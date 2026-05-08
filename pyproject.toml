@@ -1,0 +1,117 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nova-diffusion"
+version = "0.0.0.dev0"
+description = "Trainium3-native diffusion inference framework"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
+]
+
+# Versions pinned to the toolchain on the validated nxdi_inference venv
+# (/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference). Bump in lockstep when
+# upgrading the Neuron stack.
+dependencies = [
+    # Neuron toolchain (Layer 3 — kept as deps, not forked)
+    "torch>=2.9.0,<2.10",
+    "torch-neuronx==2.9.0.2.13.26312+8e870898",
+    "torch-xla==2.9.0",
+    "neuronx-cc==2.24.8799.0+6f62ff7c",         # ships nkilib bundled
+    "neuronx-distributed==0.18.27753+1cafd54f",
+    "nki==0.3.0+23928721754.g18aa1271",
+    "libneuronxla==2.2.16408.0+50c26cbd",
+
+    # HuggingFace stack
+    "transformers==4.57.6",
+    "diffusers>=0.38.0",                          # latest stable; NxDI Flux requires diffusers but doesn't pin it
+    "huggingface_hub>=0.36.0",
+    "safetensors>=0.7.0",
+    "tokenizers>=0.22.0",
+    "sentencepiece>=0.2.0",                       # for T5 / umT5 tokenizers
+
+    # Misc
+    "numpy",
+    "Pillow",
+    "einops",
+    "accelerate",
+    "av",                                         # for video I/O (Wan/Hunyuan output)
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-xdist",
+    "expecttest",
+    "imageio",
+    "imageio-ffmpeg",
+]
+dev = [
+    "nova-diffusion[test]",
+    "black==26.1.0",
+    "isort==7.0.0",
+    "ruff==0.15.1",
+    "libcst",                                     # AST-level import rewriter (M0.5)
+    "pre-commit",
+]
+
+[project.urls]
+"Source" = "https://github.com/<org>/nova-diffusion"          # placeholder
+"Tracker" = "https://github.com/<org>/nova-diffusion/issues"  # placeholder
+
+[tool.setuptools.packages.find]
+include = ["nova*"]
+exclude = ["tests*", "examples*", "benchmark*", "scripts*", "docs*"]
+
+[tool.setuptools.package-data]
+nova = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py312"]
+extend-exclude = '''
+/(
+    nova/core/.*
+    | nova/layers/.*
+    | nova/utils/.*
+    | nova/models/flux/.*
+)/
+'''
+# Reason: forked-from-NxDI files keep upstream formatting until first rebase
+# to minimize merge conflicts. New code under nova/pipeline/, nova/registry.py,
+# and new model dirs (wan/, hunyuan_video/, etc.) is black-formatted.
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip_glob = [
+    "nova/core/*",
+    "nova/layers/*",
+    "nova/utils/*",
+    "nova/models/flux/*",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["F401", "F821"]   # match sglang's narrow ruff config
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "--tb=short --strict-markers"
+markers = [
+    "slow: marks tests as slow (run with -m slow)",
+    "neuron: requires NeuronCore hardware",
+    "numerical: numerical correctness vs HF diffusers reference",
+]

@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.venv/
+venv/
+env/
+
+# Compile cache (Trainium AOT artifacts can be huge)
+.nova_compile_cache/
+*.neff
+*.hlo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Local
+.env
+*.log
