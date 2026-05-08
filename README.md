@@ -292,16 +292,6 @@ Format Nova-authored code:
 black nova/pipeline nova/registry.py examples tests
 ```
 
-## Documentation
-
-- `cclogs/00-plan.md` — original design plan (some entries supersede by later milestones).
-- `cclogs/01-M0-fork-and-skeleton.md` — repository foundation walkthrough.
-- `cclogs/02-M1-pipeline-foundation.md` — `NovaPipeline` framework design.
-- `cclogs/03-M1.0.1-fixes-and-flux-example.md` — cache-key fixes and Flux example.
-- `cclogs/04-M1.4-flux-real-smoke.md` — first hardware run, race-condition fix.
-- `cclogs/05-M1.4-load-rankrange-debug.md` — runtime protocol debugging.
-- `cclogs/06-M1-closure.md` — M1 exit criteria and 28-step baseline.
-
 ## License
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
