@@ -1,24 +1,24 @@
 """Flux text-to-image inference on Trainium via Nova.
 
-Single-instance launch (one image):
+Single-instance launch (one image, 4 NeuronCores):
 
-    torchrun --nproc_per_node=8 examples/flux_example.py \\
+    NEURON_RT_NUM_CORES=4 python examples/flux_example.py \\
         --model black-forest-labs/FLUX.1-dev \\
-        --tp-degree 8 \\
+        --tp-degree 4 \\
         --prompt "A photorealistic cat sitting in a sunlit garden" \\
         --output out.png
 
-Smaller dev box (e.g. trn3pd98.3xlarge has 4 NeuronCores):
+Larger instance (match visible cores to tensor parallel degree):
 
-    torchrun --nproc_per_node=4 examples/flux_example.py \\
+    NEURON_RT_NUM_CORES=8 python examples/flux_example.py \\
         --model black-forest-labs/FLUX.1-dev \\
-        --tp-degree 4 \\
+        --tp-degree 8 \\
         --prompt "..." --output out.png
 
 CFG-parallel (doubles world_size; faster denoising at the cost of one more
 data-parallel rank per device group):
 
-    torchrun --nproc_per_node=8 examples/flux_example.py \\
+    NEURON_RT_NUM_CORES=8 python examples/flux_example.py \\
         --model black-forest-labs/FLUX.1-dev \\
         --tp-degree 4 --cfg-parallel \\
         --prompt "..." --negative-prompt "blurry, low quality" \\
@@ -26,9 +26,13 @@ data-parallel rank per device group):
 
 Precompile only — useful for warming the cache before a benchmark or for CI:
 
-    torchrun --nproc_per_node=4 examples/flux_example.py \\
+    NEURON_RT_NUM_CORES=4 python examples/flux_example.py \\
         --model black-forest-labs/FLUX.1-dev \\
         --tp-degree 4 --precompile-only
+
+Do not use torchrun for this Flux path yet. The current NxDI diffusion
+artifacts expect one Python process with multiple visible NeuronCores; torchrun
+MPMD initializes an incompatible runtime communicator for TP=4 components.
 
 Cache key composition:
     (model_id, revision, tp/cp/cfg-parallel, dtype, height, width, toolchain)
@@ -97,6 +101,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Pass debug=True into app.compile() if supported")
     p.add_argument("--force-compile", action="store_true",
                    help="Recompile even if a valid cached artifact exists")
+    p.add_argument("--skip-warmup", action="store_true",
+                   help="Skip the post-load warmup forward pass (faster startup; "
+                        "useful when warmup itself crashes during debugging)")
 
     return p.parse_args(argv)
 
@@ -148,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
         revision=args.revision,
         force_compile=args.force_compile,
         debug_compile=args.debug_compile,
+        skip_warmup=args.skip_warmup,
     )
 
     t0 = time.monotonic()

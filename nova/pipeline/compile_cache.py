@@ -27,7 +27,7 @@ MANIFEST_FILENAME = "manifest.json"
 # Bumps when the on-disk cache schema changes in a breaking way (e.g. fields
 # moved between cache_inputs and metadata, hash function changed). Older
 # manifests written with a different version are treated as cache miss.
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)

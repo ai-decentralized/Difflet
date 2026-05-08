@@ -2,7 +2,12 @@
 # Forked from neuronx-distributed-inference v0.9.17334+ced6ae4e
 # Original path: neuronx_distributed_inference/models/application_base.py
 # Fork date: 2026-05-08
-# Modifications: (none — verbatim copy; see git log for divergence)
+# Modifications:
+#   2026-05-08 load_weights:
+#     * keep TP>1 weight sharding aligned to the compiled artifact layout
+#       while allowing a separate runtime start-rank offset
+#     * pass local device offset 0 into ``nxd_model.initialize`` for
+#       one-rank-per-process PJRT MPMD experiments
 # <<< NxDI fork banner <<<
 import logging
 import os
@@ -66,6 +71,32 @@ def normalize_path(path):
 
 def is_compiled(model_path):
     return os.path.isfile(model_path + COMPILED_MODEL_FILE_NAME)
+
+
+def _runtime_start_rank_id(start_rank_id, local_ranks_size):
+    """Translate global rank range to local Neuron device offset for MPMD.
+
+    torchrun/PJRT MPMD launches one Python process per NeuronCore. We still
+    shard weights for the global rank owned by the process, but the Neuron
+    runtime inside that process sees a single local device indexed 0.
+    """
+    try:
+        world_size = int(os.environ.get("WORLD_SIZE", "1"))
+        rank = int(os.environ.get("RANK", "0"))
+    except ValueError:
+        return start_rank_id
+    if world_size > 1 and local_ranks_size == 1 and start_rank_id == rank:
+        return 0
+    return start_rank_id
+
+
+def _torchrun_one_rank_per_process(start_rank_id, local_ranks_size):
+    try:
+        world_size = int(os.environ.get("WORLD_SIZE", "1"))
+        rank = int(os.environ.get("RANK", "0"))
+    except ValueError:
+        return False
+    return world_size > 1 and local_ranks_size == 1 and start_rank_id == rank
 
 
 def init_custom_process_group_fn(config):
@@ -394,13 +425,44 @@ class NeuronApplicationBase(torch.nn.Module):
         if local_ranks_size is None:
             local_ranks_size = self.neuron_config.local_ranks_size
 
+        weight_start_rank_id = start_rank_id
+        weight_local_ranks_size = local_ranks_size
+        keep_compiled_weight_layout = (
+            self.neuron_config.world_size > 1
+            and _torchrun_one_rank_per_process(start_rank_id, local_ranks_size)
+        )
+
+        if keep_compiled_weight_layout:
+            # TP>1 traced artifacts still expect the full compiled rank weight
+            # list during initialize. The torchrun rank range only identifies
+            # the local runtime device offset, handled below by
+            # runtime_start_rank_id.
+            weight_start_rank_id = self.neuron_config.start_rank_id
+            weight_local_ranks_size = self.neuron_config.local_ranks_size
+        elif (
+            start_rank_id != self.neuron_config.start_rank_id
+            or local_ranks_size != self.neuron_config.local_ranks_size
+        ):
+            # Nova fork: torchrun/PJRT MPMD uses one Python process per local
+            # NeuronCore. The caller may pass a per-process load range, but
+            # ModelBuilder reads the range from neuron_config when sharding
+            # checkpoints. Keep the config and builder in sync or each process
+            # will attempt to load every rank and hit Neuron's invalid-device
+            # check.
+            self.neuron_config.start_rank_id = start_rank_id
+            self.neuron_config.local_ranks_size = local_ranks_size
+            self._builder = None
+
         weights = []
         start_time = time.monotonic()
         if self.neuron_config.save_sharded_checkpoint:
             logger.info(
-                f"Loading presharded checkpoints for ranks: {start_rank_id}...{start_rank_id + local_ranks_size - 1}"
+                f"Loading presharded checkpoints for ranks: "
+                f"{weight_start_rank_id}...{weight_start_rank_id + weight_local_ranks_size - 1}"
             )
-            for rank in range(start_rank_id, start_rank_id + local_ranks_size):
+            for rank in range(
+                weight_start_rank_id, weight_start_rank_id + weight_local_ranks_size
+            ):
                 ckpt = load_file(
                     os.path.join(
                         compiled_model_path, f"weights/tp{rank}_sharded_checkpoint.safetensors"
@@ -419,10 +481,22 @@ class NeuronApplicationBase(torch.nn.Module):
                 logger.info("Sharding CPU LoRA adapter weights on load...")
                 cte_model = self.get_cte_model()
                 cte_model.lora_weight_manager.lora_checkpoint.update_weights_for_lora_cpu(cte_model)
-                lora_cpu_weights = cte_model.lora_weight_manager.lora_checkpoint.shard_cpu_checkpoints(start_rank_id, local_ranks_size, self.neuron_config.tp_degree, cte_model)
+                lora_cpu_weights = cte_model.lora_weight_manager.lora_checkpoint.shard_cpu_checkpoints(
+                    weight_start_rank_id,
+                    weight_local_ranks_size,
+                    self.neuron_config.tp_degree,
+                    cte_model,
+                )
 
-        start_rank_tensor = torch.tensor([start_rank_id], dtype=torch.int32, device="cpu")
+        runtime_start_rank_id = _runtime_start_rank_id(start_rank_id, local_ranks_size)
+        logger.info(
+            f"Initializing traced model weights for ranks: "
+            f"{start_rank_id}...{start_rank_id + local_ranks_size - 1} "
+            f"(runtime_start_rank_id={runtime_start_rank_id})"
+        )
+        start_rank_tensor = torch.tensor([runtime_start_rank_id], dtype=torch.int32, device="cpu")
         self.traced_model.nxd_model.initialize(weights, start_rank_tensor)
+        logger.info("Finished traced model weight initialization")
 
         if self.neuron_config.lora_config and self.neuron_config.lora_config.dynamic_multi_lora:
             cte_model = self.get_cte_model()

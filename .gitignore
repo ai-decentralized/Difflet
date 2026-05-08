@@ -25,3 +25,6 @@ env/
 # Local
 .env
 *.log
+
+# Internal / not for public repo
+cclogs/

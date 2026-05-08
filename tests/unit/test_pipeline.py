@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from nova import NovaParallelConfig, NovaPipeline, register_model
+from nova.pipeline.nova_pipeline import _resolve_load_rank_range
 
 
 class DummyApplication:
@@ -283,3 +284,19 @@ def test_force_compile_overrides_cache_hit(tmp_path):
     assert len(second.app.compile_calls) == 1, (
         "force_compile=True should bypass cache hit"
     )
+
+
+def test_torchrun_load_defaults_to_one_rank_per_process(monkeypatch):
+    """In torchrun MPMD each Python process owns one NeuronCore."""
+    monkeypatch.setenv("WORLD_SIZE", "4")
+    monkeypatch.setenv("RANK", "2")
+
+    assert _resolve_load_rank_range(start_rank_id=None, local_ranks_size=None) == (2, 1)
+
+
+def test_explicit_load_rank_range_is_preserved(monkeypatch):
+    """Manual load ranges still allow single-process multi-core loading."""
+    monkeypatch.setenv("WORLD_SIZE", "4")
+    monkeypatch.setenv("RANK", "2")
+
+    assert _resolve_load_rank_range(start_rank_id=0, local_ranks_size=4) == (0, 4)

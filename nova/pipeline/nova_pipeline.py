@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import os
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,7 @@ class NovaPipeline:
             model_id,
             revision=revision,
             local_files_only=local_files_only,
+            allow_patterns=entry.download_patterns,
         )
         spec = CacheSpec(
             model_id=model_id,
@@ -172,6 +174,10 @@ def _load_app(
     local_ranks_size: int | None,
     skip_warmup: bool,
 ) -> None:
+    start_rank_id, local_ranks_size = _resolve_load_rank_range(
+        start_rank_id=start_rank_id,
+        local_ranks_size=local_ranks_size,
+    )
     signature = inspect.signature(app.load)
     kwargs: dict[str, Any] = {}
     if "start_rank_id" in signature.parameters:
@@ -184,3 +190,33 @@ def _load_app(
         app.load(str(compiled_path), **kwargs)
     else:
         app.load(str(compiled_path))
+
+
+def _resolve_load_rank_range(
+    *,
+    start_rank_id: int | None,
+    local_ranks_size: int | None,
+) -> tuple[int | None, int | None]:
+    if start_rank_id is not None or local_ranks_size is not None:
+        return start_rank_id, local_ranks_size
+
+    world_size = _env_int("WORLD_SIZE")
+    rank = _env_int("RANK")
+    if world_size is not None and world_size > 1 and rank is not None:
+        # torchrun/PJRT MPMD launches one Python process per NeuronCore. Each
+        # process sees one local Neuron device, so loading all ranks from every
+        # process trips Neuron's "Invalid device index" check. Load exactly the
+        # rank owned by this process unless the caller overrides the range.
+        return rank, 1
+
+    return None, None
+
+
+def _env_int(name: str) -> int | None:
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None

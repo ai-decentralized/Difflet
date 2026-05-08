@@ -23,6 +23,11 @@ class ModelEntry:
     detector: Detector | None = None
     default_parallel: NovaParallelConfig = field(default_factory=NovaParallelConfig)
     default_shape: dict[str, int | None] = field(default_factory=dict)
+    # Per-model HF download allow-list. ``None`` (the default) lets
+    # ``resolve_model_path`` use ``DEFAULT_DIFFUSERS_PATTERNS``. Override only
+    # when a model needs files outside the standard diffusers layout (e.g. a
+    # model that ships custom code in a non-standard directory).
+    download_patterns: tuple[str, ...] | None = None
 
     def matches(self, model_id: str) -> bool:
         normalized = model_id.rstrip("/")

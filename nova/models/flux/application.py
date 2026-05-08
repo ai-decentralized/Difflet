@@ -2,10 +2,31 @@
 # Forked from neuronx-distributed-inference v0.9.17334+ced6ae4e
 # Original path: neuronx_distributed_inference/models/diffusers/flux/application.py
 # Fork date: 2026-05-08
-# Modifications: (none — verbatim copy; see git log for divergence)
+# Modifications:
+#   2026-05-08 _compile_component:
+#     * check ``model.pt`` (the post-compile end product) instead of the
+#       containing directory; ``neuron_config.json`` is written *during*
+#       compile and would otherwise short-circuit the skip check
+#     * insert ``torch.distributed.barrier()`` calls so all ranks enter and
+#       leave the per-component compile in lockstep — without this, one rank
+#       would early-exit while peers were still SPMD-tracing, dropping the
+#       trace silently and leaving an empty cache subdir
+#   2026-05-08 load:
+#     * load each component in rank lockstep for the same reason; component
+#       load performs Neuron runtime initialization and weight transfer, and
+#       ranks must not race into the next component while peers still load the
+#       current one
+#   2026-05-08 create_flux_config:
+#     * recompile a component if its saved neuron_config rank layout differs
+#       from the current config, even when model.pt already exists
+#   2026-05-08 _compile_component/load:
+#     * in torchrun, single-core replicated components are compiled only by
+#       rank 0 and then shared; all ranks still load them with local rank 0
 # <<< NxDI fork banner <<<
 import logging
 import os
+import json
+import time
 from typing import Optional
 
 import torch
@@ -191,11 +212,33 @@ class NeuronFluxApplication(nn.Module):
 
     def _compile_component(self, component, component_name, compiled_model_path, compiler_workdir, debug):
         component_path = os.path.join(compiled_model_path, f"{component_name}/")
-        if os.path.exists(component_path):
+        # Nova fork: the "is this component compiled?" marker is the
+        # post-compile artifact ``model.pt``, not the containing directory.
+        # ``neuron_config.json`` is dropped into the directory near the start
+        # of compile so the upstream ``os.path.exists(component_path)`` check
+        # races with concurrent ranks and short-circuits real compilation.
+        compiled_marker = os.path.join(component_path, "model.pt")
+        # All ranks line up before deciding so they reach the same conclusion.
+        _spmd_barrier()
+        if os.path.exists(compiled_marker) and _compiled_config_matches(component, component_path):
             logger.info(f"{component_name} already compiled at {component_path}, skipping compilation.")
+        elif not _should_compile_component(component):
+            logger.info(
+                f"Waiting for compile owner to build replicated component "
+                f"{component_name} at {component_path}."
+            )
+            _wait_for_compiled_component(component, component_name, component_path, compiled_marker)
         else:
             os.environ["BASE_COMPILE_WORK_DIR"] = os.path.join(compiler_workdir, component_name)
             component.compile(component_path, debug)
+        # All ranks line up before moving on to the next component, so a fast
+        # rank can't slip into the next component while peers are still
+        # finishing the SPMD trace of this one.
+        _spmd_barrier()
+        if not os.path.exists(compiled_marker) or not _compiled_config_matches(component, component_path):
+            raise RuntimeError(
+                f"Flux component {component_name} was not compiled correctly at {component_path}"
+            )
 
     def compile(self, compiled_model_path, debug=False):
         compiler_workdir = os.environ.get("BASE_COMPILE_WORK_DIR", "/tmp/nxd_model/")
@@ -208,30 +251,142 @@ class NeuronFluxApplication(nn.Module):
     def load(
         self, compiled_model_path, start_rank_id=None, local_ranks_size=None, skip_warmup=False
     ):
-        self.pipe.text_encoder.load(
-            os.path.join(compiled_model_path, "text_encoder/"),
-            start_rank_id,
-            local_ranks_size,
-            skip_warmup,
-        )
-        self.pipe.text_encoder_2.load(
+        # Load global TP components first. The first Neuron model loaded in a
+        # process establishes the runtime collective communicator; starting
+        # with a smaller component can leave TP=4 components with a
+        # communicator of size 1.
+        self._load_component(
+            self.pipe.text_encoder_2,
             os.path.join(compiled_model_path, "text_encoder_2/"),
             start_rank_id,
             local_ranks_size,
             skip_warmup,
         )
-        self.pipe.transformer.load(
+        self._load_component(
+            self.pipe.transformer,
             os.path.join(compiled_model_path, "transformer/"),
             start_rank_id,
             local_ranks_size,
             skip_warmup,
         )
-        self.pipe.vae.decoder.load(
+        self._load_component(
+            self.pipe.text_encoder,
+            os.path.join(compiled_model_path, "text_encoder/"),
+            start_rank_id,
+            local_ranks_size,
+            skip_warmup,
+        )
+        self._load_component(
+            self.pipe.vae.decoder,
             os.path.join(compiled_model_path, "decoder/"),
             start_rank_id,
             local_ranks_size,
             skip_warmup,
         )
 
+    def _load_component(
+        self, component, component_path, start_rank_id, local_ranks_size, skip_warmup
+    ):
+        component_start_rank_id, component_local_ranks_size = _component_load_rank_range(
+            component, start_rank_id, local_ranks_size
+        )
+        logger.info(f"Loading Flux component from {component_path}")
+        _spmd_barrier()
+        component.load(
+            component_path,
+            component_start_rank_id,
+            component_local_ranks_size,
+            skip_warmup,
+        )
+        _spmd_barrier()
+        logger.info(f"Loaded Flux component from {component_path}")
+
     def __call__(self, *args, **kwargs):
         return self.pipe(*args, **kwargs)
+
+
+# Nova fork: small helper used by _compile_component above. Defined at module
+# scope (not as a method) so it can be reused if more model classes need the
+# same sync semantics. Kept at the bottom to minimize fork drift in the body.
+def _spmd_barrier() -> None:
+    """torch.distributed.barrier() if a process group is initialized; no-op otherwise.
+
+    The Flux compile flow is invoked by both single-process tooling (where
+    no PG exists) and torchrun-style multi-rank entries — both paths must
+    work, so we tolerate the absence of a PG.
+    """
+    try:
+        import torch.distributed as dist
+        if dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1:
+            dist.barrier()
+    except Exception:  # pragma: no cover — defensive: never let a barrier crash compile
+        pass
+
+
+def _dist_rank_world():
+    """Return process rank/world for torchrun-style launches.
+
+    Prefer torch.distributed when initialized; fall back to env so pre-init
+    compile decisions are still stable in torchrun.
+    """
+    try:
+        import torch.distributed as dist
+        if dist.is_available() and dist.is_initialized():
+            return dist.get_rank(), dist.get_world_size()
+    except Exception:
+        pass
+
+    try:
+        return int(os.environ.get("RANK", "0")), int(os.environ.get("WORLD_SIZE", "1"))
+    except ValueError:
+        return 0, 1
+
+
+def _component_world_size(component) -> int:
+    return int(getattr(component.config.neuron_config, "world_size", 1))
+
+
+def _should_compile_component(component) -> bool:
+    """Only one process compiles artifacts replicated on every rank."""
+    rank, dist_world_size = _dist_rank_world()
+    if dist_world_size > 1 and _component_world_size(component) == 1:
+        return rank == 0
+    return True
+
+
+def _component_load_rank_range(component, start_rank_id, local_ranks_size):
+    """Single-core replicated components always initialize local rank 0."""
+    if _component_world_size(component) == 1:
+        return 0, 1
+    return start_rank_id, local_ranks_size
+
+
+def _wait_for_compiled_component(component, component_name, component_path, compiled_marker):
+    deadline = time.monotonic() + 7200
+    while time.monotonic() < deadline:
+        if os.path.exists(compiled_marker) and _compiled_config_matches(component, component_path):
+            return
+        time.sleep(2)
+    raise RuntimeError(
+        f"Timed out waiting for Flux component {component_name} to compile at {component_path}"
+    )
+
+
+def _compiled_config_matches(component, component_path: str) -> bool:
+    config_path = os.path.join(component_path, "neuron_config.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            saved = json.load(handle)["neuron_config"]
+    except (OSError, KeyError, json.JSONDecodeError):
+        return False
+
+    current = component.config.neuron_config
+    keys = ("tp_degree", "world_size", "start_rank_id", "local_ranks_size")
+    for key in keys:
+        if saved.get(key) != getattr(current, key):
+            logger.info(
+                f"Compiled component config mismatch at {component_path}: "
+                f"{key} saved={saved.get(key)!r} current={getattr(current, key)!r}; recompiling."
+            )
+            return False
+    return True
