@@ -23,6 +23,7 @@ class ModelEntry:
     detector: Detector | None = None
     default_parallel: NovaParallelConfig = field(default_factory=NovaParallelConfig)
     default_shape: dict[str, int | None] = field(default_factory=dict)
+    backends: tuple[str, ...] = ("trainium",)
     # Per-model HF download allow-list. ``None`` (the default) lets
     # ``resolve_model_path`` use ``DEFAULT_DIFFUSERS_PATTERNS``. Override only
     # when a model needs files outside the standard diffusers layout (e.g. a
@@ -60,6 +61,7 @@ class ModelEntry:
         parallel: NovaParallelConfig,
         dtype: Any,
         shape: dict[str, int | None],
+        backend: str,
         application_kwargs: dict[str, Any] | None = None,
     ) -> Any:
         factory = _resolve_factory(self.application_factory)
@@ -68,8 +70,17 @@ class ModelEntry:
             parallel=parallel,
             dtype=dtype,
             shape=shape,
+            backend=backend,
             **(application_kwargs or {}),
         )
+
+    def require_backend(self, backend: str) -> None:
+        if backend not in self.backends:
+            supported = ", ".join(self.backends)
+            raise ValueError(
+                f"model {self.name!r} does not support backend {backend!r}; "
+                f"supported backends: {supported}"
+            )
 
 
 def register_model(
@@ -80,6 +91,7 @@ def register_model(
     detector: Detector | None = None,
     default_parallel: NovaParallelConfig | None = None,
     default_shape: dict[str, int | None] | None = None,
+    backends: list[str] | tuple[str, ...] = ("trainium",),
 ) -> Callable[[type], type]:
     """Register a model entry.
 
@@ -98,6 +110,7 @@ def register_model(
             detector=detector,
             default_parallel=default_parallel or NovaParallelConfig(),
             default_shape=default_shape or {},
+            backends=tuple(backends),
         )
         return cls
 

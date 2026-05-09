@@ -13,8 +13,14 @@ def create_flux_application(
     parallel: NovaParallelConfig,
     dtype: Any,
     shape: dict[str, int | None],
+    backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
+    if backend != "trainium":
+        raise NotImplementedError(
+            f"Flux currently supports only the trainium backend, got {backend!r}"
+        )
+
     from nova.models.flux.application import (
         NeuronFluxApplication,
         create_flux_config,

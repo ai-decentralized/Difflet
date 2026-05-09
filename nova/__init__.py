@@ -7,6 +7,7 @@ extended with a unified Pipeline API and automatic compile/load caching.
 Public API:
     NovaPipeline        — unified entry point (NovaPipeline.from_pretrained(...))
     NovaParallelConfig  — TP / CP / CFG-parallel configuration
+    current_backend     — current backend name (trainium / cuda / rocm)
     register_model      — decorator for registering new model entries
 """
 
@@ -14,6 +15,7 @@ Public API:
 __all__ = [
     "NovaPipeline",
     "NovaParallelConfig",
+    "current_backend",
     "register_model",
 ]
 
@@ -27,6 +29,10 @@ def __getattr__(name: str):
         from nova.pipeline.parallel_config import NovaParallelConfig
 
         return NovaParallelConfig
+    if name in ("current_backend",):
+        from nova.backends import current_backend
+
+        return current_backend
     if name in ("register_model",):
         from nova.registry import register_model
 

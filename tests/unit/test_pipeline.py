@@ -61,6 +61,8 @@ def test_pipeline_compiles_and_loads_on_cache_miss(tmp_path):
     )
 
     assert pipe.parallel == NovaParallelConfig(tp_degree=2)
+    assert pipe.backend.name == "trainium"
+    assert pipe.app.kwargs["backend"] == "trainium"
     assert pipe.shape == {"height": 64, "width": 64, "num_frames": None}
     assert len(pipe.app.compile_calls) == 1
     assert pipe.app.compile_calls[0][1] is True
@@ -300,3 +302,46 @@ def test_explicit_load_rank_range_is_preserved(monkeypatch):
     monkeypatch.setenv("RANK", "2")
 
     assert _resolve_load_rank_range(start_rank_id=0, local_ranks_size=4) == (0, 4)
+
+
+def test_backend_override_must_be_supported_by_model(tmp_path):
+    model_dir = tmp_path / "unit-dummy-model"
+    model_dir.mkdir()
+
+    with pytest.raises(ValueError, match="does not support backend 'cuda'"):
+        NovaPipeline.from_pretrained(
+            str(model_dir),
+            model_type="unit_dummy",
+            dtype="bf16",
+            backend="cuda",
+            compile_cache_dir=str(tmp_path / "cache"),
+        )
+
+
+def test_nova_backend_env_selects_backend_before_model_check(tmp_path, monkeypatch):
+    model_dir = tmp_path / "unit-dummy-model"
+    model_dir.mkdir()
+    monkeypatch.setenv("NOVA_BACKEND", "cuda")
+
+    with pytest.raises(ValueError, match="does not support backend 'cuda'"):
+        NovaPipeline.from_pretrained(
+            str(model_dir),
+            model_type="unit_dummy",
+            dtype="bf16",
+            compile_cache_dir=str(tmp_path / "cache"),
+        )
+
+
+def test_backend_helpers_reflect_env(monkeypatch):
+    from nova.backends import current_backend
+    from nova.ops.platform import is_cuda, is_trainium
+
+    monkeypatch.setenv("NOVA_BACKEND", "trainium")
+    assert current_backend() == "trainium"
+    assert is_trainium() is True
+    assert is_cuda() is False
+
+    monkeypatch.setenv("NOVA_BACKEND", "cuda")
+    assert current_backend() == "cuda"
+    assert is_trainium() is False
+    assert is_cuda() is True

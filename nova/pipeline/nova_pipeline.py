@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import inspect
-import os
 from pathlib import Path
 from typing import Any
 
+from nova.backends import BackendRuntime, get_backend
 from nova.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest, write_manifest
 from nova.pipeline.parallel_config import NovaParallelConfig
 from nova.pipeline.path_resolver import resolve_model_path
@@ -28,6 +28,7 @@ class NovaPipeline:
         shape: dict[str, int | None],
         parallel: NovaParallelConfig,
         dtype: Any,
+        backend: BackendRuntime,
     ) -> None:
         self.app = app
         self.model_id = model_id
@@ -38,6 +39,7 @@ class NovaPipeline:
         self.shape = shape
         self.parallel = parallel
         self.dtype = dtype
+        self.backend = backend
 
     @classmethod
     def from_pretrained(
@@ -60,10 +62,14 @@ class NovaPipeline:
         local_ranks_size: int | None = None,
         skip_warmup: bool = False,
         debug_compile: bool = False,
+        backend: str | None = None,
         application_kwargs: dict[str, Any] | None = None,
     ) -> "NovaPipeline":
         entry = resolve_model(model_id, model_type=model_type)
+        backend_runtime = get_backend(backend)
+        entry.require_backend(backend_runtime.name)
         parallel_cfg = parallel or entry.default_parallel
+        backend_runtime.prepare_runtime(parallel_cfg)
         dtype = dtype if dtype is not None else _default_dtype()
         shape = entry.resolve_shape(height=height, width=width, num_frames=num_frames)
         model_path = resolve_model_path(
@@ -89,6 +95,7 @@ class NovaPipeline:
             parallel=parallel_cfg,
             dtype=dtype,
             shape=shape,
+            backend=backend_runtime.name,
             application_kwargs=application_kwargs,
         )
 
@@ -102,6 +109,7 @@ class NovaPipeline:
             _load_app(
                 app,
                 compiled_path,
+                backend=backend_runtime,
                 start_rank_id=start_rank_id,
                 local_ranks_size=local_ranks_size,
                 skip_warmup=skip_warmup,
@@ -117,6 +125,7 @@ class NovaPipeline:
             shape=shape,
             parallel=parallel_cfg,
             dtype=dtype,
+            backend=backend_runtime,
         )
 
     @classmethod
@@ -143,6 +152,7 @@ class NovaPipeline:
         _load_app(
             self.app,
             self.compiled_path,
+            backend=self.backend,
             start_rank_id=start_rank_id,
             local_ranks_size=local_ranks_size,
             skip_warmup=skip_warmup,
@@ -170,11 +180,12 @@ def _load_app(
     app: Any,
     compiled_path: Path,
     *,
+    backend: BackendRuntime,
     start_rank_id: int | None,
     local_ranks_size: int | None,
     skip_warmup: bool,
 ) -> None:
-    start_rank_id, local_ranks_size = _resolve_load_rank_range(
+    start_rank_id, local_ranks_size = backend.resolve_load_rank_range(
         start_rank_id=start_rank_id,
         local_ranks_size=local_ranks_size,
     )
@@ -197,26 +208,7 @@ def _resolve_load_rank_range(
     start_rank_id: int | None,
     local_ranks_size: int | None,
 ) -> tuple[int | None, int | None]:
-    if start_rank_id is not None or local_ranks_size is not None:
-        return start_rank_id, local_ranks_size
-
-    world_size = _env_int("WORLD_SIZE")
-    rank = _env_int("RANK")
-    if world_size is not None and world_size > 1 and rank is not None:
-        # torchrun/PJRT MPMD launches one Python process per NeuronCore. Each
-        # process sees one local Neuron device, so loading all ranks from every
-        # process trips Neuron's "Invalid device index" check. Load exactly the
-        # rank owned by this process unless the caller overrides the range.
-        return rank, 1
-
-    return None, None
-
-
-def _env_int(name: str) -> int | None:
-    value = os.environ.get(name)
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except ValueError:
-        return None
+    return get_backend("trainium").resolve_load_rank_range(
+        start_rank_id=start_rank_id,
+        local_ranks_size=local_ranks_size,
+    )
