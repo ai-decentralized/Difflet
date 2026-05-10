@@ -10,6 +10,7 @@ from functools import lru_cache
 from nova.backends.base import BackendRuntime
 
 _BACKEND_FACTORIES = {
+    "cpu": "nova.backends.cpu.runtime:create_backend",
     "trainium": "nova.backends.trainium.runtime:create_backend",
     "cuda": "nova.backends.cuda.runtime:create_backend",
     "rocm": "nova.backends.rocm.runtime:create_backend",

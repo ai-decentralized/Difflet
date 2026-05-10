@@ -13,16 +13,15 @@ Key Trainium-aware decisions:
 
 * Q/K/V column-parallel projections use ``gather_output=True`` so q/k RMSNorm
   runs on the full ``inner_dim`` (matches the reference's
-  ``rms_norm_across_heads`` semantics). Heads are then sharded across TP via
-  ``scatter_tp_dim`` before the attention kernel call. This trades projection
-  compute (replicated across ranks) for numerical fidelity vs. the HF
-  reference. A future TP-aware RMSNorm would let us flip the projections to
-  ``gather_output=False`` for full TP efficiency.
-* The attention kernel call shape is ``(B*heads_local, S, dim_head)`` — the
-  same convention used by ``nova/models/flux/modeling_flux.py``'s
-  ``attention_wrapper_sharded_without_swap``. ``tp_q=True, tp_k=True,
-  tp_out=False`` are kernel-internal transpose flags, not nova-level
-  collectives.
+  ``rms_norm_across_heads`` semantics). The spike keeps attention replicated
+  across TP ranks and uses ``ColumnParallelLinear(gather_output=True)`` for the
+  attention output projection, matching the UMT5 replicated-attention pattern
+  that is already covered by NEFF-vs-CPU. This trades attention compute for a
+  rank-safe numerical reference path. A future TP-aware RMSNorm can shard Q/K/V
+  before attention for full TP efficiency.
+* Attention uses PyTorch SDPA for the M2.5 numerical path. This is slower than
+  the Flux-style NKI kernel path but gives a direct CPU/NEFF semantic match
+  while Wan-specific TP sharding is still being validated.
 """
 
 from __future__ import annotations
@@ -48,8 +47,6 @@ from nova.ops import (
     RMSNorm,
     RowParallelLinear,
     apply_rotary_emb,
-    attention,
-    scatter_tp_dim,
 )
 
 
@@ -292,31 +289,22 @@ def _attn_kernel(
     *,
     head_dim: int,
 ) -> torch.Tensor:
-    """Run the backend attention kernel on (B, heads_local, S, head_dim) tensors.
+    """Run attention on (B, heads, S, head_dim) tensors.
 
-    Reshapes to (B*heads_local, S, head_dim), calls
-    ``nova.ops.attention`` with ``tp_q=True, tp_k=True, tp_out=False``
-    (kernel-internal transpose hints — same convention as flux's
-    ``attention_wrapper_sharded_without_swap``), then unfolds.
+    The M2.5 numerical path intentionally uses PyTorch SDPA instead of the NKI
+    attention kernel. This keeps the traced NEFF graph on the same high-level
+    semantics as the CPU reference while Wan TP sharding is still being
+    stabilized.
     """
-    bs, heads_local, q_len, _ = q.shape
-    k_len = k.shape[2]
-    v_len = v.shape[2]
-    q_kern = q.reshape(bs * heads_local, q_len, head_dim)
-    k_kern = k.reshape(bs * heads_local, k_len, head_dim)
-    v_kern = v.reshape(bs * heads_local, v_len, head_dim)
     scale = 1.0 / math.sqrt(head_dim)
-    out = attention(
-        q_kern,
-        k_kern,
-        v_kern,
+    return F.scaled_dot_product_attention(
+        q,
+        k,
+        v,
+        dropout_p=0.0,
+        is_causal=False,
         scale=scale,
-        causal=False,
-        tp_q=True,
-        tp_k=True,
-        tp_out=False,
     )
-    return out.reshape(bs, heads_local, q_len, head_dim)
 
 
 class WanAttention(nn.Module):
@@ -360,11 +348,11 @@ class WanAttention(nn.Module):
         )
         self.to_out = nn.ModuleList(
             [
-                RowParallelLinear(
+                ColumnParallelLinear(
                     inner_dim,
                     dim,
                     bias=True,
-                    input_is_parallel=True,
+                    gather_output=True,
                     dtype=dtype,
                     reduce_dtype=dtype,
                 ),
@@ -403,22 +391,16 @@ class WanAttention(nn.Module):
             q = apply_rotary_emb(q, cos, sin)
             k = apply_rotary_emb(k, cos, sin)
 
-        # Shard heads across TP. After scatter, each rank holds heads_local =
-        # heads // tp heads. The (B, S, heads, dim) → (B, S, heads_local, dim)
-        # reshape happens inside scatter_tp_dim.
-        q = scatter_tp_dim(q, dim=2)
-        k = scatter_tp_dim(k, dim=2)
-        v = scatter_tp_dim(v, dim=2)
-
-        # (B, S, heads_local, dim) → (B, heads_local, S, dim) for the kernel.
+        # (B, S, heads, dim) → (B, heads, S, dim) for the kernel. Attention is
+        # intentionally replicated across TP ranks for the M2.5 numerical path.
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
         out = _attn_kernel(q, k, v, head_dim=self.head_dim)
 
-        # (B, heads_local, S, dim) → (B, S, heads_local * dim) — local shard,
-        # ready for RowParallelLinear(input_is_parallel=True).
+        # (B, heads, S, dim) → (B, S, heads * dim), ready for a replicated
+        # ColumnParallelLinear(gather_output=True) output projection.
         out = out.transpose(1, 2).reshape(out.shape[0], out.shape[2], -1)
         out = self.to_out[0](out)
         out = self.to_out[1](out)

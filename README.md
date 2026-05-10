@@ -105,7 +105,7 @@ Flux.1-dev, 1024×1024, 28 steps, bf16, single instance, cache hit:
 | First-time AOT compile (cold) | ~683 s |
 
 Measured on `trn3pd98.3xlarge` with `NEURON_RT_NUM_CORES=4`,
-`--tp-degree 4`, `--skip-warmup`. See `cclogs/06-M1-closure.md` for the
+`--tp-degree 4`, `--skip-warmup`. See `cclogs/m0-m1/06-M1-closure.md` for the
 detailed run.
 
 ## Runtime protocol — important constraints

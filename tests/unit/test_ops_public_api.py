@@ -90,3 +90,31 @@ def test_apply_rotary_emb_matches_wan_formula(monkeypatch):
     expected[..., 2] = hidden[..., 2] * cos[..., 2] - hidden[..., 3] * sin[..., 3]
     expected[..., 3] = hidden[..., 2] * sin[..., 3] + hidden[..., 3] * cos[..., 2]
     assert torch.equal(out, expected)
+
+
+def test_cpu_backend_registry_resolves(monkeypatch):
+    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+
+    from nova.backends import get_backend
+
+    backend = get_backend()
+    assert backend.name == "cpu"
+    assert backend.capabilities.requires_aot is False
+
+
+def test_cpu_ops_run_on_regular_torch_tensors(monkeypatch):
+    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+
+    import torch
+
+    from nova.ops import RMSNorm, attention, gather_tp_dim
+
+    norm = RMSNorm(4)
+    x = torch.ones((1, 2, 4), dtype=torch.float32)
+    assert norm(x).shape == x.shape
+
+    q = torch.randn(1, 3, 4)
+    k = torch.randn(1, 3, 4)
+    v = torch.randn(1, 3, 4)
+    assert attention(q, k, v, scale=0.5).shape == q.shape
+    assert gather_tp_dim(x, dim=1) is x

@@ -1,5 +1,7 @@
 """Trainium attention op passthroughs."""
 
+import os
+
 from nkilib.core.attention.attention_cte import attention_cte
 
 
@@ -15,7 +17,9 @@ def attention(
     tp_out: bool = False,
     **kwargs,
 ):
-    return attention_cte(
+    vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
+    kernel = attention_cte[2] if vc_size == 2 else attention_cte
+    return kernel(
         q,
         k,
         v,

@@ -26,6 +26,10 @@ ATOL="${NOVA_WAN_VAE_ALIGN_ATOL:-1e-6}"
 RTOL="${NOVA_WAN_VAE_ALIGN_RTOL:-1e-6}"
 RUN_NEURON_LOAD="${NOVA_WAN_VAE_RUN_NEURON_LOAD:-1}"
 RUN_NEFF_NUMERIC="${NOVA_WAN_VAE_RUN_NEFF_NUMERIC:-0}"
+NEFF_MAX_ABS_MAX="${NOVA_WAN_VAE_NEFF_MAX_ABS_MAX:-0.25}"
+NEFF_MEAN_ABS_MAX="${NOVA_WAN_VAE_NEFF_MEAN_ABS_MAX:-0.02}"
+NEFF_RMSE_MAX="${NOVA_WAN_VAE_NEFF_RMSE_MAX:-0.025}"
+NEFF_COSINE_MIN="${NOVA_WAN_VAE_NEFF_COSINE_MIN:-0.995}"
 LOCAL_FILES_ONLY="${NOVA_LOCAL_FILES_ONLY:-0}"
 
 cd "${ROOT}"
@@ -54,6 +58,10 @@ atol = float(${ATOL@Q})
 rtol = float(${RTOL@Q})
 run_neuron_load = ${RUN_NEURON_LOAD@Q} == "1"
 run_neff_numeric = ${RUN_NEFF_NUMERIC@Q} == "1"
+neff_max_abs_max = float(${NEFF_MAX_ABS_MAX@Q})
+neff_mean_abs_max = float(${NEFF_MEAN_ABS_MAX@Q})
+neff_rmse_max = float(${NEFF_RMSE_MAX@Q})
+neff_cosine_min = float(${NEFF_COSINE_MIN@Q})
 local_files_only = ${LOCAL_FILES_ONLY@Q} == "1"
 vae_dir = model_dir / "vae"
 weights_path = vae_dir / "diffusion_pytorch_model.safetensors"
@@ -157,16 +165,43 @@ if run_neuron_load:
             cpu_elapsed = time.time() - start
 
         diff = (neuron_out.float() - cpu_out.float()).abs()
-        repeat = torch.zeros((), dtype=torch.float32)
+        max_abs = float(diff.max())
+        mean_abs = float(diff.mean())
+        rmse = float(torch.sqrt((diff * diff).mean()))
+        cosine = float(torch.nn.functional.cosine_similarity(
+            neuron_out.float().flatten(),
+            cpu_out.float().flatten(),
+            dim=0,
+        ))
         print(f"[wan-vae-align] neff shape    = {tuple(neuron_out.shape)}")
         print(f"[wan-vae-align] neff dtype    = {neuron_out.dtype}")
         print(f"[wan-vae-align] neff forward  = {neuron_elapsed:.3f}s")
         print(f"[wan-vae-align] cpu bf16 full = {cpu_elapsed:.3f}s")
-        print(f"[wan-vae-align] neff max_abs  = {float(diff.max()):.10g}")
-        print(f"[wan-vae-align] neff mean_abs = {float(diff.mean()):.10g}")
-        print(f"[wan-vae-align] neff rmse     = {float(torch.sqrt((diff * diff).mean())):.10g}")
+        print(f"[wan-vae-align] neff max_abs  = {max_abs:.10g}")
+        print(f"[wan-vae-align] neff mean_abs = {mean_abs:.10g}")
+        print(f"[wan-vae-align] neff rmse     = {rmse:.10g}")
+        print(f"[wan-vae-align] neff cosine   = {cosine:.10g}")
         for q in (0.5, 0.9, 0.95, 0.99, 0.999, 0.9999):
             print(f"[wan-vae-align] neff p{q:g} = {float(diff.quantile(q)):.10g}")
+        if max_abs > neff_max_abs_max:
+            raise RuntimeError(
+                f"NEFF max_abs too high: {max_abs} > {neff_max_abs_max}"
+            )
+        if mean_abs > neff_mean_abs_max:
+            raise RuntimeError(
+                f"NEFF mean_abs too high: {mean_abs} > {neff_mean_abs_max}"
+            )
+        if rmse > neff_rmse_max:
+            raise RuntimeError(f"NEFF rmse too high: {rmse} > {neff_rmse_max}")
+        if cosine < neff_cosine_min:
+            raise RuntimeError(
+                f"NEFF cosine too low: {cosine} < {neff_cosine_min}"
+            )
+        print(
+            "[wan-vae-align] neff alignment = ok "
+            f"(max_abs<={neff_max_abs_max}, mean_abs<={neff_mean_abs_max}, "
+            f"rmse<={neff_rmse_max}, cosine>={neff_cosine_min})"
+        )
 else:
     print("[wan-vae-align] neuron load = skipped")
 PY
