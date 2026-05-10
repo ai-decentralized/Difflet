@@ -159,6 +159,7 @@ def _ensure_builtin_models_registered() -> None:
         return
     _BUILTINS_LOADED = True
     _register_builtin_flux()
+    _register_builtin_wan()
 
 
 def _register_builtin_flux() -> None:
@@ -178,4 +179,24 @@ def _register_builtin_flux() -> None:
         default_shape={"height": 1024, "width": 1024, "num_frames": None},
     )
     class _FluxRegistration:
+        pass
+
+
+def _register_builtin_wan() -> None:
+    def is_wan(model_id: str) -> bool:
+        value = model_id.lower()
+        return "wan" in value or "wan-ai/" in value
+
+    @register_model(
+        name="wan",
+        application_factory="nova.models.wan.entry:create_wan_application",
+        hf_paths=(
+            "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+        ),
+        detector=is_wan,
+        default_parallel=NovaParallelConfig(tp_degree=4),
+        default_shape={"height": 480, "width": 832, "num_frames": 9},
+        backends=("trainium",),
+    )
+    class _WanRegistration:
         pass

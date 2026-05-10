@@ -99,7 +99,9 @@ class NovaPipeline:
             application_kwargs=application_kwargs,
         )
 
-        cache_ready = has_valid_manifest(compiled_path, spec)
+        cache_ready = has_valid_manifest(compiled_path, spec) and _compiled_artifacts_ready(
+            app, compiled_path
+        )
         if not skip_compile and (force_compile or not cache_ready):
             compiled_path.mkdir(parents=True, exist_ok=True)
             _compile_app(app, compiled_path, debug=debug_compile)
@@ -137,7 +139,10 @@ class NovaPipeline:
         # Use the same cache-validity check as `from_pretrained` so a stale or
         # missing manifest still triggers recompile even when the artifact dir
         # already exists.
-        if force or not has_valid_manifest(self.compiled_path, self.cache_spec):
+        cache_ready = has_valid_manifest(
+            self.compiled_path, self.cache_spec
+        ) and _compiled_artifacts_ready(self.app, self.compiled_path)
+        if force or not cache_ready:
             self.compiled_path.mkdir(parents=True, exist_ok=True)
             _compile_app(self.app, self.compiled_path, debug=debug)
             write_manifest(self.compiled_path, self.cache_spec)
@@ -174,6 +179,13 @@ def _compile_app(app: Any, compiled_path: Path, *, debug: bool) -> None:
         app.compile(str(compiled_path), debug=debug)
     else:
         app.compile(str(compiled_path))
+
+
+def _compiled_artifacts_ready(app: Any, compiled_path: Path) -> bool:
+    checker = getattr(app, "has_compiled_artifacts", None)
+    if checker is None:
+        return True
+    return bool(checker(str(compiled_path)))
 
 
 def _load_app(

@@ -48,6 +48,30 @@ class _DummyRegistration:
     pass
 
 
+class ArtifactAwareApplication(DummyApplication):
+    def compile(self, compiled_model_path, debug=False):
+        super().compile(compiled_model_path, debug=debug)
+        Path(compiled_model_path, "required.txt").write_text("ok\n", encoding="utf-8")
+
+    def has_compiled_artifacts(self, compiled_model_path):
+        return Path(compiled_model_path, "required.txt").exists()
+
+
+def create_artifact_aware_application(**kwargs):
+    return ArtifactAwareApplication(**kwargs)
+
+
+@register_model(
+    name="unit_artifact_dummy",
+    application_factory=create_artifact_aware_application,
+    detector=lambda model_id: model_id.endswith("unit-artifact-dummy-model"),
+    default_parallel=NovaParallelConfig(tp_degree=2),
+    default_shape={"height": 64, "width": 64, "num_frames": None},
+)
+class _ArtifactDummyRegistration:
+    pass
+
+
 def test_pipeline_compiles_and_loads_on_cache_miss(tmp_path):
     model_dir = tmp_path / "unit-dummy-model"
     model_dir.mkdir()
@@ -90,6 +114,37 @@ def test_pipeline_skips_compile_on_cache_hit(tmp_path):
 
     assert second.app.compile_calls == []
     assert len(second.app.load_calls) == 1
+
+
+def test_pipeline_recompiles_when_manifest_valid_but_artifacts_missing(tmp_path):
+    from nova.pipeline.compile_cache import write_manifest
+
+    model_dir = tmp_path / "unit-artifact-dummy-model"
+    model_dir.mkdir()
+    cache_dir = tmp_path / "cache"
+
+    stale = NovaPipeline.from_pretrained(
+        str(model_dir),
+        model_type="unit_artifact_dummy",
+        dtype="bf16",
+        compile_cache_dir=str(cache_dir),
+        skip_compile=True,
+        load=False,
+    )
+    stale.compiled_path.mkdir(parents=True, exist_ok=True)
+    write_manifest(stale.compiled_path, stale.cache_spec)
+    assert not (stale.compiled_path / "required.txt").exists()
+
+    second = NovaPipeline.from_pretrained(
+        str(model_dir),
+        model_type="unit_artifact_dummy",
+        dtype="bf16",
+        compile_cache_dir=str(cache_dir),
+        load=False,
+    )
+
+    assert len(second.app.compile_calls) == 1
+    assert (second.compiled_path / "required.txt").exists()
 
 
 def test_parallel_config_rejects_conflicting_parallel_modes():
@@ -345,3 +400,40 @@ def test_backend_helpers_reflect_env(monkeypatch):
     assert current_backend() == "cuda"
     assert is_trainium() is False
     assert is_cuda() is True
+
+
+def test_wan_registry_skeleton_builds_without_compile_or_load(tmp_path):
+    model_dir = tmp_path / "Wan2.2-T2V-A14B-Diffusers"
+    model_dir.mkdir()
+
+    pipe = NovaPipeline.from_pretrained(
+        str(model_dir),
+        model_type="wan",
+        dtype="bf16",
+        skip_compile=True,
+        load=False,
+        compile_cache_dir=str(tmp_path / "cache"),
+    )
+
+    assert pipe.model_entry.name == "wan"
+    assert pipe.parallel == NovaParallelConfig(tp_degree=4)
+    assert pipe.shape == {"height": 480, "width": 832, "num_frames": 9}
+    assert pipe.backend.name == "trainium"
+    assert pipe.app.model_path == str(model_dir)
+
+
+def test_wan_skeleton_forward_returns_latent_shape(tmp_path):
+    model_dir = tmp_path / "Wan2.2-T2V-A14B-Diffusers"
+    model_dir.mkdir()
+
+    pipe = NovaPipeline.from_pretrained(
+        str(model_dir),
+        model_type="wan",
+        dtype="bf16",
+        skip_compile=True,
+        load=False,
+        compile_cache_dir=str(tmp_path / "cache"),
+    )
+
+    output = pipe(batch_size=2, channels=16, num_latent_frames=3, latent_height=60, latent_width=104)
+    assert tuple(output.shape) == (2, 16, 3, 60, 104)

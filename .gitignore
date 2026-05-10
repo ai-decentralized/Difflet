@@ -14,8 +14,13 @@ env/
 
 # Compile cache (Trainium AOT artifacts can be huge)
 .nova_compile_cache/
+.nova-cache/
 *.neff
 *.hlo
+
+# Neuron compiler diagnostic dumps written into the working directory
+PostSPMDPassesExecutionDuration.txt
+global_metric_store.json
 
 # IDE
 .idea/

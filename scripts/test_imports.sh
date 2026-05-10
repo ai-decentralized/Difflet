@@ -31,6 +31,14 @@ modules = [
     "nova.pipeline.compile_cache",
     "nova.pipeline.parallel_config",
     "nova.models.flux.application",
+    "nova.models.wan.application",
+    "nova.models.wan.entry",
+    "nova.models.wan.pipeline",
+    "nova.models.wan.modeling_wan",
+    "nova.models.wan.umt5.modeling_umt5",
+    "nova.models.wan.vae.modeling_vae",
+    "nova.backends.trainium.wan.text_encoder",
+    "nova.backends.trainium.wan.vae",
 ]
 
 for name in modules:
