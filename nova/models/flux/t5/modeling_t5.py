@@ -27,23 +27,23 @@ import logging
 from typing import List, Optional, Tuple, Union
 
 import torch
-from neuronx_distributed.parallel_layers.layers import (
+from nova.ops import (
     ColumnParallelLinear,
     ParallelEmbedding,
     RowParallelLinear,
+    get_platform_target,
+    hardware,
 )
-from neuronx_distributed.utils.utils import hardware
 from torch import nn
-from torch_neuronx.utils import get_platform_target
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import (
     BaseModelOutput,
     BaseModelOutputWithPastAndCrossAttentions,
 )
 
-from nova.core.application_base import NeuronApplicationBase
-from nova.core.config import InferenceConfig
-from nova.core.model_wrapper import BaseModelInstance, ModelWrapper
+from nova.backends.trainium.core.application_base import NeuronApplicationBase
+from nova.backends.trainium.core.config import InferenceConfig
+from nova.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 
 _HARDWARE = hardware(get_platform_target())
 

@@ -21,8 +21,8 @@ from typing import List, Optional
 import torch
 from torch_neuronx.testing import neuron_allclose
 
-from nova.core.application_base import NeuronApplicationBase
-from nova.core.image_to_text_model_base import NeuronBaseForImageToText
+from nova.backends.trainium.core.application_base import NeuronApplicationBase
+from nova.backends.trainium.core.image_to_text_model_base import NeuronBaseForImageToText
 
 
 class TensorCaptureMetadata:

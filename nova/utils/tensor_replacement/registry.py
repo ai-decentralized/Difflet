@@ -6,7 +6,7 @@
 # <<< NxDI fork banner <<<
 import os
 import re
-from nova.core.modules.attention.utils import order_strided_tensor, stride_tensor
+from nova.backends.trainium.core.modules.attention.utils import order_strided_tensor, stride_tensor
 import torch
 from typing import Dict, List, Optional, Any
 from collections import defaultdict

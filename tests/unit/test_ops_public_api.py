@@ -65,10 +65,10 @@ def test_trainium_scatter_tp_dim_returns_input_for_tp_one(monkeypatch):
 def test_attention_public_alias_resolves_to_trainium_impl(monkeypatch):
     monkeypatch.setenv("NOVA_BACKEND", "trainium")
 
-    from nova.ops import attention, attention_cte
+    from nova.ops import attention, cross_attention
 
     assert callable(attention)
-    assert callable(attention_cte)
+    assert callable(cross_attention)
 
 
 def test_apply_rotary_emb_matches_wan_formula(monkeypatch):

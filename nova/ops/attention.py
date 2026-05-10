@@ -36,10 +36,6 @@ def cross_attention(q, k, v, *, scale: float | None = None, **kwargs):
     return attention(q, k, v, scale=scale, causal=False, tp_q=False, tp_k=False, tp_out=False, **kwargs)
 
 
-def attention_cte(*args, **kwargs):
-    return _load("attention_cte")(*args, **kwargs)
-
-
 def _load(name: str):
     from nova.ops._dispatch import load_backend_attr
 

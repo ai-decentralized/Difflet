@@ -28,12 +28,8 @@ def attention(
     return torch.matmul(probs, v)
 
 
-def attention_cte(*args, **kwargs):
-    return attention(*args, **kwargs)
-
-
 def cross_attention(q, k, v, *, scale: float | None = None, **kwargs):
     return attention(q, k, v, scale=scale, causal=False, **kwargs)
 
 
-__all__ = ["attention", "attention_cte", "cross_attention"]
+__all__ = ["attention", "cross_attention"]

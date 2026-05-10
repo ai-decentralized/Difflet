@@ -181,7 +181,7 @@ def test_wan_text_encoder_inference_config_defaults():
     from nova.backends.trainium.wan.text_encoder import (
         WanTextEncoderInferenceConfig,
     )
-    from nova.core.config import NeuronConfig
+    from nova.backends.trainium.core.config import NeuronConfig
     from nova.utils.diffusers_adapter import load_diffusers_config
 
     snap = (
@@ -216,7 +216,7 @@ def test_model_wrapper_wan_text_encoder_input_shapes():
         ModelWrapperWanTextEncoder,
         WanTextEncoderInferenceConfig,
     )
-    from nova.core.config import NeuronConfig
+    from nova.backends.trainium.core.config import NeuronConfig
     from nova.utils.diffusers_adapter import load_diffusers_config
 
     snap = (

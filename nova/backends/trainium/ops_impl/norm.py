@@ -2,7 +2,7 @@
 
 from neuronx_distributed.parallel_layers.layer_norm import LayerNorm
 
-from nova.core.modules.custom_calls import CustomRMSNorm
+from nova.backends.trainium.core.modules.custom_calls import CustomRMSNorm
 
 RMSNorm = CustomRMSNorm
 

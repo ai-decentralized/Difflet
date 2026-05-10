@@ -8,7 +8,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from nova.core.config import NeuronConfig
+from nova.backends.trainium.core.config import NeuronConfig
 from nova.utils.diffusers_adapter import load_diffusers_config
 
 

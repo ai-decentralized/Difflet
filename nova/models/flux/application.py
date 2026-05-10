@@ -36,7 +36,7 @@ from nova.models.flux.clip.modeling_clip import (
     CLIPInferenceConfig,
     NeuronClipApplication,
 )
-from nova.core.config import InferenceConfig, NeuronConfig
+from nova.backends.trainium.core.config import InferenceConfig, NeuronConfig
 from nova.models.flux.modeling_flux import (
     FluxBackboneInferenceConfig,
     NeuronFluxBackboneApplication,
@@ -186,9 +186,15 @@ class NeuronFluxApplication(nn.Module):
         self.width = width
         self.max_sequence_length = 512
 
+        # Neuron applications replace these modules immediately below. Passing
+        # None prevents diffusers from loading large CPU weights that are never
+        # used, while still loading tokenizers, scheduler, and the VAE shell.
         self.pipe = pipeline_class.from_pretrained(
             model_path,
             torch_dtype=torch.bfloat16,
+            text_encoder=None,
+            text_encoder_2=None,
+            transformer=None,
         )
 
         self.text_encoder_config = text_encoder_config

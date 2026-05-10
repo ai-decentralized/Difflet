@@ -26,16 +26,13 @@
 from typing import Optional, Tuple
 
 import torch
-from neuronx_distributed.parallel_layers.layer_norm import LayerNorm
-from neuronx_distributed.parallel_layers.layers import (  # noqa: E402; noqa: E402; noqa: E402; noqa: E402; noqa: E402
-    ColumnParallelLinear,
-)
 from torch import nn as nn
 
 from nova.layers.embeddings import (
     NeuronCombinedTimestepLabelEmbeddings,
 )
-from nova.core.layer_boundary_marker import ModuleMarkerEndWrapper, ModuleMarkerStartWrapper
+from nova.backends.trainium.core.layer_boundary_marker import ModuleMarkerEndWrapper, ModuleMarkerStartWrapper
+from nova.ops import ColumnParallelLinear, LayerNorm
 
 
 class NeuronAdaLayerNormZeroSingle(nn.Module):

@@ -46,7 +46,7 @@ def convert_backbone_state_dict(
     Args:
         state_dict: HF-style state dict (key, tensor pairs). Loaded from
             safetensors / pytorch_model.bin via
-            ``nova.core.modules.checkpoint.load_state_dict``.
+            ``nova.backends.trainium.core.modules.checkpoint.load_state_dict``.
         config: optional ``WanTransformerConfig`` or ``WanBackboneInferenceConfig``
             instance. Currently unused; reserved for future structural
             transforms (e.g. weight splitting).

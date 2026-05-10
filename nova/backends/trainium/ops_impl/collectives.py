@@ -3,12 +3,18 @@
 from neuronx_distributed.parallel_layers.mappings import (
     gather_from_tensor_model_parallel_region_with_dim,
     reduce_from_tensor_model_parallel_region,
+    scatter_to_process_group_spmd,
     scatter_to_tensor_model_parallel_region,
 )
+from neuronx_distributed.parallel_layers.layers import SPMDRank
 from neuronx_distributed.parallel_layers.parallel_state import (
+    get_data_parallel_group,
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_size,
+    get_world_group,
 )
+
+from nova.backends.trainium.utils.distributed import get_dp_rank_spmd
 
 
 def gather_tp_dim(tensor, *, dim: int):
@@ -47,12 +53,17 @@ def get_tp_rank() -> int:
 __all__ = [
     "gather_from_tensor_model_parallel_region_with_dim",
     "gather_tp_dim",
+    "get_data_parallel_group",
+    "get_dp_rank_spmd",
     "get_tensor_model_parallel_rank",
     "get_tensor_model_parallel_size",
     "get_tp_rank",
     "get_tp_size",
+    "get_world_group",
     "reduce_from_tensor_model_parallel_region",
     "reduce_tp",
+    "scatter_to_process_group_spmd",
     "scatter_to_tensor_model_parallel_region",
     "scatter_tp_dim",
+    "SPMDRank",
 ]

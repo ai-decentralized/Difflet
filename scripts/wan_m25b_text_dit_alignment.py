@@ -287,7 +287,7 @@ def stage_umt5_hf(args: argparse.Namespace) -> None:
 
 
 def stage_umt5_nova(args: argparse.Namespace) -> None:
-    from nova.core.modules.checkpoint import load_state_dict
+    from nova.backends.trainium.core.modules.checkpoint import load_state_dict
     from nova.models.wan.checkpoint import convert_text_encoder_state_dict
     from nova.models.wan.umt5.modeling_umt5 import WanUmT5Config, WanUmT5EncoderModel
 

@@ -44,7 +44,7 @@ from diffusers.models.autoencoders.autoencoder_kl_wan import AutoencoderKLWan
 from huggingface_hub import hf_hub_download
 
 from nova.backends.trainium.wan.vae import NeuronWanVAEDecoderApplication
-from nova.core.modules.checkpoint import load_state_dict
+from nova.backends.trainium.core.modules.checkpoint import load_state_dict
 from nova.models.wan.application import create_wan_vae_decoder_config
 from nova.models.wan.checkpoint import convert_vae_decoder_state_dict
 from nova.models.wan.vae.modeling_vae import WanVAEDecoderConfig, WanVAEDecoderModel

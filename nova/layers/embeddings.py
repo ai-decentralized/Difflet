@@ -27,7 +27,7 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch
-from neuronx_distributed.parallel_layers.layers import (  # noqa: E402; noqa: E402; noqa: E402; noqa: E402; noqa: E402
+from nova.ops import (
     ColumnParallelLinear,
     ParallelEmbedding,
     RowParallelLinear,

@@ -7,7 +7,7 @@
 from diffusers.configuration_utils import ConfigMixin
 from typing import Optional, Union
 import os
-from nova.core.config import (
+from nova.backends.trainium.core.config import (
     InferenceConfig,
 )
 

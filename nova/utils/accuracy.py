@@ -25,7 +25,7 @@ from transformers import GenerationConfig, PreTrainedModel, PreTrainedTokenizer
 from transformers.generation import SampleDecoderOnlyOutput, SampleEncoderDecoderOutput
 import re
 
-from nova.core.application_base import NeuronApplicationBase
+from nova.backends.trainium.core.application_base import NeuronApplicationBase
 from neuronx_distributed_inference.models.mllama.utils import create_vision_mask, get_image_tensors
 from neuronx_distributed_inference.models.mllama.modeling_mllama import NeuronMllamaForCausalLM
 from neuronx_distributed_inference.models.llama4.modeling_llama4_text import NeuronLlama4TextForCausalLM

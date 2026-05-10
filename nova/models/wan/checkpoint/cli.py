@@ -77,7 +77,7 @@ def convert_diffusers_checkpoint(
     """
     # Imports kept inside the function so this module can be imported and
     # type-checked without dragging in heavy state-dict loaders.
-    from nova.core.modules.checkpoint import (
+    from nova.backends.trainium.core.modules.checkpoint import (
         load_state_dict,
         save_state_dict_safetensors,
     )

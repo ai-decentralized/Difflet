@@ -29,9 +29,9 @@ from torch.nn import Parameter
 from torch.nn import functional as F, init
 
 from diffusers.models.autoencoders.vae import Decoder
-from nova.core.config import InferenceConfig
-from nova.core.model_wrapper import BaseModelInstance, ModelWrapper
-from nova.core.application_base import NeuronApplicationBase
+from nova.backends.trainium.core.config import InferenceConfig
+from nova.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
+from nova.backends.trainium.core.application_base import NeuronApplicationBase
 from typing import List, Tuple
 
 

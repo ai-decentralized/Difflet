@@ -9,10 +9,6 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from neuronx_distributed.parallel_layers.layers import ColumnParallelLinear, RowParallelLinear
-from neuronx_distributed.parallel_layers.parallel_state import get_tensor_model_parallel_size
-from neuronx_distributed.utils.utils import hardware
-from torch_neuronx.utils import get_platform_target
 from transformers.activations import ACT2FN
 from transformers.modeling_attn_mask_utils import (
     _create_4d_causal_attention_mask,
@@ -20,9 +16,16 @@ from transformers.modeling_attn_mask_utils import (
 )
 from transformers.modeling_outputs import BaseModelOutput, BaseModelOutputWithPooling
 
-from nova.core.application_base import NeuronApplicationBase
-from nova.core.config import InferenceConfig
-from nova.core.model_wrapper import BaseModelInstance, ModelWrapper
+from nova.ops import (
+    ColumnParallelLinear,
+    RowParallelLinear,
+    get_platform_target,
+    get_tensor_model_parallel_size,
+    hardware,
+)
+from nova.backends.trainium.core.application_base import NeuronApplicationBase
+from nova.backends.trainium.core.config import InferenceConfig
+from nova.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 
 _HARDWARE = hardware(get_platform_target())
 

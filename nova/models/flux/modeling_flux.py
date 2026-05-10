@@ -32,22 +32,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from neuronx_distributed.parallel_layers.layer_norm import LayerNorm
-from neuronx_distributed.parallel_layers.layers import (  # noqa: E402; noqa: E402; noqa: E402; noqa: E402; noqa: E402
-    ColumnParallelLinear,
-    RowParallelLinear,
-    SPMDRank,
-)
-from neuronx_distributed.parallel_layers.mappings import (
-    gather_from_tensor_model_parallel_region_with_dim,
-    reduce_from_tensor_model_parallel_region,
-    scatter_to_process_group_spmd,
-)
-from neuronx_distributed.parallel_layers.parallel_state import (
-    get_data_parallel_group,
-    get_tensor_model_parallel_size,
-    get_world_group,
-)
 
 from nova.layers.activations import NeuronGELU
 from nova.layers.embeddings import (
@@ -61,21 +45,31 @@ from nova.layers.normalization import (
     NeuronAdaLayerNormZero,
     NeuronAdaLayerNormZeroSingle,
 )
-from nova.core.modules.custom_calls import CustomRMSNorm
-from nova.utils.distributed import get_dp_rank_spmd
+from nova.ops import (
+    ColumnParallelLinear,
+    CustomRMSNorm,
+    LayerNorm,
+    RowParallelLinear,
+    SPMDRank,
+    attention,
+    gather_from_tensor_model_parallel_region_with_dim,
+    get_data_parallel_group,
+    get_dp_rank_spmd,
+    get_platform_target,
+    get_tensor_model_parallel_size,
+    get_world_group,
+    hardware,
+    reduce_from_tensor_model_parallel_region,
+    scatter_to_process_group_spmd,
+)
 
-from nkilib.core.attention.attention_cte import attention_cte
-
-from neuronx_distributed.utils.utils import hardware
-from torch_neuronx.utils import get_platform_target
-
-from nova.core.application_base import NeuronApplicationBase
-from nova.core.config import InferenceConfig
-from nova.core.layer_boundary_marker import (
+from nova.backends.trainium.core.application_base import NeuronApplicationBase
+from nova.backends.trainium.core.config import InferenceConfig
+from nova.backends.trainium.core.layer_boundary_marker import (
     ModuleMarkerEndWrapper,
     ModuleMarkerStartWrapper,
 )
-from nova.core.model_wrapper import BaseModelInstance, ModelWrapper
+from nova.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 
 _HARDWARE = hardware(get_platform_target())
 
@@ -104,26 +98,18 @@ def attention_wrapper_sharded_without_swap(query, key, value):
     k = key.reshape((bs * n_head, k_len, d_head))     # [B*H, S, d]
     v = value.reshape((bs * n_head, v_len, d_head))   # [B*H, S, d]
 
-    vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
-    use_sharded_attention_kernel = vc_size == 2
     scale = 1 / math.sqrt(d_head)
 
-    if use_sharded_attention_kernel:
-        attn_output = attention_cte[2](
-            q, k, v, scale,
-            causal_mask=False,  # Flux uses bi-directional attention
-            tp_q=True,          # Q is (batch, seqlen, d)
-            tp_k=True,          # K is (batch, seqlen, d) - kernel transposes internally
-            tp_out=False        # Output is (batch, seqlen, d)
-        )
-    else:
-        attn_output = attention_cte(
-            q, k, v, scale,
-            causal_mask=False,
-            tp_q=True,
-            tp_k=True,
-            tp_out=False
-        )
+    attn_output = attention(
+        q,
+        k,
+        v,
+        scale=scale,
+        causal=False,  # Flux uses bi-directional attention
+        tp_q=True,  # Q is (batch, seqlen, d)
+        tp_k=True,  # K is (batch, seqlen, d) - kernel transposes internally
+        tp_out=False,  # Output is (batch, seqlen, d)
+    )
 
     attn_output = attn_output.reshape((bs, n_head, q_len, d_head))
 
@@ -178,25 +164,16 @@ def attention_wrapper_context_parallel_single_transformer(query, key, value, pro
 
     scale = 1 / math.sqrt(d_head)
 
-    vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
-    use_sharded_attention_kernel = vc_size == 2
-
-    if use_sharded_attention_kernel:
-        attn_output = attention_cte[2](
-            query, key, value, scale,
-            causal_mask=False,  # Flux uses bi-directional attention
-            tp_q=True,          # Q is (batch, seqlen, d)
-            tp_k=True,          # K is (batch, seqlen, d) - kernel transposes internally
-            tp_out=False        # Output is (batch, seqlen, d)
-        )
-    else:
-        attn_output = attention_cte(
-            query, key, value, scale,
-            causal_mask=False,
-            tp_q=True,
-            tp_k=True,
-            tp_out=False
-        )
+    attn_output = attention(
+        query,
+        key,
+        value,
+        scale=scale,
+        causal=False,  # Flux uses bi-directional attention
+        tp_q=True,  # Q is (batch, seqlen, d)
+        tp_k=True,  # K is (batch, seqlen, d) - kernel transposes internally
+        tp_out=False,  # Output is (batch, seqlen, d)
+    )
 
     attn_output = attn_output.reshape((bs, n_head, q_len, d_head))
     return attn_output

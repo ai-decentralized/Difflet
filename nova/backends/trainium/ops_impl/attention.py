@@ -36,4 +36,4 @@ def cross_attention(q, k, v, *, scale: float | None = None, **kwargs):
     return attention(q, k, v, scale=scale, causal=False, tp_q=False, tp_k=False, tp_out=False, **kwargs)
 
 
-__all__ = ["attention", "attention_cte", "cross_attention"]
+__all__ = ["attention", "cross_attention"]

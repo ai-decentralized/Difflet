@@ -146,7 +146,7 @@ def test_wan_vae_decoder_inference_config_shapes():
         ModelWrapperWanVAEDecoder,
         WanVAEDecoderInferenceConfig,
     )
-    from nova.core.config import NeuronConfig
+    from nova.backends.trainium.core.config import NeuronConfig
     from nova.utils.diffusers_adapter import load_diffusers_config
 
     snap = (

@@ -7,9 +7,9 @@ from typing import List, Tuple
 
 import torch
 
-from nova.core.application_base import NeuronApplicationBase
-from nova.core.config import InferenceConfig
-from nova.core.model_wrapper import BaseModelInstance, ModelWrapper
+from nova.backends.trainium.core.application_base import NeuronApplicationBase
+from nova.backends.trainium.core.config import InferenceConfig
+from nova.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from nova.models.wan.vae.modeling_vae import WanVAEDecoderConfig, WanVAEDecoderModel
 
 

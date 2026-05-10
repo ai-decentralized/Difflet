@@ -14,8 +14,8 @@ import numpy as np
 import torch
 from transformers import GenerationConfig
 
-from nova.core.application_base import NeuronApplicationBase
-from nova.core.config import InferenceConfig
+from nova.backends.trainium.core.application_base import NeuronApplicationBase
+from nova.backends.trainium.core.config import InferenceConfig
 from neuronx_distributed_inference.models.mllama.model_wrapper_mllama import NUM_IMAGE_PER_PROMPT
 from neuronx_distributed_inference.models.mllama.utils import get_image_tensors
 from neuronx_distributed_inference.modules.generation.sampling import prepare_sampling_params

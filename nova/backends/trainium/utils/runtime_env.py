@@ -1,0 +1,44 @@
+# >>> NxDI fork banner — managed by scripts/add_fork_banner.py >>>
+# Forked from neuronx-distributed-inference v0.9.17334+ced6ae4e
+# Original path: neuronx_distributed_inference/utils/runtime_env.py
+# Fork date: 2026-05-08
+# Modifications: (none — verbatim copy; see git log for divergence)
+# <<< NxDI fork banner <<<
+import collections
+import os
+from nova.backends.trainium.core.config import NeuronConfig
+
+
+LONG_CONTEXT_RUNTIME_ENV_VARS = {
+    "NEURON_RT_EXEC_TIMEOUT": "600",  # sometimes long context neff can take time to load/execute
+    "NEURON_RT_DBG_SCRATCHPAD_ON_SINGLE_CORE": "1",  # LNC2 related scratchpad optimization
+}
+
+
+def get_env_vars(neuron_config: NeuronConfig) -> dict[str, str]:
+    env_vars = collections.defaultdict()
+    if neuron_config.enable_long_context_mode:
+        env_vars.update(LONG_CONTEXT_RUNTIME_ENV_VARS)
+
+    if neuron_config.scratchpad_page_size:
+        env_vars.update({"NEURON_SCRATCHPAD_PAGE_SIZE": f"{neuron_config.scratchpad_page_size}"})
+
+    if neuron_config.is_mxfp4_compute:
+        env_vars["NEURON_RT_ENABLE_OCP"] = "1"
+        env_vars["NEURON_RT_ENABLE_OCP_SATURATION"] = "1"
+
+    return env_vars
+
+
+def set_env_vars(neuron_config: NeuronConfig) -> None:
+    """
+    Set environment variables if they're not already set.
+
+    Args:
+        neuron_config (NeuronConfig): config contains env var info
+    """
+
+    env_vars = get_env_vars(neuron_config)
+    for var, value in env_vars.items():
+        if var not in os.environ:
+            os.environ[var] = str(value)

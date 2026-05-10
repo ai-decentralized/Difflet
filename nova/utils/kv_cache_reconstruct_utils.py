@@ -6,7 +6,7 @@
 # <<< NxDI fork banner <<<
 import torch
 from typing import Callable
-from nova.core.config import InferenceConfig
+from nova.backends.trainium.core.config import InferenceConfig
 from torch.nn.modules.container import ParameterList
 
 ##############################################################################

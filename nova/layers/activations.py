@@ -24,11 +24,10 @@
 # Modifications: (none — verbatim copy; see git log for divergence)
 # <<< NxDI fork banner <<<
 import torch
-from neuronx_distributed.parallel_layers.layers import (  # noqa: E402; noqa: E402; noqa: E402; noqa: E402; noqa: E402
-    ColumnParallelLinear,
-)
 from torch import nn as nn
 from torch.nn import functional as F
+
+from nova.ops import ColumnParallelLinear
 
 
 class NeuronGELU(nn.Module):

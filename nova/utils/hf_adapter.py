@@ -25,8 +25,8 @@ from transformers.generation.logits_process import LogitsProcessorList
 from transformers.generation.stopping_criteria import StoppingCriteriaList
 from transformers.modeling_outputs import ModelOutput
 
-from nova.core.application_base import NeuronApplicationBase
-from nova.core.config import (
+from nova.backends.trainium.core.application_base import NeuronApplicationBase
+from nova.backends.trainium.core.config import (
     InferenceConfig,
     NeuronConfig,
     OnDeviceSamplingConfig,
