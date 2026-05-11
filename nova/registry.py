@@ -160,6 +160,7 @@ def _ensure_builtin_models_registered() -> None:
     _BUILTINS_LOADED = True
     _register_builtin_flux()
     _register_builtin_wan()
+    _register_builtin_hunyuan_video()
 
 
 def _register_builtin_flux() -> None:
@@ -199,4 +200,25 @@ def _register_builtin_wan() -> None:
         backends=("trainium",),
     )
     class _WanRegistration:
+        pass
+
+
+def _register_builtin_hunyuan_video() -> None:
+    def is_hunyuan_video(model_id: str) -> bool:
+        value = model_id.lower()
+        return "hunyuanvideo" in value or "hunyuan-video" in value or "hunyuan_video" in value
+
+    @register_model(
+        name="hunyuan_video",
+        application_factory="nova.models.hunyuan_video.entry:create_hunyuan_video_application",
+        hf_paths=(
+            "hunyuanvideo-community/HunyuanVideo",
+            "tencent/HunyuanVideo",
+        ),
+        detector=is_hunyuan_video,
+        default_parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        default_shape={"height": 320, "width": 512, "num_frames": 61},
+        backends=("trainium",),
+    )
+    class _HunyuanVideoRegistration:
         pass

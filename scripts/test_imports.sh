@@ -31,6 +31,11 @@ modules = [
     "nova.pipeline.compile_cache",
     "nova.pipeline.parallel_config",
     "nova.models.flux.application",
+    "nova.models.hunyuan_video.application",
+    "nova.models.hunyuan_video.entry",
+    "nova.models.hunyuan_video.modeling_hunyuan_video",
+    "nova.models.hunyuan_video.pipeline",
+    "nova.backends.trainium.hunyuan_video.backbone",
     "nova.models.wan.application",
     "nova.models.wan.entry",
     "nova.models.wan.pipeline",
@@ -44,4 +49,51 @@ modules = [
 for name in modules:
     importlib.import_module(name)
     print(f"ok import {name}")
+
+import ast
+from pathlib import Path
+
+forbidden_modules = {
+    "nova.core",
+    "nova.utils.compile_env",
+    "nova.utils.runtime_env",
+    "nova.utils.distributed",
+    "nova.utils.snapshot",
+}
+roots = [Path("nova"), Path("tests"), Path("scripts"), Path("examples")]
+violations = []
+
+
+def is_forbidden(module: str) -> bool:
+    return any(module == item or module.startswith(item + ".") for item in forbidden_modules)
+
+
+for root in roots:
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if is_forbidden(alias.name):
+                        violations.append((path, node.lineno, alias.name))
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if is_forbidden(module):
+                    violations.append((path, node.lineno, module))
+                if module == "nova":
+                    for alias in node.names:
+                        if alias.name == "core":
+                            violations.append((path, node.lineno, f"{module}.{alias.name}"))
+                if module == "nova.utils":
+                    for alias in node.names:
+                        candidate = f"{module}.{alias.name}"
+                        if candidate in forbidden_modules:
+                            violations.append((path, node.lineno, candidate))
+
+if violations:
+    for path, line, module in violations:
+        print(f"forbidden import {module} at {path}:{line}")
+    raise SystemExit(1)
+
+print("ok forbidden import guard")
 PY

@@ -12,10 +12,11 @@ multi-core execution for image and video diffusion models on Trainium v3.
 |---|---|---|
 | M0 — repository foundation | Done | Core inference primitives, layer library, registry, compile cache |
 | M1 — Flux end-to-end | Done | `FLUX.1-dev` at 1024² in 28 steps, cache-hit baseline below |
-| M2 — Wan 2.2 T2V (spike) | Done | Prompt → UMT5 → DiT (TP=4) → VAE → `(1, 3, 9, 480, 832)` video tensor at 480×832×9. Sequential 4-core split via `scripts/wan_smoke.sh`. See `cclogs/m2-wan/17-M2-wan-spike-retro.md`. |
-| M2.5 — Wan numerical alignment | Done (component) | UMT5 / DiT / VAE NEFF-vs-CPU all PASS (cosine ≥ 0.995). Full denoise trajectory parity vs HF diffusers still open. See `cclogs/m2-wan/{18,19,20}`. |
-| Phase B — backend abstraction | Done | `nova/core/` and 4 Trainium-only `nova/utils/*` files relocated under `nova/backends/trainium/`. Models import only via `nova.ops`. See `cclogs/backend/23-phase-b-closure.md`. |
-| M3 — HunyuanVideo + 1.5 | Planned | First model written entirely against the frozen `nova.ops` v1 surface. |
+| M2 — Wan 2.2 T2V (spike) | Done | Prompt → UMT5 → DiT (TP=4) → VAE → `(1, 3, 9, 480, 832)` video tensor at 480×832×9. Sequential 4-core split via `scripts/wan_smoke.sh`. |
+| M2.5 — Wan numerical alignment | Done (component) | UMT5 / DiT / VAE NEFF-vs-CPU all PASS (cosine ≥ 0.995). Full denoise trajectory parity vs HF diffusers still open. |
+| Phase B — backend abstraction | Done | `nova/core/` and 4 Trainium-only `nova/utils/*` files relocated under `nova/backends/trainium/`; compatibility shims removed during M3. Models import only via `nova.ops`. |
+| M3 — HunyuanVideo (v0) | Done (standard, hybrid) | HunyuanVideo T2V at `320x512x61`, TP=4. Hybrid pipeline: HF Llama 3 / CLIP / VAE on CPU, Nova DiT on Trainium. 4-step trajectory cosine min `0.999896` vs HF; end-to-end ~175 s. |
+| M3.x | Planned | HunyuanVideo 1.5, 720p / longer-frame / I2V, Trainium text/VAE ports, CP, TP refactor, NKI masked attention. |
 | M4 — Qwen-Image, LTX-2, Z-Image | Planned | |
 
 ## Hardware and software prerequisites
@@ -108,6 +109,35 @@ NEURON_RT_NUM_CORES=4 python examples/wan_example.py \
 Use `--download-weights` on the first run to fetch transformer / text
 encoder / tokenizer / VAE shards from HF.
 
+## Quick start — HunyuanVideo (M3 v0, hybrid)
+
+M3 v0 runs the HunyuanVideo DiT on Trainium and keeps Llama 3 + CLIP
+text encoders and the VAE decoder on CPU (HF reference). End-to-end is
+two steps.
+
+Step 1 — encode the prompt + initial latent once into a cached DiT
+input artifact (CPU, ~2 min):
+
+```bash
+PYTHONPATH=. python scripts/hunyuan_video_cache_dit_inputs.py \
+    --model-id hunyuanvideo-community/HunyuanVideo \
+    --prompt "a cat walking in a sunlit garden" \
+    --height 320 --width 512 --num-frames 61 \
+    --num-inference-steps 4 --seed 42 \
+    --output .nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors
+```
+
+Step 2 — Trainium DiT denoise + CPU VAE decode in one process:
+
+```bash
+./scripts/hunyuan_smoke.sh
+```
+
+Defaults assume artifact + real HF weights + compiled NEFF at the
+paths produced by step 1 and the M3 capacity gate; override via
+`NOVA_HUNYUAN_*` env vars. MP4 export is best-effort; the `.pt` video
+tensor is always saved.
+
 ### Library API
 
 ```python
@@ -140,9 +170,8 @@ image.save("out.png")
 | First-time AOT compile (cold) | ~683 s | ~683 s | n/a |
 
 Measured on `trn3pd98.3xlarge` with `NEURON_RT_NUM_CORES=4`,
-`--tp-degree 4`, `--skip-warmup`. The `from_pretrained` regression vs M1
-closure is documented in `cclogs/backend/23-phase-b-closure.md` §2; the
-remaining ~65 s is Neuron sharding + traced weight init and is the next
+`--tp-degree 4`, `--skip-warmup`. The remaining ~65 s after the
+Phase B fix is Neuron sharding + traced weight init and is the next
 optimization target (pre-sharded component cache).
 
 ### Wan 2.2 T2V — 480×832, 9 frames, bf16, cache hit, 2 inference steps
@@ -155,9 +184,7 @@ optimization target (pre-sharded component cache).
 | Stage 2 forward (single decode) | 1.0 s |
 | Total wall clock (`wan_smoke.sh`) | ~53 s |
 
-Spike baseline. See `cclogs/m2-wan/21-M2.5D-current-wan-smoke-baseline.md`
-for the full run record (latent / video sha256, tensor stats); Phase B
-reproduced these numbers bit-identically.
+Spike baseline; Phase B reproduced these numbers bit-identically.
 
 ## Runtime protocol — important constraints
 
@@ -189,109 +216,59 @@ ports should follow the same pattern.
 ## Architecture
 
 ```
-                     User script
-                          │
-                          ▼
-              ┌──────────────────────┐
-              │     NovaPipeline     │   single public entry point
-              │  from_pretrained,    │   resolves registry, manages
-              │  precompile, __call__│   cache, dispatches to app
-              └──────────┬───────────┘
-                         │ resolve(model_id) via registry
-                         ▼
-              ┌──────────────────────┐
-              │      ModelEntry      │   per-model metadata: factory,
-              │   (registry.py)      │   default parallel + shape,
-              │                      │   download patterns, allowed backends
-              └──────────┬───────────┘
-                         │ lazy factory
-                         ▼
-              ┌──────────────────────┐
-              │   <Model>Application │   composes sub-apps for text
-              │   (Flux: 4 sub-apps) │   encoders / DiT / VAE
-              │   (Wan:  up to 4   ) │   compile() + load() + __call__
-              └──────────┬───────────┘
-                         │ model code uses ONLY:
-                         ▼
-              ┌──────────────────────┐
-              │       nova.ops       │   backend-neutral op surface
-              │ attention, RMSNorm,  │   (linear, attention, norm,
-              │ Column/Row/Embedding │   collectives, embeddings,
-              │ collectives, plat-   │   platform). Frozen v1; additive
-              │ form helpers         │   only. Dispatch frozen at first
-              │                      │   import per process.
-              └──────────┬───────────┘
-                         │ NOVA_BACKEND ∈ {trainium, cpu, …}
-                         ▼
-              ┌──────────────────────────────────────┐
-              │            nova/backends/            │
-              │ ┌─────────────┐  ┌─────────────────┐ │
-              │ │ trainium/   │  │ cpu/            │ │
-              │ │  ops_impl/  │  │  ops_impl/      │ │
-              │ │  core/      │  │  runtime.py     │ │
-              │ │  utils/     │  │ (numerical ref) │ │
-              │ │  runtime.py │  └─────────────────┘ │
-              │ └─────────────┘  ┌─────────────────┐ │
-              │                  │ cuda/ rocm/     │ │
-              │                  │  (stubs)        │ │
-              │                  └─────────────────┘ │
-              └──────────────────────────────────────┘
+User script
+   │
+   ▼
+NovaPipeline             single public entry; resolves registry, manages
+   │  from_pretrained,   compile cache, dispatches to <Model>Application
+   │  precompile, __call__
+   ▼
+ModelEntry (registry.py) per-model metadata: factory, default parallel +
+   │                     shape, download patterns, allowed backends
+   ▼
+<Model>Application       composes encoder / DiT / VAE sub-apps; exposes
+   │                     compile() + load() + __call__()
+   ▼
+nova.ops                 backend-neutral op surface (attention / linear /
+   │                     norm / collectives / embeddings / platform).
+   │                     Frozen v1; additive only; dispatch frozen at
+   │                     first import per process.
+   ▼
+nova/backends/<hw>/ops_impl/   per-hardware implementations.
+                               trainium = the real backend; cpu = pure
+                               torch numerical reference; cuda/rocm stubs.
 ```
 
-`NovaPipeline` only invokes three methods on an application:
-`compile()`, `load()`, `__call__()`. Model code imports only from
-`nova.ops` (no direct `neuronx_distributed` / `nkilib` / `torch_neuronx`);
-backend-specific implementations live entirely under
-`nova/backends/<hw>/ops_impl/`. CUDA / ROCm backends remain stubs.
+`NovaPipeline` only invokes `compile() / load() / __call__()` on an
+application. Model code imports only from `nova.ops` (no direct
+`neuronx_distributed` / `nkilib` / `torch_neuronx`); backend-specific
+implementations live entirely under `nova/backends/<hw>/ops_impl/`.
 
 ### Repository layout
 
 ```
 nova/
-├── pipeline/             # Public API — Nova-authored, formatted with black
-│   ├── nova_pipeline.py  # NovaPipeline.from_pretrained / precompile / __call__
-│   ├── parallel_config.py
-│   ├── compile_cache.py  # cache_key + manifest schema
-│   └── path_resolver.py  # local path / HF snapshot_download with allow_patterns
-├── registry.py           # @register_model decorator + ModelEntry
-├── ops/                  # Backend-neutral op surface (frozen v1)
-│   ├── attention.py / linear.py / norm.py / collectives.py
-│   ├── embeddings.py / platform.py
-│   └── _dispatch.py      # lazy backend selection (frozen on first import)
-├── backends/             # Per-hardware implementations
-│   ├── base.py / registry.py
-│   ├── trainium/         # NXD + nkilib + torch_neuronx
-│   │   ├── core/         # AOT inference base classes (application_base,
-│   │   │                 # config, modules/{attention,custom_calls,...})
-│   │   ├── utils/        # compile_env, runtime_env, distributed, snapshot
-│   │   ├── ops_impl/     # Trainium impls of nova.ops
-│   │   └── wan/          # Trainium-side Wan wrappers
-│   ├── cpu/              # Pure-torch numerical reference
-│   │   └── ops_impl/
-│   ├── cuda/  rocm/      # Stubs
-│   └── runtime.py        # backend probe + selection
-├── core/                 # Compatibility shims → nova/backends/trainium/core/
-├── utils/                # Hardware-neutral utilities (HF / diffusers adapters);
-│                         # the four Trainium-flavored files here are shims
-├── layers/               # Diffusion-specific layers; import only via nova.ops
-├── models/
-│   ├── flux/             # Flux application + pipeline + DiT + CLIP + T5 + VAE
-│   └── wan/              # Wan application + orchestrator + DiT + UMT5 + VAE
-│       ├── modeling_wan.py / pipeline.py / application.py
-│       ├── checkpoint/   # HF → Nova state-dict conversion
-│       ├── umt5/  vae/   # encoder + decoder modeling
-│       └── entry.py      # registered factory
+├── pipeline/        Nova-authored public API (NovaPipeline, compile cache,
+│                    parallel config, HF path resolver)
+├── registry.py      @register_model + ModelEntry
+├── ops/             Backend-neutral op surface (frozen v1)
+├── backends/
+│   ├── trainium/    Real backend (NXD + nkilib + torch_neuronx)
+│   │   ├── core/    AOT base classes, attention, custom_calls
+│   │   ├── utils/   compile_env, runtime_env, distributed, snapshot
+│   │   ├── ops_impl/    Trainium impls of nova.ops
+│   │   └── wan/ hunyuan_video/    Trainium-side per-model wrappers
+│   ├── cpu/         Pure-torch numerical reference
+│   └── cuda/ rocm/  Stubs
+├── utils/           Hardware-neutral utilities (HF / diffusers adapters)
+├── layers/          Diffusion-specific layers; import only via nova.ops
+└── models/          flux/ + wan/ + hunyuan_video/, each: modeling, pipeline,
+                     application, entry, checkpoint (where needed)
 ```
 
-`nova/backends/trainium/{core,modules}` follows upstream coding style so
-periodic syncs with the upstream Neuron infrastructure produce clean
-diffs. `nova/{pipeline, ops, registry.py, models/<new>}` are Nova-authored
-and formatted with Black.
-
-The compatibility shims at `nova/core/` and the four Trainium-named files
-in `nova/utils/` re-export from `nova/backends/trainium/`. They exist
-only to give external callers a migration window and will be removed at
-M3 closure (see `cclogs/backend/23-phase-b-closure.md` §4).
+`nova/backends/trainium/{core,modules}` follows upstream Neuron coding
+style so periodic rebases are clean; `nova/{pipeline, ops, registry.py,
+models/<new>}` is Nova-authored and formatted with Black.
 
 ## Compile cache
 
@@ -351,13 +328,13 @@ To port a diffusion model, add three things:
    factory by string (lazy import) plus default parallel config, shape,
    HF download patterns, and supported `backends=("trainium", ...)`.
 
-Hard rule for new modeling code (enforced grep-statically and by the
-`forbidden_prefixes` guard in `tests/unit/test_modeling_*.py`):
+Hard rule for new modeling code (enforced by the repo-wide import guard in
+`scripts/test_imports.sh`):
 
 - model files import **only** from `nova.ops`, `torch`, stdlib,
   `diffusers`, and `transformers`;
-- no direct `neuronx_distributed`, `torch_neuronx`, `nkilib`, `nova.core`
-  (shim), or old `nova.utils.{compile_env,runtime_env,distributed,snapshot}`
+- no direct `neuronx_distributed`, `torch_neuronx`, `nkilib`, `nova.core`,
+  or old `nova.utils.{compile_env,runtime_env,distributed,snapshot}`
   imports;
 - if a primitive is missing, add it to `nova.ops` first (with at least
   the Trainium implementation under `nova/backends/trainium/ops_impl/`,
@@ -367,8 +344,7 @@ Hard rule for new modeling code (enforced grep-statically and by the
 establish (multiple sub-applications, race-safe compile with `model.pt`
 markers and SPMD barriers, ordered load with biggest-TP component first)
 should be reused. Lifting this into a shared
-`MultiComponentApplication` base class is a deferred Phase B/M3 cleanup
-(retro proposal in `cclogs/m2-wan/17-M2-wan-spike-retro.md` §2.2).
+`MultiComponentApplication` base class is a deferred cleanup.
 
 ## Development
 
@@ -389,7 +365,7 @@ Project-local helper scripts:
 ./scripts/wan_text_encoder_compile_smoke.sh   # AOT compile UMT5 only
 ./scripts/wan_vae_compile_smoke.sh            # AOT compile VAE only (~78 min @ 480×832×9)
 
-# M2.5 numerical alignment gates (per cclogs/m2-wan/{18,19,20})
+# M2.5 numerical alignment gates
 ./scripts/wan_m25_numerical_alignment.sh      # M2.5-A: VAE NEFF vs CPU
 ./scripts/wan_m25b_text_dit_alignment.sh      # M2.5-B: UMT5 / DiT real-weight CPU parity
 ./scripts/wan_m25c_neff_cpu_alignment.sh      # M2.5-C: UMT5 / DiT NEFF vs CPU
