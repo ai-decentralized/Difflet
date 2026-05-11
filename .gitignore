@@ -33,3 +33,5 @@ global_metric_store.json
 
 # Internal / not for public repo
 cclogs/
+CLAUDE.md
+AGENTS.md
