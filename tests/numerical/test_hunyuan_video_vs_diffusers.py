@@ -51,7 +51,7 @@ def test_hunyuan_video_cached_trajectory_cosine_matches_diffusers():
             "/home/ubuntu/nova/.nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors",
         )
     )
-    threshold = float(os.environ.get("NOVA_HUNYUAN_VIDEO_MIN_COSINE", "0.95"))
+    threshold = float(os.environ.get("NOVA_HUNYUAN_VIDEO_MIN_COSINE", "0.999"))
     tp_degree = int(os.environ.get("NOVA_HUNYUAN_VIDEO_TP_DEGREE", "4"))
     reference_dtype = _parse_dtype(
         os.environ.get("NOVA_HUNYUAN_VIDEO_REFERENCE_DTYPE", "bfloat16")

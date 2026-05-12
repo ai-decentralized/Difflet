@@ -35,3 +35,4 @@ global_metric_store.json
 cclogs/
 CLAUDE.md
 AGENTS.md
+.claude/

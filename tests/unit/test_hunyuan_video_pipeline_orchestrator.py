@@ -25,8 +25,8 @@ class FakeScheduler:
         self.steps = []
 
     def set_timesteps(self, *, sigmas, device):
-        del sigmas
-        self.timesteps = torch.tensor([1000.0, 500.0], device=device)
+        steps = max(len(sigmas), 1)
+        self.timesteps = torch.linspace(1000.0, 500.0, steps=steps, device=device)
 
     def step(self, noise_pred, timestep, latents, return_dict):
         assert return_dict is False
@@ -60,11 +60,12 @@ def _bundle(latents: torch.Tensor | None = None) -> HunyuanVideoDiTInputBundle:
 
 def test_hunyuan_orchestrator_runs_bundle_denoise_with_fallback_scheduler(tmp_path):
     transformer = FakeTransformer(value=0.25)
-    pipeline = HunyuanVideoOrchestrator(
-        model_path=str(tmp_path),
-        transformer=transformer,
-        dtype=torch.float32,
-    )
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        pipeline = HunyuanVideoOrchestrator(
+            model_path=str(tmp_path),
+            transformer=transformer,
+            dtype=torch.float32,
+        )
 
     output = pipeline(
         bundle=_bundle(),
@@ -79,6 +80,19 @@ def test_hunyuan_orchestrator_runs_bundle_denoise_with_fallback_scheduler(tmp_pa
     assert transformer.calls[0].encoder_attention_mask.dtype == torch.int64
     assert output.trajectory is not None
     assert len(output.trajectory) == 3
+
+
+def test_hunyuan_orchestrator_rejects_implicit_timesteps_without_scheduler(tmp_path):
+    transformer = FakeTransformer(value=0.25)
+    with pytest.warns(RuntimeWarning, match="hunyuan_video_cache_dit_inputs.py"):
+        pipeline = HunyuanVideoOrchestrator(
+            model_path=str(tmp_path),
+            transformer=transformer,
+            dtype=torch.float32,
+        )
+
+    with pytest.raises(ValueError, match="FlowMatchEulerDiscreteScheduler"):
+        pipeline(bundle=_bundle(), num_inference_steps=2)
 
 
 def test_hunyuan_orchestrator_uses_diffusers_style_scheduler(tmp_path):
@@ -131,9 +145,11 @@ def test_hunyuan_orchestrator_rejects_explicit_timesteps_outside_m3_schedule(tmp
 
 def test_hunyuan_orchestrator_builds_bundle_from_named_tensors(tmp_path):
     transformer = FakeTransformer(value=1.0)
+    scheduler = FakeScheduler()
     pipeline = HunyuanVideoOrchestrator(
         model_path=str(tmp_path),
         transformer=transformer,
+        scheduler=scheduler,
         dtype=torch.float32,
     )
     bundle = _bundle()

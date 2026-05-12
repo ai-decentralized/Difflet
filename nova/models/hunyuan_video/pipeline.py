@@ -8,6 +8,7 @@ The Trainium boundary is the DiT backbone call represented by
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,7 +47,11 @@ class HunyuanVideoOrchestrator:
         self.height = int(height)
         self.width = int(width)
         self.num_frames = int(num_frames)
-        self.scheduler = scheduler if scheduler is not None else _load_scheduler(model_path)
+        self.scheduler = (
+            scheduler
+            if scheduler is not None
+            else _load_scheduler(model_path, warn_if_missing=transformer is not None)
+        )
 
     def has_runtime_components(self) -> bool:
         return self.transformer is not None or self.vae is not None
@@ -104,7 +109,7 @@ class HunyuanVideoOrchestrator:
     def _timesteps(self, num_inference_steps: int, *, device: torch.device) -> torch.Tensor:
         num_inference_steps = max(int(num_inference_steps), 1)
         if self.scheduler is None:
-            return torch.linspace(1000.0, 0.0, steps=num_inference_steps, device=device)
+            raise ValueError(_missing_scheduler_message(self.model_path))
         sigmas = np.linspace(1.0, 0.0, num_inference_steps + 1)[:-1]
         timesteps, _ = _retrieve_timesteps(self.scheduler, num_inference_steps, "cpu", sigmas=sigmas)
         return timesteps.to(device=device)
@@ -236,15 +241,35 @@ def _bundle_from_tensors(
     )
 
 
-def _load_scheduler(model_path: str):
+def _load_scheduler(model_path: str, *, warn_if_missing: bool = True):
     scheduler_path = os.path.join(model_path, "scheduler")
     if not os.path.exists(os.path.join(scheduler_path, "scheduler_config.json")):
+        if warn_if_missing:
+            warnings.warn(_missing_scheduler_message(model_path), RuntimeWarning, stacklevel=2)
         return None
     try:
         from diffusers import FlowMatchEulerDiscreteScheduler
     except ImportError:
+        if warn_if_missing:
+            warnings.warn(
+                "HunyuanVideo scheduler config was found, but diffusers is not installed; "
+                "Nova cannot initialize FlowMatchEulerDiscreteScheduler and will only run "
+                "explicit test/debug scheduler fallback paths.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         return None
     return FlowMatchEulerDiscreteScheduler.from_pretrained(scheduler_path)
+
+
+def _missing_scheduler_message(model_path: str) -> str:
+    scheduler_config = os.path.join(model_path, "scheduler", "scheduler_config.json")
+    return (
+        "HunyuanVideo scheduler config is missing at "
+        f"{scheduler_config}. Nova cannot initialize FlowMatchEulerDiscreteScheduler; "
+        "copy or download the HF scheduler/ directory for this model, or regenerate the "
+        "cached DiT input artifact with scripts/hunyuan_video_cache_dit_inputs.py."
+    )
 
 
 def _load_vae(model_path: str, dtype: torch.dtype):

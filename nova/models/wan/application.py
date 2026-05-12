@@ -6,9 +6,12 @@ import os
 from typing import Any
 
 import torch
-from torch import nn
 
 from nova.backends.trainium.core.config import NeuronConfig
+from nova.backends.trainium.core.multi_component_application import (
+    ComponentSpec,
+    MultiComponentApplication,
+)
 from nova.utils.diffusers_adapter import load_diffusers_config
 
 
@@ -115,7 +118,7 @@ def _latent_num_frames(num_frames: int) -> int:
     return (int(num_frames) - 1) // 4 + 1
 
 
-class NeuronWanApplication(nn.Module):
+class NeuronWanApplication(MultiComponentApplication):
     def __init__(
         self,
         *,
@@ -239,70 +242,37 @@ class NeuronWanApplication(nn.Module):
             max_text_length=text_seq_len,
         )
 
-    def _components(self):
+    def components(self) -> list[ComponentSpec]:
         """Yield ``(name, component)`` for every active sub-app, in compile order.
 
         UMT5 first so its communicator establishes before the transformer
         (Flux M1.4 lesson, cclogs/05 §9.1). VAE compiles last as an
         independent one-core component.
         """
+        components: list[ComponentSpec] = []
         if self.text_encoder is not None:
-            yield "text_encoder", self.text_encoder
+            components.append(ComponentSpec("text_encoder", self.text_encoder))
         if self.transformer is not None:
-            yield "transformer", self.transformer
+            components.append(ComponentSpec("transformer", self.transformer))
         if self.transformer_2 is not None:
-            yield "transformer_2", self.transformer_2
+            components.append(ComponentSpec("transformer_2", self.transformer_2))
         if self.vae_decoder is not None:
-            yield "vae_decoder", self.vae_decoder
+            components.append(ComponentSpec("vae_decoder", self.vae_decoder))
+        return components
 
-    def compile(self, compiled_model_path: str, debug: bool = False) -> None:
-        components = list(self._components())
-        if not components:
-            raise NotImplementedError(
+    def no_components_message(self, action: str) -> str:
+        if action == "compile":
+            return (
                 "Wan compile requires diffusers transformer/ or text_encoder/ "
                 "config.json. The current app is in W2 skeleton mode for this "
                 "model path."
             )
-        for name, component in components:
-            component.compile(os.path.join(compiled_model_path, name), debug=debug)
-
-    def has_compiled_artifacts(self, compiled_model_path: str) -> bool:
-        components = list(self._components())
-        if not components:
-            return True
-        for name, _component in components:
-            component_path = os.path.join(compiled_model_path, name)
-            if not os.path.exists(os.path.join(component_path, "model.pt")):
-                return False
-            if not os.path.exists(os.path.join(component_path, "neuron_config.json")):
-                return False
-        return True
-
-    def load(
-        self,
-        compiled_model_path: str,
-        start_rank_id: int | None = None,
-        local_ranks_size: int | None = None,
-        skip_warmup: bool = False,
-    ) -> None:
-        components = list(self._components())
-        if not components:
-            raise NotImplementedError(
+        if action == "load":
+            return (
                 "Wan load requires compiled artifacts. The current app is in "
                 "W2 skeleton mode for this model path."
             )
-        for name, component in components:
-            component_start_rank_id, component_local_ranks_size = self._component_load_range(
-                component,
-                start_rank_id=start_rank_id,
-                local_ranks_size=local_ranks_size,
-            )
-            component.load(
-                os.path.join(compiled_model_path, name),
-                start_rank_id=component_start_rank_id,
-                local_ranks_size=component_local_ranks_size,
-                skip_warmup=skip_warmup,
-            )
+        return super().no_components_message(action)
 
     @staticmethod
     def _component_load_range(
@@ -312,12 +282,11 @@ class NeuronWanApplication(nn.Module):
         local_ranks_size: int | None,
     ) -> tuple[int | None, int | None]:
         """Clamp single-core components when the parent Wan app uses TP>1."""
-        config = getattr(component, "config", None)
-        neuron_config = getattr(config, "neuron_config", None)
-        world_size = getattr(neuron_config, "world_size", None)
-        if world_size == 1:
-            return 0 if start_rank_id is not None else None, 1
-        return start_rank_id, local_ranks_size
+        return MultiComponentApplication._component_load_rank_range(
+            component,
+            start_rank_id=start_rank_id,
+            local_ranks_size=local_ranks_size,
+        )
 
     def __call__(self, *args: Any, **kwargs: Any):
         if self.transformer is not None and len(args) >= 3:

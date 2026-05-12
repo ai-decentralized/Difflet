@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,44 @@ def test_hunyuan_video_pipeline_skeleton_can_be_constructed_without_load(tmp_pat
     assert pipe.parallel == NovaParallelConfig(tp_degree=4, cp_enabled=False)
     assert pipe.shape == {"height": 320, "width": 512, "num_frames": 61}
     assert pipe.app.shape == {"height": 320, "width": 512, "num_frames": 61}
+
+
+def test_hunyuan_video_application_declares_vae_decoder_component(tmp_path):
+    model_dir = tmp_path / "HunyuanVideo"
+    vae_dir = model_dir / "vae"
+    vae_dir.mkdir(parents=True)
+    (vae_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "_class_name": "AutoencoderKLHunyuanVideo",
+                "out_channels": 3,
+                "latent_channels": 16,
+                "up_block_types": ["HunyuanVideoUpBlock3D"] * 4,
+                "block_out_channels": [128, 256, 512, 512],
+                "layers_per_block": 2,
+                "act_fn": "silu",
+                "norm_num_groups": 32,
+                "scaling_factor": 0.476986,
+                "spatial_compression_ratio": 8,
+                "temporal_compression_ratio": 4,
+                "mid_block_add_attention": True,
+            }
+        )
+    )
+
+    pipe = NovaPipeline.from_pretrained(
+        str(model_dir),
+        model_type="hunyuan_video",
+        parallel=NovaParallelConfig(tp_degree=4),
+        dtype="bf16",
+        compile_cache_dir=str(tmp_path / "cache"),
+        skip_compile=True,
+        load=False,
+        application_kwargs={"enable_vae_decoder": True},
+    )
+
+    assert [spec.name for spec in pipe.app.components()] == ["vae_decoder"]
+    assert pipe.app.pipeline.vae is pipe.app.vae_decoder
 
 
 def test_hunyuan_video_rejects_cp_until_m3_polish(tmp_path):

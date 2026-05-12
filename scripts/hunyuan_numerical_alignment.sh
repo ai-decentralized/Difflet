@@ -14,7 +14,7 @@ export NOVA_HUNYUAN_VIDEO_SOURCE_DIR="${NOVA_HUNYUAN_VIDEO_SOURCE_DIR:-/home/ubu
 export NOVA_HUNYUAN_VIDEO_COMPILED_DIR="${NOVA_HUNYUAN_VIDEO_COMPILED_DIR:-${REPO_DIR}/.nova-cache/hunyuan_n4_20d40s2r/compiled}"
 export NOVA_HUNYUAN_VIDEO_BUNDLE="${NOVA_HUNYUAN_VIDEO_BUNDLE:-${REPO_DIR}/.nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors}"
 export NOVA_HUNYUAN_VIDEO_NUMERICAL_METRICS="${NOVA_HUNYUAN_VIDEO_NUMERICAL_METRICS:-/tmp/nova_hunyuan_video_trajectory_metrics.json}"
-export NOVA_HUNYUAN_VIDEO_MIN_COSINE="${NOVA_HUNYUAN_VIDEO_MIN_COSINE:-0.95}"
+export NOVA_HUNYUAN_VIDEO_MIN_COSINE="${NOVA_HUNYUAN_VIDEO_MIN_COSINE:-0.999}"
 
 cd "${REPO_DIR}"
 exec "${PYTHON_BIN}" -m pytest tests/numerical/test_hunyuan_video_vs_diffusers.py -q "$@"

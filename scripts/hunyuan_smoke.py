@@ -3,7 +3,8 @@
 Single-process driver for the M3 hybrid path:
 
   cached DiT input artifact  -->  Nova Trainium DiT (4 steps)
-                               -->  HF AutoencoderKLHunyuanVideo decode (CPU)
+                               -->  HF VAE decode (CPU, default)
+                                    or Nova Trainium VAE decode (opt-in)
                                -->  (1, 3, T, H, W) bf16 video tensor
                                -->  optional best-effort MP4 export
 
@@ -56,6 +57,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fps", type=int, default=15,
                         help="MP4 framerate (HunyuanVideo diffusers default is 15)")
     parser.add_argument("--tp-degree", type=int, default=4)
+    parser.add_argument(
+        "--enable-trainium-vae",
+        action="store_true",
+        help="Load compiled vae_decoder/ and use Nova Trainium VAE decode instead of HF CPU VAE.",
+    )
     return parser.parse_args()
 
 
@@ -101,6 +107,7 @@ def main() -> int:
         dtype=torch.bfloat16,
         shape={"height": meta["height"], "width": meta["width"], "num_frames": meta["num_frames"]},
         text_seq_len=meta["text_seq_len"],
+        enable_vae_decoder=args.enable_trainium_vae,
     )
     print(f"[smoke] load(skip_warmup=True) from {args.compiled_dir} ...", flush=True)
     t_load = time.time()

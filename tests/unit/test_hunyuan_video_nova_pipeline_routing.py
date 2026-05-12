@@ -73,6 +73,20 @@ class _FakeVAE:
         return (latents[:, :3],)
 
 
+class _FakeScheduler:
+    def __init__(self):
+        self.timesteps = None
+
+    def set_timesteps(self, *, sigmas, device):
+        steps = max(len(sigmas), 1)
+        self.timesteps = torch.linspace(1000.0, 500.0, steps=steps, device=device)
+
+    def step(self, noise_pred, timestep, latents, return_dict):
+        del timestep
+        assert return_dict is False
+        return (latents - noise_pred,)
+
+
 def _build_app(tmp_path) -> NeuronHunyuanVideoApplication:
     """Skeleton app with no transformer/VAE compiled artifacts."""
     return NeuronHunyuanVideoApplication(
@@ -97,6 +111,7 @@ def _install_fake_components(
         model_path=app.model_path,
         transformer=transformer,
         vae=vae,
+        scheduler=_FakeScheduler(),
         dtype=torch.float32,
     )
     return transformer, vae

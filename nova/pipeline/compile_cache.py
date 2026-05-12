@@ -18,10 +18,14 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
+from nova import envs
 from nova.pipeline.parallel_config import NovaParallelConfig
 
 
-DEFAULT_CACHE_DIR = Path(os.environ.get("NOVA_COMPILE_CACHE", "~/.cache/nova")).expanduser()
+def _default_cache_dir() -> Path:
+    return Path(envs.NOVA_COMPILE_CACHE)
+
+
 MANIFEST_FILENAME = "manifest.json"
 
 # Bumps when the on-disk cache schema changes in a breaking way (e.g. fields
@@ -169,7 +173,7 @@ def cache_key(spec: CacheSpec) -> str:
 
 
 def cache_path(cache_dir: str | os.PathLike[str] | None, spec: CacheSpec) -> Path:
-    base = Path(cache_dir).expanduser() if cache_dir is not None else DEFAULT_CACHE_DIR
+    base = Path(cache_dir).expanduser() if cache_dir is not None else _default_cache_dir()
     return base / spec.model_name / cache_key(spec)
 
 

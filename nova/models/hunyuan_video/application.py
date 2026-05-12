@@ -12,9 +12,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
-from torch import nn
 
 from nova.backends.trainium.core.config import NeuronConfig
+from nova.backends.trainium.core.multi_component_application import (
+    ComponentSpec,
+    MultiComponentApplication,
+)
 from nova.utils.diffusers_adapter import load_diffusers_config
 
 
@@ -128,6 +131,36 @@ def create_hunyuan_video_backbone_config(
     )
 
 
+def create_hunyuan_video_vae_decoder_config(
+    *,
+    model_path: str,
+    world_size: int,
+    tp_degree: int,
+    dtype: torch.dtype,
+    height: int,
+    width: int,
+    num_frames: int,
+    batch_size: int = 1,
+):
+    from nova.backends.trainium.hunyuan_video.vae import HunyuanVideoVAEDecoderInferenceConfig
+
+    vae_path = os.path.join(model_path, "vae")
+    neuron_config = NeuronConfig(
+        batch_size=batch_size,
+        tp_degree=tp_degree,
+        world_size=world_size,
+        torch_dtype=dtype,
+        skip_sharding=True,
+    )
+    return HunyuanVideoVAEDecoderInferenceConfig(
+        neuron_config=neuron_config,
+        load_config=load_diffusers_config(vae_path),
+        height=height,
+        width=width,
+        num_frames=num_frames,
+    )
+
+
 def _normalize_dtype(dtype: Any) -> torch.dtype:
     if isinstance(dtype, torch.dtype):
         return dtype
@@ -138,7 +171,7 @@ def _normalize_dtype(dtype: Any) -> torch.dtype:
     raise ValueError(f"Unsupported HunyuanVideo dtype: {dtype!r}")
 
 
-class NeuronHunyuanVideoApplication(nn.Module):
+class NeuronHunyuanVideoApplication(MultiComponentApplication):
     def __init__(
         self,
         *,
@@ -159,12 +192,15 @@ class NeuronHunyuanVideoApplication(nn.Module):
         }
         self.kwargs = kwargs
         self.transformer_path = os.path.join(model_path, "transformer")
+        self.vae_decoder_path = os.path.join(model_path, "vae")
         self.transformer = None
+        self.vae_decoder = None
         self.pipeline = None
         self.text_seq_len = int(kwargs.get("text_seq_len", 256))
         self.batch_size = int(kwargs.get("batch_size", 1))
 
         enable_transformer = bool(kwargs.get("enable_transformer", True))
+        enable_vae_decoder = bool(kwargs.get("enable_vae_decoder", False))
         transformer_config_path = os.path.join(self.transformer_path, "config.json")
         if enable_transformer and os.path.exists(transformer_config_path):
             from nova.backends.trainium.hunyuan_video.backbone import (
@@ -186,60 +222,56 @@ class NeuronHunyuanVideoApplication(nn.Module):
                 model_path=self.transformer_path,
                 config=config,
             )
+
+        vae_config_path = os.path.join(self.vae_decoder_path, "config.json")
+        if enable_vae_decoder and os.path.exists(vae_config_path):
+            from nova.backends.trainium.hunyuan_video.vae import (
+                NeuronHunyuanVideoVAEDecoderApplication,
+            )
+
+            vae_config = create_hunyuan_video_vae_decoder_config(
+                model_path=model_path,
+                world_size=parallel.tp_degree,
+                tp_degree=1,
+                dtype=self.dtype,
+                height=self.shape["height"],
+                width=self.shape["width"],
+                num_frames=self.shape["num_frames"],
+                batch_size=self.batch_size,
+            )
+            self.vae_decoder = NeuronHunyuanVideoVAEDecoderApplication(
+                model_path=self.vae_decoder_path,
+                config=vae_config,
+            )
         from nova.models.hunyuan_video.pipeline import HunyuanVideoOrchestrator
 
         self.pipeline = HunyuanVideoOrchestrator(
             model_path=model_path,
             transformer=self if self.transformer is not None else None,
+            vae=self.vae_decoder,
             dtype=self.dtype,
             height=self.shape["height"],
             width=self.shape["width"],
             num_frames=self.shape["num_frames"],
         )
 
-    def _components(self):
+    def components(self) -> list[ComponentSpec]:
+        components: list[ComponentSpec] = []
         if self.transformer is not None:
-            yield "transformer", self.transformer
+            components.append(ComponentSpec("transformer", self.transformer))
+        if self.vae_decoder is not None:
+            components.append(ComponentSpec("vae_decoder", self.vae_decoder))
+        return components
 
-    def compile(self, compiled_model_path: str, debug: bool = False) -> None:
-        components = list(self._components())
-        if not components:
-            raise NotImplementedError(
+    def no_components_message(self, action: str) -> str:
+        if action == "compile":
+            return (
                 "HunyuanVideo compile requires transformer/config.json. "
                 "The current app has no active compile component."
             )
-        for name, component in components:
-            component.compile(os.path.join(compiled_model_path, name), debug=debug)
-
-    def has_compiled_artifacts(self, compiled_model_path: str) -> bool:
-        components = list(self._components())
-        if not components:
-            return True
-        for name, _component in components:
-            component_path = os.path.join(compiled_model_path, name)
-            if not os.path.exists(os.path.join(component_path, "model.pt")):
-                return False
-            if not os.path.exists(os.path.join(component_path, "neuron_config.json")):
-                return False
-        return True
-
-    def load(
-        self,
-        compiled_model_path: str,
-        start_rank_id: int | None = None,
-        local_ranks_size: int | None = None,
-        skip_warmup: bool = False,
-    ) -> None:
-        components = list(self._components())
-        if not components:
-            raise NotImplementedError("HunyuanVideo load requires compiled component artifacts")
-        for name, component in components:
-            component.load(
-                os.path.join(compiled_model_path, name),
-                start_rank_id=start_rank_id,
-                local_ranks_size=local_ranks_size,
-                skip_warmup=skip_warmup,
-            )
+        if action == "load":
+            return "HunyuanVideo load requires compiled component artifacts"
+        return super().no_components_message(action)
 
     def dit_input_contract(self) -> dict[str, dict[str, Any]]:
         if self.transformer is None:

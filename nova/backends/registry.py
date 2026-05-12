@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import os
 from functools import lru_cache
 
+from nova import envs
 from nova.backends.base import BackendRuntime
 
 _BACKEND_FACTORIES = {
@@ -18,7 +18,7 @@ _BACKEND_FACTORIES = {
 
 
 def resolve_backend_name(name: str | None = None) -> str:
-    value = name or os.environ.get("NOVA_BACKEND")
+    value = name or envs.NOVA_BACKEND
     if value:
         normalized = value.strip().lower()
         if normalized in _BACKEND_FACTORIES:
