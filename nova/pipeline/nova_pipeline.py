@@ -88,6 +88,7 @@ class NovaPipeline:
             width=shape.get("width"),
             num_frames=shape.get("num_frames"),
             revision=revision,
+            application_kwargs=application_kwargs,
         )
         compiled_path = cache_path(compile_cache_dir, spec)
         app = entry.create_application(

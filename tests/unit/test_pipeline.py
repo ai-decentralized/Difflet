@@ -245,6 +245,7 @@ def test_p4_changing_real_input_changes_cache_key():
     assert base != cache_key(_spec(parallel=NovaParallelConfig(tp_degree=4)))
     assert base != cache_key(_spec(height=128))
     assert base != cache_key(_spec(revision="v1.2.3"))
+    assert base != cache_key(_spec(application_kwargs={"text_seq_len": 16}))
 
 
 def test_p1_compile_recompiles_when_manifest_missing(tmp_path):

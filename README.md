@@ -16,7 +16,8 @@ multi-core execution for image and video diffusion models on Trainium v3.
 | M2.5 — Wan numerical alignment | Done (component) | UMT5 / DiT / VAE NEFF-vs-CPU all PASS (cosine ≥ 0.995). Full denoise trajectory parity vs HF diffusers still open. |
 | Phase B — backend abstraction | Done | `nova/core/` and 4 Trainium-only `nova/utils/*` files relocated under `nova/backends/trainium/`; compatibility shims removed during M3. Models import only via `nova.ops`. |
 | M3 — HunyuanVideo (v0) | Done (standard, hybrid) | HunyuanVideo T2V at `320x512x61`, TP=4. Hybrid pipeline: HF Llama 3 / CLIP / VAE on CPU, Nova DiT on Trainium. 4-step trajectory cosine min `0.999896` vs HF; end-to-end ~175 s. |
-| M3.x | Planned | HunyuanVideo 1.5, 720p / longer-frame / I2V, Trainium text/VAE ports, CP, TP refactor, NKI masked attention. |
+| M3.x — VAE on Trainium | Done | 16-segment NEFF decoder bypasses a `neuronx-cc` `GroupNorm+SiLU → causal-Conv3D` same-graph lowering bug (`cclogs/m3-hunyuan/38`). Full tiled parity cosine `1.0022` vs HF (`≥ 0.999` gate); decode 91.4 s vs HF CPU 149.7 s (~1.6×). Per-segment dispatch overhead still under investigation. |
+| M3.x — remaining | Planned | HunyuanVideo 1.5, 720p / longer-frame / I2V, Llama 3 + CLIP Trainium text encoder ports, CP, TP refactor, NKI masked attention. |
 | M4 — Qwen-Image, LTX-2, Z-Image | Planned | |
 
 ## Hardware and software prerequisites

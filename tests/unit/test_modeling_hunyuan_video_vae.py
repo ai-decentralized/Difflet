@@ -199,6 +199,68 @@ def test_hunyuan_video_vae_decoder_inference_config_shapes(tmp_path):
     assert inputs[0][0].dtype == torch.bfloat16
 
 
+def test_hunyuan_video_vae_segment_specs_materialize_norm_conv_boundaries(tmp_path):
+    from nova.backends.trainium.core.config import NeuronConfig
+    from nova.backends.trainium.hunyuan_video.vae import (
+        NeuronHunyuanVideoVAEDecoderApplication,
+        HunyuanVideoVAEDecoderInferenceConfig,
+    )
+    from nova.utils.diffusers_adapter import load_diffusers_config
+
+    vae_dir = tmp_path / "vae"
+    vae_dir.mkdir()
+    (vae_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "_class_name": "AutoencoderKLHunyuanVideo",
+                "out_channels": 3,
+                "latent_channels": 16,
+                "up_block_types": ["HunyuanVideoUpBlock3D"] * 4,
+                "block_out_channels": [128, 256, 512, 512],
+                "layers_per_block": 2,
+                "act_fn": "silu",
+                "norm_num_groups": 32,
+                "scaling_factor": 0.476986,
+                "spatial_compression_ratio": 8,
+                "temporal_compression_ratio": 4,
+                "mid_block_add_attention": True,
+            }
+        )
+    )
+    cfg = HunyuanVideoVAEDecoderInferenceConfig(
+        neuron_config=NeuronConfig(
+            batch_size=1,
+            tp_degree=1,
+            world_size=1,
+            torch_dtype=torch.bfloat16,
+            skip_sharding=True,
+        ),
+        load_config=load_diffusers_config(vae_dir),
+        height=320,
+        width=512,
+        num_frames=61,
+    )
+    app = object.__new__(NeuronHunyuanVideoVAEDecoderApplication)
+    app.config = cfg
+
+    specs = app._segment_specs()
+    names = [spec.name for spec in specs]
+
+    assert names[0] == "body_up2"
+    assert names[-2:] == ["final_norm_act", "final_conv_out"]
+    assert "up3_r0_norm1_act" in names
+    assert "up3_r0_conv1" in names
+    assert "up3_r0_shortcut" in names
+    assert "up3_r2_conv2" in names
+    assert len(specs) == 16
+
+    by_name = {spec.name: spec for spec in specs}
+    assert by_name["body_up2"].input_shape == (1, 16, 5, 32, 32)
+    assert by_name["up3_r0_norm1_act"].input_shape == (1, 256, 17, 256, 256)
+    assert by_name["up3_r1_norm1_act"].input_shape == (1, 128, 17, 256, 256)
+    assert by_name["final_conv_out"].input_shape == (1, 128, 17, 256, 256)
+
+
 def test_hunyuan_video_vae_host_tiling_reconstructs_v0_shape():
     from nova.backends.trainium.hunyuan_video.vae import (
         NeuronHunyuanVideoVAEDecoderApplication,

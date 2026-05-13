@@ -1,0 +1,2 @@
+"""Qwen-Image model integration."""
+

@@ -31,7 +31,7 @@ MANIFEST_FILENAME = "manifest.json"
 # Bumps when the on-disk cache schema changes in a breaking way (e.g. fields
 # moved between cache_inputs and metadata, hash function changed). Older
 # manifests written with a different version are treated as cache miss.
-MANIFEST_SCHEMA_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -45,6 +45,7 @@ class CacheSpec:
     width: int | None = None
     num_frames: int | None = None
     revision: str | None = None
+    application_kwargs: dict[str, Any] | None = None
 
     def cache_inputs(self) -> dict[str, Any]:
         """Fields that drive the AOT artifact identity (hash key input).
@@ -65,6 +66,7 @@ class CacheSpec:
                 "width": self.width,
                 "num_frames": self.num_frames,
             },
+            "application_kwargs": _normalize_for_cache(self.application_kwargs or {}),
             "toolchain": _cache_relevant_toolchain_versions(),
         }
 
@@ -78,6 +80,16 @@ class CacheSpec:
             "model_path": self.model_path,
             "python_full": sys.version.split()[0],
         }
+
+
+def _normalize_for_cache(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _normalize_for_cache(value[key]) for key in sorted(value)}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_for_cache(item) for item in value]
+    return repr(value)
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ class ComponentSpec:
     component: Any
     world_size: int | None = None
     load_priority: int | None = None
+    artifact_name: str | None = None
 
 
 class MultiComponentApplication(nn.Module, ABC):
@@ -263,7 +264,7 @@ class MultiComponentApplication(nn.Module, ABC):
 
     @staticmethod
     def _component_path(compiled_model_path: str, spec: ComponentSpec) -> Path:
-        return Path(compiled_model_path) / spec.name
+        return Path(compiled_model_path) / (spec.artifact_name or spec.name)
 
 
 def _spmd_barrier() -> None:

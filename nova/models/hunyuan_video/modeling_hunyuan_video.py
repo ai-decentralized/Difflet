@@ -30,7 +30,13 @@ from diffusers.models.normalization import (
     RMSNorm,
 )
 
-from nova.ops import ColumnParallelLinear, apply_rotary_emb, attention
+from nova.ops import (
+    ColumnParallelLinear,
+    RowParallelLinear,
+    apply_rotary_emb,
+    attention,
+    get_tensor_model_parallel_size,
+)
 
 
 @dataclass
@@ -123,7 +129,7 @@ class HunyuanVideoGELU(nn.Module):
 
     def __init__(self, dim_in: int, dim_out: int, approximate: str = "none"):
         super().__init__()
-        self.proj = ColumnParallelLinear(dim_in, dim_out, bias=True, gather_output=True)
+        self.proj = ColumnParallelLinear(dim_in, dim_out, bias=True, gather_output=False)
         self.approximate = approximate
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -136,7 +142,7 @@ class HunyuanVideoLinearActivation(nn.Module):
 
     def __init__(self, dim_in: int, dim_out: int, bias: bool = True):
         super().__init__()
-        self.proj = ColumnParallelLinear(dim_in, dim_out, bias=bias, gather_output=True)
+        self.proj = ColumnParallelLinear(dim_in, dim_out, bias=bias, gather_output=False)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states = self.proj(hidden_states)
@@ -161,7 +167,7 @@ class HunyuanVideoFeedForward(nn.Module):
             [
                 act_fn,
                 nn.Dropout(0.0),
-                ColumnParallelLinear(inner_dim, dim, bias=True, gather_output=True),
+                RowParallelLinear(inner_dim, dim, bias=True, input_is_parallel=True),
             ]
         )
 
@@ -183,15 +189,22 @@ class HunyuanVideoSelfAttention(nn.Module):
         bias: bool = True,
     ):
         super().__init__()
-        self.heads = heads
+        tp_degree = get_tensor_model_parallel_size()
+        if heads % tp_degree != 0:
+            raise ValueError(
+                f"HunyuanVideoSelfAttention heads={heads} must be divisible by tp={tp_degree}"
+            )
+        self.heads = heads // tp_degree
         self.head_dim = dim_head
         self.inner_dim = heads * dim_head
-        self.to_q = ColumnParallelLinear(query_dim, self.inner_dim, bias=bias, gather_output=True)
-        self.to_k = ColumnParallelLinear(query_dim, self.inner_dim, bias=bias, gather_output=True)
-        self.to_v = ColumnParallelLinear(query_dim, self.inner_dim, bias=bias, gather_output=True)
+        self.to_q = ColumnParallelLinear(query_dim, self.inner_dim, bias=bias, gather_output=False)
+        self.to_k = ColumnParallelLinear(query_dim, self.inner_dim, bias=bias, gather_output=False)
+        self.to_v = ColumnParallelLinear(query_dim, self.inner_dim, bias=bias, gather_output=False)
         self.to_out = nn.ModuleList(
             [
-                ColumnParallelLinear(self.inner_dim, query_dim, bias=True, gather_output=True),
+                RowParallelLinear(
+                    self.inner_dim, query_dim, bias=True, input_is_parallel=True
+                ),
                 nn.Dropout(0.0),
             ]
         )
@@ -255,29 +268,35 @@ class HunyuanVideoAttention(nn.Module):
         if qk_norm != "rms_norm":
             raise NotImplementedError("HunyuanVideo M3 currently supports qk_norm='rms_norm' only")
 
-        self.heads = num_attention_heads
+        tp_degree = get_tensor_model_parallel_size()
+        if num_attention_heads % tp_degree != 0:
+            raise ValueError(
+                "HunyuanVideoAttention num_attention_heads="
+                f"{num_attention_heads} must be divisible by tp={tp_degree}"
+            )
+        self.heads = num_attention_heads // tp_degree
         self.head_dim = attention_head_dim
         self.inner_dim = num_attention_heads * attention_head_dim
         self.added_kv_proj_dim = added_kv_proj_dim
         self.context_pre_only = context_pre_only
         self.pre_only = pre_only
 
-        self.to_q = ColumnParallelLinear(hidden_size, self.inner_dim, bias=True, gather_output=True)
-        self.to_k = ColumnParallelLinear(hidden_size, self.inner_dim, bias=True, gather_output=True)
-        self.to_v = ColumnParallelLinear(hidden_size, self.inner_dim, bias=True, gather_output=True)
+        self.to_q = ColumnParallelLinear(hidden_size, self.inner_dim, bias=True, gather_output=False)
+        self.to_k = ColumnParallelLinear(hidden_size, self.inner_dim, bias=True, gather_output=False)
+        self.to_v = ColumnParallelLinear(hidden_size, self.inner_dim, bias=True, gather_output=False)
         self.norm_q = RMSNorm(attention_head_dim, eps=eps)
         self.norm_k = RMSNorm(attention_head_dim, eps=eps)
 
         if added_kv_proj_dim is not None:
             self.add_k_proj = ColumnParallelLinear(
-                added_kv_proj_dim, self.inner_dim, bias=True, gather_output=True
+                added_kv_proj_dim, self.inner_dim, bias=True, gather_output=False
             )
             self.add_v_proj = ColumnParallelLinear(
-                added_kv_proj_dim, self.inner_dim, bias=True, gather_output=True
+                added_kv_proj_dim, self.inner_dim, bias=True, gather_output=False
             )
             if context_pre_only is not None:
                 self.add_q_proj = ColumnParallelLinear(
-                    added_kv_proj_dim, self.inner_dim, bias=True, gather_output=True
+                    added_kv_proj_dim, self.inner_dim, bias=True, gather_output=False
                 )
             else:
                 self.add_q_proj = None
@@ -293,8 +312,11 @@ class HunyuanVideoAttention(nn.Module):
         if not pre_only:
             self.to_out = nn.ModuleList(
                 [
-                    ColumnParallelLinear(
-                        self.inner_dim, hidden_size, bias=True, gather_output=True
+                    RowParallelLinear(
+                        self.inner_dim,
+                        hidden_size,
+                        bias=True,
+                        input_is_parallel=True,
                     ),
                     nn.Dropout(0.0),
                 ]
@@ -303,8 +325,11 @@ class HunyuanVideoAttention(nn.Module):
             self.to_out = None
 
         if context_pre_only is not None and not context_pre_only:
-            self.to_add_out = ColumnParallelLinear(
-                self.inner_dim, hidden_size, bias=True, gather_output=True
+            self.to_add_out = RowParallelLinear(
+                self.inner_dim,
+                hidden_size,
+                bias=True,
+                input_is_parallel=True,
             )
         else:
             self.to_add_out = None
@@ -476,10 +501,13 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             eps=1e-6,
         )
         self.norm = AdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm")
-        self.proj_mlp = ColumnParallelLinear(hidden_size, mlp_dim, bias=True, gather_output=True)
+        self.proj_mlp = ColumnParallelLinear(hidden_size, mlp_dim, bias=True, gather_output=False)
         self.act_mlp = nn.GELU(approximate="tanh")
-        self.proj_out = ColumnParallelLinear(
-            hidden_size + mlp_dim, hidden_size, bias=True, gather_output=True
+        self.proj_out = RowParallelLinear(
+            hidden_size + mlp_dim,
+            hidden_size,
+            bias=True,
+            input_is_parallel=True,
         )
 
     def forward(

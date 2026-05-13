@@ -147,11 +147,11 @@ def _repeat_causal_time(x: torch.Tensor, factor: int) -> torch.Tensor:
     num_frames = x.size(2)
     if factor == 1 or num_frames <= 1:
         return x
-    indices = [0]
+    chunks = [x[:, :, :1]]
     for frame in range(1, num_frames):
-        indices.extend([frame] * factor)
-    index = torch.tensor(indices, device=x.device, dtype=torch.long)
-    return torch.index_select(x, 2, index)
+        frame_slice = x[:, :, frame : frame + 1]
+        chunks.extend([frame_slice] * factor)
+    return torch.cat(chunks, dim=2)
 
 
 def _replace_interpolate_upsamplers(module: nn.Module) -> None:

@@ -160,7 +160,9 @@ def _ensure_builtin_models_registered() -> None:
     _BUILTINS_LOADED = True
     _register_builtin_flux()
     _register_builtin_wan()
+    _register_builtin_hunyuan_video_15()
     _register_builtin_hunyuan_video()
+    _register_builtin_qwen_image()
 
 
 def _register_builtin_flux() -> None:
@@ -206,7 +208,10 @@ def _register_builtin_wan() -> None:
 def _register_builtin_hunyuan_video() -> None:
     def is_hunyuan_video(model_id: str) -> bool:
         value = model_id.lower()
-        return "hunyuanvideo" in value or "hunyuan-video" in value or "hunyuan_video" in value
+        return (
+            ("hunyuanvideo" in value or "hunyuan-video" in value or "hunyuan_video" in value)
+            and not _is_hunyuan_video_15(value)
+        )
 
     @register_model(
         name="hunyuan_video",
@@ -221,4 +226,59 @@ def _register_builtin_hunyuan_video() -> None:
         backends=("trainium",),
     )
     class _HunyuanVideoRegistration:
+        pass
+
+
+def _register_builtin_hunyuan_video_15() -> None:
+    def is_hunyuan_video_15(model_id: str) -> bool:
+        return _is_hunyuan_video_15(model_id.lower())
+
+    @register_model(
+        name="hunyuan_video_15",
+        application_factory="nova.models.hunyuan_video.entry:create_hunyuan_video15_application",
+        hf_paths=(
+            "tencent/HunyuanVideo-1.5",
+            "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+            "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v",
+        ),
+        detector=is_hunyuan_video_15,
+        default_parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        default_shape={"height": 480, "width": 848, "num_frames": 121},
+        backends=("trainium",),
+    )
+    class _HunyuanVideo15Registration:
+        pass
+
+
+def _is_hunyuan_video_15(value: str) -> bool:
+    return any(
+        marker in value
+        for marker in (
+            "hunyuanvideo-1.5",
+            "hunyuanvideo_1.5",
+            "hunyuanvideo1.5",
+            "hunyuanvideo15",
+            "hunyuan-video-1.5",
+            "hunyuan_video_15",
+        )
+    )
+
+
+def _register_builtin_qwen_image() -> None:
+    def is_qwen_image(model_id: str) -> bool:
+        value = model_id.lower()
+        return "qwen-image" in value or "qwen/image" in value or "qwen_image" in value
+
+    @register_model(
+        name="qwen_image",
+        application_factory="nova.models.qwen_image.entry:create_qwen_image_application",
+        hf_paths=(
+            "Qwen/Qwen-Image",
+        ),
+        detector=is_qwen_image,
+        default_parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        default_shape={"height": 1024, "width": 1024, "num_frames": None},
+        backends=("trainium",),
+    )
+    class _QwenImageRegistration:
         pass
