@@ -23,6 +23,7 @@ cd "${ROOT}"
 
 exec "${PYTHON_BIN}" - <<'PY'
 import importlib
+import importlib.util
 
 modules = [
     "nova",
@@ -45,6 +46,11 @@ modules = [
     "nova.models.qwen_image.entry",
     "nova.models.qwen_image.pipeline",
     "nova.backends.trainium.qwen_image.transformer",
+    "nova.models.ltx_2.application",
+    "nova.models.ltx_2.entry",
+    "nova.models.ltx_2.pipeline",
+    "nova.backends.trainium.ltx_2.segmented",
+    "nova.backends.trainium.ltx_2.transformer",
     "nova.models.wan.application",
     "nova.models.wan.entry",
     "nova.models.wan.pipeline",
@@ -58,6 +64,22 @@ modules = [
 for name in modules:
     importlib.import_module(name)
     print(f"ok import {name}")
+
+for path, name in [
+    ("scripts/ltx_2_full_transformer_closure.py", "ltx_2_full_transformer_closure"),
+    ("scripts/ltx_2_host_e2e_smoke.py", "ltx_2_host_e2e_smoke"),
+    ("scripts/ltx_2_production_block_compile_probe.py", "ltx_2_production_block_compile_probe"),
+    ("scripts/ltx_2_segmented_block_compile_probe.py", "ltx_2_segmented_block_compile_probe"),
+    ("scripts/ltx_2_segmented_block_parity.py", "ltx_2_segmented_block_parity"),
+    ("scripts/ltx_2_segmented_process_block.py", "ltx_2_segmented_process_block"),
+    ("scripts/ltx_2_snapshot_report.py", "ltx_2_snapshot_report"),
+    ("scripts/ltx_2_trajectory_parity.py", "ltx_2_trajectory_parity"),
+    ("scripts/ltx_2_transformer_parity.py", "ltx_2_transformer_parity"),
+]:
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    print(f"ok import {path}")
 
 import ast
 from pathlib import Path

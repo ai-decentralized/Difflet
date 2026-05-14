@@ -92,6 +92,7 @@ def register_model(
     default_parallel: NovaParallelConfig | None = None,
     default_shape: dict[str, int | None] | None = None,
     backends: list[str] | tuple[str, ...] = ("trainium",),
+    download_patterns: list[str] | tuple[str, ...] | None = None,
 ) -> Callable[[type], type]:
     """Register a model entry.
 
@@ -111,6 +112,7 @@ def register_model(
             default_parallel=default_parallel or NovaParallelConfig(),
             default_shape=default_shape or {},
             backends=tuple(backends),
+            download_patterns=tuple(download_patterns) if download_patterns is not None else None,
         )
         return cls
 
@@ -163,6 +165,7 @@ def _ensure_builtin_models_registered() -> None:
     _register_builtin_hunyuan_video_15()
     _register_builtin_hunyuan_video()
     _register_builtin_qwen_image()
+    _register_builtin_ltx_2()
 
 
 def _register_builtin_flux() -> None:
@@ -281,4 +284,52 @@ def _register_builtin_qwen_image() -> None:
         backends=("trainium",),
     )
     class _QwenImageRegistration:
+        pass
+
+
+def _register_builtin_ltx_2() -> None:
+    def is_ltx_2(model_id: str) -> bool:
+        value = model_id.lower()
+        return (
+            "ltx-2" in value
+            or "ltx2" in value
+            or "ltx_2" in value
+            or "lightricks/ltx" in value
+        )
+
+    @register_model(
+        name="ltx_2",
+        application_factory="nova.models.ltx_2.entry:create_ltx_2_application",
+        hf_paths=(
+            "Lightricks/LTX-2",
+        ),
+        detector=is_ltx_2,
+        default_parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        default_shape={"height": 512, "width": 768, "num_frames": 121},
+        backends=("trainium",),
+        download_patterns=(
+            "*.json",
+            "*.txt",
+            "*.md",
+            "LICENSE",
+            "transformer/config.json",
+            "transformer/diffusion_pytorch_model*.safetensors",
+            "transformer/diffusion_pytorch_model.safetensors.index.json",
+            "text_encoder/config.json",
+            "text_encoder/generation_config.json",
+            "text_encoder/model*.safetensors",
+            "text_encoder/model.safetensors.index.json",
+            "tokenizer/*",
+            "scheduler/scheduler_config.json",
+            "vae/config.json",
+            "vae/diffusion_pytorch_model.safetensors",
+            "audio_vae/config.json",
+            "audio_vae/diffusion_pytorch_model.safetensors",
+            "vocoder/config.json",
+            "vocoder/diffusion_pytorch_model.safetensors",
+            "connectors/config.json",
+            "connectors/diffusion_pytorch_model.safetensors",
+        ),
+    )
+    class _LTX2Registration:
         pass
