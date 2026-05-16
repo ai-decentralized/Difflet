@@ -30,6 +30,7 @@ modules = [
     "nova.registry",
     "nova.pipeline.nova_pipeline",
     "nova.pipeline.compile_cache",
+    "nova.pipeline.precision_schedule",
     "nova.pipeline.parallel_config",
     "nova.models.flux.application",
     "nova.models.hunyuan_video.application",
@@ -51,6 +52,10 @@ modules = [
     "nova.models.ltx_2.pipeline",
     "nova.backends.trainium.ltx_2.segmented",
     "nova.backends.trainium.ltx_2.transformer",
+    "nova.ops.mx",
+    "nova.backends.cpu.ops_impl.mx",
+    "nova.backends.trainium.ops_impl.mx",
+    "nova.backends.trainium.nki_kernels.mx",
     "nova.models.wan.application",
     "nova.models.wan.entry",
     "nova.models.wan.pipeline",
@@ -75,6 +80,12 @@ for path, name in [
     ("scripts/ltx_2_snapshot_report.py", "ltx_2_snapshot_report"),
     ("scripts/ltx_2_trajectory_parity.py", "ltx_2_trajectory_parity"),
     ("scripts/ltx_2_transformer_parity.py", "ltx_2_transformer_parity"),
+    ("scripts/hv15_to_q_mx_probe.py", "hv15_to_q_mx_probe"),
+    ("scripts/hv15_rowparallel_mx_probe.py", "hv15_rowparallel_mx_probe"),
+    ("scripts/hv15_precision_calibration_sweep.py", "hv15_precision_calibration_sweep"),
+    ("scripts/hv15_precision_schedule_frontier.py", "hv15_precision_schedule_frontier"),
+    ("scripts/hv15_precision_verify.py", "hv15_precision_verify"),
+    ("scripts/mx_smoke.py", "mx_smoke"),
 ]:
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)

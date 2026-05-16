@@ -31,7 +31,7 @@ MANIFEST_FILENAME = "manifest.json"
 # Bumps when the on-disk cache schema changes in a breaking way (e.g. fields
 # moved between cache_inputs and metadata, hash function changed). Older
 # manifests written with a different version are treated as cache miss.
-MANIFEST_SCHEMA_VERSION = 3
+MANIFEST_SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,7 @@ class CacheSpec:
     num_frames: int | None = None
     revision: str | None = None
     application_kwargs: dict[str, Any] | None = None
+    precision_schedule: dict[str, Any] | None = None
 
     def cache_inputs(self) -> dict[str, Any]:
         """Fields that drive the AOT artifact identity (hash key input).
@@ -80,6 +81,13 @@ class CacheSpec:
             "model_path": self.model_path,
             "python_full": sys.version.split()[0],
         }
+
+    def manifest_precision_schedule(self) -> dict[str, Any] | None:
+        """Optional schedule artifact metadata recorded next to the cache."""
+
+        if self.precision_schedule is None:
+            return None
+        return _normalize_for_cache(self.precision_schedule)
 
 
 def _normalize_for_cache(value: Any) -> Any:
@@ -227,6 +235,7 @@ def write_manifest(path: Path, spec: CacheSpec) -> None:
         "cache_key": cache_key(spec),
         "cache_inputs": spec.cache_inputs(),
         "metadata": spec.manifest_metadata(),
+        "precision_schedule": spec.manifest_precision_schedule(),
     }
     with manifest_path(path).open("w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2, sort_keys=True)

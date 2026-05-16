@@ -9,6 +9,30 @@ def test_collective_public_aliases_resolve():
     assert callable(get_tp_size)
 
 
+def test_mx_public_aliases_resolve_for_cpu_backend(monkeypatch):
+    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+
+    from nova.ops import dequantize_mx, linear_mx, matmul_mx, quantize_mx
+    from nova.ops.mx import matmul_mx as module_matmul_mx
+
+    assert callable(dequantize_mx)
+    assert callable(linear_mx)
+    assert callable(matmul_mx)
+    assert callable(quantize_mx)
+    assert callable(module_matmul_mx)
+
+
+def test_mx_public_aliases_resolve_for_trainium_backend(monkeypatch):
+    monkeypatch.setenv("NOVA_BACKEND", "trainium")
+
+    from nova.ops import dequantize_mx, linear_mx, matmul_mx, quantize_mx
+
+    assert callable(dequantize_mx)
+    assert callable(linear_mx)
+    assert callable(matmul_mx)
+    assert callable(quantize_mx)
+
+
 def test_trainium_gather_tp_dim_uses_nxd_gather_dim_keyword(monkeypatch):
     import torch
 
