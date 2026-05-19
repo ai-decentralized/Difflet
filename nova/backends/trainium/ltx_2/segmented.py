@@ -115,9 +115,483 @@ def _copy_config_loader(config: InferenceConfig):
     return _load
 
 
+# --- M5.D1.z: shelved full-model MXFP8-E4M3 feasibility probe ---------------
+# Pre-trace nn.Linear -> MXLinear swap (backend-side; not modeling code, so the
+# modeling import allowlist / AST guard is not engaged). Enabled by env
+# NOVA_LTX2_MX_ALL_E4M3=1 so the existing compile probe can toggle it without
+# changing any caller. linear_mx requires M tiled at 128 and K/N multiples of
+# 512 (cclogs 51-55); ineligible linears stay BF16 and are reported. This line
+# is parked after cclog 60; keep the probes default-off and avoid expanding the
+# surface unless the MoE-side MX work provides a transferable fused pattern.
+
+_MX_M_TILE = 128
+_MX_KN_MULT = 512
+_MX_SWAP_REPORT: list[dict[str, Any]] = []
+_LTX2_MX_DTYPE = "float8_e4m3fn_x4"
+
+
+def _mx_native_weight_pack_enabled() -> bool:
+    return os.environ.get("NOVA_LTX2_MX_NATIVE_WEIGHT_PACK", "") == "1"
+
+
+def _expand_compact_mx_scale_to_native(scale: torch.Tensor) -> torch.Tensor:
+    """Expand compact ``[16, F]`` MX scales to nc_matmul_mx's 128-row layout."""
+
+    native = torch.zeros((128, scale.shape[1]), dtype=scale.dtype, device=scale.device)
+    for quadrant_idx in range(4):
+        src_start = quadrant_idx * 4
+        dst_start = quadrant_idx * 32
+        native[dst_start : dst_start + 4, :] = scale[src_start : src_start + 4, :]
+    return native.contiguous()
+
+
+def _pack_mx_linear_weight(
+    weight_out_in: torch.Tensor,
+    *,
+    mx_dtype: str = _LTX2_MX_DTYPE,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Convert an ``nn.Linear.weight`` tensor into MXLinear checkpoint buffers."""
+    from nova.backends.cpu.ops_impl import mx as cpu_mx
+
+    weight_k_n = weight_out_in.detach().to(torch.bfloat16).t().contiguous()
+    weight_mx_tiles = []
+    weight_scale_tiles = []
+    for n_start in range(0, int(weight_k_n.shape[1]), 512):
+        n_end = n_start + 512
+        moving_tiles = []
+        moving_scales = []
+        for k_start in range(0, int(weight_k_n.shape[0]), 512):
+            k_end = k_start + 512
+            weight_tile = weight_k_n[k_start:k_end, n_start:n_end].contiguous()
+            weight_native = (
+                weight_tile.reshape(128, 4, 512)
+                .permute(0, 2, 1)
+                .reshape(128, 512 * 4)
+                .contiguous()
+            )
+            moving_mx, moving_scale = cpu_mx.quantize_mx(weight_native, dtype=mx_dtype)
+            moving_tiles.append(moving_mx.view(torch.int32))
+            if _mx_native_weight_pack_enabled():
+                moving_scales.append(_expand_compact_mx_scale_to_native(moving_scale))
+            else:
+                moving_scales.append(moving_scale)
+        weight_mx_tiles.append(torch.stack(moving_tiles, dim=0))
+        weight_scale_tiles.append(torch.stack(moving_scales, dim=0))
+    return (
+        weight_k_n,
+        torch.stack(weight_mx_tiles, dim=0),
+        torch.stack(weight_scale_tiles, dim=0),
+    )
+
+
+def _convert_state_dict_linears_to_mx(
+    state_dict: dict[str, torch.Tensor],
+    *,
+    mx_dtype: str = _LTX2_MX_DTYPE,
+) -> dict[str, torch.Tensor]:
+    """Convert eligible checkpoint ``nn.Linear`` keys to ``MXLinear`` buffers."""
+
+    eligible_prefixes = {
+        key[: -len(".weight")]
+        for key, value in state_dict.items()
+        if key.endswith(".weight")
+        and torch.is_tensor(value)
+        and value.ndim == 2
+        and int(value.shape[0]) % _MX_KN_MULT == 0
+        and int(value.shape[1]) % _MX_KN_MULT == 0
+    }
+    if not eligible_prefixes:
+        return state_dict
+
+    converted: dict[str, torch.Tensor] = {}
+    for key, value in state_dict.items():
+        if key.endswith(".weight") and key[: -len(".weight")] in eligible_prefixes:
+            prefix = key[: -len(".weight")]
+            weight_k_n, weight_mx, weight_scale = _pack_mx_linear_weight(
+                value,
+                mx_dtype=mx_dtype,
+            )
+            converted[f"{prefix}.weight_k_n"] = weight_k_n
+            converted[f"{prefix}.weight_mx"] = weight_mx
+            converted[f"{prefix}.weight_scale"] = weight_scale
+        elif key.endswith(".bias") and key[: -len(".bias")] in eligible_prefixes:
+            prefix = key[: -len(".bias")]
+            converted[f"{prefix}.bias_bf16"] = value.detach().to(torch.bfloat16).contiguous()
+        else:
+            converted[key] = value
+    return converted
+
+
+class MXLinear(nn.Module):
+    """nn.Linear whose matmul runs through nova.ops.mx.linear_mx (E4M3).
+
+    Weight is stored K x N (in_features x out_features) BF16, the transpose
+    of nn.Linear.weight, matching linear_mx's contract. The M axis is tiled
+    to 128 with zero-pad on the final tile and truncated back.
+    """
+
+    def __init__(self, src: nn.Linear, *, mx_dtype: str = _LTX2_MX_DTYPE) -> None:
+        super().__init__()
+        weight_k_n, weight_mx, weight_scale = _pack_mx_linear_weight(
+            src.weight,
+            mx_dtype=mx_dtype,
+        )
+        self.register_buffer("weight_k_n", weight_k_n)
+        self.weight_mx = nn.Parameter(weight_mx, requires_grad=False)
+        self.weight_scale = nn.Parameter(weight_scale, requires_grad=False)
+        if src.bias is not None:
+            self.bias_bf16 = nn.Parameter(
+                src.bias.detach().to(torch.bfloat16),
+                requires_grad=False,
+            )
+        else:
+            self.bias_bf16 = None
+        self.in_features = int(src.in_features)
+        self.out_features = int(src.out_features)
+        self.mx_dtype = mx_dtype
+
+    def _uses_native_weight_pack(self) -> bool:
+        scale_rows = int(self.weight_scale.shape[-2])
+        if scale_rows == _MX_M_TILE:
+            return True
+        if scale_rows == 16:
+            return False
+        raise RuntimeError(
+            "MXLinear weight_scale must use compact [16, F] or native [128, F] "
+            f"layout, got row dimension {scale_rows}"
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        from nova.backends.trainium.ops_impl.mx import (
+            linear_mx_prequant,
+            linear_mx_prequant_cached_activation,
+            linear_mx_prequant_native_weight,
+        )
+
+        lead = x.shape[:-1]
+        k = x.shape[-1]
+        x2d = x.reshape(-1, k)
+        m = x2d.shape[0]
+        pad = (-m) % _MX_M_TILE
+        if pad:
+            x2d = torch.cat([x2d, x2d.new_zeros((pad, k))], dim=0)
+        out_tiles = []
+        native_weight_pack = self._uses_native_weight_pack()
+        hoist_activation = os.environ.get("NOVA_LTX2_MX_HOIST_ACTIVATION", "") == "1"
+        for s in range(0, x2d.shape[0], _MX_M_TILE):
+            x_tile = x2d[s : s + _MX_M_TILE].to(torch.bfloat16)
+            if hoist_activation and not native_weight_pack:
+                out_tiles.append(
+                    linear_mx_prequant_cached_activation(
+                        x_tile,
+                        self.weight_mx,
+                        self.weight_scale,
+                        self.bias_bf16,
+                        dtype=self.mx_dtype,
+                    )
+                )
+                continue
+            n_tiles = []
+            for n_idx in range(0, self.out_features // 512):
+                n_start = n_idx * 512
+                n_end = n_start + 512
+                bias_tile = (
+                    self.bias_bf16[n_start:n_end].contiguous()
+                    if self.bias_bf16 is not None
+                    else None
+                )
+                if native_weight_pack:
+                    n_tiles.append(
+                        linear_mx_prequant_native_weight(
+                            x_tile,
+                            self.weight_mx[n_idx],
+                            self.weight_scale[n_idx],
+                            bias_tile,
+                            dtype=self.mx_dtype,
+                        )
+                    )
+                    continue
+                n_tiles.append(
+                    linear_mx_prequant(
+                        x_tile,
+                        self.weight_mx[n_idx],
+                        self.weight_scale[n_idx],
+                        bias_tile,
+                        dtype=self.mx_dtype,
+                    )
+                )
+            out_tiles.append(torch.cat(n_tiles, dim=1))
+        out = torch.cat(out_tiles, dim=0)[:m]
+        return out.reshape(*lead, self.out_features)
+
+
+def _mx_linear_pair_same_input(
+    first: MXLinear,
+    second: MXLinear,
+    x: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run two MXLinear modules while sharing activation work per N tile."""
+
+    from nova.backends.trainium.ops_impl.mx import (
+        linear_mx_prequant_group2_native_weight_same_input,
+        linear_mx_prequant_group2_same_input,
+    )
+
+    if x.device.type == "cpu":
+        return first(x), second(x)
+    if first.in_features != second.in_features or first.out_features != second.out_features:
+        return first(x), second(x)
+    native_weight_pack = first._uses_native_weight_pack()
+    if native_weight_pack != second._uses_native_weight_pack():
+        return first(x), second(x)
+
+    lead = x.shape[:-1]
+    k = x.shape[-1]
+    x2d = x.reshape(-1, k)
+    m = x2d.shape[0]
+    pad = (-m) % _MX_M_TILE
+    if pad:
+        x2d = torch.cat([x2d, x2d.new_zeros((pad, k))], dim=0)
+
+    first_tiles = []
+    second_tiles = []
+    for s in range(0, x2d.shape[0], _MX_M_TILE):
+        x_tile = x2d[s : s + _MX_M_TILE].to(torch.bfloat16)
+        first_n_tiles = []
+        second_n_tiles = []
+        for n_idx in range(0, first.out_features // 512):
+            n_start = n_idx * 512
+            n_end = n_start + 512
+            first_bias = (
+                first.bias_bf16[n_start:n_end].contiguous()
+                if first.bias_bf16 is not None
+                else None
+            )
+            second_bias = (
+                second.bias_bf16[n_start:n_end].contiguous()
+                if second.bias_bf16 is not None
+                else None
+            )
+            if native_weight_pack:
+                first_out, second_out = linear_mx_prequant_group2_native_weight_same_input(
+                    x_tile,
+                    first.weight_mx[n_idx],
+                    first.weight_scale[n_idx],
+                    first_bias,
+                    second.weight_mx[n_idx],
+                    second.weight_scale[n_idx],
+                    second_bias,
+                    dtype=first.mx_dtype,
+                )
+            else:
+                first_out, second_out = linear_mx_prequant_group2_same_input(
+                    x_tile,
+                    first.weight_mx[n_idx],
+                    first.weight_scale[n_idx],
+                    first_bias,
+                    second.weight_mx[n_idx],
+                    second.weight_scale[n_idx],
+                    second_bias,
+                    dtype=first.mx_dtype,
+                )
+            first_n_tiles.append(first_out)
+            second_n_tiles.append(second_out)
+        first_tiles.append(torch.cat(first_n_tiles, dim=1))
+        second_tiles.append(torch.cat(second_n_tiles, dim=1))
+
+    first_out = torch.cat(first_tiles, dim=0)[:m].reshape(*lead, first.out_features)
+    second_out = torch.cat(second_tiles, dim=0)[:m].reshape(*lead, second.out_features)
+    return first_out, second_out
+
+
+class _LTX2MXGroupedAttnProcessor:
+    """LTX-2 attention processor that fuses MX K/V projections when possible."""
+
+    def __init__(self, base_processor: Any | None = None) -> None:
+        self._attention_backend = getattr(base_processor, "_attention_backend", None)
+        self._parallel_config = getattr(base_processor, "_parallel_config", None)
+
+    def _project_kv(
+        self,
+        attn: Any,
+        encoder_hidden_states: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if (
+            os.environ.get("NOVA_LTX2_MX_GROUP_KV", "") == "1"
+            and isinstance(attn.to_k, MXLinear)
+            and isinstance(attn.to_v, MXLinear)
+        ):
+            return _mx_linear_pair_same_input(attn.to_k, attn.to_v, encoder_hidden_states)
+        return attn.to_k(encoder_hidden_states), attn.to_v(encoder_hidden_states)
+
+    def __call__(
+        self,
+        attn: Any,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        query_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
+        key_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
+        perturbation_mask: torch.Tensor | None = None,
+        all_perturbed: bool | None = None,
+    ) -> torch.Tensor:
+        import diffusers.models.transformers.transformer_ltx2 as ltx2_transformer
+
+        batch_size, sequence_length, _ = (
+            hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
+        )
+
+        if attention_mask is not None:
+            attention_mask = attn.prepare_attention_mask(
+                attention_mask,
+                sequence_length,
+                batch_size,
+            )
+            attention_mask = attention_mask.view(
+                batch_size,
+                attn.heads,
+                -1,
+                attention_mask.shape[-1],
+            )
+
+        if encoder_hidden_states is None:
+            encoder_hidden_states = hidden_states
+
+        if attn.to_gate_logits is not None:
+            gate_logits = attn.to_gate_logits(hidden_states)
+
+        if all_perturbed is None:
+            all_perturbed = (
+                torch.all(perturbation_mask == 0)
+                if perturbation_mask is not None
+                else False
+            )
+
+        if all_perturbed:
+            hidden_states = attn.to_v(encoder_hidden_states)
+        else:
+            query = attn.to_q(hidden_states)
+            key, value = self._project_kv(attn, encoder_hidden_states)
+
+            query = attn.norm_q(query)
+            key = attn.norm_k(key)
+
+            if query_rotary_emb is not None:
+                if attn.rope_type == "interleaved":
+                    query = ltx2_transformer.apply_interleaved_rotary_emb(query, query_rotary_emb)
+                    key = ltx2_transformer.apply_interleaved_rotary_emb(
+                        key,
+                        key_rotary_emb if key_rotary_emb is not None else query_rotary_emb,
+                    )
+                elif attn.rope_type == "split":
+                    query = ltx2_transformer.apply_split_rotary_emb(query, query_rotary_emb)
+                    key = ltx2_transformer.apply_split_rotary_emb(
+                        key,
+                        key_rotary_emb if key_rotary_emb is not None else query_rotary_emb,
+                    )
+
+            query = query.unflatten(2, (attn.heads, -1))
+            key = key.unflatten(2, (attn.heads, -1))
+            value = value.unflatten(2, (attn.heads, -1))
+
+            hidden_states = ltx2_transformer.dispatch_attention_fn(
+                query,
+                key,
+                value,
+                attn_mask=attention_mask,
+                dropout_p=0.0,
+                is_causal=False,
+                backend=self._attention_backend,
+                parallel_config=self._parallel_config,
+            )
+            hidden_states = hidden_states.flatten(2, 3)
+            hidden_states = hidden_states.to(query.dtype)
+
+            if perturbation_mask is not None:
+                value = value.flatten(2, 3)
+                hidden_states = torch.lerp(value, hidden_states, perturbation_mask)
+
+        if attn.to_gate_logits is not None:
+            hidden_states = hidden_states.unflatten(2, (attn.heads, -1))
+            gates = 2.0 * torch.sigmoid(gate_logits)
+            hidden_states = hidden_states * gates.unsqueeze(-1)
+            hidden_states = hidden_states.flatten(2, 3)
+
+        hidden_states = attn.to_out[0](hidden_states)
+        hidden_states = attn.to_out[1](hidden_states)
+        return hidden_states
+
+
+def _mx_eligible(lin: nn.Linear) -> bool:
+    return (
+        int(lin.in_features) % _MX_KN_MULT == 0
+        and int(lin.out_features) % _MX_KN_MULT == 0
+    )
+
+
+def _swap_linears_to_mx(root: nn.Module, *, prefix: str = "block") -> None:
+    """Recursively replace MX-eligible nn.Linear children with MXLinear."""
+    for name, child in list(root.named_children()):
+        qual = f"{prefix}.{name}"
+        if isinstance(child, nn.Linear):
+            entry = {
+                "name": qual,
+                "in": int(child.in_features),
+                "out": int(child.out_features),
+            }
+            if _mx_eligible(child):
+                setattr(root, name, MXLinear(child))
+                entry["swapped"] = True
+            else:
+                entry["swapped"] = False
+                entry["reason"] = "in/out not multiple of 512"
+            _MX_SWAP_REPORT.append(entry)
+        else:
+            _swap_linears_to_mx(child, prefix=qual)
+
+
+def _maybe_swap_block_to_mx(block: nn.Module) -> nn.Module:
+    if os.environ.get("NOVA_LTX2_MX_ALL_E4M3", "") != "1":
+        return block
+    _MX_SWAP_REPORT.clear()
+    _swap_linears_to_mx(block)
+    if os.environ.get("NOVA_LTX2_MX_GROUP_KV", "") == "1":
+        _install_grouped_kv_processors(block)
+    swapped = sum(1 for e in _MX_SWAP_REPORT if e["swapped"])
+    total = len(_MX_SWAP_REPORT)
+    print(
+        f"[mx-e4m3] swapped {swapped}/{total} nn.Linear -> MXLinear "
+        f"(eligible: in&out % 512 == 0)",
+        flush=True,
+    )
+    for e in _MX_SWAP_REPORT:
+        if not e["swapped"]:
+            print(
+                f"[mx-e4m3]   skip {e['name']} [{e['in']}x{e['out']}] "
+                f"{e.get('reason', '')}",
+                flush=True,
+            )
+    report_path = os.environ.get("NOVA_LTX2_MX_SWAP_REPORT")
+    if report_path:
+        Path(report_path).write_text(
+            json.dumps(
+                {"swapped": swapped, "total": total, "linears": _MX_SWAP_REPORT},
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    return block
+
+
+def _install_grouped_kv_processors(root: nn.Module) -> None:
+    for module in root.modules():
+        if all(hasattr(module, name) for name in ("processor", "to_q", "to_k", "to_v")):
+            module.processor = _LTX2MXGroupedAttnProcessor(module.processor)
+
+
 def _make_ltx2_block(config: InferenceConfig) -> nn.Module:
     ltx2_transformer = _patch_ltx2_rope()
-    return ltx2_transformer.LTX2VideoTransformerBlock(
+    block = ltx2_transformer.LTX2VideoTransformerBlock(
         dim=_block_inner_dim(config),
         num_attention_heads=int(config.num_attention_heads),
         attention_head_dim=int(config.attention_head_dim),
@@ -139,6 +613,7 @@ def _make_ltx2_block(config: InferenceConfig) -> nn.Module:
         rope_type=str(getattr(config, "rope_type", "interleaved")),
         perturbed_attn=bool(getattr(config, "perturbed_attn", False)),
     )
+    return _maybe_swap_block_to_mx(block)
 
 
 class _LTX2BlockModule(nn.Module):
@@ -351,15 +826,18 @@ class LTX2BlockSegmentApplication(NeuronApplicationBase):
     @classmethod
     def get_state_dict(cls, model_name_or_path: str, config: InferenceConfig) -> dict:
         del model_name_or_path
-        return _load_block_state_dict_from_dir(
+        state_dict = _load_block_state_dict_from_dir(
             Path(config.source_model_dir),
             int(config.block_index),
             dtype=config.neuron_config.torch_dtype,
         )
+        return cls.convert_hf_to_neuron_state_dict(state_dict, config)
 
     @staticmethod
     def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
         del config
+        if os.environ.get("NOVA_LTX2_MX_ALL_E4M3", "") == "1":
+            return _convert_state_dict_linears_to_mx(state_dict)
         return state_dict
 
     @staticmethod

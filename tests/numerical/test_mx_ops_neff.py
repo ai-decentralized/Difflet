@@ -9,12 +9,13 @@ import pytest
 
 @pytest.mark.neuron
 @pytest.mark.numerical
+@pytest.mark.parametrize("mx_dtype", ["float8_e4m3fn_x4", "float8_e5m2_x4"])
 @pytest.mark.parametrize("k_tiles", [1, 2, 8])
-def test_mx_smoke_trainium(tmp_path, k_tiles):
+def test_mx_smoke_trainium(tmp_path, k_tiles, mx_dtype):
     if shutil.which("neuron-ls") is None:
         pytest.skip("Neuron runtime is not available")
 
-    metrics_path = tmp_path / "mx_metrics.json"
+    metrics_path = tmp_path / f"mx_metrics_{mx_dtype}_{k_tiles}.json"
     cmd = [
         "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
         "scripts/mx_smoke.py",
@@ -22,6 +23,8 @@ def test_mx_smoke_trainium(tmp_path, k_tiles):
         "trainium",
         "--k-tiles",
         str(k_tiles),
+        "--mx-dtype",
+        mx_dtype,
         "--metrics-path",
         str(metrics_path),
     ]
@@ -31,6 +34,7 @@ def test_mx_smoke_trainium(tmp_path, k_tiles):
     subprocess.run(cmd, check=True, env=env)
 
     metrics = json.loads(Path(metrics_path).read_text())
+    assert metrics["mx_dtype"] == mx_dtype
     assert metrics["passed"] is True
     assert metrics["cosine"] >= 0.999
     assert metrics["mean_abs"] <= 0.01

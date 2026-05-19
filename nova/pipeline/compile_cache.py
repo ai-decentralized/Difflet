@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from nova import envs
-from nova.pipeline.parallel_config import NovaParallelConfig
+from nova.pipeline.parallel_config import CandidateConfig, NovaParallelConfig
 
 
 def _default_cache_dir() -> Path:
@@ -47,6 +47,7 @@ class CacheSpec:
     revision: str | None = None
     application_kwargs: dict[str, Any] | None = None
     precision_schedule: dict[str, Any] | None = None
+    candidate: CandidateConfig | None = None
 
     def cache_inputs(self) -> dict[str, Any]:
         """Fields that drive the AOT artifact identity (hash key input).
@@ -56,7 +57,7 @@ class CacheSpec:
         the same key (enables cross-machine cache sharing). Also uses only
         the major.minor Python version to avoid micro-version churn.
         """
-        return {
+        inputs: dict[str, Any] = {
             "model_id": self.model_id,
             "model_name": self.model_name,
             "revision": self.revision,
@@ -70,6 +71,13 @@ class CacheSpec:
             "application_kwargs": _normalize_for_cache(self.application_kwargs or {}),
             "toolchain": _cache_relevant_toolchain_versions(),
         }
+        # Additive-only (cclog 56 D3): inject the candidate sub-dict
+        # *only* for a non-trivial candidate axis, so a None / default
+        # (max_candidates=1) config leaves the key byte-identical to
+        # every pre-candidate model cache.
+        if self.candidate is not None and not self.candidate.is_trivial:
+            inputs["candidate"] = self.candidate.to_cache_dict()
+        return inputs
 
     def manifest_metadata(self) -> dict[str, Any]:
         """Informational fields recorded in the manifest but NOT hashed.

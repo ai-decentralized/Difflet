@@ -708,6 +708,177 @@ def test_ltx_2_segmented_block_parity_parser_imports_without_running():
     assert args.skip_compile is True
 
 
+def test_ltx_2_mx_state_dict_conversion_uses_checkpoint_weight(monkeypatch):
+    monkeypatch.setenv("NOVA_LTX2_MX_ALL_E4M3", "1")
+
+    import torch
+
+    from nova.backends.cpu.ops_impl.mx import quantize_mx
+    from nova.backends.trainium.ltx_2.segmented import LTX2BlockSegmentApplication
+
+    weight = (
+        torch.arange(512 * 512, dtype=torch.float32).reshape(512, 512) / 10000
+    ).to(torch.bfloat16)
+    bias = torch.arange(512, dtype=torch.float32).to(torch.bfloat16)
+    untouched = torch.ones(512, dtype=torch.bfloat16)
+
+    converted = LTX2BlockSegmentApplication.convert_hf_to_neuron_state_dict(
+        {
+            "block.ff.net.2.weight": weight,
+            "block.ff.net.2.bias": bias,
+            "block.norm.weight": untouched,
+        },
+        None,
+    )
+
+    assert "block.ff.net.2.weight" not in converted
+    assert "block.ff.net.2.bias" not in converted
+    assert torch.equal(converted["block.norm.weight"], untouched)
+    assert torch.equal(converted["block.ff.net.2.bias_bf16"], bias)
+
+    weight_k_n = weight.t().contiguous()
+    expected_native = (
+        weight_k_n.reshape(128, 4, 512)
+        .permute(0, 2, 1)
+        .reshape(128, 512 * 4)
+        .contiguous()
+    )
+    expected_mx, expected_scale = quantize_mx(expected_native)
+
+    assert torch.equal(converted["block.ff.net.2.weight_k_n"], weight_k_n)
+    assert torch.equal(
+        converted["block.ff.net.2.weight_mx"][0, 0],
+        expected_mx.view(torch.int32),
+    )
+    assert torch.equal(converted["block.ff.net.2.weight_scale"][0, 0], expected_scale)
+
+
+def test_ltx_2_mx_linear_runtime_weights_are_parameters(monkeypatch):
+    monkeypatch.setenv("NOVA_LTX2_MX_ALL_E4M3", "1")
+
+    import torch
+    import torch.nn as nn
+
+    from nova.backends.trainium.ltx_2.segmented import MXLinear
+
+    src = nn.Linear(512, 512, bias=True, dtype=torch.bfloat16)
+    layer = MXLinear(src)
+
+    named_parameters = dict(layer.named_parameters())
+    named_buffers = dict(layer.named_buffers())
+
+    assert {"weight_mx", "weight_scale", "bias_bf16"} <= set(named_parameters)
+    assert "weight_k_n" in named_buffers
+    assert named_parameters["weight_mx"].requires_grad is False
+    assert named_parameters["weight_scale"].requires_grad is False
+    assert named_parameters["bias_bf16"].requires_grad is False
+
+
+def test_ltx_2_mx_native_weight_pack_expands_scales(monkeypatch):
+    monkeypatch.setenv("NOVA_LTX2_MX_ALL_E4M3", "1")
+    monkeypatch.setenv("NOVA_LTX2_MX_NATIVE_WEIGHT_PACK", "1")
+
+    import torch
+
+    from nova.backends.cpu.ops_impl.mx import quantize_mx
+    from nova.backends.trainium.ltx_2.segmented import LTX2BlockSegmentApplication
+
+    weight = (
+        torch.arange(512 * 512, dtype=torch.float32).reshape(512, 512) / 10000
+    ).to(torch.bfloat16)
+
+    converted = LTX2BlockSegmentApplication.convert_hf_to_neuron_state_dict(
+        {"block.ff.net.2.weight": weight},
+        None,
+    )
+
+    weight_k_n = weight.t().contiguous()
+    expected_native = (
+        weight_k_n.reshape(128, 4, 512)
+        .permute(0, 2, 1)
+        .reshape(128, 512 * 4)
+        .contiguous()
+    )
+    _, compact_scale = quantize_mx(expected_native)
+
+    native_scale = converted["block.ff.net.2.weight_scale"][0, 0]
+    assert tuple(native_scale.shape) == (128, 512)
+    assert torch.equal(native_scale[0:4], compact_scale[0:4])
+    assert torch.equal(native_scale[32:36], compact_scale[4:8])
+    assert torch.equal(native_scale[64:68], compact_scale[8:12])
+    assert torch.equal(native_scale[96:100], compact_scale[12:16])
+    assert torch.count_nonzero(native_scale[4:32]).item() == 0
+    assert torch.count_nonzero(native_scale[36:64]).item() == 0
+    assert torch.count_nonzero(native_scale[68:96]).item() == 0
+    assert torch.count_nonzero(native_scale[100:128]).item() == 0
+
+
+def test_ltx_2_mx_linear_weight_layout_is_module_local(monkeypatch):
+    import torch
+    import torch.nn as nn
+
+    from nova.backends.trainium.ltx_2.segmented import MXLinear
+
+    src = nn.Linear(512, 512, bias=False, dtype=torch.bfloat16)
+
+    monkeypatch.delenv("NOVA_LTX2_MX_NATIVE_WEIGHT_PACK", raising=False)
+    compact_layer = MXLinear(src)
+    monkeypatch.setenv("NOVA_LTX2_MX_NATIVE_WEIGHT_PACK", "1")
+    assert compact_layer._uses_native_weight_pack() is False
+
+    native_layer = MXLinear(src)
+    monkeypatch.delenv("NOVA_LTX2_MX_NATIVE_WEIGHT_PACK", raising=False)
+    assert native_layer._uses_native_weight_pack() is True
+
+
+def test_ltx_2_mx_group_kv_installs_attention_processors(monkeypatch):
+    monkeypatch.setenv("NOVA_LTX2_MX_ALL_E4M3", "1")
+    monkeypatch.setenv("NOVA_LTX2_MX_GROUP_KV", "1")
+
+    from argparse import Namespace
+
+    from nova.backends.trainium.ltx_2.segmented import (
+        _LTX2MXGroupedAttnProcessor,
+        _make_ltx2_block,
+    )
+
+    config = Namespace(
+        num_attention_heads=24,
+        attention_head_dim=128,
+        cross_attention_dim=3840,
+        audio_num_attention_heads=32,
+        audio_attention_head_dim=64,
+        audio_cross_attention_dim=2048,
+        gated_attn=False,
+        cross_attn_mod=False,
+        audio_gated_attn=False,
+        audio_cross_attn_mod=False,
+        qk_norm="rms_norm_across_heads",
+        activation_fn="gelu-approximate",
+        attention_bias=True,
+        attention_out_bias=True,
+        norm_eps=1e-6,
+        norm_elementwise_affine=False,
+        rope_type="interleaved",
+        perturbed_attn=False,
+    )
+
+    block = _make_ltx2_block(config)
+
+    attention_modules = [
+        block.attn1,
+        block.audio_attn1,
+        block.attn2,
+        block.audio_attn2,
+        block.audio_to_video_attn,
+        block.video_to_audio_attn,
+    ]
+    assert all(
+        isinstance(module.processor, _LTX2MXGroupedAttnProcessor)
+        for module in attention_modules
+    )
+
+
 def test_ltx_2_host_e2e_smoke_preflight_decode_requirements(tmp_path):
     script_path = Path("/home/ubuntu/nova/scripts/ltx_2_host_e2e_smoke.py")
     spec = importlib.util.spec_from_file_location("ltx_2_host_e2e_smoke", script_path)

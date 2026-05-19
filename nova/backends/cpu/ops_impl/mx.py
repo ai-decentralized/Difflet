@@ -7,14 +7,22 @@ import torch
 SUPPORTED_DTYPE = "float8_e4m3fn_x4"
 GROUP_SIZE = 32
 _FLOAT32_EXP_BIAS = 127
-_MXFP8_E4M3_MAX = 448.0
-_MXFP8_E4M3_MAX_EXP = 8
+
+# Per-MXFP8-format parameters: (max binade exponent, max representable
+# magnitude, torch fp8 dtype). Mirrors the canonical table in
+# ``nkilib.core.utils.mx_torch_common.quantize_to_mx`` so the CPU
+# reference and the Trainium kernels agree bit-for-bit on the scale law.
+_MX_PARAMS = {
+    "float8_e4m3fn_x4": (8, 448.0, torch.float8_e4m3fn),
+    "float8_e5m2_x4": (15, 57344.0, torch.float8_e5m2),
+}
+SUPPORTED_DTYPES = frozenset(_MX_PARAMS)
 
 
 def _validate_common(dtype: str, group_size: int) -> None:
-    if dtype != SUPPORTED_DTYPE:
+    if dtype not in _MX_PARAMS:
         raise NotImplementedError(
-            f"CPU MX reference supports only {SUPPORTED_DTYPE!r}; got {dtype!r}"
+            f"CPU MX reference supports {sorted(_MX_PARAMS)!r}; got {dtype!r}"
         )
     if group_size != GROUP_SIZE:
         raise NotImplementedError(
@@ -51,6 +59,7 @@ def quantize_mx(
 
     _validate_common(dtype, group_size)
     _validate_quantize_input(x)
+    max_exp, max_val, fp8_dtype = _MX_PARAMS[dtype]
 
     *prefix, p_dim, f_dim = x.shape
     sp_dim = p_dim // 8
@@ -59,9 +68,7 @@ def quantize_mx(
     exp = _get_ieee_frexp(x)
     exp_blocks = exp.reshape(*prefix, sp_dim, 8, sf_dim, 4)
     max_exp_per_block = torch.amax(exp_blocks, dim=(-3, -1))
-    scale = (max_exp_per_block + _FLOAT32_EXP_BIAS - _MXFP8_E4M3_MAX_EXP).to(
-        torch.uint8
-    )
+    scale = (max_exp_per_block + _FLOAT32_EXP_BIAS - max_exp).to(torch.uint8)
 
     scale_exp = scale.to(torch.int32) - _FLOAT32_EXP_BIAS
     scale_blocks = torch.pow(2.0, scale_exp.float())
@@ -73,8 +80,8 @@ def quantize_mx(
         .reshape(*prefix, p_dim, f_dim)
     )
 
-    mx_data = torch.clamp(x / expanded_scale, -_MXFP8_E4M3_MAX, _MXFP8_E4M3_MAX)
-    mx_data = mx_data.to(torch.float8_e4m3fn).contiguous()
+    mx_data = torch.clamp(x / expanded_scale, -max_val, max_val)
+    mx_data = mx_data.to(fp8_dtype).contiguous()
     packed = mx_data.view(torch.uint32).reshape(*prefix, p_dim, sf_dim)
     return packed, scale.contiguous()
 
@@ -103,8 +110,9 @@ def dequantize_mx(
             f"scale={tuple(scale.shape)}"
         )
 
+    _, _, fp8_dtype = _MX_PARAMS[dtype]
     *prefix, p_dim, sf_dim = data.shape
-    float8_data = data.contiguous().reshape(-1).view(torch.float8_e4m3fn)
+    float8_data = data.contiguous().reshape(-1).view(fp8_dtype)
     float8_data = float8_data.reshape(*prefix, p_dim, sf_dim * 4)
 
     scale_exp = scale.to(torch.int32) - _FLOAT32_EXP_BIAS
@@ -176,8 +184,9 @@ def dequantize_mx_hardware_tile(
             f"scale shape must be ({data.shape[0] // 8}, {data.shape[1]}), got {tuple(scale.shape)}"
         )
 
+    _, _, fp8_dtype = _MX_PARAMS[dtype]
     k_packed, free_dim = data.shape
-    unpacked = data.contiguous().reshape(-1).view(torch.float8_e4m3fn)
+    unpacked = data.contiguous().reshape(-1).view(fp8_dtype)
     unpacked = unpacked.reshape(k_packed, free_dim, 4).to(torch.float32)
 
     scale_exp = scale.to(torch.int32) - _FLOAT32_EXP_BIAS
@@ -463,6 +472,7 @@ def linear_mx_outer_n_reference(
 
 
 __all__ = [
+    "SUPPORTED_DTYPES",
     "dequantize_mx",
     "dequantize_mx_hardware_tile",
     "linear_mx",
