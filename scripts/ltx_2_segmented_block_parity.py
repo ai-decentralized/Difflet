@@ -93,7 +93,12 @@ def _load_cpu_block(config, model_dir: Path, block_index: int):
         _load_block_state_dict_from_dir,
     )
 
-    block = _LTX2BlockModule(config)
+    mx_swap = os.environ.pop("NOVA_LTX2_MX_ALL_E4M3", None)
+    try:
+        block = _LTX2BlockModule(config)
+    finally:
+        if mx_swap is not None:
+            os.environ["NOVA_LTX2_MX_ALL_E4M3"] = mx_swap
     state = _load_block_state_dict_from_dir(
         model_dir / "transformer",
         block_index,
@@ -156,7 +161,10 @@ def main() -> int:
 
     inputs = _make_inputs(block_app, args.seed)
     cpu_block = _load_cpu_block(segmented.config, model_dir, args.block_index)
-    cpu_inputs = [tensor.to(dtype=args.dtype) if torch.is_floating_point(tensor) else tensor for tensor in inputs]
+    cpu_inputs = [
+        tensor.to(dtype=args.dtype) if torch.is_floating_point(tensor) else tensor
+        for tensor in inputs
+    ]
 
     t1 = time.perf_counter()
     with torch.no_grad():

@@ -43,15 +43,17 @@ def _build_inputs(seed: int, k_tiles: int) -> tuple[torch.Tensor, torch.Tensor]:
 def _cpu_reference(
     stationary: torch.Tensor,
     moving: torch.Tensor,
+    mx_dtype: str,
 ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
-    stationary_mx, stationary_scale = cpu_mx.quantize_mx(stationary)
-    moving_mx, moving_scale = cpu_mx.quantize_mx(moving)
+    stationary_mx, stationary_scale = cpu_mx.quantize_mx(stationary, dtype=mx_dtype)
+    moving_mx, moving_scale = cpu_mx.quantize_mx(moving, dtype=mx_dtype)
     if stationary_mx.ndim == 3:
         out = cpu_mx.matmul_mx_k_tiles_reference(
             stationary_mx,
             stationary_scale,
             moving_mx,
             moving_scale,
+            dtype=mx_dtype,
             out_dtype=torch.float32,
         )
     else:
@@ -60,6 +62,7 @@ def _cpu_reference(
             stationary_scale,
             moving_mx,
             moving_scale,
+            dtype=mx_dtype,
             out_dtype=torch.float32,
         )
     return out, (stationary_mx, stationary_scale, moving_mx, moving_scale)
@@ -67,6 +70,7 @@ def _cpu_reference(
 
 def _run_simulator(
     packed: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+    mx_dtype: str,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     from nki.simulator import simulate_kernel
 
@@ -81,16 +85,19 @@ def _run_simulator(
         if stationary_mx.ndim == 3
         else matmul_mx_single_tile_kernel
     )
+    kernel_args = (
+        stationary_mx.numpy(),
+        stationary_scale.numpy(),
+        moving_mx.numpy(),
+        moving_scale.numpy(),
+    )
+    if stationary_mx.ndim == 3:
+        kernel_args = (*kernel_args, int(stationary_mx.shape[0]))
     start = time.perf_counter()
     out = simulate_kernel(
         kernel,
-        (
-            stationary_mx.numpy(),
-            stationary_scale.numpy(),
-            moving_mx.numpy(),
-            moving_scale.numpy(),
-        ),
-        {},
+        kernel_args,
+        {"mx_dtype": mx_dtype},
     )
     elapsed = time.perf_counter() - start
     return torch.from_numpy(out).float(), {"simulator_time_s": elapsed}
@@ -100,6 +107,7 @@ def _run_trainium(
     stationary: torch.Tensor,
     moving: torch.Tensor,
     packed: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+    mx_dtype: str,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     import torch_xla.core.xla_model as xm
 
@@ -122,13 +130,16 @@ def _run_trainium(
 
     start = time.perf_counter()
     if stationary.ndim == 2:
-        stationary_mx, stationary_scale = trainium_mx.quantize_mx(stationary_xla)
-        moving_mx, moving_scale = trainium_mx.quantize_mx(moving_xla)
+        stationary_mx, stationary_scale = trainium_mx.quantize_mx(
+            stationary_xla, dtype=mx_dtype
+        )
+        moving_mx, moving_scale = trainium_mx.quantize_mx(moving_xla, dtype=mx_dtype)
     out = trainium_mx.matmul_mx(
         stationary_mx,
         stationary_scale,
         moving_mx,
         moving_scale,
+        dtype=mx_dtype,
         out_dtype=torch.bfloat16,
     )
     xm.mark_step()
@@ -167,6 +178,12 @@ def main() -> int:
         help="number of leading K tiles to accumulate",
     )
     parser.add_argument(
+        "--mx-dtype",
+        choices=("float8_e4m3fn_x4", "float8_e5m2_x4"),
+        default="float8_e4m3fn_x4",
+        help="packed MXFP8 format for quantize + matmul",
+    )
+    parser.add_argument(
         "--metrics-path",
         type=Path,
         default=Path("/tmp/nova_mx_smoke_metrics.json"),
@@ -182,13 +199,13 @@ def main() -> int:
     stationary, moving = _build_inputs(args.seed, args.k_tiles)
 
     cpu_start = time.perf_counter()
-    cpu_out, packed = _cpu_reference(stationary, moving)
+    cpu_out, packed = _cpu_reference(stationary, moving, args.mx_dtype)
     cpu_time = time.perf_counter() - cpu_start
 
     if args.mode == "trainium":
-        actual_out, timings = _run_trainium(stationary, moving, packed)
+        actual_out, timings = _run_trainium(stationary, moving, packed, args.mx_dtype)
     else:
-        actual_out, timings = _run_simulator(packed)
+        actual_out, timings = _run_simulator(packed, args.mx_dtype)
 
     expected_out = cpu_out.to(torch.bfloat16).float()
     observed_out = actual_out.to(torch.bfloat16).float()
@@ -197,6 +214,7 @@ def main() -> int:
         "mode": args.mode,
         "seed": args.seed,
         "k_tiles": args.k_tiles,
+        "mx_dtype": args.mx_dtype,
         "shape": {
             "stationary_native": list(stationary.shape),
             "moving_native": list(moving.shape),

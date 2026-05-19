@@ -139,10 +139,16 @@ def _baseline(
     return out.to(torch.bfloat16)
 
 
+_MX_DTYPES = ("float8_e4m3fn_x4", "float8_e5m2_x4")
+# Short keys used in the per-cell metrics dict and synthesizer.
+_DTYPE_KEY = {"float8_e4m3fn_x4": "e4m3", "float8_e5m2_x4": "e5m2"}
+
+
 def _run_mx(
     input_slice: torch.Tensor,
     weight_k_n: torch.Tensor,
     bias: torch.Tensor | None,
+    mx_dtype: str,
 ) -> torch.Tensor:
     chunks = []
     for offset in range(0, input_slice.shape[0], 128):
@@ -151,6 +157,7 @@ def _run_mx(
                 input_slice[offset : offset + 128].contiguous(),
                 weight_k_n,
                 bias,
+                dtype=mx_dtype,
             )
         )
     return torch.cat(chunks, dim=0)
@@ -249,8 +256,18 @@ def main() -> int:
                 tp_degree=args.tp_degree,
             )
             baseline = _baseline(input_slice, weight_k_n, bias)
-            observed = _run_mx(input_slice, weight_k_n, bias).to(torch.bfloat16)
-            diff = (baseline.float() - observed.float()).abs()
+            metrics: dict[str, dict[str, float]] = {}
+            for mx_dtype in _MX_DTYPES:
+                observed = _run_mx(
+                    input_slice, weight_k_n, bias, mx_dtype
+                ).to(torch.bfloat16)
+                diff = (baseline.float() - observed.float()).abs()
+                metrics[_DTYPE_KEY[mx_dtype]] = {
+                    "cosine": _cosine(baseline, observed),
+                    "mean_abs": diff.mean().item(),
+                    "max_abs": diff.max().item(),
+                }
+            e4m3 = metrics["e4m3"]
             rows.append(
                 {
                     "block": block_idx,
@@ -260,18 +277,38 @@ def main() -> int:
                     "m_offset": args.m_offset,
                     "m_slice": args.m_slice,
                     "input_shape": list(input_slice.shape),
-                    "output_shape": list(observed.shape),
-                    "cosine": _cosine(baseline, observed),
-                    "mean_abs": diff.mean().item(),
-                    "max_abs": diff.max().item(),
+                    "output_shape": list(input_slice.shape[:1])
+                    + [weight_k_n.shape[1]],
+                    # Back-compat: top-level keys remain the E4M3 values so
+                    # the M5.4.0 reader still parses (Decision D2). The
+                    # three-dtype data lives under "metrics".
+                    "cosine": e4m3["cosine"],
+                    "mean_abs": e4m3["mean_abs"],
+                    "max_abs": e4m3["max_abs"],
+                    "metrics": metrics,
                     **shard_meta,
                 }
             )
     mx_time_s = time.perf_counter() - mx_start
 
     expected_rows = block_count * len(TARGETS)
+
+    def _dtype_summary(key: str) -> dict[str, float]:
+        cosines = [row["metrics"][key]["cosine"] for row in rows]
+        return {
+            "min_cosine": min(cosines),
+            "mean_cosine": sum(cosines) / len(cosines),
+            "max_mean_abs": max(row["metrics"][key]["mean_abs"] for row in rows),
+            "max_max_abs": max(row["metrics"][key]["max_abs"] for row in rows),
+        }
+
+    has_nan = any(
+        row["metrics"][k]["cosine"] != row["metrics"][k]["cosine"]
+        for row in rows
+        for k in ("e4m3", "e5m2")
+    )
     table = {
-        "schema_version": 1,
+        "schema_version": 2,
         "model_dir": str(args.model_dir),
         "transformer_subfolder": args.transformer_subfolder,
         "bundle": str(args.bundle),
@@ -284,21 +321,29 @@ def main() -> int:
         "expected_rows": expected_rows,
         "row_count": len(rows),
         "complete": len(rows) == expected_rows,
-        "has_nan": any(row["cosine"] != row["cosine"] for row in rows),
+        "has_nan": has_nan,
         "capture_time_s": capture_time_s,
         "mx_time_s": mx_time_s,
-        "summary": {
-            "min_cosine": min(row["cosine"] for row in rows),
-            "mean_cosine": sum(row["cosine"] for row in rows) / len(rows),
-            "max_mean_abs": max(row["mean_abs"] for row in rows),
-            "max_max_abs": max(row["max_abs"] for row in rows),
+        # Back-compat: "summary" stays E4M3 (the M5.4.0 default).
+        "summary": _dtype_summary("e4m3"),
+        "summary_by_dtype": {
+            "e4m3": _dtype_summary("e4m3"),
+            "e5m2": _dtype_summary("e5m2"),
         },
         "rows": rows,
     }
     _write_json(args.out, table)
     print(
         json.dumps(
-            {k: table[k] for k in ("row_count", "complete", "has_nan", "summary")},
+            {
+                k: table[k]
+                for k in (
+                    "row_count",
+                    "complete",
+                    "has_nan",
+                    "summary_by_dtype",
+                )
+            },
             indent=2,
         )
     )

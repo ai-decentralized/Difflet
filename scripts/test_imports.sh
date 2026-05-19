@@ -84,7 +84,9 @@ for path, name in [
     ("scripts/hv15_rowparallel_mx_probe.py", "hv15_rowparallel_mx_probe"),
     ("scripts/hv15_precision_calibration_sweep.py", "hv15_precision_calibration_sweep"),
     ("scripts/hv15_precision_schedule_frontier.py", "hv15_precision_schedule_frontier"),
+    ("scripts/hunyuan_candidate_smoke.py", "hunyuan_candidate_smoke"),
     ("scripts/hv15_precision_verify.py", "hv15_precision_verify"),
+    ("scripts/ltx2_precision_calibration_sweep.py", "ltx2_precision_calibration_sweep"),
     ("scripts/mx_smoke.py", "mx_smoke"),
 ]:
     spec = importlib.util.spec_from_file_location(name, path)

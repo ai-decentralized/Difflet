@@ -238,7 +238,7 @@ def _run_simulator(
         )
         out = simulate_kernel(
             matmul_mx_k_tiles_kernel,
-            tuple(tensor.numpy() for tensor in packed),
+            (*tuple(tensor.numpy() for tensor in packed), packed[0].shape[0]),
             {},
         )
         outputs.append(torch.from_numpy(out).to(torch.bfloat16))

@@ -1,4 +1,4 @@
-__all__ = ["NovaPipeline", "NovaParallelConfig"]
+__all__ = ["NovaPipeline", "NovaParallelConfig", "CandidateConfig"]
 
 
 def __getattr__(name: str):
@@ -10,4 +10,8 @@ def __getattr__(name: str):
         from nova.pipeline.parallel_config import NovaParallelConfig
 
         return NovaParallelConfig
+    if name == "CandidateConfig":
+        from nova.pipeline.parallel_config import CandidateConfig
+
+        return CandidateConfig
     raise AttributeError(f"module 'nova.pipeline' has no attribute {name!r}")
