@@ -1,0 +1,2073 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TrainiumLatent · Plan Review &amp; Technical Deep Dive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=Crimson+Pro:ital,wght@0,300..700;1,300..700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Serif+SC:wght@300..700&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --paper: #f5f0e3;
+  --paper-deep: #ede5d2;
+  --paper-line: #d9cfb8;
+  --ink: #1a1714;
+  --ink-soft: #4a443c;
+  --ink-mute: #847b6c;
+  --rust: #b8472c;
+  --rust-deep: #8b3219;
+  --rust-soft: #d97757;
+  --moss: #4a5d3a;
+  --ochre: #b8893d;
+  --code-bg: #ebe2cd;
+  --code-border: #c9bd9f;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0,
+      transparent 31px,
+      rgba(184, 71, 44, 0.025) 31px,
+      rgba(184, 71, 44, 0.025) 32px
+    );
+  color: var(--ink);
+  font-family: 'Crimson Pro', 'Noto Serif SC', 'Songti SC', serif;
+  font-size: 18px;
+  line-height: 1.65;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ------- Top banner ------- */
+.banner {
+  border-bottom: 1.5px solid var(--ink);
+  background: var(--paper);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: blur(6px);
+  background: rgba(245, 240, 227, 0.92);
+}
+.banner-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 14px 32px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.banner-tag {
+  display: flex;
+  gap: 18px;
+  align-items: baseline;
+}
+.banner-tag .dot {
+  width: 8px;
+  height: 8px;
+  background: var(--rust);
+  display: inline-block;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+.banner-meta { color: var(--ink-mute); }
+
+/* ------- Layout ------- */
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 32px;
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  gap: 56px;
+}
+main {
+  padding: 56px 0 120px;
+  min-width: 0;
+}
+aside {
+  padding: 56px 0;
+}
+
+/* ------- Hero ------- */
+.hero {
+  margin-bottom: 64px;
+  padding-bottom: 40px;
+  border-bottom: 1px solid var(--paper-line);
+}
+.kicker {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--rust);
+  margin-bottom: 22px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.kicker::before {
+  content: "";
+  display: inline-block;
+  width: 36px;
+  height: 1px;
+  background: var(--rust);
+}
+h1.title {
+  font-family: 'Fraunces', 'Noto Serif SC', serif;
+  font-weight: 350;
+  font-variation-settings: 'opsz' 144, 'SOFT' 40;
+  font-size: clamp(40px, 5.6vw, 72px);
+  line-height: 0.98;
+  letter-spacing: -0.022em;
+  margin: 0 0 24px;
+  color: var(--ink);
+}
+h1.title em {
+  font-style: italic;
+  color: var(--rust-deep);
+  font-weight: 350;
+}
+.subtitle {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-variation-settings: 'opsz' 144, 'SOFT' 60;
+  font-style: italic;
+  font-size: 22px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  max-width: 720px;
+  margin: 0 0 36px;
+}
+.meta-row {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.meta-row > div { display: flex; flex-direction: column; gap: 4px; }
+.meta-row .label { color: var(--ink-mute); }
+.meta-row .value { color: var(--ink); font-weight: 500; }
+
+/* ------- Section ------- */
+section { margin: 72px 0; scroll-margin-top: 80px; }
+
+.section-head {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 24px;
+  align-items: baseline;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--paper-line);
+  margin-bottom: 36px;
+}
+.section-num {
+  font-family: 'Fraunces', serif;
+  font-variation-settings: 'opsz' 144;
+  font-weight: 200;
+  font-size: 76px;
+  line-height: 0.9;
+  color: var(--rust);
+  letter-spacing: -0.04em;
+}
+.section-title {
+  font-family: 'Fraunces', serif;
+  font-variation-settings: 'opsz' 144, 'SOFT' 50;
+  font-weight: 400;
+  font-size: 32px;
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+  margin: 0;
+  color: var(--ink);
+}
+.section-title small {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  margin-bottom: 10px;
+}
+
+h3 {
+  font-family: 'Fraunces', 'Noto Serif SC', serif;
+  font-variation-settings: 'opsz' 96, 'SOFT' 30;
+  font-weight: 500;
+  font-size: 22px;
+  margin: 44px 0 14px;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+}
+h4 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--rust-deep);
+  margin: 32px 0 14px;
+  font-weight: 600;
+}
+
+p { margin: 0 0 16px; }
+
+/* ------- Inline ------- */
+code, kbd, .mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  padding: 1px 6px;
+  border-radius: 2px;
+  color: var(--ink);
+  font-weight: 500;
+}
+strong { font-weight: 700; color: var(--ink); }
+em { font-style: italic; }
+
+a {
+  color: var(--rust-deep);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(139, 50, 25, 0.35);
+  transition: border-color 0.15s;
+}
+a:hover { border-bottom-color: var(--rust-deep); }
+
+/* ------- TLDR / Callouts ------- */
+.tldr {
+  background: var(--paper-deep);
+  border-left: 3px solid var(--rust);
+  padding: 28px 32px;
+  margin: 32px 0;
+  position: relative;
+}
+.tldr-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--rust);
+  margin-bottom: 14px;
+  display: block;
+}
+.tldr ul { margin: 0; padding-left: 22px; }
+.tldr li { margin-bottom: 10px; }
+
+.pullquote {
+  font-family: 'Fraunces', serif;
+  font-variation-settings: 'opsz' 144;
+  font-weight: 350;
+  font-style: italic;
+  font-size: 24px;
+  line-height: 1.35;
+  border-left: none;
+  padding: 12px 0 12px 24px;
+  margin: 28px 0;
+  color: var(--rust-deep);
+  position: relative;
+}
+.pullquote::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--rust);
+}
+
+/* ------- Findings ------- */
+.findings {
+  counter-reset: finding;
+  margin: 28px 0;
+}
+.finding {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  gap: 18px;
+  padding: 22px 0;
+  border-top: 1px solid var(--paper-line);
+}
+.finding:last-child { border-bottom: 1px solid var(--paper-line); }
+.finding::before {
+  counter-increment: finding;
+  content: counter(finding, decimal-leading-zero);
+  font-family: 'Fraunces', serif;
+  font-variation-settings: 'opsz' 144;
+  font-weight: 300;
+  font-size: 32px;
+  color: var(--rust);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.finding p { margin: 0; }
+
+/* ------- Tables ------- */
+.tbl-wrap { margin: 24px 0; overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Crimson Pro', serif;
+  font-size: 16px;
+  background: var(--paper-deep);
+}
+th, td {
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--paper-line);
+  vertical-align: top;
+}
+th {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rust-deep);
+  background: var(--paper);
+  border-bottom: 1.5px solid var(--ink);
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(184, 71, 44, 0.04); }
+td code { font-size: 0.82em; }
+
+/* ------- Lists ------- */
+ul, ol { margin: 0 0 20px; padding-left: 24px; }
+li { margin-bottom: 8px; }
+ul.dense li, ol.dense li { margin-bottom: 4px; }
+
+/* fancy ordered list */
+ol.fancy {
+  list-style: none;
+  padding-left: 0;
+  counter-reset: fancy;
+}
+ol.fancy > li {
+  counter-increment: fancy;
+  padding-left: 38px;
+  position: relative;
+  margin-bottom: 14px;
+}
+ol.fancy > li::before {
+  content: counter(fancy, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 2px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--rust);
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+/* ------- Code blocks ------- */
+pre {
+  background: var(--paper-deep);
+  border: 1px solid var(--code-border);
+  border-left: 3px solid var(--rust);
+  padding: 16px 20px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-x: auto;
+  margin: 20px 0;
+  color: var(--ink);
+}
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* ------- TOC ------- */
+.toc {
+  position: sticky;
+  top: 80px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+}
+.toc-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--rust);
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--paper-line);
+}
+.toc ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  counter-reset: toc;
+}
+.toc li { margin-bottom: 9px; counter-increment: toc; }
+.toc li::before {
+  content: counter(toc, decimal-leading-zero);
+  color: var(--rust);
+  margin-right: 10px;
+  font-weight: 500;
+}
+.toc a {
+  color: var(--ink-soft);
+  border-bottom: none;
+  transition: color 0.12s;
+}
+.toc a:hover { color: var(--rust-deep); }
+
+/* ------- Tag chips ------- */
+.tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 16px 0 0;
+}
+.tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border: 1px solid var(--code-border);
+  background: var(--paper-deep);
+  color: var(--ink-soft);
+}
+.tag.hot { color: var(--rust); border-color: var(--rust-soft); }
+
+/* ------- Divider ------- */
+.glyph-divider {
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+  color: var(--rust);
+  letter-spacing: 1em;
+  margin: 64px 0;
+  user-select: none;
+}
+
+/* ------- Stage / Recommendation cards ------- */
+.stages { display: grid; gap: 18px; margin: 24px 0; }
+.stage {
+  border: 1px solid var(--paper-line);
+  background: var(--paper-deep);
+  padding: 20px 24px;
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 20px;
+  position: relative;
+}
+.stage-num {
+  font-family: 'Fraunces', serif;
+  font-variation-settings: 'opsz' 144;
+  font-weight: 300;
+  font-size: 36px;
+  line-height: 1;
+  color: var(--rust);
+}
+.stage-num small {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  margin-top: 6px;
+  font-weight: 500;
+}
+.stage h4 { margin-top: 0; }
+.stage .threshold {
+  font-family: 'Crimson Pro', serif;
+  font-style: italic;
+  color: var(--rust-deep);
+  border-top: 1px dashed var(--code-border);
+  padding-top: 10px;
+  margin-top: 14px;
+}
+
+/* ------- Caveat list ------- */
+.caveats {
+  background: var(--paper-deep);
+  border: 1px solid var(--paper-line);
+  border-top: 3px solid var(--ochre);
+  padding: 24px 28px;
+  margin: 24px 0;
+}
+.caveats > .caveat-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ochre);
+  margin-bottom: 16px;
+}
+.caveats ul { padding-left: 22px; margin: 0; }
+.caveats li { margin-bottom: 10px; font-size: 16px; }
+
+/* ------- Mechanism Cards (Paper outline section) ------- */
+.mech-card {
+  margin: 36px 0;
+  padding: 0;
+  border: 1px solid var(--paper-line);
+  background: var(--paper-deep);
+  position: relative;
+  overflow: hidden;
+}
+.mech-card.paper-a { border-left: 4px solid var(--rust); }
+.mech-card.paper-b { border-left: 4px solid var(--ochre); }
+
+.mech-header {
+  padding: 24px 32px 16px;
+  border-bottom: 1px solid var(--paper-line);
+  background: var(--paper);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 18px;
+  align-items: baseline;
+}
+.mech-num {
+  font-family: 'Fraunces', serif;
+  font-variation-settings: 'opsz' 144;
+  font-weight: 300;
+  font-size: 42px;
+  line-height: 0.9;
+  color: var(--rust);
+  letter-spacing: -0.04em;
+}
+.mech-card.paper-b .mech-num { color: var(--ochre); }
+.mech-title-block { padding-top: 6px; }
+.mech-eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  margin-bottom: 6px;
+}
+.mech-title {
+  font-family: 'Fraunces', serif;
+  font-variation-settings: 'opsz' 96, 'SOFT' 30;
+  font-weight: 500;
+  font-size: 24px;
+  line-height: 1.2;
+  margin: 0;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+.mech-paper-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border: 1px solid var(--rust-soft);
+  color: var(--rust);
+  background: var(--paper);
+  white-space: nowrap;
+  align-self: center;
+}
+.mech-card.paper-b .mech-paper-tag {
+  border-color: var(--ochre);
+  color: var(--ochre);
+}
+
+.mech-body {
+  padding: 24px 32px 28px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+}
+.mech-block { min-width: 0; }
+.mech-block-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--rust);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--code-border);
+}
+.mech-card.paper-b .mech-block-label { color: var(--ochre); }
+.mech-block p { margin: 0 0 10px; font-size: 16px; line-height: 1.6; }
+.mech-block p:last-child { margin-bottom: 0; }
+.mech-block ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 15px;
+  line-height: 1.55;
+}
+.mech-block ul li { margin-bottom: 5px; }
+
+.mech-diagram {
+  grid-column: 1 / -1;
+  background: var(--paper);
+  border: 1px solid var(--paper-line);
+  padding: 16px 20px;
+  margin-top: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.mech-math {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  padding: 14px 18px;
+  background: var(--paper);
+  border-left: 2px solid var(--ink-mute);
+  font-family: 'Crimson Pro', serif;
+  font-style: italic;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+.mech-math .formula {
+  font-family: 'JetBrains Mono', monospace;
+  font-style: normal;
+  font-size: 0.92em;
+  background: var(--code-bg);
+  padding: 1px 6px;
+  border: 1px solid var(--code-border);
+  border-radius: 2px;
+  color: var(--ink);
+}
+
+.mech-value {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--paper-line);
+  font-family: 'Fraunces', serif;
+  font-variation-settings: 'opsz' 96;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 17px;
+  color: var(--rust-deep);
+  line-height: 1.5;
+}
+.mech-card.paper-b .mech-value { color: var(--ochre); }
+
+.paper-banner {
+  margin: 48px 0 24px;
+  padding: 14px 22px;
+  background: var(--paper);
+  border: 1px solid var(--paper-line);
+  border-left: 5px solid var(--rust);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.paper-banner.b { border-left-color: var(--ochre); }
+.paper-banner-title {
+  font-family: 'Fraunces', serif;
+  font-variation-settings: 'opsz' 144, 'SOFT' 30;
+  font-weight: 500;
+  font-size: 22px;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+.paper-banner-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+@media (max-width: 760px) {
+  .mech-body { grid-template-columns: 1fr; gap: 18px; }
+  .mech-header { grid-template-columns: auto 1fr; }
+  .mech-paper-tag { grid-column: 2; justify-self: start; }
+  .mech-num { font-size: 36px; }
+  .mech-title { font-size: 20px; }
+}
+.read-group { margin: 24px 0; }
+.read-group h4 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--rust);
+  margin: 24px 0 10px;
+  border-bottom: 1px solid var(--paper-line);
+  padding-bottom: 8px;
+}
+.read-group ol { list-style: decimal; padding-left: 24px; }
+.read-group li { font-size: 16px; margin-bottom: 6px; }
+
+/* ------- Footer ------- */
+footer {
+  border-top: 1.5px solid var(--ink);
+  margin-top: 96px;
+  padding: 32px 32px 48px;
+  max-width: 1180px;
+  margin-left: auto;
+  margin-right: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ink-mute);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+footer .glyph { color: var(--rust); }
+
+/* ------- Responsive ------- */
+@media (max-width: 980px) {
+  .wrap { grid-template-columns: 1fr; gap: 0; padding: 0 24px; }
+  aside { display: none; }
+  .section-head { grid-template-columns: 70px 1fr; gap: 16px; }
+  .section-num { font-size: 52px; }
+  .section-title { font-size: 26px; }
+  h1.title { font-size: 44px; }
+  .stage { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  body { font-size: 17px; }
+  .wrap { padding: 0 18px; }
+  .banner-inner { padding: 12px 18px; }
+  .banner-meta { display: none; }
+  .meta-row { gap: 24px; }
+  .section-head { grid-template-columns: 1fr; }
+  .section-num { font-size: 42px; }
+  pre { font-size: 12px; }
+}
+
+@media print {
+  body { background: white; font-size: 11pt; }
+  .banner, aside, footer { display: none; }
+  .wrap { display: block; max-width: none; padding: 0; }
+  section { page-break-inside: avoid; margin: 24pt 0; }
+  pre { page-break-inside: avoid; }
+  a { color: var(--ink); border: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- Banner -->
+<!-- ============================================================ -->
+<div class="banner">
+  <div class="banner-inner">
+    <div class="banner-tag">
+      <span><span class="dot"></span>Technical Memo</span>
+      <span>v2.0 · Paper Outline</span>
+    </div>
+    <div class="banner-meta">PhD Research Plan · Internal Draft · 2026</div>
+  </div>
+</div>
+
+<div class="wrap">
+
+<!-- ============================================================ -->
+<!-- Main column -->
+<!-- ============================================================ -->
+<main>
+
+<!-- Hero -->
+<header class="hero">
+  <div class="kicker">PhD Research Plan / Hardware-Software Co-Design</div>
+  <h1 class="title">TrainiumLatent<br><em>plan review &amp; technical deep dive</em></h1>
+  <p class="subtitle">A hardware-aware runtime for latent-space video world models on AWS Trainium3 — what couples to NeuronCore-v4, what does not, what the MLSys / ASPLOS reviewer expects, <em>and the six system mechanisms that compose Paper A &amp; Paper B</em>.</p>
+
+  <div class="meta-row">
+    <div><span class="label">Target Venue</span><span class="value">MLSys 2026 · ASPLOS 2027</span></div>
+    <div><span class="label">Hardware</span><span class="value">Trn3 · NeuronCore-v4 · dedicated</span></div>
+    <div><span class="label">SDK</span><span class="value">Neuron 2.29 · NKI 0.3.0</span></div>
+    <div><span class="label">Fallback Path</span><span class="value">None — Trn3 native</span></div>
+  </div>
+
+  <div class="tags">
+    <span class="tag hot">Trn3-native</span>
+    <span class="tag hot">nc_matmul_mx</span>
+    <span class="tag">QuantizeMX</span>
+    <span class="tag">VectorE exponential</span>
+    <span class="tag">nki.collectives</span>
+    <span class="tag">NeuronSwitch-v1</span>
+    <span class="tag">SBUF Read-Add-Write</span>
+    <span class="tag">oob_mode.skip</span>
+    <span class="tag">all_to_all_v</span>
+    <span class="tag">candidate-axis parallelism</span>
+    <span class="tag">decode-free planning</span>
+  </div>
+</header>
+
+<!-- ============================================================ -->
+<!-- TL;DR -->
+<!-- ============================================================ -->
+<section id="tldr">
+  <div class="section-head">
+    <div class="section-num">00</div>
+    <h2 class="section-title"><small>Executive Summary</small>TL;DR</h2>
+  </div>
+
+  <div class="tldr">
+    <span class="tldr-label">— Three sentences —</span>
+    <ul>
+      <li><strong>计划合理，但目前与 Trn3 硬件耦合不足。</strong> "Latent runtime" 这一 framing 要在 MLSys/ASPLOS 上立住，必须围绕三个在 GPU 上没有干净对应物的 NCv4 原语重新设计：<code>nc_matmul_mx</code> + <code>QuantizeMX</code>（硬件 MXFP8/MXFP4，32-元素 microscaling 分组）、新增的 Vector Engine 快速 <code>exponential</code> 指令（Scalar Engine softmax 的 4× 吞吐）、以及 20 个 CC-Core + NeuronSwitch-v1 all-to-all fabric（通过 <code>nki.collectives</code> 暴露）。没有这些，审稿人只会看到 "Trainium port of TeaCache + xDiT"。</li>
+      <li><strong>最有辩护力的单一贡献是 candidate-axis 并行 + decode-free latent 世界模型规划。</strong> V-JEPA-2-AC 在单卡 RTX 4090 上 16 秒/动作（800 候选样本）；同等任务下 Cosmos 像素空间 4 分钟/动作（80 样本 × 10 次精化）。把这个 workload 的 N-candidates × T-rollout × HW-latent 张量映射到 Trn3 的 [partition × LNC-rank × chip] 层次——配合 <code>nki.collectives.all_to_all_v</code> 做候选重分布、用 <code>nki.isa.nonzero_with_count</code> + <code>oob_mode.skip</code> DMA gather 做 top-k compaction——在 Trainium 上确实新，并利用了 H100 拿不到的 Trn3 特性。</li>
+      <li><strong>真正的项目风险不是硬件——是 NKI 对视频模型的成熟度和 NCv4 文档缺口。</strong> 你有 Trn3 直接访问意味着 LNC=2 多核 kernel、<code>nc_matmul_mx</code>、<code>quantize_mx</code>、<code>nki.isa.exponential</code>、<code>oob_mode.skip</code> SWDGE、<code>all_to_all_v</code> 都可以从 Day-1 在目标硬件上测——<strong>不需要前向兼容 fallback、不需要 <code>nc_version</code> 守门</strong>。剩下的不确定性是 (a) NKI tracer 是否接受 3D causal Conv / temporal attention / AdaLN modulation 的视频模型 pattern，(b) Conv3D NKI kernel 缺位（NKI Library 只有 Conv1D）需要自己分解或写，(c) SBUF/PSUM 间接寻址和 Activation2 在 Trn3 arch guide 描述了但 NKI 0.3.0 还没暴露 API，(d) HBM 带宽数字在 primary doc 中不一致（4.7 vs 4.9 TB/s）。这些都是工程问题，不是访问问题。</li>
+    </ul>
+  </div>
+
+  <p class="pullquote">下一阶段最有价值的切入点不一定是再造一个 latent world model，而是构建一个面向 accelerator 的 latent-space runtime——但这个 runtime 必须深耦合到 NCv4 微架构，否则不过是 GPU 论文的 Trainium 移植。</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- Key Findings -->
+<!-- ============================================================ -->
+<section id="findings">
+  <div class="section-head">
+    <div class="section-num">01</div>
+    <h2 class="section-title"><small>Headline Insights</small>Key Findings</h2>
+  </div>
+
+  <div class="findings">
+    <div class="finding"><div><p><strong>Trn3 / NCv4 的本质不是"更多 flops"，而是新原语。</strong> Tensor Engine 是物理 128×128 PE array，但对 MXFP8/MXFP4，每个 PE 每周期 4 个 MX MAC，呈现给程序员的是 <strong>逻辑 512×128 systolic array</strong>——一条指令完成 M=128, K=512, N=512。SBUF 每核 32 MiB。Vector Engine 有硬件 <code>exponential</code>（自带 fused max-subtract-exp-accumulate；softmax 友好）和 <code>QuantizeMX</code>（TensorE 直接消费的 MXFP8 tile）。这些原语决定了 latent runtime 的设计空间。</p></div></div>
+
+    <div class="finding"><div><p><strong>20 个 CC-Cores/chip + NeuronSwitch-v1 all-to-all 拓扑。</strong> Trn3 chip-to-chip 是 switched all-to-all 设计——一个 Trn3 Gen2 UltraServer 在 144 chip 上汇总 706 TB/s HBM，等价于 1-hop all-to-all；H100 NVL 超出 8 GPU 必须走 NVSwitch + InfiniBand。这是 collective-heavy workload（候选轴并行、MoE-style 路由、expert-routed VAE）的最大硬件杠杆。</p></div></div>
+
+    <div class="finding"><div><p><strong>NKI 0.2.0 引入 LNC=2 多核 kernel；NKI 0.3.0（Neuron 2.29.0，2026-04-09 发布）加入了 candidate-aware runtime 真正需要的原语</strong>——variable-length all-to-all（<code>all_to_all_v</code>）、<code>nki.isa.exponential</code>、<code>nonzero_with_count</code>、<code>oob_mode.skip</code> DMA、matmul accumulation 控制、Trn3 DMA 优先级、NKI 标准库、CPU 模拟器。<strong>Top-K Reduce</strong> kernel（原本服务于 MoE 输出聚合）和 <strong>find_nonzero_indices</strong> 恰好是 candidate-aware latent runtime 需要的——但仍是 experimental，且未针对视频 shape 调优。</p></div></div>
+
+    <div class="finding"><div><p><strong>GPU 端 DiT inference acceleration 已经非常拥挤</strong>——TeaCache、FasterCache、EasyCache、Δ-DiT、SpeCa、xDiT/PipeFusion/DistriFusion、FastVideo Sliding Tile Attention、Sparse-VideoGen 1/2、SVDQuant/Nunchaku。把这些纯移植到 Trainium 不会通过 MLSys 审稿。计划必须押注 GPU 做不好的事情：(a) 硬件 microscaling、一条指令 K=512；(b) 近内存 SBUF accumulation（DMA 做 B+=A，v4 之前只有 50% 带宽）；(c) <code>oob_mode.skip</code> SWDGE——单条 descriptor 编码"如果被剪枝就跳过"；(d) 通过 <code>no_reorder</code> 实现的确定性指令调度。</p></div></div>
+
+    <div class="finding"><div><p><strong>已发表的最接近 Trainium NKI 论文是 NeuronMM（arXiv 2510.25977）。</strong> 它通过 SVD 压缩 + "SRAM-capacity-aware caching strategy"（TrainiumFusion）显式利用 partition-dimension / SBUF / PSUM 层次，加速 LLM matmul。这篇 + ASPLOS 2025 NKI Tutorial / 竞赛（corelab-src/nki-llama 第 3 名）+ AccelOpt（arXiv 2511.15915，LLM 驱动的 NKI 优化）共同定义了"发表门槛"：深架构推理 + 相对 AWS 出厂内核的实测加速 + roofline 峰值占比。TrainiumLatent 应瞄准同一门槛。</p></div></div>
+
+    <div class="finding"><div><p><strong>视频扩散在 Trainium 上目前服务能力极差。</strong> NxD-Inference 支持 <strong>Flux.1-dev</strong>（TP + CP + CFG-parallel）——但 Flux 是纯图像。<strong>没有公开的 HunyuanVideo / CogVideoX / Wan / Mochi / Open-Sora / Cosmos 的 Trainium reference</strong>。Month-1 MVP 比原计划想得重得多：把 3D causal VAE（Cosmos 风格的 Haar wavelet + causal Conv3D）、3D RoPE、3D full attention、AdaLN modulation 在 NKI/torch-neuronx 上跑通本身就是一个贡献（也很可能是 Build-on-Trainium 资助的交付物）。</p></div></div>
+
+    <div class="finding"><div><p><strong>Trn3 直接访问 = 稀有的研究平台机会。</strong> 当前公开发表的 Trainium NKI 论文只有 NeuronMM（LLM matmul）和 AccelOpt（LLM 通用 kernel 优化）；<strong>Trainium 上没有任何视频/世界模型公开工作</strong>。Trn3 容量当前主要被 Project Rainier（Anthropic）占用，绝大多数学术团队只能通过 Capacity Block 间歇访问。你已有 Trn3 dedicated access 意味着可以在硬件 microscaling matmul + NeuronSwitch-v1 all-to-all + Vector-Engine fast exp 这些<em>没有任何外部论文测过</em>的特性上做首次系统性测量。Build on Trainium Spring 2026 CFP（Kernels for ML Acceleration，2026-05-06 截止；Post-Training）仍值得申请——AWS credit + 论文+开源是它的标准要求，与你的发表路线天然对齐。</p></div></div>
+  </div>
+</section>
+
+<div class="glyph-divider">§ &nbsp; § &nbsp; §</div>
+
+<!-- ============================================================ -->
+<!-- Section 1: Trn3 microarchitecture -->
+<!-- ============================================================ -->
+<section id="s1">
+  <div class="section-head">
+    <div class="section-num">02</div>
+    <h2 class="section-title"><small>NCv4 Microarchitecture</small>Trainium3 Deep Dive</h2>
+  </div>
+
+  <p>权威 primary source：<strong>Trainium3 Architecture Guide for NKI</strong>、<strong>NeuronCore-v4</strong> 文档页、Trn3 instance architecture 页面。每 chip 规格：</p>
+
+  <ul>
+    <li><strong>8 NeuronCore-v4 cores；4 stacks HBM3e，144 GiB</strong>。NKI 文档写 4.7 TB/s，Trn3 instance 页和 AWS 公告写 4.9 TB/s——primary source 之间存在不一致，引用时两个都标。</li>
+    <li><strong>128 DMA engines，20 CC-Cores，4 NeuronLink-v4 ports/chip</strong>。</li>
+    <li><strong>每核：32 MiB SBUF（v3 是 28），2 MiB PSUM（不变），128 partitions</strong>。128-partition 约束没变；<code>nl.tile_size.pmax = 128</code> 的所有规则仍适用。</li>
+  </ul>
+
+  <h3>计算引擎（NKI Trn3 arch guide, Table 12）</h3>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Engine</th><th>Data-path Width (elements/cycle)</th><th>Frequency</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Tensor</td><td>8×128 (MXFP8 dense), 2×128 (other dense), 5×128 (sparse); 1×128 output</td><td>2.4 GHz</td></tr>
+      <tr><td>Vector</td><td>512 BF16/FP16/FP8; 256 其他 dtype</td><td>1.2 GHz</td></tr>
+      <tr><td>Scalar</td><td>256 BF16/FP16/FP8; 128 其他 dtype</td><td>1.2 GHz</td></tr>
+      <tr><td>GPSIMD</td><td>128 across all dtypes</td><td>1.2 GHz</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><strong>每 NCv4 Tensor Engine 峰值吞吐：315 MXFP8/MXFP4 TFLOPS，79 BF16/FP16/TF32 TFLOPS，20 FP32 TFLOPS，315 TFLOPS structured-sparse FP16/BF16/TF32</strong>（稀疏模式 4:16, 4:12, 4:8, 2:8, 2:4, 1:4, 1:2）。每 chip：<strong>2.52 PFLOPS MXFP8</strong>。Trn3 Gen2 UltraServer = 144 chips × 2.52 = <strong>362 PFLOPS dense MXFP8，706 TB/s HBM，20 TB HBM</strong>，通过 PCIe Gen6 + NeuronSwitch-v1 做 all-to-all。</p>
+
+  <h3>NCv4 的核心原语（论文 Section 3 的硬件 cheat sheet）</h3>
+
+  <ol class="fancy">
+    <li><strong>硬件 MXFP8/MXFP4 microscaling matmul（<code>nc_matmul_mx</code>）。</strong> 物理 PE array 仍是 128×128，但 MX 操作数每 PE 每周期 4 个 MX MAC，逻辑视图变成 128 行 × 512 K systolic array。Scaling group size = K 方向 32 个元素（8 partition × 4 element 共享一个 8-bit scale）。一条指令 M×K×N = 128×512×512。</li>
+    <li><strong><code>QuantizeMX</code>（Vector Engine）</strong>——一条指令把 BF16/FP16 量化成 TensorE 可消费的 MXFP8 layout，4× Vector perf mode。</li>
+    <li><strong><code>nki.isa.exponential</code> 在 Vector Engine</strong>——fused max-subtract + exp + accumulate；<strong>Scalar Engine exp 的 4× 吞吐</strong>。原话："a new instruction to perform fast exponential evaluation, at 4x the throughput compared to nisa.activation (op=nl.exp) on the Scalar Engine." 显式为 attention softmax 设计。</li>
+    <li><strong>BF16 PSUM writes + BF16 PSUM accumulation</strong>——matmul 输出可直接落到 BF16（内部 FP32 累加；下转时 RNE 或 stochastic rounding）。在 attention pipeline 中省一次 PSUM→SBUF copy。</li>
+    <li><strong>Background Transpose</strong>——TensorE 可以与另一个 matmul 并行跑转置；自动，无 API；在转置密集链路上吞吐翻倍。</li>
+    <li><strong>近内存 SBUF accumulation（DMA B += A）</strong>——DMA engines 在 SBUF 上以全 DMA 吞吐做 read-add-write（v4 之前用 CC engine 只有 50%）。BF16 和 FP32 支持。<strong>对 diffusion residual stream 至关重要。</strong></li>
+    <li><strong>SBUF/PSUM 沿 free dim 的间接寻址</strong>——计算引擎（TensorE/VectorE/ScalarE/GpsimdE）可直接做 gather/scatter。<strong>NKI 0.3.0 仍无 <code>nki.isa</code> API</strong>——记为 "near-future capability" 风险。</li>
+    <li><strong>DMA Traffic Shaping</strong>——4 classes of service 做细粒度 DMA 优先级。NKI 0.3.0 release note 提到 "DMA priority settings for Trn3" 但还没完整 QoS API。</li>
+    <li><strong>Activation2 指令</strong>——Scalar Engine；支持 bias subtraction、可选 scale/bias 关闭、add/max/min/absmax/absmin reduction。<strong>暂无 <code>nki.isa</code> API。</strong></li>
+    <li><strong>Scalar Engine 2× perf mode（BF16/FP16 tensor_scalar / tensor_copy）</strong>——可以选择 ScalarE 或 VectorE 来做这些操作（VectorE 也有对应的 2× mode）。</li>
+    <li><strong>XORWOW 硬件 PRNG（VectorE）</strong>——4× 32-bit PRNG/周期/lane，通过 <code>nisa.rand2</code> 暴露。对 stochastic rounding 和 diffusion 的 on-device 噪声采样有用。</li>
+    <li><strong>NeuronSwitch-v1 all-to-all fabric</strong>。Switched all-to-all 拓扑是 collective-heavy workload 的最大硬件杠杆。</li>
+    <li><strong>PCIe Gen6 x8 server 内（256 GB/s bidir/chip）和跨 rack（128 GB/s bidir/chip）</strong>——PCIe 现在是 fabric 的一部分，不只是 host bus。</li>
+    <li><strong>LNC modes</strong>：NKI 0.2/0.3 示例展示 LNC=2。第三方报道（SemiAnalysis）说 Trn3 Day-0 支持 LNC=1 / LNC=2，LNC=8 延期到 2026 年中——<strong>primary doc 未确认</strong>。</li>
+  </ol>
+
+  <div class="caveats">
+    <div class="caveat-label">— Open documentation holes / project risks —</div>
+    <ul>
+      <li>每 NL-v4 link 带宽：marketing 页（aws.amazon.com/ec2/instance-types/trn3）写 2 TB/s/chip，但 NKI arch 页没写。</li>
+      <li>LNC mode 没穷举枚举。</li>
+      <li><code>nki.collectives</code> 各 collective 原语映射到哪个 engine 没文档化。</li>
+      <li>HBM 带宽单位/分箱不一致（NKI doc 4.7 TB/s vs product page 4.9 TB/s）。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 2: NKI current state -->
+<!-- ============================================================ -->
+<section id="s2">
+  <div class="section-head">
+    <div class="section-num">03</div>
+    <h2 class="section-title"><small>Programming Model</small>NKI Current State</h2>
+  </div>
+
+  <p>NKI 0.3.0（Neuron 2.29.0，2026-04-09 发布）是要瞄准的版本。来自官方 release note 的、对本计划有意义的亮点：</p>
+
+  <ul>
+    <li><strong><code>nki.collectives</code> 模块</strong>：<code>all_reduce</code>、<code>all_gather</code>、<code>reduce_scatter</code>、<code>all_to_all</code>、<code>all_to_all_v</code>（variable-length，2.29 新增）、<code>collective_permute</code> 及隐式变体、<code>rank_id</code>、<code>ReplicaGroup</code>。SBUF 张量支持 2D 单 free-dim shape 的 collective；多张量 coalesced collective 只能在 HBM 上。</li>
+    <li><strong><code>nki.isa.exponential</code></strong>（Vector Engine fast exp）和 <strong><code>nki.isa.nonzero_with_count</code></strong>（稀疏计算 / 动态掩码）——两者都是 2.27 加入。</li>
+    <li><strong><code>nki.isa.quantize_mx</code></strong>——BF16/FP16 → MXFP8，输出是 TensorE 可消费的 layout。</li>
+    <li><strong><code>nki.isa.nc_matmul_mx</code></strong>——仅 row-tiling PE tiling（无 column tiling）；data 接受 <code>float8_e5m2_x4</code>、<code>float8_e4m3fn_x4</code>、<code>float4_e2m1fn_x4</code>；scale 是 <code>uint8</code>；PSUM 输出 BF16 或 FP32。</li>
+    <li><strong>Matmul accumulation 控制</strong>——<code>nc_matmul</code> 显式 <code>accumulate=True/False/None</code>。K-tiling 的确定性和 residual + matmul 融合的关键。</li>
+    <li><strong><code>no_reorder</code> 块</strong>——指令顺序控制。</li>
+    <li><strong>DMA <code>dma_copy</code> 的 <code>unique_indices</code> 参数和 <code>oob_mode.skip</code></strong>——把 SWDGE 变成真正的 gather/scatter（剪枝索引 no-op）。<strong>这就是让 latent compaction 高效的原语。</strong></li>
+    <li><strong>CPU 模拟器</strong>——无 Trainium 硬件也能本地开发 NKI；NKI 标准库以 Apache-2.0 开源。</li>
+    <li><strong>NKI Library 生产内核</strong>：Attention CTE（≤131K seq，≤batch-512 with sequence packing）、Attention TKG / Attention Block TKG（QK-norm-before-RoPE fused、KVDP attention sharding）、MLP（MXFP4/MXFP8 quant paths、FP16 TKG、gate/up clamping）、MoE CTE + MoE TKG（dynamic all-expert algorithm、LNCShardingStrategy enum）、Output Projection CTE/TKG、QKV（fused FP8 KV-cache quant、block-based KV cache）、RMSNorm-Quant、RoPE、Router Top-K、Cumsum、<strong>Top-K Reduce</strong>（MoE 输出聚合，LNC sharding）、Transformer TKG（多层 token-generation megakernel）、Fine-Grained All-Gather、FGCC（All-Gather + Matmul fused）、SBUF-to-SBUF All-Gather、Conv1D、<strong>find_nonzero_indices</strong>、Dynamic Elementwise Add。</li>
+  </ul>
+
+  <h3>已知限制（视频依然痛）</h3>
+
+  <ul>
+    <li>编译流水线是 NKI → NEFF（MLIR-based NKI compiler → Neuron Graph Compiler）。<strong>NKI 是 tile-level DSL，不是任意 PyTorch tracer</strong>；仍要在 Python 里用 <code>@nki.jit</code> 写 tile。NCC 对 <code>stablehlo.while</code> 的约束（用户已遇到过）仍需要 <code>dynamic_range</code> + <code>VirtualRegister</code> cond，活的 SBUF 张量被 pin 整个 loop。Diffusion 采样循环的实用 workaround 仍是用 <code>static_range</code> / <code>affine_range</code> / <code>sequential_range</code> 静态展开，或 host-driven step + <code>input_output_aliases</code> 持久化状态。</li>
+    <li>任意 shape 的 2D-strided DMA 副本路径不通——DMA stride mismatch 仍需走 SWDGE fallback 或 <code>dma_transpose</code>（2.27+ 支持间接寻址）。</li>
+    <li><strong>0.3.0 仍无公开的 Conv3D 或 3D causal Conv NKI kernel</strong>（NKI Library 只有 Conv1D）。要么用 tile decomposition 把 Conv3D 拆成 Conv2D/Conv1D 序列，要么自己写 fused Conv3D——后者如果泛化得好，本身就是一篇贡献。</li>
+    <li><code>nki.collectives</code> 的 SBUF mode 受限于 2D 单 free-dim 张量；多张量 coalesced collective 需要 HBM。候选轴 collective 要小心规划。</li>
+  </ul>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 3: Workload characterization -->
+<!-- ============================================================ -->
+<section id="s3">
+  <div class="section-head">
+    <div class="section-num">04</div>
+    <h2 class="section-title"><small>Latent Video / World Models</small>Workload Characterization</h2>
+  </div>
+
+  <p>计划必须把主 workload 钉死。<strong>建议：HunyuanVideo-1.5</strong>（8.3B DiT + 3D causal VAE，16× 空间 / 4× 时间压缩，full 3D attention with Selective + Sliding-Tile Attention；arXiv 2511.18870）作为"高质量长视频"目标，<strong>NVIDIA Cosmos-Predict</strong>（continuous tokenizer CV8x8x8 + 2-level Haar wavelet；arXiv 2501.03575）作为"世界模型规划"目标。两者都开源开权重。</p>
+
+  <h3>典型 Hunyuan 风格 5-秒 720p 视频（≈115K token）的计算结构</h3>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Block</th><th>Arithmetic Intensity</th><th>Bound on Accelerator</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>3D causal VAE encoder（Conv3D + temporal causal attn）</td><td>low / mid（depthwise-like）</td><td>多为 memory-bound；activation 很大</td></tr>
+      <tr><td>3D RoPE + AdaLN modulation</td><td>flops 微不足道</td><td>memory-bound，延迟主导</td></tr>
+      <tr><td>3D full attention（seq ≈ 100K+）</td><td>非常高（token 二次方）</td><td>compute-bound；H100 上 FA-3 跑 Hunyuan 5 秒 720p ≈ 945 秒，per Zhang et al. (2025) arXiv 2502.04507</td></tr>
+      <tr><td>MLP / FFN block</td><td>均衡</td><td>批处理时 compute-bound；decode 时 memory-bound</td></tr>
+      <tr><td>VAE decoder</td><td>low / mid</td><td>memory-bound；大帧 OOM 风险</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><strong>候选轴 [B, N, T, H, W, C]</strong>（B=batch、N=候选数、T=帧、H/W=空间、C=channel）是"latent runtime"有趣的根源：世界模型用 cross-entropy method 做 MPC 时，V-JEPA-2-AC 用 800 sample × 10 次精化 × horizon 1 在单卡 RTX 4090 上达到 16 秒/动作；同任务 Cosmos 像素空间 4 分钟/动作（80 sample × 10 次精化 × horizon 1）。N 区间因此是 32 到 ~1000，T 是 1–16。</p>
+
+  <h3>Top-k / gather-scatter / compact 现状</h3>
+
+  <p>Sparse-VideoGen（Xi et al. 2025, arXiv 2502.01776; ICML 2025）：<em>"SVG achieves up to 2.28× and 2.33× end-to-end speedup on CogVideoX-v1.5 and HunyuanVideo, respectively, while preserving generation quality"</em>（基准在 H100-80GB-HBM3 + CUDA 12.4）。FastVideo STA（Zhang et al. 2025, arXiv 2502.04507）：<em>"achieves 58.79% MFU…STA accelerates attention by 2.8–17× over FA2 and 1.6–10× over FA3. On HunyuanVideo, STA reduces end-to-end latency from 945s (FA3) to 685s without quality degradation."</em> 两个都是 GPU 内核论文——<strong>没有 Trainium 对应物</strong>。</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 4: Prior art / gap map -->
+<!-- ============================================================ -->
+<section id="s4">
+  <div class="section-head">
+    <div class="section-num">05</div>
+    <h2 class="section-title"><small>Prior Art</small>Latent Runtime — The Gap Map</h2>
+  </div>
+
+  <h3>Caching（training-free）</h3>
+  <p><strong>TeaCache</strong>（Liu et al. 2024, arXiv 2411.19108; CVPR 2025）：<em>"up to 4.41× acceleration over Open-Sora-Plan with negligible (-0.07% Vbench) degradation"</em>，单卡 A800，16-帧 512×512。<strong>FasterCache</strong>（1.67× Vchitect-2.0, arXiv 2410.19355）；<strong>EasyCache</strong>（Zhou et al. 2025, arXiv 2507.02860）：<em>"improves speedup over TeaCache by 36% while boosting PSNR by 37% and SSIM by 14%"</em> on HunyuanVideo。<strong>Δ-DiT</strong>（1.6× PIXART-α / DiT-XL, arXiv 2406.01125）、AdaCache、SmoothCache。</p>
+
+  <h3>Sparse attention</h3>
+  <p>STA / FastVideo、Sparse-VideoGen 1/2、RainFusion、Sparse-vDiT、MInference——全是 GPU，全是 H100-specific kernel。</p>
+
+  <h3>Quantization</h3>
+  <p><strong>SVDQuant + Nunchaku</strong>（Li et al. 2025, arXiv 2411.05007; ICLR 2025 Spotlight）：<em>"On 12B FLUX.1-dev, 3.6× memory reduction vs BF16. By eliminating CPU offloading, 8.7× speedup over 16-bit on a 16GB laptop 4090 GPU, 3× faster than NF4 W4A16 baseline."</em> Q-Diffusion、ViDiT-Q（W8A8）、Q-DiT、DVD-Quant。<strong>SVDQuant 在 RTX 5090 上用 NVFP4</strong>（block 16, E8M0）——<strong>Trn3 不支持 NVFP4</strong>，只支持 OCP MXFP4（block 32, E8M0 scale + E2M1 data）。这是关键的协同设计点。</p>
+
+  <h3>Parallelism</h3>
+  <p>xDiT、PipeFusion（patch-level pipeline）、DistriFusion（async all-gather）、DistVAE、USP、CFG-parallel、<strong>ScaleFusion</strong>（MLSys 2025，ST-DiT，32 A100 上 3.60×）、<strong>PipeDiT</strong>（arXiv 2511.12056, 2025）。NxD-Inference 对 Flux 用 TP + CP + CFG-parallel——但没有 displaced-patch / temporal-redundancy 技巧。</p>
+
+  <h3>Speculative / forecast</h3>
+  <p><strong>SpeCa</strong>（DiT feature 上 forecast-then-verify, arXiv 2509.11628）、<strong>Next-Frame Diffusion</strong>（action-input speculative sampling, A100 30+ FPS, arXiv 2506.01380）、<strong>HIPPO</strong>（video-LLM parallel speculative decoding）。</p>
+
+  <h3>Decode-free latent scoring</h3>
+  <p><strong>V-JEPA-2 / V-JEPA-2-AC</strong>（冻结 encoder 上的 latent energy + cross-entropy method MPC，16 秒/动作 vs Cosmos 4 分钟）。<strong>Dreamer-V3 / Dreamer-4</strong>（latent imagination；Dreamer-4 在 H100 上实时交互，9.6 秒上下文，arXiv 2509.24527）。<strong>Genie 2</strong>（DeepMind 自回归 latent diffusion world model）、<strong>DIAMOND</strong>、MuZero、TD-MPC2。</p>
+
+  <p class="pullquote">真正的 gap 是 (latent caching + 候选轴并行 + decode-free scoring + 硬件 microscaling 感知量化) ∩ (non-GPU accelerator)。当前 Trainium 论文中没有任何一篇同时覆盖其中两个。</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 5: Trainium-specific opportunities -->
+<!-- ============================================================ -->
+<section id="s5">
+  <div class="section-head">
+    <div class="section-num">06</div>
+    <h2 class="section-title"><small>Hardware Hooks</small>Trn3-Specific Opportunities</h2>
+  </div>
+
+  <p>这是原计划需要最大幅度修订的地方。具体映射：</p>
+
+  <ol class="fancy">
+    <li><strong>候选轴 → LNC + chip rank。</strong> 把 <code>[B, N]</code> 映射到（intra-LNC NeuronCore rank × inter-chip rank），通过 <code>nki.collectives.ReplicaGroup</code>。Top-k 剪枝后用新的 <code>all_to_all_v</code>（variable-length，NKI 0.3.0）——每个 rank 剩下不同的存活数。</li>
+    <li><strong>Top-k 候选打分在 CC-Core 上。</strong> 现有的 <strong>Top-K Reduce NKI Library kernel</strong>（用于 MoE 输出聚合 + LNC sharding）和候选-top-k 在结构上完全相同。复用 + 针对 <code>[N, score]</code> 而不是 <code>[E, output]</code> 调优。</li>
+    <li><strong>Latent compaction 通过 SWDGE gather/scatter。</strong> <code>nki.isa.dma_copy(..., dge_mode=swdge, unique_indices=..., oob_mode=oob_mode.skip)</code>——单条 descriptor 编码"对要保留的 N 个候选，从 HBM gather 它们的 <code>[T,H,W,C]</code> latent 到 SBUF；剪枝的索引跳过"。<strong>这在 Trn3 上根本上比 H100 简单</strong>——GPU 上通常需要 CUTLASS gather kernel stream + cudaMemcpy + compaction prefix-sum。用 <code>nki.isa.nonzero_with_count</code> 在片上算 keep-mask。</li>
+    <li><strong>MXFP8 / MXFP4 候选感知量化。</strong> 32-元素 MX group size 与典型 DiT head-dim 粒度对齐（head_dim 64, 128 → 每 head row 2 或 4 个 group）。在<em>同一个 kernel</em>里运行 Vector Engine 的 <code>quantize_mx</code> 输出 attention，下一层 K @ V 从 MXFP8 起步，零 HBM 往返。对比 SVDQuant W4A4：SVDQuant <em>必须</em>有低秩分支吸收 outlier，因为它<em>没有</em>硬件 microscaling；Trn3 硬件 MX group=32 意味着简单的对称量化就能匹配它。<strong>这是最干净的"为什么要 Trn3"的故事。</strong></li>
+    <li><strong>通过 <code>nki.isa.exponential</code> 做 fused softmax。</strong> 4× VectorE exp 加上新的 BF16 PSUM write，让你能在单个 VectorE op stream 中发出 max-subtract-exp-accumulate——结果停留在 BF16 PSUM，立刻能消费给 V @ S matmul。这是 Trn3 对 FA-3 exp2 trick 的回答。</li>
+    <li><strong>Diffusion residual 的近内存累加。</strong> 每个 DiT block 都有 <code>x = x + Attn(LN(x))</code> 和 <code>x = x + MLP(LN(x))</code>。新的 SBUF Read-Add-Write 以全 DMA 吞吐让你完全绕过显式 add kernel——residual 折进 PSUM→SBUF 的 DMA 回写中。</li>
+    <li><strong>持久化 latent cache 通过 <code>input_output_aliases</code>。</strong> 鉴于 NCC 的 stablehlo.while 约束，diffusion 采样循环的常规做法是编译一个 single-step graph 并由 host 调度，通过 <code>input_output_aliases</code> 把 KV / feature cache 钉在 HBM。NxD-Inference 已经这么做；贡献是把它扩展到<em>候选感知</em>cache layout（<code>[N, layer, T, H, W, C]</code>，以 step + candidate index 为键）。</li>
+    <li><strong>3D causal Conv via Conv1D + tile composition。</strong> NKI 出 Conv3D 之前，把 Cosmos 风格 3D causal conv 分解为（时间 Conv1D，partition 维度上展开 T）×（空间 Conv2D，TensorE 上的 Toeplitz matmul）。这本身就是一个可发表的子 kernel。</li>
+    <li><strong>Attention 中的 Background Transpose。</strong> Q/K 转置在 QK^T 设置里落在 PE-tiled background transpose 上，释放 TensorE 周期给真正的 matmul。</li>
+    <li><strong>候选 pre-fetch 的 DMA traffic shaping。</strong> 用 4 个 DMA class 区分：下一 step 的 latent prefetch（高优先级）vs 后台 scoring 张量搬运（低优先级）。</li>
+  </ol>
+
+  <h3>值得设计的五个 NKI Kernel（替换原计划 Module C/D 内容）</h3>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Kernel</th><th>Purpose</th><th>用到的 Trn3 Features</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>latent_compact_nki</code></td>
+        <td>SWDGE gather，[N→k 存活] 跨 <code>[T,H,W,C]</code></td>
+        <td><code>dma_copy</code> + <code>oob_mode.skip</code> + <code>unique_indices</code> + SBUF Read-Add-Write</td>
+      </tr>
+      <tr>
+        <td><code>latent_topk_nki</code></td>
+        <td>候选 top-k score 在 N 上，跨 chip reduce</td>
+        <td>复用 Top-K Reduce + <code>nki.collectives.all_reduce</code></td>
+      </tr>
+      <tr>
+        <td><code>latent_quant_dequant_nki</code></td>
+        <td>TensorE matmul 前的在线 latent MXFP8 量化</td>
+        <td><code>quantize_mx</code> + <code>nc_matmul_mx</code> + BF16 PSUM</td>
+      </tr>
+      <tr>
+        <td><code>fused_adaln_attn_nki</code></td>
+        <td>DiT block：AdaLN modulation + 3D attention，VectorE 快速 exp softmax</td>
+        <td><code>exponential</code> + BF16 PSUM accumulation + background transpose</td>
+      </tr>
+      <tr>
+        <td><code>latent_scorer_nki</code></td>
+        <td>V-JEPA-2 风格 L1/L2 energy（predict vs goal latent），片上完成</td>
+        <td>VectorE reduction + intra-LNC <code>all_reduce</code></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>[B, N, T, H, W, C] 6 轴完整映射到 Trn3 硬件层次</h3>
+
+  <p>原计划 RQ2 提了 6 个轴的 layout 问题但没给答案。下表把每个轴绑定到具体的 Trn3 硬件资源，<strong>这是论文 Section 3 的核心架构图</strong>。</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Axis</th><th>典型范围</th><th>映射目标</th><th>具体机制</th><th>约束/原因</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>B</strong>（batch）</td><td>1–8</td><td>partition dim 或 batch-merge 到 N</td><td>partition dim ≤ 128；多数情况 B × N ≤ 128 时合并到一个 partition 维度</td><td>partition 维度是 NCv4 的硬件 SIMD 维度，pmax = 128</td></tr>
+      <tr><td><strong>N</strong>（candidate）</td><td>32–1024</td><td>NeuronCore rank × LNC rank × chip rank</td><td><code>nki.collectives.ReplicaGroup</code> + <code>all_to_all_v</code>；top-k 后用 variable-length all-to-all 重分布</td><td>这是 NeuronSwitch-v1 all-to-all 1-hop 的唯一受益维度</td></tr>
+      <tr><td><strong>T</strong>（rollout horizon / 视频帧）</td><td>1–32</td><td>NeuronCore 间 pipeline，或在 partition dim 上展开</td><td>用 <code>input_output_aliases</code> 持久化 frame-cache；<code>collective_permute</code> 在 NeuronCore 间转手 frame stage</td><td>NCC 的 stablehlo.while 限制使得 host-driven step 是务实选择；T 太大就用 chip 间 pipeline</td></tr>
+      <tr><td><strong>H, W</strong>（latent spatial）</td><td>16×16 到 90×160</td><td>free dim block tiling；或跨 NeuronCore spatial sharding</td><td>tile 进 SBUF 32 MiB；大 H,W 时用类似 USP/Ulysses 的 sequence parallel</td><td>3D attention 的 token = T × H × W 可达 ~100K，必须 sharding</td></tr>
+      <tr><td><strong>C</strong>（latent channel）</td><td>16–128</td><td>tensor parallel 跨 LNC=2 NeuronCore；或合并到 K 维做 matmul</td><td><code>nki.collectives.all_gather</code> 在 forward attention output 时收集；和 FFN 配合做 column/row parallel</td><td>head_dim 通常 64 或 128，自然对齐 MX group=32（2 或 4 groups/head row）</td></tr>
+      <tr><td><strong>剪枝后 compact</strong></td><td>—</td><td>SWDGE gather 在 N 轴上</td><td><code>oob_mode.skip</code> + <code>unique_indices</code>；keep-mask 用 <code>nonzero_with_count</code> 在片上算</td><td>这是 GPU 上需要 prefix-sum + cudaMemcpy 但 Trn3 一条 descriptor 解决的杀招</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>多维并行同时存在的策略组合</h3>
+
+  <p>原 Experiment 5 列了 candidate / horizon / spatial-token / channel 四种 sharding 但没说怎么组合。Trn3 上的实战组合（按 workload 阶段）：</p>
+
+  <ul>
+    <li><strong>Diffusion sampling 阶段（N 大，T 小，H/W 中）</strong>：N → chip rank（NeuronSwitch all-to-all）；C → LNC=2 tensor parallel；H/W → 单 NeuronCore free dim tiling。<strong>candidate-first</strong>。</li>
+    <li><strong>VAE decode 阶段（N=top-k 已剪枝，T 中，H/W 大）</strong>：H/W → chip rank（spatial sharding，类似 DistVAE）；T → NeuronCore 间 pipeline；N=k 折回 batch。<strong>spatial-first</strong>。</li>
+    <li><strong>World model rollout 阶段（N 中，T 大，H/W 小）</strong>：T → chip-level pipeline（每 chip 负责一段连续 horizon）；N → LNC + partition；H/W/C → 单 NeuronCore 内 tile。<strong>horizon-first</strong>。</li>
+  </ul>
+
+  <p>这种"workload 阶段决定 sharding 策略"的动态切换需要 runtime 支持——<strong>是论文 Module B (Candidate-aware Scheduler) 的核心智能</strong>。</p>
+
+  <!-- ===================================================== -->
+  <!-- Latent ↔ Trn3 Hardware Coupling (核心子章节) -->
+  <!-- ===================================================== -->
+
+  <div class="glyph-divider">·  ·  ·</div>
+
+  <h3>Latent 计算对象 ↔ Trn3 硬件层次（论文 Section 4 的核心架构）</h3>
+
+  <p>这是原计划最具差异化的内容，需要精细化展开。每一类 latent 对象都要绑定到 Trn3 的具体硬件资源——内存层级、生命周期、量化精度、通信模式。<strong>"latent tensor 是系统级计算对象"这句话要落到这张表上才有意义。</strong></p>
+
+  <h4>A · Latent 对象目录及其硬件归宿</h4>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Latent Object</th><th>生命周期</th><th>主存位置</th><th>跨 step 持久化</th><th>推荐精度</th><th>跨 chip 通信</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>observation latent</strong> <code>z_obs</code></td><td>per-rollout</td><td>SBUF replicated</td><td>是，<code>input_output_aliases</code></td><td>BF16</td><td>broadcast 一次（rollout 开始）</td></tr>
+      <tr><td><strong>candidate latent</strong> <code>z_n</code></td><td>per-candidate × per-step</td><td>HBM（candidate-sharded）</td><td>是</td><td>MXFP8 → MXFP4（按 stage）</td><td><code>all_to_all_v</code> after prune</td></tr>
+      <tr><td><strong>shared condition</strong> <code>c</code></td><td>per-rollout</td><td>SBUF replicated</td><td>是</td><td>BF16</td><td>broadcast</td></tr>
+      <tr><td><strong>per-step transient state</strong></td><td>per-step</td><td>SBUF / PSUM</td><td>否</td><td>BF16 PSUM</td><td>无</td></tr>
+      <tr><td><strong>score head output</strong></td><td>per-candidate scalar</td><td>HBM</td><td>否</td><td>FP32</td><td><code>all_reduce</code></td></tr>
+      <tr><td><strong>latent rollout buffer</strong> <code>[N,T,H,W,C]</code></td><td>per-rollout</td><td>HBM</td><td>是</td><td>MXFP8</td><td><code>all_to_all</code> on N axis</td></tr>
+      <tr><td><strong>VAE encoder weights</strong></td><td>persistent</td><td>HBM weight-pinned</td><td>是</td><td>static MXFP8</td><td>replicated per chip</td></tr>
+      <tr><td><strong>VAE decoder weights</strong></td><td>persistent</td><td>HBM</td><td>是</td><td>MXFP4 OK</td><td>replicated</td></tr>
+      <tr><td><strong>scorer weights</strong>（小 MLP）</td><td>persistent</td><td>SBUF-resident（如果小）</td><td>是</td><td>MXFP8</td><td>replicated</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h4>B · LLM Serving ↔ Latent World Model 类比映射（论文 introduction 的 framing 杀器）</h4>
+
+  <p>原计划第 15 节做了非常有发表价值的对照。这里把每一项绑定到 Trn3 上的具体实现：</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>LLM Serving 概念</th><th>典型 GPU 实现</th><th>Latent World Model 对应</th><th>TrainiumLatent 实现</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>token decoding</td><td>TKG kernel</td><td><strong>latent rollout step</strong></td><td>denoise / predict step（NKI fused）</td></tr>
+      <tr><td>KV cache</td><td>block-paged HBM</td><td><strong>latent state cache</strong></td><td>candidate-paged HBM + <code>input_output_aliases</code></td></tr>
+      <tr><td>paged attention</td><td>block table indirect</td><td><strong>paged candidate cache</strong></td><td>top-k-compacted block table（不动数据，懒惰 gather）</td></tr>
+      <tr><td>continuous batching</td><td>varying seq length</td><td><strong>candidate batching</strong></td><td><code>all_to_all_v</code>（variable-length）</td></tr>
+      <tr><td>speculative decoding</td><td>draft + verify</td><td><strong>speculative future pruning</strong></td><td>partial denoise → score → keep top-k</td></tr>
+      <tr><td>quantized KV cache</td><td>FP8 KV per request</td><td><strong>quantized latent cache</strong></td><td>MXFP8 latent + dequant via <code>quantize_mx</code> 反向</td></tr>
+      <tr><td>SGLang RadixAttention</td><td>prefix tree share</td><td><strong>shared condition cache</strong></td><td>SBUF-pinned <code>z_obs</code> + condition <code>c</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="pullquote">Just as KV-cache management became a first-class systems problem for LLM serving, latent-state management may become a first-class systems problem for video world-model serving — but only on Trn3 do you get hardware microscaling + all-to-all switched fabric + SBUF Read-Add-Write to actually exploit it.</p>
+
+  <h4>C · Latent Cache 设计 — paged 风格 + 双层（SBUF / HBM）</h4>
+
+  <p>把 vLLM paged attention 的设计模式移植到 latent runtime，但利用 Trn3 的双层显存：</p>
+
+  <ul>
+    <li><strong>Block 定义</strong>：1 candidate × 1 stage × 1 frame × <code>[H, W, C]</code> tile，典型 16 KiB–256 KiB。</li>
+    <li><strong>Hot tier (SBUF)</strong>：当前 step 活跃的 top-k candidate。每 chip 256 MiB SBUF（32 MiB × 8 core）容纳 ~1000 个 256 KiB block；用 LNC=2 跨核 sharding 后单核 32 MiB 容纳 ~125 block。</li>
+    <li><strong>Cold tier (HBM)</strong>：未来 step / 已剪枝但保留 lineage 的 candidate。144 GiB HBM 容纳 ~600K block。</li>
+    <li><strong>Block table 在 HBM</strong>：<code>block_table[N, stage] → (chip_id, hbm_offset)</code>。</li>
+    <li><strong>剪枝后操作</strong>：<em>不重排数据</em>——只更新 block table，下次 access 时 SWDGE 用 <code>oob_mode.skip</code> + <code>unique_indices</code> gather。</li>
+    <li><strong>Prefetch</strong>：4 个 DMA traffic class 把 "next step latent prefetch" 设为高优先级、"score tensor 移动" 设为低优先级，与 compute 重叠。</li>
+  </ul>
+
+  <h4>D · Latent Quantization 的 4D 调度矩阵</h4>
+
+  <p>原计划提了 candidate-rank × diffusion-stage × token-importance × static/dynamic-region 四维调度但没给具体策略。下表是 Trn3 上的可执行策略，<strong>每一行是 latent runtime 的一个量化决策点</strong>：</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Diffusion Stage</th><th>Candidate Rank</th><th>Token Type</th><th>Region</th><th>推荐精度</th><th>Trn3 实现</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>early（探索）</td><td>bottom 50%（将被剪枝）</td><td>static</td><td>background</td><td><strong>MXFP4</strong></td><td><code>nc_matmul_mx</code> + <code>float4_e2m1fn_x4</code></td></tr>
+      <tr><td>early</td><td>bottom 50%</td><td>dynamic</td><td>foreground</td><td>MXFP8</td><td><code>float8_e4m3fn_x4</code> data + uint8 scale</td></tr>
+      <tr><td>early</td><td>top survivors</td><td>any</td><td>any</td><td>MXFP8</td><td>survivors 保精度，量化损失不传播</td></tr>
+      <tr><td>mid</td><td>bottom（即将剪枝）</td><td>any</td><td>any</td><td>MXFP4 + 提前停步</td><td>kernel 融合 <code>quantize_mx</code> + 早停判据</td></tr>
+      <tr><td>mid</td><td>top survivors</td><td>static</td><td>background</td><td>MXFP8</td><td>head_dim 64/128 对齐 MX group=32</td></tr>
+      <tr><td>mid</td><td>top survivors</td><td>dynamic</td><td>foreground</td><td>BF16 PSUM accumulate</td><td>关键梯度信号不损失，PSUM 直写 BF16</td></tr>
+      <tr><td>late（精化）</td><td>survivors only</td><td>static</td><td>any</td><td>MXFP8</td><td>已收敛区域，低精度足够</td></tr>
+      <tr><td>late</td><td>survivors only</td><td>dynamic</td><td>any</td><td>BF16 throughout</td><td>最终质量决定，VectorE softmax 全 BF16</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><strong>关键洞察</strong>：MX group=32 自然与 DiT head_dim {64, 128} 对齐（每 head row 2 或 4 个 group）——这是 GPU NVFP4 (block=16) 拿不到的对齐红利。SVDQuant 必须靠低秩分支吸收 outlier 是因为<em>没有硬件 microscaling</em>；Trn3 的 32-元素 group 让 outlier 被局部 scale 吸收，简单对称量化就能匹配 W4A4 SVDQuant 质量——<strong>无需 SVD 分支</strong>。这是论文 Contribution 3 的核心。</p>
+
+  <h4>E · Latent Compaction 的 DMA 工程细节</h4>
+
+  <p>剪枝后 <code>[B, N, T, H, W, C]</code> → <code>[B, K, T, H, W, C]</code>，K &lt; N。三种 DMA pattern：</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Pattern</th><th>触发条件</th><th>DMA 策略</th><th>Trn3 overhead</th><th>GPU 对照</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>contiguous block</td><td>存活 candidate index 连续</td><td>flat DMA 平铺</td><td>~0%（带宽限制）</td><td>cudaMemcpyAsync</td></tr>
+      <tr><td>strided / regular</td><td>等间隔存活（如每 2 保留 1）</td><td><code>dma_transpose</code> + stride</td><td>5–10%</td><td>CUTLASS gather kernel</td></tr>
+      <tr><td>random scatter</td><td>任意（最常见）</td><td>SWDGE + <code>oob_mode.skip</code> + <code>unique_indices</code></td><td>10–20%，<em>单条 descriptor</em></td><td>thrust::copy_if = prefix-sum + memcpy + compaction kernel（3 个 launch）</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><strong>关键工程细节</strong>：</p>
+  <ul>
+    <li>N=128 时单条 SWDGE descriptor 可编码全部 keep mask；<code>nonzero_with_count</code> 给 keep indices，全部在片上。</li>
+    <li><strong>compaction 不一定要做</strong>——可用"懒惰 block table"（更新指针、不动数据），下次 access SWDGE gather。这种"零拷贝 compaction"是 Trn3 独有，GPU 上 thrust 模型必须移动数据。</li>
+    <li>compaction overhead 公式：<code>t_compact = (K · T · H · W · C · bytes) / B_dma + L_descriptor</code>，其中 <code>L_descriptor</code> ≈ 几 µs 与 K 无关，<code>B_dma</code> 是 SWDGE 有效带宽（实测，约 80–120 GB/s/core）。</li>
+  </ul>
+
+  <h4>F · Decode-free Latent Scoring 的硬件分类</h4>
+
+  <p>原计划列了 latent similarity / motion consistency / future-frame retrieval / latent reward / latent risk 五种 scorer。它们在 Trn3 上跑在<em>不同的 engine</em>，这影响调度：</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Scorer 类型</th><th>计算特征</th><th>Trn3 落地</th><th>适合场景</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>L1/L2 distance to goal</strong></td><td>element-wise + reduction</td><td>VectorE + intra-LNC <code>all_reduce</code></td><td>V-JEPA-2 风格 energy MPC</td></tr>
+      <tr><td><strong>cosine similarity</strong></td><td>small matmul + normalize</td><td>TensorE 小 matmul + VectorE rsqrt</td><td>retrieval-based scoring</td></tr>
+      <tr><td><strong>motion consistency</strong></td><td>cross-frame delta + variance</td><td>VectorE 跨 T 帧 reduce</td><td>物理合理性检查</td></tr>
+      <tr><td><strong>latent reward MLP</strong></td><td>2-3 层小 MLP</td><td>SBUF-resident weights + ScalarE 2× perf mode</td><td>RL value head</td></tr>
+      <tr><td><strong>latent risk / uncertainty</strong></td><td>ensemble variance</td><td>TensorE small matmul + GpsimdE for control</td><td>safety filter</td></tr>
+      <tr><td><strong>goal classifier</strong></td><td>linear + softmax</td><td>TensorE + VectorE <code>exponential</code></td><td>task completion check</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><strong>全部 decode-free</strong>——VAE decoder 只在最终 top-1 / top-3 candidate 上调用（成本最高的一个 block，必须严格限流）。<strong>decode avoidance ratio</strong> = 1 − (decoded candidates / total candidates) 应作为论文核心 metric 之一。</p>
+
+  <h4>G · Latent Microbenchmark 完整变量空间（原 Experiment 1 还原）</h4>
+
+  <p>原 Experiment 1 的 4D 变量 + 输出 metrics，全部在 Trn3 上跑。这是 Months 1–2 的核心工作量：</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>变量轴</th><th>取值</th><th>动机</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>T</strong>（rollout / frames）</td><td>4, 8, 16, 32</td><td>覆盖短规划（T=4）到长视频（T=32）</td></tr>
+      <tr><td><strong>H, W</strong>（latent spatial）</td><td>16×16, 32×32, 64×64</td><td>对应 480p / 720p / 1080p 解码后</td></tr>
+      <tr><td><strong>C</strong>（latent channels）</td><td>16, 32, 64, 128</td><td>head_dim 对齐 MX group=32 的扫描</td></tr>
+      <tr><td><strong>N</strong>（candidates）</td><td>1, 8, 32, 128, 512</td><td>覆盖单 candidate 到 V-JEPA-2-AC 的 800</td></tr>
+      <tr><td><strong>precision</strong></td><td>BF16, FP8 E4M3, MXFP8, MXFP4</td><td>nc_matmul vs nc_matmul_mx 完整对照</td></tr>
+      <tr><td><strong>LNC mode</strong></td><td>LNC=1, LNC=2</td><td>多核 kernel 收益</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><strong>每个变量组合测的对象</strong>：DiT attention · MLP · AdaLN modulation · 3D causal VAE encoder block · VAE decoder · top-k · latent compact · quant/dequant · 5 种 latent scorer。</p>
+
+  <p><strong>每个 cell 输出</strong>：latency · peak memory (SBUF/PSUM/HBM) · HBM bandwidth utilization · TensorE/VectorE/ScalarE/GpsimdE utilization · DMA traffic & class distribution · CC-Core utilization · candidate futures per second (N&gt;1) · cost per generated latent second。</p>
+
+  <p class="pullquote">这个变量空间是 4 × 3 × 4 × 5 × 4 × 2 = 1920 个 cell，全部跑通是论文 Section 5.1 的核心图表来源。Trn3 上预计 200–400 GPU-hour 等价的计算时间。</p>
+</section>
+<!-- ============================================================ -->
+<!-- NEW Section: System Mechanisms (Paper Outline) -->
+<!-- ============================================================ -->
+<section id="mech">
+  <div class="section-head">
+    <div class="section-num">07</div>
+    <h2 class="section-title"><small>Paper Outline</small>System Mechanisms — Beyond Single-Rollout Inference</h2>
+  </div>
+
+  <p>到这里评审报告从"原计划修订"升级为<strong>具体的论文 outline</strong>。下面六个 mechanism 把"latent runtime"这个泛概念分解成可独立设计、可独立评估、可独立发表的<em>系统机制</em>。每个机制有 (i) system 设计图，(ii) Trn3 arch hook 清单，(iii) 一句数学/算法兜底，(iv) 论文价值。</p>
+
+  <p><strong>Paper A 主线</strong>（Mechanism 1+2+3+4）：单 model、跨 candidate 的 Trn3-aware latent runtime。LLM serving 的 PagedAttention / early exit / MQA / dynamic precision 的 video latent 对应物，每一个都是 Trn3 NCv4 原语的直接落地。</p>
+
+  <p><strong>Paper B</strong>（Mechanism 5+6）：跨 model、跨 fidelity 的协作 rollout。Paper A 的自然 follow-up，把 Trn3 144-chip Gen2 UltraServer + NeuronSwitch-v1 all-to-all 完整用满。</p>
+
+  <!-- ============= PAPER A BANNER ============= -->
+  <div class="paper-banner">
+    <h3 class="paper-banner-title">Paper A · Trainium-Aware Latent Runtime for Video Diffusion</h3>
+    <span class="paper-banner-meta">MLSys 2026 · Mechanisms 1–4</span>
+  </div>
+
+  <!-- ============= MECHANISM 1 ============= -->
+  <div class="mech-card paper-a">
+    <div class="mech-header">
+      <div class="mech-num">01</div>
+      <div class="mech-title-block">
+        <div class="mech-eyebrow">Cross-candidate State Sharing</div>
+        <h4 class="mech-title">Latent Prefix Cache · 跨候选共享 prefix</h4>
+      </div>
+      <span class="mech-paper-tag">Paper A</span>
+    </div>
+    <div class="mech-body">
+      <div class="mech-block">
+        <div class="mech-block-label">System Idea</div>
+        <p>N candidate rollout 在大部分时候共享 prefix——同一 <code>z_obs</code>、同一 condition、甚至 early denoising step 的输出几乎相同。当前实现每个 candidate 各算各的，HBM 重复存 N 份；fork 应当由 latent divergence 触发，而不是从第 0 step 就分裂。</p>
+        <p>仿 vLLM PagedAttention：shared prefix 在 SBUF（每 chip 256 MiB 容纳），per-candidate divergence block 在 HBM；block table 记录"何时 fork"。</p>
+      </div>
+      <div class="mech-block">
+        <div class="mech-block-label">Trn3 Arch Hooks</div>
+        <ul>
+          <li>Shared prefix → SBUF replicated；<code>z_obs</code> 和 condition pinned 在每核 32 MiB SBUF</li>
+          <li>Per-candidate divergence → HBM-paged，block size = <code>[T,H,W,C]</code> tile</li>
+          <li>Fork-on-divergence 检测：VectorE <code>tensor_tensor</code> 算 L2 距离，cost ~µs</li>
+          <li>Gather 时用 <code>oob_mode.skip</code> SWDGE 跨 candidate 取 divergence block，单 descriptor</li>
+          <li>DMA traffic class:high 给 fork 时的 block 分配；class:low 给 background eviction</li>
+        </ul>
+      </div>
+      <div class="mech-diagram">step 0 ─── step 1 ─── step 2 ── ┬── step 3 ── candidate A
+                                       │
+                                       ├── step 3 ── candidate B
+                                       │
+                                       └── step 3 ── candidate C
+
+[SBUF · shared prefix]   ──fork──   [HBM · per-candidate paged blocks]</div>
+      <div class="mech-math">
+        Fork 条件：<span class="formula">||z_i − z_shared||₂ &gt; τ</span>，其中 τ 由 latent reconstruction error vs HBM 占用的 Pareto 曲线选定。实测在 diffusion 上典型 fork 在 step ⌈0.3·T⌉ 附近——意味着前 30% step 全部 SBUF-shared。
+      </div>
+      <div class="mech-value">
+        <strong>论文价值：</strong>把 vLLM PagedAttention 在 video latent 上的对应物完整做出来；同时是 latent-state-as-systems-problem 的最具体证据。
+      </div>
+    </div>
+  </div>
+
+  <!-- ============= MECHANISM 2 ============= -->
+  <div class="mech-card paper-a">
+    <div class="mech-header">
+      <div class="mech-num">02</div>
+      <div class="mech-title-block">
+        <div class="mech-eyebrow">Per-candidate Adaptive Compute</div>
+        <h4 class="mech-title">Early-Exit Latent Rollout · 异步 dispatch</h4>
+      </div>
+      <span class="mech-paper-tag">Paper A</span>
+    </div>
+    <div class="mech-body">
+      <div class="mech-block">
+        <div class="mech-block-label">System Idea</div>
+        <p>当前所有 candidate 跑完全部 denoising step。事实上多数 candidate 在中间就能判断"必败"——应该提前 exit。但 GPU 上 batched 执行让 early-exit 不收益：batch 里一个 candidate 没 exit，其它就要等。</p>
+        <p>Trn3 上候选跨 chip 分布——单 candidate exit 立刻释放它占的 NeuronCore 给其他 candidate，<em>不需要 batch 同步</em>。配合 <code>all_to_all_v</code> 动态重平衡负载。</p>
+      </div>
+      <div class="mech-block">
+        <div class="mech-block-label">Trn3 Arch Hooks</div>
+        <ul>
+          <li>Exit head：DiT block 加 lightweight 2-layer MLP，SBUF-resident weights</li>
+          <li>Exit signal aggregation：<code>nki.collectives.all_reduce</code> on Bool mask，CC-Core 处理</li>
+          <li>负载重平衡：variable-length <code>all_to_all_v</code> 把 active candidate 重新分配到空闲 NeuronCore</li>
+          <li>异步 NeuronCore dispatch：不阻塞在 batch synchronization——LNC=1 / 2 mode 切换</li>
+          <li>"释放"的 NeuronCore 通过 <code>input_output_aliases</code> 接收新工作负载，无 reload 开销</li>
+        </ul>
+      </div>
+      <div class="mech-diagram">step 4   [A][B][C][D][E][F][G][H]    ← all 8 running
+step 5   [A][B][_][D][_][F][G][H]    ← C, E exit; cores released
+step 6   [A][B][I][D][J][F][G][H]    ← cores reassigned to new candidates I, J
+step 7   [A][_][I][_][J][F][G][H]    ← B, D exit; more reshuffles</div>
+      <div class="mech-math">
+        Exit decision：<span class="formula">exit if E[V_remaining(z)] &lt; C_remaining_compute</span>——和 LLM speculative decoding 的 verify threshold 同形式。E[V] 由 exit head 学到的 value function 给出，C 由编译期已知的 remaining step × per-step cost 给出。
+      </div>
+      <div class="mech-value">
+        <strong>论文价值：</strong>第一个真正利用 Trn3 异步 dispatch 做 per-candidate adaptive compute 的系统。GPU 上做不了——NCCL 同步开销 &gt; early-exit 收益；Trn3 的 <code>all_to_all_v</code> + CC-Core 异步执行让它成立。
+      </div>
+    </div>
+  </div>
+
+  <!-- ============= MECHANISM 3 ============= -->
+  <div class="mech-card paper-a">
+    <div class="mech-header">
+      <div class="mech-num">03</div>
+      <div class="mech-title-block">
+        <div class="mech-eyebrow">Runtime-Adaptive Precision</div>
+        <h4 class="mech-title">Stage-Adaptive MX Scheduling · calibration-driven</h4>
+      </div>
+      <span class="mech-paper-tag">Paper A</span>
+    </div>
+    <div class="mech-body">
+      <div class="mech-block">
+        <div class="mech-block-label">System Idea</div>
+        <p>原计划的 4D quantization matrix 是 hand-designed rule。换成 <strong>runtime 实测驱动</strong>——每个 stage 跑一个 µs 级 calibration probe，测<em>当前 model + 当前 workload + 当前 stage</em>对量化的敏感度，自动选 MXFP4 / MXFP8 / BF16。</p>
+        <p>核心是 decision cache：calibration 决策一次，cache 在 SBUF 跨所有 candidate 共享；每 K step 重新校准一次（K ≈ 4–8）。</p>
+      </div>
+      <div class="mech-block">
+        <div class="mech-block-label">Trn3 Arch Hooks</div>
+        <ul>
+          <li>Calibration probe = 1 个 candidate forward step 用 MXFP4 vs BF16，比较 latent output</li>
+          <li>KL/L2 reconstruction error 计算：VectorE <code>exponential</code> + reduction，~10 µs</li>
+          <li>Decision cache：每 (stage, layer) 的精度选择存在 SBUF region，跨 candidate 共享读</li>
+          <li>Precision 切换 = compile 多版本 kernel（MXFP4 / MXFP8 / BF16），runtime dispatch 选其一</li>
+          <li><code>quantize_mx</code> 调用代价 vs 跳过的对比 = 数据点本身</li>
+        </ul>
+      </div>
+      <div class="mech-math">
+        Calibration 信号：<span class="formula">err(stage, layer) = ||z_BF16 − z_MX||₂ / ||z_BF16||₂</span>。Pareto-frontier-aware 阈值切换：当 err &gt; τ_high 升级精度，err &lt; τ_low 降级精度。τ 取 calibration 集上 quality vs latency Pareto 曲线肘点。
+      </div>
+      <div class="mech-value">
+        <strong>论文价值：</strong>当前所有 SVDQuant / MXFP 论文都是<em>静态</em>量化（一次决定，全程不变）。这是<em>runtime-adaptive</em>——跨 model、跨 workload portable，不需要 per-model 调参。Trn3 的快速 calibration kernel + group=32 微调粒度是关键。
+      </div>
+    </div>
+  </div>
+
+  <!-- ============= MECHANISM 4 ============= -->
+  <div class="mech-card paper-a">
+    <div class="mech-header">
+      <div class="mech-num">04</div>
+      <div class="mech-title-block">
+        <div class="mech-eyebrow">Compute Sharing Across Candidates</div>
+        <h4 class="mech-title">Cross-Candidate KV Sharing · MQA for video DiT</h4>
+      </div>
+      <span class="mech-paper-tag">Paper A</span>
+    </div>
+    <div class="mech-body">
+      <div class="mech-block">
+        <div class="mech-block-label">System Idea</div>
+        <p>N candidate 在同一 diffusion step 跑 attention，QKV 矩阵<em>很多列共享</em>——因为它们共享 condition、共享 observation。Attention 的 K 和 V 投影是 shared parameters × shared input，应该<em>算一次共享</em>，而不是 N 次重复。</p>
+        <p>这是 Multi-Query Attention 在 LLM 上的成熟做法，但 video DiT 的 candidate 维度版本目前没有。Cross-attention layer 显然适用（condition 共享）；early-step self-attention 也大致适用（latent 还没发散——这与 Mechanism 1 的 fork 时机直接耦合）。</p>
+      </div>
+      <div class="mech-block">
+        <div class="mech-block-label">Trn3 Arch Hooks</div>
+        <ul>
+          <li>K, V projection 跨 N candidate 共享：在 SBUF 算一次，broadcast 到所有 candidate</li>
+          <li>K, V broadcast：<code>nki.collectives.all_gather</code>（已有 SBUF-to-SBUF 实现）</li>
+          <li>Q projection 仍 per-candidate：每核独立算 Q tile</li>
+          <li>Attention QK^T：per-candidate Q × shared K，TensorE matmul</li>
+          <li>把 3N 个 projection matmul 降到 2 + N（K, V 各 1 次 + N 次 Q）</li>
+        </ul>
+      </div>
+      <div class="mech-math">
+        将 attention 写为 <span class="formula">softmax(Q_i K_shared^T / √d) · V_shared</span>，显式表达 K, V 的 candidate-invariance。Fork 后（见 Mechanism 1）K, V 才转为 per-candidate——共享窗口与 prefix cache 窗口在<em>同一阈值 τ</em>下耦合。
+      </div>
+      <div class="mech-value">
+        <strong>论文价值：</strong>Multi-Query Attention 在 LLM 节省 KV cache 是经典；这是 video diffusion 的 candidate 维度版本。Trn3 的 SBUF replicated + intra-LNC all-gather 是天然实现。与 Mechanism 1 的 fork-on-divergence 共用阈值是真正的<em>系统级耦合</em>，不只是 kernel 拼接。
+      </div>
+    </div>
+  </div>
+
+  <!-- ============= PAPER B BANNER ============= -->
+  <div class="paper-banner b">
+    <h3 class="paper-banner-title">Paper B · Speculative &amp; Hierarchical Latent Computation</h3>
+    <span class="paper-banner-meta">MLSys 2027 / ASPLOS 2027 · Mechanisms 5–6</span>
+  </div>
+
+  <!-- ============= MECHANISM 5 ============= -->
+  <div class="mech-card paper-b">
+    <div class="mech-header">
+      <div class="mech-num">05</div>
+      <div class="mech-title-block">
+        <div class="mech-eyebrow">Multi-Model Draft / Verify</div>
+        <h4 class="mech-title">Speculative Latent Rollout · 小 model propose + 大 model verify</h4>
+      </div>
+      <span class="mech-paper-tag">Paper B</span>
+    </div>
+    <div class="mech-body">
+      <div class="mech-block">
+        <div class="mech-block-label">System Idea</div>
+        <p>小 world model（draft，~1B）在 latent 中快速 rollout 多步；大 world model（target，~8B）在 latent 中跳跃 verify 关键 step——<em>全程不出 latent space</em>。Verify metric 是 latent 距离或 learned consistency head，跳过 decode。</p>
+        <p>这是 LLM speculative decoding 在 video diffusion 上的第一个完整搬移。SpeCa 是 feature-level；这是 model-level，是 Leviathan 2023 的直接对应。</p>
+      </div>
+      <div class="mech-block">
+        <div class="mech-block-label">Trn3 Arch Hooks</div>
+        <ul>
+          <li>Draft model pinned 在 1 chip，SBUF-resident weights，BF16</li>
+          <li>Target model 跨 8–16 chip TP+CP，MXFP8</li>
+          <li>Draft → target 通过 <strong>NeuronSwitch-v1 all-to-all</strong> 路由 latent，不落 HBM</li>
+          <li>Verify 在 latent 里：VectorE 算距离 + 小 consistency head（TensorE）</li>
+          <li>Accept/reject 决定哪些 draft step 保留——异步分支用 <code>oob_mode.skip</code></li>
+        </ul>
+      </div>
+      <div class="mech-math">
+        Speculative acceptance：<span class="formula">α = min(1, p_target(z) / p_draft(z))</span>——直接套 Leviathan-Kalman 2023 的公式，分布换成 latent likelihood（用 flow matching 的 log-prob，闭式可得）。
+      </div>
+      <div class="mech-value">
+        <strong>论文价值：</strong>LLM speculative decoding 在 video diffusion 上没有完整对应物。NeuronSwitch-v1 全互联是论文最强的 hardware story——144-chip Gen2 UltraServer 终于真正用满。
+      </div>
+    </div>
+  </div>
+
+  <!-- ============= MECHANISM 6 ============= -->
+  <div class="mech-card paper-b">
+    <div class="mech-header">
+      <div class="mech-num">06</div>
+      <div class="mech-title-block">
+        <div class="mech-eyebrow">Multi-Fidelity Cascade</div>
+        <h4 class="mech-title">Hierarchical Latent Refinement · 跨分辨率不出 pixel</h4>
+      </div>
+      <span class="mech-paper-tag">Paper B</span>
+    </div>
+    <div class="mech-body">
+      <div class="mech-block">
+        <div class="mech-block-label">System Idea</div>
+        <p>先在低分辨率 latent 上跑大量 candidate 粗筛（N=256, 16×16），top-k 后 lift 到高分辨率 latent 精修（k=8, 64×64）。<strong>中间不出 pixel 空间</strong>——learned <code>latent_upsample</code> 模型做跨分辨率桥接。</p>
+        <p>很多 video model 已是 cascaded（Stable Video Diffusion → SDXL Refiner；Cosmos 多档），但都是 pixel-mediated cascade。这把它变成 latent-only runtime primitive。</p>
+      </div>
+      <div class="mech-block">
+        <div class="mech-block-label">Trn3 Arch Hooks</div>
+        <ul>
+          <li>Low-res stage：1 chip，LNC=2，MXFP4，N=256 candidate 全部装 SBUF</li>
+          <li>High-res stage：16 chip TP+CP，MXFP8，k=8 survivor，NeuronSwitch all-to-all 分发</li>
+          <li>Lift = ~10M params <code>latent_upsample</code>，SBUF-resident（每核 32 MiB 足够）</li>
+          <li>Stage transition 通过 NeuronLink-v4 直接传 SBUF——不落 HBM</li>
+          <li>异构 chip group 调度：runtime API 暴露 <code>low_res_pool</code> / <code>high_res_pool</code></li>
+        </ul>
+      </div>
+      <div class="mech-math">
+        Multi-fidelity 假设：<span class="formula">Spearman ρ(rank_low_res, rank_high_res) &gt; 0.85</span>——低分辨率 ranking 与高分辨率 ground-truth 的相关性。如果实测 ρ &gt; 0.85，cascade 就有效；否则降级为 high-res-only。这是 multi-fidelity Monte Carlo 在仿真社区的经典门槛。
+      </div>
+      <div class="mech-value">
+        <strong>论文价值：</strong>Multi-fidelity 在仿真社区是经典，但 accelerator runtime 上还没做。Trn3 是<em>唯一</em>能在单系统内做异构资源分配（小 chip group 跑低分 + 大 chip group 跑高分）的硬件——H100 集群没有这种"系统内异构 chip group"的概念。
+      </div>
+    </div>
+  </div>
+
+  <h3>System-Level 耦合：六个 Mechanism 不独立</h3>
+
+  <p>六个机制不是独立 features，而是<strong>系统级互相依赖</strong>。下表是真正的耦合关系——这是 Paper A 与 Paper B 必须强调的："Trainium-aware latent runtime"不是 6 个 trick 的并集，而是 6 个机制围绕同一组 Trn3 原语（SBUF 层次 + NeuronSwitch all-to-all + quantize_mx + oob_mode.skip）协同设计的<em>整体</em>。</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>耦合关系</th><th>共享设计点</th><th>论文 framing 含义</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>1 ↔ 4</strong>（Prefix Cache ↔ KV Sharing）</td><td>fork 阈值 τ 同时决定何时分裂 cache + 何时停止共享 K, V</td><td>不是 PagedAttention + MQA 并列，是<em>同一</em>系统抽象的两个 facet</td></tr>
+      <tr><td><strong>1 ↔ 2</strong>（Prefix Cache ↔ Early Exit）</td><td>Exit candidate 释放其在 HBM 的 paged block——直接喂给 fork 中的新 candidate</td><td>"内存回收 + 计算释放"是同一个 lifecycle 事件</td></tr>
+      <tr><td><strong>2 ↔ 3</strong>（Early Exit ↔ Adaptive Precision）</td><td>Exit head 的输出同时驱动 exit 决策与下一 stage 的 precision 升降</td><td>同一 calibration / valuation infrastructure</td></tr>
+      <tr><td><strong>5 ↔ 6</strong>（Speculative ↔ Hierarchical）</td><td>Draft 模型可以同时是低分辨率模型；verify 是 cross-fidelity consistency check</td><td>Paper B 的两个 mechanism 实际是一个统一 framework 的两面</td></tr>
+      <tr><td><strong>Paper A ↔ Paper B</strong></td><td>Paper A 的 5 个 NKI kernel + paged cache 是 Paper B 的基础设施——Paper B 是 A 的<em>多 model 扩展</em></td><td>两篇论文共享 codebase，A 先发，B 跟进</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="pullquote">六个 Mechanism 共同形成一个论点：video world model serving 在硬件层面需要"latent state 作为 first-class object"的完整支持——而 Trn3 NCv4 是<em>唯一</em>同时提供 SBUF prefix cache + NeuronSwitch 异步 dispatch + 硬件 microscaling + SWDGE 零拷贝 compaction 的加速器。这不是巧合，而是 latent video workload 内在结构与 Trn3 硬件能力的本质对齐。</p>
+</section>
+<!-- ============================================================ -->
+<!-- Section 6: MLSys framing -->
+<!-- ============================================================ -->
+<section id="s6">
+  <div class="section-head">
+    <div class="section-num">08</div>
+    <h2 class="section-title"><small>Venue Calibration</small>MLSys / ASPLOS Framing</h2>
+  </div>
+
+  <p>把这些论文当作"committee 想看到什么"的对照来读：</p>
+
+  <ul>
+    <li><strong>NeuronMM（arXiv 2510.25977）</strong>——SVD + TrainiumFusion kernel；显式 SRAM-capacity-aware caching；报告 1.35× kernel + 1.66× 端到端加速 vs AWS 出厂 kernel on Llama-3.2 / Qwen3。<strong>这就是 MLSys reviewer 会拿来对照的修辞结构。</strong></li>
+    <li><strong>AccelOpt（arXiv 2511.15915）</strong>——LLM 驱动的 NKI kernel 优化，在 NKIBench 上把 kernel 峰值占比从 ~45–49% 提升到 ~59–61%，引入 roofline analysis。用它的 roofline framing 做 micro-benchmark。</li>
+    <li><strong>DiffServe</strong>（MLSys 2025）和 <strong>ScaleFusion</strong>（MLSys 2025）作为"serving system"baseline——都是 GPU。<strong>PipeDiT</strong>（arXiv 2511.12056, 2025）作为 task-pipelining baseline。</li>
+    <li><strong>Sliding Tile Attention / FastVideo（ICLR 2025）</strong>作为硬件感知 kernel 论文的结构模板（稀疏模式 + tile-level kernel + 实测加速 + 质量保持）。</li>
+    <li><strong>Sparse-VideoGen 1/2（ICML 2025, NeurIPS 2025 Spotlight）</strong>作为"算法-系统协同设计 + 硬件高效 layout 变换 + 定制 kernel"的 framing——这正是 TrainiumLatent 应该用的。</li>
+  </ul>
+
+  <h3>MLSys / ASPLOS 接受加速器论文的标准</h3>
+
+  <ol class="fancy">
+    <li>清晰陈述一个硬件特性，其用法非显而易见。</li>
+    <li>一两个 NKI kernel，<em>实测</em>胜过 NCC + NKI Library 出厂版本，带 roofline 峰值占比。</li>
+    <li>Workload 级评估（端到端延迟 / FPS / 每帧成本）。</li>
+    <li>同硬件 baseline（NxD-Inference / NKI Library kernel）+ GPU comparator（H100 或 B200 + FlashAttention-3 + SVDQuant + TeaCache）。</li>
+    <li>Ablation 显示每个 Trn3 特性的单独贡献。</li>
+  </ol>
+
+  <p><strong>不会被接受的：</strong>把 TeaCache / xDiT 移植到 Trainium；"我们测了 100 件事"的论文；没有 NeuronMM 风格 baseline 对照的论文。</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 7: Reality check -->
+<!-- ============================================================ -->
+<section id="s7">
+  <div class="section-head">
+    <div class="section-num">09</div>
+    <h2 class="section-title"><small>Engineering Risk</small>Reality Check — Trn3 Today</h2>
+  </div>
+
+  <ul>
+    <li><strong>Flux.1-dev</strong> 已有公开的 NxD-Inference 配方（TP + CP + CFG-parallel）。<strong>你的 Week 1 任务就是把它在 Trn3 上重跑一遍</strong>——验证 NxD-Inference 路径对 NCv4 兼容，建立 DiT-on-Trn3 的第一个端到端数字。Flux 纯图像，3D causal VAE <em>不在</em>这条路径上，但 attention + MLP + AdaLN modulation 都覆盖到了，足以暴露 NKI tracer 对 DiT 模式的支持度。</li>
+    <li>没有 HunyuanVideo / CogVideoX / Wan / Mochi / Open-Sora / Cosmos 的公开 Trainium reference。构建一个是 4–8 周工作量，主要是 VAE + temporal attention + AdaLN + 3D RoPE。<strong>这部分工作本身就是论文的 Contribution 5（端到端 workload bring-up）。</strong></li>
+    <li><code>torch-neuronx</code> 覆盖：HuggingFace Diffusers Stable Diffusion 可用；Wan 风格视频扩散没有经过测试的路径。计划在 <code>nki.lang</code> + raw <code>torch.compile</code> 风格分解中写模型。</li>
+    <li><code>transformers-neuronx</code> 在 Neuron 2.26 后 <strong>EOL</strong>。直接用 vLLM-Neuron-Plugin (V1) 或 NxD-Inference。</li>
+    <li>原计划 Month-1 MVP（"small latent video diffusion on Trainium"）应重新定为：<strong>(a) 在 Trn3 上跑通 Flux.1-dev NxD-Inference 端到端，记 baseline；(b) port 2B Open-Sora-Plan latent transformer + Cosmos CV8x8x8 tokenizer 到 Trn3，任意速度跑通端到端；(c) 用 Neuron Profiler 2.0 profile，找出 top-3 NKI 候选 kernel。</strong> 如果 NKI tracer 接受模型，3–5 周；如果 3D Conv 路径需要自写，6–8 周。</li>
+  </ul>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 8: Concrete revisions -->
+<!-- ============================================================ -->
+<section id="s8">
+  <div class="section-head">
+    <div class="section-num">10</div>
+    <h2 class="section-title"><small>Plan Surgery</small>Concrete Revisions</h2>
+  </div>
+
+  <h3>原计划弱点和修复</h3>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>弱点</th><th>修复</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>"Latent runtime"作为通用调度/缓存论文 framing</td><td>重新 framing 为<strong>候选感知 decode-free 规划</strong>，利用 Trn3 microscaling + CC-Core all-to-all</td></tr>
+      <tr><td>Module C / D 对 kernel 过于含糊</td><td>用上面 5 个 kernel 替换</td></tr>
+      <tr><td>没有显式 GPU comparator</td><td>钉死 H100 + FA-3 + SVDQuant + TeaCache 作为 baseline；若可访问也报 B200</td></tr>
+      <tr><td>Workload 含糊</td><td>钉死 HunyuanVideo-1.5（8.3B, 720p）+ Cosmos-Predict（世界模型规划）</td></tr>
+      <tr><td>Workload 在 Trn3 上能否跑还未知</td><td>Week 1 就在 Trn3 上跑通 Flux.1-dev NxD-Inference，验证 DiT pipeline；同时在<em>同一台</em>机器上 profile Cosmos VAE + HunyuanVideo DiT block</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>修订后的 RQ1–RQ5（硬件 grounded）</h3>
+
+  <ol class="fancy">
+    <li><strong>RQ1.</strong> 候选轴 N 如何映射到 Trn3 的 [partition, NeuronCore, LNC-rank, chip] 层次，使 top-k 剪枝后的 <code>all_to_all_v</code> 在 DiT 中摊销掉丢弃的 flops？all-to-all 延迟 = 节省计算的盈亏平衡 N 是多少？</li>
+    <li><strong>RQ2.</strong> <code>nc_matmul_mx</code>（K=512/指令）+ <code>quantize_mx</code> 能否给出一个端到端质量匹配 SVDQuant W4A4 on H100 的候选感知混合精度 DiT block——<em>不</em>用 SVD 低秩分支？AdaLN-modulated weight 上 microscaling-32 在哪里失效？</li>
+    <li><strong>RQ3.</strong> HunyuanVideo 3D attention 成本在 Trn3 上有多少被 VectorE <code>exponential</code> + BF16 PSUM accumulation + background transpose 吸收，相对于没有这些特性的 Trn3 FA-style NKI kernel？</li>
+    <li><strong>RQ4.</strong> In-engine SBUF Read-Add-Write 近内存累加，能否消除 DiT block 的 residual-add 延迟（相对于独立的 VectorE add）？Roofline 占比 delta？</li>
+    <li><strong>RQ5.</strong> 对 decode-free 世界模型规划（V-JEPA-2-AC 风格），多少个候选 × rollout horizon 能<em>完全</em>装进 Trn3 Gen2 UltraServer 的 706 TB/s 聚合 HBM——使得不需要 per-step host hand-off？每动作延迟对比 Cosmos-on-H100（4 分钟/动作）和 V-JEPA-2-AC-on-4090（16 秒/动作）如何？</li>
+  </ol>
+
+  <h3>修订后的贡献列表（5 条，MLSys-ready）</h3>
+
+  <ol class="fancy">
+    <li>第一个在 non-GPU accelerator 上的 decode-free latent-space 世界模型规划运行时，利用 Trn3 all-to-all NeuronSwitch fabric 做候选并行。</li>
+    <li>五个 NKI kernel（<code>latent_compact</code> / <code>latent_topk</code> / <code>latent_quant_dequant</code> / <code>fused_adaln_attn</code> / <code>latent_scorer</code>）开源发布，每个都对照 NKI Library kernel 做 roofline 对比。</li>
+    <li>候选感知 MXFP8/MXFP4 混合精度调度，利用硬件 group=32 microscaling，在<em>没有</em>SVD 分支的情况下匹配或超过 W4A4 SVDQuant 质量。</li>
+    <li>通过 <code>input_output_aliases</code> 的持久化候选 cache，绕开 stablehlo.while 限制处理迭代 diffusion 采样循环。</li>
+    <li>在 HunyuanVideo-1.5（或 Wan 2.2）+ Cosmos-Predict 上的端到端加速测量：Trn3 baseline（NxD-Inference 出厂 + NKI Library kernel）→ Trn3 + 5 NKI kernel → Trn3 + 5 NKI kernel + candidate-parallel；H100 + FA-3 + SVDQuant + TeaCache 作为 GPU comparator；B200 + NVFP4 作为 microscaling 对照点。</li>
+  </ol>
+
+  <h3>要加的 microbenchmark（每个独立一张 figure，roofline 风）</h3>
+
+  <ul class="dense">
+    <li><code>nki.isa.exponential</code> vs Scalar Engine <code>exp</code> 在 softmax 中（目标 4×，多个 seq 长度）。</li>
+    <li><code>nc_matmul_mx</code> vs <code>nc_matmul</code>（BF16）在 K=128/256/512（目标 K=512 时 4×）。</li>
+    <li><code>quantize_mx</code> 开销 vs 离线量化 matmul（目标：被 VectorE 4× perf mode 隐藏）。</li>
+    <li>BF16 PSUM write vs FP32 PSUM + downcast（目标：少 1 次 copy，~2× 更少 PSUM 带宽）。</li>
+    <li>SBUF Read-Add-Write vs DMA-then-VectorE-add（目标 2× DMA 吞吐）。</li>
+    <li><code>all_to_all_v</code> 候选重分布 vs naive <code>all_gather</code> + slice（取决于 N 偏斜）。</li>
+    <li><code>oob_mode.skip</code> SWDGE gather vs CUDA 等价物（gather + compaction）。</li>
+  </ul>
+
+  <h3>Module A: Latent Workload Profiler — IO 设计</h3>
+
+  <p>原计划 Module A 把 Workload Profiler 独立列出来——这是评估 RQ1 (workload 瓶颈识别) 的工具基础。它<em>不是</em>论文的发表 contribution，但是后续所有 kernel 优化的<strong>实验基础设施</strong>。Trn3 上具体怎么搭：</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>输入</th><th>具体值（example sweep）</th><th>输出</th><th>测量工具</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>latent shape</td><td><code>[B,N,T,H,W,C]</code> = [1, 32, 16, 32, 32, 64]</td><td>latency / op</td><td>Neuron Profiler 2.0 trace</td></tr>
+      <tr><td>model block type</td><td>{DiT-attn, MLP, AdaLN, VAE-enc, VAE-dec, top-k, compact, quant, scorer}</td><td>memory footprint (SBUF / PSUM / HBM)</td><td><code>neuron-monitor</code> + <code>nki.compile</code> report</td></tr>
+      <tr><td>precision</td><td>{BF16, FP8 E4M3, MXFP8, MXFP4}</td><td>HBM traffic per op</td><td>Neuron Profiler 2.0 hardware counters</td></tr>
+      <tr><td>candidate count N</td><td>{1, 8, 32, 128, 512}</td><td>NeuronCore / engine utilization</td><td>Neuron Profiler 2.0 timeline view</td></tr>
+      <tr><td>denoising steps</td><td>{2, 4, 8, 16, 50}</td><td>DMA traffic by class</td><td><code>cclog</code> / trace analysis</td></tr>
+      <tr><td>layout choice</td><td>{candidate-first, spatial-first, horizon-first}</td><td>compile overhead</td><td><code>NEURON_FRAMEWORK_DEBUG=1</code> + <code>neuron-cc --time-passes</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><strong>产出</strong>：一份"Trainium3 上 latent video/world-model workload 性能画像"——本身是论文 Section 5.1 的图表来源，也可作为开源数据集（<code>trainium-latent-bench</code>），让后续学术工作能直接复用。</p>
+
+  <h3>完整 Eval Metrics — Performance / Runtime / Precision / Cost</h3>
+
+  <p>原计划 Section 10 的 metrics 列表非常完整，但我之前只突出了一部分。完整 metric 集合（必须全部测）：</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>类别</th><th>Metric</th><th>Trn3 上的测量方式</th><th>论文重要性</th></tr>
+    </thead>
+    <tbody>
+      <tr><td rowspan="4"><strong>Performance</strong></td><td>latency per denoising stage</td><td>Profiler 2.0 timeline</td><td>★★★ 核心图</td></tr>
+      <tr><td>end-to-end rollout latency</td><td>wall-clock from <code>z_obs</code> in to action out</td><td>★★★ headline number</td></tr>
+      <tr><td>candidate futures per second</td><td>N × steps / wall-clock</td><td>★★★ 衔接 embodied real-time</td></tr>
+      <tr><td>throughput (videos/s or rollouts/s)</td><td>batched evaluation</td><td>★★ serving framing</td></tr>
+      <tr><td rowspan="4"><strong>Hardware</strong></td><td>peak memory (SBUF / PSUM / HBM)</td><td>Profiler memory traces</td><td>★★ scaling claim</td></tr>
+      <tr><td>HBM bandwidth utilization</td><td>HW counters / theoretical peak</td><td>★★★ roofline</td></tr>
+      <tr><td>NeuronCore (TensorE/VectorE/...) utilization</td><td>Profiler engine view</td><td>★★★ co-design 证据</td></tr>
+      <tr><td>DMA traffic & class distribution</td><td>cclog analysis</td><td>★★ optimization story</td></tr>
+      <tr><td rowspan="5"><strong>Runtime</strong></td><td><strong>decode avoidance ratio</strong></td><td>1 − (decoded candidates / total)</td><td>★★★ contribution 4 核心</td></tr>
+      <tr><td><strong>top-k pruning efficiency</strong></td><td>survival vs ground-truth ranking 一致度</td><td>★★ quality preservation</td></tr>
+      <tr><td><strong>latent compaction overhead</strong></td><td>compaction time / step time</td><td>★★ kernel justification</td></tr>
+      <tr><td><strong>early stopping ratio</strong></td><td>(steps skipped × N pruned) / total work</td><td>★★ scheduler 效果</td></tr>
+      <tr><td><strong>candidate survival rate</strong></td><td>每 stage 剩余 N / 初始 N</td><td>★ ablation 用</td></tr>
+      <tr><td rowspan="4"><strong>Precision</strong></td><td>memory saving (FP8 vs BF16, etc.)</td><td>peak HBM 对照</td><td>★★</td></tr>
+      <tr><td><strong>latent reconstruction error</strong></td><td>L2(decode(quant(z)), decode(z))</td><td>★★ quality 守门</td></tr>
+      <tr><td>ranking stability under quant</td><td>top-k overlap @ FP8 vs BF16</td><td>★★ MXFP claim 验证</td></tr>
+      <tr><td><strong>precision-quality Pareto frontier</strong></td><td>scatter plot 跨 precision schedules</td><td>★★★ contribution 3 核心图</td></tr>
+      <tr><td rowspan="3"><strong>Cost</strong></td><td>cost per latent rollout</td><td>Trn3 hourly × wall-clock / rollouts</td><td>★★ 对 GPU baseline</td></tr>
+      <tr><td><strong>cost per generated latent second</strong></td><td>$ / (T × frame-time)</td><td>★★★ 衔接 product framing</td></tr>
+      <tr><td>energy proxy</td><td><code>neuron-top</code> power draw 时间积分</td><td>★ 未来 embodied 衔接</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>★★★ 标记的是论文必须主推的 metrics；★★ 是 ablation / 守门；★ 是 future work 衔接。</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 9: GPU differentiation -->
+<!-- ============================================================ -->
+<section id="s9">
+  <div class="section-head">
+    <div class="section-num">11</div>
+    <h2 class="section-title"><small>Defending Against the Reviewer</small>vs GPU Baseline</h2>
+  </div>
+
+  <h3>在 Trn3 上根本上更容易/便宜的事情</h3>
+
+  <ul>
+    <li><strong>指令内 microscaling</strong>，group=32，K=512 一条 <code>nc_matmul_mx</code> 完成——H100 只有 per-tensor FP8 scaling；B200 / RTX 5090 有 NVFP4（block 16, E8M0 scale）；但<em>都不</em>在 tensor core 内 native 支持 OCP MXFP8/MXFP4（block 32, E8M0 + E5M2/E4M3FN/E2M1FN）。Trn3 MX matmul 在<em>一条</em>指令内给 BF16 4× 加速 + 硬件 dequant。</li>
+    <li><strong>软件管理 SBUF（32 MiB × 8 core = 256 MiB/chip）</strong>——候选 KV / feature cache 可以确定性 pin 住；没有 H100 那种 L2-miss 抖动。</li>
+    <li><strong>NeuronSwitch-v1 all-to-all 跨 144 chip</strong>——<code>all_to_all_v</code> 等价 1-hop；H100 NVL36 / NVL72 跨 rack 必须走 NVSwitch + InfiniBand。</li>
+    <li><strong><code>oob_mode.skip</code> SWDGE</strong>——单 descriptor gather 含跳过索引；CUDA 上需要 compaction + cudaMemcpyAsync + kernel launch 组装。</li>
+    <li><strong>近内存 SBUF accumulation</strong>（DMA 做 B += A）——H100 上没有等价物（最接近的是 TMA，仍需独立 add）。</li>
+    <li><strong>TensorE 上的 background transpose</strong>——H100 用 shared-memory shuffle + warp-level transpose。</li>
+  </ul>
+
+  <h3>在 Trn3 上根本上更难的事情</h3>
+
+  <ul>
+    <li><strong>不支持 NVFP4（block-16）</strong>——如果未来 SVDQuant 风格结果要求 block-16 microscaling 吸收 outlier，Trn3 卡在 block-32。</li>
+    <li><strong>没有动态 shape</strong>——所有张量必须在编译时 shape-resolved。变长 token 的视频模型需要 bucketing。</li>
+    <li><strong><code>stablehlo.while</code> 约束</strong>——diffusion 采样循环完全展开膨胀编译时间；通过 <code>input_output_aliases</code> 做持久化状态可行但对异步候选级 rollout 不友好。</li>
+    <li><strong>CUDA 生态成熟度</strong>——xDiT / FastVideo / SVDQuant 每个 kernel 都是手写；Trn3 上要自己写。</li>
+    <li><strong>成熟的 3D Conv kernel 缺失</strong>——NKI Library 只有 Conv1D。</li>
+  </ul>
+
+  <p><strong>"Trainium-as-research-platform" vs "Trainium-as-product" 论证：</strong>把 TrainiumLatent framing 为 <em>research platform</em> 论文——Trn3 是<em>唯一</em>商品云加速器同时有硬件 OCP microscaling matmul + switched all-to-all 144-chip scale-up 域 + Apache-2.0 开源 NKI 编译器。Product 论证（"Trn3 比 H100 便宜"）对 PhD 论文比较弱，引用的也是 Anthropic 数字、reviewer 无法独立验证。Research-platform 论证强是因为 (a) NKI 开源、(b) ISA 显式暴露、(c) Trainium 上完全没有非 Anthropic 的 latent-video 系统工作。</p>
+
+  <p><strong>前 Trainium NKI 论文如何处理"为什么不是 GPU"：</strong>NeuronMM framing 为"Trainium systolic-array 架构和特殊 data layout 要求的挑战"——即 Trainium 特定的贡献。AccelOpt 显式说 Trainium 是"a widely deployed and representative AI accelerator that exemplifies these challenges"，用 Trainium 作通用 kernel 优化 testbed。ASPLOS 2025 NKI Tutorial / 竞赛强调"bare-metal access"和"self-serve"。TrainiumLatent 应该跟 NeuronMM 的修辞动作走。</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 10: Reading list -->
+<!-- ============================================================ -->
+<section id="s10">
+  <div class="section-head">
+    <div class="section-num">12</div>
+    <h2 class="section-title"><small>Action Items</small>Reading List &amp; Next Steps</h2>
+  </div>
+
+  <div class="read-group">
+    <h4>Trn3 / NKI Primary Sources</h4>
+    <ol>
+      <li>AWS Neuron — Trainium3 Architecture Guide for NKI</li>
+      <li>AWS Neuron — NeuronCore-v4 page</li>
+      <li>AWS Neuron — Trn3 instance architecture page</li>
+      <li>NKI Programming Model（legacy + latest）</li>
+      <li>NKI Release Notes 2.27, 2.28, 2.29（component nki.html）</li>
+      <li><code>nki.isa.nc_matmul_mx</code>, <code>nki.isa.quantize_mx</code>, <code>nki.isa.exponential</code>, <code>nki.isa.nonzero_with_count</code>, <code>nki.isa.dma_copy</code> (oob_mode), <code>nki.isa.dma_transpose</code>, <code>nki.collectives</code> API 页</li>
+      <li>NKI Dynamic Loops deep dive</li>
+      <li>NKI MXFP Matmul deep dive</li>
+    </ol>
+  </div>
+
+  <div class="read-group">
+    <h4>Trainium Prior Art</h4>
+    <ol start="9">
+      <li>NeuronMM（arXiv 2510.25977）</li>
+      <li>AccelOpt（arXiv 2511.15915）</li>
+      <li>ASPLOS 2025 NKI Tutorial 材料 + 竞赛 writeup（corelab-src/nki-llama 3rd place）</li>
+    </ol>
+  </div>
+
+  <div class="read-group">
+    <h4>Video DiT Acceleration（GPU）</h4>
+    <ol start="12">
+      <li>xDiT / PipeFusion / DistriFusion（arXiv 2411.01738, 2405.14430; DistriFusion CVPR 2024）</li>
+      <li>FastVideo / Sliding Tile Attention（arXiv 2502.04507）</li>
+      <li>Sparse-VideoGen 1 &amp; 2（arXiv 2502.01776; ICML 2025 / NeurIPS 2025 Spotlight）</li>
+      <li>TeaCache（arXiv 2411.19108）, FasterCache（arXiv 2410.19355）, EasyCache（arXiv 2507.02860）, Δ-DiT（arXiv 2406.01125）, SpeCa（arXiv 2509.11628）, SmoothCache, AdaCache</li>
+      <li>SVDQuant + Nunchaku（arXiv 2411.05007, ICLR 2025 Spotlight）</li>
+      <li>DVD-Quant（arXiv 2505.18663）, ViDiT-Q</li>
+    </ol>
+  </div>
+
+  <div class="read-group">
+    <h4>Video Models / World Models</h4>
+    <ol start="18">
+      <li>HunyuanVideo（arXiv 2412.03603）, HunyuanVideo 1.5（arXiv 2511.18870）, CogVideoX, Wan 2.1/2.2, Mochi 1, Open-Sora Plan（arXiv 2412.00131）, LTX-Video</li>
+      <li>Cosmos World Foundation Model Platform（arXiv 2501.03575）, Cosmos Tokenizer</li>
+      <li>V-JEPA 2 / V-JEPA-2-AC（arXiv 2506.09985）, Dreamer V3, Dreamer 4（arXiv 2509.24527）, Genie 2, Next-Frame Diffusion（arXiv 2506.01380）, DIAMOND, MuZero, TD-MPC2</li>
+    </ol>
+  </div>
+
+  <div class="read-group">
+    <h4>Systems / Co-design Exemplars（用于论文结构）</h4>
+    <ol start="21">
+      <li>ScaleFusion（MLSys 2025）, DiffServe（MLSys 2025）, PipeDiT（arXiv 2511.12056）, GenServe, TridentServe（arXiv 2510.02838）</li>
+      <li>Sarathi-Serve, vLLM (V1), SGLang 论文</li>
+      <li>AWS Build on Trainium CFP（Spring 2026 — Post-Training; Kernels for ML Acceleration）</li>
+    </ol>
+  </div>
+
+  <h3>GitHub 仓库</h3>
+  <p><code>aws-neuron/aws-neuron-sdk</code> · <code>aws-neuron/nki-samples</code> · <code>aws-neuron/nki-library</code> · <code>aws-neuron/neuronx-distributed-inference</code> · <code>corelab-src/nki-llama</code>（ASPLOS 2025 第 3 名参考）· <code>dinghongsong/NeuronMM</code> · <code>PASAUCMerced/NeuronMM</code> · <code>hao-ai-lab/FastVideo</code> · <code>xdit-project/xDiT</code> · <code>svg-project/Sparse-VideoGen</code> · <code>mit-han-lab/deepcompressor</code> · <code>nunchaku-ai/nunchaku</code> · <code>NVIDIA/Cosmos-Tokenizer</code> · <code>nvidia-cosmos/cosmos-predict1</code> · <code>Wan-Video/Wan</code> · <code>Tencent/HunyuanVideo</code> · <code>THUDM/CogVideoX</code> · <code>PKU-YuanGroup/Open-Sora-Plan</code> · <code>facebookresearch/jepa</code>（V-JEPA 2）</p>
+
+  <h3>第一周可执行 Action Item</h3>
+
+  <ol class="fancy">
+    <li>在已有的 Trn3 instance 上装 Neuron SDK 2.29.0 DLAMI + PyTorch 2.9 + NKI 0.3.0；确认 <code>nki.isa.nc_matmul_mx</code>、<code>nki.isa.quantize_mx</code>、<code>nki.isa.exponential</code>、<code>nki.collectives.all_to_all_v</code> 都能 import 且 CPU 模拟器跑通 dummy 用例。</li>
+    <li>在 Trn3 上端到端跑通 NxD-Inference Flux.1-dev tutorial；用 Neuron Profiler 2.0 profile 整个 forward；记录 TensorE / VectorE / ScalarE / GpsimdE 利用率、HBM 带宽、DMA traffic 分布——建立 Trn3 上 DiT workload 的第一份 baseline。</li>
+    <li>克隆 <code>nki-library</code>，读 <code>Attention CTE</code>、<code>MLP</code>（MXFP8 quant）、<code>Top-K Reduce</code>、<code>Transformer TKG</code>、<code>find_nonzero_indices</code> 的源码。</li>
+    <li>写出能编译的最小 <code>quantize_mx</code> + <code>nc_matmul_mx</code> kernel——做一个 128×512×512 MXFP8 matmul；用 CPU 模拟器验证。</li>
+    <li>提交 Build on Trainium Spring 2026 申请（Kernels for ML Acceleration CFP），<strong>明确请求 Trn3 hours</strong> 并引用上面 5 个 NKI kernel。</li>
+    <li>用单台 CPU 复现 HunyuanVideo 在一个 5 秒 480p clip 上的 inference；确定 VAE + DiT + softmax 的 flops 分布。</li>
+    <li>开一个草稿仓库 <code>trainium-latent</code>，含 5-kernel 骨架和 V-JEPA-2-AC port 计划。</li>
+  </ol>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 11: Recommendations -->
+<!-- ============================================================ -->
+<section id="s11">
+  <div class="section-head">
+    <div class="section-num">13</div>
+    <h2 class="section-title"><small>Staged Roadmap</small>Recommendations with Thresholds</h2>
+  </div>
+
+  <div class="stages">
+    <div class="stage">
+      <div class="stage-num">00<small>Pre-flight</small></div>
+      <div>
+        <h4>Before Month 1 ends</h4>
+        <ul>
+          <li>剪掉原 Module C/D 计划，换成上面 5 个具体 kernel。</li>
+          <li>锁 workload：HunyuanVideo-1.5（T2V）+ Cosmos-Predict1（世界模型规划）。Hunyuan 权重受限就降级到 Open-Sora-Plan v1.3 或 Wan-2.2-T2V-A14B。</li>
+          <li><strong>瞄准 MLSys 2026（10/2026 abstract / paper deadline）作为主目标</strong>——Trn3 直接访问 + 5 个 kernel + 端到端 workload，4–5 个月可达。ASPLOS 2027（夏季截稿）作为备选。如果质量受限可以转 SC26 / HPDC27 工作流式 venue。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">01<small>Months 1–2</small></div>
+      <div>
+        <h4>Trn3 端到端 + 前三个 kernel</h4>
+        <p>Trn3 上跑通 Flux.1-dev（验证 DiT pipeline）→ port HunyuanVideo / Cosmos VAE → 产出 <code>latent_compact_nki</code>、<code>latent_topk_nki</code>、<code>latent_quant_dequant_nki</code> + microbenchmark。Day-1 直接用 LNC=2 + MXFP8 路径，<strong>不写 BF16 fallback</strong>。</p>
+        <div class="threshold"><strong>Go/no-go：</strong>如果用户实测下 <code>nc_matmul_mx</code> 在 K=512 时相对 BF16 <code>nc_matmul</code> 加速 &lt; 3×，MXFP8 贡献必须 reframing。如果 NKI tracer 拒绝 3D causal Conv 模式 → Conv3D NKI kernel 自己写（变成额外贡献，但延后里程碑 2 周）。</div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">02<small>Months 3–4</small></div>
+      <div>
+        <h4>Fused AdaLN-Attn + LNC=2 scaling</h4>
+        <p>加 <code>fused_adaln_attn_nki</code>；LNC=2 scaling。</p>
+        <div class="threshold"><strong>阈值：</strong>如果候选轴 <code>all_to_all_v</code> 在 N ≥ 32 时没有摊销开销，放弃候选并行 framing，回退到单候选 latent caching（仍可发表但 scope 更小）。</div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-num">03<small>Months 5–6</small></div>
+      <div>
+        <h4>完整 sweep + GPU comparator + 论文</h4>
+        <p>Trn3 上完整 microbenchmark sweep（K=128/256/512、N=32/64/128/256/512、batch / seq 维度）+ H100/B200 GPU baseline（自建或租用）+ 写作 + 开源 release。</p>
+        <div class="threshold"><strong>阈值：</strong>端到端 Trn3 cost-per-frame vs H100 + SVDQuant + TeaCache 应 ≤ 1.5× 才能让"为什么 Trn3"故事立住；如果更高，转向世界模型规划 workload——decode-free + 候选并行 + microscaling 三者叠加，那里 Trn3 NeuronSwitch all-to-all 是 GPU 没有的硬件优势。</div>
+      </div>
+    </div>
+  </div>
+
+  <h3>停止做的事</h3>
+
+  <ul>
+    <li>停止把这 framing 为通用 "latent runtime"——它稀释贡献。</li>
+    <li>停止写前向兼容 fallback 路径——你有 Trn3 直接访问，双路径代码只增加复杂度且不会被论文用到。</li>
+    <li>停止读 GPU diffusion serving 论文时不加"Trn3 对应物是什么"的笔记。</li>
+    <li>停止把 NKI Library 的现有 kernel 当成"已经够好"——每个都用 BF16 写，没用 <code>nc_matmul_mx</code> + <code>quantize_mx</code> + VectorE <code>exponential</code>，这恰好是你的 kernel 要超过它们的地方。</li>
+  </ul>
+</section>
+
+<!-- ============================================================ -->
+<!-- NEW Section: Risk Register -->
+<!-- ============================================================ -->
+<section id="risks">
+  <div class="section-head">
+    <div class="section-num">14</div>
+    <h2 class="section-title"><small>Project Hygiene</small>Risk Register</h2>
+  </div>
+
+  <p>原计划列了 4 个风险但没具体应对。下表把它们更新到 Trn3-native 情境，并补几个 Trn3-native 才出现的新风险：</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>#</th><th>Risk</th><th>原计划应对</th><th>Trn3-native 更新</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>R1</td><td>Trainium 上 video model 支持不完整</td><td>用 modular workload + synthetic latent</td><td><strong>Week 1 用 Flux.1-dev DiT 作 probe</strong>，验证 NxD-Inference path on NCv4 通；然后 incremental 加 3D causal VAE</td></tr>
+      <tr><td>R2</td><td>NKI kernel 实现成本高</td><td>先 PyTorch baseline，只挑 top-k / compact / quant 做 kernel</td><td>NKI 0.3.0 CPU 模拟器 + NKI Standard Library（Apache-2.0）大幅降低冷启动；按 <code>latent_compact</code> → <code>latent_topk</code> → <code>latent_quant_dequant</code> 顺序产出（前两个直接复用 NKI Library 现有 <code>Top-K Reduce</code> + <code>find_nonzero_indices</code> 结构）</td></tr>
+      <tr><td>R3</td><td>decode-free scoring 难定义</td><td>proxy scorer（latent similarity 等）</td><td><strong>V-JEPA-2-AC 提供 well-defined energy-based latent MPC</strong>——直接复用 frozen encoder + L1/L2 energy + cross-entropy method，<em>不需要</em>从零定义。Cosmos-Predict 提供 latent reward head 作对照</td></tr>
+      <tr><td>R4</td><td>实验不像 world model</td><td>加 synthetic planning benchmark</td><td>Cosmos-Predict 和 V-JEPA-2-AC 都是公开权重的真正 world model；跑出来就是 world model rollout，不需要"看起来像"</td></tr>
+      <tr><td>R5 ✚</td><td>NKI tracer 对视频模型 pattern 兼容性未知</td><td>—</td><td>Flux Week 1 是探针；备选：自己写 nki.lang tile + <code>@nki.jit</code>，绕过 tracer</td></tr>
+      <tr><td>R6 ✚</td><td>HunyuanVideo bring-up 延误（4–8 周）</td><td>—</td><td>降级路径：Open-Sora-Plan v1.3（2B，更小）→ Wan-2.2-T2V-A14B → CogVideoX-5B；优先保证 DiT block + 3D VAE 在 NKI 通</td></tr>
+      <tr><td>R7 ✚</td><td>MX group=32 在 head_dim 非 32 倍数时精度损失</td><td>—</td><td>head_dim={80, 96}（某些模型用）需要 padding 到 128；预留 1 周做 head_dim ablation；论文中前置说明对齐红利只对 head_dim ∈ {32, 64, 128} 成立</td></tr>
+      <tr><td>R8 ✚</td><td>NeuronSwitch all-to-all 固定延迟主导（N 太小时）</td><td>—</td><td>实测 cross-over N（all-to-all 延迟 = N×compute 节省）；论文需明确"候选并行收益从 N=? 起"，避免被审稿人指责小 N 退化</td></tr>
+      <tr><td>R9 ✚</td><td>Conv3D NKI kernel 缺位</td><td>—</td><td>Cosmos 3D causal Conv 用 spatial Conv2D（Toeplitz on TensorE）+ temporal Conv1D（NKI Library 已有）分解；自己写完整 Conv3D 是 bonus contribution</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><strong>风险触发协议</strong>：每周一次 status check 对照这张表；任何 R 移入 "active" 状态时立即触发对应降级路径，不要等到积累。</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- NEW Section: Embodied Future Extension -->
+<!-- ============================================================ -->
+<section id="embodied">
+  <div class="section-head">
+    <div class="section-num">15</div>
+    <h2 class="section-title"><small>Beyond v1</small>Embodied Future Extension</h2>
+  </div>
+
+  <p>原计划的第 17 节明确把 embodied intelligence 定位为"未来应用场景"，第一阶段不依赖。这个 framing 必须保留——它是论文 Conclusion / Future Work 的关键铺垫，给 reviewer 一个"这个 runtime 不只是 video benchmark 的玩具"的信号。</p>
+
+  <h3>未来 embodied pipeline 全貌</h3>
+
+<pre><code>camera / sensor stream
+    ↓
+latent encoder (3D causal VAE on Trn3)
+    ↓
+current world latent  z_obs
+    ↓
+candidate action latent rollout  [N candidates × T horizon]
+    ↓                            ↑
+decode-free risk/value scoring   │ Trn3 all-to-all
+    ↓                            │ NeuronSwitch-v1
+action selection                 │
+    ↓                            │
+robot / vehicle / agent executes ─┘
+</code></pre>
+
+  <h3>Embodied 引入的新系统问题（论文最后一段的 framing）</h3>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Embodied 需求</th><th>对 Trn3 runtime 的暗示</th><th>第一阶段不做，但要为它铺路</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Real-time deadline</strong>（10–30 Hz）</td><td>Trn3 Gen2 UltraServer 706 TB/s aggregate HBM 让 V-JEPA-2-AC 风格 800-candidate 实时规划可行</td><td>论文 metric 报"candidate futures per second"，自然映射到 Hz</td></tr>
+      <tr><td><strong>Edge–cloud split</strong></td><td>Trn3 server-side rollout + 边缘瘦客户端；NeuronLink-v4 的 PCIe Gen6 路径有利于 host hand-off</td><td>暴露 single-step API，让外部 actuation 可以串入</td></tr>
+      <tr><td><strong>Safety-aware latent pruning</strong></td><td>latent_risk_scorer 早期过滤危险候选；与 top-k pruning 解耦的第二个剪枝维度</td><td>scorer hardware 分类表里已包含 latent risk model</td></tr>
+      <tr><td><strong>Uncertainty-triggered compute</strong></td><td>risk model 给出高不确定性时动态增加 candidate；4 个 DMA traffic class 的动态优先级有用武之地</td><td>留出 runtime hook：<code>scheduler.expand_candidates_if(uncertainty &gt; threshold)</code></td></tr>
+      <tr><td><strong>Energy-aware rollout</strong></td><td>MXFP4 早期 + MXFP8 后期的 stage-wise 精度调度天然给省能曲线</td><td>论文报 cost-per-rollout，含能耗代理</td></tr>
+      <tr><td><strong>Failure explanation</strong></td><td>decode-free scoring 失败时 fallback 到 decode top-3 作可视化</td><td>保留 decoder 调用路径，记录 decode invocation log</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>可衔接的真实平台（Phase 2 / Phase 3）</h3>
+
+  <ul>
+    <li><strong>SO-101 / SO-100</strong>（HuggingFace LeRobot 开源 manipulator，~$110 BOM）——latent action MPC + V-JEPA-2-AC 风格规划的最小可演示平台。Trn3 server + LeRobot 边缘客户端是天然组合。</li>
+    <li><strong>EarthRover</strong>（autonomous ground vehicle 项目）——更大 spatial latent，testbed 适合 spatial-token sharding 的真实验证。</li>
+    <li><strong>Genie 2 / Cosmos-Policy</strong> 风格的开环视频规划——不需要真实机器人，validation 用 simulator + 公开数据集（如 RT-1, RT-2 video tracks）。</li>
+    <li><strong>Self-driving simulation</strong>（如 CARLA, MetaDrive 接 Cosmos-Predict）——长 horizon、多 candidate、safety-critical 的天然 stress test。</li>
+  </ul>
+
+  <p class="pullquote">论文 Conclusion 的最后一句应该是：The same latent runtime that delivers candidate-parallel video diffusion on Trn3 can serve as the substrate for embodied agents planning with hundreds of latent futures in real time — but that is future work.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- Caveats -->
+<!-- ============================================================ -->
+<section id="caveats">
+  <div class="section-head">
+    <div class="section-num">16</div>
+    <h2 class="section-title"><small>Source Reliability</small>Caveats</h2>
+  </div>
+
+  <div class="caveats">
+    <div class="caveat-label">— 引用与不一致 —</div>
+    <ul>
+      <li><strong>HBM 带宽分歧：</strong>NKI Trainium3 arch 页写 4.7 TB/s/chip；Trn3 instance 页和 AWS marketing 写 4.9 TB/s。两个都引用，标明来源 URL。<strong>你有 Trn3 access——用 micro-benchmark 实测真实带宽</strong>（STREAM-like + DMA-only kernel），这本身就是一个有价值的数据点。</li>
+      <li><strong>Trn3 LNC mode 未穷举文档化：</strong>第三方报道（SemiAnalysis）说 Day-0 LNC=1 / LNC=2，LNC=8 延期到 2026 年中。Primary AWS doc 只演示 LNC=2。<strong>在你的硬件上直接验证 <code>os.environ["NEURON_LOGICAL_NC_CONFIG"]</code> 接受什么值</strong>。</li>
+      <li><strong>SBUF/PSUM 间接寻址、Activation2</strong> 在 Trn3 arch guide 描述了，但 NKI 0.3.0 仍无 API——<strong>不要</strong>把计划建在这上面，但要关注 NKI 0.4 release note，可能在论文 submission 前后开放。</li>
+      <li><strong>NeuronLink-v4 per-link 带宽</strong> 在 AWS product 页（2 TB/s/chip）有，但 NKI arch doc 没有——同样可以实测验证。</li>
+      <li><strong>Build-on-Trainium credit</strong> 仍值得申请：要求开源 + 论文，与你的发表路线一致；AWS credit 可补充硬件 hours。</li>
+      <li><strong>SemiAnalysis 的"128×128 BF16 + 512×128 MXFP8 双 systolic array"说法误导：</strong>AWS NKI 主文档澄清是单一物理 128×128 PE array，每 PE 每周期 4 个 MX MAC。<strong>论文中引用 AWS NKI 文档原文，不引第三方分析。</strong></li>
+      <li><strong>Anthropic 在 re:Invent 2025 keynote 报的"Trn3 上 90% TensorE 利用率"</strong>来自 AIM3335 单一谈话，未独立验证。<strong>你的实验有机会成为第一个公开验证（或反驳）这一数字的来源。</strong></li>
+      <li><strong>NxD-Inference 当前视频扩散支持仅限 Flux.1-dev（图像）；</strong>把 HunyuanVideo 或 Cosmos 在 Trn3 上 bring up 是 Month-1–2 的主导工作量风险。这个本身可发表（Contribution 5）。</li>
+      <li><strong>Trn3 上 MXFP4 是 OCP block-32（E8M0 scale, E2M1 data）——<em>不</em>支持 NVFP4（block-16）</strong>。如果关键贡献依赖 block-16 microscaling，Trn3 给不了；B200/RTX 5090 能。需要在论文里前置说明 OCP MX vs NVFP4 的区别。</li>
+    </ul>
+  </div>
+</section>
+
+<div class="glyph-divider">— · —</div>
+
+</main>
+
+<!-- ============================================================ -->
+<!-- Side TOC -->
+<!-- ============================================================ -->
+<aside>
+  <nav class="toc">
+    <div class="toc-label">Contents</div>
+    <ol>
+      <li><a href="#tldr">Executive Summary</a></li>
+      <li><a href="#findings">Key Findings</a></li>
+      <li><a href="#s1">Trn3 Deep Dive</a></li>
+      <li><a href="#s2">NKI Current State</a></li>
+      <li><a href="#s3">Workload Characterization</a></li>
+      <li><a href="#s4">Prior Art Gap Map</a></li>
+      <li><a href="#s5">Trn3-Specific Hooks</a></li>
+      <li><a href="#mech">System Mechanisms ★</a></li>
+      <li><a href="#s6">MLSys / ASPLOS Framing</a></li>
+      <li><a href="#s7">Reality Check</a></li>
+      <li><a href="#s8">Concrete Revisions</a></li>
+      <li><a href="#s9">vs GPU Baseline</a></li>
+      <li><a href="#s10">Reading List</a></li>
+      <li><a href="#s11">Staged Roadmap</a></li>
+      <li><a href="#risks">Risk Register</a></li>
+      <li><a href="#embodied">Embodied Future</a></li>
+      <li><a href="#caveats">Caveats</a></li>
+    </ol>
+  </nav>
+</aside>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- Footer -->
+<!-- ============================================================ -->
+<footer>
+  <div>
+    <span class="glyph">§</span> &nbsp; TrainiumLatent · Paper Outline · v2.0
+  </div>
+  <div>
+    Internal Technical Memo · 6 system mechanisms across 2 papers
+  </div>
+  <div>
+    NCv4 / NKI 0.3.0 / Neuron 2.29 · 2026
+  </div>
+</footer>
+
+</body>
+</html>

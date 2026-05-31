@@ -39,6 +39,8 @@ class QwenImageOrchestrator:
         width: int = 1024,
         text_seq_len: int = 1024,
         scheduler: Any = None,
+        teacache_speedup: float | None = None,
+        teacache_calibration_path: str | None = None,
     ) -> None:
         self.model_path = model_path
         self.transformer = transformer
@@ -53,6 +55,30 @@ class QwenImageOrchestrator:
             if scheduler is not None
             else _load_scheduler(model_path, warn_if_missing=transformer is not None)
         )
+        self.teacache_speedup = teacache_speedup
+        self.teacache_controller = None
+        if teacache_speedup is not None:
+            from nova.pipeline.teacache import (
+                TeaCacheController,
+                load_teacache_calibration_or_raise,
+            )
+
+            shape_label = _teacache_shape_label(height=self.height, width=self.width)
+            calibration = load_teacache_calibration_or_raise(
+                teacache_calibration_path,
+                model="qwen_image",
+                shape_label=shape_label,
+            )
+            if (
+                calibration.target_speedup is not None
+                and float(teacache_speedup) > float(calibration.target_speedup) + 1e-6
+            ):
+                raise ValueError(
+                    "TeaCache calibration target speedup is lower than requested: "
+                    f"requested {teacache_speedup}, calibration has "
+                    f"{calibration.target_speedup}."
+                )
+            self.teacache_controller = TeaCacheController(calibration)
 
     def has_runtime_components(self) -> bool:
         return self.transformer is not None or self.vae is not None
@@ -190,17 +216,48 @@ class QwenImageOrchestrator:
         trajectory: list[torch.Tensor] | None,
     ) -> torch.Tensor:
         latents = bundle.hidden_states
-        for timestep in timesteps:
+        # fused-A (cclog 81): prev_mod is a persistent on-device Parameter; the
+        # probe returns only the scalar delta — no host prev_mod copy. Mirrors
+        # the HunyuanVideo fused branch (cclog 80).
+        fused_probe = (
+            self.teacache_controller is not None
+            and getattr(self.transformer, "teacache_probe_fused", False)
+            and hasattr(self.transformer, "teacache_delta")
+        )
+        for step_index, timestep in enumerate(timesteps):
             model_dtype = _component_dtype(self.transformer, self.dtype)
             timestep_batch = _batch_timestep(timestep, latents.shape[0], latents.device, model_dtype)
             model_bundle = QwenImageDiTInputBundle(
                 hidden_states=latents.to(dtype=model_dtype),
-                timestep=timestep_batch,
+                # The diffusers QwenImage pipeline feeds timestep/1000 to the DiT
+                # (sigma in [0,1]); the scheduler keeps the raw timestep. Passing
+                # the raw 0-1000 timestep makes the AdaLN modulation swing wildly
+                # step-to-step (and inflates the TeaCache rel-L1 signal ~30x).
+                timestep=(timestep_batch / 1000.0).to(dtype=model_dtype),
                 encoder_hidden_states=bundle.encoder_hidden_states.to(dtype=model_dtype),
                 encoder_hidden_states_mask=bundle.encoder_hidden_states_mask,
                 guidance=bundle.guidance.to(dtype=model_dtype),
             )
-            noise_pred = _first_tensor(self.transformer(model_bundle))
+            delta_scalar: float | None = None
+            if fused_probe and self.teacache_controller.needs_signal():
+                # prev_mod persists on device; probe returns only delta. The
+                # garbage step-0 delta (zero prev_mod) is absorbed by warmup.
+                # Skipped entirely in fixed-cadence mode (probe-free, cclog 84).
+                delta_t = self.transformer.teacache_delta(model_bundle)
+                delta_scalar = float(delta_t.detach().cpu().item())
+            if (
+                self.teacache_controller is not None
+                and self.teacache_controller.should_skip(
+                    step_index,
+                    None,
+                    diff_norm=delta_scalar,
+                )
+            ):
+                noise_pred = self.teacache_controller.skip_noise_pred(None)
+            else:
+                noise_pred = _first_tensor(self.transformer(model_bundle))
+                if self.teacache_controller is not None:
+                    self.teacache_controller.record_full_step(noise_pred, None)
             latents = self._scheduler_step(noise_pred, timestep, latents, len(timesteps))
             if trajectory is not None:
                 trajectory.append(latents.detach().cpu())
@@ -337,6 +394,10 @@ def _missing_scheduler_message(model_path: str) -> str:
         f"Qwen-Image scheduler_config.json was not found under {model_path!r}; "
         "using the fixed-shape fallback denoise step for tests/smoke only."
     )
+
+
+def _teacache_shape_label(*, height: int, width: int) -> str:
+    return f"{int(height)}x{int(width)}"
 
 
 def _component_dtype(component: Any, default: torch.dtype) -> torch.dtype:

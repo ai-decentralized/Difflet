@@ -111,6 +111,38 @@ class NeuronFluxPipeline(FluxPipeline):
         # Only use parallel CFG if both CFG is enabled AND cfg_parallel_enabled is configured
         use_parallel_cfg = do_true_cfg and cfg_parallel_enabled
 
+        # TeaCache fused-A (cclog 85): when the probe is mounted, route to the
+        # serial-CFG teacache loop (handles both the controller-on skip path and
+        # the controller-None baseline through one loop for a clean A/B). CFG
+        # parallel is incompatible (asserted off in the application).
+        if getattr(self, "teacache_probe", None) is not None:
+            with self.transformer.image_rotary_emb_cache_context():
+                return self._call_with_teacache(
+                    prompt=prompt,
+                    prompt_2=prompt_2,
+                    negative_prompt=negative_prompt,
+                    negative_prompt_2=negative_prompt_2,
+                    true_cfg_scale=true_cfg_scale,
+                    height=height,
+                    width=width,
+                    num_inference_steps=num_inference_steps,
+                    sigmas=sigmas,
+                    guidance_scale=guidance_scale,
+                    num_images_per_prompt=num_images_per_prompt,
+                    generator=generator,
+                    latents=latents,
+                    prompt_embeds=prompt_embeds,
+                    pooled_prompt_embeds=pooled_prompt_embeds,
+                    negative_prompt_embeds=negative_prompt_embeds,
+                    negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
+                    output_type=output_type,
+                    return_dict=return_dict,
+                    joint_attention_kwargs=joint_attention_kwargs,
+                    callback_on_step_end=callback_on_step_end,
+                    callback_on_step_end_tensor_inputs=callback_on_step_end_tensor_inputs,
+                    max_sequence_length=max_sequence_length,
+                )
+
         if not use_parallel_cfg:
             # No CFG - use standard FluxPipeline implementation
             with self.transformer.image_rotary_emb_cache_context():
@@ -393,6 +425,242 @@ class NeuronFluxPipeline(FluxPipeline):
         if not return_dict:
             return (image,)
 
+        return FluxPipelineOutput(images=image)
+
+    def _call_with_teacache(
+        self,
+        prompt: Union[str, List[str]] = None,
+        prompt_2: Optional[Union[str, List[str]]] = None,
+        negative_prompt: Union[str, List[str]] = None,
+        negative_prompt_2: Optional[Union[str, List[str]]] = None,
+        true_cfg_scale: float = 1.0,
+        height: Optional[int] = None,
+        width: Optional[int] = None,
+        num_inference_steps: int = 28,
+        sigmas: Optional[List[float]] = None,
+        guidance_scale: float = 3.5,
+        num_images_per_prompt: Optional[int] = 1,
+        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+        latents: Optional[torch.FloatTensor] = None,
+        prompt_embeds: Optional[torch.FloatTensor] = None,
+        pooled_prompt_embeds: Optional[torch.FloatTensor] = None,
+        negative_prompt_embeds: Optional[torch.FloatTensor] = None,
+        negative_pooled_prompt_embeds: Optional[torch.FloatTensor] = None,
+        output_type: Optional[str] = "pil",
+        return_dict: bool = True,
+        joint_attention_kwargs: Optional[Dict[str, Any]] = None,
+        callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
+        callback_on_step_end_tensor_inputs: List[str] = ["latents"],
+        max_sequence_length: int = 512,
+    ):
+        """TeaCache fused-A denoise loop (cclog 85), SERIAL CFG.
+
+        Mirrors the diffusers FluxPipeline denoise loop but per step (a) probes
+        the block-0 modulated input via the fused probe NEFF, (b) lets the
+        controller decide skip-vs-full, reusing a cached residual on skip. With
+        ``teacache_controller`` unset it never skips (clean baseline through the
+        same loop). The combined post-CFG noise_pred is the residual unit — one
+        controller, one residual (the HV/Qwen pattern).
+        """
+        height = height or self.default_sample_size * self.vae_scale_factor
+        width = width or self.default_sample_size * self.vae_scale_factor
+
+        self.check_inputs(
+            prompt,
+            prompt_2,
+            height,
+            width,
+            negative_prompt=negative_prompt,
+            negative_prompt_2=negative_prompt_2,
+            prompt_embeds=prompt_embeds,
+            negative_prompt_embeds=negative_prompt_embeds,
+            pooled_prompt_embeds=pooled_prompt_embeds,
+            negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
+            callback_on_step_end_tensor_inputs=callback_on_step_end_tensor_inputs,
+            max_sequence_length=max_sequence_length,
+        )
+
+        self._guidance_scale = guidance_scale
+        self._joint_attention_kwargs = joint_attention_kwargs or {}
+        self._interrupt = False
+
+        do_true_cfg = true_cfg_scale > 1 and negative_prompt is not None
+
+        if prompt is not None and isinstance(prompt, str):
+            batch_size = 1
+        elif prompt is not None and isinstance(prompt, list):
+            batch_size = len(prompt)
+        else:
+            batch_size = prompt_embeds.shape[0]
+
+        device = self._execution_device
+        lora_scale = self.joint_attention_kwargs.get("scale", None)
+        (prompt_embeds, pooled_prompt_embeds, text_ids) = self.encode_prompt(
+            prompt=prompt,
+            prompt_2=prompt_2,
+            prompt_embeds=prompt_embeds,
+            pooled_prompt_embeds=pooled_prompt_embeds,
+            device=device,
+            num_images_per_prompt=num_images_per_prompt,
+            max_sequence_length=max_sequence_length,
+            lora_scale=lora_scale,
+        )
+        if do_true_cfg:
+            (negative_prompt_embeds, negative_pooled_prompt_embeds, _) = self.encode_prompt(
+                prompt=negative_prompt,
+                prompt_2=negative_prompt_2,
+                prompt_embeds=negative_prompt_embeds,
+                pooled_prompt_embeds=negative_pooled_prompt_embeds,
+                device=device,
+                num_images_per_prompt=num_images_per_prompt,
+                max_sequence_length=max_sequence_length,
+                lora_scale=lora_scale,
+            )
+
+        num_channels_latents = self.transformer.config.in_channels // 4
+        latents, latent_image_ids = self.prepare_latents(
+            batch_size * num_images_per_prompt,
+            num_channels_latents,
+            height,
+            width,
+            prompt_embeds.dtype,
+            device,
+            generator,
+            latents,
+        )
+
+        sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
+        image_seq_len = latents.shape[1]
+        mu = calculate_shift(
+            image_seq_len,
+            self.scheduler.config.base_image_seq_len,
+            self.scheduler.config.max_image_seq_len,
+            self.scheduler.config.base_shift,
+            self.scheduler.config.max_shift,
+        )
+        timesteps, num_inference_steps = retrieve_timesteps(
+            self.scheduler, num_inference_steps, device, sigmas=sigmas, mu=mu
+        )
+        num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
+        self._num_timesteps = len(timesteps)
+
+        if self.transformer.config.guidance_embeds:
+            guidance = torch.full([1], guidance_scale, device=device, dtype=torch.float32)
+            guidance = guidance.expand(latents.shape[0])
+        else:
+            guidance = None
+
+        controller = getattr(self, "teacache_controller", None)
+        fused = getattr(self.teacache_probe, "teacache_probe_fused", False)
+        # Record-only signal-gate mode (cclog 84/85): probe every step, never
+        # skip, collect (rel_l1_mod, rel_l1_noise) pairs to measure the Pearson
+        # before trusting an adaptive controller.
+        record = getattr(self, "_tc_record", False)
+        empty_guidance = torch.tensor([], device=device, dtype=latents.dtype)
+        if controller is not None:
+            controller.reset()
+        self._tc_last_trajectory = []
+        self._tc_pairs = []
+        _tc_prev_np = None
+
+        def _full_noise_pred(t):
+            timestep = t.expand(latents.shape[0]).to(latents.dtype)
+            pos = self.transformer(
+                hidden_states=latents,
+                timestep=timestep / 1000,
+                guidance=guidance,
+                pooled_projections=pooled_prompt_embeds,
+                encoder_hidden_states=prompt_embeds,
+                txt_ids=text_ids,
+                img_ids=latent_image_ids,
+                joint_attention_kwargs=self.joint_attention_kwargs,
+                return_dict=False,
+            )
+            pos = pos[0] if isinstance(pos, (tuple, list)) else pos
+            if not do_true_cfg:
+                return pos
+            neg = self.transformer(
+                hidden_states=latents,
+                timestep=timestep / 1000,
+                guidance=guidance,
+                pooled_projections=negative_pooled_prompt_embeds,
+                encoder_hidden_states=negative_prompt_embeds,
+                txt_ids=text_ids,
+                img_ids=latent_image_ids,
+                joint_attention_kwargs=self.joint_attention_kwargs,
+                return_dict=False,
+            )
+            neg = neg[0] if isinstance(neg, (tuple, list)) else neg
+            return neg + true_cfg_scale * (pos - neg)
+
+        with self.progress_bar(total=num_inference_steps) as progress_bar:
+            for i, t in enumerate(timesteps):
+                if self.interrupt:
+                    continue
+
+                ts01 = (t.expand(latents.shape[0]).to(latents.dtype)) / 1000
+                delta = None
+                want_probe = record or (controller is not None and controller.needs_signal())
+                if want_probe and fused:
+                    # Probe the positive (CFG-driving) branch only.
+                    probe_guidance = guidance if guidance is not None else empty_guidance
+                    delta = float(
+                        self.teacache_probe.teacache_delta(
+                            latents, ts01, pooled_prompt_embeds, probe_guidance
+                        )
+                        .detach()
+                        .cpu()
+                        .item()
+                    )
+
+                if controller is not None and controller.should_skip(i, None, diff_norm=delta):
+                    noise_pred = controller.skip_noise_pred(None)
+                else:
+                    noise_pred = _full_noise_pred(t)
+                    if controller is not None:
+                        controller.record_full_step(noise_pred, None)
+
+                if record and delta is not None and _tc_prev_np is not None:
+                    rel_noise = float(
+                        (noise_pred.float() - _tc_prev_np).abs().mean()
+                        / (_tc_prev_np.abs().mean() + 1e-8)
+                    )
+                    self._tc_pairs.append((float(delta), rel_noise))
+                if record:
+                    _tc_prev_np = noise_pred.detach().float()
+
+                latents_dtype = latents.dtype
+                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                if latents.dtype != latents_dtype and torch.backends.mps.is_available():
+                    latents = latents.to(latents_dtype)
+                self._tc_last_trajectory.append(latents.detach().to("cpu"))
+
+                if callback_on_step_end is not None:
+                    callback_kwargs = {}
+                    for k in callback_on_step_end_tensor_inputs:
+                        callback_kwargs[k] = locals()[k]
+                    callback_outputs = callback_on_step_end(self, i, t, callback_kwargs)
+                    latents = callback_outputs.pop("latents", latents)
+                    prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
+
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
+                    progress_bar.update()
+                if XLA_AVAILABLE:
+                    xm.mark_step()
+
+        if output_type == "latent":
+            image = latents
+        else:
+            latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
+            latents = (latents / self.vae.config.scaling_factor) + self.vae.config.shift_factor
+            image = self.vae.decode(latents, return_dict=False)[0]
+            image = self.image_processor.postprocess(image, output_type=output_type)
+
+        self.maybe_free_model_hooks()
+        if not return_dict:
+            return (image,)
         return FluxPipelineOutput(images=image)
 
 

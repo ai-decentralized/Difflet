@@ -271,6 +271,7 @@ class NeuronLTX2Application(MultiComponentApplication):
             audio_text_seq_len=self.audio_text_seq_len,
             audio_num_frames=self.audio_num_frames,
             frame_rate=self.frame_rate,
+            teacache_calibration_path=self.kwargs.get("teacache_calibration_path"),
         )
 
     def components(self) -> list[ComponentSpec]:
@@ -345,6 +346,12 @@ class NeuronLTX2Application(MultiComponentApplication):
             raise NotImplementedError("LTX-2 forward_dit requires an active transformer.")
         validate_ltx_2_dit_inputs(bundle, config=self.transformer.config, dtype=self.dtype)
         return self.transformer(*bundle.as_model_inputs())
+
+    def teacache_mod_input(self, hidden_states, timestep):
+        """Delegate the TeaCache block-0 modulated-input signal to the backend runtime."""
+        if self.transformer is None:
+            raise NotImplementedError("LTX-2 teacache_mod_input requires an active transformer.")
+        return self.transformer.teacache_mod_input(hidden_states, timestep)
 
     def __call__(self, *args: Any, **kwargs: Any):
         if len(args) == 1 and isinstance(args[0], LTX2DiTInputBundle):

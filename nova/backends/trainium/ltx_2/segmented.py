@@ -42,12 +42,26 @@ def _patch_ltx2_rope() -> Any:
     return ltx2_transformer
 
 
+# cclog 87: per-block CPU weight cache. The segmented runtime sweeps all 48 blocks every
+# denoise step, re-loading each block's ~0.4 GB (bf16) from disk each time (~1.25 s/block).
+# The block weights are immutable across steps, so memoize them (≈18 GB host for all 48;
+# set NOVA_LTX2_NO_WEIGHT_CACHE=1 to disable on memory-constrained hosts). This removes the
+# disk-read half of the per-block reload cost (~2.8 s -> ~1.55 s/block).
+_BLOCK_STATE_DICT_CACHE: dict = {}
+
+
 def _load_block_state_dict_from_dir(
     transformer_dir: Path,
     block_index: int,
     *,
     dtype: torch.dtype | None = None,
 ) -> dict[str, torch.Tensor]:
+    _cache_on = os.environ.get("NOVA_LTX2_NO_WEIGHT_CACHE") != "1"
+    _cache_key = (str(transformer_dir), int(block_index), str(dtype))
+    if _cache_on:
+        _cached = _BLOCK_STATE_DICT_CACHE.get(_cache_key)
+        if _cached is not None:
+            return _cached
     index_path = transformer_dir / "diffusion_pytorch_model.safetensors.index.json"
     prefix = f"transformer_blocks.{block_index}."
     block_state_dict: dict[str, torch.Tensor] = {}
@@ -72,6 +86,8 @@ def _load_block_state_dict_from_dir(
                     )
                     block_state_dict[f"block.{key[len(prefix):]}"] = tensor
         if block_state_dict:
+            if _cache_on:
+                _BLOCK_STATE_DICT_CACHE[_cache_key] = block_state_dict
             return block_state_dict
 
     state_dict = load_state_dict(str(transformer_dir))
@@ -81,6 +97,8 @@ def _load_block_state_dict_from_dir(
             block_state_dict[f"block.{key[len(prefix):]}"] = tensor
     if not block_state_dict:
         raise KeyError(f"no state_dict keys found for {prefix!r} under {transformer_dir}")
+    if _cache_on:
+        _BLOCK_STATE_DICT_CACHE[_cache_key] = block_state_dict
     return block_state_dict
 
 
@@ -871,15 +889,67 @@ class LTX2BlockSegmentApplication(NeuronApplicationBase):
             return
         if self.traced_model is None or self._loaded_compiled_model_path is None:
             raise RuntimeError("reload_block_weights called before load")
+        # Swap to the next block's weights. The compiled artifact exports only the leaking
+        # ``initialize`` (re-allocates ~9 GB/core scratchpad per call without freeing →
+        # HBM exhausted after ~4 reloads; in-place ``replace_weights`` is NOT exported —
+        # cclog 87, confirmed via on-device probe), so we must teardown+reload the NEFF to
+        # let the NRT free the scratchpad (~1.5 s/block device re-stage).
+        #
+        # cclog 87 speedup: do NOT rebuild the ModelBuilder per block. The NEFF/trace is
+        # block-agnostic (same compiled artifact; only the checkpoint differs), and
+        # ``shard_checkpoint`` re-invokes ``checkpoint_loader`` which reads the updated
+        # ``config.block_index``. Reusing the builder removes the ~1.2 s/block rebuild
+        # (ModelBuilder construction + input_generator). Combined with the per-block weight
+        # cache (``_BLOCK_STATE_DICT_CACHE``), only the device re-stage remains.
+        import gc
+
         self.config.block_index = block_index
         for model in self.models:
             model.config.block_index = block_index
-        self._builder = None
-        self.load_weights(
-            self._loaded_compiled_model_path,
-            start_rank_id=self._loaded_start_rank_id,
-            local_ranks_size=self._loaded_local_ranks_size,
-        )
+
+        # cclog 87/88: per-block weight swap. The compiled artifact's nxd_model exports only the
+        # scratchpad-leaking ``initialize`` (no in-place ``replace_weights``), so a teardown +
+        # reload is needed to let the NRT free the scratchpad. Two speedups:
+        #  (1) REUSE the ModelBuilder — it is block-agnostic (same NEFF/trace; only the checkpoint
+        #      differs) and ``shard_checkpoint`` re-reads the new block via ``checkpoint_loader``
+        #      (which reads the updated ``config.block_index``). Removes the ~1.2 s/block rebuild
+        #      (validated 1.67×, cosine bit-identical) — this is why we no longer null ``_builder``.
+        #  (2) OPTIONAL amortized resident reload (NOVA_LTX2_RELOAD_TEARDOWN_EVERY, default 1 = off):
+        #      keep the NEFF resident for K blocks, teardown only every K to free the leak.
+        #      Default off because on-device data showed a resident reload is only ~14% faster
+        #      (the 1.49 s is genuine weight DMA/scratchpad, not a NEFF binary re-load) and carries
+        #      scratchpad-leak risk; an OOM in the resident path falls back to teardown.
+        teardown_every = int(os.environ.get("NOVA_LTX2_RELOAD_TEARDOWN_EVERY", "1"))
+        n = getattr(self, "_reloads_since_teardown", 0)
+        resident_reload = teardown_every > 1 and (n + 1) < teardown_every
+
+        if resident_reload:
+            try:
+                # NEFF stays resident; re-DMA only the new block's weights.
+                self.load_weights(
+                    self._loaded_compiled_model_path,
+                    start_rank_id=self._loaded_start_rank_id,
+                    local_ranks_size=self._loaded_local_ranks_size,
+                )
+                self._reloads_since_teardown = n + 1
+            except RuntimeError:
+                # Scratchpad accumulation OOM'd before the amortized teardown — fall back to a
+                # full teardown+reload (frees HBM) and shrink the window so it doesn't recur.
+                resident_reload = False
+                teardown_every = max(2, n)
+        if not resident_reload:
+            self.traced_model = None
+            self.is_loaded_to_neuron = False
+            for model in self.models:
+                model.model = None
+            gc.collect()
+            self.load(
+                self._loaded_compiled_model_path,
+                start_rank_id=self._loaded_start_rank_id,
+                local_ranks_size=self._loaded_local_ranks_size,
+                skip_warmup=True,
+            )
+            self._reloads_since_teardown = 0
         self._loaded_block_index = block_index
 
 
@@ -951,6 +1021,43 @@ class LTX2SegmentedTransformerApplication(nn.Module):
             )
             self._cpu_transformer = self._cpu_transformer.to(dtype=self.dtype).eval()
         return self._cpu_transformer
+
+    @torch.no_grad()
+    def teacache_mod_input(
+        self,
+        hidden_states: torch.Tensor,
+        timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        """TeaCache signal: block-0's modulated video self-attention input (cclog 87).
+
+        Replicates the prefix of the diffusers LTX-2 forward up to
+        ``transformer_blocks[0]``'s modulated norm input
+        ``norm1(proj_in(latent)) * (1 + scale_msa) + shift_msa``. The modulation is
+        timestep-only (``scale_shift_table + temb``), so this is identical for the
+        cond/uncond CFG halves — the caller passes the single (un-doubled) latent
+        plus the un-doubled per-batch timestep. Runs the host CPU transformer copy.
+
+        The host TeaCache controller takes the relative-L1 of this tensor's
+        step-to-step change as the skip signal (gate Pearson 0.93).
+        """
+        model = self._load_cpu_transformer()
+        hidden_states = hidden_states.to(dtype=self.dtype)
+        batch_size = hidden_states.shape[0]
+
+        hidden_states = model.proj_in(hidden_states)
+        temb, _embedded_timestep = model.time_embed(
+            timestep.flatten(),
+            batch_size=batch_size,
+            hidden_dtype=hidden_states.dtype,
+        )
+        temb = temb.view(batch_size, -1, temb.size(-1))
+
+        block0 = model.transformer_blocks[0]
+        video_ada_params = block0.get_mod_params(block0.scale_shift_table, temb, batch_size)
+        shift_msa, scale_msa = video_ada_params[0], video_ada_params[1]
+
+        norm_hidden_states = block0.norm1(hidden_states)
+        return norm_hidden_states * (1 + scale_msa) + shift_msa
 
     def _prepare_frontend(
         self,

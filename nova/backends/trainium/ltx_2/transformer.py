@@ -393,6 +393,45 @@ class NeuronLTX2TransformerApplication(NeuronApplicationBase):
         )
         self.models.append(self.model)
         self.dtype = self.config.neuron_config.torch_dtype
+        self._cpu_transformer = None
+
+    def _load_cpu_transformer(self):
+        """Host CPU copy of the LTX-2 transformer (for the TeaCache signal, cclog 87).
+
+        Single-mode counterpart to the segmented runtime's host model — the TeaCache
+        block-0 signal only needs a host transformer copy, independent of the device
+        execution mode.
+        """
+        if self._cpu_transformer is None:
+            from nova.backends.trainium.ltx_2.segmented import _patch_ltx2_rope
+
+            _patch_ltx2_rope()
+            from diffusers.models.transformers.transformer_ltx2 import LTX2VideoTransformer3DModel
+
+            model = LTX2VideoTransformer3DModel.from_pretrained(self.model_path, torch_dtype=self.dtype)
+            self._cpu_transformer = model.to(dtype=self.dtype).eval()
+        return self._cpu_transformer
+
+    @torch.no_grad()
+    def teacache_mod_input(self, hidden_states, timestep):
+        """TeaCache signal: block-0 modulated video self-attn input (cclog 87).
+
+        ``norm1(proj_in(latent)) * (1 + scale_msa) + shift_msa`` from the host CPU
+        transformer; modulation is timestep-only (identical for cond/uncond, so the
+        caller passes the un-doubled latent + per-batch timestep).
+        """
+        model = self._load_cpu_transformer()
+        hidden_states = hidden_states.to(dtype=self.dtype)
+        batch_size = hidden_states.shape[0]
+        hidden_states = model.proj_in(hidden_states)
+        temb, _ = model.time_embed(
+            timestep.flatten(), batch_size=batch_size, hidden_dtype=hidden_states.dtype
+        )
+        temb = temb.view(batch_size, -1, temb.size(-1))
+        block0 = model.transformer_blocks[0]
+        video_ada_params = block0.get_mod_params(block0.scale_shift_table, temb, batch_size)
+        shift_msa, scale_msa = video_ada_params[0], video_ada_params[1]
+        return block0.norm1(hidden_states) * (1 + scale_msa) + shift_msa
 
     @classmethod
     def get_config_cls(cls):

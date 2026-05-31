@@ -110,6 +110,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--download-weights", action="store_true",
                    help="Download missing transformer/text_encoder/tokenizer/vae files from HF")
     p.add_argument("--skip-warmup", action="store_true")
+    p.add_argument("--teacache-calibration", default=None,
+                   help="path to a TeaCache calibration JSON; enables adaptive step skipping")
 
     return p.parse_args(argv)
 
@@ -325,6 +327,7 @@ def main(argv: list[str] | None = None) -> int:
         enable_transformer=components["transformer"],
         enable_transformer_2=components["transformer_2"],
         enable_vae_decoder=components["vae"],
+        teacache_calibration_path=args.teacache_calibration,
     )
 
     t0 = time.monotonic()

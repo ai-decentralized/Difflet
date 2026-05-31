@@ -170,6 +170,46 @@ def test_pipeline_call_delegates_to_application(tmp_path):
     assert result == {"args": ("prompt",), "kwargs": {"steps": 1}}
 
 
+def test_pipeline_forwards_teacache_kwargs_to_application(tmp_path):
+    model_dir = tmp_path / "unit-dummy-model"
+    model_dir.mkdir()
+
+    pipe = NovaPipeline.from_pretrained(
+        str(model_dir),
+        model_type="unit_dummy",
+        dtype="bf16",
+        compile_cache_dir=str(tmp_path / "cache"),
+        skip_compile=True,
+        load=False,
+        teacache_speedup=1.5,
+        teacache_calibration_path="calibration.json",
+    )
+
+    assert pipe.app.kwargs["teacache_speedup"] == 1.5
+    assert pipe.app.kwargs["teacache_calibration_path"] == "calibration.json"
+    assert pipe.cache_spec.application_kwargs == {
+        "teacache_calibration_path": "calibration.json",
+        "teacache_speedup": 1.5,
+    }
+
+
+def test_pipeline_rejects_conflicting_teacache_kwargs(tmp_path):
+    model_dir = tmp_path / "unit-dummy-model"
+    model_dir.mkdir()
+
+    with pytest.raises(ValueError, match="teacache_speedup"):
+        NovaPipeline.from_pretrained(
+            str(model_dir),
+            model_type="unit_dummy",
+            dtype="bf16",
+            compile_cache_dir=str(tmp_path / "cache"),
+            skip_compile=True,
+            load=False,
+            teacache_speedup=1.5,
+            application_kwargs={"teacache_speedup": 1.3},
+        )
+
+
 # ---------------------------------------------------------------------------
 # P1-P4 regression tests (added in M1.0.1).
 # ---------------------------------------------------------------------------

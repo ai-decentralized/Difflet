@@ -1,14 +1,5 @@
 """HunyuanVideo model entry package."""
 
-from nova.models.hunyuan_video.modeling_hunyuan_video import (
-    HunyuanVideoAttention,
-    HunyuanVideoSingleTransformerBlock,
-    HunyuanVideoTransformer3DModel,
-    HunyuanVideoTransformerBlock,
-    HunyuanVideoTransformerConfig,
-    dual_stream_attention,
-)
-
 __all__ = [
     "HunyuanVideoAttention",
     "HunyuanVideoSingleTransformerBlock",
@@ -17,3 +8,12 @@ __all__ = [
     "HunyuanVideoTransformerConfig",
     "dual_stream_attention",
 ]
+
+
+def __getattr__(name: str):
+    if name in __all__:
+        from importlib import import_module
+
+        module = import_module("nova.models.hunyuan_video.modeling_hunyuan_video")
+        return getattr(module, name)
+    raise AttributeError(f"module 'nova.models.hunyuan_video' has no attribute {name!r}")

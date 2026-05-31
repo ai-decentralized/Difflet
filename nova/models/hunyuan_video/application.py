@@ -13,12 +13,37 @@ from typing import Any
 
 import torch
 
-from nova.backends.trainium.core.config import NeuronConfig
-from nova.backends.trainium.core.multi_component_application import (
-    ComponentSpec,
-    MultiComponentApplication,
-)
-from nova.utils.diffusers_adapter import load_diffusers_config
+try:
+    from nova.backends.trainium.core.config import NeuronConfig
+    from nova.backends.trainium.core.multi_component_application import (
+        ComponentSpec,
+        MultiComponentApplication,
+    )
+except (ImportError, FileNotFoundError) as exc:
+    _TRAINIUM_IMPORT_ERROR = exc
+
+    class NeuronConfig:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs) -> None:
+            raise RuntimeError("Trainium runtime dependencies are unavailable.") from (
+                _TRAINIUM_IMPORT_ERROR
+            )
+
+    @dataclass(frozen=True)
+    class ComponentSpec:  # type: ignore[no-redef]
+        name: str
+        component: Any
+
+    class MultiComponentApplication:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs) -> None:
+            raise RuntimeError("Trainium runtime dependencies are unavailable.") from (
+                _TRAINIUM_IMPORT_ERROR
+            )
+
+
+def _load_diffusers_config(path: str):
+    from nova.utils.diffusers_adapter import load_diffusers_config
+
+    return load_diffusers_config(path)
 
 
 @dataclass(frozen=True)
@@ -212,7 +237,7 @@ def create_hunyuan_video_backbone_config(
     )
     return HunyuanVideoBackboneInferenceConfig(
         neuron_config=neuron_config,
-        load_config=load_diffusers_config(transformer_path),
+        load_config=_load_diffusers_config(transformer_path),
         height=height,
         width=width,
         num_frames=num_frames,
@@ -247,7 +272,7 @@ def create_hunyuan_video15_backbone_config(
     )
     return HunyuanVideo15BackboneInferenceConfig(
         neuron_config=neuron_config,
-        load_config=load_diffusers_config(transformer_path),
+        load_config=_load_diffusers_config(transformer_path),
         height=height,
         width=width,
         num_frames=num_frames,
@@ -280,7 +305,7 @@ def create_hunyuan_video_vae_decoder_config(
     )
     return HunyuanVideoVAEDecoderInferenceConfig(
         neuron_config=neuron_config,
-        load_config=load_diffusers_config(vae_path),
+        load_config=_load_diffusers_config(vae_path),
         height=height,
         width=width,
         num_frames=num_frames,
@@ -315,7 +340,7 @@ def create_hunyuan_video15_vae_decoder_config(
     )
     return HunyuanVideo15VAEDecoderInferenceConfig(
         neuron_config=neuron_config,
-        load_config=load_diffusers_config(vae_path),
+        load_config=_load_diffusers_config(vae_path),
         height=height,
         width=width,
         num_frames=num_frames,
@@ -366,6 +391,22 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         self.vae_decoder_path = os.path.join(model_path, "vae")
         self.transformer = None
         self.vae_decoder = None
+        self.teacache_probe = None
+        self.teacache_probe_fused = False
+        # host-refiner (cclog 86): the HV-1.5 token refiner self-attends over the sparse
+        # mllm stream (<128 valid keys), which NaNs the Neuron flash kernel; run it on host
+        # (eager, exact) and feed refined embeds into the NEFF instead.
+        self._host_refiner = None
+        self._host_refiner_on = (
+            os.environ.get("NOVA_HUNYUAN15_HOST_REFINER") == "1"
+            and str(kwargs.get("model_version", "1.0")) == "1.5"
+        )
+        # refined embeds depend only on (raw_mllm, timestep, mask); the prompt is fixed
+        # within a generation and the timesteps repeat across the gate/baseline/teacache
+        # trajectories, so memoize by timestep (keyed under a cheap prompt fingerprint).
+        # Lazy (not eager-precompute-all): a TeaCache-skipped step never computes it.
+        self._refiner_cache: dict[float, torch.Tensor] = {}
+        self._refiner_fp = None
         self.pipeline = None
         self.text_seq_len = int(kwargs.get("text_seq_len", 256))
         self.text_seq_len_2 = int(kwargs.get("text_seq_len_2", 256))
@@ -383,7 +424,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         transformer_config_path = os.path.join(self.transformer_path, "config.json")
         self.transformer_config = None
         if os.path.exists(transformer_config_path):
-            self.transformer_config = load_diffusers_config(self.transformer_path)
+            self.transformer_config = _load_diffusers_config(self.transformer_path)
         if self.model_version == "1.5" and enable_transformer and os.path.exists(transformer_config_path):
             from nova.backends.trainium.hunyuan_video.backbone15 import (
                 NeuronHunyuanVideo15BackboneApplication,
@@ -402,7 +443,14 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 image_seq_len=self.image_seq_len,
                 batch_size=self.batch_size,
             )
+            teacache_fused_15 = bool(kwargs.get("teacache_fused", False))
             if self.transformer_runtime == "segmented":
+                if teacache_fused_15:
+                    raise NotImplementedError(
+                        "HunyuanVideo 1.5 TeaCache is not supported with the segmented "
+                        "runtime: per-block process loading has no single graph for the "
+                        "persistent prev_mod Parameter. Use transformer_runtime='monolithic'."
+                    )
                 from nova.backends.trainium.hunyuan_video.segmented15 import (
                     DEFAULT_ATTENTION_COMPILER_ARGS,
                     DEFAULT_BLOCK_COMPILER_ARGS,
@@ -430,6 +478,18 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                     model_path=self.transformer_path,
                     config=config,
                 )
+                if teacache_fused_15:
+                    # cclog 86: HV-1.5 block-0 modulation is timestep-only
+                    # (Qwen-weak); the probe is mounted to MEASURE the signal.
+                    from nova.backends.trainium.hunyuan_video.teacache_probe15 import (
+                        NeuronHunyuanVideo15TeacacheProbeFusedApplication,
+                    )
+
+                    self.teacache_probe = NeuronHunyuanVideo15TeacacheProbeFusedApplication(
+                        model_path=self.transformer_path,
+                        config=config,
+                    )
+                    self.teacache_probe_fused = True
             else:
                 raise ValueError(
                     "HunyuanVideo 1.5 transformer_runtime must be 'monolithic' or "
@@ -455,6 +515,28 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 model_path=self.transformer_path,
                 config=config,
             )
+
+            teacache_fused = bool(kwargs.get("teacache_fused", False))
+            if teacache_fused:
+                from nova.backends.trainium.hunyuan_video.teacache_probe import (
+                    NeuronHunyuanVideoTeacacheProbeFusedApplication,
+                )
+
+                self.teacache_probe = NeuronHunyuanVideoTeacacheProbeFusedApplication(
+                    model_path=self.transformer_path,
+                    config=config,
+                )
+                self.teacache_probe_fused = True
+            else:
+                from nova.backends.trainium.hunyuan_video.teacache_probe import (
+                    NeuronHunyuanVideoTeacacheProbeApplication,
+                )
+
+                self.teacache_probe = NeuronHunyuanVideoTeacacheProbeApplication(
+                    model_path=self.transformer_path,
+                    config=config,
+                )
+                self.teacache_probe_fused = False
 
         vae_config_path = os.path.join(self.vae_decoder_path, "config.json")
         if enable_vae_decoder and os.path.exists(vae_config_path):
@@ -509,6 +591,8 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
             height=self.shape["height"],
             width=self.shape["width"],
             num_frames=self.shape["num_frames"],
+            teacache_speedup=kwargs.get("teacache_speedup"),
+            teacache_calibration_path=kwargs.get("teacache_calibration_path"),
         )
 
     def components(self) -> list[ComponentSpec]:
@@ -518,6 +602,8 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 components.extend(self.transformer.component_specs(prefix="transformer"))
             else:
                 components.append(ComponentSpec("transformer", self.transformer))
+        if self.teacache_probe is not None:
+            components.append(ComponentSpec("teacache_probe", self.teacache_probe))
         if self.vae_decoder is not None:
             if hasattr(self.vae_decoder, "component_specs"):
                 components.extend(self.vae_decoder.component_specs(prefix="vae_decoder"))
@@ -643,6 +729,62 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
             "guidance": {"shape": (batch_size,), "dtype": self.dtype},
         }
 
+    def _get_host_refiner(self):
+        """Build (once) a CPU fp32 copy of the HV-1.5 token refiner (context_embedder).
+
+        Runs on host to avoid the Neuron flash <128-valid-keys NaN (cclog 86). Loads the
+        ``context_embedder.*`` weights from the transformer checkpoint; uses a key-only
+        attention mask (no all-(-inf) query row -> finite on CPU; valid-row output is
+        identical to the symmetric mask, and padding-query rows are masked/zeroed
+        downstream in the NEFF).
+        """
+        if self._host_refiner is not None:
+            return self._host_refiner
+        import glob
+        import types
+
+        from safetensors.torch import load_file
+        from diffusers.models.transformers.transformer_hunyuan_video15 import (
+            HunyuanVideo15TokenRefiner,
+        )
+
+        cfg = self.transformer.config
+        refiner = HunyuanVideo15TokenRefiner(
+            in_channels=int(cfg.text_embed_dim),
+            num_attention_heads=int(cfg.num_attention_heads),
+            attention_head_dim=int(cfg.attention_head_dim),
+            num_layers=int(cfg.num_refiner_layers),
+            mlp_ratio=float(getattr(cfg, "mlp_ratio", 4.0)),
+        )
+        prefix = "context_embedder."
+        state: dict[str, torch.Tensor] = {}
+        for f in sorted(glob.glob(os.path.join(self.transformer_path, "*.safetensors"))):
+            for k, v in load_file(f).items():
+                if k.startswith(prefix):
+                    state[k[len(prefix):]] = v
+        missing, unexpected = refiner.load_state_dict(state, strict=False)
+        if missing or unexpected:
+            raise RuntimeError(
+                f"host refiner weight mismatch: missing={missing[:4]} unexpected={unexpected[:4]}"
+            )
+        refiner = refiner.to(torch.float32).eval()
+
+        def _host_keyonly(rself, hs, temb, am=None):
+            mask = None
+            if am is not None:
+                bs, seq = int(am.shape[0]), int(am.shape[1])
+                neg = torch.finfo(hs.dtype).min
+                mask = torch.zeros((bs, 1, 1, seq), dtype=hs.dtype).masked_fill(
+                    ~am.bool().view(bs, 1, 1, seq), neg
+                )
+            for blk in rself.refiner_blocks:
+                hs = blk(hs, temb, mask)
+            return hs
+
+        refiner.token_refiner.forward = types.MethodType(_host_keyonly, refiner.token_refiner)
+        self._host_refiner = refiner
+        return refiner
+
     def forward_dit(self, bundle: HunyuanVideoDiTInputBundle):
         if self.transformer is None:
             raise NotImplementedError("HunyuanVideo forward_dit requires an active transformer.")
@@ -652,13 +794,93 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 config=self.transformer.config,
                 dtype=self.dtype,
             )
-            return self.transformer(*bundle.as_model_inputs())
+            inputs = list(bundle.as_model_inputs())
+            if self._host_refiner_on:
+                # inputs = (hidden_states, timestep, encoder_hidden_states[mllm],
+                #           encoder_attention_mask, timestep_r, ...) — refine the raw mllm
+                # on host (fp32) and feed the inner_dim result into the NEFF.
+                raw, ts, mask = inputs[2], inputs[1], inputs[3]
+                # cheap prompt fingerprint (one channel across tokens + valid count); reset
+                # the per-timestep cache when the prompt changes.
+                fp = (tuple(raw.shape), round(float(raw[0, :, 0].float().sum()), 3), int(mask.sum()))
+                if fp != self._refiner_fp:
+                    self._refiner_cache = {}
+                    self._refiner_fp = fp
+                tkey = round(float(ts.flatten()[0]), 6)
+                refined = self._refiner_cache.get(tkey)
+                if refined is None:
+                    refiner = self._get_host_refiner()
+                    with torch.no_grad():
+                        refined = refiner(raw.to(torch.float32), ts.to(torch.float32), mask).to(self.dtype)
+                    self._refiner_cache[tkey] = refined
+                inputs[2] = refined
+            return self.transformer(*inputs)
         validate_hunyuan_video_dit_inputs(
             bundle,
             config=self.transformer.config,
             dtype=self.dtype,
         )
         return self.transformer(*bundle.as_model_inputs())
+
+    def teacache_mod_input(self, bundle: HunyuanVideoDiTInputBundle) -> torch.Tensor:
+        """Calibration entry — returns ``mod_input`` only.
+
+        For Trainium backbone this dispatches the standalone probe NEFF
+        (``NeuronHunyuanVideoTeacacheProbeApplication``) which is a separate
+        compiled artifact from the DiT NEFF. For CPU model paths the wrapped
+        ``HunyuanVideoTransformer3DModel.teacache_mod_input`` is called directly.
+        """
+        if self.teacache_probe is not None:
+            return self.teacache_probe.teacache_mod_input(*bundle.as_model_inputs())
+        if self.transformer is None:
+            raise NotImplementedError("HunyuanVideo TeaCache requires an active transformer.")
+        hook = getattr(self.transformer, "teacache_mod_input", None)
+        if hook is None:
+            raise NotImplementedError(
+                "The active HunyuanVideo transformer does not expose teacache_mod_input."
+            )
+        return hook(*bundle.as_model_inputs())
+
+    def teacache_delta(self, bundle: HunyuanVideoDiTInputBundle) -> torch.Tensor:
+        """fused-A entry (cclog 80): returns ONLY the scalar delta. prev_mod is
+        a persistent on-device Parameter updated in place via alias — no host
+        handle. Requires the fused probe (teacache_fused=True)."""
+        if not self.teacache_probe_fused or self.teacache_probe is None:
+            raise NotImplementedError(
+                "teacache_delta requires the fused probe (teacache_fused=True)."
+            )
+        return self.teacache_probe.teacache_delta(*bundle.as_model_inputs())
+
+    def teacache_mod_input_with_delta(
+        self,
+        hidden_states: torch.Tensor,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
+        pooled_projections: torch.Tensor,
+        guidance: torch.Tensor,
+        prev_mod_input: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """T1 production probe entry: returns ``(delta_scalar, mod_input_handle)``.
+
+        Dispatches the standalone probe NEFF. ``prev_mod_input`` is a device
+        tensor kept on HBM across denoise steps (Python reference swap); only
+        the 4-byte ``delta_scalar`` crosses PCIe per step.
+        """
+        if self.teacache_probe is None:
+            raise NotImplementedError(
+                "HunyuanVideo TeaCache probe NEFF is not loaded. The active "
+                "transformer path may be CPU or HV-1.5 segmented — see cclog 72/73."
+            )
+        return self.teacache_probe.teacache_mod_input_with_delta(
+            hidden_states,
+            timestep,
+            encoder_hidden_states,
+            encoder_attention_mask,
+            pooled_projections,
+            guidance,
+            prev_mod_input,
+        )
 
     def __call__(self, *args: Any, **kwargs: Any):
         if len(args) == 1 and isinstance(args[0], (HunyuanVideoDiTInputBundle, HunyuanVideo15DiTInputBundle)):
