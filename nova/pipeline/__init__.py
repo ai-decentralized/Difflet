@@ -1,4 +1,10 @@
-__all__ = ["NovaPipeline", "NovaParallelConfig", "CandidateConfig"]
+__all__ = [
+    "CandidateConfig",
+    "NovaParallelConfig",
+    "NovaPipeline",
+    "TeaCacheCalibration",
+    "TeaCacheController",
+]
 
 
 def __getattr__(name: str):
@@ -14,4 +20,12 @@ def __getattr__(name: str):
         from nova.pipeline.parallel_config import CandidateConfig
 
         return CandidateConfig
+    if name == "TeaCacheCalibration":
+        from nova.pipeline.teacache import TeaCacheCalibration
+
+        return TeaCacheCalibration
+    if name == "TeaCacheController":
+        from nova.pipeline.teacache import TeaCacheController
+
+        return TeaCacheController
     raise AttributeError(f"module 'nova.pipeline' has no attribute {name!r}")

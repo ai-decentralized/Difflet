@@ -7,6 +7,7 @@ The Trainium boundary is the DiT backbone call represented by
 
 from __future__ import annotations
 
+import inspect
 import os
 import warnings
 from dataclasses import dataclass
@@ -39,6 +40,8 @@ class HunyuanVideoOrchestrator:
         width: int = 512,
         num_frames: int = 61,
         scheduler: Any = None,
+        teacache_speedup: float | None = None,
+        teacache_calibration_path: str | None = None,
     ) -> None:
         self.model_path = model_path
         self.transformer = transformer
@@ -52,6 +55,34 @@ class HunyuanVideoOrchestrator:
             if scheduler is not None
             else _load_scheduler(model_path, warn_if_missing=transformer is not None)
         )
+        self.teacache_speedup = teacache_speedup
+        self.teacache_controller = None
+        if teacache_speedup is not None:
+            from nova.pipeline.teacache import (
+                TeaCacheController,
+                load_teacache_calibration_or_raise,
+            )
+
+            shape_label = _teacache_shape_label(
+                height=self.height,
+                width=self.width,
+                num_frames=self.num_frames,
+            )
+            calibration = load_teacache_calibration_or_raise(
+                teacache_calibration_path,
+                model="hunyuan_video",
+                shape_label=shape_label,
+            )
+            if (
+                calibration.target_speedup is not None
+                and float(teacache_speedup) > float(calibration.target_speedup) + 1e-6
+            ):
+                raise ValueError(
+                    "TeaCache calibration target speedup is lower than requested: "
+                    f"requested {teacache_speedup}, calibration has "
+                    f"{calibration.target_speedup}."
+                )
+            self.teacache_controller = TeaCacheController(calibration)
 
     def has_runtime_components(self) -> bool:
         return self.transformer is not None or self.vae is not None
@@ -147,7 +178,24 @@ class HunyuanVideoOrchestrator:
         trajectory: list[torch.Tensor] | None,
     ) -> torch.Tensor:
         latents = bundle.hidden_states
-        for timestep in timesteps:
+        # cclog 72 mid-term path: when the transformer exposes
+        # ``teacache_mod_input_with_delta`` (Trainium probe NEFF), keep
+        # ``prev_mod_handle`` on device across denoise steps and let the probe
+        # compute the L2 diff on device — host only sees a scalar per step.
+        device_probe = (
+            self.teacache_controller is not None
+            and self.teacache_controller.calibration.mod_input_source == "block0_modulated_input"
+            and hasattr(self.transformer, "teacache_mod_input_with_delta")
+        )
+        # fused-A (cclog 80): prev_mod is a persistent on-device Parameter; the
+        # probe returns only the scalar delta — no host prev_mod_handle.
+        fused_probe = (
+            self.teacache_controller is not None
+            and getattr(self.transformer, "teacache_probe_fused", False)
+            and hasattr(self.transformer, "teacache_delta")
+        )
+        prev_mod_handle: torch.Tensor | None = None
+        for step_index, timestep in enumerate(timesteps):
             model_dtype = _component_dtype(self.transformer, self.dtype)
             timestep_batch = _batch_timestep(
                 timestep,
@@ -163,7 +211,60 @@ class HunyuanVideoOrchestrator:
                 pooled_projections=bundle.pooled_projections.to(dtype=model_dtype),
                 guidance=bundle.guidance.to(dtype=model_dtype),
             )
-            noise_pred = _first_tensor(self.transformer(model_bundle))
+            delta_scalar: float | None = None
+            mod_input = None
+            if fused_probe:
+                # prev_mod persists on device; probe returns only delta.
+                # The garbage step-0 delta (zero prev_mod) is absorbed by warmup.
+                delta_t = self.transformer.teacache_delta(model_bundle)
+                delta_scalar = float(delta_t.detach().cpu().item())
+            elif device_probe:
+                # Skip the ~51 ms probe NEFF dispatch while a committed skip-run
+                # is in flight (cclog 78): the controller already decided to keep
+                # skipping, so no fresh delta is needed this step.
+                needs_probe = (
+                    self.teacache_controller is None
+                    or self.teacache_controller.needs_probe()
+                )
+                if needs_probe:
+                    if self.teacache_controller is not None:
+                        self.teacache_controller.note_probe()
+                    if prev_mod_handle is None:
+                        prev_mod_handle = self.transformer.teacache_mod_input(model_bundle)
+                        mod_input = prev_mod_handle
+                    else:
+                        delta_t, mod_input = self.transformer.teacache_mod_input_with_delta(
+                            *model_bundle.as_model_inputs(),
+                            prev_mod_handle,
+                        )
+                        delta_scalar = float(delta_t.detach().cpu().item())
+                        prev_mod_handle = mod_input
+            else:
+                mod_input = _teacache_mod_input(
+                    self.transformer,
+                    model_bundle,
+                    source=self.teacache_controller.calibration.mod_input_source
+                    if self.teacache_controller is not None
+                    else "hidden_states_proxy",
+                )
+            # In device-probe mode the probe NEFF owns prev_mod_input on device,
+            # so we pass mod_input=None to the controller to avoid a 63 MB
+            # host copy per step. In the host-fallback path the controller still
+            # needs mod_input for its own diff.
+            controller_mod_input = None if device_probe else mod_input
+            if (
+                self.teacache_controller is not None
+                and self.teacache_controller.should_skip(
+                    step_index,
+                    mod_input,
+                    diff_norm=delta_scalar,
+                )
+            ):
+                noise_pred = self.teacache_controller.skip_noise_pred(controller_mod_input)
+            else:
+                noise_pred = _first_tensor(self.transformer(model_bundle))
+                if self.teacache_controller is not None:
+                    self.teacache_controller.record_full_step(noise_pred, controller_mod_input)
             latents = self._scheduler_step(noise_pred, timestep, latents, len(timesteps))
             if trajectory is not None:
                 trajectory.append(latents.detach().cpu())
@@ -270,6 +371,39 @@ def _missing_scheduler_message(model_path: str) -> str:
         "copy or download the HF scheduler/ directory for this model, or regenerate the "
         "cached DiT input artifact with scripts/hunyuan_video_cache_dit_inputs.py."
     )
+
+
+def _teacache_shape_label(*, height: int, width: int, num_frames: int) -> str:
+    return f"{int(height)}x{int(width)}x{int(num_frames)}"
+
+
+def _teacache_mod_input(
+    transformer: Any,
+    bundle: HunyuanVideoDiTInputBundle,
+    *,
+    source: str,
+) -> torch.Tensor:
+    if source == "hidden_states_proxy":
+        return bundle.hidden_states
+    hook = getattr(transformer, "teacache_mod_input", None)
+    if hook is None:
+        raise RuntimeError(
+            "TeaCache calibration requires block-0 modulated input, but the "
+            "transformer does not expose teacache_mod_input(bundle). Re-run "
+            "scripts/calibrate_teacache.py with a real modulated-input hook, "
+            "or mark a test-only calibration as hidden_states_proxy."
+        )
+    try:
+        parameters = inspect.signature(hook).parameters
+        mod_input = hook(bundle) if len(parameters) == 1 else hook(*bundle.as_model_inputs())
+    except ValueError:
+        mod_input = hook(bundle)
+    if not isinstance(mod_input, torch.Tensor):
+        raise TypeError(
+            "transformer.teacache_mod_input(bundle) must return a torch.Tensor, "
+            f"got {type(mod_input)!r}."
+        )
+    return mod_input
 
 
 def _load_vae(model_path: str, dtype: torch.dtype):

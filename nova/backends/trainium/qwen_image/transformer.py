@@ -403,6 +403,36 @@ class _QwenImageTransformerTraceModule(nn.Module):
             return_dict=False,
         )[0]
 
+    def teacache_mod_input(
+        self,
+        hidden_states: torch.Tensor,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        guidance: torch.Tensor,
+    ) -> torch.Tensor:
+        """Block-0 modulated image input for TeaCache (cclog 81 — fused-A port).
+
+        Mirrors QwenImageTransformer2DModel.forward up to the first block's
+        image modulation: img_in (patchify) -> time_text_embed -> block0.img_mod
+        / img_norm1 / _modulate. Calls the diffusers model's own submodules so
+        it stays faithful to the real forward. Assumes guidance_embeds=False and
+        zero_cond_t=False (the M4a Trainium config); guidance is forwarded only
+        when guidance_embeds is set.
+        """
+        t = self.transformer
+        hs = t.img_in(hidden_states)
+        timestep = timestep.to(hs.dtype)
+        guidance_arg = (guidance.to(hs.dtype) * 1000) if self.guidance_embeds else None
+        if guidance_arg is None:
+            temb = t.time_text_embed(timestep, hs, None)
+        else:
+            temb = t.time_text_embed(timestep, guidance_arg, hs, None)
+        block0 = t.transformer_blocks[0]
+        img_mod1 = block0.img_mod(temb).chunk(2, dim=-1)[0]
+        img_normed = block0.img_norm1(hs)
+        modulated, _gate = block0._modulate(img_normed, img_mod1, None)
+        return modulated
+
 
 class ModelWrapperQwenImageTransformer(ModelWrapper):
     """ModelBuilder wrapper for Qwen-Image transformer compile inputs."""

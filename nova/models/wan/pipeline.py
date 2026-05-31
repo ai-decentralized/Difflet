@@ -43,6 +43,7 @@ class WanOrchestrator:
         boundary_ratio: float | None = None,
         tokenizer_path: str | None = None,
         max_text_length: int = 512,
+        teacache_calibration_path: str | None = None,
     ) -> None:
         self.model_path = model_path
         self.text_encoder = text_encoder
@@ -60,6 +61,32 @@ class WanOrchestrator:
         self.tokenizer_path = tokenizer_path or os.path.join(model_path, "tokenizer")
         self.max_text_length = int(max_text_length)
         self._tokenizer = None
+        # TeaCache (cclog 87): adaptive step-skipping. Built lazily on first denoise
+        # because the CPU shadows need the per-stage transformer checkpoint paths.
+        self.teacache_calibration_path = teacache_calibration_path
+        self._teacache_controller = None
+        self._teacache_shadows: dict[int, Any] = {}
+        self._teacache_last_model_id: int | None = None
+
+    def _maybe_init_teacache(self) -> bool:
+        """Build the TeaCache controller + per-stage CPU shadows once. Returns enabled."""
+        if not self.teacache_calibration_path:
+            return False
+        if self._teacache_controller is not None:
+            return True
+        from nova.pipeline.teacache import TeaCacheCalibration, TeaCacheController
+        from nova.backends.trainium.wan.teacache_cpu_shadow import WanTeacacheCPUShadow
+
+        calibration = TeaCacheCalibration.from_json(self.teacache_calibration_path)
+        self._teacache_controller = TeaCacheController(calibration)
+        stages = {"transformer": self.transformer, "transformer_2": self.transformer_2}
+        for subfolder, model in stages.items():
+            if model is None:
+                continue
+            self._teacache_shadows[id(model)] = WanTeacacheCPUShadow(
+                os.path.join(self.model_path, subfolder), dtype=self.dtype
+            )
+        return True
 
     def has_runtime_components(self) -> bool:
         return any(
@@ -264,30 +291,65 @@ class WanOrchestrator:
         if self.boundary_ratio is not None:
             boundary_timestep = float(self.boundary_ratio) * float(train_timesteps)
 
-        for timestep in timesteps:
+        teacache_on = self._maybe_init_teacache()
+        ctrl = self._teacache_controller if teacache_on else None
+
+        for step_index, timestep in enumerate(timesteps):
             current_model = self._select_transformer(timestep, boundary_timestep)
             scale = self._select_guidance_scale(timestep, boundary_timestep, guidance_scale, guidance_scale_2)
             model_dtype = _component_dtype(current_model, self.dtype)
             timestep_batch = _batch_timestep(timestep, latents.shape[0], latents.device, model_dtype)
-            noise_pred = _first_tensor(
-                current_model(
-                    latents.to(dtype=model_dtype),
-                    timestep_batch,
-                    prompt_embeds.to(dtype=model_dtype),
+
+            # TeaCache: the block-0 modulated-input signal is timestep-only (identical for
+            # cond/uncond), so one host-shadow probe per step drives the skip decision; the
+            # cached post-CFG residual is reused when skipping the full DiT evaluation.
+            mod_input = None
+            should_skip = False
+            if ctrl is not None:
+                if self._teacache_last_model_id != id(current_model):
+                    ctrl.reset()  # stage switch (high->low noise) invalidates the residual
+                    self._teacache_last_model_id = id(current_model)
+                shadow = self._teacache_shadows[id(current_model)]
+                mod_input = shadow.teacache_mod_input(
+                    latents.to(dtype=model_dtype), timestep_batch, prompt_embeds.to(dtype=model_dtype)
                 )
-            )
-            if scale > 1.0:
-                if negative_prompt_embeds is None:
-                    negative_prompt_embeds = torch.zeros_like(prompt_embeds)
-                uncond = _first_tensor(
+                diff_norm = None
+                if ctrl.prev_mod_input is not None:
+                    prev = ctrl.prev_mod_input
+                    cur = mod_input.detach().float().cpu()
+                    denom = prev.abs().mean().clamp_min(1e-8)
+                    diff_norm = float((cur - prev).abs().mean() / denom)
+                should_skip = ctrl.should_skip(step_index, mod_input, diff_norm=diff_norm)
+
+            if should_skip:
+                noise_pred = ctrl.skip_noise_pred(mod_input=mod_input)
+            else:
+                noise_pred = _first_tensor(
                     current_model(
                         latents.to(dtype=model_dtype),
                         timestep_batch,
-                        negative_prompt_embeds.to(dtype=model_dtype),
+                        prompt_embeds.to(dtype=model_dtype),
                     )
                 )
-                noise_pred = uncond + scale * (noise_pred - uncond)
+                if scale > 1.0:
+                    if negative_prompt_embeds is None:
+                        negative_prompt_embeds = torch.zeros_like(prompt_embeds)
+                    uncond = _first_tensor(
+                        current_model(
+                            latents.to(dtype=model_dtype),
+                            timestep_batch,
+                            negative_prompt_embeds.to(dtype=model_dtype),
+                        )
+                    )
+                    noise_pred = uncond + scale * (noise_pred - uncond)
+                if ctrl is not None:
+                    ctrl.record_full_step(noise_pred, mod_input=mod_input)
+
             latents = self._scheduler_step(noise_pred, timestep, latents, num_inference_steps)
+
+        if ctrl is not None:
+            self._teacache_last_stats = ctrl.stats()
+            print(f"[wan-teacache] {self._teacache_last_stats}", flush=True)
         return latents
 
     def _select_transformer(self, timestep: torch.Tensor, boundary_timestep: float | None):

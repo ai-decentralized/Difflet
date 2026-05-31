@@ -240,6 +240,7 @@ class NeuronWanApplication(MultiComponentApplication):
             width=width,
             num_frames=num_frames,
             max_text_length=text_seq_len,
+            teacache_calibration_path=self.kwargs.get("teacache_calibration_path"),
         )
 
     def components(self) -> list[ComponentSpec]:

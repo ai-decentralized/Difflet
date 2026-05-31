@@ -992,6 +992,26 @@ class HunyuanVideoTransformer3DModel(nn.Module):
             return (hidden_states,)
         return Transformer2DModelOutput(sample=hidden_states)
 
+    def teacache_mod_input(
+        self,
+        hidden_states: torch.Tensor,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
+        pooled_projections: torch.Tensor,
+        guidance: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return the timestep-modulated latent input to transformer block 0."""
+        del encoder_hidden_states, encoder_attention_mask
+        temb, token_replace_emb = self.time_text_embed(timestep, pooled_projections, guidance)
+        if token_replace_emb is not None:
+            raise NotImplementedError(
+                "token_replace conditioning is not enabled in HunyuanVideo M3"
+            )
+        hidden_states = self.x_embedder(hidden_states)
+        norm_hidden_states, *_ = self.transformer_blocks[0].norm1(hidden_states, emb=temb)
+        return norm_hidden_states
+
 
 def dual_stream_attention(
     latent_q: torch.Tensor,

@@ -616,6 +616,54 @@ class WanTransformer3DModel(nn.Module):
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         return hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 
+    @torch.no_grad()
+    def teacache_mod_input(
+        self,
+        hidden_states: torch.Tensor,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        timestep_seq_len: Optional[int] = None,
+    ) -> torch.Tensor:
+        """TeaCache signal: block-0's modulated self-attention input (cclog 87).
+
+        Replicates the prefix of ``forward`` up to ``blocks[0]``'s modulated norm
+        input ``norm1(x)*(1+scale_msa)+shift_msa``. The modulation is timestep-only
+        (``scale_shift_table + timestep_proj``); ``encoder_hidden_states`` is only
+        needed because ``condition_embedder`` projects it (its result is unused
+        here). The host TeaCache controller takes the relative-L1 of this tensor's
+        step-to-step change as the skip signal (gate Pearson 0.99).
+        """
+        hs = self.patch_embedding(hidden_states)
+        hs = hs.flatten(2).transpose(1, 2)
+
+        if timestep.ndim == 2:
+            ts_seq_len = timestep_seq_len if timestep_seq_len is not None else timestep.shape[1]
+            timestep = timestep.flatten()
+        else:
+            ts_seq_len = None
+
+        _temb, timestep_proj, _ = self.condition_embedder(
+            timestep, encoder_hidden_states, timestep_seq_len=ts_seq_len
+        )
+        if ts_seq_len is not None:
+            timestep_proj = timestep_proj.unflatten(2, (6, -1))
+        else:
+            timestep_proj = timestep_proj.unflatten(1, (6, -1))
+
+        block0 = self.blocks[0]
+        if timestep_proj.ndim == 4:
+            shift_msa, scale_msa = (
+                block0.scale_shift_table.unsqueeze(0) + timestep_proj.float()
+            ).chunk(6, dim=2)[:2]
+            shift_msa = shift_msa.squeeze(2)
+            scale_msa = scale_msa.squeeze(2)
+        else:
+            shift_msa, scale_msa = (
+                block0.scale_shift_table + timestep_proj.float()
+            ).chunk(6, dim=1)[:2]
+
+        return (block0.norm1(hs.float()) * (1 + scale_msa) + shift_msa).type_as(hs)
+
 
 __all__ = [
     "WanAttention",

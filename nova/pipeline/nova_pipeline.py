@@ -64,7 +64,14 @@ class NovaPipeline:
         debug_compile: bool = False,
         backend: str | None = None,
         application_kwargs: dict[str, Any] | None = None,
+        teacache_speedup: float | None = None,
+        teacache_calibration_path: str | None = None,
     ) -> "NovaPipeline":
+        application_kwargs = _merge_teacache_kwargs(
+            application_kwargs,
+            teacache_speedup=teacache_speedup,
+            teacache_calibration_path=teacache_calibration_path,
+        )
         entry = resolve_model(model_id, model_type=model_type)
         backend_runtime = get_backend(backend)
         entry.require_backend(backend_runtime.name)
@@ -172,6 +179,28 @@ def _default_dtype() -> Any:
     import torch
 
     return torch.bfloat16
+
+
+def _merge_teacache_kwargs(
+    application_kwargs: dict[str, Any] | None,
+    *,
+    teacache_speedup: float | None,
+    teacache_calibration_path: str | None,
+) -> dict[str, Any] | None:
+    merged = dict(application_kwargs or {})
+    for key, value in (
+        ("teacache_speedup", teacache_speedup),
+        ("teacache_calibration_path", teacache_calibration_path),
+    ):
+        if value is None:
+            continue
+        if key in merged and merged[key] != value:
+            raise ValueError(
+                f"{key} was provided both as a top-level argument and in "
+                "application_kwargs."
+            )
+        merged[key] = value
+    return merged or None
 
 
 def _compile_app(app: Any, compiled_path: Path, *, debug: bool) -> None:

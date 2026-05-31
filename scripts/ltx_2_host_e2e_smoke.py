@@ -73,6 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
             "change the block artifact."
         ),
     )
+    parser.add_argument("--teacache-calibration", default=None,
+                        help="path to a TeaCache calibration JSON; enables adaptive step skipping")
     parser.add_argument("--output-type", choices=("latent", "pt"), default="latent")
     parser.add_argument("--guidance-scale", type=float, default=4.0)
     parser.add_argument("--audio-guidance-scale", type=float, default=None)
@@ -308,6 +310,7 @@ def main() -> int:
             "text_seq_len": args.text_seq_len,
             "frame_rate": args.frame_rate,
             "transformer_mode": args.transformer_mode,
+            "teacache_calibration_path": args.teacache_calibration,
         },
     )
     compiled_model_path = Path(args.compiled_model_path) if args.compiled_model_path else pipe.compiled_path
@@ -317,6 +320,8 @@ def main() -> int:
     if args.transformer_mode == "segmented":
         pipe.app.transformer.block_load_mode = args.segmented_block_load_mode
 
+    import time as _time
+    _t0 = _time.monotonic()
     output = pipe(
         prompt=prompt[0] if len(prompt) == 1 else prompt,
         negative_prompt=args.negative_prompt,
@@ -330,6 +335,7 @@ def main() -> int:
         output_type=args.output_type,
         generator=generator,
     )
+    print(f"[ltx2] forward elapsed = {_time.monotonic() - _t0:.3f}s", flush=True)
 
     metrics = {
         "model_dir": str(model_dir),

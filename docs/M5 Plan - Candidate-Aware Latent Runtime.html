@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>M5 Plan · Candidate-Aware Latent Runtime</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=Crimson+Pro:ital,wght@0,300..700;1,300..700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Serif+SC:wght@300..700&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --paper: #f5f0e3;
+  --paper-deep: #ede5d2;
+  --paper-line: #d9cfb8;
+  --ink: #1a1714;
+  --ink-soft: #4a443c;
+  --ink-mute: #847b6c;
+  --rust: #b8472c;
+  --rust-deep: #8b3219;
+  --rust-soft: #d97757;
+  --moss: #4a5d3a;
+  --ochre: #b8893d;
+  --code-bg: #ebe2cd;
+  --code-border: #c9bd9f;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--paper);
+  background-image: repeating-linear-gradient(
+    0deg, transparent 0, transparent 31px,
+    rgba(184, 71, 44, 0.025) 31px, rgba(184, 71, 44, 0.025) 32px
+  );
+  color: var(--ink);
+  font-family: 'Crimson Pro', 'Noto Serif SC', 'Songti SC', serif;
+  font-size: 18px;
+  line-height: 1.65;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.banner {
+  border-bottom: 1.5px solid var(--ink);
+  position: sticky; top: 0; z-index: 50;
+  backdrop-filter: blur(6px);
+  background: rgba(245, 240, 227, 0.92);
+}
+.banner-inner {
+  max-width: 1180px; margin: 0 auto; padding: 14px 32px;
+  display: flex; align-items: baseline; justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.banner-tag { display: flex; gap: 18px; align-items: baseline; }
+.banner-tag .dot {
+  width: 8px; height: 8px; background: var(--rust);
+  display: inline-block; border-radius: 50%;
+  vertical-align: middle; margin-right: 8px;
+}
+.banner-meta { color: var(--ink-mute); }
+.wrap {
+  max-width: 1180px; margin: 0 auto; padding: 0 32px;
+  display: grid; grid-template-columns: 1fr 240px; gap: 56px;
+}
+main { padding: 56px 0 120px; min-width: 0; }
+aside { padding: 56px 0; }
+.hero { margin-bottom: 64px; padding-bottom: 40px; border-bottom: 1px solid var(--paper-line); }
+.kicker {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--rust); margin-bottom: 22px;
+  display: flex; gap: 14px; align-items: center;
+}
+.kicker::before {
+  content: ""; display: inline-block;
+  width: 36px; height: 1px; background: var(--rust);
+}
+h1.title {
+  font-family: 'Fraunces', 'Noto Serif SC', serif;
+  font-weight: 350;
+  font-variation-settings: 'opsz' 144, 'SOFT' 40;
+  font-size: clamp(40px, 5.6vw, 72px);
+  line-height: 0.98; letter-spacing: -0.022em;
+  margin: 0 0 24px; color: var(--ink);
+}
+h1.title em { font-style: italic; color: var(--rust-deep); font-weight: 350; }
+.subtitle {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-variation-settings: 'opsz' 144, 'SOFT' 60;
+  font-style: italic;
+  font-size: 22px; line-height: 1.4;
+  color: var(--ink-soft);
+  max-width: 720px; margin: 0 0 36px;
+}
+.meta-row {
+  display: flex; gap: 40px; flex-wrap: wrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.meta-row > div { display: flex; flex-direction: column; gap: 4px; }
+.meta-row .label { color: var(--ink-mute); }
+.meta-row .value { color: var(--ink); font-weight: 500; }
+section { margin: 72px 0; scroll-margin-top: 80px; }
+.section-head {
+  display: grid; grid-template-columns: 110px 1fr; gap: 24px;
+  align-items: baseline;
+  padding-bottom: 18px; border-bottom: 1px solid var(--paper-line);
+  margin-bottom: 36px;
+}
+.section-num {
+  font-family: 'Fraunces', serif;
+  font-variation-settings: 'opsz' 144;
+  font-weight: 200;
+  font-size: 76px; line-height: 0.9;
+  color: var(--rust); letter-spacing: -0.04em;
+}
+.section-title {
+  font-family: 'Fraunces', serif;
+  font-variation-settings: 'opsz' 144, 'SOFT' 50;
+  font-weight: 400;
+  font-size: 32px; line-height: 1.12;
+  letter-spacing: -0.015em;
+  margin: 0; color: var(--ink);
+}
+.section-title small {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-mute); margin-bottom: 10px;
+}
+h3 {
+  font-family: 'Fraunces', 'Noto Serif SC', serif;
+  font-variation-settings: 'opsz' 96, 'SOFT' 30;
+  font-weight: 500;
+  font-size: 22px; margin: 44px 0 14px;
+  color: var(--ink); letter-spacing: -0.005em;
+}
+h4 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--rust-deep);
+  margin: 32px 0 14px; font-weight: 600;
+}
+p { margin: 0 0 16px; }
+code, kbd, .mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  padding: 1px 6px; border-radius: 2px;
+  color: var(--ink); font-weight: 500;
+}
+strong { font-weight: 700; color: var(--ink); }
+em { font-style: italic; }
+a {
+  color: var(--rust-deep); text-decoration: none;
+  border-bottom: 1px solid rgba(139, 50, 25, 0.35);
+  transition: border-color 0.15s;
+}
+a:hover { border-bottom-color: var(--rust-deep); }
+.tldr {
+  background: var(--paper-deep);
+  border-left: 3px solid var(--rust);
+  padding: 28px 32px; margin: 32px 0;
+  position: relative;
+}
+.tldr-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--rust); margin-bottom: 14px; display: block;
+}
+.tldr ul { margin: 0; padding-left: 22px; }
+.tldr li { margin-bottom: 10px; }
+.notdo {
+  background: var(--paper-deep);
+  border-left: 3px solid var(--moss);
+  padding: 24px 28px; margin: 24px 0;
+}
+.notdo-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--moss); margin-bottom: 12px; display: block;
+}
+.pullquote {
+  font-family: 'Fraunces', serif;
+  font-variation-settings: 'opsz' 144;
+  font-weight: 350; font-style: italic;
+  font-size: 24px; line-height: 1.35;
+  border-left: none;
+  padding: 12px 0 12px 24px;
+  margin: 28px 0;
+  color: var(--rust-deep);
+  position: relative;
+}
+.pullquote::before {
+  content: ""; position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px; background: var(--rust);
+}
+.tbl-wrap { margin: 24px 0; overflow-x: auto; }
+table {
+  width: 100%; border-collapse: collapse;
+  font-size: 15px; line-height: 1.5;
+}
+th, td {
+  text-align: left; padding: 10px 14px;
+  border-bottom: 1px solid var(--paper-line);
+  vertical-align: top;
+}
+th {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-mute);
+  border-bottom: 1.5px solid var(--ink);
+}
+ul, ol { margin: 0 0 16px; padding-left: 22px; }
+li { margin-bottom: 8px; }
+ol.fancy { counter-reset: fcy; list-style: none; padding-left: 0; }
+ol.fancy > li {
+  position: relative; padding-left: 36px;
+  margin-bottom: 12px;
+  counter-increment: fcy;
+}
+ol.fancy > li::before {
+  content: counter(fcy, decimal-leading-zero);
+  position: absolute; left: 0; top: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; font-weight: 600;
+  color: var(--rust); letter-spacing: 0.06em;
+}
+.glyph-divider {
+  text-align: center;
+  font-family: 'Fraunces', serif;
+  color: var(--paper-line);
+  margin: 56px 0;
+  font-size: 18px; letter-spacing: 0.5em;
+}
+.mech-card {
+  background: var(--paper-deep);
+  border: 1px solid var(--paper-line);
+  border-left: 3px solid var(--rust);
+  padding: 28px 32px;
+  margin: 24px 0;
+}
+.mech-header {
+  display: grid; grid-template-columns: 60px 1fr auto; gap: 18px;
+  align-items: baseline; margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--paper-line);
+}
+.mech-num {
+  font-family: 'Fraunces', serif;
+  font-weight: 300; font-size: 38px;
+  color: var(--rust); line-height: 0.9;
+  letter-spacing: -0.02em;
+}
+.mech-title-block { display: flex; flex-direction: column; gap: 4px; }
+.mech-eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.mech-title {
+  font-family: 'Fraunces', 'Noto Serif SC', serif;
+  font-weight: 500;
+  font-size: 21px;
+  color: var(--ink); margin: 0;
+  letter-spacing: -0.005em;
+}
+.mech-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--rust-deep);
+  background: var(--paper);
+  padding: 4px 10px; border-radius: 3px;
+  border: 1px solid var(--code-border);
+  white-space: nowrap; align-self: center;
+}
+.mech-block-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--rust);
+  margin-top: 14px; margin-bottom: 6px;
+}
+.mech-cost {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  background: var(--paper);
+  border: 1px solid var(--code-border);
+  padding: 2px 8px; border-radius: 3px;
+  color: var(--rust-deep);
+}
+pre.ascii-diagram {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  background: var(--paper-deep);
+  border: 1px solid var(--paper-line);
+  border-left: 3px solid var(--ochre);
+  padding: 22px 28px;
+  margin: 24px 0;
+  color: var(--ink-soft);
+  overflow-x: auto;
+  white-space: pre;
+}
+.toc {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  position: sticky; top: 80px;
+}
+.toc-label {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--ink-mute);
+  margin-bottom: 18px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--paper-line);
+}
+.toc ol { padding-left: 0; list-style: none; }
+.toc li { margin-bottom: 10px; }
+.toc a {
+  color: var(--ink-soft);
+  border-bottom: none;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.toc a:hover { color: var(--rust-deep); }
+footer {
+  border-top: 1.5px solid var(--ink);
+  background: var(--paper-deep);
+  padding: 32px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  display: flex; justify-content: space-between;
+  flex-wrap: wrap; gap: 16px;
+}
+footer .glyph { color: var(--rust); margin-right: 6px; }
+@media (max-width: 920px) {
+  .wrap { grid-template-columns: 1fr; gap: 0; }
+  aside { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="banner">
+  <div class="banner-inner">
+    <div class="banner-tag">
+      <span><span class="dot"></span>Implementation Plan · Ultraplan Refinement</span>
+      <span>M5.x · Candidate-Aware Latent Runtime</span>
+    </div>
+    <div class="banner-meta">Nova · Internal · 2026-05-13</div>
+  </div>
+</div>
+
+<div class="wrap">
+<main>
+
+<header class="hero">
+  <div class="kicker">Milestone Plan / Paper A Mechanisms</div>
+  <h1 class="title">M5 Plan<br><em>candidate-aware latent runtime</em></h1>
+  <p class="subtitle">Open the four Paper A system mechanisms as an M5.x backlog on top of the M0–M3 port arc. <em>Capability first. HunyuanVideo is the only available v0 workload — Qwen-Image is a registry stub, not a port.</em></p>
+
+  <div class="meta-row">
+    <div><span class="label">Direction</span><span class="value">Paper A · Mechanisms 1–4</span></div>
+    <div><span class="label">Breadth</span><span class="value">All four · backlog style</span></div>
+    <div><span class="label">Framing</span><span class="value">Capability first</span></div>
+    <div><span class="label">Pre-flight</span><span class="value">M5.0 · ~1 week</span></div>
+  </div>
+</header>
+
+<section id="context">
+  <div class="section-head">
+    <div class="section-num">01</div>
+    <h2 class="section-title"><small>Why now</small>Context</h2>
+  </div>
+
+  <p>Nova has shipped the M0–M3 arc: <code>NovaPipeline</code> + compile cache, Flux end-to-end, Wan 2.2 spike + numerical alignment, and HunyuanVideo v0 (hybrid pipeline, TP=4, 4-step trajectory cosine ≥ 0.9999 vs HF). M4 (Qwen-Image, LTX-2, Z-Image) is still <em>"Planned"</em> per <code>README.md:21</code> — Qwen-Image has a <strong>registry stub</strong> at <code>nova/registry.py:228-245</code> pointing at an as-yet-uncreated <code>nova/models/qwen_image/entry.py</code>, no model code, and no <code>scripts/qwen_*</code>.</p>
+
+  <p>The next high-leverage research direction is a candidate-aware latent runtime: 4 hardware-coupled mechanisms — latent prefix cache, cross-candidate KV sharing, early-exit rollout, stage-adaptive MX scheduling — that all need a new candidate axis <code>N</code> and several new ops the tree doesn't yet have.</p>
+
+  <div class="tldr">
+    <span class="tldr-label">— Decision baked in by the user (no further input needed before implementation) —</span>
+    <ul>
+      <li><strong>Direction:</strong> the 4 Paper A mechanisms above.</li>
+      <li><strong>Breadth:</strong> open all 4 as an M5.x backlog (analogous to the existing m3-hunyuan/31-M3-x-backlog convention).</li>
+      <li><strong>Framing:</strong> capability first — milestone cclog entries get sized but not started; publication framing deferred.</li>
+      <li><strong>v0 candidate workload:</strong> HunyuanVideo at <code>320x512x61</code> only. <strong>Qwen-Image is NOT an option until M4 lands.</strong></li>
+    </ul>
+  </div>
+
+  <p><strong>Intended outcome of this plan:</strong> three local-only markdown files under <code>cclogs/m5-latent/</code> that an implementer can pick up cold to start any of M5.0–M5.4 without re-deriving scope. <strong>No code change.</strong></p>
+</section>
+
+<section id="notdo">
+  <div class="section-head">
+    <div class="section-num">02</div>
+    <h2 class="section-title"><small>Bounded scope</small>What this plan does NOT do</h2>
+  </div>
+
+  <div class="notdo">
+    <span class="notdo-label">— Out of scope, by design —</span>
+    <ul>
+      <li><strong>Does not commit anything to git.</strong> <code>cclogs/</code> is gitignored (<code>.gitignore:cclogs/</code>, see commit <code>7556bae</code> "Stop tracking cclogs/") — this is the deliberate pattern for personal planning notes.</li>
+      <li><strong>Does not touch <code>README.md</code>.</strong> The status table only tracks shipped milestones (M0–M3 done, M4 planned). M5 entries get added once M5.0 closes, not now.</li>
+      <li><strong>Does not modify any code under <code>nova/</code>, <code>tests/</code>, or <code>scripts/</code>.</strong> The <em>next</em> session (M5.0 pickup) does that.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="deliverable">
+  <div class="section-head">
+    <div class="section-num">03</div>
+    <h2 class="section-title"><small>Three new files</small>Deliverable</h2>
+  </div>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Path</th><th>Role</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>cclogs/m5-latent/&lt;NN&gt;-M5-candidate-runtime-plan.md</code></td><td>Index + framing + M5.0 pre-flight scope</td></tr>
+      <tr><td><code>cclogs/m5-latent/&lt;NN&gt;-M5-x-backlog.md</code></td><td>M5.1–M5.4 mechanisms + M5.D1–M5.D2 dependencies, same <code>what / why / trigger / files / rough cost</code> schema as the existing <code>cclogs/m3-hunyuan/31-M3-x-backlog.md</code></td></tr>
+      <tr><td><code>cclogs/m5-latent/&lt;NN&gt;-M5.0-preflight.md</code></td><td>Pre-flight scope document — concrete next-session ticket</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><code>&lt;NN&gt;</code> is the next free two-digit prefix in <code>cclogs/m5-latent/</code> (start at <code>01</code> if the directory is fresh; the cclog index numbering is local to the user's working tree).</p>
+</section>
+
+<section id="depshape">
+  <div class="section-head">
+    <div class="section-num">04</div>
+    <h2 class="section-title"><small>What unblocks what</small>Dependency Shape</h2>
+  </div>
+
+<pre class="ascii-diagram">                    ┌── M5.0 pre-flight ──┐
+                    │  (candidate axis +  │
+                    │   trajectory metrics)│
+                    └──────────┬──────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              ▼                ▼                ▼
+         M5.1 Latent      M5.D1 MX op      M5.D2 Profiler
+         Prefix Cache     surface          (NeuronProfiler 2.0
+              │                │            ingestion)
+              │                │                │
+       ┌──────┴──────┐         │                │
+       ▼             ▼         ▼                │
+   M5.2 Cross-   M5.3 Early-  M5.4 Stage-     (motivates
+   Candidate     Exit Rollout adaptive MX      all four;
+   KV Sharing                                  not blocking)</pre>
+
+  <p>Implementation order any one of these unlocks is captured per-entry below.</p>
+</section>
+
+<section id="m50">
+  <div class="section-head">
+    <div class="section-num">05</div>
+    <h2 class="section-title"><small>Next concrete session</small>M5.0 — Pre-flight</h2>
+  </div>
+
+  <p>Three preconditions, packed as one milestone. <strong>Closure criterion</strong>: a single HunyuanVideo Trainium artifact runs <code>N=4</code> candidates of one denoise step without recompile, and the orchestrator emits a per-step trajectory metrics JSON in the existing <code>scripts/hunyuan_vae_parity.py:77-78</code> shape (<code>{cosine, max_abs, mean_abs, ...}</code> per step).</p>
+
+  <h3>1 · Candidate-axis config</h3>
+  <p>Add an <code>N</code> candidate dimension to the parallel config surface.</p>
+  <ul>
+    <li><strong>Target file:</strong> <code>nova/pipeline/parallel_config.py</code> (currently 33 lines, <code>NovaParallelConfig</code> frozen dataclass with <code>tp_degree</code>, <code>cp_enabled</code>, <code>cfg_parallel_enabled</code>).</li>
+    <li><strong>Change:</strong> extend <code>NovaParallelConfig</code> with <code>num_candidates: int = 1</code>. The dataclass is <code>frozen=True</code> so cache keys remain stable; bump <code>MANIFEST_SCHEMA_VERSION</code> in <code>nova/pipeline/compile_cache.py:34</code> from <code>3</code> to <code>4</code> because the cache hash inputs change (it is folded through <code>NovaParallelConfig.to_cache_dict()</code> at line 31).</li>
+    <li><strong><code>world_size</code> math:</strong> the candidate axis does NOT consume cores — it shares the existing TP/CP world via batch tiling. Leave the <code>world_size</code> property at lines 26-29 unchanged. Validation hook in <code>__post_init__</code> enforces <code>num_candidates &gt;= 1</code>.</li>
+    <li><strong>Wiring:</strong> pass through <code>NovaPipeline.from_pretrained</code> at <code>nova/pipeline/nova_pipeline.py:49</code> (<code>parallel</code> kwarg already exists). Default <code>num_candidates=1</code> so all four registry entries (<code>nova/registry.py:180,199,220,240</code>) continue to validate unchanged.</li>
+  </ul>
+
+  <h3>2 · Decode-free latent trajectory metric harness</h3>
+  <p><strong>Do NOT extend <code>nova/utils/benchmark.py</code>.</strong> That file is a verbatim NxDI fork (banner at lines 1-7, references <code>GenerationConfig</code>, <code>sampling_params</code>, <code>NUM_IMAGE_PER_PROMPT</code>) for LLM token-generation benchmarking. Its <code>LatencyCollector</code> class at lines 490-499 is the only generic piece — it's 12 lines of <code>pre_hook</code> / <code>hook</code> time bookkeeping.</p>
+
+  <p>Instead create:</p>
+  <ul>
+    <li><strong>New file:</strong> <code>nova/utils/latent_trajectory.py</code> — small (one class + one writer fn) for diffusion-side per-step metrics. Reuses the <code>LatencyCollector</code> pattern (pre_hook / hook) but operates on <code>torch.Tensor</code> snapshots, not just timestamps. Computes <code>{step, latency_ms, latent_cosine_vs_ref, latent_mean, latent_std}</code>. Writes a JSON list with the same <code>json.dumps(stats, indent=2)</code> shape as <code>scripts/hunyuan_vae_parity.py:182</code>.</li>
+    <li><strong>Hook site:</strong> <code>HunyuanVideoOrchestrator._denoise</code> at <code>nova/models/hunyuan_video/pipeline.py:142-170</code> already has a <code>return_trajectory</code> path (lines 90-92, 168-169) that materialises <code>latents.detach().cpu()</code> per step. Wrap that path through the new collector. The orchestrator already takes <code>return_trajectory: bool</code> (line 74) — add <code>metrics_out_path: Path | None = None</code> peer parameter.</li>
+    <li><strong>Reference latent for cosine:</strong> cached <code>N=1</code> run with the same seed. Persist under the existing compile-cache directory layout (<code>nova/pipeline/compile_cache.py:_default_cache_dir</code>).</li>
+  </ul>
+  <p>No Neuron Profiler 2.0 yet. That is M5.D2.</p>
+
+  <h3>3 · Run <code>N=4</code> HunyuanVideo end-to-end</h3>
+  <ul>
+    <li><strong>Workload:</strong> HunyuanVideo at the default registered shape <code>{height: 320, width: 512, num_frames: 61}</code> (<code>nova/registry.py:221</code>), TP=4.</li>
+    <li><strong>Synthetic scorer:</strong> "keep all" — every candidate survives every step. Sufficient to validate the candidate axis plumbing without needing M5.3 exit logic.</li>
+    <li><strong>Driver:</strong> small new script <code>scripts/hunyuan_candidate_smoke.py</code> modelled on <code>scripts/hunyuan_hybrid_orchestrator_smoke.py</code> (the existing M3 orchestrator smoke). <strong>Asserts:</strong> no recompile between <code>N=1</code> and <code>N=4</code>; per-step metrics JSON written; trajectory cosine of <code>N=4</code> seed-0 matches the <code>N=1</code> reference within 1e-6.</li>
+  </ul>
+
+  <p><strong>Eyeball cost:</strong> <span class="mech-cost">~1 week</span></p>
+</section>
+
+<div class="glyph-divider">§ &nbsp; § &nbsp; §</div>
+
+<section id="backlog">
+  <div class="section-head">
+    <div class="section-num">06</div>
+    <h2 class="section-title"><small>Sized but not started</small>M5.x Backlog</h2>
+  </div>
+
+  <p>Same <code>what / why / trigger / files / rough cost</code> schema as <code>cclogs/m3-hunyuan/31-M3-x-backlog.md</code>.</p>
+
+  <!-- M5.1 -->
+  <div class="mech-card">
+    <div class="mech-header">
+      <div class="mech-num">5.1</div>
+      <div class="mech-title-block">
+        <div class="mech-eyebrow">Cross-candidate state sharing · Mechanism 1</div>
+        <h4 class="mech-title">Latent Prefix Cache</h4>
+      </div>
+      <span class="mech-tag">Foundational</span>
+    </div>
+
+    <div class="mech-block-label">What</div>
+    <p>Paged latent cache: replicated HBM v0, shared prefix + per-candidate divergence blocks. Fork-on-divergence detection via L2 distance with threshold τ. <strong>vLLM PagedAttention analog for video DiT.</strong></p>
+
+    <div class="mech-block-label">Why</div>
+    <p>Most candidates share the first ~30 % of denoise steps; recomputing them per-N is pure waste. Foundational — <strong>M5.2 and M5.3 both reuse τ.</strong></p>
+
+    <div class="mech-block-label">Trigger</div>
+    <p>As soon as M5.0 lands and <code>N≥2</code> runs measure ≥ 20 % HBM duplication on early steps. The trajectory JSON from M5.0 is the evidence source.</p>
+
+    <div class="mech-block-label">Files</div>
+    <ul>
+      <li>New <code>nova/pipeline/latent_cache.py</code> (paged store + fork detection).</li>
+      <li>Integration hooks in each model orchestrator (<code>nova/models/hunyuan_video/pipeline.py:_denoise</code> at line 142; <code>nova/models/wan/pipeline.py:WanOrchestrator</code>; <code>nova/models/flux/pipeline.py:NeuronFluxPipeline</code> — Flux extends <code>diffusers.FluxPipeline</code>, so the hook goes in the overridden <code>__call__</code> at line 65).</li>
+      <li>State aliasing seam: every Trainium backbone currently passes <code>input_output_aliases={}</code> (verified at <code>nova/backends/trainium/hunyuan_video/backbone.py:140</code>, <code>nova/backends/trainium/wan/backbone.py:129</code>, <code>nova/backends/trainium/wan/vae.py:134</code>, <code>nova/backends/trainium/wan/text_encoder.py:116</code>). The LLM KV cache pattern at <code>nova/backends/trainium/core/model_wrapper.py:1590-1638</code> is the worked reference — same <code>input_output_aliases</code> mechanism, different state shape (latent block instead of <code>past_key_values</code>).</li>
+    </ul>
+
+    <div class="mech-block-label">Rough cost</div>
+    <p><span class="mech-cost">3–5 working days for HBM-only v0; +1 week for SBUF-tier prefix if v0 evidence justifies</span></p>
+  </div>
+
+  <!-- M5.2 -->
+  <div class="mech-card">
+    <div class="mech-header">
+      <div class="mech-num">5.2</div>
+      <div class="mech-title-block">
+        <div class="mech-eyebrow">Compute sharing across candidates · Mechanism 4</div>
+        <h4 class="mech-title">Cross-Candidate KV Sharing</h4>
+      </div>
+      <span class="mech-tag">Tightly Coupled</span>
+    </div>
+
+    <div class="mech-block-label">What</div>
+    <p>MQA-style sharing of K/V projections across candidates <em>before fork</em>. Q stays per-candidate; K, V are computed once and broadcast.</p>
+
+    <div class="mech-block-label">Why</div>
+    <p>Drops <code>3N</code> projection matmuls to <code>2 + N</code> in the pre-fork window. Tightly coupled to M5.1: the same τ that triggers prefix-cache fork triggers per-candidate K, V.</p>
+
+    <div class="mech-block-label">Trigger</div>
+    <p>After M5.1 lands. Standalone has no benefit.</p>
+
+    <div class="mech-block-label">Files</div>
+    <ul>
+      <li><code>nova/ops/attention.py</code> — add a candidate-shared K/V variant.</li>
+      <li>Per-model attention layers (<code>nova/models/hunyuan_video/modeling_hunyuan_video.py</code>, <code>nova/models/wan/modeling_wan.py</code>).</li>
+      <li><code>nova/backends/trainium/ops_impl/attention.py:9</code> already routes through <code>nkilib.core.attention.attention_cte</code> (<code>attention_cte</code> at line 12); keep that for the per-candidate <code>Q × shared K</code> matmul.</li>
+    </ul>
+
+    <div class="mech-block-label">Rough cost</div>
+    <p><span class="mech-cost">2–3 working days once M5.1 exists</span></p>
+  </div>
+
+  <!-- M5.3 -->
+  <div class="mech-card">
+    <div class="mech-header">
+      <div class="mech-num">5.3</div>
+      <div class="mech-title-block">
+        <div class="mech-eyebrow">Per-candidate adaptive compute · Mechanism 2</div>
+        <h4 class="mech-title">Early-Exit Latent Rollout</h4>
+      </div>
+      <span class="mech-tag">Async Dispatch</span>
+    </div>
+
+    <div class="mech-block-label">What</div>
+    <p>Per-candidate value-head decides exit; cross-core rebalance for surviving candidates.</p>
+
+    <div class="mech-block-label">Why</div>
+    <p>Candidates that will not be selected should not pay full denoise cost. <strong>GPU-blocked by NCCL synchronisation cost.</strong></p>
+
+    <div class="mech-block-label">Trigger</div>
+    <p>After M5.1 (release HBM blocks on exit). For v0, prove the rebalance path with a <em>synthetic oracle exit</em> (e.g., random or threshold-on-step-index) on HunyuanVideo — no learned exit head needed to validate the plumbing.</p>
+
+    <div class="mech-block-label">Files</div>
+    <ul>
+      <li>New <code>nova/pipeline/scheduler.py</code> — host-side rebalance loop.</li>
+      <li>Orchestrator changes mirroring M5.1.</li>
+      <li>New shared exit-head module under <code>nova/layers/</code>.</li>
+      <li><code>nki.collectives.all_to_all_v</code> first integration — current <code>nova/backends/trainium/ops_impl/collectives.py</code> exposes only TP <code>gather_tp_dim</code>, <code>reduce_tp</code>, <code>scatter_tp_dim</code> (lines 20-42). Add <code>all_to_all_v</code> here next to those.</li>
+    </ul>
+
+    <div class="mech-block-label">Rough cost</div>
+    <p><span class="mech-cost">4–6 working days for plumbing + synthetic exit; learned exit head is a follow-up of its own</span></p>
+  </div>
+
+  <!-- M5.4 -->
+  <div class="mech-card">
+    <div class="mech-header">
+      <div class="mech-num">5.4</div>
+      <div class="mech-title-block">
+        <div class="mech-eyebrow">Runtime-adaptive precision · Mechanism 3</div>
+        <h4 class="mech-title">Stage-Adaptive MX Scheduling</h4>
+      </div>
+      <span class="mech-tag">Blocks on M5.D1</span>
+    </div>
+
+    <div class="mech-block-label">What</div>
+    <p>Runtime calibration probe per <code>(stage, layer)</code> picks MXFP4 / MXFP8 / BF16; decisions cached and shared across candidates.</p>
+
+    <div class="mech-block-label">Why</div>
+    <p>Static quantization is per-model hand-tuned; runtime adaptive is portable. Trn3 MX group=32 aligns with DiT <code>head_dim ∈ {64, 128}</code>.</p>
+
+    <div class="mech-block-label">Trigger</div>
+    <p>Blocks on <strong>M5.D1</strong> (MX op surface). For motivating data, use HunyuanVideo's bf16-vs-fp32 step-cosine deltas observed in M3 (per the 4-step trajectory min cosine 0.9999 reported in <code>README.md:18</code>) — if any per-step cosine dips below a chosen gate, that layer is a candidate for higher precision. <strong><em>Do not</em> cite Qwen-Image data — M4 isn't ported.</strong></p>
+
+    <div class="mech-block-label">Files</div>
+    <ul>
+      <li>New <code>nova/ops/mx.py</code> exposing <code>nc_matmul_mx</code>, <code>quantize_mx</code> via the existing dispatch pattern (<code>nova/ops/_dispatch.py:10-20</code> lazy-loads <code>nova.backends.&lt;hw&gt;.ops_impl.&lt;module&gt;</code>).</li>
+      <li>Trainium impl at <code>nova/backends/trainium/ops_impl/mx.py</code>.</li>
+      <li>Calibration loop in <code>nova/pipeline/nova_pipeline.py</code> next to the existing <code>from_pretrained</code> flow (line 44).</li>
+      <li>Per-model <code>precision_schedule.py</code> next to each <code>application.py</code>.</li>
+    </ul>
+
+    <div class="mech-block-label">Rough cost</div>
+    <p><span class="mech-cost">5–7 working days, gated on M5.D1</span></p>
+  </div>
+</section>
+
+<section id="deps">
+  <div class="section-head">
+    <div class="section-num">07</div>
+    <h2 class="section-title"><small>Deferred infrastructure</small>M5.D — Dependencies</h2>
+  </div>
+
+  <h3>M5.D1 — MX op surface</h3>
+  <p><code>nc_matmul_mx</code>, <code>quantize_mx</code> via <code>nova.ops</code> (dispatch pattern at <code>nova/ops/_dispatch.py:10-20</code>). Trainium impl at <code>nova/backends/trainium/ops_impl/mx.py</code>. CPU reference is a slow numpy emulator under <code>nova/backends/cpu/ops_impl/mx.py</code>. <strong>Required by M5.4. Cost ~1 week.</strong> No MX use exists anywhere in the tree today.</p>
+
+  <h3>M5.D2 — Latent Workload Profiler</h3>
+  <p>NeuronProfiler 2.0 trace ingestion: per-engine utilization (TensorE, VectorE, ScalarE, GpsimdE) + HBM bandwidth + DMA traffic. Required to ground every M5.x ablation. <em>Not</em> an extension of <code>nova/utils/benchmark.py</code> (NxDI LLM fork) — new module <code>nova/utils/neuron_profile.py</code>. <strong>Cost 1–2 weeks; mostly tooling.</strong></p>
+</section>
+
+<section id="roadmap">
+  <div class="section-head">
+    <div class="section-num">08</div>
+    <h2 class="section-title"><small>Single tile → megakernel</small>Realistic NKI Kernel Roadmap</h2>
+  </div>
+
+  <p>M5.D1 closed 2026-05-14 (cclogs/m5-latent/49–54) at <strong>single-tile scope</strong>: 174 LoC across 2 <code>@nki.jit</code> kernels (<code>matmul_mx_single_tile_kernel</code>, <code>quantize_mx_e4m3_single_tile_kernel</code>), each wrapping a single Tensor Engine instruction. Real Trainium NEFF compile + load + forward all PASS at cosine <code>1.0000050</code> vs CPU reference.</p>
+
+  <p>Production DiT shapes are several orders of magnitude larger. LTX-2 480p attention is <code>Q=K=51275</code>; HV-1.5 480p is similar. A single-tile kernel handles <code>128×512×512</code> — <strong>~625 tile calls per matmul</strong> when tiled naively. The roadmap below scales from current single-tile primitives to the megakernel scope described in the research plan §06 (<code>docs/Trainium Latent Review …</code>).</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Phase</th><th>Scope</th><th>ETA</th><th>LoC</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>M5.D1</strong></td>
+        <td>Single-tile MX matmul + quantize + dispatch surface + CPU emulator + smoke gate</td>
+        <td>—</td>
+        <td>~174</td>
+        <td><strong>✅ Closed</strong></td>
+      </tr>
+      <tr>
+        <td><strong>M5.D1.x</strong></td>
+        <td>Multi-tile composition (outer K-loop + PSUM accumulate) + arbitrary-shape padding</td>
+        <td>+1–2 weeks</td>
+        <td>~+200 → ~400 total</td>
+        <td>Next</td>
+      </tr>
+      <tr>
+        <td><strong>M5.D1.y</strong></td>
+        <td>MXFP8-E5M2 + MXFP4-E2M1FN dtypes</td>
+        <td>+1 week</td>
+        <td>~+100</td>
+        <td>Queued</td>
+      </tr>
+      <tr>
+        <td><strong>M5.4</strong></td>
+        <td>Integration + per-<code>(stage, layer, modality)</code> calibration + <code>PrecisionSchedule</code> artifact. Reuses existing kernels; <em>no new</em> <code>@nki.jit</code></td>
+        <td>+3–4 weeks</td>
+        <td>host code only</td>
+        <td>Queued (gated on M5.D1.x)</td>
+      </tr>
+      <tr>
+        <td><strong>Megakernel phase</strong></td>
+        <td>5 fused video-DiT NKI kernels from research plan §06</td>
+        <td>+2–3 months</td>
+        <td>~+2000–3000 → ~2500–3500 total</td>
+        <td><strong>Productized M5 ceiling</strong></td>
+      </tr>
+      <tr>
+        <td>Production opt.</td>
+        <td>Match <code>nki-moe-bin/mlp_tkg_b2</code> scale (~4500 LoC for a single MoE MLP path); collective overlap, PE utilization, SBUF/PSUM fusion</td>
+        <td>+4–6 months</td>
+        <td>~+1500 → ~5000 total</td>
+        <td>Optional — only if a perf claim demands</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Megakernel scope (the 5 fused kernels)</h3>
+
+  <p>Per research plan §06 "5 NKI kernels to design", Nova's <em>megakernel</em> deliverable is these five fused video-DiT kernels. They are the productized M5 outcome:</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Kernel</th><th>Purpose</th><th>Trn3 features used</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>latent_compact_nki</code></td><td>SWDGE gather, <code>N → k</code> survivors across <code>[T, H, W, C]</code></td><td><code>dma_copy</code> + <code>oob_mode.skip</code> + <code>unique_indices</code> + SBUF Read-Add-Write</td></tr>
+      <tr><td><code>latent_topk_nki</code></td><td>candidate top-k score on N, cross-chip reduce</td><td>reuse NKI Library <code>Top-K Reduce</code> + <code>nki.collectives.all_reduce</code></td></tr>
+      <tr><td><code>latent_quant_dequant_nki</code></td><td>online MX quantization fused with TensorE matmul</td><td><code>quantize_mx</code> + <code>nc_matmul_mx</code> + BF16 PSUM (extends M5.D1.x)</td></tr>
+      <tr><td><code>fused_adaln_attn_nki</code></td><td>DiT block: AdaLN modulation + 3D attention with fast exp softmax</td><td><code>exponential</code> + BF16 PSUM accumulation + background transpose</td></tr>
+      <tr><td><code>latent_scorer_nki</code></td><td>V-JEPA-style L1/L2 energy (predict vs goal latent), on-chip</td><td>VectorE reduction + intra-LNC <code>all_reduce</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Why Nova doesn't need <code>mlp_tkg_b2</code> scale</h3>
+
+  <p><code>/home/ubuntu/nki-moe-bin/mlp_tkg_b2</code> is a <strong>4488-LoC LLM token-generation MoE MLP</strong> (one of 53+ <code>@nki.jit</code> files in that competition codebase). That's a different workload class:</p>
+
+  <ul>
+    <li><strong>TKG (token generation)</strong> — single query (Q seq=1) × long KV (K seq=N) with KV cache reuse; optimized for autoregressive inference.</li>
+    <li><strong>CTE (context encoding)</strong> — many-token attention (Q=K=N), no KV cache, batched. <strong>This is Nova's diffusion path.</strong></li>
+  </ul>
+
+  <p>Nova stands on existing nkilib for universal kernels:</p>
+  <ul>
+    <li>Attention → <code>nkilib.core.attention.attention_cte</code> (already in use)</li>
+    <li>QKV → <code>nkilib.core.qkv.qkv</code></li>
+    <li>Output projection → <code>nkilib.core.output_projection.output_projection_cte</code></li>
+    <li>Cumsum → <code>nkilib.core.cumsum.cumsum</code></li>
+  </ul>
+
+  <p>Nova only writes the <strong>video-diffusion-specific</strong> kernels (the 5 above). Estimated Nova first-party NKI final surface: <strong>~2500–3500 LoC</strong>, not ~5000. Matching <code>mlp_tkg_b2</code> tuning depth is an <em>optional</em> follow-on, gated on whether a specific performance claim demands it.</p>
+
+  <h3>Stop conditions</h3>
+  <ul>
+    <li>If M5.4 mixed-precision schedule on LTX-2 / HV-1.5 hits the cosine ≥ 0.999 + wall ≤ 1.3× pure BF16 target with only multi-tile MX matmul + quantize, <strong>do not enter the megakernel phase</strong>. Fusion is contingent on M5.4 evidence that further fusion is necessary.</li>
+    <li>Each of the 5 fused kernels is <strong>independently triggered</strong>, not bundled. If <code>fused_adaln_attn_nki</code> alone closes the wall-clock gap to FA-3 on H100, do not write the remaining four.</li>
+    <li>Production optimization phase is <strong>never auto-entered</strong>. Only proceed if MLSys / ASPLOS reviewer demand or production SLA demands it.</li>
+  </ul>
+
+  <p class="pullquote">M5.D1 single-tile is the floor (today, 174 LoC). Megakernel = the 5 fused video-DiT kernels (2–3 months, ~2500–3500 total LoC) is the productized M5 ceiling. <code>mlp_tkg_b2</code>-level optimization (~5000 LoC) is optional luxury, not the target.</p>
+</section>
+
+<section id="reuse">
+  <div class="section-head">
+    <div class="section-num">09</div>
+    <h2 class="section-title"><small>Lift, don't reinvent</small>Reuse Map</h2>
+  </div>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th>Need</th><th>Existing pattern (file:line)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>AOT compile + load + cache</td><td><code>nova/pipeline/nova_pipeline.py</code>, <code>nova/pipeline/compile_cache.py</code></td></tr>
+      <tr><td>Multi-component orchestration</td><td><code>MultiComponentApplication</code> at <code>nova/backends/trainium/core/multi_component_application.py:36</code>; <code>NeuronHunyuanVideoApplication</code> at <code>nova/models/hunyuan_video/application.py:174</code> is the worked reference</td></tr>
+      <tr><td>State aliasing across steps</td><td><code>nova/backends/trainium/core/model_wrapper.py:1590-1638</code> (LLM KV cache via <code>input_output_aliases</code>) — same mechanism, port to latent state</td></tr>
+      <tr><td>Per-step metrics JSON convention</td><td><code>scripts/hunyuan_vae_parity.py:77-78,182</code> (<code>{cosine, max_abs, mean_abs}</code> + <code>json.dumps(stats, indent=2)</code>)</td></tr>
+      <tr><td>Trajectory hook surface</td><td><code>HunyuanVideoOrchestrator._denoise</code> at <code>nova/models/hunyuan_video/pipeline.py:142-170</code> (already materialises per-step latents)</td></tr>
+      <tr><td>NKI op dispatch</td><td><code>nova/ops/_dispatch.py:10-20</code> lazy-loads <code>nova.backends.&lt;hw&gt;.ops_impl.&lt;module&gt;</code> — same shape for MX, scheduler, latent-cache ops</td></tr>
+      <tr><td>Test layout for new ops</td><td><code>tests/unit/test_ops_public_api.py</code>, <code>tests/unit/test_modeling_hunyuan_video.py</code>, etc.; AST guard via <code>scripts/test_imports.sh</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="verify">
+  <div class="section-head">
+    <div class="section-num">10</div>
+    <h2 class="section-title"><small>For this plan, not the implementation</small>Verification</h2>
+  </div>
+
+  <p>Editorial (this plan only writes markdown):</p>
+
+  <ol class="fancy">
+    <li>The three files exist at <code>cclogs/m5-latent/&lt;NN&gt;-…md</code> with the sections above; <code>&lt;NN&gt;</code> is the next free prefix.</li>
+    <li>The backlog file mirrors the schema in <code>cclogs/m3-hunyuan/31-M3-x-backlog.md</code> (open that file first to confirm exact field order before writing).</li>
+    <li><code>git status</code> shows <strong>no tracked-file changes</strong> (<code>cclogs/</code> is gitignored).</li>
+  </ol>
+
+  <p>End-to-end functional verification is the M5.0 closure criterion above (the <code>N=4</code> HunyuanVideo run + trajectory metrics JSON), to be executed by the <em>next</em> session, not this one.</p>
+
+  <p class="pullquote">The backlog is the deliverable; individual M5.x.N items will get their own session logs as they are picked up.</p>
+</section>
+
+<div class="glyph-divider">— · —</div>
+
+</main>
+
+<aside>
+  <nav class="toc">
+    <div class="toc-label">Contents</div>
+    <ol>
+      <li><a href="#context">01 · Context</a></li>
+      <li><a href="#notdo">02 · NOT do</a></li>
+      <li><a href="#deliverable">03 · Deliverable</a></li>
+      <li><a href="#depshape">04 · Dependency Shape</a></li>
+      <li><a href="#m50">05 · M5.0 Pre-flight</a></li>
+      <li><a href="#backlog">06 · Backlog (M5.1–M5.4)</a></li>
+      <li><a href="#deps">07 · Dependencies (M5.D)</a></li>
+      <li><a href="#roadmap">08 · NKI Kernel Roadmap ★</a></li>
+      <li><a href="#reuse">09 · Reuse Map</a></li>
+      <li><a href="#verify">10 · Verification</a></li>
+    </ol>
+  </nav>
+</aside>
+
+</div>
+
+<footer>
+  <div><span class="glyph">§</span> Nova · M5 Plan · v2.0 · Ultraplan Refinement</div>
+  <div>Companion to <code>docs/Trainium Latent Review …</code></div>
+  <div>cclogs/m5-latent/ · 2026-05-13</div>
+</footer>
+
+</body>
+</html>

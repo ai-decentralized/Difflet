@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -5,6 +6,7 @@ import torch
 
 from nova.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
 from nova.models.hunyuan_video.pipeline import HunyuanVideoOrchestrator, HunyuanVideoPipelineOutput
+from nova.pipeline.teacache import TeaCacheCalibration
 
 
 class FakeTransformer:
@@ -16,6 +18,16 @@ class FakeTransformer:
     def __call__(self, bundle: HunyuanVideoDiTInputBundle):
         self.calls.append(bundle)
         return {"sample": torch.ones_like(bundle.hidden_states) * self.value}
+
+
+class FakeTeaCacheTransformer(FakeTransformer):
+    def __init__(self, *, value: float = 0.25):
+        super().__init__(value=value)
+        self.mod_input_calls = []
+
+    def teacache_mod_input(self, bundle: HunyuanVideoDiTInputBundle):
+        self.mod_input_calls.append(bundle)
+        return bundle.hidden_states + 0.5
 
 
 class FakeScheduler:
@@ -110,6 +122,116 @@ def test_hunyuan_orchestrator_uses_diffusers_style_scheduler(tmp_path):
     assert torch.allclose(output.latents, torch.full((1, 16, 2, 2, 2), -1.0))
     assert len(scheduler.steps) == 2
     assert scheduler.steps[0][1].item() == pytest.approx(1000.0)
+
+
+def test_hunyuan_orchestrator_teacache_requires_calibration(tmp_path):
+    transformer = FakeTransformer(value=1.0)
+
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        with pytest.raises(FileNotFoundError, match="calibrate_teacache.py"):
+            HunyuanVideoOrchestrator(
+                model_path=str(tmp_path),
+                transformer=transformer,
+                dtype=torch.float32,
+                teacache_speedup=1.5,
+            )
+
+
+def test_hunyuan_orchestrator_teacache_skips_full_transformer_calls(tmp_path):
+    transformer = FakeTeaCacheTransformer(value=1.0)
+    calibration = TeaCacheCalibration(
+        model="hunyuan_video",
+        shape_label="320x512x61",
+        num_steps=4,
+        poly_coef=(0.0,),
+        threshold=1.0,
+        warmup_steps=1,
+        cooldown_steps=0,
+        target_speedup=1.5,
+        fit_r2=0.95,
+        n_samples=32,
+        mod_input_source="block0_modulated_input",
+    )
+    calibration_path = tmp_path / "calibration.json"
+    calibration_path.write_text(json.dumps(calibration.to_dict()), encoding="utf-8")
+
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        pipeline = HunyuanVideoOrchestrator(
+            model_path=str(tmp_path),
+            transformer=transformer,
+            dtype=torch.float32,
+            teacache_speedup=1.5,
+            teacache_calibration_path=str(calibration_path),
+        )
+
+    output = pipeline(
+        bundle=_bundle(),
+        timesteps=torch.tensor([1000.0, 900.0, 800.0, 700.0]),
+        return_trajectory=True,
+    )
+
+    assert torch.allclose(output.latents, torch.full((1, 16, 2, 2, 2), -1.0))
+    assert len(transformer.calls) == 2
+    assert len(transformer.mod_input_calls) == 4
+    assert pipeline.teacache_controller.stats()["full_steps"] == 2
+    assert pipeline.teacache_controller.stats()["skipped_steps"] == 2
+    assert output.trajectory is not None
+    assert len(output.trajectory) == 5
+
+
+def test_hunyuan_orchestrator_rejects_teacache_speedup_above_calibration(tmp_path):
+    transformer = FakeTransformer(value=1.0)
+    calibration = TeaCacheCalibration(
+        model="hunyuan_video",
+        shape_label="320x512x61",
+        num_steps=4,
+        poly_coef=(0.0,),
+        threshold=1.0,
+        target_speedup=1.3,
+        mod_input_source="hidden_states_proxy",
+    )
+    calibration_path = tmp_path / "calibration.json"
+    calibration_path.write_text(json.dumps(calibration.to_dict()), encoding="utf-8")
+
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        with pytest.raises(ValueError, match="lower than requested"):
+            HunyuanVideoOrchestrator(
+                model_path=str(tmp_path),
+                transformer=transformer,
+                dtype=torch.float32,
+                teacache_speedup=1.5,
+                teacache_calibration_path=str(calibration_path),
+            )
+
+
+def test_hunyuan_orchestrator_teacache_requires_mod_input_hook(tmp_path):
+    transformer = FakeTransformer(value=1.0)
+    calibration = TeaCacheCalibration(
+        model="hunyuan_video",
+        shape_label="320x512x61",
+        num_steps=4,
+        poly_coef=(0.0,),
+        threshold=1.0,
+        target_speedup=1.5,
+        mod_input_source="block0_modulated_input",
+    )
+    calibration_path = tmp_path / "calibration.json"
+    calibration_path.write_text(json.dumps(calibration.to_dict()), encoding="utf-8")
+
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        pipeline = HunyuanVideoOrchestrator(
+            model_path=str(tmp_path),
+            transformer=transformer,
+            dtype=torch.float32,
+            teacache_speedup=1.5,
+            teacache_calibration_path=str(calibration_path),
+        )
+
+    with pytest.raises(RuntimeError, match="teacache_mod_input"):
+        pipeline(
+            bundle=_bundle(),
+            timesteps=torch.tensor([1000.0, 900.0, 800.0, 700.0]),
+        )
 
 
 def test_hunyuan_orchestrator_initializes_scheduler_for_explicit_timesteps(tmp_path):

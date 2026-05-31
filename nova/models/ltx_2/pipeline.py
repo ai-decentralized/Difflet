@@ -54,6 +54,7 @@ class LTX2Orchestrator:
         audio_num_frames: int | None = None,
         frame_rate: float = 24.0,
         scheduler: Any = None,
+        teacache_calibration_path: str | None = None,
     ) -> None:
         self.model_path = model_path
         self.transformer = transformer
@@ -93,6 +94,21 @@ class LTX2Orchestrator:
             if scheduler is not None
             else _load_scheduler(model_path, warn_if_missing=transformer is not None)
         )
+        # TeaCache (cclog 87): adaptive step-skipping. Built lazily on first denoise.
+        self.teacache_calibration_path = teacache_calibration_path
+        self._teacache_controller = None
+
+    def _maybe_init_teacache(self) -> bool:
+        """Build the TeaCache controller once. Returns whether TeaCache is enabled."""
+        if not self.teacache_calibration_path:
+            return False
+        if self._teacache_controller is not None:
+            return True
+        from nova.pipeline.teacache import TeaCacheCalibration, TeaCacheController
+
+        calibration = TeaCacheCalibration.from_json(self.teacache_calibration_path)
+        self._teacache_controller = TeaCacheController(calibration)
+        return True
 
     def has_runtime_components(self) -> bool:
         return (
@@ -502,6 +518,14 @@ class LTX2Orchestrator:
         latents = bundle.hidden_states
         audio_latents = bundle.audio_hidden_states
         audio_scheduler = copy.deepcopy(self.scheduler) if self.scheduler is not None else None
+        # TeaCache: the controller tracks only the video stream; the audio residual is
+        # maintained manually here. cclog 87 fix: cache the raw VELOCITY model output (what
+        # the scheduler consumes), NOT the x0 prediction — caching x0 and converting back
+        # via (latents-x0)/sigma amplifies the reused-x0 error at small sigma (late steps),
+        # which destroyed cosine (0.27). Velocity caching matches Wan (cosine 0.985).
+        ctrl = self._teacache_controller if self._maybe_init_teacache() else None
+        prev_audio_vel: torch.Tensor | None = None
+        cached_audio_vel_res: torch.Tensor | None = None
         for step_index, timestep in enumerate(timesteps):
             model_dtype = _component_dtype(self.transformer, self.dtype)
             do_cfg = float(guidance_scale) > 1.0 or float(audio_guidance_scale) > 1.0
@@ -554,7 +578,8 @@ class LTX2Orchestrator:
                     audio_latents.shape[0],
                     "audio_encoder_attention_mask",
                 )
-            noise_pred_video, noise_pred_audio = _first_tensor_pair(self.transformer(model_bundle))
+            # video_sigma / audio_sigma are needed for the scheduler step whether the
+            # full DiT runs or the step is skipped, so compute them up front.
             video_sigma = _scheduler_sigma(
                 self.scheduler,
                 step_index,
@@ -567,109 +592,76 @@ class LTX2Orchestrator:
                 device=audio_latents.device,
                 dtype=audio_latents.dtype,
             )
-            if do_cfg:
-                video_uncond, video_cond = noise_pred_video.float().chunk(2, dim=0)
-                audio_uncond, audio_cond = noise_pred_audio.float().chunk(2, dim=0)
-                video_uncond_x0 = _convert_velocity_to_x0(latents, video_uncond, video_sigma)
-                video_cond_x0 = _convert_velocity_to_x0(latents, video_cond, video_sigma)
-                audio_uncond_x0 = _convert_velocity_to_x0(audio_latents, audio_uncond, audio_sigma)
-                audio_cond_x0 = _convert_velocity_to_x0(audio_latents, audio_cond, audio_sigma)
-                noise_pred_video_x0 = video_cond_x0 + (float(guidance_scale) - 1.0) * (
-                    video_cond_x0 - video_uncond_x0
+
+            # TeaCache skip decision. The block-0 modulated-input signal is timestep-only
+            # (identical across the cond/uncond CFG halves), so the probe uses the single
+            # un-doubled latent + the un-doubled per-batch timestep.
+            mod_input = None
+            skip = False
+            if ctrl is not None:
+                timestep_batch_single = _batch_timestep(
+                    timestep, latents.shape[0], latents.device, model_dtype
                 )
-                noise_pred_audio_x0 = audio_cond_x0 + (
-                    float(audio_guidance_scale) - 1.0
-                ) * (
-                    audio_cond_x0 - audio_uncond_x0
+                mod_input = self.transformer.teacache_mod_input(
+                    latents.to(dtype=model_dtype), timestep_batch_single
                 )
-                positive_bundle = _positive_ltx_2_bundle(model_bundle, latents.shape[0])
+                diff_norm = None
+                if ctrl.prev_mod_input is not None:
+                    prev = ctrl.prev_mod_input
+                    cur = mod_input.detach().float().cpu()
+                    denom = prev.abs().mean().clamp_min(1e-8)
+                    diff_norm = float((cur - prev).abs().mean() / denom)
+                skip = ctrl.should_skip(step_index, mod_input, diff_norm=diff_norm)
+
+            if skip:
+                # Reuse cached VELOCITY (raw model output) — no x0/sigma round-trip.
+                noise_pred_video = ctrl.skip_noise_pred(mod_input=mod_input)
+                noise_pred_audio = prev_audio_vel + cached_audio_vel_res
             else:
-                video_cond_x0 = _convert_velocity_to_x0(latents, noise_pred_video.float(), video_sigma)
-                audio_cond_x0 = _convert_velocity_to_x0(
-                    audio_latents,
-                    noise_pred_audio.float(),
-                    audio_sigma,
-                )
-                noise_pred_video_x0 = video_cond_x0
-                noise_pred_audio_x0 = audio_cond_x0
-                positive_bundle = model_bundle
-
-            if do_stg:
-                stg_video, stg_audio = _first_tensor_pair(
-                    self._call_transformer_with_ltx_2_kwargs(
-                        positive_bundle,
-                        isolate_modalities=False,
+                noise_pred_video_x0, noise_pred_audio_x0, video_cond_x0, audio_cond_x0 = (
+                    self._full_dit_step(
+                        model_bundle=model_bundle,
+                        latents=latents,
+                        audio_latents=audio_latents,
+                        video_sigma=video_sigma,
+                        audio_sigma=audio_sigma,
+                        do_cfg=do_cfg,
+                        do_stg=do_stg,
+                        do_modality=do_modality,
+                        guidance_scale=guidance_scale,
+                        audio_guidance_scale=audio_guidance_scale,
+                        stg_scale=stg_scale,
+                        audio_stg_scale=audio_stg_scale,
+                        modality_scale=modality_scale,
+                        audio_modality_scale=audio_modality_scale,
                         spatio_temporal_guidance_blocks=spatio_temporal_guidance_blocks,
-                        perturbation_mask=None,
                         use_cross_timestep=use_cross_timestep,
                         attention_kwargs=attention_kwargs,
                     )
                 )
-                stg_video_x0 = _convert_velocity_to_x0(latents, stg_video.float(), video_sigma)
-                stg_audio_x0 = _convert_velocity_to_x0(
-                    audio_latents,
-                    stg_audio.float(),
-                    audio_sigma,
-                )
-                noise_pred_video_x0 = noise_pred_video_x0 + float(stg_scale) * (
-                    video_cond_x0 - stg_video_x0
-                )
-                noise_pred_audio_x0 = noise_pred_audio_x0 + float(audio_stg_scale) * (
-                    audio_cond_x0 - stg_audio_x0
-                )
-
-            if do_modality:
-                modality_video, modality_audio = _first_tensor_pair(
-                    self._call_transformer_with_ltx_2_kwargs(
-                        positive_bundle,
-                        isolate_modalities=True,
-                        spatio_temporal_guidance_blocks=None,
-                        perturbation_mask=None,
-                        use_cross_timestep=use_cross_timestep,
-                        attention_kwargs=attention_kwargs,
+                if float(guidance_rescale) > 0.0:
+                    noise_pred_video_x0 = rescale_ltx_2_noise_cfg(
+                        noise_pred_video_x0,
+                        video_cond_x0,
+                        guidance_rescale=float(guidance_rescale),
                     )
-                )
-                modality_video_x0 = _convert_velocity_to_x0(
-                    latents,
-                    modality_video.float(),
-                    video_sigma,
-                )
-                modality_audio_x0 = _convert_velocity_to_x0(
-                    audio_latents,
-                    modality_audio.float(),
-                    audio_sigma,
-                )
-                noise_pred_video_x0 = noise_pred_video_x0 + (float(modality_scale) - 1.0) * (
-                    video_cond_x0 - modality_video_x0
-                )
-                noise_pred_audio_x0 = noise_pred_audio_x0 + (
-                    float(audio_modality_scale) - 1.0
-                ) * (
-                    audio_cond_x0 - modality_audio_x0
-                )
+                if float(audio_guidance_rescale) > 0.0:
+                    noise_pred_audio_x0 = rescale_ltx_2_noise_cfg(
+                        noise_pred_audio_x0,
+                        audio_cond_x0,
+                        guidance_rescale=float(audio_guidance_rescale),
+                    )
+                # Convert to velocity (what the scheduler consumes) on the FULL step, then
+                # cache THIS velocity — so skips reuse a velocity residual, not an x0 one.
+                noise_pred_video = _convert_x0_to_velocity(latents, noise_pred_video_x0, video_sigma)
+                noise_pred_audio = _convert_x0_to_velocity(audio_latents, noise_pred_audio_x0, audio_sigma)
+                if ctrl is not None:
+                    ctrl.record_full_step(noise_pred_video, mod_input=mod_input)
+                    if prev_audio_vel is not None:
+                        cached_audio_vel_res = noise_pred_audio - prev_audio_vel
+            if ctrl is not None:
+                prev_audio_vel = noise_pred_audio
 
-            if float(guidance_rescale) > 0.0:
-                noise_pred_video_x0 = rescale_ltx_2_noise_cfg(
-                    noise_pred_video_x0,
-                    video_cond_x0,
-                    guidance_rescale=float(guidance_rescale),
-                )
-            if float(audio_guidance_rescale) > 0.0:
-                noise_pred_audio_x0 = rescale_ltx_2_noise_cfg(
-                    noise_pred_audio_x0,
-                    audio_cond_x0,
-                    guidance_rescale=float(audio_guidance_rescale),
-                )
-            noise_pred_video = _convert_x0_to_velocity(
-                latents,
-                noise_pred_video_x0,
-                video_sigma,
-            )
-            noise_pred_audio = _convert_x0_to_velocity(
-                audio_latents,
-                noise_pred_audio_x0,
-                audio_sigma,
-            )
             latents = self._scheduler_step(
                 self.scheduler,
                 noise_pred_video,
@@ -686,7 +678,120 @@ class LTX2Orchestrator:
             )
             if trajectory is not None:
                 trajectory.append((latents.detach().cpu(), audio_latents.detach().cpu()))
+        if ctrl is not None:
+            print(f"[ltx2-teacache] {ctrl.stats()}", flush=True)
         return latents, audio_latents
+
+    def _full_dit_step(
+        self,
+        *,
+        model_bundle: LTX2DiTInputBundle,
+        latents: torch.Tensor,
+        audio_latents: torch.Tensor,
+        video_sigma: torch.Tensor,
+        audio_sigma: torch.Tensor,
+        do_cfg: bool,
+        do_stg: bool,
+        do_modality: bool,
+        guidance_scale: float,
+        audio_guidance_scale: float,
+        stg_scale: float,
+        audio_stg_scale: float,
+        modality_scale: float,
+        audio_modality_scale: float,
+        spatio_temporal_guidance_blocks: list[int] | None,
+        use_cross_timestep: bool,
+        attention_kwargs: dict[str, Any] | None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Run the full DiT evaluation + CFG/STG/modality guidance for one step.
+
+        Returns ``(noise_pred_video_x0, noise_pred_audio_x0, video_cond_x0,
+        audio_cond_x0)``. The ``*_cond_x0`` baselines are returned so the caller
+        can apply ``guidance_rescale`` (which references the cond prediction).
+        """
+        noise_pred_video, noise_pred_audio = _first_tensor_pair(self.transformer(model_bundle))
+        if do_cfg:
+            video_uncond, video_cond = noise_pred_video.float().chunk(2, dim=0)
+            audio_uncond, audio_cond = noise_pred_audio.float().chunk(2, dim=0)
+            video_uncond_x0 = _convert_velocity_to_x0(latents, video_uncond, video_sigma)
+            video_cond_x0 = _convert_velocity_to_x0(latents, video_cond, video_sigma)
+            audio_uncond_x0 = _convert_velocity_to_x0(audio_latents, audio_uncond, audio_sigma)
+            audio_cond_x0 = _convert_velocity_to_x0(audio_latents, audio_cond, audio_sigma)
+            noise_pred_video_x0 = video_cond_x0 + (float(guidance_scale) - 1.0) * (
+                video_cond_x0 - video_uncond_x0
+            )
+            noise_pred_audio_x0 = audio_cond_x0 + (
+                float(audio_guidance_scale) - 1.0
+            ) * (
+                audio_cond_x0 - audio_uncond_x0
+            )
+            positive_bundle = _positive_ltx_2_bundle(model_bundle, latents.shape[0])
+        else:
+            video_cond_x0 = _convert_velocity_to_x0(latents, noise_pred_video.float(), video_sigma)
+            audio_cond_x0 = _convert_velocity_to_x0(
+                audio_latents,
+                noise_pred_audio.float(),
+                audio_sigma,
+            )
+            noise_pred_video_x0 = video_cond_x0
+            noise_pred_audio_x0 = audio_cond_x0
+            positive_bundle = model_bundle
+
+        if do_stg:
+            stg_video, stg_audio = _first_tensor_pair(
+                self._call_transformer_with_ltx_2_kwargs(
+                    positive_bundle,
+                    isolate_modalities=False,
+                    spatio_temporal_guidance_blocks=spatio_temporal_guidance_blocks,
+                    perturbation_mask=None,
+                    use_cross_timestep=use_cross_timestep,
+                    attention_kwargs=attention_kwargs,
+                )
+            )
+            stg_video_x0 = _convert_velocity_to_x0(latents, stg_video.float(), video_sigma)
+            stg_audio_x0 = _convert_velocity_to_x0(
+                audio_latents,
+                stg_audio.float(),
+                audio_sigma,
+            )
+            noise_pred_video_x0 = noise_pred_video_x0 + float(stg_scale) * (
+                video_cond_x0 - stg_video_x0
+            )
+            noise_pred_audio_x0 = noise_pred_audio_x0 + float(audio_stg_scale) * (
+                audio_cond_x0 - stg_audio_x0
+            )
+
+        if do_modality:
+            modality_video, modality_audio = _first_tensor_pair(
+                self._call_transformer_with_ltx_2_kwargs(
+                    positive_bundle,
+                    isolate_modalities=True,
+                    spatio_temporal_guidance_blocks=None,
+                    perturbation_mask=None,
+                    use_cross_timestep=use_cross_timestep,
+                    attention_kwargs=attention_kwargs,
+                )
+            )
+            modality_video_x0 = _convert_velocity_to_x0(
+                latents,
+                modality_video.float(),
+                video_sigma,
+            )
+            modality_audio_x0 = _convert_velocity_to_x0(
+                audio_latents,
+                modality_audio.float(),
+                audio_sigma,
+            )
+            noise_pred_video_x0 = noise_pred_video_x0 + (float(modality_scale) - 1.0) * (
+                video_cond_x0 - modality_video_x0
+            )
+            noise_pred_audio_x0 = noise_pred_audio_x0 + (
+                float(audio_modality_scale) - 1.0
+            ) * (
+                audio_cond_x0 - modality_audio_x0
+            )
+
+        return noise_pred_video_x0, noise_pred_audio_x0, video_cond_x0, audio_cond_x0
 
     def _scheduler_step(
         self,

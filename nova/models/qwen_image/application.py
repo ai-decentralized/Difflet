@@ -149,6 +149,8 @@ class NeuronQwenImageApplication(MultiComponentApplication):
         self.kwargs = kwargs
         self.transformer_path = os.path.join(model_path, "transformer")
         self.transformer = None
+        self.teacache_probe = None
+        self.teacache_probe_fused = False
         self.text_seq_len = int(kwargs.get("text_seq_len", 1024))
         self.batch_size = int(kwargs.get("batch_size", 1))
 
@@ -174,6 +176,17 @@ class NeuronQwenImageApplication(MultiComponentApplication):
                 config=config,
             )
 
+            if bool(kwargs.get("teacache_fused", False)):
+                from nova.backends.trainium.qwen_image.teacache_probe_fused import (
+                    NeuronQwenImageTeacacheProbeFusedApplication,
+                )
+
+                self.teacache_probe = NeuronQwenImageTeacacheProbeFusedApplication(
+                    model_path=self.transformer_path,
+                    config=config,
+                )
+                self.teacache_probe_fused = True
+
         from nova.models.qwen_image.pipeline import QwenImageOrchestrator
 
         self.pipeline = QwenImageOrchestrator(
@@ -183,12 +196,16 @@ class NeuronQwenImageApplication(MultiComponentApplication):
             height=self.shape["height"],
             width=self.shape["width"],
             text_seq_len=self.text_seq_len,
+            teacache_speedup=kwargs.get("teacache_speedup"),
+            teacache_calibration_path=kwargs.get("teacache_calibration_path"),
         )
 
     def components(self) -> list[ComponentSpec]:
         components: list[ComponentSpec] = []
         if self.transformer is not None:
             components.append(ComponentSpec("transformer", self.transformer))
+        if self.teacache_probe is not None:
+            components.append(ComponentSpec("teacache_probe", self.teacache_probe))
         return components
 
     def no_components_message(self, action: str) -> str:
@@ -229,6 +246,16 @@ class NeuronQwenImageApplication(MultiComponentApplication):
             raise NotImplementedError("Qwen-Image forward_dit requires an active transformer.")
         validate_qwen_image_dit_inputs(bundle, config=self.transformer.config, dtype=self.dtype)
         return self.transformer(*bundle.as_model_inputs())
+
+    def teacache_delta(self, bundle: QwenImageDiTInputBundle) -> torch.Tensor:
+        """fused-A entry (cclog 81): returns ONLY the scalar delta. prev_mod is a
+        persistent on-device Parameter updated in place via alias — no host
+        handle. Requires the fused probe (teacache_fused=True)."""
+        if not self.teacache_probe_fused or self.teacache_probe is None:
+            raise NotImplementedError(
+                "teacache_delta requires the fused probe (teacache_fused=True)."
+            )
+        return self.teacache_probe.teacache_delta(*bundle.as_model_inputs())
 
     def __call__(self, *args: Any, **kwargs: Any):
         if len(args) == 1 and isinstance(args[0], QwenImageDiTInputBundle):

@@ -41,6 +41,9 @@ from nova.models.flux.clip.modeling_clip import (
     CLIPInferenceConfig,
     NeuronClipApplication,
 )
+from nova.backends.trainium.flux.teacache_probe_fused import (
+    NeuronFluxTeacacheProbeFusedApplication,
+)
 from nova.models.flux.modeling_flux import (
     FluxBackboneInferenceConfig,
     NeuronFluxBackboneApplication,
@@ -178,6 +181,9 @@ class NeuronFluxApplication(MultiComponentApplication):
         height: int = 1024,
         width: int = 1024,
         pipeline_class=NeuronFluxPipeline,
+        teacache_fused: bool = False,
+        teacache_speedup: Optional[float] = None,
+        teacache_calibration_path: Optional[str] = None,
     ):
         super().__init__()
         self.model_path = model_path
@@ -220,16 +226,69 @@ class NeuronFluxApplication(MultiComponentApplication):
             model_path=self.vae_decoder_path, config=self.decoder_config
         )
 
+        # TeaCache fused-A (cclog 85). Mount the probe NEFF when teacache is
+        # requested; build the controller when a calibration is provided.
+        self.teacache_probe = None
+        self.pipe.teacache_probe = None
+        self.pipe.teacache_controller = None
+        self.pipe.teacache_speedup = None
+        enable_teacache = teacache_fused or teacache_speedup is not None
+        if enable_teacache:
+            # CFG-parallel scatters [neg,pos] across DP ranks (modeling_flux.py:
+            # 338-399), which a single probe/skip decision cannot represent — must
+            # be off when teacache is on (cclog 85). Flux's default is off.
+            if getattr(self.backbone_config, "cfg_parallel_enabled", False):
+                raise ValueError(
+                    "Flux TeaCache requires cfg_parallel_enabled=False (the probe + "
+                    "single skip decision is unsound across CFG-parallel DP ranks). "
+                    "Disable CFG parallelism when enabling teacache."
+                )
+            self.teacache_probe = NeuronFluxTeacacheProbeFusedApplication(
+                model_path=self.transformer_path,
+                config=self.backbone_config,
+            )
+            self.pipe.teacache_probe = self.teacache_probe
+            if teacache_speedup is not None:
+                from nova.pipeline.teacache import (
+                    TeaCacheController,
+                    load_teacache_calibration_or_raise,
+                )
+
+                shape_label = f"{int(self.height)}x{int(self.width)}"
+                calibration = load_teacache_calibration_or_raise(
+                    teacache_calibration_path,
+                    model="flux",
+                    shape_label=shape_label,
+                )
+                if (
+                    calibration.target_speedup is not None
+                    and float(teacache_speedup) > float(calibration.target_speedup) + 1e-6
+                ):
+                    raise ValueError(
+                        "Flux TeaCache calibration target speedup is lower than requested: "
+                        f"requested {teacache_speedup}, calibration has "
+                        f"{calibration.target_speedup}."
+                    )
+                self.pipe.teacache_controller = TeaCacheController(calibration)
+                self.pipe.teacache_speedup = float(teacache_speedup)
+
     def components(self) -> list[ComponentSpec]:
         # Compile order follows the original Flux application. Load order is
         # fixed explicitly because the first loaded Trainium component
         # establishes the process-wide communicator.
-        return [
+        specs = [
             ComponentSpec("text_encoder", self.pipe.text_encoder, load_priority=2),
             ComponentSpec("text_encoder_2", self.pipe.text_encoder_2, load_priority=0),
             ComponentSpec("transformer", self.pipe.transformer, load_priority=1),
             ComponentSpec("decoder", self.pipe.vae.decoder, load_priority=3),
         ]
+        if self.teacache_probe is not None:
+            # Same world_size as the backbone; load after text_encoder_2 (which
+            # fixes the process communicator), alongside the transformer.
+            specs.append(
+                ComponentSpec("teacache_probe", self.teacache_probe, load_priority=1)
+            )
+        return specs
 
     def __call__(self, *args, **kwargs):
         return self.pipe(*args, **kwargs)
