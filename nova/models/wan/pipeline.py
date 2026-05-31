@@ -79,6 +79,10 @@ class WanOrchestrator:
 
         calibration = TeaCacheCalibration.from_json(self.teacache_calibration_path)
         self._teacache_controller = TeaCacheController(calibration)
+        # Fixed-cadence mode (cclog 84/89): the skip decision is purely index-based, so the
+        # block-0 CPU shadow is never consulted — don't build it (saves load + per-step cost).
+        if not self._teacache_controller.needs_signal():
+            return True
         stages = {"transformer": self.transformer, "transformer_2": self.transformer_2}
         for subfolder, model in stages.items():
             if model is None:
@@ -309,16 +313,18 @@ class WanOrchestrator:
                 if self._teacache_last_model_id != id(current_model):
                     ctrl.reset()  # stage switch (high->low noise) invalidates the residual
                     self._teacache_last_model_id = id(current_model)
-                shadow = self._teacache_shadows[id(current_model)]
-                mod_input = shadow.teacache_mod_input(
-                    latents.to(dtype=model_dtype), timestep_batch, prompt_embeds.to(dtype=model_dtype)
-                )
                 diff_norm = None
-                if ctrl.prev_mod_input is not None:
-                    prev = ctrl.prev_mod_input
-                    cur = mod_input.detach().float().cpu()
-                    denom = prev.abs().mean().clamp_min(1e-8)
-                    diff_norm = float((cur - prev).abs().mean() / denom)
+                # Fixed-cadence mode skips the block-0 CPU shadow entirely (index-based decision).
+                if ctrl.needs_signal():
+                    shadow = self._teacache_shadows[id(current_model)]
+                    mod_input = shadow.teacache_mod_input(
+                        latents.to(dtype=model_dtype), timestep_batch, prompt_embeds.to(dtype=model_dtype)
+                    )
+                    if ctrl.prev_mod_input is not None:
+                        prev = ctrl.prev_mod_input
+                        cur = mod_input.detach().float().cpu()
+                        denom = prev.abs().mean().clamp_min(1e-8)
+                        diff_norm = float((cur - prev).abs().mean() / denom)
                 should_skip = ctrl.should_skip(step_index, mod_input, diff_norm=diff_norm)
 
             if should_skip:
