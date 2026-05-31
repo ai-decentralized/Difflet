@@ -191,8 +191,13 @@ def build_transformer(tdir: Path, dtype: torch.dtype) -> WanTransformer3DModel:
     return model
 
 
-def make_inputs(dtype: torch.dtype, text_seq_len: int, text_dim: int):
-    """Latents (from cache or random) + a FIXED random encoder_hidden_states."""
+def make_inputs(dtype: torch.dtype, text_seq_len: int, text_dim: int, *, prompt=None, transformer_dir=None):
+    """Latents (cache/random) + encoder_hidden_states.
+
+    If ``prompt`` is given, encode it with the real UMT5 text encoder (cclog 88: the
+    fixed-random embeds were a stand-in; this is the real-prompt re-calibration path).
+    Otherwise use a fixed-random tensor (the timestep-only signal only needs it constant).
+    """
     g = torch.Generator().manual_seed(1234)
     if LATENT_CACHE.exists():
         latents = torch.load(LATENT_CACHE, map_location="cpu")
@@ -205,15 +210,33 @@ def make_inputs(dtype: torch.dtype, text_seq_len: int, text_dim: int):
         log(f"latents_init: random {tuple(latents.shape)} (no cache found)")
 
     b = latents.shape[0]
-    encoder_hidden_states = torch.randn(
-        b, text_seq_len, text_dim, generator=g
-    ).to(dtype)
-    log(
-        f"embed source: FIXED RANDOM encoder_hidden_states "
-        f"{tuple(encoder_hidden_states.shape)} (constant across all steps; "
-        "block-0 self-attn modulation is timestep-only so text embeds need "
-        "only be constant)"
-    )
+    if prompt:
+        import gc as _gc
+        from pathlib import Path as _P
+
+        from transformers import AutoTokenizer, UMT5EncoderModel
+
+        snap = _P(transformer_dir).parent
+        tok = AutoTokenizer.from_pretrained(str(snap / "tokenizer"))
+        te = UMT5EncoderModel.from_pretrained(str(snap / "text_encoder"), torch_dtype=dtype).eval()
+        enc = tok([prompt] * b, return_tensors="pt", padding="max_length",
+                  max_length=text_seq_len, truncation=True)
+        with torch.no_grad():
+            encoder_hidden_states = te(
+                input_ids=enc.input_ids, attention_mask=enc.attention_mask
+            ).last_hidden_state.to(dtype)
+        del te, tok
+        _gc.collect()
+        log(f"embed source: REAL UMT5 encoder_hidden_states {tuple(encoder_hidden_states.shape)} "
+            f"prompt={prompt!r}")
+    else:
+        encoder_hidden_states = torch.randn(b, text_seq_len, text_dim, generator=g).to(dtype)
+        log(
+            f"embed source: FIXED RANDOM encoder_hidden_states "
+            f"{tuple(encoder_hidden_states.shape)} (constant across all steps; "
+            "block-0 self-attn modulation is timestep-only so text embeds need "
+            "only be constant)"
+        )
     return latents, encoder_hidden_states
 
 
@@ -281,13 +304,13 @@ def rel_l1(curr: torch.Tensor, prev: torch.Tensor) -> float:
     return num / den if den != 0.0 else float("nan")
 
 
-def run_gate(num_steps: int, dtype: torch.dtype) -> None:
+def run_gate(num_steps: int, dtype: torch.dtype, prompt=None, write_calib=False) -> None:
     tdir = resolve_transformer_dir(WAN_MODEL_ID, WAN_SUBFOLDER)
     model = build_transformer(tdir, dtype)
 
     text_seq_len = 226  # typical Wan UMT5 prompt length; arbitrary for the gate
     latents, encoder_hidden_states = make_inputs(
-        dtype, text_seq_len, model.config.text_dim
+        dtype, text_seq_len, model.config.text_dim, prompt=prompt, transformer_dir=tdir
     )
 
     capture = Block0Capture(model.blocks[0])
@@ -337,7 +360,8 @@ def run_gate(num_steps: int, dtype: torch.dtype) -> None:
     log("=" * 64)
     log("RESULTS")
     log(f"  steps                : {num_steps}")
-    log(f"  embed source         : FIXED RANDOM (constant across steps)")
+    log(f"  embed source         : "
+        + (f"REAL UMT5 (prompt={prompt!r})" if prompt else "FIXED RANDOM (constant across steps)"))
     log(f"  consecutive pairs    : {len(signals)}")
     log(f"  signal (relL1 mod)   : " + ", ".join(f"{s:.4f}" for s in signals))
     log(f"  true_delta (relL1 np): " + ", ".join(f"{d:.4f}" for d in deltas))
@@ -354,20 +378,65 @@ def run_gate(num_steps: int, dtype: torch.dtype) -> None:
     )
     log(f"  TeaCache verdict     : {verdict}")
 
+    if write_calib and not (r == r and r >= 0.8):
+        log(f"  SKIP write-calib: Pearson {r:.4f} < 0.8 (not viable) — refusing to clobber "
+            "the production calibration with a non-viable fit")
+    elif write_calib:
+        import json
+        from pathlib import Path as _P
+
+        import numpy as np
+
+        sig = np.array(signals)
+        dlt = np.array(deltas)
+        deg = 4
+        scale = float(sig.max())
+        desc = np.polyfit(sig / scale, dlt, deg)  # highest->lowest, in (x/scale)
+        asc = [float(desc[deg - k]) / (scale ** k) for k in range(deg + 1)]  # ascending, raw x
+        out = {
+            "schema": "nova-m9-teacache-calibration-v1",
+            "model": "wan",
+            "shape_label": "832x480x13",
+            "poly_coef": asc,
+            "threshold": 0.20,
+            "warmup_steps": 2,
+            "cooldown_steps": 2,
+            "num_steps": num_steps,
+            "skip_run_length": 1,
+            "accumulate": True,
+            "cadence": 0,
+            "notes": (
+                f"cclog 88 re-fit from REAL UMT5 embeds (prompt={prompt!r}, {num_steps}-step gate, "
+                f"Pearson {r:.4f}). Supersedes the fixed-random-embed calibration."
+            ),
+        }
+        calib_path = _P(__file__).resolve().parents[1] / "cclogs" / "m9-teacache" / "teacache_calib_wan.json"
+        backup = calib_path.with_suffix(".randomembed.json")
+        if calib_path.exists() and not backup.exists():
+            backup.write_text(calib_path.read_text(encoding="utf-8"), encoding="utf-8")
+            log(f"  backed up old calib -> {backup.name}")
+        calib_path.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
+        log(f"  WROTE real-embed calib -> {calib_path} (coef={[round(c, 4) for c in asc]})")
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Wan 2.2 TeaCache CPU signal gate")
-    ap.add_argument("--steps", type=int, default=16, help="denoise steps (default 16)")
+    ap.add_argument("--steps", type=int, default=50,
+                    help="denoise steps (default 50 = production schedule; <50 under-samples the signal)")
     ap.add_argument(
         "--dtype",
         choices=["bf16", "fp32"],
         default="bf16",
         help="compute dtype (default bf16; fp32 ok with 124GB RAM)",
     )
+    ap.add_argument("--prompt", default=None,
+                    help="if set, encode with the real UMT5 text encoder instead of random embeds")
+    ap.add_argument("--write-calib", action="store_true",
+                    help="re-fit + write teacache_calib_wan.json from this gate's trajectory")
     args = ap.parse_args()
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
     log(f"backend={os.environ.get('NOVA_BACKEND')} dtype={dtype} python={sys.executable}")
-    run_gate(args.steps, dtype)
+    run_gate(args.steps, dtype, prompt=args.prompt, write_calib=args.write_calib)
 
 
 if __name__ == "__main__":
