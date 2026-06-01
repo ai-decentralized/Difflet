@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from typing import List
 
@@ -12,7 +13,12 @@ from diffusers.models.attention_dispatch import dispatch_attention_fn
 from nova.backends.trainium.core.application_base import NeuronApplicationBase
 from nova.backends.trainium.core.config import InferenceConfig
 from nova.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
-from nova.ops import ColumnParallelLinear, RowParallelLinear, get_tensor_model_parallel_size
+from nova.ops import (
+    ColumnParallelLinear,
+    RowParallelLinear,
+    attention,
+    get_tensor_model_parallel_size,
+)
 
 
 class QwenImageTransformerInferenceConfig(InferenceConfig):
@@ -315,16 +321,42 @@ class _QwenImageTrainiumAttnProcessor:
         joint_key = torch.cat([txt_key, img_key], dim=1)
         joint_value = torch.cat([txt_value, img_value], dim=1)
 
-        joint_hidden_states = dispatch_attention_fn(
-            joint_query,
-            joint_key,
-            joint_value,
-            attn_mask=attention_mask,
-            dropout_p=0.0,
-            is_causal=False,
-            backend=self._attention_backend,
-            parallel_config=self._parallel_config,
-        )
+        head_dim = joint_query.shape[-1]
+        if attention_mask is None:
+            # Unmasked Qwen-Image joint attention → flash attention_cte
+            # (device-only, ~4x over compiled SDPA — cclog 90/m10). q/k/v are
+            # (B, S, heads, dim); the kernel wants (B*heads, S, dim) with the
+            # heads folded into the batch axis. Attention is per-rank: q/k/v
+            # already carry this rank's head shard from the ColumnParallel
+            # projections (_parallel_config is None — no context parallelism).
+            q = joint_query.transpose(1, 2)
+            k = joint_key.transpose(1, 2)
+            v = joint_value.transpose(1, 2)
+            b, h, s_q, d = q.shape
+            s_k = k.shape[2]
+            attn_out = attention(
+                q.reshape(b * h, s_q, d),
+                k.reshape(b * h, s_k, d),
+                v.reshape(b * h, s_k, d),
+                scale=1.0 / math.sqrt(head_dim),
+                causal=False,
+                attention_mask=None,
+                tp_q=True,
+                tp_k=True,
+                tp_out=False,
+            )
+            joint_hidden_states = attn_out.reshape(b, h, s_q, d).transpose(1, 2)
+        else:
+            joint_hidden_states = dispatch_attention_fn(
+                joint_query,
+                joint_key,
+                joint_value,
+                attn_mask=attention_mask,
+                dropout_p=0.0,
+                is_causal=False,
+                backend=self._attention_backend,
+                parallel_config=self._parallel_config,
+            )
 
         joint_hidden_states = joint_hidden_states.flatten(2, 3)
         joint_hidden_states = joint_hidden_states.to(joint_query.dtype)
