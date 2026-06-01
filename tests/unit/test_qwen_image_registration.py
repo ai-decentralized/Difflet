@@ -137,6 +137,11 @@ def test_qwen_image_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
         validate_qwen_image_dit_inputs(bad_bundle, config=cfg, dtype=torch.bfloat16)
 
 
+@pytest.mark.skip(
+    reason="Qwen attention migrated to device-only flash attention_cte (cclog 90/m10); "
+    "the full trace-module forward no longer runs on CPU. Attention correctness is "
+    "validated on device (e2e cosine + diffusers parity), mirroring Wan."
+)
 def test_qwen_image_transformer_trace_module_tiny_cpu_forward(tmp_path):
     from nova.backends.trainium.qwen_image.transformer import _QwenImageTransformerTraceModule
     from nova.models.qwen_image.application import create_qwen_image_transformer_config
@@ -302,6 +307,11 @@ def test_qwen_image_full_transformer_closure_cli_parser_imports_without_loading_
     assert args.tp_degree == 4
 
 
+@pytest.mark.skip(
+    reason="Qwen attention migrated to device-only flash attention_cte (cclog 90/m10); "
+    "the trace module no longer runs the attention on CPU, so this diffusers CPU-parity "
+    "check is superseded by on-device validation (e2e cosine + diffusers parity), like Wan."
+)
 def test_qwen_image_trainium_trace_module_matches_diffusers_tiny_cpu(tmp_path):
     from diffusers.models.transformers.transformer_qwenimage import QwenImageTransformer2DModel
 

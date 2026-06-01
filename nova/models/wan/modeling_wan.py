@@ -47,6 +47,7 @@ from nova.ops import (
     RMSNorm,
     RowParallelLinear,
     apply_rotary_emb,
+    attention,
 )
 
 
@@ -289,22 +290,33 @@ def _attn_kernel(
     *,
     head_dim: int,
 ) -> torch.Tensor:
-    """Run attention on (B, heads, S, head_dim) tensors.
+    """Run attention on (B, heads, S, head_dim) tensors via ``nova.ops.attention``.
 
-    The M2.5 numerical path intentionally uses PyTorch SDPA instead of the NKI
-    attention kernel. This keeps the traced NEFF graph on the same high-level
-    semantics as the CPU reference while Wan TP sharding is still being
-    stabilized.
+    Routes to the nkilib flash kernel (``attention_cte``) on Trainium — measured
+    ~4x faster than the prior PyTorch-SDPA fallback (cclog 90: SDPA 15.33 ms vs
+    attention_cte 3.69 ms at N=4096). Unmasked full attention, replicated across
+    TP ranks; the M2.5 SDPA shortcut is retired. Mirrors the verified HV layout:
+    flatten heads into the batch axis → (B*heads, S, head_dim), tp_q/tp_k in the
+    standard (S, D) layout, no mask. The CPU reference (``nova.ops`` cpu impl)
+    computes the same standard attention, so trajectory parity is preserved.
     """
-    scale = 1.0 / math.sqrt(head_dim)
-    return F.scaled_dot_product_attention(
-        q,
-        k,
-        v,
-        dropout_p=0.0,
-        is_causal=False,
-        scale=scale,
+    batch, heads, seq_q, dim = q.shape
+    seq_k = k.shape[2]
+    q_flat = q.reshape(batch * heads, seq_q, dim)
+    k_flat = k.reshape(batch * heads, seq_k, dim)
+    v_flat = v.reshape(batch * heads, seq_k, dim)
+    out = attention(
+        q_flat,
+        k_flat,
+        v_flat,
+        scale=1.0 / math.sqrt(head_dim),
+        causal=False,
+        attention_mask=None,
+        tp_q=True,
+        tp_k=True,
+        tp_out=False,
     )
+    return out.reshape(batch, heads, seq_q, dim)
 
 
 class WanAttention(nn.Module):
