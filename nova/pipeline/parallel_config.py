@@ -2,34 +2,58 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class NovaParallelConfig:
     """Tensor, context, and CFG parallel settings.
 
-    Context parallelism and CFG parallelism both consume a second data-parallel
-    lane in the current NxDI Flux implementation, so they are mutually exclusive.
+    Context parallelism is configured via ``cp_degree`` (1 = disabled). The
+    legacy boolean ``cp_enabled`` is retained as a back-compat constructor
+    alias for ``cp_degree=2``. Context parallelism and CFG parallelism both
+    consume extra data-parallel lanes, so they are mutually exclusive.
     """
 
     tp_degree: int = 1
     cp_enabled: bool = False
+    cp_degree: int = 1
     cfg_parallel_enabled: bool = False
 
     def __post_init__(self) -> None:
         if self.tp_degree < 1:
             raise ValueError("tp_degree must be >= 1")
+        if self.cp_degree < 1:
+            raise ValueError("cp_degree must be >= 1")
+        # Reconcile the legacy bool alias with the new degree field.
+        if self.cp_enabled and self.cp_degree == 1:
+            object.__setattr__(self, "cp_degree", 2)
+        elif self.cp_enabled and self.cp_degree != 2:
+            raise ValueError(
+                "cp_enabled is a degree-2 alias; pass cp_degree directly for "
+                "other degrees instead of combining the two."
+            )
+        # Keep the bool in sync so downstream `if cfg.cp_enabled` checks work.
+        object.__setattr__(self, "cp_enabled", self.cp_degree > 1)
         if self.cp_enabled and self.cfg_parallel_enabled:
             raise ValueError("cp_enabled and cfg_parallel_enabled are mutually exclusive")
 
     @property
     def world_size(self) -> int:
-        multiplier = 2 if self.cp_enabled or self.cfg_parallel_enabled else 1
-        return self.tp_degree * multiplier
+        cfg_multiplier = 2 if self.cfg_parallel_enabled else 1
+        return self.tp_degree * self.cp_degree * cfg_multiplier
 
     def to_cache_dict(self) -> dict[str, object]:
-        return asdict(self)
+        d: dict[str, object] = {
+            "tp_degree": self.tp_degree,
+            "cp_enabled": self.cp_enabled,
+            "cfg_parallel_enabled": self.cfg_parallel_enabled,
+        }
+        # Additive only: omit cp_degree when disabled so the legacy default
+        # cache key stays byte-identical.
+        if self.cp_degree > 1:
+            d["cp_degree"] = self.cp_degree
+        return d
 
 
 @dataclass(frozen=True)
