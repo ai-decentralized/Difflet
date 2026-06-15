@@ -101,7 +101,7 @@ def main() -> int:
     print("[ab] loading Trainium app + probe NEFF...", flush=True)
     app = NeuronHunyuanVideoApplication(
         model_path=str(SOURCE),
-        parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        parallel=NovaParallelConfig(tp_degree=4),
         dtype=torch.bfloat16,
         shape={"height": int(meta["height"]), "width": int(meta["width"]),
                "num_frames": int(meta["num_frames"])},

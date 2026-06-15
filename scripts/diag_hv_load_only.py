@@ -49,7 +49,7 @@ def main() -> int:
     t_init = time.perf_counter()
     app = NeuronHunyuanVideoApplication(
         model_path=".nova-cache/f3_hunyuan_n4_4d8s1r/source",
-        parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        parallel=NovaParallelConfig(tp_degree=4),
         dtype=torch.bfloat16,
         shape={"height": 320, "width": 512, "num_frames": 61},
         text_seq_len=256,

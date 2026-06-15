@@ -102,7 +102,7 @@ def main() -> int:
     print("[vae-parity] build NeuronHunyuanVideoApplication (vae-only)...")
     app = NeuronHunyuanVideoApplication(
         model_path=args.model_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree, cp_enabled=False),
+        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
         dtype=torch.bfloat16,
         shape={"height": args.height, "width": args.width, "num_frames": args.frames},
         enable_transformer=False,

@@ -61,7 +61,7 @@ def main() -> int:
 
     app = NeuronHunyuanVideoApplication(
         model_path=MODEL_DIR,
-        parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        parallel=NovaParallelConfig(tp_degree=4),
         dtype=dtype,
         shape={"height": 320, "width": 512, "num_frames": 61},
         model_version="1.5",

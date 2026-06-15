@@ -168,7 +168,7 @@ def _run_nova_trainium(
 
     app = NeuronHunyuanVideoApplication(
         model_path=str(source_dir),
-        parallel=NovaParallelConfig(tp_degree=tp_degree, cp_enabled=False),
+        parallel=NovaParallelConfig(tp_degree=tp_degree),
         dtype=torch.bfloat16,
         shape={
             "height": meta["height"],

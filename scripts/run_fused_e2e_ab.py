@@ -67,7 +67,7 @@ def main() -> int:
 
     app = NeuronHunyuanVideoApplication(
         model_path=str(SOURCE),
-        parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        parallel=NovaParallelConfig(tp_degree=4),
         dtype=torch.bfloat16,
         shape={"height": int(first_meta["height"]), "width": int(first_meta["width"]),
                "num_frames": int(first_meta["num_frames"])},

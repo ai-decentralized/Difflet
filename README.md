@@ -286,7 +286,7 @@ Nova maintains a content-addressed cache of AOT-compiled artifacts.
 
 The cache key hashes:
 - model id, registry name, revision
-- parallel configuration (`tp_degree`, `cp_enabled`, `cfg_parallel_enabled`)
+- parallel configuration (`tp_degree`, `cp_degree`, `cfg_parallel_enabled`)
 - dtype (normalized — `"bf16"`, `"bfloat16"`, `torch.bfloat16` collapse to one key)
 - shape (`height`, `width`, `num_frames`)
 - toolchain versions (Python major.minor, torch, neuronx-cc, neuronx-distributed,
@@ -305,14 +305,16 @@ variable or `compile_cache_dir=` in `from_pretrained`. Pass
 `NovaParallelConfig` exposes three parallelism axes:
 
 - `tp_degree` — tensor parallel degree (must divide visible NeuronCore count).
-- `cp_enabled` — context parallel; doubles `world_size` to `tp_degree * 2`.
+- `cp_degree` — context parallel degree (1 = disabled); `world_size` becomes
+  `tp_degree * cp_degree`.
 - `cfg_parallel_enabled` — splits the CFG conditional/unconditional batch;
-  doubles `world_size` to `tp_degree * 2`. Mutually exclusive with `cp_enabled`.
+  doubles `world_size` to `tp_degree * 2`. Mutually exclusive with `cp_degree > 1`.
 
 ```python
 NovaParallelConfig(tp_degree=4)                          # world_size=4
 NovaParallelConfig(tp_degree=4, cfg_parallel_enabled=1)  # world_size=8
-NovaParallelConfig(tp_degree=4, cp_enabled=True)         # world_size=8
+NovaParallelConfig(tp_degree=4, cp_degree=2)             # world_size=8
+NovaParallelConfig(tp_degree=4, cp_degree=4)             # world_size=16
 ```
 
 ## Adding a new model

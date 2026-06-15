@@ -149,7 +149,7 @@ def test_pipeline_recompiles_when_manifest_valid_but_artifacts_missing(tmp_path)
 
 def test_parallel_config_rejects_conflicting_parallel_modes():
     with pytest.raises(ValueError, match="mutually exclusive"):
-        NovaParallelConfig(tp_degree=8, cp_enabled=True, cfg_parallel_enabled=True)
+        NovaParallelConfig(tp_degree=8, cp_degree=2, cfg_parallel_enabled=True)
 
 
 def test_pipeline_call_delegates_to_application(tmp_path):
