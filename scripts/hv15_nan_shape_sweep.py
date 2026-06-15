@@ -73,7 +73,7 @@ def main() -> int:
         print(f"\n[sweep] === num_frames={nf} ===", flush=True)
         app = NeuronHunyuanVideoApplication(
             model_path=MODEL_DIR,
-            parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+            parallel=NovaParallelConfig(tp_degree=4),
             dtype=dtype,
             shape={"height": 320, "width": 512, "num_frames": nf},
             model_version="1.5",

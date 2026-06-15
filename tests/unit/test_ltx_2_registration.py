@@ -59,7 +59,7 @@ def test_ltx_2_registry_defaults_are_tp_only():
     entry = resolve_model("Lightricks/LTX-2")
 
     assert entry.name == "ltx_2"
-    assert entry.default_parallel == NovaParallelConfig(tp_degree=4, cp_enabled=False)
+    assert entry.default_parallel == NovaParallelConfig(tp_degree=4)
     assert entry.default_shape == {"height": 512, "width": 768, "num_frames": 121}
     assert "audio_vae/diffusion_pytorch_model.safetensors" in (entry.download_patterns or ())
     assert "vocoder/diffusion_pytorch_model.safetensors" in (entry.download_patterns or ())
@@ -82,7 +82,7 @@ def test_ltx_2_pipeline_skeleton_can_be_constructed_without_load(tmp_path):
     )
 
     assert pipe.model_entry.name == "ltx_2"
-    assert pipe.parallel == NovaParallelConfig(tp_degree=4, cp_enabled=False)
+    assert pipe.parallel == NovaParallelConfig(tp_degree=4)
     assert pipe.shape == {"height": 512, "width": 768, "num_frames": 121}
     assert pipe.app.shape == {"height": 512, "width": 768, "num_frames": 121}
     assert pipe.app.text_seq_len == 1024
@@ -189,7 +189,7 @@ def test_ltx_2_rejects_cp_until_transformer_spike(tmp_path):
         NovaPipeline.from_pretrained(
             str(model_dir),
             model_type="ltx_2",
-            parallel=NovaParallelConfig(tp_degree=4, cp_enabled=True),
+            parallel=NovaParallelConfig(tp_degree=4, cp_degree=2),
             dtype="bf16",
             compile_cache_dir=str(tmp_path / "cache"),
             skip_compile=True,
