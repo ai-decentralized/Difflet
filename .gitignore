@@ -36,3 +36,6 @@ cclogs/
 CLAUDE.md
 AGENTS.md
 .claude/
+
+# Design specs (local working docs, not committed)
+.specs/

@@ -111,7 +111,7 @@ def _load_hunyuan_app(args: argparse.Namespace, meta: dict[str, Any]):
 
     return NeuronHunyuanVideoApplication(
         model_path=args.source_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree, cp_enabled=False),
+        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
         dtype=_dtype_from_name(args.dtype),
         shape={
             "height": int(meta["height"]),

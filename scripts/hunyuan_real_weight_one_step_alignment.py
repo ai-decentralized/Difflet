@@ -86,7 +86,7 @@ def run_trainium(args: argparse.Namespace, meta: dict, tensors: dict, timestep: 
 
     app = NeuronHunyuanVideoApplication(
         model_path=args.source_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree, cp_enabled=False),
+        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
         dtype=torch.bfloat16,
         shape={"height": meta["height"], "width": meta["width"], "num_frames": meta["num_frames"]},
         text_seq_len=meta["text_seq_len"],

@@ -31,7 +31,7 @@ def create_flux_application(
     width = int(shape.get("width") or 1024)
     world_size = get_flux_parallelism_config(
         backbone_tp_degree=parallel.tp_degree,
-        context_parallel_enabled=parallel.cp_enabled,
+        cp_degree=parallel.cp_degree,
         cfg_parallel_enabled=parallel.cfg_parallel_enabled,
     )
     configs = create_flux_config(
@@ -42,7 +42,7 @@ def create_flux_application(
         height=height,
         width=width,
         cfg_parallel_enabled=parallel.cfg_parallel_enabled,
-        context_parallel_enabled=parallel.cp_enabled,
+        context_parallel_enabled=parallel.cp_degree > 1,
     )
     return NeuronFluxApplication(
         model_path,

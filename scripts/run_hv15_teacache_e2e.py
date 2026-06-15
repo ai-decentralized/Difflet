@@ -107,7 +107,7 @@ def main() -> int:
     print("[hv15-tc] building app (1.5 monolithic, teacache_fused)...", flush=True)
     app = NeuronHunyuanVideoApplication(
         model_path=MODEL_DIR,
-        parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        parallel=NovaParallelConfig(tp_degree=4),
         dtype=dtype,
         shape={"height": HEIGHT, "width": WIDTH, "num_frames": NUM_FRAMES},
         model_version="1.5",
