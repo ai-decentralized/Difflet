@@ -103,7 +103,7 @@ def main() -> int:
     t_init = time.perf_counter()
     app = NeuronHunyuanVideoApplication(
         model_path=str(args.source_dir),
-        parallel=NovaParallelConfig(tp_degree=int(args.tp_degree), cp_enabled=False),
+        parallel=NovaParallelConfig(tp_degree=int(args.tp_degree)),
         dtype=_dtype_from_name(args.dtype),
         shape={
             "height": int(args.height),

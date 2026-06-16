@@ -29,7 +29,7 @@ def test_active_defaults_to_max():
     [
         NovaParallelConfig(tp_degree=1),
         NovaParallelConfig(tp_degree=4),
-        NovaParallelConfig(tp_degree=4, cp_enabled=True),
+        NovaParallelConfig(tp_degree=4, cp_degree=2),
         NovaParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
     ],
 )

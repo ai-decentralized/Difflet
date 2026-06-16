@@ -13,7 +13,7 @@ def test_hunyuan_video_registry_defaults_are_tp_only():
     entry = resolve_model("hunyuanvideo-community/HunyuanVideo")
 
     assert entry.name == "hunyuan_video"
-    assert entry.default_parallel == NovaParallelConfig(tp_degree=4, cp_enabled=False)
+    assert entry.default_parallel == NovaParallelConfig(tp_degree=4)
     assert entry.default_shape == {"height": 320, "width": 512, "num_frames": 61}
 
 
@@ -21,7 +21,7 @@ def test_hunyuan_video_15_registry_defaults_are_production_480p():
     entry = resolve_model("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v")
 
     assert entry.name == "hunyuan_video_15"
-    assert entry.default_parallel == NovaParallelConfig(tp_degree=4, cp_enabled=False)
+    assert entry.default_parallel == NovaParallelConfig(tp_degree=4)
     assert entry.default_shape == {"height": 480, "width": 848, "num_frames": 121}
 
 
@@ -40,7 +40,7 @@ def test_hunyuan_video_pipeline_skeleton_can_be_constructed_without_load(tmp_pat
     )
 
     assert pipe.model_entry.name == "hunyuan_video"
-    assert pipe.parallel == NovaParallelConfig(tp_degree=4, cp_enabled=False)
+    assert pipe.parallel == NovaParallelConfig(tp_degree=4)
     assert pipe.shape == {"height": 320, "width": 512, "num_frames": 61}
     assert pipe.app.shape == {"height": 320, "width": 512, "num_frames": 61}
 
@@ -782,7 +782,7 @@ def test_hunyuan_video_rejects_cp_until_m3_polish(tmp_path):
         NovaPipeline.from_pretrained(
             str(model_dir),
             model_type="hunyuan_video",
-            parallel=NovaParallelConfig(tp_degree=4, cp_enabled=True),
+            parallel=NovaParallelConfig(tp_degree=4, cp_degree=2),
             dtype="bf16",
             compile_cache_dir=str(tmp_path / "cache"),
             skip_compile=True,

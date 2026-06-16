@@ -91,7 +91,7 @@ def _build_app(tmp_path) -> NeuronHunyuanVideoApplication:
     """Skeleton app with no transformer/VAE compiled artifacts."""
     return NeuronHunyuanVideoApplication(
         model_path=str(tmp_path),
-        parallel=NovaParallelConfig(tp_degree=1, cp_enabled=False),
+        parallel=NovaParallelConfig(tp_degree=1),
         dtype=torch.float32,
         shape={"height": 320, "width": 512, "num_frames": 61},
         text_seq_len=4,

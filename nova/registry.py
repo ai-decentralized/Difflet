@@ -224,7 +224,7 @@ def _register_builtin_hunyuan_video() -> None:
             "tencent/HunyuanVideo",
         ),
         detector=is_hunyuan_video,
-        default_parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        default_parallel=NovaParallelConfig(tp_degree=4),
         default_shape={"height": 320, "width": 512, "num_frames": 61},
         backends=("trainium",),
     )
@@ -245,7 +245,7 @@ def _register_builtin_hunyuan_video_15() -> None:
             "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v",
         ),
         detector=is_hunyuan_video_15,
-        default_parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        default_parallel=NovaParallelConfig(tp_degree=4),
         default_shape={"height": 480, "width": 848, "num_frames": 121},
         backends=("trainium",),
     )
@@ -279,7 +279,7 @@ def _register_builtin_qwen_image() -> None:
             "Qwen/Qwen-Image",
         ),
         detector=is_qwen_image,
-        default_parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        default_parallel=NovaParallelConfig(tp_degree=4),
         default_shape={"height": 1024, "width": 1024, "num_frames": None},
         backends=("trainium",),
     )
@@ -304,7 +304,7 @@ def _register_builtin_ltx_2() -> None:
             "Lightricks/LTX-2",
         ),
         detector=is_ltx_2,
-        default_parallel=NovaParallelConfig(tp_degree=4, cp_enabled=False),
+        default_parallel=NovaParallelConfig(tp_degree=4),
         default_shape={"height": 512, "width": 768, "num_frames": 121},
         backends=("trainium",),
         download_patterns=(
