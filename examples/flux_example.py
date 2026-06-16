@@ -70,8 +70,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # ----- parallelism (None means: fall through to registry default) -----
     p.add_argument("--tp-degree", type=int, default=None,
                    help="Tensor-parallel degree (registry default: 8)")
-    p.add_argument("--cp-enabled", action="store_true",
-                   help="Enable context parallel (mutually exclusive with --cfg-parallel)")
+    p.add_argument("--cp-degree", type=int, default=1,
+                   help="Context-parallel degree (1 = disabled; mutually exclusive with --cfg-parallel)")
     p.add_argument("--cfg-parallel", action="store_true",
                    help="Enable CFG parallel (mutually exclusive with --cp-enabled)")
 
@@ -110,11 +110,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _build_parallel_config(args: argparse.Namespace) -> NovaParallelConfig | None:
     """Return None when user didn't specify any parallel flag (use registry default)."""
-    if args.tp_degree is None and not args.cp_enabled and not args.cfg_parallel:
+    if args.tp_degree is None and args.cp_degree == 1 and not args.cfg_parallel:
         return None
     return NovaParallelConfig(
         tp_degree=args.tp_degree if args.tp_degree is not None else 1,
-        cp_enabled=args.cp_enabled,
+        cp_degree=args.cp_degree,
         cfg_parallel_enabled=args.cfg_parallel,
     )
 
