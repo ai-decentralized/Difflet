@@ -32,7 +32,7 @@ def test_qwen_image_registry_defaults_are_tp_only():
     entry = resolve_model("Qwen/Qwen-Image")
 
     assert entry.name == "qwen_image"
-    assert entry.default_parallel == NovaParallelConfig(tp_degree=4, cp_enabled=False)
+    assert entry.default_parallel == NovaParallelConfig(tp_degree=4)
     assert entry.default_shape == {"height": 1024, "width": 1024, "num_frames": None}
 
 
@@ -51,7 +51,7 @@ def test_qwen_image_pipeline_skeleton_can_be_constructed_without_load(tmp_path):
     )
 
     assert pipe.model_entry.name == "qwen_image"
-    assert pipe.parallel == NovaParallelConfig(tp_degree=4, cp_enabled=False)
+    assert pipe.parallel == NovaParallelConfig(tp_degree=4)
     assert pipe.shape == {"height": 1024, "width": 1024, "num_frames": None}
     assert pipe.app.shape == {"height": 1024, "width": 1024, "num_frames": None}
     assert pipe.app.components() == []
@@ -90,7 +90,7 @@ def test_qwen_image_rejects_cp_until_transformer_spike(tmp_path):
         NovaPipeline.from_pretrained(
             str(model_dir),
             model_type="qwen_image",
-            parallel=NovaParallelConfig(tp_degree=4, cp_enabled=True),
+            parallel=NovaParallelConfig(tp_degree=4, cp_degree=2),
             dtype="bf16",
             compile_cache_dir=str(tmp_path / "cache"),
             skip_compile=True,

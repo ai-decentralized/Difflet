@@ -66,7 +66,7 @@ logger.setLevel(logging.INFO)
 
 def get_flux_parallelism_config(
     backbone_tp_degree: int,
-    context_parallel_enabled: bool = False,
+    cp_degree: int = 1,
     cfg_parallel_enabled: bool = False
 ) -> int:
     """
@@ -74,29 +74,25 @@ def get_flux_parallelism_config(
 
     Args:
         backbone_tp_degree: The tensor parallelism degree for the backbone model
-        context_parallel_enabled: Whether context parallelism is enabled (default: False)
+        cp_degree: Context parallelism degree (1 = disabled, default: 1)
         cfg_parallel_enabled: Whether CFG parallelism is enabled (default: False)
 
     Returns:
-        int: world_size (equals backbone_tp_degree, or 2x if context/CFG parallel enabled)
+        int: world_size (backbone_tp_degree × cp_degree, or × 2 for CFG parallel)
 
     Note:
-        context_parallel_enabled and cfg_parallel_enabled are mutually exclusive.
-        Both require world_size = 2 × backbone_tp_degree (dp_degree=2).
+        cp_degree > 1 and cfg_parallel_enabled are mutually exclusive.
     """
-    # Validate mutual exclusivity
-    if context_parallel_enabled and cfg_parallel_enabled:
+    if cp_degree > 1 and cfg_parallel_enabled:
         raise ValueError(
-            "context_parallel_enabled and cfg_parallel_enabled are mutually exclusive. "
-            "Only one can be True at a time."
+            "cp_degree > 1 and cfg_parallel_enabled are mutually exclusive. "
+            "Only one can be set at a time."
         )
 
-    # Determine if we need 2x world_size (either for context parallel or CFG parallel)
-    use_2x_world_size = context_parallel_enabled or cfg_parallel_enabled
+    if cfg_parallel_enabled:
+        return backbone_tp_degree * 2
 
-    world_size = backbone_tp_degree * 2 if use_2x_world_size else backbone_tp_degree
-
-    return world_size
+    return backbone_tp_degree * cp_degree
 
 
 def create_flux_config(model_path, world_size, backbone_tp_degree, dtype, height, width, inpaint=False,

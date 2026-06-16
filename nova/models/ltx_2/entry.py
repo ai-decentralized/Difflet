@@ -20,7 +20,7 @@ def create_ltx_2_application(
         raise NotImplementedError(
             f"LTX-2 currently supports only the trainium backend, got {backend!r}"
         )
-    if parallel.cp_enabled:
+    if parallel.cp_degree > 1:
         raise NotImplementedError("LTX-2 CP is deferred until the M4c transformer spike.")
     if parallel.cfg_parallel_enabled:
         raise NotImplementedError(

@@ -118,7 +118,7 @@ def _run_trainium_vae(
 
     app = NeuronHunyuanVideoApplication(
         model_path=str(source_dir),
-        parallel=NovaParallelConfig(tp_degree=tp_degree, cp_enabled=False),
+        parallel=NovaParallelConfig(tp_degree=tp_degree),
         dtype=torch.bfloat16,
         shape={"height": height, "width": width, "num_frames": num_frames},
         enable_transformer=False,
