@@ -46,8 +46,15 @@ from nova.ops import (
     ColumnParallelLinear,
     RMSNorm,
     RowParallelLinear,
+    SPMDRank,
     apply_rotary_emb,
     attention,
+    gather_from_tensor_model_parallel_region_with_dim,
+    get_data_parallel_group,
+    get_dp_rank_spmd,
+    get_tensor_model_parallel_size,
+    get_world_group,
+    scatter_to_process_group_spmd,
 )
 
 
@@ -338,12 +345,16 @@ class WanAttention(nn.Module):
         eps: float = 1e-6,
         is_cross_attention: bool = False,
         dtype: Optional[torch.dtype] = None,
+        context_parallel_enabled: bool = False,
     ):
         super().__init__()
         self.dim = dim
         self.heads = heads
         self.head_dim = head_dim
         self.is_cross_attention = is_cross_attention
+        self.context_parallel_enabled = context_parallel_enabled
+        if context_parallel_enabled:
+            self.data_parallel_group = get_data_parallel_group()
         inner_dim = heads * head_dim
 
         # gather_output=True → full inner_dim on every rank so RMSNorm
@@ -403,11 +414,19 @@ class WanAttention(nn.Module):
             q = apply_rotary_emb(q, cos, sin)
             k = apply_rotary_emb(k, cos, sin)
 
-        # (B, S, heads, dim) → (B, heads, S, dim) for the kernel. Attention is
-        # intentionally replicated across TP ranks for the M2.5 numerical path.
+        # (B, S, heads, dim) → (B, heads, S, dim) for the kernel.
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
+
+        # CP self-attention: each rank has Q for its token shard; gather full K,V.
+        # Cross-attention K,V come from encoder_hidden_states which is not scattered.
+        if self.context_parallel_enabled and not self.is_cross_attention:
+            stacked_kv = torch.stack([k, v], dim=0)  # [2, B, heads, S/cp, head_dim]
+            stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
+                stacked_kv, gather_dim=3, process_group=self.data_parallel_group
+            )  # [2, B, heads, S, head_dim]
+            k, v = torch.unbind(stacked_kv, dim=0)
 
         out = _attn_kernel(q, k, v, head_dim=self.head_dim)
 
@@ -439,17 +458,20 @@ class WanTransformerBlock(nn.Module):
         cross_attn_norm: bool = True,
         eps: float = 1e-6,
         dtype: Optional[torch.dtype] = None,
+        context_parallel_enabled: bool = False,
     ):
         super().__init__()
         head_dim = dim // num_heads
 
         self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
         self.attn1 = WanAttention(
-            dim, num_heads, head_dim, eps=eps, is_cross_attention=False, dtype=dtype
+            dim, num_heads, head_dim, eps=eps, is_cross_attention=False, dtype=dtype,
+            context_parallel_enabled=context_parallel_enabled,
         )
 
         self.attn2 = WanAttention(
-            dim, num_heads, head_dim, eps=eps, is_cross_attention=True, dtype=dtype
+            dim, num_heads, head_dim, eps=eps, is_cross_attention=True, dtype=dtype,
+            context_parallel_enabled=context_parallel_enabled,
         )
         self.norm2 = (
             FP32LayerNorm(dim, eps, elementwise_affine=True)
@@ -528,6 +550,11 @@ class WanTransformer3DModel(nn.Module):
         self.config = config
         self.dtype = dtype
 
+        self.context_parallel_enabled = getattr(config, 'context_parallel_enabled', False)
+        if self.context_parallel_enabled:
+            self.data_parallel_group = get_data_parallel_group()
+            self.global_rank = SPMDRank(world_size=get_world_group().size())
+
         inner_dim = config.inner_dim
 
         self.rope = WanRotaryPosEmbed(
@@ -559,6 +586,7 @@ class WanTransformer3DModel(nn.Module):
                     cross_attn_norm=config.cross_attn_norm,
                     eps=config.eps,
                     dtype=dtype,
+                    context_parallel_enabled=self.context_parallel_enabled,
                 )
                 for _ in range(config.num_layers)
             ]
@@ -583,10 +611,28 @@ class WanTransformer3DModel(nn.Module):
         pph = height // p_h
         ppw = width // p_w
 
-        rotary_emb = self.rope(hidden_states)
+        rotary_emb = self.rope(hidden_states)  # (cos, sin) each (1, S, 1, head_dim)
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)  # (B, S, inner_dim)
+
+        if self.context_parallel_enabled:
+            dp_rank = get_dp_rank_spmd(
+                global_rank=self.global_rank.get_rank(),
+                tp_degree=get_tensor_model_parallel_size(),
+            )
+            hidden_states = scatter_to_process_group_spmd(
+                hidden_states, partition_dim=1, rank=dp_rank,
+                process_group=self.data_parallel_group,
+            )
+            cos, sin = rotary_emb
+            cos = scatter_to_process_group_spmd(
+                cos, partition_dim=1, rank=dp_rank, process_group=self.data_parallel_group,
+            )
+            sin = scatter_to_process_group_spmd(
+                sin, partition_dim=1, rank=dp_rank, process_group=self.data_parallel_group,
+            )
+            rotary_emb = (cos, sin)
 
         # timestep can be (B,) or (B, S_t) in Ti2V mode.
         if timestep.ndim == 2:
@@ -623,6 +669,11 @@ class WanTransformer3DModel(nn.Module):
             self.norm_out(hidden_states.float()) * (1 + scale) + shift
         ).type_as(hidden_states)
         hidden_states = self.proj_out(hidden_states)
+
+        if self.context_parallel_enabled:
+            hidden_states = gather_from_tensor_model_parallel_region_with_dim(
+                hidden_states, gather_dim=1, process_group=self.data_parallel_group,
+            )
 
         hidden_states = hidden_states.reshape(bs, ppf, pph, ppw, p_t, p_h, p_w, -1)
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
