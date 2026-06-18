@@ -214,9 +214,14 @@ def make_inputs(dtype: torch.dtype, text_seq_len: int, text_dim: int, *, prompt=
         import gc as _gc
         from pathlib import Path as _P
 
+        from huggingface_hub import snapshot_download
         from transformers import AutoTokenizer, UMT5EncoderModel
 
-        snap = _P(transformer_dir).parent
+        # resolve_transformer_dir only fetched transformer/*; the real-embed path also
+        # needs tokenizer/ + text_encoder/ (the ~11 GB UMT5). Fetch them now and use the
+        # canonical snapshot dir (do NOT rely on transformer_dir.parent — it may be None).
+        snap = _P(snapshot_download(WAN_MODEL_ID, allow_patterns=["tokenizer/*", "text_encoder/*"]))
+        log(f"fetched tokenizer/ + text_encoder/ under {snap} (real-embed path)")
         tok = AutoTokenizer.from_pretrained(str(snap / "tokenizer"))
         te = UMT5EncoderModel.from_pretrained(str(snap / "text_encoder"), torch_dtype=dtype).eval()
         enc = tok([prompt] * b, return_tensors="pt", padding="max_length",
