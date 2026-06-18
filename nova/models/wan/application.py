@@ -26,6 +26,7 @@ def create_wan_backbone_config(
     num_frames: int,
     batch_size: int = 1,
     subfolder: str = "transformer",
+    context_parallel_enabled: bool = False,
 ):
     from nova.backends.trainium.wan.backbone import WanBackboneInferenceConfig
 
@@ -45,6 +46,7 @@ def create_wan_backbone_config(
         height=height,
         width=width,
         num_frames=num_frames,
+        context_parallel_enabled=context_parallel_enabled,
     )
 
 
@@ -159,13 +161,14 @@ class NeuronWanApplication(MultiComponentApplication):
 
             config = create_wan_backbone_config(
                 model_path=model_path,
-                world_size=parallel.tp_degree,
+                world_size=parallel.world_size,
                 tp_degree=parallel.tp_degree,
                 dtype=self.dtype,
                 height=height,
                 width=width,
                 num_frames=latent_num_frames,
                 batch_size=batch_size,
+                context_parallel_enabled=parallel.cp_degree > 1,
             )
             self.transformer = NeuronWanBackboneApplication(
                 model_path=self.transformer_path,
@@ -177,7 +180,7 @@ class NeuronWanApplication(MultiComponentApplication):
 
             config = create_wan_backbone_config(
                 model_path=model_path,
-                world_size=parallel.tp_degree,
+                world_size=parallel.world_size,
                 tp_degree=parallel.tp_degree,
                 dtype=self.dtype,
                 height=height,
@@ -185,6 +188,7 @@ class NeuronWanApplication(MultiComponentApplication):
                 num_frames=latent_num_frames,
                 batch_size=batch_size,
                 subfolder="transformer_2",
+                context_parallel_enabled=parallel.cp_degree > 1,
             )
             self.transformer_2 = NeuronWanBackboneApplication(
                 model_path=self.transformer_2_path,
@@ -198,7 +202,7 @@ class NeuronWanApplication(MultiComponentApplication):
 
             te_config = create_wan_text_encoder_config(
                 model_path=model_path,
-                world_size=parallel.tp_degree,
+                world_size=parallel.world_size,
                 tp_degree=parallel.tp_degree,
                 dtype=self.dtype,
                 text_seq_len=text_seq_len,
@@ -276,18 +280,26 @@ class NeuronWanApplication(MultiComponentApplication):
         return super().no_components_message(action)
 
     @staticmethod
-    def _component_load_range(
+    def _component_load_rank_range(
         component,
         *,
         start_rank_id: int | None,
         local_ranks_size: int | None,
     ) -> tuple[int | None, int | None]:
-        """Clamp single-core components when the parent Wan app uses TP>1."""
-        return MultiComponentApplication._component_load_rank_range(
-            component,
-            start_rank_id=start_rank_id,
-            local_ranks_size=local_ranks_size,
-        )
+        """Clamp each component to its own world_size.
+
+        Text encoder uses tp-only (world_size=tp), transformer uses tp*cp.
+        When the app-level local_ranks_size=tp*cp, text encoder must still
+        load on only tp ranks or weight initialization crashes.
+        """
+        config = getattr(component, "config", None)
+        neuron_config = getattr(config, "neuron_config", None)
+        world_size = getattr(neuron_config, "world_size", None)
+        if world_size == 1:
+            return 0 if start_rank_id is not None else None, 1
+        if world_size is not None and local_ranks_size is not None and world_size < local_ranks_size:
+            return start_rank_id, world_size
+        return start_rank_id, local_ranks_size
 
     def __call__(self, *args: Any, **kwargs: Any):
         if self.transformer is not None and len(args) >= 3:

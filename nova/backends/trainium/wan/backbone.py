@@ -24,6 +24,8 @@ class WanBackboneInferenceConfig(InferenceConfig):
             self.text_seq_len = 512
         if getattr(self, "out_channels", None) is None:
             self.out_channels = self.in_channels
+        if not hasattr(self, "context_parallel_enabled"):
+            self.context_parallel_enabled = False
 
     def get_required_attributes(self) -> List[str]:
         return [
