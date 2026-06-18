@@ -70,6 +70,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--model", required=True,
                    help="HF model id (e.g. Wan-AI/Wan2.2-T2V-A14B-Diffusers) or local path")
     p.add_argument("--tp-degree", type=int, default=4)
+    p.add_argument("--cp-degree", type=int, default=1,
+                   help="Context-parallel degree (1 = disabled)")
     p.add_argument("--height", type=int, default=480)
     p.add_argument("--width", type=int, default=832)
     p.add_argument("--num-frames", type=int, default=9)
@@ -316,9 +318,10 @@ def main(argv: list[str] | None = None) -> int:
     compiled_dir = Path(args.compiled_dir)
     _stage_components(compiled_dir, components, args)
 
+    parallel = NovaParallelConfig(tp_degree=args.tp_degree, cp_degree=args.cp_degree)
     app = NeuronWanApplication(
         model_path=str(model_dir),
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=parallel,
         dtype=torch.bfloat16,
         shape={"height": args.height, "width": args.width, "num_frames": args.num_frames},
         text_seq_len=args.text_seq_len,
@@ -334,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     app.load(
         str(compiled_dir),
         start_rank_id=0,
-        local_ranks_size=args.tp_degree,
+        local_ranks_size=parallel.world_size,
         skip_warmup=args.skip_warmup,
     )
     print(f"[wan] load elapsed    = {time.monotonic() - t0:.3f}s", flush=True)
