@@ -15,10 +15,13 @@ multi-core execution for image and video diffusion models on Trainium v3.
 | M2 — Wan 2.2 T2V (spike) | Done | Prompt → UMT5 → DiT (TP=4) → VAE → `(1, 3, 9, 480, 832)` video tensor at 480×832×9. Sequential 4-core split via `scripts/wan_smoke.sh`. |
 | M2.5 — Wan numerical alignment | Done (component) | UMT5 / DiT / VAE NEFF-vs-CPU all PASS (cosine ≥ 0.995). Full denoise trajectory parity vs HF diffusers still open. |
 | Phase B — backend abstraction | Done | `nova/core/` and 4 Trainium-only `nova/utils/*` files relocated under `nova/backends/trainium/`; compatibility shims removed during M3. Models import only via `nova.ops`. |
-| M3 — HunyuanVideo (v0) | Done (standard, hybrid) | HunyuanVideo T2V at `320x512x61`, TP=4. Hybrid pipeline: HF Llama 3 / CLIP / VAE on CPU, Nova DiT on Trainium. 4-step trajectory cosine min `0.999896` vs HF; end-to-end ~175 s. |
-| M3.x — VAE on Trainium | Done | 16-segment NEFF decoder bypasses a `neuronx-cc` `GroupNorm+SiLU → causal-Conv3D` same-graph lowering bug (`cclogs/m3-hunyuan/38`). Full tiled parity cosine `1.0022` vs HF (`≥ 0.999` gate); decode 91.4 s vs HF CPU 149.7 s (~1.6×). Per-segment dispatch overhead still under investigation. |
-| M3.x — remaining | Planned | HunyuanVideo 1.5, 720p / longer-frame / I2V, Llama 3 + CLIP Trainium text encoder ports, CP, TP refactor, NKI masked attention. |
-| M4 — Qwen-Image, LTX-2, Z-Image | Planned | |
+| M3 — HunyuanVideo | Done | T2V at `320x512x61`, TP=4. Now **fully on-device** — Llama 3 + CLIP text encoders, the DiT, and the 16-segment NEFF VAE decoder all run on Trainium (`examples/hunyuan_video_example.py`). 4-step DiT trajectory cosine min `0.999896` vs HF. The original M3 v0 hybrid path (HF CPU text/VAE) is still available via `scripts/hunyuan_smoke.sh`. |
+| M3.x — VAE on Trainium | Done | 16-segment NEFF decoder bypasses a `neuronx-cc` `GroupNorm+SiLU → causal-Conv3D` same-graph lowering bug (`cclogs/m3-hunyuan/38`). Full tiled parity cosine `1.0022` vs HF (`≥ 0.999` gate); decode 91.4 s vs HF CPU 149.7 s (~1.6×). |
+| M4a — Qwen-Image | Done | Text-to-image **fully on-device** — Qwen2.5-VL + DiT + VAE on Trainium (`examples/qwen_image_example.py`); the VAE reuses Nova's Wan VAE decoder port. |
+| M6 — LTX-2 | Done | Dual-stream segmented DiT runtime, decoded end-to-end. |
+| M6a — HunyuanVideo 1.5 | Done | Registered; segmented DiT + VAE runtime. |
+| Context parallelism (Wan) | Done | `cp_degree` sequence parallelism for the Wan DiT (gather-KV self-attention); `world_size = tp_degree × cp_degree`. |
+| Planned | — | 720p / longer-frame / I2V, TP refactor, NKI masked attention, Z-Image. |
 
 ## Hardware and software prerequisites
 
@@ -36,8 +39,8 @@ The reference development image bundles all of the above at
 ## Install
 
 ```bash
-git clone git@github.com:binkma-v/Nova.git
-cd Nova
+git clone git@github.com:ai-decentralized/fastdiff.git
+cd fastdiff
 pip install -e .
 ```
 
@@ -110,34 +113,57 @@ NEURON_RT_NUM_CORES=4 python examples/wan_example.py \
 Use `--download-weights` on the first run to fetch transformer / text
 encoder / tokenizer / VAE shards from HF.
 
-## Quick start — HunyuanVideo (M3 v0, hybrid)
+## Quick start — HunyuanVideo (on-device)
 
-M3 v0 runs the HunyuanVideo DiT on Trainium and keeps Llama 3 + CLIP
-text encoders and the VAE decoder on CPU (HF reference). End-to-end is
-two steps.
-
-Step 1 — encode the prompt + initial latent once into a cached DiT
-input artifact (CPU, ~2 min):
-
-```bash
-PYTHONPATH=. python scripts/hunyuan_video_cache_dit_inputs.py \
-    --model-id hunyuanvideo-community/HunyuanVideo \
-    --prompt "a cat walking in a sunlit garden" \
-    --height 320 --width 512 --num-frames 61 \
-    --num-inference-steps 4 --seed 42 \
-    --output .nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors
-```
-
-Step 2 — Trainium DiT denoise + CPU VAE decode in one process:
+Fully on-device text-to-video: Llama 3 + CLIP text encoders, the DiT, and the
+VAE decoder all run on Trainium. Capacity forces staging — the 8B Llama encoder
+and the 13B DiT cannot co-fit on one 4-core card — so each stage is its own
+process and passes tensors through `--work-dir` files. The CLIP and Llama NEFFs
+compile on first run; the DiT (+ `vae_decoder/`) NEFF must be pre-compiled and
+pointed at by `--dit-compiled`.
 
 ```bash
-./scripts/hunyuan_smoke.sh
+# Stage 1 — CLIP pooled projections (1 core)
+NEURON_RT_NUM_CORES=1 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
+    python examples/hunyuan_video_example.py --stage clip \
+        --prompt "a cat walking in a sunlit garden"
+
+# Stage 2 — Llama 3 prompt embeddings (TP=4)
+NEURON_RT_NUM_CORES=4 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
+    python examples/hunyuan_video_example.py --stage llama \
+        --prompt "a cat walking in a sunlit garden"
+
+# Stage 3 — DiT denoise + on-device VAE decode → video (TP=4)
+NEURON_RT_NUM_CORES=4 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
+    python examples/hunyuan_video_example.py --stage generate \
+        --num-inference-steps 4 --output /tmp/hunyuan.mp4
 ```
 
-Defaults assume artifact + real HF weights + compiled NEFF at the
-paths produced by step 1 and the M3 capacity gate; override via
-`NOVA_HUNYUAN_*` env vars. MP4 export is best-effort; the `.pt` video
-tensor is always saved.
+Pass `--cpu-vae` to stage 3 to decode the VAE on the HF CPU reference instead
+(the earlier M3 v0 hybrid path; `scripts/hunyuan_smoke.sh` also drives it). MP4
+export is best-effort; the `.pt` video tensor is always saved.
+
+## Quick start — Qwen-Image (on-device)
+
+Fully on-device text-to-image: the Qwen2.5-VL text encoder, the DiT, and the VAE
+all run on Trainium (the VAE reuses Nova's Wan VAE decoder port — the Qwen-Image
+VAE config is identical to Wan's). Staged like HunyuanVideo; the encoder and VAE
+NEFFs compile on first run, the DiT compiles into a content-addressed cache.
+
+```bash
+# Stage 1 — Qwen2.5-VL prompt embeddings (TP=4)
+NEURON_RT_NUM_CORES=4 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
+    python examples/qwen_image_example.py --stage text \
+        --prompt "a small red cabin beside a lake, crisp morning light"
+
+# Stage 2 — DiT denoise → packed latents (TP=4)
+NEURON_RT_NUM_CORES=4 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
+    python examples/qwen_image_example.py --stage generate --num-inference-steps 4
+
+# Stage 3 — VAE decode → image (1 core)
+NEURON_RT_NUM_CORES=1 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
+    python examples/qwen_image_example.py --stage vae --output /tmp/qwen.png
+```
 
 ### Library API
 
@@ -258,13 +284,16 @@ nova/
 │   │   ├── core/    AOT base classes, attention, custom_calls
 │   │   ├── utils/   compile_env, runtime_env, distributed, snapshot
 │   │   ├── ops_impl/    Trainium impls of nova.ops
-│   │   └── wan/ hunyuan_video/    Trainium-side per-model wrappers
+│   │   ├── nki_kernels/    NKI custom kernels (MX microscaling, etc.)
+│   │   └── flux/ wan/ hunyuan_video/ qwen_image/ ltx_2/    per-model wrappers
 │   ├── cpu/         Pure-torch numerical reference
 │   └── cuda/ rocm/  Stubs
 ├── utils/           Hardware-neutral utilities (HF / diffusers adapters)
 ├── layers/          Diffusion-specific layers; import only via nova.ops
-└── models/          flux/ + wan/ + hunyuan_video/, each: modeling, pipeline,
-                     application, entry, checkpoint (where needed)
+└── models/          flux/ wan/ hunyuan_video/ qwen_image/ ltx_2/ — each:
+                     modeling, pipeline, application, entry, checkpoint
+                     (where needed). HunyuanVideo 1.5 is served from
+                     hunyuan_video/ (model_version="1.5").
 ```
 
 `nova/backends/trainium/{core,modules}` follows upstream Neuron coding
@@ -343,18 +372,18 @@ Hard rule for new modeling code (enforced by the repo-wide import guard in
   the Trainium implementation under `nova/backends/trainium/ops_impl/`,
   ideally also a CPU reference under `nova/backends/cpu/ops_impl/`).
 
-`NovaPipeline` itself does not change. The pattern that Flux and Wan
-establish (multiple sub-applications, race-safe compile with `model.pt`
-markers and SPMD barriers, ordered load with biggest-TP component first)
-should be reused. Lifting this into a shared
-`MultiComponentApplication` base class is a deferred cleanup.
+`NovaPipeline` itself does not change. Multi-component models extend the shared
+`MultiComponentApplication` base (`nova/backends/trainium/core/`), which provides
+race-safe compile with `model.pt` markers and SPMD barriers, and ordered load
+with the biggest-TP component first. All current model applications (Flux, Wan,
+HunyuanVideo, Qwen-Image, LTX-2) build on it.
 
 ## Development
 
 Project-local helper scripts:
 
 ```bash
-./scripts/check_quick.sh                      # imports + 76 unit tests
+./scripts/check_quick.sh                      # imports + unit tests
 ./scripts/test_unit.sh                        # pytest tests/unit -q
 ./scripts/test_imports.sh                     # smoke import nova + key submodules
 ./scripts/flux_smoke.sh                       # 1-step Flux smoke (load + 1 forward)
