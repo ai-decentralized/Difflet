@@ -28,6 +28,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict
 
+import torch
+
 # Substring regex rewrites applied in order. Each (pattern, replacement) pair
 # rewrites every match in a key.
 BACKBONE_KEY_RENAMES: list[tuple[str, str]] = [
@@ -56,13 +58,17 @@ def convert_backbone_state_dict(
         (no clone). Caller may apply ``.clone().detach().contiguous()`` later
         before saving.
     """
-    del config  # unused for now; kept for forward-compat
     out: Dict[str, Any] = {}
     for key, value in state_dict.items():
         new_key = key
         for pattern, replacement in BACKBONE_KEY_RENAMES:
             new_key = re.sub(pattern, replacement, new_key)
         out[new_key] = value
+
+    if config is not None and getattr(config, "context_parallel_enabled", False):
+        world_size = config.neuron_config.world_size
+        out["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)
+
     return out
 
 
