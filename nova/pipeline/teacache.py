@@ -50,6 +50,13 @@ class TeaCacheCalibration:
     # Probe-free + calibration-free; used to test whether a weak-signal model is
     # better served by a uniform skip than by its (weak) adaptive controller.
     cadence: int = 0
+    # cclog 91: generic online-delta mode (probe-free, calibration-free, 0-per-model).
+    # When > 0, skip a step iff the PREVIOUS full step's measured output rel-L1 delta
+    # is below ``online_delta_alpha * baseline`` (baseline = first post-warmup full
+    # step's delta). Uses the real noise_pred trajectory the pipeline already has — no
+    # per-model probe/signal. Data-driven (adaptive), unlike the blind fixed cadence;
+    # it skips only genuinely-flat steps. No two skips in a row (must re-measure).
+    online_delta_alpha: float = 0.0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TeaCacheCalibration":
@@ -73,6 +80,7 @@ class TeaCacheCalibration:
             skip_run_length=int(data.get("skip_run_length", 1)),
             accumulate=bool(data.get("accumulate", False)),
             cadence=int(data.get("cadence", 0)),
+            online_delta_alpha=float(data.get("online_delta_alpha", 0.0)),
         )
 
     @classmethod
@@ -96,6 +104,7 @@ class TeaCacheCalibration:
             "skip_run_length": int(self.skip_run_length),
             "accumulate": bool(self.accumulate),
             "cadence": int(self.cadence),
+            "online_delta_alpha": float(self.online_delta_alpha),
         }
 
     def predict_delta(self, mod_input_diff_norm: float) -> float:
@@ -128,6 +137,11 @@ class TeaCacheController:
         self._skip_run_remaining = 0
         # Running sum of rescaled per-step estimates (cclog 83 accumulate mode).
         self._accum = 0.0
+        # cclog 91 online-delta mode: last full step's measured output rel-L1 delta,
+        # the baseline (first post-warmup full delta), and a no-two-skips-in-a-row latch.
+        self._last_full_delta: float | None = None
+        self._baseline_delta: float | None = None
+        self._just_skipped = False
 
     def reset(self) -> None:
         self.prev_mod_input = None
@@ -139,14 +153,19 @@ class TeaCacheController:
         self.last_delta_estimate = None
         self._skip_run_remaining = 0
         self._accum = 0.0
+        self._last_full_delta = None
+        self._baseline_delta = None
+        self._just_skipped = False
 
     def needs_signal(self) -> bool:
         """Whether the controller needs the probe's per-step signal at all.
 
         False in fixed-cadence mode (cclog 84): the skip decision is purely
         index-based, so the pipeline can skip the probe NEFF dispatch entirely.
+        Also False in online-delta mode (cclog 91): the decision uses the real
+        noise_pred trajectory the pipeline already has — no per-model probe.
         """
-        return int(self.calibration.cadence) <= 0
+        return int(self.calibration.cadence) <= 0 and float(self.calibration.online_delta_alpha) <= 0.0
 
     def needs_probe(self) -> bool:
         """Whether the next step requires a fresh probe NEFF call.
@@ -192,6 +211,20 @@ class TeaCacheController:
         if int(self.calibration.cadence) > 0:
             pos = step_index - int(self.calibration.warmup_steps)
             return (pos % int(self.calibration.cadence)) == (int(self.calibration.cadence) - 1)
+
+        # cclog 91: online-delta mode — skip iff the PREVIOUS full step's measured
+        # output rel-L1 delta was below alpha*baseline. Probe-free, 0-per-model,
+        # data-driven. No two skips in a row (the latch forces a re-measure).
+        if float(self.calibration.online_delta_alpha) > 0.0:
+            if self._just_skipped:
+                self._just_skipped = False
+                return False
+            if self._last_full_delta is None or self._baseline_delta is None:
+                return False
+            thresh = float(self.calibration.online_delta_alpha) * self._baseline_delta
+            skip = self._last_full_delta < thresh
+            self.last_delta_estimate = self._last_full_delta
+            return skip
 
         # Committed skip-run (cclog 78): skip without a fresh probe decision.
         # The pipeline will not have run the probe this step (needs_probe()
@@ -245,6 +278,7 @@ class TeaCacheController:
         if self.prev_noise_pred is None or self.cached_residual is None:
             raise RuntimeError("TeaCache skip requested before residual cache was initialized")
         self.skipped_steps += 1
+        self._just_skipped = True  # online-delta: never skip two in a row (re-measure next)
         noise_pred = self.prev_noise_pred + self.cached_residual
         self.prev_noise_pred = noise_pred.detach()
         if mod_input is not None:
@@ -257,7 +291,15 @@ class TeaCacheController:
         noise_pred = noise_pred.detach()
         if self.prev_noise_pred is not None:
             self.cached_residual = noise_pred - self.prev_noise_pred
+            # cclog 91 online-delta: measure this full step's output rel-L1 change.
+            if float(self.calibration.online_delta_alpha) > 0.0:
+                prev = self.prev_noise_pred
+                denom = prev.abs().mean().clamp_min(1e-8)
+                self._last_full_delta = float((noise_pred - prev).abs().mean() / denom)
+                if self._baseline_delta is None:
+                    self._baseline_delta = self._last_full_delta
         self.prev_noise_pred = noise_pred
+        self._just_skipped = False
         # In device-probe mode the caller passes mod_input=None — the device
         # probe owns prev_mod_input, so the 63 MB host copy is skipped.
         if mod_input is not None:

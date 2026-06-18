@@ -123,3 +123,129 @@ def test_should_skip_accepts_precomputed_diff_norm():
     controller.prev_mod_input = torch.zeros(3)
     assert controller.should_skip(step_index=5, mod_input_now=torch.ones(3)) is False  # ||1-0||=sqrt(3)>0.5
     assert controller.last_delta_estimate > 0.5
+
+
+def test_online_delta_mode_is_probe_free_and_skips_only_flat_steps():
+    """cclog 91 generic online-delta mode: 0-per-model, data-driven, no two skips in a row."""
+    cal = _calibration(num_steps=8, warmup_steps=2, cooldown_steps=1, online_delta_alpha=0.5)
+    c = TeaCacheController(cal)
+    assert c.needs_signal() is False  # online mode uses noise_pred, no probe
+
+    def npred(v):
+        return torch.full((1, 4), float(v))
+
+    assert c.should_skip(0, None) is False                # warmup
+    c.record_full_step(npred(1.0))                        # prev=1.0 (no delta yet)
+    assert c.should_skip(1, None) is False                # warmup
+    c.record_full_step(npred(3.0))                        # delta=|3-1|/1=2.0 -> baseline=2.0
+    assert c.should_skip(2, None) is False                # last 2.0 !< 0.5*2.0=1.0 -> run
+    c.record_full_step(npred(3.2))                        # delta=0.2/3~0.067 (flat)
+    assert c.should_skip(3, None) is True                 # 0.067 < 1.0 -> SKIP
+    c.skip_noise_pred()
+    assert c.should_skip(4, None) is False                # just skipped -> must re-measure
+    c.record_full_step(npred(3.25))                       # delta small again
+    assert c.should_skip(5, None) is True                 # flat -> SKIP again
+    assert c.skipped_steps == 1                            # only one skip recorded so far
+
+
+def test_online_delta_calibration_roundtrips(tmp_path):
+    cal = _calibration(online_delta_alpha=0.6)
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps(cal.to_dict()), encoding="utf-8")
+    loaded = TeaCacheCalibration.from_json(path)
+    assert loaded.online_delta_alpha == 0.6
+    assert loaded.to_dict()["online_delta_alpha"] == 0.6
+
+
+def test_teacache_gate_auto_selects_method():
+    from nova.pipeline.teacache_gate import decide_method, build_calibration
+
+    # adaptive: signal predicts delta
+    assert decide_method(0.95, 0.5) == "adaptive"
+    # online: weak signal but the output trajectory is self-predictable
+    assert decide_method(0.30, 0.93) == "online_delta"
+    # cadence: neither
+    assert decide_method(0.30, 0.10) == "cadence"
+
+    # build_calibration wires the right controller mode
+    adapt = build_calibration(model="m", shape_label="s", num_steps=50,
+                              signals=[1.0, 2.0, 3.0, 4.0, 5.0], deltas=[1.1, 2.0, 3.1, 3.9, 5.2])
+    assert adapt.online_delta_alpha == 0.0 and adapt.cadence == 0 and adapt.accumulate is True
+
+    online = build_calibration(model="m", shape_label="s", num_steps=50,
+                               signals=[1.0, 9.0, 2.0, 8.0, 3.0, 7.0, 4.0, 6.0, 5.0, 5.5],
+                               deltas=[10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0])
+    assert online.online_delta_alpha > 0 and online.cadence == 0
+    assert TeaCacheController(online).needs_signal() is False  # probe-free
+
+
+def test_teacache_gate_on_real_trajectories():
+    """HV-1.0 -> adaptive (strong probe signal); Qwen -> online_delta (smooth output)."""
+    import json
+    from collections import defaultdict
+    from pathlib import Path
+    from nova.pipeline.teacache_gate import build_calibration
+
+    def load(path):
+        p = Path(path)
+        if not p.exists():
+            pytest.skip(f"{path} not present")
+        s = json.load(open(p))["samples"]
+        byb = defaultdict(list)
+        for x in s:
+            byb[x.get("bundle", "_")].append(x)
+        traj = max(byb.values(), key=len)
+        traj = sorted(traj, key=lambda r: r.get("step_index", 0))
+        return ([r["mod_input_diff_norm"] for r in traj], [r["noise_pred_diff_norm"] for r in traj])
+
+    sig, dlt = load("cclogs/m9-teacache/pairs_hunyuan_video_n4_4d8s1r_50step.json")
+    cal = build_calibration(model="hunyuan_video", shape_label="x", num_steps=50, signals=sig, deltas=dlt)
+    assert cal.accumulate is True and cal.online_delta_alpha == 0.0, "HV should pick adaptive"
+
+    sig, dlt = load("cclogs/m9-teacache/pairs_qwen_image_1024_50step.json")
+    cal = build_calibration(model="qwen_image", shape_label="x", num_steps=50, signals=sig, deltas=dlt)
+    assert cal.online_delta_alpha > 0, "Qwen should pick online_delta (weak probe, smooth output)"
+
+
+def test_run_gate_end_to_end_with_fake_models():
+    from nova.pipeline.teacache_gate import run_gate
+
+    def fake(np_vals, sig_vals):
+        def init_latent():
+            return torch.zeros((1, 4))
+        def step_fn(i, latent):
+            return torch.full((1, 4), float(np_vals[i])), torch.full((1, 4), float(sig_vals[i]))
+        def advance_fn(latent, noise_pred, i):
+            return latent
+        return init_latent, step_fn, advance_fn
+
+    # adaptive: signal == output → signal change perfectly predicts delta
+    vals = [10, 8, 6, 4, 3, 2, 1.5, 1.2, 1.1, 1.05]
+    il, sf, af = fake(vals, vals)
+    cal, summ = run_gate(model="m", shape_label="s", num_steps=len(vals),
+                         init_latent=il, step_fn=sf, advance_fn=af)
+    assert summ["method"] == "adaptive" and cal.accumulate is True
+
+    # online: smooth output (autocorrelated δ) but zigzag signal (uncorrelated)
+    npv = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+    sgv = [1, 9, 2, 8, 3, 7, 4, 6, 5, 5.5]
+    il, sf, af = fake(npv, sgv)
+    cal, summ = run_gate(model="m", shape_label="s", num_steps=len(npv),
+                         init_latent=il, step_fn=sf, advance_fn=af)
+    assert summ["method"] == "online_delta" and cal.online_delta_alpha > 0
+    assert summ["delta_autocorr"] is not None and summ["delta_autocorr"] >= 0.7
+
+
+def test_run_gate_zero_per_model_no_signal_picks_online():
+    """No block-0 hook at all (signal=None): gate picks online_delta from output δ alone."""
+    from nova.pipeline.teacache_gate import run_gate
+
+    npv = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+    cal, summ = run_gate(
+        model="m", shape_label="s", num_steps=len(npv),
+        init_latent=lambda: torch.zeros((1, 4)),
+        step_fn=lambda i, latent: (torch.full((1, 4), float(npv[i])), None),  # no signal
+        advance_fn=lambda latent, np, i: latent,
+    )
+    assert summ["probe_pearson"] is None        # no signal captured
+    assert summ["method"] == "online_delta" and cal.online_delta_alpha > 0
