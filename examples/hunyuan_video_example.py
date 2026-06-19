@@ -71,13 +71,14 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--dit-source",
-        default=str(_DEFAULT_CACHE / "hunyuan_n4_20d40s2r" / "source"),
-        help="Dir with transformer/ (real weights) + vae/ + scheduler/ for the DiT stage.",
+        default=None,
+        help="Dir with transformer/ (real weights) + vae/ + scheduler/ for the DiT stage. "
+        "Defaults to the local hunyuanvideo-community/HunyuanVideo snapshot (it ships all three).",
     )
     p.add_argument(
         "--dit-compiled",
-        default=str(_DEFAULT_CACHE / "hunyuan_sdpa_20d40s2r" / "compiled"),
-        help="Pre-compiled masked-SDPA DiT NEFF parent dir (contains transformer/).",
+        default=str(_DEFAULT_CACHE / "hunyuan_ondevice" / "compiled"),
+        help="DiT (+ vae_decoder/) NEFF parent dir. Compiled here on first run if missing.",
     )
     p.add_argument("--llama-compiled", default=str(_DEFAULT_CACHE / "hunyuan_llama_enc_l29_351"))
     p.add_argument("--clip-compiled", default=str(_DEFAULT_CACHE / "hunyuan_clip_enc"))
@@ -249,7 +250,7 @@ def stage_generate(args: argparse.Namespace) -> None:
     guidance = torch.full([1], args.guidance_scale * 1000.0, dtype=torch.bfloat16)
 
     app = NeuronHunyuanVideoApplication(
-        model_path=args.dit_source,
+        model_path=_resolve_model_dir(args.dit_source),
         parallel=NovaParallelConfig(tp_degree=args.tp_degree, cp_degree=1),
         dtype=torch.bfloat16,
         shape={"height": args.height, "width": args.width, "num_frames": args.num_frames},
@@ -257,6 +258,11 @@ def stage_generate(args: argparse.Namespace) -> None:
         enable_vae_decoder=not args.cpu_vae,
     )
     app.teacache_probe = None  # not running teacache; no probe NEFF is compiled
+    if not app.has_compiled_artifacts(args.dit_compiled):
+        print(f"[generate] compiling DiT (+ VAE) into {args.dit_compiled} (first run) ...", flush=True)
+        tc = time.monotonic()
+        app.compile(args.dit_compiled)
+        print(f"[generate] DiT compile = {time.monotonic() - tc:.1f}s", flush=True)
     t0 = time.monotonic()
     app.load(args.dit_compiled, skip_warmup=True)
     print(f"[generate] DiT load = {time.monotonic() - t0:.1f}s", flush=True)

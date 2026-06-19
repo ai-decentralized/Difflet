@@ -56,13 +56,9 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--enc-compiled", default=str(_DEFAULT_CACHE / "qwen_qwen25vl_enc"))
     p.add_argument(
         "--dit-compiled",
-        default=str(
-            _DEFAULT_CACHE
-            / "qwen_image_transformer_full"
-            / "qwen_image"
-            / "8350b1e4c2db17bd"
-        ),
-        help="Pre-compiled Qwen-Image DiT artifact (parent dir containing transformer/).",
+        default=str(_DEFAULT_CACHE / "qwen_ondevice" / "dit"),
+        help="Qwen-Image DiT NEFF parent dir (contains transformer/). "
+        "Compiled here on first run if missing.",
     )
     p.add_argument("--vae-compiled", default=str(_DEFAULT_CACHE / "qwen_vae_dec"))
     p.add_argument("--work-dir", default="/tmp/qwen_example")
@@ -174,6 +170,11 @@ def stage_generate(args: argparse.Namespace) -> None:
         text_seq_len=args.text_seq_len,
         enable_transformer=True,
     )
+    if not app.has_compiled_artifacts(args.dit_compiled):
+        print(f"[generate] compiling DiT into {args.dit_compiled} (first run) ...", flush=True)
+        tc = time.time()
+        app.compile(args.dit_compiled)
+        print(f"[generate] DiT compile = {time.time() - tc:.1f}s", flush=True)
     t0 = time.time()
     app.load(args.dit_compiled, skip_warmup=True)
     print(f"[generate] DiT load = {time.time() - t0:.1f}s", flush=True)
