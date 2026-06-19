@@ -118,9 +118,17 @@ encoder / tokenizer / VAE shards from HF.
 Fully on-device text-to-video: Llama 3 + CLIP text encoders, the DiT, and the
 VAE decoder all run on Trainium. Capacity forces staging — the 8B Llama encoder
 and the 13B DiT cannot co-fit on one 4-core card — so each stage is its own
-process and passes tensors through `--work-dir` files. The CLIP and Llama NEFFs
-compile on first run; the DiT (+ `vae_decoder/`) NEFF must be pre-compiled and
-pointed at by `--dit-compiled`.
+process and passes tensors through `--work-dir` files. Every NEFF compiles on
+first run and is cached: CLIP/Llama in their stages, and the DiT + VAE decoder in
+the `generate` stage (the 13B DiT compile is ~30 min the first time).
+
+First download the weights (~42 GB, public model):
+
+```bash
+huggingface-cli download hunyuanvideo-community/HunyuanVideo
+```
+
+Then run the three stages (each resolves the local HF snapshot automatically):
 
 ```bash
 # Stage 1 — CLIP pooled projections (1 core)
@@ -134,21 +142,32 @@ NEURON_RT_NUM_CORES=4 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
         --prompt "a cat walking in a sunlit garden"
 
 # Stage 3 — DiT denoise + on-device VAE decode → video (TP=4)
+#   first run compiles the DiT + VAE NEFF into .nova-cache/hunyuan_ondevice/
 NEURON_RT_NUM_CORES=4 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
     python examples/hunyuan_video_example.py --stage generate \
         --num-inference-steps 4 --output /tmp/hunyuan.mp4
 ```
 
 Pass `--cpu-vae` to stage 3 to decode the VAE on the HF CPU reference instead
-(the earlier M3 v0 hybrid path; `scripts/hunyuan_smoke.sh` also drives it). MP4
-export is best-effort; the `.pt` video tensor is always saved.
+(the earlier M3 v0 hybrid path; `scripts/hunyuan_smoke.sh` also drives it). The
+generated video is saved as a `.pt` tensor (the `--output` `.mp4` suffix is a
+label; MP4 encoding is not yet wired). Validated end-to-end on
+`trn3pd98.3xlarge`: a `(1, 3, 61, 320, 512)` video tensor in 4 steps.
 
 ## Quick start — Qwen-Image (on-device)
 
 Fully on-device text-to-image: the Qwen2.5-VL text encoder, the DiT, and the VAE
 all run on Trainium (the VAE reuses Nova's Wan VAE decoder port — the Qwen-Image
-VAE config is identical to Wan's). Staged like HunyuanVideo; the encoder and VAE
-NEFFs compile on first run, the DiT compiles into a content-addressed cache.
+VAE config is identical to Wan's). Staged like HunyuanVideo; every NEFF compiles
+on first run (encoder in `text`, DiT in `generate`, VAE in `vae`).
+
+First download the weights:
+
+```bash
+huggingface-cli download Qwen/Qwen-Image
+```
+
+Then:
 
 ```bash
 # Stage 1 — Qwen2.5-VL prompt embeddings (TP=4)
@@ -156,7 +175,7 @@ NEURON_RT_NUM_CORES=4 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
     python examples/qwen_image_example.py --stage text \
         --prompt "a small red cabin beside a lake, crisp morning light"
 
-# Stage 2 — DiT denoise → packed latents (TP=4)
+# Stage 2 — DiT denoise → packed latents (TP=4); first run compiles the DiT NEFF
 NEURON_RT_NUM_CORES=4 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
     python examples/qwen_image_example.py --stage generate --num-inference-steps 4
 
