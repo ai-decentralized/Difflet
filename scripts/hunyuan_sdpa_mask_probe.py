@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--head-dim", type=int, default=64)
     parser.add_argument("--masked-tail", type=int, default=128)
     parser.add_argument("--seed", type=int, default=20260510)
-    parser.add_argument("--work-dir", default="/tmp/nova_hunyuan_sdpa_probe")
+    parser.add_argument("--work-dir", default="/tmp/difflet_hunyuan_sdpa_probe")
     parser.add_argument("--cosine-min", type=float, default=0.999)
     parser.add_argument("--mean-abs-max", type=float, default=0.005)
     parser.add_argument(

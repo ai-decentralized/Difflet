@@ -1,6 +1,6 @@
 import json
 
-from nova.pipeline.parallel_config import NovaParallelConfig
+from difflet.pipeline.parallel_config import DiffletParallelConfig
 
 
 def _rows():
@@ -12,7 +12,7 @@ def _rows():
 
 
 def test_precision_schedule_round_trips(tmp_path):
-    from nova.pipeline.precision_schedule import PrecisionSchedule
+    from difflet.pipeline.precision_schedule import PrecisionSchedule
 
     schedule = PrecisionSchedule(
         model_id="model",
@@ -35,8 +35,8 @@ def test_precision_schedule_round_trips(tmp_path):
 
 
 def test_synthesize_schedule_thresholds_by_cell_cosine():
-    from nova.pipeline.precision_schedule import PRECISION_BF16, PRECISION_MXFP8_E4M3
-    from nova.pipeline.precision_schedule import synthesize_schedule
+    from difflet.pipeline.precision_schedule import PRECISION_BF16, PRECISION_MXFP8_E4M3
+    from difflet.pipeline.precision_schedule import synthesize_schedule
 
     schedule = synthesize_schedule(
         _rows(),
@@ -54,7 +54,7 @@ def test_synthesize_schedule_thresholds_by_cell_cosine():
 
 
 def test_schedule_frontier_includes_extremes_and_taus():
-    from nova.pipeline.precision_schedule import schedule_frontier
+    from difflet.pipeline.precision_schedule import schedule_frontier
 
     schedules = schedule_frontier(_rows(), [0.9990, 0.9995], model_id="model", bundle="bundle")
 
@@ -98,7 +98,7 @@ def _rows_two_dtype():
 
 
 def test_two_threshold_lattice_routes_by_both_cosines():
-    from nova.pipeline.precision_schedule import (
+    from difflet.pipeline.precision_schedule import (
         PRECISION_BF16,
         PRECISION_MXFP8_E4M3,
         PRECISION_MXFP8_E5M2,
@@ -126,7 +126,7 @@ def test_two_threshold_lattice_routes_by_both_cosines():
 
 
 def test_two_threshold_synthesis_is_deterministic():
-    from nova.pipeline.precision_schedule import synthesize_two_threshold_schedule
+    from difflet.pipeline.precision_schedule import synthesize_two_threshold_schedule
 
     a = synthesize_two_threshold_schedule(
         _rows_two_dtype(), 0.9998, 0.9995, model_id="m", bundle="b"
@@ -138,7 +138,7 @@ def test_two_threshold_synthesis_is_deterministic():
 
 
 def test_two_threshold_frontier_has_three_extremes_plus_grid():
-    from nova.pipeline.precision_schedule import two_threshold_frontier
+    from difflet.pipeline.precision_schedule import two_threshold_frontier
 
     schedules = two_threshold_frontier(
         _rows_two_dtype(),
@@ -156,7 +156,7 @@ def test_two_threshold_frontier_has_three_extremes_plus_grid():
 def test_old_two_level_schedule_still_deserializes(tmp_path):
     # A schedule written before E5M2 existed (schema 1, bf16/e4m3 only)
     # must still round-trip unchanged under the extended vocabulary.
-    from nova.pipeline.precision_schedule import PrecisionSchedule
+    from difflet.pipeline.precision_schedule import PrecisionSchedule
 
     legacy = {
         "schema_version": 1,
@@ -178,7 +178,7 @@ def test_old_two_level_schedule_still_deserializes(tmp_path):
 def test_single_threshold_degrades_on_schema1_table():
     # Schema-1 rows (no "metrics") -> E5M2 unknown -> two-threshold
     # never selects E5M2, degrading to single-threshold behavior.
-    from nova.pipeline.precision_schedule import (
+    from difflet.pipeline.precision_schedule import (
         PRECISION_BF16,
         PRECISION_MXFP8_E4M3,
         synthesize_two_threshold_schedule,
@@ -198,13 +198,13 @@ def test_single_threshold_degrades_on_schema1_table():
 
 
 def test_compile_cache_manifest_records_optional_precision_schedule(tmp_path):
-    from nova.pipeline.compile_cache import CacheSpec, read_manifest, write_manifest
+    from difflet.pipeline.compile_cache import CacheSpec, read_manifest, write_manifest
 
     spec = CacheSpec(
         model_id="org/test-model",
         model_path="/tmp/model",
         model_name="unit_dummy",
-        parallel=NovaParallelConfig(tp_degree=1),
+        parallel=DiffletParallelConfig(tp_degree=1),
         dtype="bf16",
         precision_schedule={
             "path": "/tmp/schedule.json",
@@ -222,7 +222,7 @@ def test_compile_cache_manifest_records_optional_precision_schedule(tmp_path):
 
 
 def test_old_compile_cache_manifest_still_reads_but_is_not_valid(tmp_path):
-    from nova.pipeline.compile_cache import CacheSpec, has_valid_manifest, read_manifest
+    from difflet.pipeline.compile_cache import CacheSpec, has_valid_manifest, read_manifest
 
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(
@@ -240,7 +240,7 @@ def test_old_compile_cache_manifest_still_reads_but_is_not_valid(tmp_path):
         model_id="org/test-model",
         model_path="/tmp/model",
         model_name="unit_dummy",
-        parallel=NovaParallelConfig(tp_degree=1),
+        parallel=DiffletParallelConfig(tp_degree=1),
         dtype="bf16",
     )
 

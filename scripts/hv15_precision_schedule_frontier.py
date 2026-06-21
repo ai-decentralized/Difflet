@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 
 import itertools  # noqa: E402
 
-from nova.pipeline.precision_schedule import (  # noqa: E402
+from difflet.pipeline.precision_schedule import (  # noqa: E402
     PRECISION_BF16,
     PRECISION_MXFP8_E4M3,
     PRECISION_MXFP8_E5M2,

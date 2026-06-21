@@ -22,7 +22,7 @@ from typing import Any
 
 
 DEFAULT_THRESHOLD = 0.10
-COMBINED_SCHEMA = "nova-f3-denoise-loop-neuron-inspect-summary-v1"
+COMBINED_SCHEMA = "difflet-f3-denoise-loop-neuron-inspect-summary-v1"
 ACCEPTED_NEFF_SOURCES = {
     "xla_metric:ExecuteReplicatedTime",
     "xla_metric:ExecuteTime",
@@ -123,7 +123,7 @@ def audit(
     ]
     passing_rows = [row for row in rows if row["passes_threshold"]]
     return {
-        "schema": "nova-f3-0b-gate-audit-v1",
+        "schema": "difflet-f3-0b-gate-audit-v1",
         "threshold": threshold,
         "required_labels": required_labels,
         "measured_labels": sorted(measured_labels),

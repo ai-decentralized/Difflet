@@ -1,4 +1,4 @@
-"""Wan 2.2 text-to-video inference on Trainium via Nova.
+"""Wan 2.2 text-to-video inference on Trainium via Difflet.
 
 Single-instance launch (text + DiT, 4 NeuronCores, save latents):
 
@@ -35,7 +35,7 @@ one process (cclogs/16 §7.7); use ``scripts/wan_smoke.sh`` to drive the
 two-stage sequential split.
 
 Cache key composition mirrors Flux (cclogs/16 §8.6):
-    .nova-cache/wan_text_encoder_smoke / wan_backbone_smoke /
+    .difflet-cache/wan_text_encoder_smoke / wan_backbone_smoke /
     wan_backbone_2_smoke / wan_vae_decoder_smoke
 """
 
@@ -51,15 +51,15 @@ from pathlib import Path
 
 import torch
 
-from nova.models.wan.application import NeuronWanApplication, _latent_num_frames
-from nova.pipeline.parallel_config import NovaParallelConfig
-from nova.pipeline.path_resolver import resolve_model_path
+from difflet.models.wan.application import NeuronWanApplication, _latent_num_frames
+from difflet.pipeline.parallel_config import DiffletParallelConfig
+from difflet.pipeline.path_resolver import resolve_model_path
 
 
-_DEFAULT_TEXT_DIR = ".nova-cache/wan_text_encoder_smoke"
-_DEFAULT_TRANSFORMER_DIR = ".nova-cache/wan_backbone_smoke"
-_DEFAULT_TRANSFORMER_2_DIR = ".nova-cache/wan_backbone_2_smoke"
-_DEFAULT_VAE_DIR = ".nova-cache/wan_vae_decoder_smoke"
+_DEFAULT_TEXT_DIR = ".difflet-cache/wan_text_encoder_smoke"
+_DEFAULT_TRANSFORMER_DIR = ".difflet-cache/wan_backbone_smoke"
+_DEFAULT_TRANSFORMER_2_DIR = ".difflet-cache/wan_backbone_2_smoke"
+_DEFAULT_VAE_DIR = ".difflet-cache/wan_vae_decoder_smoke"
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -104,7 +104,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--transformer-dir", default=_DEFAULT_TRANSFORMER_DIR)
     p.add_argument("--transformer-2-dir", default=_DEFAULT_TRANSFORMER_2_DIR)
     p.add_argument("--vae-dir", default=_DEFAULT_VAE_DIR)
-    p.add_argument("--compiled-dir", default=".nova-cache/wan_smoke_run",
+    p.add_argument("--compiled-dir", default=".difflet-cache/wan_smoke_run",
                    help="Working directory; component artifacts are symlinked under it")
 
     p.add_argument("--local-files-only", action="store_true", default=True)
@@ -318,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     compiled_dir = Path(args.compiled_dir)
     _stage_components(compiled_dir, components, args)
 
-    parallel = NovaParallelConfig(tp_degree=args.tp_degree, cp_degree=args.cp_degree)
+    parallel = DiffletParallelConfig(tp_degree=args.tp_degree, cp_degree=args.cp_degree)
     app = NeuronWanApplication(
         model_path=str(model_dir),
         parallel=parallel,

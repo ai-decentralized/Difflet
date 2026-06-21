@@ -1,4 +1,4 @@
-"""Round-trip smoke: cached DiT input artifact -> Nova backbone -> output.
+"""Round-trip smoke: cached DiT input artifact -> Difflet backbone -> output.
 
 Closes the second item of `cclogs/m3-hunyuan/29-M3-text-encoder-decision.md`
 §7.1 "Deferred until NeuronCore is free" list. Reuses the N4 production
@@ -9,9 +9,9 @@ end-to-end on real cached encoder outputs).
 Usage:
 
     python scripts/hunyuan_artifact_forward_smoke.py \\
-        --source-dir .nova-cache/hunyuan_n4_20d40s2r/source \\
-        --compiled-dir .nova-cache/hunyuan_n4_20d40s2r/compiled \\
-        --bundle .nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors
+        --source-dir .difflet-cache/hunyuan_n4_20d40s2r/source \\
+        --compiled-dir .difflet-cache/hunyuan_n4_20d40s2r/compiled \\
+        --bundle .difflet-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
 
     meta_path = Path(args.bundle + ".meta.json")
     meta = json.loads(meta_path.read_text())
@@ -54,13 +54,13 @@ def main() -> int:
           f"text_seq_len={meta['text_seq_len']}, "
           f"num_inference_steps={meta['num_inference_steps']}")
 
-    from nova.models.hunyuan_video.application import (
+    from difflet.models.hunyuan_video.application import (
         HunyuanVideoDiTInputBundle,
         NeuronHunyuanVideoApplication,
     )
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-    parallel = NovaParallelConfig(tp_degree=args.tp_degree)
+    parallel = DiffletParallelConfig(tp_degree=args.tp_degree)
     app = NeuronHunyuanVideoApplication(
         model_path=args.source_dir,
         parallel=parallel,

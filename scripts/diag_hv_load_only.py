@@ -41,15 +41,15 @@ import torch  # noqa: E402
 
 
 def main() -> int:
-    from nova.models.hunyuan_video.application import NeuronHunyuanVideoApplication
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     print(f"[diag] uptime check: {time.time()}", flush=True)
 
     t_init = time.perf_counter()
     app = NeuronHunyuanVideoApplication(
-        model_path=".nova-cache/f3_hunyuan_n4_4d8s1r/source",
-        parallel=NovaParallelConfig(tp_degree=4),
+        model_path=".difflet-cache/f3_hunyuan_n4_4d8s1r/source",
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype=torch.bfloat16,
         shape={"height": 320, "width": 512, "num_frames": 61},
         text_seq_len=256,
@@ -65,7 +65,7 @@ def main() -> int:
     t_load = time.perf_counter()
     print("[diag] calling app.load(compiled_dir) (existing DiT cache)", flush=True)
     try:
-        app.load(".nova-cache/f3_hunyuan_n4_4d8s1r/compiled", skip_warmup=True)
+        app.load(".difflet-cache/f3_hunyuan_n4_4d8s1r/compiled", skip_warmup=True)
         elapsed = time.perf_counter() - t_load
         print(f"[diag] load SUCCEEDED in {elapsed:.1f}s", flush=True)
     except Exception as exc:

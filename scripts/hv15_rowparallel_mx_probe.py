@@ -22,7 +22,7 @@ for path in (ROOT, SCRIPTS):
 
 from hunyuan15_attention_boundary_probe import _prepare_frontend  # noqa: E402
 from hunyuan15_transformer_parity import _load_bundle_inputs, _load_config  # noqa: E402
-from nova.backends.cpu.ops_impl import mx as cpu_mx  # noqa: E402
+from difflet.backends.cpu.ops_impl import mx as cpu_mx  # noqa: E402
 
 
 class TargetSpec:
@@ -227,7 +227,7 @@ def _run_simulator(
 ) -> tuple[torch.Tensor, dict[str, float]]:
     from nki.simulator import simulate_kernel
 
-    from nova.backends.trainium.nki_kernels.mx import matmul_mx_k_tiles_kernel
+    from difflet.backends.trainium.nki_kernels.mx import matmul_mx_k_tiles_kernel
 
     outputs = []
     start = time.perf_counter()
@@ -252,7 +252,7 @@ def _run_trainium(
 ) -> tuple[torch.Tensor, dict[str, float]]:
     import torch_xla.core.xla_model as xm
 
-    from nova.backends.trainium.ops_impl import mx as trainium_mx
+    from difflet.backends.trainium.ops_impl import mx as trainium_mx
 
     device = xm.xla_device()
     start = time.perf_counter()

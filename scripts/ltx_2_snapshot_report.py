@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Report or materialize the Nova LTX-2 diffusers snapshot subset.
+"""Report or materialize the Difflet LTX-2 diffusers snapshot subset.
 
-By default this is a dry run: it queries Hugging Face metadata, applies Nova's
+By default this is a dry run: it queries Hugging Face metadata, applies Difflet's
 LTX-2 registry allow-list, and prints the exact files/bytes that would be
 downloaded. Pass ``--download`` to call ``snapshot_download`` with the same
 allow-list.
@@ -50,7 +50,7 @@ def _snapshot_report(
 ) -> dict[str, Any]:
     from huggingface_hub import model_info
 
-    from nova.registry import resolve_model
+    from difflet.registry import resolve_model
 
     entry = resolve_model(model_id, model_type=model_type)
     if entry.download_patterns is None:
@@ -99,7 +99,7 @@ def _download_snapshot(
 ) -> str:
     from huggingface_hub import snapshot_download
 
-    from nova.registry import resolve_model
+    from difflet.registry import resolve_model
 
     entry = resolve_model(model_id, model_type=model_type)
     if entry.download_patterns is None:

@@ -16,10 +16,10 @@ from typing import Any
 
 import torch
 
-from nova.pipeline.teacache import CALIBRATION_SCHEMA, TeaCacheCalibration
+from difflet.pipeline.teacache import CALIBRATION_SCHEMA, TeaCacheCalibration
 
 
-PAIRS_SCHEMA = "nova-m9-teacache-pairs-v1"
+PAIRS_SCHEMA = "difflet-m9-teacache-pairs-v1"
 FOREGROUND_ACK = "I am running TeaCache T0 in the foreground"
 
 
@@ -114,7 +114,7 @@ def _hv_shape_label(meta: dict[str, Any]) -> str:
 
 
 def _build_hv_bundle(meta: dict[str, Any], tensors: dict[str, torch.Tensor]):
-    from nova.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
+    from difflet.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
 
     return HunyuanVideoDiTInputBundle(
         hidden_states=tensors["latents_init"],
@@ -127,12 +127,12 @@ def _build_hv_bundle(meta: dict[str, Any], tensors: dict[str, torch.Tensor]):
 
 
 def _load_hv_app(args: argparse.Namespace, meta: dict[str, Any]):
-    from nova.models.hunyuan_video.application import NeuronHunyuanVideoApplication
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     return NeuronHunyuanVideoApplication(
         model_path=args.source_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=_dtype_from_name(args.dtype),
         shape={
             "height": int(meta["height"]),
@@ -170,8 +170,8 @@ def _collect_hv_bundle_pairs(
     split: str,
     app: Any | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    from nova.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
-    from nova.models.hunyuan_video.pipeline import (
+    from difflet.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
+    from difflet.models.hunyuan_video.pipeline import (
         _batch_timestep,
         _component_dtype,
         _first_tensor,

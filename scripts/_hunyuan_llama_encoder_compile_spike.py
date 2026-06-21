@@ -22,7 +22,7 @@ SNAP = glob.glob(
     "/home/ubuntu/.cache/huggingface/hub/"
     "models--hunyuanvideo-community--HunyuanVideo/snapshots/*/text_encoder"
 )[0]
-OUT = "/home/ubuntu/nova/.nova-cache/hunyuan_llama_enc_compile"
+OUT = "/home/ubuntu/difflet/.difflet-cache/hunyuan_llama_enc_compile"
 os.makedirs(OUT, exist_ok=True)
 
 print("model_path:", SNAP, flush=True)

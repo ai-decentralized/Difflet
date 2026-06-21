@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Convert a HF Wan2.2 snapshot into Nova-loadable safetensors.
+# Convert a HF Wan2.2 snapshot into Difflet-loadable safetensors.
 #
 # Usage:
 #   ./scripts/wan_convert_checkpoint.sh \
@@ -24,8 +24,8 @@ export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 MODEL_DIR="${1:?need model_dir}"
 OUT_DIR="${2:?need out_dir}"
-COMPONENTS="${NOVA_WAN_COMPONENTS:-}"
-OVERWRITE="${NOVA_WAN_OVERWRITE:-0}"
+COMPONENTS="${DIFFLET_WAN_COMPONENTS:-}"
+OVERWRITE="${DIFFLET_WAN_OVERWRITE:-0}"
 
 cd "${ROOT}"
 
@@ -33,7 +33,7 @@ exec "${PYTHON_BIN}" - <<PY
 import logging
 import sys
 
-from nova.models.wan.checkpoint import convert_diffusers_checkpoint
+from difflet.models.wan.checkpoint import convert_diffusers_checkpoint
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
 

@@ -42,10 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--model-dir",
-        default=os.environ.get("NOVA_LTX_2_MODEL_DIR", ""),
-        help="Local LTX-2 snapshot dir. Env: NOVA_LTX_2_MODEL_DIR.",
+        default=os.environ.get("DIFFLET_LTX_2_MODEL_DIR", ""),
+        help="Local LTX-2 snapshot dir. Env: DIFFLET_LTX_2_MODEL_DIR.",
     )
-    parser.add_argument("--cache-dir", default="/tmp/nova_ltx2_segmented_block_probe_cache")
+    parser.add_argument("--cache-dir", default="/tmp/difflet_ltx2_segmented_block_probe_cache")
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=768)
     parser.add_argument("--num-frames", type=int, default=121)
@@ -88,17 +88,17 @@ def _extract_pair(output):
 
 
 def _load_cpu_block(config, model_dir: Path, block_index: int):
-    from nova.backends.trainium.ltx_2.segmented import (
+    from difflet.backends.trainium.ltx_2.segmented import (
         _LTX2BlockModule,
         _load_block_state_dict_from_dir,
     )
 
-    mx_swap = os.environ.pop("NOVA_LTX2_MX_ALL_E4M3", None)
+    mx_swap = os.environ.pop("DIFFLET_LTX2_MX_ALL_E4M3", None)
     try:
         block = _LTX2BlockModule(config)
     finally:
         if mx_swap is not None:
-            os.environ["NOVA_LTX2_MX_ALL_E4M3"] = mx_swap
+            os.environ["DIFFLET_LTX2_MX_ALL_E4M3"] = mx_swap
     state = _load_block_state_dict_from_dir(
         model_dir / "transformer",
         block_index,
@@ -121,21 +121,21 @@ def main() -> int:
     ensure_runtime_python()
     args = build_parser().parse_args()
     if not args.model_dir:
-        raise ValueError("--model-dir or NOVA_LTX_2_MODEL_DIR is required")
+        raise ValueError("--model-dir or DIFFLET_LTX_2_MODEL_DIR is required")
 
     import torch
 
     if args.num_threads > 0:
         torch.set_num_threads(args.num_threads)
 
-    from nova import NovaParallelConfig, NovaPipeline
+    from difflet import DiffletParallelConfig, DiffletPipeline
 
     model_dir = Path(args.model_dir).expanduser().resolve()
     t0 = time.perf_counter()
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="ltx_2",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=args.dtype,
         height=args.height,
         width=args.width,

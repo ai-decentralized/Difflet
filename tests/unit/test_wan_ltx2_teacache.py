@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from nova.pipeline.teacache import TeaCacheCalibration, TeaCacheController
+from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
 
 _CALIB_DIR = Path(__file__).resolve().parents[2] / "cclogs" / "m9-teacache"
 
@@ -31,7 +31,7 @@ def test_wan_ltx2_calibrations_load_and_are_well_formed(name):
 
 
 def _tiny_wan_model():
-    from nova.models.wan.modeling_wan import WanTransformer3DModel, WanTransformerConfig
+    from difflet.models.wan.modeling_wan import WanTransformer3DModel, WanTransformerConfig
 
     config = WanTransformerConfig(
         patch_size=(1, 2, 2),

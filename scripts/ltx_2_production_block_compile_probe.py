@@ -39,11 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--model-dir",
-        default=os.environ.get("NOVA_LTX_2_MODEL_DIR", ""),
-        help="Local LTX-2 snapshot dir. Env: NOVA_LTX_2_MODEL_DIR.",
+        default=os.environ.get("DIFFLET_LTX_2_MODEL_DIR", ""),
+        help="Local LTX-2 snapshot dir. Env: DIFFLET_LTX_2_MODEL_DIR.",
     )
-    parser.add_argument("--work-dir", default="/tmp/nova_ltx2_production_block_probe_model")
-    parser.add_argument("--cache-dir", default="/tmp/nova_ltx2_production_block_probe_cache")
+    parser.add_argument("--work-dir", default="/tmp/difflet_ltx2_production_block_probe_model")
+    parser.add_argument("--cache-dir", default="/tmp/difflet_ltx2_production_block_probe_cache")
     parser.add_argument("--num-layers", type=int, default=1)
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=768)
@@ -61,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _write_probe_model(args: argparse.Namespace) -> Path:
     if not args.model_dir:
-        raise ValueError("--model-dir or NOVA_LTX_2_MODEL_DIR is required")
+        raise ValueError("--model-dir or DIFFLET_LTX_2_MODEL_DIR is required")
     source = Path(args.model_dir).expanduser().resolve() / "transformer" / "config.json"
     if not source.exists():
         raise FileNotFoundError(f"missing transformer config: {source}")
@@ -86,14 +86,14 @@ def main() -> int:
 
     import torch
 
-    from nova import NovaParallelConfig, NovaPipeline
+    from difflet import DiffletParallelConfig, DiffletPipeline
 
     work_dir = _write_probe_model(args)
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(work_dir),
         model_type="ltx_2",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=dtype,
         height=args.height,
         width=args.width,

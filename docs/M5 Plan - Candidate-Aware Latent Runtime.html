@@ -364,7 +364,7 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
       <span><span class="dot"></span>Implementation Plan · Ultraplan Refinement</span>
       <span>M5.x · Candidate-Aware Latent Runtime</span>
     </div>
-    <div class="banner-meta">Nova · Internal · 2026-05-13</div>
+    <div class="banner-meta">Difflet · Internal · 2026-05-13</div>
   </div>
 </div>
 
@@ -390,7 +390,7 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
     <h2 class="section-title"><small>Why now</small>Context</h2>
   </div>
 
-  <p>Nova has shipped the M0–M3 arc: <code>NovaPipeline</code> + compile cache, Flux end-to-end, Wan 2.2 spike + numerical alignment, and HunyuanVideo v0 (hybrid pipeline, TP=4, 4-step trajectory cosine ≥ 0.9999 vs HF). M4 (Qwen-Image, LTX-2, Z-Image) is still <em>"Planned"</em> per <code>README.md:21</code> — Qwen-Image has a <strong>registry stub</strong> at <code>nova/registry.py:228-245</code> pointing at an as-yet-uncreated <code>nova/models/qwen_image/entry.py</code>, no model code, and no <code>scripts/qwen_*</code>.</p>
+  <p>Difflet has shipped the M0–M3 arc: <code>DiffletPipeline</code> + compile cache, Flux end-to-end, Wan 2.2 spike + numerical alignment, and HunyuanVideo v0 (hybrid pipeline, TP=4, 4-step trajectory cosine ≥ 0.9999 vs HF). M4 (Qwen-Image, LTX-2, Z-Image) is still <em>"Planned"</em> per <code>README.md:21</code> — Qwen-Image has a <strong>registry stub</strong> at <code>difflet/registry.py:228-245</code> pointing at an as-yet-uncreated <code>difflet/models/qwen_image/entry.py</code>, no model code, and no <code>scripts/qwen_*</code>.</p>
 
   <p>The next high-leverage research direction is a candidate-aware latent runtime: 4 hardware-coupled mechanisms — latent prefix cache, cross-candidate KV sharing, early-exit rollout, stage-adaptive MX scheduling — that all need a new candidate axis <code>N</code> and several new ops the tree doesn't yet have.</p>
 
@@ -418,7 +418,7 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
     <ul>
       <li><strong>Does not commit anything to git.</strong> <code>cclogs/</code> is gitignored (<code>.gitignore:cclogs/</code>, see commit <code>7556bae</code> "Stop tracking cclogs/") — this is the deliberate pattern for personal planning notes.</li>
       <li><strong>Does not touch <code>README.md</code>.</strong> The status table only tracks shipped milestones (M0–M3 done, M4 planned). M5 entries get added once M5.0 closes, not now.</li>
-      <li><strong>Does not modify any code under <code>nova/</code>, <code>tests/</code>, or <code>scripts/</code>.</strong> The <em>next</em> session (M5.0 pickup) does that.</li>
+      <li><strong>Does not modify any code under <code>difflet/</code>, <code>tests/</code>, or <code>scripts/</code>.</strong> The <em>next</em> session (M5.0 pickup) does that.</li>
     </ul>
   </div>
 </section>
@@ -482,26 +482,26 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
   <h3>1 · Candidate-axis config</h3>
   <p>Add an <code>N</code> candidate dimension to the parallel config surface.</p>
   <ul>
-    <li><strong>Target file:</strong> <code>nova/pipeline/parallel_config.py</code> (currently 33 lines, <code>NovaParallelConfig</code> frozen dataclass with <code>tp_degree</code>, <code>cp_enabled</code>, <code>cfg_parallel_enabled</code>).</li>
-    <li><strong>Change:</strong> extend <code>NovaParallelConfig</code> with <code>num_candidates: int = 1</code>. The dataclass is <code>frozen=True</code> so cache keys remain stable; bump <code>MANIFEST_SCHEMA_VERSION</code> in <code>nova/pipeline/compile_cache.py:34</code> from <code>3</code> to <code>4</code> because the cache hash inputs change (it is folded through <code>NovaParallelConfig.to_cache_dict()</code> at line 31).</li>
+    <li><strong>Target file:</strong> <code>difflet/pipeline/parallel_config.py</code> (currently 33 lines, <code>DiffletParallelConfig</code> frozen dataclass with <code>tp_degree</code>, <code>cp_enabled</code>, <code>cfg_parallel_enabled</code>).</li>
+    <li><strong>Change:</strong> extend <code>DiffletParallelConfig</code> with <code>num_candidates: int = 1</code>. The dataclass is <code>frozen=True</code> so cache keys remain stable; bump <code>MANIFEST_SCHEMA_VERSION</code> in <code>difflet/pipeline/compile_cache.py:34</code> from <code>3</code> to <code>4</code> because the cache hash inputs change (it is folded through <code>DiffletParallelConfig.to_cache_dict()</code> at line 31).</li>
     <li><strong><code>world_size</code> math:</strong> the candidate axis does NOT consume cores — it shares the existing TP/CP world via batch tiling. Leave the <code>world_size</code> property at lines 26-29 unchanged. Validation hook in <code>__post_init__</code> enforces <code>num_candidates &gt;= 1</code>.</li>
-    <li><strong>Wiring:</strong> pass through <code>NovaPipeline.from_pretrained</code> at <code>nova/pipeline/nova_pipeline.py:49</code> (<code>parallel</code> kwarg already exists). Default <code>num_candidates=1</code> so all four registry entries (<code>nova/registry.py:180,199,220,240</code>) continue to validate unchanged.</li>
+    <li><strong>Wiring:</strong> pass through <code>DiffletPipeline.from_pretrained</code> at <code>difflet/pipeline/difflet_pipeline.py:49</code> (<code>parallel</code> kwarg already exists). Default <code>num_candidates=1</code> so all four registry entries (<code>difflet/registry.py:180,199,220,240</code>) continue to validate unchanged.</li>
   </ul>
 
   <h3>2 · Decode-free latent trajectory metric harness</h3>
-  <p><strong>Do NOT extend <code>nova/utils/benchmark.py</code>.</strong> That file is a verbatim NxDI fork (banner at lines 1-7, references <code>GenerationConfig</code>, <code>sampling_params</code>, <code>NUM_IMAGE_PER_PROMPT</code>) for LLM token-generation benchmarking. Its <code>LatencyCollector</code> class at lines 490-499 is the only generic piece — it's 12 lines of <code>pre_hook</code> / <code>hook</code> time bookkeeping.</p>
+  <p><strong>Do NOT extend <code>difflet/utils/benchmark.py</code>.</strong> That file is a verbatim NxDI fork (banner at lines 1-7, references <code>GenerationConfig</code>, <code>sampling_params</code>, <code>NUM_IMAGE_PER_PROMPT</code>) for LLM token-generation benchmarking. Its <code>LatencyCollector</code> class at lines 490-499 is the only generic piece — it's 12 lines of <code>pre_hook</code> / <code>hook</code> time bookkeeping.</p>
 
   <p>Instead create:</p>
   <ul>
-    <li><strong>New file:</strong> <code>nova/utils/latent_trajectory.py</code> — small (one class + one writer fn) for diffusion-side per-step metrics. Reuses the <code>LatencyCollector</code> pattern (pre_hook / hook) but operates on <code>torch.Tensor</code> snapshots, not just timestamps. Computes <code>{step, latency_ms, latent_cosine_vs_ref, latent_mean, latent_std}</code>. Writes a JSON list with the same <code>json.dumps(stats, indent=2)</code> shape as <code>scripts/hunyuan_vae_parity.py:182</code>.</li>
-    <li><strong>Hook site:</strong> <code>HunyuanVideoOrchestrator._denoise</code> at <code>nova/models/hunyuan_video/pipeline.py:142-170</code> already has a <code>return_trajectory</code> path (lines 90-92, 168-169) that materialises <code>latents.detach().cpu()</code> per step. Wrap that path through the new collector. The orchestrator already takes <code>return_trajectory: bool</code> (line 74) — add <code>metrics_out_path: Path | None = None</code> peer parameter.</li>
-    <li><strong>Reference latent for cosine:</strong> cached <code>N=1</code> run with the same seed. Persist under the existing compile-cache directory layout (<code>nova/pipeline/compile_cache.py:_default_cache_dir</code>).</li>
+    <li><strong>New file:</strong> <code>difflet/utils/latent_trajectory.py</code> — small (one class + one writer fn) for diffusion-side per-step metrics. Reuses the <code>LatencyCollector</code> pattern (pre_hook / hook) but operates on <code>torch.Tensor</code> snapshots, not just timestamps. Computes <code>{step, latency_ms, latent_cosine_vs_ref, latent_mean, latent_std}</code>. Writes a JSON list with the same <code>json.dumps(stats, indent=2)</code> shape as <code>scripts/hunyuan_vae_parity.py:182</code>.</li>
+    <li><strong>Hook site:</strong> <code>HunyuanVideoOrchestrator._denoise</code> at <code>difflet/models/hunyuan_video/pipeline.py:142-170</code> already has a <code>return_trajectory</code> path (lines 90-92, 168-169) that materialises <code>latents.detach().cpu()</code> per step. Wrap that path through the new collector. The orchestrator already takes <code>return_trajectory: bool</code> (line 74) — add <code>metrics_out_path: Path | None = None</code> peer parameter.</li>
+    <li><strong>Reference latent for cosine:</strong> cached <code>N=1</code> run with the same seed. Persist under the existing compile-cache directory layout (<code>difflet/pipeline/compile_cache.py:_default_cache_dir</code>).</li>
   </ul>
   <p>No Neuron Profiler 2.0 yet. That is M5.D2.</p>
 
   <h3>3 · Run <code>N=4</code> HunyuanVideo end-to-end</h3>
   <ul>
-    <li><strong>Workload:</strong> HunyuanVideo at the default registered shape <code>{height: 320, width: 512, num_frames: 61}</code> (<code>nova/registry.py:221</code>), TP=4.</li>
+    <li><strong>Workload:</strong> HunyuanVideo at the default registered shape <code>{height: 320, width: 512, num_frames: 61}</code> (<code>difflet/registry.py:221</code>), TP=4.</li>
     <li><strong>Synthetic scorer:</strong> "keep all" — every candidate survives every step. Sufficient to validate the candidate axis plumbing without needing M5.3 exit logic.</li>
     <li><strong>Driver:</strong> small new script <code>scripts/hunyuan_candidate_smoke.py</code> modelled on <code>scripts/hunyuan_hybrid_orchestrator_smoke.py</code> (the existing M3 orchestrator smoke). <strong>Asserts:</strong> no recompile between <code>N=1</code> and <code>N=4</code>; per-step metrics JSON written; trajectory cosine of <code>N=4</code> seed-0 matches the <code>N=1</code> reference within 1e-6.</li>
   </ul>
@@ -541,9 +541,9 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
 
     <div class="mech-block-label">Files</div>
     <ul>
-      <li>New <code>nova/pipeline/latent_cache.py</code> (paged store + fork detection).</li>
-      <li>Integration hooks in each model orchestrator (<code>nova/models/hunyuan_video/pipeline.py:_denoise</code> at line 142; <code>nova/models/wan/pipeline.py:WanOrchestrator</code>; <code>nova/models/flux/pipeline.py:NeuronFluxPipeline</code> — Flux extends <code>diffusers.FluxPipeline</code>, so the hook goes in the overridden <code>__call__</code> at line 65).</li>
-      <li>State aliasing seam: every Trainium backbone currently passes <code>input_output_aliases={}</code> (verified at <code>nova/backends/trainium/hunyuan_video/backbone.py:140</code>, <code>nova/backends/trainium/wan/backbone.py:129</code>, <code>nova/backends/trainium/wan/vae.py:134</code>, <code>nova/backends/trainium/wan/text_encoder.py:116</code>). The LLM KV cache pattern at <code>nova/backends/trainium/core/model_wrapper.py:1590-1638</code> is the worked reference — same <code>input_output_aliases</code> mechanism, different state shape (latent block instead of <code>past_key_values</code>).</li>
+      <li>New <code>difflet/pipeline/latent_cache.py</code> (paged store + fork detection).</li>
+      <li>Integration hooks in each model orchestrator (<code>difflet/models/hunyuan_video/pipeline.py:_denoise</code> at line 142; <code>difflet/models/wan/pipeline.py:WanOrchestrator</code>; <code>difflet/models/flux/pipeline.py:NeuronFluxPipeline</code> — Flux extends <code>diffusers.FluxPipeline</code>, so the hook goes in the overridden <code>__call__</code> at line 65).</li>
+      <li>State aliasing seam: every Trainium backbone currently passes <code>input_output_aliases={}</code> (verified at <code>difflet/backends/trainium/hunyuan_video/backbone.py:140</code>, <code>difflet/backends/trainium/wan/backbone.py:129</code>, <code>difflet/backends/trainium/wan/vae.py:134</code>, <code>difflet/backends/trainium/wan/text_encoder.py:116</code>). The LLM KV cache pattern at <code>difflet/backends/trainium/core/model_wrapper.py:1590-1638</code> is the worked reference — same <code>input_output_aliases</code> mechanism, different state shape (latent block instead of <code>past_key_values</code>).</li>
     </ul>
 
     <div class="mech-block-label">Rough cost</div>
@@ -572,9 +572,9 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
 
     <div class="mech-block-label">Files</div>
     <ul>
-      <li><code>nova/ops/attention.py</code> — add a candidate-shared K/V variant.</li>
-      <li>Per-model attention layers (<code>nova/models/hunyuan_video/modeling_hunyuan_video.py</code>, <code>nova/models/wan/modeling_wan.py</code>).</li>
-      <li><code>nova/backends/trainium/ops_impl/attention.py:9</code> already routes through <code>nkilib.core.attention.attention_cte</code> (<code>attention_cte</code> at line 12); keep that for the per-candidate <code>Q × shared K</code> matmul.</li>
+      <li><code>difflet/ops/attention.py</code> — add a candidate-shared K/V variant.</li>
+      <li>Per-model attention layers (<code>difflet/models/hunyuan_video/modeling_hunyuan_video.py</code>, <code>difflet/models/wan/modeling_wan.py</code>).</li>
+      <li><code>difflet/backends/trainium/ops_impl/attention.py:9</code> already routes through <code>nkilib.core.attention.attention_cte</code> (<code>attention_cte</code> at line 12); keep that for the per-candidate <code>Q × shared K</code> matmul.</li>
     </ul>
 
     <div class="mech-block-label">Rough cost</div>
@@ -603,10 +603,10 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
 
     <div class="mech-block-label">Files</div>
     <ul>
-      <li>New <code>nova/pipeline/scheduler.py</code> — host-side rebalance loop.</li>
+      <li>New <code>difflet/pipeline/scheduler.py</code> — host-side rebalance loop.</li>
       <li>Orchestrator changes mirroring M5.1.</li>
-      <li>New shared exit-head module under <code>nova/layers/</code>.</li>
-      <li><code>nki.collectives.all_to_all_v</code> first integration — current <code>nova/backends/trainium/ops_impl/collectives.py</code> exposes only TP <code>gather_tp_dim</code>, <code>reduce_tp</code>, <code>scatter_tp_dim</code> (lines 20-42). Add <code>all_to_all_v</code> here next to those.</li>
+      <li>New shared exit-head module under <code>difflet/layers/</code>.</li>
+      <li><code>nki.collectives.all_to_all_v</code> first integration — current <code>difflet/backends/trainium/ops_impl/collectives.py</code> exposes only TP <code>gather_tp_dim</code>, <code>reduce_tp</code>, <code>scatter_tp_dim</code> (lines 20-42). Add <code>all_to_all_v</code> here next to those.</li>
     </ul>
 
     <div class="mech-block-label">Rough cost</div>
@@ -635,9 +635,9 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
 
     <div class="mech-block-label">Files</div>
     <ul>
-      <li>New <code>nova/ops/mx.py</code> exposing <code>nc_matmul_mx</code>, <code>quantize_mx</code> via the existing dispatch pattern (<code>nova/ops/_dispatch.py:10-20</code> lazy-loads <code>nova.backends.&lt;hw&gt;.ops_impl.&lt;module&gt;</code>).</li>
-      <li>Trainium impl at <code>nova/backends/trainium/ops_impl/mx.py</code>.</li>
-      <li>Calibration loop in <code>nova/pipeline/nova_pipeline.py</code> next to the existing <code>from_pretrained</code> flow (line 44).</li>
+      <li>New <code>difflet/ops/mx.py</code> exposing <code>nc_matmul_mx</code>, <code>quantize_mx</code> via the existing dispatch pattern (<code>difflet/ops/_dispatch.py:10-20</code> lazy-loads <code>difflet.backends.&lt;hw&gt;.ops_impl.&lt;module&gt;</code>).</li>
+      <li>Trainium impl at <code>difflet/backends/trainium/ops_impl/mx.py</code>.</li>
+      <li>Calibration loop in <code>difflet/pipeline/difflet_pipeline.py</code> next to the existing <code>from_pretrained</code> flow (line 44).</li>
       <li>Per-model <code>precision_schedule.py</code> next to each <code>application.py</code>.</li>
     </ul>
 
@@ -653,10 +653,10 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
   </div>
 
   <h3>M5.D1 — MX op surface</h3>
-  <p><code>nc_matmul_mx</code>, <code>quantize_mx</code> via <code>nova.ops</code> (dispatch pattern at <code>nova/ops/_dispatch.py:10-20</code>). Trainium impl at <code>nova/backends/trainium/ops_impl/mx.py</code>. CPU reference is a slow numpy emulator under <code>nova/backends/cpu/ops_impl/mx.py</code>. <strong>Required by M5.4. Cost ~1 week.</strong> No MX use exists anywhere in the tree today.</p>
+  <p><code>nc_matmul_mx</code>, <code>quantize_mx</code> via <code>difflet.ops</code> (dispatch pattern at <code>difflet/ops/_dispatch.py:10-20</code>). Trainium impl at <code>difflet/backends/trainium/ops_impl/mx.py</code>. CPU reference is a slow numpy emulator under <code>difflet/backends/cpu/ops_impl/mx.py</code>. <strong>Required by M5.4. Cost ~1 week.</strong> No MX use exists anywhere in the tree today.</p>
 
   <h3>M5.D2 — Latent Workload Profiler</h3>
-  <p>NeuronProfiler 2.0 trace ingestion: per-engine utilization (TensorE, VectorE, ScalarE, GpsimdE) + HBM bandwidth + DMA traffic. Required to ground every M5.x ablation. <em>Not</em> an extension of <code>nova/utils/benchmark.py</code> (NxDI LLM fork) — new module <code>nova/utils/neuron_profile.py</code>. <strong>Cost 1–2 weeks; mostly tooling.</strong></p>
+  <p>NeuronProfiler 2.0 trace ingestion: per-engine utilization (TensorE, VectorE, ScalarE, GpsimdE) + HBM bandwidth + DMA traffic. Required to ground every M5.x ablation. <em>Not</em> an extension of <code>difflet/utils/benchmark.py</code> (NxDI LLM fork) — new module <code>difflet/utils/neuron_profile.py</code>. <strong>Cost 1–2 weeks; mostly tooling.</strong></p>
 </section>
 
 <section id="roadmap">
@@ -723,7 +723,7 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
 
   <h3>Megakernel scope (the 5 fused kernels)</h3>
 
-  <p>Per research plan §06 "5 NKI kernels to design", Nova's <em>megakernel</em> deliverable is these five fused video-DiT kernels. They are the productized M5 outcome:</p>
+  <p>Per research plan §06 "5 NKI kernels to design", Difflet's <em>megakernel</em> deliverable is these five fused video-DiT kernels. They are the productized M5 outcome:</p>
 
   <div class="tbl-wrap">
   <table>
@@ -740,16 +740,16 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
   </table>
   </div>
 
-  <h3>Why Nova doesn't need <code>mlp_tkg_b2</code> scale</h3>
+  <h3>Why Difflet doesn't need <code>mlp_tkg_b2</code> scale</h3>
 
   <p><code>/home/ubuntu/nki-moe-bin/mlp_tkg_b2</code> is a <strong>4488-LoC LLM token-generation MoE MLP</strong> (one of 53+ <code>@nki.jit</code> files in that competition codebase). That's a different workload class:</p>
 
   <ul>
     <li><strong>TKG (token generation)</strong> — single query (Q seq=1) × long KV (K seq=N) with KV cache reuse; optimized for autoregressive inference.</li>
-    <li><strong>CTE (context encoding)</strong> — many-token attention (Q=K=N), no KV cache, batched. <strong>This is Nova's diffusion path.</strong></li>
+    <li><strong>CTE (context encoding)</strong> — many-token attention (Q=K=N), no KV cache, batched. <strong>This is Difflet's diffusion path.</strong></li>
   </ul>
 
-  <p>Nova stands on existing nkilib for universal kernels:</p>
+  <p>Difflet stands on existing nkilib for universal kernels:</p>
   <ul>
     <li>Attention → <code>nkilib.core.attention.attention_cte</code> (already in use)</li>
     <li>QKV → <code>nkilib.core.qkv.qkv</code></li>
@@ -757,7 +757,7 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
     <li>Cumsum → <code>nkilib.core.cumsum.cumsum</code></li>
   </ul>
 
-  <p>Nova only writes the <strong>video-diffusion-specific</strong> kernels (the 5 above). Estimated Nova first-party NKI final surface: <strong>~2500–3500 LoC</strong>, not ~5000. Matching <code>mlp_tkg_b2</code> tuning depth is an <em>optional</em> follow-on, gated on whether a specific performance claim demands it.</p>
+  <p>Difflet only writes the <strong>video-diffusion-specific</strong> kernels (the 5 above). Estimated Difflet first-party NKI final surface: <strong>~2500–3500 LoC</strong>, not ~5000. Matching <code>mlp_tkg_b2</code> tuning depth is an <em>optional</em> follow-on, gated on whether a specific performance claim demands it.</p>
 
   <h3>Stop conditions</h3>
   <ul>
@@ -781,12 +781,12 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
       <tr><th>Need</th><th>Existing pattern (file:line)</th></tr>
     </thead>
     <tbody>
-      <tr><td>AOT compile + load + cache</td><td><code>nova/pipeline/nova_pipeline.py</code>, <code>nova/pipeline/compile_cache.py</code></td></tr>
-      <tr><td>Multi-component orchestration</td><td><code>MultiComponentApplication</code> at <code>nova/backends/trainium/core/multi_component_application.py:36</code>; <code>NeuronHunyuanVideoApplication</code> at <code>nova/models/hunyuan_video/application.py:174</code> is the worked reference</td></tr>
-      <tr><td>State aliasing across steps</td><td><code>nova/backends/trainium/core/model_wrapper.py:1590-1638</code> (LLM KV cache via <code>input_output_aliases</code>) — same mechanism, port to latent state</td></tr>
+      <tr><td>AOT compile + load + cache</td><td><code>difflet/pipeline/difflet_pipeline.py</code>, <code>difflet/pipeline/compile_cache.py</code></td></tr>
+      <tr><td>Multi-component orchestration</td><td><code>MultiComponentApplication</code> at <code>difflet/backends/trainium/core/multi_component_application.py:36</code>; <code>NeuronHunyuanVideoApplication</code> at <code>difflet/models/hunyuan_video/application.py:174</code> is the worked reference</td></tr>
+      <tr><td>State aliasing across steps</td><td><code>difflet/backends/trainium/core/model_wrapper.py:1590-1638</code> (LLM KV cache via <code>input_output_aliases</code>) — same mechanism, port to latent state</td></tr>
       <tr><td>Per-step metrics JSON convention</td><td><code>scripts/hunyuan_vae_parity.py:77-78,182</code> (<code>{cosine, max_abs, mean_abs}</code> + <code>json.dumps(stats, indent=2)</code>)</td></tr>
-      <tr><td>Trajectory hook surface</td><td><code>HunyuanVideoOrchestrator._denoise</code> at <code>nova/models/hunyuan_video/pipeline.py:142-170</code> (already materialises per-step latents)</td></tr>
-      <tr><td>NKI op dispatch</td><td><code>nova/ops/_dispatch.py:10-20</code> lazy-loads <code>nova.backends.&lt;hw&gt;.ops_impl.&lt;module&gt;</code> — same shape for MX, scheduler, latent-cache ops</td></tr>
+      <tr><td>Trajectory hook surface</td><td><code>HunyuanVideoOrchestrator._denoise</code> at <code>difflet/models/hunyuan_video/pipeline.py:142-170</code> (already materialises per-step latents)</td></tr>
+      <tr><td>NKI op dispatch</td><td><code>difflet/ops/_dispatch.py:10-20</code> lazy-loads <code>difflet.backends.&lt;hw&gt;.ops_impl.&lt;module&gt;</code> — same shape for MX, scheduler, latent-cache ops</td></tr>
       <tr><td>Test layout for new ops</td><td><code>tests/unit/test_ops_public_api.py</code>, <code>tests/unit/test_modeling_hunyuan_video.py</code>, etc.; AST guard via <code>scripts/test_imports.sh</code></td></tr>
     </tbody>
   </table>
@@ -837,7 +837,7 @@ footer .glyph { color: var(--rust); margin-right: 6px; }
 </div>
 
 <footer>
-  <div><span class="glyph">§</span> Nova · M5 Plan · v2.0 · Ultraplan Refinement</div>
+  <div><span class="glyph">§</span> Difflet · M5 Plan · v2.0 · Ultraplan Refinement</div>
   <div>Companion to <code>docs/Trainium Latent Review …</code></div>
   <div>cclogs/m5-latent/ · 2026-05-13</div>
 </footer>

@@ -1,11 +1,11 @@
-"""Unit tests for nova.models.hunyuan_video.modeling_hunyuan_video.
+"""Unit tests for difflet.models.hunyuan_video.modeling_hunyuan_video.
 
 Forward / parity coverage lives in
 ``tests/unit/test_hunyuan_video_attention.py`` and the registry checks in
 ``tests/unit/test_hunyuan_video_registration.py``; this file is the
 per-model AST import guard, mirroring ``tests/unit/test_modeling_wan.py``.
 The repo-wide guard at ``scripts/test_imports.sh`` already rejects
-``nova.core`` and the four removed ``nova.utils`` paths; the per-file
+``difflet.core`` and the four removed ``difflet.utils`` paths; the per-file
 AST walk below keeps the constraint visible inside the modeling code's
 own neighborhood.
 """
@@ -17,10 +17,10 @@ from pathlib import Path
 
 
 def test_modeling_hunyuan_video_imports_only_from_allowed_modules():
-    src = Path("/home/ubuntu/nova/nova/models/hunyuan_video/modeling_hunyuan_video.py").read_text()
+    src = Path("/home/ubuntu/difflet/difflet/models/hunyuan_video/modeling_hunyuan_video.py").read_text()
     tree = ast.parse(src)
     forbidden_roots = {"neuronx_distributed", "nkilib", "torch_neuronx"}
-    forbidden_prefixes = ("nova.core",)
+    forbidden_prefixes = ("difflet.core",)
     offending: list[str] = []
 
     for node in ast.walk(tree):

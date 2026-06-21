@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from nova.models.ltx_2.application import LTX2DiTInputBundle
-from nova.models.ltx_2.pipeline import (
+from difflet.models.ltx_2.application import LTX2DiTInputBundle
+from difflet.models.ltx_2.pipeline import (
     LTX2Orchestrator,
     LTX2PipelineOutput,
     ltx_2_scheduler_mu,

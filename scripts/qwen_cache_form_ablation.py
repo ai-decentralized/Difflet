@@ -10,7 +10,7 @@ skip pattern that is IDENTICAL for both cache forms (so the only variable is the
 cache form), run a full 50-step denoise three ways:
 
   (i)  reference   — every step full (no cache)
-  (ii) nova-form   — noise_pred extrapolation: on skip, np = prev_np + cached(np_delta)
+  (ii) difflet-form   — noise_pred extrapolation: on skip, np = prev_np + cached(np_delta)
                      (the HV cache form, skip = don't run the DiT at all)
   (iii) vllm-form  — block-residual + re-postprocess: on full step cache
                      residual_h = h_out - h_in (image stream); on skip recompute
@@ -21,7 +21,7 @@ Report final-latent + min-trajectory cosine of (ii) and (iii) vs (i) at MATCHED
 skips. Also harvest corrected rel-L1(block0 mod input) -> rel-L1(noise_pred) pairs
 from the reference run (the Option-A calibration data, which was never persisted).
 
-Decision: GO Path B only if vllm-form >> nova-form at matched skips. STOP Path B
+Decision: GO Path B only if vllm-form >> difflet-form at matched skips. STOP Path B
 if they are similar and both well below 0.999 -> the 0.59 signal is the limiter.
 """
 
@@ -59,7 +59,7 @@ import torch.nn.functional as F  # noqa: E402
 from safetensors.torch import load_file as load_safetensors_file  # noqa: E402
 
 MODEL_DIR = Path("/home/ubuntu/.cache/huggingface/hub/qwen-image-real/transformer")
-BUNDLE_DIR = ROOT / ".nova-cache" / "qwen_image_dit_inputs" / "m9_calib_50step"
+BUNDLE_DIR = ROOT / ".difflet-cache" / "qwen_image_dit_inputs" / "m9_calib_50step"
 CCLOG = ROOT / "cclogs" / "m9-teacache"
 IMG_SHAPES = [[(1, 64, 64)]]  # 1024^2 -> packed 64x64
 
@@ -226,8 +226,8 @@ def main() -> int:
                 ref_traj.append(lat.detach().clone())
         print(f"[abl] b{bi} reference done in {time.perf_counter()-tb:.0f}s", flush=True)
 
-        # ---------- (ii) nova-form: noise_pred extrapolation ----------
-        nova_traj = []
+        # ---------- (ii) difflet-form: noise_pred extrapolation ----------
+        difflet_traj = []
         lat = hs0.clone()
         sched_n = _scheduler(args.scheduler_id)
         _timesteps(sched_n, args.num_steps, int(hs0.shape[1]))
@@ -246,7 +246,7 @@ def main() -> int:
                         resid_np = (np_pred - prev_np).detach()
                     prev_np = np_pred.detach()
                 lat = sched_n.step(np_pred, t, lat, return_dict=False)[0]
-                nova_traj.append(lat.detach().clone())
+                difflet_traj.append(lat.detach().clone())
 
         # ---------- (iii) vllm-form: block-residual + current-temb re-postprocess ----------
         vllm_traj = []
@@ -269,19 +269,19 @@ def main() -> int:
 
         rec = {
             "bundle": bpath.name,
-            "nova_final_cos": _cos(nova_traj[-1], ref_traj[-1]),
-            "nova_traj_cos": _traj_cos(nova_traj, ref_traj),
+            "difflet_final_cos": _cos(difflet_traj[-1], ref_traj[-1]),
+            "difflet_traj_cos": _traj_cos(difflet_traj, ref_traj),
             "vllm_final_cos": _cos(vllm_traj[-1], ref_traj[-1]),
             "vllm_traj_cos": _traj_cos(vllm_traj, ref_traj),
         }
         per_bundle.append(rec)
-        print(f"[abl] b{bi} {bpath.name}: nova final={rec['nova_final_cos']:.4f} traj={rec['nova_traj_cos']:.4f} "
+        print(f"[abl] b{bi} {bpath.name}: difflet final={rec['difflet_final_cos']:.4f} traj={rec['difflet_traj_cos']:.4f} "
               f"| vllm final={rec['vllm_final_cos']:.4f} traj={rec['vllm_traj_cos']:.4f}", flush=True)
 
     # aggregate (min across bundles, matching the e2e metric)
     agg = {
-        "nova_final_cos_min": min(r["nova_final_cos"] for r in per_bundle),
-        "nova_traj_cos_min": min(r["nova_traj_cos"] for r in per_bundle),
+        "difflet_final_cos_min": min(r["difflet_final_cos"] for r in per_bundle),
+        "difflet_traj_cos_min": min(r["difflet_traj_cos"] for r in per_bundle),
         "vllm_final_cos_min": min(r["vllm_final_cos"] for r in per_bundle),
         "vllm_traj_cos_min": min(r["vllm_traj_cos"] for r in per_bundle),
     }
@@ -291,7 +291,7 @@ def main() -> int:
     pearson = float(torch.corrcoef(torch.stack([xs, ys]))[0, 1].item())
 
     out = {
-        "schema": "nova-m9-teacache-cacheform-ablation-v1",
+        "schema": "difflet-m9-teacache-cacheform-ablation-v1",
         "model": "qwen_image", "shape_label": "1024x1024",
         "num_steps": args.num_steps, "n_bundles": len(per_bundle),
         "oracle_skip_fraction": skip_frac, "skip_stride": args.stride,
@@ -302,7 +302,7 @@ def main() -> int:
     }
     (CCLOG / "qwen_cacheform_ablation.json").write_text(json.dumps(out, indent=2, sort_keys=True) + "\n")
     pairs_doc = {
-        "schema": "nova-m9-teacache-pairs-v1", "model": "qwen_image",
+        "schema": "difflet-m9-teacache-pairs-v1", "model": "qwen_image",
         "shape_label": "1024x1024", "num_steps": args.num_steps,
         "mod_input_source": "block0_modulated_input_rel_l1", "signal": "relative_l1",
         "hardware_measured": False, "samples": pairs,
@@ -310,10 +310,10 @@ def main() -> int:
     (CCLOG / "pairs_qwen_relL1_corrected.json").write_text(json.dumps(pairs_doc, indent=2, sort_keys=True) + "\n")
 
     print("\n[abl] ===== RESULT (matched %d%% skip) =====" % round(skip_frac * 100), flush=True)
-    print(f"[abl] nova-form  : final={agg['nova_final_cos_min']:.4f}  traj={agg['nova_traj_cos_min']:.4f}", flush=True)
+    print(f"[abl] difflet-form  : final={agg['difflet_final_cos_min']:.4f}  traj={agg['difflet_traj_cos_min']:.4f}", flush=True)
     print(f"[abl] vllm-form  : final={agg['vllm_final_cos_min']:.4f}  traj={agg['vllm_traj_cos_min']:.4f}", flush=True)
-    delta = agg["vllm_final_cos_min"] - agg["nova_final_cos_min"]
-    print(f"[abl] vllm - nova (final cos) = {delta:+.4f}", flush=True)
+    delta = agg["vllm_final_cos_min"] - agg["difflet_final_cos_min"]
+    print(f"[abl] vllm - difflet (final cos) = {delta:+.4f}", flush=True)
     print(f"[abl] corrected signal Pearson(rel_l1_mod, rel_l1_noise) = {pearson:.4f} (n={len(pairs)})", flush=True)
     verdict = ("GO Path B (cache form recovers a lot)" if delta > 0.03
                else "STOP Path B (cache form ~neutral -> signal is the limiter)")

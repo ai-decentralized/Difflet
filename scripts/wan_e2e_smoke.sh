@@ -14,34 +14,34 @@ if [[ -d "${NEURON_VENV}/bin" ]]; then
 fi
 
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
-export NOVA_BACKEND="${NOVA_BACKEND:-trainium}"
+export DIFFLET_BACKEND="${DIFFLET_BACKEND:-trainium}"
 export NEURON_RT_NUM_CORES="${NEURON_RT_NUM_CORES:-4}"
 export NEURON_RT_VIRTUAL_CORE_SIZE="${NEURON_RT_VIRTUAL_CORE_SIZE:-2}"
 
-MODEL="${1:-${NOVA_WAN_MODEL:-Wan-AI/Wan2.2-T2V-A14B-Diffusers}}"
-HEIGHT="${NOVA_WAN_HEIGHT:-480}"
-WIDTH="${NOVA_WAN_WIDTH:-832}"
-VIDEO_FRAMES="${NOVA_WAN_FRAMES:-9}"
-TP_DEGREE="${NOVA_WAN_TP_DEGREE:-4}"
-TEXT_SEQ_LEN="${NOVA_WAN_TEXT_SEQ_LEN:-512}"
-LOCAL_FILES_ONLY="${NOVA_LOCAL_FILES_ONLY:-1}"
-DOWNLOAD_WEIGHTS="${NOVA_WAN_E2E_DOWNLOAD_WEIGHTS:-0}"
-OUTPUT_TYPE="${NOVA_WAN_E2E_OUTPUT_TYPE:-latent}"
-NUM_STEPS="${NOVA_WAN_E2E_STEPS:-1}"
-STAGE_ONLY="${NOVA_WAN_E2E_STAGE_ONLY:-0}"
-SAVE_LATENTS="${NOVA_WAN_E2E_SAVE_LATENTS:-}"
-LOAD_LATENTS="${NOVA_WAN_E2E_LOAD_LATENTS:-}"
+MODEL="${1:-${DIFFLET_WAN_MODEL:-Wan-AI/Wan2.2-T2V-A14B-Diffusers}}"
+HEIGHT="${DIFFLET_WAN_HEIGHT:-480}"
+WIDTH="${DIFFLET_WAN_WIDTH:-832}"
+VIDEO_FRAMES="${DIFFLET_WAN_FRAMES:-9}"
+TP_DEGREE="${DIFFLET_WAN_TP_DEGREE:-4}"
+TEXT_SEQ_LEN="${DIFFLET_WAN_TEXT_SEQ_LEN:-512}"
+LOCAL_FILES_ONLY="${DIFFLET_LOCAL_FILES_ONLY:-1}"
+DOWNLOAD_WEIGHTS="${DIFFLET_WAN_E2E_DOWNLOAD_WEIGHTS:-0}"
+OUTPUT_TYPE="${DIFFLET_WAN_E2E_OUTPUT_TYPE:-latent}"
+NUM_STEPS="${DIFFLET_WAN_E2E_STEPS:-1}"
+STAGE_ONLY="${DIFFLET_WAN_E2E_STAGE_ONLY:-0}"
+SAVE_LATENTS="${DIFFLET_WAN_E2E_SAVE_LATENTS:-}"
+LOAD_LATENTS="${DIFFLET_WAN_E2E_LOAD_LATENTS:-}"
 
-COMPILED_DIR="${NOVA_WAN_E2E_COMPILED_DIR:-${ROOT}/.nova-cache/wan_e2e_smoke}"
-TEXT_DIR="${NOVA_WAN_E2E_TEXT_DIR:-${ROOT}/.nova-cache/wan_text_encoder_smoke}"
-TRANSFORMER_DIR="${NOVA_WAN_E2E_TRANSFORMER_DIR:-${ROOT}/.nova-cache/wan_backbone_smoke}"
-TRANSFORMER_2_DIR="${NOVA_WAN_E2E_TRANSFORMER_2_DIR:-${ROOT}/.nova-cache/wan_backbone_2_smoke}"
-VAE_DIR="${NOVA_WAN_E2E_VAE_DIR:-${ROOT}/.nova-cache/wan_vae_decoder_smoke}"
+COMPILED_DIR="${DIFFLET_WAN_E2E_COMPILED_DIR:-${ROOT}/.difflet-cache/wan_e2e_smoke}"
+TEXT_DIR="${DIFFLET_WAN_E2E_TEXT_DIR:-${ROOT}/.difflet-cache/wan_text_encoder_smoke}"
+TRANSFORMER_DIR="${DIFFLET_WAN_E2E_TRANSFORMER_DIR:-${ROOT}/.difflet-cache/wan_backbone_smoke}"
+TRANSFORMER_2_DIR="${DIFFLET_WAN_E2E_TRANSFORMER_2_DIR:-${ROOT}/.difflet-cache/wan_backbone_2_smoke}"
+VAE_DIR="${DIFFLET_WAN_E2E_VAE_DIR:-${ROOT}/.difflet-cache/wan_vae_decoder_smoke}"
 
-ENABLE_TEXT="${NOVA_WAN_E2E_ENABLE_TEXT:-1}"
-ENABLE_TRANSFORMER="${NOVA_WAN_E2E_ENABLE_TRANSFORMER:-1}"
-ENABLE_TRANSFORMER_2="${NOVA_WAN_E2E_ENABLE_TRANSFORMER_2:-auto}"
-ENABLE_VAE="${NOVA_WAN_E2E_ENABLE_VAE:-auto}"
+ENABLE_TEXT="${DIFFLET_WAN_E2E_ENABLE_TEXT:-1}"
+ENABLE_TRANSFORMER="${DIFFLET_WAN_E2E_ENABLE_TRANSFORMER:-1}"
+ENABLE_TRANSFORMER_2="${DIFFLET_WAN_E2E_ENABLE_TRANSFORMER_2:-auto}"
+ENABLE_VAE="${DIFFLET_WAN_E2E_ENABLE_VAE:-auto}"
 
 cd "${ROOT}"
 
@@ -54,9 +54,9 @@ from pathlib import Path
 
 import torch
 
-from nova.models.wan.application import NeuronWanApplication, _latent_num_frames
-from nova.pipeline.parallel_config import NovaParallelConfig
-from nova.pipeline.path_resolver import resolve_model_path
+from difflet.models.wan.application import NeuronWanApplication, _latent_num_frames
+from difflet.pipeline.parallel_config import DiffletParallelConfig
+from difflet.pipeline.path_resolver import resolve_model_path
 
 model = ${MODEL@Q}
 compiled_dir = Path(${COMPILED_DIR@Q})
@@ -84,7 +84,7 @@ enable_transformer_2_value = ${ENABLE_TRANSFORMER_2@Q}
 enable_vae_value = ${ENABLE_VAE@Q}
 
 if output_type not in {"latent", "pt"}:
-    raise ValueError("NOVA_WAN_E2E_OUTPUT_TYPE must be 'latent' or 'pt'")
+    raise ValueError("DIFFLET_WAN_E2E_OUTPUT_TYPE must be 'latent' or 'pt'")
 
 model_dir = Path(resolve_model_path(model, local_files_only=local_files_only))
 repo_id = model if "/" in model and not Path(model).exists() else "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
@@ -106,7 +106,7 @@ def download_component_weights(component: str) -> None:
     if not download_weights:
         raise FileNotFoundError(
             f"missing {component}/ weights under {model_dir}. "
-            "Set NOVA_WAN_E2E_DOWNLOAD_WEIGHTS=1 to fetch the required HF shards."
+            "Set DIFFLET_WAN_E2E_DOWNLOAD_WEIGHTS=1 to fetch the required HF shards."
         )
     from huggingface_hub import hf_hub_download, list_repo_files
 
@@ -234,7 +234,7 @@ if stage_only:
 
 app = NeuronWanApplication(
     model_path=str(model_dir),
-    parallel=NovaParallelConfig(tp_degree=tp_degree),
+    parallel=DiffletParallelConfig(tp_degree=tp_degree),
     dtype=torch.bfloat16,
     shape={"height": height, "width": width, "num_frames": video_frames},
     text_seq_len=text_seq_len,

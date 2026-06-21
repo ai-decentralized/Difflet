@@ -38,17 +38,17 @@ ensure_runtime_python()
 import torch  # noqa: E402
 from safetensors.torch import load_file as load_safetensors_file  # noqa: E402
 
-SOURCE = ROOT / ".nova-cache" / "f3_hunyuan_n4_4d8s1r" / "source"
-OUT_DIR = ROOT / ".nova-cache" / "f3_hunyuan_n4_4d8s1r" / "compiled" / "teacache_probe_fused"
-BUNDLE = ROOT / ".nova-cache" / "hunyuan_dit_inputs" / "cat_walking_4step.safetensors"
+SOURCE = ROOT / ".difflet-cache" / "f3_hunyuan_n4_4d8s1r" / "source"
+OUT_DIR = ROOT / ".difflet-cache" / "f3_hunyuan_n4_4d8s1r" / "compiled" / "teacache_probe_fused"
+BUNDLE = ROOT / ".difflet-cache" / "hunyuan_dit_inputs" / "cat_walking_4step.safetensors"
 META = Path(str(BUNDLE) + ".meta.json")
 
 
 def main() -> int:
-    from nova.backends.trainium.hunyuan_video.teacache_probe import (
+    from difflet.backends.trainium.hunyuan_video.teacache_probe import (
         NeuronHunyuanVideoTeacacheProbeFusedApplication,
     )
-    from nova.models.hunyuan_video.application import create_hunyuan_video_backbone_config
+    from difflet.models.hunyuan_video.application import create_hunyuan_video_backbone_config
 
     meta = json.loads(META.read_text())
     tensors = {
@@ -105,7 +105,7 @@ def main() -> int:
     print(f"[fused] median per-call = {median_ms:.2f} ms  (current probe = ~52 ms)", flush=True)
 
     result = {
-        "schema": "nova-m9-teacache-fused-smoke-v1",
+        "schema": "difflet-m9-teacache-fused-smoke-v1",
         "call1_delta": v0, "call2_delta_same_input": v1,
         "prev_mod_persists": persisted,
         "median_ms_per_call": median_ms,

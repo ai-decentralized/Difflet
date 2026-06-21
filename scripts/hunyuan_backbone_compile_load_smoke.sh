@@ -5,13 +5,13 @@
 # (24 x 128), default M3 shape (320x512x61), tp=4, bf16, skip_warmup=False.
 #
 # Scale to production via env vars:
-#   NOVA_HUNYUAN_N4_NUM_LAYERS=20
-#   NOVA_HUNYUAN_N4_NUM_SINGLE_LAYERS=40
-#   NOVA_HUNYUAN_N4_NUM_REFINER_LAYERS=2
-#   NOVA_HUNYUAN_N4_METRICS=/tmp/hunyuan_n4_prod.json
+#   DIFFLET_HUNYUAN_N4_NUM_LAYERS=20
+#   DIFFLET_HUNYUAN_N4_NUM_SINGLE_LAYERS=40
+#   DIFFLET_HUNYUAN_N4_NUM_REFINER_LAYERS=2
+#   DIFFLET_HUNYUAN_N4_METRICS=/tmp/hunyuan_n4_prod.json
 #
 # Skip the warmup forward (faster iteration, no first-execute coverage):
-#   NOVA_HUNYUAN_N4_SKIP_WARMUP=1
+#   DIFFLET_HUNYUAN_N4_SKIP_WARMUP=1
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -22,7 +22,7 @@ if [[ -d "${NEURON_VENV}/bin" ]]; then
   export PATH="${NEURON_VENV}/bin:${PATH}"
 fi
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
-export NOVA_BACKEND="${NOVA_BACKEND:-trainium}"
+export DIFFLET_BACKEND="${DIFFLET_BACKEND:-trainium}"
 export NEURON_RT_NUM_CORES="${NEURON_RT_NUM_CORES:-4}"
 export NEURON_RT_VIRTUAL_CORE_SIZE="${NEURON_RT_VIRTUAL_CORE_SIZE:-2}"
 

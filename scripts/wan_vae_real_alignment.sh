@@ -17,20 +17,20 @@ export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 export NEURON_RT_NUM_CORES="${NEURON_RT_NUM_CORES:-1}"
 export NEURON_RT_VIRTUAL_CORE_SIZE="${NEURON_RT_VIRTUAL_CORE_SIZE:-2}"
 
-MODEL_DIR="${1:-${NOVA_WAN_MODEL_DIR:-/home/ubuntu/.cache/huggingface/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7}}"
-COMPILED_DIR="${NOVA_WAN_VAE_COMPILED_DIR:-${ROOT}/.nova-cache/wan_vae_decoder_smoke}"
-LATENT_T="${NOVA_WAN_VAE_ALIGN_LATENT_T:-2}"
-LATENT_H="${NOVA_WAN_VAE_ALIGN_LATENT_H:-4}"
-LATENT_W="${NOVA_WAN_VAE_ALIGN_LATENT_W:-6}"
-ATOL="${NOVA_WAN_VAE_ALIGN_ATOL:-1e-6}"
-RTOL="${NOVA_WAN_VAE_ALIGN_RTOL:-1e-6}"
-RUN_NEURON_LOAD="${NOVA_WAN_VAE_RUN_NEURON_LOAD:-1}"
-RUN_NEFF_NUMERIC="${NOVA_WAN_VAE_RUN_NEFF_NUMERIC:-0}"
-NEFF_MAX_ABS_MAX="${NOVA_WAN_VAE_NEFF_MAX_ABS_MAX:-0.25}"
-NEFF_MEAN_ABS_MAX="${NOVA_WAN_VAE_NEFF_MEAN_ABS_MAX:-0.02}"
-NEFF_RMSE_MAX="${NOVA_WAN_VAE_NEFF_RMSE_MAX:-0.025}"
-NEFF_COSINE_MIN="${NOVA_WAN_VAE_NEFF_COSINE_MIN:-0.995}"
-LOCAL_FILES_ONLY="${NOVA_LOCAL_FILES_ONLY:-0}"
+MODEL_DIR="${1:-${DIFFLET_WAN_MODEL_DIR:-/home/ubuntu/.cache/huggingface/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7}}"
+COMPILED_DIR="${DIFFLET_WAN_VAE_COMPILED_DIR:-${ROOT}/.difflet-cache/wan_vae_decoder_smoke}"
+LATENT_T="${DIFFLET_WAN_VAE_ALIGN_LATENT_T:-2}"
+LATENT_H="${DIFFLET_WAN_VAE_ALIGN_LATENT_H:-4}"
+LATENT_W="${DIFFLET_WAN_VAE_ALIGN_LATENT_W:-6}"
+ATOL="${DIFFLET_WAN_VAE_ALIGN_ATOL:-1e-6}"
+RTOL="${DIFFLET_WAN_VAE_ALIGN_RTOL:-1e-6}"
+RUN_NEURON_LOAD="${DIFFLET_WAN_VAE_RUN_NEURON_LOAD:-1}"
+RUN_NEFF_NUMERIC="${DIFFLET_WAN_VAE_RUN_NEFF_NUMERIC:-0}"
+NEFF_MAX_ABS_MAX="${DIFFLET_WAN_VAE_NEFF_MAX_ABS_MAX:-0.25}"
+NEFF_MEAN_ABS_MAX="${DIFFLET_WAN_VAE_NEFF_MEAN_ABS_MAX:-0.02}"
+NEFF_RMSE_MAX="${DIFFLET_WAN_VAE_NEFF_RMSE_MAX:-0.025}"
+NEFF_COSINE_MIN="${DIFFLET_WAN_VAE_NEFF_COSINE_MIN:-0.995}"
+LOCAL_FILES_ONLY="${DIFFLET_LOCAL_FILES_ONLY:-0}"
 
 cd "${ROOT}"
 
@@ -43,11 +43,11 @@ import torch
 from diffusers.models.autoencoders.autoencoder_kl_wan import AutoencoderKLWan
 from huggingface_hub import hf_hub_download
 
-from nova.backends.trainium.wan.vae import NeuronWanVAEDecoderApplication
-from nova.backends.trainium.core.modules.checkpoint import load_state_dict
-from nova.models.wan.application import create_wan_vae_decoder_config
-from nova.models.wan.checkpoint import convert_vae_decoder_state_dict
-from nova.models.wan.vae.modeling_vae import WanVAEDecoderConfig, WanVAEDecoderModel
+from difflet.backends.trainium.wan.vae import NeuronWanVAEDecoderApplication
+from difflet.backends.trainium.core.modules.checkpoint import load_state_dict
+from difflet.models.wan.application import create_wan_vae_decoder_config
+from difflet.models.wan.checkpoint import convert_vae_decoder_state_dict
+from difflet.models.wan.vae.modeling_vae import WanVAEDecoderConfig, WanVAEDecoderModel
 
 model_dir = Path(${MODEL_DIR@Q})
 compiled_dir = Path(${COMPILED_DIR@Q})
@@ -87,11 +87,11 @@ print(f"[wan-vae-align] decoder tensors = {len(converted)}")
 print(f"[wan-vae-align] decoder params  = {sum(v.numel() for v in converted.values())}")
 
 cfg = WanVAEDecoderConfig.from_diffusers_dict(AutoencoderKLWan.load_config(str(vae_dir)))
-nova = WanVAEDecoderModel(cfg).eval()
-missing, unexpected = nova.load_state_dict(converted, strict=True)
+difflet = WanVAEDecoderModel(cfg).eval()
+missing, unexpected = difflet.load_state_dict(converted, strict=True)
 if missing or unexpected:
-    raise RuntimeError(f"Nova strict load mismatch: missing={missing}, unexpected={unexpected}")
-print("[wan-vae-align] nova strict load = ok")
+    raise RuntimeError(f"Difflet strict load mismatch: missing={missing}, unexpected={unexpected}")
+print("[wan-vae-align] difflet strict load = ok")
 
 ref = AutoencoderKLWan.from_pretrained(
     str(model_dir),
@@ -105,16 +105,16 @@ torch.manual_seed(1234)
 latents = torch.randn(1, 16, latent_t, latent_h, latent_w, dtype=torch.float32) * 0.1
 with torch.no_grad():
     ref_out = ref.decode(latents, return_dict=False)[0]
-    nova_out = nova(latents)
+    difflet_out = difflet(latents)
 
-diff = (ref_out - nova_out).abs()
+diff = (ref_out - difflet_out).abs()
 max_abs = float(diff.max())
 mean_abs = float(diff.mean())
 print(f"[wan-vae-align] ref shape    = {tuple(ref_out.shape)}")
-print(f"[wan-vae-align] nova shape   = {tuple(nova_out.shape)}")
+print(f"[wan-vae-align] difflet shape   = {tuple(difflet_out.shape)}")
 print(f"[wan-vae-align] max_abs      = {max_abs:.10g}")
 print(f"[wan-vae-align] mean_abs     = {mean_abs:.10g}")
-if not torch.allclose(ref_out, nova_out, atol=atol, rtol=rtol):
+if not torch.allclose(ref_out, difflet_out, atol=atol, rtol=rtol):
     raise RuntimeError(f"CPU alignment failed: max_abs={max_abs}, mean_abs={mean_abs}, atol={atol}, rtol={rtol}")
 print(f"[wan-vae-align] cpu alignment = ok (atol={atol}, rtol={rtol})")
 

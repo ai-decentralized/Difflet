@@ -39,20 +39,20 @@ ensure_runtime_python()
 
 import torch  # noqa: E402
 
-SOURCE = ROOT / ".nova-cache" / "f3_hunyuan_n4_4d8s1r" / "source"
-COMPILED = ROOT / ".nova-cache" / "f3_hunyuan_n4_4d8s1r" / "compiled"
+SOURCE = ROOT / ".difflet-cache" / "f3_hunyuan_n4_4d8s1r" / "source"
+COMPILED = ROOT / ".difflet-cache" / "f3_hunyuan_n4_4d8s1r" / "compiled"
 CALIB = ROOT / "cclogs" / "m9-teacache" / "calibration_hunyuan_video_n4_4d8s1r_50step_t2.0.json"
-BUNDLE_DIR = ROOT / ".nova-cache" / "hunyuan_dit_inputs" / "m9_calib_50step"
+BUNDLE_DIR = ROOT / ".difflet-cache" / "hunyuan_dit_inputs" / "m9_calib_50step"
 NUM_STEPS = 50
 
 
 def main() -> int:
-    from nova.models.hunyuan_video.application import (
+    from difflet.models.hunyuan_video.application import (
         HunyuanVideoDiTInputBundle,
         NeuronHunyuanVideoApplication,
     )
-    from nova.pipeline.parallel_config import NovaParallelConfig
-    from nova.pipeline.teacache import TeaCacheCalibration, TeaCacheController
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
     from scripts.verify_teacache_speedup import (
         _build_hv_bundle,
         _load_hv_bundle,
@@ -67,7 +67,7 @@ def main() -> int:
 
     app = NeuronHunyuanVideoApplication(
         model_path=str(SOURCE),
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype=torch.bfloat16,
         shape={"height": int(first_meta["height"]), "width": int(first_meta["width"]),
                "num_frames": int(first_meta["num_frames"])},
@@ -110,7 +110,7 @@ def main() -> int:
     fused_total = sum(fused_times)
 
     result = {
-        "schema": "nova-m9-teacache-fused-e2e-v1",
+        "schema": "difflet-m9-teacache-fused-e2e-v1",
         "num_steps": NUM_STEPS, "n_bundles": len(records),
         "baseline_total_s": base_total, "fused_total_s": fused_total,
         "measured_speedup": base_total / fused_total,

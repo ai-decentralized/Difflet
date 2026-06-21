@@ -11,7 +11,7 @@ works, with the *relative-L1* signal. This run:
      bundles, baseline vs fused, reporting speedup + trajectory/final cosine.
 
 The probe now returns relative L1 (mean|mod-prev|/mean|prev|) — see
-nova/backends/trainium/qwen_image/teacache_probe_fused.py.
+difflet/backends/trainium/qwen_image/teacache_probe_fused.py.
 """
 
 from __future__ import annotations
@@ -45,8 +45,8 @@ ensure_runtime_python()
 
 import torch  # noqa: E402
 
-from nova.models.qwen_image.application import QwenImageDiTInputBundle  # noqa: E402
-from nova.pipeline.teacache import TeaCacheCalibration, TeaCacheController
+from difflet.models.qwen_image.application import QwenImageDiTInputBundle  # noqa: E402
+from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
 from scripts.run_qwen_teacache_e2e import (
     BUNDLE_DIR,
     CCLOG,
@@ -79,7 +79,7 @@ def _pearson(a: list[float], b: list[float]) -> float:
 def _collect_rel_corr(app, tensors, num_steps: int) -> list[tuple[float, float]]:
     """Per step, the device relative-L1 of the block-0 mod_input and the host
     relative-L1 of the noise_pred. Confirms the signal predicts the output."""
-    from nova.models.qwen_image.pipeline import _batch_timestep, _component_dtype, _first_tensor
+    from difflet.models.qwen_image.pipeline import _batch_timestep, _component_dtype, _first_tensor
 
     pipe = app.pipeline
     bundle = _build_bundle(tensors)
@@ -113,13 +113,13 @@ def _collect_rel_corr(app, tensors, num_steps: int) -> list[tuple[float, float]]
 
 
 def _build_and_load_app(args):
-    from nova.models.qwen_image.application import NeuronQwenImageApplication
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.models.qwen_image.application import NeuronQwenImageApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     _setup_compiled_dir(Path(args.transformer_cache))
     app = NeuronQwenImageApplication(
         model_path=args.model_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=torch.bfloat16,
         shape={"height": args.height, "width": args.width},
         text_seq_len=args.text_seq_len,
@@ -241,7 +241,7 @@ def main() -> int:
         )
 
     doc = {
-        "schema": "nova-m9-teacache-relL1-sweep-v1",
+        "schema": "difflet-m9-teacache-relL1-sweep-v1",
         "model": MODEL,
         "shape_label": "1024x1024",
         "num_steps": int(args.num_steps),

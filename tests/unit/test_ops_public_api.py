@@ -1,6 +1,6 @@
 def test_collective_public_aliases_resolve():
-    from nova.ops import get_tp_rank, get_tp_size, reduce_tp
-    from nova.ops.collectives import gather_tp_dim, scatter_tp_dim
+    from difflet.ops import get_tp_rank, get_tp_size, reduce_tp
+    from difflet.ops.collectives import gather_tp_dim, scatter_tp_dim
 
     assert callable(gather_tp_dim)
     assert callable(reduce_tp)
@@ -10,10 +10,10 @@ def test_collective_public_aliases_resolve():
 
 
 def test_mx_public_aliases_resolve_for_cpu_backend(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
-    from nova.ops import dequantize_mx, linear_mx, matmul_mx, quantize_mx
-    from nova.ops.mx import matmul_mx as module_matmul_mx
+    from difflet.ops import dequantize_mx, linear_mx, matmul_mx, quantize_mx
+    from difflet.ops.mx import matmul_mx as module_matmul_mx
 
     assert callable(dequantize_mx)
     assert callable(linear_mx)
@@ -23,9 +23,9 @@ def test_mx_public_aliases_resolve_for_cpu_backend(monkeypatch):
 
 
 def test_mx_public_aliases_resolve_for_trainium_backend(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "trainium")
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
 
-    from nova.ops import dequantize_mx, linear_mx, matmul_mx, quantize_mx
+    from difflet.ops import dequantize_mx, linear_mx, matmul_mx, quantize_mx
 
     assert callable(dequantize_mx)
     assert callable(linear_mx)
@@ -36,7 +36,7 @@ def test_mx_public_aliases_resolve_for_trainium_backend(monkeypatch):
 def test_trainium_gather_tp_dim_uses_nxd_gather_dim_keyword(monkeypatch):
     import torch
 
-    from nova.backends.trainium.ops_impl import collectives
+    from difflet.backends.trainium.ops_impl import collectives
 
     seen = {}
 
@@ -59,7 +59,7 @@ def test_trainium_gather_tp_dim_uses_nxd_gather_dim_keyword(monkeypatch):
 def test_trainium_scatter_tp_dim_slices_requested_dimension(monkeypatch):
     import torch
 
-    from nova.backends.trainium.ops_impl import collectives
+    from difflet.backends.trainium.ops_impl import collectives
 
     monkeypatch.setattr(collectives, "get_tensor_model_parallel_size", lambda: 2)
     monkeypatch.setattr(collectives, "get_tensor_model_parallel_rank", lambda: 1)
@@ -75,7 +75,7 @@ def test_trainium_scatter_tp_dim_slices_requested_dimension(monkeypatch):
 def test_trainium_scatter_tp_dim_returns_input_for_tp_one(monkeypatch):
     import torch
 
-    from nova.backends.trainium.ops_impl import collectives
+    from difflet.backends.trainium.ops_impl import collectives
 
     monkeypatch.setattr(collectives, "get_tensor_model_parallel_size", lambda: 1)
 
@@ -87,20 +87,20 @@ def test_trainium_scatter_tp_dim_returns_input_for_tp_one(monkeypatch):
 
 
 def test_attention_public_alias_resolves_to_trainium_impl(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "trainium")
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
 
-    from nova.ops import attention, cross_attention
+    from difflet.ops import attention, cross_attention
 
     assert callable(attention)
     assert callable(cross_attention)
 
 
 def test_apply_rotary_emb_matches_wan_formula(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "trainium")
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
 
     import torch
 
-    from nova.ops.embeddings import apply_rotary_emb
+    from difflet.ops.embeddings import apply_rotary_emb
 
     hidden = torch.tensor([[[[1.0, 2.0, 3.0, 4.0]]]])
     cos = torch.tensor([[[[10.0, 20.0, 30.0, 40.0]]]])
@@ -117,9 +117,9 @@ def test_apply_rotary_emb_matches_wan_formula(monkeypatch):
 
 
 def test_cpu_backend_registry_resolves(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
-    from nova.backends import get_backend
+    from difflet.backends import get_backend
 
     backend = get_backend()
     assert backend.name == "cpu"
@@ -127,11 +127,11 @@ def test_cpu_backend_registry_resolves(monkeypatch):
 
 
 def test_cpu_ops_run_on_regular_torch_tensors(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     import torch
 
-    from nova.ops import RMSNorm, attention, gather_tp_dim
+    from difflet.ops import RMSNorm, attention, gather_tp_dim
 
     norm = RMSNorm(4)
     x = torch.ones((1, 2, 4), dtype=torch.float32)

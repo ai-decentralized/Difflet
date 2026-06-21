@@ -40,8 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--model-dir",
-        default=os.environ.get("NOVA_QWEN_IMAGE_MODEL_DIR", ""),
-        help="Local Qwen-Image snapshot dir. Env: NOVA_QWEN_IMAGE_MODEL_DIR.",
+        default=os.environ.get("DIFFLET_QWEN_IMAGE_MODEL_DIR", ""),
+        help="Local Qwen-Image snapshot dir. Env: DIFFLET_QWEN_IMAGE_MODEL_DIR.",
     )
     parser.add_argument("--prompt", action="append", default=None)
     parser.add_argument("--height", type=int, default=1024)
@@ -58,15 +58,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--guidance-scale", type=float, default=4.0)
     parser.add_argument(
         "--bundle",
-        default=".nova-cache/qwen_image_dit_inputs/full_1024_4step.safetensors",
+        default=".difflet-cache/qwen_image_dit_inputs/full_1024_4step.safetensors",
     )
     parser.add_argument(
         "--cache-dir",
-        default=".nova-cache/qwen_image_transformer_full",
+        default=".difflet-cache/qwen_image_transformer_full",
     )
     parser.add_argument(
         "--metrics-out",
-        default="/tmp/nova_qwen_image_full_transformer_parity_metrics.json",
+        default="/tmp/difflet_qwen_image_full_transformer_parity_metrics.json",
     )
     parser.add_argument("--reference-mode", choices=("trace", "diffusers"), default="trace")
     parser.add_argument("--min-cosine", type=float, default=0.999)
@@ -141,7 +141,7 @@ def main() -> int:
     args = build_parser().parse_args()
     if not args.model_dir:
         print(
-            "[qwen-full] --model-dir or NOVA_QWEN_IMAGE_MODEL_DIR is required for full closure",
+            "[qwen-full] --model-dir or DIFFLET_QWEN_IMAGE_MODEL_DIR is required for full closure",
             file=sys.stderr,
         )
         return 2
@@ -161,7 +161,7 @@ def main() -> int:
     env = os.environ.copy()
     env["PATH"] = f"{NEURON_VENV / 'bin'}:{env.get('PATH', '')}"
     env["PYTHONPATH"] = f"{ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
-    env.setdefault("NOVA_BACKEND", "trainium")
+    env.setdefault("DIFFLET_BACKEND", "trainium")
     env.setdefault("NEURON_RT_NUM_CORES", str(args.tp_degree))
     env.setdefault("NEURON_RT_VIRTUAL_CORE_SIZE", "2")
 

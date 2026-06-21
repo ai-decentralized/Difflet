@@ -31,13 +31,13 @@ ensure_runtime_python()
 
 import torch  # noqa: E402
 
-from nova.backends.trainium.core.config import NeuronConfig  # noqa: E402
-from nova.backends.trainium.hunyuan_video.vae15 import (  # noqa: E402
+from difflet.backends.trainium.core.config import NeuronConfig  # noqa: E402
+from difflet.backends.trainium.hunyuan_video.vae15 import (  # noqa: E402
     HunyuanVideo15VAEDecoderInferenceConfig,
     HunyuanVideo15VAEDecoderModel,
     NeuronHunyuanVideo15VAEDecoderApplication,
 )
-from nova.utils.diffusers_adapter import load_diffusers_config  # noqa: E402
+from difflet.utils.diffusers_adapter import load_diffusers_config  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-compile", action="store_true")
     parser.add_argument("--skip-reference", action="store_true")
     parser.add_argument("--skip-warmup", action="store_true")
-    parser.add_argument("--metrics-out", default="/tmp/nova_hunyuan15_vae15_parity_metrics.json")
+    parser.add_argument("--metrics-out", default="/tmp/difflet_hunyuan15_vae15_parity_metrics.json")
     return parser
 
 

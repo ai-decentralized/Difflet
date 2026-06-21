@@ -29,8 +29,8 @@ def ensure_runtime_python() -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model-dir", default="/tmp/nova_ltx2_tiny_model")
-    parser.add_argument("--cache-dir", default="/tmp/nova_ltx2_tiny_cache")
+    parser.add_argument("--model-dir", default="/tmp/difflet_ltx2_tiny_model")
+    parser.add_argument("--cache-dir", default="/tmp/difflet_ltx2_tiny_cache")
     parser.add_argument("--height", type=int, default=64)
     parser.add_argument("--width", type=int, default=64)
     parser.add_argument("--num-frames", type=int, default=9)
@@ -83,8 +83,8 @@ def create_tiny_model(model_dir: Path) -> None:
 def _make_bundle(pipe):
     import torch
 
-    from nova.models.ltx_2.application import LTX2DiTInputBundle
-    from nova.models.ltx_2.pipeline import make_ltx_2_audio_coords, make_ltx_2_video_coords
+    from difflet.models.ltx_2.application import LTX2DiTInputBundle
+    from difflet.models.ltx_2.pipeline import make_ltx_2_audio_coords, make_ltx_2_video_coords
 
     contract = pipe.app.dit_input_contract()
     cfg = pipe.app.transformer.config
@@ -141,7 +141,7 @@ def main() -> None:
     ensure_runtime_python()
     import torch
 
-    from nova import NovaParallelConfig, NovaPipeline
+    from difflet import DiffletParallelConfig, DiffletPipeline
 
     args = build_parser().parse_args()
     model_dir = Path(args.model_dir)
@@ -152,10 +152,10 @@ def main() -> None:
                 shutil.rmtree(path)
     create_tiny_model(model_dir)
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="ltx_2",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=torch.bfloat16,
         height=args.height,
         width=args.width,
@@ -178,7 +178,7 @@ def main() -> None:
     if args.load:
         from safetensors.torch import load_file
 
-        from nova.backends.trainium.ltx_2.transformer import _LTX2TransformerTraceModule
+        from difflet.backends.trainium.ltx_2.transformer import _LTX2TransformerTraceModule
 
         bundle = _make_bundle(pipe)
         video_out, audio_out = pipe(bundle)

@@ -21,27 +21,27 @@ if [[ -d "${NEURON_VENV}/bin" ]]; then
   export PATH="${NEURON_VENV}/bin:${PATH}"
 fi
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
-export NOVA_BACKEND="${NOVA_BACKEND:-trainium}"
+export DIFFLET_BACKEND="${DIFFLET_BACKEND:-trainium}"
 export NEURON_RT_VIRTUAL_CORE_SIZE="${NEURON_RT_VIRTUAL_CORE_SIZE:-2}"
 
-MODEL="${NOVA_WAN_MODEL:-Wan-AI/Wan2.2-T2V-A14B-Diffusers}"
-HEIGHT="${NOVA_WAN_HEIGHT:-480}"
-WIDTH="${NOVA_WAN_WIDTH:-832}"
-FRAMES="${NOVA_WAN_FRAMES:-9}"
-TP_DEGREE="${NOVA_WAN_TP_DEGREE:-4}"
-NUM_STEPS="${NOVA_WAN_STEPS:-2}"
-PROMPT="${NOVA_WAN_PROMPT:-a cat walking}"
-LATENTS_PATH="${NOVA_WAN_LATENTS_PATH:-${ROOT}/.nova-cache/wan_smoke_latents.pt}"
-OUTPUT="${NOVA_WAN_OUTPUT:-/tmp/wan_smoke.mp4}"
+MODEL="${DIFFLET_WAN_MODEL:-Wan-AI/Wan2.2-T2V-A14B-Diffusers}"
+HEIGHT="${DIFFLET_WAN_HEIGHT:-480}"
+WIDTH="${DIFFLET_WAN_WIDTH:-832}"
+FRAMES="${DIFFLET_WAN_FRAMES:-9}"
+TP_DEGREE="${DIFFLET_WAN_TP_DEGREE:-4}"
+NUM_STEPS="${DIFFLET_WAN_STEPS:-2}"
+PROMPT="${DIFFLET_WAN_PROMPT:-a cat walking}"
+LATENTS_PATH="${DIFFLET_WAN_LATENTS_PATH:-${ROOT}/.difflet-cache/wan_smoke_latents.pt}"
+OUTPUT="${DIFFLET_WAN_OUTPUT:-/tmp/wan_smoke.mp4}"
 DOWNLOAD_FLAG=""
-if [[ "${NOVA_WAN_DOWNLOAD_WEIGHTS:-0}" == "1" ]]; then
+if [[ "${DIFFLET_WAN_DOWNLOAD_WEIGHTS:-0}" == "1" ]]; then
   DOWNLOAD_FLAG="--download-weights"
 fi
 
 cd "${ROOT}"
 
 echo "[wan-smoke] stage 1/2: text + transformer -> latents"
-NEURON_RT_NUM_CORES=${NOVA_WAN_TRANSFORMER_NUM_CORES:-4} \
+NEURON_RT_NUM_CORES=${DIFFLET_WAN_TRANSFORMER_NUM_CORES:-4} \
   "${PYTHON_BIN}" examples/wan_example.py \
     --model "${MODEL}" \
     --tp-degree "${TP_DEGREE}" \
@@ -52,11 +52,11 @@ NEURON_RT_NUM_CORES=${NOVA_WAN_TRANSFORMER_NUM_CORES:-4} \
     --enable-text --enable-transformer --no-vae \
     --output-type latent \
     --save-latents "${LATENTS_PATH}" \
-    --compiled-dir "${ROOT}/.nova-cache/wan_smoke_stage1" \
+    --compiled-dir "${ROOT}/.difflet-cache/wan_smoke_stage1" \
     ${DOWNLOAD_FLAG}
 
 echo "[wan-smoke] stage 2/2: vae decode -> tensor (mp4 best-effort)"
-NEURON_RT_NUM_CORES=${NOVA_WAN_VAE_NUM_CORES:-1} \
+NEURON_RT_NUM_CORES=${DIFFLET_WAN_VAE_NUM_CORES:-1} \
   "${PYTHON_BIN}" examples/wan_example.py \
     --model "${MODEL}" \
     --tp-degree 1 \
@@ -66,7 +66,7 @@ NEURON_RT_NUM_CORES=${NOVA_WAN_VAE_NUM_CORES:-1} \
     --load-latents "${LATENTS_PATH}" \
     --output-type pt \
     --output "${OUTPUT}" \
-    --compiled-dir "${ROOT}/.nova-cache/wan_smoke_stage2" \
+    --compiled-dir "${ROOT}/.difflet-cache/wan_smoke_stage2" \
     ${DOWNLOAD_FLAG}
 
 FALLBACK_OUTPUT="${OUTPUT%.*}.pt"

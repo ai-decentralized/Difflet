@@ -14,7 +14,7 @@ reduced layer count to keep iteration time bounded; env vars or CLI flags
 let callers scale to full ``20+40+1``/``20+40+2``.
 
 The diffusers reference model is used purely to generate a state dict
-whose keys match Nova's ``HunyuanVideoTransformer3DModel`` — see the
+whose keys match Difflet's ``HunyuanVideoTransformer3DModel`` — see the
 ``test_hunyuan_video_transformer3d_model_matches_diffusers_*`` tests for
 the equivalence proof.
 """
@@ -34,32 +34,32 @@ import torch
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--num-layers", type=int,
-                        default=int(os.environ.get("NOVA_HUNYUAN_N4_NUM_LAYERS", "4")))
+                        default=int(os.environ.get("DIFFLET_HUNYUAN_N4_NUM_LAYERS", "4")))
     parser.add_argument("--num-single-layers", type=int,
-                        default=int(os.environ.get("NOVA_HUNYUAN_N4_NUM_SINGLE_LAYERS", "8")))
+                        default=int(os.environ.get("DIFFLET_HUNYUAN_N4_NUM_SINGLE_LAYERS", "8")))
     parser.add_argument("--num-refiner-layers", type=int,
-                        default=int(os.environ.get("NOVA_HUNYUAN_N4_NUM_REFINER_LAYERS", "1")))
+                        default=int(os.environ.get("DIFFLET_HUNYUAN_N4_NUM_REFINER_LAYERS", "1")))
     parser.add_argument("--height", type=int,
-                        default=int(os.environ.get("NOVA_HUNYUAN_N4_HEIGHT", "320")))
+                        default=int(os.environ.get("DIFFLET_HUNYUAN_N4_HEIGHT", "320")))
     parser.add_argument("--width", type=int,
-                        default=int(os.environ.get("NOVA_HUNYUAN_N4_WIDTH", "512")))
+                        default=int(os.environ.get("DIFFLET_HUNYUAN_N4_WIDTH", "512")))
     parser.add_argument("--num-frames", type=int,
-                        default=int(os.environ.get("NOVA_HUNYUAN_N4_FRAMES", "61")))
+                        default=int(os.environ.get("DIFFLET_HUNYUAN_N4_FRAMES", "61")))
     parser.add_argument("--text-seq-len", type=int,
-                        default=int(os.environ.get("NOVA_HUNYUAN_N4_TEXT_SEQ_LEN", "256")))
+                        default=int(os.environ.get("DIFFLET_HUNYUAN_N4_TEXT_SEQ_LEN", "256")))
     parser.add_argument("--heads", type=int,
-                        default=int(os.environ.get("NOVA_HUNYUAN_N4_HEADS", "24")))
+                        default=int(os.environ.get("DIFFLET_HUNYUAN_N4_HEADS", "24")))
     parser.add_argument("--head-dim", type=int,
-                        default=int(os.environ.get("NOVA_HUNYUAN_N4_HEAD_DIM", "128")))
+                        default=int(os.environ.get("DIFFLET_HUNYUAN_N4_HEAD_DIM", "128")))
     parser.add_argument("--mlp-ratio", type=float,
-                        default=float(os.environ.get("NOVA_HUNYUAN_N4_MLP_RATIO", "4.0")))
+                        default=float(os.environ.get("DIFFLET_HUNYUAN_N4_MLP_RATIO", "4.0")))
     parser.add_argument("--tp-degree", type=int,
-                        default=int(os.environ.get("NOVA_HUNYUAN_N4_TP_DEGREE", "4")))
+                        default=int(os.environ.get("DIFFLET_HUNYUAN_N4_TP_DEGREE", "4")))
     parser.add_argument("--work-dir",
                         default=os.environ.get(
-                            "NOVA_HUNYUAN_N4_WORK_DIR", ".nova-cache/hunyuan_n4_smoke"))
+                            "DIFFLET_HUNYUAN_N4_WORK_DIR", ".difflet-cache/hunyuan_n4_smoke"))
     parser.add_argument("--skip-warmup", action="store_true",
-                        default=os.environ.get("NOVA_HUNYUAN_N4_SKIP_WARMUP", "0") == "1")
+                        default=os.environ.get("DIFFLET_HUNYUAN_N4_SKIP_WARMUP", "0") == "1")
     parser.add_argument("--seed", type=int, default=20260510)
     return parser.parse_args()
 
@@ -90,9 +90,9 @@ def write_synthetic_transformer_dir(transformer_dir: Path, args: argparse.Namesp
     """Create transformer/config.json + diffusion_pytorch_model.safetensors.
 
     Uses the diffusers reference module to generate a state_dict whose key
-    set matches Nova's HunyuanVideoTransformer3DModel exactly (the
+    set matches Difflet's HunyuanVideoTransformer3DModel exactly (the
     test_hunyuan_video_transformer3d_model_matches_diffusers_* tests
-    prove this). We do this here, before any nova.ops import, so that the
+    prove this). We do this here, before any difflet.ops import, so that the
     process-wide backend dispatch stays free to bind to trainium below.
     """
     from diffusers.models.transformers.transformer_hunyuan_video import (
@@ -117,15 +117,15 @@ def write_synthetic_transformer_dir(transformer_dir: Path, args: argparse.Namesp
 
 
 def run_compile_load(transformer_dir: Path, compiled_dir: Path, args: argparse.Namespace) -> dict:
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
 
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.backends.trainium.core.application_base import is_compiled
-    from nova.backends.trainium.hunyuan_video.backbone import (
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.core.application_base import is_compiled
+    from difflet.backends.trainium.hunyuan_video.backbone import (
         HunyuanVideoBackboneInferenceConfig,
         NeuronHunyuanVideoBackboneApplication,
     )
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     neuron_config = NeuronConfig(
         batch_size=1,
@@ -203,7 +203,7 @@ def main() -> int:
     write_synthetic_transformer_dir(transformer_dir, args)
     metrics = run_compile_load(transformer_dir, compiled_dir, args)
 
-    metrics_path = os.environ.get("NOVA_HUNYUAN_N4_METRICS")
+    metrics_path = os.environ.get("DIFFLET_HUNYUAN_N4_METRICS")
     if metrics_path:
         Path(metrics_path).parent.mkdir(parents=True, exist_ok=True)
         Path(metrics_path).write_text(json.dumps(metrics, indent=2))

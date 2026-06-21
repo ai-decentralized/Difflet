@@ -20,7 +20,7 @@ for path in (ROOT, SCRIPTS):
         sys.path.insert(0, str(path))
 
 from hunyuan15_transformer_parity import _load_bundle_inputs, _load_config  # noqa: E402
-from nova.backends.cpu.ops_impl import mx as cpu_mx  # noqa: E402
+from difflet.backends.cpu.ops_impl import mx as cpu_mx  # noqa: E402
 
 
 TARGETS: dict[str, str] = {

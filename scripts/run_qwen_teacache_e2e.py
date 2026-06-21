@@ -55,7 +55,7 @@ import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 from safetensors.torch import load_file as load_safetensors_file  # noqa: E402
 
-from nova.models.qwen_image.application import QwenImageDiTInputBundle  # noqa: E402
+from difflet.models.qwen_image.application import QwenImageDiTInputBundle  # noqa: E402
 from scripts.calibrate_teacache import (  # noqa: E402
     _fit_poly,
     _mark_step,
@@ -68,10 +68,10 @@ from scripts.calibrate_teacache import (  # noqa: E402
 MODEL = "qwen_image"
 DEFAULT_MODEL_DIR = "/home/ubuntu/.cache/huggingface/hub/qwen-image-real"
 DEFAULT_TRANSFORMER_CACHE = (
-    ROOT / ".nova-cache" / "qwen_image_transformer_full" / "qwen_image"
+    ROOT / ".difflet-cache" / "qwen_image_transformer_full" / "qwen_image"
 )
-BUNDLE_DIR = ROOT / ".nova-cache" / "qwen_image_dit_inputs" / "m9_calib_50step"
-COMPILED = ROOT / ".nova-cache" / "qwen_m9_e2e" / "compiled"
+BUNDLE_DIR = ROOT / ".difflet-cache" / "qwen_image_dit_inputs" / "m9_calib_50step"
+COMPILED = ROOT / ".difflet-cache" / "qwen_m9_e2e" / "compiled"
 CCLOG = ROOT / "cclogs" / "m9-teacache"
 
 
@@ -150,7 +150,7 @@ def _collect_pairs(app, tensors, num_steps: int, split: str) -> list[dict[str, A
     """Manual loop: per step record the device delta (mod_input diff vs prev
     step) and the host noise_pred diff. Step 0 is skipped (prev_mod carries the
     previous bundle's last mod_input; warmup absorbs it)."""
-    from nova.models.qwen_image.pipeline import _batch_timestep, _component_dtype, _first_tensor
+    from difflet.models.qwen_image.pipeline import _batch_timestep, _component_dtype, _first_tensor
 
     pipe = app.pipeline
     bundle = _build_bundle(tensors)
@@ -240,9 +240,9 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
-    from nova.models.qwen_image.application import NeuronQwenImageApplication
-    from nova.pipeline.parallel_config import NovaParallelConfig
-    from nova.pipeline.teacache import TeaCacheCalibration, TeaCacheController
+    from difflet.models.qwen_image.application import NeuronQwenImageApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
 
     calib_bundles = sorted(BUNDLE_DIR.glob("calibration_*.safetensors"))
     holdout_bundles = sorted(BUNDLE_DIR.glob("holdout_*.safetensors"))
@@ -258,7 +258,7 @@ def main() -> int:
 
     app = NeuronQwenImageApplication(
         model_path=args.model_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=torch.bfloat16,
         shape={"height": args.height, "width": args.width},
         text_seq_len=args.text_seq_len,
@@ -323,7 +323,7 @@ def main() -> int:
 
     # Save pairs so the fit can be re-derived offline without re-running HW.
     pairs_doc = {
-        "schema": "nova-m9-teacache-pairs-v1",
+        "schema": "difflet-m9-teacache-pairs-v1",
         "model": MODEL,
         "shape_label": shape_label,
         "num_steps": int(args.num_steps),
@@ -394,7 +394,7 @@ def main() -> int:
     final_cos = min(fcos)
 
     ab = {
-        "schema": "nova-m9-teacache-fused-e2e-v1",
+        "schema": "difflet-m9-teacache-fused-e2e-v1",
         "model": MODEL,
         "shape_label": shape_label,
         "num_steps": int(args.num_steps),
@@ -413,7 +413,7 @@ def main() -> int:
     (CCLOG / "qwen_fused_e2e_ab.json").write_text(json.dumps(ab, indent=2, sort_keys=True) + "\n")
 
     curve = {
-        "schema": "nova-m9-teacache-speedup-curve-v1",
+        "schema": "difflet-m9-teacache-speedup-curve-v1",
         "model": MODEL,
         "shape_label": shape_label,
         "num_steps": int(args.num_steps),
@@ -436,7 +436,7 @@ def main() -> int:
     )
 
     integration = {
-        "schema": "nova-m9-teacache-integration-v1",
+        "schema": "difflet-m9-teacache-integration-v1",
         "model": MODEL,
         "shape_label": shape_label,
         "num_steps": int(args.num_steps),

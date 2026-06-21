@@ -20,8 +20,8 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from nova.pipeline.teacache import TeaCacheCalibration
-from nova.pipeline.teacache_gate import build_calibration
+from difflet.pipeline.teacache import TeaCacheCalibration
+from difflet.pipeline.teacache_gate import build_calibration
 
 
 def _load_pairs(path: str):

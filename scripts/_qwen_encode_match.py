@@ -29,8 +29,8 @@ SNAP = glob.glob(
 )[0]
 ENC = f"{SNAP}/text_encoder"
 TOK = f"{SNAP}/tokenizer"
-OUT = "/home/ubuntu/nova/.nova-cache/qwen_qwen25vl_enc"
-BUNDLE = "/home/ubuntu/nova/.nova-cache/qwen_image_dit_inputs/full_1024_4step.safetensors"
+OUT = "/home/ubuntu/difflet/.difflet-cache/qwen_qwen25vl_enc"
+BUNDLE = "/home/ubuntu/difflet/.difflet-cache/qwen_image_dit_inputs/full_1024_4step.safetensors"
 
 DROP_IDX = 34  # prompt_template_encode_start_idx
 SEQ = 256  # device bucket (templated prompt is short; valid tokens are mask-independent of pad)

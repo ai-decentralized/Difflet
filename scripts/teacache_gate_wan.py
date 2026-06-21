@@ -1,6 +1,6 @@
 """Thin Wan adapter onto the unified gate (cclog 92).
 
-Validates that ``nova.pipeline.teacache_gate.run_gate`` — the model-agnostic gate core —
+Validates that ``difflet.pipeline.teacache_gate.run_gate`` — the model-agnostic gate core —
 reproduces the existing per-model Wan gate when driven by the REAL transformer. Reuses
 the existing gate's heavy helpers (transformer load, block-0 hook, inputs); the only new
 code is the 3 thin callables (init_latent / step_fn / advance_fn). Random embeds (matches
@@ -8,8 +8,8 @@ the original gate's ~0.99 random-embed Pearson — a wiring check, not the produ
 the production online_delta calib is emitted separately, cclog 91/92).
 
 Run:
-  PATH=/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin:$PATH NOVA_BACKEND=cpu \
-  PYTHONPATH=/home/ubuntu/nova \
+  PATH=/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin:$PATH DIFFLET_BACKEND=cpu \
+  PYTHONPATH=/home/ubuntu/difflet \
   /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python scripts/teacache_gate_wan.py --steps 16
 """
 
@@ -29,7 +29,7 @@ from wan_teacache_cpu_gate import (  # noqa: E402
     resolve_transformer_dir,
 )
 
-from nova.pipeline.teacache_gate import run_gate  # noqa: E402
+from difflet.pipeline.teacache_gate import run_gate  # noqa: E402
 
 
 def main():

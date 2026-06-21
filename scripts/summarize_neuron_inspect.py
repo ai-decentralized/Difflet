@@ -233,7 +233,7 @@ def main() -> int:
         for step, cluster, window in zip(steps, clusters, windows)
     ]
     result = {
-        "schema": "nova-f3-denoise-loop-neuron-inspect-summary-v1",
+        "schema": "difflet-f3-denoise-loop-neuron-inspect-summary-v1",
         "denoise_json": args.denoise_json,
         "inspect_json": args.inspect_json,
         "model_name_contains": args.model_name_contains,

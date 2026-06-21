@@ -47,7 +47,7 @@ ensure_runtime_python()
 
 import torch  # noqa: E402
 
-from nova.pipeline.teacache import TeaCacheCalibration, TeaCacheController  # noqa: E402
+from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController  # noqa: E402
 from scripts.run_qwen_teacache_e2e import (  # noqa: E402
     BUNDLE_DIR,
     CCLOG,
@@ -106,7 +106,7 @@ def main() -> int:
     ap.add_argument("--model-dir", default="/home/ubuntu/.cache/huggingface/hub/qwen-image-real")
     ap.add_argument("--scheduler-id", default="Qwen/Qwen-Image")
     ap.add_argument("--transformer-cache",
-                    default=str(ROOT / ".nova-cache" / "qwen_image_transformer_full" / "qwen_image"))
+                    default=str(ROOT / ".difflet-cache" / "qwen_image_transformer_full" / "qwen_image"))
     ap.add_argument("--num-steps", type=int, default=50)
     ap.add_argument("--tp-degree", type=int, default=4)
     ap.add_argument("--height", type=int, default=1024)
@@ -136,7 +136,7 @@ def main() -> int:
                          _controller_calib(args.num_steps, args.threshold))
 
     doc = {
-        "schema": "nova-m9-teacache-fixed-cadence-ab-v1",
+        "schema": "difflet-m9-teacache-fixed-cadence-ab-v1",
         "model": "qwen_image", "shape_label": "1024x1024", "num_steps": args.num_steps,
         "n_bundles": len(bundles), "warmup": WARMUP, "cooldown": COOLDOWN,
         "cadence": args.cadence, "controller_threshold": args.threshold,

@@ -54,7 +54,7 @@ def test_calibrate_teacache_preflight_rejects_missing_trainium_mod_input_hook():
 def test_verify_teacache_speedup_marks_gate_crossing_candidate():
     result = verify(
         {
-            "schema": "nova-m9-teacache-speedup-candidates-v1",
+            "schema": "difflet-m9-teacache-speedup-candidates-v1",
             "model": "hunyuan_video",
             "shape_label": "320x512x61",
             "num_steps": 50,
@@ -92,7 +92,7 @@ def test_verify_teacache_collection_requires_explicit_hardware_ack():
 
 def test_audit_m9_rejects_hidden_state_proxy_calibration(tmp_path):
     calibration = {
-        "schema": "nova-m9-teacache-calibration-v1",
+        "schema": "difflet-m9-teacache-calibration-v1",
         "model": "hunyuan_video",
         "shape_label": "320x512x61",
         "num_steps": 50,
@@ -104,7 +104,7 @@ def test_audit_m9_rejects_hidden_state_proxy_calibration(tmp_path):
         "hardware_measured": True,
     }
     speedup = {
-        "schema": "nova-m9-teacache-speedup-curve-v1",
+        "schema": "difflet-m9-teacache-speedup-curve-v1",
         "model": "hunyuan_video",
         "shape_label": "320x512x61",
         "num_steps": 50,
@@ -139,7 +139,7 @@ def test_audit_m9_rejects_hidden_state_proxy_calibration(tmp_path):
 
 def test_audit_m9_requires_calibration_speedup_and_integration_to_close(tmp_path):
     calibration = {
-        "schema": "nova-m9-teacache-calibration-v1",
+        "schema": "difflet-m9-teacache-calibration-v1",
         "model": "hunyuan_video",
         "shape_label": "320x512x61",
         "num_steps": 50,
@@ -151,7 +151,7 @@ def test_audit_m9_requires_calibration_speedup_and_integration_to_close(tmp_path
         "hardware_measured": True,
     }
     speedup = {
-        "schema": "nova-m9-teacache-speedup-curve-v1",
+        "schema": "difflet-m9-teacache-speedup-curve-v1",
         "model": "hunyuan_video",
         "shape_label": "320x512x61",
         "num_steps": 50,
@@ -166,7 +166,7 @@ def test_audit_m9_requires_calibration_speedup_and_integration_to_close(tmp_path
         ],
     }
     integration = {
-        "schema": "nova-m9-teacache-integration-v1",
+        "schema": "difflet-m9-teacache-integration-v1",
         "model": "hunyuan_video",
         "wallclock_speedup": 1.55,
         "trajectory_cosine": 0.99995,

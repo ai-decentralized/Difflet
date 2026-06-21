@@ -20,8 +20,8 @@ Example:
     python scripts/profile_component_wallclock.py \\
         --model hunyuan-video \\
         --source-dir /home/ubuntu/.cache/huggingface/hub/hunyuanvideo-real \\
-        --compiled-dir .nova-cache/f3_hunyuan_n4_4d8s1r/compiled \\
-        --bundle .nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors \\
+        --compiled-dir .difflet-cache/f3_hunyuan_n4_4d8s1r/compiled \\
+        --bundle .difflet-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors \\
         --tp-degree 4 --skip-warmup \\
         --metrics-out cclogs/m8-dit-vae-separation/profile_hv_n4_4d8s1r_components.json
 """
@@ -41,7 +41,7 @@ NEURON_PYTHON = NEURON_VENV / "bin" / "python"
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT_DIR = ROOT / "cclogs" / "m8-dit-vae-separation"
 
-SCHEMA = "nova-f2-0-component-wallclock-v1"
+SCHEMA = "difflet-f2-0-component-wallclock-v1"
 GATE_THRESHOLD = 0.20
 
 
@@ -79,10 +79,10 @@ def _parse_args() -> argparse.Namespace:
         "--model",
         required=True,
         choices=("hunyuan-video", "hunyuan-video15"),
-        help="Which Nova application to drive. F2 is video-only (D1).",
+        help="Which Difflet application to drive. F2 is video-only (D1).",
     )
     p.add_argument("--source-dir", required=True, help="HF source path (transformer + vae)")
-    p.add_argument("--compiled-dir", required=True, help="Nova compiled cache parent dir")
+    p.add_argument("--compiled-dir", required=True, help="Difflet compiled cache parent dir")
     p.add_argument("--bundle", required=True, help="Cached DiT input safetensors")
     p.add_argument("--tp-degree", type=int, default=4)
     p.add_argument("--dtype", default="bfloat16", choices=("bfloat16", "float16", "float32"))
@@ -106,12 +106,12 @@ def _dtype_from_name(name: str) -> torch.dtype:
 
 
 def _load_hunyuan_app(args: argparse.Namespace, meta: dict[str, Any]):
-    from nova.models.hunyuan_video.application import NeuronHunyuanVideoApplication
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     return NeuronHunyuanVideoApplication(
         model_path=args.source_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=_dtype_from_name(args.dtype),
         shape={
             "height": int(meta["height"]),
@@ -126,7 +126,7 @@ def _load_hunyuan_app(args: argparse.Namespace, meta: dict[str, Any]):
 def _drive_hunyuan(
     args: argparse.Namespace, meta: dict[str, Any], tensors: dict[str, torch.Tensor]
 ) -> dict[str, Any]:
-    from nova.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
+    from difflet.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
 
     app = _load_hunyuan_app(args, meta)
     t_load_start = time.perf_counter()
@@ -157,7 +157,7 @@ def _drive_hunyuan(
     )
     per_step_s: list[float] = []
     latents = bundle.hidden_states
-    from nova.models.hunyuan_video.pipeline import (  # noqa: E402
+    from difflet.models.hunyuan_video.pipeline import (  # noqa: E402
         _batch_timestep,
         _component_dtype,
         _first_tensor,

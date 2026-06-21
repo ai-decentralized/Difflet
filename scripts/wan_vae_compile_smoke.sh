@@ -14,15 +14,15 @@ if [[ -d "${NEURON_VENV}/bin" ]]; then
 fi
 
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
-export NOVA_BACKEND="${NOVA_BACKEND:-trainium}"
+export DIFFLET_BACKEND="${DIFFLET_BACKEND:-trainium}"
 export NEURON_RT_NUM_CORES="${NEURON_RT_NUM_CORES:-1}"
 export NEURON_RT_VIRTUAL_CORE_SIZE="${NEURON_RT_VIRTUAL_CORE_SIZE:-2}"
 
-MODEL_DIR="${1:-${NOVA_WAN_MODEL_DIR:-/home/ubuntu/.cache/huggingface/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7}}"
-HEIGHT="${NOVA_WAN_HEIGHT:-480}"
-WIDTH="${NOVA_WAN_WIDTH:-832}"
-FRAMES="${NOVA_WAN_FRAMES:-9}"
-OUT_DIR="${NOVA_WAN_VAE_OUT:-${ROOT}/.nova-cache/wan_vae_decoder_smoke}"
+MODEL_DIR="${1:-${DIFFLET_WAN_MODEL_DIR:-/home/ubuntu/.cache/huggingface/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7}}"
+HEIGHT="${DIFFLET_WAN_HEIGHT:-480}"
+WIDTH="${DIFFLET_WAN_WIDTH:-832}"
+FRAMES="${DIFFLET_WAN_FRAMES:-9}"
+OUT_DIR="${DIFFLET_WAN_VAE_OUT:-${ROOT}/.difflet-cache/wan_vae_decoder_smoke}"
 
 cd "${ROOT}"
 
@@ -32,8 +32,8 @@ exec "${PYTHON_BIN}" - <<PY
 import os
 import torch
 
-from nova.backends.trainium.wan.vae import NeuronWanVAEDecoderApplication
-from nova.models.wan.application import create_wan_vae_decoder_config
+from difflet.backends.trainium.wan.vae import NeuronWanVAEDecoderApplication
+from difflet.models.wan.application import create_wan_vae_decoder_config
 
 model_dir = ${MODEL_DIR@Q}
 out_dir = ${OUT_DIR@Q}

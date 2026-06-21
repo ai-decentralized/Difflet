@@ -1,7 +1,7 @@
 """M2: on-device CLIP (text_encoder_2) -> pooled_projections, vs HF bundle.
 
 HF _get_clip_prompt_embeds: tokenize RAW prompt with tokenizer_2 (CLIP, max_length=77),
-CLIPTextModel(...).pooler_output -> (1, 768). We reuse Nova's Flux CLIP port
+CLIPTextModel(...).pooler_output -> (1, 768). We reuse Difflet's Flux CLIP port
 (NeuronClipApplication) pointed at HunyuanVideo's text_encoder_2.
 """
 
@@ -15,9 +15,9 @@ import torch.nn.functional as F
 from safetensors.torch import load_file
 from transformers import CLIPTokenizer
 
-from nova.backends.trainium.core.config import NeuronConfig
-from nova.models.flux.clip.modeling_clip import CLIPInferenceConfig, NeuronClipApplication
-from nova.utils.diffusers_adapter import load_diffusers_config
+from difflet.backends.trainium.core.config import NeuronConfig
+from difflet.models.flux.clip.modeling_clip import CLIPInferenceConfig, NeuronClipApplication
+from difflet.utils.diffusers_adapter import load_diffusers_config
 
 SNAP = glob.glob(
     "/home/ubuntu/.cache/huggingface/hub/"
@@ -25,8 +25,8 @@ SNAP = glob.glob(
 )[0]
 CLIP = f"{SNAP}/text_encoder_2"
 TOK2 = f"{SNAP}/tokenizer_2"
-OUT = "/home/ubuntu/nova/.nova-cache/hunyuan_clip_enc"
-BUNDLE = "/home/ubuntu/nova/.nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors"
+OUT = "/home/ubuntu/difflet/.difflet-cache/hunyuan_clip_enc"
+BUNDLE = "/home/ubuntu/difflet/.difflet-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors"
 
 meta = json.loads(open(BUNDLE + ".meta.json").read())
 prompt = meta["prompt"][0]

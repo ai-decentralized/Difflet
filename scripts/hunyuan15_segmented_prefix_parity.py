@@ -8,7 +8,7 @@ This probe stitches a full prefix-1 transformer dataflow:
 3. diffusers CPU final norm/projection/reshape
 
 It is a parity gate for the segmented block inside the full transformer dataflow,
-not a production NovaPipeline runtime.
+not a production DiffletPipeline runtime.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", required=True)
     parser.add_argument("--transformer-subfolder", default="transformer")
-    parser.add_argument("--cache-dir", default="/tmp/nova_hunyuan15_segmented_prefix_cache")
+    parser.add_argument("--cache-dir", default="/tmp/difflet_hunyuan15_segmented_prefix_cache")
     parser.add_argument("--bundle", required=True)
     parser.add_argument("--timestep-index", type=int, default=0)
     parser.add_argument("--height", type=int, default=320)

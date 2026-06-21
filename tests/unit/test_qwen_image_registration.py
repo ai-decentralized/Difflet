@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 import torch
 
-from nova import NovaParallelConfig, NovaPipeline
-from nova.registry import resolve_model
+from difflet import DiffletParallelConfig, DiffletPipeline
+from difflet.registry import resolve_model
 
 
 def _write_qwen_transformer_config(model_dir, **overrides):
@@ -32,7 +32,7 @@ def test_qwen_image_registry_defaults_are_tp_only():
     entry = resolve_model("Qwen/Qwen-Image")
 
     assert entry.name == "qwen_image"
-    assert entry.default_parallel == NovaParallelConfig(tp_degree=4)
+    assert entry.default_parallel == DiffletParallelConfig(tp_degree=4)
     assert entry.default_shape == {"height": 1024, "width": 1024, "num_frames": None}
 
 
@@ -40,10 +40,10 @@ def test_qwen_image_pipeline_skeleton_can_be_constructed_without_load(tmp_path):
     model_dir = tmp_path / "Qwen-Image"
     model_dir.mkdir()
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="qwen_image",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         compile_cache_dir=str(tmp_path / "cache"),
         skip_compile=True,
@@ -51,7 +51,7 @@ def test_qwen_image_pipeline_skeleton_can_be_constructed_without_load(tmp_path):
     )
 
     assert pipe.model_entry.name == "qwen_image"
-    assert pipe.parallel == NovaParallelConfig(tp_degree=4)
+    assert pipe.parallel == DiffletParallelConfig(tp_degree=4)
     assert pipe.shape == {"height": 1024, "width": 1024, "num_frames": None}
     assert pipe.app.shape == {"height": 1024, "width": 1024, "num_frames": None}
     assert pipe.app.components() == []
@@ -61,10 +61,10 @@ def test_qwen_image_application_declares_transformer_component(tmp_path):
     model_dir = tmp_path / "Qwen-Image"
     _write_qwen_transformer_config(model_dir)
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="qwen_image",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         height=64,
         width=64,
@@ -87,10 +87,10 @@ def test_qwen_image_rejects_cp_until_transformer_spike(tmp_path):
     model_dir.mkdir()
 
     with pytest.raises(NotImplementedError, match="CP is deferred"):
-        NovaPipeline.from_pretrained(
+        DiffletPipeline.from_pretrained(
             str(model_dir),
             model_type="qwen_image",
-            parallel=NovaParallelConfig(tp_degree=4, cp_degree=2),
+            parallel=DiffletParallelConfig(tp_degree=4, cp_degree=2),
             dtype="bf16",
             compile_cache_dir=str(tmp_path / "cache"),
             skip_compile=True,
@@ -99,7 +99,7 @@ def test_qwen_image_rejects_cp_until_transformer_spike(tmp_path):
 
 
 def test_qwen_image_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
-    from nova.models.qwen_image.application import (
+    from difflet.models.qwen_image.application import (
         QwenImageDiTInputBundle,
         create_qwen_image_transformer_config,
         validate_qwen_image_dit_inputs,
@@ -143,8 +143,8 @@ def test_qwen_image_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
     "validated on device (e2e cosine + diffusers parity), mirroring Wan."
 )
 def test_qwen_image_transformer_trace_module_tiny_cpu_forward(tmp_path):
-    from nova.backends.trainium.qwen_image.transformer import _QwenImageTransformerTraceModule
-    from nova.models.qwen_image.application import create_qwen_image_transformer_config
+    from difflet.backends.trainium.qwen_image.transformer import _QwenImageTransformerTraceModule
+    from difflet.models.qwen_image.application import create_qwen_image_transformer_config
 
     model_dir = tmp_path / "Qwen-Image"
     _write_qwen_transformer_config(model_dir)
@@ -173,7 +173,7 @@ def test_qwen_image_transformer_trace_module_tiny_cpu_forward(tmp_path):
 
 
 def test_qwen_image_cache_dit_inputs_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/nova/scripts/qwen_image_cache_dit_inputs.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/qwen_image_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("qwen_image_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -191,7 +191,7 @@ def test_qwen_image_cache_dit_inputs_cli_parser_imports_without_loading_models()
 
 
 def test_qwen_image_cache_dit_inputs_pads_prompt_embeds_to_contract():
-    script_path = Path("/home/ubuntu/nova/scripts/qwen_image_cache_dit_inputs.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/qwen_image_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("qwen_image_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -214,7 +214,7 @@ def test_qwen_image_cache_dit_inputs_pads_prompt_embeds_to_contract():
 
 
 def test_qwen_image_cache_dit_inputs_keeps_active_prompt_length_by_default():
-    script_path = Path("/home/ubuntu/nova/scripts/qwen_image_cache_dit_inputs.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/qwen_image_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("qwen_image_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -234,7 +234,7 @@ def test_qwen_image_cache_dit_inputs_keeps_active_prompt_length_by_default():
 
 
 def test_qwen_image_transformer_parity_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/nova/scripts/qwen_image_transformer_parity.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/qwen_image_transformer_parity.py")
     spec = importlib.util.spec_from_file_location("qwen_image_transformer_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -257,7 +257,7 @@ def test_qwen_image_transformer_parity_cli_parser_imports_without_loading_models
 
 
 def test_qwen_image_materialize_prefix_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/nova/scripts/qwen_image_materialize_transformer_prefix.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/qwen_image_materialize_transformer_prefix.py")
     spec = importlib.util.spec_from_file_location("qwen_image_materialize_transformer_prefix", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -282,7 +282,7 @@ def test_qwen_image_materialize_prefix_cli_parser_imports_without_loading_models
 
 
 def test_qwen_image_full_transformer_closure_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/nova/scripts/qwen_image_full_transformer_closure.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/qwen_image_full_transformer_closure.py")
     spec = importlib.util.spec_from_file_location("qwen_image_full_transformer_closure", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -315,8 +315,8 @@ def test_qwen_image_full_transformer_closure_cli_parser_imports_without_loading_
 def test_qwen_image_trainium_trace_module_matches_diffusers_tiny_cpu(tmp_path):
     from diffusers.models.transformers.transformer_qwenimage import QwenImageTransformer2DModel
 
-    from nova.backends.trainium.qwen_image.transformer import _QwenImageTransformerTraceModule
-    from nova.models.qwen_image.application import create_qwen_image_transformer_config
+    from difflet.backends.trainium.qwen_image.transformer import _QwenImageTransformerTraceModule
+    from difflet.models.qwen_image.application import create_qwen_image_transformer_config
 
     torch.manual_seed(0)
     model_dir = tmp_path / "Qwen-Image"

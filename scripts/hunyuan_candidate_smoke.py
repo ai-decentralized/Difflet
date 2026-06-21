@@ -23,9 +23,9 @@ Usage (canonical paths from scripts/hunyuan_smoke.sh):
     NEURON_RT_NUM_CORES=4 NEURON_RT_VIRTUAL_CORE_SIZE=2 \\
     python scripts/hunyuan_candidate_smoke.py \\
       --source-dir /home/ubuntu/.cache/huggingface/hub/hunyuanvideo-real \\
-      --compiled-dir .nova-cache/hunyuan_n4_20d40s2r/compiled \\
-      --bundle .nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors \\
-      --metrics-out /tmp/nova_m5_0_candidate_metrics.json
+      --compiled-dir .difflet-cache/hunyuan_n4_20d40s2r/compiled \\
+      --bundle .difflet-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors \\
+      --metrics-out /tmp/difflet_m5_0_candidate_metrics.json
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--metrics-out",
         type=Path,
-        default=Path("/tmp/nova_m5_0_candidate_metrics.json"),
+        default=Path("/tmp/difflet_m5_0_candidate_metrics.json"),
     )
     return p.parse_args()
 
@@ -68,10 +68,10 @@ def parse_args() -> argparse.Namespace:
 def _assert_candidate_contract(tp_degree: int, max_candidates: int) -> dict:
     """Integration re-assertion of the M5.0.3.1 abstraction guarantees."""
 
-    from nova.pipeline.compile_cache import CacheSpec, cache_key
-    from nova.pipeline.parallel_config import CandidateConfig, NovaParallelConfig
+    from difflet.pipeline.compile_cache import CacheSpec, cache_key
+    from difflet.pipeline.parallel_config import CandidateConfig, DiffletParallelConfig
 
-    parallel = NovaParallelConfig(tp_degree=tp_degree)
+    parallel = DiffletParallelConfig(tp_degree=tp_degree)
 
     def spec(candidate):
         return CacheSpec(
@@ -112,12 +112,12 @@ def main() -> int:
             f"every --candidates value must be in [1, {args.max_candidates}]"
         )
 
-    from nova.models.hunyuan_video.application import (
+    from difflet.models.hunyuan_video.application import (
         HunyuanVideoDiTInputBundle,
         NeuronHunyuanVideoApplication,
     )
-    from nova.pipeline.latent_metrics import LatentMetricCollector
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.pipeline.latent_metrics import LatentMetricCollector
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     meta = json.loads(Path(str(args.bundle) + ".meta.json").read_text())
     tensors = load_file(str(args.bundle), device="cpu")
@@ -132,7 +132,7 @@ def main() -> int:
 
     app = NeuronHunyuanVideoApplication(
         model_path=args.source_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=torch.bfloat16,
         shape={
             "height": meta["height"],
@@ -201,7 +201,7 @@ def main() -> int:
         )
 
     result = {
-        "schema": "nova-m5-0-candidate-smoke-v1",
+        "schema": "difflet-m5-0-candidate-smoke-v1",
         "source_dir": str(args.source_dir),
         "compiled_dir": str(args.compiled_dir),
         "bundle": str(args.bundle),

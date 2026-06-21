@@ -18,7 +18,7 @@ if [[ -d "${NEURON_VENV}/bin" ]]; then
   export PATH="${NEURON_VENV}/bin:${PATH}"
 fi
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
-export NOVA_BACKEND="${NOVA_BACKEND:-trainium}"
+export DIFFLET_BACKEND="${DIFFLET_BACKEND:-trainium}"
 
 cd "${ROOT}"
 
@@ -28,7 +28,7 @@ echo "[wan-m25] reference parity unit checks"
   tests/unit/test_wan_pipeline_orchestrator.py::test_negative_prompt_string_routes_through_tokenizer
 
 echo "[wan-m25] VAE real-weight CPU + NEFF numerical alignment"
-NOVA_WAN_VAE_RUN_NEFF_NUMERIC="${NOVA_WAN_VAE_RUN_NEFF_NUMERIC:-1}" \
+DIFFLET_WAN_VAE_RUN_NEFF_NUMERIC="${DIFFLET_WAN_VAE_RUN_NEFF_NUMERIC:-1}" \
   ./scripts/wan_vae_real_alignment.sh
 
 echo "[wan-m25] PASS: M2.5-A component numerical alignment complete"

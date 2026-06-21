@@ -17,7 +17,7 @@ trajectory/final cosine + skip count, written to cclogs/m9-teacache/.
 
 Run:
   PATH=/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin:$PATH \
-  NEURON_RT_NUM_CORES=4 PYTHONPATH=/home/ubuntu/nova \
+  NEURON_RT_NUM_CORES=4 PYTHONPATH=/home/ubuntu/difflet \
   /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python \
       scripts/run_qwen_online_delta_e2e.py --online-calib \
       cclogs/m9-teacache/teacache_calib_qwen_image_online.json
@@ -71,9 +71,9 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
-    from nova.models.qwen_image.application import NeuronQwenImageApplication
-    from nova.pipeline.parallel_config import NovaParallelConfig
-    from nova.pipeline.teacache import TeaCacheCalibration, TeaCacheController
+    from difflet.models.qwen_image.application import NeuronQwenImageApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
 
     calib = TeaCacheCalibration.from_dict(json.loads(Path(args.online_calib).read_text()))
     if float(getattr(calib, "online_delta_alpha", 0.0)) <= 0.0:
@@ -96,7 +96,7 @@ def main() -> int:
     _setup_compiled_dir(Path(args.transformer_cache))
     app = NeuronQwenImageApplication(
         model_path=args.model_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=torch.bfloat16,
         shape={"height": args.height, "width": args.width},
         text_seq_len=args.text_seq_len,
@@ -149,7 +149,7 @@ def main() -> int:
     final_cos = min(fcos) if fcos else 0.0
 
     ab = {
-        "schema": "nova-m9-teacache-online-delta-e2e-v1",
+        "schema": "difflet-m9-teacache-online-delta-e2e-v1",
         "model": MODEL,
         "shape_label": calib.shape_label,
         "num_steps": int(args.num_steps),

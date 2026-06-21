@@ -8,7 +8,7 @@ validation, and back-compat default.
 
 import pytest
 
-from nova.pipeline.parallel_config import CandidateConfig, NovaParallelConfig
+from difflet.pipeline.parallel_config import CandidateConfig, DiffletParallelConfig
 
 
 def test_default_is_trivial_and_back_compat():
@@ -27,10 +27,10 @@ def test_active_defaults_to_max():
 @pytest.mark.parametrize(
     "parallel",
     [
-        NovaParallelConfig(tp_degree=1),
-        NovaParallelConfig(tp_degree=4),
-        NovaParallelConfig(tp_degree=4, cp_degree=2),
-        NovaParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
+        DiffletParallelConfig(tp_degree=1),
+        DiffletParallelConfig(tp_degree=4),
+        DiffletParallelConfig(tp_degree=4, cp_degree=2),
+        DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
     ],
 )
 @pytest.mark.parametrize("n", [1, 2, 4, 8])
@@ -59,20 +59,20 @@ def test_to_cache_dict_excludes_active():
 
 
 def _spec(candidate):
-    from nova.pipeline.compile_cache import CacheSpec
+    from difflet.pipeline.compile_cache import CacheSpec
 
     return CacheSpec(
         model_id="org/m",
         model_path="/tmp/m",
         model_name="unit_dummy",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         candidate=candidate,
     )
 
 
 def test_cache_key_byte_identical_when_absent_or_trivial():
-    from nova.pipeline.compile_cache import cache_key
+    from difflet.pipeline.compile_cache import cache_key
 
     legacy = cache_key(_spec(None))
     trivial = cache_key(_spec(CandidateConfig()))
@@ -86,7 +86,7 @@ def test_cache_key_byte_identical_when_absent_or_trivial():
 
 
 def test_cache_key_differs_by_max_candidates():
-    from nova.pipeline.compile_cache import cache_key
+    from difflet.pipeline.compile_cache import cache_key
 
     k2 = cache_key(_spec(CandidateConfig(max_candidates=2)))
     k4 = cache_key(_spec(CandidateConfig(max_candidates=4)))
@@ -97,7 +97,7 @@ def test_cache_key_differs_by_max_candidates():
 
 def test_active_within_max_is_a_cache_hit():
     # Compiling at max=4 then running active=2 must reuse the artifact.
-    from nova.pipeline.compile_cache import cache_key
+    from difflet.pipeline.compile_cache import cache_key
 
     compiled = cache_key(_spec(CandidateConfig(max_candidates=4)))
     runtime_n2 = cache_key(
@@ -107,7 +107,7 @@ def test_active_within_max_is_a_cache_hit():
 
 
 def test_exported_from_public_api():
-    import nova
-    from nova.pipeline import CandidateConfig as ViaPipeline
+    import difflet
+    from difflet.pipeline import CandidateConfig as ViaPipeline
 
-    assert nova.CandidateConfig is ViaPipeline
+    assert difflet.CandidateConfig is ViaPipeline

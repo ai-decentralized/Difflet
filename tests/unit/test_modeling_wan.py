@@ -1,4 +1,4 @@
-"""Unit tests for nova.models.wan.modeling_wan (W3a)."""
+"""Unit tests for difflet.models.wan.modeling_wan (W3a)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import torch
 
 def test_modeling_wan_imports_only_from_allowed_modules():
     """Rule 1 of cclogs/09 §2: Wan modeling imports only torch / stdlib /
-    diffusers / nova.ops. No direct neuronx_distributed / nkilib /
+    diffusers / difflet.ops. No direct neuronx_distributed / nkilib /
     torch_neuronx imports.
 
     Walks the AST so prose mentions of forbidden module names (in docstrings
@@ -19,10 +19,10 @@ def test_modeling_wan_imports_only_from_allowed_modules():
     """
     import ast
 
-    src = Path("/home/ubuntu/nova/nova/models/wan/modeling_wan.py").read_text()
+    src = Path("/home/ubuntu/difflet/difflet/models/wan/modeling_wan.py").read_text()
     tree = ast.parse(src)
     forbidden_roots = {"neuronx_distributed", "nkilib", "torch_neuronx"}
-    forbidden_prefixes = ("nova.core",)
+    forbidden_prefixes = ("difflet.core",)
     offending: list[str] = []
 
     for node in ast.walk(tree):
@@ -41,7 +41,7 @@ def test_modeling_wan_imports_only_from_allowed_modules():
 
 
 def test_wan_transformer_config_defaults_match_a14b():
-    from nova.models.wan.modeling_wan import WanTransformerConfig
+    from difflet.models.wan.modeling_wan import WanTransformerConfig
 
     cfg = WanTransformerConfig()
     assert cfg.patch_size == (1, 2, 2)
@@ -59,7 +59,7 @@ def test_wan_transformer_config_defaults_match_a14b():
 
 
 def test_wan_transformer_config_from_diffusers_dict_filters_unknown_keys():
-    from nova.models.wan.modeling_wan import WanTransformerConfig
+    from difflet.models.wan.modeling_wan import WanTransformerConfig
 
     raw = {
         "patch_size": [1, 2, 2],
@@ -75,7 +75,7 @@ def test_wan_transformer_config_from_diffusers_dict_filters_unknown_keys():
 
 
 def test_wan_transformer_config_rejects_unsupported_i2v_fields():
-    from nova.models.wan.modeling_wan import WanTransformerConfig
+    from difflet.models.wan.modeling_wan import WanTransformerConfig
 
     with pytest.raises(NotImplementedError, match="image_dim"):
         WanTransformerConfig(image_dim=1280)
@@ -88,7 +88,7 @@ def test_wan_transformer_config_rejects_unsupported_i2v_fields():
 
 
 def test_wan_transformer_config_rejects_unsupported_qk_norm():
-    from nova.models.wan.modeling_wan import WanTransformerConfig
+    from difflet.models.wan.modeling_wan import WanTransformerConfig
 
     with pytest.raises(NotImplementedError, match="qk_norm"):
         WanTransformerConfig(qk_norm=None)
@@ -102,32 +102,32 @@ def test_wan_rotary_pos_embed_shapes_match_diffusers_reference():
         WanRotaryPosEmbed as DiffWanRotaryPosEmbed,
     )
 
-    from nova.models.wan.modeling_wan import WanRotaryPosEmbed
+    from difflet.models.wan.modeling_wan import WanRotaryPosEmbed
 
     head_dim = 128
     patch = (1, 2, 2)
     max_seq_len = 1024
 
-    nova_rope = WanRotaryPosEmbed(head_dim, patch, max_seq_len)
+    difflet_rope = WanRotaryPosEmbed(head_dim, patch, max_seq_len)
     diff_rope = DiffWanRotaryPosEmbed(head_dim, patch, max_seq_len)
 
     # tiny tensor: B=1, C=16, T=2, H=8, W=8 — patch (1,2,2) → ppf=2, pph=4, ppw=4
     x = torch.randn(1, 16, 2, 8, 8)
-    nova_cos, nova_sin = nova_rope(x)
+    difflet_cos, difflet_sin = difflet_rope(x)
     diff_cos, diff_sin = diff_rope(x)
 
     s_tokens = 2 * 4 * 4
-    assert nova_cos.shape == (1, s_tokens, 1, head_dim)
-    assert nova_sin.shape == (1, s_tokens, 1, head_dim)
-    assert torch.allclose(nova_cos, diff_cos, atol=1e-6, rtol=1e-6)
-    assert torch.allclose(nova_sin, diff_sin, atol=1e-6, rtol=1e-6)
+    assert difflet_cos.shape == (1, s_tokens, 1, head_dim)
+    assert difflet_sin.shape == (1, s_tokens, 1, head_dim)
+    assert torch.allclose(difflet_cos, diff_cos, atol=1e-6, rtol=1e-6)
+    assert torch.allclose(difflet_sin, diff_sin, atol=1e-6, rtol=1e-6)
 
 
 def test_wan_rotary_axis_split_uses_canonical_t_h_w_dims():
     """Wan splits attention_head_dim into (t_dim, h_dim, w_dim) where
     h_dim = w_dim = 2 * (head_dim // 6). For head_dim=128: h=w=2*21=42, t=44.
     """
-    from nova.models.wan.modeling_wan import WanRotaryPosEmbed
+    from difflet.models.wan.modeling_wan import WanRotaryPosEmbed
 
     rope = WanRotaryPosEmbed(attention_head_dim=128, patch_size=(1, 2, 2), max_seq_len=64)
     assert rope.t_dim == 44
@@ -138,7 +138,7 @@ def test_wan_rotary_axis_split_uses_canonical_t_h_w_dims():
 
 def test_modeling_wan_classes_are_importable():
     """All public classes/functions are exported from the module."""
-    from nova.models.wan import modeling_wan
+    from difflet.models.wan import modeling_wan
 
     expected = [
         "WanAttention",
@@ -158,7 +158,7 @@ def test_wan_transformer_3d_model_top_level_signature_matches_plan():
     """Forward must accept (hidden_states, timestep, encoder_hidden_states,
     timestep_seq_len=None). Locked by cclogs/09 W3 plan and survey §3.
     """
-    from nova.models.wan.modeling_wan import WanTransformer3DModel
+    from difflet.models.wan.modeling_wan import WanTransformer3DModel
 
     sig = inspect.signature(WanTransformer3DModel.forward)
     params = list(sig.parameters)
@@ -170,7 +170,7 @@ def test_wan_time_text_embedding_drops_image_branch():
     """T2V-only spike: WanTimeTextEmbedding must NOT accept image conditioning
     args (cclogs/09 §1 non-goals: no I2V).
     """
-    from nova.models.wan.modeling_wan import WanTimeTextEmbedding
+    from difflet.models.wan.modeling_wan import WanTimeTextEmbedding
 
     sig = inspect.signature(WanTimeTextEmbedding.__init__)
     assert "image_embed_dim" not in sig.parameters
@@ -187,7 +187,7 @@ def test_wan_rotary_pos_embed_handles_varying_input_shapes(shape):
     """Rotary should produce S = (T/p_t)*(H/p_h)*(W/p_w) tokens for any
     input shape that respects patch_size divisibility.
     """
-    from nova.models.wan.modeling_wan import WanRotaryPosEmbed
+    from difflet.models.wan.modeling_wan import WanRotaryPosEmbed
 
     head_dim = 128
     rope = WanRotaryPosEmbed(head_dim, (1, 2, 2), max_seq_len=128)

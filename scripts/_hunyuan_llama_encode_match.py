@@ -28,8 +28,8 @@ SNAP = glob.glob(
 )[0]
 ENC = f"{SNAP}/text_encoder"
 TOK = f"{SNAP}/tokenizer"
-OUT = "/home/ubuntu/nova/.nova-cache/hunyuan_llama_enc_l29_351"
-BUNDLE = "/home/ubuntu/nova/.nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors"
+OUT = "/home/ubuntu/difflet/.difflet-cache/hunyuan_llama_enc_l29_351"
+BUNDLE = "/home/ubuntu/difflet/.difflet-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors"
 
 CROP_START = 95
 TEXT_SEQ = 256

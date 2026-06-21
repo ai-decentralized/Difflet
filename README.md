@@ -1,8 +1,8 @@
-# Nova
+# Difflet
 
 A focused inference engine for diffusion transformers (DiTs) on AWS Trainium.
 
-Nova provides a single Python entry point — `NovaPipeline` — that handles model
+Difflet provides a single Python entry point — `DiffletPipeline` — that handles model
 download, ahead-of-time compilation, on-disk artifact caching, and SPMD
 multi-core execution for image and video diffusion models on Trainium v3.
 
@@ -14,10 +14,10 @@ multi-core execution for image and video diffusion models on Trainium v3.
 | M1 — Flux end-to-end | Done | `FLUX.1-dev` at 1024² in 28 steps, cache-hit baseline below |
 | M2 — Wan 2.2 T2V (spike) | Done | Prompt → UMT5 → DiT (TP=4) → VAE → `(1, 3, 9, 480, 832)` video tensor at 480×832×9. Sequential 4-core split via `scripts/wan_smoke.sh`. |
 | M2.5 — Wan numerical alignment | Done (component) | UMT5 / DiT / VAE NEFF-vs-CPU all PASS (cosine ≥ 0.995). Full denoise trajectory parity vs HF diffusers still open. |
-| Phase B — backend abstraction | Done | `nova/core/` and 4 Trainium-only `nova/utils/*` files relocated under `nova/backends/trainium/`; compatibility shims removed during M3. Models import only via `nova.ops`. |
+| Phase B — backend abstraction | Done | `difflet/core/` and 4 Trainium-only `difflet/utils/*` files relocated under `difflet/backends/trainium/`; compatibility shims removed during M3. Models import only via `difflet.ops`. |
 | M3 — HunyuanVideo | Done | T2V at `320x512x61`, TP=4. Now **fully on-device** — Llama 3 + CLIP text encoders, the DiT, and the 16-segment NEFF VAE decoder all run on Trainium (`examples/hunyuan_video_example.py`). 4-step DiT trajectory cosine min `0.999896` vs HF. The original M3 v0 hybrid path (HF CPU text/VAE) is still available via `scripts/hunyuan_smoke.sh`. |
 | M3.x — VAE on Trainium | Done | 16-segment NEFF decoder bypasses a `neuronx-cc` `GroupNorm+SiLU → causal-Conv3D` same-graph lowering bug (`cclogs/m3-hunyuan/38`). Full tiled parity cosine `1.0022` vs HF (`≥ 0.999` gate); decode 91.4 s vs HF CPU 149.7 s (~1.6×). |
-| M4a — Qwen-Image | Done | Text-to-image **fully on-device** — Qwen2.5-VL + DiT + VAE on Trainium (`examples/qwen_image_example.py`); the VAE reuses Nova's Wan VAE decoder port. |
+| M4a — Qwen-Image | Done | Text-to-image **fully on-device** — Qwen2.5-VL + DiT + VAE on Trainium (`examples/qwen_image_example.py`); the VAE reuses Difflet's Wan VAE decoder port. |
 | M6 — LTX-2 | Done | Dual-stream segmented DiT runtime, decoded end-to-end. |
 | M6a — HunyuanVideo 1.5 | Done | Registered; segmented DiT + VAE runtime. |
 | Context parallelism (Wan) | Done | `cp_degree` sequence parallelism for the Wan DiT (gather-KV self-attention); `world_size = tp_degree × cp_degree`. |
@@ -39,8 +39,8 @@ The reference development image bundles all of the above at
 ## Install
 
 ```bash
-git clone git@github.com:ai-decentralized/fastdiff.git
-cd fastdiff
+git clone git@github.com:ai-decentralized/Difflet.git
+cd Difflet
 pip install -e .
 ```
 
@@ -71,7 +71,7 @@ NEURON_RT_NUM_CORES=4 python examples/flux_example.py \
 ```
 
 The first run triggers ahead-of-time compilation (~10–15 minutes for Flux on
-4 cores). Compiled artifacts land in `~/.cache/nova/flux/<key>/`; subsequent
+4 cores). Compiled artifacts land in `~/.cache/difflet/flux/<key>/`; subsequent
 runs hit the cache and skip directly to load + denoise.
 
 Equivalent helper script:
@@ -92,7 +92,7 @@ splits into two sequential stages (text + DiT, then VAE decode):
 
 Defaults: prompt `a cat walking`, 480×832, 9 frames, TP=4 transformer,
 TP=1 VAE, 2 inference steps. Stage 1 writes a latent tensor to
-`.nova-cache/wan_smoke_latents.pt`; stage 2 reads it back and decodes.
+`.difflet-cache/wan_smoke_latents.pt`; stage 2 reads it back and decodes.
 The final `(1, 3, 9, 480, 832)` bf16 video tensor is saved to
 `/tmp/wan_smoke.pt` (MP4 export is best-effort and requires
 `imageio-ffmpeg`).
@@ -142,7 +142,7 @@ NEURON_RT_NUM_CORES=4 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
         --prompt "a cat walking in a sunlit garden"
 
 # Stage 3 — DiT denoise + on-device VAE decode → video (TP=4)
-#   first run compiles the DiT + VAE NEFF into .nova-cache/hunyuan_ondevice/
+#   first run compiles the DiT + VAE NEFF into .difflet-cache/hunyuan_ondevice/
 NEURON_RT_NUM_CORES=4 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
     python examples/hunyuan_video_example.py --stage generate \
         --num-inference-steps 4 --output /tmp/hunyuan.mp4
@@ -157,7 +157,7 @@ label; MP4 encoding is not yet wired). Validated end-to-end on
 ## Quick start — Qwen-Image (on-device)
 
 Fully on-device text-to-image: the Qwen2.5-VL text encoder, the DiT, and the VAE
-all run on Trainium (the VAE reuses Nova's Wan VAE decoder port — the Qwen-Image
+all run on Trainium (the VAE reuses Difflet's Wan VAE decoder port — the Qwen-Image
 VAE config is identical to Wan's). Staged like HunyuanVideo; every NEFF compiles
 on first run (encoder in `text`, DiT in `generate`, VAE in `vae`).
 
@@ -187,11 +187,11 @@ NEURON_RT_NUM_CORES=1 NEURON_RT_VIRTUAL_CORE_SIZE=2 \
 ### Library API
 
 ```python
-from nova import NovaPipeline, NovaParallelConfig
+from difflet import DiffletPipeline, DiffletParallelConfig
 
-pipe = NovaPipeline.from_pretrained(
+pipe = DiffletPipeline.from_pretrained(
     "black-forest-labs/FLUX.1-dev",
-    parallel=NovaParallelConfig(tp_degree=4),
+    parallel=DiffletParallelConfig(tp_degree=4),
     height=1024,
     width=1024,
 )
@@ -234,7 +234,7 @@ Spike baseline; Phase B reproduced these numbers bit-identically.
 
 ## Runtime protocol — important constraints
 
-Nova diffusion artifacts have hard constraints that differ from typical
+Difflet diffusion artifacts have hard constraints that differ from typical
 LLM serving setups. Violating them produces silent SIGSEGVs or
 `global communicator` errors.
 
@@ -256,7 +256,7 @@ LLM serving setups. Violating them produces silent SIGSEGVs or
    load before replicated ones. Flux load order:
    `text_encoder_2 → transformer → text_encoder → decoder`.
 
-These rules are enforced in `nova/models/flux/application.py`; new model
+These rules are enforced in `difflet/models/flux/application.py`; new model
 ports should follow the same pattern.
 
 ## Architecture
@@ -265,7 +265,7 @@ ports should follow the same pattern.
 User script
    │
    ▼
-NovaPipeline             single public entry; resolves registry, manages
+DiffletPipeline             single public entry; resolves registry, manages
    │  from_pretrained,   compile cache, dispatches to <Model>Application
    │  precompile, __call__
    ▼
@@ -275,26 +275,26 @@ ModelEntry (registry.py) per-model metadata: factory, default parallel +
 <Model>Application       composes encoder / DiT / VAE sub-apps; exposes
    │                     compile() + load() + __call__()
    ▼
-nova.ops                 backend-neutral op surface (attention / linear /
+difflet.ops                 backend-neutral op surface (attention / linear /
    │                     norm / collectives / embeddings / platform).
    │                     Frozen v1; additive only; dispatch frozen at
    │                     first import per process.
    ▼
-nova/backends/<hw>/ops_impl/   per-hardware implementations.
+difflet/backends/<hw>/ops_impl/   per-hardware implementations.
                                trainium = the real backend; cpu = pure
                                torch numerical reference; cuda/rocm stubs.
 ```
 
-`NovaPipeline` only invokes `compile() / load() / __call__()` on an
-application. Model code imports only from `nova.ops` (no direct
+`DiffletPipeline` only invokes `compile() / load() / __call__()` on an
+application. Model code imports only from `difflet.ops` (no direct
 `neuronx_distributed` / `nkilib` / `torch_neuronx`); backend-specific
-implementations live entirely under `nova/backends/<hw>/ops_impl/`.
+implementations live entirely under `difflet/backends/<hw>/ops_impl/`.
 
 ### Repository layout
 
 ```
-nova/
-├── pipeline/        Nova-authored public API (NovaPipeline, compile cache,
+difflet/
+├── pipeline/        Difflet-authored public API (DiffletPipeline, compile cache,
 │                    parallel config, HF path resolver)
 ├── registry.py      @register_model + ModelEntry
 ├── ops/             Backend-neutral op surface (frozen v1)
@@ -302,29 +302,29 @@ nova/
 │   ├── trainium/    Real backend (NXD + nkilib + torch_neuronx)
 │   │   ├── core/    AOT base classes, attention, custom_calls
 │   │   ├── utils/   compile_env, runtime_env, distributed, snapshot
-│   │   ├── ops_impl/    Trainium impls of nova.ops
+│   │   ├── ops_impl/    Trainium impls of difflet.ops
 │   │   ├── nki_kernels/    NKI custom kernels (MX microscaling, etc.)
 │   │   └── flux/ wan/ hunyuan_video/ qwen_image/ ltx_2/    per-model wrappers
 │   ├── cpu/         Pure-torch numerical reference
 │   └── cuda/ rocm/  Stubs
 ├── utils/           Hardware-neutral utilities (HF / diffusers adapters)
-├── layers/          Diffusion-specific layers; import only via nova.ops
+├── layers/          Diffusion-specific layers; import only via difflet.ops
 └── models/          flux/ wan/ hunyuan_video/ qwen_image/ ltx_2/ — each:
                      modeling, pipeline, application, entry, checkpoint
                      (where needed). HunyuanVideo 1.5 is served from
                      hunyuan_video/ (model_version="1.5").
 ```
 
-`nova/backends/trainium/{core,modules}` follows upstream Neuron coding
-style so periodic rebases are clean; `nova/{pipeline, ops, registry.py,
-models/<new>}` is Nova-authored and formatted with Black.
+`difflet/backends/trainium/{core,modules}` follows upstream Neuron coding
+style so periodic rebases are clean; `difflet/{pipeline, ops, registry.py,
+models/<new>}` is Difflet-authored and formatted with Black.
 
 ## Compile cache
 
-Nova maintains a content-addressed cache of AOT-compiled artifacts.
+Difflet maintains a content-addressed cache of AOT-compiled artifacts.
 
 ```
-~/.cache/nova/<model>/<sha256-prefix>/
+~/.cache/difflet/<model>/<sha256-prefix>/
 ├── manifest.json
 ├── text_encoder/   model.pt + neuron_config.json
 ├── text_encoder_2/ model.pt + neuron_config.json
@@ -344,13 +344,13 @@ The cache key hashes:
 debugging but excluded from the key, so caches are portable across hosts
 and survive Python patch upgrades.
 
-Override the cache root with the `NOVA_COMPILE_CACHE` environment
+Override the cache root with the `DIFFLET_COMPILE_CACHE` environment
 variable or `compile_cache_dir=` in `from_pretrained`. Pass
 `force_compile=True` to bypass a valid cache hit.
 
 ## Parallel modes
 
-`NovaParallelConfig` exposes three parallelism axes:
+`DiffletParallelConfig` exposes three parallelism axes:
 
 - `tp_degree` — tensor parallel degree (must divide visible NeuronCore count).
 - `cp_degree` — context parallel degree (1 = disabled); `world_size` becomes
@@ -359,40 +359,40 @@ variable or `compile_cache_dir=` in `from_pretrained`. Pass
   doubles `world_size` to `tp_degree * 2`. Mutually exclusive with `cp_degree > 1`.
 
 ```python
-NovaParallelConfig(tp_degree=4)                          # world_size=4
-NovaParallelConfig(tp_degree=4, cfg_parallel_enabled=1)  # world_size=8
-NovaParallelConfig(tp_degree=4, cp_degree=2)             # world_size=8
-NovaParallelConfig(tp_degree=4, cp_degree=4)             # world_size=16
+DiffletParallelConfig(tp_degree=4)                          # world_size=4
+DiffletParallelConfig(tp_degree=4, cfg_parallel_enabled=1)  # world_size=8
+DiffletParallelConfig(tp_degree=4, cp_degree=2)             # world_size=8
+DiffletParallelConfig(tp_degree=4, cp_degree=4)             # world_size=16
 ```
 
 ## Adding a new model
 
 To port a diffusion model, add three things:
 
-1. **`nova/models/<name>/`** — implementation: `application.py` composing
+1. **`difflet/models/<name>/`** — implementation: `application.py` composing
    the encoder / backbone / decoder sub-applications, `pipeline.py` (or a
-   thin orchestrator like `nova/models/wan/pipeline.py`), plus
+   thin orchestrator like `difflet/models/wan/pipeline.py`), plus
    `modeling_<name>.py` for the DiT backbone.
-2. **`nova/models/<name>/entry.py`** — a factory
+2. **`difflet/models/<name>/entry.py`** — a factory
    `create_<name>_application(model_path, parallel, dtype, shape, **kwargs)`.
-3. **`nova/registry.py`** — a `@register_model` entry pointing to the
+3. **`difflet/registry.py`** — a `@register_model` entry pointing to the
    factory by string (lazy import) plus default parallel config, shape,
    HF download patterns, and supported `backends=("trainium", ...)`.
 
 Hard rule for new modeling code (enforced by the repo-wide import guard in
 `scripts/test_imports.sh`):
 
-- model files import **only** from `nova.ops`, `torch`, stdlib,
+- model files import **only** from `difflet.ops`, `torch`, stdlib,
   `diffusers`, and `transformers`;
-- no direct `neuronx_distributed`, `torch_neuronx`, `nkilib`, `nova.core`,
-  or old `nova.utils.{compile_env,runtime_env,distributed,snapshot}`
+- no direct `neuronx_distributed`, `torch_neuronx`, `nkilib`, `difflet.core`,
+  or old `difflet.utils.{compile_env,runtime_env,distributed,snapshot}`
   imports;
-- if a primitive is missing, add it to `nova.ops` first (with at least
-  the Trainium implementation under `nova/backends/trainium/ops_impl/`,
-  ideally also a CPU reference under `nova/backends/cpu/ops_impl/`).
+- if a primitive is missing, add it to `difflet.ops` first (with at least
+  the Trainium implementation under `difflet/backends/trainium/ops_impl/`,
+  ideally also a CPU reference under `difflet/backends/cpu/ops_impl/`).
 
-`NovaPipeline` itself does not change. Multi-component models extend the shared
-`MultiComponentApplication` base (`nova/backends/trainium/core/`), which provides
+`DiffletPipeline` itself does not change. Multi-component models extend the shared
+`MultiComponentApplication` base (`difflet/backends/trainium/core/`), which provides
 race-safe compile with `model.pt` markers and SPMD barriers, and ordered load
 with the biggest-TP component first. All current model applications (Flux, Wan,
 HunyuanVideo, Qwen-Image, LTX-2) build on it.
@@ -404,7 +404,7 @@ Project-local helper scripts:
 ```bash
 ./scripts/check_quick.sh                      # imports + unit tests
 ./scripts/test_unit.sh                        # pytest tests/unit -q
-./scripts/test_imports.sh                     # smoke import nova + key submodules
+./scripts/test_imports.sh                     # smoke import difflet + key submodules
 ./scripts/flux_smoke.sh                       # 1-step Flux smoke (load + 1 forward)
 ./scripts/flux_baseline_28.sh                 # 28-step Flux baseline gate
 
@@ -423,12 +423,12 @@ Project-local helper scripts:
 ./scripts/wan_vae_real_alignment.sh           # VAE real-weight CPU + NEFF parity (used by M2.5-A)
 
 # Wan utilities
-./scripts/wan_convert_checkpoint.sh           # HF → Nova state-dict conversion CLI
+./scripts/wan_convert_checkpoint.sh           # HF → Difflet state-dict conversion CLI
 ```
 
 All scripts auto-set the Neuron venv on `PATH`, project on `PYTHONPATH`,
 and `NEURON_RT_NUM_CORES`. M2.5 scripts use a 115 GB peak-RSS gate
-(`NOVA_M25{B,C}_PEAK_RSS_MAX_GB`) to avoid OOM on the 4-core spike host.
+(`DIFFLET_M25{B,C}_PEAK_RSS_MAX_GB`) to avoid OOM on the 4-core spike host.
 
 Run unit tests directly:
 
@@ -436,16 +436,16 @@ Run unit tests directly:
 PYTHONPATH=. pytest tests/unit -q
 ```
 
-Format Nova-authored code:
+Format Difflet-authored code:
 
 ```bash
-black nova/pipeline nova/registry.py examples tests
+black difflet/pipeline difflet/registry.py examples tests
 ```
 
 ## License
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
 
-Nova incorporates code derived from third-party Apache-2.0 projects;
+Difflet incorporates code derived from third-party Apache-2.0 projects;
 attributions and modification banners are in [`NOTICE`](NOTICE) and at
 the top of each derived file.

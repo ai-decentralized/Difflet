@@ -5,15 +5,15 @@ from pathlib import Path
 import pytest
 import torch
 
-from nova import NovaParallelConfig, NovaPipeline
-from nova.registry import resolve_model
+from difflet import DiffletParallelConfig, DiffletPipeline
+from difflet.registry import resolve_model
 
 
 def test_hunyuan_video_registry_defaults_are_tp_only():
     entry = resolve_model("hunyuanvideo-community/HunyuanVideo")
 
     assert entry.name == "hunyuan_video"
-    assert entry.default_parallel == NovaParallelConfig(tp_degree=4)
+    assert entry.default_parallel == DiffletParallelConfig(tp_degree=4)
     assert entry.default_shape == {"height": 320, "width": 512, "num_frames": 61}
 
 
@@ -21,7 +21,7 @@ def test_hunyuan_video_15_registry_defaults_are_production_480p():
     entry = resolve_model("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v")
 
     assert entry.name == "hunyuan_video_15"
-    assert entry.default_parallel == NovaParallelConfig(tp_degree=4)
+    assert entry.default_parallel == DiffletParallelConfig(tp_degree=4)
     assert entry.default_shape == {"height": 480, "width": 848, "num_frames": 121}
 
 
@@ -29,10 +29,10 @@ def test_hunyuan_video_pipeline_skeleton_can_be_constructed_without_load(tmp_pat
     model_dir = tmp_path / "HunyuanVideo"
     model_dir.mkdir()
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="hunyuan_video",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         compile_cache_dir=str(tmp_path / "cache"),
         skip_compile=True,
@@ -40,7 +40,7 @@ def test_hunyuan_video_pipeline_skeleton_can_be_constructed_without_load(tmp_pat
     )
 
     assert pipe.model_entry.name == "hunyuan_video"
-    assert pipe.parallel == NovaParallelConfig(tp_degree=4)
+    assert pipe.parallel == DiffletParallelConfig(tp_degree=4)
     assert pipe.shape == {"height": 320, "width": 512, "num_frames": 61}
     assert pipe.app.shape == {"height": 320, "width": 512, "num_frames": 61}
 
@@ -74,10 +74,10 @@ def test_hunyuan_video_15_pipeline_skeleton_can_probe_diffusers_layout(tmp_path)
         )
     )
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="hunyuan_video_15",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         compile_cache_dir=str(tmp_path / "cache"),
         skip_compile=True,
@@ -113,10 +113,10 @@ def test_hunyuan_video_15_can_construct_trainium_vae_decoder(tmp_path):
         )
     )
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="hunyuan_video_15",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         height=32,
         width=32,
@@ -168,10 +168,10 @@ def test_hunyuan_video_15_segmented_runtime_exposes_block_components(tmp_path):
         )
     )
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="hunyuan_video_15",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         height=32,
         width=48,
@@ -207,10 +207,10 @@ def test_hunyuan_video_15_segmented_runtime_exposes_block_components(tmp_path):
     assert pipe.app.transformer.query_tile_size == 13
     assert pipe.app.transformer.meta["total_seq_len"] == 26
 
-    streaming_pipe = NovaPipeline.from_pretrained(
+    streaming_pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="hunyuan_video_15",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         height=32,
         width=48,
@@ -234,10 +234,10 @@ def test_hunyuan_video_15_segmented_runtime_exposes_block_components(tmp_path):
         "transformer_block_post",
     ]
 
-    process_pipe = NovaPipeline.from_pretrained(
+    process_pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="hunyuan_video_15",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         height=32,
         width=48,
@@ -311,10 +311,10 @@ def test_hunyuan_video_15_process_transformer_load_can_compose_with_vae(tmp_path
         )
     )
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="hunyuan_video_15",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         height=32,
         width=32,
@@ -377,10 +377,10 @@ def test_hunyuan_video_15_original_layout_can_select_transformer_subfolder(tmp_p
         )
     )
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="hunyuan_video_15",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         compile_cache_dir=str(tmp_path / "cache"),
         skip_compile=True,
@@ -420,10 +420,10 @@ def test_hunyuan_video_15_dit_input_contract(tmp_path):
         )
     )
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="hunyuan_video_15",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         height=32,
         width=48,
@@ -443,12 +443,12 @@ def test_hunyuan_video_15_dit_input_contract(tmp_path):
 
 
 def test_hunyuan_video_15_backbone_inference_config_shapes(tmp_path):
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.backends.trainium.hunyuan_video.backbone15 import (
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.hunyuan_video.backbone15 import (
         HunyuanVideo15BackboneInferenceConfig,
         ModelWrapperHunyuanVideo15Backbone,
     )
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     transformer_dir = tmp_path / "transformer"
     transformer_dir.mkdir()
@@ -517,13 +517,13 @@ def test_hunyuan_video_15_backbone_inference_config_shapes(tmp_path):
 
 
 def test_hunyuan_video_15_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.backends.trainium.hunyuan_video.backbone15 import HunyuanVideo15BackboneInferenceConfig
-    from nova.models.hunyuan_video.application import (
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.hunyuan_video.backbone15 import HunyuanVideo15BackboneInferenceConfig
+    from difflet.models.hunyuan_video.application import (
         HunyuanVideo15DiTInputBundle,
         validate_hunyuan_video15_dit_inputs,
     )
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     transformer_dir = tmp_path / "transformer"
     transformer_dir.mkdir()
@@ -594,12 +594,12 @@ def test_hunyuan_video_15_dit_input_contract_validates_shapes_and_dtypes(tmp_pat
 
 
 def test_hunyuan_video_15_trace_module_accepts_fixed_tuple_for_t2v(tmp_path):
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.backends.trainium.hunyuan_video.backbone15 import (
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.hunyuan_video.backbone15 import (
         HunyuanVideo15BackboneInferenceConfig,
         _HunyuanVideo15TraceModule,
     )
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     transformer_dir = tmp_path / "transformer"
     transformer_dir.mkdir()
@@ -660,7 +660,7 @@ def test_hunyuan_video_15_trace_module_accepts_fixed_tuple_for_t2v(tmp_path):
 
 
 def test_hunyuan_video_15_checkpoint_keys_are_prefixed_for_trace_wrapper():
-    from nova.backends.trainium.hunyuan_video.backbone15 import (
+    from difflet.backends.trainium.hunyuan_video.backbone15 import (
         NeuronHunyuanVideo15BackboneApplication,
     )
 
@@ -680,7 +680,7 @@ def test_hunyuan_video_15_checkpoint_keys_are_prefixed_for_trace_wrapper():
 def test_hunyuan_video_15_segmented_block_loader_reads_only_indexed_block(tmp_path):
     from safetensors.torch import save_file
 
-    from nova.backends.trainium.hunyuan_video.segmented15 import _load_block_state_dict_from_dir
+    from difflet.backends.trainium.hunyuan_video.segmented15 import _load_block_state_dict_from_dir
 
     transformer_dir = tmp_path / "transformer"
     transformer_dir.mkdir()
@@ -754,10 +754,10 @@ def test_hunyuan_video_application_declares_vae_decoder_component(tmp_path):
         )
     )
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="hunyuan_video",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         compile_cache_dir=str(tmp_path / "cache"),
         skip_compile=True,
@@ -779,10 +779,10 @@ def test_hunyuan_video_rejects_cp_until_m3_polish(tmp_path):
     model_dir.mkdir()
 
     with pytest.raises(NotImplementedError, match="CP is deferred"):
-        NovaPipeline.from_pretrained(
+        DiffletPipeline.from_pretrained(
             str(model_dir),
             model_type="hunyuan_video",
-            parallel=NovaParallelConfig(tp_degree=4, cp_degree=2),
+            parallel=DiffletParallelConfig(tp_degree=4, cp_degree=2),
             dtype="bf16",
             compile_cache_dir=str(tmp_path / "cache"),
             skip_compile=True,
@@ -791,12 +791,12 @@ def test_hunyuan_video_rejects_cp_until_m3_polish(tmp_path):
 
 
 def test_hunyuan_video_backbone_inference_config_shapes(tmp_path):
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.backends.trainium.hunyuan_video.backbone import (
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.hunyuan_video.backbone import (
         HunyuanVideoBackboneInferenceConfig,
         ModelWrapperHunyuanVideoBackbone,
     )
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     transformer_dir = tmp_path / "transformer"
     transformer_dir.mkdir()
@@ -860,13 +860,13 @@ def test_hunyuan_video_backbone_inference_config_shapes(tmp_path):
 
 
 def test_hunyuan_video_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.backends.trainium.hunyuan_video.backbone import HunyuanVideoBackboneInferenceConfig
-    from nova.models.hunyuan_video.application import (
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.hunyuan_video.backbone import HunyuanVideoBackboneInferenceConfig
+    from difflet.models.hunyuan_video.application import (
         HunyuanVideoDiTInputBundle,
         validate_hunyuan_video_dit_inputs,
     )
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     transformer_dir = tmp_path / "transformer"
     transformer_dir.mkdir()
@@ -930,7 +930,7 @@ def test_hunyuan_video_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
 
 
 def test_hunyuan_video_cache_dit_inputs_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/nova/scripts/hunyuan_video_cache_dit_inputs.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan_video_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("hunyuan_video_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -947,7 +947,7 @@ def test_hunyuan_video_cache_dit_inputs_cli_parser_imports_without_loading_model
 
 
 def test_hunyuan_video_15_cache_dit_inputs_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/nova/scripts/hunyuan15_cache_dit_inputs.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -972,7 +972,7 @@ def test_hunyuan_video_15_cache_dit_inputs_cli_parser_imports_without_loading_mo
 def test_hunyuan_video_15_transformer_parity_loads_cached_bundle(tmp_path):
     from safetensors.torch import save_file
 
-    script_path = Path("/home/ubuntu/nova/scripts/hunyuan15_transformer_parity.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_transformer_parity.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_transformer_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1011,7 +1011,7 @@ def test_hunyuan_video_15_transformer_parity_loads_cached_bundle(tmp_path):
 
 
 def test_hunyuan_video_15_attention_capacity_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/nova/scripts/hunyuan15_attention_capacity_probe.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_attention_capacity_probe.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_attention_capacity_probe", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1105,7 +1105,7 @@ def test_hunyuan_video_15_attention_capacity_cli_parser_imports_without_compilin
 
 
 def test_hunyuan_video_15_attention_boundary_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/nova/scripts/hunyuan15_attention_boundary_probe.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_attention_boundary_probe.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_attention_boundary_probe", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1142,7 +1142,7 @@ def test_hunyuan_video_15_attention_boundary_cli_parser_imports_without_compilin
 
 
 def test_hunyuan_video_15_block_split_capacity_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/nova/scripts/hunyuan15_block_split_capacity_probe.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_block_split_capacity_probe.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_block_split_capacity_probe", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1182,7 +1182,7 @@ def test_hunyuan_video_15_block_split_capacity_cli_parser_imports_without_compil
 
 
 def test_hunyuan_video_15_vae_trace_probe_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/nova/scripts/hunyuan15_vae_trace_probe.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_vae_trace_probe.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_vae_trace_probe", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1200,7 +1200,7 @@ def test_hunyuan_video_15_vae_trace_probe_cli_parser_imports_without_compiling()
 
 
 def test_hunyuan_video_15_vae_parity_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/nova/scripts/hunyuan15_vae_parity.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_vae_parity.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_vae_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1219,7 +1219,7 @@ def test_hunyuan_video_15_vae_parity_cli_parser_imports_without_compiling():
 
 
 def test_hunyuan_video_15_segmented_block_parity_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/nova/scripts/hunyuan15_segmented_block_parity.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_segmented_block_parity.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_segmented_block_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1262,7 +1262,7 @@ def test_hunyuan_video_15_segmented_block_parity_cli_parser_imports_without_comp
 
 
 def test_hunyuan_video_15_segmented_prefix_parity_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/nova/scripts/hunyuan15_segmented_prefix_parity.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_segmented_prefix_parity.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_segmented_prefix_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

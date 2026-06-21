@@ -1,4 +1,4 @@
-Nova
+Difflet
 Copyright (c) 2026 <Project Owner>
 
 This product includes software derived from the following third-party projects:
@@ -16,35 +16,35 @@ This product includes software derived from the following third-party projects:
   neuronx_distributed_inference-0.9.17334+ced6ae4e.dist-info on the validated
   Trainium3 development image).
 
-  Specifically, code from the following NxDI paths has been forked into Nova:
+  Specifically, code from the following NxDI paths has been forked into Difflet:
 
   Layer 2 — shared inference infrastructure
   -----------------------------------------
-    nxdi:                                       nova:
-    models/application_base.py             →    nova/core/application_base.py
-    models/config.py                       →    nova/core/config.py
-    models/model_wrapper.py                →    nova/core/model_wrapper.py
-    models/encoder_base.py                 →    nova/core/encoder_base.py
-    models/layer_boundary_marker.py        →    nova/core/layer_boundary_marker.py
-    modules/attention/*.py                 →    nova/core/modules/attention/*.py
-    modules/custom_calls.py                →    nova/core/modules/custom_calls.py
-    modules/checkpoint.py                  →    nova/core/modules/checkpoint.py
-    modules/padding.py                     →    nova/core/modules/padding.py
-    utils/hf_adapter.py                    →    nova/utils/hf_adapter.py
-    utils/diffusers_adapter.py             →    nova/utils/diffusers_adapter.py
-    utils/distributed.py                   →    nova/utils/distributed.py
-    utils/runtime_env.py                   →    nova/utils/runtime_env.py
-    utils/compile_env.py                   →    nova/utils/compile_env.py
-    utils/snapshot.py                      →    nova/utils/snapshot.py
-    utils/accuracy.py                      →    nova/utils/accuracy.py
+    nxdi:                                       difflet:
+    models/application_base.py             →    difflet/core/application_base.py
+    models/config.py                       →    difflet/core/config.py
+    models/model_wrapper.py                →    difflet/core/model_wrapper.py
+    models/encoder_base.py                 →    difflet/core/encoder_base.py
+    models/layer_boundary_marker.py        →    difflet/core/layer_boundary_marker.py
+    modules/attention/*.py                 →    difflet/core/modules/attention/*.py
+    modules/custom_calls.py                →    difflet/core/modules/custom_calls.py
+    modules/checkpoint.py                  →    difflet/core/modules/checkpoint.py
+    modules/padding.py                     →    difflet/core/modules/padding.py
+    utils/hf_adapter.py                    →    difflet/utils/hf_adapter.py
+    utils/diffusers_adapter.py             →    difflet/utils/diffusers_adapter.py
+    utils/distributed.py                   →    difflet/utils/distributed.py
+    utils/runtime_env.py                   →    difflet/utils/runtime_env.py
+    utils/compile_env.py                   →    difflet/utils/compile_env.py
+    utils/snapshot.py                      →    difflet/utils/snapshot.py
+    utils/accuracy.py                      →    difflet/utils/accuracy.py
 
   Layer 1 — diffusion-specific
   ----------------------------
-    models/diffusers/activations.py        →    nova/layers/activations.py
-    models/diffusers/embeddings.py         →    nova/layers/embeddings.py
-    models/diffusers/normalization.py      →    nova/layers/normalization.py
-    models/diffusers/padder.py             →    nova/layers/padder.py
-    models/diffusers/flux/                 →    nova/models/flux/
+    models/diffusers/activations.py        →    difflet/layers/activations.py
+    models/diffusers/embeddings.py         →    difflet/layers/embeddings.py
+    models/diffusers/normalization.py      →    difflet/layers/normalization.py
+    models/diffusers/padder.py             →    difflet/layers/padder.py
+    models/diffusers/flux/                 →    difflet/models/flux/
 
   Each forked file retains its original Apache 2.0 copyright header. A
   per-file `Forked from neuronx-distributed-inference v0.9.17334+ced6ae4e`
@@ -59,9 +59,9 @@ This product includes software derived from the following third-party projects:
   License: Apache License 2.0
   Copyright: Copyright 2024 The HuggingFace Team.
 
-  Nova subclasses `diffusers.<X>Pipeline` classes (FluxPipeline, WanPipeline,
+  Difflet subclasses `diffusers.<X>Pipeline` classes (FluxPipeline, WanPipeline,
   HunyuanVideoPipeline, ...) and overrides `__call__` to inject Neuron-compiled
-  backbones. No diffusers source is copied into Nova.
+  backbones. No diffusers source is copied into Difflet.
 
 ================================================================================
 3. xDiT (xfuser) — design inspiration only, no code
@@ -70,6 +70,6 @@ This product includes software derived from the following third-party projects:
   Source:  https://github.com/xdit-project/xDiT
   License: Apache License 2.0
 
-  Nova's overall positioning (focused DiT inference, Python API + torchrun,
+  Difflet's overall positioning (focused DiT inference, Python API + torchrun,
   no scheduler/HTTP) and the registration decorator style are inspired by
   xDiT. No xDiT source code is copied or linked.

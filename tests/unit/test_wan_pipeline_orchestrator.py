@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from nova.models.wan.pipeline import WanOrchestrator, WanPipelineOutput
+from difflet.models.wan.pipeline import WanOrchestrator, WanPipelineOutput
 
 
 class FakeTransformer:
@@ -230,7 +230,7 @@ def test_negative_prompt_string_routes_through_tokenizer(tmp_path):
 
 
 def test_application_uses_video_to_latent_frame_formula_for_dit_compile_shape():
-    from nova.models.wan.application import _latent_num_frames
+    from difflet.models.wan.application import _latent_num_frames
 
     assert _latent_num_frames(1) == 1
     assert _latent_num_frames(5) == 2
@@ -240,7 +240,7 @@ def test_application_uses_video_to_latent_frame_formula_for_dit_compile_shape():
 
 
 def test_application_clamps_single_core_component_load_range():
-    from nova.models.wan.application import NeuronWanApplication
+    from difflet.models.wan.application import NeuronWanApplication
 
     component = SimpleNamespace(
         config=SimpleNamespace(neuron_config=SimpleNamespace(world_size=1))

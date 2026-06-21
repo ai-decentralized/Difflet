@@ -26,44 +26,44 @@ import importlib
 import importlib.util
 
 modules = [
-    "nova",
-    "nova.registry",
-    "nova.pipeline.nova_pipeline",
-    "nova.pipeline.compile_cache",
-    "nova.pipeline.precision_schedule",
-    "nova.pipeline.parallel_config",
-    "nova.models.flux.application",
-    "nova.models.hunyuan_video.application",
-    "nova.models.hunyuan_video.entry",
-    "nova.models.hunyuan_video.modeling_hunyuan_video",
-    "nova.models.hunyuan_video.vae.modeling_vae",
-    "nova.models.hunyuan_video.pipeline",
-    "nova.backends.trainium.hunyuan_video.backbone",
-    "nova.backends.trainium.hunyuan_video.backbone15",
-    "nova.backends.trainium.hunyuan_video.segmented15",
-    "nova.backends.trainium.hunyuan_video.vae",
-    "nova.backends.trainium.hunyuan_video.vae15",
-    "nova.models.qwen_image.application",
-    "nova.models.qwen_image.entry",
-    "nova.models.qwen_image.pipeline",
-    "nova.backends.trainium.qwen_image.transformer",
-    "nova.models.ltx_2.application",
-    "nova.models.ltx_2.entry",
-    "nova.models.ltx_2.pipeline",
-    "nova.backends.trainium.ltx_2.segmented",
-    "nova.backends.trainium.ltx_2.transformer",
-    "nova.ops.mx",
-    "nova.backends.cpu.ops_impl.mx",
-    "nova.backends.trainium.ops_impl.mx",
-    "nova.backends.trainium.nki_kernels.mx",
-    "nova.models.wan.application",
-    "nova.models.wan.entry",
-    "nova.models.wan.pipeline",
-    "nova.models.wan.modeling_wan",
-    "nova.models.wan.umt5.modeling_umt5",
-    "nova.models.wan.vae.modeling_vae",
-    "nova.backends.trainium.wan.text_encoder",
-    "nova.backends.trainium.wan.vae",
+    "difflet",
+    "difflet.registry",
+    "difflet.pipeline.difflet_pipeline",
+    "difflet.pipeline.compile_cache",
+    "difflet.pipeline.precision_schedule",
+    "difflet.pipeline.parallel_config",
+    "difflet.models.flux.application",
+    "difflet.models.hunyuan_video.application",
+    "difflet.models.hunyuan_video.entry",
+    "difflet.models.hunyuan_video.modeling_hunyuan_video",
+    "difflet.models.hunyuan_video.vae.modeling_vae",
+    "difflet.models.hunyuan_video.pipeline",
+    "difflet.backends.trainium.hunyuan_video.backbone",
+    "difflet.backends.trainium.hunyuan_video.backbone15",
+    "difflet.backends.trainium.hunyuan_video.segmented15",
+    "difflet.backends.trainium.hunyuan_video.vae",
+    "difflet.backends.trainium.hunyuan_video.vae15",
+    "difflet.models.qwen_image.application",
+    "difflet.models.qwen_image.entry",
+    "difflet.models.qwen_image.pipeline",
+    "difflet.backends.trainium.qwen_image.transformer",
+    "difflet.models.ltx_2.application",
+    "difflet.models.ltx_2.entry",
+    "difflet.models.ltx_2.pipeline",
+    "difflet.backends.trainium.ltx_2.segmented",
+    "difflet.backends.trainium.ltx_2.transformer",
+    "difflet.ops.mx",
+    "difflet.backends.cpu.ops_impl.mx",
+    "difflet.backends.trainium.ops_impl.mx",
+    "difflet.backends.trainium.nki_kernels.mx",
+    "difflet.models.wan.application",
+    "difflet.models.wan.entry",
+    "difflet.models.wan.pipeline",
+    "difflet.models.wan.modeling_wan",
+    "difflet.models.wan.umt5.modeling_umt5",
+    "difflet.models.wan.vae.modeling_vae",
+    "difflet.backends.trainium.wan.text_encoder",
+    "difflet.backends.trainium.wan.vae",
 ]
 
 for name in modules:
@@ -98,13 +98,13 @@ import ast
 from pathlib import Path
 
 forbidden_modules = {
-    "nova.core",
-    "nova.utils.compile_env",
-    "nova.utils.runtime_env",
-    "nova.utils.distributed",
-    "nova.utils.snapshot",
+    "difflet.core",
+    "difflet.utils.compile_env",
+    "difflet.utils.runtime_env",
+    "difflet.utils.distributed",
+    "difflet.utils.snapshot",
 }
-roots = [Path("nova"), Path("tests"), Path("scripts"), Path("examples")]
+roots = [Path("difflet"), Path("tests"), Path("scripts"), Path("examples")]
 violations = []
 
 
@@ -124,11 +124,11 @@ for root in roots:
                 module = node.module or ""
                 if is_forbidden(module):
                     violations.append((path, node.lineno, module))
-                if module == "nova":
+                if module == "difflet":
                     for alias in node.names:
                         if alias.name == "core":
                             violations.append((path, node.lineno, f"{module}.{alias.name}"))
-                if module == "nova.utils":
+                if module == "difflet.utils":
                     for alias in node.names:
                         candidate = f"{module}.{alias.name}"
                         if candidate in forbidden_modules:

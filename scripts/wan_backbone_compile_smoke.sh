@@ -14,26 +14,26 @@ if [[ -d "${NEURON_VENV}/bin" ]]; then
 fi
 
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
-export NOVA_BACKEND="${NOVA_BACKEND:-trainium}"
+export DIFFLET_BACKEND="${DIFFLET_BACKEND:-trainium}"
 export NEURON_RT_VIRTUAL_CORE_SIZE="${NEURON_RT_VIRTUAL_CORE_SIZE:-2}"
 
-MODEL="${1:-${NOVA_WAN_MODEL:-Wan-AI/Wan2.2-T2V-A14B-Diffusers}}"
-HEIGHT="${NOVA_WAN_HEIGHT:-480}"
-WIDTH="${NOVA_WAN_WIDTH:-832}"
-VIDEO_FRAMES="${NOVA_WAN_FRAMES:-9}"
-TP_DEGREE="${NOVA_WAN_TP_DEGREE:-4}"
-CP_DEGREE="${NOVA_WAN_CP_DEGREE:-1}"
+MODEL="${1:-${DIFFLET_WAN_MODEL:-Wan-AI/Wan2.2-T2V-A14B-Diffusers}}"
+HEIGHT="${DIFFLET_WAN_HEIGHT:-480}"
+WIDTH="${DIFFLET_WAN_WIDTH:-832}"
+VIDEO_FRAMES="${DIFFLET_WAN_FRAMES:-9}"
+TP_DEGREE="${DIFFLET_WAN_TP_DEGREE:-4}"
+CP_DEGREE="${DIFFLET_WAN_CP_DEGREE:-1}"
 WORLD_SIZE=$(( TP_DEGREE * CP_DEGREE ))
 export NEURON_RT_NUM_CORES="${NEURON_RT_NUM_CORES:-${WORLD_SIZE}}"
-SUBFOLDER="${NOVA_WAN_TRANSFORMER_SUBFOLDER:-transformer}"
-LOCAL_FILES_ONLY="${NOVA_LOCAL_FILES_ONLY:-0}"
+SUBFOLDER="${DIFFLET_WAN_TRANSFORMER_SUBFOLDER:-transformer}"
+LOCAL_FILES_ONLY="${DIFFLET_LOCAL_FILES_ONLY:-0}"
 
 if [[ "${SUBFOLDER}" == "transformer_2" ]]; then
-  DEFAULT_OUT="${ROOT}/.nova-cache/wan_backbone_2_smoke"
+  DEFAULT_OUT="${ROOT}/.difflet-cache/wan_backbone_2_smoke"
 else
-  DEFAULT_OUT="${ROOT}/.nova-cache/wan_backbone_smoke"
+  DEFAULT_OUT="${ROOT}/.difflet-cache/wan_backbone_smoke"
 fi
-OUT_DIR="${NOVA_WAN_BACKBONE_OUT:-${DEFAULT_OUT}}"
+OUT_DIR="${DIFFLET_WAN_BACKBONE_OUT:-${DEFAULT_OUT}}"
 
 cd "${ROOT}"
 mkdir -p "${OUT_DIR}"
@@ -45,9 +45,9 @@ from pathlib import Path
 
 import torch
 
-from nova.backends.trainium.wan.backbone import NeuronWanBackboneApplication
-from nova.models.wan.application import create_wan_backbone_config, _latent_num_frames
-from nova.pipeline.path_resolver import resolve_model_path
+from difflet.backends.trainium.wan.backbone import NeuronWanBackboneApplication
+from difflet.models.wan.application import create_wan_backbone_config, _latent_num_frames
+from difflet.pipeline.path_resolver import resolve_model_path
 
 model = ${MODEL@Q}
 out_dir = ${OUT_DIR@Q}

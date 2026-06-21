@@ -13,8 +13,8 @@ venv/
 env/
 
 # Compile cache (Trainium AOT artifacts can be huge)
-.nova_compile_cache/
-.nova-cache/
+.difflet_compile_cache/
+.difflet-cache/
 *.neff
 *.hlo
 

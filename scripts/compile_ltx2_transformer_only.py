@@ -4,7 +4,7 @@ The LTX-2 snapshot on this box has only ``transformer`` + ``scheduler`` (no text
 encoder / VAE / connectors), so the host pipeline cannot be loaded. The e2e
 TeaCache driver (scripts/run_ltx2_teacache_e2e.py) builds the app with
 ``enable_host_pipeline=True`` and reads the artifact under
-.nova-cache/ltx_2_transformer_full with skip_compile=True.
+.difflet-cache/ltx_2_transformer_full with skip_compile=True.
 
 To land the compiled ``model.pt`` at the cache hash the driver expects, we
 compute the CacheSpec with the DRIVER's exact application_kwargs (which include
@@ -23,15 +23,15 @@ from pathlib import Path
 
 import torch
 
-from nova import NovaParallelConfig
-from nova.pipeline.compile_cache import (
+from difflet import DiffletParallelConfig
+from difflet.pipeline.compile_cache import (
     CacheSpec,
     cache_path,
     has_valid_manifest,
     write_manifest,
 )
-from nova.pipeline.path_resolver import resolve_model_path
-from nova.registry import resolve_model
+from difflet.pipeline.path_resolver import resolve_model_path
+from difflet.registry import resolve_model
 
 P = "[ltx2-compile]"
 
@@ -39,7 +39,7 @@ MODEL_DIR = (
     "/home/ubuntu/.cache/huggingface/hub/models--Lightricks--LTX-2/"
     "snapshots/47da56e2ad66ce4125a9922b4a8826bf407f9d0a"
 )
-COMPILE_CACHE = "/home/ubuntu/nova/.nova-cache/ltx_2_transformer_full"
+COMPILE_CACHE = "/home/ubuntu/difflet/.difflet-cache/ltx_2_transformer_full"
 HEIGHT, WIDTH, NUM_FRAMES = 512, 768, 121
 TEXT_SEQ_LEN = 1024
 TP_DEGREE = 4
@@ -60,7 +60,7 @@ DRIVER_APP_KWARGS = {
 
 def main() -> int:
     dtype = torch.bfloat16
-    parallel = NovaParallelConfig(tp_degree=TP_DEGREE)
+    parallel = DiffletParallelConfig(tp_degree=TP_DEGREE)
 
     entry = resolve_model(MODEL_DIR, model_type="ltx_2")
     shape = entry.resolve_shape(height=HEIGHT, width=WIDTH, num_frames=NUM_FRAMES)

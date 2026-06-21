@@ -27,7 +27,7 @@ SNAP = glob.glob(
     "/home/ubuntu/.cache/huggingface/hub/"
     "models--hunyuanvideo-community--HunyuanVideo/snapshots/*/text_encoder"
 )[0]
-OUT = "/home/ubuntu/nova/.nova-cache/hunyuan_llama_enc_hs"
+OUT = "/home/ubuntu/difflet/.difflet-cache/hunyuan_llama_enc_hs"
 SEQ = 256
 os.makedirs(OUT, exist_ok=True)
 

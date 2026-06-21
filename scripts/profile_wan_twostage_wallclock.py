@@ -34,7 +34,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 WAN_SMOKE = ROOT / "scripts" / "wan_smoke.sh"
-SCHEMA = "nova-f2-0-wan-twostage-wallclock-v1"
+SCHEMA = "difflet-f2-0-wan-twostage-wallclock-v1"
 GATE_THRESHOLD = 0.20
 
 
@@ -43,7 +43,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--output", required=True, help="Where to write the per-stage JSON")
     p.add_argument(
         "--latents-path",
-        default=str(ROOT / ".nova-cache" / "wan_smoke_latents.pt"),
+        default=str(ROOT / ".difflet-cache" / "wan_smoke_latents.pt"),
         help="latents shuttle file between stage 1 and stage 2",
     )
     p.add_argument(
@@ -83,13 +83,13 @@ def _stage1_cmd(args: argparse.Namespace) -> list[str]:
         "-c",
         " ".join(
             [
-                f"NOVA_WAN_STEPS={args.num_inference_steps}",
-                f"NOVA_WAN_FRAMES={args.num_frames}",
-                f"NOVA_WAN_HEIGHT={args.height}",
-                f"NOVA_WAN_WIDTH={args.width}",
-                f"NOVA_WAN_TP_DEGREE={args.tp_degree}",
-                f"NOVA_WAN_LATENTS_PATH={args.latents_path}",
-                f"NOVA_WAN_PROMPT={shlex_quote(args.prompt)}",
+                f"DIFFLET_WAN_STEPS={args.num_inference_steps}",
+                f"DIFFLET_WAN_FRAMES={args.num_frames}",
+                f"DIFFLET_WAN_HEIGHT={args.height}",
+                f"DIFFLET_WAN_WIDTH={args.width}",
+                f"DIFFLET_WAN_TP_DEGREE={args.tp_degree}",
+                f"DIFFLET_WAN_LATENTS_PATH={args.latents_path}",
+                f"DIFFLET_WAN_PROMPT={shlex_quote(args.prompt)}",
                 # We deliberately re-invoke the wan_smoke.sh script for stage 1
                 # rather than re-implementing it; the helper splits internally.
                 # However wan_smoke.sh runs *both* stages; for clean per-stage
@@ -107,7 +107,7 @@ def _stage1_cmd(args: argparse.Namespace) -> list[str]:
                 "--enable-text --enable-transformer --no-vae",
                 "--output-type latent",
                 f"--save-latents {args.latents_path}",
-                f"--compiled-dir {ROOT / '.nova-cache' / 'wan_smoke_stage1'}",
+                f"--compiled-dir {ROOT / '.difflet-cache' / 'wan_smoke_stage1'}",
             ]
         ),
     ]
@@ -131,7 +131,7 @@ def _stage2_cmd(args: argparse.Namespace) -> list[str]:
                 f"--load-latents {args.latents_path}",
                 "--output-type pt",
                 f"--output {args.mp4_output}",
-                f"--compiled-dir {ROOT / '.nova-cache' / 'wan_smoke_stage2'}",
+                f"--compiled-dir {ROOT / '.difflet-cache' / 'wan_smoke_stage2'}",
             ]
         ),
     ]

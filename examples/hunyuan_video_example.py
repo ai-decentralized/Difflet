@@ -1,4 +1,4 @@
-"""HunyuanVideo text-to-video inference on Trainium via Nova (fully on-device text encode).
+"""HunyuanVideo text-to-video inference on Trainium via Difflet (fully on-device text encode).
 
 Unlike the M3 v0 hybrid path (host HF text encoders), this example runs Llama-3 and CLIP
 on Trainium. Capacity forces staging: the 8B Llama encoder and the 13B DiT cannot co-fit on
@@ -24,7 +24,7 @@ Stage 3 -- DiT denoise (TP=4) + on-device VAE decode -> video (4 NeuronCores):
 
 This is now a fully on-device pipeline: Llama-3 + CLIP + DiT + VAE all run on Trainium.
 The DiT artifact must be pre-compiled and --dit-compiled must point at a parent dir that
-contains BOTH ``transformer/`` (masked-SDPA NEFF) and ``vae_decoder/`` (the Nova Trainium
+contains BOTH ``transformer/`` (masked-SDPA NEFF) and ``vae_decoder/`` (the Difflet Trainium
 VAE NEFF), so the VAE decode also runs on device. Pass ``--cpu-vae`` to fall back to the
 HF CPU VAE decoder (the old hybrid behaviour). The Llama and CLIP NEFFs compile on first
 run into --llama-compiled / --clip-compiled.
@@ -41,7 +41,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
-_DEFAULT_CACHE = Path(__file__).resolve().parent.parent / ".nova-cache"
+_DEFAULT_CACHE = Path(__file__).resolve().parent.parent / ".difflet-cache"
 
 # HunyuanVideo Llama prompt template (diffusers DEFAULT_PROMPT_TEMPLATE, crop_start=95).
 LLAMA_TEMPLATE = (
@@ -120,12 +120,12 @@ def _resolve_model_dir(model_dir: str | None) -> str:
 def stage_clip(args: argparse.Namespace) -> None:
     from transformers import CLIPTokenizer
 
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.models.flux.clip.modeling_clip import (
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.models.flux.clip.modeling_clip import (
         CLIPInferenceConfig,
         NeuronClipApplication,
     )
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     model_dir = _resolve_model_dir(args.model_dir)
     clip_path = os.path.join(model_dir, "text_encoder_2")
@@ -233,11 +233,11 @@ def stage_llama(args: argparse.Namespace) -> None:
 
 
 def stage_generate(args: argparse.Namespace) -> None:
-    from nova.models.hunyuan_video.application import (
+    from difflet.models.hunyuan_video.application import (
         HunyuanVideoDiTInputBundle,
         NeuronHunyuanVideoApplication,
     )
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     llama = torch.load(os.path.join(args.work_dir, "llama.pt"))
     clip = torch.load(os.path.join(args.work_dir, "clip.pt"))
@@ -251,7 +251,7 @@ def stage_generate(args: argparse.Namespace) -> None:
 
     app = NeuronHunyuanVideoApplication(
         model_path=_resolve_model_dir(args.dit_source),
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree, cp_degree=1),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree, cp_degree=1),
         dtype=torch.bfloat16,
         shape={"height": args.height, "width": args.width, "num_frames": args.num_frames},
         text_seq_len=args.text_seq_len,
@@ -302,7 +302,7 @@ def stage_generate(args: argparse.Namespace) -> None:
 def _hunyuan_timesteps(app, num_steps: int, device) -> torch.Tensor:
     import numpy as np
 
-    from nova.models.hunyuan_video.pipeline import _retrieve_timesteps
+    from difflet.models.hunyuan_video.pipeline import _retrieve_timesteps
 
     sigmas = np.linspace(1.0, 0.0, num_steps + 1)[:-1]
     timesteps, _ = _retrieve_timesteps(app.pipeline.scheduler, num_steps, "cpu", sigmas=sigmas)
@@ -311,7 +311,7 @@ def _hunyuan_timesteps(app, num_steps: int, device) -> torch.Tensor:
 
 def main() -> int:
     args = _parse_args()
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
     if args.stage == "clip":
         stage_clip(args)
     elif args.stage == "llama":
