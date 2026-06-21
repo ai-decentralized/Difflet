@@ -4,7 +4,7 @@
 This script measures the host-side scheduler boundary before F3 moves scheduler
 math into the traced Trainium graph. For cached-boundary models it replays the
 latent denoise loop from a safetensors bundle; for Flux it can wrap the full
-Nova pipeline call and time transformer / scheduler / ``xm.mark_step`` phases.
+Difflet pipeline call and time transformer / scheduler / ``xm.mark_step`` phases.
 
 Examples:
     python scripts/profile_denoise_loop.py --model qwen-image \
@@ -686,7 +686,7 @@ def _step_record(
     return record
 
 
-def _load_nova_pipeline(
+def _load_difflet_pipeline(
     args: argparse.Namespace,
     *,
     model: str,
@@ -696,14 +696,14 @@ def _load_nova_pipeline(
     num_frames: int | None,
     application_kwargs: dict[str, Any],
 ):
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
-    from nova import NovaParallelConfig, NovaPipeline
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
+    from difflet import DiffletParallelConfig, DiffletPipeline
 
     start = time.perf_counter()
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         model_id,
         model_type=MODEL_TYPES[model],
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=args.dtype,
         height=height,
         width=width,
@@ -731,14 +731,14 @@ def _load_direct_app(
     num_frames: int | None,
     application_kwargs: dict[str, Any],
 ):
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
-    from nova import NovaParallelConfig
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
+    from difflet import DiffletParallelConfig
 
-    parallel = NovaParallelConfig(tp_degree=args.tp_degree)
+    parallel = DiffletParallelConfig(tp_degree=args.tp_degree)
     shape = {"height": height, "width": width, "num_frames": num_frames}
     start = time.perf_counter()
     if model == "hunyuan-video":
-        from nova.models.hunyuan_video.application import NeuronHunyuanVideoApplication
+        from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
 
         app = NeuronHunyuanVideoApplication(
             model_path=source_dir,
@@ -748,7 +748,7 @@ def _load_direct_app(
             **application_kwargs,
         )
     elif model == "hunyuan-video15":
-        from nova.models.hunyuan_video.application import NeuronHunyuanVideoApplication
+        from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
 
         app = NeuronHunyuanVideoApplication(
             model_path=source_dir,
@@ -759,7 +759,7 @@ def _load_direct_app(
             **application_kwargs,
         )
     elif model == "qwen-image":
-        from nova.models.qwen_image.application import NeuronQwenImageApplication
+        from difflet.models.qwen_image.application import NeuronQwenImageApplication
 
         app = NeuronQwenImageApplication(
             model_path=source_dir,
@@ -769,7 +769,7 @@ def _load_direct_app(
             **application_kwargs,
         )
     elif model == "ltx-2":
-        from nova.models.ltx_2.application import NeuronLTX2Application
+        from difflet.models.ltx_2.application import NeuronLTX2Application
 
         app = NeuronLTX2Application(
             model_path=source_dir,
@@ -809,7 +809,7 @@ def _load_app_or_pipeline(
             application_kwargs=application_kwargs,
         )
         return app, load_elapsed, args.compiled_dir
-    pipe, load_elapsed = _load_nova_pipeline(
+    pipe, load_elapsed = _load_difflet_pipeline(
         args,
         model=model,
         model_id=model_id,
@@ -830,7 +830,7 @@ def _call_target(target: Any, *args: Any, **kwargs: Any) -> Any:
 
 
 def _run_qwen_image(args: argparse.Namespace, meta: dict[str, Any]) -> tuple[dict[str, Any], Any]:
-    from nova.models.qwen_image.application import QwenImageDiTInputBundle
+    from difflet.models.qwen_image.application import QwenImageDiTInputBundle
 
     bundle_path = Path(args.bundle)
     tensors = load_safetensors_file(str(bundle_path), device="cpu")
@@ -927,7 +927,7 @@ def _run_hunyuan_video(
     args: argparse.Namespace,
     meta: dict[str, Any],
 ) -> tuple[dict[str, Any], Any]:
-    from nova.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
+    from difflet.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
 
     bundle_path = Path(args.bundle)
     tensors = load_safetensors_file(str(bundle_path), device="cpu")
@@ -1025,7 +1025,7 @@ def _run_hunyuan_video15(
     args: argparse.Namespace,
     meta: dict[str, Any],
 ) -> tuple[dict[str, Any], Any]:
-    from nova.models.hunyuan_video.application import HunyuanVideo15DiTInputBundle
+    from difflet.models.hunyuan_video.application import HunyuanVideo15DiTInputBundle
 
     bundle_path = Path(args.bundle)
     tensors = load_safetensors_file(str(bundle_path), device="cpu")
@@ -1141,7 +1141,7 @@ def _run_hunyuan_video15(
 
 
 def _run_ltx_2(args: argparse.Namespace, meta: dict[str, Any]) -> tuple[dict[str, Any], Any]:
-    from nova.models.ltx_2.application import LTX2DiTInputBundle
+    from difflet.models.ltx_2.application import LTX2DiTInputBundle
 
     bundle_path = Path(args.bundle)
     tensors = load_safetensors_file(str(bundle_path), device="cpu")
@@ -1306,7 +1306,7 @@ def _run_flux(args: argparse.Namespace, meta: dict[str, Any]) -> tuple[dict[str,
     height = args.height or 1024
     width = args.width or 1024
     app_kwargs = _application_kwargs(args.application_kwarg)
-    pipe, load_elapsed = _load_nova_pipeline(
+    pipe, load_elapsed = _load_difflet_pipeline(
         args,
         model="flux",
         model_id=args.model_id,
@@ -1464,7 +1464,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Cached DiT-boundary safetensors bundle. Required except for --model flux.",
     )
-    parser.add_argument("--cache-dir", default=".nova-cache/f3_denoise_loop")
+    parser.add_argument("--cache-dir", default=".difflet-cache/f3_denoise_loop")
     parser.add_argument(
         "--source-dir",
         default=None,
@@ -1531,7 +1531,7 @@ def main() -> int:
     steps = measurements["steps"]
     summary = _summarize_steps(steps)
     profile = {
-        "schema": "nova-f3-denoise-loop-profile-v2",
+        "schema": "difflet-f3-denoise-loop-profile-v2",
         "created_utc": run_started,
         "model": model,
         "model_id": args.model_id,
@@ -1544,7 +1544,7 @@ def main() -> int:
             "device_step_time_s is the timed Trainium transformer call boundary.",
             "device_step_time_s is not hardware-only execution time; it may include "
             "runtime blocking, synchronization, and transfer-related waiting.",
-            "nova.utils.benchmark.LatencyCollector is a forward-hook wall-clock timer "
+            "difflet.utils.benchmark.LatencyCollector is a forward-hook wall-clock timer "
             "in this repository, so it is not treated as a Neuron hardware counter.",
             "F3.0b samples torch_xla.debug.metrics before and after each step; transfer "
             "time/count/bytes are per-step deltas when the runtime exposes the relevant "
@@ -1559,7 +1559,7 @@ def main() -> int:
         ],
         "neff_gate_timing_sources": list(NEFF_GATE_TIMING_SOURCES),
         "latency_collector_status": {
-            "module": "nova.utils.benchmark.LatencyCollector",
+            "module": "difflet.utils.benchmark.LatencyCollector",
             "usable_as_gate_neff_counter": False,
             "reason": "forward_hook_wall_clock_timer_not_neuron_hardware_counter",
         },

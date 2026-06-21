@@ -11,7 +11,7 @@ def test_matmul_mx_single_tile_kernel_simulates_zero_tile():
     import numpy as np
     from nki.simulator import simulate_kernel
 
-    from nova.backends.trainium.nki_kernels.mx import matmul_mx_single_tile_kernel
+    from difflet.backends.trainium.nki_kernels.mx import matmul_mx_single_tile_kernel
 
     stationary = np.zeros((128, 128), dtype=np.uint32)
     stationary_scale = np.full((16, 128), 127, dtype=np.uint8)
@@ -36,7 +36,7 @@ def test_matmul_mx_k_tiles_kernel_simulates_zero_tile():
     import numpy as np
     from nki.simulator import simulate_kernel
 
-    from nova.backends.trainium.nki_kernels.mx import matmul_mx_k_tiles_kernel
+    from difflet.backends.trainium.nki_kernels.mx import matmul_mx_k_tiles_kernel
 
     stationary = np.zeros((2, 128, 128), dtype=np.uint32)
     stationary_scale = np.full((2, 16, 128), 127, dtype=np.uint8)
@@ -63,11 +63,11 @@ def test_matmul_mx_k_tiles_kernel_simulates_numerical_parity(k_tiles):
     import torch
     from nki.simulator import simulate_kernel
 
-    from nova.backends.cpu.ops_impl.mx import (
+    from difflet.backends.cpu.ops_impl.mx import (
         matmul_mx_k_tiles_reference,
         quantize_mx,
     )
-    from nova.backends.trainium.nki_kernels.mx import matmul_mx_k_tiles_kernel
+    from difflet.backends.trainium.nki_kernels.mx import matmul_mx_k_tiles_kernel
 
     generator = torch.Generator().manual_seed(k_tiles)
     stationary = (0.1 * torch.randn((k_tiles, 128, 512), generator=generator)).to(
@@ -116,11 +116,11 @@ def test_matmul_mx_k_tiles_kernel_simulates_logical_linear_parity():
     import torch
     from nki.simulator import simulate_kernel
 
-    from nova.backends.cpu.ops_impl.mx import (
+    from difflet.backends.cpu.ops_impl.mx import (
         linear_mx_reference,
         pack_linear_mx_inputs,
     )
-    from nova.backends.trainium.nki_kernels.mx import matmul_mx_k_tiles_kernel
+    from difflet.backends.trainium.nki_kernels.mx import matmul_mx_k_tiles_kernel
 
     generator = torch.Generator().manual_seed(7)
     input_bf16 = (0.05 * torch.randn((128, 2048), generator=generator)).to(
@@ -157,11 +157,11 @@ def test_matmul_mx_k_tiles_kernel_simulates_outer_n_linear_parity(k_dim):
     import torch
     from nki.simulator import simulate_kernel
 
-    from nova.backends.cpu.ops_impl.mx import (
+    from difflet.backends.cpu.ops_impl.mx import (
         linear_mx_outer_n_reference,
         pack_linear_mx_inputs,
     )
-    from nova.backends.trainium.nki_kernels.mx import matmul_mx_k_tiles_kernel
+    from difflet.backends.trainium.nki_kernels.mx import matmul_mx_k_tiles_kernel
 
     generator = torch.Generator().manual_seed(70 + k_dim)
     input_bf16 = (0.05 * torch.randn((128, k_dim), generator=generator)).to(
@@ -200,8 +200,8 @@ def test_linear_mx_prequant_kernel_simulates_logical_linear_parity():
     import torch
     from nki.simulator import simulate_kernel
 
-    from nova.backends.cpu.ops_impl.mx import linear_mx_reference, quantize_mx
-    from nova.backends.trainium.nki_kernels.mx import linear_mx_prequant_kernel
+    from difflet.backends.cpu.ops_impl.mx import linear_mx_reference, quantize_mx
+    from difflet.backends.trainium.nki_kernels.mx import linear_mx_prequant_kernel
 
     generator = torch.Generator().manual_seed(91)
     input_fp16 = (0.05 * torch.randn((128, 2048), generator=generator)).to(torch.float16)
@@ -252,8 +252,8 @@ def test_linear_mx_prequant_group2_kernel_simulates_two_linear_parity():
     import torch
     from nki.simulator import simulate_kernel
 
-    from nova.backends.cpu.ops_impl.mx import linear_mx_reference, quantize_mx
-    from nova.backends.trainium.nki_kernels.mx import linear_mx_prequant_group2_kernel
+    from difflet.backends.cpu.ops_impl.mx import linear_mx_reference, quantize_mx
+    from difflet.backends.trainium.nki_kernels.mx import linear_mx_prequant_group2_kernel
 
     generator = torch.Generator().manual_seed(97)
     input_fp16 = (0.05 * torch.randn((128, 2048), generator=generator)).to(torch.float16)
@@ -311,9 +311,9 @@ def test_linear_mx_prequant_native_weight_kernel_simulates_parity():
     import torch
     from nki.simulator import simulate_kernel
 
-    from nova.backends.cpu.ops_impl.mx import linear_mx_reference, quantize_mx
-    from nova.backends.trainium.ltx_2.segmented import _expand_compact_mx_scale_to_native
-    from nova.backends.trainium.nki_kernels.mx import linear_mx_prequant_native_weight_kernel
+    from difflet.backends.cpu.ops_impl.mx import linear_mx_reference, quantize_mx
+    from difflet.backends.trainium.ltx_2.segmented import _expand_compact_mx_scale_to_native
+    from difflet.backends.trainium.nki_kernels.mx import linear_mx_prequant_native_weight_kernel
 
     generator = torch.Generator().manual_seed(101)
     input_fp16 = (0.05 * torch.randn((128, 2048), generator=generator)).to(torch.float16)
@@ -365,8 +365,8 @@ def test_quantize_mx_linear_activation_kernel_simulates_cpu_pack_parity():
     import torch
     from nki.simulator import simulate_kernel
 
-    from nova.backends.cpu.ops_impl.mx import quantize_mx
-    from nova.backends.trainium.nki_kernels.mx import quantize_mx_linear_activation_kernel
+    from difflet.backends.cpu.ops_impl.mx import quantize_mx
+    from difflet.backends.trainium.nki_kernels.mx import quantize_mx_linear_activation_kernel
 
     generator = torch.Generator().manual_seed(93)
     input_fp16 = (0.05 * torch.randn((128, 2048), generator=generator)).to(torch.float16)
@@ -407,7 +407,7 @@ def test_quantize_mx_single_tile_kernel_simulates_zero_tile():
     import numpy as np
     from nki.simulator import simulate_kernel
 
-    from nova.backends.trainium.nki_kernels.mx import (
+    from difflet.backends.trainium.nki_kernels.mx import (
         quantize_mx_e4m3_single_tile_kernel,
     )
 

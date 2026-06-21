@@ -1,4 +1,4 @@
-"""Flux text-to-image inference on Trainium via Nova.
+"""Flux text-to-image inference on Trainium via Difflet.
 
 Single-instance launch (one image, 4 NeuronCores):
 
@@ -39,7 +39,7 @@ Cache key composition:
 
 The first run with a given combination triggers AOT compile (single-digit
 to tens of minutes). Subsequent runs hit the on-disk cache; default
-location ``~/.cache/nova/`` or ``$NOVA_COMPILE_CACHE``.
+location ``~/.cache/difflet/`` or ``$DIFFLET_COMPILE_CACHE``.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ from pathlib import Path
 
 import torch
 
-from nova import NovaParallelConfig, NovaPipeline
+from difflet import DiffletParallelConfig, DiffletPipeline
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -94,7 +94,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # ----- output / cache / debugging -----
     p.add_argument("--output", default="out.png")
     p.add_argument("--compile-cache-dir", default=None,
-                   help="Default: $NOVA_COMPILE_CACHE or ~/.cache/nova/")
+                   help="Default: $DIFFLET_COMPILE_CACHE or ~/.cache/difflet/")
     p.add_argument("--precompile-only", action="store_true",
                    help="AOT compile and exit; skip load + forward")
     p.add_argument("--debug-compile", action="store_true",
@@ -108,11 +108,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _build_parallel_config(args: argparse.Namespace) -> NovaParallelConfig | None:
+def _build_parallel_config(args: argparse.Namespace) -> DiffletParallelConfig | None:
     """Return None when user didn't specify any parallel flag (use registry default)."""
     if args.tp_degree is None and args.cp_degree == 1 and not args.cfg_parallel:
         return None
-    return NovaParallelConfig(
+    return DiffletParallelConfig(
         tp_degree=args.tp_degree if args.tp_degree is not None else 1,
         cp_degree=args.cp_degree,
         cfg_parallel_enabled=args.cfg_parallel,
@@ -139,11 +139,11 @@ def main(argv: list[str] | None = None) -> int:
     parallel = _build_parallel_config(args)
     dtype = getattr(torch, args.dtype)
 
-    _log(f"[nova] model           = {args.model}")
-    _log(f"[nova] parallel        = {parallel or 'registry-default'}")
-    _log(f"[nova] dtype           = {dtype}")
-    _log(f"[nova] shape           = h={args.height} w={args.width}")
-    _log(f"[nova] cache_dir       = {args.compile_cache_dir or '$NOVA_COMPILE_CACHE / ~/.cache/nova'}")
+    _log(f"[difflet] model           = {args.model}")
+    _log(f"[difflet] parallel        = {parallel or 'registry-default'}")
+    _log(f"[difflet] dtype           = {dtype}")
+    _log(f"[difflet] shape           = h={args.height} w={args.width}")
+    _log(f"[difflet] cache_dir       = {args.compile_cache_dir or '$DIFFLET_COMPILE_CACHE / ~/.cache/difflet'}")
 
     common_kwargs = dict(
         model_type=args.model_type,
@@ -160,12 +160,12 @@ def main(argv: list[str] | None = None) -> int:
 
     t0 = time.monotonic()
     if args.precompile_only:
-        NovaPipeline.precompile(args.model, **common_kwargs)
-        _log(f"[nova] precompile done in {time.monotonic() - t0:.1f}s")
+        DiffletPipeline.precompile(args.model, **common_kwargs)
+        _log(f"[difflet] precompile done in {time.monotonic() - t0:.1f}s")
         return 0
 
-    pipe = NovaPipeline.from_pretrained(args.model, **common_kwargs)
-    _log(f"[nova] from_pretrained done in {time.monotonic() - t0:.1f}s "
+    pipe = DiffletPipeline.from_pretrained(args.model, **common_kwargs)
+    _log(f"[difflet] from_pretrained done in {time.monotonic() - t0:.1f}s "
          f"(compile cache at {pipe.compiled_path})")
 
     # FluxPipeline accepts a torch.Generator. Per-rank seeding is fine; the
@@ -187,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
 
     t1 = time.monotonic()
     output = pipe(**forward_kwargs)
-    _log(f"[nova] forward done in {time.monotonic() - t1:.1f}s")
+    _log(f"[difflet] forward done in {time.monotonic() - t1:.1f}s")
 
     # Save only on the main process — every rank holds a copy of the image
     # tensor / PIL.Image after VAE decode, but writing the file once is enough.
@@ -199,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
             image = images
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
         image.save(args.output)
-        _log(f"[nova] image saved to {args.output}")
+        _log(f"[difflet] image saved to {args.output}")
 
     return 0
 

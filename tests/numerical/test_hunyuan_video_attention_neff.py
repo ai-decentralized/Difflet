@@ -30,7 +30,7 @@ class HunyuanDualStreamAttentionProbe(nn.Module):
         context_v,
         attention_mask,
     ):
-        from nova.models.hunyuan_video.modeling_hunyuan_video import dual_stream_attention
+        from difflet.models.hunyuan_video.modeling_hunyuan_video import dual_stream_attention
 
         latent, context = dual_stream_attention(
             latent_q,
@@ -45,22 +45,22 @@ class HunyuanDualStreamAttentionProbe(nn.Module):
 
 
 def test_hunyuan_video_masked_dual_stream_attention_neff_matches_cpu():
-    if os.environ.get("NOVA_RUN_HUNYUAN_ATTENTION_NEFF") != "1":
-        pytest.skip("set NOVA_RUN_HUNYUAN_ATTENTION_NEFF=1 to run the Hunyuan attention NEFF gate")
+    if os.environ.get("DIFFLET_RUN_HUNYUAN_ATTENTION_NEFF") != "1":
+        pytest.skip("set DIFFLET_RUN_HUNYUAN_ATTENTION_NEFF=1 to run the Hunyuan attention NEFF gate")
 
     import torch_neuronx
 
-    batch = int(os.environ.get("NOVA_HUNYUAN_ATTENTION_BATCH", "1"))
-    latent_seq = int(os.environ.get("NOVA_HUNYUAN_ATTENTION_LATENT_SEQ", "3840"))
-    context_seq = int(os.environ.get("NOVA_HUNYUAN_ATTENTION_CONTEXT_SEQ", "256"))
-    heads = int(os.environ.get("NOVA_HUNYUAN_ATTENTION_HEADS", "24"))
-    head_dim = int(os.environ.get("NOVA_HUNYUAN_ATTENTION_HEAD_DIM", "128"))
-    masked_tail = int(os.environ.get("NOVA_HUNYUAN_ATTENTION_MASKED_TAIL", "64"))
-    cosine_min = float(os.environ.get("NOVA_HUNYUAN_ATTENTION_COSINE_MIN", "0.999"))
-    mean_abs_max = float(os.environ.get("NOVA_HUNYUAN_ATTENTION_MEAN_ABS_MAX", "0.005"))
-    work_dir = Path(os.environ.get("NOVA_HUNYUAN_ATTENTION_WORK_DIR", "/tmp/nova_hunyuan_attention_neff"))
+    batch = int(os.environ.get("DIFFLET_HUNYUAN_ATTENTION_BATCH", "1"))
+    latent_seq = int(os.environ.get("DIFFLET_HUNYUAN_ATTENTION_LATENT_SEQ", "3840"))
+    context_seq = int(os.environ.get("DIFFLET_HUNYUAN_ATTENTION_CONTEXT_SEQ", "256"))
+    heads = int(os.environ.get("DIFFLET_HUNYUAN_ATTENTION_HEADS", "24"))
+    head_dim = int(os.environ.get("DIFFLET_HUNYUAN_ATTENTION_HEAD_DIM", "128"))
+    masked_tail = int(os.environ.get("DIFFLET_HUNYUAN_ATTENTION_MASKED_TAIL", "64"))
+    cosine_min = float(os.environ.get("DIFFLET_HUNYUAN_ATTENTION_COSINE_MIN", "0.999"))
+    mean_abs_max = float(os.environ.get("DIFFLET_HUNYUAN_ATTENTION_MEAN_ABS_MAX", "0.005"))
+    work_dir = Path(os.environ.get("DIFFLET_HUNYUAN_ATTENTION_WORK_DIR", "/tmp/difflet_hunyuan_attention_neff"))
     compiler_args = os.environ.get(
-        "NOVA_HUNYUAN_ATTENTION_COMPILER_ARGS",
+        "DIFFLET_HUNYUAN_ATTENTION_COMPILER_ARGS",
         "--model-type=transformer -O1 --auto-cast=none "
         "--internal-hlo2tensorizer-options='--verify-hlo=true'",
     )
@@ -75,11 +75,11 @@ def test_hunyuan_video_masked_dual_stream_attention_neff_matches_cpu():
     )
     model = HunyuanDualStreamAttentionProbe().eval()
 
-    os.environ["NOVA_BACKEND"] = "cpu"
+    os.environ["DIFFLET_BACKEND"] = "cpu"
     with torch.no_grad():
         ref = model(*inputs).detach().cpu()
 
-    os.environ["NOVA_BACKEND"] = "trainium"
+    os.environ["DIFFLET_BACKEND"] = "trainium"
     traced = torch_neuronx.trace(
         model,
         inputs,
@@ -143,7 +143,7 @@ def _compare(ref: torch.Tensor, out: torch.Tensor) -> dict[str, float | list[int
 
 
 def _write_metrics_if_requested(metrics: dict) -> None:
-    path = os.environ.get("NOVA_HUNYUAN_ATTENTION_METRICS")
+    path = os.environ.get("DIFFLET_HUNYUAN_ATTENTION_METRICS")
     if not path:
         return
     output = Path(path)

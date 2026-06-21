@@ -1,6 +1,6 @@
 """CPU parity tests for the HunyuanVideo TeaCache probe model.
 
-These tests live in ``nova/backends/trainium/`` namespace by way of the
+These tests live in ``difflet/backends/trainium/`` namespace by way of the
 ``HunyuanVideoTeacacheProbeModel`` class, but they exercise only the CPU
 computational path — no Trainium load, no NEFF compile. The goal is to
 prove that the probe's forward is numerically identical to calling
@@ -55,12 +55,12 @@ def _tiny_bundle():
 def test_probe_mod_input_matches_cpu_teacache_mod_input(monkeypatch):
     """The probe's mod_input output must be bit-identical to the CPU model's
     own teacache_mod_input, weight-for-weight."""
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
-    from nova.backends.trainium.hunyuan_video.teacache_probe_model import (
+    from difflet.backends.trainium.hunyuan_video.teacache_probe_model import (
         HunyuanVideoTeacacheProbeModel,
     )
-    from nova.models.hunyuan_video.modeling_hunyuan_video import (
+    from difflet.models.hunyuan_video.modeling_hunyuan_video import (
         HunyuanVideoTransformer3DModel,
     )
 
@@ -115,12 +115,12 @@ def test_probe_mod_input_matches_cpu_teacache_mod_input(monkeypatch):
 def test_probe_delta_uses_caller_prev_mod_input(monkeypatch):
     """Delta must be a function of (mod_input, prev_mod_input), not just
     mod_input. Pass two different prev tensors and confirm the deltas differ."""
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
-    from nova.backends.trainium.hunyuan_video.teacache_probe_model import (
+    from difflet.backends.trainium.hunyuan_video.teacache_probe_model import (
         HunyuanVideoTeacacheProbeModel,
     )
-    from nova.models.hunyuan_video.modeling_hunyuan_video import (
+    from difflet.models.hunyuan_video.modeling_hunyuan_video import (
         HunyuanVideoTransformer3DModel,
     )
 
@@ -148,12 +148,12 @@ def test_probe_delta_uses_caller_prev_mod_input(monkeypatch):
 
 def test_probe_delta_zero_when_prev_equals_current(monkeypatch):
     """Sanity check: delta is exactly 0 when prev_mod_input == mod_input."""
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
-    from nova.backends.trainium.hunyuan_video.teacache_probe_model import (
+    from difflet.backends.trainium.hunyuan_video.teacache_probe_model import (
         HunyuanVideoTeacacheProbeModel,
     )
-    from nova.models.hunyuan_video.modeling_hunyuan_video import (
+    from difflet.models.hunyuan_video.modeling_hunyuan_video import (
         HunyuanVideoTransformer3DModel,
     )
 
@@ -176,12 +176,12 @@ def test_probe_module_state_dict_matches_wrapped_model(monkeypatch):
     """The probe wrapper holds a full HunyuanVideoTransformer3DModel under the
     ``model.`` prefix; this lets the production HF state dict load by simply
     prefixing keys. Verify that round-trip."""
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
-    from nova.backends.trainium.hunyuan_video.teacache_probe_model import (
+    from difflet.backends.trainium.hunyuan_video.teacache_probe_model import (
         HunyuanVideoTeacacheProbeModel,
     )
-    from nova.models.hunyuan_video.modeling_hunyuan_video import (
+    from difflet.models.hunyuan_video.modeling_hunyuan_video import (
         HunyuanVideoTransformer3DModel,
     )
 

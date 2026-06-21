@@ -94,7 +94,7 @@ def main() -> int:
     p.add_argument("--pattern", choices=("16:4", "4:8"), default="16:4")
     p.add_argument("--warmup", type=int, default=10)
     p.add_argument("--repeats", type=int, default=30)
-    p.add_argument("--out", type=Path, default=Path("/tmp/nova_sparse_matmul_nki2_probe.json"))
+    p.add_argument("--out", type=Path, default=Path("/tmp/difflet_sparse_matmul_nki2_probe.json"))
     p.add_argument("--mode", choices=("simulator", "baremetal"), default="baremetal")
     args = p.parse_args()
 

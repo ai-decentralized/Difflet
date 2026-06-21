@@ -1,4 +1,4 @@
-"""Qwen-Image text-to-image inference on Trainium via Nova (fully on-device).
+"""Qwen-Image text-to-image inference on Trainium via Difflet (fully on-device).
 
 Qwen2.5-VL text encoder, the DiT, and the VAE all run on Trainium. Capacity forces
 staging (the 7B Qwen2.5-VL encoder and the 60-layer DiT cannot co-fit on 4 cores, and the
@@ -22,7 +22,7 @@ Stage 3 -- VAE decode -> image (1 NeuronCore):
         --output /tmp/qwen.png
 
 The Qwen2.5-VL encoder NEFF compiles on first run; the DiT compiles into --dit-cache (a
-content-addressed Nova compile cache); the VAE reuses Nova's Wan VAE decoder port (the
+content-addressed Difflet compile cache); the VAE reuses Difflet's Wan VAE decoder port (the
 Qwen-Image VAE config is identical to Wan's).
 """
 
@@ -37,7 +37,7 @@ from pathlib import Path
 
 import torch
 
-_DEFAULT_CACHE = Path(__file__).resolve().parent.parent / ".nova-cache"
+_DEFAULT_CACHE = Path(__file__).resolve().parent.parent / ".difflet-cache"
 
 # Qwen-Image Llama/Qwen2.5-VL prompt template (diffusers prompt_template_encode).
 QWEN_TEMPLATE = (
@@ -154,9 +154,9 @@ def stage_text(args: argparse.Namespace) -> None:
 
 
 def stage_generate(args: argparse.Namespace) -> None:
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
-    from nova.models.qwen_image.application import NeuronQwenImageApplication
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
+    from difflet.models.qwen_image.application import NeuronQwenImageApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     model_dir = _model_dir(args.model_dir)
     text = torch.load(os.path.join(args.work_dir, "text.pt"))
@@ -164,7 +164,7 @@ def stage_generate(args: argparse.Namespace) -> None:
 
     app = NeuronQwenImageApplication(
         model_path=model_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree, cp_degree=1),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree, cp_degree=1),
         dtype=torch.bfloat16,
         shape={"height": args.height, "width": args.width, "num_frames": None},
         text_seq_len=args.text_seq_len,
@@ -207,12 +207,12 @@ def stage_generate(args: argparse.Namespace) -> None:
 
 
 def stage_vae(args: argparse.Namespace) -> None:
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.backends.trainium.wan.vae import (
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.wan.vae import (
         NeuronWanVAEDecoderApplication,
         WanVAEDecoderInferenceConfig,
     )
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     model_dir = _model_dir(args.model_dir)
     vae_path = os.path.join(model_dir, "vae")

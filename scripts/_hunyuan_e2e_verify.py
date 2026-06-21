@@ -6,7 +6,7 @@ cached DiT-input bundle -> Trainium DiT (drop-mask flash) -> HF CPU VAE decode
 -> (1,3,T,H,W) video. Reports shape/finite/stats and cosine vs the prior
 known-good latents as a sanity check.
 
-Env: NOVA_ATTN_DROP_MASK=1, NEURON_RT_NUM_CORES=4, NEURON_RT_VIRTUAL_CORE_SIZE=2.
+Env: DIFFLET_ATTN_DROP_MASK=1, NEURON_RT_NUM_CORES=4, NEURON_RT_VIRTUAL_CORE_SIZE=2.
 """
 
 import json
@@ -17,19 +17,19 @@ import torch
 import torch.nn.functional as F
 from safetensors.torch import load_file
 
-from nova.models.hunyuan_video.application import (
+from difflet.models.hunyuan_video.application import (
     HunyuanVideoDiTInputBundle,
     NeuronHunyuanVideoApplication,
 )
-from nova.pipeline.parallel_config import NovaParallelConfig
+from difflet.pipeline.parallel_config import DiffletParallelConfig
 
 import os
 
-ROOT = "/home/ubuntu/nova"
-SOURCE = os.environ.get("HY_SOURCE", f"{ROOT}/.nova-cache/hunyuan_cte_20d40s2r/source")
-COMPILED = os.environ.get("HY_COMPILED", f"{ROOT}/.nova-cache/hunyuan_cte_20d40s2r/compiled")
-BUNDLE = f"{ROOT}/.nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors"
-PRIOR_LATENTS = f"{ROOT}/.nova-cache/hunyuan_dit_inputs/cat_walking_4step_nova_latents.pt"
+ROOT = "/home/ubuntu/difflet"
+SOURCE = os.environ.get("HY_SOURCE", f"{ROOT}/.difflet-cache/hunyuan_cte_20d40s2r/source")
+COMPILED = os.environ.get("HY_COMPILED", f"{ROOT}/.difflet-cache/hunyuan_cte_20d40s2r/compiled")
+BUNDLE = f"{ROOT}/.difflet-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors"
+PRIOR_LATENTS = f"{ROOT}/.difflet-cache/hunyuan_dit_inputs/cat_walking_4step_difflet_latents.pt"
 SAVE_VIDEO = "/tmp/hy_e2e_video.pt"
 SAVE_LATENTS = "/tmp/hy_e2e_latents.pt"
 
@@ -40,7 +40,7 @@ print(f"[e2e] shape={meta['height']}x{meta['width']}x{meta['num_frames']} "
 
 app = NeuronHunyuanVideoApplication(
     model_path=SOURCE,
-    parallel=NovaParallelConfig(tp_degree=4, cp_degree=1),
+    parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1),
     dtype=torch.bfloat16,
     shape={"height": meta["height"], "width": meta["width"], "num_frames": meta["num_frames"]},
     text_seq_len=meta["text_seq_len"],

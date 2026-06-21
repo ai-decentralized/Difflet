@@ -47,8 +47,8 @@ import torch.nn.functional as F  # noqa: E402
 from safetensors.torch import load_file as load_safetensors_file  # noqa: E402
 
 MODEL_DIR = "/home/ubuntu/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-720p_t2v/snapshots/f4dbc4a1efa4ac8ea56680cdf79d9f455105e814"
-BUNDLE = ROOT / ".nova-cache" / "hunyuan15_dit_inputs" / "real_320x512x61_4step.safetensors"
-COMPILED = ROOT / ".nova-cache" / "hv15_teacache_keymask" / "compiled"
+BUNDLE = ROOT / ".difflet-cache" / "hunyuan15_dit_inputs" / "real_320x512x61_4step.safetensors"
+COMPILED = ROOT / ".difflet-cache" / "hv15_teacache_keymask" / "compiled"
 CCLOG = ROOT / "cclogs" / "m9-teacache"
 NUM_STEPS = 50
 HEIGHT, WIDTH, NUM_FRAMES = 320, 512, 61
@@ -73,24 +73,24 @@ def _pearson(xs, ys):
 def main() -> int:
     # cclog 86: key-only attention mask (avoids the symmetric-mask softmax 0/0 NaN
     # on the Neuron kernel). Must be set before the trace module is built/compiled.
-    os.environ["NOVA_HUNYUAN15_KEY_MASK_ATTENTION"] = "1"
+    os.environ["DIFFLET_HUNYUAN15_KEY_MASK_ATTENTION"] = "1"
     # cclog 86: run the token refiner on host (the Neuron flash kernel NaNs at <128 valid
     # keys; the refiner self-attends over the 13/1000-valid mllm stream). The NEFF then
     # receives the already-refined (inner_dim) embeds.
-    os.environ["NOVA_HUNYUAN15_HOST_REFINER"] = "1"
+    os.environ["DIFFLET_HUNYUAN15_HOST_REFINER"] = "1"
 
-    from nova.models.hunyuan_video.application import (
+    from difflet.models.hunyuan_video.application import (
         HunyuanVideo15DiTInputBundle,
         NeuronHunyuanVideoApplication,
     )
-    from nova.pipeline.parallel_config import NovaParallelConfig
-    from nova.pipeline.teacache import TeaCacheCalibration, TeaCacheController
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
 
     tns = load_safetensors_file(str(BUNDLE), device="cpu")
     dtype = torch.bfloat16
     # cclog 86: the monolithic-DiT NaN was the attention softmax dividing by zero
     # on fully-masked query rows (default symmetric mask). Fixed by the key-only
-    # mask processor (NOVA_HUNYUAN15_KEY_MASK_ATTENTION below), so we now pass the
+    # mask processor (DIFFLET_HUNYUAN15_KEY_MASK_ATTENTION below), so we now pass the
     # REAL masks (padding keys correctly ignored; no all-masked query row).
     mask2 = tns["encoder_attention_mask_2"].to(torch.int64)
     embeds = {
@@ -107,7 +107,7 @@ def main() -> int:
     print("[hv15-tc] building app (1.5 monolithic, teacache_fused)...", flush=True)
     app = NeuronHunyuanVideoApplication(
         model_path=MODEL_DIR,
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype=dtype,
         shape={"height": HEIGHT, "width": WIDTH, "num_frames": NUM_FRAMES},
         model_version="1.5",
@@ -218,7 +218,7 @@ def main() -> int:
               f"(signal/DiT produced non-finite values)", flush=True)
         results["adaptive"] = {"skipped_reason": "non-finite signal", "n_finite": int(finite.sum())}
         out = {
-            "schema": "nova-m9-teacache-hv15-e2e-v1",
+            "schema": "difflet-m9-teacache-hv15-e2e-v1",
             "model": "hunyuan_video_1.5", "shape_label": shape_label, "num_steps": NUM_STEPS,
             "signal_pearson": pearson, "n_pairs": len(pairs),
             "results": results, "hardware_measured": True,
@@ -267,7 +267,7 @@ def main() -> int:
     print(f"[hv15-tc] adaptive: {results['adaptive']}", flush=True)
 
     out = {
-        "schema": "nova-m9-teacache-hv15-e2e-v1",
+        "schema": "difflet-m9-teacache-hv15-e2e-v1",
         "model": "hunyuan_video_1.5", "shape_label": shape_label, "num_steps": NUM_STEPS,
         "signal_pearson": pearson, "n_pairs": len(pairs),
         "results": results, "hardware_measured": True,

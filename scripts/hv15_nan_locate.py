@@ -47,7 +47,7 @@ import torch  # noqa: E402
 from safetensors.torch import load_file as load_safetensors_file  # noqa: E402
 
 MODEL_DIR = Path("/home/ubuntu/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-720p_t2v/snapshots/f4dbc4a1efa4ac8ea56680cdf79d9f455105e814")
-BUNDLE = ROOT / ".nova-cache" / "hunyuan15_dit_inputs" / "real_320x512x61_4step.safetensors"
+BUNDLE = ROOT / ".difflet-cache" / "hunyuan15_dit_inputs" / "real_320x512x61_4step.safetensors"
 
 
 def _bad(t):

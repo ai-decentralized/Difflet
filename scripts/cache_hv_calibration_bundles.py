@@ -168,10 +168,10 @@ def main() -> int:
             "pooled_projections": pooled_prompt_embeds.to(dtype=dtype, device="cpu").contiguous(),
             "guidance": guidance.to(device="cpu").contiguous(),
         }
-        save_file(tensors, str(out_path), metadata={"format": "nova-hunyuan-video-dit-inputs-v1"})
+        save_file(tensors, str(out_path), metadata={"format": "difflet-hunyuan-video-dit-inputs-v1"})
 
         meta = {
-            "schema": "nova-hunyuan-video-dit-inputs-v1",
+            "schema": "difflet-hunyuan-video-dit-inputs-v1",
             "model_id": args.model_id,
             "prompt": [prompt],
             "prompt_2": None,

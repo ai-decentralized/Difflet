@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke test for Nova MX kernels."""
+"""Smoke test for Difflet MX kernels."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from nova.backends.cpu.ops_impl import mx as cpu_mx
+from difflet.backends.cpu.ops_impl import mx as cpu_mx
 
 
 def _cosine(a: torch.Tensor, b: torch.Tensor) -> float:
@@ -74,7 +74,7 @@ def _run_simulator(
 ) -> tuple[torch.Tensor, dict[str, float]]:
     from nki.simulator import simulate_kernel
 
-    from nova.backends.trainium.nki_kernels.mx import (
+    from difflet.backends.trainium.nki_kernels.mx import (
         matmul_mx_k_tiles_kernel,
         matmul_mx_single_tile_kernel,
     )
@@ -111,7 +111,7 @@ def _run_trainium(
 ) -> tuple[torch.Tensor, dict[str, float]]:
     import torch_xla.core.xla_model as xm
 
-    from nova.backends.trainium.ops_impl import mx as trainium_mx
+    from difflet.backends.trainium.ops_impl import mx as trainium_mx
 
     device = xm.xla_device()
 
@@ -186,7 +186,7 @@ def main() -> int:
     parser.add_argument(
         "--metrics-path",
         type=Path,
-        default=Path("/tmp/nova_mx_smoke_metrics.json"),
+        default=Path("/tmp/difflet_mx_smoke_metrics.json"),
     )
     parser.add_argument("--min-cosine", type=float, default=0.999)
     parser.add_argument("--max-mean-abs", type=float, default=0.01)

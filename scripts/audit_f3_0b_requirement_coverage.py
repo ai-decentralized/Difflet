@@ -280,7 +280,7 @@ def audit_requirement_coverage(
     )
 
     return {
-        "schema": "nova-f3-0b-requirement-coverage-v1",
+        "schema": "difflet-f3-0b-requirement-coverage-v1",
         "qwen_profiler_requirement_satisfied": qwen_profiler_satisfied,
         "production_gate_complete": bool(gate_audit.get("can_unlock_f3_1"))
         or bool(gate_audit.get("can_write_negative_closeout")),

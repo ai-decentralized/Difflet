@@ -54,8 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", required=True)
     parser.add_argument("--transformer-subfolder", default="transformer")
-    parser.add_argument("--cache-dir", default="/tmp/nova_hunyuan15_segmented_process_cache")
-    parser.add_argument("--work-dir", default="/tmp/nova_hunyuan15_segmented_process_work")
+    parser.add_argument("--cache-dir", default="/tmp/difflet_hunyuan15_segmented_process_cache")
+    parser.add_argument("--work-dir", default="/tmp/difflet_hunyuan15_segmented_process_work")
     parser.add_argument("--bundle", required=True)
     parser.add_argument("--timestep-index", type=int, default=0)
     parser.add_argument("--height", type=int, default=320)
@@ -105,8 +105,8 @@ def _save_pt(path: Path, value: dict[str, Any]) -> None:
 
 
 def _precompile(args: argparse.Namespace):
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
-    from nova import NovaParallelConfig, NovaPipeline
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
+    from difflet import DiffletParallelConfig, DiffletPipeline
 
     app_kwargs: dict[str, Any] = {
         "transformer_runtime": "segmented",
@@ -124,10 +124,10 @@ def _precompile(args: argparse.Namespace):
     if args.attention_compiler_args is not None:
         app_kwargs["segmented_attention_compiler_args"] = args.attention_compiler_args
 
-    return NovaPipeline.from_pretrained(
+    return DiffletPipeline.from_pretrained(
         args.model_dir,
         model_type="hunyuan_video_15",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=args.dtype,
         height=args.height,
         width=args.width,
@@ -144,8 +144,8 @@ def _run_worker(args: argparse.Namespace) -> int:
     if args.runtime_config is None or args.input_tensors is None or args.output_tensors is None:
         raise ValueError("--worker requires runtime config, input tensors, and output tensors")
 
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.backends.trainium.hunyuan_video.segmented15 import (
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.hunyuan_video.segmented15 import (
         HunyuanVideo15AttentionTileApplication,
         HunyuanVideo15AttentionTileConfig,
         HunyuanVideo15BlockSegmentApplication,
@@ -265,7 +265,7 @@ def _spawn_block_worker(
     env = os.environ.copy()
     env["PATH"] = f"{NEURON_VENV / 'bin'}:{env.get('PATH', '')}"
     env["PYTHONPATH"] = f"{ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
-    env.setdefault("NOVA_BACKEND", "trainium")
+    env.setdefault("DIFFLET_BACKEND", "trainium")
     env["LOCAL_WORLD_SIZE"] = str(args.tp_degree)
     cmd = [
         str(NEURON_PYTHON if NEURON_PYTHON.exists() else Path(sys.executable)),

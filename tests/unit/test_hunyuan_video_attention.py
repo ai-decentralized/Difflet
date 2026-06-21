@@ -5,13 +5,13 @@ import torch
 
 
 def test_hunyuan_video_transformer3d_model_matches_diffusers_tiny(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     from diffusers.models.transformers.transformer_hunyuan_video import (
         HunyuanVideoTransformer3DModel as DiffusersHunyuanVideoTransformer3DModel,
     )
 
-    from nova.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoTransformer3DModel
+    from difflet.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoTransformer3DModel
 
     kwargs = {
         "in_channels": 2,
@@ -68,13 +68,13 @@ def test_hunyuan_video_transformer3d_model_matches_diffusers_tiny(monkeypatch):
 
 
 def test_hunyuan_video_transformer3d_model_matches_diffusers_production_heads(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     from diffusers.models.transformers.transformer_hunyuan_video import (
         HunyuanVideoTransformer3DModel as DiffusersHunyuanVideoTransformer3DModel,
     )
 
-    from nova.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoTransformer3DModel
+    from difflet.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoTransformer3DModel
 
     kwargs = {
         "in_channels": 16,
@@ -132,23 +132,23 @@ def test_hunyuan_video_transformer3d_model_matches_diffusers_production_heads(mo
 
 
 def test_hunyuan_video_transformer3d_token_replace_is_explicitly_out_of_scope(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
-    from nova.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoTransformer3DModel
+    from difflet.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoTransformer3DModel
 
     with pytest.raises(NotImplementedError, match="token_replace"):
         HunyuanVideoTransformer3DModel(image_condition_type="token_replace")
 
 
 def test_hunyuan_video_transformer_block_matches_diffusers(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     from diffusers.models.embeddings import get_1d_rotary_pos_embed
     from diffusers.models.transformers.transformer_hunyuan_video import (
         HunyuanVideoTransformerBlock as DiffusersHunyuanVideoTransformerBlock,
     )
 
-    from nova.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoTransformerBlock
+    from difflet.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoTransformerBlock
 
     torch.manual_seed(10)
     batch, latent_seq, context_seq, heads, head_dim = 2, 3, 2, 2, 4
@@ -180,14 +180,14 @@ def test_hunyuan_video_transformer_block_matches_diffusers(monkeypatch):
 
 
 def test_hunyuan_video_single_transformer_block_matches_diffusers(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     from diffusers.models.embeddings import get_1d_rotary_pos_embed
     from diffusers.models.transformers.transformer_hunyuan_video import (
         HunyuanVideoSingleTransformerBlock as DiffusersHunyuanVideoSingleTransformerBlock,
     )
 
-    from nova.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoSingleTransformerBlock
+    from difflet.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoSingleTransformerBlock
 
     torch.manual_seed(12)
     batch, latent_seq, context_seq, heads, head_dim = 2, 3, 2, 2, 4
@@ -219,9 +219,9 @@ def test_hunyuan_video_single_transformer_block_matches_diffusers(monkeypatch):
 
 
 def test_dual_stream_attention_matches_concat_attention_with_mask(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
-    from nova.models.hunyuan_video.modeling_hunyuan_video import dual_stream_attention
+    from difflet.models.hunyuan_video.modeling_hunyuan_video import dual_stream_attention
 
     torch.manual_seed(0)
     batch, latent_seq, context_seq, heads, head_dim = 2, 3, 2, 4, 5
@@ -255,9 +255,9 @@ def test_dual_stream_attention_matches_concat_attention_with_mask(monkeypatch):
 
 
 def test_trainium_masked_attention_uses_sdpa_fallback(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "trainium")
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
 
-    from nova.ops import attention
+    from difflet.ops import attention
 
     torch.manual_seed(1)
     q = torch.randn(2, 4, 3)
@@ -273,9 +273,9 @@ def test_trainium_masked_attention_uses_sdpa_fallback(monkeypatch):
 
 
 def test_trainium_masked_attention_sdpa_fallback_respects_cte_layout_flags(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "trainium")
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
 
-    from nova.ops import attention
+    from difflet.ops import attention
 
     torch.manual_seed(2)
     q = torch.randn(2, 3, 4)
@@ -293,9 +293,9 @@ def test_trainium_masked_attention_sdpa_fallback_respects_cte_layout_flags(monke
 
 
 def test_trainium_masked_attention_sdpa_fallback_combines_causal_mask(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "trainium")
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
 
-    from nova.ops import attention
+    from difflet.ops import attention
 
     torch.manual_seed(3)
     q = torch.randn(1, 4, 3)
@@ -312,9 +312,9 @@ def test_trainium_masked_attention_sdpa_fallback_combines_causal_mask(monkeypatc
 
 
 def test_trainium_masked_attention_sdpa_fallback_combines_additive_and_causal_mask(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "trainium")
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
 
-    from nova.ops import attention
+    from difflet.ops import attention
 
     torch.manual_seed(4)
     q = torch.randn(1, 4, 3)

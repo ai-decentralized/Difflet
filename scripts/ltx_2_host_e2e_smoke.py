@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Run a local LTX-2 host-orchestrated Nova smoke.
+"""Run a local LTX-2 host-orchestrated Difflet smoke.
 
 This is the end-to-end closure entrypoint for a local diffusers-format
-``Lightricks/LTX-2`` snapshot. It exercises Nova's prompt -> connector ->
+``Lightricks/LTX-2`` snapshot. It exercises Difflet's prompt -> connector ->
 Trainium transformer -> optional VAE/audio decode path. It intentionally does
-not download weights; use ``NovaPipeline.from_pretrained`` or HF tooling to
+not download weights; use ``DiffletPipeline.from_pretrained`` or HF tooling to
 materialize the snapshot first.
 """
 
@@ -38,8 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--model-dir",
-        default=os.environ.get("NOVA_LTX_2_MODEL_DIR", ""),
-        help="Local LTX-2 snapshot dir. Env: NOVA_LTX_2_MODEL_DIR.",
+        default=os.environ.get("DIFFLET_LTX_2_MODEL_DIR", ""),
+        help="Local LTX-2 snapshot dir. Env: DIFFLET_LTX_2_MODEL_DIR.",
     )
     parser.add_argument("--prompt", action="append", default=None)
     parser.add_argument("--negative-prompt", default=None)
@@ -55,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--transformer-mode",
         choices=("single", "segmented"),
         default="single",
-        help="Nova LTX-2 transformer backend mode.",
+        help="Difflet LTX-2 transformer backend mode.",
     )
     parser.add_argument(
         "--segmented-block-load-mode",
@@ -63,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="streaming",
         help="Block reload mode when --transformer-mode segmented.",
     )
-    parser.add_argument("--cache-dir", default=".nova-cache/ltx_2_host_e2e")
+    parser.add_argument("--cache-dir", default=".difflet-cache/ltx_2_host_e2e")
     parser.add_argument(
         "--compiled-model-path",
         default=None,
@@ -89,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-compile", action="store_true")
     parser.add_argument("--skip-load", action="store_true")
     parser.add_argument("--skip-warmup", action="store_true")
-    parser.add_argument("--metrics-out", default="/tmp/nova_ltx_2_host_e2e_smoke.json")
+    parser.add_argument("--metrics-out", default="/tmp/difflet_ltx_2_host_e2e_smoke.json")
     parser.add_argument(
         "--save-tensors",
         default=None,
@@ -256,7 +256,7 @@ def main() -> int:
     ensure_runtime_python()
     args = build_parser().parse_args()
     if not args.model_dir:
-        print("[ltx2-e2e] --model-dir or NOVA_LTX_2_MODEL_DIR is required", file=sys.stderr)
+        print("[ltx2-e2e] --model-dir or DIFFLET_LTX_2_MODEL_DIR is required", file=sys.stderr)
         return 2
 
     model_dir = Path(args.model_dir).expanduser().resolve()
@@ -280,16 +280,16 @@ def main() -> int:
 
     import torch
 
-    from nova import NovaParallelConfig, NovaPipeline
+    from difflet import DiffletParallelConfig, DiffletPipeline
 
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
     generator = torch.Generator(device="cpu").manual_seed(args.seed)
     prompt = args.prompt or _default_prompt()
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="ltx_2",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=dtype,
         height=args.height,
         width=args.width,

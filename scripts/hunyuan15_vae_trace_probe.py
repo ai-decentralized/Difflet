@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--trace", action="store_true")
     parser.add_argument("--no-repeat-workaround", action="store_true")
-    parser.add_argument("--trace-out", default="/tmp/nova_hunyuan15_vae_tiny_trace/model.pt")
+    parser.add_argument("--trace-out", default="/tmp/difflet_hunyuan15_vae_tiny_trace/model.pt")
     parser.add_argument("--compiler-args", default=DEFAULT_COMPILER_ARGS)
     return parser
 

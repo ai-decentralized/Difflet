@@ -15,8 +15,8 @@ Required labels (cclog 65 §"Local artifact audit"):
 - (optional) ``hunyuan_video15``, ``ltx_2`` — extend later
 
 Accepted schema set:
-- ``nova-f2-0-component-wallclock-v1`` (from profile_component_wallclock.py)
-- ``nova-f2-0-wan-twostage-wallclock-v1`` (from profile_wan_twostage_wallclock.py)
+- ``difflet-f2-0-component-wallclock-v1`` (from profile_component_wallclock.py)
+- ``difflet-f2-0-wan-twostage-wallclock-v1`` (from profile_wan_twostage_wallclock.py)
 """
 
 from __future__ import annotations
@@ -28,12 +28,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "nova-f2-0-gate-audit-v1"
+SCHEMA = "difflet-f2-0-gate-audit-v1"
 THRESHOLD = 0.20
 
 ACCEPTED_SCHEMAS = {
-    "nova-f2-0-component-wallclock-v1",
-    "nova-f2-0-wan-twostage-wallclock-v1",
+    "difflet-f2-0-component-wallclock-v1",
+    "difflet-f2-0-wan-twostage-wallclock-v1",
 }
 
 LABEL_HINTS: dict[str, str] = {
@@ -53,7 +53,7 @@ def _infer_label(doc: dict[str, Any], path: Path) -> str | None:
     if model and model in LABEL_HINTS:
         return LABEL_HINTS[model]
     schema = doc.get("schema")
-    if schema == "nova-f2-0-wan-twostage-wallclock-v1":
+    if schema == "difflet-f2-0-wan-twostage-wallclock-v1":
         return "wan"
     name = path.name.lower()
     for hint, label in LABEL_HINTS.items():
@@ -67,7 +67,7 @@ def _row_for(doc: dict[str, Any], path: Path) -> dict[str, Any]:
     schema = doc.get("schema")
     invalid: list[str] = []
     vae_share: float | None = None
-    if schema == "nova-f2-0-component-wallclock-v1":
+    if schema == "difflet-f2-0-component-wallclock-v1":
         shares = doc.get("shares") or {}
         vae_share = shares.get("vae_share")
         if vae_share is None:
@@ -76,7 +76,7 @@ def _row_for(doc: dict[str, Any], path: Path) -> dict[str, Any]:
         if vae_path == "host_cpu_hf":
             # CPU VAE is an upper bound on share — useful but flag it
             invalid.append("vae_path=host_cpu_hf_upper_bound")
-    elif schema == "nova-f2-0-wan-twostage-wallclock-v1":
+    elif schema == "difflet-f2-0-wan-twostage-wallclock-v1":
         shares = doc.get("shares") or {}
         vae_share = shares.get("vae_share_lower_bound")
         if vae_share is None:

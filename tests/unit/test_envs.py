@@ -1,4 +1,4 @@
-"""Unit tests for `nova.envs`.
+"""Unit tests for `difflet.envs`.
 
 Cover the parser registry surface: lazy evaluation, type coercion, defaults,
 dir() reporting, and unknown-name behavior.
@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from nova import envs
+from difflet import envs
 
 
 def _unset(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
@@ -21,8 +21,8 @@ def _unset(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
 
 def test_known_names_listed_in_dir() -> None:
     names = dir(envs)
-    assert "NOVA_BACKEND" in names
-    assert "NOVA_COMPILE_CACHE" in names
+    assert "DIFFLET_BACKEND" in names
+    assert "DIFFLET_COMPILE_CACHE" in names
     assert "BASE_COMPILE_WORK_DIR" in names
     assert "RANK" in names
     assert "WORLD_SIZE" in names
@@ -37,15 +37,15 @@ def test_unknown_attribute_raises() -> None:
 def test_lazy_evaluation_picks_up_env_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("NOVA_BACKEND", "trainium")
-    assert envs.NOVA_BACKEND == "trainium"
-    monkeypatch.setenv("NOVA_BACKEND", "cuda")
-    assert envs.NOVA_BACKEND == "cuda"
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
+    assert envs.DIFFLET_BACKEND == "trainium"
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    assert envs.DIFFLET_BACKEND == "cuda"
 
 
 def test_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    _unset(monkeypatch, "NOVA_BACKEND")
-    assert envs.NOVA_BACKEND is None
+    _unset(monkeypatch, "DIFFLET_BACKEND")
+    assert envs.DIFFLET_BACKEND is None
 
     _unset(monkeypatch, "RANK", "WORLD_SIZE", "LOCAL_RANK", "LOCAL_WORLD_SIZE")
     assert envs.RANK == 0
@@ -75,17 +75,17 @@ def test_int_coercion(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_compile_cache_expanduser(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NOVA_COMPILE_CACHE", "~/my-cache")
-    expanded = envs.NOVA_COMPILE_CACHE
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", "~/my-cache")
+    expanded = envs.DIFFLET_COMPILE_CACHE
     assert "~" not in expanded
     assert expanded.endswith("/my-cache")
 
 
 def test_compile_cache_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    _unset(monkeypatch, "NOVA_COMPILE_CACHE")
-    value = envs.NOVA_COMPILE_CACHE
+    _unset(monkeypatch, "DIFFLET_COMPILE_CACHE")
+    value = envs.DIFFLET_COMPILE_CACHE
     assert "~" not in value
-    assert value.endswith("/.cache/nova")
+    assert value.endswith("/.cache/difflet")
 
 
 def test_nxd_inference_capture_snapshot_truthiness(

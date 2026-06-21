@@ -29,10 +29,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--model-dir",
-        default=os.environ.get("NOVA_LTX_2_MODEL_DIR", ""),
-        help="Local LTX-2 snapshot dir. Env: NOVA_LTX_2_MODEL_DIR.",
+        default=os.environ.get("DIFFLET_LTX_2_MODEL_DIR", ""),
+        help="Local LTX-2 snapshot dir. Env: DIFFLET_LTX_2_MODEL_DIR.",
     )
-    parser.add_argument("--cache-dir", default="/tmp/nova_ltx2_segmented_block_probe_cache")
+    parser.add_argument("--cache-dir", default="/tmp/difflet_ltx2_segmented_block_probe_cache")
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=768)
     parser.add_argument("--num-frames", type=int, default=121)
@@ -50,17 +50,17 @@ def main() -> int:
     ensure_runtime_python()
     args = build_parser().parse_args()
     if not args.model_dir:
-        raise ValueError("--model-dir or NOVA_LTX_2_MODEL_DIR is required")
+        raise ValueError("--model-dir or DIFFLET_LTX_2_MODEL_DIR is required")
 
     import torch
 
-    from nova import NovaParallelConfig, NovaPipeline
+    from difflet import DiffletParallelConfig, DiffletPipeline
 
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(Path(args.model_dir).expanduser().resolve()),
         model_type="ltx_2",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=dtype,
         height=args.height,
         width=args.width,

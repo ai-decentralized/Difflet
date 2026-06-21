@@ -1,7 +1,7 @@
 """HunyuanVideo trajectory numerical alignment against Hugging Face diffusers.
 
 This test is intentionally opt-in. It loads real HunyuanVideo transformer
-weights and Nova's compiled Trainium artifacts, so it is too slow and
+weights and Difflet's compiled Trainium artifacts, so it is too slow and
 hardware-heavy for default test runs.
 """
 
@@ -28,42 +28,42 @@ pytestmark = [
 
 
 def test_hunyuan_video_cached_trajectory_cosine_matches_diffusers():
-    if os.environ.get("NOVA_RUN_HUNYUAN_VIDEO_NUMERICAL") != "1":
+    if os.environ.get("DIFFLET_RUN_HUNYUAN_VIDEO_NUMERICAL") != "1":
         pytest.skip(
-            "set NOVA_RUN_HUNYUAN_VIDEO_NUMERICAL=1 to run the HunyuanVideo numerical gate"
+            "set DIFFLET_RUN_HUNYUAN_VIDEO_NUMERICAL=1 to run the HunyuanVideo numerical gate"
         )
 
     source_dir = Path(
         os.environ.get(
-            "NOVA_HUNYUAN_VIDEO_SOURCE_DIR",
+            "DIFFLET_HUNYUAN_VIDEO_SOURCE_DIR",
             "/home/ubuntu/.cache/huggingface/hub/hunyuanvideo-real",
         )
     )
     compiled_dir = Path(
         os.environ.get(
-            "NOVA_HUNYUAN_VIDEO_COMPILED_DIR",
-            "/home/ubuntu/nova/.nova-cache/hunyuan_n4_20d40s2r/compiled",
+            "DIFFLET_HUNYUAN_VIDEO_COMPILED_DIR",
+            "/home/ubuntu/difflet/.difflet-cache/hunyuan_n4_20d40s2r/compiled",
         )
     )
     bundle_path = Path(
         os.environ.get(
-            "NOVA_HUNYUAN_VIDEO_BUNDLE",
-            "/home/ubuntu/nova/.nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors",
+            "DIFFLET_HUNYUAN_VIDEO_BUNDLE",
+            "/home/ubuntu/difflet/.difflet-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors",
         )
     )
-    threshold = float(os.environ.get("NOVA_HUNYUAN_VIDEO_MIN_COSINE", "0.999"))
-    tp_degree = int(os.environ.get("NOVA_HUNYUAN_VIDEO_TP_DEGREE", "4"))
+    threshold = float(os.environ.get("DIFFLET_HUNYUAN_VIDEO_MIN_COSINE", "0.999"))
+    tp_degree = int(os.environ.get("DIFFLET_HUNYUAN_VIDEO_TP_DEGREE", "4"))
     reference_dtype = _parse_dtype(
-        os.environ.get("NOVA_HUNYUAN_VIDEO_REFERENCE_DTYPE", "bfloat16")
+        os.environ.get("DIFFLET_HUNYUAN_VIDEO_REFERENCE_DTYPE", "bfloat16")
     )
-    num_threads = int(os.environ.get("NOVA_HUNYUAN_VIDEO_NUM_THREADS", "0"))
+    num_threads = int(os.environ.get("DIFFLET_HUNYUAN_VIDEO_NUM_THREADS", "0"))
     if num_threads > 0:
         torch.set_num_threads(num_threads)
 
     scheduler_config = source_dir / "scheduler" / "scheduler_config.json"
     assert scheduler_config.exists(), (
         "HunyuanVideo trajectory parity requires a real HF scheduler at "
-        f"{scheduler_config}; otherwise Nova would use its fallback scheduler."
+        f"{scheduler_config}; otherwise Difflet would use its fallback scheduler."
     )
 
     meta, tensors = _load_artifact(bundle_path)
@@ -75,7 +75,7 @@ def test_hunyuan_video_cached_trajectory_cosine_matches_diffusers():
         timesteps=timesteps,
         dtype=reference_dtype,
     )
-    nova_steps = _run_nova_trainium(
+    difflet_steps = _run_difflet_trainium(
         source_dir=source_dir,
         compiled_dir=compiled_dir,
         meta=meta,
@@ -84,8 +84,8 @@ def test_hunyuan_video_cached_trajectory_cosine_matches_diffusers():
         tp_degree=tp_degree,
     )
 
-    assert len(ref_steps) == len(nova_steps) == int(meta["num_inference_steps"])
-    metrics = _trajectory_cosines(reference=ref_steps, actual=nova_steps)
+    assert len(ref_steps) == len(difflet_steps) == int(meta["num_inference_steps"])
+    metrics = _trajectory_cosines(reference=ref_steps, actual=difflet_steps)
     _write_metrics_if_requested(metrics)
 
     min_cosine = min(item["cosine"] for item in metrics)
@@ -149,7 +149,7 @@ def _run_diffusers_reference(
     return trajectory
 
 
-def _run_nova_trainium(
+def _run_difflet_trainium(
     *,
     source_dir: Path,
     compiled_dir: Path,
@@ -158,17 +158,17 @@ def _run_nova_trainium(
     timesteps: torch.Tensor,
     tp_degree: int,
 ) -> list[torch.Tensor]:
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
 
-    from nova.models.hunyuan_video.application import (
+    from difflet.models.hunyuan_video.application import (
         HunyuanVideoDiTInputBundle,
         NeuronHunyuanVideoApplication,
     )
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     app = NeuronHunyuanVideoApplication(
         model_path=str(source_dir),
-        parallel=NovaParallelConfig(tp_degree=tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=tp_degree),
         dtype=torch.bfloat16,
         shape={
             "height": meta["height"],
@@ -227,7 +227,7 @@ def _trajectory_cosines(
     metrics: list[dict[str, float | int | list[int]]] = []
     for index, (ref, out) in enumerate(zip(reference, actual)):
         assert list(ref.shape) == list(out.shape), (
-            f"step {index} shape mismatch: diffusers={tuple(ref.shape)} nova={tuple(out.shape)}"
+            f"step {index} shape mismatch: diffusers={tuple(ref.shape)} difflet={tuple(out.shape)}"
         )
         cosine = F.cosine_similarity(ref.flatten(), out.flatten(), dim=0).item()
         max_abs = (ref - out).abs().max().item()
@@ -245,7 +245,7 @@ def _trajectory_cosines(
 
 
 def _write_metrics_if_requested(metrics: list[dict[str, float | int | list[int]]]) -> None:
-    path = os.environ.get("NOVA_HUNYUAN_VIDEO_NUMERICAL_METRICS")
+    path = os.environ.get("DIFFLET_HUNYUAN_VIDEO_NUMERICAL_METRICS")
     if not path:
         return
     output = Path(path)

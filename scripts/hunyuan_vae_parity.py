@@ -15,8 +15,8 @@ from pathlib import Path
 
 import torch
 
-from nova.models.hunyuan_video.application import NeuronHunyuanVideoApplication
-from nova.pipeline.parallel_config import NovaParallelConfig
+from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
+from difflet.pipeline.parallel_config import DiffletParallelConfig
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,13 +28,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--compiled-dir",
-        default="/tmp/nova_hunyuan_vae_decoder_ws4_smoke",
+        default="/tmp/difflet_hunyuan_vae_decoder_ws4_smoke",
         help="Directory containing the ws=4 vae_decoder/ Trainium artifact.",
     )
     parser.add_argument(
         "--latents",
-        default="/home/ubuntu/nova/.nova-cache/hunyuan_dit_inputs/cat_walking_4step_nova_latents.pt",
-        help="Latent tensor .pt produced by the Nova DiT (shape (1,16,16,40,64)).",
+        default="/home/ubuntu/difflet/.difflet-cache/hunyuan_dit_inputs/cat_walking_4step_difflet_latents.pt",
+        help="Latent tensor .pt produced by the Difflet DiT (shape (1,16,16,40,64)).",
     )
     parser.add_argument(
         "--height", type=int, default=320, help="Sample height; must match compiled artifact."
@@ -102,7 +102,7 @@ def main() -> int:
     print("[vae-parity] build NeuronHunyuanVideoApplication (vae-only)...")
     app = NeuronHunyuanVideoApplication(
         model_path=args.model_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=torch.bfloat16,
         shape={"height": args.height, "width": args.width, "num_frames": args.frames},
         enable_transformer=False,

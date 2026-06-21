@@ -3,9 +3,9 @@
 
 The top-level `all` stage runs each heavy model in a separate subprocess:
 
-  prepare -> UMT5 HF -> UMT5 Nova CPU -> compare -> DiT HF -> DiT Nova CPU -> compare
+  prepare -> UMT5 HF -> UMT5 Difflet CPU -> compare -> DiT HF -> DiT Difflet CPU -> compare
 
-That avoids co-resident HF+Nova full-weight models and records per-stage peak RSS.
+That avoids co-resident HF+Difflet full-weight models and records per-stage peak RSS.
 """
 
 from __future__ import annotations
@@ -35,20 +35,20 @@ DEFAULT_MODEL_DIR = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", default="all")
-    parser.add_argument("--model-dir", default=os.environ.get("NOVA_WAN_MODEL_DIR", DEFAULT_MODEL_DIR))
-    parser.add_argument("--work-dir", default=os.environ.get("NOVA_M25B_WORK_DIR", "/tmp/nova_m25b"))
-    parser.add_argument("--prompt", default=os.environ.get("NOVA_M25B_PROMPT", "a cat walking"))
-    parser.add_argument("--text-seq-len", type=int, default=int(os.environ.get("NOVA_M25B_TEXT_SEQ_LEN", "512")))
-    parser.add_argument("--dit-text-seq-len", type=int, default=int(os.environ.get("NOVA_M25B_DIT_TEXT_SEQ_LEN", "8")))
-    parser.add_argument("--dit-latent-t", type=int, default=int(os.environ.get("NOVA_M25B_DIT_LATENT_T", "1")))
-    parser.add_argument("--dit-latent-h", type=int, default=int(os.environ.get("NOVA_M25B_DIT_LATENT_H", "8")))
-    parser.add_argument("--dit-latent-w", type=int, default=int(os.environ.get("NOVA_M25B_DIT_LATENT_W", "8")))
-    parser.add_argument("--seed", type=int, default=int(os.environ.get("NOVA_M25B_SEED", "20260510")))
-    parser.add_argument("--min-mem-gb", type=float, default=float(os.environ.get("NOVA_M25B_MIN_MEM_GB", "20")))
-    parser.add_argument("--umt5-cosine-min", type=float, default=float(os.environ.get("NOVA_M25B_UMT5_COSINE_MIN", "0.995")))
-    parser.add_argument("--umt5-mean-abs-max", type=float, default=float(os.environ.get("NOVA_M25B_UMT5_MEAN_ABS_MAX", "0.02")))
-    parser.add_argument("--dit-cosine-min", type=float, default=float(os.environ.get("NOVA_M25B_DIT_COSINE_MIN", "0.995")))
-    parser.add_argument("--dit-mean-abs-max", type=float, default=float(os.environ.get("NOVA_M25B_DIT_MEAN_ABS_MAX", "0.03")))
+    parser.add_argument("--model-dir", default=os.environ.get("DIFFLET_WAN_MODEL_DIR", DEFAULT_MODEL_DIR))
+    parser.add_argument("--work-dir", default=os.environ.get("DIFFLET_M25B_WORK_DIR", "/tmp/difflet_m25b"))
+    parser.add_argument("--prompt", default=os.environ.get("DIFFLET_M25B_PROMPT", "a cat walking"))
+    parser.add_argument("--text-seq-len", type=int, default=int(os.environ.get("DIFFLET_M25B_TEXT_SEQ_LEN", "512")))
+    parser.add_argument("--dit-text-seq-len", type=int, default=int(os.environ.get("DIFFLET_M25B_DIT_TEXT_SEQ_LEN", "8")))
+    parser.add_argument("--dit-latent-t", type=int, default=int(os.environ.get("DIFFLET_M25B_DIT_LATENT_T", "1")))
+    parser.add_argument("--dit-latent-h", type=int, default=int(os.environ.get("DIFFLET_M25B_DIT_LATENT_H", "8")))
+    parser.add_argument("--dit-latent-w", type=int, default=int(os.environ.get("DIFFLET_M25B_DIT_LATENT_W", "8")))
+    parser.add_argument("--seed", type=int, default=int(os.environ.get("DIFFLET_M25B_SEED", "20260510")))
+    parser.add_argument("--min-mem-gb", type=float, default=float(os.environ.get("DIFFLET_M25B_MIN_MEM_GB", "20")))
+    parser.add_argument("--umt5-cosine-min", type=float, default=float(os.environ.get("DIFFLET_M25B_UMT5_COSINE_MIN", "0.995")))
+    parser.add_argument("--umt5-mean-abs-max", type=float, default=float(os.environ.get("DIFFLET_M25B_UMT5_MEAN_ABS_MAX", "0.02")))
+    parser.add_argument("--dit-cosine-min", type=float, default=float(os.environ.get("DIFFLET_M25B_DIT_COSINE_MIN", "0.995")))
+    parser.add_argument("--dit-mean-abs-max", type=float, default=float(os.environ.get("DIFFLET_M25B_DIT_MEAN_ABS_MAX", "0.03")))
     return parser.parse_args()
 
 
@@ -64,7 +64,7 @@ def peak_rss_gb() -> float:
 
 
 def peak_rss_limit_gb() -> float:
-    return float(os.environ.get("NOVA_M25B_PEAK_RSS_MAX_GB", "115"))
+    return float(os.environ.get("DIFFLET_M25B_PEAK_RSS_MAX_GB", "115"))
 
 
 def require_memory(min_gb: float, stage: str) -> None:
@@ -156,7 +156,7 @@ def run_child(args: argparse.Namespace, stage: str, *, backend: str | None = Non
         f":{env['PYTHONPATH']}" if env.get("PYTHONPATH") else ""
     )
     if backend is not None:
-        env["NOVA_BACKEND"] = backend
+        env["DIFFLET_BACKEND"] = backend
     cmd = [
         sys.executable,
         __file__,
@@ -286,14 +286,14 @@ def stage_umt5_hf(args: argparse.Namespace) -> None:
     )
 
 
-def stage_umt5_nova(args: argparse.Namespace) -> None:
-    from nova.backends.trainium.core.modules.checkpoint import load_state_dict
-    from nova.models.wan.checkpoint import convert_text_encoder_state_dict
-    from nova.models.wan.umt5.modeling_umt5 import WanUmT5Config, WanUmT5EncoderModel
+def stage_umt5_difflet(args: argparse.Namespace) -> None:
+    from difflet.backends.trainium.core.modules.checkpoint import load_state_dict
+    from difflet.models.wan.checkpoint import convert_text_encoder_state_dict
+    from difflet.models.wan.umt5.modeling_umt5 import WanUmT5Config, WanUmT5EncoderModel
 
     work_dir = Path(args.work_dir)
     model_dir = Path(args.model_dir)
-    require_memory(args.min_mem_gb, "umt5-nova")
+    require_memory(args.min_mem_gb, "umt5-difflet")
     inputs = torch.load(work_dir / "umt5_inputs.pt", map_location="cpu")
     cfg = WanUmT5Config.from_diffusers_dict(load_json(model_dir / "text_encoder" / "config.json"))
     start = time.time()
@@ -308,7 +308,7 @@ def stage_umt5_nova(args: argparse.Namespace) -> None:
         converted["encoder.embed_tokens.weight"] = converted["shared.weight"]
     missing, unexpected = model.load_state_dict(converted, strict=True)
     if missing or unexpected:
-        raise RuntimeError(f"Nova UMT5 strict load mismatch: missing={missing}, unexpected={unexpected}")
+        raise RuntimeError(f"Difflet UMT5 strict load mismatch: missing={missing}, unexpected={unexpected}")
     del raw, converted
     gc.collect()
     load_elapsed = time.time() - start
@@ -316,10 +316,10 @@ def stage_umt5_nova(args: argparse.Namespace) -> None:
         start = time.time()
         out = model(inputs["input_ids"], inputs["attention_mask"])
         forward_elapsed = time.time() - start
-    torch.save(out.detach().cpu(), work_dir / "umt5_nova.pt")
+    torch.save(out.detach().cpu(), work_dir / "umt5_difflet.pt")
     save_metrics(
         work_dir,
-        "umt5-nova",
+        "umt5-difflet",
         {"load_elapsed": load_elapsed, "forward_elapsed": forward_elapsed, "shape": list(out.shape)},
     )
 
@@ -353,13 +353,13 @@ def stage_dit_hf(args: argparse.Namespace) -> None:
     )
 
 
-def stage_dit_nova(args: argparse.Namespace) -> None:
-    from nova.models.wan.checkpoint import convert_backbone_state_dict
-    from nova.models.wan.modeling_wan import WanTransformerConfig, WanTransformer3DModel
+def stage_dit_difflet(args: argparse.Namespace) -> None:
+    from difflet.models.wan.checkpoint import convert_backbone_state_dict
+    from difflet.models.wan.modeling_wan import WanTransformerConfig, WanTransformer3DModel
 
     work_dir = Path(args.work_dir)
     model_dir = Path(args.model_dir)
-    require_memory(args.min_mem_gb, "dit-nova")
+    require_memory(args.min_mem_gb, "dit-difflet")
     inputs = torch.load(work_dir / "dit_inputs.pt", map_location="cpu")
     cfg = WanTransformerConfig.from_diffusers_dict(load_json(model_dir / "transformer" / "config.json"))
     start = time.time()
@@ -379,26 +379,26 @@ def stage_dit_nova(args: argparse.Namespace) -> None:
             inputs["encoder_hidden_states"],
         )
         forward_elapsed = time.time() - start
-    torch.save(out.detach().cpu(), work_dir / "dit_nova.pt")
+    torch.save(out.detach().cpu(), work_dir / "dit_difflet.pt")
     save_metrics(
         work_dir,
-        "dit-nova",
+        "dit-difflet",
         {"load_elapsed": load_elapsed, "forward_elapsed": forward_elapsed, "shape": list(out.shape)},
     )
 
 
-def compare_tensors(name: str, ref: torch.Tensor, nova: torch.Tensor, cosine_min: float, mean_abs_max: float) -> dict:
-    if tuple(ref.shape) != tuple(nova.shape):
-        raise RuntimeError(f"{name} shape mismatch: ref={tuple(ref.shape)} nova={tuple(nova.shape)}")
-    diff = (ref.float() - nova.float()).abs()
+def compare_tensors(name: str, ref: torch.Tensor, difflet: torch.Tensor, cosine_min: float, mean_abs_max: float) -> dict:
+    if tuple(ref.shape) != tuple(difflet.shape):
+        raise RuntimeError(f"{name} shape mismatch: ref={tuple(ref.shape)} difflet={tuple(difflet.shape)}")
+    diff = (ref.float() - difflet.float()).abs()
     metrics = {
         "shape": list(ref.shape),
         "dtype_ref": str(ref.dtype),
-        "dtype_nova": str(nova.dtype),
+        "dtype_difflet": str(difflet.dtype),
         "max_abs": float(diff.max()),
         "mean_abs": float(diff.mean()),
         "rmse": float(torch.sqrt((diff * diff).mean())),
-        "cosine": float(torch.nn.functional.cosine_similarity(ref.float().flatten(), nova.float().flatten(), dim=0)),
+        "cosine": float(torch.nn.functional.cosine_similarity(ref.float().flatten(), difflet.float().flatten(), dim=0)),
         "p99": float(diff.quantile(0.99)),
         "p999": float(diff.quantile(0.999)),
     }
@@ -412,8 +412,8 @@ def compare_tensors(name: str, ref: torch.Tensor, nova: torch.Tensor, cosine_min
 def stage_compare_umt5(args: argparse.Namespace) -> None:
     work_dir = Path(args.work_dir)
     ref = torch.load(work_dir / "umt5_hf.pt", map_location="cpu")
-    nova = torch.load(work_dir / "umt5_nova.pt", map_location="cpu")
-    metrics = compare_tensors("UMT5", ref, nova, args.umt5_cosine_min, args.umt5_mean_abs_max)
+    difflet = torch.load(work_dir / "umt5_difflet.pt", map_location="cpu")
+    metrics = compare_tensors("UMT5", ref, difflet, args.umt5_cosine_min, args.umt5_mean_abs_max)
     metrics["cosine_min"] = args.umt5_cosine_min
     metrics["mean_abs_max"] = args.umt5_mean_abs_max
     save_metrics(work_dir, "compare-umt5", metrics)
@@ -423,8 +423,8 @@ def stage_compare_umt5(args: argparse.Namespace) -> None:
 def stage_compare_dit(args: argparse.Namespace) -> None:
     work_dir = Path(args.work_dir)
     ref = torch.load(work_dir / "dit_hf.pt", map_location="cpu")
-    nova = torch.load(work_dir / "dit_nova.pt", map_location="cpu")
-    metrics = compare_tensors("DiT", ref, nova, args.dit_cosine_min, args.dit_mean_abs_max)
+    difflet = torch.load(work_dir / "dit_difflet.pt", map_location="cpu")
+    metrics = compare_tensors("DiT", ref, difflet, args.dit_cosine_min, args.dit_mean_abs_max)
     metrics["cosine_min"] = args.dit_cosine_min
     metrics["mean_abs_max"] = args.dit_mean_abs_max
     save_metrics(work_dir, "compare-dit", metrics)
@@ -441,10 +441,10 @@ def stage_all(args: argparse.Namespace) -> None:
 
     run_child(args, "prepare")
     run_child(args, "umt5-hf")
-    run_child(args, "umt5-nova", backend="cpu")
+    run_child(args, "umt5-difflet", backend="cpu")
     run_child(args, "compare-umt5")
     run_child(args, "dit-hf")
-    run_child(args, "dit-nova", backend="cpu")
+    run_child(args, "dit-difflet", backend="cpu")
     run_child(args, "compare-dit")
     print(f"[m25b] PASS: work_dir={work_dir}", flush=True)
 
@@ -455,9 +455,9 @@ def main() -> int:
         "all": stage_all,
         "prepare": stage_prepare,
         "umt5-hf": stage_umt5_hf,
-        "umt5-nova": stage_umt5_nova,
+        "umt5-difflet": stage_umt5_difflet,
         "dit-hf": stage_dit_hf,
-        "dit-nova": stage_dit_nova,
+        "dit-difflet": stage_dit_difflet,
         "compare-umt5": stage_compare_umt5,
         "compare-dit": stage_compare_dit,
     }

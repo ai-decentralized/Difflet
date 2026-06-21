@@ -13,16 +13,16 @@ import torch
 import torch.nn.functional as F
 from safetensors.torch import load_file
 
-from nova.models.hunyuan_video.application import (
+from difflet.models.hunyuan_video.application import (
     HunyuanVideoDiTInputBundle,
     NeuronHunyuanVideoApplication,
 )
-from nova.pipeline.parallel_config import NovaParallelConfig
+from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-ROOT = "/home/ubuntu/nova"
-SOURCE = f"{ROOT}/.nova-cache/hunyuan_n4_20d40s2r/source"
-COMPILED = f"{ROOT}/.nova-cache/hunyuan_sdpa_20d40s2r/compiled"
-BUNDLE = f"{ROOT}/.nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors"
+ROOT = "/home/ubuntu/difflet"
+SOURCE = f"{ROOT}/.difflet-cache/hunyuan_n4_20d40s2r/source"
+COMPILED = f"{ROOT}/.difflet-cache/hunyuan_sdpa_20d40s2r/compiled"
+BUNDLE = f"{ROOT}/.difflet-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors"
 
 meta = json.loads(open(BUNDLE + ".meta.json").read())
 hf = load_file(BUNDLE)
@@ -38,7 +38,7 @@ print(f"[m3] mask valid tokens (device)={int(emask.sum())} vs HF bundle={int(hf[
 
 app = NeuronHunyuanVideoApplication(
     model_path=SOURCE,
-    parallel=NovaParallelConfig(tp_degree=4, cp_degree=1),
+    parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1),
     dtype=torch.bfloat16,
     shape={"height": meta["height"], "width": meta["width"], "num_frames": meta["num_frames"]},
     text_seq_len=meta["text_seq_len"],

@@ -216,10 +216,10 @@ def cache_dit_inputs(args: argparse.Namespace) -> None:
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    save_file(tensors, str(output), metadata={"format": "nova-hunyuan-video15-dit-inputs-v1"})
+    save_file(tensors, str(output), metadata={"format": "difflet-hunyuan-video15-dit-inputs-v1"})
 
     meta = {
-        "schema": "nova-hunyuan-video15-dit-inputs-v1",
+        "schema": "difflet-hunyuan-video15-dit-inputs-v1",
         "model_id": args.model_id,
         "revision": args.revision,
         "prompt": args.prompt,

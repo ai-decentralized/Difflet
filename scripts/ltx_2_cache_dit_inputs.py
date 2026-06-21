@@ -3,7 +3,7 @@
 
 This helper runs the host-side LTX-2 text encoder, connector stack, scheduler
 setup, and latent initialization. It writes the fixed tensors consumed by the
-Nova LTX-2 Trainium transformer boundary. Video VAE, audio VAE, and vocoder
+Difflet LTX-2 Trainium transformer boundary. Video VAE, audio VAE, and vocoder
 decode remain outside this artifact.
 """
 
@@ -40,7 +40,7 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from safetensors.torch import save_file  # noqa: E402
 
-from nova.models.ltx_2.pipeline import (  # noqa: E402
+from difflet.models.ltx_2.pipeline import (  # noqa: E402
     ltx_2_scheduler_mu,
     make_ltx_2_audio_coords,
     make_ltx_2_video_coords,
@@ -269,10 +269,10 @@ def cache_dit_inputs(args: argparse.Namespace) -> None:
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    save_file(tensors, str(output), metadata={"format": "nova-ltx-2-dit-inputs-v1"})
+    save_file(tensors, str(output), metadata={"format": "difflet-ltx-2-dit-inputs-v1"})
 
     meta = {
-        "schema": "nova-ltx-2-dit-inputs-v1",
+        "schema": "difflet-ltx-2-dit-inputs-v1",
         "model_id": args.model_id,
         "revision": args.revision,
         "prompt": args.prompt,

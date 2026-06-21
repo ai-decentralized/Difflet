@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """LTX-2 scheduler trajectory parity for Trainium segmented runtime.
 
-This compares the Nova host scheduler loop step-by-step from the same cached
+This compares the Difflet host scheduler loop step-by-step from the same cached
 DiT input bundle. The Trainium side can use the segmented process-isolated block
 runtime; the reference side uses the same segmented front/back-end stitching
 with the upstream CPU transformer blocks.
@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", required=True, help="Local LTX-2 snapshot dir")
     parser.add_argument("--bundle", required=True, help="Cached LTX-2 DiT inputs safetensors")
-    parser.add_argument("--cache-dir", default=".nova-cache/ltx_2_trajectory_parity")
+    parser.add_argument("--cache-dir", default=".difflet-cache/ltx_2_trajectory_parity")
     parser.add_argument("--compiled-model-path", default=None)
     parser.add_argument("--height", type=int, default=None)
     parser.add_argument("--width", type=int, default=None)
@@ -122,7 +122,7 @@ def _float_meta_or_arg(
 
 
 def _load_bundle(bundle_path: Path, dtype: torch.dtype):
-    from nova.models.ltx_2.application import LTX2DiTInputBundle
+    from difflet.models.ltx_2.application import LTX2DiTInputBundle
 
     tensors = load_safetensors_file(str(bundle_path), device="cpu")
     required = {
@@ -212,8 +212,8 @@ class _SegmentedCPUAdapter:
 
 
 def _make_pipe(args: argparse.Namespace, meta: dict[str, Any]):
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
-    from nova import NovaParallelConfig, NovaPipeline
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
+    from difflet import DiffletParallelConfig, DiffletPipeline
 
     height = _meta_or_arg(meta, args, "height")
     width = _meta_or_arg(meta, args, "width")
@@ -237,10 +237,10 @@ def _make_pipe(args: argparse.Namespace, meta: dict[str, Any]):
     if args.segmented_block_load_mode != "process":
         app_kwargs["segmented_block_load_mode"] = args.segmented_block_load_mode
     process_segmented = args.segmented_block_load_mode == "process"
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         args.model_dir,
         model_type="ltx_2",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=args.dtype,
         height=height,
         width=width,
@@ -278,7 +278,7 @@ def _run_trainium(args: argparse.Namespace, pipe, bundle):
 
 
 def _run_reference(args: argparse.Namespace, pipe, bundle, meta: dict[str, Any]):
-    from nova.models.ltx_2.pipeline import LTX2Orchestrator
+    from difflet.models.ltx_2.pipeline import LTX2Orchestrator
 
     adapter = _SegmentedCPUAdapter(pipe.app.transformer, args.dtype)
     t0 = time.perf_counter()

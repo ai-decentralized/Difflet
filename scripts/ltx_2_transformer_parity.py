@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", required=True, help="Parent dir containing transformer/")
     parser.add_argument("--bundle", required=True, help="Cached LTX-2 DiT inputs safetensors")
-    parser.add_argument("--cache-dir", default=".nova-cache/ltx_2_transformer_parity")
+    parser.add_argument("--cache-dir", default=".difflet-cache/ltx_2_transformer_parity")
     parser.add_argument("--height", type=int, default=None)
     parser.add_argument("--width", type=int, default=None)
     parser.add_argument("--num-frames", type=int, default=None)
@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--transformer-mode",
         choices=("single", "segmented"),
         default="single",
-        help="Nova LTX-2 transformer backend mode.",
+        help="Difflet LTX-2 transformer backend mode.",
     )
     parser.add_argument(
         "--segmented-block-load-mode",
@@ -244,10 +244,10 @@ def _run_trainium(
     meta: dict[str, Any],
     inputs: dict[str, torch.Tensor],
 ):
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
 
-    from nova import NovaParallelConfig, NovaPipeline
-    from nova.models.ltx_2.application import LTX2DiTInputBundle
+    from difflet import DiffletParallelConfig, DiffletPipeline
+    from difflet.models.ltx_2.application import LTX2DiTInputBundle
 
     height = _meta_or_arg(meta, args, "height")
     width = _meta_or_arg(meta, args, "width")
@@ -274,10 +274,10 @@ def _run_trainium(
         args.transformer_mode == "segmented"
         and args.segmented_block_load_mode == "process"
     )
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         args.model_dir,
         model_type="ltx_2",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=args.dtype,
         height=height,
         width=width,
@@ -317,7 +317,7 @@ def _run_trace_reference(
     inputs: dict[str, torch.Tensor],
 ) -> tuple[torch.Tensor, torch.Tensor]:
     _disable_xla_lazy_import()
-    from nova.backends.trainium.ltx_2.transformer import _LTX2TransformerTraceModule
+    from difflet.backends.trainium.ltx_2.transformer import _LTX2TransformerTraceModule
 
     device = torch.device(args.reference_device)
     dtype = args.reference_dtype

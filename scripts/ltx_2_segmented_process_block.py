@@ -51,8 +51,8 @@ def main() -> int:
 
     import torch
 
-    from nova.backends.trainium.ltx_2.segmented import LTX2SegmentedTransformerApplication
-    from nova.models.ltx_2.application import create_ltx_2_transformer_config
+    from difflet.backends.trainium.ltx_2.segmented import LTX2SegmentedTransformerApplication
+    from difflet.models.ltx_2.application import create_ltx_2_transformer_config
 
     runtime = json.loads(Path(args.runtime_config).read_text(encoding="utf-8"))
     dtype = _dtype(runtime["dtype"])

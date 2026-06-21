@@ -63,7 +63,7 @@ def audit_remote_repos(repos: dict[str, str]) -> dict[str, Any]:
                 }
             )
     return {
-        "schema": "nova-f3-0b-remote-repo-audit-v1",
+        "schema": "difflet-f3-0b-remote-repo-audit-v1",
         "rows": rows,
     }
 

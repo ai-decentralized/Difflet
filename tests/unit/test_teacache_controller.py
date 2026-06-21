@@ -3,7 +3,7 @@ import json
 import pytest
 import torch
 
-from nova.pipeline.teacache import (
+from difflet.pipeline.teacache import (
     CALIBRATION_SCHEMA,
     TeaCacheCalibration,
     TeaCacheController,
@@ -94,7 +94,7 @@ def test_should_skip_accepts_precomputed_diff_norm():
     """cclog 72: when the probe NEFF supplies a precomputed delta scalar,
     the controller must use it instead of doing its own host-side diff."""
     import torch
-    from nova.pipeline.teacache import TeaCacheCalibration, TeaCacheController
+    from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
 
     calibration = TeaCacheCalibration(
         model="test",
@@ -158,7 +158,7 @@ def test_online_delta_calibration_roundtrips(tmp_path):
 
 
 def test_teacache_gate_auto_selects_method():
-    from nova.pipeline.teacache_gate import decide_method, build_calibration
+    from difflet.pipeline.teacache_gate import decide_method, build_calibration
 
     # adaptive: signal predicts delta
     assert decide_method(0.95, 0.5) == "adaptive"
@@ -184,7 +184,7 @@ def test_teacache_gate_on_real_trajectories():
     import json
     from collections import defaultdict
     from pathlib import Path
-    from nova.pipeline.teacache_gate import build_calibration
+    from difflet.pipeline.teacache_gate import build_calibration
 
     def load(path):
         p = Path(path)
@@ -208,7 +208,7 @@ def test_teacache_gate_on_real_trajectories():
 
 
 def test_run_gate_end_to_end_with_fake_models():
-    from nova.pipeline.teacache_gate import run_gate
+    from difflet.pipeline.teacache_gate import run_gate
 
     def fake(np_vals, sig_vals):
         def init_latent():
@@ -238,7 +238,7 @@ def test_run_gate_end_to_end_with_fake_models():
 
 def test_run_gate_zero_per_model_no_signal_picks_online():
     """No block-0 hook at all (signal=None): gate picks online_delta from output δ alone."""
-    from nova.pipeline.teacache_gate import run_gate
+    from difflet.pipeline.teacache_gate import run_gate
 
     npv = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
     cal, summ = run_gate(

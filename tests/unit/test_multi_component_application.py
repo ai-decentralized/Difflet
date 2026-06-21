@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from nova.backends.trainium.core.multi_component_application import (
+from difflet.backends.trainium.core.multi_component_application import (
     ComponentSpec,
     MultiComponentApplication,
 )

@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from nova.backends.cpu.ops_impl import mx as cpu_mx
+from difflet.backends.cpu.ops_impl import mx as cpu_mx
 
 
 def _cosine(a: torch.Tensor, b: torch.Tensor) -> float:
@@ -89,7 +89,7 @@ def _run_trainium(
 ):
     import torch_xla.core.xla_model as xm
 
-    from nova.backends.trainium.ops_impl import mx as trainium_mx
+    from difflet.backends.trainium.ops_impl import mx as trainium_mx
 
     device = xm.xla_device()
 

@@ -2,7 +2,7 @@
 """cclog 85: Flux TeaCache fused-A — compile + signal gate + calibrate + e2e A/B.
 
 Single process (one compile, reused for baseline/teacache):
-  1. NovaPipeline.from_pretrained(FLUX.1-dev, application_kwargs={teacache_fused:True})
+  1. DiffletPipeline.from_pretrained(FLUX.1-dev, application_kwargs={teacache_fused:True})
      -> compiles CLIP/T5/transformer/VAE + the fused probe NEFF, loads.
   2. SIGNAL GATE (cclog 84/85): record-only run (probe every step, never skip);
      Pearson(rel_l1 block0 mod, rel_l1 noise_pred). Strong (>=0.5) -> fit poly +
@@ -87,15 +87,15 @@ def _run(pipe, prompt):
 
 
 def main() -> int:
-    from nova import NovaParallelConfig, NovaPipeline
-    from nova.pipeline.teacache import TeaCacheCalibration, TeaCacheController
+    from difflet import DiffletParallelConfig, DiffletPipeline
+    from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
 
     print("[flux-tc] compiling + loading (teacache_fused=True)...", flush=True)
     t0 = time.time()
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         MODEL,
         model_type="flux",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype=torch.bfloat16,
         height=HEIGHT,
         width=WIDTH,
@@ -203,7 +203,7 @@ def main() -> int:
     speedup = sum(base_t) / sum(tc_t)
     final_cos = min(cos)
     result = {
-        "schema": "nova-m9-teacache-flux-e2e-v1",
+        "schema": "difflet-m9-teacache-flux-e2e-v1",
         "model": "flux", "shape_label": shape_label, "num_steps": NUM_STEPS,
         "n_prompts": len(PROMPTS), "signal_pearson": pearson, "mode": mode,
         "baseline_total_s": sum(base_t), "teacache_total_s": sum(tc_t),

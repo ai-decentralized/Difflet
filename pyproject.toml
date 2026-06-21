@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nova-diffusion"
+name = "difflet-diffusion"
 version = "0.0.0.dev0"
 description = "Trainium3-native diffusion inference framework"
 readme = "README.md"
@@ -55,7 +55,7 @@ test = [
     "imageio-ffmpeg",
 ]
 dev = [
-    "nova-diffusion[test]",
+    "difflet-diffusion[test]",
     "black==26.1.0",
     "isort==7.0.0",
     "ruff==0.15.1",
@@ -64,37 +64,37 @@ dev = [
 ]
 
 [project.urls]
-"Source" = "https://github.com/<org>/nova-diffusion"          # placeholder
-"Tracker" = "https://github.com/<org>/nova-diffusion/issues"  # placeholder
+"Source" = "https://github.com/<org>/difflet-diffusion"          # placeholder
+"Tracker" = "https://github.com/<org>/difflet-diffusion/issues"  # placeholder
 
 [tool.setuptools.packages.find]
-include = ["nova*"]
+include = ["difflet*"]
 exclude = ["tests*", "examples*", "benchmark*", "scripts*", "docs*"]
 
 [tool.setuptools.package-data]
-nova = ["py.typed"]
+difflet = ["py.typed"]
 
 [tool.black]
 line-length = 100
 target-version = ["py310", "py312"]
 extend-exclude = '''
 /(
-    nova/layers/.*
-    | nova/utils/.*
-    | nova/models/flux/.*
+    difflet/layers/.*
+    | difflet/utils/.*
+    | difflet/models/flux/.*
 )/
 '''
 # Reason: forked-from-NxDI files keep upstream formatting until first rebase
-# to minimize merge conflicts. New code under nova/pipeline/, nova/registry.py,
+# to minimize merge conflicts. New code under difflet/pipeline/, difflet/registry.py,
 # and new model dirs (wan/, hunyuan_video/, etc.) is black-formatted.
 
 [tool.isort]
 profile = "black"
 line_length = 100
 skip_glob = [
-    "nova/layers/*",
-    "nova/utils/*",
-    "nova/models/flux/*",
+    "difflet/layers/*",
+    "difflet/utils/*",
+    "difflet/models/flux/*",
 ]
 
 [tool.ruff]

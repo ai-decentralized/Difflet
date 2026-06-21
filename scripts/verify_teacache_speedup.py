@@ -26,9 +26,9 @@ from scripts.calibrate_teacache import (
 )
 
 
-INPUT_SCHEMA = "nova-m9-teacache-speedup-candidates-v1"
-OUTPUT_SCHEMA = "nova-m9-teacache-speedup-curve-v1"
-INTEGRATION_SCHEMA = "nova-m9-teacache-integration-v1"
+INPUT_SCHEMA = "difflet-m9-teacache-speedup-candidates-v1"
+OUTPUT_SCHEMA = "difflet-m9-teacache-speedup-curve-v1"
+INTEGRATION_SCHEMA = "difflet-m9-teacache-integration-v1"
 DEFAULT_MIN_SPEEDUP = 1.5
 DEFAULT_MIN_TRAJECTORY_COSINE = 0.9999
 DEFAULT_MIN_FINAL_COSINE = 0.9995
@@ -104,12 +104,12 @@ def _load_hv_app(
     teacache_speedup: float | None = None,
     teacache_calibration_path: str | None = None,
 ):
-    from nova.models.hunyuan_video.application import NeuronHunyuanVideoApplication
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     return NeuronHunyuanVideoApplication(
         model_path=args.source_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=_dtype_from_name(args.dtype),
         shape={
             "height": int(meta["height"]),
@@ -197,7 +197,7 @@ def _collect_hunyuan_video_candidates(args: argparse.Namespace) -> dict[str, Any
     # Load the application ONCE — reloading per candidate triggers c10::Error
     # after ~5 iterations (cclog 75 issue 2). Baseline runs with controller=None;
     # candidates mount a fresh TeaCacheController on the same loaded app.
-    from nova.pipeline.teacache import (
+    from difflet.pipeline.teacache import (
         TeaCacheController,
         load_teacache_calibration_or_raise,
     )

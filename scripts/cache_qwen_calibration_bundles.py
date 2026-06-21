@@ -169,10 +169,10 @@ def main() -> int:
             "encoder_hidden_states_mask": prompt_embeds_mask.to(dtype=torch.bool, device="cpu").contiguous(),
             "guidance": guidance.to(device="cpu").contiguous(),
         }
-        save_file(tensors, str(out_path), metadata={"format": "nova-qwen-image-dit-inputs-v1"})
+        save_file(tensors, str(out_path), metadata={"format": "difflet-qwen-image-dit-inputs-v1"})
 
         meta = {
-            "schema": "nova-qwen-image-dit-inputs-v1",
+            "schema": "difflet-qwen-image-dit-inputs-v1",
             "model_id": args.model_id,
             "prompt": [prompt],
             "seed": int(args.seed + idx),

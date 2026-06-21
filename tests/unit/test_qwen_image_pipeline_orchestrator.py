@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from nova.models.qwen_image.application import QwenImageDiTInputBundle
-from nova.models.qwen_image.pipeline import (
+from difflet.models.qwen_image.application import QwenImageDiTInputBundle
+from difflet.models.qwen_image.pipeline import (
     QwenImageOrchestrator,
     QwenImagePipelineOutput,
     pack_qwen_image_latents,

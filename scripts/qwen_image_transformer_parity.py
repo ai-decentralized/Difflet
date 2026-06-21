@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Qwen-Image transformer parity: Trainium artifact vs CPU reference.
 
-The default CPU reference is Nova's trace module, matching the fixed-shape
+The default CPU reference is Difflet's trace module, matching the fixed-shape
 Trainium boundary. Use ``--reference-mode diffusers`` to compare against the
 upstream QwenImageTransformer2DModel path, including its text-mask semantics.
 """
@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", required=True, help="Parent dir containing transformer/")
     parser.add_argument("--bundle", required=True, help="Cached Qwen DiT inputs safetensors")
-    parser.add_argument("--cache-dir", default=".nova-cache/qwen_image_transformer_parity")
+    parser.add_argument("--cache-dir", default=".difflet-cache/qwen_image_transformer_parity")
     parser.add_argument("--height", type=int, default=None)
     parser.add_argument("--width", type=int, default=None)
     parser.add_argument("--text-seq-len", type=int, default=None)
@@ -178,7 +178,7 @@ def _load_trace_state_dict(model: torch.nn.Module, transformer_dir: Path, dtype:
     unexpected = sorted(unexpected_all)
     allow_unexpected = any(
         os.environ.get(name, "").lower() in {"1", "true", "yes"}
-        for name in ("NOVA_QWEN_ZERO_BLOCK_ATTN", "NOVA_QWEN_ZERO_BLOCK_MLP")
+        for name in ("DIFFLET_QWEN_ZERO_BLOCK_ATTN", "DIFFLET_QWEN_ZERO_BLOCK_MLP")
     )
     if missing or (unexpected and not allow_unexpected):
         raise RuntimeError(
@@ -193,10 +193,10 @@ def _load_trace_state_dict(model: torch.nn.Module, transformer_dir: Path, dtype:
 
 
 def _run_trainium(args: argparse.Namespace, meta: dict[str, Any], inputs: dict[str, torch.Tensor]):
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
 
-    from nova import NovaParallelConfig, NovaPipeline
-    from nova.models.qwen_image.application import QwenImageDiTInputBundle
+    from difflet import DiffletParallelConfig, DiffletPipeline
+    from difflet.models.qwen_image.application import QwenImageDiTInputBundle
 
     height = _meta_or_arg(meta, args, "height")
     width = _meta_or_arg(meta, args, "width")
@@ -207,10 +207,10 @@ def _run_trainium(args: argparse.Namespace, meta: dict[str, Any], inputs: dict[s
         flush=True,
     )
     t0 = time.time()
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         args.model_dir,
         model_type="qwen_image",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=args.dtype,
         height=height,
         width=width,
@@ -237,7 +237,7 @@ def _run_trace_reference(
     pipe,
     inputs: dict[str, torch.Tensor],
 ) -> torch.Tensor:
-    from nova.backends.trainium.qwen_image.transformer import _QwenImageTransformerTraceModule
+    from difflet.backends.trainium.qwen_image.transformer import _QwenImageTransformerTraceModule
 
     device = torch.device(args.reference_device)
     dtype = args.reference_dtype

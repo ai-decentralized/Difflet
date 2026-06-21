@@ -44,8 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--model-dir",
-        default=os.environ.get("NOVA_LTX_2_MODEL_DIR", ""),
-        help="Local LTX-2 snapshot dir. Env: NOVA_LTX_2_MODEL_DIR.",
+        default=os.environ.get("DIFFLET_LTX_2_MODEL_DIR", ""),
+        help="Local LTX-2 snapshot dir. Env: DIFFLET_LTX_2_MODEL_DIR.",
     )
     parser.add_argument("--prompt", action="append", default=None)
     parser.add_argument("--height", type=int, default=512)
@@ -58,12 +58,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--bundle",
-        default=".nova-cache/ltx_2_dit_inputs/full_512x768x121_4step.safetensors",
+        default=".difflet-cache/ltx_2_dit_inputs/full_512x768x121_4step.safetensors",
     )
-    parser.add_argument("--cache-dir", default=".nova-cache/ltx_2_transformer_full")
+    parser.add_argument("--cache-dir", default=".difflet-cache/ltx_2_transformer_full")
     parser.add_argument(
         "--metrics-out",
-        default="/tmp/nova_ltx_2_full_transformer_parity_metrics.json",
+        default="/tmp/difflet_ltx_2_full_transformer_parity_metrics.json",
     )
     parser.add_argument("--reference-mode", choices=("trace", "diffusers"), default="trace")
     parser.add_argument("--min-video-cosine", type=float, default=0.999)
@@ -151,7 +151,7 @@ def main() -> int:
     args = build_parser().parse_args()
     if not args.model_dir:
         print(
-            "[ltx2-full] --model-dir or NOVA_LTX_2_MODEL_DIR is required",
+            "[ltx2-full] --model-dir or DIFFLET_LTX_2_MODEL_DIR is required",
             file=sys.stderr,
         )
         return 2
@@ -174,7 +174,7 @@ def main() -> int:
     env = os.environ.copy()
     env["PATH"] = f"{NEURON_VENV / 'bin'}:{env.get('PATH', '')}"
     env["PYTHONPATH"] = f"{ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
-    env.setdefault("NOVA_BACKEND", "trainium")
+    env.setdefault("DIFFLET_BACKEND", "trainium")
     env.setdefault("NEURON_RT_NUM_CORES", str(args.tp_degree))
     env.setdefault("NEURON_RT_VIRTUAL_CORE_SIZE", "2")
 

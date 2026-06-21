@@ -2,7 +2,7 @@
 """Tiny HunyuanVideo 1.5 Trainium compile/load smoke.
 
 This uses a synthetic one-block HunyuanVideo15Transformer3DModel config and
-random diffusers-compatible weights. It validates Nova's 1.5 fixed-boundary
+random diffusers-compatible weights. It validates Difflet's 1.5 fixed-boundary
 wrapper without downloading the production 8.3B checkpoint.
 """
 
@@ -42,8 +42,8 @@ from safetensors.torch import save_file  # noqa: E402
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model-dir", default="/tmp/nova_hunyuan15_tiny_model")
-    parser.add_argument("--cache-dir", default="/tmp/nova_hunyuan15_tiny_cache")
+    parser.add_argument("--model-dir", default="/tmp/difflet_hunyuan15_tiny_model")
+    parser.add_argument("--cache-dir", default="/tmp/difflet_hunyuan15_tiny_cache")
     parser.add_argument("--height", type=int, default=32)
     parser.add_argument("--width", type=int, default=48)
     parser.add_argument("--num-frames", type=int, default=5)
@@ -117,12 +117,12 @@ def _prepare_model_dir(model_dir: Path) -> None:
 
 def main() -> int:
     args = build_parser().parse_args()
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
     os.environ.setdefault("NEURON_RT_NUM_CORES", str(args.tp_degree))
     os.environ.setdefault("NEURON_RT_VIRTUAL_CORE_SIZE", "2")
 
-    from nova import NovaParallelConfig, NovaPipeline
-    from nova.models.hunyuan_video.application import HunyuanVideo15DiTInputBundle
+    from difflet import DiffletParallelConfig, DiffletPipeline
+    from difflet.models.hunyuan_video.application import HunyuanVideo15DiTInputBundle
 
     model_dir = Path(args.model_dir)
     cache_dir = Path(args.cache_dir)
@@ -137,10 +137,10 @@ def main() -> int:
         "image_seq_len": args.image_seq_len,
     }
     t0 = time.perf_counter()
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="hunyuan_video_15",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype="bf16",
         height=args.height,
         width=args.width,

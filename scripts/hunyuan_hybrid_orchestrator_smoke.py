@@ -27,7 +27,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
 
     meta = json.loads(Path(args.bundle + ".meta.json").read_text())
     tensors = load_file(args.bundle)
@@ -38,15 +38,15 @@ def main() -> int:
         f"steps={meta['num_inference_steps']}"
     )
 
-    from nova.models.hunyuan_video.application import (
+    from difflet.models.hunyuan_video.application import (
         HunyuanVideoDiTInputBundle,
         NeuronHunyuanVideoApplication,
     )
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     app = NeuronHunyuanVideoApplication(
         model_path=args.source_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=torch.bfloat16,
         shape={"height": meta["height"], "width": meta["width"], "num_frames": meta["num_frames"]},
         text_seq_len=meta["text_seq_len"],

@@ -35,7 +35,7 @@ from hv15_precision_calibration_sweep import (  # noqa: E402
     _cosine,
     _slice_linear,
 )
-from nova.backends.cpu.ops_impl import mx as cpu_mx  # noqa: E402
+from difflet.backends.cpu.ops_impl import mx as cpu_mx  # noqa: E402
 
 
 # (attribute path on the block, parallel kind). Per LTX-2 dual-stream

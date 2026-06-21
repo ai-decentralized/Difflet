@@ -1,4 +1,4 @@
-"""Unit tests for nova.models.wan.vae.modeling_vae (W3c)."""
+"""Unit tests for difflet.models.wan.vae.modeling_vae (W3c)."""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ import torch
 
 
 def test_modeling_vae_imports_only_from_allowed_modules():
-    src = Path("/home/ubuntu/nova/nova/models/wan/vae/modeling_vae.py").read_text()
+    src = Path("/home/ubuntu/difflet/difflet/models/wan/vae/modeling_vae.py").read_text()
     tree = ast.parse(src)
     forbidden_roots = {"neuronx_distributed", "nkilib", "torch_neuronx"}
-    forbidden_prefixes = ("nova.core",)
+    forbidden_prefixes = ("difflet.core",)
     offending: list[str] = []
 
     for node in ast.walk(tree):
@@ -33,7 +33,7 @@ def test_modeling_vae_imports_only_from_allowed_modules():
 
 
 def test_wan_vae_decoder_config_defaults_match_wan22():
-    from nova.models.wan.vae.modeling_vae import WanVAEDecoderConfig
+    from difflet.models.wan.vae.modeling_vae import WanVAEDecoderConfig
 
     cfg = WanVAEDecoderConfig()
     assert cfg.base_dim == 96
@@ -49,7 +49,7 @@ def test_wan_vae_decoder_config_defaults_match_wan22():
 
 
 def test_wan_vae_decoder_config_from_diffusers_dict_filters_unknown_keys():
-    from nova.models.wan.vae.modeling_vae import WanVAEDecoderConfig
+    from difflet.models.wan.vae.modeling_vae import WanVAEDecoderConfig
 
     raw = {
         "base_dim": 96,
@@ -66,7 +66,7 @@ def test_wan_vae_decoder_config_from_diffusers_dict_filters_unknown_keys():
 
 
 def test_wan_vae_decoder_config_rejects_unsupported_modes():
-    from nova.models.wan.vae.modeling_vae import WanVAEDecoderConfig
+    from difflet.models.wan.vae.modeling_vae import WanVAEDecoderConfig
 
     with pytest.raises(NotImplementedError, match="is_residual"):
         WanVAEDecoderConfig(is_residual=True)
@@ -77,7 +77,7 @@ def test_wan_vae_decoder_config_rejects_unsupported_modes():
 
 
 def test_modeling_vae_classes_are_importable():
-    from nova.models.wan.vae import modeling_vae
+    from difflet.models.wan.vae import modeling_vae
 
     expected = [
         "WanCausalConv3d",
@@ -92,7 +92,7 @@ def test_modeling_vae_classes_are_importable():
 
 
 def test_wan_vae_decoder_state_dict_key_layout_matches_hf_decoder():
-    from nova.models.wan.vae.modeling_vae import (
+    from difflet.models.wan.vae.modeling_vae import (
         WanVAEDecoderConfig,
         WanVAEDecoderModel,
     )
@@ -117,7 +117,7 @@ def test_wan_vae_decoder_state_dict_key_layout_matches_hf_decoder():
 
 
 def test_wan_vae_decoder_tiny_forward_uses_causal_temporal_decode():
-    from nova.models.wan.vae.modeling_vae import (
+    from difflet.models.wan.vae.modeling_vae import (
         WanVAEDecoderConfig,
         WanVAEDecoderModel,
     )
@@ -142,12 +142,12 @@ def test_wan_vae_decoder_tiny_forward_uses_causal_temporal_decode():
 
 
 def test_wan_vae_decoder_inference_config_shapes():
-    from nova.backends.trainium.wan.vae import (
+    from difflet.backends.trainium.wan.vae import (
         ModelWrapperWanVAEDecoder,
         WanVAEDecoderInferenceConfig,
     )
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     snap = (
         "/home/ubuntu/.cache/huggingface/hub/"

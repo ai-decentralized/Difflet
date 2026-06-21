@@ -14,14 +14,14 @@ if [[ -d "${NEURON_VENV}/bin" ]]; then
 fi
 
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
-MODEL_DIR="${1:-${NOVA_HUNYUAN_MODEL_DIR:-/home/ubuntu/.cache/huggingface/hub/hunyuanvideo-real}}"
-HEIGHT="${NOVA_HUNYUAN_HEIGHT:-320}"
-WIDTH="${NOVA_HUNYUAN_WIDTH:-512}"
-FRAMES="${NOVA_HUNYUAN_FRAMES:-61}"
-OUT_DIR="${NOVA_HUNYUAN_VAE_OUT:-${ROOT}/.nova-cache/hunyuan_vae_decoder_smoke}"
-WORLD_SIZE="${NOVA_HUNYUAN_VAE_WORLD_SIZE:-1}"
+MODEL_DIR="${1:-${DIFFLET_HUNYUAN_MODEL_DIR:-/home/ubuntu/.cache/huggingface/hub/hunyuanvideo-real}}"
+HEIGHT="${DIFFLET_HUNYUAN_HEIGHT:-320}"
+WIDTH="${DIFFLET_HUNYUAN_WIDTH:-512}"
+FRAMES="${DIFFLET_HUNYUAN_FRAMES:-61}"
+OUT_DIR="${DIFFLET_HUNYUAN_VAE_OUT:-${ROOT}/.difflet-cache/hunyuan_vae_decoder_smoke}"
+WORLD_SIZE="${DIFFLET_HUNYUAN_VAE_WORLD_SIZE:-1}"
 
-export NOVA_BACKEND="${NOVA_BACKEND:-trainium}"
+export DIFFLET_BACKEND="${DIFFLET_BACKEND:-trainium}"
 export NEURON_RT_NUM_CORES="${NEURON_RT_NUM_CORES:-${WORLD_SIZE}}"
 export NEURON_RT_VIRTUAL_CORE_SIZE="${NEURON_RT_VIRTUAL_CORE_SIZE:-2}"
 
@@ -34,8 +34,8 @@ import time
 
 import torch
 
-from nova.models.hunyuan_video.application import NeuronHunyuanVideoApplication
-from nova.pipeline.parallel_config import NovaParallelConfig
+from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
+from difflet.pipeline.parallel_config import DiffletParallelConfig
 
 model_dir = ${MODEL_DIR@Q}
 out_dir = ${OUT_DIR@Q}
@@ -52,7 +52,7 @@ print("[hunyuan-vae] tp_degree = 1")
 
 app = NeuronHunyuanVideoApplication(
     model_path=model_dir,
-    parallel=NovaParallelConfig(tp_degree=world_size, cp_enabled=False),
+    parallel=DiffletParallelConfig(tp_degree=world_size, cp_enabled=False),
     dtype=torch.bfloat16,
     shape={"height": height, "width": width, "num_frames": frames},
     enable_transformer=False,

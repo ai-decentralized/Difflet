@@ -37,12 +37,12 @@ import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 from safetensors.torch import load_file as load_safetensors_file  # noqa: E402
 
-from nova.backends.trainium.hunyuan_video.backbone15 import (  # noqa: E402
+from difflet.backends.trainium.hunyuan_video.backbone15 import (  # noqa: E402
     _HunyuanVideo15KeyMaskAttnProcessor,
 )
 
 MD = Path("/home/ubuntu/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-720p_t2v/snapshots/f4dbc4a1efa4ac8ea56680cdf79d9f455105e814")
-BUNDLE = ROOT / ".nova-cache" / "hunyuan15_dit_inputs" / "real_320x512x61_4step.safetensors"
+BUNDLE = ROOT / ".difflet-cache" / "hunyuan15_dit_inputs" / "real_320x512x61_4step.safetensors"
 
 
 def main() -> int:
@@ -78,7 +78,7 @@ def main() -> int:
         HunyuanVideo15Transformer3DModel,
     )
 
-    from nova.backends.trainium.hunyuan_video.backbone15 import _hv15_static_reorder_forward
+    from difflet.backends.trainium.hunyuan_video.backbone15 import _hv15_static_reorder_forward
 
     # option A: static-reorder forward (the monolithic-fix). out_default above used the
     # ORIGINAL dynamic-reorder forward; patch the class now to compare.

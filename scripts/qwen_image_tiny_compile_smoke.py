@@ -28,8 +28,8 @@ def ensure_runtime_python() -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model-dir", default="/tmp/nova_qwen_image_tiny_model")
-    parser.add_argument("--cache-dir", default="/tmp/nova_qwen_image_tiny_cache")
+    parser.add_argument("--model-dir", default="/tmp/difflet_qwen_image_tiny_model")
+    parser.add_argument("--cache-dir", default="/tmp/difflet_qwen_image_tiny_cache")
     parser.add_argument("--height", type=int, default=64)
     parser.add_argument("--width", type=int, default=64)
     parser.add_argument("--text-seq-len", type=int, default=16)
@@ -63,8 +63,8 @@ def main() -> None:
     ensure_runtime_python()
     import torch
 
-    from nova import NovaParallelConfig, NovaPipeline
-    from nova.models.qwen_image.application import QwenImageDiTInputBundle
+    from difflet import DiffletParallelConfig, DiffletPipeline
+    from difflet.models.qwen_image.application import QwenImageDiTInputBundle
 
     args = build_parser().parse_args()
     model_dir = Path(args.model_dir)
@@ -75,10 +75,10 @@ def main() -> None:
                 shutil.rmtree(path)
     create_tiny_model(model_dir)
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="qwen_image",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=torch.bfloat16,
         height=args.height,
         width=args.width,
@@ -96,7 +96,7 @@ def main() -> None:
     if args.load:
         from safetensors.torch import load_file
 
-        from nova.backends.trainium.qwen_image.transformer import _QwenImageTransformerTraceModule
+        from difflet.backends.trainium.qwen_image.transformer import _QwenImageTransformerTraceModule
 
         contract = pipe.app.dit_input_contract()
         bundle = QwenImageDiTInputBundle(

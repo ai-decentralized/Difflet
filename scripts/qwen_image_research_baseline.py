@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", required=True, help="Parent dir containing transformer/")
     parser.add_argument("--bundle", required=True, help="Cached Qwen DiT inputs safetensors")
-    parser.add_argument("--cache-dir", default=".nova-cache/qwen_image_transformer_full")
+    parser.add_argument("--cache-dir", default=".difflet-cache/qwen_image_transformer_full")
     parser.add_argument("--height", type=int, default=None)
     parser.add_argument("--width", type=int, default=None)
     parser.add_argument("--text-seq-len", type=int, default=None)
@@ -63,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force-compile", action="store_true")
     parser.add_argument("--skip-compile", action="store_true")
     parser.add_argument("--skip-warmup", action="store_true")
-    parser.add_argument("--metrics-out", default="/tmp/nova_qwen_image_research_baseline_metrics.json")
+    parser.add_argument("--metrics-out", default="/tmp/difflet_qwen_image_research_baseline_metrics.json")
     parser.add_argument("--save-latents", default=None)
     return parser
 
@@ -128,10 +128,10 @@ def _load_bundle(bundle_path: Path, dtype: torch.dtype) -> dict[str, torch.Tenso
 
 def main() -> int:
     args = build_parser().parse_args()
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
 
-    from nova import NovaParallelConfig, NovaPipeline
-    from nova.models.qwen_image.application import QwenImageDiTInputBundle
+    from difflet import DiffletParallelConfig, DiffletPipeline
+    from difflet.models.qwen_image.application import QwenImageDiTInputBundle
 
     bundle_path = Path(args.bundle)
     meta = _bundle_meta(bundle_path)
@@ -146,10 +146,10 @@ def main() -> int:
         flush=True,
     )
     t0 = time.perf_counter()
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         args.model_dir,
         model_type="qwen_image",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=args.dtype,
         height=height,
         width=width,

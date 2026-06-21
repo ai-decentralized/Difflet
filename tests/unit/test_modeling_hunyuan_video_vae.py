@@ -13,11 +13,11 @@ import torch
 
 def test_modeling_hunyuan_video_vae_imports_only_from_allowed_modules():
     src = Path(
-        "/home/ubuntu/nova/nova/models/hunyuan_video/vae/modeling_vae.py"
+        "/home/ubuntu/difflet/difflet/models/hunyuan_video/vae/modeling_vae.py"
     ).read_text()
     tree = ast.parse(src)
     forbidden_roots = {"neuronx_distributed", "nkilib", "torch_neuronx"}
-    forbidden_prefixes = ("nova.core",)
+    forbidden_prefixes = ("difflet.core",)
     offending: list[str] = []
 
     for node in ast.walk(tree):
@@ -36,7 +36,7 @@ def test_modeling_hunyuan_video_vae_imports_only_from_allowed_modules():
 
 
 def test_hunyuan_video_vae_decoder_config_defaults_match_hf_v0():
-    from nova.models.hunyuan_video.vae.modeling_vae import HunyuanVideoVAEDecoderConfig
+    from difflet.models.hunyuan_video.vae.modeling_vae import HunyuanVideoVAEDecoderConfig
 
     cfg = HunyuanVideoVAEDecoderConfig()
     assert cfg.latent_channels == 16
@@ -50,7 +50,7 @@ def test_hunyuan_video_vae_decoder_config_defaults_match_hf_v0():
 
 
 def test_hunyuan_video_vae_decoder_config_filters_diffusers_dict():
-    from nova.models.hunyuan_video.vae.modeling_vae import HunyuanVideoVAEDecoderConfig
+    from difflet.models.hunyuan_video.vae.modeling_vae import HunyuanVideoVAEDecoderConfig
 
     raw = {
         "_class_name": "AutoencoderKLHunyuanVideo",
@@ -66,7 +66,7 @@ def test_hunyuan_video_vae_decoder_config_filters_diffusers_dict():
 
 
 def test_hunyuan_video_vae_decoder_classes_are_importable():
-    from nova.models.hunyuan_video.vae import modeling_vae
+    from difflet.models.hunyuan_video.vae import modeling_vae
 
     for name in ["HunyuanVideoVAEDecoderConfig", "HunyuanVideoVAEDecoderModel"]:
         cls = getattr(modeling_vae, name)
@@ -74,7 +74,7 @@ def test_hunyuan_video_vae_decoder_classes_are_importable():
 
 
 def test_hunyuan_video_vae_decoder_state_dict_key_layout_matches_hf_decoder():
-    from nova.models.hunyuan_video.vae.modeling_vae import (
+    from difflet.models.hunyuan_video.vae.modeling_vae import (
         HunyuanVideoVAEDecoderConfig,
         HunyuanVideoVAEDecoderModel,
     )
@@ -96,7 +96,7 @@ def test_hunyuan_video_vae_decoder_state_dict_key_layout_matches_hf_decoder():
 
 
 def test_hunyuan_video_vae_decoder_tiny_forward_shape():
-    from nova.models.hunyuan_video.vae.modeling_vae import (
+    from difflet.models.hunyuan_video.vae.modeling_vae import (
         HunyuanVideoVAEDecoderConfig,
         HunyuanVideoVAEDecoderModel,
     )
@@ -119,7 +119,7 @@ def test_hunyuan_video_vae_repeat_upsampler_matches_diffusers_nearest():
         HunyuanVideoUpsampleCausal3D,
     )
 
-    from nova.models.hunyuan_video.vae.modeling_vae import _RepeatNearestUpsampleCausal3D
+    from difflet.models.hunyuan_video.vae.modeling_vae import _RepeatNearestUpsampleCausal3D
 
     for factor in [(1, 2, 2), (2, 2, 2)]:
         torch.manual_seed(123)
@@ -143,12 +143,12 @@ def test_hunyuan_video_vae_repeat_upsampler_matches_diffusers_nearest():
 
 
 def test_hunyuan_video_vae_decoder_inference_config_shapes(tmp_path):
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.backends.trainium.hunyuan_video.vae import (
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.hunyuan_video.vae import (
         HunyuanVideoVAEDecoderInferenceConfig,
         ModelWrapperHunyuanVideoVAEDecoder,
     )
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     vae_dir = tmp_path / "vae"
     vae_dir.mkdir()
@@ -200,12 +200,12 @@ def test_hunyuan_video_vae_decoder_inference_config_shapes(tmp_path):
 
 
 def test_hunyuan_video_vae_segment_specs_materialize_norm_conv_boundaries(tmp_path):
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.backends.trainium.hunyuan_video.vae import (
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.hunyuan_video.vae import (
         NeuronHunyuanVideoVAEDecoderApplication,
         HunyuanVideoVAEDecoderInferenceConfig,
     )
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     vae_dir = tmp_path / "vae"
     vae_dir.mkdir()
@@ -262,7 +262,7 @@ def test_hunyuan_video_vae_segment_specs_materialize_norm_conv_boundaries(tmp_pa
 
 
 def test_hunyuan_video_vae_host_tiling_reconstructs_v0_shape():
-    from nova.backends.trainium.hunyuan_video.vae import (
+    from difflet.backends.trainium.hunyuan_video.vae import (
         NeuronHunyuanVideoVAEDecoderApplication,
     )
 

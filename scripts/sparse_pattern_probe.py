@@ -103,7 +103,7 @@ def main() -> int:
     p.add_argument("--repeats", type=int, default=30)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--metrics-out", type=Path,
-                   default=Path("/tmp/nova_sparse_pattern_probe_metrics.json"))
+                   default=Path("/tmp/difflet_sparse_pattern_probe_metrics.json"))
     args = p.parse_args()
 
     L, R = (int(x) for x in args.pattern.split(":"))

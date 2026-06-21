@@ -1,4 +1,4 @@
-"""Unit tests for nova.models.wan.umt5.modeling_umt5 (W3b)."""
+"""Unit tests for difflet.models.wan.umt5.modeling_umt5 (W3b)."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ import pytest
 
 def test_modeling_umt5_imports_only_from_allowed_modules():
     """Rule 1: UMT5 modeling imports only torch / stdlib / transformers
-    activations / nova.ops.
+    activations / difflet.ops.
     """
-    src = Path("/home/ubuntu/nova/nova/models/wan/umt5/modeling_umt5.py").read_text()
+    src = Path("/home/ubuntu/difflet/difflet/models/wan/umt5/modeling_umt5.py").read_text()
     tree = ast.parse(src)
     forbidden_roots = {"neuronx_distributed", "nkilib", "torch_neuronx"}
-    forbidden_prefixes = ("nova.core",)
+    forbidden_prefixes = ("difflet.core",)
     offending: list[str] = []
 
     for node in ast.walk(tree):
@@ -35,7 +35,7 @@ def test_modeling_umt5_imports_only_from_allowed_modules():
 
 
 def test_wan_umt5_config_defaults_match_xxl():
-    from nova.models.wan.umt5.modeling_umt5 import WanUmT5Config
+    from difflet.models.wan.umt5.modeling_umt5 import WanUmT5Config
 
     cfg = WanUmT5Config()
     assert cfg.vocab_size == 256384
@@ -53,14 +53,14 @@ def test_wan_umt5_config_defaults_match_xxl():
 
 
 def test_wan_umt5_config_rejects_non_gated():
-    from nova.models.wan.umt5.modeling_umt5 import WanUmT5Config
+    from difflet.models.wan.umt5.modeling_umt5 import WanUmT5Config
 
     with pytest.raises(NotImplementedError, match="is_gated_act"):
         WanUmT5Config(is_gated_act=False)
 
 
 def test_wan_umt5_config_from_diffusers_dict_filters_unknown_keys():
-    from nova.models.wan.umt5.modeling_umt5 import WanUmT5Config
+    from difflet.models.wan.umt5.modeling_umt5 import WanUmT5Config
 
     raw = {
         "vocab_size": 256384,
@@ -80,7 +80,7 @@ def test_wan_umt5_config_from_diffusers_dict_filters_unknown_keys():
 
 def test_relative_position_bucket_matches_t5_reference():
     """Bucket function is shared with T5; sanity-check known buckets."""
-    from nova.models.wan.umt5.modeling_umt5 import WanUmT5Attention
+    from difflet.models.wan.umt5.modeling_umt5 import WanUmT5Attention
     import torch
 
     bucket = WanUmT5Attention._relative_position_bucket
@@ -95,7 +95,7 @@ def test_relative_position_bucket_matches_t5_reference():
 
 
 def test_modeling_umt5_classes_are_importable():
-    from nova.models.wan.umt5 import modeling_umt5
+    from difflet.models.wan.umt5 import modeling_umt5
 
     expected = [
         "WanUmT5Attention",
@@ -113,7 +113,7 @@ def test_modeling_umt5_classes_are_importable():
 
 
 def test_wan_umt5_encoder_model_forward_signature():
-    from nova.models.wan.umt5.modeling_umt5 import WanUmT5EncoderModel
+    from difflet.models.wan.umt5.modeling_umt5 import WanUmT5EncoderModel
 
     sig = inspect.signature(WanUmT5EncoderModel.forward)
     params = list(sig.parameters)
@@ -135,7 +135,7 @@ def test_wan_umt5_state_dict_key_layout_matches_hf():
     This test does NOT instantiate (would need a TP PG); it walks the class
     tree to confirm submodule attribute names.
     """
-    from nova.models.wan.umt5 import modeling_umt5 as m
+    from difflet.models.wan.umt5 import modeling_umt5 as m
 
     # Top-level encoder
     enc_init = inspect.getsource(m.WanUmT5EncoderModel.__init__)
@@ -178,11 +178,11 @@ def test_wan_text_encoder_inference_config_defaults():
     """WanTextEncoderInferenceConfig.add_derived_config sets text_seq_len=512."""
     import torch
 
-    from nova.backends.trainium.wan.text_encoder import (
+    from difflet.backends.trainium.wan.text_encoder import (
         WanTextEncoderInferenceConfig,
     )
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     snap = (
         "/home/ubuntu/.cache/huggingface/hub/"
@@ -212,12 +212,12 @@ def test_wan_text_encoder_inference_config_defaults():
 def test_model_wrapper_wan_text_encoder_input_shapes():
     import torch
 
-    from nova.backends.trainium.wan.text_encoder import (
+    from difflet.backends.trainium.wan.text_encoder import (
         ModelWrapperWanTextEncoder,
         WanTextEncoderInferenceConfig,
     )
-    from nova.backends.trainium.core.config import NeuronConfig
-    from nova.utils.diffusers_adapter import load_diffusers_config
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.utils.diffusers_adapter import load_diffusers_config
 
     snap = (
         "/home/ubuntu/.cache/huggingface/hub/"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# M2.5-C compiled NEFF vs Nova CPU numerical alignment.
+# M2.5-C compiled NEFF vs Difflet CPU numerical alignment.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

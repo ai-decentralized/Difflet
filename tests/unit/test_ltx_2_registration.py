@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 import torch
 
-from nova import NovaParallelConfig, NovaPipeline
-from nova.registry import resolve_model
+from difflet import DiffletParallelConfig, DiffletPipeline
+from difflet.registry import resolve_model
 
 
 def _write_ltx_2_transformer_config(model_dir, **overrides):
@@ -59,7 +59,7 @@ def test_ltx_2_registry_defaults_are_tp_only():
     entry = resolve_model("Lightricks/LTX-2")
 
     assert entry.name == "ltx_2"
-    assert entry.default_parallel == NovaParallelConfig(tp_degree=4)
+    assert entry.default_parallel == DiffletParallelConfig(tp_degree=4)
     assert entry.default_shape == {"height": 512, "width": 768, "num_frames": 121}
     assert "audio_vae/diffusion_pytorch_model.safetensors" in (entry.download_patterns or ())
     assert "vocoder/diffusion_pytorch_model.safetensors" in (entry.download_patterns or ())
@@ -71,10 +71,10 @@ def test_ltx_2_pipeline_skeleton_can_be_constructed_without_load(tmp_path):
     model_dir = tmp_path / "LTX-2"
     model_dir.mkdir()
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="ltx_2",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         compile_cache_dir=str(tmp_path / "cache"),
         skip_compile=True,
@@ -82,7 +82,7 @@ def test_ltx_2_pipeline_skeleton_can_be_constructed_without_load(tmp_path):
     )
 
     assert pipe.model_entry.name == "ltx_2"
-    assert pipe.parallel == NovaParallelConfig(tp_degree=4)
+    assert pipe.parallel == DiffletParallelConfig(tp_degree=4)
     assert pipe.shape == {"height": 512, "width": 768, "num_frames": 121}
     assert pipe.app.shape == {"height": 512, "width": 768, "num_frames": 121}
     assert pipe.app.text_seq_len == 1024
@@ -93,10 +93,10 @@ def test_ltx_2_application_declares_transformer_component(tmp_path):
     model_dir = tmp_path / "LTX-2"
     _write_ltx_2_transformer_config(model_dir)
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="ltx_2",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         height=256,
         width=512,
@@ -126,10 +126,10 @@ def test_ltx_2_application_declares_segmented_block_component(tmp_path):
     model_dir = tmp_path / "LTX-2"
     _write_ltx_2_transformer_config(model_dir)
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="ltx_2",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         height=256,
         width=512,
@@ -161,10 +161,10 @@ def test_ltx_2_production_audio_seq_len_matches_packed_audio_frames(tmp_path):
         caption_channels=3840,
     )
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="ltx_2",
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype="bf16",
         height=512,
         width=768,
@@ -186,10 +186,10 @@ def test_ltx_2_rejects_cp_until_transformer_spike(tmp_path):
     model_dir.mkdir()
 
     with pytest.raises(NotImplementedError, match="CP is deferred"):
-        NovaPipeline.from_pretrained(
+        DiffletPipeline.from_pretrained(
             str(model_dir),
             model_type="ltx_2",
-            parallel=NovaParallelConfig(tp_degree=4, cp_degree=2),
+            parallel=DiffletParallelConfig(tp_degree=4, cp_degree=2),
             dtype="bf16",
             compile_cache_dir=str(tmp_path / "cache"),
             skip_compile=True,
@@ -198,7 +198,7 @@ def test_ltx_2_rejects_cp_until_transformer_spike(tmp_path):
 
 
 def test_ltx_2_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
-    from nova.models.ltx_2.application import (
+    from difflet.models.ltx_2.application import (
         LTX2DiTInputBundle,
         create_ltx_2_transformer_config,
         validate_ltx_2_dit_inputs,
@@ -249,8 +249,8 @@ def test_ltx_2_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
 
 
 def test_ltx_2_transformer_trace_module_tiny_cpu_forward(tmp_path):
-    from nova.backends.trainium.ltx_2.transformer import _LTX2TransformerTraceModule
-    from nova.models.ltx_2.application import create_ltx_2_transformer_config
+    from difflet.backends.trainium.ltx_2.transformer import _LTX2TransformerTraceModule
+    from difflet.models.ltx_2.application import create_ltx_2_transformer_config
 
     model_dir = tmp_path / "LTX-2"
     _write_ltx_2_transformer_config(
@@ -302,7 +302,7 @@ def test_ltx_2_transformer_trace_module_tiny_cpu_forward(tmp_path):
 
 
 def test_ltx_2_cache_dit_inputs_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_cache_dit_inputs.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("ltx_2_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -322,7 +322,7 @@ def test_ltx_2_cache_dit_inputs_cli_parser_imports_without_loading_models():
 
 
 def test_ltx_2_cache_dit_inputs_latent_dim_helper():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_cache_dit_inputs.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("ltx_2_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -334,7 +334,7 @@ def test_ltx_2_cache_dit_inputs_latent_dim_helper():
 
 
 def test_ltx_2_cache_dit_inputs_coords_respect_runtime_args():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_cache_dit_inputs.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("ltx_2_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -375,7 +375,7 @@ def test_ltx_2_cache_dit_inputs_coords_respect_runtime_args():
 
 
 def test_ltx_2_cache_dit_inputs_keeps_disabled_components_in_load_kwargs():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_cache_dit_inputs.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("ltx_2_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -398,7 +398,7 @@ def test_ltx_2_cache_dit_inputs_keeps_disabled_components_in_load_kwargs():
 
 
 def test_ltx_2_tiny_compile_smoke_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_tiny_compile_smoke.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_tiny_compile_smoke.py")
     spec = importlib.util.spec_from_file_location("ltx_2_tiny_compile_smoke", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -407,8 +407,8 @@ def test_ltx_2_tiny_compile_smoke_cli_parser_imports_without_compiling():
 
     parser = module.build_parser()
     args = parser.parse_args(["--skip-compile", "--load"])
-    assert args.model_dir == "/tmp/nova_ltx2_tiny_model"
-    assert args.cache_dir == "/tmp/nova_ltx2_tiny_cache"
+    assert args.model_dir == "/tmp/difflet_ltx2_tiny_model"
+    assert args.cache_dir == "/tmp/difflet_ltx2_tiny_cache"
     assert args.height == 64
     assert args.width == 64
     assert args.num_frames == 9
@@ -419,7 +419,7 @@ def test_ltx_2_tiny_compile_smoke_cli_parser_imports_without_compiling():
 
 
 def test_ltx_2_transformer_parity_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_transformer_parity.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_transformer_parity.py")
     spec = importlib.util.spec_from_file_location("ltx_2_transformer_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -443,7 +443,7 @@ def test_ltx_2_transformer_parity_cli_parser_imports_without_loading_models():
             "--local-files-only",
         ]
     )
-    assert args.cache_dir == ".nova-cache/ltx_2_transformer_parity"
+    assert args.cache_dir == ".difflet-cache/ltx_2_transformer_parity"
     assert args.tp_degree == 4
     assert args.dtype == torch.bfloat16
     assert args.transformer_mode == "segmented"
@@ -454,7 +454,7 @@ def test_ltx_2_transformer_parity_cli_parser_imports_without_loading_models():
 
 
 def test_ltx_2_trajectory_parity_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_trajectory_parity.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_trajectory_parity.py")
     spec = importlib.util.spec_from_file_location("ltx_2_trajectory_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -480,7 +480,7 @@ def test_ltx_2_trajectory_parity_cli_parser_imports_without_loading_models():
             "--local-files-only",
         ]
     )
-    assert args.cache_dir == ".nova-cache/ltx_2_trajectory_parity"
+    assert args.cache_dir == ".difflet-cache/ltx_2_trajectory_parity"
     assert args.tp_degree == 4
     assert args.dtype == torch.float32
     assert args.num_inference_steps == 4
@@ -491,7 +491,7 @@ def test_ltx_2_trajectory_parity_cli_parser_imports_without_loading_models():
 
 
 def test_ltx_2_trajectory_parity_cosine_is_exact_for_identical_large_tensors():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_trajectory_parity.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_trajectory_parity.py")
     spec = importlib.util.spec_from_file_location("ltx_2_trajectory_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -504,7 +504,7 @@ def test_ltx_2_trajectory_parity_cosine_is_exact_for_identical_large_tensors():
 
 
 def test_ltx_2_segmented_process_block_parser_imports_without_running():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_segmented_process_block.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_segmented_process_block.py")
     spec = importlib.util.spec_from_file_location("ltx_2_segmented_process_block", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -530,7 +530,7 @@ def test_ltx_2_segmented_process_block_parser_imports_without_running():
 
 
 def test_ltx_2_full_transformer_closure_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_full_transformer_closure.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_full_transformer_closure.py")
     spec = importlib.util.spec_from_file_location("ltx_2_full_transformer_closure", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -556,7 +556,7 @@ def test_ltx_2_full_transformer_closure_cli_parser_imports_without_loading_model
 
 
 def test_ltx_2_host_e2e_smoke_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_host_e2e_smoke.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_host_e2e_smoke.py")
     spec = importlib.util.spec_from_file_location("ltx_2_host_e2e_smoke", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -588,7 +588,7 @@ def test_ltx_2_host_e2e_smoke_cli_parser_imports_without_loading_models():
 
 
 def test_ltx_2_snapshot_report_selects_scoped_diffusers_subset():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_snapshot_report.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_snapshot_report.py")
     spec = importlib.util.spec_from_file_location("ltx_2_snapshot_report", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -622,7 +622,7 @@ def test_ltx_2_snapshot_report_selects_scoped_diffusers_subset():
 
 
 def test_ltx_2_production_block_compile_probe_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_production_block_compile_probe.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_production_block_compile_probe.py")
     spec = importlib.util.spec_from_file_location("ltx_2_production_block_compile_probe", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -652,7 +652,7 @@ def test_ltx_2_production_block_compile_probe_parser_imports_without_compiling()
 
 
 def test_ltx_2_segmented_block_compile_probe_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_segmented_block_compile_probe.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_segmented_block_compile_probe.py")
     spec = importlib.util.spec_from_file_location("ltx_2_segmented_block_compile_probe", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -679,7 +679,7 @@ def test_ltx_2_segmented_block_compile_probe_parser_imports_without_compiling():
 
 
 def test_ltx_2_segmented_block_parity_parser_imports_without_running():
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_segmented_block_parity.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_segmented_block_parity.py")
     spec = importlib.util.spec_from_file_location("ltx_2_segmented_block_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -709,12 +709,12 @@ def test_ltx_2_segmented_block_parity_parser_imports_without_running():
 
 
 def test_ltx_2_mx_state_dict_conversion_uses_checkpoint_weight(monkeypatch):
-    monkeypatch.setenv("NOVA_LTX2_MX_ALL_E4M3", "1")
+    monkeypatch.setenv("DIFFLET_LTX2_MX_ALL_E4M3", "1")
 
     import torch
 
-    from nova.backends.cpu.ops_impl.mx import quantize_mx
-    from nova.backends.trainium.ltx_2.segmented import LTX2BlockSegmentApplication
+    from difflet.backends.cpu.ops_impl.mx import quantize_mx
+    from difflet.backends.trainium.ltx_2.segmented import LTX2BlockSegmentApplication
 
     weight = (
         torch.arange(512 * 512, dtype=torch.float32).reshape(512, 512) / 10000
@@ -754,12 +754,12 @@ def test_ltx_2_mx_state_dict_conversion_uses_checkpoint_weight(monkeypatch):
 
 
 def test_ltx_2_mx_linear_runtime_weights_are_parameters(monkeypatch):
-    monkeypatch.setenv("NOVA_LTX2_MX_ALL_E4M3", "1")
+    monkeypatch.setenv("DIFFLET_LTX2_MX_ALL_E4M3", "1")
 
     import torch
     import torch.nn as nn
 
-    from nova.backends.trainium.ltx_2.segmented import MXLinear
+    from difflet.backends.trainium.ltx_2.segmented import MXLinear
 
     src = nn.Linear(512, 512, bias=True, dtype=torch.bfloat16)
     layer = MXLinear(src)
@@ -775,13 +775,13 @@ def test_ltx_2_mx_linear_runtime_weights_are_parameters(monkeypatch):
 
 
 def test_ltx_2_mx_native_weight_pack_expands_scales(monkeypatch):
-    monkeypatch.setenv("NOVA_LTX2_MX_ALL_E4M3", "1")
-    monkeypatch.setenv("NOVA_LTX2_MX_NATIVE_WEIGHT_PACK", "1")
+    monkeypatch.setenv("DIFFLET_LTX2_MX_ALL_E4M3", "1")
+    monkeypatch.setenv("DIFFLET_LTX2_MX_NATIVE_WEIGHT_PACK", "1")
 
     import torch
 
-    from nova.backends.cpu.ops_impl.mx import quantize_mx
-    from nova.backends.trainium.ltx_2.segmented import LTX2BlockSegmentApplication
+    from difflet.backends.cpu.ops_impl.mx import quantize_mx
+    from difflet.backends.trainium.ltx_2.segmented import LTX2BlockSegmentApplication
 
     weight = (
         torch.arange(512 * 512, dtype=torch.float32).reshape(512, 512) / 10000
@@ -817,27 +817,27 @@ def test_ltx_2_mx_linear_weight_layout_is_module_local(monkeypatch):
     import torch
     import torch.nn as nn
 
-    from nova.backends.trainium.ltx_2.segmented import MXLinear
+    from difflet.backends.trainium.ltx_2.segmented import MXLinear
 
     src = nn.Linear(512, 512, bias=False, dtype=torch.bfloat16)
 
-    monkeypatch.delenv("NOVA_LTX2_MX_NATIVE_WEIGHT_PACK", raising=False)
+    monkeypatch.delenv("DIFFLET_LTX2_MX_NATIVE_WEIGHT_PACK", raising=False)
     compact_layer = MXLinear(src)
-    monkeypatch.setenv("NOVA_LTX2_MX_NATIVE_WEIGHT_PACK", "1")
+    monkeypatch.setenv("DIFFLET_LTX2_MX_NATIVE_WEIGHT_PACK", "1")
     assert compact_layer._uses_native_weight_pack() is False
 
     native_layer = MXLinear(src)
-    monkeypatch.delenv("NOVA_LTX2_MX_NATIVE_WEIGHT_PACK", raising=False)
+    monkeypatch.delenv("DIFFLET_LTX2_MX_NATIVE_WEIGHT_PACK", raising=False)
     assert native_layer._uses_native_weight_pack() is True
 
 
 def test_ltx_2_mx_group_kv_installs_attention_processors(monkeypatch):
-    monkeypatch.setenv("NOVA_LTX2_MX_ALL_E4M3", "1")
-    monkeypatch.setenv("NOVA_LTX2_MX_GROUP_KV", "1")
+    monkeypatch.setenv("DIFFLET_LTX2_MX_ALL_E4M3", "1")
+    monkeypatch.setenv("DIFFLET_LTX2_MX_GROUP_KV", "1")
 
     from argparse import Namespace
 
-    from nova.backends.trainium.ltx_2.segmented import (
+    from difflet.backends.trainium.ltx_2.segmented import (
         _LTX2MXGroupedAttnProcessor,
         _make_ltx2_block,
     )
@@ -880,7 +880,7 @@ def test_ltx_2_mx_group_kv_installs_attention_processors(monkeypatch):
 
 
 def test_ltx_2_host_e2e_smoke_preflight_decode_requirements(tmp_path):
-    script_path = Path("/home/ubuntu/nova/scripts/ltx_2_host_e2e_smoke.py")
+    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_host_e2e_smoke.py")
     spec = importlib.util.spec_from_file_location("ltx_2_host_e2e_smoke", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

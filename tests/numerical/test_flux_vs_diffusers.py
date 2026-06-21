@@ -1,6 +1,6 @@
 """Flux trajectory numerical alignment against Hugging Face diffusers.
 
-This test is intentionally opt-in. It loads FLUX reference weights and Nova's
+This test is intentionally opt-in. It loads FLUX reference weights and Difflet's
 compiled Trainium artifacts, so it is too slow and hardware-heavy for default
 test runs.
 """
@@ -17,7 +17,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from nova import NovaParallelConfig, NovaPipeline
+from difflet import DiffletParallelConfig, DiffletPipeline
 
 
 pytestmark = [
@@ -28,23 +28,23 @@ pytestmark = [
 
 
 def test_flux_full_trajectory_cosine_matches_diffusers():
-    if os.environ.get("NOVA_RUN_FLUX_NUMERICAL") != "1":
-        pytest.skip("set NOVA_RUN_FLUX_NUMERICAL=1 to run the Flux numerical gate")
+    if os.environ.get("DIFFLET_RUN_FLUX_NUMERICAL") != "1":
+        pytest.skip("set DIFFLET_RUN_FLUX_NUMERICAL=1 to run the Flux numerical gate")
 
     from diffusers import FluxPipeline
 
-    model_id = os.environ.get("NOVA_FLUX_NUMERICAL_MODEL", "black-forest-labs/FLUX.1-dev")
-    prompt = os.environ.get("NOVA_FLUX_NUMERICAL_PROMPT", "a cat")
-    height = int(os.environ.get("NOVA_FLUX_NUMERICAL_HEIGHT", "1024"))
-    width = int(os.environ.get("NOVA_FLUX_NUMERICAL_WIDTH", "1024"))
-    steps = int(os.environ.get("NOVA_FLUX_NUMERICAL_STEPS", "28"))
-    seed = int(os.environ.get("NOVA_FLUX_NUMERICAL_SEED", "42"))
-    guidance_scale = float(os.environ.get("NOVA_FLUX_NUMERICAL_GUIDANCE_SCALE", "3.5"))
-    max_sequence_length = int(os.environ.get("NOVA_FLUX_NUMERICAL_MAX_SEQUENCE_LENGTH", "512"))
-    threshold = float(os.environ.get("NOVA_FLUX_NUMERICAL_MIN_COSINE", "0.95"))
-    tp_degree = int(os.environ.get("NOVA_FLUX_NUMERICAL_TP_DEGREE", "4"))
-    local_files_only = _env_flag("NOVA_FLUX_NUMERICAL_LOCAL_FILES_ONLY", default=False)
-    cache_dir = os.environ.get("NOVA_FLUX_NUMERICAL_CACHE_DIR")
+    model_id = os.environ.get("DIFFLET_FLUX_NUMERICAL_MODEL", "black-forest-labs/FLUX.1-dev")
+    prompt = os.environ.get("DIFFLET_FLUX_NUMERICAL_PROMPT", "a cat")
+    height = int(os.environ.get("DIFFLET_FLUX_NUMERICAL_HEIGHT", "1024"))
+    width = int(os.environ.get("DIFFLET_FLUX_NUMERICAL_WIDTH", "1024"))
+    steps = int(os.environ.get("DIFFLET_FLUX_NUMERICAL_STEPS", "28"))
+    seed = int(os.environ.get("DIFFLET_FLUX_NUMERICAL_SEED", "42"))
+    guidance_scale = float(os.environ.get("DIFFLET_FLUX_NUMERICAL_GUIDANCE_SCALE", "3.5"))
+    max_sequence_length = int(os.environ.get("DIFFLET_FLUX_NUMERICAL_MAX_SEQUENCE_LENGTH", "512"))
+    threshold = float(os.environ.get("DIFFLET_FLUX_NUMERICAL_MIN_COSINE", "0.95"))
+    tp_degree = int(os.environ.get("DIFFLET_FLUX_NUMERICAL_TP_DEGREE", "4"))
+    local_files_only = _env_flag("DIFFLET_FLUX_NUMERICAL_LOCAL_FILES_ONLY", default=False)
+    cache_dir = os.environ.get("DIFFLET_FLUX_NUMERICAL_CACHE_DIR")
 
     common_call_kwargs = {
         "prompt": prompt,
@@ -63,7 +63,7 @@ def test_flux_full_trajectory_cosine_matches_diffusers():
         local_files_only=local_files_only,
         call_kwargs=common_call_kwargs,
     )
-    nova_steps = _run_nova_flux(
+    difflet_steps = _run_difflet_flux(
         model_id=model_id,
         seed=seed,
         tp_degree=tp_degree,
@@ -72,8 +72,8 @@ def test_flux_full_trajectory_cosine_matches_diffusers():
         call_kwargs=common_call_kwargs,
     )
 
-    assert len(ref_steps) == len(nova_steps) == steps
-    metrics = _trajectory_cosines(reference=ref_steps, actual=nova_steps)
+    assert len(ref_steps) == len(difflet_steps) == steps
+    metrics = _trajectory_cosines(reference=ref_steps, actual=difflet_steps)
     _write_metrics_if_requested(metrics)
 
     min_cosine = min(item["cosine"] for item in metrics)
@@ -109,7 +109,7 @@ def _run_diffusers_reference(
     return step_latents
 
 
-def _run_nova_flux(
+def _run_difflet_flux(
     *,
     model_id: str,
     seed: int,
@@ -118,10 +118,10 @@ def _run_nova_flux(
     local_files_only: bool,
     call_kwargs: dict[str, Any],
 ) -> list[torch.Tensor]:
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         model_id,
         model_type="flux",
-        parallel=NovaParallelConfig(tp_degree=tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=tp_degree),
         dtype=torch.bfloat16,
         height=call_kwargs["height"],
         width=call_kwargs["width"],
@@ -160,7 +160,7 @@ def _trajectory_cosines(
     metrics: list[dict[str, float | int | list[int]]] = []
     for index, (ref, out) in enumerate(zip(reference, actual)):
         assert list(ref.shape) == list(out.shape), (
-            f"step {index} shape mismatch: diffusers={tuple(ref.shape)} nova={tuple(out.shape)}"
+            f"step {index} shape mismatch: diffusers={tuple(ref.shape)} difflet={tuple(out.shape)}"
         )
         cosine = F.cosine_similarity(ref.flatten(), out.flatten(), dim=0).item()
         max_abs = (ref - out).abs().max().item()
@@ -178,7 +178,7 @@ def _trajectory_cosines(
 
 
 def _write_metrics_if_requested(metrics: list[dict[str, float | int | list[int]]]) -> None:
-    path = os.environ.get("NOVA_FLUX_NUMERICAL_METRICS")
+    path = os.environ.get("DIFFLET_FLUX_NUMERICAL_METRICS")
     if not path:
         return
     output = Path(path)

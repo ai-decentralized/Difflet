@@ -36,16 +36,16 @@ ensure_runtime_python()
 import torch  # noqa: E402
 from safetensors.torch import load_file as load_safetensors_file  # noqa: E402
 
-BUNDLE = ROOT / ".nova-cache" / "qwen_image_dit_inputs" / "full_1024_4step.safetensors"
+BUNDLE = ROOT / ".difflet-cache" / "qwen_image_dit_inputs" / "full_1024_4step.safetensors"
 META = Path(str(BUNDLE) + ".meta.json")
-OUT_DIR = ROOT / ".nova-cache" / "qwen_fused_probe"
+OUT_DIR = ROOT / ".difflet-cache" / "qwen_fused_probe"
 
 
 def main() -> int:
-    from nova.backends.trainium.qwen_image.teacache_probe_fused import (
+    from difflet.backends.trainium.qwen_image.teacache_probe_fused import (
         NeuronQwenImageTeacacheProbeFusedApplication,
     )
-    from nova.models.qwen_image.application import create_qwen_image_transformer_config
+    from difflet.models.qwen_image.application import create_qwen_image_transformer_config
 
     meta = json.loads(META.read_text())
     src = meta["model_id"]
@@ -92,7 +92,7 @@ def main() -> int:
     print(f"[qwen-fused] median per-call = {med:.2f} ms", flush=True)
 
     res = {
-        "schema": "nova-m9-qwen-fused-smoke-v1",
+        "schema": "difflet-m9-qwen-fused-smoke-v1",
         "call1_delta": d0, "call2_delta_same_input": d1,
         "prev_mod_persists": persisted, "median_ms_per_call": med,
         "hardware_measured": True,

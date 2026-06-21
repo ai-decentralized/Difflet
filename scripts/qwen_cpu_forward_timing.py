@@ -38,7 +38,7 @@ import torch  # noqa: E402
 from safetensors.torch import load_file as load_safetensors_file  # noqa: E402
 
 MODEL_DIR = Path("/home/ubuntu/.cache/huggingface/hub/qwen-image-real/transformer")
-BUNDLE = ROOT / ".nova-cache" / "qwen_image_dit_inputs" / "m9_calib_50step" / "calibration_00_a_busy_city_street_with_50step.safetensors"
+BUNDLE = ROOT / ".difflet-cache" / "qwen_image_dit_inputs" / "m9_calib_50step" / "calibration_00_a_busy_city_street_with_50step.safetensors"
 
 
 def main() -> int:

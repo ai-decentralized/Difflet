@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from nova import NovaParallelConfig, NovaPipeline, register_model
-from nova.pipeline.nova_pipeline import _resolve_load_rank_range
+from difflet import DiffletParallelConfig, DiffletPipeline, register_model
+from difflet.pipeline.difflet_pipeline import _resolve_load_rank_range
 
 
 class DummyApplication:
@@ -41,7 +41,7 @@ def create_dummy_application(**kwargs):
     name="unit_dummy",
     application_factory=create_dummy_application,
     detector=lambda model_id: model_id.endswith("unit-dummy-model"),
-    default_parallel=NovaParallelConfig(tp_degree=2),
+    default_parallel=DiffletParallelConfig(tp_degree=2),
     default_shape={"height": 64, "width": 64, "num_frames": None},
 )
 class _DummyRegistration:
@@ -65,7 +65,7 @@ def create_artifact_aware_application(**kwargs):
     name="unit_artifact_dummy",
     application_factory=create_artifact_aware_application,
     detector=lambda model_id: model_id.endswith("unit-artifact-dummy-model"),
-    default_parallel=NovaParallelConfig(tp_degree=2),
+    default_parallel=DiffletParallelConfig(tp_degree=2),
     default_shape={"height": 64, "width": 64, "num_frames": None},
 )
 class _ArtifactDummyRegistration:
@@ -76,7 +76,7 @@ def test_pipeline_compiles_and_loads_on_cache_miss(tmp_path):
     model_dir = tmp_path / "unit-dummy-model"
     model_dir.mkdir()
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="unit_dummy",
         dtype="bf16",
@@ -84,7 +84,7 @@ def test_pipeline_compiles_and_loads_on_cache_miss(tmp_path):
         debug_compile=True,
     )
 
-    assert pipe.parallel == NovaParallelConfig(tp_degree=2)
+    assert pipe.parallel == DiffletParallelConfig(tp_degree=2)
     assert pipe.backend.name == "trainium"
     assert pipe.app.kwargs["backend"] == "trainium"
     assert pipe.shape == {"height": 64, "width": 64, "num_frames": None}
@@ -99,13 +99,13 @@ def test_pipeline_skips_compile_on_cache_hit(tmp_path):
     model_dir.mkdir()
     cache_dir = tmp_path / "cache"
 
-    NovaPipeline.from_pretrained(
+    DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="unit_dummy",
         dtype="bf16",
         compile_cache_dir=str(cache_dir),
     )
-    second = NovaPipeline.from_pretrained(
+    second = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="unit_dummy",
         dtype="bf16",
@@ -117,13 +117,13 @@ def test_pipeline_skips_compile_on_cache_hit(tmp_path):
 
 
 def test_pipeline_recompiles_when_manifest_valid_but_artifacts_missing(tmp_path):
-    from nova.pipeline.compile_cache import write_manifest
+    from difflet.pipeline.compile_cache import write_manifest
 
     model_dir = tmp_path / "unit-artifact-dummy-model"
     model_dir.mkdir()
     cache_dir = tmp_path / "cache"
 
-    stale = NovaPipeline.from_pretrained(
+    stale = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="unit_artifact_dummy",
         dtype="bf16",
@@ -135,7 +135,7 @@ def test_pipeline_recompiles_when_manifest_valid_but_artifacts_missing(tmp_path)
     write_manifest(stale.compiled_path, stale.cache_spec)
     assert not (stale.compiled_path / "required.txt").exists()
 
-    second = NovaPipeline.from_pretrained(
+    second = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="unit_artifact_dummy",
         dtype="bf16",
@@ -149,14 +149,14 @@ def test_pipeline_recompiles_when_manifest_valid_but_artifacts_missing(tmp_path)
 
 def test_parallel_config_rejects_conflicting_parallel_modes():
     with pytest.raises(ValueError, match="mutually exclusive"):
-        NovaParallelConfig(tp_degree=8, cp_degree=2, cfg_parallel_enabled=True)
+        DiffletParallelConfig(tp_degree=8, cp_degree=2, cfg_parallel_enabled=True)
 
 
 def test_pipeline_call_delegates_to_application(tmp_path):
     model_dir = tmp_path / "unit-dummy-model"
     model_dir.mkdir()
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="unit_dummy",
         dtype="bf16",
@@ -174,7 +174,7 @@ def test_pipeline_forwards_teacache_kwargs_to_application(tmp_path):
     model_dir = tmp_path / "unit-dummy-model"
     model_dir.mkdir()
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="unit_dummy",
         dtype="bf16",
@@ -198,7 +198,7 @@ def test_pipeline_rejects_conflicting_teacache_kwargs(tmp_path):
     model_dir.mkdir()
 
     with pytest.raises(ValueError, match="teacache_speedup"):
-        NovaPipeline.from_pretrained(
+        DiffletPipeline.from_pretrained(
             str(model_dir),
             model_type="unit_dummy",
             dtype="bf16",
@@ -217,13 +217,13 @@ def test_pipeline_rejects_conflicting_teacache_kwargs(tmp_path):
 
 def _spec(**overrides):
     """Helper: build a CacheSpec with sensible defaults for cache-key tests."""
-    from nova.pipeline.compile_cache import CacheSpec
+    from difflet.pipeline.compile_cache import CacheSpec
 
     defaults = dict(
         model_id="org/test-model",
         model_path="/tmp/some/local/path",
         model_name="unit_dummy",
-        parallel=NovaParallelConfig(tp_degree=2),
+        parallel=DiffletParallelConfig(tp_degree=2),
         dtype="bf16",
         height=64,
         width=64,
@@ -238,7 +238,7 @@ def test_p2_dtype_string_and_torch_alias_collapse_to_same_key():
     """P2: dtype='bf16' and torch.bfloat16 must hash identically."""
     import torch
 
-    from nova.pipeline.compile_cache import cache_key
+    from difflet.pipeline.compile_cache import cache_key
 
     key_string = cache_key(_spec(dtype="bf16"))
     key_long = cache_key(_spec(dtype="bfloat16"))
@@ -264,7 +264,7 @@ def test_p3_python_patch_version_excluded_from_cache_inputs():
 
 def test_p4_model_path_does_not_affect_cache_key():
     """P4: same model_id resolved to different local paths share a cache key."""
-    from nova.pipeline.compile_cache import cache_key
+    from difflet.pipeline.compile_cache import cache_key
 
     key_a = cache_key(_spec(model_path="/cache_a/snapshots/abc/FLUX.1-dev"))
     key_b = cache_key(_spec(model_path="/different/host/cache/FLUX.1-dev"))
@@ -278,11 +278,11 @@ def test_p4_model_path_does_not_affect_cache_key():
 
 def test_p4_changing_real_input_changes_cache_key():
     """P4 negative: legitimate input changes still invalidate the cache."""
-    from nova.pipeline.compile_cache import cache_key
+    from difflet.pipeline.compile_cache import cache_key
 
     base = cache_key(_spec())
     assert base != cache_key(_spec(model_id="org/different-model"))
-    assert base != cache_key(_spec(parallel=NovaParallelConfig(tp_degree=4)))
+    assert base != cache_key(_spec(parallel=DiffletParallelConfig(tp_degree=4)))
     assert base != cache_key(_spec(height=128))
     assert base != cache_key(_spec(revision="v1.2.3"))
     assert base != cache_key(_spec(application_kwargs={"text_seq_len": 16}))
@@ -300,7 +300,7 @@ def test_p1_compile_recompiles_when_manifest_missing(tmp_path):
     cache_dir = tmp_path / "cache"
 
     # Build a pipeline without compiling.
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="unit_dummy",
         dtype="bf16",
@@ -332,7 +332,7 @@ def test_p1_compile_recompiles_when_manifest_payload_mismatched(tmp_path):
     model_dir.mkdir()
     cache_dir = tmp_path / "cache"
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="unit_dummy",
         dtype="bf16",
@@ -366,13 +366,13 @@ def test_force_compile_overrides_cache_hit(tmp_path):
     model_dir.mkdir()
     cache_dir = tmp_path / "cache"
 
-    NovaPipeline.from_pretrained(
+    DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="unit_dummy",
         dtype="bf16",
         compile_cache_dir=str(cache_dir),
     )
-    second = NovaPipeline.from_pretrained(
+    second = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="unit_dummy",
         dtype="bf16",
@@ -405,7 +405,7 @@ def test_backend_override_must_be_supported_by_model(tmp_path):
     model_dir.mkdir()
 
     with pytest.raises(ValueError, match="does not support backend 'cuda'"):
-        NovaPipeline.from_pretrained(
+        DiffletPipeline.from_pretrained(
             str(model_dir),
             model_type="unit_dummy",
             dtype="bf16",
@@ -414,13 +414,13 @@ def test_backend_override_must_be_supported_by_model(tmp_path):
         )
 
 
-def test_nova_backend_env_selects_backend_before_model_check(tmp_path, monkeypatch):
+def test_difflet_backend_env_selects_backend_before_model_check(tmp_path, monkeypatch):
     model_dir = tmp_path / "unit-dummy-model"
     model_dir.mkdir()
-    monkeypatch.setenv("NOVA_BACKEND", "cuda")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
 
     with pytest.raises(ValueError, match="does not support backend 'cuda'"):
-        NovaPipeline.from_pretrained(
+        DiffletPipeline.from_pretrained(
             str(model_dir),
             model_type="unit_dummy",
             dtype="bf16",
@@ -429,15 +429,15 @@ def test_nova_backend_env_selects_backend_before_model_check(tmp_path, monkeypat
 
 
 def test_backend_helpers_reflect_env(monkeypatch):
-    from nova.backends import current_backend
-    from nova.ops.platform import is_cuda, is_trainium
+    from difflet.backends import current_backend
+    from difflet.ops.platform import is_cuda, is_trainium
 
-    monkeypatch.setenv("NOVA_BACKEND", "trainium")
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
     assert current_backend() == "trainium"
     assert is_trainium() is True
     assert is_cuda() is False
 
-    monkeypatch.setenv("NOVA_BACKEND", "cuda")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
     assert current_backend() == "cuda"
     assert is_trainium() is False
     assert is_cuda() is True
@@ -447,7 +447,7 @@ def test_wan_registry_skeleton_builds_without_compile_or_load(tmp_path):
     model_dir = tmp_path / "Wan2.2-T2V-A14B-Diffusers"
     model_dir.mkdir()
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="wan",
         dtype="bf16",
@@ -457,7 +457,7 @@ def test_wan_registry_skeleton_builds_without_compile_or_load(tmp_path):
     )
 
     assert pipe.model_entry.name == "wan"
-    assert pipe.parallel == NovaParallelConfig(tp_degree=4)
+    assert pipe.parallel == DiffletParallelConfig(tp_degree=4)
     assert pipe.shape == {"height": 480, "width": 832, "num_frames": 9}
     assert pipe.backend.name == "trainium"
     assert pipe.app.model_path == str(model_dir)
@@ -467,7 +467,7 @@ def test_wan_skeleton_forward_returns_latent_shape(tmp_path):
     model_dir = tmp_path / "Wan2.2-T2V-A14B-Diffusers"
     model_dir.mkdir()
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="wan",
         dtype="bf16",

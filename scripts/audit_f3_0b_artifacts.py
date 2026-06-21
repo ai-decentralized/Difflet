@@ -19,30 +19,30 @@ DEFAULT_ARTIFACTS = {
     "qwen_image": {
         "source": "/home/ubuntu/.cache/huggingface/hub/qwen-image-real",
         "compiled": (
-            ".nova-cache/qwen_image_transformer_full/qwen_image/"
+            ".difflet-cache/qwen_image_transformer_full/qwen_image/"
             "14efb7c830dbb71e/transformer/model.pt"
         ),
-        "bundle": ".nova-cache/qwen_image_dit_inputs/full_1024_4step_active.safetensors",
+        "bundle": ".difflet-cache/qwen_image_dit_inputs/full_1024_4step_active.safetensors",
     },
     "hunyuan_video": {
         "source": (
-            ".nova-cache/f3_hunyuan_n4_4d8s1r/source/transformer/"
+            ".difflet-cache/f3_hunyuan_n4_4d8s1r/source/transformer/"
             "diffusion_pytorch_model.safetensors"
         ),
-        "compiled": ".nova-cache/f3_hunyuan_n4_4d8s1r/compiled/transformer/model.pt",
-        "bundle": ".nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors",
+        "compiled": ".difflet-cache/f3_hunyuan_n4_4d8s1r/compiled/transformer/model.pt",
+        "bundle": ".difflet-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors",
     },
     "ltx_2": {
         "source": "/home/ubuntu/.cache/huggingface/hub/models--Lightricks--LTX-2",
         "compiled": (
-            ".nova-cache/ltx_2_transformer_full/ltx_2/"
+            ".difflet-cache/ltx_2_transformer_full/ltx_2/"
             "7af2c71df74f264e/transformer/model.pt"
         ),
-        "bundle": ".nova-cache/ltx_2_dit_inputs/full_512x768x121_4step.safetensors",
+        "bundle": ".difflet-cache/ltx_2_dit_inputs/full_512x768x121_4step.safetensors",
     },
     "flux": {
         "source": "/home/ubuntu/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev",
-        "compiled": ".nova-cache/flux/transformer/model.pt",
+        "compiled": ".difflet-cache/flux/transformer/model.pt",
         "bundle": None,
     },
 }
@@ -78,7 +78,7 @@ def audit_artifacts(root: Path, artifacts: dict[str, dict[str, str | None]]) -> 
         )
     disk = shutil.disk_usage(root)
     return {
-        "schema": "nova-f3-0b-artifact-inventory-v1",
+        "schema": "difflet-f3-0b-artifact-inventory-v1",
         "root": str(root),
         "disk_available_bytes": int(disk.free),
         "disk_available_gb": round(disk.free / 1e9, 2),

@@ -10,10 +10,10 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA = "nova-m9-teacache-gate-audit-v1"
-CALIBRATION_SCHEMA = "nova-m9-teacache-calibration-v1"
-SPEEDUP_SCHEMA = "nova-m9-teacache-speedup-curve-v1"
-INTEGRATION_SCHEMA = "nova-m9-teacache-integration-v1"
+SCHEMA = "difflet-m9-teacache-gate-audit-v1"
+CALIBRATION_SCHEMA = "difflet-m9-teacache-calibration-v1"
+SPEEDUP_SCHEMA = "difflet-m9-teacache-speedup-curve-v1"
+INTEGRATION_SCHEMA = "difflet-m9-teacache-integration-v1"
 
 MIN_FIT_R2 = 0.90
 MIN_SPEEDUP = 1.50

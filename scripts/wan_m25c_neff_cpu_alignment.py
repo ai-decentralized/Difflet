@@ -28,23 +28,23 @@ DEFAULT_MODEL_DIR = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", default="all")
-    parser.add_argument("--model-dir", default=os.environ.get("NOVA_WAN_MODEL_DIR", DEFAULT_MODEL_DIR))
-    parser.add_argument("--work-dir", default=os.environ.get("NOVA_M25C_WORK_DIR", "/tmp/nova_m25c"))
-    parser.add_argument("--prompt", default=os.environ.get("NOVA_M25C_PROMPT", "a cat walking"))
-    parser.add_argument("--text-seq-len", type=int, default=int(os.environ.get("NOVA_M25C_TEXT_SEQ_LEN", "512")))
-    parser.add_argument("--height", type=int, default=int(os.environ.get("NOVA_M25C_HEIGHT", "480")))
-    parser.add_argument("--width", type=int, default=int(os.environ.get("NOVA_M25C_WIDTH", "832")))
-    parser.add_argument("--video-frames", type=int, default=int(os.environ.get("NOVA_M25C_VIDEO_FRAMES", "9")))
-    parser.add_argument("--seed", type=int, default=int(os.environ.get("NOVA_M25C_SEED", "20260510")))
-    parser.add_argument("--tp-degree", type=int, default=int(os.environ.get("NOVA_M25C_TP_DEGREE", "4")))
-    parser.add_argument("--text-compiled-dir", default=os.environ.get("NOVA_M25C_TEXT_COMPILED_DIR", ".nova-cache/wan_text_encoder_smoke"))
-    parser.add_argument("--dit-compiled-dir", default=os.environ.get("NOVA_M25C_DIT_COMPILED_DIR", ".nova-cache/wan_backbone_smoke"))
-    parser.add_argument("--min-mem-gb", type=float, default=float(os.environ.get("NOVA_M25C_MIN_MEM_GB", "20")))
-    parser.add_argument("--peak-rss-max-gb", type=float, default=float(os.environ.get("NOVA_M25C_PEAK_RSS_MAX_GB", "115")))
-    parser.add_argument("--umt5-cosine-min", type=float, default=float(os.environ.get("NOVA_M25C_UMT5_COSINE_MIN", "0.995")))
-    parser.add_argument("--umt5-mean-abs-max", type=float, default=float(os.environ.get("NOVA_M25C_UMT5_MEAN_ABS_MAX", "0.03")))
-    parser.add_argument("--dit-cosine-min", type=float, default=float(os.environ.get("NOVA_M25C_DIT_COSINE_MIN", "0.995")))
-    parser.add_argument("--dit-mean-abs-max", type=float, default=float(os.environ.get("NOVA_M25C_DIT_MEAN_ABS_MAX", "0.05")))
+    parser.add_argument("--model-dir", default=os.environ.get("DIFFLET_WAN_MODEL_DIR", DEFAULT_MODEL_DIR))
+    parser.add_argument("--work-dir", default=os.environ.get("DIFFLET_M25C_WORK_DIR", "/tmp/difflet_m25c"))
+    parser.add_argument("--prompt", default=os.environ.get("DIFFLET_M25C_PROMPT", "a cat walking"))
+    parser.add_argument("--text-seq-len", type=int, default=int(os.environ.get("DIFFLET_M25C_TEXT_SEQ_LEN", "512")))
+    parser.add_argument("--height", type=int, default=int(os.environ.get("DIFFLET_M25C_HEIGHT", "480")))
+    parser.add_argument("--width", type=int, default=int(os.environ.get("DIFFLET_M25C_WIDTH", "832")))
+    parser.add_argument("--video-frames", type=int, default=int(os.environ.get("DIFFLET_M25C_VIDEO_FRAMES", "9")))
+    parser.add_argument("--seed", type=int, default=int(os.environ.get("DIFFLET_M25C_SEED", "20260510")))
+    parser.add_argument("--tp-degree", type=int, default=int(os.environ.get("DIFFLET_M25C_TP_DEGREE", "4")))
+    parser.add_argument("--text-compiled-dir", default=os.environ.get("DIFFLET_M25C_TEXT_COMPILED_DIR", ".difflet-cache/wan_text_encoder_smoke"))
+    parser.add_argument("--dit-compiled-dir", default=os.environ.get("DIFFLET_M25C_DIT_COMPILED_DIR", ".difflet-cache/wan_backbone_smoke"))
+    parser.add_argument("--min-mem-gb", type=float, default=float(os.environ.get("DIFFLET_M25C_MIN_MEM_GB", "20")))
+    parser.add_argument("--peak-rss-max-gb", type=float, default=float(os.environ.get("DIFFLET_M25C_PEAK_RSS_MAX_GB", "115")))
+    parser.add_argument("--umt5-cosine-min", type=float, default=float(os.environ.get("DIFFLET_M25C_UMT5_COSINE_MIN", "0.995")))
+    parser.add_argument("--umt5-mean-abs-max", type=float, default=float(os.environ.get("DIFFLET_M25C_UMT5_MEAN_ABS_MAX", "0.03")))
+    parser.add_argument("--dit-cosine-min", type=float, default=float(os.environ.get("DIFFLET_M25C_DIT_COSINE_MIN", "0.995")))
+    parser.add_argument("--dit-mean-abs-max", type=float, default=float(os.environ.get("DIFFLET_M25C_DIT_MEAN_ABS_MAX", "0.05")))
     return parser.parse_args()
 
 
@@ -149,7 +149,7 @@ def run_child(args: argparse.Namespace, stage: str, *, backend: str | None = Non
         f":{env['PYTHONPATH']}" if env.get("PYTHONPATH") else ""
     )
     if backend is not None:
-        env["NOVA_BACKEND"] = backend
+        env["DIFFLET_BACKEND"] = backend
     if neuron_cores is not None:
         env["NEURON_RT_NUM_CORES"] = str(neuron_cores)
         env.setdefault("NEURON_RT_VIRTUAL_CORE_SIZE", "2")
@@ -234,8 +234,8 @@ def stage_prepare(args: argparse.Namespace) -> None:
 
 
 def stage_umt5_cpu(args: argparse.Namespace) -> None:
-    from nova.models.wan.checkpoint import convert_text_encoder_state_dict
-    from nova.models.wan.umt5.modeling_umt5 import WanUmT5Config, WanUmT5EncoderModel
+    from difflet.models.wan.checkpoint import convert_text_encoder_state_dict
+    from difflet.models.wan.umt5.modeling_umt5 import WanUmT5Config, WanUmT5EncoderModel
 
     work_dir = Path(args.work_dir)
     model_dir = Path(args.model_dir)
@@ -260,8 +260,8 @@ def stage_umt5_cpu(args: argparse.Namespace) -> None:
 
 
 def stage_umt5_neff(args: argparse.Namespace) -> None:
-    from nova.backends.trainium.wan.text_encoder import NeuronWanTextEncoderApplication
-    from nova.models.wan.application import create_wan_text_encoder_config
+    from difflet.backends.trainium.wan.text_encoder import NeuronWanTextEncoderApplication
+    from difflet.models.wan.application import create_wan_text_encoder_config
 
     work_dir = Path(args.work_dir)
     model_dir = Path(args.model_dir)
@@ -293,8 +293,8 @@ def stage_umt5_neff(args: argparse.Namespace) -> None:
 
 
 def stage_dit_cpu(args: argparse.Namespace) -> None:
-    from nova.models.wan.checkpoint import convert_backbone_state_dict
-    from nova.models.wan.modeling_wan import WanTransformerConfig, WanTransformer3DModel
+    from difflet.models.wan.checkpoint import convert_backbone_state_dict
+    from difflet.models.wan.modeling_wan import WanTransformerConfig, WanTransformer3DModel
 
     work_dir = Path(args.work_dir)
     model_dir = Path(args.model_dir)
@@ -314,8 +314,8 @@ def stage_dit_cpu(args: argparse.Namespace) -> None:
 
 
 def stage_dit_neff(args: argparse.Namespace) -> None:
-    from nova.backends.trainium.wan.backbone import NeuronWanBackboneApplication
-    from nova.models.wan.application import create_wan_backbone_config
+    from difflet.backends.trainium.wan.backbone import NeuronWanBackboneApplication
+    from difflet.models.wan.application import create_wan_backbone_config
 
     work_dir = Path(args.work_dir)
     model_dir = Path(args.model_dir)

@@ -3,7 +3,7 @@
 
 Compiles ONLY the HunyuanVideo TeaCache probe NEFF (block-0 modulated input
 path + device-side L2 diff). Does NOT recompile the full DiT NEFF — the
-existing artifact at ``.nova-cache/f3_hunyuan_n4_4d8s1r/compiled/transformer/``
+existing artifact at ``.difflet-cache/f3_hunyuan_n4_4d8s1r/compiled/transformer/``
 is preserved.
 
 Mechanism: instantiate ``NeuronHunyuanVideoBackboneApplication``, then pop
@@ -19,8 +19,8 @@ Example:
     PYTHONPATH=. NEURON_RT_NUM_CORES=4 \\
     /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python \\
       scripts/compile_hv_teacache_probe_only.py \\
-        --source-dir .nova-cache/f3_hunyuan_n4_4d8s1r/source \\
-        --output-dir .nova-cache/f3_hunyuan_n4_4d8s1r/compiled_probe \\
+        --source-dir .difflet-cache/f3_hunyuan_n4_4d8s1r/source \\
+        --output-dir .difflet-cache/f3_hunyuan_n4_4d8s1r/compiled_probe \\
         --tp-degree 4
 """
 
@@ -89,8 +89,8 @@ def _dtype_from_name(name: str) -> torch.dtype:
 
 def main() -> int:
     args = _parse_args()
-    from nova.models.hunyuan_video.application import NeuronHunyuanVideoApplication
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     print(f"[probe-compile] source: {args.source_dir}", flush=True)
     print(f"[probe-compile] output: {args.output_dir}", flush=True)
@@ -103,7 +103,7 @@ def main() -> int:
     t_init = time.perf_counter()
     app = NeuronHunyuanVideoApplication(
         model_path=str(args.source_dir),
-        parallel=NovaParallelConfig(tp_degree=int(args.tp_degree)),
+        parallel=DiffletParallelConfig(tp_degree=int(args.tp_degree)),
         dtype=_dtype_from_name(args.dtype),
         shape={
             "height": int(args.height),

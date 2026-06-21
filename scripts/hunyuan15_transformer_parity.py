@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", required=True)
     parser.add_argument("--transformer-subfolder", default="transformer")
-    parser.add_argument("--cache-dir", default="/tmp/nova_hunyuan15_transformer_parity_cache")
+    parser.add_argument("--cache-dir", default="/tmp/difflet_hunyuan15_transformer_parity_cache")
     parser.add_argument("--height", type=int, default=32)
     parser.add_argument("--width", type=int, default=48)
     parser.add_argument("--num-frames", type=int, default=5)
@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--transformer-runtime",
         choices=("monolithic", "segmented"),
         default="monolithic",
-        help="Nova HunyuanVideo 1.5 transformer runtime to validate.",
+        help="Difflet HunyuanVideo 1.5 transformer runtime to validate.",
     )
     parser.add_argument("--segmented-query-tile-size", type=int, default=2051)
     parser.add_argument("--segmented-key-tile-size", type=int, default=2051)
@@ -206,9 +206,9 @@ def _load_bundle_inputs(
 
 
 def _run_trainium(args: argparse.Namespace, inputs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, Any, float]:
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
-    from nova import NovaParallelConfig, NovaPipeline
-    from nova.models.hunyuan_video.application import HunyuanVideo15DiTInputBundle
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
+    from difflet import DiffletParallelConfig, DiffletPipeline
+    from difflet.models.hunyuan_video.application import HunyuanVideo15DiTInputBundle
 
     t0 = time.perf_counter()
     app_kwargs = {
@@ -232,10 +232,10 @@ def _run_trainium(args: argparse.Namespace, inputs: dict[str, torch.Tensor]) -> 
         if args.segmented_attention_compiler_args is not None:
             app_kwargs["segmented_attention_compiler_args"] = args.segmented_attention_compiler_args
 
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         args.model_dir,
         model_type="hunyuan_video_15",
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=args.dtype,
         height=args.height,
         width=args.width,

@@ -3,10 +3,10 @@
 This is the regression gate for cclog 38 §15.5. It decodes the same latent
 through the segmented Trainium VAE (`NeuronHunyuanVideoApplication`,
 `enable_vae_decoder=True`) and through `diffusers.AutoencoderKLHunyuanVideo`
-on CPU and asserts cosine >= `NOVA_HUNYUAN_VAE_MIN_COSINE` (default 0.999,
+on CPU and asserts cosine >= `DIFFLET_HUNYUAN_VAE_MIN_COSINE` (default 0.999,
 matching cclog 38 §14 closure).
 
-Opt-in: set `NOVA_RUN_HUNYUAN_VAE_NUMERICAL=1` to enable. The test loads
+Opt-in: set `DIFFLET_RUN_HUNYUAN_VAE_NUMERICAL=1` to enable. The test loads
 the compiled segmented VAE artifact and runs the ~150 s HF CPU reference,
 so it is too slow for default test runs.
 """
@@ -31,34 +31,34 @@ pytestmark = [
 
 
 def test_hunyuan_video_vae_segmented_cosine_matches_diffusers():
-    if os.environ.get("NOVA_RUN_HUNYUAN_VAE_NUMERICAL") != "1":
+    if os.environ.get("DIFFLET_RUN_HUNYUAN_VAE_NUMERICAL") != "1":
         pytest.skip(
-            "set NOVA_RUN_HUNYUAN_VAE_NUMERICAL=1 to run the HunyuanVideo VAE numerical gate"
+            "set DIFFLET_RUN_HUNYUAN_VAE_NUMERICAL=1 to run the HunyuanVideo VAE numerical gate"
         )
 
     source_dir = Path(
         os.environ.get(
-            "NOVA_HUNYUAN_VAE_SOURCE_DIR",
+            "DIFFLET_HUNYUAN_VAE_SOURCE_DIR",
             "/home/ubuntu/.cache/huggingface/hub/hunyuanvideo-real",
         )
     )
     compiled_dir = Path(
         os.environ.get(
-            "NOVA_HUNYUAN_VAE_COMPILED_DIR",
-            "/home/ubuntu/nova/.nova-cache/hunyuan_n4_20d40s2r/compiled",
+            "DIFFLET_HUNYUAN_VAE_COMPILED_DIR",
+            "/home/ubuntu/difflet/.difflet-cache/hunyuan_n4_20d40s2r/compiled",
         )
     )
     latents_path = Path(
         os.environ.get(
-            "NOVA_HUNYUAN_VAE_LATENTS",
-            "/home/ubuntu/nova/.nova-cache/hunyuan_dit_inputs/cat_walking_4step_nova_latents.pt",
+            "DIFFLET_HUNYUAN_VAE_LATENTS",
+            "/home/ubuntu/difflet/.difflet-cache/hunyuan_dit_inputs/cat_walking_4step_difflet_latents.pt",
         )
     )
-    threshold = float(os.environ.get("NOVA_HUNYUAN_VAE_MIN_COSINE", "0.999"))
-    tp_degree = int(os.environ.get("NOVA_HUNYUAN_VAE_TP_DEGREE", "1"))
-    height = int(os.environ.get("NOVA_HUNYUAN_VAE_HEIGHT", "320"))
-    width = int(os.environ.get("NOVA_HUNYUAN_VAE_WIDTH", "512"))
-    num_frames = int(os.environ.get("NOVA_HUNYUAN_VAE_FRAMES", "61"))
+    threshold = float(os.environ.get("DIFFLET_HUNYUAN_VAE_MIN_COSINE", "0.999"))
+    tp_degree = int(os.environ.get("DIFFLET_HUNYUAN_VAE_TP_DEGREE", "1"))
+    height = int(os.environ.get("DIFFLET_HUNYUAN_VAE_HEIGHT", "320"))
+    width = int(os.environ.get("DIFFLET_HUNYUAN_VAE_WIDTH", "512"))
+    num_frames = int(os.environ.get("DIFFLET_HUNYUAN_VAE_FRAMES", "61"))
 
     assert source_dir.exists(), f"HF source dir missing: {source_dir}"
     assert (source_dir / "vae" / "config.json").exists(), (
@@ -111,14 +111,14 @@ def _run_trainium_vae(
     width: int,
     num_frames: int,
 ) -> tuple[torch.Tensor, float]:
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
 
-    from nova.models.hunyuan_video.application import NeuronHunyuanVideoApplication
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     app = NeuronHunyuanVideoApplication(
         model_path=str(source_dir),
-        parallel=NovaParallelConfig(tp_degree=tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=tp_degree),
         dtype=torch.bfloat16,
         shape={"height": height, "width": width, "num_frames": num_frames},
         enable_transformer=False,
@@ -180,7 +180,7 @@ def _stats(trainium: torch.Tensor, hf: torch.Tensor) -> dict[str, float | list[i
 
 
 def _write_metrics_if_requested(metrics: dict[str, float | list[int]]) -> None:
-    path = os.environ.get("NOVA_HUNYUAN_VAE_NUMERICAL_METRICS")
+    path = os.environ.get("DIFFLET_HUNYUAN_VAE_NUMERICAL_METRICS")
     if not path:
         return
     output = Path(path)

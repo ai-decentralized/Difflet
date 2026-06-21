@@ -47,8 +47,8 @@ def test_hv15_to_q_mx_trainium_real_weight_gate(tmp_path):
     if shutil.which("neuron-ls") is None:
         pytest.skip("Neuron runtime is not available")
 
-    model_dir = Path("/tmp/nova_hunyuan15_real_prefix_1")
-    bundle = Path(".nova-cache/hunyuan15_dit_inputs/real_320x512x61_4step.safetensors")
+    model_dir = Path("/tmp/difflet_hunyuan15_real_prefix_1")
+    bundle = Path(".difflet-cache/hunyuan15_dit_inputs/real_320x512x61_4step.safetensors")
     if not (model_dir / "transformer" / "diffusion_pytorch_model.safetensors").exists():
         pytest.skip("HV-1.5 prefix_1 safetensors artifact is not available")
     if not bundle.exists():
@@ -91,8 +91,8 @@ def test_hv15_rowparallel_mx_trainium_real_weight_gate(tmp_path, target):
     if shutil.which("neuron-ls") is None:
         pytest.skip("Neuron runtime is not available")
 
-    model_dir = Path("/tmp/nova_hunyuan15_real_prefix_1")
-    bundle = Path(".nova-cache/hunyuan15_dit_inputs/real_320x512x61_4step.safetensors")
+    model_dir = Path("/tmp/difflet_hunyuan15_real_prefix_1")
+    bundle = Path(".difflet-cache/hunyuan15_dit_inputs/real_320x512x61_4step.safetensors")
     if not (model_dir / "transformer" / "diffusion_pytorch_model.safetensors").exists():
         pytest.skip("HV-1.5 prefix_1 safetensors artifact is not available")
     if not bundle.exists():

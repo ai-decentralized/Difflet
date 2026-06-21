@@ -1,9 +1,9 @@
-"""Manual smoke: verify Neuron runtime + torch_xla + Nova imports on hardware.
+"""Manual smoke: verify Neuron runtime + torch_xla + Difflet imports on hardware.
 
 Run on a Trainium machine:
 
     PATH=/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin:$PATH \\
-    PYTHONPATH=/home/ubuntu/nova \\
+    PYTHONPATH=/home/ubuntu/difflet \\
     torchrun --nproc_per_node=2 tests/manual/check_neuron_init.py
 
 Does NOT trigger any model download or AOT compile. Only verifies:
@@ -12,7 +12,7 @@ Does NOT trigger any model download or AOT compile. Only verifies:
   2. Each rank gets its own xla_device
   3. A trivial tensor op materializes (cheap proxy that the Neuron runtime
      is actually wired through)
-  4. Nova top-level + Flux entry imports succeed in a multi-process context
+  4. Difflet top-level + Flux entry imports succeed in a multi-process context
 """
 
 from __future__ import annotations
@@ -42,10 +42,10 @@ def main() -> int:
     world = int(os.environ.get("WORLD_SIZE", "1"))
     _log(f"world={world} xla_device={device}")
 
-    # 2. Nova import smoke (uses lazy __getattr__ + factory string)
-    from nova import NovaPipeline, NovaParallelConfig, register_model  # noqa: F401
-    from nova.registry import registered_models, resolve_model
-    _log(f"nova top-level import OK; registered = {[m.name for m in registered_models()]}")
+    # 2. Difflet import smoke (uses lazy __getattr__ + factory string)
+    from difflet import DiffletPipeline, DiffletParallelConfig, register_model  # noqa: F401
+    from difflet.registry import registered_models, resolve_model
+    _log(f"difflet top-level import OK; registered = {[m.name for m in registered_models()]}")
 
     # Resolve the Flux registry entry (does not call its factory).
     flux_entry = resolve_model("black-forest-labs/FLUX.1-dev")
@@ -54,7 +54,7 @@ def main() -> int:
     # 3. Heavy import — the Flux Neuron application module. This pulls in
     # NXD parallel layers + nkilib + custom kernels. If anything is broken on
     # the hardware path this is where we'll see it.
-    from nova.models.flux.application import NeuronFluxApplication  # noqa: F401
+    from difflet.models.flux.application import NeuronFluxApplication  # noqa: F401
     _log("Flux Neuron application module imported")
 
     # 4. Trivial XLA op — proves the runtime can lower & execute something.

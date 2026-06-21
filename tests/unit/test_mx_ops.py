@@ -2,11 +2,11 @@ import pytest
 
 
 def test_cpu_quantize_dequantize_roundtrip(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     import torch
 
-    from nova.ops.mx import dequantize_mx, quantize_mx
+    from difflet.ops.mx import dequantize_mx, quantize_mx
 
     generator = torch.Generator().manual_seed(0)
     x = torch.randn((16, 64), generator=generator, dtype=torch.float32).to(
@@ -26,11 +26,11 @@ def test_cpu_quantize_dequantize_roundtrip(monkeypatch):
 
 
 def test_cpu_matmul_mx_matches_dequantized_matmul(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     import torch
 
-    from nova.ops.mx import dequantize_mx, matmul_mx, quantize_mx
+    from difflet.ops.mx import dequantize_mx, matmul_mx, quantize_mx
 
     generator = torch.Generator().manual_seed(1)
     a = torch.randn((16, 64), generator=generator, dtype=torch.float32).to(
@@ -61,15 +61,15 @@ def test_cpu_matmul_mx_matches_dequantized_matmul(monkeypatch):
 
 
 def test_cpu_hardware_tile_reference_matches_explicit_einsum(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     import torch
 
-    from nova.backends.cpu.ops_impl.mx import (
+    from difflet.backends.cpu.ops_impl.mx import (
         dequantize_mx_hardware_tile,
         matmul_mx_single_tile_reference,
     )
-    from nova.ops.mx import quantize_mx
+    from difflet.ops.mx import quantize_mx
 
     generator = torch.Generator().manual_seed(2)
     stationary = torch.randn((128, 512), generator=generator).to(torch.bfloat16)
@@ -95,15 +95,15 @@ def test_cpu_hardware_tile_reference_matches_explicit_einsum(monkeypatch):
 
 
 def test_cpu_k_tiles_reference_matches_sum_of_single_tiles(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     import torch
 
-    from nova.backends.cpu.ops_impl.mx import (
+    from difflet.backends.cpu.ops_impl.mx import (
         matmul_mx_k_tiles_reference,
         matmul_mx_single_tile_reference,
     )
-    from nova.ops.mx import quantize_mx
+    from difflet.ops.mx import quantize_mx
 
     generator = torch.Generator().manual_seed(3)
     stationary = (0.1 * torch.randn((2, 128, 512), generator=generator)).to(
@@ -137,11 +137,11 @@ def test_cpu_k_tiles_reference_matches_sum_of_single_tiles(monkeypatch):
 
 
 def test_cpu_linear_mx_reference_matches_logical_linear(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     import torch
 
-    from nova.backends.cpu.ops_impl.mx import linear_mx_reference
+    from difflet.backends.cpu.ops_impl.mx import linear_mx_reference
 
     generator = torch.Generator().manual_seed(4)
     input_bf16 = (0.05 * torch.randn((128, 2048), generator=generator)).to(
@@ -165,11 +165,11 @@ def test_cpu_linear_mx_reference_matches_logical_linear(monkeypatch):
 
 
 def test_cpu_linear_mx_public_op_dispatches(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     import torch
 
-    from nova.ops.mx import linear_mx
+    from difflet.ops.mx import linear_mx
 
     generator = torch.Generator().manual_seed(5)
     input_bf16 = (0.05 * torch.randn((128, 512), generator=generator)).to(
@@ -185,12 +185,12 @@ def test_cpu_linear_mx_public_op_dispatches(monkeypatch):
 
 @pytest.mark.parametrize("k_dim", [512, 2048])
 def test_cpu_linear_mx_outer_n_reference_matches_logical_linear(monkeypatch, k_dim):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     import torch
 
-    from nova.backends.cpu.ops_impl.mx import linear_mx_outer_n_reference
-    from nova.ops.mx import linear_mx
+    from difflet.backends.cpu.ops_impl.mx import linear_mx_outer_n_reference
+    from difflet.ops.mx import linear_mx
 
     generator = torch.Generator().manual_seed(40 + k_dim)
     input_bf16 = (0.05 * torch.randn((128, k_dim), generator=generator)).to(
@@ -215,11 +215,11 @@ def test_cpu_linear_mx_outer_n_reference_matches_logical_linear(monkeypatch, k_d
 
 
 def test_cpu_linear_mx_outer_n_adds_bias_by_tile(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     import torch
 
-    from nova.backends.cpu.ops_impl.mx import linear_mx_outer_n_reference
+    from difflet.backends.cpu.ops_impl.mx import linear_mx_outer_n_reference
 
     generator = torch.Generator().manual_seed(43)
     input_bf16 = (0.05 * torch.randn((128, 512), generator=generator)).to(
@@ -238,11 +238,11 @@ def test_cpu_linear_mx_outer_n_adds_bias_by_tile(monkeypatch):
 
 
 def test_pack_linear_mx_inputs_uses_activation_as_stationary(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     import torch
 
-    from nova.backends.cpu.ops_impl.mx import (
+    from difflet.backends.cpu.ops_impl.mx import (
         matmul_mx_single_tile_reference,
         pack_linear_mx_inputs,
     )
@@ -273,11 +273,11 @@ def test_pack_linear_mx_inputs_uses_activation_as_stationary(monkeypatch):
 
 
 def test_cpu_quantize_rejects_unsupported_dtype(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     import torch
 
-    from nova.ops.mx import quantize_mx
+    from difflet.ops.mx import quantize_mx
 
     x = torch.ones((8, 4), dtype=torch.bfloat16)
 
@@ -286,11 +286,11 @@ def test_cpu_quantize_rejects_unsupported_dtype(monkeypatch):
 
 
 def test_cpu_quantize_requires_supported_tile_shape(monkeypatch):
-    monkeypatch.setenv("NOVA_BACKEND", "cpu")
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     import torch
 
-    from nova.ops.mx import quantize_mx
+    from difflet.ops.mx import quantize_mx
 
     x = torch.ones((7, 4), dtype=torch.bfloat16)
 

@@ -6,7 +6,7 @@ Question this script answers
 TeaCache skips diffusion steps when a cheap *signal* derived from the block-0
 self-attention AdaLN modulated input is small. That only works if the signal
 **correlates** with the model's real per-step output change. This gate runs a
-short CPU flow-matching denoise loop on Nova's ``WanTransformer3DModel`` and
+short CPU flow-matching denoise loop on Difflet's ``WanTransformer3DModel`` and
 measures the Pearson correlation between
 
     signal[i]     = mean|mod_inp[i] - mod_inp[i-1]| / mean|mod_inp[i-1]|
@@ -16,7 +16,7 @@ A high Pearson (say >= ~0.8) means adaptive TeaCache is viable for Wan 2.2.
 
 Notes / verified facts
 ----------------------
-* Modeling: ``nova/models/wan/modeling_wan.py`` :: ``WanTransformer3DModel``.
+* Modeling: ``difflet/models/wan/modeling_wan.py`` :: ``WanTransformer3DModel``.
   The AdaLN modulation comes from ``timestep_proj`` (timestep ONLY); text
   embeddings enter only via cross-attention (attn2), NOT the block-0
   self-attn modulation. So the signal is purely timestep-driven and the
@@ -37,11 +37,11 @@ constant across all steps. The chosen source is logged at startup.
 
 Run:
     PATH="/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin:$PATH" \
-    NOVA_BACKEND=cpu PYTHONPATH=/home/ubuntu/nova \
+    DIFFLET_BACKEND=cpu PYTHONPATH=/home/ubuntu/difflet \
     /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python \
         scripts/wan_teacache_cpu_gate.py
 
-(The script self-execs into the neuron venv python and sets PATH/NOVA_BACKEND
+(The script self-execs into the neuron venv python and sets PATH/DIFFLET_BACKEND
 if needed, so a bare ``python scripts/wan_teacache_cpu_gate.py`` also works.)
 """
 
@@ -59,22 +59,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 WAN_MODEL_ID = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
 WAN_SUBFOLDER = "transformer"  # high-noise stage
-LATENT_CACHE = ROOT / ".nova-cache" / "wan_smoke_latents.pt"
+LATENT_CACHE = ROOT / ".difflet-cache" / "wan_smoke_latents.pt"
 DEFAULT_LATENT_SHAPE = (1, 16, 3, 60, 104)
 
 
 def ensure_runtime_python() -> None:
-    """Re-exec into the neuron venv python with PATH + NOVA_BACKEND set.
+    """Re-exec into the neuron venv python with PATH + DIFFLET_BACKEND set.
 
     torch_xla's init shells out to ``libneuronpjrt-path`` (only on the venv
     PATH), and ``neuronx_distributed`` is imported transitively even for the
-    CPU op backend, so PATH must include the venv bin. ``NOVA_BACKEND=cpu``
+    CPU op backend, so PATH must include the venv bin. ``DIFFLET_BACKEND=cpu``
     selects the numerical CPU reference ops.
     """
     need_python = Path(sys.executable) != NEURON_PYTHON and NEURON_PYTHON.exists()
     venv_bin = str(NEURON_VENV / "bin")
     need_path = venv_bin not in os.environ.get("PATH", "").split(os.pathsep)
-    need_backend = os.environ.get("NOVA_BACKEND") != "cpu"
+    need_backend = os.environ.get("DIFFLET_BACKEND") != "cpu"
     try:
         import torch  # noqa: F401
 
@@ -86,13 +86,13 @@ def ensure_runtime_python() -> None:
         return
     if not NEURON_PYTHON.exists():
         # Best effort: just set the env knobs in-process.
-        os.environ["NOVA_BACKEND"] = "cpu"
+        os.environ["DIFFLET_BACKEND"] = "cpu"
         return
 
     env = os.environ.copy()
     env["PATH"] = f"{venv_bin}{os.pathsep}{env.get('PATH', '')}"
     env["PYTHONPATH"] = f"{ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
-    env["NOVA_BACKEND"] = "cpu"
+    env["DIFFLET_BACKEND"] = "cpu"
     target = NEURON_PYTHON if need_python else Path(sys.executable)
     os.execve(str(target), [str(target), *sys.argv], env)
 
@@ -103,14 +103,14 @@ import importlib  # noqa: E402
 
 import torch  # noqa: E402
 
-# Import the modeling module DIRECTLY (not via ``nova.models.wan`` package
+# Import the modeling module DIRECTLY (not via ``difflet.models.wan`` package
 # __init__, which imports application.py -> neuronx_distributed eagerly and is
 # unnecessary here).
-_wan = importlib.import_module("nova.models.wan.modeling_wan")
+_wan = importlib.import_module("difflet.models.wan.modeling_wan")
 WanTransformer3DModel = _wan.WanTransformer3DModel
 WanTransformerConfig = _wan.WanTransformerConfig
 
-_ckpt = importlib.import_module("nova.models.wan.checkpoint.backbone")
+_ckpt = importlib.import_module("difflet.models.wan.checkpoint.backbone")
 convert_backbone_state_dict = _ckpt.convert_backbone_state_dict
 
 
@@ -399,7 +399,7 @@ def run_gate(num_steps: int, dtype: torch.dtype, prompt=None, write_calib=False)
         desc = np.polyfit(sig / scale, dlt, deg)  # highest->lowest, in (x/scale)
         asc = [float(desc[deg - k]) / (scale ** k) for k in range(deg + 1)]  # ascending, raw x
         out = {
-            "schema": "nova-m9-teacache-calibration-v1",
+            "schema": "difflet-m9-teacache-calibration-v1",
             "model": "wan",
             "shape_label": "832x480x13",
             "poly_coef": asc,
@@ -440,7 +440,7 @@ def main() -> None:
                     help="re-fit + write teacache_calib_wan.json from this gate's trajectory")
     args = ap.parse_args()
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
-    log(f"backend={os.environ.get('NOVA_BACKEND')} dtype={dtype} python={sys.executable}")
+    log(f"backend={os.environ.get('DIFFLET_BACKEND')} dtype={dtype} python={sys.executable}")
     run_gate(args.steps, dtype, prompt=args.prompt, write_calib=args.write_calib)
 
 

@@ -47,9 +47,9 @@ ensure_runtime_python()
 import torch  # noqa: E402
 from safetensors.torch import load_file as load_safetensors_file  # noqa: E402
 
-SOURCE = ROOT / ".nova-cache" / "f3_hunyuan_n4_4d8s1r" / "source"
-COMPILED = ROOT / ".nova-cache" / "f3_hunyuan_n4_4d8s1r" / "compiled"
-BUNDLE = ROOT / ".nova-cache" / "hunyuan_dit_inputs" / "cat_walking_4step.safetensors"
+SOURCE = ROOT / ".difflet-cache" / "f3_hunyuan_n4_4d8s1r" / "source"
+COMPILED = ROOT / ".difflet-cache" / "f3_hunyuan_n4_4d8s1r" / "compiled"
+BUNDLE = ROOT / ".difflet-cache" / "hunyuan_dit_inputs" / "cat_walking_4step.safetensors"
 META = Path(str(BUNDLE) + ".meta.json")
 N_ITERS = 20
 
@@ -82,12 +82,12 @@ def _run_markstep() -> dict:
 
 
 def _build_probe_app(meta, *, model_cls=None):
-    from nova.models.hunyuan_video.application import NeuronHunyuanVideoApplication
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     app = NeuronHunyuanVideoApplication(
         model_path=str(SOURCE),
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype=torch.bfloat16,
         shape={"height": int(meta["height"]), "width": int(meta["width"]),
                "num_frames": int(meta["num_frames"])},
@@ -101,7 +101,7 @@ def _build_probe_app(meta, *, model_cls=None):
 
 
 def _run_probe_full(meta, tensors) -> dict:
-    from nova.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
+    from difflet.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
 
     app = _build_probe_app(meta)
     app.load(str(COMPILED), skip_warmup=True)
@@ -124,7 +124,7 @@ def _run_probe_full(meta, tensors) -> dict:
 
 
 def _run_delta_only(meta, tensors, out_dir: Path) -> dict:
-    from nova.backends.trainium.hunyuan_video.teacache_probe_costmodels import (
+    from difflet.backends.trainium.hunyuan_video.teacache_probe_costmodels import (
         HunyuanVideoTeacacheProbeDeltaOnly,
     )
 
@@ -157,16 +157,16 @@ def _run_delta_only(meta, tensors, out_dir: Path) -> dict:
 def _run_trivial(meta, tensors, out_dir: Path) -> dict:
     import os as _os
 
-    from nova.backends.trainium.core.application_base import NeuronApplicationBase
-    from nova.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
-    from nova.backends.trainium.hunyuan_video.backbone import (
+    from difflet.backends.trainium.core.application_base import NeuronApplicationBase
+    from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
+    from difflet.backends.trainium.hunyuan_video.backbone import (
         HunyuanVideoBackboneInferenceConfig,
     )
-    from nova.backends.trainium.hunyuan_video.teacache_probe_costmodels import (
+    from difflet.backends.trainium.hunyuan_video.teacache_probe_costmodels import (
         HunyuanVideoTrivialNEFF,
     )
-    from nova.models.hunyuan_video.application import create_hunyuan_video_backbone_config
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.models.hunyuan_video.application import create_hunyuan_video_backbone_config
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     class _TrivialWrapper(ModelWrapper):
         def __init__(self, config, model_cls, tag="", compiler_args=None,
@@ -255,9 +255,9 @@ def main() -> int:
     elif args.variant == "probe_full":
         result = _run_probe_full(meta, tensors)
     elif args.variant == "delta_only":
-        result = _run_delta_only(meta, tensors, ROOT / ".nova-cache" / "f3_hunyuan_n4_4d8s1r" / "compiled_delta_only")
+        result = _run_delta_only(meta, tensors, ROOT / ".difflet-cache" / "f3_hunyuan_n4_4d8s1r" / "compiled_delta_only")
     elif args.variant == "trivial":
-        result = _run_trivial(meta, tensors, ROOT / ".nova-cache" / "f3_hunyuan_n4_4d8s1r" / "compiled_trivial")
+        result = _run_trivial(meta, tensors, ROOT / ".difflet-cache" / "f3_hunyuan_n4_4d8s1r" / "compiled_trivial")
     else:
         raise SystemExit(f"unknown variant {args.variant}")
 

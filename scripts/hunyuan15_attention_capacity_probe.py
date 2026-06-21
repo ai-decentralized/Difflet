@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("sdpa", "nki", "manual-stats", "manual-stats-masked"),
         default="sdpa",
     )
-    parser.add_argument("--cache-dir", default="/tmp/nova_hunyuan15_attention_capacity_cache")
+    parser.add_argument("--cache-dir", default="/tmp/difflet_hunyuan15_attention_capacity_cache")
     parser.add_argument("--query-len", type=int, default=31 * 30 * 53 + 10)
     parser.add_argument("--key-len", type=int, default=31 * 30 * 53 + 10)
     parser.add_argument("--heads", type=int, default=16)
@@ -147,7 +147,7 @@ class _AttentionCapacityModule(nn.Module):
                 hidden_states = hidden_states.permute(0, 2, 1, 3)
             return hidden_states
 
-        from nova.ops import attention
+        from difflet.ops import attention
 
         batch_size, heads, query_len, head_dim = query.shape
         key_len = key.shape[2]
@@ -308,12 +308,12 @@ def run_streaming_manual_stats_attention(
 
 
 def build_attention_capacity_application(args: argparse.Namespace) -> tuple[object, Path]:
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
     os.environ["LOCAL_WORLD_SIZE"] = str(args.tp_degree)
 
-    from nova.backends.trainium.core.application_base import NeuronApplicationBase
-    from nova.backends.trainium.core.config import InferenceConfig, NeuronConfig
-    from nova.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
+    from difflet.backends.trainium.core.application_base import NeuronApplicationBase
+    from difflet.backends.trainium.core.config import InferenceConfig, NeuronConfig
+    from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 
     class AttentionCapacityConfig(InferenceConfig):
         def get_required_attributes(self):

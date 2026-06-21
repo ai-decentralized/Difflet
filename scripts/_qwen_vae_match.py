@@ -1,8 +1,8 @@
-"""Q2: on-device Qwen-Image VAE decode via Nova's Wan VAE port, vs HF.
+"""Q2: on-device Qwen-Image VAE decode via Difflet's Wan VAE port, vs HF.
 
 AutoencoderKLQwenImage is architecturally identical to AutoencoderKLWan (same config:
 z_dim=16, base_dim=96, dim_mult=[1,2,4,4], temperal_downsample=[False,True,True]; same
-decoder.* / post_quant_conv.* keys). So Nova's NeuronWanVAEDecoderApplication loads the
+decoder.* / post_quant_conv.* keys). So Difflet's NeuronWanVAEDecoderApplication loads the
 Qwen VAE weights directly. We decode the same unpacked latent on device and via HF and
 compare.
 """
@@ -15,17 +15,17 @@ import torch
 import torch.nn.functional as F
 from safetensors.torch import load_file
 
-from nova.backends.trainium.core.config import NeuronConfig
-from nova.backends.trainium.wan.vae import (
+from difflet.backends.trainium.core.config import NeuronConfig
+from difflet.backends.trainium.wan.vae import (
     NeuronWanVAEDecoderApplication,
     WanVAEDecoderInferenceConfig,
 )
-from nova.utils.diffusers_adapter import load_diffusers_config
+from difflet.utils.diffusers_adapter import load_diffusers_config
 
 SNAP = glob.glob("/home/ubuntu/.cache/huggingface/hub/models--Qwen--Qwen-Image/snapshots/*")[0]
 VAE = f"{SNAP}/vae"
-OUT = "/home/ubuntu/nova/.nova-cache/qwen_vae_dec"
-BUNDLE = "/home/ubuntu/nova/.nova-cache/qwen_image_dit_inputs/full_1024_4step.safetensors"
+OUT = "/home/ubuntu/difflet/.difflet-cache/qwen_vae_dec"
+BUNDLE = "/home/ubuntu/difflet/.difflet-cache/qwen_image_dit_inputs/full_1024_4step.safetensors"
 H = W = 1024
 
 

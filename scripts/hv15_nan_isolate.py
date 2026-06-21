@@ -36,8 +36,8 @@ import torch  # noqa: E402
 from safetensors.torch import load_file as load_safetensors_file  # noqa: E402
 
 MODEL_DIR = "/home/ubuntu/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-720p_t2v/snapshots/f4dbc4a1efa4ac8ea56680cdf79d9f455105e814"
-BUNDLE = ROOT / ".nova-cache" / "hunyuan15_dit_inputs" / "real_320x512x61_4step.safetensors"
-COMPILED = ROOT / ".nova-cache" / "hv15_teacache" / "compiled"
+BUNDLE = ROOT / ".difflet-cache" / "hunyuan15_dit_inputs" / "real_320x512x61_4step.safetensors"
+COMPILED = ROOT / ".difflet-cache" / "hv15_teacache" / "compiled"
 
 
 def _fin(x):
@@ -46,11 +46,11 @@ def _fin(x):
 
 
 def main() -> int:
-    from nova.models.hunyuan_video.application import (
+    from difflet.models.hunyuan_video.application import (
         HunyuanVideo15DiTInputBundle,
         NeuronHunyuanVideoApplication,
     )
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     tns = load_safetensors_file(str(BUNDLE), device="cpu")
     dtype = torch.bfloat16
@@ -60,7 +60,7 @@ def main() -> int:
 
     app = NeuronHunyuanVideoApplication(
         model_path=MODEL_DIR,
-        parallel=NovaParallelConfig(tp_degree=4),
+        parallel=DiffletParallelConfig(tp_degree=4),
         dtype=dtype,
         shape={"height": 320, "width": 512, "num_frames": 61},
         model_version="1.5",

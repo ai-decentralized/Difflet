@@ -17,9 +17,9 @@ guidance_rescale=0) so each step is exactly one transformer eval and the
 TeaCache skip path is clean (one host signal -> skip or one full DiT pass).
 
 Usage (detached, see cclog instructions):
-    setsid bash -c 'PYTHONPATH=/home/ubuntu/nova \
+    setsid bash -c 'PYTHONPATH=/home/ubuntu/difflet \
       PATH=/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin:$PATH \
-      NOVA_BACKEND=trainium NEURON_RT_VIRTUAL_CORE_SIZE=2 NEURON_RT_NUM_CORES=4 \
+      DIFFLET_BACKEND=trainium NEURON_RT_VIRTUAL_CORE_SIZE=2 NEURON_RT_NUM_CORES=4 \
       TORCH_DISABLE_ADDR2LINE=1 NEURON_RT_LOG_LEVEL=ERROR \
       python scripts/run_ltx2_teacache_e2e_segmented.py --num-steps 50 > log 2>&1' \
       < /dev/null & disown
@@ -38,9 +38,9 @@ MODEL_DIR = (
     "/home/ubuntu/.cache/huggingface/hub/models--Lightricks--LTX-2/"
     "snapshots/47da56e2ad66ce4125a9922b4a8826bf407f9d0a"
 )
-COMPILE_CACHE = "/home/ubuntu/nova/.nova-cache/ltx_2_segmented"
-BUNDLE = "/home/ubuntu/nova/.nova-cache/ltx_2_dit_inputs/full_512x768x121_4step.safetensors"
-CALIB = "/home/ubuntu/nova/cclogs/m9-teacache/teacache_calib_ltx_2.json"
+COMPILE_CACHE = "/home/ubuntu/difflet/.difflet-cache/ltx_2_segmented"
+BUNDLE = "/home/ubuntu/difflet/.difflet-cache/ltx_2_dit_inputs/full_512x768x121_4step.safetensors"
+CALIB = "/home/ubuntu/difflet/cclogs/m9-teacache/teacache_calib_ltx_2.json"
 
 HEIGHT, WIDTH, NUM_FRAMES = 512, 768, 121
 AUDIO_NUM_FRAMES = 126
@@ -104,8 +104,8 @@ def main() -> int:
     import torch.nn.functional as F
     from safetensors.torch import load_file
 
-    from nova import NovaParallelConfig, NovaPipeline
-    from nova.models.ltx_2.pipeline import LTX2DiTInputBundle
+    from difflet import DiffletParallelConfig, DiffletPipeline
+    from difflet.models.ltx_2.pipeline import LTX2DiTInputBundle
 
     dtype = torch.bfloat16
 
@@ -123,14 +123,14 @@ def main() -> int:
     # _prepare_frontend use the segmented runtime's own host CPU transformer copy
     # (not the diffusers host pipeline). We set block_load_mode post-construction.
     print(
-        f"{P} building app via NovaPipeline.from_pretrained "
+        f"{P} building app via DiffletPipeline.from_pretrained "
         f"(skip_compile=True, block_load_mode={args.block_load_mode}, load={load_in_process})",
         flush=True,
     )
-    pipe = NovaPipeline.from_pretrained(
+    pipe = DiffletPipeline.from_pretrained(
         MODEL_DIR,
         model_type="ltx_2",
-        parallel=NovaParallelConfig(tp_degree=TP_DEGREE),
+        parallel=DiffletParallelConfig(tp_degree=TP_DEGREE),
         dtype=dtype,
         height=HEIGHT,
         width=WIDTH,

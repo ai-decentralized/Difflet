@@ -4,7 +4,7 @@ import json
 
 import torch
 
-from nova.pipeline.latent_metrics import LatentMetricCollector
+from difflet.pipeline.latent_metrics import LatentMetricCollector
 
 
 def _traj(n, steps, *, converge_after=None, seed=0):
@@ -78,7 +78,7 @@ def test_metrics_json_convention_and_roundtrip(tmp_path):
         "shared_prefix_fraction",
     ):
         assert key in data
-    assert data["schema"] == "nova-latent-metrics-v1"
+    assert data["schema"] == "difflet-latent-metrics-v1"
     assert data["num_steps"] == 5
     assert len(data["per_step"]) == 5
     assert data["final_latents_shape"] == [2, 8, 16]

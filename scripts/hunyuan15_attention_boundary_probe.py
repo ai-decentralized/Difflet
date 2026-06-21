@@ -62,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", required=True)
     parser.add_argument("--transformer-subfolder", default="transformer")
-    parser.add_argument("--cache-dir", default="/tmp/nova_hunyuan15_attention_boundary_cache")
+    parser.add_argument("--cache-dir", default="/tmp/difflet_hunyuan15_attention_boundary_cache")
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--width", type=int, default=848)
     parser.add_argument("--num-frames", type=int, default=121)

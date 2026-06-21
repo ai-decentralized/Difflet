@@ -23,7 +23,7 @@ def test_gate_audit_keeps_partial_evidence_gated(tmp_path):
     combined.write_text(
         """
         {
-          "schema": "nova-f3-denoise-loop-neuron-inspect-summary-v1",
+          "schema": "difflet-f3-denoise-loop-neuron-inspect-summary-v1",
           "steps": [
             {
               "neff_execution_time_s": 0.45,
@@ -75,7 +75,7 @@ def test_gate_audit_unlocks_on_any_measured_model_over_threshold(tmp_path):
     combined.write_text(
         """
         {
-          "schema": "nova-f3-denoise-loop-neuron-inspect-summary-v1",
+          "schema": "difflet-f3-denoise-loop-neuron-inspect-summary-v1",
           "steps": [
             {
               "neff_execution_time_s": 0.60,
@@ -126,7 +126,7 @@ def test_gate_audit_ignores_fallback_or_incomplete_json_for_decisions(tmp_path):
     combined.write_text(
         """
         {
-          "schema": "nova-f3-denoise-loop-profile-v2",
+          "schema": "difflet-f3-denoise-loop-profile-v2",
           "summary": {
             "num_steps": 4,
             "steady_state_max_cpu_round_trip_share_after_step0": 0.25,
@@ -159,7 +159,7 @@ def test_gate_audit_rejects_unknown_step_neff_source(tmp_path):
     combined.write_text(
         """
         {
-          "schema": "nova-f3-denoise-loop-neuron-inspect-summary-v1",
+          "schema": "difflet-f3-denoise-loop-neuron-inspect-summary-v1",
           "steps": [
             {
               "neff_execution_time_s": 0.75,
@@ -237,7 +237,7 @@ def test_profile_xla_sampler_uses_direct_metric_data_fallback():
 def test_requirement_coverage_distinguishes_qwen_profiler_from_gate():
     coverage_mod = _load_script("audit_f3_0b_requirement_coverage")
     direct = {
-        "schema": "nova-f3-denoise-loop-profile-v2",
+        "schema": "difflet-f3-denoise-loop-profile-v2",
         "model": "qwen-image",
         "height": 1024,
         "width": 1024,
@@ -266,7 +266,7 @@ def test_requirement_coverage_distinguishes_qwen_profiler_from_gate():
         },
     }
     combined = {
-        "schema": "nova-f3-denoise-loop-neuron-inspect-summary-v1",
+        "schema": "difflet-f3-denoise-loop-neuron-inspect-summary-v1",
         "steps": [
             {
                 "non_neff_time_s": 0.01,

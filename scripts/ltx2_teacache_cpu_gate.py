@@ -11,11 +11,11 @@ The script:
   1. Loads ``LTX2VideoTransformer3DModel`` from the real Lightricks/LTX-2
      ``transformer`` subfolder on CPU (bf16, .eval()).
   2. Loads the cached dual-stream input bundle
-     ``.nova-cache/ltx_2_dit_inputs/full_512x768x121_4step.safetensors``.
+     ``.difflet-cache/ltx_2_dit_inputs/full_512x768x121_4step.safetensors``.
   3. Builds a flow-matching denoise schedule (sigmas ~1.0 -> ~0.0) and runs an
      Euler loop on CPU, mirroring the host-frontend conventions in
-     ``nova/backends/trainium/ltx_2/segmented.py`` and
-     ``nova/models/ltx_2/pipeline.py`` (per-token timestep already scaled by
+     ``difflet/backends/trainium/ltx_2/segmented.py`` and
+     ``difflet/models/ltx_2/pipeline.py`` (per-token timestep already scaled by
      ``timestep_scale_multiplier``; ``timestep`` and ``sigma`` are the same
      scheduler value; ``video_coords`` / ``audio_coords`` supplied so RoPE does
      not need num_frames/height/width).
@@ -65,7 +65,7 @@ def ensure_runtime_python() -> None:
 
 ensure_runtime_python()
 
-# Make ``nova`` importable (for the RoPE patch + scheduler helpers) and ensure the
+# Make ``difflet`` importable (for the RoPE patch + scheduler helpers) and ensure the
 # Neuron venv bin dir is on PATH so the diffusers->torch_xla lazy init can find
 # ``libneuronpjrt-path`` (when xla is not disabled).
 if str(ROOT) not in sys.path:
@@ -81,7 +81,7 @@ def _disable_torch_xla_lazy_import() -> None:
     whose top-level ``from torch_xla.experimental.custom_kernel import
     flash_attention`` runs ``torch_xla`` Neuron init (needs ``libneuronpjrt-path``
     on PATH). We only need a CPU forward, so flip the diffusers availability flag
-    off first -- mirrors ``nova.models.ltx_2.pipeline.disable_ltx_2_xla_lazy_import``.
+    off first -- mirrors ``difflet.models.ltx_2.pipeline.disable_ltx_2_xla_lazy_import``.
     """
     try:
         import diffusers.utils.import_utils as import_utils
@@ -97,7 +97,7 @@ import torch  # noqa: E402
 from safetensors.torch import load_file  # noqa: E402
 
 LOG = "[ltx2-gate]"
-BUNDLE = ROOT / ".nova-cache" / "ltx_2_dit_inputs" / "full_512x768x121_4step.safetensors"
+BUNDLE = ROOT / ".difflet-cache" / "ltx_2_dit_inputs" / "full_512x768x121_4step.safetensors"
 META = BUNDLE.with_suffix(BUNDLE.suffix + ".meta.json")
 
 
@@ -138,12 +138,12 @@ def resolve_transformer_dir() -> str:
 def patch_rope() -> None:
     """Mirror segmented.py's RoPE override so the CPU forward matches runtime."""
     try:
-        from nova.backends.trainium.ltx_2.segmented import _patch_ltx2_rope
+        from difflet.backends.trainium.ltx_2.segmented import _patch_ltx2_rope
 
         _patch_ltx2_rope()
-        log("applied nova split-rotary RoPE patch")
+        log("applied difflet split-rotary RoPE patch")
     except Exception as exc:  # pragma: no cover - patch is best-effort
-        log(f"WARNING: could not apply nova RoPE patch ({exc!r}); using diffusers default")
+        log(f"WARNING: could not apply difflet RoPE patch ({exc!r}); using diffusers default")
 
 
 def build_sigmas(num_steps: int, transformer_dir: str) -> torch.Tensor:
@@ -159,7 +159,7 @@ def build_sigmas(num_steps: int, transformer_dir: str) -> torch.Tensor:
         try:
             from diffusers import FlowMatchEulerDiscreteScheduler
 
-            from nova.models.ltx_2.pipeline import _retrieve_timesteps, ltx_2_scheduler_mu
+            from difflet.models.ltx_2.pipeline import _retrieve_timesteps, ltx_2_scheduler_mu
 
             scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(str(scheduler_dir))
             lin = np.linspace(1.0, 1.0 / num_steps, num_steps)

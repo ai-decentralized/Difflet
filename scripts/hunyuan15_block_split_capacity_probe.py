@@ -48,7 +48,7 @@ import torch.nn as nn  # noqa: E402
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cache-dir", default="/tmp/nova_hunyuan15_block_split_capacity_cache")
+    parser.add_argument("--cache-dir", default="/tmp/difflet_hunyuan15_block_split_capacity_cache")
     parser.add_argument(
         "--model-dir",
         default=None,
@@ -102,7 +102,7 @@ def _load_block_state_dict_from_dir(
     *,
     dtype: torch.dtype | None = None,
 ) -> dict[str, torch.Tensor]:
-    from nova.backends.trainium.core.modules.checkpoint import load_state_dict
+    from difflet.backends.trainium.core.modules.checkpoint import load_state_dict
 
     state_dict = load_state_dict(str(transformer_dir))
     prefix = f"transformer_blocks.{block_index}."
@@ -338,12 +338,12 @@ def build_block_split_application(
     part: str,
     meta: dict[str, int],
 ) -> tuple[object, Path]:
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
     os.environ["LOCAL_WORLD_SIZE"] = str(args.tp_degree)
 
-    from nova.backends.trainium.core.application_base import NeuronApplicationBase
-    from nova.backends.trainium.core.config import InferenceConfig, NeuronConfig
-    from nova.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
+    from difflet.backends.trainium.core.application_base import NeuronApplicationBase
+    from difflet.backends.trainium.core.config import InferenceConfig, NeuronConfig
+    from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 
     class BlockSplitConfig(InferenceConfig):
         def get_required_attributes(self):

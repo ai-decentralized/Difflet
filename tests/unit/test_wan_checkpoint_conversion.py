@@ -1,4 +1,4 @@
-"""Unit tests for nova.models.wan.checkpoint conversion (W3b)."""
+"""Unit tests for difflet.models.wan.checkpoint conversion (W3b)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import torch
 
 
 def test_backbone_renames_ffn_proj_keys():
-    from nova.models.wan.checkpoint import convert_backbone_state_dict
+    from difflet.models.wan.checkpoint import convert_backbone_state_dict
 
     raw = {
         "blocks.0.ffn.net.0.proj.weight": torch.zeros(1),
@@ -29,7 +29,7 @@ def test_backbone_renames_ffn_proj_keys():
 
 
 def test_backbone_preserves_attention_and_other_keys_verbatim():
-    from nova.models.wan.checkpoint import convert_backbone_state_dict
+    from difflet.models.wan.checkpoint import convert_backbone_state_dict
 
     raw = {
         "patch_embedding.weight": torch.zeros(1),
@@ -53,7 +53,7 @@ def test_backbone_preserves_attention_and_other_keys_verbatim():
 
 
 def test_text_encoder_conversion_is_identity():
-    from nova.models.wan.checkpoint import convert_text_encoder_state_dict
+    from difflet.models.wan.checkpoint import convert_text_encoder_state_dict
 
     raw = {
         "shared.weight": torch.zeros(1),
@@ -74,7 +74,7 @@ def test_text_encoder_conversion_is_identity():
 
 
 def test_vae_decoder_conversion_filters_encoder_and_kl_keys():
-    from nova.models.wan.checkpoint import convert_vae_decoder_state_dict
+    from difflet.models.wan.checkpoint import convert_vae_decoder_state_dict
 
     raw = {
         "post_quant_conv.weight": torch.zeros(1),
@@ -102,7 +102,7 @@ def test_convert_diffusers_checkpoint_handles_missing_components(tmp_path):
     a clear ``FileNotFoundError`` rather than silently doing nothing.
     """
     import pytest
-    from nova.models.wan.checkpoint import convert_diffusers_checkpoint
+    from difflet.models.wan.checkpoint import convert_diffusers_checkpoint
 
     empty = tmp_path / "snapshot"
     empty.mkdir()
@@ -112,7 +112,7 @@ def test_convert_diffusers_checkpoint_handles_missing_components(tmp_path):
 
 
 def test_component_converters_registry_covers_known_subdirs():
-    from nova.models.wan.checkpoint.cli import COMPONENT_CONVERTERS
+    from difflet.models.wan.checkpoint.cli import COMPONENT_CONVERTERS
 
     # The Wan2.2 14B snapshot has these directories that we currently know
     # how to handle.
@@ -123,7 +123,7 @@ def test_component_converters_registry_covers_known_subdirs():
 
 
 def test_trainium_wan_backbone_app_uses_checkpoint_converter():
-    from nova.backends.trainium.wan.backbone import NeuronWanBackboneApplication
+    from difflet.backends.trainium.wan.backbone import NeuronWanBackboneApplication
 
     raw = {
         "blocks.0.ffn.net.0.proj.weight": torch.zeros(1),
@@ -140,7 +140,7 @@ def test_trainium_wan_backbone_app_uses_checkpoint_converter():
 
 
 def test_trainium_wan_text_encoder_app_uses_identity_checkpoint_converter():
-    from nova.backends.trainium.wan.text_encoder import NeuronWanTextEncoderApplication
+    from difflet.backends.trainium.wan.text_encoder import NeuronWanTextEncoderApplication
 
     raw = {
         "shared.weight": torch.zeros(1),
@@ -157,7 +157,7 @@ def test_trainium_wan_text_encoder_app_uses_identity_checkpoint_converter():
 
 
 def test_trainium_wan_vae_app_uses_decoder_checkpoint_converter():
-    from nova.backends.trainium.wan.vae import NeuronWanVAEDecoderApplication
+    from difflet.backends.trainium.wan.vae import NeuronWanVAEDecoderApplication
 
     raw = {
         "post_quant_conv.weight": torch.zeros(1),

@@ -4,9 +4,9 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from nova.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
-from nova.models.hunyuan_video.pipeline import HunyuanVideoOrchestrator, HunyuanVideoPipelineOutput
-from nova.pipeline.teacache import TeaCacheCalibration
+from difflet.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
+from difflet.models.hunyuan_video.pipeline import HunyuanVideoOrchestrator, HunyuanVideoPipelineOutput
+from difflet.pipeline.teacache import TeaCacheCalibration
 
 
 class FakeTransformer:

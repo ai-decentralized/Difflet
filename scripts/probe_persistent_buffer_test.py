@@ -42,7 +42,7 @@ ensure_runtime_python()
 import torch  # noqa: E402
 import torch.nn as nn  # noqa: E402
 
-OUT_DIR = ROOT / ".nova-cache" / "f3_hunyuan_n4_4d8s1r" / "compiled_counter"
+OUT_DIR = ROOT / ".difflet-cache" / "f3_hunyuan_n4_4d8s1r" / "compiled_counter"
 
 
 class CounterModel(nn.Module):
@@ -65,12 +65,12 @@ class CounterModel(nn.Module):
 
 def main() -> int:
     from neuronx_distributed.trace.model_builder import BaseModelInstance
-    from nova.backends.trainium.core.application_base import NeuronApplicationBase
-    from nova.backends.trainium.core.model_wrapper import ModelWrapper
-    from nova.backends.trainium.hunyuan_video.backbone import (
+    from difflet.backends.trainium.core.application_base import NeuronApplicationBase
+    from difflet.backends.trainium.core.model_wrapper import ModelWrapper
+    from difflet.backends.trainium.hunyuan_video.backbone import (
         HunyuanVideoBackboneInferenceConfig,
     )
-    from nova.models.hunyuan_video.application import create_hunyuan_video_backbone_config
+    from difflet.models.hunyuan_video.application import create_hunyuan_video_backbone_config
 
     class _PersistentStateInstance(BaseModelInstance):
         """Builds the alias post-load referencing self.module's runtime buffer,
@@ -131,7 +131,7 @@ def main() -> int:
         def update_state_dict_for_tied_weights(sd):
             pass
 
-    source = ROOT / ".nova-cache" / "f3_hunyuan_n4_4d8s1r" / "source"
+    source = ROOT / ".difflet-cache" / "f3_hunyuan_n4_4d8s1r" / "source"
     config = create_hunyuan_video_backbone_config(
         model_path=str(source), world_size=4, tp_degree=4, dtype=torch.bfloat16,
         height=320, width=512, num_frames=61, text_seq_len=256, batch_size=1,

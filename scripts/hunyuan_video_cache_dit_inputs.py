@@ -2,7 +2,7 @@
 """Cache HunyuanVideo DiT input tensors from the HF text/scheduler path.
 
 M3 v0 keeps Llama3, CLIP, and VAE outside Trainium. This helper produces the
-host-side DiT input artifact consumed by Nova's HunyuanVideo backbone smoke and
+host-side DiT input artifact consumed by Difflet's HunyuanVideo backbone smoke and
 trajectory tests.
 """
 
@@ -153,10 +153,10 @@ def cache_dit_inputs(args: argparse.Namespace) -> None:
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    save_file(tensors, str(output), metadata={"format": "nova-hunyuan-video-dit-inputs-v1"})
+    save_file(tensors, str(output), metadata={"format": "difflet-hunyuan-video-dit-inputs-v1"})
 
     meta = {
-        "schema": "nova-hunyuan-video-dit-inputs-v1",
+        "schema": "difflet-hunyuan-video-dit-inputs-v1",
         "model_id": args.model_id,
         "revision": args.revision,
         "prompt": args.prompt,

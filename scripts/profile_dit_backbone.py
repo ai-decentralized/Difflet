@@ -30,11 +30,11 @@ NEURON_PROFILE = "/opt/aws/neuron/bin/neuron-profile"
 # Named presets: real compiled NEFFs already on this host.
 TARGETS = {
     "hunyuan-attn": (
-        "/tmp/nova_hunyuan_attention_neff_prod_long/compiler/graph.neff",
+        "/tmp/difflet_hunyuan_attention_neff_prod_long/compiler/graph.neff",
         "HunyuanVideo attention (production long sequence)",
     ),
     "hunyuan-vae-body": (
-        "/tmp/nova_hunyuan_vae_body_act_split_neff/compiler/graph.neff",
+        "/tmp/difflet_hunyuan_vae_body_act_split_neff/compiler/graph.neff",
         "HunyuanVideo VAE body (conv-heavy)",
     ),
     "wan-dit": (
@@ -214,8 +214,8 @@ def main() -> int:
     ap.add_argument("--neff", help="explicit graph.neff path")
     ap.add_argument("--label", default="custom-neff")
     ap.add_argument("--world-size", type=int, default=1)
-    ap.add_argument("--workdir", default="/tmp/nova_profile_dit")
-    ap.add_argument("--out", default="/tmp/nova_profile_dit/metrics.json")
+    ap.add_argument("--workdir", default="/tmp/difflet_profile_dit")
+    ap.add_argument("--out", default="/tmp/difflet_profile_dit/metrics.json")
     args = ap.parse_args()
 
     jobs: list[tuple[str, str, str]] = []  # (neff, label, subdir)

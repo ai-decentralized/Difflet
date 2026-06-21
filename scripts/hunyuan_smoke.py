@@ -2,15 +2,15 @@
 
 Single-process driver for the M3 hybrid path:
 
-  cached DiT input artifact  -->  Nova Trainium DiT (4 steps)
+  cached DiT input artifact  -->  Difflet Trainium DiT (4 steps)
                                -->  HF VAE decode (CPU, default)
-                                    or Nova Trainium VAE decode (opt-in)
+                                    or Difflet Trainium VAE decode (opt-in)
                                -->  (1, 3, T, H, W) bf16 video tensor
                                -->  optional best-effort MP4 export
 
 Exercises the public ``NeuronHunyuanVideoApplication.__call__(bundle=...,
 output_type="pt")`` path so the same call shape works when reached via
-``NovaPipeline.from_pretrained``.
+``DiffletPipeline.from_pretrained``.
 
 Usage:
 
@@ -20,8 +20,8 @@ or
 
     python scripts/hunyuan_smoke.py \\
         --source-dir /home/ubuntu/.cache/huggingface/hub/hunyuanvideo-real \\
-        --compiled-dir /home/ubuntu/nova/.nova-cache/hunyuan_n4_20d40s2r/compiled \\
-        --bundle /home/ubuntu/nova/.nova-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors \\
+        --compiled-dir /home/ubuntu/difflet/.difflet-cache/hunyuan_n4_20d40s2r/compiled \\
+        --bundle /home/ubuntu/difflet/.difflet-cache/hunyuan_dit_inputs/cat_walking_4step.safetensors \\
         --output /tmp/hunyuan_smoke.mp4
 """
 
@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--enable-trainium-vae",
         action="store_true",
-        help="Load compiled vae_decoder/ and use Nova Trainium VAE decode instead of HF CPU VAE.",
+        help="Load compiled vae_decoder/ and use Difflet Trainium VAE decode instead of HF CPU VAE.",
     )
     return parser.parse_args()
 
@@ -86,7 +86,7 @@ def _try_export_mp4(video: torch.Tensor, output_path: str, fps: int) -> bool:
 
 def main() -> int:
     args = parse_args()
-    os.environ.setdefault("NOVA_BACKEND", "trainium")
+    os.environ.setdefault("DIFFLET_BACKEND", "trainium")
 
     meta = json.loads(Path(args.bundle + ".meta.json").read_text())
     tensors = load_file(args.bundle)
@@ -95,15 +95,15 @@ def main() -> int:
     print(f"[smoke] shape = {meta['height']}x{meta['width']}x{meta['num_frames']}, "
           f"text_seq_len={meta['text_seq_len']}, cached_steps={meta['num_inference_steps']}")
 
-    from nova.models.hunyuan_video.application import (
+    from difflet.models.hunyuan_video.application import (
         HunyuanVideoDiTInputBundle,
         NeuronHunyuanVideoApplication,
     )
-    from nova.pipeline.parallel_config import NovaParallelConfig
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     app = NeuronHunyuanVideoApplication(
         model_path=args.source_dir,
-        parallel=NovaParallelConfig(tp_degree=args.tp_degree),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=torch.bfloat16,
         shape={"height": meta["height"], "width": meta["width"], "num_frames": meta["num_frames"]},
         text_seq_len=meta["text_seq_len"],
