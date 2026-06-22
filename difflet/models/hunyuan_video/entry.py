@@ -20,8 +20,6 @@ def create_hunyuan_video_application(
         raise NotImplementedError(
             f"HunyuanVideo currently supports only the trainium backend, got {backend!r}"
         )
-    if parallel.cp_degree > 1:
-        raise NotImplementedError("HunyuanVideo CP is deferred until M3 polish")
     if parallel.cfg_parallel_enabled:
         raise NotImplementedError("HunyuanVideo CFG-parallel is deferred until M3 polish")
 

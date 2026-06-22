@@ -93,6 +93,12 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--tp-degree", type=int, default=4)
     p.add_argument(
+        "--cp-degree",
+        type=int,
+        default=1,
+        help="Context-parallel degree (1 = disabled). world_size = tp_degree * cp_degree.",
+    )
+    p.add_argument(
         "--cpu-vae",
         action="store_true",
         help="Decode the VAE on the HF CPU reference instead of the Trainium vae_decoder/ NEFF "
@@ -251,7 +257,7 @@ def stage_generate(args: argparse.Namespace) -> None:
 
     app = NeuronHunyuanVideoApplication(
         model_path=_resolve_model_dir(args.dit_source),
-        parallel=DiffletParallelConfig(tp_degree=args.tp_degree, cp_degree=1),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree, cp_degree=args.cp_degree),
         dtype=torch.bfloat16,
         shape={"height": args.height, "width": args.width, "num_frames": args.num_frames},
         text_seq_len=args.text_seq_len,
