@@ -71,6 +71,12 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--guidance-scale", type=float, default=4.0)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--tp-degree", type=int, default=4)
+    p.add_argument(
+        "--cp-degree",
+        type=int,
+        default=1,
+        help="Context-parallel degree (1 = disabled). world_size = tp_degree * cp_degree.",
+    )
     return p.parse_args()
 
 
@@ -164,7 +170,7 @@ def stage_generate(args: argparse.Namespace) -> None:
 
     app = NeuronQwenImageApplication(
         model_path=model_dir,
-        parallel=DiffletParallelConfig(tp_degree=args.tp_degree, cp_degree=1),
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree, cp_degree=args.cp_degree),
         dtype=torch.bfloat16,
         shape={"height": args.height, "width": args.width, "num_frames": None},
         text_seq_len=args.text_seq_len,

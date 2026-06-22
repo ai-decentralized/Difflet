@@ -16,8 +16,14 @@ from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, Mode
 from difflet.ops import (
     ColumnParallelLinear,
     RowParallelLinear,
+    SPMDRank,
     attention,
+    gather_from_tensor_model_parallel_region_with_dim,
+    get_data_parallel_group,
+    get_dp_rank_spmd,
     get_tensor_model_parallel_size,
+    get_world_group,
+    scatter_to_process_group_spmd,
 )
 
 
@@ -32,6 +38,8 @@ class QwenImageTransformerInferenceConfig(InferenceConfig):
             self.text_seq_len = 1024
         if not hasattr(self, "vae_scale_factor"):
             self.vae_scale_factor = 8
+        if not hasattr(self, "context_parallel_enabled"):
+            self.context_parallel_enabled = False
 
     def get_required_attributes(self) -> List[str]:
         return [
@@ -115,23 +123,49 @@ def _apply_qwen_rope_real(
 
 
 class _StaticQwenImageRealRope(nn.Module):
-    """Static real-valued Qwen RoPE for one compiled image/text shape."""
+    """Static real-valued Qwen RoPE for one compiled image/text shape.
+
+    Under context parallelism the image RoPE buffers are scattered along the
+    sequence axis (dim 0 of ``(S_img, head_dim)``) so each CP rank applies the
+    rotary embedding for its own image-token shard. Text RoPE stays full.
+    """
 
     def __init__(
         self,
         *,
         img_rope: tuple[torch.Tensor, torch.Tensor],
         txt_rope: tuple[torch.Tensor, torch.Tensor],
+        context_parallel_enabled: bool = False,
+        global_rank: SPMDRank | None = None,
+        data_parallel_group=None,
     ) -> None:
         super().__init__()
         self.register_buffer("img_cos", img_rope[0], persistent=False)
         self.register_buffer("img_sin", img_rope[1], persistent=False)
         self.register_buffer("txt_cos", txt_rope[0], persistent=False)
         self.register_buffer("txt_sin", txt_rope[1], persistent=False)
+        self.context_parallel_enabled = context_parallel_enabled
+        # Hold the shared SPMDRank without registering it as a submodule here
+        # (it is owned by the trace module so the state dict has a single
+        # ``global_rank.rank`` key).
+        self._global_rank_ref = (global_rank,) if global_rank is not None else ()
+        self.data_parallel_group = data_parallel_group
 
     def forward(self, *args, **kwargs):
         del args, kwargs
-        return (self.img_cos, self.img_sin), (self.txt_cos, self.txt_sin)
+        img_cos, img_sin = self.img_cos, self.img_sin
+        if self.context_parallel_enabled:
+            dp_rank = get_dp_rank_spmd(
+                global_rank=self._global_rank_ref[0].get_rank(),
+                tp_degree=get_tensor_model_parallel_size(),
+            )
+            img_cos = scatter_to_process_group_spmd(
+                img_cos, partition_dim=0, rank=dp_rank, process_group=self.data_parallel_group
+            )
+            img_sin = scatter_to_process_group_spmd(
+                img_sin, partition_dim=0, rank=dp_rank, process_group=self.data_parallel_group
+            )
+        return (img_cos, img_sin), (self.txt_cos, self.txt_sin)
 
 
 class _ZeroQwenImageAttention(nn.Module):
@@ -270,6 +304,15 @@ class _QwenImageTrainiumAttnProcessor:
     _attention_backend = None
     _parallel_config = None
 
+    def __init__(
+        self,
+        *,
+        context_parallel_enabled: bool = False,
+        data_parallel_group=None,
+    ) -> None:
+        self.context_parallel_enabled = context_parallel_enabled
+        self.data_parallel_group = data_parallel_group
+
     def __call__(
         self,
         attn,
@@ -316,6 +359,17 @@ class _QwenImageTrainiumAttnProcessor:
             img_key = _apply_qwen_rope_real(img_key, img_rope)
             txt_query = _apply_qwen_rope_real(txt_query, txt_rope)
             txt_key = _apply_qwen_rope_real(txt_key, txt_rope)
+
+        # Context parallel: each rank holds the image query for its token shard.
+        # Gather the image K/V across the CP (data-parallel) group so every rank
+        # attends over the full image sequence; image query stays sharded
+        # (q_len != kv_len). Text K/V are replicated, so they are untouched.
+        if self.context_parallel_enabled:
+            stacked_kv = torch.stack([img_key, img_value], dim=0)  # [2, B, S/cp, H, d]
+            stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
+                stacked_kv, gather_dim=2, process_group=self.data_parallel_group
+            )  # [2, B, S, H, d]
+            img_key, img_value = torch.unbind(stacked_kv, dim=0)
 
         joint_query = torch.cat([txt_query, img_query], dim=1)
         joint_key = torch.cat([txt_key, img_key], dim=1)
@@ -383,6 +437,13 @@ class _QwenImageTransformerTraceModule(nn.Module):
 
         self.config = config
         self.guidance_embeds = bool(getattr(config, "guidance_embeds", False))
+        self.context_parallel_enabled = bool(getattr(config, "context_parallel_enabled", False))
+        if self.context_parallel_enabled:
+            self.data_parallel_group = get_data_parallel_group()
+            self.global_rank = SPMDRank(world_size=get_world_group().size())
+        else:
+            self.data_parallel_group = None
+            self.global_rank = None
         self.img_shapes = [[(1, int(config.packed_height), int(config.packed_width))]]
         self.transformer = QwenImageTransformer2DModel(
             patch_size=int(config.patch_size),
@@ -407,9 +468,15 @@ class _QwenImageTransformerTraceModule(nn.Module):
         self.transformer.pos_embed = _StaticQwenImageRealRope(
             img_rope=_qwen_complex_rope_to_real(img_freqs),
             txt_rope=_qwen_complex_rope_to_real(txt_freqs),
+            context_parallel_enabled=self.context_parallel_enabled,
+            global_rank=self.global_rank,
+            data_parallel_group=self.data_parallel_group,
         )
         for block in self.transformer.transformer_blocks:
-            block.attn.processor = _QwenImageTrainiumAttnProcessor()
+            block.attn.processor = _QwenImageTrainiumAttnProcessor(
+                context_parallel_enabled=self.context_parallel_enabled,
+                data_parallel_group=self.data_parallel_group,
+            )
 
     def forward(
         self,
@@ -425,7 +492,25 @@ class _QwenImageTransformerTraceModule(nn.Module):
         # embeddings and keeps mask support as a separate follow-up.
         del encoder_hidden_states_mask
         guidance_arg = guidance if self.guidance_embeds else None
-        return self.transformer(
+
+        # Context parallel: scatter the image tokens along the sequence axis
+        # across the CP (data-parallel) group before the diffusers forward. The
+        # static RoPE scatters the matching image rope, the attention processor
+        # gathers image K/V, and we gather the packed output back below. Text
+        # tokens stay replicated, so encoder_hidden_states is left full.
+        if self.context_parallel_enabled:
+            dp_rank = get_dp_rank_spmd(
+                global_rank=self.global_rank.get_rank(),
+                tp_degree=get_tensor_model_parallel_size(),
+            )
+            hidden_states = scatter_to_process_group_spmd(
+                hidden_states,
+                partition_dim=1,
+                rank=dp_rank,
+                process_group=self.data_parallel_group,
+            )
+
+        output = self.transformer(
             hidden_states=hidden_states,
             timestep=timestep,
             encoder_hidden_states=encoder_hidden_states,
@@ -434,6 +519,12 @@ class _QwenImageTransformerTraceModule(nn.Module):
             img_shapes=self.img_shapes * int(hidden_states.shape[0]),
             return_dict=False,
         )[0]
+
+        if self.context_parallel_enabled:
+            output = gather_from_tensor_model_parallel_region_with_dim(
+                output, gather_dim=1, process_group=self.data_parallel_group
+            )
+        return output
 
     def teacache_mod_input(
         self,
@@ -577,11 +668,16 @@ class NeuronQwenImageTransformerApplication(NeuronApplicationBase):
 
     @staticmethod
     def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
-        del config
-        return {
+        out = {
             key if key.startswith("transformer.") else f"transformer.{key}": value
             for key, value in state_dict.items()
         }
+        # The SPMDRank buffer sits on the trace module (not under transformer.),
+        # so its key is un-prefixed. arange(world_size) lets each rank read its id.
+        if getattr(config, "context_parallel_enabled", False):
+            world_size = config.neuron_config.world_size
+            out["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)
+        return out
 
     @staticmethod
     def update_state_dict_for_tied_weights(state_dict):
