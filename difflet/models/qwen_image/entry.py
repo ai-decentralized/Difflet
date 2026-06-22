@@ -20,8 +20,6 @@ def create_qwen_image_application(
         raise NotImplementedError(
             f"Qwen-Image currently supports only the trainium backend, got {backend!r}"
         )
-    if parallel.cp_degree > 1:
-        raise NotImplementedError("Qwen-Image CP is deferred until the M4a transformer spike.")
     if parallel.cfg_parallel_enabled:
         raise NotImplementedError(
             "Qwen-Image CFG-parallel is deferred until the M4a transformer spike."

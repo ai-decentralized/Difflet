@@ -95,6 +95,7 @@ def create_qwen_image_transformer_config(
     width: int,
     text_seq_len: int = 1024,
     batch_size: int = 1,
+    context_parallel_enabled: bool = False,
 ):
     from difflet.backends.trainium.qwen_image.transformer import (
         QwenImageTransformerInferenceConfig,
@@ -114,6 +115,7 @@ def create_qwen_image_transformer_config(
         height=height,
         width=width,
         text_seq_len=text_seq_len,
+        context_parallel_enabled=context_parallel_enabled,
     )
 
 
@@ -163,13 +165,14 @@ class NeuronQwenImageApplication(MultiComponentApplication):
 
             config = create_qwen_image_transformer_config(
                 model_path=model_path,
-                world_size=parallel.tp_degree,
+                world_size=parallel.world_size,
                 tp_degree=parallel.tp_degree,
                 dtype=self.dtype,
                 height=self.shape["height"],
                 width=self.shape["width"],
                 text_seq_len=self.text_seq_len,
                 batch_size=self.batch_size,
+                context_parallel_enabled=parallel.cp_degree > 1,
             )
             self.transformer = NeuronQwenImageTransformerApplication(
                 model_path=self.transformer_path,

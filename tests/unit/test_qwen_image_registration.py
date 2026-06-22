@@ -82,15 +82,35 @@ def test_qwen_image_application_declares_transformer_component(tmp_path):
     assert contract["encoder_hidden_states_mask"]["dtype"] is torch.bool
 
 
-def test_qwen_image_rejects_cp_until_transformer_spike(tmp_path):
+def test_qwen_image_supports_context_parallel(tmp_path):
     model_dir = tmp_path / "Qwen-Image"
     model_dir.mkdir()
 
-    with pytest.raises(NotImplementedError, match="CP is deferred"):
+    pipe = DiffletPipeline.from_pretrained(
+        str(model_dir),
+        model_type="qwen_image",
+        parallel=DiffletParallelConfig(tp_degree=4, cp_degree=2),
+        dtype="bf16",
+        compile_cache_dir=str(tmp_path / "cache"),
+        skip_compile=True,
+        load=False,
+    )
+
+    assert pipe.model_entry.name == "qwen_image"
+    assert pipe.parallel == DiffletParallelConfig(tp_degree=4, cp_degree=2)
+    # world_size scales with the context-parallel degree.
+    assert pipe.parallel.world_size == 8
+
+
+def test_qwen_image_still_rejects_cfg_parallel(tmp_path):
+    model_dir = tmp_path / "Qwen-Image"
+    model_dir.mkdir()
+
+    with pytest.raises(NotImplementedError, match="CFG-parallel is deferred"):
         DiffletPipeline.from_pretrained(
             str(model_dir),
             model_type="qwen_image",
-            parallel=DiffletParallelConfig(tp_degree=4, cp_degree=2),
+            parallel=DiffletParallelConfig(tp_degree=4, cfg_parallel_enabled=True),
             dtype="bf16",
             compile_cache_dir=str(tmp_path / "cache"),
             skip_compile=True,
