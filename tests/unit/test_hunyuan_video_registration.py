@@ -774,14 +774,50 @@ def test_hunyuan_video_application_declares_vae_decoder_component(tmp_path):
     assert pipe.app.pipeline.vae is pipe.app.vae_decoder
 
 
-def test_hunyuan_video_rejects_cp_until_m3_polish(tmp_path):
+def test_hunyuan_video_supports_context_parallel(tmp_path):
     model_dir = tmp_path / "HunyuanVideo"
+    model_dir.mkdir()
+
+    pipe = DiffletPipeline.from_pretrained(
+        str(model_dir),
+        model_type="hunyuan_video",
+        parallel=DiffletParallelConfig(tp_degree=4, cp_degree=2),
+        dtype="bf16",
+        compile_cache_dir=str(tmp_path / "cache"),
+        skip_compile=True,
+        load=False,
+    )
+
+    assert pipe.model_entry.name == "hunyuan_video"
+    assert pipe.parallel == DiffletParallelConfig(tp_degree=4, cp_degree=2)
+    # world_size scales with the context-parallel degree.
+    assert pipe.parallel.world_size == 8
+
+
+def test_hunyuan_video_still_rejects_cfg_parallel(tmp_path):
+    model_dir = tmp_path / "HunyuanVideo"
+    model_dir.mkdir()
+
+    with pytest.raises(NotImplementedError, match="CFG-parallel is deferred"):
+        DiffletPipeline.from_pretrained(
+            str(model_dir),
+            model_type="hunyuan_video",
+            parallel=DiffletParallelConfig(tp_degree=4, cfg_parallel_enabled=True),
+            dtype="bf16",
+            compile_cache_dir=str(tmp_path / "cache"),
+            skip_compile=True,
+            load=False,
+        )
+
+
+def test_hunyuan_video_15_rejects_cp_until_transformer_port(tmp_path):
+    model_dir = tmp_path / "HunyuanVideo-1.5-Diffusers-480p_t2v"
     model_dir.mkdir()
 
     with pytest.raises(NotImplementedError, match="CP is deferred"):
         DiffletPipeline.from_pretrained(
             str(model_dir),
-            model_type="hunyuan_video",
+            model_type="hunyuan_video_15",
             parallel=DiffletParallelConfig(tp_degree=4, cp_degree=2),
             dtype="bf16",
             compile_cache_dir=str(tmp_path / "cache"),

@@ -24,6 +24,8 @@ class HunyuanVideoBackboneInferenceConfig(InferenceConfig):
             self.text_seq_len = 256
         if not hasattr(self, "image_condition_type"):
             self.image_condition_type = None
+        if not hasattr(self, "context_parallel_enabled"):
+            self.context_parallel_enabled = False
 
     def get_required_attributes(self) -> List[str]:
         return [
@@ -200,7 +202,11 @@ class NeuronHunyuanVideoBackboneApplication(NeuronApplicationBase):
 
     @staticmethod
     def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
-        del config
+        if getattr(config, "context_parallel_enabled", False):
+            out = dict(state_dict)
+            world_size = config.neuron_config.world_size
+            out["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)
+            return out
         return state_dict
 
     @staticmethod

@@ -254,6 +254,53 @@ def test_dual_stream_attention_matches_concat_attention_with_mask(monkeypatch):
     assert torch.allclose(context_out, expected[:, latent_seq:], atol=1e-6, rtol=1e-6)
 
 
+def test_dual_stream_attention_sharded_latent_query(monkeypatch):
+    """Context-parallel shape: latent query is a shard while latent K/V are full.
+
+    Each CP rank holds latent Q for its token shard but attends over the full
+    (gathered) latent K/V, so ``q_len != kv_len``. The latent output for the
+    shard must equal the full-attention output sliced to those query rows.
+    """
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
+
+    from difflet.models.hunyuan_video.modeling_hunyuan_video import dual_stream_attention
+
+    torch.manual_seed(0)
+    batch, latent_seq, context_seq, heads, head_dim = 2, 6, 2, 4, 5
+    shard = 3  # rank 0's contiguous slice of the latent sequence
+    latent_q = torch.randn(batch, latent_seq, heads, head_dim)
+    latent_k = torch.randn(batch, latent_seq, heads, head_dim)
+    latent_v = torch.randn(batch, latent_seq, heads, head_dim)
+    context_q = torch.randn(batch, context_seq, heads, head_dim)
+    context_k = torch.randn(batch, context_seq, heads, head_dim)
+    context_v = torch.randn(batch, context_seq, heads, head_dim)
+    # Key-axis mask is built with the full latent length and stays unscattered.
+    mask = torch.ones(batch, 1, 1, latent_seq + context_seq, dtype=torch.bool)
+    mask[1, :, :, -1] = False
+
+    latent_out, context_out = dual_stream_attention(
+        latent_q[:, :shard],  # sharded query
+        latent_k,             # full (gathered) key
+        latent_v,             # full (gathered) value
+        context_q,
+        context_k,
+        context_v,
+        attention_mask=mask,
+    )
+
+    # Reference: full concat attention, then slice the query rows for this shard.
+    expected = _reference_concat_attention(
+        torch.cat([latent_q[:, :shard], context_q], dim=1),
+        torch.cat([latent_k, context_k], dim=1),
+        torch.cat([latent_v, context_v], dim=1),
+        mask,
+    )
+    assert latent_out.shape == (batch, shard, heads, head_dim)
+    assert context_out.shape == (batch, context_seq, heads, head_dim)
+    assert torch.allclose(latent_out, expected[:, :shard], atol=1e-6, rtol=1e-6)
+    assert torch.allclose(context_out, expected[:, shard:], atol=1e-6, rtol=1e-6)
+
+
 def test_trainium_masked_attention_uses_sdpa_fallback(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
 
