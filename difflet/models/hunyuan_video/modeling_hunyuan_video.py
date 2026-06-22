@@ -33,9 +33,15 @@ from diffusers.models.normalization import (
 from difflet.ops import (
     ColumnParallelLinear,
     RowParallelLinear,
+    SPMDRank,
     apply_rotary_emb,
     attention,
+    gather_from_tensor_model_parallel_region_with_dim,
+    get_data_parallel_group,
+    get_dp_rank_spmd,
     get_tensor_model_parallel_size,
+    get_world_group,
+    scatter_to_process_group_spmd,
 )
 
 
@@ -63,6 +69,7 @@ class HunyuanVideoTransformerConfig:
     rope_theta: float = 256.0
     rope_axes_dim: tuple[int, ...] = (16, 56, 56)
     image_condition_type: str | None = None
+    context_parallel_enabled: bool = False
 
     def __post_init__(self) -> None:
         if self.qk_norm != "rms_norm":
@@ -263,10 +270,16 @@ class HunyuanVideoAttention(nn.Module):
         pre_only: bool = False,
         qk_norm: str = "rms_norm",
         eps: float = 1e-6,
+        context_parallel_enabled: bool = False,
     ):
         super().__init__()
         if qk_norm != "rms_norm":
             raise NotImplementedError("HunyuanVideo M3 currently supports qk_norm='rms_norm' only")
+
+        self.context_parallel_enabled = context_parallel_enabled
+        self.data_parallel_group = (
+            get_data_parallel_group() if context_parallel_enabled else None
+        )
 
         tp_degree = get_tensor_model_parallel_size()
         if num_attention_heads % tp_degree != 0:
@@ -377,6 +390,17 @@ class HunyuanVideoAttention(nn.Module):
             if self.norm_added_k is not None:
                 context_k = self.norm_added_k(context_k)
 
+        # Context parallel: each rank holds latent Q for its token shard. Gather
+        # the latent K/V across the CP (data-parallel) group so every rank attends
+        # over the full latent sequence. Latent Q stays sharded (q_len != kv_len).
+        # Context (text) K/V are replicated, so they are left untouched.
+        if self.context_parallel_enabled:
+            stacked_kv = torch.stack([latent_k, latent_v], dim=0)  # [2, B, S/cp, H, d]
+            stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
+                stacked_kv, gather_dim=2, process_group=self.data_parallel_group
+            )  # [2, B, S, H, d]
+            latent_k, latent_v = torch.unbind(stacked_kv, dim=0)
+
         hidden_states, encoder_hidden_states = dual_stream_attention(
             latent_q,
             latent_k,
@@ -408,6 +432,7 @@ class HunyuanVideoTransformerBlock(nn.Module):
         attention_head_dim: int,
         mlp_ratio: float,
         qk_norm: str = "rms_norm",
+        context_parallel_enabled: bool = False,
     ):
         super().__init__()
         hidden_size = num_attention_heads * attention_head_dim
@@ -422,6 +447,7 @@ class HunyuanVideoTransformerBlock(nn.Module):
             pre_only=False,
             qk_norm=qk_norm,
             eps=1e-6,
+            context_parallel_enabled=context_parallel_enabled,
         )
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.ff = HunyuanVideoFeedForward(hidden_size, mult=mlp_ratio)
@@ -486,6 +512,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         attention_head_dim: int,
         mlp_ratio: float = 4.0,
         qk_norm: str = "rms_norm",
+        context_parallel_enabled: bool = False,
     ):
         super().__init__()
         hidden_size = num_attention_heads * attention_head_dim
@@ -499,6 +526,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             pre_only=True,
             qk_norm=qk_norm,
             eps=1e-6,
+            context_parallel_enabled=context_parallel_enabled,
         )
         self.norm = AdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm")
         self.proj_mlp = ColumnParallelLinear(hidden_size, mlp_dim, bias=True, gather_output=False)
@@ -813,10 +841,12 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         rope_theta: float = 256.0,
         rope_axes_dim: tuple[int, ...] = (16, 56, 56),
         image_condition_type: str | None = None,
+        context_parallel_enabled: bool = False,
     ) -> None:
         super().__init__()
         if not isinstance(in_channels, int):
             config = in_channels
+            context_parallel_enabled = getattr(config, "context_parallel_enabled", False)
             in_channels = config.in_channels
             out_channels = config.out_channels
             num_attention_heads = config.num_attention_heads
@@ -853,10 +883,16 @@ class HunyuanVideoTransformer3DModel(nn.Module):
             rope_theta=rope_theta,
             rope_axes_dim=rope_axes_dim,
             image_condition_type=image_condition_type,
+            context_parallel_enabled=context_parallel_enabled,
         )
 
         inner_dim = self.config.inner_dim
         out_channels = out_channels or in_channels
+
+        self.context_parallel_enabled = context_parallel_enabled
+        if context_parallel_enabled:
+            self.data_parallel_group = get_data_parallel_group()
+            self.global_rank = SPMDRank(world_size=get_world_group().size())
 
         self.x_embedder = HunyuanVideoPatchEmbed(
             (patch_size_t, patch_size, patch_size), in_channels, inner_dim
@@ -881,6 +917,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                     attention_head_dim,
                     mlp_ratio=mlp_ratio,
                     qk_norm=qk_norm,
+                    context_parallel_enabled=context_parallel_enabled,
                 )
                 for _ in range(num_layers)
             ]
@@ -892,6 +929,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                     attention_head_dim,
                     mlp_ratio=mlp_ratio,
                     qk_norm=qk_norm,
+                    context_parallel_enabled=context_parallel_enabled,
                 )
                 for _ in range(num_single_layers)
             ]
@@ -955,6 +993,31 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         attention_mask = attention_mask.masked_fill(mask_indices, False)
         attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)
 
+        # Context parallel: scatter the latent tokens (and their rotary embeddings)
+        # along the sequence axis across the CP (data-parallel) group. The text
+        # tokens and the key-axis attention mask stay full/replicated; the mask is
+        # intentionally built above with the full latent length so it still lines up
+        # with the gathered K/V inside attention.
+        if self.context_parallel_enabled:
+            dp_rank = get_dp_rank_spmd(
+                global_rank=self.global_rank.get_rank(),
+                tp_degree=get_tensor_model_parallel_size(),
+            )
+            hidden_states = scatter_to_process_group_spmd(
+                hidden_states,
+                partition_dim=1,
+                rank=dp_rank,
+                process_group=self.data_parallel_group,
+            )
+            cos, sin = image_rotary_emb
+            cos = scatter_to_process_group_spmd(
+                cos, partition_dim=0, rank=dp_rank, process_group=self.data_parallel_group
+            )
+            sin = scatter_to_process_group_spmd(
+                sin, partition_dim=0, rank=dp_rank, process_group=self.data_parallel_group
+            )
+            image_rotary_emb = (cos, sin)
+
         for block in self.transformer_blocks:
             hidden_states, encoder_hidden_states = block(
                 hidden_states,
@@ -975,6 +1038,13 @@ class HunyuanVideoTransformer3DModel(nn.Module):
 
         hidden_states = self.norm_out(hidden_states, temb)
         hidden_states = self.proj_out(hidden_states)
+
+        # Context parallel: reassemble the full latent sequence before unpatching.
+        if self.context_parallel_enabled:
+            hidden_states = gather_from_tensor_model_parallel_region_with_dim(
+                hidden_states, gather_dim=1, process_group=self.data_parallel_group
+            )
+
         hidden_states = hidden_states.reshape(
             batch_size,
             post_patch_num_frames,
@@ -1030,26 +1100,46 @@ def dual_stream_attention(
     ``(batch, sequence, heads, head_dim)``. The implementation concatenates
     latent and context Q/K/V along sequence, runs one non-causal attention via
     ``difflet.ops.attention``, and splits the result back into the two streams.
+
+    Under context parallelism the latent query is sharded across CP ranks while
+    the latent K/V have already been gathered to the full sequence, so the latent
+    query length may be shorter than the latent K/V length (``q_len != kv_len``).
     """
-    _check_stream_shapes(latent_q, latent_k, latent_v, name="latent")
     _check_stream_shapes(context_q, context_k, context_v, name="context")
+    # latent K/V must match each other; latent Q may be a shorter shard (CP), so
+    # only its batch/heads/head_dim must agree with the latent K/V and context.
+    if latent_k.shape != latent_v.shape:
+        raise ValueError(
+            "latent K and V must share shape: "
+            f"k={tuple(latent_k.shape)} v={tuple(latent_v.shape)}"
+        )
+    if latent_q.ndim != 4 or latent_k.ndim != 4:
+        raise ValueError("latent Q/K/V must be 4D (batch, sequence, heads, head_dim)")
+    if latent_q.shape[0] != latent_k.shape[0] or latent_q.shape[2:] != latent_k.shape[2:]:
+        raise ValueError(
+            "latent Q must share batch, heads, and head_dim with latent K/V: "
+            f"q={tuple(latent_q.shape)} k={tuple(latent_k.shape)}"
+        )
     if latent_q.shape[0] != context_q.shape[0] or latent_q.shape[2:] != context_q.shape[2:]:
         raise ValueError(
             "latent and context streams must share batch, heads, and head_dim: "
             f"latent={tuple(latent_q.shape)} context={tuple(context_q.shape)}"
         )
 
-    batch, latent_seq, heads, head_dim = latent_q.shape
+    batch, q_latent_seq, heads, head_dim = latent_q.shape
+    kv_latent_seq = latent_k.shape[1]
     context_seq = context_q.shape[1]
+    q_len = q_latent_seq + context_seq
+    kv_len = kv_latent_seq + context_seq
     scale = (1.0 / math.sqrt(head_dim)) if scale is None else scale
 
     q = torch.cat([latent_q, context_q], dim=1)
     k = torch.cat([latent_k, context_k], dim=1)
     v = torch.cat([latent_v, context_v], dim=1)
 
-    q_flat = q.permute(0, 2, 1, 3).reshape(batch * heads, latent_seq + context_seq, head_dim)
-    k_flat = k.permute(0, 2, 1, 3).reshape(batch * heads, latent_seq + context_seq, head_dim)
-    v_flat = v.permute(0, 2, 1, 3).reshape(batch * heads, latent_seq + context_seq, head_dim)
+    q_flat = q.permute(0, 2, 1, 3).reshape(batch * heads, q_len, head_dim)
+    k_flat = k.permute(0, 2, 1, 3).reshape(batch * heads, kv_len, head_dim)
+    v_flat = v.permute(0, 2, 1, 3).reshape(batch * heads, kv_len, head_dim)
     mask_flat = _flatten_attention_mask(attention_mask, batch=batch, heads=heads)
 
     out = attention(
@@ -1063,8 +1153,8 @@ def dual_stream_attention(
         tp_k=True,
         tp_out=False,
     )
-    out = out.reshape(batch, heads, latent_seq + context_seq, head_dim).permute(0, 2, 1, 3)
-    return out[:, :latent_seq], out[:, latent_seq:]
+    out = out.reshape(batch, heads, q_len, head_dim).permute(0, 2, 1, 3)
+    return out[:, :q_latent_seq], out[:, q_latent_seq:]
 
 
 def _check_stream_shapes(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *, name: str) -> None:
