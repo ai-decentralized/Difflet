@@ -179,6 +179,86 @@ def attention_wrapper_context_parallel_single_transformer(query, key, value, pro
     return attn_output
 
 
+def _maybe_sparse_column_parallel(
+    sparse_mode,
+    in_features,
+    out_features,
+    bias,
+    gather_output,
+    reduce_dtype,
+    compressed_weight=None,
+    tags=None,
+    sparse_metadata=None,
+):
+    """Create ColumnParallelLinear or SparseColumnParallelLinear.
+
+    When sparse_mode is set to "bf16" or "fp8", returns a
+    SparseColumnParallelLinear with the pre-compressed weight and tags.
+    Otherwise returns a standard ColumnParallelLinear.
+    """
+    if sparse_mode in ("bf16", "fp8"):
+        if compressed_weight is None or tags is None:
+            raise ValueError(
+                f"sparse_mode={sparse_mode} but compressed_weight/tags "
+                f"not provided for in={in_features} out={out_features}"
+            )
+        from difflet.layers.sparse_linear import SparseColumnParallelLinear
+        return SparseColumnParallelLinear(
+            in_features=in_features,
+            out_features_local=out_features,
+            compressed_weight=compressed_weight,
+            tags=tags,
+            bias=bias,
+            gather_output=gather_output,
+            reduce_dtype=reduce_dtype,
+            sparse_mode=sparse_mode,
+        )
+    return ColumnParallelLinear(
+        in_features, out_features,
+        bias=bias, gather_output=gather_output, reduce_dtype=reduce_dtype,
+    )
+
+
+def _maybe_sparse_row_parallel(
+    sparse_mode,
+    in_features,
+    out_features,
+    bias,
+    input_is_parallel,
+    reduce_output,
+    skip_bias_add,
+    reduce_dtype,
+    compressed_weight=None,
+    tags=None,
+):
+    """Create RowParallelLinear or SparseRowParallelLinear."""
+    if sparse_mode in ("bf16", "fp8"):
+        if compressed_weight is None or tags is None:
+            raise ValueError(
+                f"sparse_mode={sparse_mode} but compressed_weight/tags "
+                f"not provided for in={in_features} out={out_features}"
+            )
+        from difflet.layers.sparse_linear import SparseRowParallelLinear
+        return SparseRowParallelLinear(
+            in_features=in_features,
+            out_features=out_features,
+            compressed_weight=compressed_weight,
+            tags=tags,
+            bias=bias,
+            input_is_parallel=input_is_parallel,
+            reduce_output=reduce_output,
+            skip_bias_add=skip_bias_add,
+            reduce_dtype=reduce_dtype,
+            sparse_mode=sparse_mode,
+        )
+    return RowParallelLinear(
+        in_features, out_features,
+        bias=bias, input_is_parallel=input_is_parallel,
+        reduce_output=reduce_output, skip_bias_add=skip_bias_add,
+        reduce_dtype=reduce_dtype,
+    )
+
+
 class NeuronFluxTransformer2DModel(torch.nn.Module):
     """
     The Transformer model introduced in Flux.
@@ -1262,10 +1342,20 @@ def split_along_dim(tensor, dim, rank, data_parallel_group):
 
 
 class FluxBackboneInferenceConfig(InferenceConfig):
-    def __init__(self, *args, cfg_parallel_enabled: bool = False, context_parallel_enabled: bool = False, **kwargs):
+    def __init__(self, *args, cfg_parallel_enabled: bool = False,
+                 context_parallel_enabled: bool = False,
+                 sparse_mode: str | None = None,  # NEW: None | "bf16" | "fp8"
+                 **kwargs):
         super().__init__(*args, **kwargs)
         self.cfg_parallel_enabled = cfg_parallel_enabled
         self.context_parallel_enabled = context_parallel_enabled
+        self.sparse_mode = sparse_mode  # NEW
+
+        # Validate sparse_mode
+        if self.sparse_mode not in (None, "bf16", "fp8"):
+            raise ValueError(
+                f"sparse_mode must be None, 'bf16', or 'fp8', got {self.sparse_mode!r}"
+            )
 
         # Validate mutual exclusivity
         if self.cfg_parallel_enabled and self.context_parallel_enabled:
@@ -1472,6 +1562,18 @@ class NeuronFluxBackboneApplication(NeuronApplicationBase):
 
     @staticmethod
     def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
+        sparse_mode = getattr(config, 'sparse_mode', None)
+
+        if sparse_mode in ("bf16", "fp8"):
+            import os
+            sparse_path = os.environ.get("DIFFLET_SPARSE_WEIGHTS_PATH")
+            if sparse_path:
+                sparse_state = torch.load(sparse_path, map_location="cpu")
+                for k, v in sparse_state.items():
+                    if k.startswith("__"):
+                        continue
+                    state_dict[k] = v.clone().detach()
+
         state_dict["global_rank.rank"] = torch.arange(
             0, config.neuron_config.world_size, dtype=torch.int32
         )
