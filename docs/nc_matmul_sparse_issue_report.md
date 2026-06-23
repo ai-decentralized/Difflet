@@ -2,9 +2,9 @@
 
 **Date:** 2026-06-23
 **Hardware:** Trainium2 (`trn2.3xlarge`, 4 NeuronCores)
-**Compiler:** `neuronx-cc==2.24.8799.0+6f62ff7c`
-**NKI:** `nki==0.3.0+23928721754.g18aa1271` (AWS SDK, NKI2)
-**Status:** **BLOCKED** — compiler-level bugs prevent `nc_matmul_sparse` execution
+**Compiler versions tested:** `2.25.3371.0`, `2.24.8799.0`, `2.22.12471.0`
+**NKI:** `0.3.0` (AWS SDK, NKI2) / `0.4.0` (standalone, NKI3)
+**Status:** **BLOCKED** — `int64` SBUF never supported in any public `neuronx-cc` release; `nc_matmul_sparse` is designed around `int64` and cannot execute
 
 ---
 
@@ -232,7 +232,29 @@ block the approach, but is noted for completeness.
 
 ---
 
-## 5. Root Cause Analysis
+## 5. Cross-Version Analysis
+
+All publicly available `neuronx-cc` versions were tested for `int64` SBUF
+support — the prerequisite for `nc_matmul_sparse` to function with the
+`to_compressed_sparse` data format:
+
+| neuronx-cc version | int64 in `nl.ndarray` | int64 in `nl.load` | `nc_matmul_sparse` available |
+|---|---|---|---|
+| `2.25.3371.0` | ❌ | ❌ | ✅ (API exists, can't load data) |
+| `2.24.8799.0` | ❌ | ❌ | ✅ (API exists, can't load data) |
+| `2.22.12471.0` | ❌ | ❌ | ✅ (API exists, can't load data) |
+
+**Finding:** `int64` has **never** been a supported SBUF dtype in any public
+`neuronx-cc` release. The `nc_matmul_sparse` ISA instruction exists in the
+private API across all versions but was designed around an `int64` data
+format that can never be loaded into SBUF — a design-level deadlock.
+
+The instruction appears to have been developed for an internal compiler
+version or a different compilation path (e.g., directly from HBM without
+SBUF staging, or via a dedicated DMA engine) that was never shipped
+publicly.
+
+## 6. Root Cause Analysis
 
 The three blocking issues trace to a single root cause:
 
@@ -250,19 +272,25 @@ support needed to execute it on Trainium2.
 
 ---
 
-## 6. Path Forward
+## 7. Path Forward
 
-1. **Short-term:** Report to AWS Neuron SDK team with the compiler assertion
-   errors (`NCC_ISFV901`, `NCC_ISPS901`) and the int64 SBUF load limitation
-2. **Medium-term:** When AWS ships a `neuronx-cc` with int64 SBUF support
-   and fixed SFKVectorizer, our kernel works as-is
-3. **Fallback:** If int64 SBUF is permanently unavailable, request AWS to
-   update `nc_matmul_sparse` to accept int32 stationary with uint8 tags
-   (maintaining the 4:1 byte ratio with supported dtypes)
+`nc_matmul_sparse` is non-functional across all available public compiler
+versions. Our kernel and layer architecture is correct and can be activated
+immediately if AWS resolves the `int64` SBUF limitation. Options:
+
+1. **AWS support ticket** — report with this document; request either:
+   - `int64` SBUF load support in `nl.load` / `nisa.dma_copy`
+   - OR `nc_matmul_sparse` verifier relaxed to accept `int32` + `uint8` (4:1
+     byte ratio with supported dtypes)
+2. **Alternative ISA** — use dense matmul with pruned weights (zeros
+   computed but memory bandwidth saved via weight compression on HBM)
+3. **FP8 MX path** — the production `nisa.nc_matmul_mx` already works
+   (see `difflet/backends/trainium/nki_kernels/mx.py`); combine with offline
+   FP8 quantization for bandwidth reduction without sparse ISA
 
 ---
 
-## 7. Environment
+## 8. Environment
 
 ```
 Instance:      trn2.3xlarge (i-08aa8db361298d6f2)
