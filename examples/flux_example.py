@@ -41,6 +41,8 @@ The first run with a given combination triggers AOT compile (single-digit
 to tens of minutes). Subsequent runs hit the on-disk cache; default
 location ``~/.cache/difflet/`` or ``$DIFFLET_COMPILE_CACHE``.
 """
+# DEPRECATED: Use the `difflet` CLI instead (e.g. `difflet run --model flux ...`).
+# This script remains functional until the CLI is fully trusted and stable.
 
 from __future__ import annotations
 

@@ -29,6 +29,8 @@ VAE NEFF), so the VAE decode also runs on device. Pass ``--cpu-vae`` to fall bac
 HF CPU VAE decoder (the old hybrid behaviour). The Llama and CLIP NEFFs compile on first
 run into --llama-compiled / --clip-compiled.
 """
+# DEPRECATED: Use the `difflet` CLI instead (e.g. `difflet run --model hunyuan-video ...`).
+# This script remains functional until the CLI is fully trusted and stable.
 
 from __future__ import annotations
 
