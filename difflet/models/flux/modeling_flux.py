@@ -196,7 +196,7 @@ def _maybe_sparse_column_parallel(
     SparseColumnParallelLinear with the pre-compressed weight and tags.
     Otherwise returns a standard ColumnParallelLinear.
     """
-    if sparse_mode in ("bf16", "fp8"):
+    if sparse_mode in ("bf16", "fp8", "mx-fp8"):
         if compressed_weight is None or tags is None:
             raise ValueError(
                 f"sparse_mode={sparse_mode} but compressed_weight/tags "
@@ -232,7 +232,7 @@ def _maybe_sparse_row_parallel(
     tags=None,
 ):
     """Create RowParallelLinear or SparseRowParallelLinear."""
-    if sparse_mode in ("bf16", "fp8"):
+    if sparse_mode in ("bf16", "fp8", "mx-fp8"):
         if compressed_weight is None or tags is None:
             raise ValueError(
                 f"sparse_mode={sparse_mode} but compressed_weight/tags "
@@ -1352,9 +1352,9 @@ class FluxBackboneInferenceConfig(InferenceConfig):
         self.sparse_mode = sparse_mode  # NEW
 
         # Validate sparse_mode
-        if self.sparse_mode not in (None, "bf16", "fp8"):
+        if self.sparse_mode not in (None, "bf16", "fp8", "mx-fp8"):
             raise ValueError(
-                f"sparse_mode must be None, 'bf16', or 'fp8', got {self.sparse_mode!r}"
+                f"sparse_mode must be None, 'bf16', 'fp8', or 'mx-fp8', got {self.sparse_mode!r}"
             )
 
         # Validate mutual exclusivity
@@ -1564,7 +1564,7 @@ class NeuronFluxBackboneApplication(NeuronApplicationBase):
     def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
         sparse_mode = getattr(config, 'sparse_mode', None)
 
-        if sparse_mode in ("bf16", "fp8"):
+        if sparse_mode in ("bf16", "fp8", "mx-fp8"):
             import os
             sparse_path = os.environ.get("DIFFLET_SPARSE_WEIGHTS_PATH")
             if sparse_path:

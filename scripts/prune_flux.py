@@ -5,11 +5,12 @@ Usage:
     python scripts/prune_flux.py \\
         --model black-forest-labs/FLUX.1-dev \\
         --output ./pruned_flux \\
-        --mode bf16
+        --mode mx-fp8
 
-Two modes:
-  - bf16: 4x parameter reduction via 16:4 magnitude pruning
-  - fp8:  16x parameter reduction via 16:4 pruning + FP8 quantization
+Modes:
+  - bf16:   4x parameter reduction via 16:4 magnitude pruning (needs nc_matmul_sparse)
+  - fp8:    16x parameter reduction via 16:4 pruning + FP8 quantization (needs nc_matmul_sparse)
+  - mx-fp8: 4x reduction, column-aligned 16:4 pruning → FP8 x4 packed → nc_matmul_mx compatible
 """
 
 from __future__ import annotations
@@ -115,6 +116,64 @@ def prune_and_compress_fp8(
     return compressed_packed, tags_tensor
 
 
+def prune_and_compress_mx(
+    weight: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Column-aligned 16:4 pruning → FP8 x4 packed for nc_matmul_mx.
+
+    Selects the same 4 of 16 positions per column group for ALL output rows,
+    enabling a standard dense MX matmul on the compressed dimensions.
+
+    Args:
+        weight: [M, K] original weight tensor.
+
+    Returns:
+        weight_mx:   [M, K/16] int32 — FP8 x4 packed nonzero values
+        weight_scale: [16, K/16] uint8 — compact MX scales
+        gather_idx:  [K/16, 4] int64 — which 4 of 16 positions per group
+    """
+    L, R = 16, 4
+    M, K = weight.shape
+    assert K % L == 0, f"K={K} must be divisible by 16"
+    K_groups = K // L  # number of 16-element groups along K
+
+    # Column-aligned: aggregate |magnitude| across all rows,
+    # pick top-4 positions per column group (shared for all rows)
+    w_reshaped = weight.float().abs().reshape(M, K_groups, L)  # [M, K_g, 16]
+    col_scores = w_reshaped.sum(dim=0)  # [K_g, 16] — aggregate importance
+    _, gather_idx = col_scores.topk(R, dim=-1)  # [K_g, 4] — shared indices
+
+    # Extract kept values for all rows using shared indices
+    # weight [M, K] → [M, K_g, 16] → gather → [M, K_g, 4]
+    w_groups = weight.reshape(M, K_groups, L)  # [M, K_g, 16]
+    # Expand gather_idx to [1, K_g, 4] for broadcasting over M
+    kept_values = torch.gather(w_groups, dim=-1, index=gather_idx.unsqueeze(0).expand(M, -1, -1))
+    # kept_values: [M, K_g, 4] — the nonzero values
+
+    # Quantize to FP8
+    kept_fp8 = kept_values.to(torch.float8_e4m3fn)  # [M, K_g, 4]
+
+    # Pack as x4 int32: [M, K_g, 4] fp8 → [M, K_g] int32
+    kept_flat = kept_fp8.reshape(M, K_groups * R)  # [M, K_c]
+    weight_mx = (
+        kept_flat.view(torch.uint8)
+        .reshape(M, K_groups, 4)
+        .view(torch.int32)
+        .reshape(M, K_groups)
+        .contiguous()
+    )  # [M, K_g] int32 — each packs 4 FP8 values
+
+    # MX scales: uniform E8M0 (127 = 2^0 = scale 1.0) for simplicity.
+    # Proper per-block scales can be added later via the CPU quantize_mx
+    # reference when actual MX matmul accuracy needs tuning.
+    weight_scale = torch.full((16, K_groups), 127, dtype=torch.uint8)
+
+    # Gather indices: [K_groups, 4] int64
+    gather_idx_out = gather_idx.contiguous().to(torch.int64)
+
+    return weight_mx, weight_scale, gather_idx_out
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description="16:4 structured pruning for FLUX model weights"
@@ -122,8 +181,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--model", required=True, help="HF model id or local path")
     p.add_argument("--output", required=True, help="Output directory for pruned weights")
     p.add_argument(
-        "--mode", choices=("bf16", "fp8"), default="bf16",
-        help="Sparsity mode: bf16 (4x) or fp8 (16x)",
+        "--mode", choices=("bf16", "fp8", "mx-fp8"), default="mx-fp8",
+        help="Sparsity mode: bf16 (needs nc_matmul_sparse), fp8 (needs nc_matmul_sparse), mx-fp8 (nc_matmul_mx compatible)",
     )
     p.add_argument(
         "--tp-degree", type=int, default=1,
@@ -135,7 +194,11 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     dtype = getattr(torch, args.dtype)
-    prune_fn = prune_and_compress_bf16 if args.mode == "bf16" else prune_and_compress_fp8
+    prune_fn = {
+        "bf16": prune_and_compress_bf16,
+        "fp8": prune_and_compress_fp8,
+        "mx-fp8": prune_and_compress_mx,
+    }[args.mode]
 
     print(f"Loading FLUX model from {args.model}...")
     from diffusers import FluxTransformer2DModel
@@ -163,10 +226,19 @@ def main(argv: list[str] | None = None) -> int:
 
     for key, weight in sorted(linear_weights.items()):
         M, K = weight.shape
-        compressed, tags = prune_fn(weight)
+        result = prune_fn(weight)
         base = key.replace(".weight", "")
-        sparse_state_dict[f"{base}.sparse_weight"] = compressed
-        sparse_state_dict[f"{base}.sparse_tags"] = tags
+        if args.mode == "mx-fp8":
+            weight_mx, weight_scale, gather_idx = result
+            sparse_state_dict[f"{base}.sparse_weight"] = weight_mx
+            sparse_state_dict[f"{base}.sparse_scale"] = weight_scale
+            sparse_state_dict[f"{base}.sparse_gather_idx"] = gather_idx
+            comp_shape = tuple(weight_mx.shape)
+        else:
+            compressed, tags = result
+            sparse_state_dict[f"{base}.sparse_weight"] = compressed
+            sparse_state_dict[f"{base}.sparse_tags"] = tags
+            comp_shape = tuple(compressed.shape)
 
         # Copy bias if present
         bias_key = key.replace(".weight", ".bias")
@@ -174,19 +246,27 @@ def main(argv: list[str] | None = None) -> int:
             sparse_state_dict[bias_key] = state_dict[bias_key].clone()
 
         orig_params = M * K
-        comp_params = compressed.numel() * compressed.element_size()
+        comp_params = weight_mx.numel() * weight_mx.element_size() if args.mode == "mx-fp8" else compressed.numel() * compressed.element_size()
         ratio = (M * K * weight.element_size()) / comp_params
         print(
             f"  {key}: {tuple(weight.shape)} -> compressed "
-            f"{tuple(compressed.shape)} ({ratio:.1f}x size reduction)"
+            f"{comp_shape} ({ratio:.1f}x size reduction)"
         )
 
     # Save metadata
-    sparse_state_dict["__sparse_metadata__"] = dict(
-        mode=args.mode,
-        pattern=[16, 4],
-        compress_ratio=4,
-    )
+    if args.mode == "mx-fp8":
+        sparse_state_dict["__sparse_metadata__"] = dict(
+            mode=args.mode,
+            pattern=[16, 4],
+            compress_ratio=4,
+            isa="nc_matmul_mx",
+        )
+    else:
+        sparse_state_dict["__sparse_metadata__"] = dict(
+            mode=args.mode,
+            pattern=[16, 4],
+            compress_ratio=4,
+        )
 
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
