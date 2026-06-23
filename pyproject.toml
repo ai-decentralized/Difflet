@@ -67,6 +67,9 @@ dev = [
 "Source" = "https://github.com/<org>/difflet-diffusion"          # placeholder
 "Tracker" = "https://github.com/<org>/difflet-diffusion/issues"  # placeholder
 
+[project.scripts]
+difflet = "difflet.cli.main:main"
+
 [tool.setuptools.packages.find]
 include = ["difflet*"]
 exclude = ["tests*", "examples*", "benchmark*", "scripts*", "docs*"]
