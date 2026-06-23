@@ -25,6 +25,8 @@ The Qwen2.5-VL encoder NEFF compiles on first run; the DiT compiles into --dit-c
 content-addressed Difflet compile cache); the VAE reuses Difflet's Wan VAE decoder port (the
 Qwen-Image VAE config is identical to Wan's).
 """
+# DEPRECATED: Use the `difflet` CLI instead (e.g. `difflet run --model qwen-image ...`).
+# This script remains functional until the CLI is fully trusted and stable.
 
 from __future__ import annotations
 

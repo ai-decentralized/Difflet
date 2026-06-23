@@ -38,6 +38,8 @@ Cache key composition mirrors Flux (cclogs/16 §8.6):
     .difflet-cache/wan_text_encoder_smoke / wan_backbone_smoke /
     wan_backbone_2_smoke / wan_vae_decoder_smoke
 """
+# DEPRECATED: Use the `difflet` CLI instead (e.g. `difflet run --model wan ...`).
+# This script remains functional until the CLI is fully trusted and stable.
 
 from __future__ import annotations
 
