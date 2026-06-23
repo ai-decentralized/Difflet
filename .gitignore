@@ -11,7 +11,7 @@ dist/
 .venv/
 venv/
 env/
-
+.superpowers/
 # Compile cache (Trainium AOT artifacts can be huge)
 .difflet_compile_cache/
 .difflet-cache/
