@@ -6,6 +6,7 @@ import sys
 VALID_MODELS = {
     "black-forest-labs/FLUX.1-dev",
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers",
     "hunyuanvideo-community/HunyuanVideo",
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
     "Qwen/Qwen-Image",
@@ -15,6 +16,7 @@ VALID_MODELS = {
 _MODEL_TYPE: dict[str, str] = {
     "black-forest-labs/FLUX.1-dev": "flux",
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": "wan",
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers": "wan",
     "hunyuanvideo-community/HunyuanVideo": "hunyuan_video",
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v": "hunyuan_video_15",
     "Qwen/Qwen-Image": "qwen_image",
@@ -140,6 +142,7 @@ def _get_orchestrator(args: argparse.Namespace):
         "black-forest-labs/FLUX.1-dev": FluxOrchestrator,
         "Lightricks/LTX-2": LTX2Orchestrator,
         "Wan-AI/Wan2.2-T2V-A14B-Diffusers": WanOrchestrator,
+        "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanOrchestrator,
         "hunyuanvideo-community/HunyuanVideo": HunyuanVideoOrchestrator,
         "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v": HunyuanVideo15Orchestrator,
         "Qwen/Qwen-Image": QwenImageOrchestrator,
