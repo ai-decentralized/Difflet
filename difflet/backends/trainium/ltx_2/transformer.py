@@ -12,8 +12,6 @@ from difflet.backends.trainium.core.application_base import NeuronApplicationBas
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.models.ltx_2.application import LTX_2_DEFAULT_TEXT_SEQ_LEN
-from neuronx_distributed.parallel_layers.utils import set_tensor_model_parallel_attributes
-
 from difflet.ops import (
     ColumnParallelLinear,
     RowParallelLinear,
@@ -142,11 +140,12 @@ class _LTX2TrainiumTPAttnProcessor:
     _attention_backend = None
     _parallel_config = None
 
-    def __init__(self, *, tp_degree: int) -> None:
-        # No runtime rank needed: the across-heads RMS uses an all-reduce (rank
-        # free), the norm affine weight is sharded at build time, and RoPE is
-        # pre-sliced once at the rope modules (see _patch_ltx2_rope_for_tp).
+    def __init__(self, *, tp_degree: int, rank_util: "SPMDRank") -> None:
+        # RoPE is pre-sliced once at the rope modules (_patch_ltx2_rope_for_tp);
+        # rank_util is still needed to slice the (replicated) qk-norm affine
+        # weight, which the NxD weight loader does not shard for a plain RMSNorm.
         self.tp_degree = int(tp_degree)
+        self._rank_util = rank_util
 
     def _global_rms_norm(self, norm, x: torch.Tensor) -> torch.Tensor:
         in_dim = x.shape[-1]
@@ -158,9 +157,7 @@ class _LTX2TrainiumTPAttnProcessor:
         x_normed = x.float() * torch.rsqrt(global_sq / full_dim + eps)
         weight = getattr(norm, "weight", None)
         if weight is not None:
-            # weight was sharded to this rank's heads at build time
-            # (_shard_ltx2_transformer); use directly, no per-forward scatter.
-            x_normed = x_normed * weight.float()
+            x_normed = x_normed * _tp_head_scatter(weight, 0, self._rank_util).float()
         return x_normed.to(x.dtype)
 
     def __call__(
@@ -276,29 +273,6 @@ def _patch_ltx2_rope_for_tp(transformer: nn.Module, rank_util: "SPMDRank") -> No
         rope.forward = _make(rope.forward)
 
 
-def _shard_rms_norm_weight(attn: nn.Module, name: str, tp_degree: int) -> None:
-    """Resize+mark an attention qk-norm affine weight so the builder shards it.
-
-    qk_norm="rms_norm_across_heads" carries a full-inner-dim affine weight. Each
-    rank only needs its head slice; marking it tensor-parallel (dim 0) lets the
-    NxD builder load the per-rank slice once at shard time, avoiding a per-forward
-    runtime scatter of this static parameter.
-    """
-    norm = getattr(attn, name, None)
-    weight = getattr(norm, "weight", None) if norm is not None else None
-    if weight is None:
-        return
-    full = int(weight.shape[0])
-    if full % tp_degree != 0:
-        raise ValueError(f"LTX-2 {name} dim {full} must divide tp={tp_degree}.")
-    in_dim = full // tp_degree
-    sharded = nn.Parameter(weight.detach()[:in_dim].clone(), requires_grad=False)
-    set_tensor_model_parallel_attributes(
-        sharded, is_parallel=True, dim=0, stride=1, num_partitions=tp_degree
-    )
-    norm.weight = sharded
-
-
 def _shard_ltx2_transformer(transformer: nn.Module, tp_degree: int, rank_util: "SPMDRank") -> None:
     """Tensor-parallel shard LTX-2's attention + FFN linears across ``tp_degree`` ranks."""
     if tp_degree <= 1:
@@ -306,7 +280,7 @@ def _shard_ltx2_transformer(transformer: nn.Module, tp_degree: int, rank_util: "
 
     replicate_attn = _env_flag("DIFFLET_LTX2_TP_REPLICATE_ATTN")
     replicate_mlp = _env_flag("DIFFLET_LTX2_TP_REPLICATE_MLP")
-    processor = _LTX2TrainiumTPAttnProcessor(tp_degree=tp_degree)
+    processor = _LTX2TrainiumTPAttnProcessor(tp_degree=tp_degree, rank_util=rank_util)
 
     for block in transformer.transformer_blocks:
         if not replicate_attn:
@@ -327,8 +301,6 @@ def _shard_ltx2_transformer(transformer: nn.Module, tp_degree: int, rank_util: "
                 attn.to_k = _column_parallel_like(attn.to_k, gather_output=False)
                 attn.to_v = _column_parallel_like(attn.to_v, gather_output=False)
                 attn.to_out[0] = _row_parallel_like(attn.to_out[0], input_is_parallel=True)
-                _shard_rms_norm_weight(attn, "norm_q", tp_degree)
-                _shard_rms_norm_weight(attn, "norm_k", tp_degree)
                 attn.processor = processor
 
         if not replicate_mlp:
