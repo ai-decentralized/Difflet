@@ -1,4 +1,4 @@
-"""Wan 2.2 T2V orchestrator — 2-stage subprocess pipeline.
+"""Wan 2.1 / 2.2 T2V orchestrator — 2-stage subprocess pipeline.
 
 Stage 1 (transformer): text encoder + DiT backbone, tp×cp cores.
 Stage 2 (vae):         VAE decoder, 1 core.
@@ -14,7 +14,10 @@ from pathlib import Path
 from difflet.cli.orchestrators.base import ModelOrchestrator
 from difflet.cli import runner
 
-_HF_MODEL_ID = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
+# Model id comes from the CLI (--model-id); both Wan 2.2 A14B (MoE, dual
+# transformer) and Wan 2.1 14B (single transformer) route here. The single-vs-
+# dual difference is handled by the app/pipeline (transformer_2 + boundary_ratio
+# are loaded only when present), so the orchestrator is version-agnostic.
 _MODEL_TYPE = "wan"
 _CLI_NAME = "wan"
 _VIRTUAL_CORE_SIZE = None  # Wan does not require NEURON_RT_VIRTUAL_CORE_SIZE
@@ -44,18 +47,18 @@ class WanOrchestrator(ModelOrchestrator):
     def download(self) -> None:
         from difflet.pipeline.path_resolver import resolve_model_path
         from difflet.registry import resolve_model
-        entry = resolve_model(_HF_MODEL_ID, model_type=_MODEL_TYPE)
-        resolve_model_path(_HF_MODEL_ID, local_files_only=False,
+        entry = resolve_model(self.args.model_id, model_type=_MODEL_TYPE)
+        resolve_model_path(self.args.model_id, local_files_only=False,
                            allow_patterns=entry.download_patterns)
-        print(f"[difflet] weights ready for {_HF_MODEL_ID}")
+        print(f"[difflet] weights ready for {self.args.model_id}")
 
     def compile(self) -> None:
         full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1)
         shared = self._shared_cli_args(stage_mode="compile")
-        runner.run_stage(_HF_MODEL_ID, "transformer",
+        runner.run_stage(self.args.model_id, "transformer",
                          num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE,
                          cli_args=shared)
-        runner.run_stage(_HF_MODEL_ID, "vae",
+        runner.run_stage(self.args.model_id, "vae",
                          num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE,
                          cli_args=shared)
 
@@ -66,10 +69,10 @@ class WanOrchestrator(ModelOrchestrator):
         full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1)
         shared = self._shared_cli_args(stage_mode="generate", work_dir=str(work_dir))
         try:
-            runner.run_stage(_HF_MODEL_ID, "transformer",
+            runner.run_stage(self.args.model_id, "transformer",
                              num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE,
                              cli_args=shared)
-            runner.run_stage(_HF_MODEL_ID, "vae",
+            runner.run_stage(self.args.model_id, "vae",
                              num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE,
                              cli_args=shared)
         except Exception:
@@ -94,7 +97,7 @@ class WanOrchestrator(ModelOrchestrator):
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        model_dir = resolve_model_path(_HF_MODEL_ID, local_files_only=True)
+        model_dir = resolve_model_path(self.args.model_id, local_files_only=True)
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
             cp_degree=args.cp_degree or 1,
@@ -150,7 +153,7 @@ class WanOrchestrator(ModelOrchestrator):
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        model_dir = resolve_model_path(_HF_MODEL_ID, local_files_only=True)
+        model_dir = resolve_model_path(self.args.model_id, local_files_only=True)
         parallel = DiffletParallelConfig(tp_degree=1, cp_degree=1)
         compiled_dir = self._stage_compiled_dir("vae", args)
         app = NeuronWanApplication(
@@ -211,7 +214,7 @@ class WanOrchestrator(ModelOrchestrator):
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
         a = self.args
         parts = [
-            "--model-id", _HF_MODEL_ID,
+            "--model-id", self.args.model_id,
             "--tp-degree", str(a.tp_degree or 4),
             "--cp-degree", str(a.cp_degree or 1),
             "--height", str(a.height or 480),

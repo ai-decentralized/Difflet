@@ -198,6 +198,7 @@ def _register_builtin_wan() -> None:
         application_factory="difflet.models.wan.entry:create_wan_application",
         hf_paths=(
             "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+            "Wan-AI/Wan2.1-T2V-14B-Diffusers",
         ),
         detector=is_wan,
         default_parallel=DiffletParallelConfig(tp_degree=4),

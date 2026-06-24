@@ -11,6 +11,7 @@ import sys
 
 _ORCHESTRATOR_MAP: dict[str, str] = {
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": "difflet.cli.orchestrators.wan.WanOrchestrator",
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers": "difflet.cli.orchestrators.wan.WanOrchestrator",
     "hunyuanvideo-community/HunyuanVideo": (
         "difflet.cli.orchestrators.hunyuan_video.HunyuanVideoOrchestrator"
     ),
