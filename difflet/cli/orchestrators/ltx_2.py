@@ -87,15 +87,23 @@ class LTX2Orchestrator(ModelOrchestrator):
             compile_cache_dir=self.args.cache_dir,
             revision=self.args.revision,
             skip_compile=True,
+            # Load the host pipeline (text encoder + connectors + VAE/vocoder) so
+            # prompt encoding and latent decode run on CPU around the Neuron DiT.
+            # These are runtime-only and excluded from the compile cache key.
+            application_kwargs={
+                "enable_host_pipeline": True,
+                "enable_decode_components": True,
+            },
         )
+        # Shape (height/width/num_frames) is baked into the compiled transformer and
+        # the pipeline config; the pipeline derives latents/coords from it, so we do
+        # NOT forward those kwargs here (pipeline.__call__ does not accept them).
         output = pipe(
             prompt=self.args.prompt,
             num_inference_steps=self.args.steps or 40,
-            height=self.args.height or 512,
-            width=self.args.width or 768,
-            num_frames=self.args.num_frames or 121,
             guidance_scale=self.args.guidance_scale or 3.5,
             generator=torch.Generator().manual_seed(self.args.seed),
+            output_type="pt",
         )
         frames = output.frames if hasattr(output, "frames") else output[0]
         out = Path(self.args.output)
