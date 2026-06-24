@@ -12,6 +12,16 @@ from difflet.backends.trainium.core.application_base import NeuronApplicationBas
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.models.ltx_2.application import LTX_2_DEFAULT_TEXT_SEQ_LEN
+from neuronx_distributed.parallel_layers.utils import set_tensor_model_parallel_attributes
+
+from difflet.ops import (
+    ColumnParallelLinear,
+    RowParallelLinear,
+    SPMDRank,
+    get_tensor_model_parallel_size,
+    reduce_from_tensor_model_parallel_region,
+    scatter_to_process_group_spmd,
+)
 
 
 def _difflet_apply_split_rotary_emb(
@@ -52,6 +62,287 @@ def _difflet_apply_split_rotary_emb(
     if needs_reshape:
         out = out.swapaxes(1, 2).reshape(batch_size, seq_len, -1)
     return out.to(dtype=x_dtype)
+
+
+# ── Tensor-parallel sharding (ports the validated AWS contrib recipe) ────────
+# Reference: aws-neuron/neuronx-distributed-inference/contrib/models/ltx2-video-audio
+# and /home/ubuntu/Armin-Neuron/ltx2/native-pytorch (validated TP=4, ~10 GB/rank).
+#
+# Per block (x48) the shardable linears are the six LTX2Attention paths plus the
+# two FeedForwards. Q/K/V + FFN up-proj are column-parallel (gather_output=False);
+# the attention output proj + FFN down-proj are row-parallel (input_is_parallel).
+#
+# Two LTX-2-specific correctness fixes vs a naive qwen-style swap:
+#   * ``qk_norm="rms_norm_across_heads"`` normalizes q/k over the FULL inner dim
+#     (all heads jointly, WITH an affine weight). Under head-sharding each rank
+#     only holds inner_dim/tp features, so we all-reduce the local sum-of-squares
+#     for the global RMS denominator and slice the affine weight to this rank.
+#   * ``"split"`` RoPE returns cos/sin shaped [B, H, T, d/2] whose values differ
+#     per head. The NxD graph is traced once at rank 0, so the head slice must use
+#     the runtime rank (SPMDRank) — a Python int would bake rank 0 into all ranks.
+
+_LTX2_ATTN_ATTRS = (
+    "attn1",                # video self-attention
+    "audio_attn1",          # audio self-attention
+    "attn2",                # video <- text cross-attention
+    "audio_attn2",          # audio <- text cross-attention
+    "audio_to_video_attn",  # a2v cross-attention (Q: video, K/V: audio)
+    "video_to_audio_attn",  # v2a cross-attention (Q: audio, K/V: video)
+)
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").lower() in {"1", "true", "yes"}
+
+
+def _safe_tensor_parallel_size() -> int:
+    """tp_degree if a TP group is initialized (inside ModelBuilder), else 1.
+
+    The host CPU copy in ``_load_cpu_transformer`` is built outside any parallel
+    context and must stay unsharded.
+    """
+    try:
+        return int(get_tensor_model_parallel_size())
+    except AssertionError:
+        # NxD raises AssertionError when the TP group is not initialized (the host
+        # CPU copy path). Narrow on purpose so real config/import errors surface
+        # instead of silently falling back to tp=1 and OOMing at compile.
+        return 1
+
+
+def _column_parallel_like(linear: nn.Linear, *, gather_output: bool) -> ColumnParallelLinear:
+    return ColumnParallelLinear(
+        linear.in_features,
+        linear.out_features,
+        bias=linear.bias is not None,
+        gather_output=gather_output,
+    )
+
+
+def _row_parallel_like(linear: nn.Linear, *, input_is_parallel: bool) -> RowParallelLinear:
+    return RowParallelLinear(
+        linear.in_features,
+        linear.out_features,
+        bias=linear.bias is not None,
+        input_is_parallel=input_is_parallel,
+    )
+
+
+class _LTX2TrainiumTPAttnProcessor:
+    """LTX-2 attention processor that stays correct under head tensor-parallelism.
+
+    Faithful to the stock ``LTX2AudioVideoAttnProcessor`` except:
+      * ``norm_q``/``norm_k`` use a global (all-reduced) RMS over the full inner
+        dim and slice the replicated affine weight to this rank's heads.
+      * The precomputed RoPE is sliced to this rank's heads via the runtime rank.
+    The padding mask reshape uses the (already-sharded) ``attn.heads`` so it is
+    sized to this rank's local head count automatically.
+    """
+
+    _attention_backend = None
+    _parallel_config = None
+
+    def __init__(self, *, tp_degree: int) -> None:
+        # No runtime rank needed: the across-heads RMS uses an all-reduce (rank
+        # free), the norm affine weight is sharded at build time, and RoPE is
+        # pre-sliced once at the rope modules (see _patch_ltx2_rope_for_tp).
+        self.tp_degree = int(tp_degree)
+
+    def _global_rms_norm(self, norm, x: torch.Tensor) -> torch.Tensor:
+        in_dim = x.shape[-1]
+        local_sq = x.float().pow(2).sum(dim=-1, keepdim=True)
+        global_sq = reduce_from_tensor_model_parallel_region(local_sq)
+        full_dim = in_dim * self.tp_degree
+        eps = getattr(norm, "eps", None)
+        eps = 1e-6 if eps is None else eps
+        x_normed = x.float() * torch.rsqrt(global_sq / full_dim + eps)
+        weight = getattr(norm, "weight", None)
+        if weight is not None:
+            # weight was sharded to this rank's heads at build time
+            # (_shard_ltx2_transformer); use directly, no per-forward scatter.
+            x_normed = x_normed * weight.float()
+        return x_normed.to(x.dtype)
+
+    def __call__(
+        self,
+        attn,
+        hidden_states,
+        encoder_hidden_states=None,
+        attention_mask=None,
+        query_rotary_emb=None,
+        key_rotary_emb=None,
+    ):
+        import diffusers.models.transformers.transformer_ltx2 as ltx2_transformer
+
+        # NOTE: gated attention is rejected in _shard_ltx2_transformer before this
+        # processor is ever attached, so no guard is needed here.
+        batch_size, sequence_length, _ = (
+            hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
+        )
+        if attention_mask is not None:
+            attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
+            attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
+
+        if encoder_hidden_states is None:
+            encoder_hidden_states = hidden_states
+
+        query = attn.to_q(hidden_states)
+        key = attn.to_k(encoder_hidden_states)
+        value = attn.to_v(encoder_hidden_states)
+
+        query = self._global_rms_norm(attn.norm_q, query)
+        key = self._global_rms_norm(attn.norm_k, key)
+
+        if query_rotary_emb is not None:
+            # RoPE was already sliced to this rank's heads + cast at the rope
+            # modules (_patch_ltx2_rope_for_tp); apply directly.
+            k_rope = key_rotary_emb if key_rotary_emb is not None else query_rotary_emb
+            if attn.rope_type == "interleaved":
+                query = ltx2_transformer.apply_interleaved_rotary_emb(query, query_rotary_emb)
+                key = ltx2_transformer.apply_interleaved_rotary_emb(key, k_rope)
+            elif attn.rope_type == "split":
+                query = ltx2_transformer.apply_split_rotary_emb(query, query_rotary_emb)
+                key = ltx2_transformer.apply_split_rotary_emb(key, k_rope)
+
+        query = query.unflatten(2, (attn.heads, -1))
+        key = key.unflatten(2, (attn.heads, -1))
+        value = value.unflatten(2, (attn.heads, -1))
+
+        # Masked SDPA via the diffusers dispatcher (NATIVE backend) — matches the
+        # other difflet video models (e.g. hunyuan KeyMask). The text/cross masks
+        # arrive as an additive -10000 bias (built in diffusers transformer.forward)
+        # and are reshaped to [B, heads, *, Sk] above; self-attn passes mask=None.
+        hidden_states = ltx2_transformer.dispatch_attention_fn(
+            query,
+            key,
+            value,
+            attn_mask=attention_mask,
+            dropout_p=0.0,
+            is_causal=False,
+            backend=self._attention_backend,
+            parallel_config=self._parallel_config,
+        )
+        hidden_states = hidden_states.flatten(2, 3)
+        hidden_states = hidden_states.to(query.dtype)
+        hidden_states = attn.to_out[0](hidden_states)
+        hidden_states = attn.to_out[1](hidden_states)
+        return hidden_states
+
+
+def _tp_head_scatter(tensor: torch.Tensor, dim: int, rank_util: "SPMDRank") -> torch.Tensor:
+    """This rank's contiguous chunk of ``tensor`` along ``dim`` (NxD SPMD scatter).
+
+    Uses scatter_to_process_group_spmd (not narrow/index_select) for the Neuron
+    compiler reasons documented elsewhere; non-zero dims are moved to dim 0 first
+    since the primitive only exercises partition_dim=0.
+    """
+    rank = rank_util.get_rank()
+    if dim == 0:
+        return scatter_to_process_group_spmd(tensor, 0, rank, None)
+    moved = tensor.movedim(dim, 0).contiguous()
+    moved = scatter_to_process_group_spmd(moved, 0, rank, None)
+    return moved.movedim(0, dim)
+
+
+def _patch_ltx2_rope_for_tp(transformer: nn.Module, rank_util: "SPMDRank") -> None:
+    """Slice each RoPE module's cos/sin to this rank's heads ONCE per forward.
+
+    The 4 rope modules are each called once in ``transformer.forward`` and their
+    outputs fan out to all 48 blocks, so slicing here (rather than inside every
+    attention processor) removes hundreds of redundant per-rank scatters. Also
+    casts to bf16 at the boundary (AWS contrib fix #5/#8).
+    """
+    for attr in ("rope", "audio_rope", "cross_attn_rope", "cross_attn_audio_rope"):
+        rope = getattr(transformer, attr, None)
+        if rope is None:
+            continue
+
+        def _make(orig_forward):
+            def _wrapped(*args, **kwargs):
+                out = orig_forward(*args, **kwargs)
+                if not (isinstance(out, tuple) and len(out) == 2 and torch.is_tensor(out[0])):
+                    return out
+                cos, sin = out
+                if cos.ndim == 4:  # split RoPE [B, H, T, d/2] -> head axis
+                    cos = _tp_head_scatter(cos, 1, rank_util)
+                    sin = _tp_head_scatter(sin, 1, rank_util)
+                elif cos.ndim == 3:  # interleaved RoPE [B, T, inner] -> last axis
+                    cos = _tp_head_scatter(cos, -1, rank_util)
+                    sin = _tp_head_scatter(sin, -1, rank_util)
+                return cos.to(torch.bfloat16), sin.to(torch.bfloat16)
+
+            return _wrapped
+
+        rope.forward = _make(rope.forward)
+
+
+def _shard_rms_norm_weight(attn: nn.Module, name: str, tp_degree: int) -> None:
+    """Resize+mark an attention qk-norm affine weight so the builder shards it.
+
+    qk_norm="rms_norm_across_heads" carries a full-inner-dim affine weight. Each
+    rank only needs its head slice; marking it tensor-parallel (dim 0) lets the
+    NxD builder load the per-rank slice once at shard time, avoiding a per-forward
+    runtime scatter of this static parameter.
+    """
+    norm = getattr(attn, name, None)
+    weight = getattr(norm, "weight", None) if norm is not None else None
+    if weight is None:
+        return
+    full = int(weight.shape[0])
+    if full % tp_degree != 0:
+        raise ValueError(f"LTX-2 {name} dim {full} must divide tp={tp_degree}.")
+    in_dim = full // tp_degree
+    sharded = nn.Parameter(weight.detach()[:in_dim].clone(), requires_grad=False)
+    set_tensor_model_parallel_attributes(
+        sharded, is_parallel=True, dim=0, stride=1, num_partitions=tp_degree
+    )
+    norm.weight = sharded
+
+
+def _shard_ltx2_transformer(transformer: nn.Module, tp_degree: int, rank_util: "SPMDRank") -> None:
+    """Tensor-parallel shard LTX-2's attention + FFN linears across ``tp_degree`` ranks."""
+    if tp_degree <= 1:
+        return
+
+    replicate_attn = _env_flag("DIFFLET_LTX2_TP_REPLICATE_ATTN")
+    replicate_mlp = _env_flag("DIFFLET_LTX2_TP_REPLICATE_MLP")
+    processor = _LTX2TrainiumTPAttnProcessor(tp_degree=tp_degree)
+
+    for block in transformer.transformer_blocks:
+        if not replicate_attn:
+            for name in _LTX2_ATTN_ATTRS:
+                attn = getattr(block, name)
+                if int(attn.heads) % int(tp_degree) != 0:
+                    raise ValueError(
+                        f"LTX-2 {name} heads {attn.heads} must divide tp={tp_degree}."
+                    )
+                if getattr(attn, "to_gate_logits", None) is not None:
+                    raise NotImplementedError(
+                        "LTX-2 tensor-parallel sharding does not support gated attention."
+                    )
+                attn.heads = int(attn.heads) // int(tp_degree)
+                attn.inner_dim = int(attn.inner_dim) // int(tp_degree)
+                attn.inner_kv_dim = int(attn.inner_kv_dim) // int(tp_degree)
+                attn.to_q = _column_parallel_like(attn.to_q, gather_output=False)
+                attn.to_k = _column_parallel_like(attn.to_k, gather_output=False)
+                attn.to_v = _column_parallel_like(attn.to_v, gather_output=False)
+                attn.to_out[0] = _row_parallel_like(attn.to_out[0], input_is_parallel=True)
+                _shard_rms_norm_weight(attn, "norm_q", tp_degree)
+                _shard_rms_norm_weight(attn, "norm_k", tp_degree)
+                attn.processor = processor
+
+        if not replicate_mlp:
+            block.ff.net[0].proj = _column_parallel_like(block.ff.net[0].proj, gather_output=False)
+            block.ff.net[2] = _row_parallel_like(block.ff.net[2], input_is_parallel=True)
+            block.audio_ff.net[0].proj = _column_parallel_like(
+                block.audio_ff.net[0].proj, gather_output=False
+            )
+            block.audio_ff.net[2] = _row_parallel_like(block.audio_ff.net[2], input_is_parallel=True)
+
+    # Slice RoPE once at the rope modules (heads were sharded above), so the
+    # per-rank rope fans out to all blocks without re-scattering per attention.
+    if not replicate_attn:
+        _patch_ltx2_rope_for_tp(transformer, rank_util)
 
 
 class LTX2TransformerInferenceConfig(InferenceConfig):
@@ -227,6 +518,21 @@ class _LTX2TransformerTraceModule(nn.Module):
             use_prompt_embeddings=bool(getattr(config, "use_prompt_embeddings", True)),
             perturbed_attn=bool(getattr(config, "perturbed_attn", False)),
         )
+
+        # Tensor-parallel sharding: only when a TP group is live (device compile).
+        # The runtime rank for RoPE/QK-norm head slicing comes from SPMDRank;
+        # its buffer is populated via convert_hf_to_neuron_state_dict (arange).
+        tp_degree = _safe_tensor_parallel_size()
+        if tp_degree > 1:
+            # The TP processor replaces the stock attention processor; it does not
+            # implement perturbation (STG). Fail loudly rather than silently
+            # dropping perturbation_mask/all_perturbed kwargs the block would pass.
+            if bool(getattr(config, "perturbed_attn", False)):
+                raise NotImplementedError(
+                    "LTX-2 tensor-parallel sharding does not support perturbed_attn (STG)."
+                )
+            self.tp_rank_util = SPMDRank(tp_degree)
+            _shard_ltx2_transformer(self.transformer, tp_degree, self.tp_rank_util)
 
     def forward(
         self,
@@ -455,11 +761,16 @@ class NeuronLTX2TransformerApplication(NeuronApplicationBase):
 
     @staticmethod
     def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
-        del config
-        return {
+        out = {
             key if key.startswith("transformer.") else f"transformer.{key}": value
             for key, value in state_dict.items()
         }
+        # SPMDRank buffer for per-rank RoPE / QK-norm head slicing. Sharded along
+        # dim 0 so each rank loads its own id (the standard NxD arange trick).
+        tp_degree = int(getattr(config.neuron_config, "tp_degree", 1))
+        if tp_degree > 1:
+            out["tp_rank_util.rank"] = torch.arange(0, tp_degree, dtype=torch.int32)
+        return out
 
     @staticmethod
     def update_state_dict_for_tied_weights(state_dict):

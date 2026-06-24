@@ -68,7 +68,13 @@ class CacheSpec:
                 "width": self.width,
                 "num_frames": self.num_frames,
             },
-            "application_kwargs": _normalize_for_cache(self.application_kwargs or {}),
+            "application_kwargs": _normalize_for_cache(
+                {
+                    key: value
+                    for key, value in (self.application_kwargs or {}).items()
+                    if key not in _RUNTIME_ONLY_APP_KWARGS
+                }
+            ),
             "toolchain": _cache_relevant_toolchain_versions(),
         }
         # Additive-only (cclog 56 D3): inject the candidate sub-dict
@@ -96,6 +102,14 @@ class CacheSpec:
         if self.precision_schedule is None:
             return None
         return _normalize_for_cache(self.precision_schedule)
+
+
+# Application kwargs that only affect runtime component loading (host text
+# encoder / VAE / decode), never the compiled NEFF — excluded from the cache key
+# so enabling them at generate time still hits the precompiled transformer cache.
+_RUNTIME_ONLY_APP_KWARGS: frozenset[str] = frozenset(
+    {"enable_host_pipeline", "enable_decode_components", "host_device"}
+)
 
 
 def _normalize_for_cache(value: Any) -> Any:
