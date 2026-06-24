@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from typing import List
 
@@ -16,6 +17,7 @@ from difflet.ops import (
     ColumnParallelLinear,
     RowParallelLinear,
     SPMDRank,
+    attention as difflet_attention,
     get_tensor_model_parallel_size,
     reduce_from_tensor_model_parallel_region,
     scatter_to_process_group_spmd,
@@ -137,9 +139,6 @@ class _LTX2TrainiumTPAttnProcessor:
     sized to this rank's local head count automatically.
     """
 
-    _attention_backend = None
-    _parallel_config = None
-
     def __init__(self, *, tp_degree: int, rank_util: "SPMDRank") -> None:
         # RoPE is pre-sliced once at the rope modules (_patch_ltx2_rope_for_tp);
         # rank_util is still needed to slice the (replicated) qk-norm affine
@@ -201,26 +200,52 @@ class _LTX2TrainiumTPAttnProcessor:
                 query = ltx2_transformer.apply_split_rotary_emb(query, query_rotary_emb)
                 key = ltx2_transformer.apply_split_rotary_emb(key, k_rope)
 
-        query = query.unflatten(2, (attn.heads, -1))
-        key = key.unflatten(2, (attn.heads, -1))
-        value = value.unflatten(2, (attn.heads, -1))
+        out_dtype = query.dtype
+        n_heads = attn.heads
+        if attention_mask is None:
+            # Self-attention (the dominant cost): route to the NKI attention_cte
+            # flash kernel in the [B*H, S, D] tp_q layout (~4x over compiled SDPA),
+            # matching the other difflet video models. No mask, so no in-graph
+            # mask->bounds resolution.
+            bsz, q_len, inner = query.shape
+            k_len = key.shape[1]
+            head_dim = inner // n_heads
+            q3 = query.reshape(bsz, q_len, n_heads, head_dim).permute(0, 2, 1, 3).reshape(
+                bsz * n_heads, q_len, head_dim
+            )
+            k3 = key.reshape(bsz, k_len, n_heads, head_dim).permute(0, 2, 1, 3).reshape(
+                bsz * n_heads, k_len, head_dim
+            )
+            v3 = value.reshape(bsz, k_len, n_heads, head_dim).permute(0, 2, 1, 3).reshape(
+                bsz * n_heads, k_len, head_dim
+            )
+            out3 = difflet_attention(
+                q3, k3, v3,
+                scale=1.0 / math.sqrt(head_dim),
+                causal=False,
+                tp_q=True, tp_k=True, tp_out=False,
+            )
+            hidden_states = out3.reshape(bsz, n_heads, q_len, head_dim).permute(0, 2, 1, 3).reshape(
+                bsz, q_len, inner
+            )
+        else:
+            # Cross-attention (text key-padding mask): keep the validated masked SDPA
+            # dispatch path. The attention_cte bound_min/bound_max route for contiguous
+            # masks is a follow-up (mask->bounds must move out of the XLA trace).
+            query = query.unflatten(2, (n_heads, -1))
+            key = key.unflatten(2, (n_heads, -1))
+            value = value.unflatten(2, (n_heads, -1))
+            hidden_states = ltx2_transformer.dispatch_attention_fn(
+                query, key, value,
+                attn_mask=attention_mask,
+                dropout_p=0.0,
+                is_causal=False,
+                backend=None,
+                parallel_config=None,
+            )
+            hidden_states = hidden_states.flatten(2, 3)
 
-        # Masked SDPA via the diffusers dispatcher (NATIVE backend) — matches the
-        # other difflet video models (e.g. hunyuan KeyMask). The text/cross masks
-        # arrive as an additive -10000 bias (built in diffusers transformer.forward)
-        # and are reshaped to [B, heads, *, Sk] above; self-attn passes mask=None.
-        hidden_states = ltx2_transformer.dispatch_attention_fn(
-            query,
-            key,
-            value,
-            attn_mask=attention_mask,
-            dropout_p=0.0,
-            is_causal=False,
-            backend=self._attention_backend,
-            parallel_config=self._parallel_config,
-        )
-        hidden_states = hidden_states.flatten(2, 3)
-        hidden_states = hidden_states.to(query.dtype)
+        hidden_states = hidden_states.to(out_dtype)
         hidden_states = attn.to_out[0](hidden_states)
         hidden_states = attn.to_out[1](hidden_states)
         return hidden_states
