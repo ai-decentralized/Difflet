@@ -1,0 +1,60 @@
+{
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "model_type": "wan",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "compile_seconds": 6507.0,
+  "compile_breakdown": {
+    "text_encoder(UMT5)": 31.0,
+    "transformer(WanTransformer3DModel, 14B)": 431.0,
+    "vae_decoder": 6045.0
+  },
+  "load_seconds": 14.968632461997913,
+  "e2e_cold_seconds": 712.9667833099957,
+  "e2e_warm": null,
+  "step_latency": null,
+  "throughput": {},
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": [
+      1,
+      3,
+      9,
+      480,
+      832
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": -0.87109375,
+    "max": -0.2578125,
+    "mean": -0.5518333315849304,
+    "std": 0.08400312811136246,
+    "note": "saved wan2_1_t2v_14b_diffusers_out.pt"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.14.27725+e2ff0410",
+    "neuronx-cc": "2.25.3371.0+f524f7f8",
+    "neuronx-distributed": "0.19.28093+fc70b593",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline",
+  "status": "ok",
+  "notes": [
+    "compile time from a dedicated clean run; the VAE decoder dominates (~100 min) \u2014 the Wan video VAE is conv-heavy and slow on neuronx-cc.",
+    "single-transformer (no MoE); attention is unmasked -> attention_cte."
+  ],
+  "timestamp": "2026-06-25 06:14 UTC",
+  "config_slug": "wan_2_1"
+}
