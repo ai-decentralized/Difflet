@@ -1,0 +1,58 @@
+{
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "model_type": "hunyuan_video",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "compile_seconds": 2412.500214374013,
+  "compile_breakdown": {
+    "component_0": 0.7204222679138184,
+    "component_1": 56.18846678733826,
+    "component_2": 595.4985489845276,
+    "wall_total": 2412.500214374013
+  },
+  "load_seconds": 210.21860630001174,
+  "e2e_cold_seconds": 527.2470305540191,
+  "e2e_warm": null,
+  "step_latency": null,
+  "throughput": {},
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": [
+      1,
+      3,
+      61,
+      320,
+      512
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": -2.328125,
+    "max": 2.15625,
+    "mean": -0.5327964425086975,
+    "std": 0.5874906182289124,
+    "note": "saved hunyuanvideo_out.pt"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.14.27725+e2ff0410",
+    "neuronx-cc": "2.25.3371.0+f524f7f8",
+    "neuronx-distributed": "0.19.28093+fc70b593",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4, bf16, attention_cte",
+  "status": "ok",
+  "notes": [],
+  "timestamp": "2026-06-25 07:05 UTC",
+  "config_slug": "hunyuan_video"
+}
