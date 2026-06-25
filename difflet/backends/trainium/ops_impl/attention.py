@@ -8,8 +8,6 @@ import torch.nn.functional as F
 
 from nkilib.core.attention.attention_cte import attention_cte
 
-from .mask_bounds import mask_to_contiguous_bounds
-
 
 def attention(
     q,
@@ -26,21 +24,14 @@ def attention(
     tp_out: bool = False,
     **kwargs,
 ):
-    # Auto-route a contiguous key-pad / packed mask to attention_cte's lossless
-    # bound_min/bound_max path instead of the slow XLA SDPA fallback. Lossless
-    # (cosine 0.99986) and faster, with the gap growing with sequence length
-    # (~1.1x @ S=1k -> ~2.0x @ S=8k). Requires the mask to align with q's folded
-    # (B*H) batch and q in the (B*H, S, D) tp_q layout; a non-contiguous / soft /
-    # ambiguous mask yields None and falls through to the SDPA fallback below.
-    # Ported from binkma-v/Difflet plan-a-lossless (Plan B Task 3 / cclog 96).
-    if bound_min is None and bound_max is None and attention_mask is not None and tp_q:
-        _bounds = mask_to_contiguous_bounds(attention_mask, num_heads=1, seq_q=q.shape[1])
-        if _bounds is not None and _bounds[0].shape[0] == q.shape[0]:
-            bound_min, bound_max = _bounds
-            attention_mask = None
-
-    # Contiguous-masked (lossless) flash path. range_select requires scale==1.0,
-    # so pre-scale q here.
+    # Contiguous-masked (lossless) flash path: a caller that resolved its mask to
+    # attention_cte's per-query bound_min/bound_max range (via
+    # ops_impl.mask_bounds.mask_to_contiguous_bounds, computed OUTSIDE the traced
+    # forward) routes here — measured lossless (cosine 0.99986) and ~1.16x vs SDPA.
+    # NOTE: bounds must be resolved at trace-build time, not inside the traced
+    # forward — running mask_to_contiguous_bounds in-graph trips an XLA broadcast
+    # error on some mask shapes, so there is deliberately no in-graph auto-route.
+    # range_select requires scale==1.0, so pre-scale q here.
     if bound_min is not None or bound_max is not None:
         assert bound_min is not None and bound_max is not None, (
             "bound_min and bound_max must both be provided"
