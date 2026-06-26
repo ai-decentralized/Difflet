@@ -24,8 +24,41 @@
   "load_seconds": 210.21860630001174,
   "e2e_cold_seconds": 527.2470305540191,
   "e2e_warm": null,
-  "step_latency": null,
-  "throughput": {},
+  "step_latency": {
+    "n": 20,
+    "mean": 3.7193677068004036,
+    "median": 3.7193666704843054,
+    "std": 0.0003308728629232994,
+    "p50": 3.7193688769766595,
+    "p90": 3.719713080994552,
+    "min": 3.7185655439971015,
+    "max": 3.7198688770004082,
+    "samples": [
+      3.7196901040151715,
+      3.719260048994329,
+      3.7185655439971015,
+      3.719019547017524,
+      3.7192092099867295,
+      3.7192705600173213,
+      3.718860911001684,
+      3.7196303789969534,
+      3.719848864013329,
+      3.7192349240067415,
+      3.719345779012656,
+      3.719432895013597,
+      3.719364463991951,
+      3.719553801987786,
+      3.7197060089965817,
+      3.7189574950025417,
+      3.7198688770004082,
+      3.719713080994552,
+      3.719452764984453,
+      3.7193688769766595
+    ]
+  },
+  "throughput": {
+    "DiT steps/s": 0.269
+  },
   "peak_device_mem_gb": null,
   "output": {
     "shape": [
@@ -52,7 +85,9 @@
   },
   "config_label": "tp=4, bf16, attention_cte",
   "status": "ok",
-  "notes": [],
+  "notes": [
+    "per-step = 3719.4 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency \u2014 the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes)."
+  ],
   "timestamp": "2026-06-25 07:05 UTC",
   "config_slug": "hunyuan_video"
 }

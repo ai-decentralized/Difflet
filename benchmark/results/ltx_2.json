@@ -14,15 +14,27 @@
     "num_frames": 49
   },
   "steps": 20,
-  "compile_seconds": 495.0,
-  "compile_breakdown": {
-    "transformer(LTX2VideoTransformer3DModel)": 495.0
-  },
-  "load_seconds": 82.46732539799996,
+  "compile_seconds": null,
+  "compile_breakdown": {},
+  "load_seconds": 182.7489194709924,
   "e2e_cold_seconds": 293.4548159389815,
   "e2e_warm": null,
-  "step_latency": null,
-  "throughput": {},
+  "step_latency": {
+    "n": 1,
+    "mean": 0.473,
+    "median": 0.473,
+    "std": 0.0,
+    "p50": 0.473,
+    "p90": 0.473,
+    "min": 0.473,
+    "max": 0.473,
+    "samples": [
+      0.473
+    ]
+  },
+  "throughput": {
+    "DiT steps/s": 2.114
+  },
   "peak_device_mem_gb": null,
   "output": {
     "shape": [
@@ -51,9 +63,8 @@
   "status": "ok",
   "notes": [
     "Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.",
-    "compile time from a dedicated clean run (no concurrent downloads); the e2e generate above was measured clean with --skip-compile.",
-    "per-step DiT forward (warm, attention_cte self-attn) = 0.473 s, from the transformer parity harness (Neuron-only, download-immune); video cosine vs CPU reference = 0.99992 (lossless)."
+    "per-step = 0.473 s/DiT-forward (warm, in-process) from scripts/ltx_2_transformer_parity.py \u2014 the stable Neuron-compute metric; video cosine vs CPU = 0.99992 (lossless). e2e generate is load-dominated and noisy across processes (text-encoder load swings ~80-375 s with disk/page-cache state); treat e2e as indicative, per-step as the optimal metric."
   ],
-  "timestamp": "2026-06-25 06:09 UTC",
+  "timestamp": "2026-06-25 15:18 UTC",
   "config_slug": "ltx_2"
 }

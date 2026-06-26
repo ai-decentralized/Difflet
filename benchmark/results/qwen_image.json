@@ -24,8 +24,41 @@
   "load_seconds": 6.3561614460195415,
   "e2e_cold_seconds": 495.9003687950026,
   "e2e_warm": null,
-  "step_latency": null,
-  "throughput": {},
+  "step_latency": {
+    "n": 20,
+    "mean": 0.44712370869528967,
+    "median": 0.4471576799842296,
+    "std": 0.0001805582453673846,
+    "p50": 0.44715768899186514,
+    "p90": 0.4473150649864692,
+    "min": 0.44659450798644684,
+    "max": 0.4474035279999953,
+    "samples": [
+      0.4469544719904661,
+      0.44659450798644684,
+      0.4472009659803007,
+      0.44715768899186514,
+      0.44726757300668396,
+      0.44689031000598334,
+      0.4469535200041719,
+      0.4473150649864692,
+      0.4472519069968257,
+      0.4471576709765941,
+      0.44720372499432415,
+      0.4470831229991745,
+      0.4474035279999953,
+      0.4471169479948003,
+      0.44718406701576896,
+      0.44704534497577697,
+      0.4473693629843183,
+      0.4471763730107341,
+      0.44715655900654383,
+      0.4469914619985502
+    ]
+  },
+  "throughput": {
+    "DiT steps/s": 2.237
+  },
   "peak_device_mem_gb": null,
   "output": {
     "shape": [
@@ -51,7 +84,9 @@
   },
   "config_label": "tp=4, bf16, joint attention via attention_cte",
   "status": "ok",
-  "notes": [],
+  "notes": [
+    "per-step = 447.1 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency \u2014 the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes)."
+  ],
   "timestamp": "2026-06-25 06:26 UTC",
   "config_slug": "qwen_image"
 }

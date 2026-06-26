@@ -29,7 +29,9 @@
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | — | — | — | — | — |
+| per denoise step (transformer fwd) | 3.72 s | 3.72 s | 3.72 s | 3.72 s | 20 |
+
+**Throughput:** 0.269 DiT steps/s
 
 ## Compile breakdown
 
@@ -57,6 +59,10 @@
 - `neuronx-cc` = 2.25.3371.0+f524f7f8
 - `neuronx-distributed` = 0.19.28093+fc70b593
 - `diffusers` = 0.38.0
+
+## Notes
+
+- per-step = 3719.4 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency — the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).
 
 ## Reproduce
 
