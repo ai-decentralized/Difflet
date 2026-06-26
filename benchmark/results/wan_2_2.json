@@ -21,8 +21,41 @@
   "load_seconds": 16.360165322985267,
   "e2e_cold_seconds": 615.9979431759857,
   "e2e_warm": null,
-  "step_latency": null,
-  "throughput": {},
+  "step_latency": {
+    "n": 20,
+    "mean": 1.1436433761540683,
+    "median": 1.143554073991254,
+    "std": 0.0005010555266147054,
+    "p50": 1.14356462698197,
+    "p90": 1.1444607109879144,
+    "min": 1.1429602779971901,
+    "max": 1.144678565004142,
+    "samples": [
+      1.1433116510161199,
+      1.1431027140060905,
+      1.143097457010299,
+      1.143162710010074,
+      1.1431141890061554,
+      1.1433112060185522,
+      1.1429602779971901,
+      1.1436838009976782,
+      1.1434400900034234,
+      1.1437926260114182,
+      1.143543521000538,
+      1.143325092998566,
+      1.1438280710135587,
+      1.1437569679983426,
+      1.14356462698197,
+      1.1444607109879144,
+      1.1441877790202852,
+      1.144678565004142,
+      1.1439771190052852,
+      1.1445683469937649
+    ]
+  },
+  "throughput": {
+    "DiT steps/s": 0.874
+  },
   "peak_device_mem_gb": null,
   "output": {
     "shape": [
@@ -51,7 +84,8 @@
   "status": "ok",
   "notes": [
     "CAVEAT: the wan orchestrator names compile-cache dirs by shape only (wan_transformer_tp4cp1_h480w832f9), not by model id, so Wan 2.2 reused Wan 2.1's compiled NEFF (compile time shown is a false cache hit). The two 14B transformers are architecturally identical, so 2.2's weights load into the shared graph and the generate is valid; but a faithful separate 2.2 compile needs a model-id-keyed cache (orchestrator fix).",
-    "difflet runs Wan 2.2 with enable_transformer_2=False -> only the high-noise expert (single transformer), not the full A14B MoE."
+    "difflet runs Wan 2.2 with enable_transformer_2=False -> only the high-noise expert (single transformer), not the full A14B MoE.",
+    "per-step = 1143.6 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency \u2014 the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes)."
   ],
   "timestamp": "2026-06-25 06:51 UTC",
   "config_slug": "wan_2_2"

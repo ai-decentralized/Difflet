@@ -29,7 +29,9 @@
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | — | — | — | — | — |
+| per denoise step (transformer fwd) | 1.14 s | 1.14 s | 1.14 s | 1.14 s | 20 |
+
+**Throughput:** 0.874 DiT steps/s
 
 ## Compile breakdown
 
@@ -61,6 +63,7 @@
 
 - compile time from a dedicated clean run; the VAE decoder dominates (~100 min) — the Wan video VAE is conv-heavy and slow on neuronx-cc.
 - single-transformer (no MoE); attention is unmasked -> attention_cte.
+- per-step = 1144.4 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency — the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).
 
 ## Reproduce
 

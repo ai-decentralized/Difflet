@@ -29,7 +29,9 @@
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | — | — | — | — | — |
+| per denoise step (transformer fwd) | 1.14 s | 1.14 s | 1.14 s | 1.14 s | 20 |
+
+**Throughput:** 0.874 DiT steps/s
 
 ## Compile breakdown
 
@@ -59,6 +61,7 @@
 
 - CAVEAT: the wan orchestrator names compile-cache dirs by shape only (wan_transformer_tp4cp1_h480w832f9), not by model id, so Wan 2.2 reused Wan 2.1's compiled NEFF (compile time shown is a false cache hit). The two 14B transformers are architecturally identical, so 2.2's weights load into the shared graph and the generate is valid; but a faithful separate 2.2 compile needs a model-id-keyed cache (orchestrator fix).
 - difflet runs Wan 2.2 with enable_transformer_2=False -> only the high-noise expert (single transformer), not the full A14B MoE.
+- per-step = 1143.6 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency — the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).
 
 ## Reproduce
 

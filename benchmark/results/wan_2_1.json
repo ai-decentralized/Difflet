@@ -23,8 +23,41 @@
   "load_seconds": 14.968632461997913,
   "e2e_cold_seconds": 712.9667833099957,
   "e2e_warm": null,
-  "step_latency": null,
-  "throughput": {},
+  "step_latency": {
+    "n": 20,
+    "mean": 1.1443716727997526,
+    "median": 1.1442986709880643,
+    "std": 0.0003735943729915052,
+    "p50": 1.1443149189872202,
+    "p90": 1.1446642170194536,
+    "min": 1.1437632129818667,
+    "max": 1.1452344210119918,
+    "samples": [
+      1.1438817080052104,
+      1.1438903179951012,
+      1.1437632129818667,
+      1.144021062005777,
+      1.1442206329957116,
+      1.1443149189872202,
+      1.1441790760145523,
+      1.1440928039955907,
+      1.1442675330035854,
+      1.1442719059996307,
+      1.1442824229889084,
+      1.1444341779861134,
+      1.1444442269857973,
+      1.1446642170194536,
+      1.1446280399977695,
+      1.1444403750065248,
+      1.144626153021818,
+      1.1451611990050878,
+      1.1446150509873405,
+      1.1452344210119918
+    ]
+  },
+  "throughput": {
+    "DiT steps/s": 0.874
+  },
   "peak_device_mem_gb": null,
   "output": {
     "shape": [
@@ -53,7 +86,8 @@
   "status": "ok",
   "notes": [
     "compile time from a dedicated clean run; the VAE decoder dominates (~100 min) \u2014 the Wan video VAE is conv-heavy and slow on neuronx-cc.",
-    "single-transformer (no MoE); attention is unmasked -> attention_cte."
+    "single-transformer (no MoE); attention is unmasked -> attention_cte.",
+    "per-step = 1144.4 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency \u2014 the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes)."
   ],
   "timestamp": "2026-06-25 06:14 UTC",
   "config_slug": "wan_2_1"

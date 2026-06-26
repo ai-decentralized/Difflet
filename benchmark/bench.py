@@ -65,7 +65,13 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
                 res.throughput["steps/s"] = 1.0 / st.mean
         res.peak_device_mem_gb = g.get("peak_mem_gb")
         res.output = g.get("output")
-        # warm generate(s)
+        # NOTE on per-step: the marginal-across-process method (run at 2 step
+        # counts, subtract) is NOT used — each `difflet generate` reloads the
+        # text encoder (5-11 GB) whose latency swings with OS page-cache warmth,
+        # so the "fixed" overhead does not cancel (it produced nonsense, even
+        # negative, per-step). The stable per-step is the in-process warm DiT
+        # forward measured by the per-model *_transformer_parity.py harness
+        # (prints "trainium forward elapsed"); see each report.
         if iters > 0:
             warm = []
             for _ in range(iters):
