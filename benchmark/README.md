@@ -62,27 +62,44 @@ python -m benchmark.bench --all                          # the whole matrix
 python -m benchmark.bench --model flux_1_dev --backend diffusers   # CPU/CUDA reference
 ```
 
-Outputs per model: `benchmark/results/<slug>.json` (machine-readable) and
-`benchmark/<slug>.md` (the detailed report).
-
 The **best-performing configuration** per model (shape, tp/cp, dtype, steps,
-guidance) lives in `models.py::MATRIX` — edit there to retune. Shapes default to
-what fits a single **trn2.3xlarge** (1 Neuron device, 4 cores × 24 GB), so `tp=4`
-is the max (FLUX's registry default of tp=8 is overridden to 4).
+guidance, **pinned HF revision**, seed) lives in `models.py::MATRIX` — edit there to
+retune. Shapes default to what fits a single **trn2.3xlarge** (1 Neuron device, 4
+cores × 24 GB), so `tp=4` is the max (FLUX's registry default of tp=8 is overridden
+to 4).
 
-## Results
+## Results are namespaced per hardware
 
-**[RESULTS.md](RESULTS.md)** — cross-model summary table with measured numbers.
+Each hardware target gets its own folder so reproductions sit side-by-side:
 
-| model | slug | report | status |
+```
+benchmark/
+  trn2/                      # measured here (Trainium trn2.3xlarge)
+    RESULTS.md               # cross-model summary for this device
+    <slug>.json  <slug>.md   # machine-readable + detailed report
+    logs/                    # raw compile/generate logs (gitignored)
+  h100/   b300/   …          # future: same layout, one folder per device
+```
+
+The runner writes to `benchmark/<device>/`; the device defaults to `trn2` and is set
+with `DIFFLET_BENCH_DEVICE` (e.g. `DIFFLET_BENCH_DEVICE=h100 python -m benchmark.bench …`).
+Every per-model report carries a **Reproduction** section with the exact,
+hardware-agnostic test conditions (model id + pinned revision, shape, tp/cp, dtype,
+steps, guidance, seed, prompt) and the precise commands + measurement protocol — so
+H100/B300 can replicate the *same* run and compare against the trn2 numbers.
+
+**[trn2/RESULTS.md](trn2/RESULTS.md)** — cross-model summary table (trn2).
+
+| model | slug | report (trn2) | status |
 |---|---|---|---|
-| LTX-2 (video+audio) | `ltx_2` | [ltx_2.md](ltx_2.md) | see report |
-| Wan 2.1 14B (T2V) | `wan_2_1` | [wan_2_1.md](wan_2_1.md) | see report |
-| Wan 2.2 A14B (T2V) | `wan_2_2` | [wan_2_2.md](wan_2_2.md) | see report |
-| Qwen-Image (T2I) | `qwen_image` | [qwen_image.md](qwen_image.md) | see report |
-| HunyuanVideo (T2V) | `hunyuan_video` | [hunyuan_video.md](hunyuan_video.md) | see report |
-| HunyuanVideo-1.5 (T2V) | `hunyuan_video_15` | [hunyuan_video_15.md](hunyuan_video_15.md) | see report |
-| FLUX.1-dev (T2I) | `flux_1_dev` | [flux_1_dev.md](flux_1_dev.md) | gated repo (needs HF auth) |
+| LTX-2 (video+audio) | `ltx_2` | [trn2/ltx_2.md](trn2/ltx_2.md) | see report |
+| Wan 2.1 14B (T2V) | `wan_2_1` | [trn2/wan_2_1.md](trn2/wan_2_1.md) | see report |
+| Wan 2.2 A14B (T2V) | `wan_2_2` | [trn2/wan_2_2.md](trn2/wan_2_2.md) | see report |
+| Qwen-Image (T2I) | `qwen_image` | [trn2/qwen_image.md](trn2/qwen_image.md) | see report |
+| HunyuanVideo (T2V) | `hunyuan_video` | [trn2/hunyuan_video.md](trn2/hunyuan_video.md) | see report |
+| HunyuanVideo-1.5 (T2V) | `hunyuan_video_15` | [trn2/hunyuan_video_15.md](trn2/hunyuan_video_15.md) | pending (orchestrator stub) |
+| FLUX.1-dev (T2I) | `flux_1_dev` | [trn2/flux_1_dev.md](trn2/flux_1_dev.md) | see report (gated; needs HF token) |
 
-Each report records the exact config, phase timings, latency distribution, compile
-breakdown, output validity, toolchain versions, and a reproduce command.
+Each report records the exact config + pinned revision, phase timings, latency
+distribution, compile breakdown, e2e cold/warm load split, output validity, toolchain
+versions, and the full reproduction commands.

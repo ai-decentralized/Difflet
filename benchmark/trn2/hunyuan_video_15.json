@@ -36,5 +36,11 @@
     "compile not implemented in difflet (orchestrator stub: needs Qwen2.5-VL/ByT5/image-semantic encoders) \u2014 see benchmark/hunyuan_video_15.md"
   ],
   "timestamp": "2026-06-25 07:02 UTC",
-  "config_slug": "hunyuan_video_15"
+  "config_slug": "hunyuan_video_15",
+  "revision": "286be7ce72277246578a3e3cc2487e95ddae5bcf",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 6.0,
+  "output_kind": "video",
+  "device_slug": "trn2"
 }

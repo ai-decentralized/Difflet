@@ -6,7 +6,7 @@
     python -m benchmark.bench --model flux_1_dev --skip-download
 
 For each model it runs download -> compile -> generate via the selected backend
-adapter, collects the universal metrics, writes ``benchmark/results/<slug>.json``
+adapter, collects the universal metrics, writes ``benchmark/<device>/<slug>.json``
 and ``benchmark/<slug>.md`` (the detailed report).
 """
 from __future__ import annotations
@@ -58,6 +58,7 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
         g = adapter.run_generate(cfg)
         res.e2e_cold_seconds = g.get("wall_seconds")
         res.load_seconds = g.get("load_seconds")
+        res.e2e_breakdown = g.get("e2e_breakdown")
         if g.get("step_seconds"):
             st = Stats.from_samples(g["step_seconds"])
             res.step_latency = st.__dict__
@@ -85,15 +86,16 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
 
 
 def write_outputs(slug: str, res: BenchResult) -> None:
-    results_dir = Path("benchmark/results")
-    results_dir.mkdir(parents=True, exist_ok=True)
+    from benchmark.models import DEVICE, results_dir, json_path, report_path
+    Path(results_dir()).mkdir(parents=True, exist_ok=True)
     d = res.to_dict()
     d["config_slug"] = slug
-    (results_dir / f"{slug}.json").write_text(json.dumps(d, indent=2))
-    Path(f"benchmark/{slug}.md").write_text(report.render(d))
+    d["device_slug"] = DEVICE
+    Path(json_path(slug)).write_text(json.dumps(d, indent=2))
+    Path(report_path(slug)).write_text(report.render(d))
     print(f"[bench] {slug}: status={res.status}  "
           f"compile={res.compile_seconds}  e2e_cold={res.e2e_cold_seconds}  "
-          f"-> benchmark/{slug}.md", flush=True)
+          f"-> {report_path(slug)}", flush=True)
 
 
 def main() -> int:

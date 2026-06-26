@@ -39,3 +39,21 @@ AGENTS.md
 
 # Design specs (local working docs, not committed)
 .specs/
+
+# neuronx-cc / NKI compile scratch (16-hex-char dirs + private NKI dumps created in CWD)
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]/
+neuronxcc.private_nkl.*
+log-neuron-cc.txt
+nxd_model/
+
+# Large model weights / compiled artifacts — never commit these (download to ~/.cache instead)
+*.safetensors
+*.neff
+*.bin
+*.gguf
+*.onnx
+*.msgpack
+*.pth
+*.ckpt
+# HF hub cache layout, if a model is ever downloaded into the repo by mistake
+models--*/

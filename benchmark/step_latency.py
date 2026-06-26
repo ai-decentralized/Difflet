@@ -10,7 +10,7 @@ DiT-step latency, which is what "optimal performance" should report.
     source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
     python -m benchmark.step_latency --model wan_2_1 [--iters 20]
 
-Patches benchmark/results/<slug>.json (step_latency, throughput) and re-renders
+Patches benchmark/<device>/<slug>.json (step_latency, throughput) and re-renders
 benchmark/<slug>.md.
 """
 from __future__ import annotations
@@ -42,10 +42,15 @@ def _load_transformer(slug, cfg):
         pipe = DiffletPipeline.from_pretrained(
             cfg.model_id, model_type="ltx_2", parallel=parallel, dtype=torch.bfloat16,
             height=cfg.height, width=cfg.width, num_frames=cfg.num_frames,
-            compile_cache_dir=str(cache), skip_compile=True, skip_warmup=True,
-        )
+            compile_cache_dir=str(cache), skip_compile=True, skip_warmup=True)
         sub = pipe.app.transformer
         return sub, sub.models[0].input_generator()[0]
+
+    # NOTE: flux is intentionally NOT handled here. Its compiled-graph
+    # input_generator() order differs from the wrapper forward() signature
+    # (which derives image_rotary_emb from img_ids/txt_ids), so positional
+    # calling mismaps the args. flux's per-step is taken from the warm
+    # denoise-loop rate in its generate log instead (see flux_1_dev.json note).
 
     if cfg.model_type == "wan":
         from difflet.models.wan.application import NeuronWanApplication
@@ -105,7 +110,8 @@ def main() -> int:
     print(f"[step] {args.model}: {st.mean*1000:.1f} ms/forward "
           f"(median {st.median*1000:.1f}, p90 {st.p90*1000:.1f}, n={st.n})", flush=True)
 
-    jp = Path(f"benchmark/results/{args.model}.json")
+    from benchmark.models import json_path, report_path
+    jp = Path(json_path(args.model))
     if jp.exists():
         d = json.loads(jp.read_text())
         d["step_latency"] = st.__dict__
@@ -117,8 +123,8 @@ def main() -> int:
             f"n={st.n}) via benchmark.step_latency — the stable Neuron-compute metric "
             f"(e2e generate is load-dominated/noisy across processes).")
         jp.write_text(json.dumps(d, indent=2))
-        Path(f"benchmark/{args.model}.md").write_text(report.render(d))
-        print(f"[step] patched benchmark/{args.model}.md", flush=True)
+        Path(report_path(args.model)).write_text(report.render(d))
+        print(f"[step] patched {report_path(args.model)}", flush=True)
     return 0
 
 
