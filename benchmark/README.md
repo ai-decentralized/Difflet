@@ -89,6 +89,8 @@ steps, guidance, seed, prompt) and the precise commands + measurement protocol �
 H100/B300 can replicate the *same* run and compare against the trn2 numbers.
 
 **[trn2/RESULTS.md](trn2/RESULTS.md)** — cross-model summary table (trn2).
+**[h100/RESULTS.md](h100/RESULTS.md)** — cross-model summary + H100-vs-trn2 per-step
+comparison (NVIDIA H100 PCIe 80 GB, stock-diffusers reference, single-GPU dense).
 
 | model | slug | report (trn2) | status |
 |---|---|---|---|
@@ -103,3 +105,27 @@ H100/B300 can replicate the *same* run and compare against the trn2 numbers.
 Each report records the exact config + pinned revision, phase timings, latency
 distribution, compile breakdown, e2e cold/warm load split, output validity, toolchain
 versions, and the full reproduction commands.
+
+### H100 reference (NVIDIA H100 PCIe 80 GB)
+
+Reproduced via the **diffusers CUDA reference adapter** (`--backend cuda`), at the
+**same input size + step count + pinned revision** as trn2. The only directly
+comparable metric is the **DiT per-step** (load-independent compute); e2e cold is
+*not* comparable (trn2's is a true cold disk read, the H100's reads cached weights).
+See **[h100/RESULTS.md](h100/RESULTS.md)** for the full table and caveats.
+
+| model | DiT per-step — H100 | DiT per-step — trn2 | H100 speedup |
+|---|---:|---:|---:|
+| HunyuanVideo | 1525 ms | 3719 ms | 2.4× |
+| Wan 2.1 14B | 563 ms | 1144 ms | 2.0× |
+| Wan 2.2 A14B | 564 ms | 1144 ms | 2.0× |
+| LTX-2 | 319 ms | 473 ms | 1.5× |
+| Qwen-Image | 302 ms | 447 ms | 1.5× |
+| FLUX.1-dev | 316 ms | 266 ms | **0.8× (trn2 faster)** |
+| HunyuanVideo-1.5 | OOM (>80 GB) | — (stub) | — |
+
+**Model-dependent, not a blanket win:** the H100's mature CUDA kernels lead on most
+models, but on **FLUX.1-dev — difflet's most-optimized model — trn2 is faster per-step**
+despite being 4×24 GB NeuronCores vs one 80 GB GPU. The gap reflects software-stack
+maturity as much as silicon. (HunyuanVideo-1.5's 121-frame attention exceeds 80 GB at
+default config; trn2 never ran it either — orchestrator stub.)

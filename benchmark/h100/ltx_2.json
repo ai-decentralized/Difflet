@@ -1,0 +1,110 @@
+{
+  "model_id": "Lightricks/LTX-2",
+  "model_type": "ltx_2",
+  "backend": "cuda",
+  "device": "CUDA / NVIDIA H100 PCIe",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 480,
+    "width": 704,
+    "num_frames": 49
+  },
+  "steps": 20,
+  "compile_seconds": 0.0,
+  "compile_breakdown": {
+    "eager": 0.0
+  },
+  "load_seconds": 17.041598593000344,
+  "e2e_cold_seconds": 24.586231651000162,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "pipeline load (from_pretrained \u2192 device)",
+        "shard_s": null,
+        "load_s": 17.041598593000344
+      }
+    ],
+    "weights_shard_total_s": null,
+    "weights_load_total_s": 17.041598593000344,
+    "wall_total_s": 24.586231651000162,
+    "compute_and_overhead_s": 7.5446330579998175,
+    "note": "eager diffusers (gpu-resident): one fused load of all components; residual is text-encode + denoise loop + VAE decode (no AOT compile)."
+  },
+  "e2e_warm": null,
+  "step_latency": {
+    "n": 19,
+    "mean": 0.3188301962105278,
+    "median": 0.318699502000527,
+    "std": 0.0011020013157369423,
+    "p50": 0.318699502000527,
+    "p90": 0.32002128600015567,
+    "min": 0.3167354850002084,
+    "max": 0.3210798319996684,
+    "samples": [
+      0.3169725429997925,
+      0.3180525319994558,
+      0.32002128600015567,
+      0.31952714399994875,
+      0.3167354850002084,
+      0.3181605750005474,
+      0.3195792309998069,
+      0.31846497999958956,
+      0.31850954800029285,
+      0.3210798319996684,
+      0.3183170769998469,
+      0.318699502000527,
+      0.31758822499978123,
+      0.3190819139999803,
+      0.3185383999998521,
+      0.31890374700014945,
+      0.3190174080000361,
+      0.3198706570001377,
+      0.32065364200025215
+    ]
+  },
+  "throughput": {
+    "steps/s": 3.1364657798588396
+  },
+  "peak_device_mem_gb": 76.678874624,
+  "output": {
+    "shape": [
+      1,
+      49,
+      3,
+      480,
+      704
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": 0.11328125,
+    "max": 1.0,
+    "mean": 0.5574244260787964,
+    "std": 0.1902150958776474,
+    "note": "diffusers frames (video)"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0",
+    "cuda": "12.8"
+  },
+  "config_label": "tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF)",
+  "status": "ok",
+  "notes": [
+    "Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.",
+    "H100/CUDA reference runs single-GPU DENSE via stock diffusers (eager, no AOT compile). The tp=4/cp=1 shown in Configuration/Reproduction is the Trainium sharding for the difflet recipe \u2014 NOT how this GPU run executed (effective tp=1). Per-step latency is the load-independent metric comparable to trn2."
+  ],
+  "timestamp": "2026-06-26 19:29 UTC",
+  "config_slug": "ltx_2",
+  "device_slug": "h100",
+  "revision": "47da56e2ad66ce4125a9922b4a8826bf407f9d0a",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video"
+}

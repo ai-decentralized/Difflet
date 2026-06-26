@@ -49,6 +49,12 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
         config_label=cfg.config_label, timestamp=_utc(),
     )
     res.notes.append(cfg.notes) if cfg.notes else None
+    if backend in ("diffusers", "cuda", "cpu"):
+        res.notes.append(
+            "H100/CUDA reference runs single-GPU DENSE via stock diffusers (eager, no AOT "
+            "compile). The tp=4/cp=1 shown in Configuration/Reproduction is the Trainium "
+            "sharding for the difflet recipe — NOT how this GPU run executed (effective "
+            "tp=1). Per-step latency is the load-independent metric comparable to trn2.")
     try:
         if not skip_download:
             adapter.prepare(cfg)
@@ -91,6 +97,14 @@ def write_outputs(slug: str, res: BenchResult) -> None:
     d = res.to_dict()
     d["config_slug"] = slug
     d["device_slug"] = DEVICE
+    # carry the hardware-agnostic repro fields into the JSON so the report's
+    # Reproduction section is complete and matches the schema across devices.
+    cfg = MATRIX[slug]
+    d["revision"] = cfg.revision
+    d["seed"] = cfg.seed
+    d["prompt"] = cfg.prompt
+    d["guidance_scale"] = cfg.guidance_scale
+    d["output_kind"] = cfg.output_kind
     Path(json_path(slug)).write_text(json.dumps(d, indent=2))
     Path(report_path(slug)).write_text(report.render(d))
     print(f"[bench] {slug}: status={res.status}  "
