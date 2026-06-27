@@ -36,8 +36,9 @@ class TrainiumAdapter(BackendAdapter):
     name = "trainium"
 
     def __init__(self, *, cache_dir: str | None = None, log_dir: str | None = None):
+        from benchmark.models import logs_dir
         self.cache_dir = cache_dir or os.path.expanduser("~/.cache/difflet")
-        self.log_dir = Path(log_dir or "benchmark/results/logs")
+        self.log_dir = Path(log_dir or logs_dir())
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
     # -- info ------------------------------------------------------------- #
@@ -72,34 +73,44 @@ class TrainiumAdapter(BackendAdapter):
             return {}
 
     # -- phases ----------------------------------------------------------- #
+    @staticmethod
+    def _rev(cfg) -> list[str]:
+        """Pin the exact HF commit so the harness reproduces the documented weights."""
+        rev = getattr(cfg, "revision", None)
+        return ["--revision", rev] if rev else []
+
     def prepare(self, spec) -> None:
         cfg = spec
         log = self.log_dir / f"{spec_slug(cfg)}_download.log"
-        self._run([_DIFFLET, "download", "--model-id", cfg.model_id], log, timeout=7200)
+        self._run([_DIFFLET, "download", "--model-id", cfg.model_id] + self._rev(cfg),
+                  log, timeout=7200)
 
     def compile(self, spec) -> tuple[float, dict[str, float]]:
         cfg = spec
         log = self.log_dir / f"{spec_slug(cfg)}_compile.log"
-        cmd = [_DIFFLET, "compile", "--model-id", cfg.model_id,
+        cmd = [_DIFFLET, "compile", "--model-id", cfg.model_id] + self._rev(cfg) + [
                "--tp-degree", str(cfg.tp), "--cp-degree", str(cfg.cp),
                "--cache-dir", self.cache_dir] + cfg.shape_flags()
         t0 = time.perf_counter()
         text = self._run(cmd, log, timeout=14400)
         wall = time.perf_counter() - t0
-        builds = [float(x) for x in _RE_BUILD.findall(text)]
-        breakdown = {f"component_{i}": b for i, b in enumerate(builds)}
-        breakdown["wall_total"] = wall
+        from benchmark.parse_compile import parse
+        breakdown = parse(text)  # detailed, named per-component sub-phases
+        breakdown.setdefault("wall_total_s", round(wall, 3))
         return wall, breakdown
 
     def run_generate(self, spec) -> dict:
         cfg = spec
         out_path = self.log_dir.parent / f"{spec_slug(cfg)}_out"
         log = self.log_dir / f"{spec_slug(cfg)}_generate.log"
-        cmd = [_DIFFLET, "generate", "--model-id", cfg.model_id,
+        # image models save via PIL (needs an image extension); video -> .mp4
+        out_ext = ".png" if getattr(cfg, "output_kind", "video") == "image" else ".mp4"
+        cmd = [_DIFFLET, "generate", "--model-id", cfg.model_id] + self._rev(cfg) + [
                "--tp-degree", str(cfg.tp), "--cp-degree", str(cfg.cp),
                "--cache-dir", self.cache_dir,
                "--prompt", cfg.prompt, "--steps", str(cfg.steps),
-               "--output", str(out_path) + ".mp4"] + cfg.shape_flags()
+               "--seed", str(getattr(cfg, "seed", 42)),
+               "--output", str(out_path) + out_ext] + cfg.shape_flags()
         if cfg.guidance_scale is not None:
             cmd += ["--guidance-scale", str(cfg.guidance_scale)]
         cmd += cfg.extra_generate_flags
@@ -107,12 +118,15 @@ class TrainiumAdapter(BackendAdapter):
         text = self._run(cmd, log, timeout=14400)
         wall = time.perf_counter() - t0
         res: dict = {"wall_seconds": wall, "log": str(log)}
-        load = _RE_LOAD.findall(text)
-        if load:
+        from benchmark.parse_generate import parse as _parse_gen, relabel as _relabel
+        eb = _relabel(_parse_gen(text, wall),
+                      getattr(cfg, "stage_names", None), getattr(cfg, "e2e_host_note", ""))
+        if eb.get("stages"):
+            res["e2e_breakdown"] = eb
+            # the TOTAL load across all sequential stage loads (not just the last)
+            res["load_seconds"] = eb["weights_load_total_s"]
+        elif (load := _RE_LOAD.findall(text)):
             res["load_seconds"] = float(load[-1])
-        shard = _RE_SHARD.findall(text)
-        if shard:
-            res["shard_seconds"] = float(shard[-1])
         fwd = [float(x) for x in _RE_FWD.findall(text)]
         if fwd:
             res["step_seconds"] = fwd
@@ -122,7 +136,7 @@ class TrainiumAdapter(BackendAdapter):
     # -- helpers ---------------------------------------------------------- #
     def _inspect_output(self, out_path: Path) -> dict:
         pt = out_path.with_suffix(".pt")
-        cands = [pt, out_path.with_suffix(".mp4")]
+        cands = [pt, out_path.with_suffix(".mp4"), out_path.with_suffix(".png")]
         target = next((p for p in cands if p.exists()), None)
         if target is None:
             return OutputInfo(note="no output file produced").__dict__

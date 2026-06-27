@@ -1,0 +1,121 @@
+{
+  "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+  "model_type": "wan",
+  "backend": "cuda",
+  "device": "CUDA / NVIDIA B300 SXM6 AC",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "compile_seconds": 0.0,
+  "compile_breakdown": {
+    "eager": 0.0
+  },
+  "load_seconds": 7.984029061000001,
+  "e2e_cold_seconds": 16.018326172999878,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "pipeline load (from_pretrained \u2192 device)",
+        "shard_s": null,
+        "load_s": 7.984029061000001
+      }
+    ],
+    "weights_shard_total_s": null,
+    "weights_load_total_s": 7.984029061000001,
+    "wall_total_s": 16.018326172999878,
+    "compute_and_overhead_s": 8.034297111999877,
+    "note": "eager diffusers (gpu-resident): one fused load of all components; residual is text-encode + denoise loop + VAE decode (no AOT compile). VAE tiling/slicing enabled (standard single-GPU video-decode setting; identical frames, DiT per-step unaffected)."
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 17.47694093600012,
+    "median": 17.47694093600012,
+    "std": 0.0,
+    "p50": 17.47694093600012,
+    "p90": 17.47694093600012,
+    "min": 17.47694093600012,
+    "max": 17.47694093600012,
+    "samples": [
+      17.47694093600012
+    ]
+  },
+  "step_latency": {
+    "n": 19,
+    "mean": 0.24068773073682487,
+    "median": 0.2399705080001695,
+    "std": 0.006805021701186472,
+    "p50": 0.2399705080001695,
+    "p90": 0.24079686400000355,
+    "min": 0.23526998399984222,
+    "max": 0.26844326100035687,
+    "samples": [
+      0.2401514979997046,
+      0.26844326100035687,
+      0.24079686400000355,
+      0.23713939299977937,
+      0.24000746999990952,
+      0.24048526500018852,
+      0.24199866699973427,
+      0.2353061250000792,
+      0.2400299690002612,
+      0.2400059080000574,
+      0.23997993900002257,
+      0.2353782449999926,
+      0.23962136099999043,
+      0.23526998399984222,
+      0.23989891099972738,
+      0.2399705080001695,
+      0.23956296300002577,
+      0.23979460000009567,
+      0.23922595299973182
+    ]
+  },
+  "throughput": {
+    "steps/s": 4.154761013113002
+  },
+  "peak_device_mem_gb": 70.909692928,
+  "output": {
+    "shape": [
+      1,
+      9,
+      3,
+      480,
+      832
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": 0.0,
+    "max": 1.0,
+    "mean": 0.4219903349876404,
+    "std": 0.20411643385887146,
+    "note": "diffusers frames (video)"
+  },
+  "toolchain": {
+    "torch": "2.9.1+cu128",
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0",
+    "cuda": "12.8"
+  },
+  "config_label": "tp=4, bf16, A14B (high/low-noise experts), attention_cte",
+  "status": "ok",
+  "notes": [
+    "H100/CUDA reference runs single-GPU DENSE via stock diffusers (eager, no AOT compile). The tp=4/cp=1 shown in Configuration/Reproduction is the Trainium sharding for the difflet recipe \u2014 NOT how this GPU run executed (effective tp=1). Per-step latency is the load-independent metric comparable to trn2."
+  ],
+  "timestamp": "2026-06-27 04:42 UTC",
+  "config_slug": "wan_2_2",
+  "device_slug": "b300",
+  "revision": "5be7df9619b54f4e2667b2755bc6a756675b5cd7",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video"
+}

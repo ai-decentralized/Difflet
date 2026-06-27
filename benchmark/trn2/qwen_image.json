@@ -1,0 +1,179 @@
+{
+  "model_id": "Qwen/Qwen-Image",
+  "model_type": "qwen_image",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "compile_seconds": 801.2745173239964,
+  "compile_breakdown": {
+    "text_encoder": {
+      "module_load_s": 0.175,
+      "hlo_generate_s": 2.762,
+      "priority_hlo_compile_s": 58.052,
+      "all_hlo_compile_s": 6.548,
+      "build_total_s": 96.17,
+      "other_s": 28.633
+    },
+    "transformer": {
+      "module_load_s": 86.92,
+      "hlo_generate_s": 11.223,
+      "priority_hlo_compile_s": 31.347,
+      "all_hlo_compile_s": 0.006,
+      "build_total_s": 268.545,
+      "other_s": 139.049
+    },
+    "vae_decoder": {
+      "module_load_s": 0.345,
+      "hlo_generate_s": 0.19,
+      "priority_hlo_compile_s": 402.698,
+      "all_hlo_compile_s": 0.0,
+      "build_total_s": 411.598,
+      "other_s": 8.364
+    },
+    "wall_total_s": 776.313
+  },
+  "load_seconds": 462.331,
+  "e2e_cold_seconds": 517.099,
+  "e2e_warm": {
+    "n": 1,
+    "mean": 73.6214679099794,
+    "median": 73.6214679099794,
+    "std": 0.0,
+    "p50": 73.6214679099794,
+    "p90": 73.6214679099794,
+    "min": 73.6214679099794,
+    "max": 73.6214679099794,
+    "samples": [
+      73.6214679099794
+    ]
+  },
+  "step_latency": {
+    "n": 20,
+    "mean": 0.44712370869528967,
+    "median": 0.4471576799842296,
+    "std": 0.0001805582453673846,
+    "p50": 0.44715768899186514,
+    "p90": 0.4473150649864692,
+    "min": 0.44659450798644684,
+    "max": 0.4474035279999953,
+    "samples": [
+      0.4469544719904661,
+      0.44659450798644684,
+      0.4472009659803007,
+      0.44715768899186514,
+      0.44726757300668396,
+      0.44689031000598334,
+      0.4469535200041719,
+      0.4473150649864692,
+      0.4472519069968257,
+      0.4471576709765941,
+      0.44720372499432415,
+      0.4470831229991745,
+      0.4474035279999953,
+      0.4471169479948003,
+      0.44718406701576896,
+      0.44704534497577697,
+      0.4473693629843183,
+      0.4471763730107341,
+      0.44715655900654383,
+      0.4469914619985502
+    ]
+  },
+  "throughput": {
+    "DiT steps/s": 2.237
+  },
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": [
+      1,
+      3,
+      1024,
+      1024
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": -0.953125,
+    "max": 0.88671875,
+    "mean": 0.1316588968038559,
+    "std": 0.5017990469932556,
+    "note": "saved qwen_image_out.pt"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.14.27725+e2ff0410",
+    "neuronx-cc": "2.25.3371.0+f524f7f8",
+    "neuronx-distributed": "0.19.28093+fc70b593",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4, bf16, joint attention via attention_cte",
+  "status": "ok",
+  "notes": [
+    "per-step = 447.1 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency \u2014 the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).",
+    "e2e_cold = 517 s \u2014 TRUE cold start (OS page cache dropped before the run via sudo drop_caches), so the weight load is a real cold disk read; this replaces an earlier value taken with the host weights already cached (artificially low).",
+    "e2e_warm = 74 s (n=1, warm OS page cache from the immediately-preceding cold run, same session). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-06-25 06:26 UTC",
+  "config_slug": "qwen_image",
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 124.326,
+        "shard_s": 98.607
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 332.186,
+        "shard_s": 11.904
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 5.819,
+        "shard_s": 0.121
+      }
+    ],
+    "weights_load_total_s": 462.331,
+    "weights_shard_total_s": 110.632,
+    "wall_total_s": 517.099,
+    "compute_and_overhead_s": 54.768
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 12.012,
+        "shard_s": 1.998
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 23.48,
+        "shard_s": 10.37
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 5.989,
+        "shard_s": 0.046
+      }
+    ],
+    "weights_load_total_s": 41.481,
+    "weights_shard_total_s": 12.414,
+    "wall_total_s": 73.621,
+    "compute_and_overhead_s": 32.14
+  },
+  "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 4.0,
+  "output_kind": "image",
+  "device_slug": "trn2"
+}
