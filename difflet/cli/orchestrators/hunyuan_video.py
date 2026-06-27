@@ -216,7 +216,9 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         guidance = torch.full([1], (args.guidance_scale or 6.0) * 1000.0, dtype=torch.bfloat16)
 
         parallel = DiffletParallelConfig(
-            tp_degree=args.tp_degree or 4, cp_degree=args.cp_degree or 1
+            tp_degree=args.tp_degree or 4,
+            cp_degree=args.cp_degree or 1,
+            cp_mode=getattr(args, "cp_mode", "gather_kv"),
         )
         app = NeuronHunyuanVideoApplication(
             model_path=model_dir, parallel=parallel, dtype=torch.bfloat16,
@@ -281,6 +283,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             "--model-id", _HF_MODEL_ID,
             "--tp-degree", str(a.tp_degree or 4),
             "--cp-degree", str(a.cp_degree or 1),
+            "--cp-mode", str(getattr(a, "cp_mode", "gather_kv")),
             "--height", str(a.height or 320),
             "--width", str(a.width or 512),
             "--num-frames", str(a.num_frames or 61),
