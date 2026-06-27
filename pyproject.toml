@@ -23,12 +23,12 @@ classifiers = [
 dependencies = [
     # Neuron toolchain (Layer 3 — kept as deps, not forked)
     "torch>=2.9.0,<2.10",
-    "torch-neuronx==2.9.0.2.13.26312+8e870898",
+    "torch-neuronx==2.9.0.2.14.27725+e2ff0410",
     "torch-xla==2.9.0",
-    "neuronx-cc==2.24.8799.0+6f62ff7c",         # ships nkilib bundled
-    "neuronx-distributed==0.18.27753+1cafd54f",
-    "nki==0.3.0+23928721754.g18aa1271",
-    "libneuronxla==2.2.16408.0+50c26cbd",
+    "neuronx-cc==2.25.3371.0+f524f7f8",         # ships nkilib bundled
+    "neuronx-distributed==0.19.28093+fc70b593",
+    "nki==0.4.0+25940409122.gd30719f9",
+    "libneuronxla==2.2.16974.0+a550bfe0",
 
     # HuggingFace stack
     "transformers==4.57.6",
@@ -57,7 +57,7 @@ test = [
 dev = [
     "difflet-diffusion[test]",
     "black==26.1.0",
-    "isort==7.0.0",
+    "isort==8.0.1",
     "ruff==0.15.1",
     "libcst",                                     # AST-level import rewriter (M0.5)
     "pre-commit",
