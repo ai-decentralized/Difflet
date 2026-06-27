@@ -52,6 +52,7 @@ from difflet.ops import (
     SPMDRank,
     apply_rotary_emb,
     attention,
+    ring_attention,
     gather_from_tensor_model_parallel_region_with_dim,
     get_data_parallel_group,
     get_dp_rank_spmd,
@@ -364,6 +365,7 @@ class WanAttention(nn.Module):
         is_cross_attention: bool = False,
         dtype: Optional[torch.dtype] = None,
         context_parallel_enabled: bool = False,
+        cp_mode: str = "gather_kv",
     ):
         super().__init__()
         self.dim = dim
@@ -371,6 +373,7 @@ class WanAttention(nn.Module):
         self.head_dim = head_dim
         self.is_cross_attention = is_cross_attention
         self.context_parallel_enabled = context_parallel_enabled
+        self.cp_mode = cp_mode
         if context_parallel_enabled:
             self.data_parallel_group = get_data_parallel_group()
         inner_dim = heads * head_dim
@@ -478,16 +481,18 @@ class WanAttention(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        # CP self-attention: each rank has Q for its token shard; gather full K,V.
+        # CP self-attention: ring rotates sharded K,V; gather_kv all-gathers full K,V.
         # Cross-attention K,V come from encoder_hidden_states which is not scattered.
-        if self.context_parallel_enabled and not self.is_cross_attention:
-            stacked_kv = torch.stack([k, v], dim=0)  # [2, B, heads, S/cp, head_dim]
-            stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
-                stacked_kv, gather_dim=3, process_group=self.data_parallel_group
-            )  # [2, B, heads, S, head_dim]
-            k, v = torch.unbind(stacked_kv, dim=0)
-
-        out = _attn_kernel(q, k, v, head_dim=self.head_dim)
+        if self.context_parallel_enabled and not self.is_cross_attention and self.cp_mode == "ring":
+            out = ring_attention(q, k, v, scale=1.0 / math.sqrt(self.head_dim), causal=False)
+        else:
+            if self.context_parallel_enabled and not self.is_cross_attention:
+                stacked_kv = torch.stack([k, v], dim=0)  # [2, B, heads, S/cp, head_dim]
+                stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
+                    stacked_kv, gather_dim=3, process_group=self.data_parallel_group
+                )  # [2, B, heads, S, head_dim]
+                k, v = torch.unbind(stacked_kv, dim=0)
+            out = _attn_kernel(q, k, v, head_dim=self.head_dim)
 
         # (B, local_heads, S, dim) → (B, S, local_heads * dim); RowParallelLinear then
         # all-reduces each rank's partial output projection back to the full model dim.
@@ -518,6 +523,7 @@ class WanTransformerBlock(nn.Module):
         eps: float = 1e-6,
         dtype: Optional[torch.dtype] = None,
         context_parallel_enabled: bool = False,
+        cp_mode: str = "gather_kv",
     ):
         super().__init__()
         head_dim = dim // num_heads
@@ -525,12 +531,12 @@ class WanTransformerBlock(nn.Module):
         self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
         self.attn1 = WanAttention(
             dim, num_heads, head_dim, eps=eps, is_cross_attention=False, dtype=dtype,
-            context_parallel_enabled=context_parallel_enabled,
+            context_parallel_enabled=context_parallel_enabled, cp_mode=cp_mode,
         )
 
         self.attn2 = WanAttention(
             dim, num_heads, head_dim, eps=eps, is_cross_attention=True, dtype=dtype,
-            context_parallel_enabled=context_parallel_enabled,
+            context_parallel_enabled=context_parallel_enabled, cp_mode=cp_mode,
         )
         self.norm2 = (
             FP32LayerNorm(dim, eps, elementwise_affine=True)
@@ -610,6 +616,7 @@ class WanTransformer3DModel(nn.Module):
         self.dtype = dtype
 
         self.context_parallel_enabled = getattr(config, 'context_parallel_enabled', False)
+        self.cp_mode = getattr(config, 'cp_mode', 'gather_kv')
         if self.context_parallel_enabled:
             self.data_parallel_group = get_data_parallel_group()
             self.global_rank = SPMDRank(world_size=get_world_group().size())
@@ -646,6 +653,7 @@ class WanTransformer3DModel(nn.Module):
                     eps=config.eps,
                     dtype=dtype,
                     context_parallel_enabled=self.context_parallel_enabled,
+                    cp_mode=self.cp_mode,
                 )
                 for _ in range(config.num_layers)
             ]

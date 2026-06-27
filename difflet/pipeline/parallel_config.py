@@ -9,14 +9,16 @@ from dataclasses import asdict, dataclass
 class DiffletParallelConfig:
     """Tensor, context, and CFG parallel settings.
 
-    Context parallelism is configured via ``cp_degree`` (1 = disabled).
-    Context parallelism and CFG parallelism both consume extra data-parallel
-    lanes, so they are mutually exclusive.
+    Context parallelism is configured via ``cp_degree`` (1 = disabled) and
+    ``cp_mode`` selects the CP attention strategy (``"gather_kv"`` default, or
+    ``"ring"``). Context parallelism and CFG parallelism both consume extra
+    data-parallel lanes, so they are mutually exclusive.
     """
 
     tp_degree: int = 1
     cp_degree: int = 1
     cfg_parallel_enabled: bool = False
+    cp_mode: str = "gather_kv"
 
     def __post_init__(self) -> None:
         if self.tp_degree < 1:
@@ -25,6 +27,10 @@ class DiffletParallelConfig:
             raise ValueError("cp_degree must be >= 1")
         if self.cp_degree > 1 and self.cfg_parallel_enabled:
             raise ValueError("cp_degree > 1 and cfg_parallel_enabled are mutually exclusive")
+        if self.cp_mode not in ("gather_kv", "ring"):
+            raise ValueError(f"cp_mode must be one of {{'gather_kv', 'ring'}}, got {self.cp_mode!r}")
+        if self.cp_mode == "ring" and self.cp_degree <= 1:
+            raise ValueError("cp_mode='ring' requires cp_degree > 1")
 
     @property
     def world_size(self) -> int:
@@ -32,7 +38,12 @@ class DiffletParallelConfig:
         return self.tp_degree * self.cp_degree * cfg_multiplier
 
     def to_cache_dict(self) -> dict[str, object]:
-        return asdict(self)
+        # Additive-only: omit cp_mode at its default so a gather_kv config keeps
+        # a compile-cache key byte-identical to every pre-cp_mode model cache.
+        d = asdict(self)
+        if self.cp_mode == "gather_kv":
+            d.pop("cp_mode")
+        return d
 
 
 @dataclass(frozen=True)
