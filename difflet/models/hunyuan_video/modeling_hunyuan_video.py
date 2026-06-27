@@ -41,6 +41,7 @@ from difflet.ops import (
     get_dp_rank_spmd,
     get_tensor_model_parallel_size,
     get_world_group,
+    joint_ring_attention,
     scatter_to_process_group_spmd,
 )
 
@@ -70,6 +71,7 @@ class HunyuanVideoTransformerConfig:
     rope_axes_dim: tuple[int, ...] = (16, 56, 56)
     image_condition_type: str | None = None
     context_parallel_enabled: bool = False
+    cp_mode: str = "gather_kv"
 
     def __post_init__(self) -> None:
         if self.qk_norm != "rms_norm":
@@ -271,12 +273,14 @@ class HunyuanVideoAttention(nn.Module):
         qk_norm: str = "rms_norm",
         eps: float = 1e-6,
         context_parallel_enabled: bool = False,
+        cp_mode: str = "gather_kv",
     ):
         super().__init__()
         if qk_norm != "rms_norm":
             raise NotImplementedError("HunyuanVideo M3 currently supports qk_norm='rms_norm' only")
 
         self.context_parallel_enabled = context_parallel_enabled
+        self.cp_mode = cp_mode
         self.data_parallel_group = (
             get_data_parallel_group() if context_parallel_enabled else None
         )
@@ -390,27 +394,53 @@ class HunyuanVideoAttention(nn.Module):
             if self.norm_added_k is not None:
                 context_k = self.norm_added_k(context_k)
 
-        # Context parallel: each rank holds latent Q for its token shard. Gather
-        # the latent K/V across the CP (data-parallel) group so every rank attends
-        # over the full latent sequence. Latent Q stays sharded (q_len != kv_len).
-        # Context (text) K/V are replicated, so they are left untouched.
-        if self.context_parallel_enabled:
-            stacked_kv = torch.stack([latent_k, latent_v], dim=0)  # [2, B, S/cp, H, d]
-            stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
-                stacked_kv, gather_dim=2, process_group=self.data_parallel_group
-            )  # [2, B, S, H, d]
-            latent_k, latent_v = torch.unbind(stacked_kv, dim=0)
+        # Context parallel: choose ring-attention or gather-KV based on cp_mode.
+        # Under ring: image (latent) K,V are sequence-sharded and rotated via the
+        # ring collective; text (context) K,V are replicated on every rank and
+        # folded in as a local partial. Under gather_kv (default): each rank
+        # all-gathers the full latent K,V before running dual_stream_attention.
+        if self.context_parallel_enabled and self.cp_mode == "ring":
+            if attention_mask is not None:
+                raise NotImplementedError("ring cp_mode does not support attention_mask")
+            # Joint ring: image (latent) K,V sharded → rotated; text (context) K,V
+            # replicated → local partial. q is the joint [image_shard ‖ text].
+            # dual_stream_attention concatenates latent first then context (q[:, :q_latent_seq]
+            # → latent out, q[:, q_latent_seq:] → context out), so we match that ordering.
+            scale = 1.0 / math.sqrt(self.head_dim)
+            q_img = latent_q.transpose(1, 2)      # [B, H, S_img/cp, d]
+            q_txt = context_q.transpose(1, 2)     # [B, H, S_txt, d]
+            q_joint = torch.cat([q_img, q_txt], dim=2)   # [B, H, S_img/cp + S_txt, d]
+            o_joint = joint_ring_attention(
+                q_joint,
+                latent_k.transpose(1, 2), latent_v.transpose(1, 2),
+                context_k.transpose(1, 2), context_v.transpose(1, 2),
+                scale=scale, causal=False,
+            )  # [B, H, S_img/cp + S_txt, d]
+            o_joint = o_joint.transpose(1, 2)     # [B, S_img/cp + S_txt, H, d]
+            img_len = latent_q.shape[1]
+            hidden_states = o_joint[:, :img_len]          # [B, S_img/cp, H, d]
+            encoder_hidden_states = o_joint[:, img_len:]  # [B, S_txt, H, d]
+        else:
+            # gather_kv path: each rank all-gathers latent K,V to the full sequence
+            # length before running joint dual_stream_attention. Text K,V are already
+            # replicated and left untouched.
+            if self.context_parallel_enabled:
+                stacked_kv = torch.stack([latent_k, latent_v], dim=0)  # [2, B, S/cp, H, d]
+                stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
+                    stacked_kv, gather_dim=2, process_group=self.data_parallel_group
+                )  # [2, B, S, H, d]
+                latent_k, latent_v = torch.unbind(stacked_kv, dim=0)
 
-        hidden_states, encoder_hidden_states = dual_stream_attention(
-            latent_q,
-            latent_k,
-            latent_v,
-            context_q,
-            context_k,
-            context_v,
-            attention_mask=attention_mask,
-            scale=1.0 / math.sqrt(self.head_dim),
-        )
+            hidden_states, encoder_hidden_states = dual_stream_attention(
+                latent_q,
+                latent_k,
+                latent_v,
+                context_q,
+                context_k,
+                context_v,
+                attention_mask=attention_mask,
+                scale=1.0 / math.sqrt(self.head_dim),
+            )
         hidden_states = hidden_states.flatten(2, 3).to(latent_q.dtype)
         encoder_hidden_states = encoder_hidden_states.flatten(2, 3).to(latent_q.dtype)
 
@@ -433,6 +463,7 @@ class HunyuanVideoTransformerBlock(nn.Module):
         mlp_ratio: float,
         qk_norm: str = "rms_norm",
         context_parallel_enabled: bool = False,
+        cp_mode: str = "gather_kv",
     ):
         super().__init__()
         hidden_size = num_attention_heads * attention_head_dim
@@ -448,6 +479,7 @@ class HunyuanVideoTransformerBlock(nn.Module):
             qk_norm=qk_norm,
             eps=1e-6,
             context_parallel_enabled=context_parallel_enabled,
+            cp_mode=cp_mode,
         )
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.ff = HunyuanVideoFeedForward(hidden_size, mult=mlp_ratio)
@@ -513,6 +545,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         mlp_ratio: float = 4.0,
         qk_norm: str = "rms_norm",
         context_parallel_enabled: bool = False,
+        cp_mode: str = "gather_kv",
     ):
         super().__init__()
         hidden_size = num_attention_heads * attention_head_dim
@@ -527,6 +560,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             qk_norm=qk_norm,
             eps=1e-6,
             context_parallel_enabled=context_parallel_enabled,
+            cp_mode=cp_mode,
         )
         self.norm = AdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm")
         self.proj_mlp = ColumnParallelLinear(hidden_size, mlp_dim, bias=True, gather_output=False)
@@ -842,11 +876,13 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         rope_axes_dim: tuple[int, ...] = (16, 56, 56),
         image_condition_type: str | None = None,
         context_parallel_enabled: bool = False,
+        cp_mode: str = "gather_kv",
     ) -> None:
         super().__init__()
         if not isinstance(in_channels, int):
             config = in_channels
             context_parallel_enabled = getattr(config, "context_parallel_enabled", False)
+            cp_mode = getattr(config, "cp_mode", "gather_kv")
             in_channels = config.in_channels
             out_channels = config.out_channels
             num_attention_heads = config.num_attention_heads
@@ -884,6 +920,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
             rope_axes_dim=rope_axes_dim,
             image_condition_type=image_condition_type,
             context_parallel_enabled=context_parallel_enabled,
+            cp_mode=cp_mode,
         )
 
         inner_dim = self.config.inner_dim
@@ -918,6 +955,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                     mlp_ratio=mlp_ratio,
                     qk_norm=qk_norm,
                     context_parallel_enabled=context_parallel_enabled,
+                    cp_mode=cp_mode,
                 )
                 for _ in range(num_layers)
             ]
@@ -930,6 +968,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                     mlp_ratio=mlp_ratio,
                     qk_norm=qk_norm,
                     context_parallel_enabled=context_parallel_enabled,
+                    cp_mode=cp_mode,
                 )
                 for _ in range(num_single_layers)
             ]

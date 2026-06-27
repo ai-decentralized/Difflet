@@ -96,7 +96,7 @@ def get_flux_parallelism_config(
 
 
 def create_flux_config(model_path, world_size, backbone_tp_degree, dtype, height, width, inpaint=False,
-                       cfg_parallel_enabled=False, context_parallel_enabled=False):
+                       cfg_parallel_enabled=False, context_parallel_enabled=False, cp_mode="gather_kv"):
     text_encoder_path = os.path.join(model_path, "text_encoder")
     text_encoder_2_path = os.path.join(model_path, "text_encoder_2")
     backbone_path = os.path.join(model_path, "transformer")
@@ -130,6 +130,7 @@ def create_flux_config(model_path, world_size, backbone_tp_degree, dtype, height
     backbone_config = FluxBackboneInferenceConfig(
         cfg_parallel_enabled=cfg_parallel_enabled,
         context_parallel_enabled=context_parallel_enabled,
+        cp_mode=cp_mode,
         neuron_config=backbone_neuron_config,
         load_config=load_diffusers_config(backbone_path),
         height=height,

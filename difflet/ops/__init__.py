@@ -11,6 +11,7 @@ _EXPORTS = {
     "attention": ("attention", "attention"),
     "cross_attention": ("attention", "cross_attention"),
     "ring_attention": ("attention", "ring_attention"),
+    "joint_ring_attention": ("attention", "joint_ring_attention"),
     "apply_rotary_emb": ("embeddings", "apply_rotary_emb"),
     "dequantize_mx": ("mx", "dequantize_mx"),
     "gather_tp_dim": ("collectives", "gather_tp_dim"),
