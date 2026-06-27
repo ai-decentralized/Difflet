@@ -38,6 +38,8 @@ def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
                    help="Tensor-parallel degree (default: registry default)")
     p.add_argument("--cp-degree", type=int, default=1,
                    help="Context-parallel degree (default: 1)")
+    p.add_argument("--cp-mode", choices=["gather_kv", "ring"], default="gather_kv",
+                   help="Context-parallel attention strategy (default: gather_kv)")
 
 
 def _add_shape_flags(p: argparse.ArgumentParser) -> None:

@@ -49,6 +49,16 @@ def cross_attention(q, k, v, *, scale: float | None = None, attention_mask=None,
     )
 
 
+def ring_attention(q, k, v, *, scale: float, causal: bool = False):
+    """Context-parallel ring self-attention over a sequence-sharded Q/K/V.
+
+    ``q,k,v`` are ``[B, H, S_local, d]`` (this rank's head shard). The backend
+    resolves the data-parallel ring group and merges per-step partials.
+    """
+
+    return _load("ring_attention")(q, k, v, scale=scale, causal=causal)
+
+
 def _load(name: str):
     from difflet.ops._dispatch import load_backend_attr
 
