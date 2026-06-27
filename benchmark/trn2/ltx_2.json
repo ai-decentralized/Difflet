@@ -42,20 +42,38 @@
     ]
   },
   "step_latency": {
-    "n": 1,
-    "mean": 0.473,
-    "median": 0.473,
-    "std": 0.0,
-    "p50": 0.473,
-    "p90": 0.473,
-    "min": 0.473,
-    "max": 0.473,
+    "n": 19,
+    "mean": 0.47706228452635085,
+    "median": 0.47700230199916405,
+    "std": 0.0014572426075823263,
+    "p50": 0.47700230199916405,
+    "p90": 0.4776686189998145,
+    "min": 0.4747873039996193,
+    "max": 0.48222567200173216,
     "samples": [
-      0.473
+      0.48222567200173216,
+      0.4776686189998145,
+      0.47696336099943437,
+      0.4759976679997635,
+      0.4775986479999119,
+      0.4772548100008862,
+      0.47799287799898593,
+      0.4747873039996193,
+      0.4761324510000122,
+      0.47706576700147707,
+      0.4774748339987127,
+      0.4753255080013332,
+      0.47611635999965074,
+      0.47723590199893806,
+      0.47684226800083707,
+      0.47700230199916405,
+      0.47737982100079535,
+      0.47685590400033107,
+      0.4762633289992664
     ]
   },
   "throughput": {
-    "DiT steps/s": 2.114
+    "DiT steps/s": 2.096
   },
   "peak_device_mem_gb": null,
   "output": {
@@ -84,8 +102,8 @@
   "config_label": "tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF)",
   "status": "ok",
   "notes": [
+    "per-step = 477.1 ms/DiT-step (median 477.0, p90 477.7, n=19) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 105s; output finite=True.",
     "Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.",
-    "per-step = 0.473 s/DiT-forward (warm, in-process) from scripts/ltx_2_transformer_parity.py \u2014 the stable Neuron-compute metric; video cosine vs CPU = 0.99992 (lossless). e2e generate is load-dominated and noisy across processes (text-encoder load swings ~80-375 s with disk/page-cache state); treat e2e as indicative, per-step as the optimal metric. (n=1, indicative \u2014 parity script, not the n=20 in-process timer the image/short-video models use)",
     "e2e_cold = 803 s \u2014 TRUE cold start (OS page cache dropped before the run via sudo drop_caches), so the weight load is a real cold disk read; this replaces an earlier value taken with the host weights already cached (artificially low).",
     "e2e_warm = 103 s (n=1, warm OS page cache from the immediately-preceding cold run, same session). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
   ],

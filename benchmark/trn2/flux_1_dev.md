@@ -33,10 +33,10 @@
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 266.0 ms | 266.0 ms | 266.0 ms | 266.0 ms | 28 |
+| per denoise step (transformer fwd) | 267.6 ms | 267.2 ms | 267.8 ms | 266.4 ms | 27 |
 | end-to-end (warm) | 46.66 s | 46.66 s | 46.66 s | 46.66 s | 1 |
 
-**Throughput:** 3.760 DiT steps/s
+**Throughput:** 3.737 DiT steps/s
 
 ## Compile breakdown
 
@@ -86,9 +86,9 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 ## Notes
 
+- per-step = 267.6 ms/DiT-step (median 267.2, p90 267.8, n=27) — measured the SAME way as H100: inter-step deltas of a real 28-step generate (wrapping NeuronFluxBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 28 DiT calls timed; warm generate 8s; output finite=True.
 - e2e_cold = 320 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
 - e2e_warm = 47 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 320 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
-- per-step = 266 ms/DiT-step (3.76 it/s) from the WARM denoise loop tqdm in the generate log (28 steps in ~7 s). flux's compiled-graph input order differs from the wrapper forward() signature, so the in-process step_latency timer used for the other models doesn't fit it; the denoise-loop rate is the equivalent warm per-step.
 - compile is VAE-dominated: the image VAE decoder takes ~1078 s (85% of the 1257 s build sub-phase), ~7x the 12B transformer's 151 s — the same conv-decoder neuronx-cc slowness flagged for Wan's video VAE.
 
 ## Reproduction

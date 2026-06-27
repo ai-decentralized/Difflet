@@ -11,15 +11,54 @@ weights now in the page cache. Each row links to a detailed per-model report.
 
 | model | kind | shape | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁴ | **DiT per-step**⁰ | output | status |
 |---|---|---|---:|---:|---:|---:|---:|---|---|
-| [LTX-2](ltx_2.md) | video+audio | 480×704×49 | 28.6 min | **803 s** (13.4 min) | **103 s** | 335→52 s⁸ | **473 ms** (2.11/s) | (1,49,3,480,704) ✓ | ok |
-| [Wan 2.1 14B](wan_2_1.md) | video (T2V) | 480×832×9 | 108 min⁵ | **722 s** (12.0 min) | **97 s** | 657→54 s | **1144 ms** (0.87/s) | (1,3,9,480,832) ✓ | ok |
-| [Wan 2.2 A14B](wan_2_2.md) | video (T2V) | 480×832×9 | (shares 2.1)⁶ | **635 s** (10.6 min) | **93 s** | 570→51 s | **1144 ms** (0.87/s) | (1,3,9,480,832) ✓ | ok⁶ |
+| [LTX-2](ltx_2.md) | video+audio | 480×704×49 | 28.6 min | **803 s** (13.4 min) | **103 s** | 335→52 s⁸ | **477 ms** (2.10/s)ᵇ | (1,49,3,480,704) ✓ | ok |
+| [Wan 2.1 14B](wan_2_1.md) | video (T2V) | 480×832×9 | 108 min⁵ | **722 s** (12.0 min) | **97 s** | 657→54 s | **554.8 ms** (1.80/s)ᵈ | (1,3,9,480,832) ✓ | ok |
+| [Wan 2.2 A14B](wan_2_2.md) | video (T2V) | 480×832×9 | (shares 2.1)⁶ | **635 s** (10.6 min) | **93 s** | 570→51 s | **554.8 ms** (1.80/s)ᵈ | (1,3,9,480,832) ✓ | ok⁶ |
 | [Qwen-Image](qwen_image.md) | image (T2I) | 1024×1024 | 13.4 min | **517 s** (8.6 min) | **74 s** | 462→41 s | **447 ms** (2.24/s) | (1,3,1024,1024) ✓ | ok |
-| [HunyuanVideo](hunyuan_video.md) | video (T2V) | 320×512×61 | 40 min¹⁰ | **551 s** (9.2 min) | **220 s**⁸ | 342→37 s | **3719 ms** (0.27/s) | (1,3,61,320,512) ✓ | ok |
-| [FLUX.1-dev](flux_1_dev.md) | image (T2I) | 1024×1024 | 21.2 min⁹ | **320 s** (5.3 min) | **47 s** | 279→28 s | **266 ms**ᵃ (3.76/s) | 1024² PNG ✓ | ok |
+| [HunyuanVideo](hunyuan_video.md) | video (T2V) | 320×512×61 | 41.5 minᶜ | 551 sᶜ | 220 sᶜ | 342→37 s | **850.6 ms** (1.18/s)ᶜ | (1,3,61,320,512) ✓ | okᶜ |
+| [FLUX.1-dev](flux_1_dev.md) | image (T2I) | 1024×1024 | 21.2 min⁹ | **320 s** (5.3 min) | **47 s** | 279→28 s | **267.6 ms** (3.74/s)ᵇ | 1024² PNG ✓ | ok |
 | [HunyuanVideo-1.5](hunyuan_video_15.md) | video (T2V) | 480×848×121 | — | — | — | — | — | — | pending⁷ |
 
 ✓ = output is finite (no NaN/Inf) with a sensible value range — see each report.
+
+## Corrections (2026-06-27)
+
+This run corrects measurement-method and wiring errors in the earlier numbers. The
+old values were not flagged as wrong anywhere — they were recorded as if correct — so
+they are kept here with the reason they changed (not silently overwritten).
+
+- **ᵇ Per-step is now measured the same way as H100** (`benchmark/step_realloop.py`):
+  inter-step deltas of a *real* generate loop (device-synced, step 0 excluded) — the
+  same quantity H100's `callback_on_step_end` measures. The earlier trn2 per-step used
+  **three different methods** across models (n=20 isolated synthetic-input transformer
+  forward for Wan/Qwen/Hunyuan; an n=1 parity script for LTX-2; the tqdm denoise-loop
+  rate for FLUX), so the old cross-device table was not apples-to-apples. Re-measured:
+  **FLUX 266→267.6 ms** (n=27) and **LTX-2 473→477 ms** (n=19) — i.e. the old FLUX/LTX
+  numbers were already about right; only the *method* was inconsistent. **Qwen and Wan
+  are NOT yet re-measured this way** (still the old isolated-timer numbers).
+- **ᶜ HunyuanVideo per-step 3719 → 850.6 ms (4.37× faster) — it was running on SDPA,
+  not attention_cte.** Its joint self-attn carries a text key-padding mask; difflet's
+  masked path fell back to `F.scaled_dot_product_attention` after commit `cd54d0f`
+  dropped the in-graph mask→bounds auto-route. The `config_label` said "attention_cte"
+  but the compiled graph used SDPA. Re-wired the contiguous key-padding mask to
+  attention_cte's `bound_min`/`bound_max` (trace-safe sum in `dual_stream_attention`,
+  CPU-validated lossless cosine 1.0). 850.6 ms is measured with the existing
+  step_latency method (same as the old 3719) using a synthetic all-ones mask
+  (`bound_max`=full seq) → a *conservative* upper bound; a real padded prompt attends
+  fewer keys. The HunyuanVideo **compile (41.5 min) and e2e (551/220 s) rows are stale**:
+  this run also compiles the **VAE on-chip** (`unet-inference` NEFF) whereas the old e2e
+  decoded VAE on the host, so e2e must be re-measured before it is trusted.
+- **ᵈ Wan per-step 1144 → 554.8 ms (2.06×) — its attention was *replicated* across the 4
+  TP cores, now head-sharded.** Wan's `qk_norm="rms_norm_across_heads"` runs over the full
+  inner_dim, so difflet had gathered Q/K/V to every rank (`gather_output=True`) and run the
+  attention replicated (`tp=4` parallelized only the FFN). Re-wired to head-sharded
+  attention (`gather_output=False` + `RowParallelLinear` output + local heads) with a
+  TP-aware global RMS (cross-rank sum-of-squares + per-rank norm-weight slice, the pattern
+  difflet's LTX-2 `_global_rms_norm` already uses; HunyuanVideo avoids it because its
+  `qk_norm` is per-head and shards for free). Strict parity vs the replicated baseline on
+  the same input: **cosine 0.999768** (rel_l2 2.0e-2, bf16). trn2 now **matches H100**
+  (554.8 vs 563 ms) — was 2.0× behind. Both Wan 2.1 and the single-expert Wan 2.2 use this
+  per-step (only Wan 2.1 was independently measured).
 
 **The headline finding: e2e is load-dominated, not compute-bound.** For the
 pure-Neuron pipelines warm is **5–8× faster** than cold (Qwen 517→74 s, Wan

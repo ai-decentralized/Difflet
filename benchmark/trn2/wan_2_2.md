@@ -5,7 +5,7 @@
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
 **Timestamp:** 2026-06-25 06:51 UTC
 
-> Best-performing configuration: tp=4, bf16, A14B (high/low-noise experts), attention_cte
+> Best-performing configuration: tp=4, bf16, A14B (high/low-noise experts), attention_cte — head-sharded attention + TP-aware global RMS (was replicated)
 
 ## Configuration
 
@@ -33,10 +33,10 @@
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 1.14 s | 1.14 s | 1.14 s | 1.14 s | 20 |
+| per denoise step (transformer fwd) | 554.8 ms | 554.8 ms | 554.8 ms | 554.8 ms | 20 |
 | end-to-end (warm) | 92.76 s | 92.76 s | 92.76 s | 92.76 s | 1 |
 
-**Throughput:** 0.874 DiT steps/s
+**Throughput:** 1.802 DiT steps/s
 
 ## End-to-end breakdown (cold generate)
 
@@ -72,8 +72,8 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 ## Notes
 
+- CORRECTION: per-step 1144 -> 554.8 ms (2.06x) — the attention was REPLICATED across the 4 TP cores (gather_output=True + full-width across-heads RMSNorm to match HF), so tp=4 only parallelized the FFN, not the attention. Re-wired to head-sharded attention (gather_output=False + RowParallel out + local heads) with a TP-aware global RMS (cross-rank sum-of-squares + per-rank norm-weight slice, like LTX-2's _global_rms_norm). Strict parity vs the replicated baseline on the same input: cosine 0.999768 (rel_l2 2.0e-2, bf16). trn2 now matches H100 (554.8 vs 563 ms) — was 2.0x behind. Measured with the isolated step_latency timer (same as the old 1144 number). NOTE: wan_2_2 inherits wan_2_1's measured per-step (same single 14B transformer, same shape); not independently re-measured.
 - difflet runs Wan 2.2 with enable_transformer_2=False -> only the high-noise expert (single transformer), not the full A14B MoE.
-- per-step = 1143.6 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency — the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).
 - e2e_cold = 635 s — TRUE cold start (OS page cache dropped before the run via sudo drop_caches), so the weight load is a real cold disk read; this replaces an earlier value taken with the host weights already cached (artificially low).
 - e2e_warm = 93 s (n=1, warm OS page cache from the immediately-preceding cold run, same session). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
 - compile NOT actually performed: the wan orchestrator keys its NEFF cache by shape only, and Wan 2.2 shares Wan 2.1's shape (480x832x9), so `difflet compile` was a false cache hit (~14 s) reusing Wan 2.1's graph. compile_seconds set to null; a real Wan 2.2 compile would be on the order of Wan 2.1's (~108 min, VAE-dominated).
@@ -94,7 +94,7 @@ Exact test conditions. The **model + config rows are hardware-agnostic** — an 
 | guidance scale | 1.0 |
 | seed | 42 |
 | prompt | "a cinematic shot of a red fox running through a snowy forest" |
-| best-perf knobs | tp=4, bf16, A14B (high/low-noise experts), attention_cte |
+| best-perf knobs | tp=4, bf16, A14B (high/low-noise experts), attention_cte — head-sharded attention + TP-aware global RMS (was replicated) |
 | measured on | trn2.3xlarge / 4 NeuronCores / 96 GB/device (device folder `trn2`) |
 
 ```bash

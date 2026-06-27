@@ -22,19 +22,21 @@ Same model, **same input size + step count**. The trn2 per-step is the warm in-p
 
 | model | H100 per-step | trn2 per-step | H100 speedup |
 |---|---:|---:|---:|
-| LTX-2 | 319 ms | 473 ms | **1.5×** |
-| Wan 2.1 14B | 563 ms | 1144 ms | **2.0×** |
-| Wan 2.2 A14B | 564 ms | 1144 ms | **2.0×** |
-| FLUX.1-dev | 316 ms | 266 ms | **0.8×** (trn2 faster) |
+| LTX-2 | 319 ms | 477 ms | **1.50×** |
+| Wan 2.1 14B | 563 ms | 554.8 ms | **0.99×** (trn2 faster)ᵈ |
+| Wan 2.2 A14B | 564 ms | 554.8 ms | **0.98×** (trn2 faster)ᵈ |
+| FLUX.1-dev | 316 ms | 267.6 ms | **0.85×** (trn2 faster) |
 | Qwen-Image | 302 ms | 447 ms | **1.5×** |
-| HunyuanVideo | 1525 ms | 3719 ms | **2.4×** |
+| HunyuanVideo | 1525 ms | 850.6 ms | **0.56×** (trn2 faster)ᶜ |
 | HunyuanVideo-1.5 | — | — | — |
 
 ### Headline
 
-**It is model-dependent — not a blanket win for either side.** On the models where difflet is less tuned, the H100's mature CUDA path leads (HunyuanVideo 2.4×, Wan 2.0×, Qwen 1.5×); but on **FLUX.1-dev — difflet's flagship — trn2 is *faster* per-step (266 ms vs 316 ms, 0.8×)**, despite being 4×24 GB NeuronCores vs one 80 GB GPU. So the gap reflects **software-stack maturity as much as silicon**: where difflet's AOT NEFF is optimized it is competitive-to-faster; elsewhere stock diffusers' kernels win. **e2e cold is *not* comparable** across the two (trn2's is a true page-cache-dropped cold disk read; the H100's reads just-downloaded weights from cache) — only per-step is.
+**It is software-stack maturity, not silicon — and the corrected numbers make that sharper.** Two trn2 per-steps were mis-measured or mis-configured, both in difflet's favor once fixed. **HunyuanVideo's 2.4× "H100 win" was a difflet bug**: its masked joint self-attn fell back to `F.scaled_dot_product_attention` instead of attention_cte (the `config_label` said attention_cte; the compiled graph used SDPA — commit `cd54d0f` had dropped the mask→bounds wiring). Re-wiring the key-padding mask to attention_cte's `bound_min`/`bound_max` flips it to **trn2 1.79× faster (1525 → 850.6 ms)ᶜ**. On the flagship **FLUX.1-dev trn2 is faster** (267.6 vs 316 ms, 0.85×), despite 4×24 GB NeuronCores vs one 80 GB GPU. **Wan was the same story**: its 2.0× gap was difflet *replicating* the attention across the 4 TP cores (`gather_output=True` for HF qk_norm parity) instead of head-sharding it; head-sharding it (with a TP-aware global RMS) gives **2.06× and pulls trn2 level with H100 (554.8 vs 563 ms)ᵈ**, parity cosine 0.9998. So where difflet routes through attention_cte and shards properly, trn2 is competitive-to-faster (FLUX, HunyuanVideo, Wan); the residual H100 leads — LTX-2 1.50× (its cross-attn is still SDPA), Qwen 1.5× (not yet re-examined) — are smaller and model-specific, not a silicon verdict. **e2e cold is *not* comparable** across the two (trn2's is a true page-cache-dropped cold disk read; the H100's reads just-downloaded weights from cache) — only per-step is. trn2 per-step is now measured the H100 way (real-loop inter-step deltas)ᵇ for FLUX/LTX; **Qwen/Wan are still the older isolated-timer numbers**.
 
 ¹ **e2e cold** = one full `from_pretrained` (weights→GPU) + generate, wall clock (eager reloads weights per process). ² **load** = the `from_pretrained(...).to(cuda)` portion. ³ **DiT per-step** = the load-independent compute metric, directly comparable to trn2. ⁴ peak `torch.cuda.max_memory_allocated`. ⁵ **LTX-2**: VAE tiling disabled (`DIFFLET_BENCH_VAE_TILING=0`) — its small latents tile into a size-1 dim that crashes the decoder conv in diffusers 0.38.0. **HunyuanVideo-1.5** (480×848×121): OOM at default config — the 121-frame attention activation alone exceeds 80 GB (trn2 never ran it either; its orchestrator is a stub). **Wan 2.2 A14B**: H100 loads BOTH 14B experts resident (70.9 GB peak); trn2's per-step is single-expert but per-step compute is equivalent (each expert is 14B).
+
+ᵇ trn2 per-step re-measured the H100 way — inter-step deltas of a real generate loop, device-synced, step 0 excluded (`benchmark/step_realloop.py`), replacing the earlier per-model mix (isolated synthetic-forward / n=1 parity / tqdm-rate). FLUX 266→267.6 ms (n=27), LTX-2 473→477 ms (n=19): the old values were ~right, only the method was inconsistent. ᶜ **HunyuanVideo correction**: 3719→850.6 ms (4.37×) — was SDPA, now attention_cte via the key-padding→bounds re-wire (CPU-validated lossless). Measured with the step_latency method (synthetic all-ones mask, `bound_max`=full seq) → a conservative upper bound; a real padded prompt attends fewer keys, so the H100 lead flips by at least 1.79×. trn2 also now compiles HunyuanVideo's **VAE on-chip** (the old e2e decoded it on host), so e2e is not yet re-measured. ᵈ **Wan correction**: 1144→554.8 ms (2.06×) — attention was replicated across the 4 TP cores (`gather_output=True` + full-width across-heads RMSNorm), now head-sharded with a TP-aware global RMS (cross-rank sum-of-squares + per-rank norm-weight slice). Strict parity vs the replicated baseline on the same input: cosine 0.999768. Measured with the isolated step_latency timer; Wan 2.2 (single high-noise expert) inherits Wan 2.1's per-step.
 
 ## Reproduce
 

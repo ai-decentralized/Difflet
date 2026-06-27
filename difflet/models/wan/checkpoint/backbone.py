@@ -69,6 +69,14 @@ def convert_backbone_state_dict(
         world_size = config.neuron_config.world_size
         out["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)
 
+    # TP-aware attention sharding (modeling_wan.WanAttention) injects one root-level
+    # SPMDRank whose `.rank` buffer must hold arange(tp_degree); populate it so the
+    # weight loader finds it. Only present when tp_degree > 1 (matches the modeling guard).
+    nc = getattr(config, "neuron_config", None) if config is not None else None
+    tp_degree = int(getattr(nc, "tp_degree", 1)) if nc is not None else 1
+    if tp_degree > 1:
+        out["tp_rank_util.rank"] = torch.arange(0, tp_degree, dtype=torch.int32)
+
     return out
 
 

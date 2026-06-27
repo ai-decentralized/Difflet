@@ -230,8 +230,12 @@ class _LTX2TrainiumTPAttnProcessor:
             )
         else:
             # Cross-attention (text key-padding mask): keep the validated masked SDPA
-            # dispatch path. The attention_cte bound_min/bound_max route for contiguous
-            # masks is a follow-up (mask->bounds must move out of the XLA trace).
+            # dispatch path. NOTE: attention_cte's bound_min/bound_max (sequence-packing)
+            # path is self-attention only (seqlen_q == seqlen_kv); routing cross-attn
+            # (q=video, kv=text, q_len != kv_len) through it makes neuronx-cc fail with
+            # "attention_cte ... Access pattern out of bounds" (NCC_IBIR243). Unmasked
+            # attention_cte does support q_len != kv_len (cf. wan cross-attn), but that
+            # would attend over text padding; so masked cross-attn stays on SDPA.
             query = query.unflatten(2, (n_heads, -1))
             key = key.unflatten(2, (n_heads, -1))
             value = value.unflatten(2, (n_heads, -1))

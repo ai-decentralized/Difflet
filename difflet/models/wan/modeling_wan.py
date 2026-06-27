@@ -11,17 +11,20 @@ shapes preserved).
 
 Key Trainium-aware decisions:
 
-* Q/K/V column-parallel projections use ``gather_output=True`` so q/k RMSNorm
-  runs on the full ``inner_dim`` (matches the reference's
-  ``rms_norm_across_heads`` semantics). The spike keeps attention replicated
-  across TP ranks and uses ``ColumnParallelLinear(gather_output=True)`` for the
-  attention output projection, matching the UMT5 replicated-attention pattern
-  that is already covered by NEFF-vs-CPU. This trades attention compute for a
-  rank-safe numerical reference path. A future TP-aware RMSNorm can shard Q/K/V
-  before attention for full TP efficiency.
-* Attention uses PyTorch SDPA for the M2.5 numerical path. This is slower than
-  the Flux-style NKI kernel path but gives a direct CPU/NEFF semantic match
-  while Wan-specific TP sharding is still being validated.
+* Q/K/V column-parallel projections use ``gather_output=False`` so attention is
+  **head-sharded** across TP ranks — each rank computes its own ``heads/tp`` heads,
+  and the output projection is a ``RowParallelLinear`` (all-reduce). Because the
+  upstream ``qk_norm="rms_norm_across_heads"`` normalizes over the full ``inner_dim``,
+  the sharded q/k RMSNorm is done in ``WanAttention._global_rms_norm``: a cross-rank
+  sum-of-squares (``reduce_from_tensor_model_parallel_region``) gives the full-dim RMS
+  denominator, and the norm weight is sliced to this rank's heads. One model-level
+  ``SPMDRank`` (buffer populated by ``convert_backbone_state_dict``) provides the rank.
+  At tp=1 / no group this degenerates to a plain ``RMSNorm`` (CPU reference path).
+  (Earlier the projections gathered Q/K/V and ran the attention *replicated* on every
+  rank — correct but ~2x slower; head-sharding pulls trn2 level with H100, parity
+  cosine 0.9998 vs the replicated baseline.)
+* Attention runs through ``difflet.ops.attention`` → the NKI ``attention_cte`` flash
+  kernel (``_attn_kernel``), unmasked, ~4x faster than the prior PyTorch-SDPA fallback.
 """
 
 from __future__ import annotations
@@ -54,8 +57,23 @@ from difflet.ops import (
     get_dp_rank_spmd,
     get_tensor_model_parallel_size,
     get_world_group,
+    reduce_from_tensor_model_parallel_region,
     scatter_to_process_group_spmd,
 )
+
+
+def _safe_tp_size() -> int:
+    """TP degree, or 1 when the tensor-parallel group is not initialized.
+
+    ``modeling_wan`` is constructed both on the Neuron device (group live) and on bare
+    CPU for the reference path / unit tests (no group). The raw
+    ``get_tensor_model_parallel_size()`` asserts a live group, so the attention sharding
+    must query the size through this guard and fall back to the unsharded tp=1 path.
+    """
+    try:
+        return int(get_tensor_model_parallel_size())
+    except Exception:
+        return 1
 
 
 @dataclass
@@ -356,26 +374,41 @@ class WanAttention(nn.Module):
         if context_parallel_enabled:
             self.data_parallel_group = get_data_parallel_group()
         inner_dim = heads * head_dim
+        self.inner_dim = inner_dim
 
-        # gather_output=True → full inner_dim on every rank so RMSNorm
-        # over the full feature axis matches the HF reference exactly.
-        # See module docstring for the trade-off.
+        # TP-aware head sharding: keep Q/K/V sharded across ranks (gather_output=False)
+        # so each rank computes attention for its own 1/tp of the heads — the FFN is
+        # already sharded, so this stops the attention being the one replicated stage.
+        # The across-heads RMSNorm is then done with a cross-rank reduction in
+        # _global_rms_norm (mirrors LTX-2). ``_rank_util`` (an SPMDRank) is injected by
+        # the parent transformer after construction so the norm weight can be sliced to
+        # this rank's heads; it stays None for a standalone/tp=1 build (full weight).
+        self.tp_degree = _safe_tp_size()
+        if heads % self.tp_degree != 0:
+            raise ValueError(
+                f"WanAttention heads={heads} must be divisible by tp={self.tp_degree}"
+            )
+        self.local_heads = heads // self.tp_degree
+        self._rank_util = None
+
         self.to_q = ColumnParallelLinear(
-            dim, inner_dim, bias=True, gather_output=True, dtype=dtype, reduce_dtype=dtype
+            dim, inner_dim, bias=True, gather_output=False, dtype=dtype, reduce_dtype=dtype
         )
         self.to_k = ColumnParallelLinear(
-            dim, inner_dim, bias=True, gather_output=True, dtype=dtype, reduce_dtype=dtype
+            dim, inner_dim, bias=True, gather_output=False, dtype=dtype, reduce_dtype=dtype
         )
         self.to_v = ColumnParallelLinear(
-            dim, inner_dim, bias=True, gather_output=True, dtype=dtype, reduce_dtype=dtype
+            dim, inner_dim, bias=True, gather_output=False, dtype=dtype, reduce_dtype=dtype
         )
         self.to_out = nn.ModuleList(
             [
-                ColumnParallelLinear(
+                # RowParallelLinear: input is the head-sharded attention output, so the
+                # output projection sums each rank's partial contribution (all-reduce).
+                RowParallelLinear(
                     inner_dim,
                     dim,
                     bias=True,
-                    gather_output=True,
+                    input_is_parallel=True,
                     dtype=dtype,
                     reduce_dtype=dtype,
                 ),
@@ -383,10 +416,36 @@ class WanAttention(nn.Module):
             ]
         )
 
-        # qk_norm operates on the full inner_dim before head split
-        # (qk_norm="rms_norm_across_heads" in the upstream config).
+        # qk_norm operates on the full inner_dim before the head split
+        # (qk_norm="rms_norm_across_heads" in the upstream config). The weight is loaded
+        # full (inner_dim) and sliced to this rank's heads at runtime; the RMS denominator
+        # is the full inner_dim via a cross-rank sum (see _global_rms_norm).
         self.norm_q = RMSNorm(inner_dim, eps=eps)
         self.norm_k = RMSNorm(inner_dim, eps=eps)
+
+    def _global_rms_norm(self, norm: "RMSNorm", x: torch.Tensor) -> torch.Tensor:
+        """``rms_norm_across_heads`` over the FULL inner_dim while ``x`` holds only this
+        rank's head shard ``(B, S, inner_dim/tp)``.
+
+        The sum-of-squares is reduced across the TP group so the RMS denominator is the
+        full inner_dim (matching HF exactly), and the affine weight is sliced to this
+        rank's heads. With ``_rank_util=None`` / ``tp=1`` the reduce and scatter are
+        no-ops, so this is bit-identical to a plain ``RMSNorm`` — the path the CPU
+        reference and unit tests exercise.
+        """
+        local_dim = x.shape[-1]
+        local_sq = x.float().pow(2).sum(dim=-1, keepdim=True)
+        global_sq = reduce_from_tensor_model_parallel_region(local_sq)
+        full_dim = local_dim * self.tp_degree
+        # difflet's RMSNorm is a CustomRMSNorm (eps stored as variance_epsilon).
+        eps = getattr(norm, "eps", None) or getattr(norm, "variance_epsilon", None) or 1e-6
+        x_normed = x.float() * torch.rsqrt(global_sq / full_dim + eps)
+        weight = getattr(norm, "weight", None)
+        if weight is not None:
+            if self._rank_util is not None:
+                weight = scatter_to_process_group_spmd(weight, 0, self._rank_util.get_rank(), None)
+            x_normed = x_normed * weight.float()
+        return x_normed.to(x.dtype)
 
     def forward(
         self,
@@ -402,12 +461,12 @@ class WanAttention(nn.Module):
         k = self.to_k(kv_source)
         v = self.to_v(kv_source)
 
-        q = self.norm_q(q)
-        k = self.norm_k(k)
+        q = self._global_rms_norm(self.norm_q, q)
+        k = self._global_rms_norm(self.norm_k, k)
 
-        q = q.unflatten(-1, (self.heads, self.head_dim))
-        k = k.unflatten(-1, (self.heads, self.head_dim))
-        v = v.unflatten(-1, (self.heads, self.head_dim))
+        q = q.unflatten(-1, (self.local_heads, self.head_dim))
+        k = k.unflatten(-1, (self.local_heads, self.head_dim))
+        v = v.unflatten(-1, (self.local_heads, self.head_dim))
 
         if rotary_emb is not None and not self.is_cross_attention:
             cos, sin = rotary_emb
@@ -430,8 +489,8 @@ class WanAttention(nn.Module):
 
         out = _attn_kernel(q, k, v, head_dim=self.head_dim)
 
-        # (B, heads, S, dim) → (B, S, heads * dim), ready for a replicated
-        # ColumnParallelLinear(gather_output=True) output projection.
+        # (B, local_heads, S, dim) → (B, S, local_heads * dim); RowParallelLinear then
+        # all-reduces each rank's partial output projection back to the full model dim.
         out = out.transpose(1, 2).reshape(out.shape[0], out.shape[2], -1)
         out = self.to_out[0](out)
         out = self.to_out[1](out)
@@ -591,6 +650,19 @@ class WanTransformer3DModel(nn.Module):
                 for _ in range(config.num_layers)
             ]
         )
+
+        # TP-aware attention sharding: one SPMDRank slices each block's across-heads
+        # qk-norm weight to the local heads. Build it once (its ``.rank`` buffer is
+        # populated by convert_backbone_state_dict → arange) and inject the reference
+        # into every attention WITHOUT registering it as a submodule there (object
+        # __setattr__), so the only buffer lives at the model root. Skipped at tp=1
+        # (CPU / unit tests) — the attentions then use the plain-RMSNorm fallback.
+        tp_degree = _safe_tp_size()
+        if tp_degree > 1:
+            self.tp_rank_util = SPMDRank(tp_degree)
+            for block in self.blocks:
+                object.__setattr__(block.attn1, "_rank_util", self.tp_rank_util)
+                object.__setattr__(block.attn2, "_rank_util", self.tp_rank_util)
 
         self.norm_out = FP32LayerNorm(inner_dim, config.eps, elementwise_affine=False)
         self.proj_out = nn.Linear(

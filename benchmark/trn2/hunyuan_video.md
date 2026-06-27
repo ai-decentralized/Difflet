@@ -5,7 +5,7 @@
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
 **Timestamp:** 2026-06-25 07:05 UTC
 
-> Best-performing configuration: tp=4, bf16, attention_cte
+> Best-performing configuration: tp=4, bf16, attention_cte (joint attn: key-padding mask -> bound_min/bound_max; on-chip VAE)
 
 ## Configuration
 
@@ -33,10 +33,10 @@
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 3.72 s | 3.72 s | 3.72 s | 3.72 s | 20 |
+| per denoise step (transformer fwd) | 850.6 ms | 850.6 ms | 850.9 ms | 850.3 ms | 20 |
 | end-to-end (warm) | 3.7 min (220 s) | 3.7 min (220 s) | 3.7 min (220 s) | 3.7 min (220 s) | 1 |
 
-**Throughput:** 0.269 DiT steps/s
+**Throughput:** 1.176 DiT steps/s
 
 ## Compile breakdown
 
@@ -86,10 +86,11 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 ## Notes
 
-- per-step = 3719.4 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency — the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).
+- CORRECTION: the prior 3719 ms / 0.269 it/s was the SDPA fallback — HunyuanVideo's joint self-attn carries a text key-padding mask, and difflet's masked path fell back to F.scaled_dot_product_attention (NOT attention_cte) after commit cd54d0f dropped the in-graph mask->bounds auto-route. Re-wired the contiguous key-padding mask to attention_cte's bound_min/bound_max (computed trace-safe in dual_stream_attention): 850.6 ms / 1.176 it/s, a 4.37x speedup, same step_latency method as the old number. Measured with a synthetic all-ones mask (bound_max=full seq) so it is a conservative upper bound; a real padded prompt attends fewer keys and runs faster.
 - e2e_cold = 551 s — TRUE cold start (OS page cache dropped before the run via sudo drop_caches), so the weight load is a real cold disk read; this replaces an earlier value taken with the host weights already cached (artificially low).
 - e2e_warm = 220 s (n=1, warm OS page cache from the immediately-preceding cold run, same session). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
 - compile_seconds=2413 s (40 min) is the full `difflet compile` wall; the neuronx-cc build sub-phase (compile_breakdown) is only ~652 s. The ~1760 s difference is the one-time host load + HLO trace + weight shard/save of HunyuanVideo's large stack (Llama-8B text encoder + 13B DiT) before/around the builds — the largest such overhead in the suite. Not directly comparable to the other models' compile (whose host load was small).
+- per-step = 850.6 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency — the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).
 
 ## Reproduction
 
@@ -107,7 +108,7 @@ Exact test conditions. The **model + config rows are hardware-agnostic** — an 
 | guidance scale | 6.0 |
 | seed | 42 |
 | prompt | "a cinematic shot of a red fox running through a snowy forest" |
-| best-perf knobs | tp=4, bf16, attention_cte |
+| best-perf knobs | tp=4, bf16, attention_cte (joint attn: key-padding mask -> bound_min/bound_max; on-chip VAE) |
 | measured on | trn2.3xlarge / 4 NeuronCores / 96 GB/device (device folder `trn2`) |
 
 ```bash
