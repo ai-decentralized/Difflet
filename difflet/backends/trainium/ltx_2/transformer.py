@@ -229,25 +229,35 @@ class _LTX2TrainiumTPAttnProcessor:
                 bsz, q_len, inner
             )
         else:
-            # Cross-attention (text key-padding mask): keep the validated masked SDPA
-            # dispatch path. NOTE: attention_cte's bound_min/bound_max (sequence-packing)
-            # path is self-attention only (seqlen_q == seqlen_kv); routing cross-attn
-            # (q=video, kv=text, q_len != kv_len) through it makes neuronx-cc fail with
-            # "attention_cte ... Access pattern out of bounds" (NCC_IBIR243). Unmasked
-            # attention_cte does support q_len != kv_len (cf. wan cross-attn), but that
-            # would attend over text padding; so masked cross-attn stays on SDPA.
-            query = query.unflatten(2, (n_heads, -1))
-            key = key.unflatten(2, (n_heads, -1))
-            value = value.unflatten(2, (n_heads, -1))
-            hidden_states = ltx2_transformer.dispatch_attention_fn(
-                query, key, value,
-                attn_mask=attention_mask,
-                dropout_p=0.0,
-                is_causal=False,
-                backend=None,
-                parallel_config=None,
+            # Cross-attention (text key-padding mask): run UNMASKED through attention_cte
+            # (the same NKI flash kernel as self-attn) rather than the slow SDPA fallback.
+            # attention_cte's bound_min/bound_max (sequence-packing) path is self-attn only
+            # (seqlen_q == seqlen_kv) and fails neuronx-cc for cross-attn (q_len != kv_len,
+            # NCC_IBIR243), but the *unmasked* kernel supports q_len != kv_len (cf. wan
+            # cross-attn). Dropping the mask attends over text padding; that is lossless
+            # only if the text encoder's padding embeddings are benign (as UMT5's are for
+            # wan) — gated by an explicit parity check vs the masked-SDPA baseline.
+            bsz, qx_len, inner = query.shape
+            kx_len = key.shape[1]
+            head_dim = inner // n_heads
+            q3 = query.reshape(bsz, qx_len, n_heads, head_dim).permute(0, 2, 1, 3).reshape(
+                bsz * n_heads, qx_len, head_dim
             )
-            hidden_states = hidden_states.flatten(2, 3)
+            k3 = key.reshape(bsz, kx_len, n_heads, head_dim).permute(0, 2, 1, 3).reshape(
+                bsz * n_heads, kx_len, head_dim
+            )
+            v3 = value.reshape(bsz, kx_len, n_heads, head_dim).permute(0, 2, 1, 3).reshape(
+                bsz * n_heads, kx_len, head_dim
+            )
+            out3 = difflet_attention(
+                q3, k3, v3,
+                scale=1.0 / math.sqrt(head_dim),
+                causal=False,
+                tp_q=True, tp_k=True, tp_out=False,
+            )
+            hidden_states = out3.reshape(bsz, n_heads, qx_len, head_dim).permute(0, 2, 1, 3).reshape(
+                bsz, qx_len, inner
+            )
 
         hidden_states = hidden_states.to(out_dtype)
         hidden_states = attn.to_out[0](hidden_states)
