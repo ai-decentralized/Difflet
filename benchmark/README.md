@@ -130,12 +130,12 @@ See **[h100/RESULTS.md](h100/RESULTS.md)** for the full table and caveats.
 
 | model | DiT per-step — H100 | DiT per-step — trn2 | trn2 speedup |
 |---|---:|---:|---:|
-| Qwen-Image | 302 ms | 447 ms | 0.68× (H100 faster) |
-| LTX-2 | 319 ms | 441.8 ms | 0.72× (H100 faster) |
-| Wan 2.1 14B | 563 ms | 554.8 ms | **1.01×** |
-| Wan 2.2 A14B | 564 ms | 554.8 ms | **1.02×** |
-| FLUX.1-dev | 316 ms | 267.6 ms | **1.18×** |
-| HunyuanVideo | 1525 ms | 850.6 ms | **1.79×** |
+| Qwen-Image | 297.7 ms | 447.1 ms | 0.67× (H100 faster) |
+| LTX-2 | 313.1 ms | 441.8 ms | 0.71× (H100 faster) |
+| Wan 2.1 14B | 554.2 ms | 554.8 ms | **1.00×** (≈par) |
+| Wan 2.2 A14B | 553.7 ms | 554.8 ms | **1.00×** (≈par) |
+| FLUX.1-dev | 310.8 ms | 267.6 ms | **1.16×** |
+| HunyuanVideo | 1503.2 ms | 850.6 ms | **1.77×** |
 | HunyuanVideo-1.5 | OOM (>80 GB) | — (stub) | — |
 
 ### B300 reference (NVIDIA B300 SXM6 275 GB)
@@ -150,12 +150,12 @@ and caveats in **[b300/RESULTS.md](b300/RESULTS.md)**.
 
 | model | DiT per-step — B300 | vs H100 | vs trn2 |
 |---|---:|---:|---:|
-| FLUX.1-dev | **134.1 ms** | 2.36× | 2.00× |
-| Qwen-Image | **140.0 ms** | 2.16× | 3.19× |
-| LTX-2 | **159.5 ms** | 2.00× | 2.77× |
-| Wan 2.2 A14B | **240.7 ms** | 2.34× | 2.31× |
-| Wan 2.1 14B | **271.2 ms** | 2.08× | 2.05× |
-| HunyuanVideo | **874.5 ms** | 1.74× | 0.97× (trn2 ≈ par) |
+| FLUX.1-dev | **134.1 ms** | 2.32× | 2.00× |
+| Qwen-Image | **140.0 ms** | 2.13× | 3.19× |
+| LTX-2 | **159.5 ms** | 1.96× | 2.77× |
+| Wan 2.2 A14B | **240.7 ms** | 2.30× | 2.31× |
+| Wan 2.1 14B | **271.2 ms** | 2.04× | 2.05× |
+| HunyuanVideo | **874.5 ms** | 1.72× | 0.97× (trn2 ≈ par) |
 | HunyuanVideo-1.5 | — (ran; per-step N/A) | H100 **OOM** | trn2 stub |
 
 **B300 is ~2× faster than H100 across the board on the comparable per-step, and the only
@@ -172,10 +172,40 @@ to SDPA instead of attention_cte** (3719→850.6 ms once re-wired to the kernel'
 bound_min/bound_max), and **Wan ran its attention *replicated* across the 4 TP cores**
 instead of head-sharding it (1144→554.8 ms once sharded, parity cosine 0.9998 vs the
 replicated baseline). After those fixes trn2 is **competitive-to-faster on FLUX,
-HunyuanVideo, and Wan**; the residual H100 leads — Qwen 1.5× and LTX-2 1.38× — are
+HunyuanVideo, and Wan**; the residual H100 leads — Qwen 1.5× and LTX-2 1.41× — are
 smaller and model-specific (LTX-2's text cross-attn was also moved off SDPA to unmasked
 attention_cte, lossless parity cosine 0.999934, but it was only ~7% of per-step, so the
 residual is genuine self-attn+FFN compute like Qwen). See **Corrections** in
 [trn2/RESULTS.md](trn2/RESULTS.md) / [h100/RESULTS.md](h100/RESULTS.md) for the old
 numbers and exactly why each changed. (HunyuanVideo-1.5's 121-frame attention exceeds
 80 GB at default config; trn2 never ran it either — orchestrator stub.)
+
+### e2e warm — trn2 vs H100 vs B300
+
+End-to-end **warm** generate (weights served from the OS page cache, n=1) on each device,
+same MATRIX config + pinned revision. Unlike per-step, **e2e warm is load-dominated, not a
+clean compute comparison**: every backend reloads the full pipeline each generate. On trn2
+the warm e2e is dominated by the per-process **Neuron weight-load** (each generate reloads
+the weights onto the NeuronCores); the denoise compute is small. The GPUs likewise reload
+the full pipeline from cache and run it on-device. Read it as the practical steady-state
+latency per device, **not** a silicon ranking — that is the per-step table above.
+
+| model | trn2 warm | H100 warm | B300 warm |
+|---|---:|---:|---:|
+| FLUX.1-dev | 46.7 s | 15.8 s | 7.9 s |
+| Qwen-Image | 73.6 s | 18.3 s | 10.7 s |
+| LTX-2 | 102.7 s | 24.9 s | 12.7 s |
+| Wan 2.1 14B | 96.8 s | 33.7 s | 13.6 s |
+| Wan 2.2 A14B | 92.8 s | 49.3 s | 17.5 s |
+| HunyuanVideo | 220.2 s | 47.6 s | 27.8 s |
+| HunyuanVideo-1.5 | — (stub) | OOM (>80 GB) | 439.1 s |
+
+trn2's warm e2e is the largest of the three purely because its per-process **Neuron
+weight-load** dominates (the denoise compute is small: per-step × steps). Every component —
+text-encoder, transformer **and** VAE — is compiled and runs on the NeuronCores (no host
+stages), and the difflet CLI starts a fresh process per generate, so each warm run reloads
+all weights onto the cores. The HunyuanVideo 220 s is a **stale** outlier: it was measured
+when its VAE still decoded on the host (~185 s); difflet now compiles HunyuanVideo's VAE
+on-chip too, so that e2e is pending re-measure (see trn2 Corrections). On the GPUs warm ≈
+one cached full-pipeline reload + the denoise loop. **HunyuanVideo-1.5 runs only on the
+B300** (480×848×121 peaks at 99.2 GB — over the 80 GB H100; trn2's orchestrator is a stub).

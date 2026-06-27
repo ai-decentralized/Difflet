@@ -3,7 +3,7 @@
 **Status:** ok  
 **Backend:** cuda  
 **Device:** CUDA / NVIDIA H100 PCIe  
-**Timestamp:** 2026-06-26 19:24 UTC
+**Timestamp:** 2026-06-27 06:06 UTC
 
 > Best-performing configuration: tp=4, bf16, A14B (high/low-noise experts), attention_cte
 
@@ -22,17 +22,22 @@
 | phase | time |
 |---|---|
 | compile (AOT, one-time) | 0.0 ms |
-| **e2e generate — cold start** (page cache dropped) | **39.87 s** |
-| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 25.17 s |
-| peak device memory | 70.9 GB |
+| **e2e generate — cold start** (page cache dropped) | **86.98 s** |
+| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 72.39 s |
+| **e2e generate — warm cache** | **49.28 s** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 34.69 s |
+| peak device memory | 71.1 GB |
+
+> Cold vs warm: **86.98 s → 49.28 s** (1.8× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 564.4 ms | 563.2 ms | 567.1 ms | 551.9 ms | 19 |
+| per denoise step (transformer fwd) | 553.7 ms | 552.1 ms | 554.1 ms | 538.8 ms | 19 |
+| end-to-end (warm) | 49.28 s | 49.28 s | 49.28 s | 49.28 s | 1 |
 
-**Throughput:** 1.772 steps/s
+**Throughput:** 1.806 steps/s
 
 ## Compile breakdown
 
@@ -46,11 +51,11 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 | stage | weight shard | weight load |
 |---|---:|---:|
-| pipeline load (from_pretrained → device) | — | 25.17 s |
-| **weights load total** | — | **25.17 s** |
+| pipeline load (from_pretrained → device) | — | 72.39 s |
+| **weights load total** | — | **72.39 s** |
 
-- **weights load total:** 25.17 s of 39.87 s wall
-- **compute + overhead (residual):** 14.70 s = text-encode + denoise loop + VAE decode + process/runtime startup
+- **weights load total:** 72.39 s of 86.98 s wall
+- **compute + overhead (residual):** 14.59 s = text-encode + denoise loop + VAE decode + process/runtime startup
 - eager diffusers (gpu-resident): one fused load of all components; residual is text-encode + denoise loop + VAE decode (no AOT compile). VAE tiling/slicing enabled (standard single-GPU video-decode setting; identical frames, DiT per-step unaffected).
 
 ## Output validity
@@ -65,7 +70,7 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 ## Toolchain
 
-- `torch` = 2.9.1
+- `torch` = 2.9.1+cu128
 - `diffusers` = 0.38.0
 - `transformers` = 4.57.6
 - `accelerate` = 1.14.0
@@ -74,6 +79,7 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 ## Notes
 
 - H100/CUDA reference runs single-GPU DENSE via stock diffusers (eager, no AOT compile). The tp=4/cp=1 shown in Configuration/Reproduction is the Trainium sharding for the difflet recipe — NOT how this GPU run executed (effective tp=1). Per-step latency is the load-independent metric comparable to trn2.
+- e2e_warm = 49 s (n=1) — warm-cache generate(s) run in a SEPARATE process (H100's 80 GB can't hold a second in-process generate after the cold run; the numeric equivalent of B300's in-process second iter). Weights were on disk from the immediately-preceding cold run, so warm = warm disk cache -> faster load, not a resident model.
 
 ## Reproduction
 

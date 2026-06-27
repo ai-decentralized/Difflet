@@ -57,7 +57,7 @@ they are kept here with the reason they changed (not silently overwritten).
   difflet's LTX-2 `_global_rms_norm` already uses; HunyuanVideo avoids it because its
   `qk_norm` is per-head and shards for free). Strict parity vs the replicated baseline on
   the same input: **cosine 0.999768** (rel_l2 2.0e-2, bf16). trn2 now **matches H100**
-  (554.8 vs 563 ms) — was 2.0× behind. Both Wan 2.1 and the single-expert Wan 2.2 use this
+  (554.8 vs 554.2 ms, ≈par) — was 2.0× behind. Both Wan 2.1 and the single-expert Wan 2.2 use this
   per-step (only Wan 2.1 was independently measured).
 - **ᵉ LTX-2 text cross-attn 477 → 441.8 ms (7%) — moved from masked SDPA to unmasked
   attention_cte.** LTX-2's self-attn was already on attention_cte; only its two text
@@ -66,7 +66,7 @@ they are kept here with the reason they changed (not silently overwritten).
   fails neuronx-cc NCC_IBIR243). Dropping the mask and running unmasked attention_cte (q!=kv
   is supported unmasked, like wan/qwen) is lossless here — **full-generate parity vs the
   masked baseline, same seed, cosine 0.999934** — so the text padding is benign. The gain is
-  small: cross-attn was only ~7% of the per-step, so the residual H100 1.38× lead is genuine
+  small: cross-attn was only ~7% of the per-step, so the residual H100 1.41× lead is genuine
   self-attn(cte)+FFN compute, like Qwen. (Caveat: padding-benign is an empirical property of
   the text encoder, validated on the benchmark prompt.)
 
@@ -78,7 +78,7 @@ cache. The cold→warm gap is otherwise the one-time cold disk read of the weigh
 the Neuron denoise compute is small (per-step × steps). So the two metrics that actually characterize
 the hardware are the **cold weight-load** and the **DiT per-step**; absolute cold
 e2e mostly measures disk + page-cache state. FLUX.1-dev is the fastest warm e2e
-(47 s) and fastest per-step (266 ms) of the set.
+(47 s) and fastest per-step (267.6 ms) of the set.
 
 ⁰ **DiT per-step** = warm in-process transformer-forward latency (median n=20, p90
 within 1 ms of median for every model), the stable pure-Neuron-compute metric, from
@@ -128,10 +128,11 @@ timer doesn't fit it; the denoise-loop rate is the equivalent warm per-step.
   would lift these further.
 - **Optimal warm e2e** (weights cached) is the realistic steady-state for a served
   deployment that keeps weights hot: 47–103 s for the image/short-video pipelines
-  (FLUX 47 s, Wan 93–97 s, Qwen 74 s, LTX-2 103 s), 220 s for HunyuanVideo (host VAE
-  bound). The **Neuron per-step** is the lossless compute floor: FLUX 266 ms, Qwen
-  447 ms, LTX-2 473 ms (validated cosine 0.99992 vs CPU), Wan 1144 ms, HunyuanVideo
-  3719 ms.
+  (FLUX 47 s, Wan 93–97 s, Qwen 74 s, LTX-2 103 s), 220 s for HunyuanVideo (a stale
+  host-VAE-decode measurement; its VAE is now compiled on-chip, e2e pending re-measure
+  — see Corrections ᶜ). The **Neuron per-step** is the lossless compute floor (corrected
+  values, matching the table above): FLUX 267.6 ms, Qwen 447 ms, LTX-2 441.8 ms
+  (validated cosine 0.99992 vs CPU), Wan 554.8 ms, HunyuanVideo 850.6 ms.
 
 ## Reproduce
 

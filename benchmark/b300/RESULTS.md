@@ -24,17 +24,17 @@ Same model, **same input size + step count**. The B300 and H100 per-steps are bo
 
 | model | **B300 per-step** | H100 per-step | trn2 per-step | B300 vs H100 | B300 vs trn2 |
 |---|---:|---:|---:|---:|---:|
-| FLUX.1-dev | **134.1 ms** | 316 ms | 267.6 ms | **2.36×** | **2.00×** |
-| Qwen-Image | **140.0 ms** | 302 ms | 447 ms | **2.16×** | **3.19×** |
-| LTX-2 | **159.5 ms** | 319 ms | 441.8 ms | **2.00×** | **2.77×** |
-| Wan 2.2 A14B | **240.7 ms** | 564 ms | 554.8 ms | **2.34×** | **2.31×** |
-| Wan 2.1 14B | **271.2 ms** | 563 ms | 554.8 ms | **2.08×** | **2.05×** |
-| HunyuanVideo | **874.5 ms** | 1525 ms | 850.6 ms | **1.74×** | 0.97× (trn2 ≈ par) |
+| FLUX.1-dev | **134.1 ms** | 310.8 ms | 267.6 ms | **2.32×** | **2.00×** |
+| Qwen-Image | **140.0 ms** | 297.7 ms | 447.1 ms | **2.13×** | **3.19×** |
+| LTX-2 | **159.5 ms** | 313.1 ms | 441.8 ms | **1.96×** | **2.77×** |
+| Wan 2.2 A14B | **240.7 ms** | 553.7 ms | 554.8 ms | **2.30×** | **2.31×** |
+| Wan 2.1 14B | **271.2 ms** | 554.2 ms | 554.8 ms | **2.04×** | **2.05×** |
+| HunyuanVideo | **874.5 ms** | 1503.2 ms | 850.6 ms | **1.72×** | 0.97× (trn2 ≈ par) |
 | HunyuanVideo-1.5 | —ᶠ (ran; H100 OOM) | OOM (>80 GB) | — (stub) | — | — |
 
 ### Headline
 
-**B300 is ~2× faster than H100 across the board on the comparable DiT per-step, and it is the only one of the three that runs HunyuanVideo-1.5 at all.** Against the same stock-diffusers CUDA path (same adapter, same torch/diffusers versions), Blackwell-Ultra lands **2.0–2.4× ahead of Hopper (H100)** on every model with a per-step number — FLUX 2.36×, Wan 2.2 2.34×, Qwen 2.16×, Wan 2.1 2.08×, LTX-2 2.00× — and **1.74×** on HunyuanVideo. The one model where B300 is *not* ~2× ahead of trn2 is HunyuanVideo (0.97×, trn2 marginally faster): that is exactly the model the trn2 stack was hand-tuned on (masked joint-attn re-wired from SDPA to attention_cte, 3719→850.6 ms — see [trn2/RESULTS.md](../trn2/RESULTS.md) Corrections), so trn2's tuned kernel pulls level with an untuned eager-diffusers B300 run. Everywhere the GPU path is also "just eager diffusers," B300 doubles H100.
+**B300 is ~2× faster than H100 across the board on the comparable DiT per-step, and it is the only one of the three that runs HunyuanVideo-1.5 at all.** Against the same stock-diffusers CUDA path (same adapter, same torch/diffusers versions), Blackwell-Ultra lands **2.0–2.3× ahead of Hopper (H100)** on every model with a per-step number — FLUX 2.32×, Wan 2.2 2.30×, Qwen 2.13×, Wan 2.1 2.04×, LTX-2 1.96× — and **1.72×** on HunyuanVideo. The one model where B300 is *not* ~2× ahead of trn2 is HunyuanVideo (0.97×, trn2 marginally faster): that is exactly the model the trn2 stack was hand-tuned on (masked joint-attn re-wired from SDPA to attention_cte, 3719→850.6 ms — see [trn2/RESULTS.md](../trn2/RESULTS.md) Corrections), so trn2's tuned kernel pulls level with an untuned eager-diffusers B300 run. Everywhere the GPU path is also "just eager diffusers," B300 doubles H100.
 
 **HunyuanVideo-1.5 is the memory story.** At 480×848×**121 frames** its activation working set peaks at **99.2 GB** — over the 80 GB H100 (which OOM'd) but comfortable inside the B300's 275 GB. It produces a valid (1, 121, 3, 480, 848) clip in 438.8 s e2e. trn2 never ran it either (orchestrator stub), so **B300 is the only device in this matrix that completes it**. Per-step is N/Aᶠ — the HunyuanVideo-1.5 diffusers pipeline doesn't expose `callback_on_step_end`, so the adapter can't time individual steps (an adapter limitation, not a failure; no device has a per-step for this model).
 

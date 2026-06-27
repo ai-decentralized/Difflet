@@ -18,58 +18,70 @@
   "compile_breakdown": {
     "eager": 0.0
   },
-  "load_seconds": 17.041598593000344,
-  "e2e_cold_seconds": 24.586231651000162,
+  "load_seconds": 20.739667731999816,
+  "e2e_cold_seconds": 28.061506640999824,
   "e2e_breakdown": {
     "stages": [
       {
         "stage": "pipeline load (from_pretrained \u2192 device)",
         "shard_s": null,
-        "load_s": 17.041598593000344
+        "load_s": 20.739667731999816
       }
     ],
     "weights_shard_total_s": null,
-    "weights_load_total_s": 17.041598593000344,
-    "wall_total_s": 24.586231651000162,
-    "compute_and_overhead_s": 7.5446330579998175,
+    "weights_load_total_s": 20.739667731999816,
+    "wall_total_s": 28.061506640999824,
+    "compute_and_overhead_s": 7.321838909000007,
     "note": "eager diffusers (gpu-resident): one fused load of all components; residual is text-encode + denoise loop + VAE decode (no AOT compile)."
   },
-  "e2e_warm": null,
+  "e2e_warm": {
+    "n": 1,
+    "mean": 24.91334076299995,
+    "median": 24.91334076299995,
+    "std": 0.0,
+    "p50": 24.91334076299995,
+    "p90": 24.91334076299995,
+    "min": 24.91334076299995,
+    "max": 24.91334076299995,
+    "samples": [
+      24.91334076299995
+    ]
+  },
   "step_latency": {
     "n": 19,
-    "mean": 0.3188301962105278,
-    "median": 0.318699502000527,
-    "std": 0.0011020013157369423,
-    "p50": 0.318699502000527,
-    "p90": 0.32002128600015567,
-    "min": 0.3167354850002084,
-    "max": 0.3210798319996684,
+    "mean": 0.3130690648421071,
+    "median": 0.3130709100000786,
+    "std": 0.0009970614841101047,
+    "p50": 0.3130709100000786,
+    "p90": 0.3139559090000148,
+    "min": 0.3107825330000651,
+    "max": 0.3156469719999677,
     "samples": [
-      0.3169725429997925,
-      0.3180525319994558,
-      0.32002128600015567,
-      0.31952714399994875,
-      0.3167354850002084,
-      0.3181605750005474,
-      0.3195792309998069,
-      0.31846497999958956,
-      0.31850954800029285,
-      0.3210798319996684,
-      0.3183170769998469,
-      0.318699502000527,
-      0.31758822499978123,
-      0.3190819139999803,
-      0.3185383999998521,
-      0.31890374700014945,
-      0.3190174080000361,
-      0.3198706570001377,
-      0.32065364200025215
+      0.3107825330000651,
+      0.3122636690000036,
+      0.3156469719999677,
+      0.3121937609998895,
+      0.3124292890001925,
+      0.3125530400000116,
+      0.31364881299987246,
+      0.3139559090000148,
+      0.31395668999994086,
+      0.3136693359999754,
+      0.3131508930000564,
+      0.3130709100000786,
+      0.3129653280000184,
+      0.3139400499999283,
+      0.31276161899995714,
+      0.3121162639999966,
+      0.3132198000000699,
+      0.313642112000025,
+      0.312345243999971
     ]
   },
   "throughput": {
-    "steps/s": 3.1364657798588396
+    "steps/s": 3.1941833681470215
   },
-  "peak_device_mem_gb": 76.678874624,
+  "peak_device_mem_gb": 76.830672384,
   "output": {
     "shape": [
       1,
@@ -87,7 +99,7 @@
     "note": "diffusers frames (video)"
   },
   "toolchain": {
-    "torch": "2.9.1",
+    "torch": "2.9.1+cu128",
     "diffusers": "0.38.0",
     "transformers": "4.57.6",
     "accelerate": "1.14.0",
@@ -97,14 +109,29 @@
   "status": "ok",
   "notes": [
     "Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.",
-    "H100/CUDA reference runs single-GPU DENSE via stock diffusers (eager, no AOT compile). The tp=4/cp=1 shown in Configuration/Reproduction is the Trainium sharding for the difflet recipe \u2014 NOT how this GPU run executed (effective tp=1). Per-step latency is the load-independent metric comparable to trn2."
+    "H100/CUDA reference runs single-GPU DENSE via stock diffusers (eager, no AOT compile). The tp=4/cp=1 shown in Configuration/Reproduction is the Trainium sharding for the difflet recipe \u2014 NOT how this GPU run executed (effective tp=1). Per-step latency is the load-independent metric comparable to trn2.",
+    "e2e_warm = 25 s (n=1) \u2014 warm-cache generate(s) run in a SEPARATE process (H100's 80 GB can't hold a second in-process generate after the cold run; the numeric equivalent of B300's in-process second iter). Weights were on disk from the immediately-preceding cold run, so warm = warm disk cache -> faster load, not a resident model."
   ],
-  "timestamp": "2026-06-26 19:29 UTC",
+  "timestamp": "2026-06-27 06:02 UTC",
   "config_slug": "ltx_2",
   "device_slug": "h100",
   "revision": "47da56e2ad66ce4125a9922b4a8826bf407f9d0a",
   "seed": 42,
   "prompt": "a cinematic shot of a red fox running through a snowy forest",
   "guidance_scale": 1.0,
-  "output_kind": "video"
+  "output_kind": "video",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "pipeline load (from_pretrained \u2192 device)",
+        "shard_s": null,
+        "load_s": 17.671544095999934
+      }
+    ],
+    "weights_shard_total_s": null,
+    "weights_load_total_s": 17.671544095999934,
+    "wall_total_s": 24.91334076299995,
+    "compute_and_overhead_s": 7.241796667000017,
+    "note": "eager diffusers (gpu-resident): one fused load of all components; residual is text-encode + denoise loop + VAE decode (no AOT compile)."
+  }
 }
