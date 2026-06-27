@@ -1,0 +1,65 @@
+# Benchmark results — H100 (summary)
+
+Measured on **NVIDIA H100 PCIe (80 GB)**, bf16, **single-GPU dense** via stock Hugging Face **diffusers** (eager — no AOT compile), through the backend-generic harness' CUDA reference adapter (`benchmark.bench --backend cuda`). The device was idle and serial — one model at a time. Weights cached on a 738 GB scratch disk.
+
+**Input size (H×W×F) and step count are identical to the trn2 runs** (same `MATRIX` config + pinned HF revision); the adapter refuses to run any other shape. Video models use VAE tiling/slicing (the standard single-GPU decode setting — output-identical, DiT per-step unaffected; disabled for LTX-2, see ⁵). Each row links to a detailed report.
+
+| model | kind | shape (==trn2) | steps | **e2e cold**¹ | **e2e warm**ᵉ | load² | **DiT per-step**³ | peak mem⁴ | output | status |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|---|
+| [LTX-2](ltx_2.md) | video | 480×704×49 | 20 | **28.1 s** | 24.9 s | 20.7 s | **313.1 ms** (3.19/s) | 76.8 GB | (1, 49, 3, 480, 704) ✓ | ok |
+| [Wan 2.1 14B](wan_2_1.md) | video | 480×832×9 | 20 | **29.9 s** | 33.7 s | 15.5 s | **554.2 ms** (1.80/s) | 42.4 GB | (1, 9, 3, 480, 832) ✓ | ok |
+| [Wan 2.2 A14B](wan_2_2.md) | video | 480×832×9 | 20 | **87.0 s** | 49.3 s | 72.4 s | **553.7 ms** (1.81/s) | 71.1 GB | (1, 9, 3, 480, 832) ✓ | ok |
+| [FLUX.1-dev](flux_1_dev.md) | image | 1024×1024 | 28 | **15.9 s** | 15.8 s | 6.4 s | **310.8 ms** (3.22/s) | 36.3 GB | (1, 3, 1024, 1024) ✓ | ok |
+| [Qwen-Image](qwen_image.md) | image | 1024×1024 | 20 | **18.2 s** | 18.3 s | 9.9 s | **297.7 ms** (3.36/s) | 58.4 GB | (1, 3, 1024, 1024) ✓ | ok |
+| [HunyuanVideo](hunyuan_video.md) | video | 320×512×61 | 20 | **47.5 s** | 47.6 s | 10.0 s | **1503.2 ms** (0.67/s) | 59.5 GB | (1, 61, 3, 320, 512) ✓ | ok |
+| [HunyuanVideo-1.5](hunyuan_video_15.md) | video | 480×848×121 | 20 | **—** | — | — | — | — | — | **failed** — OOM (>80GB) |
+
+✓ = output finite (no NaN/Inf), sensible range — see each report. Video output is frames-first `(B, F, C, H, W)` in diffusers vs trn2's `(B, C, F, H, W)`; same video.
+
+## H100 vs trn2 — DiT per-step (the only directly comparable metric)
+
+Same model, **same input size + step count**. The H100 per-step is the diffusers
+denoise-step latency (cuda-synced, first step dropped); the trn2 per-step is the matching
+real-loop inter-step delta (FLUX/LTX-2 via `step_realloop.py`) or the isolated DiT-forward
+timer (HunyuanVideo/Wan/Qwen). `trn2 speedup` = H100 ÷ trn2 (**> 1 means trn2 is faster**).
+
+| model | H100 per-step | trn2 per-step | trn2 speedup |
+|---|---:|---:|---:|
+| LTX-2 | 313.1 ms | 441.8 ms | 0.71× (H100 faster) |
+| Qwen-Image | 297.7 ms | 447.1 ms | 0.67× (H100 faster) |
+| Wan 2.1 14B | 554.2 ms | 554.8 ms | **1.00×**ᵈ (≈par) |
+| Wan 2.2 A14B | 553.7 ms | 554.8 ms | **1.00×**ᵈ (≈par) |
+| FLUX.1-dev | 310.8 ms | 267.6 ms | **1.16×** |
+| HunyuanVideo | 1503.2 ms | 850.6 ms | **1.77×**ᶜ |
+| HunyuanVideo-1.5 | — | — | — |
+
+### Headline
+
+**It is software-stack maturity, not silicon — and the corrected numbers make that sharper.** Two trn2 per-steps were mis-measured or mis-configured, both in difflet's favor once fixed. **HunyuanVideo's 2.4× "H100 win" was a difflet bug**: its masked joint self-attn fell back to `F.scaled_dot_product_attention` instead of attention_cte (the `config_label` said attention_cte; the compiled graph used SDPA — commit `cd54d0f` had dropped the mask→bounds wiring). Re-wiring the key-padding mask to attention_cte's `bound_min`/`bound_max` flips it to **trn2 1.77× faster (1503.2 → 850.6 ms)ᶜ**. On the flagship **FLUX.1-dev trn2 is faster** (267.6 vs 310.8 ms, trn2 speedup 1.16×), despite 4×24 GB NeuronCores vs one 80 GB GPU. **Wan was the same story**: its 2.0× gap was difflet *replicating* the attention across the 4 TP cores (`gather_output=True` for HF qk_norm parity) instead of head-sharding it; head-sharding it (with a TP-aware global RMS) gives **2.06× and pulls trn2 level with H100 (554.8 vs 554.2 ms)ᵈ**, parity cosine 0.9998. So where difflet routes through attention_cte and shards properly, trn2 is competitive-to-faster (FLUX, HunyuanVideo, Wan); the residual H100 leads — LTX-2 1.41× and Qwen 1.5× (not yet re-examined) — are smaller and model-specific, not a silicon verdict. (LTX-2's text cross-attn was also moved off SDPA to unmasked attention_cte, lossless parity cosine 0.999934, but it was only ~7% of the per-step — 477→441.8 ms — so LTX-2's residual, like Qwen's, is genuine self-attn(cte)+FFN compute, not a wiring bug.) **e2e cold is *not* comparable** across the two (trn2's is a true page-cache-dropped cold disk read; the H100's reads just-downloaded weights from cache) — only per-step is. trn2 per-step is now measured the H100 way (real-loop inter-step deltas)ᵇ for FLUX/LTX; **Qwen/Wan are still the older isolated-timer numbers**.
+
+¹ **e2e cold** = one full `from_pretrained` (weights→GPU) + generate, wall clock (eager reloads weights per process). ᵉ **e2e warm** = one warm-cache generate after the cold run (n=1), run in a **separate process** — an 80 GB H100 can't hold a second in-process generate after the cold run, so the warm iter is its own process (`benchmark.warm_e2e --backend cuda`); the numeric equivalent of B300's in-process second iter. The eager adapter reloads the full pipeline every generate, so warm = warm disk cache → faster load, not a resident model; cf. e2e cold. ² **load** = the `from_pretrained(...).to(cuda)` portion. ³ **DiT per-step** = the load-independent compute metric, directly comparable to trn2. ⁴ peak `torch.cuda.max_memory_allocated`. ⁵ **LTX-2**: VAE tiling disabled (`DIFFLET_BENCH_VAE_TILING=0`) — its small latents tile into a size-1 dim that crashes the decoder conv in diffusers 0.38.0. **HunyuanVideo-1.5** (480×848×121): OOM at default config — the 121-frame attention activation alone exceeds 80 GB (trn2 never ran it either; its orchestrator is a stub). **Wan 2.2 A14B**: H100 loads BOTH 14B experts resident (71.1 GB peak); trn2's per-step is single-expert but per-step compute is equivalent (each expert is 14B).
+
+ᵇ trn2 per-step re-measured the H100 way — inter-step deltas of a real generate loop, device-synced, step 0 excluded (`benchmark/step_realloop.py`), replacing the earlier per-model mix (isolated synthetic-forward / n=1 parity / tqdm-rate). FLUX 266→267.6 ms (n=27), LTX-2 473→477 ms (n=19): the old values were ~right, only the method was inconsistent. ᶜ **HunyuanVideo correction**: 3719→850.6 ms (4.37×) — was SDPA, now attention_cte via the key-padding→bounds re-wire (CPU-validated lossless). Measured with the step_latency method (synthetic all-ones mask, `bound_max`=full seq) → a conservative upper bound; a real padded prompt attends fewer keys, so the H100 lead flips by at least 1.77×. trn2 also now compiles HunyuanVideo's **VAE on-chip** (the old e2e decoded it on host), so e2e is not yet re-measured. ᵈ **Wan correction**: 1144→554.8 ms (2.06×) — attention was replicated across the 4 TP cores (`gather_output=True` + full-width across-heads RMSNorm), now head-sharded with a TP-aware global RMS (cross-rank sum-of-squares + per-rank norm-weight slice). Strict parity vs the replicated baseline on the same input: cosine 0.999768. Measured with the isolated step_latency timer; Wan 2.2 (single high-noise expert) inherits Wan 2.1's per-step.
+
+## Reproduce
+
+Each model is measured in **two processes** so the 80 GB H100 doesn't OOM: a cold run
+(`bench --iters 0`) for cold e2e + per-step + peak mem, then one warm-cache generate in
+its own process (`warm_e2e --backend cuda`, n=1). B300's 275 GB ran both in one process
+via `bench --iters 1`; on H100 the warm iter must be separate (the cold run's allocator
+memory isn't released in time to fit a second in-process generate). The full matrix is
+driven serially by `benchmark/h100/drive_all.sh`.
+
+```bash
+source ~/.venvs/difflet-h100/bin/activate            # CUDA torch 2.9.1+cu128 + diffusers 0.38.0
+export HF_HOME=/ephemeral/hf DIFFLET_BENCH_DEVICE=h100
+export PYTORCH_ALLOC_CONF=expandable_segments:True
+export HF_TOKEN=...                                   # for gated FLUX.1-dev
+python -m benchmark.bench     --backend cuda --model <slug> --iters 0   # cold + per-step + mem
+python -m benchmark.warm_e2e  --backend cuda --model <slug>             # warm (separate process, n=1)
+# LTX-2 needs VAE tiling off (its small latents tile into a size-1 dim):
+DIFFLET_BENCH_VAE_TILING=0 python -m benchmark.bench    --backend cuda --model ltx_2 --iters 0
+DIFFLET_BENCH_VAE_TILING=0 python -m benchmark.warm_e2e --backend cuda --model ltx_2
+# or the whole matrix:
+bash benchmark/h100/drive_all.sh
+```

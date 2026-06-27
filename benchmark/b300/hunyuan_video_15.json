@@ -1,0 +1,89 @@
+{
+  "model_id": "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+  "model_type": "hunyuan_video_15",
+  "backend": "cuda",
+  "device": "CUDA / NVIDIA B300 SXM6 AC",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 480,
+    "width": 848,
+    "num_frames": 121
+  },
+  "steps": 20,
+  "compile_seconds": 0.0,
+  "compile_breakdown": {
+    "eager": 0.0
+  },
+  "load_seconds": 3.850626977000047,
+  "e2e_cold_seconds": 438.7744327820001,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "pipeline load (from_pretrained \u2192 device)",
+        "shard_s": null,
+        "load_s": 3.850626977000047
+      }
+    ],
+    "weights_shard_total_s": null,
+    "weights_load_total_s": 3.850626977000047,
+    "wall_total_s": 438.7744327820001,
+    "compute_and_overhead_s": 434.92380580500003,
+    "note": "eager diffusers (gpu-resident): one fused load of all components; residual is text-encode + denoise loop + VAE decode (no AOT compile). VAE tiling/slicing enabled (standard single-GPU video-decode setting; identical frames, DiT per-step unaffected)."
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 439.07298530200023,
+    "median": 439.07298530200023,
+    "std": 0.0,
+    "p50": 439.07298530200023,
+    "p90": 439.07298530200023,
+    "min": 439.07298530200023,
+    "max": 439.07298530200023,
+    "samples": [
+      439.07298530200023
+    ]
+  },
+  "step_latency": null,
+  "throughput": {},
+  "peak_device_mem_gb": 99.179042816,
+  "output": {
+    "shape": [
+      1,
+      121,
+      3,
+      480,
+      848
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": 0.0,
+    "max": 1.0,
+    "mean": 0.5848416686058044,
+    "std": 0.2580447494983673,
+    "note": "diffusers frames (video)"
+  },
+  "toolchain": {
+    "torch": "2.9.1+cu128",
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0",
+    "cuda": "12.8"
+  },
+  "config_label": "tp=4, bf16, attention_cte + MX precision ops",
+  "status": "ok",
+  "notes": [
+    "H100/CUDA reference runs single-GPU DENSE via stock diffusers (eager, no AOT compile). The tp=4/cp=1 shown in Configuration/Reproduction is the Trainium sharding for the difflet recipe \u2014 NOT how this GPU run executed (effective tp=1). Per-step latency is the load-independent metric comparable to trn2."
+  ],
+  "timestamp": "2026-06-27 04:53 UTC",
+  "config_slug": "hunyuan_video_15",
+  "device_slug": "b300",
+  "revision": "286be7ce72277246578a3e3cc2487e95ddae5bcf",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 6.0,
+  "output_kind": "video"
+}

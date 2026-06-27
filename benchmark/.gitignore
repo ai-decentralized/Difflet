@@ -1,0 +1,7 @@
+# Raw run logs and generated media are device-specific and large — keep results
+# JSON + reports, drop the rest. Patterns apply to every device folder (trn2/, h100/, …).
+*/logs/
+*/*_out.pt
+*/*_out.mp4
+*/*_out.png
+*/*_out

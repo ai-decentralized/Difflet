@@ -1,0 +1,50 @@
+{
+  "model_id": "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+  "model_type": "hunyuan_video_15",
+  "backend": "cuda",
+  "device": "CUDA / NVIDIA H100 PCIe",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 480,
+    "width": 848,
+    "num_frames": 121
+  },
+  "steps": 20,
+  "compile_seconds": 0.0,
+  "compile_breakdown": {
+    "eager": 0.0
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": null,
+  "step_latency": null,
+  "throughput": {},
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0",
+    "cuda": "12.8"
+  },
+  "config_label": "tp=4, bf16, attention_cte + MX precision ops",
+  "status": "failed",
+  "notes": [
+    "H100/CUDA reference runs single-GPU DENSE via stock diffusers (eager, no AOT compile). The tp=4/cp=1 shown in Configuration/Reproduction is the Trainium sharding for the difflet recipe \u2014 NOT how this GPU run executed (effective tp=1). Per-step latency is the load-independent metric comparable to trn2.",
+    "FAILED: CUDA out of memory. Tried to allocate 51.05 GiB. GPU 0 has a total capacity of 79.19 GiB of which 39.43 GiB is free. Including non-PyTorch memory, this process has 39.75 GiB memory in use. Of the allocated memory 39.13 GiB is allocated by PyTorch, and 35.42 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)"
+  ],
+  "timestamp": "2026-06-26 19:09 UTC",
+  "config_slug": "hunyuan_video_15",
+  "device_slug": "h100",
+  "revision": "286be7ce72277246578a3e3cc2487e95ddae5bcf",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 6.0,
+  "output_kind": "video"
+}

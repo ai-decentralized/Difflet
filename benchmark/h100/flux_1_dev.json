@@ -1,0 +1,143 @@
+{
+  "model_id": "black-forest-labs/FLUX.1-dev",
+  "model_type": "flux",
+  "backend": "cuda",
+  "device": "CUDA / NVIDIA H100 PCIe",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 28,
+  "compile_seconds": 0.0,
+  "compile_breakdown": {
+    "eager": 0.0
+  },
+  "load_seconds": 6.377653867999925,
+  "e2e_cold_seconds": 15.880184779999581,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "pipeline load (from_pretrained \u2192 device)",
+        "shard_s": null,
+        "load_s": 6.377653867999925
+      }
+    ],
+    "weights_shard_total_s": null,
+    "weights_load_total_s": 6.377653867999925,
+    "wall_total_s": 15.880184779999581,
+    "compute_and_overhead_s": 9.502530911999656,
+    "note": "eager diffusers (gpu-resident): one fused load of all components; residual is text-encode + denoise loop + VAE decode (no AOT compile). VAE tiling/slicing enabled (standard single-GPU video-decode setting; identical frames, DiT per-step unaffected)."
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 15.76907642299966,
+    "median": 15.76907642299966,
+    "std": 0.0,
+    "p50": 15.76907642299966,
+    "p90": 15.76907642299966,
+    "min": 15.76907642299966,
+    "max": 15.76907642299966,
+    "samples": [
+      15.76907642299966
+    ]
+  },
+  "step_latency": {
+    "n": 27,
+    "mean": 0.3108234684444445,
+    "median": 0.3107889489997433,
+    "std": 0.0023452605130023373,
+    "p50": 0.3107889489997433,
+    "p90": 0.31296632700014015,
+    "min": 0.30509206599981553,
+    "max": 0.31669639700021435,
+    "samples": [
+      0.30509206599981553,
+      0.3095277799998257,
+      0.31669639700021435,
+      0.3072066380000251,
+      0.30819642500000555,
+      0.3158469119998699,
+      0.30996537100008936,
+      0.30844474600007743,
+      0.31236223799987783,
+      0.3130416540002443,
+      0.30830456899957426,
+      0.3129106810001758,
+      0.311036974000217,
+      0.3109410689999095,
+      0.3104232629998478,
+      0.3112905410002895,
+      0.30982826999979807,
+      0.3109668369997962,
+      0.31155182100019374,
+      0.3117329349997817,
+      0.3106105150000076,
+      0.31040555600020525,
+      0.31187533000002077,
+      0.30984390300000086,
+      0.31296632700014015,
+      0.3107889489997433,
+      0.3103758810002546
+    ]
+  },
+  "throughput": {
+    "steps/s": 3.2172602828371586
+  },
+  "peak_device_mem_gb": 36.348433408,
+  "output": {
+    "shape": [
+      1,
+      3,
+      1024,
+      1024
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": 0.0,
+    "max": 1.0,
+    "mean": 0.5764668583869934,
+    "std": 0.24459771811962128,
+    "note": "diffusers images (image)"
+  },
+  "toolchain": {
+    "torch": "2.9.1+cu128",
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0",
+    "cuda": "12.8"
+  },
+  "config_label": "tp=4 (registry default tp=8 -> 4 on trn2.3xlarge), bf16, attention_cte",
+  "status": "ok",
+  "notes": [
+    "H100/CUDA reference runs single-GPU DENSE via stock diffusers (eager, no AOT compile). The tp=4/cp=1 shown in Configuration/Reproduction is the Trainium sharding for the difflet recipe \u2014 NOT how this GPU run executed (effective tp=1). Per-step latency is the load-independent metric comparable to trn2.",
+    "e2e_warm = 16 s (n=1) \u2014 warm-cache generate(s) run in a SEPARATE process (an 80 GB H100 can't hold a second in-process generate after the cold run; the numeric equivalent of B300's in-process second iter). Weights were on disk from the immediately-preceding cold run, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-06-27 06:22 UTC",
+  "config_slug": "flux_1_dev",
+  "device_slug": "h100",
+  "revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 3.5,
+  "output_kind": "image",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "pipeline load (from_pretrained \u2192 device)",
+        "shard_s": null,
+        "load_s": 6.43176457699974
+      }
+    ],
+    "weights_shard_total_s": null,
+    "weights_load_total_s": 6.43176457699974,
+    "wall_total_s": 15.76907642299966,
+    "compute_and_overhead_s": 9.33731184599992,
+    "note": "eager diffusers (gpu-resident): one fused load of all components; residual is text-encode + denoise loop + VAE decode (no AOT compile). VAE tiling/slicing enabled (standard single-GPU video-decode setting; identical frames, DiT per-step unaffected)."
+  }
+}

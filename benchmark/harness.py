@@ -120,8 +120,9 @@ class BenchResult:
     # phase timings (seconds)
     compile_seconds: Optional[float] = None
     compile_breakdown: dict[str, float] = field(default_factory=dict)
-    load_seconds: Optional[float] = None
+    load_seconds: Optional[float] = None     # total weights load across all stages
     e2e_cold_seconds: Optional[float] = None
+    e2e_breakdown: Optional[dict] = None     # per-stage load/compute split of cold e2e
     e2e_warm: Optional[dict] = None          # Stats as dict
     step_latency: Optional[dict] = None      # Stats as dict (per denoise step)
     throughput: dict[str, float] = field(default_factory=dict)

@@ -1,0 +1,135 @@
+{
+  "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+  "model_type": "wan",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "compile_seconds": null,
+  "compile_breakdown": {},
+  "load_seconds": 570.395,
+  "e2e_cold_seconds": 635.445,
+  "e2e_warm": {
+    "n": 1,
+    "mean": 92.762891262013,
+    "median": 92.762891262013,
+    "std": 0.0,
+    "p50": 92.762891262013,
+    "p90": 92.762891262013,
+    "min": 92.762891262013,
+    "max": 92.762891262013,
+    "samples": [
+      92.762891262013
+    ]
+  },
+  "step_latency": {
+    "n": 20,
+    "mean": 0.5548,
+    "median": 0.5548,
+    "std": 0.0,
+    "p50": 0.5548,
+    "p90": 0.5548,
+    "min": 0.5548,
+    "max": 0.5548,
+    "samples": []
+  },
+  "throughput": {
+    "DiT steps/s": 1.802
+  },
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": [
+      1,
+      3,
+      9,
+      480,
+      832
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": -0.72265625,
+    "max": -0.31640625,
+    "mean": -0.4742526113986969,
+    "std": 0.07905086129903793,
+    "note": "saved wan2_2_t2v_a14b_diffusers_out.pt"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.14.27725+e2ff0410",
+    "neuronx-cc": "2.25.3371.0+f524f7f8",
+    "neuronx-distributed": "0.19.28093+fc70b593",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4, bf16, A14B (high/low-noise experts), attention_cte \u2014 head-sharded attention + TP-aware global RMS (was replicated)",
+  "status": "ok",
+  "notes": [
+    "CORRECTION: per-step 1144 -> 554.8 ms (2.06x) \u2014 the attention was REPLICATED across the 4 TP cores (gather_output=True + full-width across-heads RMSNorm to match HF), so tp=4 only parallelized the FFN, not the attention. Re-wired to head-sharded attention (gather_output=False + RowParallel out + local heads) with a TP-aware global RMS (cross-rank sum-of-squares + per-rank norm-weight slice, like LTX-2's _global_rms_norm). Strict parity vs the replicated baseline on the same input: cosine 0.999768 (rel_l2 2.0e-2, bf16). trn2 now matches H100 (554.8 vs 563 ms) \u2014 was 2.0x behind. Measured with the isolated step_latency timer (same as the old 1144 number). NOTE: wan_2_2 inherits wan_2_1's measured per-step (same single 14B transformer, same shape); not independently re-measured.",
+    "difflet runs Wan 2.2 with enable_transformer_2=False -> only the high-noise expert (single transformer), not the full A14B MoE.",
+    "e2e_cold = 635 s \u2014 TRUE cold start (OS page cache dropped before the run via sudo drop_caches), so the weight load is a real cold disk read; this replaces an earlier value taken with the host weights already cached (artificially low).",
+    "e2e_warm = 93 s (n=1, warm OS page cache from the immediately-preceding cold run, same session). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.",
+    "compile NOT actually performed: the wan orchestrator keys its NEFF cache by shape only, and Wan 2.2 shares Wan 2.1's shape (480x832x9), so `difflet compile` was a false cache hit (~14 s) reusing Wan 2.1's graph. compile_seconds set to null; a real Wan 2.2 compile would be on the order of Wan 2.1's (~108 min, VAE-dominated)."
+  ],
+  "timestamp": "2026-06-25 06:51 UTC",
+  "config_slug": "wan_2_2",
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder (UMT5)",
+        "load_s": 94.531,
+        "shard_s": 0.533
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 461.799,
+        "shard_s": 439.18
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 14.065,
+        "shard_s": 1.723
+      }
+    ],
+    "weights_load_total_s": 570.395,
+    "weights_shard_total_s": 441.436,
+    "wall_total_s": 635.445,
+    "compute_and_overhead_s": 65.05
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder (UMT5)",
+        "load_s": 9.213,
+        "shard_s": 0.215
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 29.287,
+        "shard_s": 6.824
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 12.699,
+        "shard_s": 0.076
+      }
+    ],
+    "weights_load_total_s": 51.199,
+    "weights_shard_total_s": 7.115,
+    "wall_total_s": 92.763,
+    "compute_and_overhead_s": 41.564
+  },
+  "revision": "5be7df9619b54f4e2667b2755bc6a756675b5cd7",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video",
+  "device_slug": "trn2"
+}
