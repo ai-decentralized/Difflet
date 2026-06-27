@@ -23,6 +23,7 @@ from difflet.ops import (
     get_dp_rank_spmd,
     get_tensor_model_parallel_size,
     get_world_group,
+    joint_ring_attention,
     scatter_to_process_group_spmd,
 )
 
@@ -40,6 +41,8 @@ class QwenImageTransformerInferenceConfig(InferenceConfig):
             self.vae_scale_factor = 8
         if not hasattr(self, "context_parallel_enabled"):
             self.context_parallel_enabled = False
+        if not hasattr(self, "cp_mode"):
+            self.cp_mode = "gather_kv"
 
     def get_required_attributes(self) -> List[str]:
         return [
@@ -309,9 +312,11 @@ class _QwenImageTrainiumAttnProcessor:
         *,
         context_parallel_enabled: bool = False,
         data_parallel_group=None,
+        cp_mode: str = "gather_kv",
     ) -> None:
         self.context_parallel_enabled = context_parallel_enabled
         self.data_parallel_group = data_parallel_group
+        self.cp_mode = cp_mode
 
     def __call__(
         self,
@@ -360,60 +365,79 @@ class _QwenImageTrainiumAttnProcessor:
             txt_query = _apply_qwen_rope_real(txt_query, txt_rope)
             txt_key = _apply_qwen_rope_real(txt_key, txt_rope)
 
-        # Context parallel: each rank holds the image query for its token shard.
-        # Gather the image K/V across the CP (data-parallel) group so every rank
-        # attends over the full image sequence; image query stays sharded
-        # (q_len != kv_len). Text K/V are replicated, so they are untouched.
-        if self.context_parallel_enabled:
-            stacked_kv = torch.stack([img_key, img_value], dim=0)  # [2, B, S/cp, H, d]
-            stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
-                stacked_kv, gather_dim=2, process_group=self.data_parallel_group
-            )  # [2, B, S, H, d]
-            img_key, img_value = torch.unbind(stacked_kv, dim=0)
-
-        joint_query = torch.cat([txt_query, img_query], dim=1)
-        joint_key = torch.cat([txt_key, img_key], dim=1)
-        joint_value = torch.cat([txt_value, img_value], dim=1)
-
-        head_dim = joint_query.shape[-1]
-        if attention_mask is None:
-            # Unmasked Qwen-Image joint attention → flash attention_cte
-            # (device-only, ~4x over compiled SDPA — cclog 90/m10). q/k/v are
-            # (B, S, heads, dim); the kernel wants (B*heads, S, dim) with the
-            # heads folded into the batch axis. Attention is per-rank: q/k/v
-            # already carry this rank's head shard from the ColumnParallel
-            # projections (_parallel_config is None — no context parallelism).
-            q = joint_query.transpose(1, 2)
-            k = joint_key.transpose(1, 2)
-            v = joint_value.transpose(1, 2)
-            b, h, s_q, d = q.shape
-            s_k = k.shape[2]
-            attn_out = attention(
-                q.reshape(b * h, s_q, d),
-                k.reshape(b * h, s_k, d),
-                v.reshape(b * h, s_k, d),
-                scale=1.0 / math.sqrt(head_dim),
-                causal=False,
-                attention_mask=None,
-                tp_q=True,
-                tp_k=True,
-                tp_out=False,
-            )
-            joint_hidden_states = attn_out.reshape(b, h, s_q, d).transpose(1, 2)
+        # Context parallel: choose ring-attention or gather-KV based on cp_mode.
+        # Under ring: image K,V are sequence-sharded and rotated via the ring
+        # collective; text K,V are replicated and folded in as a local partial.
+        # Under gather_kv (default): each rank all-gathers the full image K,V
+        # before running joint attention. Text K,V are always replicated.
+        head_dim = txt_query.shape[-1]
+        if self.context_parallel_enabled and self.cp_mode == "ring":
+            if attention_mask is not None:
+                raise NotImplementedError("ring cp_mode does not support attention_mask")
+            # Joint ring: image K,V sharded → rotated; text K,V replicated →
+            # local partial. q_joint is [txt ‖ img] to match the gather_kv
+            # joint concat order so the downstream split at seq_txt is unchanged.
+            # img/txt tensors are [B, S, H, d]; the op wants [B, H, S, d].
+            scale = 1.0 / math.sqrt(head_dim)
+            q_joint = torch.cat([txt_query, img_query], dim=1).transpose(1, 2)  # [B, H, Sq, d]
+            o_joint = joint_ring_attention(
+                q_joint,
+                img_key.transpose(1, 2), img_value.transpose(1, 2),  # sharded image K,V
+                txt_key.transpose(1, 2), txt_value.transpose(1, 2),  # replicated text K,V
+                scale=scale, causal=False,
+            )  # [B, H, Sq, d]
+            joint_hidden_states = o_joint.transpose(1, 2)  # [B, Sq, H, d]
         else:
-            joint_hidden_states = dispatch_attention_fn(
-                joint_query,
-                joint_key,
-                joint_value,
-                attn_mask=attention_mask,
-                dropout_p=0.0,
-                is_causal=False,
-                backend=self._attention_backend,
-                parallel_config=self._parallel_config,
-            )
+            # gather_kv path: all-gather image K,V before joint attention.
+            if self.context_parallel_enabled:
+                stacked_kv = torch.stack([img_key, img_value], dim=0)  # [2, B, S/cp, H, d]
+                stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
+                    stacked_kv, gather_dim=2, process_group=self.data_parallel_group
+                )  # [2, B, S, H, d]
+                img_key, img_value = torch.unbind(stacked_kv, dim=0)
+
+            joint_query = torch.cat([txt_query, img_query], dim=1)
+            joint_key = torch.cat([txt_key, img_key], dim=1)
+            joint_value = torch.cat([txt_value, img_value], dim=1)
+
+            if attention_mask is None:
+                # Unmasked Qwen-Image joint attention → flash attention_cte
+                # (device-only, ~4x over compiled SDPA — cclog 90/m10). q/k/v are
+                # (B, S, heads, dim); the kernel wants (B*heads, S, dim) with the
+                # heads folded into the batch axis. Attention is per-rank: q/k/v
+                # already carry this rank's head shard from the ColumnParallel
+                # projections (_parallel_config is None — no context parallelism).
+                q = joint_query.transpose(1, 2)
+                k = joint_key.transpose(1, 2)
+                v = joint_value.transpose(1, 2)
+                b, h, s_q, d = q.shape
+                s_k = k.shape[2]
+                attn_out = attention(
+                    q.reshape(b * h, s_q, d),
+                    k.reshape(b * h, s_k, d),
+                    v.reshape(b * h, s_k, d),
+                    scale=1.0 / math.sqrt(head_dim),
+                    causal=False,
+                    attention_mask=None,
+                    tp_q=True,
+                    tp_k=True,
+                    tp_out=False,
+                )
+                joint_hidden_states = attn_out.reshape(b, h, s_q, d).transpose(1, 2)
+            else:
+                joint_hidden_states = dispatch_attention_fn(
+                    joint_query,
+                    joint_key,
+                    joint_value,
+                    attn_mask=attention_mask,
+                    dropout_p=0.0,
+                    is_causal=False,
+                    backend=self._attention_backend,
+                    parallel_config=self._parallel_config,
+                )
 
         joint_hidden_states = joint_hidden_states.flatten(2, 3)
-        joint_hidden_states = joint_hidden_states.to(joint_query.dtype)
+        joint_hidden_states = joint_hidden_states.to(txt_query.dtype)
 
         txt_attn_output = joint_hidden_states[:, :seq_txt, :]
         img_attn_output = joint_hidden_states[:, seq_txt:, :]
@@ -438,6 +462,7 @@ class _QwenImageTransformerTraceModule(nn.Module):
         self.config = config
         self.guidance_embeds = bool(getattr(config, "guidance_embeds", False))
         self.context_parallel_enabled = bool(getattr(config, "context_parallel_enabled", False))
+        self.cp_mode = str(getattr(config, "cp_mode", "gather_kv"))
         if self.context_parallel_enabled:
             self.data_parallel_group = get_data_parallel_group()
             self.global_rank = SPMDRank(world_size=get_world_group().size())
@@ -476,6 +501,7 @@ class _QwenImageTransformerTraceModule(nn.Module):
             block.attn.processor = _QwenImageTrainiumAttnProcessor(
                 context_parallel_enabled=self.context_parallel_enabled,
                 data_parallel_group=self.data_parallel_group,
+                cp_mode=self.cp_mode,
             )
 
     def forward(

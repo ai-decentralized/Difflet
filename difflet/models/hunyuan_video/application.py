@@ -223,6 +223,7 @@ def create_hunyuan_video_backbone_config(
     text_seq_len: int = 256,
     batch_size: int = 1,
     context_parallel_enabled: bool = False,
+    cp_mode: str = "gather_kv",
 ):
     from difflet.backends.trainium.hunyuan_video.backbone import (
         HunyuanVideoBackboneInferenceConfig,
@@ -244,6 +245,7 @@ def create_hunyuan_video_backbone_config(
         num_frames=num_frames,
         text_seq_len=text_seq_len,
         context_parallel_enabled=context_parallel_enabled,
+        cp_mode=cp_mode,
     )
 
 
@@ -513,6 +515,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 text_seq_len=self.text_seq_len,
                 batch_size=self.batch_size,
                 context_parallel_enabled=parallel.cp_degree > 1,
+                cp_mode=parallel.cp_mode,
             )
             self.transformer = NeuronHunyuanVideoBackboneApplication(
                 model_path=self.transformer_path,

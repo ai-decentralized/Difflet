@@ -109,7 +109,11 @@ class FluxOrchestrator(ModelOrchestrator):
         entry = resolve_model(_HF_MODEL_ID, model_type=_MODEL_TYPE)
         tp = self.args.tp_degree or entry.default_parallel.tp_degree
         cp = self.args.cp_degree or 1
-        return DiffletParallelConfig(tp_degree=tp, cp_degree=cp)
+        return DiffletParallelConfig(
+            tp_degree=tp,
+            cp_degree=cp,
+            cp_mode=getattr(self.args, "cp_mode", "gather_kv"),
+        )
 
     def _dtype(self):
         import torch
