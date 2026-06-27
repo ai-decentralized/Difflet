@@ -88,7 +88,7 @@ benchmark/
     RESULTS.md               # cross-model summary for this device
     <slug>.json  <slug>.md   # machine-readable + detailed report
     logs/                    # raw compile/generate logs (gitignored)
-  h100/   b300/   …          # future: same layout, one folder per device
+  h100/   b300/              # measured here too (NVIDIA, diffusers CUDA reference); same layout
 ```
 
 The runner writes to `benchmark/<device>/`; the device defaults to `trn2` and is set
@@ -101,6 +101,8 @@ H100/B300 can replicate the *same* run and compare against the trn2 numbers.
 **[trn2/RESULTS.md](trn2/RESULTS.md)** — cross-model summary table (trn2).
 **[h100/RESULTS.md](h100/RESULTS.md)** — cross-model summary + H100-vs-trn2 per-step
 comparison (NVIDIA H100 PCIe 80 GB, stock-diffusers reference, single-GPU dense).
+**[b300/RESULTS.md](b300/RESULTS.md)** — cross-model summary + B300-vs-H100-vs-trn2
+per-step comparison (NVIDIA B300 SXM6 275 GB, stock-diffusers reference, single-GPU dense).
 
 | model | slug | report (trn2) | status |
 |---|---|---|---|
@@ -135,6 +137,33 @@ See **[h100/RESULTS.md](h100/RESULTS.md)** for the full table and caveats.
 | FLUX.1-dev | 316 ms | 267.6 ms | **1.18×** |
 | HunyuanVideo | 1525 ms | 850.6 ms | **1.79×** |
 | HunyuanVideo-1.5 | OOM (>80 GB) | — (stub) | — |
+
+### B300 reference (NVIDIA B300 SXM6 275 GB)
+
+Reproduced via the **same diffusers CUDA reference adapter** (`--backend cuda`), at the
+**same input size + step count + pinned revision + toolchain** as H100 (torch 2.9.1+cu128,
+diffusers 0.38.0) — so **B300-vs-H100 is an identical adapter/method/version comparison**.
+Run with `--iters 1` (e2e cold + one warm iter, matching the trn2 warm method). Full table
+and caveats in **[b300/RESULTS.md](b300/RESULTS.md)**.
+
+`B300 speedup` columns = `other ÷ B300` per-step (**> 1 means B300 is faster**).
+
+| model | DiT per-step — B300 | vs H100 | vs trn2 |
+|---|---:|---:|---:|
+| FLUX.1-dev | **134.1 ms** | 2.36× | 2.00× |
+| Qwen-Image | **140.0 ms** | 2.16× | 3.19× |
+| LTX-2 | **159.5 ms** | 2.00× | 2.77× |
+| Wan 2.2 A14B | **240.7 ms** | 2.34× | 2.31× |
+| Wan 2.1 14B | **271.2 ms** | 2.08× | 2.05× |
+| HunyuanVideo | **874.5 ms** | 1.74× | 0.97× (trn2 ≈ par) |
+| HunyuanVideo-1.5 | — (ran; per-step N/A) | H100 **OOM** | trn2 stub |
+
+**B300 is ~2× faster than H100 across the board on the comparable per-step, and the only
+device here that runs HunyuanVideo-1.5** (480×848×121 peaks at **99.2 GB** — over the 80 GB
+H100, inside the 275 GB B300; trn2 never ran it). The lone exception to the ~2× gap is
+HunyuanVideo, where trn2's hand-tuned attention_cte kernel (the model the trn2 stack was
+tuned on) pulls level with an untuned eager-diffusers B300 run (0.97×). Per-step for
+HunyuanVideo-1.5 is N/A — its diffusers pipeline exposes no `callback_on_step_end`.
 
 **It is software-stack maturity, not silicon — two apparent H100 wins were difflet bugs.**
 HunyuanVideo and Wan originally looked 2.0–2.4× behind H100; both were difflet

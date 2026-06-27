@@ -1,0 +1,121 @@
+{
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "model_type": "hunyuan_video",
+  "backend": "cuda",
+  "device": "CUDA / NVIDIA B300 SXM6 AC",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "compile_seconds": 0.0,
+  "compile_breakdown": {
+    "eager": 0.0
+  },
+  "load_seconds": 4.329974551000305,
+  "e2e_cold_seconds": 30.427942459000406,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "pipeline load (from_pretrained \u2192 device)",
+        "shard_s": null,
+        "load_s": 4.329974551000305
+      }
+    ],
+    "weights_shard_total_s": null,
+    "weights_load_total_s": 4.329974551000305,
+    "wall_total_s": 30.427942459000406,
+    "compute_and_overhead_s": 26.0979679080001,
+    "note": "eager diffusers (gpu-resident): one fused load of all components; residual is text-encode + denoise loop + VAE decode (no AOT compile). VAE tiling/slicing enabled (standard single-GPU video-decode setting; identical frames, DiT per-step unaffected)."
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 27.77703025599976,
+    "median": 27.77703025599976,
+    "std": 0.0,
+    "p50": 27.77703025599976,
+    "p90": 27.77703025599976,
+    "min": 27.77703025599976,
+    "max": 27.77703025599976,
+    "samples": [
+      27.77703025599976
+    ]
+  },
+  "step_latency": {
+    "n": 19,
+    "mean": 0.8745058544736821,
+    "median": 0.8747729149999941,
+    "std": 0.0008268133224190477,
+    "p50": 0.8747729149999941,
+    "p90": 0.875155686999733,
+    "min": 0.8725769370003036,
+    "max": 0.8755408389997683,
+    "samples": [
+      0.8755408389997683,
+      0.8751847900002758,
+      0.8747087430001557,
+      0.8750418729996454,
+      0.8750295429999824,
+      0.8747729149999941,
+      0.8725769370003036,
+      0.8731232850000197,
+      0.874613767000028,
+      0.8748688869995931,
+      0.874492809000003,
+      0.874837989000298,
+      0.8750406369999837,
+      0.875155686999733,
+      0.874732251000296,
+      0.8725866019999557,
+      0.8747834010000588,
+      0.8746176330000708,
+      0.8739026469997953
+    ]
+  },
+  "throughput": {
+    "steps/s": 1.1435029221180526
+  },
+  "peak_device_mem_gb": 59.452214784,
+  "output": {
+    "shape": [
+      1,
+      61,
+      3,
+      320,
+      512
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": 0.0,
+    "max": 1.0,
+    "mean": 0.5505592823028564,
+    "std": 0.2895808517932892,
+    "note": "diffusers frames (video)"
+  },
+  "toolchain": {
+    "torch": "2.9.1+cu128",
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0",
+    "cuda": "12.8"
+  },
+  "config_label": "tp=4, bf16, attention_cte",
+  "status": "ok",
+  "notes": [
+    "H100/CUDA reference runs single-GPU DENSE via stock diffusers (eager, no AOT compile). The tp=4/cp=1 shown in Configuration/Reproduction is the Trainium sharding for the difflet recipe \u2014 NOT how this GPU run executed (effective tp=1). Per-step latency is the load-independent metric comparable to trn2."
+  ],
+  "timestamp": "2026-06-27 04:49 UTC",
+  "config_slug": "hunyuan_video",
+  "device_slug": "b300",
+  "revision": "e8c2aaa66fe3742a32c11a6766aecbf07c56e773",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 6.0,
+  "output_kind": "video"
+}
