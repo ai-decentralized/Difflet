@@ -1142,19 +1142,68 @@ def dual_stream_attention(
     v_flat = v.permute(0, 2, 1, 3).reshape(batch * heads, kv_len, head_dim)
     mask_flat = _flatten_attention_mask(attention_mask, batch=batch, heads=heads)
 
-    out = attention(
-        q_flat,
-        k_flat,
-        v_flat,
-        scale=scale,
-        causal=False,
-        attention_mask=mask_flat,
-        tp_q=True,
-        tp_k=True,
-        tp_out=False,
-    )
+    if mask_flat is not None:
+        # Route the contiguous (right-padded) key-padding mask to attention_cte's
+        # lossless bound_min/bound_max range instead of the SDPA fallback. SDPA
+        # materializes the full q_len x kv_len scores+mask, which is catastrophic for
+        # this ~40k-token joint video sequence (the measured ~4-5x slowdown, i.e. the
+        # model looked like it had no attention_cte); the bound path is flash-style.
+        # Bounds are derived with a plain sum (trace-safe — mirrors the model
+        # forward's encoder_attention_mask.sum), NOT the general in-graph
+        # mask_to_contiguous_bounds, which is unsafe to trace (see commit cd54d0f /
+        # ops_impl/attention.py).
+        bound_min, bound_max = _keypad_bounds_from_mask(mask_flat, q_len)
+        out = attention(
+            q_flat,
+            k_flat,
+            v_flat,
+            scale=scale,
+            causal=False,
+            bound_min=bound_min,
+            bound_max=bound_max,
+            tp_q=True,
+            tp_k=True,
+            tp_out=False,
+        )
+    else:
+        out = attention(
+            q_flat,
+            k_flat,
+            v_flat,
+            scale=scale,
+            causal=False,
+            tp_q=True,
+            tp_k=True,
+            tp_out=False,
+        )
     out = out.reshape(batch, heads, q_len, head_dim).permute(0, 2, 1, 3)
     return out[:, :q_latent_seq], out[:, q_latent_seq:]
+
+
+def _keypad_bounds_from_mask(
+    mask_flat: torch.Tensor, q_len: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Right-padded key-padding mask -> attention_cte contiguous ``[0, count)`` bounds.
+
+    HunyuanVideo's joint DiT mask (built in ``HunyuanVideoTransformer3DModel.forward``)
+    marks the valid keys as the contiguous prefix ``[0, n_latent + n_valid_text)`` and
+    is uniform across queries, so the valid set is losslessly an attention_cte
+    ``bound_min``/``bound_max`` range: ``lo=0``, ``hi=#valid keys``. Counting valid keys
+    with a plain sum is trace-safe (it mirrors the forward's
+    ``encoder_attention_mask.sum``); the general ``mask_to_contiguous_bounds`` must NOT
+    run in-graph (XLA broadcast error — see ``ops_impl/attention.py`` and commit
+    cd54d0f).
+
+    ``mask_flat``: ``(B*heads, query_or_1, kv_len)``, bool (``True``=attend) or {0,1}.
+    Returns ``(bound_min, bound_max)`` int32 of shape ``(B*heads, q_len, 1)``.
+    """
+    bh = mask_flat.shape[0]
+    valid = mask_flat if mask_flat.dtype == torch.bool else (mask_flat != 0)
+    # sum() promotes to int64; attention_cte wants int32 bounds (cf. mask_bounds.py).
+    count = valid.sum(dim=-1, keepdim=True).to(torch.int32)   # (B*heads, q_or_1, 1)
+    bound_max = count.expand(bh, q_len, 1).contiguous()       # (B*heads, q_len, 1)
+    bound_min = torch.zeros_like(bound_max)
+    return bound_min, bound_max
 
 
 def _check_stream_shapes(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *, name: str) -> None:
