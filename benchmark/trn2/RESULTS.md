@@ -11,7 +11,7 @@ weights now in the page cache. Each row links to a detailed per-model report.
 
 | model | kind | shape | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁴ | **DiT per-step**⁰ | output | status |
 |---|---|---|---:|---:|---:|---:|---:|---|---|
-| [LTX-2](ltx_2.md) | video+audio | 480×704×49 | 28.6 min | **803 s** (13.4 min) | **103 s** | 335→52 s⁸ | **477 ms** (2.10/s)ᵇ | (1,49,3,480,704) ✓ | ok |
+| [LTX-2](ltx_2.md) | video+audio | 480×704×49 | 28.6 min | **803 s** (13.4 min) | **103 s** | 335→52 s⁸ | **441.8 ms** (2.26/s)ᵇᵉ | (1,49,3,480,704) ✓ | ok |
 | [Wan 2.1 14B](wan_2_1.md) | video (T2V) | 480×832×9 | 108 min⁵ | **722 s** (12.0 min) | **97 s** | 657→54 s | **554.8 ms** (1.80/s)ᵈ | (1,3,9,480,832) ✓ | ok |
 | [Wan 2.2 A14B](wan_2_2.md) | video (T2V) | 480×832×9 | (shares 2.1)⁶ | **635 s** (10.6 min) | **93 s** | 570→51 s | **554.8 ms** (1.80/s)ᵈ | (1,3,9,480,832) ✓ | ok⁶ |
 | [Qwen-Image](qwen_image.md) | image (T2I) | 1024×1024 | 13.4 min | **517 s** (8.6 min) | **74 s** | 462→41 s | **447 ms** (2.24/s) | (1,3,1024,1024) ✓ | ok |
@@ -59,6 +59,16 @@ they are kept here with the reason they changed (not silently overwritten).
   the same input: **cosine 0.999768** (rel_l2 2.0e-2, bf16). trn2 now **matches H100**
   (554.8 vs 563 ms) — was 2.0× behind. Both Wan 2.1 and the single-expert Wan 2.2 use this
   per-step (only Wan 2.1 was independently measured).
+- **ᵉ LTX-2 text cross-attn 477 → 441.8 ms (7%) — moved from masked SDPA to unmasked
+  attention_cte.** LTX-2's self-attn was already on attention_cte; only its two text
+  cross-attns (video←text, audio←text, text_seq_len=1024) fell to SDPA because they carry a
+  key-padding mask and attention_cte's bound path is self-attn only (q==kv; cross-attn q!=kv
+  fails neuronx-cc NCC_IBIR243). Dropping the mask and running unmasked attention_cte (q!=kv
+  is supported unmasked, like wan/qwen) is lossless here — **full-generate parity vs the
+  masked baseline, same seed, cosine 0.999934** — so the text padding is benign. The gain is
+  small: cross-attn was only ~7% of the per-step, so the residual H100 1.38× lead is genuine
+  self-attn(cte)+FFN compute, like Qwen. (Caveat: padding-benign is an empirical property of
+  the text encoder, validated on the benchmark prompt.)
 
 **The headline finding: e2e is load-dominated, not compute-bound.** For the
 pure-Neuron pipelines warm is **5–8× faster** than cold (Qwen 517→74 s, Wan

@@ -129,7 +129,7 @@ See **[h100/RESULTS.md](h100/RESULTS.md)** for the full table and caveats.
 | model | DiT per-step — H100 | DiT per-step — trn2 | trn2 speedup |
 |---|---:|---:|---:|
 | Qwen-Image | 302 ms | 447 ms | 0.68× (H100 faster) |
-| LTX-2 | 319 ms | 477 ms | 0.67× (H100 faster) |
+| LTX-2 | 319 ms | 441.8 ms | 0.72× (H100 faster) |
 | Wan 2.1 14B | 563 ms | 554.8 ms | **1.01×** |
 | Wan 2.2 A14B | 564 ms | 554.8 ms | **1.02×** |
 | FLUX.1-dev | 316 ms | 267.6 ms | **1.18×** |
@@ -143,8 +143,10 @@ to SDPA instead of attention_cte** (3719→850.6 ms once re-wired to the kernel'
 bound_min/bound_max), and **Wan ran its attention *replicated* across the 4 TP cores**
 instead of head-sharding it (1144→554.8 ms once sharded, parity cosine 0.9998 vs the
 replicated baseline). After those fixes trn2 is **competitive-to-faster on FLUX,
-HunyuanVideo, and Wan**; the residual H100 leads — Qwen 1.5× and LTX-2 1.50× (its
-cross-attn is still SDPA) — are smaller and model-specific. See **Corrections** in
+HunyuanVideo, and Wan**; the residual H100 leads — Qwen 1.5× and LTX-2 1.38× — are
+smaller and model-specific (LTX-2's text cross-attn was also moved off SDPA to unmasked
+attention_cte, lossless parity cosine 0.999934, but it was only ~7% of per-step, so the
+residual is genuine self-attn+FFN compute like Qwen). See **Corrections** in
 [trn2/RESULTS.md](trn2/RESULTS.md) / [h100/RESULTS.md](h100/RESULTS.md) for the old
 numbers and exactly why each changed. (HunyuanVideo-1.5's 121-frame attention exceeds
 80 GB at default config; trn2 never ran it either — orchestrator stub.)

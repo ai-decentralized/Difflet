@@ -5,7 +5,7 @@
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
 **Timestamp:** 2026-06-25 15:18 UTC
 
-> Best-performing configuration: tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF)
+> Best-performing configuration: tp=4, bf16, TP-sharded transformer + attention_cte self-attn + unmasked cross-attn, guidance=1.0 (batch-1 NEFF)
 
 ## Configuration
 
@@ -33,10 +33,10 @@
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 477.1 ms | 477.0 ms | 477.7 ms | 474.8 ms | 19 |
+| per denoise step (transformer fwd) | 441.8 ms | 441.5 ms | 442.4 ms | 440.5 ms | 19 |
 | end-to-end (warm) | 102.74 s | 102.74 s | 102.74 s | 102.74 s | 1 |
 
-**Throughput:** 2.096 DiT steps/s
+**Throughput:** 2.264 DiT steps/s
 
 ## Compile breakdown
 
@@ -80,7 +80,8 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 ## Notes
 
-- per-step = 477.1 ms/DiT-step (median 477.0, p90 477.7, n=19) — measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 105s; output finite=True.
+- UPDATE: cross-attn moved from masked-SDPA to UNMASKED attention_cte (attends text padding, like wan/qwen) — per-step 477.1 -> 441.8 ms (7.4%). Lossless: full-generate parity vs the masked-SDPA baseline (same seed) cosine 0.999934. Cross-attn was only ~7% of per-step; the residual H100 1.38x gap is genuine self-attn(cte)+FFN compute. attention_cte's bound path can't do cross-attn (q!=kv); unmasked can (q!=kv supported).
+- per-step = 441.8 ms/DiT-step (median 441.5, p90 442.4, n=19) — measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 35s; output finite=True.
 - Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.
 - e2e_cold = 803 s — TRUE cold start (OS page cache dropped before the run via sudo drop_caches), so the weight load is a real cold disk read; this replaces an earlier value taken with the host weights already cached (artificially low).
 - e2e_warm = 103 s (n=1, warm OS page cache from the immediately-preceding cold run, same session). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
@@ -101,7 +102,7 @@ Exact test conditions. The **model + config rows are hardware-agnostic** — an 
 | guidance scale | 1.0 |
 | seed | 42 |
 | prompt | "a cinematic shot of a red fox running through a snowy forest" |
-| best-perf knobs | tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF) |
+| best-perf knobs | tp=4, bf16, TP-sharded transformer + attention_cte self-attn + unmasked cross-attn, guidance=1.0 (batch-1 NEFF) |
 | measured on | trn2.3xlarge / 4 NeuronCores / 96 GB/device (device folder `trn2`) |
 
 ```bash
