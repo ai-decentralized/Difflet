@@ -39,14 +39,24 @@ Adapters provided:
 | `load_seconds` | weights load onto the device (per process) |
 | `e2e_cold_seconds` | first full prompt→output generate (incl. one-time host costs) |
 | `e2e_warm` (Stats) | steady-state generate over N iters (`--iters`) |
-| `step_latency` (Stats) | per denoising-step transformer-forward latency (core compute) |
+| `step_latency` (Stats) | per denoising-step DiT latency (core compute) — the metric directly comparable across backends |
 | `throughput` | derived (e.g. steps/s) |
 | `peak_device_mem_gb` | peak accelerator memory during inference |
 | `output` | shape / dtype / finite (no NaN/Inf) / value-range of the result |
 
-Timing uses warmup + N iters with percentile stats (`harness.Stats`); the Trainium
-adapter additionally relies on difflet's internal warmup so `step_latency` reflects
-steady-state device latency, not first-iteration cost.
+Timing uses warmup + N iters with percentile stats (`harness.Stats`).
+
+**Per-step is measured the H100 way** (`benchmark/step_realloop.py`): the inter-step
+deltas of a *real* generate loop (device-synced, step 0 dropped) — the same quantity the
+diffusers CUDA reference takes via `callback_on_step_end`, so the cross-device numbers are
+apples-to-apples. This replaces an earlier per-model mix (isolated synthetic-input forward
+/ n=1 parity script / tqdm denoise-rate). `benchmark/step_latency.py` is the older
+isolated-forward timer, kept for the masked models' before/after. See the **Corrections**
+section in [trn2/RESULTS.md](trn2/RESULTS.md) for which numbers changed and why.
+
+```bash
+python -m benchmark.step_realloop --model flux_1_dev   # H100-consistent per-step (real loop)
+```
 
 ## Usage
 
@@ -114,18 +124,27 @@ comparable metric is the **DiT per-step** (load-independent compute); e2e cold i
 *not* comparable (trn2's is a true cold disk read, the H100's reads cached weights).
 See **[h100/RESULTS.md](h100/RESULTS.md)** for the full table and caveats.
 
-| model | DiT per-step — H100 | DiT per-step — trn2 | H100 speedup |
+`trn2 speedup` = H100 ÷ trn2 per-step (**> 1 means trn2 is faster**).
+
+| model | DiT per-step — H100 | DiT per-step — trn2 | trn2 speedup |
 |---|---:|---:|---:|
-| HunyuanVideo | 1525 ms | 3719 ms | 2.4× |
-| Wan 2.1 14B | 563 ms | 1144 ms | 2.0× |
-| Wan 2.2 A14B | 564 ms | 1144 ms | 2.0× |
-| LTX-2 | 319 ms | 473 ms | 1.5× |
-| Qwen-Image | 302 ms | 447 ms | 1.5× |
-| FLUX.1-dev | 316 ms | 266 ms | **0.8× (trn2 faster)** |
+| Qwen-Image | 302 ms | 447 ms | 0.68× (H100 faster) |
+| LTX-2 | 319 ms | 477 ms | 0.67× (H100 faster) |
+| Wan 2.1 14B | 563 ms | 554.8 ms | **1.01×** |
+| Wan 2.2 A14B | 564 ms | 554.8 ms | **1.02×** |
+| FLUX.1-dev | 316 ms | 267.6 ms | **1.18×** |
+| HunyuanVideo | 1525 ms | 850.6 ms | **1.79×** |
 | HunyuanVideo-1.5 | OOM (>80 GB) | — (stub) | — |
 
-**Model-dependent, not a blanket win:** the H100's mature CUDA kernels lead on most
-models, but on **FLUX.1-dev — difflet's most-optimized model — trn2 is faster per-step**
-despite being 4×24 GB NeuronCores vs one 80 GB GPU. The gap reflects software-stack
-maturity as much as silicon. (HunyuanVideo-1.5's 121-frame attention exceeds 80 GB at
-default config; trn2 never ran it either — orchestrator stub.)
+**It is software-stack maturity, not silicon — two apparent H100 wins were difflet bugs.**
+HunyuanVideo and Wan originally looked 2.0–2.4× behind H100; both were difflet
+inefficiencies, not the chip: **HunyuanVideo's masked joint-attn had silently fallen back
+to SDPA instead of attention_cte** (3719→850.6 ms once re-wired to the kernel's
+bound_min/bound_max), and **Wan ran its attention *replicated* across the 4 TP cores**
+instead of head-sharding it (1144→554.8 ms once sharded, parity cosine 0.9998 vs the
+replicated baseline). After those fixes trn2 is **competitive-to-faster on FLUX,
+HunyuanVideo, and Wan**; the residual H100 leads — Qwen 1.5× and LTX-2 1.50× (its
+cross-attn is still SDPA) — are smaller and model-specific. See **Corrections** in
+[trn2/RESULTS.md](trn2/RESULTS.md) / [h100/RESULTS.md](h100/RESULTS.md) for the old
+numbers and exactly why each changed. (HunyuanVideo-1.5's 121-frame attention exceeds
+80 GB at default config; trn2 never ran it either — orchestrator stub.)
