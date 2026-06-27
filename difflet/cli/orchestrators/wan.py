@@ -101,6 +101,7 @@ class WanOrchestrator(ModelOrchestrator):
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
             cp_degree=args.cp_degree or 1,
+            cp_mode=getattr(args, "cp_mode", "gather_kv"),
         )
         compiled_dir = self._stage_compiled_dir("transformer", args)
         app = NeuronWanApplication(
@@ -217,6 +218,7 @@ class WanOrchestrator(ModelOrchestrator):
             "--model-id", self.args.model_id,
             "--tp-degree", str(a.tp_degree or 4),
             "--cp-degree", str(a.cp_degree or 1),
+            "--cp-mode", str(getattr(a, "cp_mode", "gather_kv")),
             "--height", str(a.height or 480),
             "--width", str(a.width or 832),
             "--num-frames", str(a.num_frames or 9),

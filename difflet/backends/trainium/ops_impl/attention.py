@@ -8,6 +8,14 @@ import torch.nn.functional as F
 
 from nkilib.core.attention.attention_cte import attention_cte
 
+try:
+    from nkilib.experimental.attention.ring_attention_fwd import ring_attention_spmd_fwd
+
+    _RING_IMPORT_ERROR = None
+except Exception as exc:  # pragma: no cover - import guard
+    ring_attention_spmd_fwd = None
+    _RING_IMPORT_ERROR = exc
+
 
 def attention(
     q,
@@ -148,4 +156,47 @@ def cross_attention(q, k, v, *, scale: float | None = None, attention_mask=None,
     )
 
 
-__all__ = ["attention", "cross_attention"]
+def ring_attention(q, k, v, *, scale: float, causal: bool = False):
+    """Ring context-parallel self-attention via nkilib ring_attention_spmd_fwd.
+
+    q,k,v: [B, H, S_local, d] (per-rank head shard). Returns [B, H, S_local, d].
+    The ring membership IS the data-parallel group the model scattered Q with,
+    so K/V rotate consistently with the scatter by construction.
+    """
+    if ring_attention_spmd_fwd is None:
+        raise RuntimeError(
+            "ring attention requires nkilib.experimental.attention.ring_attention_fwd "
+            f"(import failed: {_RING_IMPORT_ERROR!r}). Upgrade neuronx-cc / nkilib, or "
+            "use cp_mode=gather_kv."
+        )
+    from neuronx_distributed.parallel_layers.parallel_state import (
+        get_data_parallel_group,
+        get_data_parallel_size,
+    )
+
+    mesh = get_data_parallel_group(as_list=True)  # List[List[int]] of global ranks
+    num_workers = get_data_parallel_size()
+    replica_groups = tuple(tuple(int(r) for r in grp) for grp in mesh)
+
+    # Launch with the LNC2 1D SPMD grid under virtual-core-size 2 (same as
+    # attention_cte[2] above). The kernel's per-core shared_hbm send/recv buffers
+    # and core_barrier require the grid; without it neuronx-cc fails to resolve
+    # the named buffers on core 1 ("NCC_ILLC059 ... send_k_buf on core 1").
+    vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
+    kernel = ring_attention_spmd_fwd[2] if vc_size == 2 else ring_attention_spmd_fwd
+
+    return kernel(
+        q,
+        k,
+        v,
+        replica_groups=replica_groups,
+        num_workers=num_workers,
+        softmax_scale=float(scale),
+        use_causal_mask=causal,
+        training=False,
+        tp_q=True,
+        tp_k=True,
+    )
+
+
+__all__ = ["attention", "cross_attention", "ring_attention"]

@@ -23,6 +23,7 @@ WIDTH="${DIFFLET_WAN_WIDTH:-832}"
 VIDEO_FRAMES="${DIFFLET_WAN_FRAMES:-9}"
 TP_DEGREE="${DIFFLET_WAN_TP_DEGREE:-4}"
 CP_DEGREE="${DIFFLET_WAN_CP_DEGREE:-1}"
+CP_MODE="${DIFFLET_WAN_CP_MODE:-gather_kv}"
 WORLD_SIZE=$(( TP_DEGREE * CP_DEGREE ))
 export NEURON_RT_NUM_CORES="${NEURON_RT_NUM_CORES:-${WORLD_SIZE}}"
 SUBFOLDER="${DIFFLET_WAN_TRANSFORMER_SUBFOLDER:-transformer}"
@@ -57,6 +58,7 @@ video_frames = int(${VIDEO_FRAMES})
 latent_frames = _latent_num_frames(video_frames)
 tp_degree = int(${TP_DEGREE})
 cp_degree = int(${CP_DEGREE})
+cp_mode = ${CP_MODE@Q}
 world_size = int(${WORLD_SIZE})
 subfolder = ${SUBFOLDER@Q}
 local_files_only = ${LOCAL_FILES_ONLY@Q} == "1"
@@ -73,6 +75,7 @@ print(f"[wan-backbone] video shape    = ({height}, {width}, {video_frames})")
 print(f"[wan-backbone] latent frames  = {latent_frames}")
 print(f"[wan-backbone] tp_degree      = {tp_degree}")
 print(f"[wan-backbone] cp_degree      = {cp_degree}")
+print(f"[wan-backbone] cp_mode        = {cp_mode}")
 print(f"[wan-backbone] world_size     = {world_size}")
 
 config = create_wan_backbone_config(
@@ -86,6 +89,7 @@ config = create_wan_backbone_config(
     batch_size=1,
     subfolder=subfolder,
     context_parallel_enabled=cp_degree > 1,
+    cp_mode=cp_mode,
 )
 app = NeuronWanBackboneApplication(model_path=component_dir, config=config)
 start = time.time()
