@@ -6,12 +6,14 @@ import ast
 import inspect
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 import pytest
 import torch
 
 
 def test_modeling_vae_imports_only_from_allowed_modules():
-    src = Path("/home/ubuntu/difflet/difflet/models/wan/vae/modeling_vae.py").read_text()
+    src = (_REPO_ROOT / "difflet/models/wan/vae/modeling_vae.py").read_text()
     tree = ast.parse(src)
     forbidden_roots = {"neuronx_distributed", "nkilib", "torch_neuronx"}
     forbidden_prefixes = ("difflet.core",)

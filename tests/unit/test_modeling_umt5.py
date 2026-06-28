@@ -6,6 +6,8 @@ import ast
 import inspect
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 import pytest
 
 
@@ -13,7 +15,7 @@ def test_modeling_umt5_imports_only_from_allowed_modules():
     """Rule 1: UMT5 modeling imports only torch / stdlib / transformers
     activations / difflet.ops.
     """
-    src = Path("/home/ubuntu/difflet/difflet/models/wan/umt5/modeling_umt5.py").read_text()
+    src = (_REPO_ROOT / "difflet/models/wan/umt5/modeling_umt5.py").read_text()
     tree = ast.parse(src)
     forbidden_roots = {"neuronx_distributed", "nkilib", "torch_neuronx"}
     forbidden_prefixes = ("difflet.core",)

@@ -1,11 +1,10 @@
 import math
-import os
 
 import torch
 
 
-def test_joint_ring_attention_cpu_matches_full_joint_attention():
-    os.environ["DIFFLET_BACKEND"] = "cpu"
+def test_joint_ring_attention_cpu_matches_full_joint_attention(monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
     from difflet.ops import attention, joint_ring_attention
 
     torch.manual_seed(0)
