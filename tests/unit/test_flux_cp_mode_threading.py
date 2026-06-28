@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
+_ORIG_ENV = {k: os.environ.get(k) for k in ("DIFFLET_BACKEND", "NEURON_PLATFORM_TARGET_OVERRIDE")}
 os.environ.setdefault("DIFFLET_BACKEND", "cpu")
 os.environ.setdefault("NEURON_PLATFORM_TARGET_OVERRIDE", "cpu")
 
@@ -44,6 +45,7 @@ def _mock_pkg(name: str) -> types.ModuleType:
 
 
 if not isinstance(torch, MagicMock):
+    _pre_modules = set(sys.modules)
     # ---- torch_xla stub (diffusers imports torch_xla at module level) ----
     if "torch_xla" not in sys.modules:
         for _xla_name in [
@@ -118,6 +120,27 @@ if not isinstance(torch, MagicMock):
         NeuronFluxTransformerBlock,
         NeuronFluxSingleTransformerBlock,
     )
+
+    # Suite-safety: purge everything imported in this stubbed context — the stub
+    # modules themselves (origin="mock") AND any real difflet.backends.trainium
+    # modules whose classes got bound to the stub bases above. Leaving the latter
+    # cached makes a later real import reuse a half-real module (its base class is
+    # the stub) and crash. The classes we need are already bound locally.
+    for _stub_name in [
+        _n
+        for _n in set(sys.modules) - _pre_modules
+        if getattr(getattr(sys.modules.get(_n), "__spec__", None), "origin", None) == "mock"
+        or _n.startswith("difflet.backends.trainium")
+    ]:
+        del sys.modules[_stub_name]
+
+    # Suite-safety: restore env vars so we do not force later tests onto the cpu
+    # backend (construction above only needs them at import time).
+    for _k, _v in _ORIG_ENV.items():
+        if _v is None:
+            os.environ.pop(_k, None)
+        else:
+            os.environ[_k] = _v
 else:
     # Conftest mocked run — tests are skipped; define stubs so function bodies
     # don't raise NameError at collection time.

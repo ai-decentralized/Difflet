@@ -15,9 +15,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 def test_modeling_hunyuan_video_imports_only_from_allowed_modules():
-    src = Path("/home/ubuntu/difflet/difflet/models/hunyuan_video/modeling_hunyuan_video.py").read_text()
+    src = (_REPO_ROOT / "difflet/models/hunyuan_video/modeling_hunyuan_video.py").read_text()
     tree = ast.parse(src)
     forbidden_roots = {"neuronx_distributed", "nkilib", "torch_neuronx"}
     forbidden_prefixes = ("difflet.core",)

@@ -246,7 +246,7 @@ def test_application_clamps_single_core_component_load_range():
         config=SimpleNamespace(neuron_config=SimpleNamespace(world_size=1))
     )
 
-    assert NeuronWanApplication._component_load_range(
+    assert NeuronWanApplication._component_load_rank_range(
         component,
         start_rank_id=0,
         local_ranks_size=4,

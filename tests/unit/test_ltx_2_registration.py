@@ -2,6 +2,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 import pytest
 import torch
 
@@ -302,7 +304,7 @@ def test_ltx_2_transformer_trace_module_tiny_cpu_forward(tmp_path):
 
 
 def test_ltx_2_cache_dit_inputs_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_cache_dit_inputs.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("ltx_2_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -322,7 +324,7 @@ def test_ltx_2_cache_dit_inputs_cli_parser_imports_without_loading_models():
 
 
 def test_ltx_2_cache_dit_inputs_latent_dim_helper():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_cache_dit_inputs.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("ltx_2_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -334,7 +336,7 @@ def test_ltx_2_cache_dit_inputs_latent_dim_helper():
 
 
 def test_ltx_2_cache_dit_inputs_coords_respect_runtime_args():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_cache_dit_inputs.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("ltx_2_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -375,7 +377,7 @@ def test_ltx_2_cache_dit_inputs_coords_respect_runtime_args():
 
 
 def test_ltx_2_cache_dit_inputs_keeps_disabled_components_in_load_kwargs():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_cache_dit_inputs.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("ltx_2_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -398,7 +400,7 @@ def test_ltx_2_cache_dit_inputs_keeps_disabled_components_in_load_kwargs():
 
 
 def test_ltx_2_tiny_compile_smoke_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_tiny_compile_smoke.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_tiny_compile_smoke.py")
     spec = importlib.util.spec_from_file_location("ltx_2_tiny_compile_smoke", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -419,7 +421,7 @@ def test_ltx_2_tiny_compile_smoke_cli_parser_imports_without_compiling():
 
 
 def test_ltx_2_transformer_parity_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_transformer_parity.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_transformer_parity.py")
     spec = importlib.util.spec_from_file_location("ltx_2_transformer_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -454,7 +456,7 @@ def test_ltx_2_transformer_parity_cli_parser_imports_without_loading_models():
 
 
 def test_ltx_2_trajectory_parity_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_trajectory_parity.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_trajectory_parity.py")
     spec = importlib.util.spec_from_file_location("ltx_2_trajectory_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -491,7 +493,7 @@ def test_ltx_2_trajectory_parity_cli_parser_imports_without_loading_models():
 
 
 def test_ltx_2_trajectory_parity_cosine_is_exact_for_identical_large_tensors():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_trajectory_parity.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_trajectory_parity.py")
     spec = importlib.util.spec_from_file_location("ltx_2_trajectory_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -504,7 +506,7 @@ def test_ltx_2_trajectory_parity_cosine_is_exact_for_identical_large_tensors():
 
 
 def test_ltx_2_segmented_process_block_parser_imports_without_running():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_segmented_process_block.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_segmented_process_block.py")
     spec = importlib.util.spec_from_file_location("ltx_2_segmented_process_block", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -530,7 +532,7 @@ def test_ltx_2_segmented_process_block_parser_imports_without_running():
 
 
 def test_ltx_2_full_transformer_closure_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_full_transformer_closure.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_full_transformer_closure.py")
     spec = importlib.util.spec_from_file_location("ltx_2_full_transformer_closure", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -556,7 +558,7 @@ def test_ltx_2_full_transformer_closure_cli_parser_imports_without_loading_model
 
 
 def test_ltx_2_host_e2e_smoke_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_host_e2e_smoke.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_host_e2e_smoke.py")
     spec = importlib.util.spec_from_file_location("ltx_2_host_e2e_smoke", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -588,7 +590,7 @@ def test_ltx_2_host_e2e_smoke_cli_parser_imports_without_loading_models():
 
 
 def test_ltx_2_snapshot_report_selects_scoped_diffusers_subset():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_snapshot_report.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_snapshot_report.py")
     spec = importlib.util.spec_from_file_location("ltx_2_snapshot_report", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -622,7 +624,7 @@ def test_ltx_2_snapshot_report_selects_scoped_diffusers_subset():
 
 
 def test_ltx_2_production_block_compile_probe_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_production_block_compile_probe.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_production_block_compile_probe.py")
     spec = importlib.util.spec_from_file_location("ltx_2_production_block_compile_probe", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -652,7 +654,7 @@ def test_ltx_2_production_block_compile_probe_parser_imports_without_compiling()
 
 
 def test_ltx_2_segmented_block_compile_probe_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_segmented_block_compile_probe.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_segmented_block_compile_probe.py")
     spec = importlib.util.spec_from_file_location("ltx_2_segmented_block_compile_probe", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -679,7 +681,7 @@ def test_ltx_2_segmented_block_compile_probe_parser_imports_without_compiling():
 
 
 def test_ltx_2_segmented_block_parity_parser_imports_without_running():
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_segmented_block_parity.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_segmented_block_parity.py")
     spec = importlib.util.spec_from_file_location("ltx_2_segmented_block_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -880,7 +882,7 @@ def test_ltx_2_mx_group_kv_installs_attention_processors(monkeypatch):
 
 
 def test_ltx_2_host_e2e_smoke_preflight_decode_requirements(tmp_path):
-    script_path = Path("/home/ubuntu/difflet/scripts/ltx_2_host_e2e_smoke.py")
+    script_path = (_REPO_ROOT / "scripts/ltx_2_host_e2e_smoke.py")
     spec = importlib.util.spec_from_file_location("ltx_2_host_e2e_smoke", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

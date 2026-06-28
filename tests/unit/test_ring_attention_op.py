@@ -1,5 +1,4 @@
 import math
-import os
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,12 +13,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _set_cpu_backend():
-    os.environ["DIFFLET_BACKEND"] = "cpu"
+def _set_cpu_backend(monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
 
-def test_ring_attention_cpu_matches_plain_attention_cp1():
-    _set_cpu_backend()
+def test_ring_attention_cpu_matches_plain_attention_cp1(monkeypatch):
+    _set_cpu_backend(monkeypatch)
     from difflet.ops import attention, ring_attention
 
     torch.manual_seed(0)

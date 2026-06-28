@@ -6,15 +6,15 @@ import ast
 import inspect
 import json
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 from types import SimpleNamespace
 
 import torch
 
 
 def test_modeling_hunyuan_video_vae_imports_only_from_allowed_modules():
-    src = Path(
-        "/home/ubuntu/difflet/difflet/models/hunyuan_video/vae/modeling_vae.py"
-    ).read_text()
+    src = (_REPO_ROOT / "difflet/models/hunyuan_video/vae/modeling_vae.py").read_text()
     tree = ast.parse(src)
     forbidden_roots = {"neuronx_distributed", "nkilib", "torch_neuronx"}
     forbidden_prefixes = ("difflet.core",)
