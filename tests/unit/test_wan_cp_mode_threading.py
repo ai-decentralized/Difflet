@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
+_ORIG_DIFFLET_BACKEND = os.environ.get("DIFFLET_BACKEND")
 os.environ["DIFFLET_BACKEND"] = "cpu"
 
 # tests/conftest.py mocks torch for the default logic-only unit run; this is a
@@ -59,6 +60,23 @@ if not isinstance(torch, MagicMock):
         sys.modules["torch_xla.runtime"].is_spmd = MagicMock(return_value=False)  # type: ignore[attr-defined]
 
     from difflet.models.wan.modeling_wan import WanAttention, WanTransformerBlock
+
+    # Suite-safety: drop the import-time stubs we inserted (origin="mock") so they
+    # do not shadow the real torch_xla / difflet.backends.trainium packages when
+    # later test modules are collected in the same pytest session.
+    for _stub_name in [
+        _n
+        for _n, _mod in list(sys.modules.items())
+        if getattr(getattr(_mod, "__spec__", None), "origin", None) == "mock"
+    ]:
+        del sys.modules[_stub_name]
+
+    # Suite-safety: restore DIFFLET_BACKEND so we do not force later tests onto the
+    # cpu backend (construction above only needs it at import time).
+    if _ORIG_DIFFLET_BACKEND is None:
+        os.environ.pop("DIFFLET_BACKEND", None)
+    else:
+        os.environ["DIFFLET_BACKEND"] = _ORIG_DIFFLET_BACKEND
 else:
     # In the conftest mocked run the tests are skipped; define stubs so the
     # function bodies don't raise NameError at collection time.

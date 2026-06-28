@@ -15,7 +15,15 @@ from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
 
 _CALIB_DIR = Path(__file__).resolve().parents[2] / "cclogs" / "m9-teacache"
 
+# The calibration profiles live under cclogs/, which is gitignored, so they are
+# absent on fresh checkouts / CI. Skip the data-dependent cases when missing.
+_requires_calib = pytest.mark.skipif(
+    not (_CALIB_DIR.is_dir() and any(_CALIB_DIR.glob("teacache_calib_*.json"))),
+    reason=f"TeaCache calibration data not present at {_CALIB_DIR} (cclogs/ is gitignored)",
+)
 
+
+@_requires_calib
 @pytest.mark.parametrize("name", ["teacache_calib_wan.json", "teacache_calib_ltx_2.json"])
 def test_wan_ltx2_calibrations_load_and_are_well_formed(name):
     """The committed Wan/LTX-2 calibration profiles parse + carry sane fields."""
@@ -128,6 +136,7 @@ def test_ltx2_dual_stream_velocity_cache_skip_reuse():
     assert torch.allclose(a2, torch.full((1, 2), 14.0))  # 12 + 2
 
 
+@_requires_calib
 def test_ltx2_calibration_threshold_variants_consistent():
     """Sanity: the LTX-2 calib's poly is monotone-usable (accumulate never NaNs/stalls)."""
     calib = TeaCacheCalibration.from_json(_CALIB_DIR / "teacache_calib_ltx_2.json")
