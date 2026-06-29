@@ -109,6 +109,8 @@ class FluxOrchestrator(ModelOrchestrator):
         entry = resolve_model(_HF_MODEL_ID, model_type=_MODEL_TYPE)
         tp = self.args.tp_degree or entry.default_parallel.tp_degree
         cp = self.args.cp_degree or 1
+        # CFG-parallel is not supported for Flux via the CLI (rejected in
+        # main._validate_cfg_parallel); do not thread the flag here.
         return DiffletParallelConfig(
             tp_degree=tp,
             cp_degree=cp,

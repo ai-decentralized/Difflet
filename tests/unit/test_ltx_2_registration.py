@@ -199,6 +199,102 @@ def test_ltx_2_rejects_cp_until_transformer_spike(tmp_path):
         )
 
 
+def test_ltx_2_cfg_parallel_doubles_world_and_compiles_batch_two(tmp_path):
+    model_dir = tmp_path / "LTX-2"
+    _write_ltx_2_transformer_config(model_dir)
+
+    pipe = DiffletPipeline.from_pretrained(
+        str(model_dir),
+        model_type="ltx_2",
+        parallel=DiffletParallelConfig(tp_degree=4, cfg_parallel_enabled=True),
+        dtype="bf16",
+        height=256,
+        width=512,
+        num_frames=17,
+        compile_cache_dir=str(tmp_path / "cache"),
+        skip_compile=True,
+        load=False,
+        application_kwargs={"text_seq_len": 8, "audio_num_frames": 4, "frame_rate": 12.0},
+    )
+
+    # CFG parallel adds a 2-way data-parallel lane on top of TP.
+    assert pipe.parallel.world_size == 8
+    assert pipe.app.cfg_parallel_enabled is True
+
+    config = pipe.app.transformer.config
+    assert config.cfg_parallel_enabled is True
+    assert config.neuron_config.world_size == 8
+    # The transformer compiles at batch=2 ([uncond, cond]) before scattering.
+    assert config.neuron_config.batch_size == 2
+    contract = pipe.app.dit_input_contract()
+    assert contract["hidden_states"]["shape"][0] == 2
+    assert contract["timestep"]["shape"] == (2,)
+
+
+def test_ltx_2_cfg_parallel_rejects_perturbed_attn_stg(tmp_path):
+    from difflet.backends.trainium.ltx_2.transformer import (
+        LTX2TransformerInferenceConfig,
+        _LTX2TransformerTraceModule,
+    )
+    from difflet.models.ltx_2.application import create_ltx_2_transformer_config
+
+    model_dir = tmp_path / "LTX-2"
+    _write_ltx_2_transformer_config(model_dir, perturbed_attn=True)
+    config = create_ltx_2_transformer_config(
+        model_path=str(model_dir),
+        world_size=2,
+        tp_degree=1,
+        dtype=torch.bfloat16,
+        height=256,
+        width=512,
+        num_frames=17,
+        text_seq_len=8,
+        audio_num_frames=4,
+        cfg_parallel_enabled=True,
+    )
+    assert isinstance(config, LTX2TransformerInferenceConfig)
+
+    # STG (perturbed_attn) issues extra batch!=2 calls that can't run on the
+    # batch=2 CFG-parallel graph, so the trace module must reject the combo.
+    with pytest.raises(NotImplementedError, match="perturbed_attn"):
+        _LTX2TransformerTraceModule(config)
+
+
+def test_ltx_2_conversion_injects_global_rank_for_cfg_parallel():
+    from types import SimpleNamespace
+    from difflet.backends.trainium.ltx_2.transformer import (
+        NeuronLTX2TransformerApplication,
+    )
+
+    cfg = SimpleNamespace(
+        cfg_parallel_enabled=True,
+        neuron_config=SimpleNamespace(tp_degree=2, world_size=4),
+    )
+    out = NeuronLTX2TransformerApplication.convert_hf_to_neuron_state_dict(
+        {"proj_in.weight": torch.zeros(1)}, cfg
+    )
+    # The modeling trace module adds a root-level `global_rank` SPMDRank under
+    # cfg-parallel; its arange buffer must be injected or weight load fails.
+    assert "global_rank.rank" in out
+    assert torch.equal(out["global_rank.rank"], torch.arange(0, 4, dtype=torch.int32))
+
+
+def test_ltx_2_conversion_no_global_rank_for_tp_only():
+    from types import SimpleNamespace
+    from difflet.backends.trainium.ltx_2.transformer import (
+        NeuronLTX2TransformerApplication,
+    )
+
+    cfg = SimpleNamespace(
+        cfg_parallel_enabled=False,
+        neuron_config=SimpleNamespace(tp_degree=4, world_size=4),
+    )
+    out = NeuronLTX2TransformerApplication.convert_hf_to_neuron_state_dict(
+        {"proj_in.weight": torch.zeros(1)}, cfg
+    )
+    assert "global_rank.rank" not in out
+
+
 def test_ltx_2_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
     from difflet.models.ltx_2.application import (
         LTX2DiTInputBundle,
