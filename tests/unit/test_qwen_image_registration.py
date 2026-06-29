@@ -108,7 +108,7 @@ def test_qwen_image_still_rejects_cfg_parallel(tmp_path):
     model_dir = tmp_path / "Qwen-Image"
     model_dir.mkdir()
 
-    with pytest.raises(NotImplementedError, match="CFG-parallel is deferred"):
+    with pytest.raises(NotImplementedError, match="guidance-distilled"):
         DiffletPipeline.from_pretrained(
             str(model_dir),
             model_type="qwen_image",

@@ -125,6 +125,7 @@ def create_ltx_2_transformer_config(
     audio_num_frames: int | None = None,
     frame_rate: float = 24.0,
     batch_size: int = 1,
+    cfg_parallel_enabled: bool = False,
 ):
     from difflet.backends.trainium.ltx_2.transformer import LTX2TransformerInferenceConfig
 
@@ -146,6 +147,7 @@ def create_ltx_2_transformer_config(
         audio_text_seq_len=audio_text_seq_len or text_seq_len,
         audio_num_frames=audio_num_frames,
         frame_rate=frame_rate,
+        cfg_parallel_enabled=cfg_parallel_enabled,
     )
 
 
@@ -190,13 +192,21 @@ class NeuronLTX2Application(MultiComponentApplication):
         self.batch_size = int(kwargs.get("batch_size", 1))
         self.host_pipeline = None
 
+        # CFG parallel adds a 2-way data-parallel lane (world_size = tp * 2) and
+        # compiles the transformer at batch=2 ([uncond, cond]) before scattering
+        # one branch per rank.
+        cfg_parallel_enabled = bool(getattr(parallel, "cfg_parallel_enabled", False))
+        self.cfg_parallel_enabled = cfg_parallel_enabled
+        transformer_world_size = parallel.tp_degree * 2 if cfg_parallel_enabled else parallel.tp_degree
+        transformer_batch_size = 2 if cfg_parallel_enabled else self.batch_size
+
         enable_transformer = bool(kwargs.get("enable_transformer", True))
         transformer_mode = str(kwargs.get("transformer_mode", "single"))
         transformer_config_path = os.path.join(self.transformer_path, "config.json")
         if enable_transformer and os.path.exists(transformer_config_path):
             config = create_ltx_2_transformer_config(
                 model_path=model_path,
-                world_size=parallel.tp_degree,
+                world_size=transformer_world_size,
                 tp_degree=parallel.tp_degree,
                 dtype=self.dtype,
                 height=self.shape["height"],
@@ -206,7 +216,8 @@ class NeuronLTX2Application(MultiComponentApplication):
                 audio_text_seq_len=self.audio_text_seq_len,
                 audio_num_frames=self.audio_num_frames,
                 frame_rate=self.frame_rate,
-                batch_size=self.batch_size,
+                batch_size=transformer_batch_size,
+                cfg_parallel_enabled=cfg_parallel_enabled,
             )
             if transformer_mode == "single":
                 from difflet.backends.trainium.ltx_2.transformer import (

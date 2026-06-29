@@ -85,6 +85,67 @@ def test_orchestrator_runs_fallback_denoise_with_prompt_embeds(tmp_path):
     assert transformer.calls[0]["timestep"].shape == (1,)
 
 
+class FakeCfgParallelTransformer:
+    """Emulates the gathered batch=2 output of a CFG-parallel transformer.
+
+    The real model scatters [uncond, cond] to two ranks and gathers the result
+    back to batch=2; this fake just returns a batch=2 tensor with distinct
+    uncond/cond values so the CFG combine can be checked.
+    """
+
+    def __init__(self, *, uncond: float = 1.0, cond: float = 3.0):
+        self.dtype = torch.float32
+        self.config = SimpleNamespace(cfg_parallel_enabled=True)
+        self.uncond = uncond
+        self.cond = cond
+        self.calls = []
+
+    def __call__(self, hidden_states, timestep, encoder_hidden_states):
+        self.calls.append(
+            {
+                "hidden_states": hidden_states.detach().clone(),
+                "timestep": timestep.detach().clone(),
+                "encoder_hidden_states": encoder_hidden_states.detach().clone(),
+            }
+        )
+        out = torch.empty_like(hidden_states)
+        out[0:1] = self.uncond
+        out[1:2] = self.cond
+        return out
+
+
+def test_orchestrator_cfg_parallel_uses_single_batched_call(tmp_path):
+    transformer = FakeCfgParallelTransformer(uncond=1.0, cond=3.0)
+    pipeline = WanOrchestrator(
+        model_path=str(tmp_path),
+        transformer=transformer,
+        dtype=torch.float32,
+        boundary_ratio=None,
+    )
+    latents = torch.zeros((1, 16, 3, 4, 4), dtype=torch.float32)
+    prompt_embeds = torch.ones((1, 5, 8), dtype=torch.float32)
+
+    output = pipeline(
+        prompt_embeds=prompt_embeds,
+        latents=latents,
+        height=32,
+        width=32,
+        num_frames=9,
+        num_inference_steps=1,
+        guidance_scale=5.0,
+        output_type="latent",
+    )
+
+    # One batched call per step (not two serial uncond/cond passes), batch=2.
+    assert len(transformer.calls) == 1
+    assert transformer.calls[0]["hidden_states"].shape[0] == 2
+    assert transformer.calls[0]["timestep"].shape == (2,)
+    assert transformer.calls[0]["encoder_hidden_states"].shape[0] == 2
+    # noise_pred = uncond + scale*(cond-uncond) = 1 + 5*(3-1) = 11; scheduler
+    # fallback (no scheduler) is latents - noise_pred/steps = 0 - 11/1 = -11.
+    assert torch.allclose(output.frames, torch.full_like(latents, -11.0))
+
+
 def test_orchestrator_routes_late_steps_to_transformer_2(tmp_path):
     high_noise = FakeTransformer(bias=0.0)
     low_noise = FakeTransformer(bias=0.0)

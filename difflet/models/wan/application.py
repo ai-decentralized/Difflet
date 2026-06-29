@@ -28,6 +28,7 @@ def create_wan_backbone_config(
     subfolder: str = "transformer",
     context_parallel_enabled: bool = False,
     cp_mode: str = "gather_kv",
+    cfg_parallel_enabled: bool = False,
 ):
     from difflet.backends.trainium.wan.backbone import WanBackboneInferenceConfig
 
@@ -49,6 +50,7 @@ def create_wan_backbone_config(
         num_frames=num_frames,
         context_parallel_enabled=context_parallel_enabled,
         cp_mode=cp_mode,
+        cfg_parallel_enabled=cfg_parallel_enabled,
     )
 
 
@@ -157,6 +159,11 @@ class NeuronWanApplication(MultiComponentApplication):
 
         text_seq_len = int(kwargs.get("text_seq_len", 512))
         batch_size = int(kwargs.get("batch_size", 1))
+        # CFG parallel stacks [uncond, cond] into batch=2 before scattering one
+        # branch to each data-parallel rank, so the transformer compiles at
+        # batch=2 while the rest of the components stay at the base batch.
+        cfg_parallel_enabled = bool(getattr(parallel, "cfg_parallel_enabled", False))
+        backbone_batch_size = 2 if cfg_parallel_enabled else batch_size
         height = int(shape.get("height") or 480)
         width = int(shape.get("width") or 832)
         num_frames = int(shape.get("num_frames") or 9)
@@ -173,9 +180,10 @@ class NeuronWanApplication(MultiComponentApplication):
                 height=height,
                 width=width,
                 num_frames=latent_num_frames,
-                batch_size=batch_size,
+                batch_size=backbone_batch_size,
                 context_parallel_enabled=parallel.cp_degree > 1,
                 cp_mode=parallel.cp_mode,
+                cfg_parallel_enabled=cfg_parallel_enabled,
             )
             self.transformer = NeuronWanBackboneApplication(
                 model_path=self.transformer_path,
@@ -193,10 +201,11 @@ class NeuronWanApplication(MultiComponentApplication):
                 height=height,
                 width=width,
                 num_frames=latent_num_frames,
-                batch_size=batch_size,
+                batch_size=backbone_batch_size,
                 subfolder="transformer_2",
                 context_parallel_enabled=parallel.cp_degree > 1,
                 cp_mode=parallel.cp_mode,
+                cfg_parallel_enabled=cfg_parallel_enabled,
             )
             self.transformer_2 = NeuronWanBackboneApplication(
                 model_path=self.transformer_2_path,

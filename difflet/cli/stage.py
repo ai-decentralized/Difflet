@@ -40,6 +40,7 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--tp-degree", type=int, default=None)
     p.add_argument("--cp-degree", type=int, default=1)
     p.add_argument("--cp-mode", choices=["gather_kv", "ring"], default="gather_kv")
+    p.add_argument("--cfg-parallel", dest="cfg_parallel", action="store_true")
     p.add_argument("--height", type=int, default=None)
     p.add_argument("--width", type=int, default=None)
     p.add_argument("--num-frames", type=int, default=None)
