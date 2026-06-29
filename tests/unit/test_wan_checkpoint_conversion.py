@@ -52,6 +52,52 @@ def test_backbone_preserves_attention_and_other_keys_verbatim():
     assert set(out) == set(raw)
 
 
+def test_backbone_injects_global_rank_for_cfg_parallel():
+    from types import SimpleNamespace
+    from difflet.models.wan.checkpoint import convert_backbone_state_dict
+
+    config = SimpleNamespace(
+        context_parallel_enabled=False,
+        cfg_parallel_enabled=True,
+        neuron_config=SimpleNamespace(world_size=4, tp_degree=2),
+    )
+    out = convert_backbone_state_dict(
+        {"blocks.0.attn1.to_q.weight": torch.zeros(1)}, config=config
+    )
+    assert "global_rank.rank" in out
+    assert torch.equal(out["global_rank.rank"], torch.arange(0, 4, dtype=torch.int32))
+
+
+def test_backbone_injects_global_rank_for_context_parallel():
+    from types import SimpleNamespace
+    from difflet.models.wan.checkpoint import convert_backbone_state_dict
+
+    config = SimpleNamespace(
+        context_parallel_enabled=True,
+        cfg_parallel_enabled=False,
+        neuron_config=SimpleNamespace(world_size=8, tp_degree=4),
+    )
+    out = convert_backbone_state_dict(
+        {"blocks.0.attn1.to_q.weight": torch.zeros(1)}, config=config
+    )
+    assert torch.equal(out["global_rank.rank"], torch.arange(0, 8, dtype=torch.int32))
+
+
+def test_backbone_no_global_rank_for_tp_only():
+    from types import SimpleNamespace
+    from difflet.models.wan.checkpoint import convert_backbone_state_dict
+
+    config = SimpleNamespace(
+        context_parallel_enabled=False,
+        cfg_parallel_enabled=False,
+        neuron_config=SimpleNamespace(world_size=4, tp_degree=4),
+    )
+    out = convert_backbone_state_dict(
+        {"blocks.0.attn1.to_q.weight": torch.zeros(1)}, config=config
+    )
+    assert "global_rank.rank" not in out
+
+
 def test_text_encoder_conversion_is_identity():
     from difflet.models.wan.checkpoint import convert_text_encoder_state_dict
 

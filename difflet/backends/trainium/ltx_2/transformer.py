@@ -18,7 +18,11 @@ from difflet.ops import (
     RowParallelLinear,
     SPMDRank,
     attention as difflet_attention,
+    gather_from_tensor_model_parallel_region_with_dim,
+    get_data_parallel_group,
+    get_dp_rank_spmd,
     get_tensor_model_parallel_size,
+    get_world_group,
     reduce_from_tensor_model_parallel_region,
     scatter_to_process_group_spmd,
 )
@@ -371,6 +375,8 @@ class LTX2TransformerInferenceConfig(InferenceConfig):
             self.text_seq_len = LTX_2_DEFAULT_TEXT_SEQ_LEN
         if not hasattr(self, "audio_text_seq_len"):
             self.audio_text_seq_len = self.text_seq_len
+        if not hasattr(self, "cfg_parallel_enabled"):
+            self.cfg_parallel_enabled = False
         if not hasattr(self, "audio_num_frames") or self.audio_num_frames is None:
             self.audio_num_frames = self._infer_audio_num_frames()
         self.video_text_dim = (
@@ -530,6 +536,21 @@ class _LTX2TransformerTraceModule(nn.Module):
             perturbed_attn=bool(getattr(config, "perturbed_attn", False)),
         )
 
+        # CFG parallel: the caller stacks [uncond, cond] into batch=2 and one
+        # branch is scattered to each data-parallel rank. STG/modality guidance
+        # add extra batch!=2 transformer calls that can't run on this batch=2
+        # graph, so they are rejected at the pipeline boundary; perturbed_attn
+        # (STG) is rejected here for the same reason.
+        self.cfg_parallel_enabled = bool(getattr(config, "cfg_parallel_enabled", False))
+        if self.cfg_parallel_enabled:
+            if bool(getattr(config, "perturbed_attn", False)):
+                raise NotImplementedError(
+                    "LTX-2 CFG-parallel does not support perturbed_attn (STG); "
+                    "disable spatio-temporal guidance when cfg_parallel_enabled."
+                )
+            self.data_parallel_group = get_data_parallel_group()
+            self.global_rank = SPMDRank(world_size=get_world_group().size())
+
         # Tensor-parallel sharding: only when a TP group is live (device compile).
         # The runtime rank for RoPE/QK-norm head slicing comes from SPMDRank;
         # its buffer is populated via convert_hf_to_neuron_state_dict (arange).
@@ -558,7 +579,33 @@ class _LTX2TransformerTraceModule(nn.Module):
         video_coords: torch.Tensor,
         audio_coords: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        return self.transformer(
+        # CFG parallel: scatter the batch=2 [uncond, cond] stack so each
+        # data-parallel rank denoises one branch at batch=1; the per-branch
+        # outputs are gathered back into batch=2 below.
+        if self.cfg_parallel_enabled:
+            dp_rank = get_dp_rank_spmd(
+                global_rank=self.global_rank.get_rank(),
+                tp_degree=get_tensor_model_parallel_size(),
+            )
+
+            def _scatter(t: torch.Tensor) -> torch.Tensor:
+                return scatter_to_process_group_spmd(
+                    t, partition_dim=0, rank=dp_rank,
+                    process_group=self.data_parallel_group,
+                )
+
+            hidden_states = _scatter(hidden_states)
+            audio_hidden_states = _scatter(audio_hidden_states)
+            encoder_hidden_states = _scatter(encoder_hidden_states)
+            audio_encoder_hidden_states = _scatter(audio_encoder_hidden_states)
+            timestep = _scatter(timestep)
+            sigma = _scatter(sigma)
+            encoder_attention_mask = _scatter(encoder_attention_mask)
+            audio_encoder_attention_mask = _scatter(audio_encoder_attention_mask)
+            video_coords = _scatter(video_coords)
+            audio_coords = _scatter(audio_coords)
+
+        video_out, audio_out = self.transformer(
             hidden_states=hidden_states,
             audio_hidden_states=audio_hidden_states,
             encoder_hidden_states=encoder_hidden_states,
@@ -582,6 +629,15 @@ class _LTX2TransformerTraceModule(nn.Module):
             use_cross_timestep=bool(getattr(self.config, "use_cross_timestep", False)),
             return_dict=False,
         )
+
+        if self.cfg_parallel_enabled:
+            video_out = gather_from_tensor_model_parallel_region_with_dim(
+                video_out, gather_dim=0, process_group=self.data_parallel_group,
+            )
+            audio_out = gather_from_tensor_model_parallel_region_with_dim(
+                audio_out, gather_dim=0, process_group=self.data_parallel_group,
+            )
+        return video_out, audio_out
 
 
 class ModelWrapperLTX2Transformer(ModelWrapper):
@@ -781,6 +837,12 @@ class NeuronLTX2TransformerApplication(NeuronApplicationBase):
         tp_degree = int(getattr(config.neuron_config, "tp_degree", 1))
         if tp_degree > 1:
             out["tp_rank_util.rank"] = torch.arange(0, tp_degree, dtype=torch.int32)
+        # CFG parallel adds a root-level `global_rank` SPMDRank (modeling
+        # _LTX2TransformerTraceModule) whose `.rank` buffer must hold
+        # arange(world_size) so each rank loads its own global id.
+        if bool(getattr(config, "cfg_parallel_enabled", False)):
+            world_size = int(getattr(config.neuron_config, "world_size", 1))
+            out["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)
         return out
 
     @staticmethod

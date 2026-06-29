@@ -295,13 +295,38 @@ class WanOrchestrator:
         if self.boundary_ratio is not None:
             boundary_timestep = float(self.boundary_ratio) * float(train_timesteps)
 
-        teacache_on = self._maybe_init_teacache()
+        # CFG parallel runs uncond+cond as a single batched DiT call (one branch
+        # per data-parallel rank), so the serial TeaCache residual path doesn't
+        # apply; keep them mutually exclusive (mirrors Flux).
+        cfg_parallel = bool(
+            getattr(_component_config(self.transformer), "cfg_parallel_enabled", False)
+        )
+        teacache_on = False if cfg_parallel else self._maybe_init_teacache()
         ctrl = self._teacache_controller if teacache_on else None
 
         for step_index, timestep in enumerate(timesteps):
             current_model = self._select_transformer(timestep, boundary_timestep)
             scale = self._select_guidance_scale(timestep, boundary_timestep, guidance_scale, guidance_scale_2)
             model_dtype = _component_dtype(current_model, self.dtype)
+
+            if cfg_parallel:
+                # Stack [uncond, cond] into batch=2; the transformer scatters one
+                # branch to each DP rank and gathers the result back to batch=2.
+                if negative_prompt_embeds is None:
+                    negative_prompt_embeds = torch.zeros_like(prompt_embeds)
+                batched_latents = torch.cat([latents, latents], dim=0).to(dtype=model_dtype)
+                batched_embeds = torch.cat(
+                    [negative_prompt_embeds, prompt_embeds], dim=0
+                ).to(dtype=model_dtype)
+                batched_timestep = _batch_timestep(timestep, 2, latents.device, model_dtype)
+                out = _first_tensor(
+                    current_model(batched_latents, batched_timestep, batched_embeds)
+                )
+                uncond, cond = out[0:1], out[1:2]
+                noise_pred = uncond + scale * (cond - uncond)
+                latents = self._scheduler_step(noise_pred, timestep, latents, num_inference_steps)
+                continue
+
             timestep_batch = _batch_timestep(timestep, latents.shape[0], latents.device, model_dtype)
 
             # TeaCache: the block-0 modulated-input signal is timestep-only (identical for

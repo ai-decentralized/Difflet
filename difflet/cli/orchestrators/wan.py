@@ -53,7 +53,9 @@ class WanOrchestrator(ModelOrchestrator):
         print(f"[difflet] weights ready for {self.args.model_id}")
 
     def compile(self) -> None:
-        full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1)
+        full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1) * (
+            2 if getattr(self.args, "cfg_parallel", False) else 1
+        )
         shared = self._shared_cli_args(stage_mode="compile")
         runner.run_stage(self.args.model_id, "transformer",
                          num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE,
@@ -66,7 +68,9 @@ class WanOrchestrator(ModelOrchestrator):
         work_dir = Path(self.args.work_dir or
                         Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME)
         work_dir.mkdir(parents=True, exist_ok=True)
-        full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1)
+        full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1) * (
+            2 if getattr(self.args, "cfg_parallel", False) else 1
+        )
         shared = self._shared_cli_args(stage_mode="generate", work_dir=str(work_dir))
         try:
             runner.run_stage(self.args.model_id, "transformer",
@@ -102,6 +106,7 @@ class WanOrchestrator(ModelOrchestrator):
             tp_degree=args.tp_degree or 4,
             cp_degree=args.cp_degree or 1,
             cp_mode=getattr(args, "cp_mode", "gather_kv"),
+            cfg_parallel_enabled=getattr(args, "cfg_parallel", False),
         )
         compiled_dir = self._stage_compiled_dir("transformer", args)
         app = NeuronWanApplication(
@@ -203,11 +208,12 @@ class WanOrchestrator(ModelOrchestrator):
         base = Path(args.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
         tp = args.tp_degree or 4
         cp = args.cp_degree or 1
+        cfg = "cfg" if getattr(args, "cfg_parallel", False) else ""
         h = args.height or 480
         w = args.width or 832
         f = args.num_frames or 9
         if stage == "transformer":
-            return base / f"wan_transformer_tp{tp}cp{cp}_h{h}w{w}f{f}"
+            return base / f"wan_transformer_tp{tp}cp{cp}{cfg}_h{h}w{w}f{f}"
         if stage == "vae":
             return base / f"wan_vae_h{h}w{w}f{f}"
         raise ValueError(f"unknown stage {stage!r}")
@@ -227,6 +233,8 @@ class WanOrchestrator(ModelOrchestrator):
             "--seed", str(getattr(a, "seed", 42)),
             "--stage-mode", stage_mode,
         ]
+        if getattr(a, "cfg_parallel", False):
+            parts.append("--cfg-parallel")
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
         if getattr(a, "output", None):

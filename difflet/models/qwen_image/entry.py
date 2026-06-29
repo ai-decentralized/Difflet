@@ -22,7 +22,9 @@ def create_qwen_image_application(
         )
     if parallel.cfg_parallel_enabled:
         raise NotImplementedError(
-            "Qwen-Image CFG-parallel is deferred until the M4a transformer spike."
+            "Qwen-Image is guidance-distilled (single forward pass with the "
+            "guidance scale baked into the timestep embedding); CFG-parallel "
+            "requires true two-pass classifier-free guidance and does not apply."
         )
 
     from difflet.models.qwen_image.application import NeuronQwenImageApplication

@@ -531,6 +531,14 @@ class LTX2Orchestrator:
             do_cfg = float(guidance_scale) > 1.0 or float(audio_guidance_scale) > 1.0
             do_stg = float(stg_scale) > 0.0 or float(audio_stg_scale) > 0.0
             do_modality = float(modality_scale) > 1.0 or float(audio_modality_scale) > 1.0
+            if getattr(self.transformer, "cfg_parallel_enabled", False) and (do_stg or do_modality):
+                # STG/modality issue extra batch!=2 transformer calls that can't run
+                # on the batch=2 CFG-parallel graph (one branch per data-parallel rank).
+                raise NotImplementedError(
+                    "LTX-2 CFG-parallel does not support STG or modality guidance. "
+                    "Set stg_scale/audio_stg_scale to 0 and modality_scale/"
+                    "audio_modality_scale to <=1, or disable cfg_parallel_enabled."
+                )
             model_latents = torch.cat([latents] * 2) if do_cfg else latents
             model_audio_latents = torch.cat([audio_latents] * 2) if do_cfg else audio_latents
             timestep_batch = _batch_timestep(

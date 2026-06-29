@@ -21,7 +21,11 @@ def create_hunyuan_video_application(
             f"HunyuanVideo currently supports only the trainium backend, got {backend!r}"
         )
     if parallel.cfg_parallel_enabled:
-        raise NotImplementedError("HunyuanVideo CFG-parallel is deferred until M3 polish")
+        raise NotImplementedError(
+            "HunyuanVideo is guidance-distilled (single forward pass with the "
+            "guidance scale baked into the timestep embedding); CFG-parallel "
+            "requires true two-pass classifier-free guidance and does not apply."
+        )
 
     from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
 
@@ -51,7 +55,9 @@ def create_hunyuan_video15_application(
         raise NotImplementedError("HunyuanVideo 1.5 CP is deferred until the transformer port")
     if parallel.cfg_parallel_enabled:
         raise NotImplementedError(
-            "HunyuanVideo 1.5 CFG-parallel is deferred until the transformer port"
+            "HunyuanVideo 1.5 is guidance-distilled (single forward pass with the "
+            "guidance scale baked into the timestep embedding); CFG-parallel "
+            "requires true two-pass classifier-free guidance and does not apply."
         )
 
     from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication

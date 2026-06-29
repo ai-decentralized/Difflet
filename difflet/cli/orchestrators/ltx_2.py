@@ -116,7 +116,11 @@ class LTX2Orchestrator(ModelOrchestrator):
         from difflet.registry import resolve_model
         entry = resolve_model(_HF_MODEL_ID, model_type=_MODEL_TYPE)
         tp = self.args.tp_degree or entry.default_parallel.tp_degree
-        return DiffletParallelConfig(tp_degree=tp, cp_degree=self.args.cp_degree or 1)
+        return DiffletParallelConfig(
+            tp_degree=tp,
+            cp_degree=self.args.cp_degree or 1,
+            cfg_parallel_enabled=getattr(self.args, "cfg_parallel", False),
+        )
 
     def _dtype(self):
         import torch
