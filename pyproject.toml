@@ -110,9 +110,48 @@ select = ["F401", "F821"]   # match sglang's narrow ruff config
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--tb=short --strict-markers"
+addopts = "--tb=short --strict-markers --import-mode=importlib"
 markers = [
     "slow: marks tests as slow (run with -m slow)",
     "neuron: requires NeuronCore hardware",
     "numerical: numerical correctness vs HF diffusers reference",
+]
+
+# Coverage is measured over the CPU-executable, first-party surface of difflet/.
+# The omit list excludes code that is structurally un-runnable on a CPU-only host
+# (Trainium NKI kernels, XLA trace/compile paths, Neuron-runtime validation
+# utilities) or that needs real model weights. Everything kept in scope is
+# reachable via the torch-native CPU backend (DIFFLET_BACKEND=cpu).
+[tool.coverage.run]
+source = ["difflet"]
+omit = [
+    "difflet/_version.py",
+    # Neuron-runtime / hardware-validation utilities (cannot run on CPU; several
+    # fail even to import because they pull in neuronx_distributed_inference models).
+    "difflet/utils/accuracy.py",
+    "difflet/utils/benchmark.py",
+    "difflet/utils/hf_adapter.py",
+    "difflet/utils/testing.py",
+    "difflet/utils/tensor_capture_utils.py",
+    "difflet/utils/constants.py",
+    "difflet/utils/debug_utils.py",
+    "difflet/utils/profiling.py",
+    "difflet/utils/version_utils.py",
+    # Trainium NKI-kernel / XLA-trace backend implementations (hardware-only).
+    "difflet/backends/trainium/*",
+    "difflet/backends/trainium/**/*",
+    # Unimplemented GPU backends (stubs).
+    "difflet/backends/cuda/*",
+    "difflet/backends/rocm/*",
+    # Full diffusers pipelines that require real model weights to execute.
+    "difflet/models/flux/pipeline.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
+    "def __repr__",
 ]
