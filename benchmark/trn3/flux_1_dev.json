@@ -1,0 +1,126 @@
+{
+  "model_id": "black-forest-labs/FLUX.1-dev",
+  "model_type": "flux",
+  "backend": "trainium",
+  "device": "trn3pd98.3xlarge / 4 NeuronCores / 144 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 28,
+  "compile_seconds": 5.830911288969219,
+  "compile_breakdown": {
+    "wall_total_s": 5.831
+  },
+  "load_seconds": 282.342,
+  "e2e_cold_seconds": 318.2,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder_t5",
+        "load_s": 81.512,
+        "shard_s": 71.911
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 196.113,
+        "shard_s": 185.238
+      },
+      {
+        "stage": "text_encoder_clip",
+        "load_s": 1.297,
+        "shard_s": 1.182
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 3.42,
+        "shard_s": 1.042
+      }
+    ],
+    "weights_load_total_s": 282.342,
+    "weights_shard_total_s": 259.373,
+    "wall_total_s": 318.2,
+    "compute_and_overhead_s": 35.858
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 45.05750074097887,
+    "median": 45.05750074097887,
+    "std": 0.0,
+    "p50": 45.05750074097887,
+    "p90": 45.05750074097887,
+    "min": 45.05750074097887,
+    "max": 45.05750074097887,
+    "samples": [
+      45.05750074097887
+    ]
+  },
+  "step_latency": null,
+  "throughput": {},
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved flux_1_dev_out.png"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.14.27725+e2ff0410",
+    "neuronx-cc": "2.25.3371.0+f524f7f8",
+    "neuronx-distributed": "0.19.28093+fc70b593",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 (registry default tp=8 -> 4 on trn2.3xlarge), bf16, attention_cte",
+  "status": "ok",
+  "notes": [
+    "e2e_cold = 318 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 45 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 318 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-06-29 23:11 UTC",
+  "config_slug": "flux_1_dev",
+  "device_slug": "trn3",
+  "revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 3.5,
+  "output_kind": "image",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder_t5",
+        "load_s": 8.827,
+        "shard_s": 0.978
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 17.327,
+        "shard_s": 6.676
+      },
+      {
+        "stage": "text_encoder_clip",
+        "load_s": 0.439,
+        "shard_s": 0.329
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 2.403,
+        "shard_s": 0.145
+      }
+    ],
+    "weights_load_total_s": 28.996,
+    "weights_shard_total_s": 8.128,
+    "wall_total_s": 45.058,
+    "compute_and_overhead_s": 16.062
+  }
+}
