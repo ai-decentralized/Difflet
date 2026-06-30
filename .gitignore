@@ -39,3 +39,14 @@ AGENTS.md
 
 # Design specs (local working docs, not committed)
 .specs/
+
+# Coverage artifacts
+.coverage
+.coverage.*
+coverage.json
+htmlcov/
+
+# Neuron compiler scratch (dumped in cwd during device compiles)
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]/
+neuronxcc-*/
+log-neuron-cc.txt

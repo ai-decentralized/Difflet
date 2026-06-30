@@ -47,6 +47,24 @@ def scatter_to_process_group_spmd(tensor, *args, **kwargs):
     return tensor
 
 
+def scatter_to_sequence_parallel_region(tensor, *, dim: int):
+    # Megatron-SP forward entry; identity at tp==1 (the full sequence is the shard).
+    del dim
+    return tensor
+
+
+def gather_from_sequence_parallel_region(tensor, *, dim: int):
+    # Megatron-SP ``g`` operator; identity at tp==1.
+    del dim
+    return tensor
+
+
+def reduce_scatter_to_sequence_parallel_region(tensor, *, dim: int):
+    # Megatron-SP ``ḡ`` operator; identity at tp==1.
+    del dim
+    return tensor
+
+
 def get_tp_size() -> int:
     return 1
 
@@ -73,6 +91,7 @@ get_tensor_model_parallel_rank = get_tp_rank
 
 __all__ = [
     "SPMDRank",
+    "gather_from_sequence_parallel_region",
     "gather_from_tensor_model_parallel_region_with_dim",
     "gather_tp_dim",
     "get_data_parallel_group",
@@ -83,8 +102,10 @@ __all__ = [
     "get_tp_size",
     "get_world_group",
     "reduce_from_tensor_model_parallel_region",
+    "reduce_scatter_to_sequence_parallel_region",
     "reduce_tp",
     "scatter_to_process_group_spmd",
+    "scatter_to_sequence_parallel_region",
     "scatter_to_tensor_model_parallel_region",
     "scatter_tp_dim",
 ]

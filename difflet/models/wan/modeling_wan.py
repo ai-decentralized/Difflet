@@ -36,7 +36,6 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from diffusers.models.embeddings import (
     PixArtAlphaTextProjection,
     TimestepEmbedding,
@@ -52,13 +51,15 @@ from difflet.ops import (
     SPMDRank,
     apply_rotary_emb,
     attention,
-    ring_attention,
+    gather_from_sequence_parallel_region,
     gather_from_tensor_model_parallel_region_with_dim,
     get_data_parallel_group,
     get_dp_rank_spmd,
     get_tensor_model_parallel_size,
     get_world_group,
     reduce_from_tensor_model_parallel_region,
+    reduce_scatter_to_sequence_parallel_region,
+    ring_attention,
     scatter_to_process_group_spmd,
 )
 
@@ -75,6 +76,26 @@ def _safe_tp_size() -> int:
         return int(get_tensor_model_parallel_size())
     except Exception:
         return 1
+
+
+def _sp_unbias(x: torch.Tensor, row_linear: nn.Module) -> torch.Tensor:
+    """Correct the bias double-count of a ``reduce_output=False`` row-parallel
+    linear under Megatron-SP.
+
+    nxd's ``RowParallelLinear`` adds the *full* bias to each rank's **un-reduced**
+    partial (``output_ + self.bias`` after the skipped reduce). The Megatron-SP
+    ``ḡ`` reduce-scatter then sums across the TP group, so the bias lands ``tp×``
+    instead of once. Subtract the ``(tp-1)×`` overcount so the bias is applied
+    exactly once. No-op at ``tp == 1`` (CPU reference / unit tests), so the
+    SP-vs-dense equivalence on CPU is unchanged.
+    """
+    bias = getattr(row_linear, "bias", None)
+    if bias is None:
+        return x
+    tp = _safe_tp_size()
+    if tp <= 1:
+        return x
+    return x - (tp - 1) * bias.to(x.dtype)
 
 
 @dataclass
@@ -279,8 +300,15 @@ class WanFeedForward(nn.Module):
     op.
     """
 
-    def __init__(self, dim: int, inner_dim: int, dtype: Optional[torch.dtype] = None):
+    def __init__(
+        self,
+        dim: int,
+        inner_dim: int,
+        dtype: Optional[torch.dtype] = None,
+        sp_enabled: bool = False,
+    ):
         super().__init__()
+        self.sp_enabled = sp_enabled
         self.net_in = ColumnParallelLinear(
             dim,
             inner_dim,
@@ -296,12 +324,23 @@ class WanFeedForward(nn.Module):
             input_is_parallel=True,
             dtype=dtype,
             reduce_dtype=dtype,
+            # Under Megatron-SP the cross-rank sum is folded into the ḡ
+            # reduce-scatter below, so the row-parallel must not also all-reduce.
+            reduce_output=not sp_enabled,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Megatron-SP: x arrives sequence-sharded [B, S/tp, H]; gather to the full
+        # sequence (g) for the column-parallel up-projection, then reduce-scatter
+        # the row-parallel partial back to a sequence shard (ḡ).
+        if self.sp_enabled:
+            x = gather_from_sequence_parallel_region(x, dim=1)
         x = self.net_in(x)
         x = F.gelu(x, approximate="tanh")
         x = self.net_out(x)
+        if self.sp_enabled:
+            x = reduce_scatter_to_sequence_parallel_region(x, dim=1)
+            x = _sp_unbias(x, self.net_out)
         return x
 
 
@@ -366,6 +405,7 @@ class WanAttention(nn.Module):
         dtype: Optional[torch.dtype] = None,
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
+        sp_enabled: bool = False,
     ):
         super().__init__()
         self.dim = dim
@@ -374,6 +414,7 @@ class WanAttention(nn.Module):
         self.is_cross_attention = is_cross_attention
         self.context_parallel_enabled = context_parallel_enabled
         self.cp_mode = cp_mode
+        self.sp_enabled = sp_enabled
         if context_parallel_enabled:
             self.data_parallel_group = get_data_parallel_group()
         inner_dim = heads * head_dim
@@ -414,6 +455,9 @@ class WanAttention(nn.Module):
                     input_is_parallel=True,
                     dtype=dtype,
                     reduce_dtype=dtype,
+                    # Under Megatron-SP the cross-rank sum is folded into the ḡ
+                    # reduce-scatter in forward(); don't also all-reduce here.
+                    reduce_output=not sp_enabled,
                 ),
                 nn.Identity(),  # diffusers reference has a Dropout here; inference path is no-op
             ]
@@ -456,6 +500,14 @@ class WanAttention(nn.Module):
         encoder_hidden_states: Optional[torch.Tensor] = None,
         rotary_emb: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
     ) -> torch.Tensor:
+        # Megatron-SP: the image/query stream arrives sequence-sharded
+        # [B, S/tp, H]; gather it to the full sequence (g) before the
+        # column-parallel Q/K/V. For cross-attention the K,V come from the
+        # text encoder_hidden_states, which is replicated (never sharded), so it
+        # is left untouched.
+        if self.sp_enabled:
+            hidden_states = gather_from_sequence_parallel_region(hidden_states, dim=1)
+
         kv_source = (
             encoder_hidden_states if encoder_hidden_states is not None else hidden_states
         )
@@ -498,6 +550,11 @@ class WanAttention(nn.Module):
         # all-reduces each rank's partial output projection back to the full model dim.
         out = out.transpose(1, 2).reshape(out.shape[0], out.shape[2], -1)
         out = self.to_out[0](out)
+        # Megatron-SP ḡ: reduce the row-parallel partial across the TP group and
+        # scatter back to this rank's sequence shard [B, S/tp, H].
+        if self.sp_enabled:
+            out = reduce_scatter_to_sequence_parallel_region(out, dim=1)
+            out = _sp_unbias(out, self.to_out[0])
         out = self.to_out[1](out)
         return out
 
@@ -524,6 +581,7 @@ class WanTransformerBlock(nn.Module):
         dtype: Optional[torch.dtype] = None,
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
+        sp_enabled: bool = False,
     ):
         super().__init__()
         head_dim = dim // num_heads
@@ -532,11 +590,13 @@ class WanTransformerBlock(nn.Module):
         self.attn1 = WanAttention(
             dim, num_heads, head_dim, eps=eps, is_cross_attention=False, dtype=dtype,
             context_parallel_enabled=context_parallel_enabled, cp_mode=cp_mode,
+            sp_enabled=sp_enabled,
         )
 
         self.attn2 = WanAttention(
             dim, num_heads, head_dim, eps=eps, is_cross_attention=True, dtype=dtype,
             context_parallel_enabled=context_parallel_enabled, cp_mode=cp_mode,
+            sp_enabled=sp_enabled,
         )
         self.norm2 = (
             FP32LayerNorm(dim, eps, elementwise_affine=True)
@@ -544,7 +604,7 @@ class WanTransformerBlock(nn.Module):
             else nn.Identity()
         )
 
-        self.ffn = WanFeedForward(dim, ffn_dim, dtype=dtype)
+        self.ffn = WanFeedForward(dim, ffn_dim, dtype=dtype, sp_enabled=sp_enabled)
         self.norm3 = FP32LayerNorm(dim, eps, elementwise_affine=False)
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
@@ -618,6 +678,14 @@ class WanTransformer3DModel(nn.Module):
         self.context_parallel_enabled = getattr(config, 'context_parallel_enabled', False)
         self.cp_mode = getattr(config, 'cp_mode', 'gather_kv')
         self.cfg_parallel_enabled = getattr(config, 'cfg_parallel_enabled', False)
+        # Megatron-style sequence parallelism reuses the TP group; it is mutually
+        # exclusive with CP (both shard the sequence dimension).
+        self.sp_enabled = getattr(config, 'sp_enabled', False)
+        if self.sp_enabled and self.context_parallel_enabled:
+            raise ValueError(
+                "sp_enabled and context_parallel_enabled are mutually exclusive "
+                "(both shard the sequence dimension)."
+            )
         if self.cfg_parallel_enabled and self.context_parallel_enabled:
             raise ValueError(
                 "cfg_parallel_enabled and context_parallel_enabled are mutually "
@@ -662,6 +730,7 @@ class WanTransformer3DModel(nn.Module):
                     dtype=dtype,
                     context_parallel_enabled=self.context_parallel_enabled,
                     cp_mode=self.cp_mode,
+                    sp_enabled=self.sp_enabled,
                 )
                 for _ in range(config.num_layers)
             ]
@@ -674,6 +743,7 @@ class WanTransformer3DModel(nn.Module):
         # __setattr__), so the only buffer lives at the model root. Skipped at tp=1
         # (CPU / unit tests) — the attentions then use the plain-RMSNorm fallback.
         tp_degree = _safe_tp_size()
+        self.tp_rank_util = None
         if tp_degree > 1:
             self.tp_rank_util = SPMDRank(tp_degree)
             for block in self.blocks:
@@ -685,6 +755,22 @@ class WanTransformer3DModel(nn.Module):
             inner_dim, config.out_channels * math.prod(config.patch_size)
         )
         self.scale_shift_table = nn.Parameter(torch.randn(1, 2, inner_dim) / inner_dim**0.5)
+
+    def _sp_seq_scatter(self, tensor: torch.Tensor, *, dim: int) -> torch.Tensor:
+        """Megatron-SP forward-entry sequence scatter across the TP group.
+
+        Uses the materialized SPMD rank buffer (``tp_rank_util``) rather than
+        nxd's ``scatter_to_sequence_parallel_region``: under SPMD tracing the
+        latter resolves ``group.rank()`` to a single constant, so every rank
+        would keep the *same* chunk (verified on device: scatter→gather did not
+        round-trip). ``scatter_to_process_group_spmd`` with the per-rank buffer is
+        the same primitive the validated CP path and the qk-norm weight scatter
+        use. Identity on CPU (``tp_rank_util is None`` / tp==1).
+        """
+        rank = self.tp_rank_util.get_rank() if self.tp_rank_util is not None else 0
+        return scatter_to_process_group_spmd(
+            tensor, partition_dim=dim, rank=rank, process_group=None
+        )
 
     def forward(
         self,
@@ -733,6 +819,15 @@ class WanTransformer3DModel(nn.Module):
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)  # (B, S, inner_dim)
 
+        if self.sp_enabled:
+            # Megatron-SP: shard the patch sequence across the TP group so each
+            # rank carries [B, S/tp, H] through the blocks. Rotary stays
+            # full-sequence — attention gathers back internally before applying it.
+            # NOTE: scatter MUST use the materialized SPMD rank buffer; nxd's
+            # group.rank()-based sequence scatter is not per-rank under SPMD
+            # tracing (every rank would keep the same chunk).
+            hidden_states = self._sp_seq_scatter(hidden_states, dim=1)
+
         if self.context_parallel_enabled:
             dp_rank = get_dp_rank_spmd(
                 global_rank=self.global_rank.get_rank(),
@@ -766,6 +861,13 @@ class WanTransformer3DModel(nn.Module):
         else:
             timestep_proj = timestep_proj.unflatten(1, (6, -1))
 
+        if self.sp_enabled and ts_seq_len is not None:
+            # Per-token (Ti2V) modulation carries a sequence axis that must be
+            # sharded to match the sequence-sharded hidden states. Broadcast
+            # (non-per-token) modulation needs no scatter.
+            timestep_proj = self._sp_seq_scatter(timestep_proj, dim=1)
+            temb = self._sp_seq_scatter(temb, dim=1)
+
         for block in self.blocks:
             hidden_states = block(
                 hidden_states, encoder_hidden_states, timestep_proj, rotary_emb
@@ -786,6 +888,11 @@ class WanTransformer3DModel(nn.Module):
             self.norm_out(hidden_states.float()) * (1 + scale) + shift
         ).type_as(hidden_states)
         hidden_states = self.proj_out(hidden_states)
+
+        if self.sp_enabled:
+            # Megatron-SP: re-assemble the full sequence from the per-rank shards
+            # before un-patchifying.
+            hidden_states = gather_from_sequence_parallel_region(hidden_states, dim=1)
 
         if self.context_parallel_enabled:
             hidden_states = gather_from_tensor_model_parallel_region_with_dim(

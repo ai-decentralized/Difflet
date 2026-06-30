@@ -41,8 +41,9 @@ class LTX2Orchestrator(ModelOrchestrator):
 
     def generate(self) -> None:
         import torch
-        from difflet.pipeline.difflet_pipeline import DiffletPipeline
+
         from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest
+        from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.path_resolver import resolve_model_path
         from difflet.registry import resolve_model
 

@@ -30,6 +30,8 @@ class WanBackboneInferenceConfig(InferenceConfig):
             self.cp_mode = "gather_kv"
         if not hasattr(self, "cfg_parallel_enabled"):
             self.cfg_parallel_enabled = False
+        if not hasattr(self, "sp_enabled"):
+            self.sp_enabled = False
 
     def get_required_attributes(self) -> List[str]:
         return [

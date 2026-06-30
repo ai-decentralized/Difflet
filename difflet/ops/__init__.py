@@ -36,6 +36,18 @@ _EXPORTS = {
         "collectives",
         "scatter_to_process_group_spmd",
     ),
+    "scatter_to_sequence_parallel_region": (
+        "collectives",
+        "scatter_to_sequence_parallel_region",
+    ),
+    "gather_from_sequence_parallel_region": (
+        "collectives",
+        "gather_from_sequence_parallel_region",
+    ),
+    "reduce_scatter_to_sequence_parallel_region": (
+        "collectives",
+        "reduce_scatter_to_sequence_parallel_region",
+    ),
     "get_platform_target": ("platform", "get_platform_target"),
     "hardware": ("platform", "hardware"),
     "linear_mx": ("mx", "linear_mx"),
