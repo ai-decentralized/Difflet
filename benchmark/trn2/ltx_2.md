@@ -3,9 +3,9 @@
 **Status:** ok  
 **Backend:** trainium  
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
-**Timestamp:** 2026-06-25 15:18 UTC
+**Timestamp:** 2026-06-30 15:35 UTC
 
-> Best-performing configuration: tp=4, bf16, TP-sharded transformer + attention_cte self-attn + unmasked cross-attn, guidance=1.0 (batch-1 NEFF)
+> Best-performing configuration: tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF)
 
 ## Configuration
 
@@ -21,22 +21,22 @@
 
 | phase | time |
 |---|---|
-| compile (AOT, one-time) | 28.6 min (1714 s) |
-| **e2e generate — cold start** (page cache dropped) | **13.4 min (803 s)** |
-| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 5.6 min (335 s) |
-| **e2e generate — warm cache** | **102.74 s** |
-| &nbsp;&nbsp;↳ of which weights load (from page cache) | 52.40 s |
+| compile (AOT, one-time) | 30.6 min (1839 s) |
+| **e2e generate — cold start** (page cache dropped) | **13.0 min (778 s)** |
+| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 5.2 min (315 s) |
+| **e2e generate — warm cache** | **61.75 s** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 14.72 s |
 
-> Cold vs warm: **13.4 min (803 s) → 102.74 s** (7.8× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
+> Cold vs warm: **13.0 min (778 s) → 61.75 s** (12.6× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 441.8 ms | 441.5 ms | 442.4 ms | 440.5 ms | 19 |
-| end-to-end (warm) | 102.74 s | 102.74 s | 102.74 s | 102.74 s | 1 |
+| per denoise step (transformer fwd) | 437.9 ms | 437.5 ms | 438.3 ms | 436.7 ms | 19 |
+| end-to-end (warm) | 61.75 s | 61.75 s | 61.75 s | 61.75 s | 1 |
 
-**Throughput:** 2.264 DiT steps/s
+**Throughput:** 2.284 DiT steps/s
 
 ## Compile breakdown
 
@@ -44,8 +44,10 @@ Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-
 
 | component | module load | HLO gen | priority-HLO compile | all-HLO compile | other | **build total** |
 |---|---:|---:|---:|---:|---:|---:|
-| transformer | 87.10 s | 22.83 s | 22.0 min (1322 s) | 2.57 s | 4.7 min (280 s) | **28.6 min (1714 s)** |
-| **Σ component builds** | | | | | | **28.6 min (1714 s)** |
+| transformer | 88.89 s | 30.02 s | 7.6 min (455 s) | 808.0 ms | 5.6 min (339 s) | **15.2 min (914 s)** |
+| **Σ component builds** | | | | | | **15.2 min (914 s)** |
+
+> The headline **compile = 30.6 min (1839 s)** is the full `difflet compile` wall; the **Σ component builds = 15.2 min (914 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
 
 ## End-to-end breakdown (cold generate)
 
@@ -53,11 +55,11 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 | stage | weight shard | weight load |
 |---|---:|---:|
-| transformer (denoise loop) [Neuron] | 40.46 s | 5.6 min (335 s) |
-| **weights load total** | 40.46 s | **5.6 min (335 s)** |
+| transformer (denoise loop) [Neuron] | — | 5.2 min (315 s) |
+| **weights load total** | 0.0 ms | **5.2 min (315 s)** |
 
-- **weights load total:** 5.6 min (335 s) of 13.4 min (803 s) wall
-- **compute + overhead (residual):** 7.8 min (468 s) = text-encode + denoise loop + VAE decode + process/runtime startup
+- **weights load total:** 5.2 min (315 s) of 13.0 min (778 s) wall
+- **compute + overhead (residual):** 7.7 min (463 s) = text-encode + denoise loop + VAE decode + process/runtime startup
 - text-encoder and VAE decode run on the host (enable_host_pipeline/enable_decode_components), so only the transformer is a Neuron load; the residual is host text-encode + denoise + host VAE decode.
 
 ## Output validity
@@ -67,7 +69,7 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 | shape | [1, 49, 3, 480, 704] |
 | dtype | torch.float32 |
 | finite (no NaN/Inf) | True |
-| value range | [0.0000, 0.8828] (mean 0.3695, std 0.1457) |
+| value range | [0.0000, 0.8789] (mean 0.3696, std 0.1459) |
 | note | saved ltx_2_out.pt |
 
 ## Toolchain
@@ -80,11 +82,10 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 ## Notes
 
-- UPDATE: cross-attn moved from masked-SDPA to UNMASKED attention_cte (attends text padding, like wan/qwen) — per-step 477.1 -> 441.8 ms (7.4%). Lossless: full-generate parity vs the masked-SDPA baseline (same seed) cosine 0.999934. Cross-attn was only ~7% of per-step; the residual H100 1.38x gap is genuine self-attn(cte)+FFN compute. attention_cte's bound path can't do cross-attn (q!=kv); unmasked can (q!=kv supported).
-- per-step = 441.8 ms/DiT-step (median 441.5, p90 442.4, n=19) — measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 35s; output finite=True.
+- per-step = 437.9 ms/DiT-step (median 437.5, p90 438.3, n=19) — measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 60s; output finite=True.
 - Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.
-- e2e_cold = 803 s — TRUE cold start (OS page cache dropped before the run via sudo drop_caches), so the weight load is a real cold disk read; this replaces an earlier value taken with the host weights already cached (artificially low).
-- e2e_warm = 103 s (n=1, warm OS page cache from the immediately-preceding cold run, same session). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
+- e2e_cold = 778 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
+- e2e_warm = 62 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 778 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
 
 ## Reproduction
 
@@ -102,7 +103,7 @@ Exact test conditions. The **model + config rows are hardware-agnostic** — an 
 | guidance scale | 1.0 |
 | seed | 42 |
 | prompt | "a cinematic shot of a red fox running through a snowy forest" |
-| best-perf knobs | tp=4, bf16, TP-sharded transformer + attention_cte self-attn + unmasked cross-attn, guidance=1.0 (batch-1 NEFF) |
+| best-perf knobs | tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF) |
 | measured on | trn2.3xlarge / 4 NeuronCores / 96 GB/device (device folder `trn2`) |
 
 ```bash
