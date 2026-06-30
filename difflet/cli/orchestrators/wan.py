@@ -11,8 +11,8 @@ import shutil
 import sys
 from pathlib import Path
 
-from difflet.cli.orchestrators.base import ModelOrchestrator
 from difflet.cli import runner
+from difflet.cli.orchestrators.base import ModelOrchestrator
 
 # Model id comes from the CLI (--model-id); both Wan 2.2 A14B (MoE, dual
 # transformer) and Wan 2.1 14B (single transformer) route here. The single-vs-
@@ -97,6 +97,7 @@ class WanOrchestrator(ModelOrchestrator):
 
     def _stage_transformer(self, args: argparse.Namespace) -> None:
         import torch
+
         from difflet.models.wan.application import NeuronWanApplication, _latent_num_frames
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
@@ -107,6 +108,7 @@ class WanOrchestrator(ModelOrchestrator):
             cp_degree=args.cp_degree or 1,
             cp_mode=getattr(args, "cp_mode", "gather_kv"),
             cfg_parallel_enabled=getattr(args, "cfg_parallel", False),
+            sp_enabled=getattr(args, "sp_enabled", False),
         )
         compiled_dir = self._stage_compiled_dir("transformer", args)
         app = NeuronWanApplication(
@@ -155,6 +157,7 @@ class WanOrchestrator(ModelOrchestrator):
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
         import torch
+
         from difflet.models.wan.application import NeuronWanApplication
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
@@ -209,11 +212,12 @@ class WanOrchestrator(ModelOrchestrator):
         tp = args.tp_degree or 4
         cp = args.cp_degree or 1
         cfg = "cfg" if getattr(args, "cfg_parallel", False) else ""
+        sp = "sp" if getattr(args, "sp_enabled", False) else ""
         h = args.height or 480
         w = args.width or 832
         f = args.num_frames or 9
         if stage == "transformer":
-            return base / f"wan_transformer_tp{tp}cp{cp}{cfg}_h{h}w{w}f{f}"
+            return base / f"wan_transformer_tp{tp}cp{cp}{cfg}{sp}_h{h}w{w}f{f}"
         if stage == "vae":
             return base / f"wan_vae_h{h}w{w}f{f}"
         raise ValueError(f"unknown stage {stage!r}")
@@ -235,6 +239,8 @@ class WanOrchestrator(ModelOrchestrator):
         ]
         if getattr(a, "cfg_parallel", False):
             parts.append("--cfg-parallel")
+        if getattr(a, "sp_enabled", False):
+            parts.append("--sp")
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
         if getattr(a, "output", None):

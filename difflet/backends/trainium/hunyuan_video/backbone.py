@@ -28,6 +28,8 @@ class HunyuanVideoBackboneInferenceConfig(InferenceConfig):
             self.context_parallel_enabled = False
         if not hasattr(self, "cp_mode"):
             self.cp_mode = "gather_kv"
+        if not hasattr(self, "sp_enabled"):
+            self.sp_enabled = False
 
     def get_required_attributes(self) -> List[str]:
         return [
@@ -204,7 +206,17 @@ class NeuronHunyuanVideoBackboneApplication(NeuronApplicationBase):
 
     @staticmethod
     def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
-        if getattr(config, "context_parallel_enabled", False):
+        # The model-root ``global_rank`` SPMDRank is created whenever any
+        # sequence/batch-sharding mode is on (CP, CFG, or Megatron-SP); its
+        # ``.rank`` buffer must hold ``arange(world_size)`` so each rank reads its
+        # own rank. For SP-only, world_size == tp_degree, so the world-group rank
+        # is the TP rank used by the entry sequence scatter. Without this the
+        # buffer is all-zeros and every rank acts as rank 0 → wrong output.
+        if (
+            getattr(config, "context_parallel_enabled", False)
+            or getattr(config, "cfg_parallel_enabled", False)
+            or getattr(config, "sp_enabled", False)
+        ):
             out = dict(state_dict)
             world_size = config.neuron_config.world_size
             out["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)

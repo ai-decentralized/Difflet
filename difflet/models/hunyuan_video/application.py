@@ -224,6 +224,7 @@ def create_hunyuan_video_backbone_config(
     batch_size: int = 1,
     context_parallel_enabled: bool = False,
     cp_mode: str = "gather_kv",
+    sp_enabled: bool = False,
 ):
     from difflet.backends.trainium.hunyuan_video.backbone import (
         HunyuanVideoBackboneInferenceConfig,
@@ -246,6 +247,7 @@ def create_hunyuan_video_backbone_config(
         text_seq_len=text_seq_len,
         context_parallel_enabled=context_parallel_enabled,
         cp_mode=cp_mode,
+        sp_enabled=sp_enabled,
     )
 
 
@@ -516,6 +518,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 batch_size=self.batch_size,
                 context_parallel_enabled=parallel.cp_degree > 1,
                 cp_mode=parallel.cp_mode,
+                sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
             )
             self.transformer = NeuronHunyuanVideoBackboneApplication(
                 model_path=self.transformer_path,
@@ -749,10 +752,10 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         import glob
         import types
 
-        from safetensors.torch import load_file
         from diffusers.models.transformers.transformer_hunyuan_video15 import (
             HunyuanVideo15TokenRefiner,
         )
+        from safetensors.torch import load_file
 
         cfg = self.transformer.config
         refiner = HunyuanVideo15TokenRefiner(

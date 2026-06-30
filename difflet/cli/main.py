@@ -44,6 +44,13 @@ def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
                    help="Split the uncond/cond CFG passes across 2 data-parallel "
                         "ranks (doubles world_size). Mutually exclusive with "
                         "--cp-degree>1. Only for true-CFG models (Flux, Wan, LTX-2).")
+    p.add_argument("--sp", dest="sp_enabled", action="store_true",
+                   help="Enable Megatron-style sequence parallelism: shard the "
+                        "norm/modulation/residual regions along the sequence axis "
+                        "across the tensor-parallel group (reduce-scatter replaces "
+                        "the row-parallel all-reduce; world_size unchanged). "
+                        "Mutually exclusive with --cp-degree>1. Supported: Flux, "
+                        "Wan, HunyuanVideo.")
 
 
 def _add_shape_flags(p: argparse.ArgumentParser) -> None:
@@ -151,6 +158,41 @@ _DISTILLED_MODELS = {
 }
 
 
+# Models whose backbone wires Megatron-style sequence parallelism, device-verified
+# (dense-vs-SP cosine >= 0.999). Qwen-Image is deferred: its forward monkey-patches
+# the upstream diffusers transformer, where the SPMDRank per-rank id used by the
+# sequence scatter is not a live/loaded graph input, so every rank reads rank 0
+# (tracked follow-up — needs reimplementing Qwen's forward like the others). LTX-2
+# (tri-stream, no CP foundation) and HunyuanVideo-1.5 (segmented runtime) are also
+# out of scope for this increment.
+_SP_SUPPORTED_MODELS = {
+    "black-forest-labs/FLUX.1-dev",
+    "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+    "hunyuanvideo-community/HunyuanVideo",
+}
+
+
+def _validate_sp(args: argparse.Namespace) -> None:
+    if not getattr(args, "sp_enabled", False):
+        return
+    if (getattr(args, "cp_degree", 1) or 1) > 1:
+        print(
+            "Error: --sp and --cp-degree>1 are mutually exclusive (SP shards the "
+            "sequence over the tensor-parallel group, CP over the data-parallel "
+            "group).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if args.model_id not in _SP_SUPPORTED_MODELS:
+        print(
+            f"Error: {args.model_id} does not support --sp. Sequence parallelism "
+            "is available for Flux, Wan, and HunyuanVideo.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 def _validate_cfg_parallel(args: argparse.Namespace) -> None:
     if not getattr(args, "cfg_parallel", False):
         return
@@ -174,11 +216,11 @@ def _validate_cfg_parallel(args: argparse.Namespace) -> None:
 
 def _get_orchestrator(args: argparse.Namespace):
     from difflet.cli.orchestrators.flux import FluxOrchestrator
-    from difflet.cli.orchestrators.ltx_2 import LTX2Orchestrator
-    from difflet.cli.orchestrators.wan import WanOrchestrator
     from difflet.cli.orchestrators.hunyuan_video import HunyuanVideoOrchestrator
     from difflet.cli.orchestrators.hunyuan_video_15 import HunyuanVideo15Orchestrator
+    from difflet.cli.orchestrators.ltx_2 import LTX2Orchestrator
     from difflet.cli.orchestrators.qwen_image import QwenImageOrchestrator
+    from difflet.cli.orchestrators.wan import WanOrchestrator
 
     mapping = {
         "black-forest-labs/FLUX.1-dev": FluxOrchestrator,
@@ -206,6 +248,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command in ("compile", "generate", "run"):
         _validate_cfg_parallel(args)
+        _validate_sp(args)
 
     if args.command in ("generate", "run"):
         _validate_teacache(args)

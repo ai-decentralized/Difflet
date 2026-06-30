@@ -14,8 +14,8 @@ import shutil
 import sys
 from pathlib import Path
 
-from difflet.cli.orchestrators.base import ModelOrchestrator
 from difflet.cli import runner
+from difflet.cli.orchestrators.base import ModelOrchestrator
 
 _HF_MODEL_ID = "hunyuanvideo-community/HunyuanVideo"
 _MODEL_TYPE = "hunyuan_video"
@@ -108,12 +108,14 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
     def _stage_clip(self, args: argparse.Namespace) -> None:
         import torch
         from transformers import CLIPTokenizer
+
         from difflet.backends.trainium.core.config import NeuronConfig
         from difflet.models.flux.clip.modeling_clip import (
-            CLIPInferenceConfig, NeuronClipApplication,
+            CLIPInferenceConfig,
+            NeuronClipApplication,
         )
-        from difflet.utils.diffusers_adapter import load_diffusers_config
         from difflet.pipeline.path_resolver import resolve_model_path
+        from difflet.utils.diffusers_adapter import load_diffusers_config
 
         model_dir = resolve_model_path(_HF_MODEL_ID, local_files_only=True)
         clip_path = str(Path(model_dir) / "text_encoder_2")
@@ -144,10 +146,11 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
 
     def _stage_llama(self, args: argparse.Namespace) -> None:
         import torch
-        from transformers import AutoConfig, AutoTokenizer
         from neuronx_distributed_inference.models.config import NeuronConfig, TensorCaptureConfig
         from neuronx_distributed_inference.models.llama.modeling_llama import NeuronLlamaForCausalLM
         from neuronx_distributed_inference.utils.hf_adapter import load_pretrained_config
+        from transformers import AutoConfig, AutoTokenizer
+
         from difflet.pipeline.path_resolver import resolve_model_path
 
         model_dir = resolve_model_path(_HF_MODEL_ID, local_files_only=True)
@@ -198,12 +201,14 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
     def _stage_generate(self, args: argparse.Namespace) -> None:
         import numpy as np
         import torch
+
         from difflet.models.hunyuan_video.application import (
-            HunyuanVideoDiTInputBundle, NeuronHunyuanVideoApplication,
+            HunyuanVideoDiTInputBundle,
+            NeuronHunyuanVideoApplication,
         )
+        from difflet.models.hunyuan_video.pipeline import _retrieve_timesteps
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
-        from difflet.models.hunyuan_video.pipeline import _retrieve_timesteps
 
         model_dir = resolve_model_path(_HF_MODEL_ID, local_files_only=True)
         compiled_dir = self._stage_compiled_dir("generate", args)
@@ -219,6 +224,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             tp_degree=args.tp_degree or 4,
             cp_degree=args.cp_degree or 1,
             cp_mode=getattr(args, "cp_mode", "gather_kv"),
+            sp_enabled=getattr(args, "sp_enabled", False),
         )
         app = NeuronHunyuanVideoApplication(
             model_path=model_dir, parallel=parallel, dtype=torch.bfloat16,
@@ -268,13 +274,14 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         base = Path(args.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
         tp = args.tp_degree or 4
         cp = args.cp_degree or 1
+        sp = "sp" if getattr(args, "sp_enabled", False) else ""
         h, w, f = args.height or 320, args.width or 512, args.num_frames or 61
         if stage == "clip":
             return base / "hunyuan_video_clip"
         if stage == "llama":
             return base / f"hunyuan_video_llama_seq{_TEXT_SEQ_LEN + _LLAMA_CROP_START}"
         if stage == "generate":
-            return base / f"hunyuan_video_dit_tp{tp}cp{cp}_h{h}w{w}f{f}"
+            return base / f"hunyuan_video_dit_tp{tp}cp{cp}{sp}_h{h}w{w}f{f}"
         raise ValueError(f"unknown stage {stage!r}")
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
@@ -292,6 +299,8 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             "--seed", str(getattr(a, "seed", 42)),
             "--stage-mode", stage_mode,
         ]
+        if getattr(a, "sp_enabled", False):
+            parts.append("--sp")
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
         if getattr(a, "output", None):
