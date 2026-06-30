@@ -29,6 +29,7 @@ def create_wan_backbone_config(
     context_parallel_enabled: bool = False,
     cp_mode: str = "gather_kv",
     cfg_parallel_enabled: bool = False,
+    sp_enabled: bool = False,
 ):
     from difflet.backends.trainium.wan.backbone import WanBackboneInferenceConfig
 
@@ -51,6 +52,7 @@ def create_wan_backbone_config(
         context_parallel_enabled=context_parallel_enabled,
         cp_mode=cp_mode,
         cfg_parallel_enabled=cfg_parallel_enabled,
+        sp_enabled=sp_enabled,
     )
 
 
@@ -184,6 +186,7 @@ class NeuronWanApplication(MultiComponentApplication):
                 context_parallel_enabled=parallel.cp_degree > 1,
                 cp_mode=parallel.cp_mode,
                 cfg_parallel_enabled=cfg_parallel_enabled,
+                sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
             )
             self.transformer = NeuronWanBackboneApplication(
                 model_path=self.transformer_path,
@@ -206,6 +209,7 @@ class NeuronWanApplication(MultiComponentApplication):
                 context_parallel_enabled=parallel.cp_degree > 1,
                 cp_mode=parallel.cp_mode,
                 cfg_parallel_enabled=cfg_parallel_enabled,
+                sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
             )
             self.transformer_2 = NeuronWanBackboneApplication(
                 model_path=self.transformer_2_path,

@@ -13,12 +13,23 @@ class DiffletParallelConfig:
     ``cp_mode`` selects the CP attention strategy (``"gather_kv"`` default, or
     ``"ring"``). Context parallelism and CFG parallelism both consume extra
     data-parallel lanes, so they are mutually exclusive.
+
+    ``sp_enabled`` turns on **Megatron-style sequence parallelism**: the
+    otherwise-replicated norm / modulation / residual regions are sharded along
+    the sequence axis across the *existing tensor-parallel group*, with the
+    row-parallel all-reduce replaced by reduce-scatter and an all-gather added
+    before each column-parallel projection. SP reuses the TP group and adds no
+    new parallel axis, so ``world_size`` is unchanged. Because SP shards the
+    sequence over the TP group while CP shards it over the data-parallel group,
+    the two are mutually exclusive in this increment (``sp_enabled`` requires
+    ``cp_degree == 1``).
     """
 
     tp_degree: int = 1
     cp_degree: int = 1
     cfg_parallel_enabled: bool = False
     cp_mode: str = "gather_kv"
+    sp_enabled: bool = False
 
     def __post_init__(self) -> None:
         if self.tp_degree < 1:
@@ -31,18 +42,25 @@ class DiffletParallelConfig:
             raise ValueError(f"cp_mode must be one of {{'gather_kv', 'ring'}}, got {self.cp_mode!r}")
         if self.cp_mode == "ring" and self.cp_degree <= 1:
             raise ValueError("cp_mode='ring' requires cp_degree > 1")
+        if self.sp_enabled and self.cp_degree > 1:
+            raise ValueError("sp_enabled and cp_degree > 1 are mutually exclusive")
 
     @property
     def world_size(self) -> int:
+        # Megatron-style SP reuses the tensor-parallel group; it does not add a
+        # new world-size axis, so it never appears in this product.
         cfg_multiplier = 2 if self.cfg_parallel_enabled else 1
         return self.tp_degree * self.cp_degree * cfg_multiplier
 
     def to_cache_dict(self) -> dict[str, object]:
-        # Additive-only: omit cp_mode at its default so a gather_kv config keeps
-        # a compile-cache key byte-identical to every pre-cp_mode model cache.
+        # Additive-only: omit cp_mode at its default and sp_enabled when off so a
+        # default config keeps a compile-cache key byte-identical to every
+        # pre-cp_mode / pre-sp model cache.
         d = asdict(self)
         if self.cp_mode == "gather_kv":
             d.pop("cp_mode")
+        if not self.sp_enabled:
+            d.pop("sp_enabled")
         return d
 
 

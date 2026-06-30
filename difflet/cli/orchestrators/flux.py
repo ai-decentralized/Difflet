@@ -40,8 +40,9 @@ class FluxOrchestrator(ModelOrchestrator):
 
     def generate(self) -> None:
         import torch
-        from difflet.pipeline.difflet_pipeline import DiffletPipeline
+
         from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest
+        from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.path_resolver import resolve_model_path
         from difflet.registry import resolve_model
 
@@ -115,6 +116,7 @@ class FluxOrchestrator(ModelOrchestrator):
             tp_degree=tp,
             cp_degree=cp,
             cp_mode=getattr(self.args, "cp_mode", "gather_kv"),
+            sp_enabled=getattr(self.args, "sp_enabled", False),
         )
 
     def _dtype(self):
