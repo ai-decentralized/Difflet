@@ -135,7 +135,6 @@ def create_ltx_2_transformer_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
-        skip_sharding=True,
     )
     return LTX2TransformerInferenceConfig(
         neuron_config=neuron_config,
