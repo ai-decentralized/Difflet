@@ -38,4 +38,38 @@ def cross_attention(q, k, v, *, scale: float | None = None, attention_mask=None,
     return attention(q, k, v, scale=scale, causal=False, attention_mask=attention_mask, **kwargs)
 
 
-__all__ = ["attention", "cross_attention"]
+def ring_attention(q, k, v, *, scale: float, causal: bool = False):
+    # Single-process CPU reference: cp_degree == 1, so the "ring" is just plain
+    # non-causal attention over the local (== full) sequence.
+    b, h, s_q, d = q.shape
+    s_k = k.shape[2]
+    out = attention(
+        q.reshape(b * h, s_q, d),
+        k.reshape(b * h, s_k, d),
+        v.reshape(b * h, s_k, d),
+        scale=scale,
+        causal=causal,
+        tp_q=True,
+        tp_k=True,
+        tp_out=False,
+    )
+    return out.reshape(b, h, s_q, d)
+
+
+def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False):
+    # cp_degree == 1 reference: the ring degenerates to plain full joint attention
+    # over the concatenated [image, text] keys. This is the merge-math oracle.
+    full_k = torch.cat([image_k, text_k], dim=2)
+    full_v = torch.cat([image_v, text_v], dim=2)
+    b, h, s_q, d = q.shape
+    s_k = full_k.shape[2]
+    out = attention(
+        q.reshape(b * h, s_q, d),
+        full_k.reshape(b * h, s_k, d),
+        full_v.reshape(b * h, s_k, d),
+        scale=scale, causal=causal, tp_q=True, tp_k=True, tp_out=False,
+    )
+    return out.reshape(b, h, s_q, d)
+
+
+__all__ = ["attention", "cross_attention", "ring_attention", "joint_ring_attention"]

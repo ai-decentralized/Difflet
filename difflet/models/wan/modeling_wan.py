@@ -52,6 +52,7 @@ from difflet.ops import (
     SPMDRank,
     apply_rotary_emb,
     attention,
+    ring_attention,
     gather_from_tensor_model_parallel_region_with_dim,
     get_data_parallel_group,
     get_dp_rank_spmd,
@@ -364,6 +365,7 @@ class WanAttention(nn.Module):
         is_cross_attention: bool = False,
         dtype: Optional[torch.dtype] = None,
         context_parallel_enabled: bool = False,
+        cp_mode: str = "gather_kv",
     ):
         super().__init__()
         self.dim = dim
@@ -371,6 +373,7 @@ class WanAttention(nn.Module):
         self.head_dim = head_dim
         self.is_cross_attention = is_cross_attention
         self.context_parallel_enabled = context_parallel_enabled
+        self.cp_mode = cp_mode
         if context_parallel_enabled:
             self.data_parallel_group = get_data_parallel_group()
         inner_dim = heads * head_dim
@@ -478,16 +481,18 @@ class WanAttention(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        # CP self-attention: each rank has Q for its token shard; gather full K,V.
+        # CP self-attention: ring rotates sharded K,V; gather_kv all-gathers full K,V.
         # Cross-attention K,V come from encoder_hidden_states which is not scattered.
-        if self.context_parallel_enabled and not self.is_cross_attention:
-            stacked_kv = torch.stack([k, v], dim=0)  # [2, B, heads, S/cp, head_dim]
-            stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
-                stacked_kv, gather_dim=3, process_group=self.data_parallel_group
-            )  # [2, B, heads, S, head_dim]
-            k, v = torch.unbind(stacked_kv, dim=0)
-
-        out = _attn_kernel(q, k, v, head_dim=self.head_dim)
+        if self.context_parallel_enabled and not self.is_cross_attention and self.cp_mode == "ring":
+            out = ring_attention(q, k, v, scale=1.0 / math.sqrt(self.head_dim), causal=False)
+        else:
+            if self.context_parallel_enabled and not self.is_cross_attention:
+                stacked_kv = torch.stack([k, v], dim=0)  # [2, B, heads, S/cp, head_dim]
+                stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
+                    stacked_kv, gather_dim=3, process_group=self.data_parallel_group
+                )  # [2, B, heads, S, head_dim]
+                k, v = torch.unbind(stacked_kv, dim=0)
+            out = _attn_kernel(q, k, v, head_dim=self.head_dim)
 
         # (B, local_heads, S, dim) → (B, S, local_heads * dim); RowParallelLinear then
         # all-reduces each rank's partial output projection back to the full model dim.
@@ -518,6 +523,7 @@ class WanTransformerBlock(nn.Module):
         eps: float = 1e-6,
         dtype: Optional[torch.dtype] = None,
         context_parallel_enabled: bool = False,
+        cp_mode: str = "gather_kv",
     ):
         super().__init__()
         head_dim = dim // num_heads
@@ -525,12 +531,12 @@ class WanTransformerBlock(nn.Module):
         self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
         self.attn1 = WanAttention(
             dim, num_heads, head_dim, eps=eps, is_cross_attention=False, dtype=dtype,
-            context_parallel_enabled=context_parallel_enabled,
+            context_parallel_enabled=context_parallel_enabled, cp_mode=cp_mode,
         )
 
         self.attn2 = WanAttention(
             dim, num_heads, head_dim, eps=eps, is_cross_attention=True, dtype=dtype,
-            context_parallel_enabled=context_parallel_enabled,
+            context_parallel_enabled=context_parallel_enabled, cp_mode=cp_mode,
         )
         self.norm2 = (
             FP32LayerNorm(dim, eps, elementwise_affine=True)
@@ -610,7 +616,16 @@ class WanTransformer3DModel(nn.Module):
         self.dtype = dtype
 
         self.context_parallel_enabled = getattr(config, 'context_parallel_enabled', False)
-        if self.context_parallel_enabled:
+        self.cp_mode = getattr(config, 'cp_mode', 'gather_kv')
+        self.cfg_parallel_enabled = getattr(config, 'cfg_parallel_enabled', False)
+        if self.cfg_parallel_enabled and self.context_parallel_enabled:
+            raise ValueError(
+                "cfg_parallel_enabled and context_parallel_enabled are mutually "
+                "exclusive (both consume the data-parallel lanes)."
+            )
+        # CFG parallel scatters the batch dim (uncond/cond), CP scatters the
+        # sequence dim; both ride the same data-parallel group + global rank.
+        if self.context_parallel_enabled or self.cfg_parallel_enabled:
             self.data_parallel_group = get_data_parallel_group()
             self.global_rank = SPMDRank(world_size=get_world_group().size())
 
@@ -646,6 +661,7 @@ class WanTransformer3DModel(nn.Module):
                     eps=config.eps,
                     dtype=dtype,
                     context_parallel_enabled=self.context_parallel_enabled,
+                    cp_mode=self.cp_mode,
                 )
                 for _ in range(config.num_layers)
             ]
@@ -677,6 +693,35 @@ class WanTransformer3DModel(nn.Module):
         encoder_hidden_states: torch.Tensor,
         timestep_seq_len: Optional[int] = None,
     ) -> torch.Tensor:
+        # CFG parallel: the caller stacks [uncond, cond] into batch=2; scatter the
+        # batch dim so each data-parallel rank denoises one branch at batch=1.
+        if self.cfg_parallel_enabled:
+            assert hidden_states.shape[0] == 2, (
+                f"CFG parallel expects batch_size=2, got {hidden_states.shape[0]}"
+            )
+            assert timestep.shape[0] == 2, (
+                f"CFG parallel expects batch_size=2, got {timestep.shape[0]}"
+            )
+            assert encoder_hidden_states.shape[0] == 2, (
+                f"CFG parallel expects batch_size=2, got {encoder_hidden_states.shape[0]}"
+            )
+            dp_rank = get_dp_rank_spmd(
+                global_rank=self.global_rank.get_rank(),
+                tp_degree=get_tensor_model_parallel_size(),
+            )
+            hidden_states = scatter_to_process_group_spmd(
+                hidden_states, partition_dim=0, rank=dp_rank,
+                process_group=self.data_parallel_group,
+            )
+            timestep = scatter_to_process_group_spmd(
+                timestep, partition_dim=0, rank=dp_rank,
+                process_group=self.data_parallel_group,
+            )
+            encoder_hidden_states = scatter_to_process_group_spmd(
+                encoder_hidden_states, partition_dim=0, rank=dp_rank,
+                process_group=self.data_parallel_group,
+            )
+
         bs, _, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.config.patch_size
         ppf = num_frames // p_t
@@ -749,7 +794,15 @@ class WanTransformer3DModel(nn.Module):
 
         hidden_states = hidden_states.reshape(bs, ppf, pph, ppw, p_t, p_h, p_w, -1)
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
-        return hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
+        output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
+
+        # CFG parallel: gather the per-rank branches back into batch=2 so the
+        # pipeline can apply the guidance formula on [uncond, cond].
+        if self.cfg_parallel_enabled:
+            output = gather_from_tensor_model_parallel_region_with_dim(
+                output, gather_dim=0, process_group=self.data_parallel_group,
+            )
+        return output
 
     @torch.no_grad()
     def teacache_mod_input(

@@ -5,6 +5,8 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 import pytest
 import torch
 
@@ -19,7 +21,7 @@ def test_modeling_wan_imports_only_from_allowed_modules():
     """
     import ast
 
-    src = Path("/home/ubuntu/difflet/difflet/models/wan/modeling_wan.py").read_text()
+    src = (_REPO_ROOT / "difflet/models/wan/modeling_wan.py").read_text()
     tree = ast.parse(src)
     forbidden_roots = {"neuronx_distributed", "nkilib", "torch_neuronx"}
     forbidden_prefixes = ("difflet.core",)

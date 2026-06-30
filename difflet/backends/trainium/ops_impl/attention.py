@@ -8,6 +8,14 @@ import torch.nn.functional as F
 
 from nkilib.core.attention.attention_cte import attention_cte
 
+try:
+    from nkilib.experimental.attention.ring_attention_fwd import ring_attention_spmd_fwd
+
+    _RING_IMPORT_ERROR = None
+except Exception as exc:  # pragma: no cover - import guard
+    ring_attention_spmd_fwd = None
+    _RING_IMPORT_ERROR = exc
+
 
 def attention(
     q,
@@ -148,4 +156,186 @@ def cross_attention(q, k, v, *, scale: float | None = None, attention_mask=None,
     )
 
 
-__all__ = ["attention", "cross_attention"]
+def ring_attention(q, k, v, *, scale: float, causal: bool = False):
+    """Ring context-parallel self-attention via nkilib ring_attention_spmd_fwd.
+
+    q,k,v: [B, H, S_local, d] (per-rank head shard). Returns [B, H, S_local, d].
+    The ring membership IS the data-parallel group the model scattered Q with,
+    so K/V rotate consistently with the scatter by construction.
+    """
+    if ring_attention_spmd_fwd is None:
+        raise RuntimeError(
+            "ring attention requires nkilib.experimental.attention.ring_attention_fwd "
+            f"(import failed: {_RING_IMPORT_ERROR!r}). Upgrade neuronx-cc / nkilib, or "
+            "use cp_mode=gather_kv."
+        )
+    from neuronx_distributed.parallel_layers.parallel_state import (
+        get_data_parallel_group,
+        get_data_parallel_size,
+    )
+
+    mesh = get_data_parallel_group(as_list=True)  # List[List[int]] of global ranks
+    num_workers = get_data_parallel_size()
+    replica_groups = tuple(tuple(int(r) for r in grp) for grp in mesh)
+
+    # Launch with the LNC2 1D SPMD grid under virtual-core-size 2 (same as
+    # attention_cte[2] above). The kernel's per-core shared_hbm send/recv buffers
+    # and core_barrier require the grid; without it neuronx-cc fails to resolve
+    # the named buffers on core 1 ("NCC_ILLC059 ... send_k_buf on core 1").
+    vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
+    kernel = ring_attention_spmd_fwd[2] if vc_size == 2 else ring_attention_spmd_fwd
+
+    return kernel(
+        q,
+        k,
+        v,
+        replica_groups=replica_groups,
+        num_workers=num_workers,
+        softmax_scale=float(scale),
+        use_causal_mask=causal,
+        training=False,
+        tp_q=True,
+        tp_k=True,
+    )
+
+
+def _cte_stat_to_per_query(stat, bs: int, s_q: int):
+    """Map an attention_cte cache_softmax stat to a per-query column vector.
+
+    attention_cte (cache_softmax=True) returns softmax stats shaped
+    [bs, 128, num_grps] where num_grps = ceil(s_q / 128). This is NKI's Q-group
+    tile layout: partition row ``p`` in [0,128) and group ``g`` in [0,num_grps)
+    address query position ``q = g*128 + p``. Transposing the last two dims
+    ([bs, num_grps, 128]) then flattening gives the natural per-query order
+    (g*128 + p); slicing to s_q drops the tail padding when s_q % 128 != 0.
+
+    Confirmed on device by the Task 3 spike (Approach A): with this mapping the
+    multi-partial online-softmax merge is lossless vs a full gather-KV joint
+    attention (cosine >= 0.999).
+    """
+    return stat.transpose(-1, -2).reshape(bs, -1, 1)[:, :s_q, :].float()
+
+
+def _merge_unnormalized_partials(partials, bs: int, s_q: int, *, out_dtype):
+    """Online-softmax merge of N unnormalized attention_cte partials.
+
+    Each partial is the (out, neg_max, sum) triple returned by attention_cte with
+    cache_softmax=True AND skip_output_normalization=True, i.e.:
+        out_i     [bs, s_q, d]          = exp(scores_i - max_i) @ V_i   (UNnormalized)
+        neg_max_i [bs, 128, num_grps]   = -max_i  (negated per-query running max)
+        sum_i     [bs, 128, num_grps]   = sum_j exp(scores_ij - max_i)  (raw denom)
+
+    Combine via the standard flash/online-softmax rescale to the global max:
+        nm*     = min_i neg_max_i               (= -global_max)
+        corr_i  = exp(nm* - neg_max_i)          (= exp(max_i - global_max), in (0,1])
+        out     = (sum_i corr_i * out_i) / (sum_i corr_i * sum_i)
+    Order-invariant over partials, so the text partial and each ring-hop image
+    partial merge regardless of arrival order (valid for non-causal joint attn).
+    """
+    neg_maxes = [_cte_stat_to_per_query(nm, bs, s_q) for (_, nm, _) in partials]
+    sums = [_cte_stat_to_per_query(sm, bs, s_q) for (_, _, sm) in partials]
+
+    global_neg_max = neg_maxes[0]
+    for nm in neg_maxes[1:]:
+        global_neg_max = torch.minimum(global_neg_max, nm)
+
+    o_acc = None
+    s_acc = None
+    for (o, _, _), nm, sm in zip(partials, neg_maxes, sums):
+        corr = torch.exp(global_neg_max - nm)  # [bs, s_q, 1]
+        o_term = o.float() * corr
+        s_term = sm * corr
+        o_acc = o_term if o_acc is None else o_acc + o_term
+        s_acc = s_term if s_acc is None else s_acc + s_term
+
+    return (o_acc / s_acc).to(out_dtype)
+
+
+def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False):
+    """Joint-MMDiT ring self-attention (Approach A — device-validated, Task 3).
+
+    Approach B (reuse ``ring_attention_spmd_fwd`` for the image stream and merge a
+    single text partial) is fundamentally rejected: that kernel reshapes K with the
+    Q seqlen, so it requires ``seqlen_q == seqlen_k`` and cannot accept the joint
+    query (``S_img/cp + S_txt``) against an image-only K shard (``S_img/cp``).
+
+    Instead we hand-roll the context-parallel ring at the XLA level:
+      * The replicated text K,V form ONE rank-local ``attention_cte`` partial.
+      * The sharded image K,V are rotated around the cp ring with
+        ``collective_permute``; every hop is another ``attention_cte`` partial.
+      * Each ``attention_cte`` runs with cache_softmax=True + skip_output_norm=True
+        so it returns the UNnormalized output and raw softmax stats; all
+        ``num_workers + 1`` partials are merged once by online softmax.
+    Every ``attention_cte`` natively supports ``seqlen_q != seqlen_k``, so the long
+    joint query is fine. Lossless vs gather-KV (cosine >= 0.999 on device).
+
+    q                [B, H, S_img/cp + S_txt, d]   this rank's joint local queries
+    image_k,image_v  [B, H, S_img/cp, d]           sharded — rotated by the ring
+    text_k, text_v   [B, H, S_txt,    d]           replicated — local partial
+    returns          [B, H, S_img/cp + S_txt, d]
+    """
+    if causal:
+        raise NotImplementedError(
+            "joint_ring_attention device path supports only non-causal joint MMDiT "
+            "attention (image+text bidirectional). Causal across ring-sharded image "
+            "keys would need per-hop cp_offset masking, which no joint caller uses."
+        )
+
+    import torch_xla.core.xla_model as xm
+    from neuronx_distributed.parallel_layers.parallel_state import (
+        get_data_parallel_group,
+        get_data_parallel_size,
+    )
+
+    b, h, s_q, d = q.shape
+    bs = b * h
+    s_img = image_k.shape[2]
+    s_txt = text_k.shape[2]
+
+    qf = q.reshape(bs, s_q, d)
+    ik = image_k.reshape(bs, s_img, d)
+    iv = image_v.reshape(bs, s_img, d)
+    tk = text_k.reshape(bs, s_txt, d)
+    tv = text_v.reshape(bs, s_txt, d)
+
+    vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
+    cte = attention_cte[2] if vc_size == 2 else attention_cte
+
+    mesh = get_data_parallel_group(as_list=True)  # List[List[int]] of global ranks
+    num_workers = get_data_parallel_size()
+
+    # collective_permute ring step: each rank sends its current K,V to the next
+    # member of its cp group (g[i] -> g[i+1]), so after a hop every rank holds the
+    # shard from its ring predecessor. num_workers-1 hops visit all image shards.
+    pairs = []
+    for grp in mesh:
+        g = [int(r) for r in grp]
+        n = len(g)
+        for i in range(n):
+            pairs.append([g[i], g[(i + 1) % n]])
+
+    def _partial(k_in, v_in):
+        # UNnormalized output + raw softmax stats for cross-partial online merge.
+        return cte(
+            qf, k_in, v_in,
+            scale=float(scale), causal_mask=False,
+            tp_q=True, tp_k=True, tp_out=False,
+            cache_softmax=True, skip_output_normalization=True,
+        )
+
+    # Text partial: replicated, counted exactly once.
+    partials = [_partial(tk, tv)]
+
+    # Image partials: one per ring hop.
+    k_cur, v_cur = ik, iv
+    for step in range(num_workers):
+        partials.append(_partial(k_cur, v_cur))
+        if step < num_workers - 1:
+            k_cur = xm.collective_permute(k_cur, pairs)
+            v_cur = xm.collective_permute(v_cur, pairs)
+
+    out = _merge_unnormalized_partials(partials, bs, s_q, out_dtype=q.dtype)
+    return out.reshape(b, h, s_q, d)
+
+
+__all__ = ["attention", "cross_attention", "ring_attention", "joint_ring_attention"]

@@ -2,6 +2,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 import pytest
 import torch
 
@@ -798,7 +800,7 @@ def test_hunyuan_video_still_rejects_cfg_parallel(tmp_path):
     model_dir = tmp_path / "HunyuanVideo"
     model_dir.mkdir()
 
-    with pytest.raises(NotImplementedError, match="CFG-parallel is deferred"):
+    with pytest.raises(NotImplementedError, match="guidance-distilled"):
         DiffletPipeline.from_pretrained(
             str(model_dir),
             model_type="hunyuan_video",
@@ -966,7 +968,7 @@ def test_hunyuan_video_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
 
 
 def test_hunyuan_video_cache_dit_inputs_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan_video_cache_dit_inputs.py")
+    script_path = (_REPO_ROOT / "scripts/hunyuan_video_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("hunyuan_video_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -983,7 +985,7 @@ def test_hunyuan_video_cache_dit_inputs_cli_parser_imports_without_loading_model
 
 
 def test_hunyuan_video_15_cache_dit_inputs_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_cache_dit_inputs.py")
+    script_path = (_REPO_ROOT / "scripts/hunyuan15_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1008,7 +1010,7 @@ def test_hunyuan_video_15_cache_dit_inputs_cli_parser_imports_without_loading_mo
 def test_hunyuan_video_15_transformer_parity_loads_cached_bundle(tmp_path):
     from safetensors.torch import save_file
 
-    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_transformer_parity.py")
+    script_path = (_REPO_ROOT / "scripts/hunyuan15_transformer_parity.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_transformer_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1047,7 +1049,7 @@ def test_hunyuan_video_15_transformer_parity_loads_cached_bundle(tmp_path):
 
 
 def test_hunyuan_video_15_attention_capacity_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_attention_capacity_probe.py")
+    script_path = (_REPO_ROOT / "scripts/hunyuan15_attention_capacity_probe.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_attention_capacity_probe", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1141,7 +1143,7 @@ def test_hunyuan_video_15_attention_capacity_cli_parser_imports_without_compilin
 
 
 def test_hunyuan_video_15_attention_boundary_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_attention_boundary_probe.py")
+    script_path = (_REPO_ROOT / "scripts/hunyuan15_attention_boundary_probe.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_attention_boundary_probe", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1178,7 +1180,7 @@ def test_hunyuan_video_15_attention_boundary_cli_parser_imports_without_compilin
 
 
 def test_hunyuan_video_15_block_split_capacity_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_block_split_capacity_probe.py")
+    script_path = (_REPO_ROOT / "scripts/hunyuan15_block_split_capacity_probe.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_block_split_capacity_probe", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1218,7 +1220,7 @@ def test_hunyuan_video_15_block_split_capacity_cli_parser_imports_without_compil
 
 
 def test_hunyuan_video_15_vae_trace_probe_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_vae_trace_probe.py")
+    script_path = (_REPO_ROOT / "scripts/hunyuan15_vae_trace_probe.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_vae_trace_probe", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1236,7 +1238,7 @@ def test_hunyuan_video_15_vae_trace_probe_cli_parser_imports_without_compiling()
 
 
 def test_hunyuan_video_15_vae_parity_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_vae_parity.py")
+    script_path = (_REPO_ROOT / "scripts/hunyuan15_vae_parity.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_vae_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1255,7 +1257,7 @@ def test_hunyuan_video_15_vae_parity_cli_parser_imports_without_compiling():
 
 
 def test_hunyuan_video_15_segmented_block_parity_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_segmented_block_parity.py")
+    script_path = (_REPO_ROOT / "scripts/hunyuan15_segmented_block_parity.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_segmented_block_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -1298,7 +1300,7 @@ def test_hunyuan_video_15_segmented_block_parity_cli_parser_imports_without_comp
 
 
 def test_hunyuan_video_15_segmented_prefix_parity_cli_parser_imports_without_compiling():
-    script_path = Path("/home/ubuntu/difflet/scripts/hunyuan15_segmented_prefix_parity.py")
+    script_path = (_REPO_ROOT / "scripts/hunyuan15_segmented_prefix_parity.py")
     spec = importlib.util.spec_from_file_location("hunyuan15_segmented_prefix_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

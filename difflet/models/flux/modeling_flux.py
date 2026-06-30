@@ -60,6 +60,7 @@ from difflet.ops import (
     get_world_group,
     hardware,
     reduce_from_tensor_model_parallel_region,
+    ring_attention,
     scatter_to_process_group_spmd,
 )
 
@@ -208,6 +209,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
         self.global_rank = SPMDRank(world_size=get_world_group().size())
 
         self.context_parallel_enabled = getattr(self.config, 'context_parallel_enabled', False)
+        self.cp_mode = getattr(self.config, 'cp_mode', 'gather_kv')
         self.cfg_parallel_enabled = getattr(self.config, 'cfg_parallel_enabled', False)
 
         if (out_channels := getattr(self.config, "out_channels", None)) is not None:
@@ -247,6 +249,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
                     attention_head_dim=self.config.attention_head_dim,
                     reduce_dtype=self.config.neuron_config.torch_dtype,
                     context_parallel_enabled=self.context_parallel_enabled,
+                    cp_mode=self.cp_mode,
                 )
                 for i in range(self.config.num_layers)
             ]
@@ -260,6 +263,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
                     attention_head_dim=self.config.attention_head_dim,
                     reduce_dtype=self.config.neuron_config.torch_dtype,
                     context_parallel_enabled=self.context_parallel_enabled,
+                    cp_mode=self.cp_mode,
                 )
                 for i in range(self.config.num_single_layers)
             ]
@@ -537,10 +541,12 @@ class NeuronFluxSingleTransformerBlock(nn.Module):
         reduce_dtype=torch.bfloat16,
         mlp_ratio=4.0,
         context_parallel_enabled=False,
+        cp_mode: str = "gather_kv",
     ):
         super().__init__()
 
         self.context_parallel_enabled = context_parallel_enabled
+        self.cp_mode = cp_mode
         self.mlp_hidden_dim = int(dim * mlp_ratio)
 
         self.norm = NeuronAdaLayerNormZeroSingle(dim, use_parallel_layer=True)
@@ -585,6 +591,7 @@ class NeuronFluxSingleTransformerBlock(nn.Module):
             pre_only=True,
             reduce_dtype=reduce_dtype,
             context_parallel_enabled=self.context_parallel_enabled,
+            cp_mode=self.cp_mode,
         )
 
     def forward(
@@ -643,10 +650,12 @@ class NeuronFluxTransformerBlock(nn.Module):
         qk_norm="rms_norm",
         eps=1e-6,
         context_parallel_enabled=False,
+        cp_mode: str = "gather_kv",
     ):
         super().__init__()
 
         self.context_parallel_enabled = context_parallel_enabled
+        self.cp_mode = cp_mode
         self.norm1 = NeuronAdaLayerNormZero(dim)
 
         self.norm1_context = NeuronAdaLayerNormZero(dim)
@@ -664,6 +673,7 @@ class NeuronFluxTransformerBlock(nn.Module):
             eps=eps,
             reduce_dtype=reduce_dtype,
             context_parallel_enabled=self.context_parallel_enabled,
+            cp_mode=self.cp_mode,
         )
 
         self.norm2 = LayerNorm(dim, elementwise_affine=False, eps=1e-6)
@@ -888,11 +898,13 @@ class NeuronFluxAttention(nn.Module):
         pad_heads: bool = True,
         reduce_dtype: torch.dtype = torch.bfloat16,
         context_parallel_enabled=False,
+        cp_mode: str = "gather_kv",
     ):
         super().__init__()
 
         self.data_parallel_group = get_data_parallel_group()
         self.context_parallel_enabled = context_parallel_enabled
+        self.cp_mode = cp_mode
         self.query_dim = query_dim
         self.use_bias = bias
         self.is_cross_attention = cross_attention_dim is not None
@@ -1136,10 +1148,10 @@ class NeuronFluxAttention(nn.Module):
             if self.norm_added_k is not None:
                 encoder_hidden_states_key_proj = self.norm_added_k(encoder_hidden_states_key_proj)
 
-            if self.context_parallel_enabled:
-
-                # apply rotary before gather and cat with image tokens as emb is split
-                # along seq len for image and text
+            # CP joint attention. Flux shards BOTH streams, so [text ‖ image] is a
+            # uniform per-rank joint shard: ring rotates it (cp_mode=ring) instead of
+            # all-gathering K,V (cp_mode=gather_kv). Non-causal → equivalent.
+            if self.context_parallel_enabled and self.cp_mode == "ring":
                 if rotary_emb_text is not None:
                     encoder_hidden_states_query_proj = apply_rotary_emb(
                         encoder_hidden_states_query_proj, rotary_emb_text
@@ -1147,35 +1159,54 @@ class NeuronFluxAttention(nn.Module):
                     encoder_hidden_states_key_proj = apply_rotary_emb(
                         encoder_hidden_states_key_proj, rotary_emb_text
                     )
+                q_joint = torch.cat([encoder_hidden_states_query_proj, query], dim=2)
+                k_joint = torch.cat([encoder_hidden_states_key_proj, key], dim=2)
+                v_joint = torch.cat([encoder_hidden_states_value_proj, value], dim=2)
+                hidden_states = ring_attention(
+                    q_joint, k_joint, v_joint, scale=1.0 / math.sqrt(head_dim), causal=False
+                )
+                query = key = value = None  # joint attention already computed
+            else:
+                if self.context_parallel_enabled:
 
-                # gather k and v from dp group - [B, H, S, D]
-                stacked_kv = torch.stack([key, value], dim=0)
-                # after gather => [2, B, H, S, D]
-                stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
-                    stacked_kv,
-                    gather_dim=3,
-                    process_group=self.data_parallel_group,
-                )
-                key, value = torch.unbind(stacked_kv, dim=0)
-                # gather k and v - [B, H, S, D]
-                stacked_kv_enc = torch.stack(
-                    [encoder_hidden_states_key_proj, encoder_hidden_states_value_proj], dim=0
-                )
-                # after gather => [2, B, H, S, D]
-                stacked_kv_enc = gather_from_tensor_model_parallel_region_with_dim(
-                    stacked_kv_enc,
-                    gather_dim=3,
-                    process_group=self.data_parallel_group,
-                )
-                encoder_hidden_states_key_proj, encoder_hidden_states_value_proj = torch.unbind(
-                    stacked_kv_enc, dim=0
-                )
+                    # apply rotary before gather and cat with image tokens as emb is split
+                    # along seq len for image and text
+                    if rotary_emb_text is not None:
+                        encoder_hidden_states_query_proj = apply_rotary_emb(
+                            encoder_hidden_states_query_proj, rotary_emb_text
+                        )
+                        encoder_hidden_states_key_proj = apply_rotary_emb(
+                            encoder_hidden_states_key_proj, rotary_emb_text
+                        )
 
-            # attention
-            # the concatenation is happening along the sequence dimension after the transpose operation above.
-            query = torch.cat([encoder_hidden_states_query_proj, query], dim=2)
-            key = torch.cat([encoder_hidden_states_key_proj, key], dim=2)
-            value = torch.cat([encoder_hidden_states_value_proj, value], dim=2)
+                    # gather k and v from dp group - [B, H, S, D]
+                    stacked_kv = torch.stack([key, value], dim=0)
+                    # after gather => [2, B, H, S, D]
+                    stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
+                        stacked_kv,
+                        gather_dim=3,
+                        process_group=self.data_parallel_group,
+                    )
+                    key, value = torch.unbind(stacked_kv, dim=0)
+                    # gather k and v - [B, H, S, D]
+                    stacked_kv_enc = torch.stack(
+                        [encoder_hidden_states_key_proj, encoder_hidden_states_value_proj], dim=0
+                    )
+                    # after gather => [2, B, H, S, D]
+                    stacked_kv_enc = gather_from_tensor_model_parallel_region_with_dim(
+                        stacked_kv_enc,
+                        gather_dim=3,
+                        process_group=self.data_parallel_group,
+                    )
+                    encoder_hidden_states_key_proj, encoder_hidden_states_value_proj = torch.unbind(
+                        stacked_kv_enc, dim=0
+                    )
+
+                # attention
+                # the concatenation is happening along the sequence dimension after the transpose operation above.
+                query = torch.cat([encoder_hidden_states_query_proj, query], dim=2)
+                key = torch.cat([encoder_hidden_states_key_proj, key], dim=2)
+                value = torch.cat([encoder_hidden_states_value_proj, value], dim=2)
         elif self.context_parallel_enabled:
             # Single Transformer Case
             # In the non_masked case K and V have the same shape.
@@ -1192,6 +1223,10 @@ class NeuronFluxAttention(nn.Module):
             else:
                 if _HARDWARE == hardware.TRN1:
                     # On Trn1, gather K and V and use plain PyTorch attention instead of NKI kernel
+                    if self.cp_mode == "ring":
+                        logger.warning(
+                            "cp_mode='ring' is not supported on TRN1; falling back to gather-KV attention."
+                        )
                     key = gather_from_tensor_model_parallel_region_with_dim(
                         key, gather_dim=2, process_group=self.data_parallel_group
                     )
@@ -1202,6 +1237,13 @@ class NeuronFluxAttention(nn.Module):
                     value = value.transpose(1, 2)
                     hidden_states = F.scaled_dot_product_attention(
                         query, key, value, dropout_p=0.0, is_causal=False
+                    )
+                elif self.cp_mode == "ring":
+                    # Single sharded joint sequence → uniform ring (q/k/v same shard).
+                    # q/k are [B, H, S/cp, d]; v was kept as [B, S/cp, H, d] for the
+                    # gather-KV wrapper path, so transpose it to match q/k layout.
+                    hidden_states = ring_attention(
+                        query, key, value.transpose(1, 2), scale=1.0 / math.sqrt(head_dim), causal=False
                     )
                 else:
                     # Removed all_gather from here and moved it inside the context parallel attention kernel wrapper.
@@ -1215,7 +1257,9 @@ class NeuronFluxAttention(nn.Module):
                 query = apply_rotary_emb(query, image_rotary_emb)
                 key = apply_rotary_emb(key, image_rotary_emb)
 
-        if attention_mask is not None or _HARDWARE == hardware.TRN1:
+        if query is None:
+            pass  # double-stream ring already set hidden_states
+        elif attention_mask is not None or _HARDWARE == hardware.TRN1:
             # Use plain PyTorch SDPA when there's an attention mask or on Trn1 hardware
             hidden_states = F.scaled_dot_product_attention(
                 query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
@@ -1227,7 +1271,10 @@ class NeuronFluxAttention(nn.Module):
                 hidden_states = attention_wrapper_sharded_without_swap(query, key, value)
 
         hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, self.heads * head_dim)
-        hidden_states = hidden_states.to(query.dtype)
+        if query is not None:
+            hidden_states = hidden_states.to(query.dtype)
+        else:
+            hidden_states = hidden_states.to(q_joint.dtype)
 
         if encoder_hidden_states is not None:
             # splitting along the sequence dimension
@@ -1262,10 +1309,11 @@ def split_along_dim(tensor, dim, rank, data_parallel_group):
 
 
 class FluxBackboneInferenceConfig(InferenceConfig):
-    def __init__(self, *args, cfg_parallel_enabled: bool = False, context_parallel_enabled: bool = False, **kwargs):
+    def __init__(self, *args, cfg_parallel_enabled: bool = False, context_parallel_enabled: bool = False, cp_mode: str = "gather_kv", **kwargs):
         super().__init__(*args, **kwargs)
         self.cfg_parallel_enabled = cfg_parallel_enabled
         self.context_parallel_enabled = context_parallel_enabled
+        self.cp_mode = cp_mode
 
         # Validate mutual exclusivity
         if self.cfg_parallel_enabled and self.context_parallel_enabled:

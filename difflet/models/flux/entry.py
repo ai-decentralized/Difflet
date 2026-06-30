@@ -43,6 +43,7 @@ def create_flux_application(
         width=width,
         cfg_parallel_enabled=parallel.cfg_parallel_enabled,
         context_parallel_enabled=parallel.cp_degree > 1,
+        cp_mode=parallel.cp_mode,
     )
     return NeuronFluxApplication(
         model_path,

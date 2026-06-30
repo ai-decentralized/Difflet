@@ -49,6 +49,30 @@ def cross_attention(q, k, v, *, scale: float | None = None, attention_mask=None,
     )
 
 
+def ring_attention(q, k, v, *, scale: float, causal: bool = False):
+    """Context-parallel ring self-attention over a sequence-sharded Q/K/V.
+
+    ``q,k,v`` are ``[B, H, S_local, d]`` (this rank's head shard). The backend
+    resolves the data-parallel ring group and merges per-step partials.
+    """
+
+    return _load("ring_attention")(q, k, v, scale=scale, causal=causal)
+
+
+def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False):
+    """Joint-MMDiT ring self-attention for text-replicated models.
+
+    Rings the sequence-sharded image K,V and merges a replicated text partial via
+    online softmax. ``q`` is this rank's joint local query
+    ``[B, H, S_img/cp + S_txt, d]``; ``image_*`` are the sharded image K,V;
+    ``text_*`` are the replicated text K,V. Returns ``[B, H, q.shape[2], d]``.
+    """
+
+    return _load("joint_ring_attention")(
+        q, image_k, image_v, text_k, text_v, scale=scale, causal=causal
+    )
+
+
 def _load(name: str):
     from difflet.ops._dispatch import load_backend_attr
 

@@ -3,6 +3,32 @@ import importlib.util
 import pytest
 
 
+def _mx_kernel_skip_reason() -> str | None:
+    """The MX NKI kernels exercise ``nc_matmul_mx`` / ``quantize_mx``, which the
+    NKI simulator only accepts for NeuronCore-v4 (trn3+). On trn2 boxes the
+    simulator rejects them with NCC_IBIR530, so skip the whole module there."""
+    if importlib.util.find_spec("nki") is None:
+        return "NKI is not installed"
+    try:
+        from nki.compiler.target import resolve_target, target_to_nc_version
+
+        target = resolve_target()
+        if target_to_nc_version(target) < 4:
+            return (
+                f"MX kernels require NeuronCore-v4 (trn3+); current target is "
+                f"{target!r} (NeuronCore-v{target_to_nc_version(target)})"
+            )
+    except Exception as exc:  # pragma: no cover - defensive
+        return f"could not resolve NKI target: {exc}"
+    return None
+
+
+pytestmark = pytest.mark.skipif(
+    _mx_kernel_skip_reason() is not None,
+    reason=_mx_kernel_skip_reason() or "",
+)
+
+
 @pytest.mark.skipif(
     importlib.util.find_spec("nki") is None,
     reason="NKI is not installed",

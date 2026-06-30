@@ -27,6 +27,8 @@ def create_wan_backbone_config(
     batch_size: int = 1,
     subfolder: str = "transformer",
     context_parallel_enabled: bool = False,
+    cp_mode: str = "gather_kv",
+    cfg_parallel_enabled: bool = False,
 ):
     from difflet.backends.trainium.wan.backbone import WanBackboneInferenceConfig
 
@@ -36,9 +38,6 @@ def create_wan_backbone_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
-        # W3 starts with compile validation. Real weight sharding/loading lands
-        # after checkpoint conversion is verified.
-        skip_sharding=True,
     )
     return WanBackboneInferenceConfig(
         neuron_config=neuron_config,
@@ -47,6 +46,8 @@ def create_wan_backbone_config(
         width=width,
         num_frames=num_frames,
         context_parallel_enabled=context_parallel_enabled,
+        cp_mode=cp_mode,
+        cfg_parallel_enabled=cfg_parallel_enabled,
     )
 
 
@@ -67,7 +68,6 @@ def create_wan_text_encoder_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
-        skip_sharding=True,
     )
     return WanTextEncoderInferenceConfig(
         neuron_config=neuron_config,
@@ -95,7 +95,10 @@ def create_wan_vae_decoder_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
-        skip_sharding=True,
+        # VAE is a single-core stage; pin LNC=1 so the NEFF matches the 1-core
+        # runtime. Without this it inherits the trn2 platform default (LNC=2) and
+        # nrt_load fails: "compiled with --lnc=2" vs runtime NEURON_LOGICAL_NC_CONFIG=1.
+        logical_nc_config=1,
     )
     return WanVAEDecoderInferenceConfig(
         neuron_config=neuron_config,
@@ -151,6 +154,11 @@ class NeuronWanApplication(MultiComponentApplication):
 
         text_seq_len = int(kwargs.get("text_seq_len", 512))
         batch_size = int(kwargs.get("batch_size", 1))
+        # CFG parallel stacks [uncond, cond] into batch=2 before scattering one
+        # branch to each data-parallel rank, so the transformer compiles at
+        # batch=2 while the rest of the components stay at the base batch.
+        cfg_parallel_enabled = bool(getattr(parallel, "cfg_parallel_enabled", False))
+        backbone_batch_size = 2 if cfg_parallel_enabled else batch_size
         height = int(shape.get("height") or 480)
         width = int(shape.get("width") or 832)
         num_frames = int(shape.get("num_frames") or 9)
@@ -167,8 +175,10 @@ class NeuronWanApplication(MultiComponentApplication):
                 height=height,
                 width=width,
                 num_frames=latent_num_frames,
-                batch_size=batch_size,
+                batch_size=backbone_batch_size,
                 context_parallel_enabled=parallel.cp_degree > 1,
+                cp_mode=parallel.cp_mode,
+                cfg_parallel_enabled=cfg_parallel_enabled,
             )
             self.transformer = NeuronWanBackboneApplication(
                 model_path=self.transformer_path,
@@ -186,9 +196,11 @@ class NeuronWanApplication(MultiComponentApplication):
                 height=height,
                 width=width,
                 num_frames=latent_num_frames,
-                batch_size=batch_size,
+                batch_size=backbone_batch_size,
                 subfolder="transformer_2",
                 context_parallel_enabled=parallel.cp_degree > 1,
+                cp_mode=parallel.cp_mode,
+                cfg_parallel_enabled=cfg_parallel_enabled,
             )
             self.transformer_2 = NeuronWanBackboneApplication(
                 model_path=self.transformer_2_path,

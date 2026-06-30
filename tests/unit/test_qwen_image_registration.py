@@ -2,6 +2,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 import pytest
 import torch
 
@@ -106,7 +108,7 @@ def test_qwen_image_still_rejects_cfg_parallel(tmp_path):
     model_dir = tmp_path / "Qwen-Image"
     model_dir.mkdir()
 
-    with pytest.raises(NotImplementedError, match="CFG-parallel is deferred"):
+    with pytest.raises(NotImplementedError, match="guidance-distilled"):
         DiffletPipeline.from_pretrained(
             str(model_dir),
             model_type="qwen_image",
@@ -193,7 +195,7 @@ def test_qwen_image_transformer_trace_module_tiny_cpu_forward(tmp_path):
 
 
 def test_qwen_image_cache_dit_inputs_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/difflet/scripts/qwen_image_cache_dit_inputs.py")
+    script_path = (_REPO_ROOT / "scripts/qwen_image_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("qwen_image_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -211,7 +213,7 @@ def test_qwen_image_cache_dit_inputs_cli_parser_imports_without_loading_models()
 
 
 def test_qwen_image_cache_dit_inputs_pads_prompt_embeds_to_contract():
-    script_path = Path("/home/ubuntu/difflet/scripts/qwen_image_cache_dit_inputs.py")
+    script_path = (_REPO_ROOT / "scripts/qwen_image_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("qwen_image_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -234,7 +236,7 @@ def test_qwen_image_cache_dit_inputs_pads_prompt_embeds_to_contract():
 
 
 def test_qwen_image_cache_dit_inputs_keeps_active_prompt_length_by_default():
-    script_path = Path("/home/ubuntu/difflet/scripts/qwen_image_cache_dit_inputs.py")
+    script_path = (_REPO_ROOT / "scripts/qwen_image_cache_dit_inputs.py")
     spec = importlib.util.spec_from_file_location("qwen_image_cache_dit_inputs", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -254,7 +256,7 @@ def test_qwen_image_cache_dit_inputs_keeps_active_prompt_length_by_default():
 
 
 def test_qwen_image_transformer_parity_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/difflet/scripts/qwen_image_transformer_parity.py")
+    script_path = (_REPO_ROOT / "scripts/qwen_image_transformer_parity.py")
     spec = importlib.util.spec_from_file_location("qwen_image_transformer_parity", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -277,7 +279,7 @@ def test_qwen_image_transformer_parity_cli_parser_imports_without_loading_models
 
 
 def test_qwen_image_materialize_prefix_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/difflet/scripts/qwen_image_materialize_transformer_prefix.py")
+    script_path = (_REPO_ROOT / "scripts/qwen_image_materialize_transformer_prefix.py")
     spec = importlib.util.spec_from_file_location("qwen_image_materialize_transformer_prefix", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -302,7 +304,7 @@ def test_qwen_image_materialize_prefix_cli_parser_imports_without_loading_models
 
 
 def test_qwen_image_full_transformer_closure_cli_parser_imports_without_loading_models():
-    script_path = Path("/home/ubuntu/difflet/scripts/qwen_image_full_transformer_closure.py")
+    script_path = (_REPO_ROOT / "scripts/qwen_image_full_transformer_closure.py")
     spec = importlib.util.spec_from_file_location("qwen_image_full_transformer_closure", script_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

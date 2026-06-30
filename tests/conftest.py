@@ -1,12 +1,7 @@
-"""Pytest configuration for all tests."""
-import sys
-from unittest.mock import MagicMock
+"""Pytest configuration for all tests.
 
-# Pre-register torch mock before any imports
-torch_mock = MagicMock()
-sys.modules['torch'] = torch_mock
-sys.modules['torch.nn'] = MagicMock()
-sys.modules['torch.nn.functional'] = MagicMock()
-sys.modules['torch.utils'] = MagicMock()
-sys.modules['torch.utils.data'] = MagicMock()
-sys.modules['torch.cuda'] = MagicMock()
+Real ``torch`` (and the rest of the validated Neuron stack) is importable in the
+reference test environment, so tests use the real library. Tests that need to
+avoid the heavy Neuron runtime (``torch_xla`` / ``neuronx_distributed``) should
+mock only those modules locally rather than replacing ``torch`` globally.
+"""

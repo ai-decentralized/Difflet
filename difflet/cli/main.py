@@ -38,6 +38,12 @@ def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
                    help="Tensor-parallel degree (default: registry default)")
     p.add_argument("--cp-degree", type=int, default=1,
                    help="Context-parallel degree (default: 1)")
+    p.add_argument("--cp-mode", choices=["gather_kv", "ring"], default="gather_kv",
+                   help="Context-parallel attention strategy (default: gather_kv)")
+    p.add_argument("--cfg-parallel", dest="cfg_parallel", action="store_true",
+                   help="Split the uncond/cond CFG passes across 2 data-parallel "
+                        "ranks (doubles world_size). Mutually exclusive with "
+                        "--cp-degree>1. Only for true-CFG models (Flux, Wan, LTX-2).")
 
 
 def _add_shape_flags(p: argparse.ArgumentParser) -> None:
@@ -130,6 +136,42 @@ def _validate_teacache(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+# Guidance-distilled models run a single forward pass with the guidance scale
+# baked into the timestep embedding, so CFG-parallel has no second branch to
+# split via the CLI. Hunyuan/Qwen have no true-CFG path at all; Flux is also
+# guidance-distilled and *does* have an opt-in true-CFG path, but we don't expose
+# its --true-cfg-scale/--negative-prompt knobs through the CLI, so cfg-parallel is
+# rejected here too. The staged CLI path builds the app directly (bypassing each
+# model's entry.py guard), so reject before dispatch.
+_DISTILLED_MODELS = {
+    "black-forest-labs/FLUX.1-dev",
+    "hunyuanvideo-community/HunyuanVideo",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "Qwen/Qwen-Image",
+}
+
+
+def _validate_cfg_parallel(args: argparse.Namespace) -> None:
+    if not getattr(args, "cfg_parallel", False):
+        return
+    if (getattr(args, "cp_degree", 1) or 1) > 1:
+        print(
+            "Error: --cfg-parallel and --cp-degree>1 are mutually exclusive "
+            "(both consume the data-parallel lanes).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if args.model_id in _DISTILLED_MODELS:
+        print(
+            f"Error: {args.model_id} is guidance-distilled (single forward pass "
+            "with the guidance scale baked into the timestep embedding); "
+            "CFG-parallel requires true two-pass classifier-free guidance and "
+            "does not apply.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 def _get_orchestrator(args: argparse.Namespace):
     from difflet.cli.orchestrators.flux import FluxOrchestrator
     from difflet.cli.orchestrators.ltx_2 import LTX2Orchestrator
@@ -161,6 +203,9 @@ def main(argv: list[str] | None = None) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+    if args.command in ("compile", "generate", "run"):
+        _validate_cfg_parallel(args)
 
     if args.command in ("generate", "run"):
         _validate_teacache(args)

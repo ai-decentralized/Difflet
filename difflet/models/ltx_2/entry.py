@@ -22,10 +22,6 @@ def create_ltx_2_application(
         )
     if parallel.cp_degree > 1:
         raise NotImplementedError("LTX-2 CP is deferred until the M4c transformer spike.")
-    if parallel.cfg_parallel_enabled:
-        raise NotImplementedError(
-            "LTX-2 CFG-parallel is deferred until the M4c transformer spike."
-        )
 
     from difflet.models.ltx_2.application import NeuronLTX2Application
 

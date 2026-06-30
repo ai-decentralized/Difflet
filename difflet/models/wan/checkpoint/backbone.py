@@ -65,7 +65,10 @@ def convert_backbone_state_dict(
             new_key = re.sub(pattern, replacement, new_key)
         out[new_key] = value
 
-    if config is not None and getattr(config, "context_parallel_enabled", False):
+    if config is not None and (
+        getattr(config, "context_parallel_enabled", False)
+        or getattr(config, "cfg_parallel_enabled", False)
+    ):
         world_size = config.neuron_config.world_size
         out["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)
 
