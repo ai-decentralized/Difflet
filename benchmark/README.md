@@ -122,94 +122,50 @@ Each report records the exact config + pinned revision, phase timings, latency
 distribution, compile breakdown, e2e cold/warm load split, output validity, toolchain
 versions, and the full reproduction commands.
 
-### H100 reference (NVIDIA H100 PCIe 80 GB)
+## Cross-device comparison
 
-Reproduced via the **diffusers CUDA reference adapter** (`--backend cuda`), at the
-**same input size + step count + pinned revision** as trn2. The only directly
-comparable metric is the **DiT per-step** (load-independent compute); e2e cold is
-*not* comparable (trn2's is a true cold disk read, the H100's reads cached weights).
-See **[h100/RESULTS.md](h100/RESULTS.md)** for the full table and caveats.
+Trainium columns (**trn2** = Trainium2, **trn3** = Trainium3) are `tp=4` AOT-compiled with
+**presharding on**; the GPU columns (**H100**, **B300**) are the **diffusers CUDA reference**
+(`--backend cuda`, single-GPU dense eager, effective tp=1) at the same shape + step count +
+pinned revision. Raw values only — `—` = not run on that device, `stub` = orchestrator not
+implemented, `OOM` = out of memory, `N/A` = metric not exposed.
 
-`trn2 speedup` = H100 ÷ trn2 per-step (**> 1 means trn2 is faster**).
+### e2e warm (s)
 
-| model | DiT per-step — H100 | DiT per-step — trn2 | trn2 speedup |
-|---|---:|---:|---:|
-| Qwen-Image | 297.7 ms | 447.1 ms | 0.67× (H100 faster) |
-| LTX-2 | 313.1 ms | 441.8 ms | 0.71× (H100 faster) |
-| Wan 2.1 14B | 554.2 ms | 554.8 ms | **1.00×** (≈par) |
-| Wan 2.2 A14B | 553.7 ms | 554.8 ms | **1.00×** (≈par) |
-| FLUX.1-dev | 310.8 ms | 267.6 ms | **1.16×** |
-| HunyuanVideo | 1503.2 ms | 850.6 ms | **1.77×** |
-| HunyuanVideo-1.5 | OOM (>80 GB) | — (stub) | — |
+Warm generate, weights hot in the page cache (n=1). **Load-dominated** — read it as the
+practical steady-state latency per device, not a silicon ranking (use per-step for that):
+Trainium reloads weights onto the cores each generate, the GPUs reload the cached pipeline.
 
-### B300 reference (NVIDIA B300 SXM6 275 GB)
+| model | trn2 | trn3 | H100 | B300 |
+|---|---:|---:|---:|---:|
+| FLUX.1-dev | 37.7 | 37.1 | 15.8 | 7.9 |
+| LTX-2 | 61.7 | 61.2 | 24.9 | 12.7 |
+| Wan 2.1 14B | 59.5 | 52.7 | 33.7 | 13.6 |
+| Wan 2.2 A14B | 59.1 | — | 49.3 | 17.5 |
+| Qwen-Image | 64.9 | 54.4 | 18.3 | 10.7 |
+| HunyuanVideo | 177.6 | 160.9 | 47.6 | 27.8 |
+| HunyuanVideo-1.5 | stub | — | OOM | 439.1 |
 
-Reproduced via the **same diffusers CUDA reference adapter** (`--backend cuda`), at the
-**same input size + step count + pinned revision + toolchain** as H100 (torch 2.9.1+cu128,
-diffusers 0.38.0) — so **B300-vs-H100 is an identical adapter/method/version comparison**.
-Run with `--iters 1` (e2e cold + one warm iter, matching the trn2 warm method). Full table
-and caveats in **[b300/RESULTS.md](b300/RESULTS.md)**.
+Trainium warm is with presharding on; trn3 is its clean ON (presharded) arm. HunyuanVideo-1.5
+runs only on B300 (480×848×121 peaks at 99.2 GB — over the 80 GB H100; trn2/trn3 stub).
 
-`B300 speedup` columns = `other ÷ B300` per-step (**> 1 means B300 is faster**).
+### DiT per-step (ms)
 
-| model | DiT per-step — B300 | vs H100 | vs trn2 |
-|---|---:|---:|---:|
-| FLUX.1-dev | **134.1 ms** | 2.32× | 2.00× |
-| Qwen-Image | **140.0 ms** | 2.13× | 3.19× |
-| LTX-2 | **159.5 ms** | 1.96× | 2.77× |
-| Wan 2.2 A14B | **240.7 ms** | 2.30× | 2.31× |
-| Wan 2.1 14B | **271.2 ms** | 2.04× | 2.05× |
-| HunyuanVideo | **874.5 ms** | 1.72× | 0.97× (trn2 ≈ par) |
-| HunyuanVideo-1.5 | — (ran; per-step N/A) | H100 **OOM** | trn2 stub |
+The load-independent compute metric — the cleanest cross-device comparison (median
+`step_latency` on Trainium; inter-step deltas on the GPUs). Presharding-independent.
 
-**B300 is ~2× faster than H100 across the board on the comparable per-step, and the only
-device here that runs HunyuanVideo-1.5** (480×848×121 peaks at **99.2 GB** — over the 80 GB
-H100, inside the 275 GB B300; trn2 never ran it). The lone exception to the ~2× gap is
-HunyuanVideo, where trn2's hand-tuned attention_cte kernel (the model the trn2 stack was
-tuned on) pulls level with an untuned eager-diffusers B300 run (0.97×). Per-step for
-HunyuanVideo-1.5 is N/A — its diffusers pipeline exposes no `callback_on_step_end`.
+| model | trn2 | trn3 | H100 | B300 |
+|---|---:|---:|---:|---:|
+| FLUX.1-dev | 268.1 | — | 310.8 | 134.1 |
+| LTX-2 | 437.9 | — | 313.1 | 159.5 |
+| Wan 2.1 14B | 554.8 | 442.5 | 554.2 | 271.2 |
+| Wan 2.2 A14B | 554.8 | — | 553.7 | 240.7 |
+| Qwen-Image | 447.1 | 324.1 | 297.7 | 140.0 |
+| HunyuanVideo | 850.6 | 650.0 | 1503.2 | 874.5 |
+| HunyuanVideo-1.5 | stub | — | OOM | N/A |
 
-**It is software-stack maturity, not silicon — two apparent H100 wins were difflet bugs.**
-HunyuanVideo and Wan originally looked 2.0–2.4× behind H100; both were difflet
-inefficiencies, not the chip: **HunyuanVideo's masked joint-attn had silently fallen back
-to SDPA instead of attention_cte** (3719→850.6 ms once re-wired to the kernel's
-bound_min/bound_max), and **Wan ran its attention *replicated* across the 4 TP cores**
-instead of head-sharding it (1144→554.8 ms once sharded, parity cosine 0.9998 vs the
-replicated baseline). After those fixes trn2 is **competitive-to-faster on FLUX,
-HunyuanVideo, and Wan**; the residual H100 leads — Qwen 1.5× and LTX-2 1.41× — are
-smaller and model-specific (LTX-2's text cross-attn was also moved off SDPA to unmasked
-attention_cte, lossless parity cosine 0.999934, but it was only ~7% of per-step, so the
-residual is genuine self-attn+FFN compute like Qwen). See **Corrections** in
-[trn2/RESULTS.md](trn2/RESULTS.md) / [h100/RESULTS.md](h100/RESULTS.md) for the old
-numbers and exactly why each changed. (HunyuanVideo-1.5's 121-frame attention exceeds
-80 GB at default config; trn2 never ran it either — orchestrator stub.)
-
-### e2e warm — trn2 vs H100 vs B300
-
-End-to-end **warm** generate (weights served from the OS page cache, n=1) on each device,
-same MATRIX config + pinned revision. Unlike per-step, **e2e warm is load-dominated, not a
-clean compute comparison**: every backend reloads the full pipeline each generate. On trn2
-the warm e2e is dominated by the per-process **Neuron weight-load** (each generate reloads
-the weights onto the NeuronCores); the denoise compute is small. The GPUs likewise reload
-the full pipeline from cache and run it on-device. Read it as the practical steady-state
-latency per device, **not** a silicon ranking — that is the per-step table above.
-
-| model | trn2 warm | H100 warm | B300 warm |
-|---|---:|---:|---:|
-| FLUX.1-dev | 46.7 s | 15.8 s | 7.9 s |
-| Qwen-Image | 73.6 s | 18.3 s | 10.7 s |
-| LTX-2 | 102.7 s | 24.9 s | 12.7 s |
-| Wan 2.1 14B | 96.8 s | 33.7 s | 13.6 s |
-| Wan 2.2 A14B | 92.8 s | 49.3 s | 17.5 s |
-| HunyuanVideo | 220.2 s | 47.6 s | 27.8 s |
-| HunyuanVideo-1.5 | — (stub) | OOM (>80 GB) | 439.1 s |
-
-trn2's warm e2e is the largest of the three purely because its per-process **Neuron
-weight-load** dominates (the denoise compute is small: per-step × steps). Every component —
-text-encoder, transformer **and** VAE — is compiled and runs on the NeuronCores (no host
-stages), and the difflet CLI starts a fresh process per generate, so each warm run reloads
-all weights onto the cores. The HunyuanVideo 220 s is a **stale** outlier: it was measured
-when its VAE still decoded on the host (~185 s); difflet now compiles HunyuanVideo's VAE
-on-chip too, so that e2e is pending re-measure (see trn2 Corrections). On the GPUs warm ≈
-one cached full-pipeline reload + the denoise loop. **HunyuanVideo-1.5 runs only on the
-B300** (480×848×121 peaks at 99.2 GB — over the 80 GB H100; trn2's orchestrator is a stub).
+trn3 FLUX/LTX per-step needs the realloop method (not captured). HunyuanVideo-1.5 per-step is
+N/A (its diffusers pipeline exposes no `callback_on_step_end`). The trn2 numbers reflect two
+correctness fixes that pulled it level on the heavy models — HunyuanVideo SDPA→attention_cte
+(was 3719 ms) and Wan replicated→head-sharded attention (was 1144 ms); see **Corrections** in
+[trn2/RESULTS.md](trn2/RESULTS.md) and [h100/RESULTS.md](h100/RESULTS.md).
