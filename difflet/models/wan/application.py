@@ -39,9 +39,6 @@ def create_wan_backbone_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
-        # W3 starts with compile validation. Real weight sharding/loading lands
-        # after checkpoint conversion is verified.
-        skip_sharding=True,
     )
     return WanBackboneInferenceConfig(
         neuron_config=neuron_config,
@@ -73,7 +70,6 @@ def create_wan_text_encoder_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
-        skip_sharding=True,
     )
     return WanTextEncoderInferenceConfig(
         neuron_config=neuron_config,
@@ -101,7 +97,6 @@ def create_wan_vae_decoder_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
-        skip_sharding=True,
         # VAE is a single-core stage; pin LNC=1 so the NEFF matches the 1-core
         # runtime. Without this it inherits the trn2 platform default (LNC=2) and
         # nrt_load fails: "compiled with --lnc=2" vs runtime NEURON_LOGICAL_NC_CONFIG=1.

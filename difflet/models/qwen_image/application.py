@@ -108,7 +108,6 @@ def create_qwen_image_transformer_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
-        skip_sharding=True,
     )
     return QwenImageTransformerInferenceConfig(
         neuron_config=neuron_config,
