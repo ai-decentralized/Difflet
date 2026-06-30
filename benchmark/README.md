@@ -84,11 +84,12 @@ Each hardware target gets its own folder so reproductions sit side-by-side:
 
 ```
 benchmark/
-  trn2/                      # measured here (Trainium trn2.3xlarge)
+  trn2/                      # measured here (Trainium trn2.3xlarge, Trainium2) — presharding default-on
     RESULTS.md               # cross-model summary for this device
     <slug>.json  <slug>.md   # machine-readable + detailed report
     logs/                    # raw compile/generate logs (gitignored)
-  h100/   b300/              # measured here too (NVIDIA, diffusers CUDA reference); same layout
+  trn3/                      # Trainium trn3pd98.3xlarge (Trainium3); same layout (per-rank presharding A/B)
+  h100/   b300/              # NVIDIA (diffusers CUDA reference); same layout
 ```
 
 The runner writes to `benchmark/<device>/`; the device defaults to `trn2` and is set
@@ -98,21 +99,24 @@ hardware-agnostic test conditions (model id + pinned revision, shape, tp/cp, dty
 steps, guidance, seed, prompt) and the precise commands + measurement protocol — so
 H100/B300 can replicate the *same* run and compare against the trn2 numbers.
 
-**[trn2/RESULTS.md](trn2/RESULTS.md)** — cross-model summary table (trn2).
+**[trn2/RESULTS.md](trn2/RESULTS.md)** — cross-model summary table (trn2, Trainium2;
+**presharding default-on**).
+**[trn3/RESULTS.md](trn3/RESULTS.md)** — cross-model summary + per-rank presharding A/B +
+**trn3-vs-trn2 per-step** (trn3pd98.3xlarge, Trainium3, 144 GB).
 **[h100/RESULTS.md](h100/RESULTS.md)** — cross-model summary + H100-vs-trn2 per-step
 comparison (NVIDIA H100 PCIe 80 GB, stock-diffusers reference, single-GPU dense).
 **[b300/RESULTS.md](b300/RESULTS.md)** — cross-model summary + B300-vs-H100-vs-trn2
 per-step comparison (NVIDIA B300 SXM6 275 GB, stock-diffusers reference, single-GPU dense).
 
-| model | slug | report (trn2) | status |
-|---|---|---|---|
-| LTX-2 (video+audio) | `ltx_2` | [trn2/ltx_2.md](trn2/ltx_2.md) | see report |
-| Wan 2.1 14B (T2V) | `wan_2_1` | [trn2/wan_2_1.md](trn2/wan_2_1.md) | see report |
-| Wan 2.2 A14B (T2V) | `wan_2_2` | [trn2/wan_2_2.md](trn2/wan_2_2.md) | see report |
-| Qwen-Image (T2I) | `qwen_image` | [trn2/qwen_image.md](trn2/qwen_image.md) | see report |
-| HunyuanVideo (T2V) | `hunyuan_video` | [trn2/hunyuan_video.md](trn2/hunyuan_video.md) | see report |
-| HunyuanVideo-1.5 (T2V) | `hunyuan_video_15` | [trn2/hunyuan_video_15.md](trn2/hunyuan_video_15.md) | pending (orchestrator stub) |
-| FLUX.1-dev (T2I) | `flux_1_dev` | [trn2/flux_1_dev.md](trn2/flux_1_dev.md) | see report (gated; needs HF token) |
+| model | slug | report (trn2) | report (trn3) | status |
+|---|---|---|---|---|
+| LTX-2 (video+audio) | `ltx_2` | [trn2](trn2/ltx_2.md) | [trn3](trn3/ltx_2.md) | see report |
+| Wan 2.1 14B (T2V) | `wan_2_1` | [trn2](trn2/wan_2_1.md) | [trn3](trn3/wan_2_1.md) | see report |
+| Wan 2.2 A14B (T2V) | `wan_2_2` | [trn2](trn2/wan_2_2.md) | — (shares 2.1 NEFF) | see report |
+| Qwen-Image (T2I) | `qwen_image` | [trn2](trn2/qwen_image.md) | [trn3](trn3/qwen_image.md) | see report |
+| HunyuanVideo (T2V) | `hunyuan_video` | [trn2](trn2/hunyuan_video.md) | [trn3](trn3/hunyuan_video.md) | see report |
+| HunyuanVideo-1.5 (T2V) | `hunyuan_video_15` | [trn2](trn2/hunyuan_video_15.md) | — | pending (orchestrator stub) |
+| FLUX.1-dev (T2I) | `flux_1_dev` | [trn2](trn2/flux_1_dev.md) | [trn3](trn3/flux_1_dev.md) | see report (gated; needs HF token) |
 
 Each report records the exact config + pinned revision, phase timings, latency
 distribution, compile breakdown, e2e cold/warm load split, output validity, toolchain

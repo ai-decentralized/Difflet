@@ -6,6 +6,11 @@ Difflet provides a single Python entry point — `DiffletPipeline` — that hand
 download, ahead-of-time compilation, on-disk artifact caching, and SPMD
 multi-core execution for image and video diffusion models on Trainium v3.
 
+**Benchmarks:** cross-model performance on Trainium — compile, cold/warm e2e, weight
+load, and DiT per-step — lives in [`benchmark/README.md`](benchmark/README.md). Per-rank
+weight presharding is **default-on**; see [`benchmark/trn2/RESULTS.md`](benchmark/trn2/RESULTS.md)
+(Trainium2) and [`benchmark/trn3/RESULTS.md`](benchmark/trn3/RESULTS.md) (Trainium3).
+
 ## Status
 
 | Milestone | State | Notes |
