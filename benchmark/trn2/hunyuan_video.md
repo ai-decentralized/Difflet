@@ -3,9 +3,9 @@
 **Status:** ok  
 **Backend:** trainium  
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
-**Timestamp:** 2026-06-25 07:05 UTC
+**Timestamp:** 2026-06-30 20:05 UTC
 
-> Best-performing configuration: tp=4, bf16, attention_cte (joint attn: key-padding mask -> bound_min/bound_max; on-chip VAE)
+> Best-performing configuration: tp=4, bf16, attention_cte
 
 ## Configuration
 
@@ -21,22 +21,20 @@
 
 | phase | time |
 |---|---|
-| compile (AOT, one-time) | 40.2 min (2413 s) |
-| **e2e generate — cold start** (page cache dropped) | **9.2 min (551 s)** |
-| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 5.7 min (342 s) |
-| **e2e generate — warm cache** | **3.7 min (220 s)** |
-| &nbsp;&nbsp;↳ of which weights load (from page cache) | 36.78 s |
+| compile (AOT, one-time) | 47.1 min (2825 s) |
+| **e2e generate — cold start** (page cache dropped) | **11.1 min (667 s)** |
+| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 8.5 min (513 s) |
+| **e2e generate — warm cache** | **3.0 min (178 s)** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 48.61 s |
 
-> Cold vs warm: **9.2 min (551 s) → 3.7 min (220 s)** (2.5× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
+> Cold vs warm: **11.1 min (667 s) → 3.0 min (178 s)** (3.8× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 850.6 ms | 850.6 ms | 850.9 ms | 850.3 ms | 20 |
-| end-to-end (warm) | 3.7 min (220 s) | 3.7 min (220 s) | 3.7 min (220 s) | 3.7 min (220 s) | 1 |
-
-**Throughput:** 1.176 DiT steps/s
+| per denoise step (transformer fwd) | — | — | — | — | — |
+| end-to-end (warm) | 3.0 min (178 s) | 3.0 min (178 s) | 3.0 min (178 s) | 3.0 min (178 s) | 1 |
 
 ## Compile breakdown
 
@@ -44,12 +42,12 @@ Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-
 
 | component | module load | HLO gen | priority-HLO compile | all-HLO compile | other | **build total** |
 |---|---:|---:|---:|---:|---:|---:|
-| text_encoder_clip | 279.0 ms | 322.0 ms | — | 33.0 ms | 87.0 ms | **720.0 ms** |
-| text_encoder | 100.0 ms | 1.98 s | 195.0 ms | 120.0 ms | 53.80 s | **56.19 s** |
-| transformer | 16.23 s | 2.91 s | 6.9 min (414 s) | 4.0 ms | 2.7 min (163 s) | **9.9 min (595 s)** |
-| **Σ component builds** | | | | | | **10.9 min (652 s)** |
+| text_encoder_clip | 279.0 ms | 418.0 ms | — | 19.76 s | 99.0 ms | **20.56 s** |
+| text_encoder | 99.0 ms | 2.26 s | 80.82 s | 8.89 s | 54.23 s | **2.4 min (146 s)** |
+| transformer | 15.98 s | 31.12 s | 3.6 min (213 s) | 3.0 ms | 2.8 min (168 s) | **7.1 min (429 s)** |
+| **Σ component builds** | | | | | | **9.9 min (596 s)** |
 
-> The headline **compile = 40.2 min (2413 s)** is the full `difflet compile` wall; the **Σ component builds = 10.9 min (652 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
+> The headline **compile = 47.1 min (2825 s)** is the full `difflet compile` wall; the **Σ component builds = 9.9 min (596 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
 
 ## End-to-end breakdown (cold generate)
 
@@ -57,13 +55,13 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 | stage | weight shard | weight load |
 |---|---:|---:|
-| text_encoder_clip | 1.19 s | 5.59 s |
-| text_encoder | 116.22 s | 2.1 min (125 s) |
-| transformer (denoise loop) | 4.71 s | 3.5 min (211 s) |
-| **weights load total** | 2.0 min (122 s) | **5.7 min (342 s)** |
+| text_encoder_clip | — | 6.75 s |
+| text_encoder | 115.88 s | 2.1 min (125 s) |
+| transformer (denoise loop) | — | 6.3 min (381 s) |
+| **weights load total** | 115.88 s | **8.5 min (513 s)** |
 
-- **weights load total:** 5.7 min (342 s) of 9.2 min (551 s) wall
-- **compute + overhead (residual):** 3.5 min (209 s) = text-encode + denoise loop + VAE decode + process/runtime startup
+- **weights load total:** 8.5 min (513 s) of 11.1 min (667 s) wall
+- **compute + overhead (residual):** 2.6 min (155 s) = text-encode + denoise loop + VAE decode + process/runtime startup
 - VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode.
 
 ## Output validity
@@ -73,7 +71,7 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 | shape | [1, 3, 61, 320, 512] |
 | dtype | torch.float32 |
 | finite (no NaN/Inf) | True |
-| value range | [-2.3281, 2.1562] (mean -0.5328, std 0.5875) |
+| value range | [-2.3750, 2.1562] (mean -0.5341, std 0.5848) |
 | note | saved hunyuanvideo_out.pt |
 
 ## Toolchain
@@ -86,11 +84,8 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 ## Notes
 
-- CORRECTION: the prior 3719 ms / 0.269 it/s was the SDPA fallback — HunyuanVideo's joint self-attn carries a text key-padding mask, and difflet's masked path fell back to F.scaled_dot_product_attention (NOT attention_cte) after commit cd54d0f dropped the in-graph mask->bounds auto-route. Re-wired the contiguous key-padding mask to attention_cte's bound_min/bound_max (computed trace-safe in dual_stream_attention): 850.6 ms / 1.176 it/s, a 4.37x speedup, same step_latency method as the old number. Measured with a synthetic all-ones mask (bound_max=full seq) so it is a conservative upper bound; a real padded prompt attends fewer keys and runs faster.
-- e2e_cold = 551 s — TRUE cold start (OS page cache dropped before the run via sudo drop_caches), so the weight load is a real cold disk read; this replaces an earlier value taken with the host weights already cached (artificially low).
-- e2e_warm = 220 s (n=1, warm OS page cache from the immediately-preceding cold run, same session). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
-- compile_seconds=2413 s (40 min) is the full `difflet compile` wall; the neuronx-cc build sub-phase (compile_breakdown) is only ~652 s. The ~1760 s difference is the one-time host load + HLO trace + weight shard/save of HunyuanVideo's large stack (Llama-8B text encoder + 13B DiT) before/around the builds — the largest such overhead in the suite. Not directly comparable to the other models' compile (whose host load was small).
-- per-step = 850.6 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency — the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).
+- e2e_cold = 667 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
+- e2e_warm = 178 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 667 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
 
 ## Reproduction
 
@@ -108,7 +103,7 @@ Exact test conditions. The **model + config rows are hardware-agnostic** — an 
 | guidance scale | 6.0 |
 | seed | 42 |
 | prompt | "a cinematic shot of a red fox running through a snowy forest" |
-| best-perf knobs | tp=4, bf16, attention_cte (joint attn: key-padding mask -> bound_min/bound_max; on-chip VAE) |
+| best-perf knobs | tp=4, bf16, attention_cte |
 | measured on | trn2.3xlarge / 4 NeuronCores / 96 GB/device (device folder `trn2`) |
 
 ```bash

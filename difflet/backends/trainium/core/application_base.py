@@ -455,20 +455,35 @@ class NeuronApplicationBase(torch.nn.Module):
 
         weights = []
         start_time = time.monotonic()
-        if self.neuron_config.save_sharded_checkpoint:
+        presharded_paths = [
+            os.path.join(
+                compiled_model_path, f"weights/tp{rank}_sharded_checkpoint.safetensors"
+            )
+            for rank in range(
+                weight_start_rank_id, weight_start_rank_id + weight_local_ranks_size
+            )
+        ]
+        # Guard (Bet A): take the presharded fast path only if the flag is set AND
+        # every per-rank shard actually exists. A missing shard (cache compiled
+        # before presharding, partial/cleared cache, or a component whose compile
+        # did not pre-shard) must fall back to shard-on-load, not crash with a raw
+        # FileNotFoundError from load_file.
+        use_presharded = self.neuron_config.save_sharded_checkpoint and all(
+            os.path.exists(p) for p in presharded_paths
+        )
+        if self.neuron_config.save_sharded_checkpoint and not use_presharded:
+            logger.warning(
+                "save_sharded_checkpoint=True but presharded checkpoints are missing "
+                "under %s — falling back to shard-on-load.",
+                os.path.join(compiled_model_path, "weights"),
+            )
+        if use_presharded:
             logger.info(
                 f"Loading presharded checkpoints for ranks: "
                 f"{weight_start_rank_id}...{weight_start_rank_id + weight_local_ranks_size - 1}"
             )
-            for rank in range(
-                weight_start_rank_id, weight_start_rank_id + weight_local_ranks_size
-            ):
-                ckpt = load_file(
-                    os.path.join(
-                        compiled_model_path, f"weights/tp{rank}_sharded_checkpoint.safetensors"
-                    )
-                )
-                weights.append(ckpt)
+            for path in presharded_paths:
+                weights.append(load_file(path))
 
             if self.neuron_config.lora_config and self.neuron_config.lora_config.dynamic_multi_lora:
                 lora_cpu_weights = self.lora_model_manager.lora_checkpoint.load_sharded_cpu_checkpoints(compiled_model_path, start_rank_id, local_ranks_size)

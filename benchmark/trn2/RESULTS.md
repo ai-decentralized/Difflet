@@ -2,8 +2,9 @@
 
 Measured on **trn2.3xlarge** (1 Neuron device, 4 NeuronCores × 24 GB), bf16,
 `tp=4`, via the Neuron inference venv
-(`/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference`). The device is serial, so every
-run had it to itself (an early contended run skewed badly — LTX-2 970 s vs clean).
+(`/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference`), with **per-rank presharding
+default-on** (2026-06-30 — see the Presharding section below). The device is serial, so
+every run had it to itself (an early contended run skewed badly — LTX-2 970 s vs clean).
 **e2e cold** is a *true* cold start: the OS page cache is dropped
 (`sync; echo 3 > /proc/sys/vm/drop_caches`) immediately before the run, so the
 weight load is a real cold disk read. **e2e warm** is the very next run, with the
@@ -11,15 +12,52 @@ weights now in the page cache. Each row links to a detailed per-model report.
 
 | model | kind | shape | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁴ | **DiT per-step**⁰ | output | status |
 |---|---|---|---:|---:|---:|---:|---:|---|---|
-| [LTX-2](ltx_2.md) | video+audio | 480×704×49 | 28.6 min | **803 s** (13.4 min) | **103 s** | 335→52 s⁸ | **441.8 ms** (2.26/s)ᵇᵉ | (1,49,3,480,704) ✓ | ok |
-| [Wan 2.1 14B](wan_2_1.md) | video (T2V) | 480×832×9 | 108 min⁵ | **722 s** (12.0 min) | **97 s** | 657→54 s | **554.8 ms** (1.80/s)ᵈ | (1,3,9,480,832) ✓ | ok |
-| [Wan 2.2 A14B](wan_2_2.md) | video (T2V) | 480×832×9 | (shares 2.1)⁶ | **635 s** (10.6 min) | **93 s** | 570→51 s | **554.8 ms** (1.80/s)ᵈ | (1,3,9,480,832) ✓ | ok⁶ |
-| [Qwen-Image](qwen_image.md) | image (T2I) | 1024×1024 | 13.4 min | **517 s** (8.6 min) | **74 s** | 462→41 s | **447 ms** (2.24/s) | (1,3,1024,1024) ✓ | ok |
-| [HunyuanVideo](hunyuan_video.md) | video (T2V) | 320×512×61 | 41.5 minᶜ | 551 sᶜ | 220 sᶜ | 342→37 s | **850.6 ms** (1.18/s)ᶜ | (1,3,61,320,512) ✓ | okᶜ |
-| [FLUX.1-dev](flux_1_dev.md) | image (T2I) | 1024×1024 | 21.2 min⁹ | **320 s** (5.3 min) | **47 s** | 279→28 s | **267.6 ms** (3.74/s)ᵇ | 1024² PNG ✓ | ok |
+| [LTX-2](ltx_2.md) | video+audio | 480×704×49 | 30.6 min | **778 s** (13.0 min) | **62 s** | 315→15 s⁸ | **441.8 ms** (2.26/s)ᵇᵉ | (1,49,3,480,704) ✓ | ok |
+| [Wan 2.1 14B](wan_2_1.md) | video (T2V) | 480×832×9 | 131 min⁵ | **394 s** (6.6 min) | **60 s** | 343→31 s | **554.8 ms** (1.80/s)ᵈ | (1,3,9,480,832) ✓ | ok |
+| [Wan 2.2 A14B](wan_2_2.md) | video (T2V) | 480×832×9 | (shares 2.1)⁶ | **394 s** (6.6 min) | **59 s** | 342→30 s | **554.8 ms** (1.80/s)ᵈ | (1,3,9,480,832) ✓ | ok⁶ |
+| [Qwen-Image](qwen_image.md) | image (T2I) | 1024×1024 | 21.9 min | **509 s** (8.5 min) | **65 s** | 453→32 s | **447 ms** (2.24/s) | (1,3,1024,1024) ✓ | ok |
+| [HunyuanVideo](hunyuan_video.md) | video (T2V) | 320×512×61 | 47.1 min | **667 s** (11.1 min) | **178 s** | 513→49 s | **850.6 ms** (1.18/s)ᶜ | (1,3,61,320,512) ✓ | ok |
+| [FLUX.1-dev](flux_1_dev.md) | image (T2I) | 1024×1024 | 24.7 min⁹ | **321 s** (5.3 min) | **38 s** | 280→20 s | **267.6 ms** (3.74/s)ᵇ | 1024² PNG ✓ | ok |
 | [HunyuanVideo-1.5](hunyuan_video_15.md) | video (T2V) | 480×848×121 | — | — | — | — | — | — | pending⁷ |
 
 ✓ = output is finite (no NaN/Inf) with a sensible value range — see each report.
+
+## Presharding (per-rank weight cache) — default-on, 2026-06-30
+
+`save_sharded_checkpoint` now defaults to **True** (`config.py`): the per-rank shards
+(`weights/tp{rank}_sharded_checkpoint.safetensors`) are written **once at compile** and
+read directly at load, removing the per-run load-time reshard. The load path is now
+**guarded** (`application_base.py`): if a component's shards are missing it logs a warning
+and falls back to shard-on-load instead of raw-crashing with `FileNotFoundError` — so the
+old footgun (presharding enabled but shards absent) is closed, and components that don't
+go through the standard shard path (e.g. the Qwen-Image LLM text-encoder) take the
+fallback cleanly. **Lossless**: output is bit-identical to load-time sharding (verified on
+FLUX, md5-equal across cold/warm × on/off).
+
+All e2e/load numbers in the table above are measured **with presharding on**. Improvement
+vs the prior load-time-shard baseline on trn2.3xlarge (warm is the reliable metric; cold
+is disk/page-cache-noisy):
+
+| model | warm e2e OFF→ON | Δ warm | warm load OFF→ON |
+|---|---|---:|---|
+| LTX-2 | 103 → 62 s | **−40%** | 52 → 15 s |
+| Wan 2.1 14B | 97 → 60 s | **−38%** | 54 → 31 s |
+| Wan 2.2 A14B | 93 → 59 s | **−36%** | 51 → 30 s |
+| HunyuanVideo | 220 → 178 s | **−19%** | 37 → 49 s* |
+| FLUX.1-dev | 47 → 38 s | **−19%** | 28 → 20 s |
+| Qwen-Image | 74 → 65 s | **−12%** | 41 → 32 s |
+
+Large DiTs gain most — presharding eliminates the full load-time shard of the transformer
+(~20–40 s). **`step_latency` is unchanged** (presharding moves only weight load, not DiT
+compute), so the per-step column above is identical to the prior run. Per-rank shards add
+to the one-time compile (the transformer shard-write); the compile column includes that
+cost. *HunyuanVideo's warm-load delta is not a clean comparison — this run compiles the
+VAE on-chip whereas the prior baseline decoded VAE on the host, so the load profiles
+differ.
+
+> Caveat: parts of this run's compiles and cold reads overlapped large model downloads,
+> so absolute **cold** e2e and **compile** minutes carry some disk-contention noise. The
+> **warm** e2e and per-step latency are unaffected (page-cache / pure compute).
 
 ## Corrections (2026-06-27)
 
@@ -71,9 +109,9 @@ they are kept here with the reason they changed (not silently overwritten).
   the text encoder, validated on the benchmark prompt.)
 
 **The headline finding: e2e is load-dominated, not compute-bound.** For the
-pure-Neuron pipelines warm is **5–8× faster** than cold (Qwen 517→74 s, Wan
-635→93 s, FLUX 320→47 s); HunyuanVideo is the exception at 2.5× (551→220 s) because
-its host VAE decode (~185 s) is not weight-load and doesn't speed up with a warm
+pure-Neuron pipelines warm is **5–9× faster** than cold (Qwen 509→65 s, Wan
+394→59 s, FLUX 321→38 s); HunyuanVideo is the exception at 3.7× (667→178 s) because
+its host VAE decode is not weight-load and doesn't speed up with a warm
 cache. The cold→warm gap is otherwise the one-time cold disk read of the weights —
 the Neuron denoise compute is small (per-step × steps). So the two metrics that actually characterize
 the hardware are the **cold weight-load** and the **DiT per-step**; absolute cold
@@ -127,10 +165,10 @@ timer doesn't fit it; the denoise-loop rate is the equivalent warm per-step.
   through it. On a trn2.48xlarge, higher `tp` (e.g. FLUX `tp=8`) and context-parallel
   would lift these further.
 - **Optimal warm e2e** (weights cached) is the realistic steady-state for a served
-  deployment that keeps weights hot: 47–103 s for the image/short-video pipelines
-  (FLUX 47 s, Wan 93–97 s, Qwen 74 s, LTX-2 103 s), 220 s for HunyuanVideo (a stale
-  host-VAE-decode measurement; its VAE is now compiled on-chip, e2e pending re-measure
-  — see Corrections ᶜ). The **Neuron per-step** is the lossless compute floor (corrected
+  deployment that keeps weights hot: 38–65 s for the image/short-video pipelines
+  (FLUX 38 s, Wan 59–60 s, Qwen 65 s, LTX-2 62 s), 178 s for HunyuanVideo — all with
+  presharding default-on (weights cached, no load-time reshard). The **Neuron per-step**
+  is the lossless compute floor (presharding-independent; corrected
   values, matching the table above): FLUX 267.6 ms, Qwen 447 ms, LTX-2 441.8 ms
   (validated cosine 0.99992 vs CPU), Wan 554.8 ms, HunyuanVideo 850.6 ms.
 

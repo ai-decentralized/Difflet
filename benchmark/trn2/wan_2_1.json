@@ -14,25 +14,67 @@
     "num_frames": 9
   },
   "steps": 20,
-  "compile_seconds": 6507.0,
+  "compile_seconds": 7879.4125419269985,
   "compile_breakdown": {
-    "text_encoder(UMT5)": 31.0,
-    "transformer(WanTransformer3DModel, 14B)": 431.0,
-    "vae_decoder": 6045.0
+    "text_encoder_t5": {
+      "module_load_s": 0.477,
+      "hlo_generate_s": 2.213,
+      "priority_hlo_compile_s": 323.917,
+      "all_hlo_compile_s": 0.538,
+      "build_total_s": 366.226,
+      "other_s": 39.082
+    },
+    "transformer": {
+      "module_load_s": 2.203,
+      "hlo_generate_s": 14.398,
+      "priority_hlo_compile_s": 96.116,
+      "all_hlo_compile_s": 0.003,
+      "build_total_s": 255.391,
+      "other_s": 142.671
+    },
+    "vae_decoder": {
+      "module_load_s": 0.474,
+      "hlo_generate_s": 1.453,
+      "priority_hlo_compile_s": 6087.041,
+      "all_hlo_compile_s": 0.001,
+      "build_total_s": 6097.692,
+      "other_s": 8.722
+    },
+    "wall_total_s": 6719.31
   },
-  "load_seconds": 656.674,
-  "e2e_cold_seconds": 722.088,
+  "load_seconds": 343.279,
+  "e2e_cold_seconds": 394.177,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder (UMT5)",
+        "load_s": 94.393
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 234.937
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 13.949
+      }
+    ],
+    "weights_load_total_s": 343.279,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 394.177,
+    "compute_and_overhead_s": 50.898
+  },
   "e2e_warm": {
     "n": 1,
-    "mean": 96.77058354698238,
-    "median": 96.77058354698238,
+    "mean": 59.53240169399942,
+    "median": 59.53240169399942,
     "std": 0.0,
-    "p50": 96.77058354698238,
-    "p90": 96.77058354698238,
-    "min": 96.77058354698238,
-    "max": 96.77058354698238,
+    "p50": 59.53240169399942,
+    "p90": 59.53240169399942,
+    "min": 59.53240169399942,
+    "max": 59.53240169399942,
     "samples": [
-      96.77058354698238
+      59.53240169399942
     ]
   },
   "step_latency": {
@@ -60,10 +102,10 @@
     ],
     "dtype": "torch.float32",
     "finite": true,
-    "min": -0.87109375,
-    "max": -0.2578125,
-    "mean": -0.5518333315849304,
-    "std": 0.08400312811136246,
+    "min": -0.875,
+    "max": -0.255859375,
+    "mean": -0.5515965819358826,
+    "std": 0.08401277661323547,
     "note": "saved wan2_1_t2v_14b_diffusers_out.pt"
   },
   "toolchain": {
@@ -73,68 +115,39 @@
     "neuronx-distributed": "0.19.28093+fc70b593",
     "diffusers": "0.38.0"
   },
-  "config_label": "tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline \u2014 head-sharded attention + TP-aware global RMS (was replicated)",
+  "config_label": "tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline",
   "status": "ok",
   "notes": [
-    "CORRECTION: per-step 1144 -> 554.8 ms (2.06x) \u2014 the attention was REPLICATED across the 4 TP cores (gather_output=True + full-width across-heads RMSNorm to match HF), so tp=4 only parallelized the FFN, not the attention. Re-wired to head-sharded attention (gather_output=False + RowParallel out + local heads) with a TP-aware global RMS (cross-rank sum-of-squares + per-rank norm-weight slice, like LTX-2's _global_rms_norm). Strict parity vs the replicated baseline on the same input: cosine 0.999768 (rel_l2 2.0e-2, bf16). trn2 now matches H100 (554.8 vs 563 ms) \u2014 was 2.0x behind. Measured with the isolated step_latency timer (same as the old 1144 number).",
-    "compile time from a dedicated clean run; the VAE decoder dominates (~100 min) \u2014 the Wan video VAE is conv-heavy and slow on neuronx-cc.",
-    "single-transformer (no MoE); attention is unmasked -> attention_cte.",
-    "e2e_cold = 722 s \u2014 TRUE cold start (OS page cache dropped before the run via sudo drop_caches), so the weight load is a real cold disk read; this replaces an earlier value taken with the host weights already cached (artificially low).",
-    "e2e_warm = 97 s (n=1, warm OS page cache from the immediately-preceding cold run, same session). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.",
-    "cold transformer weight load 461 s (shard 438 s) is ~2x the size-implied cold disk read and ~60x the warm shard (7 s) \u2014 the cold TP-shard path faults in the mmapped 14B weights during the host-side scatter. Warm load (29 s) is normal; treat the cold shard as a cold-cache artifact, not steady-state."
+    "e2e_cold = 394 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 60 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 394 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.",
+    "step_latency carried over from prior trn2 measurement (presharding-independent \u2014 DiT compute unaffected by weight-load path; ltx cross-check: realloop 437.9ms vs prior 442ms)."
   ],
-  "timestamp": "2026-06-25 06:14 UTC",
+  "timestamp": "2026-06-30 16:53 UTC",
   "config_slug": "wan_2_1",
-  "e2e_breakdown": {
-    "stages": [
-      {
-        "stage": "text_encoder (UMT5)",
-        "load_s": 181.488,
-        "shard_s": 172.613
-      },
-      {
-        "stage": "transformer (denoise loop)",
-        "load_s": 460.779,
-        "shard_s": 438.485
-      },
-      {
-        "stage": "vae_decoder",
-        "load_s": 14.407,
-        "shard_s": 1.716
-      }
-    ],
-    "weights_load_total_s": 656.674,
-    "weights_shard_total_s": 612.814,
-    "wall_total_s": 722.088,
-    "compute_and_overhead_s": 65.414
-  },
-  "e2e_warm_breakdown": {
-    "stages": [
-      {
-        "stage": "text_encoder (UMT5)",
-        "load_s": 11.075,
-        "shard_s": 1.55
-      },
-      {
-        "stage": "transformer (denoise loop)",
-        "load_s": 29.323,
-        "shard_s": 6.984
-      },
-      {
-        "stage": "vae_decoder",
-        "load_s": 14.036,
-        "shard_s": 0.073
-      }
-    ],
-    "weights_load_total_s": 54.434,
-    "weights_shard_total_s": 8.607,
-    "wall_total_s": 96.771,
-    "compute_and_overhead_s": 42.337
-  },
+  "device_slug": "trn2",
   "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
   "seed": 42,
   "prompt": "a cinematic shot of a red fox running through a snowy forest",
   "guidance_scale": 1.0,
   "output_kind": "video",
-  "device_slug": "trn2"
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder (UMT5)",
+        "load_s": 8.956
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 7.972
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 13.998
+      }
+    ],
+    "weights_load_total_s": 30.926,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 59.532,
+    "compute_and_overhead_s": 28.606
+  }
 }
