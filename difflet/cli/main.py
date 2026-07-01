@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 VALID_MODELS = {
@@ -239,6 +240,38 @@ def _get_orchestrator(args: argparse.Namespace):
     return mapping[args.model_id](args)
 
 
+def _ensure_jemalloc() -> None:
+    """Re-exec once with jemalloc preloaded.
+
+    The concurrent per-rank weight load (``torch.ops.neuron._parallel_load``,
+    one thread per rank) spends most of its CPU in glibc ``calloc``/``free`` +
+    page faults; the rank threads contend on the malloc arena lock / mmap_lock.
+    jemalloc's per-thread arenas remove that contention — ~17% faster warm
+    weight load, bit-identical output (validated trn3/FLUX).
+
+    jemalloc ships inside ``torch_neuronx`` but its preload is disabled upstream
+    (``torch_neuronx/__init__.py``: ``# _add_lib_preload("jemalloc")``).
+    ``LD_PRELOAD`` must be set before the process starts, so we re-exec once.
+    Opt out with ``DIFFLET_NO_JEMALLOC=1``.
+    """
+    if os.environ.get("DIFFLET_NO_JEMALLOC"):
+        return
+    if "libjemalloc" in os.environ.get("LD_PRELOAD", ""):
+        return  # already preloaded / re-exec'd — avoid an exec loop
+    import importlib.util
+
+    spec = importlib.util.find_spec("torch_neuronx")  # locate without importing
+    if spec is None or spec.origin is None:
+        return
+    lib = os.path.join(os.path.dirname(spec.origin), "lib", "libjemalloc.so")
+    if not os.path.exists(lib):
+        return
+    os.environ["LD_PRELOAD"] = os.pathsep.join(
+        p for p in (lib, os.environ.get("LD_PRELOAD", "")) if p
+    )
+    os.execv(sys.executable, [sys.executable, "-m", "difflet.cli.main", *sys.argv[1:]])
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -257,6 +290,12 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command in ("generate", "run"):
         _validate_teacache(args)
+
+    # Only for the weight-loading commands. NOT compile: neuronx-cc runs as a
+    # subprocess that does not strip jemalloc from LD_PRELOAD, and compiling
+    # the DiT under jemalloc crashes the compiler worker.
+    if argv is None and args.command in ("generate", "run"):
+        _ensure_jemalloc()
 
     orchestrator = _get_orchestrator(args)
     getattr(orchestrator, args.command)()
