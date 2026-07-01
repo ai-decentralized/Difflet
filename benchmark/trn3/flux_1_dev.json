@@ -50,19 +50,59 @@
   },
   "e2e_warm": {
     "n": 1,
-    "mean": 45.05750074097887,
-    "median": 45.05750074097887,
+    "mean": 35.140730016864836,
+    "median": 35.140730016864836,
     "std": 0.0,
-    "p50": 45.05750074097887,
-    "p90": 45.05750074097887,
-    "min": 45.05750074097887,
-    "max": 45.05750074097887,
+    "p50": 35.140730016864836,
+    "p90": 35.140730016864836,
+    "min": 35.140730016864836,
+    "max": 35.140730016864836,
     "samples": [
-      45.05750074097887
+      35.140730016864836
     ]
   },
-  "step_latency": null,
-  "throughput": {},
+  "step_latency": {
+    "n": 27,
+    "mean": 0.24169840585198943,
+    "median": 0.2413911169860512,
+    "std": 0.001621145558806132,
+    "p50": 0.2413911169860512,
+    "p90": 0.24178801802918315,
+    "min": 0.24023224716074765,
+    "max": 0.24978507799096406,
+    "samples": [
+      0.24978507799096406,
+      0.24149483791552484,
+      0.24023224716074765,
+      0.2413911169860512,
+      0.24123008199967444,
+      0.24113903287798166,
+      0.24164197593927383,
+      0.24160395399667323,
+      0.2417361862026155,
+      0.24136700900271535,
+      0.24148162477649748,
+      0.24178801802918315,
+      0.24124803999438882,
+      0.24132337514311075,
+      0.24154969793744385,
+      0.2411610009148717,
+      0.24124833615496755,
+      0.2414789090398699,
+      0.24116421095095575,
+      0.24104995396919549,
+      0.24183839093893766,
+      0.24131530709564686,
+      0.24167256499640644,
+      0.2416853648610413,
+      0.2409938380587846,
+      0.24199342401698232,
+      0.2412433810532093
+    ]
+  },
+  "throughput": {
+    "DiT steps/s": 4.137
+  },
   "peak_device_mem_gb": null,
   "output": {
     "shape": null,
@@ -84,8 +124,9 @@
   "config_label": "tp=4 (registry default tp=8 -> 4 on trn2.3xlarge), bf16, attention_cte",
   "status": "ok",
   "notes": [
+    "per-step = 241.7 ms/DiT-step (median 241.4, p90 241.8, n=27) \u2014 measured the SAME way as H100: inter-step deltas of a real 28-step generate (wrapping NeuronFluxBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 28 DiT calls timed; warm generate 7s; output finite=True.",
     "e2e_cold = 318 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
-    "e2e_warm = 45 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 318 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+    "e2e_warm = 35 s (n=1; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-06-29 23:11 UTC",
   "config_slug": "flux_1_dev",
@@ -99,28 +140,27 @@
     "stages": [
       {
         "stage": "text_encoder_t5",
-        "load_s": 8.827,
-        "shard_s": 0.978
+        "load_s": 8.617,
+        "shard_s": 0.966
       },
       {
         "stage": "transformer (denoise loop)",
-        "load_s": 17.327,
-        "shard_s": 6.676
+        "load_s": 8.159
       },
       {
         "stage": "text_encoder_clip",
-        "load_s": 0.439,
-        "shard_s": 0.329
+        "load_s": 0.305,
+        "shard_s": 0.189
       },
       {
         "stage": "vae_decoder",
-        "load_s": 2.403,
-        "shard_s": 0.145
+        "load_s": 2.172,
+        "shard_s": 0.131
       }
     ],
-    "weights_load_total_s": 28.996,
-    "weights_shard_total_s": 8.128,
-    "wall_total_s": 45.058,
-    "compute_and_overhead_s": 16.062
+    "weights_load_total_s": 19.253,
+    "weights_shard_total_s": 1.286,
+    "wall_total_s": 35.141,
+    "compute_and_overhead_s": 15.888
   }
 }

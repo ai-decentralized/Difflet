@@ -43,19 +43,51 @@
   },
   "e2e_warm": {
     "n": 1,
-    "mean": 189.48245277488604,
-    "median": 189.48245277488604,
+    "mean": 57.73559954203665,
+    "median": 57.73559954203665,
     "std": 0.0,
-    "p50": 189.48245277488604,
-    "p90": 189.48245277488604,
-    "min": 189.48245277488604,
-    "max": 189.48245277488604,
+    "p50": 57.73559954203665,
+    "p90": 57.73559954203665,
+    "min": 57.73559954203665,
+    "max": 57.73559954203665,
     "samples": [
-      189.48245277488604
+      57.73559954203665
     ]
   },
-  "step_latency": null,
-  "throughput": {},
+  "step_latency": {
+    "n": 19,
+    "mean": 0.34498393431452934,
+    "median": 0.3445247649215162,
+    "std": 0.0014904655366770531,
+    "p50": 0.3445247649215162,
+    "p90": 0.3460328378714621,
+    "min": 0.3437112611718476,
+    "max": 0.3503739268053323,
+    "samples": [
+      0.3503739268053323,
+      0.34577305312268436,
+      0.3452212610282004,
+      0.3452661919873208,
+      0.3460328378714621,
+      0.3454954130575061,
+      0.3445247649215162,
+      0.3442660141736269,
+      0.34372866386547685,
+      0.3437763280235231,
+      0.34430493507534266,
+      0.3446280399803072,
+      0.34480062988586724,
+      0.34419384598731995,
+      0.34444805001839995,
+      0.3463173951022327,
+      0.3440953379031271,
+      0.3437112611718476,
+      0.3437368019949645
+    ]
+  },
+  "throughput": {
+    "DiT steps/s": 2.899
+  },
   "peak_device_mem_gb": null,
   "output": {
     "shape": [
@@ -83,8 +115,9 @@
   "config_label": "tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF)",
   "status": "ok",
   "notes": [
+    "per-step = 345.0 ms/DiT-step (median 344.5, p90 346.0, n=19) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 54s; output finite=True.",
     "Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.",
-    "e2e_warm = 189 s (n=1; reported after 2 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+    "e2e_warm = 58 s (n=1; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-06-30 04:03 UTC",
   "config_slug": "ltx_2",
@@ -98,14 +131,13 @@
     "stages": [
       {
         "stage": "transformer (denoise loop) [Neuron]",
-        "load_s": 47.02,
-        "shard_s": 33.271
+        "load_s": 13.913
       }
     ],
-    "weights_load_total_s": 47.02,
-    "weights_shard_total_s": 33.271,
-    "wall_total_s": 189.482,
-    "compute_and_overhead_s": 142.462,
+    "weights_load_total_s": 13.913,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 57.736,
+    "compute_and_overhead_s": 43.823,
     "note": "text-encoder and VAE decode run on the host (enable_host_pipeline/enable_decode_components), so only the transformer is a Neuron load; the residual is host text-encode + denoise + host VAE decode."
   }
 }

@@ -68,15 +68,15 @@
   },
   "e2e_warm": {
     "n": 1,
-    "mean": 194.8362139130477,
-    "median": 194.8362139130477,
+    "mean": 51.99260026193224,
+    "median": 51.99260026193224,
     "std": 0.0,
-    "p50": 194.8362139130477,
-    "p90": 194.8362139130477,
-    "min": 194.8362139130477,
-    "max": 194.8362139130477,
+    "p50": 51.99260026193224,
+    "p90": 51.99260026193224,
+    "min": 51.99260026193224,
+    "max": 51.99260026193224,
     "samples": [
-      194.8362139130477
+      51.99260026193224
     ]
   },
   "step_latency": {
@@ -135,8 +135,8 @@
   "config_label": "tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline",
   "status": "ok",
   "notes": [
-    "e2e_warm = 195 s (n=1; reported after 3 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.",
-    "per-step = 442.5 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency \u2014 the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes)."
+    "per-step = 442.5 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency \u2014 the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).",
+    "e2e_warm = 52 s (n=1; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-06-30 01:01 UTC",
   "config_slug": "wan_2_1",
@@ -150,23 +150,22 @@
     "stages": [
       {
         "stage": "text_encoder (UMT5)",
-        "load_s": 104.036,
-        "shard_s": 96.01
+        "load_s": 9.6,
+        "shard_s": 1.616
       },
       {
         "stage": "transformer (denoise loop)",
-        "load_s": 54.081,
-        "shard_s": 46.127
+        "load_s": 6.355
       },
       {
         "stage": "vae_decoder",
-        "load_s": 11.838,
-        "shard_s": 0.075
+        "load_s": 11.426,
+        "shard_s": 0.064
       }
     ],
-    "weights_load_total_s": 169.955,
-    "weights_shard_total_s": 142.212,
-    "wall_total_s": 194.836,
-    "compute_and_overhead_s": 24.881
+    "weights_load_total_s": 27.381,
+    "weights_shard_total_s": 1.68,
+    "wall_total_s": 51.993,
+    "compute_and_overhead_s": 24.612
   }
 }

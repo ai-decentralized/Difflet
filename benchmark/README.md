@@ -138,33 +138,35 @@ Trainium reloads weights onto the cores each generate, the GPUs reload the cache
 
 | model | trn2 | trn3 | H100 | B300 |
 |---|---:|---:|---:|---:|
-| FLUX.1-dev | 37.7 | 37.1 | 15.8 | 7.9 |
-| LTX-2 | 61.7 | 61.2 | 24.9 | 12.7 |
-| Wan 2.1 14B | 59.5 | 52.7 | 33.7 | 13.6 |
+| FLUX.1-dev | 37.7 | 35.1 | 15.8 | 7.9 |
+| LTX-2 | 61.7 | 57.7 | 24.9 | 12.7 |
+| Wan 2.1 14B | 59.5 | 52.0 | 33.7 | 13.6 |
 | Wan 2.2 A14B | 59.1 | — | 49.3 | 17.5 |
-| Qwen-Image | 64.9 | 54.4 | 18.3 | 10.7 |
-| HunyuanVideo | 177.6 | 160.9 | 47.6 | 27.8 |
+| Qwen-Image | 64.9 | 54.5 | 18.3 | 10.7 |
+| HunyuanVideo | 177.6 | 159.7 | 47.6 | 27.8 |
 | HunyuanVideo-1.5 | stub | — | OOM | 439.1 |
 
-Trainium warm is with presharding on; trn3 is its clean ON (presharded) arm. HunyuanVideo-1.5
+Trainium warm is with presharding on; the trn3 column is its clean ON arm with the
+jemalloc allocator preloaded (default-on load path — see [trn3/RESULTS.md](trn3/RESULTS.md)).
+HunyuanVideo-1.5
 runs only on B300 (480×848×121 peaks at 99.2 GB — over the 80 GB H100; trn2/trn3 stub).
 
 ### DiT per-step (ms)
 
-The load-independent compute metric — the cleanest cross-device comparison (median
-`step_latency` on Trainium; inter-step deltas on the GPUs). Presharding-independent.
+The load-independent compute metric — the cleanest cross-device comparison (mean
+`step_latency` on Trainium; mean inter-step delta on the GPUs). Presharding-independent.
 
 | model | trn2 | trn3 | H100 | B300 |
 |---|---:|---:|---:|---:|
-| FLUX.1-dev | 268.1 | — | 310.8 | 134.1 |
-| LTX-2 | 437.9 | — | 313.1 | 159.5 |
+| FLUX.1-dev | 268.1 | 241.7 | 310.8 | 134.1 |
+| LTX-2 | 437.9 | 345.0 | 313.1 | 159.5 |
 | Wan 2.1 14B | 554.8 | 442.5 | 554.2 | 271.2 |
 | Wan 2.2 A14B | 554.8 | — | 553.7 | 240.7 |
 | Qwen-Image | 447.1 | 324.1 | 297.7 | 140.0 |
 | HunyuanVideo | 850.6 | 650.0 | 1503.2 | 874.5 |
 | HunyuanVideo-1.5 | stub | — | OOM | N/A |
 
-trn3 FLUX/LTX per-step needs the realloop method (not captured). HunyuanVideo-1.5 per-step is
+trn3 FLUX/LTX per-step captured via the realloop method (241.7 / 345.0 ms, n=27/19). HunyuanVideo-1.5 per-step is
 N/A (its diffusers pipeline exposes no `callback_on_step_end`). The trn2 numbers reflect two
 correctness fixes that pulled it level on the heavy models — HunyuanVideo SDPA→attention_cte
 (was 3719 ms) and Wan replicated→head-sharded attention (was 1144 ms); see **Corrections** in
