@@ -66,16 +66,18 @@
     "compute_and_overhead_s": 55.968
   },
   "e2e_warm": {
-    "n": 1,
-    "mean": 64.93232544499915,
-    "median": 64.93232544499915,
-    "std": 0.0,
-    "p50": 64.93232544499915,
-    "p90": 64.93232544499915,
-    "min": 64.93232544499915,
-    "max": 64.93232544499915,
+    "n": 3,
+    "mean": 62.711678293329896,
+    "median": 63.16684876299405,
+    "std": 0.7816988106560215,
+    "p50": 63.16684876299405,
+    "p90": 63.3565576300025,
+    "min": 61.61162848699314,
+    "max": 63.3565576300025,
     "samples": [
-      64.93232544499915
+      63.3565576300025,
+      61.61162848699314,
+      63.16684876299405
     ]
   },
   "step_latency": {
@@ -135,8 +137,8 @@
   "status": "ok",
   "notes": [
     "e2e_cold = 509 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
-    "e2e_warm = 65 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 509 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.",
-    "step_latency carried over from prior trn2 (presharding-independent)."
+    "step_latency carried over from prior trn2 (presharding-independent).",
+    "e2e_warm = 63 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-06-30 19:26 UTC",
   "config_slug": "qwen_image",
@@ -150,21 +152,21 @@
     "stages": [
       {
         "stage": "text_encoder",
-        "load_s": 12.092,
-        "shard_s": 2.048
+        "load_s": 11.133,
+        "shard_s": 1.98
       },
       {
         "stage": "transformer (denoise loop)",
-        "load_s": 14.059
+        "load_s": 13.299
       },
       {
         "stage": "vae_decoder",
-        "load_s": 5.782
+        "load_s": 5.842
       }
     ],
-    "weights_load_total_s": 31.933,
-    "weights_shard_total_s": 2.048,
-    "wall_total_s": 64.932,
-    "compute_and_overhead_s": 32.999
+    "weights_load_total_s": 30.274,
+    "weights_shard_total_s": 1.98,
+    "wall_total_s": 63.167,
+    "compute_and_overhead_s": 32.893
   }
 }

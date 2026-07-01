@@ -24,17 +24,19 @@
 | compile (AOT, one-time) | 13.70 s |
 | **e2e generate — cold start** (page cache dropped) | **6.6 min (394 s)** |
 | &nbsp;&nbsp;↳ of which weights load (cold disk read) | 5.7 min (342 s) |
-| **e2e generate — warm cache** | **59.06 s** |
-| &nbsp;&nbsp;↳ of which weights load (from page cache) | 30.13 s |
+| **e2e generate — warm cache** | **57.42 s** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 29.63 s |
 
-> Cold vs warm: **6.6 min (394 s) → 59.06 s** (6.7× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
+> Cold vs warm: **6.6 min (394 s) → 57.42 s** (6.9× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | — | — | — | — | — |
-| end-to-end (warm) | 59.06 s | 59.06 s | 59.06 s | 59.06 s | 1 |
+| per denoise step (transformer fwd) | 554.8 ms | 554.8 ms | 554.8 ms | 554.8 ms | 20 |
+| end-to-end (warm) | 57.42 s | 57.34 s | 57.98 s | 56.94 s | 3 |
+
+**Throughput:** 1.802 DiT steps/s
 
 ## Compile breakdown
 
@@ -77,7 +79,8 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 ## Notes
 
 - e2e_cold = 394 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
-- e2e_warm = 59 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 394 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
+- step_latency carried over from prior trn2 (presharding-independent; wan_2_2 inherits wan_2_1 transformer per benchmark design).
+- e2e_warm = 57 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
 
 ## Reproduction
 

@@ -138,16 +138,19 @@ Trainium reloads weights onto the cores each generate, the GPUs reload the cache
 
 | model | trn2 | trn3 | H100 | B300 |
 |---|---:|---:|---:|---:|
-| FLUX.1-dev | 37.7 | 35.1 | 15.8 | 7.9 |
-| LTX-2 | 61.7 | 57.7 | 24.9 | 12.7 |
-| Wan 2.1 14B | 59.5 | 52.0 | 33.7 | 13.6 |
-| Wan 2.2 A14B | 59.1 | — | 49.3 | 17.5 |
-| Qwen-Image | 64.9 | 54.5 | 18.3 | 10.7 |
-| HunyuanVideo | 177.6 | 159.7 | 47.6 | 27.8 |
+| FLUX.1-dev | 35.3 | 35.1 | 15.8 | 7.9 |
+| LTX-2 | 58.4 | 57.7 | 24.9 | 12.7 |
+| Wan 2.1 14B | 56.2 | 52.0 | 33.7 | 13.6 |
+| Wan 2.2 A14B | 57.3 | — | 49.3 | 17.5 |
+| Qwen-Image | 63.2 | 54.5 | 18.3 | 10.7 |
+| HunyuanVideo | 144.4 | 159.7 | 47.6 | 27.8 |
 | HunyuanVideo-1.5 | stub | — | OOM | 439.1 |
 
-Trainium warm is with presharding on; the trn3 column is its clean ON arm with the
-jemalloc allocator preloaded (default-on load path — see [trn3/RESULTS.md](trn3/RESULTS.md)).
+Both Trainium columns are **presharding + jemalloc** default-on (jemalloc's per-thread arenas
+remove glibc arena/mmap-lock contention in the parallel load, ~2–5 s off warm; helps the
+host-staged LTX-2/HunyuanVideo most). The two biggest models (LTX-2 86 GB, HunyuanVideo) are
+page-cache-noisy warm — these are medians of properly-warmed runs. See
+[trn2/RESULTS.md](trn2/RESULTS.md) / [trn3/RESULTS.md](trn3/RESULTS.md).
 HunyuanVideo-1.5
 runs only on B300 (480×848×121 peaks at 99.2 GB — over the 80 GB H100; trn2/trn3 stub).
 
