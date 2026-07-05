@@ -160,7 +160,7 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
     """Ring context-parallel self-attention via nkilib ring_attention_spmd_fwd.
 
     q,k,v: [B, H, S_local, d] (per-rank head shard). Returns [B, H, S_local, d].
-    The ring membership IS the data-parallel group the model scattered Q with,
+    The ring membership IS the cp-axis subgroup the model scattered Q with,
     so K/V rotate consistently with the scatter by construction.
     """
     if ring_attention_spmd_fwd is None:
@@ -169,13 +169,10 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
             f"(import failed: {_RING_IMPORT_ERROR!r}). Upgrade neuronx-cc / nkilib, or "
             "use cp_mode=gather_kv."
         )
-    from neuronx_distributed.parallel_layers.parallel_state import (
-        get_data_parallel_group,
-        get_data_parallel_size,
-    )
+    from difflet.backends.trainium.core.parallel_mesh import get_cp_mesh
 
-    mesh = get_data_parallel_group(as_list=True)  # List[List[int]] of global ranks
-    num_workers = get_data_parallel_size()
+    mesh = get_cp_mesh()  # List[List[int]] of global ranks, one ring per cp group
+    num_workers = len(mesh[0])
     replica_groups = tuple(tuple(int(r) for r in grp) for grp in mesh)
 
     # Launch with the LNC2 1D SPMD grid under virtual-core-size 2 (same as
@@ -282,10 +279,8 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float, c
         )
 
     import torch_xla.core.xla_model as xm
-    from neuronx_distributed.parallel_layers.parallel_state import (
-        get_data_parallel_group,
-        get_data_parallel_size,
-    )
+
+    from difflet.backends.trainium.core.parallel_mesh import get_cp_mesh
 
     b, h, s_q, d = q.shape
     bs = b * h
@@ -301,8 +296,8 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float, c
     vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
     cte = attention_cte[2] if vc_size == 2 else attention_cte
 
-    mesh = get_data_parallel_group(as_list=True)  # List[List[int]] of global ranks
-    num_workers = get_data_parallel_size()
+    mesh = get_cp_mesh()  # List[List[int]] of global ranks, one ring per cp group
+    num_workers = len(mesh[0])
 
     # collective_permute ring step: each rank sends its current K,V to the next
     # member of its cp group (g[i] -> g[i+1]), so after a hop every rank holds the

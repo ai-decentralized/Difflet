@@ -116,7 +116,7 @@ def test_attention_wrapper_sharded_without_swap():
 
 def test_split_along_dim_identity_on_cpu():
     x = torch.randn(2, 4, DIM)
-    out = mf.split_along_dim(x, dim=1, rank=0, data_parallel_group=None)
+    out = mf.split_along_dim(x, dim=1, rank=0, process_group=None)
     assert torch.equal(out, x)
 
 

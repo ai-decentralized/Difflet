@@ -73,16 +73,30 @@ def get_tp_rank() -> int:
     return 0
 
 
-def get_data_parallel_group():
-    return _SingleProcessGroup()
-
-
 def get_world_group():
     return _SingleProcessGroup()
 
 
-def get_dp_rank_spmd(*args, **kwargs):
-    del args, kwargs
+def init_parallel_mesh(config):
+    """Single-process CPU backend: the mesh is trivially (1, 1, 1, 1)."""
+    del config
+
+
+def get_cfg_group():
+    return _SingleProcessGroup()
+
+
+def get_cp_group():
+    return _SingleProcessGroup()
+
+
+def get_cfg_rank_spmd(global_rank):
+    del global_rank
+    return 0
+
+
+def get_cp_rank_spmd(global_rank):
+    del global_rank
     return 0
 
 
@@ -94,13 +108,16 @@ __all__ = [
     "gather_from_sequence_parallel_region",
     "gather_from_tensor_model_parallel_region_with_dim",
     "gather_tp_dim",
-    "get_data_parallel_group",
-    "get_dp_rank_spmd",
+    "get_cfg_group",
+    "get_cfg_rank_spmd",
+    "get_cp_group",
+    "get_cp_rank_spmd",
     "get_tensor_model_parallel_rank",
     "get_tensor_model_parallel_size",
     "get_tp_rank",
     "get_tp_size",
     "get_world_group",
+    "init_parallel_mesh",
     "reduce_from_tensor_model_parallel_region",
     "reduce_scatter_to_sequence_parallel_region",
     "reduce_tp",

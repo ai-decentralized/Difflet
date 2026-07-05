@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
+from difflet.pipeline.parallel_mesh import MeshSpec
+
 
 @dataclass(frozen=True)
 class DiffletParallelConfig:
-    """Tensor, context, and CFG parallel settings.
+    """Tensor, context, CFG, and data parallel settings.
 
     Context parallelism is configured via ``cp_degree`` (1 = disabled) and
     ``cp_mode`` selects the CP attention strategy (``"gather_kv"`` default, or
@@ -30,12 +32,15 @@ class DiffletParallelConfig:
     cfg_parallel_enabled: bool = False
     cp_mode: str = "gather_kv"
     sp_enabled: bool = False
+    dp_degree: int = 1
 
     def __post_init__(self) -> None:
         if self.tp_degree < 1:
             raise ValueError("tp_degree must be >= 1")
         if self.cp_degree < 1:
             raise ValueError("cp_degree must be >= 1")
+        if self.dp_degree < 1:
+            raise ValueError("dp_degree must be >= 1")
         if self.cp_degree > 1 and self.cfg_parallel_enabled:
             raise ValueError("cp_degree > 1 and cfg_parallel_enabled are mutually exclusive")
         if self.cp_mode not in ("gather_kv", "ring"):
@@ -46,21 +51,32 @@ class DiffletParallelConfig:
             raise ValueError("sp_enabled and cp_degree > 1 are mutually exclusive")
 
     @property
+    def mesh_spec(self) -> MeshSpec:
+        """The orthogonal {dp, cfg, cp, tp} device-mesh spec for this config."""
+        return MeshSpec(
+            dp=self.dp_degree,
+            cfg=2 if self.cfg_parallel_enabled else 1,
+            cp=self.cp_degree,
+            tp=self.tp_degree,
+        )
+
+    @property
     def world_size(self) -> int:
         # Megatron-style SP reuses the tensor-parallel group; it does not add a
         # new world-size axis, so it never appears in this product.
-        cfg_multiplier = 2 if self.cfg_parallel_enabled else 1
-        return self.tp_degree * self.cp_degree * cfg_multiplier
+        return self.mesh_spec.world_size
 
     def to_cache_dict(self) -> dict[str, object]:
-        # Additive-only: omit cp_mode at its default and sp_enabled when off so a
-        # default config keeps a compile-cache key byte-identical to every
-        # pre-cp_mode / pre-sp model cache.
+        # Additive-only: omit cp_mode at its default, sp_enabled when off, and
+        # dp_degree at 1 so a default config keeps a compile-cache key
+        # byte-identical to every pre-cp_mode / pre-sp / pre-dp model cache.
         d = asdict(self)
         if self.cp_mode == "gather_kv":
             d.pop("cp_mode")
         if not self.sp_enabled:
             d.pop("sp_enabled")
+        if self.dp_degree == 1:
+            d.pop("dp_degree")
         return d
 
 

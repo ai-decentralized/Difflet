@@ -19,10 +19,11 @@ from difflet.ops import (
     SPMDRank,
     attention,
     gather_from_tensor_model_parallel_region_with_dim,
-    get_data_parallel_group,
-    get_dp_rank_spmd,
+    get_cp_group,
+    get_cp_rank_spmd,
     get_tensor_model_parallel_size,
     get_world_group,
+    init_parallel_mesh,
     joint_ring_attention,
     scatter_to_process_group_spmd,
 )
@@ -140,7 +141,7 @@ class _StaticQwenImageRealRope(nn.Module):
         txt_rope: tuple[torch.Tensor, torch.Tensor],
         context_parallel_enabled: bool = False,
         global_rank: SPMDRank | None = None,
-        data_parallel_group=None,
+        cp_group=None,
     ) -> None:
         super().__init__()
         self.register_buffer("img_cos", img_rope[0], persistent=False)
@@ -152,21 +153,18 @@ class _StaticQwenImageRealRope(nn.Module):
         # (it is owned by the trace module so the state dict has a single
         # ``global_rank.rank`` key).
         self._global_rank_ref = (global_rank,) if global_rank is not None else ()
-        self.data_parallel_group = data_parallel_group
+        self.cp_group = cp_group
 
     def forward(self, *args, **kwargs):
         del args, kwargs
         img_cos, img_sin = self.img_cos, self.img_sin
         if self.context_parallel_enabled:
-            dp_rank = get_dp_rank_spmd(
-                global_rank=self._global_rank_ref[0].get_rank(),
-                tp_degree=get_tensor_model_parallel_size(),
-            )
+            cp_rank = get_cp_rank_spmd(self._global_rank_ref[0].get_rank())
             img_cos = scatter_to_process_group_spmd(
-                img_cos, partition_dim=0, rank=dp_rank, process_group=self.data_parallel_group
+                img_cos, partition_dim=0, rank=cp_rank, process_group=self.cp_group
             )
             img_sin = scatter_to_process_group_spmd(
-                img_sin, partition_dim=0, rank=dp_rank, process_group=self.data_parallel_group
+                img_sin, partition_dim=0, rank=cp_rank, process_group=self.cp_group
             )
         return (img_cos, img_sin), (self.txt_cos, self.txt_sin)
 
@@ -311,11 +309,11 @@ class _QwenImageTrainiumAttnProcessor:
         self,
         *,
         context_parallel_enabled: bool = False,
-        data_parallel_group=None,
+        cp_group=None,
         cp_mode: str = "gather_kv",
     ) -> None:
         self.context_parallel_enabled = context_parallel_enabled
-        self.data_parallel_group = data_parallel_group
+        self.cp_group = cp_group
         self.cp_mode = cp_mode
 
     def __call__(
@@ -392,7 +390,7 @@ class _QwenImageTrainiumAttnProcessor:
             if self.context_parallel_enabled:
                 stacked_kv = torch.stack([img_key, img_value], dim=0)  # [2, B, S/cp, H, d]
                 stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
-                    stacked_kv, gather_dim=2, process_group=self.data_parallel_group
+                    stacked_kv, gather_dim=2, process_group=self.cp_group
                 )  # [2, B, S, H, d]
                 img_key, img_value = torch.unbind(stacked_kv, dim=0)
 
@@ -464,10 +462,14 @@ class _QwenImageTransformerTraceModule(nn.Module):
         self.context_parallel_enabled = bool(getattr(config, "context_parallel_enabled", False))
         self.cp_mode = str(getattr(config, "cp_mode", "gather_kv"))
         if self.context_parallel_enabled:
-            self.data_parallel_group = get_data_parallel_group()
+            # CP scatters RoPE/KV over the cp axis subgroup; the mesh must be
+            # initialized before the rope module / attention processors below
+            # capture the group reference.
+            init_parallel_mesh(config)
+            self.cp_group = get_cp_group()
             self.global_rank = SPMDRank(world_size=get_world_group().size())
         else:
-            self.data_parallel_group = None
+            self.cp_group = None
             self.global_rank = None
         self.img_shapes = [[(1, int(config.packed_height), int(config.packed_width))]]
         self.transformer = QwenImageTransformer2DModel(
@@ -495,12 +497,12 @@ class _QwenImageTransformerTraceModule(nn.Module):
             txt_rope=_qwen_complex_rope_to_real(txt_freqs),
             context_parallel_enabled=self.context_parallel_enabled,
             global_rank=self.global_rank,
-            data_parallel_group=self.data_parallel_group,
+            cp_group=self.cp_group,
         )
         for block in self.transformer.transformer_blocks:
             block.attn.processor = _QwenImageTrainiumAttnProcessor(
                 context_parallel_enabled=self.context_parallel_enabled,
-                data_parallel_group=self.data_parallel_group,
+                cp_group=self.cp_group,
                 cp_mode=self.cp_mode,
             )
 
@@ -520,20 +522,17 @@ class _QwenImageTransformerTraceModule(nn.Module):
         guidance_arg = guidance if self.guidance_embeds else None
 
         # Context parallel: scatter the image tokens along the sequence axis
-        # across the CP (data-parallel) group before the diffusers forward. The
+        # across the cp axis subgroup before the diffusers forward. The
         # static RoPE scatters the matching image rope, the attention processor
         # gathers image K/V, and we gather the packed output back below. Text
         # tokens stay replicated, so encoder_hidden_states is left full.
         if self.context_parallel_enabled:
-            dp_rank = get_dp_rank_spmd(
-                global_rank=self.global_rank.get_rank(),
-                tp_degree=get_tensor_model_parallel_size(),
-            )
+            cp_rank = get_cp_rank_spmd(self.global_rank.get_rank())
             hidden_states = scatter_to_process_group_spmd(
                 hidden_states,
                 partition_dim=1,
-                rank=dp_rank,
-                process_group=self.data_parallel_group,
+                rank=cp_rank,
+                process_group=self.cp_group,
             )
 
         output = self.transformer(
@@ -548,7 +547,7 @@ class _QwenImageTransformerTraceModule(nn.Module):
 
         if self.context_parallel_enabled:
             output = gather_from_tensor_model_parallel_region_with_dim(
-                output, gather_dim=1, process_group=self.data_parallel_group
+                output, gather_dim=1, process_group=self.cp_group
             )
         return output
 
