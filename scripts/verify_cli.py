@@ -107,8 +107,9 @@ MODELS: dict[str, ModelSpec] = {
         shape_flags=("--height", "480", "--width", "832", "--num-frames", "9"),
         prompt="a cat walking through a garden",
         output_name="wan21.mp4", artifact_names=("wan21.mp4", "wan21.pt"), staged=True,
-        # Wan 2.2 / 2.1 share staged compiled-dir names (wan.py _stage_compiled_dir
-        # has no model version in the name) — isolate wan2_1's artifacts.
+        # Isolate wan2_1's compiled artifacts: pre-fix difflet installs shared
+        # staged compiled-dir names between Wan 2.2 and 2.1 (fixed by
+        # wan.py _cache_prefix); harmless belt-and-braces on fixed installs.
         cache_dir=str(_DIFFLET_CACHE / "wan2_1"),
     ),
     "hunyuan_video": ModelSpec(
