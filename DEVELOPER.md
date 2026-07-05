@@ -152,16 +152,22 @@ Override the cache root with the `DIFFLET_COMPILE_CACHE` environment variable, `
 
 ## Parallelism
 
-`DiffletParallelConfig` exposes three parallelism axes:
+`DiffletParallelConfig` exposes four orthogonal parallelism axes, organized as a named device
+mesh `{dp, cfg, cp, tp}` (tp innermost, dp outermost):
 
 - `tp_degree` — tensor-parallel degree (must divide the visible NeuronCore count).
-- `cp_degree` — context-parallel degree (1 = disabled); `world_size` becomes
-  `tp_degree * cp_degree`. The attention strategy is selectable with `cp_mode`
-  (`gather_kv` or `ring`).
-- `cfg_parallel_enabled` — splits the CFG conditional/unconditional batch; doubles `world_size`
-  to `tp_degree * 2`. Mutually exclusive with `cp_degree > 1`, and only valid for true-CFG
-  models (Flux, Wan, LTX-2) — guidance-distilled models (HunyuanVideo, Qwen-Image) run a single
-  forward pass and reject it.
+- `cp_degree` — context-parallel degree (1 = disabled); the attention strategy is selectable
+  with `cp_mode` (`gather_kv` or `ring`).
+- `cfg_parallel_enabled` — splits the CFG conditional/unconditional batch across a cfg axis of
+  size 2. Mutually exclusive with `cp_degree > 1` at the pipeline level, and only valid for
+  true-CFG models (Wan, LTX-2) — guidance-distilled models (Flux, HunyuanVideo, HunyuanVideo
+  1.5, Qwen-Image) run a single forward pass and reject it.
+- `dp_degree` — data-parallel replica axis (reserved: groups exist, the replication feature is
+  not wired yet). The dp axis carries **no** per-layer/per-step collective — enforced by
+  `tests/unit/test_no_dp_parasites.py`.
+
+`world_size` is always the product `dp * cfg * cp * tp`, with
+`rank = tp + T*(cp + C*(cfg + G*dp))`:
 
 ```python
 DiffletParallelConfig(tp_degree=4)                          # world_size=4
@@ -169,6 +175,19 @@ DiffletParallelConfig(tp_degree=4, cfg_parallel_enabled=1)  # world_size=8
 DiffletParallelConfig(tp_degree=4, cp_degree=2)             # world_size=8
 DiffletParallelConfig(tp_degree=4, cp_degree=4)             # world_size=16
 ```
+
+The mesh math (rank ↔ coords mapping, per-axis subgroup meshes) lives in
+`difflet/pipeline/parallel_mesh.py` (`MeshSpec`, exposed as
+`DiffletParallelConfig.mesh_spec`). On Trainium,
+`difflet/backends/trainium/core/parallel_mesh.py` materializes one process group per
+non-trivial axis (`init_parallel_mesh(config)`, `get_cfg_group()`, `get_cp_group()`,
+`get_cfg_rank_spmd()`, `get_cp_rank_spmd()`, reachable via `difflet.ops`). Model code must use
+its own axis's group for every collective: the CFG cond/uncond merge fires on the cfg group,
+CP sequence scatters/gathers and ring K/V rotation on the cp group, TP/SP on NxD's
+tensor-parallel group. NxD's legacy `get_data_parallel_group` is no longer part of the ops
+surface. The migration is bit-exact: `scripts/mesh_regression_smoke.sh` compiles and runs the
+Wan backbone at `tp=2×cfg=2` and `tp=2×cp=2` against the pre-refactor baseline and asserts
+byte-identical outputs on device.
 
 On the 4-core `trn2.3xlarge`, the CP-capable models use `tp=2 cp=2` (world size 4); LTX-2 and
 HunyuanVideo 1.5 do not support CP and use `tp=4`.
