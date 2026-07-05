@@ -7,6 +7,7 @@ Inter-stage tensor: {work_dir}/latents.pt
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -21,6 +22,19 @@ from difflet.cli.orchestrators.base import ModelOrchestrator
 _MODEL_TYPE = "wan"
 _CLI_NAME = "wan"
 _VIRTUAL_CORE_SIZE = None  # Wan does not require NEURON_RT_VIRTUAL_CORE_SIZE
+
+# The historical model id keeps the bare "wan" compiled-dir prefix so existing
+# compile caches stay valid (additive-only, same policy as
+# DiffletParallelConfig.to_cache_dict).
+_LEGACY_CACHE_PREFIX_MODEL_ID = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
+
+
+def _cache_prefix(model_id: str) -> str:
+    """Per-model compiled-dir prefix: two Wan versions must never share
+    artifacts (same architecture, different weights)."""
+    if model_id == _LEGACY_CACHE_PREFIX_MODEL_ID:
+        return "wan"
+    return re.sub(r"[^a-z0-9]+", "_", model_id.split("/")[-1].lower()).strip("_")
 
 
 def _save_video(tensor: "torch.Tensor", output_path: str) -> bool:
@@ -209,6 +223,7 @@ class WanOrchestrator(ModelOrchestrator):
 
     def _stage_compiled_dir(self, stage: str, args: argparse.Namespace) -> Path:
         base = Path(args.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
+        prefix = _cache_prefix(self.args.model_id)
         tp = args.tp_degree or 4
         cp = args.cp_degree or 1
         cfg = "cfg" if getattr(args, "cfg_parallel", False) else ""
@@ -217,9 +232,9 @@ class WanOrchestrator(ModelOrchestrator):
         w = args.width or 832
         f = args.num_frames or 9
         if stage == "transformer":
-            return base / f"wan_transformer_tp{tp}cp{cp}{cfg}{sp}_h{h}w{w}f{f}"
+            return base / f"{prefix}_transformer_tp{tp}cp{cp}{cfg}{sp}_h{h}w{w}f{f}"
         if stage == "vae":
-            return base / f"wan_vae_h{h}w{w}f{f}"
+            return base / f"{prefix}_vae_h{h}w{w}f{f}"
         raise ValueError(f"unknown stage {stage!r}")
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
