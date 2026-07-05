@@ -413,3 +413,109 @@ def test_first_tensor_and_pair_branches():
     assert m._first_tensor_pair((v, a)) == (v, a)
     with pytest.raises(TypeError, match="Could not extract tensor pair"):
         m._first_tensor_pair(object())
+
+
+# --------------------------------------------------------------------------- #
+# dense (non-cfg-parallel) CFG must fit the compiled batch-1 graph
+# --------------------------------------------------------------------------- #
+class _BatchContractTransformer:
+    """Fake DiT that enforces the compiled graph's batch contract and returns
+    a velocity equal to the mean of encoder_hidden_states (0 for the uncond
+    half, 1 for the cond half of a doubled bundle)."""
+
+    dtype = torch.float32
+
+    def __init__(self, *, max_batch, cfg_parallel_enabled=False):
+        self.max_batch = max_batch
+        self.cfg_parallel_enabled = cfg_parallel_enabled
+        self.calls = []
+
+    def __call__(self, bundle):
+        assert bundle.hidden_states.shape[0] <= self.max_batch, (
+            f"DiT called with batch {bundle.hidden_states.shape[0]}, "
+            f"compiled for {self.max_batch}"
+        )
+        self.calls.append(bundle)
+        v = bundle.encoder_hidden_states.mean(dim=(1, 2), keepdim=True)
+        return (
+            torch.ones_like(bundle.hidden_states) * v,
+            torch.ones_like(bundle.audio_hidden_states) * v,
+        )
+
+
+def _doubled_cfg_bundle(latents, audio_latents):
+    """The batch-2 (uncond+cond) bundle _denoise assembles when do_cfg."""
+    enc = torch.cat([torch.zeros((1, 5, 32)), torch.ones((1, 5, 32))])
+    audio_enc = torch.cat([torch.zeros((1, 5, 32)), torch.ones((1, 5, 32))])
+    return LTX2DiTInputBundle(
+        hidden_states=torch.cat([latents] * 2),
+        audio_hidden_states=torch.cat([audio_latents] * 2),
+        encoder_hidden_states=enc,
+        audio_encoder_hidden_states=audio_enc,
+        timestep=torch.zeros([2]),
+        sigma=torch.zeros([2]),
+        encoder_attention_mask=torch.ones((2, 5), dtype=torch.bool),
+        audio_encoder_attention_mask=torch.ones((2, 5), dtype=torch.bool),
+        video_coords=torch.zeros((2, 3, latents.shape[1], 2)),
+        audio_coords=torch.zeros((2, 1, audio_latents.shape[1], 2)),
+    )
+
+
+def _full_dit_step_kwargs(latents, audio_latents):
+    return dict(
+        model_bundle=_doubled_cfg_bundle(latents, audio_latents),
+        latents=latents,
+        audio_latents=audio_latents,
+        video_sigma=torch.ones(()),
+        audio_sigma=torch.ones(()),
+        do_cfg=True,
+        do_stg=False,
+        do_modality=False,
+        guidance_scale=4.0,
+        audio_guidance_scale=4.0,
+        stg_scale=0.0,
+        audio_stg_scale=0.0,
+        modality_scale=1.0,
+        audio_modality_scale=1.0,
+        spatio_temporal_guidance_blocks=None,
+        use_cross_timestep=False,
+        attention_kwargs=None,
+    )
+
+
+def test_full_dit_step_dense_cfg_uses_two_batch1_passes(tmp_path):
+    # Without cfg-parallel the compiled DiT graph is batch-1; dense CFG must
+    # run uncond and cond sequentially instead of feeding a batch-2 bundle.
+    latents = torch.zeros((1, 6, 128))
+    audio_latents = torch.zeros((1, 4, 128))
+    transformer = _BatchContractTransformer(max_batch=1)
+    pipe = _orch(tmp_path, transformer=transformer)
+
+    video_x0, audio_x0, video_cond_x0, audio_cond_x0 = pipe._full_dit_step(
+        **_full_dit_step_kwargs(latents, audio_latents)
+    )
+
+    assert len(transformer.calls) == 2
+    # uncond half (zeros) first, cond half (ones) second — chunk(2) order
+    assert float(transformer.calls[0].encoder_hidden_states.mean()) == 0.0
+    assert float(transformer.calls[1].encoder_hidden_states.mean()) == 1.0
+    # x0 = latents - v*sigma = -v; CFG: cond + 3*(cond - uncond) = -1 + 3*(-1)
+    assert torch.allclose(video_x0, torch.full_like(latents, -4.0))
+    assert torch.allclose(audio_x0, torch.full_like(audio_latents, -4.0))
+    assert torch.allclose(video_cond_x0, torch.full_like(latents, -1.0))
+    assert torch.allclose(audio_cond_x0, torch.full_like(audio_latents, -1.0))
+
+
+def test_full_dit_step_cfg_parallel_keeps_single_batch2_call(tmp_path):
+    # CFG-parallel graphs are compiled batch-2 (one branch per data-parallel
+    # rank) and must keep receiving the doubled bundle in one call.
+    latents = torch.zeros((1, 6, 128))
+    audio_latents = torch.zeros((1, 4, 128))
+    transformer = _BatchContractTransformer(max_batch=2, cfg_parallel_enabled=True)
+    pipe = _orch(tmp_path, transformer=transformer)
+
+    video_x0, _, _, _ = pipe._full_dit_step(**_full_dit_step_kwargs(latents, audio_latents))
+
+    assert len(transformer.calls) == 1
+    assert transformer.calls[0].hidden_states.shape[0] == 2
+    assert torch.allclose(video_x0, torch.full_like(latents, -4.0))
