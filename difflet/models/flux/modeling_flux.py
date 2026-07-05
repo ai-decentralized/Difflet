@@ -54,11 +54,14 @@ from difflet.ops import (
     attention,
     gather_from_sequence_parallel_region,
     gather_from_tensor_model_parallel_region_with_dim,
-    get_data_parallel_group,
-    get_dp_rank_spmd,
+    get_cfg_group,
+    get_cfg_rank_spmd,
+    get_cp_group,
+    get_cp_rank_spmd,
     get_platform_target,
     get_tensor_model_parallel_size,
     get_world_group,
+    init_parallel_mesh,
     hardware,
     reduce_from_tensor_model_parallel_region,
     reduce_scatter_to_sequence_parallel_region,
@@ -242,12 +245,21 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
         super().__init__()
         self.config = config
 
-        self.data_parallel_group = get_data_parallel_group()
-        self.global_rank = SPMDRank(world_size=get_world_group().size())
-
         self.context_parallel_enabled = getattr(self.config, 'context_parallel_enabled', False)
         self.cp_mode = getattr(self.config, 'cp_mode', 'gather_kv')
         self.cfg_parallel_enabled = getattr(self.config, 'cfg_parallel_enabled', False)
+        # The SPMD rank buffer stays unconditional: Megatron-SP's sequence
+        # scatter and the checkpoint converter (global_rank.rank arange) rely
+        # on it even when CFG/CP are off.
+        self.global_rank = SPMDRank(world_size=get_world_group().size())
+        # CFG parallel scatters the batch dim (uncond/cond) over the cfg axis;
+        # CP scatters the sequence dim over the cp axis. Axis groups exist only
+        # when the axis is actually enabled — no cfg group for the (distilled,
+        # CLI-blocked) default, no cp group without context parallelism.
+        if self.context_parallel_enabled or self.cfg_parallel_enabled:
+            init_parallel_mesh(self.config)
+        self.cfg_group = get_cfg_group() if self.cfg_parallel_enabled else None
+        self.cp_group = get_cp_group() if self.context_parallel_enabled else None
         # Megatron-style sequence parallelism reuses the TP group; it is mutually
         # exclusive with CP (both shard the sequence dimension).
         self.sp_enabled = getattr(self.config, 'sp_enabled', False)
@@ -414,44 +426,40 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
             assert timestep.shape[0] == 2, \
                 f"CFG parallel expects batch_size=2, got timestep.shape[0]={timestep.shape[0]}"
 
-        dp_rank = get_dp_rank_spmd(
-            global_rank=self.global_rank.get_rank(),
-            tp_degree=get_tensor_model_parallel_size(),
-        )
-
-        # CFG Parallel: scatter inputs along batch dimension
+        # CFG Parallel: scatter inputs along batch dimension over the cfg axis
         if self.cfg_parallel_enabled and hidden_states.shape[0] == 2:
+            cfg_rank = get_cfg_rank_spmd(self.global_rank.get_rank())
             # Scatter inputs (each rank gets either negative OR positive)
             hidden_states = scatter_to_process_group_spmd(
                 hidden_states,
                 partition_dim=0,
-                rank=dp_rank,
-                process_group=self.data_parallel_group,
+                rank=cfg_rank,
+                process_group=self.cfg_group,
             )
             encoder_hidden_states = scatter_to_process_group_spmd(
                 encoder_hidden_states,
                 partition_dim=0,
-                rank=dp_rank,
-                process_group=self.data_parallel_group,
+                rank=cfg_rank,
+                process_group=self.cfg_group,
             )
             pooled_projections = scatter_to_process_group_spmd(
                 pooled_projections,
                 partition_dim=0,
-                rank=dp_rank,
-                process_group=self.data_parallel_group,
+                rank=cfg_rank,
+                process_group=self.cfg_group,
             )
             timestep = scatter_to_process_group_spmd(
                 timestep,
                 partition_dim=0,
-                rank=dp_rank,
-                process_group=self.data_parallel_group,
+                rank=cfg_rank,
+                process_group=self.cfg_group,
             )
             if guidance is not None and guidance.numel() > 0:
                 guidance = scatter_to_process_group_spmd(
                     guidance,
                     partition_dim=0,
-                    rank=dp_rank,
-                    process_group=self.data_parallel_group,
+                    rank=cfg_rank,
+                    process_group=self.cfg_group,
                 )
 
             # Assert scatter worked correctly for all inputs
@@ -493,25 +501,26 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
         rotary_emb_text = None
         rotary_emb_image = None
 
-        # scatter inputs to DP group for context parallel
+        # scatter inputs to the cp axis subgroup for context parallel
         if self.context_parallel_enabled:
+            cp_rank = get_cp_rank_spmd(self.global_rank.get_rank())
             # TODO: see if rotary split can only be done in one denoising step and reuse
             rotary_emb_text = image_rotary_emb[: encoder_hidden_states.shape[1]]
             rotary_emb_image = image_rotary_emb[encoder_hidden_states.shape[1] :]
             rotary_emb_text = split_along_dim(
-                rotary_emb_text, dim=0, rank=dp_rank, data_parallel_group=self.data_parallel_group
+                rotary_emb_text, dim=0, rank=cp_rank, process_group=self.cp_group
             )
             rotary_emb_image = split_along_dim(
-                rotary_emb_image, dim=0, rank=dp_rank, data_parallel_group=self.data_parallel_group
+                rotary_emb_image, dim=0, rank=cp_rank, process_group=self.cp_group
             )
             hidden_states = split_along_dim(
-                hidden_states, dim=1, rank=dp_rank, data_parallel_group=self.data_parallel_group
+                hidden_states, dim=1, rank=cp_rank, process_group=self.cp_group
             )
             encoder_hidden_states = split_along_dim(
                 encoder_hidden_states,
                 dim=1,
-                rank=dp_rank,
-                data_parallel_group=self.data_parallel_group,
+                rank=cp_rank,
+                process_group=self.cp_group,
             )
 
         hidden_states, encoder_hidden_states = ModuleMarkerStartWrapper()(
@@ -594,14 +603,14 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
         # the full sequence and `output` is already the full image sequence.
 
         if self.cfg_parallel_enabled:
-            # CFG Parallel: gather outputs along batch dimension
+            # CFG Parallel: gather outputs along batch dimension (cfg axis)
             output = gather_from_tensor_model_parallel_region_with_dim(
-                output, gather_dim=0, process_group=self.data_parallel_group
+                output, gather_dim=0, process_group=self.cfg_group
             )
         elif self.context_parallel_enabled:
-            # Context Parallel: gather outputs along sequence dimension
+            # Context Parallel: gather outputs along sequence dimension (cp axis)
             output = gather_from_tensor_model_parallel_region_with_dim(
-                output, gather_dim=1, process_group=self.data_parallel_group
+                output, gather_dim=1, process_group=self.cp_group
             )
 
         return output
@@ -1025,8 +1034,8 @@ class NeuronFluxAttention(nn.Module):
     ):
         super().__init__()
 
-        self.data_parallel_group = get_data_parallel_group()
         self.context_parallel_enabled = context_parallel_enabled
+        self.cp_group = get_cp_group() if context_parallel_enabled else None
         self.cp_mode = cp_mode
         self.sp_enabled = sp_enabled
         self.query_dim = query_dim
@@ -1324,7 +1333,7 @@ class NeuronFluxAttention(nn.Module):
                     stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
                         stacked_kv,
                         gather_dim=3,
-                        process_group=self.data_parallel_group,
+                        process_group=self.cp_group,
                     )
                     key, value = torch.unbind(stacked_kv, dim=0)
                     # gather k and v - [B, H, S, D]
@@ -1335,7 +1344,7 @@ class NeuronFluxAttention(nn.Module):
                     stacked_kv_enc = gather_from_tensor_model_parallel_region_with_dim(
                         stacked_kv_enc,
                         gather_dim=3,
-                        process_group=self.data_parallel_group,
+                        process_group=self.cp_group,
                     )
                     encoder_hidden_states_key_proj, encoder_hidden_states_value_proj = torch.unbind(
                         stacked_kv_enc, dim=0
@@ -1356,7 +1365,7 @@ class NeuronFluxAttention(nn.Module):
                 stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
                     stacked_kv,
                     gather_dim=3,
-                    process_group=self.data_parallel_group,
+                    process_group=self.cp_group,
                 )
                 key, value = torch.unbind(stacked_kv, dim=0)
             else:
@@ -1367,11 +1376,11 @@ class NeuronFluxAttention(nn.Module):
                             "cp_mode='ring' is not supported on TRN1; falling back to gather-KV attention."
                         )
                     key = gather_from_tensor_model_parallel_region_with_dim(
-                        key, gather_dim=2, process_group=self.data_parallel_group
+                        key, gather_dim=2, process_group=self.cp_group
                     )
                     # V is [B, S, H, d], gather along seqlen (dim=1), then transpose to [B, H, S, d]
                     value = gather_from_tensor_model_parallel_region_with_dim(
-                        value, gather_dim=1, process_group=self.data_parallel_group
+                        value, gather_dim=1, process_group=self.cp_group
                     )
                     value = value.transpose(1, 2)
                     hidden_states = F.scaled_dot_product_attention(
@@ -1387,7 +1396,7 @@ class NeuronFluxAttention(nn.Module):
                 else:
                     # Removed all_gather from here and moved it inside the context parallel attention kernel wrapper.
                     hidden_states = attention_wrapper_context_parallel_single_transformer(
-                        query, key, value, self.data_parallel_group
+                        query, key, value, self.cp_group
                     )
 
         # apply rotary for non CP case
@@ -1448,12 +1457,12 @@ class NeuronFluxAttention(nn.Module):
                 return hidden_states
 
 
-def split_along_dim(tensor, dim, rank, data_parallel_group):
+def split_along_dim(tensor, dim, rank, process_group):
     tensor = scatter_to_process_group_spmd(
         tensor,
         partition_dim=dim,
         rank=rank,
-        process_group=data_parallel_group,
+        process_group=process_group,
     )
     return tensor
 

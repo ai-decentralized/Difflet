@@ -19,10 +19,11 @@ from difflet.ops import (
     SPMDRank,
     attention as difflet_attention,
     gather_from_tensor_model_parallel_region_with_dim,
-    get_data_parallel_group,
-    get_dp_rank_spmd,
+    get_cfg_group,
+    get_cfg_rank_spmd,
     get_tensor_model_parallel_size,
     get_world_group,
+    init_parallel_mesh,
     reduce_from_tensor_model_parallel_region,
     scatter_to_process_group_spmd,
 )
@@ -548,7 +549,10 @@ class _LTX2TransformerTraceModule(nn.Module):
                     "LTX-2 CFG-parallel does not support perturbed_attn (STG); "
                     "disable spatio-temporal guidance when cfg_parallel_enabled."
                 )
-            self.data_parallel_group = get_data_parallel_group()
+            # The cfg axis is ONLY cond/uncond (size 2); STG was rejected above
+            # so no extra guidance branch can leak onto it.
+            init_parallel_mesh(config)
+            self.cfg_group = get_cfg_group()
             self.global_rank = SPMDRank(world_size=get_world_group().size())
 
         # Tensor-parallel sharding: only when a TP group is live (device compile).
@@ -583,15 +587,12 @@ class _LTX2TransformerTraceModule(nn.Module):
         # data-parallel rank denoises one branch at batch=1; the per-branch
         # outputs are gathered back into batch=2 below.
         if self.cfg_parallel_enabled:
-            dp_rank = get_dp_rank_spmd(
-                global_rank=self.global_rank.get_rank(),
-                tp_degree=get_tensor_model_parallel_size(),
-            )
+            cfg_rank = get_cfg_rank_spmd(self.global_rank.get_rank())
 
             def _scatter(t: torch.Tensor) -> torch.Tensor:
                 return scatter_to_process_group_spmd(
-                    t, partition_dim=0, rank=dp_rank,
-                    process_group=self.data_parallel_group,
+                    t, partition_dim=0, rank=cfg_rank,
+                    process_group=self.cfg_group,
                 )
 
             hidden_states = _scatter(hidden_states)
@@ -632,10 +633,10 @@ class _LTX2TransformerTraceModule(nn.Module):
 
         if self.cfg_parallel_enabled:
             video_out = gather_from_tensor_model_parallel_region_with_dim(
-                video_out, gather_dim=0, process_group=self.data_parallel_group,
+                video_out, gather_dim=0, process_group=self.cfg_group,
             )
             audio_out = gather_from_tensor_model_parallel_region_with_dim(
-                audio_out, gather_dim=0, process_group=self.data_parallel_group,
+                audio_out, gather_dim=0, process_group=self.cfg_group,
             )
         return video_out, audio_out
 

@@ -201,12 +201,18 @@ def test_collectives_scalars():
     assert cpu_col.get_tp_rank() == 0
     assert cpu_col.get_tensor_model_parallel_size() == 1
     assert cpu_col.get_tensor_model_parallel_rank() == 0
-    assert cpu_col.get_dp_rank_spmd() == 0
+    assert cpu_col.get_cfg_rank_spmd(0) == 0
+    assert cpu_col.get_cp_rank_spmd(0) == 0
 
 
 def test_collectives_process_groups():
-    assert cpu_col.get_data_parallel_group().size() == 1
+    assert cpu_col.init_parallel_mesh(object()) is None
+    assert cpu_col.get_cfg_group().size() == 1
+    assert cpu_col.get_cp_group().size() == 1
     assert cpu_col.get_world_group().size() == 1
+    # The dp-parasitic surface is gone: no model may reach a dp group via ops.
+    assert not hasattr(cpu_col, "get_data_parallel_group")
+    assert not hasattr(cpu_col, "get_dp_rank_spmd")
 
 
 def test_spmd_rank():

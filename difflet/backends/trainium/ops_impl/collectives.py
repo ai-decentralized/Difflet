@@ -14,13 +14,18 @@ from neuronx_distributed.parallel_layers.mappings import (
     scatter_to_tensor_model_parallel_region,
 )
 from neuronx_distributed.parallel_layers.parallel_state import (
-    get_data_parallel_group,
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_size,
     get_world_group,
 )
 
-from difflet.backends.trainium.utils.distributed import get_dp_rank_spmd
+from difflet.backends.trainium.core.parallel_mesh import (
+    get_cfg_group,
+    get_cfg_rank_spmd,
+    get_cp_group,
+    get_cp_rank_spmd,
+    init_parallel_mesh,
+)
 
 
 def gather_tp_dim(tensor, *, dim: int):
@@ -78,13 +83,16 @@ __all__ = [
     "gather_from_sequence_parallel_region",
     "gather_from_tensor_model_parallel_region_with_dim",
     "gather_tp_dim",
-    "get_data_parallel_group",
-    "get_dp_rank_spmd",
+    "get_cfg_group",
+    "get_cfg_rank_spmd",
+    "get_cp_group",
+    "get_cp_rank_spmd",
     "get_tensor_model_parallel_rank",
     "get_tensor_model_parallel_size",
     "get_tp_rank",
     "get_tp_size",
     "get_world_group",
+    "init_parallel_mesh",
     "reduce_from_tensor_model_parallel_region",
     "reduce_scatter_to_sequence_parallel_region",
     "reduce_tp",

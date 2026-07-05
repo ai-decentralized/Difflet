@@ -37,10 +37,11 @@ from difflet.ops import (
     attention,
     gather_from_sequence_parallel_region,
     gather_from_tensor_model_parallel_region_with_dim,
-    get_data_parallel_group,
-    get_dp_rank_spmd,
+    get_cp_group,
+    get_cp_rank_spmd,
     get_tensor_model_parallel_size,
     get_world_group,
+    init_parallel_mesh,
     joint_ring_attention,
     reduce_scatter_to_sequence_parallel_region,
     scatter_to_process_group_spmd,
@@ -328,9 +329,7 @@ class HunyuanVideoAttention(nn.Module):
         self.context_parallel_enabled = context_parallel_enabled
         self.cp_mode = cp_mode
         self.sp_enabled = sp_enabled
-        self.data_parallel_group = (
-            get_data_parallel_group() if context_parallel_enabled else None
-        )
+        self.cp_group = get_cp_group() if context_parallel_enabled else None
 
         tp_degree = get_tensor_model_parallel_size()
         if num_attention_heads % tp_degree != 0:
@@ -491,7 +490,7 @@ class HunyuanVideoAttention(nn.Module):
             if self.context_parallel_enabled:
                 stacked_kv = torch.stack([latent_k, latent_v], dim=0)  # [2, B, S/cp, H, d]
                 stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
-                    stacked_kv, gather_dim=2, process_group=self.data_parallel_group
+                    stacked_kv, gather_dim=2, process_group=self.cp_group
                 )  # [2, B, S, H, d]
                 latent_k, latent_v = torch.unbind(stacked_kv, dim=0)
 
@@ -1029,7 +1028,11 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                 "(both shard the sequence dimension)."
             )
         if context_parallel_enabled:
-            self.data_parallel_group = get_data_parallel_group()
+            # CP scatters the sequence dim over the cp axis subgroup. The mesh
+            # must be initialized before the transformer blocks are built —
+            # HunyuanVideoAttention grabs get_cp_group() in its own __init__.
+            init_parallel_mesh(config)
+            self.cp_group = get_cp_group()
             self.global_rank = SPMDRank(world_size=get_world_group().size())
         elif self.sp_enabled:
             # Megatron-SP reuses the TP group; for SP-only world_size == tp_degree,
@@ -1149,22 +1152,19 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         # intentionally built above with the full latent length so it still lines up
         # with the gathered K/V inside attention.
         if self.context_parallel_enabled:
-            dp_rank = get_dp_rank_spmd(
-                global_rank=self.global_rank.get_rank(),
-                tp_degree=get_tensor_model_parallel_size(),
-            )
+            cp_rank = get_cp_rank_spmd(self.global_rank.get_rank())
             hidden_states = scatter_to_process_group_spmd(
                 hidden_states,
                 partition_dim=1,
-                rank=dp_rank,
-                process_group=self.data_parallel_group,
+                rank=cp_rank,
+                process_group=self.cp_group,
             )
             cos, sin = image_rotary_emb
             cos = scatter_to_process_group_spmd(
-                cos, partition_dim=0, rank=dp_rank, process_group=self.data_parallel_group
+                cos, partition_dim=0, rank=cp_rank, process_group=self.cp_group
             )
             sin = scatter_to_process_group_spmd(
-                sin, partition_dim=0, rank=dp_rank, process_group=self.data_parallel_group
+                sin, partition_dim=0, rank=cp_rank, process_group=self.cp_group
             )
             image_rotary_emb = (cos, sin)
 
@@ -1221,7 +1221,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         # Context parallel: reassemble the full latent sequence before unpatching.
         if self.context_parallel_enabled:
             hidden_states = gather_from_tensor_model_parallel_region_with_dim(
-                hidden_states, gather_dim=1, process_group=self.data_parallel_group
+                hidden_states, gather_dim=1, process_group=self.cp_group
             )
 
         hidden_states = hidden_states.reshape(

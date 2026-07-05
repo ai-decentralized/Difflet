@@ -53,10 +53,13 @@ from difflet.ops import (
     attention,
     gather_from_sequence_parallel_region,
     gather_from_tensor_model_parallel_region_with_dim,
-    get_data_parallel_group,
-    get_dp_rank_spmd,
+    get_cfg_group,
+    get_cfg_rank_spmd,
+    get_cp_group,
+    get_cp_rank_spmd,
     get_tensor_model_parallel_size,
     get_world_group,
+    init_parallel_mesh,
     reduce_from_tensor_model_parallel_region,
     reduce_scatter_to_sequence_parallel_region,
     ring_attention,
@@ -416,7 +419,7 @@ class WanAttention(nn.Module):
         self.cp_mode = cp_mode
         self.sp_enabled = sp_enabled
         if context_parallel_enabled:
-            self.data_parallel_group = get_data_parallel_group()
+            self.cp_group = get_cp_group()
         inner_dim = heads * head_dim
         self.inner_dim = inner_dim
 
@@ -541,7 +544,7 @@ class WanAttention(nn.Module):
             if self.context_parallel_enabled and not self.is_cross_attention:
                 stacked_kv = torch.stack([k, v], dim=0)  # [2, B, heads, S/cp, head_dim]
                 stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
-                    stacked_kv, gather_dim=3, process_group=self.data_parallel_group
+                    stacked_kv, gather_dim=3, process_group=self.cp_group
                 )  # [2, B, heads, S, head_dim]
                 k, v = torch.unbind(stacked_kv, dim=0)
             out = _attn_kernel(q, k, v, head_dim=self.head_dim)
@@ -691,11 +694,18 @@ class WanTransformer3DModel(nn.Module):
                 "cfg_parallel_enabled and context_parallel_enabled are mutually "
                 "exclusive (both consume the data-parallel lanes)."
             )
-        # CFG parallel scatters the batch dim (uncond/cond), CP scatters the
-        # sequence dim; both ride the same data-parallel group + global rank.
+        # CFG parallel scatters the batch dim (uncond/cond) over the cfg axis;
+        # CP scatters the sequence dim over the cp axis. Each collective fires
+        # only in its own axis subgroup — the dp axis carries nothing here.
+        # init_parallel_mesh must run before self.blocks is built: WanAttention
+        # grabs get_cp_group() in its own __init__.
         if self.context_parallel_enabled or self.cfg_parallel_enabled:
-            self.data_parallel_group = get_data_parallel_group()
+            init_parallel_mesh(config)
             self.global_rank = SPMDRank(world_size=get_world_group().size())
+        if self.cfg_parallel_enabled:
+            self.cfg_group = get_cfg_group()
+        if self.context_parallel_enabled:
+            self.cp_group = get_cp_group()
 
         inner_dim = config.inner_dim
 
@@ -791,21 +801,18 @@ class WanTransformer3DModel(nn.Module):
             assert encoder_hidden_states.shape[0] == 2, (
                 f"CFG parallel expects batch_size=2, got {encoder_hidden_states.shape[0]}"
             )
-            dp_rank = get_dp_rank_spmd(
-                global_rank=self.global_rank.get_rank(),
-                tp_degree=get_tensor_model_parallel_size(),
-            )
+            cfg_rank = get_cfg_rank_spmd(self.global_rank.get_rank())
             hidden_states = scatter_to_process_group_spmd(
-                hidden_states, partition_dim=0, rank=dp_rank,
-                process_group=self.data_parallel_group,
+                hidden_states, partition_dim=0, rank=cfg_rank,
+                process_group=self.cfg_group,
             )
             timestep = scatter_to_process_group_spmd(
-                timestep, partition_dim=0, rank=dp_rank,
-                process_group=self.data_parallel_group,
+                timestep, partition_dim=0, rank=cfg_rank,
+                process_group=self.cfg_group,
             )
             encoder_hidden_states = scatter_to_process_group_spmd(
-                encoder_hidden_states, partition_dim=0, rank=dp_rank,
-                process_group=self.data_parallel_group,
+                encoder_hidden_states, partition_dim=0, rank=cfg_rank,
+                process_group=self.cfg_group,
             )
 
         bs, _, num_frames, height, width = hidden_states.shape
@@ -829,20 +836,17 @@ class WanTransformer3DModel(nn.Module):
             hidden_states = self._sp_seq_scatter(hidden_states, dim=1)
 
         if self.context_parallel_enabled:
-            dp_rank = get_dp_rank_spmd(
-                global_rank=self.global_rank.get_rank(),
-                tp_degree=get_tensor_model_parallel_size(),
-            )
+            cp_rank = get_cp_rank_spmd(self.global_rank.get_rank())
             hidden_states = scatter_to_process_group_spmd(
-                hidden_states, partition_dim=1, rank=dp_rank,
-                process_group=self.data_parallel_group,
+                hidden_states, partition_dim=1, rank=cp_rank,
+                process_group=self.cp_group,
             )
             cos, sin = rotary_emb
             cos = scatter_to_process_group_spmd(
-                cos, partition_dim=1, rank=dp_rank, process_group=self.data_parallel_group,
+                cos, partition_dim=1, rank=cp_rank, process_group=self.cp_group,
             )
             sin = scatter_to_process_group_spmd(
-                sin, partition_dim=1, rank=dp_rank, process_group=self.data_parallel_group,
+                sin, partition_dim=1, rank=cp_rank, process_group=self.cp_group,
             )
             rotary_emb = (cos, sin)
 
@@ -896,7 +900,7 @@ class WanTransformer3DModel(nn.Module):
 
         if self.context_parallel_enabled:
             hidden_states = gather_from_tensor_model_parallel_region_with_dim(
-                hidden_states, gather_dim=1, process_group=self.data_parallel_group,
+                hidden_states, gather_dim=1, process_group=self.cp_group,
             )
 
         hidden_states = hidden_states.reshape(bs, ppf, pph, ppw, p_t, p_h, p_w, -1)
@@ -907,7 +911,7 @@ class WanTransformer3DModel(nn.Module):
         # pipeline can apply the guidance formula on [uncond, cond].
         if self.cfg_parallel_enabled:
             output = gather_from_tensor_model_parallel_region_with_dim(
-                output, gather_dim=0, process_group=self.data_parallel_group,
+                output, gather_dim=0, process_group=self.cfg_group,
             )
         return output
 
