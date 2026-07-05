@@ -36,22 +36,30 @@ class FakeDualStreamTransformer:
 
 
 class FakeCfgTransformer:
+    """CFG fake for both contracts: a doubled batch (cfg-parallel graph) in
+    one call, or dense sequential batch-1 calls (uncond first, cond second)."""
+
     dtype = torch.float32
 
-    def __init__(self):
+    def __init__(self, *, cfg_parallel_enabled: bool = False):
+        self.cfg_parallel_enabled = cfg_parallel_enabled
         self.calls = []
 
     def __call__(self, bundle: LTX2DiTInputBundle):
         self.calls.append(bundle)
         batch = bundle.hidden_states.shape[0]
-        assert batch % 2 == 0
-        half = batch // 2
         video = torch.empty_like(bundle.hidden_states)
         audio = torch.empty_like(bundle.audio_hidden_states)
-        video[:half].fill_(0.25)
-        video[half:].fill_(1.0)
-        audio[:half].fill_(0.5)
-        audio[half:].fill_(2.0)
+        if batch % 2 == 0:
+            half = batch // 2
+            video[:half].fill_(0.25)
+            video[half:].fill_(1.0)
+            audio[:half].fill_(0.5)
+            audio[half:].fill_(2.0)
+        else:
+            cond = len(self.calls) % 2 == 0
+            video.fill_(1.0 if cond else 0.25)
+            audio.fill_(2.0 if cond else 0.5)
         return video, audio
 
 
@@ -63,7 +71,6 @@ class FakeRescaleCfgTransformer:
 
     def __call__(self, bundle: LTX2DiTInputBundle):
         self.calls.append(bundle)
-        assert bundle.hidden_states.shape[0] == 2
         video_pattern = torch.linspace(
             0.0,
             1.0,
@@ -78,8 +85,13 @@ class FakeRescaleCfgTransformer:
             dtype=bundle.audio_hidden_states.dtype,
             device=bundle.audio_hidden_states.device,
         ).reshape_as(bundle.audio_hidden_states[0])
-        video = torch.stack([torch.zeros_like(video_pattern), video_pattern], dim=0)
-        audio = torch.stack([torch.zeros_like(audio_pattern), audio_pattern], dim=0)
+        if bundle.hidden_states.shape[0] == 2:
+            video = torch.stack([torch.zeros_like(video_pattern), video_pattern], dim=0)
+            audio = torch.stack([torch.zeros_like(audio_pattern), audio_pattern], dim=0)
+        else:
+            cond = len(self.calls) % 2 == 0
+            video = (video_pattern if cond else torch.zeros_like(video_pattern)).unsqueeze(0)
+            audio = (audio_pattern if cond else torch.zeros_like(audio_pattern)).unsqueeze(0)
         return video, audio
 
 
@@ -89,6 +101,7 @@ class FakeExtraGuidanceTransformer:
 
     def __init__(self):
         self.calls = []
+        self.cfg_calls = 0
 
     def __call__(self, bundle: LTX2DiTInputBundle, **kwargs):
         self.calls.append((bundle, kwargs))
@@ -102,15 +115,20 @@ class FakeExtraGuidanceTransformer:
                 torch.ones_like(bundle.hidden_states) * 0.75,
                 torch.ones_like(bundle.audio_hidden_states) * 0.75,
             )
+        self.cfg_calls += 1
         batch = bundle.hidden_states.shape[0]
-        assert batch % 2 == 0
-        half = batch // 2
         video = torch.empty_like(bundle.hidden_states)
         audio = torch.empty_like(bundle.audio_hidden_states)
-        video[:half].fill_(0.25)
-        video[half:].fill_(1.0)
-        audio[:half].fill_(0.25)
-        audio[half:].fill_(1.0)
+        if batch % 2 == 0:
+            half = batch // 2
+            video[:half].fill_(0.25)
+            video[half:].fill_(1.0)
+            audio[:half].fill_(0.25)
+            audio[half:].fill_(1.0)
+        else:
+            cond = self.cfg_calls % 2 == 0
+            video.fill_(1.0 if cond else 0.25)
+            audio.fill_(1.0 if cond else 0.25)
         return video, audio
 
 
@@ -526,11 +544,15 @@ def test_ltx_2_orchestrator_runs_host_prompt_cfg(tmp_path):
 
     assert torch.allclose(output.latents, torch.full((1, 18, 128), -3.25))
     assert torch.allclose(output.audio_latents, torch.full((1, 4, 128), -5.0))
-    assert transformer.calls[0].hidden_states.shape == (2, 18, 128)
-    assert transformer.calls[0].audio_hidden_states.shape == (2, 4, 128)
-    assert transformer.calls[0].encoder_hidden_states.shape == (2, 5, 32)
-    assert transformer.calls[0].video_coords.shape == (2, 3, 18, 2)
-    assert transformer.calls[0].audio_coords.shape == (2, 1, 4, 2)
+    # Dense CFG runs uncond and cond as two batch-1 calls (the compiled
+    # non-cfg-parallel graph is batch-1).
+    assert len(transformer.calls) == 2
+    for call in transformer.calls:
+        assert call.hidden_states.shape == (1, 18, 128)
+        assert call.audio_hidden_states.shape == (1, 4, 128)
+        assert call.encoder_hidden_states.shape == (1, 5, 32)
+        assert call.video_coords.shape == (1, 3, 18, 2)
+        assert call.audio_coords.shape == (1, 1, 4, 2)
 
 
 def test_ltx_2_orchestrator_applies_video_and_audio_guidance_rescale(tmp_path):
@@ -609,12 +631,13 @@ def test_ltx_2_orchestrator_runs_stg_and_modality_guidance(tmp_path):
 
     assert torch.allclose(output.latents, torch.full((1, 18, 128), -2.125))
     assert torch.allclose(output.audio_latents, torch.full((1, 4, 128), -2.125))
-    assert len(transformer.calls) == 3
-    assert transformer.calls[1][0].hidden_states.shape == (1, 18, 128)
-    assert transformer.calls[1][1]["spatio_temporal_guidance_blocks"] == [0]
-    assert transformer.calls[1][1]["use_cross_timestep"] is True
-    assert transformer.calls[1][1]["attention_kwargs"] == {"scale": 1.0}
-    assert transformer.calls[2][1]["isolate_modalities"] is True
+    # uncond, cond (dense CFG batch-1 calls), then STG, then modality
+    assert len(transformer.calls) == 4
+    assert transformer.calls[2][0].hidden_states.shape == (1, 18, 128)
+    assert transformer.calls[2][1]["spatio_temporal_guidance_blocks"] == [0]
+    assert transformer.calls[2][1]["use_cross_timestep"] is True
+    assert transformer.calls[2][1]["attention_kwargs"] == {"scale": 1.0}
+    assert transformer.calls[3][1]["isolate_modalities"] is True
 
 
 def test_ltx_2_orchestrator_rejects_stg_without_blocks(tmp_path):
