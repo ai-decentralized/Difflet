@@ -144,6 +144,26 @@ def test_stage_compiled_dir_unknown_raises():
         orch._stage_compiled_dir("nope", orch.args)
 
 
+def test_stage_compiled_dir_distinguishes_wan_2_1_from_2_2():
+    # Both Wan 2.2 and Wan 2.1 route to WanOrchestrator; their compiled
+    # artifacts must never share a directory.
+    a22 = _wan_args(cache_dir="/c")
+    a21 = _wan_args(cache_dir="/c", model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers")
+    o22, o21 = WanOrchestrator(a22), WanOrchestrator(a21)
+    for stage in ("transformer", "vae"):
+        assert o22._stage_compiled_dir(stage, a22) != o21._stage_compiled_dir(stage, a21)
+
+
+def test_stage_compiled_dir_wan_2_2_keeps_legacy_names():
+    # Additive-only: the historical model id keeps its pre-fix dir names so
+    # existing compile caches stay valid.
+    args = _wan_args(cache_dir="/c")
+    orch = WanOrchestrator(args)
+    assert orch._stage_compiled_dir("transformer", args) == \
+        Path("/c/wan_transformer_tp4cp1_h480w832f9")
+    assert orch._stage_compiled_dir("vae", args) == Path("/c/wan_vae_h480w832f9")
+
+
 # ------------------------------------------------------ _shared_cli_args
 
 def test_shared_cli_args_includes_cfg_and_optionals():

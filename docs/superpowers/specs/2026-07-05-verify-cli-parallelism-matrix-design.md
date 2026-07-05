@@ -212,6 +212,10 @@ matrix with timings. Disk (521 GB free) is expected to fit but is logged per mod
 ## 6. Out of scope
 
 - Fixing the wan/wan2_1 compiled-dir collision inside difflet (documented above).
+  *Update, same day:* fixed at user request — `wan.py _cache_prefix` now gives non-2.2
+  model ids their own compiled-dir prefix (Wan 2.2 keeps the legacy `wan_*` names so
+  existing caches stay valid). The script keeps `--cache-dir` isolation for wan2_1 as
+  belt-and-braces on pre-fix installs.
 - Numerical parity between configs (covered by `scripts/*_parity_smoke.py`).
 - hunyuan_video_15 stage implementation (tracked scaffold gap).
 - Multi-cell concurrency (only 4 cores; cells are exclusive by definition).
