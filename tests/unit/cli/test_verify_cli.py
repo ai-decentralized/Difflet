@@ -1,355 +1,398 @@
+"""Unit tests for scripts/verify_cli.py — the parallelism-config matrix runner.
+
+Pure logic only: no device, no subprocess, no network. Subprocess calls are
+mocked; artifact existence is injected. Drift-guard tests import
+difflet.cli.main to pin the script's local skip-rule sets to the CLI's
+source-of-truth sets.
+"""
 from __future__ import annotations
+
+import io
 import pathlib
+import subprocess
 import sys
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent.parent / "scripts"))
 
-from verify_cli import Status, StepResult, MODEL_CONFIGS, STEPS
+from verify_cli import (
+    CP_UNSUPPORTED,
+    DISTILLED,
+    EXPECTED_FAIL_CELLS,
+    MODELS,
+    PARALLEL_CONFIGS,
+    SP_SUPPORTED,
+    Status,
+    StepResult,
+    build_compile_cmd,
+    build_download_cmd,
+    build_generate_cmd,
+    cell_outcome,
+    compute_exit_code,
+    format_summary,
+    plan_cells,
+    run_cell,
+    run_step,
+    skip_reason,
+)
+
+MODEL_KEYS = ["flux", "qwen_image", "ltx_2", "wan", "wan2_1",
+              "hunyuan_video", "hunyuan_video_15"]
+CONFIG_KEYS = ["tp4", "tp2cp2", "tp2cfg", "tp4sp"]
 
 
-def test_all_models_present():
-    assert set(MODEL_CONFIGS.keys()) == {"flux", "ltx_2", "wan", "hunyuan_video", "qwen_image"}
+# ---------------------------------------------------------------- matrix shape
+
+def test_all_seven_models_present():
+    assert list(MODELS.keys()) == MODEL_KEYS
 
 
-def test_steps_order():
-    assert STEPS == ["download", "compile", "generate"]
+def test_all_four_configs_present():
+    assert list(PARALLEL_CONFIGS.keys()) == CONFIG_KEYS
 
 
-def test_each_model_has_required_keys():
-    required = {"model_id", "compile_args", "generate_args", "output_filename",
-                "staged", "download_glob", "compile_globs"}
-    for key, cfg in MODEL_CONFIGS.items():
-        missing = required - cfg.keys()
-        assert not missing, f"{key} missing keys: {missing}"
+def test_every_config_uses_exactly_four_cores():
+    for cfg in PARALLEL_CONFIGS.values():
+        assert cfg.world_size == 4, cfg.key
+
+
+def test_config_flags():
+    assert PARALLEL_CONFIGS["tp4"].flags == ("--tp-degree", "4")
+    assert PARALLEL_CONFIGS["tp2cp2"].flags == ("--tp-degree", "2", "--cp-degree", "2")
+    assert PARALLEL_CONFIGS["tp2cfg"].flags == ("--tp-degree", "2", "--cfg-parallel")
+    assert PARALLEL_CONFIGS["tp4sp"].flags == ("--tp-degree", "4", "--sp")
+
+
+def test_model_ids():
+    assert MODELS["flux"].model_id == "black-forest-labs/FLUX.1-dev"
+    assert MODELS["qwen_image"].model_id == "Qwen/Qwen-Image"
+    assert MODELS["ltx_2"].model_id == "Lightricks/LTX-2"
+    assert MODELS["wan"].model_id == "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
+    assert MODELS["wan2_1"].model_id == "Wan-AI/Wan2.1-T2V-14B-Diffusers"
+    assert MODELS["hunyuan_video"].model_id == "hunyuanvideo-community/HunyuanVideo"
+    assert MODELS["hunyuan_video_15"].model_id == (
+        "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v")
 
 
 def test_staged_flags():
-    assert MODEL_CONFIGS["flux"]["staged"] is False
-    assert MODEL_CONFIGS["ltx_2"]["staged"] is False
-    assert MODEL_CONFIGS["wan"]["staged"] is True
-    assert MODEL_CONFIGS["hunyuan_video"]["staged"] is True
-    assert MODEL_CONFIGS["qwen_image"]["staged"] is True
+    staged = {k for k, m in MODELS.items() if m.staged}
+    assert staged == {"qwen_image", "wan", "wan2_1", "hunyuan_video"}
 
 
-def test_compile_glob_counts():
-    assert len(MODEL_CONFIGS["flux"]["compile_globs"]) == 1
-    assert len(MODEL_CONFIGS["ltx_2"]["compile_globs"]) == 1
-    assert len(MODEL_CONFIGS["wan"]["compile_globs"]) == 2
-    assert len(MODEL_CONFIGS["hunyuan_video"]["compile_globs"]) == 3
-    assert len(MODEL_CONFIGS["qwen_image"]["compile_globs"]) == 3
+# ---------------------------------------------------------------- drift guards
+
+def test_distilled_set_matches_cli_source_of_truth():
+    from difflet.cli.main import _DISTILLED_MODELS
+    assert {MODELS[k].model_id for k in DISTILLED} == _DISTILLED_MODELS
 
 
-def test_step_result_defaults():
-    r = StepResult(status=Status.PASS)
-    assert r.reason == ""
-    assert r.cmd == []
+def test_sp_supported_set_matches_cli_source_of_truth():
+    from difflet.cli.main import _SP_SUPPORTED_MODELS
+    assert {MODELS[k].model_id for k in SP_SUPPORTED} == _SP_SUPPORTED_MODELS
 
 
-def test_status_values():
-    assert Status.PASS == "PASS"
-    assert Status.FAIL == "FAIL"
-    assert Status.SKIP == "SKIP"
+def test_all_model_ids_valid_in_cli():
+    from difflet.cli.main import VALID_MODELS
+    assert {m.model_id for m in MODELS.values()} <= VALID_MODELS
 
 
-import io
-from unittest.mock import MagicMock, patch
+def test_cp_unsupported_models():
+    # Rule lives in the model entries (ltx_2/entry.py, hunyuan_video/entry.py),
+    # not in difflet.cli.main — pinned here as data.
+    assert CP_UNSUPPORTED == {"ltx_2", "hunyuan_video_15"}
 
-from verify_cli import _check_glob, run_step
 
+def test_expected_fail_cells():
+    assert EXPECTED_FAIL_CELLS == {("hunyuan_video_15", "tp4")}
+
+
+# ---------------------------------------------------------------- skip rules
+
+# The full support table from the design spec.
+_EXPECTED_SKIPS = {
+    ("flux", "tp2cfg"): "distilled",
+    ("qwen_image", "tp2cfg"): "distilled",
+    ("qwen_image", "tp4sp"): "no-SP",
+    ("ltx_2", "tp2cp2"): "no-CP",
+    ("ltx_2", "tp4sp"): "no-SP",
+    ("hunyuan_video", "tp2cfg"): "distilled",
+    ("hunyuan_video_15", "tp2cp2"): "no-CP",
+    ("hunyuan_video_15", "tp2cfg"): "distilled",
+    ("hunyuan_video_15", "tp4sp"): "no-SP",
+}
+
+
+def test_skip_reason_full_support_table():
+    for model_key in MODEL_KEYS:
+        for config_key in CONFIG_KEYS:
+            expected = _EXPECTED_SKIPS.get((model_key, config_key))
+            assert skip_reason(model_key, config_key) == expected, (model_key, config_key)
+
+
+def test_plan_cells_counts():
+    cells = plan_cells(MODEL_KEYS, CONFIG_KEYS)
+    assert len(cells) == 28
+    skipped = [c for c in cells if c.skip_reason]
+    runnable = [c for c in cells if not c.skip_reason]
+    assert len(skipped) == 9
+    assert len(runnable) == 19
+    xfail = [c for c in runnable if c.expected_fail]
+    assert [(c.model_key, c.config_key) for c in xfail] == [("hunyuan_video_15", "tp4")]
+
+
+def test_plan_cells_respects_subset_filters():
+    cells = plan_cells(["wan"], ["tp4", "tp2cfg"])
+    assert [(c.model_key, c.config_key) for c in cells] == [("wan", "tp4"), ("wan", "tp2cfg")]
+    assert all(c.skip_reason is None for c in cells)
+
+
+# ---------------------------------------------------------------- command building
+
+def test_build_download_cmd():
+    cmd = build_download_cmd(MODELS["flux"])
+    assert cmd == ["difflet", "download", "--model-id", "black-forest-labs/FLUX.1-dev"]
+
+
+def test_download_globs_point_at_hf_hub_snapshots():
+    for m in MODELS.values():
+        assert "huggingface" in m.download_glob and "snapshots" in m.download_glob
+        org, name = m.model_id.split("/")
+        assert f"models--{org}--{name}" in m.download_glob
+
+
+def test_build_compile_cmd_includes_config_and_shape_flags():
+    cmd = build_compile_cmd(MODELS["wan"], PARALLEL_CONFIGS["tp2cp2"])
+    assert cmd[:4] == ["difflet", "compile", "--model-id", "Wan-AI/Wan2.2-T2V-A14B-Diffusers"]
+    assert ("--tp-degree", "2") == (cmd[cmd.index("--tp-degree")], cmd[cmd.index("--tp-degree") + 1])
+    assert ("--cp-degree", "2") == (cmd[cmd.index("--cp-degree")], cmd[cmd.index("--cp-degree") + 1])
+    for flag, val in [("--height", "480"), ("--width", "832"), ("--num-frames", "9")]:
+        assert val == cmd[cmd.index(flag) + 1]
+
+
+def test_build_compile_cmd_cfg_parallel():
+    cmd = build_compile_cmd(MODELS["ltx_2"], PARALLEL_CONFIGS["tp2cfg"])
+    assert "--cfg-parallel" in cmd
+    assert "--cp-degree" not in cmd
+
+
+def test_build_compile_cmd_sp():
+    cmd = build_compile_cmd(MODELS["flux"], PARALLEL_CONFIGS["tp4sp"])
+    assert "--sp" in cmd
+
+
+def test_wan2_1_gets_isolated_cache_dir():
+    # Wan 2.2 and Wan 2.1 share staged compiled-dir names (wan.py
+    # _stage_compiled_dir has no model version), so wan2_1 must be isolated.
+    compile_cmd = build_compile_cmd(MODELS["wan2_1"], PARALLEL_CONFIGS["tp4"])
+    gen_cmd, _ = build_generate_cmd(MODELS["wan2_1"], PARALLEL_CONFIGS["tp4"],
+                                    pathlib.Path("/tmp/cell"))
+    for cmd in (compile_cmd, gen_cmd):
+        assert "--cache-dir" in cmd
+        assert "wan2_1" in cmd[cmd.index("--cache-dir") + 1]
+    assert "--cache-dir" not in build_compile_cmd(MODELS["wan"], PARALLEL_CONFIGS["tp4"])
+
+
+def test_hunyuan_video_15_compile_cmd_minimal():
+    cmd = build_compile_cmd(MODELS["hunyuan_video_15"], PARALLEL_CONFIGS["tp4"])
+    assert cmd[:4] == ["difflet", "compile", "--model-id",
+                       "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"]
+    assert "--height" not in cmd  # scaffold fails before shape matters
+
+
+def test_build_generate_cmd_non_staged():
+    cell_dir = pathlib.Path("/tmp/cell")
+    cmd, artifacts = build_generate_cmd(MODELS["flux"], PARALLEL_CONFIGS["tp4"], cell_dir)
+    assert "--prompt" in cmd
+    assert "--work-dir" not in cmd and "--keep-work-dir" not in cmd
+    assert cmd[cmd.index("--output") + 1] == str(cell_dir / "flux.png")
+    assert artifacts == [cell_dir / "flux.png"]
+
+
+def test_build_generate_cmd_staged_gets_work_dir():
+    cell_dir = pathlib.Path("/tmp/cell")
+    cmd, artifacts = build_generate_cmd(MODELS["wan"], PARALLEL_CONFIGS["tp4"], cell_dir)
+    assert cmd[cmd.index("--work-dir") + 1] == str(cell_dir / "work")
+    assert "--keep-work-dir" in cmd
+    # mp4 export can fall back to a .pt tensor; both prove inference ran
+    assert artifacts == [cell_dir / "wan.mp4", cell_dir / "wan.pt"]
+
+
+def test_build_generate_cmd_ltx_2_expects_pt_artifact():
+    # LTX2Orchestrator.generate always writes output.with_suffix('.pt')
+    cell_dir = pathlib.Path("/tmp/cell")
+    cmd, artifacts = build_generate_cmd(MODELS["ltx_2"], PARALLEL_CONFIGS["tp4"], cell_dir)
+    assert cmd[cmd.index("--output") + 1] == str(cell_dir / "ltx2.mp4")
+    assert artifacts == [cell_dir / "ltx2.pt"]
+
+
+def test_build_generate_cmd_qwen_accepts_png_or_pt():
+    cell_dir = pathlib.Path("/tmp/cell")
+    _, artifacts = build_generate_cmd(MODELS["qwen_image"], PARALLEL_CONFIGS["tp4"], cell_dir)
+    assert artifacts == [cell_dir / "qwen.png", cell_dir / "qwen.pt"]
+
+
+# ---------------------------------------------------------------- run_step
 
 def _log():
     return io.StringIO()
 
 
-def test_check_glob_no_wildcard_exists(tmp_path):
-    p = tmp_path / "somedir"
-    p.mkdir()
-    assert _check_glob(str(p)) is True
-
-
-def test_check_glob_no_wildcard_missing(tmp_path):
-    assert _check_glob(str(tmp_path / "missing")) is False
-
-
-def test_check_glob_wildcard_matches(tmp_path):
-    (tmp_path / "abc123").mkdir()
-    assert _check_glob(str(tmp_path / "*")) is True
-
-
-def test_check_glob_wildcard_no_match(tmp_path):
-    assert _check_glob(str(tmp_path / "*")) is False
-
-
-def test_run_step_pass_no_globs():
+def test_run_step_pass_records_duration():
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
-        result = run_step(["difflet", "download", "--model-id", "foo"], [], _log())
+        result = run_step(["difflet", "compile"], _log(), timeout=60)
     assert result.status == Status.PASS
-    assert result.cmd == ["difflet", "download", "--model-id", "foo"]
+    assert result.duration is not None and result.duration >= 0.0
 
 
 def test_run_step_fail_nonzero_exit():
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=2)
-        result = run_step(["difflet", "compile"], [], _log())
+        result = run_step(["difflet", "compile"], _log(), timeout=60)
     assert result.status == Status.FAIL
     assert "exit code 2" in result.reason
 
 
-def test_run_step_fail_missing_artifact():
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        result = run_step(
-            ["difflet", "compile"],
-            ["~/.cache/difflet/flux/*"],
-            _log(),
-            _check_artifact=lambda g: False,
-        )
+def test_run_step_timeout_is_fail():
+    with patch("subprocess.run",
+               side_effect=subprocess.TimeoutExpired(cmd=["difflet"], timeout=60)):
+        result = run_step(["difflet", "compile"], _log(), timeout=60)
     assert result.status == Status.FAIL
-    assert "artifact not found" in result.reason
-    assert "~/.cache/difflet/flux/*" in result.reason
+    assert "timeout" in result.reason
 
 
-def test_run_step_pass_with_artifacts():
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        result = run_step(
-            ["difflet", "compile"],
-            ["~/.cache/difflet/flux/*", "~/.cache/difflet/flux/neff"],
-            _log(),
-            _check_artifact=lambda g: True,
-        )
-    assert result.status == Status.PASS
+# ---------------------------------------------------------------- run_cell
 
-
-def test_run_step_writes_banner_to_log():
-    log = _log()
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        run_step(["difflet", "download", "--model-id", "foo"], [], log)
-    content = log.getvalue()
-    assert "difflet download --model-id foo" in content
-
-
-from verify_cli import _build_cmd, _run_model
-
-
-def test_build_cmd_download():
-    work_dir = pathlib.Path("/tmp/test_work")
-    cmd, globs = _build_cmd("download", "flux", MODEL_CONFIGS["flux"], work_dir)
-    assert cmd == ["difflet", "download", "--model-id", "black-forest-labs/FLUX.1-dev"]
-    assert len(globs) == 1
-    assert "FLUX.1-dev" in globs[0]
-
-
-def test_build_cmd_compile_flux():
-    work_dir = pathlib.Path("/tmp/test_work")
-    cmd, globs = _build_cmd("compile", "flux", MODEL_CONFIGS["flux"], work_dir)
-    assert cmd[:3] == ["difflet", "compile", "--model-id"]
-    assert "--tp-degree" in cmd
-    assert "--cp-degree" in cmd
-    assert globs == MODEL_CONFIGS["flux"]["compile_globs"]
-
-
-def test_build_cmd_generate_non_staged():
-    work_dir = pathlib.Path("/tmp/test_work")
-    cmd, globs = _build_cmd("generate", "flux", MODEL_CONFIGS["flux"], work_dir)
-    assert "--work-dir" not in cmd
-    assert "--keep-work-dir" not in cmd
-    assert "--output" in cmd
-    output_idx = cmd.index("--output")
-    assert cmd[output_idx + 1] == str(work_dir / "flux.png")
-    assert globs == [str(work_dir / "flux.png")]
-
-
-def test_build_cmd_generate_staged():
-    work_dir = pathlib.Path("/tmp/test_work")
-    cmd, globs = _build_cmd("generate", "wan", MODEL_CONFIGS["wan"], work_dir)
-    assert "--work-dir" in cmd
-    assert "--keep-work-dir" in cmd
-    wd_idx = cmd.index("--work-dir")
-    assert cmd[wd_idx + 1] == str(work_dir)
-    assert globs == [str(work_dir / "wan.mp4")]
-
-
-def test_run_model_all_pass():
-    log = _log()
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        results = _run_model("flux", MODEL_CONFIGS["flux"], log, _check_artifact=lambda g: True)
-    assert results["download"].status == Status.PASS
-    assert results["compile"].status == Status.PASS
-    assert results["generate"].status == Status.PASS
-
-
-def test_run_model_fail_propagates_to_skip():
-    log = _log()
+def test_run_cell_pass(tmp_path):
+    spec, cfg = MODELS["flux"], PARALLEL_CONFIGS["tp4"]
 
     def fake_run(cmd, **kwargs):
-        rc = 1 if "compile" in cmd else 0
-        return MagicMock(returncode=rc)
+        if "generate" in cmd:
+            out = cmd[cmd.index("--output") + 1]
+            pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
+            pathlib.Path(out).touch()
+        return MagicMock(returncode=0)
 
     with patch("subprocess.run", side_effect=fake_run):
-        results = _run_model("flux", MODEL_CONFIGS["flux"], log, _check_artifact=lambda g: True)
+        result = run_cell(spec, cfg, tmp_path / "flux" / "tp4", timeout=60)
+    assert result["compile"].status == Status.PASS
+    assert result["generate"].status == Status.PASS
+    assert result["generate"].duration is not None
 
-    assert results["download"].status == Status.PASS
-    assert results["compile"].status == Status.FAIL
-    assert results["generate"].status == Status.SKIP
+
+def test_run_cell_compile_fail_skips_generate(tmp_path):
+    spec, cfg = MODELS["flux"], PARALLEL_CONFIGS["tp4"]
+
+    def fake_run(cmd, **kwargs):
+        return MagicMock(returncode=1 if "compile" in cmd else 0)
+
+    with patch("subprocess.run", side_effect=fake_run):
+        result = run_cell(spec, cfg, tmp_path / "flux" / "tp4", timeout=60)
+    assert result["compile"].status == Status.FAIL
+    assert result["generate"].status == Status.SKIP
 
 
-def test_run_model_download_fail_skips_all():
-    log = _log()
+def test_run_cell_generate_fail_when_artifact_missing(tmp_path):
+    spec, cfg = MODELS["flux"], PARALLEL_CONFIGS["tp4"]
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=1)
-        results = _run_model("flux", MODEL_CONFIGS["flux"], log, _check_artifact=lambda g: True)
-
-    assert results["download"].status == Status.FAIL
-    assert results["compile"].status == Status.SKIP
-    assert results["generate"].status == Status.SKIP
+        mock_run.return_value = MagicMock(returncode=0)  # exit 0, no file written
+        result = run_cell(spec, cfg, tmp_path / "flux" / "tp4", timeout=60)
+    assert result["generate"].status == Status.FAIL
+    assert "artifact" in result["generate"].reason
 
 
-from verify_cli import format_summary
+def test_run_cell_accepts_fallback_artifact(tmp_path):
+    spec, cfg = MODELS["wan"], PARALLEL_CONFIGS["tp4"]
 
-_MINI_CFG = {
-    "flux": {
-        "download_glob": "~/.cache/hf/models--black-forest-labs--FLUX.1-dev/snapshots/*",
-        "compile_globs": ["~/.cache/difflet/flux/*"],
-        "output_filename": "flux.png",
-    },
-    "ltx_2": {
-        "download_glob": "~/.cache/hf/models--Lightricks--LTX-2/snapshots/*",
-        "compile_globs": ["~/.cache/difflet/ltx_2/*"],
-        "output_filename": "ltx2.mp4",
-    },
-}
+    def fake_run(cmd, **kwargs):
+        if "generate" in cmd:
+            out = pathlib.Path(cmd[cmd.index("--output") + 1])
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.with_suffix(".pt").touch()  # mp4 export failed, .pt fallback
+        return MagicMock(returncode=0)
 
-_ALL_PASS = {
-    "flux": {
-        "download": StepResult(Status.PASS, cmd=["difflet", "download"]),
-        "compile": StepResult(Status.PASS, cmd=["difflet", "compile"]),
-        "generate": StepResult(Status.PASS, cmd=["difflet", "generate"]),
-    },
-    "ltx_2": {
-        "download": StepResult(Status.PASS, cmd=["difflet", "download"]),
-        "compile": StepResult(Status.PASS, cmd=["difflet", "compile"]),
-        "generate": StepResult(Status.PASS, cmd=["difflet", "generate"]),
-    },
-}
-
-_WITH_FAILURE = {
-    "flux": {
-        "download": StepResult(Status.PASS, cmd=["difflet", "download", "--model-id", "flux"]),
-        "compile": StepResult(Status.FAIL, reason="exit code 1", cmd=["difflet", "compile", "--model-id", "flux"]),
-        "generate": StepResult(Status.SKIP, cmd=[]),
-    },
-    "ltx_2": {
-        "download": StepResult(Status.PASS, cmd=["difflet", "download"]),
-        "compile": StepResult(Status.PASS, cmd=["difflet", "compile"]),
-        "generate": StepResult(Status.PASS, cmd=["difflet", "generate"]),
-    },
-}
+    with patch("subprocess.run", side_effect=fake_run):
+        result = run_cell(spec, cfg, tmp_path / "wan" / "tp4", timeout=60)
+    assert result["generate"].status == Status.PASS
 
 
-def test_format_summary_all_pass_has_no_failed_section():
-    text = format_summary(_ALL_PASS, _MINI_CFG, "/tmp/logs/test.log")
-    assert "PASS" in text
-    assert "FAILED COMMANDS" not in text
+# ---------------------------------------------------------------- outcomes / exit
+
+def _step(status, duration=1.0):
+    return StepResult(status=status, duration=duration)
 
 
-def test_format_summary_contains_summary_header():
-    text = format_summary(_ALL_PASS, _MINI_CFG, "/tmp/logs/test.log")
-    assert "SUMMARY" in text
+def test_cell_outcome_pass():
+    assert cell_outcome(_step(Status.PASS), _step(Status.PASS), expected_fail=False) == Status.PASS
 
 
-def test_format_summary_lists_all_models():
-    text = format_summary(_ALL_PASS, _MINI_CFG, "/tmp/logs/test.log")
-    assert "flux" in text
-    assert "ltx_2" in text
+def test_cell_outcome_fail():
+    assert cell_outcome(_step(Status.FAIL), _step(Status.SKIP), expected_fail=False) == Status.FAIL
 
 
-def test_format_summary_shows_failure_details():
-    text = format_summary(_WITH_FAILURE, _MINI_CFG, "/tmp/logs/test.log")
-    assert "FAILED COMMANDS" in text
-    assert "[flux] compile" in text
-    assert "exit code 1" in text
-    assert "/tmp/logs/test.log" in text
+def test_cell_outcome_xfail():
+    assert cell_outcome(_step(Status.FAIL), _step(Status.SKIP), expected_fail=True) == Status.XFAIL
 
 
-def test_format_summary_shows_skip():
-    text = format_summary(_WITH_FAILURE, _MINI_CFG, "/tmp/logs/test.log")
-    assert "SKIP" in text
+def test_cell_outcome_xpass():
+    assert cell_outcome(_step(Status.PASS), _step(Status.PASS), expected_fail=True) == Status.XPASS
 
 
-def test_format_summary_artifact_locations():
-    text = format_summary(_ALL_PASS, _MINI_CFG, "/tmp/logs/test.log")
-    assert "ARTIFACT LOCATIONS" in text
-    assert "~/.cache/difflet/flux/*" in text
-    assert "/tmp/logs/verify_flux/flux.png" in text
-    assert "/tmp/logs/verify_ltx_2/ltx2.mp4" in text
+def test_exit_code_zero_with_xfail_and_skips():
+    assert compute_exit_code([Status.PASS, Status.XFAIL, Status.SKIP]) == 0
 
 
-from verify_cli import main
+def test_exit_code_one_on_fail():
+    assert compute_exit_code([Status.PASS, Status.FAIL]) == 1
 
 
-def test_main_runs_all_models(tmp_path, monkeypatch):
-    """main() should call _run_model once per model and write a log."""
-    called_models = []
-
-    def fake_run_model(model_key, cfg, log_fh, **kwargs):
-        called_models.append(model_key)
-        return {
-            "download": StepResult(Status.PASS, cmd=[]),
-            "compile": StepResult(Status.PASS, cmd=[]),
-            "generate": StepResult(Status.PASS, cmd=[]),
-        }
-
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir()
-
-    import builtins
-    real_open = builtins.open
-
-    def fake_open(path, mode="r", **kw):
-        if "verify_cli_" in str(path):
-            return real_open(str(log_dir / "verify_cli_test.log"), mode, **kw)
-        return real_open(path, mode, **kw)
-
-    monkeypatch.setattr("verify_cli._run_model", fake_run_model)
-    monkeypatch.setattr("verify_cli.pathlib.Path.mkdir", lambda *a, **kw: None)
-    monkeypatch.setattr("builtins.open", fake_open)
-
-    main([])  # no --models arg → defaults to all 5
-
-    assert set(called_models) == {"flux", "ltx_2", "wan", "hunyuan_video", "qwen_image"}
+def test_exit_code_one_on_xpass():
+    assert compute_exit_code([Status.PASS, Status.XPASS]) == 1
 
 
-def test_main_respects_models_flag(monkeypatch, tmp_path):
-    """--models flux ltx_2 should only run those two models."""
-    called_models = []
+# ---------------------------------------------------------------- summary
 
-    def fake_run_model(model_key, cfg, log_fh, **kwargs):
-        called_models.append(model_key)
-        return {
-            "download": StepResult(Status.PASS, cmd=[]),
-            "compile": StepResult(Status.PASS, cmd=[]),
-            "generate": StepResult(Status.PASS, cmd=[]),
-        }
+def _fake_results():
+    """Minimal results structure for two models / two configs."""
+    return {
+        "downloads": {
+            "flux": StepResult(status=Status.PASS, duration=120.0),
+            "hunyuan_video_15": StepResult(status=Status.PASS, duration=60.0),
+        },
+        "cells": {
+            ("flux", "tp4"): {
+                "outcome": Status.PASS,
+                "compile": StepResult(status=Status.PASS, duration=600.0),
+                "generate": StepResult(status=Status.PASS, duration=41.2),
+            },
+            ("flux", "tp2cfg"): {"outcome": Status.SKIP, "reason": "distilled"},
+            ("hunyuan_video_15", "tp4"): {
+                "outcome": Status.XFAIL,
+                "compile": StepResult(status=Status.FAIL, duration=2.0,
+                                      reason="exit code 1",
+                                      cmd=["difflet", "compile", "--model-id", "x"]),
+                "generate": StepResult(status=Status.SKIP),
+            },
+        },
+    }
 
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir()
 
-    import builtins
-    real_open = builtins.open
+def test_format_summary_matrix_cells():
+    text = format_summary(_fake_results(), ["flux", "hunyuan_video_15"], ["tp4", "tp2cfg"],
+                          "/tmp/run")
+    assert "PASS" in text and "41.2" in text          # timed generate is the headline
+    assert "SKIP" in text and "distilled" in text     # skip reason inline
+    assert "XFAIL" in text                            # known gap visible
 
-    def fake_open(path, mode="r", **kw):
-        if "verify_cli_" in str(path):
-            return real_open(str(log_dir / "verify_cli_test.log"), mode, **kw)
-        return real_open(path, mode, **kw)
 
-    monkeypatch.setattr("verify_cli._run_model", fake_run_model)
-    monkeypatch.setattr("verify_cli.pathlib.Path.mkdir", lambda *a, **kw: None)
-    monkeypatch.setattr("builtins.open", fake_open)
-
-    main(["--models", "flux", "ltx_2"])
-
-    assert set(called_models) == {"flux", "ltx_2"}
+def test_format_summary_lists_unexpected_failures_only():
+    results = _fake_results()
+    text = format_summary(results, ["flux", "hunyuan_video_15"], ["tp4", "tp2cfg"], "/tmp/run")
+    assert "FAILED" not in text  # XFAIL is expected: no failure section
+    results["cells"][("flux", "tp4")]["outcome"] = Status.FAIL
+    results["cells"][("flux", "tp4")]["generate"] = StepResult(
+        status=Status.FAIL, reason="artifact not found", cmd=["difflet", "generate"])
+    text = format_summary(results, ["flux", "hunyuan_video_15"], ["tp4", "tp2cfg"], "/tmp/run")
+    assert "FAILED" in text and "artifact not found" in text
