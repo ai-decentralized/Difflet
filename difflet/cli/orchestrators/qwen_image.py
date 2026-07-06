@@ -96,14 +96,28 @@ class QwenImageOrchestrator(ModelOrchestrator):
         enc_path = str(Path(model_dir) / "text_encoder")
         compiled_dir = self._stage_compiled_dir("text", args)
 
+        tp_degree = args.tp_degree or 4
         text_cfg = AutoConfig.from_pretrained(enc_path).text_config
         if getattr(text_cfg, "pad_token_id", None) is None:
             text_cfg.pad_token_id = 0
 
+        # This stage uses NxDI's stock NeuronConfig (not difflet's fork), whose
+        # save_sharded_checkpoint default is False (see the identical fix in
+        # hunyuan_video.py's _stage_llama). Stock load_weights() has no
+        # missing-shard fallback, so only request the presharded read path
+        # once the shard files actually exist; always request the write path
+        # at compile time.
+        weights_dir = compiled_dir / "weights"
+        shard_paths = [weights_dir / f"tp{r}_sharded_checkpoint.safetensors" for r in range(tp_degree)]
+        save_sharded_checkpoint = (
+            args.stage_mode == "compile" or all(p.exists() for p in shard_paths)
+        )
+
         neuron_config = NeuronConfig(
-            tp_degree=args.tp_degree or 4, batch_size=1, seq_len=_ENC_SEQ,
+            tp_degree=tp_degree, batch_size=1, seq_len=_ENC_SEQ,
             torch_dtype=torch.bfloat16, on_device_sampling_config={},
             tensor_capture_config=TensorCaptureConfig(modules_to_capture=["norm"]),
+            save_sharded_checkpoint=save_sharded_checkpoint,
         )
         config = NeuronQwen2VLTextForCausalLM.get_config_cls()(
             neuron_config, load_config=load_pretrained_config(hf_config=text_cfg)
