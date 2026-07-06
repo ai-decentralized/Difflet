@@ -94,3 +94,52 @@ def test_main_propagates_unknown_orchestrator_exit(monkeypatch):
     # _load_orchestrator_class is the real one -> unknown id -> SystemExit.
     with pytest.raises(SystemExit):
         stage.main(["--orchestrator", "bogus", "--stage", "transformer"])
+
+
+# ------------------------------------------- forwarded-flag coverage (drift guard)
+
+def test_parser_parses_sp_into_sp_enabled():
+    p = stage._build_stage_parser()
+    args, _ = p.parse_known_args(["--orchestrator", "X", "--stage", "transformer", "--sp"])
+    assert args.sp_enabled is True
+    args, _ = p.parse_known_args(["--orchestrator", "X", "--stage", "transformer"])
+    assert args.sp_enabled is False
+
+
+@pytest.mark.parametrize(
+    "orch_module, orch_cls, model_id",
+    [
+        ("difflet.cli.orchestrators.wan", "WanOrchestrator",
+         "Wan-AI/Wan2.2-T2V-A14B-Diffusers"),
+        ("difflet.cli.orchestrators.hunyuan_video", "HunyuanVideoOrchestrator",
+         "hunyuanvideo-community/HunyuanVideo"),
+        ("difflet.cli.orchestrators.qwen_image", "QwenImageOrchestrator",
+         "Qwen/Qwen-Image"),
+    ],
+)
+def test_stage_parser_consumes_every_forwarded_flag(orch_module, orch_cls, model_id):
+    """Every flag an orchestrator forwards via _shared_cli_args must be consumed
+    by the stage parser — parse_known_args silently drops unknown flags, which
+    turned --sp into a no-op (SP cells silently ran the dense graph)."""
+    import argparse
+    import importlib
+
+    cls = getattr(importlib.import_module(orch_module), orch_cls)
+    ns = argparse.Namespace(
+        model_id=model_id, tp_degree=4, cp_degree=2, cp_mode="ring",
+        cfg_parallel=True, sp_enabled=True,
+        height=64, width=96, num_frames=9,
+        steps=2, guidance_scale=2.0, seed=7,
+        prompt="a cat", output="/tmp/o.mp4",
+        cache_dir="/tmp/c", work_dir=None, keep_work_dir=False,
+        force=False, revision=None,
+        teacache_cadence=None, teacache_online_delta=None,
+        teacache_speedup=None, teacache_calibration=None,
+    )
+    forwarded = cls(ns)._shared_cli_args("compile", work_dir="/tmp/w")
+
+    parser = stage._build_stage_parser()
+    _, extra = parser.parse_known_args(
+        ["--orchestrator", model_id, "--stage", "transformer", *forwarded]
+    )
+    assert extra == [], f"stage parser silently drops forwarded flags: {extra}"
