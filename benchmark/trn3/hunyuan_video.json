@@ -67,16 +67,18 @@
     "note": "VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode."
   },
   "e2e_warm": {
-    "n": 1,
-    "mean": 159.68491561501287,
-    "median": 159.68491561501287,
-    "std": 0.0,
-    "p50": 159.68491561501287,
-    "p90": 159.68491561501287,
-    "min": 159.68491561501287,
-    "max": 159.68491561501287,
+    "n": 3,
+    "mean": 129.6457746529486,
+    "median": 128.26174015388824,
+    "std": 3.4351739106649166,
+    "p50": 128.26174015388824,
+    "p90": 134.3706526828464,
+    "min": 126.30493112211116,
+    "max": 134.3706526828464,
     "samples": [
-      159.68491561501287
+      134.3706526828464,
+      126.30493112211116,
+      128.26174015388824
     ]
   },
   "step_latency": {
@@ -136,7 +138,7 @@
   "status": "ok",
   "notes": [
     "per-step = 650.0 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency \u2014 the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).",
-    "e2e_warm = 160 s (n=1; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+    "e2e_warm = 130 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-06-29 23:38 UTC",
   "config_slug": "hunyuan_video",
@@ -150,23 +152,21 @@
     "stages": [
       {
         "stage": "text_encoder_clip",
-        "load_s": 4.754,
-        "shard_s": 1.106
+        "load_s": 3.632
       },
       {
         "stage": "text_encoder",
-        "load_s": 36.065,
-        "shard_s": 27.628
+        "load_s": 8.539
       },
       {
         "stage": "vae_decoder",
-        "load_s": 23.314
+        "load_s": 23.397
       }
     ],
-    "weights_load_total_s": 64.133,
-    "weights_shard_total_s": 28.734,
-    "wall_total_s": 159.685,
-    "compute_and_overhead_s": 95.552,
+    "weights_load_total_s": 35.568,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 128.262,
+    "compute_and_overhead_s": 92.694,
     "note": "VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode."
   }
 }

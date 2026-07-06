@@ -17,15 +17,18 @@ top of presharding). These are the clean, reproducible numbers. The OFF (load-ti
 arm could **not** be cleanly warmed on this box (slow
 ~125 MB/s disk + difflet's staged-subprocess load → page-cache nondeterminism for the
 75 GB models), so a trustworthy OFF→ON *ratio* is only isolated for FLUX and HunyuanVideo
-(see each `*_presharding_AB.md`).
+(see each `*_presharding_AB.md`). Wan 2.1/Qwen-Image/HunyuanVideo's **e2e warm** here also
+reflect follow-up fixes that extended presharding to their text encoders, which were
+silently missing it (stale cache for Wan; a stock-NxDI-config default for Qwen-Image and
+HunyuanVideo's Llama encoder — the latter alone is ~21% of HunyuanVideo's warm e2e).
 
 | model | kind | shape | compile¹ | e2e cold² | **e2e warm**³ | **DiT per-step**⁴ | output | status |
 |---|---|---|---:|---:|---:|---:|---|---|
 | [FLUX.1-dev](flux_1_dev.md) | image (T2I) | 1024×1024 | ~21 minᵃ | **318 s** (5.3 min) | **35.1 s** | **241.7 ms** (4.14/s)⁵ | 1024² PNG ✓ | ok |
 | [LTX-2](ltx_2.md) | video+audio | 480×704×49 | 15.0 min | **859 s** (14.3 min) | **57.7 s** | **345.0 ms** (2.90/s)⁵ | (1,49,3,480,704) ✓ | ok |
-| [Wan 2.1 14B](wan_2_1.md) | video (T2V) | 480×832×9 | 106 min | **469 s** (7.8 min) | **52.0 s** | **442.5 ms** (2.26/s) | (1,3,9,480,832) ✓ | ok |
-| [Qwen-Image](qwen_image.md) | image (T2I) | 1024×1024 | 19.8 min | **400 s** (6.7 min) | **54.5 s** | **324.1 ms** (3.09/s) | (1,3,1024,1024) ✓ | ok |
-| [HunyuanVideo](hunyuan_video.md) | video (T2V) | 320×512×61 | 40.2 min | **521 s** (8.7 min) | **159.7 s** | **650.0 ms** (1.54/s) | (1,3,61,320,512) ✓ | ok |
+| [Wan 2.1 14B](wan_2_1.md) | video (T2V) | 480×832×9 | 106 min | **469 s** (7.8 min) | **51.5 s** | **442.5 ms** (2.26/s) | (1,3,9,480,832) ✓ | ok |
+| [Qwen-Image](qwen_image.md) | image (T2I) | 1024×1024 | 19.8 min | **400 s** (6.7 min) | **54.6 s** | **324.1 ms** (3.09/s) | (1,3,1024,1024) ✓ | ok |
+| [HunyuanVideo](hunyuan_video.md) | video (T2V) | 320×512×61 | 40.2 min | **521 s** (8.7 min) | **129.6 s** | **650.0 ms** (1.54/s) | (1,3,61,320,512) ✓ | ok |
 
 ✓ = output finite (no NaN/Inf), sensible range — see each report.
 

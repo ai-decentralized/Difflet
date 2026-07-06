@@ -24,17 +24,17 @@
 | compile (AOT, one-time) | 40.2 min (2410 s) |
 | **e2e generate — cold start** (page cache dropped) | **8.7 min (521 s)** |
 | &nbsp;&nbsp;↳ of which weights load (cold disk read) | 6.7 min (403 s) |
-| **e2e generate — warm cache** | **2.7 min (160 s)** |
-| &nbsp;&nbsp;↳ of which weights load (from page cache) | 64.13 s |
+| **e2e generate — warm cache** | **2.2 min (130 s)** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 35.57 s |
 
-> Cold vs warm: **8.7 min (521 s) → 2.7 min (160 s)** (3.3× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
+> Cold vs warm: **8.7 min (521 s) → 2.2 min (130 s)** (4.0× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
 | per denoise step (transformer fwd) | 650.0 ms | 649.9 ms | 650.3 ms | 649.3 ms | 20 |
-| end-to-end (warm) | 2.7 min (160 s) | 2.7 min (160 s) | 2.7 min (160 s) | 2.7 min (160 s) | 1 |
+| end-to-end (warm) | 2.2 min (130 s) | 2.1 min (128 s) | 2.2 min (134 s) | 2.1 min (126 s) | 3 |
 
 **Throughput:** 1.538 DiT steps/s
 
@@ -86,7 +86,7 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 ## Notes
 
 - per-step = 650.0 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency — the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).
-- e2e_warm = 160 s (n=1; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
+- e2e_warm = 130 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
 
 ## Reproduction
 

@@ -140,17 +140,20 @@ Trainium reloads weights onto the cores each generate, the GPUs reload the cache
 |---|---:|---:|---:|---:|
 | FLUX.1-dev | 35.3 | 35.1 | 15.8 | 7.9 |
 | LTX-2 | 58.4 | 57.7 | 24.9 | 12.7 |
-| Wan 2.1 14B | 56.2 | 52.0 | 33.7 | 13.6 |
+| Wan 2.1 14B | 56.2 | 51.5 | 33.7 | 13.6 |
 | Wan 2.2 A14B | 57.3 | — | 49.3 | 17.5 |
-| Qwen-Image | 63.2 | 54.5 | 18.3 | 10.7 |
-| HunyuanVideo | 144.4 | 159.7 | 47.6 | 27.8 |
+| Qwen-Image | 63.2 | 54.6 | 18.3 | 10.7 |
+| HunyuanVideo | 144.4 | 129.6 | 47.6 | 27.8 |
 | HunyuanVideo-1.5 | stub | — | OOM | 439.1 |
 
 Both Trainium columns are **presharding + jemalloc** default-on (jemalloc's per-thread arenas
 remove glibc arena/mmap-lock contention in the parallel load, ~2–5 s off warm; helps the
 host-staged LTX-2/HunyuanVideo most). The two biggest models (LTX-2 86 GB, HunyuanVideo) are
-page-cache-noisy warm — these are medians of properly-warmed runs. See
-[trn2/RESULTS.md](trn2/RESULTS.md) / [trn3/RESULTS.md](trn3/RESULTS.md).
+page-cache-noisy warm — these are medians of properly-warmed runs. trn3's HunyuanVideo/Qwen-Image/
+Wan 2.1 numbers also include presharding fixes for text encoders that were silently missing it
+(stale cache for FLUX/Wan, a stock-NxDI-config default for HunyuanVideo's Llama encoder and
+Qwen-Image's text encoder) — HunyuanVideo's Llama encoder was the big one, ~21% off warm e2e.
+See [trn2/RESULTS.md](trn2/RESULTS.md) / [trn3/RESULTS.md](trn3/RESULTS.md).
 HunyuanVideo-1.5
 runs only on B300 (480×848×121 peaks at 99.2 GB — over the 80 GB H100; trn2/trn3 stub).
 

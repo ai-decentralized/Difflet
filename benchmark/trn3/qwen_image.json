@@ -68,17 +68,17 @@
   },
   "e2e_warm": {
     "n": 3,
-    "mean": 54.55090528097935,
-    "median": 54.535539977950975,
-    "std": 0.8309252345020218,
-    "p50": 54.535539977950975,
-    "p90": 55.576172350905836,
-    "min": 53.54100351408124,
-    "max": 55.576172350905836,
+    "mean": 54.564004231011495,
+    "median": 53.196395391831174,
+    "std": 2.2637413861540514,
+    "p50": 53.196395391831174,
+    "p90": 57.754603844136,
+    "min": 52.74101345706731,
+    "max": 57.754603844136,
     "samples": [
-      53.54100351408124,
-      55.576172350905836,
-      54.535539977950975
+      57.754603844136,
+      52.74101345706731,
+      53.196395391831174
     ]
   },
   "step_latency": {
@@ -138,7 +138,7 @@
   "status": "ok",
   "notes": [
     "per-step = 324.1 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency \u2014 the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).",
-    "e2e_warm = 55 s (n=3; reported after 2 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+    "e2e_warm = 55 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-06-30 03:29 UTC",
   "config_slug": "qwen_image",
@@ -152,22 +152,20 @@
     "stages": [
       {
         "stage": "text_encoder",
-        "load_s": 10.937,
-        "shard_s": 1.989
+        "load_s": 8.429
       },
       {
         "stage": "transformer (denoise loop)",
-        "load_s": 12.41
+        "load_s": 12.426
       },
       {
         "stage": "vae_decoder",
-        "load_s": 4.786,
-        "shard_s": 0.043
+        "load_s": 4.935
       }
     ],
-    "weights_load_total_s": 28.133,
-    "weights_shard_total_s": 2.032,
-    "wall_total_s": 54.536,
-    "compute_and_overhead_s": 26.403
+    "weights_load_total_s": 25.79,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 53.196,
+    "compute_and_overhead_s": 27.406
   }
 }

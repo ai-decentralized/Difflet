@@ -24,17 +24,17 @@
 | compile (AOT, one-time) | 19.8 min (1189 s) |
 | **e2e generate — cold start** (page cache dropped) | **6.7 min (400 s)** |
 | &nbsp;&nbsp;↳ of which weights load (cold disk read) | 6.2 min (373 s) |
-| **e2e generate — warm cache** | **54.55 s** |
-| &nbsp;&nbsp;↳ of which weights load (from page cache) | 28.13 s |
+| **e2e generate — warm cache** | **54.56 s** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 25.79 s |
 
-> Cold vs warm: **6.7 min (400 s) → 54.55 s** (7.3× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
+> Cold vs warm: **6.7 min (400 s) → 54.56 s** (7.3× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
 | per denoise step (transformer fwd) | 324.1 ms | 324.2 ms | 324.3 ms | 323.8 ms | 20 |
-| end-to-end (warm) | 54.55 s | 54.54 s | 55.58 s | 53.54 s | 3 |
+| end-to-end (warm) | 54.56 s | 53.20 s | 57.75 s | 52.74 s | 3 |
 
 **Throughput:** 3.085 DiT steps/s
 
@@ -85,7 +85,7 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 ## Notes
 
 - per-step = 324.1 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency — the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).
-- e2e_warm = 55 s (n=3; reported after 2 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
+- e2e_warm = 55 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
 
 ## Reproduction
 
