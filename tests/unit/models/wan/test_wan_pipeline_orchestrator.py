@@ -312,3 +312,64 @@ def test_application_clamps_single_core_component_load_range():
         start_rank_id=0,
         local_ranks_size=4,
     ) == (0, 1)
+
+
+def test_encode_prompt_zeroes_padding_positions(tmp_path):
+    # Reference Wan convention (diffusers _get_t5_prompt_embeds): embeddings at
+    # padding positions are ZEROED. The DiT cross-attends unmasked over the full
+    # sequence and was trained with zero-padded embeds — raw UMT5 pad-token
+    # outputs at 500+ positions poison cross-attention and yield noise videos.
+    text_encoder = FakeTextEncoder()  # returns all-ones embeddings
+    pipeline = WanOrchestrator(
+        model_path=str(tmp_path), text_encoder=text_encoder, dtype=torch.float32,
+    )
+    input_ids = torch.ones((1, 8), dtype=torch.int64)
+    attention_mask = torch.tensor([[1, 1, 1, 0, 0, 0, 0, 0]], dtype=torch.int32)
+    out = pipeline.encode_prompt(input_ids=input_ids, attention_mask=attention_mask)
+    assert torch.all(out[0, :3] == 1.0)   # valid tokens untouched
+    assert torch.all(out[0, 3:] == 0.0)   # padding rows zeroed
+
+
+class _FakeTokenizer:
+    def __call__(self, prompts, **kw):
+        n = len(prompts)
+        ids = torch.ones((n, 8), dtype=torch.int64)
+        mask = torch.zeros((n, 8), dtype=torch.int32)
+        mask[:, 0] = 1  # empty prompt -> single valid (EOS) token
+        return {"input_ids": ids, "attention_mask": mask}
+
+
+def test_dense_cfg_encodes_empty_prompt_negative(tmp_path):
+    # diffusers encodes negative_prompt="" through the text encoder (then
+    # zero-pads); zeros_like is not a valid embedding and washes out CFG.
+    transformer = FakeTransformer(bias=0.25)
+    text_encoder = FakeTextEncoder()  # returns ones
+    pipeline = WanOrchestrator(
+        model_path=str(tmp_path), transformer=transformer,
+        text_encoder=text_encoder, dtype=torch.float32,
+    )
+    pipeline._tokenizer = _FakeTokenizer()
+    prompt_embeds = torch.full((1, 8, 8), 2.0)
+    pipeline(prompt_embeds=prompt_embeds, latents=torch.zeros((1, 16, 3, 60, 104)),
+             num_inference_steps=1, guidance_scale=4.0, output_type="latent")
+    # dense CFG: cond call then uncond call
+    assert len(transformer.calls) == 2
+    uncond = transformer.calls[1]["encoder_hidden_states"]
+    assert torch.all(uncond[0, 0] == 1.0)      # encoded empty-prompt token
+    assert torch.all(uncond[0, 1:] == 0.0)     # zero-padded tail
+    assert not torch.all(uncond == 0.0)        # NOT the zeros_like fallback
+
+
+def test_loop_latents_held_in_float32(tmp_path):
+    # diffusers holds loop latents in fp32 (UniPC order-2 corrector algebra
+    # collapses in bf16); the model input is cast per step.
+    transformer = FakeTransformer(bias=0.5)
+    transformer.dtype = torch.bfloat16  # model contract: inputs cast per step
+    pipeline = WanOrchestrator(
+        model_path=str(tmp_path), transformer=transformer, dtype=torch.bfloat16,
+    )
+    out = pipeline(prompt_embeds=torch.ones((1, 8, 8), dtype=torch.bfloat16),
+                   num_inference_steps=2, guidance_scale=1.0, output_type="latent",
+                   generator=torch.Generator().manual_seed(0))
+    assert out.latents.dtype == torch.float32
+    assert transformer.calls[0]["hidden_states"].dtype == torch.bfloat16

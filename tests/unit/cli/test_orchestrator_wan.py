@@ -19,7 +19,7 @@ def _wan_args(**overrides) -> argparse.Namespace:
         cache_dir=None, force=False, revision=None,
         prompt="a cat walking", output="/tmp/wan.mp4",
         steps=2, guidance_scale=1.0, seed=42, stage_mode="generate",
-        work_dir=None, keep_work_dir=False,
+        work_dir=None, keep_work_dir=False, host_vae=False,
         teacache_cadence=None, teacache_online_delta=None,
         teacache_speedup=None, teacache_calibration=None,
     )
@@ -52,6 +52,7 @@ class _FakeWanApp:
 
     def __call__(self, **kw):
         import torch
+        self.call_kwargs = kw
         # transformer stage expects .latents; vae stage expects .frames.
         return types.SimpleNamespace(
             latents=torch.zeros(1, 16, 2, 4, 4, dtype=torch.bfloat16),
@@ -196,6 +197,22 @@ def test_save_video_success(monkeypatch, tmp_path):
     assert ok is True
 
 
+def test_save_video_passes_float_unit_range_frames(monkeypatch, tmp_path):
+    # export_to_video multiplies ndarray frames by 255 itself — passing uint8
+    # wraps pixels to 256-v (color inversion). Contract: float32 [0, 1].
+    import numpy as np
+    import torch
+
+    exported = {}
+    monkeypatch.setattr("diffusers.utils.export_to_video",
+                        lambda frames, path, fps: exported.update(frames=frames, fps=fps))
+    ok = wan_mod._save_video(torch.zeros(1, 3, 2, 4, 4), str(tmp_path / "v.mp4"))
+    assert ok is True and exported["fps"] == 16
+    f0 = exported["frames"][0]
+    assert f0.shape == (4, 4, 3) and f0.dtype == np.float32
+    assert abs(float(f0[0, 0, 0]) - 0.5) < 1e-6  # [-1,1] zeros -> 0.5
+
+
 def test_save_video_export_failure_returns_false(monkeypatch, tmp_path):
     import torch
 
@@ -239,6 +256,22 @@ def test_stage_transformer_generate_saves_latents(monkeypatch, tmp_path):
     assert (tmp_path / "latents.pt").exists()
 
 
+def test_stage_transformer_lets_pipeline_prepare_latents(monkeypatch, tmp_path):
+    # Sampling must start from the pipeline's unit-variance prepare_latents
+    # noise (seeded via generator), not orchestrator-injected randn*0.1 smoke
+    # latents — those decode to a flat gray video.
+    import torch
+    _setup_wan_fakes(monkeypatch)
+    args = _wan_args(stage_mode="generate", work_dir=str(tmp_path),
+                     cache_dir=str(tmp_path), seed=1234)
+    WanOrchestrator(args)._stage_transformer(args)
+    kw = _FakeWanApp.instances[-1].call_kwargs
+    assert "latents" not in kw
+    gen = kw.get("generator")
+    assert isinstance(gen, torch.Generator)
+    assert gen.initial_seed() == 1234
+
+
 def test_stage_vae_compile(monkeypatch, tmp_path):
     _setup_wan_fakes(monkeypatch)
     orch = WanOrchestrator(_wan_args(stage_mode="compile", cache_dir=str(tmp_path)))
@@ -268,3 +301,52 @@ def test_stage_vae_generate_mp4_branch(monkeypatch, tmp_path):
     WanOrchestrator(args)._stage_vae(args)
     # mp4 path taken -> no .pt fallback written.
     assert not (tmp_path / "out.pt").exists()
+
+
+def test_wan_pipeline_prepare_latents_is_unit_variance_and_seeded():
+    # Sampling must start from unit-variance noise (scheduler init sigma 1.0);
+    # the old smoke harness injected randn*0.1, which collapses the trajectory
+    # to the latent mean and decodes to a flat gray video. The orchestrator now
+    # delegates to this pipeline path with a seeded generator.
+    import torch
+    from difflet.models.wan.pipeline import WanOrchestrator as WanPipelineOrchestrator
+
+    pipe = WanPipelineOrchestrator.__new__(WanPipelineOrchestrator)
+    pipe.height, pipe.width, pipe.num_frames = 480, 832, 9
+    pipe.dtype = torch.float32
+    make = lambda seed: WanPipelineOrchestrator.prepare_latents(
+        pipe, batch_size=1, generator=torch.Generator().manual_seed(seed))
+    a, b, c = make(42), make(42), make(7)
+    assert a.shape == (1, 16, 3, 60, 104)
+    assert 0.9 < float(a.float().std()) < 1.1
+    assert torch.equal(a, b)          # same seed -> deterministic
+    assert not torch.equal(a, c)      # different seed -> different noise
+
+
+# ----------------------------------------------------------------- --host-vae
+
+def test_compile_host_vae_skips_neuron_vae_stage(monkeypatch):
+    # NCC_EVRF007: the single-shot Neuron VAE graph exceeds the compiler
+    # instruction limit beyond ~9 frames; --host-vae decodes on CPU instead.
+    stages = []
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: stages.append(stage))
+    WanOrchestrator(_wan_args(host_vae=True, num_frames=81)).compile()
+    assert stages == ["transformer"]
+
+
+def test_generate_host_vae_decodes_on_host(monkeypatch, tmp_path):
+    stages = []
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: stages.append(stage))
+    decoded = {}
+    monkeypatch.setattr(wan_mod, "_decode_latents_host",
+                        lambda latents_path, model_id, output_path, revision=None:
+                        decoded.update(latents=latents_path, out=output_path))
+    out = tmp_path / "wan.mp4"
+    args = _wan_args(host_vae=True, num_frames=81, work_dir=str(tmp_path / "work"),
+                     keep_work_dir=True, output=str(out))
+    WanOrchestrator(args).generate()
+    assert stages == ["transformer"]
+    assert decoded["out"] == str(out)
+    assert decoded["latents"].endswith("latents.pt")

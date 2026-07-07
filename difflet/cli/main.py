@@ -64,6 +64,11 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
                    help="Compiled artifact cache root (default: ~/.cache/difflet/)")
     p.add_argument("--force", action="store_true",
                    help="Recompile even if a valid cache entry exists")
+    p.add_argument("--host-vae", dest="host_vae", action="store_true",
+                   help="Decode the VAE on host CPU via diffusers instead of a "
+                        "compiled Neuron VAE. Required for Wan clips beyond ~9 "
+                        "frames: the single-shot Neuron VAE graph exceeds the "
+                        "compiler instruction limit (NCC_EVRF007).")
 
 
 def _add_generate_flags(p: argparse.ArgumentParser) -> None:

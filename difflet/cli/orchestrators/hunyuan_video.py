@@ -45,7 +45,9 @@ def _save_video(tensor: "torch.Tensor", output_path: str) -> bool:
         return False
     frames = tensor.detach().to(torch.float32).clamp(-1, 1)
     frames = ((frames + 1.0) / 2.0).clamp(0, 1)
-    frames = (frames[0].permute(1, 2, 3, 0).cpu().numpy() * 255).round().astype("uint8")
+    # export_to_video multiplies ndarray frames by 255 itself; pass float [0, 1]
+    # (uint8 input wraps to 256-v: color inversion).
+    frames = frames[0].permute(1, 2, 3, 0).cpu().numpy().astype("float32")
     try:
         export_to_video(list(frames), output_path, fps=24)
     except Exception as exc:

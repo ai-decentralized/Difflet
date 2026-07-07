@@ -162,6 +162,11 @@ mesh `{dp, cfg, cp, tp}` (tp innermost, dp outermost):
   size 2. Mutually exclusive with `cp_degree > 1` at the pipeline level, and only valid for
   true-CFG models (Wan, LTX-2) — guidance-distilled models (Flux, HunyuanVideo, HunyuanVideo
   1.5, Qwen-Image) run a single forward pass and reject it.
+- `sp_enabled` — Megatron-style sequence parallelism: shards the otherwise-replicated
+  norm/modulation/residual regions along the sequence axis across the *existing*
+  tensor-parallel group (reduce-scatter replaces the row-parallel all-reduce). Adds no mesh
+  axis, so `world_size` is unchanged. Mutually exclusive with `cp_degree > 1`. Device-verified
+  for Flux, Wan 2.1/2.2, and HunyuanVideo (`_SP_SUPPORTED_MODELS` in `difflet/cli/main.py`).
 - `dp_degree` — data-parallel replica axis (reserved: groups exist, the replication feature is
   not wired yet). The dp axis carries **no** per-layer/per-step collective — enforced by
   `tests/unit/test_no_dp_parasites.py`.
@@ -189,8 +194,10 @@ surface. The migration is bit-exact: `scripts/mesh_regression_smoke.sh` compiles
 Wan backbone at `tp=2×cfg=2` and `tp=2×cp=2` against the pre-refactor baseline and asserts
 byte-identical outputs on device.
 
-On the 4-core `trn2.3xlarge`, the CP-capable models use `tp=2 cp=2` (world size 4); LTX-2 and
-HunyuanVideo 1.5 do not support CP and use `tp=4`.
+On the 4-core `trn2.3xlarge`, the four-core configurations are `tp=4`, `tp=2 cp=2`,
+`tp=2 + --cfg-parallel` (true-CFG models), and `tp=4 --sp` (SP-capable models); LTX-2 and
+HunyuanVideo 1.5 support neither CP nor SP and use `tp=4`. All combinations are exercised
+end-to-end by `scripts/verify_cli.py` (see Development workflow).
 
 ## Runtime protocol
 
@@ -283,6 +290,47 @@ Hard rules for new modeling code (enforced by `scripts/test_imports.sh`):
 `MultiComponentApplication` base.
 
 ## Development workflow
+
+### CLI verification matrix
+
+`scripts/verify_cli.py` is the on-device release gate: for each model it runs
+`difflet download` once, then `difflet compile` + a **timed** `difflet generate` for every
+supported four-core parallel config (`tp4`, `tp2cp2`, `tp2cfg`, `tp4sp`), with sample-grade
+step counts so outputs are visually verifiable against the prompt. Unsupported combinations
+auto-SKIP (the skip-rule sets are pinned to `difflet.cli.main` by drift-guard unit tests);
+documented gaps are XFAIL cells. Results land in `/tmp/logs/verify_matrix_<ts>/` as per-cell
+logs, output artifacts, a matrix summary, and `results.json`; the exit code is nonzero on any
+unexpected FAIL/XPASS.
+
+```bash
+python scripts/verify_cli.py                          # full 7-model x 4-config matrix
+python scripts/verify_cli.py --models wan --configs tp4sp
+```
+
+**Validation lesson (hard-won):** parity/smoke tests must compare against the **diffusers
+reference**, not difflet-to-difflet. Two output-destroying bugs (unzeroed Wan pad embeddings,
+a silently-dropped attention mask on the CPU backend) survived every internal parity gate
+because both sides of each comparison shared the bug. Exit code 0 plus an artifact on disk is
+not verification either — check mode-specific side effects (e.g. an `*sp*` compiled dir, a
+plausible compile time) when validating a flag.
+
+### Known toolchain issues (neuronx-cc 2.25.3371, trn2)
+
+Repro artifacts preserved under `/tmp/logs/` on the validation host; ticket material for
+`aws-neuron-sdk`:
+
+1. `NCC_INLA001` — internal compiler error (SBUF allocation, `concatenate [140,1536,1]`)
+   compiling the HunyuanVideo DiT at `tp=2 cp=2`. Deterministic.
+2. `NCC_EVRF007` — the Wan VAE decoder graph exceeds the 5M compiler-instruction budget
+   beyond ~9 frames (23.5M at 49 frames). Worked around with `--host-vae`; the real fix is a
+   per-frame Neuron VAE decode mirroring diffusers' causal cache.
+3. On-device video-DiT sample fidelity degrades relative to the CPU reference with identical
+   inputs, worsening with attention sequence length (fine ≲5k tokens for image DiTs and
+   LTX-2; degraded at ≳13k — HunyuanVideo tiles, Wan long-clip washout). Difflet modeling is
+   validated exact vs diffusers on CPU (cosine ≥ 0.9995); one-step NEFF parity harnesses:
+   `scripts/wan_m25c_neff_cpu_alignment.sh`, `scripts/hunyuan_real_weight_one_step_alignment.py`.
+
+### Helper scripts
 
 Project-local helper scripts:
 

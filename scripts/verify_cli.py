@@ -53,6 +53,9 @@ class ModelSpec:
     key: str
     model_id: str
     shape_flags: tuple[str, ...]
+    # Sample-grade generate-only settings (steps/guidance) so outputs are
+    # prompt-faithful and human-verifiable; compile never sees these.
+    generate_flags: tuple[str, ...]
     prompt: str
     output_name: str            # value passed to --output (inside the cell dir)
     artifact_names: tuple[str, ...]  # accepted output artifacts, in preference order
@@ -78,26 +81,34 @@ MODELS: dict[str, ModelSpec] = {
     "flux": ModelSpec(
         key="flux", model_id="black-forest-labs/FLUX.1-dev",
         shape_flags=("--height", "1024", "--width", "1024"),
+        generate_flags=("--steps", "28"),
         prompt="a cat sitting on a bench",
         output_name="flux.png", artifact_names=("flux.png",), staged=False,
     ),
     "qwen_image": ModelSpec(
         key="qwen_image", model_id="Qwen/Qwen-Image",
         shape_flags=("--height", "1024", "--width", "1024"),
+        generate_flags=("--steps", "50"),
         prompt="a cat sitting on a bench",
         # torchvision PNG write falls back to a .pt tensor on failure
         output_name="qwen.png", artifact_names=("qwen.png", "qwen.pt"), staged=True,
     ),
     "ltx_2": ModelSpec(
         key="ltx_2", model_id="Lightricks/LTX-2",
-        shape_flags=("--height", "256", "--width", "384", "--num-frames", "9"),
+        shape_flags=("--height", "256", "--width", "384", "--num-frames", "121"),
+        generate_flags=("--steps", "40"),
         prompt="a cat walking through a garden",
-        # LTX2Orchestrator.generate always writes output.with_suffix('.pt')
-        output_name="ltx2.mp4", artifact_names=("ltx2.pt",), staged=False,
+        # MP4 export with a .pt tensor fallback on codec failure
+        output_name="ltx2.mp4", artifact_names=("ltx2.mp4", "ltx2.pt"), staged=False,
     ),
     "wan": ModelSpec(
         key="wan", model_id="Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+        # 9 frames: device attention fidelity degrades on long sequences
+        # (f81 = ~33k joint tokens -> washed/blank output; f9 = ~4.7k -> real
+        # content, one-step parity 0.9986). Long-clip support is blocked on the
+        # toolchain attention kernel, not difflet.
         shape_flags=("--height", "480", "--width", "832", "--num-frames", "9"),
+        generate_flags=("--steps", "40", "--guidance-scale", "4.0"),
         prompt="a cat walking through a garden",
         # export_to_video falls back to a .pt tensor on failure
         output_name="wan.mp4", artifact_names=("wan.mp4", "wan.pt"), staged=True,
@@ -105,6 +116,7 @@ MODELS: dict[str, ModelSpec] = {
     "wan2_1": ModelSpec(
         key="wan2_1", model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers",
         shape_flags=("--height", "480", "--width", "832", "--num-frames", "9"),
+        generate_flags=("--steps", "40", "--guidance-scale", "4.0"),
         prompt="a cat walking through a garden",
         output_name="wan21.mp4", artifact_names=("wan21.mp4", "wan21.pt"), staged=True,
         # Isolate wan2_1's compiled artifacts: pre-fix difflet installs shared
@@ -114,7 +126,8 @@ MODELS: dict[str, ModelSpec] = {
     ),
     "hunyuan_video": ModelSpec(
         key="hunyuan_video", model_id="hunyuanvideo-community/HunyuanVideo",
-        shape_flags=("--height", "320", "--width", "512", "--num-frames", "61"),
+        shape_flags=("--height", "320", "--width", "512", "--num-frames", "121"),
+        generate_flags=("--steps", "50"),
         prompt="a cat sitting on a bench",
         output_name="hunyuan.mp4", artifact_names=("hunyuan.mp4", "hunyuan.pt"), staged=True,
     ),
@@ -122,7 +135,7 @@ MODELS: dict[str, ModelSpec] = {
         key="hunyuan_video_15",
         model_id="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
         # scaffold: compile/generate raise NotImplementedError before shape matters
-        shape_flags=(), prompt="a cat sitting on a bench",
+        shape_flags=(), generate_flags=(), prompt="a cat sitting on a bench",
         output_name="hunyuan15.mp4", artifact_names=("hunyuan15.mp4", "hunyuan15.pt"),
         staged=False,
     ),
@@ -136,9 +149,17 @@ DISTILLED = frozenset({"flux", "qwen_image", "hunyuan_video", "hunyuan_video_15"
 SP_SUPPORTED = frozenset({"flux", "wan", "wan2_1", "hunyuan_video"})
 CP_UNSUPPORTED = frozenset({"ltx_2", "hunyuan_video_15"})
 
-# hunyuan_video_15 is a scaffold: compile/generate raise NotImplementedError
-# (difflet/cli/orchestrators/hunyuan_video_15.py) — documented known gap.
-EXPECTED_FAIL_CELLS = frozenset({("hunyuan_video_15", "tp4")})
+# Documented known gaps:
+# - hunyuan_video_15 is a scaffold: compile/generate raise NotImplementedError
+#   (difflet/cli/orchestrators/hunyuan_video_15.py).
+# - hunyuan_video tp2cp2: neuronx-cc 2.25.3371.0 dies with INTERNAL_ERROR
+#   NCC_INLA001 (SBUF alloc out of bound) on the CP-degree-2 DiT graph —
+#   deterministic, reproduced twice; HLO repro preserved for an
+#   aws-neuron-sdk ticket.
+EXPECTED_FAIL_CELLS = frozenset({
+    ("hunyuan_video_15", "tp4"),
+    ("hunyuan_video", "tp2cp2"),
+})
 
 
 def skip_reason(model_key: str, config_key: str) -> str | None:
@@ -194,6 +215,7 @@ def build_generate_cmd(
     spec: ModelSpec, cfg: ParallelConfig, cell_dir: pathlib.Path,
 ) -> tuple[list[str], list[pathlib.Path]]:
     cmd = ["difflet", "generate", "--model-id", spec.model_id] + _common_flags(spec, cfg)
+    cmd += list(spec.generate_flags)
     cmd += ["--prompt", spec.prompt, "--output", str(cell_dir / spec.output_name)]
     if spec.staged:
         cmd += ["--work-dir", str(cell_dir / "work"), "--keep-work-dir"]
