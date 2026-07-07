@@ -13,12 +13,26 @@ def attention(
     scale: float | None = None,
     causal: bool = False,
     attention_mask=None,
+    bound_min=None,
+    bound_max=None,
     tp_q: bool = False,
     tp_k: bool = False,
     tp_out: bool = False,
     **kwargs,
 ):
     del tp_q, tp_k, tp_out, kwargs
+    if bound_min is not None or bound_max is not None:
+        # attention_cte contiguous-bounds contract: per query row, keys in
+        # [bound_min, bound_max) are valid. Silently ignoring these ran the
+        # attention UNMASKED on CPU (garbage padding keys poisoned every query).
+        if bound_min is None or bound_max is None:
+            raise ValueError("bound_min and bound_max must both be provided")
+        if attention_mask is not None:
+            raise ValueError("attention_mask and bounds are mutually exclusive")
+        key_idx = torch.arange(k.shape[-2], device=k.device).view(1, 1, -1)
+        attention_mask = (key_idx >= bound_min.to(key_idx.device)) & (
+            key_idx < bound_max.to(key_idx.device)
+        )
     scale = 1.0 if scale is None else scale
     scores = torch.matmul(q, k.transpose(-1, -2)) * scale
     if causal:

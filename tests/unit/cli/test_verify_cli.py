@@ -105,7 +105,10 @@ def test_cp_unsupported_models():
 
 
 def test_expected_fail_cells():
-    assert EXPECTED_FAIL_CELLS == {("hunyuan_video_15", "tp4")}
+    assert EXPECTED_FAIL_CELLS == {
+        ("hunyuan_video_15", "tp4"),      # scaffold: NotImplementedError
+        ("hunyuan_video", "tp2cp2"),      # neuronx-cc 2.25 NCC_INLA001 internal error
+    }
 
 
 # ---------------------------------------------------------------- skip rules
@@ -138,8 +141,8 @@ def test_plan_cells_counts():
     runnable = [c for c in cells if not c.skip_reason]
     assert len(skipped) == 9
     assert len(runnable) == 19
-    xfail = [c for c in runnable if c.expected_fail]
-    assert [(c.model_key, c.config_key) for c in xfail] == [("hunyuan_video_15", "tp4")]
+    xfail = {(c.model_key, c.config_key) for c in runnable if c.expected_fail}
+    assert xfail == {("hunyuan_video_15", "tp4"), ("hunyuan_video", "tp2cp2")}
 
 
 def test_plan_cells_respects_subset_filters():
@@ -219,12 +222,12 @@ def test_build_generate_cmd_staged_gets_work_dir():
     assert artifacts == [cell_dir / "wan.mp4", cell_dir / "wan.pt"]
 
 
-def test_build_generate_cmd_ltx_2_expects_pt_artifact():
-    # LTX2Orchestrator.generate always writes output.with_suffix('.pt')
+def test_build_generate_cmd_ltx_2_accepts_mp4_or_pt():
+    # LTX2Orchestrator.generate now exports MP4 with a .pt fallback
     cell_dir = pathlib.Path("/tmp/cell")
     cmd, artifacts = build_generate_cmd(MODELS["ltx_2"], PARALLEL_CONFIGS["tp4"], cell_dir)
     assert cmd[cmd.index("--output") + 1] == str(cell_dir / "ltx2.mp4")
-    assert artifacts == [cell_dir / "ltx2.pt"]
+    assert artifacts == [cell_dir / "ltx2.mp4", cell_dir / "ltx2.pt"]
 
 
 def test_build_generate_cmd_qwen_accepts_png_or_pt():
@@ -396,3 +399,46 @@ def test_format_summary_lists_unexpected_failures_only():
         status=Status.FAIL, reason="artifact not found", cmd=["difflet", "generate"])
     text = format_summary(results, ["flux", "hunyuan_video_15"], ["tp4", "tp2cfg"], "/tmp/run")
     assert "FAILED" in text and "artifact not found" in text
+
+
+# ---------------------------------------------------------------- fidelity settings
+
+def test_generate_cmds_carry_fidelity_flags():
+    """Typical sample-grade settings so outputs are prompt-faithful and human-verifiable."""
+    expected = {
+        "flux": ("--steps", "28"),
+        "qwen_image": ("--steps", "50"),
+        "ltx_2": ("--steps", "40"),
+        "wan": ("--steps", "40", "--guidance-scale", "4.0"),
+        "wan2_1": ("--steps", "40", "--guidance-scale", "4.0"),
+        "hunyuan_video": ("--steps", "50"),
+    }
+    for key, flags in expected.items():
+        cmd, _ = build_generate_cmd(MODELS[key], PARALLEL_CONFIGS["tp4"],
+                                    pathlib.Path("/tmp/cell"))
+        assert cmd[cmd.index("--steps") + 1] == flags[flags.index("--steps") + 1], key
+        if "--guidance-scale" in flags:
+            assert cmd[cmd.index("--guidance-scale") + 1] == \
+                flags[flags.index("--guidance-scale") + 1], key
+
+
+def test_compile_cmds_have_no_generate_only_flags():
+    for key in ("flux", "wan", "hunyuan_video"):
+        cmd = build_compile_cmd(MODELS[key], PARALLEL_CONFIGS["tp4"])
+        assert "--steps" not in cmd and "--guidance-scale" not in cmd, key
+
+
+def test_video_models_use_5s_clip_shapes():
+    """ltx_2/hunyuan keep 5 s clips; wan is pinned to 9 frames — device
+    attention fidelity collapses on long sequences (~33k tokens at f81)."""
+    expected = {"wan": "9", "wan2_1": "9", "ltx_2": "121", "hunyuan_video": "121"}
+    for key, frames in expected.items():
+        flags = MODELS[key].shape_flags
+        assert flags[flags.index("--num-frames") + 1] == frames, key
+
+
+def test_wan_models_all_device_at_f9():
+    """At 9 frames the Neuron VAE compiles fine (and its dirs are warm), so
+    wan cells stay all-device; --host-vae remains available for long clips."""
+    for key in ("wan", "wan2_1"):
+        assert "--host-vae" not in build_compile_cmd(MODELS[key], PARALLEL_CONFIGS["tp4"])

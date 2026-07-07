@@ -2,7 +2,7 @@
 
 **A focused inference engine for diffusion transformers (DiTs) on AWS Trainium.**
 
-[Installation](#installation) · [Quick start](#quick-start) · [CLI reference](#cli-reference) · [Developer guide](DEVELOPER.md)
+[Installation](#installation) · [Quick start](#quick-start) · [CLI reference](#cli-reference) · [Verified matrix](#verified-parallelism-matrix) · [Developer guide](DEVELOPER.md)
 
 ## About
 
@@ -24,8 +24,10 @@ Core capabilities:
   the supported models (no CPU fallbacks in the hot path).
 - **Content-addressed compile cache** — AOT artifacts are hashed by model, parallel config,
   shape, and toolchain versions, so a warm cache skips straight to load + denoise.
-- **Tensor + context + CFG parallelism** — scale a single generation across NeuronCores with
-  `tp`, `cp`, and CFG-parallel modes.
+- **Tensor + context + CFG + sequence parallelism** — scale a single generation across
+  NeuronCores with `tp`, `cp`, CFG-parallel, and Megatron-style sequence-parallel (`--sp`)
+  modes; every mode is exercised on-device by the verification matrix
+  (`scripts/verify_cli.py`).
 - **Latency tooling** — optional TeaCache step-skipping for faster denoise.
 
 ## Supported models
@@ -37,25 +39,26 @@ Core capabilities:
 | [Wan-AI/Wan2.2-T2V-A14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers) | Text-to-video | 480×832×9 | 2-stage (transformer → vae); CFG-parallel |
 | [Wan-AI/Wan2.1-T2V-14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.1-T2V-14B-Diffusers) | Text-to-video | 480×832×9 | Same runtime as Wan 2.2 |
 | [hunyuanvideo-community/HunyuanVideo](https://huggingface.co/hunyuanvideo-community/HunyuanVideo) | Text-to-video | 320×512×61 | 3-stage (clip → llama → generate) |
-| [Lightricks/LTX-2](https://huggingface.co/Lightricks/LTX-2) | Text-to-video | 512×768×121 | Single-process; CP not supported (use `tp=4`) |
+| [Lightricks/LTX-2](https://huggingface.co/Lightricks/LTX-2) | Text-to-video | 512×768×121 | Single-process; CP/SP not supported (use `tp=4`); exports `.mp4` |
 
 ## Feature support
 
 Which acceleration features each model supports. ✅ = supported, ❌ = not supported.
 
-| Model | TP | CP — all-gather | CP — ring | TeaCache (adaptive) | TeaCache (fixed cadence) | CFG-parallel |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ |
-| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ |
-| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| HunyuanVideo | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ |
-| LTX-2 | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Model | TP | CP — all-gather | CP — ring | SP | TeaCache (adaptive) | TeaCache (fixed cadence) | CFG-parallel |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ |
+| Qwen-Image | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ ¹ |
+| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| HunyuanVideo | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ |
+| LTX-2 | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
 
 **Feature legend**
 
 - **TP** — tensor parallelism (`--tp-degree`). Splits each layer across NeuronCores.
 - **CP — all-gather** — context parallelism with gather-KV attention (`--cp-degree N --cp-mode gather_kv`, the default). Splits the sequence across ranks.
 - **CP — ring** — context parallelism with ring attention (`--cp-degree N --cp-mode ring`). Lower memory than all-gather for long sequences.
+- **SP** — Megatron-style sequence parallelism (`--sp`). Shards the norm/modulation/residual regions along the sequence axis across the existing tensor-parallel group; `world_size` is unchanged. Mutually exclusive with `--cp-degree > 1`.
 - **TeaCache (adaptive)** — calibration-driven step-skipping (`--teacache-speedup` / `--teacache-online-delta`, with `--teacache-calibration`).
 - **TeaCache (fixed cadence)** — blind skip-every-N-steps (`--teacache-cadence N`, no calibration needed).
 - **CFG-parallel** — splits the conditional/unconditional CFG passes across 2 data-parallel ranks (`--cfg-parallel`). Only meaningful for true two-pass classifier-free guidance.
@@ -64,7 +67,7 @@ Which acceleration features each model supports. ✅ = supported, ❌ = not supp
 
 1. Guidance-distilled model (single forward pass with the guidance scale baked into the timestep embedding) — there is no second CFG branch to split.
 
-Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive. `world_size = tp_degree × cp_degree` (or `tp_degree × 2` with CFG-parallel).
+Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive (and each is mutually exclusive with `--sp`). `world_size = tp_degree × cp_degree` (or `tp_degree × 2` with CFG-parallel; `--sp` leaves it unchanged).
 
 ## Installation
 
@@ -84,7 +87,7 @@ Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-p
 ```bash
 git clone git@github.com:ai-decentralized/Difflet.git
 cd Difflet
-source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/active
+source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
 pip install diffusers==0.38.0
 pip install imageio-ffmpeg
 pip install -e . --no-deps
@@ -117,7 +120,7 @@ difflet run --model-id black-forest-labs/FLUX.1-dev \
 difflet run --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers \
   --tp-degree 2 --cp-degree 2 \
   --height 480 --width 832 --num-frames 9 \
-  --steps 50 --guidance-scale 1.0 --seed 42 \
+  --steps 40 --guidance-scale 4.0 --seed 42 \
   --prompt "a cat walking through a garden" \
   --output cat.mp4
 ```
@@ -127,8 +130,9 @@ DiTs take longer). Compiled artifacts are cached under `~/.cache/difflet/`; subs
 the cache and skip straight to load + denoise.
 
 > **Parallelism cheat-sheet.** Flux, Wan, HunyuanVideo, and Qwen-Image support `--tp-degree 2
-> --cp-degree 2` (world size 4) on a 4-core host. LTX-2 do not support
-> context parallelism.
+> --cp-degree 2` (world size 4) on a 4-core host; Flux, Wan, and HunyuanVideo also support
+> `--tp-degree 4 --sp`. LTX-2 does not support context or sequence parallelism (use
+> `--tp-degree 4`, optionally with `--cfg-parallel` at `--tp-degree 2`).
 
 ### Python API
 
@@ -172,6 +176,7 @@ each step independently — useful for debugging compilation or inspecting inter
 | `--cp-degree N` | compile, generate, run | Context-parallel degree (default: 1) |
 | `--cp-mode {gather_kv,ring}` | compile, generate, run | Context-parallel attention strategy |
 | `--cfg-parallel` | compile, generate, run | Split the uncond/cond CFG passes across 2 ranks (true-CFG models only) |
+| `--sp` | compile, generate, run | Megatron-style sequence parallelism over the TP group (Flux, Wan, HunyuanVideo) |
 | `--height/--width/--num-frames` | compile, generate, run | Output shape (defaults to the model's registry shape) |
 | `--cache-dir PATH` | compile, generate, run | Compiled-artifact cache root (default `~/.cache/difflet/`) |
 | `--force` | compile, generate, run | Recompile even if a valid cache entry exists |
@@ -245,11 +250,12 @@ difflet compile --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers \
 
 difflet generate --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers \
   --tp-degree 2 --cp-degree 2 --height 480 --width 832 --num-frames 9 \
-  --steps 50 --guidance-scale 1.0 --seed 42 \
+  --steps 40 --guidance-scale 4.0 --seed 42 \
   --prompt "a cat walking through a garden" --output wan.mp4 \
   --work-dir /tmp/logs/wan-work --keep-work-dir \
   2>&1 | tee /tmp/logs/wan-generate.log
 ```
+
 
 #### HunyuanVideo (3-stage: clip → llama → generate)
 
@@ -300,18 +306,32 @@ difflet generate --model-id Qwen/Qwen-Image \
 | `generate` inter-stage tensors | `--work-dir` path (default `~/.cache/difflet/work/<model>/`) |
 | `generate` final output | `--output` path |
 
-## Project status
+## Verified parallelism matrix
 
-| Milestone | State | Notes |
-|---|---|---|
-| M1 — Flux end-to-end | Done | `FLUX.1-dev` at 1024² in 28 steps |
-| M2 — Wan 2.2 T2V | Done | 480×832×9 video tensor, TP=4 |
-| M3 — HunyuanVideo | Done | T2V at 320×512×61, fully on-device |
-| M4a — Qwen-Image | Done | Text-to-image fully on-device |
-| M6 — LTX-2 | Done | Dual-stream segmented DiT, decoded end-to-end |
-| M6a — HunyuanVideo 1.5 | In progress | Registered; `download` only |
-| Context / CFG parallelism | Done | `cp_degree` and CFG-parallel for the supported models |
-| Planned | — | 720p / longer-frame / I2V, TP refactor, NKI masked attention, Z-Image |
+`scripts/verify_cli.py` runs the full CLI (`download → compile → timed generate`) for every
+model × parallel-config cell on a 4-core `trn2.3xlarge`, with per-cell logs and a
+machine-readable `results.json`. Each config uses exactly 4 NeuronCores
+(`world_size = (2 if cfg else 1) × cp × tp`). Latest full run:
+
+| Model | `tp4` | `tp2cp2` | `tp2cfg` | `tp4sp` |
+|---|:---:|:---:|:---:|:---:|
+| flux | ✅ | ✅ | — ¹ | ✅ |
+| qwen_image | ✅ | ✅ | — ¹ | — ² |
+| ltx_2 | ✅ | — ³ | ✅ | — ² |
+| wan (2.2) | ✅ | ✅ | ✅ | ✅ |
+| wan2_1 | ✅ | ✅ | ✅ | ✅ |
+| hunyuan_video | ✅ | ✗ ⁴ | — ¹ | ✅ |
+| hunyuan_video_15 | ✗ ⁵ | — ³ | — ¹ | — ² |
+
+✅ compile + generate pass with output artifact · — auto-skipped (unsupported combination) ·
+✗ expected failure (known gap). ¹ guidance-distilled, no CFG branch. ² SP not supported.
+³ CP not supported. ⁴ `NCC_INLA001` compiler crash (see [DEVELOPER.md](DEVELOPER.md)). ⁵ HunyuanVideo 1.5 is a scaffold
+(`download` only).
+
+```bash
+python scripts/verify_cli.py                     # full matrix
+python scripts/verify_cli.py --models wan ltx_2  # subset
+```
 
 ## Developer guide
 

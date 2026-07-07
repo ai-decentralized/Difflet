@@ -157,6 +157,22 @@ def test_shared_cli_args_optionals():
     assert "--prompt" not in bare and "--cache-dir" not in bare
 
 
+def test_save_video_passes_float_unit_range_frames(monkeypatch, tmp_path):
+    # export_to_video multiplies ndarray frames by 255 itself — passing uint8
+    # wraps pixels to 256-v (color inversion). Contract: float32 [0, 1].
+    import numpy as np
+    import torch
+
+    exported = {}
+    monkeypatch.setattr("diffusers.utils.export_to_video",
+                        lambda frames, path, fps: exported.update(frames=frames, fps=fps))
+    ok = hv_mod._save_video(torch.zeros(1, 3, 2, 4, 4), str(tmp_path / "v.mp4"))
+    assert ok is True and exported["fps"] == 24
+    f0 = exported["frames"][0]
+    assert f0.shape == (4, 4, 3) and f0.dtype == np.float32
+    assert abs(float(f0[0, 0, 0]) - 0.5) < 1e-6  # [-1,1] zeros -> 0.5
+
+
 def test_save_video_success_and_failure(monkeypatch, tmp_path):
     import torch
     monkeypatch.setattr("diffusers.utils.export_to_video", lambda *a, **kw: None)

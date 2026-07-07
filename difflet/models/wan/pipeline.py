@@ -147,7 +147,8 @@ class WanOrchestrator:
                 raise ValueError("input_ids were provided but no Wan text_encoder is active.")
             if attention_mask is None:
                 attention_mask = torch.ones_like(input_ids, dtype=torch.int32)
-            return _first_tensor(self.text_encoder(input_ids, attention_mask))
+            embeds = _first_tensor(self.text_encoder(input_ids, attention_mask))
+            return _zero_padding_embeds(embeds, attention_mask)
         if prompt is not None:
             if self.text_encoder is None:
                 raise ValueError("prompt was provided but no Wan text_encoder is active.")
@@ -162,8 +163,27 @@ class WanOrchestrator:
             )
             input_ids = tokenized["input_ids"].to(torch.int64)
             attention_mask = tokenized["attention_mask"].to(torch.int32)
-            return _first_tensor(self.text_encoder(input_ids, attention_mask))
+            embeds = _first_tensor(self.text_encoder(input_ids, attention_mask))
+            return _zero_padding_embeds(embeds, attention_mask)
         return None
+
+    def _negative_prompt_embeds(self, prompt_embeds: torch.Tensor) -> torch.Tensor:
+        """Unconditional embeddings for CFG.
+
+        diffusers encodes negative_prompt="" through the text encoder (a real
+        EOS-token embedding, zero-padded); a zeros_like tensor is not a valid
+        embedding and degrades the CFG direction. Falls back to zeros when no
+        text encoder / tokenizer is available (e.g. precomputed-embeds runs).
+        """
+        if self.text_encoder is not None:
+            try:
+                neg = self.encode_prompt(prompt="")
+                if neg is not None:
+                    return neg.to(dtype=prompt_embeds.dtype)
+            except Exception as exc:  # tokenizer assets missing, etc.
+                print(f"[wan] empty-prompt negative encode failed ({exc}); "
+                      "falling back to zeros", flush=True)
+        return torch.zeros_like(prompt_embeds)
 
     def _get_tokenizer(self):
         if self._tokenizer is not None:
@@ -212,16 +232,19 @@ class WanOrchestrator:
         if output_type not in {"latent", "pt"}:
             raise ValueError("Wan output_type currently supports only 'latent' or 'pt'.")
 
+        # Hold loop latents in fp32 (diffusers convention): UniPC's order-2
+        # corrector computes small differences of near-equal terms and collapses
+        # in bf16. The model input is cast to the component dtype per step.
         latents = self.prepare_latents(
             batch_size=batch_size,
             channels=channels,
             height=height,
             width=width,
             num_frames=num_frames,
-            dtype=self.dtype,
+            dtype=torch.float32,
             generator=generator,
             latents=latents,
-        )
+        ).to(torch.float32)
         prompt_embeds = self.encode_prompt(
             prompt=prompt,
             prompt_embeds=prompt_embeds,
@@ -313,7 +336,7 @@ class WanOrchestrator:
                 # Stack [uncond, cond] into batch=2; the transformer scatters one
                 # branch to each DP rank and gathers the result back to batch=2.
                 if negative_prompt_embeds is None:
-                    negative_prompt_embeds = torch.zeros_like(prompt_embeds)
+                    negative_prompt_embeds = self._negative_prompt_embeds(prompt_embeds)
                 batched_latents = torch.cat([latents, latents], dim=0).to(dtype=model_dtype)
                 batched_embeds = torch.cat(
                     [negative_prompt_embeds, prompt_embeds], dim=0
@@ -364,7 +387,7 @@ class WanOrchestrator:
                 )
                 if scale > 1.0:
                     if negative_prompt_embeds is None:
-                        negative_prompt_embeds = torch.zeros_like(prompt_embeds)
+                        negative_prompt_embeds = self._negative_prompt_embeds(prompt_embeds)
                     uncond = _first_tensor(
                         current_model(
                             latents.to(dtype=model_dtype),
@@ -442,6 +465,18 @@ class WanOrchestrator:
 def has_wan_components(app: Any) -> bool:
     pipeline = getattr(app, "pipeline", None)
     return bool(pipeline is not None and pipeline.has_runtime_components())
+
+
+def _zero_padding_embeds(embeds: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+    """Zero embedding rows at padding positions.
+
+    Reference Wan convention (diffusers ``_get_t5_prompt_embeds``): the DiT
+    cross-attends unmasked over the full text sequence and was trained with
+    zero-padded embeddings — raw UMT5 pad-token outputs at the padding
+    positions poison cross-attention and collapse sampling to noise.
+    """
+    mask = attention_mask.to(dtype=embeds.dtype, device=embeds.device)
+    return embeds * mask.unsqueeze(-1)
 
 
 def _load_scheduler(model_path: str):

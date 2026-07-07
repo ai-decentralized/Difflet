@@ -460,3 +460,31 @@ def test_matmul_mx_k_tiles_scale_mismatch():
 def test_supported_dtypes_constant():
     assert "float8_e4m3fn_x4" in cpu_mx.SUPPORTED_DTYPES
     assert "float8_e5m2_x4" in cpu_mx.SUPPORTED_DTYPES
+
+
+def test_cpu_attention_honors_contiguous_bounds():
+    # dual_stream_attention routes masked attention through bound_min/bound_max
+    # (attention_cte contract). The CPU fallback used to swallow these in
+    # **kwargs and silently run UNMASKED — garbage padding keys then poison
+    # every query (the HunyuanVideo tile-video bug).
+    from difflet.backends.cpu.ops_impl.attention import attention as cpu_attention
+
+    torch.manual_seed(0)
+    bh, q_len, kv_len, d = 2, 4, 6, 8
+    q = torch.randn(bh, q_len, d)
+    k = torch.randn(bh, kv_len, d)
+    v = torch.randn(bh, kv_len, d)
+    n_valid = 3  # keys [0, 3) valid, rest garbage
+    bound_min = torch.zeros(bh, q_len, 1, dtype=torch.int32)
+    bound_max = torch.full((bh, q_len, 1), n_valid, dtype=torch.int32)
+
+    out_bounded = cpu_attention(q, k, v, scale=0.5, causal=False,
+                                bound_min=bound_min, bound_max=bound_max)
+
+    mask = torch.zeros(bh, 1, kv_len, dtype=torch.bool)
+    mask[:, :, :n_valid] = True
+    out_masked = cpu_attention(q, k, v, scale=0.5, causal=False, attention_mask=mask)
+    out_unmasked = cpu_attention(q, k, v, scale=0.5, causal=False)
+
+    assert torch.allclose(out_bounded, out_masked, atol=1e-6)
+    assert not torch.allclose(out_bounded, out_unmasked, atol=1e-3)
