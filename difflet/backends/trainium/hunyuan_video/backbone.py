@@ -28,6 +28,8 @@ class HunyuanVideoBackboneInferenceConfig(InferenceConfig):
             self.context_parallel_enabled = False
         if not hasattr(self, "cp_mode"):
             self.cp_mode = "gather_kv"
+        if not hasattr(self, "sp_enabled"):
+            self.sp_enabled = False
 
     def get_required_attributes(self) -> List[str]:
         return [
@@ -221,7 +223,14 @@ class NeuronHunyuanVideoBackboneApplication(NeuronApplicationBase):
             state_dict[f"single_transformer_blocks.{i}.proj_out_mlp.weight"] = (
                 w[:, inner_dim:].clone().detach().contiguous()
             )
-        if getattr(config, "context_parallel_enabled", False):
+        # The model-root global_rank SPMDRank must hold arange(world_size) whenever any
+        # sequence/batch-sharding mode is on (CP, CFG, or Megatron-SP), so each rank reads
+        # its own rank; otherwise the buffer is all-zeros and every rank acts as rank 0.
+        if (
+            getattr(config, "context_parallel_enabled", False)
+            or getattr(config, "cfg_parallel_enabled", False)
+            or getattr(config, "sp_enabled", False)
+        ):
             world_size = config.neuron_config.world_size
             state_dict["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)
         return state_dict

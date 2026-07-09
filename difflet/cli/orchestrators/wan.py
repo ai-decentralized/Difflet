@@ -7,12 +7,13 @@ Inter-stage tensor: {work_dir}/latents.pt
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import sys
 from pathlib import Path
 
-from difflet.cli.orchestrators.base import ModelOrchestrator
 from difflet.cli import runner
+from difflet.cli.orchestrators.base import ModelOrchestrator
 
 # Model id comes from the CLI (--model-id); both Wan 2.2 A14B (MoE, dual
 # transformer) and Wan 2.1 14B (single transformer) route here. The single-vs-
@@ -21,6 +22,19 @@ from difflet.cli import runner
 _MODEL_TYPE = "wan"
 _CLI_NAME = "wan"
 _VIRTUAL_CORE_SIZE = None  # Wan does not require NEURON_RT_VIRTUAL_CORE_SIZE
+
+# The historical model id keeps the bare "wan" compiled-dir prefix so existing
+# compile caches stay valid (additive-only, same policy as
+# DiffletParallelConfig.to_cache_dict).
+_LEGACY_CACHE_PREFIX_MODEL_ID = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
+
+
+def _cache_prefix(model_id: str) -> str:
+    """Per-model compiled-dir prefix: two Wan versions must never share
+    artifacts (same architecture, different weights)."""
+    if model_id == _LEGACY_CACHE_PREFIX_MODEL_ID:
+        return "wan"
+    return re.sub(r"[^a-z0-9]+", "_", model_id.split("/")[-1].lower()).strip("_")
 
 
 def _save_video(tensor: "torch.Tensor", output_path: str) -> bool:
@@ -32,7 +46,9 @@ def _save_video(tensor: "torch.Tensor", output_path: str) -> bool:
         return False
     frames = tensor.detach().to(torch.float32).clamp(-1, 1)
     frames = ((frames + 1.0) / 2.0).clamp(0, 1)
-    frames = (frames[0].permute(1, 2, 3, 0).cpu().numpy() * 255).round().astype("uint8")
+    # export_to_video multiplies ndarray frames by 255 itself; pass float [0, 1]
+    # (uint8 input wraps to 256-v: color inversion).
+    frames = frames[0].permute(1, 2, 3, 0).cpu().numpy().astype("float32")
     try:
         export_to_video(list(frames), output_path, fps=16)
     except Exception as exc:
@@ -40,6 +56,37 @@ def _save_video(tensor: "torch.Tensor", output_path: str) -> bool:
         return False
     print(f"[wan] video saved to {output_path}", flush=True)
     return True
+
+
+def _decode_latents_host(latents_path: str, model_id: str, output_path: str,
+                         revision: str | None = None) -> None:
+    """Decode DiT latents with the diffusers Wan VAE on host CPU.
+
+    The compiled single-shot Neuron VAE exceeds the neuronx-cc instruction
+    limit (NCC_EVRF007) beyond ~9 frames; diffusers decodes latent frames
+    sequentially with a causal cache, so long clips work on host.
+    """
+    import torch
+    from diffusers import AutoencoderKLWan
+
+    from difflet.pipeline.path_resolver import resolve_model_path
+
+    model_dir = resolve_model_path(model_id, revision=revision, local_files_only=True)
+    vae = AutoencoderKLWan.from_pretrained(
+        str(Path(model_dir) / "vae"), torch_dtype=torch.float32
+    ).eval()
+    z = torch.load(latents_path, map_location="cpu").to(torch.float32)
+    mean = torch.tensor(vae.config.latents_mean).view(1, vae.config.z_dim, 1, 1, 1)
+    std = 1.0 / torch.tensor(vae.config.latents_std).view(1, vae.config.z_dim, 1, 1, 1)
+    z = z / std + mean
+    with torch.no_grad():
+        frames = vae.decode(z, return_dict=False)[0]
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.suffix == ".mp4" and _save_video(frames.cpu(), str(out)):
+        return
+    torch.save(frames.cpu(), out.with_suffix(".pt"))
+    print(f"[wan] video tensor saved to {out.with_suffix('.pt')}", flush=True)
 
 
 class WanOrchestrator(ModelOrchestrator):
@@ -60,6 +107,8 @@ class WanOrchestrator(ModelOrchestrator):
         runner.run_stage(self.args.model_id, "transformer",
                          num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE,
                          cli_args=shared)
+        if getattr(self.args, "host_vae", False):
+            return
         runner.run_stage(self.args.model_id, "vae",
                          num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE,
                          cli_args=shared)
@@ -76,9 +125,13 @@ class WanOrchestrator(ModelOrchestrator):
             runner.run_stage(self.args.model_id, "transformer",
                              num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE,
                              cli_args=shared)
-            runner.run_stage(self.args.model_id, "vae",
-                             num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE,
-                             cli_args=shared)
+            if getattr(self.args, "host_vae", False):
+                _decode_latents_host(str(work_dir / "latents.pt"), self.args.model_id,
+                                     self.args.output, revision=self.args.revision)
+            else:
+                runner.run_stage(self.args.model_id, "vae",
+                                 num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE,
+                                 cli_args=shared)
         except Exception:
             print(f"[difflet] work dir preserved at {work_dir} for inspection", file=sys.stderr)
             raise
@@ -97,7 +150,8 @@ class WanOrchestrator(ModelOrchestrator):
 
     def _stage_transformer(self, args: argparse.Namespace) -> None:
         import torch
-        from difflet.models.wan.application import NeuronWanApplication, _latent_num_frames
+
+        from difflet.models.wan.application import NeuronWanApplication
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
 
@@ -107,6 +161,7 @@ class WanOrchestrator(ModelOrchestrator):
             cp_degree=args.cp_degree or 1,
             cp_mode=getattr(args, "cp_mode", "gather_kv"),
             cfg_parallel_enabled=getattr(args, "cfg_parallel", False),
+            sp_enabled=getattr(args, "sp_enabled", False),
         )
         compiled_dir = self._stage_compiled_dir("transformer", args)
         app = NeuronWanApplication(
@@ -129,17 +184,12 @@ class WanOrchestrator(ModelOrchestrator):
             app.compile(str(compiled_dir))
             return
 
-        latent_frames = _latent_num_frames(args.num_frames or 9)
-        torch.manual_seed(args.seed)
-        latents = torch.randn(
-            1, 16, latent_frames,
-            (args.height or 480) // 8, (args.width or 832) // 8,
-            dtype=torch.bfloat16,
-        ) * 0.1
         app.load(str(compiled_dir), start_rank_id=0,
                  local_ranks_size=parallel.world_size, skip_warmup=True)
         out = app(
-            latents=latents,
+            # Latent init is delegated to WanPipeline.prepare_latents, which
+            # draws unit-variance noise from this seeded generator.
+            generator=torch.Generator().manual_seed(args.seed),
             prompt=args.prompt,
             height=args.height or 480,
             width=args.width or 832,
@@ -155,6 +205,7 @@ class WanOrchestrator(ModelOrchestrator):
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
         import torch
+
         from difflet.models.wan.application import NeuronWanApplication
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
@@ -182,7 +233,7 @@ class WanOrchestrator(ModelOrchestrator):
             app.compile(str(compiled_dir))
             return
 
-        latents = torch.load(Path(args.work_dir) / "latents.pt")
+        latents = torch.load(Path(args.work_dir) / "latents.pt").to(torch.bfloat16)
         app.load(str(compiled_dir), start_rank_id=0, local_ranks_size=1, skip_warmup=True)
         out = app(
             latents=latents,
@@ -206,16 +257,18 @@ class WanOrchestrator(ModelOrchestrator):
 
     def _stage_compiled_dir(self, stage: str, args: argparse.Namespace) -> Path:
         base = Path(args.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
+        prefix = _cache_prefix(self.args.model_id)
         tp = args.tp_degree or 4
         cp = args.cp_degree or 1
         cfg = "cfg" if getattr(args, "cfg_parallel", False) else ""
+        sp = "sp" if getattr(args, "sp_enabled", False) else ""
         h = args.height or 480
         w = args.width or 832
         f = args.num_frames or 9
         if stage == "transformer":
-            return base / f"wan_transformer_tp{tp}cp{cp}{cfg}_h{h}w{w}f{f}"
+            return base / f"{prefix}_transformer_tp{tp}cp{cp}{cfg}{sp}_h{h}w{w}f{f}"
         if stage == "vae":
-            return base / f"wan_vae_h{h}w{w}f{f}"
+            return base / f"{prefix}_vae_h{h}w{w}f{f}"
         raise ValueError(f"unknown stage {stage!r}")
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
@@ -235,6 +288,8 @@ class WanOrchestrator(ModelOrchestrator):
         ]
         if getattr(a, "cfg_parallel", False):
             parts.append("--cfg-parallel")
+        if getattr(a, "sp_enabled", False):
+            parts.append("--sp")
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
         if getattr(a, "output", None):

@@ -15,8 +15,11 @@ _EXPORTS = {
     "apply_rotary_emb": ("embeddings", "apply_rotary_emb"),
     "dequantize_mx": ("mx", "dequantize_mx"),
     "gather_tp_dim": ("collectives", "gather_tp_dim"),
-    "get_data_parallel_group": ("collectives", "get_data_parallel_group"),
-    "get_dp_rank_spmd": ("collectives", "get_dp_rank_spmd"),
+    "init_parallel_mesh": ("collectives", "init_parallel_mesh"),
+    "get_cfg_group": ("collectives", "get_cfg_group"),
+    "get_cp_group": ("collectives", "get_cp_group"),
+    "get_cfg_rank_spmd": ("collectives", "get_cfg_rank_spmd"),
+    "get_cp_rank_spmd": ("collectives", "get_cp_rank_spmd"),
     "get_world_group": ("collectives", "get_world_group"),
     "gather_from_tensor_model_parallel_region_with_dim": (
         "collectives",
@@ -35,6 +38,18 @@ _EXPORTS = {
     "scatter_to_process_group_spmd": (
         "collectives",
         "scatter_to_process_group_spmd",
+    ),
+    "scatter_to_sequence_parallel_region": (
+        "collectives",
+        "scatter_to_sequence_parallel_region",
+    ),
+    "gather_from_sequence_parallel_region": (
+        "collectives",
+        "gather_from_sequence_parallel_region",
+    ),
+    "reduce_scatter_to_sequence_parallel_region": (
+        "collectives",
+        "reduce_scatter_to_sequence_parallel_region",
     ),
     "get_platform_target": ("platform", "get_platform_target"),
     "hardware": ("platform", "hardware"),

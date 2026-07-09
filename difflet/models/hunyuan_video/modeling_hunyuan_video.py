@@ -14,7 +14,6 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from diffusers.models.embeddings import (
     CombinedTimestepTextProjEmbeddings,
     PixArtAlphaTextProjection,
@@ -36,15 +35,38 @@ from difflet.ops import (
     SPMDRank,
     apply_rotary_emb,
     attention,
+    gather_from_sequence_parallel_region,
     gather_from_tensor_model_parallel_region_with_dim,
-    get_data_parallel_group,
-    get_dp_rank_spmd,
+    get_cp_group,
+    get_cp_rank_spmd,
     get_tensor_model_parallel_size,
     get_world_group,
+    init_parallel_mesh,
     joint_ring_attention,
     reduce_from_tensor_model_parallel_region,
+    reduce_scatter_to_sequence_parallel_region,
     scatter_to_process_group_spmd,
 )
+
+
+def _sp_unbias(x: torch.Tensor, row_linear: nn.Module) -> torch.Tensor:
+    """Correct the bias double-count of a ``reduce_output=False`` row-parallel
+    linear under Megatron-SP.
+
+    nxd's ``RowParallelLinear`` adds the *full* bias to each rank's **un-reduced**
+    partial (``output_ + self.bias`` after the skipped reduce). The Megatron-SP
+    ``ḡ`` reduce-scatter then sums across the TP group, so the bias lands ``tp×``
+    instead of once. Subtract the ``(tp-1)×`` overcount so the bias is applied
+    exactly once. No-op at ``tp == 1`` (CPU reference / unit tests), so the
+    SP-vs-dense equivalence on CPU is unchanged.
+    """
+    bias = getattr(row_linear, "bias", None)
+    if bias is None:
+        return x
+    tp = get_tensor_model_parallel_size()
+    if tp <= 1:
+        return x
+    return x - (tp - 1) * bias.to(x.dtype)
 
 
 @dataclass
@@ -73,6 +95,7 @@ class HunyuanVideoTransformerConfig:
     image_condition_type: str | None = None
     context_parallel_enabled: bool = False
     cp_mode: str = "gather_kv"
+    sp_enabled: bool = False
 
     def __post_init__(self) -> None:
         if self.qk_norm != "rms_norm":
@@ -162,8 +185,15 @@ class HunyuanVideoLinearActivation(nn.Module):
 class HunyuanVideoFeedForward(nn.Module):
     """Feed-forward layer with diffusers-compatible parameter names."""
 
-    def __init__(self, dim: int, mult: float = 4.0, activation_fn: str = "gelu-approximate"):
+    def __init__(
+        self,
+        dim: int,
+        mult: float = 4.0,
+        activation_fn: str = "gelu-approximate",
+        sp_enabled: bool = False,
+    ):
         super().__init__()
+        self.sp_enabled = sp_enabled
         inner_dim = int(dim * mult)
         if activation_fn == "gelu-approximate":
             act_fn = HunyuanVideoGELU(dim, inner_dim, approximate="tanh")
@@ -177,13 +207,29 @@ class HunyuanVideoFeedForward(nn.Module):
             [
                 act_fn,
                 nn.Dropout(0.0),
-                RowParallelLinear(inner_dim, dim, bias=True, input_is_parallel=True),
+                # Under Megatron-SP the cross-rank sum is folded into the ḡ
+                # reduce-scatter below, so the row-parallel must not also all-reduce.
+                RowParallelLinear(
+                    inner_dim,
+                    dim,
+                    bias=True,
+                    input_is_parallel=True,
+                    reduce_output=not sp_enabled,
+                ),
             ]
         )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        # Megatron-SP: hidden_states arrives sequence-sharded [B, S/tp, H]; gather to
+        # the full sequence (g) for the column-parallel up-projection, then
+        # reduce-scatter the row-parallel partial back to a sequence shard (ḡ).
+        if self.sp_enabled:
+            hidden_states = gather_from_sequence_parallel_region(hidden_states, dim=1)
         for module in self.net:
             hidden_states = module(hidden_states)
+        if self.sp_enabled:
+            hidden_states = reduce_scatter_to_sequence_parallel_region(hidden_states, dim=1)
+            hidden_states = _sp_unbias(hidden_states, self.net[2])
         return hidden_states
 
 
@@ -275,6 +321,7 @@ class HunyuanVideoAttention(nn.Module):
         eps: float = 1e-6,
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
+        sp_enabled: bool = False,
     ):
         super().__init__()
         if qk_norm != "rms_norm":
@@ -282,9 +329,8 @@ class HunyuanVideoAttention(nn.Module):
 
         self.context_parallel_enabled = context_parallel_enabled
         self.cp_mode = cp_mode
-        self.data_parallel_group = (
-            get_data_parallel_group() if context_parallel_enabled else None
-        )
+        self.sp_enabled = sp_enabled
+        self.cp_group = get_cp_group() if context_parallel_enabled else None
 
         tp_degree = get_tensor_model_parallel_size()
         if num_attention_heads % tp_degree != 0:
@@ -335,6 +381,9 @@ class HunyuanVideoAttention(nn.Module):
                         hidden_size,
                         bias=True,
                         input_is_parallel=True,
+                        # Under Megatron-SP the cross-rank sum is folded into the ḡ
+                        # reduce-scatter in forward(); don't also all-reduce here.
+                        reduce_output=not sp_enabled,
                     ),
                     nn.Dropout(0.0),
                 ]
@@ -343,11 +392,15 @@ class HunyuanVideoAttention(nn.Module):
             self.to_out = None
 
         if context_pre_only is not None and not context_pre_only:
+            # Latent/video-only SP: the text stream stays FULL and is processed like
+            # dense TP, so its row-parallel always all-reduces (reduce_output=True),
+            # never folded into a ḡ reduce-scatter.
             self.to_add_out = RowParallelLinear(
                 self.inner_dim,
                 hidden_size,
                 bias=True,
                 input_is_parallel=True,
+                reduce_output=True,
             )
         else:
             self.to_add_out = None
@@ -360,6 +413,16 @@ class HunyuanVideoAttention(nn.Module):
         attention_mask: torch.Tensor | None = None,
         image_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        # Megatron-SP (latent/video-only sharding): only the LATENT (video) stream
+        # arrives sequence-sharded [B, S_lat/tp, H] and is gathered to the full
+        # sequence (g) before the column-parallel Q/K/V projections. The text stream
+        # stays FULL/replicated (like dense TP), so it is never gathered here. The
+        # pre_only single-stream attention does NOT gather either: its enclosing
+        # ``HunyuanVideoSingleTransformerBlock`` runs dense on the already-full joint
+        # sequence and hands this attention full tensors.
+        if self.sp_enabled and not self.pre_only:
+            hidden_states = gather_from_sequence_parallel_region(hidden_states, dim=1)
+
         if self.add_q_proj is None and encoder_hidden_states is not None:
             latent_seq = hidden_states.shape[1]
             joined = torch.cat([hidden_states, encoder_hidden_states], dim=1)
@@ -428,7 +491,7 @@ class HunyuanVideoAttention(nn.Module):
             if self.context_parallel_enabled:
                 stacked_kv = torch.stack([latent_k, latent_v], dim=0)  # [2, B, S/cp, H, d]
                 stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
-                    stacked_kv, gather_dim=2, process_group=self.data_parallel_group
+                    stacked_kv, gather_dim=2, process_group=self.cp_group
                 )  # [2, B, S, H, d]
                 latent_k, latent_v = torch.unbind(stacked_kv, dim=0)
 
@@ -447,8 +510,17 @@ class HunyuanVideoAttention(nn.Module):
 
         if self.to_out is not None:
             hidden_states = self.to_out[0](hidden_states)
+            # Megatron-SP ḡ: reduce the row-parallel partial across the TP group and
+            # scatter back to this rank's sequence shard [B, S/tp, H].
+            if self.sp_enabled:
+                hidden_states = reduce_scatter_to_sequence_parallel_region(
+                    hidden_states, dim=1
+                )
+                hidden_states = _sp_unbias(hidden_states, self.to_out[0])
             hidden_states = self.to_out[1](hidden_states)
         if self.to_add_out is not None:
+            # Text stream stays FULL: a normal all-reduce row-parallel, no ḡ
+            # reduce-scatter / unbias.
             encoder_hidden_states = self.to_add_out(encoder_hidden_states)
         return hidden_states, encoder_hidden_states
 
@@ -465,8 +537,10 @@ class HunyuanVideoTransformerBlock(nn.Module):
         qk_norm: str = "rms_norm",
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
+        sp_enabled: bool = False,
     ):
         super().__init__()
+        self.sp_enabled = sp_enabled
         hidden_size = num_attention_heads * attention_head_dim
         self.norm1 = AdaLayerNormZero(hidden_size, norm_type="layer_norm")
         self.norm1_context = AdaLayerNormZero(hidden_size, norm_type="layer_norm")
@@ -481,11 +555,16 @@ class HunyuanVideoTransformerBlock(nn.Module):
             eps=1e-6,
             context_parallel_enabled=context_parallel_enabled,
             cp_mode=cp_mode,
+            sp_enabled=sp_enabled,
         )
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.ff = HunyuanVideoFeedForward(hidden_size, mult=mlp_ratio)
+        # Latent/video-only SP: shard the latent FF; the text FF stays dense
+        # (full sequence, normal all-reduce) since the text stream is never sharded.
+        self.ff = HunyuanVideoFeedForward(hidden_size, mult=mlp_ratio, sp_enabled=sp_enabled)
         self.norm2_context = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.ff_context = HunyuanVideoFeedForward(hidden_size, mult=mlp_ratio)
+        self.ff_context = HunyuanVideoFeedForward(
+            hidden_size, mult=mlp_ratio, sp_enabled=False
+        )
 
     def forward(
         self,
@@ -547,8 +626,10 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         qk_norm: str = "rms_norm",
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
+        sp_enabled: bool = False,
     ):
         super().__init__()
+        self.sp_enabled = sp_enabled
         hidden_size = num_attention_heads * attention_head_dim
         mlp_dim = int(hidden_size * mlp_ratio)
         self.attn = HunyuanVideoAttention(
@@ -562,6 +643,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             eps=1e-6,
             context_parallel_enabled=context_parallel_enabled,
             cp_mode=cp_mode,
+            sp_enabled=sp_enabled,
         )
         self.norm = AdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm")
         self.proj_mlp = ColumnParallelLinear(hidden_size, mlp_dim, bias=True, gather_output=False)
@@ -600,6 +682,9 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         del args, kwargs
+        # Single-stream blocks run DENSE under latent/video-only SP: the caller
+        # (HunyuanVideoTransformer3DModel.forward) gathers the latent stream to full
+        # before the first single block, so both streams arrive full here.
         text_seq_length = encoder_hidden_states.shape[1]
         hidden_states = torch.cat([hidden_states, encoder_hidden_states], dim=1)
         residual = hidden_states
@@ -620,13 +705,17 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         attn_output = torch.cat([attn_output, context_attn_output], dim=1)
 
         # Project each stream with its own RowParallelLinear (matching its sharding),
-        # then all-reduce once and add the (attn) bias — see __init__ for why.
-        out_attn, bias = self.proj_out_attn(attn_output)
+        # all-reduce the sum once (default TP group, like modeling_wan — backend-portable),
+        # then add the attn bias after the reduce. skip_bias_add returns (out, bias) on the
+        # Trainium backend; the CPU reference RowParallelLinear returns a plain tensor with
+        # the bias already applied, so handle both.
+        res_attn = self.proj_out_attn(attn_output)
+        out_attn, attn_bias = res_attn if isinstance(res_attn, tuple) else (res_attn, None)
         out_mlp = self.proj_out_mlp(mlp_hidden_states)
-        proj_out = reduce_from_tensor_model_parallel_region(
-            out_attn + out_mlp, process_group=self.proj_out_attn.tensor_parallel_group
-        )
-        hidden_states = gate.unsqueeze(1) * (proj_out + bias)
+        proj_out = reduce_from_tensor_model_parallel_region(out_attn + out_mlp)
+        if attn_bias is not None:
+            proj_out = proj_out + attn_bias
+        hidden_states = gate.unsqueeze(1) * proj_out
         hidden_states = hidden_states + residual
         return hidden_states[:, :-text_seq_length, :], hidden_states[:, -text_seq_length:, :]
 
@@ -900,12 +989,14 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         image_condition_type: str | None = None,
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
+        sp_enabled: bool = False,
     ) -> None:
         super().__init__()
         if not isinstance(in_channels, int):
             config = in_channels
             context_parallel_enabled = getattr(config, "context_parallel_enabled", False)
             cp_mode = getattr(config, "cp_mode", "gather_kv")
+            sp_enabled = getattr(config, "sp_enabled", False)
             in_channels = config.in_channels
             out_channels = config.out_channels
             num_attention_heads = config.num_attention_heads
@@ -944,14 +1035,35 @@ class HunyuanVideoTransformer3DModel(nn.Module):
             image_condition_type=image_condition_type,
             context_parallel_enabled=context_parallel_enabled,
             cp_mode=cp_mode,
+            sp_enabled=sp_enabled,
         )
 
         inner_dim = self.config.inner_dim
         out_channels = out_channels or in_channels
 
         self.context_parallel_enabled = context_parallel_enabled
+        # Megatron-style sequence parallelism reuses the TP group; it is mutually
+        # exclusive with CP (both shard the sequence dimension).
+        self.sp_enabled = sp_enabled
+        if self.sp_enabled and self.context_parallel_enabled:
+            raise ValueError(
+                "sp_enabled and context_parallel_enabled are mutually exclusive "
+                "(both shard the sequence dimension)."
+            )
         if context_parallel_enabled:
-            self.data_parallel_group = get_data_parallel_group()
+            # CP scatters the sequence dim over the cp axis subgroup. The mesh
+            # must be initialized before the transformer blocks are built —
+            # HunyuanVideoAttention grabs get_cp_group() in its own __init__.
+            init_parallel_mesh(config)
+            self.cp_group = get_cp_group()
+            self.global_rank = SPMDRank(world_size=get_world_group().size())
+        elif self.sp_enabled:
+            # Megatron-SP reuses the TP group; for SP-only world_size == tp_degree,
+            # so a world-group SPMDRank yields the per-rank TP rank used by the
+            # entry sequence scatter. The ``.rank`` buffer is populated by
+            # convert_hf_to_neuron_state_dict (device); on CPU SPMDRank is a plain
+            # object returning rank 0, so the scatter is identity and adds nothing
+            # to the state dict (SP-vs-dense load_state_dict equivalence holds).
             self.global_rank = SPMDRank(world_size=get_world_group().size())
 
         self.x_embedder = HunyuanVideoPatchEmbed(
@@ -979,6 +1091,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                     qk_norm=qk_norm,
                     context_parallel_enabled=context_parallel_enabled,
                     cp_mode=cp_mode,
+                    sp_enabled=sp_enabled,
                 )
                 for _ in range(num_layers)
             ]
@@ -992,6 +1105,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                     qk_norm=qk_norm,
                     context_parallel_enabled=context_parallel_enabled,
                     cp_mode=cp_mode,
+                    sp_enabled=sp_enabled,
                 )
                 for _ in range(num_single_layers)
             ]
@@ -1061,24 +1175,39 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         # intentionally built above with the full latent length so it still lines up
         # with the gathered K/V inside attention.
         if self.context_parallel_enabled:
-            dp_rank = get_dp_rank_spmd(
-                global_rank=self.global_rank.get_rank(),
-                tp_degree=get_tensor_model_parallel_size(),
-            )
+            cp_rank = get_cp_rank_spmd(self.global_rank.get_rank())
             hidden_states = scatter_to_process_group_spmd(
                 hidden_states,
                 partition_dim=1,
-                rank=dp_rank,
-                process_group=self.data_parallel_group,
+                rank=cp_rank,
+                process_group=self.cp_group,
             )
             cos, sin = image_rotary_emb
             cos = scatter_to_process_group_spmd(
-                cos, partition_dim=0, rank=dp_rank, process_group=self.data_parallel_group
+                cos, partition_dim=0, rank=cp_rank, process_group=self.cp_group
             )
             sin = scatter_to_process_group_spmd(
-                sin, partition_dim=0, rank=dp_rank, process_group=self.data_parallel_group
+                sin, partition_dim=0, rank=cp_rank, process_group=self.cp_group
             )
             image_rotary_emb = (cos, sin)
+
+        # Megatron-SP (latent/video-only sharding): shard ONLY the latent (video)
+        # stream across the TP group so each rank carries [B, S_lat/tp, H] through the
+        # dual-stream blocks. The text stream stays FULL/replicated (processed like
+        # dense TP). The full-sequence attention mask is built above and left
+        # full/replicated; the dual-stream attention gathers the latent back
+        # internally before applying the mask + rotary, which also stay full-sequence.
+        if self.sp_enabled:
+            # The scatter MUST use the materialized SPMD rank buffer; nxd's
+            # ``scatter_to_sequence_parallel_region`` resolves ``group.rank()`` to a
+            # compile-time constant under SPMD tracing, so every rank would keep the
+            # SAME chunk (verified on device: scatter→gather did not round-trip).
+            # ``scatter_to_process_group_spmd`` with the per-rank buffer is the same
+            # primitive the validated CP path uses. Identity on CPU (rank == 0).
+            sp_rank = self.global_rank.get_rank()
+            hidden_states = scatter_to_process_group_spmd(
+                hidden_states, partition_dim=1, rank=sp_rank, process_group=None
+            )
 
         for block in self.transformer_blocks:
             hidden_states, encoder_hidden_states = block(
@@ -1088,6 +1217,13 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                 attention_mask,
                 image_rotary_emb,
             )
+
+        # Dual→single transition: the single-stream blocks operate on the
+        # concatenated [latent|text] joint sequence and run dense. The latent is
+        # still sequence-sharded here while the text is full, so gather the latent
+        # to full FIRST; from here on everything is full/dense.
+        if self.sp_enabled:
+            hidden_states = gather_from_sequence_parallel_region(hidden_states, dim=1)
 
         for block in self.single_transformer_blocks:
             hidden_states, encoder_hidden_states = block(
@@ -1101,10 +1237,14 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         hidden_states = self.norm_out(hidden_states, temb)
         hidden_states = self.proj_out(hidden_states)
 
+        # Megatron-SP (latent/video-only): the latent stream was already gathered to
+        # full at the dual→single transition and the single-stream blocks ran dense,
+        # so ``hidden_states`` is full here — no exit gather needed.
+
         # Context parallel: reassemble the full latent sequence before unpatching.
         if self.context_parallel_enabled:
             hidden_states = gather_from_tensor_model_parallel_region_with_dim(
-                hidden_states, gather_dim=1, process_group=self.data_parallel_group
+                hidden_states, gather_dim=1, process_group=self.cp_group
             )
 
         hidden_states = hidden_states.reshape(

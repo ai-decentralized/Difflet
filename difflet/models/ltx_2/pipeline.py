@@ -717,7 +717,23 @@ class LTX2Orchestrator:
         audio_cond_x0)``. The ``*_cond_x0`` baselines are returned so the caller
         can apply ``guidance_rescale`` (which references the cond prediction).
         """
-        noise_pred_video, noise_pred_audio = _first_tensor_pair(self.transformer(model_bundle))
+        if do_cfg and not getattr(self.transformer, "cfg_parallel_enabled", False):
+            # Without cfg-parallel the compiled DiT graph matches the latent
+            # batch (1), so the doubled uncond+cond bundle cannot run in one
+            # call — evaluate the halves sequentially and rejoin in chunk(2)
+            # order.
+            uncond_video, uncond_audio = _first_tensor_pair(
+                self.transformer(_negative_ltx_2_bundle(model_bundle, latents.shape[0]))
+            )
+            cond_video, cond_audio = _first_tensor_pair(
+                self.transformer(_positive_ltx_2_bundle(model_bundle, latents.shape[0]))
+            )
+            noise_pred_video = torch.cat([uncond_video, cond_video], dim=0)
+            noise_pred_audio = torch.cat([uncond_audio, cond_audio], dim=0)
+        else:
+            noise_pred_video, noise_pred_audio = _first_tensor_pair(
+                self.transformer(model_bundle)
+            )
         if do_cfg:
             video_uncond, video_cond = noise_pred_video.float().chunk(2, dim=0)
             audio_uncond, audio_cond = noise_pred_audio.float().chunk(2, dim=0)
@@ -1311,6 +1327,33 @@ def _positive_ltx_2_bundle(bundle: LTX2DiTInputBundle, latent_batch_size: int) -
 def _positive_tensor(tensor: torch.Tensor, latent_batch_size: int) -> torch.Tensor:
     if tensor.shape[0] == latent_batch_size * 2:
         return tensor.chunk(2, dim=0)[1]
+    return tensor
+
+
+def _negative_ltx_2_bundle(bundle: LTX2DiTInputBundle, latent_batch_size: int) -> LTX2DiTInputBundle:
+    return LTX2DiTInputBundle(
+        hidden_states=_negative_tensor(bundle.hidden_states, latent_batch_size),
+        audio_hidden_states=_negative_tensor(bundle.audio_hidden_states, latent_batch_size),
+        encoder_hidden_states=_negative_tensor(bundle.encoder_hidden_states, latent_batch_size),
+        audio_encoder_hidden_states=_negative_tensor(
+            bundle.audio_encoder_hidden_states,
+            latent_batch_size,
+        ),
+        timestep=_negative_tensor(bundle.timestep, latent_batch_size),
+        sigma=_negative_tensor(bundle.sigma, latent_batch_size),
+        encoder_attention_mask=_negative_tensor(bundle.encoder_attention_mask, latent_batch_size),
+        audio_encoder_attention_mask=_negative_tensor(
+            bundle.audio_encoder_attention_mask,
+            latent_batch_size,
+        ),
+        video_coords=_negative_tensor(bundle.video_coords, latent_batch_size),
+        audio_coords=_negative_tensor(bundle.audio_coords, latent_batch_size),
+    )
+
+
+def _negative_tensor(tensor: torch.Tensor, latent_batch_size: int) -> torch.Tensor:
+    if tensor.shape[0] == latent_batch_size * 2:
+        return tensor.chunk(2, dim=0)[0]
     return tensor
 
 

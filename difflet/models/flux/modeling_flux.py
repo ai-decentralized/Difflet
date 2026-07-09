@@ -52,14 +52,19 @@ from difflet.ops import (
     RowParallelLinear,
     SPMDRank,
     attention,
+    gather_from_sequence_parallel_region,
     gather_from_tensor_model_parallel_region_with_dim,
-    get_data_parallel_group,
-    get_dp_rank_spmd,
+    get_cfg_group,
+    get_cfg_rank_spmd,
+    get_cp_group,
+    get_cp_rank_spmd,
     get_platform_target,
     get_tensor_model_parallel_size,
     get_world_group,
+    init_parallel_mesh,
     hardware,
     reduce_from_tensor_model_parallel_region,
+    reduce_scatter_to_sequence_parallel_region,
     ring_attention,
     scatter_to_process_group_spmd,
 )
@@ -78,6 +83,41 @@ if not os.environ.get("NEURON_PLATFORM_TARGET_OVERRIDE"):
     os.environ["NEURON_PLATFORM_TARGET_OVERRIDE"] = get_platform_target()
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
+
+
+def _safe_tp_size() -> int:
+    """TP degree, or 1 when the tensor-parallel group is not initialized.
+
+    ``modeling_flux`` is constructed both on the Neuron device (group live) and on
+    bare CPU for the reference path / unit tests (no group). The raw
+    ``get_tensor_model_parallel_size()`` asserts a live group, so the SP bias
+    correction must query the size through this guard and fall back to the
+    unsharded tp=1 path.
+    """
+    try:
+        return int(get_tensor_model_parallel_size())
+    except Exception:
+        return 1
+
+
+def _sp_unbias(x: torch.Tensor, row_linear: nn.Module) -> torch.Tensor:
+    """Correct the bias double-count of a ``reduce_output=False`` row-parallel
+    linear under Megatron-SP.
+
+    nxd's ``RowParallelLinear`` adds the *full* bias to each rank's **un-reduced**
+    partial (``output_ + self.bias`` after the skipped reduce). The Megatron-SP
+    ``ḡ`` reduce-scatter then sums across the TP group, so the bias lands ``tp×``
+    instead of once. Subtract the ``(tp-1)×`` overcount so the bias is applied
+    exactly once. No-op at ``tp == 1`` (CPU reference / unit tests) or when the
+    linear carries no bias, so the SP-vs-dense equivalence on CPU is unchanged.
+    """
+    bias = getattr(row_linear, "bias", None)
+    if bias is None:
+        return x
+    tp = _safe_tp_size()
+    if tp <= 1:
+        return x
+    return x - (tp - 1) * bias.to(x.dtype)
 
 
 def attention_wrapper_sharded_without_swap(query, key, value):
@@ -205,12 +245,29 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
         super().__init__()
         self.config = config
 
-        self.data_parallel_group = get_data_parallel_group()
-        self.global_rank = SPMDRank(world_size=get_world_group().size())
-
         self.context_parallel_enabled = getattr(self.config, 'context_parallel_enabled', False)
         self.cp_mode = getattr(self.config, 'cp_mode', 'gather_kv')
         self.cfg_parallel_enabled = getattr(self.config, 'cfg_parallel_enabled', False)
+        # The SPMD rank buffer stays unconditional: Megatron-SP's sequence
+        # scatter and the checkpoint converter (global_rank.rank arange) rely
+        # on it even when CFG/CP are off.
+        self.global_rank = SPMDRank(world_size=get_world_group().size())
+        # CFG parallel scatters the batch dim (uncond/cond) over the cfg axis;
+        # CP scatters the sequence dim over the cp axis. Axis groups exist only
+        # when the axis is actually enabled — no cfg group for the (distilled,
+        # CLI-blocked) default, no cp group without context parallelism.
+        if self.context_parallel_enabled or self.cfg_parallel_enabled:
+            init_parallel_mesh(self.config)
+        self.cfg_group = get_cfg_group() if self.cfg_parallel_enabled else None
+        self.cp_group = get_cp_group() if self.context_parallel_enabled else None
+        # Megatron-style sequence parallelism reuses the TP group; it is mutually
+        # exclusive with CP (both shard the sequence dimension).
+        self.sp_enabled = getattr(self.config, 'sp_enabled', False)
+        if self.sp_enabled and self.context_parallel_enabled:
+            raise ValueError(
+                "sp_enabled and context_parallel_enabled are mutually exclusive "
+                "(both shard the sequence dimension)."
+            )
 
         if (out_channels := getattr(self.config, "out_channels", None)) is not None:
             self.out_channels = out_channels
@@ -250,6 +307,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
                     reduce_dtype=self.config.neuron_config.torch_dtype,
                     context_parallel_enabled=self.context_parallel_enabled,
                     cp_mode=self.cp_mode,
+                    sp_enabled=self.sp_enabled,
                 )
                 for i in range(self.config.num_layers)
             ]
@@ -264,6 +322,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
                     reduce_dtype=self.config.neuron_config.torch_dtype,
                     context_parallel_enabled=self.context_parallel_enabled,
                     cp_mode=self.cp_mode,
+                    sp_enabled=self.sp_enabled,
                 )
                 for i in range(self.config.num_single_layers)
             ]
@@ -285,6 +344,24 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
             bias=True,
             gather_output=True,
             reduce_dtype=self.config.neuron_config.torch_dtype,
+        )
+
+    def _sp_seq_scatter(self, tensor: torch.Tensor, *, dim: int) -> torch.Tensor:
+        """Megatron-SP forward-entry sequence scatter across the TP group.
+
+        Uses the materialized SPMD rank buffer (``self.global_rank``) rather than
+        nxd's ``scatter_to_sequence_parallel_region``: under SPMD tracing the
+        latter resolves ``group.rank()`` to a single constant, so every rank
+        would keep the *same* chunk (verified on device: scatter→gather did not
+        round-trip). ``scatter_to_process_group_spmd`` with the per-rank buffer is
+        the same primitive the validated CP/CFG path uses. For SP-only the world
+        group equals the TP group, so ``process_group=None`` defaults correctly.
+        """
+        return scatter_to_process_group_spmd(
+            tensor,
+            partition_dim=dim,
+            rank=self.global_rank.get_rank(),
+            process_group=None,
         )
 
     def forward(
@@ -349,44 +426,40 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
             assert timestep.shape[0] == 2, \
                 f"CFG parallel expects batch_size=2, got timestep.shape[0]={timestep.shape[0]}"
 
-        dp_rank = get_dp_rank_spmd(
-            global_rank=self.global_rank.get_rank(),
-            tp_degree=get_tensor_model_parallel_size(),
-        )
-
-        # CFG Parallel: scatter inputs along batch dimension
+        # CFG Parallel: scatter inputs along batch dimension over the cfg axis
         if self.cfg_parallel_enabled and hidden_states.shape[0] == 2:
+            cfg_rank = get_cfg_rank_spmd(self.global_rank.get_rank())
             # Scatter inputs (each rank gets either negative OR positive)
             hidden_states = scatter_to_process_group_spmd(
                 hidden_states,
                 partition_dim=0,
-                rank=dp_rank,
-                process_group=self.data_parallel_group,
+                rank=cfg_rank,
+                process_group=self.cfg_group,
             )
             encoder_hidden_states = scatter_to_process_group_spmd(
                 encoder_hidden_states,
                 partition_dim=0,
-                rank=dp_rank,
-                process_group=self.data_parallel_group,
+                rank=cfg_rank,
+                process_group=self.cfg_group,
             )
             pooled_projections = scatter_to_process_group_spmd(
                 pooled_projections,
                 partition_dim=0,
-                rank=dp_rank,
-                process_group=self.data_parallel_group,
+                rank=cfg_rank,
+                process_group=self.cfg_group,
             )
             timestep = scatter_to_process_group_spmd(
                 timestep,
                 partition_dim=0,
-                rank=dp_rank,
-                process_group=self.data_parallel_group,
+                rank=cfg_rank,
+                process_group=self.cfg_group,
             )
             if guidance is not None and guidance.numel() > 0:
                 guidance = scatter_to_process_group_spmd(
                     guidance,
                     partition_dim=0,
-                    rank=dp_rank,
-                    process_group=self.data_parallel_group,
+                    rank=cfg_rank,
+                    process_group=self.cfg_group,
                 )
 
             # Assert scatter worked correctly for all inputs
@@ -415,28 +488,39 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
         )
         encoder_hidden_states = self.context_embedder(encoder_hidden_states)
 
+        if self.sp_enabled:
+            # Megatron-SP (image-only): shard ONLY the image stream across the TP
+            # group so each rank carries [B, S_img/tp, H] through the double-stream
+            # blocks. The text stream (encoder_hidden_states) stays FULL/replicated
+            # and is processed like dense TP. The image stream is gathered back to
+            # full at the double→single transition, after which everything runs
+            # dense. Rotary stays full-sequence — attention gathers image back
+            # internally before applying it. This mirrors the proven Wan pattern.
+            hidden_states = self._sp_seq_scatter(hidden_states, dim=1)
+
         rotary_emb_text = None
         rotary_emb_image = None
 
-        # scatter inputs to DP group for context parallel
+        # scatter inputs to the cp axis subgroup for context parallel
         if self.context_parallel_enabled:
+            cp_rank = get_cp_rank_spmd(self.global_rank.get_rank())
             # TODO: see if rotary split can only be done in one denoising step and reuse
             rotary_emb_text = image_rotary_emb[: encoder_hidden_states.shape[1]]
             rotary_emb_image = image_rotary_emb[encoder_hidden_states.shape[1] :]
             rotary_emb_text = split_along_dim(
-                rotary_emb_text, dim=0, rank=dp_rank, data_parallel_group=self.data_parallel_group
+                rotary_emb_text, dim=0, rank=cp_rank, process_group=self.cp_group
             )
             rotary_emb_image = split_along_dim(
-                rotary_emb_image, dim=0, rank=dp_rank, data_parallel_group=self.data_parallel_group
+                rotary_emb_image, dim=0, rank=cp_rank, process_group=self.cp_group
             )
             hidden_states = split_along_dim(
-                hidden_states, dim=1, rank=dp_rank, data_parallel_group=self.data_parallel_group
+                hidden_states, dim=1, rank=cp_rank, process_group=self.cp_group
             )
             encoder_hidden_states = split_along_dim(
                 encoder_hidden_states,
                 dim=1,
-                rank=dp_rank,
-                data_parallel_group=self.data_parallel_group,
+                rank=cp_rank,
+                process_group=self.cp_group,
             )
 
         hidden_states, encoder_hidden_states = ModuleMarkerStartWrapper()(
@@ -470,6 +554,14 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
         hidden_states, encoder_hidden_states = ModuleMarkerEndWrapper()(
             hidden_states, encoder_hidden_states
         )
+        if self.sp_enabled:
+            # Megatron-SP (image-only) double→single transition: the image stream
+            # is sequence-sharded while the text stream is already full. Gather the
+            # image stream back to full FIRST, then concat so the resulting
+            # [text|image] joint is full on every rank. From here the single-stream
+            # blocks and the final layers run exactly as dense (full sequence,
+            # normal TP all-reduce).
+            hidden_states = gather_from_sequence_parallel_region(hidden_states, dim=1)
         hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
 
         for index_block, block in enumerate(self.single_transformer_blocks):
@@ -505,15 +597,20 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
         output = self.proj_out(hidden_states)
         output = ModuleMarkerEndWrapper()(output)
 
+        # Megatron-SP (image-only): no exit gather is needed — the image stream was
+        # already gathered to full at the double→single transition, so everything
+        # from the concat onward (single blocks, norm_out, proj_out) runs dense on
+        # the full sequence and `output` is already the full image sequence.
+
         if self.cfg_parallel_enabled:
-            # CFG Parallel: gather outputs along batch dimension
+            # CFG Parallel: gather outputs along batch dimension (cfg axis)
             output = gather_from_tensor_model_parallel_region_with_dim(
-                output, gather_dim=0, process_group=self.data_parallel_group
+                output, gather_dim=0, process_group=self.cfg_group
             )
         elif self.context_parallel_enabled:
-            # Context Parallel: gather outputs along sequence dimension
+            # Context Parallel: gather outputs along sequence dimension (cp axis)
             output = gather_from_tensor_model_parallel_region_with_dim(
-                output, gather_dim=1, process_group=self.data_parallel_group
+                output, gather_dim=1, process_group=self.cp_group
             )
 
         return output
@@ -542,11 +639,13 @@ class NeuronFluxSingleTransformerBlock(nn.Module):
         mlp_ratio=4.0,
         context_parallel_enabled=False,
         cp_mode: str = "gather_kv",
+        sp_enabled: bool = False,
     ):
         super().__init__()
 
         self.context_parallel_enabled = context_parallel_enabled
         self.cp_mode = cp_mode
+        self.sp_enabled = sp_enabled
         self.mlp_hidden_dim = int(dim * mlp_ratio)
 
         self.norm = NeuronAdaLayerNormZeroSingle(dim, use_parallel_layer=True)
@@ -592,6 +691,11 @@ class NeuronFluxSingleTransformerBlock(nn.Module):
             reduce_dtype=reduce_dtype,
             context_parallel_enabled=self.context_parallel_enabled,
             cp_mode=self.cp_mode,
+            # Megatron-SP (image-only): single-stream blocks run DENSE on the full
+            # [text|image] sequence (the image stream is gathered to full at the
+            # double→single transition), so the attention must not gather /
+            # reduce-scatter — keep it dense regardless of the model's sp setting.
+            sp_enabled=False,
         )
 
     def forward(
@@ -605,6 +709,9 @@ class NeuronFluxSingleTransformerBlock(nn.Module):
     ):
         residual = hidden_states
         norm_hidden_states, gate = self.norm(hidden_states, emb=temb)
+        # Megatron-SP (image-only): single-stream blocks run DENSE. The image stream
+        # was gathered to full at the double→single transition, so the concatenated
+        # [text|image] sequence here is full on every rank — no gather / reduce-scatter.
         mlp_hidden_states = self.act_mlp(self.proj_mlp(norm_hidden_states))
         attn_output = self.attn(
             hidden_states=norm_hidden_states,
@@ -616,6 +723,8 @@ class NeuronFluxSingleTransformerBlock(nn.Module):
         gate = gate.unsqueeze(1)
         out_attn, bias = self.proj_out_attn(attn_output)
         out_mlp = self.proj_out_mlp(mlp_hidden_states)
+        # proj_out_attn / proj_out_mlp keep reduce_output=False to merge their two
+        # all-reduces into one; this explicit all-reduce is that merged reduce (dense).
         proj_out = reduce_from_tensor_model_parallel_region(
             out_attn + out_mlp, process_group=self.proj_out_attn.tensor_parallel_group
         )
@@ -651,11 +760,13 @@ class NeuronFluxTransformerBlock(nn.Module):
         eps=1e-6,
         context_parallel_enabled=False,
         cp_mode: str = "gather_kv",
+        sp_enabled: bool = False,
     ):
         super().__init__()
 
         self.context_parallel_enabled = context_parallel_enabled
         self.cp_mode = cp_mode
+        self.sp_enabled = sp_enabled
         self.norm1 = NeuronAdaLayerNormZero(dim)
 
         self.norm1_context = NeuronAdaLayerNormZero(dim)
@@ -674,16 +785,23 @@ class NeuronFluxTransformerBlock(nn.Module):
             reduce_dtype=reduce_dtype,
             context_parallel_enabled=self.context_parallel_enabled,
             cp_mode=self.cp_mode,
+            sp_enabled=self.sp_enabled,
         )
 
         self.norm2 = LayerNorm(dim, elementwise_affine=False, eps=1e-6)
+        # Megatron-SP (image-only): the image FFN is sequence-sharded (SP), so it
+        # gathers / reduce-scatters around its column/row-parallel matmuls.
         self.ff = NeuronFeedForward(
-            dim=dim, dim_out=dim, activation_fn="gelu-approximate", reduce_dtype=reduce_dtype
+            dim=dim, dim_out=dim, activation_fn="gelu-approximate", reduce_dtype=reduce_dtype,
+            sp_enabled=self.sp_enabled,
         )
 
         self.norm2_context = LayerNorm(dim, elementwise_affine=False, eps=1e-6)
+        # Megatron-SP (image-only): the text stream stays FULL/replicated, so its FFN
+        # runs DENSE (normal TP all-reduce, no gather / reduce-scatter) — sp off.
         self.ff_context = NeuronFeedForward(
-            dim=dim, dim_out=dim, activation_fn="gelu-approximate", reduce_dtype=reduce_dtype
+            dim=dim, dim_out=dim, activation_fn="gelu-approximate", reduce_dtype=reduce_dtype,
+            sp_enabled=False,
         )
 
         # let chunk size default to None
@@ -777,8 +895,10 @@ class NeuronFeedForward(nn.Module):
         inner_dim=None,
         bias: bool = True,
         reduce_dtype: torch.dtype = torch.bfloat16,
+        sp_enabled: bool = False,
     ):
         super().__init__()
+        self.sp_enabled = sp_enabled
         if inner_dim is None:
             inner_dim = int(dim * mult)
         dim_out = dim_out if dim_out is not None else dim
@@ -801,7 +921,10 @@ class NeuronFeedForward(nn.Module):
         # project out
         self.net.append(
             RowParallelLinear(
-                inner_dim, dim_out, bias=bias, input_is_parallel=True, reduce_dtype=reduce_dtype
+                inner_dim, dim_out, bias=bias, input_is_parallel=True, reduce_dtype=reduce_dtype,
+                # Under Megatron-SP the cross-rank sum is folded into the ḡ
+                # reduce-scatter below, so the row-parallel must not also all-reduce.
+                reduce_output=not sp_enabled,
             )
         )
         # FF as used in Vision Transformer, MLP-Mixer, etc. have a final dropout
@@ -816,8 +939,16 @@ class NeuronFeedForward(nn.Module):
                 "passed while calling the underlying pipeline component i.e., "
                 "via `cross_attention_kwargs`."
             )
+        # Megatron-SP: gather to the full sequence (g) for the column-parallel
+        # up-projection, then reduce-scatter the row-parallel partial back to a
+        # sequence shard (ḡ).
+        if self.sp_enabled:
+            hidden_states = gather_from_sequence_parallel_region(hidden_states, dim=1)
         for module in self.net:
             hidden_states = module(hidden_states)
+        if self.sp_enabled:
+            hidden_states = reduce_scatter_to_sequence_parallel_region(hidden_states, dim=1)
+            hidden_states = _sp_unbias(hidden_states, self.net[2])
         return hidden_states
 
 
@@ -899,12 +1030,14 @@ class NeuronFluxAttention(nn.Module):
         reduce_dtype: torch.dtype = torch.bfloat16,
         context_parallel_enabled=False,
         cp_mode: str = "gather_kv",
+        sp_enabled: bool = False,
     ):
         super().__init__()
 
-        self.data_parallel_group = get_data_parallel_group()
         self.context_parallel_enabled = context_parallel_enabled
+        self.cp_group = get_cp_group() if context_parallel_enabled else None
         self.cp_mode = cp_mode
+        self.sp_enabled = sp_enabled
         self.query_dim = query_dim
         self.use_bias = bias
         self.is_cross_attention = cross_attention_dim is not None
@@ -1022,6 +1155,9 @@ class NeuronFluxAttention(nn.Module):
                     bias=out_bias,
                     input_is_parallel=True,
                     reduce_dtype=reduce_dtype,
+                    # Under Megatron-SP the cross-rank sum is folded into the ḡ
+                    # reduce-scatter in forward(); don't also all-reduce here.
+                    reduce_output=not self.sp_enabled,
                 )
             )
             self.to_out.append(nn.Dropout(dropout))
@@ -1035,6 +1171,9 @@ class NeuronFluxAttention(nn.Module):
                 bias=out_bias,
                 input_is_parallel=True,
                 reduce_dtype=reduce_dtype,
+                # Megatron-SP (image-only): the text stream stays FULL, so its output
+                # projection runs DENSE — always all-reduce (no SP reduce-scatter).
+                reduce_output=True,
             )
         else:
             self.to_add_out = None
@@ -1076,6 +1215,15 @@ class NeuronFluxAttention(nn.Module):
         Returns:
             `torch.Tensor`: The output of the attention layer.
         """
+        # Megatron-SP (image-only): only the image stream (hidden_states) arrives
+        # sequence-sharded [B, S_img/tp, H]; gather it to the full sequence (g)
+        # before the column-parallel Q/K/V projections. Rotary is applied below on
+        # the full (gathered) sequence, never on a shard. The text stream
+        # (encoder_hidden_states) is already FULL/replicated, so it is left
+        # untouched. This mirrors the proven Wan pattern.
+        if self.sp_enabled:
+            hidden_states = gather_from_sequence_parallel_region(hidden_states, dim=1)
+
         batch_size, _, _ = (
             hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
         )
@@ -1185,7 +1333,7 @@ class NeuronFluxAttention(nn.Module):
                     stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
                         stacked_kv,
                         gather_dim=3,
-                        process_group=self.data_parallel_group,
+                        process_group=self.cp_group,
                     )
                     key, value = torch.unbind(stacked_kv, dim=0)
                     # gather k and v - [B, H, S, D]
@@ -1196,7 +1344,7 @@ class NeuronFluxAttention(nn.Module):
                     stacked_kv_enc = gather_from_tensor_model_parallel_region_with_dim(
                         stacked_kv_enc,
                         gather_dim=3,
-                        process_group=self.data_parallel_group,
+                        process_group=self.cp_group,
                     )
                     encoder_hidden_states_key_proj, encoder_hidden_states_value_proj = torch.unbind(
                         stacked_kv_enc, dim=0
@@ -1217,7 +1365,7 @@ class NeuronFluxAttention(nn.Module):
                 stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
                     stacked_kv,
                     gather_dim=3,
-                    process_group=self.data_parallel_group,
+                    process_group=self.cp_group,
                 )
                 key, value = torch.unbind(stacked_kv, dim=0)
             else:
@@ -1228,11 +1376,11 @@ class NeuronFluxAttention(nn.Module):
                             "cp_mode='ring' is not supported on TRN1; falling back to gather-KV attention."
                         )
                     key = gather_from_tensor_model_parallel_region_with_dim(
-                        key, gather_dim=2, process_group=self.data_parallel_group
+                        key, gather_dim=2, process_group=self.cp_group
                     )
                     # V is [B, S, H, d], gather along seqlen (dim=1), then transpose to [B, H, S, d]
                     value = gather_from_tensor_model_parallel_region_with_dim(
-                        value, gather_dim=1, process_group=self.data_parallel_group
+                        value, gather_dim=1, process_group=self.cp_group
                     )
                     value = value.transpose(1, 2)
                     hidden_states = F.scaled_dot_product_attention(
@@ -1248,7 +1396,7 @@ class NeuronFluxAttention(nn.Module):
                 else:
                     # Removed all_gather from here and moved it inside the context parallel attention kernel wrapper.
                     hidden_states = attention_wrapper_context_parallel_single_transformer(
-                        query, key, value, self.data_parallel_group
+                        query, key, value, self.cp_group
                     )
 
         # apply rotary for non CP case
@@ -1284,8 +1432,19 @@ class NeuronFluxAttention(nn.Module):
             )
 
             hidden_states = self.to_out[0](hidden_states)
+            # Megatron-SP (image-only) ḡ: the image stream's row-parallel keeps
+            # reduce_output=False; reduce the partial across the TP group and scatter
+            # back to this rank's sequence shard [B, S_img/tp, H].
+            if self.sp_enabled:
+                hidden_states = reduce_scatter_to_sequence_parallel_region(
+                    hidden_states, dim=1
+                )
+                hidden_states = _sp_unbias(hidden_states, self.to_out[0])
             hidden_states = self.to_out[1](hidden_states)
 
+            # The text stream stays FULL: to_add_out (reduce_output=True) does a
+            # normal TP all-reduce and returns the full sequence — no SP
+            # reduce-scatter / unbias.
             encoder_hidden_states = self.to_add_out(encoder_hidden_states)
 
             return hidden_states, encoder_hidden_states
@@ -1298,28 +1457,35 @@ class NeuronFluxAttention(nn.Module):
                 return hidden_states
 
 
-def split_along_dim(tensor, dim, rank, data_parallel_group):
+def split_along_dim(tensor, dim, rank, process_group):
     tensor = scatter_to_process_group_spmd(
         tensor,
         partition_dim=dim,
         rank=rank,
-        process_group=data_parallel_group,
+        process_group=process_group,
     )
     return tensor
 
 
 class FluxBackboneInferenceConfig(InferenceConfig):
-    def __init__(self, *args, cfg_parallel_enabled: bool = False, context_parallel_enabled: bool = False, cp_mode: str = "gather_kv", **kwargs):
+    def __init__(self, *args, cfg_parallel_enabled: bool = False, context_parallel_enabled: bool = False, cp_mode: str = "gather_kv", sp_enabled: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         self.cfg_parallel_enabled = cfg_parallel_enabled
         self.context_parallel_enabled = context_parallel_enabled
         self.cp_mode = cp_mode
+        # Megatron-style sequence parallelism reuses the TP group.
+        self.sp_enabled = sp_enabled
 
         # Validate mutual exclusivity
         if self.cfg_parallel_enabled and self.context_parallel_enabled:
             raise ValueError(
                 "cfg_parallel_enabled and context_parallel_enabled are mutually exclusive. "
                 "Only one can be True at a time."
+            )
+        if self.sp_enabled and self.context_parallel_enabled:
+            raise ValueError(
+                "sp_enabled and context_parallel_enabled are mutually exclusive "
+                "(both shard the sequence dimension)."
             )
 
     def get_required_attributes(self) -> List[str]:

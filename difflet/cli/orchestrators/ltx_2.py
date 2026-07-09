@@ -9,6 +9,32 @@ from difflet.cli.orchestrators.base import ModelOrchestrator
 _HF_MODEL_ID = "Lightricks/LTX-2"
 _MODEL_TYPE = "ltx_2"
 _CLI_NAME = "ltx-2"
+# LTX-2's native frame rate (difflet/models/ltx_2/application.py frame_rate default).
+_FPS = 24
+
+
+def _save_video(frames: "torch.Tensor", output_path: str) -> bool:
+    """Write (B, F, C, H, W) frames in [0, 1] to MP4. Returns True on success.
+
+    LTX-2's pipeline returns frames already denormalized to [0, 1] by diffusers'
+    VideoProcessor.postprocess_video (frames axis before channels), unlike the
+    Wan/Hunyuan (B, C, T, H, W) [-1, 1] layout — do not reuse their converter.
+    """
+    try:
+        from diffusers.utils import export_to_video
+    except ImportError:
+        return False
+    clip = frames.detach().float().clamp(0.0, 1.0)[0].permute(0, 2, 3, 1)  # (F, H, W, C)
+    # export_to_video multiplies ndarray frames by 255 itself; pass float [0, 1]
+    # (uint8 input wraps to 256-v: color inversion).
+    clip = clip.cpu().numpy().astype("float32")
+    try:
+        export_to_video(list(clip), output_path, fps=_FPS)
+    except Exception as exc:
+        print(f"[ltx_2] mp4 export failed ({exc}); saving as .pt instead", flush=True)
+        return False
+    print(f"[ltx_2] video saved to {output_path}", flush=True)
+    return True
 
 
 class LTX2Orchestrator(ModelOrchestrator):
@@ -41,8 +67,9 @@ class LTX2Orchestrator(ModelOrchestrator):
 
     def generate(self) -> None:
         import torch
-        from difflet.pipeline.difflet_pipeline import DiffletPipeline
+
         from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest
+        from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.path_resolver import resolve_model_path
         from difflet.registry import resolve_model
 
@@ -108,6 +135,8 @@ class LTX2Orchestrator(ModelOrchestrator):
         frames = output.frames if hasattr(output, "frames") else output[0]
         out = Path(self.args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
+        if out.suffix == ".mp4" and _save_video(frames, str(out)):
+            return
         torch.save(frames.cpu(), out.with_suffix(".pt"))
         print(f"[difflet] video tensor saved to {out.with_suffix('.pt')}")
 
