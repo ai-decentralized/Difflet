@@ -19,10 +19,10 @@ API or serving engine to a fixed model or fixed number of stages.
 
 Use `/v1/chat/completions` as the first public API, not
 `/v1/images/generations`. The images endpoint is more semantically direct, but
-it does not cover all Difflet model/runtime parameters cleanly. The chat route
-acts as a compatibility wrapper: it extracts a prompt from `messages`, reads
-Difflet-specific generation knobs from `extra_body`, calls the generic serving
-engine, and returns an image content item.
+it does not cover Difflet's model-specific generation and shape parameters
+cleanly. The chat route acts as a compatibility wrapper: it extracts a prompt
+from `messages`, reads Difflet-specific generation knobs from `extra_body`,
+calls the generic serving engine, and returns an image content item.
 
 The first target request shape is:
 
@@ -55,16 +55,22 @@ Current MVP target, as of 2026-07-09:
 - Models: MVP serves explicitly registered Qwen-Image and Flux text-to-image
   adapters. Each server process still loads exactly one model/profile and
   exposes exactly one output modality.
-- Parallel defaults: Qwen MVP uses `tp_degree=4`, `cp_degree=1`. Flux serving
-  should read its default from `difflet.registry`; a 4-core Flux profile is
-  allowed only if the adapter validates that matching compile/load artifacts
-  work for that profile.
+- Parallel defaults come from `difflet.registry` unless the `difflet serve`
+  startup flags override them. Qwen's registry profile is `tp_degree=4`,
+  `cp_degree=1`; Flux should default to the registry value (`tp_degree=8`
+  today) unless the operator starts serving with an explicit supported override
+  such as `--tp-degree 4 --cp-degree 1`.
+  On a 4-core serving allocation, a Flux server that omits `--tp-degree` will
+  fail core-budget admission unless the registry default changes or the adapter
+  provides a verified 4-core serving default. Do not silently rewrite model
+  defaults during startup.
 - Disabled runtime features:
   - CFG-parallel disabled. Treat Qwen and Flux as not supporting CFG-parallel
     in MVP.
   - TeaCache disabled by default until Bin confirms the serving-safe settings.
-  - Sequence/context variants beyond `tp=4, cp=1` are not part of the first
-    runtime path.
+  - Sequence parallelism (`--sp`) is disabled in MVP serving, even for models
+    where the CLI supports it. Reject it at serving startup until the resident
+    worker path is verified for that profile.
 - AOT compile is required. Without compiled artifacts, serving may be roughly
   10x slower or may be unable to load the intended Trainium path. Startup must
   verify compiled artifacts before reporting ready.
@@ -411,6 +417,7 @@ class DiffletRuntimePlan:
     engine_mode: str  # resident for P0; rotating_resident is future-only
     core_allocation: str  # per_stage_process or shared_process
     stages: tuple[DiffletStageSpec, ...]
+    worker_count: int = 1
     required_cores: int | str = "auto"
     peak_cores: int | str = "auto"
     estimated_resident_hbm_bytes: int | None = None
@@ -472,13 +479,20 @@ stage `kind`; startup only chooses among those definitions.
 
 ### Registry And Resolver
 
-Split the current monolithic `difflet/registry.py` into a registry package, then
-create a serving registry that extends it rather than duplicating it:
+Keep the current monolithic `difflet/registry.py` unchanged for P0. Current CLI
+and standalone scripts may import `difflet.registry` directly, so serving should
+not replace it with a same-name package.
+
+Create a new `difflet/common/registry/` package for modular common metadata and
+a new serving registry overlay that extends the common/base registry instead of
+duplicating it.
 
 ```text
-difflet/registry/
+difflet/registry.py              # existing base registry, unchanged
+
+difflet/common/registry/
   __init__.py
-  base.py
+  base.py                        # common registry helpers over old ModelEntry
   flux.py
   qwen_image.py
   wan.py
@@ -488,28 +502,40 @@ difflet/registry/
 difflet/serving/model_registry.py
 ```
 
-Base registry responsibilities:
+Existing base registry responsibilities:
 
 - Keep `ModelEntry`, `register_model(...)`, `resolve_model(...)`, and
   `registered_models()` as the public API currently provided by
   `difflet.registry`.
-- Move model-specific builtins such as `_register_builtin_flux()` and
-  `_register_builtin_wan()` into per-model files. For example,
-  `difflet/registry/flux.py` owns the Flux detector, HF paths,
-  `application_factory`, default shape, and default parallel config.
-- `difflet/registry/__init__.py` should import/register each builtin module
-  once, preserving existing behavior for current callers.
+- Leave generic registry code and model-specific builtins such as
+  `_register_builtin_flux()` and `_register_builtin_wan()` in
+  `difflet/registry.py`.
 - Do not move serving topology or serving runtime policy into the base
   registry. The base registry remains model identity, download, defaults, and
   application factory metadata.
 
+Common registry responsibilities:
+
+- Provide a modular folder for metadata shared by CLI/common/serving
+  infrastructure without shadowing `difflet.registry`.
+- Resolve the base `ModelEntry` through `difflet.registry.resolve_model(...)`.
+- Register common model-family metadata keyed by `ModelEntry.name`, such as
+  generic stage roles, common topology family, exact checkpoint ids supported by
+  the common/serving path, and profile constraints that are not part of the old
+  base registry.
+- Do not duplicate broad HF path matching, detector functions, default shape,
+  or default parallel values that already live in `difflet.registry`.
+
 Serving registry responsibilities:
 
-- Resolve the base `ModelEntry` through `difflet.registry.resolve_model(...)`.
+- Resolve common model metadata through `difflet.common.registry`, which in turn
+  resolves the base `ModelEntry` through `difflet.registry.resolve_model(...)`.
 - Reuse base registry metadata:
   - `ModelEntry.name` as `model_type`.
-  - `ModelEntry.hf_paths` as supported ids/aliases.
-  - `ModelEntry.detector` for existing family matching.
+  - `ModelEntry.hf_paths` as startup resolution candidates, not automatic
+    request-time aliases.
+  - `ModelEntry.detector` for startup family matching, not request-time
+    acceptance.
   - `ModelEntry.default_shape`.
   - `ModelEntry.default_parallel`.
   - `ModelEntry.backends`.
@@ -518,6 +544,11 @@ Serving registry responsibilities:
 - Register only serving-specific metadata keyed by `ModelEntry.name`:
   topology type, stage roles, runtime plans, output modality, artifact policy,
   and serving orchestrator factories.
+- Register serving-supported checkpoint ids explicitly. `ModelEntry.hf_paths`
+  and detector functions can resolve a model family at startup, but they do not
+  automatically enable every sibling checkpoint in that family for serving.
+  Each enabled checkpoint id must be proven to download, compile/cache, load,
+  and smoke with the selected serving orchestrator.
 
 Suggested shape:
 
@@ -525,11 +556,13 @@ Suggested shape:
 @dataclass(frozen=True)
 class ServingModelMetadata:
     model_type: str
+    enabled_model_ids: tuple[str, ...]
     topology_type: DiffletTopologyType
     input_modalities: tuple[str, ...]
     output_modalities: tuple[str, ...]
     stage_factory: Callable[[ModelEntry, ServingProfile], tuple[DiffletStageSpec, ...]]
     runtime_plan_factory: Callable[[ModelEntry, ServingProfile], tuple[DiffletRuntimePlan, ...]]
+    preflight_factory: Callable[[ModelEntry, ServingProfile], "ServingArtifactPreparer"]
     orchestrator_factory: Callable[[ModelEntry, ServingProfile], "ServingModelOrchestrator"]
     artifact_policy: str
 
@@ -541,13 +574,28 @@ _SERVING_METADATA: dict[str, ServingModelMetadata] = {
 def resolve_serving_model(model_id: str, *, model_type: str | None = None) -> DiffletModelSpec:
     base_entry = difflet.registry.resolve_model(model_id, model_type=model_type)
     metadata = _SERVING_METADATA[base_entry.name]
+    normalized_id = model_id.rstrip("/")
+    if normalized_id not in metadata.enabled_model_ids:
+        raise UnsupportedServingModel(
+            f"{model_id!r} resolves to {base_entry.name!r}, but this checkpoint "
+            "is not enabled for serving"
+        )
     return build_serving_spec(base_entry, metadata)
 ```
 
-This keeps the base registry as the single source of truth for supported model
-ids, detectors, download patterns, default shape/parallel, and application
-factories. The serving registry is only an overlay for serving topology and
-runtime behavior.
+For P0, the Flux metadata should set:
+
+```python
+enabled_model_ids=("black-forest-labs/FLUX.1-dev",)
+```
+
+Do not add `black-forest-labs/FLUX.1-schnell` to that tuple until the Flux
+orchestrator path is proven to use the selected checkpoint end to end.
+
+This keeps the base registry as the source of truth for model family resolution,
+download patterns, default shape/parallel, and application factories. The
+serving registry is the source of truth for which exact checkpoint ids are
+enabled for the serving runtime.
 
 First implementation policy:
 
@@ -607,6 +655,16 @@ Suggested initial mappings:
 | `hunyuanvideo-community/HunyuanVideo` | `hunyuan_video` | video | `(condition_encoder, prompt_encoder) -> denoiser_decoder` | `1 + tp*cp + tp*cp` |
 | `Lightricks/LTX-2` | `ltx_2` | video | `pipeline` | `tp*cp` |
 | `hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v` | `hunyuan_video_15` | video | registered but disabled until stage logic exists | unknown |
+
+Flux P0 checkpoint support:
+
+- Enable `black-forest-labs/FLUX.1-dev` as the only Flux P0 serving checkpoint.
+- Do not accept `black-forest-labs/FLUX.1-schnell` at serving startup merely
+  because it is present in the base Flux `ModelEntry.hf_paths`.
+- To enable Schnell later, the Flux common/serving orchestrator must be fully
+  parameterized by `ServingProfile.model_id` and `revision`, and tests must
+  prove download, cache identity, compiled artifact lookup, load, and smoke use
+  the selected checkpoint rather than a hard-coded Flux dev id.
 
 For Wan, `cfg_parallel` doubles the denoiser core term, so the full-resident
 budget becomes `tp*cp*2 + 1` when CFG-parallel is enabled.
@@ -668,6 +726,7 @@ QWEN_IMAGE_T2I_SPEC = DiffletModelSpec(
             plan_id="qwen_shared_process_resident",
             engine_mode="resident",
             core_allocation="shared_process",
+            worker_count=1,
             stages=QWEN_SHARED_PROCESS_STAGES,
             peak_cores=4,
         ),
@@ -688,6 +747,7 @@ matches the AOT compile/cache identity.
 @dataclass(frozen=True)
 class ServingProfile:
     model_id: str
+    accepted_model_ids: tuple[str, ...]
     model_type: str
     revision: str | None
     topology_type: DiffletTopologyType
@@ -709,26 +769,48 @@ class ServingProfile:
     toolchain_fingerprint: dict[str, str]
 ```
 
-Request validation must compare request shape and model against the active
-profile before admission:
+`accepted_model_ids` is the request-time allowlist for a single-model server.
+It should contain the exact startup `model_id` plus explicit same-checkpoint
+serving aliases for the same loaded artifact/profile. Do not include every
+`ModelEntry.hf_paths` value by default: a base registry entry may group sibling
+checkpoints under one model family, and those checkpoints can require different
+weights or artifacts. Detector functions are for startup model resolution only;
+do not use broad detectors for request-time acceptance.
+
+Request validation must compare request model and request-facing shape fields
+against the active profile before admission:
 
 - Matching request: enqueue and run.
-- Shape/profile mismatch: return `400 Bad Request`.
+- Model id omitted: use `active_profile.model_id`.
+- Model id provided and present in `accepted_model_ids`: enqueue and run.
+- Model id provided but absent from `accepted_model_ids`: return
+  `400 model_not_served`.
+- Shape/profile mismatch: return `400 profile_mismatch`.
 - Missing optional shape fields: fill from the active profile.
 - Prompt length: apply the model's serving prompt template and tokenizer before
   admission. If the tokenized prompt exceeds `max_prompt_tokens` /
   `text_seq_len`, return `400 prompt_too_long`. P0 should reject overlength
   prompts rather than silently truncating.
 
-Examples of profile-bound fields:
+Request-facing shape/profile fields:
 
 - `height`, `width`, `num_frames`
+
+Startup-only profile identity fields:
+
 - `tp_degree`, `cp_degree`, `cp_mode`
 - `cfg_parallel`, `sp`
 - model revision/snapshot
 - dtype and Neuron toolchain fingerprint
 - text encoder bucket / max prompt tokens
 - detected or configured NeuronCore budget for this server process
+
+`tp_degree`, `cp_degree`, `cp_mode`, `cfg_parallel`, and `sp_enabled` are valid
+only as `difflet serve` startup flags and internal `ServingProfile` fields. P0
+requests must not include them in `extra_body`; if present, return
+`400 invalid_extra_body`. This keeps request-time profile matching limited to
+fields users naturally vary per generation, such as `height` and `width` for
+image models and future `num_frames` for video models.
 
 `total_neuron_cores` is the physical or runtime-visible core count when it can
 be detected. `neuron_core_budget` is the number of cores this server is allowed
@@ -761,14 +843,59 @@ from the single `--model-id`, `--tp-degree`, `--cp-degree`, `--height`, `--width
 and related startup flags. Requests must match that loaded profile; the server
 must not compile, load, or switch profiles because of request fields.
 
+Serving profile construction order:
+
+1. Resolve `--model-id` through `difflet.registry.resolve_model(...)`.
+2. Start with `ModelEntry.default_parallel` and `ModelEntry.default_shape`.
+3. Apply explicit `difflet serve` startup overrides such as `--tp-degree`,
+   `--cp-degree`, `--cp-mode`, `--height`, `--width`, and `--num-frames`.
+4. Validate the final profile against the serving adapter and compiled artifact
+   identity before starting the resident worker.
+
+Therefore model defaults are not hard-coded by serving. For example, Flux keeps
+the registry default `tp_degree=8` when `--tp-degree` is omitted, while Qwen
+uses its registry default of `tp_degree=4`, `cp_degree=1`. Operators may
+override these at startup only when the adapter supports the resulting profile
+and matching AOT artifacts exist or can be compiled by policy.
+
+Qwen P0 profile support is intentionally narrower than its directory naming:
+reject `--model-id Qwen/Qwen-Image --cp-degree N` for `N > 1` at startup with
+`unsupported_serving_configuration` until the prompt encoder path actually
+passes context-parallel configuration into its Neuron text model and the shared
+worker smoke proves `cp_degree > 1`. The current CLI text stage only passes
+`tp_degree` into `NeuronConfig`; a compiled directory name containing `cp2` is
+not enough to advertise serving support.
+
+The `serve` parser must preserve omission state for startup profile/runtime
+overrides.
+Use serve-specific flag helpers with `default=None`; do not reuse existing
+compile/generate helpers if they default omitted values to `1`,
+`"gather_kv"`, or another concrete value before profile construction.
+
+P0 uses one model-level serving profile. Operators can override that profile at
+startup with `difflet serve --tp-degree`, `--cp-degree`, `--height`, `--width`,
+and related flags. Each stage spec then decides how that profile maps to its
+runtime resources. For example, Qwen P0 text and denoiser stages use
+`tp_degree` because P0 requires `cp_degree=1`, while Qwen VAE/decoder is a fixed
+one-core stage in the adapter. Do not add separate per-stage TP/CP CLI flags in
+P0. If a future model
+truly requires different parallel configs per stage, add an explicit advanced
+serving metadata field such as `stage_parallel_overrides` rather than overloading
+global `--tp-degree`.
+
 P0 behavior:
 
 - Reject `--profile` and `--serving-profiles` with
   `unsupported_serving_configuration`.
 - Reject `--profile-load-policy != single-active`.
+- Reject Qwen `cp_degree > 1` until the serving adapter declares text encoder CP
+  support and passes startup smoke for that profile.
 - Keep exactly one active profile loaded in the shared worker.
-- Return `400 profile_mismatch` when a request shape or parallel setting does
-  not match the loaded profile.
+- Return `400 profile_mismatch` when a request shape does not match the loaded
+  profile.
+- Return `400 invalid_extra_body` when a request includes startup-only profile
+  fields such as `tp_degree`, `cp_degree`, `cp_mode`, `cfg_parallel`, or
+  `sp_enabled`.
 
 Future multi-profile serving may promote the following shape into scope, but it
 is not part of the first build:
@@ -787,8 +914,10 @@ Future profile rules:
   dtype, toolchain)` identity.
 - For the 4-core target, require `tp_degree * cp_degree == 4` unless a model
   adapter explicitly supports another core budget.
-- A request must match exactly one loaded profile by model id, output shape, and
-  optionally request-specified `tp_degree` / `cp_degree`.
+- A request must match exactly one loaded profile by model id and output shape.
+  Parallel and runtime settings remain startup/config-only; future
+  multi-profile request routing should still avoid accepting `tp_degree` /
+  `cp_degree` in request bodies unless a separate public contract is designed.
 - Multi-profile artifact preparation and runtime loading are separate
   features. Precompiling several profile artifacts on disk does not imply those
   profiles are loaded into HBM.
@@ -870,7 +999,11 @@ class DiffletServingEngineFactory:
         plan: DiffletRuntimePlan,
         options: ServingOptions,
     ) -> DiffletServingEngine:
-        if all(stage.kind == DiffletStageKind.RESIDENT_WORKER for stage in plan.stages):
+        if (
+            plan.core_allocation == "shared_process"
+            and plan.worker_count == 1
+            and all(stage.kind == DiffletStageKind.RESIDENT_WORKER for stage in plan.stages)
+        ):
             return ResidentWorkerServingEngine(spec, plan, options)
         raise UnsupportedServingTopology(...)
 ```
@@ -887,21 +1020,29 @@ Initial priorities:
 3. Future debug harnesses may wrap the old CLI path outside serving, but P0
    should not register subprocess runtime plans.
 
+P0 factory admission is intentionally stricter than the long-term type system:
+`ResidentWorkerServingEngine` must reject any plan whose
+`core_allocation != "shared_process"` or whose resolved worker count is not
+exactly `1`. This keeps the first implementation aligned with the 4-core goal:
+one FastAPI process, one resident Trainium worker process, and sequential
+in-worker stage execution.
+
 ## Serving Engine Contract
 
 ```python
 class DiffletServingEngine(Protocol):
     model_id: str
     model_type: str
+    active_profile: ServingProfile
     active_plan_id: str
     input_modalities: tuple[str, ...]
     output_modalities: tuple[str, ...]
     stage_specs: tuple[DiffletStageSpec, ...]
 
-    def check_health(self) -> None: ...
-    def shutdown(self) -> None: ...
-
+    async def start(self) -> None: ...
     async def generate(self, request: DiffletGenerateRequest) -> DiffletGenerateOutput: ...
+    async def health(self) -> EngineHealth: ...
+    async def shutdown(self) -> None: ...
 ```
 
 ```python
@@ -919,10 +1060,21 @@ class DiffletGenerateRequest:
     seed: int = 42
     negative_prompt: str | None = None
     output_format: str | None = None
-    response_format: str = "url"
-    artifact_ttl_seconds: int | None = None
     extra_params: dict[str, Any] = field(default_factory=dict)
 ```
+
+`DiffletGenerateRequest` intentionally does not own request timeout state. The
+engine creates `received_at_monotonic` and `deadline_monotonic` when it admits a
+normalized request, stores those values in the admission ticket, passes the
+ticket/deadline through `run_one`, and sends `deadline_monotonic` to the worker
+as part of `WorkerRequestContext`.
+
+HTTP response policy also stays outside `DiffletGenerateRequest`. For P0 it is
+not request-configurable: the OpenAI handler always returns an artifact URL and
+uses the server-configured artifact TTL. Request `response_format` and
+`artifact_ttl_seconds`, whether top-level or inside `extra_body`, are ignored
+for compatibility and must not affect generation, artifact TTL, output URL
+behavior, or worker input.
 
 ```python
 @dataclass
@@ -957,11 +1109,24 @@ Responsibilities:
 - Validate prompt length using the selected adapter's tokenizer and prompt
   template before admission. P0 returns `400 prompt_too_long` instead of
   silently truncating overlength prompts.
+  - For Qwen, do not reuse the CLI tokenizer call unchanged if it passes
+    `truncation=True`. Serving must first tokenize the templated prompt without
+    truncation, reject over-bucket prompts, and only then pad to the compiled
+    execution bucket.
 - Read Difflet generation parameters from `extra_body`. P0 should not accept
   flattened generation parameters at the top level; if a top-level field
   duplicates an `extra_body` field, return `400 invalid_extra_body`.
+- Ignore `response_format` and `artifact_ttl_seconds`, whether top-level or
+  inside `extra_body`. P0 response policy is deployment-owned: always return an
+  artifact URL and use the server-configured artifact TTL.
+- Return `400 invalid_extra_body` for known Difflet generation, shape,
+  startup/runtime, TeaCache, or other advanced runtime fields sent at the top
+  level. Arbitrary unsupported chat fields, such as tool or streaming controls,
+  return `400 feature_not_supported`.
 - Infer `output_modalities` from request `modalities`, else from engine defaults.
-- Validate requested model, if request includes `model`.
+- Validate requested model, if request includes `model`, by checking
+  `active_profile.accepted_model_ids`. Do not call registry detector functions
+  during request-time matching.
 - Format the final content part according to the model's declared
   `output_modalities`:
   - image output -> `{"type": "image_url", "image_url": {"url": ...}}`
@@ -976,12 +1141,23 @@ Responsibilities:
     field.
   - `extra_body.guidance_scale` -> `guidance_scale`
   - `extra_body.seed` -> `seed`
+- Reject `extra_body.tp_degree`, `extra_body.cp_degree`, `extra_body.cp_mode`,
+  `extra_body.cfg_parallel`, and `extra_body.sp_enabled` with
+  `400 invalid_extra_body`. These are `difflet serve` startup-only
+  profile/runtime fields; they stay in `ServingProfile` for cache identity,
+  core placement, worker loading, and diagnostics, but clients cannot provide
+  them per request.
+- Compare only request-facing shape fields (`height`, `width`, and future
+  `num_frames`) against the active profile. Shape mismatch returns
+  `400 profile_mismatch`; missing optional shape fields are filled from the
+  active profile.
 - Validate P0 value ranges before calling the engine: positive bounded
-  inference steps, finite non-negative guidance, supported seed range, positive
-  bounded artifact TTL, and supported output format.
+  inference steps, finite non-negative guidance, supported seed range, and
+  supported output format.
 - Call `engine.generate(...)`.
-- For deployment `response_format=url`, write `DiffletGenerateOutput.data`
-  through `ArtifactStore.put_bytes(...)`, then return the resulting
+- Write `DiffletGenerateOutput.data` through
+  `ref = await ArtifactStore.put_bytes(...)`, then resolve
+  `url = await ArtifactStore.get_url(ref)`, and return only the resolved
   presigned/public URL as:
 
 ```json
@@ -993,10 +1169,11 @@ Responsibilities:
 }
 ```
 
-P0 does not return data URLs. `response_format=data_url` returns
-`400 invalid_extra_body`; use the R2 artifact URL returned in `image_url.url`.
-If `ArtifactStore.put_bytes(...)` or presigned/public URL creation fails after
-generation succeeds, return `502 artifact_upload_failed` or
+P0 does not return data URLs. Any request `response_format`, including
+`response_format=data_url`, is ignored; the server still returns the R2 artifact
+URL in `image_url.url`.
+If `await ArtifactStore.put_bytes(...)` or `await ArtifactStore.get_url(ref)`
+fails after generation succeeds, return `502 artifact_upload_failed` or
 `503 artifact_store_unavailable`, discard the generated bytes after cleanup,
 and do not fall back to local paths, data URLs, or inline bytes.
 
@@ -1013,7 +1190,9 @@ guidance-distilled single-pass guidance.
 Proposed modules:
 
 ```text
-difflet/registry/
+difflet/registry.py              # existing base registry, reused as-is
+
+difflet/common/registry/
   __init__.py
   base.py
   flux.py
@@ -1070,8 +1249,8 @@ Optional routes after chat works:
 - `POST /v1/videos/sync` or `POST /v1/videos/generations`
 
 Do not add `/v1/images/generations` in the first serving milestone. Difflet
-needs model/runtime parameters that are cleaner to pass through the chat
-compatibility wrapper's `extra_body`.
+uses model-specific generation and request-facing shape parameters that are
+cleaner to carry in the chat compatibility wrapper's `extra_body`.
 
 Uvicorn worker policy:
 
@@ -1107,6 +1286,31 @@ difflet serve \
   --compile-policy require
 ```
 
+`serve` should have its own profile flag helper. Existing helpers such as
+`_add_parallel_flags(...)` and `_add_shape_flags(...)` are allowed to keep their
+current compile/generate defaults, but serving must distinguish "operator did
+not provide this value" from "operator explicitly overrode this value":
+
+```python
+def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--height", type=int, default=None)
+    p.add_argument("--width", type=int, default=None)
+    p.add_argument("--num-frames", type=int, default=None)
+    p.add_argument("--tp-degree", type=int, default=None)
+    p.add_argument("--cp-degree", type=int, default=None)
+    p.add_argument("--cp-mode", choices=["gather_kv", "ring"], default=None)
+    p.add_argument("--cfg-parallel", action=argparse.BooleanOptionalAction,
+                   default=None)
+    p.add_argument("--sp", dest="sp_enabled",
+                   action=argparse.BooleanOptionalAction, default=None)
+```
+
+After parsing, profile construction resolves `None` values from
+`ModelEntry.default_parallel` and `ModelEntry.default_shape`, then applies only
+non-`None` startup overrides. For P0, `cfg_parallel=True` and
+`sp_enabled=True` should be rejected for Qwen/Flux serving even though they are
+represented as tri-state overrides internally.
+
 Serving network flags:
 
 | Flag | Default | Meaning |
@@ -1127,13 +1331,14 @@ Model/profile flags:
 | `--height N` | registry default | Fixed serving profile height. Request mismatch returns `400`. |
 | `--width N` | registry default | Fixed serving profile width. Request mismatch returns `400`. |
 | `--num-frames N` | registry default | Fixed serving profile frame count for video models. Request mismatch returns `400`. |
-| `--tp-degree N` | `4` for MVP | Tensor parallel degree for compile/load/runtime. |
-| `--cp-degree N` | `1` for MVP | Context parallel degree. |
+| `--tp-degree N` | registry default unless overridden | Tensor parallel degree for compile/load/runtime. Qwen registry default is `4`; Flux uses the base registry default unless explicitly overridden. |
+| `--cp-degree N` | registry default unless overridden | Context parallel degree. Qwen registry default is `1`; Flux uses the base registry/default unless explicitly overridden. |
 | `--profile tp=...,cp=...,height=...,width=...` | unsupported in P0 | Future repeated multi-profile declaration. P0 should reject this flag. |
 | `--serving-profiles PATH` | unsupported in P0 | Future JSON/YAML startup profile list. P0 should reject this flag. |
 | `--profile-load-policy {single-active}` | `single-active` | P0 supports only one loaded profile. Values other than `single-active` should be rejected. |
 | `--cp-mode {gather_kv,ring}` | model/default | Context parallel attention strategy. |
 | `--cfg-parallel` / `--no-cfg-parallel` | `false` | Disabled for Qwen/Flux MVP; reject `--cfg-parallel` until explicitly supported. |
+| `--sp` / `--no-sp` | `false` | Disabled for P0 serving; reject `--sp` until the resident worker profile is verified. |
 | `--dtype DTYPE` | adapter default | Runtime dtype, for example `bf16`. |
 
 Artifact/cache lifecycle flags:
@@ -1143,12 +1348,11 @@ Artifact/cache lifecycle flags:
 | `--cache-dir PATH` | `~/.cache/difflet` | Compiled artifact cache root. |
 | `--work-dir PATH` | `~/.cache/difflet/work/serve` | Scratch directory for logs/temp files. P0 shared-process tensor handoff is in-memory, not file-backed. |
 | `--artifact-store {r2}` | `r2` | Final output storage backend for P0. |
-| `--artifact-ttl-seconds N` | `3600` | Default generated artifact retention time. |
-| `--max-artifact-ttl-seconds N` | deployment config | Upper bound for per-request `artifact_ttl_seconds`; invalid values return `400 invalid_extra_body`. |
+| `--artifact-ttl-seconds N` | `3600` | Generated artifact retention time. P0 does not allow per-request TTL overrides. |
 | `--download-policy {auto,never}` | `auto` | `auto` downloads missing weights and skips download when weights already exist; `never` uses local files only and fails if missing. |
 | `--compile-policy {auto,require}` | `require` | `auto` compiles missing artifacts; `require` requires artifacts to exist. |
 | `--allow-legacy-artifacts` | `false` | Development/transition-only escape hatch for old staged artifact dirs without serving manifests. Production P0 should reject manifestless artifacts. |
-| `--force-compile` | `false` | Recompile even if cache metadata says artifacts exist. |
+| `--force-compile` | `false` | Recompile even if cache metadata says artifacts exist. Valid only with `--compile-policy auto`; with `require`, fail startup as `unsupported_serving_configuration`. |
 | `--compile-lock-timeout SECONDS` | `600` | Maximum time to wait for another process compiling the same artifact. |
 
 Request admission flags:
@@ -1156,8 +1360,8 @@ Request admission flags:
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--max-running-requests N` | `1` | Maximum actively executing requests per serving profile. |
-| `--max-queued-requests N` | `8` | Maximum queued requests. Queue full returns `429`. |
-| `--queue-timeout SECONDS` | `30` | Maximum queue wait before execution starts. Exceeding it returns `429`. |
+| `--max-queued-requests N` | `8` | Maximum queued requests. Queue full returns `429 queue_full`. |
+| `--queue-timeout SECONDS` | `30` | Maximum queue wait before execution starts. Exceeding it returns `429 queue_timeout`. |
 | `--request-timeout SECONDS` | `300` | Maximum external request wall-clock time from HTTP admission, including queue wait and generation. Exceeding it returns `504`; if worker execution has started, it also starts worker recovery. |
 | `--max-inference-steps N` | adapter/deployment default | Upper bound for `num_inference_steps` / `steps`; invalid values return `400 invalid_extra_body`. |
 | `--max-prompt-tokens N` | adapter/profile text bucket | Optional prompt-token admission override, capped by the compiled encoder bucket. |
@@ -1208,10 +1412,11 @@ before the FastAPI app reports ready:
 parse serve args
 resolve serving model spec
 resolve serving profile
-download/check model weights according to download_policy
+construct parent-side ServingArtifactPreparer
+preflight: download/check model weights according to download_policy
 build candidate runtime plans from engine mode and resource budget
 for each allowed candidate plan:
-  compile/check artifacts for that plan according to compile_policy
+  preflight: compile/check artifacts for that plan according to compile_policy
   build engine
   start/load/warm up workers
   if healthy: accept this plan
@@ -1299,7 +1504,7 @@ Required startup log events:
 | `serve.model.resolve.begin/end` | local model path resolution and optional download | model id, revision, download policy, local path, elapsed ms |
 | `serve.profile.plan` | after profile parsing | profile id, tp, cp, cp mode, height, width, num frames, dtype |
 | `serve.artifact.check.begin/end` | before/after artifact existence and manifest checks | profile id, stage role, compiled path, cache hit/miss, elapsed ms |
-| `serve.compile.begin/progress/end` | around each compile job when `compile-policy=auto` or `force-compile` | profile id, stage role, compiled path, elapsed ms |
+| `serve.compile.begin/progress/end` | around each compile job when `compile-policy=auto`; `--force-compile` is valid only with `auto` | profile id, stage role, compiled path, elapsed ms |
 | `serve.worker.start.begin/end` | worker process/thread creation | worker id, engine mode, profile id, elapsed ms |
 | `serve.stage.load.begin/end` | before/after loading a stage or pipeline into Neuron runtime | profile id, stage role, compiled path, num cores, elapsed ms |
 | `serve.profile.smoke.begin/end` | serving-specific smoke check | profile id, output type, elapsed ms |
@@ -1344,16 +1549,16 @@ Startup flags:
 | Flag | Default | Serving lifecycle use | Trainium/cache impact |
 | --- | --- | --- | --- |
 | `--model-id` | required | Select model spec/topology and served model name. | Yes: affects weights and compiled artifacts. |
-| `--tp-degree` | `4` for MVP | Tensor-parallel degree for compile/load. | Yes: affects world size, NeuronCore use, cache key. |
-| `--cp-degree` | `1` for MVP | Context-parallel degree for supported models. | Yes: affects world size, NeuronCore use, cache key. |
-| `--cp-mode` | `gather_kv` | Context-parallel attention strategy. | Yes: affects compiled graph/cache for CP-capable stages. |
+| `--tp-degree` | registry default unless overridden | Tensor-parallel degree for compile/load. Qwen defaults to the registry value `4`; Flux keeps the registry default unless overridden. | Yes: affects world size, NeuronCore use, cache key. |
+| `--cp-degree` | registry default unless overridden | Context-parallel degree for supported models. Qwen defaults to the registry value `1`. | Yes: affects world size, NeuronCore use, cache key. |
+| `--cp-mode` | registry default unless overridden | Context-parallel attention strategy. | Yes: affects compiled graph/cache for CP-capable stages. |
 | `--cfg-parallel` | `false` | Disabled in MVP. Qwen and Flux serving adapters should reject enabling it until explicitly supported. | Yes: changes world size/runtime topology and cache key. |
-| `--sp` | `false` | Sequence parallelism for supported models. | Yes: affects compiled graph/cache. |
+| `--sp` | `false` | Disabled/rejected in P0 serving, even if the CLI supports it for the model. | Yes: affects compiled graph/cache. |
 | `--height` | model registry default | Fixed output height for this server instance. | Yes: fixed shape, cache key, NEFF shape. |
 | `--width` | model registry default | Fixed output width for this server instance. | Yes: fixed shape, cache key, NEFF shape. |
 | `--num-frames` | model registry default, often `None` for image | Fixed output frame count for video models. | Yes: fixed shape, cache key, NEFF shape. |
 | `--cache-dir` | `~/.cache/difflet/` | Compile/load artifact root. | Yes: artifact lookup location. |
-| `--force` | `false` | Force startup compilation when compile policy allows it. | Yes: invalidates/rebuilds cache for matching spec. |
+| `--force-compile` | `false` | Force startup compilation. Valid only with `--compile-policy auto`; with `require`, startup fails as invalid configuration. `--force` may be accepted as a compatibility alias, but docs and tests should use `--force-compile`. | Yes: invalidates/rebuilds cache for matching spec. |
 | `--download-policy` | `auto` for dev, `never` recommended for prod | Whether startup may download missing weights. | Indirect: needed before compile/load. |
 | `--compile-policy` | `require` recommended | Whether startup may compile missing/stale artifacts. | Yes: controls compile lifecycle. |
 
@@ -1402,6 +1607,13 @@ Current docs/code evidence:
   existing `seq256` encoder artifact means the adapter must tokenize the
   templated prompt and reject overlength prompts with `400 prompt_too_long`
   rather than silently truncating or letting a shape error reach the worker.
+  This validation path must use tokenizer settings that preserve the true token
+  count; padding/truncation settings used by CLI generation are not sufficient
+  for serving admission.
+- Flux P0 also needs explicit prompt admission. The existing Flux pipeline path
+  uses `max_sequence_length=512`; the serving adapter should validate the prompt
+  against that bucket, or another declared Flux serving bucket, without silent
+  truncation before calling the loaded `DiffletPipeline`.
 
 Qwen-Image profile artifact identity:
 
@@ -1434,9 +1646,9 @@ Flux/pipeline-style profile identity:
   (`CacheSpec` / `cache_path(...)` / manifest). The cache identity includes
   model id/revision, parallel config, shape, dtype/toolchain, and adapter
   kwargs.
-- Therefore Flux is still shape/profile-bound, but the shape is represented in
-  the content-addressed cache manifest/hash rather than a human-readable
-  `tp{tp}cp{cp}_h{h}w{w}` path.
+- Therefore Flux is still bound to the startup profile identity, including
+  shape, but that identity is represented in the content-addressed cache
+  manifest/hash rather than a human-readable `tp{tp}cp{cp}_h{h}w{w}` path.
 
 Text-model comparison:
 
@@ -1454,12 +1666,15 @@ Parallelism/core handling:
 - Effective full-core usage for many staged models follows the existing CLI
   rules:
   - Wan transformer: `(tp_degree) * (cp_degree) * (2 if cfg_parallel else 1)`.
-  - Qwen-Image text/generate: `(tp_degree) * (cp_degree)`.
+  - Qwen-Image text/generate: `(tp_degree) * (cp_degree)` in the generic model
+    shape; P0 serving supports only `cp_degree=1`, so the supported Qwen P0
+    profile uses `tp_degree`.
   - HunyuanVideo llama/generate: `(tp_degree) * (cp_degree)`.
   - VAE decoder stages generally use one core.
-- `NEURON_RT_NUM_CORES` and `NEURON_RT_VIRTUAL_CORE_SIZE` are process-level, so
-  resident workers must be started per stage with the resolved stage core
-  settings.
+- `NEURON_RT_NUM_CORES` and `NEURON_RT_VIRTUAL_CORE_SIZE` are process-level. P0
+  shared-process serving starts one worker with one immutable plan-level env,
+  typically `NEURON_RT_NUM_CORES=max(stage_cores)`. Future
+  `per_stage_process` plans may start one worker per stage, but P0 must not.
 
 Startup core/HBM admission:
 
@@ -1467,10 +1682,11 @@ Startup core/HBM admission:
   `subprocess.run(cmd, env=env, check=True)` for one stage, waits for that
   process to finish, then starts the next stage. That means the CLI resource
   peak is approximately the largest single stage, not the sum of all stages.
-- Resident serving changes the resource model. If prompt encoder, denoiser, and
-  decoder are all long-lived workers, their Trainium core use and HBM residency
-  overlap for the full server lifetime.
-- Therefore the server must compute resident startup core demand as:
+- Future `per_stage_process` resident serving changes the resource model. If
+  prompt encoder, denoiser, and decoder are all long-lived workers, their
+  Trainium core use and HBM residency overlap for the full server lifetime.
+- For future `per_stage_process` resident serving, the server would compute
+  startup core demand as:
 
 ```text
 required_cores = sum(stage.num_cores * stage.num_replicas)
@@ -1653,9 +1869,9 @@ Recommended first behavior:
 
 | Condition | Response |
 | --- | --- |
-| Queue full | `429 Too Many Requests` |
-| Queue wait exceeds `--queue-timeout` | `429 Too Many Requests` or `503 Service Unavailable`; prefer `429` for admission timeout. |
-| Request shape/profile mismatch | `400 Bad Request` |
+| Queue full | `429 queue_full` |
+| Queue wait exceeds `--queue-timeout` | `429 queue_timeout` |
+| Request shape/profile mismatch | `400 profile_mismatch` |
 | Server is shutting down/draining | `503 Service Unavailable` |
 | Worker dead or engine unhealthy | `503 Service Unavailable` |
 | Request exceeds `--request-timeout` | `504 Gateway Timeout` |
@@ -1667,6 +1883,9 @@ Timeout semantics:
 - `request_timeout` is the external request deadline. The default is `300s`
   for the first text-to-image serving path. It starts when the HTTP request is
   accepted by the server and includes queue wait plus worker execution.
+- The engine must stamp `received_at_monotonic` / `deadline_monotonic` at
+  admission. Do not derive `request_timeout` from worker start time, and do not
+  require model-specific `DiffletGenerateRequest` fields to carry the timer.
 - During queue admission, both limits apply. Queue wait beyond
   `queue_timeout` returns `429 queue_timeout`; total request time beyond
   `request_timeout` returns `504 request_timeout`.
@@ -1732,6 +1951,19 @@ Current adapter runtime defaults from existing orchestrators:
 | `qwen_image` | `4` | `4.0` | `42` |
 | `wan` | `2` | `1.0` | `42` |
 | `hunyuan_video` | `4` | `6.0` | `42` |
+
+Flux P0 value limits:
+
+- prompt length: validate with the Flux tokenizer/template path against the
+  configured text bucket, default `max_sequence_length=512`, and return
+  `400 prompt_too_long` on overflow.
+- `num_inference_steps` / `steps`: positive integer, default `28`, bounded by
+  `--max-inference-steps`.
+- `guidance_scale`: finite non-negative float, default `3.5`.
+- `seed`: `0 <= seed <= 2**63 - 1`.
+- `output_format`: `png` only in P0.
+- `true_cfg_scale` and `negative_prompt`: reject in Flux P0 until the serving
+  adapter explicitly exposes a true-CFG path.
 | `hunyuan_video_15` | `4` | `6.0` | `42` |
 | `ltx_2` | `40` | `3.5` | `42` |
 
@@ -1752,6 +1984,14 @@ on at least:
 - Neuron toolchain versions
 - stage-specific Neuron settings such as logical NC / virtual core size
 - relevant adapter kwargs, such as text sequence length
+
+Compile policy validation:
+
+- `--compile-policy require` means startup may only check existing artifacts and
+  must not compile. Combining it with `--force-compile` is invalid and must fail
+  startup with `unsupported_serving_configuration`.
+- `--compile-policy auto` may compile missing/stale artifacts. `--force-compile`
+  is valid only in this mode and forces a rebuild for the selected profile.
 
 For staged models, the stage topology is the same in compile and generate:
 
@@ -1883,18 +2123,35 @@ shared by CLI and serving:
   model-specific stage logic.
 
 `difflet/serving/orchestrators/*` is a thin serving-facing adapter layer that
-calls the common orchestrator but may add serving-only behavior later:
+calls the common orchestrator but may add serving-only behavior later. Split this
+layer into parent-side preflight and worker-side runtime objects:
+
+In this plan, "adapter" means a model-specific implementation of the common
+serving protocols, not a separate preexisting package. For P0, concrete
+adapters should be modules such as
+`difflet/serving/orchestrators/qwen_image.py` and
+`difflet/serving/orchestrators/flux.py`. The serving registry binds them through
+`preflight_factory` and `orchestrator_factory`.
+
+Parent-side preflight owns cold operations before the worker starts:
 
 - lifecycle policy: download/compile before HTTP bind.
-- startup progress logging and smoke readiness.
-- request validation and admission integration.
-- active `ServingProfile` tracking.
+- startup progress logging for download, compile, and artifact checks.
+- compile plan construction and artifact verification.
+
+Worker-side runtime owns Trainium-loaded state and request execution:
+
+- worker-side load and smoke readiness.
+- request validation integration.
+- active `ServingProfile` tracking inside the worker.
 - loaded pipe/app/stage handle ownership.
 - future serving-specific profile switch or recovery behavior.
 
-In P0, serving orchestrators are constructed and loaded inside the resident
-worker process. The FastAPI parent process resolves the orchestrator factory and
-uses worker IPC; it must not hold loaded Trainium model objects directly.
+In P0, the parent constructs a preflight object to resolve/download/compile/check
+artifacts before starting the worker. Serving runtime orchestrators are
+constructed and loaded inside the resident worker process. The FastAPI parent
+process resolves the factories and uses worker IPC; it must not hold loaded
+Trainium model objects directly.
 
 The CLI should also become a thin wrapper over `difflet/common/orchestrators/*`.
 It may still use `difflet.cli.runner.run_stage(...)` for offline subprocess
@@ -1902,7 +2159,38 @@ compile/generate, but the reusable model code should live in common, not inside
 CLI private methods.
 
 Serving should not depend on CLI subprocess orchestration for the resident path.
-The serving-facing orchestrator contract should be:
+The parent-side preflight contract should be:
+
+```python
+class ServingArtifactPreparer(Protocol):
+    model_id: str
+    model_type: str
+
+    def resolve_model_path(self, *, download_policy: DownloadPolicy) -> Path: ...
+    def stage_specs(self, profile: ServingProfile) -> tuple[DiffletStageSpec, ...]: ...
+    def compile_plan(self, profile: ServingProfile) -> tuple[DiffletCompileSpec, ...]: ...
+    def ensure_artifacts(self, profile: ServingProfile, policy: CompilePolicy) -> None: ...
+```
+
+The orchestration sequence is common across serving models, but these methods
+are adapter-specific:
+
+- `resolve_model_path(...)` should reuse the common path resolver, while each
+  adapter controls the exact model id/revision policy it supports.
+- `stage_specs(...)` maps the selected profile to generic serving stages such as
+  `prompt_encoder`, `denoiser`, and `decoder`.
+- `compile_plan(...)` maps the selected profile to concrete model artifacts,
+  for example Qwen staged directories or a Flux pipeline `CacheSpec`.
+- `ensure_artifacts(...)` performs download/compile/cache validation before any
+  worker process loads model state.
+
+Do not move these operations into `ServingModelOrchestrator`. The worker
+orchestrator may resolve local paths needed for `load(...)`, but it must not
+download weights, run AOT compile, or make readiness decisions for missing/stale
+artifacts. If preflight missed something, worker `load()` or `smoke()` should
+fail and startup should not become ready.
+
+The worker-owned runtime orchestrator contract should be:
 
 ```python
 class ServingModelOrchestrator(Protocol):
@@ -1910,10 +2198,6 @@ class ServingModelOrchestrator(Protocol):
     model_type: str
     active_profile: ServingProfile
 
-    def resolve_model_path(self, *, download_policy: DownloadPolicy) -> Path: ...
-    def stage_specs(self, profile: ServingProfile) -> tuple[DiffletStageSpec, ...]: ...
-    def compile_plan(self, profile: ServingProfile) -> tuple[DiffletCompileSpec, ...]: ...
-    def ensure_artifacts(self, profile: ServingProfile, policy: CompilePolicy) -> None: ...
     def load(self, profile: ServingProfile) -> None: ...
     def smoke(self) -> None: ...
     async def generate(self, request: DiffletGenerateRequest, context: WorkerRequestContext) -> DiffletGenerateOutput: ...
@@ -1921,10 +2205,10 @@ class ServingModelOrchestrator(Protocol):
 ```
 
 The public serving engine should execute requests by sending `RUN_GENERATION`
-to the worker. Inside the worker, the worker runtime creates
-`WorkerRequestContext`, owns the cancellation signal, and calls only
-`orchestrator.generate(request, context)`; stage iteration is internal to the
-orchestrator/handler:
+to the worker with the normalized request plus engine-owned deadline metadata.
+Inside the worker, the worker runtime creates `WorkerRequestContext`, owns the
+cancellation signal, and calls only `orchestrator.generate(request, context)`;
+stage iteration is internal to the orchestrator/handler:
 
 - Flux serving orchestrator owns one loaded `DiffletPipeline` handle and calls
   it from `generate(request, context)`.
@@ -1968,6 +2252,11 @@ Load reuse rule:
 - Pipeline-style models should load through
   `DiffletPipeline.from_pretrained(..., skip_compile=True, load=True)` or
   `DiffletPipeline.load(...)`.
+- Before using `skip_compile=True`, the parent-side preflight/preparer must
+  already have run `ensure_artifacts(...)` for the exact active
+  `ServingProfile`. Do not rely on
+  `from_pretrained(..., skip_compile=True)` to reject stale or missing artifacts
+  before load.
 - `compile_cache_dir` is a cache root, not a runtime profile switch. The
   loaded pipeline/application is still constructed for one concrete
   `CacheSpec`: model id/revision, parallel config, shape, dtype, toolchain, and
@@ -2013,9 +2302,9 @@ For Qwen-Image specifically, extract these units:
 | `_stage_compiled_dir(stage, args)` | common `compiled_path(DiffletCompileSpec)` | Preserve cache dir naming for CLI/server compatibility. |
 | `_stage_text(... stage_mode=compile)` | common prompt encoder `compile()` | No request prompt needed. |
 | `_stage_text(... stage_mode=generate)` | prompt encoder stage `load()` + `generate()` | Serving returns an in-process `TensorRef`, not hard-coded global `text.pt`. |
-| `_stage_generate(... stage_mode=compile)` | common denoiser `compile()` | Shape/profile-bound. |
+| `_stage_generate(... stage_mode=compile)` | common denoiser `compile()` | Bound to startup shape/profile identity. |
 | `_stage_generate(... stage_mode=generate)` | denoiser stage `load()` + `generate()` | Input prompt tensors; output latent `TensorRef`. |
-| `_stage_vae(... stage_mode=compile)` | common decoder `compile()` | Shape/profile-bound. |
+| `_stage_vae(... stage_mode=compile)` | common decoder `compile()` | Bound to startup shape/profile identity. |
 | `_stage_vae(... stage_mode=generate)` | decoder stage `load()` + `generate()` | Output image bytes plus MIME metadata. Artifact upload happens in the OpenAI serving handler. |
 
 Registry versus orchestrator boundary:
@@ -2070,6 +2359,13 @@ Manifest:
   matches the selected `DiffletCompileSpec`, model revision/snapshot when
   known, and toolchain fingerprint. Directory naming alone is not enough for a
   production-ready artifact identity check.
+- Pipeline-style P0 models such as Flux must implement
+  `ensure_artifacts(profile, policy)` before constructing/loading the worker
+  pipeline. This check must call `has_valid_manifest(...)` for the selected
+  `CacheSpec` and the app-specific compiled artifact readiness check used by
+  `DiffletPipeline.from_pretrained(...)`. `skip_compile=True` is not itself an
+  artifact validation step; if the manifest or expected compiled files are
+  missing/stale under `compile-policy=require`, startup must fail before load.
 
 Legacy staged artifact validation:
 
@@ -2198,12 +2494,17 @@ This engine:
 - Keeps request state and inter-stage artifacts isolated by `request_id`.
 - Produces final bytes and returns `DiffletGenerateOutput`.
 
-Worker layout depends on `DiffletRuntimePlan.core_allocation`:
+P0 worker layout is fixed:
 
-- `per_stage_process`: create one worker process per resident stage allocation.
 - `shared_process`: create one worker process for the whole plan, reserve
   `max(stage_cores)` cores, and run stage adapters sequentially inside that
-  process. This is the P0 target.
+  process.
+
+`per_stage_process` is future-only. In that topology, each resident stage would
+create its own worker process and reserve its own core group, so Qwen would
+require `4 + 4 + 1 = 9` cores instead of the 4-core shared-process target. The
+P0 factory and startup admission must reject `per_stage_process` plans even if
+all stages are `RESIDENT_WORKER`.
 
 Shared-process Neuron env contract:
 
@@ -2276,10 +2577,10 @@ class StageWorkerReplyType(str, Enum):
 ```
 
 `RUN_GENERATION` is the only P0 execution command crossing the process boundary.
-It sends the `DiffletGenerateRequest` to the worker. The worker runtime creates
-the `WorkerRequestContext` locally; the cancellation signal and intermediate
-`TensorRef` values are worker-local and must not cross IPC. The reply returns
-final bytes and metadata only.
+It sends the `DiffletGenerateRequest` plus `deadline_monotonic` to the worker.
+The worker runtime creates the `WorkerRequestContext` locally; the cancellation
+signal and intermediate `TensorRef` values are worker-local and must not cross
+IPC. The reply returns final bytes and metadata only.
 
 `CANCEL` is a best-effort control command for the currently running request id.
 The worker returns `CANCEL_ACK` only when the active request is safe to forget:
@@ -2304,7 +2605,7 @@ class CancellationSignal(Protocol):
 @dataclass
 class WorkerRequestContext:
     request_id: str
-    deadline: float
+    deadline_monotonic: float
     cancellation: CancellationSignal
 ```
 
@@ -2434,28 +2735,37 @@ class ArtifactRef:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 class ArtifactStore(Protocol):
-    def put_bytes(self, data: bytes, *, content_type: str, filename: str | None = None, ttl_seconds: int | None = None, metadata: dict[str, Any] | None = None) -> ArtifactRef: ...
-    def put_file(self, path: Path, *, content_type: str, ttl_seconds: int | None = None, metadata: dict[str, Any] | None = None) -> ArtifactRef: ...
-    def get_url(self, ref: ArtifactRef) -> str: ...
-    def delete(self, ref: ArtifactRef) -> None: ...
+    async def put_bytes(self, data: bytes, *, content_type: str, filename: str | None = None, ttl_seconds: int | None = None, metadata: dict[str, Any] | None = None) -> ArtifactRef: ...
+    async def put_file(self, path: Path, *, content_type: str, ttl_seconds: int | None = None, metadata: dict[str, Any] | None = None) -> ArtifactRef: ...
+    async def get_url(self, ref: ArtifactRef) -> str: ...
+    async def delete(self, ref: ArtifactRef) -> None: ...
 ```
+
+`ArtifactStore` is async because uploads happen in the async HTTP response path.
+Implementations that use a synchronous storage SDK must run blocking calls in a
+bounded executor and map timeout/failure to `artifact_upload_failed` or
+`artifact_store_unavailable`; they must not block the FastAPI event loop.
 
 `file_id` is an opaque server-generated identifier for an artifact. It must not
 be a filesystem path. In P0, clients receive an R2 public or presigned URL;
 Difflet does not serve artifact bytes through a local `/v1/files` route.
+`ArtifactRef.uri` is an internal backend locator, such as an object-storage key
+or URI. It must never be returned to clients directly; the handler returns only
+the value from `ArtifactStore.get_url(ref)`.
 
 Initial store option:
 
 - `R2ArtifactStore`
   - Uploads generated files to object storage.
-  - Returns a presigned URL with a configured expiration.
+  - Returns an internal `ArtifactRef` from `put_bytes(...)` / `put_file(...)`.
+  - Returns a public or presigned URL with a configured expiration from
+    `get_url(ref)`.
   - Deletes the local temporary file after successful upload.
 
-The OpenAI handler computes an effective artifact TTL as
-`request.artifact_ttl_seconds or server_default_artifact_ttl_seconds` and passes
-it to `ArtifactStore.put_bytes(...)` / `put_file(...)`. `ArtifactRef.expires_at`
-should reflect the chosen TTL when the backend can enforce or represent
-expiration.
+The OpenAI handler uses only the server-configured artifact TTL and passes it to
+`await ArtifactStore.put_bytes(...)` / `await ArtifactStore.put_file(...)`.
+`ArtifactRef.expires_at` should reflect the chosen TTL when the backend can
+enforce or represent expiration.
 
 MVP deployment should use `R2ArtifactStore` for final image outputs. Configure
 credentials through environment variables rather than request parameters:
@@ -2520,6 +2830,20 @@ it does not care about stage count.
 - Add `ServingProfile` validation and request admission defaults.
 - Add adapter-conformance tests for supported `extra_body` fields, artifact
   policy, compiled path identity, and request defaulting.
+- Add profile-construction tests where registry defaults are not the global
+  parser defaults, including TP, CP, and CP mode. Omitted serving flags must use
+  `ModelEntry.default_parallel` / `default_shape`; explicit flags must override
+  them.
+- Add model matching tests proving request-time matching uses
+  `ServingProfile.accepted_model_ids` and does not accept broad detector matches
+  or sibling checkpoints from the same base `ModelEntry.hf_paths` unless the
+  serving registry explicitly declares them as same-checkpoint aliases.
+- Add startup checkpoint tests for Flux: `FLUX.1-dev` is accepted for P0,
+  `FLUX.1-schnell` is rejected until its serving orchestrator is parameterized
+  and verified for that checkpoint.
+- Add serving CLI tests for forced compilation. The public flag is
+  `--force-compile`; `--force` may be tested only as an optional compatibility
+  alias.
 
 Verification:
 
@@ -2591,6 +2915,9 @@ harnesses so failure paths can be tested deterministically:
   has started, it marks the worker `RECOVERING`, rejects new generation with
   `503 engine_recovering`, waits for `CANCEL_ACK` or terminates the worker, and
   only returns to ready after `LOAD_PROFILE -> SMOKE` succeeds.
+- Timeout tests must prove `request_timeout` includes queue wait. A request that
+  waits in the queue until the external deadline expires should return
+  `504 request_timeout` without starting worker recovery.
 - Worker death or failed health transition flips `/ready` to 503 and new
   generation requests fail with `503 engine_unavailable`.
 - Shutdown/draining rejects new requests with `503 engine_draining` and fails
@@ -2599,11 +2926,35 @@ harnesses so failure paths can be tested deterministically:
   `503 artifact_store_unavailable` and does not fall back to local paths, data
   URLs, raw filesystem paths, or inline bytes.
 - Prompt boundary tests cover exactly-at-bucket and over-bucket tokenized
-  prompts; over-bucket returns `400 prompt_too_long`.
+  prompts; over-bucket returns `400 prompt_too_long`. Qwen tests must verify
+  the validation tokenizer path does not use truncation before the length check.
+- Flux prompt boundary tests cover exactly-at-bucket and over-bucket prompts for
+  the configured Flux text bucket, default `max_sequence_length=512`, and verify
+  no silent truncation occurs before the length check.
 - Invalid `extra_body` tests cover zero/negative steps, steps above
-  `--max-inference-steps`, non-finite guidance, out-of-range seed, negative or
-  over-limit artifact TTL, unsupported `output_format`, and unsupported
-  model-specific fields.
+  `--max-inference-steps`, non-finite guidance, out-of-range seed, unsupported
+  or invalid `output_format`, and unsupported model-specific fields for both
+  Qwen and Flux P0 adapters.
+- Ignored response-policy field tests cover top-level and `extra_body`
+  `response_format` and `artifact_ttl_seconds`; P0 must still return the normal
+  ArtifactStore/R2 URL and use the server-configured artifact TTL.
+- Ignored response-policy field tests must also assert that a fake engine
+  receives the same `DiffletGenerateRequest` with and without those fields,
+  including no `response_format` or `artifact_ttl_seconds` entries in
+  `extra_params` or any other worker-facing field.
+- Invalid advanced runtime field tests cover TeaCache and other runtime knobs
+  sent through request `extra_body`; P0 must return `400 invalid_extra_body`
+  unless a future API revision explicitly declares support.
+- Invalid startup-only request field tests cover `extra_body.tp_degree`,
+  `extra_body.cp_degree`, `extra_body.cp_mode`, `extra_body.cfg_parallel`, and
+  `extra_body.sp_enabled`; each must return `400 invalid_extra_body`, not
+  `400 profile_mismatch`.
+- Invalid top-level Difflet field tests cover top-level `height`, `tp_degree`,
+  `cp_degree`, `cfg_parallel`, `sp_enabled`, and one TeaCache/runtime knob; each
+  must return `400 invalid_extra_body`, not `400 feature_not_supported`.
+- Artifact response tests must prove the handler returns the value from
+  `await ArtifactStore.get_url(ref)`, not `ArtifactRef.uri`, after a successful
+  `await ArtifactStore.put_bytes(...)`.
 
 ### M3: Hardening
 

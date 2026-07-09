@@ -1,6 +1,493 @@
 # Difflet Serving Engine Design Review
 
-Status: waiting for user confirmation on Round 16 edits
+Status: complete
+
+## Round 26
+
+Reviewer: fresh independent `gpt-5.5` high explorer subagent
+`019f4683-89ed-7200-8fed-232245f2eff9`
+
+### Findings
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. P0 still named `--num-frames` as an image serving startup override.
+   - Status: accepted and revised in revision 26.
+   - Failure mode: implementers could bake `--num-frames` into the Qwen/Flux
+     P0 `ServingProfile` even though P0 image profile matching is only
+     `height`/`width` and request `num_frames` is invalid.
+   - Resolution: `architecture.md` now lists only `--height` and `--width` as
+     P0 image shape startup overrides and marks `--num-frames` as future
+     video-only. Non-null startup `num_frames` is rejected for Qwen/Flux.
+
+2. ArtifactStore upload/presign lacked a timeout boundary.
+   - Status: accepted and revised in revision 26.
+   - Failure mode: a hung R2 upload or presign could hold the HTTP handler
+     indefinitely after worker generation succeeded, outside
+     `request_timeout`.
+   - Resolution: `engine.md` and `chat_completions_contract.md` now define
+     `artifact_store_timeout`, default 60s, require SDK/client timeouts, and
+     map timeout/failure to `artifact_upload_failed` or
+     `artifact_store_unavailable`.
+
+3. Missing or empty prompts lacked a machine-readable error code.
+   - Status: accepted and revised in revision 26.
+   - Failure mode: empty `messages`, no user prompt, or unextractable prompt
+     could diverge across handler/tests.
+   - Resolution: `chat_completions_contract.md` now uses
+     `400 invalid_prompt` and includes it in the required error table.
+
+#### Optional
+
+None.
+
+### Revision 26 Changes
+
+- `docs/design/difflet_serving/architecture.md`
+  - Removed `--num-frames` from P0 image startup overrides and marked it
+    future-video-only.
+- `docs/design/difflet_serving/engine.md`
+  - Added `artifact_store_timeout`, default 60s, and clarified that artifact
+    upload/presign is outside engine `request_timeout`.
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Added artifact-store timeout behavior.
+  - Added `invalid_prompt` for missing/empty/unextractable prompts.
+
+Next planned review action:
+
+- Stop. Fresh reviewer follow-up verified all Round 26 material findings are
+  resolved and reported no remaining blocking or material issues.
+
+## Round 25
+
+Reviewer: fresh independent `gpt-5.5` high explorer subagent
+`019f4679-1789-7360-839b-6597bf95d8b9`
+
+### Findings
+
+#### Blocking
+
+1. Qwen shared-process resident P0 needed an explicit go/no-go gate.
+   - Status: accepted and revised in revision 25.
+   - Failure mode: existing CLI/benchmark evidence still uses separate stage
+     processes and file handoff, while the P0 docs require one resident worker
+     process. Without a concrete co-load/smoke gate, implementation could
+     discover too late that the active profile cannot co-fit.
+   - Resolution: `architecture.md`, `engine.md`, and
+     `chat_completions_contract.md` now state that Qwen is a P0 target only
+     when all stages pass shared-worker co-load and smoke for the selected
+     `ServingProfile`; failure is startup failure, not implicit fallback.
+
+2. Caller cancellation could release the execution ticket while a shielded
+   worker task kept running.
+   - Status: accepted and revised in revision 25.
+   - Failure mode: `asyncio.CancelledError` from client disconnect, ASGI
+     cancellation, or shutdown skipped the timeout handler and reached
+     `finally` with `release_ticket=True`, violating `max_running_requests=1`.
+   - Resolution: `engine.md` now routes `CancelledError` through the same
+     `start_inflight_recovery(...)` ownership-transfer path as timeout, keeps
+     the ticket until safe recovery, and re-raises `CancelledError`.
+
+#### Material
+
+1. `num_frames` behavior for P0 image models was ambiguous.
+   - Status: accepted and revised in revision 25.
+   - Failure mode: Qwen/Flux image requests with `extra_body.num_frames` could
+     reasonably produce `invalid_extra_body`, `profile_mismatch`, or a video
+     rejection depending on implementer interpretation.
+   - Resolution: `chat_completions_contract.md` now says Qwen/Flux reject
+     non-null `num_frames` with `400 invalid_extra_body`; `null` is treated as
+     absent. `num_frames` profile matching is reserved for future video
+     adapters.
+   - Follow-up: same reviewer found a stale "Request shape/profile fields"
+     section that still listed `num_frames` as a P0 profile-matching field.
+     Revision 25 follow-up removed it from P0 image profile matching and
+     restated it as future video-only.
+
+#### Optional
+
+None.
+
+### Revision 25 Changes
+
+- `docs/design/difflet_serving/architecture.md`
+  - Added the Qwen shared-worker co-load/smoke gate.
+- `docs/design/difflet_serving/engine.md`
+  - Added the Qwen shared-worker load/smoke gate to the worker layout.
+  - Added `asyncio.CancelledError` recovery pseudocode and re-raise rule.
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Defined `num_frames` handling for image adapters.
+  - Marked Qwen P0 support as gated by shared-worker co-load/smoke.
+
+Next planned review action:
+
+- Same-reviewer follow-up to verify revision 25.
+
+## Round 24
+
+Reviewer: user-provided follow-up review
+
+### Findings
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. Qwen-Image support matrix still showed a per-stage resident core formula.
+   - Status: accepted and revised in revision 24.
+   - Resolution: P0 table now shows only `max(stage_cores)` for Qwen's
+     shared-process resident layout. Per-stage resident sums are called out as
+     future-only capacity planning.
+
+2. `worker_restart_timeout` was defined but not used in the engine recovery
+   flow.
+   - Status: accepted and revised in revision 24.
+   - Resolution: `engine.md` now defines restart/load/smoke timeout behavior:
+     transition to `ERROR`, keep `/ready=503`, and return
+     `503 engine_unavailable` until process restart or a future retry policy.
+
+3. Split P0 docs did not state how they relate to the older long plan.
+   - Status: accepted and revised in revision 24.
+   - Resolution: `architecture.md`, `engine.md`, and
+     `chat_completions_contract.md` now state they are authoritative for P0;
+     the older long plan is broader future reference unless repeated there.
+
+#### Optional
+
+1. Top-level and `extra_body` duplicate-field wording was redundant after the
+   top-level Difflet field precedence rule.
+   - Status: accepted and revised in revision 24.
+   - Resolution: wording now says flattened top-level Difflet generation/shape
+     fields are invalid placement.
+
+### Revision 24 Changes
+
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Updated the Qwen core column to P0 shared-process only.
+  - Reworded top-level Difflet generation/shape field placement.
+  - Added P0 authority note.
+- `docs/design/difflet_serving/engine.md`
+  - Added P0 authority note.
+  - Defined `worker_restart_timeout` failure behavior.
+- `docs/design/difflet_serving/architecture.md`
+  - Added P0 authority note.
+
+Next planned review action:
+
+- Stop unless another review round is requested.
+
+## Round 23
+
+Reviewer: fresh independent `gpt-5.5` high explorer subagent
+`019f4664-eb2e-7183-abdd-7effef1b5218`
+
+### Findings
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. Top-level Difflet runtime/profile fields could fall through to the wrong
+   error class.
+   - Status: accepted and revised in revision 23.
+   - Failure mode: unknown top-level fields return `400 feature_not_supported`,
+     while known Difflet generation/shape/startup/runtime fields sent top-level
+     should be invalid request placement and return `400 invalid_extra_body`.
+   - Reviewer fix: after ignoring top-level/`extra_body` `response_format` and
+     `artifact_ttl_seconds`, any known Difflet generation/shape/startup/runtime
+     or TeaCache field sent top-level returns `400 invalid_extra_body`.
+
+2. Queue-timeout status was ambiguous in the long plan.
+   - Status: accepted and revised in revision 23.
+   - Failure mode: one table allowed `429` or `503` for queue wait expiry,
+     while the contract requires `429 queue_timeout`.
+   - Reviewer fix: make the table use exact error codes:
+     `429 queue_full`, `429 queue_timeout`, and `400 profile_mismatch`.
+
+### User Question
+
+- Clarified that "adapter" means a model-specific implementation of the common
+  serving protocols, not a preexisting package. P0 concrete adapters live under
+  `difflet/serving/orchestrators/` and are wired through
+  `preflight_factory` / `orchestrator_factory`.
+
+### Revision 23 Changes
+
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Added top-level field precedence for known Difflet fields:
+    generation/shape/startup/runtime/TeaCache fields sent top-level return
+    `400 invalid_extra_body`.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Added matching OpenAI handler responsibility and verification tests for
+    top-level Difflet fields.
+  - Changed the recommended behavior table to exact queue/profile error codes.
+  - Added an explicit definition of "adapter" and concrete P0 module locations.
+- `docs/design/difflet_serving/architecture.md`
+  - Added the same adapter terminology clarification.
+
+Next planned review action:
+
+- Stop.
+
+### Round 23 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f4664-eb2e-7183-abdd-7effef1b5218`
+
+#### Blocking
+
+None.
+
+#### Material
+
+None.
+
+#### Previous Findings
+
+- Top-level known Difflet field error class: resolved.
+- Queue full/timeout ambiguity: resolved.
+
+#### Optional Cleanup
+
+- Changed generic shape/profile mismatch wording to `400 profile_mismatch`.
+- Changed `--queue-timeout` flag wording to `429 queue_timeout`.
+
+### Final Review Status
+
+- Latest fresh independent reviewer follow-up reports no blocking or material
+  issues.
+- Status: complete.
+
+## Round 22
+
+Reviewer: fresh independent `gpt-5.5` high explorer subagent
+`019f463b-21d2-7872-ac95-4ad8e6e18854`
+
+### Findings
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. `response_format` had conflicting error-code handling depending on where it
+   appeared.
+   - Status: revised in revision 22 with user-modified behavior.
+   - Failure mode: top-level `response_format` could be treated as an
+     unsupported chat feature returning `400 feature_not_supported`, while
+     `extra_body.response_format` was documented as `400 invalid_extra_body`.
+   - Reviewer fix: make response-policy fields invalid wherever present.
+   - User decision: ignore `response_format` and `artifact_ttl_seconds` instead
+     of returning an error. They have no effect whether top-level or inside
+     `extra_body`; P0 still returns ArtifactStore/R2 URL with server-configured
+     TTL.
+
+#### Optional
+
+1. Review document header still said `Status: active` while the prior final
+   status said complete.
+   - Status: accepted. The header remains `active` during this new review round
+     and will be set to `complete` after follow-up convergence.
+
+2. `ArtifactRef.uri` wording allowed an exception when `get_url(ref)` returned
+   the same value.
+   - Status: accepted and revised in revision 22.
+   - Fix: make the invariant absolute: the handler returns only the value from
+     `ArtifactStore.get_url(ref)`, never `ArtifactRef.uri` directly.
+
+### Revision 22 Changes
+
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Added response-policy ignored-field precedence for top-level and
+    `extra_body` `response_format` / `artifact_ttl_seconds`.
+  - Removed `response_format` from the generic unsupported chat feature list.
+  - Made `ArtifactRef.uri` internal with no direct-return exception.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Updated OpenAI handler responsibilities to ignore response-policy fields
+    wherever present.
+  - Added ignored response-policy regression tests for top-level and
+    `extra_body` fields.
+  - Made `ArtifactRef.uri` internal with no direct-return exception.
+
+Next planned review action:
+
+- Same reviewer follow-up to verify Round 22 material finding is resolved.
+
+### Round 22 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f463b-21d2-7872-ac95-4ad8e6e18854`
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. Ignored response-policy fields were not verified to stay out of worker input.
+   - Status: accepted and revised in revision 22.1.
+   - Failure mode: tests could prove URL/TTL behavior while an implementation
+     still copied `response_format` or `artifact_ttl_seconds` into
+     `DiffletGenerateRequest.extra_params` or another worker-facing field.
+   - Reviewer fix: extend ignored response-policy tests so a fake engine
+     receives the same `DiffletGenerateRequest` with and without those fields,
+     including no entries in `extra_params`.
+
+#### Previous Findings
+
+- `response_format` error-code conflict: resolved under the user decision to
+  ignore response-policy fields.
+
+### Revision 22.1 Changes
+
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Extended ignored response-policy field tests to assert those fields do not
+    reach `DiffletGenerateRequest.extra_params` or any other worker-facing field.
+
+### Round 22.1 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f463b-21d2-7872-ac95-4ad8e6e18854`
+
+#### Blocking
+
+None.
+
+#### Material
+
+None.
+
+#### Previous Findings
+
+- Ignored response-policy fields staying out of worker input: resolved.
+
+### Final Review Status
+
+- Latest fresh independent reviewer follow-up reports no blocking or material
+  issues.
+- Status: complete.
+
+Next planned review action:
+
+- Stop.
+
+## Round 21
+
+Reviewer: fresh independent `gpt-5.5` high explorer subagent
+`019f462e-9f49-7a22-8510-a765d17a4956`
+
+### Findings
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. P0 request contract still accepted non-generation response-policy fields.
+   - Status: accepted by user and revised in revision 21.
+   - Failure mode: `extra_body.response_format` and
+     `extra_body.artifact_ttl_seconds` expanded the P0 public request API beyond
+     the stated generation-plus-shape contract.
+   - Reviewer fix: remove them from accepted `extra_body`, value-limit tables,
+     and handler duties; always return URL and use server-configured TTL.
+   - User decision: do not retain `response_format` or
+     `artifact_ttl_seconds` as request fields.
+
+2. ArtifactStore URL handoff was ambiguous enough to leak the wrong URI.
+   - Status: accepted and revised in revision 21.
+   - Failure mode: some prose implied `put_bytes(...)` returned the URL for
+     `image_url.url`, which could cause an implementation to expose internal
+     `ArtifactRef.uri`.
+   - Reviewer fix: specify `ref = await store.put_bytes(...)`, then
+     `url = await store.get_url(ref)`, and return only `url`.
+
+### Revision 21 Changes
+
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Removed request support for `response_format` and `artifact_ttl_seconds`.
+    P0 always returns an ArtifactStore/R2 URL and uses server-configured TTL.
+  - Defined `ArtifactRef.uri` as internal and required
+    `ArtifactStore.get_url(ref)` before filling `image_url.url`.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Removed `ResponseOptions` and per-request artifact TTL handling.
+  - Changed OpenAI handler responsibilities to reject response-policy fields and
+    perform `put_bytes(...) -> get_url(ref) -> image_url.url`.
+  - Removed `--max-artifact-ttl-seconds` from P0 serve flags.
+  - Added verification that `get_url(ref)`, not `ArtifactRef.uri`, is returned.
+- `docs/design/difflet_serving/architecture.md`
+  - Updated request flow to include `ArtifactStore.get_url(ref)` after upload.
+
+### Round 21 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f462e-9f49-7a22-8510-a765d17a4956`
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. `extra_body` still had a loophole for advanced runtime fields.
+   - Status: accepted and revised in revision 21.1.
+   - Failure mode: the contract allowed TeaCache and advanced runtime fields to
+     pass through when an adapter declared support, which conflicted with the P0
+     goal that request `extra_body` accepts generation and request-facing shape
+     fields only.
+   - Reviewer fix: P0 rejects TeaCache and advanced runtime fields with
+     `400 invalid_extra_body`; a future API revision may add explicit
+     adapter-declared runtime fields.
+
+#### Previous Findings
+
+- Response-policy request fields: resolved.
+- ArtifactStore URL handoff: resolved.
+
+### Revision 21.1 Changes
+
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Replaced the TeaCache/advanced runtime pass-through sentence with an
+    explicit P0 rejection rule.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Added invalid advanced runtime field tests requiring
+    `400 invalid_extra_body` in P0.
+
+### Round 21.1 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f462e-9f49-7a22-8510-a765d17a4956`
+
+#### Blocking
+
+None.
+
+#### Material
+
+None.
+
+#### Previous Findings
+
+- TeaCache and advanced runtime field loophole: resolved.
+
+### Final Review Status
+
+- Latest fresh independent reviewer follow-up reports no blocking or material
+  issues.
+- Status: complete.
+
+Next planned review action:
+
+- Stop.
 
 ## Round 1
 
@@ -251,7 +738,657 @@ None.
 
 Next planned review action:
 
+- Stop. Latest fresh independent reviewer follow-up reports no blocking or
+  material issues; optional cleanup from that pass has been applied.
+
+## Round 18
+
+Reviewer: fresh independent `gpt-5.5` high explorer subagent
+`019f45ef-9b5b-7471-9aab-337858244365`
+
+Review mode: from-scratch review with no prior round summary.
+
+Review date: 2026-07-09
+
+### Findings
+
+#### Blocking
+
+1. P0's one resident Trainium worker process invariant is not enforced
+   consistently.
+   - Status: accepted and revised in revision 18.4.
+   - References:
+     - `docs/plans/2026-07-06-difflet-serving-engine.md`, Engine Factory
+     - `docs/plans/2026-07-06-difflet-serving-engine.md`, Resident Worker
+       Runtime Strategy
+   - Failure mode: the factory accepts any all-`RESIDENT_WORKER` plan, while the
+     worker layout still describes `per_stage_process`. An implementer could
+     build one worker per stage, violating the P0 shared-worker constraint.
+   - Reviewer fix: for P0, reject runtime plans whose
+     `core_allocation != "shared_process"` or whose resolved worker count is not
+     exactly `1`; move `per_stage_process` to future-only text and add startup
+     rejection tests.
+
+#### Material
+
+1. `engine_recovering` is defined by the engine but missing from the public chat
+   error contract.
+   - Status: accepted and revised in revision 18.4.
+   - References:
+     - `docs/design/difflet_serving/engine.md`, Request Admission
+     - `docs/design/difflet_serving/chat_completions_contract.md`, Error
+       Contract
+   - Failure mode: timeout recovery returns an undocumented error code.
+   - Reviewer fix: add `503 engine_recovering` to the chat contract and clarify
+     health/readiness behavior during recovery.
+
+2. `DiffletGenerateRequest` mixes generation inputs with HTTP artifact-response
+   policy.
+   - Status: accepted and revised in revision 18.4.
+   - References:
+     - `docs/plans/2026-07-06-difflet-serving-engine.md`,
+       `DiffletGenerateRequest`
+     - `docs/plans/2026-07-06-difflet-serving-engine.md`, engine output boundary
+   - Failure mode: `response_format` and `artifact_ttl_seconds` leak HTTP/R2
+     policy into engine/worker/model code, despite the bytes-first engine
+     boundary.
+   - Reviewer fix: remove those two fields from `DiffletGenerateRequest`; keep
+     them in an HTTP-layer response options object used after
+     `engine.generate(...)`.
+
+3. Registry package refactor conflicts with the current `difflet/registry.py`
+   layout.
+   - Status: accepted by user and revised in revision 18.3.
+   - References:
+     - `docs/design/difflet_serving/architecture.md`, Folder Layout
+     - `difflet/registry.py`
+   - Failure mode: Python cannot keep both `difflet/registry.py` and a
+     `difflet/registry/` package at the same import path without a migration.
+   - Reviewer fix: either keep the flat `difflet.registry` module for P0, or
+     explicitly migrate it to a package while preserving
+     `from difflet.registry import resolve_model` compatibility.
+
+4. Qwen `cp_degree` serving overrides are not currently backed by the prompt
+   encoder implementation.
+   - Status: accepted and revised in revision 18.4.
+   - References:
+     - `docs/design/difflet_serving/architecture.md`, startup override rules
+     - `difflet/cli/orchestrators/qwen_image.py`, text stage `NeuronConfig`
+     - `difflet/cli/orchestrators/qwen_image.py`, compiled directory naming
+   - Failure mode: docs say Qwen text and denoiser consume
+     `tp_degree * cp_degree`, but the current text stage passes only
+     `tp_degree` into `NeuronConfig`; `cp_degree > 1` may be falsely advertised.
+   - Reviewer fix: reject Qwen serving `cp_degree > 1` until prompt-encoder CP
+     is implemented and smoke-tested, or encode stage-specific CP support in
+     serving metadata.
+
+5. Flux artifact verification can be bypassed if serving follows
+   `from_pretrained(..., skip_compile=True)` too literally.
+   - Status: accepted and revised in revision 18.4.
+   - References:
+     - `difflet/pipeline/difflet_pipeline.py`, cache readiness and load path
+   - Failure mode: `skip_compile=True` computes `cache_ready` but does not fail
+     early on a stale or missing manifest before load is attempted.
+   - Reviewer fix: require a serving `ensure_artifacts()` step for Flux that
+     checks `has_valid_manifest(...)` plus app artifact readiness before worker
+     pipeline construction/loading.
+
+6. R2 upload is specified as synchronous in an async chat handler path.
+   - Status: accepted and revised in revision 18.4.
+   - References:
+     - `docs/plans/2026-07-06-difflet-serving-engine.md`, ArtifactStore
+     - `docs/plans/2026-07-06-difflet-serving-engine.md`, OpenAI Chat Handler
+   - Failure mode: a slow `ArtifactStore.put_bytes(...)` can block FastAPI's
+     event loop and affect health/readiness or other HTTP handling.
+   - Reviewer fix: make `ArtifactStore` async, or require sync implementations
+     to run in a bounded executor with timeout/error mapping.
+
+#### Optional
+
+1. Consider accepting harmless OpenAI no-op defaults such as `stream: false` or
+   `n: 1` instead of rejecting all presence of those fields.
+   - Status: pending user confirmation.
+
+2. Move future video milestones out of the P0 implementation milestone list.
+   - Status: pending user confirmation.
+
+### Proposed Next Edits
+
+- Tighten P0 engine selection: require `shared_process` and exactly one worker;
+  move `per_stage_process` to future-only discussion and add tests.
+- Add `engine_recovering` to the public chat error table and define
+  `/health`/`/ready` behavior while recovering.
+- Split HTTP response options from `DiffletGenerateRequest`.
+- Clarify the registry path by leaving `difflet/registry.py` unchanged and
+  placing new modular registry/common metadata under `difflet/common/registry/`.
+- Add Qwen CP support metadata and reject `cp_degree > 1` for Qwen P0 until the
+  text encoder path supports it.
+- Add a Flux `ensure_artifacts()` startup requirement before `skip_compile=True`
+  load.
+- Make ArtifactStore upload async or executor-backed with timeout/error mapping.
+
+### Revision 18.1 Changes
+
+- Status: superseded by revision 18.2 after user clarified that the registry
+  should be split now, not kept flat.
+- `docs/design/difflet_serving/architecture.md`
+  - Replaced the proposed `difflet/registry/` package layout with the existing
+    `difflet/registry.py` module.
+  - Clarified P0 serving must reuse `difflet.registry.resolve_model(...)` and
+    not modify the base registry layout.
+  - Updated the model-addition checklist so serving work adds new common and
+    serving files, while base registry additions remain a separate
+    compatibility-preserving change when needed.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Removed the P0 instruction to split `difflet/registry.py`.
+  - Documented `difflet/serving/model_registry.py` as an overlay on top of the
+    existing base registry.
+  - Updated the proposed module layout to keep `difflet/registry.py` as-is.
+
+### Revision 18.2 Changes
+
+- Status: superseded by revision 18.3 after user clarified that the original
+  `difflet/registry.py` must remain untouched for existing scripts, and new
+  modular registry files should live under `difflet/common/registry/`.
+- `docs/design/difflet_serving/architecture.md`
+  - Restored the target `difflet/registry/` package layout.
+  - Explicitly states that `difflet/registry.py` and `difflet/registry/` must not
+    coexist because both claim the `difflet.registry` import path.
+  - Documents the migration shape: move generic code to `registry/base.py`,
+    move model builtins to per-model files, and re-export the old public API
+    from `registry/__init__.py`.
+  - Updated model-addition steps and checklist to add per-model registry files
+    after the package migration.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Restored the registry package split as part of the target serving
+    architecture.
+  - Added the same no-side-by-side constraint and compatibility-preserving
+    migration requirement.
+
+### Revision 18.3 Changes
+
+- `docs/design/difflet_serving/architecture.md`
+  - Keeps the existing `difflet/registry.py` module unchanged.
+  - Adds `difflet/common/registry/` as the new modular registry namespace for
+    common/serving metadata.
+  - Clarifies `difflet/common/registry/` must wrap and reuse
+    `difflet.registry.resolve_model(...)` rather than shadowing or duplicating
+    broad model-id matching.
+  - Updates the model-addition flow and checklist to add common registry
+    metadata under `difflet/common/registry/`.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Replaces the `difflet/registry/` package migration with the three-layer
+    shape: old `difflet/registry.py`, new `difflet/common/registry/`, and
+    `difflet/serving/model_registry.py`.
+  - Documents that serving should not replace the `difflet.registry` import path.
+
+### Revision 18.4 Changes
+
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Tightened the engine factory so P0 accepts only
+    `core_allocation="shared_process"`, `worker_count=1`, and resident stages.
+  - Added `worker_count` to `DiffletRuntimePlan` and the Qwen shared-process
+    plan example.
+  - Moved `per_stage_process` to future-only runtime layout and documented that
+    Qwen per-stage resident would require `4 + 4 + 1 = 9` cores.
+  - Split HTTP response policy into `ResponseOptions`; `DiffletGenerateRequest`
+    no longer carries `response_format` or `artifact_ttl_seconds`.
+  - Added Qwen P0 startup rejection for `cp_degree > 1` until text encoder CP is
+    implemented and smoke-tested.
+  - Added Flux/pipeline `ensure_artifacts(...)` requirements before
+    `skip_compile=True` load.
+  - Changed `ArtifactStore` to an async protocol and required sync SDK
+    implementations to run in a bounded executor.
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Added `503 engine_recovering` to the public error contract.
+  - Documented `/ready=503` and `/health` behavior during recovery.
+  - Clarified response options are HTTP-layer state, not worker request fields.
+  - Added Qwen P0 `cp_degree=1` constraint.
+  - Updated artifact upload wording to `await ArtifactStore.put_bytes(...)`.
+- `docs/design/difflet_serving/engine.md`
+  - Added health/readiness semantics for `RECOVERING`.
+- `docs/design/difflet_serving/architecture.md`
+  - Updated request flow and pipeline-style model guidance for async artifact
+    upload and Flux `ensure_artifacts(...)`.
+
+### Round 18 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f45ef-9b5b-7471-9aab-337858244365`
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. `worker_count="auto"` is ambiguous against the P0 factory check.
+   - Status: accepted and revised in revision 18.5.
+   - Failure mode: a P0 plan that omits `worker_count` would keep the default
+     `"auto"` and fail `plan.worker_count == 1` unless an undocumented
+     normalization step exists.
+   - Reviewer fix: make `worker_count` an `int` defaulting to `1`, or define a
+     normalization step.
+
+2. One core-handling paragraph still contradicted the shared-process P0 worker
+   model.
+   - Status: accepted and revised in revision 18.5.
+   - Failure mode: stale wording said resident workers must be started per stage,
+     reintroducing the per-stage worker design P0 now rejects.
+   - Reviewer fix: distinguish future `per_stage_process` from P0
+     `shared_process`.
+
+#### Optional
+
+1. `engine.md` Flux layout showed `skip_compile=True` without the preceding
+   `ensure_artifacts(...)` guard.
+   - Status: accepted and revised as optional cleanup in revision 18.5.
+
+2. Some Qwen wording still said text and denoiser consume
+   `tp_degree * cp_degree`.
+   - Status: accepted and revised as optional cleanup in revision 18.5.
+
+#### Previous Findings
+
+- P0 worker invariant: conceptually resolved in revision 18.4; tightened again
+  in revision 18.5 for `worker_count`.
+- `engine_recovering` public contract: resolved.
+- `DiffletGenerateRequest` HTTP policy leakage: resolved.
+- Registry layout conflict: resolved with `difflet/common/registry/`.
+- Qwen `cp_degree > 1`: resolved.
+- Flux artifact validation: resolved.
+- Async ArtifactStore: resolved.
+
+### Revision 18.5 Changes
+
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Changed `DiffletRuntimePlan.worker_count` from `int | str = "auto"` to
+    `int = 1`.
+  - Rewrote the process-level Neuron env/core handling paragraph so P0
+    `shared_process` uses one immutable plan-level worker env and future
+    `per_stage_process` is explicitly separate.
+  - Clarified Qwen text/generate `tp*cp` wording with P0 `cp_degree=1`.
+- `docs/design/difflet_serving/engine.md`
+  - Added `ensure_artifacts()` before the Flux `skip_compile=True` load snippet.
+- `docs/design/difflet_serving/architecture.md`
+  - Clarified Qwen P0 core wording to say supported Qwen P0 uses `tp_degree`
+    because `cp_degree=1`.
+
+### Round 18.5 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f45ef-9b5b-7471-9aab-337858244365`
+
+#### Blocking
+
+None.
+
+#### Material
+
+None.
+
+#### Optional
+
+1. One plan sentence still said Qwen text/denoiser use `tp_degree * cp_degree`
+   in P0.
+   - Status: accepted and revised as optional cleanup in revision 18.6.
+
+#### Previous Findings
+
+- `worker_count="auto"` ambiguity: resolved.
+- Stale per-stage worker wording: resolved.
+- Flux `ensure_artifacts()` snippet cleanup: resolved.
+- Architecture Qwen `cp_degree=1` wording: resolved.
+
+### Revision 18.6 Changes
+
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Updated the remaining Qwen P0 profile sentence to say Qwen text and denoiser
+    use `tp_degree` because P0 requires `cp_degree=1`.
+
+## Round 19
+
+Reviewer: fresh independent `gpt-5.5` high explorer subagent
+`019f4611-a495-70d3-aaee-64a1724f7160`
+
+### Findings
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. Preflight ownership is still contradictory.
+   - Status: accepted and revised in revision 19.1.
+   - Failure mode: some sections say serving orchestrators are worker-owned, but
+     startup requires download, compile plan creation, and artifact checks before
+     the worker starts.
+   - Reviewer fix: split parent-side cold/preflight methods from the worker-owned
+     runtime orchestrator.
+
+2. Timeout pseudocode can cancel the IPC receive path while recovery still needs
+   it.
+   - Status: accepted and revised in revision 19.1.
+   - Failure mode: `asyncio.wait_for(self.run_one(...))` cancels `run_one` on
+     timeout, potentially leaving late worker replies unread or mis-associated.
+   - Reviewer fix: create an explicit worker generation task, await it with
+     `asyncio.shield`, and transfer ticket plus task/request id to recovery.
+     Replies must be request-id tagged and recovery must drain/discard late
+     terminal replies before worker reuse, or terminate/restart.
+
+3. `--force-compile` semantics conflict with `compile-policy=require`.
+   - Status: accepted and revised in revision 19.1.
+   - Failure mode: docs alternately imply force compile works regardless of
+     compile policy or only when policy allows.
+   - Reviewer fix: make `--force-compile` valid only with
+     `--compile-policy auto`; with `require`, fail startup as invalid serving
+     configuration.
+
+### Revision 19.1 Changes
+
+- `docs/design/difflet_serving/architecture.md`
+  - Split parent-side `ServingArtifactPreparer` from worker-owned
+    `ServingModelOrchestrator`.
+  - Updated startup flow so parent preflight performs download, compile-plan
+    creation, and artifact checks before worker startup.
+  - Added `preflight_factory` to serving metadata examples.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Added the same parent-side preflight and worker-side runtime split.
+  - Added `preflight_factory` to `ServingModelMetadata`.
+  - Updated startup artifact preparation to construct and use
+    `ServingArtifactPreparer`.
+  - Defined `--force-compile` as valid only with `--compile-policy auto`; with
+    `require`, startup fails as `unsupported_serving_configuration`.
+- `docs/design/difflet_serving/engine.md`
+  - Replaced timeout `wait_for(run_one(...))` with an explicit shielded worker
+    generation task.
+  - Recovery now owns the ticket plus in-flight task/request id, requires
+    request-id tagged worker replies, and must drain/discard late terminal
+    replies or restart the worker before reuse.
+
+### Round 19 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f4611-a495-70d3-aaee-64a1724f7160`
+
+#### Blocking
+
+None.
+
+#### Material
+
+None.
+
+#### Optional
+
+1. Load reuse wording still said the serving orchestrator had run
+   `ensure_artifacts(...)`, but that method moved to parent-side preflight.
+   - Status: accepted and revised as optional cleanup in revision 19.2.
+
+2. `ServingArtifactPreparer` differed between architecture and plan because the
+   plan included `stage_specs(...)` while architecture did not.
+   - Status: accepted and revised as optional cleanup in revision 19.2.
+
+#### Previous Findings
+
+- Preflight ownership contradiction: resolved.
+- Timeout recovery cancelling IPC receive path: resolved.
+- `--force-compile` vs `compile-policy=require`: resolved.
+
+### Revision 19.2 Changes
+
+- `docs/design/difflet_serving/architecture.md`
+  - Added `stage_specs(...)` to `ServingArtifactPreparer`.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Updated load reuse wording so parent-side preflight/preparer owns
+    `ensure_artifacts(...)` before `skip_compile=True` load.
+
+Next planned review action:
+
 - Fresh independent reviewer pass for missed blocking/material issues.
+
+## Round 20
+
+Reviewer: fresh independent `gpt-5.5` high explorer subagent
+`019f461c-8fc4-74a1-af16-44d5b2928196`
+
+### Findings
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. Worker/preflight ownership is still contradicted in the Flux engine snippet.
+   - Status: accepted and revised in revision 20.1.
+   - Failure mode: `engine.md` showed `ensure_artifacts()` inside
+     `FluxServingOrchestrator`, which could put artifact checks back into the
+     worker despite the parent-side preflight split.
+   - Reviewer fix: show `ensure_artifacts()` as parent preflight before worker
+     `LOAD_PROFILE`; keep worker Flux responsibilities to `load`, `smoke`,
+     `generate`, and `shutdown`.
+
+2. `extra_body` profile-bound fields are not consistently declared as accepted
+   request fields.
+   - Status: superseded by product decision and revised in revision 20.2.
+   - Failure mode: `tp_degree`, `cp_degree`, `cp_mode`, `cfg_parallel`, and
+     `sp_enabled` were described as profile-bound but not listed in accepted
+     `extra_body` tables or handler mapping, so implementations/tests could
+     disagree between `invalid_extra_body` and `profile_mismatch`.
+   - Reviewer fix: list them as accepted profile-match-only fields, validate them
+     against `ServingProfile`, and do not send them to the worker.
+   - Final decision: do not accept these fields in request `extra_body`. They
+     are `difflet serve` startup-only fields and internal `ServingProfile`
+     identity fields. Requests containing them return `400 invalid_extra_body`.
+
+### Revision 20.1 Changes
+
+- `docs/design/difflet_serving/engine.md`
+  - Split Flux snippet into parent preflight
+    `FluxServingArtifactPreparer.ensure_artifacts()` and worker-owned
+    `FluxServingOrchestrator.load/generate`.
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Added profile-match-only `extra_body` fields: `tp_degree`, `cp_degree`,
+    `cp_mode`, `cfg_parallel`, and `sp_enabled`.
+  - Clarified they are request assertions only and are not copied into
+    `DiffletGenerateRequest` or sent to the worker.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Added OpenAI handler mapping/validation rules for the same profile-match-only
+    fields.
+
+### Revision 20.2 Changes
+
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Superseded the profile-match-only request-field approach. `tp_degree`,
+    `cp_degree`, `cp_mode`, `cfg_parallel`, and `sp_enabled` are startup-only
+    `difflet serve` fields; request `extra_body` containing them returns
+    `400 invalid_extra_body`.
+  - Kept request-time profile matching limited to shape fields: `height`,
+    `width`, and future `num_frames`.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Updated `ServingProfile` validation and the OpenAI handler mapping to reject
+    startup-only runtime/profile fields in requests.
+
+### Round 20 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f461c-8fc4-74a1-af16-44d5b2928196`
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. Startup-only request field behavior needs explicit regression tests.
+   - Status: accepted and revised in revision 20.3.
+   - Failure mode: the contract now rejects `tp_degree`, `cp_degree`, `cp_mode`,
+     `cfg_parallel`, and `sp_enabled`, but the M2 invalid `extra_body` test list
+     did not name them. A future implementation could accidentally accept them
+     or return `profile_mismatch`.
+   - Reviewer fix: add those five fields to invalid `extra_body` verification
+     and require `400 invalid_extra_body`.
+
+#### Previous Findings
+
+- Flux preflight/worker ownership: resolved.
+- Request-time tp/cp/runtime fields: resolved with superseding product decision;
+  startup-only fields are invalid in request `extra_body`.
+
+### Revision 20.3 Changes
+
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Added M2 regression tests requiring `extra_body.tp_degree`,
+    `extra_body.cp_degree`, `extra_body.cp_mode`, `extra_body.cfg_parallel`,
+    and `extra_body.sp_enabled` to return `400 invalid_extra_body`, not
+    `400 profile_mismatch`.
+
+### Round 20.3 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f461c-8fc4-74a1-af16-44d5b2928196`
+
+#### Blocking
+
+None.
+
+#### Material
+
+None.
+
+#### Previous Findings
+
+- Startup-only request field regression tests: resolved.
+
+### Final Review Status
+
+- Latest same-reviewer follow-up reports no blocking or material issues.
+- Status: complete.
+
+Next planned review action:
+
+- Stop.
+
+## Round 17
+
+Reviewer: fresh independent `gpt-5.5` high explorer subagent
+`019f45e0-611d-7893-a014-5d6dfe6cb177`
+
+### Findings
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. Startup-time Flux checkpoint support is still ambiguous and can select the
+   wrong weights.
+   - Status: accepted and revised in revision 17.
+   - Failure mode: the base Flux registry groups `FLUX.1-dev` and
+     `FLUX.1-schnell`, while the current Flux CLI orchestrator hard-codes
+     `FLUX.1-dev`. If serving enables every base `ModelEntry.hf_paths` value at
+     startup, `--model-id FLUX.1-schnell` could resolve as `flux` but still load
+     or compile dev weights.
+   - Reviewer fix: add serving metadata for supported startup checkpoint ids.
+     For P0, reject `FLUX.1-schnell` at startup unless the Flux
+     common/serving orchestrator is parameterized and tested for that exact
+     checkpoint.
+
+2. Serving force-compile flag name is inconsistent.
+   - Status: accepted and revised in revision 17.
+   - Failure mode: docs mention both `--force-compile` and `--force`, so
+     implementers/tests may disagree and stale artifacts become hard to refresh
+     from serving.
+   - Reviewer fix: standardize serving on `--force-compile`, with `--force`
+     only as an optional compatibility alias.
+
+#### Optional
+
+None.
+
+### Revision 17 Changes
+
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Clarified Flux P0 serving enables only `black-forest-labs/FLUX.1-dev`.
+  - `FLUX.1-schnell` must be rejected at startup until the serving orchestrator
+    is parameterized and verified for that exact checkpoint.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Added serving-supported checkpoint ids as explicit serving registry
+    metadata.
+  - Added Flux P0 checkpoint support rules and tests.
+  - Standardized serving force compile flag on `--force-compile`; `--force` is
+    only an optional compatibility alias.
+
+Next planned review action:
+
+- Same reviewer follow-up to verify Round 17 material findings are resolved.
+
+### Round 17 Follow-Up
+
+Reviewer: same fresh independent `gpt-5.5` high explorer subagent
+`019f45e0-611d-7893-a014-5d6dfe6cb177`
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. Flux checkpoint fix is only partially resolved because the resolver shape
+   still accepts by model family.
+   - Status: accepted and revised in revision 17.1.
+   - Failure mode: `resolve_serving_model()` resolves `FLUX.1-schnell` to base
+     `ModelEntry.name == "flux"` and returns `_SERVING_METADATA["flux"]`; the
+     metadata shape lacked an allowlist field to enforce the new P0 rule.
+   - Reviewer fix: add `enabled_model_ids` or equivalent to
+     `ServingModelMetadata`, include it in the architecture example, and make
+     `resolve_serving_model()` reject ids not in that allowlist before building
+     a serving spec. For P0, Flux lists only `FLUX.1-dev`.
+
+#### Previous Findings
+
+- Flux checkpoint ambiguity: partially unresolved before revision 17.1.
+- Force compile flag inconsistency: resolved.
+
+### Revision 17.1 Changes
+
+- `docs/design/difflet_serving/architecture.md`
+  - Serving registry now explicitly owns serving-enabled checkpoint ids.
+  - Startup family resolution through `difflet.registry` must be followed by an
+    enabled-checkpoint allowlist check.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Added `enabled_model_ids` to `ServingModelMetadata`.
+  - Updated `resolve_serving_model()` to reject requested ids not present in
+    `metadata.enabled_model_ids`.
+  - Added P0 Flux metadata guidance:
+    `enabled_model_ids=("black-forest-labs/FLUX.1-dev",)`.
+
+Next planned review action:
+
+- Same reviewer follow-up to verify Round 17.1 material finding is resolved.
+
+### Round 17.1 Follow-Up
+
+Reviewer: same fresh independent `gpt-5.5` high explorer subagent
+`019f45e0-611d-7893-a014-5d6dfe6cb177`
+
+#### Blocking
+
+None.
+
+#### Material
+
+None.
+
+### Final Review Status
+
+- Round 17.1 Flux checkpoint resolver enforcement: resolved.
+- Latest fresh independent reviewer follow-up reports no blocking or material
+  issues.
+- Status: complete.
 
 ## Round 4
 
@@ -1236,3 +2373,264 @@ Next planned review action:
 - Latest fresh independent reviewer pass reports no blocking or material
   issues.
 - Status: complete.
+
+## Round 16
+
+Reviewer: fresh `gpt-5.5` high explorer subagent
+`019f459f-4847-7471-94e2-586b53a7fa9e`
+
+Context:
+
+- Reopened review after syncing the design with latest `origin/main` behavior
+  around model registry defaults, Flux `tp_degree=8`, serving startup overrides,
+  and P0 `--sp` rejection.
+- Design artifacts reviewed:
+  - `docs/design/difflet_serving/architecture.md`
+  - `docs/design/difflet_serving/engine.md`
+  - `docs/design/difflet_serving/chat_completions_contract.md`
+  - `docs/plans/2026-07-06-difflet-serving-engine.md`
+
+### Findings
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. Serve flag parsing can reintroduce hard-coded defaults.
+   - Status: accepted and revised in revision 16.
+   - Failure mode: if `difflet serve` reuses existing CLI parallel flags,
+     omitted `--cp-degree` and `--cp-mode` become `1` / `gather_kv`, so serving
+     cannot distinguish omitted values from explicit startup overrides. That
+     violates the registry-default requirement.
+   - Reviewer fix: serving-only profile-bound override flags should default to
+     `None`, then resolve from `ModelEntry.default_parallel` /
+     `ModelEntry.default_shape`. Add tests with non-global CP/CP-mode defaults.
+
+2. Timeout contract references missing request state.
+   - Status: accepted and revised in revision 16.
+   - Failure mode: engine pseudocode uses `request.received_at`, but
+     `DiffletGenerateRequest` does not define a received/deadline field.
+     Implementers may accidentally start `request_timeout` after queue
+     admission and exclude queue wait.
+   - Reviewer fix: add `received_at_monotonic` / `deadline_monotonic`, or state
+     that the engine stamps this at HTTP admission and stores it in the
+     admission ticket.
+
+3. Per-request model matching is too ambiguous with broad detectors.
+   - Status: accepted and revised in revision 16.
+   - Failure mode: startup detectors such as Flux's broad `"flux"` detector
+     could allow a single-model server to accept an unregistered or wrong
+     request `model` instead of returning `model_not_served`.
+   - Reviewer fix: define `ServingProfile.accepted_model_ids` as startup
+     `model_id` plus explicit `ModelEntry.hf_paths` or serving aliases. Use
+     detectors only for startup resolution, not request-time acceptance.
+
+4. Qwen prompt rejection can be lost when extracting CLI code.
+   - Status: accepted and revised in revision 16.
+   - Failure mode: current Qwen CLI tokenization uses `truncation=True`; if the
+     helper is moved unchanged into common serving code, over-bucket prompts are
+     silently truncated instead of returning `400 prompt_too_long`.
+   - Reviewer fix: serving should tokenize templated prompts without truncation
+     first, reject over bucket, then pad for execution.
+
+5. Engine protocol differs between design docs.
+   - Status: accepted and revised in revision 16.
+   - Failure mode: `engine.md` defines async `start()`, `health()`, and
+     `shutdown()`, while the plan has a different sync protocol. This can split
+     FastAPI lifespan, `/health`, `/ready`, and worker startup implementations.
+   - Reviewer fix: choose one protocol across artifacts. Prefer async
+     `start()`, `health() -> EngineHealth`, and `shutdown()` because worker IPC
+     and recovery are async.
+
+#### Optional
+
+None.
+
+### User Decision
+
+- User asked to continue the iterative review. Treat this as approval to apply
+  all five non-controversial material fixes.
+
+### Revision 16 Changes
+
+- Make serving CLI profile-bound flags default to `None` and document that
+  existing CLI flag helpers must not be reused when they erase omission state.
+- Clarify that `difflet serve --tp-degree/--cp-degree` overrides the
+  model-level serving profile, while stage-specific core differences are
+  adapter metadata rather than separate P0 CLI flags.
+- Add request/admission timestamp or deadline ownership to the engine contract.
+- Add `ServingProfile.accepted_model_ids` and request-time exact/alias matching
+  rules.
+- Add Qwen no-truncation prompt validation before execution padding.
+- Align all engine protocol examples on async `start()`, `health()`, and
+  `shutdown()`.
+
+Changed files:
+
+- `docs/design/difflet_serving/architecture.md`
+  - Changed `WorkerRequestContext.deadline` to `deadline_monotonic`.
+  - Added serve-specific profile override/parser guidance and clarified that
+    `difflet serve --tp-degree/--cp-degree` overrides the model-level profile,
+    while stage core differences are adapter metadata.
+- `docs/design/difflet_serving/engine.md`
+  - Added engine-owned admission timestamp/deadline semantics.
+  - Updated pseudocode to create `received_at_monotonic` and
+    `deadline_monotonic` before queue admission.
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Added `ServingProfile.accepted_model_ids` request-time matching.
+  - Forbid request-time detector matching.
+  - Added no-truncation prompt length validation before execution padding.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Added `accepted_model_ids` to `ServingProfile`.
+  - Updated engine protocol to async `start()`, `generate()`, `health()`, and
+    `shutdown()`.
+  - Clarified `DiffletGenerateRequest` does not own timeout state.
+  - Added serve-specific profile parser helper with `default=None`.
+  - Added tests for registry defaults vs parser defaults, accepted model ids,
+    timeout including queue wait, and Qwen no-truncation validation.
+
+Rejected feedback:
+
+- None.
+
+Next planned review action:
+
+- Same reviewer follow-up to verify Round 16 material findings are resolved and
+  identify any new blocking/material issues.
+
+### Round 16 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f459f-4847-7471-94e2-586b53a7fa9e`
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. `accepted_model_ids` can still allow sibling checkpoints, not aliases.
+   - Status: accepted and revised in revision 16.1.
+   - Failure mode: including all `ModelEntry.hf_paths` by default can make a
+     server loaded with one checkpoint, such as `FLUX.1-dev`, accept a request
+     for a sibling checkpoint such as `FLUX.1-schnell` and return output from
+     the wrong weights.
+   - Reviewer fix: `accepted_model_ids` defaults to the exact startup
+     `model_id` plus explicitly declared same-checkpoint aliases only.
+
+2. Engine timeout pseudocode still drops the worker deadline and uses the wrong
+   request id field.
+   - Status: accepted and revised in revision 16.1.
+   - Failure mode: `run_one(request)` / `worker_rpc.run_generation(request)` do
+     not receive the admission deadline, and timeout recovery used `request.id`
+     instead of `request.request_id`.
+   - Reviewer fix: pass the admission ticket or deadline into `run_one`, send
+     `deadline_monotonic` to worker IPC, and use `request.request_id`.
+
+#### Previous Findings
+
+- Serve parser defaults: resolved.
+- Timeout state missing: conceptually resolved; revised again for concrete
+  pseudocode deadline propagation.
+- Broad request-time detectors: conceptually resolved; revised again to avoid
+  default sibling-checkpoint aliases.
+- Qwen no-truncation prompt validation: resolved.
+- Engine protocol mismatch: resolved.
+
+### Revision 16.1 Changes
+
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - `accepted_model_ids` now defaults to exact startup model id plus explicit
+    same-checkpoint aliases only.
+  - Explicitly says not to include every `ModelEntry.hf_paths` value by default.
+- `docs/design/difflet_serving/engine.md`
+  - `run_one` receives the admission ticket and passes
+    `ticket.deadline_monotonic` to worker IPC.
+  - Timeout recovery uses `request.request_id`.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Same `accepted_model_ids` sibling-checkpoint rule.
+  - Clarifies the admission ticket/deadline is passed through `run_one` into
+    worker `WorkerRequestContext`.
+  - Adds model matching tests for sibling checkpoints from the same registry
+    entry.
+
+Next planned review action:
+
+- Same reviewer follow-up to verify Round 16.1 material findings are resolved.
+
+### Round 16.1 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f459f-4847-7471-94e2-586b53a7fa9e`
+
+#### Blocking
+
+None.
+
+#### Material
+
+1. Flux P0 request validation is still under-specified.
+   - Status: accepted and revised in revision 16.2.
+   - Failure mode: Qwen has concrete P0 value limits, but Flux is also a P0
+     target and lacked concrete limits for prompt bucket, steps, guidance, seed,
+     output format, response format, and artifact TTL. Implementers could miss
+     prompt overflow or let invalid values reach the pipeline/runtime.
+   - Reviewer fix: add Flux P0 value limits mirroring Qwen and add Flux
+     invalid-value and prompt-boundary tests.
+
+#### Previous Findings
+
+- `accepted_model_ids` sibling checkpoint issue: resolved.
+- Timeout pseudocode deadline/request id issue: resolved.
+
+### Revision 16.2 Changes
+
+- `docs/design/difflet_serving/chat_completions_contract.md`
+  - Added Flux P0 value limits for prompt bucket, steps, guidance, seed,
+    artifact TTL, output format, response format, and true-CFG/negative prompt
+    rejection.
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Added Flux prompt admission rule for the existing
+    `max_sequence_length=512` path.
+  - Added Flux P0 value limits and Flux prompt/invalid-value test coverage.
+
+Next planned review action:
+
+- Same reviewer follow-up to verify Round 16.2 material finding is resolved.
+
+### Round 16.2 Follow-Up
+
+Reviewer: same `gpt-5.5` high explorer subagent
+`019f459f-4847-7471-94e2-586b53a7fa9e`
+
+#### Blocking
+
+None.
+
+#### Material
+
+None.
+
+#### Optional
+
+1. Worker IPC prose still reads as if `RUN_GENERATION` sends only
+   `DiffletGenerateRequest`.
+   - Status: accepted and revised as optional cleanup.
+   - Reviewer fix: say `RUN_GENERATION` carries the request plus engine-owned
+     deadline metadata used to build `WorkerRequestContext`.
+
+### Revision 16.3 Changes
+
+- `docs/plans/2026-07-06-difflet-serving-engine.md`
+  - Clarified `RUN_GENERATION` sends `DiffletGenerateRequest` plus
+    `deadline_monotonic`, and the worker runtime uses that to build
+    `WorkerRequestContext`.
+- `docs/design/difflet_serving/engine.md`
+  - Applied the same `RUN_GENERATION` request plus `deadline_monotonic`
+    clarification.
+
+Next planned review action:
+
+- Fresh independent reviewer pass for missed blocking/material issues.

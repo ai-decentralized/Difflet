@@ -18,5 +18,11 @@ Review:
 - Done: removed `download-policy require`; startup download policy is `auto` or `never`.
 - Done: narrowed P0 serving scope to R2 URL output only, no `data_url`, no local `/v1/files` route, and no subprocess runtime fallback.
 - Done: updated MVP model scope to include both Qwen-Image staged serving and worker-owned Flux serving behind `ResidentWorkerServingEngine`, with one active model/profile per server process.
+- Done: narrowed P0 image request-time profile matching to `height`/`width`; `num_frames` is future video-only and non-null values are rejected by image adapters. `tp_degree`, `cp_degree`, `cp_mode`, `cfg_parallel`, and `sp_enabled` are documented as `difflet serve` startup-only fields that return `400 invalid_extra_body` if present in request `extra_body`.
+- Done: documented `response_format` and `artifact_ttl_seconds` as ignored compatibility fields; P0 always returns an ArtifactStore/R2 URL with server-configured TTL, keeps those fields out of worker-facing requests, and the handler must use `put_bytes(...) -> get_url(ref)` rather than returning internal `ArtifactRef.uri`.
+- Done: clarified that top-level known Difflet generation/shape/startup/runtime fields return `400 invalid_extra_body`, and that "adapter" means a model-specific serving implementation under `difflet/serving/orchestrators/*` wired by registry factories.
+- Done: marked the split design docs as authoritative for P0, moved per-stage core math out of the Qwen P0 support table, and defined `worker_restart_timeout` failure behavior.
+- Done: added Qwen shared-worker co-load/smoke gating, caller-cancellation recovery ownership rules, and explicit image-model `num_frames` rejection to the split P0 serving docs.
+- Done: clarified that `--num-frames` is future video-only for startup, added `artifact_store_timeout`, and added `invalid_prompt` for missing/empty prompts.
 - Rationale: serving startup must load fixed-shape Trainium NEFF artifacts before accepting requests.
-- Verification: documentation-only change; reviewed docs with `rg` for stale policy wording.
+- Verification: documentation-only change; reviewed docs with `rg` for stale policy wording and ran `git diff --check`.

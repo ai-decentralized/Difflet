@@ -5,6 +5,12 @@ This document defines the serving engine boundary for the MVP implementation.
 The engine is the serving runtime layer. It owns request execution safety and
 worker lifecycle. It does not own model-specific stage logic.
 
+This file, together with `architecture.md` and
+`chat_completions_contract.md`, is the authoritative P0 serving design. The
+older `docs/plans/2026-07-06-difflet-serving-engine.md` keeps broader future
+design notes, including rotating, subprocess, and multi-plan ideas, but those
+are not part of the P0 implementation scope unless repeated here.
+
 ## MVP Scope
 
 MVP engines support:
@@ -107,6 +113,14 @@ ResidentWorkerServingEngine
 The worker process owns one serving orchestrator. The orchestrator can be a
 single-pipeline model such as Flux or a multi-stage model such as Qwen.
 
+Flux parent preflight:
+
+```text
+FluxServingArtifactPreparer
+  ensure_artifacts()
+    verify CacheSpec manifest and compiled artifact readiness
+```
+
 Flux worker layout:
 
 ```text
@@ -145,6 +159,12 @@ QwenServingOrchestrator
     return DiffletGenerateOutput(image_bytes, "image/png")
 ```
 
+Qwen is enabled only after this shared-worker layout passes startup load and
+smoke for the selected `ServingProfile`. The smoke must prove that all Qwen
+stage handles co-load in the single resident worker process and can execute a
+minimal request without per-stage subprocesses, rotating load/unload, or file
+handoff. If this gate fails, startup fails and `/ready` never becomes healthy.
+
 The parent FastAPI process should not load Trainium model objects directly.
 Keeping Flux and Qwen behind the same worker-process boundary keeps
 process-level Neuron core/env ownership clean and avoids one-off runtime paths.
@@ -158,6 +178,7 @@ max_running_requests = 1
 max_queued_requests = 8
 queue_timeout = configurable, default 30s
 request_timeout = configurable, default 300s
+artifact_store_timeout = configurable, default 60s
 worker_cancel_timeout = configurable, default 10s
 worker_restart_timeout = configurable, default 900s
 ```
@@ -173,6 +194,19 @@ Expected behavior:
 | worker dead | `503 engine_unavailable` |
 | server draining | `503 engine_draining` |
 
+`request_timeout` is an external wall-clock deadline. It starts when the HTTP
+handler hands the normalized request to the engine and includes queue wait plus
+worker execution. The engine should stamp `received_at_monotonic` and compute
+`deadline_monotonic` in its admission path; model adapters should not own this
+timer.
+
+Artifact upload and URL generation happen after the engine returns bytes to the
+OpenAI handler, so they are bounded by `artifact_store_timeout`, not by the
+engine `request_timeout`. The artifact layer must configure SDK/client
+timeouts and fail closed with `artifact_upload_failed` or
+`artifact_store_unavailable`; it must not let a hung R2 upload or presign hold
+the HTTP request indefinitely.
+
 ## Generate Flow
 
 Generic engine logic:
@@ -182,38 +216,70 @@ async def generate(self, request: DiffletGenerateRequest) -> DiffletGenerateOutp
     if self.draining:
         raise EngineDraining()
 
-    deadline = request.received_at + self.request_timeout
-    ticket = await self.admit_or_raise(request, deadline=deadline)
+    received_at = monotonic()
+    deadline = received_at + self.request_timeout
+    ticket = await self.admit_or_raise(
+        request,
+        received_at_monotonic=received_at,
+        deadline_monotonic=deadline,
+    )
     remaining = deadline - monotonic()
     if remaining <= 0:
         self.release(ticket)
         raise RequestTimeout()
 
+    run_task = asyncio.create_task(
+        self.run_one(request, ticket),
+        name=f"difflet-generate-{request.request_id}",
+    )
     release_ticket = True
     try:
-        return await asyncio.wait_for(
-            self.run_one(request),
-            timeout=remaining,
+        return await asyncio.wait_for(asyncio.shield(run_task), timeout=remaining)
+    except asyncio.CancelledError:
+        release_ticket = False
+        self.start_inflight_recovery(
+            request.request_id,
+            ticket,
+            run_task,
+            reason="caller_cancelled",
         )
+        raise
     except asyncio.TimeoutError:
         release_ticket = False
-        self.start_timeout_recovery(request.id, ticket)
+        self.start_inflight_recovery(
+            request.request_id,
+            ticket,
+            run_task,
+            reason="timeout",
+        )
         raise RequestTimeout()
     finally:
         if release_ticket:
             self.release(ticket)
 ```
 
-On timeout, `start_timeout_recovery(...)` transfers ownership of the execution
-ticket to a recovery task. The request can return `504` immediately, but the
-ticket must not be reused by the same worker until recovery reaches a safe
-terminal state. The recovery task should:
+On timeout, `asyncio.shield(...)` prevents `wait_for` from cancelling the
+worker-receive path. `start_inflight_recovery(...)` transfers ownership of the
+execution ticket and the in-flight worker task to a recovery task. The request
+can return `504` immediately, but the ticket and worker must not be reused until
+recovery reaches a safe terminal state. Worker IPC replies must be tagged with
+`request_id`, and recovery must drain/discard any late terminal
+`GENERATION_OK`/`GENERATION_ERROR` reply for that request before reusing the
+worker. If it cannot prove the reply stream is clean, it must terminate and
+restart the worker. The recovery task should:
+
+Caller cancellation, such as client disconnect or ASGI shutdown cancellation,
+uses the same ownership-transfer path. The engine must not release the ticket
+while the shielded worker task may still be running. After starting recovery for
+`asyncio.CancelledError`, `generate()` must re-raise `CancelledError` rather
+than translating it to `RequestTimeout`.
 
 ```text
 mark worker RECOVERING / unavailable
 /ready returns 503
 send CANCEL to the worker
 wait up to worker_cancel_timeout for CANCEL_ACK
+drain/discard any late terminal reply tagged with request_id
 if CANCEL_ACK is not received:
   terminate the worker process
 restart worker
@@ -226,6 +292,13 @@ else:
   keep engine unhealthy and /ready=503
 ```
 
+The restart plus `LOAD_PROFILE -> SMOKE` phase is bounded by
+`worker_restart_timeout`. If that timeout expires, or if restart/load/smoke
+fails, the engine must leave `RECOVERING`, mark the worker state `ERROR`, keep
+`/ready` at 503, and reject new generation requests with
+`503 engine_unavailable` until the process is restarted or a future recovery
+policy explicitly retries.
+
 This makes `CANCEL` best-effort and recovery process-level. P0 should not try
 to interrupt a Trainium model call inside the same Python process and then
 immediately reuse that worker.
@@ -233,8 +306,11 @@ immediately reuse that worker.
 P0 `run_one`:
 
 ```python
-async def run_one(self, request):
-    return await self.worker_rpc.run_generation(request)
+async def run_one(self, request, ticket):
+    return await self.worker_rpc.run_generation(
+        request,
+        deadline_monotonic=ticket.deadline_monotonic,
+    )
 ```
 
 ## Worker IPC
@@ -252,8 +328,9 @@ HEALTH
 SHUTDOWN
 ```
 
-`RUN_GENERATION` sends one `DiffletGenerateRequest` to the worker. The worker
-runs the active orchestrator internally and returns a `DiffletGenerateOutput`.
+`RUN_GENERATION` sends one `DiffletGenerateRequest` plus `deadline_monotonic` to
+the worker. The worker builds `WorkerRequestContext`, runs the active
+orchestrator internally, and returns a `DiffletGenerateOutput`.
 
 `CANCEL` is a control command for the currently running request id. A worker
 returns `CANCEL_ACK` only after the request is in a safe terminal state from the
@@ -287,8 +364,14 @@ boundary in P0.
 
 - ready only after load plus serving smoke succeeds.
 - not ready while starting, draining, or unhealthy.
+- not ready while recovering a worker after request timeout.
 - not ready after worker death.
 - unhealthy after unrecoverable worker failure.
+
+During `RECOVERING`, `/ready` returns 503 and new generation requests return
+`503 engine_recovering`. `/health` may remain 200 while the process and recovery
+task are alive; it should return 503 only after recovery fails or the engine is
+marked unrecoverably unhealthy.
 
 Worker death after startup should:
 

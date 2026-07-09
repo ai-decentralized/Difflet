@@ -3,6 +3,12 @@
 This document captures the serving code organization agreed for the first
 text-to-image serving implementation.
 
+This file, together with `engine.md` and `chat_completions_contract.md`, is the
+authoritative P0 serving design. The older
+`docs/plans/2026-07-06-difflet-serving-engine.md` keeps broader future design
+notes, including rotating, subprocess, and multi-plan ideas, but those are not
+part of the P0 implementation scope unless repeated here.
+
 ## Scope
 
 MVP serving supports:
@@ -16,20 +22,28 @@ MVP serving supports:
 MVP does not include subprocess serving fallback, rotating resident fallback,
 multi-profile loading, local file serving, data URLs, or video serving.
 
+Qwen-Image is a P0 target only when the selected `ServingProfile` passes a real
+shared-worker co-load and smoke test: prompt encoder, denoiser, and decoder must
+load into the same resident Trainium worker process and run a startup smoke
+without falling back to per-stage processes or file handoff. If this gate fails,
+startup must fail clearly; P0 must not silently downgrade to subprocess or
+rotating behavior.
+
 ## Folder Layout
 
 ```text
 difflet/
-  registry/
-    __init__.py
-    base.py
-    flux.py
-    qwen_image.py
-    wan.py
-    hunyuan_video.py
-    ltx_2.py
+  registry.py                    # existing base registry; keep unchanged
 
   common/
+    registry/
+      __init__.py
+      base.py                    # common registry helpers, wraps old ModelEntry
+      flux.py
+      qwen_image.py
+      wan.py
+      hunyuan_video.py
+      ltx_2.py
     orchestrators/
       __init__.py
       base.py
@@ -71,9 +85,12 @@ difflet/
 
 ## Layer Responsibilities
 
-### `difflet/registry`
+### `difflet/registry.py`
 
-The base registry is the source of truth for model identity and defaults.
+The existing base registry module remains the source of truth for model identity
+and defaults. Do not replace it with a `difflet/registry/` package in the serving
+MVP, because current CLI and standalone scripts may import `difflet.registry`
+directly.
 
 It owns:
 
@@ -89,16 +106,22 @@ It owns:
 - backend support
 - `application_factory` for pipeline-style models
 
-Model-specific registration should live in separate files. For example,
-`difflet/registry/flux.py` owns the current `_register_builtin_flux()` logic:
+Serving and common code should keep calling the existing public API:
 
 ```python
-def register() -> None:
+from difflet.registry import ModelEntry, register_model, resolve_model, registered_models
+```
+
+For example, the existing `_register_builtin_flux()` logic remains in
+`difflet/registry.py`:
+
+```python
+def _register_builtin_flux() -> None:
     def is_flux(model_id: str) -> bool:
         value = model_id.lower()
         return "flux" in value or "black-forest-labs/flux" in value
 
-    register_model(
+    @register_model(
         name="flux",
         application_factory="difflet.models.flux.entry:create_flux_application",
         hf_paths=(
@@ -109,13 +132,32 @@ def register() -> None:
         default_parallel=DiffletParallelConfig(tp_degree=8),
         default_shape={"height": 1024, "width": 1024, "num_frames": None},
     )
+    class _FluxRegistration:
+        pass
 ```
-
-`difflet/registry/__init__.py` imports/registers builtins once and preserves the
-current public API.
 
 Serving topology and serving lifecycle policy should not live in the base
 registry.
+
+### `difflet/common/registry`
+
+`difflet/common/registry/` is the new modular registry namespace for shared CLI
+and serving infrastructure. It must not shadow `difflet.registry`; it should
+wrap and reuse the existing base registry instead.
+
+It owns common metadata that is useful outside a single entrypoint:
+
+- common model family metadata modules keyed by `ModelEntry.name`
+- serving/common stage-role declarations that are not part of the old base
+  registry
+- helper functions that convert a base `ModelEntry` plus profile options into
+  common model descriptors
+- per-model helper modules such as `difflet/common/registry/flux.py` and
+  `difflet/common/registry/qwen_image.py`
+
+It should call `difflet.registry.resolve_model(...)` for base model matching and
+defaults. It should not duplicate the old `hf_paths`, detector functions, or
+default shape/parallel values unless the value is serving/common-specific.
 
 ### `difflet/common/orchestrators`
 
@@ -138,6 +180,13 @@ They own reusable model execution infrastructure:
 CLI and serving should call this layer instead of duplicating model-specific
 logic.
 
+In this document, "adapter" means a model-specific implementation of a common
+serving interface, not a separate framework directory that already exists. For
+P0, the concrete serving adapters are expected under
+`difflet/serving/orchestrators/`, for example
+`qwen_image.py` and `flux.py`. The serving registry wires them through
+`preflight_factory` and `orchestrator_factory`.
+
 ### `difflet/cli/orchestrators`
 
 CLI orchestrators become thin wrappers.
@@ -155,10 +204,12 @@ They should not be the long-term owner of reusable model stage logic.
 
 ### `difflet/serving/model_registry.py`
 
-The serving registry is an overlay on top of `difflet.registry`.
+The serving registry is an overlay on top of `difflet.common.registry` and the
+existing `difflet.registry`.
 
 It owns serving-specific metadata keyed by base `ModelEntry.name`:
 
+- serving-enabled checkpoint ids
 - topology type
 - stage roles
 - runtime plans
@@ -166,26 +217,68 @@ It owns serving-specific metadata keyed by base `ModelEntry.name`:
 - artifact policy
 - serving orchestrator factory
 
-It should call `difflet.registry.resolve_model(...)` for model id matching,
-default shape, default parallel config, backend support, and download patterns.
+It should use `difflet.common.registry` to obtain serving/common model metadata,
+and that common layer should call `difflet.registry.resolve_model(...)` for
+startup family resolution, default shape, default parallel config, backend
+support, and download patterns. After family resolution, serving must check the
+requested checkpoint id against its serving-enabled checkpoint allowlist before
+building a serving spec.
 
 ### `difflet/serving/orchestrators`
 
 Serving orchestrators are serving adapters over common orchestrators.
 
-In P0 they are worker-owned objects. The parent FastAPI process resolves the
-orchestrator factory and sends `LOAD_PROFILE` to the resident worker; the worker
-constructs the serving orchestrator, loads runtime handles, and runs smoke.
+P0 splits cold startup work from worker runtime work:
 
-They own:
+- Parent-side preflight prepares artifacts before the worker starts.
+- Worker-owned serving orchestrators load runtime handles, run smoke, generate,
+  and shut down.
+
+The parent FastAPI process resolves the preflight/orchestrator factories, runs
+download/compile/artifact checks through the preflight object, then starts the
+resident worker and sends `LOAD_PROFILE`. The worker constructs the serving
+orchestrator, loads runtime handles, and runs smoke.
+
+Parent-side preflight owns:
+
+- model path resolution and optional download.
+- compile plan construction.
+- compiled artifact checks and optional compile.
+- startup progress logs for cold operations.
+
+The lifecycle order is common across models, but the implementation of each
+method is model-specific. For example, Flux can build a `CacheSpec` and validate
+pipeline cache manifests, while Qwen-Image must enumerate staged encoder,
+denoiser, and VAE artifacts. Keep these operations in the parent-side
+`ServingArtifactPreparer`; do not duplicate download, compile, or artifact
+validation inside the worker `ServingModelOrchestrator`.
+
+```python
+class ServingArtifactPreparer(Protocol):
+    model_id: str
+    model_type: str
+
+    def resolve_model_path(self, *, download_policy: DownloadPolicy) -> Path: ...
+    def stage_specs(self, profile: ServingProfile) -> tuple[DiffletStageSpec, ...]: ...
+    def compile_plan(self, profile: ServingProfile) -> tuple[DiffletCompileSpec, ...]: ...
+    def ensure_artifacts(self, profile: ServingProfile, policy: CompilePolicy) -> None: ...
+```
+
+Worker-owned serving orchestrators own:
 
 - active `ServingProfile`
 - loaded pipeline/stage handles
-- startup load and smoke readiness
+- worker-side load and smoke readiness
 - request validation integration
 - serving-specific progress logs
 - shutdown
 - future serving-only profile switching/recovery behavior
+
+Worker orchestrators consume the already resolved model path/profile/artifact
+identity prepared during startup. They may compute local paths needed for
+`load(...)`, but they must not download weights, run AOT compile, or decide that
+artifacts are valid enough for readiness. If load discovers a missing or stale
+artifact despite preflight, it should fail load/smoke and make startup fail.
 
 The serving orchestrator exposes one public generation method:
 
@@ -195,9 +288,6 @@ class ServingModelOrchestrator(Protocol):
     model_type: str
     active_profile: ServingProfile
 
-    def resolve_model_path(self, *, download_policy: DownloadPolicy) -> Path: ...
-    def compile_plan(self, profile: ServingProfile) -> tuple[DiffletCompileSpec, ...]: ...
-    def ensure_artifacts(self, profile: ServingProfile, policy: CompilePolicy) -> None: ...
     def load(self, profile: ServingProfile) -> None: ...
     def smoke(self) -> None: ...
     async def generate(self, request: DiffletGenerateRequest, context: WorkerRequestContext) -> DiffletGenerateOutput: ...
@@ -213,7 +303,7 @@ It carries the request deadline and one cancellation signal:
 @dataclass
 class WorkerRequestContext:
     request_id: str
-    deadline: float
+    deadline_monotonic: float
     cancellation: CancellationSignal
 ```
 
@@ -287,11 +377,11 @@ It should not know the model stage count.
 parse serve args
 resolve base ModelEntry through difflet.registry
 resolve serving metadata through difflet.serving.model_registry
-build one ServingProfile
-select serving orchestrator factory
-resolve/download model weights
-build compile plan
-check or compile artifacts
+build one ServingProfile from registry defaults plus serve-flag overrides
+select preflight and serving orchestrator factories
+parent preflight: resolve/download model weights
+parent preflight: build compile plan
+parent preflight: check or compile artifacts
 create engine
 start resident worker
 construct serving orchestrator inside worker
@@ -305,6 +395,29 @@ serve ready traffic
 Download, compile, load, and smoke must emit progress logs before and after
 long-running steps so startup does not appear stuck.
 
+Serving must not hard-code one global parallel default. `--tp-degree`,
+`--cp-degree`, `--cp-mode`, `--height`, and `--width` are P0 image startup
+overrides; when omitted, profile construction uses the resolved
+`ModelEntry.default_parallel` and `ModelEntry.default_shape`, with any
+serving-adapter default only where the model requires one. The `serve`
+subcommand should therefore use serving-specific parser helpers whose startup
+profile/runtime flags default to `None`. Do not reuse CLI helpers whose defaults
+erase whether the operator omitted a value.
+
+`--num-frames` is reserved for future video adapters. For Qwen/Flux P0 image
+serving, a non-null startup `num_frames` override must be rejected during
+startup profile validation rather than baked into `ServingProfile`.
+
+P0 uses one model-level serving profile that can be overridden at startup with
+`difflet serve --tp-degree`, `--cp-degree`, `--height`, `--width`, and related
+flags. Stage-specific differences belong in serving stage metadata and
+placement/core calculations. For example, Qwen P0 requires `cp_degree=1`; under
+that supported profile, Qwen text and denoiser stages consume the model-level
+`tp_degree`, while the Qwen decoder is a fixed-core stage owned by the adapter.
+Do not expose separate per-stage TP/CP flags in the first serving milestone; add
+an explicit stage-profile override only if a future model requires genuinely
+different stage parallel configs.
+
 ## Request Flow
 
 ```text
@@ -317,7 +430,8 @@ FastAPI /v1/chat/completions
   -> worker-owned orchestrator.generate(request, context)
   -> model-specific pipeline/stage execution inside worker
   -> image bytes
-  -> ArtifactStore.put_bytes(...)
+  -> await ArtifactStore.put_bytes(...)
+  -> await ArtifactStore.get_url(ref)
   -> chat response with image_url.url
 ```
 
@@ -335,17 +449,19 @@ Each server process loads exactly one model/profile.
 Adding a model should be explicit. Do not rely on automatic stage inference for
 serving until the model has a registered topology and orchestrator.
 
-### 1. Add Base Registry Entry
+### 1. Ensure Base Registry Resolution
 
-Create or update a model file under `difflet/registry/`.
+First verify that the existing `difflet/registry.py` can resolve the model id
+and returns the expected `ModelEntry`. This is the only place broad model id
+matching, HF paths, detector functions, default shape, default parallel config,
+and `application_factory` should live.
 
-Example:
+If a future model is missing from the old base registry, update
+`difflet/registry.py` as a separate compatibility-preserving change using the
+current `_register_builtin_*()` pattern. Do not create `difflet/registry/`, and
+do not move existing registry code as part of serving.
 
-```text
-difflet/registry/new_model.py
-```
-
-The registration must define:
+The base registration must define:
 
 - model `name` / `model_type`
 - HF paths and aliases
@@ -356,11 +472,30 @@ The registration must define:
 - backend support
 - download allow patterns if the model needs non-default files
 
-Then import/register it from `difflet/registry/__init__.py`.
+### 2. Add Common Registry Metadata
 
-This is the only place model id matching should be added.
+Create or update a model file under `difflet/common/registry/`.
 
-### 2. Add Common Orchestrator
+Example:
+
+```text
+difflet/common/registry/new_model.py
+```
+
+The common registry entry should reference the base `ModelEntry.name` and define
+metadata shared by CLI/common/serving infrastructure:
+
+- common model family id
+- supported exact checkpoint ids for common/serving paths
+- topology family
+- generic stage roles
+- model-specific profile constraints that are not in the old base registry
+- factories for common orchestrator helpers when useful
+
+This layer may call the old base registry, but it must not duplicate broad model
+id matching.
+
+### 3. Add Common Orchestrator
 
 Create:
 
@@ -386,10 +521,15 @@ DiffletPipeline.precompile(...)
 DiffletPipeline.from_pretrained(..., skip_compile=True)
 ```
 
+The serving path must run a common `ensure_artifacts(...)` check before
+`skip_compile=True` load. For Flux P0, that check must verify the selected
+`CacheSpec` manifest and app-specific compiled artifact readiness before the
+worker constructs or loads `DiffletPipeline`.
+
 For a staged model, this usually extracts logic from the existing CLI
 orchestrator into importable stage helpers.
 
-### 3. Define Stage Topology
+### 4. Define Stage Topology
 
 Define the model's serving topology in serving metadata, using generic stage
 roles rather than model-specific CLI names.
@@ -422,7 +562,7 @@ Each stage definition should include:
 
 The registry declares stage metadata. The orchestrator owns execution.
 
-### 4. Add Serving Registry Metadata
+### 5. Add Serving Registry Metadata
 
 Update `difflet/serving/model_registry.py`.
 
@@ -436,16 +576,20 @@ _SERVING_METADATA["new_model"] = ServingModelMetadata(
     output_modalities=("image",),
     stage_factory=...,
     runtime_plan_factory=...,
+    preflight_factory=...,
     orchestrator_factory=...,
     artifact_policy="r2_url",
 )
 ```
 
 This metadata tells serving how to construct the model topology and which
-serving orchestrator to use. It should not duplicate HF ids or base defaults
-that already live in `difflet.registry`.
+parent-side preflight and worker-side serving orchestrator to use. It should
+reference `difflet.common.registry` for common model metadata and should not
+duplicate base defaults that already live in `difflet.registry`, but it must list
+serving-enabled checkpoint ids explicitly so a broad base registry family such
+as Flux does not automatically enable every sibling checkpoint for serving.
 
-### 5. Add Serving Orchestrator
+### 6. Add Serving Orchestrator
 
 Create:
 
@@ -475,7 +619,7 @@ topology and calls each stage adapter in order. It should check
 `context.cancellation` only at safe points. The engine does not know the model's
 stage count.
 
-### 6. Add Engine Support If Needed
+### 7. Add Engine Support If Needed
 
 Use an existing engine whenever possible:
 
@@ -485,7 +629,7 @@ Use an existing engine whenever possible:
 Only add a new engine when the runtime behavior is truly new, such as a future
 distributed profile pool. Do not add model-specific logic to engines.
 
-### 7. Add OpenAI Contract Support
+### 8. Add OpenAI Contract Support
 
 Update the OpenAI contract only when the model changes public behavior:
 
@@ -499,11 +643,12 @@ Update the OpenAI contract only when the model changes public behavior:
 For another text-to-image model that returns PNG bytes through R2, prefer adding
 adapter validation rather than changing the HTTP contract.
 
-### 8. Add Tests And Smoke
+### 9. Add Tests And Smoke
 
 At minimum add tests for:
 
 - model id resolution through `difflet.registry`
+- common registry metadata resolution through `difflet.common.registry`
 - serving metadata resolution
 - serving profile construction
 - compiled artifact path/cache identity
@@ -521,8 +666,9 @@ marking `/ready` successful.
 ## Model Addition Checklist
 
 ```text
-[ ] Add base registry file under difflet/registry/
-[ ] Import/register the model from difflet/registry/__init__.py
+[ ] Confirm the model resolves through existing difflet/registry.py
+[ ] If missing, add base ModelEntry to difflet/registry.py as a separate compatibility-preserving change
+[ ] Add common registry metadata under difflet/common/registry/
 [ ] Add common orchestrator under difflet/common/orchestrators/
 [ ] Define stage topology and stage roles
 [ ] Add serving metadata in difflet/serving/model_registry.py
