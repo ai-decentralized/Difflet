@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import sys
 
 _ORCHESTRATOR_MAP: dict[str, str] = {
@@ -64,6 +65,15 @@ def main(argv: list[str] | None = None) -> int:
     args, _ = parser.parse_known_args(argv)
     cls = _load_orchestrator_class(args.orchestrator)
     orchestrator = cls(args)
+    if args.stage_mode == "generate":
+        # Overlap this stage's ~6.7s one-time NeuronCore bring-up with its load.
+        # Gated to generate: compile runs on the host compiler and must not spin
+        # up the device.
+        from difflet.cli.prewarm import prewarm_neuron_runtime
+        num_cores = int(os.environ.get("NEURON_RT_NUM_CORES") or 0) or (
+            (args.tp_degree or 1) * (args.cp_degree or 1)
+        )
+        prewarm_neuron_runtime(num_cores)
     orchestrator._run_stage_internal(args.stage, args)
     return 0
 

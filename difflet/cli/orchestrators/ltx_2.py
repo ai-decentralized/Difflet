@@ -86,6 +86,9 @@ class LTX2Orchestrator(ModelOrchestrator):
 
         entry = resolve_model(_HF_MODEL_ID, model_type=_MODEL_TYPE)
         parallel = self._parallel()
+        # Overlap the ~6.7s one-time NeuronCore bring-up with the host-side load.
+        from difflet.cli.prewarm import prewarm_neuron_runtime
+        prewarm_neuron_runtime(parallel.world_size)
         shape = entry.resolve_shape(height=self.args.height, width=self.args.width,
                                     num_frames=self.args.num_frames)
         spec = CacheSpec(
