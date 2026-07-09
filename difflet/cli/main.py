@@ -13,6 +13,11 @@ VALID_MODELS = {
     "Lightricks/LTX-2",
 }
 
+SERVE_VALID_MODELS = {
+    "black-forest-labs/FLUX.1-dev",
+    "Qwen/Qwen-Image",
+}
+
 _MODEL_TYPE: dict[str, str] = {
     "black-forest-labs/FLUX.1-dev": "flux",
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": "wan",
@@ -30,6 +35,15 @@ def _add_model_flag(p: argparse.ArgumentParser) -> None:
         required=True,
         dest="model_id",
         help="HuggingFace model ID. One of:\n  " + "\n  ".join(sorted(VALID_MODELS)),
+    )
+
+
+def _add_serve_model_flag(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--model-id",
+        required=True,
+        dest="model_id",
+        help="HuggingFace model ID. One of:\n  " + "\n  ".join(sorted(SERVE_VALID_MODELS)),
     )
 
 
@@ -71,6 +85,21 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
                         "compiler instruction limit (NCC_EVRF007).")
 
 
+def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--tp-degree", type=int, default=None,
+                   help="Tensor-parallel degree (default: registry default)")
+    p.add_argument("--cp-degree", type=int, default=None,
+                   help="Context-parallel degree (default: registry default)")
+    p.add_argument("--cp-mode", choices=["gather_kv", "ring"], default=None,
+                   help="Context-parallel attention strategy (default: registry default)")
+    p.add_argument("--height", type=int, default=None)
+    p.add_argument("--width", type=int, default=None)
+    p.add_argument("--cache-dir", default=None,
+                   help="Compiled artifact cache root (default: ~/.cache/difflet/)")
+    p.add_argument("--force", action="store_true",
+                   help="Recompile even if a valid cache entry exists")
+
+
 def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--prompt", required=True)
     p.add_argument("--output", required=True, help="Output file path (.png or .mp4)")
@@ -89,6 +118,11 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
                    metavar="X", help="Adaptive TeaCache target speedup (requires --teacache-calibration)")
     p.add_argument("--teacache-calibration", default=None,
                    metavar="PATH", help="Path to TeaCache calibration JSON")
+
+
+def _add_serve_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("--port", type=int, default=8091)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -122,6 +156,12 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_shape_flags(run_cmd)
     _add_cache_flags(run_cmd)
     _add_generate_flags(run_cmd)
+
+    serve = sub.add_parser("serve", help="Start OpenAI-compatible T2I serving")
+    _add_serve_model_flag(serve)
+    serve.add_argument("--revision", default=None)
+    _add_serve_profile_flags(serve)
+    _add_serve_flags(serve)
 
     return root
 
@@ -243,10 +283,11 @@ def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.model_id not in VALID_MODELS:
+    valid_models = SERVE_VALID_MODELS if args.command == "serve" else VALID_MODELS
+    if args.model_id not in valid_models:
         print(
             f"Error: Unknown model-id '{args.model_id}'. Valid model IDs:\n"
-            + "\n".join(f"  {m}" for m in sorted(VALID_MODELS)),
+            + "\n".join(f"  {m}" for m in sorted(valid_models)),
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -258,8 +299,13 @@ def main(argv: list[str] | None = None) -> None:
     if args.command in ("generate", "run"):
         _validate_teacache(args)
 
-    orchestrator = _get_orchestrator(args)
-    getattr(orchestrator, args.command)()
+    if args.command == "serve":
+        from difflet.serving.cli.serve import run
+
+        run(args)
+    else:
+        orchestrator = _get_orchestrator(args)
+        getattr(orchestrator, args.command)()
 
 
 if __name__ == "__main__":

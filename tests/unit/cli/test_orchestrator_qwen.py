@@ -61,10 +61,12 @@ def test_download_resolves_remote(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "difflet.pipeline.path_resolver.resolve_model_path",
-        lambda model_id, *, local_files_only: calls.append(local_files_only),
+        lambda model_id, *, revision, local_files_only: calls.append(
+            (revision, local_files_only)
+        ),
     )
-    QwenImageOrchestrator(_qwen_args()).download()
-    assert calls == [False]
+    QwenImageOrchestrator(_qwen_args(revision="abc123")).download()
+    assert calls == [("abc123", False)]
 
 
 def test_generate_preserves_work_dir_on_failure(monkeypatch, tmp_path, capsys):
@@ -133,6 +135,14 @@ def test_shared_cli_args_optionals():
         _qwen_args(prompt=None, output=None, cache_dir=None)
     )._shared_cli_args("compile")
     assert "--prompt" not in bare and "--output" not in bare
+
+
+def test_shared_cli_args_forwards_revision():
+    parts = QwenImageOrchestrator(
+        _qwen_args(revision="refs/pr/1")
+    )._shared_cli_args("compile")
+
+    assert parts[parts.index("--revision") + 1] == "refs/pr/1"
 
 
 # ----------------------------------------------------------------- stage: text

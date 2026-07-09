@@ -37,6 +37,7 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--stage", required=True)
     p.add_argument("--stage-mode", default="generate", choices=["compile", "generate"])
     p.add_argument("--model-id", dest="model_id", default=None)
+    p.add_argument("--revision", default=None)
     p.add_argument("--tp-degree", type=int, default=None)
     p.add_argument("--cp-degree", type=int, default=1)
     p.add_argument("--cp-mode", choices=["gather_kv", "ring"], default="gather_kv")

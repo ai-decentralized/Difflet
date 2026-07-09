@@ -61,13 +61,17 @@ The engine must not hard-code model-specific stage names such as Qwen
 
 ```python
 class DiffletServingEngine(Protocol):
-    active_profile: ServingProfile
-    output_modalities: tuple[str, ...]
+    profile: ServingProfile
 
     async def start(self) -> None: ...
     async def generate(self, request: DiffletGenerateRequest) -> DiffletGenerateOutput: ...
-    async def health(self) -> EngineHealth: ...
     async def shutdown(self) -> None: ...
+
+    @property
+    def ready(self) -> bool: ...
+
+    @property
+    def healthy(self) -> bool: ...
 ```
 
 The engine owns:
@@ -136,6 +140,10 @@ FluxServingOrchestrator
     output = pipe(...)
     return DiffletGenerateOutput(image_bytes, "image/png")
 ```
+
+Flux P0 smoke is a load/cache smoke by default; it does not run an extra full
+image generation during startup because that can make startup materially slower.
+The first real request still exercises generation on the loaded profile.
 
 Qwen worker layout:
 
@@ -315,29 +323,35 @@ async def run_one(self, request, ticket):
 
 ## Worker IPC
 
-P0 worker IPC should be worker-level, not per-stage and not model-specific.
+P0 worker IPC should be worker-level, not per-stage and not model-specific. The
+implementation may combine lifecycle commands with process startup as long as
+the externally visible state machine is the same.
 
-Commands:
+Logical commands/events:
 
 ```text
-LOAD_PROFILE
-SMOKE
+START_WORKER -> LOAD_PROFILE -> SMOKE
 RUN_GENERATION
 CANCEL
-HEALTH
 SHUTDOWN
 ```
+
+In the P0 code path, `LOAD_PROFILE` and `SMOKE` may happen during worker process
+startup before the worker reports ready. Health/readiness may be derived from
+the process state plus cached load/smoke state rather than a separate `HEALTH`
+IPC command.
 
 `RUN_GENERATION` sends one `DiffletGenerateRequest` plus `deadline_monotonic` to
 the worker. The worker builds `WorkerRequestContext`, runs the active
 orchestrator internally, and returns a `DiffletGenerateOutput`.
 
-`CANCEL` is a control command for the currently running request id. A worker
-returns `CANCEL_ACK` only after the request is in a safe terminal state from the
-worker's perspective: the generation stopped before entering an unsafe call, or
-the generation finished and the worker discarded the result. If the worker is
-blocked inside a non-interruptible Trainium/runtime call, it may not respond;
-the parent must then terminate and restart the worker process.
+`CANCEL` is a control event for the currently running request id. It may be sent
+over a dedicated cancellation queue/event rather than the main generation queue.
+A worker returns `CANCEL_ACK` only after the request is in a safe terminal state
+from the worker's perspective: the generation stopped before entering an unsafe
+call, or the generation finished and the worker discarded the result. If the
+worker is blocked inside a non-interruptible Trainium/runtime call, it may not
+respond; the parent must then terminate and restart the worker process.
 
 The engine does not inject cancellation logic into model handles. Cancellation
 is a worker-runtime signal:
@@ -380,25 +394,34 @@ Worker death after startup should:
 3. fail new requests with `503 engine_unavailable`.
 4. fail or cancel queued requests.
 
-Automatic worker restart after request timeout is part of P0 recovery. Restart
-after arbitrary repeated crashes can remain future hardening.
+Automatic worker restart after request timeout is part of P0 recovery. P0 also
+uses the same process-level recovery path for a worker-side 5xx/error returned
+while a request owns the execution slot: do not release the slot, terminate the
+current worker if the terminal state is not provably clean, then restart,
+`LOAD_PROFILE`, and `SMOKE` before accepting the next request. Restart after
+arbitrary repeated crashes outside an owned request can remain future
+hardening.
 
 ## Shutdown
 
-Shutdown sequence:
+P0 shutdown sequence:
 
 ```text
 mark draining
 /ready returns 503
 reject new requests
-fail queued requests
-wait for active request up to shutdown timeout
-best-effort cancel if timeout is exceeded
 send SHUTDOWN to worker/orchestrator
 terminate unresponsive worker process
 cleanup request-local state
 exit
 ```
+
+Because P0 exposes `max_running_requests=1` and does not maintain a separate
+async scheduler queue outside admission accounting, shutdown is allowed to be
+process-level and conservative: once draining is set, new requests are rejected,
+the resident worker receives `SHUTDOWN`, and unresponsive workers are
+terminated. A future scheduler can add explicit queued-request futures and a
+configurable drain timeout.
 
 `shutdown()` must be idempotent.
 

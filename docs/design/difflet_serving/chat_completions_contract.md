@@ -64,9 +64,9 @@ Minimal request:
 
 - If the server is started with one model, `model` may be omitted. The server
   uses the startup model.
-- If `model` is provided, it must match `ServingProfile.accepted_model_ids`.
-  This allowlist contains the exact startup model id plus explicit
-  same-checkpoint serving aliases for the same loaded profile.
+- If `model` is provided, P0 requires it to exactly match the startup model id.
+  A future alias allowlist can add explicit same-checkpoint serving aliases for
+  the same loaded profile.
 - Do not include every `ModelEntry.hf_paths` value by default. A registry entry
   may group sibling checkpoints, such as Flux dev and schnell, that are not
   aliases for the same loaded artifact.
@@ -101,6 +101,10 @@ Prompt extraction:
 - Serving validation must perform this length check without tokenizer
   truncation. After the prompt is proven to fit, the adapter may pad to the
   fixed execution bucket required by the compiled artifact.
+- P0 implements this through a model-specific parent-side request validator
+  wired by the serving registry. The validator runs after request normalization
+  and before `engine.generate(...)`, so an overlong prompt does not occupy the
+  resident worker slot.
 
 Supported top-level fields:
 
@@ -499,8 +503,8 @@ back to `data_url`, local file URLs, raw filesystem paths, or inline bytes.
 ## Implementation Notes
 
 - Chat response formatting belongs in `difflet/serving/openai/serving_chat.py`.
-- Request/response Pydantic models belong in
-  `difflet/serving/openai/protocol.py`.
+- Supporting model-list helpers may live in
+  `difflet/serving/openai/serving_models.py`.
 - Model-specific input validation belongs in the serving model registry or
   adapter, not in the OpenAI route.
 - The engine returns `DiffletGenerateOutput`; it does not know about

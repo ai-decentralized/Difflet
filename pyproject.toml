@@ -54,8 +54,14 @@ test = [
     "imageio",
     "imageio-ffmpeg",
 ]
+serve = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.35",
+    "boto3>=1.34",
+]
 dev = [
     "difflet-diffusion[test]",
+    "difflet-diffusion[serve]",
     "black==26.1.0",
     "isort==8.0.1",
     "ruff==0.15.1",

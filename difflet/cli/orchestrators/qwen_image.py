@@ -14,15 +14,16 @@ import shutil
 import sys
 from pathlib import Path
 
+from difflet.common.orchestrators import qwen_image as qwen_common
 from difflet.cli.orchestrators.base import ModelOrchestrator
 from difflet.cli import runner
 
 _HF_MODEL_ID = "Qwen/Qwen-Image"
 _MODEL_TYPE = "qwen_image"
-_CLI_NAME = "qwen-image"
-_VIRTUAL_CORE_SIZE = 2
-_ENC_SEQ = 256
-_TEXT_SEQ_LEN = 1024
+_CLI_NAME = qwen_common.CLI_NAME
+_VIRTUAL_CORE_SIZE = qwen_common.VIRTUAL_CORE_SIZE
+_ENC_SEQ = qwen_common.ENC_SEQ
+_TEXT_SEQ_LEN = qwen_common.TEXT_SEQ_LEN
 
 _QWEN_TEMPLATE = (
     "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, "
@@ -36,7 +37,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
 
     def download(self) -> None:
         from difflet.pipeline.path_resolver import resolve_model_path
-        resolve_model_path(_HF_MODEL_ID, local_files_only=False)
+        resolve_model_path(_HF_MODEL_ID, revision=self.args.revision, local_files_only=False)
         print(f"[difflet] weights ready for {_HF_MODEL_ID}")
 
     def compile(self) -> None:
@@ -92,7 +93,11 @@ class QwenImageOrchestrator(ModelOrchestrator):
         from neuronx_distributed_inference.utils.hf_adapter import load_pretrained_config
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        model_dir = resolve_model_path(_HF_MODEL_ID, local_files_only=True)
+        model_dir = resolve_model_path(
+            _HF_MODEL_ID,
+            revision=args.revision,
+            local_files_only=True,
+        )
         enc_path = str(Path(model_dir) / "text_encoder")
         compiled_dir = self._stage_compiled_dir("text", args)
 
@@ -147,7 +152,11 @@ class QwenImageOrchestrator(ModelOrchestrator):
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        model_dir = resolve_model_path(_HF_MODEL_ID, local_files_only=True)
+        model_dir = resolve_model_path(
+            _HF_MODEL_ID,
+            revision=args.revision,
+            local_files_only=True,
+        )
         compiled_dir = self._stage_compiled_dir("generate", args)
         work_dir = Path(args.work_dir)
 
@@ -202,7 +211,11 @@ class QwenImageOrchestrator(ModelOrchestrator):
         from difflet.utils.diffusers_adapter import load_diffusers_config
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        model_dir = resolve_model_path(_HF_MODEL_ID, local_files_only=True)
+        model_dir = resolve_model_path(
+            _HF_MODEL_ID,
+            revision=args.revision,
+            local_files_only=True,
+        )
         vae_path = str(Path(model_dir) / "vae")
         compiled_dir = self._stage_compiled_dir("vae", args)
         h, w = args.height or 1024, args.width or 1024
@@ -244,17 +257,14 @@ class QwenImageOrchestrator(ModelOrchestrator):
     # ------------------------------------------------------------ helpers
 
     def _stage_compiled_dir(self, stage: str, args: argparse.Namespace) -> Path:
-        base = Path(args.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
-        tp = args.tp_degree or 4
-        cp = args.cp_degree or 1
-        h, w = args.height or 1024, args.width or 1024
-        if stage == "text":
-            return base / f"qwen_image_enc_tp{tp}cp{cp}_seq{_ENC_SEQ}"
-        if stage == "generate":
-            return base / f"qwen_image_dit_tp{tp}cp{cp}_h{h}w{w}"
-        if stage == "vae":
-            return base / f"qwen_image_vae_h{h}w{w}"
-        raise ValueError(f"unknown stage {stage!r}")
+        return qwen_common.stage_compiled_dir_from_values(
+            stage,
+            cache_dir=args.cache_dir,
+            tp_degree=args.tp_degree or 4,
+            cp_degree=args.cp_degree or 1,
+            height=args.height or 1024,
+            width=args.width or 1024,
+        )
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
         a = self.args
@@ -276,6 +286,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
             parts += ["--output", a.output]
         if a.cache_dir:
             parts += ["--cache-dir", a.cache_dir]
+        if getattr(a, "revision", None):
+            parts += ["--revision", a.revision]
         if work_dir:
             parts += ["--work-dir", work_dir]
         return parts
