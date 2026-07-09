@@ -1,0 +1,22 @@
+- [x] Draft Difflet serving engine plan under docs/plans, based on vLLM-Omni stage factory pattern.
+- [x] Clarify generic stage roles vs runtime strategies; map Qwen-Image to prompt_encoder -> denoiser -> decoder.
+- [x] Promote ResidentWorkerServingEngine as the primary server runtime and document topology template / fallback resolution policy.
+- [x] Add startup artifact preparation and Trainium compile lifecycle to server/app startup plan.
+- [x] Clarify serving must reuse existing Difflet download/AOT compile/cache/CLI and DiffletPipeline primitives.
+- [x] Map existing common CLI flags to serving lifecycle defaults, request defaults, cache impact, and Trainium core impact.
+- [x] Clarify compile stages vs generate stages and first-milestone fixed-shape serving profile.
+- [x] Add current README/code evidence for shape-specific compile artifacts and compare with text serving buckets.
+
+Review:
+- Done: updated plan to make resident workers the serving target, and subprocess only an optional migration harness.
+- Done: documented compile and generate as the same stage topology with different actions.
+- Done: documented first serving pod as one model/topology/shape/parallel/dtype/toolchain profile.
+- Done: documented existing evidence that shape is part of cache identity, plus which staged encoder artifacts can be shared across shapes.
+- Done: updated MVP serving design to use one FastAPI process plus one shared-process Trainium worker for the 4-core target.
+- Done: clarified that the engine returns bytes, while the OpenAI handler writes artifacts through `ArtifactStore`/R2 and returns `image_url.url`.
+- Done: moved rotating resident to a future extension point until unload/restart semantics are implemented.
+- Done: removed `download-policy require`; startup download policy is `auto` or `never`.
+- Done: narrowed P0 serving scope to R2 URL output only, no `data_url`, no local `/v1/files` route, and no subprocess runtime fallback.
+- Done: updated MVP model scope to include both Qwen-Image staged serving and worker-owned Flux serving behind `ResidentWorkerServingEngine`, with one active model/profile per server process.
+- Rationale: serving startup must load fixed-shape Trainium NEFF artifacts before accepting requests.
+- Verification: documentation-only change; reviewed docs with `rg` for stale policy wording.
