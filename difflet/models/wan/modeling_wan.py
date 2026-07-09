@@ -196,9 +196,13 @@ class WanRotaryPosEmbed(nn.Module):
         pph = height // p_h
         ppw = width // p_w
 
-        split_sizes = [self.t_dim, self.h_dim, self.w_dim]
-        cos_t, cos_h, cos_w = self.freqs_cos.split(split_sizes, dim=1)
-        sin_t, sin_h, sin_w = self.freqs_sin.split(split_sizes, dim=1)
+        # NOTE: use direct column slices, NOT torch.split(sizes_list, dim=1). neuronxcc
+        # 2.25 miscompiles aten::split_with_sizes on a non-outermost dim (scrambled chunks,
+        # max_abs~2.0), which corrupts the RoPE table -> mosaic video. narrow/slice fold
+        # correctly and keep the (input-independent) builder in-graph. See AWS_BUG_REPORT.
+        _t, _th = self.t_dim, self.t_dim + self.h_dim
+        cos_t, cos_h, cos_w = self.freqs_cos[:, :_t], self.freqs_cos[:, _t:_th], self.freqs_cos[:, _th:]
+        sin_t, sin_h, sin_w = self.freqs_sin[:, :_t], self.freqs_sin[:, _t:_th], self.freqs_sin[:, _th:]
 
         cos_f = cos_t[:ppf].view(ppf, 1, 1, -1).expand(ppf, pph, ppw, -1)
         cos_y = cos_h[:pph].view(1, pph, 1, -1).expand(ppf, pph, ppw, -1)
