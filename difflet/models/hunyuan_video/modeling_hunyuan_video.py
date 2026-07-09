@@ -42,6 +42,7 @@ from difflet.ops import (
     get_tensor_model_parallel_size,
     get_world_group,
     joint_ring_attention,
+    reduce_from_tensor_model_parallel_region,
     scatter_to_process_group_spmd,
 )
 
@@ -565,11 +566,27 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         self.norm = AdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm")
         self.proj_mlp = ColumnParallelLinear(hidden_size, mlp_dim, bias=True, gather_output=False)
         self.act_mlp = nn.GELU(approximate="tanh")
-        self.proj_out = RowParallelLinear(
-            hidden_size + mlp_dim,
+        # The attention output is head-sharded (hidden_size/TP) while the MLP output is
+        # column-sharded (mlp_dim/TP). Concatenating them along the feature dim and feeding a
+        # single fused RowParallelLinear is WRONG under TP: the fused weight is split
+        # contiguously over the contraction dim, so each rank would pair its interleaved
+        # [attn_r || mlp_r] input with the wrong weight columns. Use two RowParallelLinears —
+        # one per stream, each matching its own input sharding — reduce once, add bias after.
+        # (Same TP-layout fix as Flux's NeuronFluxSingleTransformerBlock.)
+        self.proj_out_attn = RowParallelLinear(
+            hidden_size,
             hidden_size,
             bias=True,
             input_is_parallel=True,
+            reduce_output=False,
+            skip_bias_add=True,
+        )
+        self.proj_out_mlp = RowParallelLinear(
+            mlp_dim,
+            hidden_size,
+            bias=False,
+            input_is_parallel=True,
+            reduce_output=False,
         )
 
     def forward(
@@ -602,8 +619,14 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         )
         attn_output = torch.cat([attn_output, context_attn_output], dim=1)
 
-        hidden_states = torch.cat([attn_output, mlp_hidden_states], dim=2)
-        hidden_states = gate.unsqueeze(1) * self.proj_out(hidden_states)
+        # Project each stream with its own RowParallelLinear (matching its sharding),
+        # then all-reduce once and add the (attn) bias — see __init__ for why.
+        out_attn, bias = self.proj_out_attn(attn_output)
+        out_mlp = self.proj_out_mlp(mlp_hidden_states)
+        proj_out = reduce_from_tensor_model_parallel_region(
+            out_attn + out_mlp, process_group=self.proj_out_attn.tensor_parallel_group
+        )
+        hidden_states = gate.unsqueeze(1) * (proj_out + bias)
         hidden_states = hidden_states + residual
         return hidden_states[:, :-text_seq_length, :], hidden_states[:, -text_seq_length:, :]
 
