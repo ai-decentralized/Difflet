@@ -705,13 +705,17 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         attn_output = torch.cat([attn_output, context_attn_output], dim=1)
 
         # Project each stream with its own RowParallelLinear (matching its sharding),
-        # then all-reduce once and add the (attn) bias — see __init__ for why.
-        out_attn, bias = self.proj_out_attn(attn_output)
+        # all-reduce the sum once (default TP group, like modeling_wan — backend-portable),
+        # then add the attn bias after the reduce. skip_bias_add returns (out, bias) on the
+        # Trainium backend; the CPU reference RowParallelLinear returns a plain tensor with
+        # the bias already applied, so handle both.
+        res_attn = self.proj_out_attn(attn_output)
+        out_attn, attn_bias = res_attn if isinstance(res_attn, tuple) else (res_attn, None)
         out_mlp = self.proj_out_mlp(mlp_hidden_states)
-        proj_out = reduce_from_tensor_model_parallel_region(
-            out_attn + out_mlp, process_group=self.proj_out_attn.tensor_parallel_group
-        )
-        hidden_states = gate.unsqueeze(1) * (proj_out + bias)
+        proj_out = reduce_from_tensor_model_parallel_region(out_attn + out_mlp)
+        if attn_bias is not None:
+            proj_out = proj_out + attn_bias
+        hidden_states = gate.unsqueeze(1) * proj_out
         hidden_states = hidden_states + residual
         return hidden_states[:, :-text_seq_length, :], hidden_states[:, -text_seq_length:, :]
 
