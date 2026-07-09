@@ -42,16 +42,20 @@
     "note": "text-encoder and VAE decode run on the host (enable_host_pipeline/enable_decode_components), so only the transformer is a Neuron load; the residual is host text-encode + denoise + host VAE decode."
   },
   "e2e_warm": {
-    "n": 1,
-    "mean": 61.74936403600441,
-    "median": 61.74936403600441,
-    "std": 0.0,
-    "p50": 61.74936403600441,
-    "p90": 61.74936403600441,
-    "min": 61.74936403600441,
-    "max": 61.74936403600441,
+    "n": 5,
+    "mean": 58.50489010879828,
+    "median": 58.3947660690028,
+    "std": 0.5684314594146287,
+    "p50": 58.3947660690028,
+    "p90": 59.34955727899796,
+    "min": 57.648630153998965,
+    "max": 59.34955727899796,
     "samples": [
-      61.74936403600441
+      58.839055202988675,
+      58.3947660690028,
+      59.34955727899796,
+      58.292441839003004,
+      57.648630153998965
     ]
   },
   "step_latency": {
@@ -118,7 +122,7 @@
     "per-step = 437.9 ms/DiT-step (median 437.5, p90 438.3, n=19) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 60s; output finite=True.",
     "Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.",
     "e2e_cold = 778 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
-    "e2e_warm = 62 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 778 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+    "e2e_warm = 59 s (n=5; reported after 2 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-06-30 15:35 UTC",
   "config_slug": "ltx_2",
@@ -132,13 +136,13 @@
     "stages": [
       {
         "stage": "transformer (denoise loop) [Neuron]",
-        "load_s": 14.718
+        "load_s": 13.896
       }
     ],
-    "weights_load_total_s": 14.718,
+    "weights_load_total_s": 13.896,
     "weights_shard_total_s": 0.0,
-    "wall_total_s": 61.749,
-    "compute_and_overhead_s": 47.031,
+    "wall_total_s": 57.649,
+    "compute_and_overhead_s": 43.753,
     "note": "text-encoder and VAE decode run on the host (enable_host_pipeline/enable_decode_components), so only the transformer is a Neuron load; the residual is host text-encode + denoise + host VAE decode."
   }
 }

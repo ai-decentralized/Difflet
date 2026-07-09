@@ -65,16 +65,18 @@
     "compute_and_overhead_s": 50.898
   },
   "e2e_warm": {
-    "n": 1,
-    "mean": 59.53240169399942,
-    "median": 59.53240169399942,
-    "std": 0.0,
-    "p50": 59.53240169399942,
-    "p90": 59.53240169399942,
-    "min": 59.53240169399942,
-    "max": 59.53240169399942,
+    "n": 3,
+    "mean": 56.404766790001304,
+    "median": 56.23771499400027,
+    "std": 0.38713464484493026,
+    "p50": 56.23771499400027,
+    "p90": 56.939823553999304,
+    "min": 56.03676182200434,
+    "max": 56.939823553999304,
     "samples": [
-      59.53240169399942
+      56.23771499400027,
+      56.03676182200434,
+      56.939823553999304
     ]
   },
   "step_latency": {
@@ -119,8 +121,8 @@
   "status": "ok",
   "notes": [
     "e2e_cold = 394 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
-    "e2e_warm = 60 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 394 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.",
-    "step_latency carried over from prior trn2 measurement (presharding-independent \u2014 DiT compute unaffected by weight-load path; ltx cross-check: realloop 437.9ms vs prior 442ms)."
+    "step_latency carried over from prior trn2 measurement (presharding-independent \u2014 DiT compute unaffected by weight-load path; ltx cross-check: realloop 437.9ms vs prior 442ms).",
+    "e2e_warm = 56 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-06-30 16:53 UTC",
   "config_slug": "wan_2_1",
@@ -134,20 +136,20 @@
     "stages": [
       {
         "stage": "text_encoder (UMT5)",
-        "load_s": 8.956
+        "load_s": 8.27
       },
       {
         "stage": "transformer (denoise loop)",
-        "load_s": 7.972
+        "load_s": 6.52
       },
       {
         "stage": "vae_decoder",
-        "load_s": 13.998
+        "load_s": 13.608
       }
     ],
-    "weights_load_total_s": 30.926,
+    "weights_load_total_s": 28.398,
     "weights_shard_total_s": 0.0,
-    "wall_total_s": 59.532,
-    "compute_and_overhead_s": 28.606
+    "wall_total_s": 56.94,
+    "compute_and_overhead_s": 28.542
   }
 }

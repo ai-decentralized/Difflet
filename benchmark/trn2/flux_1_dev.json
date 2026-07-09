@@ -74,16 +74,18 @@
     "compute_and_overhead_s": 40.848
   },
   "e2e_warm": {
-    "n": 1,
-    "mean": 37.703975680997246,
-    "median": 37.703975680997246,
-    "std": 0.0,
-    "p50": 37.703975680997246,
-    "p90": 37.703975680997246,
-    "min": 37.703975680997246,
-    "max": 37.703975680997246,
+    "n": 3,
+    "mean": 35.309720673666256,
+    "median": 35.29093960400496,
+    "std": 0.2659179004666863,
+    "p50": 35.29093960400496,
+    "p90": 35.64438639699074,
+    "min": 34.99383602000307,
+    "max": 35.64438639699074,
     "samples": [
-      37.703975680997246
+      35.29093960400496,
+      34.99383602000307,
+      35.64438639699074
     ]
   },
   "step_latency": {
@@ -151,7 +153,7 @@
   "notes": [
     "per-step = 268.1 ms/DiT-step (median 265.4, p90 265.7, n=27) \u2014 measured the SAME way as H100: inter-step deltas of a real 28-step generate (wrapping NeuronFluxBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 28 DiT calls timed; warm generate 8s; output finite=True.",
     "e2e_cold = 321 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
-    "e2e_warm = 38 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 321 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+    "e2e_warm = 35 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-06-30 06:06 UTC",
   "config_slug": "flux_1_dev",
@@ -165,11 +167,11 @@
     "stages": [
       {
         "stage": "text_encoder_t5",
-        "load_s": 8.897
+        "load_s": 9.126
       },
       {
         "stage": "transformer (denoise loop)",
-        "load_s": 8.62
+        "load_s": 6.703
       },
       {
         "stage": "text_encoder_clip",
@@ -177,12 +179,12 @@
       },
       {
         "stage": "vae_decoder",
-        "load_s": 2.403
+        "load_s": 2.204
       }
     ],
-    "weights_load_total_s": 20.044,
+    "weights_load_total_s": 18.157,
     "weights_shard_total_s": 0.0,
-    "wall_total_s": 37.704,
-    "compute_and_overhead_s": 17.66
+    "wall_total_s": 35.644,
+    "compute_and_overhead_s": 17.487
   }
 }
