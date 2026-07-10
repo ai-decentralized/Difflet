@@ -29,6 +29,19 @@ def stage_compiled_dir(stage: str, profile: ServingProfile) -> Path:
     )
 
 
+def serving_stage_compiled_dir(stage: str, profile: ServingProfile) -> Path:
+    """Return artifacts for the resident serving topology.
+
+    The staged CLI keeps the VAE at TP=1 in its own process. Resident serving
+    compiles the VAE with the same TP world size as the other stages because
+    NxD cannot co-load mixed TP=4/TP=1 models in one process on Trn2.
+    """
+    if stage != "vae":
+        return stage_compiled_dir(stage, profile)
+    base = Path(profile.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
+    return base / f"qwen_image_vae_tp{profile.world_size}_h{profile.height}w{profile.width}"
+
+
 def stage_compiled_dir_from_values(
     stage: str,
     *,
@@ -53,7 +66,10 @@ def stage_compiled_dir_from_values(
 
 def compile_plan(profile: ServingProfile) -> tuple[DiffletCompileSpec, ...]:
     return tuple(
-        DiffletCompileSpec(stage_id=stage, artifact_path=str(stage_compiled_dir(stage, profile)))
+        DiffletCompileSpec(
+            stage_id=stage,
+            artifact_path=str(serving_stage_compiled_dir(stage, profile)),
+        )
         for stage in ("text", "generate", "vae")
     )
 
@@ -67,14 +83,7 @@ def artifact_ready(path: Path, *, stage: str | None = None, profile: ServingProf
         path, stage=stage, profile=profile
     ):
         return False
-    return any(
-        item.is_file() and (
-            item.suffix == ".neff"
-            or item.name == "metaneff.pb"
-            or item.name.endswith(".metaneff")
-        )
-        for item in path.rglob("*")
-    )
+    return _has_stage_artifact(path, stage=stage)
 
 
 def missing_artifacts(profile: ServingProfile) -> list[DiffletCompileSpec]:
@@ -95,10 +104,8 @@ def ensure_artifacts(profile: ServingProfile, policy: CompilePolicy) -> None:
             "[difflet serve] compiling Qwen-Image staged artifacts "
             f"(policy={policy.value})"
         )
-        from difflet.cli.orchestrators.qwen_image import QwenImageOrchestrator
-
-        args = namespace_from_profile(profile, stage_mode="compile")
-        QwenImageOrchestrator(args).compile()
+        targets = compile_plan(profile) if policy == CompilePolicy.FORCE else tuple(missing)
+        _compile_serving_artifacts(profile, targets)
         write_serving_markers(profile)
         missing = missing_artifacts(profile)
         if missing:
@@ -106,10 +113,37 @@ def ensure_artifacts(profile: ServingProfile, policy: CompilePolicy) -> None:
             raise RuntimeError(f"Qwen compile finished but artifacts are still missing: {paths}")
 
 
+def _compile_serving_artifacts(
+    profile: ServingProfile,
+    targets: tuple[DiffletCompileSpec, ...],
+) -> None:
+    from difflet.cli import runner
+    from difflet.cli.orchestrators.qwen_image import QwenImageOrchestrator
+
+    args = namespace_from_profile(profile, stage_mode="compile")
+    shared = QwenImageOrchestrator(args)._shared_cli_args(stage_mode="compile")
+    for spec in targets:
+        cli_args = [*shared, "--compiled-dir", spec.artifact_path]
+        if spec.stage_id == "vae":
+            cli_args.extend(
+                [
+                    "--vae-tp-degree",
+                    str(profile.world_size),
+                ]
+            )
+        runner.run_stage(
+            HF_MODEL_ID,
+            spec.stage_id,
+            num_cores=profile.world_size,
+            virtual_core_size=VIRTUAL_CORE_SIZE,
+            cli_args=cli_args,
+        )
+
+
 def write_serving_markers(profile: ServingProfile) -> None:
     for spec in compile_plan(profile):
         artifact_path = Path(spec.artifact_path)
-        if not _has_neuron_artifact(artifact_path):
+        if not _has_stage_artifact(artifact_path, stage=spec.stage_id):
             continue
         marker = _serving_marker_payload(spec.stage_id, profile)
         (artifact_path / SERVING_ARTIFACT_MARKER).write_text(
@@ -141,14 +175,40 @@ def namespace_from_profile(profile: ServingProfile, *, stage_mode: str) -> Names
     )
 
 
+def _has_stage_artifact(path: Path, *, stage: str | None) -> bool:
+    if stage != "generate":
+        return _has_neuron_artifact(path)
+    transformer_path = path / "transformer"
+    if transformer_path.exists():
+        return _has_neuron_artifact(transformer_path)
+    return _has_neuron_artifact(path)
+
+
 def _has_neuron_artifact(path: Path) -> bool:
-    return any(
-        item.is_file() and (
+    for item in path.rglob("*"):
+        if not item.is_file() or item.stat().st_size == 0:
+            continue
+        if (
             item.suffix == ".neff"
             or item.name == "metaneff.pb"
             or item.name.endswith(".metaneff")
-        )
-        for item in path.rglob("*")
+        ):
+            return True
+        # NxD ModelBuilder embeds the compiled executable in its TorchScript
+        # archive instead of leaving a standalone NEFF in the cache directory.
+        if item.name == "model.pt" and _has_nxd_component(item.parent):
+            return True
+    return False
+
+
+def _has_nxd_component(path: Path) -> bool:
+    model_path = path / "model.pt"
+    config_path = path / "neuron_config.json"
+    return (
+        model_path.is_file()
+        and model_path.stat().st_size > 0
+        and config_path.is_file()
+        and config_path.stat().st_size > 0
     )
 
 

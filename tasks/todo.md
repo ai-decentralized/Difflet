@@ -32,6 +32,11 @@ Review:
 - Done: fixed latest doc/implementation mismatches: Flux preflight now fail-closes on missing compiled cache under `CompilePolicy.NEVER`, Qwen artifact readiness requires NEFF/metaneff artifacts rather than manifest-only dirs, `/health` returns 503 when unhealthy, malformed `extra_body` returns `400 invalid_extra_body`, and docs were narrowed for P0 shutdown/Flux smoke/file layout/model matching.
 - Done: addressed fresh doc/code review mismatches: Qwen serving artifacts now require a profile-matched serving marker, Qwen revision is forwarded through staged subprocess compile/load helpers, engine docs describe in-flight worker 5xx recovery, and architecture docs distinguish legacy artifact `stage_id` from generic serving stage roles.
 - Done: addressed follow-up fresh-agent findings: chat prompt extraction now uses only the last user message, queue wait returns `504 request_timeout` when the request deadline expires before the worker slot opens, Flux serving uses a common orchestrator helper for pipeline/artifact checks, serving registry metadata exposes stage topology/roles, and docs now match ASGI lifespan startup order plus incremental CLI/common migration.
+- [x] Inspect the serving entry point, model/profile requirements, and runtime dependencies for Trainium deployment.
+- [x] Connect to `16.51.176.130` and inventory the instance hardware, OS, Neuron runtime, disk, and existing model caches.
+- [x] Transfer the current clean branch and install the project without overwriting unrelated remote state.
+- [x] Compile Qwen-Image, run one real inference, and exercise resident-worker startup through its readiness gate.
+- [x] Record exact startup logs, inference outcome, remaining blockers, and verification commands.
 - Rationale: serving startup must load fixed-shape Trainium NEFF artifacts before accepting requests.
 - Verification: ran `python -m pytest tests/unit/serving -q`,
   `python -m pytest tests/unit/cli/test_cli_main.py tests/unit/cli/test_cli_main_extra.py tests/unit/cli/test_cli_cfg_parallel.py tests/unit/cli/test_cli_cp_mode.py tests/unit/cli/test_cli_sp.py tests/unit/serving -q`,
@@ -45,3 +50,57 @@ Review:
   `python -m compileall -q difflet/serving difflet/common difflet/cli/main.py difflet/cli/orchestrators/qwen_image.py difflet/cli/stage.py`, and
   `git diff --check`. Full `tests/unit/cli` and full Qwen orchestrator tests still require
   `torch`/`numpy` and a writable HuggingFace/Difflet cache in this environment.
+
+Deployment review (2026-07-10):
+- Done: deployed commit `94e6c42` to EC2 `16.51.176.130` in an AWS Neuron SDK 2.30 Ubuntu 24.04 container.
+- Done: downloaded Qwen-Image, compiled prompt encoder/denoiser/VAE artifacts, and generated a verified 1024x1024 RGB PNG with exit code 0.
+- Done: fixed Qwen serving preflight to accept NxD `model.pt` plus `neuron_config.json` artifacts; `tests/unit/serving` passes 52 tests.
+- Blocker: resident-worker co-load reaches decoder weight initialization, then segfaults in `libtorchneuron.so`; health/readiness never opens. Offline staged generation remains functional.
+- Logs: `/mnt/difflet-data/logs/qwen-{compile,generate,serve-startup,serve-kernel-crash}.log` on the EC2 instance.
+
+Qwen Trn2 mixed-TP topology investigation (2026-07-10):
+- [x] Record the successful staged compile/generate path and failed resident co-load attempts.
+- [x] Verify that prompt encoder and denoiser were compiled for TP=4 and VAE decoder for TP=1.
+- [x] Test TP=4 and TP=1 in separate concurrent processes on the four-core Trn2 device.
+- [x] Compare the cited Inf1 NCG guidance with current Trn2/torch-neuronx placement guidance.
+- [x] Test same-process TP=4 -> TP=1 load with explicit placement/rank controls.
+- [x] Test alternative load ordering if the placement API applies to NxD artifacts.
+- [x] Implement the smallest viable serving topology after the runtime experiment.
+- [x] Run unit tests plus remote startup and generation verification.
+- [x] Complete `docs/design/qwen_trn2_topology/` with the final decision and measured timings.
+
+Current findings:
+- TP=4 encoder + denoiser can co-reside in one process.
+- A concurrent TP=1 process is rejected because the TP=4 process owns cores 0-3.
+- TP=1 decoder loads alone in 5.91s plus 0.27s warmup.
+- TP=4 -> TP=1 in the current shared process reaches decoder weight initialization and segfaults in `libtorchneuron.so`.
+
+Final decision and verification:
+- Done: rejected mixed TP after implicit, explicit-placement, and reversed-order experiments.
+- Done: compiled a serving-only TP=4 VAE and kept the staged CLI VAE at TP=1.
+- Done: all three TP=4 stages co-load in one resident worker; four-step smoke produces a valid 1024x1024 RGB PNG.
+- Done: remote target tests pass (`87 passed`), `/health` and `/ready` return 200, and a real API request completes successfully.
+- Done: resident device memory is 73,401,942,984 bytes (about 68.36 GiB).
+- Done: independent agent audited Wan, HunyuanVideo, Flux, LTX-2, and HunyuanVideo 1.5 topology; findings are recorded in `docs/design/qwen_trn2_topology/04_other_models_topology_audit.md`.
+
+Flux Trn2 runtime benchmark (2026-07-10):
+- [x] Confirm the existing Flux weights, compile cache, and TP/CP/world-size profile on the target instance.
+- [x] Run a real Flux inference before accepting serving readiness.
+- [x] Measure three independent CLI generations, including per-process model load.
+- [x] Measure resident serving startup/warmup separately, then three API generations.
+- [x] Record each duration, aggregate duration, output validation, and remote log paths.
+
+Local R2 environment setup (2026-07-10):
+- [x] Document how Cloudflare R2 credentials map to Difflet's `DIFFLET_R2_*` variables.
+- [x] Organize `.env` without committing secrets and verify its shell syntax/config shape.
+- Rationale: keep only the S3-compatible Bucket, account endpoint, Access Key ID, and Secret Access Key required by Difflet; discard the unused API token/dashboard paste and leave the optional public URL empty for presigned responses.
+- Verification: `zsh -n .env`, required-key shape check, `R2ArtifactStore.from_env()` with the saved values, local boto3 presigned-URL generation, and `git diff --check` all pass without exposing credentials.
+
+Flux benchmark status:
+- Initial download returned `401 GatedRepoError`; the user-provided token was mounted temporarily, the gated weights downloaded successfully, and the remote token copy was deleted immediately afterward.
+- Done: Flux compiled at TP=4/CP=1/world=4. Saved component configs confirm CLIP TP=1/W=4, T5 TP=4/W=4, transformer TP=4/W=4, and VAE TP=1/W=4.
+- Done: three independent CLI runs took 48.81s, 44.66s, and 45.67s (139.14s total); all outputs are valid 1024x1024 RGB PNGs.
+- Done: resident startup took 40.14s; three real serving requests took 10.87s, 10.39s, and 11.60s (32.86s total), including PNG upload and presign.
+- Done: an R2 presigned URL was downloaded and validated as a 1024x1024 RGB PNG.
+- Current state: `difflet-flux-service` is healthy on port 8092. Qwen is stopped because both services require cores 0-3. No EC2 stop/terminate or instance-store deletion occurred.
+- Detailed record: `docs/design/qwen_trn2_topology/05_flux_runtime_validation.md`.

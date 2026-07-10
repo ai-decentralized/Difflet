@@ -158,7 +158,6 @@ class QwenImageOrchestrator(ModelOrchestrator):
             local_files_only=True,
         )
         compiled_dir = self._stage_compiled_dir("generate", args)
-        work_dir = Path(args.work_dir)
 
         h, w = args.height or 1024, args.width or 1024
         guidance = torch.full([1], float(args.guidance_scale or 4.0), dtype=torch.bfloat16)
@@ -177,6 +176,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             app.compile(str(compiled_dir))
             return
 
+        work_dir = Path(args.work_dir)
         text = torch.load(work_dir / "text.pt")
 
         app.load(str(compiled_dir), skip_warmup=True)
@@ -217,11 +217,18 @@ class QwenImageOrchestrator(ModelOrchestrator):
             local_files_only=True,
         )
         vae_path = str(Path(model_dir) / "vae")
-        compiled_dir = self._stage_compiled_dir("vae", args)
+        compiled_dir = Path(
+            getattr(args, "compiled_dir", None) or self._stage_compiled_dir("vae", args)
+        )
         h, w = args.height or 1024, args.width or 1024
+        vae_tp_degree = getattr(args, "vae_tp_degree", None) or 1
 
         config = WanVAEDecoderInferenceConfig(
-            neuron_config=NeuronConfig(tp_degree=1, world_size=1, torch_dtype=torch.bfloat16),
+            neuron_config=NeuronConfig(
+                tp_degree=vae_tp_degree,
+                world_size=vae_tp_degree,
+                torch_dtype=torch.bfloat16,
+            ),
             load_config=load_diffusers_config(vae_path),
             height=h, width=w, num_frames=1,
         )
@@ -257,6 +264,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
     # ------------------------------------------------------------ helpers
 
     def _stage_compiled_dir(self, stage: str, args: argparse.Namespace) -> Path:
+        compiled_dir = getattr(args, "compiled_dir", None)
+        if compiled_dir:
+            return Path(compiled_dir)
         return qwen_common.stage_compiled_dir_from_values(
             stage,
             cache_dir=args.cache_dir,

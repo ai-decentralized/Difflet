@@ -55,7 +55,9 @@ class QwenImageServingArtifactPreparer:
         return (
             DiffletStageSpec("prompt_encoder", "prompt_encoder", full_cores, ("text",)),
             DiffletStageSpec("denoiser", "denoiser", full_cores, ("latents",)),
-            DiffletStageSpec("decoder", "decoder", 1, ("image",), final_output=True),
+            DiffletStageSpec(
+                "decoder", "decoder", full_cores, ("image",), final_output=True
+            ),
         )
 
     def compile_plan(self, profile: ServingProfile) -> tuple[DiffletCompileSpec, ...]:
@@ -139,7 +141,7 @@ class QwenImageServingOrchestrator:
             prompt="a small red square",
             height=profile.height,
             width=profile.width,
-            num_inference_steps=1,
+            num_inference_steps=4,
             guidance_scale=1.0,
             seed=0,
         )
@@ -223,7 +225,10 @@ class QwenImageServingOrchestrator:
             text_seq_len=_TEXT_SEQ_LEN,
             enable_transformer=True,
         )
-        self.denoise_app.load(str(qwen_common.stage_compiled_dir("generate", profile)), skip_warmup=True)
+        self.denoise_app.load(
+            str(qwen_common.serving_stage_compiled_dir("generate", profile)),
+            skip_warmup=True,
+        )
 
     def _load_vae_stage(self, profile: ServingProfile) -> None:
         import torch
@@ -237,14 +242,18 @@ class QwenImageServingOrchestrator:
         assert self.model_dir is not None
         vae_path = str(Path(self.model_dir) / "vae")
         self.vae_config = WanVAEDecoderInferenceConfig(
-            neuron_config=NeuronConfig(tp_degree=1, world_size=1, torch_dtype=torch.bfloat16),
+            neuron_config=NeuronConfig(
+                tp_degree=profile.world_size,
+                world_size=profile.world_size,
+                torch_dtype=torch.bfloat16,
+            ),
             load_config=load_diffusers_config(vae_path),
             height=profile.height,
             width=profile.width,
             num_frames=1,
         )
         self.vae_app = NeuronWanVAEDecoderApplication(model_path=vae_path, config=self.vae_config)
-        self.vae_app.load(str(qwen_common.stage_compiled_dir("vae", profile)))
+        self.vae_app.load(str(qwen_common.serving_stage_compiled_dir("vae", profile)))
 
     def _encode_prompt(self, prompt: str) -> dict[str, object]:
         import torch

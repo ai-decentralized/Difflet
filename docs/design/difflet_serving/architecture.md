@@ -442,8 +442,9 @@ P0 uses one model-level serving profile that can be overridden at startup with
 `difflet serve --tp-degree`, `--cp-degree`, `--height`, `--width`, and related
 flags. Stage-specific differences belong in serving stage metadata and
 placement/core calculations. For example, Qwen P0 requires `cp_degree=1`; under
-that supported profile, Qwen text and denoiser stages consume the model-level
-`tp_degree`, while the Qwen decoder is a fixed-core stage owned by the adapter.
+that supported profile, Qwen text, denoiser, and resident decoder stages use
+the model-level `tp_degree`. The staged CLI retains a separate one-core decoder
+artifact because each CLI stage runs in its own process.
 Do not expose separate per-stage TP/CP flags in the first serving milestone; add
 an explicit stage-profile override only if a future model requires genuinely
 different stage parallel configs.

@@ -876,8 +876,9 @@ P0 uses one model-level serving profile. Operators can override that profile at
 startup with `difflet serve --tp-degree`, `--cp-degree`, `--height`, `--width`,
 and related flags. Each stage spec then decides how that profile maps to its
 runtime resources. For example, Qwen P0 text and denoiser stages use
-`tp_degree` because P0 requires `cp_degree=1`, while Qwen VAE/decoder is a fixed
-one-core stage in the adapter. Do not add separate per-stage TP/CP CLI flags in
+`tp_degree` because P0 requires `cp_degree=1`. The resident Qwen VAE/decoder
+also uses that `tp_degree` to keep one NxD world size; the staged CLI retains
+its separate one-core VAE artifact. Do not add separate per-stage TP/CP CLI flags in
 P0. If a future model
 truly requires different parallel configs per stage, add an explicit advanced
 serving metadata field such as `stage_parallel_overrides` rather than overloading
@@ -1596,7 +1597,8 @@ Current docs/code evidence:
   `shape.height`, `shape.width`, and `shape.num_frames` in the hash input.
 - Staged model compiled dirs already encode shape:
   - Qwen DiT: `qwen_image_dit_tp{tp}cp{cp}_h{h}w{w}`
-  - Qwen VAE: `qwen_image_vae_h{h}w{w}`
+  - Qwen staged CLI VAE: `qwen_image_vae_h{h}w{w}`
+  - Qwen resident serving VAE: `qwen_image_vae_tp{tp}_h{h}w{w}`
   - Wan transformer/VAE: `..._h{h}w{w}f{f}`
   - Hunyuan generate: `hunyuan_video_dit_tp{tp}cp{cp}{sp}_h{h}w{w}f{f}`
 - Some encoder stages are shape-independent and can be shared across output
@@ -2520,10 +2522,9 @@ Shared-process Neuron env contract:
 - Stage adapters must validate that each compiled stage artifact can load and
   run under that plan-level env. A stage compiled or loaded only under a
   different process env makes the shared-process plan invalid.
-- In particular, the 1-core Qwen VAE cannot be assumed to work inside a 4-core
-  shared worker just because the CLI runs it in a separate 1-core subprocess;
-  it must be validated as part of the shared worker profile. Startup load plus
-  the serving smoke request is the admission test.
+- The staged CLI's 1-core Qwen VAE does not work inside the TP=4 shared worker.
+  Resident serving therefore uses a separately compiled TP=4 VAE artifact.
+  Startup load plus the serving smoke request remains the admission test.
 
 For the Qwen 4-core MVP shared-process plan, startup should attempt to build
 and load the prompt encoder app, denoiser app, and decoder app in that single
