@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from typing import Any
 
 from difflet.serving.artifact_store import MemoryArtifactStore, R2ArtifactStore
 from difflet.serving.errors import DiffletServingError
@@ -20,7 +21,7 @@ def create_app(
     artifact_store=None,
 ):
     try:
-        from fastapi import FastAPI, Request
+        from fastapi import Body, FastAPI, Request
         from fastapi.responses import JSONResponse
     except ImportError as exc:  # pragma: no cover - dependency guard
         raise RuntimeError("fastapi is required for `difflet serve`") from exc
@@ -76,7 +77,7 @@ def create_app(
         }
 
     @app.post("/v1/chat/completions")
-    async def chat_completions(payload: dict):
+    async def chat_completions(payload: Any = Body(default=None)):
         return await generate_chat_completion(
             payload,
             resolved_model=resolved_model,

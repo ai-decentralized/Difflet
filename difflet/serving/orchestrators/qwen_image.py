@@ -4,17 +4,34 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 from pathlib import Path
+from typing import Any, Protocol
 
 from difflet.common.orchestrators import qwen_image as qwen_common
-from difflet.serving.options import CompilePolicy, DownloadPolicy
+from difflet.serving.artifact_manager import ArtifactPublishTarget
 from difflet.serving.errors import prompt_too_long
+from difflet.serving.artifact_manager import ImmutableArtifactManager
+from difflet.serving.options import CompilePolicy, DownloadPolicy
+from difflet.serving.orchestrators.base import request_uses_teacache, resolve_hf_model_source
 from difflet.serving.types import (
-    DiffletCompileSpec,
+    ArtifactSet,
+    DistributedProcessEnvironment,
     DiffletGenerateOutput,
     DiffletGenerateRequest,
-    DiffletStageSpec,
+    ParallelTopology,
+    QwenGenerateStageInputs,
+    QwenGenerateStageOutputs,
+    QwenTextStageInputs,
+    QwenTextStageOutputs,
+    QwenVaeStageInputs,
+    QwenVaeStageOutputs,
+    ResolvedRuntimeBundle,
+    RuntimeEnvironment,
+    RuntimePlan,
     ServingProfile,
+    StageRuntimeSpec,
+    WorkerAllocationSpec,
     WorkerRequestContext,
 )
 
@@ -29,6 +46,80 @@ _QWEN_TEMPLATE = (
 )
 _QWEN_DROP_IDX = 34
 
+logger = logging.getLogger(__name__)
+
+
+class _QwenStageRunner(Protocol):
+    def execute(
+        self,
+        inputs: object,
+        request: DiffletGenerateRequest,
+        context: WorkerRequestContext,
+    ) -> object:
+        ...
+
+
+class QwenTextStageRunner:
+    def __init__(self, orchestrator: "QwenImageServingOrchestrator") -> None:
+        self.orchestrator = orchestrator
+
+    def execute(
+        self,
+        inputs: QwenTextStageInputs,
+        request: DiffletGenerateRequest,
+        context: WorkerRequestContext,
+    ) -> QwenTextStageOutputs:
+        if not isinstance(inputs, QwenTextStageInputs):
+            raise TypeError("Qwen text stage received invalid input")
+        values = self.orchestrator._encode_prompt(request.prompt)
+        return QwenTextStageOutputs(
+            encoder_hidden_states=values["encoder_hidden_states"],
+            encoder_hidden_states_mask=values["encoder_hidden_states_mask"],
+        )
+
+
+class QwenGenerateStageRunner:
+    def __init__(self, orchestrator: "QwenImageServingOrchestrator") -> None:
+        self.orchestrator = orchestrator
+
+    def execute(
+        self,
+        inputs: QwenGenerateStageInputs,
+        request: DiffletGenerateRequest,
+        context: WorkerRequestContext,
+    ) -> QwenGenerateStageOutputs:
+        if not isinstance(inputs, QwenGenerateStageInputs):
+            raise TypeError("Qwen generate stage received invalid input")
+        packed_latents = self.orchestrator._denoise(
+            {
+                "encoder_hidden_states": inputs.encoder_hidden_states,
+                "encoder_hidden_states_mask": inputs.encoder_hidden_states_mask,
+            },
+            request,
+        )
+        return QwenGenerateStageOutputs(packed_latents=packed_latents)
+
+
+class QwenVaeStageRunner:
+    def __init__(self, orchestrator: "QwenImageServingOrchestrator") -> None:
+        self.orchestrator = orchestrator
+
+    def execute(
+        self,
+        inputs: QwenVaeStageInputs,
+        request: DiffletGenerateRequest,
+        context: WorkerRequestContext,
+    ) -> QwenVaeStageOutputs:
+        if not isinstance(inputs, QwenVaeStageInputs):
+            raise TypeError("Qwen VAE stage received invalid input")
+        return QwenVaeStageOutputs(
+            output=DiffletGenerateOutput(
+                data=self.orchestrator._decode(inputs.packed_latents),
+                mime_type="image/png",
+                output_format="png",
+            )
+        )
+
 
 class QwenImageServingArtifactPreparer:
     model_id = _HF_MODEL_ID
@@ -38,47 +129,65 @@ class QwenImageServingArtifactPreparer:
         self.model_id = model_id
         self.revision = revision
 
-    def resolve_model_path(self, *, download_policy: DownloadPolicy) -> Path:
-        from difflet.pipeline.path_resolver import resolve_model_path
-
+    def prepare_runtime(
+        self,
+        profile: ServingProfile,
+        *,
+        download_policy: DownloadPolicy,
+        compile_policy: CompilePolicy,
+    ) -> ResolvedRuntimeBundle:
         print(f"[difflet serve] resolving Qwen-Image weights for {self.model_id}")
-        path = resolve_model_path(
+        source = resolve_hf_model_source(
             self.model_id,
             revision=self.revision,
-            local_files_only=download_policy == DownloadPolicy.NEVER,
+            download_policy=download_policy,
         )
-        print(f"[difflet serve] Qwen-Image weights ready at {path}")
-        return Path(path)
+        specs = qwen_common.build_compile_plan(source, profile)
+        manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
 
-    def stage_specs(self, profile: ServingProfile) -> tuple[DiffletStageSpec, ...]:
-        full_cores = profile.parallel.world_size
-        return (
-            DiffletStageSpec("prompt_encoder", "prompt_encoder", full_cores, ("text",)),
-            DiffletStageSpec("denoiser", "denoiser", full_cores, ("latents",)),
-            DiffletStageSpec(
-                "decoder", "decoder", full_cores, ("image",), final_output=True
-            ),
+        def _prepare_binding(spec):
+            def _compile_artifact(target: ArtifactPublishTarget) -> None:
+                qwen_common.compile_serving_artifact(source, profile, spec, target)
+
+            def _validate_payload(path: Path) -> None:
+                qwen_common.validate_compiled_artifact(spec, path)
+
+            return manager.prepare(
+                model_type=self.model_type,
+                artifact_id=spec.artifact_id,
+                identity=spec.identity,
+                policy=compile_policy,
+                compile_artifact=_compile_artifact,
+                validate_payload=_validate_payload,
+            )
+
+        bindings = tuple(
+            _prepare_binding(spec)
+            for spec in specs
         )
-
-    def compile_plan(self, profile: ServingProfile) -> tuple[DiffletCompileSpec, ...]:
-        return qwen_common.compile_plan(profile)
-
-    def ensure_artifacts(self, profile: ServingProfile, policy: CompilePolicy) -> None:
-        qwen_common.ensure_artifacts(profile, policy)
-        print("[difflet serve] Qwen-Image AOT artifacts ready")
+        pipeline = _pipeline_definition()
+        runtime_plan = _runtime_plan(profile, pipeline, specs)
+        return ResolvedRuntimeBundle(
+            profile=profile,
+            source=source,
+            pipeline_definition=pipeline,
+            runtime_plan=runtime_plan,
+            compile_specs=specs,
+            artifacts=ArtifactSet(bindings),
+        )
 
 
 class QwenImageServingRequestValidator:
     model_id = _HF_MODEL_ID
     model_type = _MODEL_TYPE
 
-    def __init__(self, model_id: str = _HF_MODEL_ID, revision: str | None = None) -> None:
-        self.model_id = model_id
-        self.revision = revision
+    def __init__(self, runtime: ResolvedRuntimeBundle) -> None:
+        self.model_id = runtime.profile.model_id
+        self.runtime = runtime
         self._tokenizer = None
 
-    def validate(self, request: DiffletGenerateRequest, profile: ServingProfile) -> None:
-        encoded = self._tokenizer_for_profile(profile)(
+    def validate(self, request: DiffletGenerateRequest) -> None:
+        encoded = self._tokenizer_for_runtime()(
             _QWEN_TEMPLATE.format(request.prompt),
             padding=False,
             truncation=False,
@@ -88,16 +197,11 @@ class QwenImageServingRequestValidator:
         if int(encoded.input_ids.shape[1]) > _ENC_SEQ:
             raise prompt_too_long(f"Qwen prompt exceeds encoder bucket {_ENC_SEQ}")
 
-    def _tokenizer_for_profile(self, profile: ServingProfile):
+    def _tokenizer_for_runtime(self):
         if self._tokenizer is None:
-            from difflet.pipeline.path_resolver import resolve_model_path
             from transformers import AutoTokenizer
 
-            model_dir = resolve_model_path(
-                self.model_id,
-                revision=profile.revision,
-                local_files_only=True,
-            )
+            model_dir = self.runtime.source.pinned_model_path
             self._tokenizer = AutoTokenizer.from_pretrained(str(Path(model_dir) / "tokenizer"))
         return self._tokenizer
 
@@ -108,19 +212,38 @@ class QwenImageServingOrchestrator:
 
     def __init__(self, model_id: str = _HF_MODEL_ID) -> None:
         self.model_id = model_id
+        self.active_runtime: ResolvedRuntimeBundle | None = None
         self.active_profile: ServingProfile | None = None
         self.model_dir: str | None = None
-        self.text_app = None
+        self.text_app: Any = None
         self.tokenizer = None
-        self.denoise_app = None
-        self.vae_app = None
-        self.vae_config = None
+        self.denoise_app: Any = None
+        self.vae_app: Any = None
+        self.vae_config: Any = None
+        self.runners: dict[str, _QwenStageRunner] = {
+            "text": QwenTextStageRunner(self),
+            "generate": QwenGenerateStageRunner(self),
+            "vae": QwenVaeStageRunner(self),
+        }
 
-    def load(self, profile: ServingProfile) -> None:
+    def load(self, runtime: ResolvedRuntimeBundle) -> None:
+        profile = runtime.profile
         if profile.parallel.cp_degree != 1:
             raise RuntimeError("Qwen-Image P0 shared-worker serving requires cp_degree=1")
+        self.active_runtime = runtime
         self.active_profile = profile
-        self.model_dir = self._resolve_model_dir()
+        self.model_dir = runtime.source.pinned_model_path
+        manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
+        for binding in runtime.artifacts.bindings:
+            spec = runtime.require_compile_spec(binding.artifact_id)
+
+            def _validate_runtime_payload(path: Path) -> None:
+                qwen_common.validate_compiled_artifact(spec, path)
+
+            manager.validate_binding(
+                binding,
+                validate_payload=_validate_runtime_payload,
+            )
         print("[difflet serve] loading Qwen prompt_encoder stage")
         self._load_text_stage(profile)
         print("[difflet serve] loading Qwen denoiser stage")
@@ -141,7 +264,11 @@ class QwenImageServingOrchestrator:
             prompt="a small red square",
             height=profile.height,
             width=profile.width,
-            num_inference_steps=4,
+            num_inference_steps=(
+                profile.teacache_calibration_data.num_steps
+                if profile.teacache_calibration_data is not None
+                else 4
+            ),
             guidance_scale=1.0,
             seed=0,
         )
@@ -156,13 +283,35 @@ class QwenImageServingOrchestrator:
         request: DiffletGenerateRequest,
         context: WorkerRequestContext,
     ) -> DiffletGenerateOutput:
-        context.cancellation.throw_if_cancelled()
-        text = self._encode_prompt(request.prompt)
-        context.cancellation.throw_if_cancelled()
-        latents = self._denoise(text, request)
-        context.cancellation.throw_if_cancelled()
-        image_bytes = self._decode(latents)
-        return DiffletGenerateOutput(data=image_bytes, mime_type="image/png", output_format="png")
+        if self.active_runtime is None:
+            raise RuntimeError("Qwen runtime is not loaded")
+        value = QwenTextStageInputs()
+        stages = self.active_runtime.pipeline_definition.stages
+        for index, stage in enumerate(stages):
+            if stage.kind != "extracted":
+                raise RuntimeError(f"Qwen stage {stage.stage_id!r} must be extracted")
+            context.cancellation.throw_if_cancelled()
+            context.report_stage(stage.stage_id)
+            try:
+                runner = self.runners[stage.stage_id]
+            except KeyError as exc:
+                raise RuntimeError(f"missing Qwen runner for stage {stage.stage_id!r}") from exc
+            output = runner.execute(value, request, context)
+            context.cancellation.throw_if_cancelled()
+            if stage.final_output:
+                if index != len(stages) - 1 or not isinstance(output, QwenVaeStageOutputs):
+                    raise RuntimeError("Qwen final stage contract is invalid")
+                return output.output
+            if isinstance(output, QwenTextStageOutputs):
+                value = QwenGenerateStageInputs(
+                    output.encoder_hidden_states,
+                    output.encoder_hidden_states_mask,
+                )
+            elif isinstance(output, QwenGenerateStageOutputs):
+                value = QwenVaeStageInputs(output.packed_latents)
+            else:
+                raise RuntimeError(f"unsupported Qwen stage output from {stage.stage_id!r}")
+        raise RuntimeError("Qwen pipeline has no final output stage")
 
     def shutdown(self) -> None:
         self.text_app = None
@@ -171,16 +320,7 @@ class QwenImageServingOrchestrator:
         self.vae_app = None
         self.vae_config = None
         self.active_profile = None
-
-    def _resolve_model_dir(self) -> str:
-        from difflet.pipeline.path_resolver import resolve_model_path
-
-        assert self.active_profile is not None
-        return resolve_model_path(
-            self.model_id,
-            revision=self.active_profile.revision,
-            local_files_only=True,
-        )
+        self.active_runtime = None
 
     def _load_text_stage(self, profile: ServingProfile) -> None:
         import torch
@@ -209,7 +349,8 @@ class QwenImageServingOrchestrator:
             load_config=load_pretrained_config(hf_config=text_cfg),
         )
         self.text_app = NeuronQwen2VLTextForCausalLM(enc_path, config)
-        self.text_app.load(str(qwen_common.stage_compiled_dir("text", profile)))
+        assert self.active_runtime is not None
+        self.text_app.load(str(self.active_runtime.artifacts.require("text").path))
         self.tokenizer = AutoTokenizer.from_pretrained(str(Path(self.model_dir) / "tokenizer"))
 
     def _load_denoiser_stage(self, profile: ServingProfile) -> None:
@@ -224,10 +365,14 @@ class QwenImageServingOrchestrator:
             shape=profile.shape_dict(),
             text_seq_len=_TEXT_SEQ_LEN,
             enable_transformer=True,
+            teacache_fused=profile.teacache_speedup is not None,
+            teacache_speedup=profile.teacache_speedup,
+            teacache_calibration=profile.teacache_calibration_data,
+            teacache_calibration_path=profile.teacache_calibration,
         )
+        assert self.active_runtime is not None
         self.denoise_app.load(
-            str(qwen_common.serving_stage_compiled_dir("generate", profile)),
-            skip_warmup=True,
+            str(self.active_runtime.artifacts.require("generate").path), skip_warmup=True
         )
 
     def _load_vae_stage(self, profile: ServingProfile) -> None:
@@ -253,7 +398,8 @@ class QwenImageServingOrchestrator:
             num_frames=1,
         )
         self.vae_app = NeuronWanVAEDecoderApplication(model_path=vae_path, config=self.vae_config)
-        self.vae_app.load(str(qwen_common.serving_stage_compiled_dir("vae", profile)))
+        assert self.active_runtime is not None
+        self.vae_app.load(str(self.active_runtime.artifacts.require("vae").path))
 
     def _encode_prompt(self, prompt: str) -> dict[str, object]:
         import torch
@@ -309,6 +455,14 @@ class QwenImageServingOrchestrator:
         slope = (sc.max_shift - sc.base_shift) / (sc.max_image_seq_len - sc.base_image_seq_len)
         mu = image_seq_len * slope + (sc.base_shift - slope * sc.base_image_seq_len)
         num_steps = request.num_inference_steps
+        use_teacache = request_uses_teacache(profile, num_steps)
+        if profile.teacache_speedup is not None and not use_teacache:
+            logger.info(
+                "Qwen request uses baseline inference fallback_reason=step_mismatch "
+                "request_steps=%s calibration_steps=%s",
+                num_steps,
+                getattr(profile.teacache_calibration_data, "num_steps", None),
+            )
         sigmas = np.linspace(1.0, 1.0 / num_steps, num_steps).tolist()
         sched.set_timesteps(sigmas=sigmas, mu=mu, device="cpu")
         torch.manual_seed(request.seed)
@@ -318,6 +472,7 @@ class QwenImageServingOrchestrator:
             guidance=guidance,
             timesteps=sched.timesteps,
             num_inference_steps=num_steps,
+            teacache_enabled=use_teacache,
             output_type="latent",
         )
         return out.latents.cpu()
@@ -327,18 +482,36 @@ class QwenImageServingOrchestrator:
 
         if self.vae_app is None or self.vae_config is None:
             raise RuntimeError("Qwen VAE decoder is not loaded")
+        if self.active_profile is None:
+            raise RuntimeError("Qwen serving profile is not loaded")
         b, seq, _ = packed.shape
-        hh = ww = int(seq**0.5)
+        hh, ww = _packed_latent_grid(self.active_profile, seq)
         z = packed.float().view(b, hh, ww, 16, 2, 2)
         z = z.permute(0, 3, 1, 4, 2, 5).reshape(b, 16, hh * 2, ww * 2)
         z = z.unsqueeze(2)
         mean = torch.tensor(self.vae_config.latents_mean).view(1, -1, 1, 1, 1)
         std = torch.tensor(self.vae_config.latents_std).view(1, -1, 1, 1, 1)
-        z = (z * std + mean).to(torch.bfloat16) if len(self.vae_config.latents_mean) else z.to(torch.bfloat16)
+        z = (
+            (z * std + mean).to(torch.bfloat16)
+            if len(self.vae_config.latents_mean)
+            else z.to(torch.bfloat16)
+        )
         img = self.vae_app(z)
         img = (img[0] if isinstance(img, (tuple, list)) else img).float().cpu()
         img = img[:, :, 0]
         return _tensor_to_png_bytes((img[0] * 0.5 + 0.5).clamp(0, 1))
+
+
+def _packed_latent_grid(profile: ServingProfile, seq: int) -> tuple[int, int]:
+    height = int(profile.height) // 16
+    width = int(profile.width) // 16
+    if int(seq) != height * width:
+        raise ValueError(
+            "Qwen packed latent sequence does not match the serving profile: "
+            f"seq={seq}, expected={height * width} for "
+            f"height={profile.height}, width={profile.width}."
+        )
+    return height, width
 
 
 def _tensor_to_png_bytes(tensor) -> bytes:
@@ -348,3 +521,52 @@ def _tensor_to_png_bytes(tensor) -> bytes:
     buf = io.BytesIO()
     image.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def _pipeline_definition():
+    from difflet.common.registry.qwen_image import serving_metadata
+
+    return serving_metadata().pipeline_definition
+
+
+def _runtime_plan(profile: ServingProfile, pipeline, specs) -> RuntimePlan:
+    world_size = profile.world_size
+    distributed = DistributedProcessEnvironment(1, 1, 0, 0)
+    environment = RuntimeEnvironment(
+        available_core_ids=tuple(range(world_size)),
+        num_cores_override=None,
+        virtual_core_size_override=None,
+        logical_nc_config_override=None,
+        inherited_distributed=distributed,
+        child_distributed=distributed,
+    )
+    allocation = WorkerAllocationSpec(
+        allocation_id="qwen-resident",
+        requested_num_cores=world_size,
+        effective_num_cores=world_size,
+        world_size=world_size,
+        requested_virtual_core_size=qwen_common.VIRTUAL_CORE_SIZE,
+        effective_virtual_core_size=qwen_common.VIRTUAL_CORE_SIZE,
+    )
+    by_id = {spec.artifact_id: spec for spec in specs}
+    stages = tuple(
+        StageRuntimeSpec(
+            stage_id=stage.stage_id,
+            allocation_id=allocation.allocation_id,
+            topology=ParallelTopology(
+                tp_degree=world_size if stage.stage_id == "vae" else profile.parallel.tp_degree,
+                cp_degree=1 if stage.stage_id == "vae" else profile.parallel.cp_degree,
+                world_size=world_size,
+            ),
+            artifact_id=by_id[stage.stage_id].artifact_id,
+        )
+        for stage in pipeline.stages
+    )
+    profile_identity = "-".join(spec.identity.digest for spec in specs)
+    return RuntimePlan(
+        mode="resident",
+        profile_identity=profile_identity,
+        environment=environment,
+        allocations=(allocation,),
+        stages=stages,
+    )

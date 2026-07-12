@@ -60,5 +60,9 @@ def engine_unavailable(message: str) -> DiffletServingError:
     return DiffletServingError(503, "engine_unavailable", message, error_type="server_error")
 
 
+def internal_error(message: str = "Internal model execution error") -> DiffletServingError:
+    return DiffletServingError(500, "internal_error", message, error_type="server_error")
+
+
 def request_cancelled(message: str) -> DiffletServingError:
     return DiffletServingError(499, "request_cancelled", message, error_type="server_error")

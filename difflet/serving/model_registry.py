@@ -54,9 +54,16 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         tp_degree=options.tp_degree,
         cp_degree=options.cp_degree,
         cp_mode=options.cp_mode,
+        cfg_parallel=options.cfg_parallel,
+        sp_enabled=options.sp_enabled,
         height=options.height,
         width=options.width,
         num_frames=options.num_frames,
+        host_vae=options.host_vae,
+        teacache_cadence=options.teacache_cadence,
+        teacache_online_delta=options.teacache_online_delta,
+        teacache_speedup=options.teacache_speedup,
+        teacache_calibration=options.teacache_calibration,
     )
     return ResolvedServingModel(
         model_id=options.model_id,
@@ -93,8 +100,8 @@ def load_factory(path: str) -> Factory:
     return factory
 
 
-def load_preflight_factory(metadata: ServingModelMetadata) -> Factory:
-    return load_factory(metadata.preflight_factory)
+def load_artifact_preparer_factory(metadata: ServingModelMetadata) -> Factory:
+    return load_factory(metadata.artifact_preparer_factory)
 
 
 def load_orchestrator_factory(metadata: ServingModelMetadata) -> Factory:

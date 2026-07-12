@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
 from difflet.serving.errors import DiffletServingError
+from difflet.serving.errors import internal_error
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -148,12 +152,8 @@ class R2ArtifactStore:
         try:
             await asyncio.to_thread(_put)
         except Exception as exc:
-            raise DiffletServingError(
-                502,
-                "artifact_upload_failed",
-                f"artifact upload failed: {exc}",
-                error_type="server_error",
-            ) from exc
+            logger.exception("R2 artifact upload failed")
+            raise internal_error("Internal artifact storage error") from exc
         return ArtifactRef(file_id=file_id, uri=f"s3://{self.bucket}/{key}", mime_type=mime_type)
 
     async def get_url(self, ref: ArtifactRef, *, ttl_seconds: int) -> str:
@@ -172,12 +172,8 @@ class R2ArtifactStore:
         try:
             return await asyncio.to_thread(_sign)
         except Exception as exc:
-            raise DiffletServingError(
-                502,
-                "artifact_upload_failed",
-                f"artifact presign failed: {exc}",
-                error_type="server_error",
-            ) from exc
+            logger.exception("R2 artifact presign failed")
+            raise internal_error("Internal artifact storage error") from exc
 
 
 async def put_with_timeout(

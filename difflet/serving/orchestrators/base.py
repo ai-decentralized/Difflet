@@ -2,48 +2,105 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, Sequence
 
 from difflet.serving.options import CompilePolicy, DownloadPolicy
 from difflet.serving.types import (
-    DiffletCompileSpec,
     DiffletGenerateOutput,
     DiffletGenerateRequest,
-    DiffletStageSpec,
+    ResolvedModelSource,
+    ResolvedRuntimeBundle,
     ServingProfile,
     WorkerRequestContext,
 )
+
+
+def resolve_hf_model_source(
+    model_id: str,
+    *,
+    revision: str | None,
+    download_policy: DownloadPolicy,
+    allow_patterns: Sequence[str] | None = None,
+) -> ResolvedModelSource:
+    """Resolve one commit-addressed HF snapshot for resident serving."""
+
+    if Path(model_id).expanduser().exists():
+        raise ValueError("P0 resident serving requires a Hugging Face model ID")
+
+    from difflet.pipeline.path_resolver import resolve_model_path
+
+    raw_path = Path(
+        resolve_model_path(
+            model_id,
+            revision=revision,
+            local_files_only=download_policy == DownloadPolicy.NEVER,
+            allow_patterns=allow_patterns,
+        )
+    ).expanduser()
+    parts = raw_path.parts
+    try:
+        snapshot_index = len(parts) - 1 - tuple(reversed(parts)).index("snapshots")
+        resolved_source_id = parts[snapshot_index + 1]
+    except (ValueError, IndexError) as exc:
+        raise ValueError(f"resolved Hugging Face path is not commit-addressed: {raw_path}") from exc
+    if not re.fullmatch(r"[0-9a-f]{40,64}", resolved_source_id):
+        raise ValueError(
+            f"resolved Hugging Face snapshot has invalid commit ID: {resolved_source_id!r}"
+        )
+    pinned_path = raw_path.resolve()
+    if not pinned_path.is_dir():
+        raise ValueError(f"resolved Hugging Face snapshot does not exist: {pinned_path}")
+    return ResolvedModelSource(
+        source_kind="hf_snapshot",
+        model_id=model_id,
+        requested_revision=revision,
+        pinned_model_path=str(pinned_path),
+        resolved_source_id=resolved_source_id,
+    )
 
 
 class ServingArtifactPreparer(Protocol):
     model_id: str
     model_type: str
 
-    def resolve_model_path(self, *, download_policy: DownloadPolicy) -> Path: ...
-
-    def stage_specs(self, profile: ServingProfile) -> tuple[DiffletStageSpec, ...]: ...
-
-    def compile_plan(self, profile: ServingProfile) -> tuple[DiffletCompileSpec, ...]: ...
-
-    def ensure_artifacts(self, profile: ServingProfile, policy: CompilePolicy) -> None: ...
+    def prepare_runtime(
+        self,
+        profile: ServingProfile,
+        *,
+        download_policy: DownloadPolicy,
+        compile_policy: CompilePolicy,
+    ) -> ResolvedRuntimeBundle: ...
 
 
 class ServingRequestValidator(Protocol):
-    def validate(self, request: DiffletGenerateRequest, profile: ServingProfile) -> None: ...
+    def validate(self, request: DiffletGenerateRequest) -> None: ...
 
 
 class NoopServingRequestValidator:
-    def validate(self, request: DiffletGenerateRequest, profile: ServingProfile) -> None:
+    def __init__(self, runtime: ResolvedRuntimeBundle) -> None:
+        self.runtime = runtime
+
+    def validate(self, request: DiffletGenerateRequest) -> None:
         return None
+
+
+def request_uses_teacache(profile: ServingProfile, num_inference_steps: int) -> bool:
+    calibration = profile.teacache_calibration_data
+    return bool(
+        profile.teacache_speedup is not None
+        and calibration is not None
+        and int(num_inference_steps) == int(calibration.num_steps)
+    )
 
 
 class ServingModelOrchestrator(Protocol):
     model_id: str
     model_type: str
-    active_profile: ServingProfile | None
+    active_runtime: ResolvedRuntimeBundle | None
 
-    def load(self, profile: ServingProfile) -> None: ...
+    def load(self, runtime: ResolvedRuntimeBundle) -> None: ...
 
     def smoke(self) -> None: ...
 

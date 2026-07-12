@@ -8,17 +8,27 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 import multiprocessing as mp
+import multiprocessing.process as mp_process
+import os
 import queue
+import threading
 import time
-import traceback
 from contextlib import suppress
 from dataclasses import dataclass
+from multiprocessing.connection import Connection
 from typing import Any
 
-from difflet.serving.errors import DiffletServingError, request_cancelled
-from difflet.serving.types import DiffletGenerateOutput, DiffletGenerateRequest, ServingProfile
+from difflet.serving.errors import DiffletServingError, internal_error, request_cancelled
+from difflet.serving.types import (
+    DiffletGenerateOutput,
+    DiffletGenerateRequest,
+    ResolvedRuntimeBundle,
+)
 from difflet.serving.types import CancellationSignal, WorkerRequestContext
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -29,6 +39,11 @@ class ResidentWorkerConfig:
     request_timeout: float = 300.0
     worker_cancel_timeout: float = 10.0
     worker_restart_timeout: float = 900.0
+    worker_heartbeat_interval: float = 30.0
+
+    def __post_init__(self) -> None:
+        if self.worker_heartbeat_interval <= 0:
+            raise ValueError("worker_heartbeat_interval must be greater than 0")
 
 
 class ResidentWorkerServingEngine:
@@ -37,19 +52,21 @@ class ResidentWorkerServingEngine:
     def __init__(
         self,
         *,
-        profile: ServingProfile,
+        runtime: ResolvedRuntimeBundle,
         orchestrator_factory: str,
         config: ResidentWorkerConfig | None = None,
     ) -> None:
-        self.profile = profile
+        self.runtime = runtime
+        self.profile = runtime.profile
         self.orchestrator_factory = orchestrator_factory
         self.config = config or ResidentWorkerConfig()
         if self.config.max_running_requests != 1:
             raise ValueError("P0 ResidentWorkerServingEngine requires max_running_requests=1")
         self._worker = _ResidentWorkerProcess(
-            profile=profile,
+            runtime=runtime,
             orchestrator_factory=orchestrator_factory,
             startup_timeout=self.config.worker_restart_timeout,
+            heartbeat_interval=self.config.worker_heartbeat_interval,
         )
         self._run_lock = asyncio.Lock()
         self._admission_lock = asyncio.Lock()
@@ -58,6 +75,7 @@ class ResidentWorkerServingEngine:
         self._recovering = False
         self._unrecoverable = False
         self._closed = False
+        self._draining_event = asyncio.Event()
 
     async def start(self) -> None:
         await asyncio.to_thread(self._worker.start)
@@ -66,6 +84,8 @@ class ResidentWorkerServingEngine:
     async def shutdown(self) -> None:
         self._draining = True
         self._closed = True
+        self._draining_event.set()
+        await asyncio.sleep(0)
         await asyncio.to_thread(self._worker.shutdown)
 
     @property
@@ -84,9 +104,13 @@ class ResidentWorkerServingEngine:
         if self._draining:
             raise DiffletServingError(503, "engine_draining", "engine is draining", "server_error")
         if self._recovering:
-            raise DiffletServingError(503, "engine_recovering", "worker is recovering", "server_error")
+            raise DiffletServingError(
+                503, "engine_recovering", "worker is recovering", "server_error"
+            )
         if not self._worker.is_ready():
-            raise DiffletServingError(503, "engine_unavailable", "worker is not ready", "server_error")
+            raise DiffletServingError(
+                503, "engine_unavailable", "worker is not ready", "server_error"
+            )
 
         received_at = time.monotonic()
         deadline = received_at + float(self.config.request_timeout)
@@ -98,10 +122,7 @@ class ResidentWorkerServingEngine:
                     float(self.config.queue_timeout),
                     max(deadline - time.monotonic(), 0.0),
                 )
-                await asyncio.wait_for(
-                    self._run_lock.acquire(),
-                    timeout=wait_timeout,
-                )
+                await self._acquire_run_lock_or_drain(wait_timeout)
             except asyncio.TimeoutError as exc:
                 if time.monotonic() >= deadline:
                     raise DiffletServingError(
@@ -119,29 +140,51 @@ class ResidentWorkerServingEngine:
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise DiffletServingError(504, "request_timeout", "request timed out", "server_error")
+                raise DiffletServingError(
+                    504, "request_timeout", "request timed out", "server_error"
+                )
 
             run_task = asyncio.create_task(
                 self._run_one(request, deadline_monotonic=deadline),
                 name=f"difflet-generate-{request.request_id}",
             )
+            draining_task = asyncio.create_task(
+                self._draining_event.wait(),
+                name=f"difflet-draining-{request.request_id}",
+            )
             release_lock = True
             try:
-                return await asyncio.wait_for(asyncio.shield(run_task), timeout=remaining)
+                done, _ = await asyncio.wait(
+                    (run_task, draining_task),
+                    timeout=remaining,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if run_task in done:
+                    return run_task.result()
+                if draining_task in done:
+                    run_task.cancel()
+                    with suppress(BaseException):
+                        await run_task
+                    raise _engine_draining()
+                raise asyncio.TimeoutError
             except asyncio.CancelledError:
-                release_lock = False
-                self._start_inflight_recovery(run_task, reason="caller_cancelled")
+                release_lock = not self._start_inflight_recovery(
+                    run_task, reason="caller_cancelled"
+                )
                 raise
             except asyncio.TimeoutError as exc:
-                release_lock = False
-                self._start_inflight_recovery(run_task, reason="timeout")
-                raise DiffletServingError(504, "request_timeout", "request timed out", "server_error") from exc
+                release_lock = not self._start_inflight_recovery(run_task, reason="timeout")
+                raise DiffletServingError(
+                    504, "request_timeout", "request timed out", "server_error"
+                ) from exc
             except DiffletServingError as exc:
                 if _requires_worker_recovery(exc):
-                    release_lock = False
-                    self._start_inflight_recovery(run_task, reason=exc.code)
+                    release_lock = not self._start_inflight_recovery(run_task, reason=exc.code)
                 raise
             finally:
+                draining_task.cancel()
+                with suppress(BaseException):
+                    await draining_task
                 if release_lock and lock_acquired:
                     self._run_lock.release()
         finally:
@@ -166,21 +209,59 @@ class ResidentWorkerServingEngine:
                 raise DiffletServingError(429, "queue_full", "resident worker queue is full")
             self._pending += 1
 
+    async def _acquire_run_lock_or_drain(self, timeout: float) -> None:
+        lock_task = asyncio.create_task(self._run_lock.acquire())
+        draining_task = asyncio.create_task(self._draining_event.wait())
+        lock_transferred = False
+        try:
+            done, _ = await asyncio.wait(
+                (lock_task, draining_task),
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if draining_task in done:
+                raise _engine_draining()
+            if lock_task in done:
+                lock_transferred = True
+                return
+            raise asyncio.TimeoutError
+        finally:
+            if not lock_transferred:
+                if not lock_task.done():
+                    lock_task.cancel()
+                    with suppress(BaseException):
+                        await lock_task
+                elif (
+                    not lock_task.cancelled()
+                    and lock_task.exception() is None
+                    and lock_task.result()
+                    and self._run_lock.locked()
+                ):
+                    self._run_lock.release()
+            draining_task.cancel()
+            with suppress(BaseException):
+                await draining_task
+
     async def _release_admission(self) -> None:
         async with self._admission_lock:
             if self._pending > 0:
                 self._pending -= 1
 
-    def _start_inflight_recovery(self, run_task: asyncio.Task, *, reason: str) -> None:
+    def _start_inflight_recovery(self, run_task: asyncio.Task, *, reason: str) -> bool:
+        if self._closed or self._draining:
+            return False
         self._recovering = True
         asyncio.create_task(
             self._recover_worker(run_task, reason=reason),
             name=f"difflet-worker-recovery-{reason}",
         )
+        return True
 
     async def _recover_worker(self, run_task: asyncio.Task, *, reason: str) -> None:
         clean_cancel = False
         try:
+            if self._closed or self._draining:
+                return
             if reason in {"caller_cancelled", "timeout", "request_timeout"}:
                 self._worker.cancel_inflight()
                 clean_cancel = await self._wait_for_terminal_state(run_task)
@@ -188,6 +269,8 @@ class ResidentWorkerServingEngine:
                 await asyncio.to_thread(self._worker.terminate)
                 with suppress(BaseException):
                     await asyncio.wait_for(run_task, timeout=1.0)
+                if self._closed or self._draining:
+                    return
                 await asyncio.wait_for(
                     asyncio.to_thread(self._worker.start),
                     timeout=float(self.config.worker_restart_timeout),
@@ -227,22 +310,32 @@ def _requires_worker_recovery(exc: DiffletServingError) -> bool:
     return exc.code == "request_timeout" or exc.status_code >= 500
 
 
+def _engine_draining() -> DiffletServingError:
+    return DiffletServingError(503, "engine_draining", "engine is draining", "server_error")
+
+
 class _ResidentWorkerProcess:
     def __init__(
         self,
         *,
-        profile: ServingProfile,
+        runtime: ResolvedRuntimeBundle,
         orchestrator_factory: str,
         startup_timeout: float,
+        heartbeat_interval: float,
     ) -> None:
-        self.profile = profile
+        self.runtime = runtime
         self.orchestrator_factory = orchestrator_factory
         self.startup_timeout = float(startup_timeout)
+        self.heartbeat_interval = float(heartbeat_interval)
         self._ctx = mp.get_context("spawn")
         self._cmd_q: mp.Queue | None = None
         self._cancel_q: mp.Queue | None = None
         self._reply_q: mp.Queue | None = None
-        self._process: mp.Process | None = None
+        self._status_recv: Connection | None = None
+        self._status_send: Connection | None = None
+        self._process: mp_process.BaseProcess | None = None
+        self._status_stop: threading.Event | None = None
+        self._status_thread: threading.Thread | None = None
         self._inflight_request_id: str | None = None
         self.ready = False
         self.healthy = False
@@ -252,24 +345,34 @@ class _ResidentWorkerProcess:
         self._cmd_q = self._ctx.Queue()
         self._cancel_q = self._ctx.Queue()
         self._reply_q = self._ctx.Queue()
+        self._status_recv, self._status_send = self._ctx.Pipe(duplex=False)
+        self._start_status_consumer()
         self._process = self._ctx.Process(
             target=_worker_main,
             args=(
                 self.orchestrator_factory,
-                self.profile,
+                self.runtime,
                 self._cmd_q,
                 self._cancel_q,
                 self._reply_q,
+                self._status_send,
+                self.heartbeat_interval,
             ),
             daemon=True,
         )
-        self._process.start()
-        reply = self._get_reply(timeout=self.startup_timeout)
-        if reply.get("type") != "ready":
-            self.mark_error()
-            raise _error_from_reply(reply)
-        self.ready = True
-        self.healthy = True
+        try:
+            self._process.start()
+            self._status_send.close()
+            self._status_send = None
+            reply = self._get_reply(timeout=self.startup_timeout)
+            if reply.get("type") != "ready":
+                self.mark_error()
+                raise _error_from_reply(reply)
+            self.ready = True
+            self.healthy = True
+        except BaseException:
+            self.terminate()
+            raise
 
     def run_generation(
         self,
@@ -280,7 +383,9 @@ class _ResidentWorkerProcess:
         reply_q = self._reply_q
         process = self._process
         if cmd_q is None or reply_q is None or process is None:
-            raise DiffletServingError(503, "engine_unavailable", "worker is not started", "server_error")
+            raise DiffletServingError(
+                503, "engine_unavailable", "worker is not started", "server_error"
+            )
         self._inflight_request_id = request.request_id
         cmd_q.put(
             {
@@ -293,7 +398,9 @@ class _ResidentWorkerProcess:
             timeout = max(min(deadline_monotonic - time.monotonic(), 0.1), 0.01)
             if not process.is_alive():
                 self.mark_error()
-                raise DiffletServingError(503, "engine_unavailable", "worker exited", "server_error")
+                raise DiffletServingError(
+                    503, "engine_unavailable", "worker exited", "server_error"
+                )
             try:
                 reply = reply_q.get(timeout=timeout)
             except queue.Empty:
@@ -323,6 +430,9 @@ class _ResidentWorkerProcess:
         if self._process is not None and self._process.is_alive():
             self._process.terminate()
             self._process.join(timeout=10)
+        self._process = None
+        self._stop_status_consumer()
+        self._close_queues()
         self._clear_inflight()
         self.ready = False
         self.healthy = False
@@ -360,25 +470,129 @@ class _ResidentWorkerProcess:
         if self._process is not None and self.ready and not self._process.is_alive():
             self.mark_error()
 
+    def _start_status_consumer(self) -> None:
+        self._status_stop = threading.Event()
+        self._status_thread = threading.Thread(
+            target=self._consume_status,
+            name="difflet-worker-status",
+            daemon=True,
+        )
+        self._status_thread.start()
+
+    def _stop_status_consumer(self) -> None:
+        if self._status_stop is not None:
+            self._status_stop.set()
+        if self._status_thread is not None:
+            self._status_thread.join(timeout=1.0)
+        if self._status_recv is not None:
+            self._status_recv.close()
+            self._status_recv = None
+        if self._status_send is not None:
+            self._status_send.close()
+            self._status_send = None
+        self._status_stop = None
+        self._status_thread = None
+
+    def _close_queues(self) -> None:
+        for name in ("_cmd_q", "_cancel_q", "_reply_q"):
+            channel = getattr(self, name)
+            if channel is None:
+                continue
+            with suppress(Exception):
+                channel.close()
+            with suppress(Exception):
+                channel.join_thread()
+            setattr(self, name, None)
+
+    def _consume_status(self) -> None:
+        status_recv = self._status_recv
+        stop = self._status_stop
+        if status_recv is None or stop is None:
+            return
+        last_heartbeat = time.monotonic()
+        last_event: dict[str, Any] | None = None
+        stale_reported = False
+        while not stop.is_set():
+            try:
+                if not status_recv.poll(0.2):
+                    raise TimeoutError
+                event = status_recv.recv()
+            except TimeoutError:
+                if (
+                    not stale_reported
+                    and time.monotonic() - last_heartbeat >= 3 * self.heartbeat_interval
+                ):
+                    logger.warning(
+                        "worker heartbeat stale last_state=%s request_id=%s stage=%s",
+                        (last_event or {}).get("state"),
+                        (last_event or {}).get("request_id"),
+                        (last_event or {}).get("stage"),
+                        extra={"worker_heartbeat_stale": last_event or {}},
+                    )
+                    stale_reported = True
+                continue
+            except (EOFError, OSError):
+                return
+            if event.get("type") != "worker_heartbeat":
+                continue
+            last_heartbeat = time.monotonic()
+            last_event = event
+            stale_reported = False
+            logger.info(
+                "worker heartbeat state=%s request_id=%s stage=%s",
+                event.get("state"),
+                event.get("request_id"),
+                event.get("stage"),
+                extra={"worker_heartbeat": event},
+            )
+
 
 def _worker_main(
     orchestrator_factory: str,
-    profile: ServingProfile,
+    runtime: ResolvedRuntimeBundle,
     cmd_q: mp.Queue,
     cancel_q: mp.Queue,
     reply_q: mp.Queue,
+    status_conn: Connection,
+    heartbeat_interval: float,
 ) -> None:
     orchestrator = None
     try:
+        _apply_worker_runtime_environment(runtime)
+    except BaseException as exc:
+        reply_q.put(_reply_from_error(exc))
+        status_conn.close()
+        return
+    if heartbeat_interval <= 0:
+        reply_q.put(_reply_from_error(ValueError("heartbeat_interval must be greater than 0")))
+        status_conn.close()
+        return
+    heartbeat_stop = threading.Event()
+    heartbeat_state = _WorkerHeartbeatState(
+        model_id=runtime.profile.model_id,
+        profile_identity=runtime.runtime_plan.profile_identity,
+    )
+    heartbeat_thread = threading.Thread(
+        target=_heartbeat_loop,
+        args=(status_conn, heartbeat_state, heartbeat_stop, heartbeat_interval),
+        name="difflet-worker-heartbeat",
+        daemon=True,
+    )
+    heartbeat_thread.start()
+    try:
         factory = _load_factory(orchestrator_factory)
-        orchestrator = factory(model_id=profile.model_id)
-        orchestrator.load(profile)
+        orchestrator = factory(model_id=runtime.profile.model_id)
+        heartbeat_state.set(state="loading")
+        orchestrator.load(runtime)
+        heartbeat_state.set(state="smoke")
         orchestrator.smoke()
+        heartbeat_state.set(state="ready")
         reply_q.put({"type": "ready"})
         while True:
             cmd = cmd_q.get()
             cmd_type = cmd.get("type")
             if cmd_type == "shutdown":
+                heartbeat_state.set(state="draining")
                 if orchestrator is not None:
                     orchestrator.shutdown()
                 reply_q.put({"type": "shutdown_ok"})
@@ -386,11 +600,15 @@ def _worker_main(
             if cmd_type != "generate":
                 continue
             request: DiffletGenerateRequest = cmd["request"]
+            heartbeat_state.set(state="busy", request_id=request.request_id)
             context = WorkerRequestContext.with_timeout(
                 request.request_id,
                 max(float(cmd["deadline"]) - time.monotonic(), 0.0),
                 cancellation=CancellationSignal(
                     external_event=_QueueCancellationSource(cancel_q, request.request_id)
+                ),
+                stage_callback=lambda stage_id: heartbeat_state.set(
+                    state="busy", request_id=request.request_id, stage=stage_id
                 ),
             )
             try:
@@ -406,8 +624,137 @@ def _worker_main(
                 reply_q.put({"type": "cancel_ack", "request_id": request.request_id})
             except BaseException as exc:
                 reply_q.put(_reply_from_error(exc, request_id=request.request_id))
+            finally:
+                heartbeat_state.set(state="ready")
     except BaseException as exc:
+        heartbeat_state.set(state="error")
         reply_q.put(_reply_from_error(exc))
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=1.0)
+        status_conn.close()
+
+
+def _apply_worker_runtime_environment(runtime: ResolvedRuntimeBundle) -> None:
+    plan = runtime.runtime_plan
+    if plan.mode != "resident":
+        raise ValueError(f"resident worker cannot apply {plan.mode!r} runtime plan")
+    if len(plan.allocations) != 1:
+        raise ValueError(
+            f"P0 resident worker requires exactly one allocation; found {len(plan.allocations)}"
+        )
+
+    allocation = plan.allocations[0]
+    num_cores = int(allocation.effective_num_cores)
+    if num_cores <= 0:
+        raise ValueError("resident worker effective_num_cores must be positive")
+    if int(allocation.world_size) <= 0 or int(allocation.world_size) > num_cores:
+        raise ValueError("resident worker allocation world_size must fit effective_num_cores")
+
+    available_core_ids = tuple(int(core_id) for core_id in plan.environment.available_core_ids)
+    if any(core_id < 0 for core_id in available_core_ids):
+        raise ValueError("resident worker available_core_ids must be nonnegative")
+    if len(available_core_ids) != len(set(available_core_ids)):
+        raise ValueError("resident worker available_core_ids must be unique")
+    if len(available_core_ids) < num_cores:
+        raise ValueError(
+            "resident worker allocation exceeds available cores: "
+            f"requires {num_cores}, has {len(available_core_ids)}"
+        )
+    visible_core_ids = available_core_ids[:num_cores]
+    virtual_core_size = _validated_optional_positive_int(
+        "NEURON_RT_VIRTUAL_CORE_SIZE",
+        allocation.effective_virtual_core_size,
+    )
+    logical_nc_config = _validated_optional_positive_int(
+        "NEURON_LOGICAL_NC_CONFIG",
+        allocation.effective_logical_nc_config,
+    )
+
+    child = plan.environment.child_distributed
+    if (child.world_size, child.local_world_size, child.rank, child.local_rank) != (1, 1, 0, 0):
+        raise ValueError("P0 resident worker child distributed environment must be 1/1/0/0")
+
+    os.environ["NEURON_RT_VISIBLE_CORES"] = ",".join(str(core_id) for core_id in visible_core_ids)
+    os.environ["NEURON_RT_NUM_CORES"] = str(num_cores)
+    _set_or_clear_int_environment(
+        "NEURON_RT_VIRTUAL_CORE_SIZE",
+        virtual_core_size,
+    )
+    _set_or_clear_int_environment(
+        "NEURON_LOGICAL_NC_CONFIG",
+        logical_nc_config,
+    )
+    os.environ["WORLD_SIZE"] = str(child.world_size)
+    os.environ["LOCAL_WORLD_SIZE"] = str(child.local_world_size)
+    os.environ["RANK"] = str(child.rank)
+    os.environ["LOCAL_RANK"] = str(child.local_rank)
+
+
+def _validated_optional_positive_int(name: str, value: int | None) -> int | None:
+    if value is None:
+        return None
+    value = int(value)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive when configured")
+    return value
+
+
+def _set_or_clear_int_environment(name: str, value: int | None) -> None:
+    if value is None:
+        os.environ.pop(name, None)
+        return
+    os.environ[name] = str(value)
+
+
+class _WorkerHeartbeatState:
+    def __init__(self, *, model_id: str, profile_identity: str) -> None:
+        self._lock = threading.Lock()
+        self._model_id = model_id
+        self._profile_identity = profile_identity
+        self._state = "starting"
+        self._request_id: str | None = None
+        self._stage: str | None = None
+
+    def set(
+        self,
+        *,
+        state: str,
+        request_id: str | None = None,
+        stage: str | None = None,
+    ) -> None:
+        with self._lock:
+            self._state = state
+            self._request_id = request_id
+            self._stage = stage
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "type": "worker_heartbeat",
+                "timestamp": time.time(),
+                "pid": os.getpid(),
+                "model_id": self._model_id,
+                "profile_identity": self._profile_identity,
+                "state": self._state,
+                "request_id": self._request_id,
+                "stage": self._stage,
+            }
+
+
+def _heartbeat_loop(
+    status_conn: Connection,
+    state: _WorkerHeartbeatState,
+    stop: threading.Event,
+    interval: float,
+) -> None:
+    os.set_blocking(status_conn.fileno(), False)
+    while not stop.is_set():
+        try:
+            status_conn.send(state.snapshot())
+        except (BlockingIOError, BrokenPipeError, OSError):
+            pass
+        stop.wait(interval)
 
 
 def _load_factory(path: str):
@@ -438,7 +785,7 @@ class _QueueCancellationSource:
 
 
 def _reply_from_error(exc: BaseException, *, request_id: str | None = None) -> dict[str, Any]:
-    if isinstance(exc, DiffletServingError):
+    if isinstance(exc, DiffletServingError) and exc.code in _PUBLIC_WORKER_ERROR_CODES:
         return {
             "type": "error",
             "request_id": request_id,
@@ -447,21 +794,45 @@ def _reply_from_error(exc: BaseException, *, request_id: str | None = None) -> d
             "message": exc.message,
             "error_type": exc.error_type,
         }
+    logger.error(
+        "worker operation failed request_id=%s",
+        request_id,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+    public = internal_error()
     return {
         "type": "error",
         "request_id": request_id,
-        "status_code": 503,
-        "code": "engine_unavailable",
-        "message": f"{type(exc).__name__}: {exc}",
-        "error_type": "server_error",
-        "traceback": traceback.format_exc(),
+        "status_code": public.status_code,
+        "code": public.code,
+        "message": public.message,
+        "error_type": public.error_type,
     }
 
 
 def _error_from_reply(reply: dict[str, Any]) -> DiffletServingError:
+    code = str(reply.get("code", "internal_error"))
+    if code == "internal_error":
+        return internal_error()
+    if code not in _PUBLIC_WORKER_ERROR_CODES:
+        return internal_error()
     return DiffletServingError(
-        int(reply.get("status_code", 503)),
-        str(reply.get("code", "engine_unavailable")),
-        str(reply.get("message", "worker error")),
+        int(reply.get("status_code", 500)),
+        code,
+        str(reply.get("message", "Request failed")),
         str(reply.get("error_type", "server_error")),
     )
+
+
+_PUBLIC_WORKER_ERROR_CODES = frozenset(
+    {
+        "feature_not_supported",
+        "invalid_extra_body",
+        "invalid_prompt",
+        "profile_mismatch",
+        "prompt_too_long",
+        "request_cancelled",
+        "unsupported_input_modality",
+        "unsupported_modality",
+    }
+)

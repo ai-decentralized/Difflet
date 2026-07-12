@@ -86,14 +86,16 @@ _ALLOWED_EXTRA_FIELDS = {
 
 
 def normalize_chat_request(
-    body: dict[str, Any],
+    body: Any,
     *,
     resolved_model: ResolvedServingModel,
 ) -> DiffletGenerateRequest:
     _validate_top_level(body)
     requested_model = body.get("model")
     if requested_model is not None and requested_model != resolved_model.model_id:
-        raise DiffletServingError(400, "model_not_served", "request model does not match server model")
+        raise DiffletServingError(
+            400, "model_not_served", "request model does not match server model"
+        )
     _validate_modalities(body.get("modalities"), resolved_model.metadata.output_modality)
 
     prompt = _extract_prompt(body.get("messages"))
@@ -132,8 +134,8 @@ def normalize_chat_request(
     seed = _int_field(extra.get("seed", 42), "seed")
     if seed < 0 or seed > 2**63 - 1:
         raise invalid_extra_body("seed must satisfy 0 <= seed <= 2**63 - 1")
-    if steps <= 0:
-        raise invalid_extra_body("num_inference_steps must be positive")
+    if steps < 1 or steps > 50:
+        raise invalid_extra_body("num_inference_steps must satisfy 1 <= value <= 50")
     if guidance < 0:
         raise invalid_extra_body("guidance_scale must be non-negative")
 
@@ -151,7 +153,7 @@ def normalize_chat_request(
 
 
 async def generate_chat_completion(
-    body: dict[str, Any],
+    body: Any,
     *,
     resolved_model: ResolvedServingModel,
     engine,
@@ -162,7 +164,7 @@ async def generate_chat_completion(
 ) -> dict[str, Any]:
     request = normalize_chat_request(body, resolved_model=resolved_model)
     if request_validator is not None:
-        request_validator.validate(request, resolved_model.profile)
+        request_validator.validate(request)
     output: DiffletGenerateOutput = await engine.generate(request)
     ref = await put_with_timeout(
         artifact_store,
@@ -203,7 +205,7 @@ async def generate_chat_completion(
     }
 
 
-def _validate_top_level(body: dict[str, Any]) -> None:
+def _validate_top_level(body: Any) -> None:
     if not isinstance(body, dict):
         raise DiffletServingError(400, "invalid_request", "request body must be an object")
     for field in _TOP_LEVEL_UNSUPPORTED_FEATURES:
