@@ -2,7 +2,7 @@
 
 **A focused inference engine for diffusion transformers (DiTs) on AWS Trainium.**
 
-[Installation](#installation) · [Quick start](#quick-start) · [CLI reference](#cli-reference) · [Verified matrix](#verified-parallelism-matrix) · [Developer guide](DEVELOPER.md)
+[Installation](#installation) · [Quick start](#quick-start) · [Serving](#serving) · [CLI reference](#cli-reference) · [Verified matrix](#verified-parallelism-matrix) · [Developer guide](DEVELOPER.md)
 
 ## About
 
@@ -11,10 +11,11 @@ interface. It handles the full lifecycle — model download, ahead-of-time (AOT)
 on-disk artifact caching, and SPMD multi-core execution — so you can go from a Hugging Face
 model id to a generated image or video in one command.
 
-Two entry points expose the same engine:
+Three entry points expose the same engine:
 
 - **`difflet` CLI** — `download → compile → generate`, or `difflet run` to do all three at once.
 - **`DiffletPipeline`** — a Python API mirroring `diffusers` for use inside your own scripts.
+- **`difflet serve`** — a resident, OpenAI-compatible HTTP server for Flux and Qwen-Image.
 
 Core capabilities:
 
@@ -166,6 +167,125 @@ image = pipe(
 ).images[0]
 image.save("out.png")
 ```
+
+## Serving
+
+`difflet serve` keeps one image model loaded in a resident Trainium worker and exposes an
+OpenAI-compatible HTTP API. The current serving models are `black-forest-labs/FLUX.1-dev` and
+`Qwen/Qwen-Image`. One server process owns one fixed model, shape, and parallel profile.
+
+### Configure artifact storage
+
+Generated PNG bytes are uploaded directly to Cloudflare R2 and returned as an `image_url`.
+Create a local environment file from the sanitized template:
+
+```bash
+cp .env.example .env
+```
+
+Configure the R2 S3 endpoint and bucket separately:
+
+```dotenv
+DIFFLET_R2_BUCKET=your-bucket-name
+DIFFLET_R2_ENDPOINT_URL=https://your-account-id.r2.cloudflarestorage.com
+DIFFLET_R2_ACCESS_KEY_ID=your-access-key-id
+DIFFLET_R2_SECRET_ACCESS_KEY=your-secret-access-key
+DIFFLET_R2_PREFIX=difflet
+
+# Optional public bucket or custom-domain base URL.
+# Leave empty to return expiring S3 presigned URLs.
+DIFFLET_R2_PUBLIC_BASE_URL=https://images.example.com
+```
+
+Run the server from the directory containing `.env`. It is loaded automatically without
+overriding variables already exported by the shell. Do not commit `.env` or real credentials.
+The R2 access key must have object read/write permission for the configured bucket.
+
+Create the R2 bucket with a Location Hint close to the machine running `difflet serve`.
+Cross-region uploads can add seconds to every request; for example, a server in AWS
+`ap-southeast-4` should use an R2 bucket located in Oceania (`OC`) rather than Western North
+America (`WNAM`). The S3 endpoint remains the account-level
+`https://<account-id>.r2.cloudflarestorage.com` URL; bucket placement, not a region-specific
+endpoint, controls the data location. R2 location is selected when the bucket is first created,
+so moving an existing bucket requires creating a new bucket and migrating its objects.
+
+### Start a server
+
+Flux on a four-core `trn2.3xlarge`:
+
+```bash
+difflet serve \
+  --model-id black-forest-labs/FLUX.1-dev \
+  --tp-degree 4 \
+  --cp-degree 1 \
+  --height 1024 \
+  --width 1024 \
+  --host 0.0.0.0 \
+  --port 8092
+```
+
+Qwen-Image with the same fixed serving profile:
+
+```bash
+difflet serve \
+  --model-id Qwen/Qwen-Image \
+  --tp-degree 4 \
+  --cp-degree 1 \
+  --height 1024 \
+  --width 1024 \
+  --host 0.0.0.0 \
+  --port 8092
+```
+
+The first startup downloads missing Hugging Face weights, compiles missing serving artifacts,
+loads the resident worker, and runs a real generation smoke test before readiness opens. Warm
+restarts reuse the immutable compile cache. A four-core host cannot run these two profiles, or a
+CLI generation and one of these servers, at the same time because each profile owns all four
+NeuronCores.
+
+### Check readiness and generate
+
+```bash
+curl http://127.0.0.1:8092/health
+curl http://127.0.0.1:8092/ready
+curl http://127.0.0.1:8092/v1/models
+```
+
+Send an image-generation request:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8092/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "black-forest-labs/FLUX.1-dev",
+    "messages": [
+      {"role": "user", "content": "a small red sailboat on a calm blue lake"}
+    ],
+    "extra_body": {
+      "height": 1024,
+      "width": 1024,
+      "num_inference_steps": 20,
+      "guidance_scale": 3.5,
+      "seed": 42
+    }
+  }'
+```
+
+Request `height` and `width` must match the server's startup profile. Inference steps must be
+between 1 and 50. The response image is available at
+`choices[0].message.content[0].image_url.url`.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Process and worker health |
+| `GET /ready` | Model readiness after load and smoke |
+| `GET /v1/models` | The model served by this process |
+| `POST /v1/chat/completions` | Text-to-image generation |
+
+Serving logs are written to both the console and `./logs/`. Log files are capped at 5 MiB and
+rotated on size or when the date changes. Stop the server with `Ctrl+C` or `SIGTERM`. The API
+does not currently provide authentication; protect a remotely exposed port with a security
+group, reverse proxy, or other access control.
 
 ## CLI reference
 
