@@ -95,6 +95,18 @@ pip install -e . --no-deps
 
 This installs the `difflet` CLI on your `PATH`.
 
+Because the editable install above intentionally uses `--no-deps`, install the
+runtime dependencies for resident HTTP serving explicitly before running
+`difflet serve`:
+
+```bash
+pip install accelerate "fastapi>=0.115" "uvicorn[standard]>=0.35" "boto3>=1.34" "python-dotenv>=1.0"
+```
+
+`difflet serve` automatically loads `.env` from the current working directory.
+Values already exported in the process environment take precedence. Copy
+`.env.example` to `.env` and fill in the R2 credentials before startup.
+
 Authenticate with Hugging Face for gated checkpoints such as `black-forest-labs/FLUX.1-dev`:
 
 ```bash
