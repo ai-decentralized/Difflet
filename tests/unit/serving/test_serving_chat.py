@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
-from difflet.serving.artifact_store import MemoryArtifactStore
+from difflet.serving.artifact_store import ArtifactRef, MemoryArtifactStore, R2ArtifactStore
 from difflet.serving.errors import DiffletServingError, prompt_too_long
 from difflet.serving.model_registry import resolve_serving_model
 from difflet.serving.openai.serving_chat import generate_chat_completion, normalize_chat_request
@@ -36,6 +37,28 @@ def test_normalize_chat_request_defaults_from_model_metadata():
     assert req.output_format == "png"
 
 
+@pytest.mark.parametrize("steps", [1, 50])
+def test_normalize_chat_request_accepts_bounded_steps(steps):
+    req = normalize_chat_request(
+        _body(extra_body={"num_inference_steps": steps}),
+        resolved_model=_resolved(),
+    )
+
+    assert req.num_inference_steps == steps
+
+
+@pytest.mark.parametrize("steps", [0, 51, 1_000_000])
+def test_normalize_chat_request_rejects_steps_outside_serving_bound(steps):
+    with pytest.raises(DiffletServingError) as exc:
+        normalize_chat_request(
+            _body(extra_body={"num_inference_steps": steps}),
+            resolved_model=_resolved(),
+        )
+
+    assert exc.value.code == "invalid_extra_body"
+    assert "1 <= value <= 50" in exc.value.message
+
+
 def test_normalize_chat_request_allows_omitted_model_for_single_model_server():
     body = _body()
     body.pop("model")
@@ -53,10 +76,17 @@ def test_normalize_chat_request_accepts_image_modality():
 
 def test_text_content_parts_are_joined():
     req = normalize_chat_request(
-        _body(messages=[{"role": "user", "content": [
-            {"type": "text", "text": "a cat"},
-            {"type": "text", "text": "in snow"},
-        ]}]),
+        _body(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "a cat"},
+                        {"type": "text", "text": "in snow"},
+                    ],
+                }
+            ]
+        ),
         resolved_model=_resolved(),
     )
 
@@ -66,11 +96,13 @@ def test_text_content_parts_are_joined():
 def test_prompt_uses_last_user_message_only():
     with pytest.raises(DiffletServingError) as exc:
         normalize_chat_request(
-            _body(messages=[
-                {"role": "user", "content": "older prompt"},
-                {"role": "assistant", "content": "ok"},
-                {"role": "user", "content": "  "},
-            ]),
+            _body(
+                messages=[
+                    {"role": "user", "content": "older prompt"},
+                    {"role": "assistant", "content": "ok"},
+                    {"role": "user", "content": "  "},
+                ]
+            ),
             resolved_model=_resolved(),
         )
 
@@ -112,8 +144,10 @@ def test_normalize_chat_request_errors(body, code):
 
 def test_response_policy_fields_are_ignored():
     req = normalize_chat_request(
-        _body(response_format={"type": "json_object"},
-              extra_body={"response_format": "data_url", "artifact_ttl_seconds": 1}),
+        _body(
+            response_format={"type": "json_object"},
+            extra_body={"response_format": "data_url", "artifact_ttl_seconds": 1},
+        ),
         resolved_model=_resolved(),
     )
 
@@ -135,7 +169,7 @@ class _FakeEngine:
 
 
 class _RejectingValidator:
-    def validate(self, request, profile):
+    def validate(self, request):
         raise prompt_too_long("too long")
 
 
@@ -174,3 +208,48 @@ def test_generate_chat_completion_validates_before_engine():
 
     assert exc.value.code == "prompt_too_long"
     assert engine.called is False
+
+
+class _FailingR2Client:
+    def put_object(self, **kwargs):
+        raise RuntimeError("secret bucket and endpoint")
+
+    def generate_presigned_url(self, *args, **kwargs):
+        raise RuntimeError("secret request id")
+
+
+def _failing_r2_store(monkeypatch) -> R2ArtifactStore:
+    store = R2ArtifactStore(
+        bucket="private-bucket",
+        endpoint_url="https://private.invalid",
+        access_key_id="key",
+        secret_access_key="secret",
+    )
+    monkeypatch.setattr(store, "_client", lambda: _FailingR2Client())
+    return store
+
+
+@pytest.mark.parametrize("operation", ["upload", "presign"])
+def test_r2_backend_errors_are_logged_and_sanitized(monkeypatch, caplog, operation):
+    async def _run():
+        store = _failing_r2_store(monkeypatch)
+        if operation == "upload":
+            return await store.put_bytes(
+                data=b"png",
+                mime_type="image/png",
+                suffix=".png",
+                ttl_seconds=60,
+            )
+        return await store.get_url(
+            ArtifactRef("image.png", "s3://private-bucket/image.png", "image/png"),
+            ttl_seconds=60,
+        )
+
+    caplog.set_level(logging.ERROR, logger="difflet.serving.artifact_store")
+    with pytest.raises(DiffletServingError) as exc:
+        asyncio.run(_run())
+
+    assert exc.value.code == "internal_error"
+    assert exc.value.message == "Internal artifact storage error"
+    assert "secret" not in exc.value.message
+    assert "secret" in caplog.text

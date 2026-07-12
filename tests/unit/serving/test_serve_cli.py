@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 
 import pytest
 
-from difflet.serving.cli.serve import options_from_args
+from difflet.serving.cli.serve import _load_serving_environment, options_from_args
+from difflet.serving.options import CompilePolicy
 
 
 def test_difflet_serve_routes_to_serving_command(monkeypatch):
@@ -21,6 +23,32 @@ def test_difflet_serve_routes_to_serving_command(monkeypatch):
     assert calls
     assert calls[0].command == "serve"
     assert calls[0].port == 9000
+
+
+def test_serve_loads_dotenv_from_current_directory(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DIFFLET_TEST_DOTENV", raising=False)
+    (tmp_path / ".env").write_text("DIFFLET_TEST_DOTENV=loaded\n", encoding="utf-8")
+
+    _load_serving_environment()
+
+    assert os.environ["DIFFLET_TEST_DOTENV"] == "loaded"
+
+
+def test_serve_dotenv_does_not_override_exported_environment(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DIFFLET_TEST_DOTENV", "exported")
+    (tmp_path / ".env").write_text("DIFFLET_TEST_DOTENV=file\n", encoding="utf-8")
+
+    _load_serving_environment()
+
+    assert os.environ["DIFFLET_TEST_DOTENV"] == "exported"
+
+
+def test_serve_ignores_missing_dotenv(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    _load_serving_environment()
 
 
 def test_serve_help_hides_internal_worker_tuning(capsys):
@@ -41,10 +69,17 @@ def test_serve_help_hides_internal_worker_tuning(capsys):
     assert "--compile-policy" not in out
     assert "--artifact-store" not in out
     assert "--artifact-ttl-seconds" not in out
-    assert "--cfg-parallel" not in out
-    assert "--sp" not in out
-    assert "--host-vae" not in out
-    assert "--num-frames" not in out
+    assert "--cfg-parallel" in out
+    assert "--no-cfg-parallel" in out
+    assert "--sp" in out
+    assert "--no-sp" in out
+    assert "--worker-heartbeat-interval" in out
+    assert "--host-vae" in out
+    assert "--num-frames" in out
+    assert "--teacache-cadence" in out
+    assert "--teacache-online-delta" in out
+    assert "--teacache-speedup" in out
+    assert "--teacache-calibration" in out
     assert "Wan-AI/Wan2.2-T2V-A14B-Diffusers" not in out
     assert "hunyuanvideo-community/HunyuanVideo" not in out
     assert "Lightricks/LTX-2" not in out
@@ -52,7 +87,7 @@ def test_serve_help_hides_internal_worker_tuning(capsys):
     assert "Qwen/Qwen-Image" in out
 
 
-def test_serve_options_rejects_num_frames(capsys):
+def test_serve_options_preserves_num_frames_for_adapter_validation():
     args = argparse.Namespace(
         model_id="black-forest-labs/FLUX.1-dev",
         revision=None,
@@ -70,7 +105,189 @@ def test_serve_options_rejects_num_frames(capsys):
         force=False,
     )
 
-    with pytest.raises(SystemExit):
-        options_from_args(args)
+    options = options_from_args(args)
 
-    assert "--num-frames" in capsys.readouterr().err
+    assert options.num_frames == 1
+
+
+def test_difflet_serve_accepts_flux_sp_and_adaptive_teacache(monkeypatch):
+    calls = []
+
+    def fake_run(args):
+        calls.append(args)
+
+    cli_main = importlib.import_module("difflet.cli.main")
+    monkeypatch.setattr("difflet.serving.cli.serve.run", fake_run)
+    cli_main.main(
+        [
+            "serve",
+            "--model-id",
+            "black-forest-labs/FLUX.1-dev",
+            "--sp",
+            "--teacache-speedup",
+            "1.5",
+            "--teacache-calibration",
+            "/tmp/flux-calibration.json",
+        ]
+    )
+
+    assert calls[0].sp_enabled is True
+    assert calls[0].teacache_speedup == 1.5
+    assert calls[0].teacache_calibration == "/tmp/flux-calibration.json"
+
+
+def test_difflet_serve_parses_compile_and_load_profile_flags(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+    cli_main = importlib.import_module("difflet.cli.main")
+    cli_main.main(
+        [
+            "serve",
+            "--model-id",
+            "black-forest-labs/FLUX.1-dev",
+            "--revision",
+            "rev-1",
+            "--tp-degree",
+            "4",
+            "--cp-degree",
+            "2",
+            "--cp-mode",
+            "ring",
+            "--height",
+            "768",
+            "--width",
+            "1024",
+            "--cache-dir",
+            "/tmp/difflet-cache",
+            "--force",
+        ]
+    )
+
+    args = calls[0]
+    assert (args.revision, args.tp_degree, args.cp_degree, args.cp_mode) == ("rev-1", 4, 2, "ring")
+    assert (args.height, args.width, args.cache_dir, args.force) == (
+        768,
+        1024,
+        "/tmp/difflet-cache",
+        True,
+    )
+
+
+def test_serve_options_maps_force_to_compile_policy():
+    args = argparse.Namespace(
+        model_id="black-forest-labs/FLUX.1-dev",
+        revision=None,
+        host="0.0.0.0",
+        port=8091,
+        tp_degree=4,
+        cp_degree=1,
+        cp_mode="gather_kv",
+        height=768,
+        width=1024,
+        num_frames=None,
+        cache_dir="/tmp/difflet-cache",
+        force=True,
+    )
+
+    options = options_from_args(args)
+
+    assert options.compile_policy == CompilePolicy.FORCE
+    assert (options.tp_degree, options.height, options.cache_dir) == (4, 768, "/tmp/difflet-cache")
+
+
+@pytest.mark.parametrize(
+    "flag,value",
+    [
+        ("--teacache-cadence", "2"),
+        ("--teacache-online-delta", "0.6"),
+    ],
+)
+def test_difflet_serve_preserves_unimplemented_teacache_modes_for_adapter(
+    monkeypatch,
+    flag,
+    value,
+):
+    calls = []
+    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+    cli_main = importlib.import_module("difflet.cli.main")
+
+    cli_main.main(
+        [
+            "serve",
+            "--model-id",
+            "black-forest-labs/FLUX.1-dev",
+            flag,
+            value,
+        ]
+    )
+
+    assert len(calls) == 1
+
+
+def test_difflet_serve_preserves_calibration_without_speedup_for_adapter(monkeypatch):
+    calls = []
+    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+    cli_main = importlib.import_module("difflet.cli.main")
+
+    cli_main.main(
+        [
+            "serve",
+            "--model-id",
+            "Qwen/Qwen-Image",
+            "--teacache-calibration",
+            "/tmp/qwen-calibration.json",
+        ]
+    )
+
+    assert calls[0].teacache_calibration == "/tmp/qwen-calibration.json"
+
+
+def test_difflet_serve_preserves_qwen_sp_for_adapter(monkeypatch):
+    calls = []
+    cli_main = importlib.import_module("difflet.cli.main")
+    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+
+    cli_main.main(["serve", "--model-id", "Qwen/Qwen-Image", "--sp"])
+
+    assert calls[0].sp_enabled is True
+
+
+def test_serve_boolean_overrides_are_tristate(monkeypatch):
+    calls = []
+    cli_main = importlib.import_module("difflet.cli.main")
+    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+
+    cli_main.main(["serve", "--model-id", "black-forest-labs/FLUX.1-dev"])
+    cli_main.main(
+        [
+            "serve",
+            "--model-id",
+            "black-forest-labs/FLUX.1-dev",
+            "--no-cfg-parallel",
+            "--no-sp",
+        ]
+    )
+
+    assert (calls[0].cfg_parallel, calls[0].sp_enabled) == (None, None)
+    assert (calls[1].cfg_parallel, calls[1].sp_enabled) == (False, False)
+
+
+def test_serve_rejects_nonpositive_heartbeat_before_run(monkeypatch, capsys):
+    calls = []
+    cli_main = importlib.import_module("difflet.cli.main")
+    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+
+    with pytest.raises(SystemExit):
+        cli_main.main(
+            [
+                "serve",
+                "--model-id",
+                "black-forest-labs/FLUX.1-dev",
+                "--worker-heartbeat-interval",
+                "0",
+            ]
+        )
+
+    assert calls == []
+    assert "must be greater than 0" in capsys.readouterr().err

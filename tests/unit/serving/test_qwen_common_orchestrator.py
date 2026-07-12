@@ -1,22 +1,43 @@
 from __future__ import annotations
 
-from pathlib import Path
+import asyncio
+import json
 import sys
 import types
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from difflet.common.orchestrators import qwen_image
 from difflet.pipeline.parallel_config import DiffletParallelConfig
-from difflet.serving.orchestrators.qwen_image import (
-    QwenImageServingArtifactPreparer,
-    QwenImageServingOrchestrator,
+from difflet.pipeline.teacache import TeaCacheCalibration
+from difflet.serving.types import (
+    ArtifactPublishTarget,
+    DiffletGenerateOutput,
+    DiffletGenerateRequest,
+    PipelineDefinition,
+    QwenGenerateStageOutputs,
+    QwenTextStageOutputs,
+    QwenVaeStageOutputs,
+    ResolvedModelSource,
+    ServingProfile,
+    StageDefinition,
+    WorkerRequestContext,
 )
-from difflet.serving.options import CompilePolicy
-from difflet.serving.types import ServingProfile
+from difflet.serving.orchestrators.qwen_image import (
+    QwenImageServingOrchestrator,
+    _packed_latent_grid,
+)
 
 
-def _profile(cache_dir: Path) -> ServingProfile:
+def _profile(
+    tmp_path: Path,
+    *,
+    teacache_speedup: float | None = None,
+    teacache_calibration: str | None = None,
+) -> ServingProfile:
     return ServingProfile(
         model_id="Qwen/Qwen-Image",
         model_type="qwen_image",
@@ -24,207 +45,368 @@ def _profile(cache_dir: Path) -> ServingProfile:
         width=1024,
         num_frames=None,
         parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1),
-        cache_dir=str(cache_dir),
+        cache_dir=str(tmp_path),
+        teacache_speedup=teacache_speedup,
+        teacache_calibration=teacache_calibration,
     )
 
 
-def test_qwen_artifact_check_rejects_missing_and_empty_dirs(tmp_path):
+def _source(tmp_path: Path) -> ResolvedModelSource:
+    model_path = tmp_path / "snapshots" / ("a" * 40)
+    model_path.mkdir(parents=True, exist_ok=True)
+    return ResolvedModelSource(
+        source_kind="hf_snapshot",
+        model_id="Qwen/Qwen-Image",
+        requested_revision="main",
+        pinned_model_path=str(model_path),
+        resolved_source_id="a" * 40,
+    )
+
+
+def _write_component(path: Path, stage: str, *, probe: bool = False) -> None:
+    component = path / "transformer" if stage == "generate" else path
+    component.mkdir(parents=True, exist_ok=True)
+    (component / "model.pt").write_bytes(b"torchscript")
+    (component / "neuron_config.json").write_text("{}", encoding="utf-8")
+    if probe:
+        probe_path = path / "teacache_probe"
+        probe_path.mkdir(parents=True)
+        (probe_path / "model.pt").write_bytes(b"probe")
+        (probe_path / "neuron_config.json").write_text("{}", encoding="utf-8")
+
+
+def test_qwen_compile_plan_is_path_free_and_pins_source(tmp_path):
     profile = _profile(tmp_path)
-    for spec in qwen_image.compile_plan(profile):
-        Path(spec.artifact_path).mkdir(parents=True)
+    specs = qwen_image.build_compile_plan(_source(tmp_path), profile)
 
-    missing = qwen_image.missing_artifacts(profile)
+    assert [(spec.artifact_id, spec.component_id) for spec in specs] == [
+        ("text", "text"),
+        ("generate", "generate"),
+        ("vae", "vae"),
+    ]
+    identities = {
+        spec.component_id: json.loads(spec.identity.canonical_cache_inputs_json) for spec in specs
+    }
+    assert all(value["resolved_source_id"] == "a" * 40 for value in identities.values())
+    assert identities["vae"]["tp_degree"] == 4
+    assert identities["vae"]["cp_degree"] == 1
+    assert identities["text"]["stage_inputs"]["enc_seq"] == qwen_image.ENC_SEQ
+    assert identities["generate"]["stage_inputs"]["text_seq_len"] == qwen_image.TEXT_SEQ_LEN
+    assert identities["generate"]["virtual_core_size"] == qwen_image.VIRTUAL_CORE_SIZE
+    assert "toolchain" in identities["generate"]
 
-    assert {spec.stage_id for spec in missing} == {"text", "generate", "vae"}
 
-
-def test_qwen_serving_compile_plan_uses_full_tp_vae_artifact(tmp_path):
+def test_qwen_compile_identity_changes_with_stage_contract_and_toolchain(monkeypatch, tmp_path):
     profile = _profile(tmp_path)
-
-    by_stage = {
-        spec.stage_id: Path(spec.artifact_path)
-        for spec in qwen_image.compile_plan(profile)
+    source = _source(tmp_path)
+    baseline = {
+        spec.component_id: spec.identity for spec in qwen_image.build_compile_plan(source, profile)
     }
 
-    assert by_stage["text"].name == "qwen_image_enc_tp4cp1_seq256"
-    assert by_stage["generate"].name == "qwen_image_dit_tp4cp1_h1024w1024"
-    assert by_stage["vae"].name == "qwen_image_vae_tp4_h1024w1024"
-
-
-def test_qwen_serving_stage_topology_uses_full_world_size_for_decoder(tmp_path):
-    stages = QwenImageServingArtifactPreparer().stage_specs(_profile(tmp_path))
-
-    assert [(stage.stage_id, stage.num_cores) for stage in stages] == [
-        ("prompt_encoder", 4),
-        ("denoiser", 4),
-        ("decoder", 4),
-    ]
-
-
-def test_qwen_resident_vae_load_uses_full_world_size(monkeypatch, tmp_path):
-    profile = _profile(tmp_path)
-    neuron_configs = []
-    vae_configs = []
-    created = []
-
-    class FakeVaeApplication:
-        def __init__(self, **kwargs):
-            created.append(self)
-            self.kwargs = kwargs
-            self.loaded = None
-
-        def load(self, path):
-            self.loaded = path
-
-    config_module = types.ModuleType("difflet.backends.trainium.core.config")
-    config_module.NeuronConfig = lambda **kwargs: neuron_configs.append(kwargs) or kwargs
-    vae_module = types.ModuleType("difflet.backends.trainium.wan.vae")
-    vae_module.NeuronWanVAEDecoderApplication = FakeVaeApplication
-    vae_module.WanVAEDecoderInferenceConfig = (
-        lambda **kwargs: vae_configs.append(kwargs) or kwargs
-    )
-    adapter_module = types.ModuleType("difflet.utils.diffusers_adapter")
-    adapter_module.load_diffusers_config = lambda path: {"path": path}
-    monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace(bfloat16="bf16"))
-    monkeypatch.setitem(sys.modules, "difflet.backends.trainium.core.config", config_module)
-    monkeypatch.setitem(sys.modules, "difflet.backends.trainium.wan.vae", vae_module)
-    monkeypatch.setitem(sys.modules, "difflet.utils.diffusers_adapter", adapter_module)
-    orchestrator = QwenImageServingOrchestrator()
-    orchestrator.model_dir = "/tmp/qwen-model"
-
-    orchestrator._load_vae_stage(profile)
-
-    assert neuron_configs == [
-        {"tp_degree": 4, "world_size": 4, "torch_dtype": "bf16"}
-    ]
-    assert vae_configs[0]["neuron_config"] == neuron_configs[0]
-    assert created[0].loaded == str(
-        qwen_image.serving_stage_compiled_dir("vae", profile)
-    )
-
-
-def test_qwen_artifact_check_rejects_manifest_only_dirs(tmp_path):
-    profile = _profile(tmp_path)
-    for spec in qwen_image.compile_plan(profile):
-        artifact_path = Path(spec.artifact_path)
-        artifact_path.mkdir(parents=True)
-        (artifact_path / "manifest.json").write_text("{}", encoding="utf-8")
-
-    missing = qwen_image.missing_artifacts(profile)
-
-    assert {spec.stage_id for spec in missing} == {"text", "generate", "vae"}
-
-
-def test_qwen_artifact_check_rejects_neff_without_serving_marker(tmp_path):
-    profile = _profile(tmp_path)
-    for spec in qwen_image.compile_plan(profile):
-        artifact_path = Path(spec.artifact_path)
-        artifact_path.mkdir(parents=True)
-        (artifact_path / "graph.neff").write_bytes(b"neff")
-
-    missing = qwen_image.missing_artifacts(profile)
-
-    assert {spec.stage_id for spec in missing} == {"text", "generate", "vae"}
-
-
-def test_qwen_artifact_check_accepts_neff_with_matching_serving_marker(tmp_path):
-    profile = _profile(tmp_path)
-    for spec in qwen_image.compile_plan(profile):
-        artifact_path = Path(spec.artifact_path)
-        artifact_path.mkdir(parents=True)
-        (artifact_path / "graph.neff").write_bytes(b"neff")
-
-    qwen_image.write_serving_markers(profile)
-
-    assert qwen_image.missing_artifacts(profile) == []
-
-
-def test_qwen_artifact_check_accepts_nxd_model_with_matching_serving_marker(tmp_path):
-    profile = _profile(tmp_path)
-    for spec in qwen_image.compile_plan(profile):
-        artifact_path = Path(spec.artifact_path)
-        component_path = (
-            artifact_path / "transformer" if spec.stage_id == "generate" else artifact_path
-        )
-        component_path.mkdir(parents=True)
-        (component_path / "model.pt").write_bytes(b"torchscript")
-        (component_path / "neuron_config.json").write_text("{}", encoding="utf-8")
-
-    qwen_image.write_serving_markers(profile)
-
-    assert qwen_image.missing_artifacts(profile) == []
-
-
-def test_qwen_artifact_check_rejects_nxd_model_without_neuron_config(tmp_path):
-    profile = _profile(tmp_path)
-    for spec in qwen_image.compile_plan(profile):
-        artifact_path = Path(spec.artifact_path)
-        artifact_path.mkdir(parents=True)
-        (artifact_path / "model.pt").write_bytes(b"torchscript")
-
-    qwen_image.write_serving_markers(profile)
-
-    assert {spec.stage_id for spec in qwen_image.missing_artifacts(profile)} == {
-        "text",
-        "generate",
-        "vae",
+    monkeypatch.setattr(qwen_image, "ENC_SEQ", qwen_image.ENC_SEQ + 1)
+    changed_sequence = {
+        spec.component_id: spec.identity for spec in qwen_image.build_compile_plan(source, profile)
     }
+    assert changed_sequence["text"] != baseline["text"]
+    assert changed_sequence["generate"] == baseline["generate"]
+
+    monkeypatch.setattr(qwen_image, "toolchain_versions", lambda: {"python": "changed"})
+    changed_toolchain = qwen_image.build_compile_plan(source, profile)
+    assert all(spec.identity != baseline[spec.component_id] for spec in changed_toolchain)
 
 
-def test_qwen_artifact_check_rejects_mismatched_serving_marker(tmp_path):
+def test_qwen_compile_forwards_pinned_source_and_manager_target(monkeypatch, tmp_path):
     profile = _profile(tmp_path)
-    for spec in qwen_image.compile_plan(profile):
-        artifact_path = Path(spec.artifact_path)
-        artifact_path.mkdir(parents=True)
-        (artifact_path / "graph.neff").write_bytes(b"neff")
-    qwen_image.write_serving_markers(profile)
-    other = ServingProfile(
-        model_id=profile.model_id,
-        model_type=profile.model_type,
-        height=512,
-        width=512,
-        num_frames=None,
-        parallel=profile.parallel,
-        cache_dir=profile.cache_dir,
-    )
-
-    missing = qwen_image.missing_artifacts(other)
-
-    assert {spec.stage_id for spec in missing} == {"text", "generate", "vae"}
-
-
-def test_qwen_ensure_artifacts_never_fails_for_missing_artifacts(tmp_path):
-    profile = _profile(tmp_path)
-
-    with pytest.raises(RuntimeError, match="missing Qwen compiled artifacts"):
-        qwen_image.ensure_artifacts(profile, CompilePolicy.NEVER)
-
-
-def test_qwen_ensure_artifacts_compiles_serving_vae_with_full_world_size(
-    monkeypatch,
-    tmp_path,
-):
-    profile = _profile(tmp_path)
+    source = _source(tmp_path)
+    spec = qwen_image.build_compile_plan(source, profile)[0]
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    target = ArtifactPublishTarget("text", spec.identity, tmp_path, staging)
     calls = []
 
-    def fake_run_stage(orchestrator, stage, *, num_cores, virtual_core_size, cli_args):
-        calls.append((orchestrator, stage, num_cores, virtual_core_size, cli_args))
-        spec = next(spec for spec in qwen_image.compile_plan(profile) if spec.stage_id == stage)
-        component = Path(spec.artifact_path)
-        if stage == "generate":
-            component /= "transformer"
-        component.mkdir(parents=True, exist_ok=True)
-        (component / "model.pt").write_bytes(b"torchscript")
-        (component / "neuron_config.json").write_text("{}", encoding="utf-8")
+    def fake_run_stage(
+        orchestrator,
+        stage,
+        *,
+        num_cores,
+        virtual_core_size,
+        cli_args,
+        strict_environment,
+    ):
+        calls.append(
+            (
+                orchestrator,
+                stage,
+                num_cores,
+                virtual_core_size,
+                cli_args,
+                strict_environment,
+            )
+        )
+        _write_component(staging, stage)
 
     monkeypatch.setattr("difflet.cli.runner.run_stage", fake_run_stage)
 
-    qwen_image.ensure_artifacts(profile, CompilePolicy.AUTO)
+    qwen_image.compile_serving_artifact(source, profile, spec, target)
 
-    assert [call[1] for call in calls] == ["text", "generate", "vae"]
-    assert all(call[2] == 4 for call in calls)
-    vae_args = calls[-1][4]
-    assert vae_args[vae_args.index("--vae-tp-degree") + 1] == "4"
-    assert vae_args[vae_args.index("--compiled-dir") + 1].endswith(
-        "qwen_image_vae_tp4_h1024w1024"
+    args = calls[0][4]
+    assert args[args.index("--model-path") + 1] == source.pinned_model_path
+    assert args[args.index("--revision") + 1] == source.resolved_source_id
+    assert args[args.index("--compiled-dir") + 1] == str(staging)
+    assert calls[0][5] is True
+    qwen_image.validate_compiled_artifact(spec, staging)
+
+
+def test_qwen_vae_compile_uses_resident_world_size(monkeypatch, tmp_path):
+    profile = _profile(tmp_path)
+    source = _source(tmp_path)
+    spec = qwen_image.build_compile_plan(source, profile)[2]
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    target = ArtifactPublishTarget("vae", spec.identity, tmp_path, staging)
+    calls = []
+
+    def fake_run_stage(
+        orchestrator,
+        stage,
+        *,
+        num_cores,
+        virtual_core_size,
+        cli_args,
+        strict_environment,
+    ):
+        assert strict_environment is True
+        calls.append((num_cores, cli_args))
+        _write_component(staging, stage)
+
+    monkeypatch.setattr("difflet.cli.runner.run_stage", fake_run_stage)
+
+    qwen_image.compile_serving_artifact(source, profile, spec, target)
+
+    num_cores, args = calls[0]
+    assert num_cores == 4
+    assert args[args.index("--vae-tp-degree") + 1] == "4"
+
+
+def test_qwen_compile_materializes_frozen_calibration_in_staging(monkeypatch, tmp_path):
+    calibration = TeaCacheCalibration(
+        model="qwen_image",
+        shape_label="1024x1024",
+        num_steps=50,
+        poly_coef=(0.0, 1.0),
+        threshold=0.1,
+        target_speedup=1.5,
     )
+    profile = replace(
+        _profile(tmp_path, teacache_speedup=1.5),
+        teacache_calibration_data=calibration,
+    )
+    source = _source(tmp_path)
+    spec = qwen_image.build_compile_plan(source, profile)[1]
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    target = ArtifactPublishTarget("generate", spec.identity, tmp_path, staging)
+    calls = []
+
+    def fake_run_stage(
+        orchestrator,
+        stage,
+        *,
+        num_cores,
+        virtual_core_size,
+        cli_args,
+        strict_environment,
+    ):
+        assert strict_environment is True
+        calls.append(cli_args)
+        _write_component(staging, stage, probe=True)
+
+    monkeypatch.setattr("difflet.cli.runner.run_stage", fake_run_stage)
+
+    qwen_image.compile_serving_artifact(source, profile, spec, target)
+
+    args = calls[0]
+    calibration_path = Path(args[args.index("--teacache-calibration") + 1])
+    assert calibration_path == staging / "teacache_calibration.json"
+    assert json.loads(calibration_path.read_text(encoding="utf-8"))["model"] == "qwen_image"
+
+
+def test_qwen_adaptive_generate_requires_probe(monkeypatch, tmp_path):
+    profile = _profile(
+        tmp_path,
+        teacache_speedup=1.5,
+        teacache_calibration="/tmp/calibration.json",
+    )
+    source = _source(tmp_path)
+    spec = qwen_image.build_compile_plan(source, profile)[1]
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    target = ArtifactPublishTarget("generate", spec.identity, tmp_path, staging)
+
+    def incomplete_compile(*args, **kwargs):
+        _write_component(staging, "generate")
+
+    monkeypatch.setattr("difflet.cli.runner.run_stage", incomplete_compile)
+
+    with pytest.raises(ValueError, match="TeaCache probe"):
+        qwen_image.compile_serving_artifact(source, profile, spec, target)
+
+
+def test_qwen_validation_rejects_tampered_marker(monkeypatch, tmp_path):
+    profile = _profile(tmp_path)
+    source = _source(tmp_path)
+    spec = qwen_image.build_compile_plan(source, profile)[0]
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    target = ArtifactPublishTarget("text", spec.identity, tmp_path, staging)
+
+    def fake_compile(*args, **kwargs):
+        _write_component(staging, "text")
+
+    monkeypatch.setattr("difflet.cli.runner.run_stage", fake_compile)
+    qwen_image.compile_serving_artifact(source, profile, spec, target)
+    marker = staging / qwen_image.SERVING_ARTIFACT_MARKER
+    marker.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="does not match"):
+        qwen_image.validate_compiled_artifact(spec, staging)
+
+
+def test_staged_cli_compiled_path_helper_is_unchanged(tmp_path):
+    assert (
+        qwen_image.stage_compiled_dir_from_values(
+            "generate",
+            cache_dir=str(tmp_path),
+            tp_degree=2,
+            cp_degree=2,
+            height=768,
+            width=1024,
+        )
+        == tmp_path / "qwen_image_dit_tp2cp2_h768w1024"
+    )
+
+
+def test_qwen_serving_derives_rectangular_packed_latent_grid_from_profile(tmp_path):
+    profile = replace(_profile(tmp_path), height=512, width=1024)
+
+    assert _packed_latent_grid(profile, seq=2048) == (32, 64)
+
+
+def test_qwen_serving_rejects_packed_latents_that_do_not_match_profile(tmp_path):
+    with pytest.raises(ValueError, match="does not match the serving profile"):
+        _packed_latent_grid(_profile(tmp_path), seq=2048)
+
+
+@pytest.mark.parametrize("steps,expected", [(50, True), (4, False)])
+def test_qwen_serving_selects_teacache_per_request_steps(monkeypatch, tmp_path, steps, expected):
+    calibration = TeaCacheCalibration(
+        model="qwen_image",
+        shape_label="1024x1024",
+        num_steps=50,
+        poly_coef=(0.0, 1.0),
+        threshold=0.1,
+    )
+    profile = replace(
+        _profile(tmp_path, teacache_speedup=1.5),
+        teacache_calibration_data=calibration,
+    )
+    captured = {}
+
+    class _Scheduler:
+        config = SimpleNamespace(
+            max_shift=1.0,
+            base_shift=0.0,
+            max_image_seq_len=4096,
+            base_image_seq_len=1,
+        )
+        timesteps = []
+
+        def set_timesteps(self, *, sigmas, mu, device):
+            self.timesteps = list(sigmas)
+
+    class _Latents:
+        def cpu(self):
+            return self
+
+    class _Pipeline:
+        scheduler = _Scheduler()
+
+        def __call__(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(latents=_Latents())
+
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(
+            bfloat16="bf16",
+            full=lambda *args, **kwargs: "guidance",
+            manual_seed=lambda seed: None,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "numpy",
+        types.SimpleNamespace(
+            linspace=lambda start, stop, count: SimpleNamespace(tolist=lambda: [start] * count)
+        ),
+    )
+    orchestrator = QwenImageServingOrchestrator()
+    orchestrator.active_profile = profile
+    orchestrator.denoise_app = SimpleNamespace(pipeline=_Pipeline())
+    request = DiffletGenerateRequest(
+        "request",
+        profile.model_id,
+        "prompt",
+        profile.height,
+        profile.width,
+        steps,
+        1.0,
+        0,
+    )
+
+    orchestrator._denoise(
+        {"encoder_hidden_states": "hidden", "encoder_hidden_states_mask": "mask"},
+        request,
+    )
+
+    assert captured["teacache_enabled"] is expected
+
+
+def test_qwen_generate_traverses_frozen_pipeline_and_returns_final_output():
+    orchestrator = QwenImageServingOrchestrator()
+    orchestrator.active_runtime = SimpleNamespace(
+        pipeline_definition=PipelineDefinition(
+            model_type="qwen_image",
+            stages=(
+                StageDefinition("text", "extracted", "prompt_encoder", runner_factory="x"),
+                StageDefinition("generate", "extracted", "denoiser", runner_factory="x"),
+                StageDefinition(
+                    "vae", "extracted", "decoder", final_output=True, runner_factory="x"
+                ),
+            ),
+        )
+    )
+    calls = []
+
+    class _Runner:
+        def __init__(self, stage):
+            self.stage = stage
+
+        def execute(self, value, request, context):
+            calls.append(self.stage)
+            if self.stage == "text":
+                return QwenTextStageOutputs("hidden", "mask")
+            if self.stage == "generate":
+                return QwenGenerateStageOutputs("latents")
+            return QwenVaeStageOutputs(DiffletGenerateOutput(b"png", "image/png"))
+
+    orchestrator.runners = {stage: _Runner(stage) for stage in ("text", "generate", "vae")}
+    request = DiffletGenerateRequest("id", "Qwen/Qwen-Image", "prompt", 64, 64, 1, 1.0, 0)
+
+    output = asyncio.run(
+        orchestrator.generate(request, WorkerRequestContext.with_timeout("id", 1.0))
+    )
+
+    assert calls == ["text", "generate", "vae"]
+    assert output.data == b"png"

@@ -145,7 +145,9 @@ def test_has_runtime_components(tmp_path):
 
 
 def test_prepare_latents_packed_and_unpacked_paths(tmp_path):
-    pipe = m.QwenImageOrchestrator(model_path=str(tmp_path), dtype=torch.float32, height=64, width=64)
+    pipe = m.QwenImageOrchestrator(
+        model_path=str(tmp_path), dtype=torch.float32, height=64, width=64
+    )
     packed = torch.zeros((1, 16, 64), dtype=torch.float32)
     assert pipe.prepare_latents(batch_size=1, latents=packed) is packed
     with pytest.raises(ValueError, match="Expected packed latents shape"):
@@ -172,10 +174,14 @@ def test_timesteps_fallback_linspace(tmp_path):
 
 def test_timesteps_with_scheduler(tmp_path):
     scheduler = FakeScheduler()
-    pipe = m.QwenImageOrchestrator(model_path=str(tmp_path), dtype=torch.float32, scheduler=scheduler)
+    pipe = m.QwenImageOrchestrator(
+        model_path=str(tmp_path), dtype=torch.float32, scheduler=scheduler
+    )
     ts = pipe._timesteps(3, device=torch.device("cpu"))
     assert ts.numel() == 3
-    assert scheduler.calls[0]["sigmas"].tolist() == pytest.approx(list(np.linspace(1.0, 1.0 / 3, 3)))
+    assert scheduler.calls[0]["sigmas"].tolist() == pytest.approx(
+        list(np.linspace(1.0, 1.0 / 3, 3))
+    )
 
 
 def test_call_uses_fallback_timesteps_and_scalar_timestep(tmp_path):
@@ -205,7 +211,9 @@ def test_scheduler_step_with_real_scheduler(tmp_path):
 
 
 def test_decode_requires_vae(tmp_path):
-    pipe = m.QwenImageOrchestrator(model_path=str(tmp_path), dtype=torch.float32, height=64, width=64)
+    pipe = m.QwenImageOrchestrator(
+        model_path=str(tmp_path), dtype=torch.float32, height=64, width=64
+    )
     with pytest.raises(ValueError, match="requires an active VAE"):
         pipe(bundle=_bundle(torch.ones((1, 16, 64))), output_type="pt")
 
@@ -310,3 +318,41 @@ def test_teacache_fused_probe_skips_and_records(tmp_path):
     assert len(transformer.calls) == 2
     assert pipe.teacache_controller.stats()["skipped_steps"] == 1
     assert out.latents.shape == (1, 16, 64)
+
+
+def test_teacache_controller_resets_between_requests(tmp_path):
+    calib = _write_calibration(tmp_path)
+    transformer = FakeTeacacheTransformer(value=0.5)
+    pipe = m.QwenImageOrchestrator(
+        model_path=str(tmp_path),
+        transformer=transformer,
+        dtype=torch.float32,
+        teacache_speedup=1.5,
+        teacache_calibration_path=calib,
+    )
+
+    for _ in range(2):
+        pipe(bundle=_bundle(), timesteps=torch.tensor([1.0, 0.6, 0.3]))
+        assert pipe.teacache_controller.stats()["full_steps"] == 2
+        assert pipe.teacache_controller.stats()["skipped_steps"] == 1
+
+    assert len(transformer.calls) == 4
+    assert transformer.delta_calls == 6
+
+
+def test_teacache_step_mismatch_uses_baseline_without_probe(tmp_path):
+    calib = _write_calibration(tmp_path)
+    transformer = FakeTeacacheTransformer(value=0.5)
+    pipe = m.QwenImageOrchestrator(
+        model_path=str(tmp_path),
+        transformer=transformer,
+        dtype=torch.float32,
+        teacache_speedup=1.5,
+        teacache_calibration_path=calib,
+    )
+
+    pipe(bundle=_bundle(), timesteps=torch.tensor([1.0, 0.5]))
+
+    assert transformer.delta_calls == 0
+    assert len(transformer.calls) == 2
+    assert pipe.teacache_controller.stats()["full_steps"] == 0
