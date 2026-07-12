@@ -77,10 +77,7 @@ class FluxServingArtifactPreparer:
                 validate_payload=_validate_payload,
             )
 
-        bindings = tuple(
-            _prepare_binding(spec)
-            for spec in specs
-        )
+        bindings = tuple(_prepare_binding(spec) for spec in specs)
         pipeline = _pipeline_definition()
         runtime_plan = _runtime_plan(profile, pipeline, specs)
         return ResolvedRuntimeBundle(

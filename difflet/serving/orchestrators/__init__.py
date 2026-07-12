@@ -1,2 +1,1 @@
 """Model-specific serving adapters."""
-

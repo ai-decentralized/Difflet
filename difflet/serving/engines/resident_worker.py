@@ -154,7 +154,9 @@ class ResidentWorkerServingEngine:
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                logger.warning("engine.request_timeout request_id=%s before_start", request.request_id)
+                logger.warning(
+                    "engine.request_timeout request_id=%s before_start", request.request_id
+                )
                 raise DiffletServingError(
                     504, "request_timeout", "request timed out", "server_error"
                 )
@@ -182,9 +184,7 @@ class ResidentWorkerServingEngine:
                     run_task.cancel()
                     with suppress(BaseException):
                         await run_task
-                    logger.warning(
-                        "engine.draining_wait_cancel request_id=%s", request.request_id
-                    )
+                    logger.warning("engine.draining_wait_cancel request_id=%s", request.request_id)
                     raise _engine_draining()
                 raise asyncio.TimeoutError
             except asyncio.CancelledError:
@@ -200,9 +200,7 @@ class ResidentWorkerServingEngine:
                 ) from exc
             except DiffletServingError as exc:
                 if _requires_worker_recovery(exc):
-                    release_lock = not self._start_inflight_recovery(
-                        run_task, reason=exc.code
-                    )
+                    release_lock = not self._start_inflight_recovery(run_task, reason=exc.code)
                 logger.warning(
                     "engine.request_failed request_id=%s code=%s status=%s",
                     request.request_id,
@@ -235,9 +233,7 @@ class ResidentWorkerServingEngine:
         async with self._admission_lock:
             capacity = self.config.max_running_requests + self.config.max_queued_requests
             if self._pending >= capacity:
-                logger.warning(
-                    "engine.queue_full current=%d capacity=%d", self._pending, capacity
-                )
+                logger.warning("engine.queue_full current=%d capacity=%d", self._pending, capacity)
                 raise DiffletServingError(429, "queue_full", "resident worker queue is full")
             logger.debug("engine.queue_admit before=%d", self._pending)
             self._pending += 1
@@ -302,9 +298,7 @@ class ResidentWorkerServingEngine:
             if reason in {"caller_cancelled", "timeout", "request_timeout"}:
                 self._worker.cancel_inflight()
                 clean_cancel = await self._wait_for_terminal_state(run_task)
-                logger.info(
-                    "engine.recovery_cancel_done reason=%s clean=%s", reason, clean_cancel
-                )
+                logger.info("engine.recovery_cancel_done reason=%s clean=%s", reason, clean_cancel)
             if not clean_cancel:
                 await asyncio.to_thread(self._worker.terminate)
                 with suppress(BaseException):
@@ -474,9 +468,7 @@ class _ResidentWorkerProcess:
                 )
                 raise request_cancelled("worker acknowledged request cancellation")
             self._clear_inflight(request.request_id)
-            logger.error(
-                "worker_process_generation_error request_id=%s", request.request_id
-            )
+            logger.error("worker_process_generation_error request_id=%s", request.request_id)
             raise _error_from_reply(reply)
 
     def cancel_inflight(self) -> None:
@@ -551,9 +543,7 @@ class _ResidentWorkerProcess:
         self._status_thread.start()
 
     def _stop_status_consumer(self) -> None:
-        logger.debug(
-            "worker_status_consumer_stop model=%s", self.runtime.profile.model_id
-        )
+        logger.debug("worker_status_consumer_stop model=%s", self.runtime.profile.model_id)
         if self._status_stop is not None:
             self._status_stop.set()
         if self._status_thread is not None:
@@ -716,7 +706,11 @@ def _worker_main(
             if cmd_type != "generate":
                 continue
             request: DiffletGenerateRequest = cmd["request"]
-            logger.info("worker_main generate_start request_id=%s model=%s", request.request_id, runtime.profile.model_id)
+            logger.info(
+                "worker_main generate_start request_id=%s model=%s",
+                request.request_id,
+                runtime.profile.model_id,
+            )
             heartbeat_state.set(state="busy", request_id=request.request_id)
             context = WorkerRequestContext.with_timeout(
                 request.request_id,

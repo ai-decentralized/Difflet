@@ -13,7 +13,6 @@ from difflet.serving.model_registry import ResolvedServingModel
 from difflet.serving.openai.serving_chat import generate_chat_completion
 from difflet.serving.options import ServeOptions
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -88,9 +87,7 @@ def create_app(
     @app.post("/v1/chat/completions")
     async def chat_completions(payload: Any = Body(default=None), request: Request | None = None):
         start = time.perf_counter()
-        request_id = (
-            payload.get("id") if isinstance(payload, dict) and "id" in payload else None
-        )
+        request_id = payload.get("id") if isinstance(payload, dict) and "id" in payload else None
         client = request.client.host if request is not None and request.client else None
         logger.info(
             "http.request_started path=%s method=%s model=%s request_id=%s client=%s",
