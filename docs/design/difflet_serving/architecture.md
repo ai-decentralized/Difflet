@@ -10,8 +10,8 @@ notes, including rotating, subprocess, and multi-plan ideas, but those are not
 part of the P0 implementation scope unless repeated here.
 
 [`implementation_changes.md`](implementation_changes.md) lists the exact delta
-from the current branch, including obsolete code to delete. [`review.md`](review.md)
-is the review ledger; neither file defines a competing runtime contract.
+from the current branch, including obsolete code to delete; it does not define a
+competing runtime contract.
 
 ## Scope
 
