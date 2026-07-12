@@ -44,6 +44,66 @@ for Flux. The operational comparison should use the steady-state figures above;
 resident serving is intentionally already loaded, while CLI always creates a new
 process.
 
+## 20-Step CLI And Serving Rerun
+
+A follow-up run used the same TP4/CP1, 1024x1024, seed 42 profile with 20 inference
+steps, guidance 3.5, and prompt `a small red sailboat on a calm blue lake`. Each
+CLI measurement is a new `difflet generate` process. Each serving measurement is
+the complete localhost HTTP request, including validation, resident inference, PNG
+encoding, R2 upload, and public URL construction.
+
+| Model | Mode | Run 1 | Run 2 | Run 3 | Mean |
+|---|---|---:|---:|---:|---:|
+| Qwen | Resident serving HTTP | 14.804s | 9.267s | 9.322s | **11.131s** |
+| Qwen | CLI, independent process | 83.37s | 82.70s | 80.74s | **82.27s** |
+| Flux | Resident serving HTTP | 6.833s | 6.321s | 6.324s | **6.493s** |
+| Flux | CLI, independent process | 109.73s | 53.70s | 54.10s | **72.51s** |
+
+Runs 2 and 3 remove the most obvious first-request/process cold effects:
+
+| Model | CLI runs 2-3 mean | Serving runs 2-3 mean | Serving speedup |
+|---|---:|---:|---:|
+| Qwen | 81.720s | 9.294s | **8.79x** |
+| Flux | 53.900s | 6.322s | **8.53x** |
+
+The Qwen serving worker itself was stable at 8.982-9.000s for all three requests.
+Its first HTTP request spent an additional approximately 5.29s lazily loading the
+parent-side request-validator tokenizer; runs 2 and 3 did not repeat that cost.
+Flux's 109.73s first CLI process reproduced the earlier cold page-cache outlier,
+while its two warm independent processes were within 0.4s of each other.
+
+The detailed serving phases were:
+
+| Model | Phase | Run 1 | Run 2 | Run 3 |
+|---|---|---:|---:|---:|
+| Qwen | Resident engine | 8.999s | 8.985s | 8.982s |
+| Qwen | R2 upload + URL | 0.513s | 0.279s | 0.338s |
+| Flux | Resident engine | 6.045s | 6.033s | 6.031s |
+| Flux | R2 upload + URL | 0.637s | 0.286s | 0.290s |
+
+The R2 bucket for this rerun was located in Oceania near the `ap-southeast-4`
+Trainium host. Uploading the 0.74-0.95 MiB PNGs took 0.28-0.64s, compared with
+2.85-2.96s when the previous bucket was in Western North America. Public URL
+construction itself took only 0.02-0.04ms.
+
+Both models produced deterministic output within each mode. Flux CLI and serving
+were byte-identical with SHA256
+`fcffdb037da9045076d557296496c20d3aa0bbe5c7deafcbd56054691972f5fa`.
+Qwen CLI and serving were internally deterministic but differed by approximately
+0.499/255 mean absolute RGB channel value because the CLI and resident serving VAE
+topologies differ. All 12 downloaded images are valid 1024x1024 RGB PNGs.
+
+This run also created new immutable serving generations. Preparation plus load and
+startup smoke took approximately 9 minutes for Qwen and 3 minutes 40 seconds for
+Flux, with the underlying Neuron compiler cache hit. These one-time startup costs
+are excluded from HTTP latency and will be reused by later warm starts.
+
+The complete follow-up evidence is under:
+
+```text
+artifacts/remote-logs/16.26.177.239/cli-vs-serve/benchmark-cli-20steps-20260712T074956Z/
+```
+
 ## Comparison With The Previous Flux Run
 
 The 2026-07-10 Flux benchmark used the same TP4/CP1/1024 profile but 28 steps. Its
