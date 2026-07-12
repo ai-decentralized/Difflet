@@ -18,6 +18,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent.parent / "scripts"))
 
 from verify_cli import (
+    _DIFFLET_CMD,
     CP_UNSUPPORTED,
     DISTILLED,
     EXPECTED_FAIL_CELLS,
@@ -40,7 +41,7 @@ from verify_cli import (
 
 MODEL_KEYS = ["flux", "qwen_image", "ltx_2", "wan", "wan2_1",
               "hunyuan_video", "hunyuan_video_15"]
-CONFIG_KEYS = ["tp4", "tp2cp2", "tp2cfg", "tp4sp"]
+CONFIG_KEYS = ["tp4", "tp2cp2", "tp2cfg", "tp4sp", "dp2tp2"]
 
 
 # ---------------------------------------------------------------- matrix shape
@@ -49,7 +50,7 @@ def test_all_seven_models_present():
     assert list(MODELS.keys()) == MODEL_KEYS
 
 
-def test_all_four_configs_present():
+def test_all_five_configs_present():
     assert list(PARALLEL_CONFIGS.keys()) == CONFIG_KEYS
 
 
@@ -63,6 +64,7 @@ def test_config_flags():
     assert PARALLEL_CONFIGS["tp2cp2"].flags == ("--tp-degree", "2", "--cp-degree", "2")
     assert PARALLEL_CONFIGS["tp2cfg"].flags == ("--tp-degree", "2", "--cfg-parallel")
     assert PARALLEL_CONFIGS["tp4sp"].flags == ("--tp-degree", "4", "--sp")
+    assert PARALLEL_CONFIGS["dp2tp2"].flags == ("--tp-degree", "2", "--dp", "2")
 
 
 def test_model_ids():
@@ -107,7 +109,9 @@ def test_cp_unsupported_models():
 def test_expected_fail_cells():
     assert EXPECTED_FAIL_CELLS == {
         ("hunyuan_video_15", "tp4"),      # scaffold: NotImplementedError
+        ("hunyuan_video_15", "dp2tp2"),   # same scaffold gap via the router
         ("hunyuan_video", "tp2cp2"),      # neuronx-cc 2.25 NCC_INLA001 internal error
+        ("hunyuan_video", "dp2tp2"),      # VAE alloc failure: f121 exceeds 2-core replica
     }
 
 
@@ -136,13 +140,19 @@ def test_skip_reason_full_support_table():
 
 def test_plan_cells_counts():
     cells = plan_cells(MODEL_KEYS, CONFIG_KEYS)
-    assert len(cells) == 28
+    assert len(cells) == 35
     skipped = [c for c in cells if c.skip_reason]
     runnable = [c for c in cells if not c.skip_reason]
-    assert len(skipped) == 9
-    assert len(runnable) == 19
+    assert len(skipped) == 9      # dp2tp2 adds no skips (dp applies to every model)
+    assert len(runnable) == 26
     xfail = {(c.model_key, c.config_key) for c in runnable if c.expected_fail}
-    assert xfail == {("hunyuan_video_15", "tp4"), ("hunyuan_video", "tp2cp2")}
+    assert xfail == {("hunyuan_video_15", "tp4"), ("hunyuan_video_15", "dp2tp2"),
+                     ("hunyuan_video", "tp2cp2"), ("hunyuan_video", "dp2tp2")}
+
+
+def test_dp_config_never_skipped():
+    for model_key in MODEL_KEYS:
+        assert skip_reason(model_key, "dp2tp2") is None, model_key
 
 
 def test_plan_cells_respects_subset_filters():
@@ -155,7 +165,13 @@ def test_plan_cells_respects_subset_filters():
 
 def test_build_download_cmd():
     cmd = build_download_cmd(MODELS["flux"])
-    assert cmd == ["difflet", "download", "--model-id", "black-forest-labs/FLUX.1-dev"]
+    assert cmd == _DIFFLET_CMD + ["download", "--model-id", "black-forest-labs/FLUX.1-dev"]
+
+
+def test_difflet_cmd_is_module_invocation():
+    # The editable install may point at a different checkout; the matrix must
+    # test THIS checkout via `python -m` + cwd, not the console script.
+    assert _DIFFLET_CMD[-2:] == ["-m", "difflet.cli.main"]
 
 
 def test_download_globs_point_at_hf_hub_snapshots():
@@ -167,7 +183,8 @@ def test_download_globs_point_at_hf_hub_snapshots():
 
 def test_build_compile_cmd_includes_config_and_shape_flags():
     cmd = build_compile_cmd(MODELS["wan"], PARALLEL_CONFIGS["tp2cp2"])
-    assert cmd[:4] == ["difflet", "compile", "--model-id", "Wan-AI/Wan2.2-T2V-A14B-Diffusers"]
+    assert cmd[: len(_DIFFLET_CMD) + 3] == _DIFFLET_CMD + [
+        "compile", "--model-id", "Wan-AI/Wan2.2-T2V-A14B-Diffusers"]
     assert ("--tp-degree", "2") == (cmd[cmd.index("--tp-degree")], cmd[cmd.index("--tp-degree") + 1])
     assert ("--cp-degree", "2") == (cmd[cmd.index("--cp-degree")], cmd[cmd.index("--cp-degree") + 1])
     for flag, val in [("--height", "480"), ("--width", "832"), ("--num-frames", "9")]:
@@ -199,8 +216,9 @@ def test_wan2_1_gets_isolated_cache_dir():
 
 def test_hunyuan_video_15_compile_cmd_minimal():
     cmd = build_compile_cmd(MODELS["hunyuan_video_15"], PARALLEL_CONFIGS["tp4"])
-    assert cmd[:4] == ["difflet", "compile", "--model-id",
-                       "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"]
+    assert cmd[: len(_DIFFLET_CMD) + 3] == _DIFFLET_CMD + [
+        "compile", "--model-id",
+        "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"]
     assert "--height" not in cmd  # scaffold fails before shape matters
 
 
@@ -210,7 +228,7 @@ def test_build_generate_cmd_non_staged():
     assert "--prompt" in cmd
     assert "--work-dir" not in cmd and "--keep-work-dir" not in cmd
     assert cmd[cmd.index("--output") + 1] == str(cell_dir / "flux.png")
-    assert artifacts == [cell_dir / "flux.png"]
+    assert artifacts == [[cell_dir / "flux.png"]]
 
 
 def test_build_generate_cmd_staged_gets_work_dir():
@@ -219,7 +237,7 @@ def test_build_generate_cmd_staged_gets_work_dir():
     assert cmd[cmd.index("--work-dir") + 1] == str(cell_dir / "work")
     assert "--keep-work-dir" in cmd
     # mp4 export can fall back to a .pt tensor; both prove inference ran
-    assert artifacts == [cell_dir / "wan.mp4", cell_dir / "wan.pt"]
+    assert artifacts == [[cell_dir / "wan.mp4", cell_dir / "wan.pt"]]
 
 
 def test_build_generate_cmd_ltx_2_accepts_mp4_or_pt():
@@ -227,13 +245,47 @@ def test_build_generate_cmd_ltx_2_accepts_mp4_or_pt():
     cell_dir = pathlib.Path("/tmp/cell")
     cmd, artifacts = build_generate_cmd(MODELS["ltx_2"], PARALLEL_CONFIGS["tp4"], cell_dir)
     assert cmd[cmd.index("--output") + 1] == str(cell_dir / "ltx2.mp4")
-    assert artifacts == [cell_dir / "ltx2.mp4", cell_dir / "ltx2.pt"]
+    assert artifacts == [[cell_dir / "ltx2.mp4", cell_dir / "ltx2.pt"]]
 
 
 def test_build_generate_cmd_qwen_accepts_png_or_pt():
     cell_dir = pathlib.Path("/tmp/cell")
     _, artifacts = build_generate_cmd(MODELS["qwen_image"], PARALLEL_CONFIGS["tp4"], cell_dir)
-    assert artifacts == [cell_dir / "qwen.png", cell_dir / "qwen.pt"]
+    assert artifacts == [[cell_dir / "qwen.png", cell_dir / "qwen.pt"]]
+
+
+def test_build_generate_cmd_dp_batches_requests(tmp_path):
+    import json as _json
+
+    cmd, artifacts = build_generate_cmd(MODELS["wan"], PARALLEL_CONFIGS["dp2tp2"], tmp_path)
+    assert "--requests" in cmd and "--prompt" not in cmd and "--output" not in cmd
+    assert "--dp" in cmd and cmd[cmd.index("--dp") + 1] == "2"
+    assert cmd[cmd.index("--work-dir") + 1] == str(tmp_path / "work")
+    lines = [_json.loads(l) for l in
+             (tmp_path / "requests.jsonl").read_text().splitlines()]
+    assert len(lines) == 2
+    assert lines[0]["seed"] == 42 and lines[1]["seed"] == 43
+    assert lines[0]["output"] != lines[1]["output"]
+    # one artifact group per request, each with an mp4->pt fallback
+    assert artifacts == [
+        [tmp_path / "wan_dp0.mp4", tmp_path / "wan_dp0.pt"],
+        [tmp_path / "wan_dp1.mp4", tmp_path / "wan_dp1.pt"],
+    ]
+
+
+def test_run_cell_dp_requires_every_request_artifact(tmp_path):
+    spec, cfg = MODELS["flux"], PARALLEL_CONFIGS["dp2tp2"]
+
+    def fake_run(cmd, **kwargs):
+        if "generate" in cmd:
+            # only request 0 produced an output
+            (tmp_path / "flux" / "dp2tp2" / "flux_dp0.png").touch()
+        return MagicMock(returncode=0)
+
+    with patch("subprocess.run", side_effect=fake_run):
+        result = run_cell(spec, cfg, tmp_path / "flux" / "dp2tp2", timeout=60)
+    assert result["generate"].status == Status.FAIL
+    assert "flux_dp1" in result["generate"].reason
 
 
 # ---------------------------------------------------------------- run_step

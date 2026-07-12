@@ -127,32 +127,36 @@ class QwenImageOrchestrator(ModelOrchestrator):
             app.compile(str(compiled_dir))
             return
 
+        from difflet.cli.dp import stage_loop
+
         app.load(str(compiled_dir))
         tok = AutoTokenizer.from_pretrained(str(Path(model_dir) / "tokenizer"))
-        ti = tok(
-            _QWEN_TEMPLATE.format(args.prompt), max_length=_ENC_SEQ,
-            padding="max_length", truncation=True, return_tensors="pt",
-            return_attention_mask=True,
-        )
-        input_ids = ti.input_ids.to(torch.int32)
-        attn = ti.attention_mask.to(torch.int32)
-        out = app(
-            input_ids=input_ids, attention_mask=attn,
-            position_ids=torch.arange(_ENC_SEQ, dtype=torch.int32).unsqueeze(0),
-            sampling_params=torch.tensor([[1.0, 1.0, 1.0]], dtype=torch.float32),
-        )
-        hs = out.captured_tensors[0].float()
-        valid = int(attn.sum())
-        dev = hs[:, _QWEN_DROP_IDX:valid]
-        seq = dev.shape[1]
-        ehs = torch.zeros(1, _TEXT_SEQ_LEN, dev.shape[-1], dtype=torch.bfloat16)
-        ehs[:, :seq] = dev.to(torch.bfloat16)
-        mask = torch.zeros(1, _TEXT_SEQ_LEN, dtype=torch.bool)
-        mask[:, :seq] = True
-        work_dir = Path(args.work_dir)
-        torch.save({"encoder_hidden_states": ehs, "encoder_hidden_states_mask": mask},
-                   work_dir / "text.pt")
-        print(f"[text] encoder_hidden_states {tuple(ehs.shape)} -> {work_dir}/text.pt")
+        for req in stage_loop.claim_requests(args):
+            with stage_loop.request_scope(args, req, final=False):
+                ti = tok(
+                    _QWEN_TEMPLATE.format(req.prompt), max_length=_ENC_SEQ,
+                    padding="max_length", truncation=True, return_tensors="pt",
+                    return_attention_mask=True,
+                )
+                input_ids = ti.input_ids.to(torch.int32)
+                attn = ti.attention_mask.to(torch.int32)
+                out = app(
+                    input_ids=input_ids, attention_mask=attn,
+                    position_ids=torch.arange(_ENC_SEQ, dtype=torch.int32).unsqueeze(0),
+                    sampling_params=torch.tensor([[1.0, 1.0, 1.0]], dtype=torch.float32),
+                )
+                hs = out.captured_tensors[0].float()
+                valid = int(attn.sum())
+                dev = hs[:, _QWEN_DROP_IDX:valid]
+                seq = dev.shape[1]
+                ehs = torch.zeros(1, _TEXT_SEQ_LEN, dev.shape[-1], dtype=torch.bfloat16)
+                ehs[:, :seq] = dev.to(torch.bfloat16)
+                mask = torch.zeros(1, _TEXT_SEQ_LEN, dtype=torch.bool)
+                mask[:, :seq] = True
+                dest = stage_loop.work_file(args, req, "text.pt")
+                torch.save({"encoder_hidden_states": ehs, "encoder_hidden_states_mask": mask},
+                           dest)
+                print(f"[text] encoder_hidden_states {tuple(ehs.shape)} -> {dest}")
 
     def _stage_generate(self, args: argparse.Namespace) -> None:
         import numpy as np
@@ -166,7 +170,6 @@ class QwenImageOrchestrator(ModelOrchestrator):
         work_dir = Path(args.work_dir)
 
         h, w = args.height or 1024, args.width or 1024
-        guidance = torch.full([1], float(args.guidance_scale or 4.0), dtype=torch.bfloat16)
 
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
@@ -182,7 +185,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             app.compile(str(compiled_dir))
             return
 
-        text = torch.load(work_dir / "text.pt")
+        from difflet.cli.dp import stage_loop
 
         app.load(str(compiled_dir), skip_warmup=True)
         sched = app.pipeline.scheduler
@@ -190,22 +193,29 @@ class QwenImageOrchestrator(ModelOrchestrator):
         image_seq_len = (h // 16) * (w // 16)
         slope = (sc.max_shift - sc.base_shift) / (sc.max_image_seq_len - sc.base_image_seq_len)
         mu = image_seq_len * slope + (sc.base_shift - slope * sc.base_image_seq_len)
-        num_steps = args.steps or 4
-        sigmas = np.linspace(1.0, 1.0 / num_steps, num_steps).tolist()
-        sched.set_timesteps(sigmas=sigmas, mu=mu, device="cpu")
-
-        torch.manual_seed(args.seed)
-        out = app.pipeline(
-            encoder_hidden_states=text["encoder_hidden_states"],
-            encoder_hidden_states_mask=text["encoder_hidden_states_mask"],
-            guidance=guidance,
-            timesteps=sched.timesteps,
-            num_inference_steps=num_steps,
-            output_type="latent",
-        )
-        packed = out.latents.cpu()
-        torch.save(packed, work_dir / "latents.pt")
-        print(f"[generate] packed latents {tuple(packed.shape)} -> {work_dir}/latents.pt")
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=False):
+                text = torch.load(stage_loop.work_file(args, req, "text.pt"))
+                num_steps = int(stage_loop.effective(req, args, "steps", 4))
+                sigmas = np.linspace(1.0, 1.0 / num_steps, num_steps).tolist()
+                sched.set_timesteps(sigmas=sigmas, mu=mu, device="cpu")
+                guidance = torch.full(
+                    [1], float(stage_loop.effective(req, args, "guidance_scale", 4.0)),
+                    dtype=torch.bfloat16,
+                )
+                torch.manual_seed(req.seed)
+                out = app.pipeline(
+                    encoder_hidden_states=text["encoder_hidden_states"],
+                    encoder_hidden_states_mask=text["encoder_hidden_states_mask"],
+                    guidance=guidance,
+                    timesteps=sched.timesteps,
+                    num_inference_steps=num_steps,
+                    output_type="latent",
+                )
+                packed = out.latents.cpu()
+                dest = stage_loop.work_file(args, req, "latents.pt")
+                torch.save(packed, dest)
+                print(f"[generate] packed latents {tuple(packed.shape)} -> {dest}")
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
         import torch
@@ -231,29 +241,38 @@ class QwenImageOrchestrator(ModelOrchestrator):
             app.compile(str(compiled_dir))
             return
 
-        work_dir = Path(args.work_dir)
-        packed = torch.load(work_dir / "latents.pt").float()
-        b, seq, _ = packed.shape
-        hh = ww = int(seq ** 0.5)
-        z = packed.view(b, hh, ww, 16, 2, 2).permute(0, 3, 1, 4, 2, 5).reshape(b, 16, hh * 2, ww * 2)
-        z = z.unsqueeze(2)
-        mean = torch.tensor(config.latents_mean).view(1, -1, 1, 1, 1)
-        std = torch.tensor(config.latents_std).view(1, -1, 1, 1, 1)
-        z = (z * std + mean).to(torch.bfloat16) if len(config.latents_mean) else z.to(torch.bfloat16)
+        from difflet.cli.dp import stage_loop
 
         app.load(str(compiled_dir))
-        img = app(z)
-        img = (img[0] if isinstance(img, (tuple, list)) else img).float().cpu()
-        img = img[:, :, 0]
-        out_path = Path(args.output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            from torchvision.utils import save_image
-            save_image((img[0] * 0.5 + 0.5).clamp(0, 1), str(out_path))
-            print(f"[vae] image saved to {out_path}")
-        except Exception as exc:
-            torch.save(img, out_path.with_suffix(".pt"))
-            print(f"[vae] tensor saved to {out_path.with_suffix('.pt')} (png skipped: {exc})")
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                packed = torch.load(stage_loop.work_file(args, req, "latents.pt")).float()
+                b, seq, _ = packed.shape
+                hh = ww = int(seq ** 0.5)
+                z = packed.view(b, hh, ww, 16, 2, 2).permute(0, 3, 1, 4, 2, 5).reshape(
+                    b, 16, hh * 2, ww * 2
+                )
+                z = z.unsqueeze(2)
+                mean = torch.tensor(config.latents_mean).view(1, -1, 1, 1, 1)
+                std = torch.tensor(config.latents_std).view(1, -1, 1, 1, 1)
+                z = (
+                    (z * std + mean).to(torch.bfloat16)
+                    if len(config.latents_mean)
+                    else z.to(torch.bfloat16)
+                )
+                img = app(z)
+                img = (img[0] if isinstance(img, (tuple, list)) else img).float().cpu()
+                img = img[:, :, 0]
+                out_path = Path(req.output)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    from torchvision.utils import save_image
+                    save_image((img[0] * 0.5 + 0.5).clamp(0, 1), str(out_path))
+                    print(f"[vae] image saved to {out_path}")
+                except Exception as exc:
+                    torch.save(img, out_path.with_suffix(".pt"))
+                    print(f"[vae] tensor saved to {out_path.with_suffix('.pt')} "
+                          f"(png skipped: {exc})")
 
     # ------------------------------------------------------------ helpers
 
@@ -292,4 +311,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
             parts += ["--cache-dir", a.cache_dir]
         if work_dir:
             parts += ["--work-dir", work_dir]
+        if getattr(a, "requests_dir", None):
+            parts += ["--requests-dir", str(a.requests_dir),
+                      "--worker-index", str(a.worker_index),
+                      "--dp-schedule", str(getattr(a, "dp_schedule", "round_robin"))]
         return parts

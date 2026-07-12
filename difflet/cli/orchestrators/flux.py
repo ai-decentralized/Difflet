@@ -41,6 +41,29 @@ class FluxOrchestrator(ModelOrchestrator):
     def generate(self) -> None:
         import torch
 
+        from difflet.cli.dp import stage_loop
+
+        pipe = self._load_pipeline()
+        args = self.args
+        for req in stage_loop.claim_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                output = pipe(
+                    prompt=req.prompt,
+                    num_inference_steps=int(stage_loop.effective(req, args, "steps", 28)),
+                    height=args.height or 1024,
+                    width=args.width or 1024,
+                    guidance_scale=float(
+                        stage_loop.effective(req, args, "guidance_scale", 3.5)
+                    ),
+                    generator=torch.Generator().manual_seed(req.seed),
+                )
+                image = output.images[0]
+                out = Path(req.output)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                image.save(str(out))
+                print(f"[difflet] image saved to {out}")
+
+    def _load_pipeline(self):
         from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.path_resolver import resolve_model_path
@@ -79,7 +102,7 @@ class FluxOrchestrator(ModelOrchestrator):
             )
             raise SystemExit(1)
 
-        pipe = DiffletPipeline.from_pretrained(
+        return DiffletPipeline.from_pretrained(
             _HF_MODEL_ID,
             model_type=_MODEL_TYPE,
             parallel=parallel,
@@ -91,19 +114,6 @@ class FluxOrchestrator(ModelOrchestrator):
             skip_compile=True,
             **self._teacache_kwargs(),
         )
-        output = pipe(
-            prompt=self.args.prompt,
-            num_inference_steps=self.args.steps or 28,
-            height=self.args.height or 1024,
-            width=self.args.width or 1024,
-            guidance_scale=self.args.guidance_scale or 3.5,
-            generator=torch.Generator().manual_seed(self.args.seed),
-        )
-        image = output.images[0]
-        out = Path(self.args.output)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        image.save(str(out))
-        print(f"[difflet] image saved to {out}")
 
     # ------------------------------------------------------------------ helpers
 
