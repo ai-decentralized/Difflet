@@ -57,6 +57,12 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--teacache-online-delta", type=float, default=None)
     p.add_argument("--teacache-speedup", type=float, default=None)
     p.add_argument("--teacache-calibration", default=None)
+    # DP worker-mode flags (parse_known_args silently drops what isn't declared
+    # here — the --sp bug class; keep in sync with main._add_generate_flags).
+    p.add_argument("--requests-dir", default=None)
+    p.add_argument("--worker-index", type=int, default=None)
+    p.add_argument("--dp-schedule", default="round_robin")
+    p.add_argument("--keep-work-dir", action="store_true")
     return p
 
 

@@ -184,24 +184,30 @@ class WanOrchestrator(ModelOrchestrator):
             app.compile(str(compiled_dir))
             return
 
+        from difflet.cli.dp import stage_loop
+
         app.load(str(compiled_dir), start_rank_id=0,
                  local_ranks_size=parallel.world_size, skip_warmup=True)
-        out = app(
-            # Latent init is delegated to WanPipeline.prepare_latents, which
-            # draws unit-variance noise from this seeded generator.
-            generator=torch.Generator().manual_seed(args.seed),
-            prompt=args.prompt,
-            height=args.height or 480,
-            width=args.width or 832,
-            num_frames=args.num_frames or 9,
-            num_inference_steps=args.steps or 2,
-            guidance_scale=args.guidance_scale or 1.0,
-            output_type="latent",
-        )
-        work_dir = Path(args.work_dir)
-        latents_out = out.latents if hasattr(out, "latents") else out[0]
-        torch.save(latents_out.cpu(), work_dir / "latents.pt")
-        print(f"[wan] latents saved to {work_dir}/latents.pt")
+        for req in stage_loop.claim_requests(args):
+            with stage_loop.request_scope(args, req, final=False):
+                out = app(
+                    # Latent init is delegated to WanPipeline.prepare_latents, which
+                    # draws unit-variance noise from this seeded generator.
+                    generator=torch.Generator().manual_seed(req.seed),
+                    prompt=req.prompt,
+                    height=args.height or 480,
+                    width=args.width or 832,
+                    num_frames=args.num_frames or 9,
+                    num_inference_steps=int(stage_loop.effective(req, args, "steps", 2)),
+                    guidance_scale=float(
+                        stage_loop.effective(req, args, "guidance_scale", 1.0)
+                    ),
+                    output_type="latent",
+                )
+                latents_out = out.latents if hasattr(out, "latents") else out[0]
+                dest = stage_loop.work_file(args, req, "latents.pt")
+                torch.save(latents_out.cpu(), dest)
+                print(f"[wan] latents saved to {dest}")
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
         import torch
@@ -233,25 +239,31 @@ class WanOrchestrator(ModelOrchestrator):
             app.compile(str(compiled_dir))
             return
 
-        latents = torch.load(Path(args.work_dir) / "latents.pt").to(torch.bfloat16)
+        from difflet.cli.dp import stage_loop
+
         app.load(str(compiled_dir), start_rank_id=0, local_ranks_size=1, skip_warmup=True)
-        out = app(
-            latents=latents,
-            height=args.height or 480,
-            width=args.width or 832,
-            num_frames=args.num_frames or 9,
-            num_inference_steps=1,
-            output_type="pt",
-        )
-        frames = out.frames if hasattr(out, "frames") else out[0]
-        out_path = Path(args.output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        if out_path.suffix == ".mp4" and _save_video(frames.cpu(), str(out_path)):
-            pass
-        else:
-            pt_path = out_path.with_suffix(".pt")
-            torch.save(frames.cpu(), pt_path)
-            print(f"[wan] video tensor saved to {pt_path}")
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                latents = torch.load(
+                    stage_loop.work_file(args, req, "latents.pt")
+                ).to(torch.bfloat16)
+                out = app(
+                    latents=latents,
+                    height=args.height or 480,
+                    width=args.width or 832,
+                    num_frames=args.num_frames or 9,
+                    num_inference_steps=1,
+                    output_type="pt",
+                )
+                frames = out.frames if hasattr(out, "frames") else out[0]
+                out_path = Path(req.output)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                if out_path.suffix == ".mp4" and _save_video(frames.cpu(), str(out_path)):
+                    pass
+                else:
+                    pt_path = out_path.with_suffix(".pt")
+                    torch.save(frames.cpu(), pt_path)
+                    print(f"[wan] video tensor saved to {pt_path}")
 
     # ------------------------------------------------------------ helpers
 
@@ -298,4 +310,8 @@ class WanOrchestrator(ModelOrchestrator):
             parts += ["--cache-dir", a.cache_dir]
         if work_dir:
             parts += ["--work-dir", work_dir]
+        if getattr(a, "requests_dir", None):
+            parts += ["--requests-dir", str(a.requests_dir),
+                      "--worker-index", str(a.worker_index),
+                      "--dp-schedule", str(getattr(a, "dp_schedule", "round_robin"))]
         return parts

@@ -136,15 +136,19 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             app.compile(str(compiled_dir))
             return
 
+        from difflet.cli.dp import stage_loop
+
         app.load(str(compiled_dir))
         tok = CLIPTokenizer.from_pretrained(str(Path(model_dir) / "tokenizer_2"))
-        ids = tok(args.prompt, padding="max_length", max_length=77,
-                  truncation=True, return_tensors="pt").input_ids.to(torch.int64)
-        out = app(ids)
-        pooled = out.pooler_output.to(torch.bfloat16).cpu().reshape(1, -1)
-        work_dir = Path(args.work_dir)
-        torch.save({"pooled_projections": pooled}, work_dir / "clip.pt")
-        print(f"[clip] pooled_projections {tuple(pooled.shape)} -> {work_dir}/clip.pt")
+        for req in stage_loop.claim_requests(args):
+            with stage_loop.request_scope(args, req, final=False):
+                ids = tok(req.prompt, padding="max_length", max_length=77,
+                          truncation=True, return_tensors="pt").input_ids.to(torch.int64)
+                out = app(ids)
+                pooled = out.pooler_output.to(torch.bfloat16).cpu().reshape(1, -1)
+                dest = stage_loop.work_file(args, req, "clip.pt")
+                torch.save({"pooled_projections": pooled}, dest)
+                print(f"[clip] pooled_projections {tuple(pooled.shape)} -> {dest}")
 
     def _stage_llama(self, args: argparse.Namespace) -> None:
         import torch
@@ -193,27 +197,31 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             app.compile(str(compiled_dir))
             return
 
+        from difflet.cli.dp import stage_loop
+
         app.load(str(compiled_dir))
         tok = AutoTokenizer.from_pretrained(str(Path(model_dir) / "tokenizer"))
-        ti = tok(
-            _LLAMA_TEMPLATE.format(args.prompt), max_length=seq,
-            padding="max_length", truncation=True, return_tensors="pt",
-            return_attention_mask=True,
-        )
-        input_ids = ti.input_ids.to(torch.int32)
-        attn = ti.attention_mask.to(torch.int32)
-        out = app(
-            input_ids=input_ids,
-            attention_mask=attn,
-            position_ids=torch.arange(seq, dtype=torch.int32).unsqueeze(0),
-            sampling_params=torch.tensor([[1.0, 1.0, 1.0]], dtype=torch.float32),
-        )
-        hidden = out.captured_tensors[0][:, _LLAMA_CROP_START:].to(torch.bfloat16).cpu()
-        mask = attn[:, _LLAMA_CROP_START:].to(torch.int64)
-        work_dir = Path(args.work_dir)
-        torch.save({"encoder_hidden_states": hidden, "encoder_attention_mask": mask},
-                   work_dir / "llama.pt")
-        print(f"[llama] encoder_hidden_states {tuple(hidden.shape)} -> {work_dir}/llama.pt")
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=False):
+                ti = tok(
+                    _LLAMA_TEMPLATE.format(req.prompt), max_length=seq,
+                    padding="max_length", truncation=True, return_tensors="pt",
+                    return_attention_mask=True,
+                )
+                input_ids = ti.input_ids.to(torch.int32)
+                attn = ti.attention_mask.to(torch.int32)
+                out = app(
+                    input_ids=input_ids,
+                    attention_mask=attn,
+                    position_ids=torch.arange(seq, dtype=torch.int32).unsqueeze(0),
+                    sampling_params=torch.tensor([[1.0, 1.0, 1.0]], dtype=torch.float32),
+                )
+                hidden = out.captured_tensors[0][:, _LLAMA_CROP_START:].to(torch.bfloat16).cpu()
+                mask = attn[:, _LLAMA_CROP_START:].to(torch.int64)
+                dest = stage_loop.work_file(args, req, "llama.pt")
+                torch.save({"encoder_hidden_states": hidden, "encoder_attention_mask": mask},
+                           dest)
+                print(f"[llama] encoder_hidden_states {tuple(hidden.shape)} -> {dest}")
 
     def _stage_generate(self, args: argparse.Namespace) -> None:
         import numpy as np
@@ -233,9 +241,6 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
 
         h, w, f = args.height or 320, args.width or 512, args.num_frames or 61
         latent_frames = (f - 1) // 4 + 1
-        torch.manual_seed(args.seed)
-        latents = torch.randn(1, 16, latent_frames, h // 8, w // 8, dtype=torch.bfloat16)
-        guidance = torch.full([1], (args.guidance_scale or 6.0) * 1000.0, dtype=torch.bfloat16)
 
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
@@ -254,36 +259,49 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             app.compile(str(compiled_dir))
             return
 
-        llama = torch.load(work_dir / "llama.pt")
-        clip = torch.load(work_dir / "clip.pt")
+        from difflet.cli.dp import stage_loop
 
         app.load(str(compiled_dir), skip_warmup=True)
-        sigmas = np.linspace(1.0, 0.0, (args.steps or 4) + 1)[:-1]
-        timesteps, _ = _retrieve_timesteps(
-            app.pipeline.scheduler, args.steps or 4, "cpu", sigmas=sigmas
-        )
-        bundle = HunyuanVideoDiTInputBundle(
-            hidden_states=latents,
-            timestep=timesteps[:1].clone(),
-            encoder_hidden_states=llama["encoder_hidden_states"],
-            encoder_attention_mask=llama["encoder_attention_mask"].to(torch.int64),
-            pooled_projections=clip["pooled_projections"],
-            guidance=guidance,
-        )
-        output = app(
-            bundle=bundle, timesteps=timesteps,
-            num_inference_steps=args.steps or 4,
-            output_type="pt", return_trajectory=False,
-        )
-        frames = output.frames
-        out_path = Path(args.output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        if out_path.suffix == ".mp4" and _save_video(frames.cpu(), str(out_path)):
-            pass
-        else:
-            pt_path = out_path.with_suffix(".pt")
-            torch.save(frames.cpu(), pt_path)
-            print(f"[generate] video tensor saved to {pt_path}")
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                llama = torch.load(stage_loop.work_file(args, req, "llama.pt"))
+                clip = torch.load(stage_loop.work_file(args, req, "clip.pt"))
+                torch.manual_seed(req.seed)
+                latents = torch.randn(
+                    1, 16, latent_frames, h // 8, w // 8, dtype=torch.bfloat16
+                )
+                guidance = torch.full(
+                    [1],
+                    float(stage_loop.effective(req, args, "guidance_scale", 6.0)) * 1000.0,
+                    dtype=torch.bfloat16,
+                )
+                steps = int(stage_loop.effective(req, args, "steps", 4))
+                sigmas = np.linspace(1.0, 0.0, steps + 1)[:-1]
+                timesteps, _ = _retrieve_timesteps(
+                    app.pipeline.scheduler, steps, "cpu", sigmas=sigmas
+                )
+                bundle = HunyuanVideoDiTInputBundle(
+                    hidden_states=latents,
+                    timestep=timesteps[:1].clone(),
+                    encoder_hidden_states=llama["encoder_hidden_states"],
+                    encoder_attention_mask=llama["encoder_attention_mask"].to(torch.int64),
+                    pooled_projections=clip["pooled_projections"],
+                    guidance=guidance,
+                )
+                output = app(
+                    bundle=bundle, timesteps=timesteps,
+                    num_inference_steps=steps,
+                    output_type="pt", return_trajectory=False,
+                )
+                frames = output.frames
+                out_path = Path(req.output)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                if out_path.suffix == ".mp4" and _save_video(frames.cpu(), str(out_path)):
+                    pass
+                else:
+                    pt_path = out_path.with_suffix(".pt")
+                    torch.save(frames.cpu(), pt_path)
+                    print(f"[generate] video tensor saved to {pt_path}")
 
     # ------------------------------------------------------------ helpers
 
@@ -326,4 +344,8 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             parts += ["--cache-dir", a.cache_dir]
         if work_dir:
             parts += ["--work-dir", work_dir]
+        if getattr(a, "requests_dir", None):
+            parts += ["--requests-dir", str(a.requests_dir),
+                      "--worker-index", str(a.worker_index),
+                      "--dp-schedule", str(getattr(a, "dp_schedule", "round_robin"))]
         return parts
