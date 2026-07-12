@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from typing import Any
@@ -18,6 +19,8 @@ from difflet.serving.errors import (
 )
 from difflet.serving.model_registry import ResolvedServingModel
 from difflet.serving.types import DiffletGenerateRequest, DiffletGenerateOutput, ServingProfile
+
+logger = logging.getLogger(__name__)
 
 _IGNORED_RESPONSE_POLICY_FIELDS = {"response_format", "artifact_ttl_seconds"}
 _ALLOWED_TOP_LEVEL_FIELDS = {
@@ -162,10 +165,47 @@ async def generate_chat_completion(
     artifact_ttl_seconds: int,
     artifact_store_timeout: float,
 ) -> dict[str, Any]:
+    started_at = time.perf_counter()
     request = normalize_chat_request(body, resolved_model=resolved_model)
-    if request_validator is not None:
-        request_validator.validate(request)
-    output: DiffletGenerateOutput = await engine.generate(request)
+    logger.info(
+        "chat request normalized model=%s request_id=%s prompt_len=%s steps=%s guidance=%s seed=%s",
+        request.model,
+        request.request_id,
+        len(request.prompt),
+        request.num_inference_steps,
+        request.guidance_scale,
+        request.seed,
+    )
+    try:
+        if request_validator is not None:
+            request_validator.validate(request)
+    except DiffletServingError:
+        logger.warning(
+            "chat request validation_rejected request_id=%s model=%s", request.request_id, request.model
+        )
+        raise
+    generate_started_at = time.perf_counter()
+    try:
+        output: DiffletGenerateOutput = await engine.generate(request)
+    except DiffletServingError:
+        logger.warning(
+            "chat request engine_error request_id=%s model=%s", request.request_id, request.model
+        )
+        raise
+    except Exception:
+        logger.exception(
+            "chat request engine_unhandled request_id=%s model=%s",
+            request.request_id,
+            request.model,
+        )
+        raise
+    logger.info(
+        "chat request engine_ok request_id=%s model=%s latency_ms=%.2f",
+        request.request_id,
+        request.model,
+        (time.perf_counter() - generate_started_at) * 1000.0,
+    )
+    store_started_at = time.perf_counter()
     ref = await put_with_timeout(
         artifact_store,
         data=output.data,
@@ -174,11 +214,28 @@ async def generate_chat_completion(
         ttl_seconds=artifact_ttl_seconds,
         timeout_s=artifact_store_timeout,
     )
+    logger.info(
+        "chat request artifact_uploaded request_id=%s file_id=%s",
+        request.request_id,
+        ref.file_id,
+    )
     url = await get_url_with_timeout(
         artifact_store,
         ref,
         ttl_seconds=artifact_ttl_seconds,
         timeout_s=artifact_store_timeout,
+    )
+    logger.info(
+        "chat request artifact_url_ready request_id=%s duration_ms=%.2f",
+        request.request_id,
+        (time.perf_counter() - store_started_at) * 1000.0,
+    )
+    total_ms = (time.perf_counter() - started_at) * 1000.0
+    logger.info(
+        "chat request completed request_id=%s model=%s total_ms=%.2f",
+        request.request_id,
+        request.model,
+        total_ms,
     )
     now = int(time.time())
     return {

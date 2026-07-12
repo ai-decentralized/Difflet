@@ -112,12 +112,25 @@ class ResidentWorkerServingEngine:
                 503, "engine_unavailable", "worker is not ready", "server_error"
             )
 
+        logger.info(
+            "engine.generate admitted request_id=%s model=%s queued=%d/%d",
+            request.request_id,
+            request.model,
+            self._pending,
+            self.config.max_running_requests + self.config.max_queued_requests,
+        )
         received_at = time.monotonic()
         deadline = received_at + float(self.config.request_timeout)
         await self._admit_or_raise()
+        logger.info("engine.queue_acquired request_id=%s", request.request_id)
         lock_acquired = False
         try:
             try:
+                logger.debug(
+                    "engine.wait_lock start request_id=%s timeout=%.3f",
+                    request.request_id,
+                    float(self.config.queue_timeout),
+                )
                 wait_timeout = min(
                     float(self.config.queue_timeout),
                     max(deadline - time.monotonic(), 0.0),
@@ -137,13 +150,16 @@ class ResidentWorkerServingEngine:
                     "request waited too long for the resident worker",
                 ) from exc
             lock_acquired = True
+            logger.info("engine.lock_acquired request_id=%s", request.request_id)
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                logger.warning("engine.request_timeout request_id=%s before_start", request.request_id)
                 raise DiffletServingError(
                     504, "request_timeout", "request timed out", "server_error"
                 )
 
+            logger.info("engine.run_start request_id=%s", request.request_id)
             run_task = asyncio.create_task(
                 self._run_one(request, deadline_monotonic=deadline),
                 name=f"difflet-generate-{request.request_id}",
@@ -160,11 +176,15 @@ class ResidentWorkerServingEngine:
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if run_task in done:
+                    logger.info("engine.run_complete request_id=%s", request.request_id)
                     return run_task.result()
                 if draining_task in done:
                     run_task.cancel()
                     with suppress(BaseException):
                         await run_task
+                    logger.warning(
+                        "engine.draining_wait_cancel request_id=%s", request.request_id
+                    )
                     raise _engine_draining()
                 raise asyncio.TimeoutError
             except asyncio.CancelledError:
@@ -174,12 +194,21 @@ class ResidentWorkerServingEngine:
                 raise
             except asyncio.TimeoutError as exc:
                 release_lock = not self._start_inflight_recovery(run_task, reason="timeout")
+                logger.warning("engine.request_timeout request_id=%s", request.request_id)
                 raise DiffletServingError(
                     504, "request_timeout", "request timed out", "server_error"
                 ) from exc
             except DiffletServingError as exc:
                 if _requires_worker_recovery(exc):
-                    release_lock = not self._start_inflight_recovery(run_task, reason=exc.code)
+                    release_lock = not self._start_inflight_recovery(
+                        run_task, reason=exc.code
+                    )
+                logger.warning(
+                    "engine.request_failed request_id=%s code=%s status=%s",
+                    request.request_id,
+                    exc.code,
+                    exc.status_code,
+                )
                 raise
             finally:
                 draining_task.cancel()
@@ -206,10 +235,16 @@ class ResidentWorkerServingEngine:
         async with self._admission_lock:
             capacity = self.config.max_running_requests + self.config.max_queued_requests
             if self._pending >= capacity:
+                logger.warning(
+                    "engine.queue_full current=%d capacity=%d", self._pending, capacity
+                )
                 raise DiffletServingError(429, "queue_full", "resident worker queue is full")
+            logger.debug("engine.queue_admit before=%d", self._pending)
             self._pending += 1
+            logger.debug("engine.queue_admit after=%d", self._pending)
 
     async def _acquire_run_lock_or_drain(self, timeout: float) -> None:
+        logger.debug("engine.acquire_lock timeout=%.3f", timeout)
         lock_task = asyncio.create_task(self._run_lock.acquire())
         draining_task = asyncio.create_task(self._draining_event.wait())
         lock_transferred = False
@@ -223,6 +258,7 @@ class ResidentWorkerServingEngine:
                 raise _engine_draining()
             if lock_task in done:
                 lock_transferred = True
+                logger.debug("engine.acquire_lock granted")
                 return
             raise asyncio.TimeoutError
         finally:
@@ -250,6 +286,7 @@ class ResidentWorkerServingEngine:
     def _start_inflight_recovery(self, run_task: asyncio.Task, *, reason: str) -> bool:
         if self._closed or self._draining:
             return False
+        logger.warning("engine.recovery_start request reason=%s", reason)
         self._recovering = True
         asyncio.create_task(
             self._recover_worker(run_task, reason=reason),
@@ -265,6 +302,9 @@ class ResidentWorkerServingEngine:
             if reason in {"caller_cancelled", "timeout", "request_timeout"}:
                 self._worker.cancel_inflight()
                 clean_cancel = await self._wait_for_terminal_state(run_task)
+                logger.info(
+                    "engine.recovery_cancel_done reason=%s clean=%s", reason, clean_cancel
+                )
             if not clean_cancel:
                 await asyncio.to_thread(self._worker.terminate)
                 with suppress(BaseException):
@@ -275,7 +315,9 @@ class ResidentWorkerServingEngine:
                     asyncio.to_thread(self._worker.start),
                     timeout=float(self.config.worker_restart_timeout),
                 )
+                logger.info("engine.recovery_worker_restarted reason=%s", reason)
             if not self._worker.is_ready():
+                logger.error("engine.recovery_failed_not_ready reason=%s", reason)
                 raise DiffletServingError(
                     503,
                     "engine_unavailable",
@@ -284,6 +326,7 @@ class ResidentWorkerServingEngine:
                 )
             self._recovering = False
         except Exception:
+            logger.exception("engine.recovery_failed reason=%s", reason)
             self._worker.mark_error()
             self._unrecoverable = True
             self._recovering = False
@@ -341,6 +384,12 @@ class _ResidentWorkerProcess:
         self.healthy = False
 
     def start(self) -> None:
+        logger.info(
+            "worker_process_start model=%s profile_identity=%s startup_timeout=%.1f",
+            self.runtime.profile.model_id,
+            self.runtime.runtime_plan.profile_identity,
+            self.startup_timeout,
+        )
         self.terminate()
         self._cmd_q = self._ctx.Queue()
         self._cancel_q = self._ctx.Queue()
@@ -370,6 +419,7 @@ class _ResidentWorkerProcess:
                 raise _error_from_reply(reply)
             self.ready = True
             self.healthy = True
+            logger.info("worker_process_ready model=%s", self.runtime.profile.model_id)
         except BaseException:
             self.terminate()
             raise
@@ -379,6 +429,12 @@ class _ResidentWorkerProcess:
         request: DiffletGenerateRequest,
         deadline_monotonic: float,
     ) -> DiffletGenerateOutput:
+        logger.info(
+            "worker_process_run_start request_id=%s model=%s deadline_remaining=%.3f",
+            request.request_id,
+            request.model,
+            deadline_monotonic - time.monotonic(),
+        )
         cmd_q = self._cmd_q
         reply_q = self._reply_q
         process = self._process
@@ -409,24 +465,38 @@ class _ResidentWorkerProcess:
                 continue
             if reply.get("type") == "generation_ok":
                 self._clear_inflight(request.request_id)
+                logger.info("worker_process_generation_ok request_id=%s", request.request_id)
                 return reply["output"]
             if reply.get("type") == "cancel_ack":
                 self._clear_inflight(request.request_id)
+                logger.warning(
+                    "worker_process_generation_cancelled request_id=%s", request.request_id
+                )
                 raise request_cancelled("worker acknowledged request cancellation")
             self._clear_inflight(request.request_id)
+            logger.error(
+                "worker_process_generation_error request_id=%s", request.request_id
+            )
             raise _error_from_reply(reply)
 
     def cancel_inflight(self) -> None:
+        logger.info("worker_process_cancel_inflight request_id=%s", self._inflight_request_id)
         if self._cancel_q is not None and self._inflight_request_id is not None:
             self._cancel_q.put({"type": "cancel", "request_id": self._inflight_request_id})
 
     def shutdown(self) -> None:
+        logger.info(
+            "worker_process_shutdown requested model=%s alive=%s",
+            self.runtime.profile.model_id,
+            self._process is not None and self._process.is_alive(),
+        )
         if self._cmd_q is not None and self._process is not None and self._process.is_alive():
             self._cmd_q.put({"type": "shutdown"})
             self._process.join(timeout=5)
         self.terminate()
 
     def terminate(self) -> None:
+        logger.info("worker_process_terminate model=%s", self.runtime.profile.model_id)
         if self._process is not None and self._process.is_alive():
             self._process.terminate()
             self._process.join(timeout=10)
@@ -471,6 +541,7 @@ class _ResidentWorkerProcess:
             self.mark_error()
 
     def _start_status_consumer(self) -> None:
+        logger.debug("worker_status_consumer_start model=%s", self.runtime.profile.model_id)
         self._status_stop = threading.Event()
         self._status_thread = threading.Thread(
             target=self._consume_status,
@@ -480,6 +551,9 @@ class _ResidentWorkerProcess:
         self._status_thread.start()
 
     def _stop_status_consumer(self) -> None:
+        logger.debug(
+            "worker_status_consumer_stop model=%s", self.runtime.profile.model_id
+        )
         if self._status_stop is not None:
             self._status_stop.set()
         if self._status_thread is not None:
@@ -512,6 +586,10 @@ class _ResidentWorkerProcess:
         last_heartbeat = time.monotonic()
         last_event: dict[str, Any] | None = None
         stale_reported = False
+        last_state_signature = None
+        last_state_start = time.monotonic()
+        last_summary = time.monotonic()
+        heartbeat_summary_interval = self.heartbeat_interval
         while not stop.is_set():
             try:
                 if not status_recv.poll(0.2):
@@ -538,13 +616,39 @@ class _ResidentWorkerProcess:
             last_heartbeat = time.monotonic()
             last_event = event
             stale_reported = False
-            logger.info(
-                "worker heartbeat state=%s request_id=%s stage=%s",
-                event.get("state"),
-                event.get("request_id"),
-                event.get("stage"),
-                extra={"worker_heartbeat": event},
-            )
+            state_signature = (event.get("state"), event.get("request_id"), event.get("stage"))
+            now = time.monotonic()
+            summary_due = now - last_summary >= heartbeat_summary_interval
+            if state_signature != last_state_signature:
+                if last_state_signature is not None:
+                    logger.info(
+                        "worker heartbeat state_dwell_seconds=%.2f from_state=%s to_state=%s",
+                        now - last_state_start,
+                        last_state_signature[0],
+                        state_signature[0],
+                        extra={"worker_heartbeat": event},
+                    )
+                logger.info(
+                    "worker heartbeat transition state=%s request_id=%s stage=%s",
+                    event.get("state"),
+                    event.get("request_id"),
+                    event.get("stage"),
+                    extra={"worker_heartbeat": event},
+                )
+                last_summary = now
+                last_state_start = now
+                last_state_signature = state_signature
+            elif summary_due:
+                logger.info(
+                    "worker heartbeat alive state=%s request_id=%s stage=%s model=%s profile=%s",
+                    event.get("state"),
+                    event.get("request_id"),
+                    event.get("stage"),
+                    event.get("model_id"),
+                    event.get("profile_identity"),
+                    extra={"worker_heartbeat": event},
+                )
+                last_summary = now
 
 
 def _worker_main(
@@ -558,12 +662,19 @@ def _worker_main(
 ) -> None:
     orchestrator = None
     try:
+        logger.info("worker_main start model=%s", runtime.profile.model_id)
         _apply_worker_runtime_environment(runtime)
     except BaseException as exc:
+        logger.exception("worker_main environment_apply_failed model=%s", runtime.profile.model_id)
         reply_q.put(_reply_from_error(exc))
         status_conn.close()
         return
     if heartbeat_interval <= 0:
+        logger.error(
+            "worker_main invalid_heartbeat_interval model=%s interval=%s",
+            runtime.profile.model_id,
+            heartbeat_interval,
+        )
         reply_q.put(_reply_from_error(ValueError("heartbeat_interval must be greater than 0")))
         status_conn.close()
         return
@@ -580,12 +691,16 @@ def _worker_main(
     )
     heartbeat_thread.start()
     try:
+        logger.info("worker_main loading orchestrator=%s", orchestrator_factory)
         factory = _load_factory(orchestrator_factory)
         orchestrator = factory(model_id=runtime.profile.model_id)
+        logger.info("worker_main orchestrator_loaded model=%s", runtime.profile.model_id)
         heartbeat_state.set(state="loading")
         orchestrator.load(runtime)
+        logger.info("worker_main orchestrator_loaded_artifacts model=%s", runtime.profile.model_id)
         heartbeat_state.set(state="smoke")
         orchestrator.smoke()
+        logger.info("worker_main orchestrator_smoke_ok model=%s", runtime.profile.model_id)
         heartbeat_state.set(state="ready")
         reply_q.put({"type": "ready"})
         while True:
@@ -593,6 +708,7 @@ def _worker_main(
             cmd_type = cmd.get("type")
             if cmd_type == "shutdown":
                 heartbeat_state.set(state="draining")
+                logger.info("worker_main shutdown_command model=%s", runtime.profile.model_id)
                 if orchestrator is not None:
                     orchestrator.shutdown()
                 reply_q.put({"type": "shutdown_ok"})
@@ -600,6 +716,7 @@ def _worker_main(
             if cmd_type != "generate":
                 continue
             request: DiffletGenerateRequest = cmd["request"]
+            logger.info("worker_main generate_start request_id=%s model=%s", request.request_id, runtime.profile.model_id)
             heartbeat_state.set(state="busy", request_id=request.request_id)
             context = WorkerRequestContext.with_timeout(
                 request.request_id,
@@ -613,6 +730,7 @@ def _worker_main(
             )
             try:
                 output = asyncio.run(orchestrator.generate(request, context))
+                logger.info("worker_main generate_ok request_id=%s", request.request_id)
                 reply_q.put(
                     {
                         "type": "generation_ok",
@@ -621,17 +739,21 @@ def _worker_main(
                     }
                 )
             except asyncio.CancelledError:
+                logger.warning("worker_main generate_cancelled request_id=%s", request.request_id)
                 reply_q.put({"type": "cancel_ack", "request_id": request.request_id})
             except BaseException as exc:
+                logger.exception("worker_main generate_error request_id=%s", request.request_id)
                 reply_q.put(_reply_from_error(exc, request_id=request.request_id))
             finally:
                 heartbeat_state.set(state="ready")
     except BaseException as exc:
+        logger.exception("worker_main failed model=%s", runtime.profile.model_id)
         heartbeat_state.set(state="error")
         reply_q.put(_reply_from_error(exc))
     finally:
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=1.0)
+        logger.info("worker_main exit model=%s", runtime.profile.model_id)
         status_conn.close()
 
 
