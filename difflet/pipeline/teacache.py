@@ -12,9 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import torch
-
-
 CALIBRATION_SCHEMA = "difflet-m9-teacache-calibration-v1"
 
 
@@ -165,7 +162,9 @@ class TeaCacheController:
         Also False in online-delta mode (cclog 91): the decision uses the real
         noise_pred trajectory the pipeline already has — no per-model probe.
         """
-        return int(self.calibration.cadence) <= 0 and float(self.calibration.online_delta_alpha) <= 0.0
+        return (
+            int(self.calibration.cadence) <= 0 and float(self.calibration.online_delta_alpha) <= 0.0
+        )
 
     def needs_probe(self) -> bool:
         """Whether the next step requires a fresh probe NEFF call.
@@ -241,10 +240,11 @@ class TeaCacheController:
             return False
 
         if diff_norm is None:
+            import torch
+
             diff_norm_value = float(
                 torch.linalg.vector_norm(
-                    mod_input_now.detach().float().cpu()
-                    - self.prev_mod_input.float().cpu()
+                    mod_input_now.detach().float().cpu() - self.prev_mod_input.float().cpu()
                 ).item()
             )
         else:

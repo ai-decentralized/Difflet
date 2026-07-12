@@ -7,6 +7,7 @@ Inter-stage tensors: {work_dir}/text.pt, {work_dir}/latents.pt.
 
 Stage logic migrated from examples/qwen_image_example.py.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,6 +38,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
 
     def download(self) -> None:
         from difflet.pipeline.path_resolver import resolve_model_path
+
         resolve_model_path(_HF_MODEL_ID, revision=self.args.revision, local_files_only=False)
         print(f"[difflet] weights ready for {_HF_MODEL_ID}")
 
@@ -45,26 +47,53 @@ class QwenImageOrchestrator(ModelOrchestrator):
         work_dir.mkdir(parents=True, exist_ok=True)
         full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1)
         shared = self._shared_cli_args(stage_mode="compile", work_dir=str(work_dir))
-        runner.run_stage(_HF_MODEL_ID, "text",
-                         num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE, cli_args=shared)
-        runner.run_stage(_HF_MODEL_ID, "generate",
-                         num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE, cli_args=shared)
-        runner.run_stage(_HF_MODEL_ID, "vae",
-                         num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE, cli_args=shared)
+        runner.run_stage(
+            _HF_MODEL_ID,
+            "text",
+            num_cores=full_cores,
+            virtual_core_size=_VIRTUAL_CORE_SIZE,
+            cli_args=shared,
+        )
+        runner.run_stage(
+            _HF_MODEL_ID,
+            "generate",
+            num_cores=full_cores,
+            virtual_core_size=_VIRTUAL_CORE_SIZE,
+            cli_args=shared,
+        )
+        runner.run_stage(
+            _HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE, cli_args=shared
+        )
 
     def generate(self) -> None:
-        work_dir = Path(self.args.work_dir or
-                        Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME)
+        work_dir = Path(
+            self.args.work_dir or Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME
+        )
         work_dir.mkdir(parents=True, exist_ok=True)
         full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1)
         shared = self._shared_cli_args(stage_mode="generate", work_dir=str(work_dir))
         try:
-            runner.run_stage(_HF_MODEL_ID, "text",
-                             num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE, cli_args=shared)
-            runner.run_stage(_HF_MODEL_ID, "generate",
-                             num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE, cli_args=shared)
-            runner.run_stage(_HF_MODEL_ID, "vae",
-                             num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE, cli_args=shared)
+            runner.run_stage(
+                _HF_MODEL_ID,
+                "text",
+                num_cores=full_cores,
+                virtual_core_size=_VIRTUAL_CORE_SIZE,
+                cli_args=shared,
+            )
+            runner.run_stage(
+                _HF_MODEL_ID,
+                "generate",
+                num_cores=full_cores,
+                virtual_core_size=_VIRTUAL_CORE_SIZE,
+                cli_args=shared,
+            )
+            runner.run_stage(
+                _HF_MODEL_ID,
+                "vae",
+                num_cores=1,
+                virtual_core_size=_VIRTUAL_CORE_SIZE,
+                cli_args=shared,
+            )
         except Exception:
             print(f"[difflet] work dir preserved at {work_dir} for inspection", file=sys.stderr)
             raise
@@ -93,11 +122,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
         from neuronx_distributed_inference.utils.hf_adapter import load_pretrained_config
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        model_dir = resolve_model_path(
-            _HF_MODEL_ID,
-            revision=args.revision,
-            local_files_only=True,
-        )
+        model_dir = self._model_dir(args, resolve_model_path)
         enc_path = str(Path(model_dir) / "text_encoder")
         compiled_dir = self._stage_compiled_dir("text", args)
 
@@ -106,8 +131,11 @@ class QwenImageOrchestrator(ModelOrchestrator):
             text_cfg.pad_token_id = 0
 
         neuron_config = NeuronConfig(
-            tp_degree=args.tp_degree or 4, batch_size=1, seq_len=_ENC_SEQ,
-            torch_dtype=torch.bfloat16, on_device_sampling_config={},
+            tp_degree=args.tp_degree or 4,
+            batch_size=1,
+            seq_len=_ENC_SEQ,
+            torch_dtype=torch.bfloat16,
+            on_device_sampling_config={},
             tensor_capture_config=TensorCaptureConfig(modules_to_capture=["norm"]),
         )
         config = NeuronQwen2VLTextForCausalLM.get_config_cls()(
@@ -121,14 +149,18 @@ class QwenImageOrchestrator(ModelOrchestrator):
         app.load(str(compiled_dir))
         tok = AutoTokenizer.from_pretrained(str(Path(model_dir) / "tokenizer"))
         ti = tok(
-            _QWEN_TEMPLATE.format(args.prompt), max_length=_ENC_SEQ,
-            padding="max_length", truncation=True, return_tensors="pt",
+            _QWEN_TEMPLATE.format(args.prompt),
+            max_length=_ENC_SEQ,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
             return_attention_mask=True,
         )
         input_ids = ti.input_ids.to(torch.int32)
         attn = ti.attention_mask.to(torch.int32)
         out = app(
-            input_ids=input_ids, attention_mask=attn,
+            input_ids=input_ids,
+            attention_mask=attn,
             position_ids=torch.arange(_ENC_SEQ, dtype=torch.int32).unsqueeze(0),
             sampling_params=torch.tensor([[1.0, 1.0, 1.0]], dtype=torch.float32),
         )
@@ -141,8 +173,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
         mask = torch.zeros(1, _TEXT_SEQ_LEN, dtype=torch.bool)
         mask[:, :seq] = True
         work_dir = Path(args.work_dir)
-        torch.save({"encoder_hidden_states": ehs, "encoder_hidden_states_mask": mask},
-                   work_dir / "text.pt")
+        torch.save(
+            {"encoder_hidden_states": ehs, "encoder_hidden_states_mask": mask}, work_dir / "text.pt"
+        )
         print(f"[text] encoder_hidden_states {tuple(ehs.shape)} -> {work_dir}/text.pt")
 
     def _stage_generate(self, args: argparse.Namespace) -> None:
@@ -152,11 +185,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        model_dir = resolve_model_path(
-            _HF_MODEL_ID,
-            revision=args.revision,
-            local_files_only=True,
-        )
+        model_dir = self._model_dir(args, resolve_model_path)
         compiled_dir = self._stage_compiled_dir("generate", args)
 
         h, w = args.height or 1024, args.width or 1024
@@ -168,9 +197,15 @@ class QwenImageOrchestrator(ModelOrchestrator):
             cp_mode=getattr(args, "cp_mode", "gather_kv"),
         )
         app = NeuronQwenImageApplication(
-            model_path=model_dir, parallel=parallel, dtype=torch.bfloat16,
+            model_path=model_dir,
+            parallel=parallel,
+            dtype=torch.bfloat16,
             shape={"height": h, "width": w, "num_frames": None},
-            text_seq_len=_TEXT_SEQ_LEN, enable_transformer=True,
+            text_seq_len=_TEXT_SEQ_LEN,
+            enable_transformer=True,
+            teacache_fused=getattr(args, "teacache_speedup", None) is not None,
+            teacache_speedup=getattr(args, "teacache_speedup", None),
+            teacache_calibration_path=getattr(args, "teacache_calibration", None),
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
@@ -206,16 +241,13 @@ class QwenImageOrchestrator(ModelOrchestrator):
         import torch
         from difflet.backends.trainium.core.config import NeuronConfig
         from difflet.backends.trainium.wan.vae import (
-            NeuronWanVAEDecoderApplication, WanVAEDecoderInferenceConfig,
+            NeuronWanVAEDecoderApplication,
+            WanVAEDecoderInferenceConfig,
         )
         from difflet.utils.diffusers_adapter import load_diffusers_config
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        model_dir = resolve_model_path(
-            _HF_MODEL_ID,
-            revision=args.revision,
-            local_files_only=True,
-        )
+        model_dir = self._model_dir(args, resolve_model_path)
         vae_path = str(Path(model_dir) / "vae")
         compiled_dir = Path(
             getattr(args, "compiled_dir", None) or self._stage_compiled_dir("vae", args)
@@ -230,7 +262,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 torch_dtype=torch.bfloat16,
             ),
             load_config=load_diffusers_config(vae_path),
-            height=h, width=w, num_frames=1,
+            height=h,
+            width=w,
+            num_frames=1,
         )
         app = NeuronWanVAEDecoderApplication(model_path=vae_path, config=config)
         if args.stage_mode == "compile":
@@ -240,12 +274,20 @@ class QwenImageOrchestrator(ModelOrchestrator):
         work_dir = Path(args.work_dir)
         packed = torch.load(work_dir / "latents.pt").float()
         b, seq, _ = packed.shape
-        hh = ww = int(seq ** 0.5)
-        z = packed.view(b, hh, ww, 16, 2, 2).permute(0, 3, 1, 4, 2, 5).reshape(b, 16, hh * 2, ww * 2)
+        hh = ww = int(seq**0.5)
+        z = (
+            packed.view(b, hh, ww, 16, 2, 2)
+            .permute(0, 3, 1, 4, 2, 5)
+            .reshape(b, 16, hh * 2, ww * 2)
+        )
         z = z.unsqueeze(2)
         mean = torch.tensor(config.latents_mean).view(1, -1, 1, 1, 1)
         std = torch.tensor(config.latents_std).view(1, -1, 1, 1, 1)
-        z = (z * std + mean).to(torch.bfloat16) if len(config.latents_mean) else z.to(torch.bfloat16)
+        z = (
+            (z * std + mean).to(torch.bfloat16)
+            if len(config.latents_mean)
+            else z.to(torch.bfloat16)
+        )
 
         app.load(str(compiled_dir))
         img = app(z)
@@ -255,6 +297,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             from torchvision.utils import save_image
+
             save_image((img[0] * 0.5 + 0.5).clamp(0, 1), str(out_path))
             print(f"[vae] image saved to {out_path}")
         except Exception as exc:
@@ -262,6 +305,17 @@ class QwenImageOrchestrator(ModelOrchestrator):
             print(f"[vae] tensor saved to {out_path.with_suffix('.pt')} (png skipped: {exc})")
 
     # ------------------------------------------------------------ helpers
+
+    @staticmethod
+    def _model_dir(args: argparse.Namespace, resolver) -> str:
+        model_path = getattr(args, "model_path", None)
+        if model_path:
+            return str(Path(model_path).expanduser().resolve())
+        return resolver(
+            _HF_MODEL_ID,
+            revision=args.revision,
+            local_files_only=True,
+        )
 
     def _stage_compiled_dir(self, stage: str, args: argparse.Namespace) -> Path:
         compiled_dir = getattr(args, "compiled_dir", None)
@@ -279,16 +333,26 @@ class QwenImageOrchestrator(ModelOrchestrator):
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
         a = self.args
         parts = [
-            "--model-id", _HF_MODEL_ID,
-            "--tp-degree", str(a.tp_degree or 4),
-            "--cp-degree", str(a.cp_degree or 1),
-            "--cp-mode", str(getattr(a, "cp_mode", "gather_kv")),
-            "--height", str(a.height or 1024),
-            "--width", str(a.width or 1024),
-            "--steps", str(getattr(a, "steps", None) or 4),
-            "--guidance-scale", str(getattr(a, "guidance_scale", None) or 4.0),
-            "--seed", str(getattr(a, "seed", 42)),
-            "--stage-mode", stage_mode,
+            "--model-id",
+            _HF_MODEL_ID,
+            "--tp-degree",
+            str(a.tp_degree or 4),
+            "--cp-degree",
+            str(a.cp_degree or 1),
+            "--cp-mode",
+            str(getattr(a, "cp_mode", "gather_kv")),
+            "--height",
+            str(a.height or 1024),
+            "--width",
+            str(a.width or 1024),
+            "--steps",
+            str(getattr(a, "steps", None) or 4),
+            "--guidance-scale",
+            str(getattr(a, "guidance_scale", None) or 4.0),
+            "--seed",
+            str(getattr(a, "seed", 42)),
+            "--stage-mode",
+            stage_mode,
         ]
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
@@ -298,6 +362,14 @@ class QwenImageOrchestrator(ModelOrchestrator):
             parts += ["--cache-dir", a.cache_dir]
         if getattr(a, "revision", None):
             parts += ["--revision", a.revision]
+        if getattr(a, "teacache_speedup", None) is not None:
+            parts += ["--teacache-speedup", str(a.teacache_speedup)]
+        if getattr(a, "teacache_calibration", None):
+            parts += ["--teacache-calibration", a.teacache_calibration]
+        if getattr(a, "teacache_cadence", None) is not None:
+            parts += ["--teacache-cadence", str(a.teacache_cadence)]
+        if getattr(a, "teacache_online_delta", None) is not None:
+            parts += ["--teacache-online-delta", str(a.teacache_online_delta)]
         if work_dir:
             parts += ["--work-dir", work_dir]
         return parts

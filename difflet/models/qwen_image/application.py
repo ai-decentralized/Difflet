@@ -203,6 +203,7 @@ class NeuronQwenImageApplication(MultiComponentApplication):
             width=self.shape["width"],
             text_seq_len=self.text_seq_len,
             teacache_speedup=kwargs.get("teacache_speedup"),
+            teacache_calibration=kwargs.get("teacache_calibration"),
             teacache_calibration_path=kwargs.get("teacache_calibration_path"),
         )
 

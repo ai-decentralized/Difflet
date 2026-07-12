@@ -3,6 +3,7 @@
 Called by runner.run_stage() as:
     python -m difflet.cli.stage --orchestrator <hf-id> --stage <stage> [forwarded args]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,6 +38,7 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--stage", required=True)
     p.add_argument("--stage-mode", default="generate", choices=["compile", "generate"])
     p.add_argument("--model-id", dest="model_id", default=None)
+    p.add_argument("--model-path", dest="model_path", default=None)
     p.add_argument("--revision", default=None)
     p.add_argument("--tp-degree", type=int, default=None)
     p.add_argument("--cp-degree", type=int, default=1)

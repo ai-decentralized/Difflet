@@ -6,8 +6,14 @@ import json
 from argparse import Namespace
 from pathlib import Path
 
-from difflet.serving.options import CompilePolicy
-from difflet.serving.types import DiffletCompileSpec, ServingProfile
+from difflet.pipeline.compile_cache import toolchain_versions
+from difflet.serving.types import (
+    ArtifactPublishTarget,
+    CompileArtifactIdentity,
+    DiffletCompileSpec,
+    ResolvedModelSource,
+    ServingProfile,
+)
 
 HF_MODEL_ID = "Qwen/Qwen-Image"
 MODEL_TYPE = "qwen_image"
@@ -27,19 +33,6 @@ def stage_compiled_dir(stage: str, profile: ServingProfile) -> Path:
         height=profile.height,
         width=profile.width,
     )
-
-
-def serving_stage_compiled_dir(stage: str, profile: ServingProfile) -> Path:
-    """Return artifacts for the resident serving topology.
-
-    The staged CLI keeps the VAE at TP=1 in its own process. Resident serving
-    compiles the VAE with the same TP world size as the other stages because
-    NxD cannot co-load mixed TP=4/TP=1 models in one process on Trn2.
-    """
-    if stage != "vae":
-        return stage_compiled_dir(stage, profile)
-    base = Path(profile.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
-    return base / f"qwen_image_vae_tp{profile.world_size}_h{profile.height}w{profile.width}"
 
 
 def stage_compiled_dir_from_values(
@@ -64,92 +57,142 @@ def stage_compiled_dir_from_values(
     raise ValueError(f"unknown Qwen stage {stage!r}")
 
 
-def compile_plan(profile: ServingProfile) -> tuple[DiffletCompileSpec, ...]:
+def build_compile_plan(
+    source: ResolvedModelSource,
+    profile: ServingProfile,
+) -> tuple[DiffletCompileSpec, ...]:
     return tuple(
         DiffletCompileSpec(
-            stage_id=stage,
-            artifact_path=str(serving_stage_compiled_dir(stage, profile)),
+            artifact_id=stage,
+            component_id=stage,
+            identity=_compile_identity(source, profile, stage),
         )
         for stage in ("text", "generate", "vae")
     )
 
 
-def artifact_ready(path: Path, *, stage: str | None = None, profile: ServingProfile | None = None) -> bool:
-    if not path.exists() or not path.is_dir():
-        return False
-    if not any(path.iterdir()):
-        return False
-    if stage is not None and profile is not None and not _has_valid_serving_marker(
-        path, stage=stage, profile=profile
-    ):
-        return False
-    return _has_stage_artifact(path, stage=stage)
-
-
-def missing_artifacts(profile: ServingProfile) -> list[DiffletCompileSpec]:
-    return [
-        spec
-        for spec in compile_plan(profile)
-        if not artifact_ready(Path(spec.artifact_path), stage=spec.stage_id, profile=profile)
-    ]
-
-
-def ensure_artifacts(profile: ServingProfile, policy: CompilePolicy) -> None:
-    missing = missing_artifacts(profile)
-    if policy == CompilePolicy.NEVER and missing:
-        paths = ", ".join(spec.artifact_path for spec in missing)
-        raise RuntimeError(f"missing Qwen compiled artifacts: {paths}")
-    if policy == CompilePolicy.FORCE or missing:
-        print(
-            "[difflet serve] compiling Qwen-Image staged artifacts "
-            f"(policy={policy.value})"
-        )
-        targets = compile_plan(profile) if policy == CompilePolicy.FORCE else tuple(missing)
-        _compile_serving_artifacts(profile, targets)
-        write_serving_markers(profile)
-        missing = missing_artifacts(profile)
-        if missing:
-            paths = ", ".join(spec.artifact_path for spec in missing)
-            raise RuntimeError(f"Qwen compile finished but artifacts are still missing: {paths}")
-
-
-def _compile_serving_artifacts(
+def compile_serving_artifact(
+    source: ResolvedModelSource,
     profile: ServingProfile,
-    targets: tuple[DiffletCompileSpec, ...],
+    spec: DiffletCompileSpec,
+    target: ArtifactPublishTarget,
 ) -> None:
+    if spec.artifact_id != target.artifact_id or spec.identity != target.identity:
+        raise ValueError("Qwen compile target does not match compile spec")
+    if spec.component_id not in {"text", "generate", "vae"}:
+        raise ValueError(f"unknown Qwen component {spec.component_id!r}")
+
     from difflet.cli import runner
     from difflet.cli.orchestrators.qwen_image import QwenImageOrchestrator
 
     args = namespace_from_profile(profile, stage_mode="compile")
+    args.revision = None
     shared = QwenImageOrchestrator(args)._shared_cli_args(stage_mode="compile")
-    for spec in targets:
-        cli_args = [*shared, "--compiled-dir", spec.artifact_path]
-        if spec.stage_id == "vae":
-            cli_args.extend(
-                [
-                    "--vae-tp-degree",
-                    str(profile.world_size),
-                ]
+    cli_args = [
+        *shared,
+        "--compiled-dir",
+        str(target.staging_path),
+        "--model-path",
+        source.pinned_model_path,
+        "--revision",
+        source.resolved_source_id,
+    ]
+    if spec.component_id == "generate" and profile.teacache_calibration_data is not None:
+        frozen_calibration_path = target.staging_path / "teacache_calibration.json"
+        frozen_calibration_path.write_text(
+            json.dumps(
+                profile.teacache_calibration_data.to_dict(),
+                indent=2,
+                sort_keys=True,
             )
-        runner.run_stage(
-            HF_MODEL_ID,
-            spec.stage_id,
-            num_cores=profile.world_size,
-            virtual_core_size=VIRTUAL_CORE_SIZE,
-            cli_args=cli_args,
-        )
-
-
-def write_serving_markers(profile: ServingProfile) -> None:
-    for spec in compile_plan(profile):
-        artifact_path = Path(spec.artifact_path)
-        if not _has_stage_artifact(artifact_path, stage=spec.stage_id):
-            continue
-        marker = _serving_marker_payload(spec.stage_id, profile)
-        (artifact_path / SERVING_ARTIFACT_MARKER).write_text(
-            json.dumps(marker, indent=2, sort_keys=True) + "\n",
+            + "\n",
             encoding="utf-8",
         )
+        cli_args.extend(["--teacache-calibration", str(frozen_calibration_path)])
+    if spec.component_id == "vae":
+        cli_args.extend(["--vae-tp-degree", str(profile.world_size)])
+    runner.run_stage(
+        HF_MODEL_ID,
+        spec.component_id,
+        num_cores=profile.world_size,
+        virtual_core_size=VIRTUAL_CORE_SIZE,
+        cli_args=cli_args,
+        strict_environment=True,
+    )
+    _validate_payload_files(
+        target.staging_path,
+        stage=spec.component_id,
+        requires_probe=_requires_probe(profile, spec.component_id),
+    )
+    (target.staging_path / SERVING_ARTIFACT_MARKER).write_text(
+        json.dumps(_serving_marker_payload(spec), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def validate_compiled_artifact(spec: DiffletCompileSpec, artifact_root: Path) -> None:
+    if spec.component_id not in {"text", "generate", "vae"}:
+        raise ValueError(f"unknown Qwen component {spec.component_id!r}")
+    marker_path = artifact_root / SERVING_ARTIFACT_MARKER
+    try:
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"missing or invalid Qwen artifact marker at {marker_path}") from exc
+    if marker != _serving_marker_payload(spec):
+        raise ValueError(f"Qwen artifact marker does not match {spec.artifact_id!r}")
+    inputs = json.loads(spec.identity.canonical_cache_inputs_json)
+    _validate_payload_files(
+        artifact_root,
+        stage=spec.component_id,
+        requires_probe=bool(inputs.get("stage_inputs", {}).get("teacache_probe_enabled")),
+    )
+
+
+def _compile_identity(
+    source: ResolvedModelSource,
+    profile: ServingProfile,
+    stage: str,
+) -> CompileArtifactIdentity:
+    tp_degree = profile.world_size if stage == "vae" else profile.parallel.tp_degree
+    cp_degree = 1 if stage == "vae" else profile.parallel.cp_degree
+    stage_inputs = {
+        "text": {"enc_seq": ENC_SEQ},
+        "generate": {
+            "text_seq_len": TEXT_SEQ_LEN,
+            "teacache_probe_enabled": _requires_probe(profile, stage),
+        },
+        "vae": {"num_frames": 1},
+    }[stage]
+    return CompileArtifactIdentity.from_cache_inputs(
+        {
+            "compile_contract_version": 2,
+            "model_type": MODEL_TYPE,
+            "model_id": source.model_id,
+            "resolved_source_id": source.resolved_source_id,
+            "component_id": stage,
+            "tp_degree": tp_degree,
+            "cp_degree": cp_degree,
+            "cp_mode": "gather_kv" if stage == "vae" else profile.parallel.cp_mode,
+            "world_size": profile.world_size,
+            "height": profile.height,
+            "width": profile.width,
+            "dtype": profile.dtype,
+            "virtual_core_size": VIRTUAL_CORE_SIZE,
+            "stage_inputs": stage_inputs,
+            "toolchain": toolchain_versions(),
+        }
+    )
+
+
+def _requires_probe(profile: ServingProfile, stage: str) -> bool:
+    return stage == "generate" and profile.teacache_speedup is not None
+
+
+def _validate_payload_files(path: Path, *, stage: str, requires_probe: bool) -> None:
+    if not _has_stage_artifact(path, stage=stage):
+        raise ValueError(f"Qwen {stage!r} artifact payload is incomplete at {path}")
+    if requires_probe and not _has_nxd_component(path / "teacache_probe"):
+        raise ValueError(f"Qwen {stage!r} artifact is missing TeaCache probe")
 
 
 def namespace_from_profile(profile: ServingProfile, *, stage_mode: str) -> Namespace:
@@ -171,6 +214,10 @@ def namespace_from_profile(profile: ServingProfile, *, stage_mode: str) -> Names
         steps=None,
         guidance_scale=None,
         seed=42,
+        teacache_cadence=None,
+        teacache_online_delta=None,
+        teacache_speedup=profile.teacache_speedup,
+        teacache_calibration=profile.teacache_calibration,
         stage_mode=stage_mode,
     )
 
@@ -181,18 +228,20 @@ def _has_stage_artifact(path: Path, *, stage: str | None) -> bool:
     transformer_path = path / "transformer"
     if transformer_path.exists():
         return _has_neuron_artifact(transformer_path)
-    return _has_neuron_artifact(path)
+    return _has_neuron_artifact(path, excluded_top_level={"teacache_probe"})
 
 
-def _has_neuron_artifact(path: Path) -> bool:
+def _has_neuron_artifact(
+    path: Path,
+    *,
+    excluded_top_level: set[str] | None = None,
+) -> bool:
     for item in path.rglob("*"):
+        if excluded_top_level and item.relative_to(path).parts[0] in excluded_top_level:
+            continue
         if not item.is_file() or item.stat().st_size == 0:
             continue
-        if (
-            item.suffix == ".neff"
-            or item.name == "metaneff.pb"
-            or item.name.endswith(".metaneff")
-        ):
+        if item.suffix == ".neff" or item.name == "metaneff.pb" or item.name.endswith(".metaneff"):
             return True
         # NxD ModelBuilder embeds the compiled executable in its TorchScript
         # archive instead of leaving a standalone NEFF in the cache directory.
@@ -212,30 +261,10 @@ def _has_nxd_component(path: Path) -> bool:
     )
 
 
-def _serving_marker_payload(stage: str, profile: ServingProfile) -> dict[str, object]:
+def _serving_marker_payload(spec: DiffletCompileSpec) -> dict[str, object]:
     return {
-        "schema_version": 1,
-        "stage": stage,
-        "model_id": profile.model_id,
-        "model_type": profile.model_type,
-        "revision": profile.revision,
-        "tp_degree": profile.parallel.tp_degree,
-        "cp_degree": profile.parallel.cp_degree,
-        "cp_mode": profile.parallel.cp_mode,
-        "height": profile.height,
-        "width": profile.width,
-        "num_frames": profile.num_frames,
-        "enc_seq": ENC_SEQ,
-        "text_seq_len": TEXT_SEQ_LEN,
+        "schema_version": 2,
+        "artifact_id": spec.artifact_id,
+        "component_id": spec.component_id,
+        "identity_digest": spec.identity.digest,
     }
-
-
-def _has_valid_serving_marker(path: Path, *, stage: str, profile: ServingProfile) -> bool:
-    marker_path = path / SERVING_ARTIFACT_MARKER
-    if not marker_path.exists():
-        return False
-    try:
-        marker = json.loads(marker_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    return marker == _serving_marker_payload(stage, profile)

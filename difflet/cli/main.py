@@ -48,23 +48,38 @@ def _add_serve_model_flag(p: argparse.ArgumentParser) -> None:
 
 
 def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--tp-degree", type=int, default=None,
-                   help="Tensor-parallel degree (default: registry default)")
-    p.add_argument("--cp-degree", type=int, default=1,
-                   help="Context-parallel degree (default: 1)")
-    p.add_argument("--cp-mode", choices=["gather_kv", "ring"], default="gather_kv",
-                   help="Context-parallel attention strategy (default: gather_kv)")
-    p.add_argument("--cfg-parallel", dest="cfg_parallel", action="store_true",
-                   help="Split the uncond/cond CFG passes across 2 data-parallel "
-                        "ranks (doubles world_size). Mutually exclusive with "
-                        "--cp-degree>1. Only for true-CFG models (Flux, Wan, LTX-2).")
-    p.add_argument("--sp", dest="sp_enabled", action="store_true",
-                   help="Enable Megatron-style sequence parallelism: shard the "
-                        "norm/modulation/residual regions along the sequence axis "
-                        "across the tensor-parallel group (reduce-scatter replaces "
-                        "the row-parallel all-reduce; world_size unchanged). "
-                        "Mutually exclusive with --cp-degree>1. Supported: Flux, "
-                        "Wan, HunyuanVideo.")
+    p.add_argument(
+        "--tp-degree",
+        type=int,
+        default=None,
+        help="Tensor-parallel degree (default: registry default)",
+    )
+    p.add_argument("--cp-degree", type=int, default=1, help="Context-parallel degree (default: 1)")
+    p.add_argument(
+        "--cp-mode",
+        choices=["gather_kv", "ring"],
+        default="gather_kv",
+        help="Context-parallel attention strategy (default: gather_kv)",
+    )
+    p.add_argument(
+        "--cfg-parallel",
+        dest="cfg_parallel",
+        action="store_true",
+        help="Split the uncond/cond CFG passes across 2 data-parallel "
+        "ranks (doubles world_size). Mutually exclusive with "
+        "--cp-degree>1. Only for true-CFG models (Flux, Wan, LTX-2).",
+    )
+    p.add_argument(
+        "--sp",
+        dest="sp_enabled",
+        action="store_true",
+        help="Enable Megatron-style sequence parallelism: shard the "
+        "norm/modulation/residual regions along the sequence axis "
+        "across the tensor-parallel group (reduce-scatter replaces "
+        "the row-parallel all-reduce; world_size unchanged). "
+        "Mutually exclusive with --cp-degree>1. Supported: Flux, "
+        "Wan, HunyuanVideo.",
+    )
 
 
 def _add_shape_flags(p: argparse.ArgumentParser) -> None:
@@ -74,30 +89,113 @@ def _add_shape_flags(p: argparse.ArgumentParser) -> None:
 
 
 def _add_cache_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--cache-dir", default=None,
-                   help="Compiled artifact cache root (default: ~/.cache/difflet/)")
-    p.add_argument("--force", action="store_true",
-                   help="Recompile even if a valid cache entry exists")
-    p.add_argument("--host-vae", dest="host_vae", action="store_true",
-                   help="Decode the VAE on host CPU via diffusers instead of a "
-                        "compiled Neuron VAE. Required for Wan clips beyond ~9 "
-                        "frames: the single-shot Neuron VAE graph exceeds the "
-                        "compiler instruction limit (NCC_EVRF007).")
+    p.add_argument(
+        "--cache-dir",
+        default=None,
+        help="Compiled artifact cache root (default: ~/.cache/difflet/)",
+    )
+    p.add_argument(
+        "--force", action="store_true", help="Recompile even if a valid cache entry exists"
+    )
+    p.add_argument(
+        "--host-vae",
+        dest="host_vae",
+        action="store_true",
+        help="Decode the VAE on host CPU via diffusers instead of a "
+        "compiled Neuron VAE. Required for Wan clips beyond ~9 "
+        "frames: the single-shot Neuron VAE graph exceeds the "
+        "compiler instruction limit (NCC_EVRF007).",
+    )
 
 
 def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--tp-degree", type=int, default=None,
-                   help="Tensor-parallel degree (default: registry default)")
-    p.add_argument("--cp-degree", type=int, default=None,
-                   help="Context-parallel degree (default: registry default)")
-    p.add_argument("--cp-mode", choices=["gather_kv", "ring"], default=None,
-                   help="Context-parallel attention strategy (default: registry default)")
+    p.add_argument(
+        "--tp-degree",
+        type=int,
+        default=None,
+        help="Tensor-parallel degree (default: registry default)",
+    )
+    p.add_argument(
+        "--cp-degree",
+        type=int,
+        default=None,
+        help="Context-parallel degree (default: registry default)",
+    )
+    p.add_argument(
+        "--cp-mode",
+        choices=["gather_kv", "ring"],
+        default=None,
+        help="Context-parallel attention strategy (default: registry default)",
+    )
+    cfg = p.add_mutually_exclusive_group()
+    cfg.add_argument(
+        "--cfg-parallel",
+        dest="cfg_parallel",
+        action="store_true",
+        help="Enable CFG-parallel startup topology",
+    )
+    cfg.add_argument(
+        "--no-cfg-parallel",
+        dest="cfg_parallel",
+        action="store_false",
+        help="Disable CFG-parallel startup topology",
+    )
+    p.set_defaults(cfg_parallel=None)
+    sp = p.add_mutually_exclusive_group()
+    sp.add_argument(
+        "--sp",
+        dest="sp_enabled",
+        action="store_true",
+        help="Enable sequence parallelism for the resident model profile",
+    )
+    sp.add_argument(
+        "--no-sp",
+        dest="sp_enabled",
+        action="store_false",
+        help="Disable sequence parallelism for the resident model profile",
+    )
+    p.set_defaults(sp_enabled=None)
     p.add_argument("--height", type=int, default=None)
     p.add_argument("--width", type=int, default=None)
-    p.add_argument("--cache-dir", default=None,
-                   help="Compiled artifact cache root (default: ~/.cache/difflet/)")
-    p.add_argument("--force", action="store_true",
-                   help="Recompile even if a valid cache entry exists")
+    p.add_argument("--num-frames", type=int, default=None)
+    p.add_argument(
+        "--cache-dir",
+        default=None,
+        help="Compiled artifact cache root (default: ~/.cache/difflet/)",
+    )
+    p.add_argument(
+        "--force", action="store_true", help="Recompile even if a valid cache entry exists"
+    )
+    p.add_argument(
+        "--host-vae",
+        dest="host_vae",
+        action="store_true",
+        help="Request host VAE decode (rejected by current image serving)",
+    )
+    p.add_argument(
+        "--teacache-cadence",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Request fixed-cadence TeaCache (not supported by serving)",
+    )
+    p.add_argument(
+        "--teacache-online-delta",
+        type=float,
+        default=None,
+        metavar="ALPHA",
+        help="Request online-delta TeaCache (not supported by serving)",
+    )
+    p.add_argument(
+        "--teacache-speedup",
+        type=float,
+        default=None,
+        metavar="X",
+        help="Adaptive TeaCache target speedup",
+    )
+    p.add_argument(
+        "--teacache-calibration", default=None, metavar="PATH", help="TeaCache calibration JSON"
+    )
 
 
 def _add_generate_flags(p: argparse.ArgumentParser) -> None:
@@ -106,28 +204,59 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--steps", type=int, default=None)
     p.add_argument("--guidance-scale", type=float, default=None)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--work-dir", default=None,
-                   help="Directory for inter-stage tensors (staged models only)")
-    p.add_argument("--keep-work-dir", action="store_true",
-                   help="Do not delete work-dir after successful generation")
-    p.add_argument("--teacache-cadence", type=int, default=None,
-                   metavar="N", help="Skip every N-th DiT step (fixed cadence, no calibration)")
-    p.add_argument("--teacache-online-delta", type=float, default=None,
-                   metavar="ALPHA", help="Online-delta TeaCache alpha (no calibration)")
-    p.add_argument("--teacache-speedup", type=float, default=None,
-                   metavar="X", help="Adaptive TeaCache target speedup (requires --teacache-calibration)")
-    p.add_argument("--teacache-calibration", default=None,
-                   metavar="PATH", help="Path to TeaCache calibration JSON")
+    p.add_argument(
+        "--work-dir", default=None, help="Directory for inter-stage tensors (staged models only)"
+    )
+    p.add_argument(
+        "--keep-work-dir",
+        action="store_true",
+        help="Do not delete work-dir after successful generation",
+    )
+    p.add_argument(
+        "--teacache-cadence",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Skip every N-th DiT step (fixed cadence, no calibration)",
+    )
+    p.add_argument(
+        "--teacache-online-delta",
+        type=float,
+        default=None,
+        metavar="ALPHA",
+        help="Online-delta TeaCache alpha (no calibration)",
+    )
+    p.add_argument(
+        "--teacache-speedup",
+        type=float,
+        default=None,
+        metavar="X",
+        help="Adaptive TeaCache target speedup (requires --teacache-calibration)",
+    )
+    p.add_argument(
+        "--teacache-calibration",
+        default=None,
+        metavar="PATH",
+        help="Path to TeaCache calibration JSON",
+    )
 
 
 def _add_serve_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8091)
+    p.add_argument(
+        "--worker-heartbeat-interval",
+        type=float,
+        default=30.0,
+        metavar="SECONDS",
+        help="Worker heartbeat interval in seconds (default: 30)",
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(prog="difflet",
-                                   description="Difflet — diffusion inference on Trainium")
+    root = argparse.ArgumentParser(
+        prog="difflet", description="Difflet — diffusion inference on Trainium"
+    )
     sub = root.add_subparsers(dest="command", required=True)
 
     dl = sub.add_parser("download", help="Download model weights from HuggingFace")
@@ -179,12 +308,13 @@ def _validate_teacache(args: argparse.Namespace) -> None:
     ]
     active_names = [name for name, on in active if on]
     if len(active_names) > 1:
-        print(f"Error: {active_names[0]} and {active_names[1]} are mutually exclusive.",
-              file=sys.stderr)
+        print(
+            f"Error: {active_names[0]} and {active_names[1]} are mutually exclusive.",
+            file=sys.stderr,
+        )
         raise SystemExit(1)
-    if speedup is not None and calib is None:
-        print("Error: --teacache-speedup requires --teacache-calibration PATH.",
-              file=sys.stderr)
+    if speedup is not None and not calib:
+        print("Error: --teacache-speedup requires --teacache-calibration PATH.", file=sys.stderr)
         raise SystemExit(1)
 
 
@@ -300,8 +430,9 @@ def main(argv: list[str] | None = None) -> None:
         _validate_teacache(args)
 
     if args.command == "serve":
-        from difflet.serving.cli.serve import run
+        from difflet.serving.cli.serve import run, validate_serve_args
 
+        validate_serve_args(args)
         run(args)
     else:
         orchestrator = _get_orchestrator(args)

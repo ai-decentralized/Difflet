@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from difflet.common.registry.base import ServingModelMetadata, ServingStageMetadata
+from difflet.common.registry.base import ServingModelMetadata
+from difflet.serving.types import PipelineDefinition, StageDefinition
 
 
 def serving_metadata() -> ServingModelMetadata:
@@ -14,15 +15,21 @@ def serving_metadata() -> ServingModelMetadata:
         chat_content_type="image_url",
         default_steps=28,
         default_guidance_scale=3.5,
-        stages=(
-            ServingStageMetadata(
-                stage_id="pipeline",
-                role="pipeline",
-                output_keys=("image",),
-                final_output=True,
+        pipeline_definition=PipelineDefinition(
+            model_type="flux",
+            stages=(
+                StageDefinition(
+                    stage_id="pipeline",
+                    kind="opaque_pipeline",
+                    role="pipeline",
+                    output_keys=("output",),
+                    final_output=True,
+                ),
             ),
         ),
-        preflight_factory="difflet.serving.orchestrators.flux:FluxServingArtifactPreparer",
+        artifact_preparer_factory=(
+            "difflet.serving.orchestrators.flux:FluxServingArtifactPreparer"
+        ),
         orchestrator_factory="difflet.serving.orchestrators.flux:FluxServingOrchestrator",
         request_validator_factory="difflet.serving.orchestrators.flux:FluxServingRequestValidator",
     )

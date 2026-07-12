@@ -65,9 +65,7 @@ logger.setLevel(logging.INFO)
 
 
 def get_flux_parallelism_config(
-    backbone_tp_degree: int,
-    cp_degree: int = 1,
-    cfg_parallel_enabled: bool = False
+    backbone_tp_degree: int, cp_degree: int = 1, cfg_parallel_enabled: bool = False
 ) -> int:
     """
     Get the world_size based on backbone_tp_degree and parallelism settings.
@@ -95,9 +93,19 @@ def get_flux_parallelism_config(
     return backbone_tp_degree * cp_degree
 
 
-def create_flux_config(model_path, world_size, backbone_tp_degree, dtype, height, width, inpaint=False,
-                       cfg_parallel_enabled=False, context_parallel_enabled=False, cp_mode="gather_kv",
-                       sp_enabled=False):
+def create_flux_config(
+    model_path,
+    world_size,
+    backbone_tp_degree,
+    dtype,
+    height,
+    width,
+    inpaint=False,
+    cfg_parallel_enabled=False,
+    context_parallel_enabled=False,
+    cp_mode="gather_kv",
+    sp_enabled=False,
+):
     text_encoder_path = os.path.join(model_path, "text_encoder")
     text_encoder_2_path = os.path.join(model_path, "text_encoder_2")
     backbone_path = os.path.join(model_path, "transformer")
@@ -182,6 +190,7 @@ class NeuronFluxApplication(MultiComponentApplication):
         pipeline_class=NeuronFluxPipeline,
         teacache_fused: bool = False,
         teacache_speedup: Optional[float] = None,
+        teacache_calibration=None,
         teacache_calibration_path: Optional[str] = None,
     ):
         super().__init__()
@@ -254,11 +263,19 @@ class NeuronFluxApplication(MultiComponentApplication):
                 )
 
                 shape_label = f"{int(self.height)}x{int(self.width)}"
-                calibration = load_teacache_calibration_or_raise(
-                    teacache_calibration_path,
-                    model="flux",
-                    shape_label=shape_label,
-                )
+                if teacache_calibration is not None and teacache_calibration_path is not None:
+                    raise ValueError(
+                        "teacache_calibration and teacache_calibration_path are mutually exclusive"
+                    )
+                calibration = teacache_calibration
+                if calibration is None:
+                    calibration = load_teacache_calibration_or_raise(
+                        teacache_calibration_path,
+                        model="flux",
+                        shape_label=shape_label,
+                    )
+                elif calibration.model != "flux" or calibration.shape_label != shape_label:
+                    raise ValueError("TeaCache calibration does not match Flux model/profile")
                 if (
                     calibration.target_speedup is not None
                     and float(teacache_speedup) > float(calibration.target_speedup) + 1e-6
@@ -284,9 +301,7 @@ class NeuronFluxApplication(MultiComponentApplication):
         if self.teacache_probe is not None:
             # Same world_size as the backbone; load after text_encoder_2 (which
             # fixes the process communicator), alongside the transformer.
-            specs.append(
-                ComponentSpec("teacache_probe", self.teacache_probe, load_priority=1)
-            )
+            specs.append(ComponentSpec("teacache_probe", self.teacache_probe, load_priority=1))
         return specs
 
     def __call__(self, *args, **kwargs):

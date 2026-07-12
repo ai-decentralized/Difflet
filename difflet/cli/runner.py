@@ -11,20 +11,36 @@ def run_stage(
     num_cores: int,
     virtual_core_size: int | None,
     cli_args: list[str],
+    strict_environment: bool = False,
 ) -> None:
     """Spawn a stage subprocess with the correct Neuron env vars.
 
-    Uses setdefault so any value already set in the user's shell wins.
+    Staged CLI calls preserve explicit shell overrides. Serving compilation uses
+    ``strict_environment=True`` so the compiled topology matches its identity.
     """
     env = os.environ.copy()
-    env.setdefault("NEURON_RT_NUM_CORES", str(num_cores))
-    if virtual_core_size is not None:
-        env.setdefault("NEURON_RT_VIRTUAL_CORE_SIZE", str(virtual_core_size))
+    if strict_environment:
+        env["NEURON_RT_VISIBLE_CORES"] = ",".join(str(index) for index in range(num_cores))
+        env["NEURON_RT_NUM_CORES"] = str(num_cores)
+        if virtual_core_size is None:
+            env.pop("NEURON_RT_VIRTUAL_CORE_SIZE", None)
+        else:
+            env["NEURON_RT_VIRTUAL_CORE_SIZE"] = str(virtual_core_size)
+        env.pop("NEURON_LOGICAL_NC_CONFIG", None)
+        env.update({"WORLD_SIZE": "1", "LOCAL_WORLD_SIZE": "1", "RANK": "0", "LOCAL_RANK": "0"})
+    else:
+        env.setdefault("NEURON_RT_NUM_CORES", str(num_cores))
+        if virtual_core_size is not None:
+            env.setdefault("NEURON_RT_VIRTUAL_CORE_SIZE", str(virtual_core_size))
 
     cmd = [
-        sys.executable, "-m", "difflet.cli.stage",
-        "--orchestrator", orchestrator,
-        "--stage", stage,
+        sys.executable,
+        "-m",
+        "difflet.cli.stage",
+        "--orchestrator",
+        orchestrator,
+        "--stage",
+        stage,
         *cli_args,
     ]
     subprocess.run(cmd, env=env, check=True)
