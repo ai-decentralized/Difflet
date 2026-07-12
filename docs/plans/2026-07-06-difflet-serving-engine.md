@@ -867,10 +867,14 @@ worker smoke proves `cp_degree > 1`. The current CLI text stage only passes
 not enough to advertise serving support.
 
 The `serve` parser must preserve omission state for startup profile/runtime
-overrides.
-Use serve-specific flag helpers with `default=None`; do not reuse existing
-compile/generate helpers if they default omitted values to `1`,
-`"gather_kv"`, or another concrete value before profile construction.
+overrides while exposing the same compile/load/runtime knobs as the existing
+CLI. Shared helper functions are preferred where their defaults preserve the
+same semantics; serving-specific wrappers may override defaults to `None` when
+omission must fall back to registry metadata.
+
+Parsed startup options are a strict contract. Each serving adapter must either
+include the option in profile construction and artifact/runtime wiring or
+reject it before preflight. Silent no-ops are invalid.
 
 P0 uses one model-level serving profile. Operators can override that profile at
 startup with `difflet serve --tp-degree`, `--cp-degree`, `--height`, `--width`,
@@ -897,6 +901,13 @@ P0 behavior:
 - Return `400 invalid_extra_body` when a request includes startup-only profile
   fields such as `tp_degree`, `cp_degree`, `cp_mode`, `cfg_parallel`, or
   `sp_enabled`.
+- Accept CLI-compatible compile/runtime options at `difflet serve` startup,
+  including `cfg_parallel`, `sp`, `num_frames`, `host_vae`, and TeaCache flags,
+  even when the selected model will reject a value as unsupported. Parser
+  compatibility and model capability are separate concerns.
+- Keep per-generation fields (`prompt`, `steps`, `guidance_scale`, `seed`) in
+  the request contract. File-output fields (`output`, `work_dir`,
+  `keep_work_dir`) do not apply to a resident HTTP server.
 
 Future multi-profile serving may promote the following shape into scope, but it
 is not part of the first build:
@@ -1300,17 +1311,21 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--tp-degree", type=int, default=None)
     p.add_argument("--cp-degree", type=int, default=None)
     p.add_argument("--cp-mode", choices=["gather_kv", "ring"], default=None)
-    p.add_argument("--cfg-parallel", action=argparse.BooleanOptionalAction,
-                   default=None)
-    p.add_argument("--sp", dest="sp_enabled",
-                   action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--cfg-parallel", action="store_true")
+    p.add_argument("--sp", dest="sp_enabled", action="store_true")
+    p.add_argument("--host-vae", action="store_true")
+    p.add_argument("--teacache-cadence", type=int, default=None)
+    p.add_argument("--teacache-online-delta", type=float, default=None)
+    p.add_argument("--teacache-speedup", type=float, default=None)
+    p.add_argument("--teacache-calibration", default=None)
 ```
 
 After parsing, profile construction resolves `None` values from
 `ModelEntry.default_parallel` and `ModelEntry.default_shape`, then applies only
-non-`None` startup overrides. For P0, `cfg_parallel=True` and
-`sp_enabled=True` should be rejected for Qwen/Flux serving even though they are
-represented as tri-state overrides internally.
+non-`None` startup overrides. Model validation follows the same capability
+rules as compile/generate CLI: Flux may use sequence parallelism, while Qwen
+rejects it; both current serving adapters reject CFG parallelism because their
+exposed request contract has no true-CFG branch.
 
 Serving network flags:
 
@@ -1338,9 +1353,14 @@ Model/profile flags:
 | `--serving-profiles PATH` | unsupported in P0 | Future JSON/YAML startup profile list. P0 should reject this flag. |
 | `--profile-load-policy {single-active}` | `single-active` | P0 supports only one loaded profile. Values other than `single-active` should be rejected. |
 | `--cp-mode {gather_kv,ring}` | model/default | Context parallel attention strategy. |
-| `--cfg-parallel` / `--no-cfg-parallel` | `false` | Disabled for Qwen/Flux MVP; reject `--cfg-parallel` until explicitly supported. |
-| `--sp` / `--no-sp` | `false` | Disabled for P0 serving; reject `--sp` until the resident worker profile is verified. |
+| `--cfg-parallel` | `false` | Parsed for CLI parity; reject when the selected model/request contract has no true-CFG path. |
+| `--sp` | `false` | Sequence parallelism startup profile. Supported for Flux; rejected for Qwen. |
 | `--dtype DTYPE` | adapter default | Runtime dtype, for example `bf16`. |
+| `--host-vae` | `false` | Host decode startup profile. Parsed for CLI parity; rejected by current image serving adapters. |
+| `--teacache-cadence N` | unset | Fixed-cadence TeaCache mode, fixed for the resident profile. Mutually exclusive with the other TeaCache modes. |
+| `--teacache-online-delta ALPHA` | unset | Online-delta TeaCache mode, fixed for the resident profile. |
+| `--teacache-speedup X` | unset | Adaptive TeaCache target; requires `--teacache-calibration`. |
+| `--teacache-calibration PATH` | unset | Calibration artifact for adaptive TeaCache. |
 
 Artifact/cache lifecycle flags:
 
@@ -1553,8 +1573,8 @@ Startup flags:
 | `--tp-degree` | registry default unless overridden | Tensor-parallel degree for compile/load. Qwen defaults to the registry value `4`; Flux keeps the registry default unless overridden. | Yes: affects world size, NeuronCore use, cache key. |
 | `--cp-degree` | registry default unless overridden | Context-parallel degree for supported models. Qwen defaults to the registry value `1`. | Yes: affects world size, NeuronCore use, cache key. |
 | `--cp-mode` | registry default unless overridden | Context-parallel attention strategy. | Yes: affects compiled graph/cache for CP-capable stages. |
-| `--cfg-parallel` | `false` | Disabled in MVP. Qwen and Flux serving adapters should reject enabling it until explicitly supported. | Yes: changes world size/runtime topology and cache key. |
-| `--sp` | `false` | Disabled/rejected in P0 serving, even if the CLI supports it for the model. | Yes: affects compiled graph/cache. |
+| `--cfg-parallel` | `false` | Parsed at serving startup; current Qwen/Flux request contracts reject it because neither exposes a true-CFG branch. | Yes: changes world size/runtime topology and cache key. |
+| `--sp` | `false` | Supported for Flux resident profiles and rejected for Qwen by model capability validation. | Yes: affects compiled graph/cache. |
 | `--height` | model registry default | Fixed output height for this server instance. | Yes: fixed shape, cache key, NEFF shape. |
 | `--width` | model registry default | Fixed output width for this server instance. | Yes: fixed shape, cache key, NEFF shape. |
 | `--num-frames` | model registry default, often `None` for image | Fixed output frame count for video models. | Yes: fixed shape, cache key, NEFF shape. |

@@ -177,6 +177,12 @@ valid only as `difflet serve` startup overrides and as internal
 `ServingProfile` identity fields for cache, core placement, and diagnostics. If
 a request includes any of these fields, return `400 invalid_extra_body`.
 
+In P0, `ServingProfile` is immutable for the process lifetime: a request cannot
+select a different profile or warm another profile in-place. Traffic for another
+`tp/cp/shape` profile is served by another server process/pod with that profile
+(typically with deployment-level routing); profile switching in-process is not part
+of this API.
+
 Response-policy fields are ignored in request `extra_body`: `response_format`
 and `artifact_ttl_seconds`. P0 always stores generated media through
 `ArtifactStore` and returns a URL in `image_url.url`; artifact TTL comes from
@@ -220,7 +226,7 @@ Qwen-Image P0 value limits:
 | Field | P0 rule |
 | --- | --- |
 | prompt length | Reject after Qwen prompt templating/tokenization if it exceeds the configured encoder bucket. Default Qwen serving profile uses the existing `enc_seq=256` bucket unless the adapter declares another value. |
-| `num_inference_steps` / `steps` | Positive integer. Adapter default is `4`; server may set an upper bound such as `--max-inference-steps`, and values above it return `400 invalid_extra_body`. |
+| `num_inference_steps` / `steps` | Integer in `1..50`. Adapter default is `4`; values outside the serving bound return `400 invalid_extra_body`. |
 | `guidance_scale` | Finite non-negative float. Adapter default is `4.0`. |
 | `seed` | Integer in the range accepted by PyTorch manual seeding; P0 should accept `0 <= seed <= 2**63 - 1`. |
 | `output_format` | `png` only for Qwen P0. |
@@ -230,7 +236,7 @@ Flux P0 value limits:
 | Field | P0 rule |
 | --- | --- |
 | prompt length | Reject after Flux tokenizer/template handling if it exceeds the configured Flux text bucket. Default Flux serving profile uses the existing `max_sequence_length=512` path unless the adapter declares another value. No silent truncation. |
-| `num_inference_steps` / `steps` | Positive integer. Adapter default is `28`; server may set an upper bound such as `--max-inference-steps`, and values above it return `400 invalid_extra_body`. |
+| `num_inference_steps` / `steps` | Integer in `1..50`. Adapter default is `28`; values outside the serving bound return `400 invalid_extra_body`. |
 | `guidance_scale` | Finite non-negative float. Adapter default is `3.5`. |
 | `seed` | Integer in the range accepted by PyTorch manual seeding; P0 should accept `0 <= seed <= 2**63 - 1`. |
 | `output_format` | `png` only for Flux P0. |
@@ -280,7 +286,7 @@ Per-model input differences:
 
 | Model type | Output | Relevant request fields | Notes |
 | --- | --- | --- | --- |
-| `qwen_image` | image | `height`, `width`, `num_inference_steps`, `guidance_scale`, `seed` | P0 target gated by shared-worker load/smoke. `height` and `width` must match the startup profile. Reject non-null `num_frames` and `true_cfg_scale`; Qwen uses guidance-distilled single-pass guidance. |
+| `qwen_image` | image | `height`, `width`, `num_inference_steps`, `guidance_scale`, `seed` | P0 target gated by shared-worker load/smoke. Fixed rectangular and square startup profiles are supported when dimensions satisfy the compiled model constraints; request shape must match startup. Reject non-null `num_frames` and `true_cfg_scale`; Qwen uses guidance-distilled single-pass guidance. |
 | `flux` | image | `height`, `width`, `num_inference_steps`, `guidance_scale`, `seed` | MVP target. Single-pipeline image model. Reject non-null `num_frames`. |
 | `wan` | video | `height`, `width`, `num_frames`, `num_inference_steps`, `guidance_scale`, `seed` | Future P1+ only. Video output must use `ArtifactStore`. |
 | `hunyuan_video` | video | `height`, `width`, `num_frames`, `num_inference_steps`, `guidance_scale`, `seed` | Future P1+ only. Video output must use `ArtifactStore`. |
@@ -366,47 +372,11 @@ Engine/output boundary:
   SDK/client timeouts so upload or presign cannot hang the HTTP handler after
   worker generation succeeds.
 
-## Future P1+ Video Response
 
-Future P1+ video models should return an artifact-backed content part:
+## Future Video Response
 
-```json
-{
-  "id": "chatcmpl-difflet-...",
-  "object": "chat.completion",
-  "created": 1783420000,
-  "model": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
-  "choices": [
-    {
-      "index": 0,
-      "message": {
-        "role": "assistant",
-        "content": [
-          {
-            "type": "video_url",
-            "video_url": {
-              "url": "https://example-r2-url/generated/file_xyz.mp4",
-              "file_id": "file_xyz",
-              "mime_type": "video/mp4",
-              "expires_at": 1783423600
-            }
-          }
-        ]
-      },
-      "finish_reason": "stop"
-    }
-  ],
-  "usage": {
-    "prompt_tokens": 0,
-    "completion_tokens": 0,
-    "total_tokens": 0
-  }
-}
-```
-
-Video is not part of P0. When enabled later, generated videos should use
-object-storage artifact URLs rather than base64.
-
+Video is outside P0. A future implementation must return an object-storage-backed
+`video_url` content part and must not inline base64 or local filesystem paths.
 ## Model Support Matrix
 
 The chat route is the single public generation route for every model that the
@@ -431,7 +401,7 @@ and verified for that exact checkpoint.
 
 | Model id | Model type | Default output | Chat content type | Min cores for full resident | P0 serving status | Notes |
 | --- | --- | --- | --- | ---: | --- | --- |
-| `Qwen/Qwen-Image` | `qwen_image` | image/png | `image_url` | `max(stage_cores)` | P0 target, gated | Shared-process 3-stage `prompt_encoder -> denoiser -> decoder`; enabled only after shared-worker co-load and smoke pass for the active profile. CFG-parallel disabled. Per-stage resident core sums are future-only capacity planning. |
+| `Qwen/Qwen-Image` | `qwen_image` | image/png | `image_url` | `max(stage_cores)` | P0 target, gated | Shared-process canonical stages `text -> generate -> vae` (roles `prompt_encoder -> denoiser -> decoder`); enabled only after shared-worker co-load and smoke pass for the active profile. CFG-parallel disabled. Per-stage resident core sums are future-only capacity planning. |
 | `black-forest-labs/FLUX.1-dev` | `flux` | image/png | `image_url` | `tp*cp` | P0 target | Single pipeline path through `DiffletPipeline`; CFG-parallel disabled. |
 | `black-forest-labs/FLUX.1-schnell` | `flux` | image/png | `image_url` | `tp*cp` | Not enabled in P0 | Same base registry family as Flux dev, but not a same-checkpoint alias. Enable only after the Flux serving/common orchestrator is parameterized and tested for this checkpoint. |
 | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` | `wan` | video/mp4 | `video_url` | `tp*cp + 1` | P1/P2 | Resident 2-stage `denoiser -> decoder`; video artifact output. |
@@ -472,6 +442,7 @@ Required status codes:
 
 | Condition | HTTP status | Error code |
 | --- | ---: | --- |
+| Parsed JSON request body is not an object | 400 | `invalid_request` |
 | Unsupported model id | 400 | `model_not_served` |
 | Unsupported output modality | 400 | `unsupported_modality` |
 | Unsupported input content item | 400 | `unsupported_input_modality` |
@@ -486,7 +457,8 @@ Required status codes:
 | Worker recovering after request timeout | 503 | `engine_recovering` |
 | Worker dead or engine unhealthy | 503 | `engine_unavailable` |
 | Artifact store unavailable or misconfigured | 503 | `artifact_store_unavailable` |
-| Artifact upload or presign failed after generation | 502 | `artifact_upload_failed` |
+| Unexpected model/worker/R2 backend failure | 500 | `internal_error` |
+| Artifact upload or presign timeout after generation | 502 | `artifact_upload_failed` |
 | Request exceeds `request_timeout` | 504 | `request_timeout` |
 
 While the engine is recovering a worker after a timed-out request, new
@@ -497,7 +469,7 @@ a restart path, or the engine marks itself unrecoverably unhealthy.
 
 If generation succeeds but `await ArtifactStore.put_bytes(...)` or
 `await ArtifactStore.get_url(ref)` fails, the handler must return one of the
-artifact errors above, clean any request-local temporary data, and must not fall
+errors above, clean any request-local temporary data, and must not fall
 back to `data_url`, local file URLs, raw filesystem paths, or inline bytes.
 
 ## Implementation Notes
