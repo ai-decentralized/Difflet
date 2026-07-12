@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
+import types
 
 import pytest
 
@@ -227,6 +229,34 @@ def _failing_r2_store(monkeypatch) -> R2ArtifactStore:
     )
     monkeypatch.setattr(store, "_client", lambda: _FailingR2Client())
     return store
+
+
+def test_r2_store_reuses_client(monkeypatch):
+    clients = []
+
+    class _Client:
+        pass
+
+    def _client(*args, **kwargs):
+        client = _Client()
+        clients.append(client)
+        return client
+
+    monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=_client))
+    monkeypatch.setitem(
+        sys.modules,
+        "botocore.config",
+        types.SimpleNamespace(Config=lambda **kwargs: kwargs),
+    )
+    store = R2ArtifactStore(
+        bucket="bucket",
+        endpoint_url="https://example.invalid",
+        access_key_id="key",
+        secret_access_key="secret",
+    )
+
+    assert store._client() is store._client()
+    assert len(clients) == 1
 
 
 @pytest.mark.parametrize("operation", ["upload", "presign"])

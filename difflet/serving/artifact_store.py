@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import uuid
 from dataclasses import dataclass
 from typing import Protocol
@@ -82,6 +83,8 @@ class R2ArtifactStore:
         self.prefix = prefix.strip("/")
         self.public_base_url = public_base_url.rstrip("/") if public_base_url else None
         self.client_timeout = float(client_timeout)
+        self._client_instance = None
+        self._client_lock = threading.Lock()
 
     @classmethod
     def from_env(cls, *, client_timeout: float = 60.0) -> "R2ArtifactStore":
@@ -113,21 +116,27 @@ class R2ArtifactStore:
         )
 
     def _client(self):
+        if self._client_instance is not None:
+            return self._client_instance
+
         import boto3
         from botocore.config import Config
 
-        return boto3.client(
-            "s3",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id=self.access_key_id,
-            aws_secret_access_key=self.secret_access_key,
-            region_name="auto",
-            config=Config(
-                connect_timeout=min(self.client_timeout, 10.0),
-                read_timeout=self.client_timeout,
-                retries={"max_attempts": 2},
-            ),
-        )
+        with self._client_lock:
+            if self._client_instance is None:
+                self._client_instance = boto3.client(
+                    "s3",
+                    endpoint_url=self.endpoint_url,
+                    aws_access_key_id=self.access_key_id,
+                    aws_secret_access_key=self.secret_access_key,
+                    region_name="auto",
+                    config=Config(
+                        connect_timeout=min(self.client_timeout, 10.0),
+                        read_timeout=self.client_timeout,
+                        retries={"max_attempts": 2},
+                    ),
+                )
+        return self._client_instance
 
     async def put_bytes(
         self,

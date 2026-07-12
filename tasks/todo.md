@@ -389,3 +389,13 @@ Serving dotenv loading (2026-07-12):
 - Verification: 54 focused serving tests pass locally. Remote Flux PID 22277 was
   the only serving parent, loaded R2 configuration from `.env`, passed real smoke,
   and returned health/ready 200 without shell-sourcing the file.
+
+R2 artifact latency (2026-07-12):
+- [x] Reuse one lazily constructed boto3 client per R2 artifact store.
+- [x] Split artifact upload and URL-generation latency logs.
+- [x] Add focused regression coverage and run serving checks.
+- Rationale: reuse the boto3 connection pool across requests and distinguish R2
+  upload latency from local URL generation before making further optimizations.
+- Verification: the focused artifact/chat suite passes 35 tests and the full
+  serving suite passes 136 tests; Black and `git diff --check` pass. Mypy reaches
+  only pre-existing pipeline/TeaCache errors, and Ruff is not installed locally.

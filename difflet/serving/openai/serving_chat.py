@@ -181,7 +181,9 @@ async def generate_chat_completion(
             request_validator.validate(request)
     except DiffletServingError:
         logger.warning(
-            "chat request validation_rejected request_id=%s model=%s", request.request_id, request.model
+            "chat request validation_rejected request_id=%s model=%s",
+            request.request_id,
+            request.model,
         )
         raise
     generate_started_at = time.perf_counter()
@@ -215,10 +217,12 @@ async def generate_chat_completion(
         timeout_s=artifact_store_timeout,
     )
     logger.info(
-        "chat request artifact_uploaded request_id=%s file_id=%s",
+        "chat request artifact_uploaded request_id=%s file_id=%s duration_ms=%.2f",
         request.request_id,
         ref.file_id,
+        (time.perf_counter() - store_started_at) * 1000.0,
     )
+    url_started_at = time.perf_counter()
     url = await get_url_with_timeout(
         artifact_store,
         ref,
@@ -226,8 +230,9 @@ async def generate_chat_completion(
         timeout_s=artifact_store_timeout,
     )
     logger.info(
-        "chat request artifact_url_ready request_id=%s duration_ms=%.2f",
+        "chat request artifact_url_ready request_id=%s duration_ms=%.2f total_store_ms=%.2f",
         request.request_id,
+        (time.perf_counter() - url_started_at) * 1000.0,
         (time.perf_counter() - store_started_at) * 1000.0,
     )
     total_ms = (time.perf_counter() - started_at) * 1000.0
