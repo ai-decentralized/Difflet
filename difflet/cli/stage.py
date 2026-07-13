@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import sys
 
 _ORCHESTRATOR_MAP: dict[str, str] = {
@@ -61,6 +62,12 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--teacache-online-delta", type=float, default=None)
     p.add_argument("--teacache-speedup", type=float, default=None)
     p.add_argument("--teacache-calibration", default=None)
+    # DP worker-mode flags (parse_known_args silently drops what isn't declared
+    # here — the --sp bug class; keep in sync with main._add_generate_flags).
+    p.add_argument("--requests-dir", default=None)
+    p.add_argument("--worker-index", type=int, default=None)
+    p.add_argument("--dp-schedule", default="round_robin")
+    p.add_argument("--keep-work-dir", action="store_true")
     return p
 
 
@@ -69,6 +76,15 @@ def main(argv: list[str] | None = None) -> int:
     args, _ = parser.parse_known_args(argv)
     cls = _load_orchestrator_class(args.orchestrator)
     orchestrator = cls(args)
+    if args.stage_mode == "generate":
+        # Overlap this stage's ~6.7s one-time NeuronCore bring-up with its load.
+        # Gated to generate: compile runs on the host compiler and must not spin
+        # up the device.
+        from difflet.cli.prewarm import prewarm_neuron_runtime
+        num_cores = int(os.environ.get("NEURON_RT_NUM_CORES") or 0) or (
+            (args.tp_degree or 1) * (args.cp_degree or 1)
+        )
+        prewarm_neuron_runtime(num_cores)
     orchestrator._run_stage_internal(args.stage, args)
     return 0
 

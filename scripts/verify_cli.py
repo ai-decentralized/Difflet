@@ -24,6 +24,11 @@ from enum import Enum
 _HF_CACHE = pathlib.Path.home() / ".cache" / "huggingface" / "hub"
 _DIFFLET_CACHE = pathlib.Path.home() / ".cache" / "difflet"
 
+# Invoke the CLI as a module of THIS checkout (cwd on sys.path), not the
+# `difflet` console script: the editable install may point at a different
+# checkout that lacks the flags under test (e.g. --dp on a feature branch).
+_DIFFLET_CMD = [sys.executable, "-m", "difflet.cli.main"]
+
 
 class Status(str, Enum):
     PASS = "PASS"
@@ -75,6 +80,10 @@ PARALLEL_CONFIGS: dict[str, ParallelConfig] = {
     "tp2cfg": ParallelConfig("tp2cfg", ("--tp-degree", "2", "--cfg-parallel"), 4),
     # SP reuses the TP group; world_size unchanged
     "tp4sp": ParallelConfig("tp4sp", ("--tp-degree", "4", "--sp"), 4),
+    # DP: 2 replicas x tp2 = 4 cores. Generate runs a 2-request batch through
+    # the router (one request per replica); compile resolves to the same dp=1
+    # tp2 artifact both replicas load (compile-once-load-k).
+    "dp2tp2": ParallelConfig("dp2tp2", ("--tp-degree", "2", "--dp", "2"), 4),
 }
 
 MODELS: dict[str, ModelSpec] = {
@@ -151,14 +160,24 @@ CP_UNSUPPORTED = frozenset({"ltx_2", "hunyuan_video_15"})
 
 # Documented known gaps:
 # - hunyuan_video_15 is a scaffold: compile/generate raise NotImplementedError
-#   (difflet/cli/orchestrators/hunyuan_video_15.py).
+#   (difflet/cli/orchestrators/hunyuan_video_15.py). Its dp cell fails the
+#   same way (DP inherits automatically once generate lands).
 # - hunyuan_video tp2cp2: neuronx-cc 2.25.3371.0 dies with INTERNAL_ERROR
 #   NCC_INLA001 (SBUF alloc out of bound) on the CP-degree-2 DiT graph —
 #   deterministic, reproduced twice; HLO repro preserved for an
-#   aws-neuron-sdk ticket.
+#   aws-neuron-sdk ticket. On 2.26.6360.0 the signature drifted to
+#   NCC_IBIR243 "Access pattern out of bounds" — same cell, still expected.
+# - hunyuan_video dp2tp2: per-replica HBM capacity, not a DP bug. The generate
+#   stage dies loading the compiled VAE (torch.jit.load, NRT "status=4
+#   Allocation Failure") at f121 on a 2-core replica; a lone pinned dp=1 tp2
+#   replica with the rest of the device idle fails identically (verified
+#   2026-07-12, NRT 2.33.10 / neuronx-cc 2.26.6360.0), while 4-core tp4
+#   passes. hunyuan_video has never fit any 2-core-per-shard config.
 EXPECTED_FAIL_CELLS = frozenset({
     ("hunyuan_video_15", "tp4"),
+    ("hunyuan_video_15", "dp2tp2"),
     ("hunyuan_video", "tp2cp2"),
+    ("hunyuan_video", "dp2tp2"),
 })
 
 
@@ -197,7 +216,7 @@ def plan_cells(model_keys: list[str], config_keys: list[str]) -> list[Cell]:
 # ---------------------------------------------------------------- commands
 
 def build_download_cmd(spec: ModelSpec) -> list[str]:
-    return ["difflet", "download", "--model-id", spec.model_id]
+    return _DIFFLET_CMD + ["download", "--model-id", spec.model_id]
 
 
 def _common_flags(spec: ModelSpec, cfg: ParallelConfig) -> list[str]:
@@ -208,18 +227,51 @@ def _common_flags(spec: ModelSpec, cfg: ParallelConfig) -> list[str]:
 
 
 def build_compile_cmd(spec: ModelSpec, cfg: ParallelConfig) -> list[str]:
-    return ["difflet", "compile", "--model-id", spec.model_id] + _common_flags(spec, cfg)
+    return _DIFFLET_CMD + ["compile", "--model-id", spec.model_id] + _common_flags(spec, cfg)
+
+
+def _dp_variants(name: str, replica: int) -> list[str]:
+    """Per-request artifact preference list, e.g. wan.mp4 -> [wan_dp1.mp4, wan_dp1.pt]."""
+    stem, suffix = name.rsplit(".", 1)
+    variants = [f"{stem}_dp{replica}.{suffix}"]
+    if suffix != "pt":
+        variants.append(f"{stem}_dp{replica}.pt")
+    return variants
 
 
 def build_generate_cmd(
     spec: ModelSpec, cfg: ParallelConfig, cell_dir: pathlib.Path,
-) -> tuple[list[str], list[pathlib.Path]]:
-    cmd = ["difflet", "generate", "--model-id", spec.model_id] + _common_flags(spec, cfg)
+) -> tuple[list[str], list[list[pathlib.Path]]]:
+    """Returns (cmd, artifact_groups): each group is a preference list of paths,
+    at least one of which must exist for the cell to pass."""
+    cmd = _DIFFLET_CMD + ["generate", "--model-id", spec.model_id] + _common_flags(spec, cfg)
     cmd += list(spec.generate_flags)
-    cmd += ["--prompt", spec.prompt, "--output", str(cell_dir / spec.output_name)]
-    if spec.staged:
+    if "--dp" in cfg.flags:
+        # DP cell: a 2-request batch routed across the replicas.
+        dp = int(cfg.flags[cfg.flags.index("--dp") + 1])
+        stem, suffix = spec.output_name.rsplit(".", 1)
+        requests_file = cell_dir / "requests.jsonl"
+        cell_dir.mkdir(parents=True, exist_ok=True)
+        requests_file.write_text(
+            "\n".join(
+                json.dumps({
+                    "prompt": f"{spec.prompt} (variant {r})",
+                    "output": str(cell_dir / f"{stem}_dp{r}.{suffix}"),
+                    "seed": 42 + r,
+                })
+                for r in range(dp)
+            ) + "\n"
+        )
+        cmd += ["--requests", str(requests_file)]
+        artifact_groups = [
+            [cell_dir / v for v in _dp_variants(spec.output_name, r)] for r in range(dp)
+        ]
+    else:
+        cmd += ["--prompt", spec.prompt, "--output", str(cell_dir / spec.output_name)]
+        artifact_groups = [[cell_dir / name for name in spec.artifact_names]]
+    if spec.staged or "--dp" in cfg.flags:
         cmd += ["--work-dir", str(cell_dir / "work"), "--keep-work-dir"]
-    return cmd, [cell_dir / name for name in spec.artifact_names]
+    return cmd, artifact_groups
 
 
 # ---------------------------------------------------------------- execution
@@ -260,13 +312,15 @@ def run_cell(
         results["generate"] = StepResult(status=Status.SKIP, reason="compile failed")
         return results
 
-    gen_cmd, artifacts = build_generate_cmd(spec, cfg, cell_dir)
+    gen_cmd, artifact_groups = build_generate_cmd(spec, cfg, cell_dir)
     with open(cell_dir / "step_generate.log", "w") as fh:
         result = run_step(gen_cmd, fh, timeout=timeout)
-    if result.status == Status.PASS and not any(p.exists() for p in artifacts):
+    missing = [g for g in artifact_groups if not any(p.exists() for p in g)]
+    if result.status == Status.PASS and missing:
         result = StepResult(
             status=Status.FAIL, duration=result.duration,
-            reason="artifact not found: " + " | ".join(str(p) for p in artifacts),
+            reason="artifact not found: "
+            + " ; ".join(" | ".join(str(p) for p in g) for g in missing),
             cmd=gen_cmd,
         )
     results["generate"] = result
@@ -376,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="verify_cli",
         description="Parallelism-config matrix for the difflet CLI "
-                    "(7 models x 4 four-core configs).",
+                    "(7 models x 5 four-core configs).",
     )
     parser.add_argument("--models", nargs="*", choices=list(MODELS), default=list(MODELS),
                         metavar="MODEL",

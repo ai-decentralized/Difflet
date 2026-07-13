@@ -14,66 +14,83 @@
     "num_frames": 49
   },
   "steps": 20,
-  "compile_seconds": 1714.21,
+  "compile_seconds": 1838.8584776229982,
   "compile_breakdown": {
     "transformer": {
-      "module_load_s": 87.103,
-      "hlo_generate_s": 22.828,
-      "priority_hlo_compile_s": 1321.954,
-      "all_hlo_compile_s": 2.573,
-      "build_total_s": 1714.21,
-      "other_s": 279.752
+      "module_load_s": 88.891,
+      "hlo_generate_s": 30.018,
+      "priority_hlo_compile_s": 455.069,
+      "all_hlo_compile_s": 0.808,
+      "build_total_s": 913.768,
+      "other_s": 338.982
     },
-    "wall_total_s": 1714.21
+    "wall_total_s": 913.768
   },
-  "load_seconds": 335.327,
-  "e2e_cold_seconds": 803.072,
+  "load_seconds": 314.804,
+  "e2e_cold_seconds": 777.821,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "transformer (denoise loop) [Neuron]",
+        "load_s": 314.804
+      }
+    ],
+    "weights_load_total_s": 314.804,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 777.821,
+    "compute_and_overhead_s": 463.017,
+    "note": "text-encoder and VAE decode run on the host (enable_host_pipeline/enable_decode_components), so only the transformer is a Neuron load; the residual is host text-encode + denoise + host VAE decode."
+  },
   "e2e_warm": {
-    "n": 1,
-    "mean": 102.73710859401035,
-    "median": 102.73710859401035,
-    "std": 0.0,
-    "p50": 102.73710859401035,
-    "p90": 102.73710859401035,
-    "min": 102.73710859401035,
-    "max": 102.73710859401035,
+    "n": 5,
+    "mean": 58.50489010879828,
+    "median": 58.3947660690028,
+    "std": 0.5684314594146287,
+    "p50": 58.3947660690028,
+    "p90": 59.34955727899796,
+    "min": 57.648630153998965,
+    "max": 59.34955727899796,
     "samples": [
-      102.73710859401035
+      58.839055202988675,
+      58.3947660690028,
+      59.34955727899796,
+      58.292441839003004,
+      57.648630153998965
     ]
   },
   "step_latency": {
     "n": 19,
-    "mean": 0.44178727700005094,
-    "median": 0.4414749409988872,
-    "std": 0.001400421336605137,
-    "p50": 0.4414749409988872,
-    "p90": 0.44237079399681534,
-    "min": 0.4404648970012204,
-    "max": 0.4472164580001845,
+    "mean": 0.4378889405795091,
+    "median": 0.4375419440038968,
+    "std": 0.0015348665165944497,
+    "p50": 0.4375419440038968,
+    "p90": 0.4383222710021073,
+    "min": 0.43672792401048355,
+    "max": 0.4440220500109717,
     "samples": [
-      0.4472164580001845,
-      0.4417912710014207,
-      0.44237079399681534,
-      0.44207567400007974,
-      0.44124388300042483,
-      0.44146037000245997,
-      0.44105926399788586,
-      0.4422412070016435,
-      0.4426948949985672,
-      0.44084648300122353,
-      0.44095201500022085,
-      0.4414749409988872,
-      0.4412097439999343,
-      0.4404648970012204,
-      0.4417942629988829,
-      0.4410795940020762,
-      0.4407570749972365,
-      0.4416995940009656,
-      0.44152584100083914
+      0.4440220500109717,
+      0.43762781299301423,
+      0.43722521699965,
+      0.4375419440038968,
+      0.4377626909990795,
+      0.43742423100047745,
+      0.4374240600009216,
+      0.43672845300170593,
+      0.43687173299258575,
+      0.4374105739989318,
+      0.43756480400043074,
+      0.43773268500808626,
+      0.43753992799611297,
+      0.4375441019947175,
+      0.43672792401048355,
+      0.43784345999301877,
+      0.4375032359967008,
+      0.43907269500778057,
+      0.4383222710021073
     ]
   },
   "throughput": {
-    "DiT steps/s": 2.264
+    "DiT steps/s": 2.284
   },
   "peak_device_mem_gb": null,
   "output": {
@@ -87,9 +104,9 @@
     "dtype": "torch.float32",
     "finite": true,
     "min": 0.0,
-    "max": 0.8828125,
-    "mean": 0.36953800916671753,
-    "std": 0.1457165628671646,
+    "max": 0.87890625,
+    "mean": 0.36958661675453186,
+    "std": 0.14593945443630219,
     "note": "saved ltx_2_out.pt"
   },
   "toolchain": {
@@ -99,49 +116,33 @@
     "neuronx-distributed": "0.19.28093+fc70b593",
     "diffusers": "0.38.0"
   },
-  "config_label": "tp=4, bf16, TP-sharded transformer + attention_cte self-attn + unmasked cross-attn, guidance=1.0 (batch-1 NEFF)",
+  "config_label": "tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF)",
   "status": "ok",
   "notes": [
-    "UPDATE: cross-attn moved from masked-SDPA to UNMASKED attention_cte (attends text padding, like wan/qwen) \u2014 per-step 477.1 -> 441.8 ms (7.4%). Lossless: full-generate parity vs the masked-SDPA baseline (same seed) cosine 0.999934. Cross-attn was only ~7% of per-step; the residual H100 1.38x gap is genuine self-attn(cte)+FFN compute. attention_cte's bound path can't do cross-attn (q!=kv); unmasked can (q!=kv supported).",
-    "per-step = 441.8 ms/DiT-step (median 441.5, p90 442.4, n=19) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 35s; output finite=True.",
+    "per-step = 437.9 ms/DiT-step (median 437.5, p90 438.3, n=19) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 60s; output finite=True.",
     "Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.",
-    "e2e_cold = 803 s \u2014 TRUE cold start (OS page cache dropped before the run via sudo drop_caches), so the weight load is a real cold disk read; this replaces an earlier value taken with the host weights already cached (artificially low).",
-    "e2e_warm = 103 s (n=1, warm OS page cache from the immediately-preceding cold run, same session). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+    "e2e_cold = 778 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 59 s (n=5; reported after 2 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
-  "timestamp": "2026-06-25 15:18 UTC",
+  "timestamp": "2026-06-30 15:35 UTC",
   "config_slug": "ltx_2",
-  "e2e_breakdown": {
-    "stages": [
-      {
-        "stage": "transformer (denoise loop) [Neuron]",
-        "load_s": 335.327,
-        "shard_s": 40.458
-      }
-    ],
-    "weights_load_total_s": 335.327,
-    "weights_shard_total_s": 40.458,
-    "wall_total_s": 803.072,
-    "compute_and_overhead_s": 467.745,
-    "note": "text-encoder and VAE decode run on the host (enable_host_pipeline/enable_decode_components), so only the transformer is a Neuron load; the residual is host text-encode + denoise + host VAE decode."
-  },
-  "e2e_warm_breakdown": {
-    "stages": [
-      {
-        "stage": "transformer (denoise loop) [Neuron]",
-        "load_s": 52.395,
-        "shard_s": 38.883
-      }
-    ],
-    "weights_load_total_s": 52.395,
-    "weights_shard_total_s": 38.883,
-    "wall_total_s": 102.737,
-    "compute_and_overhead_s": 50.342,
-    "note": "text-encoder and VAE decode run on the host (enable_host_pipeline/enable_decode_components), so only the transformer is a Neuron load; the residual is host text-encode + denoise + host VAE decode."
-  },
+  "device_slug": "trn2",
   "revision": "47da56e2ad66ce4125a9922b4a8826bf407f9d0a",
   "seed": 42,
   "prompt": "a cinematic shot of a red fox running through a snowy forest",
   "guidance_scale": 1.0,
   "output_kind": "video",
-  "device_slug": "trn2"
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "transformer (denoise loop) [Neuron]",
+        "load_s": 13.896
+      }
+    ],
+    "weights_load_total_s": 13.896,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 57.649,
+    "compute_and_overhead_s": 43.753,
+    "note": "text-encoder and VAE decode run on the host (enable_host_pipeline/enable_decode_components), so only the transformer is a Neuron load; the residual is host text-encode + denoise + host VAE decode."
+  }
 }

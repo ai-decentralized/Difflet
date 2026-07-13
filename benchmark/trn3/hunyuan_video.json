@@ -1,0 +1,172 @@
+{
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "model_type": "hunyuan_video",
+  "backend": "trainium",
+  "device": "trn3pd98.3xlarge / 4 NeuronCores / 144 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "compile_seconds": 2410.0544206982013,
+  "compile_breakdown": {
+    "text_encoder_clip": {
+      "module_load_s": 0.27,
+      "hlo_generate_s": 0.442,
+      "all_hlo_compile_s": 18.615,
+      "build_total_s": 19.46,
+      "other_s": 0.133
+    },
+    "text_encoder": {
+      "module_load_s": 0.093,
+      "hlo_generate_s": 2.158,
+      "priority_hlo_compile_s": 57.974,
+      "all_hlo_compile_s": 9.349,
+      "build_total_s": 101.796,
+      "other_s": 32.223
+    },
+    "transformer": {
+      "module_load_s": 15.484,
+      "hlo_generate_s": 30.2,
+      "priority_hlo_compile_s": 168.482,
+      "all_hlo_compile_s": 0.003,
+      "build_total_s": 362.716,
+      "other_s": 148.547
+    },
+    "wall_total_s": 483.972
+  },
+  "load_seconds": 402.737,
+  "e2e_cold_seconds": 520.6016377841588,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder_clip",
+        "load_s": 4.746,
+        "shard_s": 1.126
+      },
+      {
+        "stage": "text_encoder",
+        "load_s": 125.485,
+        "shard_s": 115.907
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 272.506
+      }
+    ],
+    "weights_load_total_s": 402.737,
+    "weights_shard_total_s": 117.033,
+    "wall_total_s": 520.602,
+    "compute_and_overhead_s": 117.865,
+    "note": "VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode."
+  },
+  "e2e_warm": {
+    "n": 3,
+    "mean": 129.6457746529486,
+    "median": 128.26174015388824,
+    "std": 3.4351739106649166,
+    "p50": 128.26174015388824,
+    "p90": 134.3706526828464,
+    "min": 126.30493112211116,
+    "max": 134.3706526828464,
+    "samples": [
+      134.3706526828464,
+      126.30493112211116,
+      128.26174015388824
+    ]
+  },
+  "step_latency": {
+    "n": 20,
+    "mean": 0.6499853458721191,
+    "median": 0.6499368250370026,
+    "std": 0.00031064207354179583,
+    "p50": 0.6499497150070965,
+    "p90": 0.6502671760972589,
+    "min": 0.6492933768313378,
+    "max": 0.6508192291948944,
+    "samples": [
+      0.6505357560236007,
+      0.6499497150070965,
+      0.6499730830546468,
+      0.6498793489299715,
+      0.6508192291948944,
+      0.6498967369552702,
+      0.6502671760972589,
+      0.6497438088990748,
+      0.6497873500920832,
+      0.6497801861260086,
+      0.6498994680587202,
+      0.6501577810849994,
+      0.6496900238562375,
+      0.6498234469909221,
+      0.6499239350669086,
+      0.650078573031351,
+      0.6499772400129586,
+      0.6500247679650784,
+      0.650205914163962,
+      0.6492933768313378
+    ]
+  },
+  "throughput": {
+    "DiT steps/s": 1.538
+  },
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved hunyuanvideo_out.mp4"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.14.27725+e2ff0410",
+    "neuronx-cc": "2.25.3371.0+f524f7f8",
+    "neuronx-distributed": "0.19.28093+fc70b593",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4, bf16, attention_cte",
+  "status": "ok",
+  "notes": [
+    "per-step = 650.0 ms/DiT-forward (warm, in-process, n=20) via benchmark.step_latency \u2014 the stable Neuron-compute metric (e2e generate is load-dominated/noisy across processes).",
+    "e2e_warm = 130 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+  ],
+  "timestamp": "2026-06-29 23:38 UTC",
+  "config_slug": "hunyuan_video",
+  "device_slug": "trn3",
+  "revision": "e8c2aaa66fe3742a32c11a6766aecbf07c56e773",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 6.0,
+  "output_kind": "video",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder_clip",
+        "load_s": 3.632
+      },
+      {
+        "stage": "text_encoder",
+        "load_s": 8.539
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 23.397
+      }
+    ],
+    "weights_load_total_s": 35.568,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 128.262,
+    "compute_and_overhead_s": 92.694,
+    "note": "VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode."
+  }
+}

@@ -206,21 +206,33 @@ class NeuronHunyuanVideoBackboneApplication(NeuronApplicationBase):
 
     @staticmethod
     def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
-        # The model-root ``global_rank`` SPMDRank is created whenever any
-        # sequence/batch-sharding mode is on (CP, CFG, or Megatron-SP); its
-        # ``.rank`` buffer must hold ``arange(world_size)`` so each rank reads its
-        # own rank. For SP-only, world_size == tp_degree, so the world-group rank
-        # is the TP rank used by the entry sequence scatter. Without this the
-        # buffer is all-zeros and every rank acts as rank 0 → wrong output.
+        # Split each single block's fused proj_out into two per-stream weights so each
+        # matches the TP sharding of its input (attention head-shard vs MLP column-shard).
+        # The fused RowParallelLinear over cat([attn, mlp]) is TP-incorrect — see
+        # HunyuanVideoSingleTransformerBlock. Split point = inner_dim (the attn width).
+        inner_dim = config.num_attention_heads * config.attention_head_dim
+        for i in range(config.num_single_layers):
+            w = state_dict.pop(f"single_transformer_blocks.{i}.proj_out.weight")
+            b = state_dict.pop(f"single_transformer_blocks.{i}.proj_out.bias")
+            state_dict[f"single_transformer_blocks.{i}.proj_out_attn.weight"] = (
+                w[:, :inner_dim].clone().detach().contiguous()
+            )
+            state_dict[f"single_transformer_blocks.{i}.proj_out_attn.bias"] = (
+                b.clone().detach().contiguous()
+            )
+            state_dict[f"single_transformer_blocks.{i}.proj_out_mlp.weight"] = (
+                w[:, inner_dim:].clone().detach().contiguous()
+            )
+        # The model-root global_rank SPMDRank must hold arange(world_size) whenever any
+        # sequence/batch-sharding mode is on (CP, CFG, or Megatron-SP), so each rank reads
+        # its own rank; otherwise the buffer is all-zeros and every rank acts as rank 0.
         if (
             getattr(config, "context_parallel_enabled", False)
             or getattr(config, "cfg_parallel_enabled", False)
             or getattr(config, "sp_enabled", False)
         ):
-            out = dict(state_dict)
             world_size = config.neuron_config.world_size
-            out["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)
-            return out
+            state_dict["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)
         return state_dict
 
     @staticmethod

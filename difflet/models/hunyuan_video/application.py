@@ -236,7 +236,6 @@ def create_hunyuan_video_backbone_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
-        skip_sharding=True,
     )
     return HunyuanVideoBackboneInferenceConfig(
         neuron_config=neuron_config,
@@ -274,7 +273,6 @@ def create_hunyuan_video15_backbone_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
-        skip_sharding=True,
     )
     return HunyuanVideo15BackboneInferenceConfig(
         neuron_config=neuron_config,
@@ -307,7 +305,6 @@ def create_hunyuan_video_vae_decoder_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
-        skip_sharding=True,
     )
     return HunyuanVideoVAEDecoderInferenceConfig(
         neuron_config=neuron_config,
@@ -342,7 +339,6 @@ def create_hunyuan_video15_vae_decoder_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
-        skip_sharding=True,
     )
     return HunyuanVideo15VAEDecoderInferenceConfig(
         neuron_config=neuron_config,

@@ -68,6 +68,33 @@ class LTX2Orchestrator(ModelOrchestrator):
     def generate(self) -> None:
         import torch
 
+        from difflet.cli.dp import stage_loop
+
+        pipe = self._load_pipeline()
+        args = self.args
+        for req in stage_loop.claim_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                # Shape (height/width/num_frames) is baked into the compiled
+                # transformer and the pipeline config; the pipeline derives
+                # latents/coords from it, so we do NOT forward those kwargs here
+                # (pipeline.__call__ does not accept them).
+                output = pipe(
+                    prompt=req.prompt,
+                    num_inference_steps=int(stage_loop.effective(req, args, "steps", 40)),
+                    guidance_scale=float(
+                        stage_loop.effective(req, args, "guidance_scale", 3.5)
+                    ),
+                    generator=torch.Generator().manual_seed(req.seed),
+                    output_type="pt",
+                )
+                frames = output.frames if hasattr(output, "frames") else output[0]
+                out = Path(req.output)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                if not (out.suffix == ".mp4" and _save_video(frames, str(out))):
+                    torch.save(frames.cpu(), out.with_suffix(".pt"))
+                    print(f"[difflet] video tensor saved to {out.with_suffix('.pt')}")
+
+    def _load_pipeline(self):
         from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.path_resolver import resolve_model_path
@@ -86,6 +113,9 @@ class LTX2Orchestrator(ModelOrchestrator):
 
         entry = resolve_model(_HF_MODEL_ID, model_type=_MODEL_TYPE)
         parallel = self._parallel()
+        # Overlap the ~6.7s one-time NeuronCore bring-up with the host-side load.
+        from difflet.cli.prewarm import prewarm_neuron_runtime
+        prewarm_neuron_runtime(parallel.world_size)
         shape = entry.resolve_shape(height=self.args.height, width=self.args.width,
                                     num_frames=self.args.num_frames)
         spec = CacheSpec(
@@ -103,7 +133,7 @@ class LTX2Orchestrator(ModelOrchestrator):
             )
             raise SystemExit(1)
 
-        pipe = DiffletPipeline.from_pretrained(
+        return DiffletPipeline.from_pretrained(
             _HF_MODEL_ID,
             model_type=_MODEL_TYPE,
             parallel=parallel,
@@ -122,23 +152,6 @@ class LTX2Orchestrator(ModelOrchestrator):
                 "enable_decode_components": True,
             },
         )
-        # Shape (height/width/num_frames) is baked into the compiled transformer and
-        # the pipeline config; the pipeline derives latents/coords from it, so we do
-        # NOT forward those kwargs here (pipeline.__call__ does not accept them).
-        output = pipe(
-            prompt=self.args.prompt,
-            num_inference_steps=self.args.steps or 40,
-            guidance_scale=self.args.guidance_scale or 3.5,
-            generator=torch.Generator().manual_seed(self.args.seed),
-            output_type="pt",
-        )
-        frames = output.frames if hasattr(output, "frames") else output[0]
-        out = Path(self.args.output)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        if out.suffix == ".mp4" and _save_video(frames, str(out)):
-            return
-        torch.save(frames.cpu(), out.with_suffix(".pt"))
-        print(f"[difflet] video tensor saved to {out.with_suffix('.pt')}")
 
     def _parallel(self):
         from difflet.pipeline.parallel_config import DiffletParallelConfig

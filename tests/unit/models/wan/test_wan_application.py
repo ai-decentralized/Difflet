@@ -106,7 +106,7 @@ def test_create_wan_backbone_config(tmp_path):
         cfg_parallel_enabled=True,
     )
     assert cfg.neuron_config.tp_degree == 1
-    assert cfg.neuron_config.skip_sharding is True
+    assert cfg.neuron_config.skip_sharding is False  # presharding default-on: skip_sharding removed
     assert cfg.cfg_parallel_enabled is True
 
 
@@ -120,7 +120,7 @@ def test_create_wan_text_encoder_config(tmp_path):
         text_seq_len=128,
     )
     assert cfg.text_seq_len == 128
-    assert cfg.neuron_config.skip_sharding is True
+    assert cfg.neuron_config.skip_sharding is False  # presharding default-on: skip_sharding removed
 
 
 def test_create_wan_vae_decoder_config(tmp_path):

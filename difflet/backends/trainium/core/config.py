@@ -372,7 +372,7 @@ class NeuronConfig:
         self.attention_dp_degree = kwargs.pop("attention_dp_degree", 1)
         self.pp_degree = kwargs.pop("pp_degree", 1)
         self.ep_degree = kwargs.pop("ep_degree", 1)
-        self.save_sharded_checkpoint = kwargs.pop("save_sharded_checkpoint", False)
+        self.save_sharded_checkpoint = kwargs.pop("save_sharded_checkpoint", True)
         self.skip_sharding = kwargs.pop("skip_sharding", False)
         self.enable_ve_data_parallel = kwargs.pop("enable_ve_data_parallel", False)
 

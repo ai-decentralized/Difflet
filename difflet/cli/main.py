@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 
 VALID_MODELS = {
@@ -55,7 +56,12 @@ def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
         default=None,
         help="Tensor-parallel degree (default: registry default)",
     )
-    p.add_argument("--cp-degree", type=int, default=1, help="Context-parallel degree (default: 1)")
+    p.add_argument(
+        "--cp-degree",
+        type=int,
+        default=None,
+        help="Context-parallel degree (default: 1)",
+    )
     p.add_argument(
         "--cp-mode",
         choices=["gather_kv", "ring"],
@@ -80,6 +86,34 @@ def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
         "the row-parallel all-reduce; world_size unchanged). "
         "Mutually exclusive with --cp-degree>1. Supported: Flux, "
         "Wan, HunyuanVideo.",
+    )
+    p.add_argument(
+        "--dp",
+        type=int,
+        default=None,
+        help="Data-parallel replica count. The router spawns N workers, "
+        "each a full dp=1 model copy on its own core range; requests "
+        "are distributed across them (default: 1)",
+    )
+    p.add_argument(
+        "--mode",
+        choices=["latency", "throughput", "mixed"],
+        default=None,
+        help="Runtime mode preset selecting dp/cfg/cp per model class "
+        "(explicit parallelism flags override individual fields)",
+    )
+    p.add_argument(
+        "--dp-schedule",
+        choices=["round_robin", "least_loaded"],
+        default="round_robin",
+        help="Request-to-replica schedule for --dp>1 (default: round_robin)",
+    )
+    p.add_argument(
+        "--total-cores",
+        type=int,
+        default=None,
+        help="Total NeuronCores available for dp*cfg*cp*tp validation "
+        "(default: NEURON_RT_NUM_CORES when set, else unchecked)",
     )
 
 
@@ -200,8 +234,16 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
 
 
 def _add_generate_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--prompt", required=True)
-    p.add_argument("--output", required=True, help="Output file path (.png or .mp4)")
+    p.add_argument("--prompt", required=False, default=None)
+    p.add_argument("--output", required=False, default=None, help="Output file path (.png or .mp4)")
+    p.add_argument(
+        "--requests",
+        default=None,
+        help="JSONL batch file: one request per line with prompt/output/"
+        "seed and optional negative_prompt/guidance_scale/steps",
+    )
+    p.add_argument("--requests-dir", default=None, help=argparse.SUPPRESS)  # worker mode
+    p.add_argument("--worker-index", type=int, default=None, help=argparse.SUPPRESS)
     p.add_argument("--steps", type=int, default=None)
     p.add_argument("--guidance-scale", type=float, default=None)
     p.add_argument("--seed", type=int, default=42)
@@ -446,6 +488,79 @@ def _validate_cfg_parallel(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _replica_cores(args: argparse.Namespace) -> int:
+    from difflet.registry import resolve_model
+
+    entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
+    tp = args.tp_degree or entry.default_parallel.tp_degree
+    cfg = 2 if getattr(args, "cfg_parallel", False) else 1
+    return tp * (args.cp_degree or 1) * cfg
+
+
+def _validate_dp(args: argparse.Namespace) -> None:
+    batch = getattr(args, "requests", None) is not None or (getattr(args, "dp", None) or 1) > 1
+    worker = getattr(args, "requests_dir", None) is not None
+    if args.command in ("generate", "run") and not worker:
+        if not batch and not (args.prompt and args.output):
+            print(
+                "Error: --prompt and --output are required (or use --requests FILE).",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        if batch and args.prompt and args.requests:
+            print("Error: --prompt and --requests are mutually exclusive.", file=sys.stderr)
+            raise SystemExit(1)
+    if batch and any(
+        getattr(args, name, None) is not None
+        for name in ("teacache_cadence", "teacache_online_delta", "teacache_speedup")
+    ):
+        print(
+            "Error: TeaCache flags are not supported in batch/DP mode "
+            "(per-request controller reset is a follow-up).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if (getattr(args, "dp", None) or 1) > 1 and not worker:
+        total = getattr(args, "total_cores", None)
+        if total is None and os.environ.get("NEURON_RT_NUM_CORES"):
+            total = int(os.environ["NEURON_RT_NUM_CORES"])
+        needed = args.dp * _replica_cores(args)
+        if total is not None and needed > total:
+            print(
+                f"Error: dp*cfg*cp*tp = {needed} cores exceeds available cores ({total}).",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+
+
+def _dispatch_dp(args: argparse.Namespace) -> None:
+    """Route batch/DP generate runs through the router; exits the process."""
+    from difflet.cli.dp import router
+    from difflet.cli.dp.requests_io import RequestSpec, load_requests_jsonl
+
+    if args.requests:
+        requests = load_requests_jsonl(args.requests)
+    else:
+        requests = [
+            RequestSpec(
+                index=0,
+                prompt=args.prompt,
+                output=args.output,
+                seed=args.seed,
+                guidance_scale=args.guidance_scale,
+                steps=args.steps,
+            )
+        ]
+    dp = args.dp or 1
+    if dp > 1 and len(requests) == 1:
+        print("Warning: --dp > 1 with a single request leaves replicas idle.", file=sys.stderr)
+    if args.command == "run":
+        orch = _get_orchestrator(args)
+        orch.download()
+        orch.compile()
+    raise SystemExit(router.run_router(args, requests, replica_cores=_replica_cores(args)))
+
+
 def _get_orchestrator(args: argparse.Namespace):
     from difflet.cli.orchestrators.flux import FluxOrchestrator
     from difflet.cli.orchestrators.hunyuan_video import HunyuanVideoOrchestrator
@@ -466,6 +581,38 @@ def _get_orchestrator(args: argparse.Namespace):
     return mapping[args.model_id](args)
 
 
+def _ensure_jemalloc() -> None:
+    """Re-exec once with jemalloc preloaded.
+
+    The concurrent per-rank weight load (``torch.ops.neuron._parallel_load``,
+    one thread per rank) spends most of its CPU in glibc ``calloc``/``free`` +
+    page faults; the rank threads contend on the malloc arena lock / mmap_lock.
+    jemalloc's per-thread arenas remove that contention — ~17% faster warm
+    weight load, bit-identical output (validated trn3/FLUX).
+
+    jemalloc ships inside ``torch_neuronx`` but its preload is disabled upstream
+    (``torch_neuronx/__init__.py``: ``# _add_lib_preload("jemalloc")``).
+    ``LD_PRELOAD`` must be set before the process starts, so we re-exec once.
+    Opt out with ``DIFFLET_NO_JEMALLOC=1``.
+    """
+    if os.environ.get("DIFFLET_NO_JEMALLOC"):
+        return
+    if "libjemalloc" in os.environ.get("LD_PRELOAD", ""):
+        return  # already preloaded / re-exec'd — avoid an exec loop
+    import importlib.util
+
+    spec = importlib.util.find_spec("torch_neuronx")  # locate without importing
+    if spec is None or spec.origin is None:
+        return
+    lib = os.path.join(os.path.dirname(spec.origin), "lib", "libjemalloc.so")
+    if not os.path.exists(lib):
+        return
+    os.environ["LD_PRELOAD"] = os.pathsep.join(
+        p for p in (lib, os.environ.get("LD_PRELOAD", "")) if p
+    )
+    os.execv(sys.executable, [sys.executable, "-m", "difflet.cli.main", *sys.argv[1:]])
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -482,9 +629,33 @@ def main(argv: list[str] | None = None) -> None:
     if args.command in ("compile", "generate", "run"):
         _validate_cfg_parallel(args)
         _validate_sp(args)
+        from difflet.cli.modes import resolve_mode
+
+        mode_cfg = resolve_mode(args.model_id, getattr(args, "mode", None), args)
+        if mode_cfg is not None:
+            args.dp = mode_cfg.dp
+            args.cfg_parallel = mode_cfg.cfg_parallel
+            args.cp_degree = mode_cfg.cp_degree
+            print(
+                f"[difflet] parallel: dp={args.dp or 1} "
+                f"cfg={2 if args.cfg_parallel else 1} cp={args.cp_degree or 1} "
+                f"(mode={args.mode})",
+                flush=True,
+            )
+            _validate_cfg_parallel(args)  # re-run with resolved flags
+            _validate_sp(args)
 
     if args.command in ("generate", "run"):
         _validate_teacache(args)
+        _validate_dp(args)
+        if args.requests_dir is None and (args.requests is not None or (args.dp or 1) > 1):
+            _dispatch_dp(args)  # raises SystemExit
+
+    # Only for the weight-loading commands. NOT compile: neuronx-cc runs as a
+    # subprocess that does not strip jemalloc from LD_PRELOAD, and compiling
+    # the DiT under jemalloc crashes the compiler worker.
+    if argv is None and args.command in ("generate", "run"):
+        _ensure_jemalloc()
 
     if args.command == "serve":
         from difflet.serving.cli.serve import run, validate_serve_args
