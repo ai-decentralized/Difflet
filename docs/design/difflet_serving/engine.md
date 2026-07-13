@@ -2,8 +2,9 @@
 
 This document defines the serving engine boundary for the MVP implementation.
 
-The engine is the serving runtime layer. It owns request execution safety and
-worker lifecycle. It does not own model-specific stage logic.
+The engine is the serving runtime layer. It owns request execution safety,
+worker lifecycle, and generic ordered stage traversal. It does not own
+model-specific stage implementations or interpret model-specific payloads.
 
 This file, together with `architecture.md` and
 `chat_completions_contract.md`, is the authoritative P0 serving design. The
@@ -26,6 +27,8 @@ MVP engines support:
 - Periodic worker activity heartbeat from process start through shutdown.
 - Graceful shutdown.
 - Request-keyed cooperative abort with HBM-resident model reuse.
+- Generic `PipelineDefinition.stages` traversal inside the resident worker.
+- Sequential, process-local stage execution through `InProcessStageExecutor`.
 
 MVP engines do not implement:
 
@@ -36,6 +39,7 @@ MVP engines do not implement:
 - subprocess fallback.
 - cross-host distributed execution.
 - generic stage DAG optimization.
+- per-stage worker processes or inter-stage IPC/shared-memory transport.
 
 Those are future architecture hooks, not P0 behavior.
 
@@ -63,17 +67,22 @@ FastAPI route
   -> queue / timeout / health / worker lifecycle
   -> worker IPC
   -> worker runtime creates WorkerRequestContext
-  -> worker-owned ServingModelOrchestrator.generate(request, context)
-  -> common orchestrator / stage adapters / pipeline inside worker
+  -> worker-owned StagePipelineEngine.generate(request, context)
+  -> for stage in PipelineDefinition.stages
+  -> InProcessStageExecutor.execute(stage invocation)
+  -> model-owned StageRunner inside the same worker process
 ```
 
-The engine must not hard-code model-specific stage names such as Qwen
-`text/generate/vae`. It should see only:
+The parent-side resident engine and worker-side stage engine must not hard-code
+model-specific stage names such as Qwen `text/generate/vae`. Together they see
+only:
 
 - an opaque `ResolvedRuntimeBundle` carrying one `ServingProfile` and pinned load inputs
-- a serving orchestrator factory or worker-owned `ServingModelOrchestrator`
+- a model adapter factory that supplies initial/final payload conversion and
+  stage runners
 - `DiffletGenerateRequest`
 - `DiffletGenerateOutput`
+- opaque `StagePayload` values passed unchanged between adjacent stages
 
 ## Engine Protocol
 
@@ -108,6 +117,10 @@ The engine owns:
 - readiness state
 - cancellation and timeout cleanup
 - request-level logs/metrics
+- ordered traversal of `PipelineDefinition.stages`
+- cancellation/deadline checkpoints before and after each stage
+- generic stage lifecycle logs
+- selection of the P0 `InProcessStageExecutor`
 
 The engine does not own:
 
@@ -116,10 +129,222 @@ The engine does not own:
 - compiled path naming
 - model download
 - AOT compile implementation
-- Qwen stage traversal
+- Qwen payload interpretation or stage-to-stage type branching
 - Flux pipeline invocation details
+- stage placement, per-stage core scheduling, IPC, or shared-memory policy in P0
 - R2 upload
 - OpenAI response formatting
+
+## Generic Stage Execution Contract
+
+`PipelineDefinition.stages` tuple order is the sole P0 execution-order authority.
+The worker-side engine executes that list sequentially; P0 has no dependency graph,
+ready queue, placement algorithm, or stage overlap.
+
+```python
+class StagePayload(ABC):
+    """Nominal marker for logical values passed between adjacent stages."""
+
+    __slots__ = ()
+
+
+InputPayloadT = TypeVar("InputPayloadT", bound=StagePayload)
+OutputPayloadT = TypeVar("OutputPayloadT", bound=StagePayload)
+
+
+class StageExecutionContext(Protocol):
+    @property
+    def request_id(self) -> str: ...
+    @property
+    def deadline_monotonic(self) -> float: ...
+    def throw_if_aborted(self) -> None: ...
+    def report_progress(self, completed: int, total: int) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class StageInvocation(Generic[InputPayloadT]):
+    request: DiffletGenerateRequest
+    stage: StageDefinition
+    input: InputPayloadT
+    context: StageExecutionContext
+
+
+@dataclass(frozen=True)
+class StageExecutionMetadata:
+    started_monotonic: float
+    finished_monotonic: float
+
+
+@dataclass(frozen=True, slots=True)
+class StageExecutionResult(Generic[OutputPayloadT]):
+    output: OutputPayloadT
+    metadata: StageExecutionMetadata
+
+
+class StageRunner(Protocol[InputPayloadT, OutputPayloadT]):
+    async def execute(
+        self, invocation: StageInvocation[InputPayloadT]
+    ) -> StageExecutionResult[OutputPayloadT]: ...
+    async def shutdown(self) -> None: ...
+
+
+class ErasedStageRunner(Protocol):
+    @property
+    def input_type(self) -> type[StagePayload]: ...
+    @property
+    def output_type(self) -> type[StagePayload]: ...
+
+    async def execute(
+        self, invocation: StageInvocation[StagePayload]
+    ) -> StageExecutionResult[StagePayload]: ...
+    async def shutdown(self) -> None: ...
+
+
+class StageExecutor(Protocol):
+    async def execute(
+        self, invocation: StageInvocation[StagePayload]
+    ) -> StageExecutionResult[StagePayload]: ...
+    async def shutdown(self) -> None: ...
+
+
+class ServingStageAdapter(Protocol):
+    async def create_loaded_runners(
+        self, runtime: ResolvedRuntimeBundle
+    ) -> Mapping[str, ErasedStageRunner]: ...
+    def initial_payload(self, request: DiffletGenerateRequest) -> StagePayload: ...
+    def finalize(self, payload: StagePayload) -> DiffletGenerateOutput: ...
+    def smoke_request(self) -> DiffletGenerateRequest: ...
+    def validate_smoke_output(self, output: DiffletGenerateOutput) -> None: ...
+    def reset_request_state(self, outcome: str) -> None: ...
+    async def shutdown(self) -> None: ...
+```
+
+The engine treats `StagePayload` as an opaque nominal logical value. Every concrete
+model payload must inherit it; arbitrary Python objects are invalid stage values.
+Concrete adjacent runners own payload schema and validation. Payloads contain model data only;
+request/deadline/cancellation state stays in `StageExecutionContext`. This
+separation permits a future executor to encode a logical value as a private wire
+handle and hydrate it before invoking a runner. `StageInvocation.input` and
+`StageExecutionResult.output` always expose logical payloads; IPC/shared-memory
+handles never escape the executor/transport implementation.
+
+`ValidatedStageRunner` is the only generic-erasure adapter. It exposes a nominal
+base-type interface while retaining the concrete types needed by the inner runner:
+
+```python
+class ValidatedStageRunner(Generic[InputPayloadT, OutputPayloadT]):
+    def __init__(
+        self,
+        inner: StageRunner[InputPayloadT, OutputPayloadT],
+        input_type: type[InputPayloadT],
+        output_type: type[OutputPayloadT],
+    ) -> None:
+        self.inner = inner
+        self._input_type = input_type
+        self._output_type = output_type
+
+    @property
+    def input_type(self) -> type[StagePayload]:
+        return self._input_type
+
+    @property
+    def output_type(self) -> type[StagePayload]:
+        return self._output_type
+
+    async def execute(
+        self, invocation: StageInvocation[StagePayload]
+    ) -> StageExecutionResult[StagePayload]:
+        if (
+            not isinstance(invocation.input, self._input_type)
+            or type(invocation.input) is not self._input_type
+        ):
+            raise StagePayloadTypeError(...)
+        typed_invocation = StageInvocation(
+            request=invocation.request,
+            stage=invocation.stage,
+            input=invocation.input,
+            context=invocation.context,
+        )
+        result = await self.inner.execute(typed_invocation)
+        if (
+            not isinstance(result.output, self._output_type)
+            or type(result.output) is not self._output_type
+        ):
+            raise StagePayloadTypeError(...)
+        return StageExecutionResult(output=result.output, metadata=result.metadata)
+
+    async def shutdown(self) -> None:
+        await self.inner.shutdown()
+```
+
+P0 provides only:
+
+```python
+class InProcessStageExecutor:
+    def __init__(self, runners: Mapping[str, ErasedStageRunner]) -> None:
+        # Required: insertion order is runner creation/pipeline order.
+        self.runners = runners
+
+    async def execute(
+        self, invocation: StageInvocation[StagePayload]
+    ) -> StageExecutionResult[StagePayload]:
+        if not isinstance(invocation.input, StagePayload):
+            raise StagePayloadTypeError(...)
+        result = await self.runners[invocation.stage.stage_id].execute(invocation)
+        if not isinstance(result.output, StagePayload):
+            raise StagePayloadTypeError(...)
+        return result
+
+    async def shutdown(self):
+        errors = []
+        for runner in reversed(tuple(self.runners.values())):
+            try:
+                await runner.shutdown()
+            except BaseException as exc:
+                errors.append(exc)
+        if errors:
+            raise StageShutdownError(errors)
+```
+
+The execution backend is selected once when the worker is built. P0 accepts only
+`stage_executor="in_process"`; the main loop must not contain scattered
+`single_process` conditionals. A future worker-pool executor may introduce IPC,
+shared memory, host buffers, ownership, and cleanup behind the same executor
+boundary, but those mechanisms are explicitly deferred.
+
+The heterogeneous runner mapping uses `ErasedStageRunner`, not `Any`. Each concrete
+runner still declares exact generic input/output payloads; its validated wrapper
+checks the exact input before model work and the exact output afterward. The
+executor additionally fail-closes on the nominal base type around dispatch.
+Adapter `finalize()` must validate the model's exact final payload type before
+constructing `DiffletGenerateOutput`; it uses the same combined `isinstance` plus
+`type(value) is ExpectedFinalPayload` rule and rejects subclasses.
+`ValidatedStageRunner.shutdown()` delegates exactly once to its inner runner, so
+the executor's sole-owner shutdown path reaches every concrete runner.
+
+The adapter constructs and loads runners, then transfers their runtime ownership
+to the executor. `StageExecutor.shutdown()` is the only runner-shutdown path. It
+must attempt every runner in strict reverse order even after an individual failure,
+then raise an aggregate shutdown error after all attempts. The adapter's own
+`shutdown()` clears only adapter-owned state and must not close the runners again.
+Compile-time stage operations use a separate compile contract and are not methods
+on the loaded runtime `StageRunner`.
+
+Ownership transfer is atomic on successful `create_loaded_runners()` return. The
+adapter must attempt `await runner.shutdown()` in reverse creation order for every
+runner created during a partial construction/load failure, retaining failures and
+continuing through all earlier runners before re-raising an aggregate error; a
+partially populated mapping is never handed to the executor.
+
+The returned mapping must preserve insertion order, with insertion order equal to
+runner creation order and `PipelineDefinition.stages`. `InProcessStageExecutor`
+preserves that order and its shutdown strictly reverses it. Returning an unordered
+mapping is a contract violation.
+
+Readiness smoke uses the same generic stage loop: the adapter supplies a bounded,
+deterministic request and validates the final model output, while
+`StagePipelineEngine` performs traversal and executor calls. The adapter must not
+own a second private traversal path for smoke.
 
 ## P0 Engine Type
 
@@ -135,8 +360,9 @@ ResidentWorkerServingEngine
   -> receives final image bytes plus metadata
 ```
 
-The worker process owns one serving orchestrator. The orchestrator can be a
-single-pipeline model such as Flux or a multi-stage model such as Qwen.
+The worker process owns one `StagePipelineEngine`, one model adapter, and the
+process-local runners selected by that adapter. The same generic loop executes a
+single opaque stage such as Flux or multiple extracted stages such as Qwen.
 
 Initial startup uses a provisional-worker lease. Under the transition lock,
 `start()` records a new worker instance, startup epoch, queues, and one idempotent
@@ -189,34 +415,36 @@ overrides and retain current behavior.
 Flux worker layout:
 
 ```text
-FluxServingOrchestrator
-  active_runtime
-  active_profile = active_runtime.profile
-  pipe
+FluxServingStageAdapter.create_loaded_runners(runtime)
+  spec = runtime.require_compile_spec(flux_artifact_id)
+  binding = runtime.artifacts.require(flux_artifact_id)
+  verify spec/binding identity and Flux payload manifests
+  application_kwargs = flux_adapter.build_application_kwargs(
+      runtime.adapter_config
+  )
+  # kwargs contain a reconstructed TeaCacheCalibration object, never its path
+  pipe = DiffletPipeline.from_pretrained(
+      model_id=runtime.source.model_id,
+      model_path_override=runtime.source.pinned_model_path,
+      resolved_source_id=runtime.source.resolved_source_id,
+      compiled_path_override=binding.path,
+      application_kwargs=application_kwargs,
+      skip_compile=True,
+  )
+  return insertion_ordered({"pipeline": FluxPipelineRunner(pipe)})
 
-  load(runtime)
-    spec = runtime.require_compile_spec(flux_artifact_id)
-    binding = runtime.artifacts.require(flux_artifact_id)
-    verify spec/binding identity and Flux payload manifests
-    application_kwargs = flux_adapter.build_application_kwargs(
-        runtime.adapter_config
-    )
-    # kwargs contain a reconstructed TeaCacheCalibration object, never its path
-    pipe = DiffletPipeline.from_pretrained(
-        model_id=runtime.source.model_id,
-        model_path_override=runtime.source.pinned_model_path,
-        resolved_source_id=runtime.source.resolved_source_id,
-        compiled_path_override=binding.path,
-        application_kwargs=application_kwargs,
-        skip_compile=True,
-    )
-
-  generate(request, context)
+FluxPipelineRunner.execute(invocation)
+    context = invocation.context
     context.throw_if_aborted()
     output = pipe(...)
     context.throw_if_aborted()
-    return DiffletGenerateOutput(image_bytes, "image/png")
+    return StageExecutionResult(FluxFinalPayload(output), metadata)
 ```
+
+Flux smoke supplies a deterministic request through the adapter and runs this same
+generic ordered `StagePipelineEngine` loop over the one-entry pipeline definition.
+There is no Flux-specific stage-engine branch and no adapter-owned `generate()`
+entry point.
 
 Flux P0 smoke is a bounded deterministic end-to-end inference using the active
 profile shape, a fixed prompt/seed, and a startup timeout. Baseline profiles use a
@@ -229,14 +457,14 @@ the heterogeneous component topology executes.
 Qwen worker layout:
 
 ```text
-QwenServingOrchestrator
+StagePipelineEngine
   active_runtime
-  active_profile = active_runtime.profile
-  prompt_encoder_stage
-  denoiser_stage
-  decoder_stage
+  adapter = QwenServingStageAdapter
+  executor = InProcessStageExecutor(runners)
 
   load(runtime)
+    runners = await adapter.create_loaded_runners(runtime)
+    executor = InProcessStageExecutor(runners)
     retrieve exact frozen spec/binding pair for each Qwen stage
     verify each identity and Qwen payload manifest without rebuilding plan
     reconstruct optional TeaCacheCalibration from runtime.adapter_config
@@ -244,18 +472,32 @@ QwenServingOrchestrator
     load all stage apps into the worker process
 
   generate(request, context)
-    value = QwenTextStageInputs()
+    value = adapter.initial_payload(request)
     for stage_def in active_runtime.pipeline_definition.stages
       context.throw_if_aborted()
-      runner = runner_by_id[stage_def.stage_id]
-      output = runner.execute(value, request, context)
+      invocation = StageInvocation(request, stage_def, value, context)
+      result = await executor.execute(invocation)
       context.throw_if_aborted()
       if stage_def.final_output
-        require stage_def is last and output is QwenVaeStageOutputs
-        return output.output
-      value = route_non_final_output(stage_def, output)
+        require stage_def is last
+        return adapter.finalize(result.output)
+      value = result.output
     fail missing final output stage
 ```
+
+The engine passes every non-final `StageExecutionResult.output` unchanged as the
+next `StageInvocation.input`. Adjacent Qwen runners therefore share one logical
+payload contract: `text` returns `QwenTextPayload`, `generate` consumes it and
+returns `QwenLatentPayload`, and `vae` consumes that payload and returns
+`QwenFinalPayload`. The generic engine contains no `isinstance` routing over Qwen
+types.
+
+P0 execution is deliberately sequential and process-local. `InProcessStageExecutor`
+calls the selected runner directly and the payload is an in-memory Python object,
+so no tensor is serialized or copied merely to cross a stage boundary. The
+`StageExecutor` and payload-carrier contracts are the future replacement seams for
+worker-pool scheduling and IPC/shared-memory transport; P0 does not implement or
+select those transports.
 
 Qwen is enabled only after this shared-worker layout passes startup load and
 smoke for the selected `ServingProfile`. The smoke must prove that all Qwen
@@ -320,15 +562,15 @@ P0 uses engine-owned request records rather than caller-owned tickets. The engin
 owns every record from admission through terminal cleanup; an HTTP coroutine only
 waits on the record's result future and may detach at timeout or disconnect.
 
-The engine dispatches one `RUN_REQUEST` and does not iterate model stages or
+The parent engine dispatches one `RUN_REQUEST` and does not iterate model stages or
 interpret stage IDs. The worker creates one `WorkerRequestContext` and calls
-`orchestrator.generate(request, context)`. The model orchestrator owns stage
-traversal: Qwen iterates its frozen `PipelineDefinition`, reports current stage
-through the context/status queue, and checks abort immediately before and after
-every runner; Flux executes its one external `pipeline` stage with the same boundary
-checks. Long Python loops add inner safe-point checks. An in-flight Neuron graph is
-not preempted. Abort/error returns through the engine's normal terminal reset and
-recovery rules.
+`stage_engine.generate(request, context)`. The generic worker-side engine iterates
+the frozen `PipelineDefinition`, reports the current stage through the
+context/status queue, and checks abort immediately before and after every runner.
+Qwen therefore executes three extracted stages; Flux executes its one opaque
+`pipeline` runner through the same loop. Long Python loops add inner safe-point
+checks. An in-flight Neuron graph is not preempted. Abort/error returns through the
+engine's normal terminal reset and recovery rules.
 
 ```python
 @dataclass
@@ -477,8 +719,8 @@ lock, cleanup terminates/joins the old process as needed, then closes and joins 
 queue's feeder with a bounded fallback. A replacement receives a new queue and
 cannot consume an old command.
 
-At every initial or replacement child entry, before loading the orchestrator or
-importing model/Neuron modules, the worker applies the bundle's validated,
+At every initial or replacement child entry, before constructing the stage adapter
+or stage engine or importing model/Neuron modules, the worker applies the bundle's validated,
 allowlisted environment. P0 sets `WORLD_SIZE=1`, `LOCAL_WORLD_SIZE=1`, `RANK=0`,
 and `LOCAL_RANK=0`; model components may update `LOCAL_WORLD_SIZE` during their own
 NxD setup. The single resident allocation sets exact `NEURON_RT_VISIBLE_CORES` and
@@ -591,7 +833,7 @@ terminal-clean. Every row emits exactly one terminal for the active request. A
 terminal reset failure after frozen completion still delivers its immutable output,
 but replacement must complete before another dispatch.
 
-Every model orchestrator implements `reset_request_state(outcome)`. The worker calls
+Every model stage adapter implements `reset_request_state(outcome)`. The worker calls
 it defensively before starting a request and again before committing a terminal-
 clean `REQUEST_COMPLETED`, `REQUEST_ABORTED`, or `REQUEST_ERROR`. It resets
 request-local scheduler state, TeaCache counters/residuals, callback bindings,
@@ -611,7 +853,8 @@ bindings, but defensive and terminal reset still clear resident controller state
 Matching, mismatched, matching, aborted, and failed request sequences therefore
 cannot leak controller state.
 
-For successful completion, the orchestrator first materializes a parent-owned
+For successful completion, the stage engine calls adapter finalization to
+materialize a parent-owned
 immutable output byte string that no longer references request/model buffers. The
 worker then freezes `completed` under its request lock, resets request state, and
 emits that frozen output. Abort arriving after the freeze is stale and cannot alter
@@ -661,7 +904,7 @@ IPC command.
 
 `RUN_REQUEST` sends one `DiffletGenerateRequest` plus `deadline_monotonic` to
 the worker. The worker builds `WorkerRequestContext`, runs the active
-orchestrator internally, and returns a `DiffletGenerateOutput`.
+`StagePipelineEngine`, and returns a `DiffletGenerateOutput`.
 
 `ABORT_REQUEST` uses the dedicated control queue so it can set the active
 request's cancellation signal while the generation thread is busy. It does not
@@ -688,8 +931,8 @@ completion, cancellation, timeout, and error. Each startup/stage scope has a uni
 or error event with monotonic duration and `terminal_source=worker`. Every
 worker-originated event includes `worker_instance_id`.
 
-The engine remains model-agnostic. It owns a status-channel consumer and logs the
-events reported by the worker; model orchestrators own stage transitions:
+The engine remains model-agnostic. The worker-side stage engine emits canonical
+stage transitions and the parent-side engine owns their status-channel consumer:
 
 ```text
 Qwen: text -> generate -> vae
@@ -779,10 +1022,13 @@ request_elapsed_ms|null, stage_elapsed_ms|null
 dropped_status_events
 ```
 
-The parent adds `queued_requests` from admission accounting before writing the
-heartbeat log. P0 serializes execution with `max_running_requests=1`, so one
-active request/stage is sufficient. A future concurrent worker must replace the
-single activity fields with a bounded list or aggregate.
+The parent adds `running_requests`, `queued_requests`, `pending_requests`, and
+`request_capacity` from admission accounting before writing each heartbeat log.
+These fields are present in both the text message and the structured
+`worker_heartbeat` record. P0 serializes execution with
+`max_running_requests=1`, so one active request/stage is sufficient. A future
+concurrent worker must replace the single activity fields with a bounded list or
+aggregate.
 
 Heartbeats are observability-only in P0. Existing process-death checks, request
 deadlines, and recovery remain the health authorities. If no heartbeat arrives
@@ -891,11 +1137,22 @@ outside the lock:
   complete the shared shutdown future
 ```
 
+Every worker exit after stage-adapter construction—including adapter load failure,
+runner construction failure, readiness-smoke failure, request failure that retires
+the worker, and orderly `SHUTDOWN`—uses one idempotent cleanup owner. If a stage
+executor exists because runner ownership transferred, cleanup first awaits its
+exhaustive shutdown; if no executor exists, that phase is skipped. Cleanup then
+always awaits `stage_adapter.shutdown()` in a `finally`-equivalent path. It retains
+and aggregates failures from both phases only after all applicable attempts finish;
+any cleanup failure makes the worker process-unsafe.
+
 On worker `SHUTDOWN`, the listener marks worker state draining and rejects future
-RUN commands. It does not call model/orchestrator shutdown concurrently. Only the
-generation-thread owner calls orchestrator shutdown after active reset/execution/
-finalization exits. If terminal or orderly shutdown misses its bound, the parent
-terminates the process and completes lease cleanup.
+RUN commands. It does not close runners or adapter state concurrently. After active
+reset/execution/finalization exits, only the generation-thread owner invokes the
+shared cleanup owner above. If startup, terminal, or orderly cleanup misses its
+bound, the parent terminates the process and completes lease cleanup. The same rule
+applies before readiness publication, so load/smoke failures cannot bypass adapter
+cleanup merely because no request has run.
 
 Both control sends are fail-closed. Their exceptions are consumed by the shared
 shutdown operation rather than escaping it: the captured lease is detached under
@@ -938,7 +1195,7 @@ Keep the P0 engine simple:
 
 - one active profile
 - one request running
-- one worker-owned orchestrator per engine
+- one worker-owned stage engine, adapter, and in-process executor per engine
 - queue and timeout protection
 - startup load plus smoke
 - no generic stage scheduler yet

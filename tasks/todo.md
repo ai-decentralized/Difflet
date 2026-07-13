@@ -118,12 +118,94 @@ Stage runtime refactor design (2026-07-10):
 - [x] Compare Difflet's lifecycle with vLLM-Omni stage config/runtime/pool/runner boundaries.
 - [x] Define the proposed `PipelineDefinition`, `StageDefinition`, `RuntimePlan`, `StageInvocation`, and process-local `StageRunner` contracts.
 - [x] Document Qwen three-stage and Flux single-stage mappings, including CLI/resident topology differences.
+
+Single-process stage engine design (2026-07-13):
+- [x] Move the authoritative ordered stage traversal from the model orchestrator boundary into the generic engine design.
+- [x] Define transport-neutral stage invocation, payload, result, context, runner, and executor contracts.
+- [x] Keep P0 execution process-local and sequential while preserving an executor/transport seam for future stage scheduling.
+- [x] Review the updated serving design for cross-document consistency and run Markdown/diff verification.
+
+Nominal stage payload typing revision (2026-07-13):
+- [x] Replace the `StagePayload = Any` logical contract with a nominal marker base.
+- [x] Make invocation/result/runner contracts generic and require Qwen/Flux payload inheritance.
+- [x] Run iterative same-reviewer convergence plus a fresh independent review.
+- [x] Verify cross-document terminology and `git diff --check`.
+
+Single-process stage engine implementation (2026-07-13):
+- [x] Add nominal/generic stage payload and execution contracts.
+- [x] Implement validated erased runners, in-process executor, and generic ordered engine.
+- [x] Migrate Qwen and Flux serving implementations to stage adapters.
+- [x] Route resident worker load/smoke/generate/shutdown through the stage engine.
+- [x] Add negative payload, traversal, shutdown, and worker regression tests.
+- [x] Run focused serving tests, compile/type checks, and `git diff --check`.
 - [x] Document phased migration, failure behavior, verification matrix, estimates, non-goals, and pending decisions.
 - [x] Consolidate and review the stage/runtime contracts in
   `docs/design/difflet_serving/architecture.md`.
-- [ ] Implement the contract/cleanup phase in
+- [x] Implement the contract/cleanup phase in
   `docs/design/difflet_serving/implementation_changes.md` only after final review.
 - [ ] Implement later phases only after the previous phase passes local and Trainium validation.
+- Rationale: the MVP remains single-process and sequential, while its stable stage
+  contracts and executor boundary can support a future scheduler/IPC/shared-memory
+  implementation without changing model payload definitions or runner APIs.
+- Verification: 142 serving tests and 189 combined serving/relevant CLI tests pass;
+  targeted mypy reports no issues for the generic engine contracts; Black,
+  `compileall`, and `git diff --check` pass. Full `tests/unit` collection remains
+  unavailable because this local environment lacks `torch`, `numpy`, and `diffusers`;
+  Ruff is also not installed.
+
+Heartbeat interval validation (2026-07-13):
+- [x] Require a finite worker heartbeat interval between 5 and 120 seconds,
+  inclusive, at CLI, options, resident config, and worker-process boundaries.
+- [x] Cover lower/upper boundaries plus out-of-range, NaN, and infinity inputs.
+- Rationale: invalid waits can either spin the heartbeat thread or terminate it;
+  validating before stack construction also avoids expensive model preparation.
+- Verification: 157 serving tests and 204 combined serving/relevant CLI tests pass;
+  targeted mypy, Black, `compileall`, and `git diff --check` pass.
+
+OpenAI request ID contract cleanup (2026-07-13):
+- [x] Remove the unreachable client request-body `id` handling from normalization
+  and HTTP logging.
+- [x] Generate one server-owned request ID at the API boundary and propagate it
+  through normalization, engine logging, and the chat completion response.
+- [x] Document that request-body `id` is rejected while response `id` remains.
+- Verification: 43 focused chat/API tests and 160 serving tests pass; targeted
+  mypy, Black, `compileall`, and `git diff --check` pass.
+
+Serve operational CLI controls (2026-07-13):
+- [x] Expose queue, request, artifact-operation, cancellation, and restart controls with existing defaults.
+- [x] Keep artifact-store selection and artifact URL TTL internal to server configuration.
+- [x] Verify CLI help, argument propagation, validation, focused tests, and `git diff --check`.
+- Rationale: operators can tune production admission and recovery behavior without
+  changing the existing defaults or exposing deployment-owned artifact policy.
+- Verification: 30 focused serve CLI tests and 219 combined serving/relevant CLI
+  tests pass; Black, `compileall`, and `git diff --check` pass.
+
+Serving request bounds (2026-07-13):
+- [x] Reject oversized raw prompts before synchronous provider tokenization.
+- [x] Bound guidance to the normal Flux/Qwen serving range before worker admission.
+- [x] Update the request contract and run focused/full serving verification.
+- Rationale: a cheap generic request bound protects the event loop, while the
+  provider validators own guidance policy and exact model-token bucket enforcement.
+- Verification: 74 focused chat/Flux/Qwen validator tests and 235 combined
+  serving/relevant CLI tests pass; Black, `compileall`, and `git diff --check` pass.
+
+Neuron core visibility and TeaCache typing (2026-07-13):
+- [x] Preserve inherited Neuron core visibility for Flux and Qwen resident plans.
+- [x] Default an unpartitioned current host to Neuron cores 0-3.
+- [x] Restore static torch annotation visibility without a runtime import.
+- [x] Run focused/full serving tests, mypy, compile, formatting, and diff checks.
+- Rationale: resident workers must respect host partitioning while retaining the
+  current four-core default, and type-only annotations must not force a runtime
+  torch import.
+- Verification: 67 focused runtime/Flux/Qwen/worker tests and 248 combined
+  serving/relevant CLI tests pass; targeted mypy, Black, `compileall`, and
+  `git diff --check` pass.
+
+Serving log timestamps (2026-07-13):
+- [x] Add millisecond local timestamps to console, access, and file logs.
+- [x] Verify logging configuration and serving/CLI regressions.
+- Verification: 31 focused serve CLI tests and 249 combined serving/relevant
+  CLI tests pass; Black, `compileall`, and `git diff --check` pass.
 
 Stage refactor design review:
 - Done: stage metadata is currently descriptive; execution order, placement, artifact resolution, and dispatch are still duplicated.
@@ -399,3 +481,81 @@ R2 artifact latency (2026-07-12):
 - Verification: the focused artifact/chat suite passes 35 tests and the full
   serving suite passes 136 tests; Black and `git diff --check` pass. Mypy reaches
   only pre-existing pipeline/TeaCache errors, and Ruff is not installed locally.
+
+HTTP disconnect, error contract, and artifact TTL review (2026-07-13):
+- [x] Race each chat-completions operation against client disconnect detection,
+  cancel and await queued/running generation, and prove task cleanup in tests.
+- [x] Convert unexpected route failures to the fixed OpenAI-style
+  `500 internal_error` payload without exposing backend exception text.
+- [x] Define and test the R2 TTL contract for private presigned URLs versus public
+  custom-domain URLs backed by bucket lifecycle deletion.
+- [x] Run focused/full serving tests, type/format/compile/diff checks.
+- [x] Inventory `16.26.110.85`, rsync the safe worktree subset, and validate real
+  Flux/Qwen CLI plus serving health/readiness/HTTP generations sequentially.
+- Rationale: cancellation owns both race tasks and awaits every cancelled task;
+  a queued cancellation releases admission/lock while an in-flight cancellation
+  enters resident-worker cancel/recovery. Private R2 mode provides exact
+  presigned-URL access expiry; public custom-domain mode deliberately delegates
+  object expiry to the bucket lifecycle and documents possible lifecycle/CDN lag.
+- Local verification: all 188 serving tests and all 235 combined serving/relevant
+  CLI tests pass. Targeted mypy, Black, `compileall`, and `git diff --check` pass.
+  Regression tests cover task cleanup on disconnect, sanitized unexpected 500s,
+  private `ExpiresIn`, and public custom-domain URL behavior.
+- Trainium verification: current worktree was synced to `/home/ubuntu/Difflet` on
+  four-core `trn2.3xlarge` host `16.26.110.85`. Qwen and Flux compile plus CLI
+  generation both exited 0 and produced validated 1024x1024 RGB PNGs at
+  `outputs/{qwen,flux}-cli.png`. Serving ran strictly sequentially at TP4/CP1 and
+  1024x1024 on `127.0.0.1:8092`; both passed real four-step startup smoke and
+  returned health/ready 200. Qwen HTTP generation returned 200 in 9.721s and Flux
+  in 5.066s; both OpenAI envelopes were validated, their unlogged private R2
+  presigned URLs were fetched successfully, and the downloaded outputs at
+  `outputs/{qwen,flux}-serving.png` are 1024x1024 RGB PNGs. Each server handled
+  SIGTERM normally; afterward there were zero child processes, zero port 8092
+  listeners, and zero Neuron runtime processes. Detailed evidence is under
+  `/home/ubuntu/Difflet/logs/{qwen,flux}-{cli,serve}*.log`.
+
+Heartbeat admission visibility (2026-07-13):
+- [x] Enrich parent-written worker heartbeat records with running, queued,
+  pending, and total request-capacity admission counts.
+- [x] Include the counts in both human-readable heartbeat messages and the
+  structured `worker_heartbeat` logging payload.
+- [x] Run focused and full serving verification before syncing to Trainium.
+- Verification: 26 focused resident-worker tests and all 202 serving tests pass;
+  targeted Mypy, Black, `compileall`, and `git diff --check` pass.
+
+Trainium Qwen/Flux CLI and Serving revalidation (2026-07-13):
+- [x] Run Qwen and Flux CLI generation sequentially at TP4/CP1, 1024x1024,
+  four steps, and validate both output PNGs.
+- [x] Run Qwen and Flux Serving sequentially, verify health/readiness, submit a
+  real four-step HTTP generation, fetch each public R2 URL, and validate PNGs.
+- Results: Qwen CLI completed in 76.58s and Qwen HTTP in 8.25s; Flux CLI
+  completed in 52.54s and Flux HTTP in 2.78s. All four outputs are 1024x1024
+  RGB PNGs. Flux Serving remains healthy and ready on port 8092.
+
+Malformed JSON error contract (2026-07-13):
+- [x] Convert FastAPI request-body JSON decoding failures into the stable
+  OpenAI-style `400 invalid_request` payload without exposing FastAPI `detail`.
+- [x] Add an HTTP-level regression test containing a raw newline inside a JSON
+  string and document the public error matrix entry.
+- [x] Run focused and full serving verification.
+- Verification: all 9 API-server tests and all 203 serving tests pass;
+  targeted Mypy, Black, `compileall`, and `git diff --check` pass.
+- Trainium verification: synced to `16.26.110.85`, restarted Flux Serving, and
+  confirmed malformed JSON returns the fixed OpenAI-style `400 invalid_request`
+  payload while a valid four-step request returns 200 and a downloadable
+  1024x1024 RGB PNG. Health and readiness remain 200.
+
+HTTP disconnect injection regression (2026-07-13):
+- [x] Require FastAPI to inject the route `Request` instead of accepting an
+  optional default that silently disables disconnect handling.
+- [x] Observe the underlying ASGI `http.disconnect` message without hanging
+  Starlette's synchronous test client.
+- [x] Verify a disconnected blocking request cancels and awaits generation with
+  no leaked HTTP race tasks, then rerun serving verification.
+- Rationale: HTTP cancellation is the trigger for the existing resident-engine
+  cancellation/recovery path; model execution still stops only at stage-safe
+  cancellation checkpoints.
+- Verification: all 10 API-server tests and all 204 serving tests pass. Black,
+  isolated Mypy, `compileall`, and `git diff --check` pass. Repository-wide
+  import-following Mypy still reports four pre-existing errors in
+  `parallel_config.py` and `difflet_pipeline.py`.

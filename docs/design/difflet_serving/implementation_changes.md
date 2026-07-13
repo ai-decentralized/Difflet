@@ -11,8 +11,10 @@ in [engine.md](engine.md), and the public API in
   handoff, output paths, and calibration pathname behavior remain unchanged.
 - Flux remains one opaque pipeline; its internal component topology is not converted
   to generic stages.
-- P0 keeps one resident worker and one active profile. Dynamic profile switching,
-  MPMD, generic DAG scheduling, and numerical HBM estimation remain deferred.
+- P0 keeps one resident worker and one active profile. It executes the ordered
+  stage list sequentially through an in-process executor. Dynamic profile
+  switching, per-stage workers, MPMD, generic DAG scheduling, and numerical HBM
+  estimation remain deferred.
 
 ## File And Symbol Inventory
 
@@ -23,8 +25,8 @@ or the new contract to add; it does not authorize broader refactoring.
 |---|---|
 | `difflet/common/registry/base.py` | Replace `ServingStageMetadata` and `ServingModelMetadata.stages` with shared `StageDefinition`/`PipelineDefinition`; rename `preflight_factory` to `artifact_preparer_factory` without an alias. |
 | `difflet/common/registry/{qwen_image,flux}.py` | Construct one pipeline definition per model; Qwen IDs are `text/generate/vae`, Flux has only external ID `pipeline`; point metadata at the renamed factory. |
-| `difflet/serving/types.py` | Add the runtime environment/allocation/stage (including extracted/opaque kind), artifact identity/binding/set, frozen adapter config, bundle with `pipeline_definition`, stage value, context, and request-record contracts; extend `DiffletCompileSpec`; delete `DiffletStageSpec`, `CancellationSignal`, and TeaCache fields from `ServingProfile`. |
-| `difflet/serving/orchestrators/base.py` | Replace `compile_plan(profile)`/`ensure_artifacts(...)` with the adapter, artifact preparer, request-validator, and loaded-orchestrator protocols defined in `architecture.md`. |
+| `difflet/serving/types.py` | Add the runtime environment/allocation/stage (including extracted/opaque kind), artifact identity/binding/set, frozen adapter config, bundle with `pipeline_definition`, nominal `StagePayload` marker, generic `StageInvocation`/`StageExecutionResult`, context, and request-record contracts; extend `DiffletCompileSpec`; delete `DiffletStageSpec`, `CancellationSignal`, and TeaCache fields from `ServingProfile`. |
+| `difflet/serving/orchestrators/base.py` | Replace `compile_plan(profile)`/`ensure_artifacts(...)` with the stage-adapter, artifact-preparer, request-validator, and loaded-runner protocols defined in `architecture.md`. |
 | `difflet/serving/model_registry.py` | Rename `load_preflight_factory()` to `load_artifact_preparer_factory()`; resolve raw `ServeOptions` through the selected model adapter and construct validators from the frozen bundle. |
 | `difflet/serving/factory.py` | Call `prepare_runtime()` once before worker startup; pass one `ResolvedRuntimeBundle` to the validator and engine; copy `ServeOptions.worker_heartbeat_interval` into `ResidentWorkerConfig`; remove independent path/profile preflight calls. |
 | `difflet/serving/artifact_manager.py` | Add the common lock, lookup, staging, inventory, manifest, atomic generation publication, validation, and binding implementation. |
@@ -37,9 +39,9 @@ or the new contract to add; it does not authorize broader refactoring.
 | `difflet/serving/cli/serve.py`, `difflet/serving/options.py` | Preserve the two tri-state values and raw model options through `ServeOptions`; add/validate `worker_heartbeat_interval > 0` in `_add_serve_flags`, `validate_serve_args`, and `options_from_args`; remove generic TeaCache pairing/schema and model-capability checks. |
 | `difflet/models/qwen_image/{application,pipeline}.py` | Add mutually exclusive prevalidated calibration-object/path inputs and request-local TeaCache mode; keep the current pathname API for CLI callers. |
 | `difflet/models/flux/{application,pipeline}.py` | Add the same prevalidated calibration-object and request-local mode boundary; keep existing CLI construction unchanged. |
-| `difflet/serving/orchestrators/qwen_image.py` | Build/validate Qwen compile specs, load exact bindings, and call only common explicit-input builders. Compile runners consume `StageCompileInvocation.pinned_model_path`, `publish_target.staging_path`, and frozen options directly without CLI imports or revision/cache resolution. Implement typed runners, iterate `runtime.pipeline_definition.stages`, return the final VAE output directly, route only non-final typed values, and check abort before/after each stage and each denoising timestep. |
+| `difflet/serving/orchestrators/qwen_image.py` | Build/validate Qwen compile specs, load exact bindings, and call only common explicit-input builders. Compile runners consume `StageCompileInvocation.pinned_model_path`, `publish_target.staging_path`, and frozen options directly without CLI imports or revision/cache resolution. Implement typed runners plus initial/final payload conversion; adjacent runners consume the prior runner's logical output directly. Check abort inside long denoising loops. |
 | `difflet/serving/orchestrators/flux.py` | Keep one opaque external stage; validate component topology/load order, compile into manager staging, load exact bound path, and check abort around pipeline plus its step callback. |
-| `difflet/serving/engines/resident_worker.py` | Add `ResidentWorkerConfig.worker_heartbeat_interval`; pass it through `_ResidentWorkerProcess` to `_worker_main` and the dedicated heartbeat thread. Replace current run lock/pending/cancel/reply structures with engine-owned records, one FIFO control queue, terminal arbitration, bundle-based startup/replacement, and one orchestrator call per request. Shutdown-owned active callers receive the existing public `503 engine_draining`. |
+| `difflet/serving/engines/resident_worker.py` | Add `ResidentWorkerConfig.worker_heartbeat_interval`; pass it through `_ResidentWorkerProcess` to `_worker_main` and the dedicated heartbeat thread. Replace current run lock/pending/cancel/reply structures with engine-owned records, one FIFO control queue, terminal arbitration, and bundle-based startup/replacement. In the worker, construct `StagePipelineEngine` with `InProcessStageExecutor`, iterate the frozen ordered stages, and call one runner at a time. Shutdown-owned active callers receive the existing public `503 engine_draining`. |
 | `difflet/serving/artifact_store.py` | Replace raw backend exception text with allowlisted public errors; retain details only in the protected debug log sink. |
 | `difflet/serving/openai/{api_server,serving_chat,serving_models}.py` | Keep public parsing/response ownership; map sanitized engine/artifact errors and never expose raw worker traceback or paths. |
 | `tests/unit/serving/test_serve_cli.py`, `test_model_registry.py`, `test_resident_worker_engine.py`, `fake_worker.py` | Prove heartbeat parsing/default/rejection and exact options -> factory -> config -> process -> `_worker_main` propagation; cover shutdown as `engine_draining`, heartbeat, terminal races, and replacement. |
@@ -212,11 +214,45 @@ publication, and direct binding.
 - Add profile-relative `RuntimePlan`; resident P0 uses one compatible world across
   all co-loaded applications, while staged CLI topology remains unchanged.
 - Use strict compile-only `StageCompileInvocation` for serving Qwen compile children.
-- Add process-local typed `StageRunner` adapters and in-memory stage handoff.
+- Add process-local typed `StageRunner` adapters, opaque logical payloads,
+  `StageInvocation`/`StageExecutionResult`, `StageExecutor`, and in-memory stage
+  handoff through `InProcessStageExecutor`.
+- Require every concrete logical payload, including all Qwen payloads and
+  both Flux payloads, to inherit the nominal `StagePayload` marker. Make invocation,
+  result, and runner contracts generic over their concrete payload types; erase
+  those arguments only through validated `ErasedStageRunner` wrappers in the
+  heterogeneous runner registry; do not use `Any` in the engine contract.
+- Fail closed at three levels: executor nominal input/output checks, validated
+  runner exact input/output checks, and adapter exact final-payload validation.
+  Add focused tests for invalid initial payload, wrong adjacent payload type,
+  non-`StagePayload` runner output, wrong final payload type, and subclass instances
+  at exact input/output/final boundaries. Exact checks combine `isinstance` for
+  generic narrowing with `type(value) is expected_type` for subclass rejection.
+- Expose erased-runner input/output type metadata as read-only properties backed by
+  private generic fields; mutable protocol attributes and unchecked casts are not
+  permitted.
+- Require `ValidatedStageRunner.shutdown()` to delegate exactly once to its inner
+  runner. Add a structural typing check and a shutdown-delegation unit test.
+- Treat pipeline/stage handles as adapter-owned only during runner construction and
+  partial-failure cleanup. Successful runner return transfers them atomically and
+  exclusively to executor lifecycle; adapter shutdown must not touch transferred
+  handles.
 - Define `StageRole`, exact `StageLoadContext(runtime, stage, artifact)` binding, and
   concrete text embedding/mask, packed-latent, and final-output value objects.
-- Keep traversal, conversion, cancellation checkpoints, reset, smoke, and final
-  output ownership in the Qwen serving orchestrator.
+- Keep ordered traversal, stage lifecycle logs, and before/after cancellation
+  checkpoints in the generic worker-side stage engine. Keep concrete payload
+  validation, initial/final conversion, reset, smoke inputs/output validation, and
+  async runner construction/load in the Qwen serving adapter. Transfer loaded
+  runner ownership to the executor; async executor shutdown is the sole
+  runner-shutdown path, followed by async adapter-state shutdown.
+- Require `create_loaded_runners()` to return an insertion-ordered mapping whose
+  order is both runner creation order and pipeline stage order; partial-failure and
+  executor shutdown attempt every runner in strict reverse order, retain individual
+  failures, and raise only after exhaustive cleanup. Adapter-state cleanup always
+  runs afterward; any aggregated cleanup failure makes the worker process-unsafe.
+- Route every worker exit after adapter construction—including load/smoke failure
+  before readiness—through one idempotent cleanup path: clean a nullable executor
+  when ownership transferred, then always clean adapter-owned state.
 
 ## Flux Serving Adapter
 
@@ -236,6 +272,13 @@ publication, and direct binding.
   cooperative abort, finalization/reset arbitration, process-unsafe replacement,
   and ordered shutdown contracts in `engine.md`.
 - Add structured startup/stage/progress logs and a dedicated heartbeat thread.
+- Add a generic worker-side stage loop over `PipelineDefinition.stages` and select
+  `InProcessStageExecutor` once at worker construction. The P0 loop contains no
+  `single_process` branches, stage queues, placement, or transport selection.
+- Pass each non-final `StageExecutionResult.output` unchanged as the next
+  `StageInvocation.input`; generic engine code never branches on Qwen payload types.
+- Reserve `StageExecutor` as the future scheduling boundary. IPC/shared-memory
+  handles, payload ownership, cleanup, and per-stage worker pools remain deferred.
 - Readiness requires bound artifact validation, resident load, and real end-to-end
   smoke. Worker replacement loads and smokes the same bundle.
 - Replace current caller-owned run/reply/cancellation structures with the
