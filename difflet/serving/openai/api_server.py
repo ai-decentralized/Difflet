@@ -1,19 +1,72 @@
 """FastAPI app factory for Difflet serving."""
 
-from __future__ import annotations
-
+import asyncio
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
-from typing import Any
+from contextlib import suppress
+from typing import Any, Coroutine, TypeVar
 
 from difflet.serving.artifact_store import MemoryArtifactStore, R2ArtifactStore
-from difflet.serving.errors import DiffletServingError
+from difflet.serving.errors import DiffletServingError, internal_error, request_cancelled
 from difflet.serving.model_registry import ResolvedServingModel
 from difflet.serving.openai.serving_chat import generate_chat_completion
 from difflet.serving.options import ServeOptions
 
 logger = logging.getLogger(__name__)
+
+_ResultT = TypeVar("_ResultT")
+_DISCONNECT_POLL_SECONDS = 0.1
+
+
+async def _wait_for_disconnect(request) -> None:
+    # The request body has already been parsed before FastAPI enters this route,
+    # so the only relevant subsequent ASGI message is ``http.disconnect``.
+    # Avoid Starlette's zero-timeout ``is_disconnected()`` probe: with some
+    # AnyIO/TestClient combinations it can remain blocked after the body is read.
+    while True:
+        try:
+            message = await asyncio.wait_for(
+                request.receive(),
+                timeout=_DISCONNECT_POLL_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            continue
+        if message.get("type") == "http.disconnect":
+            return
+
+
+async def _run_until_disconnect(
+    operation: Coroutine[Any, Any, _ResultT],
+    *,
+    request,
+) -> _ResultT:
+    operation_task = asyncio.create_task(operation, name="difflet-http-chat-completion")
+    disconnect_task = asyncio.create_task(
+        _wait_for_disconnect(request),
+        name="difflet-http-disconnect",
+    )
+    try:
+        done, _ = await asyncio.wait(
+            (operation_task, disconnect_task),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if operation_task in done:
+            return operation_task.result()
+
+        disconnect_task.result()
+        operation_task.cancel()
+        with suppress(BaseException):
+            await operation_task
+        raise request_cancelled("client disconnected")
+    finally:
+        for task in (operation_task, disconnect_task):
+            if not task.done():
+                task.cancel()
+        for task in (operation_task, disconnect_task):
+            with suppress(BaseException):
+                await task
 
 
 def create_app(
@@ -26,6 +79,7 @@ def create_app(
 ):
     try:
         from fastapi import Body, FastAPI, Request
+        from fastapi.exceptions import RequestValidationError
         from fastapi.responses import JSONResponse
     except ImportError as exc:  # pragma: no cover - dependency guard
         raise RuntimeError("fastapi is required for `difflet serve`") from exc
@@ -50,6 +104,21 @@ def create_app(
             logger.info("serving shutdown complete model=%s", resolved_model.model_id)
 
     app = FastAPI(title="Difflet Serving", lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def _request_validation_error_handler(request: Request, exc: RequestValidationError):
+        logger.warning(
+            "http.request_validation_failed path=%s method=%s validation_errors=%d",
+            request.url.path,
+            request.method,
+            len(exc.errors()),
+        )
+        error = DiffletServingError(
+            400,
+            "invalid_request",
+            "request body is not valid JSON",
+        )
+        return JSONResponse(status_code=error.status_code, content=error.to_payload())
 
     @app.exception_handler(DiffletServingError)
     async def _serving_error_handler(request: Request, exc: DiffletServingError):
@@ -85,10 +154,10 @@ def create_app(
         }
 
     @app.post("/v1/chat/completions")
-    async def chat_completions(payload: Any = Body(default=None), request: Request | None = None):
+    async def chat_completions(request: Request, payload: Any = Body(default=None)):
         start = time.perf_counter()
-        request_id = payload.get("id") if isinstance(payload, dict) and "id" in payload else None
-        client = request.client.host if request is not None and request.client else None
+        request_id = str(uuid.uuid4())
+        client = request.client.host if request.client else None
         logger.info(
             "http.request_started path=%s method=%s model=%s request_id=%s client=%s",
             "/v1/chat/completions",
@@ -98,15 +167,17 @@ def create_app(
             client,
         )
         try:
-            response = await generate_chat_completion(
+            operation = generate_chat_completion(
                 payload,
                 resolved_model=resolved_model,
+                request_id=request_id,
                 engine=engine,
                 request_validator=request_validator,
                 artifact_store=artifact_store,
                 artifact_ttl_seconds=options.artifact_ttl_seconds,
                 artifact_store_timeout=options.artifact_store_timeout,
             )
+            response = await _run_until_disconnect(operation, request=request)
             duration_ms = (time.perf_counter() - start) * 1000.0
             logger.info(
                 "http.request_completed path=%s status=%s model=%s request_id=%s duration_ms=%.2f",
@@ -140,6 +211,6 @@ def create_app(
                 request_id,
                 duration_ms,
             )
-            raise
+            raise internal_error() from exc
 
     return app

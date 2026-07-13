@@ -192,14 +192,25 @@ DIFFLET_R2_ACCESS_KEY_ID=your-access-key-id
 DIFFLET_R2_SECRET_ACCESS_KEY=your-secret-access-key
 DIFFLET_R2_PREFIX=difflet
 
-# Optional public bucket or custom-domain base URL.
-# Leave empty to return expiring S3 presigned URLs.
+# Optional public bucket or custom-domain URL. This mode requires a matching R2
+# bucket lifecycle policy; leave empty for strict expiring presigned URLs.
 DIFFLET_R2_PUBLIC_BASE_URL=https://images.example.com
 ```
 
 Run the server from the directory containing `.env`. It is loaded automatically without
 overriding variables already exported by the shell. Do not commit `.env` or real credentials.
 The R2 access key must have object read/write permission for the configured bucket.
+Artifact expiry has two deployment modes:
+
+- Without `DIFFLET_R2_PUBLIC_BASE_URL`, Difflet returns an S3 API-domain presigned
+  URL and `artifact_ttl_seconds` controls its access expiry precisely. Do not
+  replace its host with a custom domain because the host is part of the signature.
+- With `DIFFLET_R2_PUBLIC_BASE_URL`, Difflet returns the public custom-domain URL.
+  The deployment must configure a matching R2 bucket lifecycle policy to delete
+  objects; `artifact_ttl_seconds` does not expire a public URL. Lifecycle and CDN
+  deletion can be delayed, so deployments requiring strict second-level access
+  expiry must use the private presigned mode. A custom domain with strict expiry
+  needs a separate Worker/WAF HMAC access policy, which P0 does not implement.
 
 Create the R2 bucket with a Location Hint close to the machine running `difflet serve`.
 Cross-region uploads can add seconds to every request; for example, a server in AWS

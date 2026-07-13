@@ -39,6 +39,16 @@ def test_normalize_chat_request_defaults_from_model_metadata():
     assert req.output_format == "png"
 
 
+def test_normalize_chat_request_uses_server_request_id():
+    req = normalize_chat_request(
+        _body(),
+        resolved_model=_resolved(),
+        request_id="server-request-id",
+    )
+
+    assert req.request_id == "server-request-id"
+
+
 @pytest.mark.parametrize("steps", [1, 50])
 def test_normalize_chat_request_accepts_bounded_steps(steps):
     req = normalize_chat_request(
@@ -59,6 +69,16 @@ def test_normalize_chat_request_rejects_steps_outside_serving_bound(steps):
 
     assert exc.value.code == "invalid_extra_body"
     assert "1 <= value <= 50" in exc.value.message
+
+
+@pytest.mark.parametrize("guidance", [0, 1, 3.5, 7.5, 20, 1e308])
+def test_normalize_chat_request_preserves_finite_guidance_for_model_validation(guidance):
+    request = normalize_chat_request(
+        _body(extra_body={"guidance_scale": guidance}),
+        resolved_model=_resolved(),
+    )
+
+    assert request.guidance_scale == float(guidance)
 
 
 def test_normalize_chat_request_allows_omitted_model_for_single_model_server():
@@ -95,6 +115,38 @@ def test_text_content_parts_are_joined():
     assert req.prompt == "a cat\nin snow"
 
 
+def test_prompt_character_limit_accepts_boundary():
+    prompt = "x" * 16_384
+
+    request = normalize_chat_request(
+        _body(messages=[{"role": "user", "content": prompt}]),
+        resolved_model=_resolved(),
+    )
+
+    assert request.prompt == prompt
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "x" * 16_385,
+        [
+            {"type": "text", "text": "x" * 8192},
+            {"type": "text", "text": "y" * 8192},
+        ],
+    ],
+)
+def test_prompt_character_limit_rejects_before_model_validation(content):
+    with pytest.raises(DiffletServingError) as exc:
+        normalize_chat_request(
+            _body(messages=[{"role": "user", "content": content}]),
+            resolved_model=_resolved(),
+        )
+
+    assert exc.value.code == "prompt_too_long"
+    assert "16384 characters" in exc.value.message
+
+
 def test_prompt_uses_last_user_message_only():
     with pytest.raises(DiffletServingError) as exc:
         normalize_chat_request(
@@ -127,6 +179,7 @@ def test_prompt_uses_last_user_message_only():
         (_body(modalities=["image", "text"]), "unsupported_modality"),
         (_body(temperature=0.1), "feature_not_supported"),
         (_body(max_tokens=16), "feature_not_supported"),
+        (_body(id="client-request-id"), "feature_not_supported"),
         (_body(unknown_top_level=True), "feature_not_supported"),
         (_body(extra_body={"steps": 4, "num_inference_steps": 5}), "invalid_extra_body"),
         (_body(messages=[]), "invalid_prompt"),
@@ -175,6 +228,13 @@ class _RejectingValidator:
         raise prompt_too_long("too long")
 
 
+class _TrackingValidator:
+    called = False
+
+    def validate(self, request):
+        self.called = True
+
+
 def test_generate_chat_completion_returns_artifact_url():
     store = MemoryArtifactStore()
     response = asyncio.run(
@@ -209,6 +269,27 @@ def test_generate_chat_completion_validates_before_engine():
         )
 
     assert exc.value.code == "prompt_too_long"
+    assert engine.called is False
+
+
+def test_generate_chat_completion_rejects_raw_prompt_before_provider_validation():
+    engine = _FakeEngine()
+    validator = _TrackingValidator()
+    with pytest.raises(DiffletServingError) as exc:
+        asyncio.run(
+            generate_chat_completion(
+                _body(messages=[{"role": "user", "content": "x" * 16_385}]),
+                resolved_model=_resolved(),
+                engine=engine,
+                request_validator=validator,
+                artifact_store=MemoryArtifactStore(),
+                artifact_ttl_seconds=60,
+                artifact_store_timeout=1,
+            )
+        )
+
+    assert exc.value.code == "prompt_too_long"
+    assert validator.called is False
     assert engine.called is False
 
 
@@ -257,6 +338,59 @@ def test_r2_store_reuses_client(monkeypatch):
 
     assert store._client() is store._client()
     assert len(clients) == 1
+
+
+def test_r2_public_url_mode_uses_custom_domain_without_presigning(monkeypatch):
+    store = R2ArtifactStore(
+        bucket="bucket",
+        endpoint_url="https://example.invalid",
+        access_key_id="key",
+        secret_access_key="secret",
+        prefix="generated",
+        public_base_url="https://images.example.com/",
+    )
+    monkeypatch.setattr(
+        store,
+        "_client",
+        lambda: (_ for _ in ()).throw(AssertionError("public mode must not presign")),
+    )
+
+    url = asyncio.run(
+        store.get_url(
+            ArtifactRef("image.png", "s3://bucket/generated/image.png", "image/png"),
+            ttl_seconds=60,
+        )
+    )
+
+    assert url == "https://images.example.com/generated/image.png"
+
+
+def test_r2_private_url_mode_passes_ttl_to_presigner(monkeypatch):
+    calls = []
+
+    class _Client:
+        def generate_presigned_url(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            return "https://signed.example/image.png"
+
+    store = R2ArtifactStore(
+        bucket="bucket",
+        endpoint_url="https://example.invalid",
+        access_key_id="key",
+        secret_access_key="secret",
+        prefix="generated",
+    )
+    monkeypatch.setattr(store, "_client", lambda: _Client())
+
+    url = asyncio.run(
+        store.get_url(
+            ArtifactRef("image.png", "s3://bucket/generated/image.png", "image/png"),
+            ttl_seconds=123,
+        )
+    )
+
+    assert url == "https://signed.example/image.png"
+    assert calls[0][1]["ExpiresIn"] == 123
 
 
 @pytest.mark.parametrize("operation", ["upload", "presign"])

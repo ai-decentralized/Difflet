@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from difflet.serving.orchestrators.base import resolve_available_neuron_core_ids
 from difflet.serving.types import (
     CompileArtifactIdentity,
     DistributedProcessEnvironment,
@@ -13,6 +14,41 @@ from difflet.serving.types import (
     ParallelTopology,
     WorkerAllocationSpec,
 )
+
+
+def test_neuron_core_visibility_defaults_to_current_four_core_host(monkeypatch):
+    monkeypatch.delenv("NEURON_RT_VISIBLE_CORES", raising=False)
+
+    assert resolve_available_neuron_core_ids(required_num_cores=4) == (0, 1, 2, 3)
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("4-7", (4, 5, 6, 7)),
+        ("4,5,6,7", (4, 5, 6, 7)),
+        ("2, 4-6", (2, 4, 5, 6)),
+    ],
+)
+def test_neuron_core_visibility_preserves_inherited_assignment(monkeypatch, configured, expected):
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", configured)
+
+    assert resolve_available_neuron_core_ids(required_num_cores=4) == expected
+
+
+@pytest.mark.parametrize("configured", ["4-3", "1,1", "1-2,2", "bad", "1,,2"])
+def test_neuron_core_visibility_rejects_invalid_assignments(monkeypatch, configured):
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", configured)
+
+    with pytest.raises(ValueError):
+        resolve_available_neuron_core_ids(required_num_cores=2)
+
+
+def test_neuron_core_visibility_requires_enough_assigned_cores(monkeypatch):
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "4-5")
+
+    with pytest.raises(ValueError, match="requires 4, has 2"):
+        resolve_available_neuron_core_ids(required_num_cores=4)
 
 
 def _pipeline() -> PipelineDefinition:

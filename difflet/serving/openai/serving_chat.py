@@ -14,6 +14,7 @@ from difflet.serving.errors import (
     invalid_extra_body,
     invalid_prompt,
     profile_mismatch,
+    prompt_too_long,
     unsupported_modality,
     unsupported_input_modality,
 )
@@ -86,12 +87,14 @@ _ALLOWED_EXTRA_FIELDS = {
     "response_format",
     "artifact_ttl_seconds",
 }
+_MAX_PROMPT_CHARACTERS = 16_384
 
 
 def normalize_chat_request(
     body: Any,
     *,
     resolved_model: ResolvedServingModel,
+    request_id: str | None = None,
 ) -> DiffletGenerateRequest:
     _validate_top_level(body)
     requested_model = body.get("model")
@@ -139,11 +142,8 @@ def normalize_chat_request(
         raise invalid_extra_body("seed must satisfy 0 <= seed <= 2**63 - 1")
     if steps < 1 or steps > 50:
         raise invalid_extra_body("num_inference_steps must satisfy 1 <= value <= 50")
-    if guidance < 0:
-        raise invalid_extra_body("guidance_scale must be non-negative")
-
     return DiffletGenerateRequest(
-        request_id=str(body.get("id") or uuid.uuid4()),
+        request_id=request_id or str(uuid.uuid4()),
         model=resolved_model.model_id,
         prompt=prompt,
         height=height,
@@ -159,6 +159,7 @@ async def generate_chat_completion(
     body: Any,
     *,
     resolved_model: ResolvedServingModel,
+    request_id: str | None = None,
     engine,
     request_validator=None,
     artifact_store: ArtifactStore,
@@ -166,7 +167,11 @@ async def generate_chat_completion(
     artifact_store_timeout: float,
 ) -> dict[str, Any]:
     started_at = time.perf_counter()
-    request = normalize_chat_request(body, resolved_model=resolved_model)
+    request = normalize_chat_request(
+        body,
+        resolved_model=resolved_model,
+        request_id=request_id,
+    )
     logger.info(
         "chat request normalized model=%s request_id=%s prompt_len=%s steps=%s guidance=%s seed=%s",
         request.model,
@@ -327,9 +332,11 @@ def _extract_prompt(messages: Any) -> str:
 
 def _content_to_text(content: Any) -> str:
     if isinstance(content, str):
+        _validate_prompt_character_count(len(content))
         return content
     if isinstance(content, list):
         parts: list[str] = []
+        character_count = 0
         for item in content:
             if not isinstance(item, dict):
                 raise unsupported_input_modality("message content items must be objects")
@@ -341,9 +348,18 @@ def _content_to_text(content: Any) -> str:
             unknown = set(item) - {"type", "text"}
             if unknown:
                 raise unsupported_input_modality("text content item has unsupported keys")
+            character_count += len(text) + (1 if parts else 0)
+            _validate_prompt_character_count(character_count)
             parts.append(text)
         return "\n".join(parts)
     raise unsupported_input_modality("P0 user content must be text or text content items")
+
+
+def _validate_prompt_character_count(character_count: int) -> None:
+    if character_count > _MAX_PROMPT_CHARACTERS:
+        raise prompt_too_long(
+            f"prompt must not exceed {_MAX_PROMPT_CHARACTERS} characters before tokenization"
+        )
 
 
 def _resolve_steps(extra: dict[str, Any], default: int) -> int:

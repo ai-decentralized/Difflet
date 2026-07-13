@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 
 import pytest
 
 from difflet.serving.openai.api_server import create_app
+from difflet.serving.errors import DiffletServingError
 from difflet.serving.options import ServeOptions
 from difflet.serving.model_registry import resolve_serving_model
 
@@ -18,6 +20,39 @@ class _UnhealthyEngine:
 
     async def shutdown(self):
         return None
+
+
+class _UnexpectedFailureEngine(_UnhealthyEngine):
+    healthy = True
+    ready = True
+
+    async def generate(self, request):
+        raise RuntimeError("private backend details")
+
+
+class _BlockingEngine(_UnexpectedFailureEngine):
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def generate(self, request):
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+
+
+class _DisconnectRequest:
+    client = None
+
+    def __init__(self, engine: _BlockingEngine):
+        self.engine = engine
+
+    async def receive(self):
+        await self.engine.started.wait()
+        return {"type": "http.disconnect"}
 
 
 def test_health_returns_503_when_engine_unhealthy():
@@ -60,3 +95,156 @@ def test_chat_completions_non_object_json_uses_difflet_error_contract(payload):
             "code": "invalid_request",
         }
     }
+
+
+def test_chat_completions_invalid_json_uses_difflet_error_contract():
+    from fastapi.testclient import TestClient
+
+    options = ServeOptions(
+        model_id="black-forest-labs/FLUX.1-dev",
+        artifact_store="memory",
+    )
+    app = create_app(
+        options=options,
+        resolved_model=resolve_serving_model(options),
+        engine=_UnhealthyEngine(),
+        artifact_store=None,
+    )
+
+    invalid_json = b'{"messages":[{"role":"user","content":"line one\nline two"}]}'
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            content=invalid_json,
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "message": "request body is not valid JSON",
+            "type": "invalid_request_error",
+            "code": "invalid_request",
+        }
+    }
+    assert "detail" not in response.json()
+
+
+def test_chat_completions_requires_fastapi_request_injection():
+    options = ServeOptions(
+        model_id="black-forest-labs/FLUX.1-dev",
+        artifact_store="memory",
+    )
+    app = create_app(
+        options=options,
+        resolved_model=resolve_serving_model(options),
+        engine=_UnhealthyEngine(),
+        artifact_store=None,
+    )
+    route = next(
+        route for route in app.routes if getattr(route, "path", None) == "/v1/chat/completions"
+    )
+
+    request_parameter = inspect.signature(route.endpoint).parameters["request"]
+
+    assert request_parameter.default is inspect.Parameter.empty
+
+
+def test_chat_completions_rejects_client_request_body_id():
+    from fastapi.testclient import TestClient
+
+    options = ServeOptions(
+        model_id="black-forest-labs/FLUX.1-dev",
+        artifact_store="memory",
+    )
+    app = create_app(
+        options=options,
+        resolved_model=resolve_serving_model(options),
+        engine=_UnhealthyEngine(),
+        artifact_store=None,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "id": "client-request-id",
+                "model": options.model_id,
+                "messages": [{"role": "user", "content": "a cat"}],
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "feature_not_supported"
+
+
+def test_chat_completions_unexpected_failure_uses_sanitized_error_contract(caplog):
+    from fastapi.testclient import TestClient
+
+    options = ServeOptions(
+        model_id="black-forest-labs/FLUX.1-dev",
+        artifact_store="memory",
+    )
+    app = create_app(
+        options=options,
+        resolved_model=resolve_serving_model(options),
+        engine=_UnexpectedFailureEngine(),
+        artifact_store=None,
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": options.model_id,
+                "messages": [{"role": "user", "content": "a cat"}],
+            },
+        )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": {
+            "message": "Internal model execution error",
+            "type": "server_error",
+            "code": "internal_error",
+        }
+    }
+    assert "private backend details" not in response.text
+    assert "private backend details" in caplog.text
+
+
+def test_chat_completions_disconnect_cancels_and_awaits_generation():
+    async def _run():
+        options = ServeOptions(
+            model_id="black-forest-labs/FLUX.1-dev",
+            artifact_store="memory",
+        )
+        engine = _BlockingEngine()
+        app = create_app(
+            options=options,
+            resolved_model=resolve_serving_model(options),
+            engine=engine,
+            artifact_store=None,
+        )
+        route = next(
+            route for route in app.routes if getattr(route, "path", None) == "/v1/chat/completions"
+        )
+        payload = {
+            "model": options.model_id,
+            "messages": [{"role": "user", "content": "a cat"}],
+        }
+
+        with pytest.raises(DiffletServingError) as exc:
+            await route.endpoint(payload=payload, request=_DisconnectRequest(engine))
+
+        assert exc.value.code == "request_cancelled"
+        assert engine.cancelled.is_set()
+        current = asyncio.current_task()
+        leaked = [
+            task
+            for task in asyncio.all_tasks()
+            if task is not current and task.get_name().startswith("difflet-http-")
+        ]
+        assert leaked == []
+
+    asyncio.run(_run())

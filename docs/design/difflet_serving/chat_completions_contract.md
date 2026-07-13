@@ -135,6 +135,10 @@ P0 top-level field handling:
   or other unsupported chat behavior.
 - Unknown top-level fields return `400 feature_not_supported` unless they are
   added to this allowlist in a later revision.
+- A client-supplied top-level request-body `id` is not supported and therefore
+  returns `400 feature_not_supported`. Difflet generates the request/response id
+  at the server boundary; the response continues to expose the standard
+  `chat.completion.id` field.
 - Difflet generation and request-facing shape fields must live inside
   `extra_body`. P0 should not accept flattened generation fields at the top
   level; their presence there is invalid placement and returns
@@ -225,9 +229,9 @@ Qwen-Image P0 value limits:
 
 | Field | P0 rule |
 | --- | --- |
-| prompt length | Reject after Qwen prompt templating/tokenization if it exceeds the configured encoder bucket. Default Qwen serving profile uses the existing `enc_seq=256` bucket unless the adapter declares another value. |
+| prompt length | Reject raw prompts above 16,384 characters before tokenization, then reject after Qwen prompt templating/tokenization if it exceeds the configured encoder bucket. Default Qwen serving profile uses the existing `enc_seq=256` bucket unless the adapter declares another value. |
 | `num_inference_steps` / `steps` | Integer in `1..50`. Adapter default is `4`; values outside the serving bound return `400 invalid_extra_body`. |
-| `guidance_scale` | Finite non-negative float. Adapter default is `4.0`. |
+| `guidance_scale` | Finite float in `0..20`. Adapter default is `4.0`. |
 | `seed` | Integer in the range accepted by PyTorch manual seeding; P0 should accept `0 <= seed <= 2**63 - 1`. |
 | `output_format` | `png` only for Qwen P0. |
 
@@ -235,9 +239,9 @@ Flux P0 value limits:
 
 | Field | P0 rule |
 | --- | --- |
-| prompt length | Reject after Flux tokenizer/template handling if it exceeds the configured Flux text bucket. Default Flux serving profile uses the existing `max_sequence_length=512` path unless the adapter declares another value. No silent truncation. |
+| prompt length | Reject raw prompts above 16,384 characters before tokenization, then reject after Flux tokenizer/template handling if it exceeds the configured Flux text bucket. Default Flux serving profile uses the existing `max_sequence_length=512` path unless the adapter declares another value. No silent truncation. |
 | `num_inference_steps` / `steps` | Integer in `1..50`. Adapter default is `28`; values outside the serving bound return `400 invalid_extra_body`. |
-| `guidance_scale` | Finite non-negative float. Adapter default is `3.5`. |
+| `guidance_scale` | Finite float in `0..20`. Adapter default is `3.5`. |
 | `seed` | Integer in the range accepted by PyTorch manual seeding; P0 should accept `0 <= seed <= 2**63 - 1`. |
 | `output_format` | `png` only for Flux P0. |
 | `true_cfg_scale` / `negative_prompt` | Rejected in Flux P0 until the serving adapter explicitly exposes a true-CFG path. |
@@ -442,6 +446,7 @@ Required status codes:
 
 | Condition | HTTP status | Error code |
 | --- | ---: | --- |
+| Request body is malformed JSON | 400 | `invalid_request` |
 | Parsed JSON request body is not an object | 400 | `invalid_request` |
 | Unsupported model id | 400 | `model_not_served` |
 | Unsupported output modality | 400 | `unsupported_modality` |
@@ -482,3 +487,10 @@ back to `data_url`, local file URLs, raw filesystem paths, or inline bytes.
 - The engine returns `DiffletGenerateOutput`; it does not know about
   OpenAI-style `choices` or R2 credentials.
 - `ArtifactStore` owns local paths, file ids, TTL, and presigned URLs.
+- P0 R2 has two explicit expiry modes. Private mode returns an S3 API-domain
+  presigned URL whose access lifetime is `artifact_ttl_seconds`; it cannot be
+  host-rewritten to a custom domain. Public custom-domain mode depends on a
+  deployment-owned R2 bucket lifecycle for object deletion and does not claim
+  that `artifact_ttl_seconds` expires the URL. Lifecycle/CDN deletion can lag, so
+  strict second-level access expiry requires private presigned mode; strict
+  custom-domain expiry requires a separate Worker/WAF HMAC policy outside P0.
