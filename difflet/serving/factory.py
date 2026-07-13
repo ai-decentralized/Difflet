@@ -13,7 +13,11 @@ from difflet.serving.model_registry import (
     resolve_serving_model,
 )
 from difflet.serving.options import ServeOptions
-from difflet.serving.orchestrators.base import NoopServingRequestValidator
+from difflet.serving.orchestrators.base import (
+    NoopServingRequestValidator,
+    ServingArtifactPreparer,
+    ServingRequestValidator,
+)
 from difflet.serving.types import ResolvedRuntimeBundle
 
 
@@ -22,13 +26,16 @@ class ServingStack:
     resolved_model: ResolvedServingModel
     runtime: ResolvedRuntimeBundle
     engine: ResidentWorkerServingEngine
-    request_validator: object
+    request_validator: ServingRequestValidator
 
 
 def build_serving_stack(options: ServeOptions) -> ServingStack:
     resolved = resolve_serving_model(options)
     preparer_cls = load_artifact_preparer_factory(resolved.metadata)
-    preparer = preparer_cls(model_id=resolved.model_id, revision=options.revision)
+    preparer: ServingArtifactPreparer = preparer_cls(
+        model_id=resolved.model_id,
+        revision=options.revision,
+    )
     runtime = preparer.prepare_runtime(
         resolved.profile,
         download_policy=options.download_policy,

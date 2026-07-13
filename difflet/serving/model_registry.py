@@ -73,11 +73,6 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
     )
 
 
-def serving_models() -> tuple[ServingModelMetadata, ...]:
-    _ensure_builtin_serving_models_registered()
-    return tuple(_SERVING_METADATA.values())
-
-
 def _ensure_builtin_serving_models_registered() -> None:
     global _BUILTINS_LOADED
     if _BUILTINS_LOADED:
@@ -102,10 +97,6 @@ def load_factory(path: str) -> Factory:
 
 def load_artifact_preparer_factory(metadata: ServingModelMetadata) -> Factory:
     return load_factory(metadata.artifact_preparer_factory)
-
-
-def load_orchestrator_factory(metadata: ServingModelMetadata) -> Factory:
-    return load_factory(metadata.orchestrator_factory)
 
 
 def load_request_validator_factory(metadata: ServingModelMetadata) -> Factory | None:

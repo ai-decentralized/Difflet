@@ -19,6 +19,7 @@ from difflet.serving.errors import (
     unsupported_input_modality,
 )
 from difflet.serving.model_registry import ResolvedServingModel
+from difflet.serving.orchestrators.base import ServingRequestValidator
 from difflet.serving.types import DiffletGenerateRequest, DiffletGenerateOutput, ServingProfile
 
 logger = logging.getLogger(__name__)
@@ -161,7 +162,7 @@ async def generate_chat_completion(
     resolved_model: ResolvedServingModel,
     request_id: str | None = None,
     engine,
-    request_validator=None,
+    request_validator: ServingRequestValidator | None = None,
     artifact_store: ArtifactStore,
     artifact_ttl_seconds: int,
     artifact_store_timeout: float,

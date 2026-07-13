@@ -87,7 +87,7 @@ difflet/
     cli/{__init__,serve}.py                        [existing/modified]
     orchestrators/{base,qwen_image,flux}.py        [modified]
     engines/{__init__,resident_worker}.py          [modified]
-    openai/{__init__,api_server,serving_chat,serving_models}.py [modified]
+    openai/{__init__,api_server,serving_chat}.py                [modified]
 ```
 
 The base registry remains `difflet/registry.py`; do not replace it with a package.

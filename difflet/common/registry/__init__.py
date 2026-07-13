@@ -1,5 +1,5 @@
-"""Common registry helpers layered over the existing `difflet.registry` module."""
+"""Common serving registry metadata."""
 
-from difflet.common.registry.base import CommonModelDescriptor, ServingModelMetadata, describe_model
+from difflet.common.registry.base import ServingModelMetadata
 
-__all__ = ["CommonModelDescriptor", "ServingModelMetadata", "describe_model"]
+__all__ = ["ServingModelMetadata"]

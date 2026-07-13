@@ -24,17 +24,6 @@ VIRTUAL_CORE_SIZE = 2
 SERVING_ARTIFACT_MARKER = "difflet_serving_artifact.json"
 
 
-def stage_compiled_dir(stage: str, profile: ServingProfile) -> Path:
-    return stage_compiled_dir_from_values(
-        stage,
-        cache_dir=profile.cache_dir,
-        tp_degree=profile.parallel.tp_degree,
-        cp_degree=profile.parallel.cp_degree,
-        height=profile.height,
-        width=profile.width,
-    )
-
-
 def stage_compiled_dir_from_values(
     stage: str,
     *,

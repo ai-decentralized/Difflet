@@ -56,10 +56,6 @@ def prompt_too_long(message: str) -> DiffletServingError:
     return DiffletServingError(400, "prompt_too_long", message)
 
 
-def engine_unavailable(message: str) -> DiffletServingError:
-    return DiffletServingError(503, "engine_unavailable", message, error_type="server_error")
-
-
 def internal_error(message: str = "Internal model execution error") -> DiffletServingError:
     return DiffletServingError(500, "internal_error", message, error_type="server_error")
 

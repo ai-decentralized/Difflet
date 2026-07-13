@@ -574,3 +574,23 @@ Inherited NeuronCore compile allocation (2026-07-13):
   allocation. A real Flux `--force` compile on the host's physical `0-3` cores,
   worker load, four-step HTTP generation, R2 upload/download, and final ready
   heartbeat all succeeded.
+
+Serving dead-code audit (2026-07-13):
+- [x] Remove the unused `CommonModelDescriptor` and `describe_model` registry
+  compatibility wrapper.
+- [x] Audit feature-added Python definitions and modules for other code with no
+  runtime, test, documentation, or supported public-API consumer.
+- [x] Remove only proven dead code and run focused/full serving verification.
+
+Review: removed the unused common generate protocol module, Qwen profile-to-cache
+wrapper, model-list module/registry enumerator, orchestrator factory loader, and
+`engine_unavailable()` helper in addition to the requested registry descriptor.
+Kept dynamic factory targets and the serving adapter/validator protocols; wired
+the latter into `ServingStack` and request handling instead of leaving an
+untyped `object`. Updated design docs to match the single-model `/v1/models`
+ownership. Verification: serving plus CLI runner `211 passed`; focused Qwen CLI
+path helper tests `4 passed`; targeted mypy, Black, `compileall`, import smoke,
+and `git diff --check` passed. The broader local Qwen CLI run additionally had 9
+environment-only failures because this workstation lacks Torch/NumPy and cannot
+write `~/.cache`; those Neuron-backed paths were already verified on the remote
+Trainium environment.

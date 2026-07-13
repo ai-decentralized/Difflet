@@ -480,8 +480,9 @@ back to `data_url`, local file URLs, raw filesystem paths, or inline bytes.
 ## Implementation Notes
 
 - Chat response formatting belongs in `difflet/serving/openai/serving_chat.py`.
-- Supporting model-list helpers may live in
-  `difflet/serving/openai/serving_models.py`.
+- The single-model `/v1/models` response is owned directly by
+  `difflet/serving/openai/api_server.py`; no separate model-list abstraction is
+  needed until one process can serve multiple models.
 - Model-specific input validation belongs in the serving model registry or
   adapter, not in the OpenAI route.
 - The engine returns `DiffletGenerateOutput`; it does not know about

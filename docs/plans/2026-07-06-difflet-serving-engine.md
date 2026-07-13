@@ -1242,7 +1242,6 @@ difflet/serving/
     api_server.py
     protocol.py
     serving_chat.py
-    serving_models.py
     errors.py
   cli/
     __init__.py
