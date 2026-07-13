@@ -130,7 +130,7 @@ def test_flux_compile_uses_pinned_source_and_manager_target(monkeypatch, tmp_pat
     staging = tmp_path / "staging"
     target = ArtifactPublishTarget("pipeline", spec.identity, tmp_path, staging)
     captured = {}
-    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "7")
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "4-7")
     monkeypatch.setenv("NEURON_RT_NUM_CORES", "8")
     monkeypatch.setenv("NEURON_RT_VIRTUAL_CORE_SIZE", "2")
     monkeypatch.setenv("NEURON_LOGICAL_NC_CONFIG", "1")
@@ -163,7 +163,7 @@ def test_flux_compile_uses_pinned_source_and_manager_target(monkeypatch, tmp_pat
     assert captured["compiled_path_override"] == str(staging)
     assert captured["force_compile"] is True
     assert captured["environment"] == {
-        "NEURON_RT_VISIBLE_CORES": "0,1,2,3",
+        "NEURON_RT_VISIBLE_CORES": "4,5,6,7",
         "NEURON_RT_NUM_CORES": "4",
         "NEURON_RT_VIRTUAL_CORE_SIZE": None,
         "NEURON_LOGICAL_NC_CONFIG": None,
@@ -172,7 +172,7 @@ def test_flux_compile_uses_pinned_source_and_manager_target(monkeypatch, tmp_pat
         "RANK": "0",
         "LOCAL_RANK": "0",
     }
-    assert os.environ["NEURON_RT_VISIBLE_CORES"] == "7"
+    assert os.environ["NEURON_RT_VISIBLE_CORES"] == "4-7"
     assert os.environ["NEURON_RT_NUM_CORES"] == "8"
     assert os.environ["NEURON_RT_VIRTUAL_CORE_SIZE"] == "2"
     assert os.environ["NEURON_LOGICAL_NC_CONFIG"] == "1"

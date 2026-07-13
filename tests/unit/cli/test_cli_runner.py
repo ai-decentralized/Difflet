@@ -72,10 +72,10 @@ def test_passes_check_true(monkeypatch):
     assert captured["check"] is True
 
 
-def test_strict_environment_overrides_conflicting_shell_values(monkeypatch):
+def test_strict_environment_preserves_inherited_visible_cores(monkeypatch):
     captured = {}
     monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
-    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "7")
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "4-7")
     monkeypatch.setenv("NEURON_RT_NUM_CORES", "8")
     monkeypatch.setenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1")
     monkeypatch.setenv("NEURON_LOGICAL_NC_CONFIG", "2")
@@ -91,7 +91,7 @@ def test_strict_environment_overrides_conflicting_shell_values(monkeypatch):
         strict_environment=True,
     )
 
-    assert captured["env"]["NEURON_RT_VISIBLE_CORES"] == "0,1,2,3"
+    assert captured["env"]["NEURON_RT_VISIBLE_CORES"] == "4,5,6,7"
     assert captured["env"]["NEURON_RT_NUM_CORES"] == "4"
     assert captured["env"]["NEURON_RT_VIRTUAL_CORE_SIZE"] == "2"
     assert "NEURON_LOGICAL_NC_CONFIG" not in captured["env"]

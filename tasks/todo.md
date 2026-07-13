@@ -559,3 +559,18 @@ HTTP disconnect injection regression (2026-07-13):
   isolated Mypy, `compileall`, and `git diff --check` pass. Repository-wide
   import-following Mypy still reports four pre-existing errors in
   `parallel_config.py` and `difflet_pipeline.py`.
+
+Inherited NeuronCore compile allocation (2026-07-13):
+- [x] Share one parser for runtime and compilation core visibility.
+- [x] Preserve nonzero inherited core assignments in strict Qwen and Flux
+  compilation while selecting only the required number of cores.
+- [x] Add local regression coverage and validate Flux on Trainium after sync.
+- Rationale: compile topology remains cacheable across physical core IDs, while
+  every compile subprocess/runtime initialization stays inside the deployment's
+  inherited core allocation.
+- Verification: 48 focused tests and 211 serving/CLI-runner tests pass locally;
+  Black, isolated Mypy, `compileall`, and `git diff --check` pass. On
+  `16.26.110.85`, 32 core/compile-env tests pass including the synthetic `4-7`
+  allocation. A real Flux `--force` compile on the host's physical `0-3` cores,
+  worker load, four-step HTTP generation, R2 upload/download, and final ready
+  heartbeat all succeeded.

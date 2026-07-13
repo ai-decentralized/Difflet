@@ -4,6 +4,8 @@ import os
 import subprocess
 import sys
 
+from difflet.common.neuron_cores import select_neuron_core_ids
+
 
 def run_stage(
     orchestrator: str,
@@ -20,7 +22,8 @@ def run_stage(
     """
     env = os.environ.copy()
     if strict_environment:
-        env["NEURON_RT_VISIBLE_CORES"] = ",".join(str(index) for index in range(num_cores))
+        visible_core_ids = select_neuron_core_ids(required_num_cores=num_cores)
+        env["NEURON_RT_VISIBLE_CORES"] = ",".join(str(core_id) for core_id in visible_core_ids)
         env["NEURON_RT_NUM_CORES"] = str(num_cores)
         if virtual_core_size is None:
             env.pop("NEURON_RT_VIRTUAL_CORE_SIZE", None)

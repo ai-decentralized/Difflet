@@ -6,6 +6,7 @@ import os
 from contextlib import contextmanager
 from pathlib import Path
 
+from difflet.common.neuron_cores import select_neuron_core_ids
 from difflet.pipeline.compile_cache import CacheSpec
 from difflet.serving.types import (
     ArtifactPublishTarget,
@@ -163,7 +164,10 @@ def _serving_compile_environment(world_size: int):
     )
     original = {name: os.environ.get(name) for name in names}
     try:
-        os.environ["NEURON_RT_VISIBLE_CORES"] = ",".join(str(index) for index in range(world_size))
+        visible_core_ids = select_neuron_core_ids(required_num_cores=world_size)
+        os.environ["NEURON_RT_VISIBLE_CORES"] = ",".join(
+            str(core_id) for core_id in visible_core_ids
+        )
         os.environ["NEURON_RT_NUM_CORES"] = str(world_size)
         os.environ.pop("NEURON_RT_VIRTUAL_CORE_SIZE", None)
         os.environ.pop("NEURON_LOGICAL_NC_CONFIG", None)
