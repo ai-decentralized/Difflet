@@ -10,7 +10,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import torch
 
 CALIBRATION_SCHEMA = "difflet-m9-teacache-calibration-v1"
 
@@ -236,15 +239,17 @@ class TeaCacheController:
         # diff branch. When the device probe supplies diff_norm directly, the
         # host copy is never read — skip the requirement so the device path can
         # avoid materializing the 63 MB mod_input tensor on host every step.
-        if diff_norm is None and self.prev_mod_input is None:
+        prev_mod_input = self.prev_mod_input
+        if diff_norm is None and prev_mod_input is None:
             return False
 
         if diff_norm is None:
             import torch
 
+            assert prev_mod_input is not None
             diff_norm_value = float(
                 torch.linalg.vector_norm(
-                    mod_input_now.detach().float().cpu() - self.prev_mod_input.float().cpu()
+                    mod_input_now.detach().float().cpu() - prev_mod_input.float().cpu()
                 ).item()
             )
         else:

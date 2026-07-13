@@ -2,19 +2,55 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Protocol, Sequence
 
+from difflet.serving.errors import invalid_extra_body
 from difflet.serving.options import CompilePolicy, DownloadPolicy
 from difflet.serving.types import (
-    DiffletGenerateOutput,
     DiffletGenerateRequest,
     ResolvedModelSource,
     ResolvedRuntimeBundle,
     ServingProfile,
-    WorkerRequestContext,
 )
+
+DEFAULT_NEURON_CORE_IDS: tuple[int, ...] = (0, 1, 2, 3)
+
+
+def resolve_available_neuron_core_ids(*, required_num_cores: int) -> tuple[int, ...]:
+    """Resolve inherited Neuron core visibility, defaulting to the four-core host."""
+
+    raw = os.environ.get("NEURON_RT_VISIBLE_CORES")
+    if raw is None or not raw.strip():
+        core_ids = DEFAULT_NEURON_CORE_IDS
+    else:
+        resolved: list[int] = []
+        for item in raw.split(","):
+            token = item.strip()
+            if not re.fullmatch(r"\d+(?:-\d+)?", token):
+                raise ValueError(
+                    "NEURON_RT_VISIBLE_CORES must contain comma-separated core IDs or ranges"
+                )
+            if "-" in token:
+                start_text, end_text = token.split("-", 1)
+                start, end = int(start_text), int(end_text)
+                if end < start:
+                    raise ValueError("NEURON_RT_VISIBLE_CORES ranges must be ascending")
+                resolved.extend(range(start, end + 1))
+            else:
+                resolved.append(int(token))
+        core_ids = tuple(resolved)
+
+    if len(core_ids) != len(set(core_ids)):
+        raise ValueError("NEURON_RT_VISIBLE_CORES must not contain duplicate core IDs")
+    if len(core_ids) < required_num_cores:
+        raise ValueError(
+            "NEURON_RT_VISIBLE_CORES does not provide enough cores: "
+            f"requires {required_num_cores}, has {len(core_ids)}"
+        )
+    return core_ids
 
 
 def resolve_hf_model_source(
@@ -86,6 +122,16 @@ class NoopServingRequestValidator:
         return None
 
 
+def validate_guidance_scale(
+    request: DiffletGenerateRequest,
+    *,
+    maximum: float,
+) -> None:
+    guidance = request.guidance_scale
+    if guidance < 0 or guidance > maximum:
+        raise invalid_extra_body(f"guidance_scale must satisfy 0 <= value <= {maximum:g}")
+
+
 def request_uses_teacache(profile: ServingProfile, num_inference_steps: int) -> bool:
     calibration = profile.teacache_calibration_data
     return bool(
@@ -93,21 +139,3 @@ def request_uses_teacache(profile: ServingProfile, num_inference_steps: int) -> 
         and calibration is not None
         and int(num_inference_steps) == int(calibration.num_steps)
     )
-
-
-class ServingModelOrchestrator(Protocol):
-    model_id: str
-    model_type: str
-    active_runtime: ResolvedRuntimeBundle | None
-
-    def load(self, runtime: ResolvedRuntimeBundle) -> None: ...
-
-    def smoke(self) -> None: ...
-
-    async def generate(
-        self,
-        request: DiffletGenerateRequest,
-        context: WorkerRequestContext,
-    ) -> DiffletGenerateOutput: ...
-
-    def shutdown(self) -> None: ...

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import io
 import logging
+import time
+from collections import OrderedDict
 from pathlib import Path
 
 from difflet.common.orchestrators import flux as flux_common
@@ -12,25 +13,41 @@ from difflet.registry import resolve_model
 from difflet.serving.artifact_manager import ArtifactPublishTarget, ImmutableArtifactManager
 from difflet.serving.errors import prompt_too_long
 from difflet.serving.options import CompilePolicy, DownloadPolicy
-from difflet.serving.orchestrators.base import request_uses_teacache, resolve_hf_model_source
+from difflet.serving.orchestrators.base import (
+    request_uses_teacache,
+    resolve_available_neuron_core_ids,
+    resolve_hf_model_source,
+    validate_guidance_scale,
+)
+from difflet.serving.engines.stage_pipeline import (
+    ErasedStageRunner,
+    ValidatedStageRunner,
+    require_exact_payload,
+    stage_result,
+)
 from difflet.serving.types import (
     ArtifactSet,
     DistributedProcessEnvironment,
     DiffletGenerateOutput,
     DiffletGenerateRequest,
+    FluxFinalPayload,
+    FluxInitialPayload,
     ParallelTopology,
     ResolvedRuntimeBundle,
     RuntimeEnvironment,
     RuntimePlan,
     ServingProfile,
+    StageExecutionResult,
+    StageInvocation,
+    StagePayload,
     StageRuntimeSpec,
     WorkerAllocationSpec,
-    WorkerRequestContext,
 )
 
 _HF_MODEL_ID = flux_common.HF_MODEL_ID
 _MODEL_TYPE = flux_common.MODEL_TYPE
 _MAX_SEQUENCE_LENGTH = flux_common.MAX_SEQUENCE_LENGTH
+_MAX_GUIDANCE_SCALE = 20.0
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +117,7 @@ class FluxServingRequestValidator:
         self._tokenizer = None
 
     def validate(self, request: DiffletGenerateRequest) -> None:
+        validate_guidance_scale(request, maximum=_MAX_GUIDANCE_SCALE)
         encoded = self._tokenizer_for_runtime()(
             request.prompt,
             padding=False,
@@ -118,101 +136,28 @@ class FluxServingRequestValidator:
         return self._tokenizer
 
 
-class FluxServingOrchestrator:
-    model_id = _HF_MODEL_ID
-    model_type = _MODEL_TYPE
+class FluxPipelineRunner:
+    def __init__(self, pipe, profile: ServingProfile) -> None:
+        self.pipe = pipe
+        self.profile = profile
 
-    def __init__(self, model_id: str = _HF_MODEL_ID) -> None:
-        self.model_id = model_id
-        self.active_runtime: ResolvedRuntimeBundle | None = None
-        self.active_profile: ServingProfile | None = None
-        self.pipe = None
-
-    def load(self, runtime: ResolvedRuntimeBundle) -> None:
-        profile = runtime.profile
-        print(f"[difflet serve] loading Flux worker profile {profile}")
-        self.active_runtime = runtime
-        self.active_profile = profile
-        binding = runtime.artifacts.require("pipeline")
-        spec = runtime.require_compile_spec("pipeline")
-        manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
-        manager.validate_binding(
-            binding,
-            validate_payload=lambda path: flux_common.validate_compiled_artifact(
-                runtime.source, profile, spec, path
-            ),
-        )
-        self.pipe = flux_common.build_pipeline(
-            self.model_id,
-            profile,
-            load=True,
-            skip_compile=True,
-            model_path_override=runtime.source.pinned_model_path,
-            resolved_source_id=runtime.source.resolved_source_id,
-            compiled_path_override=str(binding.path),
-        )
-        print("[difflet serve] Flux worker loaded")
-
-    def smoke(self) -> None:
-        if self.pipe is None:
-            raise RuntimeError("Flux worker is not loaded")
-        if self.active_profile is None:
-            raise RuntimeError("Flux serving profile is not loaded")
-        profile = self.active_profile
-        print("[difflet serve] running Flux generation smoke")
-        request = DiffletGenerateRequest(
-            request_id="startup-smoke",
-            model=self.model_id,
-            prompt="a small red square",
-            height=profile.height,
-            width=profile.width,
-            num_inference_steps=(
-                profile.teacache_calibration_data.num_steps
-                if profile.teacache_calibration_data is not None
-                else 4
-            ),
-            guidance_scale=1.0,
-            seed=0,
-        )
-        output = asyncio.run(
-            self.generate(request, WorkerRequestContext.with_timeout("startup-smoke", 300.0))
-        )
-        if not output.data:
-            raise RuntimeError("Flux smoke produced empty output")
-        from PIL import Image
-
-        with Image.open(io.BytesIO(output.data)) as image:
-            if image.size != (profile.width, profile.height):
-                raise RuntimeError(
-                    "Flux smoke output shape mismatch: "
-                    f"expected {profile.width}x{profile.height}, "
-                    f"got {image.width}x{image.height}"
-                )
-        print("[difflet serve] Flux generation smoke passed")
-
-    async def generate(
+    async def execute(
         self,
-        request: DiffletGenerateRequest,
-        context: WorkerRequestContext,
-    ) -> DiffletGenerateOutput:
+        invocation: StageInvocation[FluxInitialPayload],
+    ) -> StageExecutionResult[FluxFinalPayload]:
         import torch
 
-        if self.pipe is None:
-            raise RuntimeError("Flux worker is not loaded")
-        if self.active_profile is None:
-            raise RuntimeError("Flux serving profile is not loaded")
+        started = time.monotonic()
+        request = invocation.request
+        context = invocation.context
         context.cancellation.throw_if_cancelled()
-        context.report_stage("pipeline")
-        use_teacache = request_uses_teacache(
-            self.active_profile,
-            request.num_inference_steps,
-        )
-        if self.active_profile.teacache_speedup is not None and not use_teacache:
+        use_teacache = request_uses_teacache(self.profile, request.num_inference_steps)
+        if self.profile.teacache_speedup is not None and not use_teacache:
             logger.info(
                 "Flux request uses baseline inference fallback_reason=step_mismatch "
                 "request_steps=%s calibration_steps=%s",
                 request.num_inference_steps,
-                getattr(self.active_profile.teacache_calibration_data, "num_steps", None),
+                getattr(self.profile.teacache_calibration_data, "num_steps", None),
             )
         output = self.pipe(
             prompt=request.prompt,
@@ -227,12 +172,117 @@ class FluxServingOrchestrator:
         image = output.images[0]
         buf = io.BytesIO()
         image.save(buf, format="PNG")
-        return DiffletGenerateOutput(
-            data=buf.getvalue(), mime_type="image/png", output_format="png"
+        return stage_result(
+            FluxFinalPayload(
+                DiffletGenerateOutput(
+                    data=buf.getvalue(), mime_type="image/png", output_format="png"
+                )
+            ),
+            started_monotonic=started,
         )
 
-    def shutdown(self) -> None:
+    async def shutdown(self) -> None:
         self.pipe = None
+
+
+class FluxServingStageAdapter:
+    model_id = _HF_MODEL_ID
+    model_type = _MODEL_TYPE
+
+    def __init__(self, model_id: str = _HF_MODEL_ID) -> None:
+        self.model_id = model_id
+        self.active_runtime: ResolvedRuntimeBundle | None = None
+        self.active_profile: ServingProfile | None = None
+        self._untransferred_pipe = None
+
+    async def create_loaded_runners(
+        self,
+        runtime: ResolvedRuntimeBundle,
+    ) -> OrderedDict[str, ErasedStageRunner]:
+        profile = runtime.profile
+        print(f"[difflet serve] loading Flux worker profile {profile}")
+        self.active_runtime = runtime
+        self.active_profile = profile
+        binding = runtime.artifacts.require("pipeline")
+        spec = runtime.require_compile_spec("pipeline")
+        manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
+        manager.validate_binding(
+            binding,
+            validate_payload=lambda path: flux_common.validate_compiled_artifact(
+                runtime.source, profile, spec, path
+            ),
+        )
+        pipe = flux_common.build_pipeline(
+            self.model_id,
+            profile,
+            load=True,
+            skip_compile=True,
+            model_path_override=runtime.source.pinned_model_path,
+            resolved_source_id=runtime.source.resolved_source_id,
+            compiled_path_override=str(binding.path),
+        )
+        print("[difflet serve] Flux worker loaded")
+        self._untransferred_pipe = pipe
+        runner = ValidatedStageRunner(
+            FluxPipelineRunner(pipe, profile),
+            FluxInitialPayload,
+            FluxFinalPayload,
+        )
+        self._untransferred_pipe = None
+        return OrderedDict((("pipeline", runner),))
+
+    def initial_payload(self, request: DiffletGenerateRequest) -> FluxInitialPayload:
+        return FluxInitialPayload()
+
+    def finalize(self, payload: StagePayload) -> DiffletGenerateOutput:
+        return require_exact_payload(
+            payload,
+            FluxFinalPayload,
+            boundary="Flux final payload",
+        ).output
+
+    def smoke_request(self) -> DiffletGenerateRequest:
+        if self.active_profile is None:
+            raise RuntimeError("Flux serving profile is not loaded")
+        profile = self.active_profile
+        print("[difflet serve] running Flux generation smoke")
+        return DiffletGenerateRequest(
+            request_id="startup-smoke",
+            model=self.model_id,
+            prompt="a small red square",
+            height=profile.height,
+            width=profile.width,
+            num_inference_steps=(
+                profile.teacache_calibration_data.num_steps
+                if profile.teacache_calibration_data is not None
+                else 4
+            ),
+            guidance_scale=1.0,
+            seed=0,
+        )
+
+    def validate_smoke_output(self, output: DiffletGenerateOutput) -> None:
+        if self.active_profile is None:
+            raise RuntimeError("Flux serving profile is not loaded")
+        profile = self.active_profile
+        if not output.data:
+            raise RuntimeError("Flux smoke produced empty output")
+        from PIL import Image
+
+        with Image.open(io.BytesIO(output.data)) as image:
+            if image.size != (profile.width, profile.height):
+                raise RuntimeError(
+                    "Flux smoke output shape mismatch: "
+                    f"expected {profile.width}x{profile.height}, "
+                    f"got {image.width}x{image.height}"
+                )
+        print("[difflet serve] Flux generation smoke passed")
+
+    def reset_request_state(self, outcome: str) -> None:
+        return None
+
+    async def shutdown(self) -> None:
+        self._untransferred_pipe = None
         self.active_profile = None
         self.active_runtime = None
 
@@ -247,7 +297,7 @@ def _runtime_plan(profile: ServingProfile, pipeline, specs) -> RuntimePlan:
     world_size = profile.world_size
     distributed = DistributedProcessEnvironment(1, 1, 0, 0)
     environment = RuntimeEnvironment(
-        available_core_ids=tuple(range(world_size)),
+        available_core_ids=resolve_available_neuron_core_ids(required_num_cores=world_size),
         num_cores_override=None,
         virtual_core_size_override=None,
         logical_nc_config_override=None,

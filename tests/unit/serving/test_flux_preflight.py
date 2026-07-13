@@ -14,14 +14,23 @@ import pytest
 from difflet.serving.types import (
     ArtifactPublishTarget,
     DiffletGenerateRequest,
+    FluxInitialPayload,
     ResolvedModelSource,
     ServingProfile,
+    StageDefinition,
+    StageInvocation,
     WorkerRequestContext,
 )
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.pipeline.teacache import TeaCacheCalibration
 from difflet.common.orchestrators import flux as flux_common
-from difflet.serving.orchestrators.flux import FluxServingOrchestrator
+from difflet.serving.errors import DiffletServingError
+from difflet.serving.orchestrators.flux import (
+    FluxPipelineRunner,
+    FluxServingRequestValidator,
+    FluxServingStageAdapter,
+    _runtime_plan,
+)
 
 
 def test_flux_build_pipeline_forwards_adaptive_teacache(monkeypatch):
@@ -54,6 +63,48 @@ def test_flux_build_pipeline_forwards_adaptive_teacache(monkeypatch):
     assert captured["parallel"].sp_enabled is True
     assert captured["teacache_speedup"] == 1.5
     assert captured["teacache_calibration_path"] == "/tmp/flux-calibration.json"
+
+
+def test_flux_runtime_plan_preserves_inherited_core_visibility(monkeypatch):
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "4-7")
+    profile = ServingProfile(
+        model_id="black-forest-labs/FLUX.1-dev",
+        model_type="flux",
+        height=1024,
+        width=1024,
+        num_frames=None,
+        parallel=DiffletParallelConfig(tp_degree=4),
+    )
+    pipeline = SimpleNamespace(stages=(SimpleNamespace(stage_id="pipeline"),))
+    spec = SimpleNamespace(artifact_id="pipeline", identity=SimpleNamespace(digest="digest"))
+
+    plan = _runtime_plan(profile, pipeline, (spec,))
+
+    assert plan.environment.available_core_ids == (4, 5, 6, 7)
+
+
+@pytest.mark.parametrize("guidance", [-1.0, 20.0001, 1e308])
+def test_flux_request_validator_rejects_guidance_before_tokenization(guidance):
+    validator = object.__new__(FluxServingRequestValidator)
+    validator._tokenizer = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("invalid guidance must be rejected before tokenization")
+    )
+    request = DiffletGenerateRequest(
+        "request",
+        "black-forest-labs/FLUX.1-dev",
+        "prompt",
+        1024,
+        1024,
+        28,
+        guidance,
+        0,
+    )
+
+    with pytest.raises(DiffletServingError) as exc:
+        validator.validate(request)
+
+    assert exc.value.code == "invalid_extra_body"
+    assert "0 <= value <= 20" in exc.value.message
 
 
 def test_flux_compile_uses_pinned_source_and_manager_target(monkeypatch, tmp_path):
@@ -193,9 +244,7 @@ def test_flux_serving_selects_teacache_per_request_steps(monkeypatch, steps, exp
             threshold=0.1,
         ),
     )
-    orchestrator = FluxServingOrchestrator()
-    orchestrator.active_profile = profile
-    orchestrator.pipe = pipe
+    runner = FluxPipelineRunner(pipe, profile)
     request = DiffletGenerateRequest(
         "request",
         profile.model_id,
@@ -207,7 +256,16 @@ def test_flux_serving_selects_teacache_per_request_steps(monkeypatch, steps, exp
         0,
     )
 
-    asyncio.run(orchestrator.generate(request, WorkerRequestContext.with_timeout("request", 1.0)))
+    asyncio.run(
+        runner.execute(
+            StageInvocation(
+                request=request,
+                stage=StageDefinition("pipeline", "opaque_pipeline", "pipeline", final_output=True),
+                input=FluxInitialPayload(),
+                context=WorkerRequestContext.with_timeout("request", 1.0),
+            )
+        )
+    )
 
     assert captured["teacache_enabled"] is expected
 
@@ -247,11 +305,20 @@ def test_flux_smoke_runs_real_inference_and_uses_profile_steps(monkeypatch, adap
         return SimpleNamespace(images=[Image.new("RGB", (profile.width, profile.height))])
 
     monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace(Generator=_Generator))
-    orchestrator = FluxServingOrchestrator()
-    orchestrator.active_profile = profile
-    orchestrator.pipe = pipe
-
-    orchestrator.smoke()
+    adapter = FluxServingStageAdapter()
+    adapter.active_profile = profile
+    request = adapter.smoke_request()
+    result = asyncio.run(
+        FluxPipelineRunner(pipe, profile).execute(
+            StageInvocation(
+                request=request,
+                stage=StageDefinition("pipeline", "opaque_pipeline", "pipeline", final_output=True),
+                input=FluxInitialPayload(),
+                context=WorkerRequestContext.with_timeout("startup-smoke", 1.0),
+            )
+        )
+    )
+    adapter.validate_smoke_output(result.output.output)
 
     assert captured["num_inference_steps"] == (28 if adaptive else 4)
     assert captured["teacache_enabled"] is adaptive

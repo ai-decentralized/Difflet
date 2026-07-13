@@ -30,6 +30,6 @@ def serving_metadata() -> ServingModelMetadata:
         artifact_preparer_factory=(
             "difflet.serving.orchestrators.flux:FluxServingArtifactPreparer"
         ),
-        orchestrator_factory="difflet.serving.orchestrators.flux:FluxServingOrchestrator",
+        orchestrator_factory="difflet.serving.orchestrators.flux:FluxServingStageAdapter",
         request_validator_factory="difflet.serving.orchestrators.flux:FluxServingRequestValidator",
     )

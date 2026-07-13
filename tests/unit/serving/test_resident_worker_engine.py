@@ -219,6 +219,30 @@ def test_worker_environment_clears_unspecified_optional_neuron_settings(
     assert "NEURON_LOGICAL_NC_CONFIG" not in os.environ
 
 
+def test_worker_environment_applies_partitioned_core_assignment(preserve_worker_environment):
+    runtime = _runtime()
+    environment = replace(runtime.runtime_plan.environment, available_core_ids=(4, 5, 6, 7))
+    allocation = replace(
+        runtime.runtime_plan.allocations[0],
+        requested_num_cores=4,
+        effective_num_cores=4,
+        world_size=4,
+    )
+    runtime = replace(
+        runtime,
+        runtime_plan=replace(
+            runtime.runtime_plan,
+            environment=environment,
+            allocations=(allocation,),
+        ),
+    )
+
+    _apply_worker_runtime_environment(runtime)
+
+    assert os.environ["NEURON_RT_VISIBLE_CORES"] == "4,5,6,7"
+    assert os.environ["NEURON_RT_NUM_CORES"] == "4"
+
+
 @pytest.mark.parametrize(
     "runtime,error",
     [
@@ -479,21 +503,42 @@ def test_non_allowlisted_worker_reply_is_sanitized_defensively():
     assert error.message == "Internal model execution error"
 
 
+@pytest.mark.parametrize("interval", [0, 4.99, 120.01, float("nan"), float("inf"), -float("inf")])
+def test_resident_worker_config_rejects_invalid_heartbeat_interval(interval):
+    with pytest.raises(ValueError, match="between 5 and 120 seconds inclusive"):
+        ResidentWorkerConfig(worker_heartbeat_interval=interval)
+
+
+@pytest.mark.parametrize("interval", [5, 120])
+def test_resident_worker_config_accepts_heartbeat_boundaries(interval):
+    assert (
+        ResidentWorkerConfig(worker_heartbeat_interval=interval).worker_heartbeat_interval
+        == interval
+    )
+
+
 def test_worker_heartbeat_logs_independently_of_reply_queue(caplog):
     async def _run():
         engine = ResidentWorkerServingEngine(
             runtime=_runtime(),
             orchestrator_factory="tests.unit.serving.fake_worker:FakeServingOrchestrator",
             config=ResidentWorkerConfig(
-                request_timeout=5,
-                worker_restart_timeout=5,
-                worker_heartbeat_interval=0.02,
+                request_timeout=10,
+                worker_restart_timeout=10,
+                worker_heartbeat_interval=5,
             ),
         )
         await engine.start()
         try:
-            await engine.generate(_request("heartbeat", "sleep:0.08"))
-            await asyncio.sleep(0.04)
+            running = asyncio.create_task(
+                engine.generate(_request("heartbeat-running", "sleep:5.1"))
+            )
+            while engine._pending < 1:
+                await asyncio.sleep(0)
+            queued = asyncio.create_task(engine.generate(_request("heartbeat-queued", "hello")))
+            while engine._pending < 2:
+                await asyncio.sleep(0)
+            await asyncio.gather(running, queued)
         finally:
             await engine.shutdown()
 
@@ -506,3 +551,10 @@ def test_worker_heartbeat_logs_independently_of_reply_queue(caplog):
     assert heartbeats
     assert any(event["state"] == "busy" for event in heartbeats)
     assert any(event["stage"] == "pipeline" for event in heartbeats)
+    busy_with_queue = next(
+        event for event in heartbeats if event["state"] == "busy" and event["queued_requests"] == 1
+    )
+    assert busy_with_queue["running_requests"] == 1
+    assert busy_with_queue["pending_requests"] == 2
+    assert busy_with_queue["request_capacity"] == 9
+    assert "running_requests=1 queued_requests=1 pending_requests=2 capacity=9" in caplog.text

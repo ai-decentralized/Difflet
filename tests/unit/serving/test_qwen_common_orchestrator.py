@@ -13,23 +13,66 @@ import pytest
 from difflet.common.orchestrators import qwen_image
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.pipeline.teacache import TeaCacheCalibration
+from difflet.serving.errors import DiffletServingError
 from difflet.serving.types import (
     ArtifactPublishTarget,
-    DiffletGenerateOutput,
     DiffletGenerateRequest,
-    PipelineDefinition,
-    QwenGenerateStageOutputs,
-    QwenTextStageOutputs,
-    QwenVaeStageOutputs,
     ResolvedModelSource,
     ServingProfile,
-    StageDefinition,
-    WorkerRequestContext,
 )
 from difflet.serving.orchestrators.qwen_image import (
-    QwenImageServingOrchestrator,
+    QwenImageServingRequestValidator,
+    QwenImageServingStageAdapter,
+    _runtime_plan,
     _packed_latent_grid,
 )
+
+
+@pytest.mark.parametrize("guidance", [-1.0, 20.0001, 1e308])
+def test_qwen_request_validator_rejects_guidance_before_tokenization(guidance):
+    validator = object.__new__(QwenImageServingRequestValidator)
+    validator._tokenizer = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("invalid guidance must be rejected before tokenization")
+    )
+    request = DiffletGenerateRequest(
+        "request",
+        "Qwen/Qwen-Image",
+        "prompt",
+        1024,
+        1024,
+        4,
+        guidance,
+        0,
+    )
+
+    with pytest.raises(DiffletServingError) as exc:
+        validator.validate(request)
+
+    assert exc.value.code == "invalid_extra_body"
+    assert "0 <= value <= 20" in exc.value.message
+
+
+def test_qwen_runtime_plan_preserves_inherited_core_visibility(monkeypatch):
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "4-7")
+    profile = ServingProfile(
+        model_id="Qwen/Qwen-Image",
+        model_type="qwen_image",
+        height=1024,
+        width=1024,
+        num_frames=None,
+        parallel=DiffletParallelConfig(tp_degree=4),
+    )
+    pipeline = SimpleNamespace(
+        stages=tuple(SimpleNamespace(stage_id=stage) for stage in ("text", "generate", "vae"))
+    )
+    specs = tuple(
+        SimpleNamespace(artifact_id=stage, identity=SimpleNamespace(digest=stage))
+        for stage in ("text", "generate", "vae")
+    )
+
+    plan = _runtime_plan(profile, pipeline, specs)
+
+    assert plan.environment.available_core_ids == (4, 5, 6, 7)
 
 
 def _profile(
@@ -351,7 +394,7 @@ def test_qwen_serving_selects_teacache_per_request_steps(monkeypatch, tmp_path, 
             linspace=lambda start, stop, count: SimpleNamespace(tolist=lambda: [start] * count)
         ),
     )
-    orchestrator = QwenImageServingOrchestrator()
+    orchestrator = QwenImageServingStageAdapter()
     orchestrator.active_profile = profile
     orchestrator.denoise_app = SimpleNamespace(pipeline=_Pipeline())
     request = DiffletGenerateRequest(
@@ -371,42 +414,3 @@ def test_qwen_serving_selects_teacache_per_request_steps(monkeypatch, tmp_path, 
     )
 
     assert captured["teacache_enabled"] is expected
-
-
-def test_qwen_generate_traverses_frozen_pipeline_and_returns_final_output():
-    orchestrator = QwenImageServingOrchestrator()
-    orchestrator.active_runtime = SimpleNamespace(
-        pipeline_definition=PipelineDefinition(
-            model_type="qwen_image",
-            stages=(
-                StageDefinition("text", "extracted", "prompt_encoder", runner_factory="x"),
-                StageDefinition("generate", "extracted", "denoiser", runner_factory="x"),
-                StageDefinition(
-                    "vae", "extracted", "decoder", final_output=True, runner_factory="x"
-                ),
-            ),
-        )
-    )
-    calls = []
-
-    class _Runner:
-        def __init__(self, stage):
-            self.stage = stage
-
-        def execute(self, value, request, context):
-            calls.append(self.stage)
-            if self.stage == "text":
-                return QwenTextStageOutputs("hidden", "mask")
-            if self.stage == "generate":
-                return QwenGenerateStageOutputs("latents")
-            return QwenVaeStageOutputs(DiffletGenerateOutput(b"png", "image/png"))
-
-    orchestrator.runners = {stage: _Runner(stage) for stage in ("text", "generate", "vae")}
-    request = DiffletGenerateRequest("id", "Qwen/Qwen-Image", "prompt", 64, 64, 1, 1.0, 0)
-
-    output = asyncio.run(
-        orchestrator.generate(request, WorkerRequestContext.with_timeout("id", 1.0))
-    )
-
-    assert calls == ["text", "generate", "vae"]
-    assert output.data == b"png"

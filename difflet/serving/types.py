@@ -6,9 +6,10 @@ import asyncio
 import hashlib
 import json
 import time
+from abc import ABC
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 
@@ -247,36 +248,65 @@ class DiffletGenerateOutput:
     output_format: str = "png"
 
 
-@dataclass(frozen=True)
-class QwenTextStageInputs:
+class StagePayload(ABC):
+    """Nominal base for logical values passed between serving stages."""
+
+    __slots__ = ()
+
+
+InputPayloadT = TypeVar("InputPayloadT", bound=StagePayload)
+OutputPayloadT = TypeVar("OutputPayloadT", bound=StagePayload)
+
+
+@dataclass(frozen=True, slots=True)
+class QwenInitialPayload(StagePayload):
     pass
 
 
-@dataclass(frozen=True)
-class QwenTextStageOutputs:
+@dataclass(frozen=True, slots=True)
+class QwenTextPayload(StagePayload):
     encoder_hidden_states: Any
     encoder_hidden_states_mask: Any
 
 
-@dataclass(frozen=True)
-class QwenGenerateStageInputs:
-    encoder_hidden_states: Any
-    encoder_hidden_states_mask: Any
-
-
-@dataclass(frozen=True)
-class QwenGenerateStageOutputs:
+@dataclass(frozen=True, slots=True)
+class QwenLatentPayload(StagePayload):
     packed_latents: Any
 
 
-@dataclass(frozen=True)
-class QwenVaeStageInputs:
-    packed_latents: Any
-
-
-@dataclass(frozen=True)
-class QwenVaeStageOutputs:
+@dataclass(frozen=True, slots=True)
+class QwenFinalPayload(StagePayload):
     output: DiffletGenerateOutput
+
+
+@dataclass(frozen=True, slots=True)
+class FluxInitialPayload(StagePayload):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class FluxFinalPayload(StagePayload):
+    output: DiffletGenerateOutput
+
+
+@dataclass(frozen=True, slots=True)
+class StageInvocation(Generic[InputPayloadT]):
+    request: DiffletGenerateRequest
+    stage: StageDefinition
+    input: InputPayloadT
+    context: "WorkerRequestContext"
+
+
+@dataclass(frozen=True, slots=True)
+class StageExecutionMetadata:
+    started_monotonic: float
+    finished_monotonic: float
+
+
+@dataclass(frozen=True, slots=True)
+class StageExecutionResult(Generic[OutputPayloadT]):
+    output: OutputPayloadT
+    metadata: StageExecutionMetadata
 
 
 @dataclass(frozen=True)

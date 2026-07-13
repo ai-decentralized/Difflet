@@ -48,7 +48,7 @@ def serving_metadata() -> ServingModelMetadata:
             "difflet.serving.orchestrators.qwen_image:" "QwenImageServingArtifactPreparer"
         ),
         orchestrator_factory=(
-            "difflet.serving.orchestrators.qwen_image:" "QwenImageServingOrchestrator"
+            "difflet.serving.orchestrators.qwen_image:" "QwenImageServingStageAdapter"
         ),
         request_validator_factory=(
             "difflet.serving.orchestrators.qwen_image:" "QwenImageServingRequestValidator"

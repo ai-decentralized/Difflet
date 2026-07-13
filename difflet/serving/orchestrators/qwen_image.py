@@ -2,43 +2,55 @@
 
 from __future__ import annotations
 
-import asyncio
 import io
 import logging
+import time
+from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from difflet.common.orchestrators import qwen_image as qwen_common
-from difflet.serving.artifact_manager import ArtifactPublishTarget
+from difflet.serving.artifact_manager import ArtifactPublishTarget, ImmutableArtifactManager
+from difflet.serving.engines.stage_pipeline import (
+    ErasedStageRunner,
+    ValidatedStageRunner,
+    require_exact_payload,
+    stage_result,
+)
 from difflet.serving.errors import prompt_too_long
-from difflet.serving.artifact_manager import ImmutableArtifactManager
 from difflet.serving.options import CompilePolicy, DownloadPolicy
-from difflet.serving.orchestrators.base import request_uses_teacache, resolve_hf_model_source
+from difflet.serving.orchestrators.base import (
+    request_uses_teacache,
+    resolve_available_neuron_core_ids,
+    resolve_hf_model_source,
+    validate_guidance_scale,
+)
 from difflet.serving.types import (
     ArtifactSet,
     DistributedProcessEnvironment,
     DiffletGenerateOutput,
     DiffletGenerateRequest,
     ParallelTopology,
-    QwenGenerateStageInputs,
-    QwenGenerateStageOutputs,
-    QwenTextStageInputs,
-    QwenTextStageOutputs,
-    QwenVaeStageInputs,
-    QwenVaeStageOutputs,
+    QwenFinalPayload,
+    QwenInitialPayload,
+    QwenLatentPayload,
+    QwenTextPayload,
     ResolvedRuntimeBundle,
     RuntimeEnvironment,
     RuntimePlan,
     ServingProfile,
     StageRuntimeSpec,
     WorkerAllocationSpec,
-    WorkerRequestContext,
+    StageExecutionResult,
+    StageInvocation,
+    StagePayload,
 )
 
 _HF_MODEL_ID = "Qwen/Qwen-Image"
 _MODEL_TYPE = "qwen_image"
 _ENC_SEQ = qwen_common.ENC_SEQ
 _TEXT_SEQ_LEN = qwen_common.TEXT_SEQ_LEN
+_MAX_GUIDANCE_SCALE = 20.0
 _QWEN_TEMPLATE = (
     "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, "
     "quantity, text, spatial relationships of the objects and background:<|im_end|>\n"
@@ -49,75 +61,78 @@ _QWEN_DROP_IDX = 34
 logger = logging.getLogger(__name__)
 
 
-class _QwenStageRunner(Protocol):
-    def execute(
-        self,
-        inputs: object,
-        request: DiffletGenerateRequest,
-        context: WorkerRequestContext,
-    ) -> object: ...
-
-
 class QwenTextStageRunner:
-    def __init__(self, orchestrator: "QwenImageServingOrchestrator") -> None:
-        self.orchestrator = orchestrator
+    def __init__(self, adapter: "QwenImageServingStageAdapter") -> None:
+        self.adapter = adapter
 
-    def execute(
+    async def execute(
         self,
-        inputs: QwenTextStageInputs,
-        request: DiffletGenerateRequest,
-        context: WorkerRequestContext,
-    ) -> QwenTextStageOutputs:
-        if not isinstance(inputs, QwenTextStageInputs):
-            raise TypeError("Qwen text stage received invalid input")
-        values = self.orchestrator._encode_prompt(request.prompt)
-        return QwenTextStageOutputs(
-            encoder_hidden_states=values["encoder_hidden_states"],
-            encoder_hidden_states_mask=values["encoder_hidden_states_mask"],
+        invocation: StageInvocation[QwenInitialPayload],
+    ) -> StageExecutionResult[QwenTextPayload]:
+        started = time.monotonic()
+        values = self.adapter._encode_prompt(invocation.request.prompt)
+        return stage_result(
+            QwenTextPayload(
+                encoder_hidden_states=values["encoder_hidden_states"],
+                encoder_hidden_states_mask=values["encoder_hidden_states_mask"],
+            ),
+            started_monotonic=started,
         )
+
+    async def shutdown(self) -> None:
+        self.adapter.text_app = None
+        self.adapter.tokenizer = None
 
 
 class QwenGenerateStageRunner:
-    def __init__(self, orchestrator: "QwenImageServingOrchestrator") -> None:
-        self.orchestrator = orchestrator
+    def __init__(self, adapter: "QwenImageServingStageAdapter") -> None:
+        self.adapter = adapter
 
-    def execute(
+    async def execute(
         self,
-        inputs: QwenGenerateStageInputs,
-        request: DiffletGenerateRequest,
-        context: WorkerRequestContext,
-    ) -> QwenGenerateStageOutputs:
-        if not isinstance(inputs, QwenGenerateStageInputs):
-            raise TypeError("Qwen generate stage received invalid input")
-        packed_latents = self.orchestrator._denoise(
+        invocation: StageInvocation[QwenTextPayload],
+    ) -> StageExecutionResult[QwenLatentPayload]:
+        started = time.monotonic()
+        inputs = invocation.input
+        packed_latents = self.adapter._denoise(
             {
                 "encoder_hidden_states": inputs.encoder_hidden_states,
                 "encoder_hidden_states_mask": inputs.encoder_hidden_states_mask,
             },
-            request,
+            invocation.request,
         )
-        return QwenGenerateStageOutputs(packed_latents=packed_latents)
+        return stage_result(
+            QwenLatentPayload(packed_latents=packed_latents),
+            started_monotonic=started,
+        )
+
+    async def shutdown(self) -> None:
+        self.adapter.denoise_app = None
 
 
 class QwenVaeStageRunner:
-    def __init__(self, orchestrator: "QwenImageServingOrchestrator") -> None:
-        self.orchestrator = orchestrator
+    def __init__(self, adapter: "QwenImageServingStageAdapter") -> None:
+        self.adapter = adapter
 
-    def execute(
+    async def execute(
         self,
-        inputs: QwenVaeStageInputs,
-        request: DiffletGenerateRequest,
-        context: WorkerRequestContext,
-    ) -> QwenVaeStageOutputs:
-        if not isinstance(inputs, QwenVaeStageInputs):
-            raise TypeError("Qwen VAE stage received invalid input")
-        return QwenVaeStageOutputs(
-            output=DiffletGenerateOutput(
-                data=self.orchestrator._decode(inputs.packed_latents),
-                mime_type="image/png",
-                output_format="png",
-            )
+        invocation: StageInvocation[QwenLatentPayload],
+    ) -> StageExecutionResult[QwenFinalPayload]:
+        started = time.monotonic()
+        return stage_result(
+            QwenFinalPayload(
+                output=DiffletGenerateOutput(
+                    data=self.adapter._decode(invocation.input.packed_latents),
+                    mime_type="image/png",
+                    output_format="png",
+                )
+            ),
+            started_monotonic=started,
         )
+
+    async def shutdown(self) -> None:
+        self.adapter.vae_app = None
+        self.adapter.vae_config = None
 
 
 class QwenImageServingArtifactPreparer:
@@ -183,6 +198,7 @@ class QwenImageServingRequestValidator:
         self._tokenizer = None
 
     def validate(self, request: DiffletGenerateRequest) -> None:
+        validate_guidance_scale(request, maximum=_MAX_GUIDANCE_SCALE)
         encoded = self._tokenizer_for_runtime()(
             _QWEN_TEMPLATE.format(request.prompt),
             padding=False,
@@ -202,7 +218,7 @@ class QwenImageServingRequestValidator:
         return self._tokenizer
 
 
-class QwenImageServingOrchestrator:
+class QwenImageServingStageAdapter:
     model_id = _HF_MODEL_ID
     model_type = _MODEL_TYPE
 
@@ -216,13 +232,12 @@ class QwenImageServingOrchestrator:
         self.denoise_app: Any = None
         self.vae_app: Any = None
         self.vae_config: Any = None
-        self.runners: dict[str, _QwenStageRunner] = {
-            "text": QwenTextStageRunner(self),
-            "generate": QwenGenerateStageRunner(self),
-            "vae": QwenVaeStageRunner(self),
-        }
+        self._runner_ownership_transferred = False
 
-    def load(self, runtime: ResolvedRuntimeBundle) -> None:
+    async def create_loaded_runners(
+        self,
+        runtime: ResolvedRuntimeBundle,
+    ) -> OrderedDict[str, ErasedStageRunner]:
         profile = runtime.profile
         if profile.parallel.cp_degree != 1:
             raise RuntimeError("Qwen-Image P0 shared-worker serving requires cp_degree=1")
@@ -247,14 +262,48 @@ class QwenImageServingOrchestrator:
         print("[difflet serve] loading Qwen decoder stage")
         self._load_vae_stage(profile)
         print("[difflet serve] Qwen shared-worker co-load completed")
+        runners: OrderedDict[str, ErasedStageRunner] = OrderedDict(
+            (
+                (
+                    "text",
+                    ValidatedStageRunner(
+                        QwenTextStageRunner(self), QwenInitialPayload, QwenTextPayload
+                    ),
+                ),
+                (
+                    "generate",
+                    ValidatedStageRunner(
+                        QwenGenerateStageRunner(self), QwenTextPayload, QwenLatentPayload
+                    ),
+                ),
+                (
+                    "vae",
+                    ValidatedStageRunner(
+                        QwenVaeStageRunner(self), QwenLatentPayload, QwenFinalPayload
+                    ),
+                ),
+            )
+        )
+        self._runner_ownership_transferred = True
+        return runners
 
-    def smoke(self) -> None:
+    def initial_payload(self, request: DiffletGenerateRequest) -> QwenInitialPayload:
+        return QwenInitialPayload()
+
+    def finalize(self, payload: StagePayload) -> DiffletGenerateOutput:
+        return require_exact_payload(
+            payload,
+            QwenFinalPayload,
+            boundary="Qwen final payload",
+        ).output
+
+    def smoke_request(self) -> DiffletGenerateRequest:
         if not (self.text_app and self.tokenizer and self.denoise_app and self.vae_app):
             raise RuntimeError("Qwen shared-worker load did not initialize all stages")
-        assert self.active_profile is not None
-        print("[difflet serve] running Qwen shared-worker generation smoke")
+        if self.active_profile is None:
+            raise RuntimeError("Qwen serving profile is not loaded")
         profile = self.active_profile
-        request = DiffletGenerateRequest(
+        return DiffletGenerateRequest(
             request_id="startup-smoke",
             model=self.model_id,
             prompt="a small red square",
@@ -268,55 +317,26 @@ class QwenImageServingOrchestrator:
             guidance_scale=1.0,
             seed=0,
         )
-        context = WorkerRequestContext.with_timeout("startup-smoke", 300.0)
-        output = asyncio.run(self.generate(request, context))
+
+    def validate_smoke_output(self, output: DiffletGenerateOutput) -> None:
         if not output.data:
             raise RuntimeError("Qwen shared-worker smoke produced empty output")
         print("[difflet serve] Qwen shared-worker generation smoke passed")
 
-    async def generate(
-        self,
-        request: DiffletGenerateRequest,
-        context: WorkerRequestContext,
-    ) -> DiffletGenerateOutput:
-        if self.active_runtime is None:
-            raise RuntimeError("Qwen runtime is not loaded")
-        value = QwenTextStageInputs()
-        stages = self.active_runtime.pipeline_definition.stages
-        for index, stage in enumerate(stages):
-            if stage.kind != "extracted":
-                raise RuntimeError(f"Qwen stage {stage.stage_id!r} must be extracted")
-            context.cancellation.throw_if_cancelled()
-            context.report_stage(stage.stage_id)
-            try:
-                runner = self.runners[stage.stage_id]
-            except KeyError as exc:
-                raise RuntimeError(f"missing Qwen runner for stage {stage.stage_id!r}") from exc
-            output = runner.execute(value, request, context)
-            context.cancellation.throw_if_cancelled()
-            if stage.final_output:
-                if index != len(stages) - 1 or not isinstance(output, QwenVaeStageOutputs):
-                    raise RuntimeError("Qwen final stage contract is invalid")
-                return output.output
-            if isinstance(output, QwenTextStageOutputs):
-                value = QwenGenerateStageInputs(
-                    output.encoder_hidden_states,
-                    output.encoder_hidden_states_mask,
-                )
-            elif isinstance(output, QwenGenerateStageOutputs):
-                value = QwenVaeStageInputs(output.packed_latents)
-            else:
-                raise RuntimeError(f"unsupported Qwen stage output from {stage.stage_id!r}")
-        raise RuntimeError("Qwen pipeline has no final output stage")
+    def reset_request_state(self, outcome: str) -> None:
+        return None
 
-    def shutdown(self) -> None:
-        self.text_app = None
-        self.tokenizer = None
-        self.denoise_app = None
-        self.vae_app = None
+    async def shutdown(self) -> None:
+        if not self._runner_ownership_transferred:
+            self.text_app = None
+            self.tokenizer = None
+            self.denoise_app = None
+            self.vae_app = None
         self.vae_config = None
         self.active_profile = None
         self.active_runtime = None
+        self.model_dir = None
+        self._runner_ownership_transferred = False
 
     def _load_text_stage(self, profile: ServingProfile) -> None:
         import torch
@@ -529,7 +549,7 @@ def _runtime_plan(profile: ServingProfile, pipeline, specs) -> RuntimePlan:
     world_size = profile.world_size
     distributed = DistributedProcessEnvironment(1, 1, 0, 0)
     environment = RuntimeEnvironment(
-        available_core_ids=tuple(range(world_size)),
+        available_core_ids=resolve_available_neuron_core_ids(required_num_cores=world_size),
         num_cores_override=None,
         virtual_core_size_override=None,
         logical_nc_config_override=None,

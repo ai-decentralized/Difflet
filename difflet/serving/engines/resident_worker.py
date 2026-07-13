@@ -18,15 +18,18 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
-from typing import Any
+from typing import Any, Callable
 
 from difflet.serving.errors import DiffletServingError, internal_error, request_cancelled
+from difflet.serving.engines.stage_pipeline import StagePipelineEngine
+from difflet.serving.options import validate_worker_heartbeat_interval
 from difflet.serving.types import (
+    CancellationSignal,
     DiffletGenerateOutput,
     DiffletGenerateRequest,
     ResolvedRuntimeBundle,
+    WorkerRequestContext,
 )
-from difflet.serving.types import CancellationSignal, WorkerRequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +45,7 @@ class ResidentWorkerConfig:
     worker_heartbeat_interval: float = 30.0
 
     def __post_init__(self) -> None:
-        if self.worker_heartbeat_interval <= 0:
-            raise ValueError("worker_heartbeat_interval must be greater than 0")
+        validate_worker_heartbeat_interval(self.worker_heartbeat_interval)
 
 
 class ResidentWorkerServingEngine:
@@ -62,15 +64,16 @@ class ResidentWorkerServingEngine:
         self.config = config or ResidentWorkerConfig()
         if self.config.max_running_requests != 1:
             raise ValueError("P0 ResidentWorkerServingEngine requires max_running_requests=1")
+        self._run_lock = asyncio.Lock()
+        self._admission_lock = asyncio.Lock()
+        self._pending = 0
         self._worker = _ResidentWorkerProcess(
             runtime=runtime,
             orchestrator_factory=orchestrator_factory,
             startup_timeout=self.config.worker_restart_timeout,
             heartbeat_interval=self.config.worker_heartbeat_interval,
+            admission_snapshot=self._admission_snapshot,
         )
-        self._run_lock = asyncio.Lock()
-        self._admission_lock = asyncio.Lock()
-        self._pending = 0
         self._draining = False
         self._recovering = False
         self._unrecoverable = False
@@ -279,6 +282,19 @@ class ResidentWorkerServingEngine:
             if self._pending > 0:
                 self._pending -= 1
 
+    def _admission_snapshot(self) -> dict[str, int]:
+        pending_requests = self._pending
+        running_requests = min(int(self._run_lock.locked()), pending_requests)
+        queued_requests = max(pending_requests - running_requests, 0)
+        return {
+            "running_requests": running_requests,
+            "queued_requests": queued_requests,
+            "pending_requests": pending_requests,
+            "request_capacity": (
+                self.config.max_running_requests + self.config.max_queued_requests
+            ),
+        }
+
     def _start_inflight_recovery(self, run_task: asyncio.Task, *, reason: str) -> bool:
         if self._closed or self._draining:
             return False
@@ -359,11 +375,13 @@ class _ResidentWorkerProcess:
         orchestrator_factory: str,
         startup_timeout: float,
         heartbeat_interval: float,
+        admission_snapshot: Callable[[], dict[str, int]],
     ) -> None:
         self.runtime = runtime
         self.orchestrator_factory = orchestrator_factory
         self.startup_timeout = float(startup_timeout)
         self.heartbeat_interval = float(heartbeat_interval)
+        self._admission_snapshot = admission_snapshot
         self._ctx = mp.get_context("spawn")
         self._cmd_q: mp.Queue | None = None
         self._cancel_q: mp.Queue | None = None
@@ -603,6 +621,7 @@ class _ResidentWorkerProcess:
                 return
             if event.get("type") != "worker_heartbeat":
                 continue
+            event = {**event, **self._admission_snapshot()}
             last_heartbeat = time.monotonic()
             last_event = event
             stale_reported = False
@@ -619,10 +638,15 @@ class _ResidentWorkerProcess:
                         extra={"worker_heartbeat": event},
                     )
                 logger.info(
-                    "worker heartbeat transition state=%s request_id=%s stage=%s",
+                    "worker heartbeat transition state=%s request_id=%s stage=%s "
+                    "running_requests=%d queued_requests=%d pending_requests=%d capacity=%d",
                     event.get("state"),
                     event.get("request_id"),
                     event.get("stage"),
+                    event["running_requests"],
+                    event["queued_requests"],
+                    event["pending_requests"],
+                    event["request_capacity"],
                     extra={"worker_heartbeat": event},
                 )
                 last_summary = now
@@ -630,12 +654,17 @@ class _ResidentWorkerProcess:
                 last_state_signature = state_signature
             elif summary_due:
                 logger.info(
-                    "worker heartbeat alive state=%s request_id=%s stage=%s model=%s profile=%s",
+                    "worker heartbeat alive state=%s request_id=%s stage=%s model=%s profile=%s "
+                    "running_requests=%d queued_requests=%d pending_requests=%d capacity=%d",
                     event.get("state"),
                     event.get("request_id"),
                     event.get("stage"),
                     event.get("model_id"),
                     event.get("profile_identity"),
+                    event["running_requests"],
+                    event["queued_requests"],
+                    event["pending_requests"],
+                    event["request_capacity"],
                     extra={"worker_heartbeat": event},
                 )
                 last_summary = now
@@ -650,7 +679,7 @@ def _worker_main(
     status_conn: Connection,
     heartbeat_interval: float,
 ) -> None:
-    orchestrator = None
+    stage_engine: StagePipelineEngine | None = None
     try:
         logger.info("worker_main start model=%s", runtime.profile.model_id)
         _apply_worker_runtime_environment(runtime)
@@ -659,13 +688,15 @@ def _worker_main(
         reply_q.put(_reply_from_error(exc))
         status_conn.close()
         return
-    if heartbeat_interval <= 0:
+    try:
+        validate_worker_heartbeat_interval(heartbeat_interval)
+    except (TypeError, ValueError) as exc:
         logger.error(
             "worker_main invalid_heartbeat_interval model=%s interval=%s",
             runtime.profile.model_id,
             heartbeat_interval,
         )
-        reply_q.put(_reply_from_error(ValueError("heartbeat_interval must be greater than 0")))
+        reply_q.put(_reply_from_error(exc))
         status_conn.close()
         return
     heartbeat_stop = threading.Event()
@@ -681,16 +712,14 @@ def _worker_main(
     )
     heartbeat_thread.start()
     try:
-        logger.info("worker_main loading orchestrator=%s", orchestrator_factory)
+        logger.info("worker_main loading stage_adapter=%s", orchestrator_factory)
         factory = _load_factory(orchestrator_factory)
-        orchestrator = factory(model_id=runtime.profile.model_id)
-        logger.info("worker_main orchestrator_loaded model=%s", runtime.profile.model_id)
+        adapter = factory(model_id=runtime.profile.model_id)
+        stage_engine = StagePipelineEngine(runtime=runtime, adapter=adapter)
+        logger.info("worker_main stage_adapter_created model=%s", runtime.profile.model_id)
         heartbeat_state.set(state="loading")
-        orchestrator.load(runtime)
-        logger.info("worker_main orchestrator_loaded_artifacts model=%s", runtime.profile.model_id)
-        heartbeat_state.set(state="smoke")
-        orchestrator.smoke()
-        logger.info("worker_main orchestrator_smoke_ok model=%s", runtime.profile.model_id)
+        asyncio.run(stage_engine.start())
+        logger.info("worker_main stage_engine_ready model=%s", runtime.profile.model_id)
         heartbeat_state.set(state="ready")
         reply_q.put({"type": "ready"})
         while True:
@@ -699,8 +728,8 @@ def _worker_main(
             if cmd_type == "shutdown":
                 heartbeat_state.set(state="draining")
                 logger.info("worker_main shutdown_command model=%s", runtime.profile.model_id)
-                if orchestrator is not None:
-                    orchestrator.shutdown()
+                if stage_engine is not None:
+                    asyncio.run(stage_engine.shutdown())
                 reply_q.put({"type": "shutdown_ok"})
                 return
             if cmd_type != "generate":
@@ -723,7 +752,9 @@ def _worker_main(
                 ),
             )
             try:
-                output = asyncio.run(orchestrator.generate(request, context))
+                if stage_engine is None:
+                    raise RuntimeError("stage engine is not initialized")
+                output = asyncio.run(stage_engine.generate(request, context))
                 logger.info("worker_main generate_ok request_id=%s", request.request_id)
                 reply_q.put(
                     {
@@ -745,6 +776,9 @@ def _worker_main(
         heartbeat_state.set(state="error")
         reply_q.put(_reply_from_error(exc))
     finally:
+        if stage_engine is not None:
+            with suppress(BaseException):
+                asyncio.run(stage_engine.shutdown())
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=1.0)
         logger.info("worker_main exit model=%s", runtime.profile.model_id)

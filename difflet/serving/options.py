@@ -14,6 +14,24 @@ from difflet.registry import ModelEntry
 from difflet.serving.errors import invalid_extra_body
 from difflet.serving.types import ServingProfile
 
+MIN_WORKER_HEARTBEAT_INTERVAL_SECONDS = 5.0
+MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS = 120.0
+
+
+def validate_worker_heartbeat_interval(value: float) -> float:
+    interval = float(value)
+    if (
+        not math.isfinite(interval)
+        or interval < MIN_WORKER_HEARTBEAT_INTERVAL_SECONDS
+        or interval > MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS
+    ):
+        raise ValueError(
+            "worker heartbeat interval must be finite and between "
+            f"{MIN_WORKER_HEARTBEAT_INTERVAL_SECONDS:g} and "
+            f"{MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS:g} seconds inclusive"
+        )
+    return interval
+
 
 class DownloadPolicy(str, Enum):
     AUTO = "auto"
@@ -58,6 +76,9 @@ class ServeOptions:
     worker_heartbeat_interval: float = 30.0
     artifact_store: str = "r2"
     artifact_ttl_seconds: int = 3600
+
+    def __post_init__(self) -> None:
+        validate_worker_heartbeat_interval(self.worker_heartbeat_interval)
 
 
 def build_serving_profile(
