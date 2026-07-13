@@ -14,7 +14,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from difflet.cli.orchestrators.base import ModelOrchestrator
+from difflet.cli.orchestrators.base import ModelOrchestrator, cp_mode_token
 from difflet.cli import runner
 
 _HF_MODEL_ID = "Qwen/Qwen-Image"
@@ -280,11 +280,13 @@ class QwenImageOrchestrator(ModelOrchestrator):
         base = Path(args.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
         tp = args.tp_degree or 4
         cp = args.cp_degree or 1
+        cpm = cp_mode_token(args)
         h, w = args.height or 1024, args.width or 1024
         if stage == "text":
+            # The text encoder carries no CP attention, so cp_mode does not key it.
             return base / f"qwen_image_enc_tp{tp}cp{cp}_seq{_ENC_SEQ}"
         if stage == "generate":
-            return base / f"qwen_image_dit_tp{tp}cp{cp}_h{h}w{w}"
+            return base / f"qwen_image_dit_tp{tp}cp{cp}{cpm}_h{h}w{w}"
         if stage == "vae":
             return base / f"qwen_image_vae_h{h}w{w}"
         raise ValueError(f"unknown stage {stage!r}")

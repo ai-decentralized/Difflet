@@ -25,6 +25,7 @@ from difflet.ops import (
     get_world_group,
     init_parallel_mesh,
     joint_ring_attention,
+    joint_ulysses_attention,
     scatter_to_process_group_spmd,
 )
 
@@ -385,6 +386,22 @@ class _QwenImageTrainiumAttnProcessor:
                 scale=scale, causal=False,
             )  # [B, H, Sq, d]
             joint_hidden_states = o_joint.transpose(1, 2)  # [B, Sq, H, d]
+        elif self.context_parallel_enabled and self.cp_mode == "ulysses":
+            if attention_mask is not None:
+                raise NotImplementedError("ulysses cp_mode does not support attention_mask")
+            # Joint ulysses: image K,V sharded → all-to-all'd into a head shard at full
+            # sequence length; text K,V replicated → reduced to the same head shard. The
+            # op hands each stream back in the sharding it arrived with, so they are
+            # re-joined here as [txt ‖ img] to match the gather_kv concat order and keep
+            # the downstream split at seq_txt unchanged.
+            scale = 1.0 / math.sqrt(head_dim)
+            img_out, txt_out = joint_ulysses_attention(
+                img_query.transpose(1, 2), txt_query.transpose(1, 2),
+                img_key.transpose(1, 2), img_value.transpose(1, 2),      # sharded image K,V
+                txt_key.transpose(1, 2), txt_value.transpose(1, 2),      # replicated text K,V
+                scale=scale, causal=False,
+            )  # [B, H, S_img/cp, d], [B, H, S_txt, d]
+            joint_hidden_states = torch.cat([txt_out, img_out], dim=2).transpose(1, 2)
         else:
             # gather_kv path: all-gather image K,V before joint attention.
             if self.context_parallel_enabled:

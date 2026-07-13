@@ -84,6 +84,15 @@ PARALLEL_CONFIGS: dict[str, ParallelConfig] = {
     # the router (one request per replica); compile resolves to the same dp=1
     # tp2 artifact both replicas load (compile-once-load-k).
     "dp2tp2": ParallelConfig("dp2tp2", ("--tp-degree", "2", "--dp", "2"), 4),
+    # Ulysses CP: same tp2/cp2 world as tp2cp2, but attention all-to-alls the
+    # sequence shard into a head shard instead of all-gathering K,V. Heads are then
+    # sharded by tp*cp = 4, which every CP model here satisfies (wan 40, flux/
+    # hunyuan/qwen 24). cp_mode is not a mesh axis, so world_size stays 4.
+    "tp2cp2ulysses": ParallelConfig(
+        "tp2cp2ulysses",
+        ("--tp-degree", "2", "--cp-degree", "2", "--cp-mode", "ulysses"),
+        4,
+    ),
 }
 
 MODELS: dict[str, ModelSpec] = {

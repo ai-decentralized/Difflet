@@ -63,6 +63,7 @@ from difflet.ops import (
     reduce_from_tensor_model_parallel_region,
     reduce_scatter_to_sequence_parallel_region,
     ring_attention,
+    ulysses_attention,
     scatter_to_process_group_spmd,
 )
 
@@ -540,12 +541,16 @@ class WanAttention(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        # CP self-attention: ring rotates sharded K,V; gather_kv all-gathers full K,V.
-        # Cross-attention K,V come from encoder_hidden_states which is not scattered.
-        if self.context_parallel_enabled and not self.is_cross_attention and self.cp_mode == "ring":
+        # CP self-attention: ring rotates sharded K,V; ulysses all-to-alls the sequence
+        # shard into a head shard; gather_kv all-gathers full K,V. Cross-attention K,V
+        # come from encoder_hidden_states, which is not scattered, so CP never applies.
+        cp_self_attn = self.context_parallel_enabled and not self.is_cross_attention
+        if cp_self_attn and self.cp_mode == "ring":
             out = ring_attention(q, k, v, scale=1.0 / math.sqrt(self.head_dim), causal=False)
+        elif cp_self_attn and self.cp_mode == "ulysses":
+            out = ulysses_attention(q, k, v, scale=1.0 / math.sqrt(self.head_dim), causal=False)
         else:
-            if self.context_parallel_enabled and not self.is_cross_attention:
+            if cp_self_attn:
                 stacked_kv = torch.stack([k, v], dim=0)  # [2, B, heads, S/cp, head_dim]
                 stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
                     stacked_kv, gather_dim=3, process_group=self.cp_group

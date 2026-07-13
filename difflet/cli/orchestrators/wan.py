@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from difflet.cli import runner
-from difflet.cli.orchestrators.base import ModelOrchestrator
+from difflet.cli.orchestrators.base import ModelOrchestrator, cp_mode_token
 
 # Model id comes from the CLI (--model-id); both Wan 2.2 A14B (MoE, dual
 # transformer) and Wan 2.1 14B (single transformer) route here. The single-vs-
@@ -274,11 +274,12 @@ class WanOrchestrator(ModelOrchestrator):
         cp = args.cp_degree or 1
         cfg = "cfg" if getattr(args, "cfg_parallel", False) else ""
         sp = "sp" if getattr(args, "sp_enabled", False) else ""
+        cpm = cp_mode_token(args)
         h = args.height or 480
         w = args.width or 832
         f = args.num_frames or 9
         if stage == "transformer":
-            return base / f"{prefix}_transformer_tp{tp}cp{cp}{cfg}{sp}_h{h}w{w}f{f}"
+            return base / f"{prefix}_transformer_tp{tp}cp{cp}{cpm}{cfg}{sp}_h{h}w{w}f{f}"
         if stage == "vae":
             return base / f"{prefix}_vae_h{h}w{w}f{f}"
         raise ValueError(f"unknown stage {stage!r}")

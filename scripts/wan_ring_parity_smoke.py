@@ -28,7 +28,7 @@ import torch
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Wan ring/gather-KV parity single-mode runner")
-    p.add_argument("--mode", required=True, choices=["gather_kv", "ring"])
+    p.add_argument("--mode", required=True, choices=["gather_kv", "ring", "ulysses"])
     p.add_argument("--out", required=True, help="path to save the output latent tensor (.pt)")
     p.add_argument("--model", default=os.environ.get("DIFFLET_WAN_MODEL", "Wan-AI/Wan2.2-T2V-A14B-Diffusers"))
     p.add_argument("--subfolder", default=os.environ.get("DIFFLET_WAN_TRANSFORMER_SUBFOLDER", "transformer"))
@@ -78,6 +78,17 @@ def main() -> None:
         raise ValueError(
             f"ring requires per-rank seqlen ({per_rank}) divisible by 128; adjust height/width/latent-frames"
         )
+    if args.cp_degree > 1 and args.mode == "ulysses":
+        # Ulysses shards heads across cp on top of the TP head shard, so the model's
+        # head count must divide by tp*cp. Wan is 40 heads: fine at tp2/cp2 (10/rank).
+        heads = int(config.num_attention_heads)
+        if heads % (args.tp_degree * args.cp_degree) != 0:
+            raise ValueError(
+                f"ulysses requires num_attention_heads ({heads}) divisible by "
+                f"tp_degree * cp_degree ({args.tp_degree} * {args.cp_degree})"
+            )
+        print(f"[parity] ulysses heads: {heads} -> {heads // args.tp_degree}/rank (tp) "
+              f"-> {heads // (args.tp_degree * args.cp_degree)}/rank in attention (cp)")
 
     out_dir = os.path.join(args.work_dir, f"compile_{args.mode}")
     os.makedirs(out_dir, exist_ok=True)

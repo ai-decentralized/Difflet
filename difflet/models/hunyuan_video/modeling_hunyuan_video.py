@@ -43,6 +43,7 @@ from difflet.ops import (
     get_world_group,
     init_parallel_mesh,
     joint_ring_attention,
+    joint_ulysses_attention,
     reduce_from_tensor_model_parallel_region,
     reduce_scatter_to_sequence_parallel_region,
     scatter_to_process_group_spmd,
@@ -484,6 +485,23 @@ class HunyuanVideoAttention(nn.Module):
             img_len = latent_q.shape[1]
             hidden_states = o_joint[:, :img_len]          # [B, S_img/cp, H, d]
             encoder_hidden_states = o_joint[:, img_len:]  # [B, S_txt, H, d]
+        elif self.context_parallel_enabled and self.cp_mode == "ulysses":
+            if attention_mask is not None:
+                raise NotImplementedError("ulysses cp_mode does not support attention_mask")
+            # Joint ulysses: image (latent) K,V sharded → all-to-all'd into a head shard
+            # at full sequence length; text (context) K,V replicated → reduced to the
+            # same head shard. The op returns each stream in the sharding it arrived
+            # with, so the image stays sequence-sharded and the text stays replicated —
+            # exactly what the two assignments below expect.
+            scale = 1.0 / math.sqrt(self.head_dim)
+            img_out, txt_out = joint_ulysses_attention(
+                latent_q.transpose(1, 2), context_q.transpose(1, 2),
+                latent_k.transpose(1, 2), latent_v.transpose(1, 2),
+                context_k.transpose(1, 2), context_v.transpose(1, 2),
+                scale=scale, causal=False,
+            )  # [B, H, S_img/cp, d], [B, H, S_txt, d]
+            hidden_states = img_out.transpose(1, 2)          # [B, S_img/cp, H, d]
+            encoder_hidden_states = txt_out.transpose(1, 2)  # [B, S_txt, H, d]
         else:
             # gather_kv path: each rank all-gathers latent K,V to the full sequence
             # length before running joint dual_stream_attention. Text K,V are already
