@@ -333,4 +333,187 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float, c
     return out.reshape(b, h, s_q, d)
 
 
-__all__ = ["attention", "cross_attention", "ring_attention", "joint_ring_attention"]
+def _cp_all_to_all(t, *, split_dim: int, concat_dim: int, mesh):
+    """XLA AllToAll along the cp axis.
+
+    Splits ``t`` into ``cp`` chunks along ``split_dim`` (chunk ``j`` goes to the
+    ``j``-th member of the rank's cp group) and concatenates the ``cp`` received
+    chunks along ``concat_dim`` **in replica-group order**. That ordering is what
+    makes the Ulysses layout swap correct with no rank-dependent indexing.
+    """
+    import torch_xla.core.xla_model as xm
+
+    return xm.all_to_all(
+        t,
+        split_dimension=split_dim,
+        concat_dimension=concat_dim,
+        split_count=len(mesh[0]),
+        groups=[list(g) for g in mesh],
+        # pin_layout=False is REQUIRED, not a tuning knob. With torch_xla's default
+        # (True) the op is emitted as a layout-pinned CustomCall, and neuronx-cc
+        # rejects the graph outright: "CustomCallOp unsupported target:
+        # mhlo.all_to_all". Unpinned it lowers to a native HLO AllToAll, which the
+        # compiler handles. This is what nxd's own expert-parallel all-to-all does
+        # (parallel_layers/mappings.py::_all_to_all_in_expert_parallel_region).
+        pin_layout=False,
+    )
+
+
+def _ulysses_check_heads(h: int, cp: int) -> None:
+    if h % cp != 0:
+        raise ValueError(
+            f"cp_mode='ulysses' needs the per-rank head count ({h}) divisible by "
+            f"cp_degree ({cp}): Ulysses shards heads across the cp axis on top of the "
+            f"TP head shard, so num_attention_heads must be divisible by tp_degree * "
+            f"cp_degree. Reduce cp_degree, or use cp_mode=gather_kv/ring."
+        )
+
+
+def _dense_attention(q, k, v, *, scale: float, causal: bool):
+    """One ordinary dense attention over [B, H, S, d] tensors (no CP collectives)."""
+    b, h, s_q, d = q.shape
+    s_k = k.shape[2]
+    bs = b * h
+    vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
+    kernel = attention_cte[2] if vc_size == 2 else attention_cte
+    out = kernel(
+        q.reshape(bs, s_q, d),
+        k.reshape(bs, s_k, d),
+        v.reshape(bs, s_k, d),
+        scale=float(scale),
+        causal_mask=causal,
+        tp_q=True,
+        tp_k=True,
+        tp_out=False,
+    )
+    return out.reshape(b, h, s_q, d)
+
+
+def ulysses_attention(q, k, v, *, scale: float, causal: bool = False):
+    """Ulysses (all-to-all) context-parallel self-attention over a sharded sequence.
+
+    q,k,v: [B, H_local, S/cp, d] → returns [B, H_local, S/cp, d].
+
+    An all-to-all trades the sequence shard for a head shard ([B, H_local/cp, S, d]),
+    so one *ordinary* dense attention sees the whole sequence — no ring kernel, no
+    online-softmax merge, and no experimental nkilib dependency. A second all-to-all
+    restores the caller's layout. Exact: the softmax is a single dense pass over the
+    full sequence, identical math to gather-KV.
+
+    Correctness rests on XLA AllToAll's ordering: on the forward hop rank ``r``
+    receives head-block ``r`` from every rank ``r'``, concatenated along seq in group
+    order — and rank ``r'`` holds sequence block ``r'``, so the concatenation lands in
+    true global sequence order. The inverse hop restores head order by the same
+    argument. Both are rank-agnostic, so the traced SPMD graph is identical on every
+    rank.
+    """
+    if causal:
+        # Not merely unimplemented — silently WRONG for at least one caller. Flux
+        # shards a joint [text ‖ image] sequence, so the ranks' blocks concatenate as
+        # [txt_0‖img_0, txt_1‖img_1, ...]: the all-to-all reconstructs the full token
+        # set, but not in global sequence order. Non-causal attention is
+        # permutation-invariant over keys so that is fine today; a causal mask would
+        # be applied against the wrong positions. Every caller passes causal=False.
+        raise NotImplementedError(
+            "ulysses_attention supports only non-causal attention: the all-to-all "
+            "reconstructs the full token set but not necessarily in global sequence "
+            "order (flux shards a joint [text ‖ image] sequence), so a causal mask "
+            "would be applied against the wrong positions."
+        )
+    from difflet.backends.trainium.core.parallel_mesh import get_cp_mesh
+
+    mesh = get_cp_mesh()
+    cp = len(mesh[0])
+    _ulysses_check_heads(q.shape[1], cp)
+
+    # heads → seq: [B, H_local, S/cp, d] → [B, H_local/cp, S, d]
+    q = _cp_all_to_all(q, split_dim=1, concat_dim=2, mesh=mesh)
+    k = _cp_all_to_all(k, split_dim=1, concat_dim=2, mesh=mesh)
+    v = _cp_all_to_all(v, split_dim=1, concat_dim=2, mesh=mesh)
+
+    out = _dense_attention(q, k, v, scale=scale, causal=causal)
+
+    # seq → heads: [B, H_local/cp, S, d] → [B, H_local, S/cp, d]
+    return _cp_all_to_all(out, split_dim=2, concat_dim=1, mesh=mesh)
+
+
+def joint_ulysses_attention(
+    q_img, q_txt, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False
+):
+    """Joint-MMDiT Ulysses attention: sharded image stream + replicated text stream.
+
+    q_img/image_k/image_v  [B, H_local, S_img/cp, d]  sequence-sharded over cp
+    q_txt/text_k/text_v    [B, H_local, S_txt,    d]  replicated on every rank
+    returns (img_out [B, H_local, S_img/cp, d], txt_out [B, H_local, S_txt, d])
+
+    The image stream takes the ordinary Ulysses all-to-all. The text stream is
+    *replicated*, so it cannot be all-to-all'd for real — but each rank still needs
+    the text restricted to its own head block. Applying the SAME all-to-all to it does
+    exactly that for free: since every rank holds identical text, rank ``r`` receives
+    ``cp`` **identical** copies of head-block ``r``, concatenated along seq into
+    [B, H_local/cp, cp*S_txt, d]. Taking the first S_txt of that is this rank's head
+    block — a static, rank-agnostic slice, so no SPMDRank plumbing is needed in the
+    two models that hit this path.
+
+    With both streams on the same head block and the image at full sequence length, a
+    single dense attention over the concatenated [image ‖ text] keys is the exact
+    joint result. On the way out the image half takes the inverse all-to-all back to
+    its sequence shard, while the text half is all-gathered along heads to restore the
+    replication its callers expect.
+    """
+    if causal:
+        raise NotImplementedError(
+            "joint_ulysses_attention supports only non-causal joint MMDiT attention "
+            "(image+text bidirectional); no joint caller uses a causal mask."
+        )
+    from neuronx_distributed.parallel_layers.mappings import (
+        gather_from_tensor_model_parallel_region_with_dim,
+    )
+
+    from difflet.backends.trainium.core.parallel_mesh import get_cp_group, get_cp_mesh
+
+    mesh = get_cp_mesh()
+    cp = len(mesh[0])
+    _ulysses_check_heads(q_img.shape[1], cp)
+    s_txt = q_txt.shape[2]
+
+    def to_head_shard(sharded, replicated):
+        """(seq-sharded → full-seq, replicated → this rank's head block)."""
+        full = _cp_all_to_all(sharded, split_dim=1, concat_dim=2, mesh=mesh)
+        # cp identical copies of our head block, concatenated along seq — keep one.
+        tiled = _cp_all_to_all(replicated, split_dim=1, concat_dim=2, mesh=mesh)
+        return full, tiled.narrow(2, 0, s_txt)
+
+    q_i, q_t = to_head_shard(q_img, q_txt)
+    k_i, k_t = to_head_shard(image_k, text_k)
+    v_i, v_t = to_head_shard(image_v, text_v)
+
+    # Image-first joint order here is internal only — each stream is handed back
+    # separately, so callers keep their own [img‖txt] / [txt‖img] convention.
+    q = torch.cat([q_i, q_t], dim=2)
+    k = torch.cat([k_i, k_t], dim=2)
+    v = torch.cat([v_i, v_t], dim=2)
+
+    out = _dense_attention(q, k, v, scale=scale, causal=False)
+
+    s_img = q_i.shape[2]
+    img_out = out.narrow(2, 0, s_img)   # [B, H_local/cp, S_img, d]
+    txt_out = out.narrow(2, s_img, s_txt)  # [B, H_local/cp, S_txt, d]
+
+    # Image: back to this rank's sequence shard, full head count.
+    img_out = _cp_all_to_all(img_out, split_dim=2, concat_dim=1, mesh=mesh)
+    # Text: re-replicate across the cp group by gathering the head blocks back.
+    txt_out = gather_from_tensor_model_parallel_region_with_dim(
+        txt_out, gather_dim=1, process_group=get_cp_group()
+    )
+    return img_out, txt_out
+
+
+__all__ = [
+    "attention",
+    "cross_attention",
+    "ring_attention",
+    "joint_ring_attention",
+    "ulysses_attention",
+    "joint_ulysses_attention",
+]
