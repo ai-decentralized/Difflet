@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 
 VALID_MODELS = {
@@ -245,12 +246,68 @@ def _add_serve_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8091)
     p.add_argument(
+        "--max-queued-requests",
+        type=_nonnegative_int,
+        default=8,
+        metavar="COUNT",
+        help="Maximum requests waiting behind the active request (default: 8; 0 disables queuing)",
+    )
+    p.add_argument(
+        "--queue-timeout",
+        type=_positive_finite_float,
+        default=30.0,
+        metavar="SECONDS",
+        help="Maximum time a request may wait in the queue (default: 30)",
+    )
+    p.add_argument(
+        "--request-timeout",
+        type=_positive_finite_float,
+        default=300.0,
+        metavar="SECONDS",
+        help="Maximum total request time, including queueing and generation (default: 300)",
+    )
+    p.add_argument(
+        "--artifact-store-timeout",
+        type=_positive_finite_float,
+        default=60.0,
+        metavar="SECONDS",
+        help="Maximum time for each artifact upload or URL operation (default: 60)",
+    )
+    p.add_argument(
+        "--worker-cancel-timeout",
+        type=_positive_finite_float,
+        default=10.0,
+        metavar="SECONDS",
+        help="Time to wait for cooperative worker cancellation before restart (default: 10)",
+    )
+    p.add_argument(
+        "--worker-restart-timeout",
+        type=_positive_finite_float,
+        default=900.0,
+        metavar="SECONDS",
+        help="Maximum time for worker restart and readiness recovery (default: 900)",
+    )
+    p.add_argument(
         "--worker-heartbeat-interval",
         type=float,
         default=30.0,
         metavar="SECONDS",
-        help="Worker heartbeat interval in seconds (default: 30)",
+        help="Worker heartbeat interval in seconds, 5-120 inclusive (default: 30)",
     )
+
+
+def _nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be zero or greater")
+    return parsed
+
+
+def _positive_finite_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a finite number greater than zero")
+    return parsed
 
 
 def _build_parser() -> argparse.ArgumentParser:

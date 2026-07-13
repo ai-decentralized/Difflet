@@ -12,7 +12,12 @@ from typing import Any
 
 from difflet.serving.factory import build_serving_stack
 from difflet.serving.openai.api_server import create_app
-from difflet.serving.options import CompilePolicy, DownloadPolicy, ServeOptions
+from difflet.serving.options import (
+    CompilePolicy,
+    DownloadPolicy,
+    ServeOptions,
+    validate_worker_heartbeat_interval,
+)
 
 
 class _ServingLogFileHandler(RotatingFileHandler):
@@ -87,11 +92,13 @@ def _build_serving_logging_config(project_name: str) -> dict[str, Any]:
         "formatters": {
             "console": {
                 "()": "uvicorn.logging.DefaultFormatter",
-                "fmt": "%(levelprefix)s %(message)s",
+                "fmt": "%(asctime)s.%(msecs)03d %(levelprefix)s %(message)s",
+                "datefmt": "%Y-%m-%d %H:%M:%S",
                 "use_colors": None,
             },
             "file": {
-                "format": "%(asctime)s %(levelname)s %(name)s %(message)s",
+                "format": "%(asctime)s.%(msecs)03d %(levelname)s %(name)s %(message)s",
+                "datefmt": "%Y-%m-%d %H:%M:%S",
             },
         },
         "handlers": {
@@ -164,6 +171,12 @@ def options_from_args(args: argparse.Namespace) -> ServeOptions:
         teacache_calibration=getattr(args, "teacache_calibration", None),
         download_policy=download_policy,
         compile_policy=compile_policy,
+        max_queued_requests=getattr(args, "max_queued_requests", 8),
+        queue_timeout=getattr(args, "queue_timeout", 30.0),
+        request_timeout=getattr(args, "request_timeout", 300.0),
+        artifact_store_timeout=getattr(args, "artifact_store_timeout", 60.0),
+        worker_cancel_timeout=getattr(args, "worker_cancel_timeout", 10.0),
+        worker_restart_timeout=getattr(args, "worker_restart_timeout", 900.0),
         worker_heartbeat_interval=getattr(args, "worker_heartbeat_interval", 30.0),
     )
 
@@ -171,9 +184,12 @@ def options_from_args(args: argparse.Namespace) -> ServeOptions:
 def validate_serve_args(args: argparse.Namespace) -> None:
     """Validate universal serve-process settings before adapter selection."""
 
-    if getattr(args, "worker_heartbeat_interval", 30.0) <= 0:
+    try:
+        validate_worker_heartbeat_interval(getattr(args, "worker_heartbeat_interval", 30.0))
+    except (TypeError, ValueError):
         print(
-            "Error: --worker-heartbeat-interval must be greater than 0.",
+            "Error: --worker-heartbeat-interval must be a finite value "
+            "between 5 and 120 seconds inclusive.",
             file=sys.stderr,
         )
         raise SystemExit(1)
