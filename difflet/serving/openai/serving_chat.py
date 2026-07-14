@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import time
 import uuid
@@ -20,7 +21,7 @@ from difflet.serving.errors import (
 )
 from difflet.serving.model_registry import ResolvedServingModel
 from difflet.serving.orchestrators.base import ServingRequestValidator
-from difflet.serving.types import DiffletGenerateRequest, DiffletGenerateOutput, ServingProfile
+from difflet.serving.types import DiffletGenerateRequest, DiffletGenerateOutput
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ async def generate_chat_completion(
     request_id: str | None = None,
     engine,
     request_validator: ServingRequestValidator | None = None,
-    artifact_store: ArtifactStore,
+    artifact_store: ArtifactStore | None,
     artifact_ttl_seconds: int,
     artifact_store_timeout: float,
 ) -> dict[str, Any]:
@@ -213,34 +214,42 @@ async def generate_chat_completion(
         request.model,
         (time.perf_counter() - generate_started_at) * 1000.0,
     )
-    store_started_at = time.perf_counter()
-    ref = await put_with_timeout(
-        artifact_store,
-        data=output.data,
-        mime_type=output.mime_type,
-        suffix=".png",
-        ttl_seconds=artifact_ttl_seconds,
-        timeout_s=artifact_store_timeout,
-    )
-    logger.info(
-        "chat request artifact_uploaded request_id=%s file_id=%s duration_ms=%.2f",
-        request.request_id,
-        ref.file_id,
-        (time.perf_counter() - store_started_at) * 1000.0,
-    )
-    url_started_at = time.perf_counter()
-    url = await get_url_with_timeout(
-        artifact_store,
-        ref,
-        ttl_seconds=artifact_ttl_seconds,
-        timeout_s=artifact_store_timeout,
-    )
-    logger.info(
-        "chat request artifact_url_ready request_id=%s duration_ms=%.2f total_store_ms=%.2f",
-        request.request_id,
-        (time.perf_counter() - url_started_at) * 1000.0,
-        (time.perf_counter() - store_started_at) * 1000.0,
-    )
+    if artifact_store is None:
+        url = _image_data_url(output.data, mime_type=output.mime_type)
+        logger.info(
+            "chat request image_inline_ready request_id=%s bytes=%s",
+            request.request_id,
+            len(output.data),
+        )
+    else:
+        store_started_at = time.perf_counter()
+        ref = await put_with_timeout(
+            artifact_store,
+            data=output.data,
+            mime_type=output.mime_type,
+            suffix=f".{output.output_format}",
+            ttl_seconds=artifact_ttl_seconds,
+            timeout_s=artifact_store_timeout,
+        )
+        logger.info(
+            "chat request artifact_uploaded request_id=%s file_id=%s duration_ms=%.2f",
+            request.request_id,
+            ref.file_id,
+            (time.perf_counter() - store_started_at) * 1000.0,
+        )
+        url_started_at = time.perf_counter()
+        url = await get_url_with_timeout(
+            artifact_store,
+            ref,
+            ttl_seconds=artifact_ttl_seconds,
+            timeout_s=artifact_store_timeout,
+        )
+        logger.info(
+            "chat request artifact_url_ready request_id=%s duration_ms=%.2f total_store_ms=%.2f",
+            request.request_id,
+            (time.perf_counter() - url_started_at) * 1000.0,
+            (time.perf_counter() - store_started_at) * 1000.0,
+        )
     total_ms = (time.perf_counter() - started_at) * 1000.0
     logger.info(
         "chat request completed request_id=%s model=%s total_ms=%.2f",
@@ -271,6 +280,11 @@ async def generate_chat_completion(
         ],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
+
+
+def _image_data_url(data: bytes, *, mime_type: str) -> str:
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
 
 
 def _validate_top_level(body: Any) -> None:

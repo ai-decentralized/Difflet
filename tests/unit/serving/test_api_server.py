@@ -30,6 +30,17 @@ class _UnexpectedFailureEngine(_UnhealthyEngine):
         raise RuntimeError("private backend details")
 
 
+class _SuccessfulEngine(_UnexpectedFailureEngine):
+    async def generate(self, request):
+        from difflet.serving.types import DiffletGenerateOutput
+
+        return DiffletGenerateOutput(
+            data=b"png",
+            mime_type="image/png",
+            output_format="png",
+        )
+
+
 class _BlockingEngine(_UnexpectedFailureEngine):
     def __init__(self):
         self.started = asyncio.Event()
@@ -57,7 +68,7 @@ class _DisconnectRequest:
 
 def test_health_returns_503_when_engine_unhealthy():
     app = create_app(
-        options=ServeOptions(model_id="black-forest-labs/FLUX.1-dev", artifact_store="memory"),
+        options=ServeOptions(model_id="black-forest-labs/FLUX.1-dev"),
         resolved_model=resolve_serving_model(ServeOptions(model_id="black-forest-labs/FLUX.1-dev")),
         engine=_UnhealthyEngine(),
         artifact_store=None,
@@ -75,7 +86,6 @@ def test_chat_completions_non_object_json_uses_difflet_error_contract(payload):
 
     options = ServeOptions(
         model_id="black-forest-labs/FLUX.1-dev",
-        artifact_store="memory",
     )
     app = create_app(
         options=options,
@@ -102,7 +112,6 @@ def test_chat_completions_invalid_json_uses_difflet_error_contract():
 
     options = ServeOptions(
         model_id="black-forest-labs/FLUX.1-dev",
-        artifact_store="memory",
     )
     app = create_app(
         options=options,
@@ -133,7 +142,6 @@ def test_chat_completions_invalid_json_uses_difflet_error_contract():
 def test_chat_completions_requires_fastapi_request_injection():
     options = ServeOptions(
         model_id="black-forest-labs/FLUX.1-dev",
-        artifact_store="memory",
     )
     app = create_app(
         options=options,
@@ -155,7 +163,6 @@ def test_chat_completions_rejects_client_request_body_id():
 
     options = ServeOptions(
         model_id="black-forest-labs/FLUX.1-dev",
-        artifact_store="memory",
     )
     app = create_app(
         options=options,
@@ -178,12 +185,42 @@ def test_chat_completions_rejects_client_request_body_id():
     assert response.json()["error"]["code"] == "feature_not_supported"
 
 
+def test_chat_completions_returns_data_url_without_r2(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    for name in (
+        "DIFFLET_R2_BUCKET",
+        "DIFFLET_R2_ENDPOINT_URL",
+        "DIFFLET_R2_ACCESS_KEY_ID",
+        "DIFFLET_R2_SECRET_ACCESS_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    options = ServeOptions(model_id="black-forest-labs/FLUX.1-dev")
+    app = create_app(
+        options=options,
+        resolved_model=resolve_serving_model(options),
+        engine=_SuccessfulEngine(),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": options.model_id,
+                "messages": [{"role": "user", "content": "a cat"}],
+            },
+        )
+
+    assert response.status_code == 200
+    url = response.json()["choices"][0]["message"]["content"][0]["image_url"]["url"]
+    assert url == "data:image/png;base64,cG5n"
+
+
 def test_chat_completions_unexpected_failure_uses_sanitized_error_contract(caplog):
     from fastapi.testclient import TestClient
 
     options = ServeOptions(
         model_id="black-forest-labs/FLUX.1-dev",
-        artifact_store="memory",
     )
     app = create_app(
         options=options,
@@ -217,7 +254,6 @@ def test_chat_completions_disconnect_cancels_and_awaits_generation():
     async def _run():
         options = ServeOptions(
             model_id="black-forest-labs/FLUX.1-dev",
-            artifact_store="memory",
         )
         engine = _BlockingEngine()
         app = create_app(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import sys
 import types
@@ -253,6 +254,111 @@ def test_generate_chat_completion_returns_artifact_url():
     assert content[0]["image_url"]["url"].startswith("memory://difflet/")
 
 
+def test_generate_chat_completion_returns_inline_data_url_without_store():
+    response = asyncio.run(
+        generate_chat_completion(
+            _body(),
+            resolved_model=_resolved(),
+            engine=_FakeEngine(),
+            artifact_store=None,
+            artifact_ttl_seconds=60,
+            artifact_store_timeout=1,
+        )
+    )
+
+    url = response["choices"][0]["message"]["content"][0]["image_url"]["url"]
+    prefix, encoded = url.split(",", 1)
+    assert prefix == "data:image/png;base64"
+    assert base64.b64decode(encoded) == b"png"
+
+
+def test_r2_store_is_optional_when_all_required_environment_is_absent(monkeypatch):
+    for name in (
+        "DIFFLET_R2_BUCKET",
+        "DIFFLET_R2_ENDPOINT_URL",
+        "DIFFLET_R2_ACCESS_KEY_ID",
+        "DIFFLET_R2_SECRET_ACCESS_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    assert R2ArtifactStore.from_env_if_configured() is None
+
+
+def test_r2_store_is_selected_for_complete_required_environment(monkeypatch):
+    values = {
+        "DIFFLET_R2_BUCKET": "bucket",
+        "DIFFLET_R2_ENDPOINT_URL": "https://example.invalid",
+        "DIFFLET_R2_ACCESS_KEY_ID": "key",
+        "DIFFLET_R2_SECRET_ACCESS_KEY": "secret",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+
+    store = R2ArtifactStore.from_env_if_configured()
+
+    assert store is not None
+    assert store.bucket == "bucket"
+
+
+@pytest.mark.parametrize(
+    "configured_name",
+    [
+        "DIFFLET_R2_BUCKET",
+        "DIFFLET_R2_ENDPOINT_URL",
+        "DIFFLET_R2_ACCESS_KEY_ID",
+        "DIFFLET_R2_SECRET_ACCESS_KEY",
+    ],
+)
+def test_r2_store_rejects_partial_required_environment(monkeypatch, configured_name):
+    for name in (
+        "DIFFLET_R2_BUCKET",
+        "DIFFLET_R2_ENDPOINT_URL",
+        "DIFFLET_R2_ACCESS_KEY_ID",
+        "DIFFLET_R2_SECRET_ACCESS_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(configured_name, "configured")
+
+    with pytest.raises(DiffletServingError) as exc:
+        R2ArtifactStore.from_env_if_configured()
+
+    assert exc.value.code == "artifact_store_unavailable"
+    assert configured_name not in exc.value.message
+    assert "missing" in exc.value.message
+
+
+def test_r2_optional_environment_alone_does_not_enable_store(monkeypatch):
+    for name in (
+        "DIFFLET_R2_BUCKET",
+        "DIFFLET_R2_ENDPOINT_URL",
+        "DIFFLET_R2_ACCESS_KEY_ID",
+        "DIFFLET_R2_SECRET_ACCESS_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DIFFLET_R2_PREFIX", "generated")
+    monkeypatch.setenv("DIFFLET_R2_PUBLIC_BASE_URL", "https://images.example.com")
+
+    assert R2ArtifactStore.from_env_if_configured() is None
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_r2_empty_required_value_is_rejected_as_partial_configuration(monkeypatch, value):
+    for name in (
+        "DIFFLET_R2_BUCKET",
+        "DIFFLET_R2_ENDPOINT_URL",
+        "DIFFLET_R2_ACCESS_KEY_ID",
+        "DIFFLET_R2_SECRET_ACCESS_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DIFFLET_R2_BUCKET", value)
+
+    with pytest.raises(DiffletServingError) as exc:
+        R2ArtifactStore.from_env_if_configured()
+
+    assert exc.value.code == "artifact_store_unavailable"
+    assert "DIFFLET_R2_BUCKET" in exc.value.message
+
+
 def test_generate_chat_completion_validates_before_engine():
     engine = _FakeEngine()
     with pytest.raises(DiffletServingError) as exc:
@@ -310,6 +416,22 @@ def _failing_r2_store(monkeypatch) -> R2ArtifactStore:
     )
     monkeypatch.setattr(store, "_client", lambda: _FailingR2Client())
     return store
+
+
+def test_configured_r2_failure_does_not_fallback_to_inline_data(monkeypatch):
+    with pytest.raises(DiffletServingError) as exc:
+        asyncio.run(
+            generate_chat_completion(
+                _body(),
+                resolved_model=_resolved(),
+                engine=_FakeEngine(),
+                artifact_store=_failing_r2_store(monkeypatch),
+                artifact_ttl_seconds=60,
+                artifact_store_timeout=1,
+            )
+        )
+
+    assert exc.value.code == "internal_error"
 
 
 def test_r2_store_reuses_client(monkeypatch):

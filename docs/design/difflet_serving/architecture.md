@@ -23,10 +23,11 @@ MVP serving supports:
 - One active model/profile per server process.
 - One active serving profile in the resident worker lifecycle.
 - OpenAI-style `/v1/chat/completions` as the public API.
-- R2-backed image artifact URLs.
+- Base64 data URLs by default, with R2-backed artifact URLs when a complete R2
+  configuration is present.
 
 MVP does not include subprocess serving fallback, rotating resident fallback,
-multi-profile loading, local file serving, data URLs, or video serving.
+multi-profile loading, local file serving, or video serving.
 
 Qwen-Image is a P0 target only when the selected `ServingProfile` passes a real
 shared-worker co-load and smoke test: prompt encoder, denoiser, and decoder must
@@ -67,6 +68,7 @@ difflet/
     orchestrators/{qwen_image,flux}.py             [modified]
   cli/
     main.py                                        [modified serve routing]
+    serve.py                                       [serve command implementation]
     runner.py                                      [existing, unchanged]
     stage.py                                       [existing, unchanged]
     orchestrators/qwen_image.py                    [existing CLI behavior unchanged]
@@ -84,7 +86,6 @@ difflet/
     factory.py                                     [modified]
     artifact_manager.py                            [new]
     artifact_store.py                              [modified]
-    cli/{__init__,serve}.py                        [existing/modified]
     orchestrators/{base,qwen_image,flux}.py        [modified]
     engines/{__init__,resident_worker}.py          [modified]
     openai/{__init__,api_server,serving_chat}.py                [modified]
@@ -1165,7 +1166,8 @@ The OpenAI layer owns HTTP protocol behavior:
 - `extra_body` parsing and validation.
 - model/profile mismatch errors.
 - conversion of `DiffletGenerateOutput` into chat content parts.
-- `ArtifactStore` upload and URL selection.
+- deployment-owned selection between inline data URLs and `ArtifactStore`
+  upload/URL generation.
 
 It should not know the model stage count.
 
@@ -1320,8 +1322,8 @@ FastAPI /v1/chat/completions
   -> worker-owned StagePipelineEngine.generate(request, context)
   -> sequential InProcessStageExecutor calls model-owned runners
   -> image bytes
-  -> await ArtifactStore.put_bytes(...)
-  -> await ArtifactStore.get_url(ref)
+  -> if R2 configured: await ArtifactStore.put_bytes(...) -> get_url(ref)
+  -> otherwise: encode data:image/...;base64,...
   -> chat response with image_url.url
 ```
 

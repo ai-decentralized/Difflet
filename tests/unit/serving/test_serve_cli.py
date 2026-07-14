@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from difflet.serving.cli.serve import (
+from difflet.cli.serve import (
     _build_serving_logging_config,
     _load_serving_environment,
     options_from_args,
@@ -21,7 +21,7 @@ def test_difflet_serve_routes_to_serving_command(monkeypatch):
         calls.append(args)
 
     cli_main = importlib.import_module("difflet.cli.main")
-    monkeypatch.setattr("difflet.serving.cli.serve.run", fake_run)
+    monkeypatch.setattr("difflet.cli.serve.run", fake_run)
     cli_main.main(["serve", "--model-id", "black-forest-labs/FLUX.1-dev", "--port", "9000"])
 
     assert calls
@@ -104,7 +104,7 @@ def test_serve_help_exposes_operational_tuning_but_hides_artifact_policy(capsys)
 
 def test_difflet_serve_operational_controls_have_documented_defaults(monkeypatch):
     calls = []
-    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
     cli_main = importlib.import_module("difflet.cli.main")
 
     cli_main.main(["serve", "--model-id", "black-forest-labs/FLUX.1-dev"])
@@ -116,13 +116,12 @@ def test_difflet_serve_operational_controls_have_documented_defaults(monkeypatch
     assert options.artifact_store_timeout == 60.0
     assert options.worker_cancel_timeout == 10.0
     assert options.worker_restart_timeout == 900.0
-    assert options.artifact_store == "r2"
     assert options.artifact_ttl_seconds == 3600
 
 
 def test_difflet_serve_maps_operational_controls(monkeypatch):
     calls = []
-    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
     cli_main = importlib.import_module("difflet.cli.main")
 
     cli_main.main(
@@ -210,7 +209,7 @@ def test_difflet_serve_accepts_flux_sp_and_adaptive_teacache(monkeypatch):
         calls.append(args)
 
     cli_main = importlib.import_module("difflet.cli.main")
-    monkeypatch.setattr("difflet.serving.cli.serve.run", fake_run)
+    monkeypatch.setattr("difflet.cli.serve.run", fake_run)
     cli_main.main(
         [
             "serve",
@@ -232,7 +231,7 @@ def test_difflet_serve_accepts_flux_sp_and_adaptive_teacache(monkeypatch):
 def test_difflet_serve_parses_compile_and_load_profile_flags(monkeypatch):
     calls = []
 
-    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
     cli_main = importlib.import_module("difflet.cli.main")
     cli_main.main(
         [
@@ -302,7 +301,7 @@ def test_difflet_serve_preserves_unimplemented_teacache_modes_for_adapter(
     value,
 ):
     calls = []
-    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
     cli_main = importlib.import_module("difflet.cli.main")
 
     cli_main.main(
@@ -320,7 +319,7 @@ def test_difflet_serve_preserves_unimplemented_teacache_modes_for_adapter(
 
 def test_difflet_serve_preserves_calibration_without_speedup_for_adapter(monkeypatch):
     calls = []
-    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
     cli_main = importlib.import_module("difflet.cli.main")
 
     cli_main.main(
@@ -339,7 +338,7 @@ def test_difflet_serve_preserves_calibration_without_speedup_for_adapter(monkeyp
 def test_difflet_serve_preserves_qwen_sp_for_adapter(monkeypatch):
     calls = []
     cli_main = importlib.import_module("difflet.cli.main")
-    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
 
     cli_main.main(["serve", "--model-id", "Qwen/Qwen-Image", "--sp"])
 
@@ -349,7 +348,7 @@ def test_difflet_serve_preserves_qwen_sp_for_adapter(monkeypatch):
 def test_serve_boolean_overrides_are_tristate(monkeypatch):
     calls = []
     cli_main = importlib.import_module("difflet.cli.main")
-    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
 
     cli_main.main(["serve", "--model-id", "black-forest-labs/FLUX.1-dev"])
     cli_main.main(
@@ -370,7 +369,7 @@ def test_serve_boolean_overrides_are_tristate(monkeypatch):
 def test_serve_rejects_invalid_heartbeat_before_run(monkeypatch, capsys, interval):
     calls = []
     cli_main = importlib.import_module("difflet.cli.main")
-    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
 
     with pytest.raises(SystemExit):
         cli_main.main(
@@ -390,7 +389,7 @@ def test_serve_rejects_invalid_heartbeat_before_run(monkeypatch, capsys, interva
 def test_serve_accepts_heartbeat_boundaries(monkeypatch, interval):
     calls = []
     cli_main = importlib.import_module("difflet.cli.main")
-    monkeypatch.setattr("difflet.serving.cli.serve.run", calls.append)
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
 
     cli_main.main(
         [

@@ -156,9 +156,10 @@ P0 top-level field handling:
 ## `extra_body` Parameters
 
 The serving handler normalizes generation fields into `DiffletGenerateRequest`.
-P0 response policy is deployment-owned: the handler always returns an artifact
-URL and uses the server-configured artifact TTL. Request response-policy fields
-such as `response_format` or `artifact_ttl_seconds` are ignored.
+P0 response policy is deployment-owned: the handler returns a Base64 data URL
+when R2 is absent, or an artifact URL with the server-configured TTL when R2 is
+configured. Request response-policy fields such as `response_format` or
+`artifact_ttl_seconds` are ignored.
 
 Common generation fields:
 
@@ -188,9 +189,9 @@ select a different profile or warm another profile in-place. Traffic for another
 of this API.
 
 Response-policy fields are ignored in request `extra_body`: `response_format`
-and `artifact_ttl_seconds`. P0 always stores generated media through
-`ArtifactStore` and returns a URL in `image_url.url`; artifact TTL comes from
-server startup configuration.
+and `artifact_ttl_seconds`. P0 returns either a Base64 data URL or an R2 URL in
+`image_url.url`, selected from server startup configuration. Artifact TTL applies
+only when the R2 path is active.
 
 P0 rejects TeaCache and advanced runtime fields with
 `400 invalid_extra_body`. A future API revision may add explicit,
@@ -311,7 +312,7 @@ The chat handler maps engine outputs to chat content parts:
 
 | Engine output modality | Chat content part type | URL field | Default payload policy |
 | --- | --- | --- | --- |
-| `image` | `image_url` | `image_url.url` | R2 artifact URL in MVP deployment. |
+| `image` | `image_url` | `image_url.url` | Base64 data URL without R2; artifact URL with R2. |
 
 Future P1+ video serving may add a `video_url` content part. It should be a
 Difflet extension to the OpenAI-style chat response envelope rather than
@@ -323,7 +324,8 @@ multi-modality requests unless the model explicitly declares support.
 
 ## Image Response
 
-For image models, MVP deployment returns an artifact-backed URL by default:
+For image models, a deployment with complete R2 configuration returns an
+artifact-backed URL:
 
 ```json
 {
@@ -356,17 +358,33 @@ For image models, MVP deployment returns an artifact-backed URL by default:
 }
 ```
 
-Deployment URLs must come from `ArtifactStore` backed by R2; they must not
-expose arbitrary local filesystem paths. Requesting `response_format` is ignored
-in P0; it must not switch the response to data URLs or any local path mode.
+Without any required R2 variables, the same field contains an inline image:
+
+```json
+{
+  "choices": [{
+    "message": {
+      "content": [{
+        "type": "image_url",
+        "image_url": {"url": "data:image/png;base64,..."}
+      }]
+    }
+  }]
+}
+```
+
+R2 URLs must come from `ArtifactStore`; neither mode exposes arbitrary local
+filesystem paths. Requesting `response_format` is ignored in P0 and does not
+override the deployment-owned selection.
 
 Engine/output boundary:
 
 - `DiffletServingEngine.generate(...)` returns bytes plus MIME metadata.
-- `difflet/serving/openai/serving_chat.py` stores bytes through `ArtifactStore`
-  using the server-configured artifact TTL.
-- The handler must call `ref = await ArtifactStore.put_bytes(...)`, then
-  `url = await ArtifactStore.get_url(ref)`, and return only `url` in
+- `difflet/serving/openai/serving_chat.py` encodes a Base64 data URL when R2 is
+  absent. With R2 configured, it stores bytes through `ArtifactStore` using the
+  server-configured artifact TTL.
+- On the R2 path, the handler calls `ref = await ArtifactStore.put_bytes(...)`,
+  then `url = await ArtifactStore.get_url(ref)`, and returns only `url` in
   `image_url.url`.
 - `ArtifactRef.uri` is an internal storage URI or backend locator. The handler
   must never return it directly; it returns only the value from
@@ -461,7 +479,7 @@ Required status codes:
 | Server is shutting down/draining | 503 | `engine_draining` |
 | Worker recovering after request timeout | 503 | `engine_recovering` |
 | Worker dead or engine unhealthy | 503 | `engine_unavailable` |
-| Artifact store unavailable or misconfigured | 503 | `artifact_store_unavailable` |
+| Partial or invalid R2 startup configuration | 503 | `artifact_store_unavailable` |
 | Unexpected model/worker/R2 backend failure | 500 | `internal_error` |
 | Artifact upload or presign timeout after generation | 502 | `artifact_upload_failed` |
 | Request exceeds `request_timeout` | 504 | `request_timeout` |
@@ -472,10 +490,9 @@ this state. `/health` may remain 200 if the FastAPI process and recovery task ar
 alive; it should return 503 only when recovery fails, the worker is dead without
 a restart path, or the engine marks itself unrecoverably unhealthy.
 
-If generation succeeds but `await ArtifactStore.put_bytes(...)` or
-`await ArtifactStore.get_url(ref)` fails, the handler must return one of the
-errors above, clean any request-local temporary data, and must not fall
-back to `data_url`, local file URLs, raw filesystem paths, or inline bytes.
+If the configured R2 path fails after generation, the handler must return one of
+the errors above, clean any request-local temporary data, and must not silently
+fall back to a data URL or local filesystem path.
 
 ## Implementation Notes
 
@@ -487,7 +504,8 @@ back to `data_url`, local file URLs, raw filesystem paths, or inline bytes.
   adapter, not in the OpenAI route.
 - The engine returns `DiffletGenerateOutput`; it does not know about
   OpenAI-style `choices` or R2 credentials.
-- `ArtifactStore` owns local paths, file ids, TTL, and presigned URLs.
+- `ArtifactStore` owns R2 file ids, TTL, and presigned URLs. It is not
+  constructed when all required R2 variables are absent.
 - P0 R2 has two explicit expiry modes. Private mode returns an S3 API-domain
   presigned URL whose access lifetime is `artifact_ttl_seconds`; it cannot be
   host-rewritten to a custom domain. Public custom-domain mode depends on a

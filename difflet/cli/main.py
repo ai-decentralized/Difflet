@@ -658,7 +658,7 @@ def main(argv: list[str] | None = None) -> None:
         _ensure_jemalloc()
 
     if args.command == "serve":
-        from difflet.serving.cli.serve import run, validate_serve_args
+        from difflet.cli.serve import run, validate_serve_args
 
         validate_serve_args(args)
         run(args)

@@ -96,7 +96,7 @@ class R2ArtifactStore:
                 "DIFFLET_R2_ACCESS_KEY_ID",
                 "DIFFLET_R2_SECRET_ACCESS_KEY",
             )
-            if not os.environ.get(name)
+            if not (os.environ.get(name) or "").strip()
         ]
         if missing:
             raise DiffletServingError(
@@ -114,6 +114,19 @@ class R2ArtifactStore:
             public_base_url=os.environ.get("DIFFLET_R2_PUBLIC_BASE_URL"),
             client_timeout=float(os.environ.get("DIFFLET_R2_CLIENT_TIMEOUT", client_timeout)),
         )
+
+    @classmethod
+    def from_env_if_configured(cls, *, client_timeout: float = 60.0) -> "R2ArtifactStore | None":
+        required = (
+            "DIFFLET_R2_BUCKET",
+            "DIFFLET_R2_ENDPOINT_URL",
+            "DIFFLET_R2_ACCESS_KEY_ID",
+            "DIFFLET_R2_SECRET_ACCESS_KEY",
+        )
+        configured = [name for name in required if name in os.environ]
+        if not configured:
+            return None
+        return cls.from_env(client_timeout=client_timeout)
 
     def _client(self):
         if self._client_instance is not None:

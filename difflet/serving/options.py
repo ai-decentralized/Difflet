@@ -74,7 +74,6 @@ class ServeOptions:
     worker_cancel_timeout: float = 10.0
     worker_restart_timeout: float = 900.0
     worker_heartbeat_interval: float = 30.0
-    artifact_store: str = "r2"
     artifact_ttl_seconds: int = 3600
 
     def __post_init__(self) -> None:
