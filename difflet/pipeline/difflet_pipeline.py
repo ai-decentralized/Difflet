@@ -65,13 +65,19 @@ class DiffletPipeline:
         backend: str | None = None,
         application_kwargs: dict[str, Any] | None = None,
         teacache_speedup: float | None = None,
+        teacache_calibration: Any | None = None,
         teacache_calibration_path: str | None = None,
+        model_path_override: str | None = None,
+        resolved_source_id: str | None = None,
+        compiled_path_override: str | Path | None = None,
     ) -> "DiffletPipeline":
         application_kwargs = _merge_teacache_kwargs(
             application_kwargs,
             teacache_speedup=teacache_speedup,
+            teacache_calibration=teacache_calibration,
             teacache_calibration_path=teacache_calibration_path,
         )
+        cache_application_kwargs = _cache_application_kwargs(application_kwargs)
         entry = resolve_model(model_id, model_type=model_type)
         backend_runtime = get_backend(backend)
         entry.require_backend(backend_runtime.name)
@@ -79,12 +85,24 @@ class DiffletPipeline:
         backend_runtime.prepare_runtime(parallel_cfg)
         dtype = dtype if dtype is not None else _default_dtype()
         shape = entry.resolve_shape(height=height, width=width, num_frames=num_frames)
-        model_path = resolve_model_path(
-            model_id,
-            revision=revision,
-            local_files_only=local_files_only,
-            allow_patterns=entry.download_patterns,
-        )
+        overrides = (model_path_override, resolved_source_id, compiled_path_override)
+        bound_mode = any(value is not None for value in overrides)
+        if bound_mode and not all(value is not None for value in overrides):
+            raise ValueError(
+                "model_path_override, resolved_source_id, and compiled_path_override "
+                "must be provided together"
+            )
+        if bound_mode:
+            model_path = str(Path(model_path_override).expanduser().resolve())
+            cache_revision = resolved_source_id
+        else:
+            model_path = resolve_model_path(
+                model_id,
+                revision=revision,
+                local_files_only=local_files_only,
+                allow_patterns=entry.download_patterns,
+            )
+            cache_revision = revision
         spec = CacheSpec(
             model_id=model_id,
             model_path=model_path,
@@ -94,10 +112,14 @@ class DiffletPipeline:
             height=shape.get("height"),
             width=shape.get("width"),
             num_frames=shape.get("num_frames"),
-            revision=revision,
-            application_kwargs=application_kwargs,
+            revision=cache_revision,
+            application_kwargs=cache_application_kwargs,
         )
-        compiled_path = cache_path(compile_cache_dir, spec)
+        compiled_path = (
+            Path(compiled_path_override).expanduser().resolve()
+            if bound_mode
+            else cache_path(compile_cache_dir, spec)
+        )
         app = entry.create_application(
             model_path=model_path,
             parallel=parallel_cfg,
@@ -185,22 +207,42 @@ def _merge_teacache_kwargs(
     application_kwargs: dict[str, Any] | None,
     *,
     teacache_speedup: float | None,
-    teacache_calibration_path: str | None,
+    teacache_calibration: Any | None = None,
+    teacache_calibration_path: str | None = None,
 ) -> dict[str, Any] | None:
+    if teacache_calibration is not None and teacache_calibration_path is not None:
+        raise ValueError(
+            "teacache_calibration and teacache_calibration_path are mutually exclusive"
+        )
     merged = dict(application_kwargs or {})
     for key, value in (
         ("teacache_speedup", teacache_speedup),
+        ("teacache_calibration", teacache_calibration),
         ("teacache_calibration_path", teacache_calibration_path),
     ):
         if value is None:
             continue
         if key in merged and merged[key] != value:
             raise ValueError(
-                f"{key} was provided both as a top-level argument and in "
-                "application_kwargs."
+                f"{key} was provided both as a top-level argument and in " "application_kwargs."
             )
         merged[key] = value
     return merged or None
+
+
+def _cache_application_kwargs(application_kwargs: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not application_kwargs:
+        return None
+    cache_kwargs = dict(application_kwargs)
+    probe_enabled = bool(
+        cache_kwargs.pop("teacache_speedup", None) is not None
+        or cache_kwargs.pop("teacache_fused", False)
+    )
+    cache_kwargs.pop("teacache_calibration", None)
+    cache_kwargs.pop("teacache_calibration_path", None)
+    if probe_enabled:
+        cache_kwargs["teacache_probe_enabled"] = True
+    return cache_kwargs or None
 
 
 def _compile_app(app: Any, compiled_path: Path, *, debug: bool) -> None:

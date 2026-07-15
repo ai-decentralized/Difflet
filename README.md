@@ -2,7 +2,7 @@
 
 **A focused inference engine for diffusion transformers (DiTs) on AWS Trainium.**
 
-[Installation](#installation) · [Quick start](#quick-start) · [CLI reference](#cli-reference) · [Verified matrix](#verified-parallelism-matrix) · [Developer guide](DEVELOPER.md)
+[Installation](#installation) · [Quick start](#quick-start) · [Serving](#serving) · [Python API](#python-api) · [CLI reference](#cli-reference) · [Verified matrix](#verified-parallelism-matrix) · [Developer guide](DEVELOPER.md)
 
 ## About
 
@@ -11,8 +11,9 @@ interface. It handles the full lifecycle — model download, ahead-of-time (AOT)
 on-disk artifact caching, and SPMD multi-core execution — so you can go from a Hugging Face
 model id to a generated image or video in one command.
 
-Two entry points expose the same engine:
+Three entry points expose the same engine:
 
+- **`difflet serve`** — a resident, OpenAI-compatible HTTP server for Flux and Qwen-Image.
 - **`difflet` CLI** — `download → compile → generate`, or `difflet run` to do all three at once.
 - **`DiffletPipeline`** — a Python API mirroring `diffusers` for use inside your own scripts.
 
@@ -95,6 +96,15 @@ pip install -e . --no-deps
 
 This installs the `difflet` CLI on your `PATH`.
 
+Because the editable install above intentionally uses `--no-deps`, install the
+runtime dependencies for resident HTTP serving explicitly before running
+`difflet serve`:
+
+```bash
+pip install accelerate "fastapi>=0.115" "uvicorn[standard]>=0.35" \
+  "boto3>=1.34" "python-dotenv>=1.0"
+```
+
 Authenticate with Hugging Face for gated checkpoints such as `black-forest-labs/FLUX.1-dev`:
 
 ```bash
@@ -154,6 +164,154 @@ image = pipe(
 ).images[0]
 image.save("out.png")
 ```
+
+## Serving
+
+`difflet serve` keeps one image model loaded in a resident Trainium worker. S3
+is not required: without an S3 bucket configuration, generated images are
+returned as Base64 data URLs in the OpenAI-style Chat Completions response.
+
+Start Flux on a four-core `trn2.3xlarge`:
+
+```bash
+difflet serve \
+  --model-id black-forest-labs/FLUX.1-dev \
+  --tp-degree 4 \
+  --cp-degree 1 \
+  --height 1024 \
+  --width 1024 \
+  --host 0.0.0.0 \
+  --port 8092
+```
+
+Generate and save an image locally on the client:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8092/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "black-forest-labs/FLUX.1-dev",
+    "messages": [
+      {"role": "user", "content": "a small red sailboat on a calm blue lake"}
+    ],
+    "extra_body": {
+      "height": 1024,
+      "width": 1024,
+      "num_inference_steps": 20,
+      "guidance_scale": 3.5,
+      "seed": 42
+    }
+  }' | jq -r '.choices[0].message.content[0].image_url.url' \
+    | cut -d',' -f2- | base64 -d > output.png
+```
+
+When private S3 storage is configured, the same `image_url.url` field contains
+an expiring presigned URL instead of a data URL.
+
+### Optional S3 artifact storage
+
+With no S3 variables, Difflet returns the generated PNG inline as a Base64 data
+URL. To upload generated PNG bytes to a private S3 bucket and return an expiring
+`image_url`, create an environment file:
+
+```bash
+cp .env.example .env
+```
+
+Configure the AWS S3 bucket and region:
+
+```dotenv
+DIFFLET_S3_BUCKET=difflet
+DIFFLET_S3_REGION=ap-southeast-4
+DIFFLET_S3_PREFIX=difflet
+```
+
+Run the server from the directory containing `.env`. If the file exists, it is
+loaded automatically without overriding variables already exported by the shell.
+Do not commit `.env` or credentials. Boto3 uses its standard credential provider
+chain; on EC2, attach an IAM role to the instance instead of storing access keys
+in `.env`. The role needs `s3:PutObject` and `s3:GetObject` access to
+`arn:aws:s3:::difflet/difflet/*`.
+
+Difflet always returns an S3 presigned URL whose access lifetime is controlled by
+the server-owned `artifact_ttl_seconds` setting (currently 3600 seconds). Keep S3
+Block Public Access enabled. A lifecycle rule may delete expired objects later;
+URL expiry and object deletion are independent.
+
+For non-AWS S3-compatible providers, set `DIFFLET_S3_ENDPOINT_URL` explicitly.
+AWS S3 does not require this setting; boto3 derives the endpoint from
+`DIFFLET_S3_REGION`. Providers that do not use the boto3 default credential chain
+may also set `DIFFLET_S3_ACCESS_KEY_ID` and `DIFFLET_S3_SECRET_ACCESS_KEY`;
+`DIFFLET_S3_SESSION_TOKEN` is optional for temporary credentials. The access key
+and secret key must either both be present or both be absent. Difflet uses SigV4
+and virtual-hosted addressing for AWS presigned URLs. Compatible providers that
+require path-style URLs may set `DIFFLET_S3_ADDRESSING_STYLE=path`.
+
+### Qwen-Image and startup behavior
+
+The other supported serving model is Qwen-Image. Start it with the same fixed
+four-core profile:
+
+```bash
+difflet serve \
+  --model-id Qwen/Qwen-Image \
+  --tp-degree 4 \
+  --cp-degree 1 \
+  --height 1024 \
+  --width 1024 \
+  --host 0.0.0.0 \
+  --port 8092
+```
+
+The first startup downloads missing Hugging Face weights, compiles missing serving artifacts,
+loads the resident worker, and runs a real generation smoke test before readiness opens. Warm
+restarts reuse the immutable compile cache. A four-core host cannot run these two profiles, or a
+CLI generation and one of these servers, at the same time because each profile owns all four
+NeuronCores.
+
+### Check readiness and generate
+
+```bash
+curl http://127.0.0.1:8092/health
+curl http://127.0.0.1:8092/ready
+curl http://127.0.0.1:8092/v1/models
+```
+
+Send an image-generation request:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8092/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "black-forest-labs/FLUX.1-dev",
+    "messages": [
+      {"role": "user", "content": "a small red sailboat on a calm blue lake"}
+    ],
+    "extra_body": {
+      "height": 1024,
+      "width": 1024,
+      "num_inference_steps": 20,
+      "guidance_scale": 3.5,
+      "seed": 42
+    }
+  }'
+```
+
+Request `height` and `width` must match the server's startup profile. Inference steps must be
+between 1 and 50. The response image is available at
+`choices[0].message.content[0].image_url.url`.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Process and worker health |
+| `GET /ready` | Model readiness after load and smoke |
+| `GET /v1/models` | The model served by this process |
+| `POST /v1/chat/completions` | Text-to-image generation |
+
+Serving logs are written to both the console and `./logs/`. Log files are capped at 5 MiB and
+rotated on size or when the date changes. Stop the server with `Ctrl+C` or `SIGTERM`. The API
+does not currently provide authentication; protect a remotely exposed port with a security
+group, reverse proxy, or other access control.
 
 ## CLI reference
 

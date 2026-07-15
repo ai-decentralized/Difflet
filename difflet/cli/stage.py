@@ -3,6 +3,7 @@
 Called by runner.run_stage() as:
     python -m difflet.cli.stage --orchestrator <hf-id> --stage <stage> [forwarded args]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,6 +41,8 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--stage", required=True)
     p.add_argument("--stage-mode", default="generate", choices=["compile", "generate"])
     p.add_argument("--model-id", dest="model_id", default=None)
+    p.add_argument("--model-path", dest="model_path", default=None)
+    p.add_argument("--revision", default=None)
     p.add_argument("--tp-degree", type=int, default=None)
     p.add_argument("--cp-degree", type=int, default=1)
     p.add_argument("--cp-mode", choices=list(CP_MODES), default="gather_kv")
@@ -55,6 +58,8 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--work-dir", default=None)
     p.add_argument("--cache-dir", default=None)
+    p.add_argument("--compiled-dir", default=None)
+    p.add_argument("--vae-tp-degree", type=int, default=None)
     p.add_argument("--teacache-cadence", type=int, default=None)
     p.add_argument("--teacache-online-delta", type=float, default=None)
     p.add_argument("--teacache-speedup", type=float, default=None)

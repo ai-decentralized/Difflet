@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 
@@ -14,6 +15,11 @@ VALID_MODELS = {
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
     "Qwen/Qwen-Image",
     "Lightricks/LTX-2",
+}
+
+SERVE_VALID_MODELS = {
+    "black-forest-labs/FLUX.1-dev",
+    "Qwen/Qwen-Image",
 }
 
 _MODEL_TYPE: dict[str, str] = {
@@ -36,41 +42,85 @@ def _add_model_flag(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_serve_model_flag(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--model-id",
+        required=True,
+        dest="model_id",
+        help="HuggingFace model ID. One of:\n  " + "\n  ".join(sorted(SERVE_VALID_MODELS)),
+    )
+
+
 def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--tp-degree", type=int, default=None,
-                   help="Tensor-parallel degree (default: registry default)")
-    p.add_argument("--cp-degree", type=int, default=None,
-                   help="Context-parallel degree (default: 1)")
-    p.add_argument("--cp-mode", choices=list(CP_MODES), default="gather_kv",
-                   help="Context-parallel attention strategy (default: gather_kv). "
-                        "'ring' rotates the K,V shards; 'ulysses' all-to-alls the "
-                        "sequence shard into a head shard. Both need --cp-degree > 1; "
-                        "'ulysses' additionally needs the model's head count divisible "
-                        "by tp_degree * cp_degree.")
-    p.add_argument("--cfg-parallel", dest="cfg_parallel", action="store_true",
-                   help="Split the uncond/cond CFG passes across 2 data-parallel "
-                        "ranks (doubles world_size). Mutually exclusive with "
-                        "--cp-degree>1. Only for true-CFG models (Flux, Wan, LTX-2).")
-    p.add_argument("--sp", dest="sp_enabled", action="store_true",
-                   help="Enable Megatron-style sequence parallelism: shard the "
-                        "norm/modulation/residual regions along the sequence axis "
-                        "across the tensor-parallel group (reduce-scatter replaces "
-                        "the row-parallel all-reduce; world_size unchanged). "
-                        "Mutually exclusive with --cp-degree>1. Supported: Flux, "
-                        "Wan, HunyuanVideo.")
-    p.add_argument("--dp", type=int, default=None,
-                   help="Data-parallel replica count. The router spawns N workers, "
-                        "each a full dp=1 model copy on its own core range; requests "
-                        "are distributed across them (default: 1)")
-    p.add_argument("--mode", choices=["latency", "throughput", "mixed"], default=None,
-                   help="Runtime mode preset selecting dp/cfg/cp per model class "
-                        "(explicit parallelism flags override individual fields)")
-    p.add_argument("--dp-schedule", choices=["round_robin", "least_loaded"],
-                   default="round_robin",
-                   help="Request-to-replica schedule for --dp>1 (default: round_robin)")
-    p.add_argument("--total-cores", type=int, default=None,
-                   help="Total NeuronCores available for dp*cfg*cp*tp validation "
-                        "(default: NEURON_RT_NUM_CORES when set, else unchecked)")
+    p.add_argument(
+        "--tp-degree",
+        type=int,
+        default=None,
+        help="Tensor-parallel degree (default: registry default)",
+    )
+    p.add_argument(
+        "--cp-degree",
+        type=int,
+        default=None,
+        help="Context-parallel degree (default: 1)",
+    )
+    p.add_argument(
+        "--cp-mode",
+        choices=list(CP_MODES),
+        default="gather_kv",
+        help="Context-parallel attention strategy (default: gather_kv). "
+        "'ring' rotates the K,V shards; 'ulysses' all-to-alls the "
+        "sequence shard into a head shard. Both need --cp-degree > 1; "
+        "'ulysses' additionally needs the model's head count divisible "
+        "by tp_degree * cp_degree.",
+    )
+    p.add_argument(
+        "--cfg-parallel",
+        dest="cfg_parallel",
+        action="store_true",
+        help="Split the uncond/cond CFG passes across 2 data-parallel "
+        "ranks (doubles world_size). Mutually exclusive with "
+        "--cp-degree>1. Only for true-CFG models (Flux, Wan, LTX-2).",
+    )
+    p.add_argument(
+        "--sp",
+        dest="sp_enabled",
+        action="store_true",
+        help="Enable Megatron-style sequence parallelism: shard the "
+        "norm/modulation/residual regions along the sequence axis "
+        "across the tensor-parallel group (reduce-scatter replaces "
+        "the row-parallel all-reduce; world_size unchanged). "
+        "Mutually exclusive with --cp-degree>1. Supported: Flux, "
+        "Wan, HunyuanVideo.",
+    )
+    p.add_argument(
+        "--dp",
+        type=int,
+        default=None,
+        help="Data-parallel replica count. The router spawns N workers, "
+        "each a full dp=1 model copy on its own core range; requests "
+        "are distributed across them (default: 1)",
+    )
+    p.add_argument(
+        "--mode",
+        choices=["latency", "throughput", "mixed"],
+        default=None,
+        help="Runtime mode preset selecting dp/cfg/cp per model class "
+        "(explicit parallelism flags override individual fields)",
+    )
+    p.add_argument(
+        "--dp-schedule",
+        choices=["round_robin", "least_loaded"],
+        default="round_robin",
+        help="Request-to-replica schedule for --dp>1 (default: round_robin)",
+    )
+    p.add_argument(
+        "--total-cores",
+        type=int,
+        default=None,
+        help="Total NeuronCores available for dp*cfg*cp*tp validation "
+        "(default: NEURON_RT_NUM_CORES when set, else unchecked)",
+    )
 
 
 def _add_shape_flags(p: argparse.ArgumentParser) -> None:
@@ -80,46 +130,238 @@ def _add_shape_flags(p: argparse.ArgumentParser) -> None:
 
 
 def _add_cache_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--cache-dir", default=None,
-                   help="Compiled artifact cache root (default: ~/.cache/difflet/)")
-    p.add_argument("--force", action="store_true",
-                   help="Recompile even if a valid cache entry exists")
-    p.add_argument("--host-vae", dest="host_vae", action="store_true",
-                   help="Decode the VAE on host CPU via diffusers instead of a "
-                        "compiled Neuron VAE. Required for Wan clips beyond ~9 "
-                        "frames: the single-shot Neuron VAE graph exceeds the "
-                        "compiler instruction limit (NCC_EVRF007).")
+    p.add_argument(
+        "--cache-dir",
+        default=None,
+        help="Compiled artifact cache root (default: ~/.cache/difflet/)",
+    )
+    p.add_argument(
+        "--force", action="store_true", help="Recompile even if a valid cache entry exists"
+    )
+    p.add_argument(
+        "--host-vae",
+        dest="host_vae",
+        action="store_true",
+        help="Decode the VAE on host CPU via diffusers instead of a "
+        "compiled Neuron VAE. Required for Wan clips beyond ~9 "
+        "frames: the single-shot Neuron VAE graph exceeds the "
+        "compiler instruction limit (NCC_EVRF007).",
+    )
+
+
+def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--tp-degree",
+        type=int,
+        default=None,
+        help="Tensor-parallel degree (default: registry default)",
+    )
+    p.add_argument(
+        "--cp-degree",
+        type=int,
+        default=None,
+        help="Context-parallel degree (default: registry default)",
+    )
+    p.add_argument(
+        "--cp-mode",
+        choices=["gather_kv", "ring"],
+        default=None,
+        help="Context-parallel attention strategy (default: registry default)",
+    )
+    cfg = p.add_mutually_exclusive_group()
+    cfg.add_argument(
+        "--cfg-parallel",
+        dest="cfg_parallel",
+        action="store_true",
+        help="Enable CFG-parallel startup topology",
+    )
+    cfg.add_argument(
+        "--no-cfg-parallel",
+        dest="cfg_parallel",
+        action="store_false",
+        help="Disable CFG-parallel startup topology",
+    )
+    p.set_defaults(cfg_parallel=None)
+    sp = p.add_mutually_exclusive_group()
+    sp.add_argument(
+        "--sp",
+        dest="sp_enabled",
+        action="store_true",
+        help="Enable sequence parallelism for the resident model profile",
+    )
+    sp.add_argument(
+        "--no-sp",
+        dest="sp_enabled",
+        action="store_false",
+        help="Disable sequence parallelism for the resident model profile",
+    )
+    p.set_defaults(sp_enabled=None)
+    p.add_argument("--height", type=int, default=None)
+    p.add_argument("--width", type=int, default=None)
+    p.add_argument("--num-frames", type=int, default=None)
+    p.add_argument(
+        "--cache-dir",
+        default=None,
+        help="Compiled artifact cache root (default: ~/.cache/difflet/)",
+    )
+    p.add_argument(
+        "--force", action="store_true", help="Recompile even if a valid cache entry exists"
+    )
+    p.add_argument(
+        "--host-vae",
+        dest="host_vae",
+        action="store_true",
+        help="Request host VAE decode (rejected by current image serving)",
+    )
+    p.add_argument(
+        "--teacache-cadence",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Request fixed-cadence TeaCache (not supported by serving)",
+    )
+    p.add_argument(
+        "--teacache-online-delta",
+        type=float,
+        default=None,
+        metavar="ALPHA",
+        help="Request online-delta TeaCache (not supported by serving)",
+    )
+    p.add_argument(
+        "--teacache-speedup",
+        type=float,
+        default=None,
+        metavar="X",
+        help="Adaptive TeaCache target speedup",
+    )
+    p.add_argument(
+        "--teacache-calibration", default=None, metavar="PATH", help="TeaCache calibration JSON"
+    )
 
 
 def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--prompt", required=False, default=None)
-    p.add_argument("--output", required=False, default=None,
-                   help="Output file path (.png or .mp4)")
-    p.add_argument("--requests", default=None,
-                   help="JSONL batch file: one request per line with prompt/output/"
-                        "seed and optional negative_prompt/guidance_scale/steps")
+    p.add_argument("--output", required=False, default=None, help="Output file path (.png or .mp4)")
+    p.add_argument(
+        "--requests",
+        default=None,
+        help="JSONL batch file: one request per line with prompt/output/"
+        "seed and optional negative_prompt/guidance_scale/steps",
+    )
     p.add_argument("--requests-dir", default=None, help=argparse.SUPPRESS)  # worker mode
     p.add_argument("--worker-index", type=int, default=None, help=argparse.SUPPRESS)
     p.add_argument("--steps", type=int, default=None)
     p.add_argument("--guidance-scale", type=float, default=None)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--work-dir", default=None,
-                   help="Directory for inter-stage tensors (staged models only)")
-    p.add_argument("--keep-work-dir", action="store_true",
-                   help="Do not delete work-dir after successful generation")
-    p.add_argument("--teacache-cadence", type=int, default=None,
-                   metavar="N", help="Skip every N-th DiT step (fixed cadence, no calibration)")
-    p.add_argument("--teacache-online-delta", type=float, default=None,
-                   metavar="ALPHA", help="Online-delta TeaCache alpha (no calibration)")
-    p.add_argument("--teacache-speedup", type=float, default=None,
-                   metavar="X", help="Adaptive TeaCache target speedup (requires --teacache-calibration)")
-    p.add_argument("--teacache-calibration", default=None,
-                   metavar="PATH", help="Path to TeaCache calibration JSON")
+    p.add_argument(
+        "--work-dir", default=None, help="Directory for inter-stage tensors (staged models only)"
+    )
+    p.add_argument(
+        "--keep-work-dir",
+        action="store_true",
+        help="Do not delete work-dir after successful generation",
+    )
+    p.add_argument(
+        "--teacache-cadence",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Skip every N-th DiT step (fixed cadence, no calibration)",
+    )
+    p.add_argument(
+        "--teacache-online-delta",
+        type=float,
+        default=None,
+        metavar="ALPHA",
+        help="Online-delta TeaCache alpha (no calibration)",
+    )
+    p.add_argument(
+        "--teacache-speedup",
+        type=float,
+        default=None,
+        metavar="X",
+        help="Adaptive TeaCache target speedup (requires --teacache-calibration)",
+    )
+    p.add_argument(
+        "--teacache-calibration",
+        default=None,
+        metavar="PATH",
+        help="Path to TeaCache calibration JSON",
+    )
+
+
+def _add_serve_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("--port", type=int, default=8091)
+    p.add_argument(
+        "--max-queued-requests",
+        type=_nonnegative_int,
+        default=8,
+        metavar="COUNT",
+        help="Maximum requests waiting behind the active request (default: 8; 0 disables queuing)",
+    )
+    p.add_argument(
+        "--queue-timeout",
+        type=_positive_finite_float,
+        default=30.0,
+        metavar="SECONDS",
+        help="Maximum time a request may wait in the queue (default: 30)",
+    )
+    p.add_argument(
+        "--request-timeout",
+        type=_positive_finite_float,
+        default=300.0,
+        metavar="SECONDS",
+        help="Maximum total request time, including queueing and generation (default: 300)",
+    )
+    p.add_argument(
+        "--artifact-store-timeout",
+        type=_positive_finite_float,
+        default=60.0,
+        metavar="SECONDS",
+        help="Maximum time for each artifact upload or URL operation (default: 60)",
+    )
+    p.add_argument(
+        "--worker-cancel-timeout",
+        type=_positive_finite_float,
+        default=10.0,
+        metavar="SECONDS",
+        help="Time to wait for cooperative worker cancellation before restart (default: 10)",
+    )
+    p.add_argument(
+        "--worker-restart-timeout",
+        type=_positive_finite_float,
+        default=900.0,
+        metavar="SECONDS",
+        help="Maximum time for worker restart and readiness recovery (default: 900)",
+    )
+    p.add_argument(
+        "--worker-heartbeat-interval",
+        type=float,
+        default=30.0,
+        metavar="SECONDS",
+        help="Worker heartbeat interval in seconds, 5-120 inclusive (default: 30)",
+    )
+
+
+def _nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be zero or greater")
+    return parsed
+
+
+def _positive_finite_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a finite number greater than zero")
+    return parsed
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(prog="difflet",
-                                   description="Difflet — diffusion inference on Trainium")
+    root = argparse.ArgumentParser(
+        prog="difflet", description="Difflet — diffusion inference on Trainium"
+    )
     sub = root.add_subparsers(dest="command", required=True)
 
     dl = sub.add_parser("download", help="Download model weights from HuggingFace")
@@ -149,6 +391,12 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_cache_flags(run_cmd)
     _add_generate_flags(run_cmd)
 
+    serve = sub.add_parser("serve", help="Start OpenAI-compatible T2I serving")
+    _add_serve_model_flag(serve)
+    serve.add_argument("--revision", default=None)
+    _add_serve_profile_flags(serve)
+    _add_serve_flags(serve)
+
     return root
 
 
@@ -165,12 +413,13 @@ def _validate_teacache(args: argparse.Namespace) -> None:
     ]
     active_names = [name for name, on in active if on]
     if len(active_names) > 1:
-        print(f"Error: {active_names[0]} and {active_names[1]} are mutually exclusive.",
-              file=sys.stderr)
+        print(
+            f"Error: {active_names[0]} and {active_names[1]} are mutually exclusive.",
+            file=sys.stderr,
+        )
         raise SystemExit(1)
-    if speedup is not None and calib is None:
-        print("Error: --teacache-speedup requires --teacache-calibration PATH.",
-              file=sys.stderr)
+    if speedup is not None and not calib:
+        print("Error: --teacache-speedup requires --teacache-calibration PATH.", file=sys.stderr)
         raise SystemExit(1)
 
 
@@ -259,8 +508,10 @@ def _validate_dp(args: argparse.Namespace) -> None:
     worker = getattr(args, "requests_dir", None) is not None
     if args.command in ("generate", "run") and not worker:
         if not batch and not (args.prompt and args.output):
-            print("Error: --prompt and --output are required (or use --requests FILE).",
-                  file=sys.stderr)
+            print(
+                "Error: --prompt and --output are required (or use --requests FILE).",
+                file=sys.stderr,
+            )
             raise SystemExit(1)
         if batch and args.prompt and args.requests:
             print("Error: --prompt and --requests are mutually exclusive.", file=sys.stderr)
@@ -269,8 +520,11 @@ def _validate_dp(args: argparse.Namespace) -> None:
         getattr(args, name, None) is not None
         for name in ("teacache_cadence", "teacache_online_delta", "teacache_speedup")
     ):
-        print("Error: TeaCache flags are not supported in batch/DP mode "
-              "(per-request controller reset is a follow-up).", file=sys.stderr)
+        print(
+            "Error: TeaCache flags are not supported in batch/DP mode "
+            "(per-request controller reset is a follow-up).",
+            file=sys.stderr,
+        )
         raise SystemExit(1)
     if (getattr(args, "dp", None) or 1) > 1 and not worker:
         total = getattr(args, "total_cores", None)
@@ -278,8 +532,10 @@ def _validate_dp(args: argparse.Namespace) -> None:
             total = int(os.environ["NEURON_RT_NUM_CORES"])
         needed = args.dp * _replica_cores(args)
         if total is not None and needed > total:
-            print(f"Error: dp*cfg*cp*tp = {needed} cores exceeds available cores ({total}).",
-                  file=sys.stderr)
+            print(
+                f"Error: dp*cfg*cp*tp = {needed} cores exceeds available cores ({total}).",
+                file=sys.stderr,
+            )
             raise SystemExit(1)
 
 
@@ -291,13 +547,19 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
     if args.requests:
         requests = load_requests_jsonl(args.requests)
     else:
-        requests = [RequestSpec(index=0, prompt=args.prompt, output=args.output,
-                                seed=args.seed, guidance_scale=args.guidance_scale,
-                                steps=args.steps)]
+        requests = [
+            RequestSpec(
+                index=0,
+                prompt=args.prompt,
+                output=args.output,
+                seed=args.seed,
+                guidance_scale=args.guidance_scale,
+                steps=args.steps,
+            )
+        ]
     dp = args.dp or 1
     if dp > 1 and len(requests) == 1:
-        print("Warning: --dp > 1 with a single request leaves replicas idle.",
-              file=sys.stderr)
+        print("Warning: --dp > 1 with a single request leaves replicas idle.", file=sys.stderr)
     if args.command == "run":
         orch = _get_orchestrator(args)
         orch.download()
@@ -361,10 +623,11 @@ def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.model_id not in VALID_MODELS:
+    valid_models = SERVE_VALID_MODELS if args.command == "serve" else VALID_MODELS
+    if args.model_id not in valid_models:
         print(
             f"Error: Unknown model-id '{args.model_id}'. Valid model IDs:\n"
-            + "\n".join(f"  {m}" for m in sorted(VALID_MODELS)),
+            + "\n".join(f"  {m}" for m in sorted(valid_models)),
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -391,9 +654,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command in ("generate", "run"):
         _validate_teacache(args)
         _validate_dp(args)
-        if args.requests_dir is None and (
-            args.requests is not None or (args.dp or 1) > 1
-        ):
+        if args.requests_dir is None and (args.requests is not None or (args.dp or 1) > 1):
             _dispatch_dp(args)  # raises SystemExit
 
     # Only for the weight-loading commands. NOT compile: neuronx-cc runs as a
@@ -402,8 +663,14 @@ def main(argv: list[str] | None = None) -> None:
     if argv is None and args.command in ("generate", "run"):
         _ensure_jemalloc()
 
-    orchestrator = _get_orchestrator(args)
-    getattr(orchestrator, args.command)()
+    if args.command == "serve":
+        from difflet.cli.serve import run, validate_serve_args
+
+        validate_serve_args(args)
+        run(args)
+    else:
+        orchestrator = _get_orchestrator(args)
+        getattr(orchestrator, args.command)()
 
 
 if __name__ == "__main__":

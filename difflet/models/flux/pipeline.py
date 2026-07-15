@@ -35,6 +35,7 @@ from diffusers.utils import is_torch_xla_available
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
+
     XLA_AVAILABLE = True
 else:
     XLA_AVAILABLE = False
@@ -91,6 +92,7 @@ class NeuronFluxPipeline(FluxPipeline):
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 512,
+        teacache_enabled: Optional[bool] = None,
     ):
         """
         Override of FluxPipeline.__call__ with parallel CFG batching.
@@ -99,14 +101,22 @@ class NeuronFluxPipeline(FluxPipeline):
         this implementation batches positive and negative inputs for parallel inference.
         """
         # Validate Neuron-specific constraints
-        assert ip_adapter_image is None, "NeuronFluxPipeline does not support ip_adapter_image input."
-        assert ip_adapter_image_embeds is None, "NeuronFluxPipeline does not support ip_adapter_image_embeds input."
-        assert negative_ip_adapter_image is None, "NeuronFluxPipeline does not support negative_ip_adapter_image input."
-        assert negative_ip_adapter_image_embeds is None, "NeuronFluxPipeline does not support negative_ip_adapter_image_embeds input."
+        assert (
+            ip_adapter_image is None
+        ), "NeuronFluxPipeline does not support ip_adapter_image input."
+        assert (
+            ip_adapter_image_embeds is None
+        ), "NeuronFluxPipeline does not support ip_adapter_image_embeds input."
+        assert (
+            negative_ip_adapter_image is None
+        ), "NeuronFluxPipeline does not support negative_ip_adapter_image input."
+        assert (
+            negative_ip_adapter_image_embeds is None
+        ), "NeuronFluxPipeline does not support negative_ip_adapter_image_embeds input."
 
         # Check if CFG is enabled and if parallel CFG is configured
         do_true_cfg = true_cfg_scale > 1 and negative_prompt is not None
-        cfg_parallel_enabled = getattr(self.transformer.config, 'cfg_parallel_enabled', False)
+        cfg_parallel_enabled = getattr(self.transformer.config, "cfg_parallel_enabled", False)
 
         # Only use parallel CFG if both CFG is enabled AND cfg_parallel_enabled is configured
         use_parallel_cfg = do_true_cfg and cfg_parallel_enabled
@@ -115,7 +125,9 @@ class NeuronFluxPipeline(FluxPipeline):
         # serial-CFG teacache loop (handles both the controller-on skip path and
         # the controller-None baseline through one loop for a clean A/B). CFG
         # parallel is incompatible (asserted off in the application).
-        if getattr(self, "teacache_probe", None) is not None:
+        if teacache_enabled is False and getattr(self, "teacache_controller", None) is not None:
+            self.teacache_controller.reset()
+        if getattr(self, "teacache_probe", None) is not None and teacache_enabled is not False:
             with self.transformer.image_rotary_emb_cache_context():
                 return self._call_with_teacache(
                     prompt=prompt,
@@ -316,7 +328,11 @@ class NeuronFluxPipeline(FluxPipeline):
         )
 
         # 6. Prepare timesteps
-        sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
+        sigmas = (
+            np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
+            if sigmas is None
+            else sigmas
+        )
         image_seq_len = latents.shape[1]
 
         mu = calculate_shift(
@@ -346,7 +362,9 @@ class NeuronFluxPipeline(FluxPipeline):
         # 8. Batch embeddings for parallel CFG inference
         # Concatenate: [negative, positive]
         batched_prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
-        batched_pooled_embeds = torch.cat([negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
+        batched_pooled_embeds = torch.cat(
+            [negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0
+        )
 
         # Batch guidance if present
         if guidance is not None:
@@ -378,7 +396,11 @@ class NeuronFluxPipeline(FluxPipeline):
                     joint_attention_kwargs=self.joint_attention_kwargs,
                     return_dict=False,
                 )
-                batched_noise_pred = transformer_output[0] if isinstance(transformer_output, (tuple, list)) else transformer_output
+                batched_noise_pred = (
+                    transformer_output[0]
+                    if isinstance(transformer_output, (tuple, list))
+                    else transformer_output
+                )
 
                 # Split batched output and apply CFG formula
                 # Debug: check shapes before split
@@ -404,7 +426,9 @@ class NeuronFluxPipeline(FluxPipeline):
                     latents = callback_outputs.pop("latents", latents)
                     prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
 
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     progress_bar.update()
 
                 if XLA_AVAILABLE:
@@ -495,7 +519,7 @@ class NeuronFluxPipeline(FluxPipeline):
 
         device = self._execution_device
         lora_scale = self.joint_attention_kwargs.get("scale", None)
-        (prompt_embeds, pooled_prompt_embeds, text_ids) = self.encode_prompt(
+        prompt_embeds, pooled_prompt_embeds, text_ids = self.encode_prompt(
             prompt=prompt,
             prompt_2=prompt_2,
             prompt_embeds=prompt_embeds,
@@ -506,7 +530,7 @@ class NeuronFluxPipeline(FluxPipeline):
             lora_scale=lora_scale,
         )
         if do_true_cfg:
-            (negative_prompt_embeds, negative_pooled_prompt_embeds, _) = self.encode_prompt(
+            negative_prompt_embeds, negative_pooled_prompt_embeds, _ = self.encode_prompt(
                 prompt=negative_prompt,
                 prompt_2=negative_prompt_2,
                 prompt_embeds=negative_prompt_embeds,
@@ -529,7 +553,11 @@ class NeuronFluxPipeline(FluxPipeline):
             latents,
         )
 
-        sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
+        sigmas = (
+            np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
+            if sigmas is None
+            else sigmas
+        )
         image_seq_len = latents.shape[1]
         mu = calculate_shift(
             image_seq_len,
@@ -667,9 +695,7 @@ class NeuronFluxPipeline(FluxPipeline):
 class NeuronFluxFillPipeline(FluxFillPipeline):
     @functools.wraps(FluxFillPipeline.encode_prompt)
     def encode_prompt(self, *args, **kwargs):
-        assert (
-            kwargs.get("lora_scale") is None
-        ), "NeuronFluxFillPipeline does not support LoRA."
+        assert kwargs.get("lora_scale") is None, "NeuronFluxFillPipeline does not support LoRA."
         return super().encode_prompt(*args, **kwargs)
 
     @functools.wraps(FluxFillPipeline.__call__)
@@ -694,9 +720,7 @@ class NeuronFluxFillPipeline(FluxFillPipeline):
 class NeuronFluxControlPipeline(FluxControlPipeline):
     @functools.wraps(FluxControlPipeline.encode_prompt)
     def encode_prompt(self, *args, **kwargs):
-        assert (
-            kwargs.get("lora_scale") is None
-        ), "NeuronFluxControlPipeline does not support LoRA."
+        assert kwargs.get("lora_scale") is None, "NeuronFluxControlPipeline does not support LoRA."
         return super().encode_prompt(*args, **kwargs)
 
     @functools.wraps(FluxControlPipeline.__call__)

@@ -40,6 +40,7 @@ class QwenImageOrchestrator:
         text_seq_len: int = 1024,
         scheduler: Any = None,
         teacache_speedup: float | None = None,
+        teacache_calibration: Any | None = None,
         teacache_calibration_path: str | None = None,
     ) -> None:
         self.model_path = model_path
@@ -64,11 +65,19 @@ class QwenImageOrchestrator:
             )
 
             shape_label = _teacache_shape_label(height=self.height, width=self.width)
-            calibration = load_teacache_calibration_or_raise(
-                teacache_calibration_path,
-                model="qwen_image",
-                shape_label=shape_label,
-            )
+            if teacache_calibration is not None and teacache_calibration_path is not None:
+                raise ValueError(
+                    "teacache_calibration and teacache_calibration_path are mutually exclusive"
+                )
+            calibration = teacache_calibration
+            if calibration is None:
+                calibration = load_teacache_calibration_or_raise(
+                    teacache_calibration_path,
+                    model="qwen_image",
+                    shape_label=shape_label,
+                )
+            elif calibration.model != "qwen_image" or calibration.shape_label != shape_label:
+                raise ValueError("TeaCache calibration does not match Qwen model/profile")
             if (
                 calibration.target_speedup is not None
                 and float(teacache_speedup) > float(calibration.target_speedup) + 1e-6
@@ -109,7 +118,9 @@ class QwenImageOrchestrator:
             if latents.ndim == 3:
                 expected = (int(batch_size), self.packed_seq_len, int(channels) * 4)
                 if tuple(latents.shape) != expected:
-                    raise ValueError(f"Expected packed latents shape {expected}, got {tuple(latents.shape)}")
+                    raise ValueError(
+                        f"Expected packed latents shape {expected}, got {tuple(latents.shape)}"
+                    )
                 return latents
             if latents.ndim == 5:
                 return pack_qwen_image_latents(latents)
@@ -143,6 +154,7 @@ class QwenImageOrchestrator:
         batch_size: int = 1,
         channels: int = 16,
         num_inference_steps: int = 4,
+        teacache_enabled: bool | None = None,
         guidance_scale: float | None = None,
         output_type: str = "latent",
         generator: torch.Generator | None = None,
@@ -180,7 +192,19 @@ class QwenImageOrchestrator:
                 timesteps = torch.as_tensor(timesteps, device=packed_latents.device)
                 if timesteps.ndim == 0:
                     timesteps = timesteps[None]
-            packed_latents = self._denoise(bundle=bundle, timesteps=timesteps, trajectory=trajectory)
+            controller = self.teacache_controller
+            if controller is not None:
+                controller.reset()
+                if teacache_enabled is False or len(timesteps) != int(
+                    controller.calibration.num_steps
+                ):
+                    controller = None
+            packed_latents = self._denoise(
+                bundle=bundle,
+                timesteps=timesteps,
+                trajectory=trajectory,
+                controller=controller,
+            )
 
         images = packed_latents
         if output_type == "pt":
@@ -205,7 +229,9 @@ class QwenImageOrchestrator:
                 dtype=torch.float32,
             )
         sigmas = np.linspace(1.0, 1.0 / num_inference_steps, num_inference_steps)
-        timesteps, _ = _retrieve_timesteps(self.scheduler, num_inference_steps, "cpu", sigmas=sigmas)
+        timesteps, _ = _retrieve_timesteps(
+            self.scheduler, num_inference_steps, "cpu", sigmas=sigmas
+        )
         return timesteps.to(device=device)
 
     def _denoise(
@@ -214,19 +240,22 @@ class QwenImageOrchestrator:
         bundle: QwenImageDiTInputBundle,
         timesteps: torch.Tensor,
         trajectory: list[torch.Tensor] | None,
+        controller: Any | None,
     ) -> torch.Tensor:
         latents = bundle.hidden_states
         # fused-A (cclog 81): prev_mod is a persistent on-device Parameter; the
         # probe returns only the scalar delta — no host prev_mod copy. Mirrors
         # the HunyuanVideo fused branch (cclog 80).
         fused_probe = (
-            self.teacache_controller is not None
+            controller is not None
             and getattr(self.transformer, "teacache_probe_fused", False)
             and hasattr(self.transformer, "teacache_delta")
         )
         for step_index, timestep in enumerate(timesteps):
             model_dtype = _component_dtype(self.transformer, self.dtype)
-            timestep_batch = _batch_timestep(timestep, latents.shape[0], latents.device, model_dtype)
+            timestep_batch = _batch_timestep(
+                timestep, latents.shape[0], latents.device, model_dtype
+            )
             model_bundle = QwenImageDiTInputBundle(
                 hidden_states=latents.to(dtype=model_dtype),
                 # The diffusers QwenImage pipeline feeds timestep/1000 to the DiT
@@ -239,25 +268,22 @@ class QwenImageOrchestrator:
                 guidance=bundle.guidance.to(dtype=model_dtype),
             )
             delta_scalar: float | None = None
-            if fused_probe and self.teacache_controller.needs_signal():
+            if fused_probe and controller.needs_signal():
                 # prev_mod persists on device; probe returns only delta. The
                 # garbage step-0 delta (zero prev_mod) is absorbed by warmup.
                 # Skipped entirely in fixed-cadence mode (probe-free, cclog 84).
                 delta_t = self.transformer.teacache_delta(model_bundle)
                 delta_scalar = float(delta_t.detach().cpu().item())
-            if (
-                self.teacache_controller is not None
-                and self.teacache_controller.should_skip(
-                    step_index,
-                    None,
-                    diff_norm=delta_scalar,
-                )
+            if controller is not None and controller.should_skip(
+                step_index,
+                None,
+                diff_norm=delta_scalar,
             ):
-                noise_pred = self.teacache_controller.skip_noise_pred(None)
+                noise_pred = controller.skip_noise_pred(None)
             else:
                 noise_pred = _first_tensor(self.transformer(model_bundle))
-                if self.teacache_controller is not None:
-                    self.teacache_controller.record_full_step(noise_pred, None)
+                if controller is not None:
+                    controller.record_full_step(noise_pred, None)
             latents = self._scheduler_step(noise_pred, timestep, latents, len(timesteps))
             if trajectory is not None:
                 trajectory.append(latents.detach().cpu())
@@ -295,7 +321,9 @@ class QwenImageOrchestrator:
         latents_mean = getattr(config, "latents_mean", None)
         latents_std = getattr(config, "latents_std", None)
         if latents_mean is not None and latents_std is not None:
-            mean = torch.tensor(latents_mean, dtype=dtype, device=latents.device).view(1, -1, 1, 1, 1)
+            mean = torch.tensor(latents_mean, dtype=dtype, device=latents.device).view(
+                1, -1, 1, 1, 1
+            )
             std = torch.tensor(latents_std, dtype=dtype, device=latents.device).view(1, -1, 1, 1, 1)
             latents = latents.to(dtype=dtype) * std + mean
         decode = getattr(self.vae, "decode", None)

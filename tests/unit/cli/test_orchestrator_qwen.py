@@ -21,6 +21,7 @@ def _qwen_args(**overrides) -> argparse.Namespace:
         work_dir=None, keep_work_dir=False,
         teacache_cadence=None, teacache_online_delta=None,
         teacache_speedup=None, teacache_calibration=None,
+        compiled_dir=None, vae_tp_degree=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -61,10 +62,12 @@ def test_download_resolves_remote(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "difflet.pipeline.path_resolver.resolve_model_path",
-        lambda model_id, *, local_files_only: calls.append(local_files_only),
+        lambda model_id, *, revision, local_files_only: calls.append(
+            (revision, local_files_only)
+        ),
     )
-    QwenImageOrchestrator(_qwen_args()).download()
-    assert calls == [False]
+    QwenImageOrchestrator(_qwen_args(revision="abc123")).download()
+    assert calls == [("abc123", False)]
 
 
 def test_generate_preserves_work_dir_on_failure(monkeypatch, tmp_path, capsys):
@@ -133,6 +136,14 @@ def test_shared_cli_args_optionals():
         _qwen_args(prompt=None, output=None, cache_dir=None)
     )._shared_cli_args("compile")
     assert "--prompt" not in bare and "--output" not in bare
+
+
+def test_shared_cli_args_forwards_revision():
+    parts = QwenImageOrchestrator(
+        _qwen_args(revision="refs/pr/1")
+    )._shared_cli_args("compile")
+
+    assert parts[parts.index("--revision") + 1] == "refs/pr/1"
 
 
 # ----------------------------------------------------------------- stage: text
@@ -292,6 +303,42 @@ def test_stage_vae_compile(monkeypatch, tmp_path):
     monkeypatch.setattr(_Recorder, "__init__", spy)
     QwenImageOrchestrator(args)._stage_vae(args)
     assert created[-1].compiled is not None
+
+
+def test_stage_vae_compile_supports_serving_tp_and_artifact_override(monkeypatch, tmp_path):
+    configs = []
+    _common_setup(monkeypatch)
+    _inject(
+        monkeypatch,
+        "difflet.backends.trainium.core.config",
+        NeuronConfig=lambda **kw: configs.append(kw) or object(),
+    )
+    _inject(
+        monkeypatch,
+        "difflet.backends.trainium.wan.vae",
+        NeuronWanVAEDecoderApplication=_Recorder,
+        WanVAEDecoderInferenceConfig=lambda **kw: types.SimpleNamespace(
+            latents_mean=[0.0] * 16, latents_std=[1.0] * 16, **kw
+        ),
+    )
+    _inject(
+        monkeypatch,
+        "difflet.utils.diffusers_adapter",
+        load_diffusers_config=lambda p: {},
+    )
+    compiled_dir = tmp_path / "serving-vae"
+    args = _qwen_args(
+        stage_mode="compile",
+        cache_dir=str(tmp_path),
+        compiled_dir=str(compiled_dir),
+        vae_tp_degree=4,
+    )
+
+    app = QwenImageOrchestrator(args)
+    app._stage_vae(args)
+
+    assert configs[-1]["tp_degree"] == 4
+    assert configs[-1]["world_size"] == 4
 
 
 def test_stage_vae_generate_saves_output(monkeypatch, tmp_path):
