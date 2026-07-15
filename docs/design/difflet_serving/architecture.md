@@ -23,7 +23,7 @@ MVP serving supports:
 - One active model/profile per server process.
 - One active serving profile in the resident worker lifecycle.
 - OpenAI-style `/v1/chat/completions` as the public API.
-- Base64 data URLs by default, with R2-backed artifact URLs when a complete R2
+- Base64 data URLs by default, with S3-backed artifact URLs when a complete S3
   configuration is present.
 
 MVP does not include subprocess serving fallback, rotating resident fallback,
@@ -1322,7 +1322,7 @@ FastAPI /v1/chat/completions
   -> worker-owned StagePipelineEngine.generate(request, context)
   -> sequential InProcessStageExecutor calls model-owned runners
   -> image bytes
-  -> if R2 configured: await ArtifactStore.put_bytes(...) -> get_url(ref)
+  -> if S3 configured: await ArtifactStore.put_bytes(...) -> get_url(ref)
   -> otherwise: encode data:image/...;base64,...
   -> chat response with image_url.url
 ```

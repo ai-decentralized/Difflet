@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from difflet.serving.artifact_store import R2ArtifactStore
+from difflet.serving.artifact_store import S3ArtifactStore
 from difflet.serving.factory import build_serving_stack
 from difflet.serving.openai.api_server import create_app
 from difflet.serving.options import (
@@ -206,7 +206,7 @@ def run(args: argparse.Namespace) -> None:
     options = options_from_args(args)
     project_name = _resolve_project_name()
     log_config = _build_serving_logging_config(project_name)
-    artifact_store = R2ArtifactStore.from_env_if_configured(
+    artifact_store = S3ArtifactStore.from_env_if_configured(
         client_timeout=options.artifact_store_timeout
     )
     stack = build_serving_stack(options)

@@ -132,7 +132,7 @@ The engine does not own:
 - Qwen payload interpretation or stage-to-stage type branching
 - Flux pipeline invocation details
 - stage placement, per-stage core scheduling, IPC, or shared-memory policy in P0
-- R2 upload
+- S3 upload
 - OpenAI response formatting
 
 ## Generic Stage Execution Contract
@@ -548,13 +548,13 @@ worker execution. The engine should stamp `received_at_monotonic` and compute
 `deadline_monotonic` in its admission path; model adapters should not own this
 timer.
 
-When R2 is configured, artifact upload and URL generation happen after the engine
+When S3 is configured, artifact upload and URL generation happen after the engine
 returns bytes to the OpenAI handler, so they are bounded by
 `artifact_store_timeout`, not by the engine `request_timeout`. With no required
-R2 variables, the handler returns a Base64 data URL and does not use an artifact
-backend. A partial R2 configuration returns `artifact_store_unavailable` during
+S3 variables, the handler returns a Base64 data URL and does not use an artifact
+backend. A partial S3 configuration returns `artifact_store_unavailable` during
 startup. Unexpected SDK/backend failures retain full details only in protected
-logs and return fixed `internal_error`; a hung R2 upload or presign must not hold
+logs and return fixed `internal_error`; a hung S3 upload or presign must not hold
 the HTTP request indefinitely.
 
 ## Generate Flow

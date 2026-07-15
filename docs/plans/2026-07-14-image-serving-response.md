@@ -23,14 +23,14 @@ Findings in the Current State section are anchored to this commit and date.
 ## Implementation Result
 
 Implemented on 2026-07-14. The existing `/v1/chat/completions` route now
-returns a Base64 data URL when the required R2 variables are absent and keeps
-returning an artifact URL when the complete R2 configuration is present.
-Partial required R2 configuration fails before the serving stack is built, and
-an R2 upload failure does not fall back to Base64.
+returns a Base64 data URL when the required S3 variables are absent and keeps
+returning an artifact URL when the complete S3 configuration is present.
+Partial required S3 configuration fails before the serving stack is built, and
+an S3 upload failure does not fall back to Base64.
 
 The serve-command implementation now lives at `difflet/cli/serve.py`; the HTTP
 server, engine, storage, and model adapters remain under `difflet/serving/`.
-README setup and the authoritative serving documents describe R2 as optional.
+README setup and the authoritative serving documents describe S3 as optional.
 
 Local verification completed with 216 serving tests and 47 focused CLI tests,
 plus Black, Ruff, targeted mypy with skipped imports, `compileall`, and
@@ -38,12 +38,12 @@ plus Black, Ruff, targeted mypy with skipped imports, `compileall`, and
 
 ## Goal
 
-Make `difflet serve` usable without Cloudflare R2 while retaining R2 as an
+Make `difflet serve` usable without S3 while retaining private S3 storage as an
 optional production artifact backend:
 
-- When a complete R2 configuration is present, upload the generated image and
+- When a complete S3 configuration is present, upload the generated image and
   return its remote URL in the existing Chat Completions response.
-- When no R2 configuration is present, return the generated image inline as a
+- When no S3 configuration is present, return the generated image inline as a
   Base64 data URL in the existing Chat Completions response.
 - Keep `POST /v1/chat/completions` as the image-generation route.
 - Do not add an `--artifact-store` CLI option for this behavior.
@@ -62,7 +62,7 @@ The public route is:
 POST /v1/chat/completions
 ```
 
-Without R2 configuration, return:
+Without S3 configuration, return:
 
 ```json
 {
@@ -90,7 +90,7 @@ Without R2 configuration, return:
 }
 ```
 
-With R2 configured, return:
+With S3 configured, return:
 
 ```json
 {
@@ -121,34 +121,36 @@ With R2 configured, return:
 Both modes keep the same Chat Completions envelope and the same
 `image_url.url` field. Only the value changes:
 
-- no R2: `data:image/png;base64,...`;
-- complete R2: an HTTP(S) artifact URL.
+- no S3: `data:image/png;base64,...`;
+- complete S3: an HTTP(S) artifact URL.
 
 ### 2. Automatic mode selection
 
 The server resolves the response mode once during application construction:
 
-| R2 configuration | Selected mode | Startup behavior |
+| S3 configuration | Selected mode | Startup behavior |
 | --- | --- | --- |
-| All required variables absent | Base64 data URL | Start normally |
-| All required variables present and valid | R2 URL | Construct the R2 store |
-| Only some required variables present | Configuration error | Fail startup with the missing variable names |
+| All S3 selector variables absent | Base64 data URL | Start normally |
+| Bucket configured | Presigned S3 URL | Construct the S3 store |
+| Any S3 selector present without a bucket | Configuration error | Fail startup with the missing bucket name |
 
-Required R2 variables remain:
+Required S3 variable:
 
 ```text
-DIFFLET_R2_BUCKET
-DIFFLET_R2_ENDPOINT_URL
-DIFFLET_R2_ACCESS_KEY_ID
-DIFFLET_R2_SECRET_ACCESS_KEY
+DIFFLET_S3_BUCKET
 ```
 
-Optional R2 variables remain:
+Optional S3 variables:
 
 ```text
-DIFFLET_R2_PREFIX
-DIFFLET_R2_PUBLIC_BASE_URL
-DIFFLET_R2_CLIENT_TIMEOUT
+DIFFLET_S3_REGION
+DIFFLET_S3_PREFIX
+DIFFLET_S3_CLIENT_TIMEOUT
+DIFFLET_S3_ENDPOINT_URL
+DIFFLET_S3_ACCESS_KEY_ID
+DIFFLET_S3_SECRET_ACCESS_KEY
+DIFFLET_S3_SESSION_TOKEN
+DIFFLET_S3_ADDRESSING_STYLE
 ```
 
 An empty optional value is treated as unset. Selection must not depend on
@@ -159,21 +161,22 @@ whether `.env` exists; exported process variables and the existing optional
 
 Automatic selection is not a runtime fallback chain:
 
-- If R2 was selected and upload or URL creation fails, return the existing
+- If S3 was selected and upload or URL creation fails, return the existing
   OpenAI-style artifact/internal error JSON.
-- Do not silently return Base64 after an R2 failure. Doing so hides deployment
+- Do not silently return Base64 after an S3 failure. Doing so hides deployment
   faults and can unexpectedly place large image data in API responses.
 - Base64 encoding failures are unexpected internal failures and use the same
   public error envelope.
 - Never log image bytes, Base64 payloads, access keys, secret keys, or presigned
   query strings.
 
-### 4. R2 storage boundary
+### 4. S3 storage boundary
 
-The first implementation keeps the current R2 environment contract and
-`R2ArtifactStore`. R2 already uses the S3-compatible boto3 client, so the core
-upload implementation remains inside the artifact-storage layer. This change
-does not add an `--artifact-store` selector or rename the existing R2 variables.
+`S3ArtifactStore` uses the boto3 default credential provider chain when explicit
+Difflet credentials are absent. On EC2 this normally means an attached IAM role.
+S3-compatible providers may set an endpoint plus an access-key/secret-key pair;
+the session token is optional for temporary credentials. AWS S3 derives its
+endpoint from the region.
 
 ### 5. Chat Completions request contract
 
@@ -210,13 +213,13 @@ Request behavior:
 - The server still owns exactly one loaded model/profile; a supplied `model`
   must match that loaded model.
 - Object-storage selection is not controlled by a request field.
-- `response_format` does not switch between Base64 and R2.
+- `response_format` does not switch between Base64 and S3.
 
 The deployment decides:
 
 ```text
-complete R2 config -> remote URL
-no R2 config       -> Base64 data URL
+complete S3 config -> remote URL
+no S3 config       -> Base64 data URL
 ```
 
 ## Related Agreed Changes
@@ -238,7 +241,7 @@ The measured CLI path includes:
 
 Model download and one-time AOT compilation are excluded from those generate
 timings and reported separately. The resident-serving timing measures the HTTP
-request through resident inference, PNG encoding, R2 upload, and URL creation;
+request through resident inference, PNG encoding, S3 upload, and URL creation;
 the validation download is excluded. Documentation must retain this distinction
 and must not describe the table as compile-plus-generate end to end.
 
@@ -295,31 +298,31 @@ The basic installation and Serving quick start must not require this step:
 cp .env.example .env
 ```
 
-Without R2 configuration, `image_url.url` contains a Base64 data URL, so a user
+Without S3 configuration, `image_url.url` contains a Base64 data URL, so a user
 can call the service and save or display the image entirely on the client. The
 README should use the `jq | cut | base64 -d` command above as its primary
-example. R2 configuration is documented afterward as an optional deployment
+example. S3 configuration is documented afterward as an optional deployment
 integration for durable or shareable URLs.
 
 ## Current State
 
 The current branch has the following behavior:
 
-- `ServeOptions.artifact_store` defaults to `"r2"`.
-- Application construction creates `R2ArtifactStore` unless tests or callers
+- `ServeOptions.artifact_store` defaults to `"s3"`.
+- Application construction creates `S3ArtifactStore` unless tests or callers
   explicitly select/inject `MemoryArtifactStore`.
-- Missing R2 credentials therefore prevent normal serving startup.
+- Missing S3 credentials therefore prevent normal serving startup.
 - `generate_chat_completion(...)` always calls `put_bytes(...)`, then
   `get_url(...)`, and returns the resulting URL.
-- The README describes R2 setup as mandatory.
-- The authoritative serving design says data URLs are outside P0 and R2 URLs
+- The README describes S3 setup as mandatory.
+- The authoritative serving design says data URLs are outside P0 and S3 URLs
   are mandatory.
 
 Primary source locations:
 
 | Concern | Current source |
 | --- | --- |
-| Store protocol and R2 implementation | `difflet/serving/artifact_store.py:65` |
+| Store protocol and S3 implementation | `difflet/serving/artifact_store.py:65` |
 | Store selection at app construction | `difflet/serving/openai/api_server.py:87` |
 | Upload and response serialization | `difflet/serving/openai/serving_chat.py:216` |
 | Serving options | `difflet/serving/options.py:77` |
@@ -333,16 +336,16 @@ Primary source locations:
 
 ```mermaid
 flowchart TD
-    A[difflet serve startup] --> B{R2 required variables}
+    A[difflet serve startup] --> B{S3 required variables}
     B -->|all absent| C[Select inline Base64 responder]
-    B -->|all present| D[Construct R2 artifact store]
+    B -->|all present| D[Construct S3 artifact store]
     B -->|partial| E[Fail startup with configuration error]
 
     F[POST /v1/chat/completions] --> G[Validate and generate image bytes]
     G --> H{Resolved response mode}
     H -->|inline| I[Base64 encode bytes]
     I --> J[Build data image URL]
-    H -->|R2| K[Upload bytes with timeout]
+    H -->|S3| K[Upload bytes with timeout]
     K --> L[Create public or presigned URL]
     J --> M[Return Chat Completions response]
     L --> M
@@ -350,27 +353,27 @@ flowchart TD
 
 Mode selection belongs to the parent HTTP process. The resident engine and
 stage pipeline continue to return `DiffletGenerateOutput` bytes and remain
-independent of R2, Base64, HTTP response formatting, and object retention.
+independent of S3, Base64, HTTP response formatting, and object retention.
 
 ## Implementation Plan
 
 ### Phase 1: Represent the selected response mode
 
-- Remove the public/internal `artifact_store="r2"` default as the condition
-  that makes R2 mandatory.
+- Remove the public/internal `artifact_store="s3"` default as the condition
+  that makes S3 mandatory.
 - Add one explicit resolved image-response policy or equivalent application
   dependency with two states: inline and artifact URL.
 - Resolve that dependency at application construction, not once per request.
 - Preserve explicit artifact-store injection for unit tests.
-- Validate partial R2 configuration before model/worker startup where possible,
+- Validate partial S3 configuration before model/worker startup where possible,
   so configuration errors fail quickly without loading the model.
 
 Acceptance criteria:
 
-- A machine with no `DIFFLET_R2_*` variables can construct and start the app.
+- A machine with no `DIFFLET_S3_*` variables can construct and start the app.
 - A partial required configuration fails deterministically and lists missing
   variables.
-- A complete configuration constructs exactly one reusable R2 client/store.
+- A complete configuration constructs exactly one reusable S3 client/store.
 
 ### Phase 2: Add inline image serialization
 
@@ -381,31 +384,28 @@ Acceptance criteria:
 - Refactor `generate_chat_completion(...)` so the post-generation output path
   has two explicit branches:
   - inline branch: populate `image_url.url` with the data URL;
-  - R2 branch: retain the current bounded upload and URL generation path.
+  - S3 branch: retain the current bounded upload and URL generation path.
 - Keep the final Chat Completions response builder shared between both branches.
 
 Acceptance criteria:
 
 - The decoded bytes from an inline response exactly equal the engine output.
 - Inline `image_url.url` starts with `data:image/png;base64,`.
-- The response envelope is otherwise identical between inline and R2 modes.
+- The response envelope is otherwise identical between inline and S3 modes.
 
-### Phase 3: Preserve R2 retention behavior
+### Phase 3: Preserve S3 retention behavior
 
-- Keep private R2 mode returning a presigned S3 API URL whose expiry uses
+- Keep private S3 mode returning a presigned URL whose expiry uses
   `artifact_ttl_seconds`.
-- Keep public/custom-domain mode returning the configured public URL and relying
-  on the bucket lifecycle policy for deletion.
-- Document that public-domain lifecycle deletion and CDN invalidation are not
-  strict second-level URL expiry.
+- Keep bucket public access blocked; public/custom-domain URLs are not supported.
+- Treat presigned URL expiry and lifecycle object deletion as independent controls.
 - Keep upload and presign timeout handling unchanged unless tests identify a
   defect.
 
 Acceptance criteria:
 
-- Existing private presigned and public custom-domain tests continue to pass.
-- `artifact_ttl_seconds` is not described as expiring a public custom-domain
-  URL.
+- Presigned URLs receive `artifact_ttl_seconds` as their expiry.
+- No public-base URL configuration or response branch remains.
 
 ### Phase 4: Update documentation and examples
 
@@ -417,20 +417,20 @@ Acceptance criteria:
   primary image-serving example.
 - Show the `image_url.url` Base64 data URL as the default no-configuration
   behavior.
-- Move R2 instructions under an optional production/object-storage section.
-- Explain that `.env.example` is a template only for optional R2 integration.
+- Move S3 instructions under an optional production/object-storage section.
+- Explain that `.env.example` is a template only for optional S3 integration.
 - State that CLI benchmark rows use `difflet generate`, exclude compilation,
   and include fresh-process model/runtime initialization.
 - Correct TeaCache wording so the PR is described as integration/wiring, not as
   introducing Qwen/Flux TeaCache.
-- Update both authoritative serving documents to replace the mandatory-R2
+- Update both authoritative serving documents to replace the mandatory-S3
   contract; do not leave the old P0 statements in place.
 
 Acceptance criteria:
 
 - A new user can run the documented serving quick start without creating
   `.env`.
-- R2 remains fully documented but is clearly optional.
+- S3 remains fully documented but is clearly optional.
 - README and authoritative design documents describe the same response policy.
 
 ### Phase 5: Move the serve CLI implementation
@@ -452,26 +452,24 @@ Acceptance criteria:
 
 Add or update unit coverage for:
 
-1. No R2 variables: app selects inline mode.
-2. Complete R2 variables: app selects R2 mode.
-3. Each partial R2 configuration: startup rejects it and reports missing keys.
+1. No S3 variables: app selects inline mode.
+2. S3 bucket configuration: app selects S3 mode.
+3. Region or endpoint without a bucket: startup rejects it and reports the missing bucket.
 4. Inline response: `image_url.url` has the correct data-URL prefix.
 5. Inline response: decoded data URL is byte-for-byte equal to generated PNG
    data.
-6. R2 response: upload and URL generation occur once and return an HTTP(S) URL.
-7. R2 response: the HTTP(S) URL is returned in the same `image_url.url` field.
-8. Configured R2 upload failure: no Base64 fallback; unified JSON error remains.
-9. Configured R2 presign failure: no Base64 fallback; unified JSON error remains.
-10. Public custom domain and private presigned URL retention behavior remains
-   covered.
-11. Logs identify the selected mode and timings without logging artifact data or
+6. S3 response: upload and URL generation occur once and return an HTTP(S) URL.
+7. S3 response: the HTTP(S) URL is returned in the same `image_url.url` field.
+8. Configured S3 upload failure: no Base64 fallback; unified JSON error remains.
+9. Configured S3 presign failure: no Base64 fallback; unified JSON error remains.
+10. Logs identify the selected mode and timings without logging artifact data or
     credentials.
 
 Run the focused serving tests and formatting/lint checks. On the Trainium remote
 host, smoke test at least one supported image model in both modes:
 
-- no R2 configuration -> decode `image_url.url` and verify it is a valid PNG;
-- complete R2 configuration -> fetch the returned URL and verify it is a valid
+- no S3 configuration -> decode `image_url.url` and verify it is a valid PNG;
+- S3 bucket configuration -> fetch the returned URL and verify it is a valid
   PNG.
 
 The model output for the two requests does not need to be identical unless all
@@ -486,9 +484,9 @@ generation inputs, seed, compiled artifact, and runtime behavior are held fixed.
   the configured image size and format.
 - Inline responses avoid persistent artifacts but may still be retained in
   client, proxy, or application logs if those systems log response bodies.
-- Complete-looking R2 configuration does not prove credentials, endpoint, or
+- Complete-looking S3 configuration does not prove credentials, endpoint, or
   bucket permissions are valid, so the upload path must retain clear bounded
   errors.
 - The server should log the selected response mode once at startup, for example
-  `image_response_mode=inline` or `image_response_mode=r2`, without logging
+  `image_response_mode=inline` or `image_response_mode=s3`, without logging
   secrets.

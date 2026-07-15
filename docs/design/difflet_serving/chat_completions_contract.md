@@ -157,7 +157,7 @@ P0 top-level field handling:
 
 The serving handler normalizes generation fields into `DiffletGenerateRequest`.
 P0 response policy is deployment-owned: the handler returns a Base64 data URL
-when R2 is absent, or an artifact URL with the server-configured TTL when R2 is
+when S3 is absent, or an artifact URL with the server-configured TTL when S3 is
 configured. Request response-policy fields such as `response_format` or
 `artifact_ttl_seconds` are ignored.
 
@@ -189,9 +189,9 @@ select a different profile or warm another profile in-place. Traffic for another
 of this API.
 
 Response-policy fields are ignored in request `extra_body`: `response_format`
-and `artifact_ttl_seconds`. P0 returns either a Base64 data URL or an R2 URL in
+and `artifact_ttl_seconds`. P0 returns either a Base64 data URL or an S3 URL in
 `image_url.url`, selected from server startup configuration. Artifact TTL applies
-only when the R2 path is active.
+only when the S3 path is active.
 
 P0 rejects TeaCache and advanced runtime fields with
 `400 invalid_extra_body`. A future API revision may add explicit,
@@ -312,7 +312,7 @@ The chat handler maps engine outputs to chat content parts:
 
 | Engine output modality | Chat content part type | URL field | Default payload policy |
 | --- | --- | --- | --- |
-| `image` | `image_url` | `image_url.url` | Base64 data URL without R2; artifact URL with R2. |
+| `image` | `image_url` | `image_url.url` | Base64 data URL without S3; artifact URL with S3. |
 
 Future P1+ video serving may add a `video_url` content part. It should be a
 Difflet extension to the OpenAI-style chat response envelope rather than
@@ -324,7 +324,7 @@ multi-modality requests unless the model explicitly declares support.
 
 ## Image Response
 
-For image models, a deployment with complete R2 configuration returns an
+For image models, a deployment with complete S3 configuration returns an
 artifact-backed URL:
 
 ```json
@@ -342,7 +342,7 @@ artifact-backed URL:
           {
             "type": "image_url",
             "image_url": {
-              "url": "https://example-r2-url/generated/file_abc.png"
+              "url": "https://example-bucket.s3.amazonaws.com/generated/file_abc.png?X-Amz-Signature=..."
             }
           }
         ]
@@ -358,7 +358,7 @@ artifact-backed URL:
 }
 ```
 
-Without any required R2 variables, the same field contains an inline image:
+Without any required S3 variables, the same field contains an inline image:
 
 ```json
 {
@@ -373,17 +373,17 @@ Without any required R2 variables, the same field contains an inline image:
 }
 ```
 
-R2 URLs must come from `ArtifactStore`; neither mode exposes arbitrary local
+S3 URLs must come from `ArtifactStore`; neither mode exposes arbitrary local
 filesystem paths. Requesting `response_format` is ignored in P0 and does not
 override the deployment-owned selection.
 
 Engine/output boundary:
 
 - `DiffletServingEngine.generate(...)` returns bytes plus MIME metadata.
-- `difflet/serving/openai/serving_chat.py` encodes a Base64 data URL when R2 is
-  absent. With R2 configured, it stores bytes through `ArtifactStore` using the
+- `difflet/serving/openai/serving_chat.py` encodes a Base64 data URL when S3 is
+  absent. With S3 configured, it stores bytes through `ArtifactStore` using the
   server-configured artifact TTL.
-- On the R2 path, the handler calls `ref = await ArtifactStore.put_bytes(...)`,
+- On the S3 path, the handler calls `ref = await ArtifactStore.put_bytes(...)`,
   then `url = await ArtifactStore.get_url(ref)`, and returns only `url` in
   `image_url.url`.
 - `ArtifactRef.uri` is an internal storage URI or backend locator. The handler
@@ -479,8 +479,8 @@ Required status codes:
 | Server is shutting down/draining | 503 | `engine_draining` |
 | Worker recovering after request timeout | 503 | `engine_recovering` |
 | Worker dead or engine unhealthy | 503 | `engine_unavailable` |
-| Partial or invalid R2 startup configuration | 503 | `artifact_store_unavailable` |
-| Unexpected model/worker/R2 backend failure | 500 | `internal_error` |
+| Partial or invalid S3 startup configuration | 503 | `artifact_store_unavailable` |
+| Unexpected model/worker/S3 backend failure | 500 | `internal_error` |
 | Artifact upload or presign timeout after generation | 502 | `artifact_upload_failed` |
 | Request exceeds `request_timeout` | 504 | `request_timeout` |
 
@@ -490,7 +490,7 @@ this state. `/health` may remain 200 if the FastAPI process and recovery task ar
 alive; it should return 503 only when recovery fails, the worker is dead without
 a restart path, or the engine marks itself unrecoverably unhealthy.
 
-If the configured R2 path fails after generation, the handler must return one of
+If the configured S3 path fails after generation, the handler must return one of
 the errors above, clean any request-local temporary data, and must not silently
 fall back to a data URL or local filesystem path.
 
@@ -503,13 +503,9 @@ fall back to a data URL or local filesystem path.
 - Model-specific input validation belongs in the serving model registry or
   adapter, not in the OpenAI route.
 - The engine returns `DiffletGenerateOutput`; it does not know about
-  OpenAI-style `choices` or R2 credentials.
-- `ArtifactStore` owns R2 file ids, TTL, and presigned URLs. It is not
-  constructed when all required R2 variables are absent.
-- P0 R2 has two explicit expiry modes. Private mode returns an S3 API-domain
-  presigned URL whose access lifetime is `artifact_ttl_seconds`; it cannot be
-  host-rewritten to a custom domain. Public custom-domain mode depends on a
-  deployment-owned R2 bucket lifecycle for object deletion and does not claim
-  that `artifact_ttl_seconds` expires the URL. Lifecycle/CDN deletion can lag, so
-  strict second-level access expiry requires private presigned mode; strict
-  custom-domain expiry requires a separate Worker/WAF HMAC policy outside P0.
+  OpenAI-style `choices` or S3 credentials.
+- `ArtifactStore` owns S3 file ids, TTL, and presigned URLs. It is not
+  constructed when the S3 bucket is absent.
+- P0 S3 always uses a private bucket and returns a presigned URL whose access
+  lifetime is `artifact_ttl_seconds`. Public/custom-domain URLs are not part of
+  the serving contract. Bucket lifecycle controls object deletion separately.

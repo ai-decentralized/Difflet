@@ -185,14 +185,16 @@ def test_chat_completions_rejects_client_request_body_id():
     assert response.json()["error"]["code"] == "feature_not_supported"
 
 
-def test_chat_completions_returns_data_url_without_r2(monkeypatch):
+def test_chat_completions_returns_data_url_without_s3(monkeypatch):
     from fastapi.testclient import TestClient
 
     for name in (
-        "DIFFLET_R2_BUCKET",
-        "DIFFLET_R2_ENDPOINT_URL",
-        "DIFFLET_R2_ACCESS_KEY_ID",
-        "DIFFLET_R2_SECRET_ACCESS_KEY",
+        "DIFFLET_S3_BUCKET",
+        "DIFFLET_S3_ENDPOINT_URL",
+        "DIFFLET_S3_REGION",
+        "DIFFLET_S3_ACCESS_KEY_ID",
+        "DIFFLET_S3_SECRET_ACCESS_KEY",
+        "DIFFLET_S3_SESSION_TOKEN",
     ):
         monkeypatch.delenv(name, raising=False)
     options = ServeOptions(model_id="black-forest-labs/FLUX.1-dev")

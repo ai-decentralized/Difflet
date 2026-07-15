@@ -167,8 +167,8 @@ image.save("out.png")
 
 ## Serving
 
-`difflet serve` keeps one image model loaded in a resident Trainium worker. R2
-is not required: without a complete R2 configuration, generated images are
+`difflet serve` keeps one image model loaded in a resident Trainium worker. S3
+is not required: without an S3 bucket configuration, generated images are
 returned as Base64 data URLs in the OpenAI-style Chat Completions response.
 
 Start Flux on a four-core `trn2.3xlarge`:
@@ -205,58 +205,47 @@ curl -sS -X POST http://127.0.0.1:8092/v1/chat/completions \
     | cut -d',' -f2- | base64 -d > output.png
 ```
 
-When R2 is configured, the same `image_url.url` field contains the remote
-HTTP(S) URL instead of a data URL.
+When private S3 storage is configured, the same `image_url.url` field contains
+an expiring presigned URL instead of a data URL.
 
-### Optional R2 artifact storage
+### Optional S3 artifact storage
 
-With no R2 variables, Difflet returns the generated PNG inline as a Base64 data
-URL. To upload generated PNG bytes to Cloudflare R2 and return a remote
+With no S3 variables, Difflet returns the generated PNG inline as a Base64 data
+URL. To upload generated PNG bytes to a private S3 bucket and return an expiring
 `image_url`, create an environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-Configure the R2 S3 endpoint and bucket separately:
+Configure the AWS S3 bucket and region:
 
 ```dotenv
-DIFFLET_R2_BUCKET=your-bucket-name
-DIFFLET_R2_ENDPOINT_URL=https://your-account-id.r2.cloudflarestorage.com
-DIFFLET_R2_ACCESS_KEY_ID=your-access-key-id
-DIFFLET_R2_SECRET_ACCESS_KEY=your-secret-access-key
-DIFFLET_R2_PREFIX=difflet
-
-# Optional public bucket or custom-domain URL. This mode requires a matching R2
-# bucket lifecycle policy; leave empty for strict expiring presigned URLs.
-DIFFLET_R2_PUBLIC_BASE_URL=https://images.example.com
+DIFFLET_S3_BUCKET=difflet
+DIFFLET_S3_REGION=ap-southeast-4
+DIFFLET_S3_PREFIX=difflet
 ```
 
 Run the server from the directory containing `.env`. If the file exists, it is
 loaded automatically without overriding variables already exported by the shell.
-Do not commit `.env` or real credentials. If any required R2 variable is set,
-all required R2 variables must be present or startup fails with a configuration
-error.
-The R2 access key must have object read/write permission for the configured bucket.
-Artifact expiry has two deployment modes:
+Do not commit `.env` or credentials. Boto3 uses its standard credential provider
+chain; on EC2, attach an IAM role to the instance instead of storing access keys
+in `.env`. The role needs `s3:PutObject` and `s3:GetObject` access to
+`arn:aws:s3:::difflet/difflet/*`.
 
-- Without `DIFFLET_R2_PUBLIC_BASE_URL`, Difflet returns an S3 API-domain presigned
-  URL and `artifact_ttl_seconds` controls its access expiry precisely. Do not
-  replace its host with a custom domain because the host is part of the signature.
-- With `DIFFLET_R2_PUBLIC_BASE_URL`, Difflet returns the public custom-domain URL.
-  The deployment must configure a matching R2 bucket lifecycle policy to delete
-  objects; `artifact_ttl_seconds` does not expire a public URL. Lifecycle and CDN
-  deletion can be delayed, so deployments requiring strict second-level access
-  expiry must use the private presigned mode. A custom domain with strict expiry
-  needs a separate Worker/WAF HMAC access policy, which P0 does not implement.
+Difflet always returns an S3 presigned URL whose access lifetime is controlled by
+the server-owned `artifact_ttl_seconds` setting (currently 3600 seconds). Keep S3
+Block Public Access enabled. A lifecycle rule may delete expired objects later;
+URL expiry and object deletion are independent.
 
-Create the R2 bucket with a Location Hint close to the machine running `difflet serve`.
-Cross-region uploads can add seconds to every request; for example, a server in AWS
-`ap-southeast-4` should use an R2 bucket located in Oceania (`OC`) rather than Western North
-America (`WNAM`). The S3 endpoint remains the account-level
-`https://<account-id>.r2.cloudflarestorage.com` URL; bucket placement, not a region-specific
-endpoint, controls the data location. R2 location is selected when the bucket is first created,
-so moving an existing bucket requires creating a new bucket and migrating its objects.
+For non-AWS S3-compatible providers, set `DIFFLET_S3_ENDPOINT_URL` explicitly.
+AWS S3 does not require this setting; boto3 derives the endpoint from
+`DIFFLET_S3_REGION`. Providers that do not use the boto3 default credential chain
+may also set `DIFFLET_S3_ACCESS_KEY_ID` and `DIFFLET_S3_SECRET_ACCESS_KEY`;
+`DIFFLET_S3_SESSION_TOKEN` is optional for temporary credentials. The access key
+and secret key must either both be present or both be absent. Difflet uses SigV4
+and virtual-hosted addressing for AWS presigned URLs. Compatible providers that
+require path-style URLs may set `DIFFLET_S3_ADDRESSING_STYLE=path`.
 
 ### Qwen-Image and startup behavior
 

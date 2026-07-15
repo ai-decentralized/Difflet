@@ -62,68 +62,89 @@ class MemoryArtifactStore:
         return self._objects[file_id]
 
 
-class R2ArtifactStore:
-    """Cloudflare R2 store using the S3-compatible boto3 client."""
+class S3ArtifactStore:
+    """Private S3-compatible store using presigned URLs for object access."""
 
     def __init__(
         self,
         *,
         bucket: str,
-        endpoint_url: str,
-        access_key_id: str,
-        secret_access_key: str,
+        endpoint_url: str | None = None,
+        access_key_id: str | None = None,
+        secret_access_key: str | None = None,
+        session_token: str | None = None,
         prefix: str = "difflet",
-        public_base_url: str | None = None,
+        region_name: str | None = None,
+        addressing_style: str | None = None,
         client_timeout: float = 60.0,
     ) -> None:
+        if bool(access_key_id) != bool(secret_access_key):
+            raise ValueError("S3 access key ID and secret access key must be configured together")
+        if session_token and not access_key_id:
+            raise ValueError("S3 session token requires explicit access key credentials")
+        if addressing_style not in (None, "auto", "virtual", "path"):
+            raise ValueError("S3 addressing style must be auto, virtual, or path")
         self.bucket = bucket
         self.endpoint_url = endpoint_url
         self.access_key_id = access_key_id
         self.secret_access_key = secret_access_key
+        self.session_token = session_token
         self.prefix = prefix.strip("/")
-        self.public_base_url = public_base_url.rstrip("/") if public_base_url else None
+        self.region_name = region_name
+        self.addressing_style = addressing_style or ("virtual" if endpoint_url is None else "auto")
         self.client_timeout = float(client_timeout)
         self._client_instance = None
         self._client_lock = threading.Lock()
 
     @classmethod
-    def from_env(cls, *, client_timeout: float = 60.0) -> "R2ArtifactStore":
-        missing = [
-            name
-            for name in (
-                "DIFFLET_R2_BUCKET",
-                "DIFFLET_R2_ENDPOINT_URL",
-                "DIFFLET_R2_ACCESS_KEY_ID",
-                "DIFFLET_R2_SECRET_ACCESS_KEY",
-            )
-            if not (os.environ.get(name) or "").strip()
-        ]
+    def from_env(cls, *, client_timeout: float = 60.0) -> "S3ArtifactStore":
+        missing = []
+        if not (os.environ.get("DIFFLET_S3_BUCKET") or "").strip():
+            missing.append("DIFFLET_S3_BUCKET")
+
+        access_key_id = (os.environ.get("DIFFLET_S3_ACCESS_KEY_ID") or "").strip()
+        secret_access_key = (os.environ.get("DIFFLET_S3_SECRET_ACCESS_KEY") or "").strip()
+        session_token = (os.environ.get("DIFFLET_S3_SESSION_TOKEN") or "").strip()
+        if access_key_id or secret_access_key or session_token:
+            if not access_key_id:
+                missing.append("DIFFLET_S3_ACCESS_KEY_ID")
+            if not secret_access_key:
+                missing.append("DIFFLET_S3_SECRET_ACCESS_KEY")
         if missing:
             raise DiffletServingError(
                 503,
                 "artifact_store_unavailable",
-                "R2 artifact store is not configured; missing " + ", ".join(missing),
+                "S3 artifact store is not configured; missing " + ", ".join(missing),
                 error_type="server_error",
             )
         return cls(
-            bucket=os.environ["DIFFLET_R2_BUCKET"],
-            endpoint_url=os.environ["DIFFLET_R2_ENDPOINT_URL"],
-            access_key_id=os.environ["DIFFLET_R2_ACCESS_KEY_ID"],
-            secret_access_key=os.environ["DIFFLET_R2_SECRET_ACCESS_KEY"],
-            prefix=os.environ.get("DIFFLET_R2_PREFIX", "difflet"),
-            public_base_url=os.environ.get("DIFFLET_R2_PUBLIC_BASE_URL"),
-            client_timeout=float(os.environ.get("DIFFLET_R2_CLIENT_TIMEOUT", client_timeout)),
+            bucket=os.environ["DIFFLET_S3_BUCKET"].strip(),
+            endpoint_url=(os.environ.get("DIFFLET_S3_ENDPOINT_URL") or "").strip() or None,
+            access_key_id=access_key_id or None,
+            secret_access_key=secret_access_key or None,
+            session_token=session_token or None,
+            prefix=os.environ.get("DIFFLET_S3_PREFIX", "difflet"),
+            region_name=(
+                (os.environ.get("DIFFLET_S3_REGION") or "").strip()
+                or (os.environ.get("AWS_REGION") or "").strip()
+                or (os.environ.get("AWS_DEFAULT_REGION") or "").strip()
+                or None
+            ),
+            addressing_style=(os.environ.get("DIFFLET_S3_ADDRESSING_STYLE") or "").strip() or None,
+            client_timeout=float(os.environ.get("DIFFLET_S3_CLIENT_TIMEOUT", client_timeout)),
         )
 
     @classmethod
-    def from_env_if_configured(cls, *, client_timeout: float = 60.0) -> "R2ArtifactStore | None":
-        required = (
-            "DIFFLET_R2_BUCKET",
-            "DIFFLET_R2_ENDPOINT_URL",
-            "DIFFLET_R2_ACCESS_KEY_ID",
-            "DIFFLET_R2_SECRET_ACCESS_KEY",
+    def from_env_if_configured(cls, *, client_timeout: float = 60.0) -> "S3ArtifactStore | None":
+        selectors = (
+            "DIFFLET_S3_BUCKET",
+            "DIFFLET_S3_ENDPOINT_URL",
+            "DIFFLET_S3_REGION",
+            "DIFFLET_S3_ACCESS_KEY_ID",
+            "DIFFLET_S3_SECRET_ACCESS_KEY",
+            "DIFFLET_S3_SESSION_TOKEN",
         )
-        configured = [name for name in required if name in os.environ]
+        configured = [name for name in selectors if name in os.environ]
         if not configured:
             return None
         return cls.from_env(client_timeout=client_timeout)
@@ -137,18 +158,24 @@ class R2ArtifactStore:
 
         with self._client_lock:
             if self._client_instance is None:
-                self._client_instance = boto3.client(
-                    "s3",
-                    endpoint_url=self.endpoint_url,
-                    aws_access_key_id=self.access_key_id,
-                    aws_secret_access_key=self.secret_access_key,
-                    region_name="auto",
-                    config=Config(
+                client_options = {
+                    "region_name": self.region_name,
+                    "config": Config(
+                        signature_version="s3v4",
                         connect_timeout=min(self.client_timeout, 10.0),
                         read_timeout=self.client_timeout,
                         retries={"max_attempts": 2},
+                        s3={"addressing_style": self.addressing_style},
                     ),
-                )
+                }
+                if self.endpoint_url is not None:
+                    client_options["endpoint_url"] = self.endpoint_url
+                if self.access_key_id is not None:
+                    client_options["aws_access_key_id"] = self.access_key_id
+                    client_options["aws_secret_access_key"] = self.secret_access_key
+                    if self.session_token is not None:
+                        client_options["aws_session_token"] = self.session_token
+                self._client_instance = boto3.client("s3", **client_options)
         return self._client_instance
 
     async def put_bytes(
@@ -174,14 +201,12 @@ class R2ArtifactStore:
         try:
             await asyncio.to_thread(_put)
         except Exception as exc:
-            logger.exception("R2 artifact upload failed")
+            logger.exception("S3 artifact upload failed")
             raise internal_error("Internal artifact storage error") from exc
         return ArtifactRef(file_id=file_id, uri=f"s3://{self.bucket}/{key}", mime_type=mime_type)
 
     async def get_url(self, ref: ArtifactRef, *, ttl_seconds: int) -> str:
         key = f"{self.prefix}/{ref.file_id}" if self.prefix else ref.file_id
-        if self.public_base_url:
-            return f"{self.public_base_url}/{key}"
 
         def _sign() -> str:
             client = self._client()
@@ -194,7 +219,7 @@ class R2ArtifactStore:
         try:
             return await asyncio.to_thread(_sign)
         except Exception as exc:
-            logger.exception("R2 artifact presign failed")
+            logger.exception("S3 artifact presign failed")
             raise internal_error("Internal artifact storage error") from exc
 
 

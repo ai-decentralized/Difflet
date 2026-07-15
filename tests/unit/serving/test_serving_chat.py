@@ -8,12 +8,21 @@ import types
 
 import pytest
 
-from difflet.serving.artifact_store import ArtifactRef, MemoryArtifactStore, R2ArtifactStore
+from difflet.serving.artifact_store import ArtifactRef, MemoryArtifactStore, S3ArtifactStore
 from difflet.serving.errors import DiffletServingError, prompt_too_long
 from difflet.serving.model_registry import resolve_serving_model
 from difflet.serving.openai.serving_chat import generate_chat_completion, normalize_chat_request
 from difflet.serving.options import ServeOptions
 from difflet.serving.types import DiffletGenerateOutput
+
+_S3_SELECTOR_ENV = (
+    "DIFFLET_S3_BUCKET",
+    "DIFFLET_S3_ENDPOINT_URL",
+    "DIFFLET_S3_REGION",
+    "DIFFLET_S3_ACCESS_KEY_ID",
+    "DIFFLET_S3_SECRET_ACCESS_KEY",
+    "DIFFLET_S3_SESSION_TOKEN",
+)
 
 
 def _resolved():
@@ -272,91 +281,112 @@ def test_generate_chat_completion_returns_inline_data_url_without_store():
     assert base64.b64decode(encoded) == b"png"
 
 
-def test_r2_store_is_optional_when_all_required_environment_is_absent(monkeypatch):
-    for name in (
-        "DIFFLET_R2_BUCKET",
-        "DIFFLET_R2_ENDPOINT_URL",
-        "DIFFLET_R2_ACCESS_KEY_ID",
-        "DIFFLET_R2_SECRET_ACCESS_KEY",
-    ):
+def test_s3_store_is_optional_when_all_required_environment_is_absent(monkeypatch):
+    for name in _S3_SELECTOR_ENV:
         monkeypatch.delenv(name, raising=False)
 
-    assert R2ArtifactStore.from_env_if_configured() is None
+    assert S3ArtifactStore.from_env_if_configured() is None
 
 
-def test_r2_store_is_selected_for_complete_required_environment(monkeypatch):
+def test_s3_store_is_selected_for_complete_required_environment(monkeypatch):
     values = {
-        "DIFFLET_R2_BUCKET": "bucket",
-        "DIFFLET_R2_ENDPOINT_URL": "https://example.invalid",
-        "DIFFLET_R2_ACCESS_KEY_ID": "key",
-        "DIFFLET_R2_SECRET_ACCESS_KEY": "secret",
+        "DIFFLET_S3_BUCKET": "bucket",
+        "DIFFLET_S3_REGION": "ap-southeast-4",
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
 
-    store = R2ArtifactStore.from_env_if_configured()
+    store = S3ArtifactStore.from_env_if_configured()
 
     assert store is not None
     assert store.bucket == "bucket"
+    assert store.endpoint_url is None
+    assert store.region_name == "ap-southeast-4"
+
+
+def test_s3_store_reads_complete_explicit_credentials(monkeypatch):
+    for name in _S3_SELECTOR_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DIFFLET_S3_BUCKET", "bucket")
+    monkeypatch.setenv("DIFFLET_S3_ENDPOINT_URL", "https://s3-compatible.example")
+    monkeypatch.setenv("DIFFLET_S3_ACCESS_KEY_ID", "key")
+    monkeypatch.setenv("DIFFLET_S3_SECRET_ACCESS_KEY", "secret")
+    monkeypatch.setenv("DIFFLET_S3_SESSION_TOKEN", "token")
+
+    store = S3ArtifactStore.from_env_if_configured()
+
+    assert store is not None
+    assert store.endpoint_url == "https://s3-compatible.example"
+    assert store.access_key_id == "key"
+    assert store.secret_access_key == "secret"
+    assert store.session_token == "token"
+
+
+@pytest.mark.parametrize(
+    ("configured", "missing_name"),
+    [
+        ({"DIFFLET_S3_ACCESS_KEY_ID": "key"}, "DIFFLET_S3_SECRET_ACCESS_KEY"),
+        ({"DIFFLET_S3_SECRET_ACCESS_KEY": "secret"}, "DIFFLET_S3_ACCESS_KEY_ID"),
+        ({"DIFFLET_S3_SESSION_TOKEN": "token"}, "DIFFLET_S3_ACCESS_KEY_ID"),
+    ],
+)
+def test_s3_store_rejects_partial_explicit_credentials(monkeypatch, configured, missing_name):
+    for name in _S3_SELECTOR_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DIFFLET_S3_BUCKET", "bucket")
+    for name, value in configured.items():
+        monkeypatch.setenv(name, value)
+
+    with pytest.raises(DiffletServingError) as exc:
+        S3ArtifactStore.from_env_if_configured()
+
+    assert exc.value.code == "artifact_store_unavailable"
+    assert missing_name in exc.value.message
 
 
 @pytest.mark.parametrize(
     "configured_name",
     [
-        "DIFFLET_R2_BUCKET",
-        "DIFFLET_R2_ENDPOINT_URL",
-        "DIFFLET_R2_ACCESS_KEY_ID",
-        "DIFFLET_R2_SECRET_ACCESS_KEY",
+        "DIFFLET_S3_ENDPOINT_URL",
+        "DIFFLET_S3_REGION",
+        "DIFFLET_S3_ACCESS_KEY_ID",
+        "DIFFLET_S3_SECRET_ACCESS_KEY",
+        "DIFFLET_S3_SESSION_TOKEN",
     ],
 )
-def test_r2_store_rejects_partial_required_environment(monkeypatch, configured_name):
-    for name in (
-        "DIFFLET_R2_BUCKET",
-        "DIFFLET_R2_ENDPOINT_URL",
-        "DIFFLET_R2_ACCESS_KEY_ID",
-        "DIFFLET_R2_SECRET_ACCESS_KEY",
-    ):
+def test_s3_store_rejects_partial_required_environment(monkeypatch, configured_name):
+    for name in _S3_SELECTOR_ENV:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv(configured_name, "configured")
 
     with pytest.raises(DiffletServingError) as exc:
-        R2ArtifactStore.from_env_if_configured()
+        S3ArtifactStore.from_env_if_configured()
 
     assert exc.value.code == "artifact_store_unavailable"
     assert configured_name not in exc.value.message
     assert "missing" in exc.value.message
 
 
-def test_r2_optional_environment_alone_does_not_enable_store(monkeypatch):
-    for name in (
-        "DIFFLET_R2_BUCKET",
-        "DIFFLET_R2_ENDPOINT_URL",
-        "DIFFLET_R2_ACCESS_KEY_ID",
-        "DIFFLET_R2_SECRET_ACCESS_KEY",
-    ):
+def test_s3_optional_environment_alone_does_not_enable_store(monkeypatch):
+    for name in _S3_SELECTOR_ENV:
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("DIFFLET_R2_PREFIX", "generated")
-    monkeypatch.setenv("DIFFLET_R2_PUBLIC_BASE_URL", "https://images.example.com")
+    monkeypatch.setenv("DIFFLET_S3_PREFIX", "generated")
+    monkeypatch.setenv("DIFFLET_S3_CLIENT_TIMEOUT", "30")
 
-    assert R2ArtifactStore.from_env_if_configured() is None
+    assert S3ArtifactStore.from_env_if_configured() is None
 
 
 @pytest.mark.parametrize("value", ["", "   "])
-def test_r2_empty_required_value_is_rejected_as_partial_configuration(monkeypatch, value):
-    for name in (
-        "DIFFLET_R2_BUCKET",
-        "DIFFLET_R2_ENDPOINT_URL",
-        "DIFFLET_R2_ACCESS_KEY_ID",
-        "DIFFLET_R2_SECRET_ACCESS_KEY",
-    ):
+def test_s3_empty_required_value_is_rejected_as_partial_configuration(monkeypatch, value):
+    for name in _S3_SELECTOR_ENV:
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("DIFFLET_R2_BUCKET", value)
+    monkeypatch.setenv("DIFFLET_S3_BUCKET", value)
 
     with pytest.raises(DiffletServingError) as exc:
-        R2ArtifactStore.from_env_if_configured()
+        S3ArtifactStore.from_env_if_configured()
 
     assert exc.value.code == "artifact_store_unavailable"
-    assert "DIFFLET_R2_BUCKET" in exc.value.message
+    assert "DIFFLET_S3_BUCKET" in exc.value.message
 
 
 def test_generate_chat_completion_validates_before_engine():
@@ -399,7 +429,7 @@ def test_generate_chat_completion_rejects_raw_prompt_before_provider_validation(
     assert engine.called is False
 
 
-class _FailingR2Client:
+class _FailingS3Client:
     def put_object(self, **kwargs):
         raise RuntimeError("secret bucket and endpoint")
 
@@ -407,25 +437,23 @@ class _FailingR2Client:
         raise RuntimeError("secret request id")
 
 
-def _failing_r2_store(monkeypatch) -> R2ArtifactStore:
-    store = R2ArtifactStore(
+def _failing_s3_store(monkeypatch) -> S3ArtifactStore:
+    store = S3ArtifactStore(
         bucket="private-bucket",
         endpoint_url="https://private.invalid",
-        access_key_id="key",
-        secret_access_key="secret",
     )
-    monkeypatch.setattr(store, "_client", lambda: _FailingR2Client())
+    monkeypatch.setattr(store, "_client", lambda: _FailingS3Client())
     return store
 
 
-def test_configured_r2_failure_does_not_fallback_to_inline_data(monkeypatch):
+def test_configured_s3_failure_does_not_fallback_to_inline_data(monkeypatch):
     with pytest.raises(DiffletServingError) as exc:
         asyncio.run(
             generate_chat_completion(
                 _body(),
                 resolved_model=_resolved(),
                 engine=_FakeEngine(),
-                artifact_store=_failing_r2_store(monkeypatch),
+                artifact_store=_failing_s3_store(monkeypatch),
                 artifact_ttl_seconds=60,
                 artifact_store_timeout=1,
             )
@@ -434,15 +462,15 @@ def test_configured_r2_failure_does_not_fallback_to_inline_data(monkeypatch):
     assert exc.value.code == "internal_error"
 
 
-def test_r2_store_reuses_client(monkeypatch):
-    clients = []
+def test_s3_store_reuses_client(monkeypatch):
+    calls = []
 
     class _Client:
         pass
 
     def _client(*args, **kwargs):
         client = _Client()
-        clients.append(client)
+        calls.append((args, kwargs, client))
         return client
 
     monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=_client))
@@ -451,43 +479,84 @@ def test_r2_store_reuses_client(monkeypatch):
         "botocore.config",
         types.SimpleNamespace(Config=lambda **kwargs: kwargs),
     )
-    store = R2ArtifactStore(
+    store = S3ArtifactStore(
         bucket="bucket",
-        endpoint_url="https://example.invalid",
-        access_key_id="key",
-        secret_access_key="secret",
+        region_name="ap-southeast-4",
     )
 
     assert store._client() is store._client()
-    assert len(clients) == 1
+    assert len(calls) == 1
+    assert calls[0][0] == ("s3",)
+    assert calls[0][1]["region_name"] == "ap-southeast-4"
+    assert "endpoint_url" not in calls[0][1]
+    assert "aws_access_key_id" not in calls[0][1]
+    assert calls[0][1]["config"]["signature_version"] == "s3v4"
+    assert calls[0][1]["config"]["s3"] == {"addressing_style": "virtual"}
 
 
-def test_r2_public_url_mode_uses_custom_domain_without_presigning(monkeypatch):
-    store = R2ArtifactStore(
+def test_s3_store_passes_explicit_compatible_provider_credentials(monkeypatch):
+    calls = []
+
+    def _client(*args, **kwargs):
+        calls.append((args, kwargs))
+        return object()
+
+    monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=_client))
+    monkeypatch.setitem(
+        sys.modules,
+        "botocore.config",
+        types.SimpleNamespace(Config=lambda **kwargs: kwargs),
+    )
+    store = S3ArtifactStore(
         bucket="bucket",
-        endpoint_url="https://example.invalid",
+        endpoint_url="https://s3-compatible.example",
+        region_name="auto",
         access_key_id="key",
         secret_access_key="secret",
-        prefix="generated",
-        public_base_url="https://images.example.com/",
-    )
-    monkeypatch.setattr(
-        store,
-        "_client",
-        lambda: (_ for _ in ()).throw(AssertionError("public mode must not presign")),
+        session_token="token",
     )
 
-    url = asyncio.run(
-        store.get_url(
-            ArtifactRef("image.png", "s3://bucket/generated/image.png", "image/png"),
-            ttl_seconds=60,
-        )
+    store._client()
+
+    options = calls[0][1]
+    assert options["endpoint_url"] == "https://s3-compatible.example"
+    assert options["aws_access_key_id"] == "key"
+    assert options["aws_secret_access_key"] == "secret"
+    assert options["aws_session_token"] == "token"
+    assert options["config"]["signature_version"] == "s3v4"
+    assert options["config"]["s3"] == {"addressing_style": "auto"}
+
+
+def test_s3_store_accepts_path_addressing_override(monkeypatch):
+    calls = []
+
+    def _client(*args, **kwargs):
+        calls.append((args, kwargs))
+        return object()
+
+    monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=_client))
+    monkeypatch.setitem(
+        sys.modules,
+        "botocore.config",
+        types.SimpleNamespace(Config=lambda **kwargs: kwargs),
+    )
+    store = S3ArtifactStore(
+        bucket="bucket",
+        endpoint_url="https://s3-compatible.example",
+        addressing_style="path",
     )
 
-    assert url == "https://images.example.com/generated/image.png"
+    store._client()
+
+    assert calls[0][1]["config"]["s3"] == {"addressing_style": "path"}
 
 
-def test_r2_private_url_mode_passes_ttl_to_presigner(monkeypatch):
+def test_s3_store_rejects_invalid_addressing_style():
+    with pytest.raises(ValueError, match="addressing style"):
+        S3ArtifactStore(bucket="bucket", addressing_style="invalid")
+
+
+def test_s3_url_passes_ttl_to_presigner(monkeypatch):
     calls = []
 
     class _Client:
@@ -495,11 +564,9 @@ def test_r2_private_url_mode_passes_ttl_to_presigner(monkeypatch):
             calls.append((args, kwargs))
             return "https://signed.example/image.png"
 
-    store = R2ArtifactStore(
+    store = S3ArtifactStore(
         bucket="bucket",
-        endpoint_url="https://example.invalid",
-        access_key_id="key",
-        secret_access_key="secret",
+        region_name="ap-southeast-4",
         prefix="generated",
     )
     monkeypatch.setattr(store, "_client", lambda: _Client())
@@ -516,9 +583,9 @@ def test_r2_private_url_mode_passes_ttl_to_presigner(monkeypatch):
 
 
 @pytest.mark.parametrize("operation", ["upload", "presign"])
-def test_r2_backend_errors_are_logged_and_sanitized(monkeypatch, caplog, operation):
+def test_s3_backend_errors_are_logged_and_sanitized(monkeypatch, caplog, operation):
     async def _run():
-        store = _failing_r2_store(monkeypatch)
+        store = _failing_s3_store(monkeypatch)
         if operation == "upload":
             return await store.put_bytes(
                 data=b"png",

@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from contextlib import suppress
 from typing import Any, Coroutine, TypeVar
 
-from difflet.serving.artifact_store import R2ArtifactStore
+from difflet.serving.artifact_store import S3ArtifactStore
 from difflet.serving.errors import DiffletServingError, internal_error, request_cancelled
 from difflet.serving.model_registry import ResolvedServingModel
 from difflet.serving.openai.serving_chat import generate_chat_completion
@@ -85,10 +85,10 @@ def create_app(
         raise RuntimeError("fastapi is required for `difflet serve`") from exc
 
     if artifact_store is None:
-        artifact_store = R2ArtifactStore.from_env_if_configured(
+        artifact_store = S3ArtifactStore.from_env_if_configured(
             client_timeout=options.artifact_store_timeout
         )
-    image_response_mode = "r2" if artifact_store is not None else "inline"
+    image_response_mode = "s3" if artifact_store is not None else "inline"
     logger.info("serving image_response_mode=%s", image_response_mode)
 
     @asynccontextmanager
