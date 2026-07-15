@@ -121,6 +121,7 @@ def _build_serving_logging_config(project_name: str) -> dict[str, Any]:
                 "max_bytes": 5 * 1024 * 1024,
                 "backupCount": 1024,
                 "encoding": "utf-8",
+                "formatter": "file",
             },
         },
         "loggers": {

@@ -64,6 +64,7 @@ def test_serve_console_and_file_logs_include_local_timestamp():
     assert console["datefmt"] == "%Y-%m-%d %H:%M:%S"
     assert file_formatter["format"].startswith("%(asctime)s.%(msecs)03d ")
     assert file_formatter["datefmt"] == "%Y-%m-%d %H:%M:%S"
+    assert config["handlers"]["file"]["formatter"] == "file"
 
 
 def test_serve_help_exposes_operational_tuning_but_hides_artifact_policy(capsys):
