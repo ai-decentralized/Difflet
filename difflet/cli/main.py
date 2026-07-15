@@ -5,6 +5,8 @@ import math
 import os
 import sys
 
+from difflet.pipeline.parallel_config import CP_MODES
+
 VALID_MODELS = {
     "black-forest-labs/FLUX.1-dev",
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
@@ -64,9 +66,13 @@ def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument(
         "--cp-mode",
-        choices=["gather_kv", "ring"],
+        choices=list(CP_MODES),
         default="gather_kv",
-        help="Context-parallel attention strategy (default: gather_kv)",
+        help="Context-parallel attention strategy (default: gather_kv). "
+        "'ring' rotates the K,V shards; 'ulysses' all-to-alls the "
+        "sequence shard into a head shard. Both need --cp-degree > 1; "
+        "'ulysses' additionally needs the model's head count divisible "
+        "by tp_degree * cp_degree.",
     )
     p.add_argument(
         "--cfg-parallel",

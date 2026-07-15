@@ -1,6 +1,6 @@
 import pytest
 
-from difflet.pipeline.parallel_config import DiffletParallelConfig
+from difflet.pipeline.parallel_config import CP_MODES, DiffletParallelConfig
 
 
 def test_cp_mode_defaults_to_gather_kv():
@@ -36,3 +36,25 @@ def test_cache_dict_includes_cp_mode_when_ring():
 def test_cache_dict_default_is_byte_identical_to_legacy_keys():
     cfg = DiffletParallelConfig(tp_degree=4, cp_degree=1)
     assert set(cfg.to_cache_dict()) == {"tp_degree", "cp_degree", "cfg_parallel_enabled"}
+
+
+def test_cp_modes_are_the_three_supported_strategies():
+    assert CP_MODES == ("gather_kv", "ring", "ulysses")
+
+
+def test_cp_mode_ulysses_requires_cp_degree_gt_1():
+    with pytest.raises(ValueError, match="cp_mode='ulysses' requires cp_degree > 1"):
+        DiffletParallelConfig(tp_degree=4, cp_degree=1, cp_mode="ulysses")
+
+
+def test_cp_mode_ulysses_with_cp_degree_2_is_valid():
+    cfg = DiffletParallelConfig(tp_degree=2, cp_degree=2, cp_mode="ulysses")
+    assert cfg.cp_mode == "ulysses"
+    assert cfg.world_size == 4
+
+
+def test_cache_dict_includes_cp_mode_when_ulysses():
+    # A distinct cp_mode string must reach the cache key, so a ulysses artifact can
+    # never be confused with the gather_kv/ring artifact at the same tp/cp.
+    cfg = DiffletParallelConfig(tp_degree=2, cp_degree=2, cp_mode="ulysses")
+    assert cfg.to_cache_dict()["cp_mode"] == "ulysses"

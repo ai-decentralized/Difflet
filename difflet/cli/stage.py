@@ -11,6 +11,8 @@ import importlib
 import os
 import sys
 
+from difflet.pipeline.parallel_config import CP_MODES
+
 _ORCHESTRATOR_MAP: dict[str, str] = {
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": "difflet.cli.orchestrators.wan.WanOrchestrator",
     "Wan-AI/Wan2.1-T2V-14B-Diffusers": "difflet.cli.orchestrators.wan.WanOrchestrator",
@@ -43,7 +45,7 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--revision", default=None)
     p.add_argument("--tp-degree", type=int, default=None)
     p.add_argument("--cp-degree", type=int, default=1)
-    p.add_argument("--cp-mode", choices=["gather_kv", "ring"], default="gather_kv")
+    p.add_argument("--cp-mode", choices=list(CP_MODES), default="gather_kv")
     p.add_argument("--cfg-parallel", dest="cfg_parallel", action="store_true")
     p.add_argument("--sp", dest="sp_enabled", action="store_true")
     p.add_argument("--height", type=int, default=None)

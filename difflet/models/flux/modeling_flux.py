@@ -66,6 +66,7 @@ from difflet.ops import (
     reduce_from_tensor_model_parallel_region,
     reduce_scatter_to_sequence_parallel_region,
     ring_attention,
+    ulysses_attention,
     scatter_to_process_group_spmd,
 )
 
@@ -1297,9 +1298,11 @@ class NeuronFluxAttention(nn.Module):
                 encoder_hidden_states_key_proj = self.norm_added_k(encoder_hidden_states_key_proj)
 
             # CP joint attention. Flux shards BOTH streams, so [text ‖ image] is a
-            # uniform per-rank joint shard: ring rotates it (cp_mode=ring) instead of
-            # all-gathering K,V (cp_mode=gather_kv). Non-causal → equivalent.
-            if self.context_parallel_enabled and self.cp_mode == "ring":
+            # uniform per-rank joint shard, and both sharded-sequence modes take it
+            # directly: ring rotates it (cp_mode=ring), ulysses all-to-alls it into a
+            # head shard (cp_mode=ulysses), rather than all-gathering K,V
+            # (cp_mode=gather_kv). Non-causal → all three are equivalent.
+            if self.context_parallel_enabled and self.cp_mode in ("ring", "ulysses"):
                 if rotary_emb_text is not None:
                     encoder_hidden_states_query_proj = apply_rotary_emb(
                         encoder_hidden_states_query_proj, rotary_emb_text
@@ -1310,7 +1313,8 @@ class NeuronFluxAttention(nn.Module):
                 q_joint = torch.cat([encoder_hidden_states_query_proj, query], dim=2)
                 k_joint = torch.cat([encoder_hidden_states_key_proj, key], dim=2)
                 v_joint = torch.cat([encoder_hidden_states_value_proj, value], dim=2)
-                hidden_states = ring_attention(
+                cp_attn = ring_attention if self.cp_mode == "ring" else ulysses_attention
+                hidden_states = cp_attn(
                     q_joint, k_joint, v_joint, scale=1.0 / math.sqrt(head_dim), causal=False
                 )
                 query = key = value = None  # joint attention already computed
@@ -1371,9 +1375,12 @@ class NeuronFluxAttention(nn.Module):
             else:
                 if _HARDWARE == hardware.TRN1:
                     # On Trn1, gather K and V and use plain PyTorch attention instead of NKI kernel
-                    if self.cp_mode == "ring":
+                    if self.cp_mode in ("ring", "ulysses"):
+                        # Both sharded-sequence modes route their inner attention through
+                        # the NKI kernel this branch exists to avoid, so both fall back.
                         logger.warning(
-                            "cp_mode='ring' is not supported on TRN1; falling back to gather-KV attention."
+                            "cp_mode=%r is not supported on TRN1; falling back to gather-KV attention.",
+                            self.cp_mode,
                         )
                     key = gather_from_tensor_model_parallel_region_with_dim(
                         key, gather_dim=2, process_group=self.cp_group
@@ -1386,11 +1393,13 @@ class NeuronFluxAttention(nn.Module):
                     hidden_states = F.scaled_dot_product_attention(
                         query, key, value, dropout_p=0.0, is_causal=False
                     )
-                elif self.cp_mode == "ring":
-                    # Single sharded joint sequence → uniform ring (q/k/v same shard).
-                    # q/k are [B, H, S/cp, d]; v was kept as [B, S/cp, H, d] for the
-                    # gather-KV wrapper path, so transpose it to match q/k layout.
-                    hidden_states = ring_attention(
+                elif self.cp_mode in ("ring", "ulysses"):
+                    # Single sharded joint sequence → uniform ring / ulysses (q/k/v are
+                    # the same shard). q/k are [B, H, S/cp, d]; v was kept as
+                    # [B, S/cp, H, d] for the gather-KV wrapper path, so transpose it to
+                    # match the q/k layout.
+                    cp_attn = ring_attention if self.cp_mode == "ring" else ulysses_attention
+                    hidden_states = cp_attn(
                         query, key, value.transpose(1, 2), scale=1.0 / math.sqrt(head_dim), causal=False
                     )
                 else:

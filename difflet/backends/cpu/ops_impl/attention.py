@@ -86,4 +86,51 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float, c
     return out.reshape(b, h, s_q, d)
 
 
-__all__ = ["attention", "cross_attention", "ring_attention", "joint_ring_attention"]
+def ulysses_attention(q, k, v, *, scale: float, causal: bool = False):
+    # Single-process CPU reference: cp_degree == 1, so both all-to-alls are
+    # identity and Ulysses is plain attention over the local (== full) sequence.
+    b, h, s_q, d = q.shape
+    s_k = k.shape[2]
+    out = attention(
+        q.reshape(b * h, s_q, d),
+        k.reshape(b * h, s_k, d),
+        v.reshape(b * h, s_k, d),
+        scale=scale,
+        causal=causal,
+        tp_q=True,
+        tp_k=True,
+        tp_out=False,
+    )
+    return out.reshape(b, h, s_q, d)
+
+
+def joint_ulysses_attention(
+    q_img, q_txt, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False
+):
+    # cp_degree == 1 reference: the all-to-alls degenerate to identity, so this is
+    # plain full joint attention over the concatenated [image, text] keys. The two
+    # streams are split back apart on the way out, matching the device contract.
+    full_q = torch.cat([q_img, q_txt], dim=2)
+    full_k = torch.cat([image_k, text_k], dim=2)
+    full_v = torch.cat([image_v, text_v], dim=2)
+    b, h, s_q, d = full_q.shape
+    s_k = full_k.shape[2]
+    out = attention(
+        full_q.reshape(b * h, s_q, d),
+        full_k.reshape(b * h, s_k, d),
+        full_v.reshape(b * h, s_k, d),
+        scale=scale, causal=causal, tp_q=True, tp_k=True, tp_out=False,
+    )
+    out = out.reshape(b, h, s_q, d)
+    s_img = q_img.shape[2]
+    return out[:, :, :s_img], out[:, :, s_img:]
+
+
+__all__ = [
+    "attention",
+    "cross_attention",
+    "ring_attention",
+    "joint_ring_attention",
+    "ulysses_attention",
+    "joint_ulysses_attention",
+]

@@ -6,15 +6,33 @@ from dataclasses import asdict, dataclass
 
 from difflet.pipeline.parallel_mesh import MeshSpec
 
+# The CP attention strategies, in the order the CLI offers them. Single source of
+# truth: the argparse ``choices`` in difflet.cli.main and difflet.cli.stage import
+# this rather than re-declaring the list.
+CP_MODES: tuple[str, ...] = ("gather_kv", "ring", "ulysses")
+
 
 @dataclass(frozen=True)
 class DiffletParallelConfig:
     """Tensor, context, CFG, and data parallel settings.
 
     Context parallelism is configured via ``cp_degree`` (1 = disabled) and
-    ``cp_mode`` selects the CP attention strategy (``"gather_kv"`` default, or
-    ``"ring"``). Context parallelism and CFG parallelism both consume extra
-    data-parallel lanes, so they are mutually exclusive.
+    ``cp_mode`` selects the CP attention strategy (``CP_MODES``):
+
+    - ``"gather_kv"`` (default) — every rank all-gathers the full K,V, then attends
+      its query shard against the whole sequence.
+    - ``"ring"`` — K,V shards rotate around the cp ring; per-hop partials merge by
+      online softmax.
+    - ``"ulysses"`` — an all-to-all trades the sequence shard for a head shard, so
+      one *ordinary dense* attention sees the full sequence, then a second all-to-all
+      restores the layout. Exact (same math as gather-KV) and needs no special
+      attention kernel, but shards heads on top of the TP head shard and so requires
+      ``num_attention_heads`` divisible by ``tp_degree * cp_degree``.
+
+    Every mode other than ``gather_kv`` requires ``cp_degree > 1``.
+
+    Context parallelism and CFG parallelism both consume extra data-parallel lanes,
+    so they are mutually exclusive.
 
     ``sp_enabled`` turns on **Megatron-style sequence parallelism**: the
     otherwise-replicated norm / modulation / residual regions are sharded along
@@ -43,10 +61,12 @@ class DiffletParallelConfig:
             raise ValueError("dp_degree must be >= 1")
         if self.cp_degree > 1 and self.cfg_parallel_enabled:
             raise ValueError("cp_degree > 1 and cfg_parallel_enabled are mutually exclusive")
-        if self.cp_mode not in ("gather_kv", "ring"):
-            raise ValueError(f"cp_mode must be one of {{'gather_kv', 'ring'}}, got {self.cp_mode!r}")
-        if self.cp_mode == "ring" and self.cp_degree <= 1:
-            raise ValueError("cp_mode='ring' requires cp_degree > 1")
+        if self.cp_mode not in CP_MODES:
+            raise ValueError(
+                f"cp_mode must be one of {set(CP_MODES)}, got {self.cp_mode!r}"
+            )
+        if self.cp_mode != "gather_kv" and self.cp_degree <= 1:
+            raise ValueError(f"cp_mode={self.cp_mode!r} requires cp_degree > 1")
         if self.sp_enabled and self.cp_degree > 1:
             raise ValueError("sp_enabled and cp_degree > 1 are mutually exclusive")
 

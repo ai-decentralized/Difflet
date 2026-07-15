@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from difflet.cli import runner
-from difflet.cli.orchestrators.base import ModelOrchestrator
+from difflet.cli.orchestrators.base import ModelOrchestrator, cp_mode_token
 
 _HF_MODEL_ID = "hunyuanvideo-community/HunyuanVideo"
 _MODEL_TYPE = "hunyuan_video"
@@ -310,13 +310,14 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         tp = args.tp_degree or 4
         cp = args.cp_degree or 1
         sp = "sp" if getattr(args, "sp_enabled", False) else ""
+        cpm = cp_mode_token(args)
         h, w, f = args.height or 320, args.width or 512, args.num_frames or 61
         if stage == "clip":
             return base / "hunyuan_video_clip"
         if stage == "llama":
             return base / f"hunyuan_video_llama_seq{_TEXT_SEQ_LEN + _LLAMA_CROP_START}"
         if stage == "generate":
-            return base / f"hunyuan_video_dit_tp{tp}cp{cp}{sp}_h{h}w{w}f{f}"
+            return base / f"hunyuan_video_dit_tp{tp}cp{cp}{cpm}{sp}_h{h}w{w}f{f}"
         raise ValueError(f"unknown stage {stage!r}")
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:

@@ -41,7 +41,7 @@ from verify_cli import (
 
 MODEL_KEYS = ["flux", "qwen_image", "ltx_2", "wan", "wan2_1",
               "hunyuan_video", "hunyuan_video_15"]
-CONFIG_KEYS = ["tp4", "tp2cp2", "tp2cfg", "tp4sp", "dp2tp2"]
+CONFIG_KEYS = ["tp4", "tp2cp2", "tp2cfg", "tp4sp", "dp2tp2", "tp2cp2ulysses"]
 
 
 # ---------------------------------------------------------------- matrix shape
@@ -50,7 +50,7 @@ def test_all_seven_models_present():
     assert list(MODELS.keys()) == MODEL_KEYS
 
 
-def test_all_five_configs_present():
+def test_all_six_configs_present():
     assert list(PARALLEL_CONFIGS.keys()) == CONFIG_KEYS
 
 
@@ -65,6 +65,8 @@ def test_config_flags():
     assert PARALLEL_CONFIGS["tp2cfg"].flags == ("--tp-degree", "2", "--cfg-parallel")
     assert PARALLEL_CONFIGS["tp4sp"].flags == ("--tp-degree", "4", "--sp")
     assert PARALLEL_CONFIGS["dp2tp2"].flags == ("--tp-degree", "2", "--dp", "2")
+    assert PARALLEL_CONFIGS["tp2cp2ulysses"].flags == (
+        "--tp-degree", "2", "--cp-degree", "2", "--cp-mode", "ulysses")
 
 
 def test_model_ids():
@@ -123,9 +125,11 @@ _EXPECTED_SKIPS = {
     ("qwen_image", "tp2cfg"): "distilled",
     ("qwen_image", "tp4sp"): "no-SP",
     ("ltx_2", "tp2cp2"): "no-CP",
+    ("ltx_2", "tp2cp2ulysses"): "no-CP",
     ("ltx_2", "tp4sp"): "no-SP",
     ("hunyuan_video", "tp2cfg"): "distilled",
     ("hunyuan_video_15", "tp2cp2"): "no-CP",
+    ("hunyuan_video_15", "tp2cp2ulysses"): "no-CP",
     ("hunyuan_video_15", "tp2cfg"): "distilled",
     ("hunyuan_video_15", "tp4sp"): "no-SP",
 }
@@ -140,11 +144,12 @@ def test_skip_reason_full_support_table():
 
 def test_plan_cells_counts():
     cells = plan_cells(MODEL_KEYS, CONFIG_KEYS)
-    assert len(cells) == 35
+    assert len(cells) == 42
     skipped = [c for c in cells if c.skip_reason]
     runnable = [c for c in cells if not c.skip_reason]
-    assert len(skipped) == 9      # dp2tp2 adds no skips (dp applies to every model)
-    assert len(runnable) == 26
+    # tp2cp2ulysses is a CP config, so it adds the same two no-CP skips as tp2cp2.
+    assert len(skipped) == 11
+    assert len(runnable) == 31
     xfail = {(c.model_key, c.config_key) for c in runnable if c.expected_fail}
     assert xfail == {("hunyuan_video_15", "tp4"), ("hunyuan_video_15", "dp2tp2"),
                      ("hunyuan_video", "tp2cp2"), ("hunyuan_video", "dp2tp2")}

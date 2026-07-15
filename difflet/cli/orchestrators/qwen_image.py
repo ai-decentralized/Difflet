@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 from difflet.common.orchestrators import qwen_image as qwen_common
-from difflet.cli.orchestrators.base import ModelOrchestrator
+from difflet.cli.orchestrators.base import ModelOrchestrator, cp_mode_token
 from difflet.cli import runner
 
 _HF_MODEL_ID = "Qwen/Qwen-Image"
@@ -355,6 +355,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             cache_dir=args.cache_dir,
             tp_degree=args.tp_degree or 4,
             cp_degree=args.cp_degree or 1,
+            cp_mode_suffix=cp_mode_token(args),
             height=args.height or 1024,
             width=args.width or 1024,
         )
