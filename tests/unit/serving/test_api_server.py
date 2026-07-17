@@ -55,6 +55,25 @@ class _BlockingEngine(_UnexpectedFailureEngine):
             raise
 
 
+class _CancellationFencedStartEngine(_UnhealthyEngine):
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.release_start = asyncio.Event()
+        self.shutdown_calls = 0
+
+    async def start(self):
+        self.started.set()
+        try:
+            await self.release_start.wait()
+        except asyncio.CancelledError:
+            # Model the resident engine's non-cancellable process startup fence.
+            await self.release_start.wait()
+            raise
+
+    async def shutdown(self):
+        self.shutdown_calls += 1
+
+
 class _DisconnectRequest:
     client = None
 
@@ -78,6 +97,29 @@ def test_health_returns_503_when_engine_unhealthy():
     response = asyncio.run(health_route.endpoint())
 
     assert response.status_code == 503
+
+
+def test_cancelled_engine_start_is_always_torn_down():
+    async def _run() -> None:
+        options = ServeOptions(model_id="black-forest-labs/FLUX.1-dev")
+        engine = _CancellationFencedStartEngine()
+        app = create_app(
+            options=options,
+            resolved_model=resolve_serving_model(options),
+            engine=engine,
+            artifact_store=object(),
+        )
+        context = app.router.lifespan_context(app)
+        startup = asyncio.create_task(context.__aenter__())
+        await engine.started.wait()
+        startup.cancel()
+        engine.release_start.set()
+
+        with pytest.raises(asyncio.CancelledError):
+            await startup
+        assert engine.shutdown_calls == 1
+
+    asyncio.run(_run())
 
 
 @pytest.mark.parametrize("payload", [[], None, "not-an-object", 42])

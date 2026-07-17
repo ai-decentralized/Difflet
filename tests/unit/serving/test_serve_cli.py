@@ -90,6 +90,12 @@ def test_serve_help_exposes_operational_tuning_but_hides_artifact_policy(capsys)
     assert "--sp" in out
     assert "--no-sp" in out
     assert "--worker-heartbeat-interval" in out
+    assert "--validation-workers" in out
+    assert "--validation-max-waiting" in out
+    assert "--validation-timeout" in out
+    assert "--video-retention-seconds" in out
+    assert "--video-max-jobs" in out
+    assert "--video-sweep-interval" in out
     assert "--host-vae" in out
     assert "--num-frames" in out
     assert "--teacache-cadence" in out
@@ -97,8 +103,11 @@ def test_serve_help_exposes_operational_tuning_but_hides_artifact_policy(capsys)
     assert "--teacache-speedup" in out
     assert "--teacache-calibration" in out
     assert "Wan-AI/Wan2.2-T2V-A14B-Diffusers" not in out
-    assert "hunyuanvideo-community/HunyuanVideo" not in out
-    assert "Lightricks/LTX-2" not in out
+    assert "hunyuanvideo-community/HunyuanVideo-1.5" not in out
+    assert "Wan-AI/Wan2.1-T2V-14B-Diffusers" in out
+    # Argparse may wrap this long choice between the organization and model.
+    assert "community/HunyuanVideo" in out
+    assert "Lightricks/LTX-2" in out
     assert "FLUX.1-dev" in out
     assert "Qwen/Qwen-Image" in out
 
@@ -118,6 +127,12 @@ def test_difflet_serve_operational_controls_have_documented_defaults(monkeypatch
     assert options.worker_cancel_timeout == 10.0
     assert options.worker_restart_timeout == 900.0
     assert options.artifact_ttl_seconds == 3600
+    assert options.validation_workers == 4
+    assert options.validation_max_waiting == 32
+    assert options.validation_timeout == 30.0
+    assert options.video_retention_seconds == 25 * 60 * 60
+    assert options.video_max_jobs == 4096
+    assert options.video_sweep_interval_seconds == 300.0
 
 
 def test_difflet_serve_maps_operational_controls(monkeypatch):
@@ -142,6 +157,18 @@ def test_difflet_serve_maps_operational_controls(monkeypatch):
             "15",
             "--worker-restart-timeout",
             "1200",
+            "--validation-workers",
+            "2",
+            "--validation-max-waiting",
+            "7",
+            "--validation-timeout",
+            "9",
+            "--video-retention-seconds",
+            "3600",
+            "--video-max-jobs",
+            "100",
+            "--video-sweep-interval",
+            "60",
         ]
     )
 
@@ -152,6 +179,12 @@ def test_difflet_serve_maps_operational_controls(monkeypatch):
     assert options.artifact_store_timeout == 45.0
     assert options.worker_cancel_timeout == 15.0
     assert options.worker_restart_timeout == 1200.0
+    assert options.validation_workers == 2
+    assert options.validation_max_waiting == 7
+    assert options.validation_timeout == 9.0
+    assert options.video_retention_seconds == 3600
+    assert options.video_max_jobs == 100
+    assert options.video_sweep_interval_seconds == 60.0
 
 
 @pytest.mark.parametrize(
@@ -163,6 +196,12 @@ def test_difflet_serve_maps_operational_controls(monkeypatch):
         ("--artifact-store-timeout", "inf"),
         ("--worker-cancel-timeout", "-1"),
         ("--worker-restart-timeout", "0"),
+        ("--validation-workers", "0"),
+        ("--validation-max-waiting", "-1"),
+        ("--validation-timeout", "0"),
+        ("--video-retention-seconds", "0"),
+        ("--video-max-jobs", "0"),
+        ("--video-sweep-interval", "nan"),
     ],
 )
 def test_difflet_serve_rejects_invalid_operational_controls(flag, value):

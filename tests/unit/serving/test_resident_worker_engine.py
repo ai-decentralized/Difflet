@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -451,6 +452,257 @@ def test_closed_engine_recovery_does_not_restart_worker(monkeypatch):
         return starts
 
     assert asyncio.run(_run()) == []
+
+
+def test_shutdown_waits_for_non_cancellable_initial_start(monkeypatch):
+    async def _run():
+        engine = ResidentWorkerServingEngine(
+            runtime=_runtime(),
+            orchestrator_factory="tests.unit.serving.fake_worker:FakeServingOrchestrator",
+        )
+        start_entered = threading.Event()
+        release_start = threading.Event()
+        calls: list[str] = []
+
+        def _slow_start() -> None:
+            calls.append("start_entered")
+            start_entered.set()
+            assert release_start.wait(timeout=3.0)
+            engine._worker.ready = True
+            engine._worker.healthy = True
+            calls.append("start_finished")
+
+        def _shutdown() -> None:
+            calls.append("shutdown")
+            engine._worker.ready = False
+            engine._worker.healthy = False
+
+        monkeypatch.setattr(engine._worker, "start", _slow_start)
+        monkeypatch.setattr(engine._worker, "shutdown", _shutdown)
+
+        start_task = asyncio.create_task(engine.start())
+        assert await asyncio.to_thread(start_entered.wait, 1.0)
+        shutdown_task = asyncio.create_task(engine.shutdown())
+        await asyncio.sleep(0.05)
+
+        assert shutdown_task.done() is False
+        assert "shutdown" not in calls
+        release_start.set()
+        with pytest.raises(DiffletServingError) as starting:
+            await start_task
+        assert starting.value.code == "engine_draining"
+        await asyncio.wait_for(shutdown_task, timeout=1.0)
+        return calls, engine
+
+    calls, engine = asyncio.run(_run())
+
+    assert calls == ["start_entered", "start_finished", "shutdown"]
+    assert engine._closed is True
+    assert engine._worker.ready is False
+
+
+def test_shutdown_waits_for_recovery_restart_before_final_worker_shutdown(monkeypatch):
+    async def _run():
+        engine = ResidentWorkerServingEngine(
+            runtime=_runtime(),
+            orchestrator_factory="tests.unit.serving.fake_worker:FakeServingOrchestrator",
+        )
+        engine._worker.ready = True
+        engine._worker.healthy = True
+        start_entered = threading.Event()
+        release_start = threading.Event()
+        calls: list[str] = []
+
+        def _terminate() -> None:
+            calls.append("terminate")
+            engine._worker.ready = False
+            engine._worker.healthy = False
+
+        def _slow_restart() -> None:
+            calls.append("restart_entered")
+            start_entered.set()
+            assert release_start.wait(timeout=3.0)
+            engine._worker.ready = True
+            engine._worker.healthy = True
+            calls.append("restart_finished")
+
+        def _shutdown() -> None:
+            calls.append("shutdown")
+            engine._worker.ready = False
+            engine._worker.healthy = False
+
+        monkeypatch.setattr(engine._worker, "terminate", _terminate)
+        monkeypatch.setattr(engine._worker, "start", _slow_restart)
+        monkeypatch.setattr(engine._worker, "shutdown", _shutdown)
+
+        run_task = asyncio.create_task(asyncio.sleep(0))
+        assert engine._start_inflight_recovery(run_task, reason="engine_unavailable")
+        recovery_task = engine._recovery_task
+        assert recovery_task is not None
+        assert await asyncio.to_thread(start_entered.wait, 1.0)
+
+        shutdown_task = asyncio.create_task(engine.shutdown())
+        await asyncio.sleep(0.05)
+        assert shutdown_task.done() is False
+        assert "shutdown" not in calls
+
+        release_start.set()
+        await asyncio.wait_for(shutdown_task, timeout=1.0)
+        await recovery_task
+        await run_task
+        return calls, engine
+
+    calls, engine = asyncio.run(_run())
+
+    assert calls == ["terminate", "restart_entered", "restart_finished", "shutdown"]
+    assert engine._closed is True
+    assert engine._worker.ready is False
+    assert engine._recovery_done.is_set()
+
+
+def test_recovery_exception_waits_for_termination_before_signalling_fence(monkeypatch):
+    async def _run():
+        engine = ResidentWorkerServingEngine(
+            runtime=_runtime(),
+            orchestrator_factory="tests.unit.serving.fake_worker:FakeServingOrchestrator",
+        )
+        engine._worker.ready = True
+        engine._worker.healthy = True
+        terminate_entered = threading.Event()
+        release_terminate = threading.Event()
+        terminate_calls = 0
+
+        def _cancel_failure() -> None:
+            raise RuntimeError("cancel transport failed")
+
+        def _blocking_terminate() -> None:
+            nonlocal terminate_calls
+            terminate_calls += 1
+            terminate_entered.set()
+            assert release_terminate.wait(timeout=3.0)
+            engine._worker.ready = False
+            engine._worker.healthy = False
+
+        monkeypatch.setattr(engine._worker, "cancel_inflight", _cancel_failure)
+        monkeypatch.setattr(engine._worker, "terminate", _blocking_terminate)
+
+        run_task = asyncio.create_task(asyncio.sleep(0))
+        assert engine._start_inflight_recovery(run_task, reason="timeout")
+        recovery_task = engine._recovery_task
+        assert recovery_task is not None
+        assert await asyncio.to_thread(terminate_entered.wait, 1.0)
+
+        waiter = asyncio.create_task(engine.wait_for_recovery())
+        await asyncio.sleep(0.05)
+        assert recovery_task.done() is False
+        assert waiter.done() is False
+        assert engine._recovery_done.is_set() is False
+
+        release_terminate.set()
+        await asyncio.wait_for(recovery_task, timeout=1.0)
+        with pytest.raises(DiffletServingError) as unavailable:
+            await waiter
+        assert unavailable.value.code == "engine_unavailable"
+        await run_task
+        return terminate_calls, engine
+
+    terminate_calls, engine = asyncio.run(_run())
+
+    assert terminate_calls == 1
+    assert engine._unrecoverable is True
+    assert engine._recovering is False
+    assert engine._recovery_done.is_set()
+
+
+def test_recovery_does_not_open_fence_when_termination_cannot_be_confirmed(monkeypatch):
+    async def _run():
+        engine = ResidentWorkerServingEngine(
+            runtime=_runtime(),
+            orchestrator_factory="tests.unit.serving.fake_worker:FakeServingOrchestrator",
+        )
+        engine._worker.ready = True
+        engine._worker.healthy = True
+        original_terminate = engine._worker.terminate
+        terminate_calls = 0
+
+        def _cancel_failure() -> None:
+            raise RuntimeError("cancel transport failed")
+
+        def _terminate_failure() -> None:
+            nonlocal terminate_calls
+            terminate_calls += 1
+            raise RuntimeError("process death not confirmed")
+
+        monkeypatch.setattr(engine._worker, "cancel_inflight", _cancel_failure)
+        monkeypatch.setattr(engine._worker, "terminate", _terminate_failure)
+
+        run_task = asyncio.create_task(asyncio.sleep(0))
+        assert engine._start_inflight_recovery(run_task, reason="timeout")
+        recovery_task = engine._recovery_task
+        assert recovery_task is not None
+        await asyncio.wait_for(recovery_task, timeout=1.0)
+
+        assert engine._recovering is True
+        assert engine._recovery_done.is_set() is False
+        with pytest.raises(asyncio.TimeoutError):
+            await engine.wait_for_recovery(timeout=0.02)
+
+        monkeypatch.setattr(engine._worker, "terminate", original_terminate)
+        await engine.shutdown()
+        await run_task
+        return terminate_calls, engine
+
+    terminate_calls, engine = asyncio.run(_run())
+
+    assert terminate_calls == 1
+    assert engine._unrecoverable is True
+    assert engine._closed is True
+    assert engine._recovery_done.is_set()
+
+
+def test_worker_terminate_escalates_and_confirms_process_death():
+    class _StubbornProcess:
+        def __init__(self) -> None:
+            self.alive = True
+            self.killed = False
+            self.calls: list[tuple[str, float | None]] = []
+
+        def is_alive(self) -> bool:
+            return self.alive
+
+        def terminate(self) -> None:
+            self.calls.append(("terminate", None))
+
+        def kill(self) -> None:
+            self.calls.append(("kill", None))
+            self.killed = True
+
+        def join(self, timeout: float | None = None) -> None:
+            self.calls.append(("join", timeout))
+            if self.killed and timeout is None:
+                self.alive = False
+
+    engine = ResidentWorkerServingEngine(
+        runtime=_runtime(),
+        orchestrator_factory="tests.unit.serving.fake_worker:FakeServingOrchestrator",
+    )
+    process = _StubbornProcess()
+    engine._worker._process = process
+    engine._worker.ready = True
+    engine._worker.healthy = True
+
+    engine._worker.terminate()
+
+    assert process.calls == [
+        ("terminate", None),
+        ("join", 10),
+        ("kill", None),
+        ("join", None),
+    ]
+    assert process.alive is False
+    assert engine._worker._process is None
+    assert engine._worker.ready is False
+    assert engine._worker.healthy is False
 
 
 def test_shutdown_terminalizes_running_and_queued_requests_as_draining():

@@ -239,3 +239,13 @@ explicit model behavior, not a generic CPU-offload mechanism.
 - I2V, V2V, S2V, LoRA, interpolation, or generated audio.
 - Wan 2.2 before correct dual-transformer execution.
 - HunyuanVideo 1.5 before its offline end-to-end path works.
+
+### Public video response contract
+
+The public video job response follows the OpenAI Video API object: `id`,
+`object`, `model`, `status`, `progress`, timestamps, `prompt`, `size`,
+`seconds`, `quality`, `error`, `expires_at`, and remix metadata. Resolved
+dimensions, frame rate, artifact paths, file size, stage timings, peak memory,
+and other serving diagnostics remain internal job metadata and logs; they are
+not serialized in the default user response. The local `/v1/videos/sync`
+extension still returns raw MP4 bytes.

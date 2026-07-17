@@ -42,6 +42,20 @@
 > resident worker or the Videos API. See
 > [Trn2 benchmark evidence audit](07_trn2_benchmark_evidence.md).
 
+> **2026-07-17 LTX-2 hardware validation:** LTX-2 has now passed a separate
+> real resident `trn2.3xlarge` Videos Serving run at TP4/CP1, 480x704x49.
+> The run measured compile/load/smoke/idle/generation/shutdown memory, reused
+> one worker for repeated generations, validated MP4 media, and exercised all
+> six Videos routes including queued-only DELETE. See
+> [LTX-2 resident validation](08_ltx2_trn2_serving_validation.md). Wan 2.1 and
+> HunyuanVideo 1.0 remain pending hardware gates.
+
+> **2026-07-17 Wan 2.1 validation:** Wan 2.1 has now passed resident load,
+> request reuse, MP4 output, all six Videos routes, and phase memory sampling
+> at TP4/CP1 480x832x9. The service was already owned by another running test,
+> so clean shutdown/HBM release remains open. See
+> [Wan 2.1 resident validation](09_wan21_trn2_serving_validation.md).
+
 ## Research anchor
 
 - Repository: `git@github.com:ai-decentralized/Difflet.git`
@@ -114,8 +128,8 @@ under that root before accepting work.
 
 | Model | MVP logical stages | One resident process? | Current conclusion |
 | --- | ---: | --- | --- |
-| LTX-2 | 1 (`pipeline`) | Provisionally yes | Hybrid stage: host text/connectors/decode and TP4 Neuron DiT; needs Trainium serving smoke and memory measurement |
-| Wan 2.1 | 3 (`prompt_encoder`, `denoiser`, `decoder`) | Provisionally yes | TP4 Neuron prompt encoder/DiT with explicit host VAE decode |
+| LTX-2 | 1 (`pipeline`) | Yes for the measured profile | TP4 resident gate passed; steady HBM 38.96 GiB, host text/connectors/decode |
+| Wan 2.1 | 3 (`prompt_encoder`, `denoiser`, `decoder`) | Yes for the measured profile; shutdown pending | TP4 Neuron prompt encoder/DiT with explicit host VAE decode; HBM 41.34 GiB |
 | Wan 2.2 | Target 3 (`prompt_encoder`, dual-expert `denoiser`, `decoder`) | Not yet | Single-transformer Trn2 path ran; Serving is blocked on enabling and validating the second transformer plus the larger resident-set gate |
 | HunyuanVideo 1.0 | 4 (`clip`, `llama`, `denoiser`, `decoder`) | Provisionally yes | Host CLIP/VAE and resident W4 Llama/DiT; requires measured co-load and reference comparison |
 | HunyuanVideo 1.5 | 3-5 | No current basis | Not present in the README supported-model table; offline compile/generate orchestrator is incomplete |
@@ -131,14 +145,15 @@ not confused with resident HTTP qualification:
 
 | Model | Real Trn2 offline benchmark | Local Videos adapter + fake-engine API | Complete model semantics | Real Trn2 six-API gate |
 | --- | --- | --- | --- | --- |
-| LTX-2 | Yes: TP4 480x704x49, finite tensor | Yes | Provisional; fixed adapter path | Pending |
-| Wan 2.1 | Yes: TP4 480x832x9, finite tensor | Yes | Provisional; fixed adapter path | Pending |
+| LTX-2 | Yes: TP4 480x704x49, finite tensor | Yes | Fixed TP4 resident adapter path verified | Passed for TP4/CP1 480x704x49 |
+| Wan 2.1 | Yes: TP4 480x832x9, finite tensor | Yes | Fixed adapter path and API path verified | Load/API passed; shutdown pending |
 | Wan 2.2 | Partial: single transformer, reused 2.1 NEFF | No | No: current CLI disables `transformer_2` | Pending after wiring/reference fix |
 | HunyuanVideo 1.0 | Yes: TP4 320x512x61, finite tensor | Yes | Provisional TP4/CP1 host-CLIP/VAE path | Pending |
 | HunyuanVideo 1.5 | No: benchmark pending | No | No: compile/generate scaffold | Not eligible yet |
 
-Therefore LTX-2, Wan 2.1, and HunyuanVideo 1.0 are locally wired candidates;
-none is yet claimed to have passed real `trn2.3xlarge` Videos Serving.
+Therefore LTX-2 is now hardware-qualified for the measured fixed profile. Wan
+2.1 and HunyuanVideo 1.0 remain locally wired candidates that have not yet
+passed real `trn2.3xlarge` Videos Serving.
 
 ## Evidence and confidence
 
@@ -158,16 +173,17 @@ none is yet claimed to have passed real `trn2.3xlarge` Videos Serving.
 - HunyuanVideo 1.0 currently launches separate CLIP, Llama, and generate stages.
 - LTX-2 explicitly leaves non-transformer components on the host.
 
-### Provisional capacity posture
+### Capacity posture
 
-- Each supported fixed profile is treated as able to remain resident in its own
-  `trn2.3xlarge` serve process so implementation can proceed.
+- LTX-2 is measured for the fixed profile above. Wan 2.1 and HunyuanVideo 1.0
+  remain provisional per-model residency assumptions so implementation can
+  proceed before their hardware gates.
 - This does not mean all models can co-reside. One serve process owns one model
   and one immutable compiled profile on the four-core target.
 - [AWS documents](https://aws.amazon.com/ec2/instance-types/trn2/) 128 GB host
-  memory and 96 GB accelerator HBM for `trn2.3xlarge`; prior local observation
-  showed roughly 124 GB Linux-visible host memory. Exact T2V serving RSS/PSS
-  and HBM peaks have not been measured.
+  memory and 96 GB accelerator HBM for `trn2.3xlarge`; the LTX-2 validation host
+  exposed 124.77 GiB to Linux. LTX-2 exact serving RSS/PSS and HBM are now
+  measured; Wan and HunyuanVideo values remain pending.
 - Host placement is model-specific and explicit. It is not a generic CPU
   offload facility or transparent extension of Trainium HBM.
 
@@ -198,6 +214,8 @@ For each fixed serving profile:
 - [Videos API review and implementation plan](05_videos_api_review_and_plan.md)
 - [Residency assumption and investigation register](06_residency_assumption_and_investigation.md)
 - [Trn2 benchmark evidence audit](07_trn2_benchmark_evidence.md)
+- [LTX-2 Trn2 resident Videos Serving validation](08_ltx2_trn2_serving_validation.md)
+- [Wan 2.1 Trn2 resident Videos Serving validation](09_wan21_trn2_serving_validation.md)
 - Existing topology evidence:
   [Qwen Trn2 topology](../qwen_trn2_topology/00_summary.md) and
   [other model audit](../qwen_trn2_topology/04_other_models_topology_audit.md)

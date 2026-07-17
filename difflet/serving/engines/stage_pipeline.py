@@ -8,8 +8,8 @@ from collections.abc import Mapping
 from typing import Generic, Protocol
 
 from difflet.serving.types import (
-    DiffletGenerateOutput,
     DiffletGenerateRequest,
+    GenerateOutput,
     InputPayloadT,
     OutputPayloadT,
     ResolvedRuntimeBundle,
@@ -163,11 +163,11 @@ class ServingStageAdapter(Protocol):
 
     def initial_payload(self, request: DiffletGenerateRequest) -> StagePayload: ...
 
-    def finalize(self, payload: StagePayload) -> DiffletGenerateOutput: ...
+    def finalize(self, payload: StagePayload) -> GenerateOutput: ...
 
     def smoke_request(self) -> DiffletGenerateRequest: ...
 
-    def validate_smoke_output(self, output: DiffletGenerateOutput) -> None: ...
+    def validate_smoke_output(self, output: GenerateOutput) -> None: ...
 
     def reset_request_state(self, outcome: str) -> None: ...
 
@@ -212,7 +212,7 @@ class StagePipelineEngine:
         self,
         request: DiffletGenerateRequest,
         context: WorkerRequestContext,
-    ) -> DiffletGenerateOutput:
+    ) -> GenerateOutput:
         if self.executor is None or self._closed:
             raise RuntimeError("stage pipeline engine is not ready")
         self.adapter.reset_request_state("before_request")

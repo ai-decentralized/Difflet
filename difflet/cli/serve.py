@@ -180,6 +180,12 @@ def options_from_args(args: argparse.Namespace) -> ServeOptions:
         worker_cancel_timeout=getattr(args, "worker_cancel_timeout", 10.0),
         worker_restart_timeout=getattr(args, "worker_restart_timeout", 900.0),
         worker_heartbeat_interval=getattr(args, "worker_heartbeat_interval", 30.0),
+        validation_workers=getattr(args, "validation_workers", 4),
+        validation_max_waiting=getattr(args, "validation_max_waiting", 32),
+        validation_timeout=getattr(args, "validation_timeout", 30.0),
+        video_retention_seconds=getattr(args, "video_retention_seconds", 25 * 60 * 60),
+        video_max_jobs=getattr(args, "video_max_jobs", 4096),
+        video_sweep_interval_seconds=getattr(args, "video_sweep_interval", 5 * 60.0),
     )
 
 
