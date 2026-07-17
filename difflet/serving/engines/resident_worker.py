@@ -25,8 +25,8 @@ from difflet.serving.engines.stage_pipeline import StagePipelineEngine
 from difflet.serving.options import validate_worker_heartbeat_interval
 from difflet.serving.types import (
     CancellationSignal,
-    DiffletGenerateOutput,
     DiffletGenerateRequest,
+    GenerateOutput,
     ResolvedRuntimeBundle,
     WorkerRequestContext,
 )
@@ -66,6 +66,7 @@ class ResidentWorkerServingEngine:
             raise ValueError("P0 ResidentWorkerServingEngine requires max_running_requests=1")
         self._run_lock = asyncio.Lock()
         self._admission_lock = asyncio.Lock()
+        self._lifecycle_lock = asyncio.Lock()
         self._pending = 0
         self._worker = _ResidentWorkerProcess(
             runtime=runtime,
@@ -79,17 +80,43 @@ class ResidentWorkerServingEngine:
         self._unrecoverable = False
         self._closed = False
         self._draining_event = asyncio.Event()
+        self._recovery_done = asyncio.Event()
+        self._recovery_done.set()
+        self._startup_task: asyncio.Task[None] | None = None
+        self._recovery_task: asyncio.Task[None] | None = None
+        self._shutdown_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
-        await asyncio.to_thread(self._worker.start)
-        self._unrecoverable = False
+        if self._closed or self._draining:
+            raise _engine_draining()
+        async with self._lifecycle_lock:
+            if self._closed or self._draining:
+                raise _engine_draining()
+            await self._start_worker_uncancellable()
+            if self._closed or self._draining:
+                # A concurrent shutdown owns the final worker teardown.
+                raise _engine_draining()
+            self._unrecoverable = False
 
     async def shutdown(self) -> None:
         self._draining = True
         self._closed = True
         self._draining_event.set()
-        await asyncio.sleep(0)
-        await asyncio.to_thread(self._worker.shutdown)
+        task = self._shutdown_task
+        if task is None:
+            task = asyncio.create_task(
+                self._shutdown_worker_lifecycle(),
+                name="difflet-worker-shutdown",
+            )
+            self._shutdown_task = task
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # Worker lifecycle calls run in threads and cannot be cancelled.
+            # Complete teardown before propagating cancellation to the caller.
+            with suppress(BaseException):
+                await task
+            raise
 
     @property
     def ready(self) -> bool:
@@ -103,7 +130,7 @@ class ResidentWorkerServingEngine:
             return True
         return self._worker.is_healthy()
 
-    async def generate(self, request: DiffletGenerateRequest) -> DiffletGenerateOutput:
+    async def generate(self, request: DiffletGenerateRequest) -> GenerateOutput:
         if self._draining:
             raise DiffletServingError(503, "engine_draining", "engine is draining", "server_error")
         if self._recovering:
@@ -225,7 +252,7 @@ class ResidentWorkerServingEngine:
         request: DiffletGenerateRequest,
         *,
         deadline_monotonic: float,
-    ) -> DiffletGenerateOutput:
+    ) -> GenerateOutput:
         return await asyncio.to_thread(
             self._worker.run_generation,
             request,
@@ -298,34 +325,53 @@ class ResidentWorkerServingEngine:
     def _start_inflight_recovery(self, run_task: asyncio.Task, *, reason: str) -> bool:
         if self._closed or self._draining:
             return False
+        if self._recovery_task is not None and not self._recovery_task.done():
+            return True
         logger.warning("engine.recovery_start request reason=%s", reason)
         self._recovering = True
-        asyncio.create_task(
+        self._recovery_done.clear()
+        task = asyncio.create_task(
             self._recover_worker(run_task, reason=reason),
             name=f"difflet-worker-recovery-{reason}",
         )
+        self._recovery_task = task
+        task.add_done_callback(self._clear_recovery_task)
         return True
 
     async def _recover_worker(self, run_task: asyncio.Task, *, reason: str) -> None:
         clean_cancel = False
+        fence_established = False
         try:
             if self._closed or self._draining:
+                await self._terminate_worker_for_fence()
+                fence_established = True
                 return
             if reason in {"caller_cancelled", "timeout", "request_timeout"}:
                 self._worker.cancel_inflight()
                 clean_cancel = await self._wait_for_terminal_state(run_task)
                 logger.info("engine.recovery_cancel_done reason=%s clean=%s", reason, clean_cancel)
-            if not clean_cancel:
-                await asyncio.to_thread(self._worker.terminate)
-                with suppress(BaseException):
-                    await asyncio.wait_for(run_task, timeout=1.0)
+            if clean_cancel:
+                fence_established = True
+            else:
+                async with self._lifecycle_lock:
+                    await self._run_worker_call_uncancellable(
+                        self._worker.terminate,
+                        name="difflet-worker-recovery-terminate",
+                    )
+                    fence_established = True
+                    # The process is confirmed dead. Drain the parent-side thread
+                    # before reusing worker fields for a replacement process.
+                    with suppress(BaseException):
+                        await asyncio.shield(run_task)
+                    if self._closed or self._draining:
+                        return
+                    await self._start_worker_uncancellable()
                 if self._closed or self._draining:
                     return
-                await asyncio.wait_for(
-                    asyncio.to_thread(self._worker.start),
-                    timeout=float(self.config.worker_restart_timeout),
-                )
                 logger.info("engine.recovery_worker_restarted reason=%s", reason)
+
+            if self._closed or self._draining:
+                return
             if not self._worker.is_ready():
                 logger.error("engine.recovery_failed_not_ready reason=%s", reason)
                 raise DiffletServingError(
@@ -334,20 +380,113 @@ class ResidentWorkerServingEngine:
                     "worker did not become ready after recovery",
                     "server_error",
                 )
-            self._recovering = False
-        except Exception:
+        except BaseException:
             logger.exception("engine.recovery_failed reason=%s", reason)
             self._worker.mark_error()
             self._unrecoverable = True
-            self._recovering = False
+            # Never fail open: an exception in cancellation, termination, or
+            # restart still has to prove that no worker can write the old target.
+            fence_established = False
+            try:
+                await self._terminate_worker_for_fence()
+                fence_established = True
+            except BaseException:
+                logger.critical(
+                    "engine.recovery_fence_failed reason=%s",
+                    reason,
+                    exc_info=True,
+                )
         finally:
-            if self._run_lock.locked():
-                self._run_lock.release()
+            if fence_established:
+                self._recovering = False
+                self._recovery_done.set()
+                if self._run_lock.locked():
+                    self._run_lock.release()
+
+    async def _shutdown_worker_lifecycle(self) -> None:
+        await asyncio.sleep(0)
+        startup_task = self._startup_task
+        if startup_task is not None and startup_task is not asyncio.current_task():
+            with suppress(BaseException):
+                await asyncio.shield(startup_task)
+        recovery_task = self._recovery_task
+        if recovery_task is not None and recovery_task is not asyncio.current_task():
+            with suppress(BaseException):
+                await asyncio.shield(recovery_task)
+
+        async with self._lifecycle_lock:
+            await self._run_worker_call_uncancellable(
+                self._worker.shutdown,
+                name="difflet-worker-final-shutdown",
+            )
+        self._recovering = False
+        self._recovery_done.set()
+        if self._run_lock.locked():
+            self._run_lock.release()
+
+    async def _start_worker_uncancellable(self) -> None:
+        task = asyncio.create_task(
+            asyncio.to_thread(self._worker.start),
+            name="difflet-worker-start",
+        )
+        self._startup_task = task
+        try:
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                with suppress(BaseException):
+                    await task
+                raise
+        finally:
+            if self._startup_task is task:
+                self._startup_task = None
+
+    async def _run_worker_call_uncancellable(
+        self,
+        call: Callable[[], Any],
+        *,
+        name: str,
+    ) -> Any:
+        task = asyncio.create_task(asyncio.to_thread(call), name=name)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            with suppress(BaseException):
+                await task
+            raise
+
+    async def _terminate_worker_for_fence(self) -> None:
+        async with self._lifecycle_lock:
+            await self._run_worker_call_uncancellable(
+                self._worker.terminate,
+                name="difflet-worker-fence-terminate",
+            )
+
+    def _clear_recovery_task(self, task: asyncio.Task[None]) -> None:
+        if self._recovery_task is task:
+            self._recovery_task = None
+
+    async def wait_for_recovery(self, timeout: float | None = None) -> None:
+        """Fence caller-owned cleanup until cancellation acknowledgement or restart."""
+
+        if not self._recovery_done.is_set():
+            waiter = self._recovery_done.wait()
+            if timeout is None:
+                await waiter
+            else:
+                await asyncio.wait_for(waiter, timeout=float(timeout))
+        if self._unrecoverable or not self._worker.is_ready():
+            raise DiffletServingError(
+                503,
+                "engine_unavailable",
+                "worker did not recover to a ready state",
+                "server_error",
+            )
 
     async def _wait_for_terminal_state(self, run_task: asyncio.Task) -> bool:
         try:
             await asyncio.wait_for(
-                run_task,
+                asyncio.shield(run_task),
                 timeout=float(self.config.worker_cancel_timeout),
             )
             return False
@@ -440,7 +579,7 @@ class _ResidentWorkerProcess:
         self,
         request: DiffletGenerateRequest,
         deadline_monotonic: float,
-    ) -> DiffletGenerateOutput:
+    ) -> GenerateOutput:
         logger.info(
             "worker_process_run_start request_id=%s model=%s deadline_remaining=%.3f",
             request.request_id,
@@ -507,9 +646,25 @@ class _ResidentWorkerProcess:
 
     def terminate(self) -> None:
         logger.info("worker_process_terminate model=%s", self.runtime.profile.model_id)
-        if self._process is not None and self._process.is_alive():
-            self._process.terminate()
-            self._process.join(timeout=10)
+        process = self._process
+        if process is not None and process.is_alive():
+            process.terminate()
+            process.join(timeout=10)
+            if process.is_alive():
+                logger.error(
+                    "worker_process_terminate_escalate model=%s",
+                    self.runtime.profile.model_id,
+                )
+                kill = getattr(process, "kill", None)
+                if kill is not None:
+                    kill()
+                else:  # pragma: no cover - supported Python processes expose kill
+                    process.terminate()
+                # A recovery fence cannot be opened while the old process may
+                # still write its output target. Wait for confirmed process death.
+                process.join()
+            if process.is_alive():  # defensive for non-standard process doubles
+                raise RuntimeError("resident worker did not terminate")
         self._process = None
         self._stop_status_consumer()
         self._close_queues()

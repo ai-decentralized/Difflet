@@ -254,3 +254,21 @@ cancellation guarantees.
 These are process-lifetime consistency and media-ownership guarantees, not
 evidence that a model/profile has passed the required real `trn2.3xlarge`
 acceptance run.
+
+## S3 video artifacts and `url`
+
+With complete `DIFFLET_S3_*` configuration, asynchronous videos use local
+temporary staging and upload to S3 after validation. Synchronous `/sync` results
+use only a local temporary file and are cleaned up after the response; they do
+not upload to S3. Without S3, asynchronous jobs use the local artifact store;
+workers do not write directly to remote object storage.
+
+After a successful upload, asynchronous status and list responses include the
+single Difflet extension field `url`, containing a short-lived presigned GET URL.
+It is `null` before completion, without S3, or after upload failure. The API does
+not expose `artifact_url` or `presigned_url` aliases, and this does not change
+the OpenAI-standard fields.
+
+`GET /content` remains OpenAI-compatible: the server reads from the local file or
+S3 SDK and proxies/streams `video/mp4` bytes instead of redirecting the client.
+DELETE and the TTL sweeper remove both S3 objects and local staging remnants.

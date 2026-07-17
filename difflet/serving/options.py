@@ -12,7 +12,7 @@ from typing import Any
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.registry import ModelEntry
 from difflet.serving.errors import invalid_extra_body
-from difflet.serving.types import ServingProfile
+from difflet.serving.types import OutputModality, ServingProfile
 
 MIN_WORKER_HEARTBEAT_INTERVAL_SECONDS = 5.0
 MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS = 120.0
@@ -75,9 +75,40 @@ class ServeOptions:
     worker_restart_timeout: float = 900.0
     worker_heartbeat_interval: float = 30.0
     artifact_ttl_seconds: int = 3600
+    validation_workers: int = 4
+    validation_max_waiting: int = 32
+    validation_timeout: float = 30.0
+    video_retention_seconds: int = 25 * 60 * 60
+    video_max_jobs: int = 4096
+    video_sweep_interval_seconds: float = 5 * 60.0
 
     def __post_init__(self) -> None:
         validate_worker_heartbeat_interval(self.worker_heartbeat_interval)
+        if (
+            isinstance(self.validation_workers, bool)
+            or not isinstance(self.validation_workers, int)
+            or self.validation_workers <= 0
+            or isinstance(self.validation_max_waiting, bool)
+            or not isinstance(self.validation_max_waiting, int)
+            or self.validation_max_waiting < 0
+        ):
+            raise ValueError("validation worker/waiting limits are invalid")
+        if not math.isfinite(self.validation_timeout) or self.validation_timeout <= 0:
+            raise ValueError("validation timeout must be positive")
+        if (
+            isinstance(self.video_retention_seconds, bool)
+            or not isinstance(self.video_retention_seconds, int)
+            or self.video_retention_seconds <= 0
+            or isinstance(self.video_max_jobs, bool)
+            or not isinstance(self.video_max_jobs, int)
+            or self.video_max_jobs <= 0
+        ):
+            raise ValueError("video retention and job limits must be positive")
+        if (
+            not math.isfinite(self.video_sweep_interval_seconds)
+            or self.video_sweep_interval_seconds <= 0
+        ):
+            raise ValueError("video sweep interval must be positive")
 
 
 def build_serving_profile(
@@ -85,7 +116,10 @@ def build_serving_profile(
     model_id: str,
     model_type: str,
     entry: ModelEntry,
+    output_modality: OutputModality,
     output_mime_type: str,
+    default_fps: int | None,
+    default_host_vae: bool,
     revision: str | None,
     cache_dir: str | None,
     tp_degree: int | None,
@@ -104,19 +138,19 @@ def build_serving_profile(
 ) -> ServingProfile:
     """Resolve registry defaults plus `difflet serve` overrides."""
 
-    if num_frames is not None:
+    if output_modality == "image" and num_frames is not None:
         raise invalid_extra_body(
             "--num-frames is reserved for future video serving; Qwen/Flux image serving "
             "requires num_frames to be omitted."
         )
-    if host_vae:
+    if output_modality == "image" and host_vae:
         raise invalid_extra_body("Qwen/Flux image serving does not support --host-vae.")
     if cfg_parallel:
         raise invalid_extra_body(
             f"{model_id} serving does not expose the true-CFG request path required "
             "by --cfg-parallel."
         )
-    if sp_enabled and model_type != "flux":
+    if sp_enabled and model_type not in {"flux", "wan", "hunyuan_video"}:
         raise invalid_extra_body(f"{model_id} does not support --sp serving.")
     if teacache_cadence is not None or teacache_online_delta is not None:
         raise invalid_extra_body(
@@ -124,7 +158,13 @@ def build_serving_profile(
             "--teacache-online-delta; use adaptive --teacache-speedup with a "
             "calibration file."
         )
-    shape = entry.resolve_shape(height=height, width=width, num_frames=None)
+    if output_modality == "video" and teacache_speedup is not None:
+        raise invalid_extra_body("resident video serving does not yet expose adaptive TeaCache.")
+    shape = entry.resolve_shape(
+        height=height,
+        width=width,
+        num_frames=num_frames if output_modality == "video" else None,
+    )
     resolved_height = shape.get("height")
     resolved_width = shape.get("width")
     if resolved_height is None or resolved_width is None:
@@ -165,20 +205,31 @@ def build_serving_profile(
     if model_type == "qwen_image" and parallel.cp_degree != 1:
         raise invalid_extra_body("Qwen-Image P0 serving requires cp_degree=1.")
 
+    resolved_num_frames = shape.get("num_frames")
+    if output_modality == "video":
+        if resolved_num_frames is None or int(resolved_num_frames) <= 0:
+            raise ValueError(f"video model {model_type!r} must define positive num_frames")
+        if default_fps is None or default_fps <= 0:
+            raise ValueError(f"video model {model_type!r} must define a positive FPS")
+    else:
+        resolved_num_frames = None
+
     return ServingProfile(
         model_id=model_id,
         model_type=model_type,
         height=int(resolved_height),
         width=int(resolved_width),
-        num_frames=None,
+        num_frames=int(resolved_num_frames) if resolved_num_frames is not None else None,
         parallel=parallel,
         cache_dir=cache_dir,
         revision=revision,
-        output_modality="image",
+        output_modality=output_modality,
         output_mime_type=output_mime_type,
         teacache_speedup=teacache_speedup,
         teacache_calibration=None,
         teacache_calibration_data=frozen_calibration,
+        output_fps=default_fps if output_modality == "video" else None,
+        host_vae=(default_host_vae or host_vae) if output_modality == "video" else False,
     )
 
 

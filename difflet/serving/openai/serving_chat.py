@@ -167,12 +167,11 @@ async def generate_chat_completion(
     artifact_store: ArtifactStore | None,
     artifact_ttl_seconds: int,
     artifact_store_timeout: float,
+    normalized_request: DiffletGenerateRequest | None = None,
 ) -> dict[str, Any]:
     started_at = time.perf_counter()
-    request = normalize_chat_request(
-        body,
-        resolved_model=resolved_model,
-        request_id=request_id,
+    request = normalized_request or normalize_chat_request(
+        body, resolved_model=resolved_model, request_id=request_id
     )
     logger.info(
         "chat request normalized model=%s request_id=%s prompt_len=%s steps=%s guidance=%s seed=%s",

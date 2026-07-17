@@ -19,7 +19,11 @@ VALID_MODELS = {
 
 SERVE_VALID_MODELS = {
     "black-forest-labs/FLUX.1-dev",
+    "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+    "hunyuanvideo-community/HunyuanVideo",
     "Qwen/Qwen-Image",
+    "Lightricks/LTX-2",
 }
 
 _MODEL_TYPE: dict[str, str] = {
@@ -342,12 +346,61 @@ def _add_serve_flags(p: argparse.ArgumentParser) -> None:
         metavar="SECONDS",
         help="Worker heartbeat interval in seconds, 5-120 inclusive (default: 30)",
     )
+    p.add_argument(
+        "--validation-workers",
+        type=_positive_int,
+        default=4,
+        metavar="COUNT",
+        help="CPU request-validation threads (default: 4)",
+    )
+    p.add_argument(
+        "--validation-max-waiting",
+        type=_nonnegative_int,
+        default=32,
+        metavar="COUNT",
+        help="Maximum validation submissions waiting for a thread (default: 32)",
+    )
+    p.add_argument(
+        "--validation-timeout",
+        type=_positive_finite_float,
+        default=30.0,
+        metavar="SECONDS",
+        help="Maximum validation wait plus execution time (default: 30)",
+    )
+    p.add_argument(
+        "--video-retention-seconds",
+        type=_positive_int,
+        default=25 * 60 * 60,
+        metavar="SECONDS",
+        help="Terminal in-process video job retention (default: 90000, 25 hours)",
+    )
+    p.add_argument(
+        "--video-max-jobs",
+        type=_positive_int,
+        default=4096,
+        metavar="COUNT",
+        help="Maximum retained asynchronous video job records (default: 4096)",
+    )
+    p.add_argument(
+        "--video-sweep-interval",
+        type=_positive_finite_float,
+        default=5 * 60.0,
+        metavar="SECONDS",
+        help="Expired-video sweep interval (default: 300)",
+    )
 
 
 def _nonnegative_int(value: str) -> int:
     parsed = int(value)
     if parsed < 0:
         raise argparse.ArgumentTypeError("must be zero or greater")
+    return parsed
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
     return parsed
 
 
@@ -391,7 +444,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_cache_flags(run_cmd)
     _add_generate_flags(run_cmd)
 
-    serve = sub.add_parser("serve", help="Start OpenAI-compatible T2I serving")
+    serve = sub.add_parser("serve", help="Start OpenAI-compatible image/video serving")
     _add_serve_model_flag(serve)
     serve.add_argument("--revision", default=None)
     _add_serve_profile_flags(serve)

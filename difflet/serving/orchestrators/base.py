@@ -6,7 +6,9 @@ import re
 from pathlib import Path
 from typing import Protocol, Sequence
 
-from difflet.common.neuron_cores import resolve_available_neuron_core_ids
+from difflet.common.neuron_cores import (
+    resolve_available_neuron_core_ids as resolve_available_neuron_core_ids,
+)
 from difflet.serving.errors import invalid_extra_body
 from difflet.serving.options import CompilePolicy, DownloadPolicy
 from difflet.serving.types import (
@@ -75,12 +77,17 @@ class ServingArtifactPreparer(Protocol):
 
 
 class ServingRequestValidator(Protocol):
+    def preload(self) -> None: ...
+
     def validate(self, request: DiffletGenerateRequest) -> None: ...
 
 
 class NoopServingRequestValidator:
     def __init__(self, runtime: ResolvedRuntimeBundle) -> None:
         self.runtime = runtime
+
+    def preload(self) -> None:
+        return None
 
     def validate(self, request: DiffletGenerateRequest) -> None:
         return None

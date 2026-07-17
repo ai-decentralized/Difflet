@@ -197,6 +197,9 @@ class QwenImageServingRequestValidator:
         self.runtime = runtime
         self._tokenizer = None
 
+    def preload(self) -> None:
+        self._tokenizer_for_runtime()
+
     def validate(self, request: DiffletGenerateRequest) -> None:
         validate_guidance_scale(request, maximum=_MAX_GUIDANCE_SCALE)
         encoded = self._tokenizer_for_runtime()(

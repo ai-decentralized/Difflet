@@ -1,5 +1,13 @@
 # T2V Trn2 Benchmark Evidence Audit
 
+> **Post-audit update (2026-07-17):** the statements below remain accurate for
+> what the checked-in offline benchmark proves by itself. A separate real
+> resident Videos Serving run has now qualified LTX-2 at TP4/CP1,
+> 480x704x49, including memory sampling, same-worker reuse, validated MP4s, and
+> all six routes. See
+> [LTX-2 resident validation](08_ltx2_trn2_serving_validation.md). Wan 2.1 and
+> HunyuanVideo 1.0 remain pending resident gates.
+
 ## Conclusion
 
 The checked-in benchmark is real hardware evidence, not a placeholder. It

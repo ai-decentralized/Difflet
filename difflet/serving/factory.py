@@ -55,7 +55,12 @@ def build_serving_stack(options: ServeOptions) -> ServingStack:
         orchestrator_factory=resolved.metadata.orchestrator_factory,
         config=ResidentWorkerConfig(
             max_running_requests=options.max_running_requests,
-            max_queued_requests=options.max_queued_requests,
+            # Video sync and async work share VideoGenerationService's FIFO.
+            # Keeping the inner engine queue disabled prevents either API path
+            # from bypassing that single admission domain.
+            max_queued_requests=(
+                0 if resolved.metadata.output_modality == "video" else options.max_queued_requests
+            ),
             queue_timeout=options.queue_timeout,
             request_timeout=options.request_timeout,
             worker_cancel_timeout=options.worker_cancel_timeout,

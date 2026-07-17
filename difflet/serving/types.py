@@ -9,7 +9,7 @@ import time
 from abc import ABC
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeAlias, TypeVar
 
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 OutputModality = Literal["image", "video"]
 StageRole = Literal["prompt_encoder", "denoiser", "decoder", "pipeline"]
 StageKind = Literal["extracted", "opaque_pipeline"]
+StagePlacement = Literal["host", "neuron", "hybrid"]
 
 
 @dataclass(frozen=True)
@@ -99,9 +100,30 @@ class ParallelTopology:
 @dataclass(frozen=True)
 class StageRuntimeSpec:
     stage_id: str
-    allocation_id: str
-    topology: ParallelTopology
-    artifact_id: str
+    allocation_id: str | None
+    topology: ParallelTopology | None
+    artifact_id: str | None
+    placement: StagePlacement = "neuron"
+
+    def __post_init__(self) -> None:
+        if not self.stage_id:
+            raise ValueError("runtime stage_id must not be empty")
+        if self.placement == "host":
+            if any(
+                value is not None for value in (self.allocation_id, self.topology, self.artifact_id)
+            ):
+                raise ValueError(
+                    f"host stage {self.stage_id!r} must not claim a Neuron "
+                    "allocation, topology, or compiled artifact"
+                )
+            return
+        if self.placement not in {"neuron", "hybrid"}:
+            raise ValueError(f"unsupported stage placement {self.placement!r}")
+        if self.allocation_id is None or self.topology is None or self.artifact_id is None:
+            raise ValueError(
+                f"{self.placement} stage {self.stage_id!r} requires allocation, "
+                "topology, and compiled artifact"
+            )
 
 
 @dataclass(frozen=True)
@@ -123,7 +145,7 @@ class RuntimePlan:
         if len(allocation_ids) != len(self.allocations):
             raise ValueError("runtime allocation IDs must be unique")
         for stage in self.stages:
-            if stage.allocation_id not in allocation_ids:
+            if stage.allocation_id is not None and stage.allocation_id not in allocation_ids:
                 raise ValueError(
                     f"stage {stage.stage_id!r} references unknown allocation "
                     f"{stage.allocation_id!r}"
@@ -219,6 +241,8 @@ class ServingProfile:
     teacache_speedup: float | None = None
     teacache_calibration: str | None = None
     teacache_calibration_data: TeaCacheCalibration | None = None
+    output_fps: int | None = None
+    host_vae: bool = False
 
     @property
     def world_size(self) -> int:
@@ -239,6 +263,7 @@ class DiffletGenerateRequest:
     guidance_scale: float
     seed: int
     output_format: str = "png"
+    video: "VideoGenerateOptions | None" = None
 
 
 @dataclass(frozen=True)
@@ -246,6 +271,49 @@ class DiffletGenerateOutput:
     data: bytes
     mime_type: str
     output_format: str = "png"
+
+
+@dataclass(frozen=True, slots=True)
+class FileOutputTarget:
+    """Parent-owned worker output target; never populated from a client filename."""
+
+    staging_path: str
+    mime_type: str = "video/mp4"
+    output_format: str = "mp4"
+
+
+@dataclass(frozen=True, slots=True)
+class VideoGenerateOptions:
+    """Immutable video-only request fields carried through resident-worker IPC."""
+
+    num_frames: int
+    fps: int
+    output_target: FileOutputTarget | None = None
+    negative_prompt: str | None = None
+    guidance_scale_2: float | None = None
+    boundary_ratio: float | None = None
+    flow_shift: float | None = None
+    true_cfg_scale: float | None = None
+    requested_seconds: str | None = None
+    user: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FileBackedGenerateOutput:
+    """Small worker result descriptor for media already written to shared storage."""
+
+    path: str
+    mime_type: str
+    output_format: str
+    size_bytes: int
+    width: int
+    height: int
+    num_frames: int
+    fps: float
+    duration_s: float
+
+
+GenerateOutput: TypeAlias = DiffletGenerateOutput | FileBackedGenerateOutput
 
 
 class StagePayload(ABC):
@@ -347,7 +415,7 @@ class ResolvedRuntimeBundle:
                     f"binding identity does not match compile spec {binding.artifact_id!r}"
                 )
         for stage in self.runtime_plan.stages:
-            if stage.artifact_id not in by_spec:
+            if stage.artifact_id is not None and stage.artifact_id not in by_spec:
                 raise ValueError(
                     f"runtime stage {stage.stage_id!r} references unknown artifact "
                     f"{stage.artifact_id!r}"

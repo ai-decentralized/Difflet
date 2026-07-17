@@ -48,7 +48,10 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         model_id=options.model_id,
         model_type=metadata.model_type,
         entry=entry,
+        output_modality=metadata.output_modality,
         output_mime_type=metadata.output_mime_type,
+        default_fps=metadata.default_fps,
+        default_host_vae=metadata.default_host_vae,
         revision=options.revision,
         cache_dir=options.cache_dir,
         tp_degree=options.tp_degree,
@@ -78,10 +81,13 @@ def _ensure_builtin_serving_models_registered() -> None:
     if _BUILTINS_LOADED:
         return
     _BUILTINS_LOADED = True
-    from difflet.common.registry import flux, qwen_image
+    from difflet.common.registry import flux, hunyuan_video, ltx_2, qwen_image, wan
 
     register_serving_model(flux.serving_metadata())
+    register_serving_model(hunyuan_video.serving_metadata())
+    register_serving_model(ltx_2.serving_metadata())
     register_serving_model(qwen_image.serving_metadata())
+    register_serving_model(wan.serving_metadata())
 
 
 def load_factory(path: str) -> Factory:
