@@ -162,7 +162,7 @@ would be a separate model-port project, not a serving-placement rollout.
 
 Completed qualification sequence:
 
-1. Re-run the omitted/default host-host profile as the rollback control.
+1. Re-run the explicit `--host-vae` host-host profile as the rollback control.
 2. Start `--clip-placement neuron --host-vae`; compile the new CLIP
    artifact, run startup smoke, and execute sync plus async API checks.
 3. Select and record one accepted CLIP baseline.
