@@ -17,7 +17,7 @@ or a long repeated-request soak.
 
 ## Target and fixed profile
 
-- Host: `16.27.26.203`, AWS `trn2.3xlarge`
+- Host: AWS `trn2.3xlarge` validation instance
 - NeuronCores/HBM: 4 logical NeuronCores, 96 GB aggregate HBM
 - Host memory: 124.77 GiB visible to Linux, no swap
 - Model: `Lightricks/LTX-2`
@@ -26,6 +26,12 @@ or a long repeated-request soak.
 - Serving artifact identity:
   `ce5e9b3c34f198ae5777a6852a66410d0f2db965f859356568512fa11b6df141`
 - Environment: `/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference`
+
+This is also the supported placement boundary, not merely the benchmark choice.
+The current LTX-2 CLI/lower layer has no Neuron video-VAE decoder application or
+compiled decoder artifact to reuse. Serving therefore keeps the same opaque
+hybrid pipeline, requires host decode components, and does not advertise a
+Neuron VAE profile.
 
 The cold-start command was:
 
@@ -165,8 +171,11 @@ when planning startup, even though neither is steady state.
 
 ## Evidence
 
-- [Raw five-second JSONL](../../../artifacts/remote-logs/16.27.26.203/t2v/ltx2/resources.jsonl)
-- [Complete serve log](../../../artifacts/remote-logs/16.27.26.203/t2v/ltx2/serve.log)
-- [Synchronous MP4](../../../artifacts/remote-logs/16.27.26.203/t2v/ltx2/sync-1.mp4)
-- [Asynchronous MP4](../../../artifacts/remote-logs/16.27.26.203/t2v/ltx2/async-content.mp4)
-- [Artifact inventory](../../../artifacts/remote-logs/16.27.26.203/t2v/ltx2/README.md)
+The host-specific capture directory is intentionally omitted. Under the
+configured artifact root, the evidence set contains:
+
+- `t2v/ltx2/resources.jsonl`: raw five-second JSONL
+- `t2v/ltx2/serve.log`: complete serve log
+- `t2v/ltx2/sync-1.mp4`: synchronous MP4
+- `t2v/ltx2/async-content.mp4`: asynchronous MP4
+- `t2v/ltx2/README.md`: artifact inventory
