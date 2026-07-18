@@ -2,8 +2,8 @@
 
 Date: 2026-07-06
 
-Reference: `/Users/clark/project/vllm-omni/docs/design/difflet_serving` plus
-direct source inspection under `/Users/clark/project/vllm-omni/vllm_omni`.
+Reference: the Difflet serving design documents and direct source inspection
+from a separate vLLM-Omni checkout.
 
 API contract: [Difflet Chat Completions Contract](../design/difflet_serving/chat_completions_contract.md).
 

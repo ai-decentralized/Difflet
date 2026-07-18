@@ -9,7 +9,7 @@ TeaCache wording, and README organization.
 
 ## Research Anchor
 
-- Repository: `/Users/clark/project/yotta/Difflet`
+- Repository: current repository root
 - Remote: `git@github.com:ai-decentralized/Difflet.git`
 - Branch: `feature/serving_t2i`
 - Commit: `f75e13b`
@@ -226,8 +226,8 @@ no S3 config       -> Base64 data URL
 
 ### Benchmark interpretation
 
-The Qwen and Flux CLI timings in
-`artifacts/cli-vs-serve-16.26.177.239.md` measure a new
+The Qwen and Flux CLI timings in the CLI-versus-serving comparison artifact
+measure a new
 `difflet generate` process for every run. They are not `difflet run` end-to-end
 timings.
 

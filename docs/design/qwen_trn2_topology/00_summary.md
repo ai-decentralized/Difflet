@@ -2,13 +2,13 @@
 
 ## Research anchor
 
-- Repository: `/Users/clark/project/yotta/Difflet`
+- Repository: current repository root
 - Remote: `git@github.com:ai-decentralized/Difflet.git`
 - Branch: `feature/serving_t2i`
 - Commit: `94e6c42e296b93af63aa0d722d579d682a4e250b`
 - Research date: 2026-07-10
 - Research owner: Codex
-- Target: EC2 `i-0980bd14d2dafe6d5`, `trn2.3xlarge`, four logical NeuronCores, 96 GB HBM
+- Target: EC2 `trn2.3xlarge`, four logical NeuronCores, 96 GB HBM
 - Relevant uncommitted changes at research start: Qwen serving artifact detection, its unit tests, and `tasks/todo.md`
 
 ## Scope
