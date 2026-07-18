@@ -49,11 +49,11 @@ do not copy vLLM-Omni's I2V/V2V upload support.
 
 Inputs such as I2V/V2V references, audio generation, LoRA, interpolation, and
 arbitrary extra parameters are rejected until the lower model path and their
-security/validation contracts exist. Wan 2.2-only dual-expert controls are not
-accepted because Wan 2.2 is not currently exposed by Serving. This is a
-serving-qualification restriction, not a claim that Wan 2.2 is absent from the
-README or offline CLI: the current CLI produces an artifact while disabling
-`transformer_2`, so dual-transformer correctness remains unproven.
+security/validation contracts exist. The Wan 2.2 checkpoint is accepted only for
+an explicit experimental single-transformer serving profile. Wan 2.2-only
+dual-expert controls are not accepted, and this profile is not an MVP default:
+the current path produces an artifact while disabling `transformer_2`, so
+dual-transformer correctness remains unproven.
 
 ## Global admission and deadline contract
 
@@ -64,12 +64,13 @@ validation timeout. Model generation remains limited to exactly one running
 request. Each synchronous validator call runs in an executor thread and
 FastAPI awaits it asynchronously. Submitting when all 36 validation positions are occupied is
 rejected immediately as `429 validation_capacity_exhausted`; the implementation
-must not use an executor with an unbounded submission queue. The total request
+must not use an executor with an unbounded submission queue. The validation
 deadline starts when bounded body parsing finishes and the request first seeks a
-validation position. It includes validation wait/execution, generation
-admission wait, and model execution. Validation timeout returns stable
-`504 validation_timeout`. A generation ticket is assigned only after successful
-validation, so FIFO order is among validated requests.
+validation position; it covers validation wait and execution only. Validation
+timeout returns stable `504 validation_timeout`. After validation, Video queue
+wait and generation execution use the independent clocks described below. A
+generation ticket is assigned only after successful validation, so FIFO order
+is among validated requests.
 
 Validation capacity belongs to the underlying executor work, not to the HTTP
 waiter. If timeout or disconnect occurs after a validation thread starts, that
@@ -94,10 +95,16 @@ additional Uvicorn processes or resident model workers.
   not whichever handler finishes its later asynchronous preparation first.
 - The physical queue as well as the live-work count must remain bounded after
   repeated queued cancellation or client disconnects.
-- Immediate capacity rejection and queue-wait expiration use the same behavior
-  for every generation endpoint. Total deadline measurement begins when the
-  request first seeks validation capacity and includes validation wait/work,
-  generation queue wait, and engine execution.
+- Immediate capacity rejection uses the same behavior for both Video create
+  endpoints. Video queue wait and execution have separate clocks: the bounded
+  FIFO defaults to 86,400 seconds, while `request_timeout` starts only after
+  the dispatcher claims the item and changes it to `in_progress`. An explicit
+  `--queue-timeout` overrides the modality default.
+- Queue expiration removes the physical FIFO entry and releases its live-work,
+  job-slot, and storage reservations, so it is never submitted for generation.
+  Async metadata remains as a terminal `failed` job with error code
+  `queue_timeout` until DELETE or TTL cleanup; synchronous callers receive
+  `429 queue_timeout`.
 - Model/health reads and job list/status/content reads do not consume a
   generation slot. DELETE is control traffic and must not wait behind
   generation tickets: it cancels queued work, rejects running work, and deletes
@@ -272,3 +279,37 @@ the OpenAI-standard fields.
 `GET /content` remains OpenAI-compatible: the server reads from the local file or
 S3 SDK and proxies/streams `video/mp4` bytes instead of redirecting the client.
 DELETE and the TTL sweeper remove both S3 objects and local staging remnants.
+
+## Video VAE host override
+
+The current MVP keeps each model's already validated decoder path as its registry
+default and retains the existing startup-only host override. It does not change
+the six-route lifecycle contract:
+
+```text
+--host-vae present -> host/CPU VAE decode
+--host-vae omitted -> the model registry's validated default
+```
+
+No public `--vae-placement` selector is added. Before promotion, omission keeps
+the current host default. After a Neuron decoder passes acceptance and its
+registry default is explicitly promoted, omission selects Neuron and
+`--host-vae` remains the rollback command. Host-only adapters such as LTX-2 keep
+a host registry default. Placement is not accepted in an HTTP request.
+
+The option is part of the immutable serving profile. All non-VAE artifacts and
+stage bindings must remain identical between the two placements: model
+revision, shape, dtype, parallel topology, text/prompt-encoder placement,
+transformer artifacts, and latent schema do not change. Only the VAE artifact,
+decoder runner binding, and decoder placement may differ. The choice is
+recorded in internal job/stage metadata, while the OpenAI-compatible public
+video response remains unchanged. One running serve process never switches
+placement or compiles a new VAE in response to an HTTP request.
+
+For Hunyuan, `--clip-placement host|neuron` is also startup-only. The VAE
+comparison begins only after a separate CLIP-placement
+experiment has selected one accepted CLIP baseline. That selected CLIP artifact,
+binding, and placement are then frozen across both VAE candidates. The earlier
+CLIP experiment keeps host VAE fixed and permits only the CLIP artifact,
+prompt-encoder binding, and placement to differ. The two changes are never
+evaluated together.

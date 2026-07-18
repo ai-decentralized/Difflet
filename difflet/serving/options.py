@@ -12,7 +12,7 @@ from typing import Any
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.registry import ModelEntry
 from difflet.serving.errors import invalid_extra_body
-from difflet.serving.types import OutputModality, ServingProfile
+from difflet.serving.types import OutputModality, ServingPlacement, ServingProfile
 
 MIN_WORKER_HEARTBEAT_INTERVAL_SECONDS = 5.0
 MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS = 120.0
@@ -60,6 +60,7 @@ class ServeOptions:
     num_frames: int | None = None
     cache_dir: str | None = None
     host_vae: bool = False
+    clip_placement: ServingPlacement | None = None
     teacache_cadence: int | None = None
     teacache_online_delta: float | None = None
     teacache_speedup: float | None = None
@@ -68,7 +69,9 @@ class ServeOptions:
     compile_policy: CompilePolicy = CompilePolicy.AUTO
     max_running_requests: int = 1
     max_queued_requests: int = 8
-    queue_timeout: float = 30.0
+    # None preserves modality-specific defaults: 30 seconds for image serving
+    # and 24 hours for the shared video FIFO.
+    queue_timeout: float | None = None
     request_timeout: float = 300.0
     artifact_store_timeout: float = 60.0
     worker_cancel_timeout: float = 10.0
@@ -84,6 +87,12 @@ class ServeOptions:
 
     def __post_init__(self) -> None:
         validate_worker_heartbeat_interval(self.worker_heartbeat_interval)
+        if self.queue_timeout is not None and (
+            not math.isfinite(self.queue_timeout) or self.queue_timeout <= 0
+        ):
+            raise ValueError("queue timeout must be positive")
+        if self.clip_placement not in {None, "host", "neuron"}:
+            raise ValueError("clip placement must be 'host' or 'neuron'")
         if (
             isinstance(self.validation_workers, bool)
             or not isinstance(self.validation_workers, int)
@@ -110,6 +119,11 @@ class ServeOptions:
         ):
             raise ValueError("video sweep interval must be positive")
 
+    def effective_queue_timeout(self, output_modality: OutputModality) -> float:
+        if self.queue_timeout is not None:
+            return float(self.queue_timeout)
+        return 24.0 * 60.0 * 60.0 if output_modality == "video" else 30.0
+
 
 def build_serving_profile(
     *,
@@ -131,6 +145,7 @@ def build_serving_profile(
     width: int | None,
     num_frames: int | None,
     host_vae: bool,
+    clip_placement: ServingPlacement | None,
     teacache_cadence: int | None,
     teacache_online_delta: float | None,
     teacache_speedup: float | None,
@@ -145,6 +160,14 @@ def build_serving_profile(
         )
     if output_modality == "image" and host_vae:
         raise invalid_extra_body("Qwen/Flux image serving does not support --host-vae.")
+    if output_modality == "image" and clip_placement is not None:
+        raise invalid_extra_body(
+            "Qwen/Flux image serving does not support CLIP placement overrides."
+        )
+    if clip_placement is not None and model_type != "hunyuan_video":
+        raise invalid_extra_body(
+            f"{model_id} does not support --clip-placement; it is HunyuanVideo-only."
+        )
     if cfg_parallel:
         raise invalid_extra_body(
             f"{model_id} serving does not expose the true-CFG request path required "
@@ -214,6 +237,10 @@ def build_serving_profile(
     else:
         resolved_num_frames = None
 
+    resolved_clip_placement: ServingPlacement | None = None
+    if model_type == "hunyuan_video":
+        resolved_clip_placement = clip_placement or "host"
+
     return ServingProfile(
         model_id=model_id,
         model_type=model_type,
@@ -230,6 +257,7 @@ def build_serving_profile(
         teacache_calibration_data=frozen_calibration,
         output_fps=default_fps if output_modality == "video" else None,
         host_vae=(default_host_vae or host_vae) if output_modality == "video" else False,
+        clip_placement=resolved_clip_placement,
     )
 
 

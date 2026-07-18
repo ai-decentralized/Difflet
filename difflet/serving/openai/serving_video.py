@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 _MAX_PROMPT_CHARACTERS = 32_768
 _MAX_USER_CHARACTERS = 256
 _MAX_SEED = 2**63 - 1
+_MAX_INTEGER_DIGITS = len(str(_MAX_SEED))
+_MAX_SIZE_CHARACTERS = 2 * _MAX_INTEGER_DIGITS + 1
 MAX_VIDEO_FORM_FIELDS = 32
 MAX_VIDEO_FORM_PART_BYTES = 256 * 1024
 MAX_VIDEO_FORM_BODY_BYTES = 1024 * 1024
@@ -230,10 +232,19 @@ def normalize_video_request(
     size_width: int | None = None
     size_height: int | None = None
     if "size" in values:
-        size_match = _SIZE_RE.fullmatch(values["size"])
+        raw_size = values["size"].strip()
+        if len(raw_size) > _MAX_SIZE_CHARACTERS:
+            raise invalid_extra_body("size contains an oversized integer")
+        size_match = _SIZE_RE.fullmatch(raw_size)
         if size_match is None:
             raise invalid_extra_body("size must use WIDTHxHEIGHT with positive integers")
-        size_width, size_height = (int(size_match.group(1)), int(size_match.group(2)))
+        raw_width, raw_height = size_match.groups()
+        if len(raw_width) > _MAX_INTEGER_DIGITS or len(raw_height) > _MAX_INTEGER_DIGITS:
+            raise invalid_extra_body("size contains an oversized integer")
+        try:
+            size_width, size_height = (int(raw_width), int(raw_height))
+        except (ValueError, OverflowError) as exc:
+            raise invalid_extra_body("size must use bounded WIDTHxHEIGHT integers") from exc
 
     explicit_width = _optional_positive_int(values, "width")
     explicit_height = _optional_positive_int(values, "height")
@@ -654,6 +665,8 @@ def _optional_seconds(values: Mapping[str, str]) -> str | None:
     if "seconds" not in values:
         return None
     value = values["seconds"].strip()
+    if len(value) > _MAX_INTEGER_DIGITS:
+        raise invalid_extra_body("seconds contains too many integer digits")
     if _POSITIVE_INTEGER_RE.fullmatch(value) is None:
         raise invalid_extra_body("seconds must be a positive integer string")
     return value
@@ -673,9 +686,14 @@ def _optional_bounded_int(
     if field not in values:
         return None
     raw = values[field].strip()
+    if len(raw) > _MAX_INTEGER_DIGITS:
+        raise invalid_extra_body(f"{field} contains too many integer digits")
     if _INTEGER_RE.fullmatch(raw) is None:
         raise invalid_extra_body(f"{field} must be an integer")
-    value = int(raw)
+    try:
+        value = int(raw)
+    except (ValueError, OverflowError) as exc:
+        raise invalid_extra_body(f"{field} must be a bounded integer") from exc
     if value < minimum or (maximum is not None and value > maximum):
         if maximum is None:
             requirement = f">= {minimum}"

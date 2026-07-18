@@ -1,10 +1,10 @@
-"""HunyuanVideo 1.0 resident adapter with host CLIP and host VAE."""
+"""HunyuanVideo 1.0 resident adapter with selectable CLIP/VAE placement."""
 
 from __future__ import annotations
 
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,7 @@ from difflet.serving.types import (
     DiffletGenerateRequest,
     FileBackedGenerateOutput,
     ParallelTopology,
+    PipelineDefinition,
     ResolvedModelSource,
     ResolvedRuntimeBundle,
     RuntimePlan,
@@ -140,7 +141,7 @@ class HunyuanVideoServingArtifactPreparer:
             )
             for spec in specs
         )
-        pipeline = _pipeline_definition()
+        pipeline = _pipeline_definition(profile)
         return ResolvedRuntimeBundle(
             profile=profile,
             source=source,
@@ -221,7 +222,7 @@ class HunyuanVideoHostClipStageRunner:
 
         started = time.monotonic()
         invocation.context.cancellation.throw_if_cancelled()
-        tokenizer, model = self.adapter._require_clip()
+        tokenizer, model = self.adapter._require_host_clip()
         inputs = tokenizer(
             invocation.request.prompt,
             padding="max_length",
@@ -231,6 +232,35 @@ class HunyuanVideoHostClipStageRunner:
         )
         with torch.no_grad():
             output = model(input_ids=inputs.input_ids, attention_mask=inputs.attention_mask)
+        pooled = output.pooler_output.to(torch.bfloat16).cpu().reshape(1, -1)
+        invocation.context.cancellation.throw_if_cancelled()
+        return stage_result(HunyuanVideoClipPayload(pooled), started_monotonic=started)
+
+    async def shutdown(self) -> None:
+        return None
+
+
+class HunyuanVideoNeuronClipStageRunner:
+    def __init__(self, adapter: "HunyuanVideoServingStageAdapter") -> None:
+        self.adapter = adapter
+
+    async def execute(
+        self,
+        invocation: StageInvocation[HunyuanVideoInitialPayload],
+    ) -> StageExecutionResult[HunyuanVideoClipPayload]:
+        import torch
+
+        started = time.monotonic()
+        invocation.context.cancellation.throw_if_cancelled()
+        tokenizer, app = self.adapter._require_neuron_clip()
+        input_ids = tokenizer(
+            invocation.request.prompt,
+            padding="max_length",
+            max_length=77,
+            truncation=True,
+            return_tensors="pt",
+        ).input_ids.to(torch.int64)
+        output = app(input_ids)
         pooled = output.pooler_output.to(torch.bfloat16).cpu().reshape(1, -1)
         invocation.context.cancellation.throw_if_cancelled()
         return stage_result(HunyuanVideoClipPayload(pooled), started_monotonic=started)
@@ -367,6 +397,38 @@ class HunyuanVideoHostDecoderStageRunner:
         return None
 
 
+class HunyuanVideoNeuronDecoderStageRunner:
+    def __init__(self, adapter: "HunyuanVideoServingStageAdapter") -> None:
+        self.adapter = adapter
+
+    async def execute(
+        self,
+        invocation: StageInvocation[HunyuanVideoLatentPayload],
+    ) -> StageExecutionResult[HunyuanVideoFinalPayload]:
+        import torch
+
+        started = time.monotonic()
+        invocation.context.cancellation.throw_if_cancelled()
+        app = self.adapter._require_neuron_vae()
+        latents = invocation.input.latents.detach().to(dtype=torch.bfloat16)
+        # Reuse the lower-layer pipeline's scaling and segmented decode contract
+        # instead of duplicating VAE normalization in the serving adapter.
+        frames = app.pipeline._decode_latents(latents)
+        frames = frames.to(device="cpu", dtype=torch.float32).clamp(-1.0, 1.0)
+        invocation.context.cancellation.throw_if_cancelled()
+        output = encode_video_tensor(
+            frames,
+            invocation.request,
+            layout="BCTHW",
+            value_range="minus_one_to_one",
+        )
+        invocation.context.cancellation.throw_if_cancelled()
+        return stage_result(HunyuanVideoFinalPayload(output), started_monotonic=started)
+
+    async def shutdown(self) -> None:
+        return None
+
+
 class HunyuanVideoServingStageAdapter:
     model_id = _HF_MODEL_ID
     model_type = _MODEL_TYPE
@@ -377,10 +439,12 @@ class HunyuanVideoServingStageAdapter:
         self.profile: ServingProfile | None = None
         self.clip_tokenizer = None
         self.clip_model = None
+        self.clip_app = None
         self.llama_tokenizer = None
         self.llama_app = None
         self.denoiser = None
         self.vae = None
+        self.vae_app = None
         self._smoke: StartupSmokeTarget | None = None
 
     async def create_loaded_runners(
@@ -399,7 +463,11 @@ class HunyuanVideoServingStageAdapter:
                     runtime.source, runtime.profile, spec, path
                 ),
             )
-        self.clip_tokenizer, self.clip_model = _load_host_clip(runtime.source.pinned_model_path)
+        clip_placement = _clip_placement(runtime.profile)
+        if clip_placement == "host":
+            self.clip_tokenizer, self.clip_model = _load_host_clip(runtime.source.pinned_model_path)
+        else:
+            self.clip_tokenizer = _load_clip_tokenizer(runtime.source.pinned_model_path)
         llama_binding = runtime.artifacts.require("llama")
         llama_app = _build_llama_app(
             runtime.source,
@@ -419,15 +487,49 @@ class HunyuanVideoServingStageAdapter:
             skip_warmup=True,
         )
         self.denoiser = denoiser
-        self.vae = _load_host_vae(runtime.source.pinned_model_path)
+        if clip_placement == "neuron":
+            # A full-world TP4 component must establish the process communicator
+            # before replicated TP1/W4 components, matching the validated Flux
+            # resident load order.
+            clip_binding = runtime.artifacts.require("clip")
+            clip_app = _build_clip_app(runtime.source, runtime.profile)
+            clip_app.load(
+                str(clip_binding.path),
+                start_rank_id=0,
+                local_ranks_size=runtime.profile.world_size,
+                skip_warmup=True,
+            )
+            self.clip_app = clip_app
+        if runtime.profile.host_vae:
+            self.vae = _load_host_vae(runtime.source.pinned_model_path)
+        else:
+            decoder_binding = runtime.artifacts.require("decoder")
+            vae_app = _build_vae_decoder(runtime.source, runtime.profile)
+            vae_app.load(
+                str(decoder_binding.path),
+                start_rank_id=0,
+                local_ranks_size=runtime.profile.world_size,
+                skip_warmup=True,
+            )
+            self.vae_app = vae_app
         self.runtime = runtime
         self.profile = runtime.profile
+        clip_runner = (
+            HunyuanVideoHostClipStageRunner(self)
+            if clip_placement == "host"
+            else HunyuanVideoNeuronClipStageRunner(self)
+        )
+        decoder_runner = (
+            HunyuanVideoHostDecoderStageRunner(self)
+            if runtime.profile.host_vae
+            else HunyuanVideoNeuronDecoderStageRunner(self)
+        )
         return OrderedDict(
             (
                 (
                     "clip",
                     ValidatedStageRunner(
-                        HunyuanVideoHostClipStageRunner(self),
+                        clip_runner,
                         HunyuanVideoInitialPayload,
                         HunyuanVideoClipPayload,
                     ),
@@ -451,7 +553,7 @@ class HunyuanVideoServingStageAdapter:
                 (
                     "decoder",
                     ValidatedStageRunner(
-                        HunyuanVideoHostDecoderStageRunner(self),
+                        decoder_runner,
                         HunyuanVideoLatentPayload,
                         HunyuanVideoFinalPayload,
                     ),
@@ -521,18 +623,25 @@ class HunyuanVideoServingStageAdapter:
             self._smoke.cleanup()
         self._smoke = None
         self.vae = None
+        self.vae_app = None
         self.denoiser = None
         self.llama_app = None
         self.llama_tokenizer = None
         self.clip_model = None
+        self.clip_app = None
         self.clip_tokenizer = None
         self.profile = None
         self.runtime = None
 
-    def _require_clip(self):
+    def _require_host_clip(self):
         if self.clip_tokenizer is None or self.clip_model is None:
             raise RuntimeError("HunyuanVideo host CLIP is not loaded")
         return self.clip_tokenizer, self.clip_model
+
+    def _require_neuron_clip(self):
+        if self.clip_tokenizer is None or self.clip_app is None:
+            raise RuntimeError("HunyuanVideo Neuron CLIP is not loaded")
+        return self.clip_tokenizer, self.clip_app
 
     def _require_llama(self):
         if self.llama_app is None or self.llama_tokenizer is None:
@@ -548,6 +657,11 @@ class HunyuanVideoServingStageAdapter:
         if self.vae is None:
             raise RuntimeError("HunyuanVideo host VAE is not loaded")
         return self.vae
+
+    def _require_neuron_vae(self):
+        if self.vae_app is None:
+            raise RuntimeError("HunyuanVideo Neuron VAE is not loaded")
+        return self.vae_app
 
 
 def _validate_profile(profile: ServingProfile) -> None:
@@ -570,8 +684,8 @@ def _validate_profile(profile: ServingProfile) -> None:
         raise ValueError(
             "HunyuanVideo serving num_frames must equal 4n+1 for exact causal VAE reconstruction"
         )
-    if not profile.host_vae:
-        raise ValueError("HunyuanVideo resident serving requires host VAE decode")
+    if profile.clip_placement not in {None, "host", "neuron"}:
+        raise ValueError("HunyuanVideo CLIP placement must be host or neuron")
     if profile.output_fps != _FPS:
         raise ValueError(f"HunyuanVideo video profile requires {_FPS} FPS")
     parallel = profile.parallel
@@ -624,10 +738,39 @@ def _compile_specs(
             "text_seq_len": _TEXT_SEQ_LEN,
         }
     )
-    return (
-        DiffletCompileSpec("llama", "llama", llama_identity),
-        DiffletCompileSpec("denoiser", "denoiser", denoiser_identity),
+    specs: list[DiffletCompileSpec] = []
+    if _clip_placement(profile) == "neuron":
+        clip_identity = CompileArtifactIdentity.from_cache_inputs(
+            {
+                **common,
+                "component_id": "clip",
+                "sequence_length": 77,
+                "component_tp_degree": 1,
+                "component_world_size": profile.world_size,
+            }
+        )
+        specs.append(DiffletCompileSpec("clip", "clip", clip_identity))
+    specs.extend(
+        (
+            DiffletCompileSpec("llama", "llama", llama_identity),
+            DiffletCompileSpec("denoiser", "denoiser", denoiser_identity),
+        )
     )
+    if not profile.host_vae:
+        decoder_identity = CompileArtifactIdentity.from_cache_inputs(
+            {
+                **common,
+                "component_id": "decoder",
+                "height": profile.height,
+                "width": profile.width,
+                "num_frames": profile.num_frames,
+                "component_tp_degree": 1,
+                "component_world_size": profile.world_size,
+                "segmented_causal_norm_conv": True,
+            }
+        )
+        specs.append(DiffletCompileSpec("decoder", "decoder", decoder_identity))
+    return tuple(specs)
 
 
 def _compile_artifact(
@@ -639,7 +782,10 @@ def _compile_artifact(
     if target.artifact_id != spec.artifact_id or target.identity != spec.identity:
         raise ValueError("HunyuanVideo compile target does not match compile spec")
     with serving_compile_environment(profile.world_size, virtual_core_size=_VIRTUAL_CORE_SIZE):
-        if spec.component_id == "llama":
+        if spec.component_id == "clip":
+            app = _build_clip_app(source, profile)
+            app.compile(str(target.staging_path))
+        elif spec.component_id == "llama":
             app = _build_llama_app(
                 source,
                 profile,
@@ -649,6 +795,9 @@ def _compile_artifact(
             app.compile(str(target.staging_path))
         elif spec.component_id == "denoiser":
             app = _build_denoiser(source, profile)
+            app.compile(str(target.staging_path))
+        elif spec.component_id == "decoder":
+            app = _build_vae_decoder(source, profile)
             app.compile(str(target.staging_path))
         else:
             raise ValueError(f"unknown HunyuanVideo component {spec.component_id!r}")
@@ -661,6 +810,10 @@ def _validate_artifact(
     spec: DiffletCompileSpec,
     path: Path,
 ) -> None:
+    if spec.component_id == "clip":
+        if not _has_nxd_component(path):
+            raise ValueError(f"HunyuanVideo CLIP artifact is incomplete at {path}")
+        return
     if spec.component_id == "llama":
         if not _has_nxd_component(path):
             raise ValueError(f"HunyuanVideo Llama artifact is incomplete at {path}")
@@ -671,6 +824,13 @@ def _validate_artifact(
             app, path
         ):
             raise ValueError(f"HunyuanVideo denoiser artifact is incomplete at {path}")
+        return
+    if spec.component_id == "decoder":
+        app = _build_vae_decoder(source, profile)
+        if not app.has_compiled_artifacts(str(path)) or not compiled_model_payloads_ready(
+            app, path
+        ):
+            raise ValueError(f"HunyuanVideo decoder artifact is incomplete at {path}")
         return
     raise ValueError(f"unknown HunyuanVideo component {spec.component_id!r}")
 
@@ -732,11 +892,52 @@ def _build_denoiser(source: ResolvedModelSource, profile: ServingProfile):
     return app
 
 
+def _build_clip_app(source: ResolvedModelSource, profile: ServingProfile):
+    import torch
+
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.models.flux.clip.modeling_clip import (
+        CLIPInferenceConfig,
+        NeuronClipApplication,
+    )
+    from difflet.utils.diffusers_adapter import load_diffusers_config
+
+    clip_path = str(Path(source.pinned_model_path) / "text_encoder_2")
+    config = CLIPInferenceConfig(
+        neuron_config=NeuronConfig(
+            tp_degree=1,
+            world_size=profile.world_size,
+            torch_dtype=torch.bfloat16,
+        ),
+        load_config=load_diffusers_config(clip_path),
+    )
+    for key, value in {
+        "output_attentions": False,
+        "output_hidden_states": False,
+        "use_return_dict": True,
+    }.items():
+        setattr(config, key, value)
+    return NeuronClipApplication(model_path=clip_path, config=config)
+
+
+def _build_vae_decoder(source: ResolvedModelSource, profile: ServingProfile):
+    from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
+
+    return NeuronHunyuanVideoApplication(
+        model_path=source.pinned_model_path,
+        parallel=profile.parallel,
+        dtype=_torch_bfloat16(),
+        shape=profile.shape_dict(),
+        text_seq_len=_TEXT_SEQ_LEN,
+        enable_transformer=False,
+        enable_vae_decoder=True,
+    )
+
+
 def _runtime_plan(
     profile: ServingProfile,
     specs: tuple[DiffletCompileSpec, ...],
 ) -> RuntimePlan:
-    by_id = {spec.artifact_id: spec for spec in specs}
     environment, allocation = resident_environment(
         profile,
         allocation_id="hunyuan-video-resident",
@@ -747,19 +948,36 @@ def _runtime_plan(
         cp_degree=profile.parallel.cp_degree,
         world_size=profile.world_size,
     )
+    replicated_topology = ParallelTopology(
+        tp_degree=1,
+        cp_degree=1,
+        world_size=profile.world_size,
+    )
+    clip_placement = _clip_placement(profile)
     return RuntimePlan(
         mode="resident",
         profile_identity=combined_profile_identity(
-            by_id["llama"].identity.digest,
-            by_id["denoiser"].identity.digest,
+            f"clip:{clip_placement}",
+            *(spec.identity.digest for spec in specs),
+            f"vae:{profile.vae_placement}",
         ),
         environment=environment,
         allocations=(allocation,),
         stages=(
-            StageRuntimeSpec("clip", None, None, None, placement="host"),
+            (
+                StageRuntimeSpec("clip", None, None, None, placement="host")
+                if clip_placement == "host"
+                else StageRuntimeSpec("clip", allocation.allocation_id, replicated_topology, "clip")
+            ),
             StageRuntimeSpec("llama", allocation.allocation_id, topology, "llama"),
             StageRuntimeSpec("denoiser", allocation.allocation_id, topology, "denoiser"),
-            StageRuntimeSpec("decoder", None, None, None, placement="host"),
+            (
+                StageRuntimeSpec("decoder", None, None, None, placement="host")
+                if profile.host_vae
+                else StageRuntimeSpec(
+                    "decoder", allocation.allocation_id, replicated_topology, "decoder"
+                )
+            ),
         ),
     )
 
@@ -772,6 +990,12 @@ def _load_host_clip(model_path: str):
     tokenizer = CLIPTokenizer.from_pretrained(str(Path(model_path) / "tokenizer_2"))
     model = CLIPTextModel.from_pretrained(path, torch_dtype=torch.float32).eval()
     return tokenizer, model
+
+
+def _load_clip_tokenizer(model_path: str):
+    from transformers import CLIPTokenizer
+
+    return CLIPTokenizer.from_pretrained(str(Path(model_path) / "tokenizer_2"))
 
 
 def _load_llama_tokenizer(model_path: str):
@@ -803,10 +1027,31 @@ def _has_nxd_component(path: Path) -> bool:
     )
 
 
-def _pipeline_definition():
+def _pipeline_definition(profile: ServingProfile | None = None) -> PipelineDefinition:
     from difflet.common.registry.hunyuan_video import serving_metadata
 
-    return serving_metadata().pipeline_definition
+    pipeline = serving_metadata().pipeline_definition
+    if profile is None:
+        return pipeline
+    clip_runner = (
+        "HunyuanVideoHostClipStageRunner"
+        if _clip_placement(profile) == "host"
+        else "HunyuanVideoNeuronClipStageRunner"
+    )
+    decoder_runner = (
+        "HunyuanVideoHostDecoderStageRunner"
+        if profile.host_vae
+        else "HunyuanVideoNeuronDecoderStageRunner"
+    )
+    module = __name__
+    stages = list(pipeline.stages)
+    stages[0] = replace(stages[0], runner_factory=f"{module}:{clip_runner}")
+    stages[-1] = replace(stages[-1], runner_factory=f"{module}:{decoder_runner}")
+    return PipelineDefinition(model_type=pipeline.model_type, stages=tuple(stages))
+
+
+def _clip_placement(profile: ServingProfile) -> str:
+    return profile.clip_placement or "host"
 
 
 def _torch_bfloat16():
@@ -819,6 +1064,8 @@ __all__ = [
     "HunyuanVideoDenoiserStageRunner",
     "HunyuanVideoHostClipStageRunner",
     "HunyuanVideoHostDecoderStageRunner",
+    "HunyuanVideoNeuronClipStageRunner",
+    "HunyuanVideoNeuronDecoderStageRunner",
     "HunyuanVideoLlamaStageRunner",
     "HunyuanVideoServingArtifactPreparer",
     "HunyuanVideoServingRequestValidator",

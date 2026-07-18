@@ -215,7 +215,14 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
         "--host-vae",
         dest="host_vae",
         action="store_true",
-        help="Request host VAE decode (rejected by current image serving)",
+        help="Decode the video VAE on the host CPU instead of the model's "
+        "default serving placement",
+    )
+    p.add_argument(
+        "--clip-placement",
+        choices=["host", "neuron"],
+        default=None,
+        help="HunyuanVideo CLIP placement for this immutable serving profile",
     )
     p.add_argument(
         "--teacache-cadence",
@@ -307,16 +314,22 @@ def _add_serve_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--queue-timeout",
         type=_positive_finite_float,
-        default=30.0,
+        default=None,
         metavar="SECONDS",
-        help="Maximum time a request may wait in the queue (default: 30)",
+        help=(
+            "Maximum time a request may wait in the queue "
+            "(default: 30 for image, 86400 for video)"
+        ),
     )
     p.add_argument(
         "--request-timeout",
         type=_positive_finite_float,
         default=300.0,
         metavar="SECONDS",
-        help="Maximum total request time, including queueing and generation (default: 300)",
+        help=(
+            "Maximum request execution time after queue admission for video, "
+            "or total request time for image (default: 300)"
+        ),
     )
     p.add_argument(
         "--artifact-store-timeout",

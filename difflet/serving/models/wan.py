@@ -1,15 +1,15 @@
-"""Wan 2.1 resident video serving adapter with host VAE decode."""
+"""Wan 2.1 resident video serving adapter with selectable VAE decode."""
 
 from __future__ import annotations
 
 import logging
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from difflet.pipeline.compile_cache import CacheSpec
+from difflet.pipeline.compile_cache import CacheSpec, toolchain_versions
 from difflet.registry import resolve_model
 from difflet.serving.artifact_manager import ImmutableArtifactManager
 from difflet.serving.engines.stage_pipeline import (
@@ -21,6 +21,7 @@ from difflet.serving.engines.stage_pipeline import (
 from difflet.serving.errors import invalid_extra_body, prompt_too_long, profile_mismatch
 from difflet.serving.models._common import (
     StartupSmokeTarget,
+    combined_profile_identity,
     compiled_model_payloads_ready,
     encode_video_tensor,
     require_video_target,
@@ -110,25 +111,32 @@ class WanServingArtifactPreparer:
             download_policy=download_policy,
             allow_patterns=entry.download_patterns,
         )
-        spec = _compile_spec(source, profile)
+        specs = _compile_specs(source, profile)
         manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
-        binding = manager.prepare(
-            model_type=_MODEL_TYPE,
-            artifact_id=spec.artifact_id,
-            identity=spec.identity,
-            policy=compile_policy,
-            compile_artifact=lambda target: _compile_artifact(source, profile, spec, target),
-            validate_payload=lambda path: _validate_artifact(source, profile, spec, path),
+        bindings = tuple(
+            manager.prepare(
+                model_type=_MODEL_TYPE,
+                artifact_id=spec.artifact_id,
+                identity=spec.identity,
+                policy=compile_policy,
+                compile_artifact=lambda target, spec=spec: _compile_artifact(
+                    source, profile, spec, target
+                ),
+                validate_payload=lambda path, spec=spec: _validate_artifact(
+                    source, profile, spec, path
+                ),
+            )
+            for spec in specs
         )
-        pipeline = _pipeline_definition()
-        runtime_plan = _runtime_plan(profile, pipeline, spec)
+        pipeline = _pipeline_definition(profile)
+        runtime_plan = _runtime_plan(profile, pipeline, specs)
         return ResolvedRuntimeBundle(
             profile=profile,
             source=source,
             pipeline_definition=pipeline,
             runtime_plan=runtime_plan,
-            compile_specs=(spec,),
-            artifacts=ArtifactSet((binding,)),
+            compile_specs=specs,
+            artifacts=ArtifactSet(bindings),
         )
 
 
@@ -293,6 +301,48 @@ class WanHostDecoderStageRunner:
         return None
 
 
+class WanNeuronDecoderStageRunner:
+    """Decode Wan latents with the serving-specific replicated Neuron VAE."""
+
+    def __init__(self, adapter: "WanServingStageAdapter") -> None:
+        self.adapter = adapter
+
+    async def execute(
+        self,
+        invocation: StageInvocation[WanLatentPayload],
+    ) -> StageExecutionResult[WanFinalPayload]:
+        import torch
+
+        started = time.monotonic()
+        invocation.context.cancellation.throw_if_cancelled()
+        application = self.adapter._require_neuron_vae()
+        decoder = application.vae_decoder
+        config = decoder.config
+        latents = invocation.input.latents.detach().to(dtype=torch.bfloat16)
+        mean = getattr(config, "latents_mean", None)
+        std = getattr(config, "latents_std", None)
+        if mean is not None and std is not None and len(mean) > 0 and len(std) > 0:
+            mean_tensor = torch.tensor(mean, dtype=torch.bfloat16).view(1, -1, 1, 1, 1)
+            std_tensor = torch.tensor(std, dtype=torch.bfloat16).view(1, -1, 1, 1, 1)
+            latents = latents * std_tensor + mean_tensor
+        frames = decoder(latents)
+        if isinstance(frames, (tuple, list)):
+            frames = frames[0]
+        frames = frames.to(device="cpu", dtype=torch.float32).clamp(-1.0, 1.0)
+        invocation.context.cancellation.throw_if_cancelled()
+        output = encode_video_tensor(
+            frames,
+            invocation.request,
+            layout="BCTHW",
+            value_range="minus_one_to_one",
+        )
+        invocation.context.cancellation.throw_if_cancelled()
+        return stage_result(WanFinalPayload(output), started_monotonic=started)
+
+    async def shutdown(self) -> None:
+        return None
+
+
 class WanServingStageAdapter:
     model_id = _HF_MODEL_ID
     model_type = _MODEL_TYPE
@@ -303,6 +353,7 @@ class WanServingStageAdapter:
         self.profile: ServingProfile | None = None
         self.application = None
         self.vae = None
+        self.vae_app = None
         self._smoke: StartupSmokeTarget | None = None
 
     async def create_loaded_runners(
@@ -310,17 +361,18 @@ class WanServingStageAdapter:
         runtime: ResolvedRuntimeBundle,
     ) -> OrderedDict[str, ErasedStageRunner]:
         _validate_profile(runtime.profile)
-        binding = runtime.artifacts.require("generation")
-        spec = runtime.require_compile_spec("generation")
         manager = ImmutableArtifactManager(
             runtime.profile.cache_dir or Path.home() / ".cache" / "difflet"
         )
-        manager.validate_binding(
-            binding,
-            validate_payload=lambda path: _validate_artifact(
-                runtime.source, runtime.profile, spec, path
-            ),
-        )
+        for binding in runtime.artifacts.bindings:
+            spec = runtime.require_compile_spec(binding.artifact_id)
+            manager.validate_binding(
+                binding,
+                validate_payload=lambda path, spec=spec: _validate_artifact(
+                    runtime.source, runtime.profile, spec, path
+                ),
+            )
+        binding = runtime.artifacts.require("generation")
         application = _build_application(runtime.source, runtime.profile)
         application.load(
             str(binding.path),
@@ -329,9 +381,25 @@ class WanServingStageAdapter:
             skip_warmup=True,
         )
         self.application = application
-        self.vae = _load_host_vae(runtime.source.pinned_model_path)
+        if runtime.profile.host_vae:
+            self.vae = _load_host_vae(runtime.source.pinned_model_path)
+        else:
+            decoder_binding = runtime.artifacts.require("decoder")
+            vae_app = _build_neuron_vae(runtime.source, runtime.profile)
+            vae_app.load(
+                str(decoder_binding.path),
+                start_rank_id=0,
+                local_ranks_size=runtime.profile.world_size,
+                skip_warmup=True,
+            )
+            self.vae_app = vae_app
         self.runtime = runtime
         self.profile = runtime.profile
+        decoder_runner = (
+            WanHostDecoderStageRunner(self)
+            if runtime.profile.host_vae
+            else WanNeuronDecoderStageRunner(self)
+        )
         return OrderedDict(
             (
                 (
@@ -353,7 +421,7 @@ class WanServingStageAdapter:
                 (
                     "decoder",
                     ValidatedStageRunner(
-                        WanHostDecoderStageRunner(self),
+                        decoder_runner,
                         WanLatentPayload,
                         WanFinalPayload,
                     ),
@@ -419,6 +487,7 @@ class WanServingStageAdapter:
             self._smoke.cleanup()
         self._smoke = None
         self.vae = None
+        self.vae_app = None
         self.application = None
         self.profile = None
         self.runtime = None
@@ -432,6 +501,11 @@ class WanServingStageAdapter:
         if self.vae is None:
             raise RuntimeError("Wan host VAE is not loaded")
         return self.vae
+
+    def _require_neuron_vae(self):
+        if self.vae_app is None:
+            raise RuntimeError("Wan Neuron VAE is not loaded")
+        return self.vae_app
 
 
 def _validate_profile(profile: ServingProfile) -> None:
@@ -453,8 +527,6 @@ def _validate_profile(profile: ServingProfile) -> None:
         raise ValueError(
             "Wan serving num_frames must equal 4n+1 for exact causal VAE reconstruction"
         )
-    if not profile.host_vae:
-        raise ValueError("Wan resident serving requires host VAE decode")
     if profile.output_fps != _FPS:
         raise ValueError(f"Wan video profile requires {_FPS} FPS")
     parallel = profile.parallel
@@ -498,6 +570,42 @@ def _compile_spec(
     )
 
 
+def _compile_specs(
+    source: ResolvedModelSource,
+    profile: ServingProfile,
+) -> tuple[DiffletCompileSpec, ...]:
+    """Keep the host generation identity stable and add only a Neuron decoder."""
+
+    generation = _compile_spec(source, profile)
+    if profile.host_vae:
+        return (generation,)
+    decoder_identity = CompileArtifactIdentity.from_cache_inputs(
+        {
+            "compile_contract_version": 1,
+            "component_id": "decoder",
+            "model_type": _MODEL_TYPE,
+            "model_id": source.model_id,
+            "resolved_source_id": source.resolved_source_id,
+            "height": profile.height,
+            "width": profile.width,
+            "num_frames": profile.num_frames,
+            "dtype": profile.dtype,
+            "component_tp_degree": 1,
+            "component_world_size": profile.world_size,
+            "logical_nc_config": 2,
+            "toolchain": toolchain_versions(),
+        }
+    )
+    return (
+        generation,
+        DiffletCompileSpec(
+            artifact_id="decoder",
+            component_id="decoder",
+            identity=decoder_identity,
+        ),
+    )
+
+
 def _application_kwargs() -> dict[str, Any]:
     return {
         "text_seq_len": _TEXT_SEQ_LEN,
@@ -528,7 +636,12 @@ def _compile_artifact(
     target: ArtifactPublishTarget,
 ) -> None:
     _validate_compile_target(spec, target)
-    application = _build_application(source, profile)
+    if spec.component_id == "generation":
+        application = _build_application(source, profile)
+    elif spec.component_id == "decoder":
+        application = _build_neuron_vae(source, profile)
+    else:
+        raise ValueError(f"unknown Wan serving component {spec.component_id!r}")
     with serving_compile_environment(profile.world_size):
         application.compile(str(target.staging_path))
     if not application.has_compiled_artifacts(
@@ -543,9 +656,12 @@ def _validate_artifact(
     spec: DiffletCompileSpec,
     path: Path,
 ) -> None:
-    if spec.component_id != "generation":
+    if spec.component_id == "generation":
+        application = _build_application(source, profile)
+    elif spec.component_id == "decoder":
+        application = _build_neuron_vae(source, profile)
+    else:
         raise ValueError(f"unknown Wan serving component {spec.component_id!r}")
-    application = _build_application(source, profile)
     if not application.has_compiled_artifacts(str(path)) or not compiled_model_payloads_ready(
         application, path
     ):
@@ -560,7 +676,15 @@ def _validate_compile_target(
         raise ValueError("Wan compile target does not match compile spec")
 
 
-def _runtime_plan(profile, pipeline, spec: DiffletCompileSpec) -> RuntimePlan:
+def _runtime_plan(
+    profile,
+    pipeline,
+    specs: tuple[DiffletCompileSpec, ...] | DiffletCompileSpec,
+) -> RuntimePlan:
+    if isinstance(specs, DiffletCompileSpec):
+        specs = (specs,)
+    by_component = {spec.component_id: spec for spec in specs}
+    generation = by_component["generation"]
     environment, allocation = resident_environment(profile, allocation_id="wan-resident")
     topology = ParallelTopology(
         tp_degree=profile.parallel.tp_degree,
@@ -569,7 +693,15 @@ def _runtime_plan(profile, pipeline, spec: DiffletCompileSpec) -> RuntimePlan:
     )
     return RuntimePlan(
         mode="resident",
-        profile_identity=spec.identity.digest,
+        profile_identity=(
+            generation.identity.digest
+            if profile.host_vae
+            else combined_profile_identity(
+                generation.identity.digest,
+                by_component["decoder"].identity.digest,
+                "vae:neuron",
+            )
+        ),
         environment=environment,
         allocations=(allocation,),
         stages=(
@@ -577,29 +709,100 @@ def _runtime_plan(profile, pipeline, spec: DiffletCompileSpec) -> RuntimePlan:
                 stage_id="prompt_encoder",
                 allocation_id=allocation.allocation_id,
                 topology=topology,
-                artifact_id=spec.artifact_id,
+                artifact_id=generation.artifact_id,
             ),
             StageRuntimeSpec(
                 stage_id="denoiser",
                 allocation_id=allocation.allocation_id,
                 topology=topology,
-                artifact_id=spec.artifact_id,
+                artifact_id=generation.artifact_id,
             ),
-            StageRuntimeSpec(
-                stage_id="decoder",
-                allocation_id=None,
-                topology=None,
-                artifact_id=None,
-                placement="host",
+            (
+                StageRuntimeSpec(
+                    stage_id="decoder",
+                    allocation_id=None,
+                    topology=None,
+                    artifact_id=None,
+                    placement="host",
+                )
+                if profile.host_vae
+                else StageRuntimeSpec(
+                    stage_id="decoder",
+                    allocation_id=allocation.allocation_id,
+                    topology=ParallelTopology(tp_degree=1, cp_degree=1, world_size=_WORLD_SIZE),
+                    artifact_id="decoder",
+                    placement="neuron",
+                )
             ),
         ),
     )
 
 
-def _pipeline_definition():
+def _pipeline_definition(profile: ServingProfile | None = None):
     from difflet.common.registry.wan import serving_metadata
 
-    return serving_metadata().pipeline_definition
+    pipeline = serving_metadata().pipeline_definition
+    if profile is None or profile.host_vae:
+        return pipeline
+    stages = list(pipeline.stages)
+    stages[2] = replace(
+        stages[2],
+        runner_factory=f"{__name__}:WanNeuronDecoderStageRunner",
+    )
+    return replace(pipeline, stages=tuple(stages))
+
+
+def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
+    """Build a decoder-only W4 replicated wrapper from the existing Wan VAE."""
+
+    from difflet.backends.trainium.core.multi_component_application import (
+        ComponentSpec,
+        MultiComponentApplication,
+    )
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.wan.vae import (
+        NeuronWanVAEDecoderApplication,
+        WanVAEDecoderInferenceConfig,
+    )
+    from difflet.utils.diffusers_adapter import load_diffusers_config
+
+    vae_path = str(Path(source.pinned_model_path) / "vae")
+    neuron_config = NeuronConfig(
+        batch_size=1,
+        tp_degree=1,
+        world_size=profile.world_size,
+        torch_dtype=_torch_bfloat16(),
+        # The generation artifact uses the Trn2 platform LNC=2.  A resident
+        # decoder shares that runtime, unlike the CLI's isolated W1/LNC1 VAE.
+        logical_nc_config=2,
+    )
+    config = WanVAEDecoderInferenceConfig(
+        neuron_config=neuron_config,
+        load_config=load_diffusers_config(vae_path),
+        height=profile.height,
+        width=profile.width,
+        num_frames=int(profile.num_frames),
+    )
+    decoder = NeuronWanVAEDecoderApplication(
+        model_path=vae_path,
+        config=config,
+    )
+
+    class WanServingNeuronVAEApplication(MultiComponentApplication):
+        def __init__(self, component) -> None:
+            super().__init__()
+            self.vae_decoder = component
+
+        def components(self):
+            return [
+                ComponentSpec(
+                    "vae_decoder",
+                    self.vae_decoder,
+                    world_size=profile.world_size,
+                )
+            ]
+
+    return WanServingNeuronVAEApplication(decoder)
 
 
 def _load_host_vae(model_path: str):
@@ -620,6 +823,7 @@ def _torch_bfloat16():
 __all__ = [
     "WanDenoiserStageRunner",
     "WanHostDecoderStageRunner",
+    "WanNeuronDecoderStageRunner",
     "WanPromptEncoderStageRunner",
     "WanServingArtifactPreparer",
     "WanServingRequestValidator",

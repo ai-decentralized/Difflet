@@ -63,6 +63,7 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         width=options.width,
         num_frames=options.num_frames,
         host_vae=options.host_vae,
+        clip_placement=options.clip_placement,
         teacache_cadence=options.teacache_cadence,
         teacache_online_delta=options.teacache_online_delta,
         teacache_speedup=options.teacache_speedup,

@@ -12,12 +12,13 @@ from difflet.serving.openai.api_server import create_app
 from difflet.serving.options import ServeOptions
 from difflet.serving.video_jobs import InMemoryVideoJobRepository
 from difflet.serving.video_service import VideoGenerationService
-from difflet.serving.video_storage import LocalVideoArtifactStore
+from difflet.serving.video_storage import LocalVideoArtifactStore, S3VideoArtifactStore
 from tests.unit.serving.test_video_service import (
     _FakeVideoEngine,
     _patch_media_validation_without_pyav,
     _request,
 )
+from tests.unit.serving.test_video_storage import _FakeS3Client, _FakeS3Store
 
 
 class _NoopVideoService:
@@ -55,18 +56,18 @@ def _resolved_video(tmp_path):
     return options, resolved
 
 
-def _video_app(tmp_path, monkeypatch, *, engine=None):
+def _video_app(tmp_path, monkeypatch, *, engine=None, artifacts=None):
     _patch_media_validation_without_pyav(monkeypatch)
     options, resolved = _resolved_video(tmp_path)
     engine = engine or _FakeVideoEngine()
     jobs = InMemoryVideoJobRepository()
-    artifacts = LocalVideoArtifactStore(tmp_path / "media")
+    artifacts = artifacts or LocalVideoArtifactStore(tmp_path / "media")
     service = VideoGenerationService(
         engine=engine,
         jobs=jobs,
         artifacts=artifacts,
         max_queued_requests=options.max_queued_requests,
-        queue_timeout_s=options.queue_timeout,
+        queue_timeout_s=options.effective_queue_timeout("video"),
         request_timeout_s=options.request_timeout,
         recovery_timeout_s=1.0,
     )
@@ -168,6 +169,43 @@ def test_sync_video_returns_raw_mp4_headers_and_leaves_no_job_or_artifact(
         assert tuple(artifacts.staging_root.iterdir()) == ()
 
     assert engine.start_calls == engine.shutdown_calls == 1
+
+
+def test_oversized_integer_form_field_returns_400_without_admission(
+    tmp_path,
+    monkeypatch,
+):
+    from fastapi.testclient import TestClient
+
+    app, resolved, _, jobs, artifacts, engine = _video_app(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/videos",
+            files=_multipart(
+                ("model", resolved.model_id),
+                ("prompt", "bounded integer"),
+                ("seed", "9" * 10_000),
+            ),
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_extra_body"
+        assert jobs.count() == 0
+        assert engine.calls == []
+        assert tuple(artifacts.artifact_root.iterdir()) == ()
+
+
+def test_oversized_list_limit_returns_stable_400(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    app, _, _, jobs, _, engine = _video_app(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        response = client.get("/v1/videos", params={"limit": "9" * 10_000})
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_request"
+        assert jobs.count() == 0
+        assert engine.calls == []
 
 
 def test_sync_video_cleans_artifact_when_asgi_send_fails(tmp_path, monkeypatch):
@@ -396,14 +434,31 @@ def test_async_video_multipart_status_list_content_headers_and_delete(
         assert created["status"] == "queued"
         assert created["model"] == resolved.model_id
         assert created["size"] == "16x16"
-        assert created["duration_s"] == 1.0
+        assert set(created) == {
+            "id",
+            "object",
+            "status",
+            "model",
+            "prompt",
+            "size",
+            "seconds",
+            "progress",
+            "quality",
+            "created_at",
+            "completed_at",
+            "remixed_from_video_id",
+            "error",
+            "url",
+            "expires_at",
+        }
         video_id = created["id"]
 
         completed = _wait_for_status(client, video_id, "completed")
         assert completed["progress"] == 100
-        assert completed["file_name"] == f"{video_id}.mp4"
-        assert completed["file_size_bytes"] > 0
-        assert completed["inference_time_s"] >= 0
+        assert "duration_s" not in completed
+        assert "file_name" not in completed
+        assert "file_size_bytes" not in completed
+        assert "inference_time_s" not in completed
 
         listed_response = client.get("/v1/videos", params={"limit": 1})
         assert listed_response.status_code == 200
@@ -430,6 +485,39 @@ def test_async_video_multipart_status_list_content_headers_and_delete(
         assert jobs.get(video_id) is None
         assert artifacts.get(f"{video_id}.mp4") is None
         assert client.get(f"/v1/videos/{video_id}").status_code == 404
+
+
+def test_async_s3_publication_failure_completes_with_local_content(
+    tmp_path,
+    monkeypatch,
+):
+    from fastapi.testclient import TestClient
+
+    s3_client = _FakeS3Client(upload_error=OSError("upload unavailable"))
+    artifacts = S3VideoArtifactStore(
+        tmp_path / "media",
+        s3=_FakeS3Store(s3_client),  # type: ignore[arg-type]
+    )
+    app, resolved, _, _, _, engine = _video_app(
+        tmp_path,
+        monkeypatch,
+        artifacts=artifacts,
+    )
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/v1/videos",
+            files=_multipart(
+                ("model", resolved.model_id),
+                ("prompt", "local fallback"),
+            ),
+        ).json()
+        completed = _wait_for_status(client, created["id"], "completed")
+
+        assert completed["url"] is None
+        content = client.get(f"/v1/videos/{created['id']}/content")
+        assert content.status_code == 200
+        assert content.content == engine.payloads[created["id"]]
 
 
 def test_video_jobs_and_outputs_disappear_after_server_lifecycle(tmp_path, monkeypatch):

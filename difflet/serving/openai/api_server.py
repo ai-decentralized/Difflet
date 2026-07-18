@@ -173,7 +173,7 @@ def create_app(
             jobs=video_jobs,
             artifacts=video_artifact_store,
             max_queued_requests=options.max_queued_requests,
-            queue_timeout_s=options.queue_timeout,
+            queue_timeout_s=options.effective_queue_timeout("video"),
             request_timeout_s=options.request_timeout,
             recovery_timeout_s=(options.worker_cancel_timeout + options.worker_restart_timeout),
             retention_seconds=options.video_retention_seconds,
@@ -379,14 +379,14 @@ def create_app(
                     normalized,
                     deadline=deadline,
                 )
-            return normalized, deadline
+            return normalized
 
         @app.post("/v1/videos")
         async def create_video(request: Request):
             video_id = new_video_job_id()
             try:
-                normalized, deadline = await _normalize_video(request, video_id)
-                job = await video_service.create_async(normalized, deadline=deadline)
+                normalized = await _normalize_video(request, video_id)
+                job = await video_service.create_async(normalized)
                 return JSONResponse(
                     status_code=200,
                     content=video_job_to_response(job).model_dump(mode="json"),
@@ -423,9 +423,9 @@ def create_app(
                     )
 
             try:
-                normalized, deadline = await _normalize_video(request, request_id)
+                normalized = await _normalize_video(request, request_id)
                 result = await _run_until_disconnect(
-                    video_service.generate_sync(normalized, deadline=deadline),
+                    video_service.generate_sync(normalized),
                     request=request,
                 )
                 lease = await video_service.open_sync_result(result)
@@ -520,6 +520,8 @@ def _video_service_root(options: ServeOptions, resolved_model: ResolvedServingMo
             "width": profile.width,
             "num_frames": profile.num_frames,
             "fps": profile.output_fps,
+            "clip_placement": profile.clip_placement,
+            "vae_placement": profile.vae_placement,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -545,9 +547,15 @@ def _video_list_query(request) -> tuple[int, str | None]:
                 f"list query field {field!r} is repeated",
             )
     raw_limit = query.get("limit", "20")
-    if not raw_limit.isdigit():
+    # The only valid values are 1..100. Bound the text before conversion so an
+    # attacker cannot trigger Python's integer digit-limit exception (or force
+    # expensive arbitrary-length parsing on runtimes without that guard).
+    if len(raw_limit) > 3 or not raw_limit.isascii() or not raw_limit.isdigit():
         raise DiffletServingError(400, "invalid_request", "limit must be an integer")
-    limit = int(raw_limit)
+    try:
+        limit = int(raw_limit)
+    except ValueError as exc:
+        raise DiffletServingError(400, "invalid_request", "limit must be an integer") from exc
     if not 1 <= limit <= 100:
         raise DiffletServingError(
             400,

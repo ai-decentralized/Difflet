@@ -11,9 +11,11 @@ _RUNNER_MODULE = "difflet.serving.models.hunyuan_video"
 def serving_metadata() -> ServingModelMetadata:
     """Describe the honest HunyuanVideo 1.0 resident stage boundaries.
 
-    CLIP and VAE execution stay on the host.  The Llama encoder and denoiser use
-    their existing Neuron artifacts.  HunyuanVideo 1.5 remains unregistered
-    until its offline compile and generation path is complete.
+    The validated default keeps CLIP and VAE execution on the host. The Llama
+    encoder and denoiser use their existing Neuron artifacts. Runtime profile
+    resolution may replace the CLIP and decoder bindings with explicit
+    experimental Neuron placements. HunyuanVideo 1.5 remains unregistered until
+    its offline compile and generation path is complete.
     """
 
     return ServingModelMetadata(

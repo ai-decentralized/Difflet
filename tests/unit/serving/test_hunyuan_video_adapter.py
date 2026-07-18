@@ -37,6 +37,7 @@ def _profile(
     *,
     parallel: DiffletParallelConfig | None = None,
     host_vae: bool = True,
+    clip_placement: str | None = None,
 ) -> ServingProfile:
     return ServingProfile(
         model_id="hunyuanvideo-community/HunyuanVideo",
@@ -51,6 +52,7 @@ def _profile(
         output_mime_type="video/mp4",
         output_fps=24,
         host_vae=host_vae,
+        clip_placement=clip_placement,
     )
 
 
@@ -83,7 +85,7 @@ def _runtime(
         lambda *, required_num_cores: tuple(range(8, 8 + required_num_cores)),
     )
     specs = hunyuan_video._compile_specs(source, profile)
-    pipeline = hunyuan_video._pipeline_definition()
+    pipeline = hunyuan_video._pipeline_definition(profile)
     plan = hunyuan_video._runtime_plan(profile, specs)
     bindings = tuple(
         ArtifactBinding(
@@ -267,6 +269,66 @@ def test_compile_identities_bind_commit_toolchain_components_and_denoiser_shape(
     assert str(tmp_path) not in first[0].identity.canonical_cache_inputs_json.decode()
 
 
+@pytest.mark.parametrize(
+    ("clip_placement", "host_vae", "expected"),
+    [
+        ("host", True, ["llama", "denoiser"]),
+        ("neuron", True, ["clip", "llama", "denoiser"]),
+        ("host", False, ["llama", "denoiser", "decoder"]),
+        ("neuron", False, ["clip", "llama", "denoiser", "decoder"]),
+    ],
+)
+def test_compile_specs_include_only_selected_neuron_placement_artifacts(
+    monkeypatch,
+    tmp_path,
+    clip_placement,
+    host_vae,
+    expected,
+):
+    monkeypatch.setattr(
+        hunyuan_video,
+        "toolchain_versions",
+        lambda: {"python": "3.10", "neuronx-cc": "test"},
+    )
+    profile = _profile(
+        tmp_path,
+        clip_placement=clip_placement,
+        host_vae=host_vae,
+    )
+
+    specs = hunyuan_video._compile_specs(_source(tmp_path), profile)
+
+    assert [spec.artifact_id for spec in specs] == expected
+
+
+def test_placement_profiles_keep_non_selected_artifact_identities_identical(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        hunyuan_video,
+        "toolchain_versions",
+        lambda: {"python": "3.10", "neuronx-cc": "test"},
+    )
+    source = _source(tmp_path)
+    profiles = (
+        _profile(tmp_path, clip_placement="host", host_vae=True),
+        _profile(tmp_path, clip_placement="neuron", host_vae=True),
+        _profile(tmp_path, clip_placement="host", host_vae=False),
+        _profile(tmp_path, clip_placement="neuron", host_vae=False),
+    )
+
+    identities = [
+        {spec.artifact_id: spec.identity for spec in hunyuan_video._compile_specs(source, profile)}
+        for profile in profiles
+    ]
+
+    assert len({item["llama"] for item in identities}) == 1
+    assert len({item["denoiser"] for item in identities}) == 1
+    assert identities[1]["clip"] == identities[3]["clip"]
+    assert identities[2]["decoder"] == identities[3]["decoder"]
+
+
 def test_runtime_plan_places_clip_and_decoder_on_host_with_one_shared_neuron_allocation(
     monkeypatch,
     tmp_path,
@@ -298,6 +360,75 @@ def test_runtime_plan_places_clip_and_decoder_on_host_with_one_shared_neuron_all
         "denoiser",
         None,
     ]
+
+
+@pytest.mark.parametrize(
+    ("clip_placement", "host_vae", "placements", "artifacts"),
+    [
+        (
+            "neuron",
+            True,
+            ["neuron", "neuron", "neuron", "host"],
+            ["clip", "llama", "denoiser", None],
+        ),
+        (
+            "host",
+            False,
+            ["host", "neuron", "neuron", "neuron"],
+            [None, "llama", "denoiser", "decoder"],
+        ),
+        (
+            "neuron",
+            False,
+            ["neuron", "neuron", "neuron", "neuron"],
+            ["clip", "llama", "denoiser", "decoder"],
+        ),
+    ],
+)
+def test_runtime_plan_binds_selected_placement_to_one_resident_allocation(
+    monkeypatch,
+    tmp_path,
+    clip_placement,
+    host_vae,
+    placements,
+    artifacts,
+):
+    runtime = _runtime(
+        tmp_path,
+        monkeypatch,
+        profile=_profile(
+            tmp_path,
+            clip_placement=clip_placement,
+            host_vae=host_vae,
+        ),
+    )
+
+    assert [stage.placement for stage in runtime.runtime_plan.stages] == placements
+    assert [stage.artifact_id for stage in runtime.runtime_plan.stages] == artifacts
+    for stage in runtime.runtime_plan.stages:
+        if stage.placement == "neuron":
+            assert stage.allocation_id == "hunyuan-video-resident"
+    if clip_placement == "neuron":
+        assert runtime.runtime_plan.stages[0].topology.tp_degree == 1
+        assert runtime.runtime_plan.stages[0].topology.world_size == 4
+    if not host_vae:
+        assert runtime.runtime_plan.stages[-1].topology.tp_degree == 1
+        assert runtime.runtime_plan.stages[-1].topology.world_size == 4
+
+
+def test_pipeline_definition_switches_only_selected_stage_runner_bindings(tmp_path):
+    baseline = hunyuan_video._pipeline_definition(
+        _profile(tmp_path, clip_placement="host", host_vae=True)
+    )
+    neuron = hunyuan_video._pipeline_definition(
+        _profile(tmp_path, clip_placement="neuron", host_vae=False)
+    )
+
+    assert baseline.stages[1:3] == neuron.stages[1:3]
+    assert baseline.stages[0].runner_factory.endswith("HunyuanVideoHostClipStageRunner")
+    assert neuron.stages[0].runner_factory.endswith("HunyuanVideoNeuronClipStageRunner")
+    assert baseline.stages[-1].runner_factory.endswith("HunyuanVideoHostDecoderStageRunner")
+    assert neuron.stages[-1].runner_factory.endswith("HunyuanVideoNeuronDecoderStageRunner")
 
 
 @pytest.mark.parametrize(
@@ -411,6 +542,66 @@ def test_compile_artifact_routes_llama_and_denoiser_under_vcore2_environment(
         )
 
 
+def test_compile_artifact_routes_experimental_clip_and_decoder(
+    monkeypatch,
+    tmp_path,
+):
+    runtime = _runtime(
+        tmp_path,
+        monkeypatch,
+        profile=_profile(tmp_path, clip_placement="neuron", host_vae=False),
+    )
+    calls = []
+
+    class FakeApplication:
+        def __init__(self, component):
+            self.component = component
+
+        def compile(self, path):
+            calls.append((self.component, "compile", path))
+
+    @contextmanager
+    def fake_environment(world_size, **kwargs):
+        calls.append(("environment", world_size, kwargs))
+        yield
+
+    monkeypatch.setattr(hunyuan_video, "serving_compile_environment", fake_environment)
+    monkeypatch.setattr(
+        hunyuan_video,
+        "_build_clip_app",
+        lambda source, profile: FakeApplication("clip"),
+    )
+    monkeypatch.setattr(
+        hunyuan_video,
+        "_build_llama_app",
+        lambda source, profile, **kwargs: FakeApplication("llama"),
+    )
+    monkeypatch.setattr(
+        hunyuan_video,
+        "_build_denoiser",
+        lambda source, profile: FakeApplication("denoiser"),
+    )
+    monkeypatch.setattr(
+        hunyuan_video,
+        "_build_vae_decoder",
+        lambda source, profile: FakeApplication("decoder"),
+    )
+    monkeypatch.setattr(hunyuan_video, "_validate_artifact", lambda *args: None)
+
+    for spec in runtime.compile_specs:
+        target = ArtifactPublishTarget(
+            artifact_id=spec.artifact_id,
+            identity=spec.identity,
+            identity_root=tmp_path / spec.artifact_id,
+            staging_path=tmp_path / f"staging-{spec.artifact_id}",
+        )
+        hunyuan_video._compile_artifact(runtime.source, runtime.profile, spec, target)
+
+    assert calls.count(("environment", 4, {"virtual_core_size": 2})) == 4
+    assert ("clip", "compile", str(tmp_path / "staging-clip")) in calls
+    assert ("decoder", "compile", str(tmp_path / "staging-decoder")) in calls
+
+
 def test_artifact_validation_checks_nxdi_files_and_denoiser_components(
     monkeypatch,
     tmp_path,
@@ -438,6 +629,50 @@ def test_artifact_validation_checks_nxdi_files_and_denoiser_components(
             runtime.profile,
             denoiser_spec,
             tmp_path / "denoiser",
+        )
+
+
+def test_artifact_validation_checks_experimental_clip_and_decoder_components(
+    monkeypatch,
+    tmp_path,
+):
+    runtime = _runtime(
+        tmp_path,
+        monkeypatch,
+        profile=_profile(tmp_path, clip_placement="neuron", host_vae=False),
+    )
+    clip_spec = runtime.require_compile_spec("clip")
+    decoder_spec = runtime.require_compile_spec("decoder")
+    clip_path = tmp_path / "clip"
+    clip_path.mkdir()
+
+    with pytest.raises(ValueError, match="CLIP artifact is incomplete"):
+        hunyuan_video._validate_artifact(
+            runtime.source,
+            runtime.profile,
+            clip_spec,
+            clip_path,
+        )
+    (clip_path / "model.pt").write_bytes(b"model")
+    (clip_path / "neuron_config.json").write_text("{}")
+    hunyuan_video._validate_artifact(
+        runtime.source,
+        runtime.profile,
+        clip_spec,
+        clip_path,
+    )
+
+    monkeypatch.setattr(
+        hunyuan_video,
+        "_build_vae_decoder",
+        lambda source, profile: SimpleNamespace(has_compiled_artifacts=lambda path: False),
+    )
+    with pytest.raises(ValueError, match="decoder artifact is incomplete"):
+        hunyuan_video._validate_artifact(
+            runtime.source,
+            runtime.profile,
+            decoder_spec,
+            tmp_path / "decoder",
         )
 
 
@@ -536,6 +771,81 @@ def test_llama_builder_preserves_cli_sharded_checkpoint_load_contract(
         for_compile=True,
     )
     assert calls["neuron_config"]["save_sharded_checkpoint"] is True
+
+
+def test_clip_builder_uses_serving_specific_replicated_world4_contract(
+    monkeypatch,
+    tmp_path,
+):
+    profile = _profile(tmp_path, clip_placement="neuron")
+    source = _source(tmp_path)
+    calls = {}
+    torch = _fake_torch(monkeypatch, calls)
+
+    config_module = ModuleType("difflet.backends.trainium.core.config")
+
+    class NeuronConfig:
+        def __init__(self, **kwargs):
+            calls["neuron_config"] = kwargs
+
+    config_module.NeuronConfig = NeuronConfig
+    clip_module = ModuleType("difflet.models.flux.clip.modeling_clip")
+
+    class CLIPInferenceConfig:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+            calls["clip_config"] = self
+
+    class NeuronClipApplication:
+        def __init__(self, **kwargs):
+            calls["app"] = kwargs
+
+    clip_module.CLIPInferenceConfig = CLIPInferenceConfig
+    clip_module.NeuronClipApplication = NeuronClipApplication
+    adapter_module = ModuleType("difflet.utils.diffusers_adapter")
+    adapter_module.load_diffusers_config = lambda path: ("loaded", path)
+    monkeypatch.setitem(sys.modules, "difflet.backends.trainium.core.config", config_module)
+    monkeypatch.setitem(sys.modules, "difflet.models.flux.clip.modeling_clip", clip_module)
+    monkeypatch.setitem(sys.modules, "difflet.utils.diffusers_adapter", adapter_module)
+
+    app = hunyuan_video._build_clip_app(source, profile)
+
+    assert isinstance(app, NeuronClipApplication)
+    assert calls["neuron_config"] == {
+        "tp_degree": 1,
+        "world_size": 4,
+        "torch_dtype": torch.bfloat16,
+    }
+    config = calls["clip_config"]
+    assert config.output_attentions is False
+    assert config.output_hidden_states is False
+    assert config.use_return_dict is True
+    assert calls["app"]["model_path"].endswith("/text_encoder_2")
+
+
+def test_vae_builder_reuses_lower_layer_decoder_only_world4_application(
+    monkeypatch,
+    tmp_path,
+):
+    calls = {}
+    _fake_torch(monkeypatch, calls)
+    application = ModuleType("difflet.models.hunyuan_video.application")
+
+    class NeuronHunyuanVideoApplication:
+        def __init__(self, **kwargs):
+            calls.update(kwargs)
+
+    application.NeuronHunyuanVideoApplication = NeuronHunyuanVideoApplication
+    monkeypatch.setitem(sys.modules, "difflet.models.hunyuan_video.application", application)
+    profile = _profile(tmp_path, host_vae=False)
+
+    app = hunyuan_video._build_vae_decoder(_source(tmp_path), profile)
+
+    assert isinstance(app, NeuronHunyuanVideoApplication)
+    assert calls["parallel"] is profile.parallel
+    assert calls["shape"] == {"height": 64, "width": 96, "num_frames": 5}
+    assert calls["enable_transformer"] is False
+    assert calls["enable_vae_decoder"] is True
 
 
 def test_request_validator_checks_llama_template_bucket_and_unsupported_fields(
@@ -682,6 +992,58 @@ def test_host_clip_and_nxdi_llama_stages_preserve_conditioning_contract(
     assert llama_result.output.encoder_attention_mask.name.startswith("to(slice(")
 
 
+def test_neuron_clip_stage_preserves_cli_token_and_pooling_contract(
+    monkeypatch,
+    tmp_path,
+):
+    runtime = _runtime(
+        tmp_path,
+        monkeypatch,
+        profile=_profile(tmp_path, clip_placement="neuron"),
+    )
+    request = _request(runtime.profile)
+    calls = {}
+    torch = _fake_torch(monkeypatch, calls)
+    input_ids = _TraceTensor("clip_ids")
+    pooled = _TraceTensor("pooled")
+
+    def tokenizer(prompt, **kwargs):
+        calls["tokenizer"] = (prompt, kwargs)
+        return SimpleNamespace(input_ids=input_ids)
+
+    def app(value):
+        calls["app"] = value
+        return SimpleNamespace(pooler_output=pooled)
+
+    adapter = hunyuan_video.HunyuanVideoServingStageAdapter()
+    adapter.clip_tokenizer = tokenizer
+    adapter.clip_app = app
+
+    result = asyncio.run(
+        hunyuan_video.HunyuanVideoNeuronClipStageRunner(adapter).execute(
+            _invocation(
+                runtime,
+                request,
+                0,
+                hunyuan_video.HunyuanVideoInitialPayload(),
+            )
+        )
+    )
+
+    assert calls["tokenizer"] == (
+        request.prompt,
+        {
+            "padding": "max_length",
+            "max_length": 77,
+            "truncation": True,
+            "return_tensors": "pt",
+        },
+    )
+    assert calls["app"].name == "to(clip_ids)"
+    assert ("clip_ids", "to", (torch.int64,), {}) in input_ids.calls
+    assert result.output.pooled_projections.name == "reshape(cpu(to(pooled)))"
+
+
 def test_denoiser_builds_seeded_latents_bundle_and_uses_lower_scheduler_loop(
     monkeypatch,
     tmp_path,
@@ -812,6 +1174,75 @@ def test_host_decoder_scales_cpu_latents_and_encodes_bcthw_mp4(monkeypatch, tmp_
     assert result.output.output == expected
 
 
+def test_neuron_decoder_uses_lower_pipeline_scaling_and_encodes_bcthw_mp4(
+    monkeypatch,
+    tmp_path,
+):
+    runtime = _runtime(
+        tmp_path,
+        monkeypatch,
+        profile=_profile(tmp_path, host_vae=False),
+    )
+    target_path = (tmp_path / "job.part.mp4").resolve()
+    target_path.touch()
+    request = _request(
+        runtime.profile,
+        target=FileOutputTarget(staging_path=str(target_path)),
+    )
+    calls = {}
+    torch = _fake_torch(monkeypatch, calls)
+    latents = _TraceTensor("latents")
+    frames = _TraceTensor("frames")
+
+    class Pipeline:
+        def _decode_latents(self, value):
+            calls["decode"] = value
+            return frames
+
+    expected = FileBackedGenerateOutput(
+        path=str(target_path),
+        mime_type="video/mp4",
+        output_format="mp4",
+        size_bytes=3,
+        width=96,
+        height=64,
+        num_frames=5,
+        fps=24.0,
+        duration_s=5 / 24,
+    )
+    monkeypatch.setattr(
+        hunyuan_video,
+        "encode_video_tensor",
+        lambda tensor, encoded_request, **kwargs: calls.update(
+            encode=(tensor, encoded_request, kwargs)
+        )
+        or expected,
+    )
+    adapter = hunyuan_video.HunyuanVideoServingStageAdapter()
+    adapter.vae_app = SimpleNamespace(pipeline=Pipeline())
+
+    result = asyncio.run(
+        hunyuan_video.HunyuanVideoNeuronDecoderStageRunner(adapter).execute(
+            _invocation(
+                runtime,
+                request,
+                3,
+                hunyuan_video.HunyuanVideoLatentPayload(latents),
+            )
+        )
+    )
+
+    assert calls["decode"].name == "to(latents)"
+    assert ("latents", "to", (), {"dtype": torch.bfloat16}) in latents.calls
+    assert calls["encode"][0].name == "clamp(to(frames))"
+    assert calls["encode"][1] is request
+    assert calls["encode"][2] == {
+        "layout": "BCTHW",
+        "value_range": "minus_one_to_one",
+    }
+    assert result.output.output == expected
+
+
 def test_initial_payload_requires_precreated_parent_target(monkeypatch, tmp_path):
     runtime = _runtime(tmp_path, monkeypatch)
     adapter = hunyuan_video.HunyuanVideoServingStageAdapter()
@@ -919,6 +1350,110 @@ def test_adapter_validates_both_bindings_and_loads_host_and_neuron_components(
     assert adapter.vae is None
     assert adapter.runtime is None
     assert adapter.profile is None
+
+
+def test_adapter_loads_neuron_clip_and_vae_without_host_models(
+    monkeypatch,
+    tmp_path,
+):
+    runtime = _runtime(
+        tmp_path,
+        monkeypatch,
+        profile=_profile(tmp_path, clip_placement="neuron", host_vae=False),
+    )
+    calls = []
+
+    class FakeManager:
+        def __init__(self, root):
+            calls.append(("manager", Path(root)))
+
+        def validate_binding(self, binding, *, validate_payload):
+            calls.append(("binding", binding.artifact_id))
+            validate_payload(binding.path)
+
+    class FakeApplication:
+        def __init__(self, name):
+            self.name = name
+
+        def load(self, path, **kwargs):
+            calls.append((f"{self.name}_load", path, kwargs))
+
+    class FakeLlama(FakeApplication):
+        def load(self, path, **kwargs):
+            calls.append(("llama_load", path, kwargs))
+
+    clip_app = FakeApplication("clip")
+    llama_app = FakeLlama("llama")
+    denoiser = FakeApplication("denoiser")
+    vae_app = FakeApplication("decoder")
+    clip_tokenizer = object()
+    llama_tokenizer = object()
+    monkeypatch.setattr(hunyuan_video, "ImmutableArtifactManager", FakeManager)
+    monkeypatch.setattr(
+        hunyuan_video,
+        "_validate_artifact",
+        lambda source, profile, spec, path: calls.append(("validated", spec.artifact_id)),
+    )
+    monkeypatch.setattr(hunyuan_video, "_build_clip_app", lambda *args: clip_app)
+    monkeypatch.setattr(
+        hunyuan_video,
+        "_load_clip_tokenizer",
+        lambda path: clip_tokenizer,
+    )
+    monkeypatch.setattr(
+        hunyuan_video,
+        "_build_llama_app",
+        lambda source, profile, **kwargs: llama_app,
+    )
+    monkeypatch.setattr(
+        hunyuan_video,
+        "_load_llama_tokenizer",
+        lambda path: llama_tokenizer,
+    )
+    monkeypatch.setattr(hunyuan_video, "_build_denoiser", lambda *args: denoiser)
+    monkeypatch.setattr(hunyuan_video, "_build_vae_decoder", lambda *args: vae_app)
+    monkeypatch.setattr(
+        hunyuan_video,
+        "_load_host_clip",
+        lambda path: pytest.fail("host CLIP must not load"),
+    )
+    monkeypatch.setattr(
+        hunyuan_video,
+        "_load_host_vae",
+        lambda path: pytest.fail("host VAE must not load"),
+    )
+    adapter = hunyuan_video.HunyuanVideoServingStageAdapter()
+
+    runners = asyncio.run(adapter.create_loaded_runners(runtime))
+
+    assert tuple(runners) == ("clip", "llama", "denoiser", "decoder")
+    assert {item[1] for item in calls if item[0] == "binding"} == {
+        "clip",
+        "llama",
+        "denoiser",
+        "decoder",
+    }
+    load_kwargs = {
+        "start_rank_id": 0,
+        "local_ranks_size": 4,
+        "skip_warmup": True,
+    }
+    assert ("clip_load", str(runtime.artifacts.require("clip").path), load_kwargs) in calls
+    assert (
+        "decoder_load",
+        str(runtime.artifacts.require("decoder").path),
+        load_kwargs,
+    ) in calls
+    load_events = [item[0] for item in calls if item[0].endswith("_load")]
+    assert load_events == ["llama_load", "denoiser_load", "clip_load", "decoder_load"]
+    assert adapter.clip_app is clip_app
+    assert adapter.clip_model is None
+    assert adapter.vae_app is vae_app
+    assert adapter.vae is None
+
+    asyncio.run(adapter.shutdown())
+    assert adapter.clip_app is None
+    assert adapter.vae_app is None
 
 
 def test_startup_smoke_is_target_bound_reentrant_and_cleans_on_error(

@@ -42,8 +42,15 @@ def build_serving_stack(options: ServeOptions) -> ServingStack:
         compile_policy=options.compile_policy,
     )
     print("[difflet serve] stage topology:")
-    for stage in runtime.pipeline_definition.stages:
-        print(f"  - {stage.stage_id}: role={stage.role} kind={stage.kind}")
+    for stage, stage_runtime in zip(
+        runtime.pipeline_definition.stages,
+        runtime.runtime_plan.stages,
+        strict=True,
+    ):
+        print(
+            f"  - {stage.stage_id}: role={stage.role} kind={stage.kind} "
+            f"placement={stage_runtime.placement} artifact={stage_runtime.artifact_id or '-'}"
+        )
     validator_factory = load_request_validator_factory(resolved.metadata)
     request_validator = (
         validator_factory(runtime)
@@ -61,7 +68,9 @@ def build_serving_stack(options: ServeOptions) -> ServingStack:
             max_queued_requests=(
                 0 if resolved.metadata.output_modality == "video" else options.max_queued_requests
             ),
-            queue_timeout=options.queue_timeout,
+            queue_timeout=options.effective_queue_timeout(
+                resolved.metadata.output_modality
+            ),
             request_timeout=options.request_timeout,
             worker_cancel_timeout=options.worker_cancel_timeout,
             worker_restart_timeout=options.worker_restart_timeout,

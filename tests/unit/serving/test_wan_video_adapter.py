@@ -77,25 +77,29 @@ def _runtime(
         "resolve_available_neuron_core_ids",
         lambda *, required_num_cores: tuple(range(4, 4 + required_num_cores)),
     )
-    spec = wan._compile_spec(source, profile)
-    pipeline = wan._pipeline_definition()
-    plan = wan._runtime_plan(profile, pipeline, spec)
-    artifact_path = tmp_path / "published" / "generation"
-    binding = ArtifactBinding(
-        artifact_id="generation",
-        path=artifact_path,
-        manifest_path=artifact_path / "difflet_generation_manifest.json",
-        identity=spec.identity,
-        generation_id="g0000000000000001",
-        content_digest="1" * 64,
+    specs = wan._compile_specs(source, profile)
+    pipeline = wan._pipeline_definition(profile)
+    plan = wan._runtime_plan(profile, pipeline, specs)
+    bindings = tuple(
+        ArtifactBinding(
+            artifact_id=spec.artifact_id,
+            path=tmp_path / "published" / spec.artifact_id,
+            manifest_path=(
+                tmp_path / "published" / spec.artifact_id / "difflet_generation_manifest.json"
+            ),
+            identity=spec.identity,
+            generation_id=f"g-{spec.artifact_id}",
+            content_digest="1" * 64,
+        )
+        for spec in specs
     )
     return ResolvedRuntimeBundle(
         profile=profile,
         source=source,
         pipeline_definition=pipeline,
         runtime_plan=plan,
-        compile_specs=(spec,),
-        artifacts=ArtifactSet((binding,)),
+        compile_specs=specs,
+        artifacts=ArtifactSet(bindings),
     )
 
 
@@ -165,6 +169,9 @@ class _SymbolicTensor:
     def __add__(self, other):
         return _SymbolicTensor(f"({self.name}+{other.name})", self.calls)
 
+    def __mul__(self, other):
+        return _SymbolicTensor(f"({self.name}*{other.name})", self.calls)
+
 
 def _fake_torch(monkeypatch, calls: dict) -> ModuleType:
     torch = ModuleType("torch")
@@ -227,6 +234,43 @@ def test_compile_identity_binds_commit_shape_topology_and_component(monkeypatch,
     assert str(tmp_path) not in first.identity.canonical_cache_inputs_json.decode()
 
 
+def test_neuron_profile_adds_only_decoder_artifact_and_binding(monkeypatch, tmp_path):
+    host = _runtime(tmp_path / "host", monkeypatch)
+    neuron = _runtime(
+        tmp_path / "neuron",
+        monkeypatch,
+        profile=_profile(tmp_path / "neuron", host_vae=False),
+    )
+
+    assert tuple(spec.artifact_id for spec in host.compile_specs) == ("generation",)
+    assert tuple(spec.artifact_id for spec in neuron.compile_specs) == (
+        "generation",
+        "decoder",
+    )
+    assert (
+        host.require_compile_spec("generation").identity
+        == neuron.require_compile_spec("generation").identity
+    )
+    decoder_identity = json.loads(
+        neuron.require_compile_spec("decoder").identity.canonical_cache_inputs_json
+    )
+    assert decoder_identity["component_tp_degree"] == 1
+    assert decoder_identity["component_world_size"] == 4
+    assert decoder_identity["logical_nc_config"] == 2
+    assert str(tmp_path) not in json.dumps(decoder_identity)
+    assert neuron.pipeline_definition.stages[2].runner_factory.endswith(
+        ":WanNeuronDecoderStageRunner"
+    )
+    assert [stage.placement for stage in neuron.runtime_plan.stages] == [
+        "neuron",
+        "neuron",
+        "neuron",
+    ]
+    assert neuron.runtime_plan.stages[2].artifact_id == "decoder"
+    assert neuron.runtime_plan.stages[2].topology.tp_degree == 1
+    assert neuron.runtime_plan.stages[2].topology.world_size == 4
+
+
 def test_compile_artifact_checks_target_environment_and_payload(monkeypatch, tmp_path):
     runtime = _runtime(tmp_path, monkeypatch)
     spec = runtime.compile_specs[0]
@@ -277,6 +321,61 @@ def test_compile_artifact_checks_target_environment_and_payload(monkeypatch, tmp
         )
 
 
+def test_neuron_decoder_compile_uses_dedicated_artifact(monkeypatch, tmp_path):
+    runtime = _runtime(
+        tmp_path,
+        monkeypatch,
+        profile=_profile(tmp_path, host_vae=False),
+    )
+    spec = runtime.require_compile_spec("decoder")
+    target = ArtifactPublishTarget(
+        artifact_id=spec.artifact_id,
+        identity=spec.identity,
+        identity_root=tmp_path / "identity",
+        staging_path=tmp_path / "staging",
+    )
+    calls = {}
+
+    class FakeApplication:
+        def compile(self, path):
+            calls["compile"] = path
+            component = Path(path) / "vae_decoder"
+            component.mkdir(parents=True)
+            (component / "model.pt").write_bytes(b"model")
+            (component / "neuron_config.json").write_text("{}")
+
+        def has_compiled_artifacts(self, path):
+            calls["validated"] = path
+            return True
+
+        def components(self):
+            return [SimpleNamespace(name="vae_decoder", artifact_name=None)]
+
+    @contextmanager
+    def fake_environment(world_size, **kwargs):
+        calls["environment"] = (world_size, kwargs)
+        yield
+
+    application = FakeApplication()
+    monkeypatch.setattr(wan, "_build_neuron_vae", lambda source, profile: application)
+    monkeypatch.setattr(
+        wan,
+        "_build_application",
+        lambda source, profile: (_ for _ in ()).throw(
+            AssertionError("generation builder must not be used")
+        ),
+    )
+    monkeypatch.setattr(wan, "serving_compile_environment", fake_environment)
+
+    wan._compile_artifact(runtime.source, runtime.profile, spec, target)
+
+    assert calls == {
+        "environment": (4, {}),
+        "compile": str(target.staging_path),
+        "validated": str(target.staging_path),
+    }
+
+
 def test_artifact_validation_rejects_unknown_or_incomplete_component(monkeypatch, tmp_path):
     runtime = _runtime(tmp_path, monkeypatch)
     spec = runtime.compile_specs[0]
@@ -322,6 +421,10 @@ def test_profile_allows_lower_layer_sequence_parallelism(tmp_path):
     wan._validate_profile(
         _profile(tmp_path, parallel=DiffletParallelConfig(tp_degree=4, sp_enabled=True))
     )
+
+
+def test_profile_allows_explicit_neuron_vae(tmp_path):
+    wan._validate_profile(_profile(tmp_path, host_vae=False))
 
 
 def test_artifact_validation_rejects_empty_model_payload(monkeypatch, tmp_path):
@@ -527,6 +630,66 @@ def test_host_decoder_normalizes_latents_on_cpu_and_encodes_exact_target(
     assert result.output.output == expected_output
 
 
+def test_neuron_decoder_normalizes_latents_and_encodes_exact_target(monkeypatch, tmp_path):
+    runtime = _runtime(
+        tmp_path,
+        monkeypatch,
+        profile=_profile(tmp_path, host_vae=False),
+    )
+    target_path = (tmp_path / "job.part.mp4").resolve()
+    target_path.touch()
+    request = _request(
+        runtime.profile,
+        target=FileOutputTarget(staging_path=str(target_path)),
+    )
+    calls = {}
+    torch = _fake_torch(monkeypatch, calls)
+    tensor_calls = []
+    latents = _SymbolicTensor("latents", tensor_calls)
+    frames = _SymbolicTensor("frames", tensor_calls)
+
+    class FakeDecoder:
+        config = SimpleNamespace(latents_mean=(1.0, 2.0), latents_std=(0.5, 0.25))
+
+        def __call__(self, value):
+            calls["decode"] = value
+            return (frames,)
+
+    expected_output = FileBackedGenerateOutput(
+        path=str(target_path),
+        mime_type="video/mp4",
+        output_format="mp4",
+        size_bytes=3,
+        width=96,
+        height=64,
+        num_frames=5,
+        fps=16.0,
+        duration_s=5 / 16,
+    )
+
+    def fake_encode(tensor, encoded_request, **kwargs):
+        calls["encode"] = (tensor, encoded_request, kwargs)
+        return expected_output
+
+    monkeypatch.setattr(wan, "encode_video_tensor", fake_encode)
+    adapter = wan.WanServingStageAdapter()
+    adapter.vae_app = SimpleNamespace(vae_decoder=FakeDecoder())
+    runner = wan.WanNeuronDecoderStageRunner(adapter)
+
+    result = asyncio.run(
+        runner.execute(_invocation(runtime, request, 2, wan.WanLatentPayload(latents)))
+    )
+
+    latent_to = next(call for call in tensor_calls if call[:2] == ("latents", "to"))
+    assert latent_to[2:] == ((), {"dtype": torch.bfloat16})
+    assert "latents" in calls["decode"].name and "tensor" in calls["decode"].name
+    encoded_frames, encoded_request, encode_kwargs = calls["encode"]
+    assert encoded_frames.name.startswith("clamp(")
+    assert encoded_request is request
+    assert encode_kwargs == {"layout": "BCTHW", "value_range": "minus_one_to_one"}
+    assert result.output.output == expected_output
+
+
 def test_initial_payload_requires_precreated_parent_owned_mp4_target(monkeypatch, tmp_path):
     runtime = _runtime(tmp_path, monkeypatch)
     adapter = wan.WanServingStageAdapter()
@@ -598,6 +761,69 @@ def test_adapter_validates_binding_before_loading_and_shutdown_releases_state(
     assert adapter.vae is None
     assert adapter.runtime is None
     assert adapter.profile is None
+
+
+def test_adapter_loads_neuron_decoder_after_generation_and_releases_it(
+    monkeypatch,
+    tmp_path,
+):
+    runtime = _runtime(
+        tmp_path,
+        monkeypatch,
+        profile=_profile(tmp_path, host_vae=False),
+    )
+    calls = {"bindings": [], "loads": []}
+
+    class FakeManager:
+        def __init__(self, root):
+            calls["root"] = Path(root)
+
+        def validate_binding(self, binding, *, validate_payload):
+            calls["bindings"].append(binding.artifact_id)
+            validate_payload(binding.path)
+
+    class FakeApplication:
+        def __init__(self, name):
+            self.name = name
+
+        def load(self, path, **kwargs):
+            calls["loads"].append((self.name, path, kwargs))
+
+    generation = FakeApplication("generation")
+    decoder = FakeApplication("decoder")
+    decoder.vae_decoder = object()
+    monkeypatch.setattr(wan, "ImmutableArtifactManager", FakeManager)
+    monkeypatch.setattr(wan, "_validate_artifact", lambda *args, **kwargs: None)
+    monkeypatch.setattr(wan, "_build_application", lambda source, profile: generation)
+    monkeypatch.setattr(wan, "_build_neuron_vae", lambda source, profile: decoder)
+    monkeypatch.setattr(
+        wan,
+        "_load_host_vae",
+        lambda path: (_ for _ in ()).throw(AssertionError("host VAE must not load")),
+    )
+    adapter = wan.WanServingStageAdapter()
+
+    runners = asyncio.run(adapter.create_loaded_runners(runtime))
+
+    assert calls["bindings"] == ["generation", "decoder"]
+    assert calls["loads"] == [
+        (
+            "generation",
+            str(runtime.artifacts.require("generation").path),
+            {"start_rank_id": 0, "local_ranks_size": 4, "skip_warmup": True},
+        ),
+        (
+            "decoder",
+            str(runtime.artifacts.require("decoder").path),
+            {"start_rank_id": 0, "local_ranks_size": 4, "skip_warmup": True},
+        ),
+    ]
+    assert isinstance(runners["decoder"].inner, wan.WanNeuronDecoderStageRunner)
+    assert adapter.vae is None
+    assert adapter.vae_app is decoder
+
+    asyncio.run(adapter.shutdown())
+    assert adapter.vae_app is None
 
 
 def test_startup_smoke_is_target_bound_reentrant_and_always_cleans(monkeypatch, tmp_path):

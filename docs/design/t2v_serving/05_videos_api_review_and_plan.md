@@ -11,6 +11,10 @@ share one resident engine, including Chat Completions, must use one global FIFO.
 The current implementation is shared only within Videos and therefore has a
 cross-endpoint admission follow-up before both API families may coexist.
 
+Caller-facing startup, curl, field, response, storage, and error documentation
+is maintained separately in [Videos API](../../serving/videos_api.md). This
+design record remains authoritative for internal ownership and lifecycle rules.
+
 The accepted Round 1/2 hardening is **implemented locally**: bounded validation
 admission, streaming multipart limits, queued-only DELETE, 25-hour expiry, the
 4,096-record cap, and storage reservation/sweeper transactions are covered by
@@ -27,7 +31,7 @@ resident-worker constraints unless this document explicitly changes a decision.
 
 ## Research anchor
 
-- Repository: `/Users/clark/project/yotta/Difflet`
+- Repository: current repository root
 - Remote: `git@github.com:ai-decentralized/Difflet.git`
 - Current branch: `feature/serving_t2v`
 - Current branch commit: `3cbe695fa4c50ea72c2010e1dd643c980e7a5583`

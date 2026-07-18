@@ -97,6 +97,8 @@ def test_serve_help_exposes_operational_tuning_but_hides_artifact_policy(capsys)
     assert "--video-max-jobs" in out
     assert "--video-sweep-interval" in out
     assert "--host-vae" in out
+    assert "--clip-placement" in out
+    assert "--vae-placement" not in out
     assert "--num-frames" in out
     assert "--teacache-cadence" in out
     assert "--teacache-online-delta" in out
@@ -121,7 +123,9 @@ def test_difflet_serve_operational_controls_have_documented_defaults(monkeypatch
 
     options = options_from_args(calls[0])
     assert options.max_queued_requests == 8
-    assert options.queue_timeout == 30.0
+    assert options.queue_timeout is None
+    assert options.effective_queue_timeout("image") == 30.0
+    assert options.effective_queue_timeout("video") == 24 * 60 * 60
     assert options.request_timeout == 300.0
     assert options.artifact_store_timeout == 60.0
     assert options.worker_cancel_timeout == 10.0
@@ -304,6 +308,27 @@ def test_difflet_serve_parses_compile_and_load_profile_flags(monkeypatch):
         "/tmp/difflet-cache",
         True,
     )
+
+
+def test_difflet_serve_maps_hunyuan_clip_and_legacy_host_vae_flags(monkeypatch):
+    calls = []
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
+    cli_main = importlib.import_module("difflet.cli.main")
+
+    cli_main.main(
+        [
+            "serve",
+            "--model-id",
+            "hunyuanvideo-community/HunyuanVideo",
+            "--clip-placement",
+            "neuron",
+            "--host-vae",
+        ]
+    )
+
+    options = options_from_args(calls[0])
+    assert options.clip_placement == "neuron"
+    assert options.host_vae is True
 
 
 def test_serve_options_maps_force_to_compile_policy():

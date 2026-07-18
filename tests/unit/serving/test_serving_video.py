@@ -125,6 +125,9 @@ def test_fixed_model_and_profile_conflicts_are_rejected(form, code):
         ("seed", str(2**63)),
         ("seconds", "0"),
         ("width", "1.5"),
+        ("seed", "9" * 10_000),
+        ("seconds", "9" * 10_000),
+        ("size", f"{'9' * 10_000}x1"),
     ],
 )
 def test_numeric_fields_are_strict_finite_and_bounded(field, value):

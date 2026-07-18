@@ -8,6 +8,7 @@ published directory after media validation succeeds.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
@@ -20,6 +21,8 @@ from pathlib import Path
 from typing import BinaryIO, Iterable
 
 from difflet.serving.artifact_store import S3ArtifactStore
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_VIDEO_ARTIFACT_BYTES = 8 * 1024**3
 DEFAULT_STREAM_CHUNK_BYTES = 1024 * 1024
@@ -144,6 +147,7 @@ class LocalVideoArtifactStore:
             raise ValueError("max_artifact_bytes must be a positive integer")
         self.max_artifact_bytes = int(max_artifact_bytes)
         self._lock = threading.RLock()
+        self._pending_artifact_deletes: dict[str, VideoArtifact] = {}
         requested_root = Path(root).expanduser()
         _mkdir_private_and_reject_symlink(requested_root)
         self.root = requested_root.resolve(strict=True)
@@ -369,11 +373,54 @@ class LocalVideoArtifactStore:
         with self._lock:
             self._ensure_managed_directories()
             if not _lexists(path):
+                self._pending_artifact_deletes.pop(artifact_key, None)
                 return False
             _lstat_regular_file(path, parent=self.artifact_root)
             os.unlink(path)
             _fsync_directory(self.artifact_root)
+            self._pending_artifact_deletes.pop(artifact_key, None)
             return True
+
+    def schedule_artifact_delete(self, artifact: VideoArtifact) -> None:
+        """Retain cleanup and accounting ownership for an unreachable artifact."""
+
+        if not isinstance(artifact, VideoArtifact):
+            raise TypeError("artifact must be a VideoArtifact")
+        expected_path = self._artifact_path(artifact.key)
+        if not _same_path(artifact.path, expected_path):
+            raise VideoArtifactPathViolation(
+                "scheduled video artifact path does not match its managed key"
+            )
+        if artifact.size_bytes <= 0 or artifact.size_bytes > self.max_artifact_bytes:
+            raise InvalidVideoArtifact("scheduled video artifact size is invalid")
+        with self._lock:
+            existing = self._pending_artifact_deletes.get(artifact.key)
+            if existing is not None and existing != artifact:
+                raise InvalidVideoArtifact(
+                    f"conflicting cleanup token for video artifact {artifact.key!r}"
+                )
+            self._pending_artifact_deletes[artifact.key] = artifact
+
+    def retry_pending_artifact_deletes(self) -> tuple[VideoArtifact, ...]:
+        """Retry local orphan deletion and return accounting tokens exactly once."""
+
+        with self._lock:
+            pending = tuple(self._pending_artifact_deletes.values())
+        removed: list[VideoArtifact] = []
+        for artifact in pending:
+            try:
+                self.delete(artifact.key)
+            except Exception:
+                logger.exception(
+                    "video.local_pending_delete_failed artifact_key=%s",
+                    artifact.key,
+                )
+                continue
+            with self._lock:
+                still_pending = artifact.key in self._pending_artifact_deletes
+            if not still_pending:
+                removed.append(artifact)
+        return tuple(removed)
 
     def delete_staging(self, target: VideoArtifactTarget) -> bool:
         self._validate_target(target)
@@ -387,49 +434,6 @@ class LocalVideoArtifactStore:
             os.unlink(target.staging_path)
             _fsync_directory(self.staging_root)
             return True
-
-
-class S3VideoArtifactStore(LocalVideoArtifactStore):
-    """Local staging store that publishes committed MP4s to S3.
-
-    The local committed copy is retained until normal DELETE/TTL cleanup so the
-    existing inode-validated content lease remains safe; S3 is the durable
-    download copy and supplies the public presigned URL.
-    """
-
-    def __init__(self, root: str | Path, *, s3: S3ArtifactStore, retention_seconds: int = 25 * 60 * 60, max_artifact_bytes: int = DEFAULT_MAX_VIDEO_ARTIFACT_BYTES) -> None:
-        super().__init__(root, max_artifact_bytes=max_artifact_bytes)
-        self.s3 = s3
-        self.retention_seconds = int(retention_seconds)
-        self._urls: dict[str, str] = {}
-
-    def commit(self, target: VideoArtifactTarget, *, reported_path: str | Path | None = None, expected_size_bytes: int | None = None) -> VideoArtifact:
-        artifact = super().commit(target, reported_path=reported_path, expected_size_bytes=expected_size_bytes)
-        data = artifact.path.read_bytes()
-        client = self.s3._client()
-        key = f"{self.s3.prefix}/{artifact.key}" if self.s3.prefix else artifact.key
-        client.put_object(Bucket=self.s3.bucket, Key=key, Body=data, ContentType="video/mp4")
-        # Keep the download URL lifetime aligned with the existing video
-        # retention policy. S3 SigV4 permits this 25-hour lifetime (under 7d).
-        self._urls[artifact.key] = client.generate_presigned_url(
-            "get_object", Params={"Bucket": self.s3.bucket, "Key": key}, ExpiresIn=self.retention_seconds
-        )
-        return artifact
-
-    def commit_local(self, target: VideoArtifactTarget, *, reported_path: str | Path | None = None, expected_size_bytes: int | None = None) -> VideoArtifact:
-        """Commit a synchronous result locally without publishing to S3."""
-        return super().commit(target, reported_path=reported_path, expected_size_bytes=expected_size_bytes)
-
-    def url(self, artifact_key: str) -> str | None:
-        return self._urls.get(artifact_key)
-
-    def delete(self, artifact_key: str) -> bool:
-        key = f"{self.s3.prefix}/{artifact_key}" if self.s3.prefix else artifact_key
-        try:
-            self.s3._client().delete_object(Bucket=self.s3.bucket, Key=key)
-        finally:
-            self._urls.pop(artifact_key, None)
-        return super().delete(artifact_key)
 
     def sweep_orphans(
         self,
@@ -597,6 +601,181 @@ class S3VideoArtifactStore(LocalVideoArtifactStore):
                 raise VideoArtifactPathViolation(
                     f"managed video path is not a real directory: {path}"
                 )
+
+
+class S3VideoArtifactStore(LocalVideoArtifactStore):
+    """Local source-of-truth store with best-effort S3 publication.
+
+    The local committed copy is retained until normal DELETE/TTL cleanup so the
+    existing inode-validated content lease remains safe. S3 supplies an optional
+    direct-download copy and presigned URL; publication failure never invalidates
+    a successfully committed local MP4.
+    """
+
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        s3: S3ArtifactStore,
+        retention_seconds: int = 25 * 60 * 60,
+        max_artifact_bytes: int = DEFAULT_MAX_VIDEO_ARTIFACT_BYTES,
+    ) -> None:
+        super().__init__(root, max_artifact_bytes=max_artifact_bytes)
+        self.s3 = s3
+        self.retention_seconds = int(retention_seconds)
+        self._urls: dict[str, str] = {}
+        self._remote_keys: set[str] = set()
+        self._pending_remote_deletes: set[str] = set()
+
+    def commit(
+        self,
+        target: VideoArtifactTarget,
+        *,
+        reported_path: str | Path | None = None,
+        expected_size_bytes: int | None = None,
+    ) -> VideoArtifact:
+        """Commit locally, then publish remotely for compatibility callers.
+
+        The serving lifecycle uses :meth:`commit_local` and
+        :meth:`publish_remote` separately so it can establish its terminal
+        publication claim before entering an unbounded network operation.
+        """
+
+        artifact = self.commit_local(
+            target,
+            reported_path=reported_path,
+            expected_size_bytes=expected_size_bytes,
+        )
+        self.publish_remote(artifact)
+        return artifact
+
+    def publish_remote(self, artifact: VideoArtifact) -> str | None:
+        """Best-effort upload and signing for an already committed local MP4.
+
+        Publication failure never removes or invalidates the local artifact.
+        If rollback cannot confirm remote deletion, the key is retained in a
+        store-owned retry set that does not depend on job metadata persistence.
+        """
+
+        if not isinstance(artifact, VideoArtifact):
+            raise TypeError("artifact must be a VideoArtifact")
+        current = self.require(artifact.key)
+        if current != artifact:
+            raise InvalidVideoArtifact(
+                f"committed artifact {artifact.key!r} changed before S3 publication"
+            )
+        key = f"{self.s3.prefix}/{artifact.key}" if self.s3.prefix else artifact.key
+        client = None
+        try:
+            client = self.s3._client()
+            client.upload_file(
+                str(artifact.path),
+                self.s3.bucket,
+                key,
+                ExtraArgs={"ContentType": "video/mp4"},
+            )
+            # Keep the requested download lifetime aligned with video retention.
+            # S3/credential policy may shorten the effective lifetime.
+            url = client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self.s3.bucket, "Key": key},
+                ExpiresIn=self.retention_seconds,
+            )
+        except Exception:
+            logger.exception(
+                "video.s3_publish_failed artifact_key=%s fallback=local",
+                artifact.key,
+            )
+            with self._lock:
+                self._urls.pop(artifact.key, None)
+            if client is None:
+                return None
+            try:
+                client.delete_object(Bucket=self.s3.bucket, Key=key)
+            except Exception:
+                # The upload may have completed before signing failed. Preserve a
+                # conservative marker independent of job metadata so the
+                # periodic sweeper can retry remote cleanup.
+                with self._lock:
+                    self._remote_keys.add(artifact.key)
+                    self._pending_remote_deletes.add(artifact.key)
+                logger.exception(
+                    "video.s3_publish_rollback_failed artifact_key=%s",
+                    artifact.key,
+                )
+            else:
+                with self._lock:
+                    self._remote_keys.discard(artifact.key)
+                    self._pending_remote_deletes.discard(artifact.key)
+            return None
+
+        with self._lock:
+            self._remote_keys.add(artifact.key)
+            self._pending_remote_deletes.discard(artifact.key)
+            self._urls[artifact.key] = url
+        return url
+
+    def commit_local(
+        self,
+        target: VideoArtifactTarget,
+        *,
+        reported_path: str | Path | None = None,
+        expected_size_bytes: int | None = None,
+    ) -> VideoArtifact:
+        """Commit a synchronous result locally without publishing to S3."""
+        return super().commit(
+            target,
+            reported_path=reported_path,
+            expected_size_bytes=expected_size_bytes,
+        )
+
+    def url(self, artifact_key: str) -> str | None:
+        with self._lock:
+            return self._urls.get(artifact_key)
+
+    def delete(self, artifact_key: str) -> bool:
+        key = f"{self.s3.prefix}/{artifact_key}" if self.s3.prefix else artifact_key
+        with self._lock:
+            remote_may_exist = artifact_key in self._remote_keys
+        if remote_may_exist:
+            self.s3._client().delete_object(Bucket=self.s3.bucket, Key=key)
+            with self._lock:
+                self._remote_keys.discard(artifact_key)
+                self._pending_remote_deletes.discard(artifact_key)
+                self._urls.pop(artifact_key, None)
+        deleted = super().delete(artifact_key)
+        return deleted
+
+    def retry_pending_remote_deletes(self) -> int:
+        """Retry orphan cleanup that no longer belongs to a job transaction."""
+
+        with self._lock:
+            pending = tuple(sorted(self._pending_remote_deletes))
+        removed = 0
+        for artifact_key in pending:
+            key = f"{self.s3.prefix}/{artifact_key}" if self.s3.prefix else artifact_key
+            try:
+                self.s3._client().delete_object(Bucket=self.s3.bucket, Key=key)
+            except Exception:
+                logger.exception(
+                    "video.s3_pending_delete_failed artifact_key=%s",
+                    artifact_key,
+                )
+                continue
+            with self._lock:
+                self._remote_keys.discard(artifact_key)
+                self._pending_remote_deletes.discard(artifact_key)
+                self._urls.pop(artifact_key, None)
+            removed += 1
+        return removed
+
+    def purge_all_managed(self) -> VideoArtifactSweep:
+        # Shutdown cannot enumerate arbitrary bucket contents, but it can make
+        # one final attempt for remote keys conservatively retained by this
+        # process after a failed publish rollback.
+        self.retry_pending_remote_deletes()
+        self.retry_pending_artifact_deletes()
+        return super().purge_all_managed()
 
 
 def _mkdir_private_and_reject_symlink(path: Path) -> None:
