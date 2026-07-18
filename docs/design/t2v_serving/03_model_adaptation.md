@@ -177,7 +177,7 @@ not an implementation commitment or memory-fit claim.
 | --- | --- | --- | --- | ---: |
 | LTX-2 | Yes, fixed-profile direct CLI | Provisional hybrid adapter | Yes, explicit | 1 |
 | Wan 2.1 | Yes, fixed-profile staged CLI | Provisional W4 adapter with host VAE | Yes, explicit | 2 |
-| HunyuanVideo 1.0 | Yes, fixed-profile staged CLI | Provisional W4 Llama/DiT with host CLIP/VAE | Yes, explicit | 3 |
+| HunyuanVideo 1.0 | Yes, fixed-profile staged CLI | Validated W4 Llama/DiT with host CLIP and Neuron VAE by default; host VAE remains the rollback | Yes, explicit | 3 |
 | Wan 2.2 | Partial single-expert path only | Unknown | Yes | 4 |
 | HunyuanVideo 1.5 | No; benchmark pending | Unknown | Future | 5 |
 
@@ -217,22 +217,23 @@ The Neuron VAE must be co-loaded with the resident transformer world size; a
 CLI TP=1 VAE artifact cannot be reused inside a TP=4 resident worker unless the
 runtime contract explicitly supports that world-size change.
 
-This is an additive rollout. The currently accepted host/hybrid adapter remains
-the MVP default and is not rewritten while a Neuron VAE profile is being built.
-For a fixed model/revision/shape/dtype/topology, the two profiles reuse identical
-non-VAE artifacts and bindings. Only the VAE artifact, decoder runner binding,
-and decoder placement differ; a running resident worker never switches between
-them.
+This was an additive rollout: the accepted host/hybrid adapters were preserved
+unchanged while the Neuron VAE profiles were built and qualified. Wan 2.1 and
+HunyuanVideo 1.0 now select Neuron VAE by default, while `--host-vae` selects
+the retained host rollback. For a fixed model/revision/shape/dtype/topology, the
+two profiles reuse identical non-VAE artifacts and bindings. Only the VAE
+artifact, decoder runner binding, and decoder placement differ; a running
+resident worker never switches between them.
 
-Hunyuan is intentionally split into two serial placement experiments. The first
-holds host VAE fixed and compares host CLIP with a serving-specific Neuron CLIP
-artifact selected by a startup-only `--clip-placement host|neuron` profile field;
-only that field, the CLIP artifact, prompt-encoder binding, and placement may
-differ. Omission retains the current host default. After correctness and repeated latency/memory measurements select one
-CLIP baseline, the second experiment freezes that baseline and compares host VAE
-with Neuron VAE; only the VAE artifact, decoder binding, and placement may then
-differ. The existing host-CLIP/host-VAE adapter remains the MVP and rollback
-profile throughout both experiments.
+Hunyuan validation was split into two serial placement experiments. The first
+held host VAE fixed and compared host CLIP with a serving-specific Neuron CLIP
+artifact selected by a startup-only `--clip-placement host|neuron` profile
+field; only that field, the CLIP artifact, prompt-encoder binding, and placement
+differed. Omission retains the accepted host CLIP default. The second experiment
+froze the Neuron CLIP comparison baseline and compared host VAE with Neuron VAE;
+only the VAE artifact, decoder binding, and placement differed. Neuron VAE was
+promoted after the fixed-profile gates passed; the host-CLIP/host-VAE adapter
+remains an explicit rollback profile.
 
 The implemented operator flags are Hunyuan-only
 `--clip-placement host|neuron` and the existing `--host-vae` override.

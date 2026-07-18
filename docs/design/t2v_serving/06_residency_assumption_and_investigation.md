@@ -260,9 +260,10 @@ before keeping the four-thread validation default.
 ## Release interpretation
 
 Code presence and production enablement are separate. LTX-2, Wan 2.1, and
-HunyuanVideo 1.0 are wired for provisional hardware validation under this
-decision. A checkpoint is production-supported only after its correctness,
-co-residency, recovery, media, and memory record is attached to this register.
+HunyuanVideo 1.0 have now passed their recorded fixed-profile resident hardware
+gates. That qualification is limited to the documented checkpoints, shapes,
+topologies, and placement profiles; broader recovery and soak claims require
+their own evidence.
 Wan 2.2 remains excluded until its existing second-transformer wiring and
 reference-correctness gate are closed; this does not retract its README/offline
 artifact support. HunyuanVideo 1.5 remains excluded until its offline

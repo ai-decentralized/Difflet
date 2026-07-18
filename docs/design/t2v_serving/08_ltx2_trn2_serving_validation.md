@@ -11,9 +11,11 @@ smoke, served repeated synchronous and asynchronous MP4 generations, exercised
 all six Videos routes, enforced queued-only deletion, and released the Neuron
 runtime after SIGTERM.
 
-This result applies only to the fixed profile below. It does not complete the
-still-pending Wan 2.1 or HunyuanVideo 1.0 resident gates, timeout/restart testing,
-or a long repeated-request soak.
+This result applies only to the fixed profile below. At the time of this run it
+did not complete the then-pending Wan 2.1 or HunyuanVideo 1.0 resident gates,
+timeout/restart testing, or a long repeated-request soak. Later fixed-profile
+Wan and Hunyuan runs closed their placement gates; they do not change the LTX-2
+evidence recorded here.
 
 ## Target and fixed profile
 

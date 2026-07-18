@@ -2,11 +2,13 @@
 
 > **Post-audit update (2026-07-17):** the statements below remain accurate for
 > what the checked-in offline benchmark proves by itself. A separate real
-> resident Videos Serving run has now qualified LTX-2 at TP4/CP1,
-> 480x704x49, including memory sampling, same-worker reuse, validated MP4s, and
-> all six routes. See
-> [LTX-2 resident validation](08_ltx2_trn2_serving_validation.md). Wan 2.1 and
-> HunyuanVideo 1.0 remain pending resident gates.
+> resident Videos Serving runs have now qualified LTX-2 at TP4/CP1,
+> 480x704x49, Wan 2.1 with its fixed-profile Neuron VAE, and HunyuanVideo 1.0
+> with its fixed-profile Neuron VAE. See
+> [LTX-2 resident validation](08_ltx2_trn2_serving_validation.md),
+> [Wan 2.1 resident validation](09_wan21_trn2_serving_validation.md), and the
+> [VAE placement validation record](10_vae_placement_rollout_plan.md). The
+> offline-only evidence boundary described below remains unchanged.
 
 ## Conclusion
 

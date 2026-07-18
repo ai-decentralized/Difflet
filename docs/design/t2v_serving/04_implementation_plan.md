@@ -17,21 +17,23 @@ tokenizer before readiness, run per-request tokenization on a bounded CPU
 executor, enforce text-only multipart limits before admission, expire terminal
 jobs after 25 hours, and narrow public DELETE to queued work only.
 
-This is not a hardware-qualified release. Each advertised model/profile must
-still pass the real `trn2.3xlarge` acceptance packet below. Wan 2.2 and
-HunyuanVideo 1.5 remain outside HTTP Serving for different reasons. Wan 2.2 is
+LTX-2, Wan 2.1, and HunyuanVideo 1.0 now have hardware-qualified fixed-profile
+resident results. Their qualification does not generalize to other shapes,
+topologies, or checkpoints, and the remaining timeout/restart and soak items
+below still apply. Wan 2.2 and HunyuanVideo 1.5 remain outside MVP HTTP Serving
+for different reasons. Wan 2.2 is
 listed in the README and its single-transformer offline CLI path has run on a
 real Trn2, but current wiring disables `transformer_2`, so dual-transformer
 reference correctness and resident memory are not qualified. HunyuanVideo 1.5
 is not the HunyuanVideo 1.0 row shown in the README; its offline
 compile/generate methods remain scaffolds.
 
-The existing benchmark already closes the basic fixed-profile offline
-generation question for LTX-2, Wan 2.1, and HunyuanVideo 1.0. It does not close
-the resident gate: every warm sample is a separate CLI process with a warm page
-cache, T2V peak memory is unrecorded, and retained outputs are finite `.pt`
-tensors rather than validated MP4s. See
-[Trn2 benchmark evidence audit](07_trn2_benchmark_evidence.md).
+The existing benchmark closes the basic fixed-profile offline generation
+question for LTX-2, Wan 2.1, and HunyuanVideo 1.0. Later resident validation
+separately closed the fixed-profile co-load, memory, API, and MP4 gates; the
+offline benchmark alone still proves none of those properties. See the
+[Trn2 benchmark evidence audit](07_trn2_benchmark_evidence.md) and the model
+validation reports linked from it.
 
 ## Implemented milestones
 
@@ -158,13 +160,13 @@ These tests describe the current implementation, including the local Phase 2b
 hardening. Only mixed Chat/Video admission tests remain with the cross-endpoint
 generalization follow-up.
 
-### Phase 4: provisional model adapters
+### Phase 4: model adapters and fixed-profile qualification
 
 | Model | Implemented fixed-profile plan | Public posture |
 | --- | --- | --- |
-| LTX-2 | One TP4 hybrid `pipeline`; host text/connectors/decode, Neuron DiT; silent MP4 | Real offline Trn2 path verified; resident API validation pending |
-| Wan 2.1 | TP4 Neuron prompt encoder + denoiser, explicit host VAE decoder | Real offline Trn2 path verified; resident API validation pending |
-| HunyuanVideo 1.0 | Host CLIP/decoder, resident W4 Llama + denoiser | Real offline Trn2 path verified; resident API validation pending |
+| LTX-2 | One TP4 hybrid `pipeline`; host text/connectors/decode, Neuron DiT; silent MP4 | Fixed-profile resident API and media validation passed; timeout/restart and long soak remain |
+| Wan 2.1 | TP4 Neuron prompt encoder + denoiser; Neuron VAE default with `--host-vae` rollback | Fixed-profile resident API, media, memory, and clean-shutdown validation passed |
+| HunyuanVideo 1.0 | Host CLIP default, resident W4 Llama + denoiser; Neuron VAE default with `--host-vae` rollback | Fixed-profile resident API, S3, media, memory, and image-regression validation passed |
 | Wan 2.2 | Real Trn2 single-transformer path exists; no serving adapter/allowlist entry | Blocked on enabling/validating the second transformer and then the resident hardware gate |
 | HunyuanVideo 1.5 | Not in the README supported-model table; no serving adapter/allowlist entry | Blocked on offline prompt-conditioning/compile/generation |
 
