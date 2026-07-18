@@ -63,11 +63,21 @@ def _process_tree(root_pid: int) -> list[int]:
         if not Path(f"/proc/{pid}").exists():
             continue
         found.append(pid)
+        # A child is recorded under the Linux task/thread that created it, not
+        # necessarily under the thread-group leader.  Python multiprocessing
+        # may spawn the resident worker from a background thread, so reading
+        # only ``task/<pid>/children`` can silently omit the largest process in
+        # the serving tree.  Scan every live task and de-duplicate below.
         try:
-            children = Path(f"/proc/{pid}/task/{pid}/children").read_text(encoding="utf-8")
+            task_dirs = list(Path(f"/proc/{pid}/task").iterdir())
         except (FileNotFoundError, PermissionError, ProcessLookupError):
             continue
-        pending.extend(int(value) for value in children.split())
+        for task_dir in task_dirs:
+            try:
+                children = (task_dir / "children").read_text(encoding="utf-8")
+            except (FileNotFoundError, PermissionError, ProcessLookupError):
+                continue
+            pending.extend(int(value) for value in children.split())
     return sorted(found)
 
 

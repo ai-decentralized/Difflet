@@ -407,21 +407,43 @@ class VideoGenerationService:
             raise
 
         rejection: DiffletServingError | None = None
-        async with self._lock:
-            if item.create_task is create_task:
-                item.create_task = None
-            if time.monotonic() >= deadline:
-                item.deadline_expired = True
+        try:
+            async with self._lock:
+                if item.create_task is create_task:
+                    item.create_task = None
+                if time.monotonic() >= deadline:
+                    item.deadline_expired = True
+                    item.cancelled = True
+                    rejection = _request_timeout_error()
+                elif item.finished or item.cancelled or not self._accepting or self._closed:
+                    item.cancelled = True
+                    rejection = _service_unavailable_error()
+                else:
+                    item.phase = "queued"
+                    # An explicit caller deadline is a total deadline. The
+                    # normal Videos API leaves it unset so the queue timeout
+                    # and execution timeout remain independent.
+                    if item.deadline_monotonic is not None:
+                        self._start_deadline_watch(item)
+                    self._queue.append(item)
+                    self._queue_ready.set()
+        except asyncio.CancelledError:
+            # Creation has committed, but cancellation won before the enqueue
+            # transition acquired the service lock. Remove the unreachable row
+            # and release every admission/accounting reservation.
+            async with self._lock:
                 item.cancelled = True
-                rejection = _request_timeout_error()
-            elif item.finished or item.cancelled or not self._accepting or self._closed:
-                item.cancelled = True
-                rejection = _service_unavailable_error()
-            else:
-                item.phase = "queued"
-                self._start_deadline_watch(item)
-                self._queue.append(item)
-                self._queue_ready.set()
+                item.delete_requested = True
+                if item.create_task is create_task:
+                    item.create_task = None
+            with suppress(Exception):
+                await _run_thread_fenced(
+                    self.jobs.delete,
+                    job.id,
+                    expected_statuses="queued",
+                )
+            await self._finish_item(item)
+            raise
         if rejection is not None:
             if item.deadline_expired:
                 await self._mark_failed(item.key, _timeout_job_error())
@@ -456,7 +478,8 @@ class VideoGenerationService:
                 rejection = _service_unavailable_error()
             else:
                 item.phase = "queued"
-                self._start_deadline_watch(item)
+                if item.deadline_monotonic is not None:
+                    self._start_deadline_watch(item)
                 self._queue.append(item)
                 self._queue_ready.set()
         if rejection is not None:
@@ -466,6 +489,7 @@ class VideoGenerationService:
             return await asyncio.shield(future)
         except asyncio.CancelledError:
             future.add_done_callback(_consume_future_exception)
+            abandoned_result: VideoGenerationResult | None = None
             async with self._lock:
                 item.delete_requested = True
                 queued = item.phase == "queued" and item.task is None
@@ -478,12 +502,20 @@ class VideoGenerationService:
                             self._queue_ready.clear()
                         else:
                             self._queue_ready.set()
+                elif future.done() and not future.cancelled():
+                    with suppress(BaseException):
+                        abandoned_result = future.result()
             if queued:
                 if not future.done():
                     future.set_exception(
                         request_cancelled("Video generation was cancelled before dispatch")
                     )
                 await self._finish_item(item)
+            elif abandoned_result is not None:
+                # Completion won immediately before caller cancellation. The
+                # route never received this result, so it cannot run its normal
+                # response cleanup.
+                await self.delete_sync_result(abandoned_result)
             raise
 
     async def get_job(self, video_id: str) -> VideoJob:
@@ -539,6 +571,7 @@ class VideoGenerationService:
 
     async def delete_job(self, video_id: str) -> VideoJob:
         job = await self.get_job(video_id)
+        stale_queued_item: _VideoWorkItem | None = None
         async with self._lock:
             item = self._items.get(video_id)
             if item is not None and not item.finished:
@@ -548,16 +581,24 @@ class VideoGenerationService:
                         "video_in_progress",
                         "Video generation is already in progress",
                     )
-                item.cancelled = True
-                item.delete_requested = True
-                with suppress(ValueError):
-                    self._queue.remove(item)
-                if not self._queue:
-                    if self._accepting:
-                        self._queue_ready.clear()
-                    else:
-                        self._queue_ready.set()
-                deleted = self.jobs.delete(video_id, expected_statuses="queued")
+                try:
+                    deleted = self.jobs.delete(video_id, expected_statuses="queued")
+                except VideoJobStateConflict:
+                    # A deadline may have persisted `failed` before its watcher
+                    # has finished removing the still-queued local item. Leave
+                    # local ownership intact and use terminal deletion below.
+                    deleted = None
+                    stale_queued_item = item
+                else:
+                    item.cancelled = True
+                    item.delete_requested = True
+                    with suppress(ValueError):
+                        self._queue.remove(item)
+                    if not self._queue:
+                        if self._accepting:
+                            self._queue_ready.clear()
+                        else:
+                            self._queue_ready.set()
             else:
                 deleted = None
         if deleted is not None:
@@ -570,13 +611,18 @@ class VideoGenerationService:
             name=f"difflet-video-delete-{video_id}",
         )
         try:
-            return await asyncio.shield(mutation_task)
+            result = await asyncio.shield(mutation_task)
         except asyncio.CancelledError:
             # Job deletion cannot be rolled back by cancelling its parent task.
             # Complete the metadata/artifact transaction before propagating.
             with suppress(BaseException):
                 await _await_task_fenced(mutation_task)
+            if stale_queued_item is not None:
+                await self._finish_item(stale_queued_item)
             raise
+        if stale_queued_item is not None:
+            await self._finish_item(stale_queued_item)
+        return result
 
     async def _delete_persisted_job(self, video_id: str) -> VideoJob:
         async with self._content_lock:
@@ -592,15 +638,43 @@ class VideoGenerationService:
             deleted = await _run_thread_fenced(self.jobs.delete, video_id)
             if deleted is None:
                 raise DiffletServingError(404, "video_not_found", "Video job was not found")
-            await self._release_job_slot_count()
+            await self._release_job_slot_count(video_id=video_id)
             if deleted.artifact_size_bytes:
                 await self._release_retained_bytes(deleted.artifact_size_bytes)
             return deleted
 
     async def delete_sync_result(self, result: VideoGenerationResult) -> None:
-        deleted = await asyncio.to_thread(self.artifacts.delete, result.artifact.key)
+        deleted = await self._delete_or_schedule_orphan(result.artifact)
         if deleted:
             await self._release_retained_bytes(result.artifact.size_bytes)
+
+    async def _delete_or_schedule_orphan(self, artifact: VideoArtifact) -> bool:
+        """Bound orphan cleanup and preserve its accounting token on failure."""
+
+        for attempt in range(3):
+            try:
+                # Both True (unlinked now) and False (already absent) complete
+                # cleanup for this retained accounting token.
+                await _run_thread_fenced(self.artifacts.delete, artifact.key)
+                return True
+            except Exception:
+                if attempt == 2:
+                    logger.critical(
+                        "video.orphan_artifact_delete_deferred artifact_key=%s",
+                        artifact.key,
+                        exc_info=True,
+                    )
+                    break
+                await asyncio.sleep(0.05 * (attempt + 1))
+        try:
+            await _run_thread_fenced(self.artifacts.schedule_artifact_delete, artifact)
+        except Exception:
+            logger.critical(
+                "video.orphan_artifact_schedule_failed artifact_key=%s",
+                artifact.key,
+                exc_info=True,
+            )
+        return False
 
     async def _delete_artifact_with_retries(self, artifact_key: str) -> None:
         for attempt in range(3):
@@ -727,9 +801,19 @@ class VideoGenerationService:
                         # queued DELETE, which is their linearization point.
                         self.jobs.mark_in_progress(item.key)
                         item.phase = "preparing"
+                        if item.deadline_monotonic is None:
+                            item.deadline_monotonic = (
+                                time.monotonic() + self.request_timeout_s
+                            )
+                            self._start_deadline_watch(item)
                         claimed = True
                     else:
                         item.phase = "preparing"
+                        if item.deadline_monotonic is None:
+                            item.deadline_monotonic = (
+                                time.monotonic() + self.request_timeout_s
+                            )
+                            self._start_deadline_watch(item)
                         claimed = True
             if not claimed:
                 if not item.finished and not item.cancelled and queue_expired:
@@ -809,7 +893,7 @@ class VideoGenerationService:
                     raise asyncio.CancelledError
                 if item.delete_requested and not item.job_backed:
                     raise asyncio.CancelledError
-                item.phase = "publishing"
+                item.phase = "validating"
             if not isinstance(output, FileBackedGenerateOutput):
                 raise TypeError("video engine must return FileBackedGenerateOutput")
             if output.mime_type != "video/mp4" or output.output_format != "mp4":
@@ -826,39 +910,12 @@ class VideoGenerationService:
                 item.request,
             )
             _compare_worker_media(output, media)
-            async with self._content_lock:
-                commit_fn = getattr(self.artifacts, "commit_local", None) if not item.job_backed else None
-                if commit_fn is None:
-                    commit_fn = self.artifacts.commit
-                artifact = await asyncio.to_thread(
-                    commit_fn,
-                    target,
-                    reported_path=output.path,
-                    expected_size_bytes=actual_size,
-                )
-            item.artifact = artifact
-            await self._commit_storage_reservation(item, artifact.size_bytes)
-            inference_time = time.perf_counter() - started
-            media_dict = _media_metadata_dict(media)
-            media_dict.update(
-                {
-                    "inference_time_s": inference_time,
-                    "file_name": artifact.key,
-                }
-            )
-            artifact_url = getattr(self.artifacts, "url", lambda _key: None)(artifact.key)
-            if artifact_url:
-                media_dict["url"] = artifact_url
-            result = VideoGenerationResult(
-                request_id=item.request.request_id,
-                artifact=artifact,
-                media_metadata=media_dict,
-                inference_time_s=inference_time,
-            )
-            # Claim terminal publication under a short lock. The repository CAS
-            # stays outside this lock so DELETE can enter its bounded wait. Once
-            # claimed, completion has won and DELETE removes the terminal job and
-            # artifact afterward.
+
+            # Media validation is the final reversible boundary. Once it has
+            # succeeded, claim completion before any filesystem or S3 call so a
+            # deadline cannot turn a valid local commit into a failed job and
+            # race its cleanup. Local commit failures still enter the ordinary
+            # exception path and produce a failed result.
             async with self._lock:
                 if item.cancelled:
                     if item.deadline_expired:
@@ -871,7 +928,66 @@ class VideoGenerationService:
                     item.deadline_expired = True
                     raise _request_timeout_error()
                 item.publication_claimed = True
+                item.phase = "publishing_local"
+
+            async with self._content_lock:
+                commit_fn = getattr(self.artifacts, "commit_local", None)
+                if not callable(commit_fn):
+                    commit_fn = self.artifacts.commit
+                artifact = await asyncio.to_thread(
+                    commit_fn,
+                    target,
+                    reported_path=output.path,
+                    expected_size_bytes=actual_size,
+                )
+            item.artifact = artifact
+            await self._commit_storage_reservation(item, artifact.size_bytes)
+
+            artifact_url = None
+            publish_remote = getattr(self.artifacts, "publish_remote", None)
+            if item.job_backed and callable(publish_remote):
+                async with self._lock:
+                    item.phase = "publishing_remote"
+                try:
+                    artifact_url = await asyncio.to_thread(publish_remote, artifact)
+                except Exception:
+                    # Remote publication is an optional direct-download mirror;
+                    # local completion and /content remain authoritative.
+                    logger.exception(
+                        "video.s3_publish_unhandled artifact_key=%s fallback=local",
+                        artifact.key,
+                    )
+
+            inference_time = time.perf_counter() - started
+            media_dict = _media_metadata_dict(media)
+            media_dict.update(
+                {
+                    "inference_time_s": inference_time,
+                    "file_name": artifact.key,
+                }
+            )
+            if artifact_url:
+                media_dict["url"] = artifact_url
+            result = VideoGenerationResult(
+                request_id=item.request.request_id,
+                artifact=artifact,
+                media_metadata=media_dict,
+                inference_time_s=inference_time,
+            )
+            # The claim was established before local publication. The repository
+            # CAS stays outside this lock so DELETE can enter its bounded wait.
+            abandon_sync = False
+            async with self._lock:
                 item.phase = "terminal"
+                if not item.job_backed:
+                    if item.delete_requested:
+                        abandon_sync = True
+                    elif item.future is not None and not item.future.done():
+                        # Resolve under the same lock used by cancellation so one
+                        # side owns cleanup for every ordering of the race.
+                        item.future.set_result(result)
+            if abandon_sync:
+                raise asyncio.CancelledError
             if item.job_backed:
                 await asyncio.to_thread(
                     self.jobs.mark_completed,
@@ -881,8 +997,6 @@ class VideoGenerationService:
                     media_metadata=media_dict,
                     expires_at=int(time.time()) + self.retention_seconds,
                 )
-            elif item.future is not None and not item.future.done():
-                item.future.set_result(result)
             keep_artifact = True
         except asyncio.CancelledError:
             if not worker_output_fenced:
@@ -917,10 +1031,9 @@ class VideoGenerationService:
         finally:
             if not keep_artifact and worker_output_fenced:
                 if item.artifact is not None:
-                    with suppress(Exception):
-                        deleted = await asyncio.to_thread(self.artifacts.delete, item.artifact.key)
-                        if deleted:
-                            await self._release_item_storage(item)
+                    deleted = await self._delete_or_schedule_orphan(item.artifact)
+                    if deleted:
+                        await self._release_item_storage(item)
                 if item.target is not None:
                     with suppress(Exception):
                         await asyncio.to_thread(self.artifacts.delete_staging, item.target)
@@ -1190,6 +1303,32 @@ class VideoGenerationService:
 
     async def sweep_expired(self, *, now: int | None = None) -> int:
         async with self._content_lock:
+            retry_remote_cleanup = getattr(
+                self.artifacts,
+                "retry_pending_remote_deletes",
+                None,
+            )
+            if callable(retry_remote_cleanup):
+                remotely_removed = await _run_thread_fenced(retry_remote_cleanup)
+                if remotely_removed:
+                    logger.info(
+                        "video.s3_pending_delete_sweep removed_objects=%d",
+                        remotely_removed,
+                    )
+            retry_orphan_cleanup = getattr(
+                self.artifacts,
+                "retry_pending_artifact_deletes",
+                None,
+            )
+            if callable(retry_orphan_cleanup):
+                orphan_artifacts = await _run_thread_fenced(retry_orphan_cleanup)
+                for artifact in orphan_artifacts:
+                    await self._release_retained_bytes(artifact.size_bytes)
+                if orphan_artifacts:
+                    logger.info(
+                        "video.orphan_artifact_sweep removed_artifacts=%d",
+                        len(orphan_artifacts),
+                    )
             expired = await _run_thread_fenced(self.jobs.list_expired, now=now)
             removed = 0
             for job in expired:
@@ -1206,16 +1345,27 @@ class VideoGenerationService:
                     continue
                 if deleted is not None:
                     removed += 1
-                    await self._release_job_slot_count()
+                    # A terminal job can expire while its worker/recovery fence
+                    # is still active. Clear that item's ownership token while
+                    # releasing the repository slot so `_finish_item` cannot
+                    # decrement the same slot a second time.
+                    await self._release_job_slot_count(video_id=deleted.id)
                     if deleted.artifact_size_bytes:
                         await self._release_retained_bytes(deleted.artifact_size_bytes)
             if removed:
                 logger.info("video.retention_sweep removed_jobs=%d", removed)
             return removed
 
-    async def _release_job_slot_count(self) -> None:
+    async def _release_job_slot_count(self, *, video_id: str | None = None) -> None:
         async with self._lock:
-            self._job_slots_reserved = max(self._job_slots_reserved - 1, 0)
+            should_release = True
+            if video_id is not None:
+                item = self._items.get(video_id)
+                if item is not None:
+                    should_release = item.job_slot_owned
+                    item.job_slot_owned = False
+            if should_release:
+                self._job_slots_reserved = max(self._job_slots_reserved - 1, 0)
 
     @staticmethod
     def _require_video_request(request: DiffletGenerateRequest) -> None:

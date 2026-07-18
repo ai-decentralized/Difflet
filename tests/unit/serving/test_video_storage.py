@@ -10,10 +10,58 @@ import difflet.serving.video_storage as video_storage
 from difflet.serving.video_storage import (
     InvalidVideoArtifact,
     LocalVideoArtifactStore,
+    S3VideoArtifactStore,
     VideoArtifactNotFound,
     VideoArtifactPathViolation,
     VideoArtifactTooLarge,
 )
+
+
+class _FakeS3Client:
+    def __init__(
+        self,
+        *,
+        upload_error: Exception | None = None,
+        presign_error: Exception | None = None,
+        delete_errors: list[Exception] | None = None,
+    ) -> None:
+        self.upload_error = upload_error
+        self.presign_error = presign_error
+        self.delete_errors = list(delete_errors or [])
+        self.uploads: list[tuple[str, str, str, dict[str, str]]] = []
+        self.deletes: list[tuple[str, str]] = []
+
+    def upload_file(self, filename, bucket, key, *, ExtraArgs):
+        self.uploads.append((filename, bucket, key, dict(ExtraArgs)))
+        if self.upload_error is not None:
+            raise self.upload_error
+
+    def generate_presigned_url(self, operation, *, Params, ExpiresIn):
+        if self.presign_error is not None:
+            raise self.presign_error
+        assert operation == "get_object"
+        return f"https://example.test/{Params['Bucket']}/{Params['Key']}?ttl={ExpiresIn}"
+
+    def delete_object(self, *, Bucket, Key):
+        self.deletes.append((Bucket, Key))
+        if self.delete_errors:
+            raise self.delete_errors.pop(0)
+
+
+class _FakeS3Store:
+    bucket = "video-bucket"
+    prefix = "difflet"
+
+    def __init__(self, client: _FakeS3Client) -> None:
+        self.client = client
+
+    def _client(self):
+        return self.client
+
+
+class _FailingClientS3Store(_FakeS3Store):
+    def _client(self):
+        raise OSError("client unavailable")
 
 
 def _write(target, payload: bytes = b"fake mp4 bytes") -> None:
@@ -66,6 +114,177 @@ def test_validate_commit_open_and_delete_have_expected_lifecycle(tmp_path):
     assert b"".join(lease.iter_chunks(chunk_size=3)) == payload
     assert lease.closed is True
     assert store.delete(artifact.key) is False
+
+
+def test_pending_local_cleanup_releases_token_after_unlink_fsync_failure(
+    tmp_path,
+    monkeypatch,
+):
+    store = LocalVideoArtifactStore(tmp_path / "videos")
+    target = store.allocate_staging("video_gen_fsync_failure")
+    _write(target)
+    artifact = store.commit(target)
+    real_fsync_directory = video_storage._fsync_directory
+
+    def fail_artifact_directory_fsync(path):
+        if path == store.artifact_root:
+            raise OSError("simulated directory fsync failure")
+        return real_fsync_directory(path)
+
+    monkeypatch.setattr(video_storage, "_fsync_directory", fail_artifact_directory_fsync)
+    with pytest.raises(OSError, match="directory fsync failure"):
+        store.delete(artifact.key)
+    assert artifact.path.exists() is False
+
+    store.schedule_artifact_delete(artifact)
+    monkeypatch.setattr(video_storage, "_fsync_directory", real_fsync_directory)
+    assert store.retry_pending_artifact_deletes() == (artifact,)
+    assert store.retry_pending_artifact_deletes() == ()
+
+
+def test_s3_store_streams_upload_and_deletes_remote_and_local(tmp_path):
+    client = _FakeS3Client()
+    store = S3VideoArtifactStore(
+        tmp_path / "videos",
+        s3=_FakeS3Store(client),  # type: ignore[arg-type]
+        retention_seconds=90_000,
+    )
+    target = store.allocate_staging("video_gen_1")
+    payload = b"streamed mp4"
+    _write(target, payload)
+
+    artifact = store.commit(target, expected_size_bytes=len(payload))
+
+    assert artifact.path.read_bytes() == payload
+    assert client.uploads == [
+        (
+            str(artifact.path),
+            "video-bucket",
+            "difflet/video_gen_1.mp4",
+            {"ContentType": "video/mp4"},
+        )
+    ]
+    assert store.url(artifact.key) == (
+        "https://example.test/video-bucket/difflet/video_gen_1.mp4?ttl=90000"
+    )
+
+    assert store.delete(artifact.key) is True
+    assert client.deletes == [("video-bucket", "difflet/video_gen_1.mp4")]
+    assert artifact.path.exists() is False
+
+
+def test_s3_upload_failure_keeps_local_artifact_and_content_available(tmp_path):
+    client = _FakeS3Client(upload_error=OSError("upload unavailable"))
+    store = S3VideoArtifactStore(
+        tmp_path / "videos",
+        s3=_FakeS3Store(client),  # type: ignore[arg-type]
+    )
+    target = store.allocate_staging("video_gen_fallback")
+    payload = b"local fallback"
+    _write(target, payload)
+
+    artifact = store.commit(target, expected_size_bytes=len(payload))
+
+    assert store.url(artifact.key) is None
+    lease = store.open(artifact.key)
+    assert b"".join(lease.iter_chunks()) == payload
+    # Failed publication performs a best-effort remote rollback. Because that
+    # rollback succeeded, normal local DELETE does not call S3 again.
+    assert client.deletes == [("video-bucket", "difflet/video_gen_fallback.mp4")]
+    assert store.delete(artifact.key) is True
+    assert client.deletes == [("video-bucket", "difflet/video_gen_fallback.mp4")]
+
+
+def test_s3_client_failure_keeps_local_artifact_available(tmp_path):
+    client = _FakeS3Client()
+    store = S3VideoArtifactStore(
+        tmp_path / "videos",
+        s3=_FailingClientS3Store(client),  # type: ignore[arg-type]
+    )
+    target = store.allocate_staging("video_gen_client_fallback")
+    _write(target, b"local only")
+
+    artifact = store.commit(target)
+
+    assert store.url(artifact.key) is None
+    assert artifact.path.read_bytes() == b"local only"
+    assert client.uploads == []
+    assert client.deletes == []
+    assert store.delete(artifact.key) is True
+    assert artifact.path.exists() is False
+
+
+def test_s3_presign_and_rollback_failure_has_independent_cleanup_retry(tmp_path):
+    client = _FakeS3Client(
+        presign_error=OSError("signing unavailable"),
+        delete_errors=[
+            OSError("rollback unavailable"),
+            OSError("first sweep unavailable"),
+        ],
+    )
+    store = S3VideoArtifactStore(
+        tmp_path / "videos",
+        s3=_FakeS3Store(client),  # type: ignore[arg-type]
+    )
+    target = store.allocate_staging("video_gen_retry")
+    _write(target)
+
+    artifact = store.commit(target)
+
+    assert store.url(artifact.key) is None
+    assert artifact.path.exists()
+    assert client.deletes == [("video-bucket", "difflet/video_gen_retry.mp4")]
+
+    assert store.retry_pending_remote_deletes() == 0
+    assert store.retry_pending_remote_deletes() == 1
+    assert store.retry_pending_artifact_deletes() == ()
+    assert client.deletes == [
+        ("video-bucket", "difflet/video_gen_retry.mp4"),
+        ("video-bucket", "difflet/video_gen_retry.mp4"),
+        ("video-bucket", "difflet/video_gen_retry.mp4"),
+    ]
+
+    # Remote ownership was cleared independently, so local deletion no longer
+    # needs a job row or another S3 request.
+    assert store.delete(artifact.key) is True
+    assert client.deletes == [
+        ("video-bucket", "difflet/video_gen_retry.mp4"),
+        ("video-bucket", "difflet/video_gen_retry.mp4"),
+        ("video-bucket", "difflet/video_gen_retry.mp4"),
+    ]
+    assert artifact.path.exists() is False
+
+
+def test_s3_delete_exhaustion_remains_job_owned_until_explicitly_orphaned(tmp_path):
+    client = _FakeS3Client(
+        delete_errors=[OSError(f"delete attempt {attempt}") for attempt in range(3)]
+    )
+    store = S3VideoArtifactStore(
+        tmp_path / "videos",
+        s3=_FakeS3Store(client),  # type: ignore[arg-type]
+    )
+    target = store.allocate_staging("video_gen_delete_retry")
+    _write(target)
+    artifact = store.commit(target)
+
+    for _attempt in range(3):
+        with pytest.raises(OSError, match="delete attempt"):
+            store.delete(artifact.key)
+    assert artifact.path.exists()
+
+    # A failed job-backed DELETE must not let the background orphan sweep remove
+    # content while its completed job row is still retained.
+    assert store.retry_pending_remote_deletes() == 0
+    assert store.retry_pending_artifact_deletes() == ()
+    assert artifact.path.exists()
+
+    # Only the service cleanup path for an artifact with no owning job may
+    # transfer full-delete ownership to the store.
+    store.schedule_artifact_delete(artifact)
+    assert store.retry_pending_remote_deletes() == 0
+    assert store.retry_pending_artifact_deletes() == (artifact,)
+    assert artifact.path.exists() is False
+    assert len(client.deletes) == 4
 
 
 def test_open_missing_artifact_raises_typed_error(tmp_path):

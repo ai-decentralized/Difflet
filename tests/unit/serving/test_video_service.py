@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import threading
+import time
 from collections import defaultdict
 from fractions import Fraction
 from pathlib import Path
@@ -21,7 +22,7 @@ from difflet.serving.video_jobs import (
     VideoJobRepositoryError,
 )
 from difflet.serving.video_service import VideoGenerationService
-from difflet.serving.video_storage import LocalVideoArtifactStore
+from difflet.serving.video_storage import LocalVideoArtifactStore, S3VideoArtifactStore
 
 
 def _request(request_id: str, *, prompt: str = "a tiny video") -> DiffletGenerateRequest:
@@ -173,6 +174,18 @@ class _BlockingValidationStore(LocalVideoArtifactStore):
         return super().validate_staging(*args, **kwargs)
 
 
+class _BlockingCommitStore(LocalVideoArtifactStore):
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.commit_entered = threading.Event()
+        self.release_commit = threading.Event()
+
+    def commit(self, *args, **kwargs):
+        self.commit_entered.set()
+        assert self.release_commit.wait(timeout=3.0)
+        return super().commit(*args, **kwargs)
+
+
 class _BlockingFailureRepository(InMemoryVideoJobRepository):
     def __init__(self) -> None:
         super().__init__()
@@ -195,6 +208,26 @@ class _BlockingFailureRepository(InMemoryVideoJobRepository):
         )
 
 
+class _BlockAfterFailureRepository(InMemoryVideoJobRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed_persisted = threading.Event()
+        self.release_failure_return = threading.Event()
+
+    def mark_failed(
+        self, video_id, *, error, expected_statuses=("queued", "in_progress"), now=None
+    ):
+        failed = super().mark_failed(
+            video_id,
+            error=error,
+            expected_statuses=expected_statuses,
+            now=now,
+        )
+        self.failed_persisted.set()
+        assert self.release_failure_return.wait(timeout=3.0)
+        return failed
+
+
 class _BlockingCreateReturnRepository(InMemoryVideoJobRepository):
     def __init__(self) -> None:
         super().__init__()
@@ -206,6 +239,11 @@ class _BlockingCreateReturnRepository(InMemoryVideoJobRepository):
         self.committed.set()
         assert self.release_return.wait(timeout=3.0)
         return job
+
+
+class _FailCompletionRepository(InMemoryVideoJobRepository):
+    def mark_completed(self, *args, **kwargs):
+        raise OSError("completion persistence unavailable")
 
 
 class _FailOnceDeleteStore(LocalVideoArtifactStore):
@@ -231,6 +269,66 @@ class _ControlledDeleteStore(LocalVideoArtifactStore):
         if self.fail_deletes:
             raise OSError("simulated persistent unlink failure")
         return super().delete(artifact_key)
+
+
+class _PendingCleanupStore(LocalVideoArtifactStore):
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.retry_calls = 0
+
+    def retry_pending_remote_deletes(self) -> int:
+        self.retry_calls += 1
+        return 1
+
+
+class _BlockingS3Client:
+    def __init__(self) -> None:
+        self.upload_started = threading.Event()
+        self.release_upload = threading.Event()
+        self.deletes: list[tuple[str, str]] = []
+
+    def upload_file(self, filename, bucket, key, *, ExtraArgs):
+        assert Path(filename).is_file()
+        assert ExtraArgs == {"ContentType": "video/mp4"}
+        self.upload_started.set()
+        assert self.release_upload.wait(timeout=3.0)
+
+    def generate_presigned_url(self, operation, *, Params, ExpiresIn):
+        assert operation == "get_object"
+        return f"https://example.test/{Params['Bucket']}/{Params['Key']}?ttl={ExpiresIn}"
+
+    def delete_object(self, *, Bucket, Key):
+        self.deletes.append((Bucket, Key))
+
+
+class _BlockingS3Store:
+    bucket = "video-bucket"
+    prefix = "difflet"
+
+    def __init__(self, client: _BlockingS3Client) -> None:
+        self.client = client
+
+    def _client(self):
+        return self.client
+
+
+class _DeleteRetryS3Client:
+    def __init__(self) -> None:
+        self.delete_errors: list[Exception] = []
+        self.deletes: list[tuple[str, str]] = []
+
+    def upload_file(self, filename, bucket, key, *, ExtraArgs):
+        assert Path(filename).is_file()
+        assert ExtraArgs == {"ContentType": "video/mp4"}
+
+    def generate_presigned_url(self, operation, *, Params, ExpiresIn):
+        assert operation == "get_object"
+        return f"https://example.test/{Params['Bucket']}/{Params['Key']}?ttl={ExpiresIn}"
+
+    def delete_object(self, *, Bucket, Key):
+        self.deletes.append((Bucket, Key))
+        if self.delete_errors:
+            raise self.delete_errors.pop(0)
 
 
 def _service(tmp_path, engine: _FakeVideoEngine, *, max_queued_requests: int = 2):
@@ -300,6 +398,150 @@ def test_sync_and_async_share_one_capacity_domain(tmp_path, monkeypatch):
             await service.delete_sync_result(sync_result)
             assert artifacts.get(sync_result.artifact.key) is None
         finally:
+            await service.shutdown()
+
+    asyncio.run(_run())
+
+
+def test_local_sync_cleanup_failure_is_deferred_and_releases_accounting(
+    tmp_path,
+    monkeypatch,
+):
+    _patch_media_validation_without_pyav(monkeypatch)
+
+    async def _run() -> None:
+        request_id = "video_sync_local_orphan"
+        engine = _FakeVideoEngine()
+        jobs = InMemoryVideoJobRepository()
+        artifacts = _ControlledDeleteStore(tmp_path / "media")
+        service = VideoGenerationService(
+            engine=engine,
+            jobs=jobs,
+            artifacts=artifacts,
+            max_queued_requests=1,
+            queue_timeout_s=2.0,
+            request_timeout_s=2.0,
+            recovery_timeout_s=1.0,
+        )
+        await service.start()
+        try:
+            result = await service.generate_sync(_request(request_id))
+            assert service._retained_bytes == result.artifact.size_bytes
+
+            await service.delete_sync_result(result)
+            assert artifacts.delete_calls == 3
+            assert artifacts.get(result.artifact.key) is not None
+            assert service._retained_bytes == result.artifact.size_bytes
+
+            artifacts.fail_deletes = False
+            assert await service.sweep_expired(now=0) == 0
+            assert artifacts.get(result.artifact.key) is None
+            assert service._retained_bytes == 0
+            assert artifacts.retry_pending_artifact_deletes() == ()
+        finally:
+            artifacts.fail_deletes = False
+            await service.shutdown()
+
+    asyncio.run(_run())
+
+
+def test_queue_timeout_uses_async_job_and_sync_http_error_channels(
+    tmp_path,
+    monkeypatch,
+):
+    _patch_media_validation_without_pyav(monkeypatch)
+
+    async def _run() -> None:
+        engine = _FakeVideoEngine(blocked_ids={"video_blocker"})
+        jobs = InMemoryVideoJobRepository()
+        artifacts = LocalVideoArtifactStore(tmp_path / "media")
+        service = VideoGenerationService(
+            engine=engine,
+            jobs=jobs,
+            artifacts=artifacts,
+            max_queued_requests=2,
+            queue_timeout_s=0.02,
+            request_timeout_s=2.0,
+            recovery_timeout_s=1.0,
+        )
+        await service.start()
+        try:
+            await service.create_async(_request("video_blocker"))
+            await engine.started["video_blocker"].wait()
+
+            queued = await service.create_async(_request("video_async_queue_timeout"))
+            assert queued.status == "queued"
+            sync_task = asyncio.create_task(
+                service.generate_sync(_request("video_sync_queue_timeout"))
+            )
+            await _wait_for_reserved(service, "video_sync_queue_timeout")
+
+            await asyncio.sleep(0.05)
+            engine.release.set()
+
+            failed = await _wait_for_status(
+                service,
+                "video_async_queue_timeout",
+                "failed",
+            )
+            assert failed.error is not None
+            assert failed.error.code == "queue_timeout"
+            assert failed.error.error_type == "invalid_request_error"
+
+            with pytest.raises(DiffletServingError) as sync_timeout:
+                await sync_task
+            assert (sync_timeout.value.status_code, sync_timeout.value.code) == (
+                429,
+                "queue_timeout",
+            )
+        finally:
+            engine.release.set()
+            await service.shutdown()
+
+    asyncio.run(_run())
+
+
+def test_queued_video_uses_queue_timeout_before_execution_timeout(
+    tmp_path,
+    monkeypatch,
+):
+    _patch_media_validation_without_pyav(monkeypatch)
+
+    async def _run() -> None:
+        engine = _FakeVideoEngine(blocked_ids={"video_queue_blocker"})
+        jobs = InMemoryVideoJobRepository()
+        artifacts = LocalVideoArtifactStore(tmp_path / "media")
+        service = VideoGenerationService(
+            engine=engine,
+            jobs=jobs,
+            artifacts=artifacts,
+            max_queued_requests=1,
+            queue_timeout_s=0.5,
+            request_timeout_s=0.02,
+            recovery_timeout_s=1.0,
+        )
+        await service.start()
+        try:
+            await service.create_async(
+                _request("video_queue_blocker"),
+                deadline=time.monotonic() + 1.0,
+            )
+            await engine.started["video_queue_blocker"].wait()
+
+            queued = await service.create_async(_request("video_queue_survivor"))
+            assert queued.status == "queued"
+            await asyncio.sleep(0.05)
+            assert jobs.require("video_queue_survivor").status == "queued"
+
+            engine.release.set()
+            completed = await _wait_for_status(
+                service,
+                "video_queue_survivor",
+                "completed",
+            )
+            assert completed.error is None
+        finally:
+            engine.release.set()
             await service.shutdown()
 
     asyncio.run(_run())
@@ -745,6 +987,53 @@ def test_sync_deadline_expires_while_publication_validation_is_blocked(
     asyncio.run(_run())
 
 
+def test_sync_disconnect_during_local_commit_removes_committed_artifact(
+    tmp_path,
+    monkeypatch,
+):
+    _patch_media_validation_without_pyav(monkeypatch)
+
+    async def _run() -> None:
+        request_id = "video_sync_disconnect_commit"
+        engine = _FakeVideoEngine()
+        jobs = InMemoryVideoJobRepository()
+        artifacts = _BlockingCommitStore(tmp_path / "media")
+        service = VideoGenerationService(
+            engine=engine,
+            jobs=jobs,
+            artifacts=artifacts,
+            max_queued_requests=1,
+            queue_timeout_s=2.0,
+            request_timeout_s=2.0,
+            recovery_timeout_s=1.0,
+        )
+        await service.start()
+        try:
+            generation = asyncio.create_task(service.generate_sync(_request(request_id)))
+            assert await asyncio.to_thread(artifacts.commit_entered.wait, 3.0)
+            item = service._items[request_id]
+            assert item.publication_claimed is True
+            assert item.phase == "publishing_local"
+
+            generation.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await generation
+            assert item.delete_requested is True
+
+            artifacts.release_commit.set()
+            await asyncio.wait_for(item.done.wait(), timeout=3.0)
+
+            assert artifacts.get(f"{request_id}.mp4") is None
+            assert tuple(artifacts.staging_root.iterdir()) == ()
+            assert tuple(artifacts.artifact_root.iterdir()) == ()
+            assert service._retained_bytes == 0
+        finally:
+            artifacts.release_commit.set()
+            await service.shutdown()
+
+    asyncio.run(_run())
+
+
 def test_async_deadline_fails_job_while_publication_validation_is_blocked(
     tmp_path,
     monkeypatch,
@@ -802,6 +1091,121 @@ def test_async_deadline_fails_job_while_publication_validation_is_blocked(
             assert tuple(artifacts.artifact_root.iterdir()) == ()
         finally:
             artifacts.release_validation.set()
+            await service.shutdown()
+
+    asyncio.run(_run())
+
+
+def test_async_local_publication_claim_survives_s3_past_request_deadline(
+    tmp_path,
+    monkeypatch,
+):
+    _patch_media_validation_without_pyav(monkeypatch)
+
+    async def _run() -> None:
+        engine = _FakeVideoEngine()
+        jobs = InMemoryVideoJobRepository()
+        client = _BlockingS3Client()
+        artifacts = S3VideoArtifactStore(
+            tmp_path / "media",
+            s3=_BlockingS3Store(client),  # type: ignore[arg-type]
+            retention_seconds=90_000,
+        )
+        service = VideoGenerationService(
+            engine=engine,
+            jobs=jobs,
+            artifacts=artifacts,
+            max_queued_requests=1,
+            queue_timeout_s=2.0,
+            request_timeout_s=0.2,
+            recovery_timeout_s=1.0,
+        )
+        await service.start()
+        try:
+            created = await service.create_async(_request("video_s3_past_deadline"))
+            assert created.status == "queued"
+            assert await asyncio.to_thread(client.upload_started.wait, 3.0)
+
+            item = service._items["video_s3_past_deadline"]
+            assert item.publication_claimed is True
+            assert item.phase == "publishing_remote"
+            assert item.artifact is not None
+            assert artifacts.require(item.artifact.key) == item.artifact
+
+            # The original total request deadline expires while S3 is blocked.
+            # A valid local MP4 has already won completion and must not be
+            # converted to a failed job or removed.
+            await asyncio.sleep(0.25)
+            in_progress = jobs.require("video_s3_past_deadline")
+            assert in_progress.status == "in_progress"
+            assert item.deadline_expired is False
+            assert artifacts.get("video_s3_past_deadline.mp4") is not None
+
+            client.release_upload.set()
+            completed = await _wait_for_status(
+                service,
+                "video_s3_past_deadline",
+                "completed",
+            )
+            assert completed.error is None
+            assert completed.media_metadata is not None
+            assert completed.media_metadata["url"].startswith("https://example.test/")
+        finally:
+            client.release_upload.set()
+            await service.shutdown()
+
+    asyncio.run(_run())
+
+
+def test_failed_completion_persistence_transfers_orphan_cleanup_to_store(
+    tmp_path,
+    monkeypatch,
+):
+    _patch_media_validation_without_pyav(monkeypatch)
+
+    async def _run() -> None:
+        request_id = "video_completion_orphan"
+        engine = _FakeVideoEngine()
+        jobs = _FailCompletionRepository()
+        client = _DeleteRetryS3Client()
+        client.delete_errors = [
+            OSError(f"initial orphan cleanup attempt {attempt} unavailable") for attempt in range(3)
+        ]
+        artifacts = S3VideoArtifactStore(
+            tmp_path / "media",
+            s3=_BlockingS3Store(client),  # type: ignore[arg-type]
+        )
+        service = VideoGenerationService(
+            engine=engine,
+            jobs=jobs,
+            artifacts=artifacts,
+            max_queued_requests=1,
+            queue_timeout_s=2.0,
+            request_timeout_s=2.0,
+            recovery_timeout_s=1.0,
+        )
+        await service.start()
+        try:
+            await service.create_async(_request(request_id))
+            item = service._items[request_id]
+            await asyncio.wait_for(item.done.wait(), timeout=3.0)
+
+            failed = jobs.require(request_id)
+            assert failed.status == "failed"
+            assert failed.artifact_key is None
+            assert artifacts.get(f"{request_id}.mp4") is not None
+            assert service._retained_bytes > 0
+            assert len(client.deletes) == 3
+
+            # The failed row cannot identify the committed artifact. Store-owned
+            # orphan cleanup retries remote removal, then local removal, and
+            # reports the released bytes back to the service.
+            assert await service.sweep_expired(now=0) == 0
+            assert artifacts.get(f"{request_id}.mp4") is None
+            assert service._retained_bytes == 0
+            assert len(client.deletes) == 4
+            assert jobs.require(request_id).status == "failed"
+        finally:
             await service.shutdown()
 
     asyncio.run(_run())
@@ -1056,6 +1460,117 @@ def test_delete_failure_keeps_job_and_artifact_retryable(tmp_path, monkeypatch):
     asyncio.run(_run())
 
 
+def test_delete_stale_queued_item_after_deadline_persisted_failed_job(
+    tmp_path,
+    monkeypatch,
+):
+    _patch_media_validation_without_pyav(monkeypatch)
+
+    async def _run() -> None:
+        blocker_id = "video_delete_deadline_blocker"
+        expired_id = "video_delete_deadline_expired"
+        engine = _FakeVideoEngine(blocked_ids={blocker_id})
+        jobs = _BlockAfterFailureRepository()
+        artifacts = LocalVideoArtifactStore(tmp_path / "media")
+        service = VideoGenerationService(
+            engine=engine,
+            jobs=jobs,
+            artifacts=artifacts,
+            max_queued_requests=1,
+            queue_timeout_s=2.0,
+            request_timeout_s=2.0,
+            recovery_timeout_s=1.0,
+        )
+        await service.start()
+        try:
+            await service.create_async(_request(blocker_id))
+            await engine.started[blocker_id].wait()
+            await service.create_async(
+                _request(expired_id),
+                deadline=asyncio.get_running_loop().time() + 0.05,
+            )
+            assert await asyncio.to_thread(jobs.failed_persisted.wait, 3.0)
+
+            item = service._items[expired_id]
+            assert item.phase == "queued"
+            assert jobs.require(expired_id).status == "failed"
+
+            deletion = asyncio.create_task(service.delete_job(expired_id))
+            await asyncio.sleep(0)
+            jobs.release_failure_return.set()
+            deleted = await asyncio.wait_for(deletion, timeout=3.0)
+
+            assert deleted.status == "failed"
+            assert jobs.get(expired_id) is None
+            assert expired_id not in service._items
+            assert service._job_slots_reserved == 1
+        finally:
+            jobs.release_failure_return.set()
+            engine.release.set()
+            await service.shutdown()
+
+    asyncio.run(_run())
+
+
+def test_failed_s3_delete_background_sweep_preserves_job_and_content(
+    tmp_path,
+    monkeypatch,
+):
+    _patch_media_validation_without_pyav(monkeypatch)
+
+    async def _run() -> None:
+        request_id = "video_s3_delete_failure"
+        engine = _FakeVideoEngine()
+        jobs = InMemoryVideoJobRepository()
+        client = _DeleteRetryS3Client()
+        artifacts = S3VideoArtifactStore(
+            tmp_path / "media",
+            s3=_BlockingS3Store(client),  # type: ignore[arg-type]
+        )
+        service = VideoGenerationService(
+            engine=engine,
+            jobs=jobs,
+            artifacts=artifacts,
+            max_queued_requests=1,
+            queue_timeout_s=2.0,
+            request_timeout_s=2.0,
+            recovery_timeout_s=1.0,
+        )
+        await service.start()
+        try:
+            await service.create_async(_request(request_id))
+            completed = await _wait_for_status(service, request_id, "completed")
+            assert completed.artifact_key is not None
+            assert completed.media_metadata is not None
+            original_url = completed.media_metadata["url"]
+
+            client.delete_errors = [OSError(f"remote delete {attempt}") for attempt in range(3)]
+            with pytest.raises(OSError, match="remote delete"):
+                await service.delete_job(request_id)
+
+            assert len(client.deletes) == 3
+            assert jobs.require(request_id) == completed
+            assert artifacts.get(completed.artifact_key) is not None
+
+            # Store-level orphan cleanup must not take ownership from the live
+            # job transaction after an HTTP DELETE failure.
+            assert await service.sweep_expired(now=0) == 0
+            assert len(client.deletes) == 3
+            assert jobs.require(request_id).media_metadata["url"] == original_url
+            _, lease = await service.open_content(request_id)
+            lease.close()
+
+            deleted = await service.delete_job(request_id)
+            assert deleted == completed
+            assert jobs.get(request_id) is None
+            assert artifacts.get(completed.artifact_key) is None
+            assert len(client.deletes) == 4
+        finally:
+            await service.shutdown()
+
+    asyncio.run(_run())
+
+
 def test_shutdown_fences_inflight_create_and_never_returns_a_stale_queued_job(tmp_path):
     async def _run() -> None:
         request_id = "video_create_shutdown_race"
@@ -1197,6 +1712,53 @@ def test_cancelled_async_create_fences_store_and_removes_unenqueued_job(tmp_path
     asyncio.run(_run())
 
 
+def test_cancel_after_create_commit_before_enqueue_releases_all_capacity(tmp_path):
+    async def _run() -> None:
+        request_id = "video_cancelled_after_create"
+        engine = _FakeVideoEngine()
+        jobs = _BlockingCreateReturnRepository()
+        artifacts = LocalVideoArtifactStore(tmp_path / "media")
+        service = VideoGenerationService(
+            engine=engine,
+            jobs=jobs,
+            artifacts=artifacts,
+            max_queued_requests=1,
+            queue_timeout_s=2.0,
+            request_timeout_s=2.0,
+            recovery_timeout_s=1.0,
+        )
+        await service.start()
+        lock_held = False
+        try:
+            create = asyncio.create_task(service.create_async(_request(request_id)))
+            assert await asyncio.to_thread(jobs.committed.wait, 3.0)
+
+            await service._lock.acquire()
+            lock_held = True
+            jobs.release_return.set()
+            await asyncio.sleep(0.01)
+            create.cancel()
+            service._lock.release()
+            lock_held = False
+
+            with pytest.raises(asyncio.CancelledError):
+                await create
+
+            assert jobs.count() == 0
+            assert request_id not in service._items
+            assert service._pending == 0
+            assert service._job_slots_reserved == 0
+            assert service._active_reserved_bytes == 0
+            assert engine.calls == []
+        finally:
+            if lock_held:
+                service._lock.release()
+            jobs.release_return.set()
+            await service.shutdown()
+
+    asyncio.run(_run())
+
+
 def test_terminal_ttl_sweeper_removes_metadata_and_artifact(tmp_path, monkeypatch):
     _patch_media_validation_without_pyav(monkeypatch)
 
@@ -1227,6 +1789,93 @@ def test_terminal_ttl_sweeper_removes_metadata_and_artifact(tmp_path, monkeypatc
             assert artifacts.get("video_ttl.mp4") is None
             assert service._retained_bytes == 0
             assert service._job_slots_reserved == 0
+        finally:
+            await service.shutdown()
+
+    asyncio.run(_run())
+
+
+def test_retention_sweep_clears_active_item_job_slot_ownership(tmp_path, monkeypatch):
+    _patch_media_validation_without_pyav(monkeypatch)
+
+    class _RecoveryBlockedEngine(_FakeVideoEngine):
+        def __init__(self) -> None:
+            super().__init__(blocked_ids={"video_expired_active"})
+            self.recovery_entered = asyncio.Event()
+            self.release_recovery = asyncio.Event()
+
+        async def wait_for_recovery(self, *, timeout: float | None) -> None:
+            assert timeout is None
+            self.recovery_waits += 1
+            self.recovery_entered.set()
+            await self.release_recovery.wait()
+
+    async def _run() -> None:
+        engine = _RecoveryBlockedEngine()
+        jobs = InMemoryVideoJobRepository()
+        artifacts = LocalVideoArtifactStore(tmp_path / "media")
+        service = VideoGenerationService(
+            engine=engine,
+            jobs=jobs,
+            artifacts=artifacts,
+            max_queued_requests=1,
+            queue_timeout_s=2.0,
+            request_timeout_s=0.02,
+            recovery_timeout_s=1.0,
+            retention_seconds=1,
+            max_jobs=2,
+            sweep_interval_s=60.0,
+        )
+        await service.start()
+        try:
+            await service.create_async(_request("video_expired_active"))
+            await asyncio.wait_for(engine.recovery_entered.wait(), timeout=3.0)
+            failed = await _wait_for_status(service, "video_expired_active", "failed")
+            assert failed.expires_at is not None
+            active_item = service._items[failed.id]
+
+            await service.create_async(
+                _request("video_retained"),
+                deadline=time.monotonic() + 5.0,
+            )
+            assert service._job_slots_reserved == 2
+
+            assert await service.sweep_expired(now=failed.expires_at) == 1
+            assert jobs.get(failed.id) is None
+            assert jobs.get("video_retained") is not None
+            assert active_item.job_slot_owned is False
+            assert service._job_slots_reserved == 1
+
+            engine.release_recovery.set()
+            await asyncio.wait_for(active_item.done.wait(), timeout=3.0)
+            assert jobs.count() == 1
+            assert service._job_slots_reserved == 1
+        finally:
+            engine.release.set()
+            engine.release_recovery.set()
+            await service.shutdown()
+
+    asyncio.run(_run())
+
+
+def test_retention_sweeper_retries_store_owned_remote_cleanup(tmp_path):
+    async def _run() -> None:
+        engine = _FakeVideoEngine()
+        jobs = InMemoryVideoJobRepository()
+        artifacts = _PendingCleanupStore(tmp_path / "media")
+        service = VideoGenerationService(
+            engine=engine,
+            jobs=jobs,
+            artifacts=artifacts,
+            max_queued_requests=1,
+            queue_timeout_s=2.0,
+            request_timeout_s=2.0,
+            recovery_timeout_s=1.0,
+        )
+        await service.start()
+        try:
+            assert await service.sweep_expired() == 0
+            assert artifacts.retry_calls == 1
         finally:
             await service.shutdown()
 

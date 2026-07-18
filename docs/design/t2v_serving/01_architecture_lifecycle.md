@@ -71,9 +71,10 @@ The frozen constraints are:
    FastAPI awaits its future asynchronously.
    A full validation domain rejects
    immediately with `429 validation_capacity_exhausted`; validation has a
-   30-second sub-deadline and returns `504 validation_timeout`. The total
-   request deadline begins when the request seeks validation capacity and
-   includes validation, generation queue wait, and execution. Tokenizers
+   30-second sub-deadline and returns `504 validation_timeout`. Video queue
+   wait and execution use separate clocks after validation: the shared video
+   FIFO defaults to a 24-hour wait limit, and the request execution timeout
+   starts only after the dispatcher claims the item. Tokenizers
    are vocabulary/rule data, not model weights or Neuron work. Invalid requests
    receive `400` and never consume a generation ticket. Capacity follows
    executor work rather than the HTTP waiter: after timeout or disconnect,
@@ -96,9 +97,14 @@ The frozen constraints are:
    Cancelled tombstones must be removed/compacted, or retain their slot until
    dequeued, so repeated enqueue/cancel traffic cannot grow memory without
    bound.
-6. Queue/deadline accounting starts from the same admission point for Chat,
-   sync Video, and async Video. Strict FIFO deliberately accepts head-of-line
-   blocking; endpoint quotas or priorities would require a different scheduler.
+6. Queue accounting starts from the same admission point for sync and async
+   Video. The default queue timeout is 86,400 seconds. Expiration atomically
+   removes the item from the FIFO, marks an async job `failed` with
+   `queue_timeout`, and releases every admission/storage reservation; it can
+   never execute afterward. The generation timeout starts on the atomic
+   `queued -> in_progress` claim. Strict FIFO deliberately accepts
+   head-of-line blocking; endpoint quotas or priorities would require a
+   different scheduler.
 7. Status, list, content, model, and health reads bypass generation admission.
    DELETE also bypasses the generation FIFO: it removes queued work, returns
    `409 video_in_progress` for running work without signalling cancellation,

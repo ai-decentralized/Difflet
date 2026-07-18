@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from difflet.pipeline.teacache import TeaCacheCalibration
 
 OutputModality = Literal["image", "video"]
+ServingPlacement = Literal["host", "neuron"]
 StageRole = Literal["prompt_encoder", "denoiser", "decoder", "pipeline"]
 StageKind = Literal["extracted", "opaque_pipeline"]
 StagePlacement = Literal["host", "neuron", "hybrid"]
@@ -243,10 +244,15 @@ class ServingProfile:
     teacache_calibration_data: TeaCacheCalibration | None = None
     output_fps: int | None = None
     host_vae: bool = False
+    clip_placement: ServingPlacement | None = None
 
     @property
     def world_size(self) -> int:
         return self.parallel.world_size
+
+    @property
+    def vae_placement(self) -> ServingPlacement:
+        return "host" if self.host_vae else "neuron"
 
     def shape_dict(self) -> dict[str, int | None]:
         return {"height": self.height, "width": self.width, "num_frames": self.num_frames}

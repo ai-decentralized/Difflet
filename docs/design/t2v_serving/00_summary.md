@@ -47,14 +47,23 @@
 > The run measured compile/load/smoke/idle/generation/shutdown memory, reused
 > one worker for repeated generations, validated MP4 media, and exercised all
 > six Videos routes including queued-only DELETE. See
-> [LTX-2 resident validation](08_ltx2_trn2_serving_validation.md). Wan 2.1 and
-> HunyuanVideo 1.0 remain pending hardware gates.
+> [LTX-2 resident validation](08_ltx2_trn2_serving_validation.md).
 
 > **2026-07-17 Wan 2.1 validation:** Wan 2.1 has now passed resident load,
 > request reuse, MP4 output, all six Videos routes, and phase memory sampling
 > at TP4/CP1 480x832x9. The service was already owned by another running test,
 > so clean shutdown/HBM release remains open. See
 > [Wan 2.1 resident validation](09_wan21_trn2_serving_validation.md).
+
+> **2026-07-18 HunyuanVideo 1.0 validation:** the fixed TP4/CP1 320x512x61
+> profile passed resident co-load, repeated MP4 generation, all Videos API
+> lifecycle routes, S3 publication/presign, clean shutdown, and memory gates
+> with Neuron CLIP and segmented Neuron VAE. Three four-step generations
+> averaged 58.402 seconds of inference time with 79.05 GiB peak HBM. The
+> host-CLIP/host-VAE profile remains the release default pending an explicit
+> promotion decision. The controlled comparison is recorded in
+> [the VAE placement rollout plan](10_vae_placement_rollout_plan.md); raw remote
+> logs and generated media are intentionally excluded from Git.
 
 ## Research anchor
 
@@ -93,8 +102,9 @@ The current implementation includes:
 5. Provisional resident adapters for **LTX-2**, **Wan 2.1**, and
    **HunyuanVideo 1.0**, using only existing lower-layer model primitives.
 
-Wan 2.2 and HunyuanVideo 1.5 are not in the HTTP Serving allowlist, but they
-must not be described as the same kind of unsupported model. Wan 2.2 is listed
+Wan 2.2 is accepted only as an explicit experimental HTTP Serving checkpoint;
+HunyuanVideo 1.5 is not in the allowlist. They must not be described as the same
+kind of unsupported model. Wan 2.2 is listed
 as supported by the README, and its current single-transformer offline CLI path
 has a successful real Trn2 benchmark. The CLI wiring nevertheless disables
 `transformer_2`, so the intended dual-transformer semantics and reference
@@ -129,9 +139,9 @@ under that root before accepting work.
 | Model | MVP logical stages | One resident process? | Current conclusion |
 | --- | ---: | --- | --- |
 | LTX-2 | 1 (`pipeline`) | Yes for the measured profile | TP4 resident gate passed; steady HBM 38.96 GiB, host text/connectors/decode |
-| Wan 2.1 | 3 (`prompt_encoder`, `denoiser`, `decoder`) | Yes for the measured profile; shutdown pending | TP4 Neuron prompt encoder/DiT with explicit host VAE decode; HBM 41.34 GiB |
-| Wan 2.2 | Target 3 (`prompt_encoder`, dual-expert `denoiser`, `decoder`) | Not yet | Single-transformer Trn2 path ran; Serving is blocked on enabling and validating the second transformer plus the larger resident-set gate |
-| HunyuanVideo 1.0 | 4 (`clip`, `llama`, `denoiser`, `decoder`) | Provisionally yes | Host CLIP/VAE and resident W4 Llama/DiT; requires measured co-load and reference comparison |
+| Wan 2.1 | 3 (`prompt_encoder`, `denoiser`, `decoder`) | Yes for the measured profile | Host VAE baseline and Neuron VAE profile both passed; Neuron VAE HBM 61.99 GiB |
+| Wan 2.2 | Target 3 (`prompt_encoder`, dual-expert `denoiser`, `decoder`) | Experimental single-transformer profile only | Single-transformer Trn2 path ran; MVP qualification is blocked on enabling and validating the second transformer plus the larger resident-set gate |
+| HunyuanVideo 1.0 | 4 (`clip`, `llama`, `denoiser`, `decoder`) | Yes for the measured profile | Neuron CLIP/VAE co-load and generation passed; peak HBM 79.05 GiB, host path retained for rollback |
 | HunyuanVideo 1.5 | 3-5 | No current basis | Not present in the README supported-model table; offline compile/generate orchestrator is incomplete |
 
 “Stage” here is a logical serving boundary, not automatically a process. The
@@ -146,14 +156,14 @@ not confused with resident HTTP qualification:
 | Model | Real Trn2 offline benchmark | Local Videos adapter + fake-engine API | Complete model semantics | Real Trn2 six-API gate |
 | --- | --- | --- | --- | --- |
 | LTX-2 | Yes: TP4 480x704x49, finite tensor | Yes | Fixed TP4 resident adapter path verified | Passed for TP4/CP1 480x704x49 |
-| Wan 2.1 | Yes: TP4 480x832x9, finite tensor | Yes | Fixed adapter path and API path verified | Load/API passed; shutdown pending |
+| Wan 2.1 | Yes: TP4 480x832x9, finite tensor | Yes | Host and Neuron VAE fixed-profile paths verified | Passed, including repeated Neuron VAE generation and shutdown |
 | Wan 2.2 | Partial: single transformer, reused 2.1 NEFF | No | No: current CLI disables `transformer_2` | Pending after wiring/reference fix |
-| HunyuanVideo 1.0 | Yes: TP4 320x512x61, finite tensor | Yes | Provisional TP4/CP1 host-CLIP/VAE path | Pending |
+| HunyuanVideo 1.0 | Yes: TP4 320x512x61, finite tensor | Yes | Host rollback plus accepted Neuron CLIP/VAE candidate | Passed for TP4/CP1 320x512x61 |
 | HunyuanVideo 1.5 | No: benchmark pending | No | No: compile/generate scaffold | Not eligible yet |
 
-Therefore LTX-2 is now hardware-qualified for the measured fixed profile. Wan
-2.1 and HunyuanVideo 1.0 remain locally wired candidates that have not yet
-passed real `trn2.3xlarge` Videos Serving.
+Therefore LTX-2, Wan 2.1, and HunyuanVideo 1.0 are hardware-qualified for their
+recorded fixed profiles. This does not qualify Wan 2.2 dual-transformer
+semantics or HunyuanVideo 1.5.
 
 ## Evidence and confidence
 
@@ -175,15 +185,14 @@ passed real `trn2.3xlarge` Videos Serving.
 
 ### Capacity posture
 
-- LTX-2 is measured for the fixed profile above. Wan 2.1 and HunyuanVideo 1.0
-  remain provisional per-model residency assumptions so implementation can
-  proceed before their hardware gates.
+- LTX-2, Wan 2.1, and HunyuanVideo 1.0 are measured for the fixed profiles
+  above. Each result applies only to its recorded immutable shape/topology.
 - This does not mean all models can co-reside. One serve process owns one model
   and one immutable compiled profile on the four-core target.
 - [AWS documents](https://aws.amazon.com/ec2/instance-types/trn2/) 128 GB host
   memory and 96 GB accelerator HBM for `trn2.3xlarge`; the LTX-2 validation host
-  exposed 124.77 GiB to Linux. LTX-2 exact serving RSS/PSS and HBM are now
-  measured; Wan and HunyuanVideo values remain pending.
+  exposed 124.77 GiB to Linux. Exact serving RSS/PSS and HBM evidence is now
+  retained for LTX-2, Wan 2.1, and HunyuanVideo 1.0.
 - Host placement is model-specific and explicit. It is not a generic CPU
   offload facility or transparent extension of Trainium HBM.
 

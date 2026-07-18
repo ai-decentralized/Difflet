@@ -46,6 +46,57 @@ def test_serving_registry_exposes_pipeline_definition():
     ]
 
 
+def test_hunyuan_placement_defaults_preserve_validated_host_mvp():
+    resolved = resolve_serving_model(ServeOptions(model_id="hunyuanvideo-community/HunyuanVideo"))
+
+    assert resolved.profile.clip_placement == "host"
+    assert resolved.profile.vae_placement == "host"
+    assert resolved.profile.host_vae is True
+
+
+def test_hunyuan_explicit_neuron_clip_preserves_default_host_vae():
+    resolved = resolve_serving_model(
+        ServeOptions(
+            model_id="hunyuanvideo-community/HunyuanVideo",
+            clip_placement="neuron",
+        )
+    )
+
+    assert resolved.profile.clip_placement == "neuron"
+    assert resolved.profile.vae_placement == "host"
+    assert resolved.profile.host_vae is True
+
+
+def test_host_vae_preserves_host_placement():
+    resolved = resolve_serving_model(
+        ServeOptions(
+            model_id="hunyuanvideo-community/HunyuanVideo",
+            host_vae=True,
+        )
+    )
+
+    assert resolved.profile.vae_placement == "host"
+
+
+def test_image_and_non_hunyuan_models_reject_placement_overrides():
+    with pytest.raises(DiffletServingError) as image_exc:
+        resolve_serving_model(
+            ServeOptions(
+                model_id="Qwen/Qwen-Image",
+                host_vae=True,
+            )
+        )
+    assert image_exc.value.code == "invalid_extra_body"
+
+    with pytest.raises(DiffletServingError) as clip_exc:
+        resolve_serving_model(
+            ServeOptions(
+                model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers",
+                clip_placement="neuron",
+            )
+        )
+    assert clip_exc.value.code == "invalid_extra_body"
+
 def test_flux_schnell_is_not_enabled_for_p0_serving():
     with pytest.raises(ValueError, match="not enabled for P0 serving"):
         resolve_serving_model(ServeOptions(model_id="black-forest-labs/FLUX.1-schnell"))

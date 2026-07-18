@@ -184,3 +184,59 @@ not an implementation commitment or memory-fit claim.
 Host placement in this table is an adapter-specific execution choice. Difflet
 does not currently provide a generic CPU-offload switch that can spill arbitrary
 Neuron weights or runtime buffers into the 128 GB host memory.
+
+## VAE placement through the legacy host flag
+
+Video serving keeps the existing CLI surface instead of adding a second VAE
+selector:
+
+```text
+--host-vae present -> host/CPU VAE decode
+--host-vae omitted -> the model registry's validated default
+```
+
+`host_vae` remains the single internal boolean in the immutable serving profile.
+Before Neuron acceptance, the registry default remains host. After a separately
+reviewed promotion, omission selects the accepted Neuron default and
+`--host-vae` remains the explicit rollback override. There is no public
+`--vae-placement` selector. Changing the resolved boolean selects or compiles a
+different artifact set, while all non-VAE fields and artifacts stay identical.
+Wan 2.2 remains
+an explicit single-transformer experiment, not an MVP-qualified default, pending
+dual-transformer qualification. Hunyuan's Neuron VAE has passed its fixed-profile
+Trn2 gates but remains non-default pending an explicit promotion decision. LTX-2
+is host-only because its current CLI and lower layer do not
+provide a Neuron video-VAE application or artifact, so its registry default stays
+host. The host path must not load a Neuron VAE artifact.
+
+An unsupported registry/default combination fails startup; the server must not
+silently fall back to the other placement. The choice is recorded in internal
+job metadata and stage telemetry, but need not be exposed as an OpenAI public
+response field. Each model/placement requires measured steady and peak HBM,
+Neuron host runtime memory, host RSS/PSS, decode latency, and MP4 correctness.
+The Neuron VAE must be co-loaded with the resident transformer world size; a
+CLI TP=1 VAE artifact cannot be reused inside a TP=4 resident worker unless the
+runtime contract explicitly supports that world-size change.
+
+This is an additive rollout. The currently accepted host/hybrid adapter remains
+the MVP default and is not rewritten while a Neuron VAE profile is being built.
+For a fixed model/revision/shape/dtype/topology, the two profiles reuse identical
+non-VAE artifacts and bindings. Only the VAE artifact, decoder runner binding,
+and decoder placement differ; a running resident worker never switches between
+them.
+
+Hunyuan is intentionally split into two serial placement experiments. The first
+holds host VAE fixed and compares host CLIP with a serving-specific Neuron CLIP
+artifact selected by a startup-only `--clip-placement host|neuron` profile field;
+only that field, the CLIP artifact, prompt-encoder binding, and placement may
+differ. Omission retains the current host default. After correctness and repeated latency/memory measurements select one
+CLIP baseline, the second experiment freezes that baseline and compares host VAE
+with Neuron VAE; only the VAE artifact, decoder binding, and placement may then
+differ. The existing host-CLIP/host-VAE adapter remains the MVP and rollback
+profile throughout both experiments.
+
+The implemented operator flags are Hunyuan-only
+`--clip-placement host|neuron` and the existing `--host-vae` override.
+The Hunyuan Neuron CLIP artifact is replicated at TP1 in the resident W4 world.
+The decoder-only Neuron VAE application likewise uses its lower-layer TP1/W4
+segmented graph, so neither experiment introduces a second worker allocation.

@@ -13,8 +13,9 @@ def serving_metadata() -> ServingModelMetadata:
 
     Prompt encoding and denoising use the existing Neuron components.  Decode
     remains on the host because the current long-video Neuron VAE path exceeds
-    the compiler instruction limit.  Wan 2.2 is intentionally not exposed: its
-    current CLI path does not load the second transformer.
+    the compiler instruction limit. Wan 2.2 is accepted only as an explicit
+    experimental checkpoint using this current single-transformer topology; it
+    is not MVP-qualified because its second transformer is not loaded.
     """
 
     return ServingModelMetadata(

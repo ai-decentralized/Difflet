@@ -46,10 +46,13 @@ def test_ltx_2_uses_one_opaque_hybrid_pipeline():
     ] == [("pipeline", "opaque_pipeline", "pipeline", ("output",), True, None)]
 
 
-def test_wan_exposes_only_the_closed_loop_21_topology():
+def test_wan_keeps_21_and_experimental_22_on_the_current_closed_loop_topology():
     metadata = wan.serving_metadata()
 
-    assert metadata.checkpoint_ids == ("Wan-AI/Wan2.1-T2V-14B-Diffusers",)
+    assert metadata.checkpoint_ids == (
+        "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+        "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+    )
     assert [
         (stage.stage_id, stage.role, stage.output_keys, stage.runner_factory)
         for stage in metadata.pipeline_definition.stages
@@ -112,8 +115,8 @@ def test_hunyuan_video_uses_host_clip_and_decode_around_neuron_stages():
     assert metadata.pipeline_definition.stages[-1].final_output is True
 
 
-def test_unqualified_video_checkpoints_are_not_publicly_registered():
-    assert "Wan-AI/Wan2.2-T2V-A14B-Diffusers" not in wan.serving_metadata().checkpoint_ids
+def test_hunyuan_15_remains_unregistered_while_wan_22_is_explicitly_experimental():
+    assert "Wan-AI/Wan2.2-T2V-A14B-Diffusers" in wan.serving_metadata().checkpoint_ids
     hunyuan_ids = hunyuan_video.serving_metadata().checkpoint_ids
     assert "tencent/HunyuanVideo" not in hunyuan_ids
     assert not any("1.5" in checkpoint for checkpoint in hunyuan_ids)

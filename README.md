@@ -13,7 +13,7 @@ model id to a generated image or video in one command.
 
 Three entry points expose the same engine:
 
-- **`difflet serve`** — a resident, OpenAI-compatible HTTP server for Flux and Qwen-Image.
+- **`difflet serve`** — a resident, OpenAI-compatible HTTP server for image and video models.
 - **`difflet` CLI** — `download → compile → generate`, or `difflet run` to do all three at once.
 - **`DiffletPipeline`** — a Python API mirroring `diffusers` for use inside your own scripts.
 
@@ -167,9 +167,14 @@ image.save("out.png")
 
 ## Serving
 
-`difflet serve` keeps one image model loaded in a resident Trainium worker. S3
-is not required: without an S3 bucket configuration, generated images are
-returned as Base64 data URLs in the OpenAI-style Chat Completions response.
+`difflet serve` keeps one image or video model loaded in a resident Trainium
+worker. S3 is not required: without an S3 bucket configuration, generated images
+are returned as Base64 data URLs in the OpenAI-style Chat Completions response,
+while completed videos remain available through the Videos content endpoint.
+
+For asynchronous and synchronous video generation, request fields, lifecycle,
+download, deletion, retention, and S3 behavior, see the
+[Videos API reference](docs/serving/videos_api.md).
 
 Start Flux on a four-core `trn2.3xlarge`:
 
