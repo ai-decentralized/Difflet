@@ -10,21 +10,21 @@ serving path during the migration.
 
 ## Compatibility rule
 
-Do not change existing defaults until the corresponding Neuron profile passes
-co-load, memory, latency, and output-correctness gates.
+Do not change an existing default until the corresponding Neuron profile passes
+co-load, memory, latency, and output-correctness gates. Wan 2.1 and
+HunyuanVideo 1.0 have now passed those fixed-profile gates, so this rollout
+promotes their Neuron VAE and retains `--host-vae` as the host rollback.
 
-The already validated host/hybrid paths are the MVP baseline and remain the
-release path throughout this work. Adding placement metadata, compiling an
-experimental VAE, or failing an experiment must not change their artifacts,
-stage runners, startup command, request behavior, or recorded acceptance
-results. Neuron VAE work is additive until a separate promotion decision is
-made after acceptance.
+The already validated host/hybrid paths remain available as rollback profiles.
+Adding placement metadata, compiling a VAE, or failing an experiment must not
+rewrite their artifacts, stage runners, startup command, request behavior, or
+recorded acceptance results.
 
-| Model | Current validated default | Initial migration policy |
+| Model | Current validated default | Rollback or qualification boundary |
 | --- | --- | --- |
-| Wan 2.1 | Host VAE | Keep default; add experimental Neuron VAE profile |
-| Wan 2.2 | Explicit experimental single-transformer profile; not an MVP default | Preserve experiments, but do not enable a Neuron VAE profile before dual-transformer qualification |
-| HunyuanVideo 1.0 | Host CLIP + host VAE | Keep the MVP default; evaluate Neuron CLIP first, select the faster accepted CLIP baseline, then evaluate Neuron VAE against that frozen baseline |
+| Wan 2.1 | Neuron VAE | `--host-vae` selects the validated host rollback |
+| Wan 2.2 | Explicit experimental single-transformer profile; not an MVP default | Uses the Wan decoder selection but remains unqualified until its dual-transformer path passes correctness and residency gates |
+| HunyuanVideo 1.0 | Host CLIP + Neuron VAE | `--host-vae` changes only the decoder to the validated host rollback; CLIP remains a separate startup choice |
 | LTX-2 | Existing hybrid host path | Host-only: the current CLI and lower layer have no Neuron video-VAE decoder artifact/runtime |
 
 ## Profile contract
@@ -37,17 +37,16 @@ resolution:
 --host-vae omitted -> the model registry's validated default
 ```
 
-No public `--vae-placement` selector is added. The model registry resolves its
-current validated default (currently host VAE), while `--host-vae` always forces
-the rollback host path. A promoted Neuron default is selected by omitting the
-flag only after that adapter path passes acceptance. The choice is part of the immutable profile
-identity. Between the two profiles, all non-VAE
+No public `--vae-placement` selector is added. The model registry resolves the
+accepted Neuron default for Wan 2.1 and HunyuanVideo 1.0, while `--host-vae`
+always forces the rollback host path. LTX-2 remains host-only because no Neuron
+decoder exists. The choice is part of the immutable profile identity. Between
+the two placements, all non-VAE
 artifacts and stage bindings must be identical: model revision, shape, dtype,
 parallel topology, text/prompt-encoder placement, transformer artifacts, and
 latent schema do not change. Only the VAE artifact, decoder runner binding, and
 decoder placement may differ. An unavailable placement fails startup before the
-worker becomes ready; the server never silently falls back. The existing default
-remains the validated host placement until migration gates pass.
+worker becomes ready; the server never silently falls back.
 
 This contract applies to startup model/profile resolution, not to a live worker
 switch. One serve process still owns one immutable profile. Placement is not a
@@ -102,9 +101,10 @@ to differ.
 
 ## Implementation status
 
-The additive local implementation now contains both Hunyuan experimental paths:
+The implementation contains both Hunyuan placement paths:
 
-- host CLIP and host VAE remain the registry default and unchanged MVP fallback;
+- host CLIP remains the CLIP default, Neuron VAE is the decoder default, and the
+  host VAE remains the unchanged rollback;
 - Neuron CLIP uses a serving-specific `TP=1/world_size=4` artifact and runner;
 - Neuron VAE reuses the existing segmented lower-layer decoder in a decoder-only
   `TP=1/world_size=4` application;
@@ -122,8 +122,9 @@ with the unchanged Llama/denoiser artifacts; three four-step requests averaged
 58.402 seconds of inference time. Peak request HBM was 79.05 GiB, peak Neuron
 host allocation was 12.75 GiB, and peak process PSS was 13.45 GiB. Repeated MP4
 decode, async lifecycle, S3 publication/presign, and clean shutdown all passed.
-The candidate is accepted for this fixed profile but is not promoted by this
-document; host CLIP/VAE remains the registry default and rollback path.
+The candidate is accepted and promoted for this fixed profile. Omitting
+`--host-vae` selects Neuron VAE; adding the flag selects the host decoder
+rollback without changing the CLIP choice.
 
 The Phase B comparison held Neuron CLIP, model revision, TP4/CP1 topology,
 BF16 dtype, 512x320x61 shape, 24 FPS, prompts, four denoise steps, and seeds
@@ -146,9 +147,9 @@ Wan 2.1 has now passed a real Neuron-VAE compile, resident co-load, sync/async
 API, output decode, resource, and clean-shutdown run for its fixed 832x480x9
 profile. Three controlled 20-step requests averaged 13.265 seconds versus the
 prior 57.583-second host-VAE synchronous result. Resident HBM increased from
-41.34 GiB to 61.99 GiB. The experimental profile is viable, but host VAE remains
-the default until an explicit promotion review. Detailed evidence is recorded
-in `09_wan21_trn2_serving_validation.md`.
+41.34 GiB to 61.99 GiB. The accepted Neuron profile is now the omitted-flag
+default, while `--host-vae` preserves the host rollback. Detailed evidence is
+recorded in `09_wan21_trn2_serving_validation.md`.
 
 LTX-2 is intentionally not part of this implementation. Its existing CLI and
 serving path compile the TP4 dual-stream transformer on Neuron while text
@@ -159,16 +160,15 @@ one opaque hybrid `pipeline`, requires the host decode profile, and rejects an
 explicit Neuron VAE placement at startup. Adding a new LTX-2 lower-layer backend
 would be a separate model-port project, not a serving-placement rollout.
 
-Recommended remote sequence:
+Completed qualification sequence:
 
 1. Re-run the omitted/default host-host profile as the rollback control.
 2. Start `--clip-placement neuron --host-vae`; compile the new CLIP
    artifact, run startup smoke, and execute sync plus async API checks.
 3. Select and record one accepted CLIP baseline.
-4. In the acceptance build, resolve `host_vae=false` internally while keeping
-   the selected CLIP placement; compile the decoder artifact and repeat
-   correctness, API, memory, and latency checks. Do not expose a second public
-   placement selector solely for this experiment.
+4. Resolve `host_vae=false` internally while keeping the selected CLIP
+   placement; compile the decoder artifact and repeat correctness, API, memory,
+   and latency checks without exposing a second public placement selector.
 5. Re-run the corresponding host-VAE candidate without changing any non-VAE
    startup field, then compare the recorded results.
 
@@ -192,25 +192,24 @@ Recommended remote sequence:
 6. Record LTX-2 as host-only for this rollout. Do not add an experimental
    serving-only decoder when the CLI and lower layer provide no Neuron VAE
    application to reuse.
-7. Only after a model passes all gates may its validated-default registry pointer
-   move from the host profile to the Neuron profile. Promotion is a deployment
-   change for newly started processes, not an in-process profile mutation.
+7. After Wan 2.1 and HunyuanVideo 1.0 passed all fixed-profile gates, move their
+   validated-default registry pointer from host to Neuron. This promotion affects
+   newly started processes only; it is not an in-process profile mutation.
 
 ## Promotion and rollback
 
 - Each model registry entry keeps one explicit validated-default VAE placement.
-  Experimental profiles are exercised by the acceptance harness and never
-  update this pointer during compile, startup, or request handling.
-- Promotion changes that single registry default only after all acceptance
-  evidence is recorded and reviewed. A process resolves the pointer once at
-  startup and keeps the resulting profile immutable.
+  Wan 2.1 and HunyuanVideo 1.0 now point to Neuron; LTX-2 remains host-only.
+  Compile, startup, and request handling never mutate this pointer.
+- A process resolves the registry default once at startup and keeps the
+  resulting profile immutable.
 - Rollback restores the prior validated-default pointer and starts replacement
   processes with the prior profile. Existing processes and in-flight requests
   continue on the profile they resolved at startup; they are drained or stopped
   through the normal serving lifecycle.
-- A failed compile, load, smoke, generation, or memory gate cannot change the
-  default pointer. Omitted `host_vae` therefore continues to resolve to the MVP
-  host path after any failed experiment.
+- A future failed compile, load, smoke, generation, or memory gate cannot change
+  the last accepted default pointer. `--host-vae` remains available regardless
+  of that pointer.
 
 ## Acceptance gates
 

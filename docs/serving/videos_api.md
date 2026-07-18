@@ -19,9 +19,10 @@ tradeoffs, and Trn2 acceptance evidence live separately under
   resident worker. The MVP runs one generation at a time.
 - Async job metadata is in memory. Restarting the server removes all job IDs and
   starts with an empty list.
-- The currently validated host/hybrid model paths remain the release defaults.
-  Wan 2.1 and Hunyuan Neuron VAE profiles have also passed fixed-profile Trn2
-  acceptance, but are not selected by an HTTP request field.
+- Wan 2.1 and HunyuanVideo 1.0 default to their accepted fixed-profile Neuron
+  VAE decoders. `--host-vae` retains the validated host rollback. LTX-2 remains
+  host/hybrid because its current lower layer has no Neuron video-VAE decoder.
+  Placement is fixed at startup and is not selected by an HTTP request field.
 
 Validated Trn2 serving evidence currently exists for Wan 2.1, HunyuanVideo 1.0,
 and LTX-2 at their recorded fixed profiles. The Wan 2.2 checkpoint can be
@@ -55,22 +56,38 @@ TOKENIZERS_PARALLELISM=false difflet serve \
   --height 320 \
   --width 512 \
   --num-frames 61 \
+  --clip-placement neuron \
   --host 0.0.0.0 \
   --port 8092 \
   --request-timeout 1800 \
   --worker-restart-timeout 2400
 ```
 
-Omitting placement flags preserves the validated Hunyuan host-CLIP/host-VAE
-default. `--host-vae` is the only public VAE placement override and explicitly
-selects that host decoder path.
+Omitting `--host-vae` selects the accepted Neuron VAE default. This example also
+selects the measured Neuron CLIP profile; omitting `--clip-placement` keeps CLIP
+on the host. `--host-vae` is the only public VAE override and explicitly selects
+the host decoder rollback.
 
-### Experimental Hunyuan placement profiles
+The equivalent Wan 2.1 Neuron VAE profile is:
 
-Both later-stage code paths are present so Trn2 validation requires only a code
-sync and a different startup command. They are not release-qualified yet.
-Placement is fixed for the lifetime of the serve process; HTTP requests cannot
-switch it or trigger compilation.
+```bash
+TOKENIZERS_PARALLELISM=false difflet serve \
+  --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers \
+  --cache-dir /mnt/model-cache/difflet \
+  --tp-degree 4 --cp-degree 1 \
+  --height 480 --width 832 --num-frames 9 \
+  --host 0.0.0.0 --port 8092 \
+  --request-timeout 1800 --worker-restart-timeout 2400
+```
+
+Add `--host-vae` to either startup command to use the host decoder instead.
+
+### Hunyuan placement variants
+
+Both decoder paths are release-qualified for the recorded fixed profile, with
+Neuron VAE selected by default and host VAE retained for rollback. CLIP remains
+a separate startup choice. Placement is fixed for the lifetime of the serve
+process; HTTP requests cannot switch it or trigger compilation.
 
 Phase A keeps VAE decode on the host and tests the serving-specific replicated
 CLIP artifact (`TP=1`, resident `world_size=4`):
@@ -87,12 +104,11 @@ TOKENIZERS_PARALLELISM=false difflet serve \
   --request-timeout 1800 --worker-restart-timeout 2400
 ```
 
-Phase B freezes the accepted CLIP placement and changes only the decoder. The
-Neuron VAE candidate has passed Trn2 acceptance, but the registry still keeps
-host VAE as the release default. There is intentionally no public
-`--vae-placement` selector: `--host-vae` keeps the existing CLI-compatible host
-override, and a future promotion changes the omitted-flag registry default for
-new processes without changing the HTTP contract.
+Phase B froze the accepted CLIP placement and changed only the decoder. The
+Neuron VAE candidate passed Trn2 acceptance and is now the omitted-flag registry
+default. There is intentionally no public `--vae-placement` selector:
+`--host-vae` keeps the existing CLI-compatible host override without changing
+the HTTP contract.
 
 Readiness opens only after the resident worker has loaded and passed startup
 checks:

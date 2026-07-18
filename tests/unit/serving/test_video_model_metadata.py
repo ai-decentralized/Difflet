@@ -9,8 +9,8 @@ from difflet.common.registry import hunyuan_video, ltx_2, wan
     ("factory", "model_type", "steps", "guidance", "fps", "host_vae"),
     [
         (ltx_2.serving_metadata, "ltx_2", 40, 3.5, 24, True),
-        (wan.serving_metadata, "wan", 2, 1.0, 16, True),
-        (hunyuan_video.serving_metadata, "hunyuan_video", 4, 6.0, 24, True),
+        (wan.serving_metadata, "wan", 2, 1.0, 16, False),
+        (hunyuan_video.serving_metadata, "hunyuan_video", 4, 6.0, 24, False),
     ],
 )
 def test_video_metadata_uses_cli_defaults_and_mp4_contract(

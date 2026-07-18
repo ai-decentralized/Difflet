@@ -9,8 +9,8 @@ benchmark profile `TP4/CP1, 480x832x9, bf16` with both the validated host VAE
 baseline and an explicit experimental Neuron VAE profile. The Neuron profile
 compiled the repository's existing Wan decoder lower layer into a separate
 serving artifact, co-loaded it with the unchanged generation artifact, and
-generated valid MP4s. Host VAE remains the default until the experimental
-profile is reviewed and promoted explicitly.
+generated valid MP4s. The accepted Neuron VAE is now the omitted-flag default;
+`--host-vae` retains the validated host rollback.
 
 The original 2026-07-17 check reused an already-running host-VAE service because
 it owned all four NeuronCores. The isolated 2026-07-18 follow-up started a fresh

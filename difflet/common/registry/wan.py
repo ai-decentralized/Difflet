@@ -11,11 +11,13 @@ _RUNNER_MODULE = "difflet.serving.models.wan"
 def serving_metadata() -> ServingModelMetadata:
     """Describe the closed-loop Wan 2.1 resident serving topology.
 
-    Prompt encoding and denoising use the existing Neuron components.  Decode
-    remains on the host because the current long-video Neuron VAE path exceeds
-    the compiler instruction limit. Wan 2.2 is accepted only as an explicit
-    experimental checkpoint using this current single-transformer topology; it
-    is not MVP-qualified because its second transformer is not loaded.
+    Prompt encoding and denoising use the existing Neuron components. The fixed
+    serving profile defaults to the accepted Neuron VAE decoder; ``--host-vae``
+    preserves the CLI-compatible host rollback and remains required for longer
+    clips whose single-shot Neuron graph exceeds the compiler instruction
+    limit. Wan 2.2 is accepted only as an explicit experimental checkpoint using
+    this current single-transformer topology; it is not MVP-qualified because
+    its second transformer is not loaded.
     """
 
     return ServingModelMetadata(
@@ -60,5 +62,5 @@ def serving_metadata() -> ServingModelMetadata:
         orchestrator_factory=f"{_RUNNER_MODULE}:WanServingStageAdapter",
         request_validator_factory=f"{_RUNNER_MODULE}:WanServingRequestValidator",
         default_fps=16,
-        default_host_vae=True,
+        default_host_vae=False,
     )
