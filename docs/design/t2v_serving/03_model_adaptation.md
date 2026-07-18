@@ -196,15 +196,14 @@ selector:
 ```
 
 `host_vae` remains the single internal boolean in the immutable serving profile.
-Before Neuron acceptance, the registry default remains host. After a separately
-reviewed promotion, omission selects the accepted Neuron default and
+Wan 2.1 and HunyuanVideo 1.0 now resolve omission to the accepted Neuron default;
 `--host-vae` remains the explicit rollback override. There is no public
 `--vae-placement` selector. Changing the resolved boolean selects or compiles a
 different artifact set, while all non-VAE fields and artifacts stay identical.
 Wan 2.2 remains
 an explicit single-transformer experiment, not an MVP-qualified default, pending
 dual-transformer qualification. Hunyuan's Neuron VAE has passed its fixed-profile
-Trn2 gates but remains non-default pending an explicit promotion decision. LTX-2
+Trn2 gates and is the decoder default for that profile. LTX-2
 is host-only because its current CLI and lower layer do not
 provide a Neuron video-VAE application or artifact, so its registry default stays
 host. The host path must not load a Neuron VAE artifact.

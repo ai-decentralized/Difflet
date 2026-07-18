@@ -282,20 +282,19 @@ DELETE and the TTL sweeper remove both S3 objects and local staging remnants.
 
 ## Video VAE host override
 
-The current MVP keeps each model's already validated decoder path as its registry
-default and retains the existing startup-only host override. It does not change
-the six-route lifecycle contract:
+The current MVP selects the accepted Neuron VAE for Wan 2.1 and HunyuanVideo
+1.0 while retaining the existing startup-only host override. LTX-2 keeps its
+required host/hybrid path. This does not change the six-route lifecycle contract:
 
 ```text
 --host-vae present -> host/CPU VAE decode
 --host-vae omitted -> the model registry's validated default
 ```
 
-No public `--vae-placement` selector is added. Before promotion, omission keeps
-the current host default. After a Neuron decoder passes acceptance and its
-registry default is explicitly promoted, omission selects Neuron and
-`--host-vae` remains the rollback command. Host-only adapters such as LTX-2 keep
-a host registry default. Placement is not accepted in an HTTP request.
+No public `--vae-placement` selector is added. For the accepted Wan 2.1 and
+Hunyuan profiles, omission selects Neuron and `--host-vae` is the rollback
+command. Host-only adapters such as LTX-2 keep a host registry default.
+Placement is not accepted in an HTTP request.
 
 The option is part of the immutable serving profile. All non-VAE artifacts and
 stage bindings must remain identical between the two placements: model

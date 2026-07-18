@@ -46,15 +46,15 @@ def test_serving_registry_exposes_pipeline_definition():
     ]
 
 
-def test_hunyuan_placement_defaults_preserve_validated_host_mvp():
+def test_hunyuan_placement_defaults_to_neuron_vae_with_host_clip():
     resolved = resolve_serving_model(ServeOptions(model_id="hunyuanvideo-community/HunyuanVideo"))
 
     assert resolved.profile.clip_placement == "host"
-    assert resolved.profile.vae_placement == "host"
-    assert resolved.profile.host_vae is True
+    assert resolved.profile.vae_placement == "neuron"
+    assert resolved.profile.host_vae is False
 
 
-def test_hunyuan_explicit_neuron_clip_preserves_default_host_vae():
+def test_hunyuan_explicit_neuron_clip_preserves_default_neuron_vae():
     resolved = resolve_serving_model(
         ServeOptions(
             model_id="hunyuanvideo-community/HunyuanVideo",
@@ -63,6 +63,22 @@ def test_hunyuan_explicit_neuron_clip_preserves_default_host_vae():
     )
 
     assert resolved.profile.clip_placement == "neuron"
+    assert resolved.profile.vae_placement == "neuron"
+    assert resolved.profile.host_vae is False
+
+
+def test_wan_defaults_to_neuron_vae():
+    resolved = resolve_serving_model(
+        ServeOptions(model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers")
+    )
+
+    assert resolved.profile.vae_placement == "neuron"
+    assert resolved.profile.host_vae is False
+
+
+def test_ltx_keeps_required_host_vae_default():
+    resolved = resolve_serving_model(ServeOptions(model_id="Lightricks/LTX-2"))
+
     assert resolved.profile.vae_placement == "host"
     assert resolved.profile.host_vae is True
 
@@ -76,6 +92,14 @@ def test_host_vae_preserves_host_placement():
     )
 
     assert resolved.profile.vae_placement == "host"
+
+    wan = resolve_serving_model(
+        ServeOptions(
+            model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers",
+            host_vae=True,
+        )
+    )
+    assert wan.profile.vae_placement == "host"
 
 
 def test_image_and_non_hunyuan_models_reject_placement_overrides():

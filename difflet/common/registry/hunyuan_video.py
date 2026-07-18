@@ -11,11 +11,12 @@ _RUNNER_MODULE = "difflet.serving.models.hunyuan_video"
 def serving_metadata() -> ServingModelMetadata:
     """Describe the honest HunyuanVideo 1.0 resident stage boundaries.
 
-    The validated default keeps CLIP and VAE execution on the host. The Llama
-    encoder and denoiser use their existing Neuron artifacts. Runtime profile
-    resolution may replace the CLIP and decoder bindings with explicit
-    experimental Neuron placements. HunyuanVideo 1.5 remains unregistered until
-    its offline compile and generation path is complete.
+    The validated default keeps CLIP execution on the host and uses the accepted
+    Neuron VAE decoder. The Llama encoder and denoiser use their existing Neuron
+    artifacts. ``--host-vae`` replaces only the decoder binding with the host
+    rollback path; CLIP placement remains an independent startup choice.
+    HunyuanVideo 1.5 remains unregistered until its offline compile and
+    generation path is complete.
     """
 
     return ServingModelMetadata(
@@ -64,5 +65,5 @@ def serving_metadata() -> ServingModelMetadata:
         orchestrator_factory=f"{_RUNNER_MODULE}:HunyuanVideoServingStageAdapter",
         request_validator_factory=(f"{_RUNNER_MODULE}:HunyuanVideoServingRequestValidator"),
         default_fps=24,
-        default_host_vae=True,
+        default_host_vae=False,
     )

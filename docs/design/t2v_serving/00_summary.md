@@ -60,8 +60,8 @@
 > lifecycle routes, S3 publication/presign, clean shutdown, and memory gates
 > with Neuron CLIP and segmented Neuron VAE. Three four-step generations
 > averaged 58.402 seconds of inference time with 79.05 GiB peak HBM. The
-> host-CLIP/host-VAE profile remains the release default pending an explicit
-> promotion decision. The controlled comparison is recorded in
+> Neuron VAE is now the omitted-flag default; `--host-vae` retains the validated
+> host rollback. The controlled comparison is recorded in
 > [the VAE placement rollout plan](10_vae_placement_rollout_plan.md); raw remote
 > logs and generated media are intentionally excluded from Git.
 
