@@ -213,6 +213,32 @@ curl -sS -X POST http://127.0.0.1:8092/v1/chat/completions \
 When private S3 storage is configured, the same `image_url.url` field contains
 an expiring presigned URL instead of a data URL.
 
+### Optional API-key authentication
+
+API authentication is disabled when no key is configured. Set one key either
+with `--api-key` or through `DIFFLET_API_KEY`; the CLI flag takes precedence:
+
+```bash
+difflet serve \
+  --model-id black-forest-labs/FLUX.1-dev \
+  --tp-degree 4 --cp-degree 1 \
+  --height 1024 --width 1024 \
+  --host 0.0.0.0 --port 8092 \
+  --api-key 'replace-with-a-secret'
+```
+
+When enabled, every `/v1` request requires a Bearer token:
+
+```bash
+curl http://127.0.0.1:8092/v1/models \
+  -H 'Authorization: Bearer replace-with-a-secret'
+```
+
+Missing or incorrect credentials return `401 {"error":"Unauthorized"}` before
+the request body is parsed or generation capacity is reserved. `/health` and
+`/ready` intentionally remain unauthenticated. This is a single shared service
+key, not tenant isolation or per-user authorization.
+
 ### Optional S3 artifact storage
 
 With no S3 variables, Difflet returns the generated PNG inline as a Base64 data
@@ -315,8 +341,8 @@ between 1 and 50. The response image is available at
 
 Serving logs are written to both the console and `./logs/`. Log files are capped at 5 MiB and
 rotated on size or when the date changes. Stop the server with `Ctrl+C` or `SIGTERM`. The API
-does not currently provide authentication; protect a remotely exposed port with a security
-group, reverse proxy, or other access control.
+supports the optional shared key described above; still protect a remotely exposed port with a
+security group, TLS-terminating reverse proxy, or equivalent network access control.
 
 ## CLI reference
 

@@ -14,6 +14,11 @@ from difflet.cli.serve import (
 from difflet.serving.options import CompilePolicy
 
 
+@pytest.fixture(autouse=True)
+def _clear_difflet_api_key(monkeypatch):
+    monkeypatch.delenv("DIFFLET_API_KEY", raising=False)
+
+
 def test_difflet_serve_routes_to_serving_command(monkeypatch):
     calls = []
 
@@ -80,6 +85,7 @@ def test_serve_help_exposes_operational_tuning_but_hides_artifact_policy(capsys)
     assert "--max-queued-requests" in out
     assert "--queue-timeout" in out
     assert "--request-timeout" in out
+    assert "--api-key" in out
     assert "--artifact-store-timeout" in out
     assert "--download-policy" not in out
     assert "--compile-policy" not in out
@@ -137,6 +143,64 @@ def test_difflet_serve_operational_controls_have_documented_defaults(monkeypatch
     assert options.video_retention_seconds == 25 * 60 * 60
     assert options.video_max_jobs == 4096
     assert options.video_sweep_interval_seconds == 300.0
+    assert options.api_key is None
+
+
+def test_difflet_serve_maps_optional_api_key_without_exposing_it_in_repr(monkeypatch):
+    calls = []
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
+    cli_main = importlib.import_module("difflet.cli.main")
+
+    cli_main.main(
+        [
+            "serve",
+            "--model-id",
+            "black-forest-labs/FLUX.1-dev",
+            "--api-key",
+            "cli-secret",
+        ]
+    )
+
+    options = options_from_args(calls[0])
+    assert options.api_key == "cli-secret"
+    assert "cli-secret" not in repr(options)
+
+
+def test_difflet_serve_uses_environment_api_key_and_cli_takes_precedence(monkeypatch):
+    calls = []
+    monkeypatch.setenv("DIFFLET_API_KEY", "environment-secret")
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
+    cli_main = importlib.import_module("difflet.cli.main")
+
+    cli_main.main(["serve", "--model-id", "black-forest-labs/FLUX.1-dev"])
+    cli_main.main(
+        [
+            "serve",
+            "--model-id",
+            "black-forest-labs/FLUX.1-dev",
+            "--api-key",
+            "cli-secret",
+        ]
+    )
+
+    assert options_from_args(calls[0]).api_key == "environment-secret"
+    assert options_from_args(calls[1]).api_key == "cli-secret"
+
+
+@pytest.mark.parametrize("value", ["", "two words", " leading", "trailing "])
+def test_difflet_serve_rejects_invalid_api_key(value):
+    cli_main = importlib.import_module("difflet.cli.main")
+
+    with pytest.raises(SystemExit):
+        cli_main.main(
+            [
+                "serve",
+                "--model-id",
+                "black-forest-labs/FLUX.1-dev",
+                "--api-key",
+                value,
+            ]
+        )
 
 
 def test_difflet_serve_maps_operational_controls(monkeypatch):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -50,6 +50,7 @@ class ServeOptions:
     revision: str | None = None
     host: str = "0.0.0.0"
     port: int = 8091
+    api_key: str | None = field(default=None, repr=False)
     tp_degree: int | None = None
     cp_degree: int | None = None
     cp_mode: str | None = None
@@ -87,6 +88,12 @@ class ServeOptions:
 
     def __post_init__(self) -> None:
         validate_worker_heartbeat_interval(self.worker_heartbeat_interval)
+        if self.api_key is not None and (
+            not isinstance(self.api_key, str)
+            or not self.api_key
+            or any(character.isspace() for character in self.api_key)
+        ):
+            raise ValueError("API key must be non-empty and cannot contain whitespace")
         if self.queue_timeout is not None and (
             not math.isfinite(self.queue_timeout) or self.queue_timeout <= 0
         ):

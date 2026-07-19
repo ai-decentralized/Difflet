@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -152,11 +153,15 @@ def options_from_args(args: argparse.Namespace) -> ServeOptions:
     validate_serve_args(args)
     compile_policy = CompilePolicy.FORCE if getattr(args, "force", False) else CompilePolicy.AUTO
     download_policy = DownloadPolicy.AUTO
+    api_key = getattr(args, "api_key", None)
+    if api_key is None:
+        api_key = os.environ.get("DIFFLET_API_KEY") or None
     return ServeOptions(
         model_id=args.model_id,
         revision=args.revision,
         host=args.host,
         port=args.port,
+        api_key=api_key,
         tp_degree=args.tp_degree,
         cp_degree=args.cp_degree,
         cp_mode=args.cp_mode,

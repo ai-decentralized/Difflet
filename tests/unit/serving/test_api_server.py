@@ -99,6 +99,70 @@ def test_health_returns_503_when_engine_unhealthy():
     assert response.status_code == 503
 
 
+def test_api_key_auth_is_optional_and_protects_only_v1_routes():
+    from fastapi.testclient import TestClient
+
+    open_options = ServeOptions(model_id="black-forest-labs/FLUX.1-dev")
+    open_app = create_app(
+        options=open_options,
+        resolved_model=resolve_serving_model(open_options),
+        engine=_SuccessfulEngine(),
+        artifact_store=object(),
+    )
+    with TestClient(open_app) as client:
+        assert client.get("/v1/models").status_code == 200
+
+    protected_options = ServeOptions(
+        model_id="black-forest-labs/FLUX.1-dev",
+        api_key="test-secret",
+    )
+    assert (
+        resolve_serving_model(protected_options).profile
+        == resolve_serving_model(open_options).profile
+    )
+    protected_app = create_app(
+        options=protected_options,
+        resolved_model=resolve_serving_model(protected_options),
+        engine=_SuccessfulEngine(),
+        artifact_store=object(),
+    )
+    with TestClient(protected_app) as client:
+        assert client.get("/health").status_code == 200
+        assert client.get("/ready").status_code == 200
+        assert client.get("/v1/models").json() == {"error": "Unauthorized"}
+        assert client.get("/v1/models").status_code == 401
+        assert (
+            client.post(
+                "/v1/chat/completions",
+                content=b"not-json",
+                headers={"Content-Type": "application/json"},
+            ).status_code
+            == 401
+        )
+        assert (
+            client.get(
+                "/v1/models",
+                headers={"Authorization": "Basic test-secret"},
+            ).status_code
+            == 401
+        )
+        assert (
+            client.get(
+                "/v1/models",
+                headers={"Authorization": "Bearer wrong-secret"},
+            ).status_code
+            == 401
+        )
+        assert (
+            client.get(
+                "/v1/models",
+                headers={"Authorization": "bEaReR test-secret"},
+            ).status_code
+            == 200
+        )
+        assert client.options("/v1/models").status_code != 401
+
+
 def test_cancelled_engine_start_is_always_torn_down():
     async def _run() -> None:
         options = ServeOptions(model_id="black-forest-labs/FLUX.1-dev")

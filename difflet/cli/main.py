@@ -305,6 +305,16 @@ def _add_serve_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8091)
     p.add_argument(
+        "--api-key",
+        type=_api_key,
+        default=None,
+        metavar="KEY",
+        help=(
+            "Bearer API key required by /v1 endpoints "
+            "(default: DIFFLET_API_KEY; disabled when unset)"
+        ),
+    )
+    p.add_argument(
         "--max-queued-requests",
         type=_nonnegative_int,
         default=8,
@@ -415,6 +425,12 @@ def _positive_int(value: str) -> int:
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be greater than zero")
     return parsed
+
+
+def _api_key(value: str) -> str:
+    if not value or any(character.isspace() for character in value):
+        raise argparse.ArgumentTypeError("must be non-empty and cannot contain whitespace")
+    return value
 
 
 def _positive_finite_float(value: str) -> float:
