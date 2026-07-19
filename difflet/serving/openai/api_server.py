@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Coroutine, TypeVar
 
 from difflet.serving.artifact_store import S3ArtifactStore
+from difflet.serving.auth import ApiKeyAuthenticationMiddleware
 from difflet.serving.errors import DiffletServingError, internal_error, request_cancelled
 from difflet.serving.model_registry import ResolvedServingModel
 from difflet.serving.openai.serving_chat import (
@@ -218,6 +219,9 @@ def create_app(
             logger.info("serving shutdown complete model=%s", resolved_model.model_id)
 
     app = FastAPI(title="Difflet Serving", lifespan=lifespan)
+    if options.api_key is not None:
+        app.add_middleware(ApiKeyAuthenticationMiddleware, api_key=options.api_key)
+        logger.info("serving API-key authentication enabled protected_prefix=/v1")
     app.state.video_service = video_service
     app.state.validation_executor = validation_executor
 

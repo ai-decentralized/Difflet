@@ -32,12 +32,20 @@ HunyuanVideo 1.5 is not registered for serving.
 
 ### Security boundary
 
-Difflet serving does not provide built-in authentication, tenant isolation, or
-per-user job ownership. The `user` form field is opaque metadata, not an access
-control. Any caller that can reach the server can list, retrieve, download, and
-delete every job owned by that process. Bind to `127.0.0.1` for local use; when
-binding to `0.0.0.0`, place the service on a trusted network or behind an
-authenticating, authorizing reverse proxy.
+API authentication is optional. With neither `--api-key` nor
+`DIFFLET_API_KEY`, no authentication middleware is installed. When a key is
+configured, every `/v1` route requires `Authorization: Bearer <key>` and rejects
+missing or incorrect credentials with `401 {"error":"Unauthorized"}` before
+multipart parsing, validation, or FIFO admission. The CLI flag takes precedence
+over the environment value. `/health`, `/ready`, and `OPTIONS` preflight requests
+remain unauthenticated.
+
+The key is shared by the whole serve process; Difflet does not provide tenant
+isolation or per-user job ownership. The `user` form field is opaque metadata,
+not an access control. Any caller holding the key can list, retrieve, download,
+and delete every job owned by that process. When binding to `0.0.0.0`,
+still use a trusted network and a TLS-terminating reverse proxy or equivalent
+ingress.
 
 ## Quick start
 
@@ -81,6 +89,15 @@ TOKENIZERS_PARALLELISM=false difflet serve \
 ```
 
 Add `--host-vae` to either startup command to use the host decoder instead.
+
+To enable the optional shared API key, add `--api-key replace-with-a-secret` to
+the startup command, or set `DIFFLET_API_KEY` in the serving environment. Then
+include the header on every command under `/v1`:
+
+```bash
+curl -sS http://127.0.0.1:8092/v1/models \
+  -H 'Authorization: Bearer replace-with-a-secret'
+```
 
 ### Hunyuan placement variants
 
