@@ -17,33 +17,31 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 
-# Versions pinned to the toolchain on the validated nxdi_inference venv
-# (/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference). Bump in lockstep when
-# upgrading the Neuron stack.
+# difflet is installed with `pip install -e .` INTO the pre-built Neuron venv
+# (/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference), which already provides the
+# Neuron toolchain (torch, torch-neuronx, torch-xla, neuronx-cc,
+# neuronx-distributed, nki, libneuronxla) and the HuggingFace stack
+# (transformers, huggingface_hub, safetensors, tokenizers, sentencepiece,
+# numpy, Pillow). Those are deliberately NOT listed here: pinning them made
+# `pip install -e .` downgrade the venv's Neuron packages to older builds.
+# Only declare what the venv does not already supply.
+#
+# The Neuron venv is a hard requirement for difflet — this file is not a
+# standalone install spec and installing outside that venv is unsupported.
 dependencies = [
-    # Neuron toolchain (Layer 3 — kept as deps, not forked)
-    "torch>=2.9.0,<2.10",
-    "torch-neuronx==2.9.0.2.14.27725+e2ff0410",
-    "torch-xla==2.9.0",
-    "neuronx-cc==2.25.3371.0+f524f7f8",         # ships nkilib bundled
-    "neuronx-distributed==0.19.28093+fc70b593",
-    "nki==0.4.0+25940409122.gd30719f9",
-    "libneuronxla==2.2.16974.0+a550bfe0",
+    "diffusers==0.38.0",                          # pinned: pipeline/transformer forks track this exact API
+    "av",                                         # video I/O (Wan/Hunyuan output) — difflet/serving/video_media.py
+    "imageio-ffmpeg",                             # ffmpeg binary for video encoding
+    "accelerate",                                 # used by diffusers' from_pretrained weight loading
 
-    # HuggingFace stack
-    "transformers==4.57.6",
-    "diffusers>=0.38.0",                          # latest stable; NxDI Flux requires diffusers but doesn't pin it
-    "huggingface_hub>=0.36.0",
-    "safetensors>=0.7.0",
-    "tokenizers>=0.22.0",
-    "sentencepiece>=0.2.0",                       # for T5 / umT5 tokenizers
-
-    # Misc
-    "numpy",
-    "Pillow",
-    "einops",
-    "accelerate",
-    "av",                                         # for video I/O (Wan/Hunyuan output)
+    # Serving stack — `difflet serve` is part of the CLI, so these are required,
+    # not optional. fastapi and boto3 are already in the venv; listed anyway to
+    # document the floor.
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.35",                    # difflet/cli/serve.py
+    "python-multipart>=0.0.20",                   # Starlette request.form() — serving_video.py:133
+    "boto3>=1.34",                                # S3 artifact store — artifact_store.py:156
+    "python-dotenv>=1.0",                         # .env loading — serve.py:248
 ]
 
 [project.optional-dependencies]
@@ -54,16 +52,8 @@ test = [
     "imageio",
     "imageio-ffmpeg",
 ]
-serve = [
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.35",
-    "python-multipart>=0.0.20",
-    "boto3>=1.34",
-    "python-dotenv>=1.0",
-]
 dev = [
     "difflet-diffusion[test]",
-    "difflet-diffusion[serve]",
     "black==26.1.0",
     "isort==8.0.1",
     "ruff==0.15.1",
