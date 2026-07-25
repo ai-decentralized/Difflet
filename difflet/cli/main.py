@@ -473,6 +473,23 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_cache_flags(run_cmd)
     _add_generate_flags(run_cmd)
 
+    clean = sub.add_parser(
+        "clean",
+        help="Remove Neuron compiler scratch (hash dirs, neuronxcc-*/, "
+        "log-neuron-cc.txt) from a directory",
+    )
+    clean.add_argument(
+        "--dir",
+        default=".",
+        help="Directory to sweep (default: current working directory)",
+    )
+    clean.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="List what would be removed without deleting anything",
+    )
+
     serve = sub.add_parser("serve", help="Start OpenAI-compatible image/video serving")
     _add_serve_model_flag(serve)
     serve.add_argument("--revision", default=None)
@@ -704,6 +721,12 @@ def _ensure_jemalloc() -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "clean":
+        from difflet.cli.clean import run as run_clean
+
+        run_clean(args)
+        return
 
     valid_models = SERVE_VALID_MODELS if args.command == "serve" else VALID_MODELS
     if args.model_id not in valid_models:
