@@ -346,8 +346,9 @@ security group, TLS-terminating reverse proxy, or equivalent network access cont
 
 ## CLI reference
 
-The CLI has four subcommands. `run` is the one-shot path; the other three let you run and verify
-each step independently — useful for debugging compilation or inspecting intermediate artifacts.
+The CLI has four model subcommands. `run` is the one-shot path; the other three let you run and
+verify each step independently — useful for debugging compilation or inspecting intermediate
+artifacts. `difflet clean` is a housekeeping command that takes no `--model-id`.
 
 | Command | Purpose |
 |---|---|
@@ -355,6 +356,25 @@ each step independently — useful for debugging compilation or inspecting inter
 | `difflet compile` | AOT-compile the model NEFFs and cache them on disk |
 | `difflet generate` | Run inference (requires a prior `compile`) |
 | `difflet run` | `download` + `compile` + `generate` in one shot |
+| `difflet clean` | Delete Neuron compiler scratch from the working directory |
+
+### Cleaning up compiler scratch
+
+Device compiles leave scratch in the process working directory: per-kernel cache directories
+named with a 16-hex-char hash, one `neuronxcc-<id>/` work directory per compiler invocation, and
+the `log-neuron-cc.txt` / `global_metric_store.json` / `PostSPMDPassesExecutionDuration.txt`
+diagnostic files. They are gitignored but accumulate across runs.
+
+```bash
+difflet clean --dry-run     # list what would go
+difflet clean               # delete it
+difflet clean --dir PATH    # sweep somewhere other than the cwd
+```
+
+Only direct children of the target directory are touched, symlinks are never followed, and a
+hash-named directory holding anything other than compiler output is reported and left in place.
+This does **not** touch the compiled-artifact cache under `~/.cache/difflet/` — remove that by
+hand (`rm -rf ~/.cache/difflet`) or recompile over it with `--force`.
 
 ### Common flags
 

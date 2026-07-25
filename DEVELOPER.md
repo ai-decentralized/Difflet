@@ -150,6 +150,12 @@ Override the cache root with the `DIFFLET_COMPILE_CACHE` environment variable, `
 (CLI), or `compile_cache_dir=` in `from_pretrained`. Pass `--force` (CLI) or `force_compile=True`
 (API) to bypass a valid cache hit.
 
+Separate from this cache, neuronx-cc dumps scratch into the process **working directory** —
+16-hex-char per-kernel cache dirs, `neuronxcc-<id>/` work dirs, and a few diagnostic files (all
+gitignored). `difflet clean` (`difflet/cli/clean.py`) sweeps them; `--dry-run` lists first. It
+matches only direct children by those fixed patterns, never follows symlinks, and skips a
+hash-named directory whose contents don't look like compiler output.
+
 ## Parallelism
 
 `DiffletParallelConfig` exposes four orthogonal parallelism axes, organized as a named device
