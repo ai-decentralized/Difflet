@@ -78,9 +78,7 @@ Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-p
   presented as 4 logical NeuronCores under the Trn2 default `LNC=2`). Other Trn2 shapes should
   work; the tensor-parallel degree must divide the number of visible NeuronCores.
 - **Runtime** — a Neuron PyTorch 2.9 environment with `neuronx-cc`, `neuronx-distributed`, `nki`,
-  `nkilib`, `torch-neuronx`, and `libneuronxla`. Pinned versions live in `pyproject.toml`. The
-  reference development image bundles all of these at
-  `/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/`.
+  `nkilib`, `torch-neuronx`, and `libneuronxla`. The reference development image bundles all of these at `/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/`.
 - **Python** — 3.10+.
 
 ### Install
@@ -89,25 +87,9 @@ Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-p
 git clone git@github.com:ai-decentralized/Difflet.git
 cd Difflet
 source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
-pip install diffusers==0.38.0
-pip install imageio-ffmpeg
-pip install -e . --no-deps
-```
-
-This installs the `difflet` CLI on your `PATH`.
-
-Because the editable install above intentionally uses `--no-deps`, install the
-runtime dependencies for resident HTTP serving explicitly before running
-`difflet serve`:
-
-```bash
-pip install accelerate "fastapi>=0.115" "uvicorn[standard]>=0.35" \
-  "boto3>=1.34" "python-dotenv>=1.0"
-```
-
-Authenticate with Hugging Face for gated checkpoints such as `black-forest-labs/FLUX.1-dev`:
-
-```bash
+# This installs the `difflet` CLI on your `PATH`.
+pip install -e .
+# Setup your huggingface credential
 huggingface-cli login
 ```
 
@@ -358,24 +340,6 @@ artifacts. `difflet clean` is a housekeeping command that takes no `--model-id`.
 | `difflet run` | `download` + `compile` + `generate` in one shot |
 | `difflet clean` | Delete Neuron compiler scratch from the working directory |
 
-### Cleaning up compiler scratch
-
-Device compiles leave scratch in the process working directory: per-kernel cache directories
-named with a 16-hex-char hash, one `neuronxcc-<id>/` work directory per compiler invocation, and
-the `log-neuron-cc.txt` / `global_metric_store.json` / `PostSPMDPassesExecutionDuration.txt`
-diagnostic files. They are gitignored but accumulate across runs.
-
-```bash
-difflet clean --dry-run     # list what would go
-difflet clean               # delete it
-difflet clean --dir PATH    # sweep somewhere other than the cwd
-```
-
-Only direct children of the target directory are touched, symlinks are never followed, and a
-hash-named directory holding anything other than compiler output is reported and left in place.
-This does **not** touch the compiled-artifact cache under `~/.cache/difflet/` — remove that by
-hand (`rm -rf ~/.cache/difflet`) or recompile over it with `--force`.
-
 ### Common flags
 
 | Flag | Applies to | Description |
@@ -514,6 +478,24 @@ difflet generate --model-id Qwen/Qwen-Image \
 | `compile` (staged models) | `~/.cache/difflet/<stage-specific-dir>/` |
 | `generate` inter-stage tensors | `--work-dir` path (default `~/.cache/difflet/work/<model>/`) |
 | `generate` final output | `--output` path |
+
+### Cleaning up compiler scratch
+
+Device compiles leave scratch in the process working directory: per-kernel cache directories
+named with a 16-hex-char hash, one `neuronxcc-<id>/` work directory per compiler invocation, and
+the `log-neuron-cc.txt` / `global_metric_store.json` / `PostSPMDPassesExecutionDuration.txt`
+diagnostic files. They are gitignored but accumulate across runs.
+
+```bash
+difflet clean --dry-run     # list what would go
+difflet clean               # delete it
+difflet clean --dir PATH    # sweep somewhere other than the cwd
+```
+
+Only direct children of the target directory are touched, symlinks are never followed, and a
+hash-named directory holding anything other than compiler output is reported and left in place.
+This does **not** touch the compiled-artifact cache under `~/.cache/difflet/` — remove that by
+hand (`rm -rf ~/.cache/difflet`) or recompile over it with `--force`.
 
 ## Verified parallelism matrix
 
