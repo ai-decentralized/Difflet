@@ -15,6 +15,7 @@ from typing import Any
 import torch.nn as nn
 
 from difflet import envs
+from difflet.backends.trainium.utils.compile_allocator import without_allocator_preload
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,9 @@ class MultiComponentApplication(nn.Module, ABC):
 
         compiler_workdir = envs.BASE_COMPILE_WORK_DIR
         try:
-            for spec in specs:
-                self._compile_one(spec, compiled_model_path, compiler_workdir, debug)
+            with without_allocator_preload():
+                for spec in specs:
+                    self._compile_one(spec, compiled_model_path, compiler_workdir, debug)
         finally:
             os.environ["BASE_COMPILE_WORK_DIR"] = compiler_workdir
 
