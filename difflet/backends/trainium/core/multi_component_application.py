@@ -16,6 +16,7 @@ import torch.nn as nn
 
 from difflet import envs
 from difflet.backends.trainium.utils.compile_allocator import without_allocator_preload
+from difflet.backends.trainium.utils.compile_retry import retrying_cached_failures
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class MultiComponentApplication(nn.Module, ABC):
 
         compiler_workdir = envs.BASE_COMPILE_WORK_DIR
         try:
-            with without_allocator_preload():
+            with without_allocator_preload(), retrying_cached_failures():
                 for spec in specs:
                     self._compile_one(spec, compiled_model_path, compiler_workdir, debug)
         finally:
