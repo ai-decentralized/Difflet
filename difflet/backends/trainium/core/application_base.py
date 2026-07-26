@@ -50,6 +50,7 @@ LoraModelManager = None  # type: ignore[assignment]
 # Original: from neuronx_distributed_inference.modules.lora_serving import LoraModelManager
 from difflet.backends.trainium.utils.runtime_env import set_env_vars
 from difflet.backends.trainium.utils.compile_env import set_compile_env_vars
+from difflet.backends.trainium.utils.compile_allocator import without_allocator_preload
 from difflet.backends.trainium.utils.snapshot import (
     ScriptModuleWrapper,
     SnapshotOutputFormat,
@@ -343,7 +344,8 @@ class NeuronApplicationBase(torch.nn.Module):
         trace_kwargs = dict(initialize_model_weights=False, dry_run=dry_run)
         if disable_fail_fast:
             trace_kwargs["disable_fail_fast"] = True
-        traced_model = self.get_builder(debug).trace(**trace_kwargs)
+        with without_allocator_preload():
+            traced_model = self.get_builder(debug).trace(**trace_kwargs)
 
         self._save_configs_to_compiler_workdir()
 
