@@ -762,9 +762,11 @@ def main(argv: list[str] | None = None) -> None:
         if args.requests_dir is None and (args.requests is not None or (args.dp or 1) > 1):
             _dispatch_dp(args)  # raises SystemExit
 
-    # Only for the weight-loading commands. NOT compile: neuronx-cc runs as a
-    # subprocess that does not strip jemalloc from LD_PRELOAD, and compiling
-    # the DiT under jemalloc crashes the compiler worker.
+    # Only for the weight-loading commands, where jemalloc pays off. This list
+    # is NOT the safety boundary for compilation: `run` also compiles when the
+    # cache is cold, and neuronx-cc aborts under jemalloc. The compile path
+    # strips the preload itself for exactly that reason -- see
+    # difflet/backends/trainium/utils/compile_allocator.py.
     if argv is None and args.command in ("generate", "run"):
         _ensure_jemalloc()
 
