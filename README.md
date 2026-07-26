@@ -89,7 +89,7 @@ cd Difflet
 source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
 # This installs the `difflet` CLI on your `PATH`.
 pip install -e .
-# Setup your hugginface credential
+# Setup your huggingface credential
 huggingface-cli login
 ```
 
