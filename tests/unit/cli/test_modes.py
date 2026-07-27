@@ -2,7 +2,7 @@ import argparse
 
 import pytest
 
-from difflet.cli.modes import MODEL_CLASS, ModeConfig, resolve_mode
+from difflet.cli.modes import ModeConfig, model_class, resolve_mode
 
 WAN = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
 FLUX = "black-forest-labs/FLUX.1-dev"
@@ -21,7 +21,7 @@ def _args(**kw):
 
 def test_all_six_models_classified():
     for mid in (WAN, FLUX, HYV, HYV15, QWEN, LTX):
-        assert mid in MODEL_CLASS
+        assert model_class(mid) in {"distilled", "true_cfg", "true_cfg_no_cp"}
 
 
 @pytest.mark.parametrize("mid", [FLUX, HYV, HYV15, QWEN])

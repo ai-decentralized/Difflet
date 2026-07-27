@@ -553,3 +553,37 @@ Flux 教程的 trn2.48xlarge 配置，是有意为之；小机器上由 D1 的�
 否则同一条断言在笔记本上过、在 trn2 上挂，单测会变成看机器脸色。真实解析路径由
 `tests/unit/planner/test_hardware.py` 注入 `neuron-ls` payload 来覆盖，包括
 trn2.3xlarge 的逐字实测输出和一个 16 设备 / 64 核的 trn2.48xlarge 合成 payload。
+
+### P1 决策
+
+**D6 — `ModelCapabilities` 放在 `difflet/registry.py`，作为 `ModelEntry` 的伴生
+dataclass**，而不是新开一个模块。它描述的就是「这个 registry 条目支持什么」，
+和 `default_parallel` / `default_shape` 是同一层的东西。
+
+**D7 — `capabilities` 字段可为 `None`，但 planner 走 `require_capabilities()`
+硬失败。** 其他测试套件会往全局 registry 注册 dummy 条目（`unit_dummy` 等），
+强制必填会逼这些 fixture 编造能力值；out-of-tree 模型同理。让字段可选、让消费者
+显式要求，比让注册方敷衍填值更诚实。
+
+**D8 — 从 config.json 补齐了两个此前无处记载的 head 数**：HunyuanVideo 1.5 是
+**16**，LTX-2 是 **32**。仓库里唯一的 head 数记录是 `scripts/verify_cli.py:89`
+的注释「wan 40; flux/hunyuan/qwen 24」，这两个模型因为不支持 CP 而从未被提及。
+六个模型的 head 数都能被 4 整除，所以 4 核上的 `tp4` / `tp2cp2`（含 ulysses）
+在整除性上都是安全的。
+
+**D9 — 漂移守卫测试改写而非直接删除。** 原来的
+`test_distilled_set_matches_cli_source_of_truth` 断言 `verify_cli` 的字面量集合
+等于 `cli/main.py` 的字面量集合；现在两边都从 registry 派生，这条断言退化成
+「frozenset 推导式能工作」。改成断言派生结果等于 **README 里记录的支持矩阵** ——
+这样在 registry 里改了能力却忘了更新文档时仍会被抓住。
+
+**D10 — `cli/modes.py` 的 `MODEL_CLASS` 字典换成 `model_class(model_id)` 函数。**
+三个类别（`distilled` / `true_cfg` / `true_cfg_no_cp`）现在从
+`is_distilled` 和 `supports_cp` 推导。`_BASE` 预设表本身保留不动 —— 它是 P4 才
+被 planner 取代的东西，这次只拆掉它的模型分类硬编码，并在模块 docstring 里注明
+它假设 4 核、不看硬件。
+
+**改动波及面**：`cli/main.py`（删掉 `_DISTILLED_MODELS` / `_SP_SUPPORTED_MODELS`）、
+`cli/modes.py`、`serving/options.py`（SP 白名单）、`scripts/verify_cli.py`
+（三个 skip 集合）、`tests/unit/cli/test_verify_cli.py`、`tests/unit/cli/test_modes.py`。
+新增模型现在只需填一处 `ModelCapabilities`。

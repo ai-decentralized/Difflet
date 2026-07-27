@@ -180,7 +180,7 @@ def build_serving_profile(
             f"{model_id} serving does not expose the true-CFG request path required "
             "by --cfg-parallel."
         )
-    if sp_enabled and model_type not in {"flux", "wan", "hunyuan_video"}:
+    if sp_enabled and not entry.require_capabilities().supports_sp:
         raise invalid_extra_body(f"{model_id} does not support --sp serving.")
     if teacache_cadence is not None or teacache_online_delta is not None:
         raise invalid_extra_body(

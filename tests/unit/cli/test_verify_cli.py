@@ -85,16 +85,21 @@ def test_staged_flags():
     assert staged == {"qwen_image", "wan", "wan2_1", "hunyuan_video"}
 
 
-# ---------------------------------------------------------------- drift guards
+# ------------------------------------------------------------- skip-rule sets
+#
+# These were drift guards pinning hand-written literals here to hand-written
+# literals in difflet.cli.main. Both sides now derive from each model's registry
+# ModelCapabilities, so pinning them to each other would only assert that
+# frozenset comprehension works. What is still worth asserting is that the
+# derived sets match the support matrix documented in README.md -- that catches
+# a capability edited in the registry without the docs following.
 
-def test_distilled_set_matches_cli_source_of_truth():
-    from difflet.cli.main import _DISTILLED_MODELS
-    assert {MODELS[k].model_id for k in DISTILLED} == _DISTILLED_MODELS
+def test_distilled_set_matches_documented_matrix():
+    assert DISTILLED == {"flux", "qwen_image", "hunyuan_video", "hunyuan_video_15"}
 
 
-def test_sp_supported_set_matches_cli_source_of_truth():
-    from difflet.cli.main import _SP_SUPPORTED_MODELS
-    assert {MODELS[k].model_id for k in SP_SUPPORTED} == _SP_SUPPORTED_MODELS
+def test_sp_supported_set_matches_documented_matrix():
+    assert SP_SUPPORTED == {"flux", "wan", "wan2_1", "hunyuan_video"}
 
 
 def test_all_model_ids_valid_in_cli():

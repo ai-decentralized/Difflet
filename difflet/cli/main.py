@@ -522,34 +522,18 @@ def _validate_teacache(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
-# Guidance-distilled models run a single forward pass with the guidance scale
-# baked into the timestep embedding, so CFG-parallel has no second branch to
-# split via the CLI. Hunyuan/Qwen have no true-CFG path at all; Flux is also
-# guidance-distilled and *does* have an opt-in true-CFG path, but we don't expose
-# its --true-cfg-scale/--negative-prompt knobs through the CLI, so cfg-parallel is
-# rejected here too. The staged CLI path builds the app directly (bypassing each
-# model's entry.py guard), so reject before dispatch.
-_DISTILLED_MODELS = {
-    "black-forest-labs/FLUX.1-dev",
-    "hunyuanvideo-community/HunyuanVideo",
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
-    "Qwen/Qwen-Image",
-}
+def _capabilities(model_id: str):
+    """The registry's parallel-strategy declaration for a CLI model id.
 
+    ``difflet/registry.py`` is the single source of truth; the CLI used to keep
+    its own ``_DISTILLED_MODELS`` / ``_SP_SUPPORTED_MODELS`` copies, which
+    ``scripts/verify_cli.py`` then copied again and a drift-guard test pinned
+    together.
+    """
 
-# Models whose backbone wires Megatron-style sequence parallelism, device-verified
-# (dense-vs-SP cosine >= 0.999). Qwen-Image is deferred: its forward monkey-patches
-# the upstream diffusers transformer, where the SPMDRank per-rank id used by the
-# sequence scatter is not a live/loaded graph input, so every rank reads rank 0
-# (tracked follow-up — needs reimplementing Qwen's forward like the others). LTX-2
-# (tri-stream, no CP foundation) and HunyuanVideo-1.5 (segmented runtime) are also
-# out of scope for this increment.
-_SP_SUPPORTED_MODELS = {
-    "black-forest-labs/FLUX.1-dev",
-    "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers",
-    "hunyuanvideo-community/HunyuanVideo",
-}
+    from difflet.registry import resolve_model
+
+    return resolve_model(model_id, model_type=_MODEL_TYPE[model_id]).require_capabilities()
 
 
 def _validate_sp(args: argparse.Namespace) -> None:
@@ -563,7 +547,7 @@ def _validate_sp(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
-    if args.model_id not in _SP_SUPPORTED_MODELS:
+    if not _capabilities(args.model_id).supports_sp:
         print(
             f"Error: {args.model_id} does not support --sp. Sequence parallelism "
             "is available for Flux, Wan, and HunyuanVideo.",
@@ -582,7 +566,9 @@ def _validate_cfg_parallel(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
-    if args.model_id in _DISTILLED_MODELS:
+    # The staged CLI path builds the app directly, bypassing each model's
+    # entry.py guard, so this has to reject before dispatch.
+    if not _capabilities(args.model_id).supports_cfg_parallel:
         print(
             f"Error: {args.model_id} is guidance-distilled (single forward pass "
             "with the guidance scale baked into the timestep embedding); "
