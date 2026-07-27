@@ -166,6 +166,14 @@ MODELS: dict[str, ModelSpec] = {
 DISTILLED = frozenset({"flux", "qwen_image", "hunyuan_video", "hunyuan_video_15"})
 SP_SUPPORTED = frozenset({"flux", "wan", "wan2_1", "hunyuan_video"})
 CP_UNSUPPORTED = frozenset({"ltx_2", "hunyuan_video_15"})
+# Ulysses all-to-alls the sequence shard into a head shard, and that kernel has
+# no path for an attention mask: both the ring and ulysses branches raise
+# NotImplementedError when one is passed (modeling_hunyuan_video.py:490,
+# qwen_image/transformer.py:391). HunyuanVideo always carries a mask -- its
+# Llama text encoder emits padded, variable-length sequences -- so the pairing
+# is unsupported no matter how the heads divide. Qwen-Image reaches the same
+# branch with attention_mask=None and is unaffected.
+ULYSSES_UNSUPPORTED = frozenset({"hunyuan_video"})
 
 # Documented known gaps:
 # - hunyuan_video_15 is a scaffold: compile/generate raise NotImplementedError
@@ -199,6 +207,8 @@ def skip_reason(model_key: str, config_key: str) -> str | None:
         return "no-SP"
     if "--cp-degree" in cfg.flags and model_key in CP_UNSUPPORTED:
         return "no-CP"
+    if "ulysses" in cfg.flags and model_key in ULYSSES_UNSUPPORTED:
+        return "no-ulysses"
     return None
 
 
