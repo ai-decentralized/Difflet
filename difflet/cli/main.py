@@ -480,6 +480,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_model_flag(plan_cmd)
     _add_shape_flags(plan_cmd)
+    _add_cache_flags(plan_cmd)
+    plan_cmd.add_argument(
+        "--objective",
+        choices=["latency", "throughput", "balanced"],
+        default="latency",
+        help="What to optimize: single-request latency, aggregate throughput, "
+        "or the geometric mean of both (default: latency)",
+    )
+    plan_cmd.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        help="Denoise steps to score against (default: 20)",
+    )
     plan_cmd.add_argument(
         "--total-cores",
         type=int,

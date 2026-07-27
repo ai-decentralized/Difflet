@@ -624,7 +624,70 @@ HBM 放不下）、HunyuanVideo 1.5 全部配置（scaffold，只实现了 downl
 （`(?<![.\w])dp_degree\s*=`），仍然抓得住 `DiffletParallelConfig(dp_degree=N)`
 这种真正会把 dp 轴带进 worker 编译图的写法。
 
-**D18 — `difflet plan` 输出直接给出可复制的 CLI flags**，而不只是配置名。
+**D18a — `difflet plan` 输出直接给出可复制的 CLI flags**，而不只是配置名。
 一行 `tp2cp2ulysses  --tp-degree 2 --cp-degree 2 --cp-mode ulysses` 可以直接粘到
 `difflet compile` 后面。`--json` 给机器读，`--serving` 施加 serving 的额外限制，
 `--total-cores` 让用户为另一台机器做规划。
+
+### P3 决策
+
+**D19 — 成本模型做成「相对」而非「绝对」。** 不去估算绝对 FLOPs 和设备吞吐（在
+这个加速器上两者都是猜），而是把单个标量 `C`（单核每步计算秒数）拟合到**同模型
+同 shape 的真实实测**上，再用代码里能确定**比值**的项外推：
+
+```
+T_step = C * compute_share(config) + comm_bytes(config) / bandwidth
+```
+
+三档标定，输出里如实标注：0 个实测点 → 用参数量估 `C`，标
+`predicted-uncalibrated`；1 个 → 解出 `C`、带宽用假设值；**≥2 个 → 最小二乘同时
+拟合 `C` 和 `1/bandwidth`，不再依赖任何假设常数**。这是 benchmark 计划要求「每个
+模型至少两个配置」的原因。
+
+**D20 — SP 在通信上是中性的，这是诚实的建模结果不是疏漏。** row-parallel
+all-reduce 换成 reduce-scatter + all-gather，各 `(tp-1)/tp`，合计仍是
+`2(tp-1)/tp` —— 与它替换掉的 all-reduce 分毫不差。所以 SP 的全部预测收益来自
+计算项（`REPLICATED_COMPUTE_SHARE` 那部分被 tp 整除）。有专门的测试钉住这一点，
+一旦不成立说明通信账变了，该重新审视模型而不是打补丁。
+
+**D21 — ulysses / gather_kv 的通信比是 `2/cp`，不是设计文档说的 `1/cp`。**
+gather_kv 发 `2(cp-1)·L`（K 和 V 两次 all-gather），ulysses 发
+`4(cp-1)/cp·L`（q,k,v 正向 + output 反向共 4 次 all-to-all）。比值
+`= 2/cp`：**cp=2 时两者相等**，cp=4 才减半。Ulysses 设计文档的「少一个 cp 因子」
+比较的是 `O(S·H·d)` 与 `O(S/cp·H·d)`，丢掉了 `(cp-1)/cp` 系数和张量个数。
+这个分歧列进了 benchmark 计划待实测判定。
+
+**D22 — 内存估算做成提示，不做硬性可行性规则。** 朴素模型（设备上驻留
+`dp×cfg×cp` 份完整权重）说 Wan 2.2 `tp2cfg` 需要 137.6 GB、放不进 96 GB 的芯片，
+而 `verify_cli` 记录这个格子**在设备上是通过的**。所以朴素模型某处高估了 ——
+很可能是分阶段模型的组件从不同时常驻。在实测峰值 HBM 之前，planner 报出这个数字
+并加 `!` 标记，但拒绝据此剔除候选。**已知后果**：Flux 的 `tp1cp4*` 目前排第一
+（预测 0.182s/step vs `tp4` 实测 0.265s），但它需要 135 GB，几乎肯定跑不起来。
+benchmark 计划的优先级 2 专门解决这件事。
+
+**D23 — 维度用静态表而不是读 `config.json`。** 规划一个配置恰恰是**下载 30 GB
+权重之前**该做的事。表里的数字全部来自各模型自带的 `transformer/config.json`，
+`tests/unit/planner/test_model_profile.py` 在本地缓存里有该模型时会读真实文件比对，
+没有则 skip。同理权重体积用静态表，来自
+`hbm_check.component_weight_bytes` 的实测扫描。
+
+**D24 — 测量库打包成 `difflet/planner/data/measurements.json`**，由
+`scripts/seed_planner_measurements.py` 从 `benchmark/<device>/*.json` 生成，而不是
+运行时去读仓库里的 benchmark 目录 —— 后者在安装成 wheel 之后就不存在了。
+`DIFFLET_PLANNER_MEASUREMENTS` 可指向自己的文件覆盖。脚本带 `--check`，可以在 CI
+里防止 benchmark 更新后忘记重新播种。
+
+**D25 — 测量条目按 `model_id` 而非 registry 名区分。** Wan 2.1 和 2.2 共用一个
+registry 条目和一套维度，但是不同权重、不同延迟；只按 `wan` 索引会让两者互相覆盖。
+另外 `benchmark/h100` 和 `benchmark/b300` 的 device 字段是 `"CUDA / NVIDIA H100
+PCIe"`，解析出来的实例类型是 `"CUDA"` —— 这类非 Neuron 主机直接跳过，不要用一个
+无意义的键塞进来。
+
+**D26 — 缓存感知读 manifest 里记录的 `parallel` 块，而不是重算 cache key。**
+`to_cache_dict` 是「加法式」的（`cp_mode` 为 gather_kv 时省略、`sp` 关闭时省略、
+`dp` 为 1 时省略），读记录值天然兼容这些省略。编译到一半死掉、没写 manifest 的
+目录读作「未编译」—— 它本来就是。
+
+**D27 — 三个目标函数的打分方式。** `latency` 和 `throughput` 各自优化单一量，
+分数是该量相对最优候选的归一化值（冠军为 1.0）。`balanced` 取两者的**几何平均**，
+因为算术平均会容忍「把一项压到零换另一项」。
