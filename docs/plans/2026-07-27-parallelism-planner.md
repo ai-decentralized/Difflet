@@ -2,7 +2,9 @@
 
 Date: 2026-07-27
 
-Status: 设计已确认，P0–P3 待实施。
+Status: P0–P3 已实现（见 Part 7 的决策记录）。P4/P5 待做。
+
+会话记录（含调研全过程与决策理由）：<https://claude.ai/code/artifact/0fbea154-8055-45ff-b573-2404215efe9e>
 
 参考：`difflet/pipeline/parallel_config.py`、`difflet/pipeline/parallel_mesh.py`、
 [DEVELOPER.md](../../DEVELOPER.md) 的 Parallelism 与 Runtime protocol 两节、
