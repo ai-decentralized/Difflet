@@ -503,5 +503,53 @@ planner 用 `compile_cache.has_valid_manifest()` 标出哪些候选**已经编�
 - **端到端** — 本机跑
   `difflet plan --model-id black-forest-labs/FLUX.1-dev --height 1024 --width 1024 --objective latency`，
   确认输出排序合理、`tp=4` 行命中实测 35.3s、缓存标记正确。
-- **回归** — `scripts/verify_cli.py` 全矩阵仍全绿。P0–P3 不改变任何既有默认行为
-  （`difflet plan` 是纯新增的只读命令，`--auto` 要到 P4 才引入）。
+- **回归** — `scripts/verify_cli.py` 全矩阵仍全绿。`difflet plan` 是纯新增的只读
+  命令，`--auto` 要到 P4 才引入。唯一的既有行为变更是 P0 的容量校验，见下。
+
+---
+
+## Part 7 — 实施过程中做的决策
+
+用户授权我在需要拍板的地方直接选推荐方案并记录在此，供次日 review。
+
+### P0 决策
+
+**D1 — 容量校验从「仅 dp>1」扩展到所有并行配置，且以探测到的核数为准。**
+原来 `_validate_dp` 只在 `--dp > 1` 时检查，且只认 `--total-cores` 或
+`NEURON_RT_NUM_CORES`；两者都没有时**完全不检查**。现在 `compile` / `generate` /
+`run` 都会校验 `dp × cfg × cp × tp ≤ 可用核数`，核数来源优先级为
+`--total-cores` > `NEURON_RT_NUM_CORES` > `neuron-ls` 探测。
+
+*这是本次唯一的既有行为变更*，且有一个可见后果：Flux 的 registry 默认是
+`tp_degree=8`，所以在 4 核的 trn2.3xlarge 上，
+`difflet compile --model-id black-forest-labs/FLUX.1-dev`（不带 `--tp-degree`）
+**现在会立即报错**：
+
+```
+Error: this parallel config needs 8 NeuronCores but only 4 are available (detected on trn2.3xlarge).
+  dp=1 x cfg=1 x cp=1 x tp=8 (registry default for flux) = 8
+  Lower a degree, or pass --total-cores to plan for a larger host.
+```
+
+以前这条命令会一路跑到 runtime 才以 SIGSEGV 或 `global communicator` 报错。
+仓库里所有既有入口（`scripts/verify_cli.py`、`benchmark/models.py`）都显式传
+`--tp-degree 4`，不受影响。
+
+**D2 — 没有把 Flux 的 registry 默认从 tp=8 改成 tp=4。** tp=8 对应 NxDI 官方
+Flux 教程的 trn2.48xlarge 配置，是有意为之；小机器上由 D1 的错误信息引导用户传
+`--tp-degree 4`，比悄悄改默认值更诚实。
+
+**D3 — 只有 `neuron-ls` 探测到的核数才用于硬报错**，`hardware` 的按平台兜底常量
+（trn1=2 核 / trn2=4 核）不参与校验。理由：兜底值是形状假设不是测量值，拿它去
+拒绝用户的配置，可能拒掉在对方机器上完全能跑的组合。探测不到就跳过校验，保持
+原有行为。
+
+**D4 — `machine_cores` 与 `allocated_cores` 分为两个字段。** 前者是整台机器有多少
+核，后者是**本进程**能花多少核。`difflet/cli/dp/router.py` 起的 DP worker 继承
+`NEURON_RT_VISIBLE_CORES=2-3`，它的预算是 2 而不是整机的 4 —— 混成一个
+`total_cores` 会让 planner 在 DP worker 里给出超配方案。
+
+**D5 — 单测全局 stub 掉硬件探测**（`tests/unit/conftest.py` 的 autouse fixture）。
+否则同一条断言在笔记本上过、在 trn2 上挂，单测会变成看机器脸色。真实解析路径由
+`tests/unit/planner/test_hardware.py` 注入 `neuron-ls` payload 来覆盖，包括
+trn2.3xlarge 的逐字实测输出和一个 16 设备 / 64 核的 trn2.48xlarge 合成 payload。

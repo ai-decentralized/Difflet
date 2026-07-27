@@ -602,6 +602,70 @@ def _replica_cores(args: argparse.Namespace) -> int:
     return tp * (args.cp_degree or 1) * cfg
 
 
+def _resolve_total_cores(args: argparse.Namespace) -> tuple[int | None, str]:
+    """The core budget to validate against, and where the number came from.
+
+    Returns ``(None, ...)`` when the budget is genuinely unknown -- no flag, no
+    env var, and no ``neuron-ls`` to ask. An unknown budget must not be treated
+    as zero or as "fits": validating against a guess would reject configurations
+    that run fine on the user's actual box. Detected values are only trusted
+    when they came from the driver; ``hardware``'s per-platform fallback
+    constants are a shape assumption, not a measurement.
+    """
+
+    total = getattr(args, "total_cores", None)
+    if total is not None:
+        return total, "--total-cores"
+
+    env_value = os.environ.get("NEURON_RT_NUM_CORES", "").strip()
+    if env_value:
+        try:
+            return int(env_value), "NEURON_RT_NUM_CORES"
+        except ValueError:
+            pass
+
+    from difflet.planner.hardware import detect_hardware
+
+    hardware = detect_hardware()
+    if hardware.source.startswith("neuron-ls"):
+        return hardware.allocated_cores, f"detected on {hardware.instance_type}"
+    return None, "undetected"
+
+
+def _validate_capacity(args: argparse.Namespace) -> None:
+    """Reject a parallel config that cannot fit the available NeuronCores.
+
+    ``world_size = dp * cfg * cp * tp`` is a hard requirement: every rank needs
+    its own core. Before hardware detection this could only be checked when the
+    user volunteered ``--total-cores`` or ``NEURON_RT_NUM_CORES``, so the usual
+    outcome of an over-subscribed config was a SIGSEGV or a ``global
+    communicator`` error minutes into a compile. Failing here costs nothing.
+    """
+
+    total, origin = _resolve_total_cores(args)
+    if total is None:
+        return
+    replica = _replica_cores(args)
+    needed = (getattr(args, "dp", None) or 1) * replica
+    if needed <= total:
+        return
+
+    from difflet.registry import resolve_model
+
+    entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
+    tp = args.tp_degree or entry.default_parallel.tp_degree
+    tp_note = "" if args.tp_degree else f" (registry default for {entry.name})"
+    print(
+        f"Error: this parallel config needs {needed} NeuronCores but only "
+        f"{total} are available ({origin}).\n"
+        f"  dp={getattr(args, 'dp', None) or 1} x cfg={2 if getattr(args, 'cfg_parallel', False) else 1} "
+        f"x cp={args.cp_degree or 1} x tp={tp}{tp_note} = {needed}\n"
+        f"  Lower a degree, or pass --total-cores to plan for a larger host.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
 def _validate_dp(args: argparse.Namespace) -> None:
     batch = getattr(args, "requests", None) is not None or (getattr(args, "dp", None) or 1) > 1
     worker = getattr(args, "requests_dir", None) is not None
@@ -626,16 +690,7 @@ def _validate_dp(args: argparse.Namespace) -> None:
         )
         raise SystemExit(1)
     if (getattr(args, "dp", None) or 1) > 1 and not worker:
-        total = getattr(args, "total_cores", None)
-        if total is None and os.environ.get("NEURON_RT_NUM_CORES"):
-            total = int(os.environ["NEURON_RT_NUM_CORES"])
-        needed = args.dp * _replica_cores(args)
-        if total is not None and needed > total:
-            print(
-                f"Error: dp*cfg*cp*tp = {needed} cores exceeds available cores ({total}).",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
+        _validate_capacity(args)
 
 
 def _dispatch_dp(args: argparse.Namespace) -> None:
@@ -755,6 +810,9 @@ def main(argv: list[str] | None = None) -> None:
             )
             _validate_cfg_parallel(args)  # re-run with resolved flags
             _validate_sp(args)
+        # After mode resolution: --mode rewrites dp/cfg/cp, so the core budget
+        # has to be checked against the values that will actually be compiled.
+        _validate_capacity(args)
 
     if args.command in ("generate", "run"):
         _validate_teacache(args)
