@@ -587,3 +587,44 @@ dataclass**，而不是新开一个模块。它描述的就是「这个 registry
 `cli/modes.py`、`serving/options.py`（SP 白名单）、`scripts/verify_cli.py`
 （三个 skip 集合）、`tests/unit/cli/test_verify_cli.py`、`tests/unit/cli/test_modes.py`。
 新增模型现在只需填一处 `ModelCapabilities`。
+
+### P2 决策
+
+**D11 — 互斥规则不重新实现，而是构造 `DiffletParallelConfig` 并捕获 `ValueError`。**
+被拒配置携带的是**运行时自己抛出的那句错误信息**，不是 planner 的转述。
+`test_exclusivity_reason_comes_from_the_runtime_type` 直接断言这一点。这样
+planner 结构上不可能与运行时约束漂移。
+
+**D12 — 只枚举「恰好用满所有核」的配置。** 用不满是合法的但没人想要（有核闲着），
+把它们列出来只会淹没有用的候选。同理，**被拒配置也只记录那些能填满核数的** ——
+乘不到核数是算术问题，不值得解释。
+
+**D13 — 候选标签沿用 `scripts/verify_cli.py` 的矩阵键名**（`tp4` / `tp2cp2` /
+`tp2cfg` / `tp4sp` / `dp2tp2` / `tp2cp2ulysses`），顺序固定为 dp→tp→cp→cfg→sp→mode。
+这让 planner 的可行集能和实测矩阵**逐格比对** ——
+`test_feasible_set_agrees_with_verify_cli_on_four_cores` 就是这么做的：
+verify_cli 会跑的格子必须可行，它 skip 或标 XFAIL 的格子必须不可行。
+
+**D14 — 新增一类拒绝理由 `degenerate`：`--sp` 配 `tp=1`。** SP 沿**张量并行组**
+切 norm/modulation/residual，tp=1 时该组只有一个成员，纯粹是空操作外加额外
+collective。`DiffletParallelConfig` 不拦这个（它不是非法配置），但 planner 不该
+把它当候选推荐。
+
+**D15 — 已知坏格（`KNOWN_BAD`）与不可行分开报告。** 「编译器在这个格子上崩」和
+「这个配置本身没意义」是两种不同的信息，前者可以被上游修复。当前三条：
+HunyuanVideo `tp2cp2`（neuronx-cc `NCC_INLA001`）、HunyuanVideo `dp2tp2`（单副本
+HBM 放不下）、HunyuanVideo 1.5 全部配置（scaffold，只实现了 download）。
+
+**D16 — cp>1 时只为每个 (tp, cp) 生成一个 `sp=True` 代表**（固定 gather_kv）。
+目的是让报告**解释** SP⊗CP 互斥而不是默默省略，但每个 cp_mode 都重复一遍纯属噪音。
+
+**D17 — 收紧了 `tests/unit/cli/test_dp_isolation.py` 的字面量 grep。** 原断言是
+「`difflet/cli/**` 里不得出现 `dp_degree` 字样」，而 `cli/plan.py` 需要**读**
+`parallel.dp_degree` 来展示它收到的配置。改成匹配绑定形式
+（`(?<![.\w])dp_degree\s*=`），仍然抓得住 `DiffletParallelConfig(dp_degree=N)`
+这种真正会把 dp 轴带进 worker 编译图的写法。
+
+**D18 — `difflet plan` 输出直接给出可复制的 CLI flags**，而不只是配置名。
+一行 `tp2cp2ulysses  --tp-degree 2 --cp-degree 2 --cp-mode ulysses` 可以直接粘到
+`difflet compile` 后面。`--json` 给机器读，`--serving` 施加 serving 的额外限制，
+`--total-cores` 让用户为另一台机器做规划。

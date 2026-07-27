@@ -473,6 +473,30 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_cache_flags(run_cmd)
     _add_generate_flags(run_cmd)
 
+    plan_cmd = sub.add_parser(
+        "plan",
+        help="List the parallel configurations this host and model allow "
+        "(read-only: no device, no compile)",
+    )
+    _add_model_flag(plan_cmd)
+    _add_shape_flags(plan_cmd)
+    plan_cmd.add_argument(
+        "--total-cores",
+        type=int,
+        default=None,
+        help="Plan for this many NeuronCores instead of the detected count",
+    )
+    plan_cmd.add_argument(
+        "--serving",
+        action="store_true",
+        help="Apply the extra restrictions `difflet serve` imposes",
+    )
+    plan_cmd.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON instead of a table",
+    )
+
     clean = sub.add_parser(
         "clean",
         help="Remove Neuron compiler scratch (hash dirs, neuronxcc-*/, "
@@ -770,6 +794,8 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     valid_models = SERVE_VALID_MODELS if args.command == "serve" else VALID_MODELS
+    if args.command == "plan" and getattr(args, "serving", False):
+        valid_models = SERVE_VALID_MODELS
     if args.model_id not in valid_models:
         print(
             f"Error: Unknown model-id '{args.model_id}'. Valid model IDs:\n"
@@ -814,7 +840,11 @@ def main(argv: list[str] | None = None) -> None:
     if argv is None and args.command in ("generate", "run"):
         _ensure_jemalloc()
 
-    if args.command == "serve":
+    if args.command == "plan":
+        from difflet.cli.plan import run as run_plan
+
+        run_plan(args)
+    elif args.command == "serve":
         from difflet.cli.serve import run, validate_serve_args
 
         validate_serve_args(args)
