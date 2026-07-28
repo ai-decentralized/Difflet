@@ -916,10 +916,24 @@ def _nki_input_dtype_name(dtype: torch.dtype) -> str:
     raise TypeError(f"Trainium quantize_mx expects BF16 or FP16 input, got {dtype}")
 
 
+def _torch_xla_kernel_cls():
+    """``TorchXlaKernel``, wherever the installed NKI keeps it.
+
+    Public as ``nki.framework.torch_xla`` through NKI 0.4; 0.5 moved it to the
+    private ``nki.framework._torch_xla`` without re-exporting it.
+    """
+    try:
+        from nki.framework.torch_xla import TorchXlaKernel
+    except ImportError:
+        from nki.framework._torch_xla import TorchXlaKernel
+
+    return TorchXlaKernel
+
+
 def _linear_mx_prequant_torchxla_kernel():
     global _LINEAR_MX_PREQUANT_TORCHXLA_KERNEL
     if _LINEAR_MX_PREQUANT_TORCHXLA_KERNEL is None:
-        from nki.framework.torch_xla import TorchXlaKernel
+        TorchXlaKernel = _torch_xla_kernel_cls()
 
         _LINEAR_MX_PREQUANT_TORCHXLA_KERNEL = linear_mx_prequant_kernel[1]._to_subclass(
             TorchXlaKernel
@@ -930,7 +944,7 @@ def _linear_mx_prequant_torchxla_kernel():
 def _linear_mx_prequant_native_weight_torchxla_kernel():
     global _LINEAR_MX_PREQUANT_NATIVE_WEIGHT_TORCHXLA_KERNEL
     if _LINEAR_MX_PREQUANT_NATIVE_WEIGHT_TORCHXLA_KERNEL is None:
-        from nki.framework.torch_xla import TorchXlaKernel
+        TorchXlaKernel = _torch_xla_kernel_cls()
 
         _LINEAR_MX_PREQUANT_NATIVE_WEIGHT_TORCHXLA_KERNEL = (
             linear_mx_prequant_native_weight_kernel[1]._to_subclass(TorchXlaKernel)
@@ -941,7 +955,7 @@ def _linear_mx_prequant_native_weight_torchxla_kernel():
 def _linear_mx_prequant_group2_torchxla_kernel():
     global _LINEAR_MX_PREQUANT_GROUP2_TORCHXLA_KERNEL
     if _LINEAR_MX_PREQUANT_GROUP2_TORCHXLA_KERNEL is None:
-        from nki.framework.torch_xla import TorchXlaKernel
+        TorchXlaKernel = _torch_xla_kernel_cls()
 
         _LINEAR_MX_PREQUANT_GROUP2_TORCHXLA_KERNEL = (
             linear_mx_prequant_group2_kernel[1]._to_subclass(TorchXlaKernel)
@@ -952,7 +966,7 @@ def _linear_mx_prequant_group2_torchxla_kernel():
 def _linear_mx_prequant_group2_native_weight_torchxla_kernel():
     global _LINEAR_MX_PREQUANT_GROUP2_NATIVE_WEIGHT_TORCHXLA_KERNEL
     if _LINEAR_MX_PREQUANT_GROUP2_NATIVE_WEIGHT_TORCHXLA_KERNEL is None:
-        from nki.framework.torch_xla import TorchXlaKernel
+        TorchXlaKernel = _torch_xla_kernel_cls()
 
         _LINEAR_MX_PREQUANT_GROUP2_NATIVE_WEIGHT_TORCHXLA_KERNEL = (
             linear_mx_prequant_group2_native_weight_kernel[1]._to_subclass(
@@ -965,7 +979,7 @@ def _linear_mx_prequant_group2_native_weight_torchxla_kernel():
 def _quantize_mx_linear_activation_torchxla_kernel():
     global _QUANTIZE_MX_LINEAR_ACTIVATION_TORCHXLA_KERNEL
     if _QUANTIZE_MX_LINEAR_ACTIVATION_TORCHXLA_KERNEL is None:
-        from nki.framework.torch_xla import TorchXlaKernel
+        TorchXlaKernel = _torch_xla_kernel_cls()
 
         _QUANTIZE_MX_LINEAR_ACTIVATION_TORCHXLA_KERNEL = (
             quantize_mx_linear_activation_kernel[1]._to_subclass(TorchXlaKernel)

@@ -767,12 +767,11 @@ def test_hunyuan_video_application_declares_vae_decoder_component(tmp_path):
         application_kwargs={"enable_vae_decoder": True},
     )
 
+    # The decoder is one NEFF. It used to be split into 16 at every
+    # GroupNorm -> causal-Conv3d boundary, working around bf16 GroupNorm
+    # statistics that _Fp32GroupNorm now handles directly.
     component_names = [spec.name for spec in pipe.app.components()]
-    assert component_names[0] == "vae_decoder/body_up2"
-    assert "vae_decoder/up3_r0_norm1_act" in component_names
-    assert "vae_decoder/up3_r0_conv1" in component_names
-    assert component_names[-2:] == ["vae_decoder/final_norm_act", "vae_decoder/final_conv_out"]
-    assert len(component_names) == 16
+    assert component_names == ["vae_decoder"]
     assert pipe.app.pipeline.vae is pipe.app.vae_decoder
 
 
