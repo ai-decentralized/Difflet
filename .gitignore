@@ -40,6 +40,9 @@ AGENTS.md
 # Design specs (local working docs, not committed)
 .specs/
 
+# Sample renders / parity captures from local runs (large binaries)
+generated_samples/
+
 # Coverage artifacts
 .coverage
 .coverage.*
