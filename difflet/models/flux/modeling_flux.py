@@ -1676,7 +1676,15 @@ class NeuronFluxBackboneApplication(NeuronApplicationBase):
         self.model.image_rotary_emb = None
 
     def get_compiler_args(self):
-        compiler_args = "--model-type=transformer -O1"
+        # TRN2: -O2 is the compiler default for --model-type=transformer.
+        # The old -O1 was a downgrade; make -O2 explicit.
+        # NOTE (2026-07-30): tested --auto-cast=matmult --auto-cast-type=fp8_e4m3
+        # on trn2.3xlarge (batch=1). Per-step latency unchanged (271ms vs 268ms
+        # baseline) — FLUX DiT at batch=1 is compute-bound, not memory-bandwidth
+        # bound, so FP8's bandwidth savings don't translate to speedup.
+        # Keeping --auto-cast=none for correctness and minimal compile time.
+        opt_level = "-O2" if (_HARDWARE == hardware.TRN2) else "-O1"
+        compiler_args = f"--model-type=transformer {opt_level}"
         if self.context_parallel_enabled and _HARDWARE == hardware.TRN1:
             compiler_args = "--model-type=transformer -O2"
         else:

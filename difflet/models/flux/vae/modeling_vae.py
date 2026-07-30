@@ -21,14 +21,18 @@
 # Forked from neuronx-distributed-inference v0.9.17334+ced6ae4e
 # Original path: neuronx_distributed_inference/models/diffusers/flux/vae/modeling_vae.py
 # Fork date: 2026-05-08
-# Modifications: (none — verbatim copy; see git log for divergence)
+# Modifications:
+#   2026-07-30 _model_cls:
+#     * support TAEF1 via DecoderTiny; DecoderTiny has no GroupNorm so skip
+#       the PatchedGroupNorm monkey-patch; its constructor signature differs
+#       from the standard Decoder — use get_decoder_config() to dispatch.
 # <<< NxDI fork banner <<<
 import torch
 from torch import Tensor
 from torch.nn import Parameter
 from torch.nn import functional as F, init
 
-from diffusers.models.autoencoders.vae import Decoder
+from diffusers.models.autoencoders.vae import Decoder, DecoderTiny
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
@@ -78,37 +82,81 @@ class PatchedGroupNorm(torch.nn.Module):
         )
 
 
-class VAEDecoderInferenceConfig(InferenceConfig):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.decoder_config = {
-            "in_channels": self.latent_channels,
-            "out_channels": self.out_channels,
-            "up_block_types": self.up_block_types,
-            "block_out_channels": self.block_out_channels,
-            "layers_per_block": self.layers_per_block,
-            "norm_num_groups": self.norm_num_groups,
-            "act_fn": self.act_fn,
-            "mid_block_add_attention": self.mid_block_add_attention
+def get_decoder_config(model_cls, load_config_dict: dict, height: int, width: int,
+                       transformer_in_channels: int | None = None) -> dict:
+    """Build the decoder constructor kwargs dict for standard Decoder or DecoderTiny.
+
+    The standard diffusers ``Decoder`` expects::
+
+        in_channels, out_channels, up_block_types, block_out_channels,
+        layers_per_block, norm_num_groups, act_fn, mid_block_add_attention
+
+    ``DecoderTiny`` (TAEF1) expects::
+
+        in_channels, out_channels, num_blocks, block_out_channels,
+        upsampling_scaling_factor, act_fn, upsample_fn
+    """
+    if model_cls is DecoderTiny:
+        latent_channels = load_config_dict.get("latent_channels", 16)
+        return {
+            "in_channels": latent_channels,
+            "out_channels": load_config_dict.get("out_channels", 3),
+            "num_blocks": load_config_dict.get("num_decoder_blocks", [3, 3, 3, 1]),
+            "block_out_channels": load_config_dict.get("decoder_block_out_channels", [64, 64, 64, 64]),
+            "upsampling_scaling_factor": load_config_dict.get("upsampling_scaling_factor", 2),
+            "act_fn": load_config_dict.get("act_fn", "relu"),
+            "upsample_fn": load_config_dict.get("upsample_fn", "nearest"),
         }
+
+    # Standard Decoder
+    return {
+        "in_channels": load_config_dict.get("latent_channels", 16),
+        "out_channels": load_config_dict.get("out_channels", 3),
+        "up_block_types": load_config_dict.get("up_block_types", []),
+        "block_out_channels": load_config_dict.get("block_out_channels", []),
+        "layers_per_block": load_config_dict.get("layers_per_block", 1),
+        "norm_num_groups": load_config_dict.get("norm_num_groups", 32),
+        "act_fn": load_config_dict.get("act_fn", "silu"),
+        "mid_block_add_attention": load_config_dict.get("mid_block_add_attention", True),
+    }
+
+
+def get_vae_scale_factor(model_cls, decoder_config: dict) -> int:
+    """Return the VAE's total downsampling factor (always 8 for FLUX-compatible VAEs)."""
+    if model_cls is DecoderTiny:
+        # DecoderTiny has len(num_blocks) stages; each stage except the last
+        # doubles resolution. 4 stages → 3 upsamples → 8x.
+        num_stages = len(decoder_config.get("num_blocks", [3, 3, 3, 1]))
+        return 2 ** (num_stages - 1)
+    return 2 ** (len(decoder_config.get("block_out_channels", [])) - 1)
+
+
+class VAEDecoderInferenceConfig(InferenceConfig):
+    def __init__(self, *args, model_cls=Decoder, **kwargs):
+        self._decoder_cls = model_cls
+        # Pre-populate decoder_config BEFORE super().__init__() so that
+        # vae_scale_factor (which reads self.decoder_config) does not fail
+        # when load_config accesses it during attribute validation.
+        self.decoder_config = {}
+        super().__init__(*args, **kwargs)
+        # Now that load_config has populated all config.json keys as
+        # attributes, rebuild decoder_config from the loaded values.
+        self.decoder_config = get_decoder_config(
+            self._decoder_cls,
+            {k: getattr(self, k) for k in dir(self) if not k.startswith("_")},
+            getattr(self, "height", 1024),
+            getattr(self, "width", 1024),
+        )
 
     def get_required_attributes(self) -> List[str]:
         return [
-            "latent_channels",
-            "out_channels",
-            "up_block_types",
-            "block_out_channels",
-            "layers_per_block",
-            "norm_num_groups",
-            "act_fn",
-            "mid_block_add_attention",
             "height",
             "width",
         ]
 
     @property
     def vae_scale_factor(self):
-        return 2 ** (len(self.block_out_channels) - 1)
+        return get_vae_scale_factor(self._decoder_cls, self.decoder_config)
 
 
 class ModelWrapperVAEDecoder(ModelWrapper):
@@ -128,10 +176,8 @@ class ModelWrapperVAEDecoder(ModelWrapper):
         self.bucket_config = None  # Set to None if you don't have bucketing
 
     def input_generator(self) -> List[Tuple[torch.Tensor]]:
-        if hasattr(self.config, "transformer_in_channels"):
-            in_channels = self.config.transformer_in_channels // 4
-        else:
-            in_channels = self.config.latent_channels
+        in_channels = self.config.decoder_config.get("in_channels",
+                          getattr(self.config, "latent_channels", 16))
         model_inputs = torch.rand(
             [
                 1,
@@ -146,12 +192,11 @@ class ModelWrapperVAEDecoder(ModelWrapper):
 
     def get_model_instance(self):
         # Create the model instance
+        is_tiny = self.model_cls is DecoderTiny
 
         def _create_model():
-            # Need to replace torch.nn.GroupNorm with PatchedGroupNorm when using bfloat16
-            # It is because of sensitivity of norm operation to extremely small values.
-            # We need to convert input to float32 before computation.
-            if self.config.neuron_config.torch_dtype == torch.bfloat16:
+            # DecoderTiny has no GroupNorm — skip the PatchedGroupNorm patch.
+            if not is_tiny and self.config.neuron_config.torch_dtype == torch.bfloat16:
                 torch.nn.GroupNorm = PatchedGroupNorm
             model = self.model_cls(**self.config.decoder_config)
             model = model.to(self.config.neuron_config.torch_dtype)
@@ -179,7 +224,9 @@ class NeuronVAEDecoderApplication(NeuronApplicationBase):
 
     _model_cls = Decoder
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, model_cls=None, **kwargs):
+        if model_cls is not None:
+            self._model_cls = model_cls
         super().__init__(*args, **kwargs)
         self.model_wrapper = self.get_model_wrapper_cls()
 
@@ -200,7 +247,9 @@ class NeuronVAEDecoderApplication(NeuronApplicationBase):
         return self.models[0](model_inputs)
 
     def get_compiler_args(self):
-        compiler_args = "--model-type=unet-inference -O1"
+        # DecoderTiny is a pure conv stack (no attention, no GroupNorm).
+        # --model-type=unet-inference still gives the best conv fusion.
+        compiler_args = "--model-type=unet-inference -O1 --auto-cast=none"
         return compiler_args
 
     @staticmethod
