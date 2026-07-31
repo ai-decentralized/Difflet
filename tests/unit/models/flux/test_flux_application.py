@@ -206,6 +206,10 @@ def test_application_components_and_call():
         vae=types.SimpleNamespace(decoder="dec"),
     )
     inst.teacache_probe = None
+    inst._cache_plan = None
+    inst._cache_mask = None
+    inst._teacache_cadence = None
+    inst._teacache_online_delta_alpha = None
 
     specs = inst.components()
     assert [s.name for s in specs] == [
@@ -230,6 +234,78 @@ def test_application_components_and_call():
     inst.pipe = fake_pipe
     assert inst(7, prompt="cat") == "image"
     assert seen["args"] == ((7,), {"prompt": "cat"})
+
+
+def test_probe_free_cache_uses_composable_runtime_and_explicit_recovery(
+    monkeypatch,
+):
+    import types
+
+    from difflet.pipeline.cache import CacheRuntimeController
+
+    class FakePipeline:
+        def __init__(self):
+            self.vae = types.SimpleNamespace(decoder=None)
+            self.scheduler = types.SimpleNamespace()
+
+        @classmethod
+        def from_pretrained(cls, *args, **kwargs):
+            return cls()
+
+        def __call__(
+            self,
+            prompt=None,
+            *,
+            num_inference_steps=28,
+            sigmas=None,
+            height=None,
+            width=None,
+        ):
+            del prompt, num_inference_steps, sigmas, height, width
+
+    monkeypatch.setattr(app, "NeuronClipApplication", lambda **kwargs: "clip")
+    monkeypatch.setattr(app, "NeuronT5Application", lambda **kwargs: "t5")
+    monkeypatch.setattr(
+        app, "NeuronFluxBackboneApplication", lambda **kwargs: "transformer"
+    )
+    monkeypatch.setattr(
+        app, "NeuronVAEDecoderApplication", lambda **kwargs: "decoder"
+    )
+
+    backbone_config = types.SimpleNamespace(cfg_parallel_enabled=False)
+    instance = app.NeuronFluxApplication(
+        model_path="/fake/model",
+        text_encoder_config=types.SimpleNamespace(),
+        text_encoder2_config=types.SimpleNamespace(),
+        backbone_config=backbone_config,
+        decoder_config=types.SimpleNamespace(),
+        pipeline_class=FakePipeline,
+        teacache_cadence=1,
+        cache_recovery_warmup_steps=0,
+        cache_recovery_cooldown_steps=2,
+        cache_recovery_max_consecutive=1,
+        cache_recovery_steps=3,
+        cache_require_final_anchor=True,
+    )
+    instance._prepare_probe_free_teacache(
+        prompt="cat",
+        num_inference_steps=6,
+        height=768,
+        width=512,
+    )
+
+    controller = instance.pipe.teacache_controller
+    assert isinstance(controller, CacheRuntimeController)
+    assert instance.cache_controller is controller
+    assert controller.source == "teacache_cadence"
+    assert controller.num_steps == 6
+    assert controller.runner.policy.calibration.shape_label == "768x512"
+    recovery = controller.runner.recovery.config
+    assert recovery.warmup_steps == 0
+    assert recovery.cooldown_steps == 2
+    assert recovery.max_consecutive_predictions == 1
+    assert recovery.recovery_steps == 3
+    assert recovery.require_final_anchor is True
 
 
 def test_create_flux_config_threads_parallel_flags(patched_loaders):

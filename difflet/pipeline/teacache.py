@@ -16,6 +16,11 @@ if TYPE_CHECKING:
     import torch
 
 CALIBRATION_SCHEMA = "difflet-m9-teacache-calibration-v1"
+# Conservative compatibility defaults for legacy TeaCache artifacts and the
+# probe-free FLUX modes. Applications may override these through the
+# independent quality-recovery configuration.
+DEFAULT_TEACACHE_WARMUP_STEPS = 5
+DEFAULT_TEACACHE_COOLDOWN_STEPS = 5
 
 
 @dataclass(frozen=True)
@@ -25,8 +30,8 @@ class TeaCacheCalibration:
     num_steps: int
     poly_coef: tuple[float, ...]
     threshold: float
-    warmup_steps: int = 5
-    cooldown_steps: int = 5
+    warmup_steps: int = DEFAULT_TEACACHE_WARMUP_STEPS
+    cooldown_steps: int = DEFAULT_TEACACHE_COOLDOWN_STEPS
     target_speedup: float | None = None
     fit_r2: float | None = None
     n_samples: int | None = None
@@ -69,8 +74,12 @@ class TeaCacheCalibration:
             num_steps=int(data["num_steps"]),
             poly_coef=tuple(float(item) for item in data["poly_coef"]),
             threshold=float(data["threshold"]),
-            warmup_steps=int(data.get("warmup_steps", 5)),
-            cooldown_steps=int(data.get("cooldown_steps", 5)),
+            warmup_steps=int(
+                data.get("warmup_steps", DEFAULT_TEACACHE_WARMUP_STEPS)
+            ),
+            cooldown_steps=int(
+                data.get("cooldown_steps", DEFAULT_TEACACHE_COOLDOWN_STEPS)
+            ),
             target_speedup=(
                 float(data["target_speedup"]) if data.get("target_speedup") is not None else None
             ),

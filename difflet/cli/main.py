@@ -335,21 +335,21 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         type=_nonnegative_int,
         default=None,
         metavar="N",
-        help="Independent quality-recovery warmup anchors for a cache mask",
+        help="Independent quality-recovery warmup anchors for a cache schedule",
     )
     p.add_argument(
         "--cache-recovery-cooldown",
         type=_nonnegative_int,
         default=None,
         metavar="N",
-        help="Independent quality-recovery cooldown anchors for a cache mask",
+        help="Independent quality-recovery cooldown anchors for a cache schedule",
     )
     p.add_argument(
         "--cache-recovery-max-consecutive",
         type=_positive_int,
         default=None,
         metavar="N",
-        help="Quality bound on consecutive predicted steps for a cache mask",
+        help="Quality bound on consecutive predicted steps for a cache schedule",
     )
     p.add_argument(
         "--cache-recovery-steps",
@@ -362,7 +362,7 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         "--cache-require-final-anchor",
         action="store_true",
         default=None,
-        help="Force the final denoise step to be a true anchor for a cache mask",
+        help="Force the final denoise step to be a true anchor for a cache schedule",
     )
 
 
@@ -592,10 +592,12 @@ def _validate_cache_config(args: argparse.Namespace) -> None:
     mask = getattr(args, "cache_mask_file", None)
     predictor = getattr(args, "cache_predictor", None)
     predictor_order = getattr(args, "cache_predictor_order", None)
-    cache_options = (
+    predictor_options = (
         predictor,
         predictor_order,
         getattr(args, "cache_predictor_coord", None),
+    )
+    recovery_options = (
         getattr(args, "cache_recovery_warmup", None),
         getattr(args, "cache_recovery_cooldown", None),
         getattr(args, "cache_recovery_max_consecutive", None),
@@ -603,25 +605,34 @@ def _validate_cache_config(args: argparse.Namespace) -> None:
         getattr(args, "cache_require_final_anchor", None),
     )
     cache_selected = plan is not None or mask is not None or any(
-        value is not None for value in cache_options
+        value is not None
+        for value in (*predictor_options, *recovery_options)
     )
     if not cache_selected:
         return
     if args.model_id != "black-forest-labs/FLUX.1-dev":
-        print("Error: cache plan/mask/predictor controls are currently FLUX-only.", file=sys.stderr)
+        print(
+            "Error: cache plan/mask/predictor/recovery controls are currently "
+            "FLUX-only.",
+            file=sys.stderr,
+        )
         raise SystemExit(1)
 
+    cadence = getattr(args, "teacache_cadence", None)
+    online = getattr(args, "teacache_online_delta", None)
+    speedup = getattr(args, "teacache_speedup", None)
+    calibration = getattr(args, "teacache_calibration", None)
+    probe_free_selected = cadence is not None or online is not None
     legacy_selected = any(
-        getattr(args, name, None) is not None
-        for name in (
-            "teacache_cadence",
-            "teacache_online_delta",
-            "teacache_speedup",
-            "teacache_calibration",
-        )
+        value is not None
+        for value in (cadence, online, speedup, calibration)
     )
     if plan is not None:
-        if mask is not None or any(value is not None for value in cache_options):
+        if (
+            mask is not None
+            or any(value is not None for value in predictor_options)
+            or any(value is not None for value in recovery_options)
+        ):
             print(
                 "Error: --cache-plan-file is complete and cannot be combined with "
                 "--cache-mask-file, predictor, or recovery flags.",
@@ -636,24 +647,42 @@ def _validate_cache_config(args: argparse.Namespace) -> None:
             raise SystemExit(1)
         return
 
-    if mask is None:
+    if mask is not None:
+        if legacy_selected:
+            print(
+                "Error: --cache-mask-file and --teacache-* flags are mutually exclusive.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        if predictor is None:
+            print("Error: --cache-mask-file requires --cache-predictor.", file=sys.stderr)
+            raise SystemExit(1)
+        if predictor == "legacy_residual" and predictor_order is not None:
+            print(
+                "Error: --cache-predictor-order applies only to taylorseer.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        return
+
+    if any(value is not None for value in predictor_options):
         print(
-            "Error: cache predictor/recovery flags require --cache-mask-file.",
+            "Error: cache predictor flags require --cache-mask-file.",
             file=sys.stderr,
         )
         raise SystemExit(1)
-    if legacy_selected:
+    if any(value is not None for value in recovery_options) and (
+        speedup is not None or calibration is not None
+    ):
         print(
-            "Error: --cache-mask-file and --teacache-* flags are mutually exclusive.",
+            "Error: cache recovery flags are not supported by calibrated TeaCache.",
             file=sys.stderr,
         )
         raise SystemExit(1)
-    if predictor is None:
-        print("Error: --cache-mask-file requires --cache-predictor.", file=sys.stderr)
-        raise SystemExit(1)
-    if predictor == "legacy_residual" and predictor_order is not None:
+    if any(value is not None for value in recovery_options) and not probe_free_selected:
         print(
-            "Error: --cache-predictor-order applies only to taylorseer.",
+            "Error: cache recovery flags require --cache-mask-file, "
+            "--teacache-cadence, or --teacache-online-delta.",
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -761,10 +790,17 @@ def _validate_dp(args: argparse.Namespace) -> None:
             "cache_plan_file",
             "cache_mask_file",
             "cache_predictor",
+            "cache_predictor_order",
+            "cache_predictor_coord",
+            "cache_recovery_warmup",
+            "cache_recovery_cooldown",
+            "cache_recovery_max_consecutive",
+            "cache_recovery_steps",
+            "cache_require_final_anchor",
         )
     ):
         print(
-            "Error: TeaCache flags are not supported in batch/DP mode "
+            "Error: Cache acceleration flags are not supported in batch/DP mode "
             "(per-request controller reset is a follow-up).",
             file=sys.stderr,
         )

@@ -141,7 +141,10 @@ class CacheRunner:
             )
         self._validate_step_order(context)
         if context.is_barrier:
-            self.reset_history(reset_policy=True, reset_recovery=True)
+            # A semantic barrier invalidates trajectory-dependent history, but
+            # it must not discard an independent quality-recovery request.
+            # The real barrier output counts as one requested fresh anchor.
+            self.reset_history(reset_policy=True, reset_recovery=False)
             self.counters.barrier_resets += 1
             self._last_context = context
             self._compute_context = context

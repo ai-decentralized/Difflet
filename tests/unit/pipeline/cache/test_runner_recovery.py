@@ -259,20 +259,25 @@ def test_overlapping_recovery_windows_are_safe_full_compute():
     ]
 
 
-def test_barrier_clears_stale_pending_recovery_but_preserves_metrics():
+def test_barrier_preserves_pending_recovery_and_cumulative_metrics():
     runner = CacheRunner(
-        ExplicitMaskPolicy([True, True]),
+        ExplicitMaskPolicy([True, True, True]),
         TaylorSeerPredictor(order=1),
     )
-    first = _ctx(0, 2)
+    first = _ctx(0, 3)
     runner.decide(first)
     runner.record_anchor(first, torch.tensor([0.0]))
     runner.request_quality_recovery("pre-barrier drift", steps=2)
 
-    barrier = _ctx(1, 2, barrier=True)
+    barrier = _ctx(1, 3, barrier=True)
     assert runner.decide(barrier).reason == "barrier"
     runner.record_anchor(barrier, torch.tensor([1.0]))
 
     assert runner.stats()["recovery_triggers"] == 1
-    assert runner.recovery.stats()["quality_recovery_pending_steps"] == 0
+    assert runner.recovery.stats()["quality_recovery_pending_steps"] == 1
     assert "quality_recovery_triggers" not in runner.recovery.stats()
+
+    after_barrier = _ctx(2, 3)
+    assert runner.decide(after_barrier).reason == "recovery_requested"
+    runner.record_anchor(after_barrier, torch.tensor([2.0]))
+    assert runner.recovery.stats()["quality_recovery_pending_steps"] == 0

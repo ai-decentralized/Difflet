@@ -9,17 +9,22 @@ from difflet.pipeline.cache import (
     CACHE_MASK_SCHEMA,
     CACHE_PLAN_SCHEMA,
     CachePlanController,
+    CacheRunner,
+    CacheRuntimeController,
     CacheSpecError,
     LegacyResidualPredictor,
     PeriodicAnchorPolicy,
     QualityRecoveryConfig,
+    QualityRecoveryGuard,
     TaylorSeerPredictor,
+    TeaCachePolicy,
     load_cache_mask,
     load_cache_plan,
     resolve_cache_config,
     resolve_cache_plan,
     validate_schedule_safety,
 )
+from difflet.pipeline.teacache import TeaCacheCalibration
 
 
 def _plan_dict(num_steps: int = 10):
@@ -178,6 +183,51 @@ def test_controller_binds_scheduler_coordinates_and_resets_per_request():
     assert stats["skipped_steps"] == stats["planned_skip_steps"]
     controller.reset()
     assert controller.stats()["full_steps"] == 0
+
+
+def test_dynamic_controller_composes_policy_predictor_and_recovery():
+    calibration = TeaCacheCalibration(
+        model="flux",
+        shape_label="1024x1024",
+        num_steps=6,
+        poly_coef=(0.0, 1.0),
+        threshold=0.0,
+        warmup_steps=0,
+        cooldown_steps=0,
+        cadence=1,
+    )
+    recovery = QualityRecoveryGuard(
+        QualityRecoveryConfig(max_consecutive_predictions=1)
+    )
+    controller = CacheRuntimeController(
+        CacheRunner(
+            TeaCachePolicy(calibration),
+            LegacyResidualPredictor(),
+            recovery=recovery,
+        ),
+        num_steps=6,
+        source="teacache_cadence",
+    )
+
+    assert controller.needs_signal() is False
+    controller.bind_schedule(
+        [6.0, 5.0, 4.0, 3.0, 2.0, 1.0],
+        [1.0, 0.8, 0.6, 0.4, 0.2, 0.0, 0.0],
+    )
+    for index in range(6):
+        if controller.should_skip(index):
+            controller.skip_noise_pred()
+        else:
+            controller.record_full_step(torch.tensor([float(index)]))
+
+    stats = controller.stats()
+    assert stats["source"] == "teacache_cadence"
+    assert stats["full_steps"] == 4
+    assert stats["skipped_steps"] == 2
+    assert stats["readiness_rejections"] == 2
+    assert stats["recovery_forced_steps"] == 2
+    assert "planned_anchor_steps" not in stats
+    assert stats["quality_recovery_pending_steps"] == 0
 
 
 def test_plan_roundtrip_dict_is_stable():

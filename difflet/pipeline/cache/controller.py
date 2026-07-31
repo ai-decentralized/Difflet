@@ -14,23 +14,40 @@ from difflet.pipeline.cache.spec import ResolvedCacheConfig
 from difflet.pipeline.cache.types import CacheStepContext
 
 
-class CachePlanController:
-    """Execute a :class:`ResolvedCacheConfig` inside a TeaCache-style loop.
+class CacheRuntimeController:
+    """Drive a CacheRunner through the production denoise-loop interface.
 
-    Plan/mask schedules do not need a model-change probe, so ``needs_signal()``
-    and ``needs_probe()`` are both False. Predictor coordinates may still use
-    the request's index, timestep, or sigma after :meth:`bind_schedule`.
-    Predictions come from the configured predictor via the runner; real
-    outputs are recorded as anchors.
+    Static plan/mask schedules need no probe. Dynamic policies may opt into a
+    signal by implementing ``needs_signal`` and ``needs_probe``. Predictor
+    coordinates may use index, timestep, or sigma after :meth:`bind_schedule`.
     """
 
-    def __init__(self, config: ResolvedCacheConfig) -> None:
-        if not isinstance(config, ResolvedCacheConfig):
-            raise TypeError("CachePlanController requires a ResolvedCacheConfig")
-        self.config = config
-        self.num_steps = int(config.num_steps)
-        self._barrier_steps = frozenset(config.barrier_steps)
-        self.runner: CacheRunner = config.build_runner()
+    def __init__(
+        self,
+        runner: CacheRunner,
+        *,
+        num_steps: int,
+        source: str,
+        barrier_steps: tuple[int, ...] = (),
+        planned_anchor_steps: int | None = None,
+        planned_skip_steps: int | None = None,
+    ) -> None:
+        if not isinstance(runner, CacheRunner):
+            raise TypeError("CacheRuntimeController requires a CacheRunner")
+        if (
+            isinstance(num_steps, bool)
+            or not isinstance(num_steps, int)
+            or num_steps <= 0
+        ):
+            raise ValueError("num_steps must be a positive integer")
+        if not isinstance(source, str) or not source:
+            raise ValueError("source must be a non-empty string")
+        self.num_steps = num_steps
+        self.source = source
+        self._barrier_steps = frozenset(barrier_steps)
+        self._planned_anchor_steps = planned_anchor_steps
+        self._planned_skip_steps = planned_skip_steps
+        self.runner = runner
         self._contexts: dict[int, CacheStepContext] = {}
         self._timesteps: tuple[float, ...] | None = None
         self._sigmas: tuple[float, ...] | None = None
@@ -41,6 +58,7 @@ class CachePlanController:
         self._contexts.clear()
         self._timesteps = None
         self._sigmas = None
+        self.last_delta_estimate = None
 
     @staticmethod
     def _coordinates(values: Any, name: str, num_steps: int) -> tuple[float, ...] | None:
@@ -71,12 +89,19 @@ class CachePlanController:
         self._contexts.clear()
 
     def needs_signal(self) -> bool:
-        return False
+        hook = getattr(self.runner.policy, "needs_signal", None)
+        return bool(hook()) if callable(hook) else False
 
     def needs_probe(self) -> bool:
-        return False
+        hook = getattr(self.runner.policy, "needs_probe", None)
+        return bool(hook()) if callable(hook) else False
 
-    def _context(self, step_index: int) -> CacheStepContext:
+    def _context(
+        self,
+        step_index: int,
+        *,
+        signal: float | None = None,
+    ) -> CacheStepContext:
         step_index = int(step_index)
         context = self._contexts.get(step_index)
         if context is None:
@@ -88,8 +113,13 @@ class CachePlanController:
                 ),
                 sigma=None if self._sigmas is None else self._sigmas[step_index],
                 is_barrier=step_index in self._barrier_steps,
+                signal=signal,
             )
             self._contexts[step_index] = context
+        elif signal is not None and context.signal != signal:
+            raise ValueError(
+                f"cache step {step_index} was rebound with a different signal"
+            )
         return context
 
     def should_skip(
@@ -99,8 +129,14 @@ class CachePlanController:
         *,
         diff_norm: float | None = None,
     ) -> bool:
-        del mod_input_now, diff_norm  # schedule-driven decisions need no probe
-        return self.runner.decide(self._context(step_index)).should_skip
+        del mod_input_now
+        decision = self.runner.decide(
+            self._context(step_index, signal=diff_norm)
+        )
+        self.last_delta_estimate = getattr(
+            self.runner.policy, "last_delta_estimate", None
+        )
+        return decision.should_skip
 
     def skip_noise_pred(self, mod_input: Any = None) -> Any:
         del mod_input
@@ -131,10 +167,29 @@ class CachePlanController:
         recovery_stats = getattr(self.runner.recovery, "stats", None)
         if callable(recovery_stats):
             stats.update(recovery_stats())
-        stats["planned_anchor_steps"] = int(self.config.planned_anchor_steps)
-        stats["planned_skip_steps"] = int(self.config.planned_skip_steps)
-        stats["source"] = self.config.source
+        if self._planned_anchor_steps is not None:
+            stats["planned_anchor_steps"] = int(self._planned_anchor_steps)
+        if self._planned_skip_steps is not None:
+            stats["planned_skip_steps"] = int(self._planned_skip_steps)
+        stats["source"] = self.source
         return stats
 
 
-__all__ = ["CachePlanController"]
+class CachePlanController(CacheRuntimeController):
+    """Execute a strictly resolved plan/mask in a production denoise loop."""
+
+    def __init__(self, config: ResolvedCacheConfig) -> None:
+        if not isinstance(config, ResolvedCacheConfig):
+            raise TypeError("CachePlanController requires a ResolvedCacheConfig")
+        self.config = config
+        super().__init__(
+            config.build_runner(),
+            num_steps=config.num_steps,
+            source=config.source,
+            barrier_steps=config.barrier_steps,
+            planned_anchor_steps=config.planned_anchor_steps,
+            planned_skip_steps=config.planned_skip_steps,
+        )
+
+
+__all__ = ["CachePlanController", "CacheRuntimeController"]

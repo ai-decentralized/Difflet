@@ -26,7 +26,10 @@ from difflet.pipeline.cache.recovery import (
     QualityRecoveryConfig,
     QualityRecoveryGuard,
 )
-from difflet.pipeline.cache.controller import CachePlanController
+from difflet.pipeline.cache.controller import (
+    CachePlanController,
+    CacheRuntimeController,
+)
 from difflet.pipeline.cache.runner import CacheRunner
 from difflet.pipeline.cache.spec import (
     CACHE_MASK_SCHEMA,
@@ -74,6 +77,7 @@ __all__ = [
     "CachePolicy",
     "CachePredictor",
     "CacheRecovery",
+    "CacheRuntimeController",
     "CacheRunner",
     "CacheRunnerStats",
     "CacheSpecError",
