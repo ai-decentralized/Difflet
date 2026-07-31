@@ -299,6 +299,71 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         metavar="PATH",
         help="Path to TeaCache calibration JSON",
     )
+    p.add_argument(
+        "--cache-plan-file",
+        default=None,
+        metavar="PATH",
+        help="Strict difflet-cache-plan-v1 artifact (FLUX only)",
+    )
+    p.add_argument(
+        "--cache-mask-file",
+        default=None,
+        metavar="PATH",
+        help="Strict difflet-cache-mask-v1 anchor mask (FLUX only)",
+    )
+    p.add_argument(
+        "--cache-predictor",
+        choices=["legacy_residual", "taylorseer"],
+        default=None,
+        help="Predictor paired with --cache-mask-file (FLUX only)",
+    )
+    p.add_argument(
+        "--cache-predictor-order",
+        type=int,
+        choices=[1, 2],
+        default=None,
+        help="TaylorSeer order for --cache-mask-file (default: 1)",
+    )
+    p.add_argument(
+        "--cache-predictor-coord",
+        choices=["index", "timestep", "sigma"],
+        default=None,
+        help="Predictor coordinate for --cache-mask-file (default: index)",
+    )
+    p.add_argument(
+        "--cache-recovery-warmup",
+        type=_nonnegative_int,
+        default=None,
+        metavar="N",
+        help="Independent quality-recovery warmup anchors for a cache mask",
+    )
+    p.add_argument(
+        "--cache-recovery-cooldown",
+        type=_nonnegative_int,
+        default=None,
+        metavar="N",
+        help="Independent quality-recovery cooldown anchors for a cache mask",
+    )
+    p.add_argument(
+        "--cache-recovery-max-consecutive",
+        type=_positive_int,
+        default=None,
+        metavar="N",
+        help="Quality bound on consecutive predicted steps for a cache mask",
+    )
+    p.add_argument(
+        "--cache-recovery-steps",
+        type=_positive_int,
+        default=None,
+        metavar="N",
+        help="Fresh anchors produced after a future adaptive recovery trigger",
+    )
+    p.add_argument(
+        "--cache-require-final-anchor",
+        action="store_true",
+        default=None,
+        help="Force the final denoise step to be a true anchor for a cache mask",
+    )
 
 
 def _add_serve_flags(p: argparse.ArgumentParser) -> None:
@@ -522,6 +587,78 @@ def _validate_teacache(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _validate_cache_config(args: argparse.Namespace) -> None:
+    plan = getattr(args, "cache_plan_file", None)
+    mask = getattr(args, "cache_mask_file", None)
+    predictor = getattr(args, "cache_predictor", None)
+    predictor_order = getattr(args, "cache_predictor_order", None)
+    cache_options = (
+        predictor,
+        predictor_order,
+        getattr(args, "cache_predictor_coord", None),
+        getattr(args, "cache_recovery_warmup", None),
+        getattr(args, "cache_recovery_cooldown", None),
+        getattr(args, "cache_recovery_max_consecutive", None),
+        getattr(args, "cache_recovery_steps", None),
+        getattr(args, "cache_require_final_anchor", None),
+    )
+    cache_selected = plan is not None or mask is not None or any(
+        value is not None for value in cache_options
+    )
+    if not cache_selected:
+        return
+    if args.model_id != "black-forest-labs/FLUX.1-dev":
+        print("Error: cache plan/mask/predictor controls are currently FLUX-only.", file=sys.stderr)
+        raise SystemExit(1)
+
+    legacy_selected = any(
+        getattr(args, name, None) is not None
+        for name in (
+            "teacache_cadence",
+            "teacache_online_delta",
+            "teacache_speedup",
+            "teacache_calibration",
+        )
+    )
+    if plan is not None:
+        if mask is not None or any(value is not None for value in cache_options):
+            print(
+                "Error: --cache-plan-file is complete and cannot be combined with "
+                "--cache-mask-file, predictor, or recovery flags.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        if legacy_selected:
+            print(
+                "Error: --cache-plan-file and --teacache-* flags are mutually exclusive.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        return
+
+    if mask is None:
+        print(
+            "Error: cache predictor/recovery flags require --cache-mask-file.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if legacy_selected:
+        print(
+            "Error: --cache-mask-file and --teacache-* flags are mutually exclusive.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if predictor is None:
+        print("Error: --cache-mask-file requires --cache-predictor.", file=sys.stderr)
+        raise SystemExit(1)
+    if predictor == "legacy_residual" and predictor_order is not None:
+        print(
+            "Error: --cache-predictor-order applies only to taylorseer.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 # Guidance-distilled models run a single forward pass with the guidance scale
 # baked into the timestep embedding, so CFG-parallel has no second branch to
 # split via the CLI. Hunyuan/Qwen have no true-CFG path at all; Flux is also
@@ -617,7 +754,14 @@ def _validate_dp(args: argparse.Namespace) -> None:
             raise SystemExit(1)
     if batch and any(
         getattr(args, name, None) is not None
-        for name in ("teacache_cadence", "teacache_online_delta", "teacache_speedup")
+        for name in (
+            "teacache_cadence",
+            "teacache_online_delta",
+            "teacache_speedup",
+            "cache_plan_file",
+            "cache_mask_file",
+            "cache_predictor",
+        )
     ):
         print(
             "Error: TeaCache flags are not supported in batch/DP mode "
@@ -758,6 +902,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command in ("generate", "run"):
         _validate_teacache(args)
+        _validate_cache_config(args)
         _validate_dp(args)
         if args.requests_dir is None and (args.requests is not None or (args.dp or 1) > 1):
             _dispatch_dp(args)  # raises SystemExit

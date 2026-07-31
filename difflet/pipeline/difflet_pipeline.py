@@ -240,6 +240,21 @@ def _cache_application_kwargs(application_kwargs: dict[str, Any] | None) -> dict
     )
     cache_kwargs.pop("teacache_calibration", None)
     cache_kwargs.pop("teacache_calibration_path", None)
+    cache_kwargs.pop("teacache_cadence", None)
+    cache_kwargs.pop("teacache_online_delta_alpha", None)
+    for runtime_key in (
+        "cache_plan_file",
+        "cache_mask_file",
+        "cache_predictor",
+        "cache_predictor_order",
+        "cache_predictor_coord",
+        "cache_recovery_warmup_steps",
+        "cache_recovery_cooldown_steps",
+        "cache_recovery_max_consecutive",
+        "cache_recovery_steps",
+        "cache_require_final_anchor",
+    ):
+        cache_kwargs.pop(runtime_key, None)
     if probe_enabled:
         cache_kwargs["teacache_probe_enabled"] = True
     return cache_kwargs or None

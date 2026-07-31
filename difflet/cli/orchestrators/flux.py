@@ -138,14 +138,30 @@ class FluxOrchestrator(ModelOrchestrator):
 
     def _teacache_kwargs(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {}
-        if self.args.teacache_speedup is not None:
+        if getattr(self.args, "teacache_speedup", None) is not None:
             kwargs["teacache_speedup"] = self.args.teacache_speedup
             kwargs["teacache_calibration_path"] = self.args.teacache_calibration
         app_kwargs: dict[str, Any] = {}
-        if self.args.teacache_cadence is not None:
+        if getattr(self.args, "teacache_cadence", None) is not None:
             app_kwargs["teacache_cadence"] = self.args.teacache_cadence
-        if self.args.teacache_online_delta is not None:
+        if getattr(self.args, "teacache_online_delta", None) is not None:
             app_kwargs["teacache_online_delta_alpha"] = self.args.teacache_online_delta
+        cache_arg_map = {
+            "cache_plan_file": "cache_plan_file",
+            "cache_mask_file": "cache_mask_file",
+            "cache_predictor": "cache_predictor",
+            "cache_predictor_order": "cache_predictor_order",
+            "cache_predictor_coord": "cache_predictor_coord",
+            "cache_recovery_warmup": "cache_recovery_warmup_steps",
+            "cache_recovery_cooldown": "cache_recovery_cooldown_steps",
+            "cache_recovery_max_consecutive": "cache_recovery_max_consecutive",
+            "cache_recovery_steps": "cache_recovery_steps",
+            "cache_require_final_anchor": "cache_require_final_anchor",
+        }
+        for argument, application_key in cache_arg_map.items():
+            value = getattr(self.args, argument, None)
+            if value is not None:
+                app_kwargs[application_key] = value
         if app_kwargs:
             kwargs["application_kwargs"] = app_kwargs
         return kwargs

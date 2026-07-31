@@ -121,13 +121,16 @@ class NeuronFluxPipeline(FluxPipeline):
         # Only use parallel CFG if both CFG is enabled AND cfg_parallel_enabled is configured
         use_parallel_cfg = do_true_cfg and cfg_parallel_enabled
 
-        # TeaCache fused-A (cclog 85): when the probe is mounted, route to the
-        # serial-CFG teacache loop (handles both the controller-on skip path and
-        # the controller-None baseline through one loop for a clean A/B). CFG
-        # parallel is incompatible (asserted off in the application).
+        # Cache controller path. Dynamic TeaCache uses the optional probe;
+        # index/mask/plan controllers do not need one but share the same
+        # scheduler-preserving loop. CFG parallel is incompatible (asserted
+        # off in the application).
         if teacache_enabled is False and getattr(self, "teacache_controller", None) is not None:
             self.teacache_controller.reset()
-        if getattr(self, "teacache_probe", None) is not None and teacache_enabled is not False:
+        if (
+            getattr(self, "teacache_probe", None) is not None
+            or getattr(self, "teacache_controller", None) is not None
+        ) and teacache_enabled is not False:
             with self.transformer.image_rotary_emb_cache_context():
                 return self._call_with_teacache(
                     prompt=prompt,
@@ -587,6 +590,12 @@ class NeuronFluxPipeline(FluxPipeline):
         empty_guidance = torch.tensor([], device=device, dtype=latents.dtype)
         if controller is not None:
             controller.reset()
+            bind_schedule = getattr(controller, "bind_schedule", None)
+            if callable(bind_schedule):
+                bind_schedule(
+                    timesteps,
+                    getattr(self.scheduler, "sigmas", None),
+                )
         self._tc_last_trajectory = []
         self._tc_pairs = []
         _tc_prev_np = None
