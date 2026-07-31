@@ -52,6 +52,9 @@ test = [
     "imageio",
     "imageio-ffmpeg",
 ]
+cache-eval = [
+    "lpips==0.1.4",
+]
 dev = [
     "difflet-diffusion[test]",
     "black==26.1.0",
