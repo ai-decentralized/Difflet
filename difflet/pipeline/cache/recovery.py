@@ -76,10 +76,6 @@ class QualityRecoveryConfig:
             or num_steps <= 0
         ):
             raise ValueError("num_steps must be a positive integer")
-        if self.warmup_steps + self.cooldown_steps >= num_steps:
-            raise ValueError(
-                "warmup_steps + cooldown_steps must be lower than num_steps"
-            )
 
     def apply_to_anchor_mask(self, anchor_mask: tuple[bool, ...]) -> tuple[bool, ...]:
         """Materialize static recovery guarantees onto a schedule mask."""
@@ -92,10 +88,11 @@ class QualityRecoveryConfig:
             raise ValueError("anchor_mask must be a sequence of booleans")
         effective = list(anchor_mask)
         self.validate_num_steps(len(effective))
-        for index in range(self.warmup_steps):
+        for index in range(min(self.warmup_steps, len(effective))):
             effective[index] = True
         if self.cooldown_steps:
-            for index in range(len(effective) - self.cooldown_steps, len(effective)):
+            cooldown_start = max(len(effective) - self.cooldown_steps, 0)
+            for index in range(cooldown_start, len(effective)):
                 effective[index] = True
         if self.require_final_anchor:
             effective[-1] = True
@@ -120,21 +117,22 @@ class QualityRecoveryGuard:
         self._pending_steps = 0
         self._pending_reason: str | None = None
         self._reset_history_pending = False
-        self._trigger_count = 0
-
-    @property
-    def trigger_count(self) -> int:
-        return self._trigger_count
 
     @property
     def pending_steps(self) -> int:
         return self._pending_steps
 
     def reset(self) -> None:
+        """Reset request-scoped recovery state for a new generation."""
+
+        self.reset_runtime_state()
+
+    def reset_runtime_state(self) -> None:
+        """Clear pending recovery work without altering Runner-owned metrics."""
+
         self._pending_steps = 0
         self._pending_reason = None
         self._reset_history_pending = False
-        self._trigger_count = 0
 
     def request_recovery(
         self,
@@ -163,7 +161,6 @@ class QualityRecoveryGuard:
         self._pending_steps = max(self._pending_steps, requested_steps)
         self._pending_reason = reason.strip()
         self._reset_history_pending = self._reset_history_pending or reset_history
-        self._trigger_count += 1
 
     def before_step(
         self,
@@ -219,8 +216,9 @@ class QualityRecoveryGuard:
         del context, output, history, observation
 
     def stats(self) -> dict[str, Any]:
+        """Return live guard state; cumulative counts belong to CacheRunner."""
+
         return {
-            "quality_recovery_triggers": int(self._trigger_count),
             "quality_recovery_pending_steps": int(self._pending_steps),
             "quality_recovery_reason": self._pending_reason,
         }

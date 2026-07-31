@@ -99,7 +99,7 @@ class CachePlanController:
         *,
         diff_norm: float | None = None,
     ) -> bool:
-        del mod_input_now, diff_norm  # plan-driven decisions are index-based
+        del mod_input_now, diff_norm  # schedule-driven decisions need no probe
         return self.runner.decide(self._context(step_index)).should_skip
 
     def skip_noise_pred(self, mod_input: Any = None) -> Any:

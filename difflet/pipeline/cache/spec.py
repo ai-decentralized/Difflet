@@ -9,7 +9,9 @@ Two JSON formats exist on purpose:
   (model, shape, steps, scheduler), the policy parameters, the predictor
   parameters, and a frozen per-step mask. Parameters explain the schedule;
   the frozen mask pins the exact behaviour of the calibrated run. Both must
-  agree or resolution fails.
+  agree or resolution fails. Unlike the bare mask format, plan v1 has no
+  optional ``description`` field: its top-level keys match the architecture
+  artifact exactly.
 
 Parsing is fail closed: unknown fields, missing fields, or a wrong schema
 string raise instead of being silently ignored.
@@ -511,6 +513,14 @@ def resolve_cache_plan(
     )
     policy = build_policy(plan.policy)
     predictor = build_predictor(plan.predictor)
+    if (
+        policy.warmup_steps + policy.cooldown_steps
+        >= plan.compatibility.num_steps
+    ):
+        raise CacheSpecError(
+            "cache plan warmup_steps + cooldown_steps must be lower than "
+            "compatibility.num_steps"
+        )
     recovery = QualityRecoveryConfig(
         warmup_steps=policy.warmup_steps,
         cooldown_steps=policy.cooldown_steps,

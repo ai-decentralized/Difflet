@@ -12,6 +12,7 @@ from difflet.pipeline.cache import (
     PeriodicAnchorPolicy,
     QualityRecoveryConfig,
     QualityRecoveryGuard,
+    RecoveryDecision,
     TaylorSeerPredictor,
 )
 
@@ -202,3 +203,76 @@ def test_runner_lifts_policy_windows_into_default_recovery_guard():
             runner.record_anchor(context, torch.tensor([float(index)]))
     assert reasons[:2] == ["recovery_warmup", "recovery_warmup"]
     assert reasons[-1] == "recovery_cooldown"
+
+
+def test_recovery_decision_rejects_missing_or_unknown_force_reason():
+    with pytest.raises(ValueError, match="requires a recovery reason"):
+        RecoveryDecision(force_compute=True, reason="none")
+    with pytest.raises(ValueError, match="unsupported recovery reason"):
+        RecoveryDecision(force_compute=True, reason="custom")
+
+
+def test_runner_rejects_malformed_custom_recovery_result():
+    class MalformedRecovery:
+        def before_step(self, context, history, observation):
+            return object()
+
+        def observe_anchor(self, context, output, history, observation):
+            return None
+
+        def observe_prediction(self, context, output, history, observation):
+            return None
+
+        def reset(self):
+            return None
+
+    runner = CacheRunner(
+        ExplicitMaskPolicy([True]),
+        TaylorSeerPredictor(order=1),
+        recovery=MalformedRecovery(),
+    )
+    with pytest.raises(TypeError, match="must return a RecoveryDecision"):
+        runner.decide(_ctx(0, 1))
+
+
+def test_overlapping_recovery_windows_are_safe_full_compute():
+    config = QualityRecoveryConfig(warmup_steps=3, cooldown_steps=3)
+    assert config.apply_to_anchor_mask((False,) * 5) == (True,) * 5
+
+    runner = CacheRunner(
+        CadencePolicy(cadence=2, warmup_steps=3, cooldown_steps=3),
+        LegacyResidualPredictor(),
+    )
+    reasons = []
+    for index in range(5):
+        context = _ctx(index, 5)
+        decision = runner.decide(context)
+        reasons.append(decision.reason)
+        assert decision.should_compute
+        runner.record_anchor(context, torch.tensor([float(index)]))
+    assert reasons == [
+        "recovery_warmup",
+        "recovery_warmup",
+        "recovery_warmup",
+        "recovery_cooldown",
+        "recovery_cooldown",
+    ]
+
+
+def test_barrier_clears_stale_pending_recovery_but_preserves_metrics():
+    runner = CacheRunner(
+        ExplicitMaskPolicy([True, True]),
+        TaylorSeerPredictor(order=1),
+    )
+    first = _ctx(0, 2)
+    runner.decide(first)
+    runner.record_anchor(first, torch.tensor([0.0]))
+    runner.request_quality_recovery("pre-barrier drift", steps=2)
+
+    barrier = _ctx(1, 2, barrier=True)
+    assert runner.decide(barrier).reason == "barrier"
+    runner.record_anchor(barrier, torch.tensor([1.0]))
+
+    assert runner.stats()["recovery_triggers"] == 1
+    assert runner.recovery.stats()["quality_recovery_pending_steps"] == 0
+    assert "quality_recovery_triggers" not in runner.recovery.stats()

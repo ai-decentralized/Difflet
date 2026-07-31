@@ -13,6 +13,7 @@ from difflet.pipeline.cache.types import (
     CacheRecovery,
     CacheRunnerStats,
     CacheStepContext,
+    RecoveryDecision,
     RuntimeObservation,
 )
 
@@ -122,7 +123,15 @@ class CacheRunner:
         if reset_policy:
             self.policy.reset()
         if reset_recovery:
-            self.recovery.reset()
+            reset_runtime_state = getattr(
+                self.recovery, "reset_runtime_state", None
+            )
+            if callable(reset_runtime_state):
+                reset_runtime_state()
+            else:
+                # Third-party recovery implementations only have the protocol's
+                # full reset hook. Built-in guards preserve cumulative metrics.
+                self.recovery.reset()
 
     def decide(self, context: CacheStepContext) -> CacheDecision:
         if self._pending_context is not None or self._compute_context is not None:
@@ -141,6 +150,10 @@ class CacheRunner:
         recovery = self.recovery.before_step(
             context, self.history, self.observation
         )
+        if not isinstance(recovery, RecoveryDecision):
+            raise TypeError(
+                "recovery.before_step() must return a RecoveryDecision"
+            )
         if recovery.force_compute:
             if recovery.reset_history:
                 # Keep the active recovery request while invalidating every
@@ -157,7 +170,12 @@ class CacheRunner:
                 "consecutive_limit": "recovery_consecutive_limit",
                 "requested": "recovery_requested",
             }
-            return CacheDecision(False, recovery_reasons[recovery.reason])
+            decision_reason = recovery_reasons.get(recovery.reason)
+            if decision_reason is None:
+                raise ValueError(
+                    f"unsupported force-compute recovery reason: {recovery.reason!r}"
+                )
+            return CacheDecision(False, decision_reason)
 
         requested = bool(
             self.policy.should_skip(context, self.history, self.observation)

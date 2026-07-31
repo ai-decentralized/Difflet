@@ -184,3 +184,18 @@ def test_plan_roundtrip_dict_is_stable():
     original = _plan_dict()
     plan = load_cache_plan(deepcopy(original))
     assert plan.to_dict() == original
+
+
+def test_plan_v1_keeps_strict_non_overlapping_protection_windows():
+    data = _plan_dict(num_steps=5)
+    data["policy"]["warmup_steps"] = 3
+    data["policy"]["cooldown_steps"] = 2
+    data["frozen_mask"] = [True] * 5
+    with pytest.raises(CacheSpecError, match=r"warmup_steps \+ cooldown_steps"):
+        resolve_cache_plan(
+            load_cache_plan(data),
+            model="flux",
+            shape_label="1024x1024",
+            num_steps=5,
+            scheduler_class="FlowMatchEulerDiscreteScheduler",
+        )

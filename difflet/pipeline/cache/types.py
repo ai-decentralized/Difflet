@@ -253,12 +253,24 @@ class RecoveryDecision:
     reset_history: bool = False
 
     def __post_init__(self) -> None:
+        valid_reasons = {
+            "none",
+            "warmup",
+            "cooldown",
+            "final_anchor",
+            "consecutive_limit",
+            "requested",
+        }
         if type(self.force_compute) is not bool:
             raise ValueError("force_compute must be a boolean")
         if type(self.reset_history) is not bool:
             raise ValueError("reset_history must be a boolean")
+        if self.reason not in valid_reasons:
+            raise ValueError(f"unsupported recovery reason: {self.reason!r}")
         if not self.force_compute and self.reason != "none":
             raise ValueError("a non-empty recovery reason requires force_compute=true")
+        if self.force_compute and self.reason == "none":
+            raise ValueError("force_compute=true requires a recovery reason")
         if self.reset_history and not self.force_compute:
             raise ValueError("reset_history requires force_compute=true")
 
