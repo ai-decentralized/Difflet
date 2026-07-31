@@ -216,6 +216,25 @@ def _jsonable(value: Any) -> Any:
     return json.loads(json.dumps(value, default=str, allow_nan=False))
 
 
+def _normalized_scheduler_config(scheduler: Any) -> dict[str, Any]:
+    """Normalize Diffusers config fields whose order has no semantic meaning."""
+
+    scheduler_config = getattr(scheduler, "config", None)
+    if scheduler_config is None:
+        raise RuntimeError("FLUX scheduler does not expose a reproducible config")
+    normalized = _jsonable(dict(scheduler_config))
+    default_values = normalized.get("_use_default_values")
+    if default_values is not None:
+        if not isinstance(default_values, list) or any(
+            not isinstance(value, str) for value in default_values
+        ):
+            raise RuntimeError("scheduler _use_default_values must be a list of strings")
+        if len(default_values) != len(set(default_values)):
+            raise RuntimeError("scheduler _use_default_values must not contain duplicates")
+        normalized["_use_default_values"] = sorted(default_values)
+    return normalized
+
+
 def build_experiment_protocol(
     *,
     pipe: Any,
@@ -241,9 +260,7 @@ def build_experiment_protocol(
         raise RuntimeError(
             f"could not read compile manifest {compile_manifest_path}: {error}"
         ) from error
-    scheduler_config = getattr(scheduler, "config", None)
-    if scheduler_config is None:
-        raise RuntimeError("FLUX scheduler does not expose a reproducible config")
+    scheduler_config = _normalized_scheduler_config(scheduler)
     product_name_path = Path("/sys/devices/virtual/dmi/id/product_name")
     product_name = (
         product_name_path.read_text(encoding="utf-8").strip()
@@ -292,7 +309,7 @@ def build_experiment_protocol(
             "guidance_scale": float(guidance_scale),
             "dtype": dtype,
             "scheduler_class": type(scheduler).__name__,
-            "scheduler_config": _jsonable(dict(scheduler_config)),
+            "scheduler_config": scheduler_config,
         },
         "rng": {
             "generator": "torch.Generator(cpu)",

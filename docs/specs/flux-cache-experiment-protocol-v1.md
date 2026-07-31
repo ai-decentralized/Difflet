@@ -53,6 +53,8 @@ dirty, the resolved model is not a 40-character Hugging Face snapshot commit, or
 Neuron compile manifest cannot be read. The evaluator independently binds the protected
 protocol to the manifest model, shape, scheduler, step count, guidance, prompt text and
 seed matrix. Changing those values and merely recomputing one manifest field is rejected.
+Diffusers' internal `_use_default_values` scheduler field is canonicalized as a sorted
+set; its process-randomized list order does not create false protocol drift.
 
 The legacy parity command shape is:
 

@@ -231,9 +231,8 @@ def test_protocol_builder_captures_resolved_snapshot_and_compile_identity(
         backend=SimpleNamespace(name="neuron"),
     )
 
-    protocol = build_experiment_protocol(
+    build_kwargs = dict(
         pipe=pipe,
-        scheduler=SimpleNamespace(config={"shift": 3.0}),
         prompt_selection=load_prompt_suite(
             DEFAULT_PROMPT_SUITE_PATH,
             "legacy_parity",
@@ -249,10 +248,33 @@ def test_protocol_builder_captures_resolved_snapshot_and_compile_identity(
         cache_coordinate="index",
         pipeline_warmup_enabled=True,
     )
+    protocol = build_experiment_protocol(
+        scheduler=SimpleNamespace(
+            config={
+                "shift": 3.0,
+                "_use_default_values": ["use_beta_sigmas", "invert_sigmas"],
+            }
+        ),
+        **build_kwargs,
+    )
+    reordered = build_experiment_protocol(
+        scheduler=SimpleNamespace(
+            config={
+                "shift": 3.0,
+                "_use_default_values": ["invert_sigmas", "use_beta_sigmas"],
+            }
+        ),
+        **build_kwargs,
+    )
 
     assert protocol["compile"]["cache_inputs"] == compile_inputs
     assert protocol["model"]["resolved_revision"] == "b" * 40
     assert protocol["prompt_selection"]["split"] == "legacy_parity"
+    assert protocol["sha256"] == reordered["sha256"]
+    assert protocol["generation"]["scheduler_config"]["_use_default_values"] == [
+        "invert_sigmas",
+        "use_beta_sigmas",
+    ]
 
 
 def test_evaluation_protocol_independently_hashes_runtime_and_metric_config(
