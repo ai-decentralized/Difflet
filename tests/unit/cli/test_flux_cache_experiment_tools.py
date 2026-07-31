@@ -8,7 +8,7 @@ import pytest
 import torch
 from PIL import Image
 
-from difflet.pipeline.cache import load_cache_plan, resolve_cache_plan
+from difflet.pipeline.cache import build_policy, load_cache_plan, resolve_cache_plan
 from scripts.calibrate_flux_cache_plan import (
     NO_ACCEPTABLE_CANDIDATE,
     NoAcceptableCandidateError,
@@ -440,6 +440,40 @@ def test_calibrator_ranks_quality_first_and_emits_resolvable_plan():
     )
     assert resolved.plan is not None
     assert resolved.planned_skip_steps > 0
+
+
+def test_calibrator_freezes_recovery_overlay_when_cooldown_is_zero():
+    candidate = _passing_candidate(
+        "final-anchor-overlay",
+        lpips=0.03,
+        psnr=38.0,
+        speedup=2.0,
+    )
+    candidate["policy"].update(
+        {
+            "anchor_interval": 3,
+            "anchor_phase": 1,
+            "warmup_steps": 3,
+            "cooldown_steps": 0,
+        }
+    )
+    curve = _quality_curve([candidate])
+    curve["num_steps"] = 10
+
+    plan, _ = calibrate(curve)
+
+    bare_mask = build_policy(candidate["policy"]).materialize_anchor_mask(10)
+    assert bare_mask[-1] is False
+    assert plan.frozen_mask[-1] is True
+    resolved = resolve_cache_plan(
+        plan,
+        model="flux",
+        shape_label="1024x1024",
+        num_steps=10,
+        scheduler_class="FlowMatchEulerDiscreteScheduler",
+    )
+    assert resolved.anchor_mask == plan.frozen_mask
+    assert resolved.anchor_mask[-1] is True
 
 
 @pytest.mark.parametrize(

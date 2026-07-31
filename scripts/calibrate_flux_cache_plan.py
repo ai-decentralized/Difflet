@@ -26,6 +26,7 @@ from difflet.pipeline.cache import (  # noqa: E402
     CacheCompatibility,
     CachePlan,
     PeriodicAnchorPolicy,
+    QualityRecoveryConfig,
     build_policy,
     build_predictor,
     resolve_cache_plan,
@@ -452,7 +453,11 @@ def calibrate(
     policy = build_policy(selected["policy"])
     predictor = build_predictor(selected["predictor"])
     num_steps = int(document["num_steps"])
-    frozen_mask = policy.materialize_anchor_mask(num_steps)
+    frozen_mask = QualityRecoveryConfig(
+        warmup_steps=policy.warmup_steps,
+        cooldown_steps=policy.cooldown_steps,
+        require_final_anchor=policy.require_final_anchor,
+    ).apply_to_anchor_mask(policy.materialize_anchor_mask(num_steps))
     plan = CachePlan(
         compatibility=CacheCompatibility(
             model="flux",
