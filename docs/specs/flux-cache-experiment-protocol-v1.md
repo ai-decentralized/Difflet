@@ -83,6 +83,13 @@ Those values are therefore **legacy summary evidence**, not a parity oracle. The
 be mixed with new `quality-curve-v2` results. New parity starts with the first clean,
 digest-valid protocol-v1 hardware run.
 
+The 2026-07-31 controlled audit is recorded in
+[`docs/reports/flux-cache-parity-audit-20260731.md`](../reports/flux-cache-parity-audit-20260731.md).
+It found that the frozen `legacy_parity` cases span `39.79` down to `25.98 dB`; the
+fox-only worst case is `35.59 dB`, close to the legacy `35.44 dB` summary, while the
+night-market cases control the current four-sample worst value. This is strong evidence
+for case-set sensitivity, but not proof of the unsaved historical prompt binding.
+
 ## TaylorSeer naming boundary
 
 Difflet's architecture predicts the complete Transformer noise prediction from real
@@ -94,4 +101,7 @@ systems and must not share benchmark labels without recording the prediction tar
 
 The automatic trajectory gate uses the minimum flattened cosine over individual denoise
 steps (`minimum-per-step-flattened-v1`). A cosine over the entire stacked trajectory is a
-different diagnostic and must never be substituted under the same field name.
+different diagnostic and must never be substituted under the same field name. There is
+no fixed conversion between the two. On the same 2026-07-31 index-coordinate artifacts,
+the worst minimum-per-step cosine was `0.98307991`, while the worst float64 stacked
+cosine was `0.99798978`; the latter still did not reproduce the legacy `0.996803`.
