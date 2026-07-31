@@ -1,0 +1,106 @@
+{
+  "schema": "difflet-flux-cache-prompt-suite-v1",
+  "suite_id": "flux-cache-generalization-v1",
+  "source": {
+    "calibration_holdout": "cclogs/m9-teacache/calibration_prompts.txt@505cbf7b910457bad3a5fcd6e82e9d957d3b468b",
+    "legacy_parity": "scripts/run_flux_teacache_e2e.py@505cbf7b910457bad3a5fcd6e82e9d957d3b468b"
+  },
+  "splits": {
+    "legacy_parity": [
+      {
+        "category": "animal-landscape",
+        "prompt_id": "legacy-fox-snow",
+        "text": "a red fox sitting in a snowy forest at dawn, sharp detail"
+      },
+      {
+        "category": "dense-urban-night",
+        "prompt_id": "legacy-night-market",
+        "text": "a bustling night market with neon signs and steam, cinematic"
+      }
+    ],
+    "calibration": [
+      {
+        "category": "dense-urban",
+        "prompt_id": "cal-city-crossing",
+        "text": "a busy city street with buses, bicycles, and people crossing at sunset"
+      },
+      {
+        "category": "human-animal-motion",
+        "prompt_id": "cal-dog-ocean",
+        "text": "a small dog running through shallow ocean water beside a child"
+      },
+      {
+        "category": "dense-still-life",
+        "prompt_id": "cal-kitchen-table",
+        "text": "a kitchen table covered with fruit, cups, plates, and morning light"
+      },
+      {
+        "category": "vehicle-landscape",
+        "prompt_id": "cal-train-snow",
+        "text": "a train moving through snowy mountains under a cloudy sky"
+      },
+      {
+        "category": "hands-fine-detail",
+        "prompt_id": "cal-flower-arrangement",
+        "text": "a close view of hands arranging flowers in a glass vase"
+      },
+      {
+        "category": "human-fast-motion",
+        "prompt_id": "cal-skateboarder",
+        "text": "a skateboarder jumping over a concrete stair rail in a public plaza"
+      },
+      {
+        "category": "object-landscape",
+        "prompt_id": "cal-red-boat",
+        "text": "a red boat floating near a wooden dock on a calm lake"
+      },
+      {
+        "category": "multi-human-night",
+        "prompt_id": "cal-outdoor-dinner",
+        "text": "a group of people eating outdoors under string lights"
+      }
+    ],
+    "holdout": [
+      {
+        "category": "animal-fine-detail",
+        "prompt_id": "holdout-bird-branch",
+        "text": "a bird landing on a tree branch with green leaves in the background"
+      },
+      {
+        "category": "human-animal-motion",
+        "prompt_id": "holdout-horse-trail",
+        "text": "a person riding a horse along a dirt trail in an open field"
+      },
+      {
+        "category": "dense-urban",
+        "prompt_id": "holdout-street-market",
+        "text": "a street market with umbrellas, signs, vegetables, and walking shoppers"
+      },
+      {
+        "category": "dense-still-life",
+        "prompt_id": "holdout-laptop-desk",
+        "text": "a laptop on a desk beside books, headphones, and a coffee mug"
+      },
+      {
+        "category": "vehicle-night-reflection",
+        "prompt_id": "holdout-car-wet-road",
+        "text": "a white car driving on a wet road with reflections from traffic lights"
+      },
+      {
+        "category": "human-object-motion",
+        "prompt_id": "holdout-kite-park",
+        "text": "a child flying a kite in a park on a windy afternoon"
+      },
+      {
+        "category": "food-fine-detail",
+        "prompt_id": "holdout-pasta-table",
+        "text": "a plate of pasta on a restaurant table with candles and glasses"
+      },
+      {
+        "category": "human-water-motion",
+        "prompt_id": "holdout-surfer-wave",
+        "text": "a surfer standing on a wave while the sun reflects on the water"
+      }
+    ]
+  }
+}

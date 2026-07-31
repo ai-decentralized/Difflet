@@ -33,7 +33,11 @@ from difflet.pipeline.cache import (  # noqa: E402
 from difflet.pipeline.cache.predictors import TaylorSeerPredictor  # noqa: E402
 from scripts.evaluate_cache_quality import (  # noqa: E402
     QUALITY_CURVE_SCHEMA,
-    metric_config as expected_metric_config,
+    validate_metric_config,
+)
+from scripts.flux_cache_protocol import (  # noqa: E402
+    validate_evaluation_protocol,
+    validate_protocol_binding,
 )
 
 NO_ACCEPTABLE_CANDIDATE = "无可接受候选"
@@ -73,9 +77,10 @@ def _check_keys(
     name: str,
     *,
     required: set[str],
+    optional: set[str] = frozenset(),
 ) -> None:
     missing = required - set(value)
-    unknown = set(value) - required
+    unknown = set(value) - required - optional
     if missing:
         raise ValueError(f"{name} is missing required fields: {sorted(missing)}")
     if unknown:
@@ -196,6 +201,7 @@ def _validate_curve(document: dict[str, Any]) -> list[dict[str, Any]]:
             "candidates",
             "passing_candidate_ids",
         },
+        optional={"protocol", "evaluation_protocol"},
     )
     if document["schema"] != QUALITY_CURVE_SCHEMA:
         raise ValueError(
@@ -211,32 +217,32 @@ def _validate_curve(document: dict[str, Any]) -> list[dict[str, Any]]:
         raise ValueError("quality curve.sample_count must equal prompt_count * seed_count")
     _finite_float(document["guidance_scale"], "quality curve.guidance_scale")
     _strict_bool(document["hardware_measured"], "quality curve.hardware_measured")
+    has_protocol = "protocol" in document
+    evaluation_protocol = None
+    if has_protocol:
+        validate_protocol_binding(
+            document["protocol"],
+            document,
+            name="quality curve.protocol",
+        )
+        if "evaluation_protocol" not in document:
+            raise ValueError("protocol-v1 quality curve is missing evaluation_protocol")
+        evaluation_protocol = validate_evaluation_protocol(
+            document["evaluation_protocol"],
+            name="quality curve.evaluation_protocol",
+        )
+        if evaluation_protocol["source"]["git_dirty"]:
+            raise ValueError("quality curve.evaluation_protocol was created from a dirty worktree")
+    elif "evaluation_protocol" in document:
+        raise ValueError("quality curve.evaluation_protocol requires an experiment protocol")
     if document["aggregation"] != "worst-sample":
         raise ValueError("quality curve aggregation must be 'worst-sample'")
-    metric_config = document["metric_config"]
-    if not isinstance(metric_config, dict):
-        raise ValueError("quality curve.metric_config must be a JSON object")
-    _check_keys(
-        metric_config,
-        "quality curve.metric_config",
-        required={
-            "trajectory_cosine",
-            "final_latent_cosine",
-            "psnr",
-            "ssim",
-            "lpips",
-        },
+    metric_config = validate_metric_config(
+        document["metric_config"],
+        require_lpips_provenance=has_protocol,
     )
-    if metric_config["trajectory_cosine"] != "minimum-per-step-flattened-v1":
-        raise ValueError("unsupported trajectory cosine metric configuration")
-    if metric_config["final_latent_cosine"] != "flattened-v1":
-        raise ValueError("unsupported final latent cosine metric configuration")
-    for name in ("psnr", "ssim", "lpips"):
-        if not isinstance(metric_config[name], dict):
-            raise ValueError(f"quality curve.metric_config.{name} must be an object")
-    lpips_net = metric_config["lpips"].get("net")
-    if metric_config != expected_metric_config(lpips_net):
-        raise ValueError("quality curve.metric_config is unsupported or incomplete")
+    if evaluation_protocol is not None and evaluation_protocol["metric_config"] != metric_config:
+        raise ValueError("quality curve.evaluation_protocol does not match metric_config")
 
     thresholds_value = document["thresholds"]
     if not isinstance(thresholds_value, dict):

@@ -31,6 +31,7 @@ from scripts.evaluate_cache_quality import (
     psnr_db,
     ssim,
     tensor_cosine,
+    validate_metric_config,
 )
 
 
@@ -308,6 +309,23 @@ def test_metric_primitives_have_expected_identity_behavior():
     assert tensor_cosine(tensor, tensor) == pytest.approx(1.0)
     assert psnr_db(image, image) == pytest.approx(120.0)
     assert ssim(image, image) == pytest.approx(1.0)
+
+
+def test_protocol_metric_config_requires_exact_lpips_model_state():
+    base = metric_config("alex")
+    with pytest.raises(ValueError, match="model-state provenance"):
+        validate_metric_config(base, require_lpips_provenance=True)
+
+    provenance = {
+        "implementation": "lpips.LPIPS",
+        "package_version": "0.1.4",
+        "calibration_version": "0.1",
+        "net": "alex",
+        "model_state_sha256": "a" * 64,
+    }
+    exact = metric_config("alex", provenance)
+
+    assert validate_metric_config(exact, require_lpips_provenance=True) == exact
 
 
 def test_lpips_input_validation_rejects_tiny_or_mismatched_images():

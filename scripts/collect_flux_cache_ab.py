@@ -41,6 +41,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts.flux_cache_protocol import (  # noqa: E402
+    DEFAULT_PROMPT_SUITE_PATH,
+    PromptSelection,
+    build_experiment_protocol,
+    inline_prompt_selection,
+    load_prompt_suite,
+)
+
 
 @dataclass(frozen=True)
 class CandidateArm:
@@ -193,6 +201,19 @@ def _load_prompts(path: Path | None, inline: Sequence[str] | None) -> tuple[str,
     if not prompts or any(not isinstance(prompt, str) or not prompt.strip() for prompt in prompts):
         raise ValueError("prompts must be a non-empty list of non-empty strings")
     return tuple(prompt.strip() for prompt in prompts)
+
+
+def _select_prompts(args: argparse.Namespace) -> PromptSelection:
+    custom_prompts = bool(args.prompts_json or args.prompt)
+    if custom_prompts:
+        if args.prompt_split != "legacy_parity":
+            raise ValueError("--prompt-split cannot be combined with custom prompts")
+        path = Path(args.prompts_json) if args.prompts_json else None
+        prompts = _load_prompts(path, args.prompt)
+        source = f"json:{path.resolve()}" if path is not None else "command-line"
+        return inline_prompt_selection(prompts, source)
+    suite_path = Path(args.prompt_suite or DEFAULT_PROMPT_SUITE_PATH)
+    return load_prompt_suite(suite_path.expanduser().resolve(), args.prompt_split)
 
 
 def _sample_matrix(
@@ -476,6 +497,7 @@ def _load_pipeline(args: argparse.Namespace):
     return DiffletPipeline.from_pretrained(
         args.model_id,
         model_type="flux",
+        revision=args.model_revision,
         parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
         dtype=dtype,
         compile_cache_dir=args.compile_cache_dir,
@@ -519,10 +541,8 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
     guidance_scale = float(args.guidance_scale)
     if not math.isfinite(guidance_scale):
         raise ValueError("guidance_scale must be finite")
-    prompts = _load_prompts(
-        Path(args.prompts_json) if args.prompts_json else None,
-        args.prompt,
-    )
+    prompt_selection = _select_prompts(args)
+    prompts = prompt_selection.prompts
     seeds = tuple(DEFAULT_SEEDS if args.seed is None else args.seed)
     samples = _sample_matrix(prompts, seeds)
     arms = build_candidate_arms(
@@ -543,6 +563,27 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
     pipe = _load_pipeline(args)
     flux_pipeline = pipe.app.pipe
     flux_pipeline._tc_record = False
+    protocol = build_experiment_protocol(
+        pipe=pipe,
+        scheduler=flux_pipeline.scheduler,
+        prompt_selection=prompt_selection,
+        seeds=seeds,
+        num_steps=num_steps,
+        height=height,
+        width=width,
+        guidance_scale=guidance_scale,
+        dtype=args.dtype,
+        tp_degree=args.tp_degree,
+        requested_model_revision=args.model_revision,
+        cache_coordinate=args.coord,
+        pipeline_warmup_enabled=not bool(args.skip_warmup),
+    )
+    print(
+        "[flux-cache-ab] protocol "
+        f"{protocol['sha256']} prompts={prompt_selection.descriptor['split']} "
+        f"model={protocol['model']['resolved_revision']}",
+        flush=True,
+    )
 
     baseline_runs: list[dict[str, Any]] = []
     baseline_controller = _build_baseline_controller(num_steps)
@@ -605,6 +646,7 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
         "prompt_count": len(prompts),
         "seed_count": len(seeds),
         "sample_count": len(samples),
+        "protocol": protocol,
     }
     quality, speedup = build_manifests(
         identity=identity,
@@ -628,8 +670,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--model-id", default=MODEL_ID)
-    parser.add_argument("--prompts-json", default=None)
-    parser.add_argument("--prompt", action="append", default=None)
+    parser.add_argument("--model-revision", default=None)
+    prompt_group = parser.add_mutually_exclusive_group()
+    prompt_group.add_argument("--prompt-suite", default=None)
+    prompt_group.add_argument("--prompts-json", default=None)
+    prompt_group.add_argument("--prompt", action="append", default=None)
+    parser.add_argument("--prompt-split", default="legacy_parity")
     parser.add_argument("--seed", action="append", type=int, default=None)
     parser.add_argument("--num-steps", type=int, default=50)
     parser.add_argument("--height", type=int, default=1024)

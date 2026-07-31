@@ -11,9 +11,11 @@ closed when unavailable.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
+from importlib import metadata
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -25,6 +27,10 @@ from scripts.collect_flux_cache_ab import (  # noqa: E402
     QUALITY_INPUT_SCHEMA,
     SPEEDUP_CANDIDATES_SCHEMA,
 )
+from scripts.flux_cache_protocol import (  # noqa: E402
+    build_evaluation_protocol,
+    validate_protocol_binding,
+)
 
 QUALITY_CURVE_SCHEMA = "quality-curve-v2"
 DEFAULT_MIN_SPEEDUP = 1.5
@@ -32,6 +38,8 @@ DEFAULT_MIN_TRAJECTORY_COSINE = 0.9999
 DEFAULT_MIN_FINAL_LATENT_COSINE = 0.9995
 DEFAULT_MIN_PSNR_DB = 30.0
 DEFAULT_MAX_LPIPS = 0.10
+LPIPS_PACKAGE_VERSION = "0.1.4"
+LPIPS_CALIBRATION_VERSION = "0.1"
 
 LPIPSFunction = Callable[[Any, Any], float]
 
@@ -139,6 +147,12 @@ def _validate_identity(document: Mapping[str, Any], name: str) -> dict[str, Any]
         raise ValueError(
             f"{name}.sample_count must equal prompt_count * seed_count " f"({expected_samples})"
         )
+    if "protocol" in document:
+        identity["protocol"] = validate_protocol_binding(
+            document["protocol"],
+            identity,
+            name=f"{name}.protocol",
+        )
     return identity
 
 
@@ -185,6 +199,7 @@ def _validate_quality_input(
         document,
         "quality input",
         required={"schema", *_COMMON_FIELDS, "candidates", "comparisons"},
+        optional={"protocol"},
     )
     if document["schema"] != QUALITY_INPUT_SCHEMA:
         raise ValueError(
@@ -278,6 +293,27 @@ def _validate_quality_input(
         previous = prompt_labels.setdefault(prompt_index, prompt)
         if previous != prompt:
             raise ValueError("one prompt_index maps to multiple prompt strings")
+    if "protocol" in identity:
+        validate_protocol_binding(
+            identity["protocol"],
+            identity,
+            sample_matrix=[
+                {
+                    "prompt_index": prompt_index,
+                    "prompt": prompt,
+                    "seed": seed,
+                }
+                for prompt_index, prompt, seed, _ in canonical.values()
+            ],
+            name="quality input.protocol",
+        )
+        coordinate = identity["protocol"]["cache_semantics"]["coordinate"]
+        for candidate_id, definition in definitions.items():
+            if definition["predictor"].get("coord", "index") != coordinate:
+                raise ValueError(
+                    f"candidate {candidate_id!r} predictor coordinate does not "
+                    "match the experiment protocol"
+                )
     return identity, definitions, comparisons
 
 
@@ -288,6 +324,7 @@ def _validate_speedup_input(
         document,
         "speedup candidates",
         required={"schema", *_COMMON_FIELDS, "baseline", "candidates"},
+        optional={"protocol"},
     )
     if document["schema"] != SPEEDUP_CANDIDATES_SCHEMA:
         raise ValueError(
@@ -585,6 +622,19 @@ def build_lpips_function(net: str = "alex") -> LPIPSFunction:
         ) from error
     model = lpips.LPIPS(net=net)
     model.eval()
+    package_version = metadata.version("lpips")
+    if package_version != LPIPS_PACKAGE_VERSION:
+        raise RuntimeError(
+            "reproducible LPIPS evaluation requires "
+            f"lpips=={LPIPS_PACKAGE_VERSION}, got {package_version!r}"
+        )
+    calibration_version = str(getattr(model, "version", LPIPS_CALIBRATION_VERSION))
+    if calibration_version != LPIPS_CALIBRATION_VERSION:
+        raise RuntimeError(
+            "reproducible LPIPS evaluation requires calibration weights "
+            f"{LPIPS_CALIBRATION_VERSION!r}, got {calibration_version!r}"
+        )
+    model_state_sha256 = _model_state_sha256(model)
 
     def metric(lhs: Any, rhs: Any) -> float:
         import torch
@@ -600,7 +650,38 @@ def build_lpips_function(net: str = "alex") -> LPIPSFunction:
             raise ValueError("LPIPS must be nonnegative")
         return result
 
+    metric._difflet_lpips_provenance = {  # type: ignore[attr-defined]
+        "implementation": "lpips.LPIPS",
+        "package_version": package_version,
+        "calibration_version": calibration_version,
+        "net": net,
+        "model_state_sha256": model_state_sha256,
+    }
     return metric
+
+
+def _model_state_sha256(model: Any) -> str:
+    """Hash the exact LPIPS backbone and calibration tensors in a stable order."""
+
+    digest = hashlib.sha256()
+    state = model.state_dict()
+    for name in sorted(state):
+        tensor = state[name].detach().cpu().contiguous()
+        descriptor = json.dumps(
+            {
+                "name": name,
+                "dtype": str(tensor.dtype),
+                "shape": list(tensor.shape),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        raw = tensor.numpy().tobytes(order="C")
+        digest.update(len(descriptor).to_bytes(8, "big"))
+        digest.update(descriptor)
+        digest.update(len(raw).to_bytes(8, "big"))
+        digest.update(raw)
+    return digest.hexdigest()
 
 
 def _failed_gates(
@@ -628,9 +709,44 @@ def _failed_gates(
     return failures
 
 
-def metric_config(lpips_net: str) -> dict[str, Any]:
+def metric_config(
+    lpips_net: str,
+    lpips_provenance: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     if lpips_net not in ("alex", "vgg", "squeeze"):
         raise ValueError("lpips_net must be one of: alex, vgg, squeeze")
+    lpips_config = {
+        "package": "lpips",
+        "package_version": LPIPS_PACKAGE_VERSION,
+        "calibration_version": LPIPS_CALIBRATION_VERSION,
+        "implementation": "lpips.LPIPS",
+        "net": lpips_net,
+        "input_range": "minus-one-to-one",
+        "minimum_spatial_size": [64, 64],
+    }
+    if lpips_provenance is not None:
+        required = {
+            "implementation",
+            "package_version",
+            "calibration_version",
+            "net",
+            "model_state_sha256",
+        }
+        if set(lpips_provenance) != required:
+            raise ValueError("LPIPS provenance is incomplete or has unknown fields")
+        for field in required - {"model_state_sha256"}:
+            if lpips_provenance[field] != lpips_config[field]:
+                raise ValueError(
+                    f"LPIPS provenance {field} does not match the metric configuration"
+                )
+        state_digest = lpips_provenance["model_state_sha256"]
+        if (
+            not isinstance(state_digest, str)
+            or len(state_digest) != 64
+            or any(character not in "0123456789abcdef" for character in state_digest)
+        ):
+            raise ValueError("LPIPS model_state_sha256 must be a lowercase SHA-256 digest")
+        lpips_config["model_state_sha256"] = state_digest
     return {
         "trajectory_cosine": "minimum-per-step-flattened-v1",
         "final_latent_cosine": "flattened-v1",
@@ -643,14 +759,39 @@ def metric_config(lpips_net: str) -> dict[str, Any]:
             "max_window": 11,
             "sigma": 1.5,
         },
-        "lpips": {
-            "package": "lpips",
-            "version": "0.1",
-            "net": lpips_net,
-            "input_range": "minus-one-to-one",
-            "minimum_spatial_size": [64, 64],
-        },
+        "lpips": lpips_config,
     }
+
+
+def validate_metric_config(
+    value: Any,
+    *,
+    require_lpips_provenance: bool,
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("quality curve.metric_config must be a JSON object")
+    lpips_value = value.get("lpips")
+    if not isinstance(lpips_value, dict):
+        raise ValueError("quality curve.metric_config.lpips must be an object")
+    net = lpips_value.get("net")
+    provenance = None
+    if "model_state_sha256" in lpips_value:
+        provenance = {
+            field: lpips_value.get(field)
+            for field in (
+                "implementation",
+                "package_version",
+                "calibration_version",
+                "net",
+                "model_state_sha256",
+            )
+        }
+    if require_lpips_provenance and provenance is None:
+        raise ValueError("protocol-v1 quality evidence requires LPIPS model-state provenance")
+    expected = metric_config(net, provenance)
+    if value != expected:
+        raise ValueError("quality curve.metric_config is unsupported or incomplete")
+    return expected
 
 
 def evaluate(
@@ -679,6 +820,20 @@ def evaluate(
             raise ValueError(
                 f"candidate {candidate_id!r} policy/predictor differs between manifests"
             )
+    lpips_provenance = getattr(
+        lpips_function,
+        "_difflet_lpips_provenance",
+        None,
+    )
+    if "protocol" in identity and lpips_provenance is None:
+        raise ValueError(
+            "protocol-v1 evaluation requires build_lpips_function() so the "
+            "exact LPIPS model state can be recorded"
+        )
+    resolved_metric_config = metric_config(lpips_net, lpips_provenance)
+    evaluation_protocol = (
+        build_evaluation_protocol(resolved_metric_config) if "protocol" in identity else None
+    )
 
     per_candidate: dict[str, list[dict[str, Any]]] = {
         candidate_id: [] for candidate_id in definitions
@@ -786,7 +941,7 @@ def evaluate(
             }
         )
 
-    return {
+    result = {
         "schema": QUALITY_CURVE_SCHEMA,
         **identity,
         "hardware_measured": bool(
@@ -794,13 +949,16 @@ def evaluate(
             and speedup_document["hardware_measured"] is True
         ),
         "aggregation": "worst-sample",
-        "metric_config": metric_config(lpips_net),
+        "metric_config": resolved_metric_config,
         "thresholds": dict(thresholds),
         "candidates": candidate_rows,
         "passing_candidate_ids": [
             candidate["candidate_id"] for candidate in candidate_rows if candidate["passes_gate"]
         ],
     }
+    if evaluation_protocol is not None:
+        result["evaluation_protocol"] = evaluation_protocol
+    return result
 
 
 def default_thresholds(
