@@ -234,8 +234,6 @@ class TeaCachePolicy:
     ) -> None:
         del context, history
         if float(self.calibration.online_delta_alpha) > 0.0 and observation.last_output is not None:
-            import torch
-
             current = output.detach()
             previous = observation.last_output
             denominator = previous.abs().mean().clamp_min(1e-8)

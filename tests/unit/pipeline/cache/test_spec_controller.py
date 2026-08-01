@@ -8,15 +8,16 @@ import torch
 from difflet.pipeline.cache import (
     CACHE_MASK_SCHEMA,
     CACHE_PLAN_SCHEMA,
-    CachePlanController,
     CacheRunner,
-    CacheRuntimeController,
+    CacheSession,
     CacheSpecError,
     LegacyResidualPredictor,
     PeriodicAnchorPolicy,
     QualityRecoveryConfig,
     QualityRecoveryGuard,
+    ResolvedCacheSession,
     TaylorSeerPredictor,
+    TeaCacheControllerAdapter,
     TeaCachePolicy,
     load_cache_mask,
     load_cache_plan,
@@ -156,7 +157,7 @@ def test_independent_recovery_materializes_effective_mask():
     resolved.build_runner()
 
 
-def test_controller_binds_scheduler_coordinates_and_resets_per_request():
+def test_resolved_session_binds_schedule_coordinates_and_clears_request_state():
     data = _plan_dict()
     data["predictor"]["coord"] = "timestep"
     plan = load_cache_plan(data)
@@ -167,25 +168,26 @@ def test_controller_binds_scheduler_coordinates_and_resets_per_request():
         num_steps=10,
         scheduler_class="FlowMatchEulerDiscreteScheduler",
     )
-    controller = CachePlanController(resolved)
-    controller.reset()
-    controller.bind_schedule(
+    session = ResolvedCacheSession(resolved)
+    session.clear_request_state()
+    session.bind_schedule_coordinates(
         [10.0, 9.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.5]
     )
     for index in range(10):
-        if controller.should_skip(index):
-            controller.skip_noise_pred()
+        decision = session.decide_step(index)
+        if decision.should_skip:
+            session.estimate_output(index)
         else:
-            controller.record_full_step(torch.tensor([float(index)]))
+            session.record_anchor(index, torch.tensor([float(index)]))
 
-    stats = controller.stats()
+    stats = session.statistics()
     assert stats["full_steps"] == stats["planned_anchor_steps"]
     assert stats["skipped_steps"] == stats["planned_skip_steps"]
-    controller.reset()
-    assert controller.stats()["full_steps"] == 0
+    session.clear_request_state()
+    assert session.statistics()["full_steps"] == 0
 
 
-def test_dynamic_controller_composes_policy_predictor_and_recovery():
+def test_cache_session_composes_policy_predictor_and_recovery():
     calibration = TeaCacheCalibration(
         model="flux",
         shape_label="1024x1024",
@@ -199,28 +201,29 @@ def test_dynamic_controller_composes_policy_predictor_and_recovery():
     recovery = QualityRecoveryGuard(
         QualityRecoveryConfig(max_consecutive_predictions=1)
     )
-    controller = CacheRuntimeController(
+    session = CacheSession(
         CacheRunner(
             TeaCachePolicy(calibration),
             LegacyResidualPredictor(),
             recovery=recovery,
         ),
         num_steps=6,
-        source="teacache_cadence",
+        configuration_source="teacache_cadence",
     )
 
-    assert controller.needs_signal() is False
-    controller.bind_schedule(
+    assert session.policy_requires_signal() is False
+    session.bind_schedule_coordinates(
         [6.0, 5.0, 4.0, 3.0, 2.0, 1.0],
         [1.0, 0.8, 0.6, 0.4, 0.2, 0.0, 0.0],
     )
     for index in range(6):
-        if controller.should_skip(index):
-            controller.skip_noise_pred()
+        decision = session.decide_step(index)
+        if decision.should_skip:
+            session.estimate_output(index)
         else:
-            controller.record_full_step(torch.tensor([float(index)]))
+            session.record_anchor(index, torch.tensor([float(index)]))
 
-    stats = controller.stats()
+    stats = session.statistics()
     assert stats["source"] == "teacache_cadence"
     assert stats["full_steps"] == 4
     assert stats["skipped_steps"] == 2
@@ -228,6 +231,54 @@ def test_dynamic_controller_composes_policy_predictor_and_recovery():
     assert stats["recovery_forced_steps"] == 2
     assert "planned_anchor_steps" not in stats
     assert stats["quality_recovery_pending_steps"] == 0
+
+
+def test_teacache_adapter_translates_legacy_loop_calls_only():
+    resolved = resolve_cache_config(
+        num_steps=4,
+        mask=(True, True, False, True),
+        predictor=TaylorSeerPredictor(order=1),
+        require_final_anchor=True,
+    )
+    session = ResolvedCacheSession(resolved)
+    adapter = TeaCacheControllerAdapter(session)
+
+    adapter.bind_schedule([4.0, 3.0, 2.0, 1.0])
+    outputs = []
+    for index in range(4):
+        if adapter.should_skip(index):
+            output = adapter.skip_noise_pred()
+        else:
+            output = torch.tensor([float(index * index)])
+            adapter.record_full_step(output)
+        outputs.append(float(output.item()))
+
+    assert outputs == [0.0, 1.0, 2.0, 9.0]
+    assert adapter.session is session
+    assert adapter.stats()["full_steps"] == 3
+    assert adapter.stats()["skipped_steps"] == 1
+
+
+def test_cache_session_requires_explicit_matching_step_completion():
+    resolved = resolve_cache_config(
+        num_steps=2,
+        mask=(True, True),
+        predictor=TaylorSeerPredictor(order=1),
+    )
+    session = ResolvedCacheSession(resolved)
+
+    with pytest.raises(ValueError, match="step_index must be an integer"):
+        session.decide_step(True)
+
+    decision = session.decide_step(0)
+    assert decision.should_compute
+    with pytest.raises(RuntimeError, match="not step 1"):
+        session.record_anchor(1, torch.tensor([0.0]))
+    with pytest.raises(RuntimeError, match="cannot change"):
+        session.bind_schedule_coordinates([2.0, 1.0])
+
+    session.record_anchor(0, torch.tensor([0.0]))
+    assert session.active_step_index is None
 
 
 def test_plan_roundtrip_dict_is_stable():

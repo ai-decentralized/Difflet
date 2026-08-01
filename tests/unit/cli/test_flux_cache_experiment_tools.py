@@ -17,7 +17,7 @@ from scripts.calibrate_flux_cache_plan import (
 from scripts.collect_flux_cache_ab import (
     FOREGROUND_ACK,
     CandidateArm,
-    _build_baseline_controller,
+    _build_baseline_adapter,
     build_candidate_arms,
     build_manifests,
     collect,
@@ -47,9 +47,9 @@ def test_default_flux_sweep_has_twelve_unique_safe_arms():
         for order in (1, 2)
     }
     for arm in arms:
-        controller = arm.build_controller(50)
-        assert controller.num_steps == 50
-        assert controller.stats()["planned_skip_steps"] > 0
+        adapter = arm.build_pipeline_adapter(50)
+        assert adapter.num_steps == 50
+        assert adapter.stats()["planned_skip_steps"] > 0
 
 
 def test_measured_50_step_schedule_matches_frozen_mask_without_vetoes():
@@ -60,32 +60,32 @@ def test_measured_50_step_schedule_matches_frozen_mask_without_vetoes():
         anchor_phase=1,
         cooldown_steps=1,
     )
-    controller = arm.build_controller(50)
+    adapter = arm.build_pipeline_adapter(50)
     actual_anchors = []
     for step in range(50):
-        should_skip = controller.should_skip(step)
+        should_skip = adapter.should_skip(step)
         actual_anchors.append(not should_skip)
         if should_skip:
-            controller.skip_noise_pred()
+            adapter.skip_noise_pred()
         else:
-            controller.record_full_step(torch.tensor([float(step)]))
+            adapter.record_full_step(torch.tensor([float(step)]))
 
-    assert tuple(actual_anchors) == controller.config.anchor_mask
-    assert controller.stats()["readiness_rejections"] == 0
-    assert controller.stats()["consecutive_skip_vetoes"] == 0
-    assert controller.stats()["full_steps"] == controller.stats()["planned_anchor_steps"]
-    assert controller.stats()["skipped_steps"] == controller.stats()["planned_skip_steps"]
+    assert tuple(actual_anchors) == adapter.session.config.anchor_mask
+    assert adapter.stats()["readiness_rejections"] == 0
+    assert adapter.stats()["consecutive_skip_vetoes"] == 0
+    assert adapter.stats()["full_steps"] == adapter.stats()["planned_anchor_steps"]
+    assert adapter.stats()["skipped_steps"] == adapter.stats()["planned_skip_steps"]
 
 
-def test_baseline_controller_forces_every_step_through_the_same_runner_loop():
-    controller = _build_baseline_controller(6)
+def test_baseline_adapter_forces_every_step_through_the_same_runner_loop():
+    adapter = _build_baseline_adapter(6)
     for step in range(6):
-        assert controller.should_skip(step) is False
-        controller.record_full_step(torch.tensor([float(step)]))
+        assert adapter.should_skip(step) is False
+        adapter.record_full_step(torch.tensor([float(step)]))
 
-    assert controller.stats()["full_steps"] == 6
-    assert controller.stats()["skipped_steps"] == 0
-    assert controller.stats()["planned_anchor_steps"] == 6
+    assert adapter.stats()["full_steps"] == 6
+    assert adapter.stats()["skipped_steps"] == 0
+    assert adapter.stats()["planned_anchor_steps"] == 6
 
 
 def test_collector_requires_explicit_hardware_ack():

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping, Protocol, Sequence, runtime_checkable
+from typing import Any, Literal, Mapping, Protocol, runtime_checkable
 
 Coordinate = Literal["index", "timestep", "sigma"]
 

@@ -100,11 +100,14 @@ class CandidateArm:
             "coord": self.coord,
         }
 
-    def build_controller(self, num_steps: int):
+    def build_pipeline_adapter(self, num_steps: int):
+        """Build the TeaCache-loop adapter for this experimental arm."""
+
         from difflet.pipeline.cache import (
-            CachePlanController,
             PeriodicAnchorPolicy,
+            ResolvedCacheSession,
             TaylorSeerPredictor,
+            TeaCacheControllerAdapter,
             resolve_cache_config,
         )
 
@@ -125,7 +128,7 @@ class CandidateArm:
             predictor=TaylorSeerPredictor(order=self.order, coord=self.coord),
             require_final_anchor=self.require_final_anchor,
         )
-        return CachePlanController(resolved)
+        return TeaCacheControllerAdapter(ResolvedCacheSession(resolved))
 
 
 def build_candidate_arms(
@@ -508,10 +511,11 @@ def _load_pipeline(args: argparse.Namespace):
     )
 
 
-def _build_baseline_controller(num_steps: int):
+def _build_baseline_adapter(num_steps: int):
     from difflet.pipeline.cache import (
-        CachePlanController,
+        ResolvedCacheSession,
         TaylorSeerPredictor,
+        TeaCacheControllerAdapter,
         resolve_cache_config,
     )
 
@@ -521,7 +525,7 @@ def _build_baseline_controller(num_steps: int):
         predictor=TaylorSeerPredictor(order=1),
         require_final_anchor=True,
     )
-    return CachePlanController(resolved)
+    return TeaCacheControllerAdapter(ResolvedCacheSession(resolved))
 
 
 def collect(args: argparse.Namespace) -> tuple[Path, Path]:
@@ -555,7 +559,7 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
         coord=args.coord,
     )
     for arm in arms:
-        arm.build_controller(num_steps)
+        arm.build_pipeline_adapter(num_steps)
 
     output_root = Path(args.out_dir).expanduser().resolve()
     _prepare_output_directory(output_root)
@@ -586,8 +590,8 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
     )
 
     baseline_runs: list[dict[str, Any]] = []
-    baseline_controller = _build_baseline_controller(num_steps)
-    flux_pipeline.teacache_controller = baseline_controller
+    baseline_adapter = _build_baseline_adapter(num_steps)
+    flux_pipeline.teacache_controller = baseline_adapter
     for sample in samples:
         run = _run_sample(
             pipe,
@@ -600,9 +604,9 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
             artifact_dir=output_root / "artifacts" / "baseline",
             output_root=output_root,
         )
-        baseline_stats = baseline_controller.stats()
+        baseline_stats = baseline_adapter.stats()
         if baseline_stats["full_steps"] != num_steps or baseline_stats["skipped_steps"] != 0:
-            raise RuntimeError("baseline controller did not execute every denoise step")
+            raise RuntimeError("baseline adapter did not execute every denoise step")
         baseline_runs.append(run)
         print(
             f"[flux-cache-ab] baseline {sample['sample_id']} " f"{run['elapsed_s']:.3f}s",
@@ -611,8 +615,8 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
 
     candidate_runs: dict[str, list[dict[str, Any]]] = {}
     for arm in arms:
-        controller = arm.build_controller(num_steps)
-        flux_pipeline.teacache_controller = controller
+        adapter = arm.build_pipeline_adapter(num_steps)
+        flux_pipeline.teacache_controller = adapter
         rows: list[dict[str, Any]] = []
         for sample in samples:
             run = _run_sample(
@@ -626,7 +630,7 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
                 artifact_dir=output_root / "artifacts" / arm.candidate_id,
                 output_root=output_root,
             )
-            run["runner_stats"] = controller.stats()
+            run["runner_stats"] = adapter.stats()
             rows.append(run)
             print(
                 f"[flux-cache-ab] {arm.candidate_id} {sample['sample_id']} "

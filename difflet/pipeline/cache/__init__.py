@@ -1,11 +1,13 @@
-"""Composable diffusion-cache runtime.
+"""Composable, framework-neutral diffusion-cache runtime.
 
-The package separates three concerns that the legacy TeaCache controller kept
-in one state machine:
+The package separates concerns that the legacy TeaCache controller kept in
+one state machine:
 
 * policies decide *when* a transformer evaluation may be skipped;
 * predictors decide *which value* replaces that evaluation; and
-* :class:`CacheRunner` owns history, safety checks, and accounting.
+* :class:`CacheRunner` owns history, safety checks, and accounting;
+* :class:`CacheSession` owns one request's schedule and lifecycle; and
+* :class:`TeaCacheControllerAdapter` only translates the existing loop API.
 
 Only real transformer outputs enter :class:`CacheHistory`. Predicted outputs
 are retained in :class:`RuntimeObservation` because the scheduler consumes
@@ -26,11 +28,8 @@ from difflet.pipeline.cache.recovery import (
     QualityRecoveryConfig,
     QualityRecoveryGuard,
 )
-from difflet.pipeline.cache.controller import (
-    CachePlanController,
-    CacheRuntimeController,
-)
 from difflet.pipeline.cache.runner import CacheRunner
+from difflet.pipeline.cache.session import CacheSession, ResolvedCacheSession
 from difflet.pipeline.cache.spec import (
     CACHE_MASK_SCHEMA,
     CACHE_PLAN_SCHEMA,
@@ -62,6 +61,7 @@ from difflet.pipeline.cache.types import (
     RecoveryDecision,
     StepContext,
 )
+from difflet.pipeline.cache.teacache_adapter import TeaCacheControllerAdapter
 
 __all__ = [
     "CACHE_MASK_SCHEMA",
@@ -73,11 +73,10 @@ __all__ = [
     "CacheHistory",
     "CacheMask",
     "CachePlan",
-    "CachePlanController",
     "CachePolicy",
     "CachePredictor",
     "CacheRecovery",
-    "CacheRuntimeController",
+    "CacheSession",
     "CacheRunner",
     "CacheRunnerStats",
     "CacheSpecError",
@@ -92,9 +91,11 @@ __all__ = [
     "RecoveryDecision",
     "ResolvedCacheConfig",
     "RuntimeObservation",
+    "ResolvedCacheSession",
     "StepContext",
     "TaylorSeerPredictor",
     "TeaCachePolicy",
+    "TeaCacheControllerAdapter",
     "build_policy",
     "build_predictor",
     "load_cache_mask",

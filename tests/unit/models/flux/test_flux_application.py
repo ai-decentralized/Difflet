@@ -241,7 +241,7 @@ def test_probe_free_cache_uses_composable_runtime_and_explicit_recovery(
 ):
     import types
 
-    from difflet.pipeline.cache import CacheRuntimeController
+    from difflet.pipeline.cache import CacheSession, TeaCacheControllerAdapter
 
     class FakePipeline:
         def __init__(self):
@@ -294,18 +294,71 @@ def test_probe_free_cache_uses_composable_runtime_and_explicit_recovery(
         width=512,
     )
 
-    controller = instance.pipe.teacache_controller
-    assert isinstance(controller, CacheRuntimeController)
-    assert instance.cache_controller is controller
-    assert controller.source == "teacache_cadence"
-    assert controller.num_steps == 6
-    assert controller.runner.policy.calibration.shape_label == "768x512"
-    recovery = controller.runner.recovery.config
+    adapter = instance.pipe.teacache_controller
+    assert isinstance(adapter, TeaCacheControllerAdapter)
+    assert isinstance(instance.cache_session, CacheSession)
+    assert adapter.session is instance.cache_session
+    assert adapter.source == "teacache_cadence"
+    assert adapter.num_steps == 6
+    assert adapter.runner.policy.calibration.shape_label == "768x512"
+    recovery = adapter.runner.recovery.config
     assert recovery.warmup_steps == 0
     assert recovery.cooldown_steps == 2
     assert recovery.max_consecutive_predictions == 1
     assert recovery.recovery_steps == 3
     assert recovery.require_final_anchor is True
+
+
+def test_static_cache_configuration_installs_resolved_session_and_adapter():
+    import types
+
+    from difflet.pipeline.cache import (
+        QualityRecoveryConfig,
+        ResolvedCacheSession,
+        TeaCacheControllerAdapter,
+    )
+
+    instance = object.__new__(app.NeuronFluxApplication)
+    instance._cache_plan = None
+    instance._cache_mask = (True, True, False, True)
+    instance._cache_predictor_spec = {
+        "type": "taylorseer",
+        "order": 1,
+        "coord": "index",
+    }
+    instance._cache_recovery_config = QualityRecoveryConfig(
+        require_final_anchor=True
+    )
+    instance.pipe = types.SimpleNamespace(
+        scheduler=types.SimpleNamespace(),
+        teacache_controller=None,
+    )
+    instance._request_identity = lambda *args, **kwargs: (4, 512, 512)
+
+    instance._prepare_cache_session(prompt="cat")
+
+    assert isinstance(instance.cache_session, ResolvedCacheSession)
+    assert isinstance(instance.pipe.teacache_controller, TeaCacheControllerAdapter)
+    assert instance.pipe.teacache_controller.session is instance.cache_session
+    assert instance.cache_session.config.anchor_mask == (True, True, False, True)
+
+
+def test_request_identity_uses_pipeline_default_and_rejects_zero_steps():
+    class FakePipeline:
+        def __call__(self, *, num_inference_steps=17, sigmas=None, height=None, width=None):
+            del num_inference_steps, sigmas, height, width
+
+    instance = object.__new__(app.NeuronFluxApplication)
+    instance.pipe = FakePipeline()
+    instance.height = 768
+    instance.width = 512
+
+    assert instance._request_identity() == (17, 768, 512)
+    assert instance._request_identity(sigmas=[1.0, 0.5]) == (2, 768, 512)
+    with pytest.raises(ValueError, match="at least one step"):
+        instance._request_identity(num_inference_steps=0)
+    with pytest.raises(ValueError, match="at least one step"):
+        instance._request_identity(sigmas=[])
 
 
 def test_create_flux_config_threads_parallel_flags(patched_loaders):

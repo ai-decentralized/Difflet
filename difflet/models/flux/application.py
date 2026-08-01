@@ -221,7 +221,7 @@ class NeuronFluxApplication(MultiComponentApplication):
         self._cache_predictor_spec = None
         self._cache_recovery_config = None
         self._probe_free_recovery_config = None
-        self.cache_controller = None
+        self.cache_session = None
         self._teacache_cadence = teacache_cadence
         self._teacache_online_delta_alpha = teacache_online_delta_alpha
 
@@ -509,8 +509,18 @@ class NeuronFluxApplication(MultiComponentApplication):
         return specs
 
     def __call__(self, *args, **kwargs):
+        """Run one generation through the configured FLUX pipeline.
+
+        Cache-enabled calls install a request-scoped adapter in the shared
+        ``pipe.teacache_controller`` slot.  Consequently, concurrent calls on
+        the same application instance are unsupported: the host must serialize
+        them or allocate separate application instances.  A future concurrent
+        serving integration must pass request state explicitly instead of
+        mutating this shared slot.
+        """
+
         if self._cache_plan is not None or self._cache_mask is not None:
-            self._prepare_cache_controller(*args, **kwargs)
+            self._prepare_cache_session(*args, **kwargs)
         elif (
             self._teacache_cadence is not None
             or self._teacache_online_delta_alpha is not None
@@ -523,21 +533,31 @@ class NeuronFluxApplication(MultiComponentApplication):
         bound = signature.bind_partial(*args, **kwargs)
         call = bound.arguments
         sigmas = call.get("sigmas")
-        num_steps = (
-            len(sigmas)
-            if sigmas is not None
-            else int(call.get("num_inference_steps") or 28)
-        )
+        if sigmas is not None:
+            num_steps = len(sigmas)
+        else:
+            parameter = signature.parameters.get("num_inference_steps")
+            if parameter is None or parameter.default is inspect.Parameter.empty:
+                raise TypeError(
+                    "FLUX pipeline must declare a default for num_inference_steps"
+                )
+            requested_steps = call.get("num_inference_steps", parameter.default)
+            if isinstance(requested_steps, bool) or not isinstance(requested_steps, int):
+                raise TypeError("num_inference_steps must be an integer")
+            num_steps = requested_steps
+        if num_steps <= 0:
+            raise ValueError("num_inference_steps or sigmas must define at least one step")
         height = int(call.get("height") or self.height)
         width = int(call.get("width") or self.width)
         return num_steps, height, width
 
     def _prepare_probe_free_teacache(self, *args: Any, **kwargs: Any) -> None:
         from difflet.pipeline.cache import (
+            CacheSession,
             CacheRunner,
-            CacheRuntimeController,
             LegacyResidualPredictor,
             QualityRecoveryGuard,
+            TeaCacheControllerAdapter,
             TeaCachePolicy,
         )
         from difflet.pipeline.teacache import TeaCacheCalibration
@@ -567,19 +587,21 @@ class NeuronFluxApplication(MultiComponentApplication):
             if self._teacache_cadence is not None
             else "teacache_online_delta"
         )
-        controller = CacheRuntimeController(
+        session = CacheSession(
             runner,
             num_steps=num_steps,
-            source=source,
+            configuration_source=source,
         )
-        self.cache_controller = controller
-        self.pipe.teacache_controller = controller
+        adapter = TeaCacheControllerAdapter(session)
+        self.cache_session = session
+        self.pipe.teacache_controller = adapter
 
-    def _prepare_cache_controller(self, *args: Any, **kwargs: Any) -> None:
-        """Resolve request identity and install a fresh, request-scoped controller."""
+    def _prepare_cache_session(self, *args: Any, **kwargs: Any) -> None:
+        """Resolve request identity and install a fresh cache session."""
 
         from difflet.pipeline.cache import (
-            CachePlanController,
+            ResolvedCacheSession,
+            TeaCacheControllerAdapter,
             resolve_cache_config,
             resolve_cache_plan,
         )
@@ -605,6 +627,7 @@ class NeuronFluxApplication(MultiComponentApplication):
                 predictor=self._cache_predictor_spec,
                 recovery=self._cache_recovery_config,
             )
-        controller = CachePlanController(resolved)
-        self.cache_controller = controller
-        self.pipe.teacache_controller = controller
+        session = ResolvedCacheSession(resolved)
+        adapter = TeaCacheControllerAdapter(session)
+        self.cache_session = session
+        self.pipe.teacache_controller = adapter
