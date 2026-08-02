@@ -57,3 +57,17 @@ def test_signal_study_protocol_is_content_addressed(tmp_path):
 
     with pytest.raises(ValueError, match="sha256"):
         load_signal_study_protocol(tampered)
+
+
+def test_signal_confirmation_protocol_promotes_the_preregistered_mean_signal():
+    source = (
+        Path(__file__).resolve().parents[3]
+        / "benchmark"
+        / "flux_cache"
+        / "signal-confirmation-protocol.json"
+    )
+
+    document = load_signal_study_protocol(source)
+
+    assert document["primary_test"]["signal"] == "mean-anchor-estimate-relative-error"
+    assert "maximum-anchor-estimate-relative-error" in document["exploratory_signals"]

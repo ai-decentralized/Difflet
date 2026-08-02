@@ -179,7 +179,10 @@ def load_signal_study_protocol(source: str | Path | Mapping[str, Any]) -> dict[s
             "bootstrap",
         },
     )
-    if primary["signal"] != "maximum-anchor-estimate-relative-error":
+    if primary["signal"] not in {
+        "maximum-anchor-estimate-relative-error",
+        "mean-anchor-estimate-relative-error",
+    }:
         raise ValueError("unsupported primary signal")
     if primary["quality_target"] != "lpips":
         raise ValueError("unsupported primary quality target")
@@ -222,6 +225,7 @@ def load_signal_study_protocol(source: str | Path | Mapping[str, Any]) -> dict[s
 
     exploratory = document["exploratory_signals"]
     supported = {
+        "maximum-anchor-estimate-relative-error",
         "mean-anchor-estimate-relative-error",
         "maximum-anchor-output-change",
         "maximum-anchor-output-curvature",
