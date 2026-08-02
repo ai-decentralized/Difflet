@@ -1,0 +1,64 @@
+{
+  "schema": "difflet-flux-cache-signal-study-protocol",
+  "schema_revision": 1,
+  "study_id": "flux-taylorseer-anchor-signal-2026-08-02",
+  "created_at": "2026-08-02T18:43:00Z",
+  "prompt_suite": {
+    "suite_id": "flux-cache-generalization-v1",
+    "splits": {
+      "calibration": "3a2ab8ba25eb6eea3fbaa072a6495c40b960af51b23c480aa98ee33e06b88c9a",
+      "holdout": "68523dea70f615c04847f38b526aaedc03a31594dc6c40f88b9f0f2915bf7a17"
+    },
+    "seeds": [
+      0,
+      1
+    ]
+  },
+  "candidate_sweep": {
+    "warmup_steps": [
+      10,
+      12,
+      14
+    ],
+    "anchor_intervals": [
+      4,
+      5
+    ],
+    "orders": [
+      1,
+      2
+    ],
+    "anchor_phase": 1,
+    "cooldown_steps": 1,
+    "require_final_anchor": true,
+    "coordinate": "index"
+  },
+  "primary_test": {
+    "signal": "maximum-anchor-estimate-relative-error",
+    "quality_target": "lpips",
+    "analysis": "candidate-stratified-spearman",
+    "minimum_prompts": 8,
+    "minimum_samples_per_candidate": 16,
+    "minimum_stratified_spearman": 0.5,
+    "minimum_positive_candidate_fraction": 0.75,
+    "bootstrap": {
+      "cluster": "prompt",
+      "resamples": 2000,
+      "seed": 20260802,
+      "minimum_lower_95_confidence_bound": 0.0
+    }
+  },
+  "exploratory_signals": [
+    "mean-anchor-estimate-relative-error",
+    "maximum-anchor-output-change",
+    "maximum-anchor-output-curvature",
+    "maximum-latent-relative-update"
+  ],
+  "pilot_exclusions": [
+    {
+      "label": "legacy-parity-and-inline-pilots-through-2026-08-02T18:43:00Z",
+      "reason": "These results were observed while choosing the analysis and thresholds; they cannot be formal calibration or holdout evidence."
+    }
+  ],
+  "sha256": "991c33c185ca5e92030512de39e6d695614635714cad445e4d6347b726da959a"
+}
