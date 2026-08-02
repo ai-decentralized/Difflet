@@ -185,11 +185,30 @@ def _validate_artifacts(value: Any, name: str) -> dict[str, str]:
         value,
         name,
         required={"trajectory", "final_latent", "image"},
+        optional={"cache_measurements", "cache_measurements_sha256"},
     )
-    return {
+    artifacts = {
         key: _strict_string(value[key], f"{name}.{key}")
         for key in ("trajectory", "final_latent", "image")
     }
+    if "cache_measurements" in value:
+        artifacts["cache_measurements"] = _strict_string(
+            value["cache_measurements"],
+            f"{name}.cache_measurements",
+        )
+        digest = value.get("cache_measurements_sha256")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ValueError(f"{name}.cache_measurements_sha256 must be a SHA-256 digest")
+        artifacts["cache_measurements_sha256"] = digest
+    elif "cache_measurements_sha256" in value:
+        raise ValueError(
+            f"{name}.cache_measurements_sha256 requires cache_measurements"
+        )
+    return artifacts
 
 
 def _validate_quality_input(
@@ -260,6 +279,12 @@ def _validate_quality_input(
                 "candidate": _validate_artifacts(value["candidate"], f"{name}.candidate"),
             }
         )
+        if (
+            "cache_measurements" in comparisons[-1]["baseline"]
+        ) != ("cache_measurements" in comparisons[-1]["candidate"]):
+            raise ValueError(
+                f"{name} must provide cache measurements for both sides or neither side"
+            )
     expected = identity["sample_count"] * len(definitions)
     if len(comparisons) != expected:
         raise ValueError(f"quality input has {len(comparisons)} comparisons, expected {expected}")
@@ -496,6 +521,39 @@ def _load_tensor(path: Path, name: str):
     if not torch.isfinite(value.float()).all():
         raise ValueError(f"{name} tensor contains non-finite values")
     return value.detach().cpu()
+
+
+def _validate_cache_measurement_artifact(
+    path: Path,
+    *,
+    expected_sha256: str,
+    num_steps: int,
+    require_all_anchors: bool,
+) -> None:
+    from difflet.pipeline.cache import load_cache_measurements
+
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != expected_sha256:
+        raise ValueError(f"cache measurement report SHA-256 mismatch: {path}")
+    report = load_cache_measurements(path)
+    if report.num_steps != num_steps:
+        raise ValueError(
+            f"cache measurement report has {report.num_steps} steps, expected {num_steps}"
+        )
+    if tuple(record.step_index for record in report.latent_updates) != tuple(
+        range(num_steps)
+    ):
+        raise ValueError("cache measurement report does not cover every denoising step")
+    anchor_steps = tuple(record.step_index for record in report.anchor_measurements)
+    executed_anchor_steps = tuple(
+        record.step_index for record in report.latent_updates if not record.used_estimate
+    )
+    if anchor_steps != executed_anchor_steps:
+        raise ValueError(
+            "cache measurement report anchor records disagree with executed actions"
+        )
+    if require_all_anchors and len(anchor_steps) != num_steps:
+        raise ValueError("baseline cache measurement report used an estimated step")
 
 
 def _load_image(path: Path, name: str):
@@ -855,6 +913,33 @@ def evaluate(
             )
             for key in ("trajectory", "final_latent", "image")
         }
+        if "cache_measurements" in comparison["baseline"]:
+            baseline_measurement_path = _artifact_path(
+                quality_path,
+                comparison["baseline"]["cache_measurements"],
+                f"{comparison['sample_id']} baseline cache measurements",
+            )
+            candidate_measurement_path = _artifact_path(
+                quality_path,
+                comparison["candidate"]["cache_measurements"],
+                f"{comparison['sample_id']} candidate cache measurements",
+            )
+            _validate_cache_measurement_artifact(
+                baseline_measurement_path,
+                expected_sha256=comparison["baseline"][
+                    "cache_measurements_sha256"
+                ],
+                num_steps=identity["num_steps"],
+                require_all_anchors=True,
+            )
+            _validate_cache_measurement_artifact(
+                candidate_measurement_path,
+                expected_sha256=comparison["candidate"][
+                    "cache_measurements_sha256"
+                ],
+                num_steps=identity["num_steps"],
+                require_all_anchors=False,
+            )
         baseline_trajectory = _load_tensor(baseline_paths["trajectory"], "baseline trajectory")
         candidate_trajectory = _load_tensor(candidate_paths["trajectory"], "candidate trajectory")
         baseline_final = _load_tensor(baseline_paths["final_latent"], "baseline final latent")

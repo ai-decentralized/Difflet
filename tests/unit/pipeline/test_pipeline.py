@@ -170,7 +170,7 @@ def test_pipeline_call_delegates_to_application(tmp_path):
     assert result == {"args": ("prompt",), "kwargs": {"steps": 1}}
 
 
-def test_pipeline_forwards_teacache_kwargs_to_application(tmp_path):
+def test_pipeline_forwards_teacache_kwargs_and_canonicalizes_compile_cache(tmp_path):
     model_dir = tmp_path / "unit-dummy-model"
     model_dir.mkdir()
 
@@ -187,10 +187,7 @@ def test_pipeline_forwards_teacache_kwargs_to_application(tmp_path):
 
     assert pipe.app.kwargs["teacache_speedup"] == 1.5
     assert pipe.app.kwargs["teacache_calibration_path"] == "calibration.json"
-    assert pipe.cache_spec.application_kwargs == {
-        "teacache_calibration_path": "calibration.json",
-        "teacache_speedup": 1.5,
-    }
+    assert pipe.cache_spec.application_kwargs == {"teacache_probe_enabled": True}
 
 
 def test_pipeline_rejects_conflicting_teacache_kwargs(tmp_path):

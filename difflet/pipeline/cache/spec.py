@@ -31,6 +31,7 @@ from difflet.pipeline.cache.recovery import (
     QualityRecoveryGuard,
 )
 from difflet.pipeline.cache.runner import CacheRunner
+from difflet.pipeline.cache.measurements import CacheMeasurementSink
 from difflet.pipeline.cache.types import CachePolicy, CachePredictor
 
 CACHE_MASK_SCHEMA = "difflet-cache-mask-v1"
@@ -271,12 +272,18 @@ class ResolvedCacheConfig:
     def planned_skip_steps(self) -> int:
         return self.num_steps - self.planned_anchor_steps
 
-    def build_runner(self, *, history_capacity: int | None = None) -> CacheRunner:
+    def build_runner(
+        self,
+        *,
+        history_capacity: int | None = None,
+        measurement_sink: CacheMeasurementSink | None = None,
+    ) -> CacheRunner:
         return CacheRunner(
             self.policy,
             self.predictor,
             recovery=QualityRecoveryGuard(self.recovery),
             history_capacity=history_capacity,
+            measurement_sink=measurement_sink,
         )
 
 

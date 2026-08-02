@@ -16,6 +16,7 @@ Hardware execution is gated by an explicit acknowledgement because a default
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -100,7 +101,7 @@ class CandidateArm:
             "coord": self.coord,
         }
 
-    def build_pipeline_adapter(self, num_steps: int):
+    def build_pipeline_adapter(self, num_steps: int, *, measurement_sink: Any = None):
         """Build the TeaCache-loop adapter for this experimental arm."""
 
         from difflet.pipeline.cache import (
@@ -128,7 +129,9 @@ class CandidateArm:
             predictor=TaylorSeerPredictor(order=self.order, coord=self.coord),
             require_final_anchor=self.require_final_anchor,
         )
-        return TeaCacheControllerAdapter(ResolvedCacheSession(resolved))
+        return TeaCacheControllerAdapter(
+            ResolvedCacheSession(resolved, measurement_sink=measurement_sink)
+        )
 
 
 def build_candidate_arms(
@@ -258,6 +261,14 @@ def _relative(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _save_tensor(path: Path, tensor: Any) -> None:
     import torch
 
@@ -289,6 +300,8 @@ def _run_sample(
     guidance_scale: float,
     artifact_dir: Path,
     output_root: Path,
+    measurement_sink: Any = None,
+    configuration_source: str | None = None,
 ) -> dict[str, Any]:
     import torch
 
@@ -327,14 +340,36 @@ def _run_sample(
     _save_tensor(final_path, final_latent)
     image_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(image_path)
+    artifacts = {
+        "trajectory": _relative(trajectory_path, output_root),
+        "final_latent": _relative(final_path, output_root),
+        "image": _relative(image_path, output_root),
+    }
+    if measurement_sink is not None:
+        if not configuration_source:
+            raise RuntimeError("runtime measurements require a configuration source")
+        report = measurement_sink.build_report(
+            num_steps=num_steps,
+            configuration_source=configuration_source,
+        )
+        latent_updates = report.latent_updates
+        if tuple(record.step_index for record in latent_updates) != tuple(range(num_steps)):
+            raise RuntimeError(
+                "FLUX runtime measurements do not cover every denoising step"
+            )
+        actual_anchor_count = sum(not record.used_estimate for record in latent_updates)
+        if len(report.anchor_measurements) != actual_anchor_count:
+            raise RuntimeError(
+                "FLUX anchor measurements disagree with the executed cache actions"
+            )
+        measurement_path = artifact_dir / f"{sample['sample_id']}.cache-measurements.json"
+        report.write_json(measurement_path)
+        artifacts["cache_measurements"] = _relative(measurement_path, output_root)
+        artifacts["cache_measurements_sha256"] = _sha256_file(measurement_path)
     return {
         "sample_id": sample["sample_id"],
         "elapsed_s": float(elapsed),
-        "artifacts": {
-            "trajectory": _relative(trajectory_path, output_root),
-            "final_latent": _relative(final_path, output_root),
-            "image": _relative(image_path, output_root),
-        },
+        "artifacts": artifacts,
     }
 
 
@@ -511,7 +546,7 @@ def _load_pipeline(args: argparse.Namespace):
     )
 
 
-def _build_baseline_adapter(num_steps: int):
+def _build_baseline_adapter(num_steps: int, *, measurement_sink: Any = None):
     from difflet.pipeline.cache import (
         ResolvedCacheSession,
         TaylorSeerPredictor,
@@ -525,7 +560,9 @@ def _build_baseline_adapter(num_steps: int):
         predictor=TaylorSeerPredictor(order=1),
         require_final_anchor=True,
     )
-    return TeaCacheControllerAdapter(ResolvedCacheSession(resolved))
+    return TeaCacheControllerAdapter(
+        ResolvedCacheSession(resolved, measurement_sink=measurement_sink)
+    )
 
 
 def collect(args: argparse.Namespace) -> tuple[Path, Path]:
@@ -588,9 +625,24 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
         f"model={protocol['model']['resolved_revision']}",
         flush=True,
     )
+    collect_measurements = bool(getattr(args, "collect_cache_measurements", False))
+    if collect_measurements:
+        print(
+            "[flux-cache-ab] runtime measurements enabled; reported wall-clock "
+            "times include measurement overhead and are not clean serving timings",
+            flush=True,
+        )
 
     baseline_runs: list[dict[str, Any]] = []
-    baseline_adapter = _build_baseline_adapter(num_steps)
+    baseline_sink = None
+    if collect_measurements:
+        from difflet.pipeline.cache import InMemoryMeasurementSink
+
+        baseline_sink = InMemoryMeasurementSink()
+    baseline_adapter = _build_baseline_adapter(
+        num_steps,
+        measurement_sink=baseline_sink,
+    )
     flux_pipeline.teacache_controller = baseline_adapter
     for sample in samples:
         run = _run_sample(
@@ -603,6 +655,8 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
             guidance_scale=guidance_scale,
             artifact_dir=output_root / "artifacts" / "baseline",
             output_root=output_root,
+            measurement_sink=baseline_sink,
+            configuration_source=baseline_adapter.source,
         )
         baseline_stats = baseline_adapter.stats()
         if baseline_stats["full_steps"] != num_steps or baseline_stats["skipped_steps"] != 0:
@@ -615,7 +669,15 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
 
     candidate_runs: dict[str, list[dict[str, Any]]] = {}
     for arm in arms:
-        adapter = arm.build_pipeline_adapter(num_steps)
+        candidate_sink = None
+        if collect_measurements:
+            from difflet.pipeline.cache import InMemoryMeasurementSink
+
+            candidate_sink = InMemoryMeasurementSink()
+        adapter = arm.build_pipeline_adapter(
+            num_steps,
+            measurement_sink=candidate_sink,
+        )
         flux_pipeline.teacache_controller = adapter
         rows: list[dict[str, Any]] = []
         for sample in samples:
@@ -629,6 +691,8 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
                 guidance_scale=guidance_scale,
                 artifact_dir=output_root / "artifacts" / arm.candidate_id,
                 output_root=output_root,
+                measurement_sink=candidate_sink,
+                configuration_source=adapter.source,
             )
             run["runner_stats"] = adapter.stats()
             rows.append(run)
@@ -700,6 +764,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--compile-cache-dir", default=None)
     parser.add_argument("--force-compile", action="store_true")
     parser.add_argument("--skip-warmup", action="store_true")
+    parser.add_argument(
+        "--collect-cache-measurements",
+        action="store_true",
+        help=(
+            "write per-request cache measurement reports; this adds tensor "
+            "measurement overhead to the recorded wall-clock times"
+        ),
+    )
     parser.add_argument("--allow-hardware", action="store_true")
     parser.add_argument("--foreground-ack", default=None)
     return parser.parse_args(argv)

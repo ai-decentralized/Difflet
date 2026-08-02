@@ -7,6 +7,7 @@ one state machine:
 * predictors decide *which value* replaces that evaluation; and
 * :class:`CacheRunner` owns history, safety checks, and accounting;
 * :class:`CacheSession` owns one request's schedule and lifecycle; and
+* measurement sinks observe real anchors without changing decisions; and
 * :class:`TeaCacheControllerAdapter` only translates the existing loop API.
 
 Only real transformer outputs enter :class:`CacheHistory`. Predicted outputs
@@ -46,6 +47,21 @@ from difflet.pipeline.cache.spec import (
     resolve_cache_plan,
     validate_schedule_safety,
 )
+from difflet.pipeline.cache.measurements import (
+    AnchorEstimateStatus,
+    AnchorMeasurement,
+    CacheMeasurementSink,
+    InMemoryMeasurementSink,
+    LatentUpdateMeasurement,
+    measure_anchor_estimate,
+    measure_latent_update,
+)
+from difflet.pipeline.cache.measurement_report import (
+    CACHE_MEASUREMENT_SCHEMA,
+    CACHE_MEASUREMENT_SCHEMA_REVISION,
+    CacheMeasurementReport,
+    load_cache_measurements,
+)
 from difflet.pipeline.cache.types import (
     Anchor,
     CacheAnchor,
@@ -66,7 +82,11 @@ from difflet.pipeline.cache.teacache_adapter import TeaCacheControllerAdapter
 __all__ = [
     "CACHE_MASK_SCHEMA",
     "CACHE_PLAN_SCHEMA",
+    "CACHE_MEASUREMENT_SCHEMA",
+    "CACHE_MEASUREMENT_SCHEMA_REVISION",
     "Anchor",
+    "AnchorEstimateStatus",
+    "AnchorMeasurement",
     "CacheAnchor",
     "CacheCompatibility",
     "CacheDecision",
@@ -81,10 +101,14 @@ __all__ = [
     "CacheRunnerStats",
     "CacheSpecError",
     "CacheStepContext",
+    "CacheMeasurementReport",
+    "CacheMeasurementSink",
     "CadencePolicy",
     "Context",
     "ExplicitMaskPolicy",
     "LegacyResidualPredictor",
+    "InMemoryMeasurementSink",
+    "LatentUpdateMeasurement",
     "PeriodicAnchorPolicy",
     "QualityRecoveryConfig",
     "QualityRecoveryGuard",
@@ -100,6 +124,9 @@ __all__ = [
     "build_predictor",
     "load_cache_mask",
     "load_cache_plan",
+    "load_cache_measurements",
+    "measure_anchor_estimate",
+    "measure_latent_update",
     "resolve_cache_config",
     "resolve_cache_plan",
     "validate_schedule_safety",

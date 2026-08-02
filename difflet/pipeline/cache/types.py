@@ -291,7 +291,12 @@ class CachePolicy(Protocol):
 
 @runtime_checkable
 class CachePredictor(Protocol):
-    """Predictor protocol: estimate a missing transformer output."""
+    """Predictor protocol: estimate a missing transformer output.
+
+    ``predict`` must be deterministic and free of mutable side effects.  The
+    runtime may call it at a real anchor to measure a comparison estimate that
+    is discarded instead of being returned to the scheduler.
+    """
 
     required_history: int
     max_consecutive_predictions: int | None

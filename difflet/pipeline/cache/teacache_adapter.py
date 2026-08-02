@@ -56,6 +56,11 @@ class TeaCacheControllerAdapter:
     def needs_probe(self) -> bool:
         return self.session.policy_requires_probe()
 
+    def measurements_enabled(self) -> bool:
+        """Return whether the current request records runtime measurements."""
+
+        return self.session.measurements_enabled
+
     def should_skip(
         self,
         step_index: int,
@@ -84,6 +89,11 @@ class TeaCacheControllerAdapter:
 
     def note_probe(self) -> None:
         self.session.record_probe_call()
+
+    def record_latent_update(self, step_index: int, before: Any, after: Any) -> None:
+        """Forward one completed scheduler update to the request session."""
+
+        self.session.record_latent_update(step_index, before, after)
 
     def request_quality_recovery(
         self,

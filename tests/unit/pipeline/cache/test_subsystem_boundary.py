@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import difflet.pipeline.cache as cache_api
@@ -47,3 +48,18 @@ def test_removed_controller_classes_are_not_public_api():
     assert cache_api.CacheSession.__name__ == "CacheSession"
     assert cache_api.ResolvedCacheSession.__name__ == "ResolvedCacheSession"
     assert cache_api.TeaCacheControllerAdapter.__name__ == "TeaCacheControllerAdapter"
+
+
+def test_cache_core_class_and_function_names_do_not_encode_schema_revisions():
+    repository_root = Path(__file__).resolve().parents[4]
+    cache_package = repository_root / "difflet" / "pipeline" / "cache"
+    revision_suffix = re.compile(r"(?:_v|V)[12]$")
+    violations = []
+    for path in sorted(cache_package.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                if revision_suffix.search(node.name):
+                    violations.append(f"{path.name}: {node.name}")
+
+    assert violations == []

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,7 +9,13 @@ import pytest
 import torch
 from PIL import Image
 
-from difflet.pipeline.cache import build_policy, load_cache_plan, resolve_cache_plan
+from difflet.pipeline.cache import (
+    InMemoryMeasurementSink,
+    build_policy,
+    load_cache_measurements,
+    load_cache_plan,
+    resolve_cache_plan,
+)
 from scripts.calibrate_flux_cache_plan import (
     NO_ACCEPTABLE_CANDIDATE,
     NoAcceptableCandidateError,
@@ -18,6 +25,7 @@ from scripts.collect_flux_cache_ab import (
     FOREGROUND_ACK,
     CandidateArm,
     _build_baseline_adapter,
+    _run_sample,
     build_candidate_arms,
     build_manifests,
     collect,
@@ -88,6 +96,53 @@ def test_baseline_adapter_forces_every_step_through_the_same_runner_loop():
     assert adapter.stats()["planned_anchor_steps"] == 6
 
 
+def test_collector_writes_and_references_one_measurement_report_per_sample(tmp_path):
+    sink = InMemoryMeasurementSink()
+    adapter = _build_baseline_adapter(3, measurement_sink=sink)
+    flux_pipeline = SimpleNamespace(
+        teacache_controller=adapter,
+        _tc_last_trajectory=[],
+    )
+
+    def fake_pipe(**kwargs):
+        del kwargs
+        adapter.reset()
+        flux_pipeline._tc_last_trajectory = []
+        latent = torch.tensor([1.0])
+        for step_index in range(3):
+            assert adapter.should_skip(step_index) is False
+            adapter.record_full_step(torch.tensor([float(step_index)]))
+            previous = latent
+            latent = latent + 1.0
+            adapter.record_latent_update(step_index, previous, latent)
+            flux_pipeline._tc_last_trajectory.append(latent.detach().cpu())
+        return SimpleNamespace(images=[Image.new("RGB", (16, 16), color="white")])
+
+    run = _run_sample(
+        fake_pipe,
+        flux_pipeline,
+        sample={"sample_id": "p000-s0", "prompt": "test", "seed": 0},
+        num_steps=3,
+        height=16,
+        width=16,
+        guidance_scale=3.5,
+        artifact_dir=tmp_path / "artifacts" / "baseline",
+        output_root=tmp_path,
+        measurement_sink=sink,
+        configuration_source=adapter.source,
+    )
+
+    measurement_relative = run["artifacts"]["cache_measurements"]
+    measurement_path = tmp_path / measurement_relative
+    assert run["artifacts"]["cache_measurements_sha256"] == hashlib.sha256(
+        measurement_path.read_bytes()
+    ).hexdigest()
+    report = load_cache_measurements(measurement_path)
+    assert [record.step_index for record in report.latent_updates] == [0, 1, 2]
+    assert all(not record.used_estimate for record in report.latent_updates)
+    assert len(report.anchor_measurements) == 3
+
+
 def test_collector_requires_explicit_hardware_ack():
     with pytest.raises(RuntimeError, match="--allow-hardware"):
         collect(
@@ -118,6 +173,34 @@ def _save_artifacts(
         "trajectory": trajectory_path.relative_to(root).as_posix(),
         "final_latent": final_path.relative_to(root).as_posix(),
         "image": image_path.relative_to(root).as_posix(),
+    }
+
+
+def _save_measurement_artifact(
+    root: Path,
+    *,
+    label: str,
+    sample_id: str,
+    adapter_builder,
+) -> dict[str, str]:
+    sink = InMemoryMeasurementSink()
+    adapter = adapter_builder(sink)
+    for step_index in range(adapter.num_steps):
+        if adapter.should_skip(step_index):
+            adapter.skip_noise_pred()
+        else:
+            adapter.record_full_step(torch.tensor([float(step_index)]))
+        before = torch.tensor([float(step_index + 1)])
+        adapter.record_latent_update(step_index, before, before + 0.5)
+    report = sink.build_report(
+        num_steps=adapter.num_steps,
+        configuration_source=adapter.source,
+    )
+    path = root / "artifacts" / label / f"{sample_id}.cache-measurements.json"
+    report.write_json(path)
+    return {
+        "cache_measurements": path.relative_to(root).as_posix(),
+        "cache_measurements_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
     }
 
 
@@ -166,12 +249,34 @@ def _experiment_manifests(tmp_path: Path):
             trajectory=base + index,
             image_value=128,
         )
+        baseline_artifacts.update(
+            _save_measurement_artifact(
+                tmp_path,
+                label="baseline",
+                sample_id=sample["sample_id"],
+                adapter_builder=lambda sink: _build_baseline_adapter(
+                    6,
+                    measurement_sink=sink,
+                ),
+            )
+        )
         candidate_artifacts = _save_artifacts(
             tmp_path,
             label=arm.candidate_id,
             sample_id=sample["sample_id"],
             trajectory=(base + index) * (1.0 + 0.001 * (index + 1)),
             image_value=130 + index * 2,
+        )
+        candidate_artifacts.update(
+            _save_measurement_artifact(
+                tmp_path,
+                label=arm.candidate_id,
+                sample_id=sample["sample_id"],
+                adapter_builder=lambda sink: arm.build_pipeline_adapter(
+                    6,
+                    measurement_sink=sink,
+                ),
+            )
         )
         baseline_runs.append(
             {
@@ -294,6 +399,25 @@ def test_quality_evaluator_rejects_unreproducible_speedup(tmp_path):
     speedup_path.write_text(json.dumps(speedup), encoding="utf-8")
 
     with pytest.raises(ValueError, match="measured_speedup disagrees"):
+        evaluate(
+            quality_path,
+            speedup_path,
+            thresholds=default_thresholds(),
+            lpips_function=lambda left, right: 0.0,
+        )
+
+
+def test_quality_evaluator_rejects_replaced_cache_measurements(tmp_path):
+    quality_path, speedup_path, _ = _experiment_manifests(tmp_path)
+    quality = json.loads(quality_path.read_text(encoding="utf-8"))
+    relative = quality["comparisons"][0]["candidate"]["cache_measurements"]
+    measurement_path = tmp_path / relative
+    measurement_path.write_text(
+        measurement_path.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
         evaluate(
             quality_path,
             speedup_path,
