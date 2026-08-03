@@ -179,6 +179,32 @@ def test_adaptive_brake_candidate_is_appended_without_enabling_oil():
     assert adapter.stats()["adaptive_acceleration_enabled"] is False
 
 
+def test_repeated_adaptive_candidates_form_one_paired_oil_sweep():
+    root = Path(__file__).resolve().parents[3]
+    static_path = root / "benchmark" / "flux_cache" / "static-profile-candidate.json"
+    adaptive_paths = [
+        root / "benchmark" / "flux_cache" / "adaptive-oil-e1p00-candidate.json",
+        root / "benchmark" / "flux_cache" / "adaptive-oil-e1p20-candidate.json",
+        root / "benchmark" / "flux_cache" / "adaptive-oil-e1p40-candidate.json",
+    ]
+
+    arms = select_candidate_arms(
+        SimpleNamespace(
+            candidate_ladder=str(static_path),
+            adaptive_candidate=[str(path) for path in adaptive_paths],
+            warmup_steps=None,
+            anchor_intervals=None,
+            orders=None,
+            coord=None,
+        )
+    )
+
+    assert len(arms) == 4
+    assert [arm.config.tighten_error for arm in arms[1:]] == [1.0, 1.2, 1.4]
+    assert all(arm.config.allow_acceleration for arm in arms[1:])
+    assert all(arm.config.maximum_anchor_interval == 10 for arm in arms[1:])
+
+
 def test_candidate_ladder_rejects_sweep_overrides():
     with pytest.raises(ValueError, match="cannot be combined"):
         select_candidate_arms(

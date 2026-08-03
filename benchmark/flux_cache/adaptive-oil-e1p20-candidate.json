@@ -1,0 +1,28 @@
+{
+  "schema": "difflet-flux-cache-adaptive-candidate",
+  "schema_revision": 1,
+  "candidate_id": "adaptive-oil-e1p20-w6-i8-k10-o1-index",
+  "policy": {
+    "type": "adaptive_anchor",
+    "initial_anchor_interval": 8,
+    "minimum_anchor_interval": 4,
+    "maximum_anchor_interval": 10,
+    "warmup_steps": 6,
+    "cooldown_steps": 1,
+    "anchor_phase": 1,
+    "tighten_error": 1.2,
+    "recovery_error": 1.5,
+    "acceleration_error": 0.6,
+    "recovery_steps": 2,
+    "disable_after_recoveries": 2,
+    "stable_anchors_for_acceleration": 2,
+    "allow_acceleration": true,
+    "require_final_anchor": true
+  },
+  "predictor": {
+    "type": "taylorseer",
+    "order": 1,
+    "coord": "index"
+  },
+  "sha256": "4d04d35812f3fbf20104dd14b52588dcf63c296e3dba4e2bb5f9e309c0cae66b"
+}

@@ -495,9 +495,14 @@ def select_candidate_arms(
             coord=coord,
         )
 
-    adaptive_path = getattr(args, "adaptive_candidate", None)
-    if adaptive_path is not None:
-        arms = (*arms, load_adaptive_candidate(Path(adaptive_path).expanduser().resolve()))
+    adaptive_paths = getattr(args, "adaptive_candidate", None) or ()
+    if isinstance(adaptive_paths, (str, Path)):
+        adaptive_paths = (adaptive_paths,)
+    for adaptive_path in adaptive_paths:
+        arms = (
+            *arms,
+            load_adaptive_candidate(Path(adaptive_path).expanduser().resolve()),
+        )
     candidate_ids = [arm.candidate_id for arm in arms]
     if len(candidate_ids) != len(set(candidate_ids)):
         raise ValueError("candidate selection contains duplicate identifiers")
@@ -1060,7 +1065,15 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=1024)
     parser.add_argument("--guidance-scale", type=float, default=3.5)
     parser.add_argument("--candidate-ladder", default=None)
-    parser.add_argument("--adaptive-candidate", default=None)
+    parser.add_argument(
+        "--adaptive-candidate",
+        action="append",
+        default=None,
+        help=(
+            "append one strict adaptive candidate to the static candidate set; "
+            "repeat the flag to compare several adaptive settings in one paired run"
+        ),
+    )
     parser.add_argument("--warmup-steps", type=int, nargs="+", default=None)
     parser.add_argument("--anchor-intervals", type=int, nargs="+", default=None)
     parser.add_argument("--orders", type=int, nargs="+", default=None)
