@@ -1,0 +1,100 @@
+{
+  "schema": "difflet-flux-cache-boundary-pilot",
+  "schema_revision": 1,
+  "study_id": "flux-taylorseer-semantic-boundary-2026-08-02",
+  "created_at": "2026-08-02T22:35:00Z",
+  "evidence_role": {
+    "kind": "exploratory-boundary-bracketing",
+    "excluded_from_future_calibration_and_holdout": true,
+    "reason": "This pilot is allowed to choose later metric margins, signal summaries, and candidate strengths, so it cannot be reused as confirmation evidence."
+  },
+  "prompt_suite": {
+    "path": "benchmark/flux_cache/prompt-suite-v1.json",
+    "suite_id": "flux-cache-generalization-v1",
+    "split": "boundary_pilot",
+    "split_sha256": "bb7249a2fc99aace4fe0831d0711b81f7541e48afdd955a9f6f7a7145f8b3d48",
+    "prompt_count": 16,
+    "seeds": [
+      0
+    ]
+  },
+  "candidate_ladder": {
+    "path": "benchmark/flux_cache/boundary-pilot-candidates.json",
+    "file_sha256": "d781d83295e5c6ff9ca1a30849ac34dc563e2734ad0f5805a283fbdd91485bc4",
+    "content_sha256": "814e04ca2de7d1855a9dc1134cbe01ff2e70e10dbbd09fd18878901b87c4f8f1",
+    "candidate_count": 4,
+    "labels_in_order": [
+      "conservative",
+      "current-fast",
+      "aggressive",
+      "deliberate-boundary"
+    ]
+  },
+  "controlled_generation": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4,
+    "predictor": "taylorseer",
+    "predictor_order": 1,
+    "coordinate": "index",
+    "anchor_phase": 1,
+    "cooldown_steps": 1,
+    "require_final_anchor": true,
+    "only_warmup_and_anchor_interval_change": true
+  },
+  "collection": {
+    "baseline_count": 16,
+    "candidate_image_count": 64,
+    "expected_unique_image_count": 80,
+    "runtime_measurements_required": true,
+    "clean_git_worktree_required": true,
+    "new_empty_output_directory_required": true
+  },
+  "semantic_assessment": {
+    "automatic_metrics": [
+      "image_reward",
+      "vqa_score"
+    ],
+    "comparison": "same-prompt-same-seed-candidate-minus-baseline",
+    "numeric_damage_margins": "not selected from this pilot; freeze them before the later formal calibration run",
+    "blind_review": {
+      "candidate_identity_hidden": true,
+      "left_right_order_randomized": true,
+      "prompt_visible": true,
+      "minimum_independent_reviewers": 2,
+      "labels": [
+        "equivalent",
+        "minor-difference",
+        "damaged",
+        "unusable"
+      ],
+      "damage_labels": [
+        "damaged",
+        "unusable"
+      ],
+      "disagreement_resolution": "independent third review"
+    }
+  },
+  "signal_analysis": {
+    "purpose": "discover whether cheap anchor-time measurements separate confirmed harmless and confirmed damaged outputs",
+    "exploratory_signals": [
+      "mean-anchor-estimate-relative-error",
+      "maximum-anchor-estimate-relative-error",
+      "maximum-anchor-output-change",
+      "maximum-anchor-output-curvature",
+      "maximum-latent-relative-update"
+    ],
+    "selection_rule": "Any signal chosen after this pilot must be frozen and confirmed on new data before it can control caching."
+  },
+  "stopping_rules": {
+    "highest_strength_has_no_confirmed_damage": "add a more aggressive arm and keep all existing pilot data exploratory",
+    "all_aggressive_arms_are_damaged": "add one arm between the strongest harmless arm and the weakest damaged arm",
+    "cheap_signals_do_not_separate_damage": "do not implement adaptive cache relaxation; validate a static plan with deterministic fallback",
+    "cheap_signal_separates_damage": "preregister a new confirmation experiment before implementing CacheProfile and CacheController"
+  },
+  "sha256": "30978320fe802bf56685cb6524c3e1859a40375d8f8bf58d4e6b015dc122456a"
+}

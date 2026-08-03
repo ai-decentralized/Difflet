@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import hashlib
 import json
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -124,6 +126,10 @@ def test_versioned_prompt_splits_have_stable_digests_and_are_disjoint():
             8,
             "68523dea70f615c04847f38b526aaedc03a31594dc6c40f88b9f0f2915bf7a17",
         ),
+        "boundary_pilot": (
+            16,
+            "bb7249a2fc99aace4fe0831d0711b81f7541e48afdd955a9f6f7a7145f8b3d48",
+        ),
     }
     selections = {split: load_prompt_suite(DEFAULT_PROMPT_SUITE_PATH, split) for split in expected}
 
@@ -132,7 +138,31 @@ def test_versioned_prompt_splits_have_stable_digests_and_are_disjoint():
         assert len(selection.prompts) == count
         assert selection.descriptor["schema"] == PROMPT_SUITE_SCHEMA
         assert selection.descriptor["sha256"] == digest
-    assert set(selections["calibration"].prompts).isdisjoint(selections["holdout"].prompts)
+    all_prompts: set[str] = set()
+    for selection in selections.values():
+        assert all_prompts.isdisjoint(selection.prompts)
+        all_prompts.update(selection.prompts)
+
+
+def test_boundary_pilot_protocol_binds_prompt_and_candidate_digests():
+    root = Path(__file__).resolve().parents[3]
+    protocol_path = root / "benchmark" / "flux_cache" / "boundary-pilot-protocol.json"
+    ladder_path = root / "benchmark" / "flux_cache" / "boundary-pilot-candidates.json"
+    protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+    ladder = json.loads(ladder_path.read_text(encoding="utf-8"))
+
+    protocol_payload = {key: value for key, value in protocol.items() if key != "sha256"}
+    ladder_payload = {key: value for key, value in ladder.items() if key != "sha256"}
+    selection = load_prompt_suite(DEFAULT_PROMPT_SUITE_PATH, "boundary_pilot")
+
+    assert protocol["sha256"] == canonical_sha256(protocol_payload)
+    assert ladder["sha256"] == canonical_sha256(ladder_payload)
+    assert protocol["prompt_suite"]["split_sha256"] == selection.descriptor["sha256"]
+    assert protocol["candidate_ladder"]["content_sha256"] == ladder["sha256"]
+    assert protocol["candidate_ladder"]["file_sha256"] == hashlib.sha256(
+        ladder_path.read_bytes()
+    ).hexdigest()
+    assert protocol["collection"]["expected_unique_image_count"] == 80
 
 
 def test_collector_defaults_to_the_versioned_legacy_parity_split():

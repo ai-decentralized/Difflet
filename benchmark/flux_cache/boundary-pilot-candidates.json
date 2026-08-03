@@ -1,0 +1,48 @@
+{
+  "schema": "difflet-flux-cache-candidate-ladder",
+  "schema_revision": 1,
+  "ladder_id": "flux-taylorseer-boundary-pilot-2026-08-02",
+  "candidates": [
+    {
+      "label": "conservative",
+      "warmup_steps": 14,
+      "anchor_interval": 4,
+      "order": 1,
+      "anchor_phase": 1,
+      "cooldown_steps": 1,
+      "require_final_anchor": true,
+      "coord": "index"
+    },
+    {
+      "label": "current-fast",
+      "warmup_steps": 10,
+      "anchor_interval": 5,
+      "order": 1,
+      "anchor_phase": 1,
+      "cooldown_steps": 1,
+      "require_final_anchor": true,
+      "coord": "index"
+    },
+    {
+      "label": "aggressive",
+      "warmup_steps": 6,
+      "anchor_interval": 8,
+      "order": 1,
+      "anchor_phase": 1,
+      "cooldown_steps": 1,
+      "require_final_anchor": true,
+      "coord": "index"
+    },
+    {
+      "label": "deliberate-boundary",
+      "warmup_steps": 4,
+      "anchor_interval": 12,
+      "order": 1,
+      "anchor_phase": 1,
+      "cooldown_steps": 1,
+      "require_final_anchor": true,
+      "coord": "index"
+    }
+  ],
+  "sha256": "814e04ca2de7d1855a9dc1134cbe01ff2e70e10dbbd09fd18878901b87c4f8f1"
+}

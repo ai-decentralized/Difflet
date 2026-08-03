@@ -2,6 +2,7 @@
   "schema": "difflet-flux-cache-prompt-suite-v1",
   "suite_id": "flux-cache-generalization-v1",
   "source": {
+    "boundary_pilot": "boundary-study design frozen in benchmark/flux_cache/boundary-pilot-protocol.json",
     "calibration_holdout": "cclogs/m9-teacache/calibration_prompts.txt@505cbf7b910457bad3a5fcd6e82e9d957d3b468b",
     "legacy_parity": "scripts/run_flux_teacache_e2e.py@505cbf7b910457bad3a5fcd6e82e9d957d3b468b"
   },
@@ -100,6 +101,88 @@
         "category": "human-water-motion",
         "prompt_id": "holdout-surfer-wave",
         "text": "a surfer standing on a wave while the sun reflects on the water"
+      }
+    ],
+    "boundary_pilot": [
+      {
+        "category": "multi-object-spatial-color",
+        "prompt_id": "boundary-umbrella-bicycle-mailbox",
+        "text": "a red umbrella leaning against a blue bicycle beside a yellow mailbox"
+      },
+      {
+        "category": "counting-still-life",
+        "prompt_id": "boundary-three-cups",
+        "text": "three ceramic cups arranged in a row on a wooden shelf, one red, one green, and one blue"
+      },
+      {
+        "category": "human-fine-detail",
+        "prompt_id": "boundary-watchmaker",
+        "text": "a close-up of a watchmaker repairing a tiny mechanical watch with metal tools"
+      },
+      {
+        "category": "animal-fast-motion",
+        "prompt_id": "boundary-owl-dive",
+        "text": "a snowy owl diving toward a field with its wings spread and feathers sharply visible"
+      },
+      {
+        "category": "dense-human-transit",
+        "prompt_id": "boundary-subway-platform",
+        "text": "a crowded subway platform with commuters, luggage, signs, and an arriving train"
+      },
+      {
+        "category": "transparent-fluid-motion",
+        "prompt_id": "boundary-water-pitcher",
+        "text": "water pouring from a transparent glass pitcher into a clear tumbler on a sunlit table"
+      },
+      {
+        "category": "hands-food-fine-detail",
+        "prompt_id": "boundary-chef-plating",
+        "text": "a chef using tweezers to place herbs on a plated dessert in a busy restaurant kitchen"
+      },
+      {
+        "category": "human-night-lighting",
+        "prompt_id": "boundary-violinist",
+        "text": "an elderly violinist performing under a single streetlamp on a rainy cobblestone street"
+      },
+      {
+        "category": "landscape-weather-structure",
+        "prompt_id": "boundary-bridge-storm",
+        "text": "a medieval stone bridge crossing a river during a thunderstorm with mountains behind it"
+      },
+      {
+        "category": "vehicle-emergency-motion",
+        "prompt_id": "boundary-fire-truck",
+        "text": "a red fire truck turning through a wet city intersection with flashing lights at night"
+      },
+      {
+        "category": "object-animal-composition",
+        "prompt_id": "boundary-robot-puppy",
+        "text": "a small white robot carrying a sleeping puppy through a room filled with cardboard boxes"
+      },
+      {
+        "category": "multi-human-outdoor",
+        "prompt_id": "boundary-family-picnic",
+        "text": "a family having a picnic beneath a large oak tree with a red blanket, fruit, and a kite"
+      },
+      {
+        "category": "animal-reflection",
+        "prompt_id": "boundary-cat-mirror",
+        "text": "an orange cat looking into a round mirror while its reflection raises one paw"
+      },
+      {
+        "category": "food-pattern-fine-detail",
+        "prompt_id": "boundary-strawberry-basket",
+        "text": "a woven basket overflowing with strawberries beside folded blue cloth and silver scissors"
+      },
+      {
+        "category": "human-water-motion",
+        "prompt_id": "boundary-kayaker",
+        "text": "a kayaker in a yellow boat moving through whitewater rapids between dark canyon walls"
+      },
+      {
+        "category": "surreal-dense-composition",
+        "prompt_id": "boundary-astronaut-chess",
+        "text": "two astronauts playing chess inside a glass greenhouse filled with tropical plants"
       }
     ]
   }

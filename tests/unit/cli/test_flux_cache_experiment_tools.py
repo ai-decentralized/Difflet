@@ -29,6 +29,8 @@ from scripts.collect_flux_cache_ab import (
     build_candidate_arms,
     build_manifests,
     collect,
+    load_candidate_ladder,
+    select_candidate_arms,
 )
 from scripts.evaluate_cache_quality import (
     QUALITY_CURVE_SCHEMA,
@@ -58,6 +60,95 @@ def test_default_flux_sweep_has_twelve_unique_safe_arms():
         adapter = arm.build_pipeline_adapter(50)
         assert adapter.num_steps == 50
         assert adapter.stats()["planned_skip_steps"] > 0
+
+
+def test_boundary_pilot_ladder_has_four_explicit_paired_arms():
+    ladder_path = (
+        Path(__file__).resolve().parents[3]
+        / "benchmark"
+        / "flux_cache"
+        / "boundary-pilot-candidates.json"
+    )
+
+    ladder = load_candidate_ladder(ladder_path)
+    arms = ladder.arms
+
+    assert [
+        (arm.warmup_steps, arm.anchor_interval, arm.order, arm.coord)
+        for arm in arms
+    ] == [
+        (14, 4, 1, "index"),
+        (10, 5, 1, "index"),
+        (6, 8, 1, "index"),
+        (4, 12, 1, "index"),
+    ]
+    assert len({arm.candidate_id for arm in arms}) == 4
+    assert ladder.labels == (
+        "conservative",
+        "current-fast",
+        "aggressive",
+        "deliberate-boundary",
+    )
+    assert ladder.descriptor()["candidate_ids_in_order"] == [
+        arm.candidate_id for arm in arms
+    ]
+    assert [
+        arm.build_pipeline_adapter(50).stats()["planned_skip_steps"] for arm in arms
+    ] == [26, 31, 37, 41]
+
+
+def test_candidate_ladder_cli_selection_does_not_form_cartesian_product():
+    ladder_path = (
+        Path(__file__).resolve().parents[3]
+        / "benchmark"
+        / "flux_cache"
+        / "boundary-pilot-candidates.json"
+    )
+
+    arms, descriptor = select_candidate_arms(
+        SimpleNamespace(
+            candidate_ladder=str(ladder_path),
+            warmup_steps=None,
+            anchor_intervals=None,
+            orders=None,
+            coord=None,
+        )
+    )
+
+    assert len(arms) == 4
+    assert descriptor["kind"] == "explicit_ladder"
+    assert descriptor["content_sha256"] == (
+        "814e04ca2de7d1855a9dc1134cbe01ff2e70e10dbbd09fd18878901b87c4f8f1"
+    )
+
+
+def test_candidate_ladder_rejects_sweep_overrides():
+    with pytest.raises(ValueError, match="cannot be combined"):
+        select_candidate_arms(
+            SimpleNamespace(
+                candidate_ladder="unused.json",
+                warmup_steps=[14],
+                anchor_intervals=None,
+                orders=None,
+                coord=None,
+            )
+        )
+
+
+def test_candidate_ladder_rejects_rehashed_field_drift(tmp_path):
+    source_path = (
+        Path(__file__).resolve().parents[3]
+        / "benchmark"
+        / "flux_cache"
+        / "boundary-pilot-candidates.json"
+    )
+    document = json.loads(source_path.read_text(encoding="utf-8"))
+    document["candidates"][0]["warmup_steps"] = 13
+    tampered_path = tmp_path / "candidate-ladder.json"
+    tampered_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="sha256 does not match"):
+        load_candidate_ladder(tampered_path)
 
 
 def test_measured_50_step_schedule_matches_frozen_mask_without_vetoes():

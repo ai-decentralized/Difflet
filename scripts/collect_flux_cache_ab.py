@@ -38,6 +38,8 @@ DEFAULT_SEEDS = (0, 1)
 DEFAULT_WARMUP_STEPS = (10, 12, 14)
 DEFAULT_ANCHOR_INTERVALS = (4, 5)
 DEFAULT_ORDERS = (1, 2)
+CANDIDATE_LADDER_SCHEMA = "difflet-flux-cache-candidate-ladder"
+CANDIDATE_LADDER_SCHEMA_REVISION = 1
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -46,6 +48,7 @@ from scripts.flux_cache_protocol import (  # noqa: E402
     DEFAULT_PROMPT_SUITE_PATH,
     PromptSelection,
     build_experiment_protocol,
+    canonical_sha256,
     inline_prompt_selection,
     load_prompt_suite,
 )
@@ -134,6 +137,31 @@ class CandidateArm:
         )
 
 
+@dataclass(frozen=True)
+class CandidateLadder:
+    """A verified ordered set of explicitly paired experiment arms."""
+
+    source_path: Path
+    ladder_id: str
+    labels: tuple[str, ...]
+    arms: tuple[CandidateArm, ...]
+    content_sha256: str
+    file_sha256: str
+
+    def descriptor(self) -> dict[str, Any]:
+        """Return the immutable provenance stored in experiment manifests."""
+
+        return {
+            "kind": "explicit_ladder",
+            "ladder_id": self.ladder_id,
+            "source_name": self.source_path.name,
+            "content_sha256": self.content_sha256,
+            "file_sha256": self.file_sha256,
+            "labels_in_order": list(self.labels),
+            "candidate_ids_in_order": [arm.candidate_id for arm in self.arms],
+        }
+
+
 def build_candidate_arms(
     *,
     warmup_steps: Sequence[int] = DEFAULT_WARMUP_STEPS,
@@ -186,6 +214,165 @@ def _strict_positive_int(value: int, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{name} must be a positive integer")
     return value
+
+
+def load_candidate_ladder(path: Path) -> CandidateLadder:
+    """Load one strict, digest-bearing list of explicitly paired candidates."""
+
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"could not read candidate ladder {path}: {error}") from error
+    if not isinstance(document, dict):
+        raise ValueError("candidate ladder must contain a JSON object")
+    expected_keys = {
+        "schema",
+        "schema_revision",
+        "ladder_id",
+        "candidates",
+        "sha256",
+    }
+    if set(document) != expected_keys:
+        raise ValueError(
+            "candidate ladder fields do not match the protocol: "
+            f"expected {sorted(expected_keys)}, got {sorted(document)}"
+        )
+    if document["schema"] != CANDIDATE_LADDER_SCHEMA:
+        raise ValueError(f"candidate ladder schema must be {CANDIDATE_LADDER_SCHEMA!r}")
+    if document["schema_revision"] != CANDIDATE_LADDER_SCHEMA_REVISION:
+        raise ValueError(
+            "candidate ladder schema_revision must be "
+            f"{CANDIDATE_LADDER_SCHEMA_REVISION}"
+        )
+    ladder_id = document["ladder_id"]
+    if not isinstance(ladder_id, str) or not ladder_id or ladder_id != ladder_id.strip():
+        raise ValueError("candidate ladder ladder_id must be a non-empty trimmed string")
+    payload = {key: value for key, value in document.items() if key != "sha256"}
+    if document["sha256"] != canonical_sha256(payload):
+        raise ValueError("candidate ladder sha256 does not match its contents")
+    rows = document["candidates"]
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("candidate ladder candidates must be a non-empty list")
+    candidate_keys = {
+        "label",
+        "warmup_steps",
+        "anchor_interval",
+        "order",
+        "anchor_phase",
+        "cooldown_steps",
+        "require_final_anchor",
+        "coord",
+    }
+    labels: list[str] = []
+    arms: list[CandidateArm] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict) or set(row) != candidate_keys:
+            raise ValueError(
+                f"candidate ladder candidates[{index}] fields do not match the protocol"
+            )
+        label = row["label"]
+        if not isinstance(label, str) or not label or label != label.strip():
+            raise ValueError(f"candidate ladder candidates[{index}].label is invalid")
+        if label in labels:
+            raise ValueError("candidate ladder contains duplicate labels")
+        labels.append(label)
+        for field in (
+            "warmup_steps",
+            "anchor_interval",
+            "order",
+            "anchor_phase",
+            "cooldown_steps",
+        ):
+            value = row[field]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(
+                    f"candidate ladder candidates[{index}].{field} "
+                    "must be a nonnegative integer"
+                )
+        if row["warmup_steps"] <= 0 or row["anchor_interval"] <= 0 or row["order"] <= 0:
+            raise ValueError(
+                f"candidate ladder candidates[{index}] warmup, interval, and order "
+                "must be positive"
+            )
+        if not isinstance(row["require_final_anchor"], bool):
+            raise ValueError(
+                f"candidate ladder candidates[{index}].require_final_anchor must be boolean"
+            )
+        if row["coord"] not in {"index", "sigma", "timestep"}:
+            raise ValueError(
+                f"candidate ladder candidates[{index}].coord is unsupported"
+            )
+        arms.append(
+            CandidateArm(
+                warmup_steps=row["warmup_steps"],
+                anchor_interval=row["anchor_interval"],
+                order=row["order"],
+                anchor_phase=row["anchor_phase"],
+                cooldown_steps=row["cooldown_steps"],
+                require_final_anchor=row["require_final_anchor"],
+                coord=row["coord"],
+            )
+        )
+    candidate_ids = [arm.candidate_id for arm in arms]
+    if len(candidate_ids) != len(set(candidate_ids)):
+        raise ValueError("candidate ladder produced duplicate candidate identifiers")
+    coordinates = {arm.coord for arm in arms}
+    if len(coordinates) != 1:
+        raise ValueError("candidate ladder must use one shared coordinate")
+    return CandidateLadder(
+        source_path=path,
+        ladder_id=ladder_id,
+        labels=tuple(labels),
+        arms=tuple(arms),
+        content_sha256=document["sha256"],
+        file_sha256=_sha256_file(path),
+    )
+
+
+def select_candidate_arms(
+    args: argparse.Namespace,
+) -> tuple[tuple[CandidateArm, ...], dict[str, Any]]:
+    """Resolve either one explicit ladder or the legacy Cartesian sweep."""
+
+    candidate_ladder = getattr(args, "candidate_ladder", None)
+    sweep_values = (
+        getattr(args, "warmup_steps", None),
+        getattr(args, "anchor_intervals", None),
+        getattr(args, "orders", None),
+        getattr(args, "coord", None),
+    )
+    if candidate_ladder is not None:
+        if any(value is not None for value in sweep_values):
+            raise ValueError(
+                "--candidate-ladder cannot be combined with sweep or coordinate flags"
+            )
+        ladder = load_candidate_ladder(Path(candidate_ladder).expanduser().resolve())
+        return ladder.arms, ladder.descriptor()
+
+    warmup_steps = tuple(sweep_values[0] or DEFAULT_WARMUP_STEPS)
+    anchor_intervals = tuple(sweep_values[1] or DEFAULT_ANCHOR_INTERVALS)
+    orders = tuple(sweep_values[2] or DEFAULT_ORDERS)
+    coord = sweep_values[3] or "index"
+    arms = build_candidate_arms(
+        warmup_steps=warmup_steps,
+        anchor_intervals=anchor_intervals,
+        orders=orders,
+        anchor_phase=getattr(args, "anchor_phase", 1),
+        cooldown_steps=getattr(args, "cooldown_steps", 1),
+        require_final_anchor=True,
+        coord=coord,
+    )
+    return arms, {
+        "kind": "cartesian_sweep",
+        "warmup_steps": list(warmup_steps),
+        "anchor_intervals": list(anchor_intervals),
+        "orders": list(orders),
+        "anchor_phase": getattr(args, "anchor_phase", 1),
+        "cooldown_steps": getattr(args, "cooldown_steps", 1),
+        "require_final_anchor": True,
+        "coord": coord,
+        "candidate_ids_in_order": [arm.candidate_id for arm in arms],
+    }
 
 
 def _load_prompts(path: Path | None, inline: Sequence[str] | None) -> tuple[str, ...]:
@@ -586,15 +773,7 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
     prompts = prompt_selection.prompts
     seeds = tuple(DEFAULT_SEEDS if args.seed is None else args.seed)
     samples = _sample_matrix(prompts, seeds)
-    arms = build_candidate_arms(
-        warmup_steps=tuple(args.warmup_steps),
-        anchor_intervals=tuple(args.anchor_intervals),
-        orders=tuple(args.orders),
-        anchor_phase=args.anchor_phase,
-        cooldown_steps=args.cooldown_steps,
-        require_final_anchor=True,
-        coord=args.coord,
-    )
+    arms, candidate_selection = select_candidate_arms(args)
     for arm in arms:
         arm.build_pipeline_adapter(num_steps)
 
@@ -616,7 +795,7 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
         dtype=args.dtype,
         tp_degree=args.tp_degree,
         requested_model_revision=args.model_revision,
-        cache_coordinate=args.coord,
+        cache_coordinate=arms[0].coord,
         pipeline_warmup_enabled=not bool(args.skip_warmup),
     )
     print(
@@ -715,6 +894,7 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
         "seed_count": len(seeds),
         "sample_count": len(samples),
         "protocol": protocol,
+        "candidate_selection": candidate_selection,
     }
     quality, speedup = build_manifests(
         identity=identity,
@@ -749,12 +929,13 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=1024)
     parser.add_argument("--width", type=int, default=1024)
     parser.add_argument("--guidance-scale", type=float, default=3.5)
-    parser.add_argument("--warmup-steps", type=int, nargs="+", default=[10, 12, 14])
-    parser.add_argument("--anchor-intervals", type=int, nargs="+", default=[4, 5])
-    parser.add_argument("--orders", type=int, nargs="+", default=[1, 2])
+    parser.add_argument("--candidate-ladder", default=None)
+    parser.add_argument("--warmup-steps", type=int, nargs="+", default=None)
+    parser.add_argument("--anchor-intervals", type=int, nargs="+", default=None)
+    parser.add_argument("--orders", type=int, nargs="+", default=None)
     parser.add_argument("--anchor-phase", type=int, default=1)
     parser.add_argument("--cooldown-steps", type=int, default=1)
-    parser.add_argument("--coord", choices=["index", "timestep", "sigma"], default="index")
+    parser.add_argument("--coord", choices=["index", "timestep", "sigma"], default=None)
     parser.add_argument("--tp-degree", type=int, default=4)
     parser.add_argument(
         "--dtype",
