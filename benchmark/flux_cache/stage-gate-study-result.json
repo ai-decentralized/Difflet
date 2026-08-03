@@ -115,6 +115,15 @@
           "vqa_score": 0.33203125,
           "vqa_score_harm": 0.29296875
         },
+        "runtime_signal_observation": {
+          "stage_acceleration_last_anchor_error_descending_rank": "18 of 32",
+          "brake_only_last_anchor_error_descending_rank": "19 of 32",
+          "stage_acceleration_tightened_this_request": false,
+          "brake_only_tightened_this_request": false,
+          "brake_only_other_requests_tightened": 9,
+          "brake_only_tightened_requests_that_passed": 9,
+          "interpretation": "The request was not a high-risk outlier under the available online signal. The signal missed the only automatic failure in this audit while conservatively tightening nine passing requests."
+        },
         "diagnostic_visual_observation": "All three images contain the pastry chef, a tall cream-puff cone, and caramel decoration. The cached variants show weaker thin caramel threads. This observation did not override the automatic gate."
       },
       "artifact_sha256": {
