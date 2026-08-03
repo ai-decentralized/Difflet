@@ -1,0 +1,85 @@
+{
+  "schema": "difflet-flux-cache-automatic-quality-contract-protocol",
+  "schema_revision": 1,
+  "study_id": "flux-taylorseer-automatic-quality-contract-2026-08-03",
+  "created_at": "2026-08-03T03:30:00Z",
+  "quality_claim": "paired VQAScore and ImageReward non-inferiority relative to normal baseline seed variation; no human-perception claim",
+  "controlled_generation": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "scheduler_class": "FlowMatchEulerDiscreteScheduler",
+    "scheduler_config_sha256": "d32e7bf63b561cb6aa9101116b0bd3e4946d17af13a0dd1b674f24ca7dae509b",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4,
+    "predictor": "taylorseer",
+    "predictor_order": 1,
+    "coordinate": "index",
+    "anchor_phase": 1,
+    "cooldown_steps": 1,
+    "require_final_anchor": true
+  },
+  "margin_calibration": {
+    "prompt_suite_path": "benchmark/flux_cache/prompt-suite-v1.json",
+    "split": "metric_margin_calibration",
+    "split_sha256": "36ce6b7881991d8dc7a27fb5b9a6bc70e66e210fb6cbcf94882359bf8db1c3fa",
+    "prompt_count": 16,
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "sample_count": 48,
+    "method": "absolute-baseline-seed-pair-difference-nearest-rank",
+    "quantile": 0.95,
+    "candidate_images_excluded_from_margin_estimation": true
+  },
+  "static_candidate": {
+    "ladder_path": "benchmark/flux_cache/static-profile-candidate.json",
+    "ladder_file_sha256": "4475a310cdb6fef56f6b982e3296d6e69e581388335c36f109f2ad3a8609c6c0",
+    "ladder_content_sha256": "39ffd8bd2e208955bf443ee52760f8bcdcb7eb79678e08bba14eb075e1e27d50",
+    "candidate_id": "periodic-w6-i8-p1-c1-o1-index-f1",
+    "warmup_steps": 6,
+    "anchor_interval": 8,
+    "planned_skip_steps": 37
+  },
+  "automatic_damage_rule": {
+    "metrics": [
+      "image_reward",
+      "vqa_score"
+    ],
+    "paired_loss": "baseline_score_minus_candidate_score",
+    "comparison": "strictly-greater-than-metric-margin",
+    "combination": "fail-if-either-metric-fails",
+    "weighted_average_forbidden": true
+  },
+  "signal_gate": {
+    "evidence_role": "exploratory-routing-decision",
+    "primary_signal": "maximum-anchor-estimate-relative-error",
+    "minimum_macro_within_candidate_auc": 0.75,
+    "minimum_informative_candidates": 2,
+    "failure_action": "ship-static-candidate-only"
+  },
+  "holdout": {
+    "prompt_suite_path": "benchmark/flux_cache/prompt-suite-v1.json",
+    "split": "static_profile_holdout",
+    "split_sha256": "2c52ee4b0f5ff469c40db4b1b89ea259f6d5da66dcbeee2ebdd8d09a9655239a",
+    "prompt_count": 32,
+    "seeds": [
+      0
+    ],
+    "sample_count": 32,
+    "confidence": 0.95,
+    "maximum_failure_rate_upper_bound": 0.1,
+    "parameters_frozen_before_collection": true
+  },
+  "limitations": [
+    "Automatic semantic metrics are proxies and do not establish human-perceived equivalence.",
+    "The quality contract applies only to the controlled generation identity above.",
+    "Performance timings collected with runtime measurements are not clean serving benchmarks."
+  ],
+  "sha256": "a3ca8c490be6756c7bcc564b9cc5e2748a22a73e06df0ab8d1bb1db3ad28f742"
+}

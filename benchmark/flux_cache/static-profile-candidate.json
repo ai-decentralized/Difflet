@@ -1,0 +1,18 @@
+{
+  "schema": "difflet-flux-cache-candidate-ladder",
+  "schema_revision": 1,
+  "ladder_id": "flux-taylorseer-static-profile-candidate-2026-08-03",
+  "candidates": [
+    {
+      "label": "static-profile-candidate",
+      "warmup_steps": 6,
+      "anchor_interval": 8,
+      "order": 1,
+      "anchor_phase": 1,
+      "cooldown_steps": 1,
+      "require_final_anchor": true,
+      "coord": "index"
+    }
+  ],
+  "sha256": "39ffd8bd2e208955bf443ee52760f8bcdcb7eb79678e08bba14eb075e1e27d50"
+}

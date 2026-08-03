@@ -4,7 +4,8 @@
   "source": {
     "boundary_pilot": "boundary-study design frozen in benchmark/flux_cache/boundary-pilot-protocol.json",
     "calibration_holdout": "cclogs/m9-teacache/calibration_prompts.txt@505cbf7b910457bad3a5fcd6e82e9d957d3b468b",
-    "legacy_parity": "scripts/run_flux_teacache_e2e.py@505cbf7b910457bad3a5fcd6e82e9d957d3b468b"
+    "legacy_parity": "scripts/run_flux_teacache_e2e.py@505cbf7b910457bad3a5fcd6e82e9d957d3b468b",
+    "automatic_quality_contract": "independent prompts frozen for seed-variation calibration and final static holdout on 2026-08-03"
   },
   "splits": {
     "legacy_parity": [
@@ -183,6 +184,250 @@
         "category": "surreal-dense-composition",
         "prompt_id": "boundary-astronaut-chess",
         "text": "two astronauts playing chess inside a glass greenhouse filled with tropical plants"
+      }
+    ],
+    "metric_margin_calibration": [
+      {
+        "category": "human-object-fine-detail",
+        "prompt_id": "margin-librarian-maps",
+        "text": "a librarian stamping old maps at a wooden desk beneath a green reading lamp"
+      },
+      {
+        "category": "craft-transparent-material",
+        "prompt_id": "margin-glassblower-vase",
+        "text": "a glassblower shaping a glowing blue vase in a workshop filled with metal tools"
+      },
+      {
+        "category": "multi-human-landscape",
+        "prompt_id": "margin-hikers-bridge",
+        "text": "two hikers crossing a narrow suspension bridge above a foggy pine valley"
+      },
+      {
+        "category": "animal-macro-detail",
+        "prompt_id": "margin-dragonfly-dew",
+        "text": "a macro photograph of a dragonfly resting on a reed covered with morning dew"
+      },
+      {
+        "category": "hands-food-fine-detail",
+        "prompt_id": "margin-sushi-chef",
+        "text": "a sushi chef arranging salmon and herbs on a black ceramic plate"
+      },
+      {
+        "category": "vehicle-workshop-detail",
+        "prompt_id": "margin-motorcycle-repair",
+        "text": "a mechanic repairing a vintage motorcycle in a crowded workshop with hanging tools"
+      },
+      {
+        "category": "human-reflection-motion",
+        "prompt_id": "margin-ballet-mirrors",
+        "text": "a ballet dancer rehearsing beside tall mirrors in a sunlit studio"
+      },
+      {
+        "category": "underwater-dense-animal",
+        "prompt_id": "margin-turtle-coral",
+        "text": "a sea turtle swimming above colorful coral while a school of silver fish passes behind"
+      },
+      {
+        "category": "human-plant-transparent-structure",
+        "prompt_id": "margin-greenhouse-seedlings",
+        "text": "a gardener watering rows of seedlings inside a rainy glass greenhouse"
+      },
+      {
+        "category": "food-text-dense-still-life",
+        "prompt_id": "margin-bakery-counter",
+        "text": "a bakery counter filled with pastries, paper labels, metal trays, and warm morning light"
+      },
+      {
+        "category": "space-planet-structure",
+        "prompt_id": "margin-satellite-earth",
+        "text": "a communications satellite with extended solar panels orbiting above the blue Earth"
+      },
+      {
+        "category": "human-fire-motion",
+        "prompt_id": "margin-blacksmith-sparks",
+        "text": "a blacksmith striking hot metal on an anvil as orange sparks fill the dark workshop"
+      },
+      {
+        "category": "child-object-spatial-color",
+        "prompt_id": "margin-sandcastle-buckets",
+        "text": "a child building a tall sandcastle beside a purple bucket and two yellow shovels"
+      },
+      {
+        "category": "aerial-landscape-pattern",
+        "prompt_id": "margin-rice-terraces",
+        "text": "an aerial view of green rice terraces curving around a mountain village after rain"
+      },
+      {
+        "category": "transparent-fluid-pattern",
+        "prompt_id": "margin-teapot-cup",
+        "text": "tea pouring from a white ceramic teapot into a patterned cup on a linen tablecloth"
+      },
+      {
+        "category": "multi-human-stage-lighting",
+        "prompt_id": "margin-jazz-quartet",
+        "text": "a jazz quartet performing on a small stage under blue and amber spotlights"
+      }
+    ],
+    "static_profile_holdout": [
+      {
+        "category": "vehicle-dense-urban",
+        "prompt_id": "profile-holdout-red-tram",
+        "text": "a red tram crossing a historic plaza while cyclists wait beside a stone fountain"
+      },
+      {
+        "category": "animal-night-landscape",
+        "prompt_id": "profile-holdout-polar-bear",
+        "text": "a polar bear standing on a small ice floe beneath green northern lights"
+      },
+      {
+        "category": "human-object-fine-detail",
+        "prompt_id": "profile-holdout-architect-model",
+        "text": "an architect adjusting tiny windows on a white building model in a bright studio"
+      },
+      {
+        "category": "animal-fast-motion",
+        "prompt_id": "profile-holdout-hummingbird",
+        "text": "a hummingbird hovering between red trumpet flowers with its wings sharply visible"
+      },
+      {
+        "category": "human-sport-rain",
+        "prompt_id": "profile-holdout-goalkeeper",
+        "text": "a goalkeeper diving toward a soccer ball during a match in heavy rain"
+      },
+      {
+        "category": "animal-interior-dense",
+        "prompt_id": "profile-holdout-bookstore-cat",
+        "text": "a black cat sitting on a rolling ladder inside a bookstore with floor-to-ceiling shelves"
+      },
+      {
+        "category": "human-water-landscape",
+        "prompt_id": "profile-holdout-canoe-mist",
+        "text": "a person paddling a green canoe across a misty lake surrounded by pine trees"
+      },
+      {
+        "category": "science-human-fine-detail",
+        "prompt_id": "profile-holdout-microscope",
+        "text": "a scientist adjusting a microscope beside labeled glass slides and a blue notebook"
+      },
+      {
+        "category": "hands-craft-motion",
+        "prompt_id": "profile-holdout-pottery-wheel",
+        "text": "two clay-covered hands shaping a narrow vase on a spinning pottery wheel"
+      },
+      {
+        "category": "counting-spatial-color",
+        "prompt_id": "profile-holdout-balloons",
+        "text": "three balloons tied to a wooden chair, a red one above a blue one and a yellow one beside them"
+      },
+      {
+        "category": "object-counting-fine-detail",
+        "prompt_id": "profile-holdout-two-clocks",
+        "text": "two brass alarm clocks on a shelf, the left showing three o'clock and the right showing nine o'clock"
+      },
+      {
+        "category": "food-floral-fine-detail",
+        "prompt_id": "profile-holdout-wedding-cake",
+        "text": "a florist placing small purple flowers on a three-tier white wedding cake"
+      },
+      {
+        "category": "human-landscape-action",
+        "prompt_id": "profile-holdout-climber",
+        "text": "a mountain climber securing a red rope to dark rock above a snowy valley"
+      },
+      {
+        "category": "animal-urban-weather",
+        "prompt_id": "profile-holdout-fox-alley",
+        "text": "a red fox walking through a narrow city alley during fresh snowfall"
+      },
+      {
+        "category": "multi-human-performance",
+        "prompt_id": "profile-holdout-conductor",
+        "text": "an orchestra conductor raising a baton before rows of violin and cello players"
+      },
+      {
+        "category": "food-object-macro",
+        "prompt_id": "profile-holdout-coffee-grinder",
+        "text": "coffee beans spilling beside a hand-cranked metal grinder on a wooden counter"
+      },
+      {
+        "category": "aerial-vehicle-landscape",
+        "prompt_id": "profile-holdout-drone-wheat",
+        "text": "a small camera drone flying low above a golden wheat field with tractor lines"
+      },
+      {
+        "category": "child-underwater-lighting",
+        "prompt_id": "profile-holdout-aquarium",
+        "text": "a child watching glowing jellyfish through a large blue aquarium window"
+      },
+      {
+        "category": "human-vehicle-fine-detail",
+        "prompt_id": "profile-holdout-tire-mechanic",
+        "text": "a mechanic tightening bolts on a car wheel with a silver torque wrench"
+      },
+      {
+        "category": "landscape-water-light",
+        "prompt_id": "profile-holdout-waterfall-rainbow",
+        "text": "a rainbow forming in the mist below a wide waterfall surrounded by dark green cliffs"
+      },
+      {
+        "category": "human-emergency-structure",
+        "prompt_id": "profile-holdout-firefighter-ladder",
+        "text": "a firefighter climbing an extended ladder toward a smoky apartment window"
+      },
+      {
+        "category": "object-music-still-life",
+        "prompt_id": "profile-holdout-violin-case",
+        "text": "an open violin case beside folded sheet music and a wooden music stand"
+      },
+      {
+        "category": "multi-animal-fast-motion",
+        "prompt_id": "profile-holdout-dogs-frisbee",
+        "text": "two dogs chasing a red frisbee across a windy beach near the surf"
+      },
+      {
+        "category": "craft-pattern-dense",
+        "prompt_id": "profile-holdout-textile-loom",
+        "text": "a weaver working at a wooden loom filled with red, gold, and indigo threads"
+      },
+      {
+        "category": "multi-object-aerial-landscape",
+        "prompt_id": "profile-holdout-balloons-valley",
+        "text": "five hot air balloons floating above a rocky valley at sunrise"
+      },
+      {
+        "category": "human-food-fire-motion",
+        "prompt_id": "profile-holdout-wok-flame",
+        "text": "a chef tossing vegetables in a steel wok above a bright orange flame"
+      },
+      {
+        "category": "space-vehicle-landscape",
+        "prompt_id": "profile-holdout-lunar-rover",
+        "text": "an astronaut driving a small lunar rover with the Earth visible above the horizon"
+      },
+      {
+        "category": "interior-architecture-dense",
+        "prompt_id": "profile-holdout-spiral-library",
+        "text": "a spiral staircase rising through a circular library lined with thousands of books"
+      },
+      {
+        "category": "animal-macro-floral",
+        "prompt_id": "profile-holdout-bee-sunflower",
+        "text": "a macro photograph of a honeybee collecting pollen from a yellow sunflower"
+      },
+      {
+        "category": "vehicle-weather-landscape",
+        "prompt_id": "profile-holdout-sailboat-lighthouse",
+        "text": "a white sailboat crossing rough water near a lighthouse during a dark storm"
+      },
+      {
+        "category": "vehicle-human-dense-weather",
+        "prompt_id": "profile-holdout-steam-platform",
+        "text": "a steam train arriving at a crowded platform where travelers stand beside leather luggage"
+      },
+      {
+        "category": "food-transparent-object",
+        "prompt_id": "profile-holdout-honey-pancakes",
+        "text": "honey pouring from a glass spoon onto a stack of pancakes topped with blueberries"
       }
     ]
   }

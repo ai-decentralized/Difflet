@@ -130,6 +130,14 @@ def test_versioned_prompt_splits_have_stable_digests_and_are_disjoint():
             16,
             "bb7249a2fc99aace4fe0831d0711b81f7541e48afdd955a9f6f7a7145f8b3d48",
         ),
+        "metric_margin_calibration": (
+            16,
+            "36ce6b7881991d8dc7a27fb5b9a6bc70e66e210fb6cbcf94882359bf8db1c3fa",
+        ),
+        "static_profile_holdout": (
+            32,
+            "2c52ee4b0f5ff469c40db4b1b89ea259f6d5da66dcbeee2ebdd8d09a9655239a",
+        ),
     }
     selections = {split: load_prompt_suite(DEFAULT_PROMPT_SUITE_PATH, split) for split in expected}
 
