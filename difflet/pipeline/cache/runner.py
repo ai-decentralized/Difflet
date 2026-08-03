@@ -273,7 +273,12 @@ class CacheRunner:
             or "direct_compute"
         )
         measurement = None
-        if self.measurement_sink is not None:
+        measurement_hook = getattr(
+            self.policy,
+            "observe_anchor_measurement",
+            None,
+        )
+        if self.measurement_sink is not None or callable(measurement_hook):
             measurement = measure_anchor_estimate(
                 context=context,
                 output=output,
@@ -282,6 +287,8 @@ class CacheRunner:
                 history=self.history,
                 observation=self.observation,
             )
+        if measurement is not None and callable(measurement_hook):
+            measurement_hook(measurement)
         if self._pending_context is not None:
             # A caller may elect to compute after seeing a skip decision. That
             # is safe, but the stale pending decision must not leak.
@@ -300,7 +307,8 @@ class CacheRunner:
         self.counters.full_steps += 1
         self._last_context = context
         if measurement is not None:
-            self.measurement_sink.record_anchor_measurement(measurement)
+            if self.measurement_sink is not None:
+                self.measurement_sink.record_anchor_measurement(measurement)
 
     def record_full_step(self, output: Any, context: CacheStepContext | None = None) -> None:
         context = context or self._last_context

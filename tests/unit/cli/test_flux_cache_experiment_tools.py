@@ -29,6 +29,7 @@ from scripts.collect_flux_cache_ab import (
     build_candidate_arms,
     build_manifests,
     collect,
+    load_adaptive_candidate,
     load_candidate_ladder,
     select_candidate_arms,
 )
@@ -144,6 +145,38 @@ def test_candidate_ladder_cli_selection_does_not_form_cartesian_product():
     assert ladder.content_sha256 == (
         "814e04ca2de7d1855a9dc1134cbe01ff2e70e10dbbd09fd18878901b87c4f8f1"
     )
+
+
+def test_adaptive_brake_candidate_is_appended_without_enabling_oil():
+    root = Path(__file__).resolve().parents[3]
+    static_path = root / "benchmark" / "flux_cache" / "static-profile-candidate.json"
+    adaptive_path = root / "benchmark" / "flux_cache" / "adaptive-brake-candidate.json"
+
+    arm = load_adaptive_candidate(adaptive_path)
+    assert arm.config.allow_acceleration is False
+    assert arm.config.initial_anchor_interval == 8
+    assert arm.config.minimum_anchor_interval == 4
+    assert arm.config.maximum_anchor_interval == 8
+    assert arm.config.tighten_error == pytest.approx(1.19)
+    assert arm.config.recovery_error == pytest.approx(1.5)
+
+    arms = select_candidate_arms(
+        SimpleNamespace(
+            candidate_ladder=str(static_path),
+            adaptive_candidate=str(adaptive_path),
+            warmup_steps=None,
+            anchor_intervals=None,
+            orders=None,
+            coord=None,
+        )
+    )
+    assert [candidate.candidate_id for candidate in arms] == [
+        "periodic-w6-i8-p1-c1-o1-index-f1",
+        "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+    ]
+    adapter = arms[-1].build_pipeline_adapter(50)
+    assert adapter.stats()["adaptive_state"] == "active"
+    assert adapter.stats()["adaptive_acceleration_enabled"] is False
 
 
 def test_candidate_ladder_rejects_sweep_overrides():

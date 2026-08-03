@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from difflet.pipeline.cache.types import CacheHistory, CacheStepContext, RuntimeObservation
 
@@ -21,6 +21,241 @@ def _protected(context: CacheStepContext, warmup_steps: int, cooldown_steps: int
         context.step_index < warmup_steps
         or context.step_index >= context.num_steps - cooldown_steps
     )
+
+
+def _finite_nonnegative(value: Any, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a nonnegative finite number")
+    result = float(value)
+    if not math.isfinite(result) or result < 0.0:
+        raise ValueError(f"{name} must be a nonnegative finite number")
+    return result
+
+
+@dataclass(frozen=True)
+class AdaptiveAnchorConfig:
+    """Bounds and signal thresholds for request-local anchor adaptation."""
+
+    initial_anchor_interval: int
+    minimum_anchor_interval: int
+    maximum_anchor_interval: int
+    warmup_steps: int
+    cooldown_steps: int
+    anchor_phase: int
+    tighten_error: float
+    recovery_error: float
+    acceleration_error: float
+    recovery_steps: int
+    disable_after_recoveries: int
+    stable_anchors_for_acceleration: int = 2
+    allow_acceleration: bool = False
+    require_final_anchor: bool = True
+
+    def __post_init__(self) -> None:
+        initial = _strict_int(
+            self.initial_anchor_interval,
+            "initial_anchor_interval",
+            minimum=1,
+        )
+        minimum = _strict_int(
+            self.minimum_anchor_interval,
+            "minimum_anchor_interval",
+            minimum=1,
+        )
+        maximum = _strict_int(
+            self.maximum_anchor_interval,
+            "maximum_anchor_interval",
+            minimum=1,
+        )
+        if not minimum <= initial <= maximum:
+            raise ValueError(
+                "anchor intervals must satisfy minimum <= initial <= maximum"
+            )
+        _strict_int(self.warmup_steps, "warmup_steps", minimum=1)
+        _strict_int(self.cooldown_steps, "cooldown_steps")
+        phase = _strict_int(self.anchor_phase, "anchor_phase")
+        if phase >= initial:
+            raise ValueError("anchor_phase must be lower than initial_anchor_interval")
+        acceleration = _finite_nonnegative(
+            self.acceleration_error,
+            "acceleration_error",
+        )
+        tighten = _finite_nonnegative(self.tighten_error, "tighten_error")
+        recovery = _finite_nonnegative(self.recovery_error, "recovery_error")
+        if not acceleration < tighten < recovery:
+            raise ValueError(
+                "signal thresholds must satisfy acceleration < tighten < recovery"
+            )
+        _strict_int(self.recovery_steps, "recovery_steps", minimum=1)
+        _strict_int(
+            self.disable_after_recoveries,
+            "disable_after_recoveries",
+            minimum=1,
+        )
+        _strict_int(
+            self.stable_anchors_for_acceleration,
+            "stable_anchors_for_acceleration",
+            minimum=1,
+        )
+        if type(self.allow_acceleration) is not bool:
+            raise ValueError("allow_acceleration must be a boolean")
+        if type(self.require_final_anchor) is not bool:
+            raise ValueError("require_final_anchor must be a boolean")
+
+
+AdaptiveAnchorState = Literal["active", "recovery", "disabled"]
+
+
+class AdaptiveAnchorPolicy:
+    """Adjust anchor spacing from real-anchor errors within fixed hard bounds.
+
+    With ``allow_acceleration=False`` the interval can only stay unchanged or
+    shrink from its initial value.  The same implementation can later enable
+    gradual acceleration after its thresholds and hard maximum are calibrated.
+    Invalid comparison signals deterministically disable caching for the rest
+    of the request.
+    """
+
+    def __init__(self, config: AdaptiveAnchorConfig) -> None:
+        if not isinstance(config, AdaptiveAnchorConfig):
+            raise TypeError("config must be an AdaptiveAnchorConfig")
+        self.config = config
+        self.warmup_steps = config.warmup_steps
+        self.cooldown_steps = config.cooldown_steps
+        self.require_final_anchor = config.require_final_anchor
+        self.reset()
+
+    def reset(self) -> None:
+        self._state: AdaptiveAnchorState = "active"
+        self._current_interval = self.config.initial_anchor_interval
+        self._next_anchor_step: int | None = None
+        self._recovery_steps_remaining = 0
+        self._recovery_count = 0
+        self._stable_anchor_count = 0
+        self._tightening_count = 0
+        self._acceleration_count = 0
+        self._disabled_count = 0
+        self._last_anchor_error: float | None = None
+
+    @property
+    def state(self) -> AdaptiveAnchorState:
+        return self._state
+
+    @property
+    def current_anchor_interval(self) -> int:
+        return self._current_interval
+
+    def should_skip(
+        self,
+        context: CacheStepContext,
+        history: CacheHistory,
+        observation: RuntimeObservation,
+    ) -> bool:
+        del history, observation
+        if _protected(context, self.warmup_steps, self.cooldown_steps):
+            return False
+        if self._state != "active" or self._next_anchor_step is None:
+            return False
+        return context.step_index < self._next_anchor_step
+
+    def observe_anchor_measurement(self, measurement: Any) -> None:
+        """Consume the comparison produced before the real anchor is recorded."""
+
+        step_index = int(measurement.step_index)
+        num_steps = int(measurement.num_steps)
+        if self._state == "disabled":
+            return
+        if self._state == "recovery":
+            self._recovery_steps_remaining -= 1
+            if self._recovery_steps_remaining <= 0:
+                self._state = "active"
+                self._schedule_after_anchor(step_index, num_steps)
+            return
+
+        status = measurement.estimate_status
+        if status == "history_not_ready":
+            self._schedule_after_anchor(step_index, num_steps)
+            return
+        if status != "measured" or not measurement.numerically_valid:
+            self._disable()
+            return
+        error = float(measurement.estimate_relative_error)
+        if not math.isfinite(error) or error < 0.0:
+            self._disable()
+            return
+        self._last_anchor_error = error
+
+        if error > self.config.recovery_error:
+            self._current_interval = self.config.minimum_anchor_interval
+            self._stable_anchor_count = 0
+            self._recovery_count += 1
+            if self._recovery_count >= self.config.disable_after_recoveries:
+                self._disable()
+                return
+            self._state = "recovery"
+            self._recovery_steps_remaining = self.config.recovery_steps
+            self._next_anchor_step = None
+            return
+
+        if error > self.config.tighten_error:
+            tightened = max(
+                self.config.minimum_anchor_interval,
+                self._current_interval // 2,
+            )
+            if tightened < self._current_interval:
+                self._current_interval = tightened
+                self._tightening_count += 1
+            self._stable_anchor_count = 0
+        elif (
+            self.config.allow_acceleration
+            and error < self.config.acceleration_error
+        ):
+            self._stable_anchor_count += 1
+            if (
+                self._stable_anchor_count
+                >= self.config.stable_anchors_for_acceleration
+                and self._current_interval < self.config.maximum_anchor_interval
+            ):
+                self._current_interval += 1
+                self._acceleration_count += 1
+                self._stable_anchor_count = 0
+        else:
+            self._stable_anchor_count = 0
+        self._schedule_after_anchor(step_index, num_steps)
+
+    def _schedule_after_anchor(self, step_index: int, num_steps: int) -> None:
+        cooldown_start = num_steps - self.cooldown_steps
+        if step_index < self.warmup_steps:
+            if step_index == self.warmup_steps - 1:
+                next_anchor = self.warmup_steps + self.config.anchor_phase
+                self._next_anchor_step = (
+                    next_anchor if next_anchor < cooldown_start else None
+                )
+            return
+        if step_index >= cooldown_start:
+            self._next_anchor_step = None
+            return
+        self._next_anchor_step = step_index + self._current_interval
+
+    def _disable(self) -> None:
+        if self._state != "disabled":
+            self._disabled_count += 1
+        self._state = "disabled"
+        self._next_anchor_step = None
+        self._recovery_steps_remaining = 0
+
+    def stats(self) -> dict[str, Any]:
+        return {
+            "adaptive_state": self._state,
+            "adaptive_current_anchor_interval": self._current_interval,
+            "adaptive_tightenings": self._tightening_count,
+            "adaptive_accelerations": self._acceleration_count,
+            "adaptive_recoveries": self._recovery_count,
+            "adaptive_disabled": self._disabled_count,
+            "adaptive_recovery_steps_remaining": self._recovery_steps_remaining,
+            "adaptive_last_anchor_error": self._last_anchor_error,
+            "adaptive_acceleration_enabled": self.config.allow_acceleration,
+        }
 
 
 @dataclass(frozen=True)
@@ -269,6 +504,8 @@ def _materialize(policy: Any, num_steps: int) -> tuple[bool, ...]:
 
 
 __all__ = [
+    "AdaptiveAnchorConfig",
+    "AdaptiveAnchorPolicy",
     "CadencePolicy",
     "ExplicitMaskPolicy",
     "PeriodicAnchorPolicy",

@@ -7,10 +7,13 @@ from pathlib import Path
 import pytest
 
 from scripts.automatic_quality_contract import (
+    CONTRACT_SCHEMA,
+    SCHEMA_REVISION,
     calibrate_contract,
     clopper_pearson_upper,
     evaluate_contract,
     load_protocol,
+    metric_identity,
 )
 from scripts.collect_flux_cache_ab import load_candidate_ladder
 from scripts.flux_cache_protocol import (
@@ -240,6 +243,101 @@ def test_zero_of_32_has_below_ten_percent_one_sided_upper_bound():
     assert upper == pytest.approx(1.0 - 0.05 ** (1.0 / 32.0))
     assert upper < 0.1
     assert clopper_pearson_upper(1, 32, 0.95) > 0.1
+
+
+def test_metric_identity_ignores_transient_cache_bookkeeping():
+    left = _metric_config()
+    right = _metric_config()
+    left["image_reward"]["checkpoint_files"] = [
+        {"path": "/cache/model.bin", "bytes": 10, "sha256": "a" * 64},
+        {"path": "/cache/model.bin.metadata", "bytes": 20, "sha256": "b" * 64},
+    ]
+    right["image_reward"]["checkpoint_files"] = [
+        {"path": "/cache/model.bin", "bytes": 10, "sha256": "a" * 64},
+        {"path": "/cache/model.bin.metadata", "bytes": 21, "sha256": "c" * 64},
+    ]
+
+    assert metric_identity(left)["sha256"] == metric_identity(right)["sha256"]
+
+
+def test_registered_holdout_can_examine_static_and_brake_candidates_together(tmp_path):
+    protocol = load_protocol(PROTOCOL_PATH)
+    selection = load_prompt_suite(DEFAULT_PROMPT_SUITE_PATH, "static_profile_holdout")
+    manifest = _experiment_manifest(selection, [0])
+    static = protocol["static_candidate"]
+    static_id = static["candidate_id"]
+    brake_id = "adaptive-brake"
+    manifest["candidates"] = [
+        {
+            "candidate_id": static_id,
+            "policy": {
+                "type": "periodic_anchor",
+                "warmup_steps": 6,
+                "anchor_interval": 8,
+                "anchor_phase": 1,
+                "cooldown_steps": 1,
+                "require_final_anchor": True,
+            },
+            "predictor": {"type": "taylorseer", "order": 1, "coord": "index"},
+        },
+        {
+            "candidate_id": brake_id,
+            "policy": {"type": "adaptive_anchor"},
+            "predictor": {"type": "taylorseer", "order": 1, "coord": "index"},
+        },
+    ]
+    manifest_path = tmp_path / "holdout-quality.json"
+    _write_json(manifest_path, manifest)
+    comparisons = []
+    for candidate_id in (static_id, brake_id):
+        for prompt_index, prompt in enumerate(selection.prompts):
+            comparisons.append(
+                {
+                    "candidate_id": candidate_id,
+                    "sample_id": f"p{prompt_index:03d}-s0",
+                    "prompt_index": prompt_index,
+                    "seed": 0,
+                    "prompt": prompt,
+                    "candidate_minus_baseline": {
+                        "image_reward": 0.0,
+                        "vqa_score": 0.0,
+                    },
+                }
+            )
+    report_path = tmp_path / "holdout-semantic.json"
+    _write_json(
+        report_path,
+        _semantic_report(
+            manifest_path,
+            split="static_profile_holdout",
+            images=[],
+            comparisons=comparisons,
+        ),
+    )
+    payload = {
+        "schema": CONTRACT_SCHEMA,
+        "schema_revision": SCHEMA_REVISION,
+        "controlled_generation": protocol["controlled_generation"],
+        "static_candidate": static,
+        "metric_identity": metric_identity(_metric_config()),
+        "margins": {"image_reward": 0.1, "vqa_score": 0.1},
+        "holdout": protocol["holdout"],
+    }
+    contract = {**payload, "sha256": canonical_sha256(payload)}
+    contract_path = tmp_path / "contract.json"
+    _write_json(contract_path, contract)
+
+    evaluation = evaluate_contract(contract_path, report_path)
+
+    assert evaluation["registered_holdout"] is True
+    assert {row["candidate_id"] for row in evaluation["candidate_summaries"]} == {
+        static_id,
+        brake_id,
+    }
+    assert all(
+        row["passes_statistical_gate"]
+        for row in evaluation["candidate_summaries"]
+    )
 
 
 def test_protocol_digest_rejects_rehashed_field_drift(tmp_path):

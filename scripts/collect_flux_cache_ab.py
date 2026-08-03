@@ -40,6 +40,8 @@ DEFAULT_ANCHOR_INTERVALS = (4, 5)
 DEFAULT_ORDERS = (1, 2)
 CANDIDATE_LADDER_SCHEMA = "difflet-flux-cache-candidate-ladder"
 CANDIDATE_LADDER_SCHEMA_REVISION = 1
+ADAPTIVE_CANDIDATE_SCHEMA = "difflet-flux-cache-adaptive-candidate"
+ADAPTIVE_CANDIDATE_SCHEMA_REVISION = 1
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -135,6 +137,84 @@ class CandidateArm:
         return TeaCacheControllerAdapter(
             ResolvedCacheSession(resolved, measurement_sink=measurement_sink)
         )
+
+
+@dataclass(frozen=True)
+class AdaptiveCandidateArm:
+    """One bounded adaptive-anchor arm using the same TaylorSeer predictor."""
+
+    candidate_id: str
+    config: Any
+    order: int
+    coord: str
+
+    def __post_init__(self) -> None:
+        from difflet.pipeline.cache import AdaptiveAnchorConfig, TaylorSeerPredictor
+
+        if not isinstance(self.candidate_id, str) or not self.candidate_id.strip():
+            raise ValueError("adaptive candidate_id must be a non-empty string")
+        if not isinstance(self.config, AdaptiveAnchorConfig):
+            raise TypeError("adaptive config must be an AdaptiveAnchorConfig")
+        TaylorSeerPredictor(order=self.order, coord=self.coord)
+
+    def policy_spec(self) -> dict[str, Any]:
+        return {
+            "type": "adaptive_anchor",
+            "initial_anchor_interval": self.config.initial_anchor_interval,
+            "minimum_anchor_interval": self.config.minimum_anchor_interval,
+            "maximum_anchor_interval": self.config.maximum_anchor_interval,
+            "warmup_steps": self.config.warmup_steps,
+            "cooldown_steps": self.config.cooldown_steps,
+            "anchor_phase": self.config.anchor_phase,
+            "tighten_error": self.config.tighten_error,
+            "recovery_error": self.config.recovery_error,
+            "acceleration_error": self.config.acceleration_error,
+            "recovery_steps": self.config.recovery_steps,
+            "disable_after_recoveries": self.config.disable_after_recoveries,
+            "stable_anchors_for_acceleration": (
+                self.config.stable_anchors_for_acceleration
+            ),
+            "allow_acceleration": self.config.allow_acceleration,
+            "require_final_anchor": self.config.require_final_anchor,
+        }
+
+    def predictor_spec(self) -> dict[str, Any]:
+        return {"type": "taylorseer", "order": self.order, "coord": self.coord}
+
+    def build_pipeline_adapter(self, num_steps: int, *, measurement_sink: Any = None):
+        from difflet.pipeline.cache import (
+            AdaptiveAnchorPolicy,
+            CacheRunner,
+            CacheSession,
+            QualityRecoveryConfig,
+            QualityRecoveryGuard,
+            TaylorSeerPredictor,
+            TeaCacheControllerAdapter,
+        )
+
+        if self.config.warmup_steps + self.config.cooldown_steps >= num_steps:
+            raise ValueError(
+                "adaptive candidates require warmup_steps + cooldown_steps < num_steps"
+            )
+        recovery = QualityRecoveryGuard(
+            QualityRecoveryConfig(
+                warmup_steps=self.config.warmup_steps,
+                cooldown_steps=self.config.cooldown_steps,
+                require_final_anchor=self.config.require_final_anchor,
+            )
+        )
+        runner = CacheRunner(
+            AdaptiveAnchorPolicy(self.config),
+            TaylorSeerPredictor(order=self.order, coord=self.coord),
+            recovery=recovery,
+            measurement_sink=measurement_sink,
+        )
+        session = CacheSession(
+            runner,
+            num_steps=num_steps,
+            configuration_source="adaptive-anchor",
+        )
+        return TeaCacheControllerAdapter(session)
 
 
 @dataclass(frozen=True)
@@ -316,9 +396,74 @@ def load_candidate_ladder(path: Path) -> CandidateLadder:
     )
 
 
+def load_adaptive_candidate(path: Path) -> AdaptiveCandidateArm:
+    """Load one strict adaptive candidate without changing ladder semantics."""
+
+    from difflet.pipeline.cache import AdaptiveAnchorConfig
+
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"could not read adaptive candidate {path}: {error}") from error
+    expected = {
+        "schema",
+        "schema_revision",
+        "candidate_id",
+        "policy",
+        "predictor",
+        "sha256",
+    }
+    if not isinstance(document, dict) or set(document) != expected:
+        raise ValueError("adaptive candidate fields do not match the protocol")
+    if (
+        document["schema"] != ADAPTIVE_CANDIDATE_SCHEMA
+        or document["schema_revision"] != ADAPTIVE_CANDIDATE_SCHEMA_REVISION
+    ):
+        raise ValueError("adaptive candidate schema is unsupported")
+    payload = {key: value for key, value in document.items() if key != "sha256"}
+    if document["sha256"] != canonical_sha256(payload):
+        raise ValueError("adaptive candidate sha256 does not match its contents")
+    policy = document["policy"]
+    policy_fields = {
+        "type",
+        "initial_anchor_interval",
+        "minimum_anchor_interval",
+        "maximum_anchor_interval",
+        "warmup_steps",
+        "cooldown_steps",
+        "anchor_phase",
+        "tighten_error",
+        "recovery_error",
+        "acceleration_error",
+        "recovery_steps",
+        "disable_after_recoveries",
+        "stable_anchors_for_acceleration",
+        "allow_acceleration",
+        "require_final_anchor",
+    }
+    if not isinstance(policy, dict) or set(policy) != policy_fields:
+        raise ValueError("adaptive candidate policy fields do not match the protocol")
+    if policy["type"] != "adaptive_anchor":
+        raise ValueError("adaptive candidate policy type is unsupported")
+    predictor = document["predictor"]
+    if not isinstance(predictor, dict) or set(predictor) != {"type", "order", "coord"}:
+        raise ValueError("adaptive candidate predictor fields do not match the protocol")
+    if predictor["type"] != "taylorseer":
+        raise ValueError("adaptive candidate predictor type is unsupported")
+    config = AdaptiveAnchorConfig(
+        **{key: value for key, value in policy.items() if key != "type"}
+    )
+    return AdaptiveCandidateArm(
+        candidate_id=document["candidate_id"],
+        config=config,
+        order=predictor["order"],
+        coord=predictor["coord"],
+    )
+
+
 def select_candidate_arms(
     args: argparse.Namespace,
-) -> tuple[CandidateArm, ...]:
+) -> tuple[Any, ...]:
     """Resolve either one explicit ladder or the legacy Cartesian sweep."""
 
     candidate_ladder = getattr(args, "candidate_ladder", None)
@@ -334,21 +479,30 @@ def select_candidate_arms(
                 "--candidate-ladder cannot be combined with sweep or coordinate flags"
             )
         ladder = load_candidate_ladder(Path(candidate_ladder).expanduser().resolve())
-        return ladder.arms
+        arms: tuple[Any, ...] = ladder.arms
+    else:
+        warmup_steps = tuple(sweep_values[0] or DEFAULT_WARMUP_STEPS)
+        anchor_intervals = tuple(sweep_values[1] or DEFAULT_ANCHOR_INTERVALS)
+        orders = tuple(sweep_values[2] or DEFAULT_ORDERS)
+        coord = sweep_values[3] or "index"
+        arms = build_candidate_arms(
+            warmup_steps=warmup_steps,
+            anchor_intervals=anchor_intervals,
+            orders=orders,
+            anchor_phase=getattr(args, "anchor_phase", 1),
+            cooldown_steps=getattr(args, "cooldown_steps", 1),
+            require_final_anchor=True,
+            coord=coord,
+        )
 
-    warmup_steps = tuple(sweep_values[0] or DEFAULT_WARMUP_STEPS)
-    anchor_intervals = tuple(sweep_values[1] or DEFAULT_ANCHOR_INTERVALS)
-    orders = tuple(sweep_values[2] or DEFAULT_ORDERS)
-    coord = sweep_values[3] or "index"
-    arms = build_candidate_arms(
-        warmup_steps=warmup_steps,
-        anchor_intervals=anchor_intervals,
-        orders=orders,
-        anchor_phase=getattr(args, "anchor_phase", 1),
-        cooldown_steps=getattr(args, "cooldown_steps", 1),
-        require_final_anchor=True,
-        coord=coord,
-    )
+    adaptive_path = getattr(args, "adaptive_candidate", None)
+    if adaptive_path is not None:
+        arms = (*arms, load_adaptive_candidate(Path(adaptive_path).expanduser().resolve()))
+    candidate_ids = [arm.candidate_id for arm in arms]
+    if len(candidate_ids) != len(set(candidate_ids)):
+        raise ValueError("candidate selection contains duplicate identifiers")
+    if len({arm.coord for arm in arms}) != 1:
+        raise ValueError("all candidates must use one shared coordinate")
     return arms
 
 
@@ -906,6 +1060,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=1024)
     parser.add_argument("--guidance-scale", type=float, default=3.5)
     parser.add_argument("--candidate-ladder", default=None)
+    parser.add_argument("--adaptive-candidate", default=None)
     parser.add_argument("--warmup-steps", type=int, nargs="+", default=None)
     parser.add_argument("--anchor-intervals", type=int, nargs="+", default=None)
     parser.add_argument("--orders", type=int, nargs="+", default=None)

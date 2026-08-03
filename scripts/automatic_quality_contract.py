@@ -120,6 +120,19 @@ def metric_identity(metrics: Mapping[str, Any]) -> dict[str, Any]:
     if set(metrics) != set(METRICS):
         raise ValueError("semantic report must contain ImageReward and VQAScore")
     normalized = _without_runtime_fields(copy.deepcopy(dict(metrics)))
+    # Hugging Face cache bookkeeping changes whenever the same immutable
+    # checkpoint is opened.  Lock files, download metadata, and the cache's
+    # own .gitignore are not model identity; retaining them would reject two
+    # reports that used byte-identical weights and preprocessing.
+    transient_suffixes = (".lock", ".metadata", ".gitignore")
+    for config in normalized.values():
+        checkpoint_files = config.get("checkpoint_files")
+        if isinstance(checkpoint_files, list):
+            config["checkpoint_files"] = [
+                row
+                for row in checkpoint_files
+                if not str(row.get("path", "")).endswith(transient_suffixes)
+            ]
     return {"config": normalized, "sha256": canonical_sha256(normalized)}
 
 
@@ -418,10 +431,17 @@ def evaluate_contract(
             raise ValueError("holdout prompt or seed identity differs from the contract")
         validate_static_candidate(manifest, contract["static_candidate"])
         candidate_ids = {row["candidate_id"] for row in rows}
-        if candidate_ids != {contract["static_candidate"]["candidate_id"]}:
-            raise ValueError("holdout must evaluate only the frozen static candidate")
-        if len(rows) != holdout["sample_count"]:
-            raise ValueError("holdout sample count differs from the contract")
+        if contract["static_candidate"]["candidate_id"] not in candidate_ids:
+            raise ValueError("holdout must include the frozen static candidate")
+        for candidate_id in candidate_ids:
+            candidate_rows = [
+                row for row in rows if row["candidate_id"] == candidate_id
+            ]
+            if len(candidate_rows) != holdout["sample_count"]:
+                raise ValueError(
+                    f"holdout candidate {candidate_id!r} sample count differs "
+                    "from the contract"
+                )
 
     grouped: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for row in rows:

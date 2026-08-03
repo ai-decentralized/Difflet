@@ -1,0 +1,28 @@
+{
+  "schema": "difflet-flux-cache-adaptive-candidate",
+  "schema_revision": 1,
+  "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+  "policy": {
+    "type": "adaptive_anchor",
+    "initial_anchor_interval": 8,
+    "minimum_anchor_interval": 4,
+    "maximum_anchor_interval": 8,
+    "warmup_steps": 6,
+    "cooldown_steps": 1,
+    "anchor_phase": 1,
+    "tighten_error": 1.19,
+    "recovery_error": 1.5,
+    "acceleration_error": 0.75,
+    "recovery_steps": 2,
+    "disable_after_recoveries": 2,
+    "stable_anchors_for_acceleration": 2,
+    "allow_acceleration": false,
+    "require_final_anchor": true
+  },
+  "predictor": {
+    "type": "taylorseer",
+    "order": 1,
+    "coord": "index"
+  },
+  "sha256": "f1e71776ea593b491f496dd278040efdb35ca2f6a9fc04c057f8bcdbfdfea7cf"
+}

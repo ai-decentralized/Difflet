@@ -16,6 +16,8 @@ them, but they are never allowed to become interpolation anchors.
 """
 
 from difflet.pipeline.cache.policies import (
+    AdaptiveAnchorConfig,
+    AdaptiveAnchorPolicy,
     CadencePolicy,
     ExplicitMaskPolicy,
     PeriodicAnchorPolicy,
@@ -87,6 +89,8 @@ __all__ = [
     "Anchor",
     "AnchorEstimateStatus",
     "AnchorMeasurement",
+    "AdaptiveAnchorConfig",
+    "AdaptiveAnchorPolicy",
     "CacheAnchor",
     "CacheCompatibility",
     "CacheDecision",

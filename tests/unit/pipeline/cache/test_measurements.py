@@ -110,6 +110,32 @@ def test_enabling_measurements_preserves_decisions_outputs_history_and_stats():
     assert len(sink.anchor_measurements()) == sum(mask)
 
 
+def test_runner_produces_anchor_measurements_for_a_controlling_policy_without_a_sink():
+    class MeasuringPolicy:
+        def __init__(self):
+            self.measurements = []
+
+        def should_skip(self, context, history, observation):
+            del context, history, observation
+            return False
+
+        def observe_anchor_measurement(self, measurement):
+            self.measurements.append(measurement)
+
+        def reset(self):
+            self.measurements.clear()
+
+    policy = MeasuringPolicy()
+    runner = CacheRunner(policy, TaylorSeerPredictor(order=1))
+    for step_index in range(3):
+        context = _context(step_index, 3)
+        assert runner.decide(context).should_compute
+        runner.record_anchor(context, torch.tensor([float(step_index)]))
+
+    assert [row.step_index for row in policy.measurements] == [0, 1, 2]
+    assert policy.measurements[-1].estimate_status == "measured"
+
+
 def test_prediction_configuration_error_is_recorded_without_losing_anchor():
     class InvalidPredictor:
         required_history = 1

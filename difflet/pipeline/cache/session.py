@@ -299,6 +299,9 @@ class CacheSession:
         recovery_statistics = getattr(self.runner.recovery, "stats", None)
         if callable(recovery_statistics):
             statistics.update(recovery_statistics())
+        policy_statistics = getattr(self.runner.policy, "stats", None)
+        if callable(policy_statistics):
+            statistics.update(policy_statistics())
         if self._planned_anchor_steps is not None:
             statistics["planned_anchor_steps"] = int(self._planned_anchor_steps)
         if self._planned_estimate_steps is not None:
