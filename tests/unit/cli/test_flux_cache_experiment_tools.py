@@ -94,6 +94,33 @@ def test_boundary_pilot_ladder_has_four_explicit_paired_arms():
     ] == [26, 31, 37, 41]
 
 
+def test_boundary_refinement_ladder_fills_each_missing_skip_count():
+    ladder_path = (
+        Path(__file__).resolve().parents[3]
+        / "benchmark"
+        / "flux_cache"
+        / "boundary-refinement-candidates.json"
+    )
+
+    ladder = load_candidate_ladder(ladder_path)
+
+    assert [
+        (arm.warmup_steps, arm.anchor_interval, arm.order, arm.coord)
+        for arm in ladder.arms
+    ] == [
+        (6, 9, 1, "index"),
+        (5, 10, 1, "index"),
+        (5, 11, 1, "index"),
+    ]
+    assert [
+        arm.build_pipeline_adapter(50).stats()["planned_skip_steps"]
+        for arm in ladder.arms
+    ] == [38, 39, 40]
+    assert ladder.content_sha256 == (
+        "042ab01ca50d44f9c1308ab797bdf15ca7c2603ef7d316c0f252c6c3cc84be05"
+    )
+
+
 def test_candidate_ladder_cli_selection_does_not_form_cartesian_product():
     ladder_path = (
         Path(__file__).resolve().parents[3]

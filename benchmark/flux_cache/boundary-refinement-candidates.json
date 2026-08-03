@@ -1,0 +1,38 @@
+{
+  "schema": "difflet-flux-cache-candidate-ladder",
+  "schema_revision": 1,
+  "ladder_id": "flux-taylorseer-boundary-refinement-2026-08-03",
+  "candidates": [
+    {
+      "label": "boundary-38-skips",
+      "warmup_steps": 6,
+      "anchor_interval": 9,
+      "order": 1,
+      "anchor_phase": 1,
+      "cooldown_steps": 1,
+      "require_final_anchor": true,
+      "coord": "index"
+    },
+    {
+      "label": "boundary-39-skips",
+      "warmup_steps": 5,
+      "anchor_interval": 10,
+      "order": 1,
+      "anchor_phase": 1,
+      "cooldown_steps": 1,
+      "require_final_anchor": true,
+      "coord": "index"
+    },
+    {
+      "label": "boundary-40-skips",
+      "warmup_steps": 5,
+      "anchor_interval": 11,
+      "order": 1,
+      "anchor_phase": 1,
+      "cooldown_steps": 1,
+      "require_final_anchor": true,
+      "coord": "index"
+    }
+  ],
+  "sha256": "042ab01ca50d44f9c1308ab797bdf15ca7c2603ef7d316c0f252c6c3cc84be05"
+}
