@@ -148,19 +148,6 @@ class CandidateLadder:
     content_sha256: str
     file_sha256: str
 
-    def descriptor(self) -> dict[str, Any]:
-        """Return the immutable provenance stored in experiment manifests."""
-
-        return {
-            "kind": "explicit_ladder",
-            "ladder_id": self.ladder_id,
-            "source_name": self.source_path.name,
-            "content_sha256": self.content_sha256,
-            "file_sha256": self.file_sha256,
-            "labels_in_order": list(self.labels),
-            "candidate_ids_in_order": [arm.candidate_id for arm in self.arms],
-        }
-
 
 def build_candidate_arms(
     *,
@@ -331,7 +318,7 @@ def load_candidate_ladder(path: Path) -> CandidateLadder:
 
 def select_candidate_arms(
     args: argparse.Namespace,
-) -> tuple[tuple[CandidateArm, ...], dict[str, Any]]:
+) -> tuple[CandidateArm, ...]:
     """Resolve either one explicit ladder or the legacy Cartesian sweep."""
 
     candidate_ladder = getattr(args, "candidate_ladder", None)
@@ -347,7 +334,7 @@ def select_candidate_arms(
                 "--candidate-ladder cannot be combined with sweep or coordinate flags"
             )
         ladder = load_candidate_ladder(Path(candidate_ladder).expanduser().resolve())
-        return ladder.arms, ladder.descriptor()
+        return ladder.arms
 
     warmup_steps = tuple(sweep_values[0] or DEFAULT_WARMUP_STEPS)
     anchor_intervals = tuple(sweep_values[1] or DEFAULT_ANCHOR_INTERVALS)
@@ -362,17 +349,7 @@ def select_candidate_arms(
         require_final_anchor=True,
         coord=coord,
     )
-    return arms, {
-        "kind": "cartesian_sweep",
-        "warmup_steps": list(warmup_steps),
-        "anchor_intervals": list(anchor_intervals),
-        "orders": list(orders),
-        "anchor_phase": getattr(args, "anchor_phase", 1),
-        "cooldown_steps": getattr(args, "cooldown_steps", 1),
-        "require_final_anchor": True,
-        "coord": coord,
-        "candidate_ids_in_order": [arm.candidate_id for arm in arms],
-    }
+    return arms
 
 
 def _load_prompts(path: Path | None, inline: Sequence[str] | None) -> tuple[str, ...]:
@@ -773,7 +750,7 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
     prompts = prompt_selection.prompts
     seeds = tuple(DEFAULT_SEEDS if args.seed is None else args.seed)
     samples = _sample_matrix(prompts, seeds)
-    arms, candidate_selection = select_candidate_arms(args)
+    arms = select_candidate_arms(args)
     for arm in arms:
         arm.build_pipeline_adapter(num_steps)
 
@@ -894,7 +871,6 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
         "seed_count": len(seeds),
         "sample_count": len(samples),
         "protocol": protocol,
-        "candidate_selection": candidate_selection,
     }
     quality, speedup = build_manifests(
         identity=identity,

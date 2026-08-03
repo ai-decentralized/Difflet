@@ -89,9 +89,6 @@ def test_boundary_pilot_ladder_has_four_explicit_paired_arms():
         "aggressive",
         "deliberate-boundary",
     )
-    assert ladder.descriptor()["candidate_ids_in_order"] == [
-        arm.candidate_id for arm in arms
-    ]
     assert [
         arm.build_pipeline_adapter(50).stats()["planned_skip_steps"] for arm in arms
     ] == [26, 31, 37, 41]
@@ -105,7 +102,7 @@ def test_candidate_ladder_cli_selection_does_not_form_cartesian_product():
         / "boundary-pilot-candidates.json"
     )
 
-    arms, descriptor = select_candidate_arms(
+    arms = select_candidate_arms(
         SimpleNamespace(
             candidate_ladder=str(ladder_path),
             warmup_steps=None,
@@ -116,8 +113,8 @@ def test_candidate_ladder_cli_selection_does_not_form_cartesian_product():
     )
 
     assert len(arms) == 4
-    assert descriptor["kind"] == "explicit_ladder"
-    assert descriptor["content_sha256"] == (
+    ladder = load_candidate_ladder(ladder_path)
+    assert ladder.content_sha256 == (
         "814e04ca2de7d1855a9dc1134cbe01ff2e70e10dbbd09fd18878901b87c4f8f1"
     )
 
