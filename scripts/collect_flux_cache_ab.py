@@ -172,6 +172,7 @@ class AdaptiveCandidateArm:
             "recovery_steps": self.config.recovery_steps,
             "disable_after_recoveries": self.config.disable_after_recoveries,
             "stable_anchors_for_acceleration": (self.config.stable_anchors_for_acceleration),
+            "acceleration_start_progress": self.config.acceleration_start_progress,
             "allow_acceleration": self.config.allow_acceleration,
             "require_final_anchor": self.config.require_final_anchor,
         }
@@ -418,7 +419,7 @@ def load_adaptive_candidate(path: Path) -> AdaptiveCandidateArm:
     if document["sha256"] != canonical_sha256(payload):
         raise ValueError("adaptive candidate sha256 does not match its contents")
     policy = document["policy"]
-    policy_fields = {
+    required_policy_fields = {
         "type",
         "initial_anchor_interval",
         "minimum_anchor_interval",
@@ -435,7 +436,12 @@ def load_adaptive_candidate(path: Path) -> AdaptiveCandidateArm:
         "allow_acceleration",
         "require_final_anchor",
     }
-    if not isinstance(policy, dict) or set(policy) != policy_fields:
+    optional_policy_fields = {"acceleration_start_progress"}
+    if (
+        not isinstance(policy, dict)
+        or not required_policy_fields <= set(policy)
+        or set(policy) - required_policy_fields - optional_policy_fields
+    ):
         raise ValueError("adaptive candidate policy fields do not match the protocol")
     if policy["type"] != "adaptive_anchor":
         raise ValueError("adaptive candidate policy type is unsupported")

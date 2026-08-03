@@ -48,6 +48,7 @@ def _adaptive_config(**overrides) -> AdaptiveAnchorConfig:
         "recovery_steps": 2,
         "disable_after_recoveries": 2,
         "stable_anchors_for_acceleration": 2,
+        "acceleration_start_progress": 0.0,
         "allow_acceleration": False,
         "require_final_anchor": True,
     }
@@ -180,9 +181,32 @@ def test_adaptive_anchor_policy_oil_branch_is_explicitly_gated():
     assert enabled.stats()["adaptive_accelerations"] == 1
 
 
+def test_adaptive_anchor_policy_holds_acceleration_until_frozen_progress():
+    policy = AdaptiveAnchorPolicy(
+        _adaptive_config(
+            allow_acceleration=True,
+            acceleration_start_progress=0.5,
+        )
+    )
+
+    policy.observe_anchor_measurement(_anchor_measurement(2, error=0.1))
+    policy.observe_anchor_measurement(_anchor_measurement(3, error=0.1))
+    assert policy.current_anchor_interval == 8
+
+    policy.observe_anchor_measurement(_anchor_measurement(10, error=0.1))
+    assert policy.current_anchor_interval == 9
+    assert policy.stats()["adaptive_accelerations"] == 1
+
+
 def test_adaptive_anchor_config_rejects_overlapping_thresholds():
     with pytest.raises(ValueError, match="acceleration < tighten < recovery"):
         _adaptive_config(tighten_error=1.0, recovery_error=0.5)
+
+
+@pytest.mark.parametrize("progress", [-0.1, 1.0, True])
+def test_adaptive_anchor_config_rejects_invalid_acceleration_progress(progress):
+    with pytest.raises(ValueError, match="acceleration_start_progress"):
+        _adaptive_config(acceleration_start_progress=progress)
 
 
 def test_cadence_and_explicit_mask_are_schedule_only():

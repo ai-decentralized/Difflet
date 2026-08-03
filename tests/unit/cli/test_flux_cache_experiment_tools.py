@@ -222,6 +222,22 @@ def test_wider_oil_sweep_changes_only_registered_risk_bounds():
     assert all(arm.config.initial_anchor_interval == 8 for arm in arms)
     assert all(arm.config.maximum_anchor_interval == 12 for arm in arms)
     assert all(arm.config.stable_anchors_for_acceleration == 2 for arm in arms)
+    assert all(arm.config.acceleration_start_progress == 0.0 for arm in arms)
+
+
+def test_stage_gated_oil_candidate_freezes_acceleration_progress():
+    root = Path(__file__).resolve().parents[3]
+    arm = load_adaptive_candidate(
+        root
+        / "benchmark"
+        / "flux_cache"
+        / "adaptive-stage-oil-p30-e1p40-k12-candidate.json"
+    )
+
+    assert arm.config.acceleration_start_progress == pytest.approx(0.3)
+    assert arm.config.initial_anchor_interval == 8
+    assert arm.config.maximum_anchor_interval == 12
+    assert arm.policy_spec()["acceleration_start_progress"] == pytest.approx(0.3)
 
 
 def test_adaptive_only_selection_avoids_an_unneeded_static_arm():

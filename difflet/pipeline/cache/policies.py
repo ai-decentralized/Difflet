@@ -48,6 +48,7 @@ class AdaptiveAnchorConfig:
     recovery_steps: int
     disable_after_recoveries: int
     stable_anchors_for_acceleration: int = 2
+    acceleration_start_progress: float = 0.0
     allow_acceleration: bool = False
     require_final_anchor: bool = True
 
@@ -97,6 +98,12 @@ class AdaptiveAnchorConfig:
             "stable_anchors_for_acceleration",
             minimum=1,
         )
+        acceleration_start = _finite_nonnegative(
+            self.acceleration_start_progress,
+            "acceleration_start_progress",
+        )
+        if acceleration_start >= 1.0:
+            raise ValueError("acceleration_start_progress must be lower than 1")
         if type(self.allow_acceleration) is not bool:
             raise ValueError("allow_acceleration must be a boolean")
         if type(self.require_final_anchor) is not bool:
@@ -211,7 +218,10 @@ class AdaptiveAnchorPolicy:
             and error < self.config.acceleration_error
         ):
             self._stable_anchor_count += 1
+            progress = step_index / max(num_steps - 1, 1)
             if (
+                progress >= self.config.acceleration_start_progress
+                and
                 self._stable_anchor_count
                 >= self.config.stable_anchors_for_acceleration
                 and self._current_interval < self.config.maximum_anchor_interval
