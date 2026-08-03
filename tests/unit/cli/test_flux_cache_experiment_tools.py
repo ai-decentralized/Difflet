@@ -205,6 +205,24 @@ def test_repeated_adaptive_candidates_form_one_paired_oil_sweep():
     assert all(arm.config.maximum_anchor_interval == 10 for arm in arms[1:])
 
 
+def test_wider_oil_sweep_changes_only_registered_risk_bounds():
+    root = Path(__file__).resolve().parents[3]
+    adaptive_paths = [
+        root / "benchmark" / "flux_cache" / "adaptive-oil-e1p40-k12-candidate.json",
+        root / "benchmark" / "flux_cache" / "adaptive-oil-e1p60-k12-candidate.json",
+        root / "benchmark" / "flux_cache" / "adaptive-oil-e1p80-k12-candidate.json",
+    ]
+
+    arms = [load_adaptive_candidate(path) for path in adaptive_paths]
+
+    assert [arm.config.tighten_error for arm in arms] == [1.4, 1.6, 1.8]
+    assert [arm.config.acceleration_error for arm in arms] == [0.7, 0.8, 0.9]
+    assert [arm.config.recovery_error for arm in arms] == [1.75, 2.0, 2.25]
+    assert all(arm.config.initial_anchor_interval == 8 for arm in arms)
+    assert all(arm.config.maximum_anchor_interval == 12 for arm in arms)
+    assert all(arm.config.stable_anchors_for_acceleration == 2 for arm in arms)
+
+
 def test_candidate_ladder_rejects_sweep_overrides():
     with pytest.raises(ValueError, match="cannot be combined"):
         select_candidate_arms(
