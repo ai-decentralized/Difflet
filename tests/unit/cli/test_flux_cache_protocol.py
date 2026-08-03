@@ -138,6 +138,10 @@ def test_versioned_prompt_splits_have_stable_digests_and_are_disjoint():
             32,
             "2c52ee4b0f5ff469c40db4b1b89ea259f6d5da66dcbeee2ebdd8d09a9655239a",
         ),
+        "adaptive_profile_holdout": (
+            32,
+            "17a59b3fdd0bf3c0dfcce3e6bd07edfea168a9720b2decca91a11469491a086a",
+        ),
     }
     selections = {split: load_prompt_suite(DEFAULT_PROMPT_SUITE_PATH, split) for split in expected}
 

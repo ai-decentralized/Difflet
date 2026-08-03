@@ -467,13 +467,21 @@ def select_candidate_arms(
     """Resolve either one explicit ladder or the legacy Cartesian sweep."""
 
     candidate_ladder = getattr(args, "candidate_ladder", None)
+    adaptive_only = bool(getattr(args, "adaptive_only", False))
     sweep_values = (
         getattr(args, "warmup_steps", None),
         getattr(args, "anchor_intervals", None),
         getattr(args, "orders", None),
         getattr(args, "coord", None),
     )
-    if candidate_ladder is not None:
+    if adaptive_only:
+        if candidate_ladder is not None or any(value is not None for value in sweep_values):
+            raise ValueError(
+                "--adaptive-only cannot be combined with a static ladder, "
+                "sweep, or coordinate flags"
+            )
+        arms: tuple[Any, ...] = ()
+    elif candidate_ladder is not None:
         if any(value is not None for value in sweep_values):
             raise ValueError(
                 "--candidate-ladder cannot be combined with sweep or coordinate flags"
@@ -503,6 +511,8 @@ def select_candidate_arms(
             *arms,
             load_adaptive_candidate(Path(adaptive_path).expanduser().resolve()),
         )
+    if not arms:
+        raise ValueError("candidate selection is empty")
     candidate_ids = [arm.candidate_id for arm in arms]
     if len(candidate_ids) != len(set(candidate_ids)):
         raise ValueError("candidate selection contains duplicate identifiers")
@@ -1072,6 +1082,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "append one strict adaptive candidate to the static candidate set; "
             "repeat the flag to compare several adaptive settings in one paired run"
+        ),
+    )
+    parser.add_argument(
+        "--adaptive-only",
+        action="store_true",
+        help=(
+            "collect the baseline and explicitly supplied adaptive candidates "
+            "without adding a static ladder or Cartesian sweep"
         ),
     )
     parser.add_argument("--warmup-steps", type=int, nargs="+", default=None)

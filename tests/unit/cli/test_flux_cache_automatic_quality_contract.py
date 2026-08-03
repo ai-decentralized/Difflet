@@ -12,10 +12,12 @@ from scripts.automatic_quality_contract import (
     calibrate_contract,
     clopper_pearson_upper,
     evaluate_contract,
+    evaluate_profile_holdout,
+    load_profile_holdout_registration,
     load_protocol,
     metric_identity,
 )
-from scripts.collect_flux_cache_ab import load_candidate_ladder
+from scripts.collect_flux_cache_ab import load_adaptive_candidate, load_candidate_ladder
 from scripts.flux_cache_protocol import (
     DEFAULT_PROMPT_SUITE_PATH,
     canonical_sha256,
@@ -243,6 +245,112 @@ def test_zero_of_32_has_below_ten_percent_one_sided_upper_bound():
     assert upper == pytest.approx(1.0 - 0.05 ** (1.0 / 32.0))
     assert upper < 0.1
     assert clopper_pearson_upper(1, 32, 0.95) > 0.1
+
+
+def test_registered_adaptive_profile_holdout_binds_one_candidate(tmp_path):
+    protocol = load_protocol(PROTOCOL_PATH)
+    selection = load_prompt_suite(DEFAULT_PROMPT_SUITE_PATH, "adaptive_profile_holdout")
+    candidate_path = (
+        ROOT
+        / "benchmark"
+        / "flux_cache"
+        / "adaptive-oil-e1p40-k12-candidate.json"
+    )
+    candidate_document = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate = load_adaptive_candidate(candidate_path)
+    manifest = _experiment_manifest(selection, [0])
+    manifest["candidates"] = [
+        {
+            "candidate_id": candidate.candidate_id,
+            "policy": candidate.policy_spec(),
+            "predictor": candidate.predictor_spec(),
+        }
+    ]
+    manifest_path = tmp_path / "quality.json"
+    _write_json(manifest_path, manifest)
+    comparisons = [
+        {
+            "candidate_id": candidate.candidate_id,
+            "sample_id": f"p{index:03d}-s0",
+            "prompt_index": index,
+            "seed": 0,
+            "prompt": prompt,
+            "candidate_minus_baseline": {
+                "image_reward": 0.0,
+                "vqa_score": 0.0,
+            },
+        }
+        for index, prompt in enumerate(selection.prompts)
+    ]
+    report_path = tmp_path / "semantic.json"
+    _write_json(
+        report_path,
+        _semantic_report(
+            manifest_path,
+            split="adaptive_profile_holdout",
+            images=[],
+            comparisons=comparisons,
+        ),
+    )
+    contract_payload = {
+        "schema": CONTRACT_SCHEMA,
+        "schema_revision": SCHEMA_REVISION,
+        "controlled_generation": protocol["controlled_generation"],
+        "metric_identity": metric_identity(_metric_config()),
+        "margins": {"image_reward": 0.1, "vqa_score": 0.1},
+        "holdout": protocol["holdout"],
+    }
+    contract = {
+        **contract_payload,
+        "sha256": canonical_sha256(contract_payload),
+    }
+    contract_path = tmp_path / "contract.json"
+    _write_json(contract_path, contract)
+    registration_payload = {
+        "schema": "difflet-flux-cache-profile-holdout-registration",
+        "schema_revision": 1,
+        "study_id": "unit-test",
+        "quality_contract": {"content_sha256": contract["sha256"]},
+        "prompt_suite": {
+            "path": "benchmark/flux_cache/prompt-suite-v1.json",
+            "split": "adaptive_profile_holdout",
+            "split_sha256": selection.descriptor["sha256"],
+            "prompt_count": 32,
+            "seeds": [0],
+            "sample_count": 32,
+        },
+        "candidate": {
+            "path": "benchmark/flux_cache/adaptive-oil-e1p40-k12-candidate.json",
+            "file_sha256": _sha256(candidate_path),
+            "content_sha256": candidate_document["sha256"],
+            "candidate_id": candidate.candidate_id,
+        },
+        "statistical_gate": {
+            "confidence": 0.95,
+            "maximum_failure_rate_upper_bound": 0.1,
+            "required_failures": 0,
+        },
+        "parameters_frozen_before_collection": True,
+    }
+    registration = {
+        **registration_payload,
+        "sha256": canonical_sha256(registration_payload),
+    }
+    registration_path = tmp_path / "registration.json"
+    _write_json(registration_path, registration)
+
+    loaded = load_profile_holdout_registration(registration_path)
+    evaluation = evaluate_profile_holdout(
+        registration_path,
+        contract_path,
+        report_path,
+    )
+
+    assert loaded["sha256"] == registration["sha256"]
+    assert evaluation["registered_profile_holdout"] is True
+    assert evaluation["passes_registered_holdout"] is True
+    assert evaluation["candidate_summary"]["failure_count"] == 0
+    assert evaluation["candidate_summary"]["failure_rate_upper_bound"] < 0.1
 
 
 def test_metric_identity_ignores_transient_cache_bookkeeping():

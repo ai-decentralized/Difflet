@@ -11,27 +11,40 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.automatic_quality_contract import evaluate_contract, write_json
+from scripts.automatic_quality_contract import (
+    evaluate_contract,
+    evaluate_profile_holdout,
+    write_json,
+)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--contract", required=True)
     parser.add_argument("--semantic-report", required=True)
+    parser.add_argument("--profile-holdout-registration", default=None)
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
     out = Path(args.out).expanduser().resolve()
     if out.exists():
         parser.error(f"output already exists: {out}")
     try:
-        document = evaluate_contract(
-            Path(args.contract).expanduser().resolve(),
-            Path(args.semantic_report).expanduser().resolve(),
-        )
+        contract_path = Path(args.contract).expanduser().resolve()
+        semantic_path = Path(args.semantic_report).expanduser().resolve()
+        if args.profile_holdout_registration is None:
+            document = evaluate_contract(contract_path, semantic_path)
+            summaries = document["candidate_summaries"]
+        else:
+            document = evaluate_profile_holdout(
+                Path(args.profile_holdout_registration).expanduser().resolve(),
+                contract_path,
+                semantic_path,
+            )
+            summaries = [document["candidate_summary"]]
         write_json(out, document)
     except (OSError, RuntimeError, ValueError) as error:
         parser.error(str(error))
-    for row in document["candidate_summaries"]:
+    for row in summaries:
         print(
             "[automatic-quality] "
             f"{row['candidate_id']} failures={row['failure_count']}/{row['sample_count']} "

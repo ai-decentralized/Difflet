@@ -223,6 +223,47 @@ def test_wider_oil_sweep_changes_only_registered_risk_bounds():
     assert all(arm.config.stable_anchors_for_acceleration == 2 for arm in arms)
 
 
+def test_adaptive_only_selection_avoids_an_unneeded_static_arm():
+    root = Path(__file__).resolve().parents[3]
+    selected = select_candidate_arms(
+        SimpleNamespace(
+            adaptive_only=True,
+            adaptive_candidate=[
+                str(
+                    root
+                    / "benchmark"
+                    / "flux_cache"
+                    / "adaptive-oil-e1p40-k12-candidate.json"
+                )
+            ],
+            candidate_ladder=None,
+            warmup_steps=None,
+            anchor_intervals=None,
+            orders=None,
+            coord=None,
+        )
+    )
+
+    assert [arm.candidate_id for arm in selected] == [
+        "adaptive-oil-e1p40-w6-i8-k12-o1-index"
+    ]
+
+
+def test_adaptive_only_requires_an_explicit_adaptive_candidate():
+    with pytest.raises(ValueError, match="candidate selection is empty"):
+        select_candidate_arms(
+            SimpleNamespace(
+                adaptive_only=True,
+                adaptive_candidate=None,
+                candidate_ladder=None,
+                warmup_steps=None,
+                anchor_intervals=None,
+                orders=None,
+                coord=None,
+            )
+        )
+
+
 def test_candidate_ladder_rejects_sweep_overrides():
     with pytest.raises(ValueError, match="cannot be combined"):
         select_candidate_arms(

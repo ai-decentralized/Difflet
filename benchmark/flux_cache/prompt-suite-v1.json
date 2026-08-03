@@ -429,6 +429,168 @@
         "prompt_id": "profile-holdout-honey-pancakes",
         "text": "honey pouring from a glass spoon onto a stack of pancakes topped with blueberries"
       }
+    ],
+    "adaptive_profile_holdout": [
+      {
+        "category": "craft-pattern-fine-detail",
+        "prompt_id": "adaptive-holdout-mosaic-tiles",
+        "text": "a ceramic artist arranging turquoise and white mosaic tiles around a circular mirror"
+      },
+      {
+        "category": "animal-mountain-weather",
+        "prompt_id": "adaptive-holdout-snow-leopard",
+        "text": "a snow leopard walking along a narrow rocky ledge while wind lifts fresh powder"
+      },
+      {
+        "category": "human-vehicle-motion",
+        "prompt_id": "adaptive-holdout-cyclist-leaves",
+        "text": "a cyclist in a blue jacket racing through an autumn forest as orange leaves scatter"
+      },
+      {
+        "category": "food-counting-color",
+        "prompt_id": "adaptive-holdout-macarons",
+        "text": "six macarons arranged on a marble tray, alternating pink, green, and yellow"
+      },
+      {
+        "category": "science-night-structure",
+        "prompt_id": "adaptive-holdout-observatory",
+        "text": "an astronomer opening a white observatory dome beneath a dense field of stars"
+      },
+      {
+        "category": "human-water-fine-detail",
+        "prompt_id": "adaptive-holdout-fishing-net",
+        "text": "a fisherman repairing a green net beside wooden boats in the early morning fog"
+      },
+      {
+        "category": "robot-plant-interior",
+        "prompt_id": "adaptive-holdout-greenhouse-robot",
+        "text": "a small orange robot watering tomato plants inside a glass greenhouse"
+      },
+      {
+        "category": "human-dance-motion",
+        "prompt_id": "adaptive-holdout-red-scarf-dancer",
+        "text": "a dancer spinning across a dark stage with a long red scarf forming a wide arc"
+      },
+      {
+        "category": "transparent-object-macro",
+        "prompt_id": "adaptive-holdout-lemon-ice",
+        "text": "ice cubes and thin lemon slices floating in a clear glass under sharp afternoon light"
+      },
+      {
+        "category": "vehicle-desert-night",
+        "prompt_id": "adaptive-holdout-motorcycle-station",
+        "text": "a vintage motorcycle parked beside an illuminated desert gas station after sunset"
+      },
+      {
+        "category": "human-map-interior",
+        "prompt_id": "adaptive-holdout-librarian-map",
+        "text": "a librarian unfolding a large antique map across a table beneath a green reading lamp"
+      },
+      {
+        "category": "underwater-animal-dense",
+        "prompt_id": "adaptive-holdout-turtle-coral",
+        "text": "a sea turtle swimming above a dense coral reef filled with small silver fish"
+      },
+      {
+        "category": "craft-music-fine-detail",
+        "prompt_id": "adaptive-holdout-luthier",
+        "text": "a luthier carving the curved bridge of a cello at a bench covered with wood shavings"
+      },
+      {
+        "category": "urban-reflection-weather",
+        "prompt_id": "adaptive-holdout-puddle-neon",
+        "text": "colorful shop signs reflected in a deep rain puddle as pedestrians cross the street"
+      },
+      {
+        "category": "space-structure-landscape",
+        "prompt_id": "adaptive-holdout-radio-array",
+        "text": "three radio telescopes pointed toward the Milky Way on a high desert plateau"
+      },
+      {
+        "category": "child-object-motion",
+        "prompt_id": "adaptive-holdout-paper-airplanes",
+        "text": "two children launching paper airplanes from opposite ends of a bright classroom"
+      },
+      {
+        "category": "craft-fire-transparent",
+        "prompt_id": "adaptive-holdout-glassblower",
+        "text": "a glassblower shaping a glowing orange vessel at the end of a long metal pipe"
+      },
+      {
+        "category": "food-human-dense",
+        "prompt_id": "adaptive-holdout-apple-crates",
+        "text": "a farmer sorting red and green apples into wooden crates at a crowded market stall"
+      },
+      {
+        "category": "animal-water-fast-motion",
+        "prompt_id": "adaptive-holdout-kingfisher",
+        "text": "a kingfisher emerging from a stream with a tiny fish and droplets frozen in the air"
+      },
+      {
+        "category": "architecture-vehicle-weather",
+        "prompt_id": "adaptive-holdout-bus-suspension-bridge",
+        "text": "a yellow bus crossing a narrow suspension bridge above a mist-filled gorge"
+      },
+      {
+        "category": "underwater-human-structure",
+        "prompt_id": "adaptive-holdout-diver-shipwreck",
+        "text": "a scuba diver shining a light through the broken window of a coral-covered shipwreck"
+      },
+      {
+        "category": "food-urban-motion",
+        "prompt_id": "adaptive-holdout-noodle-vendor",
+        "text": "a street vendor lifting noodles from a steaming pot beneath red paper lanterns"
+      },
+      {
+        "category": "hands-textile-pattern",
+        "prompt_id": "adaptive-holdout-embroidered-bird",
+        "text": "hands stitching a blue bird and yellow flowers onto dark fabric with a wooden hoop"
+      },
+      {
+        "category": "human-sport-snow",
+        "prompt_id": "adaptive-holdout-snowboarder",
+        "text": "a snowboarder carving a sharp turn down a steep slope as powder sprays behind"
+      },
+      {
+        "category": "animal-surreal-interior",
+        "prompt_id": "adaptive-holdout-raccoon-laundromat",
+        "text": "a raccoon sitting inside a quiet laundromat beside rows of round silver doors"
+      },
+      {
+        "category": "energy-aerial-pattern",
+        "prompt_id": "adaptive-holdout-solar-panels",
+        "text": "rows of blue solar panels forming geometric patterns across a pale desert plain"
+      },
+      {
+        "category": "human-music-fast-motion",
+        "prompt_id": "adaptive-holdout-drummer",
+        "text": "a drummer striking cymbals during an outdoor concert as stage lights cut through smoke"
+      },
+      {
+        "category": "multi-object-spatial",
+        "prompt_id": "adaptive-holdout-lantern-books-plant",
+        "text": "a brass lantern between two stacked books with a small fern positioned behind them"
+      },
+      {
+        "category": "food-architecture-night",
+        "prompt_id": "adaptive-holdout-bakery-window",
+        "text": "fresh bread cooling behind a fogged bakery window on a quiet street before dawn"
+      },
+      {
+        "category": "animal-water-scale",
+        "prompt_id": "adaptive-holdout-whale-kayak",
+        "text": "a humpback whale surfacing beside a tiny orange kayak on calm open water"
+      },
+      {
+        "category": "miniature-dense-landscape",
+        "prompt_id": "adaptive-holdout-model-railway",
+        "text": "a detailed miniature railway winding past a station, a tunnel, and snow-covered houses"
+      },
+      {
+        "category": "weather-landscape-lighting",
+        "prompt_id": "adaptive-holdout-lightning-windmill",
+        "text": "a wooden windmill standing in a wheat field while forked lightning illuminates distant clouds"
+      }
     ]
   }
 }

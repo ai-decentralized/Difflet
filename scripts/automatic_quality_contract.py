@@ -18,8 +18,13 @@ from scripts.flux_cache_protocol import canonical_sha256
 PROTOCOL_SCHEMA = "difflet-flux-cache-automatic-quality-contract-protocol"
 CONTRACT_SCHEMA = "difflet-flux-cache-automatic-quality-contract"
 EVALUATION_SCHEMA = "difflet-flux-cache-automatic-quality-evaluation"
+PROFILE_HOLDOUT_REGISTRATION_SCHEMA = (
+    "difflet-flux-cache-profile-holdout-registration"
+)
+PROFILE_HOLDOUT_EVALUATION_SCHEMA = "difflet-flux-cache-profile-holdout-evaluation"
 SCHEMA_REVISION = 1
 METRICS = ("image_reward", "vqa_score")
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def sha256_file(path: Path) -> str:
@@ -359,6 +364,95 @@ def load_contract(path: Path) -> dict[str, Any]:
     return document
 
 
+def load_profile_holdout_registration(path: Path) -> dict[str, Any]:
+    """Load the frozen candidate/prompt binding for one adaptive holdout."""
+
+    document = load_json(path, "profile holdout registration")
+    expected = {
+        "schema",
+        "schema_revision",
+        "study_id",
+        "quality_contract",
+        "prompt_suite",
+        "candidate",
+        "statistical_gate",
+        "parameters_frozen_before_collection",
+        "sha256",
+    }
+    if set(document) != expected:
+        raise ValueError("profile holdout registration fields do not match the protocol")
+    if (
+        document["schema"] != PROFILE_HOLDOUT_REGISTRATION_SCHEMA
+        or document["schema_revision"] != SCHEMA_REVISION
+    ):
+        raise ValueError("profile holdout registration schema is unsupported")
+    _validate_digest(document, "profile holdout registration")
+    if document["parameters_frozen_before_collection"] is not True:
+        raise ValueError("profile holdout parameters were not frozen before collection")
+    if set(document["quality_contract"]) != {"content_sha256"}:
+        raise ValueError("profile holdout quality-contract binding is invalid")
+    prompt_suite = document["prompt_suite"]
+    if set(prompt_suite) != {
+        "path",
+        "split",
+        "split_sha256",
+        "prompt_count",
+        "seeds",
+        "sample_count",
+    }:
+        raise ValueError("profile holdout prompt-suite binding is invalid")
+    candidate = document["candidate"]
+    if set(candidate) != {
+        "path",
+        "file_sha256",
+        "content_sha256",
+        "candidate_id",
+    }:
+        raise ValueError("profile holdout candidate binding is invalid")
+    gate = document["statistical_gate"]
+    if set(gate) != {
+        "confidence",
+        "maximum_failure_rate_upper_bound",
+        "required_failures",
+    }:
+        raise ValueError("profile holdout statistical gate is invalid")
+    if (
+        int(prompt_suite["prompt_count"]) <= 0
+        or int(prompt_suite["sample_count"]) <= 0
+        or not isinstance(prompt_suite["seeds"], list)
+        or not prompt_suite["seeds"]
+    ):
+        raise ValueError("profile holdout prompt counts or seeds are invalid")
+    if int(prompt_suite["sample_count"]) != int(prompt_suite["prompt_count"]) * len(
+        prompt_suite["seeds"]
+    ):
+        raise ValueError("profile holdout sample count is inconsistent")
+    confidence = float(gate["confidence"])
+    target = float(gate["maximum_failure_rate_upper_bound"])
+    failures = gate["required_failures"]
+    if (
+        not 0.0 < confidence < 1.0
+        or not 0.0 < target < 1.0
+        or isinstance(failures, bool)
+        or not isinstance(failures, int)
+        or failures < 0
+    ):
+        raise ValueError("profile holdout statistical values are invalid")
+    return document
+
+
+def _repository_artifact(relative_path: str, name: str) -> Path:
+    path = Path(relative_path)
+    if path.is_absolute():
+        raise ValueError(f"{name} path must be repository-relative")
+    resolved = (ROOT / path).resolve()
+    if not resolved.is_relative_to(ROOT):
+        raise ValueError(f"{name} path escapes the repository")
+    if not resolved.is_file():
+        raise ValueError(f"{name} does not exist: {resolved}")
+    return resolved
+
+
 def clopper_pearson_upper(failures: int, samples: int, confidence: float) -> float:
     if samples <= 0 or failures < 0 or failures > samples or not 0.0 < confidence < 1.0:
         raise ValueError("invalid binomial confidence inputs")
@@ -488,5 +582,98 @@ def evaluate_contract(
         "margins": contract["margins"],
         "candidate_summaries": summaries,
         "rows": rows,
+    }
+    return {**payload, "sha256": canonical_sha256(payload)}
+
+
+def evaluate_profile_holdout(
+    registration_path: Path,
+    contract_path: Path,
+    semantic_report_path: Path,
+) -> dict[str, Any]:
+    """Apply the frozen contract to one exactly registered adaptive candidate."""
+
+    from scripts.collect_flux_cache_ab import load_adaptive_candidate
+    from scripts.flux_cache_protocol import load_prompt_suite
+
+    registration = load_profile_holdout_registration(registration_path)
+    contract = load_contract(contract_path)
+    if contract["sha256"] != registration["quality_contract"]["content_sha256"]:
+        raise ValueError("profile holdout uses a different quality contract")
+    contract_gate = contract["holdout"]
+    registered_gate = registration["statistical_gate"]
+    if (
+        float(contract_gate["confidence"]) != float(registered_gate["confidence"])
+        or float(contract_gate["maximum_failure_rate_upper_bound"])
+        != float(registered_gate["maximum_failure_rate_upper_bound"])
+    ):
+        raise ValueError("profile holdout statistical gate differs from the contract")
+
+    prompt_binding = registration["prompt_suite"]
+    prompt_path = _repository_artifact(prompt_binding["path"], "profile prompt suite")
+    selection = load_prompt_suite(prompt_path, prompt_binding["split"])
+    if (
+        selection.descriptor["sha256"] != prompt_binding["split_sha256"]
+        or len(selection.prompts) != int(prompt_binding["prompt_count"])
+    ):
+        raise ValueError("profile holdout prompt split differs from its registration")
+
+    candidate_binding = registration["candidate"]
+    candidate_path = _repository_artifact(
+        candidate_binding["path"],
+        "profile candidate",
+    )
+    if sha256_file(candidate_path) != candidate_binding["file_sha256"]:
+        raise ValueError("profile candidate file sha256 differs from its registration")
+    candidate_document = load_json(candidate_path, "profile candidate")
+    candidate = load_adaptive_candidate(candidate_path)
+    if (
+        candidate_document.get("sha256") != candidate_binding["content_sha256"]
+        or candidate.candidate_id != candidate_binding["candidate_id"]
+    ):
+        raise ValueError("profile candidate contents differ from its registration")
+
+    report = load_semantic_report(semantic_report_path)
+    manifest, observed_selection, _ = semantic_source(report)
+    if (
+        observed_selection["split"] != prompt_binding["split"]
+        or observed_selection["sha256"] != prompt_binding["split_sha256"]
+        or tuple(manifest["protocol"]["rng"]["seeds"])
+        != tuple(prompt_binding["seeds"])
+    ):
+        raise ValueError("profile holdout evidence uses a different prompt or seed set")
+    definitions = manifest.get("candidates")
+    expected_definition = {
+        "candidate_id": candidate.candidate_id,
+        "policy": candidate.policy_spec(),
+        "predictor": candidate.predictor_spec(),
+    }
+    if definitions != [expected_definition]:
+        raise ValueError("profile holdout evidence does not contain only the frozen candidate")
+
+    evaluation = evaluate_contract(contract_path, semantic_report_path)
+    summaries = evaluation["candidate_summaries"]
+    if len(summaries) != 1 or summaries[0]["candidate_id"] != candidate.candidate_id:
+        raise ValueError("profile holdout evaluation candidate identity is invalid")
+    summary = summaries[0]
+    if int(summary["sample_count"]) != int(prompt_binding["sample_count"]):
+        raise ValueError("profile holdout evaluation sample count is invalid")
+    required_failures = int(registered_gate["required_failures"])
+    passed = (
+        int(summary["failure_count"]) == required_failures
+        and bool(summary["passes_statistical_gate"])
+    )
+    payload = {
+        "schema": PROFILE_HOLDOUT_EVALUATION_SCHEMA,
+        "schema_revision": SCHEMA_REVISION,
+        "registered_profile_holdout": True,
+        "registration": {
+            "path": str(registration_path),
+            "sha256": sha256_file(registration_path),
+            "content_sha256": registration["sha256"],
+        },
+        "contract_evaluation": evaluation,
+        "candidate_summary": summary,
+        "passes_registered_holdout": passed,
     }
     return {**payload, "sha256": canonical_sha256(payload)}

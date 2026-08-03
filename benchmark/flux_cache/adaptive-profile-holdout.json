@@ -1,0 +1,31 @@
+{
+  "schema": "difflet-flux-cache-profile-holdout-registration",
+  "schema_revision": 1,
+  "study_id": "flux-cache-adaptive-profile-holdout-2026-08-03",
+  "quality_contract": {
+    "content_sha256": "66998a67d40b0c4e6653d565d5e0ee871c3a3a5852ea3fe65aa9722777e2d9f8"
+  },
+  "prompt_suite": {
+    "path": "benchmark/flux_cache/prompt-suite-v1.json",
+    "split": "adaptive_profile_holdout",
+    "split_sha256": "17a59b3fdd0bf3c0dfcce3e6bd07edfea168a9720b2decca91a11469491a086a",
+    "prompt_count": 32,
+    "seeds": [
+      0
+    ],
+    "sample_count": 32
+  },
+  "candidate": {
+    "path": "benchmark/flux_cache/adaptive-oil-e1p40-k12-candidate.json",
+    "file_sha256": "fcca14ae81f7a3db3ebeddc830a8a670bec4d1257abb17d78b4e5fb15827a5b5",
+    "content_sha256": "1cc3458bb338329606300bfab1d52350bc80d7bfeb683180601a86616613c4bd",
+    "candidate_id": "adaptive-oil-e1p40-w6-i8-k12-o1-index"
+  },
+  "statistical_gate": {
+    "confidence": 0.95,
+    "maximum_failure_rate_upper_bound": 0.1,
+    "required_failures": 0
+  },
+  "parameters_frozen_before_collection": true,
+  "sha256": "2f52ec879ea46411ee4c99d88ca0cfc65a814a40e8f89b2ccdad582ae777bdb9"
+}
