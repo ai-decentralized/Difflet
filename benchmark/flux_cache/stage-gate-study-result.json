@@ -1,0 +1,150 @@
+{
+  "schema": "difflet-flux-cache-stage-gate-study-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-stage-gate-study-2026-08-03",
+  "implementation_commit": "64b70ab",
+  "objective": "Test whether keeping interval 8 early and permitting interval 10 or 12 later can recover speed without exceeding the frozen automatic semantic-quality contract.",
+  "frozen_contract": {
+    "image_reward_max_harm": 0.7824214100837708,
+    "vqa_score_max_harm": 0.25,
+    "confidence": 0.95,
+    "target_failure_rate_upper_bound": 0.1,
+    "contract_sha256": "08fb07e3bf35026940ac7cecd2c51eacfa7f5a78491169a7b4a560819e6e7f9b"
+  },
+  "candidates": {
+    "stage_acceleration": {
+      "candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index",
+      "warmup_steps": 6,
+      "initial_anchor_interval": 8,
+      "maximum_anchor_interval": 12,
+      "acceleration_start_progress": 0.3,
+      "tighten_error": 1.4,
+      "allow_acceleration": true,
+      "candidate_sha256": "4b6a5d53599b0eefcd061819ce1b16fd968d73fe7a37b784779726d11633c4d5"
+    },
+    "brake_only": {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "warmup_steps": 6,
+      "initial_anchor_interval": 8,
+      "maximum_anchor_interval": 8,
+      "tighten_error": 1.19,
+      "allow_acceleration": false,
+      "candidate_sha256": "bca87db396d98cf29c8536f17c4640b3aeb7636156498291bf02b9875eda6d25"
+    }
+  },
+  "experiments": {
+    "known-case_sentinel": {
+      "candidate": "stage_acceleration",
+      "sample_count": 8,
+      "automatic_failures": 0,
+      "measured_speedup": 3.7036856217422645,
+      "statistical_gate_passed": false,
+      "reason": "Eight samples are insufficient to lower the one-sided 95% failure-rate bound below 10%."
+    },
+    "first_fresh_holdout": {
+      "candidate": "stage_acceleration",
+      "sample_count": 32,
+      "automatic_failures": 2,
+      "failure_rate_upper_bound": 0.1839434681769287,
+      "measured_speedup": 3.764265559048283,
+      "statistical_gate_passed": false,
+      "failed_requests": [
+        "a stained-glass artisan assembling colored pieces into a circular window",
+        "two firefighters rescuing a cat from a balcony using a ladder"
+      ]
+    },
+    "opened-case_regression": {
+      "sample_count": 4,
+      "result": "Moving the acceleration start from 30% to 40% or 50% did not repair both failures. Tightening the error thresholds repaired the stained-glass request but not the firefighter request. Reducing the maximum interval to 8, 7, or 6 also did not repair the firefighter VQAScore failure.",
+      "serving_claim": false
+    },
+    "firefighter_seed_audit": {
+      "candidate": "brake_only",
+      "seed_count": 8,
+      "automatic_failures": 1,
+      "failed_seed": 0,
+      "result": "The paired VQAScore failure was seed-dependent; seeds 1 through 7 passed. The cached seed-0 image improved ImageReward while VQAScore fell.",
+      "serving_claim": false
+    },
+    "firefighter_signal_audit": {
+      "candidate": "brake_only",
+      "seed_count": 8,
+      "output_identity_with_measurement_disabled": true,
+      "failed_seed_anchor_error_ranks": {
+        "maximum": "8 of 8, where rank 1 is largest",
+        "mean": "5 of 8, where rank 1 is largest",
+        "root_mean_square": "6 of 8, where rank 1 is largest"
+      },
+      "result": "The current global anchor-error signal did not identify the semantic failure. It is not qualified to increase cache intensity or to serve as a per-request semantic guarantee."
+    },
+    "second_fresh_audit": {
+      "prompt_count": 32,
+      "prompt_file_sha256": "ed1135e354ca0b64efe957560073ff810e9816eac3b4a0a33d2107269f26eeb1",
+      "frozen_before_execution_commit": "bdc22fa",
+      "exact_prompt_overlap_with_prior_suites": 0,
+      "registered_by_contract_tool": false,
+      "registration_note": "The prompt file and candidates were committed before execution, but this split was not added to the contract allowlist before execution. Treat this as a frozen independent audit, not as a contract-registered holdout.",
+      "stage_acceleration": {
+        "automatic_failures": 1,
+        "failure_rate_upper_bound": 0.139849460274226,
+        "measured_speedup": 3.7411530821489234,
+        "full_steps": 392,
+        "skipped_steps": 1208
+      },
+      "brake_only": {
+        "automatic_failures": 1,
+        "failure_rate_upper_bound": 0.139849460274226,
+        "measured_speedup": 3.3869403902971547,
+        "full_steps": 455,
+        "skipped_steps": 1145
+      },
+      "shared_failed_request": {
+        "sample_id": "p002-s0",
+        "prompt": "a pastry chef stacking cream puffs into a tall cone decorated with thin caramel threads",
+        "baseline": {
+          "image_reward": 1.542714238166809,
+          "vqa_score": 0.625
+        },
+        "stage_acceleration": {
+          "image_reward": 1.2927268743515015,
+          "vqa_score": 0.337890625,
+          "vqa_score_harm": 0.287109375
+        },
+        "brake_only": {
+          "image_reward": 1.3603745698928833,
+          "vqa_score": 0.33203125,
+          "vqa_score_harm": 0.29296875
+        },
+        "diagnostic_visual_observation": "All three images contain the pastry chef, a tall cream-puff cone, and caramel decoration. The cached variants show weaker thin caramel threads. This observation did not override the automatic gate."
+      },
+      "artifact_sha256": {
+        "quality_manifest": "e66bd02ec17be5f067c9bdb0781f0c4edd4b8e002294e623c9d6fc106b436669",
+        "speed_manifest": "a9656010bc0df15e1f5c1cbc0fc6fab30e3893bc346833cd25a8833a988184db",
+        "semantic_scores": "e9f1e415d466ed9a0aef76dab4c50f422b9d9784df696e483ed075aed054eed1",
+        "contract_evaluation": "7018ff143985d195ca6c0af0b100ba421ecf3f7e66f2bcf357a89e54420b4d28"
+      }
+    }
+  },
+  "cumulative_evidence": {
+    "stage_acceleration": {
+      "automatic_failures": 3,
+      "sample_count": 64,
+      "one_sided_95_percent_failure_rate_upper_bound": 0.11671658790335933,
+      "meets_10_percent_target": false
+    },
+    "brake_only": {
+      "automatic_failures": 1,
+      "sample_count": 64,
+      "one_sided_95_percent_failure_rate_upper_bound": 0.07198975489470939,
+      "meets_10_percent_target": true,
+      "qualification": "This pools one contract-registered 32-request holdout with one independently frozen 32-request audit. Report the registration distinction with the number."
+    }
+  },
+  "decision": {
+    "publish_stage_acceleration_profile": false,
+    "qualify_anchor_error_to_accelerate": false,
+    "retain_brake_only_candidate": true,
+    "add_spatial_or_stage_specific_runtime_complexity": false,
+    "next_action": "Keep maximum interval 8 and acceleration disabled as the conservative candidate. Do not tune on the opened failures. Future acceleration work requires a different predictor or a demonstrably earlier request-specific signal, followed by a newly registered holdout."
+  }
+}

@@ -221,8 +221,7 @@ class AdaptiveAnchorPolicy:
             progress = step_index / max(num_steps - 1, 1)
             if (
                 progress >= self.config.acceleration_start_progress
-                and
-                self._stable_anchor_count
+                and self._stable_anchor_count
                 >= self.config.stable_anchors_for_acceleration
                 and self._current_interval < self.config.maximum_anchor_interval
             ):

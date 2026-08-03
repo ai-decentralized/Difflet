@@ -673,7 +673,7 @@
         <a href="#profile">地图与限速</a>
         <a href="#runtime">在线闭环</a>
         <a href="#recovery">安全回退</a>
-        <a href="#phase-one">下一轮实验</a>
+        <a href="#phase-one">实验结论</a>
         <a href="#status">当前状态</a>
       </nav>
     </div>
@@ -690,7 +690,7 @@
         <span class="pill">目标形态：可接入不同图像和视频生成框架</span>
         <span class="pill">自动质量合同：已冻结并实机验证</span>
         <span class="pill">静态与自适应刹车通过；渐进油门独立 holdout 未通过</span>
-        <span class="pill">按请求自动调整：刹车已实现，渐进油门正在校准</span>
+        <span class="pill">按请求自动调整：刹车已实现，渐进油门当前关闭</span>
         <span class="pill">页面背景：固定白色</span>
       </div>
     </div>
@@ -1042,7 +1042,7 @@ performance/
           <table>
             <thead><tr><th>目标</th><th>可复用程度</th><th>仍需单独完成</th></tr></thead>
             <tbody>
-              <tr><td>Difflet / FLUX</td><td>统一会话、静态/自适应控制、三状态恢复、运行测量和渐进油门独立复检均已实现</td><td>渐进候选未通过；决定发布保守 Profile 或冻结新的更保守候选后，再补 loader 与正式适配层</td></tr>
+              <tr><td>Difflet / FLUX</td><td>统一会话、静态/自适应控制、三状态恢复、运行测量和渐进油门独立复检均已实现</td><td>渐进候选未通过；下一步为最大间隔8、禁止主动加速的保守方案补 loader 与正式适配层</td></tr>
               <tr><td>其他 Difflet 模型</td><td>可复用缓存核心、文件格式、三状态回退和实验工序</td><td>编写模型适配层、确认应缓存哪一种模型输出，并重新校准 Cache Profile</td></tr>
               <tr><td>Diffusers / ComfyUI</td><td>可复用每请求会话和全部控制组件</td><td>连接各自去噪循环、请求生命周期、跨设备标量汇总和配置入口</td></tr>
               <tr><td>其他在线扩散系统</td><td>只要能提供逐步真实输出和 Scheduler 坐标即可接入</td><td>编写宿主适配层、重新收集质量证据，并验证运行环境的数值等价性</td></tr>
@@ -1064,7 +1064,7 @@ performance/
         </div>
 
         <h3 style="margin-top:32px">先在 Difflet 内验证，再按已经通过测试的边界拆库</h3>
-        <p>当前不为追求目录美观立即创建外部仓库。<code>difflet/pipeline/cache</code> 已通过 AST 导入边界测试，禁止依赖 Difflet serving、common、具体模型、ImageReward、VQAScore 或其大型模型依赖。渐进油门独立 holdout 已完成但未通过；待一个具备发布资格的 Profile 和 loader 落地后，再按已经被测试证明的依赖边界抽成独立 Python 库。</p>
+        <p>当前不为追求目录美观立即创建外部仓库。<code>difflet/pipeline/cache</code> 已通过 AST 导入边界测试，禁止依赖 Difflet serving、common、具体模型、ImageReward、VQAScore 或其大型模型依赖。渐进油门独立复检已完成但未通过；待保守 Profile 和 loader 落地后，再按已经被测试证明的依赖边界抽成独立 Python 库。</p>
       </div>
     </section>
 
@@ -1139,13 +1139,13 @@ performance/
           </article>
         </div>
 
-        <div class="formula">当前已实现规则：L 在最小间隔与硬上限 K 之间逐级变化</div>
-        <div class="formula">锚点误差低并连续稳定 → L 增加 1；误差升高 → L 缩短；严重超线 → L = 0</div>
-        <p>第一版没有直接实现“逐步误差相加”的复杂账本，因为现有证据只证明锚点误差能够对自动损伤风险排序，还没有证明逐步成本可加。当前实现采用更小的机制：以已经验证的静态 w6/i8 为起点，只在连续两个低风险锚点后逐级增加间隔；风险升高时收紧、恢复或关闭缓存。未来只有在数据证明误差地图和可加性确实带来额外收益时，才加入更完整的预算模型。</p>
+        <div class="formula">当前发布候选：L 从 8 开始，只能缩短到最小间隔；严重超线时 L = 0</div>
+        <div class="formula">实验代码也支持“连续稳定后 L 增加 1”，但发布配置明确关闭这个开关</div>
+        <p>第一版没有直接实现“逐步误差相加”的复杂账本，因为现有证据没有证明逐步成本可加。当前实现采用更小的机制：以静态 w6/i8 为起点，风险升高时收紧、恢复或关闭缓存。实验代码能够在连续低误差锚点后逐级增加间隔，也能把加速推迟到去噪后段；但两组独立实验仍发现自动失败，因此发布候选禁止主动增加间隔。未来只有在新的提前信号或新的估计方法通过全新 holdout 后，才会打开该能力。</p>
 
         <div class="callout">
-          <strong>自动损伤样本和主信号门已经补齐：</strong>
-          <p>边界数据共形成 112 组成对样本，其中 7 组超过冻结后的 ImageReward 或 VQAScore 允许范围。主要锚点误差信号在“同一候选内部”得到宏平均 AUC 0.775，超过预先规定的 0.75，并有两个同时包含通过与失败样本的候选可供计算，因此获得驱动自适应控制的资格。这里的 AUC 表示随机抽取一个失败样本和一个通过样本时，信号把失败样本排得更危险的概率；同候选内部计算避免把“配置更激进”误当成“信号更聪明”。</p>
+          <strong>自动损伤样本支持刹车，但不足以批准油门：</strong>
+          <p>边界数据共形成 112 组成对样本，其中 7 组超过冻结后的 ImageReward 或 VQAScore 允许范围。主要锚点误差信号在“同一候选内部”得到宏平均 AUC 0.775，超过预先规定的 0.75；这说明它总体上能排序风险，足以在数值异常时减少缓存。后续八 seed 审计却发现，唯一自动失败 seed 的最大锚点误差是八个 seed 中最低的，因此这个总体相关性不能变成逐请求保证，也不能批准主动增加缓存强度。这里的 AUC 表示随机抽取一个失败样本和一个通过样本时，信号把失败样本排得更危险的概率；它不表示每一个失败都会被发现。</p>
         </div>
 
         <h3 style="margin-top:34px">Cache Profile 只保存运行时真正需要的内容</h3>
@@ -1297,7 +1297,7 @@ performance/
             <div class="section-no">08 / Evidence stage</div>
             <h2>安全自适应已经闭环，渐进油门未获发布资格</h2>
           </div>
-          <p class="section-copy">质量判据、边界损伤标签、主信号准入、静态方案和自适应刹车都已经完成。冻结的渐进油门候选也已接受全新独立 holdout，但出现 2/32 自动失败，因此没有发布为 Cache Profile，也没有进入 serving。</p>
+          <p class="section-copy">质量判据、边界损伤标签、静态方案和自适应刹车都已经完成。渐进油门经过两组各 32 个全新请求的检验，累计出现 3/64 自动失败，95% 单侧失败率上界为 11.67%，因此没有发布为 Cache Profile，也没有进入 serving。</p>
         </div>
 
         <div class="grid-4">
@@ -1309,7 +1309,7 @@ performance/
           <article class="card">
             <span class="tag now">已完成</span>
             <h3>静态与刹车 holdout</h3>
-            <p>32 个全新 prompt 中，静态 w6/i8 和只会收紧的自适应控制器均为 <code>0/32</code> 自动失败；95% 单侧失败率上界为 <code>8.94%</code>，通过事前冻结的低于 10% 要求。</p>
+            <p>首个正式 32-prompt holdout 中，静态 w6/i8 和只会收紧的自适应控制器均为 <code>0/32</code> 自动失败。第二组独立冻结的 32 个请求中，刹车方案为 <code>1/32</code>；合并观察为 <code>1/64</code>，95% 单侧上界 <code>7.20%</code>。</p>
           </article>
           <article class="card">
             <span class="tag now">已完成</span>
@@ -1319,7 +1319,7 @@ performance/
           <article class="card">
             <span class="tag">未通过</span>
             <h3>渐进油门独立复检</h3>
-            <p>两轮 16-prompt calibration 中六个候选均为 0/16，但冻结的 <code>ε=1.4, K=12</code> 在另一组 32 个全新 prompt 上出现 <code>2/32</code> 自动失败；95% 单侧失败率上界为 <code>18.39%</code>，高于 10% 目标。</p>
+            <p>原冻结候选在第一组 32 个全新请求中为 <code>2/32</code>；增加“前 30% 不加速”的阶段门后，在第二组中仍为 <code>1/32</code>。累计 <code>3/64</code>，95% 单侧上界 <code>11.67%</code>，仍高于 10% 目标。</p>
           </article>
         </div>
 
@@ -1330,9 +1330,9 @@ performance/
             <thead><tr><th>问题</th><th>怎样验证</th><th>通过后</th><th>失败分支</th></tr></thead>
             <tbody>
               <tr><td><b>自动失败标签是否稳定</b></td><td>评分模型权重固定；允许范围只从无缓存 seed 波动产生</td><td>已通过；合同工具与模型身份已经冻结</td><td>评分模型发生变化时重新标定，不静默沿用</td></tr>
-              <tr><td><b>便宜信号能否预警</b></td><td>112 个边界样本、7 个自动损伤；主门使用同候选内部 AUC</td><td>已通过：宏平均 AUC 0.775，允许成为唯一主控制信号</td><td>其他模型若哨兵验证不通过，只启用静态方案与异常刹车</td></tr>
+              <tr><td><b>便宜信号能否预警</b></td><td>112 个边界样本、7 个自动损伤；另对一个失败 prompt 做八个 seed 的同候选审计</td><td>宏平均 AUC 0.775 支持把它用于保守刹车；但失败 seed 的最大锚点误差反而是 8/8 最低，不能据此踩油门或承诺逐请求安全</td><td>只允许减少缓存强度；增加缓存强度必须等待新的、能提前识别失败的信号</td></tr>
               <tr><td><b>一个难度数和加法账本是否够</b></td><td>现有证据尚未证明逐步误差可加</td><td>暂不引入账本；使用更直接的锚点阈值和逐级段长</td><td>保持简单实现，不为满足设计图而增加未验证模型</td></tr>
-              <tr><td><b>风险限值是否带来可发布前沿</b></td><td>固定 TaylorSeer、warmup 和坐标，只扫描风险限值与 K；冻结后用全新 holdout 复检</td><td>六档 calibration 均 0/16，但 ε=1.4、K=12 的独立 holdout 为 2/32，未通过</td><td>不发布、不改门、不用已经开封的 holdout 继续选参</td></tr>
+              <tr><td><b>风险限值是否带来可发布前沿</b></td><td>固定 TaylorSeer、warmup 和坐标，先检验 K 与阈值，再单独检验“去噪后段才增加间隔”</td><td>K=12 原候选 2/32；阶段门候选在另一组为 1/32。阶段门提高了速度，但没有消除尾部失败</td><td>不发布渐进油门，不在已经开封的失败请求上继续调参</td></tr>
             </tbody>
           </table>
         </div>
@@ -1344,11 +1344,11 @@ performance/
 
         <div class="callout">
           <strong>Calibration 通过不等于 Profile 可以发布：</strong>
-          <p>两轮 calibration 没有发现损伤，但全新 holdout 找到两例 ImageReward 越界。这正是独立复检存在的原因。该结果只能用于否决冻结候选，不能再被当成 calibration 数据调低阈值或挑选替代参数；任何新候选都必须重新冻结并接受另一套未开封 holdout。</p>
+          <p>两轮 calibration 没有发现损伤，但第一组全新 holdout 找到两例越界；阶段门又在另一组独立请求中找到一例 VQAScore 越界。这正是独立复检存在的原因。已开封结果只能用于否决或诊断，不能被当成 calibration 数据反复挑选参数；任何新候选都必须重新冻结并接受另一套未开封 holdout。</p>
         </div>
 
         <h3 style="margin-top:32px">本阶段退出条件</h3>
-        <p>自动允许范围、边界重判、主信号准入、静态与刹车版 32-prompt holdout 均已完成。渐进油门独立复检也已执行，但冻结候选未通过，因此本阶段以“拒绝发布”结束；小型 Cache Profile loader 暂不承载该候选。</p>
+        <p>自动允许范围、边界重判、静态与刹车版检验均已完成。阶段门与八 seed 信号审计进一步证明：当前锚点误差可以保守地踩刹车，却不能可靠识别所有语义失败，也没有资格主动增加缓存强度。本阶段以“保留刹车版、拒绝渐进油门”结束；小型 Cache Profile loader 不承载阶段油门候选。</p>
       </div>
     </section>
 
@@ -1369,10 +1369,10 @@ performance/
           <div class="status-row"><b>静态开头/结尾保护与外部恢复</b><span class="state done">已实现</span><p>Warmup、cooldown、最后一步强制真算、最大连续估计限制，以及外部组件主动要求恢复真算都已可执行。</p></div>
           <div class="status-row"><b>离线成对实验闭环</b><span class="state done">已实现</span><p>已经具备采集无缓存/缓存结果、离线计算 latent、PSNR、LPIPS、SSIM、校准静态 Plan 和检查实验可复现性的工具；baseline 与候选共用同一去噪循环。</p></div>
           <div class="status-row"><b>运行测量采集</b><span class="state done">已实现并实机复测</span><p>统一执行器会在真实锚点写入历史前，用旧的真实历史产生只读对照估计；FLUX 去噪循环逐步记录实际动作和 Scheduler 的 latent 更新幅度。Trainium 五组关闭/开启配对中，轨迹、最终 latent 和 PNG 均逐位一致；baseline 平均增加 160.0 ms（1.153%），候选平均增加 96.4 ms（1.407%）。正式 calibration 与 holdout 已各完成 208 次生成。</p></div>
-          <div class="status-row"><b>离线语义评分</b><span class="state done">多阶段数据已完成</span><p>独立 CPU 环境先完成 416 张图片评分，随后又完成 margin、静态/刹车 holdout、两轮渐进油门 calibration，以及最新 64 张渐进油门独立 holdout 图片。所有报告都保存模型 revision、评分权重指纹和成对差值。</p></div>
-          <div class="status-row"><b>便宜信号验证</b><span class="state done">新目标门控已通过</span><p>112 个边界样本包含 7 个自动损伤；主要锚点误差信号的同候选宏平均 AUC 为 0.775，超过预注册 0.75。它有资格控制第一版自适应逻辑，但不被解释为线上真实质量分数。</p></div>
-          <div class="status-row"><b>自动质量合同</b><span class="state done">协议、数据与 holdout 均完成</span><p>ImageReward 允许下降 0.7824、VQAScore 允许下降 0.25。静态 w6/i8 和自适应刹车在 32 个全新 prompt 上均为 0/32 自动失败，95% 单侧上界 8.94%，通过预设低于 10% 的目标。</p></div>
-          <div class="status-row"><b>Cache Profile</b><span class="state todo">渐进候选未获发布资格</span><p>warmup 6、初始间隔 8、最大间隔 12、风险限值 1.4 的冻结候选在全新 holdout 上出现 2/32 自动失败。按照事前协议，当前不生成它的 serving Profile，也不实现会默认启用它的加载路径。</p></div>
+          <div class="status-row"><b>离线语义评分</b><span class="state done">多阶段数据已完成</span><p>独立 CPU 环境先完成 416 张图片评分，随后完成 margin、静态/刹车 holdout、渐进油门校准、阶段门回归、八 seed 审计，以及第二组 96 张基线/候选对照。所有报告都保存模型 revision、评分权重指纹和成对差值。</p></div>
+          <div class="status-row"><b>便宜信号验证</b><span class="state done">只获刹车资格</span><p>112 个边界样本上的同候选宏平均 AUC 为 0.775，支持用锚点误差做保守收紧。但八 seed 审计中，唯一自动失败 seed 的最大锚点误差却是 8/8 最低；因此该信号不能被解释为线上真实质量分数，也没有主动增加缓存强度的资格。</p></div>
+          <div class="status-row"><b>自动质量合同</b><span class="state done">协议与两组独立证据已完成</span><p>ImageReward 允许下降 0.7824、VQAScore 允许下降 0.25。刹车方案先在正式 32-prompt holdout 中取得 0/32，随后在另一组执行前已冻结的 32 个请求中取得 1/32；累计 1/64 的 95% 单侧上界为 7.20%。第二组未写入合同 allowlist，因此报告时必须同时说明它是独立冻结审计，而不是合同工具登记的 holdout。</p></div>
+          <div class="status-row"><b>Cache Profile</b><span class="state todo">渐进候选未获发布资格</span><p>warmup 6、初始间隔 8、最大间隔 12 的原候选为 2/32；加入“前 30% 不加速”后在另一组 32 个请求中仍为 1/32。累计 3/64 的 95% 单侧上界为 11.67%，因此当前不生成它的 serving Profile，也不默认启用主动加速。</p></div>
           <div class="status-row"><b>动态段长与请求状态</b><span class="state done">第一版已实现</span><p><code>AdaptiveAnchorPolicy</code> 使用锚点误差逐级增加或缩短间隔；油门可由配置开关关闭。Runner 只计算一次锚点测量，同时交给控制器和可选实验记录端。</p></div>
           <div class="status-row"><b>三状态安全回退</b><span class="state done">已实现并通过 holdout</span><p>ACTIVE、RECOVERY、DISABLED 已接入；无效测量会确定性关闭本请求缓存，严重超阈进入有限真算恢复，重复恢复达到上限后余下步骤全真算。</p></div>
           <div class="status-row"><b>其他模型接入新运行时</b><span class="state todo">待实现</span><p>Qwen Image、Wan、HunyuanVideo、LTX-2 等仍未完成同等级接入。</p></div>
@@ -1380,7 +1380,7 @@ performance/
 
         <div class="callout">
           <strong>当前实验结论：</strong>
-          <p>最新独立 holdout 中，冻结渐进候选在 Trainium 上测得 <code>3.80×</code>（baseline 总计 490.71 秒，候选 129.21 秒），共估计 1213/1600 步；但 32 个样本中有两例 ImageReward 成对下降越界，自动失败率为 6.25%，95% 单侧上界为 18.39%。只把 K 从 12 降到 10 后，两例仍为 2/2 失败；保持 ε=1.4 与恢复线1.75不变、禁止间隔从8继续增加后，两例则均回到允许范围。这个两例实验定位了主动扩大间隔的风险，但样本太少，不能替代正式 holdout。性能收益真实存在，但不满足事前冻结的发布合同，所以不能用速度覆盖质量否决。</p>
+          <p>第二组 32-request 独立冻结审计中，阶段门候选在 Trainium 上测得 <code>3.74×</code>，刹车版测得 <code>3.39×</code>；两者都在同一个“泡芙高塔”请求上出现 VQAScore 越界。直接观察显示主题和主体结构仍完整，但焦糖细丝比基线弱；自动合同仍按冻结规则判失败，不用观察结果覆盖阈值。阶段油门累计 3/64、95% 上界 11.67%，未通过；刹车版累计 1/64、上界 7.20%。性能收益真实存在，但当前可保留的只是不主动扩大间隔的保守候选。</p>
         </div>
       </div>
     </section>
@@ -1392,7 +1392,7 @@ performance/
             <div class="section-no">10 / Controlled evolution</div>
             <h2>后续实施顺序</h2>
           </div>
-          <p class="section-copy">静态方案、自动质量合同、锚点信号和自适应刹车已经完成。渐进油门最终复检未通过；后续不能在已开封 holdout 上补选参数，而应先决定交付已通过的保守方案，还是冻结更保守的新候选并另建 holdout。</p>
+          <p class="section-copy">静态方案、自动质量合同、锚点测量和自适应刹车已经完成。两组独立证据都没有给渐进油门发布资格；后续不能在已开封请求上补选参数。当前应优先固化最大间隔 8、禁止主动加速的保守方案，并把更激进的研究留给新的预测器或新的提前信号。</p>
         </div>
 
         <div class="roadmap">
@@ -1402,15 +1402,15 @@ performance/
           </article>
           <article class="roadmap-item">
             <h3>已完成：静态与刹车 holdout</h3>
-            <p>w6/i8 与只会收紧的控制器同场通过 32-prompt 独立检验；自适应路径确实在风险请求上减少估计步，没有永久关闭或请求失败。</p>
+            <p>w6/i8 与只会收紧的控制器先同场通过正式 32-prompt 检验；第二组独立冻结审计中刹车版为 1/32，累计 1/64 的 95% 单侧上界为 7.20%。自适应路径确实在风险请求上增加真算，没有永久关闭或请求失败。</p>
           </article>
           <article class="roadmap-item">
             <h3>已完成：信号准入与简化控制</h3>
-            <p>锚点误差通过 AUC 门。逐步成本可加性尚未证明，因此没有实现复杂账本；当前控制器只用阈值、计数和有界段长。</p>
+            <p>锚点误差在边界数据上通过 AUC 门，但八 seed 审计证明它会漏掉个别语义失败。逐步成本可加性也尚未证明，因此没有实现复杂账本；当前控制器只用阈值、计数和有界段长，并且只允许信号踩刹车。</p>
           </article>
           <article class="roadmap-item">
             <h3>已完成但未通过：渐进油门 Profile 复检</h3>
-            <p>ε=1.4、K=12 已在全新 32-prompt holdout 上完成复检，结果为 2/32 自动失败。单变量降到 K=10 后，这两个失败请求仍为 2/2 失败；进一步保持同一阈值但禁止从间隔8继续加速后，两例恢复正常。因此安全版本仍应以最大间隔8、只踩刹车为发布候选；渐进油门保持未发布状态。</p>
+            <p>原 ε=1.4、K=12 候选为 2/32；把主动加速推迟到去噪进度 30%、40% 或 50% 均未消除打开请求中的失败。冻结的 30% 阶段门在第二组 32 个新请求中又出现 1 例失败，累计上界仍高于目标。因此安全版本以最大间隔8、只踩刹车为候选；渐进油门保持未发布状态。</p>
           </article>
           <article class="roadmap-item">
             <h3>随后：干净测速、Trainium 内存优化和扩模型</h3>
@@ -1435,14 +1435,14 @@ performance/
             <tbody>
               <tr><td>统一执行</td><td><code>difflet/pipeline/cache/runner.py</code></td><td>已在写入新锚点前选择性执行只读锚点测量；未提供测量接收端时完全不调用测量。信号门控通过后只接收段长和 COMPUTE/PREDICT 决定，不把语义评分放进 Runner</td></tr>
               <tr><td>通用请求边界</td><td><code>difflet/pipeline/cache/session.py</code></td><td><code>CacheSession</code> 已提供明确的步骤决定、输出估计、锚点记录、Scheduler latent 更新记录、恢复请求和统计接口；<code>ResolvedCacheSession</code> 已能选择性接收运行测量接收端</td></tr>
-              <tr><td>请求共享状态</td><td><code>difflet/pipeline/cache/types.py</code><br><code>difflet/pipeline/cache/measurements.py</code></td><td>锚点对照估计与逐步 latent 更新已有明确类型；动态状态只在信号门控通过后增加，并由一个 CacheSession 持有，不使用字符串字典或跨请求共享槽位</td></tr>
+              <tr><td>请求共享状态</td><td><code>difflet/pipeline/cache/types.py</code><br><code>difflet/pipeline/cache/measurements.py</code></td><td>锚点对照估计与逐步 latent 更新已有明确类型；段长、恢复计数和关闭状态由单个 CacheSession 持有，不使用字符串字典或跨请求共享槽位</td></tr>
               <tr><td>静态与动态安排</td><td><code>difflet/pipeline/cache/policies.py</code></td><td>固定周期、冻结步骤表和 <code>AdaptiveAnchorPolicy</code> 均已实现；自适应逻辑只调整有界锚点间隔，不在 Runner 增加特殊执行分支</td></tr>
               <tr><td>输出估计</td><td><code>difflet/pipeline/cache/predictors.py</code></td><td>当前不改；锚点对照估计复用现有无状态外推接口，只有历史就绪时才调用</td></tr>
               <tr><td>在线控制</td><td><code>difflet/pipeline/cache/policies.py</code><br><code>difflet/pipeline/cache/runner.py</code></td><td>三状态与段长控制已经落入策略对象，Runner 仍只执行 COMPUTE/PREDICT。下一步只增加 Profile 装配，不新增独立 Monitor 或另一套 Controller</td></tr>
               <tr><td>恢复约束</td><td><code>difflet/pipeline/cache/recovery.py</code></td><td>保留现有 warmup、cooldown 与外部恢复来源；未来作为 Cache Controller 的真算约束，轻微收紧和稳定观察只用段长与计数表达</td></tr>
               <tr><td>数据文件读取与校验</td><td><code>difflet/pipeline/cache/spec.py</code><br><code>difflet/pipeline/cache/measurement_report.py</code></td><td>静态实验格式继续兼容；运行测量已使用格式名和整数修订号。未来代码类型统一命名为 CacheProfile，不在类名或函数名中加入 V1/V2</td></tr>
               <tr><td>现有去噪循环适配</td><td><code>difflet/pipeline/cache/teacache_adapter.py</code><br><code>difflet/models/flux/pipeline.py</code><br><code>difflet/models/flux/application.py</code></td><td>适配层只翻译旧 TeaCache 方法；FLUX loop 仅在测量开关开启时复制更新前 latent 并回报更新后的结果。未来宿主采用通用会话接口后可以直接删除该适配层</td></tr>
-              <tr><td>实验协议</td><td><code>scripts/collect_flux_cache_ab.py</code><br><code>scripts/evaluate_flux_cache_quality_contract.py</code><br><code>scripts/analyze_flux_cache_contract_signals.py</code></td><td>运行测量、Trainium A/B、自动 margin、边界信号 AUC、静态/刹车 holdout、两轮渐进 calibration 与最终独立复检均已完成；冻结油门候选被质量合同拒绝</td></tr>
+              <tr><td>实验协议</td><td><code>scripts/collect_flux_cache_ab.py</code><br><code>scripts/evaluate_flux_cache_quality_contract.py</code><br><code>scripts/analyze_flux_cache_contract_signals.py</code></td><td>运行测量、Trainium A/B、自动 margin、边界信号 AUC、静态/刹车 holdout、阶段门回归、八 seed 信号审计与第二组独立冻结审计均已完成；结果摘要保存在 <code>benchmark/flux_cache/stage-gate-study-result.json</code></td></tr>
               <tr><td>语义离线评分</td><td><code>scripts/evaluate_flux_cache_semantics.py</code></td><td>ImageReward/VQAScore 保持在独立 CPU 环境，模型权重和预处理均有指纹；这些依赖禁止进入 <code>difflet/pipeline/cache</code></td></tr>
               <tr><td>校准入口</td><td><code>scripts/calibrate_flux_cache_plan.py</code></td><td>静态 Plan 校准语义保持冻结；信号门控通过后再新增命名稳定的 Cache Profile 校准入口，不在代码名称中写代际版本号</td></tr>
             </tbody>
