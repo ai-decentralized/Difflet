@@ -1,0 +1,75 @@
+{
+  "schema": "difflet-flux-cache-spatial-sentinel-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-spatial-sentinel-2026-08-03",
+  "implementation_commit": "d11e263",
+  "candidate_id": "adaptive-oil-e1p40-w6-i8-k12-o1-index",
+  "source_holdout": "adaptive_profile_holdout",
+  "source_prompt_indices": [11, 15, 30, 22, 0, 6, 18, 27],
+  "frozen_labels": ["failure", "failure", "pass", "pass", "pass", "pass", "pass", "pass"],
+  "measurement": {
+    "layout": "8x8 equal regions over the 64x64 FLUX token grid",
+    "region_error": "sqrt(error_energy / max(reference_energy, 1e-12))",
+    "anchor_filter": "measured candidate anchors with anchor_step_gap >= 8",
+    "request_score": "maximum across eligible anchors of the mean of the two largest region errors"
+  },
+  "read_only_identity": {
+    "passed": true,
+    "request_count": 8,
+    "checks_per_request": 6,
+    "checks": [
+      "baseline final latent",
+      "baseline 50-step trajectory",
+      "baseline decoded image pixels",
+      "candidate final latent",
+      "candidate 50-step trajectory",
+      "candidate decoded image pixels"
+    ],
+    "maximum_global_energy_reconstruction_difference": 0.000011225445099904974
+  },
+  "primary_test": {
+    "required_auc": 1.0,
+    "observed_auc": 0.3333333333333333,
+    "perfect_separation": false,
+    "passed": false
+  },
+  "ranking": [
+    {"source_prompt_index": 0, "label": "pass", "score": 3.632241134430318},
+    {"source_prompt_index": 30, "label": "pass", "score": 3.5641434837466752},
+    {"source_prompt_index": 15, "label": "failure", "score": 3.1939450599007673},
+    {"source_prompt_index": 18, "label": "pass", "score": 3.135266859386065},
+    {"source_prompt_index": 6, "label": "pass", "score": 2.9752534843343383},
+    {"source_prompt_index": 27, "label": "pass", "score": 2.962919614088702},
+    {"source_prompt_index": 22, "label": "pass", "score": 2.699136289585593},
+    {"source_prompt_index": 11, "label": "failure", "score": 1.9949654787409585}
+  ],
+  "auxiliary_auc": {
+    "largest_region": 0.25,
+    "mean_largest_four_regions": 0.3333333333333333,
+    "regional_p95": 0.4166666666666667,
+    "top_two_divided_by_global_error": 0.5833333333333334,
+    "largest_region_divided_by_global_error": 0.5,
+    "regional_coefficient_of_variation": 0.5,
+    "largest_region_divided_by_regional_median": 0.5
+  },
+  "measurement_cost": {
+    "candidate_wall_seconds": 32.010466617997736,
+    "baseline_wall_seconds": 112.27870473498479,
+    "diagnostic_speedup_including_measurements": 3.507562263146036,
+    "spatial_measurement_seconds_per_request_range": [0.003558, 0.004481],
+    "serving_speed_claim": false
+  },
+  "artifact_hashes": {
+    "prompt_file_sha256": "1b80a9daf6eff23729703dfaddaaf0f8aff3bfb88603f30c1aa6d1ef7e577dc0",
+    "protocol_file_sha256": "bc172748f0c751ece115a07f56829b6297eb82f1836b17bd97716d94589f33c8",
+    "quality_manifest_sha256": "5745728c0578743b5c45671162f415e24bbc4741bd44a2ea0d0786a2a3d28222",
+    "speed_manifest_sha256": "e76623f85b8da076cce0b41070d3a275479813292b30adc5fc7ad071f8560117"
+  },
+  "decision": {
+    "run_full_holdout": false,
+    "add_spatial_runtime_control": false,
+    "add_sp_tp_risk_voting": false,
+    "runtime_direction": "retain the global brake-only controller path",
+    "next_hypothesis": "keep maximum interval 8 during early structure formation and permit longer intervals only later in denoising"
+  }
+}

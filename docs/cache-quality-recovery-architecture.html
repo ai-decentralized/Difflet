@@ -1,0 +1,1213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Difflet Cache Core 质量恢复：严格区分当前实现、预留接口、目标设计与长期纠错方案。">
+  <title>Difflet Cache Core｜质量恢复现状与目标架构</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #ffffff;
+      /* Keep the same research-visual system as cache-system-architecture.html. */
+      --panel: rgba(255, 255, 255, .96);
+      --panel-2: #f3f8f6;
+      --panel-3: #eaf3f0;
+      --ink: #10231e;
+      --muted: #536c64;
+      --faint: #789087;
+      --line: rgba(25, 83, 69, .14);
+      --line-strong: rgba(25, 83, 69, .25);
+      --green: #087c67;
+      --green-soft: rgba(8, 124, 103, .09);
+      --amber: #9b6608;
+      --amber-soft: rgba(155, 102, 8, .09);
+      --blue: #356dc8;
+      --blue-soft: rgba(53, 109, 200, .09);
+      --violet: #7550ad;
+      --violet-soft: rgba(117, 80, 173, .09);
+      --red: #c44250;
+      --red-soft: rgba(196, 66, 80, .08);
+      --slate: #607970;
+      --radius: 22px;
+      --shadow: 0 24px 64px rgba(25, 73, 62, .10);
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #ffffff;
+      font-family: var(--sans);
+      line-height: 1.62;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      opacity: .55;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(25,83,69,.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(25,83,69,.045) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(to bottom, #000, transparent 84%);
+    }
+    a { color: inherit; }
+    button, input { font: inherit; }
+    code, pre { font-family: var(--mono); }
+    code { color: #096d5c; }
+
+    .skip-link {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 100;
+      padding: 8px 12px;
+      transform: translateY(-160%);
+      border-radius: 8px;
+      color: #ffffff;
+      background: var(--green);
+    }
+    .skip-link:focus { transform: none; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, .92);
+      backdrop-filter: blur(18px);
+    }
+    .topbar-inner {
+      width: min(1260px, calc(100% - 32px));
+      min-height: 64px;
+      margin: auto;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      font-weight: 780;
+      white-space: nowrap;
+    }
+    .brand-mark {
+      width: 30px;
+      aspect-ratio: 1;
+      display: grid;
+      place-items: center;
+      border-radius: 9px;
+      color: #ffffff;
+      background: var(--green);
+      box-shadow: 0 0 28px rgba(73, 224, 181, .25);
+    }
+    nav {
+      margin-left: auto;
+      display: flex;
+      gap: 2px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    nav::-webkit-scrollbar { display: none; }
+    nav a {
+      padding: 8px 10px;
+      border-radius: 9px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    nav a:hover, nav a:focus-visible { color: var(--ink); background: rgba(8,124,103,.07); }
+
+    .shell { width: min(1180px, calc(100% - 32px)); margin: auto; }
+    section { padding: 86px 0; border-top: 1px solid rgba(25, 83, 69, .09); }
+    .hero { padding: 86px 0 70px; border-top: 0; }
+    .hero-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 48px; align-items: center; }
+    .eyebrow, .kicker {
+      color: var(--green);
+      font: 750 12px/1.2 var(--mono);
+      letter-spacing: .065em;
+      text-transform: uppercase;
+    }
+    .eyebrow {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 7px 11px;
+      border: 1px solid rgba(73,224,181,.25);
+      border-radius: 999px;
+      background: var(--green-soft);
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 5px rgba(73,224,181,.1); }
+    h1 { margin: 22px 0 20px; font-size: clamp(43px, 6.4vw, 78px); line-height: .99; letter-spacing: -.06em; }
+    h1 span { display: block; color: var(--green); }
+    h2 { margin: 8px 0 0; font-size: clamp(31px, 4vw, 50px); line-height: 1.05; letter-spacing: -.045em; }
+    h3 { margin: 0 0 8px; font-size: 19px; line-height: 1.28; }
+    p { margin: 0; }
+    .lede { max-width: 720px; color: #3e5951; font-size: clamp(17px, 2vw, 21px); }
+    .hero-actions { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 10px; }
+    .btn {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 16px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      color: var(--ink);
+      background: rgba(8,124,103,.035);
+      text-decoration: none;
+      font-weight: 730;
+      cursor: pointer;
+    }
+    .btn.primary { border-color: transparent; color: #ffffff; background: var(--green); }
+    .btn:hover { transform: translateY(-1px); }
+
+    .truth-card {
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 24px;
+      background: linear-gradient(145deg, #ffffff, #f2f8f5);
+      box-shadow: var(--shadow);
+    }
+    .truth-head { padding: 18px 20px; display: flex; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); color: var(--muted); font: 12px/1.4 var(--mono); }
+    .truth-row { padding: 22px; display: grid; grid-template-columns: 105px 1fr; gap: 18px; border-bottom: 1px solid var(--line); }
+    .truth-row:last-child { border-bottom: 0; }
+    .truth-row p { color: var(--muted); font-size: 14px; }
+    .truth-row b { display: block; margin-bottom: 5px; }
+
+    .status {
+      display: inline-flex;
+      width: max-content;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 9px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font: 760 11px/1.1 var(--mono);
+      white-space: nowrap;
+    }
+    .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .implemented { color: var(--green); background: var(--green-soft); }
+    .interface { color: var(--amber); background: var(--amber-soft); }
+    .designed { color: var(--blue); background: var(--blue-soft); }
+    .longterm { color: var(--violet); background: var(--violet-soft); }
+    .missing { color: var(--red); background: var(--red-soft); }
+
+    .boundary-banner {
+      margin-top: 36px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .boundary-half { padding: 24px; background: #ffffff; }
+    .boundary-half + .boundary-half { border-left: 1px solid var(--line); background: rgba(115,169,255,.055); }
+    .boundary-half h3 { display: flex; align-items: center; gap: 10px; }
+    .boundary-half ul { margin: 14px 0 0; padding-left: 20px; color: var(--muted); }
+
+    .section-head { margin-bottom: 34px; display: grid; grid-template-columns: 1fr minmax(300px, .78fr); gap: 36px; align-items: end; }
+    .section-copy { color: var(--muted); }
+    .panel { border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255,255,255,.97); box-shadow: 0 15px 45px rgba(25,73,62,.07); }
+
+    .filterbar { margin-bottom: 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .filter-label { margin-right: 8px; color: var(--faint); font: 12px var(--mono); }
+    .filter-btn {
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+    }
+    .filter-btn.active { color: var(--ink); border-color: var(--green); background: var(--green-soft); }
+    [data-layer].dimmed { opacity: .18; filter: saturate(.25); }
+
+    .five-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+    .capability { min-height: 280px; padding: 20px; position: relative; overflow: hidden; }
+    .capability::after { content: attr(data-number); position: absolute; right: 11px; bottom: -22px; color: rgba(8,124,103,.05); font: 900 92px/1 var(--mono); }
+    .capability .status { margin-bottom: 20px; }
+    .capability p { color: var(--muted); font-size: 14px; }
+    .capability ul { margin: 15px 0 0; padding-left: 18px; color: #38534b; font-size: 13px; }
+    .capability li + li { margin-top: 7px; }
+
+    .flow-shell { padding: 24px; }
+    .flow-title { margin-bottom: 18px; display: flex; justify-content: space-between; gap: 20px; color: var(--muted); font: 12px var(--mono); }
+    .flow-line { display: grid; grid-template-columns: 1fr 32px 1fr 32px 1fr 32px 1fr; align-items: stretch; }
+    .flow-node { min-height: 152px; padding: 18px; border: 1px solid var(--line); border-radius: 15px; background: var(--panel-2); }
+    .flow-node p { color: var(--muted); font-size: 13px; }
+    .flow-node .status { margin-bottom: 15px; }
+    .flow-arrow { display: grid; place-items: center; color: var(--faint); font-size: 22px; }
+    .stop-line { margin-top: 18px; padding: 16px 18px; display: flex; gap: 12px; align-items: flex-start; border: 1px solid rgba(196,66,80,.28); border-radius: 14px; color: #7d2630; background: var(--red-soft); }
+    .stop-line b { white-space: nowrap; }
+
+    .gap-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+    table { width: 100%; border-collapse: collapse; min-width: 850px; background: rgba(255,255,255,.98); }
+    th, td { padding: 16px 18px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); background: rgba(8,124,103,.045); font: 720 12px/1.35 var(--mono); }
+    td { font-size: 14px; }
+    td p { margin-top: 4px; color: var(--muted); font-size: 13px; }
+    tr:last-child td { border-bottom: 0; }
+
+    .architecture { display: grid; gap: 13px; }
+    .arch-row { display: grid; grid-template-columns: 155px 1fr; gap: 13px; align-items: stretch; }
+    .arch-label { padding: 16px; display: grid; align-content: center; border: 1px solid var(--line); border-radius: 15px; color: var(--muted); background: rgba(8,124,103,.035); font: 700 12px/1.45 var(--mono); }
+    .arch-content { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 15px; background: rgba(244,248,247,.84); }
+    .arch-module { padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+    .arch-module b { display: block; margin: 9px 0 5px; font-size: 14px; }
+    .arch-module p { color: var(--muted); font-size: 12px; }
+    .arch-row.future .arch-content { border-color: rgba(115,169,255,.3); background: rgba(115,169,255,.035); }
+    .arch-row.long .arch-content { border-color: rgba(195,154,255,.28); background: rgba(195,154,255,.03); }
+    .architecture-note { margin-top: 18px; padding: 18px 20px; border-left: 3px solid var(--amber); color: #493b20; background: var(--amber-soft); }
+
+    .signals-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; }
+    .signal-card { padding: 20px; }
+    .signal-head { margin-bottom: 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .signal-card p { color: var(--muted); font-size: 14px; }
+    .signal-card .formula { margin-top: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; color: #075f50; background: #f2f8f6; font: 12px/1.6 var(--mono); overflow-wrap: anywhere; }
+
+    .simulator { padding: 24px; }
+    .sim-note { margin-bottom: 20px; padding: 12px 14px; border-radius: 11px; color: #244e91; background: var(--blue-soft); font-size: 13px; }
+    .scenario-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .scenario {
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+    }
+    .scenario.active { color: var(--ink); border-color: var(--blue); background: var(--blue-soft); }
+    .state-flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 9px; }
+    .state-node { padding: 15px; border: 1px solid var(--line); border-radius: 13px; color: var(--faint); background: rgba(8,124,103,.025); transition: .2s ease; }
+    .state-node b { display: block; color: inherit; font: 750 12px/1.2 var(--mono); }
+    .state-node span { display: block; margin-top: 6px; font-size: 12px; }
+    .state-node.active { color: var(--ink); border-color: var(--green); background: var(--green-soft); box-shadow: 0 0 30px rgba(73,224,181,.09); }
+    .timeline { margin-top: 22px; display: grid; grid-template-columns: repeat(18, 1fr); gap: 5px; }
+    .step { min-width: 0; padding: 10px 3px; border: 1px solid var(--line); border-radius: 8px; text-align: center; background: #eff6f3; }
+    .step b { display: block; font: 700 10px var(--mono); }
+    .step small { display: block; margin-top: 5px; color: var(--muted); font: 9px var(--mono); overflow: hidden; }
+    .step.skip { background: #f5f8f7; }
+    .step.anchor { border-color: rgba(73,224,181,.5); background: var(--green-soft); }
+    .step.warn { border-color: var(--amber); background: var(--amber-soft); }
+    .step.recover { border-color: var(--red); background: var(--red-soft); }
+    .step.probation { border-color: var(--blue); background: var(--blue-soft); }
+    .sim-result { margin-top: 18px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .metric { padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: rgba(8,124,103,.025); }
+    .metric strong { display: block; font-size: 20px; }
+    .metric span { color: var(--muted); font-size: 11px; }
+
+    .semantics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; }
+    .semantic { padding: 20px; }
+    .semantic .level { margin-bottom: 16px; color: var(--faint); font: 12px var(--mono); }
+    .semantic p { color: var(--muted); font-size: 14px; }
+    .semantic.current { border-color: rgba(73,224,181,.34); }
+    .semantic.target { border-color: rgba(115,169,255,.34); }
+    .semantic.deep { border-color: rgba(195,154,255,.34); }
+
+    .sequence { display: grid; grid-template-columns: 160px 1fr; gap: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+    .seq-who, .seq-event { padding: 15px 18px; border-bottom: 1px solid var(--line); }
+    .seq-who { color: var(--muted); background: rgba(8,124,103,.04); font: 700 12px var(--mono); }
+    .seq-event { position: relative; background: rgba(255,255,255,.96); }
+    .seq-event::before { content: "→"; margin-right: 10px; color: var(--green); }
+    .seq-event p { display: inline; color: var(--muted); font-size: 13px; }
+    .sequence > :nth-last-child(-n+2) { border-bottom: 0; }
+
+    .contract-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .code-card { overflow: hidden; }
+    .code-head { padding: 13px 16px; display: flex; justify-content: space-between; color: var(--muted); border-bottom: 1px solid var(--line); font: 12px var(--mono); }
+    pre { margin: 0; padding: 18px; overflow-x: auto; color: #29443c; background: #f3f8f6; font-size: 12px; line-height: 1.65; }
+    .kw { color: var(--violet); }
+    .str { color: var(--green); }
+    .comment { color: var(--faint); }
+    .key { color: var(--blue); }
+    .num { color: var(--amber); }
+
+    .roadmap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .phase { padding: 22px; position: relative; overflow: hidden; }
+    .phase-no { display: block; margin-bottom: 16px; color: var(--blue); font: 750 12px var(--mono); }
+    .phase p { color: var(--muted); font-size: 14px; }
+    .phase ul { margin: 15px 0 0; padding-left: 18px; font-size: 13px; color: #38534b; }
+    .phase li + li { margin-top: 7px; }
+    .phase .exit { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--green); font-size: 12px; }
+
+    .acceptance { margin-top: 16px; padding: 22px; }
+    .checks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 26px; margin-top: 16px; }
+    .check { display: grid; grid-template-columns: 24px 1fr; gap: 10px; color: var(--muted); font-size: 13px; }
+    .check i { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 6px; color: #ffffff; background: var(--green); font-style: normal; font-weight: 900; }
+
+    .comparison-note { margin-top: 14px; padding: 16px 18px; border-radius: 13px; color: var(--muted); background: rgba(8,124,103,.035); font-size: 13px; }
+    .source-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .source { padding: 18px; }
+    .source code { display: block; margin-bottom: 7px; font-size: 12px; overflow-wrap: anywhere; }
+    .source p { color: var(--muted); font-size: 13px; }
+
+    .reader-note {
+      margin-bottom: 24px;
+      padding: 18px 20px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 14px;
+      align-items: start;
+      border: 1px solid rgba(53,109,200,.22);
+      border-radius: 15px;
+      background: var(--blue-soft);
+    }
+    .reader-note .reader-icon {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      color: #fff;
+      background: var(--blue);
+      font-weight: 850;
+    }
+    .reader-note p { margin-top: 4px; color: var(--muted); }
+    .plain-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; }
+    .plain-card { padding: 21px; }
+    .plain-no { display: block; margin-bottom: 15px; color: var(--green); font: 780 12px var(--mono); }
+    .plain-card p { color: var(--muted); font-size: 14px; }
+    .plain-card .example { margin-top: 15px; padding: 11px 12px; border-radius: 10px; color: #29443c; background: var(--panel-2); font-size: 12px; }
+
+    .compare-runs { display: grid; gap: 14px; }
+    .run-row { display: grid; grid-template-columns: 190px 1fr; gap: 14px; align-items: center; }
+    .run-label { color: var(--muted); font-size: 13px; }
+    .run-label b { display: block; color: var(--ink); font-size: 15px; }
+    .run-steps { display: grid; grid-template-columns: repeat(12, 1fr); gap: 6px; }
+    .run-step { min-width: 0; padding: 10px 3px; border: 1px solid var(--line); border-radius: 8px; text-align: center; font: 760 10px var(--mono); }
+    .run-step.real { color: #fff; border-color: var(--green); background: var(--green); }
+    .run-step.guess { color: var(--muted); border-style: dashed; background: #f4f7f6; }
+    .run-legend { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 12px; }
+    .run-legend span { display: inline-flex; align-items: center; gap: 7px; }
+    .run-legend i { width: 11px; height: 11px; border-radius: 3px; background: var(--green); }
+    .run-legend .guess-key i { border: 1px dashed var(--muted); background: #f4f7f6; }
+
+    .story-grid { margin-top: 18px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; }
+    .story-card { padding: 22px; }
+    .story-card .big { margin-bottom: 13px; color: var(--green); font: 850 26px/1 var(--mono); }
+    .story-card p { color: var(--muted); font-size: 14px; }
+    .story-arrow { margin: 18px 0; padding: 17px 20px; border-left: 3px solid var(--red); color: #6f2e35; background: var(--red-soft); }
+
+    .two-paths { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .path { padding: 22px; }
+    .path-title { margin-bottom: 16px; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .path-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); font: 12px var(--mono); }
+    .path-node { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+    .path.bad .path-node:nth-of-type(n+2) { border-color: rgba(196,66,80,.24); background: var(--red-soft); }
+    .path p { margin-top: 16px; color: var(--muted); font-size: 14px; }
+
+    .plain-status { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .plain-status-card { padding: 23px; }
+    .plain-status-card ul { margin: 15px 0 0; padding-left: 20px; color: var(--muted); }
+    .plain-status-card li + li { margin-top: 8px; }
+    .plain-status-card.current { border-top: 4px solid var(--green); }
+    .plain-status-card.future-box { border-top: 4px solid var(--blue); }
+    .plain-warning { margin-top: 14px; padding: 18px 20px; border: 1px solid rgba(155,102,8,.2); border-radius: 14px; color: #51401f; background: var(--amber-soft); }
+
+    .question-flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+    .question { min-height: 180px; padding: 19px; border: 1px solid var(--line); border-radius: 15px; background: #fff; }
+    .question b { display: block; margin: 11px 0 7px; }
+    .question p { color: var(--muted); font-size: 13px; }
+    .question .q { color: var(--green); font: 800 12px var(--mono); }
+
+    details { border: 1px solid var(--line); border-radius: 13px; background: #fff; }
+    details + details { margin-top: 9px; }
+    summary { padding: 17px 19px; cursor: pointer; font-weight: 740; }
+    details p { padding: 0 19px 18px; color: var(--muted); }
+    .term-table td:first-child { width: 190px; font-weight: 760; }
+    .term-table code { display: block; margin-top: 3px; color: var(--faint); font-size: 11px; font-weight: 500; }
+
+    footer { padding: 38px 0 50px; color: var(--faint); border-top: 1px solid var(--line); font-size: 12px; }
+    .footer-inner { display: flex; justify-content: space-between; gap: 20px; }
+
+    @media (max-width: 980px) {
+      .hero-grid, .section-head { grid-template-columns: 1fr; }
+      .five-grid { grid-template-columns: repeat(2, 1fr); }
+      .flow-line { grid-template-columns: 1fr; gap: 8px; }
+      .flow-arrow { transform: rotate(90deg); }
+      .arch-row { grid-template-columns: 1fr; }
+      .arch-content { grid-template-columns: repeat(2, 1fr); }
+      .signals-grid, .roadmap, .source-grid { grid-template-columns: repeat(2, 1fr); }
+      .semantics-grid { grid-template-columns: repeat(2, 1fr); }
+      .plain-grid, .question-flow { grid-template-columns: repeat(2, 1fr); }
+      .story-grid { grid-template-columns: 1fr; }
+      nav { display: none; }
+    }
+    @media (max-width: 680px) {
+      section { padding: 64px 0; }
+      .hero { padding-top: 58px; }
+      .boundary-banner, .contract-grid { grid-template-columns: 1fr; }
+      .boundary-half + .boundary-half { border-left: 0; border-top: 1px solid var(--line); }
+      .five-grid, .signals-grid, .roadmap, .semantics-grid, .source-grid, .checks { grid-template-columns: 1fr; }
+      .plain-grid, .plain-status, .two-paths, .question-flow { grid-template-columns: 1fr; }
+      .run-row { grid-template-columns: 1fr; }
+      .run-steps { grid-template-columns: repeat(6, 1fr); }
+      .arch-content { grid-template-columns: 1fr; }
+      .state-flow { grid-template-columns: 1fr; }
+      .timeline { grid-template-columns: repeat(6, 1fr); }
+      .sim-result { grid-template-columns: repeat(2, 1fr); }
+      .sequence { grid-template-columns: 105px 1fr; }
+      .truth-row { grid-template-columns: 1fr; }
+      .footer-inner { flex-direction: column; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#top"><span class="brand-mark">R</span><span>Difflet Cache Core · Quality Recovery</span></a>
+      <nav aria-label="页面导航">
+        <a href="#plain-start">从零开始</a>
+        <a href="#example">具体例子</a>
+        <a href="#plain-status">现在做到哪</a>
+        <a href="#capabilities">完整闭环</a>
+        <a href="#target">目标架构</a>
+        <a href="#simulator">状态机</a>
+        <a href="#roadmap">实施阶段</a>
+        <a href="#faq">常见问题</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="shell">
+        <div class="hero-grid">
+          <div>
+            <div class="eyebrow"><span class="dot"></span>Research dossier · Current state × Target design</div>
+            <h1>缓存加速以后，<span>怎样防止图像悄悄变差</span></h1>
+            <p class="lede">这份页面从一次普通图像生成讲起：哪些步骤真的运行大模型，哪些步骤用估计值代替，误差为什么会积累，系统怎样发现问题、暂停加速并确认质量已经恢复。</p>
+            <div class="hero-actions">
+              <a class="btn primary" href="#plain-start">从零开始阅读</a>
+              <a class="btn" href="#plain-status">直接看当前状态</a>
+              <a class="btn" href="cache-system-architecture.html">打开原总架构页</a>
+            </div>
+          </div>
+          <aside class="truth-card" aria-label="最重要的事实边界">
+            <div class="truth-head"><span>STATUS SNAPSHOT</span><span>2026-07-31</span></div>
+            <div class="truth-row">
+              <span class="status implemented">已实现</span>
+              <div><b>固定的安全规则</b><p>开头和结尾坚持真实计算；预测次数不能无限连续；遇到模型含义变化时丢弃旧数据。</p></div>
+            </div>
+            <div class="truth-row">
+              <span class="status interface">接口已预留</span>
+              <div><b>收到通知后暂停加速</b><p>其他组件可以要求连续几步恢复真实计算并清空旧记录，但目前没有组件会自动发出通知。</p></div>
+            </div>
+            <div class="truth-row">
+              <span class="status designed">尚属设计</span>
+              <div><b>运行中自动发现质量变差</b><p>比较“本来会猜成什么”和“真实算出来是什么”、识别持续偏离、分级处理等功能尚未编码。</p></div>
+            </div>
+            <div class="truth-row">
+              <span class="status longterm">长期方案</span>
+              <div><b>撤销已经造成的误差</b><p>在模型内部修正估计值，或者回到较早的安全状态重新计算，这两类能力尚未实现。</p></div>
+            </div>
+          </aside>
+        </div>
+
+        <div class="boundary-banner" id="boundary">
+          <article class="boundary-half">
+            <h3><span class="status implemented">当前事实</span>现在能够做什么</h3>
+            <ul>
+              <li>在开头、结尾、特殊切换点和连续预测过多时，强制运行真实模型。</li>
+              <li>收到明确的恢复请求后，清空旧预测依据，并连续获得几个真实结果。</li>
+              <li>记录真实计算、估计、强制恢复、历史重置等主要次数；每一步的执行决定本身带原因标记。</li>
+              <li>生成结束后，由离线实验闭环按最坏样本质量门拒绝不安全候选。</li>
+            </ul>
+          </article>
+          <article class="boundary-half">
+            <h3><span class="status designed">目标设计</span>刚才建议但尚未实现</h3>
+            <ul>
+              <li>运行中自动判断预测误差是否正在扩大。</li>
+              <li>在真实计算点比较估计结果和真实结果，并观察误差是否持续扩大。</li>
+              <li>把短暂波动、可恢复异常和严重异常分开处理。</li>
+              <li>恢复后先保守观察；仍不安全时，本次生成彻底关闭缓存加速。</li>
+              <li>未来在模型内部修正，或回到较早的安全状态重新执行。</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="plain-start">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">01 / Start here</span><h2>先理解缓存到底省掉了什么</h2></div>
+          <p class="section-copy">不需要先懂扩散模型。只要记住：生成一张图要重复运行很多次大型计算；相邻两次结果常常相似，所以系统会尝试少算几次。</p>
+        </div>
+        <div class="reader-note">
+          <div class="reader-icon">i</div>
+          <div><b>本文统一使用“真实计算”和“估计结果”。</b><p>代码里的 Transformer、anchor、prediction、Policy、Predictor 等名称会放在括号或技术附录里，不影响理解正文。</p></div>
+        </div>
+        <div class="plain-grid">
+          <article class="panel plain-card"><span class="plain-no">第一件事</span><h3>生成不是一次完成</h3><p>FLUX 通常要重复几十轮。每一轮都根据当前中间状态，判断下一轮应该怎样减少噪声。</p><div class="example">例如：一张图可能经历 50 个连续步骤。</div></article>
+          <article class="panel plain-card"><span class="plain-no">第二件事</span><h3>大型模型最耗时间</h3><p>每一步里最贵的是运行完整模型。更新中间图像状态的那部分计算相对便宜。</p><div class="example">所以加速重点是少运行几次完整模型。</div></article>
+          <article class="panel plain-card"><span class="plain-no">第三件事</span><h3>缓存用估计代替真算</h3><p>系统保留最近几次真实结果，并用它们估计某一步的模型输出；该步仍然存在，只是没有运行完整模型。</p><div class="example">“跳过一步”实际是跳过大型模型，不是删除整轮生成。</div></article>
+          <article class="panel plain-card"><span class="plain-no">第四件事</span><h3>估计会带来误差</h3><p>若真实变化不是直线，估计就会偏离。这个偏离会进入下一轮，并可能在后面持续放大。</p><div class="example">速度来自少算；质量风险也来自少算。</div></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="example">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">02 / A concrete example</span><h2>用 12 步生成看懂真实计算与估计</h2></div>
+          <p class="section-copy">下面不是某次正式实验，只是把执行过程缩短到 12 步。第一行每步都运行真实模型；第二行在部分步骤使用估计值。</p>
+        </div>
+        <div class="panel flow-shell compare-runs">
+          <div class="run-row">
+            <div class="run-label"><b>不开缓存</b>12 次真实模型计算</div>
+            <div class="run-steps" aria-label="不开缓存的十二个真实计算步骤">
+              <span class="run-step real">真 0</span><span class="run-step real">真 1</span><span class="run-step real">真 2</span><span class="run-step real">真 3</span><span class="run-step real">真 4</span><span class="run-step real">真 5</span><span class="run-step real">真 6</span><span class="run-step real">真 7</span><span class="run-step real">真 8</span><span class="run-step real">真 9</span><span class="run-step real">真 10</span><span class="run-step real">真 11</span>
+            </div>
+          </div>
+          <div class="run-row">
+            <div class="run-label"><b>开启缓存</b>7 次真实计算 + 5 次估计</div>
+            <div class="run-steps" aria-label="开启缓存后的真实与估计步骤">
+              <span class="run-step real">真 0</span><span class="run-step real">真 1</span><span class="run-step real">真 2</span><span class="run-step guess">估 3</span><span class="run-step guess">估 4</span><span class="run-step real">真 5</span><span class="run-step guess">估 6</span><span class="run-step guess">估 7</span><span class="run-step real">真 8</span><span class="run-step guess">估 9</span><span class="run-step real">真 10</span><span class="run-step real">真 11</span>
+            </div>
+          </div>
+          <div class="run-legend"><span><i></i>真：完整模型实际运行</span><span class="guess-key"><i></i>估：根据以前的真实结果推算</span></div>
+        </div>
+
+        <div class="story-grid">
+          <article class="panel story-card"><div class="big">0–2</div><h3>先积累可靠依据</h3><p>最开始连续真实计算，系统才能看出模型输出最近怎样变化。没有足够的真实结果时，不允许开始估计。</p></article>
+          <article class="panel story-card"><div class="big">3–4</div><h3>用过去推算现在</h3><p>完整模型不运行。系统根据步骤 0–2 的真实结果估计步骤 3 和 4，然后继续更新图像的中间状态。</p></article>
+          <article class="panel story-card"><div class="big">5</div><h3>重新获得一个真实结果</h3><p>模型再次真实运行。这个结果可以作为后续估计的新依据，但它不会自动撤销步骤 3–4 已经造成的状态偏移。</p></article>
+        </div>
+        <div class="story-arrow"><b>最重要的因果关系：</b>估计结果先改变中间状态 → 后面的真实模型是在“已经偏移的状态”上计算 → 因此以后真算一次，只能让未来更可靠，不能让过去从未发生。</div>
+
+        <div class="two-paths">
+          <article class="panel path"><div class="path-title"><h3>参考路径：每步真算</h3><span class="status implemented">基准</span></div><div class="path-line"><span class="path-node">状态 2</span>→<span class="path-node">真实输出 3</span>→<span class="path-node">状态 3A</span>→<span class="path-node">真实输出 4</span></div><p>每一步都沿着完整模型给出的方向前进，作为质量比较的参考。</p></article>
+          <article class="panel path bad"><div class="path-title"><h3>缓存路径：第 3 步估计偏了</h3><span class="status missing">开始偏离</span></div><div class="path-line"><span class="path-node">状态 2</span>→<span class="path-node">估计输出 3</span>→<span class="path-node">状态 3B</span>→<span class="path-node">后来真实计算</span></div><p>后来真实计算面对的是状态 3B，而不是参考路径的状态 3A；它能阻止继续盲猜，却不能直接回到 3A。</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="plain-status">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">03 / What exists today</span><h2>当前系统能预防和止损，但不会自动发现</h2></div>
+          <p class="section-copy">这句话是整份设计的状态结论。下面左侧已经在代码中运行；右侧仍然只是设计目标。</p>
+        </div>
+        <div class="plain-status">
+          <article class="panel plain-status-card current">
+            <span class="status implemented">已经落实</span>
+            <h3 style="margin-top:16px">固定规则 + 收到通知后的恢复动作</h3>
+            <ul>
+              <li>开头连续真实计算，先取得可靠依据。</li>
+              <li>结尾连续真实计算，减少最后阶段直接留下估计误差。</li>
+              <li>限制连续估计的最大次数。</li>
+              <li>遇到预先声明的特殊切换点，清空旧记录并真算。</li>
+              <li>外部如果发来恢复通知，可以连续真算并重建依据。</li>
+            </ul>
+          </article>
+          <article class="panel plain-status-card future-box">
+            <span class="status designed">尚未落实</span>
+            <h3 style="margin-top:16px">自动监测 + 分级恢复 + 恢复后复查</h3>
+            <ul>
+              <li>运行中衡量估计与真实结果的差距。</li>
+              <li>判断差距是一次波动，还是正在持续扩大。</li>
+              <li>根据严重度选择多算一步、连续真算、降低加速强度或完全关闭缓存。</li>
+              <li>恢复后观察几步，确认安全后才重新加速。</li>
+              <li>严重错误时撤销已经造成的中间状态偏移。</li>
+            </ul>
+          </article>
+        </div>
+        <div class="plain-warning"><b>为什么这不是文字上的区别：</b>当前实测候选获得约 2.02× 加速，但最坏样本 PSNR 只有 25.98 dB。运行时没有触发恢复，因为固定规则都合法；直到生成完成后的离线评测，系统才知道该候选没有通过质量门。</div>
+      </div>
+    </section>
+
+    <section id="capabilities">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">04 / Five questions</span><h2>完整系统必须连续回答五个问题</h2></div>
+          <p class="section-copy">“多运行几次真实模型”只是一个动作。系统还要知道为什么触发、应该持续多久，以及恢复之后能不能重新开启加速。</p>
+        </div>
+        <div class="filterbar" aria-label="按实现状态筛选">
+          <span class="filter-label">强调显示</span>
+          <button class="filter-btn active" data-filter="all">全部</button>
+          <button class="filter-btn" data-filter="implemented">已实现</button>
+          <button class="filter-btn" data-filter="interface">已预留</button>
+          <button class="filter-btn" data-filter="designed">目标设计</button>
+          <button class="filter-btn" data-filter="longterm">长期纠错</button>
+        </div>
+        <div class="five-grid">
+          <article class="panel capability" data-layer="implemented" data-number="1">
+            <span class="status implemented">已实现</span>
+            <h3>1 · 哪些地方不能冒险？</h3>
+            <p>不测量图像质量，直接按已知风险规则禁止使用估计。</p>
+            <ul><li>开头和结尾连续真算</li><li>最后一步必须真算</li><li>连续估计次数设上限</li><li>旧依据失效时强制重建</li></ul>
+          </article>
+          <article class="panel capability" data-layer="designed" data-number="2">
+            <span class="status designed">目标设计</span>
+            <h3>2 · 估计是否正在变差？</h3>
+            <p>利用低成本信号，尽早发现估计结果开始偏离真实模型。</p>
+            <ul><li>在真实计算点做一次估计对照</li><li>观察模型输入变化趋势</li><li>区分生成早期和晚期</li><li>识别缓慢漂移与突然跳变</li></ul>
+          </article>
+          <article class="panel capability" data-layer="designed" data-number="3">
+            <span class="status designed">目标设计</span>
+            <h3>3 · 是波动还是故障？</h3>
+            <p>一次偏高不一定危险；连续偏高或突然剧增才需要升级动作。</p>
+            <ul><li>正常与可疑分开</li><li>恢复与恢复后观察分开</li><li>判断标准有明确版本</li><li>优先依据连续证据</li></ul>
+          </article>
+          <article class="panel capability" data-layer="interface" data-number="4">
+            <span class="status interface">部分具备</span>
+            <h3>4 · 应该采取多强的动作？</h3>
+            <p>当前可以连续真算并丢弃旧依据，但还不能按严重程度分级。</p>
+            <ul><li>已有：增加真实计算</li><li>已有：清空旧估计依据</li><li>缺少：降低估计激进程度</li><li>缺少：本次生成关闭缓存</li></ul>
+          </article>
+          <article class="panel capability" data-layer="interface" data-number="5">
+            <span class="status interface">离线已有</span>
+            <h3>5 · 怎样确认已经安全？</h3>
+            <p>生成结束后的评测很完整；生成过程中还不能确认恢复是否成功。</p>
+            <ul><li>已有：逐案例对照实验</li><li>已有：像素、感知和内部轨迹指标</li><li>缺少：运行中重新进入安全区的判断</li><li>缺少：恢复成功率统计</li></ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="current-flow">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">05 / Current execution</span><h2>当前每一步怎样运行，闭环又断在哪里</h2></div>
+          <p class="section-copy">现有代码会先检查安全规则，再考虑是否使用估计。缺少的是一个持续观察质量风险并主动发出恢复通知的组件。</p>
+        </div>
+        <div class="panel flow-shell">
+          <div class="flow-title"><span>当前实际执行顺序</span><span>以下四步已经进入 FLUX 生成路径</span></div>
+          <div class="flow-line">
+            <div class="flow-node" data-layer="implemented"><span class="status implemented">已实现</span><h3>读取本轮信息</h3><p>知道当前是第几步、生成阶段在哪里、是否遇到必须丢弃旧记录的特殊切换点。</p></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node" data-layer="implemented"><span class="status implemented">已实现</span><h3>先检查安全规则</h3><p>检查开头/结尾保护、外部恢复通知和连续估计上限；必要时直接要求真实计算。</p></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node" data-layer="implemented"><span class="status implemented">已实现</span><h3>决定真算还是估计</h3><p>如果允许加速，调度规则决定本步是否估计；估计方法只使用以前真实算出的结果。</p></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node" data-layer="implemented"><span class="status implemented">已实现</span><h3>更新图像中间状态</h3><p>无论模型输出是真算还是估计，都会被用于更新下一轮的中间状态。</p></div>
+          </div>
+          <div class="stop-line"><b>闭环断点</b><span>没有生产组件持续观察估计误差并自动发出恢复通知。因此只要固定规则没有被违反，运行时就不知道最终图像和参考结果已经产生明显差距。代码层对应的缺口是：没有生产调用者自动触发 <code>request_quality_recovery()</code>。</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="gaps">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">06 / What is missing</span><h2>问题不只是“开头和结尾多算几步”</h2></div>
+          <p class="section-copy">不同文字描述、随机种子和图像内容会产生不同难度。固定保护窗口不能识别某个具体案例是否正在失控。</p>
+        </div>
+        <div class="gap-table-wrap">
+          <table>
+            <thead><tr><th>问题</th><th>当前系统</th><th>目标能力</th><th>为什么重要</th></tr></thead>
+            <tbody>
+              <tr><td>什么时候开始变坏？</td><td><span class="status missing">未实现</span><p>现在只检查固定位置和连续估计次数。</p></td><td>在真实计算点比较“估计值”和“真实值”，同时观察输入变化趋势。</td><td>当前夜市场景质量失败时，运行器没有触发任何拦截或恢复。</td></tr>
+              <tr><td>一次偏高是否值得恢复？</td><td><span class="status missing">未实现</span><p>没有“可疑—恢复—观察”的连续状态。</p></td><td>连续多次偏高才升级；突然剧增则立即恢复；恢复后设置观察期。</td><td>只用一个阈值会频繁开关：要么牺牲速度，要么漏掉慢性漂移。</td></tr>
+              <tr><td>发现异常以后做什么？</td><td><span class="status interface">部分具备</span><p>只能连续真算若干步，并选择是否清空旧依据。</p></td><td>按严重度增加真算、减少连续估计、使用更保守方法或关闭缓存。</td><td>轻微风险和严重失控不应支付完全相同的恢复成本。</td></tr>
+              <tr><td>已经造成的偏移怎么办？</td><td><span class="status missing">未实现</span><p>以后真算不能撤销以前对中间状态的更新。</p></td><td>在完整模型内部提前修正，或保存安全状态并在严重时回退重算。</td><td>这决定系统只能“止损”，还是能够真正撤销错误。</td></tr>
+              <tr><td>怎样知道恢复成功？</td><td><span class="status interface">仅离线</span><p>现在要等整张图生成结束后才评测。</p></td><td>恢复后保守运行一段时间，并再次比较估计与真实结果。</td><td>否则多真算几步后，系统可能立即回到刚才的危险配置。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="target">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">07 / Target architecture</span><h2>目标系统怎样把监测、恢复和正常加速分开</h2></div>
+          <p class="section-copy">正常加速负责“哪里少算、少算时怎样估计”；质量监测只负责收集风险证据；恢复控制只负责决定什么时候暂停或降低加速。分开以后才能单独调优和审计。</p>
+        </div>
+        <div class="question-flow" style="margin-bottom:22px">
+          <div class="question"><span class="q">问题 1</span><b>本步按固定规则安全吗？</b><p>开头、结尾、特殊切换点和连续估计超限时，直接真实计算。</p></div>
+          <div class="question"><span class="q">问题 2</span><b>当前案例是否开始偏离？</b><p>利用真实计算点的对照误差和低成本变化信号判断。</p></div>
+          <div class="question"><span class="q">问题 3</span><b>偏离需要多强的干预？</b><p>区分一次波动、持续偏离和严重跳变，选择不同动作。</p></div>
+          <div class="question"><span class="q">问题 4</span><b>恢复后是否真的稳定？</b><p>先进入保守观察期，连续安全后才恢复原来的加速强度。</p></div>
+          <div class="question"><span class="q">问题 5</span><b>最终质量是否有证据？</b><p>生成后仍用完整的对照实验和最坏案例质量门做最终判断。</p></div>
+        </div>
+        <div class="architecture" aria-label="目标质量恢复分层架构">
+          <div class="arch-row">
+            <div class="arch-label">第 0 层<br>本次生成方案</div>
+            <div class="arch-content">
+              <div class="arch-module" data-layer="implemented"><span class="status implemented">已实现</span><b>逐步计算方案</b><p>记录哪些步骤计划真实计算、使用哪种估计方法。代码中称 Cache Plan / Mask。</p></div>
+              <div class="arch-module" data-layer="implemented"><span class="status implemented">已实现</span><b>生成阶段坐标</b><p>把每一步与模型实际使用的时间和噪声阶段对应起来。</p></div>
+              <div class="arch-module" data-layer="implemented"><span class="status implemented">已实现</span><b>运行条件核对</b><p>模型、分辨率、总步数和更新算法必须与实验记录一致。</p></div>
+              <div class="arch-module" data-layer="designed"><span class="status designed">目标设计</span><b>恢复设置</b><p>未来把监测标准、观察期和降级动作写进带版本的配置。</p></div>
+            </div>
+          </div>
+          <div class="arch-row">
+            <div class="arch-label">第 1 层<br>正常加速执行</div>
+            <div class="arch-content">
+              <div class="arch-module" data-layer="implemented"><span class="status implemented">已实现</span><b>决定哪里少算</b><p>支持固定间隔、周期真实计算、明确步骤表和 TeaCache 动态规则。</p></div>
+              <div class="arch-module" data-layer="implemented"><span class="status implemented">已实现</span><b>决定估计值怎么算</b><p>当前支持最近变化延续和一阶/二阶 TaylorSeer 外推。</p></div>
+              <div class="arch-module" data-layer="implemented"><span class="status implemented">已实现</span><b>只保存真实依据</b><p>估计结果可以用于生成，但不能伪装成真实结果参与后面的数学拟合。</p></div>
+              <div class="arch-module" data-layer="implemented"><span class="status implemented">已实现</span><b>统一执行与拦截</b><p>历史不足、规则冲突、连续估计超限或特殊切换时强制真算；每次决定带原因标记，并累计主要运行计数。</p></div>
+            </div>
+          </div>
+          <div class="arch-row future">
+            <div class="arch-label">第 2 层<br>观察质量风险</div>
+            <div class="arch-content">
+              <div class="arch-module" data-layer="designed"><span class="status designed">目标设计</span><b>估计与真实结果对照</b><p>在本来就会真算的步骤，先估计一次，再与真实输出比较；不增加完整模型调用。</p></div>
+              <div class="arch-module" data-layer="interface"><span class="status interface">信号已有</span><b>低成本变化信号</b><p>FLUX 已能取得 TeaCache 变化量，但当前只帮助决定是否少算，没有用于自动恢复。</p></div>
+              <div class="arch-module" data-layer="designed"><span class="status designed">目标设计</span><b>不同阶段分别判断</b><p>生成早期和晚期的自然变化幅度不同，不能共用一个未经校准的阈值。</p></div>
+              <div class="arch-module" data-layer="designed"><span class="status designed">目标设计</span><b>连续偏离检测</b><p>同时识别缓慢累积和突然跳变，避免被单次正常波动误导。</p></div>
+            </div>
+          </div>
+          <div class="arch-row future">
+            <div class="arch-label">第 3 层<br>决定怎样恢复</div>
+            <div class="arch-content">
+              <div class="arch-module" data-layer="designed"><span class="status designed">目标设计</span><b>五种运行状态</b><p>正常、可疑、恢复中、恢复后观察、本次生成关闭缓存。</p></div>
+              <div class="arch-module" data-layer="designed"><span class="status designed">目标设计</span><b>风险严重程度</b><p>轻微、警告和严重采用不同成本的动作，避免一出现波动就完全关闭加速。</p></div>
+              <div class="arch-module" data-layer="interface"><span class="status interface">动作部分已有</span><b>恢复动作</b><p>已有连续真算和清记录；未来增加降低估计强度与彻底关闭缓存。</p></div>
+              <div class="arch-module" data-layer="designed"><span class="status designed">目标设计</span><b>重新开启加速的门槛</b><p>恢复后必须连续观察安全，不能刚真算两步就立即恢复原来的激进设置。</p></div>
+            </div>
+          </div>
+          <div class="arch-row long">
+            <div class="arch-label">第 4 层<br>深入模型内部纠错</div>
+            <div class="arch-content">
+              <div class="arch-module" data-layer="longterm"><span class="status longterm">长期方案</span><b>先运行模型前部</b><p>用少量前部计算获得更可靠的变化判断，而不是直接猜整个模型最终输出。</p></div>
+              <div class="arch-module" data-layer="longterm"><span class="status longterm">长期方案</span><b>用模型后部修正</b><p>让后部若干层把近似的中间结果拉回更合理的范围。</p></div>
+              <div class="arch-module" data-layer="longterm"><span class="status longterm">长期方案</span><b>多种估计方法自动降级</b><p>复杂方法不稳定时，切换到更保守的方法，最终回到完全真实计算。</p></div>
+              <div class="arch-module" data-layer="longterm"><span class="status longterm">长期方案</span><b>回退并重新执行</b><p>保存较早的安全中间状态；严重错误时回到那里，重新计算已经污染的区间。</p></div>
+            </div>
+          </div>
+          <div class="arch-row">
+            <div class="arch-label">第 5 层<br>生成结束后证明</div>
+            <div class="arch-content">
+              <div class="arch-module" data-layer="implemented"><span class="status implemented">已实现</span><b>公平对照采集</b><p>缓存开关两边使用相同文字、随机种子、硬件和生成循环。</p></div>
+              <div class="arch-module" data-layer="implemented"><span class="status implemented">已实现</span><b>多角度质量评测</b><p>比较每一步内部状态、最终内部状态和解码图像。</p></div>
+              <div class="arch-module" data-layer="implemented"><span class="status implemented">已实现</span><b>不合格就拒绝</b><p>最坏案例没有同时通过全部质量门，就不生成生产配置。</p></div>
+              <div class="arch-module" data-layer="designed"><span class="status designed">目标设计</span><b>校准在线判断标准</b><p>用离线真实质量结果确定在线信号的阈值、漏报率和误报率。</p></div>
+            </div>
+          </div>
+        </div>
+        <div class="architecture-note"><b>为什么一定要分开：</b>正常加速规则不能一边决定“我要少算”，一边又自己证明“少算是安全的”。质量观察者只提供证据，恢复控制者可以临时否决加速，但每次否决的原因、持续多久、什么时候退出都必须记录。这样以后才能分别调整速度策略和安全策略。</div>
+      </div>
+    </section>
+
+    <section id="signals">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">08 / What can be measured</span><h2>生成过程中没有参考图，怎样判断可能变差</h2></div>
+          <p class="section-copy">线上只有正在生成的这一条路径，没有一张“每步都真实计算”的参考图。因此无法当场得到 PSNR、LPIPS 等最终分数，只能观察经过离线验证的低成本风险信号。</p>
+        </div>
+        <div class="signals-grid">
+          <article class="panel signal-card" data-layer="implemented">
+            <div class="signal-head"><h3>信号一：固定安全规则</h3><span class="status implemented">已实现</span></div>
+            <p>已知某些位置风险高，就直接真实计算，不需要先看到质量下降。</p>
+            <div class="formula">开头保护、结尾保护、最后一步、特殊切换点、连续估计上限。</div>
+          </article>
+          <article class="panel signal-card" data-layer="interface">
+            <div class="signal-head"><h3>信号二：模型输入变化有多大</h3><span class="status interface">数据路径已有</span></div>
+            <p>FLUX 已能低成本观察模型前部输入的变化幅度。当前它主要帮助 TeaCache 决定要不要少算，还没有接到恢复系统。</p>
+            <div class="formula">直观理解：与上一轮相比，模型即将处理的内容变化越大，沿用旧结果的风险通常越高。</div>
+          </article>
+          <article class="panel signal-card" data-layer="designed">
+            <div class="signal-head"><h3>信号三：估计与真实结果差多远</h3><span class="status designed">优先实现</span></div>
+            <p>在本来就会真实计算的步骤，先根据旧记录估计一次，再与刚得到的真实结果比较。只增加便宜的张量运算，不增加完整模型调用。</p>
+            <div class="formula">直观理解：同一个步骤同时得到“如果少算会猜成什么”和“真实模型算成什么”。两者差距就是最直接的在线风险证据。</div>
+          </article>
+          <article class="panel signal-card" data-layer="designed">
+            <div class="signal-head"><h3>信号四：差距是否持续扩大</h3><span class="status designed">目标设计</span></div>
+            <p>一次差距偏高可能只是正常波动。系统需要观察最近多次结果，让持续偏离比单次尖峰更有权重。</p>
+            <div class="formula">实现时可使用移动平均或累计变化检测；具体数学方法放在技术实现阶段选择。</div>
+          </article>
+          <article class="panel signal-card" data-layer="designed">
+            <div class="signal-head"><h3>信号五：这次估计本身有多冒险</h3><span class="status designed">目标设计</span></div>
+            <p>连续估计越久、相邻生成阶段变化越不均匀、所用曲线越复杂，结果通常越值得怀疑。</p>
+            <div class="formula">风险参考：生成阶段间距、距离最近真实结果有几步、估计方法复杂度、此前恢复次数。</div>
+          </article>
+          <article class="panel signal-card" data-layer="designed">
+            <div class="signal-head"><h3>最后：组合证据，而不是相信一个数字</h3><span class="status designed">目标设计</span></div>
+            <p>固定规则可以直接否决加速；其他风险最好由多个信号共同证明。不能让同一个变化值既决定少算，又独自证明少算安全。</p>
+            <div class="formula">原则：硬规则优先；持续偏离比单点波动重要；证据不足时回到真实计算。</div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="simulator">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">09 / Interactive example</span><h2>为什么需要“正常—可疑—恢复—观察”几个阶段</h2></div>
+          <p class="section-copy">下面用虚构的风险数字演示目标行为。点击不同情况可以看到系统怎样处理。它只是解释设计，不代表当前代码已经实现，也不是生产阈值。</p>
+        </div>
+        <div class="panel simulator">
+          <div class="sim-note"><b>怎样读：</b>每个小格是一轮生成；数字越大表示估计风险越高。“真”是真实计算，“估”是使用估计，“疑”是进入可疑状态，“恢”是强制恢复，“观”是恢复后的保守观察。</div>
+          <div class="scenario-row" role="group" aria-label="选择误差场景">
+            <button class="scenario active" data-scenario="healthy">稳定轨迹</button>
+            <button class="scenario" data-scenario="gradual">逐渐漂移</button>
+            <button class="scenario" data-scenario="spike">末段突变</button>
+            <button class="scenario" data-scenario="persistent">恢复失败</button>
+          </div>
+          <div class="state-flow" aria-label="恢复状态">
+            <div class="state-node active" data-state="HEALTHY"><b>正常</b><span>按原计划加速</span></div>
+            <div class="state-node" data-state="SUSPECT"><b>可疑</b><span>继续收集证据</span></div>
+            <div class="state-node" data-state="RECOVERING"><b>恢复中</b><span>连续真算并清旧记录</span></div>
+            <div class="state-node" data-state="PROBATION"><b>恢复后观察</b><span>暂时保持保守</span></div>
+            <div class="state-node" data-state="DENSE"><b>关闭本次缓存</b><span>剩余步骤全部真算</span></div>
+          </div>
+          <div class="timeline" id="simTimeline" aria-label="状态机步骤模拟"></div>
+          <div class="sim-result">
+            <div class="metric"><strong id="simFinalState">正常</strong><span>最终状态</span></div>
+            <div class="metric"><strong id="simRecoveries">0</strong><span>恢复触发次数</span></div>
+            <div class="metric"><strong id="simForced">0</strong><span>额外真实计算</span></div>
+            <div class="metric"><strong id="simWorst">0.00</strong><span>最大 proxy error</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="semantics">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">10 / Four levels of protection</span><h2>从提前预防到真正撤销错误，共有四个层级</h2></div>
+          <p class="section-copy">最容易混淆的是第二层：以后多真算几步能阻止误差继续扩大，却不会自动撤销以前对图像中间状态的更新。</p>
+        </div>
+        <div class="semantics-grid">
+          <article class="panel semantic current" data-layer="implemented"><div class="level">第 1 层 · 当前已有</div><h3>提前预防</h3><p>在已知危险位置坚持真实计算。它降低发生问题的概率，但并不知道某个具体案例的图像质量。</p></article>
+          <article class="panel semantic current" data-layer="interface"><div class="level">第 2 层 · 动作已有</div><h3>发现后止损</h3><p>收到异常通知后，丢弃旧依据并连续真算。它改善后面的估计，但不能撤销过去的中间状态更新。</p></article>
+          <article class="panel semantic target" data-layer="longterm"><div class="level">第 3 层 · 长期方案</div><h3>模型内部局部修正</h3><p>不直接估计整个模型最终输出，而是保留部分前部和后部真实计算，在结果用于更新图像前纠正近似值。</p></article>
+          <article class="panel semantic deep" data-layer="longterm"><div class="level">第 4 层 · 成本最高</div><h3>回到安全状态重算</h3><p>保存较早的安全中间状态；严重偏离时回到那里，重新执行受影响步骤。这才能严格撤销已经发生的错误。</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="sequence">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">11 / One recovery episode</span><h2>一次自动恢复从发现到结束会发生什么</h2></div>
+          <p class="section-copy">优先方案不会为了监测而每步多跑一次完整模型。它利用原计划中的真实计算点做对照，只有发现风险以后才增加真算。</p>
+        </div>
+        <div class="sequence" aria-label="目标恢复时序">
+          <div class="seq-who">正常执行</div><div class="seq-event"><b>按照已有方案决定真算或估计。</b> <p>估计方法只能参考以前的真实结果。</p></div>
+          <div class="seq-who">真实计算点</div><div class="seq-event"><b>先估计一次，再运行真实模型。</b> <p>两者比较后，得到“如果这里少算，会错多少”的直接证据。</p></div>
+          <div class="seq-who">质量观察</div><div class="seq-event"><b>结合最近趋势和当前生成阶段。</b> <p>判断这是正常波动、持续变差，还是突然出现严重异常。</p></div>
+          <div class="seq-who">状态判断</div><div class="seq-event"><b>从正常进入可疑或恢复。</b> <p>轻微异常需要连续证据；严重跳变可以立即触发恢复。</p></div>
+          <div class="seq-who">执行恢复</div><div class="seq-event"><b>连续真实计算并丢弃旧依据。</b> <p>未来还可根据严重程度降低估计强度或关闭本次缓存。</p></div>
+          <div class="seq-who">恢复后观察</div><div class="seq-event"><b>暂时保守运行并再次比较。</b> <p>连续安全后才重新开启原加速；仍不安全则剩余步骤全部真算。</p></div>
+          <div class="seq-who">留下证据</div><div class="seq-event"><b>记录触发原因、采取动作和恢复结果。</b> <p>生成结束后再验证在线判断与最终图像质量是否一致。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="glossary">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">Reader reference</span><h2>页面里的内部名词，用白话怎样理解</h2></div>
+          <p class="section-copy">正文不要求记住英文名。这里提供从读者语言到代码语言的对应关系，方便需要时回到实现。</p>
+        </div>
+        <div class="gap-table-wrap">
+          <table class="term-table">
+            <thead><tr><th>本文常用说法</th><th>它实际指什么</th><th>代码或论文里可能看到的名字</th></tr></thead>
+            <tbody>
+              <tr><td>真实计算<code>full compute</code></td><td>本轮真正运行一次完整 FLUX Transformer，得到真实模型输出。</td><td>full step / compute / anchor step</td></tr>
+              <tr><td>真实结果<code>anchor</code></td><td>真实计算产生的输出，可以作为后面估计的可靠依据。</td><td>anchor / real anchor / cached snapshot</td></tr>
+              <tr><td>估计结果<code>prediction</code></td><td>没有运行完整模型，而是根据以前真实结果推算出的替代输出。</td><td>prediction / forecast / cached output</td></tr>
+              <tr><td>哪里少算<code>Policy</code></td><td>一套步骤安排规则，只决定本轮真算还是估计，不负责生成估计值。</td><td>cache policy / schedule / mask</td></tr>
+              <tr><td>怎样估计<code>Predictor</code></td><td>给定以前真实结果后，具体怎样算出本轮替代输出。</td><td>predictor / calibrator / TaylorSeer</td></tr>
+              <tr><td>统一执行器<code>Runner</code></td><td>按照安全顺序调用各组件，拦截危险决定，并记录真实执行情况。</td><td>CacheRunner</td></tr>
+              <tr><td>固定安全规则<code>Recovery Guard</code></td><td>当前已经实现的开头/结尾保护、连续估计上限和外部恢复请求执行器。</td><td>QualityRecoveryGuard</td></tr>
+              <tr><td>质量观察者<code>Monitor</code></td><td>未来负责观察风险信号并判断是否正在偏离；当前尚未实现。</td><td>HealthMonitor / adaptive monitor</td></tr>
+              <tr><td>中间状态<code>latent</code></td><td>生成过程中尚未解码成图片的内部表示，每一轮都会根据模型输出更新。</td><td>latent / sample</td></tr>
+              <tr><td>特殊切换点<code>barrier</code></td><td>模型输入含义或执行阶段发生变化，旧的估计依据不再可信，必须清空并真算。</td><td>semantic barrier / force refresh</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">Reader FAQ</span><h2>读到这里最容易产生的六个问题</h2></div>
+          <p class="section-copy">这些答案同时说明当前实现边界和目标设计边界。</p>
+        </div>
+        <details open><summary>1. 现在的系统已经会自动发现图像质量下降吗？</summary><p>不会。它会检查固定安全规则，也能执行外部发来的恢复请求，但当前生产路径没有自动质量观察者。最终质量下降只能由生成结束后的离线评测发现。</p></details>
+        <details><summary>2. 开头和结尾多真实计算几步，不就足够了吗？</summary><p>不够。固定保护能覆盖普遍风险，却无法识别某个文字描述或随机种子是否特别难。当前同一配置在狐狸案例上可达到约 35.59 dB，而加入夜市场景后最坏结果降到约 25.98 dB，说明案例差异很大。</p></details>
+        <details><summary>3. 为什么线上不能直接计算 PSNR 或 LPIPS？</summary><p>这些指标需要一张每步都真实计算的参考结果。线上为了加速只运行缓存路径，没有同时生成参考路径；如果两条路径一起跑，成本会高于不开缓存。因此线上只能使用经过离线标定的风险信号。</p></details>
+        <details><summary>4. 在真实计算点做“估计—真实”对照会不会很贵？</summary><p>会增加一次廉价的张量估计和距离计算，但不会增加一次完整 Transformer 调用。实际开销仍必须在 Trainium 上计入端到端时间，不能只凭理论认定为零。</p></details>
+        <details><summary>5. 发现异常后连续真算，能把图像完全修好吗？</summary><p>不能保证。它能阻止继续使用过时依据，并改善未来步骤，所以属于止损。要撤销以前已经写入中间状态的误差，需要在误差进入前做模型内部修正，或回退到较早的安全状态重新执行。</p></details>
+        <details><summary>6. 为什么不直接一直真实计算，彻底没有风险？</summary><p>一直真实计算就是关闭缓存，质量最稳但没有缓存加速。恢复系统的目标是在证据安全时保留加速，在风险升高时主动支付更多计算，并在证据不足时回到真实计算。</p></details>
+      </div>
+    </section>
+
+    <section id="contracts">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">Technical appendix A</span><h2>给实现者看的接口草案</h2></div>
+          <p class="section-copy">普通读者可以跳过本节。这些接口尚未进入当前代码：质量观察组件只产生证据，恢复控制组件决定动作，统一执行器负责真正执行并记录统计。</p>
+        </div>
+        <div class="contract-grid">
+          <article class="panel code-card" data-layer="designed">
+            <div class="code-head"><span>monitor.py · proposed</span><span class="status designed">设计</span></div>
+            <pre><span class="kw">class</span> <span class="key">CacheHealthMonitor</span>(Protocol):
+    <span class="kw">def</span> observe_probe(context, signal) -> HealthEvent | <span class="kw">None</span>: ...
+
+    <span class="kw">def</span> observe_anchor_audit(
+        context,
+        predicted_output,
+        actual_output,
+        observation,
+    ) -> HealthEvent | <span class="kw">None</span>: ...
+
+    <span class="kw">def</span> reset_runtime_state() -> <span class="kw">None</span>: ...
+    <span class="kw">def</span> stats() -> Mapping[str, Any]: ...</pre>
+          </article>
+          <article class="panel code-card" data-layer="designed">
+            <div class="code-head"><span>recovery.py · proposed extension</span><span class="status designed">设计</span></div>
+            <pre><span class="kw">class</span> <span class="key">RecoveryAction</span>(Enum):
+    FORCE_ANCHOR = <span class="str">"force_anchor"</span>
+    RESET_HISTORY = <span class="str">"reset_history"</span>
+    LIMIT_HORIZON = <span class="str">"limit_horizon"</span>
+    LOWER_ORDER = <span class="str">"lower_order"</span>
+    DISABLE_CACHE = <span class="str">"disable_cache"</span>
+    ROLLBACK = <span class="str">"rollback"</span>  <span class="comment"># long-term</span>
+
+<span class="kw">class</span> <span class="key">RecoveryController</span>(Protocol):
+    <span class="kw">def</span> on_health_event(event) -> RecoveryDirective: ...
+    <span class="kw">def</span> before_step(context, history, observation): ...
+    <span class="kw">def</span> observe_anchor(...): ...</pre>
+          </article>
+          <article class="panel code-card" data-layer="designed">
+            <div class="code-head"><span>HealthEvent · proposed</span><span class="status designed">设计</span></div>
+            <pre>@dataclass(frozen=<span class="kw">True</span>)
+<span class="kw">class</span> <span class="key">HealthEvent</span>:
+    step_index: int
+    source: Literal[<span class="str">"shadow_error"</span>, <span class="str">"probe"</span>, <span class="str">"rule"</span>]
+    severity: Literal[<span class="str">"info"</span>, <span class="str">"warning"</span>, <span class="str">"critical"</span>]
+    value: float
+    threshold: float
+    phase_bin: str
+    evidence_version: str</pre>
+          </article>
+          <article class="panel code-card" data-layer="designed">
+            <div class="code-head"><span>cache-plan-v2 · proposed</span><span class="status designed">设计</span></div>
+            <pre>{
+  <span class="key">"recovery"</span>: {
+    <span class="key">"profile"</span>: <span class="str">"flux-shadow-ewma-v1"</span>,
+    <span class="key">"monitor"</span>: {
+      <span class="key">"metric"</span>: <span class="str">"relative-l1+cosine"</span>,
+      <span class="key">"phase_thresholds_digest"</span>: <span class="str">"sha256:..."</span>
+    },
+    <span class="key">"state_machine"</span>: {
+      <span class="key">"recovery_steps"</span>: <span class="num">2</span>,
+      <span class="key">"probation_steps"</span>: <span class="num">3</span>,
+      <span class="key">"max_recoveries"</span>: <span class="num">2</span>
+    }
+  }
+}</pre>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">12 / Staged implementation</span><h2>实施时先旁观，再接管，最后做深层纠错</h2></div>
+          <p class="section-copy">不能一开始就让尚未验证的判断自动改变生成结果。第一阶段只记录；证明信号可靠以后才允许它暂停加速；最后再改大型模型内部结构。</p>
+        </div>
+        <div class="roadmap">
+          <article class="panel phase">
+            <span class="phase-no">第一阶段 · 只观察</span>
+            <h3>记录风险，但不改变生成</h3>
+            <p>增加真实计算点上的“估计—真实”对照，把所有风险事件写入报告，但绝不触发恢复。</p>
+            <ul><li>比较估计值与真实值</li><li>按生成阶段分别统计</li><li>对照最终图像和内部轨迹质量</li><li>测量额外耗时、漏报和误报</li></ul>
+            <div class="exit"><b>进入下一阶段前：</b>在未参与调参的案例上，也能提前识别质量失败，而且监测成本可接受。</div>
+          </article>
+          <article class="panel phase">
+            <span class="phase-no">第二阶段 · 自动止损</span>
+            <h3>让监测结果可以暂停加速</h3>
+            <p>接通正常、可疑、恢复和观察状态，复用当前已有的“连续真算、清空旧依据”入口。</p>
+            <ul><li>弱异常先观察，严重异常立即恢复</li><li>连续真实计算并重建可靠依据</li><li>多次恢复失败后关闭本次缓存</li><li>完整记录原因、动作和恢复结果</li></ul>
+            <div class="exit"><b>进入下一阶段前：</b>失败案例质量明显改善，同时健康案例不会频繁误触发或失去全部加速。</div>
+          </article>
+          <article class="panel phase">
+            <span class="phase-no">第三阶段 · 真正纠错</span>
+            <h3>把估计和修正放进模型内部</h3>
+            <p>不再直接猜完整模型最终输出；保留部分真实模型层做判断和修正，并研究严重情况下的回退重算。</p>
+            <ul><li>前部少量真实计算用于判断变化</li><li>后部少量真实计算用于修正近似结果</li><li>增加 DMD、FoCa 等更稳定的估计方法</li><li>评估保存安全状态并回退重算</li></ul>
+            <div class="exit"><b>完成标准：</b>在相同质量门下，速度与质量的综合结果优于当前“直接估计完整输出”的方案。</div>
+          </article>
+        </div>
+        <div class="panel acceptance">
+          <h3>每个阶段都必须遵守的验证规则</h3>
+          <div class="checks">
+            <div class="check"><i>✓</i><span>判断标准只能用调参案例确定；最终验证案例不能反过来参与调参。</span></div>
+            <div class="check"><i>✓</i><span>同时报告发现了多少失败、误触发多少次和提前多少步发现，不能只展示成功图片。</span></div>
+            <div class="check"><i>✓</i><span>计划少算、实际少算、恢复增加的真算和彻底关闭缓存必须分开计数。</span></div>
+            <div class="check"><i>✓</i><span>监测组件异常或证据不足时回到真实计算，不能在未知状态下继续估计。</span></div>
+            <div class="check"><i>✓</i><span>恢复设置、判断标准摘要、代码版本和硬件信息都写入实验记录。</span></div>
+            <div class="check"><i>✓</i><span>比较完整生成耗时；监测、额外估计和恢复重算的成本全部计入。</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="comparison">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">13 / Existing frameworks</span><h2>与 Cache-DiT 相比，当前强项和短板是什么</h2></div>
+          <p class="section-copy">这里只比较系统提供哪些能力，不比较速度数字，因为双方没有在同一硬件、同一输入和同一质量门下测试。Difflet 更强调独立安全控制和实验审计；Cache-DiT 的实际估计与修正方法更丰富。</p>
+        </div>
+        <div class="gap-table-wrap">
+          <table>
+            <thead><tr><th>能力</th><th>Difflet 当前</th><th>Cache-DiT 当前文档能力</th><th>架构判断</th></tr></thead>
+            <tbody>
+              <tr><td>固定位置的安全保护</td><td>开头/结尾保护、最后一步、连续估计上限和特殊切换点均已明确实现。</td><td>也提供开头保护、连续缓存上限、逐步计算表和强制刷新。</td><td>双方都具备；Difflet 对“为什么被强制真算”的记录更明确。</td></tr>
+              <tr><td>运行中判断变化</td><td>FLUX 有 TeaCache 低成本变化信号，但当前没有交给独立恢复组件。</td><td>可以使用模型内部残差差距和动态裁剪阈值决定是否复用。</td><td>Difflet 的自动恢复监测目前落后。</td></tr>
+              <tr><td>在结果使用前做修正</td><td>当前直接估计完整模型输出；以后真算只能重新建立未来依据。</td><td>可运行模型前部获得稳定差值，也可运行后部修正近似的中间结果。</td><td>Cache-DiT 的实际数值修正能力更成熟。</td></tr>
+              <tr><td>估计方法选择</td><td>当前为最近变化延续和一阶/二阶 TaylorSeer。</td><td>除 TaylorSeer 外还有 DMD、FoCa，并能作用于残差或模型中间状态。</td><td>Difflet 当前方法库较少。</td></tr>
+              <tr><td>安全系统是否独立</td><td>恢复接口与正常步骤安排、估计方法分开，但自动观察者尚未实现。</td><td>相关能力主要组合在缓存设置和估计校准器中。</td><td>Difflet 的分层更利于独立调优，但仍是“架构先行、功能未满”。</td></tr>
+              <tr><td>实验和发布证据</td><td>同条件对照、最坏案例评测、冻结步骤表和不合格拒绝发布均已实现。</td><td>官方文档重点展示统一接口、配置方法和基准案例。</td><td>Difflet 的离线审计是优势，但它不能替代在线发现与恢复。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="comparison-note">Cache-DiT 参考：<a href="https://cache-dit.readthedocs.io/en/latest/user_guide/CACHE_API/">Unified Cache API 官方文档</a>。其中 DBCache、DBPrune、TaylorSeer、DMD、FoCa 与 SCM 的描述来自该页面；其示例数字不应直接与 Trainium 实验横向比较。</div>
+      </div>
+    </section>
+
+    <section id="sources">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="kicker">Technical appendix B</span><h2>当前实现描述分别对应哪些代码</h2></div>
+          <p class="section-copy">以下是本页面“已实现”判断的代码来源。页面里标为目标设计或长期方案的组件，目前没有对应生产文件。</p>
+        </div>
+        <div class="source-grid">
+          <article class="panel source"><code>difflet/pipeline/cache/recovery.py</code><p>固定安全规则、等待中的外部恢复请求、连续真算步数，以及清空恢复运行状态。</p></article>
+          <article class="panel source"><code>difflet/pipeline/cache/runner.py</code><p>先检查恢复规则、再询问正常步骤安排；负责清空历史、拦截危险估计、返回本步决定原因并累计主要计数。</p></article>
+          <article class="panel source"><code>difflet/pipeline/cache/session.py</code><p>提供与模型和硬件无关的每请求缓存接口，并把外部质量恢复请求交给统一执行器。</p></article>
+          <article class="panel source"><code>difflet/pipeline/cache/teacache_adapter.py</code><p>只把现有去噪循环的旧 TeaCache 方法翻译成通用会话调用，不保存独立调度或恢复状态。</p></article>
+          <article class="panel source"><code>difflet/pipeline/cache/predictors.py</code><p>当前两类估计方法：最近变化延续与 TaylorSeer；目标都是完整模型输出张量。</p></article>
+          <article class="panel source"><code>difflet/models/flux/pipeline.py</code><p>FLUX 中获得低成本变化量、选择估计或真算、更新中间状态和记录整条轨迹的位置。</p></article>
+          <article class="panel source"><code>docs/reports/flux-cache-parity-audit-20260731.md</code><p>当前最坏 25.98 dB、不同案例差异，以及更换坐标和延长结尾保护后的实验结论。</p></article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell footer-inner">
+      <span>Difflet Cache Core · Quality Recovery Architecture</span>
+      <span>绿色是事实；黄色是接口；蓝色是设计；紫色是长期方案。</span>
+    </div>
+  </footer>
+
+  <script>
+    const filterButtons = [...document.querySelectorAll('.filter-btn')];
+    const layered = [...document.querySelectorAll('[data-layer]')];
+    filterButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        filterButtons.forEach((item) => item.classList.remove('active'));
+        button.classList.add('active');
+        const wanted = button.dataset.filter;
+        layered.forEach((item) => {
+          item.classList.toggle('dimmed', wanted !== 'all' && item.dataset.layer !== wanted);
+        });
+      });
+    });
+
+    const scenarios = {
+      healthy: [0.02,0.02,0.03,0.03,0.04,0.03,0.04,0.04,0.03,0.04,0.04,0.05,0.04,0.04,0.05,0.05,0.04,0.05],
+      gradual: [0.02,0.03,0.03,0.04,0.05,0.06,0.08,0.10,0.12,0.14,0.05,0.04,0.04,0.05,0.05,0.04,0.05,0.05],
+      spike: [0.02,0.03,0.03,0.04,0.04,0.05,0.04,0.05,0.05,0.06,0.06,0.07,0.08,0.18,0.06,0.05,0.04,0.04],
+      persistent: [0.02,0.03,0.04,0.06,0.08,0.11,0.14,0.17,0.13,0.12,0.11,0.16,0.15,0.14,0.13,0.15,0.14,0.13]
+    };
+    const anchorSteps = new Set([0,1,2,5,8,11,14,17]);
+
+    function renderScenario(name) {
+      const values = scenarios[name];
+      const timeline = document.getElementById('simTimeline');
+      timeline.innerHTML = '';
+      let state = 'HEALTHY';
+      let warningStreak = 0;
+      let recoveryLeft = 0;
+      let probationLeft = 0;
+      let recoveries = 0;
+      let forced = 0;
+
+      values.forEach((value, index) => {
+        const plannedAnchor = anchorSteps.has(index);
+        let kind = plannedAnchor ? 'anchor' : 'skip';
+        let label = plannedAnchor ? '真' : '估';
+
+        if (state === 'DENSE') {
+          kind = 'recover'; label = '真'; forced += plannedAnchor ? 0 : 1;
+        } else if (state === 'RECOVERING') {
+          kind = 'recover'; label = '恢'; forced += plannedAnchor ? 0 : 1;
+          recoveryLeft -= 1;
+          if (recoveryLeft <= 0) { state = 'PROBATION'; probationLeft = 2; }
+        } else if (state === 'PROBATION') {
+          kind = 'probation'; label = '观'; forced += plannedAnchor ? 0 : 1;
+          if (value >= 0.12) {
+            state = name === 'persistent' && recoveries >= 2 ? 'DENSE' : 'RECOVERING';
+            if (state === 'RECOVERING') { recoveries += 1; recoveryLeft = 2; }
+          } else {
+            probationLeft -= 1;
+            if (probationLeft <= 0) { state = 'HEALTHY'; warningStreak = 0; }
+          }
+        } else {
+          if (value >= 0.16) {
+            state = 'RECOVERING'; recoveries += 1; recoveryLeft = 2;
+            kind = 'recover'; label = '恢'; forced += plannedAnchor ? 0 : 1;
+          } else if (value >= 0.08) {
+            warningStreak += 1;
+            state = 'SUSPECT'; kind = 'warn'; label = '疑';
+            if (warningStreak >= 2) {
+              state = 'RECOVERING'; recoveries += 1; recoveryLeft = 2;
+              kind = 'recover'; label = '恢'; forced += plannedAnchor ? 0 : 1;
+            }
+          } else {
+            warningStreak = Math.max(0, warningStreak - 1);
+            state = warningStreak ? 'SUSPECT' : 'HEALTHY';
+          }
+        }
+
+        const step = document.createElement('div');
+        step.className = `step ${kind}`;
+        step.title = `step ${index}: proxy=${value.toFixed(2)}, state=${state}`;
+        step.innerHTML = `<b>${index} · ${label}</b><small>${value.toFixed(2)}</small>`;
+        timeline.appendChild(step);
+      });
+
+      document.querySelectorAll('.state-node').forEach((node) => {
+        node.classList.toggle('active', node.dataset.state === state);
+      });
+      const stateNames = {
+        HEALTHY: '正常',
+        SUSPECT: '可疑',
+        RECOVERING: '恢复中',
+        PROBATION: '恢复后观察',
+        DENSE: '关闭本次缓存'
+      };
+      document.getElementById('simFinalState').textContent = stateNames[state];
+      document.getElementById('simRecoveries').textContent = String(recoveries);
+      document.getElementById('simForced').textContent = String(forced);
+      document.getElementById('simWorst').textContent = Math.max(...values).toFixed(2);
+    }
+
+    document.querySelectorAll('.scenario').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.scenario').forEach((item) => item.classList.remove('active'));
+        button.classList.add('active');
+        renderScenario(button.dataset.scenario);
+      });
+    });
+    renderScenario('healthy');
+  </script>
+</body>
+</html>
