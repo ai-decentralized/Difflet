@@ -171,9 +171,7 @@ class AdaptiveCandidateArm:
             "acceleration_error": self.config.acceleration_error,
             "recovery_steps": self.config.recovery_steps,
             "disable_after_recoveries": self.config.disable_after_recoveries,
-            "stable_anchors_for_acceleration": (
-                self.config.stable_anchors_for_acceleration
-            ),
+            "stable_anchors_for_acceleration": (self.config.stable_anchors_for_acceleration),
             "allow_acceleration": self.config.allow_acceleration,
             "require_final_anchor": self.config.require_final_anchor,
         }
@@ -308,8 +306,7 @@ def load_candidate_ladder(path: Path) -> CandidateLadder:
         raise ValueError(f"candidate ladder schema must be {CANDIDATE_LADDER_SCHEMA!r}")
     if document["schema_revision"] != CANDIDATE_LADDER_SCHEMA_REVISION:
         raise ValueError(
-            "candidate ladder schema_revision must be "
-            f"{CANDIDATE_LADDER_SCHEMA_REVISION}"
+            "candidate ladder schema_revision must be " f"{CANDIDATE_LADDER_SCHEMA_REVISION}"
         )
     ladder_id = document["ladder_id"]
     if not isinstance(ladder_id, str) or not ladder_id or ladder_id != ladder_id.strip():
@@ -353,8 +350,7 @@ def load_candidate_ladder(path: Path) -> CandidateLadder:
             value = row[field]
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(
-                    f"candidate ladder candidates[{index}].{field} "
-                    "must be a nonnegative integer"
+                    f"candidate ladder candidates[{index}].{field} " "must be a nonnegative integer"
                 )
         if row["warmup_steps"] <= 0 or row["anchor_interval"] <= 0 or row["order"] <= 0:
             raise ValueError(
@@ -366,9 +362,7 @@ def load_candidate_ladder(path: Path) -> CandidateLadder:
                 f"candidate ladder candidates[{index}].require_final_anchor must be boolean"
             )
         if row["coord"] not in {"index", "sigma", "timestep"}:
-            raise ValueError(
-                f"candidate ladder candidates[{index}].coord is unsupported"
-            )
+            raise ValueError(f"candidate ladder candidates[{index}].coord is unsupported")
         arms.append(
             CandidateArm(
                 warmup_steps=row["warmup_steps"],
@@ -450,9 +444,7 @@ def load_adaptive_candidate(path: Path) -> AdaptiveCandidateArm:
         raise ValueError("adaptive candidate predictor fields do not match the protocol")
     if predictor["type"] != "taylorseer":
         raise ValueError("adaptive candidate predictor type is unsupported")
-    config = AdaptiveAnchorConfig(
-        **{key: value for key, value in policy.items() if key != "type"}
-    )
+    config = AdaptiveAnchorConfig(**{key: value for key, value in policy.items() if key != "type"})
     return AdaptiveCandidateArm(
         candidate_id=document["candidate_id"],
         config=config,
@@ -483,9 +475,7 @@ def select_candidate_arms(
         arms: tuple[Any, ...] = ()
     elif candidate_ladder is not None:
         if any(value is not None for value in sweep_values):
-            raise ValueError(
-                "--candidate-ladder cannot be combined with sweep or coordinate flags"
-            )
+            raise ValueError("--candidate-ladder cannot be combined with sweep or coordinate flags")
         ladder = load_candidate_ladder(Path(candidate_ladder).expanduser().resolve())
         arms: tuple[Any, ...] = ladder.arms
     else:
@@ -687,18 +677,36 @@ def _run_sample(
         )
         latent_updates = report.latent_updates
         if tuple(record.step_index for record in latent_updates) != tuple(range(num_steps)):
-            raise RuntimeError(
-                "FLUX runtime measurements do not cover every denoising step"
-            )
+            raise RuntimeError("FLUX runtime measurements do not cover every denoising step")
         actual_anchor_count = sum(not record.used_estimate for record in latent_updates)
         if len(report.anchor_measurements) != actual_anchor_count:
-            raise RuntimeError(
-                "FLUX anchor measurements disagree with the executed cache actions"
-            )
+            raise RuntimeError("FLUX anchor measurements disagree with the executed cache actions")
         measurement_path = artifact_dir / f"{sample['sample_id']}.cache-measurements.json"
         report.write_json(measurement_path)
         artifacts["cache_measurements"] = _relative(measurement_path, output_root)
         artifacts["cache_measurements_sha256"] = _sha256_file(measurement_path)
+        spatial_builder = getattr(measurement_sink, "build_spatial_report", None)
+        if callable(spatial_builder):
+            spatial_report = spatial_builder(
+                num_steps=num_steps,
+                configuration_source=configuration_source,
+            )
+            expected_spatial_steps = tuple(
+                record.step_index
+                for record in report.anchor_measurements
+                if record.estimate_status == "measured"
+            )
+            if (
+                tuple(record.step_index for record in spatial_report.anchor_errors)
+                != expected_spatial_steps
+            ):
+                raise RuntimeError(
+                    "FLUX spatial measurements disagree with measured anchor estimates"
+                )
+            spatial_path = artifact_dir / f"{sample['sample_id']}.spatial-measurements.json"
+            spatial_report.write_json(spatial_path)
+            artifacts["spatial_measurements"] = _relative(spatial_path, output_root)
+            artifacts["spatial_measurements_sha256"] = _sha256_file(spatial_path)
     return {
         "sample_id": sample["sample_id"],
         "elapsed_s": float(elapsed),
@@ -951,19 +959,54 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
         flush=True,
     )
     collect_measurements = bool(getattr(args, "collect_cache_measurements", False))
+    collect_spatial_measurements = bool(getattr(args, "collect_spatial_measurements", False))
+    if collect_spatial_measurements and not collect_measurements:
+        raise ValueError("--collect-spatial-measurements requires --collect-cache-measurements")
+    spatial_layout = None
+    if collect_spatial_measurements:
+        if height % 16 != 0 or width % 16 != 0:
+            raise ValueError("FLUX spatial measurements require height and width divisible by 16")
+        from difflet.pipeline.cache import SpatialMeasurementLayout
+
+        spatial_layout = SpatialMeasurementLayout(
+            token_height=height // 16,
+            token_width=width // 16,
+            region_rows=_strict_positive_int(
+                args.spatial_region_rows,
+                "spatial_region_rows",
+            ),
+            region_columns=_strict_positive_int(
+                args.spatial_region_columns,
+                "spatial_region_columns",
+            ),
+            token_axis=-2,
+        )
     if collect_measurements:
         print(
             "[flux-cache-ab] runtime measurements enabled; reported wall-clock "
             "times include measurement overhead and are not clean serving timings",
             flush=True,
         )
+    if collect_spatial_measurements:
+        print(
+            "[flux-cache-ab] spatial anchor measurements enabled; these "
+            "read-only region summaries do not affect cache decisions",
+            flush=True,
+        )
 
-    baseline_runs: list[dict[str, Any]] = []
-    baseline_sink = None
-    if collect_measurements:
+    def make_measurement_sink(*, include_spatial: bool):
+        if not collect_measurements:
+            return None
+        if include_spatial and spatial_layout is not None:
+            from difflet.pipeline.cache import InMemorySpatialMeasurementSink
+
+            return InMemorySpatialMeasurementSink(spatial_layout)
         from difflet.pipeline.cache import InMemoryMeasurementSink
 
-        baseline_sink = InMemoryMeasurementSink()
+        return InMemoryMeasurementSink()
+
+    baseline_runs: list[dict[str, Any]] = []
+    baseline_sink = make_measurement_sink(include_spatial=False)
     baseline_adapter = _build_baseline_adapter(
         num_steps,
         measurement_sink=baseline_sink,
@@ -994,11 +1037,7 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
 
     candidate_runs: dict[str, list[dict[str, Any]]] = {}
     for arm in arms:
-        candidate_sink = None
-        if collect_measurements:
-            from difflet.pipeline.cache import InMemoryMeasurementSink
-
-            candidate_sink = InMemoryMeasurementSink()
+        candidate_sink = make_measurement_sink(include_spatial=True)
         adapter = arm.build_pipeline_adapter(
             num_steps,
             measurement_sink=candidate_sink,
@@ -1115,6 +1154,16 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "measurement overhead to the recorded wall-clock times"
         ),
     )
+    parser.add_argument(
+        "--collect-spatial-measurements",
+        action="store_true",
+        help=(
+            "write exact per-region anchor-error energies alongside ordinary "
+            "cache measurements; this never changes cache decisions"
+        ),
+    )
+    parser.add_argument("--spatial-region-rows", type=int, default=8)
+    parser.add_argument("--spatial-region-columns", type=int, default=8)
     parser.add_argument("--allow-hardware", action="store_true")
     parser.add_argument("--foreground-ack", default=None)
     return parser.parse_args(argv)

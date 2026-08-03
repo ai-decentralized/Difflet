@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Literal, Protocol, runtime_checkable
 
 from difflet.pipeline.cache.types import (
     CacheHistory,
@@ -173,9 +173,7 @@ class AnchorMeasurement:
             raise ValueError("unmeasured anchor estimates cannot have a relative error")
         if self.estimate_status in {"history_not_ready", "invalid_actual_output"}:
             if self.estimate_seconds is not None:
-                raise ValueError(
-                    f"{self.estimate_status} cannot have an estimate duration"
-                )
+                raise ValueError(f"{self.estimate_status} cannot have an estimate duration")
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible record with explicit optional fields."""
@@ -385,11 +383,7 @@ def _relative_tensor_difference(left: Any, right: Any) -> float:
 
 
 def _matching_tensor(left: Any, right: Any) -> bool:
-    return (
-        _torch_tensor(left)
-        and _torch_tensor(right)
-        and tuple(left.shape) == tuple(right.shape)
-    )
+    return _torch_tensor(left) and _torch_tensor(right) and tuple(left.shape) == tuple(right.shape)
 
 
 def measure_latent_update(
@@ -418,9 +412,7 @@ def measure_latent_update(
         before_norm = _tensor_norm(before)
         after_norm = _tensor_norm(after)
         update_norm = _tensor_norm(after.detach().float() - before.detach().float())
-        relative_update = float(
-            update_norm / max(before_norm, _RELATIVE_NORM_FLOOR)
-        )
+        relative_update = float(update_norm / max(before_norm, _RELATIVE_NORM_FLOOR))
         numerically_valid = all(
             math.isfinite(value)
             for value in (before_norm, after_norm, update_norm, relative_update)
@@ -455,8 +447,7 @@ def _relative_output_curvature(
         return None
     older, latest = history.tail(2)
     if not (
-        _matching_tensor(older.output, latest.output)
-        and _matching_tensor(latest.output, output)
+        _matching_tensor(older.output, latest.output) and _matching_tensor(latest.output, output)
     ):
         return None
     coordinate_kind = getattr(predictor, "coord", "index")
@@ -488,6 +479,7 @@ def measure_anchor_estimate(
     predictor: CachePredictor,
     history: CacheHistory,
     observation: RuntimeObservation,
+    tensor_observer: Callable[[CacheStepContext, Any, Any], None] | None = None,
 ) -> AnchorMeasurement:
     """Measure an anchor against a side-effect-free predictor using old history.
 
@@ -500,9 +492,7 @@ def measure_anchor_estimate(
     started = time.perf_counter()
     history_size = len(history)
     latest = history.latest
-    anchor_step_gap = (
-        None if latest is None else context.step_index - latest.step_index
-    )
+    anchor_step_gap = None if latest is None else context.step_index - latest.step_index
     shape = tuple(int(size) for size in getattr(output, "shape", ()))
     dtype = str(getattr(output, "dtype", type(output).__name__)).removeprefix("torch.")
     actual_is_tensor = _torch_tensor(output)
@@ -553,6 +543,11 @@ def measure_anchor_estimate(
                 else:
                     estimate_status = "measured"
         estimate_seconds = time.perf_counter() - estimate_started
+        if estimate_status == "measured" and tensor_observer is not None:
+            # Optional experimental observers receive detached views only
+            # after the ordinary scalar measurement is known to be valid.
+            # Their output is never returned to the scheduler or controller.
+            tensor_observer(context, estimate.detach(), output.detach())
 
     measurement_seconds = time.perf_counter() - started
     return AnchorMeasurement(

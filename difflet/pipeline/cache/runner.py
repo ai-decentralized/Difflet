@@ -61,9 +61,7 @@ class CacheRunner:
                             getattr(calibration, "cooldown_steps", 0),
                         )
                     ),
-                    require_final_anchor=bool(
-                        getattr(policy, "require_final_anchor", False)
-                    ),
+                    require_final_anchor=bool(getattr(policy, "require_final_anchor", False)),
                 )
             )
         if not isinstance(recovery, CacheRecovery):
@@ -82,9 +80,7 @@ class CacheRunner:
             raise ValueError(
                 f"history_capacity={capacity} is lower than predictor requirement {required}"
             )
-        if measurement_sink is not None and not isinstance(
-            measurement_sink, CacheMeasurementSink
-        ):
+        if measurement_sink is not None and not isinstance(measurement_sink, CacheMeasurementSink):
             raise TypeError("measurement_sink must implement CacheMeasurementSink")
         _validate_static_pair(policy, predictor, recovery)
         self.policy = policy
@@ -141,9 +137,7 @@ class CacheRunner:
         if reset_policy:
             self.policy.reset()
         if reset_recovery:
-            reset_runtime_state = getattr(
-                self.recovery, "reset_runtime_state", None
-            )
+            reset_runtime_state = getattr(self.recovery, "reset_runtime_state", None)
             if callable(reset_runtime_state):
                 reset_runtime_state()
             else:
@@ -169,13 +163,9 @@ class CacheRunner:
             self._compute_decision_reason = "barrier"
             return CacheDecision(False, "barrier")
 
-        recovery = self.recovery.before_step(
-            context, self.history, self.observation
-        )
+        recovery = self.recovery.before_step(context, self.history, self.observation)
         if not isinstance(recovery, RecoveryDecision):
-            raise TypeError(
-                "recovery.before_step() must return a RecoveryDecision"
-            )
+            raise TypeError("recovery.before_step() must return a RecoveryDecision")
         if recovery.force_compute:
             if recovery.reset_history:
                 # Keep the active recovery request while invalidating every
@@ -194,15 +184,11 @@ class CacheRunner:
             }
             decision_reason = recovery_reasons.get(recovery.reason)
             if decision_reason is None:
-                raise ValueError(
-                    f"unsupported force-compute recovery reason: {recovery.reason!r}"
-                )
+                raise ValueError(f"unsupported force-compute recovery reason: {recovery.reason!r}")
             self._compute_decision_reason = decision_reason
             return CacheDecision(False, decision_reason)
 
-        requested = bool(
-            self.policy.should_skip(context, self.history, self.observation)
-        )
+        requested = bool(self.policy.should_skip(context, self.history, self.observation))
         if not requested:
             self._last_context = context
             self._compute_context = context
@@ -218,10 +204,7 @@ class CacheRunner:
             return CacheDecision(False, "history_not_ready")
 
         maximum = self.predictor.max_consecutive_predictions
-        if (
-            maximum is not None
-            and self.observation.consecutive_predictions >= int(maximum)
-        ):
+        if maximum is not None and self.observation.consecutive_predictions >= int(maximum):
             self.counters.consecutive_skip_vetoes += 1
             self._last_context = context
             self._compute_context = context
@@ -246,9 +229,7 @@ class CacheRunner:
         hook = getattr(self.policy, "observe_prediction", None)
         if callable(hook):
             hook(context, output, self.history, self.observation)
-        self.recovery.observe_prediction(
-            context, output, self.history, self.observation
-        )
+        self.recovery.observe_prediction(context, output, self.history, self.observation)
         self.observation.record(context, output, predicted=True)
         self.counters.skipped_steps += 1
         self._pending_context = None
@@ -256,21 +237,12 @@ class CacheRunner:
         return output
 
     def record_anchor(self, context: CacheStepContext, output: Any) -> None:
-        if (
-            self._compute_context is not None
-            and context != self._compute_context
-        ):
-            raise RuntimeError(
-                "anchor context does not match the pending compute decision"
-            )
+        if self._compute_context is not None and context != self._compute_context:
+            raise RuntimeError("anchor context does not match the pending compute decision")
         if self._pending_context is not None and context != self._pending_context:
-            raise RuntimeError(
-                "anchor context does not match the pending skip decision"
-            )
+            raise RuntimeError("anchor context does not match the pending skip decision")
         decision_reason = (
-            self._pending_decision_reason
-            or self._compute_decision_reason
-            or "direct_compute"
+            self._pending_decision_reason or self._compute_decision_reason or "direct_compute"
         )
         measurement = None
         measurement_hook = getattr(
@@ -278,6 +250,13 @@ class CacheRunner:
             "observe_anchor_measurement",
             None,
         )
+        tensor_observer = getattr(
+            self.measurement_sink,
+            "observe_anchor_tensors",
+            None,
+        )
+        if not callable(tensor_observer):
+            tensor_observer = None
         if self.measurement_sink is not None or callable(measurement_hook):
             measurement = measure_anchor_estimate(
                 context=context,
@@ -286,6 +265,7 @@ class CacheRunner:
                 predictor=self.predictor,
                 history=self.history,
                 observation=self.observation,
+                tensor_observer=tensor_observer,
             )
         if measurement is not None and callable(measurement_hook):
             measurement_hook(measurement)
@@ -300,9 +280,7 @@ class CacheRunner:
         if callable(hook):
             hook(context, output, self.history, self.observation)
         self.history.push(CacheAnchor(context=context, output=output))
-        self.recovery.observe_anchor(
-            context, output, self.history, self.observation
-        )
+        self.recovery.observe_anchor(context, output, self.history, self.observation)
         self.observation.record(context, output, predicted=False)
         self.counters.full_steps += 1
         self._last_context = context
@@ -356,9 +334,7 @@ class CacheRunner:
             raise ValueError(
                 "cache step indices moved backwards; call reset() before a new trajectory"
             )
-        if (
-            context.step_index == self._last_context.step_index
-        ):
+        if context.step_index == self._last_context.step_index:
             raise ValueError(f"cache step {context.step_index} was decided more than once")
 
 
@@ -371,9 +347,7 @@ def _validate_static_pair(
     if maximum is None:
         return
     recovery_config = getattr(recovery, "config", None)
-    recovery_maximum = getattr(
-        recovery_config, "max_consecutive_predictions", None
-    )
+    recovery_maximum = getattr(recovery_config, "max_consecutive_predictions", None)
     if recovery_maximum is not None and int(recovery_maximum) <= int(maximum):
         # The independent recovery envelope inserts a real anchor before the
         # predictor's mathematical limit can be exceeded.

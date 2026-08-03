@@ -11,8 +11,11 @@ from PIL import Image
 
 from difflet.pipeline.cache import (
     InMemoryMeasurementSink,
+    InMemorySpatialMeasurementSink,
+    SpatialMeasurementLayout,
     build_policy,
     load_cache_measurements,
+    load_spatial_measurements,
     load_cache_plan,
     resolve_cache_plan,
 )
@@ -74,10 +77,7 @@ def test_boundary_pilot_ladder_has_four_explicit_paired_arms():
     ladder = load_candidate_ladder(ladder_path)
     arms = ladder.arms
 
-    assert [
-        (arm.warmup_steps, arm.anchor_interval, arm.order, arm.coord)
-        for arm in arms
-    ] == [
+    assert [(arm.warmup_steps, arm.anchor_interval, arm.order, arm.coord) for arm in arms] == [
         (14, 4, 1, "index"),
         (10, 5, 1, "index"),
         (6, 8, 1, "index"),
@@ -90,9 +90,12 @@ def test_boundary_pilot_ladder_has_four_explicit_paired_arms():
         "aggressive",
         "deliberate-boundary",
     )
-    assert [
-        arm.build_pipeline_adapter(50).stats()["planned_skip_steps"] for arm in arms
-    ] == [26, 31, 37, 41]
+    assert [arm.build_pipeline_adapter(50).stats()["planned_skip_steps"] for arm in arms] == [
+        26,
+        31,
+        37,
+        41,
+    ]
 
 
 def test_boundary_refinement_ladder_fills_each_missing_skip_count():
@@ -106,16 +109,14 @@ def test_boundary_refinement_ladder_fills_each_missing_skip_count():
     ladder = load_candidate_ladder(ladder_path)
 
     assert [
-        (arm.warmup_steps, arm.anchor_interval, arm.order, arm.coord)
-        for arm in ladder.arms
+        (arm.warmup_steps, arm.anchor_interval, arm.order, arm.coord) for arm in ladder.arms
     ] == [
         (6, 9, 1, "index"),
         (5, 10, 1, "index"),
         (5, 11, 1, "index"),
     ]
     assert [
-        arm.build_pipeline_adapter(50).stats()["planned_skip_steps"]
-        for arm in ladder.arms
+        arm.build_pipeline_adapter(50).stats()["planned_skip_steps"] for arm in ladder.arms
     ] == [38, 39, 40]
     assert ladder.content_sha256 == (
         "042ab01ca50d44f9c1308ab797bdf15ca7c2603ef7d316c0f252c6c3cc84be05"
@@ -229,12 +230,7 @@ def test_adaptive_only_selection_avoids_an_unneeded_static_arm():
         SimpleNamespace(
             adaptive_only=True,
             adaptive_candidate=[
-                str(
-                    root
-                    / "benchmark"
-                    / "flux_cache"
-                    / "adaptive-oil-e1p40-k12-candidate.json"
-                )
+                str(root / "benchmark" / "flux_cache" / "adaptive-oil-e1p40-k12-candidate.json")
             ],
             candidate_ladder=None,
             warmup_steps=None,
@@ -244,9 +240,7 @@ def test_adaptive_only_selection_avoids_an_unneeded_static_arm():
         )
     )
 
-    assert [arm.candidate_id for arm in selected] == [
-        "adaptive-oil-e1p40-w6-i8-k12-o1-index"
-    ]
+    assert [arm.candidate_id for arm in selected] == ["adaptive-oil-e1p40-w6-i8-k12-o1-index"]
 
 
 def test_adaptive_only_requires_an_explicit_adaptive_candidate():
@@ -367,13 +361,62 @@ def test_collector_writes_and_references_one_measurement_report_per_sample(tmp_p
 
     measurement_relative = run["artifacts"]["cache_measurements"]
     measurement_path = tmp_path / measurement_relative
-    assert run["artifacts"]["cache_measurements_sha256"] == hashlib.sha256(
-        measurement_path.read_bytes()
-    ).hexdigest()
+    assert (
+        run["artifacts"]["cache_measurements_sha256"]
+        == hashlib.sha256(measurement_path.read_bytes()).hexdigest()
+    )
     report = load_cache_measurements(measurement_path)
     assert [record.step_index for record in report.latent_updates] == [0, 1, 2]
     assert all(not record.used_estimate for record in report.latent_updates)
     assert len(report.anchor_measurements) == 3
+
+
+def test_collector_writes_separate_spatial_measurements_without_full_tensors(tmp_path):
+    sink = InMemorySpatialMeasurementSink(SpatialMeasurementLayout(2, 2, 2, 2, token_axis=1))
+    adapter = _build_baseline_adapter(3, measurement_sink=sink)
+    flux_pipeline = SimpleNamespace(
+        teacache_controller=adapter,
+        _tc_last_trajectory=[],
+    )
+
+    def fake_pipe(**kwargs):
+        del kwargs
+        adapter.reset()
+        flux_pipeline._tc_last_trajectory = []
+        latent = torch.zeros((1, 4, 2))
+        for step_index in range(3):
+            assert adapter.should_skip(step_index) is False
+            output = torch.full((1, 4, 2), float(step_index * step_index))
+            adapter.record_full_step(output)
+            previous = latent
+            latent = latent + 1.0
+            adapter.record_latent_update(step_index, previous, latent)
+            flux_pipeline._tc_last_trajectory.append(latent.detach().cpu())
+        return SimpleNamespace(images=[Image.new("RGB", (16, 16), color="white")])
+
+    run = _run_sample(
+        fake_pipe,
+        flux_pipeline,
+        sample={"sample_id": "p000-s0", "prompt": "test", "seed": 0},
+        num_steps=3,
+        height=16,
+        width=16,
+        guidance_scale=3.5,
+        artifact_dir=tmp_path / "artifacts" / "baseline",
+        output_root=tmp_path,
+        measurement_sink=sink,
+        configuration_source=adapter.source,
+    )
+
+    relative = run["artifacts"]["spatial_measurements"]
+    path = tmp_path / relative
+    assert (
+        run["artifacts"]["spatial_measurements_sha256"]
+        == hashlib.sha256(path.read_bytes()).hexdigest()
+    )
+    report = load_spatial_measurements(path)
+    assert [record.step_index for record in report.anchor_errors] == [2]
+    assert len(report.anchor_errors[0].error_energy) == 4
 
 
 def test_collector_requires_explicit_hardware_ack():
