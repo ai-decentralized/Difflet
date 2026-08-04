@@ -247,12 +247,21 @@ class NeuronFluxApplication(MultiComponentApplication):
         # pipeline's decode() path uses the lightweight decoder transparently.
         if taef1:
             from diffusers import AutoencoderTiny
+            from difflet.pipeline.path_resolver import resolve_model_path
             taef1_model_path = taef1_path or vae_decoder_path
+            # AutoencoderTiny.from_pretrained accepts a repo id, but the
+            # compiled decoder application needs a LOCAL snapshot dir —
+            # get_state_dict() only handles local paths (load_hf_model is
+            # unimplemented in this fork). TAEF1 is ~9 MB, so pull everything.
+            taef1_local_path = resolve_model_path(
+                taef1_model_path,
+                allow_patterns=["*.json", "*.safetensors", "*.md", "*.txt"],
+            )
             self.pipe.vae = AutoencoderTiny.from_pretrained(
                 taef1_model_path, torch_dtype=torch.bfloat16,
             )
             self.pipe.vae.decoder = NeuronVAEDecoderApplication(
-                model_path=taef1_model_path, config=self.decoder_config,
+                model_path=taef1_local_path, config=self.decoder_config,
                 model_cls=DecoderTiny,
             )
         else:
