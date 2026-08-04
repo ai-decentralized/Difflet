@@ -33,6 +33,7 @@ from neuronx_distributed.trace.trace import get_sharded_checkpoint
 from neuronx_distributed.utils.model_utils import init_on_device
 from safetensors.torch import load_file
 
+from difflet.backends.trainium.core import shared_weights
 from difflet.backends.trainium.core.config import InferenceConfig, NeuronConfig
 from difflet.backends.trainium.core.model_wrapper import (
     CONTEXT_ENCODING_MODEL_TAG,
@@ -293,8 +294,23 @@ class NeuronApplicationBase(torch.nn.Module):
                 "SKIPPING pre-sharding the checkpoints. The checkpoints will be sharded during load time."
             )
         else:
-            logger.info("Pre-sharding checkpoints.")
-            self.get_builder(debug).shard_checkpoint(serialize_path=sharded_checkpoint_dir)
+            # Sharded weights depend on model/dtype/tp/rank-marker but not on
+            # shape, so every compiled resolution can hardlink one copy instead
+            # of writing its own tens of GB. Falls through to a normal shard
+            # when the store is disabled, empty, or on another filesystem.
+            store = shared_weights.store_dir(self)
+            if store is not None and shared_weights.link_from_store(
+                store, sharded_checkpoint_dir, self
+            ):
+                logger.info("Reusing pre-sharded checkpoints from %s.", store)
+            else:
+                logger.info("Pre-sharding checkpoints.")
+                # Existing files here may be hardlinks into the store; writing
+                # through them would mutate every artifact sharing the inode.
+                shared_weights.prepare_for_write(sharded_checkpoint_dir)
+                self.get_builder(debug).shard_checkpoint(serialize_path=sharded_checkpoint_dir)
+                if store is not None:
+                    shared_weights.publish_to_store(store, sharded_checkpoint_dir, self)
 
             if self.neuron_config.lora_config and self.neuron_config.lora_config.dynamic_multi_lora:
                 logger.info("Pre-sharding CPU LoRA adapter checkpoints.")
