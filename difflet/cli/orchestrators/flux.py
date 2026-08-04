@@ -36,6 +36,7 @@ class FluxOrchestrator(ModelOrchestrator):
             compile_cache_dir=self.args.cache_dir,
             force_compile=self.args.force,
             revision=self.args.revision,
+            **self._model_kwargs(),
         )
 
     def generate(self) -> None:
@@ -92,6 +93,7 @@ class FluxOrchestrator(ModelOrchestrator):
             dtype=self._dtype(),
             height=shape.get("height"), width=shape.get("width"),
             num_frames=shape.get("num_frames"), revision=self.args.revision,
+            application_kwargs=self._application_kwargs() or None,
         )
         compiled = cache_path(self.args.cache_dir, spec)
         if not has_valid_manifest(compiled, spec):
@@ -112,7 +114,7 @@ class FluxOrchestrator(ModelOrchestrator):
             compile_cache_dir=self.args.cache_dir,
             revision=self.args.revision,
             skip_compile=True,
-            **self._teacache_kwargs(),
+            **self._model_kwargs(),
         )
 
     # ------------------------------------------------------------------ helpers
@@ -136,16 +138,30 @@ class FluxOrchestrator(ModelOrchestrator):
         import torch
         return torch.bfloat16
 
-    def _teacache_kwargs(self) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {}
-        if self.args.teacache_speedup is not None:
-            kwargs["teacache_speedup"] = self.args.teacache_speedup
-            kwargs["teacache_calibration_path"] = self.args.teacache_calibration
+    def _application_kwargs(self) -> dict[str, Any]:
+        """Model-opt kwargs shared by compile and load (hashed into the cache key)."""
         app_kwargs: dict[str, Any] = {}
         if self.args.teacache_cadence is not None:
             app_kwargs["teacache_cadence"] = self.args.teacache_cadence
         if self.args.teacache_online_delta is not None:
             app_kwargs["teacache_online_delta_alpha"] = self.args.teacache_online_delta
+        if getattr(self.args, "taef1", False):
+            app_kwargs["taef1"] = True
+            app_kwargs["taef1_path"] = self.args.taef1_path
+        return app_kwargs
+
+    def _model_kwargs(self) -> dict[str, Any]:
+        """Kwargs passed to DiffletPipeline.from_pretrained / precompile.
+
+        TeaCache and TAEF1 must reach BOTH the compile step (the VAE NEFF and
+        the probe NEFF are built at compile time) and generate, so the cache
+        spec and the loaded application agree.
+        """
+        kwargs: dict[str, Any] = {}
+        if self.args.teacache_speedup is not None:
+            kwargs["teacache_speedup"] = self.args.teacache_speedup
+            kwargs["teacache_calibration_path"] = self.args.teacache_calibration
+        app_kwargs = self._application_kwargs()
         if app_kwargs:
             kwargs["application_kwargs"] = app_kwargs
         return kwargs

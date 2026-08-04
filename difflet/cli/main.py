@@ -151,6 +151,20 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "frames: the single-shot Neuron VAE graph exceeds the "
         "compiler instruction limit (NCC_EVRF007).",
     )
+    p.add_argument(
+        "--taef1",
+        dest="taef1",
+        action="store_true",
+        help="Replace the standard VAE decoder with the lightweight TAEF1 "
+        "decoder (Flux only). Requires --taef1-path.",
+    )
+    p.add_argument(
+        "--taef1-path",
+        default=None,
+        metavar="REPO_ID",
+        help="HuggingFace repo id of the tiny VAE (e.g. madebyollin/taef1). "
+        "Implies --taef1.",
+    )
 
 
 def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
@@ -572,6 +586,26 @@ def _validate_sp(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _validate_taef1(args: argparse.Namespace) -> None:
+    if getattr(args, "taef1_path", None) is not None:
+        setattr(args, "taef1", True)  # --taef1-path implies --taef1
+    if not getattr(args, "taef1", False):
+        return
+    if not args.taef1_path:
+        print(
+            "Error: --taef1 requires --taef1-path REPO_ID (e.g. madebyollin/taef1).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if args.model_id != "black-forest-labs/FLUX.1-dev":
+        print(
+            f"Error: {args.model_id} does not support --taef1. The lightweight "
+            "TAEF1 VAE is only wired into the Flux application.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 def _validate_cfg_parallel(args: argparse.Namespace) -> None:
     if not getattr(args, "cfg_parallel", False):
         return
@@ -740,6 +774,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command in ("compile", "generate", "run"):
         _validate_cfg_parallel(args)
         _validate_sp(args)
+        _validate_taef1(args)
         from difflet.cli.modes import resolve_mode
 
         mode_cfg = resolve_mode(args.model_id, getattr(args, "mode", None), args)
