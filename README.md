@@ -111,7 +111,7 @@ difflet run --model-id black-forest-labs/FLUX.1-dev \
 Faster decode with the lightweight TAEF1 VAE — same command, two extra flags:
 
 ```bash
-# Flux with the TAEF1 tiny VAE — ~58× faster VAE decode, ~1.8× faster warm end-to-end
+# Flux with the TAEF1 tiny VAE — 4.3× faster VAE decode, 1.18× faster warm end-to-end
 difflet run --model-id black-forest-labs/FLUX.1-dev \
   --tp-degree 4 --height 1024 --width 1024 \
   --taef1 --taef1-path madebyollin/taef1 \
