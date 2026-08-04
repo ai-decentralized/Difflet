@@ -29,7 +29,8 @@ Core capabilities:
   NeuronCores with `tp`, `cp`, CFG-parallel, and Megatron-style sequence-parallel (`--sp`)
   modes; every mode is exercised on-device by the verification matrix
   (`scripts/verify_cli.py`).
-- **Latency tooling** — optional TeaCache step-skipping for faster denoise.
+- **Latency tooling** — optional TeaCache step-skipping and a lightweight TAEF1 VAE for faster
+  denoise and decode.
 
 ## Supported models
 
@@ -106,6 +107,25 @@ difflet run --model-id black-forest-labs/FLUX.1-dev \
   --prompt "a photorealistic cat sitting in a sunlit garden" \
   --output cat.png
 ```
+
+Faster decode with the lightweight TAEF1 VAE — same command, two extra flags:
+
+```bash
+# Flux with the TAEF1 tiny VAE — ~58× faster VAE decode, ~1.8× faster warm end-to-end
+difflet run --model-id black-forest-labs/FLUX.1-dev \
+  --tp-degree 4 --height 1024 --width 1024 \
+  --taef1 --taef1-path madebyollin/taef1 \
+  --prompt "a red fox sitting in a snowy forest" \
+  --output fox_taef1.png
+```
+
+`--taef1` swaps the standard 80M-parameter VAE decoder for the 1.2M-parameter
+[`madebyollin/taef1`](https://huggingface.co/madebyollin/taef1) decoder (measured on
+`trn2.3xlarge`, tp=4, 1024×1024). Strictly opt-in — without the flags the standard VAE is
+used. `--taef1-path` implies `--taef1`; both flags are hashed into the compile-cache key, so
+TAEF1 and standard-VAE artifacts cache independently. Output quality differs from the
+standard VAE — evaluate for your use case. For staged runs, pass the same flags to
+`difflet compile` and `difflet generate`.
 
 ```bash
 # Text-to-video — Wan 2.2 at 480×832, 9 frames
@@ -363,6 +383,8 @@ artifacts. `difflet clean` is a housekeeping command that takes no `--model-id`.
 
 TeaCache step-skipping flags (`--teacache-cadence`, `--teacache-online-delta`,
 `--teacache-speedup`, `--teacache-calibration`) are available on `generate` and `run`.
+TAEF1 lightweight-VAE flags (`--taef1`, `--taef1-path`) are available on `compile`,
+`generate`, and `run` (Flux only, see [Quick start](#quick-start)).
 
 ### Staged usage
 
