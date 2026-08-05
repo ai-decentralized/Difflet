@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="FLUX Transformer residual 拆分缓存：模型结构、精确 cache 位置，以及 Trainium AOT 落地约束。">
+  <title>FLUX Residual Cache Split｜Difflet</title>
+  <style>
+    :root {
+      --bg:#f6f8fb; --paper:#fff; --ink:#142033; --muted:#617086; --line:#dce3ec;
+      --navy:#172844; --attn:#1769e0; --attn-soft:#eaf2ff; --mlp:#dc6b20;
+      --mlp-soft:#fff1e7; --cache:#7b48cf; --cache-soft:#f2ecff; --ok:#087b61;
+      --ok-soft:#e8f7f2; --warn:#a76a06; --warn-soft:#fff6df; --bad:#b9404f;
+      --bad-soft:#fff0f1; --shadow:0 18px 55px rgba(26,48,80,.09);
+      --sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    }
+    *{box-sizing:border-box} html{scroll-behavior:smooth} body{margin:0;color:var(--ink);background:var(--bg);font-family:var(--sans);line-height:1.58}
+    body:before{content:"";position:fixed;inset:0;z-index:-1;background:radial-gradient(circle at 8% 8%,rgba(23,105,224,.07),transparent 27%),radial-gradient(circle at 92% 14%,rgba(220,107,32,.07),transparent 28%),linear-gradient(rgba(23,40,68,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(23,40,68,.025) 1px,transparent 1px);background-size:auto,auto,36px 36px,36px 36px}
+    a{color:inherit}.shell{width:min(1240px,calc(100% - 34px));margin:auto}.top{position:sticky;top:0;z-index:30;border-bottom:1px solid rgba(220,227,236,.86);background:rgba(246,248,251,.9);backdrop-filter:blur(14px)}
+    .topin{min-height:62px;display:flex;align-items:center;gap:18px}.brand{display:flex;align-items:center;gap:10px;font-weight:820;text-decoration:none}.mark{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,var(--attn),var(--cache))}
+    nav{margin-left:auto;display:flex;gap:4px;overflow:auto}nav a{padding:7px 10px;color:var(--muted);font-size:13px;text-decoration:none;white-space:nowrap;border-radius:8px}nav a:hover{background:#fff;color:var(--ink)}
+    section{padding:76px 0;border-top:1px solid rgba(220,227,236,.8)}.hero{padding:78px 0 66px;border:0}.hero-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:42px;align-items:center}
+    .eyebrow,.kicker{font:760 12px/1.25 var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--attn)}.eyebrow{display:inline-flex;align-items:center;gap:8px;padding:7px 11px;border:1px solid #bcd2f5;border-radius:999px;background:rgba(255,255,255,.76)}
+    h1{max-width:820px;margin:20px 0 20px;font-size:clamp(42px,6.5vw,78px);line-height:1;letter-spacing:-.06em}h1 span{color:var(--attn)}h2{margin:8px 0 0;font-size:clamp(30px,4vw,49px);line-height:1.08;letter-spacing:-.045em}h3{margin:0 0 8px;font-size:19px;line-height:1.3}p{margin:0}.lede{max-width:760px;color:#44536a;font-size:clamp(17px,2vw,21px)}
+    .verdict{border:1px solid var(--line);border-radius:23px;background:rgba(255,255,255,.93);box-shadow:var(--shadow);overflow:hidden}.vhead{padding:15px 18px;border-bottom:1px solid var(--line);color:var(--muted);font:12px var(--mono);display:flex;justify-content:space-between}.vbody{padding:23px}.bigyes{display:flex;align-items:center;gap:14px;margin-bottom:17px}.yesicon{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;color:#fff;background:var(--ok);font-size:24px}.bigyes strong{display:block;font-size:22px}.bigyes span{color:var(--muted);font-size:13px}.vline{display:grid;grid-template-columns:98px 1fr;gap:12px;padding:13px 0;border-top:1px solid var(--line);font-size:14px}.vline b{font-family:var(--mono);font-size:12px;color:var(--muted)}
+    .legend{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap}.chip{display:inline-flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--muted);font-size:12px}.swatch{width:9px;height:9px;border-radius:3px}.section-head{display:grid;grid-template-columns:1fr minmax(300px,.75fr);gap:36px;align-items:end;margin-bottom:30px}.section-copy{color:var(--muted)}
+    .panel{border:1px solid var(--line);border-radius:22px;background:rgba(255,255,255,.96);box-shadow:var(--shadow)}.panel-pad{padding:24px}.mono{font-family:var(--mono)}
+    .route{padding:25px;overflow-x:auto}.route-row{min-width:1050px;display:grid;grid-template-columns:145px 36px 175px 36px 200px 36px 190px 36px 145px;align-items:center}.node{min-height:112px;padding:16px;border:1px solid var(--line);border-radius:16px;background:#fff}.node small{display:block;margin-bottom:9px;color:var(--muted);font:11px var(--mono)}.node b{display:block}.node p{margin-top:6px;color:var(--muted);font-size:12px}.node.double{border-color:#b9d1f6;background:var(--attn-soft)}.node.single{border-color:#f2c5a7;background:var(--mlp-soft)}.arrow{text-align:center;color:#8c9caf;font-size:24px}
+    .bypass{min-width:1050px;margin-top:18px;padding-top:18px;border-top:1px dashed var(--line);display:grid;grid-template-columns:145px 36px 447px 36px 145px;align-items:center}.cachebar{padding:14px 17px;border:1px dashed #9c7ad8;border-radius:14px;background:var(--cache-soft);color:#5f36a5}.cachebar b{display:block}.cachebar span{font-size:12px}.tag{display:inline-flex;padding:4px 7px;border-radius:6px;font:700 10px var(--mono);letter-spacing:.03em}.tag.now{color:#fff;background:var(--cache)}.tag.new{color:#fff;background:var(--ok)}
+    .switcher{display:flex;gap:7px;margin-bottom:18px}.switcher button{padding:9px 13px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--muted);cursor:pointer;font-weight:720}.switcher button.active{border-color:var(--navy);background:var(--navy);color:#fff}.diagram-view[hidden]{display:none}
+    .equation{padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#f9fafc;font:13px/1.65 var(--mono);overflow:auto}.blue{color:var(--attn)}.orange{color:var(--mlp)}.purple{color:var(--cache)}
+    .double-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.stream{padding:20px;border:1px solid var(--line);border-radius:17px;background:#fff}.stream-title{display:flex;align-items:center;gap:9px;margin-bottom:16px;font-weight:800}.stream-title .dot{width:11px;height:11px;border-radius:50%}
+    .ladder{display:grid;grid-template-columns:1fr;gap:7px}.step{position:relative;padding:10px 13px 10px 42px;border:1px solid var(--line);border-radius:11px;background:#fafbfd;font-size:13px}.step:before{position:absolute;left:13px;top:50%;transform:translateY(-50%);width:20px;height:20px;border-radius:6px;display:grid;place-items:center;color:#fff;font:12px var(--mono);content:attr(data-n);background:#92a0b3}.step.attn{border-color:#bfd4f6;background:var(--attn-soft)}.step.attn:before{background:var(--attn)}.step.mlp{border-color:#f2c5a7;background:var(--mlp-soft)}.step.mlp:before{background:var(--mlp)}.step.add{border-style:dashed}.step.add b{font-family:var(--mono)}
+    .cache-cut{margin-top:14px;padding:14px;border:1px solid #cdb9ef;border-radius:12px;background:var(--cache-soft);font-size:13px}.cache-cut b{color:#6037a6}.note{margin-top:14px;padding:13px 15px;border-left:4px solid var(--warn);border-radius:8px;background:var(--warn-soft);color:#665027;font-size:13px}
+    .single-flow{padding:22px;overflow-x:auto}.fork{min-width:1030px;display:grid;grid-template-columns:150px 45px 1fr 52px 170px 45px 155px;align-items:center}.branchbox{display:grid;gap:12px}.branch{padding:13px 15px;border:1px solid;border-radius:13px;background:#fff;font-size:13px}.branch.attn{border-color:#a9c8f5;background:var(--attn-soft)}.branch.mlp{border-color:#edb995;background:var(--mlp-soft)}.branch.cache{border-style:dashed;border-color:#9c7ad8;background:var(--cache-soft)}.op{width:42px;height:42px;margin:auto;display:grid;place-items:center;border:2px solid var(--navy);border-radius:50%;background:#fff;font:800 20px var(--mono)}.op.addres{border-color:var(--ok);color:var(--ok)}
+    .callout{margin-top:19px;display:grid;grid-template-columns:1fr 1fr;gap:14px}.call{padding:16px;border:1px solid var(--line);border-radius:14px;background:#fff}.call b{display:block;margin-bottom:5px}.call p{color:var(--muted);font-size:13px}
+    .timeline{padding:23px;overflow-x:auto}.timegrid{min-width:990px;display:grid;grid-template-columns:1fr 43px 1fr 43px 1fr;align-items:stretch}.timecard{padding:19px;border:1px solid var(--line);border-radius:16px;background:#fff}.timecard.anchor{border-color:#a9c8f5;background:linear-gradient(145deg,#fff,var(--attn-soft))}.timecard.skip{border-color:#cdb9ef;background:linear-gradient(145deg,#fff,var(--cache-soft))}.timecard h3{display:flex;justify-content:space-between;gap:10px}.timecard ul{margin:11px 0 0;padding-left:19px;color:var(--muted);font-size:13px}.timearrow{display:grid;place-items:center;color:#91a0b4;font-size:24px}
+    .aot-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.traffic{padding:20px}.traffic .lamp{width:12px;height:12px;border-radius:50%;margin-bottom:16px;box-shadow:0 0 0 6px currentColor}.traffic ul{margin:12px 0 0;padding-left:19px;color:var(--muted);font-size:13px}.traffic.ok{color:var(--ok)}.traffic.warn{color:var(--warn)}.traffic.bad{color:var(--bad)}.traffic h3{color:var(--ink)}
+    .aotflow{margin-top:16px;padding:22px;overflow-x:auto}.aotrow{min-width:960px;display:grid;grid-template-columns:145px 34px 255px 34px 255px 34px 145px;align-items:center}.neff{padding:15px;border:1px solid var(--line);border-radius:14px;background:#fff}.neff strong{display:block}.neff small{display:block;color:var(--muted);margin-top:5px}.neff.anchor{border-color:#a9c8f5;background:var(--attn-soft)}.neff.hybrid{border-color:#cdb9ef;background:var(--cache-soft)}
+    .memory{display:grid;grid-template-columns:repeat(4,1fr);gap:13px}.metric{padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff}.metric small{display:block;color:var(--muted);font:11px var(--mono)}.metric strong{display:block;margin:7px 0 3px;font-size:27px;letter-spacing:-.04em}.metric span{color:var(--muted);font-size:12px}.footnote{margin-top:14px;color:var(--muted);font-size:12px}
+    .decision{display:grid;grid-template-columns:.8fr 1.2fr;gap:18px}.score{padding:23px;background:var(--navy);color:#fff;border-radius:19px}.score .n{margin:13px 0 3px;font-size:58px;font-weight:850;line-height:1}.score p{color:#c5d0df}.steps{padding:23px}.steps ol{margin:10px 0 0;padding-left:23px}.steps li{padding:7px 0;color:var(--muted)}.steps li b{color:var(--ink)}
+    footer{padding:32px 0 48px;color:var(--muted);font-size:12px}.src{font-family:var(--mono)}
+    @media(max-width:900px){.hero-grid,.section-head,.double-grid,.aot-grid,.decision{grid-template-columns:1fr}.memory{grid-template-columns:1fr 1fr}.hero{padding-top:54px}.section-head{gap:12px}.aot-grid{gap:10px}.top nav{display:none}}
+    @media(max-width:560px){.shell{width:min(100% - 22px,1240px)}section{padding:56px 0}.panel-pad,.route,.timeline{padding:16px}.memory,.callout{grid-template-columns:1fr}h1{font-size:42px}.vline{grid-template-columns:1fr;gap:3px}}
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="shell topin">
+      <a class="brand" href="#top"><span class="mark">D</span>Difflet / FLUX cache split</a>
+      <nav aria-label="页面导航">
+        <a href="#model">总架构</a><a href="#blocks">Residual 位置</a><a href="#runtime">跨 timestep</a><a href="#aot">Trainium / AOT</a><a href="#decision">结论</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="shell hero-grid">
+        <div>
+          <div class="eyebrow">FLUX.1-dev · TP=4 · 1024² · BF16</div>
+          <h1>Residual 在哪里，<span>cache 应该怎么拆</span></h1>
+          <p class="lede">不是把一个 block 的 hidden state 生硬切成两半。Residual 是“从支路计算出来、最后加回主干的增量”。目标是每步保留 Attention 增量，缓存或预测 MLP 增量。</p>
+          <div class="legend">
+            <span class="chip"><i class="swatch" style="background:var(--attn)"></i>Attention：每步真实计算</span>
+            <span class="chip"><i class="swatch" style="background:var(--mlp)"></i>MLP：重计算或 cache</span>
+            <span class="chip"><i class="swatch" style="background:var(--cache)"></i>设备内 cache / predictor</span>
+          </div>
+        </div>
+        <aside class="verdict">
+          <div class="vhead"><span>ARCHITECTURE CHECK</span><span>2026-08-03</span></div>
+          <div class="vbody">
+            <div class="bigyes"><span class="yesicon">✓</span><div><strong>可做，且 single block 很顺</strong><span>但必须编译新的静态 hybrid NEFF</span></div></div>
+            <div class="vline"><b>最优切点</b><span>single block 的 <code>out_mlp</code>，在 gate 与 TP AllReduce 之前</span></div>
+            <div class="vline"><b>AOT 形态</b><span><code>anchor-write.neff</code> + <code>attention-read.neff</code>，host 按 timestep 选入口</span></div>
+            <div class="vline"><b>最大风险</b><span>MLP cache bank 约 1.17–1.50 GiB / history / batch element / rank</span></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="model">
+      <div class="shell">
+        <div class="section-head"><div><div class="kicker">01 / END-TO-END</div><h2>先看整个 FLUX Transformer</h2></div><p class="section-copy">当前 TaylorSeer 是“整个 Transformer 输出”级 cache：跳步时 57 个 block 全不跑。新方案把 cache 下沉到 block 内，Attention 继续逐层传播，因此仍然进入完整模型拓扑。</p></div>
+        <div class="panel route">
+          <div class="route-row">
+            <div class="node"><small>INPUT</small><b>packed latent</b><p>4096 image tokens<br>64 input channels</p></div><div class="arrow">→</div>
+            <div class="node"><small>EMBEDDINGS</small><b>x / text / timestep</b><p>H = 24 × 128 = 3072<br>T5 text ≤ 512 tokens</p></div><div class="arrow">→</div>
+            <div class="node double"><small>DOUBLE STREAM × 19</small><b>image 与 text 分开</b><p>Joint Attention 交换语义；每条 stream 各有 Attention add + MLP add</p></div><div class="arrow">→</div>
+            <div class="node single"><small>SINGLE STREAM × 38</small><b>[text | image] 拼接</b><p>Attention 与 MLP 并行；合并后只有一次 residual add</p></div><div class="arrow">→</div>
+            <div class="node"><small>OUTPUT</small><b>norm + proj</b><p>noise prediction<br>交给 scheduler 更新 latent</p></div>
+          </div>
+          <div class="bypass">
+            <div class="node" style="min-height:auto"><small>SKIPPED STEP</small><b>latent z<sub>t</sub></b></div><div class="arrow">↘</div>
+            <div class="cachebar"><span class="tag now">现有整步 cache</span><b>TaylorSeer 直接预测最终 Transformer output</b><span>19 + 38 个 block 全部绕过；最快，但 prompt / 空间语义误差无法在中间层纠正。</span></div><div class="arrow">→</div>
+            <div class="node" style="min-height:auto"><small>PREDICTED</small><b>noise ε̂<sub>t</sub></b></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="blocks">
+      <div class="shell">
+        <div class="section-head"><div><div class="kicker">02 / INSIDE THE BLOCK</div><h2>Residual 就在“⊕ 加回主干”处</h2></div><p class="section-copy">点击两种 block 对照。Double block 是串行的两次加法；Single block 是平行两支先汇合，再做一次加法。两者不能用同一段 cache 代码硬套。</p></div>
+        <div class="switcher" role="tablist"><button class="active" data-tab="double" role="tab">Double-stream block</button><button data-tab="single" role="tab">Single-stream block</button></div>
+
+        <div id="view-double" class="diagram-view panel panel-pad">
+          <div class="double-grid">
+            <article class="stream">
+              <div class="stream-title"><span class="dot" style="background:var(--attn)"></span>Image stream：x<sub>ℓ</sub></div>
+              <div class="ladder">
+                <div class="step" data-n="1">AdaLN(x<sub>ℓ</sub>, timestep) → norm、g<sub>A</sub>、shift/scale、g<sub>M</sub></div>
+                <div class="step attn" data-n="2"><b>Joint Attention</b> 与 text 交换信息，得到 Attn<sub>img</sub></div>
+                <div class="step attn add" data-n="⊕"><b>x⁺ = x<sub>ℓ</sub> + R<sub>A</sub></b>，其中 R<sub>A</sub> = g<sub>A</sub> · Attn<sub>img</sub></div>
+                <div class="step mlp" data-n="3">LN(x⁺) + shift/scale → FFN → <b>F<sub>M</sub></b></div>
+                <div class="step mlp add" data-n="⊕"><b>x<sub>ℓ+1</sub> = x⁺ + R<sub>M</sub></b>，其中 R<sub>M</sub> = g<sub>M</sub> · F<sub>M</sub></div>
+              </div>
+              <div class="cache-cut"><b>推荐 cache payload：F<sub>M</sub>（未乘 gate）</b><br>跳步时用预测的 F̂<sub>M</sub>，仍使用当前 timestep 的新 g<sub>M</sub>。不要 cache x⁺，否则 fresh Attention 的修正会被覆盖。</div>
+            </article>
+            <article class="stream">
+              <div class="stream-title"><span class="dot" style="background:var(--cache)"></span>Text stream：c<sub>ℓ</sub></div>
+              <div class="ladder">
+                <div class="step" data-n="1">AdaLN(c<sub>ℓ</sub>, timestep) → context norm 与四个 modulation 参数</div>
+                <div class="step attn" data-n="2"><b>同一个 Joint Attention</b> 返回 Attn<sub>text</sub></div>
+                <div class="step attn add" data-n="⊕"><b>c⁺ = c<sub>ℓ</sub> + R<sub>A,c</sub></b></div>
+                <div class="step mlp" data-n="3">LN(c⁺) + shift/scale → context FFN → <b>F<sub>M,c</sub></b></div>
+                <div class="step mlp add" data-n="⊕"><b>c<sub>ℓ+1</sub> = c⁺ + R<sub>M,c</sub></b></div>
+              </div>
+              <div class="cache-cut"><b>Text MLP 也必须单独存</b><br>后续 block 的 Attention 会读更新后的 text stream。只缓存 image MLP 而漏掉 text MLP，会改变整条语义路径。</div>
+            </article>
+          </div>
+          <div class="equation" style="margin-top:16px"><span class="blue">R_A(t) = gate_A(t) · Attention(current x, current c)</span><br><span class="orange">R_M(t) = gate_M(t) · FFN(Norm(current x + R_A(t)))</span><br><b>hybrid：</b> x′(t) = x(t) + <span class="blue">R_A(t)</span> + gate_M(t) · <span class="purple">predict/cache[F_M](t)</span></div>
+          <div class="note"><b>重要依赖：</b>Double block 的 MLP 输入依赖刚算出的 Attention 结果。所以我们 cache 的是 MLP <em>输出支路</em>，不是 MLP 输入，也不是 block hidden state。</div>
+        </div>
+
+        <div id="view-single" class="diagram-view panel" hidden>
+          <div class="single-flow">
+            <div class="fork">
+              <div class="node" style="min-height:auto"><small>MAIN HIGHWAY</small><b>h<sub>ℓ</sub></b><p>保留为 residual</p></div><div class="arrow">→</div>
+              <div><div class="equation">u, g = AdaLN(h<sub>ℓ</sub>, t)</div><div class="branchbox" style="margin-top:12px">
+                <div class="branch attn"><b>Attention(u) → proj_out_attn</b><br>a<sub>local</sub> · 当前实现每步真实算</div>
+                <div class="branch mlp" data-live-mlp><b>GELU(proj_mlp(u)) → proj_out_mlp</b><br>m<sub>local</sub> · anchor step 真实算</div>
+                <div class="branch cache"><b>cache / predict m̂<sub>local</sub></b><br>skipped step 替换上面橙色支路</div>
+              </div></div><div class="op">+</div>
+              <div class="node" style="min-height:auto;border-color:#a9c8f5;background:var(--attn-soft)"><small>UNCHANGED COLLECTIVE</small><b>TP AllReduce</b><p>AR(a<sub>local</sub> + m̂<sub>local</sub>)<br>仍然只有一次</p></div><div class="arrow">→</div>
+              <div><div class="equation">Δh = g · (proj + bias)</div><div class="op addres" style="margin-top:13px">⊕</div><div style="text-align:center;margin-top:6px;font:12px var(--mono)">h<sub>ℓ+1</sub> = h<sub>ℓ</sub> + Δh</div></div>
+            </div>
+          </div>
+          <div class="panel-pad" style="padding-top:0">
+            <div class="equation"><b>源码精确公式（modeling_flux.py:711–733）</b><br>h′ = h + gate(t) · [ AllReduce(<span class="blue">out_attn_local</span> + <span class="orange">out_mlp_local</span>) + bias ]</div>
+            <div class="callout">
+              <div class="call"><b>为什么这是 Trainium 最好的拆点</b><p>源码本来就把两支 RowParallelLinear 的 reduce_output 关掉，在相加后合并成一次 AllReduce。用 m̂<sub>local</sub> 替换 out_mlp，不增加 collective，也不改 rank 间通信顺序。</p></div>
+              <div class="call"><b>这里的“两个 residual”是代数分解</b><p>Single block 物理上只有最后一次 residual add；由于 AllReduce 与加法是线性的，可把 Δh 看成 Attention 分量 + MLP 分量，但实现上应保持先合并再 AllReduce。</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="runtime">
+      <div class="shell">
+        <div class="section-head"><div><div class="kicker">03 / ACROSS TIMESTEPS</div><h2>不是多跑完整 DiT，而是跳过 MLP GEMM</h2></div><p class="section-copy">Anchor step 负责刷新每层 cache；hybrid step 仍经过 57 层，但每层只走 Attention 主计算和轻量 modulation，MLP 支路从设备内状态恢复。</p></div>
+        <div class="panel timeline">
+          <div class="timegrid">
+            <article class="timecard anchor"><h3>t<sub>k</sub> · anchor <span class="tag new">FULL</span></h3><div class="equation">Attention✓ + MLP✓</div><ul><li>真实计算每层 Attention 与 MLP</li><li>写入每层未加 gate 的 MLP 输出 F<sub>M,ℓ</sub></li><li>若做一阶 Taylor，再滚动 previous / previous-2 两个 bank</li></ul></article>
+            <div class="timearrow">→</div>
+            <article class="timecard skip"><h3>t<sub>k+1</sub> · hybrid <span class="tag now">CACHE</span></h3><div class="equation"><span class="blue">Attention✓</span> + <span class="purple">MLP predicted</span></div><ul><li>Attention 用当前 hidden / text / timestep</li><li>m̂<sub>ℓ</sub> 从设备内 bank 读取或 Taylor 外推</li><li>当前 gate(t) 重新施加，逐层输出继续传递</li></ul></article>
+            <div class="timearrow">→</div>
+            <article class="timecard skip"><h3>t<sub>k+2</sub> · hybrid / anchor</h3><div class="equation">由静态 cadence / host policy 选择 NEFF</div><ul><li>质量不稳：切回 anchor-write</li><li>稳定区间：继续 attention-read</li><li>所有 TP rank 必须做相同选择</li></ul></article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="aot">
+      <div class="shell">
+        <div class="section-head"><div><div class="kicker">04 / TRAINIUM + AOT</div><h2>能静态编译，但不能运行时随便分叉</h2></div><p class="section-copy">结论来自当前 NXD 结构：固定 shape / TP collective、整段 backbone traced 成 NEFF；项目已有 <code>nn.Parameter + input_output_aliases</code> 的设备持久状态先例。</p></div>
+        <div class="aot-grid">
+          <article class="panel traffic ok"><div class="lamp"></div><h3>绿色：架构天然兼容</h3><ul><li>固定 1024²、B=1、TP=4 编译</li><li>single block 在 AllReduce 前替换 MLP local partial</li><li>cache bank 作为 device-resident aliased Parameter</li><li>所有 rank 保持同一 collective 拓扑</li></ul></article>
+          <article class="panel traffic warn"><div class="lamp"></div><h3>黄色：需要新实现与测量</h3><ul><li>新编译 anchor-write / attention-read 两个图</li><li>跨 NEFF 的 cache handle 必须验证 zero-copy，且所有输入都留在 Neuron device</li><li>double block 的 image cache 要匹配 SP sequence shard</li><li>两份 history bank 的 HBM 容量、读带宽与 Attention-only 延迟</li></ul></article>
+          <article class="panel traffic bad"><div class="lamp"></div><h3>红色：不要这样做</h3><ul><li>在 traced forward 里用 Python if / tensor.item()</li><li>不同 TP rank 选择不同支路或少做 collective</li><li>每步把 GiB 级 cache 拉回 host 再送入设备</li><li>把 57 个 block 拆成 57 次 host→NEFF dispatch</li></ul></article>
+        </div>
+        <div class="panel aotflow">
+          <div class="aotrow">
+            <div class="neff"><strong>Host cadence</strong><small>只做入口选择；不搬 cache tensor</small></div><div class="arrow">→</div>
+            <div class="neff anchor"><strong>anchor-write.neff</strong><small>完整 Attention + MLP；输出 noise；alias-write cache bank</small></div><div class="arrow">或</div>
+            <div class="neff hybrid"><strong>attention-read.neff</strong><small>Attention + cached MLP；输出 noise；alias-read histories</small></div><div class="arrow">→</div>
+            <div class="neff"><strong>Scheduler</strong><small>更新 latent z<sub>t−1</sub></small></div>
+          </div>
+        </div>
+        <div class="note"><b>跨图状态的边界：</b>两个 NEFF 不会因为各自都声明了 aliased Parameter 就自动共享同一块状态。实现时应让 anchor 图返回仍驻留 Neuron HBM 的 cache tensor handle，再作为 hybrid 图的 device input；或由支持共享 buffer 的 runtime 统一管理。AWS 的 direct-HBM / model-chaining 路径支持这种零 CPU round-trip 形态，但要在当前 NXD ModelBuilder 版本上做一次实测。</div>
+
+        <div style="height:22px"></div>
+        <div class="memory">
+          <div class="metric"><small>MODEL WIDTH</small><strong>3072</strong><span>24 heads × 128 dim</span></div>
+          <div class="metric"><small>ONE DOUBLE BLOCK</small><strong>27 MiB</strong><span>image 24 + text 3，dense BF16 / B=1</span></div>
+          <div class="metric"><small>ONE SINGLE BLOCK</small><strong>27 MiB</strong><span>4608 joint tokens × 3072 × 2 B</span></div>
+          <div class="metric"><small>ALL 57 · ONE HISTORY</small><strong>1.50 GiB</strong><span>SP double-image 时约 1.17 GiB / rank</span></div>
+        </div>
+        <p class="footnote">估算条件：1024×1024 → 64×64 = 4096 image tokens，text=512，BF16，batch element=1。两阶历史约 2.34–3.01 GiB / rank。Single block 的 RowParallel local partial 输出仍是完整 H 宽度，因此 TP=4 不会自动把这部分 cache 容量除以 4。</p>
+      </div>
+    </section>
+
+    <section id="decision">
+      <div class="shell">
+        <div class="section-head"><div><div class="kicker">05 / RECOMMENDATION</div><h2>先验证 single block 拆分，再扩到 57 层</h2></div><p class="section-copy">结构正确不等于速度一定划算。新方案不会再获得“整步完全跳过”的极端加速，但它让 prompt / 空间语义通过 Attention 每步重新注入，正对目前油门版本的主要失败模式。</p></div>
+        <div class="decision">
+          <div class="score"><div class="kicker" style="color:#8fbaf8">FEASIBILITY</div><div class="n">可行</div><p>AOT：高<br>通信拓扑：single 很优<br>内存成本：中高<br>质量收益：待因果实验</p></div>
+          <div class="panel steps"><h3>建议的最小实验</h3><ol><li><b>做 1 个 single block 的双图 micro-NEFF：</b>full 与 cached-MLP，确认数值拼接、alias 和单次 AllReduce。</li><li><b>测真实 block 分解：</b>Attention、MLP、collective、cache read 各自延迟；先决定理论油门上限。</li><li><b>扩到 38 个 single blocks：</b>用真值 MLP cache 做质量上界，再上 Taylor 预测；避免一开始同时处理 double-stream SP。</li><li><b>最后扩 double blocks：</b>image payload 按 SP shard 存，text payload replicated；保持所有 rank collective 次序一致。</li></ol></div>
+        </div>
+        <div class="note" style="margin-top:17px"><b>一句话：</b>它符合 Trainium/AOT，但产品形态应是“两个静态 NEFF + 设备内 alias cache bank”，不是在一个 NEFF 里做动态 if；最值得先落地的切点是 <code>NeuronFluxSingleTransformerBlock.forward()</code> 的 <code>out_mlp</code>。</div>
+      </div>
+    </section>
+  </main>
+
+  <footer><div class="shell">依据当前仓库实现：<span class="src">difflet/models/flux/modeling_flux.py:620–871</span>；设备内 alias 先例：<span class="src">difflet/backends/trainium/flux/teacache_probe_fused.py:85–145</span>。配置读取自本机 FLUX.1-dev transformer config。Trainium 约束参考 AWS Neuron：<a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/frameworks/torch/torch-neuronx/programming-guide/inference/trace-vs-xla-lazytensor.html">AOT / fixed control flow</a>、<a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-runtime/explore/direct-hbm-tensor-alloc.html">direct HBM / model chaining</a>。</div></footer>
+
+  <script>
+    const buttons = [...document.querySelectorAll('[data-tab]')];
+    buttons.forEach(button => button.addEventListener('click', () => {
+      buttons.forEach(b => b.classList.toggle('active', b === button));
+      document.querySelector('#view-double').hidden = button.dataset.tab !== 'double';
+      document.querySelector('#view-single').hidden = button.dataset.tab !== 'single';
+    }));
+  </script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+{
+  "schema": "difflet-flux-cache-warmup-vqa-stress-calibration",
+  "schema_revision": 1,
+  "study_id": "flux-cache-warmup-vqa-stress-calibration-20260804",
+  "evidence_role": "opened-profile-pressure-calibration",
+  "serving_claim": false,
+  "prompt_source": {
+    "path": "benchmark/flux_cache/warmup-vqa-router-holdout-prompts.json",
+    "file_sha256": "f57796a591107de7a7b302ba8c9b4dcdd84d5bafd70f1e48a500ef6f12ed911f",
+    "opened": true
+  },
+  "source_holdout_result": {
+    "path": "benchmark/flux_cache/warmup-vqa-router-holdout-result.json",
+    "file_sha256": "91cf9439b4266c9d9f4f6ee4ffb509205331daf0d7238fd5891ca57a07951068",
+    "content_sha256": "0fd49a64fc49faa65a907232a7af0253da6d7a0087a856fd32475c02a524af42",
+    "required_status": "prospective_inconclusive_too_few_positive_groups"
+  },
+  "python_source_sha256": "4727bd6392d27c57f23dca2e5875699918e5e056dc27e0a3913d7e911f8038ac",
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4,
+    "seeds": [
+      2
+    ]
+  },
+  "candidates": [
+    {
+      "path": "benchmark/flux_cache/adaptive-vqa-stress-i12-k16-candidate.json",
+      "file_sha256": "98c2cfead70dd60a8c4e42b4db6f68fdd837a7832a82b1ec053b70b5ff741b29",
+      "candidate_id": "adaptive-vqa-stress-w6-i12-m8-k16-o1-index",
+      "pressure_order": 1
+    },
+    {
+      "path": "benchmark/flux_cache/adaptive-vqa-stress-i16-k20-candidate.json",
+      "file_sha256": "5150abe4995e20557094633dc0613d9d40b91636866bcb284e5106b412b11cd6",
+      "candidate_id": "adaptive-vqa-stress-w6-i16-m8-k20-o1-index",
+      "pressure_order": 2
+    }
+  ],
+  "sample_matrix": {
+    "prompt_count": 48,
+    "seed_count": 1,
+    "candidate_comparison_count": 96,
+    "expected_unique_quality_images": 144
+  },
+  "online_signal": {
+    "feature": "max_acceleration_cv",
+    "window": [
+      2,
+      5
+    ],
+    "threshold": 0.04691181821870764,
+    "risk_direction": "lower_is_riskier",
+    "profile_selection_must_not_use_signal_performance": true
+  },
+  "offline_label": {
+    "metric": "vqa_score",
+    "paired_harm_threshold": 0.25
+  },
+  "profile_selection_rule": {
+    "minimum_vqa_failure_prompt_groups": 6,
+    "maximum_vqa_failure_prompt_groups": 20,
+    "selection": "Choose the lowest pressure_order whose VQAScore failure prompt-group count is between the inclusive bounds. Do not inspect signal ranking or threshold performance when selecting the profile.",
+    "if_none": "Register another opened pressure calibration; do not change the online signal or VQAScore margin."
+  },
+  "sha256": "2cab9cb3af255a6b35cc9bd6e44b61717efe50e2851c8453675c855d39872e6c"
+}

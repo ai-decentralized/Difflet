@@ -101,18 +101,18 @@ class NeuronFluxPipeline(FluxPipeline):
         this implementation batches positive and negative inputs for parallel inference.
         """
         # Validate Neuron-specific constraints
-        assert (
-            ip_adapter_image is None
-        ), "NeuronFluxPipeline does not support ip_adapter_image input."
-        assert (
-            ip_adapter_image_embeds is None
-        ), "NeuronFluxPipeline does not support ip_adapter_image_embeds input."
-        assert (
-            negative_ip_adapter_image is None
-        ), "NeuronFluxPipeline does not support negative_ip_adapter_image input."
-        assert (
-            negative_ip_adapter_image_embeds is None
-        ), "NeuronFluxPipeline does not support negative_ip_adapter_image_embeds input."
+        assert ip_adapter_image is None, (
+            "NeuronFluxPipeline does not support ip_adapter_image input."
+        )
+        assert ip_adapter_image_embeds is None, (
+            "NeuronFluxPipeline does not support ip_adapter_image_embeds input."
+        )
+        assert negative_ip_adapter_image is None, (
+            "NeuronFluxPipeline does not support negative_ip_adapter_image input."
+        )
+        assert negative_ip_adapter_image_embeds is None, (
+            "NeuronFluxPipeline does not support negative_ip_adapter_image_embeds input."
+        )
 
         # Check if CFG is enabled and if parallel CFG is configured
         do_true_cfg = true_cfg_scale > 1 and negative_prompt is not None
@@ -604,6 +604,14 @@ class NeuronFluxPipeline(FluxPipeline):
         self._tc_last_trajectory = []
         self._tc_pairs = []
         _tc_prev_np = None
+        # Private, experiment-only hook used by the offline causal-repair
+        # collector.  Normal generation never installs it.  The hook may ask
+        # for a shadow full-DiT output through ``compute_actual`` or replace a
+        # predicted output with an already captured counterfactual.  It must
+        # never be used to make a serving speed claim.
+        counterfactual_hook = getattr(self, "_cache_counterfactual_hook", None)
+        if counterfactual_hook is not None and not callable(counterfactual_hook):
+            raise TypeError("_cache_counterfactual_hook must be callable")
 
         def _full_noise_pred(t):
             timestep = t.expand(latents.shape[0]).to(latents.dtype)
@@ -648,19 +656,51 @@ class NeuronFluxPipeline(FluxPipeline):
                     probe_guidance = guidance if guidance is not None else empty_guidance
                     delta = float(
                         self.teacache_probe.teacache_delta(
-                            latents, ts01, pooled_prompt_embeds, probe_guidance
+                            latents,
+                            ts01,
+                            pooled_prompt_embeds,
+                            probe_guidance,
                         )
                         .detach()
                         .cpu()
                         .item()
                     )
-
-                if controller is not None and controller.should_skip(i, None, diff_norm=delta):
+                used_cache_prediction = bool(
+                    controller is not None and controller.should_skip(i, None, diff_norm=delta)
+                )
+                if used_cache_prediction:
                     noise_pred = controller.skip_noise_pred(None)
                 else:
                     noise_pred = _full_noise_pred(t)
                     if controller is not None:
                         controller.record_full_step(noise_pred, None)
+
+                if counterfactual_hook is not None:
+                    original_shape = tuple(noise_pred.shape)
+                    original_dtype = noise_pred.dtype
+                    original_device = noise_pred.device
+                    noise_pred = counterfactual_hook(
+                        step_index=i,
+                        timestep=t,
+                        latents=latents,
+                        predicted=noise_pred,
+                        used_cache_prediction=used_cache_prediction,
+                        compute_actual=lambda: _full_noise_pred(t),
+                    )
+                    if not torch.is_tensor(noise_pred):
+                        raise TypeError("cache counterfactual hook must return a tensor")
+                    if tuple(noise_pred.shape) != original_shape:
+                        raise ValueError(
+                            "cache counterfactual hook changed the noise-prediction shape"
+                        )
+                    if noise_pred.dtype != original_dtype:
+                        raise ValueError(
+                            "cache counterfactual hook changed the noise-prediction dtype"
+                        )
+                    if noise_pred.device != original_device:
+                        raise ValueError(
+                            "cache counterfactual hook changed the noise-prediction device"
+                        )
 
                 if record and delta is not None and _tc_prev_np is not None:
                     rel_noise = float(
@@ -672,9 +712,7 @@ class NeuronFluxPipeline(FluxPipeline):
                     _tc_prev_np = noise_pred.detach().float()
 
                 latents_dtype = latents.dtype
-                latent_before_update = (
-                    latents.detach().clone() if measurements_enabled else None
-                )
+                latent_before_update = latents.detach().clone() if measurements_enabled else None
                 latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
                 if latents.dtype != latents_dtype and torch.backends.mps.is_available():
                     latents = latents.to(latents_dtype)
@@ -719,18 +757,18 @@ class NeuronFluxFillPipeline(FluxFillPipeline):
 
     @functools.wraps(FluxFillPipeline.__call__)
     def __call__(self, *args, **kwargs):
-        assert (
-            kwargs.get("ip_adapter_image") is None
-        ), "NeuronFluxFillPipeline does not support ip_adapter_image input."
-        assert (
-            kwargs.get("ip_adapter_image_embeds") is None
-        ), "NeuronFluxFillPipeline does not support ip_adapter_image_embeds input."
-        assert (
-            kwargs.get("negative_ip_adapter_image") is None
-        ), "NeuronFluxFillPipeline does not support negative_ip_adapter_image input."
-        assert (
-            kwargs.get("negative_ip_adapter_image_embeds") is None
-        ), "NeuronFluxFillPipeline does not support negative_ip_adapter_image_embeds input."
+        assert kwargs.get("ip_adapter_image") is None, (
+            "NeuronFluxFillPipeline does not support ip_adapter_image input."
+        )
+        assert kwargs.get("ip_adapter_image_embeds") is None, (
+            "NeuronFluxFillPipeline does not support ip_adapter_image_embeds input."
+        )
+        assert kwargs.get("negative_ip_adapter_image") is None, (
+            "NeuronFluxFillPipeline does not support negative_ip_adapter_image input."
+        )
+        assert kwargs.get("negative_ip_adapter_image_embeds") is None, (
+            "NeuronFluxFillPipeline does not support negative_ip_adapter_image_embeds input."
+        )
 
         with self.transformer.image_rotary_emb_cache_context():
             return super().__call__(*args, **kwargs)

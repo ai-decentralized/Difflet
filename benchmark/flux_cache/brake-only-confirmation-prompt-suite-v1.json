@@ -1,0 +1,173 @@
+{
+  "schema": "difflet-flux-cache-prompt-suite-v1",
+  "suite_id": "flux-cache-brake-only-confirmation-v1",
+  "source": {
+    "created_at": "2026-08-04",
+    "origin": "Prospectively authored confirmation prompts",
+    "selection": "Balanced ordinary compositional prompts; no candidate images or semantic scores inspected"
+  },
+  "splits": {
+    "brake_only_methodology_v1_confirmation": [
+      {
+        "prompt_id": "brake-confirm-001",
+        "category": "attribute",
+        "text": "a ceramic teapot with a matte teal glaze and a curved bamboo handle on a linen cloth"
+      },
+      {
+        "prompt_id": "brake-confirm-002",
+        "category": "attribute",
+        "text": "a snow-white owl wearing a narrow crimson ribbon perched on an old fence post"
+      },
+      {
+        "prompt_id": "brake-confirm-003",
+        "category": "attribute",
+        "text": "a vintage yellow typewriter with round black keys on a walnut desk"
+      },
+      {
+        "prompt_id": "brake-confirm-004",
+        "category": "attribute",
+        "text": "a translucent green glass frog beside a small silver bell"
+      },
+      {
+        "prompt_id": "brake-confirm-005",
+        "category": "counting",
+        "text": "exactly four copper measuring cups nested from largest to smallest on a white shelf"
+      },
+      {
+        "prompt_id": "brake-confirm-006",
+        "category": "counting",
+        "text": "seven paper lanterns hanging in a gentle arc, alternating orange and ivory"
+      },
+      {
+        "prompt_id": "brake-confirm-007",
+        "category": "counting",
+        "text": "three red canoes lined up parallel on the shore of a calm lake"
+      },
+      {
+        "prompt_id": "brake-confirm-008",
+        "category": "counting",
+        "text": "a breakfast tray holding two croissants, one pear, and three strawberries"
+      },
+      {
+        "prompt_id": "brake-confirm-009",
+        "category": "spatial-relation",
+        "text": "a blue suitcase beneath a wooden bench while a red umbrella leans against the bench's right side"
+      },
+      {
+        "prompt_id": "brake-confirm-010",
+        "category": "spatial-relation",
+        "text": "a small white sailboat between two dark rock formations under a pale evening sky"
+      },
+      {
+        "prompt_id": "brake-confirm-011",
+        "category": "spatial-relation",
+        "text": "a black cat sitting to the left of a green watering can in a sunny greenhouse"
+      },
+      {
+        "prompt_id": "brake-confirm-012",
+        "category": "spatial-relation",
+        "text": "a round mirror above a narrow console table with matching lamps at both ends"
+      },
+      {
+        "prompt_id": "brake-confirm-013",
+        "category": "interaction",
+        "text": "a watchmaker using tweezers to place a tiny gear inside an open pocket watch"
+      },
+      {
+        "prompt_id": "brake-confirm-014",
+        "category": "interaction",
+        "text": "a gardener tying a young tomato vine to a wooden stake with soft green twine"
+      },
+      {
+        "prompt_id": "brake-confirm-015",
+        "category": "interaction",
+        "text": "a cellist bowing a dark wooden cello on a small empty theater stage"
+      },
+      {
+        "prompt_id": "brake-confirm-016",
+        "category": "interaction",
+        "text": "two children passing a striped beach ball over a shallow tide pool"
+      },
+      {
+        "prompt_id": "brake-confirm-017",
+        "category": "fine-structure",
+        "text": "a basket weaver forming the braided rim of a half-finished willow basket"
+      },
+      {
+        "prompt_id": "brake-confirm-018",
+        "category": "fine-structure",
+        "text": "a bookbinder stitching cream pages together with blue thread on a workbench"
+      },
+      {
+        "prompt_id": "brake-confirm-019",
+        "category": "fine-structure",
+        "text": "a potter carving a repeating wave pattern around an unfired clay bowl"
+      },
+      {
+        "prompt_id": "brake-confirm-020",
+        "category": "fine-structure",
+        "text": "an origami artist folding an indigo paper crane beside several precise crease diagrams"
+      },
+      {
+        "prompt_id": "brake-confirm-021",
+        "category": "scene",
+        "text": "a quiet subway platform at dawn with one silver train arriving through light mist"
+      },
+      {
+        "prompt_id": "brake-confirm-022",
+        "category": "scene",
+        "text": "a small mountain clinic during snowfall with warm light glowing from two windows"
+      },
+      {
+        "prompt_id": "brake-confirm-023",
+        "category": "scene",
+        "text": "an open-air spice market with striped awnings and neat pyramids of colorful powders"
+      },
+      {
+        "prompt_id": "brake-confirm-024",
+        "category": "scene",
+        "text": "a research vessel crossing dark water beneath a broad green aurora"
+      },
+      {
+        "prompt_id": "brake-confirm-025",
+        "category": "material-lighting",
+        "text": "a chrome espresso machine reflecting a black-and-white checkerboard floor"
+      },
+      {
+        "prompt_id": "brake-confirm-026",
+        "category": "material-lighting",
+        "text": "a frosted glass vase filled with dried lavender in soft window light"
+      },
+      {
+        "prompt_id": "brake-confirm-027",
+        "category": "material-lighting",
+        "text": "a rain-soaked red bicycle under the cyan glow of a closed shop sign"
+      },
+      {
+        "prompt_id": "brake-confirm-028",
+        "category": "material-lighting",
+        "text": "a polished stone chessboard lit by a narrow beam in an otherwise dim room"
+      },
+      {
+        "prompt_id": "brake-confirm-029",
+        "category": "composition",
+        "text": "a top-down sewing workspace with folded fabric, wooden spools, scissors, and a paper pattern"
+      },
+      {
+        "prompt_id": "brake-confirm-030",
+        "category": "composition",
+        "text": "an isometric reading nook with one armchair, a floor lamp, and shelves built into two walls"
+      },
+      {
+        "prompt_id": "brake-confirm-031",
+        "category": "composition",
+        "text": "a macro photograph of dew droplets arranged along the serrated edge of a fern leaf"
+      },
+      {
+        "prompt_id": "brake-confirm-032",
+        "category": "composition",
+        "text": "a wide panoramic view of rice terraces with a lone blue shelter near the center"
+      }
+    ]
+  }
+}

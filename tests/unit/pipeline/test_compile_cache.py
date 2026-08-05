@@ -60,7 +60,12 @@ def test_cache_inputs_excludes_model_path():
 
 
 def test_runtime_only_app_kwargs_excluded_from_key():
-    spec_a = _spec(application_kwargs={"enable_host_pipeline": True, "foo": 1})
+    spec_a = _spec(
+        application_kwargs={
+            "enable_host_pipeline": True,
+            "foo": 1,
+        }
+    )
     spec_b = _spec(application_kwargs={"foo": 1})
     # Runtime-only kwargs do not change the cache key.
     assert cache_key(spec_a) == cache_key(spec_b)

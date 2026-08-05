@@ -1,0 +1,91 @@
+{
+  "schema": "difflet-flux-cache-semantic-coverage-registered-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-semantic-coverage-probe-20260804",
+  "status": "opened_primary_gate_rejected",
+  "serving_claim": false,
+  "opened_data": true,
+  "artifacts": {
+    "protocol": {
+      "path": "benchmark/flux_cache/semantic-coverage-probe.json",
+      "file_sha256": "0a865c90c58fd6d8882f87c22d4b3b167b95873e0594ba8ac86e1233f9a5788c",
+      "content_sha256": "cc56f20bbab87c6f136fe7659d97fe8f3a651e209a8eb8a87c8916302dd2e91a"
+    },
+    "collector": {
+      "path": "scripts/collect_flux_cache_semantic_coverage.py",
+      "file_sha256": "339779903ee9c3460858b6e8df1c1950f53cb0d3f1b4500a967219275374e065"
+    },
+    "probe_implementation": {
+      "path": "difflet/backends/trainium/flux/semantic_coverage_probe.py",
+      "file_sha256": "e41cab27a4f34f9e7b9ecbe8aa723563de883f57da8dbebcd94da58f82c380c1"
+    },
+    "feature_extractor": {
+      "path": "scripts/flux_cache_semantic_coverage.py",
+      "file_sha256": "118682c56f488f6bd76492b3fdecdb4f09f7335a2a17372d1f41fe435efcddff"
+    },
+    "analyzer": {
+      "path": "scripts/analyze_flux_cache_semantic_coverage.py",
+      "file_sha256": "28a3798465716b949042963b065343abe30282f4c4a102abad5462a14ce5755c"
+    },
+    "hardware_run": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-semantic-coverage-probe-20260804/semantic-coverage-run.json",
+      "file_sha256": "284d6f9296b9d22a0334443f56f773c49ed24ce7579c3fb5cd28c2b9efaa20e5"
+    },
+    "quality": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-semantic-coverage-probe-20260804/quality-input-v2.json",
+      "file_sha256": "233625891bdef8ce33882b5e8a7e78946e06543e3c72ff35ed342358d3648d27"
+    },
+    "speed": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-semantic-coverage-probe-20260804/speedup-candidates-v1.json",
+      "file_sha256": "d76acf2ee16503bf8dd88c520acf088fdb180ddb9ae325c6d2860ffa07453167"
+    },
+    "full_analysis": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-semantic-coverage-probe-20260804/analysis-result.json",
+      "file_sha256": "f98e7f693f399d5e043edbe5fcbb24a36ae7bd49528b022f80f9e04809148409",
+      "content_sha256": "11444d3467f6bfa62153e1b57c7bd797b1b4d7ed382503f8c88f5f25e0316469"
+    }
+  },
+  "execution_gates": {
+    "sample_count": 48,
+    "image_sha_identical_count": 48,
+    "final_latent_tensor_identical_count": 48,
+    "trajectory_tensor_identical_count": 48,
+    "identity_passed": true,
+    "partial_block_probe_step": 7,
+    "partial_block_probe_calls_per_request": 1,
+    "extra_full_transformer_calls": 0
+  },
+  "primary": {
+    "feature": "bottom_quartile_mean_max_region_coverage",
+    "risk_direction": "lower_is_riskier",
+    "positive_count": 12,
+    "roc_auc": 0.5046296296296297,
+    "full_recall_threshold": 0.00007366760983131825,
+    "full_recall_false_brake_count": 34,
+    "full_recall_negative_count": 36,
+    "full_recall_trigger_count": 46,
+    "gate_passed": false
+  },
+  "exploratory_upper_bound": {
+    "feature": "minimum_max_region_coverage",
+    "risk_direction": "higher_is_riskier",
+    "roc_auc": 0.6064814814814815,
+    "full_recall_false_brake_count": 32
+  },
+  "measurement_cost": {
+    "partial_probe_total_s": 0.38627623008505907,
+    "source_candidate_total_s": 142.10516942299728,
+    "partial_probe_fraction_of_source_total": 0.002718241930631321,
+    "diagnostic_candidate_total_s": 135.68303091703274,
+    "observed_end_to_end_difference_fraction": -0.04519285633338277,
+    "interpretation": "The direct probe timer is the cost evidence; the negative end-to-end difference is run-to-run variance and is not a speedup claim.",
+    "serving_cost_claim": false
+  },
+  "decision": {
+    "what_worked": "A fixed-shape Trainium/AOT partial-block sentinel can expose a 4x4-by-512 prompt-token coverage map with no full-DiT shadow call and without changing generation.",
+    "what_failed": "Early block-0 prompt-token coverage does not rank the terminal@21-actionable VQA failures; the frozen primary is random-level and even the opened exploratory upper bound is unusable at full recall.",
+    "prompt_token_coverage_signal_search": "closed_negative",
+    "next": "Change the cache representation or granularity. The next bounded experiment should keep attention residual fresh while caching the MLP residual, then measure whether quality tolerance permits a larger cache interval."
+  },
+  "sha256": "111a2e0566c4c6ca7318c1de2f021136481b757e82e67e08d8828826258123e3"
+}

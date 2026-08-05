@@ -20,7 +20,10 @@ from difflet.pipeline.cache.policies import (
     AdaptiveAnchorPolicy,
     CadencePolicy,
     ExplicitMaskPolicy,
+    PhasedStaticPolicy,
     PeriodicAnchorPolicy,
+    StaticPlusBrakeConfig,
+    StaticPlusBrakePolicy,
     TeaCachePolicy,
 )
 from difflet.pipeline.cache.predictors import (
@@ -122,6 +125,7 @@ __all__ = [
     "CadencePolicy",
     "Context",
     "ExplicitMaskPolicy",
+    "PhasedStaticPolicy",
     "LegacyResidualPredictor",
     "InMemoryMeasurementSink",
     "InMemorySpatialMeasurementSink",
@@ -137,6 +141,8 @@ __all__ = [
     "SpatialMeasurementReport",
     "ResolvedCacheSession",
     "StepContext",
+    "StaticPlusBrakeConfig",
+    "StaticPlusBrakePolicy",
     "TaylorSeerPredictor",
     "TeaCachePolicy",
     "TeaCacheControllerAdapter",

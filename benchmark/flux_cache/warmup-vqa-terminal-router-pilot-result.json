@@ -1,0 +1,78 @@
+{
+  "schema": "difflet-flux-cache-warmup-vqa-terminal-router-pilot-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-warmup-vqa-terminal-router-pilot-20260804",
+  "evidence_role": "opened-development-causal-upper-bound",
+  "serving_claim": false,
+  "protocol": {
+    "path": "benchmark/flux_cache/warmup-vqa-terminal-router-pilot.json",
+    "file_sha256": "d3344fb3e3ede28959f8fd50cf9fc38306a1a67c7a181336bb417bf5714cbec5",
+    "content_sha256": "b62bcdacc61248f7467ae9059ad909fd67cf5e7dd63ccdd4117a9ac89ab45bf6"
+  },
+  "artifacts": {
+    "run": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-terminal-route-20260804/warmup-terminal-router-run.json",
+      "file_sha256": "7ba62a3aeeed62eb08bc0ae82f054fc3d4753d892f569834bdea0562520a5f3a",
+      "content_sha256": "8c19bda02ba9309eb3fd4ac003a28744f6fc95156d38a06e625761900cd277a9"
+    },
+    "semantic_scores": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-terminal-route-20260804/semantic-scores.json",
+      "file_sha256": "a4798ac3d9822e7d91ec39c0a42d8f031d09d6e0c3c99750e4a03ecd78622b0c"
+    },
+    "analysis": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-terminal-route-20260804/analysis.json",
+      "file_sha256": "e4a0ad5d7cc04ca1fae4ff373b428e04250d6c3fbc1df35a487c67b6df33d789",
+      "content_sha256": "559fb693f6de2e38fe6b8d83b86bca8bc276aee66c2fca7512335f6c3133d1e9"
+    }
+  },
+  "signal": {
+    "feature": "max_acceleration_cv",
+    "window": [
+      2,
+      5
+    ],
+    "risk_direction": "lower_is_riskier",
+    "threshold": 0.04691181821870764,
+    "label": "full-DiT VQAScore minus oil-profile VQAScore is strictly greater than 0.25",
+    "available_before_first_cache_skip": true,
+    "requires_shadow_full_dit": false
+  },
+  "intervention": {
+    "action": "disable cache permanently from step 6",
+    "terminal_image_count": 4,
+    "all_terminal_images_byte_identical_to_baseline": true,
+    "full_steps_per_terminal_request": 50,
+    "skipped_steps_per_terminal_request": 0
+  },
+  "opened_data_result": {
+    "status": "development_terminal_mapping_found",
+    "vqa_failure_comparison_count": 4,
+    "vqa_failure_prompt_group_count": 2,
+    "triggered_vqa_failure_count": 4,
+    "rescued_vqa_failure_count": 4,
+    "introduced_contract_failure_count": 0,
+    "stage_oil": {
+      "original_vqa_failure_count": 2,
+      "routed_vqa_failure_count": 0,
+      "routing_cost_increase_fraction_diagnostic": 0.31531883586905396
+    },
+    "aggressive_oil": {
+      "original_vqa_failure_count": 2,
+      "routed_vqa_failure_count": 0,
+      "remaining_image_reward_failure_count": 1,
+      "routing_cost_increase_fraction_diagnostic": 0.26439643547561875
+    }
+  },
+  "interpretation": {
+    "what_closed": "The warmup signal can be mapped to an effective endpoint action on opened data: terminal routing removes the targeted VQAScore failures.",
+    "what_failed": "Routing to the existing conservative cache profile did not repair any targeted VQAScore failure because that profile still skipped 33 to 37 of 50 steps.",
+    "what_remains": "The signal was selected on opened data and has only two independent positive prompt groups; prospective replication is mandatory.",
+    "serving_qualified": false
+  },
+  "next": {
+    "protocol": "benchmark/flux_cache/warmup-vqa-router-holdout.json",
+    "fixed_prompt_groups": 48,
+    "no_post_score_sample_expansion": true
+  },
+  "sha256": "9b18ca60bcc416f7c42ed632d4e871a6847d26fe8b78cdc72a203deb1e560a8f"
+}

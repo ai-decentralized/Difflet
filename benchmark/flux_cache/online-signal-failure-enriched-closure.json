@@ -1,0 +1,117 @@
+{
+  "decision": {
+    "brake_threshold": {
+      "comparison": "risk_score >= threshold",
+      "failure_recall": 1.0,
+      "passing_count": 30,
+      "passing_false_brake_count": 20,
+      "passing_false_brake_rate": 0.6666666666666666,
+      "source": "target-policy grouped OOF predictions",
+      "threshold": 0.06414135908015087
+    },
+    "checks": {
+      "full_failure_recall": true,
+      "maximum_passing_false_brake_rate": false,
+      "methodology_preregistered": false,
+      "minimum_pooled_oof_roc_auc": false,
+      "minimum_target_failures": true,
+      "minimum_target_oof_roc_auc": false,
+      "minimum_total_failures": true,
+      "qualified_oil_all_clear_zone": false
+    },
+    "export_frozen_gate": false,
+    "failed_checks": [
+      "minimum_pooled_oof_roc_auc",
+      "minimum_target_oof_roc_auc",
+      "maximum_passing_false_brake_rate",
+      "qualified_oil_all_clear_zone",
+      "methodology_preregistered"
+    ],
+    "next_stage": "do not run a confirmation holdout or deploy a threshold",
+    "oil_threshold": {
+      "best_available": {
+        "coverage": 0.3125,
+        "failing_group_count": 0,
+        "failure_count": 0,
+        "failure_rate": 0.0,
+        "group_coverage": 0.375,
+        "independent_group_count": 6,
+        "independent_group_failure_rate": 0.0,
+        "independent_group_failure_rate_upper_bound": 0.39303776899708265,
+        "qualified": false,
+        "sample_count": 10,
+        "threshold": 0.04211980451759159
+      },
+      "candidate_threshold_count": 10,
+      "comparison": "risk_score <= threshold",
+      "constraints": {
+        "confidence": 0.95,
+        "independent_unit": "prompt_index",
+        "maximum_failure_rate_upper_bound": 0.1,
+        "minimum_independent_group_count": 29,
+        "require_zero_observed_failures": true,
+        "strictly_below_brake_threshold": 0.06414135908015087
+      },
+      "qualified": false,
+      "selected": null,
+      "selection_rule": "largest score <= threshold satisfying every oil constraint",
+      "source": "target-policy grouped OOF predictions"
+    },
+    "pooled_oof": {
+      "average_precision": 0.1876750700280112,
+      "full_recall_operating_point": {
+        "failure_recall": 1.0,
+        "passing_count": 59,
+        "passing_false_brake_count": 40,
+        "passing_false_brake_rate": 0.6779661016949152,
+        "threshold": 0.06414135908015087
+      },
+      "roc_auc": 0.6576271186440679
+    },
+    "selected_model": "combined",
+    "serving_claim": false,
+    "status": "reject_feature_family",
+    "target_candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index",
+    "target_oof": {
+      "average_precision": 0.11688311688311688,
+      "failure_count": 2,
+      "full_recall_operating_point": {
+        "failure_recall": 1.0,
+        "passing_count": 30,
+        "passing_false_brake_count": 20,
+        "passing_false_brake_rate": 0.6666666666666666,
+        "threshold": 0.06414135908015087
+      },
+      "roc_auc": 0.5666666666666667,
+      "sample_count": 32
+    }
+  },
+  "development_artifact": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-failure-enriched-20260803/gate-development-methodology-v1.json",
+    "sha256": "99e90671c691bfd4b144ac3d54c5c0800b29686da5f282d10e97152dcd28add9"
+  },
+  "integrity": {
+    "candidate_ids": [
+      "adaptive-oil-e1p80-w6-i8-k12-o1-index",
+      "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index"
+    ],
+    "comparison_count": 64,
+    "execution_git_commit": "ce013e2ae630a046039b66ddcd5c9fcde62afa45",
+    "execution_git_dirty": false,
+    "methodology_preregistered": false,
+    "methodology_sha256": "4622c84e39cd44458e90a6f832332dcecfa489fbdde71c02a32aa233d24732c0",
+    "prompt_set_sha256": "f2917b14b905aa085452031b32a11ba95516d9861c4e18f9128ebb8e437fd45a",
+    "quality_manifest_sha256": "2e654a18b2f922cfdff72fa01affb61a9722b62575c6203604116887a9d81247",
+    "registration_sha256": "d4450428fcaaa23c523f7be79ee348c087d292aee878c0d23a03e62025f352fc",
+    "semantic_report_sha256": "bff1cc1bd0683eb67d97188060438a8936f837d54fefff6f584e0819d8321d66",
+    "target_candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index"
+  },
+  "phase": "development",
+  "qualification": {
+    "development_only": true,
+    "note": "A positive development decision only freezes a candidate gate; it never qualifies serving by itself.",
+    "serving_claim": false
+  },
+  "schema": "difflet-flux-cache-offline-gate-closure",
+  "schema_revision": 1
+}

@@ -1,0 +1,160 @@
+{
+  "schema": "difflet-flux-cache-terminal-brake-causal-label-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-terminal-brake-causal-label-20260804",
+  "status": "causal_target_alignment_confirmed_gate_rejected",
+  "serving_claim": false,
+  "opened_data": true,
+  "artifacts": {
+    "source_semantic": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/semantic-scores.json",
+      "file_sha256": "01859c03400266e979d0baf31a635ef4fdab9f8bbbd864fb1ccfba5d2292e55e"
+    },
+    "timing_protocol": {
+      "path": "benchmark/flux_cache/terminal-brake-timing-failure-sweep.json",
+      "file_sha256": "aded21501460c0512a3ded7d5f27ee0b58bc2beefc994834c8b6ce047b0be2f7",
+      "content_sha256": "31d8bf69aee55139f1f37e638e382d2cfd27b704e1a0cc4888f98b3ddeb2b0e1"
+    },
+    "timing_run": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-timing-failures-20260804/terminal-brake-sweep-run.json",
+      "file_sha256": "bcc7aca0bcf1c33881f39b2a2556f1d03111911663ebb18946f7f891d1b19019"
+    },
+    "timing_semantic": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-timing-failures-20260804/semantic-scores.json",
+      "file_sha256": "c94f30a0f0b3de01503045c57a06490165ab3f1f9a903f313fd2f4a68ebe99ce"
+    },
+    "completion_protocol": {
+      "path": "benchmark/flux_cache/terminal-brake-step29-completion.json",
+      "file_sha256": "94e70bd9567b5743752bcb93df94c8a861e146c926bd4aa7fec3cdaaa99ec5e1",
+      "content_sha256": "ae2d815bbe5ea2e7bc4000f42d437a6d36d947745c47480561cbf95367352f7c"
+    },
+    "completion_run": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-step29-completion-20260804/terminal-brake-completion-run.json",
+      "file_sha256": "0338892e81b7f7ed0f38c58f8974dfe1b2abf8f54d485f82d0dd5ae6ae595bed"
+    },
+    "completion_semantic": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-step29-completion-20260804/semantic-scores.json",
+      "file_sha256": "3c54bb7f090f3541ab9d1db74b3b4cf5e210cc88437362ebc2140265738b1203"
+    }
+  },
+  "causal_definition": {
+    "terminal_brake": "Follow the original cache trajectory through step t-1, then permanently compute real Transformer outputs from step t.",
+    "brake_benefit_at_t": "VQA(terminal@t) - VQA(continue-cache)",
+    "actionable_brake_at_29": "continue-cache VQA harm > 0.25 and terminal@29 VQA harm <= 0.25",
+    "prefix_identity_gate": "The latent after step t-1 must be bit-identical to the continue-cache trajectory."
+  },
+  "identity_and_scoring_gates": {
+    "terminal_branch_count": 96,
+    "prefix_identity_pass_count": 96,
+    "baseline_vqa_rescore_count": 48,
+    "baseline_vqa_rescore_mismatch_count": 0
+  },
+  "failure_rescue_timing": [
+    {
+      "terminal_step": 7,
+      "cache_prefix_skips": 1,
+      "source_failure_count": 12,
+      "rescued_count": 12,
+      "mean_brake_benefit": 0.4474283854166667
+    },
+    {
+      "terminal_step": 13,
+      "cache_prefix_skips": 6,
+      "source_failure_count": 12,
+      "rescued_count": 12,
+      "mean_brake_benefit": 0.44970703125
+    },
+    {
+      "terminal_step": 21,
+      "cache_prefix_skips": 14,
+      "source_failure_count": 12,
+      "rescued_count": 12,
+      "mean_brake_benefit": 0.4197591145833333
+    },
+    {
+      "terminal_step": 29,
+      "cache_prefix_skips": 22,
+      "source_failure_count": 12,
+      "rescued_count": 8,
+      "mean_brake_benefit": 0.2639973958333333
+    },
+    {
+      "terminal_step": 37,
+      "cache_prefix_skips": 30,
+      "source_failure_count": 12,
+      "rescued_count": 1,
+      "mean_brake_benefit": -0.018391927083333332
+    }
+  ],
+  "step29_full_population": {
+    "sample_count": 48,
+    "continue_cache_failure_count": 12,
+    "actionable_brake_count": 8,
+    "unrescued_source_failure_count": 4,
+    "terminal_all_failure_count": 6,
+    "terminal_introduced_failure_count": 2,
+    "terminal_introduced_failure_sample_ids": [
+      "p013-s2",
+      "p039-s2"
+    ],
+    "positive_brake_benefit_count": 38,
+    "negative_brake_benefit_count": 10,
+    "mean_brake_benefit": 0.0926513671875,
+    "continue_cache_total_s": 142.10516942299728,
+    "terminal_all_total_s": 388.0840724849986,
+    "terminal_all_cost_increase_fraction": 1.7309637929483648
+  },
+  "failure_subset_selected_signal_control_completion": {
+    "feature": "output_max_region_relative_l1",
+    "window": [
+      6,
+      12
+    ],
+    "risk_direction": "lower_is_more_actionable",
+    "extra_transformer_calls": 0,
+    "selection_note": "Selected after inspecting the 12 source failures and before scoring the 36 non-failure terminal branches; not a new-prompt holdout.",
+    "actionable_brake_auc": 0.721875,
+    "actionable_brake_average_precision": 0.30209752491940534,
+    "continuous_brake_benefit_spearman": -0.1478404930588501,
+    "observational_final_failure_auc": 0.5509259259259259,
+    "auc_change_after_causal_relabeling": 0.1709490740740741,
+    "full_recall_diagnostic_threshold": 0.28770628571510315,
+    "full_recall_actionable_count": 8,
+    "full_recall_false_brake_count": 28,
+    "full_recall_negative_count": 40,
+    "full_recall_trigger_count": 36,
+    "full_recall_routed_failure_count": 6,
+    "full_recall_introduced_failure_count": 2,
+    "full_recall_cost_increase_fraction": 1.299850121652805,
+    "serving_threshold_frozen": false
+  },
+  "posthoc_upper_bound": {
+    "feature": "output_max_region_velocity_turn",
+    "window": [
+      21,
+      28
+    ],
+    "risk_direction": "higher_is_more_actionable",
+    "actionable_brake_auc": 0.78125,
+    "actionable_brake_average_precision": 0.5338389214636947,
+    "full_recall_diagnostic_threshold": 0.009243369102478027,
+    "full_recall_false_brake_count": 21,
+    "full_recall_trigger_count": 29,
+    "full_recall_routed_failure_count": 5,
+    "full_recall_introduced_failure_count": 1,
+    "full_recall_cost_increase_fraction": 1.052014819721419,
+    "qualification_role": "posthoc_only"
+  },
+  "decision": {
+    "what_worked": "Replacing observational final-failure labels with paired terminal-brake outcomes improved the selected cheap signal AUC from 0.551 to 0.722, confirming causal-target mismatch was material.",
+    "what_failed": "No cheap threshold gives useful full recall: the preselected signal brakes 28 of 40 negatives, still leaves six failures, and more than doubles total runtime.",
+    "additional_risk": "Terminal braking is not quality-monotone from a cached prefix; terminal@29 introduced two VQA failures among requests that passed under continue-cache.",
+    "serving_qualified": false
+  },
+  "next": {
+    "do_not_run": "Do not send the step-29 gate to a new-prompt serving holdout.",
+    "highest_value_experiment": "If continuing, pre-register terminal@21 and exactly one signal available by step 20, complete paired controls, and reject unless it rescues failures without introduced failures at a materially lower false-brake and cost rate.",
+    "fallback": "If the step-21 mapping also fails, stop scalar whole-output signal search and change predictor or cache granularity."
+  },
+  "sha256": "cbb532986c7c0541b99a6a7a1770306d4097a761c2a621e993a25589e23242ac"
+}

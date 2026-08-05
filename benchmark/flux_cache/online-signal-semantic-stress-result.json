@@ -1,0 +1,155 @@
+{
+  "schema": "difflet-flux-cache-online-signal-semantic-stress-result",
+  "schema_revision": 1,
+  "study_date": "2026-08-03",
+  "source_commit": "537bda284e13a2a7c88916cf2e369b8ac47d5090",
+  "hardware": "AWS Trainium2, TP=4, bfloat16",
+  "registration": {
+    "path": "benchmark/flux_cache/online-signal-semantic-stress-audit.json",
+    "prompt_path": "benchmark/flux_cache/online-signal-semantic-stress-prompts.json",
+    "prompt_sha256": "d0639ba758fd1e3c007035a0c6bc4563be4af16deb1dfe724c072aa1d835f307",
+    "sample_count": 24,
+    "seed": 0,
+    "frozen_before_collection": true
+  },
+  "semantic_outcome": {
+    "automatic_failure_count": 0,
+    "automatic_pass_count": 24,
+    "worst_candidate_minus_baseline": {
+      "vqa_score": -0.205078125,
+      "image_reward": -0.7722109854221344
+    },
+    "frozen_max_harm": {
+      "vqa_score": 0.25,
+      "image_reward": 0.7824214100837708
+    },
+    "roc_auc": null,
+    "average_precision": null,
+    "reason_metrics_unavailable": "The prospectively frozen stress set contained no automatic failures. Near-boundary passing samples were not relabeled after inspection.",
+    "artifact": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-semantic-stress-20260803/semantic-scores.json",
+      "sha256": "327551b3fd65e8c1c84e23c75fbba7aff6c30e1ddb09ccf7f12312a548870982"
+    }
+  },
+  "opened_threshold_intervention": {
+    "signal": "max_region_modulation_positive_acceleration",
+    "threshold": 0.14,
+    "threshold_status": "selected on an opened single-positive audit; not qualified",
+    "passing_requests_vetoed": 7,
+    "passing_request_count": 24,
+    "passing_request_false_veto_rate": 0.2916666666666667,
+    "extra_full_dit_step_requests": 10,
+    "no_veto_total_elapsed_s": 85.10123878599552,
+    "veto_total_elapsed_s": 87.48906513399925,
+    "observed_runtime_increase_percent": 2.805865557384424,
+    "artifacts": {
+      "no_veto": {
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-semantic-stress-20260803/online-signal-no-veto.json",
+        "sha256": "d8ae380b58bd02561b0f2c09de5687cf9ff81f8f0cafef27ebc3fd8687f115f7"
+      },
+      "veto_0p14": {
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-semantic-stress-20260803/online-signal-veto-0p14.json",
+        "sha256": "b9244a558d28b7d6cc0a9943123cb4c4c929a1c2c4f06da4d6d9cff7bb97804f"
+      }
+    }
+  },
+  "continuous_risk_audit": {
+    "outcome_definition": "positive metric harm, with the contract outcome equal to the maximum harm normalized by its frozen metric limit",
+    "method": "Spearman rank correlation over the 24 stress requests",
+    "signals": {
+      "max_region_modulation_positive_acceleration": {
+        "opened_single_positive_auc": 0.9032258064516129,
+        "opened_failure_descending_rank": 4,
+        "image_reward_harm": {
+          "rho": 0.268696,
+          "p_value": 0.204239
+        },
+        "vqa_score_harm": {
+          "rho": 0.128317,
+          "p_value": 0.550146
+        },
+        "normalized_contract_harm": {
+          "rho": 0.293107,
+          "p_value": 0.164522
+        },
+        "decision": "reject threshold 0.14; retain the feature only as an unqualified exploratory input"
+      },
+      "prompt_relative_text_mass_drop": {
+        "probe": "block-0 learned Q/K attention proxy from 16 image regions to the first 64 valid T5 tokens",
+        "opened_single_positive_auc": 1.0,
+        "opened_failure_descending_rank": 1,
+        "image_reward_harm": {
+          "rho": 0.014783,
+          "p_value": 0.945342
+        },
+        "vqa_score_harm": {
+          "rho": -0.118312,
+          "p_value": 0.581902
+        },
+        "normalized_contract_harm": {
+          "rho": 0.076973,
+          "p_value": 0.720724
+        },
+        "opened_mean_elapsed_s": 3.623670414031267,
+        "decision": "reject; the apparent opened separation did not generalize"
+      },
+      "one_block_linear_prediction_error": {
+        "probe": "one faithful FLUX double-stream block image branch after joint attention",
+        "opened_single_positive_auc": 0.967741935483871,
+        "opened_failure_descending_rank": 2,
+        "image_reward_harm": {
+          "rho": -0.184348,
+          "p_value": 0.388506
+        },
+        "vqa_score_harm": {
+          "rho": 0.037408,
+          "p_value": 0.86223
+        },
+        "normalized_contract_harm": {
+          "rho": -0.219178,
+          "p_value": 0.303476
+        },
+        "opened_mean_elapsed_s": 3.9386122256877343,
+        "runtime_increase_vs_prompt_probe_percent": 8.69124,
+        "decision": "reject; no independent harm correlation and materially higher probe cost"
+      },
+      "cached_output_dynamics": {
+        "opened_single_positive_auc": {
+          "max_region_relative_l1": 0.6129032258064516,
+          "max_region_velocity_turn": 0.0967741935483871,
+          "max_region_acceleration_ratio": 0.2903225806451613
+        },
+        "decision": "reject as a standalone risk signal"
+      }
+    },
+    "experimental_artifacts": {
+      "prompt_opened": {
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-prompt-conditioned-opened32-20260803.json",
+        "sha256": "cb82f4e568a442fc723a09208528915d1d4fd4a61fb65734b979557235e2f857"
+      },
+      "prompt_stress": {
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-prompt-conditioned-stress24-20260803.json",
+        "sha256": "cbcf132e00a22fe59c060db7c7d554289b0fcf6c081bde8521d27241cb94d9ca"
+      },
+      "block_opened": {
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-block-surrogate-opened32-20260803.json",
+        "sha256": "091c2388e5f1b46b81d77c90b3daeee72e0661bb0515685db35c57b6ccfb4f98"
+      },
+      "block_stress": {
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-block-surrogate-stress24-20260803.json",
+        "sha256": "4b91ad8c877b9c2e79637151f13f9a08d4624e7e2f369da94471d62789479d81"
+      }
+    }
+  },
+  "decision": {
+    "qualified_handcrafted_signal_count": 0,
+    "deploy_threshold_0p14": false,
+    "continue_handcrafting_single_scalar_signals": false,
+    "reason": "Three signals with strong apparent ranking on one opened pastry failure had weak or reversed relationships to semantic harm on an independent stress set. This is evidence of single-positive overfitting, not a stable cache-control boundary.",
+    "next_experiment": "Prospectively freeze a failure-enriched, multi-seed data set; collect only cheap serving-available features and semantic labels; fit a tiny regularized multivariate gate on a training split; qualify its brake/oil thresholds once on an untouched positive-containing holdout. The 24-sample stress set is now opened and cannot confirm a newly designed gate."
+  },
+  "qualification": {
+    "serving_claim": false,
+    "note": "Exploratory audit. Zero failures prevent sensitivity, ROC-AUC, and average-precision estimation; continuous correlations are descriptive and were inspected while developing later probes."
+  }
+}

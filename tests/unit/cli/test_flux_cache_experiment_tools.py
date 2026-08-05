@@ -9,6 +9,7 @@ import pytest
 import torch
 from PIL import Image
 
+from scripts import collect_flux_cache_ab as collector_module
 from difflet.pipeline.cache import (
     InMemoryMeasurementSink,
     InMemorySpatialMeasurementSink,
@@ -36,6 +37,17 @@ from scripts.collect_flux_cache_ab import (
     load_candidate_ladder,
     select_candidate_arms,
 )
+from scripts.flux_cache_phased_candidate import (
+    PHASED_CANDIDATE_SCHEMA,
+    PHASED_CANDIDATE_SCHEMA_REVISION,
+    load_phased_candidate,
+    load_phased_candidates,
+)
+from scripts.collect_flux_cache_phased import (
+    _parse_args as parse_phased_args,
+    collect as collect_phased,
+)
+from scripts.flux_cache_protocol import canonical_sha256
 from scripts.evaluate_cache_quality import (
     QUALITY_CURVE_SCHEMA,
     _validate_lpips_images,
@@ -274,6 +286,210 @@ def test_adaptive_only_requires_an_explicit_adaptive_candidate():
         )
 
 
+def _write_phased_candidate(tmp_path: Path, *, combined: bool) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    horizon_path = tmp_path / "horizon.json"
+    contract_path = tmp_path / "quality-contract.json"
+    horizon_path.write_text('{"status":"usable"}\n', encoding="utf-8")
+    contract_path.write_text('{"contract":"frozen"}\n', encoding="utf-8")
+
+    policy = {
+        "type": "phased_static_plus_brake" if combined else "phased_static",
+        "num_steps": 10,
+        "static_anchor_steps": [0, 1, 2, 6, 9],
+        "warmup_steps": 3,
+        "cooldown_steps": 1,
+        "require_final_anchor": True,
+        "dynamic_budget": 2 if combined else 0,
+        "invalid_measurement_fail_closed": True,
+    }
+    if combined:
+        policy.update(
+            {
+                "plastic_window": [3, 8],
+                "tighten_error": 0.5,
+                "recovery_error": 1.0,
+                "recovery_steps": 2,
+                "disable_after_recoveries": 2,
+                "tighten_rule": "bisect_next_static_gap",
+                "allow_acceleration": False,
+            }
+        )
+    payload = {
+        "schema": PHASED_CANDIDATE_SCHEMA,
+        "schema_revision": PHASED_CANDIDATE_SCHEMA_REVISION,
+        "candidate_id": (
+            "static-plus-brake-g4-b2" if combined else "phased-static-g4"
+        ),
+        "policy": policy,
+        "predictor": {"type": "taylorseer", "order": 1, "coord": "index"},
+        "horizon_ref": {
+            "path": str(horizon_path),
+            "sha256": hashlib.sha256(horizon_path.read_bytes()).hexdigest(),
+        },
+        "quality_contract_ref": {
+            "path": str(contract_path),
+            "sha256": hashlib.sha256(contract_path.read_bytes()).hexdigest(),
+        },
+    }
+    document = {**payload, "sha256": canonical_sha256(payload)}
+    candidate_path = tmp_path / (
+        "static-plus-brake.json" if combined else "phased-static.json"
+    )
+    candidate_path.write_text(json.dumps(document), encoding="utf-8")
+    return candidate_path
+
+
+@pytest.mark.parametrize("combined", [False, True])
+def test_phased_candidate_loads_frozen_refs_and_builds_adapter(tmp_path, combined):
+    path = _write_phased_candidate(tmp_path, combined=combined)
+
+    arm = load_phased_candidate(path)
+    adapter = arm.build_pipeline_adapter(10)
+
+    assert arm.policy["type"] == (
+        "phased_static_plus_brake" if combined else "phased_static"
+    )
+    assert arm.horizon_ref["sha256"] == hashlib.sha256(
+        (tmp_path / "horizon.json").read_bytes()
+    ).hexdigest()
+    assert arm.file_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert adapter.num_steps == 10
+    assert adapter.stats()["source"] == arm.policy["type"].replace("_", "-")
+
+
+def test_phased_candidate_set_loads_exact_frozen_candidates(tmp_path):
+    static_path = _write_phased_candidate(tmp_path / "static", combined=False)
+    combined_path = _write_phased_candidate(tmp_path / "combined", combined=True)
+
+    selected = load_phased_candidates([static_path, combined_path])
+
+    assert [arm.candidate_id for arm in selected] == [
+        "phased-static-g4",
+        "static-plus-brake-g4-b2",
+    ]
+
+
+def test_phased_collector_uses_separate_candidate_cli(tmp_path):
+    candidate_path = _write_phased_candidate(tmp_path, combined=False)
+    args = parse_phased_args(
+        [
+            "--phased-candidate",
+            str(candidate_path),
+            "--out-dir",
+            str(tmp_path / "output"),
+        ]
+    )
+
+    assert args.phased_candidate == (str(candidate_path),)
+    assert args.adaptive_candidate is None
+
+
+def test_phased_collector_rejects_legacy_candidate_flags(tmp_path):
+    candidate_path = _write_phased_candidate(tmp_path, combined=False)
+    with pytest.raises(ValueError, match="legacy candidate flags"):
+        parse_phased_args(
+            [
+                "--phased-candidate",
+                str(candidate_path),
+                "--adaptive-only",
+                "--out-dir",
+                str(tmp_path / "output"),
+            ]
+        )
+
+
+def test_phased_collector_injects_candidates_without_mutating_base_collector(
+    tmp_path,
+    monkeypatch,
+):
+    candidate_path = _write_phased_candidate(tmp_path, combined=False)
+    original_selector = collector_module.select_candidate_arms
+    captured = {}
+
+    def fake_collect(args):
+        captured["arms"] = collector_module.select_candidate_arms(args)
+        return tmp_path / "quality.json", tmp_path / "speed.json"
+
+    monkeypatch.setattr(collector_module, "collect", fake_collect)
+    result = collect_phased(
+        SimpleNamespace(phased_candidate=(str(candidate_path),))
+    )
+
+    assert [arm.candidate_id for arm in captured["arms"]] == ["phased-static-g4"]
+    assert collector_module.select_candidate_arms is original_selector
+    assert result == (tmp_path / "quality.json", tmp_path / "speed.json")
+
+
+def test_static_plus_brake_adapter_unions_dynamic_and_static_anchors(tmp_path):
+    arm = load_phased_candidate(_write_phased_candidate(tmp_path, combined=True))
+    adapter = arm.build_pipeline_adapter(10)
+    actual_anchors = []
+    outputs = {
+        0: 0.0,
+        1: 0.0,
+        2: 0.0,
+        6: 10.0,
+        7: 12.0,
+        9: 16.0,
+    }
+
+    for step in range(10):
+        should_skip = adapter.should_skip(step)
+        if should_skip:
+            adapter.skip_noise_pred()
+        else:
+            actual_anchors.append(step)
+            adapter.record_full_step(torch.tensor([outputs.get(step, float(step))]))
+
+    assert actual_anchors == [0, 1, 2, 6, 7, 9]
+    assert adapter.stats()["static_brake_dynamic_insertions"] == 1
+    assert adapter.stats()["static_brake_static_anchor_count"] == 5
+
+
+@pytest.mark.parametrize(
+    "mutate,error",
+    [
+        (
+            lambda document: document["policy"].update(
+                {"static_anchor_steps": [0, 2, 1, 6, 9]}
+            ),
+            "strictly increasing",
+        ),
+        (
+            lambda document: document["policy"].update(
+                {"plastic_window": None}
+            ),
+            "plastic_window",
+        ),
+        (
+            lambda document: document["policy"].update(
+                {"allow_acceleration": True}
+            ),
+            "acceleration must be false",
+        ),
+    ],
+)
+def test_phased_candidate_rejects_invalid_policy(tmp_path, mutate, error):
+    path = _write_phased_candidate(tmp_path, combined=True)
+    document = json.loads(path.read_text(encoding="utf-8"))
+    mutate(document)
+    payload = {key: value for key, value in document.items() if key != "sha256"}
+    document["sha256"] = canonical_sha256(payload)
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=error):
+        load_phased_candidate(path)
+
+
+def test_phased_candidate_rejects_reference_hash_drift(tmp_path):
+    path = _write_phased_candidate(tmp_path, combined=False)
+    (tmp_path / "horizon.json").write_text('{"status":"changed"}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="horizon_ref sha256"):
+        load_phased_candidate(path)
+
+
 def test_candidate_ladder_rejects_sweep_overrides():
     with pytest.raises(ValueError, match="cannot be combined"):
         select_candidate_arms(
@@ -433,6 +649,53 @@ def test_collector_writes_separate_spatial_measurements_without_full_tensors(tmp
     report = load_spatial_measurements(path)
     assert [record.step_index for record in report.anchor_errors] == [2]
     assert len(report.anchor_errors[0].error_energy) == 4
+
+
+def test_collector_writes_online_signal_features_beside_candidate_image(tmp_path):
+    flux_pipeline = SimpleNamespace(_tc_last_trajectory=[])
+
+    def fake_pipe(**kwargs):
+        del kwargs
+        flux_pipeline._tc_last_trajectory = [
+            torch.tensor([float(step)]) for step in range(4)
+        ]
+        flux_pipeline._tc_spatial_deltas = [
+            (0, [1.0] * 16),
+            (1, [2.0] * 16),
+            (2, [3.0] * 15 + [5.0]),
+            (3, [4.0] * 16),
+        ]
+        flux_pipeline._tc_output_dynamics = [
+            {
+                "step_index": 2,
+                "used_cache_prediction": True,
+                "relative_l1": [0.5] * 16,
+                "velocity_turn": [0.25] * 16,
+                "acceleration_ratio": [0.75] * 16,
+            }
+        ]
+        return SimpleNamespace(images=[Image.new("RGB", (16, 16), color="white")])
+
+    run = _run_sample(
+        fake_pipe,
+        flux_pipeline,
+        sample={"sample_id": "p000-s0", "prompt": "test", "seed": 0},
+        num_steps=4,
+        height=16,
+        width=16,
+        guidance_scale=3.5,
+        artifact_dir=tmp_path / "artifacts" / "candidate",
+        output_root=tmp_path,
+        online_signal_window=(2, 3),
+    )
+
+    signal_path = tmp_path / run["artifacts"]["online_signal"]
+    signal = json.loads(signal_path.read_text(encoding="utf-8"))
+    assert signal["features"]["max_region_acceleration"] == pytest.approx(2.0)
+    assert signal["features"]["output_max_region_relative_l1"] == pytest.approx(0.5)
+    assert run["artifacts"]["online_signal_sha256"] == hashlib.sha256(
+        signal_path.read_bytes()
+    ).hexdigest()
 
 
 def test_collector_requires_explicit_hardware_ack():
@@ -609,7 +872,7 @@ def _experiment_manifests(tmp_path: Path):
         started_at="2026-07-31T00:00:00Z",
         completed_at="2026-07-31T00:01:00Z",
     )
-    quality_path = tmp_path / "quality-input-v2.json"
+    quality_path = tmp_path / "quality-input.json"
     speedup_path = tmp_path / "speedup-candidates-v1.json"
     quality_path.write_text(json.dumps(quality), encoding="utf-8")
     speedup_path.write_text(json.dumps(speedup), encoding="utf-8")

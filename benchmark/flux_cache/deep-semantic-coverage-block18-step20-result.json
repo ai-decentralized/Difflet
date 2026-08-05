@@ -1,0 +1,98 @@
+{
+  "schema": "difflet-flux-cache-deep-semantic-coverage-registered-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-deep-semantic-coverage-block18-step20-20260804",
+  "status": "opened_primary_gate_rejected",
+  "serving_claim": false,
+  "opened_data": true,
+  "artifacts": {
+    "protocol": {
+      "path": "benchmark/flux_cache/deep-semantic-coverage-block18-step20-probe.json",
+      "file_sha256": "67e33fd36768f1a42ad2b6734cbc5bcd9cdfcb0edb1fe4563bd3563f152e189e",
+      "content_sha256": "fdeef26e06220d9438cd6762b622686bb2d0763bd0d8ddddd4a9ea1e34196a92"
+    },
+    "compiled_probe": {
+      "path": "/home/ubuntu/.cache/difflet/flux/a9a7be724428f740/semantic_coverage_probe_block18/model.pt",
+      "file_sha256": "9c7d5f60762df51cae59be7c6681f0e23e50866c8707da9fceccc97fc78e418f"
+    },
+    "hardware_run": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-deep-semantic-block18-step20-20260804/semantic-coverage-run.json",
+      "file_sha256": "8a079154f05c90e486ecec58d354c225228bf0b4766ec1ac3f6880440389fa9a"
+    },
+    "quality": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-deep-semantic-block18-step20-20260804/quality-input-v2.json",
+      "file_sha256": "8caddca5f6330120e051dea8ced5f2bde237c53eba004fbfc751dd044fee5328"
+    },
+    "speed": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-deep-semantic-block18-step20-20260804/speedup-candidates-v1.json",
+      "file_sha256": "5d2ef2e5198de85edd9e1352802613ce5b049ef80d46de8b1abb45bdb82c795c"
+    },
+    "analysis": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-deep-semantic-block18-step20-20260804/analysis-result.json",
+      "file_sha256": "4302c743355b6b42b4a757173fa711290c184c1887a3057dc669bfeb8d77c7fa",
+      "content_sha256": "051ea9e6b0b02c15b1264e4127e0619f1674efe3ab795b21bb100025752a7d86"
+    }
+  },
+  "execution_gates": {
+    "sample_count": 48,
+    "image_sha_identical_count": 48,
+    "final_latent_tensor_identical_count": 48,
+    "trajectory_tensor_identical_count": 48,
+    "identity_passed": true,
+    "decision_step": 20,
+    "target_joint_block_index": 18,
+    "joint_block_count": 19,
+    "separate_prefix_probe_calls_per_request": 1,
+    "extra_full_transformer_calls": 0
+  },
+  "primary": {
+    "label": "terminal29_actionable",
+    "positive_count": 8,
+    "feature": "bottom_quartile_mean_max_region_coverage",
+    "frozen_risk_direction": "lower_is_riskier",
+    "roc_auc": 0.253125,
+    "full_recall_threshold": 0.002184766727233572,
+    "full_recall_false_brake_count": 39,
+    "full_recall_negative_count": 40,
+    "full_recall_trigger_count": 47,
+    "gate_passed": false
+  },
+  "direction_diagnostic": {
+    "reverse_higher_is_riskier_auc": 0.746875,
+    "interpretation": "The registered direction is strongly wrong, but reversing it still misses the 0.8 AUC gate and has no usable full-recall threshold."
+  },
+  "posthoc_feature_family_upper_bound": {
+    "label": "terminal29_actionable",
+    "feature": "bottom_quartile_mean_max_region_coverage",
+    "risk_direction": "higher_is_riskier",
+    "roc_auc": 0.746875,
+    "full_recall_false_brake_count": 35,
+    "next_best_auc": 0.746875,
+    "minimum_full_recall_false_brake_count_across_seven_registered_reducers": 31,
+    "serving_threshold_frozen": false
+  },
+  "observational_failure_diagnostic": {
+    "positive_count": 12,
+    "frozen_direction_auc": 0.33796296296296297,
+    "full_recall_false_brake_count": 35,
+    "posthoc_upper_bound_auc": 0.7268518518518519
+  },
+  "measurement_cost": {
+    "separate_prefix_probe_total_s": 4.5169201889802935,
+    "separate_prefix_probe_mean_s": 0.09410250393708945,
+    "separate_prefix_probe_max_s": 0.1806153500074288,
+    "source_candidate_total_s": 142.10516942299728,
+    "diagnostic_candidate_total_s": 140.03780967100465,
+    "serving_cost_claim": false,
+    "serving_projection": "A positive result would still require inline Q/K reduction inside a real anchor. The separate 18-block prefix timing is discovery-only."
+  },
+  "decision": {
+    "what_worked": "The deepest FLUX joint block can expose a deterministic 4x4-by-512 spatial semantic map on Trainium/AOT while preserving every generated artifact bit-for-bit.",
+    "what_failed": "Neither the frozen score nor any prelisted reducer maps block-18 semantic coverage to terminal@29 actionable quality at a usable operating point.",
+    "large_space_semantic_vote_for_current_whole_output_cache": "closed_negative",
+    "off_the_shelf_secondary_judge_route": "closed_negative",
+    "serving_qualified": false,
+    "next": "Do not retune layers, reducers, or generic judges on this cohort. Any next experiment must change the cache representation/predictor or explicitly accept the measured x0-preview semantic-judge cost."
+  },
+  "sha256": "f3df8336759bb66f4e9444482c0db42e7425718410491741bc0e4cd8be0f4524"
+}

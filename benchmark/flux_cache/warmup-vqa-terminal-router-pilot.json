@@ -1,0 +1,65 @@
+{
+  "schema": "difflet-flux-cache-warmup-terminal-router-pilot",
+  "schema_revision": 1,
+  "study_id": "flux-cache-warmup-vqa-terminal-router-pilot-20260804",
+  "evidence_role": "opened-development-causal-upper-bound",
+  "serving_claim": false,
+  "router_protocol": {
+    "path": "benchmark/flux_cache/warmup-vqa-router-pilot.json",
+    "file_sha256": "b40037bed79b1a5b0223a2dd8a91727b1f270e04a0a6d5c37cacc0715e5499ea",
+    "content_sha256": "4e997e0a6f1a36432e1152c02abede4dad53d583dbffca052104d799aff0a012"
+  },
+  "discovery": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-router-pilot-20260804/discovery.json",
+    "file_sha256": "97e19c52bb1b345fafa04339aa51ecb628552cf3cc039890ab79575aafb6a670",
+    "content_sha256": "037a56efb3a3e15e9111d18b4743aec36108701ca55d0759e6d7f2ac0d541e0f"
+  },
+  "safe_route_analysis": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-safe-route-20260804/analysis.json",
+    "file_sha256": "66e4307dbec68477172543be72099b237f5680e7dd37b2b5797789eb721ac891",
+    "content_sha256": "dba4647aa020fd84db4220472c21a52187febe6f38ea59c5f1c1cda006d4c7b0",
+    "required_status": "development_mapping_rejected"
+  },
+  "action": "disable_cache_before_first_skip",
+  "decision_available_after_step": 5,
+  "terminal_step": 6,
+  "prefix_profile": {
+    "path": "benchmark/flux_cache/adaptive-stage-oil-p30-e1p40-k12-candidate.json",
+    "file_sha256": "4b6a5d53599b0eefcd061819ce1b16fd968d73fe7a37b784779726d11633c4d5",
+    "candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index"
+  },
+  "samples": [
+    {
+      "sample_id": "p000-s0",
+      "prompt_index": 0,
+      "seed": 0,
+      "reason": "passing-request false route"
+    },
+    {
+      "sample_id": "p001-s1",
+      "prompt_index": 1,
+      "seed": 1,
+      "reason": "VQAScore failure"
+    },
+    {
+      "sample_id": "p012-s0",
+      "prompt_index": 12,
+      "seed": 0,
+      "reason": "passing-request false route"
+    },
+    {
+      "sample_id": "p014-s0",
+      "prompt_index": 14,
+      "seed": 0,
+      "reason": "VQAScore failure"
+    }
+  ],
+  "expected_terminal_images": 4,
+  "expected_quality_images": 8,
+  "decision_rule": {
+    "mapping_found": "Every opened VQAScore failure is triggered and repaired by the pre-skip terminal route, with no introduced contract failure.",
+    "qualification": "Freeze the exact signal, threshold, and terminal action, then test a new prompt-group holdout.",
+    "reject": "Any opened VQAScore failure remains or terminal routing introduces a contract failure."
+  },
+  "sha256": "b62bcdacc61248f7467ae9059ad909fd67cf5e7dd63ccdd4117a9ac89ab45bf6"
+}

@@ -1,0 +1,122 @@
+{
+  "schema": "difflet-flux-cache-brake-intervention-pilot",
+  "schema_revision": 1,
+  "study_id": "flux-cache-brake-intervention-development-pilot-2026-08-04",
+  "evidence_role": "exploratory-causal-action-mapping-only",
+  "serving_claim": false,
+  "offline_intervention_only": true,
+  "quality_split": "brake_intervention_development_pilot",
+  "opened_data": {
+    "source_study": "flux-cache-online-signal-failure-enriched-discovery-2026-08-03",
+    "labels_already_opened": true,
+    "future_confirmation_eligible": false,
+    "purpose": "Estimate whether an anchor-time brake or recovery action changes endpoint semantic quality, and whether pre-action cheap signals rank that treatment gain."
+  },
+  "prompt_source": {
+    "path": "benchmark/flux_cache/online-signal-failure-enriched-prompts.json",
+    "file_sha256": "f2917b14b905aa085452031b32a11ba95516d9861c4e18f9128ebb8e437fd45a"
+  },
+  "candidate": {
+    "path": "benchmark/flux_cache/adaptive-stage-oil-p30-e1p40-k12-candidate.json",
+    "file_sha256": "4b6a5d53599b0eefcd061819ce1b16fd968d73fe7a37b784779726d11633c4d5",
+    "content_sha256": "681861d03c6fd5c50cdcc884bdd0bb8e50fc4b47469bca2509989ac17e512f98",
+    "candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index",
+    "reason": "This opened development candidate supplies two reproduced VQAScore failures. Results cannot directly qualify the conservative brake-only serving candidate."
+  },
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "quality_contract": {
+    "image_reward_max_harm": 0.7824214100837708,
+    "vqa_score_max_harm": 0.25,
+    "failure_rule": "fail when baseline-minus-candidate harm is strictly greater than either frozen metric margin",
+    "weighted_metric_average_forbidden": true
+  },
+  "target_phases": {
+    "early": 0.25,
+    "middle": 0.5,
+    "late": 0.75
+  },
+  "target_selection": "For each requested phase, select the nearest naturally computed anchor whose pre-measurement policy state is ACTIVE, whose estimate error is valid, whose pre-anchor interval is above the candidate minimum, and which leaves at least minimum_remaining_steps. Ties choose the earlier anchor. Selection uses no endpoint score.",
+  "minimum_remaining_steps": 6,
+  "actions": [
+    "continue",
+    "brake",
+    "recovery"
+  ],
+  "action_semantics": {
+    "continue": "Ignore the target measurement once, preserve the pre-anchor interval, and resume ordinary adaptive control at later anchors.",
+    "brake": "At the target anchor force the candidate minimum interval, then resume ordinary adaptive control at later anchors.",
+    "recovery": "At the target anchor force the candidate recovery_steps consecutive real steps and minimum interval, then resume ordinary adaptive control."
+  },
+  "paired_identity_gate": "Every action arm must match exact hashes of the pre-step latent and real Transformer output at the selected target anchor, and must reproduce the same target anchor error and pre-anchor interval.",
+  "action_order": "Within each sample and phase, order continue/brake/recovery by SHA-256(protocol content hash, sample_id, phase, action) to distribute hardware-order effects deterministically.",
+  "primary_action_cost": "extra full Transformer steps relative to continue",
+  "elapsed_time_role": "diagnostic-only; no serving speed claim",
+  "samples": [
+    {
+      "sample_id": "p001-s1",
+      "prompt_index": 1,
+      "seed": 1,
+      "prior_label": "target-candidate-vqa-failure",
+      "phases": [
+        "early",
+        "middle",
+        "late"
+      ]
+    },
+    {
+      "sample_id": "p014-s0",
+      "prompt_index": 14,
+      "seed": 0,
+      "prior_label": "target-candidate-vqa-failure",
+      "phases": [
+        "early",
+        "middle",
+        "late"
+      ]
+    },
+    {
+      "sample_id": "p000-s0",
+      "prompt_index": 0,
+      "seed": 0,
+      "prior_label": "target-candidate-pass-control",
+      "phases": [
+        "early"
+      ]
+    },
+    {
+      "sample_id": "p004-s0",
+      "prompt_index": 4,
+      "seed": 0,
+      "prior_label": "target-candidate-pass-control",
+      "phases": [
+        "middle"
+      ]
+    },
+    {
+      "sample_id": "p008-s0",
+      "prompt_index": 8,
+      "seed": 0,
+      "prior_label": "target-candidate-pass-control",
+      "phases": [
+        "late"
+      ]
+    }
+  ],
+  "expected_unique_images": 37,
+  "decision_rule": {
+    "positive_pilot": "At least one known failure is rescued by brake or recovery, without an introduced contract failure in a pass control, and at least one pre-action signal has directionally positive rank association with the corresponding metric treatment gain.",
+    "negative_pilot": "No known failure is rescued, or both actions are consistently too late at all three phases.",
+    "next_if_positive": "Freeze a smaller signal/action hypothesis and test it on a newly registered paired-intervention holdout before changing any serving controller.",
+    "next_if_negative": "Change the predictor or cache granularity; do not retune the current scalar anchor-error thresholds on these opened requests."
+  },
+  "sha256": "7330314d199d8bd06b4cfb7380b707f3b29a0bbcd27ea648993366a6b4476bf1"
+}

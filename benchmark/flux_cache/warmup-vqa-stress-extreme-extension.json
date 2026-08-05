@@ -1,0 +1,59 @@
+{
+  "schema": "difflet-flux-cache-candidate-extension",
+  "schema_revision": 1,
+  "study_id": "flux-cache-warmup-vqa-stress-extreme-extension-20260804",
+  "evidence_role": "opened-profile-pressure-calibration",
+  "serving_claim": false,
+  "source_calibration": {
+    "path": "benchmark/flux_cache/warmup-vqa-stress-calibration.json",
+    "file_sha256": "2feb6df88cbeab4bf73bfd67b3ac4d5f4e572f9b3c950a8839e7c07860303b09",
+    "content_sha256": "2cab9cb3af255a6b35cc9bd6e44b61717efe50e2851c8453675c855d39872e6c",
+    "selection_outcome": "Neither registered profile produced a VQAScore failure strictly above 0.25."
+  },
+  "source_quality": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-calibration-20260804/quality-input-v2.json",
+    "file_sha256": "a8e35bde47a87ea515681ded3f3536cc7fb32e49f5b3d803441b7b2cd3d92cbe"
+  },
+  "source_speed": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-calibration-20260804/speedup-candidates-v1.json",
+    "file_sha256": "f56579ec7a1c13e51b814dda4b870994e87db56ea142060b6bb423c702d0ce7c"
+  },
+  "baseline_dataset_sha256": "12cb454157c585f6fa454a368869b74195b4926032ff625fff56829b82cff0a7",
+  "collector": {
+    "path": "scripts/collect_flux_cache_candidate_extension.py",
+    "file_sha256": "5fe8255be3cd3a59c1306042ba6cbd782fd08479f097d7889e3dc5dfa89c6ea7",
+    "python_source_sha256": "0e65a85b483ae898ee70be5f30aedf0ba22b252e62750c78f9b7faaeb0287797"
+  },
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "candidates": [
+    {
+      "path": "benchmark/flux_cache/adaptive-vqa-stress-i32-k40-candidate.json",
+      "file_sha256": "15a2129f70947510b7f33f1d46d911d86fcacdd20dc7e248ee03c434e300d703",
+      "candidate_id": "adaptive-vqa-stress-w6-i32-m16-k40-o1-index"
+    }
+  ],
+  "expected_sample_count": 48,
+  "online_signal_window": [
+    2,
+    5
+  ],
+  "offline_label": {
+    "metric": "vqa_score",
+    "paired_harm_threshold": 0.25
+  },
+  "profile_selection_rule": {
+    "minimum_vqa_failure_prompt_groups": 6,
+    "maximum_vqa_failure_prompt_groups": 20,
+    "selection": "Select this profile only when its VQAScore failure count lies inside the inclusive range. Online signal performance is not a selection input."
+  },
+  "sha256": "be97715e91acf313225cb8eefe654de30b3fac659e5e7ffb66e20da3c71f5479"
+}

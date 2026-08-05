@@ -1,0 +1,121 @@
+{
+  "schema": "difflet-flux-cache-online-signal-search-result",
+  "schema_revision": 1,
+  "study_date": "2026-08-03",
+  "hardware": "AWS Trainium2, TP=4, bfloat16",
+  "model": {
+    "id": "black-forest-labs/FLUX.1-dev",
+    "revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "height": 1024,
+    "width": 1024,
+    "num_steps": 50,
+    "seed": 0
+  },
+  "candidate": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index",
+  "objective": "Find a cheap online signal that detects the opened pastry VQAScore failure without computing a shadow full-DiT output at skipped steps.",
+  "rejected_signal": {
+    "name": "4x4 anchor prediction-residual energy",
+    "result": "Rejected. Regional level, slope, and acceleration did not separate the sole VQAScore failure from passing requests, and numerical teacher residual did not reliably rank causal regional VQAScore repair gain.",
+    "opened_audit_examples": {
+      "early_max_region_level_auc": 0.22580645161290322,
+      "max_positive_slope_auc": 0.16129032258064516,
+      "max_positive_acceleration_auc": 0.5483870967741935,
+      "passing_requests_at_or_above_failure_for_level": 24
+    }
+  },
+  "candidate_signal": {
+    "name": "4x4 shallow modulation positive acceleration",
+    "probe_path": "x_embedder -> timestep/pooled-text embedding -> transformer block-0 norm1",
+    "does_not_run": [
+      "attention",
+      "remaining transformer blocks",
+      "a shadow full-DiT teacher"
+    ],
+    "regional_level": "m_r(t) = mean_abs(mod_t - mod_t-1)_r / (mean_abs(mod_t-1)_r + 1e-8)",
+    "regional_risk": "a_r(t) = max(0, m_r(t) - 2*m_r(t-1) + m_r(t-2))",
+    "request_risk": "max over eligible skipped steps and all 16 regions of a_r(t)",
+    "control_semantics": "any-region veto; a majority or rank vote is not supported by the evidence"
+  },
+  "opened_request_audit": {
+    "prompt_source": "benchmark/flux_cache/extended-profile-holdout-prompts.json",
+    "sample_count": 32,
+    "known_failure_count": 1,
+    "known_failure_index": 2,
+    "signal_window": [6, 48],
+    "candidate_only_total_elapsed_s": 112.96862263700314,
+    "candidate_only_median_elapsed_s": 3.454719708999619,
+    "features": {
+      "max_region_acceleration": {
+        "auc": 0.9032258064516129,
+        "failure_descending_rank": 4,
+        "failure_score": 0.14466595649719238,
+        "passing_median": 0.1328292302787304,
+        "passing_maximum": 0.15046270936727524,
+        "passing_requests_at_or_above_failure": 3
+      },
+      "max_region_level": {
+        "auc": 0.8709677419354839,
+        "failure_descending_rank": 5,
+        "passing_requests_at_or_above_failure": 4
+      },
+      "max_top2_region_acceleration": {
+        "auc": 0.8709677419354839,
+        "failure_descending_rank": 5,
+        "passing_requests_at_or_above_failure": 4
+      },
+      "peak_acceleration_level_cv_percent": {
+        "auc": 0.4838709677419355,
+        "failure_descending_rank": 17,
+        "passing_requests_at_or_above_failure": 16
+      }
+    },
+    "raw_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-spatial-probe-20260803.json",
+      "sha256": "4e1a4cee720cf3b80979a7d476616a83b9d33f5393a44eadfddd413ff2d56b5e"
+    },
+    "qualification": "Exploratory only: this is an opened audit with one positive and multiple inspected features. The AUC is a ranking diagnostic, not a confidence-qualified serving guarantee."
+  },
+  "dynamic_veto_intervention": {
+    "threshold": 0.14,
+    "threshold_status": "selected on the opened failure; not qualified",
+    "vetoed_steps": [18, 20],
+    "full_steps_before": 12,
+    "skipped_steps_before": 38,
+    "full_steps_after": 14,
+    "skipped_steps_after": 36,
+    "shadow_full_dit_steps": 0,
+    "extra_full_dit_steps": 2,
+    "paired_scores": {
+      "baseline": {
+        "vqa_score": 0.6484375,
+        "image_reward": 1.5427145957946777
+      },
+      "cache": {
+        "vqa_score": 0.310546875,
+        "image_reward": 1.292722463607788
+      },
+      "veto": {
+        "vqa_score": 0.494140625,
+        "image_reward": 1.4921761751174927
+      },
+      "veto_minus_cache": {
+        "vqa_score": 0.18359375,
+        "image_reward": 0.1994537115097046
+      },
+      "baseline_minus_veto_vqa": 0.154296875,
+      "frozen_vqa_max_harm": 0.25,
+      "passes_frozen_vqa_harm_limit": true
+    },
+    "image": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-veto-pastry-20260803.png",
+      "sha256": "6241e2fe104dfd9ea5984af1b231e79be4e02d819957988d5d4227ab7e286311"
+    }
+  },
+  "decision": {
+    "retain_as_candidate_brake_veto": true,
+    "qualify_as_oil_all_clear": false,
+    "qualify_threshold_for_serving": false,
+    "reason": "The signal cheaply separates and causally repairs the opened VQA failure, but one positive cannot establish a threshold or false-brake rate. Oil must require a lower, independently frozen all-clear threshold and consecutive clear observations.",
+    "next_action": "Freeze the signal definition, collect additional independent VQAScore failures plus a new registered passing holdout, then choose separate brake and oil thresholds without reopening this audit."
+  }
+}

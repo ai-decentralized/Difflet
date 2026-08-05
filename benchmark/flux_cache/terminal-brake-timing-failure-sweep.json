@@ -1,0 +1,71 @@
+{
+  "schema": "difflet-flux-cache-terminal-brake-sweep",
+  "schema_revision": 1,
+  "study_id": "flux-cache-terminal-brake-timing-failure-sweep-20260804",
+  "evidence_role": "opened-failure-rescue-timing-diagnostic",
+  "serving_claim": false,
+  "offline_intervention_only": true,
+  "source_quality": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/quality-input-v2.json",
+    "file_sha256": "f751c527a3474963c24af3b2a4f8b6e7165f0afa5215716e400fb40b9d1ff470"
+  },
+  "source_semantic": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/semantic-scores.json",
+    "file_sha256": "01859c03400266e979d0baf31a635ef4fdab9f8bbbd864fb1ccfba5d2292e55e"
+  },
+  "candidate": {
+    "path": "benchmark/flux_cache/adaptive-vqa-stress-i32-k40-candidate.json",
+    "file_sha256": "15a2129f70947510b7f33f1d46d911d86fcacdd20dc7e248ee03c434e300d703",
+    "candidate_id": "adaptive-vqa-stress-w6-i32-m16-k40-o1-index"
+  },
+  "collector": {
+    "path": "scripts/flux_cache_terminal_brake_sweep.py",
+    "file_sha256": "d1195e52a716a32a36f634968f9766ddbf13593c34dacd216caeb475722da816"
+  },
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "source_failure_rule": {
+    "metric": "vqa_score",
+    "vqa_harm_threshold": 0.25,
+    "comparison": "full_dit_vqa_minus_continue_cache_vqa_is_strictly_greater"
+  },
+  "sample_ids": [
+    "p010-s2",
+    "p019-s2",
+    "p020-s2",
+    "p028-s2",
+    "p029-s2",
+    "p030-s2",
+    "p031-s2",
+    "p033-s2",
+    "p035-s2",
+    "p037-s2",
+    "p038-s2",
+    "p045-s2"
+  ],
+  "terminal_steps": [
+    7,
+    13,
+    21,
+    29,
+    37
+  ],
+  "intervention_definition": "Run the original cache policy through terminal_step-1, verify the prefix latent is bit-identical to continue-cache, then permanently disable cache before terminal_step.",
+  "analysis_definition": {
+    "brake_benefit_at_t": "VQA(terminal_step=t) - VQA(continue_cache)",
+    "rescued": "full_dit_vqa - terminal_vqa <= 0.25",
+    "purpose": "Locate the causal rescue horizon before fitting any online signal."
+  },
+  "quality_split": "terminal_brake_timing_opened_failures",
+  "expected_unique_quality_images": 72,
+  "next_rule": "Use timing only as opened diagnostic. If an informative mixed-benefit time exists, freeze that t and evaluate signal-to-brake_benefit mapping on all 48 opened samples before any new-prompt holdout.",
+  "sha256": "31d8bf69aee55139f1f37e638e382d2cfd27b704e1a0cc4888f98b3ddeb2b0e1"
+}

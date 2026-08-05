@@ -1,0 +1,129 @@
+{
+  "schema": "difflet-flux-cache-semantic-coverage-probe",
+  "schema_revision": 1,
+  "study_id": "flux-cache-deep-semantic-coverage-block18-step20-20260804",
+  "evidence_role": "opened-causal-deep-joint-attention-online-signal-diagnostic",
+  "serving_claim": false,
+  "source_quality": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/quality-input-v2.json",
+    "file_sha256": "f751c527a3474963c24af3b2a4f8b6e7165f0afa5215716e400fb40b9d1ff470"
+  },
+  "source_speed": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/speedup-candidates-v1.json",
+    "file_sha256": "b7b2bc9f1218b7b7d384d32ae660a5a803d0e802cb84136944ee87dc25dd8a49"
+  },
+  "source_semantic": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/semantic-scores.json",
+    "file_sha256": "01859c03400266e979d0baf31a635ef4fdab9f8bbbd864fb1ccfba5d2292e55e"
+  },
+  "terminal_semantic": [
+    {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-timing-failures-20260804/semantic-scores.json",
+      "file_sha256": "c94f30a0f0b3de01503045c57a06490165ab3f1f9a903f313fd2f4a68ebe99ce"
+    },
+    {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-step29-completion-20260804/semantic-scores.json",
+      "file_sha256": "3c54bb7f090f3541ab9d1db74b3b4cf5e210cc88437362ebc2140265738b1203"
+    }
+  ],
+  "baseline_dataset_sha256": "12cb454157c585f6fa454a368869b74195b4926032ff625fff56829b82cff0a7",
+  "candidate": {
+    "path": "benchmark/flux_cache/adaptive-vqa-stress-i32-k40-candidate.json",
+    "file_sha256": "15a2129f70947510b7f33f1d46d911d86fcacdd20dc7e248ee03c434e300d703",
+    "candidate_id": "adaptive-vqa-stress-w6-i32-m16-k40-o1-index"
+  },
+  "collector": {
+    "path": "scripts/collect_flux_cache_deep_semantic_coverage.py",
+    "file_sha256": "8c334f520779a9204d1d48ac98e4716de01bef18957f4f9873f73ad03e932273"
+  },
+  "probe_implementation": {
+    "path": "difflet/backends/trainium/flux/deep_semantic_coverage_probe.py",
+    "file_sha256": "528be1cefe8223cad8963c35e72414ca7c64ed55dafb5171245df6ba0e034a40"
+  },
+  "feature_extractor": {
+    "path": "scripts/flux_cache_semantic_coverage.py",
+    "file_sha256": "118682c56f488f6bd76492b3fdecdb4f09f7335a2a17372d1f41fe435efcddff"
+  },
+  "analyzer": {
+    "path": "scripts/analyze_flux_cache_deep_semantic_coverage.py",
+    "file_sha256": "097d38d8ddea26752e7c05488572b2883d85794b9869ee3338c8b6a11523fabf"
+  },
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "expected_sample_count": 48,
+  "diagnostic": {
+    "availability": "step 20, before any terminal@29 action",
+    "target_joint_block_index": 18,
+    "joint_block_count": 19,
+    "extra_full_transformer_calls": 0,
+    "partial_prefix_probe_calls": 1,
+    "offline_executed_prefix_blocks": 18,
+    "computed_components": [
+      "input and context embeddings",
+      "timestep and AdaLN prefix",
+      "joint blocks 0 through 17",
+      "block-18 image query projection",
+      "block-18 image and text key projections",
+      "RoPE",
+      "4x4 image-query pooling",
+      "small text-plus-image-key softmax"
+    ],
+    "omitted_components": [
+      "block-18 value and attention output",
+      "block-18 MLP",
+      "all 38 single Transformer blocks",
+      "final projection"
+    ],
+    "serving_projection": "If positive, compute the same reduction from block-18 Q/K inside an already-required real anchor forward; the separate prefix graph is discovery-only.",
+    "fixed_output_shape": [1, 16, 512],
+    "identity_gate": "Every rerun image, final latent, and complete latent trajectory must be bit-identical to the registered source candidate."
+  },
+  "offline_label": {
+    "metric": "vqa_score",
+    "paired_harm_threshold": 0.25,
+    "comparison": "full_dit_vqa_minus_cache_vqa_is_strictly_greater",
+    "positive_count": 12
+  },
+  "causal_label": {
+    "metric": "vqa_score",
+    "paired_harm_threshold": 0.25,
+    "positive_count": 8,
+    "definition": "continue-cache harm > 0.25 and terminal-step-29 harm <= 0.25"
+  },
+  "frozen_primary_signal": {
+    "step_index": 20,
+    "joint_block_index": 18,
+    "token_selection": "tokenizer_2 non-padding, non-special content tokens",
+    "per_token_value": "maximum block-18 attention probability over 16 coarse image regions",
+    "feature": "bottom_quartile_mean_max_region_coverage",
+    "request_score": "mean of the weakest quartile of per-token regional maxima",
+    "risk_direction": "lower_is_riskier",
+    "selection_provenance": "Frozen before block-18 outputs were generated; feature and direction are copied from the registered block-0 family, while the deepest joint block is selected a priori."
+  },
+  "opened_gate": {
+    "minimum_roc_auc": 0.8,
+    "required_failure_recall": 1.0,
+    "maximum_full_recall_false_brake_rate": 0.225,
+    "maximum_full_recall_false_brake_count": 9,
+    "qualification": "Passing only permits an inline-anchor implementation and a separately registered new-prompt holdout; it does not qualify serving."
+  },
+  "exploratory_only": [
+    "minimum token regional maximum",
+    "median token regional maximum",
+    "mean token regional maximum",
+    "token-coverage coefficient of variation",
+    "mean region text mass",
+    "minimum region text mass"
+  ],
+  "next_if_positive": "Inline the frozen block-18 reduction into real anchor forwards, verify numerical identity and cost, then run a new-prompt causal holdout.",
+  "next_if_negative": "Close large-space semantic voting for the current whole-output cache representation; do not add another generic judge or retune layers on this cohort.",
+  "sha256": "fdeef26e06220d9438cd6762b622686bb2d0763bd0d8ddddd4a9ea1e34196a92"
+}

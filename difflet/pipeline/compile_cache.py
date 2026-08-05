@@ -108,7 +108,11 @@ class CacheSpec:
 # encoder / VAE / decode), never the compiled NEFF — excluded from the cache key
 # so enabling them at generate time still hits the precompiled transformer cache.
 _RUNTIME_ONLY_APP_KWARGS: frozenset[str] = frozenset(
-    {"enable_host_pipeline", "enable_decode_components", "host_device"}
+    {
+        "enable_host_pipeline",
+        "enable_decode_components",
+        "host_device",
+    }
 )
 
 

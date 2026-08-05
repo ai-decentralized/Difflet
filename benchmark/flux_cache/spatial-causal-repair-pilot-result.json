@@ -1,0 +1,103 @@
+{
+  "schema": "difflet-flux-cache-spatial-causal-repair-pilot-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-spatial-causal-repair-pilot-result-2026-08-03",
+  "evidence_role": "exploratory-routing-only",
+  "serving_claim": false,
+  "offline_teacher_only": true,
+  "online_shadow_transformer_forbidden": true,
+  "aggressive_oil_trigger_metric_resolution": {
+    "candidate_id": "adaptive-oil-e1p40-w6-i8-k12-o1-index",
+    "result": "The two selected adaptive-profile failures reproduced as ImageReward failures, not VQAScore failures.",
+    "requests": [
+      {
+        "prompt_index": 11,
+        "triggering_metric": "image_reward",
+        "cache_score": 0.29909753799438477,
+        "full_dit_score": 1.1045750379562378,
+        "contract_harm": 0.805477499961853,
+        "locked_step": 24,
+        "full_step_repair_gain": 0.2720150351524353,
+        "best_region": 9,
+        "best_region_repair_gain": 0.1275310516357422,
+        "causal_concentration": 0.46883824478406017,
+        "passes_0p5_exploratory_threshold": false
+      },
+      {
+        "prompt_index": 15,
+        "triggering_metric": "image_reward",
+        "cache_score": 0.21124675869941711,
+        "full_dit_score": 1.3550463914871216,
+        "contract_harm": 1.1437996327877045,
+        "locked_step": 13,
+        "full_step_repair_gain": 1.0160225331783295,
+        "best_region": 5,
+        "best_region_repair_gain": 0.5319273173809052,
+        "causal_concentration": 0.5235388980172773,
+        "passes_0p5_exploratory_threshold": true
+      }
+    ],
+    "gate": {
+      "required_requests_passing": 2,
+      "actual_requests_passing": 1,
+      "passed": false,
+      "decision": "Do not qualify coarse regional voting from these ImageReward-labelled failures."
+    }
+  },
+  "vqa_failure_followup": {
+    "candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index",
+    "prompt_source": "benchmark/flux_cache/extended-profile-holdout-prompts.json",
+    "prompt_source_sha256": "ed1135e354ca0b64efe957560073ff810e9816eac3b4a0a33d2107269f26eeb1",
+    "prompt_index": 2,
+    "prompt": "a pastry chef stacking cream puffs into a tall cone decorated with thin caramel threads",
+    "cache_vqa_score": 0.310546875,
+    "full_dit_vqa_score": 0.6484375,
+    "vqa_harm": 0.337890625,
+    "reproduced_contract_failure": true,
+    "temporal_localization": {
+      "skipped_steps": 38,
+      "best_steps": [
+        6,
+        20
+      ],
+      "best_single_step_repair_gain": 0.06640625,
+      "fraction_of_full_dit_gap": 0.19653179190751446,
+      "interpretation": "The VQAScore damage is temporally distributed under single-step intervention."
+    },
+    "spatial_localization": [
+      {
+        "step": 6,
+        "full_step_repair_gain": 0.06640625,
+        "best_region": 10,
+        "best_region_repair_gain": 0.08203125,
+        "causal_concentration": 1.2352941176470589,
+        "image_reward_gain_at_best_region": 0.08620691299438477
+      },
+      {
+        "step": 20,
+        "full_step_repair_gain": 0.06640625,
+        "best_region": 5,
+        "best_region_repair_gain": 0.0546875,
+        "causal_concentration": 0.8235294117647058,
+        "image_reward_gain_at_best_region": -0.007777094841003418
+      }
+    ],
+    "interpretation": "For this reproduced VQAScore failure, damage is spread over time but strongly concentrated in space at both selected steps. A single region can outperform a full-step repair because later denoising is nonlinear and changes outside the causal region can offset the useful intervention.",
+    "limitation": "This is one opened VQAScore failure and cannot qualify an online signal or SP/TP voting policy."
+  },
+  "routing_decision": {
+    "implement_rank_voting_now": false,
+    "continue_signal_research": true,
+    "next_signal_family": "At already-required full Transformer anchors, compute per-region predicted-versus-actual residual level, slope, and acceleration. Use one-region veto for braking and require all-region clearance for acceleration; evaluate against causal region-gain labels on additional VQAScore failures before any new holdout.",
+    "why": "The causal intervention supports spatial concentration for the VQAScore case, but the sample count is one and the previously tested regional energy-only sentinel failed."
+  },
+  "artifact_hashes": {
+    "aggressive_oil_spatial_scores_sha256": "00ccb3786e0951dd70fe95a452b29586376cfd75ab74036aa80c0b76677f4233",
+    "pastry_temporal_vqa_scores_sha256": "d584beb1e68c06dc64b502db362b5b1bab52db1e002f97f062f76cc0c95b33b1",
+    "pastry_spatial_scores_sha256": "3cb716d6601cd956a2b9b3994823726cd6525753fabc602253e5367ccc7f27ee",
+    "pastry_step006_quality_input_sha256": "695bb885b2e916323c20b0d062db1e908523974c09381b69ce931eabdea65d05",
+    "pastry_step020_quality_input_sha256": "117cc588a44ece408bfb7c6096a2f142937db6f7bddd074ee1eb856bf9c94199",
+    "stage_candidate_sha256": "4b6a5d53599b0eefcd061819ce1b16fd968d73fe7a37b784779726d11633c4d5"
+  },
+  "sha256": "c80f1ac7a558bb588574bdbecb6bd3436fff8e513297b33a844c25d278921e9f"
+}

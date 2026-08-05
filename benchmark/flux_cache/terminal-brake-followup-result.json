@@ -1,0 +1,140 @@
+{
+  "schema": "difflet-flux-cache-terminal-brake-followup-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-terminal-brake-development-followup-2026-08-04",
+  "evidence_role": "opened-development-actuation-upper-bound-only",
+  "serving_claim": false,
+  "offline_intervention_only": true,
+  "protocol": {
+    "path": "benchmark/flux_cache/terminal-brake-followup.json",
+    "file_sha256": "6e737ad5a5a25b9a1d6e6c3c0ecbdd2f36407a99a141723f62f22d21fa9616ac",
+    "content_sha256": "c3185fbf7a78bc710da88fc40a53f6de1b982c5bae908010261df6811b620130"
+  },
+  "execution": {
+    "terminal_target_count": 9,
+    "paired_identity_pass_count": 9,
+    "paired_identity_failure_count": 0,
+    "quality_unique_image_count": 23,
+    "quality_scoring_complete": true,
+    "action": "Permanently disable cache after the selected real anchor without rewinding the cached prefix."
+  },
+  "summary": {
+    "known_failure_target_count": 6,
+    "known_failure_rescue_count": 0,
+    "pass_control_target_count": 3,
+    "introduced_control_failure_count": 0,
+    "mean_extra_full_transformer_steps": 21.333333333333332,
+    "mean_image_reward_gain_over_continue": 0.03853940301471286,
+    "mean_vqa_score_gain_over_continue": 0.013671875
+  },
+  "known_failure_results": [
+    {
+      "sample_id": "p001-s1",
+      "phase": "early",
+      "target_step": 15,
+      "extra_full_transformer_steps": 30,
+      "continue_vqa_harm": 0.4921875,
+      "terminal_vqa_harm": 0.4375,
+      "terminal_vqa_gain": 0.0546875,
+      "recovered_fraction_of_vqa_gap": 0.1111111111111111,
+      "outcome": "both_fail"
+    },
+    {
+      "sample_id": "p001-s1",
+      "phase": "middle",
+      "target_step": 23,
+      "extra_full_transformer_steps": 22,
+      "continue_vqa_harm": 0.47265625,
+      "terminal_vqa_harm": 0.384765625,
+      "terminal_vqa_gain": 0.087890625,
+      "recovered_fraction_of_vqa_gap": 0.1859504132231405,
+      "outcome": "both_fail"
+    },
+    {
+      "sample_id": "p001-s1",
+      "phase": "late",
+      "target_step": 40,
+      "extra_full_transformer_steps": 8,
+      "continue_vqa_harm": 0.4921875,
+      "terminal_vqa_harm": 0.466796875,
+      "terminal_vqa_gain": 0.025390625,
+      "recovered_fraction_of_vqa_gap": 0.051587301587301584,
+      "outcome": "both_fail"
+    },
+    {
+      "sample_id": "p014-s0",
+      "phase": "early",
+      "target_step": 15,
+      "extra_full_transformer_steps": 30,
+      "continue_vqa_harm": 0.3359375,
+      "terminal_vqa_harm": 0.3505859375,
+      "terminal_vqa_gain": -0.0146484375,
+      "recovered_fraction_of_vqa_gap": -0.0436046511627907,
+      "outcome": "both_fail"
+    },
+    {
+      "sample_id": "p014-s0",
+      "phase": "middle",
+      "target_step": 24,
+      "extra_full_transformer_steps": 22,
+      "continue_vqa_harm": 0.298828125,
+      "terminal_vqa_harm": 0.3330078125,
+      "terminal_vqa_gain": -0.0341796875,
+      "recovered_fraction_of_vqa_gap": -0.11437908496732026,
+      "outcome": "both_fail"
+    },
+    {
+      "sample_id": "p014-s0",
+      "phase": "late",
+      "target_step": 33,
+      "extra_full_transformer_steps": 14,
+      "continue_vqa_harm": 0.298828125,
+      "terminal_vqa_harm": 0.306640625,
+      "terminal_vqa_gain": -0.0078125,
+      "recovered_fraction_of_vqa_gap": -0.026143790849673203,
+      "outcome": "both_fail"
+    }
+  ],
+  "signal_to_terminal_gain": {
+    "sample_count": 9,
+    "anchor_error_spearman": {
+      "image_reward": 0.8333333333333334,
+      "vqa_score": 0.1
+    },
+    "strongest_observed_absolute_vqa_signal": {
+      "signal": "spatial_acceleration_cv",
+      "spearman": 0.4068381021724862
+    },
+    "qualification": "No signal qualifies: the data are opened, n=9, and terminal brake rescued no known failure."
+  },
+  "decision": {
+    "status": "terminal_brake_no_rescue",
+    "current_light_brake_threshold_tuning_supported": false,
+    "terminal_fallback_from_registered_targets_supported": false,
+    "reason": "Terminal brake rescued zero of six known-failure phase targets despite adding 8 to 30 full Transformer steps.",
+    "causal_interpretation": "By the registered step-15-or-later anchors, semantic trajectory changes from the cached prefix are not reliably reversible by computing every remaining Transformer step.",
+    "remaining_uncertainty": "The pilot did not intervene at the first post-warmup anchor at step 7, before the first long skip interval; it cannot distinguish an already-too-late step-15 target from a fundamentally unrecoverable predictor error."
+  },
+  "artifacts": {
+    "root": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-followup-20260804",
+    "run": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-followup-20260804/terminal-brake-run.json",
+      "file_sha256": "968b46d92c2987a93ac1511e3b78e417bfac145226be03c5cffbb13c058e315f",
+      "content_sha256": "29786225599eb27868e139e5138f7cc39e4abb76dce01715606b17a2f1c1d1d8"
+    },
+    "quality_input": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-followup-20260804/quality-input.json",
+      "file_sha256": "843dd148ee263026563324a55baea163162dc51269051f083360846e969ee305"
+    },
+    "semantic_scores": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-followup-20260804/semantic-scores.json",
+      "file_sha256": "b12ecce957ab9238779944661b1af4aa7977dcbe9214e5d49bd182cf6869a2bc"
+    },
+    "analysis": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-followup-20260804/terminal-brake-analysis.json",
+      "file_sha256": "bf2738c011348e1ec705c94e7fc34d91e251881c555dc434da027e967b0226d3",
+      "content_sha256": "596d8b66dfc58f0ef0bd555b9d1ae325ed93c4c405da4c6c2ea4a6c2da5c0c8a"
+    }
+  },
+  "sha256": "431195866feb17fde829270173edd8a894ab95cba36a0146482403a799a7cfa9"
+}

@@ -1,0 +1,37 @@
+{
+  "schema": "difflet-flux-cache-terminal-brake-followup",
+  "schema_revision": 1,
+  "study_id": "flux-cache-terminal-brake-development-followup-2026-08-04",
+  "evidence_role": "opened-development-actuation-upper-bound-only",
+  "serving_claim": false,
+  "offline_intervention_only": true,
+  "quality_split": "terminal_brake_development_followup",
+  "source_protocol": {
+    "path": "benchmark/flux_cache/brake-intervention-pilot.json",
+    "file_sha256": "acb86d1b6a28633bf323932c3be345ae845ac8090d4b93652bb36a8d442d03d7",
+    "content_sha256": "7330314d199d8bd06b4cfb7380b707f3b29a0bbcd27ea648993366a6b4476bf1"
+  },
+  "source_run": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-brake-intervention-pilot-20260804/brake-intervention-run.json",
+    "file_sha256": "757de7694337e520a00a004447a7207d5a0e5ca0ab48f38dcdf89d71995e6335",
+    "content_sha256": "53c098845bdbba23328294989c79d656cf8491534e98ebee5775ee3b8adc8132"
+  },
+  "action": "terminal",
+  "action_semantics": "At the selected real anchor, permanently disable cache prediction for every remaining denoising step. The already-executed cache prefix is not rewound.",
+  "paired_identity_gate": "The terminal arm must exactly match the source arm's target pre-step latent, actual Transformer output, cache history, anchor error, and pre-anchor interval.",
+  "target_source": "Reuse all nine endpoint-blind early/middle/late targets frozen by the source pilot; do not select a new target after seeing endpoint scores.",
+  "expected_terminal_images": 9,
+  "expected_quality_images": 23,
+  "quality_contract": {
+    "image_reward_max_harm": 0.7824214100837708,
+    "vqa_score_max_harm": 0.25,
+    "failure_rule": "fail when baseline-minus-candidate harm is strictly greater than either frozen metric margin"
+  },
+  "decision_rule": {
+    "actuator_viable": "At least one known VQAScore failure target is rescued by terminal brake without introducing a contract failure in a pass control.",
+    "no_rescue": "No known failure target is rescued, including both early targets.",
+    "interpretation_if_viable": "The light brake dose was insufficient; use terminal treatment gain to search for an earlier recoverability signal on a new registration.",
+    "interpretation_if_no_rescue": "The selected anchors are too late, the cached prefix is irrecoverable by future full steps, or the endpoint label is not action-responsive. Do not tune the current online threshold from these requests."
+  },
+  "sha256": "c3185fbf7a78bc710da88fc40a53f6de1b982c5bae908010261df6811b620130"
+}

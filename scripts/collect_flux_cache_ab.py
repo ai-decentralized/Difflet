@@ -631,6 +631,7 @@ def _run_sample(
     output_root: Path,
     measurement_sink: Any = None,
     configuration_source: str | None = None,
+    online_signal_window: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     import torch
 
@@ -674,6 +675,42 @@ def _run_sample(
         "final_latent": _relative(final_path, output_root),
         "image": _relative(image_path, output_root),
     }
+    if online_signal_window is not None:
+        from scripts.evaluate_flux_cache_online_signal import (
+            extract_features,
+            extract_output_dynamics_features,
+        )
+
+        first_eligible_step, last_eligible_step = online_signal_window
+        spatial_records = list(getattr(flux_pipeline, "_tc_spatial_deltas", ()))
+        output_records = list(getattr(flux_pipeline, "_tc_output_dynamics", ()))
+        features = extract_features(
+            spatial_records,
+            first_eligible_step=first_eligible_step,
+            last_eligible_step=last_eligible_step,
+        )
+        features.update(
+            extract_output_dynamics_features(
+                output_records,
+                first_eligible_step=first_eligible_step,
+                last_eligible_step=last_eligible_step,
+            )
+        )
+        signal_path = artifact_dir / f"{sample['sample_id']}.online-signal.json"
+        _write_json(
+            signal_path,
+            {
+                "schema": "difflet-flux-cache-online-signal-sample",
+                "schema_revision": 1,
+                "sample_id": sample["sample_id"],
+                "signal_window": [first_eligible_step, last_eligible_step],
+                "features": features,
+                "spatial_records": spatial_records,
+                "output_dynamics_records": output_records,
+            },
+        )
+        artifacts["online_signal"] = _relative(signal_path, output_root)
+        artifacts["online_signal_sha256"] = _sha256_file(signal_path)
     if measurement_sink is not None:
         if not configuration_source:
             raise RuntimeError("runtime measurements require a configuration source")
@@ -879,6 +916,11 @@ def _load_pipeline(args: argparse.Namespace):
         "float16": torch.float16,
         "float32": torch.float32,
     }[args.dtype]
+    application_kwargs = (
+        {"teacache_fused": True}
+        if bool(getattr(args, "collect_online_signals", False))
+        else None
+    )
     return DiffletPipeline.from_pretrained(
         args.model_id,
         model_type="flux",
@@ -890,6 +932,7 @@ def _load_pipeline(args: argparse.Namespace):
         width=args.width,
         force_compile=bool(args.force_compile),
         skip_warmup=bool(args.skip_warmup),
+        application_kwargs=application_kwargs,
     )
 
 
@@ -966,6 +1009,18 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
     )
     collect_measurements = bool(getattr(args, "collect_cache_measurements", False))
     collect_spatial_measurements = bool(getattr(args, "collect_spatial_measurements", False))
+    collect_online_signals = bool(getattr(args, "collect_online_signals", False))
+    online_signal_window = None
+    if collect_online_signals:
+        first_eligible_step = int(args.online_signal_first_eligible_step)
+        last_eligible_step = int(args.online_signal_last_eligible_step)
+        if (
+            first_eligible_step < 2
+            or last_eligible_step < first_eligible_step
+            or last_eligible_step >= num_steps
+        ):
+            raise ValueError("online signal window is invalid")
+        online_signal_window = (first_eligible_step, last_eligible_step)
     if collect_spatial_measurements and not collect_measurements:
         raise ValueError("--collect-spatial-measurements requires --collect-cache-measurements")
     spatial_layout = None
@@ -1012,6 +1067,8 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
         return InMemoryMeasurementSink()
 
     baseline_runs: list[dict[str, Any]] = []
+    flux_pipeline._tc_record = False
+    flux_pipeline._tc_output_dynamics_record = False
     baseline_sink = make_measurement_sink(include_spatial=False)
     baseline_adapter = _build_baseline_adapter(
         num_steps,
@@ -1042,6 +1099,8 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
         )
 
     candidate_runs: dict[str, list[dict[str, Any]]] = {}
+    flux_pipeline._tc_record = collect_online_signals
+    flux_pipeline._tc_output_dynamics_record = collect_online_signals
     for arm in arms:
         candidate_sink = make_measurement_sink(include_spatial=True)
         adapter = arm.build_pipeline_adapter(
@@ -1063,6 +1122,7 @@ def collect(args: argparse.Namespace) -> tuple[Path, Path]:
                 output_root=output_root,
                 measurement_sink=candidate_sink,
                 configuration_source=adapter.source,
+                online_signal_window=online_signal_window,
             )
             run["runner_stats"] = adapter.stats()
             rows.append(run)
@@ -1170,6 +1230,16 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--spatial-region-rows", type=int, default=8)
     parser.add_argument("--spatial-region-columns", type=int, default=8)
+    parser.add_argument(
+        "--collect-online-signals",
+        action="store_true",
+        help=(
+            "compile/load the shallow fused probe and write its serving-available "
+            "request features beside every candidate image"
+        ),
+    )
+    parser.add_argument("--online-signal-first-eligible-step", type=int, default=6)
+    parser.add_argument("--online-signal-last-eligible-step", type=int, default=48)
     parser.add_argument("--allow-hardware", action="store_true")
     parser.add_argument("--foreground-ack", default=None)
     return parser.parse_args(argv)

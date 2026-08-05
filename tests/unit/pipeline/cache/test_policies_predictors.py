@@ -15,8 +15,11 @@ from difflet.pipeline.cache import (
     CadencePolicy,
     ExplicitMaskPolicy,
     LegacyResidualPredictor,
+    PhasedStaticPolicy,
     PeriodicAnchorPolicy,
     RuntimeObservation,
+    StaticPlusBrakeConfig,
+    StaticPlusBrakePolicy,
     TaylorSeerPredictor,
     TeaCachePolicy,
 )
@@ -223,6 +226,180 @@ def test_cadence_and_explicit_mask_are_schedule_only():
     )
     explicit = ExplicitMaskPolicy([True, True, False, True])
     assert explicit.materialize_anchor_mask(4) == (True, True, False, True)
+
+
+def _static_brake_config(**overrides) -> StaticPlusBrakeConfig:
+    values = {
+        "anchor_mask": (
+            True,
+            True,
+            True,
+            False,
+            False,
+            False,
+            False,
+            True,
+            False,
+            False,
+            False,
+            True,
+        ),
+        "plastic_window_start": 2,
+        "plastic_window_end": 9,
+        "dynamic_budget": 2,
+        "tighten_error": 0.5,
+        "recovery_error": 1.0,
+        "recovery_steps": 2,
+        "disable_after_recoveries": 2,
+        "tighten_rule": "bisect_next_static_gap",
+        "allow_acceleration": False,
+        "invalid_measurement_fail_closed": True,
+    }
+    values.update(overrides)
+    return StaticPlusBrakeConfig(**values)
+
+
+def test_phased_static_policy_uses_exact_mask_and_fails_closed():
+    policy = PhasedStaticPolicy([True, True, False, True, False, True])
+    history = CacheHistory(2)
+    observation = RuntimeObservation()
+
+    assert [
+        policy.should_skip(_context(step, steps=6), history, observation)
+        for step in range(6)
+    ] == [False, False, True, False, True, False]
+    policy.observe_anchor_measurement(
+        _anchor_measurement(
+            3,
+            error=None,
+            num_steps=6,
+            status="invalid_estimated_output",
+        )
+    )
+    assert policy.should_skip(_context(4, steps=6), history, observation) is False
+    assert policy.stats()["phased_static_disable_reason"] == "invalid_measurement"
+
+    policy.reset()
+    assert policy.should_skip(_context(4, steps=6), history, observation) is True
+    assert policy.stats()["phased_static_disabled"] == 0
+
+
+def test_static_plus_brake_inserts_without_moving_static_anchors():
+    policy = StaticPlusBrakePolicy(_static_brake_config())
+    history = CacheHistory(2)
+    observation = RuntimeObservation()
+
+    policy.observe_anchor_measurement(_anchor_measurement(2, error=0.6, num_steps=12))
+    assert policy.should_skip(_context(3, steps=12), history, observation) is True
+    assert policy.should_skip(_context(4, steps=12), history, observation) is False
+    policy.observe_anchor_measurement(_anchor_measurement(4, error=0.6, num_steps=12))
+    assert policy.should_skip(_context(5, steps=12), history, observation) is False
+    policy.observe_anchor_measurement(_anchor_measurement(5, error=0.1, num_steps=12))
+
+    assert policy.should_skip(_context(6, steps=12), history, observation) is True
+    assert policy.should_skip(_context(7, steps=12), history, observation) is False
+    assert policy.materialize_static_anchor_mask(12)[7] is True
+    assert policy.stats()["static_brake_dynamic_insertions"] == 2
+    assert policy.stats()["static_brake_dynamic_budget_remaining"] == 0
+
+
+def test_static_plus_brake_recovery_counts_only_extra_true_steps():
+    mask = (True, True, True, False, True, False, False, True)
+    policy = StaticPlusBrakePolicy(
+        _static_brake_config(
+            anchor_mask=mask,
+            plastic_window_end=6,
+            dynamic_budget=2,
+        )
+    )
+    history = CacheHistory(2)
+    observation = RuntimeObservation()
+
+    policy.observe_anchor_measurement(_anchor_measurement(2, error=1.1, num_steps=8))
+    assert policy.state == "recovery"
+    assert policy.should_skip(_context(3, steps=8), history, observation) is False
+    policy.observe_anchor_measurement(_anchor_measurement(3, error=0.1, num_steps=8))
+    assert policy.should_skip(_context(4, steps=8), history, observation) is False
+    policy.observe_anchor_measurement(_anchor_measurement(4, error=0.1, num_steps=8))
+
+    assert policy.state == "active"
+    assert policy.stats()["static_brake_dynamic_insertions"] == 1
+    assert policy.stats()["static_brake_dynamic_compute_overlaps"] == 1
+    assert policy.dynamic_budget_remaining == 1
+
+
+def test_static_plus_brake_keeps_fuse_global_outside_plastic_window():
+    policy = StaticPlusBrakePolicy(_static_brake_config(plastic_window_end=6))
+    history = CacheHistory(2)
+    observation = RuntimeObservation()
+
+    policy.observe_anchor_measurement(_anchor_measurement(7, error=1.1, num_steps=12))
+    assert policy.state == "active"
+    policy.observe_anchor_measurement(_anchor_measurement(11, error=1.1, num_steps=12))
+    assert policy.state == "disabled"
+    assert policy.should_skip(_context(9, steps=12), history, observation) is False
+    assert policy.stats()["static_brake_disable_reason"] == "recovery_limit"
+
+
+def test_static_plus_brake_invalid_measurement_disables_during_recovery():
+    policy = StaticPlusBrakePolicy(_static_brake_config())
+    policy.observe_anchor_measurement(_anchor_measurement(2, error=1.1, num_steps=12))
+    assert policy.state == "recovery"
+
+    policy.observe_anchor_measurement(
+        _anchor_measurement(
+            3,
+            error=None,
+            num_steps=12,
+            status="invalid_estimated_output",
+        )
+    )
+
+    assert policy.state == "disabled"
+    assert policy.stats()["static_brake_disable_reason"] == "invalid_measurement"
+
+
+def test_static_plus_brake_reset_clears_request_state():
+    policy = StaticPlusBrakePolicy(_static_brake_config())
+    policy.observe_anchor_measurement(_anchor_measurement(2, error=0.6, num_steps=12))
+    assert policy.should_skip(
+        _context(4, steps=12), CacheHistory(2), RuntimeObservation()
+    ) is False
+    assert policy.dynamic_budget_remaining == 1
+
+    policy.reset()
+    assert policy.dynamic_budget_remaining == 2
+    assert policy.state == "active"
+    assert policy.should_skip(
+        _context(4, steps=12), CacheHistory(2), RuntimeObservation()
+    ) is True
+
+
+def test_static_plus_brake_replays_same_trace_from_same_measurements():
+    def replay() -> tuple[list[bool], dict[str, object]]:
+        policy = StaticPlusBrakePolicy(_static_brake_config())
+        history = CacheHistory(2)
+        observation = RuntimeObservation()
+        decisions = []
+        for step in range(12):
+            skip = policy.should_skip(_context(step, steps=12), history, observation)
+            decisions.append(skip)
+            if not skip:
+                policy.observe_anchor_measurement(
+                    _anchor_measurement(
+                        step,
+                        error=0.6 if step in {2, 4} else 0.1,
+                        num_steps=12,
+                    )
+                )
+        return decisions, policy.stats()
+
+    assert replay() == replay()
+
+
+def test_static_plus_brake_rejects_acceleration_permission():
+    with pytest.raises(ValueError, match="acceleration must be false"):
+        _static_brake_config(allow_acceleration=True)
 
 
 def test_taylorseer_order_one_uses_real_anchor_coordinates():

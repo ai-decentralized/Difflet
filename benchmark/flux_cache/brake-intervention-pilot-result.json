@@ -1,0 +1,139 @@
+{
+  "schema": "difflet-flux-cache-brake-intervention-pilot-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-brake-intervention-development-pilot-2026-08-04",
+  "evidence_role": "exploratory-causal-action-mapping-only",
+  "serving_claim": false,
+  "offline_intervention_only": true,
+  "protocol": {
+    "path": "benchmark/flux_cache/brake-intervention-pilot.json",
+    "file_sha256": "acb86d1b6a28633bf323932c3be345ae845ac8090d4b93652bb36a8d442d03d7",
+    "content_sha256": "7330314d199d8bd06b4cfb7380b707f3b29a0bbcd27ea648993366a6b4476bf1"
+  },
+  "sample_matrix": {
+    "known_failure_requests": 2,
+    "pass_control_requests": 3,
+    "selected_anchor_targets": 9,
+    "paired_action_arms": 27,
+    "unique_images": 37,
+    "target_phases": [
+      "early",
+      "middle",
+      "late"
+    ]
+  },
+  "identity_gates": {
+    "passed_target_arms": 27,
+    "failed_target_arms": 0,
+    "fields": [
+      "pre_step_latent_sha256",
+      "actual_transformer_output_sha256",
+      "cache_history_sha256",
+      "anchor_error",
+      "pre_anchor_interval"
+    ],
+    "historical_natural_replay": {
+      "exact_png_matches": 4,
+      "mismatches": 0,
+      "scope": "Natural-cache and full-DiT images for p001-s1 and p014-s0 match the 2026-08-03 failure-enriched run byte for byte."
+    }
+  },
+  "quality_contract": {
+    "image_reward_max_harm": 0.7824214100837708,
+    "vqa_score_max_harm": 0.25,
+    "failure_rule": "fail when baseline-minus-candidate harm is strictly greater than either frozen metric margin"
+  },
+  "action_results": {
+    "brake": {
+      "target_count": 9,
+      "known_failure_rescues": 0,
+      "known_failure_targets_still_failed": 6,
+      "introduced_control_failures": 0,
+      "passing_controls_still_passed": 3,
+      "mean_extra_full_transformer_steps": 2.4444444444444446,
+      "mean_image_reward_gain_over_continue": 0.006959590646955702,
+      "mean_vqa_score_gain_over_continue": 0.0078125
+    },
+    "recovery": {
+      "target_count": 9,
+      "known_failure_rescues": 0,
+      "known_failure_targets_still_failed": 6,
+      "introduced_control_failures": 0,
+      "passing_controls_still_passed": 3,
+      "mean_extra_full_transformer_steps": 4.0,
+      "mean_image_reward_gain_over_continue": 0.017128997378879122,
+      "mean_vqa_score_gain_over_continue": 0.004448784722222222
+    }
+  },
+  "largest_partial_repair": {
+    "sample_id": "p001-s1",
+    "phase": "early",
+    "target_step": 15,
+    "anchor_error": 1.2603432995040744,
+    "action": "brake",
+    "extra_full_transformer_steps": 3,
+    "image_reward_gain_over_continue": 0.2206716537475586,
+    "vqa_score_gain_over_continue": 0.08984375,
+    "continue_vqa_harm": 0.4921875,
+    "action_vqa_harm": 0.40234375,
+    "contract_outcome": "both_fail"
+  },
+  "signal_to_treatment_gain": {
+    "sample_count_per_action": 9,
+    "anchor_error_spearman": {
+      "brake": {
+        "image_reward": 0.7333333333333333,
+        "vqa_score": 0.14286218715872304
+      },
+      "recovery": {
+        "image_reward": 0.6666666666666666,
+        "vqa_score": -0.05085476277156078
+      }
+    },
+    "strongest_observed_absolute_vqa_associations": {
+      "brake": {
+        "signal": "relative_output_change",
+        "spearman": 0.3949719292035284
+      },
+      "recovery": {
+        "signal": "spatial_acceleration_cv",
+        "spearman": -0.41379310344827586
+      }
+    },
+    "qualification": "No signal qualifies. The data are opened, n=9 per action, phase and anchor error are confounded, and neither action rescued a failure."
+  },
+  "decision": {
+    "status": "negative_pilot",
+    "known_failure_target_count": 6,
+    "known_failure_rescued_target_count": 0,
+    "pass_control_target_count": 3,
+    "introduced_control_failure_target_count": 0,
+    "failure_metric": "vqa_score",
+    "reason": "Neither registered action rescued either known VQAScore failure at early, middle, or late anchors.",
+    "threshold_reoptimization_supported": false,
+    "controller_serving_change_supported": false,
+    "prescribed_next_step": "Change the predictor or cache granularity; do not retune the current scalar anchor-error thresholds on these opened requests."
+  },
+  "artifacts": {
+    "root": "/home/ubuntu/difflet-artifacts/flux-cache-brake-intervention-pilot-20260804",
+    "run_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-brake-intervention-pilot-20260804/brake-intervention-run.json",
+      "file_sha256": "757de7694337e520a00a004447a7207d5a0e5ca0ab48f38dcdf89d71995e6335",
+      "content_sha256": "53c098845bdbba23328294989c79d656cf8491534e98ebee5775ee3b8adc8132"
+    },
+    "quality_input": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-brake-intervention-pilot-20260804/quality-input.json",
+      "file_sha256": "ba406320ec1250f4b4b40de7c8ef885bd54905a1dbed072fa2744f856f144ef1"
+    },
+    "semantic_scores": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-brake-intervention-pilot-20260804/semantic-scores.json",
+      "file_sha256": "21868088cd128bdf46759bcb7efd41131e1ef642ba088408d4ff852376b755ee"
+    },
+    "analysis": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-brake-intervention-pilot-20260804/brake-intervention-analysis.json",
+      "file_sha256": "d7e7f13cbc7b42fd74e68c921f79b94e1f9ff38503caf42c9964260035f360c3",
+      "content_sha256": "55f35cc3bdb23f6788e495196463aac2bb43efe63d324b4b897d51c2baefe353"
+    }
+  },
+  "sha256": "906ce8cef16766ffe5c2492a2f25e1f95a13e6899f09eda5bc6fe24448b0f683"
+}

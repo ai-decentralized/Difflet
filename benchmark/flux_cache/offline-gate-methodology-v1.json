@@ -1,0 +1,112 @@
+{
+  "schema": "difflet-flux-cache-offline-gate-methodology",
+  "schema_revision": 1,
+  "methodology_id": "flux-cache-offline-gate-v1",
+  "scope": "Development and offline threshold selection for cheap FLUX cache-risk features. This artifact does not qualify a serving controller.",
+  "evidence_roles": {
+    "development": "Failure-enriched data may select a feature group, fit coefficients, and select candidate thresholds, but may not make a confirmation or serving claim.",
+    "confirmation": "An untouched, prospectively registered, positive-containing holdout may confirm frozen scores and thresholds without refitting.",
+    "intervention": "A separate prospective run must execute the frozen controller and pass paired semantic-quality and measured-speed contracts before serving publication."
+  },
+  "contract": {
+    "image_reward_max_harm": 0.7824214100837708,
+    "vqa_score_max_harm": 0.25,
+    "failure_definition": "Fail when either baseline-minus-candidate metric harm is strictly greater than its frozen limit.",
+    "weighted_metric_average_forbidden": true
+  },
+  "profile_selection": {
+    "candidate_unit": "One immutable adaptive-candidate JSON. Anchor intervals, warmup/cooldown, predictor, tighten_error, recovery_error, acceleration_error, and allow_acceleration are selected as one atomic profile; controller thresholds may not be retuned after labels are opened.",
+    "candidate_grid": "Freeze every candidate file hash and the prompt/seed matrix before collection.",
+    "quality_eligibility": "The one-sided exact-binomial 95% prompt-group failure-rate upper bound must be no greater than 10% under the frozen two-metric contract.",
+    "confidence": 0.95,
+    "maximum_failure_rate_upper_bound": 0.1,
+    "minimum_independent_group_count": 29,
+    "independent_unit": "prompt_index",
+    "ranking": "Among quality-eligible profiles, choose the largest measured hardware speedup; break exact ties by candidate_id.",
+    "confirmation": "Freeze the selected candidate file hash, then evaluate it once on a new registered profile holdout before any serving claim.",
+    "current_study_replay": "The stage-gate study can reproduce the conservative brake-only choice, but it predates methodology-v1 and includes one frozen audit that was not contract-allowlisted. Its selection is legacy evidence, not a methodology-v1 serving qualification."
+  },
+  "features": {
+    "availability": "Every feature must be computable during the cache request without a shadow/full-DiT teacher at skipped steps.",
+    "groups": {
+      "modulation_only": [
+        "max_region_level",
+        "max_top2_region_level",
+        "max_level_cv",
+        "max_region_acceleration",
+        "max_top2_region_acceleration",
+        "max_acceleration_range",
+        "max_acceleration_cv",
+        "peak_acceleration_level_cv_percent"
+      ],
+      "output_only": [
+        "output_max_region_relative_l1",
+        "output_max_top2_region_relative_l1",
+        "output_max_region_velocity_turn",
+        "output_max_top2_region_velocity_turn",
+        "output_max_region_acceleration_ratio",
+        "output_max_top2_region_acceleration_ratio"
+      ],
+      "combined": [
+        "max_region_level",
+        "max_top2_region_level",
+        "max_level_cv",
+        "max_region_acceleration",
+        "max_top2_region_acceleration",
+        "max_acceleration_range",
+        "max_acceleration_cv",
+        "peak_acceleration_level_cv_percent",
+        "output_max_region_relative_l1",
+        "output_max_top2_region_relative_l1",
+        "output_max_region_velocity_turn",
+        "output_max_top2_region_velocity_turn",
+        "output_max_region_acceleration_ratio",
+        "output_max_top2_region_acceleration_ratio"
+      ]
+    }
+  },
+  "model": {
+    "family": "L2-regularized logistic regression",
+    "standardization": "Fit StandardScaler inside each training fold.",
+    "class_weight": "balanced",
+    "random_state": 0,
+    "validation": "Leave one prompt_index out. All seeds and candidate strengths for one prompt remain in the same fold.",
+    "selection": "Choose maximum grouped-OOF average precision; break ties in favor of fewer features.",
+    "threshold_source": "Only target-policy grouped-OOF probabilities; never in-sample probabilities from the final all-data fit."
+  },
+  "development": {
+    "minimum_total_failures": 5,
+    "minimum_target_failures": 2,
+    "minimum_pooled_oof_roc_auc": 0.75,
+    "minimum_target_oof_roc_auc": 0.75,
+    "on_failure": "Reject the feature family and do not spend a new confirmation holdout."
+  },
+  "brake_threshold": {
+    "selection": "minimum_positive_target_oof_score",
+    "comparison": "risk_score >= threshold",
+    "required_failure_recall": 1.0,
+    "maximum_passing_false_brake_rate": 0.1,
+    "interpretation": "The development brake threshold is the highest inclusive cutoff that retains every observed target-policy failure."
+  },
+  "oil_threshold": {
+    "selection": "largest_qualified_target_oof_score",
+    "comparison": "risk_score <= threshold",
+    "confidence": 0.95,
+    "maximum_failure_rate_upper_bound": 0.1,
+    "independent_unit": "prompt_index",
+    "minimum_independent_group_count": 29,
+    "require_zero_observed_failures": true,
+    "strictly_below_brake_threshold": true,
+    "interpretation": "Choose the largest low-risk cutoff whose development all-clear zone has zero observed failing prompt groups and a one-sided exact-binomial 95% prompt-group failure-rate upper bound no greater than 10%. Seeds from the same prompt never increase the independent-unit count. Twenty-nine zero-failure prompt groups are the minimum for that bound."
+  },
+  "export": {
+    "requires_methodology_hash_in_preregistration": true,
+    "state": "awaiting_prospective_confirmation",
+    "serving_claim": false,
+    "required_next_stages": [
+      "Prospectively registered threshold confirmation with frozen features, coefficients, and thresholds and no refitting.",
+      "Prospective interventional A/B that actually executes brake/oil actions and remeasures paired ImageReward, VQAScore, and speed."
+    ]
+  },
+  "current_study_note": "The 2026-08-03 failure-enriched study froze its stopping rules before collection but predates this methodology artifact. It may be replayed to validate a rejection; it may not export a positive frozen gate because the methodology hash was not preregistered."
+}

@@ -1,0 +1,56 @@
+{
+  "schema": "difflet-flux-cache-online-signal-audit-registration",
+  "schema_revision": 1,
+  "study_id": "flux-cache-online-signal-semantic-stress-2026-08-03",
+  "frozen_before_collection": true,
+  "source_commit": "537bda284e13a2a7c88916cf2e369b8ac47d5090",
+  "prompt_set": {
+    "path": "benchmark/flux_cache/online-signal-semantic-stress-prompts.json",
+    "file_sha256": "d0639ba758fd1e3c007035a0c6bc4563be4af16deb1dfe724c072aa1d835f307",
+    "prompt_count": 24,
+    "exact_overlap_with_existing_benchmark_json": 0,
+    "seeds": [0],
+    "sample_count": 24
+  },
+  "generation": {
+    "model": "black-forest-labs/FLUX.1-dev",
+    "revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "height": 1024,
+    "width": 1024,
+    "num_steps": 50,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "candidate": {
+    "path": "benchmark/flux_cache/adaptive-stage-oil-p30-e1p40-k12-candidate.json",
+    "candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index",
+    "file_sha256": "4b6a5d53599b0eefcd061819ce1b16fd968d73fe7a37b784779726d11633c4d5"
+  },
+  "quality_contract": {
+    "image_reward_max_harm": 0.7824214100837708,
+    "vqa_score_max_harm": 0.25,
+    "automatic_failure": "candidate-minus-baseline harm exceeds either frozen metric limit"
+  },
+  "primary_signal": {
+    "name": "max_region_modulation_positive_acceleration",
+    "window": [6, 48],
+    "region_grid": [4, 4],
+    "definition": "max over time and region of max(0, m_r(t)-2*m_r(t-1)+m_r(t-2))",
+    "opened_brake_threshold": 0.14,
+    "threshold_frozen_for_this_audit": true,
+    "control_rule": "any-region veto"
+  },
+  "predeclared_outputs": [
+    "ROC-AUC against automatic failure",
+    "average precision against automatic failure",
+    "failure recall at threshold 0.14",
+    "passing-request false-veto rate at threshold 0.14",
+    "extra full-DiT steps requested at threshold 0.14"
+  ],
+  "qualification": {
+    "registered_by_contract_tool": false,
+    "serving_claim": false,
+    "note": "This is a prospectively frozen independent stress audit, not a contract-registered holdout. No new feature or threshold may be selected on its labels and reported as confirmed."
+  }
+}

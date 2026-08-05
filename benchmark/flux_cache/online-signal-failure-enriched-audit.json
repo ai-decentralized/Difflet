@@ -1,0 +1,111 @@
+{
+  "schema": "difflet-flux-cache-online-signal-training-audit-registration",
+  "schema_revision": 1,
+  "study_id": "flux-cache-online-signal-failure-enriched-discovery-2026-08-03",
+  "frozen_before_collection": true,
+  "source_commit": "537bda284e13a2a7c88916cf2e369b8ac47d5090",
+  "evidence_role": {
+    "kind": "failure-enriched-model-development",
+    "serving_claim": false,
+    "confirmation_claim": false,
+    "reason": "Prompts and candidate strata were designed after inspecting earlier failures. This data may train and select a gate but may not qualify it."
+  },
+  "prompt_set": {
+    "path": "benchmark/flux_cache/online-signal-failure-enriched-prompts.json",
+    "file_sha256": "f2917b14b905aa085452031b32a11ba95516d9861c4e18f9128ebb8e437fd45a",
+    "prompt_count": 16,
+    "exact_overlap_with_existing_benchmark_json": 0,
+    "enrichment_families": [
+      "thin or fragile structures",
+      "count and color binding",
+      "left-right and actor-role binding",
+      "dense fine-detail assemblies"
+    ]
+  },
+  "sample_matrix": {
+    "seeds": [0, 1],
+    "prompt_seed_count": 32,
+    "candidate_count": 2,
+    "candidate_comparison_count": 64,
+    "expected_unique_images": 96,
+    "grouping_unit_for_model_validation": "prompt_index",
+    "reason": "All seeds and candidate strengths for one prompt remain in the same validation fold."
+  },
+  "generation": {
+    "model": "black-forest-labs/FLUX.1-dev",
+    "revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "height": 1024,
+    "width": 1024,
+    "num_steps": 50,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "candidate_strata": [
+    {
+      "role": "target oil policy",
+      "path": "benchmark/flux_cache/adaptive-stage-oil-p30-e1p40-k12-candidate.json",
+      "candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index",
+      "file_sha256": "4b6a5d53599b0eefcd061819ce1b16fd968d73fe7a37b784779726d11633c4d5"
+    },
+    {
+      "role": "more aggressive enrichment policy",
+      "path": "benchmark/flux_cache/adaptive-oil-e1p80-k12-candidate.json",
+      "candidate_id": "adaptive-oil-e1p80-w6-i8-k12-o1-index",
+      "file_sha256": "0c295e448e567149ccbeb7c95934f4cec7ba31e3744c4cb2fca701bfe66f37df"
+    }
+  ],
+  "quality_contract": {
+    "image_reward_max_harm": 0.7824214100837708,
+    "vqa_score_max_harm": 0.25,
+    "automatic_failure": "baseline-minus-candidate is strictly greater than either frozen metric limit",
+    "weighted_metric_average_forbidden": true
+  },
+  "online_features": {
+    "teacher_or_shadow_full_dit": false,
+    "signal_window": [6, 48],
+    "region_grid": [4, 4],
+    "feature_names": [
+      "max_region_level",
+      "max_top2_region_level",
+      "max_level_cv",
+      "max_region_acceleration",
+      "max_top2_region_acceleration",
+      "max_acceleration_range",
+      "max_acceleration_cv",
+      "peak_acceleration_level_cv_percent",
+      "output_max_region_relative_l1",
+      "output_max_top2_region_relative_l1",
+      "output_max_region_velocity_turn",
+      "output_max_top2_region_velocity_turn",
+      "output_max_region_acceleration_ratio",
+      "output_max_top2_region_acceleration_ratio"
+    ],
+    "probe_path": "block-0 x_embedder, time/text embedding, and norm1 modulation only",
+    "cached_output_features": "computed from the already produced TaylorSeer output",
+    "excluded_rejected_probes": [
+      "prompt Q/K attention proxy",
+      "one-real-transformer-block surrogate"
+    ]
+  },
+  "model_development": {
+    "model_family": "standardized L2-regularized logistic regression",
+    "maximum_input_feature_count": 14,
+    "class_weight": "balanced",
+    "validation": "grouped cross-validation by prompt_index",
+    "primary_selection_metric": "average precision",
+    "secondary_metrics": [
+      "ROC-AUC",
+      "failure recall",
+      "passing-request false-brake rate"
+    ],
+    "threshold_selection": "development-only; choose separate brake and oil thresholds from grouped out-of-fold predictions",
+    "final_confirmation": "freeze the selected feature transform, coefficients, and thresholds, then evaluate once on a new positive-containing holdout"
+  },
+  "stopping_rules": {
+    "fewer_than_five_total_failures": "do not fit or report a deployable threshold; expand the discovery set",
+    "fewer_than_two_target_policy_failures": "do not claim the gate applies to the target oil policy",
+    "grouped_out_of_fold_auc_below_0p75": "abandon this cheap-feature family for oil control",
+    "false_brake_rate_above_0p10_at_full_failure_recall": "do not use the model as an oil all-clear gate"
+  }
+}

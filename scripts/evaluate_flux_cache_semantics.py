@@ -207,9 +207,29 @@ def _repository_checkpoint_files(cache_root: Path, repository: str) -> list[dict
     return _checkpoint_files(snapshot)
 
 
+def _load_image_reward_module() -> Any:
+    """Import the scorer without importing ImageReward's training entrypoint.
+
+    ImageReward's package initializer eagerly imports ReFL, which pulls in the
+    optional datasets and Stable Diffusion training stacks.  Neither is used by
+    the scorer.  Registering the installed package as a namespace keeps the
+    official scoring implementation unchanged while preserving the evaluator's
+    CPU-only dependency boundary.
+    """
+
+    distribution = importlib.metadata.distribution("image-reward")
+    package_root = Path(distribution.locate_file("ImageReward")).resolve()
+    package = types.ModuleType("ImageReward")
+    package.__path__ = [str(package_root)]
+    package.__package__ = "ImageReward"
+    sys.modules["ImageReward"] = package
+    return importlib.import_module("ImageReward.utils")
+
+
 def load_image_reward(cache_root: Path) -> tuple[Callable[[str, str], float], dict[str, Any]]:
     import torch
-    import ImageReward as reward_module
+
+    reward_module = _load_image_reward_module()
 
     started = time.perf_counter()
     model = reward_module.load(

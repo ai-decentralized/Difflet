@@ -1,0 +1,253 @@
+{
+  "schema": "difflet-flux-cache-prompt-suite-v1",
+  "suite_id": "flux-cache-phase-schedule-development",
+  "source": {
+    "created_at": "2026-08-05",
+    "origin": "Prospectively authored phase-schedule development prompts",
+    "selection": "Balanced compositional stress prompts authored before candidate images or semantic labels were collected"
+  },
+  "splits": {
+    "phase_schedule_horizon_development": [
+      {
+        "prompt_id": "phase-horizon-001",
+        "category": "counting",
+        "text": "exactly five brass keys arranged in a fan beside two blue glass marbles on a slate table"
+      },
+      {
+        "prompt_id": "phase-horizon-002",
+        "category": "counting",
+        "text": "eight white candles in two equal rows with only the third candle in the front row lit"
+      },
+      {
+        "prompt_id": "phase-horizon-003",
+        "category": "counting",
+        "text": "three green pears and four red plums distributed among two shallow wicker baskets"
+      },
+      {
+        "prompt_id": "phase-horizon-004",
+        "category": "counting",
+        "text": "six toy sailboats circling one yellow rubber duck in a round garden pond"
+      },
+      {
+        "prompt_id": "phase-horizon-005",
+        "category": "counting",
+        "text": "exactly nine ceramic tiles forming a three by three square with the center tile painted gold"
+      },
+      {
+        "prompt_id": "phase-horizon-006",
+        "category": "counting",
+        "text": "four violin cases standing upright behind two open music stands in an empty rehearsal room"
+      },
+      {
+        "prompt_id": "phase-horizon-007",
+        "category": "counting",
+        "text": "seven small kites rising above three children on a windy gray beach"
+      },
+      {
+        "prompt_id": "phase-horizon-008",
+        "category": "counting",
+        "text": "two silver spoons beside five strawberries and one sliced kiwi on a black plate"
+      },
+      {
+        "prompt_id": "phase-horizon-009",
+        "category": "spatial-relation",
+        "text": "a copper kettle below a narrow shelf with a blue bowl above it and a white cup to its right"
+      },
+      {
+        "prompt_id": "phase-horizon-010",
+        "category": "spatial-relation",
+        "text": "a red tram passing behind a stone fountain while a cyclist waits in front of the fountain"
+      },
+      {
+        "prompt_id": "phase-horizon-011",
+        "category": "spatial-relation",
+        "text": "a yellow suitcase between a tall cactus and a short floor lamp with a hat resting on the suitcase"
+      },
+      {
+        "prompt_id": "phase-horizon-012",
+        "category": "spatial-relation",
+        "text": "a white rabbit under a wooden ladder and a black raven perched on the ladder's top rung"
+      },
+      {
+        "prompt_id": "phase-horizon-013",
+        "category": "spatial-relation",
+        "text": "a small red planet to the upper left of a large blue planet with a satellite directly between them"
+      },
+      {
+        "prompt_id": "phase-horizon-014",
+        "category": "spatial-relation",
+        "text": "a violin lying diagonally across an open book while a metronome stands behind both objects"
+      },
+      {
+        "prompt_id": "phase-horizon-015",
+        "category": "spatial-relation",
+        "text": "a green canoe nearest the shore with a red canoe farther away and a white buoy beyond both"
+      },
+      {
+        "prompt_id": "phase-horizon-016",
+        "category": "spatial-relation",
+        "text": "a square mirror centered above a sink with one amber bottle on the left and two blue bottles on the right"
+      },
+      {
+        "prompt_id": "phase-horizon-017",
+        "category": "attribute-binding",
+        "text": "a woman in a violet helmet holding a green map beside a man in a green helmet holding a violet map"
+      },
+      {
+        "prompt_id": "phase-horizon-018",
+        "category": "attribute-binding",
+        "text": "a striped orange mug on a plain blue saucer and a plain orange mug on a striped blue saucer"
+      },
+      {
+        "prompt_id": "phase-horizon-019",
+        "category": "attribute-binding",
+        "text": "a bronze robot with a triangular head next to a silver robot with a circular head"
+      },
+      {
+        "prompt_id": "phase-horizon-020",
+        "category": "attribute-binding",
+        "text": "a chef wearing red gloves carrying a blue tray while a waiter wearing blue gloves carries a red tray"
+      },
+      {
+        "prompt_id": "phase-horizon-021",
+        "category": "attribute-binding",
+        "text": "a glossy black horse with a white saddle beside a matte white horse with a black saddle"
+      },
+      {
+        "prompt_id": "phase-horizon-022",
+        "category": "attribute-binding",
+        "text": "a tall glass filled with purple juice and a short purple cup filled with clear water"
+      },
+      {
+        "prompt_id": "phase-horizon-023",
+        "category": "attribute-binding",
+        "text": "a round green clock hanging above a square red clock on a pale brick wall"
+      },
+      {
+        "prompt_id": "phase-horizon-024",
+        "category": "attribute-binding",
+        "text": "a child with a yellow backpack walking a brown dog and a child with a brown backpack walking a yellow dog"
+      },
+      {
+        "prompt_id": "phase-horizon-025",
+        "category": "interaction",
+        "text": "a jeweler using a tiny hammer to set a blue stone into a silver ring held by another person"
+      },
+      {
+        "prompt_id": "phase-horizon-026",
+        "category": "interaction",
+        "text": "a firefighter passing a coiled hose to a colleague standing halfway up a metal staircase"
+      },
+      {
+        "prompt_id": "phase-horizon-027",
+        "category": "interaction",
+        "text": "a baker pouring chocolate glaze over a cake while an assistant rotates the wooden cake stand"
+      },
+      {
+        "prompt_id": "phase-horizon-028",
+        "category": "interaction",
+        "text": "a veterinarian wrapping the front leg of a calm gray donkey as a farmer holds its rope"
+      },
+      {
+        "prompt_id": "phase-horizon-029",
+        "category": "interaction",
+        "text": "a glass artist heating the neck of a vase while a partner turns the long metal pipe"
+      },
+      {
+        "prompt_id": "phase-horizon-030",
+        "category": "interaction",
+        "text": "a cyclist handing a water bottle to a runner moving alongside the bicycle"
+      },
+      {
+        "prompt_id": "phase-horizon-031",
+        "category": "interaction",
+        "text": "a librarian lifting a rolled map toward a student who is opening a long wooden drawer"
+      },
+      {
+        "prompt_id": "phase-horizon-032",
+        "category": "interaction",
+        "text": "two engineers fastening opposite ends of a curved solar panel onto a small rover"
+      },
+      {
+        "prompt_id": "phase-horizon-033",
+        "category": "text-rendering",
+        "text": "a cream bakery sign reading FRESH BREAD in large dark green capital letters above a striped awning"
+      },
+      {
+        "prompt_id": "phase-horizon-034",
+        "category": "text-rendering",
+        "text": "a red enamel camping mug printed with the words NORTH TRAIL in clean white letters"
+      },
+      {
+        "prompt_id": "phase-horizon-035",
+        "category": "text-rendering",
+        "text": "a subway platform display showing RIVER LINE and the number 204 in bright amber type"
+      },
+      {
+        "prompt_id": "phase-horizon-036",
+        "category": "text-rendering",
+        "text": "a blue library return box labeled BOOK DROP in centered gold block lettering"
+      },
+      {
+        "prompt_id": "phase-horizon-037",
+        "category": "text-rendering",
+        "text": "a weathered wooden crate stamped HANDLE WITH CARE in two straight black lines"
+      },
+      {
+        "prompt_id": "phase-horizon-038",
+        "category": "text-rendering",
+        "text": "a white ceramic jar with the word SUGAR painted once in narrow cobalt letters"
+      },
+      {
+        "prompt_id": "phase-horizon-039",
+        "category": "text-rendering",
+        "text": "a yellow roadside board reading SLOW BRIDGE AHEAD in bold black uppercase text"
+      },
+      {
+        "prompt_id": "phase-horizon-040",
+        "category": "text-rendering",
+        "text": "a concert ticket displaying HALL C, ROW 8, SEAT 12 in crisp red typography"
+      },
+      {
+        "prompt_id": "phase-horizon-041",
+        "category": "compositional-layout",
+        "text": "a top-down drafting desk with a compass at the center, two rulers forming an L, and rolled plans in the upper right"
+      },
+      {
+        "prompt_id": "phase-horizon-042",
+        "category": "compositional-layout",
+        "text": "a symmetrical greenhouse aisle with matching rows of ferns and a single orange wheelbarrow at the far end"
+      },
+      {
+        "prompt_id": "phase-horizon-043",
+        "category": "compositional-layout",
+        "text": "an isometric workshop containing a red drill press, a blue workbench, and three shelves along the back wall"
+      },
+      {
+        "prompt_id": "phase-horizon-044",
+        "category": "compositional-layout",
+        "text": "a wide desert campsite with two tents on the left, a cooking fire in the center, and a parked jeep on the right"
+      },
+      {
+        "prompt_id": "phase-horizon-045",
+        "category": "compositional-layout",
+        "text": "a cutaway view of a small lighthouse showing a spiral stair below, a bedroom in the middle, and the lamp room above"
+      },
+      {
+        "prompt_id": "phase-horizon-046",
+        "category": "compositional-layout",
+        "text": "a triangular arrangement of three market stalls surrounding a circular stone well viewed from above"
+      },
+      {
+        "prompt_id": "phase-horizon-047",
+        "category": "compositional-layout",
+        "text": "a panoramic harbor scene with fishing nets in the foreground, four boats in the middle, and snowy hills in the distance"
+      },
+      {
+        "prompt_id": "phase-horizon-048",
+        "category": "compositional-layout",
+        "text": "a centered museum display with a tall fossil skeleton flanked by two low glass cases under an arched ceiling"
+      }
+    ]
+  }
+}

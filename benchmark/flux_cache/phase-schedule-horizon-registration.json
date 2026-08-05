@@ -1,0 +1,446 @@
+{
+  "schema": "difflet-flux-cache-phase-schedule-horizon-registration",
+  "schema_revision": 1,
+  "study_id": "flux-cache-phase-schedule-horizon-development-2026-08-05",
+  "created_at": "2026-08-05T03:12:56Z",
+  "status": "registered_not_collected",
+  "evidence_role": {
+    "stage": "phase_schedule_horizon_and_repair_depth_development",
+    "serving_claim_permitted": false,
+    "profile_selection_permitted": false,
+    "endpoint_labels_opened_before_registration": false
+  },
+  "methodology": {
+    "path": "benchmark/flux_cache/offline-gate-methodology-v1.json",
+    "file_sha256": "4622c84e39cd44458e90a6f832332dcecfa489fbdde71c02a32aa233d24732c0",
+    "methodology_id": "flux-cache-offline-gate-v1"
+  },
+  "quality_contract": {
+    "paired_loss": "baseline_score_minus_candidate_score",
+    "comparison": "strictly_greater_than_metric_margin",
+    "combination": "fail_if_either_metric_fails",
+    "margins": {
+      "image_reward": 0.7824214100837708,
+      "vqa_score": 0.25
+    },
+    "weighted_metric_average_forbidden": true
+  },
+  "controlled_generation": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "scheduler_class": "FlowMatchEulerDiscreteScheduler",
+    "scheduler_config_sha256": "d32e7bf63b561cb6aa9101116b0bd3e4946d17af13a0dd1b674f24ca7dae509b",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "metric_identity_source": {
+    "path": "benchmark/flux_cache/brake-only-methodology-v1-confirmation.json",
+    "file_sha256": "03cbce3b923093061706b5f46e79c01c498aeff5f23a8e0022ce886cc67bf704",
+    "json_pointer": "/semantic_metrics"
+  },
+  "semantic_metrics": {
+    "image_reward": {
+      "implementation": "ImageReward.score",
+      "package": "image-reward",
+      "package_version": "1.5",
+      "model": "ImageReward-v1.0",
+      "dtype": "float32",
+      "preprocessing": "official-ImageReward-224-center-crop",
+      "files_by_suffix": {
+        "/ImageReward.pt": "d71dc8d4912bc633c06ab8ef1ef6a81e8199d4369f14b47b29baf1d19de561f6",
+        "/med_config.json": "d8b5029cc3c0124313d17009d043f0701bbe497f3721fa4ceb818720fe665326"
+      }
+    },
+    "vqa_score": {
+      "implementation": "t2v_metrics.CLIPT5Model.forward",
+      "package": "t2v-metrics",
+      "package_version": "1.2",
+      "model": "clip-flant5-xl",
+      "dtype": "bfloat16",
+      "question_template": "Does this figure show \"{}\"? Please answer yes or no.",
+      "answer_template": "Yes",
+      "repository_revisions": {
+        "zhiqiulin/clip-flant5-xl": "3b4a6b1b618f4e286f5353b5b5147a3ae7d9ec55",
+        "google/flan-t5-xl": "7d6315df2c2fb742f0f5b556879d730926ca9001",
+        "openai/clip-vit-large-patch14-336": "ce19dc912ca5cd21c8a653c79e251e808ccabcd1"
+      },
+      "files_by_suffix": {
+        "/models--zhiqiulin--clip-flant5-xl/snapshots/3b4a6b1b618f4e286f5353b5b5147a3ae7d9ec55/pytorch_model.bin": "9bed8d86ae279f05cc9b8e09c0478afa712fe6df2f14a8486d5a7465de9806cd",
+        "/models--google--flan-t5-xl/snapshots/7d6315df2c2fb742f0f5b556879d730926ca9001/spiece.model": "d60acb128cf7b7f2536e8f38a5b18a05535c9e14c7a355904270e15b0945ea86",
+        "/models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1/pytorch_model.bin": "c6032c2e0caae3dc2d4fba35535fa6307dbb49df59c7e182b1bc4b3329b81801"
+      }
+    }
+  },
+  "prompt_suite": {
+    "path": "benchmark/flux_cache/phase-schedule-development-prompt-suite.json",
+    "file_sha256": "b3d6c0825f4b580d3fa8373223ec74fa22335c847dc4541db439bdaa55cb4451",
+    "split": "phase_schedule_horizon_development",
+    "split_sha256": "bb156679f78f625a437a10532cd7824cbaabbf0d9cef50903b0897254827737c",
+    "prompt_count": 48,
+    "seeds": [
+      2
+    ],
+    "sample_count": 48
+  },
+  "novelty_audit": {
+    "method": "exact prompt-text comparison against every previously registered prompt JSON",
+    "prior_unique_prompt_count": 298,
+    "exact_overlap_count": 0,
+    "exact_overlap_prompts": [],
+    "prior_prompt_sources": [
+      {
+        "path": "benchmark/flux_cache/extended-profile-holdout-prompts.json",
+        "file_sha256": "ed1135e354ca0b64efe957560073ff810e9816eac3b4a0a33d2107269f26eeb1"
+      },
+      {
+        "path": "benchmark/flux_cache/online-signal-failure-enriched-prompts.json",
+        "file_sha256": "f2917b14b905aa085452031b32a11ba95516d9861c4e18f9128ebb8e437fd45a"
+      },
+      {
+        "path": "benchmark/flux_cache/online-signal-semantic-stress-prompts.json",
+        "file_sha256": "d0639ba758fd1e3c007035a0c6bc4563be4af16deb1dfe724c072aa1d835f307"
+      },
+      {
+        "path": "benchmark/flux_cache/prompt-suite-v1.json",
+        "file_sha256": "615d2e2c082095b6cf9c034084e0b8caca0ce608d559bdf4186e6c1bff0d6979"
+      },
+      {
+        "path": "benchmark/flux_cache/stage-gate-regression-prompts.json",
+        "file_sha256": "9cfe27caa9aaa6c0a53292676ef358978b65d2a6424baaedf751570c08cb0195"
+      },
+      {
+        "path": "benchmark/flux_cache/stage-profile-holdout-prompts.json",
+        "file_sha256": "91f57dfdc302d9b1435d34eb8b79d8c47f1989a57f0e9ffb6478e4dddc563ecd"
+      },
+      {
+        "path": "benchmark/flux_cache/warmup-vqa-router-holdout-prompts.json",
+        "file_sha256": "f57796a591107de7a7b302ba8c9b4dcdd84d5bafd70f1e48a500ef6f12ed911f"
+      },
+      {
+        "path": "benchmark/flux_cache/brake-only-confirmation-prompt-suite-v1.json",
+        "file_sha256": "4a12ec535a52f44124bd0a8b640be76394792fcdd944441e11483185d669047c"
+      }
+    ]
+  },
+  "source_profiles": [
+    {
+      "path": "benchmark/flux_cache/adaptive-vqa-stress-i12-k16-candidate.json",
+      "file_sha256": "98c2cfead70dd60a8c4e42b4db6f68fdd837a7832a82b1ec053b70b5ff741b29",
+      "content_sha256": "b6b53c990e88c0114079d4bd2e298c4f1f41edf0c83a6fedc3a72322eee9e093",
+      "candidate_id": "adaptive-vqa-stress-w6-i12-m8-k16-o1-index",
+      "registered_request_count": 48
+    },
+    {
+      "path": "benchmark/flux_cache/adaptive-vqa-stress-i16-k20-candidate.json",
+      "file_sha256": "5150abe4995e20557094633dc0613d9d40b91636866bcb284e5106b412b11cd6",
+      "content_sha256": "56617effed8ee32d92c97bc870fcf73c5f87e270357de24c6dce1ff8c75d49ac",
+      "candidate_id": "adaptive-vqa-stress-w6-i16-m8-k20-o1-index",
+      "registered_request_count": 48
+    }
+  ],
+  "implementation": {
+    "base_collector": {
+      "path": "scripts/collect_flux_cache_ab.py",
+      "file_sha256": "70be04d6413fae8e01c70ca9bbb1ef289ae8ec246de3dd2a91b517d2b3f6ac30"
+    },
+    "source_collector": {
+      "path": "scripts/collect_flux_cache_phase_schedule_source.py",
+      "file_sha256": "4e9180d5b9c6c9fcdd279dbb1627db3f51c0ebeedd98bac91db9259076de7d96"
+    },
+    "semantic_scorer": {
+      "path": "scripts/evaluate_flux_cache_semantics.py",
+      "file_sha256": "1aeb540b9fa365b1c00d2ae7f47b38c692319b9cbbc33f1fc5853a55c53b0de0"
+    },
+    "registration_validator": {
+      "path": "scripts/flux_cache_phase_schedule_registration.py",
+      "file_sha256": "e6756ef157ce5f387f0a9b25695ca11aa34caef885468f8fa9a32004468d3291"
+    },
+    "intervention_tool": {
+      "path": "scripts/flux_cache_phase_schedule_horizon.py",
+      "file_sha256": "9c3052e29d971a0269cc0592dfe45bc8d41ae22792e79bb37e9b51948f892cd8"
+    },
+    "flux_application": {
+      "path": "difflet/models/flux/application.py",
+      "file_sha256": "45c7b1232378505595e3fac5e4b164e131f31f80c65d9fc2aad95860247e3040"
+    },
+    "flux_pipeline": {
+      "path": "difflet/models/flux/pipeline.py",
+      "file_sha256": "b634b73e0d8fafb4e79bd5bcff93fe8eefa751abe054055fca27293fb7ec24b5"
+    },
+    "cache_public_api": {
+      "path": "difflet/pipeline/cache/__init__.py",
+      "file_sha256": "50634d54445bcd122fa1eace321de8a3832a4ce4e27d9b72d576b01872ef4a3d"
+    },
+    "cache_policy": {
+      "path": "difflet/pipeline/cache/policies.py",
+      "file_sha256": "19719fc5e2ccba9df4ab30e3fbd9fbe863153ebc15b5e20874d0d3aa84a91336"
+    },
+    "cache_predictor": {
+      "path": "difflet/pipeline/cache/predictors.py",
+      "file_sha256": "3b3bafe6b47e79acab5dd8761ac7731c4a70254eee9b50ab803bcc71374a8dab"
+    },
+    "cache_recovery": {
+      "path": "difflet/pipeline/cache/recovery.py",
+      "file_sha256": "16ca705b49b34f20d3727acf27306c901cbad1eb086bf251455ea9592d0fd161"
+    },
+    "cache_runner": {
+      "path": "difflet/pipeline/cache/runner.py",
+      "file_sha256": "bd4c893561d9ba61096aef8dc4f5b779379dc4617e6c484ba74c21bae96d31f3"
+    },
+    "cache_session": {
+      "path": "difflet/pipeline/cache/session.py",
+      "file_sha256": "0c55ef274f3d52eebc8d658a59e4b546319d0a27c5b538a4453cceca567a8c30"
+    },
+    "teacache_adapter": {
+      "path": "difflet/pipeline/cache/teacache_adapter.py",
+      "file_sha256": "832420126e500badd6e790450d0d428ee86f57a770c91220322cddab409d4bca"
+    },
+    "cache_measurements": {
+      "path": "difflet/pipeline/cache/measurements.py",
+      "file_sha256": "2dfb51d9ebd6a1b2a17d5d9b1e9c4477c5aa5406897fca618dc327d5597d0abf"
+    }
+  },
+  "source_collection": {
+    "output_directory": "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-source-20260805",
+    "pairing": "same prompt, seed, initial latent, scheduler, and generation settings for the baseline and both source profiles",
+    "prompt_count": 48,
+    "sample_count": 48,
+    "candidate_request_count": 96,
+    "candidate_order": [
+      "adaptive-vqa-stress-w6-i12-m8-k16-o1-index",
+      "adaptive-vqa-stress-w6-i16-m8-k20-o1-index"
+    ],
+    "expected_unique_semantic_images": 144,
+    "pipeline_warmup_enabled": true,
+    "early_stopping_permitted": false,
+    "retuning_after_collection_starts_permitted": false,
+    "collector_argv": [
+      "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+      "scripts/collect_flux_cache_phase_schedule_source.py",
+      "--out-dir",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-source-20260805",
+      "--model-id",
+      "black-forest-labs/FLUX.1-dev",
+      "--model-revision",
+      "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+      "--prompt-suite",
+      "benchmark/flux_cache/phase-schedule-development-prompt-suite.json",
+      "--prompt-split",
+      "phase_schedule_horizon_development",
+      "--seed",
+      "2",
+      "--num-steps",
+      "50",
+      "--height",
+      "1024",
+      "--width",
+      "1024",
+      "--guidance-scale",
+      "3.5",
+      "--adaptive-only",
+      "--adaptive-candidate",
+      "benchmark/flux_cache/adaptive-vqa-stress-i12-k16-candidate.json",
+      "--adaptive-candidate",
+      "benchmark/flux_cache/adaptive-vqa-stress-i16-k20-candidate.json",
+      "--tp-degree",
+      "4",
+      "--dtype",
+      "bfloat16",
+      "--allow-hardware",
+      "--foreground-ack",
+      "I am running FLUX cache A/B in the foreground"
+    ],
+    "semantic_scorer_argv": [
+      "/home/ubuntu/.venvs/difflet-cache-eval/bin/python",
+      "scripts/evaluate_flux_cache_semantics.py",
+      "--quality-input",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-source-20260805/quality-input.json",
+      "--out",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-source-20260805/semantic-scores.json",
+      "--metrics",
+      "image_reward",
+      "vqa_score",
+      "--expected-images",
+      "144"
+    ],
+    "selection_argv": [
+      "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+      "scripts/flux_cache_phase_schedule_horizon.py",
+      "select",
+      "--registration",
+      "benchmark/flux_cache/phase-schedule-horizon-registration.json",
+      "--source-semantic",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-source-20260805/semantic-scores.json",
+      "--out",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-source-20260805/phase-schedule-selection.json"
+    ]
+  },
+  "registered_workflow": {
+    "validate_registration_argv": [
+      "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+      "scripts/flux_cache_phase_schedule_registration.py",
+      "benchmark/flux_cache/phase-schedule-horizon-registration.json"
+    ],
+    "collect_terminal_argv": [
+      "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+      "scripts/flux_cache_phase_schedule_horizon.py",
+      "collect-terminal",
+      "--registration",
+      "benchmark/flux_cache/phase-schedule-horizon-registration.json",
+      "--selection",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-source-20260805/phase-schedule-selection.json",
+      "--out-dir",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-terminal-20260805",
+      "--allow-hardware",
+      "--foreground-ack",
+      "I am running the offline FLUX phase schedule interventions"
+    ],
+    "score_terminal_argv": [
+      "/home/ubuntu/.venvs/difflet-cache-eval/bin/python",
+      "scripts/evaluate_flux_cache_semantics.py",
+      "--quality-input",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-terminal-20260805/terminal-quality-input.json",
+      "--out",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-terminal-20260805/terminal-semantic-scores.json",
+      "--metrics",
+      "image_reward",
+      "vqa_score",
+      "--expected-images",
+      "96"
+    ],
+    "evaluate_terminal_argv": [
+      "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+      "scripts/flux_cache_phase_schedule_horizon.py",
+      "evaluate-terminal",
+      "--registration",
+      "benchmark/flux_cache/phase-schedule-horizon-registration.json",
+      "--selection",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-source-20260805/phase-schedule-selection.json",
+      "--semantic-report",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-terminal-20260805/terminal-semantic-scores.json",
+      "--out",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-terminal-20260805/terminal-analysis.json"
+    ],
+    "collect_repair_argv": [
+      "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+      "scripts/flux_cache_phase_schedule_horizon.py",
+      "collect-repair",
+      "--registration",
+      "benchmark/flux_cache/phase-schedule-horizon-registration.json",
+      "--selection",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-source-20260805/phase-schedule-selection.json",
+      "--terminal-analysis",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-terminal-20260805/terminal-analysis.json",
+      "--out-dir",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-repair-20260805",
+      "--allow-hardware",
+      "--foreground-ack",
+      "I am running the offline FLUX phase schedule interventions"
+    ],
+    "score_repair_argv": [
+      "/home/ubuntu/.venvs/difflet-cache-eval/bin/python",
+      "scripts/evaluate_flux_cache_semantics.py",
+      "--quality-input",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-repair-20260805/repair-depth-quality-input.json",
+      "--out",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-repair-20260805/repair-semantic-scores.json",
+      "--metrics",
+      "image_reward",
+      "vqa_score",
+      "--expected-images",
+      "84"
+    ],
+    "evaluate_repair_argv": [
+      "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+      "scripts/flux_cache_phase_schedule_horizon.py",
+      "evaluate-repair",
+      "--registration",
+      "benchmark/flux_cache/phase-schedule-horizon-registration.json",
+      "--selection",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-source-20260805/phase-schedule-selection.json",
+      "--terminal-analysis",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-terminal-20260805/terminal-analysis.json",
+      "--semantic-report",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-repair-20260805/repair-semantic-scores.json",
+      "--out",
+      "/home/ubuntu/difflet-artifacts/flux-cache-phase-schedule-repair-20260805/phase-schedule-horizon.json"
+    ]
+  },
+  "source_selection": {
+    "source_failure_metric": "vqa_score",
+    "source_failure_comparison": "baseline_minus_cache_strictly_greater",
+    "minimum_source_failures": 6,
+    "maximum_source_failures": 6,
+    "failure_order": [
+      "sample_id",
+      "registered_profile_order"
+    ],
+    "control_pass_rule": "both_metric_harms_are_within_contract",
+    "control_match_keys": [
+      "registered_profile",
+      "semantic_category"
+    ],
+    "control_order": [
+      "sample_id"
+    ],
+    "selected_failure_sample_ids_excluded_from_controls": true,
+    "insufficient_exact_controls_action": "stop_insufficient_matched_controls"
+  },
+  "terminal_horizon": {
+    "steps": [
+      7,
+      13,
+      17,
+      21,
+      25,
+      29,
+      37
+    ],
+    "prefix_identity_gate": "bit_exact_latent_at_step_before_intervention",
+    "action": "disable_cache_before_registered_step_and_compute_all_remaining_steps",
+    "rescue_rule": "baseline_vqa_minus_intervention_vqa_is_not_greater_than_margin",
+    "introduced_failure_rule": "either_metric_harm_is_strictly_greater_than_margin",
+    "t_full_observed": "maximum_tested_step_where_R_equals_1_and_I_equals_0",
+    "t_dead_observed": "earliest_tested_step_where_R_is_at_most_0.2_and_all_later_R_are_at_most_0.2"
+  },
+  "repair_depth": {
+    "start_steps": [
+      13,
+      21
+    ],
+    "consecutive_real_steps": [
+      4,
+      8,
+      16
+    ],
+    "prefix_identity_gate": "bit_exact_latent_at_step_before_intervention",
+    "action": "force_k_consecutive_real_steps_then_resume_the_registered_source_policy",
+    "rescue_rule": "baseline_vqa_minus_intervention_vqa_is_not_greater_than_margin",
+    "introduced_failure_rule": "either_metric_harm_is_strictly_greater_than_margin",
+    "run_only_when_terminal_horizon_status_is_usable": true
+  },
+  "stopping_rules": {
+    "collect_all_source_requests_before_scoring": true,
+    "source_failure_count_below_6": "insufficient_source_failures",
+    "t_full_observed_null": "no_observed_full_rescue_window",
+    "t_dead_observed_null": "no_observed_tail_relaxation_window",
+    "t_dead_not_after_t_full": "invalid_horizon_order",
+    "otherwise": "run_registered_repair_depth_grid",
+    "prompt_extension_permitted": false,
+    "profile_substitution_permitted": false,
+    "grid_retuning_permitted": false
+  },
+  "registered_outputs": {
+    "selection_plan": "phase-schedule-selection.json",
+    "terminal_quality_input": "terminal-quality-input.json",
+    "terminal_analysis": "terminal-analysis.json",
+    "repair_quality_input": "repair-depth-quality-input.json",
+    "horizon_result": "phase-schedule-horizon.json"
+  },
+  "parameters_frozen_before_collection": true,
+  "sha256": "e49062b34084f63e4901dd0c3de2f6f885accf07c81269ebcef99faa1cd1bfc6"
+}

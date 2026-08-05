@@ -355,7 +355,9 @@ def _validate_static_pair(
     from difflet.pipeline.cache.policies import (
         CadencePolicy,
         ExplicitMaskPolicy,
+        PhasedStaticPolicy,
         PeriodicAnchorPolicy,
+        StaticPlusBrakePolicy,
         TeaCachePolicy,
     )
 
@@ -374,6 +376,13 @@ def _validate_static_pair(
         if run > maximum:
             raise ValueError(
                 f"explicit mask requests {run} consecutive skips, "
+                f"but the predictor supports at most {maximum}"
+            )
+    if isinstance(policy, (PhasedStaticPolicy, StaticPlusBrakePolicy)):
+        run = _longest_false_run(policy.anchor_mask)
+        if run > maximum:
+            raise ValueError(
+                f"static anchor mask requests {run} consecutive skips, "
                 f"but the predictor supports at most {maximum}"
             )
     if isinstance(policy, TeaCachePolicy) and int(policy.calibration.skip_run_length) > maximum:

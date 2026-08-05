@@ -1,0 +1,107 @@
+{
+  "schema": "difflet-flux-cache-terminal-brake-step21-futility-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-terminal-brake-step21-futility-20260804",
+  "status": "opened_signal_futility_stop_before_control_hardware",
+  "serving_claim": false,
+  "opened_data": true,
+  "artifacts": {
+    "source_quality": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/quality-input-v2.json",
+      "file_sha256": "f751c527a3474963c24af3b2a4f8b6e7165f0afa5215716e400fb40b9d1ff470"
+    },
+    "source_semantic": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/semantic-scores.json",
+      "file_sha256": "01859c03400266e979d0baf31a635ef4fdab9f8bbbd864fb1ccfba5d2292e55e"
+    },
+    "timing_protocol": {
+      "path": "benchmark/flux_cache/terminal-brake-timing-failure-sweep.json",
+      "file_sha256": "aded21501460c0512a3ded7d5f27ee0b58bc2beefc994834c8b6ce047b0be2f7"
+    },
+    "timing_run": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-timing-failures-20260804/terminal-brake-sweep-run.json",
+      "file_sha256": "bcc7aca0bcf1c33881f39b2a2556f1d03111911663ebb18946f7f891d1b19019"
+    },
+    "timing_semantic": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-timing-failures-20260804/semantic-scores.json",
+      "file_sha256": "c94f30a0f0b3de01503045c57a06490165ab3f1f9a903f313fd2f4a68ebe99ce"
+    },
+    "feature_extractor": {
+      "path": "scripts/evaluate_flux_cache_online_signal.py",
+      "file_sha256": "c6635aadbeaca5b37003f9ec4b8c61faeba05b48cc44c2bccad85d9562239c6d"
+    }
+  },
+  "causal_reduction": {
+    "terminal_step": 21,
+    "source_failure_count": 12,
+    "source_failure_rescued_count": 12,
+    "actionable_definition": "continue-cache VQA harm is strictly greater than 0.25 and terminal@21 VQA harm is at most 0.25",
+    "consequence": "Every known source failure is actionable at step 21. Passing continue-cache controls are non-actionable by definition, so their terminal images cannot improve signal ranking or reduce false-brake count."
+  },
+  "bounded_opened_screen": {
+    "latest_signal_step": 20,
+    "extra_transformer_calls": 0,
+    "families": [
+      "4x4 shallow-modulation level and positive-acceleration summaries",
+      "4x4 predicted-output relative-L1, velocity-turn, and acceleration-ratio summaries"
+    ],
+    "windows": [
+      [
+        2,
+        5
+      ],
+      [
+        6,
+        12
+      ],
+      [
+        13,
+        20
+      ],
+      [
+        6,
+        20
+      ]
+    ],
+    "best_fixed_scalar": {
+      "feature": "max_acceleration_cv",
+      "window": [
+        6,
+        12
+      ],
+      "risk_direction": "lower_is_riskier",
+      "roc_auc": 0.7314814814814815,
+      "full_recall_threshold": 0.24214515883726442,
+      "full_recall_true_brake_count": 12,
+      "full_recall_false_brake_count": 25,
+      "full_recall_passing_count": 36,
+      "full_recall_false_brake_rate": 0.6944444444444444,
+      "full_recall_trigger_count": 37
+    },
+    "large_spatial_vote_diagnostic": {
+      "best_feature": "mean 4x4 positive-acceleration participation ratio",
+      "window": [
+        6,
+        12
+      ],
+      "risk_direction": "higher_is_riskier",
+      "roc_auc": 0.7222222222222222,
+      "full_recall_false_brake_count": 25,
+      "finding": "Replacing the worst region with broad 4x4 consensus did not improve separation."
+    }
+  },
+  "hardware_futility_gate": {
+    "maximum_full_recall_false_brake_count": 9,
+    "maximum_full_recall_false_brake_rate": 0.25,
+    "observed_best_false_brake_count": 25,
+    "gate_passed": false,
+    "control_terminal_branches_run": 0,
+    "reason": "The online threshold is already rejected before control intervention outcomes; running 36 full terminal branches cannot change the actionable labels or the signal values."
+  },
+  "decision": {
+    "terminal_step21_control_completion": "stopped_for_futility",
+    "whole_output_scalar_search": "rejected",
+    "next": "Measure 4x4 Taylor prediction error at an already-computed real anchor. This adds a small reduction but no Transformer calls and tests whether spatial anchor-error structure retains information hidden by the failed global scalar."
+  },
+  "sha256": "d5751d62d224c1d1c3279ef0c592d75c078897c3f2ee010dd9e519d46fa1eb9f"
+}

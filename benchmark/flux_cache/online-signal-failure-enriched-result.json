@@ -1,0 +1,137 @@
+{
+  "schema": "difflet-flux-cache-online-signal-training-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-online-signal-failure-enriched-discovery-2026-08-03",
+  "registration": "benchmark/flux_cache/online-signal-failure-enriched-audit.json",
+  "execution_commit": "ce013e2ae630a046039b66ddcd5c9fcde62afa45",
+  "execution_worktree_clean": true,
+  "sample_matrix": {
+    "prompt_count": 16,
+    "seeds": [0, 1],
+    "candidate_count": 2,
+    "candidate_comparison_count": 64,
+    "unique_image_count": 96
+  },
+  "automatic_failures": {
+    "total": 5,
+    "unique_prompt_seed_count": 3,
+    "by_candidate": {
+      "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index": {
+        "count": 2,
+        "vqa_score_failures": 2,
+        "image_reward_failures": 0
+      },
+      "adaptive-oil-e1p80-w6-i8-k12-o1-index": {
+        "count": 3,
+        "vqa_score_failures": 2,
+        "image_reward_failures": 1
+      }
+    },
+    "failed_prompt_seeds": [
+      {
+        "sample_id": "p001-s1",
+        "prompt": "a baker carrying a tall tower of cream puffs joined by hair-thin caramel strands across a marble kitchen",
+        "failed_candidates": [
+          "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index",
+          "adaptive-oil-e1p80-w6-i8-k12-o1-index"
+        ]
+      },
+      {
+        "sample_id": "p002-s1",
+        "prompt": "a stained-glass artist fitting twelve narrow blue and red panes around a yellow circular center",
+        "failed_candidates": [
+          "adaptive-oil-e1p80-w6-i8-k12-o1-index"
+        ]
+      },
+      {
+        "sample_id": "p014-s0",
+        "prompt": "five sailboats crossing in front of a lighthouse, each with a different striped sail and fine rigging visible",
+        "failed_candidates": [
+          "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index",
+          "adaptive-oil-e1p80-w6-i8-k12-o1-index"
+        ]
+      }
+    ]
+  },
+  "grouped_out_of_fold_models": {
+    "validation": "leave one prompt index out; both seeds and both candidate strengths for a prompt are held out together",
+    "combined_14_features": {
+      "roc_auc": 0.6576271186440679,
+      "average_precision": 0.1876750700280112,
+      "full_recall_false_brake_rate": 0.6779661016949152,
+      "full_recall_false_brake_count": 40,
+      "passing_count": 59,
+      "target_policy": {
+        "roc_auc": 0.5666666666666667,
+        "average_precision": 0.11688311688311688,
+        "full_recall_false_brake_rate": 0.6666666666666666,
+        "full_recall_false_brake_count": 20,
+        "passing_count": 30
+      }
+    },
+    "modulation_only_8_features": {
+      "roc_auc": 0.6203389830508474,
+      "average_precision": 0.1119967011545959,
+      "full_recall_false_brake_rate": 0.559322033898305,
+      "target_policy": {
+        "roc_auc": 0.6333333333333333,
+        "average_precision": 0.11858974358974358,
+        "full_recall_false_brake_rate": 0.36666666666666664
+      }
+    },
+    "cached_output_only_6_features": {
+      "roc_auc": 0.4983050847457626,
+      "average_precision": 0.13546626984126983,
+      "full_recall_false_brake_rate": 1.0,
+      "target_policy": {
+        "roc_auc": 0.4166666666666667,
+        "average_precision": 0.11458333333333333,
+        "full_recall_false_brake_rate": 1.0
+      }
+    }
+  },
+  "runtime_with_shallow_probe": {
+    "baseline_total_s": 463.8615004610074,
+    "target_policy_total_s": 128.7333833359953,
+    "target_policy_measured_speedup": 3.6032728142499337,
+    "enrichment_policy_total_s": 117.38747715399586,
+    "enrichment_policy_measured_speedup": 3.95154160994947,
+    "note": "Candidate timings include the serving-available shallow probe and feature collection."
+  },
+  "stopping_rule_evaluation": {
+    "at_least_five_total_failures": true,
+    "at_least_two_target_policy_failures": true,
+    "grouped_out_of_fold_auc_at_least_0p75": false,
+    "false_brake_rate_at_most_0p10_at_full_recall": false
+  },
+  "decision": {
+    "fit_deployable_threshold": false,
+    "run_confirmation_holdout": false,
+    "deploy_spatial_semantic_vote": false,
+    "continue_searching_this_cheap_feature_family": false,
+    "reason": "The failure-enriched data supplied enough positives to test the hypothesis, but prompt-grouped out-of-fold ranking stayed below the frozen AUC floor and full recall required an unusable false-brake rate. The earlier single-positive AUC values were prompt-specific overfit.",
+    "recommended_serving_policy": "Keep acceleration disabled and maximum interval 8 for the conservative brake-only profile. Further acceleration work should change the predictor or cache granularity, not add another scalar vote over these shallow features."
+  },
+  "artifacts": {
+    "quality_manifest": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-failure-enriched-20260803/quality-input-v2.json",
+      "sha256": "2e654a18b2f922cfdff72fa01affb61a9722b62575c6203604116887a9d81247"
+    },
+    "speed_manifest": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-failure-enriched-20260803/speedup-candidates-v1.json",
+      "sha256": "ec0e88f7d20b7020bce9f38c8e12c2e6ed3a21bf0263de29db6da4c780bf6754"
+    },
+    "semantic_scores": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-failure-enriched-20260803/semantic-scores.json",
+      "sha256": "bff1cc1bd0683eb67d97188060438a8936f837d54fefff6f584e0819d8321d66"
+    },
+    "gate_development": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-failure-enriched-20260803/gate-development.json",
+      "sha256": "99e90671c691bfd4b144ac3d54c5c0800b29686da5f282d10e97152dcd28add9"
+    }
+  },
+  "qualification": {
+    "serving_claim": false,
+    "note": "Failure-enriched model-development evidence. Prompt families were selected after earlier failures were opened, so these results reject the current signal family but cannot qualify a gate."
+  }
+}

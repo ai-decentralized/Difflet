@@ -1,0 +1,112 @@
+{
+  "schema": "difflet-flux-cache-semantic-coverage-probe",
+  "schema_revision": 1,
+  "study_id": "flux-cache-semantic-coverage-step20-probe-20260804",
+  "evidence_role": "opened-causal-horizon-partial-block-online-signal-diagnostic",
+  "serving_claim": false,
+  "source_quality": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/quality-input-v2.json",
+    "file_sha256": "f751c527a3474963c24af3b2a4f8b6e7165f0afa5215716e400fb40b9d1ff470"
+  },
+  "source_speed": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/speedup-candidates-v1.json",
+    "file_sha256": "b7b2bc9f1218b7b7d384d32ae660a5a803d0e802cb84136944ee87dc25dd8a49"
+  },
+  "source_semantic": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/semantic-scores.json",
+    "file_sha256": "01859c03400266e979d0baf31a635ef4fdab9f8bbbd864fb1ccfba5d2292e55e"
+  },
+  "baseline_dataset_sha256": "12cb454157c585f6fa454a368869b74195b4926032ff625fff56829b82cff0a7",
+  "candidate": {
+    "path": "benchmark/flux_cache/adaptive-vqa-stress-i32-k40-candidate.json",
+    "file_sha256": "15a2129f70947510b7f33f1d46d911d86fcacdd20dc7e248ee03c434e300d703",
+    "candidate_id": "adaptive-vqa-stress-w6-i32-m16-k40-o1-index"
+  },
+  "collector": {
+    "path": "scripts/collect_flux_cache_semantic_coverage.py",
+    "file_sha256": "339779903ee9c3460858b6e8df1c1950f53cb0d3f1b4500a967219275374e065"
+  },
+  "probe_implementation": {
+    "path": "difflet/backends/trainium/flux/semantic_coverage_probe.py",
+    "file_sha256": "e41cab27a4f34f9e7b9ecbe8aa723563de883f57da8dbebcd94da58f82c380c1"
+  },
+  "feature_extractor": {
+    "path": "scripts/flux_cache_semantic_coverage.py",
+    "file_sha256": "118682c56f488f6bd76492b3fdecdb4f09f7335a2a17372d1f41fe435efcddff"
+  },
+  "analyzer": {
+    "path": "scripts/analyze_flux_cache_semantic_coverage.py",
+    "file_sha256": "28a3798465716b949042963b065343abe30282f4c4a102abad5462a14ce5755c"
+  },
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "expected_sample_count": 48,
+  "diagnostic": {
+    "availability": "step 20, immediately before the terminal@21 causal rescue action",
+    "extra_full_transformer_calls": 0,
+    "partial_block_probe_calls": 1,
+    "computed_components": [
+      "input and context embeddings",
+      "timestep and AdaLN prefix",
+      "block-0 image query projection",
+      "block-0 image and text key projections",
+      "RoPE",
+      "4x4 image-query pooling",
+      "small text-plus-image-key softmax"
+    ],
+    "omitted_components": [
+      "value projections",
+      "attention output projection",
+      "MLP",
+      "all later Transformer blocks"
+    ],
+    "fixed_output_shape": [
+      1,
+      16,
+      512
+    ],
+    "identity_gate": "Every rerun image, final latent, and complete latent trajectory must be bit-identical to the registered source candidate."
+  },
+  "offline_label": {
+    "metric": "vqa_score",
+    "paired_harm_threshold": 0.25,
+    "comparison": "full_dit_vqa_minus_cache_vqa_is_strictly_greater",
+    "positive_count": 12,
+    "causal_alignment": "all 12 positives are known terminal@21 rescues"
+  },
+  "frozen_primary_signal": {
+    "step_index": 20,
+    "token_selection": "tokenizer_2 non-padding, non-special content tokens",
+    "per_token_value": "maximum block-0 attention probability over the 16 coarse image regions",
+    "feature": "bottom_quartile_mean_max_region_coverage",
+    "request_score": "mean of the weakest quartile of per-token regional maxima",
+    "risk_direction": "lower_is_riskier",
+    "selection_provenance": "feature and direction copied unchanged from the step-7 registered probe; only the causal-horizon observation step changes"
+  },
+  "opened_gate": {
+    "minimum_roc_auc": 0.8,
+    "required_failure_recall": 1.0,
+    "maximum_full_recall_false_brake_rate": 0.25,
+    "maximum_full_recall_false_brake_count": 9,
+    "qualification": "Passing only permits a separately registered new-prompt holdout; it does not qualify serving."
+  },
+  "exploratory_only": [
+    "minimum token regional maximum",
+    "median token regional maximum",
+    "mean token regional maximum",
+    "token-coverage coefficient of variation",
+    "mean region text mass",
+    "minimum region text mass"
+  ],
+  "next_if_positive": "Register and run a new-prompt holdout with the frozen step-20 semantic-coverage score and threshold; do not make a serving claim from opened data.",
+  "next_if_negative": "Reject shallow block-0 prompt-token coverage at both the early anchor and causal horizon; do not retune this signal family on the opened cohort.",
+  "sha256": "dd35f4c5f38fecba78b12feb8f7d75e7c72107beaf3208ae5f247aff593a799a"
+}

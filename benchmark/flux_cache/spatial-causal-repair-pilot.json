@@ -1,0 +1,81 @@
+{
+  "schema": "difflet-flux-cache-spatial-causal-repair-pilot",
+  "schema_revision": 1,
+  "study_id": "flux-cache-spatial-causal-repair-pilot-2026-08-03",
+  "evidence_role": "exploratory-routing-only",
+  "serving_claim": false,
+  "opened_data": {
+    "source_holdout": "adaptive_profile_holdout",
+    "source_result": "benchmark/flux_cache/spatial-sentinel-result.json",
+    "failure_prompt_indices": [
+      11,
+      15
+    ],
+    "pass_control_prompt_indices": [
+      30,
+      22,
+      0,
+      6,
+      18,
+      27
+    ],
+    "labels_frozen_before_this_pilot": true,
+    "excluded_from_future_calibration_and_holdout": true
+  },
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4,
+    "seed": 0
+  },
+  "candidate": {
+    "path": "benchmark/flux_cache/adaptive-oil-e1p40-k12-candidate.json",
+    "file_sha256": "fcca14ae81f7a3db3ebeddc830a8a670bec4d1257abb17d78b4e5fb15827a5b5",
+    "content_sha256": "1cc3458bb338329606300bfab1d52350bc80d7bfeb683180601a86616613c4bd",
+    "candidate_id": "adaptive-oil-e1p40-w6-i8-k12-o1-index"
+  },
+  "quality_contract": {
+    "image_reward_max_harm": 0.7824214100837708,
+    "vqa_score_max_harm": 0.25,
+    "failure_rule": "fail-if-either-metric-exceeds-its-frozen-margin",
+    "primary_metric_for_repair": "vqa_score"
+  },
+  "first_principles_boundary": {
+    "teacher_truth_is_offline_only": true,
+    "online_shadow_transformer_forbidden": true,
+    "online_region_repair_claim": false,
+    "intended_runtime_action": "a future cheap regional signal may only advance or delay the next complete transformer anchor",
+    "note": "The pilot spends extra full-DiT calls only to label causal time steps and regions. No result may justify serving unless a separate cheap proxy passes a newly registered holdout."
+  },
+  "phase_1_temporal_localization": {
+    "shadow_trace": "At each naturally skipped step, compute and save the true transformer output on the unchanged candidate pre-step latent, but advance the original predicted output.",
+    "intervention": "Replay from the identical seed and candidate state; at exactly one skipped step replace the complete prediction with its saved true output, then resume the unmodified cache policy.",
+    "selection": "Rank skipped steps independently for each failed request by VQAScore repair gain and retain at most two positive-gain steps.",
+    "repair_gain": "vqa_score(single_step_full_repair) - vqa_score(unmodified_cache)",
+    "continue_if": "Each failed request has at least one single-step intervention with positive repair gain and reduced VQAScore harm.",
+    "stop_if": "Either failed request has no positive single-step repair gain; report the damage as temporally distributed under this intervention and stop the spatial phase."
+  },
+  "phase_2_spatial_localization": {
+    "layout": "4x4 equal regions over the 64x64 FLUX token grid",
+    "intervention": "At one phase-1-selected step, load the saved true output produced on the identical pre-step latent and replace exactly one region of the predicted output; all later steps use the unmodified cache policy.",
+    "region_count": 16,
+    "repair_gain": "vqa_score(single_region_repair) - vqa_score(unmodified_cache)",
+    "causal_concentration": "maximum_positive_region_repair_gain / full_step_repair_gain_at_the_same_step",
+    "primary_gate": {
+      "minimum_causal_concentration": 0.5,
+      "required_failed_requests_passing": 2
+    },
+    "controls": "Run the same selected-step regional interventions on the six frozen pass controls only after both failures pass the causal-concentration gate."
+  },
+  "routing_decision": {
+    "spatial_gate_passes": "Proceed to a separate prompt-conditioned cheap-signal protocol; this pilot alone cannot add SP/TP voting or enable acceleration.",
+    "temporal_gate_fails": "Stop spatial voting work and investigate global or multi-step prompt-risk controls.",
+    "spatial_gate_fails": "Do not implement rank voting; the VQA damage is not sufficiently concentrated under the registered coarse intervention."
+  },
+  "sha256": "deeeda1015674a897f43d7f1e004d4b783c647a0f08c5f9e5f312555646c6779"
+}

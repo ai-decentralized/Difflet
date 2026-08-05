@@ -1,0 +1,98 @@
+{
+  "schema": "difflet-flux-cache-spatial-anchor-error-registered-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-spatial-anchor-error-probe-20260804",
+  "status": "opened_primary_gate_rejected",
+  "serving_claim": false,
+  "opened_data": true,
+  "artifacts": {
+    "protocol": {
+      "path": "benchmark/flux_cache/spatial-anchor-error-probe.json",
+      "file_sha256": "4e885794b1eeb04a611d25f6f472bfa9f29308bc2eacd33f0300e8e9352551e3",
+      "content_sha256": "2579c3ceff3efefe106794b8cb94ce019184db68c75f74281f33e16edad7fc2a"
+    },
+    "collector": {
+      "path": "scripts/collect_flux_cache_candidate_extension.py",
+      "file_sha256": "6f6cf699dcfadacfd554439516410104c6ef1822969252564959d5a3fbe93689"
+    },
+    "analyzer": {
+      "path": "scripts/analyze_flux_cache_spatial_anchor_error.py",
+      "file_sha256": "ef9ca564602b3f7b646610903500542aa3e11a0438f3fcfc3e3b98bc9c4dff3d"
+    },
+    "hardware_run": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-spatial-anchor-error-probe-20260804/candidate-extension-run.json",
+      "file_sha256": "48325d5dc1f872347135b8de545183ebeb5c1a1527cddb53220641901736cfc3"
+    },
+    "quality": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-spatial-anchor-error-probe-20260804/quality-input-v2.json",
+      "file_sha256": "b0cc7dd4bd94c22d434363bff7f6db6fa4de37bb81c93e10caec6d03c0e3f8ee"
+    },
+    "speed": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-spatial-anchor-error-probe-20260804/speedup-candidates-v1.json",
+      "file_sha256": "09142d6c81df38590e8adf8679ec8f90b613b5d6d79499451a4df4336823f4d1"
+    },
+    "full_analysis": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-spatial-anchor-error-probe-20260804/analysis-result.json",
+      "file_sha256": "0a3766048d8453a20734a9341b62421ac524a1cd0b36ec6ab71f990239f7d967",
+      "content_sha256": "48f277bbaf2bc85df41232a461fcf41fb77593807571b79b143b465883837bcc"
+    }
+  },
+  "execution_gates": {
+    "sample_count": 48,
+    "image_sha_identical_count": 48,
+    "final_latent_tensor_identical_count": 48,
+    "trajectory_tensor_identical_count": 48,
+    "identity_passed": true,
+    "anchor_step_sequence": [
+      2,
+      3,
+      4,
+      5,
+      7,
+      39,
+      49
+    ],
+    "extra_transformer_calls": 0
+  },
+  "primary": {
+    "anchor_step": 7,
+    "feature": "mean of four largest 4x4 region sqrt(error_energy/reference_energy) values",
+    "risk_direction": "higher_is_riskier",
+    "positive_count": 12,
+    "roc_auc": 0.46296296296296297,
+    "full_recall_threshold": 0.17016112094525737,
+    "full_recall_false_brake_count": 35,
+    "full_recall_negative_count": 36,
+    "full_recall_trigger_count": 47,
+    "gate_passed": false
+  },
+  "exploratory_upper_bounds": {
+    "anchor_step_7": {
+      "feature": "raw_error_median",
+      "risk_direction": "lower_is_riskier",
+      "roc_auc": 0.6041666666666667,
+      "full_recall_false_brake_count": 31
+    },
+    "anchor_step_39": {
+      "feature": "relative_mean",
+      "risk_direction": "lower_is_riskier",
+      "roc_auc": 0.6550925925925926,
+      "full_recall_false_brake_count": 33,
+      "serving_note": "This anchor is after the terminal@21 rescue horizon and is not an early brake signal."
+    }
+  },
+  "measurement_cost": {
+    "summed_region_reduction_seconds": 0.09002985811093822,
+    "source_candidate_total_s": 142.10516942299728,
+    "diagnostic_candidate_total_s": 143.9059583430062,
+    "observed_total_increase_fraction": 0.012672226684791621,
+    "serving_cost_claim": false
+  },
+  "decision": {
+    "what_worked": "The 4x4 anchor-error vector is passive, deterministic, bit-identity preserving, and costs no extra Transformer calls.",
+    "what_failed": "Neither the frozen regional vote nor any registered exploratory regional/global aggregation separates VQA failures at a usable full-recall threshold.",
+    "whole_output_scalar_and_anchor_aggregation_search": "closed_negative",
+    "next": "A further online signal experiment must change predictor or cache granularity; do not retune another scalar aggregation on these opened trajectories."
+  },
+  "sha256": "856a977ec88c504887420c0cbe7dbcdaad490aa2bd90c07dc63a91a0711f1ff7"
+}

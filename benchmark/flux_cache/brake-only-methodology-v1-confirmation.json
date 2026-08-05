@@ -1,0 +1,249 @@
+{
+  "schema": "difflet-flux-cache-profile-confirmation-registration",
+  "schema_revision": 1,
+  "study_id": "flux-cache-brake-only-methodology-v1-confirmation-2026-08-04",
+  "created_at": "2026-08-04T15:02:57Z",
+  "status": "registered_not_collected",
+  "evidence_role": {
+    "stage": "prospective_profile_confirmation",
+    "profile_selection_or_refit_permitted": false,
+    "serving_claim_permitted": false
+  },
+  "methodology": {
+    "path": "benchmark/flux_cache/offline-gate-methodology-v1.json",
+    "file_sha256": "4622c84e39cd44458e90a6f832332dcecfa489fbdde71c02a32aa233d24732c0",
+    "methodology_id": "flux-cache-offline-gate-v1"
+  },
+  "selection_provenance": {
+    "path": "benchmark/flux_cache/profile-selection-replay.json",
+    "file_sha256": "f1c8502e41ee4eb0012def64e0aa7be93539b3a036db99dc1c29ea539facfcdb",
+    "status": "legacy_profile_selected_not_methodology_preregistered",
+    "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index"
+  },
+  "quality_contract": {
+    "paired_loss": "baseline_score_minus_candidate_score",
+    "comparison": "strictly_greater_than_metric_margin",
+    "combination": "fail_if_either_metric_fails",
+    "margins": {
+      "image_reward": 0.7824214100837708,
+      "vqa_score": 0.25
+    },
+    "weighted_metric_average_forbidden": true
+  },
+  "controlled_generation": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "scheduler_class": "FlowMatchEulerDiscreteScheduler",
+    "scheduler_config_sha256": "d32e7bf63b561cb6aa9101116b0bd3e4946d17af13a0dd1b674f24ca7dae509b",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "semantic_metrics": {
+    "image_reward": {
+      "implementation": "ImageReward.score",
+      "package": "image-reward",
+      "package_version": "1.5",
+      "model": "ImageReward-v1.0",
+      "dtype": "float32",
+      "preprocessing": "official-ImageReward-224-center-crop",
+      "files_by_suffix": {
+        "/ImageReward.pt": "d71dc8d4912bc633c06ab8ef1ef6a81e8199d4369f14b47b29baf1d19de561f6",
+        "/med_config.json": "d8b5029cc3c0124313d17009d043f0701bbe497f3721fa4ceb818720fe665326"
+      }
+    },
+    "vqa_score": {
+      "implementation": "t2v_metrics.CLIPT5Model.forward",
+      "package": "t2v-metrics",
+      "package_version": "1.2",
+      "model": "clip-flant5-xl",
+      "dtype": "bfloat16",
+      "question_template": "Does this figure show \"{}\"? Please answer yes or no.",
+      "answer_template": "Yes",
+      "repository_revisions": {
+        "zhiqiulin/clip-flant5-xl": "3b4a6b1b618f4e286f5353b5b5147a3ae7d9ec55",
+        "google/flan-t5-xl": "7d6315df2c2fb742f0f5b556879d730926ca9001",
+        "openai/clip-vit-large-patch14-336": "ce19dc912ca5cd21c8a653c79e251e808ccabcd1"
+      },
+      "files_by_suffix": {
+        "/models--zhiqiulin--clip-flant5-xl/snapshots/3b4a6b1b618f4e286f5353b5b5147a3ae7d9ec55/pytorch_model.bin": "9bed8d86ae279f05cc9b8e09c0478afa712fe6df2f14a8486d5a7465de9806cd",
+        "/models--google--flan-t5-xl/snapshots/7d6315df2c2fb742f0f5b556879d730926ca9001/spiece.model": "d60acb128cf7b7f2536e8f38a5b18a05535c9e14c7a355904270e15b0945ea86",
+        "/models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1/pytorch_model.bin": "c6032c2e0caae3dc2d4fba35535fa6307dbb49df59c7e182b1bc4b3329b81801"
+      }
+    }
+  },
+  "prompt_suite": {
+    "path": "benchmark/flux_cache/brake-only-confirmation-prompt-suite-v1.json",
+    "file_sha256": "4a12ec535a52f44124bd0a8b640be76394792fcdd944441e11483185d669047c",
+    "split": "brake_only_methodology_v1_confirmation",
+    "split_sha256": "4b85b217b75ebffeefca1d115b6d24d4bb1ef38d1ebc1a31b35b6cc1dee57543",
+    "prompt_count": 32,
+    "seeds": [
+      0
+    ],
+    "sample_count": 32
+  },
+  "novelty_audit": {
+    "method": "exact prompt-text comparison against every previously registered prompt JSON",
+    "prior_unique_prompt_count": 266,
+    "exact_overlap_count": 0,
+    "prior_prompt_sources": [
+      {
+        "path": "benchmark/flux_cache/extended-profile-holdout-prompts.json",
+        "file_sha256": "ed1135e354ca0b64efe957560073ff810e9816eac3b4a0a33d2107269f26eeb1"
+      },
+      {
+        "path": "benchmark/flux_cache/online-signal-failure-enriched-prompts.json",
+        "file_sha256": "f2917b14b905aa085452031b32a11ba95516d9861c4e18f9128ebb8e437fd45a"
+      },
+      {
+        "path": "benchmark/flux_cache/online-signal-semantic-stress-prompts.json",
+        "file_sha256": "d0639ba758fd1e3c007035a0c6bc4563be4af16deb1dfe724c072aa1d835f307"
+      },
+      {
+        "path": "benchmark/flux_cache/prompt-suite-v1.json",
+        "file_sha256": "615d2e2c082095b6cf9c034084e0b8caca0ce608d559bdf4186e6c1bff0d6979"
+      },
+      {
+        "path": "benchmark/flux_cache/stage-gate-regression-prompts.json",
+        "file_sha256": "9cfe27caa9aaa6c0a53292676ef358978b65d2a6424baaedf751570c08cb0195"
+      },
+      {
+        "path": "benchmark/flux_cache/stage-profile-holdout-prompts.json",
+        "file_sha256": "91f57dfdc302d9b1435d34eb8b79d8c47f1989a57f0e9ffb6478e4dddc563ecd"
+      },
+      {
+        "path": "benchmark/flux_cache/warmup-vqa-router-holdout-prompts.json",
+        "file_sha256": "f57796a591107de7a7b302ba8c9b4dcdd84d5bafd70f1e48a500ef6f12ed911f"
+      }
+    ]
+  },
+  "candidate": {
+    "path": "benchmark/flux_cache/adaptive-brake-candidate.json",
+    "file_sha256": "bca87db396d98cf29c8536f17c4640b3aeb7636156498291bf02b9875eda6d25",
+    "content_sha256": "f1e71776ea593b491f496dd278040efdb35ca2f6a9fc04c057f8bcdbfdfea7cf",
+    "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+    "policy": {
+      "type": "adaptive_anchor",
+      "initial_anchor_interval": 8,
+      "minimum_anchor_interval": 4,
+      "maximum_anchor_interval": 8,
+      "warmup_steps": 6,
+      "cooldown_steps": 1,
+      "anchor_phase": 1,
+      "tighten_error": 1.19,
+      "recovery_error": 1.5,
+      "acceleration_error": 0.75,
+      "recovery_steps": 2,
+      "disable_after_recoveries": 2,
+      "stable_anchors_for_acceleration": 2,
+      "allow_acceleration": false,
+      "require_final_anchor": true
+    },
+    "predictor": {
+      "type": "taylorseer",
+      "order": 1,
+      "coord": "index"
+    }
+  },
+  "implementation": {
+    "collector": {
+      "path": "scripts/collect_flux_cache_ab.py",
+      "file_sha256": "70be04d6413fae8e01c70ca9bbb1ef289ae8ec246de3dd2a91b517d2b3f6ac30"
+    },
+    "semantic_scorer": {
+      "path": "scripts/evaluate_flux_cache_semantics.py",
+      "file_sha256": "1aeb540b9fa365b1c00d2ae7f47b38c692319b9cbbc33f1fc5853a55c53b0de0"
+    },
+    "confirmation_evaluator": {
+      "path": "scripts/flux_cache_profile_confirmation.py",
+      "file_sha256": "71be87ddfe4f48282416a6c9235728d8d6cfed8d0c3081db0f9c6e005368654c"
+    }
+  },
+  "statistical_gate": {
+    "independent_unit": "prompt_index",
+    "independent_group_count": 32,
+    "confidence": 0.95,
+    "interval": "one_sided_clopper_pearson",
+    "maximum_failure_rate_upper_bound": 0.1,
+    "required_failures": 0,
+    "required_upper_bound": 0.0893681989862648,
+    "stopping_rule": "collect_and_score_all_registered_samples"
+  },
+  "collection": {
+    "output_directory": "/home/ubuntu/difflet-artifacts/flux-cache-brake-only-methodology-v1-confirmation-20260804",
+    "pairing": "same prompt, seed, initial latent, scheduler, and generation settings for baseline and candidate",
+    "candidate_set": "baseline plus exactly the registered brake-only candidate",
+    "measurements": "ordinary end-to-end wall time and final images only; no probes, online-signal collection, or shadow Transformer",
+    "early_stopping_permitted": false,
+    "retuning_after_collection_starts_permitted": false,
+    "collector_argv": [
+      "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+      "scripts/collect_flux_cache_ab.py",
+      "--out-dir",
+      "/home/ubuntu/difflet-artifacts/flux-cache-brake-only-methodology-v1-confirmation-20260804",
+      "--model-id",
+      "black-forest-labs/FLUX.1-dev",
+      "--model-revision",
+      "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+      "--prompt-suite",
+      "benchmark/flux_cache/brake-only-confirmation-prompt-suite-v1.json",
+      "--prompt-split",
+      "brake_only_methodology_v1_confirmation",
+      "--seed",
+      "0",
+      "--num-steps",
+      "50",
+      "--height",
+      "1024",
+      "--width",
+      "1024",
+      "--guidance-scale",
+      "3.5",
+      "--adaptive-only",
+      "--adaptive-candidate",
+      "benchmark/flux_cache/adaptive-brake-candidate.json",
+      "--tp-degree",
+      "4",
+      "--dtype",
+      "bfloat16",
+      "--allow-hardware",
+      "--foreground-ack",
+      "I am running FLUX cache A/B in the foreground"
+    ],
+    "semantic_scorer_argv": [
+      "/home/ubuntu/.venvs/difflet-cache-eval/bin/python",
+      "scripts/evaluate_flux_cache_semantics.py",
+      "--quality-input",
+      "/home/ubuntu/difflet-artifacts/flux-cache-brake-only-methodology-v1-confirmation-20260804/quality-input-v2.json",
+      "--out",
+      "/home/ubuntu/difflet-artifacts/flux-cache-brake-only-methodology-v1-confirmation-20260804/semantic-scores.json",
+      "--metrics",
+      "image_reward",
+      "vqa_score",
+      "--expected-images",
+      "64"
+    ],
+    "confirmation_evaluator_argv": [
+      "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+      "scripts/flux_cache_profile_confirmation.py",
+      "evaluate",
+      "--registration",
+      "benchmark/flux_cache/brake-only-methodology-v1-confirmation.json",
+      "--semantic-report",
+      "/home/ubuntu/difflet-artifacts/flux-cache-brake-only-methodology-v1-confirmation-20260804/semantic-scores.json",
+      "--out",
+      "/home/ubuntu/difflet-artifacts/flux-cache-brake-only-methodology-v1-confirmation-20260804/confirmation-evaluation.json"
+    ]
+  },
+  "confirmation_claim": {
+    "pass_permits": "proceed_to_a_new_prospective_interventional_quality_and_speed_holdout",
+    "pass_does_not_permit": "serving qualification",
+    "failure_action": "reject or redesign the profile without retuning or reusing this opened holdout"
+  },
+  "parameters_frozen_before_collection": true,
+  "sha256": "c188992f2e6f1e83289b9f690f644094eca175f78507abd2027ded88da12146d"
+}

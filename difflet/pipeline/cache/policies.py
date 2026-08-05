@@ -267,6 +267,346 @@ class AdaptiveAnchorPolicy:
         }
 
 
+def _strict_anchor_mask(anchor_mask: Sequence[bool], name: str) -> tuple[bool, ...]:
+    if isinstance(anchor_mask, (str, bytes)) or not isinstance(anchor_mask, Sequence):
+        raise ValueError(f"{name} must be a sequence of booleans")
+    if not anchor_mask:
+        raise ValueError(f"{name} must not be empty")
+    if any(type(item) is not bool for item in anchor_mask):
+        raise ValueError(f"{name} entries must be JSON booleans")
+    return tuple(anchor_mask)
+
+
+def _measurement_error(measurement: Any) -> float | None:
+    """Return a valid measured error, allow warmup, and fail closed otherwise."""
+
+    if measurement.estimate_status == "history_not_ready":
+        return None
+    if measurement.estimate_status != "measured" or not measurement.numerically_valid:
+        raise ValueError("anchor estimate measurement is invalid")
+    error = measurement.estimate_relative_error
+    if error is None:
+        raise ValueError("measured anchor estimate has no relative error")
+    result = float(error)
+    if not math.isfinite(result) or result < 0.0:
+        raise ValueError("anchor estimate relative error is invalid")
+    return result
+
+
+class PhasedStaticPolicy:
+    """Execute a frozen phase-aware anchor mask and fail closed on bad estimates."""
+
+    def __init__(
+        self,
+        anchor_mask: Sequence[bool],
+        *,
+        invalid_measurement_fail_closed: bool = True,
+    ) -> None:
+        self.anchor_mask = _strict_anchor_mask(anchor_mask, "anchor_mask")
+        if type(invalid_measurement_fail_closed) is not bool:
+            raise ValueError("invalid_measurement_fail_closed must be a boolean")
+        if not invalid_measurement_fail_closed:
+            raise ValueError("phased static policies must fail closed")
+        self.invalid_measurement_fail_closed = invalid_measurement_fail_closed
+        self.reset()
+
+    def reset(self) -> None:
+        self._disabled = False
+        self._disabled_count = 0
+        self._disable_reason: str | None = None
+        self._disable_step: int | None = None
+
+    def _validate_context(self, context: CacheStepContext) -> None:
+        if context.num_steps != len(self.anchor_mask):
+            raise ValueError(
+                f"phased static cache mask has {len(self.anchor_mask)} entries, "
+                f"but runtime has {context.num_steps} steps"
+            )
+
+    def should_skip(
+        self,
+        context: CacheStepContext,
+        history: CacheHistory,
+        observation: RuntimeObservation,
+    ) -> bool:
+        del history, observation
+        self._validate_context(context)
+        return False if self._disabled else not self.anchor_mask[context.step_index]
+
+    def observe_anchor_measurement(self, measurement: Any) -> None:
+        if self._disabled:
+            return
+        if int(measurement.num_steps) != len(self.anchor_mask):
+            self._disable("num_steps_mismatch", int(measurement.step_index))
+            return
+        try:
+            _measurement_error(measurement)
+        except (TypeError, ValueError, OverflowError):
+            self._disable("invalid_measurement", int(measurement.step_index))
+
+    def _disable(self, reason: str, step_index: int) -> None:
+        if not self._disabled:
+            self._disabled_count += 1
+        self._disabled = True
+        self._disable_reason = reason
+        self._disable_step = step_index
+
+    def materialize_anchor_mask(self, num_steps: int) -> tuple[bool, ...]:
+        if int(num_steps) != len(self.anchor_mask):
+            raise ValueError(
+                f"phased static cache mask has {len(self.anchor_mask)} entries, "
+                f"but {num_steps} were requested"
+            )
+        return self.anchor_mask
+
+    def stats(self) -> dict[str, Any]:
+        return {
+            "phased_static_anchor_count": sum(self.anchor_mask),
+            "phased_static_disabled": self._disabled_count,
+            "phased_static_disable_reason": self._disable_reason,
+            "phased_static_disable_step": self._disable_step,
+        }
+
+
+@dataclass(frozen=True)
+class StaticPlusBrakeConfig:
+    """Frozen static anchors plus a bounded, one-way Taylor brake."""
+
+    anchor_mask: tuple[bool, ...]
+    plastic_window_start: int
+    plastic_window_end: int
+    dynamic_budget: int
+    tighten_error: float
+    recovery_error: float
+    recovery_steps: int
+    disable_after_recoveries: int
+    tighten_rule: str = "bisect_next_static_gap"
+    allow_acceleration: bool = False
+    invalid_measurement_fail_closed: bool = True
+
+    def __post_init__(self) -> None:
+        mask = _strict_anchor_mask(self.anchor_mask, "anchor_mask")
+        object.__setattr__(self, "anchor_mask", mask)
+        start = _strict_int(self.plastic_window_start, "plastic_window_start")
+        end = _strict_int(self.plastic_window_end, "plastic_window_end")
+        if start > end or end >= len(mask):
+            raise ValueError("plastic window must be ordered and inside anchor_mask")
+        _strict_int(self.dynamic_budget, "dynamic_budget", minimum=1)
+        tighten = _finite_nonnegative(self.tighten_error, "tighten_error")
+        recovery = _finite_nonnegative(self.recovery_error, "recovery_error")
+        if not tighten < recovery:
+            raise ValueError("signal thresholds must satisfy tighten < recovery")
+        _strict_int(self.recovery_steps, "recovery_steps", minimum=1)
+        _strict_int(
+            self.disable_after_recoveries,
+            "disable_after_recoveries",
+            minimum=1,
+        )
+        if self.tighten_rule != "bisect_next_static_gap":
+            raise ValueError("tighten_rule must be 'bisect_next_static_gap'")
+        if type(self.allow_acceleration) is not bool or self.allow_acceleration:
+            raise ValueError("static-plus-brake acceleration must be false")
+        if (
+            type(self.invalid_measurement_fail_closed) is not bool
+            or not self.invalid_measurement_fail_closed
+        ):
+            raise ValueError("static-plus-brake must fail closed")
+
+
+StaticPlusBrakeState = Literal["active", "recovery", "disabled"]
+
+
+class StaticPlusBrakePolicy:
+    """Union a read-only static anchor stream with bounded dynamic insertions."""
+
+    def __init__(self, config: StaticPlusBrakeConfig) -> None:
+        if not isinstance(config, StaticPlusBrakeConfig):
+            raise TypeError("config must be a StaticPlusBrakeConfig")
+        self.config = config
+        self.anchor_mask = config.anchor_mask
+        self.reset()
+
+    @property
+    def state(self) -> StaticPlusBrakeState:
+        return self._state
+
+    @property
+    def dynamic_budget_remaining(self) -> int:
+        return self._dynamic_budget_remaining
+
+    def reset(self) -> None:
+        self._state: StaticPlusBrakeState = "active"
+        self._next_dynamic_anchor: int | None = None
+        self._recovery_steps_remaining = 0
+        self._dynamic_budget_remaining = self.config.dynamic_budget
+        self._dynamic_insertions = 0
+        self._dynamic_compute_overlaps = 0
+        self._tightening_count = 0
+        self._recovery_count = 0
+        self._disabled_count = 0
+        self._disable_reason: str | None = None
+        self._disable_step: int | None = None
+        self._last_anchor_error: float | None = None
+
+    def _validate_context(self, context: CacheStepContext) -> None:
+        if context.num_steps != len(self.anchor_mask):
+            raise ValueError(
+                f"static-plus-brake mask has {len(self.anchor_mask)} entries, "
+                f"but runtime has {context.num_steps} steps"
+            )
+
+    def _inside_plastic_window(self, step_index: int) -> bool:
+        return (
+            self.config.plastic_window_start
+            <= step_index
+            <= self.config.plastic_window_end
+        )
+
+    def should_skip(
+        self,
+        context: CacheStepContext,
+        history: CacheHistory,
+        observation: RuntimeObservation,
+    ) -> bool:
+        del history, observation
+        self._validate_context(context)
+        step_index = context.step_index
+        if self._state == "disabled":
+            return False
+
+        static_anchor = self.anchor_mask[step_index]
+        if static_anchor:
+            if self._next_dynamic_anchor == step_index:
+                self._next_dynamic_anchor = None
+                self._dynamic_compute_overlaps += 1
+            if self._state == "recovery":
+                self._dynamic_compute_overlaps += 1
+            return False
+
+        if not self._inside_plastic_window(step_index):
+            if self._state == "recovery":
+                self._state = "active"
+                self._recovery_steps_remaining = 0
+            if self._next_dynamic_anchor == step_index:
+                self._next_dynamic_anchor = None
+            return True
+
+        if self._dynamic_budget_remaining <= 0:
+            self._state = "active"
+            self._next_dynamic_anchor = None
+            self._recovery_steps_remaining = 0
+            return True
+
+        if self._state == "recovery" or self._next_dynamic_anchor == step_index:
+            self._next_dynamic_anchor = None
+            self._dynamic_budget_remaining -= 1
+            self._dynamic_insertions += 1
+            return False
+        return True
+
+    def observe_anchor_measurement(self, measurement: Any) -> None:
+        if self._state == "disabled":
+            return
+        step_index = int(measurement.step_index)
+        if int(measurement.num_steps) != len(self.anchor_mask):
+            self._disable("num_steps_mismatch", step_index)
+            return
+        if (
+            self._next_dynamic_anchor is not None
+            and step_index >= self._next_dynamic_anchor
+        ):
+            # A separate recovery guard may force the scheduled dynamic step
+            # before this policy is queried. The real output satisfies that
+            # insertion without spending this policy's extra-step budget.
+            self._next_dynamic_anchor = None
+            self._dynamic_compute_overlaps += 1
+
+        try:
+            error = _measurement_error(measurement)
+        except (TypeError, ValueError, OverflowError):
+            self._disable("invalid_measurement", step_index)
+            return
+        if self._state == "recovery":
+            self._recovery_steps_remaining -= 1
+            if self._recovery_steps_remaining <= 0:
+                self._state = "active"
+                self._recovery_steps_remaining = 0
+            return
+        if error is None:
+            return
+        self._last_anchor_error = error
+
+        if error > self.config.recovery_error:
+            self._recovery_count += 1
+            self._next_dynamic_anchor = None
+            if self._recovery_count >= self.config.disable_after_recoveries:
+                self._disable("recovery_limit", step_index)
+                return
+            if self._inside_plastic_window(step_index) and self._dynamic_budget_remaining > 0:
+                self._state = "recovery"
+                self._recovery_steps_remaining = self.config.recovery_steps
+            return
+
+        if (
+            error > self.config.tighten_error
+            and self._inside_plastic_window(step_index)
+            and self._dynamic_budget_remaining > 0
+        ):
+            next_static = self._next_static_anchor(step_index)
+            if next_static is None or next_static - step_index <= 1:
+                return
+            gap = next_static - step_index
+            candidate = step_index + max(1, gap // 2)
+            if candidate <= self.config.plastic_window_end and candidate < next_static:
+                if self._next_dynamic_anchor is None:
+                    self._next_dynamic_anchor = candidate
+                else:
+                    self._next_dynamic_anchor = min(self._next_dynamic_anchor, candidate)
+                self._tightening_count += 1
+
+    def _next_static_anchor(self, step_index: int) -> int | None:
+        for index in range(step_index + 1, len(self.anchor_mask)):
+            if self.anchor_mask[index]:
+                return index
+        return None
+
+    def _disable(self, reason: str, step_index: int) -> None:
+        if self._state != "disabled":
+            self._disabled_count += 1
+        self._state = "disabled"
+        self._next_dynamic_anchor = None
+        self._recovery_steps_remaining = 0
+        self._disable_reason = reason
+        self._disable_step = step_index
+
+    def materialize_static_anchor_mask(self, num_steps: int) -> tuple[bool, ...]:
+        if int(num_steps) != len(self.anchor_mask):
+            raise ValueError(
+                f"static-plus-brake mask has {len(self.anchor_mask)} entries, "
+                f"but {num_steps} were requested"
+            )
+        return self.anchor_mask
+
+    def stats(self) -> dict[str, Any]:
+        return {
+            "static_brake_state": self._state,
+            "static_brake_static_anchor_count": sum(self.anchor_mask),
+            "static_brake_dynamic_insertions": self._dynamic_insertions,
+            "static_brake_dynamic_compute_overlaps": self._dynamic_compute_overlaps,
+            "static_brake_dynamic_budget": self.config.dynamic_budget,
+            "static_brake_dynamic_budget_remaining": self._dynamic_budget_remaining,
+            "static_brake_tightenings": self._tightening_count,
+            "static_brake_tighten_rule": self.config.tighten_rule,
+            "static_brake_recoveries": self._recovery_count,
+            "static_brake_recovery_steps_remaining": self._recovery_steps_remaining,
+            "static_brake_disabled": self._disabled_count,
+            "static_brake_disable_reason": self._disable_reason,
+            "static_brake_disable_step": self._disable_step,
+            "static_brake_last_anchor_error": self._last_anchor_error,
+            "static_brake_acceleration_enabled": False,
+        }
+
+
 @dataclass(frozen=True)
 class CadencePolicy:
     """Skip one step at the end of each fixed-size cadence window."""
@@ -517,6 +857,9 @@ __all__ = [
     "AdaptiveAnchorPolicy",
     "CadencePolicy",
     "ExplicitMaskPolicy",
+    "PhasedStaticPolicy",
     "PeriodicAnchorPolicy",
+    "StaticPlusBrakeConfig",
+    "StaticPlusBrakePolicy",
     "TeaCachePolicy",
 ]

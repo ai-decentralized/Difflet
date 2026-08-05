@@ -1,0 +1,29 @@
+{
+  "schema": "difflet-flux-cache-adaptive-candidate",
+  "schema_revision": 1,
+  "candidate_id": "adaptive-vqa-stress-w6-i16-m8-k20-o1-index",
+  "policy": {
+    "type": "adaptive_anchor",
+    "initial_anchor_interval": 16,
+    "minimum_anchor_interval": 8,
+    "maximum_anchor_interval": 20,
+    "warmup_steps": 6,
+    "cooldown_steps": 1,
+    "anchor_phase": 1,
+    "tighten_error": 3.0,
+    "recovery_error": 4.0,
+    "acceleration_error": 1.5,
+    "recovery_steps": 2,
+    "disable_after_recoveries": 2,
+    "stable_anchors_for_acceleration": 1,
+    "acceleration_start_progress": 0.2,
+    "allow_acceleration": true,
+    "require_final_anchor": true
+  },
+  "predictor": {
+    "type": "taylorseer",
+    "order": 1,
+    "coord": "index"
+  },
+  "sha256": "56617effed8ee32d92c97bc870fcf73c5f87e270357de24c6dce1ff8c75d49ac"
+}

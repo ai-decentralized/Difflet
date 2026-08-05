@@ -1,0 +1,90 @@
+{
+  "schema": "difflet-flux-cache-candidate-extension",
+  "schema_revision": 1,
+  "study_id": "flux-cache-spatial-anchor-error-probe-20260804",
+  "evidence_role": "opened-zero-extra-dit-online-signal-diagnostic",
+  "serving_claim": false,
+  "source_quality": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/quality-input-v2.json",
+    "file_sha256": "f751c527a3474963c24af3b2a4f8b6e7165f0afa5215716e400fb40b9d1ff470"
+  },
+  "source_speed": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/speedup-candidates-v1.json",
+    "file_sha256": "b7b2bc9f1218b7b7d384d32ae660a5a803d0e802cb84136944ee87dc25dd8a49"
+  },
+  "source_semantic": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/semantic-scores.json",
+    "file_sha256": "01859c03400266e979d0baf31a635ef4fdab9f8bbbd864fb1ccfba5d2292e55e"
+  },
+  "baseline_dataset_sha256": "12cb454157c585f6fa454a368869b74195b4926032ff625fff56829b82cff0a7",
+  "collector": {
+    "path": "scripts/collect_flux_cache_candidate_extension.py",
+    "file_sha256": "6f6cf699dcfadacfd554439516410104c6ef1822969252564959d5a3fbe93689"
+  },
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "candidates": [
+    {
+      "path": "benchmark/flux_cache/adaptive-vqa-stress-i32-k40-candidate.json",
+      "file_sha256": "15a2129f70947510b7f33f1d46d911d86fcacdd20dc7e248ee03c434e300d703",
+      "candidate_id": "adaptive-vqa-stress-w6-i32-m16-k40-o1-index"
+    }
+  ],
+  "expected_sample_count": 48,
+  "online_signal_window": [
+    2,
+    20
+  ],
+  "diagnostics": {
+    "collect_spatial_anchor_errors": true,
+    "collector_file_sha256": "6f6cf699dcfadacfd554439516410104c6ef1822969252564959d5a3fbe93689",
+    "extra_transformer_calls": 0,
+    "spatial_layout": {
+      "token_height": 64,
+      "token_width": 64,
+      "region_rows": 4,
+      "region_columns": 4,
+      "token_axis": -2
+    },
+    "identity_gate": "Every rerun image, final latent, and complete latent trajectory must be bit-identical to the registered source candidate."
+  },
+  "offline_label": {
+    "metric": "vqa_score",
+    "paired_harm_threshold": 0.25,
+    "comparison": "full_dit_vqa_minus_cache_vqa_is_strictly_greater",
+    "positive_count": 12
+  },
+  "frozen_primary_signal": {
+    "availability": "after the first post-warmup anchor with a valid Taylor estimate and before the next cache decision",
+    "expected_anchor_step": 7,
+    "per_region_value": "sqrt(error_energy / max(reference_energy, 1e-12))",
+    "request_score": "mean of the four largest per-region values",
+    "risk_direction": "higher_is_riskier",
+    "extra_transformer_calls": 0
+  },
+  "opened_gate": {
+    "minimum_roc_auc": 0.8,
+    "required_failure_recall": 1.0,
+    "maximum_full_recall_false_brake_rate": 0.25,
+    "maximum_full_recall_false_brake_count": 9,
+    "qualification": "Passing only permits a separately registered new-prompt holdout; it does not qualify serving."
+  },
+  "exploratory_only": [
+    "maximum region error",
+    "top-two region mean error",
+    "median region error",
+    "spatial coefficient of variation",
+    "spatial participation ratio",
+    "later-anchor summaries"
+  ],
+  "next_if_negative": "Stop scalar whole-output and anchor-error aggregation search; the next signal must change predictor or cache granularity.",
+  "sha256": "2579c3ceff3efefe106794b8cb94ce019184db68c75f74281f33e16edad7fc2a"
+}

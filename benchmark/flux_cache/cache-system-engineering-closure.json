@@ -1,0 +1,39 @@
+{
+  "schema": "difflet-flux-cache-system-engineering-closure",
+  "schema_revision": 1,
+  "status": "research_decision_closed_serving_not_qualified",
+  "methodology": {
+    "path": "benchmark/flux_cache/offline-gate-methodology-v1.json",
+    "sha256": "4622c84e39cd44458e90a6f832332dcecfa489fbdde71c02a32aa233d24732c0"
+  },
+  "offline_profile_selection": {
+    "artifact": "benchmark/flux_cache/profile-selection-replay.json",
+    "artifact_sha256": "f1c8502e41ee4eb0012def64e0aa7be93539b3a036db99dc1c29ea539facfcdb",
+    "status": "legacy_profile_selected_not_methodology_preregistered",
+    "selected_candidate": "benchmark/flux_cache/adaptive-brake-candidate.json",
+    "selected_candidate_sha256": "bca87db396d98cf29c8536f17c4640b3aeb7636156498291bf02b9875eda6d25",
+    "frozen_controls": {
+      "minimum_anchor_interval": 4,
+      "initial_anchor_interval": 8,
+      "maximum_anchor_interval": 8,
+      "tighten_error": 1.19,
+      "recovery_error": 1.5,
+      "allow_acceleration": false
+    },
+    "serving_claim": false
+  },
+  "online_semantic_gate": {
+    "artifact": "benchmark/flux_cache/online-signal-failure-enriched-closure.json",
+    "artifact_sha256": "1c23d70e55daf909ac29459a8057762f32e308ef4a26ecdd25bf4c41762ab2d5",
+    "status": "reject_feature_family",
+    "export_frozen_gate": false,
+    "serving_claim": false
+  },
+  "effective_decision": {
+    "retain_for_prospective_confirmation": "brake-only adaptive profile",
+    "enable_acceleration": false,
+    "deploy_learned_semantic_vote": false,
+    "serving_qualified": false,
+    "required_next_evidence": "A methodology-v1 preregistered confirmation of the exact brake-only candidate hash, followed by an interventional quality/speed holdout if serving publication is desired."
+  }
+}

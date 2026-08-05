@@ -1,0 +1,61 @@
+{
+  "schema": "difflet-flux-cache-warmup-vqa-router-holdout-registered-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-warmup-vqa-router-prospective-holdout-20260804",
+  "prospective": true,
+  "serving_claim": false,
+  "protocol": {
+    "path": "benchmark/flux_cache/warmup-vqa-router-holdout.json",
+    "file_sha256": "454ef0f07a1cedbecbd0c2dec6b5beaf8ff1d86bd67b75ded6cf6234fbe1a067",
+    "content_sha256": "aff15ef5d0a1bb8dfdb1254ac0730bfe30ea7db4cebd5fcd50553be0d20b83f5"
+  },
+  "artifact_root": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-router-holdout-20260804-retry1",
+  "artifacts": {
+    "quality_input": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-router-holdout-20260804-retry1/quality-input-v2.json",
+      "file_sha256": "68a23fc11eddee0dec9f7756880d1fd64e6bd31b7797fc47e87210aa9244f067"
+    },
+    "speed_manifest": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-router-holdout-20260804-retry1/speedup-candidates-v1.json",
+      "file_sha256": "ff82e3a8b9d3094f1ff72ed747ade5931cec4990111f187832a146e1a1b94edb"
+    },
+    "semantic_scores": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-router-holdout-20260804-retry1/semantic-scores.json",
+      "file_sha256": "c53e13ec8e003a6cbbee9688e40a4870f250b60bac3236983ee56a161321e07f"
+    },
+    "analysis": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-router-holdout-20260804-retry1/router-holdout-result.json",
+      "file_sha256": "9523e4d0d490fbbb28323c6fc35df904d01ad25c99da2561c953cba9e9baece4",
+      "content_sha256": "da01bf12751123e122bf4f617a4866f06b3fc9b97156baacf075e2d4b829587f"
+    }
+  },
+  "result": {
+    "status": "prospective_inconclusive_too_few_positive_groups",
+    "comparison_count": 48,
+    "vqa_failure_count": 0,
+    "vqa_failure_prompt_group_count": 0,
+    "maximum_observed_vqa_harm": 0.10546875,
+    "triggered_count": 5,
+    "passing_false_route_count": 5,
+    "passing_false_route_rate": 0.10416666666666667,
+    "roc_auc": null,
+    "failure_recall": null,
+    "original_contract_failure_count": 1,
+    "original_image_reward_only_failure_count": 1,
+    "routed_contract_failure_count": 1,
+    "routing_cost_increase_fraction_diagnostic": 0.29488459463084427
+  },
+  "interpretation": {
+    "signal_confirmed": false,
+    "signal_rejected": false,
+    "reason": "No targeted VQAScore failure occurred, so the frozen online signal could not be tested against positive offline labels. All five triggers were false terminal routes.",
+    "profile_observation": "The stage oil profile was VQAScore-safe on this fixed prompt matrix; its largest paired VQAScore harm was 0.10546875, well below the frozen 0.25 failure margin.",
+    "complexity_decision": "Do not add this router to serving. Any next experiment should first create a registered cache-pressure stress arm that produces enough VQAScore positives; another same-profile prompt expansion is low value."
+  },
+  "collection_note": {
+    "first_attempt": "All baselines completed, then the first candidate signal export failed before a complete comparison because the exporter required a cached record inside a pre-skip window.",
+    "fix": "A pre-skip window now preserves the modulation feature schema and emits zero output-dynamics features when no cache prediction exists.",
+    "formal_artifact": "Only the retry1 root is used by this registered result."
+  },
+  "sha256": "0fd49a64fc49faa65a907232a7af0253da6d7a0087a856fd32475c02a524af42"
+}

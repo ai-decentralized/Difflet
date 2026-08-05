@@ -1,0 +1,111 @@
+{
+  "schema": "difflet-flux-cache-component-residual-signal-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-component-residual-signal-20260804",
+  "status": "exploratory_offline_online_mapping_found_end_to_end_quality_gate_rejected",
+  "serving_claim": false,
+  "opened_data": true,
+  "artifacts": {
+    "real_trajectory_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-single-block-real-trajectory-20260804/all-step20-result.json",
+      "file_sha256": "6fc0de9f6774efcae4f293f6a1475783c57e5b70c66bf2571e59c036be97234f",
+      "content_sha256": "dc75de28d270cf5ef4eb135eb843828ec775adb79b173270ec3a38d6a79f0c36"
+    },
+    "aot_split_probe": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-single-block-residual-split-20260804/bucketed-bank-metrics.json",
+      "file_sha256": "52a323013ee3399df28f693ff11571d9589cb49a22839532f8e23bddf03936e9"
+    },
+    "normalized_aot_followup": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-single-block-residual-normalized-aot-20260804/metrics.json",
+      "file_sha256": "edc86accf4258b6989c77f35f40c7b744b017e47f5e10ec0d90240959e5f473b"
+    },
+    "component_signal_source": {
+      "path": "difflet/pipeline/cache/component_signal.py",
+      "file_sha256": "4ea73007ac49069a16929802d4071e53a9c17f94004759f0b7c5fa4f6884a957"
+    },
+    "trajectory_collector_source": {
+      "path": "scripts/collect_flux_single_block_residual_trajectory.py",
+      "file_sha256": "2c043d87e9d75744770ae3db1f3e9d097bfdae47e384aadce9bd262f84544332"
+    },
+    "aot_split_probe_source": {
+      "path": "scripts/flux_single_block_residual_split_probe.py",
+      "file_sha256": "6975848e5f46350732257e079a65b1bb1f88e29b866f497b46317149e877cfc5"
+    }
+  },
+  "experiment": {
+    "model": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "request_count": 48,
+    "continue_cache_failure_count": 12,
+    "continue_cache_pass_count": 36,
+    "failure_definition": "continue-cache VQA harm is strictly greater than 0.25",
+    "decision_signal_step": 20,
+    "causal_action": "terminal brake at step 21",
+    "known_positive_rescues": 12
+  },
+  "aot_online_primitive": {
+    "signal": "24x32 raw block-input representative samples",
+    "bytes_per_block": 1536,
+    "extra_transformer_calls": 0,
+    "cache_payload_host_transfer_bytes_per_call": 0,
+    "same_step_cross_bucket_floor": 0.0,
+    "maximum_online_vs_anchor_abs_difference": 0.0,
+    "synthetic_vs_true_mlp_error_spearman": 0.9935707687831224,
+    "synthetic_quality_claim": false
+  },
+  "real_trajectory_mapping": {
+    "teacher": "truncated FLUX through double-stream blocks and single-stream block-0 MLP residual",
+    "teacher_omits": [
+      "remaining 37 single-stream blocks",
+      "final projection",
+      "scheduler update",
+      "VAE",
+      "quality scorer"
+    ],
+    "tensor_determinism": true,
+    "raw_input_sample_taylor_error_vs_true_mlp_taylor_error_spearman": 0.7481545809813287,
+    "normalized_input_sample_taylor_error_vs_true_mlp_taylor_error_spearman": 0.8738601823708206,
+    "normalized_candidate_same_step_aot_floor_measured": true,
+    "normalized_candidate_same_step_aot_floor": 0.0009852794464677572,
+    "normalized_candidate_maximum_online_vs_anchor_abs_difference": 0.0006175684102345258,
+    "normalized_candidate_synthetic_vs_true_mlp_error_spearman": 0.9898963958405929,
+    "normalized_candidate_exploratory_offline_online_mapping": "found",
+    "preselected_raw_signal_minimum_spearman": 0.8,
+    "preselected_raw_signal_gate_passed": false
+  },
+  "end_to_end_quality_mapping": {
+    "raw_online_signal": {
+      "higher_is_riskier_auc": 0.5092592592592593,
+      "lower_is_riskier_auc": 0.49074074074074076,
+      "higher_direction_full_recall_false_brakes": 34,
+      "passing_request_count": 36
+    },
+    "normalized_candidate": {
+      "higher_is_riskier_auc": 0.42824074074074076,
+      "lower_is_riskier_auc": 0.5717592592592593,
+      "best_direction_full_recall_false_brakes": 33,
+      "passing_request_count": 36
+    },
+    "offline_true_mlp_error": {
+      "higher_is_riskier_auc": 0.45601851851851855,
+      "lower_is_riskier_auc": 0.5439814814814815,
+      "best_direction_full_recall_false_brakes": 34,
+      "passing_request_count": 36
+    },
+    "raw_online_signal_vs_terminal29_vqa_benefit_spearman": -0.1034829158171753,
+    "maximum_acceptable_full_recall_false_brakes": 9,
+    "quality_gate_passed": false
+  },
+  "interpretation": {
+    "aot_feasibility": "A tiny component sketch can be transported exactly through Trainium bucketed AOT graphs without host transfer.",
+    "proxy_fidelity": "The preselected AOT-exact raw signal misses the full-cohort mapping gate. The post-opened normalized candidate has a small nonzero AOT floor and maps to offline MLP error at Spearman 0.874, so it is an exploratory numerical bridge rather than a confirmatory serving signal.",
+    "quality_fidelity": "Even the offline true MLP prediction error does not separate final VQA failures, so a better proxy for that error cannot produce a valid brake threshold.",
+    "threshold_policy": "Do not select or serve a component-error brake threshold from this opened cohort."
+  },
+  "decision": {
+    "component_error_online_brake": "rejected",
+    "additional_threshold_search_on_opened_rows": "forbidden",
+    "next": "If residual splitting continues, evaluate it as a fixed cache representation that keeps attention fresh and measure final quality directly; do not add this scalar as another online gate."
+  },
+  "sha256": "62554d7397cfdfe375bf3e71e885ca2a035b276e48c52bcf35d03f59ce26b03e"
+}

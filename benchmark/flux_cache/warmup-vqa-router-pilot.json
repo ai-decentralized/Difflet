@@ -1,0 +1,102 @@
+{
+  "schema": "difflet-flux-cache-warmup-vqa-router-pilot",
+  "schema_revision": 1,
+  "study_id": "flux-cache-warmup-vqa-router-opened-development-2026-08-04",
+  "evidence_role": "opened-development-metric-specific-signal-routing-only",
+  "serving_claim": false,
+  "source": {
+    "artifact_root": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-failure-enriched-20260803",
+    "gate_development": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-failure-enriched-20260803/gate-development.json",
+      "file_sha256": "99e90671c691bfd4b144ac3d54c5c0800b29686da5f282d10e97152dcd28add9"
+    },
+    "semantic_scores": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-failure-enriched-20260803/semantic-scores.json",
+      "file_sha256": "bff1cc1bd0683eb67d97188060438a8936f837d54fefff6f584e0819d8321d66"
+    },
+    "speed_manifest": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-online-signal-failure-enriched-20260803/speedup-candidates-v1.json",
+      "file_sha256": "ec0e88f7d20b7020bce9f38c8e12c2e6ed3a21bf0263de29db6da4c780bf6754"
+    },
+    "online_signal_file_count": 64,
+    "online_signal_dataset_sha256": "04767a84d7c77964349a777846d8c5b9b6ecb68c53d730747de43a6d1e7f2f03"
+  },
+  "prompt_source": {
+    "path": "benchmark/flux_cache/online-signal-failure-enriched-prompts.json",
+    "file_sha256": "f2917b14b905aa085452031b32a11ba95516d9861c4e18f9128ebb8e437fd45a"
+  },
+  "profiles": {
+    "safe": {
+      "path": "benchmark/flux_cache/adaptive-brake-candidate.json",
+      "file_sha256": "bca87db396d98cf29c8536f17c4640b3aeb7636156498291bf02b9875eda6d25",
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index"
+    },
+    "oil": [
+      {
+        "path": "benchmark/flux_cache/adaptive-stage-oil-p30-e1p40-k12-candidate.json",
+        "file_sha256": "4b6a5d53599b0eefcd061819ce1b16fd968d73fe7a37b784779726d11633c4d5",
+        "candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index"
+      },
+      {
+        "path": "benchmark/flux_cache/adaptive-oil-e1p80-k12-candidate.json",
+        "file_sha256": "0c295e448e567149ccbeb7c95934f4cec7ba31e3744c4cb2fca701bfe66f37df",
+        "candidate_id": "adaptive-oil-e1p80-w6-i8-k12-o1-index"
+      }
+    ]
+  },
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "offline_label": {
+    "metric": "vqa_score",
+    "paired_harm_threshold": 0.25,
+    "definition": "full-DiT VQAScore minus candidate VQAScore is strictly greater than 0.25"
+  },
+  "online_signal": {
+    "name": "warmup_modulation_max_positive_acceleration_cv",
+    "probe_path": "x_embedder plus timestep/text embedding plus transformer block-0 norm1 modulation",
+    "region_grid": [4, 4],
+    "window": [2, 5],
+    "definition": "For each warmup step, compute the positive second difference of the 16 regional modulation levels and its spatial coefficient of variation; take the maximum CV over steps 2 through 5.",
+    "risk_direction": "lower_is_riskier",
+    "development_threshold": 0.04691181821870764,
+    "trigger": "signal <= development_threshold",
+    "teacher_or_shadow_full_dit": false,
+    "available_before_first_cache_skip": true
+  },
+  "triggered_comparisons": [
+    {"candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index", "sample_id": "p000-s0"},
+    {"candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index", "sample_id": "p001-s1"},
+    {"candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index", "sample_id": "p012-s0"},
+    {"candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index", "sample_id": "p014-s0"},
+    {"candidate_id": "adaptive-oil-e1p80-w6-i8-k12-o1-index", "sample_id": "p001-s1"},
+    {"candidate_id": "adaptive-oil-e1p80-w6-i8-k12-o1-index", "sample_id": "p012-s0"},
+    {"candidate_id": "adaptive-oil-e1p80-w6-i8-k12-o1-index", "sample_id": "p014-s0"}
+  ],
+  "safe_generation_samples": [
+    {"sample_id": "p000-s0", "prompt_index": 0, "seed": 0},
+    {"sample_id": "p001-s1", "prompt_index": 1, "seed": 1},
+    {"sample_id": "p012-s0", "prompt_index": 12, "seed": 0},
+    {"sample_id": "p014-s0", "prompt_index": 14, "seed": 0}
+  ],
+  "expected_safe_images": 4,
+  "expected_quality_images": 8,
+  "quality_contract": {
+    "image_reward_max_harm": 0.7824214100837708,
+    "vqa_score_max_harm": 0.25,
+    "failure_rule": "fail when baseline-minus-candidate harm is strictly greater than either frozen metric margin"
+  },
+  "decision_rule": {
+    "development_mapping_found": "The warmup signal recalls every opened VQA failure with at most 10% passing-request false routes, and routing every triggered comparison to the safe profile removes all opened VQA failures without introducing a contract failure.",
+    "qualification": "Opened discovery only. Freeze the metric-specific signal, direction, window, threshold, and route action, then collect a new positive-containing prompt-group holdout.",
+    "reject": "Any opened VQA failure is not triggered, a triggered VQA failure remains failed under the safe route, or the route introduces a contract failure."
+  },
+  "sha256": "4e997e0a6f1a36432e1152c02abede4dad53d583dbffca052104d799aff0a012"
+}

@@ -1,0 +1,105 @@
+{
+  "schema": "difflet-flux-cache-terminal-brake-completion",
+  "schema_revision": 1,
+  "study_id": "flux-cache-terminal-brake-step29-completion-20260804",
+  "evidence_role": "opened-causal-label-completion",
+  "serving_claim": false,
+  "offline_intervention_only": true,
+  "source_quality": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/quality-input-v2.json",
+    "file_sha256": "f751c527a3474963c24af3b2a4f8b6e7165f0afa5215716e400fb40b9d1ff470"
+  },
+  "source_semantic": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/semantic-scores.json",
+    "file_sha256": "01859c03400266e979d0baf31a635ef4fdab9f8bbbd864fb1ccfba5d2292e55e"
+  },
+  "candidate": {
+    "path": "benchmark/flux_cache/adaptive-vqa-stress-i32-k40-candidate.json",
+    "file_sha256": "15a2129f70947510b7f33f1d46d911d86fcacdd20dc7e248ee03c434e300d703",
+    "candidate_id": "adaptive-vqa-stress-w6-i32-m16-k40-o1-index"
+  },
+  "timing_protocol": {
+    "path": "benchmark/flux_cache/terminal-brake-timing-failure-sweep.json",
+    "file_sha256": "aded21501460c0512a3ded7d5f27ee0b58bc2beefc994834c8b6ce047b0be2f7",
+    "content_sha256": "31d8bf69aee55139f1f37e638e382d2cfd27b704e1a0cc4888f98b3ddeb2b0e1"
+  },
+  "timing_run": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-timing-failures-20260804/terminal-brake-sweep-run.json",
+    "file_sha256": "bcc7aca0bcf1c33881f39b2a2556f1d03111911663ebb18946f7f891d1b19019",
+    "content_sha256": "107e244c93d1ff920a07fce1ff28f6c4aae6d8c5a65c5713fa771ffd27ccdb0a"
+  },
+  "timing_semantic": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-timing-failures-20260804/semantic-scores.json",
+    "file_sha256": "c94f30a0f0b3de01503045c57a06490165ab3f1f9a903f313fd2f4a68ebe99ce"
+  },
+  "collector": {
+    "path": "scripts/flux_cache_terminal_brake_completion.py",
+    "file_sha256": "233a5d9bf66e0f7139b447eb6d389a57fb81783d10a72261c6f1549e841a6f80"
+  },
+  "terminal_policy_implementation": {
+    "path": "scripts/flux_cache_terminal_brake_sweep.py",
+    "file_sha256": "d1195e52a716a32a36f634968f9766ddbf13593c34dacd216caeb475722da816"
+  },
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "source_selection_rule": {
+    "metric": "vqa_score",
+    "maximum_vqa_harm": 0.25,
+    "comparison": "full_dit_vqa_minus_continue_cache_vqa_is_less_than_or_equal"
+  },
+  "terminal_step": 29,
+  "sample_ids": [
+    "p000-s2",
+    "p001-s2",
+    "p002-s2",
+    "p003-s2",
+    "p004-s2",
+    "p005-s2",
+    "p006-s2",
+    "p007-s2",
+    "p008-s2",
+    "p009-s2",
+    "p011-s2",
+    "p012-s2",
+    "p013-s2",
+    "p014-s2",
+    "p015-s2",
+    "p016-s2",
+    "p017-s2",
+    "p018-s2",
+    "p021-s2",
+    "p022-s2",
+    "p023-s2",
+    "p024-s2",
+    "p025-s2",
+    "p026-s2",
+    "p027-s2",
+    "p032-s2",
+    "p034-s2",
+    "p036-s2",
+    "p039-s2",
+    "p040-s2",
+    "p041-s2",
+    "p042-s2",
+    "p043-s2",
+    "p044-s2",
+    "p046-s2",
+    "p047-s2"
+  ],
+  "quality_split": "terminal_brake_step29_opened_nonfailures",
+  "expected_unique_quality_images": 72,
+  "analysis_definition": {
+    "brake_benefit_at_29": "VQA(terminal_step=29) - VQA(continue_cache)",
+    "actionable_brake": "continue-cache fails at harm > 0.25 and terminal-step-29 passes at harm <= 0.25"
+  },
+  "next_rule": "Merge these 36 causal branches with the 12 registered failure branches, then assess frozen cheap signal families against all 48 brake-benefit labels. Do not qualify serving on opened data.",
+  "sha256": "ae2d815bbe5ea2e7bc4000f42d437a6d36d947745c47480561cbf95367352f7c"
+}

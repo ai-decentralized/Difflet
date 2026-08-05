@@ -1,0 +1,110 @@
+{
+  "schema": "difflet-flux-cache-warmup-vqa-router-holdout",
+  "schema_revision": 1,
+  "study_id": "flux-cache-warmup-vqa-router-prospective-holdout-20260804",
+  "prospective": true,
+  "serving_claim": false,
+  "frozen_before_generation": true,
+  "pre_collection_failures": [
+    {
+      "superseded_protocol_content_sha256": "c9b40dab6db88e9526c25ccb22029e387c763806ece7fa3c19327962365c9109",
+      "quality_labels_opened": false,
+      "complete_candidate_comparisons": 0,
+      "reason": "The online feature exporter rejected a registered pre-skip window because it incorrectly required a cached output-dynamics record. The exporter was amended to emit zero-valued output-dynamics features while preserving the fully observed modulation features."
+    }
+  ],
+  "prompt_source": {
+    "path": "benchmark/flux_cache/warmup-vqa-router-holdout-prompts.json",
+    "file_sha256": "f57796a591107de7a7b302ba8c9b4dcdd84d5bafd70f1e48a500ef6f12ed911f"
+  },
+  "candidate": {
+    "path": "benchmark/flux_cache/adaptive-stage-oil-p30-e1p40-k12-candidate.json",
+    "file_sha256": "4b6a5d53599b0eefcd061819ce1b16fd968d73fe7a37b784779726d11633c4d5",
+    "candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index"
+  },
+  "development_protocol": {
+    "path": "benchmark/flux_cache/warmup-vqa-terminal-router-pilot.json",
+    "file_sha256": "d3344fb3e3ede28959f8fd50cf9fc38306a1a67c7a181336bb417bf5714cbec5",
+    "content_sha256": "b62bcdacc61248f7467ae9059ad909fd67cf5e7dd63ccdd4117a9ac89ab45bf6"
+  },
+  "development_result": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-terminal-route-20260804/analysis.json",
+    "file_sha256": "e4a0ad5d7cc04ca1fae4ff373b428e04250d6c3fbc1df35a487c67b6df33d789",
+    "content_sha256": "559fb693f6de2e38fe6b8d83b86bca8bc276aee66c2fca7512335f6c3133d1e9",
+    "required_status": "development_terminal_mapping_found"
+  },
+  "evaluator": {
+    "path": "scripts/evaluate_flux_cache_warmup_router_holdout.py",
+    "file_sha256": "560771d21e24c7e6e5fc48407b6d9beb562e5b4a4d893202eec52aec9df5bf7b"
+  },
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "sample_matrix": {
+    "prompt_count": 48,
+    "seeds": [
+      2
+    ],
+    "expected_comparisons": 48,
+    "expected_unique_quality_images": 96,
+    "no_sample_expansion_after_scoring": true
+  },
+  "collection": {
+    "python_source_sha256": "4727bd6392d27c57f23dca2e5875699918e5e056dc27e0a3913d7e911f8038ac",
+    "collect_online_signals": true,
+    "online_signal_first_eligible_step": 2,
+    "online_signal_last_eligible_step": 5,
+    "adaptive_only": true,
+    "candidate_count": 1
+  },
+  "router": {
+    "online_signal": {
+      "feature": "max_acceleration_cv",
+      "window": [
+        2,
+        5
+      ],
+      "risk_direction": "lower_is_riskier",
+      "threshold": 0.04691181821870764,
+      "trigger": "signal <= threshold",
+      "available_after_step": 5,
+      "available_before_first_cache_skip": true,
+      "teacher_or_shadow_full_dit": false
+    },
+    "action": "disable_cache_from_step_6",
+    "triggered_request_cost": "full-DiT suffix; because steps 0 through 5 are already full compute, the final image is the full-DiT baseline"
+  },
+  "offline_label": {
+    "metric": "vqa_score",
+    "paired_harm_threshold": 0.25,
+    "definition": "full-DiT VQAScore minus candidate VQAScore is strictly greater than 0.25"
+  },
+  "quality_contract": {
+    "image_reward_max_harm": 0.7824214100837708,
+    "vqa_score_max_harm": 0.25,
+    "failure_rule": "fail when baseline-minus-candidate harm is strictly greater than either frozen metric margin"
+  },
+  "decision_rule": {
+    "minimum_positive_prompt_groups": 3,
+    "minimum_failure_recall": 1.0,
+    "maximum_passing_false_route_rate": 0.1,
+    "minimum_roc_auc": 0.8,
+    "require_no_introduced_contract_failures": true,
+    "pass": "All criteria pass on the fixed 48-prompt matrix.",
+    "inconclusive": "Fewer than three independent VQAScore-failing prompt groups occur.",
+    "reject": "At least three positive prompt groups occur and any criterion fails."
+  },
+  "interpretation_limits": [
+    "This holdout can confirm a development signal-to-action mapping but is too small for a serving SLA.",
+    "The terminal action is a quality upper bound and sacrifices cache speed on triggered requests.",
+    "ImageReward failures are outside this metric-specific router's target label."
+  ],
+  "sha256": "aff15ef5d0a1bb8dfdb1254ac0730bfe30ea7db4cebd5fcd50553be0d20b83f5"
+}

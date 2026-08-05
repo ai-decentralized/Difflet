@@ -1,0 +1,127 @@
+{
+  "export_serving_profile": false,
+  "methodology_preregistered": false,
+  "profiles": [
+    {
+      "candidate_content_sha256": "f1e71776ea593b491f496dd278040efdb35ca2f6a9fc04c057f8bcdbfdfea7cf",
+      "candidate_file_sha256": "bca87db396d98cf29c8536f17c4640b3aeb7636156498291bf02b9875eda6d25",
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "candidate_path": "/home/ubuntu/Difflet/benchmark/flux_cache/adaptive-brake-candidate.json",
+      "failure_count": 1,
+      "failure_rate_upper_bound": 0.07198975489470939,
+      "independent_group_count": 64,
+      "measured_speedup": 3.3869403902971547,
+      "policy": {
+        "acceleration_error": 0.75,
+        "acceleration_start_progress": 0.0,
+        "allow_acceleration": false,
+        "anchor_phase": 1,
+        "cooldown_steps": 1,
+        "disable_after_recoveries": 2,
+        "initial_anchor_interval": 8,
+        "maximum_anchor_interval": 8,
+        "minimum_anchor_interval": 4,
+        "recovery_error": 1.5,
+        "recovery_steps": 2,
+        "require_final_anchor": true,
+        "stable_anchors_for_acceleration": 2,
+        "tighten_error": 1.19,
+        "type": "adaptive_anchor",
+        "warmup_steps": 6
+      },
+      "predictor": {
+        "coord": "index",
+        "order": 1,
+        "type": "taylorseer"
+      },
+      "profile_name": "brake_only",
+      "quality_eligible": true
+    },
+    {
+      "candidate_content_sha256": "681861d03c6fd5c50cdcc884bdd0bb8e50fc4b47469bca2509989ac17e512f98",
+      "candidate_file_sha256": "4b6a5d53599b0eefcd061819ce1b16fd968d73fe7a37b784779726d11633c4d5",
+      "candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index",
+      "candidate_path": "/home/ubuntu/Difflet/benchmark/flux_cache/adaptive-stage-oil-p30-e1p40-k12-candidate.json",
+      "failure_count": 3,
+      "failure_rate_upper_bound": 0.11671658790335933,
+      "independent_group_count": 64,
+      "measured_speedup": 3.7411530821489234,
+      "policy": {
+        "acceleration_error": 0.7,
+        "acceleration_start_progress": 0.3,
+        "allow_acceleration": true,
+        "anchor_phase": 1,
+        "cooldown_steps": 1,
+        "disable_after_recoveries": 2,
+        "initial_anchor_interval": 8,
+        "maximum_anchor_interval": 12,
+        "minimum_anchor_interval": 4,
+        "recovery_error": 1.75,
+        "recovery_steps": 2,
+        "require_final_anchor": true,
+        "stable_anchors_for_acceleration": 2,
+        "tighten_error": 1.4,
+        "type": "adaptive_anchor",
+        "warmup_steps": 6
+      },
+      "predictor": {
+        "coord": "index",
+        "order": 1,
+        "type": "taylorseer"
+      },
+      "profile_name": "stage_acceleration",
+      "quality_eligible": false
+    }
+  ],
+  "qualification_note": "This deterministic replay preserves the historical conservative choice. The evidence predates methodology-v1, so a new registered confirmation is required before a serving profile can be exported.",
+  "schema": "difflet-flux-cache-profile-selection-replay",
+  "schema_revision": 1,
+  "selected_profile": {
+    "candidate_content_sha256": "f1e71776ea593b491f496dd278040efdb35ca2f6a9fc04c057f8bcdbfdfea7cf",
+    "candidate_file_sha256": "bca87db396d98cf29c8536f17c4640b3aeb7636156498291bf02b9875eda6d25",
+    "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+    "candidate_path": "/home/ubuntu/Difflet/benchmark/flux_cache/adaptive-brake-candidate.json",
+    "failure_count": 1,
+    "failure_rate_upper_bound": 0.07198975489470939,
+    "independent_group_count": 64,
+    "measured_speedup": 3.3869403902971547,
+    "policy": {
+      "acceleration_error": 0.75,
+      "acceleration_start_progress": 0.0,
+      "allow_acceleration": false,
+      "anchor_phase": 1,
+      "cooldown_steps": 1,
+      "disable_after_recoveries": 2,
+      "initial_anchor_interval": 8,
+      "maximum_anchor_interval": 8,
+      "minimum_anchor_interval": 4,
+      "recovery_error": 1.5,
+      "recovery_steps": 2,
+      "require_final_anchor": true,
+      "stable_anchors_for_acceleration": 2,
+      "tighten_error": 1.19,
+      "type": "adaptive_anchor",
+      "warmup_steps": 6
+    },
+    "predictor": {
+      "coord": "index",
+      "order": 1,
+      "type": "taylorseer"
+    },
+    "profile_name": "brake_only",
+    "quality_eligible": true
+  },
+  "selection_rule": "quality upper-bound constraint first, then maximum measured speedup, then candidate_id",
+  "serving_claim": false,
+  "sources": {
+    "methodology": {
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/offline-gate-methodology-v1.json",
+      "sha256": "4622c84e39cd44458e90a6f832332dcecfa489fbdde71c02a32aa233d24732c0"
+    },
+    "stage_result": {
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/stage-gate-study-result.json",
+      "sha256": "6a45fead2c9f4b08dbf76cd8c9b98fc77724d220d27f2c5bc2db175e3ba699c9"
+    }
+  },
+  "status": "legacy_profile_selected_not_methodology_preregistered"
+}

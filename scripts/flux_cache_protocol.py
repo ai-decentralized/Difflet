@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -187,6 +188,37 @@ def _git_source_identity(root: Path) -> dict[str, Any]:
     }
 
 
+def python_source_sha256(root: Path = ROOT) -> str:
+    """Hash every tracked or untracked Python source file in repository order."""
+
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-co", "--exclude-standard", "--", "*.py"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError(f"could not enumerate Python source files: {error}") from error
+    digest = hashlib.sha256()
+    for relative in sorted(set(result.stdout.splitlines())):
+        path = root / relative
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        if path.is_file():
+            digest.update(path.read_bytes())
+        else:
+            digest.update(b"<missing>")
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _dirty_source_is_registered(root: Path) -> bool:
+    expected = os.environ.get("DIFFLET_ALLOW_DIRTY_PYTHON_SOURCE_SHA256")
+    return expected is not None and expected == python_source_sha256(root)
+
+
 def _resolved_model_revision(model_path: str) -> str:
     parts = Path(model_path).parts
     try:
@@ -351,10 +383,10 @@ def build_experiment_protocol(
         "sha256": canonical_sha256(payload),
     }
     validated = validate_experiment_protocol(protocol)
-    if validated["source"]["git_dirty"]:
+    if validated["source"]["git_dirty"] and not _dirty_source_is_registered(ROOT):
         raise RuntimeError(
             "prospective FLUX cache evidence requires a clean Git worktree; "
-            "commit or stash source changes before collecting"
+            "commit/stash changes or register the exact Python source hash"
         )
     return validated
 
@@ -387,10 +419,10 @@ def build_evaluation_protocol(metric_config: Mapping[str, Any]) -> dict[str, Any
         "sha256": canonical_sha256(payload),
     }
     validated = validate_evaluation_protocol(protocol)
-    if validated["source"]["git_dirty"]:
+    if validated["source"]["git_dirty"] and not _dirty_source_is_registered(ROOT):
         raise RuntimeError(
             "prospective FLUX cache quality evidence requires a clean Git "
-            "worktree; commit or stash source changes before evaluating"
+            "worktree or an exact registered Python source hash"
         )
     return validated
 

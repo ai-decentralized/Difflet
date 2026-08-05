@@ -239,12 +239,9 @@ class NeuronFluxApplication(MultiComponentApplication):
             "cache_recovery_steps": cache_recovery_steps,
             "cache_require_final_anchor": cache_require_final_anchor,
         }
-        recovery_selected = any(
-            value is not None for value in recovery_options.values()
-        )
+        recovery_selected = any(value is not None for value in recovery_options.values())
         probe_free_selected = (
-            teacache_cadence is not None
-            or teacache_online_delta_alpha is not None
+            teacache_cadence is not None or teacache_online_delta_alpha is not None
         )
         old_cache_selected = any(
             value is not None
@@ -274,9 +271,7 @@ class NeuronFluxApplication(MultiComponentApplication):
             or teacache_cadence <= 0
         ):
             raise ValueError("teacache_cadence must be a positive integer")
-        if teacache_online_delta_alpha is not None and float(
-            teacache_online_delta_alpha
-        ) <= 0.0:
+        if teacache_online_delta_alpha is not None and float(teacache_online_delta_alpha) <= 0.0:
             raise ValueError("teacache_online_delta_alpha must be positive")
         if plan_selected and (
             mask_selected
@@ -295,25 +290,15 @@ class NeuronFluxApplication(MultiComponentApplication):
             raise ValueError(
                 "cache_mask_file and legacy teacache configuration are mutually exclusive"
             )
-        if not mask_selected and any(
-            value is not None for value in predictor_options.values()
-        ):
-            raise ValueError(
-                "cache predictor overrides require cache_mask_file"
-            )
+        if not mask_selected and any(value is not None for value in predictor_options.values()):
+            raise ValueError("cache predictor overrides require cache_mask_file")
         if recovery_selected and (
             teacache_speedup is not None
             or teacache_calibration is not None
             or teacache_calibration_path is not None
         ):
-            raise ValueError(
-                "cache recovery overrides are not supported by calibrated TeaCache"
-            )
-        if (
-            not mask_selected
-            and recovery_selected
-            and not probe_free_selected
-        ):
+            raise ValueError("cache recovery overrides are not supported by calibrated TeaCache")
+        if not mask_selected and recovery_selected and not probe_free_selected:
             raise ValueError(
                 "cache recovery overrides require cache_mask_file, "
                 "teacache_cadence, or teacache_online_delta_alpha"
@@ -328,9 +313,9 @@ class NeuronFluxApplication(MultiComponentApplication):
                 load_cache_plan,
             )
 
-            if (
-                plan_selected or mask_selected
-            ) and getattr(backbone_config, "cfg_parallel_enabled", False):
+            if (plan_selected or mask_selected) and getattr(
+                backbone_config, "cfg_parallel_enabled", False
+            ):
                 raise ValueError(
                     "Flux cache plans/masks require cfg_parallel_enabled=False; "
                     "one shared predictor history cannot represent split CFG branches"
@@ -341,15 +326,11 @@ class NeuronFluxApplication(MultiComponentApplication):
                 assert cache_mask_file is not None
                 assert cache_predictor is not None
                 if cache_predictor not in ("legacy_residual", "taylorseer"):
-                    raise ValueError(
-                        "cache_predictor must be 'legacy_residual' or 'taylorseer'"
-                    )
+                    raise ValueError("cache_predictor must be 'legacy_residual' or 'taylorseer'")
                 coord = cache_predictor_coord or "index"
                 if cache_predictor == "legacy_residual":
                     if cache_predictor_order is not None:
-                        raise ValueError(
-                            "cache_predictor_order applies only to taylorseer"
-                        )
+                        raise ValueError("cache_predictor_order applies only to taylorseer")
                     self._cache_predictor_spec = {
                         "type": "legacy_residual",
                         "coord": coord,
@@ -363,9 +344,7 @@ class NeuronFluxApplication(MultiComponentApplication):
                 self._cache_mask = load_cache_mask(cache_mask_file)
                 self._cache_recovery_config = QualityRecoveryConfig(
                     warmup_steps=(
-                        0
-                        if cache_recovery_warmup_steps is None
-                        else cache_recovery_warmup_steps
+                        0 if cache_recovery_warmup_steps is None else cache_recovery_warmup_steps
                     ),
                     cooldown_steps=(
                         0
@@ -374,9 +353,7 @@ class NeuronFluxApplication(MultiComponentApplication):
                     ),
                     require_final_anchor=bool(cache_require_final_anchor),
                     max_consecutive_predictions=cache_recovery_max_consecutive,
-                    recovery_steps=(
-                        1 if cache_recovery_steps is None else cache_recovery_steps
-                    ),
+                    recovery_steps=(1 if cache_recovery_steps is None else cache_recovery_steps),
                 )
             if probe_free_selected:
                 from difflet.pipeline.teacache import (
@@ -397,9 +374,7 @@ class NeuronFluxApplication(MultiComponentApplication):
                     ),
                     require_final_anchor=bool(cache_require_final_anchor),
                     max_consecutive_predictions=cache_recovery_max_consecutive,
-                    recovery_steps=(
-                        1 if cache_recovery_steps is None else cache_recovery_steps
-                    ),
+                    recovery_steps=(1 if cache_recovery_steps is None else cache_recovery_steps),
                 )
 
         # Neuron applications replace these modules immediately below. Passing
@@ -521,10 +496,7 @@ class NeuronFluxApplication(MultiComponentApplication):
 
         if self._cache_plan is not None or self._cache_mask is not None:
             self._prepare_cache_session(*args, **kwargs)
-        elif (
-            self._teacache_cadence is not None
-            or self._teacache_online_delta_alpha is not None
-        ):
+        elif self._teacache_cadence is not None or self._teacache_online_delta_alpha is not None:
             self._prepare_probe_free_teacache(*args, **kwargs)
         return self.pipe(*args, **kwargs)
 
@@ -538,9 +510,7 @@ class NeuronFluxApplication(MultiComponentApplication):
         else:
             parameter = signature.parameters.get("num_inference_steps")
             if parameter is None or parameter.default is inspect.Parameter.empty:
-                raise TypeError(
-                    "FLUX pipeline must declare a default for num_inference_steps"
-                )
+                raise TypeError("FLUX pipeline must declare a default for num_inference_steps")
             requested_steps = call.get("num_inference_steps", parameter.default)
             if isinstance(requested_steps, bool) or not isinstance(requested_steps, int):
                 raise TypeError("num_inference_steps must be an integer")
@@ -583,9 +553,7 @@ class NeuronFluxApplication(MultiComponentApplication):
             recovery=QualityRecoveryGuard(recovery_config),
         )
         source = (
-            "teacache_cadence"
-            if self._teacache_cadence is not None
-            else "teacache_online_delta"
+            "teacache_cadence" if self._teacache_cadence is not None else "teacache_online_delta"
         )
         session = CacheSession(
             runner,

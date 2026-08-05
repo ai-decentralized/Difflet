@@ -1,0 +1,63 @@
+{
+  "schema": "difflet-flux-cache-spatial-causal-repair-pilot-amendment",
+  "schema_revision": 1,
+  "study_id": "flux-cache-spatial-causal-repair-pilot-2026-08-03-metric-amendment",
+  "evidence_role": "exploratory-routing-only-post-temporal-amendment",
+  "timing": "Frozen after both temporal sweeps and both metric evaluations, before any 4x4 regional image was generated.",
+  "original_protocol": {
+    "path": "benchmark/flux_cache/spatial-causal-repair-pilot.json",
+    "file_sha256": "bd94fc5d42c863983997a7a50dba7f75cdf1d9d1adfc8b37ab78dc91483c9330",
+    "content_sha256": "deeeda1015674a897f43d7f1e004d4b783c647a0f08c5f9e5f312555646c6779"
+  },
+  "reason": "The two frozen aggressive-oil failures selected from adaptive_profile_holdout were reproduced as ImageReward failures, not VQAScore failures. Optimizing VQAScore would therefore target the wrong failure label.",
+  "source_artifacts": {
+    "p011_vqa_sha256": "2a5af05de9bcab3eac93a902a4c370ce3631bf167a109f498e1dcc39da438793",
+    "p015_vqa_sha256": "c8dd4b51298404635d3c0a62ac821ab6c2a500d841f5dcd659d721c25aad8c0d",
+    "combined_image_reward_sha256": "6b74909a5f50f6485b481b23ee5e919865b190f55597a24d59b635e5c0c95fe6",
+    "p011_shadow_trace_sha256": "deb1f52a5abf34bff5efe03e6a8d19a10baa1324ea08f5f60fc15d5f7285eeb3",
+    "p015_shadow_trace_sha256": "48fe0de22c1cc466a3423301acaea0805945f8a4fbc81fa885d30fa8fc83c7bc"
+  },
+  "locked_spatial_targets": [
+    {
+      "prompt_index": 11,
+      "target_step": 24,
+      "triggering_metric": "image_reward",
+      "cache_score": 0.29909753799438477,
+      "full_dit_score": 1.1045750379562378,
+      "full_step_repair_score": 0.5711125731468201,
+      "full_step_repair_gain": 0.2720150351524353,
+      "vqa_cache_score": 0.68359375,
+      "vqa_full_dit_score": 0.8984375,
+      "vqa_contract_harm": 0.21484375,
+      "vqa_failed_contract": false
+    },
+    {
+      "prompt_index": 15,
+      "target_step": 13,
+      "triggering_metric": "image_reward",
+      "cache_score": 0.21124675869941711,
+      "full_dit_score": 1.3550463914871216,
+      "full_step_repair_score": 1.2272692918777466,
+      "full_step_repair_gain": 1.0160225331783295,
+      "vqa_cache_score": 0.84375,
+      "vqa_full_dit_score": 0.80078125,
+      "vqa_contract_harm": -0.04296875,
+      "vqa_failed_contract": false
+    }
+  ],
+  "spatial_evaluation": {
+    "layout": "4x4 equal regions over the 64x64 FLUX token grid",
+    "primary_metric": "image_reward",
+    "diagnostic_metric": "vqa_score",
+    "repair_gain": "primary_metric(single_region_repair) - primary_metric(unmodified_cache)",
+    "causal_concentration": "maximum_positive_region_repair_gain / full_step_repair_gain_at_the_locked_step",
+    "exploratory_threshold": 0.5,
+    "serving_claim": false,
+    "online_shadow_transformer_forbidden": true
+  },
+  "separate_vqa_followup": {
+    "required": true,
+    "reason": "The pastry and firefighter failures in the stage-acceleration study were VQAScore failures and must be studied as a separate population; these two ImageReward-labelled requests cannot answer the prompt-consistency question."
+  },
+  "sha256": "b298d683b681596a0664d1d6d59ed1a4a4fbaf65252108aecc8ed9f0d5785461"
+}
