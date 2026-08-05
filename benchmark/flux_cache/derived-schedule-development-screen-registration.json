@@ -1,0 +1,295 @@
+{
+  "candidate_set": {
+    "content_sha256": "a25a26eef9840cff682d24695c89fd7f97957703a81a99ad3a2f84f7b3b90232",
+    "file_sha256": "06f591f36fb41601010a06b865723bd8bc28c17a5fed5db54ef003ce0ccff47d",
+    "path": "benchmark/flux_cache/derived-schedule-candidate-set.json"
+  },
+  "candidates": [
+    {
+      "anchor_budget": null,
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "content_sha256": "f1e71776ea593b491f496dd278040efdb35ca2f6a9fc04c057f8bcdbfdfea7cf",
+      "family": "legacy_comparator",
+      "file_sha256": "bca87db396d98cf29c8536f17c4640b3aeb7636156498291bf02b9875eda6d25",
+      "path": "benchmark/flux_cache/adaptive-brake-candidate.json"
+    },
+    {
+      "anchor_budget": 12,
+      "candidate_id": "derived-static-a12-o1-index",
+      "content_sha256": "a2e108e3e57491a2d434564118bd0e2d307ba105345515331d1138feda5585a9",
+      "family": "static",
+      "file_sha256": "cf8d84c619b92ea3395d428f34befea994e18316e8321c1af413e599acd3f04e",
+      "path": "benchmark/flux_cache/derived-static-a12-o1-index.json"
+    },
+    {
+      "anchor_budget": 12,
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "content_sha256": "c7eccc28a61e1fb4cc323292e94e9643a7cbd4bee702a759e85d78b03a20ad0c",
+      "family": "combined",
+      "file_sha256": "cbb498c7a8e1467e72950938f969156d79165ab4ea1396634893101255953bc0",
+      "path": "benchmark/flux_cache/derived-static-brake-a12-b2-o1-index.json"
+    },
+    {
+      "anchor_budget": 13,
+      "candidate_id": "derived-static-a13-o1-index",
+      "content_sha256": "068be8030fcd33937e08bf6341f315c7eb047937a33f9afa473b45bf05b63ac0",
+      "family": "static",
+      "file_sha256": "5304db1c753e96a1d901299c903680f0d8fa5b825f8ecc36722cbac960054eaa",
+      "path": "benchmark/flux_cache/derived-static-a13-o1-index.json"
+    },
+    {
+      "anchor_budget": 13,
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "content_sha256": "e13e283885830fb4718890a47c45ec8bd338aaa611180deb7f3749c8703bb207",
+      "family": "combined",
+      "file_sha256": "59612a2267312ca3813c54fc4289c39e481e60b7eff6d314a6324f923b417536",
+      "path": "benchmark/flux_cache/derived-static-brake-a13-b2-o1-index.json"
+    }
+  ],
+  "collection": {
+    "candidate_order": [
+      "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "derived-static-a12-o1-index",
+      "derived-static-brake-a12-b2-o1-index",
+      "derived-static-a13-o1-index",
+      "derived-static-brake-a13-b2-o1-index"
+    ],
+    "collector_argv": [
+      "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+      "scripts/collect_flux_cache_schedule_screen.py",
+      "--registration",
+      "benchmark/flux_cache/derived-schedule-development-screen-registration.json",
+      "--allow-hardware",
+      "--foreground-ack",
+      "I am running the registered derived schedule screen"
+    ],
+    "early_stopping_permitted": false,
+    "evaluator_argv": [
+      "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+      "scripts/flux_cache_schedule_screen.py",
+      "evaluate",
+      "--registration",
+      "benchmark/flux_cache/derived-schedule-development-screen-registration.json",
+      "--semantic-report",
+      "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805/semantic-scores.json",
+      "--speed-manifest",
+      "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805/speedup-candidates-v1.json",
+      "--out",
+      "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805/screen-evaluation.json"
+    ],
+    "expected_unique_semantic_images": 192,
+    "output_directory": "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805",
+    "pipeline_warmup_enabled": true,
+    "retuning_after_collection_starts_permitted": false,
+    "semantic_scorer_argv": [
+      "/home/ubuntu/.venvs/difflet-cache-eval/bin/python",
+      "scripts/evaluate_flux_cache_semantics.py",
+      "--quality-input",
+      "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805/quality-input-v2.json",
+      "--out",
+      "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805/semantic-scores.json",
+      "--metrics",
+      "image_reward",
+      "vqa_score",
+      "--expected-images",
+      "192"
+    ]
+  },
+  "controlled_generation": {
+    "dtype": "bfloat16",
+    "guidance_scale": 3.5,
+    "height": 1024,
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "scheduler_class": "FlowMatchEulerDiscreteScheduler",
+    "scheduler_config_sha256": "d32e7bf63b561cb6aa9101116b0bd3e4946d17af13a0dd1b674f24ca7dae509b",
+    "tp_degree": 4,
+    "width": 1024
+  },
+  "created_at": "2026-08-05T22:00:00Z",
+  "evidence_role": {
+    "profile_selection_permitted": true,
+    "serving_claim_permitted": false,
+    "stage": "derived_schedule_development_screen"
+  },
+  "implementation": {
+    "base_collector": {
+      "file_sha256": "70be04d6413fae8e01c70ca9bbb1ef289ae8ec246de3dd2a91b517d2b3f6ac30",
+      "path": "scripts/collect_flux_cache_ab.py"
+    },
+    "phased_candidate_loader": {
+      "file_sha256": "2e52d4ef78c6ae51d7c20e6db16e0a14622bdf249f5361266c5a9709732bcfd2",
+      "path": "scripts/flux_cache_phased_candidate.py"
+    },
+    "screen_collector": {
+      "file_sha256": "8150878317bb813d596a472338d26be4b44763881b6400bf0df20868d32b8e6a",
+      "path": "scripts/collect_flux_cache_schedule_screen.py"
+    },
+    "screen_evaluator": {
+      "file_sha256": "809d42a1db4c313e02881e30c37765749f579f6f55bd896fc6c10be77640497f",
+      "path": "scripts/flux_cache_schedule_screen.py"
+    },
+    "semantic_scorer": {
+      "file_sha256": "1aeb540b9fa365b1c00d2ae7f47b38c692319b9cbbc33f1fc5853a55c53b0de0",
+      "path": "scripts/evaluate_flux_cache_semantics.py"
+    }
+  },
+  "methodology": {
+    "file_sha256": "4622c84e39cd44458e90a6f832332dcecfa489fbdde71c02a32aa233d24732c0",
+    "methodology_id": "flux-cache-offline-gate-v1",
+    "path": "benchmark/flux_cache/offline-gate-methodology-v1.json"
+  },
+  "metric_identity_source": {
+    "file_sha256": "03cbce3b923093061706b5f46e79c01c498aeff5f23a8e0022ce886cc67bf704",
+    "path": "benchmark/flux_cache/brake-only-methodology-v1-confirmation.json"
+  },
+  "novelty_audit": {
+    "exact_overlap_count": 0,
+    "method": "exact_prompt_text_comparison",
+    "prior_prompt_sources": [
+      {
+        "file_sha256": "4a12ec535a52f44124bd0a8b640be76394792fcdd944441e11483185d669047c",
+        "path": "benchmark/flux_cache/brake-only-confirmation-prompt-suite-v1.json"
+      },
+      {
+        "file_sha256": "ed1135e354ca0b64efe957560073ff810e9816eac3b4a0a33d2107269f26eeb1",
+        "path": "benchmark/flux_cache/extended-profile-holdout-prompts.json"
+      },
+      {
+        "file_sha256": "f2917b14b905aa085452031b32a11ba95516d9861c4e18f9128ebb8e437fd45a",
+        "path": "benchmark/flux_cache/online-signal-failure-enriched-prompts.json"
+      },
+      {
+        "file_sha256": "d0639ba758fd1e3c007035a0c6bc4563be4af16deb1dfe724c072aa1d835f307",
+        "path": "benchmark/flux_cache/online-signal-semantic-stress-prompts.json"
+      },
+      {
+        "file_sha256": "b3d6c0825f4b580d3fa8373223ec74fa22335c847dc4541db439bdaa55cb4451",
+        "path": "benchmark/flux_cache/phase-schedule-development-prompt-suite.json"
+      },
+      {
+        "file_sha256": "615d2e2c082095b6cf9c034084e0b8caca0ce608d559bdf4186e6c1bff0d6979",
+        "path": "benchmark/flux_cache/prompt-suite-v1.json"
+      },
+      {
+        "file_sha256": "4bc1176724a9a115781f87ca483b52354fb90503ad418ebff2d840998ca652b2",
+        "path": "benchmark/flux_cache/signal-confirmation-protocol.json"
+      },
+      {
+        "file_sha256": "b2ae67b67bb927e975a2aa5d6069fe9f23f9ba9f256aa1ace91c4cbd1757e9db",
+        "path": "benchmark/flux_cache/signal-study-protocol.json"
+      },
+      {
+        "file_sha256": "9cfe27caa9aaa6c0a53292676ef358978b65d2a6424baaedf751570c08cb0195",
+        "path": "benchmark/flux_cache/stage-gate-regression-prompts.json"
+      },
+      {
+        "file_sha256": "91f57dfdc302d9b1435d34eb8b79d8c47f1989a57f0e9ffb6478e4dddc563ecd",
+        "path": "benchmark/flux_cache/stage-profile-holdout-prompts.json"
+      },
+      {
+        "file_sha256": "f57796a591107de7a7b302ba8c9b4dcdd84d5bafd70f1e48a500ef6f12ed911f",
+        "path": "benchmark/flux_cache/warmup-vqa-router-holdout-prompts.json"
+      }
+    ],
+    "prior_unique_prompt_count": 346
+  },
+  "parameters_frozen_before_collection": true,
+  "prompt_suite": {
+    "category_counts": {
+      "attribute-binding": 4,
+      "counting": 4,
+      "fine-detail": 4,
+      "interaction": 4,
+      "material-texture": 4,
+      "scene-composition": 4,
+      "spatial-relation": 4,
+      "text-rendering": 4
+    },
+    "file_sha256": "de3b6b61df83efc1c6ea5a695ba32f652fcb469f93f779b11f7963cedf47f5a4",
+    "path": "benchmark/flux_cache/derived-schedule-screen-prompt-suite.json",
+    "prompt_count": 32,
+    "sample_count": 32,
+    "seeds": [
+      3
+    ],
+    "split": "derived_schedule_development_screen",
+    "split_sha256": "1fa80e1ef0c8b6689378e677e007fca594b522395bdecf7d830e764d3e3e3842"
+  },
+  "quality_contract": {
+    "combination": "fail_if_either_metric_fails",
+    "comparison": "strictly_greater_than_metric_margin",
+    "margins": {
+      "image_reward": 0.7824214100837708,
+      "vqa_score": 0.25
+    },
+    "paired_loss": "baseline_score_minus_candidate_score",
+    "weighted_metric_average_forbidden": true
+  },
+  "quality_gate": {
+    "confidence": 0.95,
+    "independent_group_count": 32,
+    "independent_unit": "prompt_index",
+    "maximum_failure_rate_upper_bound": 0.1,
+    "required_failures": 0,
+    "required_upper_bound": 0.08936819898626475
+  },
+  "schema": "difflet-flux-cache-derived-schedule-screen-registration",
+  "schema_revision": 1,
+  "selection_rule": {
+    "eligible_families": [
+      "static",
+      "combined"
+    ],
+    "maximum_representatives_per_family": 1,
+    "no_eligible_representatives_action": "stop_schedule_iteration",
+    "quality_before_speed": true,
+    "within_family": "minimum_total_wall_time_then_candidate_id"
+  },
+  "semantic_metrics": {
+    "image_reward": {
+      "dtype": "float32",
+      "files_by_suffix": {
+        "/ImageReward.pt": "d71dc8d4912bc633c06ab8ef1ef6a81e8199d4369f14b47b29baf1d19de561f6",
+        "/med_config.json": "d8b5029cc3c0124313d17009d043f0701bbe497f3721fa4ceb818720fe665326"
+      },
+      "implementation": "ImageReward.score",
+      "model": "ImageReward-v1.0",
+      "package": "image-reward",
+      "package_version": "1.5",
+      "preprocessing": "official-ImageReward-224-center-crop"
+    },
+    "vqa_score": {
+      "answer_template": "Yes",
+      "dtype": "bfloat16",
+      "files_by_suffix": {
+        "/models--google--flan-t5-xl/snapshots/7d6315df2c2fb742f0f5b556879d730926ca9001/spiece.model": "d60acb128cf7b7f2536e8f38a5b18a05535c9e14c7a355904270e15b0945ea86",
+        "/models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1/pytorch_model.bin": "c6032c2e0caae3dc2d4fba35535fa6307dbb49df59c7e182b1bc4b3329b81801",
+        "/models--zhiqiulin--clip-flant5-xl/snapshots/3b4a6b1b618f4e286f5353b5b5147a3ae7d9ec55/pytorch_model.bin": "9bed8d86ae279f05cc9b8e09c0478afa712fe6df2f14a8486d5a7465de9806cd"
+      },
+      "implementation": "t2v_metrics.CLIPT5Model.forward",
+      "model": "clip-flant5-xl",
+      "package": "t2v-metrics",
+      "package_version": "1.2",
+      "question_template": "Does this figure show \"{}\"? Please answer yes or no.",
+      "repository_revisions": {
+        "google/flan-t5-xl": "7d6315df2c2fb742f0f5b556879d730926ca9001",
+        "openai/clip-vit-large-patch14-336": "ce19dc912ca5cd21c8a653c79e251e808ccabcd1",
+        "zhiqiulin/clip-flant5-xl": "3b4a6b1b618f4e286f5353b5b5147a3ae7d9ec55"
+      }
+    }
+  },
+  "sha256": "26b0882c584293c733a29d065bb0862de21ad522d2e0bff521b539ab97881e28",
+  "speed_gate": {
+    "comparator_candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+    "minimum_bootstrap_lower_bound": 1.0,
+    "minimum_relative_speed": 1.05,
+    "paired_bootstrap_lower_quantile": 0.025,
+    "paired_bootstrap_repetitions": 10000,
+    "paired_bootstrap_seed": 20260805,
+    "relative_speed_estimand": "sum_legacy_wall_time_divided_by_sum_candidate_wall_time"
+  },
+  "status": "registered_not_collected",
+  "study_id": "flux-cache-derived-schedule-development-screen-2026-08-05"
+}
