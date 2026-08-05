@@ -1,0 +1,1704 @@
+{
+  "contradiction_adjudication": {
+    "allowed_conclusion": "Observed rescue horizon depends on the profile family, failure mechanism, and sampled request distribution; neither historical curve is a deployable or model-wide horizon.",
+    "confounds": [
+      "profile family and anchor distribution differ",
+      "prompt and seed populations differ",
+      "two unique requests with six phase targets are not six independent failures",
+      "the stage-oil terminal grid begins at step 15 while the pressure grid includes earlier interventions"
+    ],
+    "extreme_pressure_family": {
+      "candidate_id": "adaptive-vqa-stress-w6-i32-m16-k40-o1-index",
+      "rescued_request_count": 12,
+      "terminal_step": 21,
+      "unique_failure_request_count": 12
+    },
+    "forbidden_conclusions": [
+      "step 21 is a universal last fully rescuable point",
+      "all non-pressure failures are irrecoverable by step 15",
+      "the profile family alone caused the difference",
+      "historical curves may substitute for the registered near-frontier A2 probe"
+    ],
+    "opened_stage_oil_family": {
+      "candidate_id": "adaptive-stage-oil-p30-e1p40-w6-i8-k12-o1-index",
+      "rescued_target_count": 0,
+      "terminal_intervention_target_count": 6,
+      "terminal_target_steps": [
+        15,
+        23,
+        24,
+        33,
+        40
+      ],
+      "unique_failure_request_count": 2,
+      "unique_failure_sample_ids": [
+        "p001-s1",
+        "p014-s0"
+      ]
+    }
+  },
+  "decision": {
+    "a1_complete": true,
+    "a2_still_required": true,
+    "historical_t_full_or_t_dead_may_be_used_for_mask_generation": false,
+    "reason": "The retrospective standardizes historical evidence but the two curves use different profile families and request populations."
+  },
+  "evidence_role": {
+    "a2_or_a3_parameter_changes_permitted": false,
+    "hardware_calls": 0,
+    "opened_historical_data": true,
+    "profile_selection_permitted": false,
+    "serving_claim_permitted": false
+  },
+  "extreme_pressure_rescue": {
+    "R_by_terminal_step": [
+      {
+        "R": 1.0,
+        "mean_brake_benefit": 0.4474283854166667,
+        "rescued_count": 12,
+        "source_failure_count": 12,
+        "terminal_step": 7
+      },
+      {
+        "R": 1.0,
+        "mean_brake_benefit": 0.44970703125,
+        "rescued_count": 12,
+        "source_failure_count": 12,
+        "terminal_step": 13
+      },
+      {
+        "R": 1.0,
+        "mean_brake_benefit": 0.4197591145833333,
+        "rescued_count": 12,
+        "source_failure_count": 12,
+        "terminal_step": 21
+      },
+      {
+        "R": 0.6666666666666666,
+        "mean_brake_benefit": 0.2639973958333333,
+        "rescued_count": 8,
+        "source_failure_count": 12,
+        "terminal_step": 29
+      },
+      {
+        "R": 0.08333333333333333,
+        "mean_brake_benefit": -0.0184326171875,
+        "rescued_count": 1,
+        "source_failure_count": 12,
+        "terminal_step": 37
+      }
+    ],
+    "candidate_id": "adaptive-vqa-stress-w6-i32-m16-k40-o1-index",
+    "metric_coverage": [
+      "vqa_score"
+    ],
+    "per_request": [
+      {
+        "continue_cache_vqa_harm": 0.607421875,
+        "latest_tested_rescued_step": 21,
+        "outcomes": [
+          {
+            "baseline_vqa": 0.8984375,
+            "brake_benefit": 0.607421875,
+            "continue_cache_vqa_harm": 0.607421875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 7,
+            "terminal_vqa": 0.8984375,
+            "terminal_vqa_harm": 0.0
+          },
+          {
+            "baseline_vqa": 0.8984375,
+            "brake_benefit": 0.576171875,
+            "continue_cache_vqa_harm": 0.607421875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 13,
+            "terminal_vqa": 0.8671875,
+            "terminal_vqa_harm": 0.03125
+          },
+          {
+            "baseline_vqa": 0.8984375,
+            "brake_benefit": 0.611328125,
+            "continue_cache_vqa_harm": 0.607421875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 21,
+            "terminal_vqa": 0.90234375,
+            "terminal_vqa_harm": -0.00390625
+          },
+          {
+            "baseline_vqa": 0.8984375,
+            "brake_benefit": 0.029296875,
+            "continue_cache_vqa_harm": 0.607421875,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 29,
+            "terminal_vqa": 0.3203125,
+            "terminal_vqa_harm": 0.578125
+          },
+          {
+            "baseline_vqa": 0.8984375,
+            "brake_benefit": 0.037109375,
+            "continue_cache_vqa_harm": 0.607421875,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 37,
+            "terminal_vqa": 0.328125,
+            "terminal_vqa_harm": 0.5703125
+          }
+        ],
+        "prompt": "a round table set for six guests with exactly six plates, six glasses, and six folded napkins in alternating blue and white",
+        "sample_id": "p010-s2",
+        "seed": 2,
+        "semantic_tags": [
+          "counting",
+          "attribute_binding",
+          "alternation"
+        ]
+      },
+      {
+        "continue_cache_vqa_harm": 0.55859375,
+        "latest_tested_rescued_step": 21,
+        "outcomes": [
+          {
+            "baseline_vqa": 0.95703125,
+            "brake_benefit": 0.546875,
+            "continue_cache_vqa_harm": 0.55859375,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 7,
+            "terminal_vqa": 0.9453125,
+            "terminal_vqa_harm": 0.01171875
+          },
+          {
+            "baseline_vqa": 0.95703125,
+            "brake_benefit": 0.53515625,
+            "continue_cache_vqa_harm": 0.55859375,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 13,
+            "terminal_vqa": 0.93359375,
+            "terminal_vqa_harm": 0.0234375
+          },
+          {
+            "baseline_vqa": 0.95703125,
+            "brake_benefit": 0.56640625,
+            "continue_cache_vqa_harm": 0.55859375,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 21,
+            "terminal_vqa": 0.96484375,
+            "terminal_vqa_harm": -0.0078125
+          },
+          {
+            "baseline_vqa": 0.95703125,
+            "brake_benefit": 0.21484375,
+            "continue_cache_vqa_harm": 0.55859375,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 29,
+            "terminal_vqa": 0.61328125,
+            "terminal_vqa_harm": 0.34375
+          },
+          {
+            "baseline_vqa": 0.95703125,
+            "brake_benefit": -0.091796875,
+            "continue_cache_vqa_harm": 0.55859375,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 37,
+            "terminal_vqa": 0.306640625,
+            "terminal_vqa_harm": 0.650390625
+          }
+        ],
+        "prompt": "four chefs piping four different frosting patterns onto four cakes arranged from smallest to largest",
+        "sample_id": "p019-s2",
+        "seed": 2,
+        "semantic_tags": [
+          "counting",
+          "attribute_binding",
+          "ordering"
+        ]
+      },
+      {
+        "continue_cache_vqa_harm": 0.494140625,
+        "latest_tested_rescued_step": 29,
+        "outcomes": [
+          {
+            "baseline_vqa": 0.9375,
+            "brake_benefit": 0.474609375,
+            "continue_cache_vqa_harm": 0.494140625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 7,
+            "terminal_vqa": 0.91796875,
+            "terminal_vqa_harm": 0.01953125
+          },
+          {
+            "baseline_vqa": 0.9375,
+            "brake_benefit": 0.435546875,
+            "continue_cache_vqa_harm": 0.494140625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 13,
+            "terminal_vqa": 0.87890625,
+            "terminal_vqa_harm": 0.05859375
+          },
+          {
+            "baseline_vqa": 0.9375,
+            "brake_benefit": 0.263671875,
+            "continue_cache_vqa_harm": 0.494140625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 21,
+            "terminal_vqa": 0.70703125,
+            "terminal_vqa_harm": 0.23046875
+          },
+          {
+            "baseline_vqa": 0.9375,
+            "brake_benefit": 0.455078125,
+            "continue_cache_vqa_harm": 0.494140625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 29,
+            "terminal_vqa": 0.8984375,
+            "terminal_vqa_harm": 0.0390625
+          },
+          {
+            "baseline_vqa": 0.9375,
+            "brake_benefit": -0.1640625,
+            "continue_cache_vqa_harm": 0.494140625,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 37,
+            "terminal_vqa": 0.279296875,
+            "terminal_vqa_harm": 0.658203125
+          }
+        ],
+        "prompt": "three astronauts tethered by thin white lines to a spacecraft, with one astronaut above it and two below it",
+        "sample_id": "p020-s2",
+        "seed": 2,
+        "semantic_tags": [
+          "counting",
+          "spatial_relation",
+          "relation_binding"
+        ]
+      },
+      {
+        "continue_cache_vqa_harm": 0.28515625,
+        "latest_tested_rescued_step": 29,
+        "outcomes": [
+          {
+            "baseline_vqa": 0.8828125,
+            "brake_benefit": 0.2578125,
+            "continue_cache_vqa_harm": 0.28515625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 7,
+            "terminal_vqa": 0.85546875,
+            "terminal_vqa_harm": 0.02734375
+          },
+          {
+            "baseline_vqa": 0.8828125,
+            "brake_benefit": 0.22265625,
+            "continue_cache_vqa_harm": 0.28515625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 13,
+            "terminal_vqa": 0.8203125,
+            "terminal_vqa_harm": 0.0625
+          },
+          {
+            "baseline_vqa": 0.8828125,
+            "brake_benefit": 0.078125,
+            "continue_cache_vqa_harm": 0.28515625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 21,
+            "terminal_vqa": 0.67578125,
+            "terminal_vqa_harm": 0.20703125
+          },
+          {
+            "baseline_vqa": 0.8828125,
+            "brake_benefit": 0.05078125,
+            "continue_cache_vqa_harm": 0.28515625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 29,
+            "terminal_vqa": 0.6484375,
+            "terminal_vqa_harm": 0.234375
+          },
+          {
+            "baseline_vqa": 0.8828125,
+            "brake_benefit": 0.02734375,
+            "continue_cache_vqa_harm": 0.28515625,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 37,
+            "terminal_vqa": 0.625,
+            "terminal_vqa_harm": 0.2578125
+          }
+        ],
+        "prompt": "five paper boats floating in a row, numbered one to five, with boat three passing under a tiny arched bridge",
+        "sample_id": "p028-s2",
+        "seed": 2,
+        "semantic_tags": [
+          "counting",
+          "ordering",
+          "spatial_relation"
+        ]
+      },
+      {
+        "continue_cache_vqa_harm": 0.6806640625,
+        "latest_tested_rescued_step": 29,
+        "outcomes": [
+          {
+            "baseline_vqa": 0.84375,
+            "brake_benefit": 0.6728515625,
+            "continue_cache_vqa_harm": 0.6806640625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 7,
+            "terminal_vqa": 0.8359375,
+            "terminal_vqa_harm": 0.0078125
+          },
+          {
+            "baseline_vqa": 0.84375,
+            "brake_benefit": 0.7197265625,
+            "continue_cache_vqa_harm": 0.6806640625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 13,
+            "terminal_vqa": 0.8828125,
+            "terminal_vqa_harm": -0.0390625
+          },
+          {
+            "baseline_vqa": 0.84375,
+            "brake_benefit": 0.5126953125,
+            "continue_cache_vqa_harm": 0.6806640625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 21,
+            "terminal_vqa": 0.67578125,
+            "terminal_vqa_harm": 0.16796875
+          },
+          {
+            "baseline_vqa": 0.84375,
+            "brake_benefit": 0.4736328125,
+            "continue_cache_vqa_harm": 0.6806640625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 29,
+            "terminal_vqa": 0.63671875,
+            "terminal_vqa_harm": 0.20703125
+          },
+          {
+            "baseline_vqa": 0.84375,
+            "brake_benefit": 0.0546875,
+            "continue_cache_vqa_harm": 0.6806640625,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 37,
+            "terminal_vqa": 0.2177734375,
+            "terminal_vqa_harm": 0.6259765625
+          }
+        ],
+        "prompt": "four planets aligned diagonally behind a silver satellite whose two thin solar panels extend horizontally",
+        "sample_id": "p029-s2",
+        "seed": 2,
+        "semantic_tags": [
+          "counting",
+          "spatial_relation",
+          "orientation"
+        ]
+      },
+      {
+        "continue_cache_vqa_harm": 0.28125,
+        "latest_tested_rescued_step": 29,
+        "outcomes": [
+          {
+            "baseline_vqa": 0.94921875,
+            "brake_benefit": 0.28125,
+            "continue_cache_vqa_harm": 0.28125,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 7,
+            "terminal_vqa": 0.94921875,
+            "terminal_vqa_harm": 0.0
+          },
+          {
+            "baseline_vqa": 0.94921875,
+            "brake_benefit": 0.2734375,
+            "continue_cache_vqa_harm": 0.28125,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 13,
+            "terminal_vqa": 0.94140625,
+            "terminal_vqa_harm": 0.0078125
+          },
+          {
+            "baseline_vqa": 0.94921875,
+            "brake_benefit": 0.24609375,
+            "continue_cache_vqa_harm": 0.28125,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 21,
+            "terminal_vqa": 0.9140625,
+            "terminal_vqa_harm": 0.03515625
+          },
+          {
+            "baseline_vqa": 0.94921875,
+            "brake_benefit": 0.23046875,
+            "continue_cache_vqa_harm": 0.28125,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 29,
+            "terminal_vqa": 0.8984375,
+            "terminal_vqa_harm": 0.05078125
+          },
+          {
+            "baseline_vqa": 0.94921875,
+            "brake_benefit": -0.0234375,
+            "continue_cache_vqa_harm": 0.28125,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 37,
+            "terminal_vqa": 0.64453125,
+            "terminal_vqa_harm": 0.3046875
+          }
+        ],
+        "prompt": "seven colored pencils threaded through separate loops of a white ribbon in rainbow order",
+        "sample_id": "p030-s2",
+        "seed": 2,
+        "semantic_tags": [
+          "counting",
+          "ordering",
+          "relation_binding"
+        ]
+      },
+      {
+        "continue_cache_vqa_harm": 0.703125,
+        "latest_tested_rescued_step": 29,
+        "outcomes": [
+          {
+            "baseline_vqa": 0.890625,
+            "brake_benefit": 0.6875,
+            "continue_cache_vqa_harm": 0.703125,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 7,
+            "terminal_vqa": 0.875,
+            "terminal_vqa_harm": 0.015625
+          },
+          {
+            "baseline_vqa": 0.890625,
+            "brake_benefit": 0.7265625,
+            "continue_cache_vqa_harm": 0.703125,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 13,
+            "terminal_vqa": 0.9140625,
+            "terminal_vqa_harm": -0.0234375
+          },
+          {
+            "baseline_vqa": 0.890625,
+            "brake_benefit": 0.69140625,
+            "continue_cache_vqa_harm": 0.703125,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 21,
+            "terminal_vqa": 0.87890625,
+            "terminal_vqa_harm": 0.01171875
+          },
+          {
+            "baseline_vqa": 0.890625,
+            "brake_benefit": 0.7109375,
+            "continue_cache_vqa_harm": 0.703125,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 29,
+            "terminal_vqa": 0.8984375,
+            "terminal_vqa_harm": -0.0078125
+          },
+          {
+            "baseline_vqa": 0.890625,
+            "brake_benefit": 0.083984375,
+            "continue_cache_vqa_harm": 0.703125,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 37,
+            "terminal_vqa": 0.271484375,
+            "terminal_vqa_harm": 0.619140625
+          }
+        ],
+        "prompt": "three horses inside a wooden fence and five sheep outside it, with a red gate positioned between the groups",
+        "sample_id": "p031-s2",
+        "seed": 2,
+        "semantic_tags": [
+          "counting",
+          "spatial_relation",
+          "group_binding"
+        ]
+      },
+      {
+        "continue_cache_vqa_harm": 0.48046875,
+        "latest_tested_rescued_step": 21,
+        "outcomes": [
+          {
+            "baseline_vqa": 0.9296875,
+            "brake_benefit": 0.4375,
+            "continue_cache_vqa_harm": 0.48046875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 7,
+            "terminal_vqa": 0.88671875,
+            "terminal_vqa_harm": 0.04296875
+          },
+          {
+            "baseline_vqa": 0.9296875,
+            "brake_benefit": 0.49609375,
+            "continue_cache_vqa_harm": 0.48046875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 13,
+            "terminal_vqa": 0.9453125,
+            "terminal_vqa_harm": -0.015625
+          },
+          {
+            "baseline_vqa": 0.9296875,
+            "brake_benefit": 0.45703125,
+            "continue_cache_vqa_harm": 0.48046875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 21,
+            "terminal_vqa": 0.90625,
+            "terminal_vqa_harm": 0.0234375
+          },
+          {
+            "baseline_vqa": 0.9296875,
+            "brake_benefit": 0.09375,
+            "continue_cache_vqa_harm": 0.48046875,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 29,
+            "terminal_vqa": 0.54296875,
+            "terminal_vqa_harm": 0.38671875
+          },
+          {
+            "baseline_vqa": 0.9296875,
+            "brake_benefit": 0.029296875,
+            "continue_cache_vqa_harm": 0.48046875,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 37,
+            "terminal_vqa": 0.478515625,
+            "terminal_vqa_harm": 0.451171875
+          }
+        ],
+        "prompt": "four acrobats forming a human pyramid with three people on the bottom and one person on top, all holding thin ribbons",
+        "sample_id": "p033-s2",
+        "seed": 2,
+        "semantic_tags": [
+          "counting",
+          "spatial_relation",
+          "group_binding"
+        ]
+      },
+      {
+        "continue_cache_vqa_harm": 0.421875,
+        "latest_tested_rescued_step": 21,
+        "outcomes": [
+          {
+            "baseline_vqa": 0.95703125,
+            "brake_benefit": 0.4296875,
+            "continue_cache_vqa_harm": 0.421875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 7,
+            "terminal_vqa": 0.96484375,
+            "terminal_vqa_harm": -0.0078125
+          },
+          {
+            "baseline_vqa": 0.95703125,
+            "brake_benefit": 0.42578125,
+            "continue_cache_vqa_harm": 0.421875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 13,
+            "terminal_vqa": 0.9609375,
+            "terminal_vqa_harm": -0.00390625
+          },
+          {
+            "baseline_vqa": 0.95703125,
+            "brake_benefit": 0.4375,
+            "continue_cache_vqa_harm": 0.421875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 21,
+            "terminal_vqa": 0.97265625,
+            "terminal_vqa_harm": -0.015625
+          },
+          {
+            "baseline_vqa": 0.95703125,
+            "brake_benefit": -0.103515625,
+            "continue_cache_vqa_harm": 0.421875,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 29,
+            "terminal_vqa": 0.431640625,
+            "terminal_vqa_harm": 0.525390625
+          },
+          {
+            "baseline_vqa": 0.95703125,
+            "brake_benefit": -0.076171875,
+            "continue_cache_vqa_harm": 0.421875,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 37,
+            "terminal_vqa": 0.458984375,
+            "terminal_vqa_harm": 0.498046875
+          }
+        ],
+        "prompt": "two firefighters aiming crossed water hoses above three orange traffic cones in front of a brick building",
+        "sample_id": "p035-s2",
+        "seed": 2,
+        "semantic_tags": [
+          "counting",
+          "spatial_relation",
+          "crossing_relation"
+        ]
+      },
+      {
+        "continue_cache_vqa_harm": 0.3134765625,
+        "latest_tested_rescued_step": 29,
+        "outcomes": [
+          {
+            "baseline_vqa": 0.42578125,
+            "brake_benefit": 0.2978515625,
+            "continue_cache_vqa_harm": 0.3134765625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 7,
+            "terminal_vqa": 0.41015625,
+            "terminal_vqa_harm": 0.015625
+          },
+          {
+            "baseline_vqa": 0.42578125,
+            "brake_benefit": 0.3369140625,
+            "continue_cache_vqa_harm": 0.3134765625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 13,
+            "terminal_vqa": 0.44921875,
+            "terminal_vqa_harm": -0.0234375
+          },
+          {
+            "baseline_vqa": 0.42578125,
+            "brake_benefit": 0.4580078125,
+            "continue_cache_vqa_harm": 0.3134765625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 21,
+            "terminal_vqa": 0.5703125,
+            "terminal_vqa_harm": -0.14453125
+          },
+          {
+            "baseline_vqa": 0.42578125,
+            "brake_benefit": 0.4853515625,
+            "continue_cache_vqa_harm": 0.3134765625,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 29,
+            "terminal_vqa": 0.59765625,
+            "terminal_vqa_harm": -0.171875
+          },
+          {
+            "baseline_vqa": 0.42578125,
+            "brake_benefit": -0.03759765625,
+            "continue_cache_vqa_harm": 0.3134765625,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 37,
+            "terminal_vqa": 0.07470703125,
+            "terminal_vqa_harm": 0.35107421875
+          }
+        ],
+        "prompt": "three foxes walking behind a fallen log while four rabbits sit in front of it among small white flowers",
+        "sample_id": "p037-s2",
+        "seed": 2,
+        "semantic_tags": [
+          "counting",
+          "spatial_relation",
+          "group_binding"
+        ]
+      },
+      {
+        "continue_cache_vqa_harm": 0.26171875,
+        "latest_tested_rescued_step": 37,
+        "outcomes": [
+          {
+            "baseline_vqa": 0.8984375,
+            "brake_benefit": 0.23828125,
+            "continue_cache_vqa_harm": 0.26171875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 7,
+            "terminal_vqa": 0.875,
+            "terminal_vqa_harm": 0.0234375
+          },
+          {
+            "baseline_vqa": 0.8984375,
+            "brake_benefit": 0.203125,
+            "continue_cache_vqa_harm": 0.26171875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 13,
+            "terminal_vqa": 0.83984375,
+            "terminal_vqa_harm": 0.05859375
+          },
+          {
+            "baseline_vqa": 0.8984375,
+            "brake_benefit": 0.26171875,
+            "continue_cache_vqa_harm": 0.26171875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 21,
+            "terminal_vqa": 0.8984375,
+            "terminal_vqa_harm": 0.0
+          },
+          {
+            "baseline_vqa": 0.8984375,
+            "brake_benefit": 0.21484375,
+            "continue_cache_vqa_harm": 0.26171875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 29,
+            "terminal_vqa": 0.8515625,
+            "terminal_vqa_harm": 0.046875
+          },
+          {
+            "baseline_vqa": 0.8984375,
+            "brake_benefit": 0.01953125,
+            "continue_cache_vqa_harm": 0.26171875,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 37,
+            "terminal_vqa": 0.65625,
+            "terminal_vqa_harm": 0.2421875
+          }
+        ],
+        "prompt": "six chess pieces arranged left to right as king, queen, bishop, knight, rook, and pawn on separate black squares",
+        "sample_id": "p038-s2",
+        "seed": 2,
+        "semantic_tags": [
+          "counting",
+          "ordering",
+          "identity_binding"
+        ]
+      },
+      {
+        "continue_cache_vqa_harm": 0.453125,
+        "latest_tested_rescued_step": 29,
+        "outcomes": [
+          {
+            "baseline_vqa": 0.92578125,
+            "brake_benefit": 0.4375,
+            "continue_cache_vqa_harm": 0.453125,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 7,
+            "terminal_vqa": 0.91015625,
+            "terminal_vqa_harm": 0.015625
+          },
+          {
+            "baseline_vqa": 0.92578125,
+            "brake_benefit": 0.4453125,
+            "continue_cache_vqa_harm": 0.453125,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 13,
+            "terminal_vqa": 0.91796875,
+            "terminal_vqa_harm": 0.0078125
+          },
+          {
+            "baseline_vqa": 0.92578125,
+            "brake_benefit": 0.453125,
+            "continue_cache_vqa_harm": 0.453125,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 21,
+            "terminal_vqa": 0.92578125,
+            "terminal_vqa_harm": 0.0
+          },
+          {
+            "baseline_vqa": 0.92578125,
+            "brake_benefit": 0.3125,
+            "continue_cache_vqa_harm": 0.453125,
+            "prefix_matches_continue_cache": true,
+            "rescued": true,
+            "terminal_step": 29,
+            "terminal_vqa": 0.78515625,
+            "terminal_vqa_harm": 0.140625
+          },
+          {
+            "baseline_vqa": 0.92578125,
+            "brake_benefit": -0.080078125,
+            "continue_cache_vqa_harm": 0.453125,
+            "prefix_matches_continue_cache": true,
+            "rescued": false,
+            "terminal_step": 37,
+            "terminal_vqa": 0.392578125,
+            "terminal_vqa_harm": 0.533203125
+          }
+        ],
+        "prompt": "three fishing boats towing separate nets while four seabirds fly in a line between the boats and the horizon",
+        "sample_id": "p045-s2",
+        "seed": 2,
+        "semantic_tags": [
+          "counting",
+          "spatial_relation",
+          "relation_binding"
+        ]
+      }
+    ],
+    "registered_summary_reconciliation": {
+      "all_mean_brake_benefits_match_exactly": false,
+      "all_source_and_rescue_counts_match": true,
+      "basis": "recomputed_from_bound_per_request_semantic_artifacts",
+      "interpretation": "Request-level recomputation is reported without replacing or silently rounding the registered historical summary.",
+      "rows": [
+        {
+          "mean_brake_benefit_difference": 0.0,
+          "recomputed_mean_brake_benefit": 0.4474283854166667,
+          "recomputed_rescued_count": 12,
+          "recomputed_source_failure_count": 12,
+          "registered_mean_brake_benefit": 0.4474283854166667,
+          "registered_rescued_count": 12,
+          "registered_source_failure_count": 12,
+          "terminal_step": 7
+        },
+        {
+          "mean_brake_benefit_difference": 0.0,
+          "recomputed_mean_brake_benefit": 0.44970703125,
+          "recomputed_rescued_count": 12,
+          "recomputed_source_failure_count": 12,
+          "registered_mean_brake_benefit": 0.44970703125,
+          "registered_rescued_count": 12,
+          "registered_source_failure_count": 12,
+          "terminal_step": 13
+        },
+        {
+          "mean_brake_benefit_difference": 0.0,
+          "recomputed_mean_brake_benefit": 0.4197591145833333,
+          "recomputed_rescued_count": 12,
+          "recomputed_source_failure_count": 12,
+          "registered_mean_brake_benefit": 0.4197591145833333,
+          "registered_rescued_count": 12,
+          "registered_source_failure_count": 12,
+          "terminal_step": 21
+        },
+        {
+          "mean_brake_benefit_difference": 0.0,
+          "recomputed_mean_brake_benefit": 0.2639973958333333,
+          "recomputed_rescued_count": 8,
+          "recomputed_source_failure_count": 12,
+          "registered_mean_brake_benefit": 0.2639973958333333,
+          "registered_rescued_count": 8,
+          "registered_source_failure_count": 12,
+          "terminal_step": 29
+        },
+        {
+          "mean_brake_benefit_difference": -4.069010416666782e-05,
+          "recomputed_mean_brake_benefit": -0.0184326171875,
+          "recomputed_rescued_count": 1,
+          "recomputed_source_failure_count": 12,
+          "registered_mean_brake_benefit": -0.018391927083333332,
+          "registered_rescued_count": 1,
+          "registered_source_failure_count": 12,
+          "terminal_step": 37
+        }
+      ]
+    },
+    "request_count": 12,
+    "semantic_diagnosis": {
+      "gate_use_permitted": false,
+      "profile_selection_use_permitted": false,
+      "sample_size_warning": "Four step-29 non-rescues support description only.",
+      "step29_unrescued_sample_ids": [
+        "p010-s2",
+        "p019-s2",
+        "p033-s2",
+        "p035-s2"
+      ],
+      "step29_unrescued_shared_tags": [
+        "counting"
+      ],
+      "tag_counts": [
+        {
+          "all_source_failures": 1,
+          "step29_unrescued": 1,
+          "tag": "alternation"
+        },
+        {
+          "all_source_failures": 2,
+          "step29_unrescued": 2,
+          "tag": "attribute_binding"
+        },
+        {
+          "all_source_failures": 12,
+          "step29_unrescued": 4,
+          "tag": "counting"
+        },
+        {
+          "all_source_failures": 1,
+          "step29_unrescued": 1,
+          "tag": "crossing_relation"
+        },
+        {
+          "all_source_failures": 3,
+          "step29_unrescued": 1,
+          "tag": "group_binding"
+        },
+        {
+          "all_source_failures": 1,
+          "step29_unrescued": 0,
+          "tag": "identity_binding"
+        },
+        {
+          "all_source_failures": 4,
+          "step29_unrescued": 1,
+          "tag": "ordering"
+        },
+        {
+          "all_source_failures": 1,
+          "step29_unrescued": 0,
+          "tag": "orientation"
+        },
+        {
+          "all_source_failures": 3,
+          "step29_unrescued": 0,
+          "tag": "relation_binding"
+        },
+        {
+          "all_source_failures": 8,
+          "step29_unrescued": 2,
+          "tag": "spatial_relation"
+        }
+      ],
+      "taxonomy_origin": "posthoc_manual_prompt_text_multilabel"
+    }
+  },
+  "implementation": {
+    "file_sha256": "fb27f821c76ca30fd7902e6652e38285775fff7354e4fabddedfaf5dbf7b39e9",
+    "path": "scripts/flux_cache_phase_schedule_retrospective.py"
+  },
+  "inputs": {
+    "brake_intervention_pilot_result": {
+      "content_sha256": "906ce8cef16766ffe5c2492a2f25e1f95a13e6899f09eda5bc6fe24448b0f683",
+      "file_sha256": "40446060a911872a5e3af0e98d02bcef3e9a12600e3fa8b39926cadcf1d991ab",
+      "path": "benchmark/flux_cache/brake-intervention-pilot-result.json",
+      "schema": "difflet-flux-cache-brake-intervention-pilot-result",
+      "schema_revision": 1
+    },
+    "causal_label_result": {
+      "content_sha256": "cbb532986c7c0541b99a6a7a1770306d4097a761c2a621e993a25589e23242ac",
+      "file_sha256": "ea91c371e4cfcd11144835ddd5ff73a937be2cb05e1951c36d7f3491aeff2b83",
+      "path": "benchmark/flux_cache/terminal-brake-causal-label-result.json",
+      "schema": "difflet-flux-cache-terminal-brake-causal-label-result",
+      "schema_revision": 1
+    },
+    "step21_futility_result": {
+      "content_sha256": "d5751d62d224c1d1c3279ef0c592d75c078897c3f2ee010dd9e519d46fa1eb9f",
+      "file_sha256": "b51eacec02f5e4a92efde5246f36d2378ddf65989cc5d7969e2ae60c1120864d",
+      "path": "benchmark/flux_cache/terminal-brake-step21-futility-result.json",
+      "schema": "difflet-flux-cache-terminal-brake-step21-futility-result",
+      "schema_revision": 1
+    },
+    "terminal_brake_followup_result": {
+      "content_sha256": "431195866feb17fde829270173edd8a894ab95cba36a0146482403a799a7cfa9",
+      "file_sha256": "5c10cc2e8a954f0a00df61dee32aeedf2a111980236b4c492983a4032ee9c969",
+      "path": "benchmark/flux_cache/terminal-brake-followup-result.json",
+      "schema": "difflet-flux-cache-terminal-brake-followup-result",
+      "schema_revision": 1
+    }
+  },
+  "introduced_failures": {
+    "opened_stage_oil_controls": {
+      "evidence_role": "descriptive_small_n_controls",
+      "introduced_contract_failure_count": 0,
+      "metric_coverage": [
+        "image_reward",
+        "vqa_score"
+      ],
+      "pilot_brake_and_recovery": [
+        {
+          "action": "brake",
+          "action_failed": false,
+          "continue_failed": false,
+          "introduced_contract_failure": false,
+          "outcome": "both_pass",
+          "phase": "early",
+          "sample_id": "p000-s0",
+          "target_step": 15
+        },
+        {
+          "action": "recovery",
+          "action_failed": false,
+          "continue_failed": false,
+          "introduced_contract_failure": false,
+          "outcome": "both_pass",
+          "phase": "early",
+          "sample_id": "p000-s0",
+          "target_step": 15
+        },
+        {
+          "action": "brake",
+          "action_failed": false,
+          "continue_failed": false,
+          "introduced_contract_failure": false,
+          "outcome": "both_pass",
+          "phase": "middle",
+          "sample_id": "p004-s0",
+          "target_step": 23
+        },
+        {
+          "action": "recovery",
+          "action_failed": false,
+          "continue_failed": false,
+          "introduced_contract_failure": false,
+          "outcome": "both_pass",
+          "phase": "middle",
+          "sample_id": "p004-s0",
+          "target_step": 23
+        },
+        {
+          "action": "brake",
+          "action_failed": false,
+          "continue_failed": false,
+          "introduced_contract_failure": false,
+          "outcome": "both_pass",
+          "phase": "late",
+          "sample_id": "p008-s0",
+          "target_step": 33
+        },
+        {
+          "action": "recovery",
+          "action_failed": false,
+          "continue_failed": false,
+          "introduced_contract_failure": false,
+          "outcome": "both_pass",
+          "phase": "late",
+          "sample_id": "p008-s0",
+          "target_step": 33
+        }
+      ],
+      "terminal_followup": [
+        {
+          "action": "terminal_brake",
+          "action_failed": false,
+          "continue_failed": false,
+          "introduced_contract_failure": false,
+          "outcome": "both_pass",
+          "phase": "early",
+          "sample_id": "p000-s0",
+          "target_step": 15
+        },
+        {
+          "action": "terminal_brake",
+          "action_failed": false,
+          "continue_failed": false,
+          "introduced_contract_failure": false,
+          "outcome": "both_pass",
+          "phase": "middle",
+          "sample_id": "p004-s0",
+          "target_step": 23
+        },
+        {
+          "action": "terminal_brake",
+          "action_failed": false,
+          "continue_failed": false,
+          "introduced_contract_failure": false,
+          "outcome": "both_pass",
+          "phase": "late",
+          "sample_id": "p008-s0",
+          "target_step": 33
+        }
+      ]
+    },
+    "step29_full_population": {
+      "source_pass_controls": [
+        {
+          "brake_benefit": -0.07421875,
+          "continue_cache_vqa_harm": 0.0859375,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "six glass perfume bottles arranged in two rows on a mirrored tray, each bottle a different color with a thin gold label",
+          "sample_id": "p000-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.16015625
+        },
+        {
+          "brake_benefit": 0.140625,
+          "continue_cache_vqa_harm": 0.02734375,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "four red kayaks passing behind a white buoy while two blue kayaks pass in front of it on a calm lake",
+          "sample_id": "p001-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.11328125
+        },
+        {
+          "brake_benefit": 0.021484375,
+          "continue_cache_vqa_harm": 0.01953125,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "a jeweler placing seven tiny gemstones in a circular silver brooch, alternating emerald green and ruby red",
+          "sample_id": "p002-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.001953125
+        },
+        {
+          "brake_benefit": -0.08203125,
+          "continue_cache_vqa_harm": -0.01171875,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "three children holding separate kites: a yellow diamond kite on the left, a striped dragon kite in the center, and a blue star kite on the right",
+          "sample_id": "p003-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.0703125
+        },
+        {
+          "brake_benefit": 0.078125,
+          "continue_cache_vqa_harm": 0.1171875,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "five ceramic teacups stacked in a leaning tower, each cup showing a different painted flower and a visible handle",
+          "sample_id": "p004-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.0390625
+        },
+        {
+          "brake_benefit": 0.11328125,
+          "continue_cache_vqa_harm": 0.2265625,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "two violinists facing three cellists across a narrow aisle, with every bow and instrument string clearly visible",
+          "sample_id": "p005-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.11328125
+        },
+        {
+          "brake_benefit": 0.16015625,
+          "continue_cache_vqa_harm": 0.2109375,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "eight macarons arranged around one central cupcake, alternating pink and pale green with thin cream layers",
+          "sample_id": "p006-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.05078125
+        },
+        {
+          "brake_benefit": 0.06640625,
+          "continue_cache_vqa_harm": 0.15625,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "a mechanic connecting four color-coded hoses to four matching ports labeled A, B, C, and D on a metal panel",
+          "sample_id": "p007-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.08984375
+        },
+        {
+          "brake_benefit": -0.0078125,
+          "continue_cache_vqa_harm": 0.0859375,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "three hot-air balloons above a winding river and two hot-air balloons below a band of clouds, all with distinct stripe patterns",
+          "sample_id": "p008-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.09375
+        },
+        {
+          "brake_benefit": 0.0859375,
+          "continue_cache_vqa_harm": -0.10546875,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "seven origami cranes hanging from separate threads at descending heights from left to right",
+          "sample_id": "p009-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.19140625
+        },
+        {
+          "brake_benefit": 0.03515625,
+          "continue_cache_vqa_harm": 0.0703125,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "four cyclists crossing a bridge from left to right while one cyclist travels beneath the bridge in the opposite direction",
+          "sample_id": "p011-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.03515625
+        },
+        {
+          "brake_benefit": 0.046875,
+          "continue_cache_vqa_harm": 0.046875,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "five laboratory flasks connected in a chain by thin transparent tubes, containing red, orange, yellow, green, and blue liquids",
+          "sample_id": "p012-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.0
+        },
+        {
+          "brake_benefit": -0.12109375,
+          "continue_cache_vqa_harm": 0.2265625,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": true,
+          "prompt": "three black cats sitting between four white lanterns on a stone wall at night",
+          "sample_id": "p013-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.34765625
+        },
+        {
+          "brake_benefit": 0.0546875,
+          "continue_cache_vqa_harm": 0.08984375,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "six postage stamps displayed in a two-by-three grid, each showing a different bird and a readable country name",
+          "sample_id": "p014-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.03515625
+        },
+        {
+          "brake_benefit": 0.01953125,
+          "continue_cache_vqa_harm": -0.296875,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "a conductor standing in front of four brass players and behind two violinists, with all six music stands visible",
+          "sample_id": "p015-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.31640625
+        },
+        {
+          "brake_benefit": 0.0234375,
+          "continue_cache_vqa_harm": 0.0703125,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "five red apples balanced on separate branches of a small tree and three green apples resting in a basket below",
+          "sample_id": "p016-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.046875
+        },
+        {
+          "brake_benefit": 0.08203125,
+          "continue_cache_vqa_harm": 0.1015625,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "two wooden ladders crossing to form an X, with four painters standing on distinct rungs and holding different colored brushes",
+          "sample_id": "p017-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.01953125
+        },
+        {
+          "brake_benefit": 0.08203125,
+          "continue_cache_vqa_harm": -0.109375,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "seven sailboats forming a semicircle around a red lighthouse, each boat carrying a uniquely colored triangular sail",
+          "sample_id": "p018-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.19140625
+        },
+        {
+          "brake_benefit": 0.03515625,
+          "continue_cache_vqa_harm": 0.05078125,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "six antique keys hanging from numbered hooks one through six, each key having a different shaped bow",
+          "sample_id": "p021-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.015625
+        },
+        {
+          "brake_benefit": 0.09375,
+          "continue_cache_vqa_harm": 0.0703125,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "five dancers in red costumes forming a ring around two dancers in blue costumes at the center of a stage",
+          "sample_id": "p022-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.0234375
+        },
+        {
+          "brake_benefit": 0.00390625,
+          "continue_cache_vqa_harm": 0.02734375,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "four toy trains on parallel tracks, ordered top to bottom as green, yellow, red, and blue, each pulling exactly three cars",
+          "sample_id": "p023-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.0234375
+        },
+        {
+          "brake_benefit": -0.0078125,
+          "continue_cache_vqa_harm": -0.03125,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "eight candles surrounding a small birthday cake, with four lit candles alternating with four unlit candles",
+          "sample_id": "p024-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.0234375
+        },
+        {
+          "brake_benefit": 0.021484375,
+          "continue_cache_vqa_harm": -0.01953125,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "three suspension bridges crossing the same canyon at different heights, each with fine cables and two visible towers",
+          "sample_id": "p025-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.041015625
+        },
+        {
+          "brake_benefit": -0.01171875,
+          "continue_cache_vqa_harm": -0.0546875,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "six butterflies perched on a spiral vine, alternating orange and blue from the bottom to the top",
+          "sample_id": "p026-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.04296875
+        },
+        {
+          "brake_benefit": 0.1640625,
+          "continue_cache_vqa_harm": 0.14453125,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "two doctors standing to the left of a hospital bed and three nurses standing to its right, all wearing distinct name badges",
+          "sample_id": "p027-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.01953125
+        },
+        {
+          "brake_benefit": 0.01953125,
+          "continue_cache_vqa_harm": 0.01953125,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "six clocks mounted in a three-by-two grid, each showing a different hour from one through six",
+          "sample_id": "p032-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.0
+        },
+        {
+          "brake_benefit": 0.01953125,
+          "continue_cache_vqa_harm": 0.1328125,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "five bowls nested from largest to smallest, colored purple, blue, green, yellow, and orange from outside inward",
+          "sample_id": "p034-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.11328125
+        },
+        {
+          "brake_benefit": 0.03125,
+          "continue_cache_vqa_harm": -0.06640625,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "eight lanterns suspended across two wires, four round lanterns on the upper wire and four square lanterns on the lower wire",
+          "sample_id": "p036-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.09765625
+        },
+        {
+          "brake_benefit": -0.169921875,
+          "continue_cache_vqa_harm": 0.09375,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": true,
+          "prompt": "five climbers attached to one red safety rope at evenly spaced points along a steep gray rock face",
+          "sample_id": "p039-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.263671875
+        },
+        {
+          "brake_benefit": -0.03125,
+          "continue_cache_vqa_harm": -0.01171875,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "four bowls of fruit at the corners of a square table and one vase of flowers exactly at the center",
+          "sample_id": "p040-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.01953125
+        },
+        {
+          "brake_benefit": 0.10546875,
+          "continue_cache_vqa_harm": 0.12890625,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "seven tiny windows in an old stone tower, with three illuminated windows above four dark windows",
+          "sample_id": "p041-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.0234375
+        },
+        {
+          "brake_benefit": 0.05078125,
+          "continue_cache_vqa_harm": 0.05078125,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "two yellow taxis between three blue buses on a busy street, all vehicles facing the same direction",
+          "sample_id": "p042-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.0
+        },
+        {
+          "brake_benefit": 0.07421875,
+          "continue_cache_vqa_harm": 0.0546875,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "six musicians seated in a circle, passing a thin red ribbon behind one chair and in front of the next",
+          "sample_id": "p043-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.01953125
+        },
+        {
+          "brake_benefit": -0.05078125,
+          "continue_cache_vqa_harm": -0.19140625,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "five snowmen arranged by height with the shortest on the left and tallest on the right, each wearing a different scarf",
+          "sample_id": "p044-s2",
+          "seed": 2,
+          "terminal_vqa_harm": -0.140625
+        },
+        {
+          "brake_benefit": 0.09765625,
+          "continue_cache_vqa_harm": 0.140625,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "eight gears meshing in a rectangular mechanism, alternating large brass gears and small steel gears",
+          "sample_id": "p046-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.04296875
+        },
+        {
+          "brake_benefit": 0.109375,
+          "continue_cache_vqa_harm": 0.171875,
+          "contract_status": "not_evaluable_missing_image_reward",
+          "introduced_contract_failure": null,
+          "introduced_vqa_failure": false,
+          "prompt": "four archers aiming at four separate targets labeled north, east, south, and west around a central flag",
+          "sample_id": "p047-s2",
+          "seed": 2,
+          "terminal_vqa_harm": 0.0625
+        }
+      ],
+      "summary": {
+        "contract_status": "not_evaluable_missing_image_reward",
+        "full_population_request_count": 48,
+        "introduced_contract_failure_count": null,
+        "introduced_vqa_failure_count": 2,
+        "introduced_vqa_failure_sample_ids": [
+          "p013-s2",
+          "p039-s2"
+        ],
+        "metric_coverage": [
+          "vqa_score"
+        ],
+        "source_failure_request_count": 12,
+        "source_pass_control_count": 36,
+        "terminal_step": 29
+      }
+    }
+  },
+  "quality_rule": {
+    "failure": "harm_strictly_greater_than_margin",
+    "harm": "baseline_vqa_minus_candidate_vqa",
+    "margin": 0.25,
+    "metric": "vqa_score"
+  },
+  "required_artifact_audit": [
+    {
+      "file_sha256": "01859c03400266e979d0baf31a635ef4fdab9f8bbbd864fb1ccfba5d2292e55e",
+      "input": "causal_label_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/semantic-scores.json",
+      "required_for_retrospective": true,
+      "role": "source_semantic",
+      "verified": true
+    },
+    {
+      "file_sha256": "bcc7aca0bcf1c33881f39b2a2556f1d03111911663ebb18946f7f891d1b19019",
+      "input": "causal_label_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-timing-failures-20260804/terminal-brake-sweep-run.json",
+      "required_for_retrospective": true,
+      "role": "timing_run",
+      "verified": true
+    },
+    {
+      "file_sha256": "c94f30a0f0b3de01503045c57a06490165ab3f1f9a903f313fd2f4a68ebe99ce",
+      "input": "causal_label_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-timing-failures-20260804/semantic-scores.json",
+      "required_for_retrospective": true,
+      "role": "timing_semantic",
+      "verified": true
+    },
+    {
+      "file_sha256": "0338892e81b7f7ed0f38c58f8974dfe1b2abf8f54d485f82d0dd5ae6ae595bed",
+      "input": "causal_label_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-step29-completion-20260804/terminal-brake-completion-run.json",
+      "required_for_retrospective": true,
+      "role": "completion_run",
+      "verified": true
+    },
+    {
+      "file_sha256": "3c54bb7f090f3541ab9d1db74b3b4cf5e210cc88437362ebc2140265738b1203",
+      "input": "causal_label_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-step29-completion-20260804/semantic-scores.json",
+      "required_for_retrospective": true,
+      "role": "completion_semantic",
+      "verified": true
+    },
+    {
+      "file_sha256": "f751c527a3474963c24af3b2a4f8b6e7165f0afa5215716e400fb40b9d1ff470",
+      "input": "step21_futility_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/quality-input-v2.json",
+      "required_for_retrospective": true,
+      "role": "source_quality",
+      "verified": true
+    },
+    {
+      "file_sha256": "01859c03400266e979d0baf31a635ef4fdab9f8bbbd864fb1ccfba5d2292e55e",
+      "input": "step21_futility_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-warmup-vqa-stress-extreme-20260804/semantic-scores.json",
+      "required_for_retrospective": true,
+      "role": "source_semantic",
+      "verified": true
+    },
+    {
+      "file_sha256": "bcc7aca0bcf1c33881f39b2a2556f1d03111911663ebb18946f7f891d1b19019",
+      "input": "step21_futility_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-timing-failures-20260804/terminal-brake-sweep-run.json",
+      "required_for_retrospective": true,
+      "role": "timing_run",
+      "verified": true
+    },
+    {
+      "file_sha256": "c94f30a0f0b3de01503045c57a06490165ab3f1f9a903f313fd2f4a68ebe99ce",
+      "input": "step21_futility_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-timing-failures-20260804/semantic-scores.json",
+      "required_for_retrospective": true,
+      "role": "timing_semantic",
+      "verified": true
+    },
+    {
+      "file_sha256": "757de7694337e520a00a004447a7207d5a0e5ca0ab48f38dcdf89d71995e6335",
+      "input": "brake_intervention_pilot_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-brake-intervention-pilot-20260804/brake-intervention-run.json",
+      "required_for_retrospective": true,
+      "role": "run_result",
+      "verified": true
+    },
+    {
+      "file_sha256": "ba406320ec1250f4b4b40de7c8ef885bd54905a1dbed072fa2744f856f144ef1",
+      "input": "brake_intervention_pilot_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-brake-intervention-pilot-20260804/quality-input.json",
+      "required_for_retrospective": true,
+      "role": "quality_input",
+      "verified": true
+    },
+    {
+      "file_sha256": "21868088cd128bdf46759bcb7efd41131e1ef642ba088408d4ff852376b755ee",
+      "input": "brake_intervention_pilot_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-brake-intervention-pilot-20260804/semantic-scores.json",
+      "required_for_retrospective": true,
+      "role": "semantic_scores",
+      "verified": true
+    },
+    {
+      "file_sha256": "d7e7f13cbc7b42fd74e68c921f79b94e1f9ff38503caf42c9964260035f360c3",
+      "input": "brake_intervention_pilot_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-brake-intervention-pilot-20260804/brake-intervention-analysis.json",
+      "required_for_retrospective": true,
+      "role": "analysis",
+      "verified": true
+    },
+    {
+      "file_sha256": "968b46d92c2987a93ac1511e3b78e417bfac145226be03c5cffbb13c058e315f",
+      "input": "terminal_brake_followup_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-followup-20260804/terminal-brake-run.json",
+      "required_for_retrospective": true,
+      "role": "run",
+      "verified": true
+    },
+    {
+      "file_sha256": "843dd148ee263026563324a55baea163162dc51269051f083360846e969ee305",
+      "input": "terminal_brake_followup_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-followup-20260804/quality-input.json",
+      "required_for_retrospective": true,
+      "role": "quality_input",
+      "verified": true
+    },
+    {
+      "file_sha256": "b12ecce957ab9238779944661b1af4aa7977dcbe9214e5d49bd182cf6869a2bc",
+      "input": "terminal_brake_followup_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-followup-20260804/semantic-scores.json",
+      "required_for_retrospective": true,
+      "role": "semantic_scores",
+      "verified": true
+    },
+    {
+      "file_sha256": "bf2738c011348e1ec705c94e7fc34d91e251881c555dc434da027e967b0226d3",
+      "input": "terminal_brake_followup_result",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-terminal-brake-followup-20260804/terminal-brake-analysis.json",
+      "required_for_retrospective": true,
+      "role": "analysis",
+      "verified": true
+    }
+  ],
+  "schema": "difflet-flux-cache-phase-schedule-retrospective",
+  "schema_revision": 1,
+  "sha256": "ed0d37e912518bbd329226105fc64413b16407decde41edb4e47a517699a3c5b",
+  "status": "complete_historical_descriptive",
+  "step21_signal_futility": {
+    "best_opened_scalar_auc": 0.7314814814814815,
+    "full_recall_false_brake_count": 25,
+    "full_recall_passing_count": 36,
+    "gate_passed": false,
+    "interpretation": "A1 does not reopen the rejected historical online-signal route.",
+    "source_failure_count": 12,
+    "source_failure_rescued_count": 12
+  },
+  "study_id": "flux-cache-phase-schedule-a1-historical-retrospective"
+}
