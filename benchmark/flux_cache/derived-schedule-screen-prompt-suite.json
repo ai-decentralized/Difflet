@@ -1,0 +1,173 @@
+{
+  "schema": "difflet-flux-cache-prompt-suite-v1",
+  "suite_id": "flux-cache-derived-schedule-development-screen",
+  "source": {
+    "created_at": "2026-08-05",
+    "origin": "Prospectively authored prompts for scheduler-weighted schedule screening",
+    "selection": "Eight frozen semantic and perceptual categories with four independent prompts each"
+  },
+  "splits": {
+    "derived_schedule_development_screen": [
+      {
+        "prompt_id": "derived-screen-001",
+        "category": "counting",
+        "text": "exactly six copper bells hanging from two parallel wooden rails with three bells on each rail"
+      },
+      {
+        "prompt_id": "derived-screen-002",
+        "category": "counting",
+        "text": "four red apples and exactly seven yellow lemons arranged around one empty ceramic bowl"
+      },
+      {
+        "prompt_id": "derived-screen-003",
+        "category": "counting",
+        "text": "nine paper lanterns floating above a canal while exactly two small boats pass underneath"
+      },
+      {
+        "prompt_id": "derived-screen-004",
+        "category": "counting",
+        "text": "five chess pawns forming a circle around three glass dice on a green felt table"
+      },
+      {
+        "prompt_id": "derived-screen-005",
+        "category": "spatial-relation",
+        "text": "a bronze telescope to the left of a red globe with a folded map directly beneath both objects"
+      },
+      {
+        "prompt_id": "derived-screen-006",
+        "category": "spatial-relation",
+        "text": "a white bicycle behind a blue bench while a black umbrella leans against the bench in front"
+      },
+      {
+        "prompt_id": "derived-screen-007",
+        "category": "spatial-relation",
+        "text": "a green vase centered between two lamps with the shorter lamp on the right and a mirror above the vase"
+      },
+      {
+        "prompt_id": "derived-screen-008",
+        "category": "spatial-relation",
+        "text": "a red fox standing inside a stone arch and a gray owl perched above the arch facing left"
+      },
+      {
+        "prompt_id": "derived-screen-009",
+        "category": "attribute-binding",
+        "text": "a child in a striped green coat holding a yellow kite beside an adult in a yellow coat holding a striped green bag"
+      },
+      {
+        "prompt_id": "derived-screen-010",
+        "category": "attribute-binding",
+        "text": "a matte silver teapot with a blue handle next to a glossy blue teapot with a silver handle"
+      },
+      {
+        "prompt_id": "derived-screen-011",
+        "category": "attribute-binding",
+        "text": "a square purple cushion on a round orange chair and a round purple cushion on a square orange stool"
+      },
+      {
+        "prompt_id": "derived-screen-012",
+        "category": "attribute-binding",
+        "text": "a gardener wearing white gloves carrying a red bucket beside a mechanic wearing red gloves carrying a white toolbox"
+      },
+      {
+        "prompt_id": "derived-screen-013",
+        "category": "text-rendering",
+        "text": "a clean railway platform sign reading NORTH HARBOR in bold white letters above a blue clock"
+      },
+      {
+        "prompt_id": "derived-screen-014",
+        "category": "text-rendering",
+        "text": "a bakery window with a hand-painted sign that clearly reads FRESH BREAD TODAY"
+      },
+      {
+        "prompt_id": "derived-screen-015",
+        "category": "text-rendering",
+        "text": "a red enamel toolbox labeled SMALL REPAIRS in centered cream lettering"
+      },
+      {
+        "prompt_id": "derived-screen-016",
+        "category": "text-rendering",
+        "text": "an open notebook whose first page displays the phrase MEET AT SUNRISE in neat black handwriting"
+      },
+      {
+        "prompt_id": "derived-screen-017",
+        "category": "interaction",
+        "text": "a violin maker carefully fitting a wooden bridge beneath the strings of an unfinished violin"
+      },
+      {
+        "prompt_id": "derived-screen-018",
+        "category": "interaction",
+        "text": "two firefighters passing a coiled hose to each other beside a yellow emergency truck"
+      },
+      {
+        "prompt_id": "derived-screen-019",
+        "category": "interaction",
+        "text": "a potter guiding a child's hands as they shape a narrow clay vase on a spinning wheel"
+      },
+      {
+        "prompt_id": "derived-screen-020",
+        "category": "interaction",
+        "text": "a bicycle mechanic tightening the front brake cable while a customer steadies the handlebars"
+      },
+      {
+        "prompt_id": "derived-screen-021",
+        "category": "fine-detail",
+        "text": "a watchmaker placing a tiny ruby bearing into a brass movement with fine steel tweezers"
+      },
+      {
+        "prompt_id": "derived-screen-022",
+        "category": "fine-detail",
+        "text": "an embroiderer sewing pale gold leaves onto dark velvet with individual stitches clearly visible"
+      },
+      {
+        "prompt_id": "derived-screen-023",
+        "category": "fine-detail",
+        "text": "a cartographer drawing thin contour lines and minute elevation numbers on a mountain map"
+      },
+      {
+        "prompt_id": "derived-screen-024",
+        "category": "fine-detail",
+        "text": "a conservator repairing a cracked porcelain bird with a narrow line of gold lacquer"
+      },
+      {
+        "prompt_id": "derived-screen-025",
+        "category": "material-texture",
+        "text": "folded indigo linen beside polished walnut and rough gray stone under soft window light"
+      },
+      {
+        "prompt_id": "derived-screen-026",
+        "category": "material-texture",
+        "text": "a rain-darkened leather satchel resting on coarse wool with bright brass buckles"
+      },
+      {
+        "prompt_id": "derived-screen-027",
+        "category": "material-texture",
+        "text": "translucent rice paper layered over black ink brushwork on a lightly scratched bamboo desk"
+      },
+      {
+        "prompt_id": "derived-screen-028",
+        "category": "material-texture",
+        "text": "a frosted glass bottle wrapped in frayed hemp rope beside smooth river pebbles"
+      },
+      {
+        "prompt_id": "derived-screen-029",
+        "category": "scene-composition",
+        "text": "a narrow night market alley framed by red awnings with a single bright food cart at the distant center"
+      },
+      {
+        "prompt_id": "derived-screen-030",
+        "category": "scene-composition",
+        "text": "a wide coastal landscape with a lighthouse on the far left and three fishing boats leading toward it"
+      },
+      {
+        "prompt_id": "derived-screen-031",
+        "category": "scene-composition",
+        "text": "an overhead view of a circular reading room with radial desks surrounding one central green lamp"
+      },
+      {
+        "prompt_id": "derived-screen-032",
+        "category": "scene-composition",
+        "text": "a quiet snow-covered courtyard seen through a dark doorway with one warm window in the upper right"
+      }
+    ]
+  }
+}
