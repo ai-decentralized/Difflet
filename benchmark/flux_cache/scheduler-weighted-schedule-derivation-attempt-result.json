@@ -1,0 +1,21 @@
+{
+  "schema": "difflet-flux-cache-schedule-derivation-attempt-result",
+  "schema_revision": 1,
+  "study_id": "flux-cache-scheduler-weighted-schedule-derivation-2026-08-05",
+  "status": "implementation_error_before_result_materialization",
+  "registration": {
+    "path": "benchmark/flux_cache/scheduler-weighted-schedule-derivation-registration.json",
+    "file_sha256": "47040667ee92511f59e6a638ec2aeadfc70e5d9c23bd5779de00f146b2c4f3a9",
+    "content_sha256": "521cb0173cac6cf2d17bccae66339a58e1f654276e42b967571c8502103c93fe"
+  },
+  "error": {
+    "type": "KeyError",
+    "missing_segment": [0, 1, 2],
+    "location": "derive result path-segment materialization",
+    "cause": "Warmup-only anchor triples were incorrectly included in the result-reporting loop even though the registered optimizer correctly begins scoring from the final two warmup anchors.",
+    "semantic_labels_read": false,
+    "candidate_masks_materialized": false,
+    "candidate_files_written": false
+  },
+  "disposition": "supersede_with_new_registration_after_code_fix_and_regression_test"
+}

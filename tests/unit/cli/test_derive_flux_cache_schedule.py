@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from scripts.derive_flux_cache_schedule import (
+    _materialized_path_segments,
     _nearest_rank,
     _optimize_mask,
     _relative_prediction_error,
@@ -57,6 +58,19 @@ def test_optimizer_obeys_budget_gap_caps_final_anchor_and_lexical_tie_break():
     assert objective == 0.0
     assert len(anchors) == 6
     assert all(right - left <= 3 for left, right in zip(anchors, anchors[1:]))
+
+
+def test_materialized_segments_exclude_unscored_warmup_transitions():
+    anchors = (0, 1, 2, 5, 8, 11)
+    costs = {(1, 2, 5): 0.1, (2, 5, 8): 0.2, (5, 8, 11): 0.3}
+
+    rows = _materialized_path_segments(anchors, costs, warmup_steps=3)
+
+    assert [(row["previous_anchor"], row["anchor"], row["next_anchor"]) for row in rows] == [
+        (1, 2, 5),
+        (2, 5, 8),
+        (5, 8, 11),
+    ]
 
 
 def test_scheduler_sigmas_reproduce_registered_dynamic_shift():

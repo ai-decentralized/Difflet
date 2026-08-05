@@ -216,6 +216,31 @@ def _optimize_mask(
     return anchors, result[0]
 
 
+def _materialized_path_segments(
+    anchors: Sequence[int],
+    segment_costs: Mapping[tuple[int, int, int], float],
+    *,
+    warmup_steps: int,
+) -> list[dict[str, Any]]:
+    """Describe only post-warmup segments scored by the optimizer."""
+
+    rows = []
+    for index in range(warmup_steps, len(anchors)):
+        a, b, c = anchors[index - 2 : index + 1]
+        key = (a, b, c)
+        if key not in segment_costs:
+            raise ValueError(f"optimized path is missing segment cost {key}")
+        rows.append(
+            {
+                "previous_anchor": a,
+                "anchor": b,
+                "next_anchor": c,
+                "prompt_q95_cost": float(segment_costs[key]),
+            }
+        )
+    return rows
+
+
 def _registration_payload(
     quality_path: Path,
     methodology_path: Path,
@@ -452,19 +477,15 @@ def derive(args: argparse.Namespace) -> None:
             middle_gap_cap=int(optimizer["middle_max_anchor_gap"]),
             tail_gap_cap=int(optimizer["tail_max_anchor_gap"]),
         )
-        path_segments = []
+        path_segments = _materialized_path_segments(
+            anchors,
+            segment_costs,
+            warmup_steps=int(optimizer["warmup_steps"]),
+        )
         threshold_values: list[float] = []
-        for index in range(2, len(anchors)):
+        for index in range(int(optimizer["warmup_steps"]), len(anchors)):
             a, b, c = anchors[index - 2 : index + 1]
             key = (a, b, c)
-            path_segments.append(
-                {
-                    "previous_anchor": a,
-                    "anchor": b,
-                    "next_anchor": c,
-                    "prompt_q95_cost": segment_costs[key],
-                }
-            )
             if brake["plastic_window"][0] <= c <= brake["plastic_window"][1]:
                 threshold_values.extend(prompt_anchor_errors[key])
         tighten = _nearest_rank(threshold_values, float(brake["tighten_quantile"]))
