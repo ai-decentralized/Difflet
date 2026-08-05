@@ -366,6 +366,7 @@ def load_registration(path: Path) -> dict[str, Any]:
     observed_ids = []
     for index, binding in enumerate(candidates):
         candidate_path = _check_binding(binding, f"candidate {index}")
+        candidate_document = _load_json(candidate_path, f"candidate {index}")
         arm = (
             load_adaptive_candidate(candidate_path)
             if index == 0
@@ -373,7 +374,7 @@ def load_registration(path: Path) -> dict[str, Any]:
         )
         if (
             arm.candidate_id != binding["candidate_id"]
-            or arm.content_sha256 != binding["content_sha256"]
+            or candidate_document.get("sha256") != binding["content_sha256"]
         ):
             raise ValueError("screen candidate identity differs")
         observed_ids.append(arm.candidate_id)
