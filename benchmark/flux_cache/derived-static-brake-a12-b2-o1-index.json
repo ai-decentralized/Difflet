@@ -1,0 +1,52 @@
+{
+  "candidate_id": "derived-static-brake-a12-b2-o1-index",
+  "horizon_ref": {
+    "path": "benchmark/flux_cache/scheduler-weighted-schedule-derivation-result.json",
+    "sha256": "bd9a73f15eccb3c1d9e05c39fdf3ed55b105aa34ea4d63f0ab9cd6b4f69fd9f4"
+  },
+  "policy": {
+    "allow_acceleration": false,
+    "cooldown_steps": 1,
+    "disable_after_recoveries": 2,
+    "dynamic_budget": 2,
+    "invalid_measurement_fail_closed": true,
+    "num_steps": 50,
+    "plastic_window": [
+      6,
+      29
+    ],
+    "recovery_error": 1.4524717845133421,
+    "recovery_steps": 2,
+    "require_final_anchor": true,
+    "static_anchor_steps": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      9,
+      15,
+      21,
+      31,
+      41,
+      49
+    ],
+    "tighten_error": 1.2437687480953683,
+    "tighten_rule": "bisect_next_static_gap",
+    "type": "phased_static_plus_brake",
+    "warmup_steps": 6
+  },
+  "predictor": {
+    "coord": "index",
+    "order": 1,
+    "type": "taylorseer"
+  },
+  "quality_contract_ref": {
+    "path": "benchmark/flux_cache/offline-gate-methodology-v1.json",
+    "sha256": "4622c84e39cd44458e90a6f832332dcecfa489fbdde71c02a32aa233d24732c0"
+  },
+  "schema": "difflet-flux-cache-phased-candidate",
+  "schema_revision": 1,
+  "sha256": "c7eccc28a61e1fb4cc323292e94e9643a7cbd4bee702a759e85d78b03a20ad0c"
+}

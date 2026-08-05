@@ -1,0 +1,42 @@
+{
+  "candidate_id": "derived-static-a12-o1-index",
+  "horizon_ref": {
+    "path": "benchmark/flux_cache/scheduler-weighted-schedule-derivation-result.json",
+    "sha256": "bd9a73f15eccb3c1d9e05c39fdf3ed55b105aa34ea4d63f0ab9cd6b4f69fd9f4"
+  },
+  "policy": {
+    "cooldown_steps": 1,
+    "dynamic_budget": 0,
+    "invalid_measurement_fail_closed": true,
+    "num_steps": 50,
+    "require_final_anchor": true,
+    "static_anchor_steps": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      9,
+      15,
+      21,
+      31,
+      41,
+      49
+    ],
+    "type": "phased_static",
+    "warmup_steps": 6
+  },
+  "predictor": {
+    "coord": "index",
+    "order": 1,
+    "type": "taylorseer"
+  },
+  "quality_contract_ref": {
+    "path": "benchmark/flux_cache/offline-gate-methodology-v1.json",
+    "sha256": "4622c84e39cd44458e90a6f832332dcecfa489fbdde71c02a32aa233d24732c0"
+  },
+  "schema": "difflet-flux-cache-phased-candidate",
+  "schema_revision": 1,
+  "sha256": "a2e108e3e57491a2d434564118bd0e2d307ba105345515331d1138feda5585a9"
+}

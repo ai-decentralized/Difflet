@@ -1,0 +1,50 @@
+{
+  "candidates": [
+    {
+      "anchor_budget": 12,
+      "candidate_id": "derived-static-a12-o1-index",
+      "content_sha256": "a2e108e3e57491a2d434564118bd0e2d307ba105345515331d1138feda5585a9",
+      "family": "static",
+      "file_sha256": "cf8d84c619b92ea3395d428f34befea994e18316e8321c1af413e599acd3f04e",
+      "path": "benchmark/flux_cache/derived-static-a12-o1-index.json"
+    },
+    {
+      "anchor_budget": 12,
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "content_sha256": "c7eccc28a61e1fb4cc323292e94e9643a7cbd4bee702a759e85d78b03a20ad0c",
+      "family": "combined",
+      "file_sha256": "cbb498c7a8e1467e72950938f969156d79165ab4ea1396634893101255953bc0",
+      "path": "benchmark/flux_cache/derived-static-brake-a12-b2-o1-index.json"
+    },
+    {
+      "anchor_budget": 13,
+      "candidate_id": "derived-static-a13-o1-index",
+      "content_sha256": "068be8030fcd33937e08bf6341f315c7eb047937a33f9afa473b45bf05b63ac0",
+      "family": "static",
+      "file_sha256": "5304db1c753e96a1d901299c903680f0d8fa5b825f8ecc36722cbac960054eaa",
+      "path": "benchmark/flux_cache/derived-static-a13-o1-index.json"
+    },
+    {
+      "anchor_budget": 13,
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "content_sha256": "e13e283885830fb4718890a47c45ec8bd338aaa611180deb7f3749c8703bb207",
+      "family": "combined",
+      "file_sha256": "59612a2267312ca3813c54fc4289c39e481e60b7eff6d314a6324f923b417536",
+      "path": "benchmark/flux_cache/derived-static-brake-a13-b2-o1-index.json"
+    }
+  ],
+  "derivation": {
+    "content_sha256": "7ad2c72184955d5b55ac6e819f5466807ed222092f33bf9b3488fe6db68d8a71",
+    "file_sha256": "bd9a73f15eccb3c1d9e05c39fdf3ed55b105aa34ea4d63f0ab9cd6b4f69fd9f4",
+    "path": "benchmark/flux_cache/scheduler-weighted-schedule-derivation-result.json"
+  },
+  "registration": {
+    "content_sha256": "663d65e80fba85ebb205030ccd08a789245ff6f45e1e8a4c917b9eec08ca4427",
+    "file_sha256": "d8182183324ba222ed9eb86778bac8f0889a4f3f226ffa1b3c2d704bb9319354",
+    "path": "benchmark/flux_cache/scheduler-weighted-schedule-derivation-registration-replacement.json"
+  },
+  "schema": "difflet-flux-cache-derived-candidate-set",
+  "schema_revision": 1,
+  "sha256": "a25a26eef9840cff682d24695c89fd7f97957703a81a99ad3a2f84f7b3b90232",
+  "study_id": "flux-cache-scheduler-weighted-schedule-derivation-replacement-2026-08-05"
+}

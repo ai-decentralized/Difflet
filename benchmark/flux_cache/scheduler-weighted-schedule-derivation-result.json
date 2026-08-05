@@ -1,0 +1,199 @@
+{
+  "registration": {
+    "content_sha256": "663d65e80fba85ebb205030ccd08a789245ff6f45e1e8a4c917b9eec08ca4427",
+    "file_sha256": "d8182183324ba222ed9eb86778bac8f0889a4f3f226ffa1b3c2d704bb9319354",
+    "path": "/home/ubuntu/Difflet-a2-d391597/benchmark/flux_cache/scheduler-weighted-schedule-derivation-registration-replacement.json"
+  },
+  "schedules": [
+    {
+      "anchor_budget": 12,
+      "brake_thresholds": {
+        "observation_count": 144,
+        "recovery_error": 1.4524717845133421,
+        "tighten_error": 1.2437687480953683
+      },
+      "objective_cost": 0.2637245537359446,
+      "segments": [
+        {
+          "anchor": 5,
+          "next_anchor": 9,
+          "previous_anchor": 4,
+          "prompt_q95_cost": 0.017617163944889533
+        },
+        {
+          "anchor": 9,
+          "next_anchor": 15,
+          "previous_anchor": 5,
+          "prompt_q95_cost": 0.02307227122008885
+        },
+        {
+          "anchor": 15,
+          "next_anchor": 21,
+          "previous_anchor": 9,
+          "prompt_q95_cost": 0.01740986167417323
+        },
+        {
+          "anchor": 21,
+          "next_anchor": 31,
+          "previous_anchor": 15,
+          "prompt_q95_cost": 0.05165821677283286
+        },
+        {
+          "anchor": 31,
+          "next_anchor": 41,
+          "previous_anchor": 21,
+          "prompt_q95_cost": 0.053624334481505116
+        },
+        {
+          "anchor": 41,
+          "next_anchor": 49,
+          "previous_anchor": 31,
+          "prompt_q95_cost": 0.10034270564245507
+        }
+      ],
+      "static_anchor_steps": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        9,
+        15,
+        21,
+        31,
+        41,
+        49
+      ]
+    },
+    {
+      "anchor_budget": 13,
+      "brake_thresholds": {
+        "observation_count": 192,
+        "recovery_error": 1.4524717845133421,
+        "tighten_error": 1.1847414045005096
+      },
+      "objective_cost": 0.20905507497357245,
+      "segments": [
+        {
+          "anchor": 5,
+          "next_anchor": 9,
+          "previous_anchor": 4,
+          "prompt_q95_cost": 0.017617163944889533
+        },
+        {
+          "anchor": 9,
+          "next_anchor": 15,
+          "previous_anchor": 5,
+          "prompt_q95_cost": 0.02307227122008885
+        },
+        {
+          "anchor": 15,
+          "next_anchor": 21,
+          "previous_anchor": 9,
+          "prompt_q95_cost": 0.01740986167417323
+        },
+        {
+          "anchor": 21,
+          "next_anchor": 29,
+          "previous_anchor": 15,
+          "prompt_q95_cost": 0.03195418999611978
+        },
+        {
+          "anchor": 29,
+          "next_anchor": 38,
+          "previous_anchor": 21,
+          "prompt_q95_cost": 0.038625523310493
+        },
+        {
+          "anchor": 38,
+          "next_anchor": 45,
+          "previous_anchor": 29,
+          "prompt_q95_cost": 0.03925375847054598
+        },
+        {
+          "anchor": 45,
+          "next_anchor": 49,
+          "previous_anchor": 38,
+          "prompt_q95_cost": 0.04112230635726213
+        }
+      ],
+      "static_anchor_steps": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        9,
+        15,
+        21,
+        29,
+        38,
+        45,
+        49
+      ]
+    }
+  ],
+  "schema": "difflet-flux-cache-schedule-derivation-result",
+  "schema_revision": 1,
+  "semantic_labels_read": false,
+  "sha256": "7ad2c72184955d5b55ac6e819f5466807ed222092f33bf9b3488fe6db68d8a71",
+  "sigma_schedule": [
+    1.0,
+    0.9935795068740845,
+    0.9869785904884338,
+    0.9801895618438721,
+    0.9732041358947754,
+    0.9660137891769409,
+    0.958609402179718,
+    0.9509811997413635,
+    0.9431188106536865,
+    0.9350114464759827,
+    0.9266473650932312,
+    0.9180141687393188,
+    0.9090986847877502,
+    0.8998868465423584,
+    0.8903636932373047,
+    0.880513072013855,
+    0.870317816734314,
+    0.8597595691680908,
+    0.8488184809684753,
+    0.837473452091217,
+    0.8257016539573669,
+    0.8134785294532776,
+    0.8007776737213135,
+    0.7875705361366272,
+    0.7738260626792908,
+    0.7595109343528748,
+    0.7445887327194214,
+    0.7290202975273132,
+    0.7127622961997986,
+    0.6957681775093079,
+    0.677986741065979,
+    0.6593618392944336,
+    0.6398321986198425,
+    0.619330108165741,
+    0.5977811217308044,
+    0.5751029253005981,
+    0.5512044429779053,
+    0.5259844064712524,
+    0.4993301033973694,
+    0.4711155891418457,
+    0.44119974970817566,
+    0.40942391753196716,
+    0.37560901045799255,
+    0.33955228328704834,
+    0.3010231852531433,
+    0.2597584128379822,
+    0.2154558151960373,
+    0.16776712238788605,
+    0.11628876626491547,
+    0.060550276190042496,
+    0.0
+  ],
+  "sigma_schedule_sha256": "26a3099b2c263ea0dc3f4b265c630f22d60cbcd2fbd0cb7e6699a9f0f6a4be42",
+  "source_trajectory_count": 48,
+  "status": "derived_without_semantic_labels",
+  "study_id": "flux-cache-scheduler-weighted-schedule-derivation-replacement-2026-08-05"
+}
