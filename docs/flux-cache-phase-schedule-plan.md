@@ -1,7 +1,8 @@
 # FLUX cache phase schedule: phase-aware static anchors with bounded online braking
 
-Status: A1 historical retrospective complete; A2 and A3 jointly registered but not
-collected. This document makes no serving claim.
+Status: A1 historical retrospective complete; A2 source collection complete and
+stopped by the preregistered exact-control rule; A3 was not run. See
+`docs/flux-cache-phase-schedule-a2-result.md`. This document makes no serving claim.
 
 Every experiment follows the discipline in `docs/flux-cache-offline-closure.md`:
 atomic candidates, frozen hashes, no threshold retuning after labels open, and no
