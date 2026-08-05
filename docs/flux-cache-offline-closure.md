@@ -89,7 +89,7 @@ qualification: methodology-v1 was written after those data, and one of the two
 
 ### Prospective brake-only confirmation
 
-The conservative candidate is now prospectively frozen for a new
+The conservative candidate was prospectively frozen for a new
 methodology-v1 confirmation in
 [`benchmark/flux_cache/brake-only-methodology-v1-confirmation.json`](../benchmark/flux_cache/brake-only-methodology-v1-confirmation.json).
 The registration binds the exact candidate, methodology, collector, semantic
@@ -113,8 +113,13 @@ Validate the freeze before collection:
 ```
 
 The exact collection, scoring, and confirmation-evaluation argument vectors are
-stored in the registration's `collection` object. The hardware run has not yet
-started, and the registered holdout outcomes remain unopened.
+stored in the registration's `collection` object. The study completed all 32
+groups and observed one ImageReward-only failure. Its one-sided exact-binomial 95%
+upper bound is 13.98%, so it failed the frozen zero-failure/10% gate. A replay at
+historical commit `64b70ab` reproduced the failing PNG byte for byte and reproduced
+the final latent, full trajectory, and controller statistics exactly. Recent cache
+code changes therefore do not explain the failure. See
+[`docs/flux-cache-brake-only-methodology-v1-confirmation-result.md`](flux-cache-brake-only-methodology-v1-confirmation-result.md).
 
 ## Online semantic risk thresholds
 
@@ -156,15 +161,18 @@ development rule passes and the registration binds the exact methodology hash.
 
 | Component | Current result | Serving status |
 |---|---|---|
-| Offline adaptive profile | Brake-only profile and a fresh 32-prompt confirmation are frozen; collection has not started | Prospectively registered, not yet confirmed; no serving claim |
+| Offline adaptive profile | Legacy brake-only evidence is 1/64; the fresh 32-prompt confirmation failed 1/32 on ImageReward | Rejected prospectively; legacy/development comparator only |
+| Scheduler-weighted static/combined schedules | Four frozen candidates all passed the speed screen but failed its 0/32 quality gate | Development stopped; no confirmation or holdout |
 | Learned semantic brake threshold | Full target failure recall needs 66.7% false brakes | Rejected |
 | Learned semantic oil threshold | Best all-clear zone has 6 independent prompt groups; 95% upper bound 39.3% | Rejected |
 | Oil/acceleration profile | Quality upper bound 11.67% exceeds the 10% contract | Rejected |
 
-The current engineering decision is therefore conservative: retain the frozen
-brake-only candidate for further confirmation work, do not enable acceleration,
-and do not deploy the learned semantic vote. The research decision is closed;
-serving qualification is intentionally not claimed.
+The current engineering decision is therefore explicit: do not claim a serving-
+qualified cache profile from this evidence. Retain brake-only only as a legacy
+comparator and numerical fail-closed mechanism, do not enable acceleration, and do
+not deploy the learned semantic vote. The current scheduler-weighted static plus
+bounded-brake iteration is closed after selecting zero development
+representatives.
 
 ## Paired brake intervention
 
@@ -475,6 +483,8 @@ Current machine-readable results:
 
 - [`benchmark/flux_cache/cache-system-engineering-closure.json`](../benchmark/flux_cache/cache-system-engineering-closure.json)
 - [`benchmark/flux_cache/profile-selection-replay.json`](../benchmark/flux_cache/profile-selection-replay.json)
+- [`benchmark/flux_cache/brake-only-methodology-v1-confirmation-result.json`](../benchmark/flux_cache/brake-only-methodology-v1-confirmation-result.json)
+- [`benchmark/flux_cache/derived-schedule-development-screen-result.json`](../benchmark/flux_cache/derived-schedule-development-screen-result.json)
 - [`benchmark/flux_cache/online-signal-failure-enriched-closure.json`](../benchmark/flux_cache/online-signal-failure-enriched-closure.json)
 - [`benchmark/flux_cache/brake-intervention-pilot-result.json`](../benchmark/flux_cache/brake-intervention-pilot-result.json)
 - [`benchmark/flux_cache/terminal-brake-followup-result.json`](../benchmark/flux_cache/terminal-brake-followup-result.json)

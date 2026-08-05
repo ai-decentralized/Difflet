@@ -1,8 +1,10 @@
 # FLUX cache phase schedule: phase-aware static anchors with bounded online braking
 
-Status: A1 historical retrospective complete; A2 source collection complete and
-stopped by the preregistered exact-control rule; A3 was not run. See
-`docs/flux-cache-phase-schedule-a2-result.md`. This document makes no serving claim.
+Status: closed with a negative development result. A1 completed; A2 stopped by its
+preregistered exact-control rule; A3 was not run. A separately registered,
+scheduler-weighted derivation produced four static/combined candidates, but all
+four failed the frozen development quality screen. No Stage D confirmation or
+winner holdout was permitted. This document makes no serving claim.
 
 Every experiment follows the discipline in `docs/flux-cache-offline-closure.md`:
 atomic candidates, frozen hashes, no threshold retuning after labels open, and no
@@ -23,6 +25,32 @@ static anchor masks, and candidate certifications are resolution-specific eviden
 They may not be transferred to other resolutions with an existing quality contract.
 Each added resolution must remeasure the horizon, rematerialize candidates, and run
 an independent confirmation.
+
+## Execution outcome
+
+The original A2 path stopped at `insufficient_matched_controls`; see
+`docs/flux-cache-phase-schedule-a2-result.md`. It did not generate a horizon or a
+candidate.
+
+The follow-up did not alter that stopped registration. It created a new registered
+derivation from the 48 complete full-DiT trajectories already collected in A2. The
+deterministic objective combines scheduler step mass with first-order Taylor
+prediction error, takes a prompt-wise q95 envelope, and solves an exact-budget
+dynamic program under frozen mid/tail gap constraints. It did not read semantic
+labels. The resulting 12- and 13-anchor masks, with static-only and bounded-brake
+variants, were atomically frozen before a new 32-group screen.
+
+The screen result is `stop_no_eligible_representatives`:
+
+- all four new candidates passed the registered speed gate versus legacy
+  brake-only;
+- all four failed the zero-failure quality gate on ImageReward-only failures;
+- no static or combined representative was selected;
+- the conditional 64-group confirmation and 32-group holdout were not run.
+
+See `docs/flux-cache-derived-schedule-development-screen-result.md` and
+`benchmark/flux_cache/derived-schedule-development-screen-result.json` for the
+frozen outcome.
 
 ## 1. Motivation and evidence boundary
 
@@ -185,7 +213,8 @@ using only the extreme i32/k40 pressure profile.
 3. If fewer than six total VQA source failures are observed, record
    `insufficient_source_failures` and stop phase-schedule candidate generation.
    Do not extend prompts, increase pressure, lower the positive-count requirement,
-   or fall back to an extreme-pressure schedule. Production remains brake-only.
+   or fall back to an extreme-pressure schedule. The legacy brake-only profile
+   remains the development comparator; this stop makes no serving claim.
 4. Sort source failures by the frozen sample-id and profile order, select at most
    six, and match six continue-cache pass controls by profile and semantic category.
    Run both groups at terminal steps `{7,13,17,21,25,29,37}` with the bit-exact
@@ -217,8 +246,9 @@ does not accept null:
 - `t_dead_observed <= t_full_observed` -> `invalid_horizon_order`, stop;
 - A3 and C1 are permitted only when both bounds are non-null and correctly ordered.
 
-Every stop keeps the existing brake-only profile. No conservative default mask may
-be introduced after outcomes are observed.
+Every stop keeps the existing brake-only profile only as the frozen legacy
+comparator. No conservative default mask may be introduced after outcomes are
+observed, and no serving qualification is implied.
 
 `phase-schedule-horizon.json` must bind at least:
 
@@ -387,21 +417,23 @@ safety from anchor-error quantiles alone.
 
 ### D0. Registration relationship
 
-`brake-only-methodology-v1-confirmation.json` is registered but not collected. It
-must either run exactly as registered or be formally marked superseded. Results from
-the new prompts may not be inserted into the old registration after the fact.
+`brake-only-methodology-v1-confirmation.json` ran exactly as registered. It observed
+one ImageReward-only failure in 32 groups, giving a one-sided 95% upper bound of
+13.98%, and was rejected. A historical-code replay reproduced the failing image,
+latent, trajectory, and controller decisions exactly, excluding recent code changes
+as the cause. See `docs/flux-cache-brake-only-methodology-v1-confirmation-result.md`.
 
 The methodology-v1 quality gate remains unchanged. Three-arm sampling quotas,
 speed-advantage rules, and comparison order are new preregistered additions.
 
 ### D1. Arms
 
-1. Current arm: frozen brake-only.
+1. Legacy comparator arm: frozen brake-only; it is not a confirmed serving base.
 2. Static arm: the C2 Layer 0 representative plus numerical fail-closed.
 3. Combined arm: the same Layer 0 mask plus Layer 1 and Layer 2.
 
-If a new family has no C2 representative, that arm is absent and the remaining arms
-continue under the registered rules.
+If a new family has no C2 representative, that arm is absent. If neither new family
+has a representative, Stage D stops and no comparator-only confirmation is run.
 
 ### D2. Data and quality gate
 
@@ -442,11 +474,11 @@ engineering and certification cost, not whether temporal structure exists.
 
 ### D4. Independent holdout
 
-D1--D3 select at most one winner. Confirm that frozen winner on 32 new independent
-prompt groups with zero failures; the one-sided exact-binomial 95% upper bound is
-about 8.94%. Remeasure wall time, with no early stopping, candidate reselection, or
-field adjustment. Only a passing winner may enter later serving/interventional
-release work.
+D1--D3 select at most one winner. If one exists, confirm that frozen winner on 32
+new independent prompt groups with zero failures; the one-sided exact-binomial 95%
+upper bound is about 8.94%. Remeasure wall time, with no early stopping, candidate
+reselection, or field adjustment. Only a passing winner may enter later
+serving/interventional release work.
 
 Registration must recalculate budget from the actual arm count. For three arms and
 64 groups, a rough estimate is 64 baselines plus the cached compute for three arms,
@@ -462,8 +494,8 @@ Apply quality before speed:
 | Static and combined pass quality | Do not claim a quality difference. Only arms meeting the speed gate versus current brake-only can win; with an identical mask, prefer shorter total wall time. |
 | Static fails and combined passes on the same mask | Layer 1 has end-to-end value evidence, but combined must still meet the 5% speed gate. |
 | Static passes and combined fails | Remove Layer 1; static may win only if it meets the speed gate. |
-| New arms pass quality but miss the speed gate | Keep brake-only and record "quality feasible, engineering benefit insufficient." |
-| Both new arms fail quality | Keep brake-only, record the negative result, and close this phase-schedule iteration. |
+| New arms pass quality but miss the speed gate | Keep brake-only as the legacy comparator and record "quality feasible, engineering benefit insufficient." |
+| Both new arms fail quality | Keep brake-only as the legacy comparator, record the negative result, and close this phase-schedule iteration. |
 
 If multiple new arms pass quality and speed, choose the shortest total wall time and
 break exact ties by candidate id. Rare failure-count differences among 64 groups are
@@ -480,12 +512,14 @@ representatives. Any such change starts a new study.
 
 ## 8. Deliverables
 
-- Stage A registration and `phase-schedule-horizon.json`, including R/I/D and full
-  identity bindings;
+- Stage A registration and result. The registered stop means no horizon or R/I/D
+  artifact exists;
 - deterministic static-mask generator and tests;
 - combined policy and state-machine tests in
   `difflet/pipeline/cache/policies.py`;
-- Stage C registration, all atomic candidates, and family-selection result;
-- Stage D three-arm registration/result and an independent winner holdout;
+- scheduler-weighted derivation registrations/result, four atomic candidates, and
+  the Stage C screen registration/result;
+- no Stage D registration/result or winner holdout, because Stage C selected zero
+  representatives;
 - updated `docs/flux-cache-offline-closure.md` with the positive or negative final
   conclusion.

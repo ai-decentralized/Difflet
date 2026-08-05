@@ -1,0 +1,125 @@
+{
+  "artifacts": {
+    "evaluation": {
+      "file_sha256": "16f13b7b2bf1561c694baf13ce6d19e2ff76d28cedc0e2d66cd052f925433f2a",
+      "internal_sha256": "4fb51f7bf09cc92905dcd4f9f67745c48530146182fb5e58afe2bed98f5ecd45",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805/screen-evaluation.json"
+    },
+    "quality_manifest": {
+      "file_sha256": "11473e826c3c343cef46a450e1abeada1ff06118d25cdfd39bb62af9e032dfd2",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805/quality-input-v2.json"
+    },
+    "semantic_report": {
+      "file_sha256": "3cf0f7b73e7c116c2a134e7fe5e47c46b7489b3b2eebaabe60fdc4506f05dda4",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805/semantic-scores.json"
+    },
+    "speed_manifest": {
+      "file_sha256": "01a735319208e89956eb15ac0787ca7ffd6c479e9f6d7f0e73bde26c706728f8",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805/speedup-candidates-v1.json"
+    }
+  },
+  "candidate_summaries": [
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "eligible": false,
+      "failure_count": 0,
+      "failure_rate_upper_bound": 0.08936819898626475,
+      "family": "legacy_comparator",
+      "measured_speedup_vs_full_dit": 3.215189917347219,
+      "quality_passed": true,
+      "relative_speed_vs_legacy": 1.0,
+      "speed_passed": false
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "eligible": false,
+      "failure_count": 2,
+      "failure_rate_upper_bound": 0.18394346817692872,
+      "failures": [
+        {
+          "image_reward_harm": 1.013394057750702,
+          "sample_id": "p013-s3"
+        },
+        {
+          "image_reward_harm": 0.8119804263114929,
+          "sample_id": "p028-s3"
+        }
+      ],
+      "family": "static",
+      "measured_speedup_vs_full_dit": 3.9485607193101147,
+      "paired_bootstrap_lower_bound": 1.175523287053625,
+      "quality_passed": false,
+      "relative_speed_vs_legacy": 1.2280956400136958,
+      "speed_passed": true
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "eligible": false,
+      "failure_count": 2,
+      "failure_rate_upper_bound": 0.18394346817692872,
+      "failures": [
+        {
+          "image_reward_harm": 1.1806514263153076,
+          "sample_id": "p013-s3"
+        },
+        {
+          "image_reward_harm": 0.8119804263114929,
+          "sample_id": "p028-s3"
+        }
+      ],
+      "family": "combined",
+      "measured_speedup_vs_full_dit": 3.93439724228597,
+      "paired_bootstrap_lower_bound": 1.176011752902441,
+      "quality_passed": false,
+      "relative_speed_vs_legacy": 1.2236904641490518,
+      "speed_passed": true
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "eligible": false,
+      "failure_count": 1,
+      "failure_rate_upper_bound": 0.13984946027422598,
+      "failures": [
+        {
+          "image_reward_harm": 0.9653264284133911,
+          "sample_id": "p013-s3"
+        }
+      ],
+      "family": "static",
+      "measured_speedup_vs_full_dit": 3.6962037764450826,
+      "paired_bootstrap_lower_bound": 1.1001249118847778,
+      "quality_passed": false,
+      "relative_speed_vs_legacy": 1.1496066706674477,
+      "speed_passed": true
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "eligible": false,
+      "failure_count": 1,
+      "failure_rate_upper_bound": 0.13984946027422598,
+      "failures": [
+        {
+          "image_reward_harm": 1.0752760171890259,
+          "sample_id": "p013-s3"
+        }
+      ],
+      "family": "combined",
+      "measured_speedup_vs_full_dit": 3.6535774412718847,
+      "paired_bootstrap_lower_bound": 1.0928110300063891,
+      "quality_passed": false,
+      "relative_speed_vs_legacy": 1.1363488736884224,
+      "speed_passed": true
+    }
+  ],
+  "independent_group_count": 32,
+  "registration": {
+    "content_sha256": "26b0882c584293c733a29d065bb0862de21ad522d2e0bff521b539ab97881e28",
+    "file_sha256": "8a2af8f6c297bb494330954ab2e449a6d534dc69302981852663d20d8a351958",
+    "path": "benchmark/flux_cache/derived-schedule-development-screen-registration.json"
+  },
+  "schema": "difflet-flux-cache-derived-schedule-screen-result-summary",
+  "schema_revision": 1,
+  "selected_representatives": [],
+  "serving_qualified": false,
+  "status": "stop_no_eligible_representatives"
+}

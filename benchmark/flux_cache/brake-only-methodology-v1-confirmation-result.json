@@ -1,0 +1,63 @@
+{
+  "artifacts": {
+    "confirmation_evaluation": {
+      "file_sha256": "aec792f60e417a48548fc41e08e8b96e2c33bc468b48b983a2e53143898a6144",
+      "internal_sha256": "3af66bd1b7c1a39f1a5d5f8d9e6f53a1fb0029e422ee011bbb706fe177348a2b",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-brake-only-methodology-v1-confirmation-20260804/confirmation-evaluation.json"
+    },
+    "quality_manifest": {
+      "file_sha256": "c7cc617b27935cf4914d4a5755c11a910dc4a500f9a069ba493c0e173db5e8b7",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-brake-only-methodology-v1-confirmation-20260804/quality-input-v2.json"
+    },
+    "semantic_report": {
+      "file_sha256": "968a1658606086e103e12bf633ba7b893211a86049622b49600e634c2e20cb47",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-brake-only-methodology-v1-confirmation-20260804/semantic-scores.json"
+    }
+  },
+  "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+  "failure": {
+    "harms": {
+      "image_reward": 0.9166896995157003,
+      "vqa_score": 0.146484375
+    },
+    "metric_failures": {
+      "image_reward": true,
+      "vqa_score": false
+    },
+    "sample_id": "p017-s0"
+  },
+  "failure_count": 1,
+  "failure_rate_upper_bound": 0.13984946027422598,
+  "independent_group_count": 32,
+  "registered_gate": {
+    "maximum_failure_rate_upper_bound": 0.1,
+    "required_failure_count": 0
+  },
+  "registration": {
+    "content_sha256": "c188992f2e6f1e83289b9f690f644094eca175f78507abd2027ded88da12146d",
+    "file_sha256": "03cbce3b923093061706b5f46e79c01c498aeff5f23a8e0022ce886cc67bf704",
+    "path": "benchmark/flux_cache/brake-only-methodology-v1-confirmation.json"
+  },
+  "regression_replay": {
+    "candidate_final_latent_elementwise_equal": true,
+    "candidate_image_sha256": "cedf49c31ca666fe49751c8eb0527094b4c0bc1759ffb305d8f5792d693c7bff",
+    "candidate_image_sha256_equal": true,
+    "candidate_runner_stats_equal_excluding_elapsed_time": true,
+    "candidate_trajectory_elementwise_equal": true,
+    "current_collection_commit": "d391597d8d4ccac1efdb81511158904bc2b45c9e",
+    "historical_code_commit": "64b70abdc7e34058f16f25ec6113829d1c08af99",
+    "quality_manifest_file_sha256": "43a7aa77b8004df964a8cacdfbe942c9fb836177ed6412ee5b39df53d1b2ce5e",
+    "replay_artifact_root": "/home/ubuntu/difflet-artifacts/flux-cache-brake-old-code-p017-replay-20260805-r3",
+    "speed_manifest_file_sha256": "fa25a88beeb0c3e0a739c0657215536c6b150dbc8cae47e3e362751a67434ca7",
+    "verdict": "not_a_recent_code_regression"
+  },
+  "schema": "difflet-flux-cache-brake-only-confirmation-result-summary",
+  "schema_revision": 1,
+  "serving_qualified": false,
+  "speed": {
+    "baseline_total_s": 463.79935192503035,
+    "candidate_total_s": 139.70666353797424,
+    "measured_speedup_vs_full_dit": 3.319808376920856
+  },
+  "status": "rejected_registered_confirmation"
+}

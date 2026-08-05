@@ -20,8 +20,8 @@ The registration fixes `insufficient_exact_controls_action` to
 `stop_insufficient_matched_controls`. No failure was replaced, no cross-profile
 control was borrowed, and no prompt, profile, margin, or intervention grid was
 changed after labels opened. Terminal-horizon collection and A3 repair-depth
-collection were not permitted. The existing brake-only serving candidate remains
-the production path.
+collection were not permitted. At this point in the sequence, brake-only remained
+the frozen legacy comparator; its later prospective confirmation was rejected.
 
 ## Frozen identity
 
@@ -102,3 +102,10 @@ design could not construct its required balanced failure/control intervention se
 near the chosen profile frontier. Any retry must be a new preregistered study with
 new data. Changing the selection algorithm on these opened labels would not be a
 valid continuation of this A2 run.
+
+A separately registered scheduler-weighted derivation later generated candidates
+without reading these semantic labels. Its development screen stopped with no
+eligible representative; see
+`docs/flux-cache-derived-schedule-development-screen-result.md`. The subsequent
+prospective brake-only confirmation also failed, so references above to the
+existing brake-only path mean a legacy comparator, not a serving qualification.
