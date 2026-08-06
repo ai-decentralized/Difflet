@@ -6,12 +6,69 @@ import numpy as np
 import pytest
 
 from scripts.derive_flux_cache_schedule import (
+    _derive_hardware_budget,
+    _fit_affine_step_cost,
     _materialized_path_segments,
     _nearest_rank,
     _optimize_mask,
     _relative_prediction_error,
     _scheduler_sigmas,
 )
+
+
+def test_hardware_budget_derives_one_static_anchor_count_from_speed_target():
+    fit = _fit_affine_step_cost([(12, 117.0), (13, 125.0)])
+
+    budget = _derive_hardware_budget(
+        num_steps=50,
+        warmup_steps=6,
+        cooldown_steps=1,
+        baseline_latency_s=464.0,
+        target_speedup=3.2,
+        intercept_s=fit["intercept_s"],
+        incremental_real_step_s=fit["incremental_real_step_s"],
+        dynamic_step_reserve=2,
+    )
+
+    assert fit["intercept_s"] == pytest.approx(21.0)
+    assert fit["incremental_real_step_s"] == pytest.approx(8.0)
+    assert budget["total_real_step_budget"] == 15
+    assert budget["static_anchor_budget"] == 13
+    assert budget["dynamic_step_reserve"] == 2
+    assert budget["predicted_reserved_speedup"] >= 3.2
+
+    faster_budget = _derive_hardware_budget(
+        num_steps=50,
+        warmup_steps=6,
+        cooldown_steps=1,
+        baseline_latency_s=464.0,
+        target_speedup=3.3,
+        intercept_s=fit["intercept_s"],
+        incremental_real_step_s=fit["incremental_real_step_s"],
+        dynamic_step_reserve=2,
+    )
+
+    assert faster_budget["total_real_step_budget"] == 14
+    assert faster_budget["static_anchor_budget"] == 12
+
+
+def test_hardware_budget_rejects_target_that_cannot_cover_required_anchors():
+    with pytest.raises(ValueError, match="too few static anchors"):
+        _derive_hardware_budget(
+            num_steps=50,
+            warmup_steps=6,
+            cooldown_steps=1,
+            baseline_latency_s=100.0,
+            target_speedup=10.0,
+            intercept_s=5.0,
+            incremental_real_step_s=2.0,
+            dynamic_step_reserve=2,
+        )
+
+
+def test_affine_step_cost_requires_distinct_hardware_points():
+    with pytest.raises(ValueError, match="at least two real-step counts"):
+        _fit_affine_step_cost([(12, 117.0), (12, 118.0)])
 
 
 def test_nearest_rank_is_deterministic_at_tail_quantiles():

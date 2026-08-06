@@ -26,11 +26,11 @@ from scripts.flux_cache_phased_candidate import (  # noqa: E402
 from scripts.flux_cache_protocol import canonical_sha256  # noqa: E402
 
 REGISTRATION_SCHEMA = "difflet-flux-cache-schedule-derivation-registration"
-REGISTRATION_SCHEMA_REVISION = 1
+REGISTRATION_SCHEMA_REVISION = 2
 RESULT_SCHEMA = "difflet-flux-cache-schedule-derivation-result"
-RESULT_SCHEMA_REVISION = 1
+RESULT_SCHEMA_REVISION = 2
 CANDIDATE_SET_SCHEMA = "difflet-flux-cache-derived-candidate-set"
-CANDIDATE_SET_SCHEMA_REVISION = 1
+CANDIDATE_SET_SCHEMA_REVISION = 2
 
 
 def sha256_file(path: Path) -> str:
@@ -77,6 +77,131 @@ def _nearest_rank(values: Sequence[float], quantile: float) -> float:
     ordered = sorted(float(value) for value in values)
     index = max(0, math.ceil(quantile * len(ordered)) - 1)
     return ordered[index]
+
+
+def _finite_positive(value: Any, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a positive finite number")
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be a positive finite number") from error
+    if not math.isfinite(result) or result <= 0.0:
+        raise ValueError(f"{name} must be a positive finite number")
+    return result
+
+
+def _fit_affine_step_cost(
+    points: Sequence[tuple[int, float]],
+) -> dict[str, Any]:
+    """Fit aggregate latency = intercept + incremental_cost * real_steps."""
+
+    grouped: dict[int, list[float]] = {}
+    for real_steps, latency_s in points:
+        if isinstance(real_steps, bool) or not isinstance(real_steps, int) or real_steps <= 0:
+            raise ValueError("hardware calibration real-step counts must be positive integers")
+        grouped.setdefault(real_steps, []).append(
+            _finite_positive(latency_s, "hardware calibration latency")
+        )
+    if len(grouped) < 2:
+        raise ValueError("hardware calibration requires at least two real-step counts")
+
+    counts = np.asarray(sorted(grouped), dtype=np.float64)
+    latencies = np.asarray(
+        [sum(grouped[int(count)]) / len(grouped[int(count)]) for count in counts],
+        dtype=np.float64,
+    )
+    centered = counts - float(counts.mean())
+    denominator = float(np.dot(centered, centered))
+    if denominator <= 0.0:
+        raise ValueError("hardware calibration real-step counts have no variance")
+    incremental = float(np.dot(centered, latencies - float(latencies.mean())) / denominator)
+    intercept = float(latencies.mean() - incremental * counts.mean())
+    if not math.isfinite(incremental) or incremental <= 0.0:
+        raise ValueError("hardware calibration must have positive incremental real-step cost")
+    if not math.isfinite(intercept) or intercept < 0.0:
+        raise ValueError("hardware calibration must have a nonnegative latency intercept")
+
+    predicted = intercept + incremental * counts
+    residual_sum = float(np.square(latencies - predicted).sum())
+    total_sum = float(np.square(latencies - float(latencies.mean())).sum())
+    r_squared = 1.0 if total_sum == 0.0 else 1.0 - residual_sum / total_sum
+    return {
+        "fit_method": "ordinary_least_squares_over_static_profiles",
+        "latency_formula": "aggregate_latency_s=intercept_s+incremental_real_step_s*real_steps",
+        "intercept_s": intercept,
+        "incremental_real_step_s": incremental,
+        "fit_r_squared": r_squared,
+        "points": [
+            {
+                "real_steps": int(count),
+                "aggregate_latency_s": float(latency),
+            }
+            for count, latency in zip(counts, latencies)
+        ],
+    }
+
+
+def _derive_hardware_budget(
+    *,
+    num_steps: int,
+    warmup_steps: int,
+    cooldown_steps: int,
+    baseline_latency_s: float,
+    target_speedup: float,
+    intercept_s: float,
+    incremental_real_step_s: float,
+    dynamic_step_reserve: int,
+) -> dict[str, Any]:
+    """Derive one static anchor budget from a minimum hardware speed target."""
+
+    if isinstance(num_steps, bool) or not isinstance(num_steps, int) or num_steps <= 0:
+        raise ValueError("num_steps must be a positive integer")
+    if (
+        isinstance(dynamic_step_reserve, bool)
+        or not isinstance(dynamic_step_reserve, int)
+        or dynamic_step_reserve < 0
+    ):
+        raise ValueError("dynamic_step_reserve must be a nonnegative integer")
+    baseline = _finite_positive(baseline_latency_s, "baseline_latency_s")
+    target = _finite_positive(target_speedup, "target_speedup")
+    if target <= 1.0:
+        raise ValueError("target_speedup must be greater than one")
+    intercept = float(intercept_s)
+    incremental = _finite_positive(
+        incremental_real_step_s,
+        "incremental_real_step_s",
+    )
+    if not math.isfinite(intercept) or intercept < 0.0:
+        raise ValueError("intercept_s must be a nonnegative finite number")
+
+    maximum_latency = baseline / target
+    raw_total_budget = (maximum_latency - intercept) / incremental
+    total_real_budget = min(num_steps, math.floor(raw_total_budget + 1e-12))
+    static_anchor_budget = total_real_budget - dynamic_step_reserve
+    required_static = warmup_steps + cooldown_steps
+    if cooldown_steps == 0:
+        required_static += 1
+    if static_anchor_budget < required_static:
+        raise ValueError(
+            "target speed leaves too few static anchors after the dynamic-step reserve"
+        )
+    predicted_static_latency = intercept + incremental * static_anchor_budget
+    predicted_reserved_latency = intercept + incremental * total_real_budget
+    return {
+        "selection_rule": "largest_total_real_step_budget_meeting_minimum_target_speedup",
+        "budget_formula": "floor((baseline_latency_s/target_speedup-intercept_s)/incremental_real_step_s)",
+        "target_speedup": target,
+        "maximum_aggregate_latency_s": maximum_latency,
+        "total_real_step_budget": total_real_budget,
+        "dynamic_step_reserve": dynamic_step_reserve,
+        "static_anchor_budget": static_anchor_budget,
+        "predicted_static_latency_s": predicted_static_latency,
+        "predicted_static_speedup": baseline / predicted_static_latency,
+        "predicted_reserved_latency_s": predicted_reserved_latency,
+        "predicted_reserved_speedup": baseline / predicted_reserved_latency,
+        "fail_closed_steps_exempt_from_speed_target": True,
+    }
 
 
 def _scheduler_sigmas(generation: Mapping[str, Any]) -> tuple[float, ...]:
@@ -241,12 +366,100 @@ def _materialized_path_segments(
     return rows
 
 
+def _hardware_budget_payload(
+    speed_manifest_path: Path,
+    generation: Mapping[str, Any],
+    *,
+    target_speedup: float,
+    dynamic_step_reserve: int,
+    warmup_steps: int,
+    cooldown_steps: int,
+) -> dict[str, Any]:
+    manifest = _load_json(speed_manifest_path, "hardware speed manifest")
+    if manifest.get("schema") != "speedup-candidates-v1":
+        raise ValueError("hardware speed manifest schema is unsupported")
+    if manifest.get("hardware_measured") is not True:
+        raise ValueError("hardware speed manifest must contain measured hardware timings")
+    protocol = manifest.get("protocol")
+    if not isinstance(protocol, dict) or protocol.get("generation") != dict(generation):
+        raise ValueError("hardware speed manifest generation identity differs")
+    hardware = protocol.get("hardware")
+    if not isinstance(hardware, dict):
+        raise ValueError("hardware speed manifest has no hardware identity")
+
+    baseline = manifest.get("baseline")
+    if not isinstance(baseline, dict):
+        raise ValueError("hardware speed manifest has no baseline timing")
+    baseline_latency = _finite_positive(
+        baseline.get("total_s"),
+        "hardware baseline total_s",
+    )
+    sample_count = manifest.get("sample_count")
+    if isinstance(sample_count, bool) or not isinstance(sample_count, int) or sample_count <= 0:
+        raise ValueError("hardware speed manifest sample_count must be positive")
+
+    points: list[tuple[int, float]] = []
+    bindings: list[dict[str, Any]] = []
+    candidates = manifest.get("candidates")
+    if not isinstance(candidates, list):
+        raise ValueError("hardware speed manifest candidates must be a list")
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            raise ValueError("hardware speed manifest contains a malformed candidate")
+        policy = candidate.get("policy")
+        if not isinstance(policy, dict) or policy.get("type") != "phased_static":
+            continue
+        if policy.get("dynamic_budget") != 0:
+            raise ValueError("static hardware calibration candidate has a dynamic budget")
+        anchor_steps = policy.get("static_anchor_steps")
+        if not isinstance(anchor_steps, list) or not anchor_steps:
+            raise ValueError("static hardware calibration candidate has no anchor steps")
+        anchor_count = len(anchor_steps)
+        total_s = _finite_positive(candidate.get("total_s"), "static candidate total_s")
+        points.append((anchor_count, total_s))
+        bindings.append(
+            {
+                "candidate_id": candidate.get("candidate_id"),
+                "real_steps": anchor_count,
+                "aggregate_latency_s": total_s,
+            }
+        )
+
+    cost_model = _fit_affine_step_cost(points)
+    budget = _derive_hardware_budget(
+        num_steps=int(generation["num_steps"]),
+        warmup_steps=warmup_steps,
+        cooldown_steps=cooldown_steps,
+        baseline_latency_s=baseline_latency,
+        target_speedup=target_speedup,
+        intercept_s=float(cost_model["intercept_s"]),
+        incremental_real_step_s=float(cost_model["incremental_real_step_s"]),
+        dynamic_step_reserve=dynamic_step_reserve,
+    )
+    return {
+        **budget,
+        "latency_statistic": "aggregate_wall_time_over_shared_requests",
+        "sample_count": sample_count,
+        "baseline_aggregate_latency_s": baseline_latency,
+        "hardware": dict(hardware),
+        "source": {
+            "path": str(speed_manifest_path.resolve()),
+            "file_sha256": sha256_file(speed_manifest_path),
+            "schema": manifest["schema"],
+            "static_profiles": bindings,
+        },
+        "cost_model": cost_model,
+    }
+
+
 def _registration_payload(
     quality_path: Path,
     methodology_path: Path,
+    hardware_speed_manifest_path: Path,
     *,
     study_id: str,
     created_at: str,
+    target_speedup: float,
 ) -> dict[str, Any]:
     quality = _load_json(quality_path, "A2 quality input")
     protocol = quality.get("protocol")
@@ -284,6 +497,18 @@ def _registration_payload(
     if len(rows) != 48:
         raise ValueError("A2 quality input must bind 48 unique baseline trajectories")
 
+    warmup_steps = 6
+    cooldown_steps = 1
+    dynamic_step_reserve = 2
+    hardware_budget = _hardware_budget_payload(
+        hardware_speed_manifest_path,
+        generation,
+        target_speedup=target_speedup,
+        dynamic_step_reserve=dynamic_step_reserve,
+        warmup_steps=warmup_steps,
+        cooldown_steps=cooldown_steps,
+    )
+
     methodology_relative = methodology_path.resolve().relative_to(ROOT).as_posix()
     implementation_relative = Path(__file__).resolve().relative_to(ROOT).as_posix()
     return {
@@ -306,6 +531,7 @@ def _registration_payload(
             "trajectories": [rows[key] for key in sorted(rows)],
         },
         "controlled_generation": generation,
+        "hardware_budget": hardware_budget,
         "cache_semantics": {
             "prediction_target": "transformer_noise_prediction",
             "predictor": {"type": "taylorseer", "order": 1, "coord": "index"},
@@ -318,10 +544,10 @@ def _registration_payload(
             "prompt_quantile": 0.95,
             "working_dtype": "float32",
             "norm_floor": 1e-8,
-            "warmup_steps": 6,
-            "cooldown_steps": 1,
+            "warmup_steps": warmup_steps,
+            "cooldown_steps": cooldown_steps,
             "require_final_anchor": True,
-            "anchor_budgets": [12, 13],
+            "anchor_budget_source": "hardware_budget.static_anchor_budget",
             "phase_boundary_step": 21,
             "middle_max_anchor_gap": 6,
             "tail_max_anchor_gap": 10,
@@ -329,7 +555,7 @@ def _registration_payload(
         },
         "bounded_brake": {
             "plastic_window": [6, 29],
-            "dynamic_budget": 2,
+            "dynamic_budget": dynamic_step_reserve,
             "tighten_quantile": 0.95,
             "recovery_quantile": 0.99,
             "quantile_method": "nearest_rank_over_label_free_predicted_anchor_errors",
@@ -354,11 +580,14 @@ def _registration_payload(
 def register(args: argparse.Namespace) -> None:
     quality_path = Path(args.quality_input).expanduser().resolve()
     methodology_path = _repo_path(args.methodology, "methodology")
+    hardware_speed_manifest_path = Path(args.hardware_speed_manifest).expanduser().resolve()
     payload = _registration_payload(
         quality_path,
         methodology_path,
+        hardware_speed_manifest_path,
         study_id=args.study_id,
         created_at=args.created_at,
+        target_speedup=args.target_speedup,
     )
     _write_json(
         Path(args.out).expanduser().resolve(), {**payload, "sha256": canonical_sha256(payload)}
@@ -367,7 +596,10 @@ def register(args: argparse.Namespace) -> None:
 
 def load_registration(path: Path) -> dict[str, Any]:
     document = _load_json(path, "schedule derivation registration")
-    if document.get("schema") != REGISTRATION_SCHEMA or document.get("schema_revision") != 1:
+    if (
+        document.get("schema") != REGISTRATION_SCHEMA
+        or document.get("schema_revision") != REGISTRATION_SCHEMA_REVISION
+    ):
         raise ValueError("schedule derivation registration schema is unsupported")
     payload = {key: value for key, value in document.items() if key != "sha256"}
     if canonical_sha256(payload) != document.get("sha256"):
@@ -392,6 +624,30 @@ def load_registration(path: Path) -> dict[str, Any]:
     contract_path = _repo_path(contract["path"], "quality contract")
     if sha256_file(contract_path) != contract["file_sha256"]:
         raise ValueError("registered quality contract hash differs")
+    optimizer = document["optimizer"]
+    if optimizer.get("anchor_budget_source") != "hardware_budget.static_anchor_budget":
+        raise ValueError("registered anchor budget source is unsupported")
+    if "anchor_budgets" in optimizer:
+        raise ValueError("registered optimizer must not contain manual anchor budgets")
+    hardware_budget = document["hardware_budget"]
+    hardware_source = hardware_budget["source"]
+    speed_manifest_path = Path(hardware_source["path"]).resolve()
+    if sha256_file(speed_manifest_path) != hardware_source["file_sha256"]:
+        raise ValueError("registered hardware speed manifest hash differs")
+    recomputed_budget = _hardware_budget_payload(
+        speed_manifest_path,
+        document["controlled_generation"],
+        target_speedup=float(hardware_budget["target_speedup"]),
+        dynamic_step_reserve=int(hardware_budget["dynamic_step_reserve"]),
+        warmup_steps=int(optimizer["warmup_steps"]),
+        cooldown_steps=int(optimizer["cooldown_steps"]),
+    )
+    if recomputed_budget != hardware_budget:
+        raise ValueError("registered hardware-derived anchor budget differs")
+    if int(document["bounded_brake"]["dynamic_budget"]) != int(
+        hardware_budget["dynamic_step_reserve"]
+    ):
+        raise ValueError("brake budget differs from the hardware dynamic-step reserve")
     return document
 
 
@@ -467,7 +723,9 @@ def derive(args: argparse.Namespace) -> None:
 
     schedules = []
     brake = registration["bounded_brake"]
-    for budget in optimizer["anchor_budgets"]:
+    target_speedup = float(registration["hardware_budget"]["target_speedup"])
+    budget = int(registration["hardware_budget"]["static_anchor_budget"])
+    for budget in (budget,):
         anchors, objective = _optimize_mask(
             segment_costs,
             num_steps=num_steps,
@@ -495,6 +753,10 @@ def derive(args: argparse.Namespace) -> None:
         schedules.append(
             {
                 "anchor_budget": int(budget),
+                "target_speedup": target_speedup,
+                "total_real_step_budget": int(
+                    registration["hardware_budget"]["total_real_step_budget"]
+                ),
                 "static_anchor_steps": list(anchors),
                 "objective_cost": objective,
                 "segments": path_segments,
@@ -517,6 +779,7 @@ def derive(args: argparse.Namespace) -> None:
             "content_sha256": registration["sha256"],
         },
         "source_trajectory_count": expected_prompts,
+        "hardware_budget": registration["hardware_budget"],
         "sigma_schedule": list(sigmas),
         "sigma_schedule_sha256": canonical_sha256(list(sigmas)),
         "schedules": schedules,
@@ -560,10 +823,11 @@ def _candidate_document(
                 "allow_acceleration": False,
             }
         )
+    target_token = format(float(schedule["target_speedup"]), ".6g").replace(".", "p")
     candidate_id = (
-        f"derived-static-brake-a{budget}-b{brake['dynamic_budget']}-o1-index"
+        f"target-static-brake-s{target_token}-a{budget}-b{brake['dynamic_budget']}-o1-index"
         if combined
-        else f"derived-static-a{budget}-o1-index"
+        else f"target-static-s{target_token}-a{budget}-o1-index"
     )
     payload = {
         "schema": PHASED_CANDIDATE_SCHEMA,
@@ -591,6 +855,7 @@ def materialize(args: argparse.Namespace) -> None:
     payload = {key: value for key, value in derivation.items() if key != "sha256"}
     if (
         derivation.get("schema") != RESULT_SCHEMA
+        or derivation.get("schema_revision") != RESULT_SCHEMA_REVISION
         or canonical_sha256(payload) != derivation.get("sha256")
         or derivation.get("registration", {}).get("content_sha256") != registration["sha256"]
         or derivation.get("semantic_labels_read") is not False
@@ -619,6 +884,8 @@ def materialize(args: argparse.Namespace) -> None:
                     "content_sha256": arm.content_sha256,
                     "candidate_id": arm.candidate_id,
                     "anchor_budget": int(schedule["anchor_budget"]),
+                    "target_speedup": float(schedule["target_speedup"]),
+                    "total_real_step_budget": int(schedule["total_real_step_budget"]),
                     "family": "combined" if combined else "static",
                 }
             )
@@ -652,6 +919,8 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     register_parser = subparsers.add_parser("register")
     register_parser.add_argument("--quality-input", required=True)
     register_parser.add_argument("--methodology", required=True)
+    register_parser.add_argument("--hardware-speed-manifest", required=True)
+    register_parser.add_argument("--target-speedup", required=True, type=float)
     register_parser.add_argument("--study-id", required=True)
     register_parser.add_argument("--created-at", required=True)
     register_parser.add_argument("--out", required=True)

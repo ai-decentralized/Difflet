@@ -1,0 +1,43 @@
+{
+  "candidate_id": "target-static-s3p2-a13-o1-index",
+  "horizon_ref": {
+    "path": "benchmark/flux_cache/target-speed-schedule-derivation-result.json",
+    "sha256": "c74f59502d2d066bbc7d0bbec41ce7d7463cb35a2a2e02c07c563a8d0ab23350"
+  },
+  "policy": {
+    "cooldown_steps": 1,
+    "dynamic_budget": 0,
+    "invalid_measurement_fail_closed": true,
+    "num_steps": 50,
+    "require_final_anchor": true,
+    "static_anchor_steps": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      9,
+      15,
+      21,
+      29,
+      38,
+      45,
+      49
+    ],
+    "type": "phased_static",
+    "warmup_steps": 6
+  },
+  "predictor": {
+    "coord": "index",
+    "order": 1,
+    "type": "taylorseer"
+  },
+  "quality_contract_ref": {
+    "path": "benchmark/flux_cache/offline-gate-methodology-v1.json",
+    "sha256": "4622c84e39cd44458e90a6f832332dcecfa489fbdde71c02a32aa233d24732c0"
+  },
+  "schema": "difflet-flux-cache-phased-candidate",
+  "schema_revision": 1,
+  "sha256": "0a4cd63ceeb65b31c09716ef846d8295974f0fd5550b3accb6238eb55a6efc87"
+}

@@ -1,0 +1,2318 @@
+{
+  "bucket_id": "square-1024",
+  "candidate_summaries": [
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failure_count": 0,
+      "passes_zero_failure_gate": true,
+      "sample_count": 32
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_reject",
+      "failure_count": 1,
+      "passes_zero_failure_gate": false,
+      "sample_count": 32
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failure_count": 0,
+      "passes_zero_failure_gate": true,
+      "sample_count": 32
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_reject",
+      "failure_count": 1,
+      "passes_zero_failure_gate": false,
+      "sample_count": 32
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_reject",
+      "failure_count": 1,
+      "passes_zero_failure_gate": false,
+      "sample_count": 32
+    }
+  ],
+  "contract": {
+    "content_sha256": "60e8e44288793dcdc5940b547a035fef11ebd6d05b102ac92185ecafc73f8194",
+    "file_sha256": "d5168775b36de76c4a2494b10e3affb2c0c5572d90a33ad5dfdafe073dfc1b9f",
+    "path": "/home/ubuntu/Difflet/benchmark/flux_cache/multires-quality-contract-v1.json"
+  },
+  "height": 1024,
+  "natural_range_limits": {
+    "image_reward": 0.9721190482378006,
+    "vqa_score": 0.26171875
+  },
+  "quality_manifest": {
+    "file_sha256": "11473e826c3c343cef46a450e1abeada1ff06118d25cdfd39bb62af9e032dfd2",
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805/quality-input-v2.json"
+  },
+  "review_policy": {
+    "human_review_required": false,
+    "manual_override_permitted": false,
+    "outside_natural_range_action": "automatic_reject",
+    "within_natural_range_action": "automatic_pass"
+  },
+  "rows": [
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.05642843246459961,
+        "vqa_score": -0.015625
+      },
+      "passes": true,
+      "prompt": "exactly six copper bells hanging from two parallel wooden rails with three bells on each rail",
+      "prompt_index": 0,
+      "sample_id": "p000-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.3965117931365967,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "four red apples and exactly seven yellow lemons arranged around one empty ceramic bowl",
+      "prompt_index": 1,
+      "sample_id": "p001-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.022084474563598633,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "nine paper lanterns floating above a canal while exactly two small boats pass underneath",
+      "prompt_index": 2,
+      "sample_id": "p002-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.0823831558227539,
+        "vqa_score": -0.00390625
+      },
+      "passes": true,
+      "prompt": "five chess pawns forming a circle around three glass dice on a green felt table",
+      "prompt_index": 3,
+      "sample_id": "p003-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.011218786239624023,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "a bronze telescope to the left of a red globe with a folded map directly beneath both objects",
+      "prompt_index": 4,
+      "sample_id": "p004-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.10168278217315674,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "a white bicycle behind a blue bench while a black umbrella leans against the bench in front",
+      "prompt_index": 5,
+      "sample_id": "p005-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.055487632751464844,
+        "vqa_score": -0.0078125
+      },
+      "passes": true,
+      "prompt": "a green vase centered between two lamps with the shorter lamp on the right and a mirror above the vase",
+      "prompt_index": 6,
+      "sample_id": "p006-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.011992335319519043,
+        "vqa_score": 0.0390625
+      },
+      "passes": true,
+      "prompt": "a red fox standing inside a stone arch and a gray owl perched above the arch facing left",
+      "prompt_index": 7,
+      "sample_id": "p007-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.405811607837677,
+        "vqa_score": 0.07421875
+      },
+      "passes": true,
+      "prompt": "a child in a striped green coat holding a yellow kite beside an adult in a yellow coat holding a striped green bag",
+      "prompt_index": 8,
+      "sample_id": "p008-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.06554841995239258,
+        "vqa_score": -0.0390625
+      },
+      "passes": true,
+      "prompt": "a matte silver teapot with a blue handle next to a glossy blue teapot with a silver handle",
+      "prompt_index": 9,
+      "sample_id": "p009-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.06347990036010742,
+        "vqa_score": -0.04296875
+      },
+      "passes": true,
+      "prompt": "a square purple cushion on a round orange chair and a round purple cushion on a square orange stool",
+      "prompt_index": 10,
+      "sample_id": "p010-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.7352436780929565,
+        "vqa_score": -0.03125
+      },
+      "passes": true,
+      "prompt": "a gardener wearing white gloves carrying a red bucket beside a mechanic wearing red gloves carrying a white toolbox",
+      "prompt_index": 11,
+      "sample_id": "p011-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.04451775550842285,
+        "vqa_score": 0.04296875
+      },
+      "passes": true,
+      "prompt": "a clean railway platform sign reading NORTH HARBOR in bold white letters above a blue clock",
+      "prompt_index": 12,
+      "sample_id": "p012-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.31406426429748535,
+        "vqa_score": -0.0078125
+      },
+      "passes": true,
+      "prompt": "a bakery window with a hand-painted sign that clearly reads FRESH BREAD TODAY",
+      "prompt_index": 13,
+      "sample_id": "p013-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.004408717155456543,
+        "vqa_score": 0.0234375
+      },
+      "passes": true,
+      "prompt": "a red enamel toolbox labeled SMALL REPAIRS in centered cream lettering",
+      "prompt_index": 14,
+      "sample_id": "p014-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.022652626037597656,
+        "vqa_score": 0.0546875
+      },
+      "passes": true,
+      "prompt": "an open notebook whose first page displays the phrase MEET AT SUNRISE in neat black handwriting",
+      "prompt_index": 15,
+      "sample_id": "p015-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.18441878259181976,
+        "vqa_score": -0.0546875
+      },
+      "passes": true,
+      "prompt": "a violin maker carefully fitting a wooden bridge beneath the strings of an unfinished violin",
+      "prompt_index": 16,
+      "sample_id": "p016-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.16051018238067627,
+        "vqa_score": -0.05859375
+      },
+      "passes": true,
+      "prompt": "two firefighters passing a coiled hose to each other beside a yellow emergency truck",
+      "prompt_index": 17,
+      "sample_id": "p017-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.21604681015014648,
+        "vqa_score": 0.005859375
+      },
+      "passes": true,
+      "prompt": "a potter guiding a child's hands as they shape a narrow clay vase on a spinning wheel",
+      "prompt_index": 18,
+      "sample_id": "p018-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.01971706748008728,
+        "vqa_score": -0.5390625
+      },
+      "passes": true,
+      "prompt": "a bicycle mechanic tightening the front brake cable while a customer steadies the handlebars",
+      "prompt_index": 19,
+      "sample_id": "p019-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.15363872051239014,
+        "vqa_score": -0.03515625
+      },
+      "passes": true,
+      "prompt": "a watchmaker placing a tiny ruby bearing into a brass movement with fine steel tweezers",
+      "prompt_index": 20,
+      "sample_id": "p020-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.16367197036743164,
+        "vqa_score": -0.07421875
+      },
+      "passes": true,
+      "prompt": "an embroiderer sewing pale gold leaves onto dark velvet with individual stitches clearly visible",
+      "prompt_index": 21,
+      "sample_id": "p021-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.21894413232803345,
+        "vqa_score": 0.01953125
+      },
+      "passes": true,
+      "prompt": "a cartographer drawing thin contour lines and minute elevation numbers on a mountain map",
+      "prompt_index": 22,
+      "sample_id": "p022-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.15249094367027283,
+        "vqa_score": -0.130859375
+      },
+      "passes": true,
+      "prompt": "a conservator repairing a cracked porcelain bird with a narrow line of gold lacquer",
+      "prompt_index": 23,
+      "sample_id": "p023-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.10976248979568481,
+        "vqa_score": 0.08203125
+      },
+      "passes": true,
+      "prompt": "folded indigo linen beside polished walnut and rough gray stone under soft window light",
+      "prompt_index": 24,
+      "sample_id": "p024-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.059893012046813965,
+        "vqa_score": -0.046875
+      },
+      "passes": true,
+      "prompt": "a rain-darkened leather satchel resting on coarse wool with bright brass buckles",
+      "prompt_index": 25,
+      "sample_id": "p025-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.25835782289505005,
+        "vqa_score": -0.0625
+      },
+      "passes": true,
+      "prompt": "translucent rice paper layered over black ink brushwork on a lightly scratched bamboo desk",
+      "prompt_index": 26,
+      "sample_id": "p026-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.004912614822387695,
+        "vqa_score": 0.00390625
+      },
+      "passes": true,
+      "prompt": "a frosted glass bottle wrapped in frayed hemp rope beside smooth river pebbles",
+      "prompt_index": 27,
+      "sample_id": "p027-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.7298435568809509,
+        "vqa_score": 0.13671875
+      },
+      "passes": true,
+      "prompt": "a narrow night market alley framed by red awnings with a single bright food cart at the distant center",
+      "prompt_index": 28,
+      "sample_id": "p028-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.08165222406387329,
+        "vqa_score": -0.015625
+      },
+      "passes": true,
+      "prompt": "a wide coastal landscape with a lighthouse on the far left and three fishing boats leading toward it",
+      "prompt_index": 29,
+      "sample_id": "p029-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.004412412643432617,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "an overhead view of a circular reading room with radial desks surrounding one central green lamp",
+      "prompt_index": 30,
+      "sample_id": "p030-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "adaptive-brake-w6-i8-m4-t1p19-r1p50-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.042383670806884766,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "a quiet snow-covered courtyard seen through a dark doorway with one warm window in the upper right",
+      "prompt_index": 31,
+      "sample_id": "p031-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.25231122970581055,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "exactly six copper bells hanging from two parallel wooden rails with three bells on each rail",
+      "prompt_index": 0,
+      "sample_id": "p000-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.04884612560272217,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "four red apples and exactly seven yellow lemons arranged around one empty ceramic bowl",
+      "prompt_index": 1,
+      "sample_id": "p001-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.012230157852172852,
+        "vqa_score": 0.02734375
+      },
+      "passes": true,
+      "prompt": "nine paper lanterns floating above a canal while exactly two small boats pass underneath",
+      "prompt_index": 2,
+      "sample_id": "p002-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.23082637786865234,
+        "vqa_score": -0.0078125
+      },
+      "passes": true,
+      "prompt": "five chess pawns forming a circle around three glass dice on a green felt table",
+      "prompt_index": 3,
+      "sample_id": "p003-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.01930534839630127,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "a bronze telescope to the left of a red globe with a folded map directly beneath both objects",
+      "prompt_index": 4,
+      "sample_id": "p004-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.19499194622039795,
+        "vqa_score": 0.01171875
+      },
+      "passes": true,
+      "prompt": "a white bicycle behind a blue bench while a black umbrella leans against the bench in front",
+      "prompt_index": 5,
+      "sample_id": "p005-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.018419742584228516,
+        "vqa_score": -0.00390625
+      },
+      "passes": true,
+      "prompt": "a green vase centered between two lamps with the shorter lamp on the right and a mirror above the vase",
+      "prompt_index": 6,
+      "sample_id": "p006-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.0071868896484375,
+        "vqa_score": -0.00390625
+      },
+      "passes": true,
+      "prompt": "a red fox standing inside a stone arch and a gray owl perched above the arch facing left",
+      "prompt_index": 7,
+      "sample_id": "p007-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.4059516042470932,
+        "vqa_score": 0.03125
+      },
+      "passes": true,
+      "prompt": "a child in a striped green coat holding a yellow kite beside an adult in a yellow coat holding a striped green bag",
+      "prompt_index": 8,
+      "sample_id": "p008-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.05064678192138672,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "a matte silver teapot with a blue handle next to a glossy blue teapot with a silver handle",
+      "prompt_index": 9,
+      "sample_id": "p009-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.1239241361618042,
+        "vqa_score": -0.03515625
+      },
+      "passes": true,
+      "prompt": "a square purple cushion on a round orange chair and a round purple cushion on a square orange stool",
+      "prompt_index": 10,
+      "sample_id": "p010-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.030182361602783203,
+        "vqa_score": 0.05078125
+      },
+      "passes": true,
+      "prompt": "a gardener wearing white gloves carrying a red bucket beside a mechanic wearing red gloves carrying a white toolbox",
+      "prompt_index": 11,
+      "sample_id": "p011-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.09110832214355469,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "a clean railway platform sign reading NORTH HARBOR in bold white letters above a blue clock",
+      "prompt_index": 12,
+      "sample_id": "p012-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_reject",
+      "failed_metrics": [
+        "image_reward"
+      ],
+      "harms": {
+        "image_reward": 1.013394057750702,
+        "vqa_score": 0.01953125
+      },
+      "passes": false,
+      "prompt": "a bakery window with a hand-painted sign that clearly reads FRESH BREAD TODAY",
+      "prompt_index": 13,
+      "sample_id": "p013-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.006902098655700684,
+        "vqa_score": -0.0078125
+      },
+      "passes": true,
+      "prompt": "a red enamel toolbox labeled SMALL REPAIRS in centered cream lettering",
+      "prompt_index": 14,
+      "sample_id": "p014-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.02460920810699463,
+        "vqa_score": -0.0234375
+      },
+      "passes": true,
+      "prompt": "an open notebook whose first page displays the phrase MEET AT SUNRISE in neat black handwriting",
+      "prompt_index": 15,
+      "sample_id": "p015-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.0728723406791687,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "a violin maker carefully fitting a wooden bridge beneath the strings of an unfinished violin",
+      "prompt_index": 16,
+      "sample_id": "p016-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.2552374005317688,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "two firefighters passing a coiled hose to each other beside a yellow emergency truck",
+      "prompt_index": 17,
+      "sample_id": "p017-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.4245520830154419,
+        "vqa_score": 0.15625
+      },
+      "passes": true,
+      "prompt": "a potter guiding a child's hands as they shape a narrow clay vase on a spinning wheel",
+      "prompt_index": 18,
+      "sample_id": "p018-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.20600908994674683,
+        "vqa_score": -0.4453125
+      },
+      "passes": true,
+      "prompt": "a bicycle mechanic tightening the front brake cable while a customer steadies the handlebars",
+      "prompt_index": 19,
+      "sample_id": "p019-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.16281211376190186,
+        "vqa_score": -0.12890625
+      },
+      "passes": true,
+      "prompt": "a watchmaker placing a tiny ruby bearing into a brass movement with fine steel tweezers",
+      "prompt_index": 20,
+      "sample_id": "p020-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.2816464900970459,
+        "vqa_score": -0.0703125
+      },
+      "passes": true,
+      "prompt": "an embroiderer sewing pale gold leaves onto dark velvet with individual stitches clearly visible",
+      "prompt_index": 21,
+      "sample_id": "p021-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.4624135494232178,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "a cartographer drawing thin contour lines and minute elevation numbers on a mountain map",
+      "prompt_index": 22,
+      "sample_id": "p022-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.004988670349121094,
+        "vqa_score": 0.0625
+      },
+      "passes": true,
+      "prompt": "a conservator repairing a cracked porcelain bird with a narrow line of gold lacquer",
+      "prompt_index": 23,
+      "sample_id": "p023-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.062262505292892456,
+        "vqa_score": 0.03515625
+      },
+      "passes": true,
+      "prompt": "folded indigo linen beside polished walnut and rough gray stone under soft window light",
+      "prompt_index": 24,
+      "sample_id": "p024-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.06662976741790771,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "a rain-darkened leather satchel resting on coarse wool with bright brass buckles",
+      "prompt_index": 25,
+      "sample_id": "p025-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.041177570819854736,
+        "vqa_score": -0.046875
+      },
+      "passes": true,
+      "prompt": "translucent rice paper layered over black ink brushwork on a lightly scratched bamboo desk",
+      "prompt_index": 26,
+      "sample_id": "p026-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.0025899410247802734,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "a frosted glass bottle wrapped in frayed hemp rope beside smooth river pebbles",
+      "prompt_index": 27,
+      "sample_id": "p027-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.8119804263114929,
+        "vqa_score": 0.05078125
+      },
+      "passes": true,
+      "prompt": "a narrow night market alley framed by red awnings with a single bright food cart at the distant center",
+      "prompt_index": 28,
+      "sample_id": "p028-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.15980303287506104,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "a wide coastal landscape with a lighthouse on the far left and three fishing boats leading toward it",
+      "prompt_index": 29,
+      "sample_id": "p029-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.02147650718688965,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "an overhead view of a circular reading room with radial desks surrounding one central green lamp",
+      "prompt_index": 30,
+      "sample_id": "p030-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a12-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.021958470344543457,
+        "vqa_score": -0.03125
+      },
+      "passes": true,
+      "prompt": "a quiet snow-covered courtyard seen through a dark doorway with one warm window in the upper right",
+      "prompt_index": 31,
+      "sample_id": "p031-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.20039057731628418,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "exactly six copper bells hanging from two parallel wooden rails with three bells on each rail",
+      "prompt_index": 0,
+      "sample_id": "p000-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.050347089767456055,
+        "vqa_score": -0.0078125
+      },
+      "passes": true,
+      "prompt": "four red apples and exactly seven yellow lemons arranged around one empty ceramic bowl",
+      "prompt_index": 1,
+      "sample_id": "p001-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.013186097145080566,
+        "vqa_score": 0.03125
+      },
+      "passes": true,
+      "prompt": "nine paper lanterns floating above a canal while exactly two small boats pass underneath",
+      "prompt_index": 2,
+      "sample_id": "p002-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.0036984682083129883,
+        "vqa_score": -0.03125
+      },
+      "passes": true,
+      "prompt": "five chess pawns forming a circle around three glass dice on a green felt table",
+      "prompt_index": 3,
+      "sample_id": "p003-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.02006232738494873,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "a bronze telescope to the left of a red globe with a folded map directly beneath both objects",
+      "prompt_index": 4,
+      "sample_id": "p004-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.19909203052520752,
+        "vqa_score": 0.01171875
+      },
+      "passes": true,
+      "prompt": "a white bicycle behind a blue bench while a black umbrella leans against the bench in front",
+      "prompt_index": 5,
+      "sample_id": "p005-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.019103646278381348,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "a green vase centered between two lamps with the shorter lamp on the right and a mirror above the vase",
+      "prompt_index": 6,
+      "sample_id": "p006-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.0035240650177001953,
+        "vqa_score": -0.0078125
+      },
+      "passes": true,
+      "prompt": "a red fox standing inside a stone arch and a gray owl perched above the arch facing left",
+      "prompt_index": 7,
+      "sample_id": "p007-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.4274820536375046,
+        "vqa_score": 0.07421875
+      },
+      "passes": true,
+      "prompt": "a child in a striped green coat holding a yellow kite beside an adult in a yellow coat holding a striped green bag",
+      "prompt_index": 8,
+      "sample_id": "p008-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.06302380561828613,
+        "vqa_score": 0.0234375
+      },
+      "passes": true,
+      "prompt": "a matte silver teapot with a blue handle next to a glossy blue teapot with a silver handle",
+      "prompt_index": 9,
+      "sample_id": "p009-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.12241852283477783,
+        "vqa_score": -0.03125
+      },
+      "passes": true,
+      "prompt": "a square purple cushion on a round orange chair and a round purple cushion on a square orange stool",
+      "prompt_index": 10,
+      "sample_id": "p010-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.03312265872955322,
+        "vqa_score": 0.04296875
+      },
+      "passes": true,
+      "prompt": "a gardener wearing white gloves carrying a red bucket beside a mechanic wearing red gloves carrying a white toolbox",
+      "prompt_index": 11,
+      "sample_id": "p011-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.09412503242492676,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "a clean railway platform sign reading NORTH HARBOR in bold white letters above a blue clock",
+      "prompt_index": 12,
+      "sample_id": "p012-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.9653264284133911,
+        "vqa_score": 0.015625
+      },
+      "passes": true,
+      "prompt": "a bakery window with a hand-painted sign that clearly reads FRESH BREAD TODAY",
+      "prompt_index": 13,
+      "sample_id": "p013-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.013068079948425293,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "a red enamel toolbox labeled SMALL REPAIRS in centered cream lettering",
+      "prompt_index": 14,
+      "sample_id": "p014-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.010891914367675781,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "an open notebook whose first page displays the phrase MEET AT SUNRISE in neat black handwriting",
+      "prompt_index": 15,
+      "sample_id": "p015-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.07256990671157837,
+        "vqa_score": 0.05859375
+      },
+      "passes": true,
+      "prompt": "a violin maker carefully fitting a wooden bridge beneath the strings of an unfinished violin",
+      "prompt_index": 16,
+      "sample_id": "p016-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.2020849585533142,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "two firefighters passing a coiled hose to each other beside a yellow emergency truck",
+      "prompt_index": 17,
+      "sample_id": "p017-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.4598535895347595,
+        "vqa_score": 0.1484375
+      },
+      "passes": true,
+      "prompt": "a potter guiding a child's hands as they shape a narrow clay vase on a spinning wheel",
+      "prompt_index": 18,
+      "sample_id": "p018-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.2294142246246338,
+        "vqa_score": -0.40625
+      },
+      "passes": true,
+      "prompt": "a bicycle mechanic tightening the front brake cable while a customer steadies the handlebars",
+      "prompt_index": 19,
+      "sample_id": "p019-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.07677745819091797,
+        "vqa_score": -0.09765625
+      },
+      "passes": true,
+      "prompt": "a watchmaker placing a tiny ruby bearing into a brass movement with fine steel tweezers",
+      "prompt_index": 20,
+      "sample_id": "p020-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.3224952220916748,
+        "vqa_score": -0.08203125
+      },
+      "passes": true,
+      "prompt": "an embroiderer sewing pale gold leaves onto dark velvet with individual stitches clearly visible",
+      "prompt_index": 21,
+      "sample_id": "p021-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.3804129958152771,
+        "vqa_score": -0.06640625
+      },
+      "passes": true,
+      "prompt": "a cartographer drawing thin contour lines and minute elevation numbers on a mountain map",
+      "prompt_index": 22,
+      "sample_id": "p022-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.05237498879432678,
+        "vqa_score": 0.09375
+      },
+      "passes": true,
+      "prompt": "a conservator repairing a cracked porcelain bird with a narrow line of gold lacquer",
+      "prompt_index": 23,
+      "sample_id": "p023-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.12683334946632385,
+        "vqa_score": 0.07421875
+      },
+      "passes": true,
+      "prompt": "folded indigo linen beside polished walnut and rough gray stone under soft window light",
+      "prompt_index": 24,
+      "sample_id": "p024-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.0339735746383667,
+        "vqa_score": -0.046875
+      },
+      "passes": true,
+      "prompt": "a rain-darkened leather satchel resting on coarse wool with bright brass buckles",
+      "prompt_index": 25,
+      "sample_id": "p025-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.13858777284622192,
+        "vqa_score": -0.06640625
+      },
+      "passes": true,
+      "prompt": "translucent rice paper layered over black ink brushwork on a lightly scratched bamboo desk",
+      "prompt_index": 26,
+      "sample_id": "p026-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.002972245216369629,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "a frosted glass bottle wrapped in frayed hemp rope beside smooth river pebbles",
+      "prompt_index": 27,
+      "sample_id": "p027-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.6693102121353149,
+        "vqa_score": 0.03125
+      },
+      "passes": true,
+      "prompt": "a narrow night market alley framed by red awnings with a single bright food cart at the distant center",
+      "prompt_index": 28,
+      "sample_id": "p028-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.0346028208732605,
+        "vqa_score": -0.015625
+      },
+      "passes": true,
+      "prompt": "a wide coastal landscape with a lighthouse on the far left and three fishing boats leading toward it",
+      "prompt_index": 29,
+      "sample_id": "p029-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.028708338737487793,
+        "vqa_score": 0.00390625
+      },
+      "passes": true,
+      "prompt": "an overhead view of a circular reading room with radial desks surrounding one central green lamp",
+      "prompt_index": 30,
+      "sample_id": "p030-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-a13-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.02906942367553711,
+        "vqa_score": -0.01953125
+      },
+      "passes": true,
+      "prompt": "a quiet snow-covered courtyard seen through a dark doorway with one warm window in the upper right",
+      "prompt_index": 31,
+      "sample_id": "p031-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.25231122970581055,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "exactly six copper bells hanging from two parallel wooden rails with three bells on each rail",
+      "prompt_index": 0,
+      "sample_id": "p000-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.1020808219909668,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "four red apples and exactly seven yellow lemons arranged around one empty ceramic bowl",
+      "prompt_index": 1,
+      "sample_id": "p001-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.012230157852172852,
+        "vqa_score": 0.02734375
+      },
+      "passes": true,
+      "prompt": "nine paper lanterns floating above a canal while exactly two small boats pass underneath",
+      "prompt_index": 2,
+      "sample_id": "p002-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.23082637786865234,
+        "vqa_score": -0.0078125
+      },
+      "passes": true,
+      "prompt": "five chess pawns forming a circle around three glass dice on a green felt table",
+      "prompt_index": 3,
+      "sample_id": "p003-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.01930534839630127,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "a bronze telescope to the left of a red globe with a folded map directly beneath both objects",
+      "prompt_index": 4,
+      "sample_id": "p004-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.19499194622039795,
+        "vqa_score": 0.01171875
+      },
+      "passes": true,
+      "prompt": "a white bicycle behind a blue bench while a black umbrella leans against the bench in front",
+      "prompt_index": 5,
+      "sample_id": "p005-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.018419742584228516,
+        "vqa_score": -0.00390625
+      },
+      "passes": true,
+      "prompt": "a green vase centered between two lamps with the shorter lamp on the right and a mirror above the vase",
+      "prompt_index": 6,
+      "sample_id": "p006-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.0071868896484375,
+        "vqa_score": -0.00390625
+      },
+      "passes": true,
+      "prompt": "a red fox standing inside a stone arch and a gray owl perched above the arch facing left",
+      "prompt_index": 7,
+      "sample_id": "p007-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.4059516042470932,
+        "vqa_score": 0.03125
+      },
+      "passes": true,
+      "prompt": "a child in a striped green coat holding a yellow kite beside an adult in a yellow coat holding a striped green bag",
+      "prompt_index": 8,
+      "sample_id": "p008-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.05064678192138672,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "a matte silver teapot with a blue handle next to a glossy blue teapot with a silver handle",
+      "prompt_index": 9,
+      "sample_id": "p009-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.1239241361618042,
+        "vqa_score": -0.03515625
+      },
+      "passes": true,
+      "prompt": "a square purple cushion on a round orange chair and a round purple cushion on a square orange stool",
+      "prompt_index": 10,
+      "sample_id": "p010-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.015657782554626465,
+        "vqa_score": 0.078125
+      },
+      "passes": true,
+      "prompt": "a gardener wearing white gloves carrying a red bucket beside a mechanic wearing red gloves carrying a white toolbox",
+      "prompt_index": 11,
+      "sample_id": "p011-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.09110832214355469,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "a clean railway platform sign reading NORTH HARBOR in bold white letters above a blue clock",
+      "prompt_index": 12,
+      "sample_id": "p012-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_reject",
+      "failed_metrics": [
+        "image_reward"
+      ],
+      "harms": {
+        "image_reward": 1.1806514263153076,
+        "vqa_score": 0.015625
+      },
+      "passes": false,
+      "prompt": "a bakery window with a hand-painted sign that clearly reads FRESH BREAD TODAY",
+      "prompt_index": 13,
+      "sample_id": "p013-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.006902098655700684,
+        "vqa_score": -0.0078125
+      },
+      "passes": true,
+      "prompt": "a red enamel toolbox labeled SMALL REPAIRS in centered cream lettering",
+      "prompt_index": 14,
+      "sample_id": "p014-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.02460920810699463,
+        "vqa_score": -0.0234375
+      },
+      "passes": true,
+      "prompt": "an open notebook whose first page displays the phrase MEET AT SUNRISE in neat black handwriting",
+      "prompt_index": 15,
+      "sample_id": "p015-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.0728723406791687,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "a violin maker carefully fitting a wooden bridge beneath the strings of an unfinished violin",
+      "prompt_index": 16,
+      "sample_id": "p016-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.2552374005317688,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "two firefighters passing a coiled hose to each other beside a yellow emergency truck",
+      "prompt_index": 17,
+      "sample_id": "p017-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.4245520830154419,
+        "vqa_score": 0.15625
+      },
+      "passes": true,
+      "prompt": "a potter guiding a child's hands as they shape a narrow clay vase on a spinning wheel",
+      "prompt_index": 18,
+      "sample_id": "p018-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.20600908994674683,
+        "vqa_score": -0.4453125
+      },
+      "passes": true,
+      "prompt": "a bicycle mechanic tightening the front brake cable while a customer steadies the handlebars",
+      "prompt_index": 19,
+      "sample_id": "p019-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.16281211376190186,
+        "vqa_score": -0.12890625
+      },
+      "passes": true,
+      "prompt": "a watchmaker placing a tiny ruby bearing into a brass movement with fine steel tweezers",
+      "prompt_index": 20,
+      "sample_id": "p020-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.2816464900970459,
+        "vqa_score": -0.0703125
+      },
+      "passes": true,
+      "prompt": "an embroiderer sewing pale gold leaves onto dark velvet with individual stitches clearly visible",
+      "prompt_index": 21,
+      "sample_id": "p021-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.4624135494232178,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "a cartographer drawing thin contour lines and minute elevation numbers on a mountain map",
+      "prompt_index": 22,
+      "sample_id": "p022-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.004988670349121094,
+        "vqa_score": 0.0625
+      },
+      "passes": true,
+      "prompt": "a conservator repairing a cracked porcelain bird with a narrow line of gold lacquer",
+      "prompt_index": 23,
+      "sample_id": "p023-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.062262505292892456,
+        "vqa_score": 0.03515625
+      },
+      "passes": true,
+      "prompt": "folded indigo linen beside polished walnut and rough gray stone under soft window light",
+      "prompt_index": 24,
+      "sample_id": "p024-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.06662976741790771,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "a rain-darkened leather satchel resting on coarse wool with bright brass buckles",
+      "prompt_index": 25,
+      "sample_id": "p025-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.041177570819854736,
+        "vqa_score": -0.046875
+      },
+      "passes": true,
+      "prompt": "translucent rice paper layered over black ink brushwork on a lightly scratched bamboo desk",
+      "prompt_index": 26,
+      "sample_id": "p026-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.0025899410247802734,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "a frosted glass bottle wrapped in frayed hemp rope beside smooth river pebbles",
+      "prompt_index": 27,
+      "sample_id": "p027-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.8119804263114929,
+        "vqa_score": 0.05078125
+      },
+      "passes": true,
+      "prompt": "a narrow night market alley framed by red awnings with a single bright food cart at the distant center",
+      "prompt_index": 28,
+      "sample_id": "p028-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.15980303287506104,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "a wide coastal landscape with a lighthouse on the far left and three fishing boats leading toward it",
+      "prompt_index": 29,
+      "sample_id": "p029-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.02147650718688965,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "an overhead view of a circular reading room with radial desks surrounding one central green lamp",
+      "prompt_index": 30,
+      "sample_id": "p030-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a12-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.021958470344543457,
+        "vqa_score": -0.03125
+      },
+      "passes": true,
+      "prompt": "a quiet snow-covered courtyard seen through a dark doorway with one warm window in the upper right",
+      "prompt_index": 31,
+      "sample_id": "p031-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.20039057731628418,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "exactly six copper bells hanging from two parallel wooden rails with three bells on each rail",
+      "prompt_index": 0,
+      "sample_id": "p000-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.10357630252838135,
+        "vqa_score": -0.01953125
+      },
+      "passes": true,
+      "prompt": "four red apples and exactly seven yellow lemons arranged around one empty ceramic bowl",
+      "prompt_index": 1,
+      "sample_id": "p001-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.013186097145080566,
+        "vqa_score": 0.03125
+      },
+      "passes": true,
+      "prompt": "nine paper lanterns floating above a canal while exactly two small boats pass underneath",
+      "prompt_index": 2,
+      "sample_id": "p002-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.0036984682083129883,
+        "vqa_score": -0.03125
+      },
+      "passes": true,
+      "prompt": "five chess pawns forming a circle around three glass dice on a green felt table",
+      "prompt_index": 3,
+      "sample_id": "p003-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.02006232738494873,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "a bronze telescope to the left of a red globe with a folded map directly beneath both objects",
+      "prompt_index": 4,
+      "sample_id": "p004-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.19909203052520752,
+        "vqa_score": 0.01171875
+      },
+      "passes": true,
+      "prompt": "a white bicycle behind a blue bench while a black umbrella leans against the bench in front",
+      "prompt_index": 5,
+      "sample_id": "p005-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.019103646278381348,
+        "vqa_score": -0.0
+      },
+      "passes": true,
+      "prompt": "a green vase centered between two lamps with the shorter lamp on the right and a mirror above the vase",
+      "prompt_index": 6,
+      "sample_id": "p006-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.0035240650177001953,
+        "vqa_score": -0.0078125
+      },
+      "passes": true,
+      "prompt": "a red fox standing inside a stone arch and a gray owl perched above the arch facing left",
+      "prompt_index": 7,
+      "sample_id": "p007-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.4274820536375046,
+        "vqa_score": 0.07421875
+      },
+      "passes": true,
+      "prompt": "a child in a striped green coat holding a yellow kite beside an adult in a yellow coat holding a striped green bag",
+      "prompt_index": 8,
+      "sample_id": "p008-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.06302380561828613,
+        "vqa_score": 0.0234375
+      },
+      "passes": true,
+      "prompt": "a matte silver teapot with a blue handle next to a glossy blue teapot with a silver handle",
+      "prompt_index": 9,
+      "sample_id": "p009-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.12241852283477783,
+        "vqa_score": -0.03125
+      },
+      "passes": true,
+      "prompt": "a square purple cushion on a round orange chair and a round purple cushion on a square orange stool",
+      "prompt_index": 10,
+      "sample_id": "p010-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.04093599319458008,
+        "vqa_score": 0.0703125
+      },
+      "passes": true,
+      "prompt": "a gardener wearing white gloves carrying a red bucket beside a mechanic wearing red gloves carrying a white toolbox",
+      "prompt_index": 11,
+      "sample_id": "p011-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.09412503242492676,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "a clean railway platform sign reading NORTH HARBOR in bold white letters above a blue clock",
+      "prompt_index": 12,
+      "sample_id": "p012-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_reject",
+      "failed_metrics": [
+        "image_reward"
+      ],
+      "harms": {
+        "image_reward": 1.0752760171890259,
+        "vqa_score": 0.0078125
+      },
+      "passes": false,
+      "prompt": "a bakery window with a hand-painted sign that clearly reads FRESH BREAD TODAY",
+      "prompt_index": 13,
+      "sample_id": "p013-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.008693933486938477,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "a red enamel toolbox labeled SMALL REPAIRS in centered cream lettering",
+      "prompt_index": 14,
+      "sample_id": "p014-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.010891914367675781,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "an open notebook whose first page displays the phrase MEET AT SUNRISE in neat black handwriting",
+      "prompt_index": 15,
+      "sample_id": "p015-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.07256990671157837,
+        "vqa_score": 0.05859375
+      },
+      "passes": true,
+      "prompt": "a violin maker carefully fitting a wooden bridge beneath the strings of an unfinished violin",
+      "prompt_index": 16,
+      "sample_id": "p016-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.2020849585533142,
+        "vqa_score": -0.01171875
+      },
+      "passes": true,
+      "prompt": "two firefighters passing a coiled hose to each other beside a yellow emergency truck",
+      "prompt_index": 17,
+      "sample_id": "p017-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.4598535895347595,
+        "vqa_score": 0.1484375
+      },
+      "passes": true,
+      "prompt": "a potter guiding a child's hands as they shape a narrow clay vase on a spinning wheel",
+      "prompt_index": 18,
+      "sample_id": "p018-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.2294142246246338,
+        "vqa_score": -0.40625
+      },
+      "passes": true,
+      "prompt": "a bicycle mechanic tightening the front brake cable while a customer steadies the handlebars",
+      "prompt_index": 19,
+      "sample_id": "p019-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.07677745819091797,
+        "vqa_score": -0.09765625
+      },
+      "passes": true,
+      "prompt": "a watchmaker placing a tiny ruby bearing into a brass movement with fine steel tweezers",
+      "prompt_index": 20,
+      "sample_id": "p020-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.3224952220916748,
+        "vqa_score": -0.08203125
+      },
+      "passes": true,
+      "prompt": "an embroiderer sewing pale gold leaves onto dark velvet with individual stitches clearly visible",
+      "prompt_index": 21,
+      "sample_id": "p021-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.3804129958152771,
+        "vqa_score": -0.06640625
+      },
+      "passes": true,
+      "prompt": "a cartographer drawing thin contour lines and minute elevation numbers on a mountain map",
+      "prompt_index": 22,
+      "sample_id": "p022-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.05237498879432678,
+        "vqa_score": 0.09375
+      },
+      "passes": true,
+      "prompt": "a conservator repairing a cracked porcelain bird with a narrow line of gold lacquer",
+      "prompt_index": 23,
+      "sample_id": "p023-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.12683334946632385,
+        "vqa_score": 0.07421875
+      },
+      "passes": true,
+      "prompt": "folded indigo linen beside polished walnut and rough gray stone under soft window light",
+      "prompt_index": 24,
+      "sample_id": "p024-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.0339735746383667,
+        "vqa_score": -0.046875
+      },
+      "passes": true,
+      "prompt": "a rain-darkened leather satchel resting on coarse wool with bright brass buckles",
+      "prompt_index": 25,
+      "sample_id": "p025-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.13858777284622192,
+        "vqa_score": -0.06640625
+      },
+      "passes": true,
+      "prompt": "translucent rice paper layered over black ink brushwork on a lightly scratched bamboo desk",
+      "prompt_index": 26,
+      "sample_id": "p026-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.002972245216369629,
+        "vqa_score": 0.0078125
+      },
+      "passes": true,
+      "prompt": "a frosted glass bottle wrapped in frayed hemp rope beside smooth river pebbles",
+      "prompt_index": 27,
+      "sample_id": "p027-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.6693102121353149,
+        "vqa_score": 0.03125
+      },
+      "passes": true,
+      "prompt": "a narrow night market alley framed by red awnings with a single bright food cart at the distant center",
+      "prompt_index": 28,
+      "sample_id": "p028-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": 0.0346028208732605,
+        "vqa_score": -0.015625
+      },
+      "passes": true,
+      "prompt": "a wide coastal landscape with a lighthouse on the far left and three fishing boats leading toward it",
+      "prompt_index": 29,
+      "sample_id": "p029-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.028708338737487793,
+        "vqa_score": 0.00390625
+      },
+      "passes": true,
+      "prompt": "an overhead view of a circular reading room with radial desks surrounding one central green lamp",
+      "prompt_index": 30,
+      "sample_id": "p030-s3",
+      "seed": 3
+    },
+    {
+      "candidate_id": "derived-static-brake-a13-b2-o1-index",
+      "decision": "automatic_pass",
+      "failed_metrics": [],
+      "harms": {
+        "image_reward": -0.02906942367553711,
+        "vqa_score": -0.01953125
+      },
+      "passes": true,
+      "prompt": "a quiet snow-covered courtyard seen through a dark doorway with one warm window in the upper right",
+      "prompt_index": 31,
+      "sample_id": "p031-s3",
+      "seed": 3
+    }
+  ],
+  "schema": "difflet-flux-cache-natural-range-evaluation",
+  "schema_revision": 1,
+  "semantic_report": {
+    "file_sha256": "3cf0f7b73e7c116c2a134e7fe5e47c46b7489b3b2eebaabe60fdc4506f05dda4",
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805/semantic-scores.json"
+  },
+  "sha256": "26923dd7424ac74d130e4a9ce5c3e2fc96d8c3c0d0533c296e0b6e1d133de51c",
+  "split": "derived_schedule_development_screen",
+  "split_sha256": "1fa80e1ef0c8b6689378e677e007fca594b522395bdecf7d830e764d3e3e3842",
+  "width": 1024
+}

@@ -1,0 +1,58 @@
+{
+  "build_id": "flux-cache-target-profile-square-1024-2026-08-06",
+  "calibration": {
+    "schedule_registration": {
+      "content_sha256": "91af963b42432090e9db01257ffea3ef645b2a6ae89feed7f23e4b3144ae4fde",
+      "file_sha256": "0e09c2025588cf0a0706e3ac08e5b2c32206a603a3fd349a98803aa98bf707df",
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/target-speed-schedule-derivation-registration.json"
+    }
+  },
+  "confirmation": {
+    "candidate_family": "combined",
+    "minimum_speedup": 3.2,
+    "output_directory": "/home/ubuntu/difflet-artifacts/flux-cache-target-profile-confirmation-20260806",
+    "prompt_split": "target_profile_confirmation",
+    "prompt_split_sha256": "208238da94cfdf56af0a55c3c16420538450789f03421bdf7b5d11fe107f453e",
+    "prompt_suite": {
+      "file_sha256": "4889a83cd1bcdf0f33ae4ecaf20f6731a2977a4e8a53455c265fa7250769e749",
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/target-profile-confirmation-prompt-suite-v1.json"
+    },
+    "require_zero_failures": true,
+    "seeds": [
+      4
+    ]
+  },
+  "created_at": "2026-08-06T00:00:00Z",
+  "execution_policy": {
+    "content_sha256": "d0f6286084821fea62c333d5c72bfc866e76d8703eea845dd222d078ca139649",
+    "file_sha256": "eb0d3d54663521b4f6d78998655350a7cabd389775641820d79c06d207860a37",
+    "path": "/home/ubuntu/Difflet/benchmark/flux_cache/offline-profile-square-1024-execution-policy.json"
+  },
+  "implementation": {
+    "file_sha256": "ee0d34748596dfa4d3425e0d6390b239b6874feb107ca3e6d554dd344f335867",
+    "path": "/home/ubuntu/Difflet/scripts/build_flux_cache_profile.py"
+  },
+  "quality_contract": {
+    "bucket_id": "square-1024",
+    "contract": {
+      "content_sha256": "60e8e44288793dcdc5940b547a035fef11ebd6d05b102ac92185ecafc73f8194",
+      "file_sha256": "d5168775b36de76c4a2494b10e3affb2c0c5572d90a33ad5dfdafe073dfc1b9f",
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/multires-quality-contract-v1.json"
+    }
+  },
+  "runtimes": {
+    "hardware_python": "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+    "semantic_python": "/home/ubuntu/.venvs/difflet-cache-eval/bin/python"
+  },
+  "schema": "difflet-flux-cache-profile-build-spec",
+  "schema_revision": 1,
+  "scoring": {
+    "cpu_threads": 12,
+    "huggingface_cache": "/home/ubuntu/.cache/huggingface/hub",
+    "image_reward_cache": "/home/ubuntu/.cache/diffcache-semantic/ImageReward",
+    "vqa_batch_size": 4,
+    "vqa_model_cache": "/home/ubuntu/.cache/diffcache-semantic/vqascore"
+  },
+  "sha256": "8ac0663a4b20a0b381510db362d78ae1e8a3b9344e89b8bd2a9146d5bc1ba14d",
+  "status": "registered_not_run"
+}

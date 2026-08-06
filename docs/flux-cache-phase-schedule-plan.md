@@ -52,6 +52,12 @@ See `docs/flux-cache-derived-schedule-development-screen-result.md` and
 `benchmark/flux_cache/derived-schedule-development-screen-result.json` for the
 frozen outcome.
 
+A successor candidate-generation method now derives one anchor count from a
+frozen hardware speed target instead of registering `[12, 13]` manually. It does
+not reopen or overwrite this stopped study. See
+`docs/flux-cache-target-speed-profile-derivation.md` for the formula, bound timing
+evidence, and unqualified generated candidates.
+
 ## 1. Motivation and evidence boundary
 
 Existing evidence supports the following conclusions, and no stronger ones:

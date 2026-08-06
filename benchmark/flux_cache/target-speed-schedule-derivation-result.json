@@ -1,0 +1,196 @@
+{
+  "hardware_budget": {
+    "baseline_aggregate_latency_s": 463.6633422928862,
+    "budget_formula": "floor((baseline_latency_s/target_speedup-intercept_s)/incremental_real_step_s)",
+    "cost_model": {
+      "fit_method": "ordinary_least_squares_over_static_profiles",
+      "fit_r_squared": 1.0,
+      "incremental_real_step_s": 8.017210596939549,
+      "intercept_s": 21.219384517753497,
+      "latency_formula": "aggregate_latency_s=intercept_s+incremental_real_step_s*real_steps",
+      "points": [
+        {
+          "aggregate_latency_s": 117.42591168102808,
+          "real_steps": 12
+        },
+        {
+          "aggregate_latency_s": 125.44312227796763,
+          "real_steps": 13
+        }
+      ]
+    },
+    "dynamic_step_reserve": 2,
+    "fail_closed_steps_exempt_from_speed_target": true,
+    "hardware": {
+      "backend": "trainium",
+      "product_name": "trn2.3xlarge",
+      "tp_degree": 4
+    },
+    "latency_statistic": "aggregate_wall_time_over_shared_requests",
+    "maximum_aggregate_latency_s": 144.89479446652695,
+    "predicted_reserved_latency_s": 141.47754347184673,
+    "predicted_reserved_speedup": 3.2772928545027553,
+    "predicted_static_latency_s": 125.44312227796763,
+    "predicted_static_speedup": 3.6962037764450826,
+    "sample_count": 32,
+    "selection_rule": "largest_total_real_step_budget_meeting_minimum_target_speedup",
+    "source": {
+      "file_sha256": "01a735319208e89956eb15ac0787ca7ffd6c479e9f6d7f0e73bde26c706728f8",
+      "path": "/home/ubuntu/difflet-artifacts/flux-cache-derived-schedule-development-screen-20260805/speedup-candidates-v1.json",
+      "schema": "speedup-candidates-v1",
+      "static_profiles": [
+        {
+          "aggregate_latency_s": 117.42591168102808,
+          "candidate_id": "derived-static-a12-o1-index",
+          "real_steps": 12
+        },
+        {
+          "aggregate_latency_s": 125.44312227796763,
+          "candidate_id": "derived-static-a13-o1-index",
+          "real_steps": 13
+        }
+      ]
+    },
+    "static_anchor_budget": 13,
+    "target_speedup": 3.2,
+    "total_real_step_budget": 15
+  },
+  "registration": {
+    "content_sha256": "91af963b42432090e9db01257ffea3ef645b2a6ae89feed7f23e4b3144ae4fde",
+    "file_sha256": "0e09c2025588cf0a0706e3ac08e5b2c32206a603a3fd349a98803aa98bf707df",
+    "path": "/home/ubuntu/Difflet/benchmark/flux_cache/target-speed-schedule-derivation-registration.json"
+  },
+  "schedules": [
+    {
+      "anchor_budget": 13,
+      "brake_thresholds": {
+        "observation_count": 192,
+        "recovery_error": 1.4524717845133421,
+        "tighten_error": 1.1847414045005096
+      },
+      "objective_cost": 0.20905507497357245,
+      "segments": [
+        {
+          "anchor": 5,
+          "next_anchor": 9,
+          "previous_anchor": 4,
+          "prompt_q95_cost": 0.017617163944889533
+        },
+        {
+          "anchor": 9,
+          "next_anchor": 15,
+          "previous_anchor": 5,
+          "prompt_q95_cost": 0.02307227122008885
+        },
+        {
+          "anchor": 15,
+          "next_anchor": 21,
+          "previous_anchor": 9,
+          "prompt_q95_cost": 0.01740986167417323
+        },
+        {
+          "anchor": 21,
+          "next_anchor": 29,
+          "previous_anchor": 15,
+          "prompt_q95_cost": 0.03195418999611978
+        },
+        {
+          "anchor": 29,
+          "next_anchor": 38,
+          "previous_anchor": 21,
+          "prompt_q95_cost": 0.038625523310493
+        },
+        {
+          "anchor": 38,
+          "next_anchor": 45,
+          "previous_anchor": 29,
+          "prompt_q95_cost": 0.03925375847054598
+        },
+        {
+          "anchor": 45,
+          "next_anchor": 49,
+          "previous_anchor": 38,
+          "prompt_q95_cost": 0.04112230635726213
+        }
+      ],
+      "static_anchor_steps": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        9,
+        15,
+        21,
+        29,
+        38,
+        45,
+        49
+      ],
+      "target_speedup": 3.2,
+      "total_real_step_budget": 15
+    }
+  ],
+  "schema": "difflet-flux-cache-schedule-derivation-result",
+  "schema_revision": 2,
+  "semantic_labels_read": false,
+  "sha256": "ba105c5601208397270a6b2c188b4a032850cd0a9ed44431e3d6612fc0157f39",
+  "sigma_schedule": [
+    1.0,
+    0.9935795068740845,
+    0.9869785904884338,
+    0.9801895618438721,
+    0.9732041358947754,
+    0.9660137891769409,
+    0.958609402179718,
+    0.9509811997413635,
+    0.9431188106536865,
+    0.9350114464759827,
+    0.9266473650932312,
+    0.9180141687393188,
+    0.9090986847877502,
+    0.8998868465423584,
+    0.8903636932373047,
+    0.880513072013855,
+    0.870317816734314,
+    0.8597595691680908,
+    0.8488184809684753,
+    0.837473452091217,
+    0.8257016539573669,
+    0.8134785294532776,
+    0.8007776737213135,
+    0.7875705361366272,
+    0.7738260626792908,
+    0.7595109343528748,
+    0.7445887327194214,
+    0.7290202975273132,
+    0.7127622961997986,
+    0.6957681775093079,
+    0.677986741065979,
+    0.6593618392944336,
+    0.6398321986198425,
+    0.619330108165741,
+    0.5977811217308044,
+    0.5751029253005981,
+    0.5512044429779053,
+    0.5259844064712524,
+    0.4993301033973694,
+    0.4711155891418457,
+    0.44119974970817566,
+    0.40942391753196716,
+    0.37560901045799255,
+    0.33955228328704834,
+    0.3010231852531433,
+    0.2597584128379822,
+    0.2154558151960373,
+    0.16776712238788605,
+    0.11628876626491547,
+    0.060550276190042496,
+    0.0
+  ],
+  "sigma_schedule_sha256": "26a3099b2c263ea0dc3f4b265c630f22d60cbcd2fbd0cb7e6699a9f0f6a4be42",
+  "source_trajectory_count": 48,
+  "status": "derived_without_semantic_labels",
+  "study_id": "flux-cache-target-speed-schedule-derivation-2026-08-06"
+}

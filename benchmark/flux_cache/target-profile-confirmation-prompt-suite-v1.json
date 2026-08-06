@@ -1,0 +1,173 @@
+{
+  "schema": "difflet-flux-cache-prompt-suite-v1",
+  "suite_id": "flux-cache-target-profile-confirmation-v1",
+  "source": {
+    "created_at": "2026-08-06",
+    "origin": "Prospectively authored before target-derived profile confirmation",
+    "selection": "Balanced compositional prompts; no target-profile images or scores inspected"
+  },
+  "splits": {
+    "target_profile_confirmation": [
+      {
+        "prompt_id": "target-confirm-001",
+        "category": "counting",
+        "text": "exactly five orange umbrellas arranged around one empty white chair on a quiet beach"
+      },
+      {
+        "prompt_id": "target-confirm-002",
+        "category": "counting",
+        "text": "three brass clocks on the upper shelf and four blue books on the lower shelf"
+      },
+      {
+        "prompt_id": "target-confirm-003",
+        "category": "counting",
+        "text": "eight red apples divided equally between two shallow wooden bowls"
+      },
+      {
+        "prompt_id": "target-confirm-004",
+        "category": "counting",
+        "text": "six paper boats floating in two rows of three on a narrow rain puddle"
+      },
+      {
+        "prompt_id": "target-confirm-005",
+        "category": "spatial-relation",
+        "text": "a yellow bicycle behind a stone bench with a green backpack directly beneath the bench"
+      },
+      {
+        "prompt_id": "target-confirm-006",
+        "category": "spatial-relation",
+        "text": "a silver lantern between a red vase and a blue vase on a dark mantel"
+      },
+      {
+        "prompt_id": "target-confirm-007",
+        "category": "spatial-relation",
+        "text": "a white kite above a lighthouse while a small fishing boat passes to its left"
+      },
+      {
+        "prompt_id": "target-confirm-008",
+        "category": "spatial-relation",
+        "text": "a round table in front of a tall window with one stool on each side"
+      },
+      {
+        "prompt_id": "target-confirm-009",
+        "category": "attribute-binding",
+        "text": "a striped purple mug beside a plain yellow kettle, both with black handles"
+      },
+      {
+        "prompt_id": "target-confirm-010",
+        "category": "attribute-binding",
+        "text": "a small bronze robot holding a translucent blue cube in its left hand"
+      },
+      {
+        "prompt_id": "target-confirm-011",
+        "category": "attribute-binding",
+        "text": "a black horse wearing a red saddle beside a white horse wearing a green saddle"
+      },
+      {
+        "prompt_id": "target-confirm-012",
+        "category": "attribute-binding",
+        "text": "a wooden tray carrying one matte gray bottle and two glossy pink cups"
+      },
+      {
+        "prompt_id": "target-confirm-013",
+        "category": "text-rendering",
+        "text": "a clean storefront sign reading MOON BAKERY in large white capital letters"
+      },
+      {
+        "prompt_id": "target-confirm-014",
+        "category": "text-rendering",
+        "text": "a red library card printed with the words RETURN BY FRIDAY"
+      },
+      {
+        "prompt_id": "target-confirm-015",
+        "category": "text-rendering",
+        "text": "a ceramic street plaque displaying number 47 above the word HARBOR"
+      },
+      {
+        "prompt_id": "target-confirm-016",
+        "category": "text-rendering",
+        "text": "a simple poster that says PLANT MORE TREES in bold green lettering"
+      },
+      {
+        "prompt_id": "target-confirm-017",
+        "category": "interaction",
+        "text": "a tailor measuring the sleeve of a blue jacket worn by a standing customer"
+      },
+      {
+        "prompt_id": "target-confirm-018",
+        "category": "interaction",
+        "text": "a potter shaping a wide clay bowl with both hands on a spinning wheel"
+      },
+      {
+        "prompt_id": "target-confirm-019",
+        "category": "interaction",
+        "text": "a child handing a yellow flower to an elderly gardener beside a greenhouse"
+      },
+      {
+        "prompt_id": "target-confirm-020",
+        "category": "interaction",
+        "text": "two mechanics lifting a tire onto the rear axle of a vintage truck"
+      },
+      {
+        "prompt_id": "target-confirm-021",
+        "category": "fine-detail",
+        "text": "an open mechanical watch showing tiny gears, screws, springs, and engraved markings"
+      },
+      {
+        "prompt_id": "target-confirm-022",
+        "category": "fine-detail",
+        "text": "a dragonfly resting on a reed with sharply visible wings and delicate veins"
+      },
+      {
+        "prompt_id": "target-confirm-023",
+        "category": "fine-detail",
+        "text": "a miniature sailing ship with fine rigging inside a clear glass bottle"
+      },
+      {
+        "prompt_id": "target-confirm-024",
+        "category": "fine-detail",
+        "text": "a close view of an embroidered bird with individual red and gold stitches"
+      },
+      {
+        "prompt_id": "target-confirm-025",
+        "category": "scene-composition",
+        "text": "a winter train station at dusk with a clock tower, two platforms, and distant mountains"
+      },
+      {
+        "prompt_id": "target-confirm-026",
+        "category": "scene-composition",
+        "text": "a sunlit kitchen with an island in the center, open shelves, and a garden visible outside"
+      },
+      {
+        "prompt_id": "target-confirm-027",
+        "category": "scene-composition",
+        "text": "a narrow city canal curving past brick houses toward a small arched bridge"
+      },
+      {
+        "prompt_id": "target-confirm-028",
+        "category": "scene-composition",
+        "text": "an outdoor jazz stage in a park with musicians, seated listeners, and trees behind them"
+      },
+      {
+        "prompt_id": "target-confirm-029",
+        "category": "material-texture",
+        "text": "a folded velvet scarf beside a rough granite stone and a polished steel sphere"
+      },
+      {
+        "prompt_id": "target-confirm-030",
+        "category": "material-texture",
+        "text": "a weathered leather suitcase with brass corners resting on a smooth marble floor"
+      },
+      {
+        "prompt_id": "target-confirm-031",
+        "category": "material-texture",
+        "text": "a woven straw hat next to a glazed ceramic bowl on wrinkled linen fabric"
+      },
+      {
+        "prompt_id": "target-confirm-032",
+        "category": "material-texture",
+        "text": "a frosted glass bottle, a glossy black pebble, and a dry cork on a wooden board"
+      }
+    ]
+  }
+}
