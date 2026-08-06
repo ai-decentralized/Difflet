@@ -29,7 +29,7 @@
     "path": "/home/ubuntu/Difflet/benchmark/flux_cache/offline-profile-square-1024-execution-policy.json"
   },
   "implementation": {
-    "file_sha256": "ee0d34748596dfa4d3425e0d6390b239b6874feb107ca3e6d554dd344f335867",
+    "file_sha256": "6a27aa407e3315d8708ac1c4c2aaf2c6ffef74006091a7dd67b88c685a01f23c",
     "path": "/home/ubuntu/Difflet/scripts/build_flux_cache_profile.py"
   },
   "quality_contract": {
@@ -53,6 +53,6 @@
     "vqa_batch_size": 4,
     "vqa_model_cache": "/home/ubuntu/.cache/diffcache-semantic/vqascore"
   },
-  "sha256": "8ac0663a4b20a0b381510db362d78ae1e8a3b9344e89b8bd2a9146d5bc1ba14d",
+  "sha256": "188fc3cf1b912b9431b693f3142b1b93f0829e261dd0731627155ad2c5d14565",
   "status": "registered_not_run"
 }

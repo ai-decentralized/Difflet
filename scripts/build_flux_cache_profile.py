@@ -473,7 +473,12 @@ def _materialize_combined_candidate(
 
 def _run_command(command: Sequence[str]) -> None:
     print("[profile-build] run: " + " ".join(command), flush=True)
-    result = subprocess.run(command, cwd=ROOT, check=False)
+    environment = os.environ.copy()
+    runtime_bin = str(Path(command[0]).expanduser().absolute().parent)
+    environment["PATH"] = os.pathsep.join(
+        value for value in (runtime_bin, environment.get("PATH")) if value
+    )
+    result = subprocess.run(command, cwd=ROOT, check=False, env=environment)
     if result.returncode != 0:
         raise RuntimeError(
             f"profile build command failed with exit code {result.returncode}: {command[1]}"

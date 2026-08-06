@@ -341,3 +341,18 @@ def test_profile_build_rejects_dirty_source_before_hardware(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="clean Git worktree"):
         profile_builder._require_clean_worktree()
+
+
+def test_subprocess_inherits_the_selected_runtime_bin_on_path(monkeypatch):
+    observed = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        observed["environment"] = kwargs["env"]
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(profile_builder.subprocess, "run", fake_run)
+    profile_builder._run_command(["/opt/example-venv/bin/python", "script.py"])
+
+    assert observed["command"][0] == "/opt/example-venv/bin/python"
+    assert observed["environment"]["PATH"].split(":")[0] == "/opt/example-venv/bin"
