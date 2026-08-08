@@ -103,6 +103,12 @@ class DiffletPipeline:
                 allow_patterns=entry.download_patterns,
             )
             cache_revision = revision
+        application_kwargs = _bind_qualified_profile_identity(
+            application_kwargs,
+            model_id=model_id,
+            model_path=model_path,
+            revision=cache_revision,
+        )
         spec = CacheSpec(
             model_id=model_id,
             model_path=model_path,
@@ -253,11 +259,42 @@ def _cache_application_kwargs(application_kwargs: dict[str, Any] | None) -> dict
         "cache_recovery_max_consecutive",
         "cache_recovery_steps",
         "cache_require_final_anchor",
+        "cache_profile_file",
+        "cache_profile_qualification_file",
+        "cache_runtime_model_id",
+        "cache_runtime_model_revision",
     ):
         cache_kwargs.pop(runtime_key, None)
     if probe_enabled:
         cache_kwargs["teacache_probe_enabled"] = True
     return cache_kwargs or None
+
+
+def _bind_qualified_profile_identity(
+    application_kwargs: dict[str, Any] | None,
+    *,
+    model_id: str,
+    model_path: str,
+    revision: str | None,
+) -> dict[str, Any] | None:
+    """Attach the resolved source identity to a qualified runtime profile."""
+
+    if not application_kwargs or application_kwargs.get("cache_profile_file") is None:
+        return application_kwargs
+    resolved_path = Path(model_path).expanduser().resolve()
+    resolved_revision = revision
+    if resolved_path.parent.name == "snapshots" and resolved_path.name:
+        resolved_revision = resolved_path.name
+    expected = {
+        "cache_runtime_model_id": model_id,
+        "cache_runtime_model_revision": resolved_revision,
+    }
+    result = dict(application_kwargs)
+    for key, value in expected.items():
+        if key in result and result[key] != value:
+            raise ValueError(f"{key} conflicts with the resolved model source")
+        result[key] = value
+    return result
 
 
 def _compile_app(app: Any, compiled_path: Path, *, debug: bool) -> None:

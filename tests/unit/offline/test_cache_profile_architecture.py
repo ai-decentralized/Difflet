@@ -9,7 +9,6 @@ PACKAGE = ROOT / "difflet" / "offline" / "cache_profile"
 ALLOWED_SCRIPT_IMPORTS = {
     "scripts.flux_cache_execution_policy",
     "scripts.flux_cache_natural_range_gate",
-    "scripts.flux_cache_phased_candidate",
     "scripts.flux_cache_protocol",
 }
 
@@ -25,14 +24,14 @@ def _imports(path: Path) -> set[str]:
     return names
 
 
-def test_offline_profile_package_does_not_import_serving_runtime():
+def test_offline_profile_package_only_imports_the_shared_runtime_profile_contract():
     imports = set().union(*(_imports(path) for path in PACKAGE.glob("*.py")))
 
-    assert not {
+    assert {
         name
         for name in imports
         if name.startswith(("difflet.models", "difflet.pipeline", "difflet.serving"))
-    }
+    } == {"difflet.pipeline.cache", "difflet.pipeline.cache.profile"}
 
 
 def test_offline_profile_package_has_an_explicit_stable_script_boundary():

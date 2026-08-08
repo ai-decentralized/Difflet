@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from difflet.pipeline.cache import (
+    CacheProfileError,
+    CacheSession,
+    QualifiedCacheProfile,
+)
+from difflet.pipeline.cache.profile import (
+    PHASED_CANDIDATE_SCHEMA,
+    PHASED_CANDIDATE_SCHEMA_REVISION,
+    PROFILE_QUALIFICATION_SCHEMA,
+    PROFILE_QUALIFICATION_SCHEMA_REVISION,
+    canonical_sha256,
+    load_qualified_cache_profile,
+    sha256_file,
+)
+
+
+def _write_json(path: Path, payload: dict, *, hashed: bool = True) -> dict:
+    document = {**payload, "sha256": canonical_sha256(payload)} if hashed else payload
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return document
+
+
+def _qualified_bundle(tmp_path: Path) -> tuple[Path, Path]:
+    horizon_path = tmp_path / "internal" / "schedule.json"
+    horizon_path.parent.mkdir(parents=True)
+    horizon_path.write_text("{}\n", encoding="utf-8")
+    contract_path = tmp_path / "internal" / "quality-contract.json"
+    contract = _write_json(
+        contract_path,
+        {
+            "schema": "difflet-flux-cache-multires-quality-contract",
+            "schema_revision": 1,
+            "controlled_generation": {
+                "model_id": "black-forest-labs/FLUX.1-dev",
+                "model_revision": "3" * 40,
+                "tp_degree": 4,
+                "num_steps": 8,
+                "guidance_scale": 3.5,
+                "dtype": "bfloat16",
+                "scheduler_class": "FlowMatchEulerDiscreteScheduler",
+                "scheduler_config_sha256": "4" * 64,
+            },
+            "resolution_contracts": [
+                {"bucket_id": "square-64", "height": 64, "width": 64}
+            ],
+        },
+    )
+    profile_path = tmp_path / "cache-profile.json"
+    candidate = _write_json(
+        profile_path,
+        {
+            "schema": PHASED_CANDIDATE_SCHEMA,
+            "schema_revision": PHASED_CANDIDATE_SCHEMA_REVISION,
+            "candidate_id": "qualified-test-profile",
+            "policy": {
+                "type": "phased_static_plus_brake",
+                "num_steps": 8,
+                "static_anchor_steps": [0, 1, 2, 4, 7],
+                "warmup_steps": 2,
+                "cooldown_steps": 1,
+                "require_final_anchor": True,
+                "dynamic_budget": 1,
+                "invalid_measurement_fail_closed": True,
+                "plastic_window": [2, 6],
+                "tighten_error": 1.1,
+                "recovery_error": 1.4,
+                "recovery_steps": 1,
+                "disable_after_recoveries": 2,
+                "tighten_rule": "bisect_next_static_gap",
+                "allow_acceleration": False,
+            },
+            "predictor": {"type": "taylorseer", "order": 1, "coord": "index"},
+            "horizon_ref": {
+                "path": "internal/schedule.json",
+                "sha256": sha256_file(horizon_path),
+            },
+            "quality_contract_ref": {
+                "path": "internal/quality-contract.json",
+                "sha256": sha256_file(contract_path),
+            },
+        },
+    )
+    build_spec_path = tmp_path / "build-spec.json"
+    build_spec = _write_json(
+        build_spec_path,
+        {
+            "schema": "test-build-spec",
+            "quality_contract": {
+                "contract": {
+                    "path": str(contract_path),
+                    "file_sha256": sha256_file(contract_path),
+                    "content_sha256": contract["sha256"],
+                },
+                "bucket_id": "square-64",
+            },
+        },
+    )
+    qualification_path = tmp_path / "profile-qualification.json"
+    _write_json(
+        qualification_path,
+        {
+            "schema": PROFILE_QUALIFICATION_SCHEMA,
+            "schema_revision": PROFILE_QUALIFICATION_SCHEMA_REVISION,
+            "build_id": "qualified-test-build",
+            "completed_at": "2026-08-08T00:00:00Z",
+            "status": "qualified",
+            "build_spec": {
+                "path": str(build_spec_path),
+                "file_sha256": sha256_file(build_spec_path),
+                "content_sha256": build_spec["sha256"],
+            },
+            "profile": {
+                "path": "/original/output/cache-profile.json",
+                "file_sha256": sha256_file(profile_path),
+                "content_sha256": candidate["sha256"],
+                "candidate_id": candidate["candidate_id"],
+            },
+            "decision": {
+                "quality_passed": True,
+                "failure_count": 0,
+                "measured_speedup": 3.4,
+                "minimum_speedup": 3.2,
+                "speed_passed": True,
+            },
+            "evidence": {},
+        },
+    )
+    return profile_path, qualification_path
+
+
+def _runtime_identity() -> dict:
+    return {
+        "model_id": "black-forest-labs/FLUX.1-dev",
+        "model_revision": "3" * 40,
+        "height": 64,
+        "width": 64,
+        "num_steps": 8,
+        "scheduler_class": "FlowMatchEulerDiscreteScheduler",
+        "scheduler_config_sha256": "4" * 64,
+        "dtype": "bfloat16",
+        "guidance_scale": 3.5,
+        "tp_degree": 4,
+    }
+
+
+def test_load_qualified_profile_validates_evidence_and_builds_request_session(tmp_path):
+    profile_path, qualification_path = _qualified_bundle(tmp_path)
+
+    profile = load_qualified_cache_profile(profile_path, qualification_path)
+    profile.validate_runtime(**_runtime_identity())
+    session = profile.build_session(8)
+
+    assert isinstance(profile, QualifiedCacheProfile)
+    assert isinstance(session, CacheSession)
+    assert profile.candidate_id == "qualified-test-profile"
+    assert profile.measured_speedup == 3.4
+
+
+def test_qualified_profile_rejects_runtime_identity_mismatch(tmp_path):
+    profile_path, qualification_path = _qualified_bundle(tmp_path)
+    profile = load_qualified_cache_profile(profile_path, qualification_path)
+    identity = _runtime_identity()
+    identity["width"] = 96
+
+    with pytest.raises(CacheProfileError, match="does not match the runtime"):
+        profile.validate_runtime(**identity)
+
+
+def test_qualified_profile_rejects_profile_changed_after_confirmation(tmp_path):
+    profile_path, qualification_path = _qualified_bundle(tmp_path)
+    document = json.loads(profile_path.read_text(encoding="utf-8"))
+    document["candidate_id"] = "tampered"
+    profile_path.write_text(json.dumps(document) + "\n", encoding="utf-8")
+
+    with pytest.raises(CacheProfileError, match="sha256"):
+        load_qualified_cache_profile(profile_path, qualification_path)
+
+
+def test_qualified_profile_rejects_failed_decision(tmp_path):
+    profile_path, qualification_path = _qualified_bundle(tmp_path)
+    qualification = json.loads(qualification_path.read_text(encoding="utf-8"))
+    qualification["decision"]["quality_passed"] = False
+    payload = {key: value for key, value in qualification.items() if key != "sha256"}
+    qualification["sha256"] = canonical_sha256(payload)
+    qualification_path.write_text(
+        json.dumps(qualification, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CacheProfileError, match="did not pass"):
+        load_qualified_cache_profile(profile_path, qualification_path)

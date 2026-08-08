@@ -81,6 +81,42 @@ def test_compiled_artifacts_ready_uses_checker():
     assert dp._compiled_artifacts_ready(app2, Path("/x")) is True
 
 
+def test_qualified_profile_identity_uses_resolved_snapshot_revision():
+    kwargs = dp._bind_qualified_profile_identity(
+        {"cache_profile_file": "/profile.json"},
+        model_id="black-forest-labs/FLUX.1-dev",
+        model_path="/cache/models--flux/snapshots/resolved-hash",
+        revision="requested-tag",
+    )
+    assert kwargs["cache_runtime_model_id"] == "black-forest-labs/FLUX.1-dev"
+    assert kwargs["cache_runtime_model_revision"] == "resolved-hash"
+
+
+def test_qualified_profile_identity_rejects_conflicting_override():
+    with pytest.raises(ValueError, match="conflicts"):
+        dp._bind_qualified_profile_identity(
+            {
+                "cache_profile_file": "/profile.json",
+                "cache_runtime_model_revision": "wrong",
+            },
+            model_id="black-forest-labs/FLUX.1-dev",
+            model_path="/cache/models--flux/snapshots/resolved-hash",
+            revision=None,
+        )
+
+
+def test_qualified_profile_does_not_change_compiled_graph_cache_key():
+    kwargs = dp._cache_application_kwargs(
+        {
+            "cache_profile_file": "/profile.json",
+            "cache_profile_qualification_file": "/qualification.json",
+            "cache_runtime_model_id": "model",
+            "cache_runtime_model_revision": "revision",
+        }
+    )
+    assert kwargs is None
+
+
 def _fake_backend():
     return SimpleNamespace(
         resolve_load_rank_range=lambda start_rank_id, local_ranks_size: (

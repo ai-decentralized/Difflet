@@ -18,6 +18,8 @@ from difflet.pipeline.cache import (
     load_cache_measurements,
     load_spatial_measurements,
     measure_latent_update,
+    measure_anchor_estimate,
+    measure_anchor_estimate_fast,
     measure_spatial_error,
     resolve_cache_config,
     SpatialMeasurementLayout,
@@ -140,6 +142,41 @@ def test_runner_produces_anchor_measurements_for_a_controlling_policy_without_a_
 
     assert [row.step_index for row in policy.measurements] == [0, 1, 2]
     assert policy.measurements[-1].estimate_status == "measured"
+    assert policy.measurements[-1].relative_output_change is None
+    assert policy.measurements[-1].relative_output_curvature is None
+
+
+def test_fast_anchor_measurement_preserves_the_control_error():
+    from difflet.pipeline.cache import CacheAnchor, CacheHistory, RuntimeObservation
+
+    history = CacheHistory(2)
+    history.push(CacheAnchor(_context(0, 3), torch.tensor([0.0, 0.0])))
+    history.push(CacheAnchor(_context(1, 3), torch.tensor([1.0, 2.0])))
+    context = _context(2, 3)
+    output = torch.tensor([4.0, 8.0])
+    predictor = TaylorSeerPredictor(order=1)
+    observation = RuntimeObservation()
+    common = dict(
+        context=context,
+        output=output,
+        decision_reason="policy_compute",
+        predictor=predictor,
+        history=history,
+        observation=observation,
+    )
+
+    full = measure_anchor_estimate(**common)
+    fast = measure_anchor_estimate_fast(**common)
+
+    assert fast.estimate_status == full.estimate_status == "measured"
+    assert fast.estimate_relative_error == pytest.approx(
+        full.estimate_relative_error,
+        rel=0.0,
+        abs=0.0,
+    )
+    assert fast.output_norm == pytest.approx(full.output_norm, rel=0.0, abs=0.0)
+    assert fast.relative_output_change is None
+    assert fast.relative_output_curvature is None
 
 
 def test_prediction_configuration_error_is_recorded_without_losing_anchor():

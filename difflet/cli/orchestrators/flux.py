@@ -147,6 +147,8 @@ class FluxOrchestrator(ModelOrchestrator):
         if getattr(self.args, "teacache_online_delta", None) is not None:
             app_kwargs["teacache_online_delta_alpha"] = self.args.teacache_online_delta
         cache_arg_map = {
+            "cache_profile_file": "cache_profile_file",
+            "cache_profile_qualification_file": "cache_profile_qualification_file",
             "cache_plan_file": "cache_plan_file",
             "cache_mask_file": "cache_mask_file",
             "cache_predictor": "cache_predictor",

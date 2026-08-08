@@ -419,6 +419,38 @@ def test_taylorseer_order_two_newton_extrapolation_is_exact_for_quadratic():
     assert predicted.item() == pytest.approx(25.0)
 
 
+def test_taylorseer_reuses_coefficients_until_real_history_changes(monkeypatch):
+    import difflet.pipeline.cache.predictors as predictor_module
+
+    calls = 0
+    original = predictor_module._torch_working_copy
+
+    def counted(value):
+        nonlocal calls
+        calls += 1
+        return original(value)
+
+    monkeypatch.setattr(predictor_module, "_torch_working_copy", counted)
+    history = CacheHistory(3)
+    history.push(CacheAnchor(_context(0), torch.tensor([1.0, 2.0])))
+    history.push(CacheAnchor(_context(1), torch.tensor([3.0, 6.0])))
+    predictor = TaylorSeerPredictor(order=1)
+
+    first = predictor.predict(_context(2), history)
+    assert calls == 2
+    second = predictor.predict(_context(3), history)
+    assert calls == 2
+    expected = TaylorSeerPredictor(order=1).predict(_context(3), history)
+    assert torch.equal(second, expected)
+    assert not torch.equal(first, second)
+
+    history.push(CacheAnchor(_context(2), torch.tensor([5.0, 10.0])))
+    predictor.predict(_context(3), history)
+    assert calls == 6  # two for the independent expected value, two after invalidation
+    predictor.reset_cache()
+    assert predictor._coefficients == ()
+
+
 def test_legacy_residual_scales_nonuniform_coordinate_distance():
     history = _history([(0, 0.0, 3.0), (2, 4.0, 11.0)], coord="sigma")
     predicted = LegacyResidualPredictor(coord="sigma").predict(

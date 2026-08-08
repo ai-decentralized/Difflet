@@ -126,3 +126,47 @@ def test_recovery_controls_reject_calibrated_teacache(capsys):
         )
     assert exc.value.code == 1
     assert "not supported by calibrated TeaCache" in capsys.readouterr().err
+
+
+def test_qualified_cache_profile_requires_paired_qualification(capsys):
+    cli = _cli()
+    with pytest.raises(SystemExit) as exc:
+        cli.main(
+            [
+                "generate",
+                "--model-id",
+                "black-forest-labs/FLUX.1-dev",
+                "--prompt",
+                "x",
+                "--output",
+                "o.png",
+                "--cache-profile-file",
+                "profile.json",
+            ]
+        )
+    assert exc.value.code == 1
+    assert "must be provided together" in capsys.readouterr().err
+
+
+def test_qualified_cache_profile_rejects_legacy_cache_flags(capsys):
+    cli = _cli()
+    with pytest.raises(SystemExit) as exc:
+        cli.main(
+            [
+                "generate",
+                "--model-id",
+                "black-forest-labs/FLUX.1-dev",
+                "--prompt",
+                "x",
+                "--output",
+                "o.png",
+                "--cache-profile-file",
+                "profile.json",
+                "--cache-profile-qualification-file",
+                "qualification.json",
+                "--teacache-cadence",
+                "2",
+            ]
+        )
+    assert exc.value.code == 1
+    assert "qualified cache profile cannot be combined" in capsys.readouterr().err

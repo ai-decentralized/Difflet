@@ -386,6 +386,42 @@ def _matching_tensor(left: Any, right: Any) -> bool:
     return _torch_tensor(left) and _torch_tensor(right) and tuple(left.shape) == tuple(right.shape)
 
 
+def _finite_flag_and_norm(value: Any) -> tuple[bool, float]:
+    """Return tensor validity and L2 norm with one device-to-host transfer."""
+
+    import torch
+
+    working = value.detach().float()
+    summary = torch.stack(
+        (
+            torch.isfinite(working).all().to(dtype=torch.float32),
+            torch.linalg.vector_norm(working.reshape(-1), ord=2),
+        )
+    )
+    finite_flag, norm = summary.detach().cpu().tolist()
+    return bool(finite_flag), float(norm)
+
+
+def _finite_flag_and_difference_norm(estimate: Any, output: Any) -> tuple[bool, float]:
+    """Summarize an estimate comparison with one device-to-host transfer."""
+
+    import torch
+
+    estimate_working = estimate.detach().float()
+    output_working = output.detach().float()
+    summary = torch.stack(
+        (
+            torch.isfinite(estimate_working).all().to(dtype=torch.float32),
+            torch.linalg.vector_norm(
+                (estimate_working - output_working).reshape(-1),
+                ord=2,
+            ),
+        )
+    )
+    finite_flag, difference_norm = summary.detach().cpu().tolist()
+    return bool(finite_flag), float(difference_norm)
+
+
 def measure_latent_update(
     *,
     context: CacheStepContext,
@@ -483,10 +519,11 @@ def measure_anchor_estimate(
 ) -> AnchorMeasurement:
     """Measure an anchor against a side-effect-free predictor using old history.
 
-    ``CachePredictor.predict`` is required to be deterministic and free of
-    mutable side effects.  Configuration-related ``TypeError`` and
-    ``ValueError`` failures are recorded as unavailable measurement. Runtime
-    failures such as device errors and out-of-memory conditions are not caught.
+    ``CachePredictor.predict`` is required to be deterministic and externally
+    side-effect free; request-local memoization is allowed. Configuration-related
+    ``TypeError`` and ``ValueError`` failures are recorded as unavailable
+    measurement. Runtime failures such as device errors and out-of-memory
+    conditions are not caught.
     """
 
     started = time.perf_counter()
@@ -572,6 +609,98 @@ def measure_anchor_estimate(
     )
 
 
+def measure_anchor_estimate_fast(
+    *,
+    context: CacheStepContext,
+    output: Any,
+    decision_reason: str,
+    predictor: CachePredictor,
+    history: CacheHistory,
+    observation: RuntimeObservation,
+) -> AnchorMeasurement:
+    """Measure only the anchor error needed by an online cache policy.
+
+    This serving path omits change and curvature diagnostics and packs each
+    tensor summary into a single device-to-host transfer. The full measurement
+    path remains active whenever an offline measurement sink is attached.
+    """
+
+    started = time.perf_counter()
+    history_size = len(history)
+    latest = history.latest
+    anchor_step_gap = None if latest is None else context.step_index - latest.step_index
+    shape = tuple(int(size) for size in getattr(output, "shape", ()))
+    dtype = str(getattr(output, "dtype", type(output).__name__)).removeprefix("torch.")
+    actual_is_tensor = _torch_tensor(output)
+    output_norm = None
+    actual_is_finite = False
+    if actual_is_tensor:
+        actual_is_finite, measured_norm = _finite_flag_and_norm(output)
+        if actual_is_finite and math.isfinite(measured_norm):
+            output_norm = measured_norm
+        else:
+            actual_is_finite = False
+
+    estimate_status: AnchorEstimateStatus = "history_not_ready"
+    estimate_relative_error = None
+    estimate_seconds = None
+    numerically_valid = actual_is_finite
+    if not actual_is_finite:
+        estimate_status = "invalid_actual_output"
+    elif history.ready(predictor.required_history):
+        estimate_started = time.perf_counter()
+        try:
+            estimate = predictor.predict(context, history)
+        except (TypeError, ValueError):
+            estimate_status = "prediction_error"
+            numerically_valid = False
+        else:
+            if not _matching_tensor(estimate, output):
+                estimate_status = "invalid_estimated_output"
+                numerically_valid = False
+            else:
+                estimate_is_finite, difference_norm = _finite_flag_and_difference_norm(
+                    estimate,
+                    output,
+                )
+                if not estimate_is_finite or not math.isfinite(difference_norm):
+                    estimate_status = "invalid_estimated_output"
+                    numerically_valid = False
+                else:
+                    assert output_norm is not None
+                    estimate_relative_error = float(
+                        difference_norm / max(output_norm, _RELATIVE_NORM_FLOOR)
+                    )
+                    if math.isfinite(estimate_relative_error):
+                        estimate_status = "measured"
+                    else:
+                        estimate_status = "invalid_estimated_output"
+                        estimate_relative_error = None
+                        numerically_valid = False
+        estimate_seconds = time.perf_counter() - estimate_started
+
+    return AnchorMeasurement(
+        step_index=context.step_index,
+        num_steps=context.num_steps,
+        timestep=context.timestep,
+        sigma=context.sigma,
+        decision_reason=decision_reason,
+        history_size=history_size,
+        estimated_steps_since_anchor=observation.consecutive_predictions,
+        anchor_step_gap=anchor_step_gap,
+        output_shape=shape,
+        output_dtype=dtype,
+        output_norm=output_norm,
+        relative_output_change=None,
+        relative_output_curvature=None,
+        estimate_status=estimate_status,
+        estimate_relative_error=estimate_relative_error,
+        estimate_seconds=estimate_seconds,
+        measurement_seconds=time.perf_counter() - started,
+        numerically_valid=numerically_valid,
+    )
+
+
 __all__ = [
     "AnchorMeasurement",
     "AnchorEstimateStatus",
@@ -579,5 +708,6 @@ __all__ = [
     "InMemoryMeasurementSink",
     "LatentUpdateMeasurement",
     "measure_anchor_estimate",
+    "measure_anchor_estimate_fast",
     "measure_latent_update",
 ]

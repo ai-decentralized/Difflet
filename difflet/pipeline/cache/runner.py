@@ -7,6 +7,7 @@ from typing import Any, Callable
 from difflet.pipeline.cache.measurements import (
     CacheMeasurementSink,
     measure_anchor_estimate,
+    measure_anchor_estimate_fast,
 )
 from difflet.pipeline.cache.types import (
     CacheAnchor,
@@ -106,6 +107,7 @@ class CacheRunner:
 
     def reset(self, *, reset_policy: bool = True) -> None:
         self.history.clear()
+        self._reset_predictor_cache()
         self.observation.reset()
         self.counters.reset()
         self._pending_context = None
@@ -128,6 +130,7 @@ class CacheRunner:
         """Invalidate trajectory state while retaining aggregate counters."""
 
         self.history.clear()
+        self._reset_predictor_cache()
         self.observation.reset()
         self._pending_context = None
         self._compute_context = None
@@ -257,7 +260,7 @@ class CacheRunner:
         )
         if not callable(tensor_observer):
             tensor_observer = None
-        if self.measurement_sink is not None or callable(measurement_hook):
+        if self.measurement_sink is not None:
             measurement = measure_anchor_estimate(
                 context=context,
                 output=output,
@@ -266,6 +269,15 @@ class CacheRunner:
                 history=self.history,
                 observation=self.observation,
                 tensor_observer=tensor_observer,
+            )
+        elif callable(measurement_hook):
+            measurement = measure_anchor_estimate_fast(
+                context=context,
+                output=output,
+                decision_reason=decision_reason,
+                predictor=self.predictor,
+                history=self.history,
+                observation=self.observation,
             )
         if measurement is not None and callable(measurement_hook):
             measurement_hook(measurement)
@@ -280,6 +292,10 @@ class CacheRunner:
         if callable(hook):
             hook(context, output, self.history, self.observation)
         self.history.push(CacheAnchor(context=context, output=output))
+        # Coefficients derived from the pre-anchor history are now stale. Drop
+        # them immediately so a run of real steps does not retain old device
+        # tensors until the next prediction.
+        self._reset_predictor_cache()
         self.recovery.observe_anchor(context, output, self.history, self.observation)
         self.observation.record(context, output, predicted=False)
         self.counters.full_steps += 1
@@ -287,6 +303,11 @@ class CacheRunner:
         if measurement is not None:
             if self.measurement_sink is not None:
                 self.measurement_sink.record_anchor_measurement(measurement)
+
+    def _reset_predictor_cache(self) -> None:
+        reset_predictor_cache = getattr(self.predictor, "reset_cache", None)
+        if callable(reset_predictor_cache):
+            reset_predictor_cache()
 
     def record_full_step(self, output: Any, context: CacheStepContext | None = None) -> None:
         context = context or self._last_context

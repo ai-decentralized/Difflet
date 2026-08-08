@@ -300,6 +300,18 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         help="Path to TeaCache calibration JSON",
     )
     p.add_argument(
+        "--cache-profile-file",
+        default=None,
+        metavar="PATH",
+        help="Qualified FLUX cache profile artifact",
+    )
+    p.add_argument(
+        "--cache-profile-qualification-file",
+        default=None,
+        metavar="PATH",
+        help="Qualification artifact paired with --cache-profile-file",
+    )
+    p.add_argument(
         "--cache-plan-file",
         default=None,
         metavar="PATH",
@@ -588,6 +600,8 @@ def _validate_teacache(args: argparse.Namespace) -> None:
 
 
 def _validate_cache_config(args: argparse.Namespace) -> None:
+    profile = getattr(args, "cache_profile_file", None)
+    qualification = getattr(args, "cache_profile_qualification_file", None)
     plan = getattr(args, "cache_plan_file", None)
     mask = getattr(args, "cache_mask_file", None)
     predictor = getattr(args, "cache_predictor", None)
@@ -604,7 +618,7 @@ def _validate_cache_config(args: argparse.Namespace) -> None:
         getattr(args, "cache_recovery_steps", None),
         getattr(args, "cache_require_final_anchor", None),
     )
-    cache_selected = plan is not None or mask is not None or any(
+    cache_selected = profile is not None or qualification is not None or plan is not None or mask is not None or any(
         value is not None
         for value in (*predictor_options, *recovery_options)
     )
@@ -627,6 +641,28 @@ def _validate_cache_config(args: argparse.Namespace) -> None:
         value is not None
         for value in (cadence, online, speedup, calibration)
     )
+    if (profile is None) != (qualification is None):
+        print(
+            "Error: --cache-profile-file and --cache-profile-qualification-file "
+            "must be provided together.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if profile is not None:
+        if (
+            plan is not None
+            or mask is not None
+            or any(value is not None for value in predictor_options)
+            or any(value is not None for value in recovery_options)
+            or legacy_selected
+        ):
+            print(
+                "Error: a qualified cache profile cannot be combined with cache "
+                "plan/mask, predictor/recovery, or --teacache-* flags.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        return
     if plan is not None:
         if (
             mask is not None

@@ -15,7 +15,8 @@ if str(ROOT) not in sys.path:
 
 from difflet.offline.cache_profile import schedule as schedule_math  # noqa: E402
 from difflet.offline.cache_profile import provenance  # noqa: E402
-from scripts.flux_cache_phased_candidate import (  # noqa: E402
+from difflet.pipeline.cache import profile as runtime_profile  # noqa: E402
+from difflet.pipeline.cache.profile import (  # noqa: E402
     PHASED_CANDIDATE_SCHEMA,
     PHASED_CANDIDATE_SCHEMA_REVISION,
     load_phased_candidate,
@@ -33,7 +34,7 @@ _IMPLEMENTATION_PATHS = (
     Path(__file__).resolve(),
     Path(schedule_math.__file__).resolve(),
     Path(provenance.__file__).resolve(),
-    ROOT / "scripts" / "flux_cache_phased_candidate.py",
+    Path(runtime_profile.__file__).resolve(),
     ROOT / "scripts" / "flux_cache_protocol.py",
 )
 

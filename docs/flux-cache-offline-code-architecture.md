@@ -59,6 +59,11 @@ binds the hashes of every listed first-party source file that can affect its
 workflow. Validation fails if the manifest changes, a source file changes, or a
 required implementation file is omitted.
 
+The phase-aware profile schema and qualification loader live in
+`difflet.pipeline.cache.profile`. Offline derivation imports this single shared
+artifact contract so generation and serving cannot drift onto different JSON
+parsers; it does not import a model application or denoising pipeline.
+
 ## Research isolation
 
 Exploratory scripts remain available for retrospective and mechanism studies,

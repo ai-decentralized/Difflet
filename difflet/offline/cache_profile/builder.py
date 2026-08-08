@@ -20,6 +20,12 @@ if str(ROOT) not in sys.path:
 
 from difflet.offline.cache_profile import derivation as schedule_derivation  # noqa: E402
 from difflet.offline.cache_profile import provenance  # noqa: E402
+from difflet.pipeline.cache import profile as runtime_profile  # noqa: E402
+from difflet.pipeline.cache.profile import (  # noqa: E402
+    PHASED_CANDIDATE_SCHEMA,
+    PHASED_CANDIDATE_SCHEMA_REVISION,
+    load_phased_candidate,
+)
 from scripts.flux_cache_execution_policy import (  # noqa: E402
     ExecutionRequest,
     authorize_execution,
@@ -27,11 +33,6 @@ from scripts.flux_cache_execution_policy import (  # noqa: E402
 )
 from scripts.flux_cache_natural_range_gate import (  # noqa: E402
     evaluate_natural_range,
-)
-from scripts.flux_cache_phased_candidate import (  # noqa: E402
-    PHASED_CANDIDATE_SCHEMA,
-    PHASED_CANDIDATE_SCHEMA_REVISION,
-    load_phased_candidate,
 )
 from scripts.flux_cache_protocol import (  # noqa: E402
     canonical_sha256,
@@ -52,6 +53,7 @@ _IMPLEMENTATION_PATHS = (
     Path(__file__).resolve(),
     Path(schedule_derivation.__file__).resolve(),
     Path(provenance.__file__).resolve(),
+    Path(runtime_profile.__file__).resolve(),
     ROOT / "difflet" / "offline" / "cache_profile" / "schedule.py",
     ROOT / "scripts" / "automatic_quality_contract.py",
     ROOT / "scripts" / "build_flux_cache_profile.py",

@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import sys
 import types
-from pathlib import Path
-
-import pytest
 
 from difflet.cli.orchestrators.flux import FluxOrchestrator
 
@@ -20,6 +16,7 @@ def _flux_args(**overrides) -> argparse.Namespace:
         work_dir=None, keep_work_dir=False, cfg_parallel=False,
         teacache_cadence=None, teacache_online_delta=None,
         teacache_speedup=None, teacache_calibration=None,
+        cache_profile_file=None, cache_profile_qualification_file=None,
         cache_plan_file=None, cache_mask_file=None, cache_predictor=None,
         cache_predictor_order=None, cache_predictor_coord=None,
         cache_recovery_warmup=None, cache_recovery_cooldown=None,
@@ -90,6 +87,19 @@ def test_teacache_kwargs_speedup_and_app_kwargs():
 
 def test_teacache_kwargs_empty_when_unset():
     assert FluxOrchestrator(_flux_args())._teacache_kwargs() == {}
+
+
+def test_qualified_cache_profile_is_forwarded_to_application():
+    kwargs = FluxOrchestrator(
+        _flux_args(
+            cache_profile_file="/profile.json",
+            cache_profile_qualification_file="/qualification.json",
+        )
+    )._teacache_kwargs()
+    assert kwargs["application_kwargs"] == {
+        "cache_profile_file": "/profile.json",
+        "cache_profile_qualification_file": "/qualification.json",
+    }
 
 
 def test_teacache_kwargs_threads_independent_recovery_controls():

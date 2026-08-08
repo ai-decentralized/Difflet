@@ -93,6 +93,7 @@ class NeuronFluxPipeline(FluxPipeline):
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 512,
         teacache_enabled: Optional[bool] = None,
+        cache_session: Optional[Any] = None,
     ):
         """
         Override of FluxPipeline.__call__ with parallel CFG batching.
@@ -121,15 +122,30 @@ class NeuronFluxPipeline(FluxPipeline):
         # Only use parallel CFG if both CFG is enabled AND cfg_parallel_enabled is configured
         use_parallel_cfg = do_true_cfg and cfg_parallel_enabled
 
-        # Cache controller path. Dynamic TeaCache uses the optional probe;
+        # Cache controller path. New integrations pass one request-scoped
+        # CacheSession explicitly. The instance slot remains a compatibility
+        # path for registered legacy collectors and calibrated TeaCache.
         # index/mask/plan controllers do not need one but share the same
         # scheduler-preserving loop. CFG parallel is incompatible (asserted
         # off in the application).
-        if teacache_enabled is False and getattr(self, "teacache_controller", None) is not None:
-            self.teacache_controller.reset()
+        legacy_controller = getattr(self, "teacache_controller", None)
+        if cache_session is not None and legacy_controller is not None:
+            raise ValueError(
+                "cache_session cannot be combined with the legacy shared controller"
+            )
+        if cache_session is not None:
+            if teacache_enabled is False:
+                raise ValueError("cache_session cannot be disabled by teacache_enabled=False")
+            from difflet.pipeline.cache import TeaCacheControllerAdapter
+
+            request_controller = TeaCacheControllerAdapter(cache_session)
+        else:
+            request_controller = legacy_controller
+            if request_controller is not None:
+                request_controller.reset()
         if (
             getattr(self, "teacache_probe", None) is not None
-            or getattr(self, "teacache_controller", None) is not None
+            or request_controller is not None
         ) and teacache_enabled is not False:
             with self.transformer.image_rotary_emb_cache_context():
                 return self._call_with_teacache(
@@ -156,6 +172,7 @@ class NeuronFluxPipeline(FluxPipeline):
                     callback_on_step_end=callback_on_step_end,
                     callback_on_step_end_tensor_inputs=callback_on_step_end_tensor_inputs,
                     max_sequence_length=max_sequence_length,
+                    cache_controller=request_controller,
                 )
 
         if not use_parallel_cfg:
@@ -479,13 +496,14 @@ class NeuronFluxPipeline(FluxPipeline):
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 512,
+        cache_controller: Optional[Any] = None,
     ):
         """TeaCache fused-A denoise loop (cclog 85), SERIAL CFG.
 
         Mirrors the diffusers FluxPipeline denoise loop but per step (a) probes
         the block-0 modulated input via the fused probe NEFF, (b) lets the
         controller decide skip-vs-full, reusing a cached residual on skip. With
-        ``teacache_controller`` unset it never skips (clean baseline through the
+        ``cache_controller`` unset it never skips (clean baseline through the
         same loop). The combined post-CFG noise_pred is the residual unit — one
         controller, one residual (the HV/Qwen pattern).
         """
@@ -581,7 +599,7 @@ class NeuronFluxPipeline(FluxPipeline):
         else:
             guidance = None
 
-        controller = getattr(self, "teacache_controller", None)
+        controller = cache_controller
         fused = getattr(self.teacache_probe, "teacache_probe_fused", False)
         # Record-only signal-gate mode (cclog 84/85): probe every step, never
         # skip, collect (rel_l1_mod, rel_l1_noise) pairs to measure the Pearson
@@ -589,7 +607,6 @@ class NeuronFluxPipeline(FluxPipeline):
         record = getattr(self, "_tc_record", False)
         empty_guidance = torch.tensor([], device=device, dtype=latents.dtype)
         if controller is not None:
-            controller.reset()
             bind_schedule = getattr(controller, "bind_schedule", None)
             if callable(bind_schedule):
                 bind_schedule(

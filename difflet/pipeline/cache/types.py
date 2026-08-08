@@ -293,7 +293,9 @@ class CachePolicy(Protocol):
 class CachePredictor(Protocol):
     """Predictor protocol: estimate a missing transformer output.
 
-    ``predict`` must be deterministic and free of mutable side effects.  The
+    ``predict`` must be deterministic and externally side-effect free. An
+    implementation may memoize values derived solely from immutable real
+    anchors, provided reset hooks release request-derived device tensors. The
     runtime may call it at a real anchor to measure a comparison estimate that
     is discarded instead of being returned to the scheduler.
     """

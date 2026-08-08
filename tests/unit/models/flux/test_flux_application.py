@@ -8,6 +8,8 @@ NeuronFluxApplication runtime (compile/load/pipeline) is out of scope.
 
 import importlib
 import os
+from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
 
@@ -241,7 +243,7 @@ def test_probe_free_cache_uses_composable_runtime_and_explicit_recovery(
 ):
     import types
 
-    from difflet.pipeline.cache import CacheSession, TeaCacheControllerAdapter
+    from difflet.pipeline.cache import CacheSession
 
     class FakePipeline:
         def __init__(self):
@@ -287,21 +289,19 @@ def test_probe_free_cache_uses_composable_runtime_and_explicit_recovery(
         cache_recovery_steps=3,
         cache_require_final_anchor=True,
     )
-    instance._prepare_probe_free_teacache(
+    session = instance._prepare_probe_free_teacache(
         prompt="cat",
         num_inference_steps=6,
         height=768,
         width=512,
     )
 
-    adapter = instance.pipe.teacache_controller
-    assert isinstance(adapter, TeaCacheControllerAdapter)
-    assert isinstance(instance.cache_session, CacheSession)
-    assert adapter.session is instance.cache_session
-    assert adapter.source == "teacache_cadence"
-    assert adapter.num_steps == 6
-    assert adapter.runner.policy.calibration.shape_label == "768x512"
-    recovery = adapter.runner.recovery.config
+    assert isinstance(session, CacheSession)
+    assert instance.pipe.teacache_controller is None
+    assert session.configuration_source == "teacache_cadence"
+    assert session.num_steps == 6
+    assert session.runner.policy.calibration.shape_label == "768x512"
+    recovery = session.runner.recovery.config
     assert recovery.warmup_steps == 0
     assert recovery.cooldown_steps == 2
     assert recovery.max_consecutive_predictions == 1
@@ -315,7 +315,6 @@ def test_static_cache_configuration_installs_resolved_session_and_adapter():
     from difflet.pipeline.cache import (
         QualityRecoveryConfig,
         ResolvedCacheSession,
-        TeaCacheControllerAdapter,
     )
 
     instance = object.__new__(app.NeuronFluxApplication)
@@ -335,12 +334,162 @@ def test_static_cache_configuration_installs_resolved_session_and_adapter():
     )
     instance._request_identity = lambda *args, **kwargs: (4, 512, 512)
 
-    instance._prepare_cache_session(prompt="cat")
+    first = instance._prepare_cache_session(prompt="cat")
+    second = instance._prepare_cache_session(prompt="cat")
 
-    assert isinstance(instance.cache_session, ResolvedCacheSession)
-    assert isinstance(instance.pipe.teacache_controller, TeaCacheControllerAdapter)
-    assert instance.pipe.teacache_controller.session is instance.cache_session
-    assert instance.cache_session.config.anchor_mask == (True, True, False, True)
+    assert isinstance(first, ResolvedCacheSession)
+    assert isinstance(second, ResolvedCacheSession)
+    assert first is not second
+    assert instance.pipe.teacache_controller is None
+    assert first.config.anchor_mask == (True, True, False, True)
+
+
+def test_application_creates_a_fresh_session_for_each_request(monkeypatch):
+    instance = object.__new__(app.NeuronFluxApplication)
+    instance._qualified_cache_profile = None
+    instance._cache_plan = "configured"
+    instance._cache_mask = None
+    instance._teacache_cadence = None
+    instance._teacache_online_delta_alpha = None
+    sessions = [object(), object()]
+    monkeypatch.setattr(
+        instance,
+        "_prepare_cache_session",
+        lambda *args, **kwargs: sessions.pop(0),
+    )
+    received = []
+    instance.pipe = lambda **kwargs: received.append(kwargs["cache_session"])
+
+    instance(prompt="first")
+    instance(prompt="second")
+
+    assert received[0] is not received[1]
+    assert not hasattr(instance, "cache_session")
+
+
+def test_application_accepts_explicit_session_only_without_configured_cache():
+    instance = object.__new__(app.NeuronFluxApplication)
+    instance._qualified_cache_profile = None
+    instance._cache_plan = None
+    instance._cache_mask = None
+    instance._teacache_cadence = None
+    instance._teacache_online_delta_alpha = None
+    received = {}
+    instance.pipe = lambda **kwargs: received.update(kwargs)
+    session = object()
+
+    instance(prompt="cat", cache_session=session)
+    assert received["cache_session"] is session
+
+    instance._cache_plan = "configured"
+    with pytest.raises(ValueError, match="explicit cache_session"):
+        instance(prompt="cat", cache_session=object())
+
+
+def test_flux_pipeline_wraps_explicit_session_without_shared_state(monkeypatch):
+    from difflet.pipeline.cache import (
+        ResolvedCacheSession,
+        TaylorSeerPredictor,
+        resolve_cache_config,
+    )
+
+    pipe = object.__new__(app.NeuronFluxPipeline)
+    pipe.transformer = SimpleNamespace(
+        config=SimpleNamespace(cfg_parallel_enabled=False),
+        image_rotary_emb_cache_context=lambda: nullcontext(),
+    )
+    pipe.teacache_controller = None
+    pipe.teacache_probe = None
+    captured = []
+
+    def fake_teacache(self, *args, cache_controller=None, **kwargs):
+        del self, args, kwargs
+        captured.append(cache_controller)
+        return "image"
+
+    monkeypatch.setattr(app.NeuronFluxPipeline, "_call_with_teacache", fake_teacache)
+    resolved = resolve_cache_config(
+        num_steps=3,
+        mask=(True, True, True),
+        predictor=TaylorSeerPredictor(order=1),
+    )
+    session = ResolvedCacheSession(resolved)
+
+    assert pipe(prompt="cat", cache_session=session) == "image"
+    assert captured[0].session is session
+    assert pipe.teacache_controller is None
+
+
+def test_qualified_profile_loader_is_wired_into_flux_application(monkeypatch):
+    import difflet.pipeline.cache as cache_api
+
+    calls = []
+
+    class FakeProfile:
+        generation = {"num_steps": 50, "guidance_scale": 3.5}
+
+        def validate_runtime(self, **kwargs):
+            calls.append(kwargs)
+
+    class FakeScheduler:
+        config = {}
+
+    class FakePipeline:
+        def __init__(self):
+            self.vae = SimpleNamespace(decoder=None)
+            self.scheduler = FakeScheduler()
+
+        @classmethod
+        def from_pretrained(cls, *args, **kwargs):
+            return cls()
+
+        def __call__(
+            self,
+            prompt=None,
+            *,
+            num_inference_steps=50,
+            sigmas=None,
+            height=None,
+            width=None,
+            guidance_scale=3.5,
+            cache_session=None,
+        ):
+            del (
+                prompt,
+                num_inference_steps,
+                sigmas,
+                height,
+                width,
+                guidance_scale,
+                cache_session,
+            )
+
+    monkeypatch.setattr(cache_api, "load_qualified_cache_profile", lambda *args: FakeProfile())
+    monkeypatch.setattr(app, "NeuronClipApplication", lambda **kwargs: "clip")
+    monkeypatch.setattr(app, "NeuronT5Application", lambda **kwargs: "t5")
+    monkeypatch.setattr(app, "NeuronFluxBackboneApplication", lambda **kwargs: "transformer")
+    monkeypatch.setattr(app, "NeuronVAEDecoderApplication", lambda **kwargs: "decoder")
+    backbone_config = SimpleNamespace(
+        cfg_parallel_enabled=False,
+        neuron_config=SimpleNamespace(torch_dtype=torch.bfloat16, tp_degree=4),
+    )
+
+    instance = app.NeuronFluxApplication(
+        model_path="/fake/model",
+        text_encoder_config=SimpleNamespace(),
+        text_encoder2_config=SimpleNamespace(),
+        backbone_config=backbone_config,
+        decoder_config=SimpleNamespace(),
+        pipeline_class=FakePipeline,
+        cache_profile_file="profile.json",
+        cache_profile_qualification_file="qualification.json",
+        cache_runtime_model_id="black-forest-labs/FLUX.1-dev",
+        cache_runtime_model_revision="revision",
+    )
+
+    assert isinstance(instance._qualified_cache_profile, FakeProfile)
+    assert calls[0]["model_revision"] == "revision"
+    assert calls[0]["scheduler_class"] == "FakeScheduler"
 
 
 def test_request_identity_uses_pipeline_default_and_rejects_zero_steps():

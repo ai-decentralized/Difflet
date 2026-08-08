@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from difflet.pipeline.cache.types import CacheHistory, CacheStepContext, Coordinate
@@ -56,6 +56,14 @@ class TaylorSeerPredictor:
     order: int = 1
     coord: Coordinate = "index"
     max_consecutive_predictions: int | None = None
+    _coefficient_key: Any = field(default=None, init=False, repr=False, compare=False)
+    _coefficient_coordinates: tuple[float, ...] = field(
+        default=(), init=False, repr=False, compare=False
+    )
+    _coefficients: tuple[Any, ...] = field(
+        default=(), init=False, repr=False, compare=False
+    )
+    _coefficient_dtype: Any = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if isinstance(self.order, bool) or self.order not in (1, 2):
@@ -67,16 +75,33 @@ class TaylorSeerPredictor:
     def required_history(self) -> int:
         return self.order + 1
 
-    def predict(self, context: CacheStepContext, history: CacheHistory) -> Any:
+    def reset_cache(self) -> None:
+        """Release request-derived coefficients without changing configuration."""
+
+        object.__setattr__(self, "_coefficient_key", None)
+        object.__setattr__(self, "_coefficient_coordinates", ())
+        object.__setattr__(self, "_coefficients", ())
+        object.__setattr__(self, "_coefficient_dtype", None)
+
+    def _prepare_coefficients(
+        self,
+        history: CacheHistory,
+    ) -> tuple[tuple[float, ...], tuple[Any, ...], Any]:
         required = self.required_history
-        if not history.ready(required):
-            raise RuntimeError(
-                f"TaylorSeer order={self.order} requires {required} real anchors"
-            )
         anchors = history.tail(required)
-        coordinates = [anchor.coordinate(self.coord) for anchor in anchors]
+        coordinates = tuple(anchor.coordinate(self.coord) for anchor in anchors)
         if len(set(coordinates)) != len(coordinates):
             raise ValueError("TaylorSeer received duplicate anchor coordinates")
+        key = tuple(
+            (anchor.step_index, coordinate, id(anchor.output))
+            for anchor, coordinate in zip(anchors, coordinates)
+        )
+        if key == self._coefficient_key:
+            return (
+                self._coefficient_coordinates,
+                self._coefficients,
+                self._coefficient_dtype,
+            )
 
         values = []
         original_dtype = None
@@ -87,7 +112,7 @@ class TaylorSeerPredictor:
 
         # Newton divided differences. ``coefficients[k]`` becomes the order-k
         # coefficient while lower entries retain the coefficients needed by
-        # nested multiplication below.
+        # nested multiplication in ``predict``.
         coefficients = list(values)
         for level in range(1, required):
             for index in range(required - 1, level - 1, -1):
@@ -97,6 +122,21 @@ class TaylorSeerPredictor:
                 coefficients[index] = (
                     coefficients[index] - coefficients[index - 1]
                 ) / denominator
+
+        result = (coordinates, tuple(coefficients), original_dtype)
+        object.__setattr__(self, "_coefficient_key", key)
+        object.__setattr__(self, "_coefficient_coordinates", result[0])
+        object.__setattr__(self, "_coefficients", result[1])
+        object.__setattr__(self, "_coefficient_dtype", result[2])
+        return result
+
+    def predict(self, context: CacheStepContext, history: CacheHistory) -> Any:
+        required = self.required_history
+        if not history.ready(required):
+            raise RuntimeError(
+                f"TaylorSeer order={self.order} requires {required} real anchors"
+            )
+        coordinates, coefficients, original_dtype = self._prepare_coefficients(history)
 
         target = context.coordinate(self.coord)
         result = coefficients[-1]

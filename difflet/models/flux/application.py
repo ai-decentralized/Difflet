@@ -205,6 +205,10 @@ class NeuronFluxApplication(MultiComponentApplication):
         cache_recovery_max_consecutive: Optional[int] = None,
         cache_recovery_steps: Optional[int] = None,
         cache_require_final_anchor: Optional[bool] = None,
+        cache_profile_file: Optional[str] = None,
+        cache_profile_qualification_file: Optional[str] = None,
+        cache_runtime_model_id: Optional[str] = None,
+        cache_runtime_model_revision: Optional[str] = None,
     ):
         super().__init__()
         self.model_path = model_path
@@ -221,12 +225,19 @@ class NeuronFluxApplication(MultiComponentApplication):
         self._cache_predictor_spec = None
         self._cache_recovery_config = None
         self._probe_free_recovery_config = None
-        self.cache_session = None
+        self._qualified_cache_profile = None
+        self._cache_runtime_model_id = cache_runtime_model_id
+        self._cache_runtime_model_revision = cache_runtime_model_revision
         self._teacache_cadence = teacache_cadence
         self._teacache_online_delta_alpha = teacache_online_delta_alpha
 
         plan_selected = cache_plan_file is not None
         mask_selected = cache_mask_file is not None
+        qualified_profile_selected = cache_profile_file is not None
+        if (cache_profile_qualification_file is not None) != qualified_profile_selected:
+            raise ValueError(
+                "cache_profile_file and cache_profile_qualification_file must be provided together"
+            )
         predictor_options = {
             "cache_predictor": cache_predictor,
             "cache_predictor_order": cache_predictor_order,
@@ -253,6 +264,25 @@ class NeuronFluxApplication(MultiComponentApplication):
                 teacache_online_delta_alpha,
             )
         ) or bool(teacache_fused)
+        if qualified_profile_selected and (
+            plan_selected
+            or mask_selected
+            or old_cache_selected
+            or any(value is not None for value in predictor_options.values())
+            or recovery_selected
+        ):
+            raise ValueError(
+                "a qualified cache profile cannot be combined with legacy cache options"
+            )
+        if qualified_profile_selected and (
+            not isinstance(cache_runtime_model_id, str)
+            or not cache_runtime_model_id
+            or not isinstance(cache_runtime_model_revision, str)
+            or not cache_runtime_model_revision
+        ):
+            raise ValueError(
+                "qualified cache profiles require a resolved runtime model id and revision"
+            )
         legacy_modes = sum(
             (
                 teacache_speedup is not None,
@@ -305,6 +335,18 @@ class NeuronFluxApplication(MultiComponentApplication):
             )
         if mask_selected and cache_predictor is None:
             raise ValueError("cache_mask_file requires cache_predictor")
+
+        if qualified_profile_selected:
+            from difflet.pipeline.cache import load_qualified_cache_profile
+
+            if getattr(backbone_config, "cfg_parallel_enabled", False):
+                raise ValueError("qualified Flux cache profiles require cfg_parallel_enabled=False")
+            assert cache_profile_file is not None
+            assert cache_profile_qualification_file is not None
+            self._qualified_cache_profile = load_qualified_cache_profile(
+                cache_profile_file,
+                cache_profile_qualification_file,
+            )
 
         if plan_selected or mask_selected or probe_free_selected:
             from difflet.pipeline.cache import (
@@ -392,6 +434,14 @@ class NeuronFluxApplication(MultiComponentApplication):
         self.text_encoder2_config = text_encoder2_config
         self.backbone_config = backbone_config
         self.decoder_config = decoder_config
+
+        if self._qualified_cache_profile is not None:
+            self._validate_qualified_cache_runtime(
+                num_steps=int(self._qualified_cache_profile.generation["num_steps"]),
+                guidance_scale=float(
+                    self._qualified_cache_profile.generation["guidance_scale"]
+                ),
+            )
 
         self.pipe.text_encoder = NeuronClipApplication(
             model_path=self.text_encoder_path, config=self.text_encoder_config
@@ -486,18 +536,38 @@ class NeuronFluxApplication(MultiComponentApplication):
     def __call__(self, *args, **kwargs):
         """Run one generation through the configured FLUX pipeline.
 
-        Cache-enabled calls install a request-scoped adapter in the shared
-        ``pipe.teacache_controller`` slot.  Consequently, concurrent calls on
-        the same application instance are unsupported: the host must serialize
-        them or allocate separate application instances.  A future concurrent
-        serving integration must pass request state explicitly instead of
-        mutating this shared slot.
+        Composable cache modes create one fresh session and pass it explicitly
+        into this call. No request state is stored on the application or shared
+        pipeline. The calibrated legacy TeaCache path retains its historical
+        controller slot until that separate compatibility mode is removed.
         """
 
-        if self._cache_plan is not None or self._cache_mask is not None:
-            self._prepare_cache_session(*args, **kwargs)
-        elif self._teacache_cadence is not None or self._teacache_online_delta_alpha is not None:
-            self._prepare_probe_free_teacache(*args, **kwargs)
+        external_session = kwargs.get("cache_session")
+        configured_cache = (
+            getattr(self, "_qualified_cache_profile", None) is not None
+            or self._cache_plan is not None
+            or self._cache_mask is not None
+            or self._teacache_cadence is not None
+            or self._teacache_online_delta_alpha is not None
+        )
+        if external_session is not None and configured_cache:
+            raise ValueError(
+                "an explicit cache_session cannot be combined with application cache configuration"
+            )
+        cache_session = None
+        if external_session is None and (
+            getattr(self, "_qualified_cache_profile", None) is not None
+            or self._cache_plan is not None
+            or self._cache_mask is not None
+        ):
+            cache_session = self._prepare_cache_session(*args, **kwargs)
+        elif external_session is None and (
+            self._teacache_cadence is not None
+            or self._teacache_online_delta_alpha is not None
+        ):
+            cache_session = self._prepare_probe_free_teacache(*args, **kwargs)
+        if cache_session is not None:
+            kwargs["cache_session"] = cache_session
         return self.pipe(*args, **kwargs)
 
     def _request_identity(self, *args: Any, **kwargs: Any) -> tuple[int, int, int]:
@@ -521,13 +591,63 @@ class NeuronFluxApplication(MultiComponentApplication):
         width = int(call.get("width") or self.width)
         return num_steps, height, width
 
-    def _prepare_probe_free_teacache(self, *args: Any, **kwargs: Any) -> None:
+    def _validate_qualified_cache_runtime(
+        self,
+        *,
+        num_steps: int,
+        guidance_scale: float,
+    ) -> None:
+        from difflet.pipeline.cache import scheduler_config_sha256
+
+        profile = getattr(self, "_qualified_cache_profile", None)
+        if profile is None:
+            return
+        neuron_config = getattr(self.backbone_config, "neuron_config", None)
+        dtype = str(getattr(neuron_config, "torch_dtype", "")).removeprefix("torch.")
+        tp_degree = getattr(neuron_config, "tp_degree", None)
+        if not dtype or isinstance(tp_degree, bool) or not isinstance(tp_degree, int):
+            raise ValueError("Flux backbone does not expose the qualified dtype and TP degree")
+        profile.validate_runtime(
+            model_id=str(self._cache_runtime_model_id),
+            model_revision=str(self._cache_runtime_model_revision),
+            height=int(self.height),
+            width=int(self.width),
+            num_steps=num_steps,
+            scheduler_class=type(self.pipe.scheduler).__name__,
+            scheduler_config_sha256=scheduler_config_sha256(self.pipe.scheduler),
+            dtype=dtype,
+            guidance_scale=guidance_scale,
+            tp_degree=tp_degree,
+        )
+
+    def _validate_qualified_cache_request(self, *args: Any, **kwargs: Any) -> None:
+        if getattr(self, "_qualified_cache_profile", None) is None:
+            return
+        signature = inspect.signature(self.pipe.__call__)
+        call = signature.bind_partial(*args, **kwargs).arguments
+        if call.get("sigmas") is not None:
+            raise ValueError("qualified cache profiles do not allow custom sigma schedules")
+        parameter = signature.parameters.get("guidance_scale")
+        default_guidance = (
+            parameter.default
+            if parameter is not None and parameter.default is not inspect.Parameter.empty
+            else None
+        )
+        guidance_scale = call.get("guidance_scale", default_guidance)
+        if guidance_scale is None:
+            raise ValueError("qualified cache profile requires an explicit guidance scale")
+        num_steps, _, _ = self._request_identity(*args, **kwargs)
+        self._validate_qualified_cache_runtime(
+            num_steps=num_steps,
+            guidance_scale=float(guidance_scale),
+        )
+
+    def _prepare_probe_free_teacache(self, *args: Any, **kwargs: Any):
         from difflet.pipeline.cache import (
             CacheSession,
             CacheRunner,
             LegacyResidualPredictor,
             QualityRecoveryGuard,
-            TeaCacheControllerAdapter,
             TeaCachePolicy,
         )
         from difflet.pipeline.teacache import TeaCacheCalibration
@@ -560,21 +680,22 @@ class NeuronFluxApplication(MultiComponentApplication):
             num_steps=num_steps,
             configuration_source=source,
         )
-        adapter = TeaCacheControllerAdapter(session)
-        self.cache_session = session
-        self.pipe.teacache_controller = adapter
+        return session
 
-    def _prepare_cache_session(self, *args: Any, **kwargs: Any) -> None:
-        """Resolve request identity and install a fresh cache session."""
+    def _prepare_cache_session(self, *args: Any, **kwargs: Any):
+        """Resolve request identity and return a fresh cache session."""
 
         from difflet.pipeline.cache import (
             ResolvedCacheSession,
-            TeaCacheControllerAdapter,
             resolve_cache_config,
             resolve_cache_plan,
         )
 
         num_steps, height, width = self._request_identity(*args, **kwargs)
+        if getattr(self, "_qualified_cache_profile", None) is not None:
+            self._validate_qualified_cache_request(*args, **kwargs)
+            session = self._qualified_cache_profile.build_session(num_steps)
+            return session
         shape_label = f"{height}x{width}"
         scheduler_class = type(self.pipe.scheduler).__name__
 
@@ -596,6 +717,4 @@ class NeuronFluxApplication(MultiComponentApplication):
                 recovery=self._cache_recovery_config,
             )
         session = ResolvedCacheSession(resolved)
-        adapter = TeaCacheControllerAdapter(session)
-        self.cache_session = session
-        self.pipe.teacache_controller = adapter
+        return session
