@@ -8,7 +8,7 @@ import torch
 from difflet.pipeline.cache import (
     AdaptiveAnchorConfig,
     AdaptiveAnchorPolicy,
-    AnchorMeasurement,
+    AnchorErrorMeasurement,
     CacheAnchor,
     CacheHistory,
     CacheStepContext,
@@ -65,25 +65,12 @@ def _anchor_measurement(
     error: float | None,
     num_steps: int = 20,
     status: str = "measured",
-) -> AnchorMeasurement:
-    return AnchorMeasurement(
+) -> AnchorErrorMeasurement:
+    return AnchorErrorMeasurement(
         step_index=step_index,
         num_steps=num_steps,
-        timestep=None,
-        sigma=None,
-        decision_reason="policy_compute",
-        history_size=2 if status == "measured" else 0,
-        estimated_steps_since_anchor=0,
-        anchor_step_gap=1 if step_index else None,
-        output_shape=(1,),
-        output_dtype="float32",
-        output_norm=1.0,
-        relative_output_change=0.0,
-        relative_output_curvature=0.0,
         estimate_status=status,
         estimate_relative_error=error,
-        estimate_seconds=0.0 if status == "measured" else None,
-        measurement_seconds=0.0,
         numerically_valid=status in {"measured", "history_not_ready"},
     )
 

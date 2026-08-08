@@ -110,8 +110,7 @@ non-serving refactor.
 ## Runtime boundary
 
 Nothing under `difflet.offline` is imported to construct or execute a serving
-pipeline. This change does not modify `FluxApplication`, cache runners,
-controllers, policies, predictors, Transformer execution, or device/host
-measurement paths. The next runtime phase can therefore introduce a qualified
-profile loader and request-scoped session without coupling serving to offline
-calibration code.
+pipeline. The request-time controller uses only the scalar Taylor anchor-error
+path in `difflet.pipeline.cache.control_error`; research telemetry, latent
+clones, measurement sinks, and JSON measurement reports are not part of the
+qualified runtime.

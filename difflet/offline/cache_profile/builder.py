@@ -61,7 +61,7 @@ _IMPLEMENTATION_PATHS = (
     ROOT / "difflet" / "models" / "flux" / "pipeline.py",
     ROOT / "difflet" / "offline" / "cache_profile" / "schedule.py",
     ROOT / "difflet" / "pipeline" / "cache" / "__init__.py",
-    ROOT / "difflet" / "pipeline" / "cache" / "measurements.py",
+    ROOT / "difflet" / "pipeline" / "cache" / "control_error.py",
     ROOT / "difflet" / "pipeline" / "cache" / "policies.py",
     ROOT / "difflet" / "pipeline" / "cache" / "predictors.py",
     ROOT / "difflet" / "pipeline" / "cache" / "recovery.py",

@@ -6,8 +6,8 @@ one state machine:
 * policies decide *when* a transformer evaluation may be skipped;
 * predictors decide *which value* replaces that evaluation; and
 * :class:`CacheRunner` owns history, safety checks, and accounting;
-* :class:`CacheSession` owns one request's schedule and lifecycle; and
-* measurement sinks observe real anchors without changing decisions; and
+* :class:`CacheSession` owns one request's schedule and lifecycle;
+* the anchor-error path exposes only the scalar needed for bounded braking; and
 * :class:`TeaCacheControllerAdapter` only translates the existing loop API.
 
 Only real transformer outputs enter :class:`CacheHistory`. Predicted outputs
@@ -52,21 +52,10 @@ from difflet.pipeline.cache.spec import (
     resolve_cache_plan,
     validate_schedule_safety,
 )
-from difflet.pipeline.cache.measurements import (
+from difflet.pipeline.cache.control_error import (
     AnchorEstimateStatus,
-    AnchorMeasurement,
-    CacheMeasurementSink,
-    InMemoryMeasurementSink,
-    LatentUpdateMeasurement,
-    measure_anchor_estimate,
-    measure_anchor_estimate_fast,
-    measure_latent_update,
-)
-from difflet.pipeline.cache.measurement_report import (
-    CACHE_MEASUREMENT_SCHEMA,
-    CACHE_MEASUREMENT_SCHEMA_REVISION,
-    CacheMeasurementReport,
-    load_cache_measurements,
+    AnchorErrorMeasurement,
+    measure_anchor_error,
 )
 from difflet.pipeline.cache.profile import (
     PHASED_CANDIDATE_SCHEMA,
@@ -101,15 +90,13 @@ from difflet.pipeline.cache.teacache_adapter import TeaCacheControllerAdapter
 __all__ = [
     "CACHE_MASK_SCHEMA",
     "CACHE_PLAN_SCHEMA",
-    "CACHE_MEASUREMENT_SCHEMA",
-    "CACHE_MEASUREMENT_SCHEMA_REVISION",
     "PHASED_CANDIDATE_SCHEMA",
     "PHASED_CANDIDATE_SCHEMA_REVISION",
     "PROFILE_QUALIFICATION_SCHEMA",
     "PROFILE_QUALIFICATION_SCHEMA_REVISION",
     "Anchor",
     "AnchorEstimateStatus",
-    "AnchorMeasurement",
+    "AnchorErrorMeasurement",
     "AdaptiveAnchorConfig",
     "AdaptiveAnchorPolicy",
     "CacheAnchor",
@@ -127,16 +114,12 @@ __all__ = [
     "CacheRunnerStats",
     "CacheSpecError",
     "CacheStepContext",
-    "CacheMeasurementReport",
-    "CacheMeasurementSink",
     "CadencePolicy",
     "Context",
     "ExplicitMaskPolicy",
     "PhasedStaticPolicy",
     "PhasedCandidateArm",
     "LegacyResidualPredictor",
-    "InMemoryMeasurementSink",
-    "LatentUpdateMeasurement",
     "PeriodicAnchorPolicy",
     "QualityRecoveryConfig",
     "QualityRecoveryGuard",
@@ -159,10 +142,7 @@ __all__ = [
     "load_phased_candidates",
     "load_qualified_cache_profile",
     "scheduler_config_sha256",
-    "load_cache_measurements",
-    "measure_anchor_estimate",
-    "measure_anchor_estimate_fast",
-    "measure_latent_update",
+    "measure_anchor_error",
     "resolve_cache_config",
     "resolve_cache_plan",
     "validate_schedule_safety",

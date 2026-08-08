@@ -7,10 +7,6 @@ from typing import Any
 
 from difflet.pipeline.cache.runner import CacheRunner
 from difflet.pipeline.cache.spec import ResolvedCacheConfig
-from difflet.pipeline.cache.measurements import (
-    CacheMeasurementSink,
-    measure_latent_update,
-)
 from difflet.pipeline.cache.types import CacheDecision, CacheStepContext
 
 
@@ -74,9 +70,6 @@ class CacheSession:
         self._timesteps: tuple[float, ...] | None = None
         self._sigmas: tuple[float, ...] | None = None
         self._active_step_index: int | None = None
-        self._decisions: dict[int, CacheDecision] = {}
-        self._completed_with_estimate: dict[int, bool] = {}
-        self._measured_latent_steps: set[int] = set()
 
     @property
     def active_step_index(self) -> int | None:
@@ -90,12 +83,6 @@ class CacheSession:
 
         value = getattr(self.runner.policy, "last_delta_estimate", None)
         return None if value is None else float(value)
-
-    @property
-    def measurements_enabled(self) -> bool:
-        """Return whether this request has an attached measurement sink."""
-
-        return self.runner.measurement_sink is not None
 
     def clear_request_state(self) -> None:
         """Clear all trajectory state before the session is reused in tests.
@@ -113,9 +100,6 @@ class CacheSession:
         self._timesteps = None
         self._sigmas = None
         self._active_step_index = None
-        self._decisions.clear()
-        self._completed_with_estimate.clear()
-        self._measured_latent_steps.clear()
 
     @staticmethod
     def _finite_coordinates(
@@ -202,7 +186,6 @@ class CacheSession:
         context = self._context_for_step(step_index, signal=signal)
         decision = self.runner.decide(context)
         self._active_step_index = context.step_index
-        self._decisions[context.step_index] = decision
         return decision
 
     def estimate_output(self, step_index: int) -> Any:
@@ -210,7 +193,6 @@ class CacheSession:
 
         context = self._require_active_context(step_index)
         output = self.runner.predict(context)
-        self._completed_with_estimate[context.step_index] = True
         self._active_step_index = None
         return output
 
@@ -219,35 +201,7 @@ class CacheSession:
 
         context = self._require_active_context(step_index)
         self.runner.record_anchor(context, output)
-        self._completed_with_estimate[context.step_index] = False
         self._active_step_index = None
-
-    def record_latent_update(self, step_index: int, before: Any, after: Any) -> None:
-        """Measure the scheduler update after this cache step has completed."""
-
-        sink = self.runner.measurement_sink
-        if sink is None:
-            return
-        step_index = self._validate_step_index(step_index)
-        decision = self._decisions.get(step_index)
-        if decision is None or step_index not in self._completed_with_estimate:
-            raise RuntimeError(
-                f"cache step {step_index} must complete before its latent update is measured"
-            )
-        if step_index in self._measured_latent_steps:
-            raise RuntimeError(f"cache step {step_index} latent update was measured twice")
-        context = self._contexts.get(step_index)
-        if context is None:
-            raise RuntimeError(f"cache step {step_index} has no bound context")
-        measurement = measure_latent_update(
-            context=context,
-            before=before,
-            after=after,
-            decision_reason=decision.reason,
-            used_estimate=self._completed_with_estimate[step_index],
-        )
-        sink.record_latent_update(measurement)
-        self._measured_latent_steps.add(step_index)
 
     def _require_active_context(self, step_index: int) -> CacheStepContext:
         step_index = self._validate_step_index(step_index)
@@ -318,14 +272,12 @@ class ResolvedCacheSession(CacheSession):
     def __init__(
         self,
         config: ResolvedCacheConfig,
-        *,
-        measurement_sink: CacheMeasurementSink | None = None,
     ) -> None:
         if not isinstance(config, ResolvedCacheConfig):
             raise TypeError("ResolvedCacheSession requires a ResolvedCacheConfig")
         self.config = config
         super().__init__(
-            config.build_runner(measurement_sink=measurement_sink),
+            config.build_runner(),
             num_steps=config.num_steps,
             configuration_source=config.source,
             barrier_steps=config.barrier_steps,

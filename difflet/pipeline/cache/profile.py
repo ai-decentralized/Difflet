@@ -253,7 +253,7 @@ class PhasedCandidateArm:
     def predictor_spec(self) -> dict[str, Any]:
         return {"type": "taylorseer", "order": self.order, "coord": self.coord}
 
-    def build_session(self, num_steps: int, *, measurement_sink: Any = None) -> CacheSession:
+    def build_session(self, num_steps: int) -> CacheSession:
         expected_steps = int(self.policy["num_steps"])
         if num_steps != expected_steps:
             raise CacheProfileError(
@@ -300,7 +300,6 @@ class PhasedCandidateArm:
                 policy,
                 TaylorSeerPredictor(order=self.order, coord=self.coord),
                 recovery=recovery,
-                measurement_sink=measurement_sink,
             ),
             num_steps=num_steps,
             configuration_source=kind.replace("_", "-"),
@@ -308,11 +307,11 @@ class PhasedCandidateArm:
             planned_estimate_steps=(num_steps - sum(mask) if kind == "phased_static" else None),
         )
 
-    def build_pipeline_adapter(self, num_steps: int, *, measurement_sink: Any = None):
+    def build_pipeline_adapter(self, num_steps: int):
         from difflet.pipeline.cache.teacache_adapter import TeaCacheControllerAdapter
 
         return TeaCacheControllerAdapter(
-            self.build_session(num_steps, measurement_sink=measurement_sink)
+            self.build_session(num_steps)
         )
 
 
@@ -452,8 +451,8 @@ class QualifiedCacheProfile:
                 + json.dumps(mismatches, sort_keys=True)
             )
 
-    def build_session(self, num_steps: int, *, measurement_sink: Any = None) -> CacheSession:
-        return self.candidate.build_session(num_steps, measurement_sink=measurement_sink)
+    def build_session(self, num_steps: int) -> CacheSession:
+        return self.candidate.build_session(num_steps)
 
 
 def _validate_file_binding(value: Any, name: str) -> tuple[Path, dict[str, Any]]:

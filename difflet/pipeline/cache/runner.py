@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from difflet.pipeline.cache.measurements import (
-    CacheMeasurementSink,
-    measure_anchor_estimate,
-    measure_anchor_estimate_fast,
-)
+from difflet.pipeline.cache.control_error import measure_anchor_error
 from difflet.pipeline.cache.types import (
     CacheAnchor,
     CacheDecision,
@@ -33,7 +29,6 @@ class CacheRunner:
         *,
         recovery: CacheRecovery | None = None,
         history_capacity: int | None = None,
-        measurement_sink: CacheMeasurementSink | None = None,
     ) -> None:
         if not isinstance(policy, CachePolicy):
             raise TypeError("policy must implement CachePolicy")
@@ -81,8 +76,6 @@ class CacheRunner:
             raise ValueError(
                 f"history_capacity={capacity} is lower than predictor requirement {required}"
             )
-        if measurement_sink is not None and not isinstance(measurement_sink, CacheMeasurementSink):
-            raise TypeError("measurement_sink must implement CacheMeasurementSink")
         _validate_static_pair(policy, predictor, recovery)
         self.policy = policy
         self.predictor = predictor
@@ -90,12 +83,9 @@ class CacheRunner:
         self.history = CacheHistory(capacity)
         self.observation = RuntimeObservation()
         self.counters = CacheRunnerStats()
-        self.measurement_sink = measurement_sink
         self._pending_context: CacheStepContext | None = None
         self._compute_context: CacheStepContext | None = None
         self._last_context: CacheStepContext | None = None
-        self._pending_decision_reason: str | None = None
-        self._compute_decision_reason: str | None = None
 
     @property
     def ready(self) -> bool:
@@ -113,13 +103,9 @@ class CacheRunner:
         self._pending_context = None
         self._compute_context = None
         self._last_context = None
-        self._pending_decision_reason = None
-        self._compute_decision_reason = None
         if reset_policy:
             self.policy.reset()
         self.recovery.reset()
-        if self.measurement_sink is not None:
-            self.measurement_sink.clear()
 
     def reset_history(
         self,
@@ -135,8 +121,6 @@ class CacheRunner:
         self._pending_context = None
         self._compute_context = None
         self._last_context = None
-        self._pending_decision_reason = None
-        self._compute_decision_reason = None
         if reset_policy:
             self.policy.reset()
         if reset_recovery:
@@ -163,7 +147,6 @@ class CacheRunner:
             self.counters.barrier_resets += 1
             self._last_context = context
             self._compute_context = context
-            self._compute_decision_reason = "barrier"
             return CacheDecision(False, "barrier")
 
         recovery = self.recovery.before_step(context, self.history, self.observation)
@@ -188,14 +171,12 @@ class CacheRunner:
             decision_reason = recovery_reasons.get(recovery.reason)
             if decision_reason is None:
                 raise ValueError(f"unsupported force-compute recovery reason: {recovery.reason!r}")
-            self._compute_decision_reason = decision_reason
             return CacheDecision(False, decision_reason)
 
         requested = bool(self.policy.should_skip(context, self.history, self.observation))
         if not requested:
             self._last_context = context
             self._compute_context = context
-            self._compute_decision_reason = "policy_compute"
             return CacheDecision(False, "policy_compute")
 
         self.counters.policy_skip_requests += 1
@@ -203,7 +184,6 @@ class CacheRunner:
             self.counters.readiness_rejections += 1
             self._last_context = context
             self._compute_context = context
-            self._compute_decision_reason = "history_not_ready"
             return CacheDecision(False, "history_not_ready")
 
         maximum = self.predictor.max_consecutive_predictions
@@ -211,12 +191,10 @@ class CacheRunner:
             self.counters.consecutive_skip_vetoes += 1
             self._last_context = context
             self._compute_context = context
-            self._compute_decision_reason = "consecutive_skip_veto"
             return CacheDecision(False, "consecutive_skip_veto")
 
         self._pending_context = context
         self._last_context = context
-        self._pending_decision_reason = "policy_skip"
         return CacheDecision(True, "policy_skip")
 
     def should_skip(self, context: CacheStepContext) -> bool:
@@ -236,7 +214,6 @@ class CacheRunner:
         self.observation.record(context, output, predicted=True)
         self.counters.skipped_steps += 1
         self._pending_context = None
-        self._pending_decision_reason = None
         return output
 
     def record_anchor(self, context: CacheStepContext, output: Any) -> None:
@@ -244,40 +221,18 @@ class CacheRunner:
             raise RuntimeError("anchor context does not match the pending compute decision")
         if self._pending_context is not None and context != self._pending_context:
             raise RuntimeError("anchor context does not match the pending skip decision")
-        decision_reason = (
-            self._pending_decision_reason or self._compute_decision_reason or "direct_compute"
-        )
         measurement = None
         measurement_hook = getattr(
             self.policy,
             "observe_anchor_measurement",
             None,
         )
-        tensor_observer = getattr(
-            self.measurement_sink,
-            "observe_anchor_tensors",
-            None,
-        )
-        if not callable(tensor_observer):
-            tensor_observer = None
-        if self.measurement_sink is not None:
-            measurement = measure_anchor_estimate(
+        if callable(measurement_hook):
+            measurement = measure_anchor_error(
                 context=context,
                 output=output,
-                decision_reason=decision_reason,
                 predictor=self.predictor,
                 history=self.history,
-                observation=self.observation,
-                tensor_observer=tensor_observer,
-            )
-        elif callable(measurement_hook):
-            measurement = measure_anchor_estimate_fast(
-                context=context,
-                output=output,
-                decision_reason=decision_reason,
-                predictor=self.predictor,
-                history=self.history,
-                observation=self.observation,
             )
         if measurement is not None and callable(measurement_hook):
             measurement_hook(measurement)
@@ -285,9 +240,7 @@ class CacheRunner:
             # A caller may elect to compute after seeing a skip decision. That
             # is safe, but the stale pending decision must not leak.
             self._pending_context = None
-            self._pending_decision_reason = None
         self._compute_context = None
-        self._compute_decision_reason = None
         hook = getattr(self.policy, "observe_anchor", None)
         if callable(hook):
             hook(context, output, self.history, self.observation)
@@ -300,9 +253,6 @@ class CacheRunner:
         self.observation.record(context, output, predicted=False)
         self.counters.full_steps += 1
         self._last_context = context
-        if measurement is not None:
-            if self.measurement_sink is not None:
-                self.measurement_sink.record_anchor_measurement(measurement)
 
     def _reset_predictor_cache(self) -> None:
         reset_predictor_cache = getattr(self.predictor, "reset_cache", None)

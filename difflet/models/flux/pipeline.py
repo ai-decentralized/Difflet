@@ -613,11 +613,6 @@ class NeuronFluxPipeline(FluxPipeline):
                     timesteps,
                     getattr(self.scheduler, "sigmas", None),
                 )
-        measurements_enabled = bool(
-            controller is not None
-            and callable(getattr(controller, "measurements_enabled", None))
-            and controller.measurements_enabled()
-        )
         self._tc_last_trajectory = []
         self._tc_pairs = []
         _tc_prev_np = None
@@ -729,12 +724,9 @@ class NeuronFluxPipeline(FluxPipeline):
                     _tc_prev_np = noise_pred.detach().float()
 
                 latents_dtype = latents.dtype
-                latent_before_update = latents.detach().clone() if measurements_enabled else None
                 latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
                 if latents.dtype != latents_dtype and torch.backends.mps.is_available():
                     latents = latents.to(latents_dtype)
-                if measurements_enabled:
-                    controller.record_latent_update(i, latent_before_update, latents)
                 self._tc_last_trajectory.append(latents.detach().to("cpu"))
 
                 if callback_on_step_end is not None:
