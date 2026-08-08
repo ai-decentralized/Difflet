@@ -5,14 +5,14 @@ import math
 import numpy as np
 import pytest
 
-from scripts.derive_flux_cache_schedule import (
-    _derive_hardware_budget,
-    _fit_affine_step_cost,
-    _materialized_path_segments,
-    _nearest_rank,
-    _optimize_mask,
-    _relative_prediction_error,
-    _scheduler_sigmas,
+from difflet.offline.cache_profile.schedule import (
+    derive_hardware_budget as _derive_hardware_budget,
+    fit_affine_step_cost as _fit_affine_step_cost,
+    materialized_path_segments as _materialized_path_segments,
+    nearest_rank as _nearest_rank,
+    optimize_mask as _optimize_mask,
+    relative_prediction_error as _relative_prediction_error,
+    scheduler_sigmas as _scheduler_sigmas,
 )
 
 

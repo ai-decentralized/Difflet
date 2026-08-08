@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import scripts.build_flux_cache_profile as profile_builder
+from difflet.offline.cache_profile import builder as profile_builder
 from scripts.flux_cache_protocol import canonical_sha256
 
 

@@ -130,14 +130,21 @@ the `p013-s3` ImageReward comparison. No review state is produced.
 `scripts/build_flux_cache_profile.py` closes the orchestration boundary. Its
 frozen build spec binds the cached calibration evidence, the natural-range
 contract, one new confirmation split, the execution policy, both Python
-runtimes, scorer caches, output directory, and builder implementation hash.
+runtimes, scorer caches, output directory, and a hash manifest of the
+first-party implementation files used by the build.
+
+The checked-in revision-1 square-1024 build spec and its qualification remain
+historical evidence for commit `e16a718`. The modular implementation rejects
+that old spec rather than silently inheriting its qualification. A future run
+must first register and commit a new revision-2 build spec with a new
+confirmation split.
 
 The user-facing execution is one command:
 
 ```bash
 /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python \
   scripts/build_flux_cache_profile.py build \
-  --spec benchmark/flux_cache/target-profile-square-1024-build-spec.json
+  --spec /path/to/prospective-build-spec.json
 ```
 
 The command performs a clean-worktree preflight before model loading, because
