@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import scripts.collect_flux_cache_phase_schedule_source as source_collector
+import scripts.flux_cache_phase_schedule_registration as registration_module
 from difflet.pipeline.cache import (
     AdaptiveAnchorConfig,
     CacheHistory,
@@ -50,14 +51,16 @@ def _adaptive_config() -> AdaptiveAnchorConfig:
     )
 
 
-def test_frozen_phase_schedule_registration_validates():
-    registration = load_registration(REGISTRATION_PATH)
+def test_frozen_phase_schedule_registration_is_preserved_and_detects_runtime_drift():
+    registration = json.loads(REGISTRATION_PATH.read_text(encoding="utf-8"))
 
     assert registration["status"] == "registered_not_collected"
     assert registration["source_collection"]["candidate_request_count"] == 96
     assert registration["source_collection"]["expected_unique_semantic_images"] == 144
     assert registration["terminal_horizon"]["steps"] == [7, 13, 17, 21, 25, 29, 37]
     assert registration["repair_depth"]["consecutive_real_steps"] == [4, 8, 16]
+    with pytest.raises(ValueError, match="implementation flux_application file sha256 mismatch"):
+        load_registration(REGISTRATION_PATH)
 
 
 def test_source_collector_uses_neutral_quality_manifest_name(monkeypatch, tmp_path):
@@ -79,6 +82,10 @@ def test_source_collector_uses_neutral_quality_manifest_name(monkeypatch, tmp_pa
 
 def test_registration_rejects_post_registration_grid_change(tmp_path):
     document = json.loads(REGISTRATION_PATH.read_text(encoding="utf-8"))
+    for name, relative_path in registration_module.IMPLEMENTATION_PATHS.items():
+        document["implementation"][name]["file_sha256"] = (
+            registration_module.sha256_file(ROOT / relative_path)
+        )
     document["terminal_horizon"]["steps"] = [7, 13, 21, 29, 37]
     payload = {key: value for key, value in document.items() if key != "sha256"}
     document["sha256"] = canonical_sha256(payload)
