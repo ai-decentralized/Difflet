@@ -11,16 +11,12 @@ import scripts.flux_cache_protocol as protocol_module
 from difflet.offline.cache_profile.collector import select_prompts
 from scripts.flux_cache_protocol import (
     DEFAULT_PROMPT_SUITE_PATH,
-    EVALUATION_PROTOCOL_SCHEMA,
     EXPERIMENT_PROTOCOL_SCHEMA,
     PROMPT_SUITE_SCHEMA,
-    build_evaluation_protocol,
     build_experiment_protocol,
     canonical_sha256,
     load_prompt_suite,
-    validate_evaluation_protocol,
     validate_experiment_protocol,
-    validate_protocol_binding,
 )
 
 
@@ -97,19 +93,6 @@ def _protocol() -> dict:
         "prompt_selection": selection.descriptor,
     }
     return {**payload, "sha256": canonical_sha256(payload)}
-
-
-def _identity() -> dict:
-    return {
-        "model_id": "black-forest-labs/FLUX.1-dev",
-        "shape_label": "1024x1024",
-        "num_steps": 50,
-        "scheduler_class": "FlowMatchEulerDiscreteScheduler",
-        "guidance_scale": 3.5,
-        "prompt_count": 2,
-        "seed_count": 2,
-        "sample_count": 4,
-    }
 
 
 def test_versioned_prompt_splits_have_stable_digests_and_are_disjoint():
@@ -202,41 +185,6 @@ def test_protocol_digest_rejects_content_tampering():
         validate_experiment_protocol(protocol)
 
 
-def test_protocol_binding_rejects_rehashed_prompt_seed_drift():
-    protocol = _protocol()
-    payload = {key: value for key, value in protocol.items() if key != "sha256"}
-    payload["rng"]["seeds"] = [0, 2]
-    protocol = {**payload, "sha256": canonical_sha256(payload)}
-    prompts = load_prompt_suite(
-        DEFAULT_PROMPT_SUITE_PATH,
-        "legacy_parity",
-    ).prompts
-    sample_matrix = [
-        {
-            "prompt_index": prompt_index,
-            "prompt": prompt,
-            "seed": seed,
-        }
-        for prompt_index, prompt in enumerate(prompts)
-        for seed in (0, 1)
-    ]
-
-    with pytest.raises(ValueError, match="prompt/seed matrix"):
-        validate_protocol_binding(
-            protocol,
-            _identity(),
-            sample_matrix=sample_matrix,
-        )
-
-
-def test_protocol_binding_rejects_manifest_generation_drift():
-    identity = _identity()
-    identity["scheduler_class"] = "DifferentScheduler"
-
-    with pytest.raises(ValueError, match="scheduler_class"):
-        validate_protocol_binding(_protocol(), identity)
-
-
 def test_protocol_builder_captures_resolved_snapshot_and_compile_identity(
     tmp_path,
     monkeypatch,
@@ -318,33 +266,3 @@ def test_protocol_builder_captures_resolved_snapshot_and_compile_identity(
         "invert_sigmas",
         "use_beta_sigmas",
     ]
-
-
-def test_evaluation_protocol_independently_hashes_runtime_and_metric_config(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        protocol_module,
-        "_git_source_identity",
-        lambda root: {
-            "git_commit": "c" * 40,
-            "git_branch": "feature/cache-system",
-            "git_dirty": False,
-        },
-    )
-    metric = {
-        "trajectory_cosine": "minimum-per-step-flattened-v1",
-        "lpips": {
-            "package_version": "0.1.4",
-            "model_state_sha256": "d" * 64,
-        },
-    }
-
-    protocol = build_evaluation_protocol(metric)
-
-    assert protocol["schema"] == EVALUATION_PROTOCOL_SCHEMA
-    assert protocol["metric_config"] == metric
-    validate_evaluation_protocol(protocol)
-    protocol["metric_config"]["lpips"]["model_state_sha256"] = "e" * 64
-    with pytest.raises(ValueError, match="sha256 does not match"):
-        validate_evaluation_protocol(protocol)

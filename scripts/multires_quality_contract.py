@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.automatic_quality_contract import (
+from difflet.offline.cache_profile.quality import (
     METRICS,
     load_semantic_report,
     metric_identity,

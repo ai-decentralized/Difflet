@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
 from difflet.offline.cache_profile import collector as profile_collector  # noqa: E402
 from difflet.offline.cache_profile import derivation as schedule_derivation  # noqa: E402
 from difflet.offline.cache_profile import provenance  # noqa: E402
+from difflet.offline.cache_profile import quality  # noqa: E402
 from difflet.pipeline.cache import profile as runtime_profile  # noqa: E402
 from difflet.pipeline.cache.profile import (  # noqa: E402
     PHASED_CANDIDATE_SCHEMA,
@@ -54,6 +55,7 @@ _IMPLEMENTATION_PATHS = (
     Path(profile_collector.__file__).resolve(),
     Path(schedule_derivation.__file__).resolve(),
     Path(provenance.__file__).resolve(),
+    Path(quality.__file__).resolve(),
     Path(runtime_profile.__file__).resolve(),
     ROOT / "difflet" / "models" / "flux" / "application.py",
     ROOT / "difflet" / "models" / "flux" / "pipeline.py",
@@ -69,7 +71,6 @@ _IMPLEMENTATION_PATHS = (
     ROOT / "difflet" / "pipeline" / "cache" / "teacache_adapter.py",
     ROOT / "difflet" / "pipeline" / "cache" / "types.py",
     ROOT / "difflet" / "pipeline" / "difflet_pipeline.py",
-    ROOT / "scripts" / "automatic_quality_contract.py",
     ROOT / "scripts" / "build_flux_cache_profile.py",
     ROOT / "scripts" / "collect_flux_baseline_calibration.py",
     ROOT / "scripts" / "collect_flux_cache_authorized.py",

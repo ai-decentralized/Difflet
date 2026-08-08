@@ -15,7 +15,6 @@ from typing import Any, Mapping, Sequence
 
 PROMPT_SUITE_SCHEMA = "difflet-flux-cache-prompt-suite-v1"
 EXPERIMENT_PROTOCOL_SCHEMA = "difflet-flux-cache-experiment-protocol-v1"
-EVALUATION_PROTOCOL_SCHEMA = "difflet-flux-cache-evaluation-protocol-v1"
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROMPT_SUITE_PATH = ROOT / "benchmark" / "flux_cache" / "prompt-suite-v1.json"
 
@@ -391,123 +390,6 @@ def build_experiment_protocol(
     return validated
 
 
-def build_evaluation_protocol(metric_config: Mapping[str, Any]) -> dict[str, Any]:
-    """Capture the independent source/runtime identity of offline quality scoring."""
-
-    if not isinstance(metric_config, dict) or not metric_config:
-        raise ValueError("metric_config must be a non-empty JSON object")
-    payload = {
-        "schema": EVALUATION_PROTOCOL_SCHEMA,
-        "source": _git_source_identity(ROOT),
-        "runtime": {
-            "python": sys.version.split()[0],
-            "platform": platform.platform(),
-            "packages": _package_versions(
-                (
-                    "torch",
-                    "torchvision",
-                    "lpips",
-                    "numpy",
-                    "Pillow",
-                )
-            ),
-        },
-        "metric_config": _jsonable(metric_config),
-    }
-    protocol = {
-        **payload,
-        "sha256": canonical_sha256(payload),
-    }
-    validated = validate_evaluation_protocol(protocol)
-    if validated["source"]["git_dirty"] and not _dirty_source_is_registered(ROOT):
-        raise RuntimeError(
-            "prospective FLUX cache quality evidence requires a clean Git "
-            "worktree or an exact registered Python source hash"
-        )
-    return validated
-
-
-def validate_evaluation_protocol(
-    value: Any,
-    name: str = "evaluation protocol",
-) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{name} must be a JSON object")
-    _check_keys(
-        value,
-        name,
-        {"schema", "sha256", "source", "runtime", "metric_config"},
-    )
-    if value["schema"] != EVALUATION_PROTOCOL_SCHEMA:
-        raise ValueError(
-            f"{name}.schema must be {EVALUATION_PROTOCOL_SCHEMA!r}, " f"got {value['schema']!r}"
-        )
-    digest = _hex_digest(value["sha256"], f"{name}.sha256", length=64)
-    payload = {key: item for key, item in value.items() if key != "sha256"}
-    if canonical_sha256(payload) != digest:
-        raise ValueError(f"{name}.sha256 does not match its canonical contents")
-    source = _strict_object(
-        value["source"],
-        f"{name}.source",
-        {"git_commit", "git_branch", "git_dirty"},
-    )
-    normalized_source = {
-        "git_commit": _hex_digest(
-            source["git_commit"],
-            f"{name}.source.git_commit",
-            length=40,
-        ),
-        "git_branch": _strict_string(
-            source["git_branch"],
-            f"{name}.source.git_branch",
-        ),
-        "git_dirty": _strict_bool(
-            source["git_dirty"],
-            f"{name}.source.git_dirty",
-        ),
-    }
-    runtime = _strict_object(
-        value["runtime"],
-        f"{name}.runtime",
-        {"python", "platform", "packages"},
-    )
-    packages = runtime["packages"]
-    if not isinstance(packages, dict) or not packages:
-        raise ValueError(f"{name}.runtime.packages must be a non-empty object")
-    if any(
-        not isinstance(package, str)
-        or not package
-        or (version is not None and (not isinstance(version, str) or not version))
-        for package, version in packages.items()
-    ):
-        raise ValueError(f"{name}.runtime.packages must map package names to versions or null")
-    metric_config = value["metric_config"]
-    if not isinstance(metric_config, dict) or not metric_config:
-        raise ValueError(f"{name}.metric_config must be a non-empty object")
-    lpips_config = metric_config.get("lpips")
-    if not isinstance(lpips_config, dict):
-        raise ValueError(f"{name}.metric_config.lpips must be an object")
-    if packages.get("lpips") != lpips_config.get("package_version"):
-        raise ValueError(f"{name}.runtime.packages.lpips does not match metric_config")
-    return {
-        "schema": EVALUATION_PROTOCOL_SCHEMA,
-        "source": normalized_source,
-        "runtime": {
-            "python": _strict_string(
-                runtime["python"],
-                f"{name}.runtime.python",
-            ),
-            "platform": _strict_string(
-                runtime["platform"],
-                f"{name}.runtime.platform",
-            ),
-            "packages": dict(packages),
-        },
-        "metric_config": _jsonable(metric_config),
-        "sha256": digest,
-    }
-
-
 def validate_experiment_protocol(value: Any, name: str = "experiment protocol") -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{name} must be a JSON object")
@@ -798,58 +680,6 @@ def validate_experiment_protocol(value: Any, name: str = "experiment protocol") 
     }
 
 
-def validate_protocol_binding(
-    protocol: Any,
-    experiment: Mapping[str, Any],
-    *,
-    sample_matrix: Sequence[Mapping[str, Any]] | None = None,
-    name: str = "experiment protocol",
-) -> dict[str, Any]:
-    """Validate protocol integrity and bind it to its enclosing manifest."""
-
-    normalized = validate_experiment_protocol(protocol, name)
-    if normalized["source"]["git_dirty"]:
-        raise ValueError(f"{name} was collected from a dirty Git worktree")
-    generation = normalized["generation"]
-    expected_identity = {
-        "model_id": normalized["model"]["model_id"],
-        "shape_label": f"{generation['height']}x{generation['width']}",
-        "num_steps": generation["num_steps"],
-        "scheduler_class": generation["scheduler_class"],
-        "guidance_scale": generation["guidance_scale"],
-        "prompt_count": len(normalized["prompt_selection"]["prompts"]),
-        "seed_count": len(normalized["rng"]["seeds"]),
-    }
-    for field, expected in expected_identity.items():
-        if experiment.get(field) != expected:
-            raise ValueError(
-                f"{name} {field}={expected!r} does not match "
-                f"manifest value {experiment.get(field)!r}"
-            )
-    expected_samples = expected_identity["prompt_count"] * expected_identity["seed_count"]
-    if experiment.get("sample_count") != expected_samples:
-        raise ValueError(
-            f"{name} sample matrix has {expected_samples} rows but manifest "
-            f"declares {experiment.get('sample_count')!r}"
-        )
-    if sample_matrix is not None:
-        expected_prompts = {
-            index: row["text"]
-            for index, row in enumerate(normalized["prompt_selection"]["prompts"])
-        }
-        observed = {
-            (row.get("prompt_index"), row.get("prompt"), row.get("seed")) for row in sample_matrix
-        }
-        expected = {
-            (prompt_index, prompt, seed)
-            for prompt_index, prompt in expected_prompts.items()
-            for seed in normalized["rng"]["seeds"]
-        }
-        if observed != expected or len(sample_matrix) != len(expected):
-            raise ValueError(f"{name} prompt/seed matrix does not match manifest comparisons")
-    return normalized
-
-
 def _strict_object(value: Any, name: str, required: set[str]) -> Mapping[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{name} must be a JSON object")
@@ -980,16 +810,12 @@ def _validate_prompt_selection(value: Any, name: str) -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_PROMPT_SUITE_PATH",
-    "EVALUATION_PROTOCOL_SCHEMA",
     "EXPERIMENT_PROTOCOL_SCHEMA",
     "PROMPT_SUITE_SCHEMA",
     "PromptSelection",
-    "build_evaluation_protocol",
     "build_experiment_protocol",
     "canonical_sha256",
     "inline_prompt_selection",
     "load_prompt_suite",
-    "validate_protocol_binding",
-    "validate_evaluation_protocol",
     "validate_experiment_protocol",
 ]

@@ -16,18 +16,18 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.automatic_quality_contract import (  # noqa: E402
+from difflet.offline.cache_profile.quality import (  # noqa: E402
     METRICS,
     load_semantic_report,
     metric_identity,
     semantic_source,
+    sha256_file,
     validate_generation_identity,
 )
 from scripts.flux_cache_protocol import canonical_sha256  # noqa: E402
 from scripts.multires_quality_contract import (  # noqa: E402
     CONTRACT_SCHEMA,
     SCHEMA_REVISION,
-    sha256_file,
 )
 
 
