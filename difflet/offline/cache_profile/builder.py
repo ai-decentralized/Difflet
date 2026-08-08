@@ -67,7 +67,6 @@ _IMPLEMENTATION_PATHS = (
     ROOT / "difflet" / "pipeline" / "cache" / "recovery.py",
     ROOT / "difflet" / "pipeline" / "cache" / "runner.py",
     ROOT / "difflet" / "pipeline" / "cache" / "session.py",
-    ROOT / "difflet" / "pipeline" / "cache" / "spec.py",
     ROOT / "difflet" / "pipeline" / "cache" / "teacache_adapter.py",
     ROOT / "difflet" / "pipeline" / "cache" / "types.py",
     ROOT / "difflet" / "pipeline" / "difflet_pipeline.py",

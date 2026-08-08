@@ -208,8 +208,6 @@ def test_application_components_and_call():
         vae=types.SimpleNamespace(decoder="dec"),
     )
     inst.teacache_probe = None
-    inst._cache_plan = None
-    inst._cache_mask = None
     inst._teacache_cadence = None
     inst._teacache_online_delta_alpha = None
 
@@ -283,11 +281,6 @@ def test_probe_free_cache_uses_composable_runtime_and_explicit_recovery(
         decoder_config=types.SimpleNamespace(),
         pipeline_class=FakePipeline,
         teacache_cadence=1,
-        cache_recovery_warmup_steps=0,
-        cache_recovery_cooldown_steps=2,
-        cache_recovery_max_consecutive=1,
-        cache_recovery_steps=3,
-        cache_require_final_anchor=True,
     )
     session = instance._prepare_probe_free_teacache(
         prompt="cat",
@@ -302,53 +295,16 @@ def test_probe_free_cache_uses_composable_runtime_and_explicit_recovery(
     assert session.num_steps == 6
     assert session.runner.policy.calibration.shape_label == "768x512"
     recovery = session.runner.recovery.config
-    assert recovery.warmup_steps == 0
-    assert recovery.cooldown_steps == 2
-    assert recovery.max_consecutive_predictions == 1
-    assert recovery.recovery_steps == 3
+    assert recovery.warmup_steps == 5
+    assert recovery.cooldown_steps == 5
+    assert recovery.max_consecutive_predictions is None
+    assert recovery.recovery_steps == 1
     assert recovery.require_final_anchor is True
-
-
-def test_static_cache_configuration_installs_resolved_session_and_adapter():
-    import types
-
-    from difflet.pipeline.cache import (
-        QualityRecoveryConfig,
-        ResolvedCacheSession,
-    )
-
-    instance = object.__new__(app.NeuronFluxApplication)
-    instance._cache_plan = None
-    instance._cache_mask = (True, True, False, True)
-    instance._cache_predictor_spec = {
-        "type": "taylorseer",
-        "order": 1,
-        "coord": "index",
-    }
-    instance._cache_recovery_config = QualityRecoveryConfig(
-        require_final_anchor=True
-    )
-    instance.pipe = types.SimpleNamespace(
-        scheduler=types.SimpleNamespace(),
-        teacache_controller=None,
-    )
-    instance._request_identity = lambda *args, **kwargs: (4, 512, 512)
-
-    first = instance._prepare_cache_session(prompt="cat")
-    second = instance._prepare_cache_session(prompt="cat")
-
-    assert isinstance(first, ResolvedCacheSession)
-    assert isinstance(second, ResolvedCacheSession)
-    assert first is not second
-    assert instance.pipe.teacache_controller is None
-    assert first.config.anchor_mask == (True, True, False, True)
 
 
 def test_application_creates_a_fresh_session_for_each_request(monkeypatch):
     instance = object.__new__(app.NeuronFluxApplication)
-    instance._qualified_cache_profile = None
-    instance._cache_plan = "configured"
-    instance._cache_mask = None
+    instance._qualified_cache_profile = "configured"
     instance._teacache_cadence = None
     instance._teacache_online_delta_alpha = None
     sessions = [object(), object()]
@@ -370,8 +326,6 @@ def test_application_creates_a_fresh_session_for_each_request(monkeypatch):
 def test_application_accepts_explicit_session_only_without_configured_cache():
     instance = object.__new__(app.NeuronFluxApplication)
     instance._qualified_cache_profile = None
-    instance._cache_plan = None
-    instance._cache_mask = None
     instance._teacache_cadence = None
     instance._teacache_online_delta_alpha = None
     received = {}
@@ -381,16 +335,17 @@ def test_application_accepts_explicit_session_only_without_configured_cache():
     instance(prompt="cat", cache_session=session)
     assert received["cache_session"] is session
 
-    instance._cache_plan = "configured"
+    instance._qualified_cache_profile = "configured"
     with pytest.raises(ValueError, match="explicit cache_session"):
         instance(prompt="cat", cache_session=object())
 
 
 def test_flux_pipeline_wraps_explicit_session_without_shared_state(monkeypatch):
     from difflet.pipeline.cache import (
-        ResolvedCacheSession,
+        CacheRunner,
+        CacheSession,
+        PhasedStaticPolicy,
         TaylorSeerPredictor,
-        resolve_cache_config,
     )
 
     pipe = object.__new__(app.NeuronFluxPipeline)
@@ -408,12 +363,14 @@ def test_flux_pipeline_wraps_explicit_session_without_shared_state(monkeypatch):
         return "image"
 
     monkeypatch.setattr(app.NeuronFluxPipeline, "_call_with_teacache", fake_teacache)
-    resolved = resolve_cache_config(
+    session = CacheSession(
+        CacheRunner(
+            PhasedStaticPolicy((True, True, True)),
+            TaylorSeerPredictor(order=1),
+        ),
         num_steps=3,
-        mask=(True, True, True),
-        predictor=TaylorSeerPredictor(order=1),
+        configuration_source="test",
     )
-    session = ResolvedCacheSession(resolved)
 
     assert pipe(prompt="cat", cache_session=session) == "image"
     assert captured[0].session is session

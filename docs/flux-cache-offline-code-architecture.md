@@ -1,8 +1,7 @@
 # FLUX cache-profile offline code architecture
 
-Status: implemented for the non-serving control plane. Request-time loading,
-session ownership, controller fast paths, and Taylor coefficient caching are
-explicitly outside this change.
+Status: implemented for the offline control plane and the qualified FLUX runtime
+boundary. Serving integration remains separate.
 
 ## Purpose
 
@@ -114,3 +113,27 @@ pipeline. The request-time controller uses only the scalar Taylor anchor-error
 path in `difflet.pipeline.cache.control_error`; research telemetry, latent
 clones, measurement sinks, and JSON measurement reports are not part of the
 qualified runtime.
+
+Qualified profiles are the only supported FLUX profile artifact at request time.
+The profile and its paired qualification are loaded together, validated against
+the runtime model, scheduler, shape, and generation settings, and used to build a
+fresh request-scoped `CacheSession`.
+
+## Breaking runtime migration
+
+The generic `difflet-cache-plan-v1` and `difflet-cache-mask-v1` artifacts and
+their CLI and application arguments are retired. Their policy factory,
+configuration resolver, `ResolvedCacheSession`, periodic schedule, explicit-mask
+schedule, and adaptive-interval research policy are no longer runtime APIs.
+
+Callers must migrate to a paired qualified profile:
+
+```text
+--cache-profile-file PROFILE.json
+--cache-profile-qualification-file QUALIFICATION.json
+```
+
+The older TeaCache cadence, online-delta, and calibrated-speedup entry points are
+kept as a separate compatibility path for model families that have not migrated
+to qualified profiles. They do not confer a FLUX quality qualification and cannot
+be combined with a qualified profile.

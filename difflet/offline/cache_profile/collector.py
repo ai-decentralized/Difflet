@@ -333,19 +333,24 @@ def load_pipeline(args: argparse.Namespace):
 
 def build_baseline_adapter(num_steps: int):
     from difflet.pipeline.cache import (
-        ResolvedCacheSession,
+        CacheRunner,
+        CacheSession,
+        PhasedStaticPolicy,
         TaylorSeerPredictor,
         TeaCacheControllerAdapter,
-        resolve_cache_config,
     )
 
-    resolved = resolve_cache_config(
+    session = CacheSession(
+        CacheRunner(
+            PhasedStaticPolicy((True,) * num_steps),
+            TaylorSeerPredictor(order=1),
+        ),
         num_steps=num_steps,
-        mask=(True,) * num_steps,
-        predictor=TaylorSeerPredictor(order=1),
-        require_final_anchor=True,
+        configuration_source="full-compute-baseline",
+        planned_anchor_steps=num_steps,
+        planned_estimate_steps=0,
     )
-    return TeaCacheControllerAdapter(ResolvedCacheSession(resolved))
+    return TeaCacheControllerAdapter(session)
 
 
 def collect_confirmation(

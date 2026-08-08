@@ -17,11 +17,6 @@ def _flux_args(**overrides) -> argparse.Namespace:
         teacache_cadence=None, teacache_online_delta=None,
         teacache_speedup=None, teacache_calibration=None,
         cache_profile_file=None, cache_profile_qualification_file=None,
-        cache_plan_file=None, cache_mask_file=None, cache_predictor=None,
-        cache_predictor_order=None, cache_predictor_coord=None,
-        cache_recovery_warmup=None, cache_recovery_cooldown=None,
-        cache_recovery_max_consecutive=None, cache_recovery_steps=None,
-        cache_require_final_anchor=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -99,28 +94,6 @@ def test_qualified_cache_profile_is_forwarded_to_application():
     assert kwargs["application_kwargs"] == {
         "cache_profile_file": "/profile.json",
         "cache_profile_qualification_file": "/qualification.json",
-    }
-
-
-def test_teacache_kwargs_threads_independent_recovery_controls():
-    orch = FluxOrchestrator(
-        _flux_args(
-            teacache_cadence=2,
-            cache_recovery_warmup=0,
-            cache_recovery_cooldown=4,
-            cache_recovery_max_consecutive=1,
-            cache_recovery_steps=2,
-            cache_require_final_anchor=True,
-        )
-    )
-    app = orch._teacache_kwargs()["application_kwargs"]
-    assert app == {
-        "teacache_cadence": 2,
-        "cache_recovery_warmup_steps": 0,
-        "cache_recovery_cooldown_steps": 4,
-        "cache_recovery_max_consecutive": 1,
-        "cache_recovery_steps": 2,
-        "cache_require_final_anchor": True,
     }
 
 

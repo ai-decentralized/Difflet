@@ -149,16 +149,6 @@ class FluxOrchestrator(ModelOrchestrator):
         cache_arg_map = {
             "cache_profile_file": "cache_profile_file",
             "cache_profile_qualification_file": "cache_profile_qualification_file",
-            "cache_plan_file": "cache_plan_file",
-            "cache_mask_file": "cache_mask_file",
-            "cache_predictor": "cache_predictor",
-            "cache_predictor_order": "cache_predictor_order",
-            "cache_predictor_coord": "cache_predictor_coord",
-            "cache_recovery_warmup": "cache_recovery_warmup_steps",
-            "cache_recovery_cooldown": "cache_recovery_cooldown_steps",
-            "cache_recovery_max_consecutive": "cache_recovery_max_consecutive",
-            "cache_recovery_steps": "cache_recovery_steps",
-            "cache_require_final_anchor": "cache_require_final_anchor",
         }
         for argument, application_key in cache_arg_map.items():
             value = getattr(self.args, argument, None)

@@ -6,10 +6,8 @@ import torch
 from difflet.pipeline.cache import (
     CacheRunner,
     CacheStepContext,
-    CadencePolicy,
-    ExplicitMaskPolicy,
     LegacyResidualPredictor,
-    PeriodicAnchorPolicy,
+    PhasedStaticPolicy,
     QualityRecoveryConfig,
     QualityRecoveryGuard,
     RecoveryDecision,
@@ -25,9 +23,17 @@ def _ctx(index: int, steps: int, *, barrier: bool = False) -> CacheStepContext:
     )
 
 
+class AlwaysSkipPolicy:
+    def should_skip(self, context, history, observation):
+        return True
+
+    def reset(self):
+        return None
+
+
 def test_predictions_never_enter_true_anchor_history():
     runner = CacheRunner(
-        ExplicitMaskPolicy([True, True, False, False, True]),
+        PhasedStaticPolicy([True, True, False, False, True]),
         TaylorSeerPredictor(order=1),
     )
     values = []
@@ -46,7 +52,10 @@ def test_predictions_never_enter_true_anchor_history():
 
 
 def test_readiness_rejection_forces_real_anchors():
-    runner = CacheRunner(CadencePolicy(cadence=1), TaylorSeerPredictor(order=1))
+    runner = CacheRunner(
+        PhasedStaticPolicy([False, False, False]),
+        TaylorSeerPredictor(order=1),
+    )
     decisions = []
     for index in range(3):
         context = _ctx(index, 3)
@@ -61,13 +70,6 @@ def test_readiness_rejection_forces_real_anchors():
 
 
 def test_predictor_consecutive_limit_vetoes_dynamic_second_skip():
-    class AlwaysSkipPolicy:
-        def should_skip(self, context, history, observation):
-            return True
-
-        def reset(self):
-            return None
-
     runner = CacheRunner(AlwaysSkipPolicy(), LegacyResidualPredictor())
     reasons = []
     for index in range(4):
@@ -89,7 +91,7 @@ def test_predictor_consecutive_limit_vetoes_dynamic_second_skip():
 
 def test_barrier_invalidates_history_and_rebuilds_readiness():
     runner = CacheRunner(
-        ExplicitMaskPolicy([True, True, False, True, True, False]),
+        PhasedStaticPolicy([True, True, False, True, True, False]),
         TaylorSeerPredictor(order=1),
     )
     reasons = []
@@ -114,7 +116,7 @@ def test_barrier_invalidates_history_and_rebuilds_readiness():
 
 def test_quality_recovery_request_forces_fresh_anchor_window_and_history_reset():
     runner = CacheRunner(
-        CadencePolicy(cadence=1),
+        PhasedStaticPolicy([False] * 5),
         TaylorSeerPredictor(order=1),
         recovery=QualityRecoveryGuard(QualityRecoveryConfig(recovery_steps=2)),
     )
@@ -141,12 +143,12 @@ def test_quality_recovery_request_forces_fresh_anchor_window_and_history_reset()
     assert stats["recovery_forced_steps"] == 2
 
 
-def test_quality_consecutive_bound_can_safely_wrap_legacy_cadence_one():
+def test_quality_consecutive_bound_can_wrap_a_dynamic_policy():
     recovery = QualityRecoveryGuard(
         QualityRecoveryConfig(max_consecutive_predictions=1)
     )
     runner = CacheRunner(
-        CadencePolicy(cadence=1),
+        AlwaysSkipPolicy(),
         LegacyResidualPredictor(),
         recovery=recovery,
     )
@@ -169,7 +171,10 @@ def test_quality_consecutive_bound_can_safely_wrap_legacy_cadence_one():
 
 
 def test_runner_rejects_bypassing_or_abandoning_a_decision():
-    runner = CacheRunner(CadencePolicy(cadence=1), TaylorSeerPredictor(order=1))
+    runner = CacheRunner(
+        PhasedStaticPolicy([False, False, False]),
+        TaylorSeerPredictor(order=1),
+    )
     with pytest.raises(RuntimeError, match="accepted skip decision"):
         runner.predict(_ctx(0, 3))
 
@@ -181,16 +186,17 @@ def test_runner_rejects_bypassing_or_abandoning_a_decision():
         runner.record_anchor(_ctx(1, 3), torch.tensor([1.0]))
 
 
-def test_runner_lifts_policy_windows_into_default_recovery_guard():
+def test_runner_applies_explicit_recovery_windows():
     runner = CacheRunner(
-        PeriodicAnchorPolicy(
-            anchor_interval=3,
-            anchor_phase=1,
-            warmup_steps=2,
-            cooldown_steps=1,
-            require_final_anchor=True,
-        ),
+        PhasedStaticPolicy([False] * 6),
         TaylorSeerPredictor(order=1),
+        recovery=QualityRecoveryGuard(
+            QualityRecoveryConfig(
+                warmup_steps=2,
+                cooldown_steps=1,
+                require_final_anchor=True,
+            )
+        ),
     )
     reasons = []
     for index in range(6):
@@ -227,7 +233,7 @@ def test_runner_rejects_malformed_custom_recovery_result():
             return None
 
     runner = CacheRunner(
-        ExplicitMaskPolicy([True]),
+        PhasedStaticPolicy([True]),
         TaylorSeerPredictor(order=1),
         recovery=MalformedRecovery(),
     )
@@ -240,8 +246,9 @@ def test_overlapping_recovery_windows_are_safe_full_compute():
     assert config.apply_to_anchor_mask((False,) * 5) == (True,) * 5
 
     runner = CacheRunner(
-        CadencePolicy(cadence=2, warmup_steps=3, cooldown_steps=3),
-        LegacyResidualPredictor(),
+        PhasedStaticPolicy([False] * 5),
+        TaylorSeerPredictor(order=1),
+        recovery=QualityRecoveryGuard(config),
     )
     reasons = []
     for index in range(5):
@@ -261,7 +268,7 @@ def test_overlapping_recovery_windows_are_safe_full_compute():
 
 def test_barrier_preserves_pending_recovery_and_cumulative_metrics():
     runner = CacheRunner(
-        ExplicitMaskPolicy([True, True, True]),
+        PhasedStaticPolicy([True, True, True]),
         TaylorSeerPredictor(order=1),
     )
     first = _ctx(0, 3)

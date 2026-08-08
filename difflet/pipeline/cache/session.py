@@ -6,7 +6,6 @@ import math
 from typing import Any
 
 from difflet.pipeline.cache.runner import CacheRunner
-from difflet.pipeline.cache.spec import ResolvedCacheConfig
 from difflet.pipeline.cache.types import CacheDecision, CacheStepContext
 
 
@@ -266,24 +265,4 @@ class CacheSession:
         return statistics
 
 
-class ResolvedCacheSession(CacheSession):
-    """Create a request session from a fully validated static cache config."""
-
-    def __init__(
-        self,
-        config: ResolvedCacheConfig,
-    ) -> None:
-        if not isinstance(config, ResolvedCacheConfig):
-            raise TypeError("ResolvedCacheSession requires a ResolvedCacheConfig")
-        self.config = config
-        super().__init__(
-            config.build_runner(),
-            num_steps=config.num_steps,
-            configuration_source=config.source,
-            barrier_steps=config.barrier_steps,
-            planned_anchor_steps=config.planned_anchor_steps,
-            planned_estimate_steps=config.planned_skip_steps,
-        )
-
-
-__all__ = ["CacheSession", "ResolvedCacheSession"]
+__all__ = ["CacheSession"]

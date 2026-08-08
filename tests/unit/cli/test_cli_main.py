@@ -52,39 +52,8 @@ def test_valid_generate_routes_to_orchestrator(monkeypatch):
     assert calls == ["generate"]
 
 
-def test_recovery_controls_compose_with_probe_free_cadence(monkeypatch):
-    cli = _cli()
-    calls = []
-
-    class FakeOrch:
-        def generate(self):
-            calls.append("generate")
-
-    monkeypatch.setattr(cli, "_get_orchestrator", lambda args: FakeOrch())
-    cli.main(
-        [
-            "generate",
-            "--model-id",
-            "black-forest-labs/FLUX.1-dev",
-            "--prompt",
-            "x",
-            "--output",
-            "o.png",
-            "--teacache-cadence",
-            "2",
-            "--cache-recovery-warmup",
-            "0",
-            "--cache-recovery-cooldown",
-            "3",
-            "--cache-recovery-max-consecutive",
-            "1",
-            "--cache-require-final-anchor",
-        ]
-    )
-    assert calls == ["generate"]
-
-
-def test_recovery_controls_require_a_supported_cache_schedule(capsys):
+@pytest.mark.parametrize("flag", ["--cache-plan-file", "--cache-mask-file"])
+def test_retired_cache_artifact_flags_are_rejected(flag, capsys):
     cli = _cli()
     with pytest.raises(SystemExit) as exc:
         cli.main(
@@ -96,36 +65,12 @@ def test_recovery_controls_require_a_supported_cache_schedule(capsys):
                 "x",
                 "--output",
                 "o.png",
-                "--cache-recovery-warmup",
-                "2",
+                flag,
+                "retired.json",
             ]
         )
-    assert exc.value.code == 1
-    assert "require --cache-mask-file" in capsys.readouterr().err
-
-
-def test_recovery_controls_reject_calibrated_teacache(capsys):
-    cli = _cli()
-    with pytest.raises(SystemExit) as exc:
-        cli.main(
-            [
-                "generate",
-                "--model-id",
-                "black-forest-labs/FLUX.1-dev",
-                "--prompt",
-                "x",
-                "--output",
-                "o.png",
-                "--teacache-speedup",
-                "1.5",
-                "--teacache-calibration",
-                "calibration.json",
-                "--cache-recovery-cooldown",
-                "2",
-            ]
-        )
-    assert exc.value.code == 1
-    assert "not supported by calibrated TeaCache" in capsys.readouterr().err
+    assert exc.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
 
 
 def test_qualified_cache_profile_requires_paired_qualification(capsys):

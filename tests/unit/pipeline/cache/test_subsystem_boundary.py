@@ -45,8 +45,10 @@ def test_cache_core_has_no_host_or_hardware_imports():
 def test_removed_controller_classes_are_not_public_api():
     assert not hasattr(cache_api, "CacheRuntimeController")
     assert not hasattr(cache_api, "CachePlanController")
+    assert not hasattr(cache_api, "CachePlan")
+    assert not hasattr(cache_api, "CacheMask")
+    assert not hasattr(cache_api, "ResolvedCacheSession")
     assert cache_api.CacheSession.__name__ == "CacheSession"
-    assert cache_api.ResolvedCacheSession.__name__ == "ResolvedCacheSession"
     assert cache_api.TeaCacheControllerAdapter.__name__ == "TeaCacheControllerAdapter"
 
 

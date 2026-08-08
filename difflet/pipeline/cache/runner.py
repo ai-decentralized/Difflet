@@ -324,31 +324,11 @@ def _validate_static_pair(
         # predictor's mathematical limit can be exceeded.
         return
     from difflet.pipeline.cache.policies import (
-        CadencePolicy,
-        ExplicitMaskPolicy,
         PhasedStaticPolicy,
-        PeriodicAnchorPolicy,
         StaticPlusBrakePolicy,
         TeaCachePolicy,
     )
 
-    if isinstance(policy, CadencePolicy) and policy.cadence == 1:
-        raise ValueError(
-            "cadence=1 requests unbounded consecutive skips, but the predictor "
-            f"supports at most {maximum}"
-        )
-    if isinstance(policy, PeriodicAnchorPolicy) and policy.anchor_interval - 1 > maximum:
-        raise ValueError(
-            f"periodic policy can request {policy.anchor_interval - 1} consecutive skips, "
-            f"but the predictor supports at most {maximum}"
-        )
-    if isinstance(policy, ExplicitMaskPolicy):
-        run = _longest_false_run(policy.anchor_mask)
-        if run > maximum:
-            raise ValueError(
-                f"explicit mask requests {run} consecutive skips, "
-                f"but the predictor supports at most {maximum}"
-            )
     if isinstance(policy, (PhasedStaticPolicy, StaticPlusBrakePolicy)):
         run = _longest_false_run(policy.anchor_mask)
         if run > maximum:

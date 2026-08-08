@@ -142,11 +142,10 @@ Constraints:
   authority ends outside the plastic window, but invalid-measurement handling and
   the global fuse remain active.
 
-`AdaptiveAnchorPolicy._schedule_after_anchor` in
-`difflet/pipeline/cache/policies.py` currently resets `_next_anchor_step` to
-`step + interval` after every anchor. A static anchor therefore cannot be injected
-into its single movable deadline. The combined implementation must maintain
-separate static and dynamic state.
+The retired `AdaptiveAnchorPolicy` reset its single movable deadline to
+`step + interval` after every anchor. That design could not accept a static anchor
+without also moving the dynamic schedule. `StaticPlusBrakePolicy` replaces it with
+separate immutable static and bounded dynamic state.
 
 Existing thresholds are not inherited. The brake-only values
 `tighten_error=1.19` and `recovery_error=1.50` were selected under an interval
@@ -309,8 +308,7 @@ keeps both metrics as independent vetoes.
 
 ### B1. Combined policy
 
-Implement `PhasedStaticPolicy` (or `ExplicitMaskPolicy`) and
-`StaticPlusBrakePolicy`:
+Implement `PhasedStaticPolicy` and `StaticPlusBrakePolicy`:
 
 - the static stream is read-only and materialized from candidate JSON;
 - the dynamic stream implements a tighten deadline and consecutive recovery;

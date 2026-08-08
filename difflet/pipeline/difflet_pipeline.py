@@ -249,16 +249,6 @@ def _cache_application_kwargs(application_kwargs: dict[str, Any] | None) -> dict
     cache_kwargs.pop("teacache_cadence", None)
     cache_kwargs.pop("teacache_online_delta_alpha", None)
     for runtime_key in (
-        "cache_plan_file",
-        "cache_mask_file",
-        "cache_predictor",
-        "cache_predictor_order",
-        "cache_predictor_coord",
-        "cache_recovery_warmup_steps",
-        "cache_recovery_cooldown_steps",
-        "cache_recovery_max_consecutive",
-        "cache_recovery_steps",
-        "cache_require_final_anchor",
         "cache_profile_file",
         "cache_profile_qualification_file",
         "cache_runtime_model_id",
