@@ -1,0 +1,173 @@
+{
+  "schema": "difflet-flux-cache-prompt-suite-v1",
+  "suite_id": "flux-cache-qualified-profile-confirmation-20260808",
+  "source": {
+    "created_at": "2026-08-08",
+    "origin": "Prospective holdout written before collection",
+    "selection": "No exact calibration or prior-confirmation prompt overlap; eight semantic categories with four prompts each"
+  },
+  "splits": {
+    "qualified_profile_confirmation": [
+      {
+        "prompt_id": "qualified-confirm-001",
+        "category": "counting",
+        "text": "exactly seven green pears arranged in a circle around one small copper cup"
+      },
+      {
+        "prompt_id": "qualified-confirm-002",
+        "category": "counting",
+        "text": "four white candles on the left tray and two purple candles on the right tray"
+      },
+      {
+        "prompt_id": "qualified-confirm-003",
+        "category": "counting",
+        "text": "nine wooden blocks stacked as three equal towers on a classroom table"
+      },
+      {
+        "prompt_id": "qualified-confirm-004",
+        "category": "counting",
+        "text": "five red kayaks and one yellow canoe pulled onto a rocky riverbank"
+      },
+      {
+        "prompt_id": "qualified-confirm-005",
+        "category": "spatial-relation",
+        "text": "a blue suitcase under a wooden desk and a red umbrella leaning against its right side"
+      },
+      {
+        "prompt_id": "qualified-confirm-006",
+        "category": "spatial-relation",
+        "text": "a black cat seated between two flowerpots with a watering can behind the left pot"
+      },
+      {
+        "prompt_id": "qualified-confirm-007",
+        "category": "spatial-relation",
+        "text": "a narrow footbridge above a stream with a red tent visible beyond the bridge"
+      },
+      {
+        "prompt_id": "qualified-confirm-008",
+        "category": "spatial-relation",
+        "text": "a brass telescope pointing over a balcony while a folded map lies directly beneath it"
+      },
+      {
+        "prompt_id": "qualified-confirm-009",
+        "category": "attribute-binding",
+        "text": "a tall teal bottle with a silver cap beside a short amber bottle with a cork cap"
+      },
+      {
+        "prompt_id": "qualified-confirm-010",
+        "category": "attribute-binding",
+        "text": "a white dog wearing a blue scarf and a brown dog wearing an orange scarf"
+      },
+      {
+        "prompt_id": "qualified-confirm-011",
+        "category": "attribute-binding",
+        "text": "a glossy red helmet on a matte black chair beside a striped green bag"
+      },
+      {
+        "prompt_id": "qualified-confirm-012",
+        "category": "attribute-binding",
+        "text": "a tiny golden bird carrying a violet ribbon above a large gray stone"
+      },
+      {
+        "prompt_id": "qualified-confirm-013",
+        "category": "text-rendering",
+        "text": "a railway platform sign displaying NORTH GATE in crisp yellow capital letters"
+      },
+      {
+        "prompt_id": "qualified-confirm-014",
+        "category": "text-rendering",
+        "text": "a white enamel mug printed with the phrase START HERE in dark blue letters"
+      },
+      {
+        "prompt_id": "qualified-confirm-015",
+        "category": "text-rendering",
+        "text": "a theater marquee reading ONE NIGHT ONLY above three closed red doors"
+      },
+      {
+        "prompt_id": "qualified-confirm-016",
+        "category": "text-rendering",
+        "text": "a cardboard parcel labeled ROOM 12 and HANDLE WITH CARE in black ink"
+      },
+      {
+        "prompt_id": "qualified-confirm-017",
+        "category": "interaction",
+        "text": "a baker passing a round loaf to a cyclist waiting beside a market stall"
+      },
+      {
+        "prompt_id": "qualified-confirm-018",
+        "category": "interaction",
+        "text": "a violin teacher adjusting a young musician's bow hand in a bright studio"
+      },
+      {
+        "prompt_id": "qualified-confirm-019",
+        "category": "interaction",
+        "text": "two hikers unfolding a paper map together beside a wooden trail marker"
+      },
+      {
+        "prompt_id": "qualified-confirm-020",
+        "category": "interaction",
+        "text": "a nurse fastening a green bandage around a seated athlete's left wrist"
+      },
+      {
+        "prompt_id": "qualified-confirm-021",
+        "category": "fine-detail",
+        "text": "a macro photograph of a blue butterfly wing showing scales and branching veins"
+      },
+      {
+        "prompt_id": "qualified-confirm-022",
+        "category": "fine-detail",
+        "text": "an antique compass opened to reveal engraved degree marks and a thin red needle"
+      },
+      {
+        "prompt_id": "qualified-confirm-023",
+        "category": "fine-detail",
+        "text": "a close view of a knitted snowflake pattern with clearly separated blue and white loops"
+      },
+      {
+        "prompt_id": "qualified-confirm-024",
+        "category": "fine-detail",
+        "text": "a tiny botanical illustration with labeled leaves, roots, seeds, and delicate ink lines"
+      },
+      {
+        "prompt_id": "qualified-confirm-025",
+        "category": "scene-composition",
+        "text": "a coastal village at sunrise with a harbor wall, clustered houses, and cliffs in the distance"
+      },
+      {
+        "prompt_id": "qualified-confirm-026",
+        "category": "scene-composition",
+        "text": "a busy greenhouse interior with a central aisle, hanging plants, and workers near the far door"
+      },
+      {
+        "prompt_id": "qualified-confirm-027",
+        "category": "scene-composition",
+        "text": "an old university courtyard framed by stone arches with a fountain at the center"
+      },
+      {
+        "prompt_id": "qualified-confirm-028",
+        "category": "scene-composition",
+        "text": "a desert research camp at twilight with two tents, solar panels, and mountains on the horizon"
+      },
+      {
+        "prompt_id": "qualified-confirm-029",
+        "category": "material-texture",
+        "text": "a crumpled silk ribbon across coarse burlap beside a smooth porcelain tile"
+      },
+      {
+        "prompt_id": "qualified-confirm-030",
+        "category": "material-texture",
+        "text": "a rusty iron key resting on polished walnut wood next to a clear acrylic cube"
+      },
+      {
+        "prompt_id": "qualified-confirm-031",
+        "category": "material-texture",
+        "text": "a soft wool mitten touching cracked blue paint and a wet river stone"
+      },
+      {
+        "prompt_id": "qualified-confirm-032",
+        "category": "material-texture",
+        "text": "a sheet of hammered copper beside translucent rice paper and dark braided rope"
+      }
+    ]
+  }
+}
