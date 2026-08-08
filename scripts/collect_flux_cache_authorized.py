@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Run legacy FLUX collectors under one frozen execution-scope policy.
+"""Run FLUX profile collection under one frozen execution-scope policy.
 
-This wrapper deliberately leaves the evidence-bound collectors unchanged. It
-validates the complete hardware request first, injects their legacy foreground
-acknowledgement internally, and writes a policy-bound authorization record only
-after collection succeeds.
+The confirmation command accepts exactly one frozen cache profile. It validates
+the complete hardware request before invoking the minimal paired collector and
+writes a policy-bound authorization record only after collection succeeds.
 """
 
 from __future__ import annotations
@@ -18,18 +17,17 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from difflet.offline.cache_profile import collector as confirmation_collector  # noqa: E402
+from difflet.pipeline.cache.profile import load_phased_candidates  # noqa: E402
 from scripts import collect_flux_baseline_calibration as baseline_collector  # noqa: E402
-from scripts import collect_flux_cache_ab as ab_collector  # noqa: E402
 from scripts.flux_cache_execution_policy import (  # noqa: E402
-    ExecutionRequest,
     PROFILE_STAGES,
+    ExecutionRequest,
     authorize_execution,
     write_authorization_record,
 )
-from scripts.flux_cache_phased_candidate import load_phased_candidates  # noqa: E402
 from scripts.flux_cache_protocol import load_prompt_suite  # noqa: E402
 from scripts.multires_quality_contract import bucket_for, load_protocol  # noqa: E402
-
 
 _LEGACY_AUTH_FLAGS = {"--allow-hardware", "--foreground-ack"}
 
@@ -51,9 +49,9 @@ def _authorize_ab(
     backend: str,
     product_name: str,
 ) -> dict[str, Any]:
-    prompt_selection = ab_collector._select_prompts(args)
-    seeds = tuple(ab_collector.DEFAULT_SEEDS if args.seed is None else args.seed)
-    samples = ab_collector._sample_matrix(prompt_selection.prompts, seeds)
+    prompt_selection = confirmation_collector.select_prompts(args)
+    seeds = tuple(confirmation_collector.DEFAULT_SEEDS if args.seed is None else args.seed)
+    samples = confirmation_collector.sample_matrix(prompt_selection.prompts, seeds)
     return authorize_execution(
         policy_path,
         ExecutionRequest(
@@ -78,50 +76,25 @@ def _collect_ab(
     wrapper_args: argparse.Namespace,
     remaining: Sequence[str],
 ) -> tuple[Path, Path]:
-    if wrapper_args.execution_stage == "baseline_calibration":
-        raise ValueError("the ab command cannot use the baseline_calibration stage")
+    if wrapper_args.execution_stage != "confirmation":
+        raise ValueError("the ab command is restricted to the confirmation stage")
     _reject_legacy_authorization(remaining)
-    args = ab_collector._parse_args(
-        [
-            *remaining,
-            "--allow-hardware",
-            "--foreground-ack",
-            ab_collector.FOREGROUND_ACK,
-        ]
-    )
-    if args.model_revision is None:
-        raise ValueError("scoped hardware execution requires an exact --model-revision")
+    args = confirmation_collector.parse_confirmation_args(remaining)
 
     phased_paths = tuple(wrapper_args.phased_candidate or ())
-    if phased_paths:
-        if (
-            args.candidate_ladder is not None
-            or args.adaptive_candidate
-            or args.adaptive_only
-            or args.warmup_steps is not None
-            or args.anchor_intervals is not None
-            or args.orders is not None
-            or args.coord is not None
-        ):
-            raise ValueError("--phased-candidate cannot be combined with legacy candidate flags")
-        arms = load_phased_candidates(phased_paths)
-    else:
-        arms = ab_collector.select_candidate_arms(args)
+    if len(phased_paths) != 1:
+        raise ValueError("confirmation requires exactly one --phased-candidate")
+    arm = load_phased_candidates(phased_paths)[0]
 
     authorization = _authorize_ab(
         policy_path=Path(wrapper_args.execution_policy),
         stage=wrapper_args.execution_stage,
         args=args,
-        arms=arms,
+        arms=(arm,),
         backend=wrapper_args.hardware_backend,
         product_name=wrapper_args.hardware_product,
     )
-    original_selector = ab_collector.select_candidate_arms
-    ab_collector.select_candidate_arms = lambda _args: tuple(arms)
-    try:
-        result = ab_collector.collect(args)
-    finally:
-        ab_collector.select_candidate_arms = original_selector
+    result = confirmation_collector.collect_confirmation(args, arm)
     record_path = write_authorization_record(Path(args.out_dir), authorization)
     print(f"[scoped-hardware] authorization record: {record_path}", flush=True)
     return result
@@ -152,7 +125,10 @@ def _collect_baseline(
         (ROOT / prompt_binding["path"]).resolve(),
         prompt_binding["split"],
     )
-    samples = ab_collector._sample_matrix(prompt_selection.prompts, prompt_binding["seeds"])
+    samples = confirmation_collector.sample_matrix(
+        prompt_selection.prompts,
+        prompt_binding["seeds"],
+    )
     controlled = registration["controlled_generation"]
     authorization = authorize_execution(
         Path(wrapper_args.execution_policy),

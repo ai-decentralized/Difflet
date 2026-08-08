@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import scripts.flux_cache_protocol as protocol_module
-from scripts.collect_flux_cache_ab import _select_prompts
+from difflet.offline.cache_profile.collector import select_prompts
 from scripts.flux_cache_protocol import (
     DEFAULT_PROMPT_SUITE_PATH,
     EVALUATION_PROTOCOL_SCHEMA,
@@ -18,8 +18,8 @@ from scripts.flux_cache_protocol import (
     build_experiment_protocol,
     canonical_sha256,
     load_prompt_suite,
-    validate_experiment_protocol,
     validate_evaluation_protocol,
+    validate_experiment_protocol,
     validate_protocol_binding,
 )
 
@@ -171,14 +171,15 @@ def test_boundary_pilot_protocol_binds_prompt_and_candidate_digests():
     assert ladder["sha256"] == canonical_sha256(ladder_payload)
     assert protocol["prompt_suite"]["split_sha256"] == selection.descriptor["sha256"]
     assert protocol["candidate_ladder"]["content_sha256"] == ladder["sha256"]
-    assert protocol["candidate_ladder"]["file_sha256"] == hashlib.sha256(
-        ladder_path.read_bytes()
-    ).hexdigest()
+    assert (
+        protocol["candidate_ladder"]["file_sha256"]
+        == hashlib.sha256(ladder_path.read_bytes()).hexdigest()
+    )
     assert protocol["collection"]["expected_unique_image_count"] == 80
 
 
 def test_collector_defaults_to_the_versioned_legacy_parity_split():
-    selection = _select_prompts(
+    selection = select_prompts(
         SimpleNamespace(
             prompt_suite=None,
             prompt_split="legacy_parity",

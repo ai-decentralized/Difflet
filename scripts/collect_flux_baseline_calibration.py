@@ -15,14 +15,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.collect_flux_cache_ab import (
-    _build_baseline_adapter,
-    _extract_image,
-    _load_pipeline,
-    _prepare_output_directory,
-    _sample_matrix,
-    _utc_now,
-    _write_json,
+from difflet.offline.cache_profile.collector import (
+    build_baseline_adapter,
+    extract_image,
+    load_pipeline,
+    prepare_output_directory,
+    sample_matrix,
+    utc_now,
+    write_json,
 )
 from scripts.flux_cache_protocol import (
     build_experiment_protocol,
@@ -37,7 +37,6 @@ from scripts.multires_quality_contract import (
     sha256_file,
     validate_observed_generation,
 )
-
 
 BASELINE_FOREGROUND_ACK = "I am running FLUX multires baseline calibration"
 
@@ -72,7 +71,7 @@ def _run_baseline_sample(
     elapsed = time.perf_counter() - started
     if not math.isfinite(elapsed) or elapsed <= 0.0:
         raise RuntimeError("pipeline returned an invalid wall-clock duration")
-    image = _extract_image(result)
+    image = extract_image(result)
     image_path = output_root / "artifacts" / "baseline" / f"{sample['sample_id']}.png"
     image_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(image_path)
@@ -104,10 +103,10 @@ def collect(args: argparse.Namespace) -> Path:
     prompt_binding = bucket["prompt_suite"]
     prompt_path = (ROOT / prompt_binding["path"]).resolve()
     prompt_selection = load_prompt_suite(prompt_path, prompt_binding["split"])
-    samples = _sample_matrix(prompt_selection.prompts, prompt_binding["seeds"])
+    samples = sample_matrix(prompt_selection.prompts, prompt_binding["seeds"])
     output_root = Path(args.out_dir).expanduser().resolve()
-    _prepare_output_directory(output_root)
-    started_at = _utc_now()
+    prepare_output_directory(output_root)
+    started_at = utc_now()
 
     controlled = registration["controlled_generation"]
     pipeline_args = argparse.Namespace(
@@ -122,11 +121,11 @@ def collect(args: argparse.Namespace) -> Path:
         skip_warmup=bool(args.skip_warmup),
         collect_online_signals=False,
     )
-    pipe = _load_pipeline(pipeline_args)
+    pipe = load_pipeline(pipeline_args)
     flux_pipeline = pipe.app.pipe
     flux_pipeline._tc_record = False
     flux_pipeline._tc_output_dynamics_record = False
-    adapter = _build_baseline_adapter(controlled["num_steps"])
+    adapter = build_baseline_adapter(controlled["num_steps"])
     flux_pipeline.teacache_controller = adapter
     experiment = build_experiment_protocol(
         pipe=pipe,
@@ -182,12 +181,12 @@ def collect(args: argparse.Namespace) -> Path:
         "bucket_id": args.bucket_id,
         "python_source_sha256": registered_source,
         "started_at": started_at,
-        "completed_at": _utc_now(),
+        "completed_at": utc_now(),
         "protocol": experiment,
         "baseline_samples": rows,
     }
     manifest_path = output_root / "baseline-calibration-manifest-v1.json"
-    _write_json(manifest_path, manifest)
+    write_json(manifest_path, manifest)
     print(f"[flux-baseline-calibration] manifest -> {manifest_path}", flush=True)
     return manifest_path
 

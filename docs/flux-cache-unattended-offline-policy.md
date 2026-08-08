@@ -1,8 +1,8 @@
 # Unattended FLUX cache-profile execution policy
 
-Status: implemented for the hardware collectors used by offline profile
-calibration and screening. Legacy foreground acknowledgement flags remain only
-for replaying older registrations.
+Status: implemented for baseline calibration and independent profile
+confirmation. Exploratory screening collectors are archived at commit
+`de2a415`.
 
 ## One-time scoped hardware authorization
 
@@ -41,15 +41,15 @@ python scripts/flux_cache_execution_policy.py \
   --out /path/to/execution-policy.json
 ```
 
-Subsequent hardware stages enter through the scoped compatibility wrapper. For
-an A/B candidate screen:
+Subsequent hardware stages enter through the scoped wrapper. Independent A/B
+confirmation accepts exactly one frozen candidate:
 
 ```bash
 python scripts/collect_flux_cache_authorized.py ab \
   --execution-policy /path/to/execution-policy.json \
-  --execution-stage candidate_screen \
+  --execution-stage confirmation \
   --phased-candidate /path/to/frozen-candidate.json \
-  --out-dir /home/ubuntu/difflet-artifacts/candidate-screen \
+  --out-dir /home/ubuntu/difflet-artifacts/confirmation \
   --model-revision 3de623fc3c33e44ffbe2bad470d0f45bccf2eb21 \
   --prompt-suite benchmark/flux_cache/prompt-suite-v1.json \
   --prompt-split holdout \
@@ -68,12 +68,10 @@ python scripts/collect_flux_cache_authorized.py baseline \
 ```
 
 The wrapper does not accept or request another user acknowledgement. It checks
-the request count, exact generation identity, device, stage, and output path
-before loading the model. It then injects the old collector acknowledgement
-internally, so evidence-bound legacy collectors remain byte-identical. Each
-successful output directory contains `execution-authorization.json`, binding
-the policy hash, stage, actual request count, request ceiling, and output
-directory.
+the request count, exact generation identity, device, stage, output path, and
+single frozen candidate before loading the model. Each successful output
+directory contains `execution-authorization.json`, binding the policy hash,
+stage, actual request count, request ceiling, and output directory.
 
 The policy is an auditable workflow guardrail, not a cryptographic user signature.
 Launching the parent workflow with an authorized policy is the single user
@@ -120,10 +118,9 @@ ImageReward harm <= 0.9721190482378006
 VQAScore harm    <= 0.26171875
 ```
 
-Replaying the 32-group derived-schedule screen under this rule automatically
-passes legacy brake-only and static-a13, and automatically rejects static-a12,
-static-plus-brake-a12, and static-plus-brake-a13. The three rejections are all
-the `p013-s3` ImageReward comparison. No review state is produced.
+Historical development-screen labels are not serving evidence. The current
+workflow applies this rule once to the independently collected confirmation
+pair and exports no profile if any comparison exceeds either bound.
 
 ## One-command profile build
 

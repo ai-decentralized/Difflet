@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from difflet.offline.cache_profile import collector as profile_collector  # noqa: E402
 from difflet.offline.cache_profile import derivation as schedule_derivation  # noqa: E402
 from difflet.offline.cache_profile import provenance  # noqa: E402
 from difflet.pipeline.cache import profile as runtime_profile  # noqa: E402
@@ -39,7 +40,6 @@ from scripts.flux_cache_protocol import (  # noqa: E402
     load_prompt_suite,
 )
 
-
 BUILD_SPEC_SCHEMA = "difflet-flux-cache-profile-build-spec"
 BUILD_SPEC_SCHEMA_REVISION = 2
 BUILD_STATE_SCHEMA = "difflet-flux-cache-profile-build-state"
@@ -51,6 +51,7 @@ REJECTION_SCHEMA_REVISION = 1
 
 _IMPLEMENTATION_PATHS = (
     Path(__file__).resolve(),
+    Path(profile_collector.__file__).resolve(),
     Path(schedule_derivation.__file__).resolve(),
     Path(provenance.__file__).resolve(),
     Path(runtime_profile.__file__).resolve(),
@@ -71,7 +72,6 @@ _IMPLEMENTATION_PATHS = (
     ROOT / "scripts" / "automatic_quality_contract.py",
     ROOT / "scripts" / "build_flux_cache_profile.py",
     ROOT / "scripts" / "collect_flux_baseline_calibration.py",
-    ROOT / "scripts" / "collect_flux_cache_ab.py",
     ROOT / "scripts" / "collect_flux_cache_authorized.py",
     ROOT / "scripts" / "evaluate_flux_cache_semantics.py",
     ROOT / "scripts" / "flux_cache_execution_policy.py",

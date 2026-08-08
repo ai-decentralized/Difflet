@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -17,13 +18,73 @@ from scripts.flux_cache_execution_policy import (
 )
 from scripts.flux_cache_protocol import canonical_sha256
 
-
 MODEL_ID = "black-forest-labs/FLUX.1-dev"
 MODEL_REVISION = "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21"
 
 
 def _write_json(path: Path, document: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_candidate(root: Path) -> Path:
+    horizon = root / "horizon.json"
+    contract = root / "contract.json"
+    _write_json(horizon, {})
+    _write_json(contract, {})
+    payload = {
+        "schema": "difflet-flux-cache-phased-candidate",
+        "schema_revision": 1,
+        "candidate_id": "unit-static-plus-brake",
+        "policy": {
+            "type": "phased_static_plus_brake",
+            "num_steps": 50,
+            "static_anchor_steps": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                9,
+                13,
+                17,
+                21,
+                25,
+                29,
+                33,
+                37,
+                41,
+                45,
+                49,
+            ],
+            "warmup_steps": 6,
+            "cooldown_steps": 1,
+            "require_final_anchor": True,
+            "dynamic_budget": 2,
+            "invalid_measurement_fail_closed": True,
+            "plastic_window": [6, 37],
+            "tighten_error": 1.19,
+            "recovery_error": 1.5,
+            "recovery_steps": 2,
+            "disable_after_recoveries": 2,
+            "tighten_rule": "bisect_next_static_gap",
+            "allow_acceleration": False,
+        },
+        "predictor": {"type": "taylorseer", "order": 1, "coord": "index"},
+        "horizon_ref": {
+            "path": str(horizon),
+            "sha256": hashlib.sha256(horizon.read_bytes()).hexdigest(),
+        },
+        "quality_contract_ref": {
+            "path": str(contract),
+            "sha256": hashlib.sha256(contract.read_bytes()).hexdigest(),
+        },
+    }
+    candidate = {**payload, "sha256": canonical_sha256(payload)}
+    path = root / "candidate.json"
+    _write_json(path, candidate)
+    return path
 
 
 def _execution_policy(output_root: Path) -> dict:
@@ -370,30 +431,39 @@ def test_natural_range_cli_returns_nonzero_when_any_candidate_is_rejected(
     assert exit_code == 1
 
 
-def test_scoped_wrapper_injects_legacy_ack_after_policy_validation(tmp_path, monkeypatch):
+def test_scoped_wrapper_runs_one_frozen_confirmation_candidate(tmp_path, monkeypatch):
     output_root = tmp_path / "artifacts"
-    output_directory = output_root / "screen"
+    output_directory = output_root / "confirmation"
     policy_path = tmp_path / "execution-policy.json"
     _write_json(policy_path, _execution_policy(output_root))
+    candidate_path = _write_candidate(tmp_path / "candidate")
+    prompt_suite = (
+        Path(__file__).resolve().parents[3]
+        / "benchmark"
+        / "flux_cache"
+        / "qualified-profile-confirmation-prompt-suite-20260808.json"
+    )
     observed = {}
 
-    def fake_collect(args):
-        assert args.allow_hardware is True
-        assert args.foreground_ack == authorized_collector.ab_collector.FOREGROUND_ACK
+    def fake_collect(args, arm):
         output_directory.mkdir(parents=True)
-        observed["arms"] = authorized_collector.ab_collector.select_candidate_arms(args)
+        observed["candidate_id"] = arm.candidate_id
         return output_directory / "quality.json", output_directory / "speed.json"
 
-    monkeypatch.setattr(authorized_collector.ab_collector, "collect", fake_collect)
+    monkeypatch.setattr(
+        authorized_collector.confirmation_collector,
+        "collect_confirmation",
+        fake_collect,
+    )
     wrapper_args = type(
         "Args",
         (),
         {
-            "execution_stage": "candidate_screen",
+            "execution_stage": "confirmation",
             "execution_policy": str(policy_path),
             "hardware_backend": "trainium",
             "hardware_product": "trn2.3xlarge",
-            "phased_candidate": None,
+            "phased_candidate": (str(candidate_path),),
         },
     )()
     authorized_collector._collect_ab(
@@ -403,25 +473,21 @@ def test_scoped_wrapper_injects_legacy_ack_after_policy_validation(tmp_path, mon
             str(output_directory),
             "--model-revision",
             MODEL_REVISION,
-            "--prompt",
-            "one prompt",
+            "--prompt-suite",
+            str(prompt_suite),
+            "--prompt-split",
+            "qualified_profile_confirmation",
             "--seed",
             "0",
-            "--warmup-steps",
-            "6",
-            "--anchor-intervals",
-            "8",
-            "--orders",
-            "1",
         ),
     )
 
     record = json.loads(
         (output_directory / "execution-authorization.json").read_text(encoding="utf-8")
     )
-    assert record["stage"] == "candidate_screen"
-    assert record["request_count"] == 2
-    assert len(observed["arms"]) == 1
+    assert record["stage"] == "confirmation"
+    assert record["request_count"] == 64
+    assert observed["candidate_id"] == "unit-static-plus-brake"
 
 
 def test_scoped_wrapper_rejects_user_supplied_legacy_ack(tmp_path):
@@ -429,7 +495,7 @@ def test_scoped_wrapper_rejects_user_supplied_legacy_ack(tmp_path):
         "Args",
         (),
         {
-            "execution_stage": "candidate_screen",
+            "execution_stage": "confirmation",
             "execution_policy": str(tmp_path / "policy.json"),
             "hardware_backend": "trainium",
             "hardware_product": "trn2.3xlarge",

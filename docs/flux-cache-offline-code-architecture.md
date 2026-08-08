@@ -22,7 +22,8 @@ difflet.offline.cache_profile.builder      qualification orchestration
                   |
                   +--> provenance          implementation-bundle hashing
                   |
-                  +--> frozen collectors, scorers, and quality gate
+                  +--> collector           one frozen candidate A/B
+                  +--> frozen scorers and quality gate
 
 scripts/derive_flux_cache_schedule.py      thin compatibility CLI
                   |
@@ -49,6 +50,12 @@ script modules.
 calculations. It loads a prospective registration, validates all bound inputs,
 derives exactly one schedule, and writes the hash-bound result.
 
+`collector.py` owns the minimal hardware-facing A/B operation. It accepts one
+frozen profile, runs paired baseline and candidate requests over the registered
+prompt/seed matrix, stores only decoded images, and writes measured timing plus
+runner accounting. It has no candidate sweep, trajectory dump, spatial probe,
+or learned-signal mode.
+
 `builder.py` owns the unattended qualification state machine. It derives one
 candidate, launches the independently registered A/B collection, invokes the
 two semantic scorers, applies the fail-closed natural-range gate, and exports a
@@ -66,17 +73,12 @@ parsers; it does not import a model application or denoising pipeline.
 
 ## Research isolation
 
-Exploratory scripts remain available for retrospective and mechanism studies,
-but they are outside the import graph of the qualified profile generator. The
-generator may depend only on the registered derivation path, authorized A/B
-collector, frozen semantic scorer, natural-range gate, candidate schema, and
-shared protocol utilities. Horizon probes, spatial probes, learned-signal
-analyses, terminal-brake sweeps, routers, and ad hoc candidate screens are not
-profile-builder dependencies.
-
-This is dependency isolation rather than a mass file move. Keeping historical
-script paths stable preserves reproducibility of old artifacts and links while
-preventing research code from silently entering the deployable-profile path.
+Exploratory scripts are removed from the production tree and remain recoverable
+from commit `de2a415`; see `docs/flux-cache-research-archive.md`. The generator
+depends only on the registered derivation path, minimal authorized collector,
+frozen semantic scorer, natural-range gate, candidate schema, and shared
+protocol utilities. Historical benchmark files remain as evidence and may name
+source paths that exist only in the archived commit.
 
 ## Evidence and migration boundary
 

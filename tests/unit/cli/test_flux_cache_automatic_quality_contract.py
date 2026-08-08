@@ -12,18 +12,14 @@ from scripts.automatic_quality_contract import (
     calibrate_contract,
     clopper_pearson_upper,
     evaluate_contract,
-    evaluate_profile_holdout,
-    load_profile_holdout_registration,
     load_protocol,
     metric_identity,
 )
-from scripts.collect_flux_cache_ab import load_adaptive_candidate, load_candidate_ladder
 from scripts.flux_cache_protocol import (
     DEFAULT_PROMPT_SUITE_PATH,
     canonical_sha256,
     load_prompt_suite,
 )
-
 
 ROOT = Path(__file__).resolve().parents[3]
 PROTOCOL_PATH = ROOT / "benchmark" / "flux_cache" / "automatic-quality-contract-protocol.json"
@@ -57,9 +53,7 @@ def _semantic_report(
         "complete": True,
         "started_at": "2026-08-03T00:00:00Z",
         "completed_at": "2026-08-03T00:01:00Z",
-        "sources": [
-            {"split": split, "path": str(manifest_path), "sha256": _sha256(manifest_path)}
-        ],
+        "sources": [{"split": split, "path": str(manifest_path), "sha256": _sha256(manifest_path)}],
         "metrics": _metric_config(),
         "runtime": {},
         "images": images,
@@ -140,17 +134,6 @@ def test_automatic_quality_protocol_and_prompt_splits_are_frozen_and_disjoint():
     assert set(margin.prompts).isdisjoint(holdout.prompts)
     assert protocol["margin_calibration"]["split_sha256"] == margin.descriptor["sha256"]
     assert protocol["holdout"]["split_sha256"] == holdout.descriptor["sha256"]
-
-
-def test_static_profile_candidate_is_exactly_w6_i8():
-    path = ROOT / "benchmark" / "flux_cache" / "static-profile-candidate.json"
-    ladder = load_candidate_ladder(path)
-
-    assert len(ladder.arms) == 1
-    arm = ladder.arms[0]
-    assert (arm.warmup_steps, arm.anchor_interval, arm.order, arm.coord) == (6, 8, 1, "index")
-    assert arm.build_pipeline_adapter(50).stats()["planned_skip_steps"] == 37
-    assert load_protocol(PROTOCOL_PATH)["static_candidate"]["ladder_file_sha256"] == _sha256(path)
 
 
 def test_contract_uses_only_baseline_seed_variation_and_evaluates_strict_margins(tmp_path):
@@ -247,112 +230,6 @@ def test_zero_of_32_has_below_ten_percent_one_sided_upper_bound():
     assert clopper_pearson_upper(1, 32, 0.95) > 0.1
 
 
-def test_registered_adaptive_profile_holdout_binds_one_candidate(tmp_path):
-    protocol = load_protocol(PROTOCOL_PATH)
-    selection = load_prompt_suite(DEFAULT_PROMPT_SUITE_PATH, "adaptive_profile_holdout")
-    candidate_path = (
-        ROOT
-        / "benchmark"
-        / "flux_cache"
-        / "adaptive-oil-e1p40-k12-candidate.json"
-    )
-    candidate_document = json.loads(candidate_path.read_text(encoding="utf-8"))
-    candidate = load_adaptive_candidate(candidate_path)
-    manifest = _experiment_manifest(selection, [0])
-    manifest["candidates"] = [
-        {
-            "candidate_id": candidate.candidate_id,
-            "policy": candidate.policy_spec(),
-            "predictor": candidate.predictor_spec(),
-        }
-    ]
-    manifest_path = tmp_path / "quality.json"
-    _write_json(manifest_path, manifest)
-    comparisons = [
-        {
-            "candidate_id": candidate.candidate_id,
-            "sample_id": f"p{index:03d}-s0",
-            "prompt_index": index,
-            "seed": 0,
-            "prompt": prompt,
-            "candidate_minus_baseline": {
-                "image_reward": 0.0,
-                "vqa_score": 0.0,
-            },
-        }
-        for index, prompt in enumerate(selection.prompts)
-    ]
-    report_path = tmp_path / "semantic.json"
-    _write_json(
-        report_path,
-        _semantic_report(
-            manifest_path,
-            split="adaptive_profile_holdout",
-            images=[],
-            comparisons=comparisons,
-        ),
-    )
-    contract_payload = {
-        "schema": CONTRACT_SCHEMA,
-        "schema_revision": SCHEMA_REVISION,
-        "controlled_generation": protocol["controlled_generation"],
-        "metric_identity": metric_identity(_metric_config()),
-        "margins": {"image_reward": 0.1, "vqa_score": 0.1},
-        "holdout": protocol["holdout"],
-    }
-    contract = {
-        **contract_payload,
-        "sha256": canonical_sha256(contract_payload),
-    }
-    contract_path = tmp_path / "contract.json"
-    _write_json(contract_path, contract)
-    registration_payload = {
-        "schema": "difflet-flux-cache-profile-holdout-registration",
-        "schema_revision": 1,
-        "study_id": "unit-test",
-        "quality_contract": {"content_sha256": contract["sha256"]},
-        "prompt_suite": {
-            "path": "benchmark/flux_cache/prompt-suite-v1.json",
-            "split": "adaptive_profile_holdout",
-            "split_sha256": selection.descriptor["sha256"],
-            "prompt_count": 32,
-            "seeds": [0],
-            "sample_count": 32,
-        },
-        "candidate": {
-            "path": "benchmark/flux_cache/adaptive-oil-e1p40-k12-candidate.json",
-            "file_sha256": _sha256(candidate_path),
-            "content_sha256": candidate_document["sha256"],
-            "candidate_id": candidate.candidate_id,
-        },
-        "statistical_gate": {
-            "confidence": 0.95,
-            "maximum_failure_rate_upper_bound": 0.1,
-            "required_failures": 0,
-        },
-        "parameters_frozen_before_collection": True,
-    }
-    registration = {
-        **registration_payload,
-        "sha256": canonical_sha256(registration_payload),
-    }
-    registration_path = tmp_path / "registration.json"
-    _write_json(registration_path, registration)
-
-    loaded = load_profile_holdout_registration(registration_path)
-    evaluation = evaluate_profile_holdout(
-        registration_path,
-        contract_path,
-        report_path,
-    )
-
-    assert loaded["sha256"] == registration["sha256"]
-    assert evaluation["registered_profile_holdout"] is True
-    assert evaluation["passes_registered_holdout"] is True
-    assert evaluation["candidate_summary"]["failure_count"] == 0
-    assert evaluation["candidate_summary"]["failure_rate_upper_bound"] < 0.1
-
-
 def test_metric_identity_ignores_transient_cache_bookkeeping():
     left = _metric_config()
     right = _metric_config()
@@ -442,10 +319,7 @@ def test_registered_holdout_can_examine_static_and_brake_candidates_together(tmp
         static_id,
         brake_id,
     }
-    assert all(
-        row["passes_statistical_gate"]
-        for row in evaluation["candidate_summaries"]
-    )
+    assert all(row["passes_statistical_gate"] for row in evaluation["candidate_summaries"])
 
 
 def test_protocol_digest_rejects_rehashed_field_drift(tmp_path):

@@ -6,23 +6,17 @@ import torch
 from difflet.pipeline.cache import (
     CACHE_MEASUREMENT_SCHEMA,
     CACHE_MEASUREMENT_SCHEMA_REVISION,
-    SPATIAL_MEASUREMENT_SCHEMA,
-    SPATIAL_MEASUREMENT_SCHEMA_REVISION,
     CacheRunner,
     CacheStepContext,
     ExplicitMaskPolicy,
     InMemoryMeasurementSink,
-    InMemorySpatialMeasurementSink,
     ResolvedCacheSession,
     TaylorSeerPredictor,
     load_cache_measurements,
-    load_spatial_measurements,
-    measure_latent_update,
     measure_anchor_estimate,
     measure_anchor_estimate_fast,
-    measure_spatial_error,
+    measure_latent_update,
     resolve_cache_config,
-    SpatialMeasurementLayout,
 )
 
 
@@ -337,68 +331,3 @@ def test_disabled_session_latent_measurement_is_a_tensor_free_noop():
 
     assert session.measurements_enabled is False
     session.record_latent_update(99, object(), object())
-
-
-def test_spatial_measurement_records_exact_region_energies_with_one_layout():
-    actual = torch.arange(1, 17, dtype=torch.float32).reshape(1, 4, 4)
-    estimate = actual.clone()
-    estimate[:, 0, :] += 1.0
-    estimate[:, 3, :] += 2.0
-    layout = SpatialMeasurementLayout(
-        token_height=2,
-        token_width=2,
-        region_rows=2,
-        region_columns=2,
-        token_axis=1,
-    )
-
-    measurement = measure_spatial_error(
-        context=_context(2, 5),
-        estimate=estimate,
-        actual=actual,
-        layout=layout,
-    )
-
-    assert measurement.error_energy == pytest.approx((4.0, 0.0, 0.0, 16.0))
-    assert measurement.reference_energy == pytest.approx((30.0, 174.0, 446.0, 846.0))
-    assert measurement.measurement_seconds >= 0.0
-
-
-def test_spatial_observer_is_read_only_and_report_roundtrips(tmp_path):
-    layout = SpatialMeasurementLayout(2, 2, 2, 2, token_axis=1)
-    sink = InMemorySpatialMeasurementSink(layout)
-    runner = CacheRunner(
-        ExplicitMaskPolicy((True, True, True)),
-        TaylorSeerPredictor(order=1),
-        measurement_sink=sink,
-    )
-    outputs = []
-    for step_index in range(3):
-        context = _context(step_index, 3)
-        output = torch.full((1, 4, 2), float(step_index * step_index))
-        outputs.append(output.clone())
-        assert runner.decide(context).should_compute
-        runner.record_anchor(context, output)
-
-    retained_outputs = outputs[-len(runner.history) :]
-    assert all(
-        torch.equal(anchor.output, expected)
-        for anchor, expected in zip(runner.history, retained_outputs)
-    )
-    assert [record.step_index for record in sink.anchor_measurements()] == [0, 1, 2]
-    assert [record.step_index for record in sink.spatial_errors()] == [2]
-    report = sink.build_spatial_report(
-        num_steps=3,
-        configuration_source="unit_test",
-    )
-    document = report.to_dict()
-    assert document["schema"] == SPATIAL_MEASUREMENT_SCHEMA
-    assert document["schema_revision"] == SPATIAL_MEASUREMENT_SCHEMA_REVISION
-    assert load_spatial_measurements(document) == report
-
-    path = tmp_path / "spatial-measurements.json"
-    report.write_json(path)
-    assert load_spatial_measurements(path) == report
-    sink.clear()
-    assert sink.anchor_measurements() == ()
-    assert sink.spatial_errors() == ()
