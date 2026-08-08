@@ -147,9 +147,10 @@ The user-facing execution is one command:
   --spec /path/to/prospective-build-spec.json
 ```
 
-The command performs a clean-worktree preflight before model loading, because
-the confirmation protocol rejects mutable source evidence. Commit the frozen
-builder, spec, and prompt suite before launching it.
+The command verifies that every hash-bound implementation file, build spec,
+prompt suite, and protocol input is tracked and unchanged from `HEAD` before
+model loading. Unrelated working-tree changes do not block confirmation. Commit
+the frozen workflow inputs before launching it.
 
 Internally it performs only two logical operations:
 

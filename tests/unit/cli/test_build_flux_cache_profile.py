@@ -215,7 +215,11 @@ def _orchestration_fixture(tmp_path, monkeypatch, *, quality_passed, measured_sp
     registration = _registration()
     candidate = _candidate()
     monkeypatch.setattr(profile_builder, "load_build_spec", lambda _path: spec)
-    monkeypatch.setattr(profile_builder, "_require_clean_worktree", lambda: None)
+    monkeypatch.setattr(
+        profile_builder,
+        "_require_frozen_repository_inputs",
+        lambda *_args: None,
+    )
     monkeypatch.setattr(
         profile_builder.schedule_derivation,
         "load_registration",
@@ -333,14 +337,30 @@ def test_cli_uses_distinct_exit_code_for_a_quality_rejection(monkeypatch):
     assert profile_builder.main(["build", "--spec", "/tmp/spec.json"]) == 1
 
 
-def test_profile_build_rejects_dirty_source_before_hardware(monkeypatch):
-    monkeypatch.setattr(
-        profile_builder.subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(stdout=" M scripts/example.py\n"),
-    )
-    with pytest.raises(RuntimeError, match="clean Git worktree"):
-        profile_builder._require_clean_worktree()
+def test_profile_build_rejects_changed_bound_source_before_hardware(monkeypatch):
+    bound = profile_builder.ROOT / "difflet" / "pipeline" / "cache" / "runner.py"
+    spec = {
+        "implementation": {"files": [{"path": bound.relative_to(profile_builder.ROOT).as_posix()}]},
+        "calibration": {"schedule_registration": {"path": str(bound)}},
+        "quality_contract": {"contract": {"path": str(bound)}},
+        "confirmation": {"prompt_suite": {"path": str(bound)}},
+        "execution_policy": {"path": str(bound)},
+    }
+    commands = []
+
+    def fake_run(command, **kwargs):
+        del kwargs
+        commands.append(command)
+        return SimpleNamespace(
+            returncode=1 if command[1:3] == ["diff", "--quiet"] else 0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(profile_builder.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="hash-bound implementation"):
+        profile_builder._require_frozen_repository_inputs(bound, spec)
+    assert all("status" not in command for command in commands)
 
 
 def test_subprocess_inherits_the_selected_runtime_bin_on_path(monkeypatch):

@@ -54,7 +54,20 @@ _IMPLEMENTATION_PATHS = (
     Path(schedule_derivation.__file__).resolve(),
     Path(provenance.__file__).resolve(),
     Path(runtime_profile.__file__).resolve(),
+    ROOT / "difflet" / "models" / "flux" / "application.py",
+    ROOT / "difflet" / "models" / "flux" / "pipeline.py",
     ROOT / "difflet" / "offline" / "cache_profile" / "schedule.py",
+    ROOT / "difflet" / "pipeline" / "cache" / "__init__.py",
+    ROOT / "difflet" / "pipeline" / "cache" / "measurements.py",
+    ROOT / "difflet" / "pipeline" / "cache" / "policies.py",
+    ROOT / "difflet" / "pipeline" / "cache" / "predictors.py",
+    ROOT / "difflet" / "pipeline" / "cache" / "recovery.py",
+    ROOT / "difflet" / "pipeline" / "cache" / "runner.py",
+    ROOT / "difflet" / "pipeline" / "cache" / "session.py",
+    ROOT / "difflet" / "pipeline" / "cache" / "spec.py",
+    ROOT / "difflet" / "pipeline" / "cache" / "teacache_adapter.py",
+    ROOT / "difflet" / "pipeline" / "cache" / "types.py",
+    ROOT / "difflet" / "pipeline" / "difflet_pipeline.py",
     ROOT / "scripts" / "automatic_quality_contract.py",
     ROOT / "scripts" / "build_flux_cache_profile.py",
     ROOT / "scripts" / "collect_flux_baseline_calibration.py",
@@ -506,21 +519,53 @@ def _run_command(command: Sequence[str]) -> None:
         )
 
 
-def _require_clean_worktree() -> None:
+def _require_frozen_repository_inputs(
+    spec_path: Path,
+    spec: Mapping[str, Any],
+) -> None:
+    """Require every repository input to match HEAD, ignoring unrelated files."""
+
+    paths = {Path(spec_path).resolve()}
+    for row in spec["implementation"]["files"]:
+        paths.add((ROOT / row["path"]).resolve())
+    for section, key in (
+        ("calibration", "schedule_registration"),
+        ("quality_contract", "contract"),
+        ("confirmation", "prompt_suite"),
+    ):
+        paths.add(_resolve_path(spec[section][key]["path"]))
+    paths.add(_resolve_path(spec["execution_policy"]["path"]))
+
+    repository_paths: list[str] = []
+    for path in paths:
+        try:
+            repository_paths.append(path.relative_to(ROOT).as_posix())
+        except ValueError:
+            continue
+    if not repository_paths:
+        raise RuntimeError("profile confirmation has no repository-bound source inputs")
+    command = ["git", "diff", "--quiet", "HEAD", "--", *sorted(repository_paths)]
     try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
+        tracked = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", *sorted(repository_paths)],
             cwd=ROOT,
-            check=True,
+            check=False,
             capture_output=True,
             text=True,
         )
-    except (OSError, subprocess.CalledProcessError) as error:
+        unchanged = subprocess.run(
+            command,
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as error:
         raise RuntimeError(f"could not verify the profile-build source state: {error}") from error
-    if result.stdout.strip():
+    if tracked.returncode != 0 or unchanged.returncode != 0:
         raise RuntimeError(
-            "profile confirmation requires a clean Git worktree; commit the frozen "
-            "builder, spec, and prompt suite before launching hardware"
+            "profile confirmation requires its hash-bound implementation, build spec, "
+            "prompt suite, and protocol inputs to be tracked and unchanged from HEAD"
         )
 
 
@@ -593,7 +638,7 @@ def _existing_confirmation(confirmation_dir: Path) -> tuple[Path, Path] | None:
 def build_profile(spec_path: Path) -> Path:
     spec_path = Path(spec_path).expanduser().resolve()
     spec = load_build_spec(spec_path)
-    _require_clean_worktree()
+    _require_frozen_repository_inputs(spec_path, spec)
     build_id = spec["build_id"]
     output_root = Path(spec["confirmation"]["output_directory"]).resolve()
     internal_dir = output_root / "internal"
