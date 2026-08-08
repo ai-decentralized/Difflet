@@ -119,6 +119,23 @@ def test_vae_config_vae_scale_factor():
     assert cfg.vae_scale_factor == 2
 
 
+def test_tiny_decoder_config_and_scale_factor():
+    config = vae.get_decoder_config(
+        vae.DecoderTiny,
+        {
+            "latent_channels": 16,
+            "out_channels": 3,
+            "num_decoder_blocks": [3, 3, 3, 1],
+            "decoder_block_out_channels": [64, 64, 64, 64],
+        },
+        height=1024,
+        width=1024,
+    )
+    assert config["in_channels"] == 16
+    assert config["num_blocks"] == [3, 3, 3, 1]
+    assert vae.get_vae_scale_factor(vae.DecoderTiny, config) == 8
+
+
 def test_vae_config_missing_attribute_raises():
     nc = NeuronConfig(tp_degree=1, world_size=1, torch_dtype=torch.float32)
     with pytest.raises((AssertionError, AttributeError, KeyError)):
