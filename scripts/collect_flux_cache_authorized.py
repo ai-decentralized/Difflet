@@ -100,6 +100,32 @@ def _collect_ab(
     return result
 
 
+def _collect_calibration(
+    wrapper_args: argparse.Namespace,
+    remaining: Sequence[str],
+) -> tuple[Path, Path]:
+    if wrapper_args.execution_stage != "trajectory_collection":
+        raise ValueError("the calibration command requires --execution-stage trajectory_collection")
+    _reject_legacy_authorization(remaining)
+    args = confirmation_collector.parse_confirmation_args(remaining)
+    phased_paths = tuple(wrapper_args.phased_candidate or ())
+    if len(phased_paths) != 2:
+        raise ValueError("calibration requires exactly two --phased-candidate values")
+    arms = load_phased_candidates(phased_paths)
+    authorization = _authorize_ab(
+        policy_path=Path(wrapper_args.execution_policy),
+        stage=wrapper_args.execution_stage,
+        args=args,
+        arms=arms,
+        backend=wrapper_args.hardware_backend,
+        product_name=wrapper_args.hardware_product,
+    )
+    result = confirmation_collector.collect_calibration(args, arms)
+    record_path = write_authorization_record(Path(args.out_dir), authorization)
+    print(f"[scoped-hardware] authorization record: {record_path}", flush=True)
+    return result
+
+
 def _collect_baseline(
     wrapper_args: argparse.Namespace,
     remaining: Sequence[str],
@@ -158,7 +184,7 @@ def _parse_args(
     argv: Sequence[str] | None = None,
 ) -> tuple[argparse.Namespace, tuple[str, ...]]:
     parser = argparse.ArgumentParser(description=__doc__, add_help=False)
-    parser.add_argument("command", choices=("ab", "baseline"))
+    parser.add_argument("command", choices=("ab", "baseline", "calibration"))
     parser.add_argument("--execution-policy", required=True)
     parser.add_argument("--execution-stage", choices=PROFILE_STAGES, required=True)
     parser.add_argument("--hardware-backend", default="trainium")
@@ -177,6 +203,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         args, remaining = _parse_args(argv)
         if args.command == "ab":
             _collect_ab(args, remaining)
+        elif args.command == "calibration":
+            _collect_calibration(args, remaining)
         else:
             _collect_baseline(args, remaining)
     except (FileExistsError, OSError, RuntimeError, TypeError, ValueError) as error:

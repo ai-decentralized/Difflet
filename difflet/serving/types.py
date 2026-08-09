@@ -225,6 +225,16 @@ class ResolvedModelSource:
 
 
 @dataclass(frozen=True)
+class QualifiedCacheServingContract:
+    """Pickle-safe request identity extracted from a qualified cache profile."""
+
+    num_steps: int
+    guidance_scale: float
+    height: int
+    width: int
+
+
+@dataclass(frozen=True)
 class ServingProfile:
     """The single loaded model/profile identity for a serving process."""
 
@@ -242,6 +252,9 @@ class ServingProfile:
     teacache_speedup: float | None = None
     teacache_calibration: str | None = None
     teacache_calibration_data: TeaCacheCalibration | None = None
+    cache_profile_file: str | None = None
+    cache_profile_qualification_file: str | None = None
+    qualified_cache_contract: QualifiedCacheServingContract | None = None
     output_fps: int | None = None
     host_vae: bool = False
     clip_placement: ServingPlacement | None = None

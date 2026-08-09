@@ -1,10 +1,16 @@
-"""Collect one frozen FLUX cache profile against a full-compute baseline.
+"""Collect frozen FLUX cache evidence against a full-compute baseline.
 
 This module is intentionally narrower than the historical experiment collector:
 it accepts exactly one already-frozen profile, records only the decoded images
 needed by the semantic gate, and emits the two manifests consumed by profile
 qualification. Candidate sweeps, trajectory dumps, spatial probes, and learned
 online-signal collection belong to archived research code.
+
+The calibration entry point is deliberately separate from confirmation. It
+accepts exactly two already-frozen phased-static profiles, records the shared
+full-compute trajectories needed by deterministic schedule derivation, and
+uses those two profiles only to fit the Trainium real-step cost model. It does
+not search, rank, or semantically score candidates.
 """
 
 from __future__ import annotations
@@ -155,8 +161,9 @@ def run_image_sample(
     guidance_scale: float,
     artifact_dir: Path,
     output_root: Path,
+    save_trajectory: bool = False,
 ) -> dict[str, Any]:
-    """Run one request and persist only the image used by the quality gate."""
+    """Run one request and persist its image plus optional baseline trajectory."""
 
     import torch
 
@@ -178,13 +185,29 @@ def run_image_sample(
     image_path = artifact_dir / f"{sample['sample_id']}.png"
     image_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(image_path)
+    artifacts = {
+        "image": image_path.relative_to(output_root).as_posix(),
+        "image_sha256": sha256_file(image_path),
+    }
+    if save_trajectory:
+        trajectory_values = getattr(pipe.app.pipe, "_tc_last_trajectory", None)
+        if not isinstance(trajectory_values, list) or len(trajectory_values) != num_steps:
+            raise RuntimeError(
+                "FLUX pipeline did not expose the complete baseline trajectory: "
+                f"expected {num_steps} tensors"
+            )
+        trajectory = torch.stack([value.detach().to("cpu") for value in trajectory_values])
+        for name, tensor in (("trajectory", trajectory), ("final_latent", trajectory[-1])):
+            path = artifact_dir / f"{sample['sample_id']}.{name.replace('_', '-')}.pt"
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            torch.save(tensor, temporary)
+            os.replace(temporary, path)
+            artifacts[name] = path.relative_to(output_root).as_posix()
+            artifacts[f"{name}_sha256"] = sha256_file(path)
     return {
         "sample_id": sample["sample_id"],
         "elapsed_s": float(elapsed),
-        "artifacts": {
-            "image": image_path.relative_to(output_root).as_posix(),
-            "image_sha256": sha256_file(image_path),
-        },
+        "artifacts": artifacts,
     }
 
 
@@ -203,27 +226,32 @@ def build_manifests(
     *,
     identity: Mapping[str, Any],
     samples: Sequence[Mapping[str, Any]],
-    arm: PhasedCandidateArm,
+    arm: PhasedCandidateArm | Sequence[PhasedCandidateArm],
     baseline_runs: Sequence[Mapping[str, Any]],
-    candidate_runs: Sequence[Mapping[str, Any]],
+    candidate_runs: (Sequence[Mapping[str, Any]] | Mapping[str, Sequence[Mapping[str, Any]]]),
     started_at: str,
     completed_at: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Build the exact two manifests consumed by qualification."""
+    """Build paired quality and speed manifests for one or more frozen arms."""
 
     num_steps = strict_positive_int(identity.get("num_steps"), "identity.num_steps")
+    arms = (arm,) if isinstance(arm, PhasedCandidateArm) else tuple(arm)
+    if not arms or len({item.candidate_id for item in arms}) != len(arms):
+        raise ValueError("candidate profiles must be nonempty and unique")
+    runs_by_candidate = (
+        candidate_runs
+        if isinstance(candidate_runs, Mapping)
+        else {arms[0].candidate_id: candidate_runs}
+    )
     sample_by_id = {row["sample_id"]: row for row in samples}
     baseline_by_id = {row["sample_id"]: row for row in baseline_runs}
-    candidate_by_id = {row["sample_id"]: row for row in candidate_runs}
     expected_ids = set(sample_by_id)
-    if len(sample_by_id) != len(samples):
-        raise ValueError("sample matrix contains duplicate sample identifiers")
-    if len(baseline_by_id) != len(baseline_runs):
-        raise ValueError("baseline records contain duplicate sample identifiers")
-    if len(candidate_by_id) != len(candidate_runs):
-        raise ValueError("candidate records contain duplicate sample identifiers")
-    if set(baseline_by_id) != expected_ids or set(candidate_by_id) != expected_ids:
-        raise ValueError("collected records do not match the prompt/seed sample matrix")
+    if (
+        len(sample_by_id) != len(samples)
+        or len(baseline_by_id) != len(baseline_runs)
+        or set(baseline_by_id) != expected_ids
+    ):
+        raise ValueError("baseline records do not match the prompt/seed sample matrix")
 
     def total_duration(rows: Sequence[Mapping[str, Any]], name: str) -> float:
         total = 0.0
@@ -237,26 +265,56 @@ def build_manifests(
         return total
 
     baseline_total = total_duration(baseline_runs, "baseline")
-    candidate_total = total_duration(candidate_runs, "candidate")
-    for row in candidate_runs:
-        stats = row.get("runner_stats")
-        if not isinstance(stats, dict):
-            raise ValueError("candidate record is missing runner statistics")
-        for key in ("full_steps", "skipped_steps", "consecutive_skip_vetoes"):
-            value = stats.get(key)
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ValueError(f"candidate runner stat {key!r} is invalid")
-        if stats["full_steps"] + stats["skipped_steps"] != num_steps:
-            raise ValueError("candidate runner steps do not sum to num_steps")
-
-    comparisons = []
-    for sample_id, sample in sample_by_id.items():
-        comparisons.append(
+    comparisons, definitions, speed_rows = [], [], []
+    for item in arms:
+        rows = tuple(runs_by_candidate.get(item.candidate_id, ()))
+        rows_by_id = {row["sample_id"]: row for row in rows}
+        if len(rows_by_id) != len(rows) or set(rows_by_id) != expected_ids:
+            raise ValueError("candidate records do not match the prompt/seed sample matrix")
+        for row in rows:
+            stats = row.get("runner_stats")
+            if not isinstance(stats, dict):
+                raise ValueError("candidate record is missing runner statistics")
+            if any(
+                isinstance(stats.get(key), bool)
+                or not isinstance(stats.get(key), int)
+                or stats[key] < 0
+                for key in ("full_steps", "skipped_steps", "consecutive_skip_vetoes")
+            ):
+                raise ValueError("candidate runner statistics are invalid")
+            if stats["full_steps"] + stats["skipped_steps"] != num_steps:
+                raise ValueError("candidate runner steps do not sum to num_steps")
+        definition = {
+            "candidate_id": item.candidate_id,
+            "policy": item.policy_spec(),
+            "predictor": item.predictor_spec(),
+        }
+        definitions.append(definition)
+        comparisons.extend(
             {
                 **dict(sample),
-                "candidate_id": arm.candidate_id,
+                "candidate_id": item.candidate_id,
                 "baseline": dict(baseline_by_id[sample_id]["artifacts"]),
-                "candidate": dict(candidate_by_id[sample_id]["artifacts"]),
+                "candidate": dict(rows_by_id[sample_id]["artifacts"]),
+            }
+            for sample_id, sample in sample_by_id.items()
+        )
+        candidate_total = total_duration(rows, item.candidate_id)
+        speed_rows.append(
+            {
+                **definition,
+                "total_s": candidate_total,
+                "measured_speedup": baseline_total / candidate_total,
+                "hardware_measured": True,
+                "runner_stats": aggregate_runner_stats(rows),
+                "samples": [
+                    {
+                        "sample_id": row["sample_id"],
+                        "elapsed_s": float(row["elapsed_s"]),
+                        "runner_stats": dict(row["runner_stats"]),
+                    }
+                    for row in rows
+                ],
             }
         )
     common = {
@@ -265,15 +323,10 @@ def build_manifests(
         "started_at": started_at,
         "completed_at": completed_at,
     }
-    candidate_definition = {
-        "candidate_id": arm.candidate_id,
-        "policy": arm.policy_spec(),
-        "predictor": arm.predictor_spec(),
-    }
     quality = {
         "schema": QUALITY_INPUT_SCHEMA,
         **common,
-        "candidates": [candidate_definition],
+        "candidates": definitions,
         "comparisons": comparisons,
     }
     speed = {
@@ -286,23 +339,7 @@ def build_manifests(
                 for row in baseline_runs
             ],
         },
-        "candidates": [
-            {
-                **candidate_definition,
-                "total_s": candidate_total,
-                "measured_speedup": baseline_total / candidate_total,
-                "hardware_measured": True,
-                "runner_stats": aggregate_runner_stats(candidate_runs),
-                "samples": [
-                    {
-                        "sample_id": row["sample_id"],
-                        "elapsed_s": float(row["elapsed_s"]),
-                        "runner_stats": dict(row["runner_stats"]),
-                    }
-                    for row in candidate_runs
-                ],
-            }
-        ],
+        "candidates": speed_rows,
     }
     return quality, speed
 
@@ -353,16 +390,17 @@ def build_baseline_adapter(num_steps: int):
     return TeaCacheControllerAdapter(session)
 
 
-def collect_confirmation(
+def _collect_profiles(
     args: argparse.Namespace,
-    arm: PhasedCandidateArm,
+    arms: Sequence[PhasedCandidateArm],
+    *,
+    label: str,
+    save_baseline_trajectories: bool,
 ) -> tuple[Path, Path]:
-    """Run a paired baseline/candidate confirmation for exactly one profile."""
-
     if args.model_id != MODEL_ID:
         raise ValueError(f"this collector is FLUX-only; expected --model-id {MODEL_ID!r}")
     if not args.model_revision:
-        raise ValueError("confirmation requires an exact --model-revision")
+        raise ValueError(f"{label} requires an exact --model-revision")
     num_steps = strict_positive_int(args.num_steps, "num_steps")
     height = strict_positive_int(args.height, "height")
     width = strict_positive_int(args.width, "width")
@@ -370,7 +408,8 @@ def collect_confirmation(
     guidance_scale = float(args.guidance_scale)
     if not math.isfinite(guidance_scale):
         raise ValueError("guidance_scale must be finite")
-    arm.build_pipeline_adapter(num_steps)
+    for arm in arms:
+        arm.build_pipeline_adapter(num_steps)
     prompt_selection = select_prompts(args)
     seeds = tuple(DEFAULT_SEEDS if args.seed is None else args.seed)
     samples = sample_matrix(prompt_selection.prompts, seeds)
@@ -394,12 +433,12 @@ def collect_confirmation(
         dtype=args.dtype,
         tp_degree=args.tp_degree,
         requested_model_revision=args.model_revision,
-        cache_coordinate=arm.coord,
+        cache_coordinate=arms[0].coord,
         pipeline_warmup_enabled=not bool(args.skip_warmup),
     )
     print(
-        "[flux-cache-confirmation] "
-        f"protocol={protocol['sha256']} candidate={arm.candidate_id} "
+        f"[flux-cache-{label}] protocol={protocol['sha256']} "
+        f"profiles={','.join(arm.candidate_id for arm in arms)} "
         f"samples={len(samples)}",
         flush=True,
     )
@@ -417,37 +456,41 @@ def collect_confirmation(
             guidance_scale=guidance_scale,
             artifact_dir=output_root / "artifacts" / "baseline",
             output_root=output_root,
+            save_trajectory=save_baseline_trajectories,
         )
         stats = baseline_adapter.stats()
         if stats["full_steps"] != num_steps or stats["skipped_steps"] != 0:
             raise RuntimeError("baseline adapter did not execute every denoise step")
         baseline_runs.append(run)
         print(
-            f"[flux-cache-confirmation] baseline {sample['sample_id']} " f"{run['elapsed_s']:.3f}s",
+            f"[flux-cache-{label}] baseline {sample['sample_id']} {run['elapsed_s']:.3f}s",
             flush=True,
         )
 
-    candidate_adapter = arm.build_pipeline_adapter(num_steps)
-    flux_pipeline.teacache_controller = candidate_adapter
-    candidate_runs = []
-    for sample in samples:
-        run = run_image_sample(
-            pipe,
-            sample=sample,
-            num_steps=num_steps,
-            height=height,
-            width=width,
-            guidance_scale=guidance_scale,
-            artifact_dir=output_root / "artifacts" / arm.candidate_id,
-            output_root=output_root,
-        )
-        run["runner_stats"] = candidate_adapter.stats()
-        candidate_runs.append(run)
-        print(
-            f"[flux-cache-confirmation] {arm.candidate_id} {sample['sample_id']} "
-            f"{run['elapsed_s']:.3f}s skip={run['runner_stats']['skipped_steps']}",
-            flush=True,
-        )
+    candidate_runs: dict[str, list[dict[str, Any]]] = {}
+    for arm in arms:
+        adapter = arm.build_pipeline_adapter(num_steps)
+        flux_pipeline.teacache_controller = adapter
+        rows = []
+        for sample in samples:
+            run = run_image_sample(
+                pipe,
+                sample=sample,
+                num_steps=num_steps,
+                height=height,
+                width=width,
+                guidance_scale=guidance_scale,
+                artifact_dir=output_root / "artifacts" / arm.candidate_id,
+                output_root=output_root,
+            )
+            run["runner_stats"] = adapter.stats()
+            rows.append(run)
+            print(
+                f"[flux-cache-{label}] {arm.candidate_id} {sample['sample_id']} "
+                f"{run['elapsed_s']:.3f}s skip={run['runner_stats']['skipped_steps']}",
+                flush=True,
+            )
+        candidate_runs[arm.candidate_id] = rows
 
     identity = {
         "model": MODEL_LABEL,
@@ -464,7 +507,7 @@ def collect_confirmation(
     quality, speed = build_manifests(
         identity=identity,
         samples=samples,
-        arm=arm,
+        arm=arms,
         baseline_runs=baseline_runs,
         candidate_runs=candidate_runs,
         started_at=started_at,
@@ -474,9 +517,47 @@ def collect_confirmation(
     speed_path = output_root / "speedup-candidates-v1.json"
     write_json(quality_path, quality)
     write_json(speed_path, speed)
-    print(f"[flux-cache-confirmation] quality manifest: {quality_path}", flush=True)
-    print(f"[flux-cache-confirmation] speed manifest: {speed_path}", flush=True)
+    print(f"[flux-cache-{label}] quality manifest: {quality_path}", flush=True)
+    print(f"[flux-cache-{label}] speed manifest: {speed_path}", flush=True)
     return quality_path, speed_path
+
+
+def collect_confirmation(
+    args: argparse.Namespace,
+    arm: PhasedCandidateArm,
+) -> tuple[Path, Path]:
+    """Run a paired baseline/candidate confirmation for exactly one profile."""
+
+    return _collect_profiles(
+        args,
+        (arm,),
+        label="confirmation",
+        save_baseline_trajectories=False,
+    )
+
+
+def collect_calibration(
+    args: argparse.Namespace,
+    arms: Sequence[PhasedCandidateArm],
+) -> tuple[Path, Path]:
+    """Collect label-free trajectories and a two-point Trainium cost model."""
+
+    if len(arms) != 2:
+        raise ValueError("calibration requires exactly two phased-static profiles")
+    policies = [arm.policy_spec() for arm in arms]
+    if any(
+        policy.get("type") != "phased_static" or policy.get("dynamic_budget") != 0
+        for policy in policies
+    ):
+        raise ValueError("cost calibration profiles must be purely phased-static")
+    if len({len(policy["static_anchor_steps"]) for policy in policies}) != 2:
+        raise ValueError("cost calibration profiles must have distinct real-step counts")
+    return _collect_profiles(
+        args,
+        arms,
+        label="calibration",
+        save_baseline_trajectories=True,
+    )
 
 
 def parse_confirmation_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

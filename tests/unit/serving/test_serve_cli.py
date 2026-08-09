@@ -110,6 +110,8 @@ def test_serve_help_exposes_operational_tuning_but_hides_artifact_policy(capsys)
     assert "--teacache-online-delta" in out
     assert "--teacache-speedup" in out
     assert "--teacache-calibration" in out
+    assert "--cache-profile-file" in out
+    assert "--cache-profile-qualification-file" in out
     assert "Wan-AI/Wan2.2-T2V-A14B-Diffusers" not in out
     assert "hunyuanvideo-community/HunyuanVideo-1.5" not in out
     assert "Wan-AI/Wan2.1-T2V-14B-Diffusers" in out
@@ -334,6 +336,28 @@ def test_difflet_serve_accepts_flux_sp_and_adaptive_teacache(monkeypatch):
     assert calls[0].sp_enabled is True
     assert calls[0].teacache_speedup == 1.5
     assert calls[0].teacache_calibration == "/tmp/flux-calibration.json"
+
+
+def test_difflet_serve_maps_qualified_flux_cache_files(monkeypatch):
+    calls = []
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
+    cli_main = importlib.import_module("difflet.cli.main")
+
+    cli_main.main(
+        [
+            "serve",
+            "--model-id",
+            "black-forest-labs/FLUX.1-dev",
+            "--cache-profile-file",
+            "/tmp/cache-profile.json",
+            "--cache-profile-qualification-file",
+            "/tmp/profile-qualification.json",
+        ]
+    )
+
+    options = options_from_args(calls[0])
+    assert options.cache_profile_file == "/tmp/cache-profile.json"
+    assert options.cache_profile_qualification_file == "/tmp/profile-qualification.json"
 
 
 def test_difflet_serve_parses_compile_and_load_profile_flags(monkeypatch):

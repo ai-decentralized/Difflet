@@ -6,7 +6,6 @@ import os
 import sys
 import types
 from types import SimpleNamespace
-from pathlib import Path
 from dataclasses import replace
 
 import pytest
@@ -15,6 +14,7 @@ from difflet.serving.types import (
     ArtifactPublishTarget,
     DiffletGenerateRequest,
     FluxInitialPayload,
+    QualifiedCacheServingContract,
     ResolvedModelSource,
     ServingProfile,
     StageDefinition,
@@ -65,6 +65,36 @@ def test_flux_build_pipeline_forwards_adaptive_teacache(monkeypatch):
     assert captured["teacache_calibration_path"] == "/tmp/flux-calibration.json"
 
 
+def test_flux_build_pipeline_forwards_qualified_cache_as_runtime_configuration(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(flux_common, "_torch_bfloat16", lambda: "bfloat16")
+
+    class FakePipeline:
+        @classmethod
+        def from_pretrained(cls, *args, **kwargs):
+            captured.update(kwargs)
+            return object()
+
+    monkeypatch.setattr("difflet.pipeline.difflet_pipeline.DiffletPipeline", FakePipeline)
+    profile = ServingProfile(
+        model_id="black-forest-labs/FLUX.1-dev",
+        model_type="flux",
+        height=1024,
+        width=1024,
+        num_frames=None,
+        parallel=DiffletParallelConfig(tp_degree=4),
+        cache_profile_file="/tmp/cache-profile.json",
+        cache_profile_qualification_file="/tmp/profile-qualification.json",
+    )
+
+    flux_common.build_pipeline(profile.model_id, profile, load=False)
+
+    assert captured["application_kwargs"] == {
+        "cache_profile_file": "/tmp/cache-profile.json",
+        "cache_profile_qualification_file": "/tmp/profile-qualification.json",
+    }
+
+
 def test_flux_runtime_plan_preserves_inherited_core_visibility(monkeypatch):
     monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "4-7")
     profile = ServingProfile(
@@ -105,6 +135,52 @@ def test_flux_request_validator_rejects_guidance_before_tokenization(guidance):
 
     assert exc.value.code == "invalid_extra_body"
     assert "0 <= value <= 20" in exc.value.message
+
+
+@pytest.mark.parametrize(
+    "request_kwargs,message",
+    [
+        ({"num_inference_steps": 49}, "50 inference steps"),
+        ({"guidance_scale": 3.0}, "guidance_scale=3.5"),
+        ({"width": 768}, "1024x1024"),
+    ],
+)
+def test_flux_request_validator_rejects_qualified_identity_mismatch(request_kwargs, message):
+    qualified = QualifiedCacheServingContract(
+        num_steps=50,
+        guidance_scale=3.5,
+        height=1024,
+        width=1024,
+    )
+    profile = ServingProfile(
+        model_id="black-forest-labs/FLUX.1-dev",
+        model_type="flux",
+        height=1024,
+        width=1024,
+        num_frames=None,
+        parallel=DiffletParallelConfig(tp_degree=4),
+        qualified_cache_contract=qualified,
+    )
+    validator = FluxServingRequestValidator(SimpleNamespace(profile=profile))
+    validator._tokenizer = lambda *args, **kwargs: SimpleNamespace(
+        input_ids=SimpleNamespace(shape=(1, 2))
+    )
+    values = {
+        "request_id": "request",
+        "model": profile.model_id,
+        "prompt": "prompt",
+        "height": 1024,
+        "width": 1024,
+        "num_inference_steps": 50,
+        "guidance_scale": 3.5,
+        "seed": 0,
+    }
+    values.update(request_kwargs)
+
+    with pytest.raises(DiffletServingError) as exc:
+        validator.validate(DiffletGenerateRequest(**values))
+
+    assert message in exc.value.message
 
 
 def test_flux_compile_uses_pinned_source_and_manager_target(monkeypatch, tmp_path):
@@ -206,9 +282,18 @@ def test_flux_compile_identity_uses_probe_mode_not_runtime_speedup(monkeypatch, 
     adaptive_b = flux_common.build_compile_plan(source, replace(profile, teacache_speedup=1.8))[
         0
     ].identity
+    qualified = flux_common.build_compile_plan(
+        source,
+        replace(
+            profile,
+            cache_profile_file="/tmp/cache-profile.json",
+            cache_profile_qualification_file="/tmp/profile-qualification.json",
+        ),
+    )[0].identity
 
     assert adaptive_a == adaptive_b
     assert adaptive_a != baseline
+    assert qualified == baseline
 
 
 @pytest.mark.parametrize("steps,expected", [(28, True), (4, False)])
@@ -268,6 +353,53 @@ def test_flux_serving_selects_teacache_per_request_steps(monkeypatch, steps, exp
     )
 
     assert captured["teacache_enabled"] is expected
+
+
+def test_flux_serving_lets_qualified_application_create_request_session(monkeypatch):
+    class _Generator:
+        def manual_seed(self, seed):
+            return self
+
+    class _Image:
+        def save(self, buffer: io.BytesIO, *, format: str):
+            buffer.write(b"png")
+
+    captured = {}
+
+    def pipe(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(images=[_Image()])
+
+    monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace(Generator=_Generator))
+    qualified = QualifiedCacheServingContract(
+        num_steps=50,
+        guidance_scale=3.5,
+        height=1024,
+        width=1024,
+    )
+    profile = ServingProfile(
+        model_id="black-forest-labs/FLUX.1-dev",
+        model_type="flux",
+        height=1024,
+        width=1024,
+        num_frames=None,
+        parallel=DiffletParallelConfig(tp_degree=4),
+        qualified_cache_contract=qualified,
+    )
+    request = DiffletGenerateRequest("request", profile.model_id, "prompt", 1024, 1024, 50, 3.5, 0)
+
+    asyncio.run(
+        FluxPipelineRunner(pipe, profile).execute(
+            StageInvocation(
+                request=request,
+                stage=StageDefinition("pipeline", "opaque_pipeline", "pipeline", final_output=True),
+                input=FluxInitialPayload(),
+                context=WorkerRequestContext.with_timeout("request", 1.0),
+            )
+        )
+    )
+
+    assert "teacache_enabled" not in captured
 
 
 @pytest.mark.parametrize("adaptive", [False, True])

@@ -248,6 +248,18 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--teacache-calibration", default=None, metavar="PATH", help="TeaCache calibration JSON"
     )
+    p.add_argument(
+        "--cache-profile-file",
+        default=None,
+        metavar="PATH",
+        help="Qualified FLUX cache profile artifact",
+    )
+    p.add_argument(
+        "--cache-profile-qualification-file",
+        default=None,
+        metavar="PATH",
+        help="Qualification artifact paired with --cache-profile-file",
+    )
 
 
 def _add_generate_flags(p: argparse.ArgumentParser) -> None:

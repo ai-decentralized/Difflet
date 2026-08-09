@@ -8,6 +8,8 @@ NeuronFluxApplication runtime (compile/load/pipeline) is out of scope.
 
 import importlib
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from types import SimpleNamespace
 
@@ -320,6 +322,37 @@ def test_application_creates_a_fresh_session_for_each_request(monkeypatch):
     instance(prompt="second")
 
     assert received[0] is not received[1]
+    assert not hasattr(instance, "cache_session")
+
+
+def test_application_isolates_sessions_for_simultaneous_requests(monkeypatch):
+    instance = object.__new__(app.NeuronFluxApplication)
+    instance._qualified_cache_profile = "configured"
+    instance._teacache_cadence = None
+    instance._teacache_online_delta_alpha = None
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    sessions = []
+
+    def prepare(*args, **kwargs):
+        session = object()
+        with lock:
+            sessions.append(session)
+        return session
+
+    def pipe(**kwargs):
+        barrier.wait(timeout=2.0)
+        return kwargs["cache_session"]
+
+    monkeypatch.setattr(instance, "_prepare_cache_session", prepare)
+    instance.pipe = pipe
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda prompt: instance(prompt=prompt), ("one", "two")))
+
+    assert len(sessions) == 2
+    assert sessions[0] is not sessions[1]
+    assert set(results) == set(sessions)
     assert not hasattr(instance, "cache_session")
 
 

@@ -177,6 +177,8 @@ def options_from_args(args: argparse.Namespace) -> ServeOptions:
         teacache_online_delta=getattr(args, "teacache_online_delta", None),
         teacache_speedup=getattr(args, "teacache_speedup", None),
         teacache_calibration=getattr(args, "teacache_calibration", None),
+        cache_profile_file=getattr(args, "cache_profile_file", None),
+        cache_profile_qualification_file=getattr(args, "cache_profile_qualification_file", None),
         download_policy=download_policy,
         compile_policy=compile_policy,
         max_queued_requests=getattr(args, "max_queued_requests", 8),

@@ -12,7 +12,12 @@ from typing import Any
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.registry import ModelEntry
 from difflet.serving.errors import invalid_extra_body
-from difflet.serving.types import OutputModality, ServingPlacement, ServingProfile
+from difflet.serving.types import (
+    OutputModality,
+    QualifiedCacheServingContract,
+    ServingPlacement,
+    ServingProfile,
+)
 
 MIN_WORKER_HEARTBEAT_INTERVAL_SECONDS = 5.0
 MAX_WORKER_HEARTBEAT_INTERVAL_SECONDS = 120.0
@@ -66,6 +71,8 @@ class ServeOptions:
     teacache_online_delta: float | None = None
     teacache_speedup: float | None = None
     teacache_calibration: str | None = None
+    cache_profile_file: str | None = None
+    cache_profile_qualification_file: str | None = None
     download_policy: DownloadPolicy = DownloadPolicy.AUTO
     compile_policy: CompilePolicy = CompilePolicy.AUTO
     max_running_requests: int = 1
@@ -157,6 +164,8 @@ def build_serving_profile(
     teacache_online_delta: float | None,
     teacache_speedup: float | None,
     teacache_calibration: str | None,
+    cache_profile_file: str | None,
+    cache_profile_qualification_file: str | None,
 ) -> ServingProfile:
     """Resolve registry defaults plus `difflet serve` overrides."""
 
@@ -190,6 +199,49 @@ def build_serving_profile(
         )
     if output_modality == "video" and teacache_speedup is not None:
         raise invalid_extra_body("resident video serving does not yet expose adaptive TeaCache.")
+    qualified_profile = None
+    if (cache_profile_file is None) != (cache_profile_qualification_file is None):
+        raise invalid_extra_body(
+            "--cache-profile-file and --cache-profile-qualification-file must be provided together."
+        )
+    if cache_profile_file is not None:
+        if model_type != "flux":
+            raise invalid_extra_body("qualified cache profiles are currently FLUX-only.")
+        if any(
+            value is not None
+            for value in (
+                teacache_cadence,
+                teacache_online_delta,
+                teacache_speedup,
+                teacache_calibration,
+            )
+        ):
+            raise invalid_extra_body(
+                "a qualified cache profile cannot be combined with --teacache-* flags."
+            )
+        try:
+            from difflet.pipeline.cache import load_qualified_cache_profile
+
+            qualified_profile = load_qualified_cache_profile(
+                cache_profile_file,
+                cache_profile_qualification_file,
+            )
+        except (OSError, TypeError, ValueError, OverflowError, KeyError) as exc:
+            raise invalid_extra_body(f"invalid qualified cache profile: {exc}") from exc
+        if qualified_profile.generation["model_id"] != model_id:
+            raise invalid_extra_body("qualified cache profile model does not match --model-id.")
+        qualified_height = int(qualified_profile.resolution["height"])
+        qualified_width = int(qualified_profile.resolution["width"])
+        if height is not None and int(height) != qualified_height:
+            raise invalid_extra_body("--height does not match the qualified cache profile.")
+        if width is not None and int(width) != qualified_width:
+            raise invalid_extra_body("--width does not match the qualified cache profile.")
+        height = qualified_height
+        width = qualified_width
+        qualified_tp = int(qualified_profile.generation["tp_degree"])
+        if tp_degree is not None and int(tp_degree) != qualified_tp:
+            raise invalid_extra_body("--tp-degree does not match the qualified cache profile.")
+        tp_degree = qualified_tp
     shape = entry.resolve_shape(
         height=height,
         width=width,
@@ -262,6 +314,26 @@ def build_serving_profile(
         teacache_speedup=teacache_speedup,
         teacache_calibration=None,
         teacache_calibration_data=frozen_calibration,
+        cache_profile_file=(
+            str(Path(cache_profile_file).expanduser().resolve())
+            if cache_profile_file is not None
+            else None
+        ),
+        cache_profile_qualification_file=(
+            str(Path(cache_profile_qualification_file).expanduser().resolve())
+            if cache_profile_qualification_file is not None
+            else None
+        ),
+        qualified_cache_contract=(
+            QualifiedCacheServingContract(
+                num_steps=int(qualified_profile.generation["num_steps"]),
+                guidance_scale=float(qualified_profile.generation["guidance_scale"]),
+                height=int(qualified_profile.resolution["height"]),
+                width=int(qualified_profile.resolution["width"]),
+            )
+            if qualified_profile is not None
+            else None
+        ),
         output_fps=default_fps if output_modality == "video" else None,
         host_vae=(default_host_vae or host_vae) if output_modality == "video" else False,
         clip_placement=resolved_clip_placement,

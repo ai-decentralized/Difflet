@@ -11,7 +11,7 @@ from pathlib import Path
 from difflet.common.orchestrators import flux as flux_common
 from difflet.registry import resolve_model
 from difflet.serving.artifact_manager import ArtifactPublishTarget, ImmutableArtifactManager
-from difflet.serving.errors import prompt_too_long
+from difflet.serving.errors import invalid_extra_body, prompt_too_long
 from difflet.serving.options import CompilePolicy, DownloadPolicy
 from difflet.serving.orchestrators.base import (
     request_uses_teacache,
@@ -121,6 +121,25 @@ class FluxServingRequestValidator:
 
     def validate(self, request: DiffletGenerateRequest) -> None:
         validate_guidance_scale(request, maximum=_MAX_GUIDANCE_SCALE)
+        qualified = self.runtime.profile.qualified_cache_contract
+        if qualified is not None:
+            expected_steps = qualified.num_steps
+            expected_guidance = qualified.guidance_scale
+            expected_height = qualified.height
+            expected_width = qualified.width
+            if request.num_inference_steps != expected_steps:
+                raise invalid_extra_body(
+                    f"qualified Flux cache profile requires {expected_steps} inference steps"
+                )
+            if request.guidance_scale != expected_guidance:
+                raise invalid_extra_body(
+                    f"qualified Flux cache profile requires guidance_scale={expected_guidance:g}"
+                )
+            if (request.height, request.width) != (expected_height, expected_width):
+                raise invalid_extra_body(
+                    "qualified Flux cache profile requires "
+                    f"{expected_height}x{expected_width} requests"
+                )
         encoded = self._tokenizer_for_runtime()(
             request.prompt,
             padding=False,
@@ -154,23 +173,28 @@ class FluxPipelineRunner:
         request = invocation.request
         context = invocation.context
         context.cancellation.throw_if_cancelled()
-        use_teacache = request_uses_teacache(self.profile, request.num_inference_steps)
-        if self.profile.teacache_speedup is not None and not use_teacache:
+        qualified = self.profile.qualified_cache_contract is not None
+        use_teacache = (
+            False if qualified else request_uses_teacache(self.profile, request.num_inference_steps)
+        )
+        if not qualified and self.profile.teacache_speedup is not None and not use_teacache:
             logger.info(
                 "Flux request uses baseline inference fallback_reason=step_mismatch "
                 "request_steps=%s calibration_steps=%s",
                 request.num_inference_steps,
                 getattr(self.profile.teacache_calibration_data, "num_steps", None),
             )
-        output = self.pipe(
+        call_kwargs = dict(
             prompt=request.prompt,
             num_inference_steps=request.num_inference_steps,
             height=request.height,
             width=request.width,
             guidance_scale=request.guidance_scale,
             generator=torch.Generator().manual_seed(request.seed),
-            teacache_enabled=use_teacache,
         )
+        if not qualified:
+            call_kwargs["teacache_enabled"] = use_teacache
+        output = self.pipe(**call_kwargs)
         context.cancellation.throw_if_cancelled()
         image = output.images[0]
         buf = io.BytesIO()
@@ -248,6 +272,7 @@ class FluxServingStageAdapter:
         if self.active_profile is None:
             raise RuntimeError("Flux serving profile is not loaded")
         profile = self.active_profile
+        qualified = profile.qualified_cache_contract
         print("[difflet serve] running Flux generation smoke")
         return DiffletGenerateRequest(
             request_id="startup-smoke",
@@ -256,11 +281,15 @@ class FluxServingStageAdapter:
             height=profile.height,
             width=profile.width,
             num_inference_steps=(
-                profile.teacache_calibration_data.num_steps
-                if profile.teacache_calibration_data is not None
-                else 4
+                qualified.num_steps
+                if qualified is not None
+                else (
+                    profile.teacache_calibration_data.num_steps
+                    if profile.teacache_calibration_data is not None
+                    else 4
+                )
             ),
-            guidance_scale=1.0,
+            guidance_scale=(qualified.guidance_scale if qualified is not None else 1.0),
             seed=0,
         )
 

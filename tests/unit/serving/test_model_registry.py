@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import pickle
+from types import SimpleNamespace
 
 import pytest
 
@@ -208,6 +210,71 @@ def test_flux_serving_profile_carries_frozen_adaptive_teacache(tmp_path):
 
     calibration_path.unlink()
     assert resolved.profile.teacache_calibration_data.target_speedup == 1.5
+
+
+def test_flux_serving_profile_loads_qualified_cache_and_uses_frozen_shape_and_tp(
+    monkeypatch, tmp_path
+):
+    profile_path = tmp_path / "cache-profile.json"
+    qualification_path = tmp_path / "profile-qualification.json"
+    profile_path.write_text("{}", encoding="utf-8")
+    qualification_path.write_text("{}", encoding="utf-8")
+    qualified = SimpleNamespace(
+        generation={
+            "model_id": "black-forest-labs/FLUX.1-dev",
+            "model_revision": "a" * 40,
+            "tp_degree": 4,
+            "num_steps": 50,
+            "guidance_scale": 3.5,
+        },
+        resolution={"height": 1024, "width": 1024},
+    )
+    monkeypatch.setattr(
+        "difflet.pipeline.cache.load_qualified_cache_profile",
+        lambda *args: qualified,
+    )
+
+    resolved = resolve_serving_model(
+        ServeOptions(
+            model_id="black-forest-labs/FLUX.1-dev",
+            cache_profile_file=str(profile_path),
+            cache_profile_qualification_file=str(qualification_path),
+        )
+    )
+
+    assert resolved.profile.parallel.tp_degree == 4
+    assert resolved.profile.qualified_cache_contract.num_steps == 50
+    assert resolved.profile.qualified_cache_contract.guidance_scale == 3.5
+    assert resolved.profile.cache_profile_file == str(profile_path.resolve())
+    assert resolved.profile.cache_profile_qualification_file == str(qualification_path.resolve())
+    pickle.dumps(resolved.profile)
+
+
+@pytest.mark.parametrize(
+    "options,message",
+    [
+        (
+            ServeOptions(
+                model_id="black-forest-labs/FLUX.1-dev",
+                cache_profile_file="profile.json",
+            ),
+            "must be provided together",
+        ),
+        (
+            ServeOptions(
+                model_id="Qwen/Qwen-Image",
+                cache_profile_file="profile.json",
+                cache_profile_qualification_file="qualification.json",
+            ),
+            "FLUX-only",
+        ),
+    ],
+)
+def test_serving_rejects_invalid_qualified_cache_selection(options, message):
+    with pytest.raises(DiffletServingError) as exc:
+        resolve_serving_model(options)
+
+    assert message in exc.value.message
 
 
 def test_serving_profile_rejects_unimplemented_teacache_modes():

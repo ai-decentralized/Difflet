@@ -490,6 +490,93 @@ def test_scoped_wrapper_runs_one_frozen_confirmation_candidate(tmp_path, monkeyp
     assert observed["candidate_id"] == "unit-static-plus-brake"
 
 
+def test_scoped_wrapper_runs_two_point_trajectory_calibration(tmp_path, monkeypatch):
+    output_root = tmp_path / "artifacts"
+    output_directory = output_root / "calibration"
+    policy_path = tmp_path / "execution-policy.json"
+    policy = _execution_policy(output_root)
+    policy["scope"]["allowed_stages"].append("trajectory_collection")
+    policy["scope"]["stage_request_limits"]["trajectory_collection"] = 192
+    policy["sha256"] = canonical_sha256(
+        {key: value for key, value in policy.items() if key != "sha256"}
+    )
+    _write_json(policy_path, policy)
+
+    candidate_paths = []
+    for index, anchors in enumerate(((0, 1, 3, 49), (0, 1, 2, 3, 49))):
+        candidate_path = _write_candidate(tmp_path / f"candidate-{index}")
+        candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+        candidate["candidate_id"] = f"unit-static-{index}"
+        candidate["policy"] = {
+            "type": "phased_static",
+            "num_steps": 50,
+            "static_anchor_steps": list(anchors),
+            "warmup_steps": 1,
+            "cooldown_steps": 1,
+            "require_final_anchor": True,
+            "dynamic_budget": 0,
+            "invalid_measurement_fail_closed": True,
+        }
+        candidate["sha256"] = canonical_sha256(
+            {key: value for key, value in candidate.items() if key != "sha256"}
+        )
+        _write_json(candidate_path, candidate)
+        candidate_paths.append(candidate_path)
+
+    prompt_suite = (
+        Path(__file__).resolve().parents[3]
+        / "benchmark"
+        / "flux_cache"
+        / "phase-schedule-development-prompt-suite.json"
+    )
+    observed = {}
+
+    def fake_collect(args, arms):
+        output_directory.mkdir(parents=True)
+        observed["candidate_ids"] = [arm.candidate_id for arm in arms]
+        return output_directory / "quality.json", output_directory / "speed.json"
+
+    monkeypatch.setattr(
+        authorized_collector.confirmation_collector,
+        "collect_calibration",
+        fake_collect,
+    )
+    wrapper_args = type(
+        "Args",
+        (),
+        {
+            "execution_stage": "trajectory_collection",
+            "execution_policy": str(policy_path),
+            "hardware_backend": "trainium",
+            "hardware_product": "trn2.3xlarge",
+            "phased_candidate": tuple(str(path) for path in candidate_paths),
+        },
+    )()
+
+    authorized_collector._collect_calibration(
+        wrapper_args,
+        (
+            "--out-dir",
+            str(output_directory),
+            "--model-revision",
+            MODEL_REVISION,
+            "--prompt-suite",
+            str(prompt_suite),
+            "--prompt-split",
+            "phase_schedule_horizon_development",
+            "--seed",
+            "2",
+        ),
+    )
+
+    record = json.loads(
+        (output_directory / "execution-authorization.json").read_text(encoding="utf-8")
+    )
+    assert record["stage"] == "trajectory_collection"
+    assert record["request_count"] == 144
+    assert observed["candidate_ids"] == ["unit-static-0", "unit-static-1"]
+
+
 def test_scoped_wrapper_rejects_user_supplied_legacy_ack(tmp_path):
     wrapper_args = type(
         "Args",

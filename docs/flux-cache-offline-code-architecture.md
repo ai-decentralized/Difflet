@@ -1,7 +1,8 @@
 # FLUX cache-profile offline code architecture
 
-Status: implemented for the offline control plane and the qualified FLUX runtime
-boundary. Serving integration remains separate.
+Status: implemented for the offline control plane, qualified FLUX runtime
+boundary, and resident serving configuration path. A current qualification
+artifact and hardware serving E2E remain required before deployment.
 
 ## Purpose
 
@@ -105,6 +106,12 @@ new prospective registration and build specification, followed by:
 
 That rerun belongs after the remaining runtime work. It is not part of this
 non-serving refactor.
+
+The checked-in `qualified-profile-square-1024-build-spec-20260808.json` is now
+also historical: the later legacy-API retirement changed its bound FLUX
+application implementation. The builder correctly rejects it before hardware
+loading. A replacement registration must bind the final runtime sources and
+the restored calibration trajectory bundle before qualification is run.
 
 ## Runtime boundary
 

@@ -67,6 +67,28 @@ python scripts/collect_flux_cache_authorized.py baseline \
   --out-dir /home/ubuntu/difflet-artifacts/baseline-square-1024
 ```
 
+For a fresh label-free schedule calibration, collect the 48 shared full-DiT
+trajectories and two frozen phased-static cost points in one policy-bound run:
+
+```bash
+python scripts/collect_flux_cache_authorized.py calibration \
+  --execution-policy benchmark/flux_cache/offline-profile-square-1024-execution-policy.json \
+  --execution-stage trajectory_collection \
+  --phased-candidate benchmark/flux_cache/derived-static-a12-o1-index.json \
+  --phased-candidate benchmark/flux_cache/derived-static-a13-o1-index.json \
+  --out-dir /home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260809 \
+  --model-revision 3de623fc3c33e44ffbe2bad470d0f45bccf2eb21 \
+  --prompt-suite benchmark/flux_cache/phase-schedule-development-prompt-suite.json \
+  --prompt-split phase_schedule_horizon_development \
+  --seed 2
+```
+
+This command is calibration, not a candidate sweep: it accepts exactly two
+already-frozen static profiles with distinct real-step counts. Candidate images
+are retained only to make the cost run auditable; semantic labels are not read.
+The baseline trajectory paths and hashes are recorded in `quality-input-v2.json`,
+and the paired hardware timings are recorded in `speedup-candidates-v1.json`.
+
 The wrapper does not accept or request another user acknowledgement. It checks
 the request count, exact generation identity, device, stage, output path, and
 single frozen candidate before loading the model. Each successful output

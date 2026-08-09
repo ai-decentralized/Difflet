@@ -34,6 +34,12 @@ def build_pipeline(
 ):
     from difflet.pipeline.difflet_pipeline import DiffletPipeline
 
+    application_kwargs = None
+    if profile.cache_profile_file is not None:
+        application_kwargs = {
+            "cache_profile_file": profile.cache_profile_file,
+            "cache_profile_qualification_file": profile.cache_profile_qualification_file,
+        }
     return DiffletPipeline.from_pretrained(
         model_id,
         model_type=MODEL_TYPE,
@@ -50,6 +56,7 @@ def build_pipeline(
         teacache_speedup=profile.teacache_speedup,
         teacache_calibration=profile.teacache_calibration_data,
         teacache_calibration_path=profile.teacache_calibration,
+        application_kwargs=application_kwargs,
         model_path_override=model_path_override,
         resolved_source_id=resolved_source_id,
         compiled_path_override=compiled_path_override,

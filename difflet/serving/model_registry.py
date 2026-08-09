@@ -68,6 +68,8 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         teacache_online_delta=options.teacache_online_delta,
         teacache_speedup=options.teacache_speedup,
         teacache_calibration=options.teacache_calibration,
+        cache_profile_file=options.cache_profile_file,
+        cache_profile_qualification_file=options.cache_profile_qualification_file,
     )
     return ResolvedServingModel(
         model_id=options.model_id,
