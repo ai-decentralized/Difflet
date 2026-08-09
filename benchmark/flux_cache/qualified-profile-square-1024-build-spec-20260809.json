@@ -1,0 +1,173 @@
+{
+  "build_id": "flux-cache-qualified-profile-square-1024-2026-08-09",
+  "calibration": {
+    "schedule_registration": {
+      "content_sha256": "5dfece0d689113d95746b2caf7e4ae460f241b76831ae78884407b75e41aaf4b",
+      "file_sha256": "8a59556ce8ddd8a70dfdb85f2a4d88d13c3e9026feff7522a53116c9c33d6341",
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/qualified-schedule-derivation-registration-20260809.json"
+    }
+  },
+  "confirmation": {
+    "candidate_family": "combined",
+    "minimum_speedup": 3.2,
+    "output_directory": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-profile-confirmation-20260809",
+    "prompt_split": "qualified_profile_confirmation",
+    "prompt_split_sha256": "2272a79002a5a4a7d503ed88b316deb0fdca1abf59cc53ab1fcfbdc9a75a14f1",
+    "prompt_suite": {
+      "file_sha256": "d9d301114d733a0b869506f3f0d28eb83c98f2bb47f3ceee5c1617b5f62861e8",
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/qualified-profile-confirmation-prompt-suite-20260808.json"
+    },
+    "require_zero_failures": true,
+    "seeds": [
+      7
+    ]
+  },
+  "created_at": "2026-08-09T18:41:05Z",
+  "execution_policy": {
+    "content_sha256": "d0f6286084821fea62c333d5c72bfc866e76d8703eea845dd222d078ca139649",
+    "file_sha256": "eb0d3d54663521b4f6d78998655350a7cabd389775641820d79c06d207860a37",
+    "path": "/home/ubuntu/Difflet/benchmark/flux_cache/offline-profile-square-1024-execution-policy.json"
+  },
+  "implementation": {
+    "files": [
+      {
+        "file_sha256": "b41295b02934e3701a6f8f18e52c547d8a221ea8cd2032ae58bb74f20732e726",
+        "path": "difflet/models/flux/application.py"
+      },
+      {
+        "file_sha256": "d5cf44f7b1067d0664ab0ae333eace8691f0dd46197085345791946f2a3c08c9",
+        "path": "difflet/models/flux/pipeline.py"
+      },
+      {
+        "file_sha256": "fe83b52350f08970b3f20cecaa0fe19d4935928dfd4a91a6e017379b1dae8e99",
+        "path": "difflet/offline/cache_profile/builder.py"
+      },
+      {
+        "file_sha256": "0b027223f79199a866230cd50ac6c5ea7731436bbabc6e7e366953b1e56ccb0d",
+        "path": "difflet/offline/cache_profile/collector.py"
+      },
+      {
+        "file_sha256": "2dbaa3510589fee8d3cc5c5a194146e2daf53bf834316255a857673f05142da3",
+        "path": "difflet/offline/cache_profile/derivation.py"
+      },
+      {
+        "file_sha256": "18d0664a69f1858c1517a3e5a40d271540ebb1df7cf08607284f5eecc50b24cb",
+        "path": "difflet/offline/cache_profile/provenance.py"
+      },
+      {
+        "file_sha256": "8d0163076969cf3ce0ab5629d113ffa71e69fe2496a5816ebb938c8370f81aa5",
+        "path": "difflet/offline/cache_profile/quality.py"
+      },
+      {
+        "file_sha256": "35ef9406d2e71c3df977a34034049a64f6f38760232d25efe4f78cd3a624710a",
+        "path": "difflet/offline/cache_profile/schedule.py"
+      },
+      {
+        "file_sha256": "c30ba843c47ab3f7ebe20be9164bcf5d0af097db95305565ce41a3e9100f84cf",
+        "path": "difflet/pipeline/cache/__init__.py"
+      },
+      {
+        "file_sha256": "b39db0a56c6eb89cc32fc4dc40ebf567f05e92c008cb2aeb1ab4b0ed645fdae1",
+        "path": "difflet/pipeline/cache/control_error.py"
+      },
+      {
+        "file_sha256": "75116ec8a562bdb96687557caa7d25a8687cab2317bc77fd3ac36ec3bf9f24f4",
+        "path": "difflet/pipeline/cache/policies.py"
+      },
+      {
+        "file_sha256": "363bc8f2e4b504549ae70c6fb29a916b5865b0652bcfe04f4eb7734aef33380f",
+        "path": "difflet/pipeline/cache/predictors.py"
+      },
+      {
+        "file_sha256": "e98e4ed6925cd5578b28122ae1d309a7f03fe1aa8260b906538ab1585fda6675",
+        "path": "difflet/pipeline/cache/profile.py"
+      },
+      {
+        "file_sha256": "16ca705b49b34f20d3727acf27306c901cbad1eb086bf251455ea9592d0fd161",
+        "path": "difflet/pipeline/cache/recovery.py"
+      },
+      {
+        "file_sha256": "ab0b9fbfff8158ddc8d0df41c45d9817875c127ea22cddd6f3aa6ec906a35d40",
+        "path": "difflet/pipeline/cache/runner.py"
+      },
+      {
+        "file_sha256": "a4c88a4fa530c4a85a4e3cd3c9c72aa2ef665615e992170d3c069982f180be98",
+        "path": "difflet/pipeline/cache/session.py"
+      },
+      {
+        "file_sha256": "31c726b3f9a2d977b42948c7580f7b85d57a2ab73c85d51844eedbca975b1232",
+        "path": "difflet/pipeline/cache/teacache_adapter.py"
+      },
+      {
+        "file_sha256": "96e8a5c25e798733860c0897639f8c8ef8da3411e10f25d87026ea3a09c5ad5b",
+        "path": "difflet/pipeline/cache/types.py"
+      },
+      {
+        "file_sha256": "7d5840854173018057d2f5a04f6e0a7004a972d9d2fce07991d971460621faeb",
+        "path": "difflet/pipeline/difflet_pipeline.py"
+      },
+      {
+        "file_sha256": "bb499c8bb9ce9fbcbeb2033715b963bbcd5a741e0bdd2cb491074bc73bae4126",
+        "path": "scripts/build_flux_cache_profile.py"
+      },
+      {
+        "file_sha256": "028428694d3c80bc6375fda4224bc7eaf84f3b20b2bd8fd80c28be195e8418d5",
+        "path": "scripts/collect_flux_baseline_calibration.py"
+      },
+      {
+        "file_sha256": "c8f5479a9ec546c684c3a50187bb09914332abd120fe67f31a93112ed64ee7a4",
+        "path": "scripts/collect_flux_cache_authorized.py"
+      },
+      {
+        "file_sha256": "1aeb540b9fa365b1c00d2ae7f47b38c692319b9cbbc33f1fc5853a55c53b0de0",
+        "path": "scripts/evaluate_flux_cache_semantics.py"
+      },
+      {
+        "file_sha256": "79aaac56d429d87b8aa06f92954bab2862d77959995285114cb98dd1c57f5efb",
+        "path": "scripts/flux_cache_execution_policy.py"
+      },
+      {
+        "file_sha256": "f84944e79eac3933e5f13814a24dddce04be4391265e9eef41999e472d445ad3",
+        "path": "scripts/flux_cache_natural_range_gate.py"
+      },
+      {
+        "file_sha256": "10a919b6c0a36ffffef1b46768ba08984829b57d6c16a79404d766cdf4306784",
+        "path": "scripts/flux_cache_phased_candidate.py"
+      },
+      {
+        "file_sha256": "e5cb8b4022739d328e0b0eaadceb2e5ae90e9e89982161a113de263f6789880d",
+        "path": "scripts/flux_cache_protocol.py"
+      },
+      {
+        "file_sha256": "dd2417fcb178bef60e32aa11a4aa253fd121ad965e884e364d8754b0011bbad9",
+        "path": "scripts/multires_quality_contract.py"
+      }
+    ],
+    "schema": "difflet-cache-profile-implementation-bundle",
+    "schema_revision": 1,
+    "sha256": "0107e1b7af3424e6290aafc1233728c8a4a34b33738db707b493bb40b59d7008"
+  },
+  "quality_contract": {
+    "bucket_id": "square-1024",
+    "contract": {
+      "content_sha256": "60e8e44288793dcdc5940b547a035fef11ebd6d05b102ac92185ecafc73f8194",
+      "file_sha256": "d5168775b36de76c4a2494b10e3affb2c0c5572d90a33ad5dfdafe073dfc1b9f",
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/multires-quality-contract-v1.json"
+    }
+  },
+  "runtimes": {
+    "hardware_python": "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python",
+    "semantic_python": "/home/ubuntu/.venvs/difflet-cache-eval/bin/python"
+  },
+  "schema": "difflet-flux-cache-profile-build-spec",
+  "schema_revision": 2,
+  "scoring": {
+    "cpu_threads": 12,
+    "huggingface_cache": "/home/ubuntu/.cache/huggingface/hub",
+    "image_reward_cache": "/home/ubuntu/.cache/diffcache-semantic/ImageReward",
+    "vqa_batch_size": 4,
+    "vqa_model_cache": "/home/ubuntu/.cache/diffcache-semantic/vqascore"
+  },
+  "sha256": "a1c067cafc842ec6350ae55d5bce1162ca23c7bfb1404a8e4caef22028f860a8",
+  "status": "registered_not_run"
+}
