@@ -127,11 +127,46 @@ def test_h3_cache_keys_include_static_contract():
     )
 
 
-def test_pending_heavy_stages_never_fall_back_to_host():
-    orchestrator = MiniMaxH3Orchestrator(_args())
-    for stage in ("video_vae", "audio_vae"):
-        with pytest.raises(NotImplementedError, match="no host fallback"):
-            orchestrator._run_stage_internal(stage, orchestrator.args)
+@pytest.mark.parametrize(
+    "stage, expected_subdir, expected_cache",
+    [
+        ("video_vae", "vae", "minimax_h3_video_vae_h768w1344f124"),
+        ("audio_vae", "audio_vae", "minimax_h3_audio_vae_f124_chunk48"),
+    ],
+)
+def test_vae_stages_compile_real_trainium_applications(
+    monkeypatch, tmp_path, stage, expected_subdir, expected_cache
+):
+    compiled = []
+
+    class FakeApplication:
+        def __init__(self, *, model_path, config):
+            assert model_path == f"/model/{expected_subdir}"
+            assert config == f"{stage}-config"
+
+        def compile(self, path):
+            compiled.append(path)
+
+    _inject(
+        monkeypatch,
+        "difflet.backends.trainium.minimax_h3.vae",
+        NeuronMiniMaxH3VideoVAEDecoderApplication=FakeApplication,
+        NeuronMiniMaxH3AudioVAEDecoderApplication=FakeApplication,
+    )
+    _inject(
+        monkeypatch,
+        "difflet.models.minimax_h3.application",
+        create_minimax_h3_video_vae_config=lambda **kwargs: "video_vae-config",
+        create_minimax_h3_audio_vae_config=lambda **kwargs: "audio_vae-config",
+    )
+    monkeypatch.setattr(
+        "difflet.pipeline.path_resolver.resolve_model_path", lambda *args, **kwargs: "/model"
+    )
+    args = _args(stage_mode="compile", cache_dir=str(tmp_path))
+
+    MiniMaxH3Orchestrator(args)._run_stage_internal(stage, args)
+
+    assert compiled == [str(tmp_path / expected_cache)]
 
 
 def test_generate_stage_compiles_real_transformer_application(monkeypatch, tmp_path):

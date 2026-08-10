@@ -50,6 +50,54 @@ def create_minimax_h3_transformer_config(
     )
 
 
+def create_minimax_h3_video_vae_config(
+    *,
+    model_path: str,
+    height: int,
+    width: int,
+    num_frames: int,
+):
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.minimax_h3.vae import (
+        MiniMaxH3VideoVAEDecoderInferenceConfig,
+    )
+    from difflet.utils.diffusers_adapter import load_diffusers_config
+
+    vae_path = os.path.join(model_path, "vae")
+    return MiniMaxH3VideoVAEDecoderInferenceConfig(
+        neuron_config=NeuronConfig(
+            batch_size=1,
+            tp_degree=1,
+            world_size=1,
+            torch_dtype=torch.float32,
+        ),
+        load_config=load_diffusers_config(vae_path),
+        height=height,
+        width=width,
+        num_frames=num_frames,
+    )
+
+
+def create_minimax_h3_audio_vae_config(*, model_path: str, num_frames: int):
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.minimax_h3.vae import (
+        MiniMaxH3AudioVAEDecoderInferenceConfig,
+    )
+    from difflet.utils.diffusers_adapter import load_diffusers_config
+
+    vae_path = os.path.join(model_path, "audio_vae")
+    return MiniMaxH3AudioVAEDecoderInferenceConfig(
+        neuron_config=NeuronConfig(
+            batch_size=2,
+            tp_degree=1,
+            world_size=1,
+            torch_dtype=torch.float32,
+        ),
+        load_config=load_diffusers_config(vae_path),
+        num_frames=num_frames,
+    )
+
+
 def _normalize_dtype(dtype: Any) -> torch.dtype:
     if isinstance(dtype, torch.dtype):
         return dtype
