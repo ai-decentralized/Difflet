@@ -129,9 +129,40 @@ def test_h3_cache_keys_include_static_contract():
 
 def test_pending_heavy_stages_never_fall_back_to_host():
     orchestrator = MiniMaxH3Orchestrator(_args())
-    for stage in ("generate", "video_vae", "audio_vae"):
+    for stage in ("video_vae", "audio_vae"):
         with pytest.raises(NotImplementedError, match="no host fallback"):
             orchestrator._run_stage_internal(stage, orchestrator.args)
+
+
+def test_generate_stage_compiles_real_transformer_application(monkeypatch, tmp_path):
+    compiled = []
+
+    class FakeApplication:
+        def __init__(self, *, model_path, config):
+            assert model_path == "/model/transformer"
+            assert config == "config"
+
+        def compile(self, path):
+            compiled.append(path)
+
+    _inject(
+        monkeypatch,
+        "difflet.backends.trainium.minimax_h3.transformer",
+        NeuronMiniMaxH3TransformerApplication=FakeApplication,
+    )
+    _inject(
+        monkeypatch,
+        "difflet.models.minimax_h3.application",
+        create_minimax_h3_transformer_config=lambda **kwargs: "config",
+    )
+    monkeypatch.setattr(
+        "difflet.pipeline.path_resolver.resolve_model_path", lambda *args, **kwargs: "/model"
+    )
+    args = _args(stage_mode="compile", cache_dir=str(tmp_path))
+
+    MiniMaxH3Orchestrator(args)._stage_generate(args)
+
+    assert compiled == [str(tmp_path / "minimax_h3_dit_tp4_h768w1344f124_text1024")]
 
 
 def test_text_stage_compile_captures_qwen_layer_49(monkeypatch, tmp_path):

@@ -8,6 +8,7 @@ from difflet.models.minimax_h3.contracts import (
     TEXT_TAG,
     VIDEO_TAG,
     align_num_frames,
+    build_padded_t2va_layout,
     build_t2va_layout,
 )
 
@@ -53,3 +54,25 @@ def test_h3_static_graph_rejects_unaligned_frames_and_canvas():
         build_t2va_layout(num_text_tokens=1, height=768, width=1344, num_frames=120)
     with pytest.raises(ValueError, match="multiples of 32"):
         build_t2va_layout(num_text_tokens=1, height=770, width=1344, num_frames=124)
+
+
+def test_padded_layout_moves_unused_text_rows_behind_live_media():
+    layout = build_padded_t2va_layout(
+        num_text_tokens=3,
+        max_text_tokens=8,
+        height=768,
+        width=1344,
+        num_frames=124,
+    )
+
+    media_rows = 414 + 37 * 24 * 42
+    live_sequence_length = 3 + media_rows
+    assert layout.sequence_length == 8 + media_rows
+    assert layout.text_indices[:3].tolist() == [0, 1, 2]
+    assert layout.text_indices[3:].tolist() == list(
+        range(live_sequence_length, live_sequence_length + 5)
+    )
+    assert int(layout.audio_indices[0]) == 3
+    assert int(layout.video_indices[0]) == 3 + 414
+    assert torch.all(layout.attention_mask[:live_sequence_length])
+    assert not torch.any(layout.attention_mask[live_sequence_length:])

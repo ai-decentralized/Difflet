@@ -40,6 +40,9 @@ class MiniMaxH3T2VALayout:
     video_indices: torch.Tensor
     audio_indices: torch.Tensor
     text_indices: torch.Tensor
+    attention_mask: torch.Tensor
+    num_text_tokens: int
+    max_text_tokens: int
 
     @property
     def sequence_length(self) -> int:
@@ -166,4 +169,77 @@ def build_t2va_layout(
         video_indices=video_indices,
         audio_indices=audio_indices,
         text_indices=text_indices,
+        attention_mask=torch.ones(sequence_length, dtype=torch.bool),
+        num_text_tokens=num_text_tokens,
+        max_text_tokens=num_text_tokens,
+    )
+
+
+def build_padded_t2va_layout(
+    *,
+    num_text_tokens: int,
+    max_text_tokens: int,
+    height: int,
+    width: int,
+    num_frames: int,
+    sequence_alignment: int = 1,
+) -> MiniMaxH3T2VALayout:
+    """Move fixed-bucket text padding to the packed sequence tail.
+
+    H3's released layout has no padding.  A Neuron graph still needs a fixed
+    text bucket, so live text and all media stay a contiguous prefix while the
+    unused text rows are scattered behind the media.  The resulting key mask is
+    exactly ``[0, live_sequence_length)`` and can use attention_cte bounds
+    without materializing an ``S x S`` mask.
+    """
+
+    if max_text_tokens < num_text_tokens:
+        raise ValueError(
+            f"max_text_tokens ({max_text_tokens}) is smaller than the live token count "
+            f"({num_text_tokens})"
+        )
+    if sequence_alignment < 1:
+        raise ValueError(f"sequence_alignment must be positive, got {sequence_alignment}")
+    live = build_t2va_layout(
+        num_text_tokens=num_text_tokens,
+        height=height,
+        width=width,
+        num_frames=num_frames,
+    )
+    text_padding = max_text_tokens - num_text_tokens
+    unaligned_length = live.sequence_length + text_padding
+    sequence_length = (
+        (unaligned_length + sequence_alignment - 1) // sequence_alignment
+    ) * sequence_alignment
+    graph_padding = sequence_length - unaligned_length
+    if text_padding == 0 and graph_padding == 0:
+        return live
+
+    position_ids = torch.zeros(sequence_length, 3, dtype=live.position_ids.dtype)
+    position_ids[: live.sequence_length] = live.position_ids
+    token_tags = torch.full((sequence_length,), TEXT_TAG, dtype=torch.long)
+    token_tags[: live.sequence_length] = live.token_tags
+    attention_mask = torch.zeros(sequence_length, dtype=torch.bool)
+    attention_mask[: live.sequence_length] = True
+    text_indices = torch.cat(
+        [
+            live.text_indices,
+            torch.arange(live.sequence_length, live.sequence_length + text_padding),
+        ]
+    )
+
+    return MiniMaxH3T2VALayout(
+        height=height,
+        width=width,
+        num_frames=num_frames,
+        num_latent_frames=live.num_latent_frames,
+        num_audio_latents=live.num_audio_latents,
+        position_ids=position_ids,
+        token_tags=token_tags,
+        video_indices=live.video_indices,
+        audio_indices=live.audio_indices,
+        text_indices=text_indices,
+        attention_mask=attention_mask,
+        num_text_tokens=num_text_tokens,
+        max_text_tokens=max_text_tokens,
     )

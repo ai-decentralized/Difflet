@@ -193,7 +193,35 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                 )
 
     def _stage_generate(self, args: argparse.Namespace) -> None:
-        self._pending_stage("generate", "H3 Omni Transformer TP4 port")
+        import torch
+
+        from difflet.backends.trainium.minimax_h3.transformer import (
+            NeuronMiniMaxH3TransformerApplication,
+        )
+        from difflet.models.minimax_h3.application import (
+            create_minimax_h3_transformer_config,
+        )
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        model_dir = self._model_dir(args, resolve_model_path)
+        transformer_path = str(Path(model_dir) / "transformer")
+        compiled_dir = self._stage_compiled_dir("generate", args)
+        config = create_minimax_h3_transformer_config(
+            model_path=model_dir,
+            tp_degree=args.tp_degree or 4,
+            dtype=torch.bfloat16,
+            height=args.height or h3_common.DEFAULT_HEIGHT,
+            width=args.width or h3_common.DEFAULT_WIDTH,
+            num_frames=args.num_frames or h3_common.DEFAULT_NUM_FRAMES,
+        )
+        app = NeuronMiniMaxH3TransformerApplication(
+            model_path=transformer_path,
+            config=config,
+        )
+        if args.stage_mode == "compile":
+            app.compile(str(compiled_dir))
+            return
+        self._pending_stage("generate", "host scheduler loop over the compiled H3 Omni Transformer")
 
     def _stage_video_vae(self, args: argparse.Namespace) -> None:
         self._pending_stage("video_vae", "H3 visual VAE Neuron decoder")
