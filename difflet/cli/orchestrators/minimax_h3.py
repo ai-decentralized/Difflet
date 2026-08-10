@@ -221,7 +221,52 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
             return
-        self._pending_stage("generate", "host scheduler loop over the compiled H3 Omni Transformer")
+
+        from difflet.cli.dp import stage_loop
+        from difflet.models.minimax_h3.pipeline import (
+            denoise_minimax_h3_t2va,
+            load_minimax_h3_schedulers,
+        )
+
+        app.load(str(compiled_dir), skip_warmup=True)
+        height = args.height or h3_common.DEFAULT_HEIGHT
+        width = args.width or h3_common.DEFAULT_WIDTH
+        num_frames = args.num_frames or h3_common.DEFAULT_NUM_FRAMES
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=False):
+                text = torch.load(stage_loop.work_file(args, req, "text.pt"))
+                video_scheduler, audio_scheduler = load_minimax_h3_schedulers(model_dir)
+                output = denoise_minimax_h3_t2va(
+                    app,
+                    encoder_hidden_states=text["encoder_hidden_states"],
+                    encoder_attention_mask=text["attention_mask"],
+                    num_text_tokens=int(text["num_text_tokens"]),
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
+                    num_inference_steps=int(
+                        stage_loop.effective(req, args, "steps", h3_common.DEFAULT_STEPS)
+                    ),
+                    seed=req.seed,
+                    video_scheduler=video_scheduler,
+                    audio_scheduler=audio_scheduler,
+                    model_dtype=torch.bfloat16,
+                )
+                destination = stage_loop.work_file(args, req, "latents.pt")
+                torch.save(
+                    {
+                        "video_latents": output.video_latents.cpu(),
+                        "audio_latents": output.audio_latents.cpu(),
+                        "height": height,
+                        "width": width,
+                        "num_frames": num_frames,
+                    },
+                    destination,
+                )
+                print(
+                    f"[generate] video latents {tuple(output.video_latents.shape)}, "
+                    f"audio latents {tuple(output.audio_latents.shape)} -> {destination}"
+                )
 
     def _stage_video_vae(self, args: argparse.Namespace) -> None:
         self._pending_stage("video_vae", "H3 visual VAE Neuron decoder")

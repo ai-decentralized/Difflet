@@ -165,6 +165,66 @@ def test_generate_stage_compiles_real_transformer_application(monkeypatch, tmp_p
     assert compiled == [str(tmp_path / "minimax_h3_dit_tp4_h768w1344f124_text1024")]
 
 
+def test_generate_stage_runs_scheduler_loop_and_saves_both_latent_streams(monkeypatch, tmp_path):
+    import torch
+
+    calls = {}
+
+    class FakeApplication:
+        def __init__(self, *, model_path, config):
+            calls["model_path"] = model_path
+            calls["config"] = config
+
+        def load(self, path, *, skip_warmup):
+            calls["load"] = (path, skip_warmup)
+
+    def fake_denoise(transformer, **kwargs):
+        calls["transformer"] = transformer
+        calls["denoise"] = kwargs
+        return types.SimpleNamespace(
+            video_latents=torch.zeros(1, 24, 37, 48, 84),
+            audio_latents=torch.zeros(2, 32, 207),
+        )
+
+    _inject(
+        monkeypatch,
+        "difflet.backends.trainium.minimax_h3.transformer",
+        NeuronMiniMaxH3TransformerApplication=FakeApplication,
+    )
+    _inject(
+        monkeypatch,
+        "difflet.models.minimax_h3.application",
+        create_minimax_h3_transformer_config=lambda **kwargs: "config",
+    )
+    _inject(
+        monkeypatch,
+        "difflet.models.minimax_h3.pipeline",
+        denoise_minimax_h3_t2va=fake_denoise,
+        load_minimax_h3_schedulers=lambda model_dir: ("video-scheduler", "audio-scheduler"),
+    )
+    monkeypatch.setattr(
+        "difflet.pipeline.path_resolver.resolve_model_path", lambda *args, **kwargs: "/model"
+    )
+    torch.save(
+        {
+            "encoder_hidden_states": torch.zeros(1, 1024, 5120),
+            "attention_mask": torch.ones(1, 1024, dtype=torch.bool),
+            "num_text_tokens": 5,
+        },
+        tmp_path / "text.pt",
+    )
+    args = _args(stage_mode="generate", cache_dir=str(tmp_path), work_dir=str(tmp_path))
+
+    MiniMaxH3Orchestrator(args)._stage_generate(args)
+
+    saved = torch.load(tmp_path / "latents.pt")
+    assert calls["load"][1] is True
+    assert calls["denoise"]["num_inference_steps"] == 30
+    assert calls["denoise"]["video_scheduler"] == "video-scheduler"
+    assert saved["video_latents"].shape == (1, 24, 37, 48, 84)
+    assert saved["audio_latents"].shape == (2, 32, 207)
+
+
 def test_text_stage_compile_captures_qwen_layer_49(monkeypatch, tmp_path):
     import torch
 
