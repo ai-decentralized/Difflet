@@ -24,6 +24,7 @@ def test_minimax_h3_application_exposes_static_dit_contract(tmp_path):
     assert contract["hidden_states"]["shape"] == (1, 37296, 96)
     assert contract["audio_hidden_states"]["shape"] == (1, 414, 32)
     assert contract["encoder_hidden_states"]["shape"] == (1, 1024, 5120)
+    assert contract["position_ids"]["shape"] == (38784, 3)
 
 
 @pytest.mark.parametrize(
