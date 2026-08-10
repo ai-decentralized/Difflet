@@ -14,6 +14,7 @@ VALID_MODELS = {
     "hunyuanvideo-community/HunyuanVideo",
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
     "Qwen/Qwen-Image",
+    "MiniMaxAI/MiniMax-H3",
     "Lightricks/LTX-2",
 }
 
@@ -33,6 +34,7 @@ _MODEL_TYPE: dict[str, str] = {
     "hunyuanvideo-community/HunyuanVideo": "hunyuan_video",
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v": "hunyuan_video_15",
     "Qwen/Qwen-Image": "qwen_image",
+    "MiniMaxAI/MiniMax-H3": "minimax_h3",
     "Lightricks/LTX-2": "ltx_2",
 }
 
@@ -705,12 +707,14 @@ def _get_orchestrator(args: argparse.Namespace):
     from difflet.cli.orchestrators.hunyuan_video import HunyuanVideoOrchestrator
     from difflet.cli.orchestrators.hunyuan_video_15 import HunyuanVideo15Orchestrator
     from difflet.cli.orchestrators.ltx_2 import LTX2Orchestrator
+    from difflet.cli.orchestrators.minimax_h3 import MiniMaxH3Orchestrator
     from difflet.cli.orchestrators.qwen_image import QwenImageOrchestrator
     from difflet.cli.orchestrators.wan import WanOrchestrator
 
     mapping = {
         "black-forest-labs/FLUX.1-dev": FluxOrchestrator,
         "Lightricks/LTX-2": LTX2Orchestrator,
+        "MiniMaxAI/MiniMax-H3": MiniMaxH3Orchestrator,
         "Wan-AI/Wan2.2-T2V-A14B-Diffusers": WanOrchestrator,
         "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanOrchestrator,
         "hunyuanvideo-community/HunyuanVideo": HunyuanVideoOrchestrator,

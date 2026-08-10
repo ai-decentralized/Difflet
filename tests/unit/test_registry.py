@@ -176,4 +176,4 @@ def test_register_uses_class_attribute_factory():
 
 def test_builtin_models_registered():
     names = {entry.name for entry in registered_models()}
-    assert {"flux", "wan", "hunyuan_video", "qwen_image", "ltx_2"} <= names
+    assert {"flux", "wan", "hunyuan_video", "qwen_image", "minimax_h3", "ltx_2"} <= names
