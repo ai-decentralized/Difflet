@@ -8,13 +8,46 @@ the individual Neuron components are integrated behind those four stages.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import torch
 
 from difflet.backends.trainium.core.multi_component_application import MultiComponentApplication
 from difflet.common.orchestrators import minimax_h3 as h3_common
-from difflet.models.minimax_h3.contracts import build_t2va_layout
+from difflet.models.minimax_h3.contracts import build_padded_t2va_layout
+
+
+def create_minimax_h3_transformer_config(
+    *,
+    model_path: str,
+    tp_degree: int,
+    dtype: torch.dtype,
+    height: int,
+    width: int,
+    num_frames: int,
+    text_seq_len: int = h3_common.TEXT_SEQ_LEN,
+):
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.minimax_h3.transformer import (
+        MiniMaxH3TransformerInferenceConfig,
+    )
+    from difflet.utils.diffusers_adapter import load_diffusers_config
+
+    transformer_path = os.path.join(model_path, "transformer")
+    return MiniMaxH3TransformerInferenceConfig(
+        neuron_config=NeuronConfig(
+            batch_size=1,
+            tp_degree=tp_degree,
+            world_size=tp_degree,
+            torch_dtype=dtype,
+        ),
+        load_config=load_diffusers_config(transformer_path),
+        height=height,
+        width=width,
+        num_frames=num_frames,
+        text_seq_len=text_seq_len,
+    )
 
 
 def _normalize_dtype(dtype: Any) -> torch.dtype:
@@ -47,11 +80,13 @@ class NeuronMiniMaxH3Application(MultiComponentApplication):
             "num_frames": int(shape.get("num_frames") or h3_common.DEFAULT_NUM_FRAMES),
         }
         self.text_seq_len = int(kwargs.get("text_seq_len", h3_common.TEXT_SEQ_LEN))
-        self.layout = build_t2va_layout(
+        self.layout = build_padded_t2va_layout(
             num_text_tokens=self.text_seq_len,
+            max_text_tokens=self.text_seq_len,
             height=self.shape["height"],
             width=self.shape["width"],
             num_frames=self.shape["num_frames"],
+            sequence_alignment=128,
         )
 
     def components(self):
