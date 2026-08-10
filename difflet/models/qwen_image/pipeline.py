@@ -1,8 +1,11 @@
-"""Qwen-Image hybrid pipeline orchestration.
+"""Qwen-Image DiT-loop and tensor-orchestration helpers.
 
-The first M4a runtime path keeps Qwen2.5-VL prompt encoding, scheduler setup,
-and VAE decode on the host side. The Trainium boundary is the packed-latent
-DiT call represented by ``QwenImageDiTInputBundle``.
+This module supplies the host-controlled scheduler loop around the Trainium
+DiT call represented by ``QwenImageDiTInputBundle``.  It is not the complete
+production placement description: the formal CLI and serving orchestrators run
+Qwen2.5-VL prompt encoding, DiT denoising, and Qwen VAE decoding as three
+Trainium stages.  Only lightweight scheduling, tensor preparation, and output
+handling remain on the host in those paths.
 """
 
 from __future__ import annotations

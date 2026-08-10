@@ -1,8 +1,15 @@
-"""Qwen-Image Trainium application.
+"""Qwen-Image Trainium DiT application.
 
-M4a starts with the DiT transformer boundary. The Qwen2.5-VL text encoder,
-scheduler loop, and Qwen VAE remain host-side until transformer parity and
-shape coverage are established.
+This module owns the DiT boundary used by the middle stage of Qwen-Image
+inference.  The production CLI and serving paths are fully staged across
+Trainium: a ``NeuronQwen2VLTextForCausalLM`` prompt-encoder stage feeds this
+DiT stage, whose latents are decoded by a ``NeuronWanVAEDecoderApplication``
+stage loaded with the Qwen VAE configuration.  Tokenization, scheduler control,
+inter-stage tensor preparation, and output post-processing remain host-side.
+
+The absence of text-encoder and VAE components from
+``NeuronQwenImageApplication`` is therefore a module boundary, not a statement
+that those production stages run on the host.
 """
 
 from __future__ import annotations
