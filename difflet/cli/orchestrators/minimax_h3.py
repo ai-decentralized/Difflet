@@ -14,18 +14,85 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import subprocess
 import sys
+import tempfile
+import wave
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import ModelOrchestrator
 from difflet.common.orchestrators import minimax_h3 as h3_common
+
+if TYPE_CHECKING:
+    import torch
 
 _HF_MODEL_ID = h3_common.HF_MODEL_ID
 _MODEL_TYPE = h3_common.MODEL_TYPE
 _CLI_NAME = h3_common.CLI_NAME
 _VIRTUAL_CORE_SIZE = h3_common.VIRTUAL_CORE_SIZE
 _STAGES = ("text", "generate", "video_vae", "audio_vae")
+
+
+def _save_av(
+    video: "torch.Tensor",
+    audio: "torch.Tensor",
+    output_path: str,
+    *,
+    fps: int = 24,
+    sample_rate: int = 32000,
+) -> bool:
+    """Encode BCTHW RGB plus BCS audio to MP4 through temporary lossless handoff."""
+
+    if Path(output_path).suffix.lower() != ".mp4":
+        return False
+    try:
+        import numpy as np
+        from diffusers.utils import export_to_video
+    except ImportError:
+        return False
+
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="difflet-h3-av-") as temp_dir:
+        silent_path = Path(temp_dir) / "video.mp4"
+        audio_path = Path(temp_dir) / "audio.wav"
+        frames = video.detach().float().clamp(0, 1)[0].permute(1, 2, 3, 0).cpu().numpy()
+        samples = audio.detach().float().clamp(-1, 1)[0].transpose(0, 1).cpu().numpy()
+        try:
+            export_to_video(list(frames.astype("float32")), str(silent_path), fps=fps)
+            pcm = np.rint(samples * 32767.0).astype("<i2")
+            with wave.open(str(audio_path), "wb") as wav:
+                wav.setnchannels(int(pcm.shape[1]))
+                wav.setsampwidth(2)
+                wav.setframerate(sample_rate)
+                wav.writeframes(pcm.tobytes())
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(silent_path),
+                    "-i",
+                    str(audio_path),
+                    "-c:v",
+                    "copy",
+                    "-c:a",
+                    "aac",
+                    "-shortest",
+                    str(destination),
+                ],
+                check=True,
+            )
+        except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+            print(f"[minimax-h3] AV export failed ({exc}); saving tensors instead", flush=True)
+            return False
+    print(f"[minimax-h3] video with audio saved to {destination}", flush=True)
+    return True
 
 
 class MiniMaxH3Orchestrator(ModelOrchestrator):
@@ -269,17 +336,112 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                 )
 
     def _stage_video_vae(self, args: argparse.Namespace) -> None:
-        self._pending_stage("video_vae", "H3 visual VAE Neuron decoder")
+        import torch
+
+        from difflet.backends.trainium.minimax_h3.vae import (
+            NeuronMiniMaxH3VideoVAEDecoderApplication,
+        )
+        from difflet.models.minimax_h3.application import create_minimax_h3_video_vae_config
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        model_dir = self._model_dir(args, resolve_model_path)
+        vae_path = str(Path(model_dir) / "vae")
+        compiled_dir = self._stage_compiled_dir("video_vae", args)
+        config = create_minimax_h3_video_vae_config(
+            model_path=model_dir,
+            height=args.height or h3_common.DEFAULT_HEIGHT,
+            width=args.width or h3_common.DEFAULT_WIDTH,
+            num_frames=args.num_frames or h3_common.DEFAULT_NUM_FRAMES,
+        )
+        app = NeuronMiniMaxH3VideoVAEDecoderApplication(
+            model_path=vae_path,
+            config=config,
+        )
+        if args.stage_mode == "compile":
+            app.compile(str(compiled_dir))
+            return
+
+        from difflet.cli.dp import stage_loop
+        from difflet.models.minimax_h3.pipeline import decode_minimax_h3_video
+
+        app.load(str(compiled_dir), skip_warmup=True)
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=False):
+                latents = torch.load(stage_loop.work_file(args, req, "latents.pt"))
+                video = decode_minimax_h3_video(
+                    app,
+                    latents["video_latents"],
+                    latents_mean=config.latents_mean,
+                    latents_std=config.latents_std,
+                    clip_length=int(config.clip_length),
+                    token_drop=int(config.token_drop),
+                    temporal_compression_ratio=int(config.temporal_compression_ratio),
+                    spatial_compression_ratio=int(config.spatial_compression_ratio),
+                )
+                destination = stage_loop.work_file(args, req, "video.pt")
+                torch.save(video.to(torch.float16), destination)
+                print(f"[video_vae] RGB video {tuple(video.shape)} -> {destination}")
 
     def _stage_audio_vae(self, args: argparse.Namespace) -> None:
-        self._pending_stage("audio_vae", "H3 audio VAE Neuron decoder")
+        import torch
 
-    @staticmethod
-    def _pending_stage(stage: str, component: str) -> None:
-        raise NotImplementedError(
-            f"MiniMax-H3 stage {stage!r} is reserved for the {component}; "
-            "no host fallback is used."
+        from difflet.backends.trainium.minimax_h3.vae import (
+            NeuronMiniMaxH3AudioVAEDecoderApplication,
         )
+        from difflet.models.minimax_h3.application import create_minimax_h3_audio_vae_config
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        model_dir = self._model_dir(args, resolve_model_path)
+        vae_path = str(Path(model_dir) / "audio_vae")
+        compiled_dir = self._stage_compiled_dir("audio_vae", args)
+        config = create_minimax_h3_audio_vae_config(
+            model_path=model_dir,
+            num_frames=args.num_frames or h3_common.DEFAULT_NUM_FRAMES,
+        )
+        app = NeuronMiniMaxH3AudioVAEDecoderApplication(
+            model_path=vae_path,
+            config=config,
+        )
+        if args.stage_mode == "compile":
+            app.compile(str(compiled_dir))
+            return
+
+        from difflet.cli.dp import stage_loop
+        from difflet.models.minimax_h3.pipeline import decode_minimax_h3_audio
+
+        app.load(str(compiled_dir), skip_warmup=True)
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                latents = torch.load(stage_loop.work_file(args, req, "latents.pt"))
+                video = torch.load(stage_loop.work_file(args, req, "video.pt")).float()
+                audio = decode_minimax_h3_audio(
+                    app,
+                    latents["audio_latents"],
+                    latents_mean=config.latents_mean,
+                    latents_std=config.latents_std,
+                    chunk_latent_frames=int(config.audio_chunk_latent_frames),
+                    chunk_core_frames=int(config.audio_chunk_core_frames),
+                    hop_length=800,
+                )
+                output_path = Path(req.output)
+                if not _save_av(
+                    video,
+                    audio,
+                    str(output_path),
+                    sample_rate=int(config.sampling_rate),
+                ):
+                    tensor_path = output_path.with_suffix(".pt")
+                    tensor_path.parent.mkdir(parents=True, exist_ok=True)
+                    torch.save(
+                        {
+                            "video": video.to(torch.float16),
+                            "audio": audio,
+                            "fps": 24,
+                            "sample_rate": int(config.sampling_rate),
+                        },
+                        tensor_path,
+                    )
+                    print(f"[audio_vae] AV tensors saved to {tensor_path}")
 
     def _validate_topology(self) -> None:
         if (self.args.tp_degree or 4) != 4:

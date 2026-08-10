@@ -7,6 +7,7 @@ and both decoders remain separate Trainium stages.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -26,6 +27,81 @@ from difflet.models.minimax_h3.scheduling_minimax_h3 import MiniMaxH3Scheduler
 class MiniMaxH3LatentOutput:
     video_latents: torch.Tensor
     audio_latents: torch.Tensor
+
+
+def _split_tiles(
+    length: int,
+    *,
+    tile_size: int = 256,
+    min_overlap: int = 64,
+    alignment: int = 16,
+) -> tuple[list[int], list[int], list[int]]:
+    """Reproduce the official VAE's aligned tile placement."""
+
+    if tile_size >= length:
+        return [0], [length], []
+    num_tiles = math.ceil(length / tile_size)
+    while tile_size * num_tiles - min_overlap * (num_tiles - 1) < length:
+        num_tiles += 1
+    overlaps = [min_overlap] * (num_tiles - 1)
+    remaining = tile_size * num_tiles - sum(overlaps) - length
+    for index in range(remaining // alignment):
+        overlaps[index % (num_tiles - 1)] += alignment
+    starts = [0]
+    for overlap in overlaps:
+        starts.append(starts[-1] + tile_size - overlap)
+    return starts, [tile_size] * num_tiles, overlaps
+
+
+def _blend(a: torch.Tensor, b: torch.Tensor, extent: int, dim: int) -> torch.Tensor:
+    extent = min(a.shape[dim], b.shape[dim], extent)
+    positions = torch.arange(extent, device=b.device, dtype=b.dtype)
+    shape = [1] * a.ndim
+    shape[dim] = extent
+    weight_a = (1 - positions / extent).view(shape)
+    weight_b = (positions / extent).view(shape)
+    slice_a = [slice(None)] * a.ndim
+    slice_a[dim] = slice(-extent, None)
+    slice_b = [slice(None)] * b.ndim
+    slice_b[dim] = slice(0, extent)
+    blended = a[tuple(slice_a)] * weight_a + b[tuple(slice_b)] * weight_b
+    if extent == b.shape[dim]:
+        return blended
+    slice_rest = [slice(None)] * b.ndim
+    slice_rest[dim] = slice(extent, None)
+    return torch.cat([blended, b[tuple(slice_rest)]], dim=dim)
+
+
+def _stitch_tiles(
+    tiles: list[list[torch.Tensor]],
+    height_overlaps: list[int],
+    width_overlaps: list[int],
+) -> torch.Tensor:
+    result_rows = []
+    for row_index, row in enumerate(tiles):
+        result_row = []
+        for column_index, tile in enumerate(row):
+            if row_index > 0:
+                tile = _blend(
+                    tiles[row_index - 1][column_index],
+                    tile,
+                    height_overlaps[row_index - 1],
+                    dim=-2,
+                )
+            if column_index > 0:
+                tile = _blend(
+                    row[column_index - 1],
+                    tile,
+                    width_overlaps[column_index - 1],
+                    dim=-1,
+                )
+            if row_index < len(tiles) - 1:
+                tile = tile[..., : -height_overlaps[row_index], :]
+            if column_index < len(row) - 1:
+                tile = tile[..., :, : -width_overlaps[column_index]]
+            result_row.append(tile)
+        result_rows.append(torch.cat(result_row, dim=-1))
+    return torch.cat(result_rows, dim=-2)
 
 
 def patchify_video_latents(
@@ -240,3 +316,177 @@ def denoise_minimax_h3_t2va(
         video_latents=video_latents.contiguous(),
         audio_latents=audio_latents.contiguous(),
     )
+
+
+def _first_tensor(output: Any) -> torch.Tensor:
+    return output[0] if isinstance(output, (tuple, list)) else output
+
+
+@torch.no_grad()
+def decode_minimax_h3_video(
+    decoder: Callable[[torch.Tensor], Any],
+    normalized_latents: torch.Tensor,
+    *,
+    latents_mean: list[float] | tuple[float, ...],
+    latents_std: list[float] | tuple[float, ...],
+    clip_length: int = 17,
+    token_drop: int = 3,
+    temporal_compression_ratio: int = 4,
+    spatial_compression_ratio: int = 16,
+    tile_sample_size: int = 256,
+    tile_min_overlap: int = 64,
+) -> torch.Tensor:
+    """Run official H3 temporal chunking and 256px spatial tiling on Neuron."""
+
+    if normalized_latents.ndim != 5 or normalized_latents.shape[0] != 1:
+        raise ValueError("MiniMax-H3 video latents must have shape (1, C, T, H, W)")
+    mean = torch.tensor(latents_mean, dtype=torch.float32).view(1, -1, 1, 1, 1)
+    std = torch.tensor(latents_std, dtype=torch.float32).view(1, -1, 1, 1, 1)
+    latents = normalized_latents.float() * std + mean
+    tokens_chunk_size = math.ceil(clip_length / temporal_compression_ratio)
+    token_overlap = (-token_drop) % tokens_chunk_size
+    frame_pre_padding = (-clip_length) % temporal_compression_ratio
+    frame_overlap = max(
+        token_overlap * temporal_compression_ratio - frame_pre_padding,
+        0,
+    )
+    chunk_num_frames = tokens_chunk_size * temporal_compression_ratio
+
+    height = latents.shape[-2] * spatial_compression_ratio
+    width = latents.shape[-1] * spatial_compression_ratio
+    y_starts, y_lengths, y_overlaps = _split_tiles(
+        height,
+        tile_size=tile_sample_size,
+        min_overlap=tile_min_overlap,
+        alignment=spatial_compression_ratio,
+    )
+    x_starts, x_lengths, x_overlaps = _split_tiles(
+        width,
+        tile_size=tile_sample_size,
+        min_overlap=tile_min_overlap,
+        alignment=spatial_compression_ratio,
+    )
+
+    def decode_clip(clip: torch.Tensor) -> torch.Tensor:
+        rows = []
+        for y_start, y_length in zip(y_starts, y_lengths):
+            row = []
+            for x_start, x_length in zip(x_starts, x_lengths):
+                tile = clip[
+                    ...,
+                    y_start // spatial_compression_ratio : y_start // spatial_compression_ratio
+                    + y_length // spatial_compression_ratio,
+                    x_start // spatial_compression_ratio : x_start // spatial_compression_ratio
+                    + x_length // spatial_compression_ratio,
+                ]
+                if tile.shape[2:] != (
+                    tokens_chunk_size + token_overlap,
+                    tile_sample_size // spatial_compression_ratio,
+                    tile_sample_size // spatial_compression_ratio,
+                ):
+                    raise ValueError(
+                        "MiniMax-H3 visual VAE fixed graph received an incompatible latent tile, "
+                        f"got {tuple(tile.shape[2:])}"
+                    )
+                row.append(_first_tensor(decoder(tile)).float().cpu())
+            rows.append(row)
+        return _stitch_tiles(rows, y_overlaps, x_overlaps)
+
+    num_tokens = latents.shape[2] + token_drop
+    pad_tokens = (-num_tokens) % tokens_chunk_size
+    num_chunks = (num_tokens + pad_tokens) // tokens_chunk_size - int(token_drop > 0)
+    if pad_tokens:
+        latents = torch.cat(
+            [latents, latents[:, :, -1:].repeat(1, 1, pad_tokens, 1, 1)],
+            dim=2,
+        )
+
+    decoded_chunks: list[torch.Tensor] = []
+    overlap = None
+    for index in range(num_chunks):
+        start = index * tokens_chunk_size
+        clip = decode_clip(latents[:, :, start : start + tokens_chunk_size + token_overlap])
+        for subchunk in range(int(token_drop > 0) + 1):
+            frame_start = subchunk * chunk_num_frames
+            chunk = clip[:, :, frame_start : frame_start + chunk_num_frames]
+            chunk = chunk[:, :, frame_pre_padding:]
+            if subchunk == 0:
+                if overlap is not None:
+                    chunk = _blend(overlap, chunk, frame_overlap, dim=-3)
+                decoded_chunks.append(chunk)
+            else:
+                overlap = chunk
+    if overlap is not None:
+        decoded_chunks.append(overlap)
+    video = torch.cat(decoded_chunks, dim=2)
+
+    if pad_tokens:
+        intra_tail = clip_length % temporal_compression_ratio
+        num_tokens_before_pad = latents.shape[2] - pad_tokens
+        pad_frames = sum(
+            (
+                intra_tail
+                if intra_tail and (num_tokens_before_pad + offset) % tokens_chunk_size == 0
+                else temporal_compression_ratio
+            )
+            for offset in range(pad_tokens)
+        )
+        video = video[:, :, :-pad_frames]
+
+    pixel_mean = torch.tensor((0.485, 0.456, 0.406)).view(1, -1, 1, 1, 1)
+    pixel_std = torch.tensor((0.229, 0.224, 0.225)).view(1, -1, 1, 1, 1)
+    return (video * pixel_std + pixel_mean).clamp(0, 1)
+
+
+@torch.no_grad()
+def decode_minimax_h3_audio(
+    decoder: Callable[[torch.Tensor], Any],
+    normalized_latents: torch.Tensor,
+    *,
+    latents_mean: list[float] | tuple[float, ...],
+    latents_std: list[float] | tuple[float, ...],
+    chunk_latent_frames: int | None = None,
+    chunk_core_frames: int = 16,
+    hop_length: int = 800,
+) -> torch.Tensor:
+    """Denormalize stereo-as-batch H3 latents and return ``(1, 2, samples)``."""
+
+    if normalized_latents.ndim != 3 or normalized_latents.shape[0] != AUDIO_CHANNELS:
+        raise ValueError("MiniMax-H3 audio latents must have shape (2, C, T)")
+    mean = torch.tensor(latents_mean, dtype=torch.float32).view(1, -1, 1)
+    std = torch.tensor(latents_std, dtype=torch.float32).view(1, -1, 1)
+    latents = normalized_latents.float() * std + mean
+    if chunk_latent_frames is None:
+        waveform = _first_tensor(decoder(latents))
+    else:
+        total_frames = int(latents.shape[-1])
+        if not total_frames > chunk_latent_frames:
+            raise ValueError(
+                "chunk_latent_frames must be smaller than the full audio latent length"
+            )
+        if not 0 < chunk_core_frames <= chunk_latent_frames:
+            raise ValueError("chunk_core_frames must be in (0, chunk_latent_frames]")
+        pieces = []
+        decoded_windows: dict[int, torch.Tensor] = {}
+        halo = (chunk_latent_frames - chunk_core_frames) // 2
+        for start in range(0, total_frames, chunk_core_frames):
+            end = min(start + chunk_core_frames, total_frames)
+            window_start = min(
+                max(0, start - halo),
+                total_frames - chunk_latent_frames,
+            )
+            window_end = window_start + chunk_latent_frames
+            decoded = decoded_windows.get(window_start)
+            if decoded is None:
+                decoded = _first_tensor(decoder(latents[..., window_start:window_end]))
+                decoded_windows[window_start] = decoded
+            sample_start = (start - window_start) * hop_length
+            sample_end = (end - window_start) * hop_length
+            pieces.append(decoded[..., sample_start:sample_end])
+        waveform = torch.cat(pieces, dim=-1)
+    if waveform.shape[:2] != (AUDIO_CHANNELS, 1):
+        raise RuntimeError(
+            "MiniMax-H3 audio VAE must return stereo-as-batch mono waveforms, got "
+            f"{tuple(waveform.shape)}"
+        )
+    return waveform.float().permute(1, 0, 2).contiguous()

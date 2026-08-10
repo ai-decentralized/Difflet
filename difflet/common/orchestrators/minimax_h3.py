@@ -13,6 +13,9 @@ TEXT_ENCODER_LAYER = 50
 TEXT_SEQ_LEN = 1024
 VIDEO_VAE_FRAMES_PER_CHUNK = 17
 VIDEO_VAE_LATENTS_PER_CHUNK = 5
+AUDIO_VAE_CHUNK_CORE_FRAMES = 16
+AUDIO_VAE_CHUNK_HALO_FRAMES = 16
+AUDIO_VAE_CHUNK_LATENT_FRAMES = AUDIO_VAE_CHUNK_CORE_FRAMES + 2 * AUDIO_VAE_CHUNK_HALO_FRAMES
 
 DEFAULT_HEIGHT = 768
 DEFAULT_WIDTH = 1344
@@ -41,5 +44,5 @@ def stage_compiled_dir_from_values(
     if stage == "video_vae":
         return base / f"minimax_h3_video_vae_h{height}w{width}f{num_frames}"
     if stage == "audio_vae":
-        return base / f"minimax_h3_audio_vae_f{num_frames}"
+        return base / (f"minimax_h3_audio_vae_f{num_frames}_chunk{AUDIO_VAE_CHUNK_LATENT_FRAMES}")
     raise ValueError(f"unknown MiniMax-H3 stage {stage!r}")
