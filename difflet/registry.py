@@ -165,6 +165,7 @@ def _ensure_builtin_models_registered() -> None:
     _register_builtin_hunyuan_video_15()
     _register_builtin_hunyuan_video()
     _register_builtin_qwen_image()
+    _register_builtin_minimax_h3()
     _register_builtin_ltx_2()
 
 
@@ -285,6 +286,51 @@ def _register_builtin_qwen_image() -> None:
         backends=("trainium",),
     )
     class _QwenImageRegistration:
+        pass
+
+
+def _register_builtin_minimax_h3() -> None:
+    def is_minimax_h3(model_id: str) -> bool:
+        value = model_id.lower().replace("_", "-")
+        return "minimax-h3" in value or "minimaxai/h3" in value
+
+    @register_model(
+        name="minimax_h3",
+        application_factory="difflet.models.minimax_h3.entry:create_minimax_h3_application",
+        hf_paths=("MiniMaxAI/MiniMax-H3",),
+        detector=is_minimax_h3,
+        default_parallel=DiffletParallelConfig(tp_degree=4),
+        default_shape={"height": 768, "width": 1344, "num_frames": 124},
+        backends=("trainium",),
+        # The repository also contains the Ref2VA transformer and the original
+        # FL2VA/Ref2VA checkpoints.  The first Difflet path is the root-level
+        # diffusers T2VA partition, so avoid downloading those duplicate weights.
+        download_patterns=(
+            "*.json",
+            "*.txt",
+            "*.md",
+            "LICENSE",
+            "requirements.txt",
+            "transformer/config.json",
+            "transformer/diffusion_pytorch_model*.safetensors",
+            "transformer/diffusion_pytorch_model.safetensors.index.json",
+            "text_encoder/config.json",
+            "text_encoder/generation_config.json",
+            "text_encoder/model*.safetensors",
+            "text_encoder/model.safetensors.index.json",
+            "tokenizer/*",
+            "processor/*",
+            "vae/config.json",
+            "vae/diffusion_pytorch_model*.safetensors",
+            "vae/diffusion_pytorch_model.safetensors.index.json",
+            "audio_vae/config.json",
+            "audio_vae/diffusion_pytorch_model*.safetensors",
+            "audio_vae/diffusion_pytorch_model.safetensors.index.json",
+            "scheduler/scheduler_config.json",
+            "audio_scheduler/scheduler_config.json",
+        ),
+    )
+    class _MiniMaxH3Registration:
         pass
 
 
