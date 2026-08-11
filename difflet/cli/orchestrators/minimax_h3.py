@@ -280,6 +280,7 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             height=args.height or h3_common.DEFAULT_HEIGHT,
             width=args.width or h3_common.DEFAULT_WIDTH,
             num_frames=args.num_frames or h3_common.DEFAULT_NUM_FRAMES,
+            precomputed_adaln=bool(getattr(args, "adaln_precompute", False)),
         )
         app = NeuronMiniMaxH3TransformerApplication(
             model_path=transformer_path,
@@ -299,10 +300,55 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         height = args.height or h3_common.DEFAULT_HEIGHT
         width = args.width or h3_common.DEFAULT_WIDTH
         num_frames = args.num_frames or h3_common.DEFAULT_NUM_FRAMES
+
+        adaln_tables: dict[int, torch.Tensor] = {}
+
+        def _adaln_table(num_steps: int) -> torch.Tensor | None:
+            if not bool(getattr(config, "precomputed_adaln", False)):
+                return None
+            if num_steps not in adaln_tables:
+                from difflet.models.minimax_h3.pipeline import build_adaln_modulation_table
+
+                cache_path = Path(compiled_dir) / f"adaln_table_steps{num_steps}.pt"
+                if cache_path.exists():
+                    adaln_tables[num_steps] = torch.load(cache_path)
+                else:
+                    video_sched, audio_sched = load_minimax_h3_schedulers(model_dir)
+                    video_sched.set_timesteps(num_steps, device="cpu")
+                    audio_sched.set_timesteps(num_steps, device="cpu")
+                    # Slot order matches the denoise loop: 0 = audio, 1 = video.
+                    timesteps = torch.stack(
+                        [
+                            audio_sched.timesteps.to(torch.float32),
+                            video_sched.timesteps.to(torch.float32),
+                        ],
+                        dim=-1,
+                    )
+                    table = build_adaln_modulation_table(
+                        str(Path(model_dir) / "transformer"),
+                        timesteps,
+                        num_layers=int(config.num_layers),
+                        freq_dim=int(config.freq_dim),
+                        time_embed_hidden_dim=int(config.time_embed_hidden_dim),
+                        time_embed_dim=int(config.time_embed_dim),
+                        hidden_size=int(config.hidden_size),
+                        dtype=torch.bfloat16,
+                    )
+                    torch.save(table, cache_path)
+                    adaln_tables[num_steps] = table
+                    print(
+                        f"[generate] precomputed AdaLN table for {num_steps} steps "
+                        f"({table.numel() * table.element_size() / 2**20:.0f} MiB) -> {cache_path}"
+                    )
+            return adaln_tables[num_steps]
+
         for req in stage_loop.claimed_requests(args):
             with stage_loop.request_scope(args, req, final=False):
                 text = torch.load(stage_loop.work_file(args, req, "text.pt"))
                 video_scheduler, audio_scheduler = load_minimax_h3_schedulers(model_dir)
+                request_steps = int(
+                    stage_loop.effective(req, args, "steps", h3_common.DEFAULT_STEPS)
+                )
                 output = denoise_minimax_h3_t2va(
                     app,
                     encoder_hidden_states=text["encoder_hidden_states"],
@@ -311,13 +357,12 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                     height=height,
                     width=width,
                     num_frames=num_frames,
-                    num_inference_steps=int(
-                        stage_loop.effective(req, args, "steps", h3_common.DEFAULT_STEPS)
-                    ),
+                    num_inference_steps=request_steps,
                     seed=req.seed,
                     video_scheduler=video_scheduler,
                     audio_scheduler=audio_scheduler,
                     model_dtype=torch.bfloat16,
+                    adaln_modulation_table=_adaln_table(request_steps),
                 )
                 destination = stage_loop.work_file(args, req, "latents.pt")
                 torch.save(
@@ -476,6 +521,7 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             height=args.height or h3_common.DEFAULT_HEIGHT,
             width=args.width or h3_common.DEFAULT_WIDTH,
             num_frames=args.num_frames or h3_common.DEFAULT_NUM_FRAMES,
+            adaln_precompute=bool(getattr(args, "adaln_precompute", False)),
         )
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:

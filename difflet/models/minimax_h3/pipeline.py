@@ -23,6 +23,91 @@ from difflet.models.minimax_h3.contracts import (
 from difflet.models.minimax_h3.scheduling_minimax_h3 import MiniMaxH3Scheduler
 
 
+def build_adaln_modulation_table(
+    transformer_path: str,
+    timesteps: torch.Tensor,
+    *,
+    num_layers: int,
+    freq_dim: int,
+    time_embed_hidden_dim: int,
+    time_embed_dim: int,
+    hidden_size: int,
+    dtype: torch.dtype = torch.bfloat16,
+) -> torch.Tensor:
+    """Precompute every block's AdaLN modulation for a fixed sampling schedule.
+
+    The 13B `adaln_proj` branch depends only on `(timestep, modality)`, so for a
+    frozen schedule its outputs can be built once on the host and streamed to
+    the device per step, and the branch's weights never need to be resident.
+
+    Args:
+        transformer_path: the HF `transformer/` subfolder holding the sharded
+            checkpoint and its safetensors index.
+        timesteps: `(num_steps, num_timesteps)` float32 — the per-step timestep
+            slots exactly as the denoise loop passes them (slot 0 audio, slot 1
+            video for T2VA).
+
+    Returns `(num_steps, num_layers, 6, num_timesteps * MODALITY_NUM,
+    hidden_size)` in ``dtype``, matching the row layout `adaln_proj` emits:
+    parameters in shift/scale/gate msa-then-mlp order, rows `t * 3 + modality`.
+    """
+    import json
+    import os
+
+    from diffusers.models.embeddings import TimestepEmbedding, Timesteps
+    from safetensors import safe_open
+
+    from difflet.models.minimax_h3.modeling_minimax_h3 import MINIMAX_H3_MODALITY_NUM
+
+    if timesteps.ndim != 2:
+        raise ValueError(f"timesteps must be (num_steps, num_timesteps), got {list(timesteps.shape)}")
+    index_path = os.path.join(
+        transformer_path, "diffusion_pytorch_model.safetensors.index.json"
+    )
+    weight_map = json.load(open(index_path))["weight_map"]
+    handles: dict[str, Any] = {}
+
+    def _load(key: str) -> torch.Tensor:
+        shard = weight_map[key]
+        if shard not in handles:
+            handles[shard] = safe_open(
+                os.path.join(transformer_path, shard), framework="pt"
+            )
+        return handles[shard].get_tensor(key)
+
+    time_proj = Timesteps(num_channels=freq_dim, flip_sin_to_cos=True, downscale_freq_shift=0)
+    time_embedder = TimestepEmbedding(
+        in_channels=freq_dim, time_embed_dim=time_embed_hidden_dim, out_dim=time_embed_dim
+    )
+    time_embedder.load_state_dict(
+        {
+            key[len("time_embedder.") :]: _load(key)
+            for key in weight_map
+            if key.startswith("time_embedder.")
+        }
+    )
+    time_embedder.float().eval()
+
+    num_steps, num_timesteps = timesteps.shape
+    with torch.no_grad():
+        temb = time_embedder(time_proj(timesteps.reshape(-1).to(torch.float32)))
+        activated = torch.nn.functional.silu(temb)
+        rows = num_timesteps * MINIMAX_H3_MODALITY_NUM
+        table = torch.empty(num_steps, num_layers, 6, rows, hidden_size, dtype=dtype)
+        for layer in range(num_layers):
+            weight = _load(f"transformer_blocks.{layer}.adaln_proj.linear.weight")
+            bias = _load(f"transformer_blocks.{layer}.adaln_proj.linear.bias")
+            # Mirror MiniMaxH3AdaLayerNormModulation exactly: activate at temb
+            # precision, cast down to the projection dtype, then the checkpoint's
+            # (modality, param, hidden) output layout with rows `t * 3 + modality`.
+            out = torch.nn.functional.linear(activated.to(weight.dtype), weight, bias)
+            out = out.view(num_steps, num_timesteps, MINIMAX_H3_MODALITY_NUM, 6, hidden_size)
+            table[:, layer] = (
+                out.permute(0, 3, 1, 2, 4).reshape(num_steps, 6, rows, hidden_size).to(dtype)
+            )
+    return table
+
+
 @dataclass(frozen=True)
 class MiniMaxH3LatentOutput:
     video_latents: torch.Tensor
@@ -192,8 +277,14 @@ def denoise_minimax_h3_t2va(
     video_scheduler: MiniMaxH3Scheduler,
     audio_scheduler: MiniMaxH3Scheduler,
     model_dtype: torch.dtype = torch.bfloat16,
+    adaln_modulation_table: torch.Tensor | None = None,
 ) -> MiniMaxH3LatentOutput:
-    """Run H3's guidance-distilled joint video/audio denoising loop."""
+    """Run H3's guidance-distilled joint video/audio denoising loop.
+
+    ``adaln_modulation_table`` is required when the transformer graph was built
+    with ``precomputed_adaln=True``: `(num_steps, num_layers, 6, 6, hidden)`,
+    step-aligned with the two schedulers' shared timestep sequence.
+    """
 
     if encoder_hidden_states.ndim != 3 or encoder_hidden_states.shape[0] != 1:
         raise ValueError(
@@ -271,11 +362,25 @@ def denoise_minimax_h3_t2va(
         layout.attention_mask.unsqueeze(0),
     )
 
-    for video_timestep, audio_timestep in zip(
-        video_scheduler.timesteps,
-        audio_scheduler.timesteps,
+    if adaln_modulation_table is not None and int(adaln_modulation_table.shape[0]) != len(
+        video_scheduler.timesteps
+    ):
+        raise ValueError(
+            f"adaln_modulation_table covers {int(adaln_modulation_table.shape[0])} steps, "
+            f"but the schedule has {len(video_scheduler.timesteps)}"
+        )
+    for step_index, (video_timestep, audio_timestep) in enumerate(
+        zip(
+            video_scheduler.timesteps,
+            audio_scheduler.timesteps,
+        )
     ):
         timestep = torch.stack([audio_timestep, video_timestep]).to(torch.float32)
+        modulation_inputs = (
+            ()
+            if adaln_modulation_table is None
+            else (adaln_modulation_table[step_index].to(model_dtype),)
+        )
         output = transformer(
             video_rows.to(model_dtype),
             audio_rows.to(model_dtype),
@@ -283,6 +388,7 @@ def denoise_minimax_h3_t2va(
             timestep,
             timestep_indices,
             *fixed_inputs,
+            *modulation_inputs,
         )
         if not isinstance(output, (tuple, list)) or len(output) != 2:
             raise RuntimeError("MiniMax-H3 Transformer must return video and audio predictions")

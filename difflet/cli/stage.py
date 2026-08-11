@@ -61,6 +61,7 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--cache-dir", default=None)
     p.add_argument("--compiled-dir", default=None)
     p.add_argument("--vae-tp-degree", type=int, default=None)
+    p.add_argument("--adaln-precompute", dest="adaln_precompute", action="store_true")
     p.add_argument("--teacache-cadence", type=int, default=None)
     p.add_argument("--teacache-online-delta", type=float, default=None)
     p.add_argument("--teacache-speedup", type=float, default=None)
