@@ -352,6 +352,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         time_embed_dim: int,
         norm_eps: float,
         qk_norm_eps: float,
+        precomputed_adaln: bool = False,
     ):
         super().__init__()
         self.norm1 = nn.RMSNorm(hidden_size, eps=norm_eps)
@@ -363,8 +364,15 @@ class MiniMaxH3TransformerBlock(nn.Module):
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
         self.ff = FeedForward(hidden_size, inner_dim=ffn_dim, activation_fn="swiglu", bias=False)
-        self.adaln_proj = MiniMaxH3AdaLayerNormModulation(
-            time_embed_dim=time_embed_dim, hidden_size=hidden_size
+        # Inference deployments may precompute the (timestep, modality) modulation
+        # table offline — it depends only on the sampling schedule — and drop the
+        # 13B adaln_proj branch from the resident weights entirely.
+        self.adaln_proj = (
+            None
+            if precomputed_adaln
+            else MiniMaxH3AdaLayerNormModulation(
+                time_embed_dim=time_embed_dim, hidden_size=hidden_size
+            )
         )
 
     def forward(
@@ -374,8 +382,20 @@ class MiniMaxH3TransformerBlock(nn.Module):
         adaln_indices: torch.Tensor,
         rotary_emb: tuple[torch.Tensor, torch.Tensor],
         attention_mask: torch.Tensor | None = None,
+        block_modulation: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaln_proj(temb)
+        if self.adaln_proj is not None:
+            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaln_proj(temb)
+        elif block_modulation is None:
+            raise ValueError(
+                "this block was built with precomputed_adaln=True and requires block_modulation"
+            )
+        else:
+            # `[6, num_timesteps * MODALITY_NUM, hidden]`, parameters in the same
+            # shift/scale/gate order adaln_proj emits.
+            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+                block_modulation.to(hidden_states.dtype).unbind(0)
+            )
 
         residual = hidden_states
         norm_hidden_states = self.norm1(hidden_states)
@@ -500,6 +520,7 @@ class MiniMaxH3Transformer3DModel(
         norm_eps: float = 1e-5,
         qk_norm_eps: float = 1e-5,
         final_norm_eps: float = 1e-5,
+        precomputed_adaln: bool = False,
     ) -> None:
         super().__init__()
 
@@ -544,6 +565,7 @@ class MiniMaxH3Transformer3DModel(
                     time_embed_dim=time_embed_dim,
                     norm_eps=norm_eps,
                     qk_norm_eps=qk_norm_eps,
+                    precomputed_adaln=precomputed_adaln,
                 )
                 for _ in range(num_layers)
             ]
@@ -574,6 +596,7 @@ class MiniMaxH3Transformer3DModel(
         text_indices: torch.Tensor,
         encoder_attention_mask: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
+        block_modulation: torch.Tensor | None = None,
         attention_kwargs: dict[str, Any] | None = None,
         return_dict: bool = True,
     ) -> MiniMaxH3TransformerOutput | tuple[torch.Tensor, torch.Tensor]:
@@ -664,7 +687,24 @@ class MiniMaxH3Transformer3DModel(
         # 3. Row -> AdaLN table row.
         adaln_indices = timestep_indices * MINIMAX_H3_MODALITY_NUM + token_tags
 
-        for block in self.transformer_blocks:
+        if bool(self.config.precomputed_adaln):
+            expected = (
+                len(self.transformer_blocks),
+                6,
+                int(timestep.shape[-1]) * MINIMAX_H3_MODALITY_NUM,
+                int(self.config.hidden_size),
+            )
+            if block_modulation is None or tuple(block_modulation.shape) != expected:
+                raise ValueError(
+                    "precomputed_adaln=True requires `block_modulation` of shape "
+                    f"{expected}, got "
+                    f"{None if block_modulation is None else list(block_modulation.shape)}."
+                )
+        elif block_modulation is not None:
+            raise ValueError("`block_modulation` is only accepted when precomputed_adaln=True")
+
+        for index, block in enumerate(self.transformer_blocks):
+            modulation = None if block_modulation is None else block_modulation[index]
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 hidden_states = self._gradient_checkpointing_func(
                     block,
@@ -673,6 +713,7 @@ class MiniMaxH3Transformer3DModel(
                     adaln_indices,
                     rotary_emb,
                     attention_mask,
+                    modulation,
                 )
             else:
                 hidden_states = block(
@@ -681,6 +722,7 @@ class MiniMaxH3Transformer3DModel(
                     adaln_indices,
                     rotary_emb,
                     attention_mask,
+                    modulation,
                 )
 
         # 5. Both heads run over every row, then the rows of each modality are selected. The heads are listed in
