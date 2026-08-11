@@ -22,6 +22,7 @@ from difflet.pipeline.cache.policies import (
     TeaCachePolicy,
 )
 from difflet.pipeline.cache.predictors import (
+    CalibratedLinearPredictor,
     LegacyResidualPredictor,
     TaylorSeerPredictor,
 )
@@ -80,6 +81,7 @@ __all__ = [
     "CacheProfileError",
     "CachePolicy",
     "CachePredictor",
+    "CalibratedLinearPredictor",
     "CacheRecovery",
     "CacheSession",
     "CacheRunner",

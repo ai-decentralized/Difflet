@@ -197,3 +197,66 @@ def test_qualified_profile_rejects_failed_decision(tmp_path):
 
     with pytest.raises(CacheProfileError, match="did not pass"):
         load_qualified_cache_profile(profile_path, qualification_path)
+
+
+def _calibrated_candidate(tmp_path: Path, weights: dict) -> Path:
+    horizon_path = tmp_path / "internal" / "schedule.json"
+    horizon_path.parent.mkdir(parents=True, exist_ok=True)
+    horizon_path.write_text("{}\n", encoding="utf-8")
+    contract_path = tmp_path / "internal" / "quality-contract.json"
+    contract_path.write_text("{}\n", encoding="utf-8")
+    profile_path = tmp_path / "calibrated-profile.json"
+    _write_json(
+        profile_path,
+        {
+            "schema": PHASED_CANDIDATE_SCHEMA,
+            "schema_revision": PHASED_CANDIDATE_SCHEMA_REVISION,
+            "candidate_id": "calibrated-test-profile",
+            "policy": {
+                "type": "phased_static",
+                "num_steps": 8,
+                "static_anchor_steps": [0, 1, 2, 4, 7],
+                "warmup_steps": 2,
+                "cooldown_steps": 1,
+                "require_final_anchor": True,
+                "dynamic_budget": 0,
+                "invalid_measurement_fail_closed": True,
+            },
+            "predictor": {"type": "calibrated_linear", "coord": "index", "weights": weights},
+            "horizon_ref": {
+                "path": str(horizon_path),
+                "sha256": sha256_file(horizon_path),
+            },
+            "quality_contract_ref": {
+                "path": str(contract_path),
+                "sha256": sha256_file(contract_path),
+            },
+        },
+    )
+    return profile_path
+
+
+def test_calibrated_candidate_round_trips_and_builds_session(tmp_path):
+    from difflet.pipeline.cache.profile import load_phased_candidate
+
+    weights = {
+        "3": [[1, -0.5], [2, 1.5]],
+        "5": [[2, -0.25], [4, 1.25]],
+        "6": [[2, -0.75], [4, 1.75]],
+    }
+    arm = load_phased_candidate(_calibrated_candidate(tmp_path, weights))
+    assert arm.weights == {
+        3: ((1, -0.5), (2, 1.5)),
+        5: ((2, -0.25), (4, 1.25)),
+        6: ((2, -0.75), (4, 1.75)),
+    }
+    assert arm.predictor_spec()["type"] == "calibrated_linear"
+    assert isinstance(arm.build_session(8), CacheSession)
+
+
+def test_calibrated_candidate_rejects_incomplete_weight_coverage(tmp_path):
+    weights = {"3": [[1, -0.5], [2, 1.5]], "5": [[2, -0.25], [4, 1.25]]}
+    from difflet.pipeline.cache.profile import load_phased_candidate
+
+    with pytest.raises(CacheProfileError, match="exactly the skipped steps"):
+        load_phased_candidate(_calibrated_candidate(tmp_path, weights))

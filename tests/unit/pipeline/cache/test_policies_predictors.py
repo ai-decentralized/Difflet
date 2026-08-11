@@ -298,3 +298,42 @@ def test_teacache_policy_is_independent_of_predictor():
         for index in range(7)
     ]
     assert decisions == [False, False, False, True, False, True, False]
+
+
+def test_calibrated_linear_predictor_replays_frozen_weights():
+    from difflet.pipeline.cache import CalibratedLinearPredictor
+
+    predictor = CalibratedLinearPredictor(weights={4: ((1, -0.5), (3, 1.25))})
+    history = _history([(1, 1, 2.0), (3, 3, 4.0)])
+    result = predictor.predict(_context(4), history)
+    assert torch.allclose(result, torch.tensor([-0.5 * 2.0 + 1.25 * 4.0]))
+    assert predictor.required_history == 2
+
+
+def test_calibrated_linear_predictor_fails_closed_without_table_anchor():
+    from difflet.pipeline.cache import CalibratedLinearPredictor
+
+    predictor = CalibratedLinearPredictor(weights={4: ((1, -0.5), (3, 1.25))})
+    history = _history([(2, 2, 2.0), (3, 3, 4.0)])
+    with pytest.raises(ValueError, match="requires real anchors"):
+        predictor.predict(_context(4), history)
+
+
+def test_calibrated_linear_predictor_measures_off_table_steps_like_taylorseer():
+    from difflet.pipeline.cache import CalibratedLinearPredictor
+
+    predictor = CalibratedLinearPredictor(weights={4: ((1, -0.5), (3, 1.25))})
+    history = _history([(2, 2, 2.0), (3, 3, 4.0)])
+    reference = TaylorSeerPredictor(order=1, coord="index").predict(_context(5), history)
+    assert torch.allclose(predictor.predict(_context(5), history), reference)
+
+
+def test_calibrated_linear_predictor_rejects_invalid_tables():
+    from difflet.pipeline.cache import CalibratedLinearPredictor
+
+    with pytest.raises(ValueError):
+        CalibratedLinearPredictor(weights={})
+    with pytest.raises(ValueError):
+        CalibratedLinearPredictor(weights={4: ((5, 1.0),)})
+    with pytest.raises(ValueError):
+        CalibratedLinearPredictor(weights={4: ((1, float("nan")), (3, 1.0))})

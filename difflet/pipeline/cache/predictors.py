@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from difflet.pipeline.cache.types import CacheHistory, CacheStepContext, Coordinate
 
@@ -145,4 +146,68 @@ class TaylorSeerPredictor:
         return result.to(dtype=original_dtype).detach()
 
 
-__all__ = ["LegacyResidualPredictor", "TaylorSeerPredictor"]
+@dataclass(frozen=True)
+class CalibratedLinearPredictor:
+    """Replay a frozen per-step anchor-combination table derived offline.
+
+    ``weights`` maps each skipped step index to ``((anchor_step, weight), ...)``.
+    The table is only valid for the static anchor sequence it was derived
+    against, so prediction fails closed when a required anchor is absent. Steps
+    outside the table (real anchors probed for control-error measurement) fall
+    back to order-1 Newton extrapolation so the measured signal keeps the same
+    semantics as the TaylorSeer predictor it replaces.
+    """
+
+    weights: Mapping[int, tuple[tuple[int, float], ...]]
+    max_consecutive_predictions: int | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.weights, Mapping) or not self.weights:
+            raise ValueError("calibrated weights must be a non-empty mapping")
+        table: dict[int, tuple[tuple[int, float], ...]] = {}
+        for step, entry in self.weights.items():
+            if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+                raise ValueError("calibrated weight steps must be nonnegative integers")
+            pairs = tuple((anchor, float(weight)) for anchor, weight in entry)
+            anchors = [anchor for anchor, _ in pairs]
+            if (
+                not pairs
+                or anchors != sorted(set(anchors))
+                or any(isinstance(a, bool) or not isinstance(a, int) for a in anchors)
+                or anchors[-1] >= step
+                or any(not math.isfinite(weight) for _, weight in pairs)
+            ):
+                raise ValueError(f"calibrated weight entry for step {step} is invalid")
+            table[step] = pairs
+        object.__setattr__(self, "weights", table)
+
+    @property
+    def required_history(self) -> int:
+        return max(len(entry) for entry in self.weights.values())
+
+    def predict(self, context: CacheStepContext, history: CacheHistory) -> Any:
+        entry = self.weights.get(context.step_index)
+        if entry is None:
+            # Anchor-step measurement fallback: order-1 Newton over the two most
+            # recent anchors, matching the TaylorSeer control-error signal.
+            if not history.ready(2):
+                raise ValueError("calibrated measurement fallback requires two anchors")
+            previous, latest = history.tail(2)
+            ratio = (context.step_index - latest.step_index) / (
+                latest.step_index - previous.step_index
+            )
+            entry = ((previous.step_index, -ratio), (latest.step_index, 1.0 + ratio))
+        anchors = {anchor.step_index: anchor for anchor in history}
+        missing = [step for step, _ in entry if step not in anchors]
+        if missing:
+            raise ValueError(f"calibrated prediction requires real anchors {missing}")
+        result = None
+        original_dtype = None
+        for step, weight in entry:
+            value, dtype = _torch_working_copy(anchors[step].output)
+            original_dtype = dtype if original_dtype is None else original_dtype
+            result = value * weight if result is None else result + value * weight
+        return result.to(dtype=original_dtype).detach()
+
+
+__all__ = ["CalibratedLinearPredictor", "LegacyResidualPredictor", "TaylorSeerPredictor"]

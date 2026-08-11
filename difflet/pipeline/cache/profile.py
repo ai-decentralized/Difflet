@@ -15,7 +15,7 @@ from difflet.pipeline.cache.policies import (
     StaticPlusBrakeConfig,
     StaticPlusBrakePolicy,
 )
-from difflet.pipeline.cache.predictors import TaylorSeerPredictor
+from difflet.pipeline.cache.predictors import CalibratedLinearPredictor, TaylorSeerPredictor
 from difflet.pipeline.cache.recovery import QualityRecoveryConfig, QualityRecoveryGuard
 from difflet.pipeline.cache.runner import CacheRunner
 from difflet.pipeline.cache.session import CacheSession
@@ -229,6 +229,45 @@ def _validate_policy(value: Any) -> Mapping[str, Any]:
     return MappingProxyType(policy)
 
 
+def _validate_predictor(value: Any, policy: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the predictor block and return normalized construction fields."""
+
+    if not isinstance(value, Mapping):
+        raise CacheProfileError("cache profile predictor must be a JSON object")
+    kind = value.get("type")
+    if kind == "taylorseer":
+        if set(value) != {"type", "order", "coord"}:
+            raise CacheProfileError("cache profile predictor fields do not match the schema")
+        TaylorSeerPredictor(order=value["order"], coord=value["coord"])
+        return {"order": value["order"], "coord": value["coord"], "weights": None}
+    if kind != "calibrated_linear":
+        raise CacheProfileError("cache profile predictor type is unsupported")
+    if set(value) != {"type", "coord", "weights"} or value["coord"] != "index":
+        raise CacheProfileError("calibrated predictor fields do not match the schema")
+    if policy["type"] != "phased_static":
+        raise CacheProfileError("calibrated predictors require a phased_static policy")
+    weights_doc = value["weights"]
+    if not isinstance(weights_doc, Mapping):
+        raise CacheProfileError("calibrated predictor weights must be an object")
+    anchors = set(policy["static_anchor_steps"])
+    skipped = {step for step in range(policy["num_steps"]) if step not in anchors}
+    try:
+        table = {
+            int(step): tuple((anchor, weight) for anchor, weight in entry)
+            for step, entry in weights_doc.items()
+        }
+    except (TypeError, ValueError) as error:
+        raise CacheProfileError("calibrated predictor weights are malformed") from error
+    if set(table) != skipped or any(
+        anchor not in anchors for entry in table.values() for anchor, _ in entry
+    ):
+        raise CacheProfileError(
+            "calibrated weights must cover exactly the skipped steps using static anchors"
+        )
+    predictor = CalibratedLinearPredictor(weights=table)
+    return {"order": 1, "coord": "index", "weights": predictor.weights}
+
+
 @dataclass(frozen=True)
 class PhasedCandidateArm:
     """A strict static or static-plus-brake runtime profile."""
@@ -242,6 +281,7 @@ class PhasedCandidateArm:
     quality_contract_ref: Mapping[str, str]
     content_sha256: str
     file_sha256: str
+    weights: Mapping[int, tuple[tuple[int, float], ...]] | None = None
 
     def policy_spec(self) -> dict[str, Any]:
         value = dict(self.policy)
@@ -251,7 +291,16 @@ class PhasedCandidateArm:
         return value
 
     def predictor_spec(self) -> dict[str, Any]:
-        return {"type": "taylorseer", "order": self.order, "coord": self.coord}
+        if self.weights is None:
+            return {"type": "taylorseer", "order": self.order, "coord": self.coord}
+        return {
+            "type": "calibrated_linear",
+            "coord": self.coord,
+            "weights": {
+                str(step): [[anchor, weight] for anchor, weight in entry]
+                for step, entry in self.weights.items()
+            },
+        }
 
     def build_session(self, num_steps: int) -> CacheSession:
         expected_steps = int(self.policy["num_steps"])
@@ -295,10 +344,15 @@ class PhasedCandidateArm:
                 require_final_anchor=self.policy["require_final_anchor"],
             )
         )
+        predictor = (
+            TaylorSeerPredictor(order=self.order, coord=self.coord)
+            if self.weights is None
+            else CalibratedLinearPredictor(weights=self.weights)
+        )
         return CacheSession(
             CacheRunner(
                 policy,
-                TaylorSeerPredictor(order=self.order, coord=self.coord),
+                predictor,
                 recovery=recovery,
             ),
             num_steps=num_steps,
@@ -338,12 +392,7 @@ def load_phased_candidate(path: str | Path) -> PhasedCandidateArm:
     content_sha256 = _validate_content_hash(document, "cache profile")
     candidate_id = _strict_string(document["candidate_id"], "candidate_id")
     policy = _validate_policy(document["policy"])
-    predictor = document["predictor"]
-    if not isinstance(predictor, Mapping) or set(predictor) != {"type", "order", "coord"}:
-        raise CacheProfileError("cache profile predictor fields do not match the schema")
-    if predictor["type"] != "taylorseer":
-        raise CacheProfileError("cache profile predictor type is unsupported")
-    TaylorSeerPredictor(order=predictor["order"], coord=predictor["coord"])
+    predictor = _validate_predictor(document["predictor"], policy)
     horizon_path, horizon_digest = _resolve_reference(
         path, document["horizon_ref"], "horizon_ref"
     )
@@ -356,6 +405,7 @@ def load_phased_candidate(path: str | Path) -> PhasedCandidateArm:
         policy=policy,
         order=predictor["order"],
         coord=predictor["coord"],
+        weights=predictor["weights"],
         horizon_ref=MappingProxyType(
             {"path": str(horizon_path), "sha256": horizon_digest}
         ),
