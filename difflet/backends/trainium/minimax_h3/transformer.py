@@ -36,6 +36,10 @@ class MiniMaxH3TransformerInferenceConfig(InferenceConfig):
         self.vae_spatial_compression = int(
             getattr(self, "vae_spatial_compression", VAE_SPATIAL_COMPRESSION)
         )
+        # When enabled, the 13B adaln_proj branch is dropped from the device
+        # graph; the host feeds each step's precomputed modulation table as an
+        # extra graph input instead (schedule-dependent data, not weights).
+        self.precomputed_adaln = bool(getattr(self, "precomputed_adaln", False))
 
     def get_required_attributes(self) -> List[str]:
         return [
@@ -199,7 +203,11 @@ def _replace_h3_linears_for_tp(transformer: nn.Module) -> None:
         _replace_block_for_tp(block, tp_degree, hidden_size, ffn_dim)
         # The 13B AdaLN branch is sharded in HBM; its tiny per-step output is
         # gathered because the residual stream remains replicated after TP.
-        block.adaln_proj.linear = _column_parallel_like(block.adaln_proj.linear, gather_output=True)
+        # Absent entirely when the modulation table is precomputed on the host.
+        if block.adaln_proj is not None:
+            block.adaln_proj.linear = _column_parallel_like(
+                block.adaln_proj.linear, gather_output=True
+            )
 
 
 def _prefix_bounds(
@@ -303,6 +311,7 @@ class _MiniMaxH3TransformerTraceModule(nn.Module):
             norm_eps=float(config.norm_eps),
             qk_norm_eps=float(config.qk_norm_eps),
             final_norm_eps=float(config.final_norm_eps),
+            precomputed_adaln=bool(config.precomputed_adaln),
         )
         _replace_h3_linears_for_tp(self.transformer)
 
@@ -328,6 +337,7 @@ class _MiniMaxH3TransformerTraceModule(nn.Module):
         text_indices,
         encoder_attention_mask,
         attention_mask,
+        block_modulation=None,
     ):
         return self.transformer(
             hidden_states=hidden_states,
@@ -342,6 +352,7 @@ class _MiniMaxH3TransformerTraceModule(nn.Module):
             text_indices=text_indices,
             encoder_attention_mask=encoder_attention_mask,
             attention_mask=attention_mask,
+            block_modulation=block_modulation,
             return_dict=False,
         )
 
@@ -383,6 +394,17 @@ class ModelWrapperMiniMaxH3Transformer(ModelWrapper):
         timestep_indices[layout.audio_indices] = 0
         encoder_attention_mask = torch.zeros(batch_size, int(config.text_seq_len), dtype=torch.bool)
         encoder_attention_mask[:, :live_text_tokens] = True
+        modulation_inputs: tuple[torch.Tensor, ...] = ()
+        if bool(config.precomputed_adaln):
+            modulation_inputs = (
+                torch.randn(
+                    int(config.num_layers),
+                    6,
+                    2 * 3,  # two timestep slots x three modalities
+                    int(config.hidden_size),
+                    dtype=dtype,
+                ),
+            )
         return [
             (
                 torch.randn(
@@ -412,6 +434,7 @@ class ModelWrapperMiniMaxH3Transformer(ModelWrapper):
                 layout.text_indices.to(torch.int64),
                 encoder_attention_mask,
                 layout.attention_mask.unsqueeze(0),
+                *modulation_inputs,
             )
         ]
 
@@ -475,6 +498,12 @@ class NeuronMiniMaxH3TransformerApplication(NeuronApplicationBase):
             key if key.startswith("transformer.") else f"transformer.{key}": value
             for key, value in state_dict.items()
         }
+        if bool(getattr(config, "precomputed_adaln", False)):
+            # The host feeds the precomputed modulation table per step; the 13B
+            # adaln_proj branch never becomes device weights.
+            converted = {
+                key: value for key, value in converted.items() if ".adaln_proj." not in key
+            }
         prefixes = [
             *[
                 f"transformer.token_refiner.refiner_blocks.{index}.ff"

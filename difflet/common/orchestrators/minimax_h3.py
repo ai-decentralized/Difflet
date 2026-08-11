@@ -31,6 +31,7 @@ def stage_compiled_dir_from_values(
     height: int,
     width: int,
     num_frames: int,
+    adaln_precompute: bool = False,
 ) -> Path:
     """Return a collision-free cache path for one staged H3 artifact."""
 
@@ -38,8 +39,13 @@ def stage_compiled_dir_from_values(
     if stage == "text":
         return base / (f"minimax_h3_text_tp{tp_degree}_seq{TEXT_SEQ_LEN}_layer{TEXT_ENCODER_LAYER}")
     if stage == "generate":
+        # The precomputed-AdaLN graph has one extra input and no adaln weights,
+        # so it must never share an artifact directory with the resident-AdaLN
+        # graph. The table itself is host data keyed separately by schedule.
+        suffix = "_padaln" if adaln_precompute else ""
         return base / (
-            f"minimax_h3_dit_tp{tp_degree}_h{height}w{width}f{num_frames}" f"_text{TEXT_SEQ_LEN}"
+            f"minimax_h3_dit_tp{tp_degree}_h{height}w{width}f{num_frames}"
+            f"_text{TEXT_SEQ_LEN}{suffix}"
         )
     if stage == "video_vae":
         return base / f"minimax_h3_video_vae_h{height}w{width}f{num_frames}"

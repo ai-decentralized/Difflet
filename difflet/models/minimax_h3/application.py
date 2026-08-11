@@ -27,6 +27,7 @@ def create_minimax_h3_transformer_config(
     width: int,
     num_frames: int,
     text_seq_len: int = h3_common.TEXT_SEQ_LEN,
+    precomputed_adaln: bool = False,
 ):
     from difflet.backends.trainium.core.config import NeuronConfig
     from difflet.backends.trainium.minimax_h3.transformer import (
@@ -47,6 +48,7 @@ def create_minimax_h3_transformer_config(
         width=width,
         num_frames=num_frames,
         text_seq_len=text_seq_len,
+        precomputed_adaln=precomputed_adaln,
     )
 
 
