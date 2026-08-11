@@ -17,6 +17,7 @@ def _flux_args(**overrides) -> argparse.Namespace:
         teacache_cadence=None, teacache_online_delta=None,
         teacache_speedup=None, teacache_calibration=None,
         cache_profile_file=None, cache_profile_qualification_file=None,
+        taef1=False, taef1_path=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -73,7 +74,7 @@ def test_teacache_kwargs_speedup_and_app_kwargs():
         teacache_speedup=1.5, teacache_calibration="/cal.json",
         teacache_cadence=3, teacache_online_delta=0.4,
     ))
-    kw = orch._teacache_kwargs()
+    kw = orch._model_kwargs()
     assert kw["teacache_speedup"] == 1.5
     assert kw["teacache_calibration_path"] == "/cal.json"
     assert kw["application_kwargs"]["teacache_cadence"] == 3
@@ -81,7 +82,19 @@ def test_teacache_kwargs_speedup_and_app_kwargs():
 
 
 def test_teacache_kwargs_empty_when_unset():
-    assert FluxOrchestrator(_flux_args())._teacache_kwargs() == {}
+    assert FluxOrchestrator(_flux_args())._model_kwargs() == {}
+
+
+def test_taef1_kwargs_reach_compile_and_application_cache_identity():
+    kwargs = FluxOrchestrator(
+        _flux_args(taef1=True, taef1_path="madebyollin/taef1")
+    )._model_kwargs()
+    assert kwargs == {
+        "application_kwargs": {
+            "taef1": True,
+            "taef1_path": "madebyollin/taef1",
+        }
+    }
 
 
 def test_qualified_cache_profile_is_forwarded_to_application():
@@ -90,7 +103,7 @@ def test_qualified_cache_profile_is_forwarded_to_application():
             cache_profile_file="/profile.json",
             cache_profile_qualification_file="/qualification.json",
         )
-    )._teacache_kwargs()
+    )._model_kwargs()
     assert kwargs["application_kwargs"] == {
         "cache_profile_file": "/profile.json",
         "cache_profile_qualification_file": "/qualification.json",

@@ -115,3 +115,39 @@ def test_qualified_cache_profile_rejects_legacy_cache_flags(capsys):
         )
     assert exc.value.code == 1
     assert "qualified cache profile cannot be combined" in capsys.readouterr().err
+
+
+def test_taef1_requires_model_path(capsys):
+    cli = _cli()
+    with pytest.raises(SystemExit) as exc:
+        cli.main([
+            "generate", "--model-id", "black-forest-labs/FLUX.1-dev",
+            "--prompt", "x", "--output", "o.png", "--taef1",
+        ])
+    assert exc.value.code == 1
+    assert "--taef1-path" in capsys.readouterr().err
+
+
+def test_taef1_path_implies_taef1(monkeypatch):
+    cli = _cli()
+    captured = {}
+
+    class FakeOrch:
+        def generate(self):
+            return None
+
+    def fake_orchestrator(args):
+        captured["taef1"] = args.taef1
+        captured["taef1_path"] = args.taef1_path
+        return FakeOrch()
+
+    monkeypatch.setattr(cli, "_get_orchestrator", fake_orchestrator)
+    cli.main([
+        "generate", "--model-id", "black-forest-labs/FLUX.1-dev",
+        "--prompt", "x", "--output", "o.png",
+        "--taef1-path", "madebyollin/taef1",
+    ])
+    assert captured == {
+        "taef1": True,
+        "taef1_path": "madebyollin/taef1",
+    }
