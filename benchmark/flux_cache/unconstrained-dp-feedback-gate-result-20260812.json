@@ -1,0 +1,39 @@
+{
+  "schema": "difflet-flux-unconstrained-dp-feedback-gate-result",
+  "schema_revision": 1,
+  "study_id": "flux-unconstrained-dp-feedback-gate-20260812",
+  "status": "offline_win_reversed_on_device_constraints_retained",
+  "architecture_speed_claim": false,
+  "serving_claim": false,
+  "question": "Do the hand-picked schedule constraints (warmup=6, gap caps 6/10, phase boundary 21) earn their keep, or can a measured-cost DP replace them?",
+  "offline_scan": {
+    "constraints_removed": ["warmup", "middle_gap_cap", "tail_gap_cap", "phase_boundary"],
+    "mechanism_minimum_kept": "anchors must include {0,1,2,49}",
+    "aggregation_cross": {"q95": "hand-picked", "q90": "derived from the contract failure gate alpha=0.10"},
+    "headline": {
+      "unconstrained_12_vs_production_12_holdout_dev": [0.0433, 0.0890],
+      "unconstrained_10_vs_production_13_holdout_dev": [0.0529, 0.0551],
+      "warmup_emerged": false,
+      "old_gap_caps_violated": true
+    }
+  },
+  "device_gate": {
+    "arm": "derived-unconstrained-a12q90-perstep-evenfit",
+    "anchors": [0, 1, 2, 9, 18, 26, 32, 38, 43, 46, 48, 49],
+    "prompts": "24 odd holdout, seed 2, same harness and control data as V10/V11",
+    "control": {"candidate": "C12 production a12 + per-step weights", "real_mean_dev": 0.2796, "erosion": 3.08},
+    "result": {"real_mean_dev": 0.4732, "real_q95_dev": 0.668, "erosion": 10.82, "elapsed_ms_per_step": 3.63},
+    "verdict": "offline -51% inverted to +69% worse under real feedback"
+  },
+  "interpretation": {
+    "mechanism": "the additive cost model prices early skips cheap (small delta-sigma), but early deviations are multiplied through the forty-plus subsequent model invocations; the production dense warmup bounds early path deviation, encoding feedback knowledge the offline model cannot see",
+    "reclassification": "warmup/gap caps/phase boundary move from hand-picked-ugliness to feedback-constraints-awaiting-derivation; deletion is refuted, derivation (path-deviation envelope in the DP) is the honest fix",
+    "theme": "third independent instance of the reversal: weights, depth segments, now schedules — teacher-forced optima concentrate their aggression exactly where feedback amplification is strongest",
+    "q90_note": "the contract-derived aggregation quantile remains a valid provenance fix, orthogonal to this reversal"
+  },
+  "artifacts": {
+    "offline_scan": "scratchpad/unconstrained_dp.py",
+    "device_run": "/home/ubuntu/difflet-artifacts/flux-cache-u12-feedback-gate/",
+    "control_data": "/home/ubuntu/difflet-artifacts/flux-cache-v12-speed-full/latent-analysis.json"
+  }
+}
