@@ -41,7 +41,7 @@ from difflet.models.flux.modeling_flux import (
     NeuronFluxTransformer2DModel,
 )
 
-TAP_PLACEMENTS = ("post", "shard")
+TAP_PLACEMENTS = ("post", "bf16", "noalias", "shard")
 
 
 def _seq_len(config) -> int:
@@ -84,10 +84,21 @@ class FluxBackboneGramTapModel(nn.Module):
         seq, dim = _seq_len(config), _out_dim(config)
         self.tp_degree = int(config.neuron_config.tp_degree)
         self.shard_width = dim // self.tp_degree
-        width = dim if placement == "post" else self.shard_width
-        self.anchor = nn.Parameter(
-            torch.zeros(1, seq, width, dtype=torch.float32), requires_grad=False
-        )
+        if placement == "bf16":
+            # Flat so the alias target can be a reshape of the output: a reshape
+            # is a distinct HLO value (dodging the dedup contract) yet a bitcast
+            # on contiguous memory, so it costs nothing and the bank stays bf16.
+            self.anchor = nn.Parameter(
+                torch.zeros(1, seq * dim, dtype=torch.bfloat16), requires_grad=False
+            )
+        else:
+            # ``noalias`` deliberately mirrors ``post`` — same fp32 bank, same
+            # reductions — and differs only in dropping the write-back, so the
+            # difference between the two prices the write-back on its own.
+            width = dim if placement in ("post", "noalias") else self.shard_width
+            self.anchor = nn.Parameter(
+                torch.zeros(1, seq, width, dtype=torch.float32), requires_grad=False
+            )
 
     def _slice_for_rank(self, tensor: torch.Tensor) -> torch.Tensor:
         """This rank's slice of the output channels, taken from the replica.
@@ -114,6 +125,18 @@ class FluxBackboneGramTapModel(nn.Module):
 
     def forward(self, *model_inputs):
         output = self.transformer(*model_inputs)
+        if self.placement == "noalias":
+            # Identical to ``post`` except that nothing is written back.
+            return output, self._gram_row(output.float())
+        if self.placement == "bf16":
+            flat = output.reshape(1, -1)
+            row = torch.stack(
+                [
+                    (self.anchor * flat).sum(dtype=torch.float32),
+                    (flat * flat).sum(dtype=torch.float32),
+                ]
+            )
+            return output, row, flat
         tapped = output if self.placement == "post" else self._slice_for_rank(output)
         current = tapped.float()
         # Host receives (output, gram_row); `current` is the alias target and
@@ -127,8 +150,11 @@ class _GramTapModelInstance(BaseModelInstance):
 
     def get(self, bucket_rank, **kwargs):
         module = self.module
-        # The alias sits at the last index in both placements: out 0 = output,
-        # out 1 = gram row (both returned), out 2 = fp32 anchor written in place.
+        # out 0 = output, out 1 = gram row (both returned). Where a bank is
+        # written back it is out 2, which must be last: an aliased output never
+        # returns to host, so anything after it would leave a hole.
+        if module.placement == "noalias":
+            return module, {}
         return module, {module.anchor: 2}
 
 
@@ -146,9 +172,9 @@ class ModelWrapperFluxGramTap(ModelWrapperFluxBackbone):
         def _create_model():
             model = FluxBackboneGramTapModel(config, placement=placement)
             model = model.to(dtype=dtype)
-            # The bank stays fp32: `.to(dtype)` above would have demoted it, and
-            # its precision is the point (see the class docstring).
-            model.anchor = nn.Parameter(model.anchor.float(), requires_grad=False)
+            if placement in ("post", "noalias", "shard"):
+                # `.to(dtype)` above demoted the bank; fp32 is the point there.
+                model.anchor = nn.Parameter(model.anchor.float(), requires_grad=False)
             return model.eval()
 
         return _GramTapModelInstance(module_builder=_create_model)
@@ -188,8 +214,15 @@ class NeuronFluxGramTapApplication(NeuronFluxBackboneApplication):
             nested["transformer.global_rank.rank"] = rank
         seq, dim = _seq_len(config), _out_dim(config)
         placement = getattr(config, "gram_tap_placement", "post")
-        width = dim if placement == "post" else dim // int(config.neuron_config.tp_degree)
-        nested["anchor"] = torch.zeros(1, seq, width, dtype=torch.float32)
+        if placement == "bf16":
+            nested["anchor"] = torch.zeros(1, seq * dim, dtype=torch.bfloat16)
+        else:
+            width = (
+                dim
+                if placement in ("post", "noalias")
+                else dim // int(config.neuron_config.tp_degree)
+            )
+            nested["anchor"] = torch.zeros(1, seq, width, dtype=torch.float32)
         return nested
 
 
