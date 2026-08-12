@@ -1098,21 +1098,21 @@
 
   <div class="tablewrap"><table>
     <tr><th>视角</th><th>候选</th><th>调度类别</th><th>判定</th></tr>
-    <tr><td rowspan="3">零调度设计</td><td>预认证格上的在线重规划</td><td>(b) 抽头搭现有集合通信</td><td><span class="pill pending">待格宽度实验</span></td></tr>
+    <tr><td rowspan="3">零调度设计</td><td>预认证格上的在线重规划</td><td>(b) 抽头搭现有集合通信</td><td><span class="pill mixed">大幅降级：禁止在线重解 DP,收缩为已认证路径间选择</span></td></tr>
     <tr><td>锚点检查点的事务式去噪</td><td>(a)+(b) 回滚是再调一次主干</td><td><span class="pill pass">存活·并入核账线</span></td></tr>
     <tr><td>可执行策略对象与运行时收据</td><td>(a) 纯主机</td><td><span class="pill pass">存活·并入阶梯线</span></td></tr>
     <tr><td rowspan="3">主机侧控制平面</td><td>图内零调度抽头与赤字降档</td><td>(b)+(a)</td><td><span class="pill pass">存活·核账线主体</span></td></tr>
     <tr><td>策略编译不变性与认证阶梯</td><td>(a)</td><td><span class="pill pass">存活·即 H3 强化版</span></td></tr>
     <tr><td>跳步段的闭式仿射折叠</td><td>(a)</td><td><span class="pill mixed">恒等式成立·奖品被 K 扫描否决</span></td></tr>
     <tr><td rowspan="3">编译特化 vs 热更新</td><td>跳步段折叠与重用阶数解放</td><td>(a)/(b)</td><td><span class="pill dead">K 扫描否决（见下）</span></td></tr>
-    <tr><td>测量触发的分支调度表</td><td>(a) 测量已存在</td><td><span class="pill pending">待灵敏度实验</span></td></tr>
-    <tr><td>调度编译器与认证阶梯</td><td>(a)</td><td><span class="pill pass">存活·并入阶梯线</span></td></tr>
+    <tr><td>测量触发的分支调度表</td><td>(a) 测量已存在</td><td><span class="pill mixed">大幅降级：DP 灵敏度依据失效,余量需真机重估</span></td></tr>
+    <tr><td>调度编译器与认证阶梯</td><td>(a)</td><td><span class="pill mixed">随阶梯线一并降级（见降级公告①）</span></td></tr>
     <tr><td rowspan="3">消灭手调参数</td><td>锚点时隙合批调度器</td><td><strong>(b) 且严格减少调用数</strong></td><td><span class="pill pass">存活·偏系统首选</span></td></tr>
-    <tr><td>边际锚点定价与证书阶梯</td><td>(a)</td><td><span class="pill pass">存活·并入阶梯线</span></td></tr>
+    <tr><td>边际锚点定价与证书阶梯</td><td>(a)</td><td><span class="pill mixed">随阶梯线一并降级（见降级公告①）</span></td></tr>
     <tr><td>空闲通道真值稽核</td><td>(b) 字面意义的零边际</td><td><span class="pill pending">依赖合批先成立</span></td></tr>
-    <tr><td rowspan="3">服务层</td><td>共权重形状成本阶梯（文本桶/粗网格）</td><td>(b) 换已驻留 key</td><td><span class="pill pending">待文本截断扰动实验</span></td></tr>
-    <tr><td>掩码为数据的令牌子集重算</td><td>(b) 掩码是输入张量</td><td><span class="pill pending">待空间集中度实验·工程量最大</span></td></tr>
-    <tr><td>兑换率驱动的认证阶梯（λ 前沿）</td><td>(a)</td><td><span class="pill pass">存活·四视角独立收敛</span></td></tr>
+    <tr><td rowspan="3">服务层</td><td>共权重形状成本阶梯（文本桶/粗网格）</td><td>(b) 换已驻留 key</td><td><span class="pill pending">中度降级：首实验仍有效,混排调度需真机门</span></td></tr>
+    <tr><td>掩码为数据的令牌子集重算</td><td>(b) 掩码是输入张量</td><td><span class="pill pending">中度降级：叠加深度抵消先例与离线定价不可信双重前置</span></td></tr>
+    <tr><td>兑换率驱动的认证阶梯（λ 前沿）</td><td>(a)</td><td><span class="pill mixed">大幅降级：前沿排序被 U12 否决,降为候选生成器,每档需真机门</span></td></tr>
   </table></div>
 
   <p><strong>收敛统计</strong>：λ 认证阶梯被四个视角独立提出（调度审计全部为 (a)），是本轮收敛度最高的候选；仿射折叠被两个视角独立提出。收敛之后立刻做了折叠线的判定实验——它也成了本轮第一个被否决的候选。</p>
@@ -1175,6 +1175,15 @@
     <p class="footnote">离线扫描与真机门数据：<span class="mono">scratchpad/unconstrained_dp.py</span>、<span class="mono">/home/ubuntu/difflet-artifacts/flux-cache-u12-feedback-gate/</span>；对照组复用 <span class="mono">flux-cache-v12-speed-full</span> 的 C12 实测。判读标准在设备运行前冻结（三种结局各自的动作已预先写明）。</p>
   </div>
 
+  <div class="incident"><span class="tag">降级公告（2026-08-12,依据上方无约束 DP 反馈门）</span>
+    U12 反馈门证明：<strong>离线可加成本模型对"调度好坏"的排序在真实反馈下不可信</strong>（离线 −51% → 真机 +69%）。所有把"离线 DP / 解析前沿的排序"当作可信输入的候选，连带降级：<br><br>
+    <strong>① λ 兑换率认证阶梯（曾四视角收敛、列第一）——大幅降级。</strong>"扫 λ 得精确 Pareto 前沿、认证沿前沿走"的前提是前沿排序正确；现已证明离线排序会反转。λ 扫描降为<strong>候选生成器</strong>：它提出的每一档都必须先过真机反馈门,再进认证。"零机器成本得到前沿"这个卖点作废,前沿的每一档都要花一次设备运行。<br><br>
+    <strong>② 预认证格上的在线重规划——大幅降级。</strong>"主机在锚点用实测 Gram 重跑精确 DP"消费的正是被证明会误导的离线成本模型。安全形态收缩为：<strong>只允许在已通过真机门的路径之间选择,禁止在线重解 DP</strong>。<br><br>
+    <strong>③ 测量触发的分支调度表——大幅降级。</strong>分支阈值的依据（"DP 灵敏度分析：测到这个值时离线优化器的 argmin 翻转"）随离线 argmin 的不可信一起失效；且逐请求余量（oracle 0.88 锚点）是离线口径,真实余量必须真机重估（逐提示词排序 ρ=0.85 仍然成立,但绝对档位划分不可继承）。<br><br>
+    <strong>④ 共权重形状成本阶梯、掩码令牌子集——中度降级。</strong>"变体误差与跳步误差同货币定价"依赖同一个离线定价体系;令牌子集额外背着深度抵消的先例（空间轴与深度轴同属"组件级缓存"）。两者的首个判定实验仍有效,但任何由此推出的调度混排都要真机门。<br><br>
+    <strong>不受影响</strong>：可执行策略对象与收据、H3 策略不变性（纯系统契约,不消费离线排序）；包络刹车（事后同域对照,不预测、不排序调度）；锚点时隙合批（前提是静态性本身,待 B=2 门）；锚点检查点回滚（同域包络对照）。
+  </div>
+
   <h3>判定后的候选排序，与"偏系统"的推荐</h3>
 
   <p>K 扫描之后，存活候选自然组织成<strong>一个三层堆叠的系统</strong>，而不是三个互斥选项：</p>
@@ -1182,10 +1191,10 @@
   <div class="tablewrap"><table>
     <tr><th>层</th><th>候选（合并后）</th><th>它交付什么</th><th>最便宜的判定实验</th></tr>
     <tr>
-      <td><strong>认证层</strong></td>
+      <td><strong>认证层</strong> <span class="pill mixed">已降级</span></td>
       <td>λ 兑换率认证阶梯（四视角收敛 + 边际定价 + 调度编译器 + 策略对象/收据）</td>
-      <td>"质量优先求最大加速"的正式兑现：λ 的量纲是毫秒/单位 Gram 偏差，扫 λ 得精确 Pareto 前沿，认证从保守档走到第一次失败，加速比是输出不是输入。直接删掉手选的 3.2 倍与网格搜的刹车阈值</td>
-      <td>零机器成本：在已有 Gram 上扫 λ 画前沿，看现役 12/13 步配置是否落在前沿上</td>
+      <td>"质量优先求最大加速"的兑现思路不变,但 U12 之后前沿构造方式必须改：λ 扫描只产生候选,<strong>每档先过真机反馈门再进认证</strong>——"零机器成本前沿"作废。认证走位逻辑（从保守到第一次失败）不受影响</td>
+      <td>（已降级）λ 扫描仅作候选生成;判定实验改为:对扫描提出的每一档做真机反馈门</td>
     </tr>
     <tr>
       <td><strong>请求层</strong></td>
@@ -1367,7 +1376,7 @@
     </tr>
     <tr>
       <td><strong>2′（新）</strong></td>
-      <td>λ 前沿扫描：现役 12/13 步配置是否落在精确 Pareto 前沿上</td>
+      <td>λ 前沿扫描 <span class="pill mixed">已降级</span>：离线前沿排序被 U12 反馈门否决,扫描仅作候选生成,每档需真机门</td>
       <td>零机器成本，第二轮头脑风暴收敛度最高候选（四视角独立提出）的第一门。同时是认证阶梯（第 5 节认证层）的地基：λ 的量纲把实测硬件价格与闭式 Gram 偏差写进同一个方程</td>
       <td>若现役两点都在前沿上且前沿在 12 锚点附近平坦，认证阶梯只剩工程价值、无科学主张；若不在前沿上，直接得到更好的配置</td>
     </tr>
