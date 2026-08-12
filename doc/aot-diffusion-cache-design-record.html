@@ -1,0 +1,1368 @@
+<title>AOT 加速器上的 Diffusion Cache：设计空间与判定记录</title>
+<style>
+  :root {
+    --ground: #F7F8F7;
+    --surface: #FFFFFF;
+    --surface-2: #EEF2F0;
+    --ink: #20282A;
+    --ink-soft: #55625F;
+    --line: #D8DEDB;
+    --accent: #0E6E6B;
+    --accent-soft: #E0EEEC;
+    --formula-bg: #F1F5F3;
+    --good: #2E7D4F;
+    --warn: #A8650F;
+    --bad: #B0413E;
+    --good-bg: #E5F1E9;
+    --warn-bg: #F6ECDC;
+    --bad-bg: #F5E4E3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #10171A;
+      --surface: #182124;
+      --surface-2: #1E292C;
+      --ink: #DCE4E2;
+      --ink-soft: #93A29E;
+      --line: #2C393C;
+      --accent: #3FB3A9;
+      --accent-soft: #14322F;
+      --formula-bg: #14211F;
+      --good: #62B586;
+      --warn: #D19A4E;
+      --bad: #D3807D;
+      --good-bg: #16281D;
+      --warn-bg: #2C2314;
+      --bad-bg: #2C1817;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #10171A;
+    --surface: #182124;
+    --surface-2: #1E292C;
+    --ink: #DCE4E2;
+    --ink-soft: #93A29E;
+    --line: #2C393C;
+    --accent: #3FB3A9;
+    --accent-soft: #14322F;
+    --formula-bg: #14211F;
+    --good: #62B586;
+    --warn: #D19A4E;
+    --bad: #D3807D;
+    --good-bg: #16281D;
+    --warn-bg: #2C2314;
+    --bad-bg: #2C1817;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+    line-height: 1.85;
+    margin: 0;
+    font-size: 16px;
+  }
+  .page { max-width: 46em; margin: 0 auto; padding: 3rem 1.4rem 6rem; }
+  h1, h2, h3 {
+    font-family: "Songti SC", "Noto Serif CJK SC", "SimSun", Georgia, serif;
+    line-height: 1.35;
+    text-wrap: balance;
+  }
+  h1 { font-size: 2rem; margin: 0.4rem 0 0.6rem; }
+  h2 {
+    font-size: 1.45rem;
+    margin: 3.2rem 0 1rem;
+    padding-top: 1.6rem;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 1.12rem; margin: 2rem 0 0.6rem; }
+  h4 { font-size: 0.95rem; margin: 1.2rem 0 0.3rem; color: var(--ink-soft); font-weight: 700; }
+  p { margin: 0.9rem 0; }
+  .eyebrow {
+    font-size: 0.78rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .subtitle { color: var(--ink-soft); margin-top: 0; font-size: 1.02rem; }
+  .meta { font-size: 0.85rem; color: var(--ink-soft); display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 1rem; }
+  code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.9em; }
+  code { background: var(--surface-2); padding: 0.1em 0.35em; border-radius: 3px; }
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1.1rem 1.4rem;
+    margin: 2rem 0;
+    font-size: 0.93rem;
+  }
+  .toc ol { margin: 0.4rem 0 0; padding-left: 1.4rem; }
+  .toc li { margin: 0.25rem 0; }
+  a { color: var(--accent); }
+  .toc a { text-decoration: none; }
+  .toc a:hover, .toc a:focus { text-decoration: underline; }
+  .formula {
+    background: var(--formula-bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin: 1.2rem 0 0.4rem;
+    overflow-x: auto;
+  }
+  .formula .expr {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 1.02rem;
+    white-space: nowrap;
+    text-align: center;
+    padding: 0.3rem 0;
+  }
+  sub, sup { font-size: 0.72em; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+  .tablewrap { overflow-x: auto; margin: 1rem 0; }
+  th, td { border: 1px solid var(--line); padding: 0.45rem 0.7rem; text-align: left; vertical-align: top; }
+  th { background: var(--surface-2); font-weight: 600; font-size: 0.86rem; }
+  .glossary table { font-size: 0.9rem; }
+  .glossary td:first-child { font-weight: 600; white-space: nowrap; color: var(--accent); }
+  .intuition {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 6px 6px 0;
+    padding: 0.8rem 1.1rem;
+    margin: 1.2rem 0;
+    font-size: 0.95rem;
+  }
+  .intuition .tag, .caution .tag, .refute .tag {
+    font-size: 0.75rem;
+    letter-spacing: 0.15em;
+    font-weight: 700;
+    display: block;
+    margin-bottom: 0.3rem;
+  }
+  .intuition .tag { color: var(--accent); }
+  .caution {
+    border-left: 3px solid var(--warn);
+    background: var(--warn-bg);
+    border-radius: 0 6px 6px 0;
+    padding: 0.8rem 1.1rem;
+    margin: 1.2rem 0;
+    font-size: 0.95rem;
+  }
+  .caution .tag { color: var(--warn); }
+  .refute {
+    border-left: 3px solid var(--bad);
+    background: var(--bad-bg);
+    border-radius: 0 6px 6px 0;
+    padding: 0.8rem 1.1rem;
+    margin: 1.2rem 0;
+    font-size: 0.95rem;
+  }
+  .refute .tag { color: var(--bad); }
+  .pill {
+    display: inline-block;
+    font-size: 0.76rem;
+    font-weight: 700;
+    padding: 0.1rem 0.6rem;
+    border-radius: 99px;
+    white-space: nowrap;
+  }
+  .pill.pass { background: var(--good-bg); color: var(--good); }
+  .pill.pending { background: var(--warn-bg); color: var(--warn); }
+  .pill.mixed { background: var(--warn-bg); color: var(--warn); }
+  .pill.dead { background: var(--bad-bg); color: var(--bad); }
+  .pill.open { background: var(--surface-2); color: var(--ink-soft); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1.2rem 1.4rem;
+    margin: 1.6rem 0;
+  }
+  .card-head { display: flex; gap: 0.8rem; align-items: baseline; flex-wrap: wrap; margin-bottom: 0.2rem; }
+  .card-head .num {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+  }
+  .card-head .title { font-weight: 700; font-size: 1.06rem; }
+  .card p { font-size: 0.95rem; }
+  ul, ol { padding-left: 1.6rem; }
+  li { margin: 0.35rem 0; }
+  .footnote { font-size: 0.84rem; color: var(--ink-soft); border-top: 1px solid var(--line); margin-top: 3rem; padding-top: 1rem; }
+
+  /* ---- 实验记录可读性增强 ---- */
+  .card-head { align-items: center; gap: 0.5rem 0.9rem; margin-bottom: 0.6rem; }
+  .card-head .num { background: var(--surface-2); border-radius: 4px; padding: 0.05rem 0.5rem; letter-spacing: 0.04em; }
+  .tldr {
+    font-size: 1rem; line-height: 1.75; margin: 0 0 1.1rem;
+    padding: 0.75rem 1rem; border-radius: 6px;
+    background: var(--surface-2); border-left: 3px solid var(--ink-soft);
+  }
+  .tldr.win { border-left-color: var(--good); }
+  .tldr.lose { border-left-color: var(--bad); }
+  .tldr.split { border-left-color: var(--warn); }
+  .tldr::before {
+    content: "一句话结论"; display: block; font-size: 0.72rem; letter-spacing: 0.16em;
+    font-weight: 700; color: var(--ink-soft); margin-bottom: 0.3rem;
+  }
+  .incident {
+    border-left: 3px solid var(--bad); background: var(--bad-bg);
+    border-radius: 0 6px 6px 0; padding: 0.85rem 1.1rem; margin: 1.3rem 0; font-size: 0.95rem;
+  }
+  .incident .tag { font-size: 0.75rem; letter-spacing: 0.15em; font-weight: 700; color: var(--bad); display: block; margin-bottom: 0.3rem; }
+  .keynums { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.7rem; margin: 1.3rem 0 1.8rem; }
+  .keynum { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 0.7rem 0.9rem; }
+  .keynum .k { font-size: 0.78rem; color: var(--ink-soft); display: block; line-height: 1.5; }
+  .keynum .v { font-size: 1.18rem; font-weight: 700; font-variant-numeric: tabular-nums; display: block; margin-top: 0.15rem; }
+  .keynum .n { font-size: 0.76rem; color: var(--ink-soft); display: block; margin-top: 0.2rem; line-height: 1.5; }
+  .keynum.good .v { color: var(--good); }
+  .keynum.bad .v { color: var(--bad); }
+  .chain { margin: 1.4rem 0 2rem; }
+  .chain-row { display: grid; grid-template-columns: 4.4rem 1fr; gap: 0 0.9rem; padding: 0.7rem 0; border-top: 1px solid var(--line); }
+  .chain-row:last-child { border-bottom: 1px solid var(--line); }
+  .chain-id { font-family: ui-monospace, Menlo, monospace; font-weight: 700; font-size: 0.9rem; color: var(--accent); padding-top: 0.12rem; }
+  .chain-what { font-weight: 600; font-size: 0.96rem; }
+  .chain-what .pill { margin-left: 0.45rem; vertical-align: 0.08em; }
+  .chain-why { font-size: 0.9rem; color: var(--ink-soft); margin-top: 0.22rem; }
+  .chain-why::before { content: "↳ "; }
+  .evidence-head {
+    margin: 2.2rem 0 0.8rem; padding: 0.55rem 0 0.5rem; border-bottom: 2px solid var(--accent);
+    font-family: "Songti SC", Georgia, serif; font-size: 1.16rem; font-weight: 700;
+  }
+  .evidence-head .lead { font-size: 0.74rem; letter-spacing: 0.16em; color: var(--accent); display: block; font-family: inherit; font-weight: 700; margin-bottom: 0.15rem; }
+</style>
+
+<div class="page">
+  <div class="eyebrow">Difflet · FLUX 缓存系统</div>
+  <h1>AOT 加速器上的 Diffusion Cache：设计空间与判定记录</h1>
+  <p class="subtitle">目标是把现有 FLUX cache 从“GPU 式的主机侧跳步策略”重写成适合 Trainium AOT 执行模型的系统：大张量状态常驻设备，预测与测量尽量在图内完成，主机只维护少量标量策略状态。本文记录该 co-design 的候选结构、关键硬件取舍、已完成的验证以及被关闭的方向。</p>
+  <div class="meta">
+    <span>版本：2026-08-12</span>
+    <span>来源：六个视角并行生成 + 逐条对抗性验证</span>
+    <span>状态：resident correctness/traffic 已通过，但完整 A12 因 dispatch explosion 慢 1.16%；H1f rounding barrier 语义失败，H1g persistent XLA loop 又在 frontend/HLO construction gate 失败，resident speed 主张继续拒绝</span>
+  </div>
+
+  <div class="toc">
+    <strong>目录</strong>
+    <ol>
+      <li><a href="#s0">这份文档是什么</a></li>
+      <li><a href="#s1">术语速查：把内部词汇讲清楚</a></li>
+      <li><a href="#s2">设计目标：AOT 硬件约束如何改变 cache abstraction</a></li>
+      <li><a href="#s3">架构主线与它们的实验证据</a></li>
+      <li><a href="#s4">被否决的方向（六条，及更早关闭的七条）</a></li>
+      <li><a href="#s5">第二轮头脑风暴：调度地板定律下的候选与判定（含 K 扫描否决）</a></li>
+      <li><a href="#s6">下一步排序与停止条件</a></li>
+      <li><a href="#s7">附录：第一轮 18 个候选全景</a></li>
+    </ol>
+  </div>
+
+  <!-- =============================================================== -->
+  <h2 id="s0">0 · 这份文档是什么</h2>
+
+  <p>项目里已经有一份提案与验证台账文档，它的纪律是<strong>每一条主张都必须有实验支撑</strong>。这份是它的姊妹篇，性质完全不同：这里记的是<strong>还没有被验证的候选方向</strong>，以及我对每一条做的可行性核查和反驳尝试。两份分开，是为了不让未验证的构想稀释掉台账的可信度。</p>
+
+  <p>它的用途有三个：一是决定接下来做什么；二是防止已经想清楚的死路被反复重提；三是论文写作时，"你为什么不做某某"这类问题在这里能直接找到带数字的回答。</p>
+
+  <div class="intuition"><span class="tag">这批想法是怎么来的</span>
+    从六个互不相同的角度并行生成：片上测量与常驻状态、编译期特化、内存层级与数据流、数值精度作为动作、消灭现存的手调参数、运行时控制平面。每个角度产出三个想法，共 18 个。之后由我逐条查代码做对抗性验证——默认立场是<strong>杀死它</strong>，只有认真尝试反驳之后仍然站得住的才判存活。
+  </div>
+
+  <!-- =============================================================== -->
+  <h2 id="s1">1 · 术语速查</h2>
+
+  <p>下面这些词在正文里反复出现。先在这里讲清楚，正文就不再打断。</p>
+
+  <h3>1.1 关于缓存机制本身</h3>
+  <div class="glossary tablewrap"><table>
+    <tr><th>词</th><th>意思</th></tr>
+    <tr><td>去噪步</td><td>生成一张图要走 50 步，每一步都让大模型算一次"这一步该往哪个方向走"。这个方向量在文档里记作 v。</td></tr>
+    <tr><td>锚点步</td><td><strong>真的让模型算</strong>的那些步。当前方案 50 步里只有 12 步是锚点。</td></tr>
+    <tr><td>被跳步</td><td>不让模型算、用之前锚点的输出<strong>猜</strong>一个值顶替的那些步。剩下 38 步都是。</td></tr>
+    <tr><td>组合系数</td><td>猜的方式是"最近两个锚点输出的加权和"，那两个权重就是组合系数。整套方案一共 74 个这样的小数，冻结在一个 JSON 文件里。<strong>注意它和模型自身的百亿参数完全无关</strong>，模型一个字节都没改过。</td></tr>
+  </table></div>
+
+  <h3>1.2 关于那套数学（Gram 框架）</h3>
+
+  <p><strong>内积</strong>：两个张量逐元素相乘再全部加起来，得到<strong>一个数</strong>。它衡量"两个方向有多像、有多长"。关键性质是：它把一个 262144 个元素、512KB 大的张量，压缩成 4 个字节。</p>
+
+  <div class="formula"><div class="expr">G<sub>ij</sub> = ⟨v<sub>i</sub>, v<sub>j</sub>⟩　　（Gram 矩阵，49 × 49 的小表）</div></div>
+  <div class="glossary tablewrap"><table>
+    <tr><th>符号</th><th>意思</th></tr>
+    <tr><td>v<sub>i</sub></td><td>第 i 步模型输出的方向量</td></tr>
+    <tr><td>⟨·,·⟩</td><td>内积</td></tr>
+    <tr><td>G<sub>ij</sub></td><td>第 i 步方向和第 j 步方向的内积；对角线上的 G<sub>ii</sub> 是第 i 步方向的长度平方</td></tr>
+  </table></div>
+
+  <div class="intuition"><span class="tag">为什么这张小表是整套方法的地基</span>
+    每个 v 是几百万维的巨型张量，但"用几个方向的组合去逼近另一个方向，误差有多大"这件事，纯粹取决于这些方向<strong>两两之间的长度和夹角</strong>——也就是这张 49×49 的小表。所以昂贵的高维问题被压缩成了查表运算：最优组合系数是解一个二元一次方程组，剩余误差是一个查表算出的数。<strong>整个框架只依赖内积，不依赖别的任何东西</strong>——这句话是后面所有想法的出发点。
+  </div>
+
+  <p><strong>Schur 补</strong>（不必记名字，记含义）：用最优系数组合之后，<strong>无论如何都消不掉的那部分剩余误差</strong>。直觉是"目标的总能量 − 能被已有方向解释掉的能量 = 解释不了的能量"。它在调度里当作"跳过这一步要付出的质量代价"。</p>
+
+  <p><strong>正交化</strong>：把一组方向依次调整成互相垂直的等价表示，是数值上更稳的做法。它产生的"残差长度"在数学上恰好等于上面那个 Schur 补。</p>
+
+  <h3>1.3 关于硬件与编译</h3>
+  <div class="glossary tablewrap"><table>
+    <tr><th>词</th><th>意思</th></tr>
+    <tr><td>提前编译</td><td>Trainium 的执行方式：整个模型的一步计算被<strong>提前</strong>编译成一个固定的大程序（文件叫 NEFF），运行时只能整个执行，不能临时跳过程序内部的某一段。这与显卡上"逐个算子临时调度、想跳哪跳哪"完全不同，是本项目所有硬件约束的总源头。</td></tr>
+    <tr><td>图</td><td>就是上面说的那个编译好的大程序。"多个图共存"指显存里同时驻留多个这样的程序。</td></tr>
+    <tr><td>张量并行</td><td>把一个大矩阵横着或竖着切开，分给 4 个计算核各算一块，最后再合并。本项目的并行度是 4。</td></tr>
+    <tr><td>分片</td><td>被切开之后每个核持有的那一块。</td></tr>
+    <tr><td>集合通信</td><td>4 个核合并各自结果的动作。求和式的合并叫全归约（all-reduce），拼接式的叫全收集（all-gather）。每个注意力层和前馈层后面都有一次，一步里上百次。</td></tr>
+    <tr><td>片上缓冲 / SBUF</td><td>紧挨着计算单元的 SRAM，每核约 24MB。它是 step-local scratchpad，每个 diffusion step 必定清空；不能作为跨 step anchor/latent persistence。跨 step 状态最多常驻 HBM。</td></tr>
+    <tr><td>显存</td><td>设备上的大内存，96GB。模型权重常驻在这里。</td></tr>
+    <tr><td>脉动阵列</td><td>芯片里专门做矩阵乘法的那块硬件，是算力的主体。</td></tr>
+    <tr><td>别名机制</td><td>编译图的一个能力：让某个输出<strong>原地写回</strong>一个常驻的设备变量，从而在多次调用之间保持状态。项目里现有的探针就用它维护一个常驻参数，每次只把几个字节的标量传回主机。<span class="mono">difflet/backends/trainium/flux/teacache_probe_fused.py:119</span></td></tr>
+    <tr><td>编译缓存键</td><td>一串哈希值，决定"这份编译产物能不能被复用"。它由模型标识、并行配置、数据类型、图像尺寸、工具链版本等拼出来。<strong>任何进入这个键的东西一改，就要重编译 23GB</strong>。</td></tr>
+  </table></div>
+
+  <h3>1.4 关于实验记录里的运行时词汇</h3>
+
+  <p>实验记录密集使用下面这些词。它们描述的是"程序怎么被调用、张量住在哪里"，与前面几组是不同的层次。</p>
+
+  <div class="glossary tablewrap"><table>
+    <tr><th>词</th><th>意思</th></tr>
+    <tr><td>入口点</td><td>一个编译产物里可以被单独调用的程序。同一个产物可以有多个入口点，各自有固定的输入形状。</td></tr>
+    <tr><td>调度 / dispatch</td><td>主机让设备执行某个入口点这个动作本身。它有固定开销（这里实测约 337 微秒），与要算的东西多小无关——这是这批实验里反复起决定作用的量。</td></tr>
+    <tr><td>别名状态</td><td>用别名机制常驻显存、可以被原地改写的张量（这里是 anchor 与潜变量），多次调用之间保留。</td></tr>
+    <tr><td>设备侧句柄</td><td>指向已经在设备上、按核分好的张量的引用。用它把大张量从一个图直接交给另一个图，不经过主机。</td></tr>
+    <tr><td>落地 / materialize</td><td>把张量真正读回主机内存，或强制它以某个数据类型在设备上成型。前者是流量成本，后者是数值语义——H1f 失败的正是后者。</td></tr>
+    <tr><td>staging</td><td>请求开始时把整个请求都不变的张量一次性写上设备，之后所有步骤复用同一份。</td></tr>
+    <tr><td>槽位</td><td>一个活跃请求独占的设备缓冲区，必须在请求结束前不被别人复用，否则会串数据。</td></tr>
+    <tr><td>判据 / gate</td><td>实验开始前就冻结下来的通过条件。先写死条件再跑，跑完不许改——防止事后调整及格线。</td></tr>
+    <tr><td>逐 bit 相同</td><td>两条路径的输出在每一个数上完全一致（不是"接近"）。用它保证两边跑的确实是同一个算法，这样时间差异才能归因于架构。</td></tr>
+    <tr><td>HLO</td><td>编译器的中间表示。"屏障进了 HLO 却被删掉"说的就是它——我们写的意图进了中间表示，却没能活到最终产物。</td></tr>
+    <tr><td>循环携带状态</td><td>循环结构里跨轮次传递的状态。用它可以让一次调用跑多轮，从而减少调度次数。</td></tr>
+    <tr><td>每核执行时间</td><td>某个入口点在单个计算核上的执行时间。四个核会重叠，所以它只作诊断，不能直接相加。</td></tr>
+  </table></div>
+
+  <h3>1.5 关于调度与认证</h3>
+  <div class="glossary tablewrap"><table>
+    <tr><th>词</th><th>意思</th></tr>
+    <tr><td>动态规划</td><td>一种能在"哪些步当锚点"的天文数字种组合里，<strong>精确</strong>找出最优解的算法（不是近似、不是搜索）。前提是代价要能沿步累加。</td></tr>
+    <tr><td>备忘表</td><td>动态规划在求解过程中记下的"从某个状态出发的最优走法"表。物化它，就得到一棵可以直接查的决策树。</td></tr>
+    <tr><td>分位数聚合</td><td>把很多个提示词各自的代价合成一个数时用的口径。当前用的是"第 95 百分位"，意思是取排在 95% 位置的那个值（偏保守）。这个口径是人选的。</td></tr>
+    <tr><td>质量契约</td><td>验收标准：每个提示词单独判，图像质量评分的下降不得超过 0.782，内容正确性评分的下降不得超过 0.25；再用统计方法给"失败率"一个 95% 置信上界，要求不超过 10%。</td></tr>
+    <tr><td>内容哈希</td><td>对文件内容算出的指纹。项目里用它把方案、认证结论、质量契约、运行时身份四者锁死，加载时一处对不上就拒绝启动。</td></tr>
+  </table></div>
+
+  <!-- =============================================================== -->
+  <h2 id="s2">2 · 设计目标：AOT 硬件约束如何改变 cache abstraction</h2>
+
+  <p>现有 cache 算法已经有一套成熟的 offline 数学：从完整轨迹恢复 velocity，利用 Gram / 闭式回归求 predictor 系数，再用动态规划选择 anchor。真正需要重做的不是这套数学本身，而是<strong>它在 Trainium 上的执行边界</strong>。</p>
+
+  <h3>2.1 保留的算法层</h3>
+  <ol>
+    <li><strong>Offline calibration</strong>：完整轨迹提供 skipped-step ground truth；Gram 是线性 predictor 误差的充分统计量。</li>
+    <li><strong>闭式 predictor</strong>：组合系数由校准数据直接求解，不训练模型，也不修改 FLUX 参数。</li>
+    <li><strong>静态 schedule / DP</strong>：给定质量代价后，anchor 位置仍可由精确动态规划得到。</li>
+    <li><strong>策略与模型参数分离</strong>：cache policy 是小型元数据，而不是模型权重的一部分。</li>
+  </ol>
+
+  <h3>2.2 Trainium 带来的系统问题</h3>
+  <ol>
+    <li><strong>AOT 图固定</strong>：运行时不能像 GPU 一样任意在大图内部插分支；频繁改变图结构会触发重新编译。</li>
+    <li><strong>TP4 数据天然分片</strong>：anchor state、predictor 和 telemetry 放在 collective 前还是后，会直接改变 HBM 占用、冗余计算和通信。</li>
+    <li><strong>跨 step 的 tensor state 有生命周期</strong>：cache 必须保留过去的 anchor output。问题不是“能不能存”，而是应该存在哪里、以什么分片形式存、什么时候 materialize 完整张量。</li>
+    <li><strong>host/device 边界应当重新定义</strong>：大 tensor 数据面应尽量留在 accelerator；主机侧最好只传 coefficient、step id、budget 等标量控制状态。</li>
+    <li><strong>serving 调度的资源单位是完整 DiT step</strong>：一个 anchor 大约对应固定的 accelerator 时隙，因此 cache schedule 可以进一步暴露为 serving scheduler 的资源分配问题。</li>
+  </ol>
+
+  <div class="intuition"><span class="tag">本文的主设计原则</span>
+    <strong>Large tensor data plane stays on the accelerator; the host operates a scalar control plane.</strong><br><br>
+    Offline 数学决定“怎么算”和“默认在哪里算”；Trainium co-design 决定“tensor state 放哪里、predictor 在哪里执行、collective 何时发生、host 到底需要看到什么”。Gram telemetry 只是这条 scalar control plane 上的一个可选观测原语，不再作为论文主问题本身。
+  </div>
+
+<h2 id="s3">3 · 架构主线与它们的实验证据</h2>
+
+  <p>这里把候选方向按系统层次重新组织。主线先回答一个 architecture 问题：<strong>在 AOT tensor accelerator 上，cache state、prediction、communication 和 control 应该如何放置？</strong> Online Gram 只作为 telemetry extension，不再承担整篇工作的中心叙事。</p>
+
+  <div class="card">
+    
+  <p class="mono" style="font-size:0.88rem;color:var(--ink-soft)">下面每一条主线，都紧跟着检验它的实验：已经跑完的给出记录与判定，还没跑的说明<strong>要回答什么、为什么这样设计、以及意义</strong>。</p>
+<div class="card-head"><span class="num">主线 A</span><span class="title">Accelerator-resident request state</span><span class="pill mixed">机制/流量通过；速度拒绝</span></div>
+    <h4>问题</h4>
+    <p>线性 cache predictor 反复使用过去的 anchor output；denoise loop 反复使用当前 latent、encoder hidden states、pooled projection、guidance 和 rotary embedding。GPU 风格实现容易把这些 tensor 都当作普通 runtime 对象；在 AOT accelerator 上，若它们每次 invocation 都从 host 重传，控制图省下的算力会被数据生命周期吞掉。</p>
+    <h4>设计</h4>
+    <p>按生命周期拆分：模型权重是 model-lifetime；prompt conditioning、anchor ring 和 latent 是 request-lifetime；coefficient、timestep、Δσ 与 action 是 step-lifetime。可变 anchor/latent 用 alias state 原地更新；请求内不变的 conditioning 在初始化时一次 staging 为 ranked device handles；逐 step 的 host 接口只保留标量。H1d 进一步证明 ranked output buffer 本身不是 request identity：host 必须给每个 live request 分配一个在 release 前不复用的 device slot。</p>
+    <h4>研究问题</h4>
+    <p>request state 应保存完整 tensor 还是 TP shard？mutable alias 与 immutable slot 应如何共同管理生命周期？K、context size、slot pool 容量增加时 HBM footprint、admission control 和隔离如何变化？现有证据只证明跨调用常驻 HBM，不应误写成跨调用常驻 scratchpad。</p>
+  </div>
+
+  <div class="card">
+    
+  <div class="evidence-head"><span class="lead">主线 A 的实验证据</span>八个连续 gate：H1a → H1g</div>
+
+  <p>下面八个实验是一条<strong>因果链</strong>：每一个的失败方式，决定了下一个要测什么。先看这张表建立全局，再读具体记录。</p>
+
+  <div class="chain">
+    <div class="chain-row"><span class="chain-id">H1a</span><div>
+      <div class="chain-what">常驻 anchor 与图内线性组合<span class="pill mixed">机制✓ 架构✗</span></div>
+      <div class="chain-why">独立的预测器图每次跳步搬 2.5 MiB、比主机慢 6.1 倍 → 问题出在图边界，需要单独验证跨图共享状态是否可行</div></div></div>
+    <div class="chain-row"><span class="chain-id">H1b</span><div>
+      <div class="chain-what">多入口共享可变状态 + 设备侧句柄传递<span class="pill pass">可行性✓</span></div>
+      <div class="chain-why">跳步的大张量主机流量降到 0 → 边界可行，但消费者还是替身，必须换成真实调度器与真实主干</div></div></div>
+    <div class="chain-row"><span class="chain-id">H1c-a</span><div>
+      <div class="chain-what">真实调度器与常驻潜变量：融合还是拆分<span class="pill mixed">拆分✓ 融合✗</span></div>
+      <div class="chain-why">融合成一个图会被编译器吃掉中间的舍入 → 只能拆成两个图，这为后面的调度次数问题埋下伏笔</div></div></div>
+    <div class="chain-row"><span class="chain-id">H1c-b</span><div>
+      <div class="chain-what">真实 23GB 主干的双向句柄回路<span class="pill mixed">边界✓ 新瓶颈</span></div>
+      <div class="chain-why">潜变量零搬运成立，但条件张量每个锚点重传 25 MiB → 必须把请求内不变的东西一次性放上设备</div></div></div>
+    <div class="chain-row"><span class="chain-id">H1d</span><div>
+      <div class="chain-what">请求级条件张量一次性 staging 与槽位归属<span class="pill pass">边界✓ 12×</span></div>
+      <div class="chain-why">流量降 12 倍，且发现请求身份必须绑定独占槽位 → 各项边界就位，可以做完整端到端对照</div></div></div>
+    <div class="chain-row"><span class="chain-id">H1e</span><div>
+      <div class="chain-what">完整真实提示词、24 对端到端 A/B<span class="pill dead">速度门✗</span></div>
+      <div class="chain-why">逐 bit 相同、流量少 91.7%，但 24/24 更慢；入口点 12 → 103 → 必须设法合并调度</div></div></div>
+    <div class="chain-row"><span class="chain-id">H1f</span><div>
+      <div class="chain-what">用编译器屏障合并两个跳步图<span class="pill dead">数值契约✗</span></div>
+      <div class="chain-why">屏障被编译器删除，语义仍然改变 → 直线图这条路走不通，只能换控制流</div></div></div>
+    <div class="chain-row"><span class="chain-id">H1g</span><div>
+      <div class="chain-what">用循环打包连续跳步（投影 103 → 33）<span class="pill dead">前端✗</span></div>
+      <div class="chain-why">三条前端路径都在生成 HLO 前失败，从未到达编译器 → 停止追逐小图优化，转向 H2 / H3</div></div></div>
+  </div>
+
+  <div class="keynums">
+    <div class="keynum"><span class="k">主干一步（每核执行）</span><span class="v">267 ms</span><span class="n">两条路径几乎相同，说明回归与模型计算无关</span></div>
+    <div class="keynum bad"><span class="k">单次图调用的固定地板</span><span class="v">≈337 μs</span><span class="n">而它承载的算术只有 1.57 兆次浮点，微秒量级</span></div>
+    <div class="keynum bad"><span class="k">每核入口点数</span><span class="v">12 → 103</span><span class="n">常驻方案多出 91 次调度，全部落在关键路径</span></div>
+    <div class="keynum good"><span class="k">去噪阶段主机流量</span><span class="v">−91.7%</span><span class="n">330.07 MiB → 27.51 MiB</span></div>
+    <div class="keynum bad"><span class="k">端到端配对结果</span><span class="v">0 / 24 胜</span><span class="n">常驻方案慢约 1.28%，预注册速度门拒绝</span></div>
+    <div class="keynum good"><span class="k">条件张量重传</span><span class="v">12×</span><span class="n">300.07 MiB/请求 → 25.01 MiB，一次性 staging</span></div>
+    <div class="keynum"><span class="k">数值契约的代价</span><span class="v">0.26%</span><span class="n">融合图与主机语义的最终潜变量相对偏差</span></div>
+    <div class="keynum"><span class="k">遥测排序能力（六段）</span><span class="v">0.7066</span><span class="n">Spearman 等权均值，六段全正；但上界 holdout 未过</span></div>
+    <div class="keynum bad"><span class="k">主机侧跳步工作占比</span><span class="v">0.19%</span><span class="n">38 次预测共 6.2 ms ÷ 去噪 3253.6 ms——这就是整个方向的收益上界</span></div>
+    <div class="keynum bad"><span class="k">去噪期图启动数（每请求每核）</span><span class="v">12 → 103</span><span class="n">按图逐个拆解自剖析数据，与预注册计数一致</span></div>
+    <div class="keynum"><span class="k">设备执行总时长（每核）</span><span class="v">−0.05%</span><span class="n">7140.5 → 7136.6 ms：多出的调度携带的执行时间为零</span></div>
+    <div class="keynum bad"><span class="k">边界穿越开销倍率</span><span class="v">17×</span><span class="n">91 次额外启动共执行 2.34 ms，却花掉 41.75 ms 墙钟</span></div>
+  </div>
+
+  <div class="intuition"><span class="tag">主线 A 的结论：一条可量化的调度地板定律</span>
+    这条链上真正的对立不是"常驻还是主机"，而是<strong>数值边界与调度次数</strong>。保住逐 bit 的算法身份需要图边界，图边界需要调度，而每次调度要约 337 微秒——比它承载的算术贵三个数量级。H1e 剖析诊断（见下）把这个矛盾从"一次失败的对照"升级成一条可陈述的定律：<br><br>
+    <strong>在提前编译的加速器上，一次图调用有 10²–10³ 微秒量级的固定地板，且与它承载的算术量无关</strong>——决定性旁证是两条路径的设备执行<em>总时长</em>在测量精度内完全相同（−0.05%），而调度次数相差 6.7 倍，墙钟却变差 1.28%：代价被干净地隔离在<strong>边界穿越本身</strong>，不在任何一种"工作"上。<br><br>
+    由此得到的推论对整类设计成立：<strong>把控制逻辑搬上加速器，其收益上界等于它移除的主机侧关键路径成本</strong>；在设备受限的负载上这个上界趋近于零（本例 0.19%），而代价随调度次数线性增长（本例每次跳步 1.099 ms，是所替代主机工作的 6.8 倍）。<strong>该方向在算术上就不可能赢，与实现质量无关。</strong><br><br>
+    这条定律反过来<strong>选中了现役架构</strong>：策略留在图外、主机侧查表、跳步完全不触碰设备——不是妥协，而是被调度经济学逼出来的最优解。这也是这批"失败实验"真正挣到的东西：把一个设计选择变成了有测量支撑的定律。
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="num">H1e 剖析诊断 · 2026-08-12</span><span class="title">主机搬运究竟是被掩盖，还是本来就不在关键路径上</span><span class="pill pass">诊断完成</span></div>
+
+    <p class="tldr split">用已采集的剖析数据重算，答案比"被主干计算掩盖"更锋利：<b>那 330 MiB 去噪期主机流量最多值 6.2 毫秒，占去噪循环的 0.19%</b>——不是省不下来，而是<b>本来就没有东西可省</b>。与此同时，运行时事件显示两条路径的设备执行总时长完全相同，而执行次数相差 6.7 倍：<b>回归 100% 来自边界穿越，0% 来自计算</b>。</p>
+
+    <h4>诊断目的</h4>
+    <p>H1e 已经给出端到端负结果，但"为什么"有两种解释：① 省下的主机流量被新增调度抵消（两者都在关键路径上，只是后者更贵）；② 省下的主机流量<em>从来就不在关键路径上</em>（前者根本不是成本）。两者对论文的表述强度完全不同——前者是一次工程权衡，后者是一条定律。区分二者不需要任何新的机器时间。</p>
+
+    <h4>分段耗时：回归 100% 落在去噪循环</h4>
+    <p>24 对配对记录的各阶段均值：</p>
+    <div class="tablewrap"><table>
+      <tr><th>阶段</th><th>主机路径</th><th>常驻路径</th><th>差</th></tr>
+      <tr><td><strong>去噪循环</strong></td><td>3253.56 ms</td><td>3295.31 ms</td><td><strong>+41.75 ms（+1.28%）</strong></td></tr>
+      <tr><td>文本编码</td><td>38.57 ms</td><td>38.56 ms</td><td>−0.00 ms</td></tr>
+      <tr><td>VAE 解码</td><td>293.78 ms</td><td>293.85 ms</td><td>+0.07 ms</td></tr>
+      <tr><td>潜变量与旋转位置编码设置</td><td>8.89 ms</td><td>8.82 ms</td><td>−0.07 ms</td></tr>
+      <tr><td>请求上下文 staging</td><td>0.00 ms</td><td>2.81 ms</td><td>+2.81 ms（常驻路径独有）</td></tr>
+      <tr><td>最终读回</td><td>0.00 ms</td><td>0.91 ms</td><td>+0.91 ms（常驻路径独有）</td></tr>
+    </table></div>
+    <p>除去噪外逐项一致（差值均在 0.1 毫秒内），因此后续分析只需看去噪循环。</p>
+
+    <h4>关键算术：收益上界是 0.19%</h4>
+    <p>以 12 个锚点 × 每核 267 毫秒的主干执行时间为基准，对主机路径的去噪循环做分解：</p>
+    <div class="tablewrap"><table>
+      <tr><th>量</th><th>数值</th><th>占去噪循环</th></tr>
+      <tr><td>去噪总时长</td><td>3253.6 ms</td><td>100%</td></tr>
+      <tr><td>12 个锚点的纯核心执行</td><td>3204.0 ms</td><td>98.5%</td></tr>
+      <tr><td>除核心执行外的<em>全部</em>时间</td><td>49.6 ms</td><td>1.52%</td></tr>
+      <tr><td><strong>其中 38 次主机侧预测</strong></td><td><strong>6.2 ms</strong></td><td><strong>0.19%</strong></td></tr>
+      <tr><td>余下：每个锚点步的主机与派发开销</td><td>3.62 ms × 12</td><td>1.33%</td></tr>
+    </table></div>
+    <p>把跳步工作搬上设备，能够回收的上限就是那 6.2 毫秒。而实测常驻路径每次跳步净增 41.75 ÷ 38 = <strong>1.099 毫秒</strong>，是它所替代的主机工作（0.162 毫秒）的 <strong>6.8 倍</strong>。用额外调度次数换算：91 × 337 微秒 = 30.7 毫秒，占实测回归的 73%，其余为同步与运行时开销。</p>
+
+    <h4>这些启动到底是哪些图</h4>
+    <p>把剖析里的设备执行事件按图身份逐个拆开，得到每请求每核的启动清单——它精确复现了预注册的 12 → 103：</p>
+    <div class="tablewrap"><table>
+      <tr><th>图</th><th>主机路径</th><th>常驻路径</th><th>单次执行时长</th><th>它做什么</th></tr>
+      <tr><td><span class="mono">transformer</span>（DiT 主干）</td><td><strong>12</strong></td><td>12</td><td>266 ms</td><td>12 个锚点步的真实计算</td></tr>
+      <tr><td><span class="mono">cache_anchor_step</span></td><td>—</td><td>12</td><td>0.028 ms</td><td>把主干输出推进常驻锚点库（移位 + 写入）</td></tr>
+      <tr><td><span class="mono">cache_predict</span></td><td>—</td><td><strong>38</strong></td><td>0.026 ms</td><td>从锚点库算 v̂ = w<sub>a</sub>·v<sub>a</sub> + w<sub>b</sub>·v<sub>b</sub></td></tr>
+      <tr><td><span class="mono">cache_scheduler_step</span></td><td>—</td><td><strong>38</strong></td><td>0.025 ms</td><td>潜变量更新 x ← x + Δσ·v̂</td></tr>
+      <tr><td><span class="mono">cache_initialize</span> / <span class="mono">stage_slot</span> / <span class="mono">cache_finalize</span></td><td>—</td><td>3</td><td>~0.03 ms</td><td>每请求生命周期：清状态、一次性 staging 条件张量、读回最终潜变量</td></tr>
+      <tr><td><strong>去噪期合计</strong></td><td><strong>12</strong></td><td><strong>103</strong></td><td></td><td></td></tr>
+    </table></div>
+    <p>为什么会多出这 91 次：提前编译下，<strong>想让设备做任何事，那件事必须是一个预编译好的图，而每个图必须被单独启动一次</strong>。主机路径里 38 个跳步的预测与采样器更新是在 CPU 上做的普通张量运算，这 38 步一次设备都不碰；常驻路径把它们搬上设备，每一小块工作就得各占一次启动。而<strong>每个跳步需要两个图而不是一个，是数值契约逼出来的</strong>——H1c-a 已证明融合会让编译器吃掉中间那次 BF16 舍入，逐位一致随之破裂。</p>
+    <p>最锋利的一个比值也来自这张表：那 <strong>91 次额外启动的执行时间合计只有 2.34 毫秒，却让墙钟多花 41.75 毫秒</strong>——每次启动做 26 微秒的算术、付约 459 微秒的往返代价，<strong>开销是工作量的 17 倍，94% 的成本纯粹是边界穿越</strong>。</p>
+
+    <h4>运行时事件：把成本隔离在边界穿越上</h4>
+    <p>从两条路径各约 13 万条 runtime 事件聚合（四核合计，per-core 为除以四）：</p>
+    <div class="tablewrap"><table>
+      <tr><th>量</th><th>主机路径</th><th>常驻路径</th><th>含义</th></tr>
+      <tr><td>设备执行次数（每核）</td><td>32</td><td><strong>214</strong></td><td>6.7 倍调度</td></tr>
+      <tr><td><strong>设备执行总时长（每核）</strong></td><td>7140.5 ms</td><td><strong>7136.6 ms</strong></td><td><strong>−0.05%，测量精度内相同</strong></td></tr>
+      <tr><td>集合通信总时长</td><td>1215.0 ms</td><td>1213.6 ms</td><td>−0.1%，不受影响</td></tr>
+      <tr><td>墙钟</td><td>基准</td><td>+1.28%</td><td>回归</td></tr>
+    </table></div>
+    <p>多出的一百八十余次图调用<strong>携带的执行时间为零</strong>，墙钟却变差。这排除了"新增调度做了更多工作"的解释，把成本唯一地归给调度与同步开销本身。用回归除以额外调度次数得约 229 微秒/次，与独立测得的 337 微秒固定地板同一量级、同一来源。</p>
+
+    <h4>对后续排序的直接影响</h4>
+    <p>该诊断确认解释②成立，因而主线 A 的结论按上面的定律改写。它同时对 H4（服务层并发翻盘）给出一个应当先算再做的算术：主机侧在去噪循环里的<em>全部</em>时间只有 49.6 毫秒，而设备侧是 3204 毫秒——<strong>要让主机成为共享瓶颈，需要并发度把主机负载放大约 65 倍</strong>，而单设备在一个请求下已经忙到约 98%，根本达不到那个并发度。因此"并发下省的是共享的主机周期"这一翻盘条件，在单设备上看起来同样被算术否定。这是推导而非实测，建议在投入 H4 工程之前，先用现役路径做一次并发压测把它证实或证伪。</p>
+
+    <p class="footnote">数据来源：<span class="mono">/home/ubuntu/difflet-artifacts/flux-h1e-resident-e2e-20260812/</span> 的 <span class="mono">paired-result-v1.json</span>（24 对配对记录）、<span class="mono">profile-{materializing,resident}-result-v1.json</span> 与 <span class="mono">inspect-{materializing,resident}-parsed-v1.json</span>（runtime 事件）。诊断为纯重算，未消耗新的机器时间。</p>
+  </div>
+
+  <div class="incident"><span class="tag">三次运行时事故：本身就是可复用的系统结论</span>
+    这批实验里有三次"意外"，价值不亚于正式结果，分别散落在下面的记录中：<br><br>
+    <strong>① 无权重的小图继承了大模型的身份</strong>（H1a）——控制图数学上不含权重，却因为沿用了主干的配置与路径身份，让共享权重存储错误硬链接了 22.7GB 检查点并在加载时初始化到设备。<strong>内容身份必须包含组件角色与权重策略</strong>，否则小图会静默继承大模型的生命周期。<br><br>
+    <strong>② 形状才是路由身份</strong>（H1c-a）——两个入口点的输入形状列表相同、只有数据类型不同，而运行时路由表只按形状匹配，后注册的覆盖了先注册的，最终在错误的图上崩溃。<strong>多入口的形状签名必须全局唯一，数据类型不足以区分。</strong><br><br>
+    <strong>③ 一个句柄不等于一个请求</strong>（H1d）——请求 A 先 staging、请求 B 后 staging，再用 A 的旧句柄时主干输出直接错成相对 L2 = 1.0。原因是同一个可执行体复用了输出缓冲。<strong>活跃请求必须拥有释放前不被复用的独占设备槽位</strong>，而槽位是有界资源，必须接入准入控制。
+  </div>
+<h3>H1 的原始假设、判据与停止条件</h3>
+  <p>实现最小版本：K=2 常驻 anchor，host 每个 skipped step 只下发两个 coefficient。与当前路径做端到端 A/B，测：</p>
+  <ul>
+    <li>每 skipped step latency 与整图 end-to-end latency；</li>
+    <li>host↔device tensor traffic / synchronization 次数；</li>
+    <li>HBM 占用与额外 graph I/O；</li>
+    <li>数值 parity：与当前 predictor 输出逐元素或范数级一致。</li>
+  </ul>
+  <p><strong>判据</strong>：如果 resident predictor 没有减少任何可测的 host/device 或 runtime 开销，而且也不能为后续 TP-aware dataflow 提供结构优势，则主线需要收缩；反之它成为所有后续设计的设备状态底座。</p>
+
+  <div class="caution"><span class="tag">H1 的系统边界（2026-08-12 代码审计后补充）</span>
+    当前 FLUX 路径由 Python <code>CacheRunner</code> 保存 anchor，并在 host 侧做线性组合；scheduler 与 latent 更新也仍在 host loop。现有 fused probe 只证明“一个独立小图中的参数可以通过 alias 跨 invocation 常驻 HBM”，<strong>没有证明 backbone 输出可以零拷贝进入另一个 predictor NEFF</strong>。所以只编译一个线性组合小图、但把 512KB tensor 往返搬运，不能算 H1 成功。
+  </div>
+
+  <p>H1 实验拆成连续 gate。<strong>H1a（standalone spike）</strong>验证 K=2 alias state 与数值语义，并直接证明“单独 post-gather predictor NEFF”会产生大 tensor 往返。<strong>H1b（graph-boundary feasibility）</strong>验证多 entry-point 共享可变 state 和 ranked tensor 跨 NEFF 传递。<strong>H1c（backbone integration）</strong>把真实 predictor、scheduler、latent 与 FLUX backbone 连成双向 data plane。<strong>H1d（request context）</strong>解决请求内不变 tensor 的一次性 staging、slot ownership 与隔离。上述 gate 只建立 architecture boundary；只有完整 50-step real-prompt end-to-end A/B 才允许报告 speed/quality frontier。</p>
+
+  <p><strong>停止条件</strong>：若跨 NEFF handoff 必然把 anchor materialize 到 host，且 predictor + scheduler 无法在共享 resident state 的图边界内组合，则独立 predictor NEFF 会增加而不是减少传输；此时应收缩为“host-controlled multi-graph runtime”或重画图边界，不能继续使用 accelerator-resident 的表述。</p>
+
+  <div class="card">
+    <div class="card-head"><span class="num">H1a 实验记录 · 2026-08-12</span><span class="title">Post-gather K=2 alias state 与 graph-boundary spike</span><span class="pill mixed">机制通过；架构边界失败</span></div>
+
+    <p class="tldr split">常驻两个 anchor、在图内做线性组合，数值<b>逐 bit 正确</b>；但把它做成一个独立的图之后，每次跳步要搬 <b>2.5 MiB</b>、比主机侧慢 <b>6.1 倍</b>。<b>机制成立，架构不成立</b>——问题不在别名机制，在图边界。</p>
+
+    <h4>实验目的</h4>
+    <p>把两个问题分开回答：① Trainium alias 参数能否正确保存两个真实 anchor，并逐次执行 reset / shift / predict；② 把这个 predictor 做成独立 NEFF 后，skip 是否真的只经过 scalar control plane。第一个是机制门，第二个才是 architecture 门。</p>
+
+    <h4>实验配置</h4>
+    <ul>
+      <li>TP4、BF16、post-gather 完整 tensor；每个 anchor 形状 <code>[1,4096,64]</code>，524,288 bytes。每个 rank 保存两个完整 anchor。</li>
+      <li>动作：<code>RESET</code> 清空；<code>ANCHOR</code> 把第二个 anchor 移到第一槽并写入新值；<code>PREDICT</code> 用两个 FP32 coefficient 做 FP32 累加、最后一次舍入回 BF16，与当前 host predictor 语义一致。</li>
+      <li>冻结序列：reset → A → B → 连续 predict → C → predict → reset → predict；另做 10 次 warmup + 100 次 timing。Neuron Profile inspect 的独立序列共 19 次 invocation，用 <code>nrt_execute</code> 聚类并逐次审计 <code>nrt_tensor_write/read</code>。</li>
+      <li>architecture gate：一个 skip invocation 必须没有完整 tensor host write，也没有完整 tensor host read；alias parity 通过不能替代该门槛。</li>
+    </ul>
+
+    <h4>机制与运行结果</h4>
+    <div class="tablewrap"><table>
+      <tr><th>指标</th><th>结果</th><th>解释</th></tr>
+      <tr><td>状态序列 parity</td><td>max abs = 0；relative L2 = 0</td><td><span class="pill pass">通过</span> alias persistence、shift、predict、reset 均逐元素一致</td></tr>
+      <tr><td>无权重 compiled artifact</td><td>117,490 bytes；compile 1.825 s</td><td>图本身很小；不需要 FLUX 权重</td></tr>
+      <tr><td>100 次 device call</td><td>P50 0.993 ms；P95 1.219 ms</td><td>包含 host↔device I/O 与同步</td></tr>
+      <tr><td>100 次 host predictor</td><td>P50 0.162 ms；P95 0.203 ms</td><td>当前 host 路径约快 6.1×</td></tr>
+      <tr><td>每次 TP4 大 tensor write</td><td>4 × 524,288 = 2,097,152 bytes</td><td>candidate 被复制到四个 rank</td></tr>
+      <tr><td>每次大 tensor read</td><td>1 × 524,288 bytes</td><td>prediction materialize 回 host</td></tr>
+      <tr><td>每次大 tensor 总流量</td><td><strong>2,621,440 bytes = 2.500 MiB</strong></td><td><span class="pill dead">architecture gate 失败</span></td></tr>
+      <tr><td>per-core peak</td><td>tensor 3,145,760 bytes；total 5,152,804 bytes</td><td>包含两个 resident anchors 和 transient graph I/O；不是纯 state 大小</td></tr>
+    </table></div>
+    <p>19/19 次 invocation 的签名完全一致：每次 4 个 rank execute、4 次完整写入和 1 次完整读回。runtime event 的中位累计 write/read 时间分别约 604/58 μs，单 rank 最大 execute time 中位数约 145 μs；跨 rank event 会重叠，因此 bytes/count 是主证据，时间只作诊断。</p>
+
+    <h4>首次产物事故：为什么 executable identity 也属于 system</h4>
+    <p>第一次编译虽然数学图没有模型权重，但它继承了 FLUX transformer 的 config/path identity，通用 shared-weight store 因而错误 hardlink 了 <strong>22.7GB</strong> backbone checkpoint，并在 load 时初始化到设备。该轮 parity 可用，但 artifact/HBM/load 数字全部作废并保留为 <code>superseded</code> 诊断。正式 v2 显式设置 <code>skip_sharding=true</code>、<code>save_sharded_checkpoint=false</code>，最终 artifact 只有约 117KB、weights peak 为 0。这个事故说明 H3 的 content identity 不能只含模型路径和 TP/dtype；还必须包含<strong>component role 与 weight policy</strong>，否则“小控制图”可能静默继承大模型权重生命周期。</p>
+
+    <h4>分析与决策</h4>
+    <p>H1a 证明“persistent K=2 state + 图内线性组合”在硬件上数学成立，但也否决了最直观的独立 post-gather predictor NEFF：它每个 skip 搬 2.5MiB，且比 host predictor 慢。因此先用 H1b 单独验证 shared-state multi-entry boundary 与 inter-NEFF ranked I/O；若可行，再由 H1c 把 <strong>predictor + scheduler update + latent state</strong> 组成完整 resident cache-step data plane，并解决 backbone anchor output 的直接 ingress。</p>
+
+    <p>协议：<code>benchmark/flux_cache/h1a-resident-state-boundary-protocol-20260812.json</code>（SHA-256 <code>0a280294…</code>）；正式机制结果：<code>/home/ubuntu/difflet-artifacts/flux-h1a-resident-state-20260812/mechanism-result-v3.json</code>（<code>e0e626cf…</code>）；runtime inspect JSON：<code>neuron-inspect-v1.json</code>（<code>d7f009e7…</code>）；冻结分析：<code>benchmark/flux_cache/h1a-resident-state-boundary-result-20260812.json</code>（<code>cf806c22…</code>）。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="num">H1b 实验记录 · 2026-08-12</span><span class="title">Multi-entry shared state + ranked device I/O</span><span class="pill pass">feasibility 通过；集成待完成</span></div>
+
+    <p class="tldr win">换一种图边界：同一个容器里放多个入口、共享同一份可变状态、大张量用设备句柄在图之间直接传递。每次跳步的大张量主机流量降到 <b>0 字节</b>，只剩 48 字节系数。<b>可行性通过</b>——但消费者仍是替身，还不是完整的缓存步。</p>
+
+    <h4>实验目的</h4>
+    <p>H1a 失败的根因不是 alias，而是图边界：static signature 每次都接收并返回完整 tensor。H1b 要回答两个更底层的系统问题：① 一个 <code>NxDModel</code> 内的多个不同输入签名 NEFF 能否绑定同一份可变 anchor allocation；② predictor 产生的 524,288-byte tensor 能否作为 ranked device handle 直接进入下一个 NEFF。这个实验选择可行 runtime boundary，不声称已经实现完整 scheduler 或 end-to-end speedup。</p>
+
+    <h4>冻结配置与 gate</h4>
+    <ul>
+      <li>Trainium TP4、BF16、形状 <code>[1,4096,64]</code>。本轮仍是 post-gather 完整 tensor replica，用来单独隔离跨图 runtime 语义；TP-sharded placement 留给 H2。</li>
+      <li>同一 compiled <code>NxDModel</code> 含四个按 input shape 路由的 entry point：<code>resident_anchor_update(candidate)</code>、<code>resident_predict(coefficients)</code>、<code>resident_consume(ranked_tensor, step_scale)</code>、<code>resident_reset(request_token)</code>。</li>
+      <li>四图都声明同名、同 shape/dtype、同 alias output position 的 <code>anchor0/anchor1</code>，runtime 初始化时把同一组 state allocation 传给所有子图。</li>
+      <li>F1 correctness：reset → A → B → 两次 predict → ranked consume → C → predict → scalar reset → zero predict，所有大 tensor 必须与 FP32 accumulate/BF16 round reference 逐 bit 一致。</li>
+      <li>F2 boundary：state seed 后测 2 个 warmup + 8 个正式 <code>predict→consume</code> pair；每 pair 的完整 tensor host write/read 都必须为 0。host 只允许 coefficient、step scalar 和一个 checksum。</li>
+    </ul>
+
+    <h4>硬件结果</h4>
+    <div class="tablewrap"><table>
+      <tr><th>指标</th><th>结果</th><th>系统含义</th></tr>
+      <tr><td>四 entry-point compile</td><td>3.008 s；artifact 243,972 bytes</td><td>一个 runtime container 内保留四个静态签名，无 FLUX 权重</td></tr>
+      <tr><td>F1 五项 tensor 检查</td><td>max abs = 0；relative L2 = 0</td><td><span class="pill pass">通过</span> update/predict/consume/reset 跨 NEFF 共享同一份可变 state</td></tr>
+      <tr><td>FP32 checksum</td><td>absolute error 2.38×10<sup>−7</sup></td><td>仅为 reduction-order 诊断；冻结 F1 gate 检查的是完整 BF16 tensor</td></tr>
+      <tr><td>F2 profile 样本</td><td>10 pairs；20 次 entry-point invocation；80 次 TP rank execution</td><td>按每个 worker 的 NEFF 序列分组审计 runtime event</td></tr>
+      <tr><td>每 skip pair 大 tensor write/read</td><td><strong>0 / 0 bytes</strong></td><td><span class="pill pass">通过</span> 预测 tensor 没有 materialize 到 host</td></tr>
+      <tr><td>每 skip pair control I/O</td><td>48-byte write；4-byte read</td><td>TP4 复制 8-byte coefficient + 4-byte step scalar；rank 0 读一个 FP32 checksum</td></tr>
+      <tr><td>100-pair host-observed latency</td><td>P50 0.457 ms；P95 0.777 ms</td><td>两个 NEFF dispatch + scalar synchronization；尚不能与完整 host cache step 作 speedup 对比</td></tr>
+      <tr><td>profile-run pair latency</td><td>P50 0.609 ms；P95 0.908 ms</td><td>profiling instrumentation 下的诊断值</td></tr>
+      <tr><td>anchor seed 大 tensor ingress</td><td>2 × 4 × 524,288 = 4,194,304 bytes</td><td><span class="pill pending">未解决</span> 本 spike 的真实 anchor 仍由 host 写到四个 rank</td></tr>
+      <tr><td>per-core peak</td><td>tensor 7,340,096 bytes；total 9,736,708 bytes；weights 0</td><td>含四 NEFF state 与 transient I/O，不是最终 TP-sharded footprint</td></tr>
+    </table></div>
+
+    <h4>失败尝试与 runtime 约束</h4>
+    <p>v1 在 HLO lowering 前失败：alias map 中的参数若没有参与 forward，lowering context 找不到它。v2 又在 compiler 处失败：同一个 tensor Python/HLO value 同时占据普通 output 与 alias output 时会被去重，导致 alias index 超出实际 tuple。最终实现让每个 alias 参数显式参与计算，并为每个 output 构造独立 value。这不是数学问题，而是 legacy ModelBuilder 的 executable contract；论文实现部分必须明确写出。</p>
+
+    <h4>分析与架构决策</h4>
+    <p>F1/F2 共同选择了一个可行边界：<strong>一个 multi-entry <code>NxDModel</code> 负责共享 alias state，entry point 保持不同静态签名，大 tensor 用 <code>forward_ranked</code> 在设备侧跨 NEFF 传递，host 只操作标量。</strong>这否定了“H1a 失败意味着跨图一定回 host”的担忧，也给 scalar control plane 找到了真实 runtime contract。</p>
+    <div class="caution"><span class="tag">仍不能声称什么</span>
+      <strong>H1b 是 feasibility pass，不是 accelerator-resident cache 已完成。</strong> <code>resident_consume</code> 当前只是 identity-scaled scheduler/latent stand-in；真实 FLUX scheduler、resident latent、backbone anchor output 的 ranked ingress、pre-gather TP shard、并发 request isolation 都还没进入这份数据。下一步 H1c 必须把这些组成完整 denoise loop，再做 current host path vs resident path 的端到端 A/B。
+    </div>
+
+    <p>冻结协议：<code>benchmark/flux_cache/h1b-cross-graph-ranked-io-protocol-20260812.json</code>（SHA-256 <code>ce715745…</code>）；正式 mechanism：<code>/home/ubuntu/difflet-artifacts/flux-h1b-cross-graph-20260812/mechanism-result-v4.json</code>（<code>56234f62…</code>）；inspect JSON：<code>neuron-inspect-v1.json</code>（<code>28855f05…</code>）；冻结判定：<code>benchmark/flux_cache/h1b-cross-graph-ranked-io-result-20260812.json</code>（<code>a02ca028…</code>）。</p>
+  </div>
+
+  <h3>H1c · 真实 resident cache-step 与 backbone ingress</h3>
+  <p>把 H1b 的 consumer stand-in 换成真实 scheduler update，并把 latent 也声明为 aliased request state。skip entry point 必须只接收 coefficient / timestep / schedule scalar；anchor entry point 必须直接消费 FLUX backbone 的 ranked output，不允许先读回 host。最终以完整 50-step denoise loop 为单位，与现有 Python <code>CacheRunner</code> 路径比较 end-to-end latency、host/device bytes、dispatch 次数、HBM 与图稳定性。这才是 architecture speedup 的第一个可发表结果。</p>
+
+  <div class="card">
+    <div class="card-head"><span class="num">H1c-a 实验记录 · 2026-08-12</span><span class="title">Predictor + FlowMatch Euler + resident latent</span><span class="pill mixed">exact split 通过；single-NEFF 被拒绝</span></div>
+
+    <p class="tldr split">把预测器和调度器融进<b>一个</b>图，编译器会吃掉中间那次 BF16 舍入，算法语义随之改变（最终潜变量差 0.26%）；拆成<b>两个</b>图才能保住逐 bit 语义。由此得到一条通用结论：<b>图边界不只是调度边界，也是数值语义边界</b>。</p>
+
+    <h4>实验目的与配置</h4>
+    <p>把 H1b 的 identity consumer 换成 FLUX 实际使用的 non-stochastic <code>FlowMatchEulerDiscreteScheduler</code> 更新：<code>latent.float() + (sigma_next − sigma) × noise.float()</code>，再舍入到 BF16。resident state 从两个 anchor 扩展为 <code>{anchor0, anchor1, latent}</code>。冻结 schedule 是 FLUX.1-dev 动态 shift 的 50-step sigma、A12 anchor <code>[0,1,2,3,4,5,9,15,21,31,41,49]</code>、38 skip、K=2 order-1 index predictor。actual anchor noise 使用固定 seed 的 synthetic BF16 tensor；它只检验 cache-step contract，不代表真实图像质量或 backbone feedback。</p>
+
+    <h4>实验一：把 predictor 与 scheduler 融成一个 skip NEFF</h4>
+    <p>直觉上一次 dispatch 最好，因此第一份冻结协议要求一个 <code>cache_skip_step(coefficients, Δσ)</code> 同时做 FP32 predictor、BF16 输出舍入、Euler 和 latent alias write-back。结果在前六个真实 anchor step 全部精确，但从第一个 skip 开始偏离：</p>
+    <div class="tablewrap"><table>
+      <tr><th>单-NEFF 对照</th><th>max abs</th><th>relative L2</th><th>判定</th></tr>
+      <tr><td>当前 host 语义：predictor 先舍入 BF16，再 Euler</td><td>0.0625</td><td>0.2633%</td><td><span class="pill dead">冻结 exact gate 失败</span></td></tr>
+      <tr><td>第 50 步最终 latent</td><td>0.046875</td><td>0.2633%</td><td>误差沿 resident feedback 累积</td></tr>
+      <tr><td>诊断 reference：FP32 predictor 直接进入 Euler</td><td>0</td><td>0</td><td>50/50 步逐 bit 一致</td></tr>
+    </table></div>
+    <p>这不是随机 numerical noise。编译器把图内 <code>FP32 → BF16 → FP32</code> 中间转换与后续 Euler 合并，得到一个语义上不同但更融合的算式。冻结协议没有放宽；single-NEFF 方案因此被拒绝。这个结果揭示了一个 architecture 要点：<strong>NEFF boundary 不只是 dispatch/communication boundary，也可能是算法的 numerical-semantics boundary。</strong></p>
+
+    <h4>实验二：用 ranked NEFF boundary 强制 BF16 contract</h4>
+    <p>重画 skip path 为两段：<code>cache_predict(coefficients)</code> 产生 BF16 ranked device tensor，随后 <code>cache_scheduler_step(ranked_prediction, Δσ)</code> 更新 aliased latent。中间 tensor 留在设备上，但独立 executable output 强制发生协议要求的 BF16 materialization。</p>
+    <div class="tablewrap"><table>
+      <tr><th>指标</th><th>结果</th><th>系统含义</th></tr>
+      <tr><td>50 个逐步 latent + final</td><td>max abs = 0；relative L2 = 0</td><td><span class="pill pass">exact contract 通过</span></td></tr>
+      <tr><td>schedule profile</td><td>12 anchors；38 skips；76 skip entry-point calls；304 TP rank executions</td><td>完整 A12/50-step 控制流，不是重复单点 microbench</td></tr>
+      <tr><td>38 skip 的大 tensor write/read</td><td><strong>0 / 0 bytes</strong></td><td><span class="pill pass">ranked predictor output 没有回 host</span></td></tr>
+      <tr><td>每 skip host control</td><td>48-byte write；0-byte read</td><td>TP4 复制 8-byte coefficient 和 4-byte Δσ；profile schedule 不做逐步同步读</td></tr>
+      <tr><td>五 entry-point compile</td><td>3.543 s；artifact 378,574 bytes</td><td>无模型权重；initialize/anchor/predict/scheduler/finalize 共用三份 state</td></tr>
+      <tr><td>100 次 split skip</td><td>device P50 1.728 ms；P95 2.033 ms</td><td>包含两个 NEFF dispatch 与 checksum 同步</td></tr>
+      <tr><td>100 次 host predictor+Euler</td><td>P50 0.265 ms；P95 0.333 ms</td><td><span class="pill dead">小算子单独看 host 快约 6.5×</span></td></tr>
+      <tr><td>per-core peak</td><td>tensor 9,961,608 bytes；total 12,654,252 bytes；weights 0</td><td>当前为 post-gather replica 和五 NEFF transient；不是 H2 的最终 footprint</td></tr>
+      <tr><td>12 个 anchor 的 host ingress</td><td>25,165,824 bytes</td><td><span class="pill pending">H1c-b 未解决</span> synthetic actual noise 仍复制到四个 rank</td></tr>
+    </table></div>
+
+    <h4>第二个 runtime 事故：shape 才是 legacy router identity</h4>
+    <p>split-v1 的 <code>initialize(full, int32[2])</code> 与 <code>anchor(full, fp32[2])</code> shape 列表相同。legacy <code>NxDModel.input_shape_map</code> 只按 shape 路由，不包含 dtype 或 tag，后加入的 entry 覆盖前者，运行时最终在错误 NEFF 上 abort。split-v2 把 initialize token 改为 shape-4 后通过。由此得到 H3 的另一条 executable rule：<strong>多 entry-point 的输入 shape signature 必须全局唯一；dtype 不足以区分入口。</strong></p>
+
+    <h4>分析与架构决策</h4>
+    <p>最终选定的 exact cache-step contract 是：<strong><code>cache_predict → BF16 ranked tensor → cache_scheduler_step</code></strong>，两个 executable 共享 aliased anchors/latent。它证明 predictor、真实 scheduler 与 latent feedback 可以完全留在 accelerator data plane，且 38 个 skip 只有 scalar host control。但 standalone 路径明显慢于 host tensor algebra，所以它本身不是 speed contribution；只有 H1c-b 把真实 FLUX backbone output 和下一步 resident latent 也接到 ranked dataflow 后，减少全循环 tensor materialization/同步，才可能产生 system speedup。</p>
+    <div class="caution"><span class="tag">当前最关键 gate</span>
+      下一步不是继续优化这个 0.26M-element 小图，而是让真实 transformer 的 ranked output 直接进入 <code>cache_anchor_step</code>，再让 resident latent 直接成为下一次 transformer 的 ranked input。必须对完整 50-step loop 数 host/device bytes 与 dispatch，并与当前 Python pipeline 做端到端 A/B；在此之前 architecture speed claim 仍为 false。
+    </div>
+
+    <p>single-NEFF 协议：<code>h1c-resident-cache-step-protocol-20260812.json</code>（<code>8cf2a8d0…</code>），失败/诊断结果 <code>mechanism-result-v2.json</code>（<code>6ed3a604…</code>）；split 协议：<code>h1c-split-cache-step-protocol-20260812.json</code>（<code>d10e62ad…</code>），正式 mechanism <code>split-mechanism-result-v2.json</code>（<code>4eafd199…</code>），inspect JSON（<code>9aac2ccb…</code>）；冻结联合判定：<code>benchmark/flux_cache/h1c-cache-step-architecture-result-20260812.json</code>（<code>94126339…</code>）。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="num">H1c-b 实验记录 · 2026-08-12</span><span class="title">真实 23GB FLUX backbone 双向 ranked loop</span><span class="pill pass">latent/noise boundary 通过；context debt 暴露</span></div>
+
+    <p class="tldr split">真实的 23GB 主干与小控制图<b>可以互相直接交换设备句柄</b>，潜变量与噪声零主机搬运、逐 bit 相同。但暴露出新的主瓶颈：请求内不变的条件张量在<b>每个锚点重传 25 MiB</b>，一个 A12 请求就是 300 MiB。</p>
+
+    <h4>实验目的与真实系统边界</h4>
+    <p>H1b/H1c-a 都使用小图，尚未证明一个单独加载的 23GB transformer runtime 会接受另一个 <code>NxDModel</code> 的 device tensor。H1c-b 直接加载已有 FLUX.1-dev TP4 backbone（四个 5.95GB shard）和 split cache-step artifact，执行：initialize latent → real backbone anchor 0 → real backbone anchor 1 → resident skip 2 → resident latent 进入 real backbone anchor 3 → finalize。conditioning 使用固定 seed、但 shape 与正式 1024×1024 compiled graph 完全一致；不运行 text encoder，因此本实验只主张 executable dataflow。</p>
+
+    <h4>Correctness 与 boundary 结果</h4>
+    <div class="tablewrap"><table>
+      <tr><th>指标</th><th>结果</th><th>系统含义</th></tr>
+      <tr><td>三次 real backbone anchor + 一次 skip</td><td>每步 max abs = 0；relative L2 = 0</td><td><span class="pill pass">通过</span> host reference 使用同一真实 backbone output</td></tr>
+      <tr><td>final latent</td><td>max abs = 0；relative L2 = 0</td><td>双向 device handle 没有改变数值</td></tr>
+      <tr><td>524,288-byte latent/noise host write</td><td><strong>0 bytes</strong></td><td>resident latent 直接成为另一个已加载 <code>NxDModel</code> 的 backbone input</td></tr>
+      <tr><td>524,288-byte latent/noise host read</td><td><strong>0 bytes</strong></td><td>backbone noise 直接进入 <code>cache_anchor_step</code></td></tr>
+      <tr><td>backbone load</td><td>19.046 s</td><td>读取 22,708.9 MiB presharded weights 并初始化 TP4</td></tr>
+      <tr><td>cache-step load</td><td>0.073 s</td><td>与已加载 backbone 共存，无 cache 权重</td></tr>
+      <tr><td>backbone per-rank execute</td><td>median 263.1 ms；max 460.0 ms</td><td>三次调用的硬件诊断；不是完整 request wall time</td></tr>
+      <tr><td>cache entry per-rank execute</td><td>约 361–386 μs median</td><td>相比 DiT 很小，但两个 dispatch 仍决定 standalone micro-latency</td></tr>
+    </table></div>
+
+    <h4>trace 暴露的新主瓶颈：请求内不变 context 每个 anchor 重传</h4>
+    <p>latent/noise 边界通过后，runtime trace 中剩余的大 write 几乎全部来自 backbone conditioning。每个 rank、每个真实 backbone 调用仍写入：</p>
+    <ul>
+      <li><code>encoder_hidden_states</code>：4,194,304 bytes；</li>
+      <li><code>rotary_embedding</code>：2,359,296 bytes；</li>
+      <li><code>pooled_projections</code>：1,536 bytes；</li>
+      <li>timestep + guidance：4 bytes。</li>
+    </ul>
+    <p>TP4 合计是 <strong>26,220,560 bytes = 25.006 MiB / real backbone call</strong>。这些 tensor 在同一 request 内都不变（只有 timestep 变化；guidance 也不变），却因为当前 static signature 每次从 CPU 传入而重复 DMA。按 trace 线性投影，A12 的 12 anchors 是 <strong>300.07 MiB/request</strong>；不缓存的 50 steps 是 <strong>1,250.29 MiB/request</strong>。这不是理论估算中的隐含项，而是 inspect 中 size/count 与 frozen shapes 完全匹配的实测 inventory。</p>
+
+    <h4>架构决策</h4>
+    <p>H1c-b 证明 separately loaded backbone/cache runtimes 可以双向交换 ranked handles，因此无需把 23GB backbone 与小控制图强制编成一个巨型 artifact。与此同时，architecture abstraction 必须从“resident anchors”扩大为 <strong>resident request state</strong>：可变 anchors/latent 使用 alias；不变 encoder/pooled/guidance/rotary 使用一次性 device staging；每步只发送 timestep、coefficient 与 Δσ。</p>
+    <div class="caution"><span class="tag">当时的下一 gate：H1d（现已完成）</span>
+      编译一个 request-context staging entry point，只在请求开始时写入 conditioning，并把其 ranked handles 复用于所有 backbone anchor。H1d 必须把 25.006 MiB/anchor 降成“一次/请求”，同时保持 H1c-b 的 latent/noise 零 materialization；其正式结果见下方。
+    </div>
+
+    <p>协议：<code>benchmark/flux_cache/h1c-backbone-ranked-loop-protocol-20260812.json</code>（<code>795eebde…</code>）；mechanism：<code>/home/ubuntu/difflet-artifacts/flux-h1c-backbone-ranked-loop-20260812/mechanism-result-v1.json</code>（<code>2ae311e8…</code>）；inspect JSON（<code>2f777f12…</code>）；冻结判定：<code>benchmark/flux_cache/h1c-backbone-ranked-loop-result-20260812.json</code>（<code>74e4f778…</code>）。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="num">H1d 实验记录 · 2026-08-12</span><span class="title">Request-invariant context staging 与 device slot ownership</span><span class="pill pass">boundary 通过；完整 loop 待测</span></div>
+
+    <p class="tldr win">把不变的条件张量在请求开始时只写一次，此后每个锚点的主机写入从 25 MiB 降到 <b>8 字节</b>（<b>12 倍</b>削减）。同时撞出一条运行时抽象：<b>一个句柄不等于一个请求身份</b>——活跃请求必须独占设备槽位，否则会被后来的请求覆盖。</p>
+
+    <h4>实验目的</h4>
+    <p>把 H1c-b 暴露的 25.006 MiB/anchor conditioning 重传移到 request 初始化边界：encoder hidden states、pooled projection、guidance 与 rotary embedding 只从 host 写入一次，之后三个真实 FLUX backbone invocation 复用 ranked handles；每步只发送 timestep。实验同时验证一个更重要的 system contract：多个 live request 的 context handle 是否彼此隔离，而不是只证明单请求 identity graph 能跑。</p>
+
+    <h4>冻结配置与判据</h4>
+    <ul>
+      <li>硬件与模型：Trainium TP4，FLUX.1-dev 23GB compiled backbone，BF16，1024×1024；cache 使用 H1c-a 的 exact split predictor/scheduler artifact。</li>
+      <li>context shape：encoder <code>[1,512,4096]</code>、pooled <code>[1,768]</code>、guidance <code>[1]</code>、rotary <code>[4608,128,2]</code>。conditioning 为固定 seed synthetic tensor，但 shape、dtype 与正式 backbone contract 完全一致；不运行 text encoder。</li>
+      <li>机制序列：stage A → direct/staged backbone parity → stage B → A/B/A 交错 → cache execution → 再用 A；随后用 A 执行 initialize → anchor 0 → anchor 1 → resident skip 2 → anchor 3 → finalize。</li>
+      <li>boundary gate：context 大 tensor 每 rank 只允许在 staging entry 出现一次；之后三个 backbone 只能各写一个 2-byte timestep；initialize→finalize 之间不得出现 524,288-byte latent/noise host read/write。</li>
+      <li>claim boundary：本实验只建立 executable lifetime、isolation、traffic 与 HBM contract；不产生 prompt semantics、图像质量、steady-state throughput 或 end-to-end speedup 主张。</li>
+    </ul>
+
+    <h4>先失败一次：一个 staging entry point 不是多请求存储</h4>
+    <p>v1 只有一个 staging entry point。A 第一次进入 backbone、B 第一次进入 backbone都与 direct-host context bit-exact；但 stage B 后再次使用旧 A handle，backbone output 变为 max abs <strong>268.546875</strong>、relative L2 <strong>1.00088</strong>。其它 23 类检查没有同时失败。原因不是 layout 或数值误差，而是同一 executable 再执行时复用了输出缓冲，B 覆盖了 A。由此得到不可省略的 runtime abstraction：<strong>Python handle 不等于 request identity；live request 必须拥有独占、release 前不复用的 device slot。</strong></p>
+
+    <p>v2 编译两个 shape-distinct staging entry points作为容量为 2 的 proof slot pool。host allocator 选择空闲 slot，并用 4-byte slot token 路由；A→B→A 交错、跨 cache execution 后再读 A、以及 direct/staged backbone 对照全部恢复 bit-exact。这里证明的是两 slot ownership contract，不外推任意并发容量。</p>
+
+    <h4>正式硬件结果</h4>
+    <div class="tablewrap"><table>
+      <tr><th>指标</th><th>结果</th><th>系统含义</th></tr>
+      <tr><td>正式 correctness checks</td><td>24 项；max abs = 0；relative L2 = 0</td><td><span class="pill pass">通过</span> staging、A/B/A 隔离、真实 backbone、skip 与 final latent 均逐 bit 一致</td></tr>
+      <tr><td>一次性 context tensors（TP4）</td><td>26,220,552 bytes</td><td>encoder + pooled + guidance + rotary；请求生命周期内只写一次</td></tr>
+      <tr><td>一次 staging host write</td><td><strong>26,220,568 bytes = 25.006 MiB</strong></td><td>context tensors 加四个 rank 的 4-byte slot token</td></tr>
+      <tr><td>staging 后每 backbone host write</td><td><strong>8 bytes</strong></td><td>四个 rank 各一个 2-byte timestep；不再重传 context</td></tr>
+      <tr><td>staging 后 host read</td><td><strong>0 bytes</strong></td><td>全部 context handles 留在设备数据面</td></tr>
+      <tr><td>initialize→finalize latent/noise write/read</td><td><strong>0 / 0 bytes</strong></td><td>保持 H1c-b 的双向 ranked boundary</td></tr>
+      <tr><td>A12 context+timestep 投影</td><td>300.0705 MiB → <strong>25.0060 MiB</strong></td><td>11.99995× byte reduction；来自实测 size/count 的线性投影</td></tr>
+      <tr><td>50-backbone context+timestep 投影</td><td>1,250.2937 MiB → <strong>25.0063 MiB</strong></td><td>49.9992× byte reduction；不是 latency speedup</td></tr>
+      <tr><td>双-slot artifact</td><td>60,440 bytes；compile 2.955 s；load 0.043 s</td><td>无模型权重；两个 entry point 的 shape signature 全局唯一</td></tr>
+      <tr><td>staging per-rank execute</td><td>median 1.508 ms；max 239.924 ms</td><td>首个 profiled invocation 有明显 rank straggler/cold effect；不得当作 steady-state latency</td></tr>
+      <tr><td>per-core HBM peak</td><td>6,586,754,112 bytes</td><td>相对 H1c-b 增加 52,545,592 bytes = 50.111 MiB/core</td></tr>
+    </table></div>
+
+    <h4>实验分析与架构结论</h4>
+    <ul>
+      <li><strong>resident request state 至少有两种机制</strong>：可变 anchor/latent 通过 alias state 更新；不变 conditioning 通过 request-owned output slot 保存。把两者统称“persistent tensor”会掩盖不同的 ownership 与回收语义。</li>
+      <li><strong>slot pool 是 bounded resource</strong>：两 slot 只证明两请求交错隔离。更大并发需要编译/分配更多 slot 或换成显式 state arena，并把 slot exhaustion 接入 admission control；不能让 runtime 静默复用 live slot。</li>
+      <li><strong>流量收益换来 HBM 成本</strong>：同一 profiler 方法下，双 slot 相对 H1c-b 多 50.111 MiB/core，其中 tensor-class 增量 50.012 MiB/core。该增量包含 retained outputs 与 graph/input buffers，不能简单等同于两个 payload 的理论大小。</li>
+      <li><strong>仍然没有 architecture speed claim</strong>：byte reduction 已经实测，但 staging 首次执行存在 239.9ms 最大 rank 时间，且尚未跑完整 scheduler、text encoders、VAE 和 50-step request wall time。下一实验必须比较 materializing baseline 与 resident A12 的端到端 latency/throughput，并测最终图像质量。</li>
+    </ul>
+
+    <div class="caution"><span class="tag">下一 gate：H1e</span>
+      用真实 prompt 执行完整 50-step A12。固定同一 seed、scheduler、anchors 与 coefficient 表，对比当前 materializing Python pipeline 和 resident request-state pipeline；同时报告总 wall time、DiT/控制/staging 分解、host↔device bytes、P50/P95、最终 latent parity（若 contract 要求）与图像质量。只有该 gate 通过，resident architecture 才从“边界正确且省流量”升级为论文中的 end-to-end system result。
+    </div>
+
+    <p>冻结协议：<code>benchmark/flux_cache/h1d-request-context-staging-protocol-20260812.json</code>（<code>3c6c9e1f…</code>）；single-slot 失败结果（<code>a59af727…</code>）；two-slot mechanism（<code>41f0660a…</code>）；profile result（<code>c639cbcb…</code>）；parsed inspect JSON（<code>8fe04675…</code>）；正式判定：<code>benchmark/flux_cache/h1d-request-context-staging-result-20260812.json</code>（<code>c58cfbcd…</code>）。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="num">H1e 实验记录 · 2026-08-12</span><span class="title">完整 real-prompt A12：materializing vs resident</span><span class="pill dead">speed gate 拒绝</span></div>
+
+    <p class="tldr lose">完整真实提示词、24 对配对请求的端到端对照：数值<b>逐 bit 相同</b>、去噪阶段主机流量<b>少 91.7%</b>，但 <b>24 对里 24 对都更慢</b>（约 1.3%）。原因是每个核的入口点从 12 个涨到 <b>103 个</b>。预注册的速度门<b>拒绝</b>——当前可部署实现仍是主机侧的 A12。</p>
+
+    <h4>实验目的</h4>
+    <p>H1a–H1d 已分别证明 state persistence、cross-graph handles、exact numerical boundary、真实 backbone 双向数据流、context residency 和 request isolation；H1e 把 text encoding、完整 50-step A12 denoise 与 VAE decode 放回同一 request。这里不再比较 A12 与 full-50 的算法收益，而是<strong>固定完全相同的 A12 anchors、TaylorSeer predictor、scheduler、prompt 和 seed</strong>，只比较 host-materializing dataflow 与 resident request-state dataflow。这样 final latent 和 decoded tensor 必须 bit-exact，wall-time 差异才能归因于 architecture。</p>
+
+    <h4>冻结实验配置</h4>
+    <ul>
+      <li>模型/硬件：FLUX.1-dev <code>3de623fc…</code>，Trainium TP4，BF16，1024×1024，50 steps，guidance 3.5；复用相同已编译 CLIP、T5、23GB transformer 与 VAE。</li>
+      <li>算法固定：A12 anchors <code>[0,1,2,3,4,5,9,15,21,31,41,49]</code>；order-1 index TaylorSeer；predictor FP32 组合后舍入 BF16，再进入相同 FlowMatch Euler update。</li>
+      <li>materializing arm：12 个 anchor 每次从 host 复制 latent + context 到四 rank，读回 rank-0 noise；两个 anchor 和 scheduler update 留在 host。</li>
+      <li>resident arm：context 一次 staging 到 request slot；latent/anchors 使用 alias state；backbone、predictor 与 scheduler 用 ranked handles 串联，只在最终读回 latent，随后使用同一 VAE decode。</li>
+      <li>24 个配对请求：4 prompts × 每 prompt 6 repetitions，seeds 101/202/303/404；每 prompt 内 AB/BA 交替，使两 arm 各先运行三次、后运行三次；正式计时前每 arm 各跑一个完整 warmup。</li>
+      <li>统计：paired speedup 定义为 <code>materializing / resident</code>；按 prompt 分层做 10,000 次 bootstrap。预注册通过要求 denoise 与 full-request 的 95% lower bound 都大于 1，median speedup 分别 ≥1.03×/1.01×。</li>
+      <li>另做两个独立 Neuron Profile inspect run；计时包含 host materialization，边界 byte accounting 聚焦 denoise。raw decoded VAE tensor 在 host materialize 后才停止 full-request timer。</li>
+    </ul>
+
+    <h4>Correctness 与 boundary：都通过</h4>
+    <div class="tablewrap"><table>
+      <tr><th>指标</th><th>materializing</th><th>resident</th><th>判定</th></tr>
+      <tr><td>24 对 final packed latent</td><td colspan="2">全局 max abs = 0；relative L2 = 0</td><td><span class="pill pass">bit-exact</span></td></tr>
+      <tr><td>24 对 raw decoded VAE tensor</td><td colspan="2">全局 max abs = 0；relative L2 = 0</td><td><span class="pill pass">bit-exact</span></td></tr>
+      <tr><td>denoise host write</td><td>339,812,544 B</td><td>28,320,136 B</td><td>resident 只做一次 context/latent staging 与 scalar control</td></tr>
+      <tr><td>denoise host read</td><td>6,291,456 B（12 次 noise）</td><td>524,288 B（1 次 final latent）</td><td>resident 中间 noise/latent 不 materialize</td></tr>
+      <tr><td>denoise host transfer 合计</td><td><strong>346,104,000 B = 330.0705 MiB</strong></td><td><strong>28,844,424 B = 27.5082 MiB</strong></td><td><span class="pill pass">减少 91.666%，11.999×</span></td></tr>
+      <tr><td>frozen transfer sequence</td><td>12 次完整 input + 12 次 noise read</td><td>一次 context、一次 latent init、scalar control、一次 final read</td><td><span class="pill pass">两 arm 均精确匹配</span></td></tr>
+    </table></div>
+
+    <h4>Wall-time：resident 在 24/24 配对中更慢</h4>
+    <div class="tablewrap"><table>
+      <tr><th>指标</th><th>materializing</th><th>resident</th><th>paired 判定</th></tr>
+      <tr><td>denoise P50</td><td>3.2537 s</td><td>3.2951 s</td><td>median speedup <strong>0.98732×</strong>（resident 慢约 1.28%）</td></tr>
+      <tr><td>denoise P95</td><td>3.2558 s</td><td>3.3066 s</td><td>resident win = <strong>0/24</strong></td></tr>
+      <tr><td>denoise geometric-mean speedup</td><td colspan="2">0.987331×；prompt-stratified bootstrap 95% CI <strong>[0.986817, 0.987837]</strong></td><td><span class="pill dead">significance/materiality 失败</span></td></tr>
+      <tr><td>full-request P50</td><td>3.5953 s</td><td>3.6358 s</td><td>median speedup <strong>0.98846×</strong>（resident 慢约 1.16%）</td></tr>
+      <tr><td>full-request P95</td><td>3.5978 s</td><td>3.6489 s</td><td>P95 ratio 0.98598；预注册 ≥0.98，tail gate 单独通过</td></tr>
+      <tr><td>full-request geometric-mean speedup</td><td colspan="2">0.988522×；prompt-stratified bootstrap 95% CI <strong>[0.988029, 0.989006]</strong></td><td><span class="pill dead">significance/materiality 失败</span></td></tr>
+    </table></div>
+
+    <h4>为什么省了 91.7% DMA 仍变慢</h4>
+    <p>对照每 rank 的 denoise 只有 12 个 backbone entry points。resident 为了保持当前 host algorithm 的 BF16 intermediate contract，需要：</p>
+    <ul>
+      <li>12 次 backbone + 12 次 <code>cache_anchor_step</code>；</li>
+      <li>38 次 <code>cache_predict</code> + 38 次 <code>cache_scheduler_step</code>；</li>
+      <li>1 次 context stage、1 次 initialize、1 次 finalize。</li>
+    </ul>
+    <p>合计 <strong>103 entry points/rank</strong>，比 materializing 多 <strong>91 次/rank</strong>。profile 中 <code>cache_predict</code> 和 <code>cache_scheduler_step</code> 的 median per-rank execute 各约 337μs/332μs；算子很小，但 76 次独立 dispatch 加上 12 次 anchor state update 抵消了 DMA 减少。真实 backbone 本身在两 arm 的调用数相同（12 次），median per-rank execute 也近似相同（267.46ms vs 267.09ms），因此回归不是模型计算变慢。</p>
+
+    <h4>系统结论</h4>
+    <ul>
+      <li><strong>resident request state 是成立的 mechanism，但当前不是性能贡献。</strong> correctness 与 data-plane boundary 已经在完整真实 prompt request 上通过；然而预注册 wall-time gate 明确拒绝 architecture speedup。</li>
+      <li><strong>正流量结果不能覆盖负 latency 结果。</strong>论文不能写“12× traffic reduction therefore faster”，只能写“DMA 被 dispatch explosion 抵消”。</li>
+      <li><strong>当前关键取舍不是 resident vs host，而是 numerical boundary vs dispatch count。</strong> H1c-a 证明把 predictor + scheduler 直接 fuse 会改变 BF16 intermediate 语义；H1e 又证明用两个 NEFF 强制语义会让完整系统变慢。两者共同定义了下一个真正的 accelerator co-design 问题。</li>
+      <li><strong>当前可部署选择仍是 host-materializing A12。</strong>除非能在不改变固定算法 contract 的情况下把 91 次额外 entry points 融合、批处理或并入一个持久循环，否则 resident path 只保留为 architecture prototype。</li>
+    </ul>
+
+    <div class="caution"><span class="tag">当时的下一 gate：H1f（现已完成并拒绝）</span>
+      目标不是再减少 tensor bytes，而是保留 <code>FP32 predictor → BF16 materialization → FP32 Euler</code> 的逐 bit 语义，同时把 38 个 skip 的两个 entry points 合成一次，最好把整段 skip run 放进一个持久 loop。第一门槛是 compiler/runtime 是否提供不会被消除的 dtype/rounding barrier；第二门槛是完整 A12 entry points 显著低于 103/rank；第三门槛才重新跑同一份 H1e 24-pair 协议。若 barrier 不存在，主线应收缩为 host dataflow，不再扩展 resident 论文叙事。
+    </div>
+
+    <p>冻结协议：<code>benchmark/flux_cache/h1e-resident-e2e-ab-protocol-20260812.json</code>（<code>77ef6eb1…</code>）；24-pair raw（<code>1b3be036…</code>）；materializing/resident profile results（<code>ea4a6470…</code>/<code>acaf9d4b…</code>）；parsed inspect（<code>09c169db…</code>/<code>8f0081eb…</code>）；正式判定：<code>benchmark/flux_cache/h1e-resident-e2e-ab-result-20260812.json</code>（<code>60db6019…</code>）。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="num">H1f 实验记录 · 2026-08-12</span><span class="title">单 NEFF rounding barrier：exact contract vs dispatch fusion</span><span class="pill dead">数值契约拒绝</span></div>
+
+    <p class="tldr lose">试图用编译器屏障在<b>单个</b>图内保住那次 BF16 舍入，好省下一次调度。屏障确实进了输入 HLO，但编译器跑了删除屏障的 pass，结果与不加屏障时<b>逐 bit 相同</b>。结论：<b>提前编译的图里，一次数据类型转换不是可靠的数值契约</b>。</p>
+
+    <h4>实验目的</h4>
+    <p>H1e 的 resident arm 省掉了 91.666% denoise boundary bytes，却因为每个 skip 必须分别 dispatch <code>cache_predict</code> 与 <code>cache_scheduler_step</code> 而变慢。H1f 不改 A12 anchors、predictor、scheduler 或 prompt policy，只测试一个编译器/架构问题：能否在一个 skip NEFF 内用 XLA <code>optimization_barrier</code> 强制 <code>FP32 predictor → BF16 round → FP32 Euler</code>，从而同时保留原算法身份并少一次 dispatch。</p>
+
+    <h4>冻结配置与顺序 gate</h4>
+    <ul>
+      <li>Trainium TP4，BF16，tensor shape <code>[1,4096,64]</code>（524,288 bytes），FLUX.1-dev 50-step 动态 shift schedule，固定 A12 anchors，共 38 skips。</li>
+      <li>候选图只有一个 <code>cache_skip_step_barrier(coeff[2], Δσ[1])</code>：设备内 FP32 组合两个 resident anchors，cast BF16，插入 <code>xm.optimization_barrier_</code>，再执行 FP32 Euler 并写回 aliased BF16 latent。</li>
+      <li>主 reference 是现有 host 契约：prediction 先舍入 BF16，再被 scheduler 转回 FP32。仅对“cast 被融合掉”的 fused-FP32 reference 精确，明确算失败。</li>
+      <li>先过 compile/HLO presence，再要求 50 个逐步 latent 与 final latent bit-exact；数值 gate 失败即停止 H1e 重跑，不能用可能的 dispatch 收益覆盖算法变化。</li>
+    </ul>
+
+    <h4>硬件结果</h4>
+    <div class="tablewrap"><table>
+      <tr><th>指标</th><th>结果</th><th>判定</th></tr>
+      <tr><td>TP4 compile/load</td><td>成功；4 entry points；compile 3.639 s；artifact 316,228 B</td><td><span class="pill pass">F1 通过</span></td></tr>
+      <tr><td>barrier 是否进入编译输入</td><td>HLO 明确包含 <code>xla__optimization_barrier</code> / <code>opt-barrier</code></td><td>排除“Python device 分支没有被 trace”</td></tr>
+      <tr><td>compiler pipeline</td><td>日志明确执行 <code>RemoveOptimizationBarriers pass</code></td><td>barrier 是优化排序约束，不是持久的 dtype materialization contract</td></tr>
+      <tr><td>两次完整 A12/50-step run</td><td>逐步 error signature 完全相同</td><td>失败可重复，不是 runtime noise</td></tr>
+      <tr><td>vs host BF16-boundary reference</td><td>step 6 首次分叉；global max abs <strong>0.0625</strong>；max relative L2 <strong>0.00263287</strong></td><td><span class="pill dead">F2 失败</span></td></tr>
+      <tr><td>final latent vs host reference</td><td>max abs <strong>0.046875</strong>；relative L2 <strong>0.00263287</strong></td><td>不能声称相同 cache algorithm</td></tr>
+      <tr><td>vs fused-FP32 reference</td><td>50 steps 与 final 均 max abs = 0；relative L2 = 0</td><td>与 H1c-a 原 fused 图的完整 error signature 相同</td></tr>
+      <tr><td>单 skip micro P50</td><td>两次为 0.842 / 0.856 ms，中值 0.849 ms</td><td>仅诊断；F2 已失败，不升级为 performance gate</td></tr>
+      <tr><td>若语义成立时的 dispatch 投影</td><td>完整 resident A12：103 → 65 entry points/rank（减少 38）</td><td>无效 counterfactual，不运行 H1e</td></tr>
+    </table></div>
+
+    <h4>实验分析与架构结论</h4>
+    <ul>
+      <li><strong>失败发生在编译语义层，而不是 Python tracing 层。</strong>输入 HLO 已有 barrier；硬件结果却仍逐 bit 等于 fused-FP32 reference，并与未加 barrier 的 H1c-a 误差轨迹完全相同。它能阻止部分优化跨越边界，却不能保证 BF16 tensor 在下游消费前发生可观察舍入。</li>
+      <li><strong>这里揭示的是 AOT executable contract 缺口。</strong>在 eager host 代码里，一个 dtype cast 看起来像算法边界；在 AOT 图里，如果没有 runtime 承诺的 materialization/rounding primitive，同一个 cast 可能只是一条可消去的数据类型路径。系统论文必须把 numerical contract 与 graph boundary 一起定义。</li>
+      <li><strong>潜在 dispatch 优势不能覆盖算法身份失败。</strong>候选单 skip 图确实把 38 个双 entry-point skip 合成 38 个单 entry-point skip，理论上把 H1e resident 的 103 降到 65；但它不再是固定的 A12 对照，因此没有资格重跑 24-pair H1e 并报告“架构加速”。</li>
+      <li><strong>当前 deployable 结论不变。</strong>exact resident 路径仍需 split NEFF，完整系统仍慢；因此 host-materializing A12 仍是当前可部署实现。resident state/traffic 作为已验证 mechanism 保留，但 speed claim 继续为 false。</li>
+    </ul>
+
+    <div class="refute"><span class="tag">决策</span>
+      拒绝 optimization-barrier fusion，不运行 H1e 24-pair 复验。若继续 resident 主线，下一候选必须是拥有真实 executable BF16 boundary 的 HBM-backed multi-step device loop；这里的目标是合并 dispatch，不包含跨 step SBUF persistence。否则停止追逐小图 micro-optimization，转向 H2/H3 的 placement/control-plane characterization，并把 host dataflow 作为 system baseline。
+    </div>
+
+    <p>冻结协议：<code>benchmark/flux_cache/h1f-optimization-barrier-protocol-20260812.json</code>（<code>e39b7a3f…</code>）；两次 raw hardware runs（<code>c43e8c4d…</code>/<code>b596d8e8…</code>）；候选 HLO（<code>da0a0660…</code>）；compiler log（<code>4886c3aa…</code>）；正式判定：<code>benchmark/flux_cache/h1f-optimization-barrier-result-20260812.json</code>（<code>bf962192…</code>）。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="num">H1g 实验记录 · 2026-08-12</span><span class="title">BF16 While carry：按连续 skip segment 批量 dispatch</span><span class="pill dead">frontend gate 拒绝</span></div>
+
+    <p class="tldr lose">改用循环把连续的跳步打包成一次调用（入口点 103 → 33 的投影）。三条前端路径<b>全部在生成 HLO 之前就失败</b>，从未到达编译器后端，因此没有任何硬件数字。顺带澄清一条内存契约：<b>片上缓冲每步清空，跨步常驻只能在显存</b>。</p>
+
+    <h4>实验目的</h4>
+    <p>H1f 说明 straight-line fused graph 即使插入 optimization barrier，也不能把中间 BF16 cast 变成可靠的 executable contract。H1g 因此不再尝试阻止 compiler fusion，而是改变控制流：把 HBM-resident BF16 latent 作为 XLA <code>While</code> 的 loop carry，让每轮 body 的输入/输出 dtype signature 强制定义 step boundary；同时把一段连续 skips 放进一次 invocation，从架构上解决 H1e 的小图 dispatch explosion。</p>
+
+    <div class="caution"><span class="tag">Memory-contract 澄清</span>
+      H1g 的目标从来不应表述为“让 anchors/latent 跨 step 留在 SBUF”。SBUF 是 step-local SRAM scratchpad，每个 diffusion step 必定清空，所以跨 step persistence 最多发生在 HBM。即使 H1g 编译成功，它能争取的也只是：① 一次 host/runtime invocation 执行多轮；② BF16 loop signature 固定数值边界。每轮仍需要 HBM↔计算单元的数据移动，不能声称消除了 step 间 HBM traffic 或实现 SRAM-resident denoising state。
+    </div>
+
+    <p>固定 A12 的 38 个 skips 自然形成六段：<code>6–8</code>、<code>10–14</code>、<code>16–20</code>、<code>22–30</code>、<code>32–40</code>、<code>42–48</code>。候选使用长度 9 的静态 packet：<code>[9,2]</code> FP32 coefficients 和 <code>[9,1]</code> FP32 Δσ；不足 9 步的段用 Δσ=0 padding。若能执行，完整 cache schedule 每 rank 只需 1 initialize + 12 anchor + 6 segment + 1 finalize = <strong>20</strong> 个 cache entry points；加上 12 次 real backbone 和一次 context stage，完整 resident request 预计从 H1e 的 103 降到 <strong>33</strong>。</p>
+
+    <h4>冻结 gate 与实验边界</h4>
+    <ul>
+      <li><strong>G0 host reference：</strong>先验证固定九轮、zero-delta padding 与显式逐步 BF16 predictor/scheduler 完全一致。</li>
+      <li><strong>G1 compile while：</strong>必须在 TP4 software stack 中生成包含真实 XLA While 的 HLO，经过 neuronx-cc 编译并 load；不能把九轮静态展开冒充 persistent loop。</li>
+      <li><strong>G2 single-active：</strong>同一 segment graph 每次只激活一行，完整 50-step 所有 latent 必须 bit-exact。</li>
+      <li><strong>G3 real segments：</strong>用六个真实 multi-active packet 执行 A12，每个 segment endpoint 与 final latent 必须 bit-exact。</li>
+      <li><strong>G4/G5 dispatch 与 boundary：</strong>只有 G1–G3 通过，才允许验证 20-entry schedule、零中间 tensor materialization 和 segment latency。</li>
+    </ul>
+
+    <h4>结果：CPU 语义通过，但可执行图没有生成</h4>
+    <div class="tablewrap"><table>
+      <tr><th>阶段</th><th>结果</th><th>系统判定</th></tr>
+      <tr><td>CPU reference</td><td>resident cache-step unit suite 4/4 通过；九轮与 zero-delta padding bit-exact</td><td><span class="pill pass">G0 通过</span>，候选数学没有歧义</td></tr>
+      <tr><td><code>torch_xla.experimental.scan</code></td><td>AOTAutograd FakeTensor trace 与 Neuron custom-op-name dispatch 冲突：<code>Expected XLA tensor; Got XLAFloatType</code></td><td>未进入 HLO generation</td></tr>
+      <tr><td>registered XLA <code>while_loop</code></td><td>ModelBuilder 默认 INFO metadata 的 TorchDispatchMode 没有 HigherOrderOperator rule</td><td>metadata frontend 不支持该 HOP</td></tr>
+      <tr><td>metadata=NONE + direct XLA While lowering</td><td>即使把 27 个控制 scalar 全部显式放入 carry，body lowering 仍捕获两个额外 FP32 device-data 参数</td><td>condition/body/init tuple signature 不一致</td></tr>
+      <tr><td>最终 G1</td><td><code>RuntimeError</code>；failure detection 0.0263 s；无 segment HLO/NEFF</td><td><span class="pill dead">G1 失败</span></td></tr>
+      <tr><td>G2–G5</td><td>未运行</td><td>不能把架构投影写成硬件 correctness、traffic 或 speed 结果</td></tr>
+    </table></div>
+
+    <h4>实验分析</h4>
+    <ul>
+      <li><strong>失败在 frontend/executable-contract 层。</strong>当前 Torch/XLA + Neuron ModelBuilder 无法把 resident module parameters、请求提供的 scalar packet 与 BF16 loop carry lowering 成闭合、shape-stable 的 While signature。仅仅在基础库里存在 <code>scan</code>/<code>While</code> API，不代表完整 AOT serving stack 能编译这类状态循环。</li>
+      <li><strong>不能写成 Trainium 算错或 loop 太慢。</strong>本实验从未到达 neuronx-cc backend compilation、NEFF load 或设备执行，所以没有硬件数值误差、latency、HBM 或 runtime traffic 数据。准确表述是“tested frontend path cannot express the candidate”。</li>
+      <li><strong>33-entry projection 仍只是 counterfactual。</strong>它说明 persistent segment 是解决 dispatch explosion 的正确系统粒度，但不能作为已实现的性能数字，也不能触发 H1e 24-pair 重跑。</li>
+      <li><strong>即使 counterfactual 成立，收益也只在 dispatch/control 层。</strong>SBUF 每 step 清空，loop-carried anchors/latent 最多在 HBM；因此 103→33 不能被解释为 SRAM residency、HBM traffic reduction 或 on-chip state-machine speedup。必须另测每轮 HBM bytes 与 loop wall time。</li>
+      <li><strong>停止条件已经满足。</strong>我们已经依次排除 scan AOT frontend、metadata HigherOrderOperator dispatch 和 direct While lowering；继续叠加私有 API workaround 会把研究问题变成 runtime patch engineering，且无法建立稳定、可复现的论文 contract。</li>
+      <li><strong>claim 不外推到所有 HBM-backed batched loop。</strong>这只拒绝当前软件版本与表达路径，不否定未来受支持的 loop-carry primitive、NKI/custom backend 或 runtime 原生 diffusion loop；但任何未来实现同样不得假设跨 step SBUF persistence。</li>
+    </ul>
+
+    <div class="refute"><span class="tag">决策</span>
+      不运行 H1e 复验，不部署 H1g，不再沿私有 frontend workaround 继续。当前 deployable baseline 保持 host-materializing exact A12；resident mechanism 保留 correctness/traffic 结果，但 architecture speed claim 为 false。主线转入正交、可执行的 H2 TP-aware placement 与 H3 scalar control-plane invariance；只有 runtime 提供正式 BF16 loop-carry contract 时才重开 HBM-backed dispatch-batched loop。
+    </div>
+
+    <p>冻结协议：<code>benchmark/flux_cache/h1g-scan-segment-protocol-20260812.json</code>（<code>1f786cb1…</code>）；最终结构化 compile failure：<code>/home/ubuntu/difflet-artifacts/flux-h1g-scan-segment-20260812/compile-failure-result-v9.json</code>（<code>28d70bcc…</code>）；正式判定：<code>benchmark/flux_cache/h1g-scan-segment-result-20260812.json</code>（<code>1030e10a…</code>，包含事后 memory-contract addendum）。</p>
+  </div>
+
+  
+  <div class="caution"><span class="tag">主线 A 目前的净结论</span>
+    <strong>成立的</strong>：跨调用常驻状态、跨图设备侧句柄传递、真实主干的双向数据流、请求级条件 staging 与槽位隔离，全部在完整真实请求上逐 bit 通过；去噪阶段主机流量确实降低 12 倍。<br><br>
+    <strong>不成立的</strong>：架构加速。预注册的速度门在 24 对配对里 0 胜，明确拒绝。因此论文<strong>不能</strong>写"流量降低 12 倍所以更快"，只能写"省下的直接内存访问被调度爆炸抵消"。<br><br>
+    <strong>当前可部署的仍是主机侧的 A12。</strong>常驻路径作为已验证的机制与流量结果保留，速度主张为假。翻盘的条件是找到既不改变数值契约、又能把 91 次额外调度合并的办法——H1f 与 H1g 已分别排除了编译器屏障与当前前端的循环表达。
+  </div>
+<div class="card-head"><span class="num">主线 B</span><span class="title">In-device predictor 与 TP-aware dataflow</span><span class="pill pass">核心 co-design</span></div>
+    <h4>设计目标</h4>
+    <p>对 skipped step，预测仍是小规模线性组合：v̂<sub>t</sub> = Σ w<sub>k</sub>v<sub>a_k</sub>。系数是几个 scalar，anchor 是大 tensor。因此最自然的数据流是：<strong>host 只下发系数，Trainium 在本地读取常驻 anchor 并完成组合。</strong></p>
+    <h4>TP4 取舍</h4>
+    <p>如果 anchor 保持分片，predictor 也可在各 rank 独立完成 shard-wise 线性组合，直到真正需要完整输出的位置再进入已有 collective。这样 cache step 不必因为 predictor 自身新增跨核通信。若把 anchor 提前 materialize 成完整张量，则实现简单，但会产生 4× replica 和更多 HBM traffic。</p>
+    <h4>论文价值</h4>
+    <p>这里的贡献不是“线性组合很便宜”，而是证明 cache prediction 与 tensor-parallel sharding 可交换，并据此重排 state placement 与 collective boundary。这是明确的 communication–storage–compute tradeoff。</p>
+  </div>
+
+  <div class="card">
+    
+  <div class="evidence-head"><span class="lead">主线 B 的实验计划</span>H2 · 分片放置 vs 完整复制</div>
+
+  <p><strong>要回答什么。</strong>主线 B 主张预测与张量并行分片<strong>可交换</strong>——同样的线性组合，放在集合通信之前（各核只处理自己那片）还是之后（每核持有完整张量），数学结果一致。既然数学一致，胜负就完全由硬件常数决定：显存占用、冗余计算、以及是否需要额外的标量通信。</p>
+
+  <p><strong>为什么必须实测而不是推算。</strong>两种放法各有一个不可通约的代价：保持分片省下四倍显存，但预测结果要在需要完整张量的地方汇合，可能引入一次额外的集合通信；完整复制实现简单、不加通信，但每核多存四倍并做四倍冗余计算。浮点运算次数在这里没有判别力——H1 那条链已经证明，真正决定成败的是调度与通信的固定开销，不是算术量。</p>
+
+  <p><strong>为什么它与 H1 的失败无关。</strong>这是本条最重要的性质：<strong>放置问题在主机侧路径上同样存在</strong>。即使常驻方案的速度主张被拒、系统继续用主机侧的 A12，anchor 该以分片还是完整形式保存、预测在通信的哪一侧完成，依然是必须回答的设计问题。所以 H2 与 H1e 的负结果<strong>正交</strong>，不受它牵连。</p>
+
+  <p><strong>意义。</strong>这是论文里最核心的"通信—存储—计算"三方权衡，而且它是可以给出定量结论的那一类：同一份数学、两种放置、一张对照表。</p>
+<h3>H2 · TP-aware placement：pre-gather vs post-gather</h3>
+  <p>分别编译两种实现：① anchor 保持 shard，predictor / telemetry 在 collective 前完成；② gather 后保存完整 anchor。不要用 FLOP 猜赢家，直接测：</p>
+  <ul>
+    <li>HBM footprint；</li>
+    <li>额外 scalar collective 固定延迟；</li>
+    <li>redundant compute；</li>
+    <li>end-to-end step latency；</li>
+    <li>编译时间、NEFF 大小与 graph stability。</li>
+  </ul>
+  <p>这项实验决定论文中最核心的 communication–storage tradeoff。</p>
+
+  <div class="card-head"><span class="num">主线 C</span><span class="title">Scalar control plane</span><span class="pill pass">连接 compiler 与 runtime</span></div>
+    <h4>抽象</h4>
+    <p>编译图负责 tensor data plane：DiT、anchor store、predictor、必要的 reduction。运行时策略保留在图外，只通过少量标量控制图的执行，例如 predictor 系数、step id、anchor mask、剩余 budget。这样 policy 变化不要求重新编译 23GB 图。</p>
+    <h4>Gram tap 的位置</h4>
+    <p>Gram reduction 被降级为一个<strong>telemetry primitive</strong>：新 anchor 产生时，可选地输出它与 resident anchors 的 partial Gram slice，用于 profiling、runtime auditing 或 adaptive extension。它不是 cache 正确性的前提；没有 Gram tap，静态 offline policy 仍可运行。</p>
+    <h4>为什么仍值得做</h4>
+    <p>Gram 的价值在于它把高维 device state 暴露成可复用的 scalar geometry，而不是“发现了一个新的 AI predictor”。同一个 telemetry 接口可供 brake、debugging、quality receipt 或后续 adaptive policy 使用。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="num">主线 D</span><span class="title">AOT-aware policy/runtime</span><span class="pill pass">系统层</span></div>
+    <h4>设计</h4>
+    <p>把 cache policy 物化成小型、可哈希、可版本化的策略对象，而不是把控制逻辑编进模型图。图的 tensor contract 保持稳定；不同 static schedule、不同 coefficient 表、不同 safety policy 在同一 compiled graph 上运行。</p>
+    <h4>要证明的不是“哈希日志很新”</h4>
+    <p>真正要测的是：策略切换是否零重编译、图输入输出结构是否固定、control-plane latency 是否可以忽略，以及 fail-closed 行为能否在不改 tensor graph 的情况下完成。</p>
+  </div>
+
+  <div class="card">
+    
+  <div class="evidence-head"><span class="lead">主线 C 与 D 的实验计划</span>H3 · 张量图固定，策略可变</div>
+
+  <p><strong>要回答什么。</strong>主线 C 和 D 共同主张"张量图保持固定，策略在图外自由更换"。这句话如果停留在概念图上没有任何价值；要成为系统贡献，必须证明它是<strong>可执行的运行时契约</strong>：在同一份编译产物上换掉调度表与系数表，确实不触发重编译，控制面延迟确实可以忽略，失败时确实能 fail-closed。</p>
+
+  <p><strong>为什么这样设计。</strong>判据刻意选成"至少三套不同的调度与系数组合"，而不是一套——因为一套只能证明"能跑"，三套才能证明"图的输入输出结构确实与策略无关"。同时记录内容哈希身份，是因为 H1a 那次 22.7GB 事故已经证明：<strong>身份定义漏掉组件角色与权重策略，小控制图会静默继承大模型的生命周期。</strong>所以身份验证不是形式主义，是这条主张的一部分。</p>
+
+  <p><strong>意义。</strong>这是当前架构里唯一一条<strong>已经在生产路径上成立、只差把它测出来</strong>的主张——现有系统的策略本来就是图外的一份 JSON。它也是"质量优先求最大加速"能落地的前提：认证换档如果要重编 23GB，整个阶梯式认证就没有实际意义。</p>
+<h3>H3 · Scalar control plane 与 policy invariance</h3>
+  <p>在同一份编译图上切换至少三套 schedule / coefficient profile，验证不触发重编译；记录每 step control payload、host latency、fail-closed path 和 content-hash identity。目标是证明“tensor graph 固定，policy 可变”不是概念图，而是实际 runtime contract。</p>
+
+  <div class="card-head"><span class="num">主线 E</span><span class="title">Anchor as a serving resource</span><span class="pill pending">服务层扩展</span></div>
+    <p>一个真实 anchor 对应一次完整 DiT step，也对应约固定的 accelerator service time。因此 serving scheduler 可以把“多给哪个 request 一个 anchor”视为显式资源分配。第一版不要求 online quality predictor：可以先用 offline-derived schedule 和已认证的 budget class 做资源分配；如果 telemetry conditional bound 后续成立，再升级为 request-specific allocation。</p>
+    <p>这条线的核心指标应是 throughput / tail latency / fairness，而不是单请求相关系数。</p>
+  </div>
+
+  <div class="card">
+    
+  <div class="evidence-head"><span class="lead">主线 E 的实验计划</span>H4 · 把锚点当作可调度资源</div>
+
+  <p><strong>要回答什么。</strong>主线 E 把"下一个设备时隙给哪个请求"当作显式的资源分配问题。第一版<strong>刻意不引入任何在线质量预测器</strong>，只用离线已认证的预算类别做分配。</p>
+
+  <p><strong>为什么先做这个便宜版本。</strong>这是一条下界测试：如果连"用静态预算类别在步粒度共享设备"本身都拿不到服务收益，那么再复杂的在线控制器更不会有——而在线控制器的证据链（见下面的可选扩展）目前恰好也没通过。先花小钱确认地板存不存在，再决定要不要盖楼。</p>
+
+  <p><strong>意义，以及它为什么是 H1e 那个负结果唯一可能的翻盘方向。</strong>这条线的指标是<strong>吞吐、尾延迟与公平性</strong>，不是单请求延迟。H1e 测的是孤立单请求，此时主机的内存搬运被 267 毫秒的主干计算完全掩盖，所以省掉它换不来任何延迟。但在并发场景下，那些搬运消耗的是<strong>所有请求共享的主机周期</strong>——12 倍的流量削减有机会在吞吐上兑现，即使单请求延迟差了 1.3%。这是一个明确、可测的翻盘条件，而不是安慰性的说法。</p>
+<h3>H4 · Serving-level anchor scheduling</h3>
+  <p>在不引入 adaptive predictor 的第一版里，用离线已认证的 budget class 让多个 request 在 step 粒度共享设备。核心评价是吞吐、P50/P95 latency 和 utilization。若这条本身没有服务收益，就不需要把更复杂的 online quality controller 接进来。</p>
+
+  <div class="card-head"><span class="num">可选扩展</span><span class="title">Online Gram telemetry → adaptive caching</span><span class="pill mixed">proxy 通过；bound holdout 拒绝</span></div>
+    <p>方向一此前的 Gate A/B 仍然有价值，但重新定位为<strong>adaptive extension 的证据</strong>。对 A12 TaylorSeer，anchor counterfactual error 在真实 cache feedback 下能够排序下一段 tensor damage；六段 Spearman 等权均值为 0.7066，六段全部为正。这个结果说明 partial Gram / direct-residual telemetry 可能支持 per-request adaptation，但它并不改变主 architecture：resident state、in-device predictor、TP-aware placement 和 scalar control plane 即使在完全静态 policy 下也成立。</p>
+    <div class="caution"><span class="tag">边界</span>
+      相关性不是安全控制。2026-08-12 的冻结 conditional-bound holdout 没有通过全部区段 coverage 门槛，因此不启动动态 skip frontier。该负结果不影响 resident state、TP-aware predictor 与 scalar control plane；它进一步确认 telemetry 只能作为 extension，不能承担主 architecture 的成立条件。
+    </div>
+  </div>
+
+
+  <div class="evidence-head"><span class="lead">可选扩展的实验证据</span>H5 · 从相关性到安全控制的那一步</div>
+
+  <p><strong>为什么要做这个实验，以及它为什么不是"再证明一次相关性"。</strong>前一轮已经确认锚点遥测能够<strong>排序</strong>下一段的真实损害（六个区段的 Spearman 等权均值 0.7066，六段全正）。但排序能力支撑不了预算记账：要说"我还剩多少质量预算、所以可以再多跳三步"，需要的是<strong>条件上界</strong>——给定观测到的锚点误差，下一段损害有多大概率不超过某个值。相关系数 0.7 与"上界可用"之间隔着一整个安全论证。</p>
+
+  <p><strong>为什么这样设计。</strong>校准与检验严格分离：用 32 条开发提示词拟合每段的单调比例上界，再到 <strong>48 条从未在任何前序实验中出现过的提示词</strong>上验证，且提示词集合在生成之前就冻结。联合判据（每段覆盖率、总体覆盖率、以及三项紧致度）五项必须全部通过——刻意设得比单段的边际保证更严，因为下游用途是安全控制。</p>
+<h3>H5 · 可选：telemetry-driven adaptive extension</h3>
+  <p>Gate B 已经证明对 FLUX.1-dev A12 TaylorSeer，anchor error 能稳定排序下一段 tensor damage；它只授权统计校准，不改变 architecture 主结论。conditional upper bound 已于 2026-08-12 完成冻结 holdout，结论为<strong>拒绝</strong>，所以 H5 在“proxy telemetry”处停止，不进入 dynamic policy、anchor saving 或语义质量 A/B。</p>
+
+  <div class="card">
+    <div class="card-head"><span class="num">H5 实验记录 · 2026-08-12</span><span class="title">z<sub>c</sub> → U<sub>c</sub> → D<sub>c→d</sub> 独立 holdout</span><span class="pill dead">冻结 gate 拒绝</span></div>
+
+    <p class="tldr lose">用便宜的锚点遥测给下一段真实损害拟合一个单调上界，再到 48 条从未用过的提示词上验。总体覆盖 95.49%、紧致度全部达标，<b>但六个区段里有三段低于冻结的 46/48</b>，联合判据拒绝。相关性成立不等于安全控制成立——<b>不启动动态跳步</b>。</p>
+
+    <h4>实验目的</h4>
+    <p>不是再证明 correlation，而是检验便宜的 anchor telemetry 能否给下一段真实 cache damage 提供足够保守且足够紧的上界。只有该上界在独立 holdout 过门，才允许另行冻结动态动作并测 anchor saving；本实验本身不产生 serving、语义质量或硬件 latency 主张。</p>
+
+    <h4>实验配置</h4>
+    <ul>
+      <li>模型：<code>black-forest-labs/FLUX.1-dev@3de623fc…</code>，1024×1024，50 steps，guidance 3.5，BF16，TP4。</li>
+      <li>固定运行策略：A12 anchors <code>[0,1,2,3,4,5,9,15,21,31,41,49]</code>，order-1 TaylorSeer；每个真实 skip 都在相同 pre-step cached latent 上额外执行 full-DiT shadow，只记录标量误差，真实 rollout 仍沿 cache prediction 前进。</li>
+      <li>校准：Gate B 的 32 条 development prompts。每个固定区段拟合单调比例上界 <code>U_c(z)=lambda_c z</code>；目标 α=0.05 时取 32 个 <code>D/z</code> 分数的最大值。形式保证仅为 exchangeability 下每个固定区段的 finite-sample marginal coverage 下界 32/33（96.97%），<strong>不是</strong>对每个 z 的 distribution-free conditional coverage。</li>
+      <li>前瞻 holdout：48 个从未用于 Gate A/B 或拟合的 prompts，8 类各 6 条，seed 11；共 48×6=288 个固定区段样本。prompt suite 在生成前冻结。</li>
+      <li>联合通过门槛：每段至少 46/48；总体 coverage ≥95%；总体 median slack ≤2.0、q90 slack ≤3.0；每段 median slack ≤2.5。五项必须全部通过。</li>
+    </ul>
+
+    <h4>实验结果</h4>
+    <div class="tablewrap"><table>
+      <tr><th>区段 c→d</th><th>coverage</th><th>median slack</th><th>判定</th></tr>
+      <tr><td>5→9</td><td>45/48 = 93.75%</td><td>1.688</td><td><span class="pill dead">coverage 失败</span></td></tr>
+      <tr><td>9→15</td><td>47/48 = 97.92%</td><td>1.980</td><td><span class="pill pass">通过</span></td></tr>
+      <tr><td>15→21</td><td>45/48 = 93.75%</td><td>1.857</td><td><span class="pill dead">coverage 失败</span></td></tr>
+      <tr><td>21→31</td><td>44/48 = 91.67%</td><td>1.196</td><td><span class="pill dead">coverage 失败</span></td></tr>
+      <tr><td>31→41</td><td>47/48 = 97.92%</td><td>1.507</td><td><span class="pill pass">通过</span></td></tr>
+      <tr><td>41→49</td><td>47/48 = 97.92%</td><td>1.381</td><td><span class="pill pass">通过</span></td></tr>
+    </table></div>
+    <p>总体为 275/288 = <strong>95.49%</strong>（Wilson 95% CI 92.43%–97.34%）；slack median <strong>1.540</strong>、q90 <strong>2.442</strong>，总体 coverage 与全部 tightness 门槛均通过。但 5→9、15→21、21→31 三段低于冻结的 46/48，因此联合 gate 拒绝。</p>
+
+    <h4>实验分析</h4>
+    <ul>
+      <li>13 个 miss 中，15→21 的 3 个和 21→31 的 4 个全部位于各自最低 z 四分位；这说明纯比例族 <code>lambda z</code> 在“z 很小但 damage 有非零底噪”区域可能结构性偏乐观。该解释是 holdout 后诊断，<strong>不能</strong>用这 48 条补截距再宣称通过。</li>
+      <li>scene-composition 为 30/36，低于其它类别；但每类只有 6 prompts，同一 prompt 又贡献 6 个相关区段，不能把 30/36 当成独立类别失败率或语义结论。</li>
+      <li>门槛本身比单段 conformal marginal guarantee 更严格：即使每段真实 coverage 恰为 32/33，单段在 48 条里达到 ≥46 的概率约 82.2%；若不现实地假设六段独立，六段全过只有约 30.9%。因此该结果不反驳 conformal 的边际定理，但明确拒绝了<strong>预注册的动态控制 readiness</strong>。后续若研究新的 bound family，必须用新的 development cohort，并重新注册新的 holdout。</li>
+    </ul>
+
+    <h4>产物与可复现身份</h4>
+    <p>协议：<code>benchmark/flux_cache/gram-monotone-bound-holdout-protocol-20260812.json</code>（SHA-256 <code>ffd43fe8…</code>）；冻结模型：<code>gram-monotone-bound-model-20260812.json</code>（文件 SHA-256 <code>46a062cf…</code>）；原始 48 条 trace：<code>/home/ubuntu/difflet-artifacts/flux-gram-bound-holdout-20260812/gate-b-result.json</code>（<code>26ded594…</code>）；分析结果：<code>gram-monotone-bound-holdout-result-20260812.json</code>（<code>6bc2ffc8…</code>）。</p>
+
+    <div class="refute"><span class="tag">决策</span>
+      不启动 dynamic policy speed/quality frontier，不用该 holdout 调 λ，也不把 95.49% 总体 coverage 写成“安全控制已成立”。论文主线继续 H1–H3：resident state、TP-aware dataflow 与 scalar control plane。
+    </div>
+  </div>
+
+  <div class="intuition"><span class="tag">论文组织建议</span>
+    主文先回答 <strong>“AOT tensor accelerator 上 cache 应该怎么执行”</strong>：resident state → TP-aware predictor → scalar control plane → runtime / serving。Online Gram 放在 telemetry / adaptive extension 小节，用它证明这套 control interface 还可以支持 request-specific adaptation，但不让统计相关性主导整篇论文。
+  </div>
+
+<h2 id="s4">4 · 被否决的方向</h2>
+
+  <h3>4.1 这一轮否决的六条：全部依赖降低数值精度</h3>
+
+  <p>18 个候选里有六条的核心都是同一个构造：在"完整计算"和"完全跳过"之间插入一档<strong>低精度的廉价计算</strong>（fp8），让调度器有三种动作可选。名字各不相同：共权重多保真图菜单、多档位锚点延迟菜单、共权重精度阶梯图菜单、精度分层菜单与见证步、残差 fp8 阶梯与三动作调度，以及"把廉价档位反用作审计探针"。</p>
+
+  <div class="refute"><span class="tag">否决理由（硬件事实）</span>
+    <strong>在 Trainium2 上，fp8 即使对访存受限的负载都拿不到加速；而这一步的大模型计算是算力受限的，更不可能有收益。</strong>这条路在这块硬件上不存在。
+  </div>
+
+  <p>第六条（把最便宜的档位反过来用作观测手段，去"看一眼"被跳步，从而把 Gram 表里唯一缺失的格子变成可测量）——这个反转本身很聪明，但它需要"存在一个便宜档位"。而低精度这条路和深度分段那条路都已经死了，<strong>系统里没有任何便宜档位可用</strong>，所以它没有立足点。</p>
+
+  <h3>4.2 更早就已关闭的七条（这次头脑风暴的边界条件）</h3>
+
+  <div class="tablewrap"><table>
+    <tr><th>方向</th><th>为什么关闭</th></tr>
+    <tr><td>逐提示词定制组合系数</td><td>"作弊上限"实验：给每个提示词用它自己的数据定制系数，也只比公用的冻结系数好 0.8%。提升空间几乎为零。</td></tr>
+    <tr><td>纯"终点最优"的组合系数</td><td>离线看好 46%，真机上因误差被模型反馈放大而崩溃，24 个提示词全败。</td></tr>
+    <tr><td>用缓存运行自己的轨迹重新拟合系数</td><td>收益约为零。说明反馈造成的漂移，在"冻结的线性系数"这个函数族内是不可预测的随机成分。等价的正面表述：现有系数已经是该族内的最优。</td></tr>
+    <tr><td>按深度分段缓存（缓存深层、只算浅层）</td><td>实测任何深度段的复用误差都<strong>不如整体输出</strong>的复用误差——各层贡献的波动沿深度方向互相抵消，聚合之后最稳定。质量前提不成立。</td></tr>
+    <tr><td>在线语义门（用模型内部激活预测语义质量）</td><td>项目早先的工作已判定该特征族不可用。</td></tr>
+    <tr><td>请求错相位交错填空隙</td><td>缓存运行下设备占用率约 98%，没有空隙可填。</td></tr>
+    <tr><td>多图共享权重的运行时</td><td>机制确实存在且已核实，但当前系统里<strong>没有消费者</strong>——菜单方向被质量证据关闭之后，没有第二个图需要挂上去。</td></tr>
+  </table></div>
+
+  <!-- =============================================================== -->
+  
+  <!-- =============================================================== -->
+  <h2 id="s5">5 · 第二轮头脑风暴：调度地板定律下的候选与判定</h2>
+
+  <p>第一轮头脑风暴发生在调度地板定律确立之前，五个视角里有五个收敛到"把缓存搬上加速器常驻"——那条线随后被 H1a–H1g 八个实验关闭。第二轮把定律写进共享上下文作为硬筛子：每个候选必须先填一份<strong>调度审计</strong>（会新增几次图调用？属于 (a) 纯主机侧 / (b) 融进本来就要发生的调用 / (c) 新开小图——落在 (c) 的必须论证收益远超 0.19% 上界，否则自我否决），并把十条已关闭方向（含低精度轴、常驻状态、循环打包、在线遥测动态跳步）全部列为禁区。五个视角共产出 15 个候选，<strong>没有一个落在 (c)</strong>——筛子起了作用。</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>视角</th><th>候选</th><th>调度类别</th><th>判定</th></tr>
+    <tr><td rowspan="3">零调度设计</td><td>预认证格上的在线重规划</td><td>(b) 抽头搭现有集合通信</td><td><span class="pill pending">待格宽度实验</span></td></tr>
+    <tr><td>锚点检查点的事务式去噪</td><td>(a)+(b) 回滚是再调一次主干</td><td><span class="pill pass">存活·并入核账线</span></td></tr>
+    <tr><td>可执行策略对象与运行时收据</td><td>(a) 纯主机</td><td><span class="pill pass">存活·并入阶梯线</span></td></tr>
+    <tr><td rowspan="3">主机侧控制平面</td><td>图内零调度抽头与赤字降档</td><td>(b)+(a)</td><td><span class="pill pass">存活·核账线主体</span></td></tr>
+    <tr><td>策略编译不变性与认证阶梯</td><td>(a)</td><td><span class="pill pass">存活·即 H3 强化版</span></td></tr>
+    <tr><td>跳步段的闭式仿射折叠</td><td>(a)</td><td><span class="pill mixed">恒等式成立·奖品被 K 扫描否决</span></td></tr>
+    <tr><td rowspan="3">编译特化 vs 热更新</td><td>跳步段折叠与重用阶数解放</td><td>(a)/(b)</td><td><span class="pill dead">K 扫描否决（见下）</span></td></tr>
+    <tr><td>测量触发的分支调度表</td><td>(a) 测量已存在</td><td><span class="pill pending">待灵敏度实验</span></td></tr>
+    <tr><td>调度编译器与认证阶梯</td><td>(a)</td><td><span class="pill pass">存活·并入阶梯线</span></td></tr>
+    <tr><td rowspan="3">消灭手调参数</td><td>锚点时隙合批调度器</td><td><strong>(b) 且严格减少调用数</strong></td><td><span class="pill pass">存活·偏系统首选</span></td></tr>
+    <tr><td>边际锚点定价与证书阶梯</td><td>(a)</td><td><span class="pill pass">存活·并入阶梯线</span></td></tr>
+    <tr><td>空闲通道真值稽核</td><td>(b) 字面意义的零边际</td><td><span class="pill pending">依赖合批先成立</span></td></tr>
+    <tr><td rowspan="3">服务层</td><td>共权重形状成本阶梯（文本桶/粗网格）</td><td>(b) 换已驻留 key</td><td><span class="pill pending">待文本截断扰动实验</span></td></tr>
+    <tr><td>掩码为数据的令牌子集重算</td><td>(b) 掩码是输入张量</td><td><span class="pill pending">待空间集中度实验·工程量最大</span></td></tr>
+    <tr><td>兑换率驱动的认证阶梯（λ 前沿）</td><td>(a)</td><td><span class="pill pass">存活·四视角独立收敛</span></td></tr>
+  </table></div>
+
+  <p><strong>收敛统计</strong>：λ 认证阶梯被四个视角独立提出（调度审计全部为 (a)），是本轮收敛度最高的候选；仿射折叠被两个视角独立提出。收敛之后立刻做了折叠线的判定实验——它也成了本轮第一个被否决的候选。</p>
+
+  <div class="card">
+    <div class="card-head"><span class="num">K 扫描实验 · 2026-08-12</span><span class="title">仿射折叠与重用阶数解放：恒等式成立，奖品不存在</span><span class="pill dead">否决</span></div>
+
+    <p class="tldr lose">折叠恒等式<b>精确成立</b>——一整段连续跳步可以离线塌成对锚点的一次仿射组合，阶数的运行时代价归零。但它承诺的奖品不存在：<b>把锚点数从 2 加到 8，只买到 2.4%–3.3% 的最终偏差改善；而少放一个真算锚点要付 38%–74%</b>。差一个数量级以上，"高阶换锚点"的兑换不成立。</p>
+
+    <h4>实验目的</h4>
+    <p>候选的推理链是：主机必须持有并乘 512KB 张量 → 这是"外推固定用 2 个锚点"的真实原因（系统理由而非数学理由）→ 折叠把阶数的运行时代价归零 → 阶数可以纯按质量选 → 若高阶能让动态规划在同等质量下少放一个锚点，一个锚点 = 267 毫秒 = 端到端 7.4%。前三环都是对的；本实验检验最后一环。</p>
+
+    <h4>怎么跑</h4>
+    <p>纯离线、零设备成本。48 条标定轨迹，偶数号求平均 Gram 解 K 锚点最优系数（K×K 线性方程组），奇数号 24 条留作评估；对四个锚点表（13/12/11/10 个真算步）× K ∈ {2,3,4,6,8}，用 Gram 二次型精确计算 holdout 平均最终潜变量偏差；Newton 固定系数作对照。</p>
+
+    <h4>结果</h4>
+    <div class="tablewrap"><table>
+      <tr><th>锚点表</th><th>真算步</th><th>K=2</th><th>K=3</th><th>K=4</th><th>K=6</th><th>K=8</th><th>Newton</th></tr>
+      <tr><td>a13</td><td>13</td><td>0.0551</td><td>0.0551</td><td>0.0553</td><td>0.0547</td><td>0.0542</td><td><strong>0.0529</strong></td></tr>
+      <tr><td>a12</td><td>12</td><td>0.0890</td><td>0.0881</td><td>0.0880</td><td>0.0872</td><td><strong>0.0867</strong></td><td>0.0919</td></tr>
+      <tr><td>a11</td><td>11</td><td>0.1229</td><td>0.1217</td><td>0.1208</td><td>0.1194</td><td>0.1188</td><td><strong>0.1187</strong></td></tr>
+      <tr><td>a10</td><td>10</td><td>0.1550</td><td>0.1544</td><td>0.1530</td><td>0.1518</td><td><strong>0.1513</strong></td><td>0.1644</td></tr>
+    </table></div>
+    <p>关键对照：a11 在任何 K 下都比 a12@K=2 差至少 33.5%，a10 差至少 70.1%。<strong>没有任何 K 能补回一个锚点。</strong></p>
+
+    <h4>分析</h4>
+    <p>这是"线性重用函数族本身很窄"的<strong>第三个独立探针</strong>，三个方向的结论互相印证：横向（逐 prompt 定制系数，作弊上限只有 0.8%）、纵向（加锚点，本实验只有 2%–3%）、时间向（用部署分布重拟合，收益约零）。两个最近的锚点已经携带了线性可提取信息的绝大部分。</p>
+    <p>一个值得记录的反常：<strong>Newton 固定系数在 a13 与 a11 上反而优于闭式最优系数</strong>（0.0529 对 0.0551、0.1187 对 0.1229），在 a12 与 a10 上则更差。这正是跨步误差抵消的再次现身——逐步最优不等于终点最优，Newton 的过冲/回补模式在某些锚点分布下恰好在终点抵消得更干净。它提示锚点表与系数族之间存在交互，认证时应把（表, 系数）作为整体对待，而不是分别择优。</p>
+    <p>折叠本身保留工程价值：把每请求 76 次主机张量操作塌成约 6 次，省约 5 毫秒（0.15%），可作为实现优化随手带上，但不构成论文主张。</p>
+  </div>
+
+  <h3>判定后的候选排序，与"偏系统"的推荐</h3>
+
+  <p>K 扫描之后，存活候选自然组织成<strong>一个三层堆叠的系统</strong>，而不是三个互斥选项：</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>层</th><th>候选（合并后）</th><th>它交付什么</th><th>最便宜的判定实验</th></tr>
+    <tr>
+      <td><strong>认证层</strong></td>
+      <td>λ 兑换率认证阶梯（四视角收敛 + 边际定价 + 调度编译器 + 策略对象/收据）</td>
+      <td>"质量优先求最大加速"的正式兑现：λ 的量纲是毫秒/单位 Gram 偏差，扫 λ 得精确 Pareto 前沿，认证从保守档走到第一次失败，加速比是输出不是输入。直接删掉手选的 3.2 倍与网格搜的刹车阈值</td>
+      <td>零机器成本：在已有 Gram 上扫 λ 画前沿，看现役 12/13 步配置是否落在前沿上</td>
+    </tr>
+    <tr>
+      <td><strong>请求层</strong></td>
+      <td>图内 Gram 抽头 + 赤字核账降档（+ 锚点检查点回滚）</td>
+      <td>逐请求的速度分化，且不依赖任何事前预测：抽头搭现有集合通信（零调度），主机记账，超出<strong>认证运行实测的包络</strong>就补真实步/回滚。被 holdout 拒掉的是"事前预测的条件上界"，核账是"事后测量对照包络"，绕开了那个否决</td>
+      <td>零设备成本：用 1216 条 shadow 标签 + 48 条轨迹离线重放激进表 + 包络触发，统计触发率与期望墙钟</td>
+    </tr>
+    <tr>
+      <td><strong>服务层 ★偏系统首选</strong></td>
+      <td>锚点时隙合批调度器（+ 空闲通道真值稽核）</td>
+      <td>98% 饱和设备上唯一剩下的吞吐轴，且是 15 个候选里唯一<strong>严格减少</strong>图调用数的（N 个请求从 N×12 次降到 ceil(12N/B) 次）。科学主张：<strong>静态认证调度是扩散服务可合批性的前提</strong>——所有请求真算步位置相同，并集不随批膨胀；自适应缓存则相反（批内任一请求要算全批都得算，并集随批大小趋向全步数），据此整个自适应缓存文献只报单请求延迟</td>
+      <td>一次无人值守编译 + neuron-bench：主干编 B=2，测 t₂ 对 t₁。若 t₂ ≥ 1.96·t₁（批完全线性）整条吞吐线当场死</td>
+    </tr>
+  </table></div>
+
+  <div class="intuition"><span class="tag">为什么合批调度器是"偏系统"的首选</span>
+    四层真正咬合在一处：<strong>算法层</strong>——Gram 动态规划给出的静态锚点表是唯一让"并集不膨胀"成立的调度形态；<strong>认证层</strong>——阶梯给出的每一档都是一张可合批的表，队列压力选档、批对齐选相位；<strong>系统层</strong>——批桶调度器、准入控制、确定性完成时间都是真实可 build 的服务组件；<strong>硬件层</strong>——批大小是编译期固定的（AOT），所以"编哪几个批档位"本身是编译期/服务期的联合设计，且合批摊薄的正是张量并行的集合通信与那个 337 微秒的调度地板。它同时是调度地板定律的<strong>正向运用</strong>：定律说不能增加调用次数，合批是唯一反向移动的设计。
+  </div>
+
+  <div class="caution"><span class="tag">H2 的处置：前提已随 H1 消亡</span>
+    H2 原本要测"常驻锚点在张量并行下保分片还是完整复制"。但 H1 的判决把预测器逐回了主机——部署架构里<strong>设备上不再有常驻锚点</strong>，放置问题失去了对象。残留的真问题只剩"遥测抽头放在集合通信之前还是之后"，见下面的 H2′。
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="num">H2′ · 2026-08-12</span><span class="title">图内 Gram 抽头：估算、实测与三条运行时契约</span><span class="pill mixed">机制通过；成本 +1.17%/步</span></div>
+
+    <p class="tldr split">用已采集的剖析数据在<b>不编译任何东西</b>的前提下给两种放置定量级。结论：集合通信的固定成本地板是 <b>7.0 微秒</b>，而抽头的算术在两种放置下分别约 20 与 30–80 微秒/锚点步——<b>两者对 267 毫秒的一步都在 0.03% 以内</b>。因此放置之争不是性能问题；真正被这份估算确立的是更基础的一条：<b>"零调度图内抽头"这个设计原语在量级上成立</b>，而它是第二轮三个存活候选共同的地基。</p>
+
+    <h4>为什么这是一个架构问题而不是实现细节</h4>
+    <p>内积是全收缩，与任意切分轴可交换，所以两种放置<strong>数学上完全等价</strong>——胜负因此纯粹由硬件常数决定，这正是架构实验该有的形状：</p>
+    <div class="tablewrap"><table>
+      <tr><th>放置</th><th>算术</th><th>通信</th><th>代价结构</th></tr>
+      <tr><td><strong>集合通信之前</strong>（pre-gather）</td><td>每核只对自己 1×4096×16 的分片算部分内积（1/4 数据量）</td><td>K+1 个部分和需跨核求和：或搭上 <span class="mono">proj_out</span> 本来就要发生的 all-gather，或另起一次小载荷集合通信</td><td>省 4× 算术，可能多一次通信的固定延迟</td></tr>
+      <tr><td><strong>集合通信之后</strong>（post-gather）</td><td>输出已四核复制，每核独立算全量内积（4× 冗余）</td><td>零新增通信</td><td>零通信，但每核多做 4× 冗余算术并多读 4× 张量</td></tr>
+    </table></div>
+
+    <h4>编译前能测到什么</h4>
+    <p>两个量都可以从已有剖析数据直接读出，不需要新编译：</p>
+    <div class="tablewrap"><table>
+      <tr><th>量</th><th>实测</th><th>来源</th></tr>
+      <tr><td><strong>集合通信的固定成本地板</strong></td><td><strong>7.0 μs</strong>（p0；p1=7.6、p5=8.4、p50=75.8、p100=194.5）</td><td>H1e 剖析的 17336 条 <span class="mono">cc_running</span> 事件；每核每请求 2167 次、合计 151.9 ms</td></tr>
+      <tr><td>集合通信是否在图内</td><td><strong>100% 落在图执行窗口内</strong></td><td>逐事件时间戳与执行窗口求交（核 0：300.3/300.3 ms）——它们编译在图里，加一次不产生新调度</td></tr>
+      <tr><td>同规模归约的算术代价</td><td><strong>26 μs</strong>（262144 元素的两项线性组合）</td><td>H1e 里 <span class="mono">cache_predict</span> 图的实测执行时长，是图内归约成本最好的同规模代理</td></tr>
+    </table></div>
+
+    <h4>由此得到的量级</h4>
+    <div class="tablewrap"><table>
+      <tr><th>放置</th><th>每锚点步</th><th>每请求（12 锚点步）</th><th>占去噪循环 3253.6 ms</th></tr>
+      <tr><td>pre-gather（1/4 算术 + 一次小集合通信）</td><td>≈ 20 μs</td><td>≈ 0.24 ms</td><td><strong>≈ 0.007%</strong></td></tr>
+      <tr><td>post-gather（全量算术、零通信）</td><td>≈ 30–80 μs</td><td>≈ 0.4–1.0 ms</td><td><strong>≈ 0.01–0.03%</strong></td></tr>
+    </table></div>
+    <p>一个反直觉的中间结论：看起来更"优雅"的 pre-gather（顺着分片走、省 4× 算术）只领先约 2–4 倍，因为它省下的算术本身只有几十微秒，而它要付的通信固定成本是 7–8 微秒——<strong>在这个问题规模上，冗余计算与通信几乎等价便宜</strong>。交叉点由张量规模与并行度决定，这本身是一条可陈述的硬件常数结论。</p>
+
+    <h4>这份估算真正确立的东西，以及它的边界</h4>
+    <p><strong>确立的</strong>：抽头在两种放置下都远低于噪声（&lt;0.03%），所以"把内积归约焊进本来就要发生的那次大图调用"这个原语<strong>在量级上成立</strong>。第二轮三个存活候选（预认证格上的在线重规划、赤字核账降档、空闲通道真值稽核）都以此为地基，这份估算把它们的公共前提提前锁住了。</p>
+    <p><strong>没有确立、只能靠编译回答的</strong>：把算子追加到主干图尾部，会不会扰动编译器对既有集合通信的重叠调度（编译参数里开着 <span class="mono">--enable-ccop-compute-overlap</span>）。算术量级说它至多是几十微秒，但调度扰动不是算术，可能放大。因此下一步仍需编译两个带抽头的主干变体做实测对照，<strong>但目标已经从"哪种放置更快"改成"抽头是否扰动那 267 毫秒的一步"</strong>。</p>
+    <div class="caution"><span class="tag">诚实的风险</span>
+      如果实测确认两种放置都在噪声内（大概率），那么<strong>放置之争不构成论文贡献</strong>，应写成实现说明；论文里留下的是那条硬件常数结论（在此规模下冗余计算 ≈ 通信）与"零调度抽头原语成立"这个使能性结果。要让它成为独立贡献，需要把规模/并行度扫开，证明交叉点的位置是可预测的——那是更大的一笔投入，应在核账线本身证明有价值之后再考虑。
+    </div>
+
+    <h4>实测结果：估算错了约 40 倍，抽头不是免费的</h4>
+
+    <p class="tldr lose">编译成功、机制验证通过，但<b>抽头把主干一步从 266.53 ms 拖到 269.66 ms，+3.13 ms（+1.17%）</b>。每请求 12 个锚点步合计 <b>+37.6 ms = 去噪循环的 +1.16%</b>——<b>几乎等于 H1e 整条常驻路径的回归（+41.75 ms）</b>。上面那份编译前估算给出的是 0.01–0.03%，<b>错了约 40 倍</b>。"零调度"不等于"零成本"。</p>
+
+    <div class="tablewrap"><table>
+      <tr><th>主机侧墙钟（同一入口、同一输入、各 30 次）</th><th>基线主干</th><th>带抽头</th><th>差</th></tr>
+      <tr><td>平均</td><td>266.53 ms</td><td>269.66 ms</td><td><strong>+3.13 ms（+1.17%）</strong></td></tr>
+      <tr><td>p50</td><td>266.49 ms</td><td>269.69 ms</td><td>+3.20 ms</td></tr>
+      <tr><td>p95</td><td>266.98 ms</td><td>269.90 ms</td><td>+2.92 ms</td></tr>
+      <tr><td>最小</td><td>265.95 ms</td><td>269.31 ms</td><td>+3.36 ms</td></tr>
+    </table></div>
+    <p>两侧分布都极紧（基线极差约 1 ms，抽头约 0.6 ms），差值远在噪声之外。<strong>方法学要点</strong>：剖析里的 266.4 ms 是<em>设备执行时长</em>，而这里两臂都用<em>主机侧墙钟</em>、同一个 <span class="mono">_forward</span> 入口、同一批输入——直接拿剖析数字当基线会把主机派发开销算到抽头头上，所以基线必须重测。</p>
+
+    <h4>机制验证通过</h4>
+    <p>返回的 Gram 行两个分量相等（402300.375, 402300.375），即 <span class="mono">&lt;anchor, c&gt; = &lt;c, c&gt;</span>。因为每次调用输入相同、输出也相同，这个等式恰好证明<strong>常驻锚点确实存住了上一次调用的输出并跨调用原地更新</strong>——别名写回按契约工作。</p>
+
+    <h4>估算为什么错了 40 倍</h4>
+    <p>估算用 <span class="mono">cache_predict</span> 图的 26 μs（262144 元素的两项线性组合）作同规模归约的代理，只算了<strong>算术</strong>。实测的 3.13 ms 是它的 120 倍，差额来自算术之外的三件事：</p>
+    <ul>
+      <li><strong>fp32 物化与写回</strong>：<span class="mono">output.float()</span> 生成 1 MB 的 fp32 张量，别名每步再把这 1 MB 写回显存。这是真实的显存流量，而代理里没有。</li>
+      <li><strong>fp32 锚点的读取</strong>：内积要读另一份 1 MB。</li>
+      <li><strong>它落在关键路径的尾巴上，无可重叠</strong>——这一条是架构层面的关键。图里其余部分被编译器精心安排成计算与集合通信重叠（<span class="mono">--enable-ccop-compute-overlap</span>），而抽头依赖最终输出、被追加在最后一个算子之后，<strong>后面已经没有任何东西可以和它重叠</strong>，延迟因此完全暴露。</li>
+    </ul>
+    <p>所以这条结论要比"抽头贵"更精确：<strong>在一个已经被调度得很满的图的尾部追加工作，其代价不是它的算术，而是它无处隐藏的显存流量</strong>。这也解释了为什么代理式估算会系统性乐观——代理是个独立小图，它的 26 μs 里那点流量本来就无处可藏，比例上却小得多。</p>
+
+    <h4>对三个存活候选的影响</h4>
+    <p>第二轮里预认证格、赤字核账降档、空闲通道真值稽核都以"零调度抽头几乎免费"为地基。这份实测把地基改写成：<strong>抽头可行、机制正确，但每锚点步要付约 1.17%</strong>。于是它们的收益必须先跨过这道门槛才谈得上净赚——例如核账降档若要靠"简单 prompt 少跑一个真实步"回本，省下的 267 ms 要先抵掉 12 步抽头的 37.6 ms，净收益从 7.4% 降到约 6.2%，仍然为正但不再是白拿。</p>
+    <div class="caution"><span class="tag">下一步：抽头的代价可能大部分是可以去掉的</span>
+      当前实现为了同时满足两条别名契约（别名必须在元组末尾、且不能与普通输出同值），选择把锚点保持在 fp32——代价就是那两次 1 MB 的读写。若改用 bf16 锚点并用别的方式制造"不同的值"（例如让写回带上一个真实的运行时标量），显存流量可以砍半甚至更多。<strong>把 3.13 ms 拆成"算术 / fp32 物化 / 别名写回"三份，是下一个该做的测量</strong>，它决定这条线是"贵但值得优化"还是"结构性地贵"。
+    </div>
+
+    <h4>过程中撞到的四条契约，本身就是可复用的系统结论</h4>
+    <p>这个抽头编译了四次才通过，每次失败都暴露一条 AOT 服务栈的隐式契约。它们与 H1a–H1g 的三次事故同类，建议合并进论文的实现章节。</p>
+    <div class="tablewrap"><table>
+      <tr><th>#</th><th>症状</th><th>契约</th></tr>
+      <tr>
+        <td>①</td>
+        <td><span class="mono">Trying to set up alias at {3} which is an invalid index for shape (bf16[…], f32[3], bf16[…])</span></td>
+        <td><strong>同时作为普通输出与别名目标的张量会被 XLA 去重</strong>，别名索引随之悬空。这正是 H1b 记录过的那条——记录了却仍然踩中，说明它需要变成代码里的断言而不是文档里的段落。</td>
+      </tr>
+      <tr>
+        <td>②</td>
+        <td><span class="mono">IndexError: Found layout index=1 but only 1 values were given</span></td>
+        <td><strong>被别名的输出原地写回、不返回主机</strong>，所以返回值是输出元组的前缀。别名必须排在元组末尾，否则打包器会去找运行时从未发送的值。生产里的融合探针正是这么排的（别名在最后，主机只拿到那个标量）。</td>
+      </tr>
+      <tr>
+        <td>③</td>
+        <td><span class="mono">RuntimeError: Missing weight tensor with key transformer.proj_out.bias</span></td>
+        <td><strong>共享权重存储的键里没有任何图结构判别符</strong>——见下方独立记录。</td>
+      </tr>
+      <tr>
+        <td>④</td>
+        <td>追踪期取 rank 会把 rank 0 的切片烤进所有 rank</td>
+        <td><strong>builder 只追踪一份程序供四个 rank 执行（SPMD）</strong>，所以任何依赖 rank 的行为必须从设备状态读取（主干用 <span class="mono">global_rank.rank</span>），不能用 Python 时的 rank 查询。分片放置因此推迟。</td>
+      </tr>
+    </table></div>
+
+    <div class="incident"><span class="tag">事故复发：共享权重存储缺少图判别符（已修）</span>
+      第三次编译看似成功，但载入时报缺键。查证发现产物里的权重文件<strong>链接数为 5、日期是 8 月 9 日</strong>——它是被硬链接过来的<strong>基线主干</strong>的检查点。<br><br>
+      根因：<span class="mono">shared_weights.store_key</span> 的输入（scheme、源检查点路径、dtype、并行度、world_size、cp/sp/cfg 开关）<strong>全部描述"检查点"，没有一项描述"消费它的图"</strong>。于是同一份检查点上两个期望不同 state-dict 命名空间的应用哈希到同一个键，后者静默收到前者的分片。<br><br>
+      <strong>这比 H1a 那次更危险</strong>：H1a 是响亮地失败（凭空出现 22.7GB 权重），这次是<strong>静默加载了错误的权重</strong>，只因恰好有一个键名对不上才暴露。若两侧命名恰好一致，它会安静地用基线权重算出错误的数字。H1a 记录了"内容身份必须包含组件角色与权重策略"，但没有落到代码里，于是它复发了。<br><br>
+      <strong>修复</strong>（最小且向后兼容）：应用可声明 <span class="mono">weight_namespace</span>；声明了才进入键。未声明的应用键值逐字节不变，现有存储条目全部保持有效。抽头应用声明为 <span class="mono">flux-gram-tap</span>，随后正确分片了自己的权重并成功载入。
+    </div>
+  </div>
+
+  <!-- =============================================================== -->
+  <h2 id="s6">6 · 下一步排序与停止条件</h2>
+
+  <p>主线 A 的八个 gate 已经把"常驻请求状态"这条线走到头：机制与流量成立，架构加速被拒，而两条合并调度的出路（编译器屏障、前端循环）分别在编译语义层与前端表达层失败。第 1 项剖析诊断已于 2026-08-12 完成（记录见第 3 节），它把主线 A 的结论升级为一条调度地板定律，并改变了后面两项的判断依据。因此下一阶段按下面的顺序推进。</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>顺序</th><th>做什么</th><th>为什么排在这里</th><th>停止条件</th></tr>
+    <tr>
+      <td><strong>1</strong> <span class="pill pass">已完成</span></td>
+      <td>用已采的 H1e profile 确认主机内存搬运是否已被主干计算掩盖</td>
+      <td>零机器成本。<strong>结论：不是被掩盖，而是本来就不在关键路径上</strong>——38 次主机侧预测共 6.2 ms，占去噪循环 0.19%，这就是整个方向的收益上界；而常驻方案每次跳步净增 1.099 ms（6.8 倍）。运行时事件进一步显示两条路径设备执行总时长相同（−0.05%）而调度次数相差 6.7 倍，把成本唯一地归给边界穿越</td>
+      <td>—（诊断，已产出定律表述）</td>
+    </tr>
+    <tr>
+      <td><strong>2</strong> <span class="pill dead">已降级</span></td>
+      <td>H2 分片放置对照</td>
+      <td><strong>前提已随 H1 消亡</strong>：部署架构里设备上不再有常驻锚点，放置问题失去对象。残留的"抽头放在集合通信前还是后"并入核账线的实现测量（见第 5 节）</td>
+      <td>降级为实现说明，不再是独立实验线</td>
+    </tr>
+    <tr>
+      <td><strong>2′（新）</strong></td>
+      <td>λ 前沿扫描：现役 12/13 步配置是否落在精确 Pareto 前沿上</td>
+      <td>零机器成本，第二轮头脑风暴收敛度最高候选（四视角独立提出）的第一门。同时是认证阶梯（第 5 节认证层）的地基：λ 的量纲把实测硬件价格与闭式 Gram 偏差写进同一个方程</td>
+      <td>若现役两点都在前沿上且前沿在 12 锚点附近平坦，认证阶梯只剩工程价值、无科学主张；若不在前沿上，直接得到更好的配置</td>
+    </tr>
+    <tr>
+      <td><strong>3</strong></td>
+      <td>H3 策略不变性与身份契约</td>
+      <td>唯一一条已在生产路径上成立、只差测量的主张；也是阶梯式认证能落地的前提</td>
+      <td>若换策略仍触发重编译，则"策略与机制在编译边界上分离"这条主张不成立，主线 C/D 收缩</td>
+    </tr>
+    <tr>
+      <td><strong>3′（新）</strong></td>
+      <td>合批可行性门：主干编 B=2，neuron-bench 实测 t₂ 对 t₁</td>
+      <td>"偏系统"首选主线（第 5 节服务层）的生死门，一次无人值守编译 + 几分钟测量。合批是 98% 饱和设备上唯一剩下的吞吐轴，也是唯一严格减少图调用数的设计</td>
+      <td>若 t₂ ≥ 1.96·t₁（批完全线性无摊薄），整条吞吐线当场死，H4 一并关闭</td>
+    </tr>
+    <tr>
+      <td><strong>4</strong></td>
+      <td>H4 服务层时隙分配（并发吞吐）——<strong>先做一次现役路径的并发压测作为前置门</strong></td>
+      <td>原本是 H1e 负结果唯一可能的翻盘方向：孤立单请求下省流量无用，并发下省的是共享的主机周期。但第 1 项诊断给出了一个不利的算术：主机侧在去噪循环里的<em>全部</em>时间只有 49.6 ms，设备侧是 3204 ms，<strong>要让主机成为共享瓶颈需要并发把主机负载放大约 65 倍</strong>，而单设备在一个请求下已忙到约 98%，达不到该并发度。这是推导不是实测，因此先花十几分钟用现役路径压并发把它证实或证伪，再决定要不要投入调度器工程</td>
+      <td>若吞吐一路涨到设备饱和都没有出现主机导致的退化，则翻盘条件被否定，常驻这条线以"已验证机制、无性能贡献"定稿，不必再建调度器</td>
+    </tr>
+  </table></div>
+
+  <div class="caution"><span class="tag">一个被冻结协议遮住的选项</span>
+    目前所有 gate 都要求与主机语义<strong>逐 bit 相同</strong>。这个要求作为<strong>归因工具</strong>是正确的——只有算法完全一致，时间差异才能归给架构。但它现在已经变成<strong>设计约束</strong>，而且正是它挡住了入口点 103 → 65 的那条路。<br><br>
+    值得区分的是：逐 bit 相同是方法学要求，<strong>部署只关心质量契约</strong>。H1c-a 里那个融合变体的偏差是最终潜变量相对 0.26%，而且它<strong>少了一次舍入</strong>，质量未必更差。用质量契约（逐提示词的伤害上限加二项置信上界）去判它，它就是一个合法的新算法契约。这条不保证翻盘（65 次调度仍比 12 次多 53 次），但它是当前唯一一条不依赖运行时新增原语的路，而且判它只需要跑一次现有的认证流程。
+  </div>
+<h2 id="s7">7 · 附录：第一轮 18 个候选全景</h2>
+
+  <div class="tablewrap"><table>
+    <tr><th>生成视角</th><th>候选</th><th>判定</th></tr>
+    <tr><td rowspan="3">片上测量与常驻状态</td><td>片上 Gram 抽头与偏差预算记账</td><td><span class="pill mixed">telemetry 扩展</span></td></tr>
+    <tr><td>共权重多保真图菜单</td><td><span class="pill dead">否决·低精度</span></td></tr>
+    <tr><td>质量预算驱动的批内锚点对齐</td><td><span class="pill pending">待门槛实验</span></td></tr>
+
+    <tr><td rowspan="3">编译期特化</td><td>片上 Gram 抽头与图外闭环</td><td><span class="pill mixed">control-plane 扩展</span></td></tr>
+    <tr><td>可执行策略对象与质量收据</td><td><span class="pill pass">存活</span></td></tr>
+    <tr><td>锚点资源化服务控制平面</td><td><span class="pill pass">存活</span></td></tr>
+
+    <tr><td rowspan="3">内存层级与数据流</td><td>HBM-resident 去噪状态机（SBUF 仅 step-local）</td><td><span class="pill pass">resident-state 主线</span></td></tr>
+    <tr><td>片上正交化锚点基</td><td><span class="pill mixed">降为实现细节</span></td></tr>
+    <tr><td>多档位锚点延迟菜单</td><td><span class="pill dead">否决·低精度</span></td></tr>
+
+    <tr><td rowspan="3">数值精度作为动作</td><td>常驻轨迹的标量控制面</td><td><span class="pill pass">scalar-control 主线</span></td></tr>
+    <tr><td>共权重精度阶梯图菜单</td><td><span class="pill dead">否决·低精度</span></td></tr>
+    <tr><td>廉价档位反用作审计探针</td><td><span class="pill dead">否决·无便宜档位</span></td></tr>
+
+    <tr><td rowspan="3">消灭现存手调参数</td><td>片上 Gram 探针与预算前沿</td><td><span class="pill mixed">adaptive 扩展</span></td></tr>
+    <tr><td>精度分层菜单与见证步</td><td><span class="pill dead">否决·低精度</span></td></tr>
+    <tr><td>设备驻留去噪环与标量控制面</td><td><span class="pill pass">architecture 主线</span></td></tr>
+
+    <tr><td rowspan="3">运行时控制平面</td><td>残差低精度阶梯与三动作调度</td><td><span class="pill dead">否决·低精度</span></td></tr>
+    <tr><td>图内 Gram 探针与在线证书</td><td><span class="pill mixed">telemetry / audit</span></td></tr>
+    <tr><td>常驻锚点库与图内组合</td><td><span class="pill pass">predictor 主线</span></td></tr>
+  </table></div>
+
+  <div class="intuition"><span class="tag">重新归并后的结构</span>
+    18 个候选表面上分散，但真正反复出现的是三个系统原语：<strong>设备常驻 tensor state、分片感知的图内 predictor、图外 scalar control plane</strong>。Gram reduction、quality receipt、dynamic budget 都可以建立在这三个原语之上，因此更适合作为扩展或消费者，而不是分别充当独立主线。
+  </div>
+
+  <p class="footnote">
+    本文档同时维护 architecture 设计依赖与后续实验判定；已完成实验必须写明冻结协议、样本、指标、结果、限制和产物身份，不能让辅助数学结果替代 system 证据。所有代码位置引用（文件名与行号）均为撰写时实地核查所得；硬件数字（单步 271.7 毫秒、图切换 0.17–0.89 毫秒、设备占用约 98%）来自本项目的真机实测。
+  </p>
+</div>

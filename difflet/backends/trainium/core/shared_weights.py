@@ -87,7 +87,7 @@ def _key_inputs(app: Any) -> dict[str, Any]:
     either way, since shape appears in neither form.
     """
     config, neuron_config = app.config, app.neuron_config
-    return {
+    inputs = {
         "scheme": _SCHEME,
         # Resolved source checkpoint. For a HuggingFace cache this pins both
         # the repo and the revision (…/snapshots/<sha>/<component>). The store
@@ -103,6 +103,17 @@ def _key_inputs(app: Any) -> dict[str, Any]:
         "sequence_parallel": bool(getattr(config, "sp_enabled", False)),
         "cfg_parallel": bool(getattr(config, "cfg_parallel_enabled", False)),
     }
+    # Everything above describes the *checkpoint*; none of it describes the
+    # graph consuming it. Two applications over the same checkpoint that expect
+    # different state-dict namespaces therefore hash alike, and the second one
+    # silently receives the first one's shards — loudly if a key is missing,
+    # silently wrong if the names happen to line up. An application that does
+    # not reuse the stock namespace declares it here. Absent the attribute the
+    # key is byte-identical to before, so existing store entries stay valid.
+    namespace = getattr(app, "weight_namespace", None)
+    if namespace is not None:
+        inputs["weight_namespace"] = str(namespace)
+    return inputs
 
 
 def store_key(app: Any) -> str:

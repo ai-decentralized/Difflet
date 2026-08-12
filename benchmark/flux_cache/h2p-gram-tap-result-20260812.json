@@ -1,0 +1,48 @@
+{
+  "schema": "difflet-flux-h2p-gram-tap-result",
+  "schema_revision": 1,
+  "study_id": "flux-h2p-gram-tap-20260812",
+  "status": "mechanism_passed_cost_measured",
+  "architecture_speed_claim": false,
+  "serving_claim": false,
+  "question": "Does an in-graph Gram tap, which adds zero graph dispatches, perturb the backbone step?",
+  "method": {
+    "entry_point": "traced-module _forward, identical inputs, host wall clock",
+    "reps": 30,
+    "warmup": 5,
+    "note": "baseline re-measured with the same clock; the profile's 266.4 ms is device execution time and is not comparable"
+  },
+  "step_ms": {
+    "baseline": {"mean": 266.5319450660415, "p50": 266.490233996592, "p95": 266.9835709966719, "min": 265.94917799229734},
+    "tap_post": {"mean": 269.6601773005871, "p50": 269.6921385067981, "p95": 269.89907900861, "min": 269.3096690054517}
+  },
+  "delta": {
+    "per_step_ms": 3.128232234545558,
+    "per_step_pct": 1.1736,
+    "per_request_ms": 37.5387868145467,
+    "per_request_pct_of_denoise": 1.1538,
+    "denoise_baseline_ms": 3253.56
+  },
+  "mechanism": {
+    "alias_writeback_verified": true,
+    "evidence": "returned Gram row components are equal (402300.375, 402300.375), i.e. <anchor,c> == <c,c> under a repeated identical input, so the resident anchor holds the previous invocation's output"
+  },
+  "pre_compilation_estimate": {
+    "predicted_pct_of_denoise": [0.01, 0.03],
+    "measured_pct_of_denoise": 1.1538,
+    "error_factor": 40,
+    "why_wrong": "the proxy priced arithmetic only; the measured cost is dominated by fp32 materialisation, the 1 MB alias write-back, and the fact that a tail-appended reduction has nothing left to overlap with"
+  },
+  "runtime_contracts_learned": [
+    "a tensor returned both plainly and as an alias target is deduplicated by XLA, leaving the alias index dangling",
+    "an aliased output is written in place and does not return to host, so aliases must occupy the tail of the output tuple",
+    "shared_weights.store_key carried no graph discriminator, so a structurally different graph silently received the baseline backbone's shards",
+    "the builder traces one SPMD program for all ranks, so rank-dependent behaviour must read device state rather than a Python-time rank lookup"
+  ],
+  "artifacts": {
+    "compiled": "/home/ubuntu/difflet-artifacts/flux-h2p-gram-tap-20260812/tap-post/compiled",
+    "bench": "/home/ubuntu/difflet-artifacts/flux-h2p-gram-tap-20260812/tap-post/bench-report.json",
+    "baseline_bench": "/home/ubuntu/difflet-artifacts/flux-h2p-gram-tap-20260812/baseline-bench.json"
+  },
+  "next": "decompose the 3.13 ms into arithmetic / fp32 materialisation / alias write-back; a bf16 bank may remove most of it"
+}
