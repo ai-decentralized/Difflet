@@ -162,3 +162,39 @@ def test_semantic_resume_rejects_report_revision_drift(tmp_path):
 
     with pytest.raises(ValueError, match="does not match"):
         semantics._restore_scores(report_path, images, sources)
+
+
+def test_semantic_resume_accepts_append_only_quality_ladder_prefix(tmp_path):
+    manifest = _write_quality_manifest(
+        tmp_path,
+        split="confirmation",
+        candidate_ids=("candidate-a",),
+    )
+    first_images, first_sources = semantics.collect_unique_images((manifest,))
+    for row in first_images:
+        row["scores"] = {"image_reward": 0.5}
+    report_path = tmp_path / "semantic-scores.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "schema": semantics.REPORT_SCHEMA,
+                "schema_revision": semantics.REPORT_SCHEMA_REVISION,
+                "sources": first_sources,
+                "images": first_images,
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_quality_manifest(
+        tmp_path,
+        split="confirmation",
+        candidate_ids=("candidate-a", "candidate-b"),
+    )
+    next_images, next_sources = semantics.collect_unique_images((manifest,))
+
+    restored = semantics._restore_scores(report_path, next_images, next_sources)
+
+    scores = {row["image_id"]: row["scores"] for row in restored["images"]}
+    assert scores["confirmation:baseline:p000-s0"] == {"image_reward": 0.5}
+    assert scores["confirmation:candidate-a:p000-s0"] == {"image_reward": 0.5}
+    assert scores["confirmation:candidate-b:p000-s0"] == {}

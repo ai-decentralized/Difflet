@@ -385,10 +385,40 @@ def _restore_scores(report_path: Path, records: list[dict[str, Any]], sources: l
     if (
         previous.get("schema") != REPORT_SCHEMA
         or previous.get("schema_revision") != REPORT_SCHEMA_REVISION
-        or previous.get("sources") != sources
     ):
         raise ValueError("existing semantic report does not match the requested manifests")
     previous_images = {row["image_id"]: row for row in previous.get("images", [])}
+    current_images = {row["image_id"]: row for row in records}
+    previous_sources = previous.get("sources")
+    if previous_sources != sources:
+        if (
+            not isinstance(previous_sources, list)
+            or len(previous_sources) != 1
+            or len(sources) != 1
+            or previous_sources[0].get("split") != sources[0].get("split")
+            or not set(previous_images) <= set(current_images)
+        ):
+            raise ValueError(
+                "existing semantic report is not an append-only ladder prefix"
+            )
+        identity_fields = {
+            "split",
+            "role",
+            "candidate_id",
+            "sample_id",
+            "prompt_index",
+            "seed",
+            "prompt",
+            "image_path",
+            "image_sha256",
+        }
+        if any(
+            any(old.get(field) != current_images[image_id].get(field) for field in identity_fields)
+            for image_id, old in previous_images.items()
+        ):
+            raise ValueError(
+                "existing semantic report ladder prefix changed prior image evidence"
+            )
     for record in records:
         old = previous_images.get(record["image_id"])
         if old and old.get("image_sha256") == record["image_sha256"]:

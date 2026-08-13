@@ -1,8 +1,8 @@
 """Pure schedule-cost and anchor-placement algorithms.
 
-The functions in this module are label-free. They operate on hardware timing
-points, scheduler configuration, and full-compute trajectories; semantic
-metrics are intentionally handled by the independent qualification layer.
+The functions in this module are label-free. They operate on scheduler
+configuration and full-compute trajectories; semantic metrics are intentionally
+handled by the independent qualification layer.
 """
 
 from __future__ import annotations
@@ -25,142 +25,6 @@ def nearest_rank(values: Sequence[float], quantile: float) -> float:
     ordered = sorted(float(value) for value in values)
     index = max(0, math.ceil(quantile * len(ordered)) - 1)
     return ordered[index]
-
-
-def finite_positive(value: Any, name: str) -> float:
-    """Parse one strictly positive finite scalar."""
-
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be a positive finite number")
-    try:
-        result = float(value)
-    except (TypeError, ValueError) as error:
-        raise ValueError(f"{name} must be a positive finite number") from error
-    if not math.isfinite(result) or result <= 0.0:
-        raise ValueError(f"{name} must be a positive finite number")
-    return result
-
-
-def fit_affine_step_cost(points: Sequence[tuple[int, float]]) -> dict[str, Any]:
-    """Fit aggregate latency = intercept + incremental cost * real steps."""
-
-    grouped: dict[int, list[float]] = {}
-    for real_steps, latency_s in points:
-        if (
-            isinstance(real_steps, bool)
-            or not isinstance(real_steps, int)
-            or real_steps <= 0
-        ):
-            raise ValueError("hardware calibration real-step counts must be positive integers")
-        grouped.setdefault(real_steps, []).append(
-            finite_positive(latency_s, "hardware calibration latency")
-        )
-    if len(grouped) < 2:
-        raise ValueError("hardware calibration requires at least two real-step counts")
-
-    counts = np.asarray(sorted(grouped), dtype=np.float64)
-    latencies = np.asarray(
-        [sum(grouped[int(count)]) / len(grouped[int(count)]) for count in counts],
-        dtype=np.float64,
-    )
-    centered = counts - float(counts.mean())
-    denominator = float(np.dot(centered, centered))
-    if denominator <= 0.0:
-        raise ValueError("hardware calibration real-step counts have no variance")
-    incremental = float(
-        np.dot(centered, latencies - float(latencies.mean())) / denominator
-    )
-    intercept = float(latencies.mean() - incremental * counts.mean())
-    if not math.isfinite(incremental) or incremental <= 0.0:
-        raise ValueError("hardware calibration must have positive incremental real-step cost")
-    if not math.isfinite(intercept) or intercept < 0.0:
-        raise ValueError("hardware calibration must have a nonnegative latency intercept")
-
-    predicted = intercept + incremental * counts
-    residual_sum = float(np.square(latencies - predicted).sum())
-    total_sum = float(np.square(latencies - float(latencies.mean())).sum())
-    r_squared = 1.0 if total_sum == 0.0 else 1.0 - residual_sum / total_sum
-    return {
-        "fit_method": "ordinary_least_squares_over_static_profiles",
-        "latency_formula": (
-            "aggregate_latency_s=intercept_s+incremental_real_step_s*real_steps"
-        ),
-        "intercept_s": intercept,
-        "incremental_real_step_s": incremental,
-        "fit_r_squared": r_squared,
-        "points": [
-            {
-                "real_steps": int(count),
-                "aggregate_latency_s": float(latency),
-            }
-            for count, latency in zip(counts, latencies)
-        ],
-    }
-
-
-def derive_hardware_budget(
-    *,
-    num_steps: int,
-    warmup_steps: int,
-    cooldown_steps: int,
-    baseline_latency_s: float,
-    target_speedup: float,
-    intercept_s: float,
-    incremental_real_step_s: float,
-    dynamic_step_reserve: int,
-) -> dict[str, Any]:
-    """Derive one static anchor budget from a minimum hardware speed target."""
-
-    if isinstance(num_steps, bool) or not isinstance(num_steps, int) or num_steps <= 0:
-        raise ValueError("num_steps must be a positive integer")
-    if (
-        isinstance(dynamic_step_reserve, bool)
-        or not isinstance(dynamic_step_reserve, int)
-        or dynamic_step_reserve < 0
-    ):
-        raise ValueError("dynamic_step_reserve must be a nonnegative integer")
-    baseline = finite_positive(baseline_latency_s, "baseline_latency_s")
-    target = finite_positive(target_speedup, "target_speedup")
-    if target <= 1.0:
-        raise ValueError("target_speedup must be greater than one")
-    intercept = float(intercept_s)
-    incremental = finite_positive(
-        incremental_real_step_s,
-        "incremental_real_step_s",
-    )
-    if not math.isfinite(intercept) or intercept < 0.0:
-        raise ValueError("intercept_s must be a nonnegative finite number")
-
-    maximum_latency = baseline / target
-    raw_total_budget = (maximum_latency - intercept) / incremental
-    total_real_budget = min(num_steps, math.floor(raw_total_budget + 1e-12))
-    static_anchor_budget = total_real_budget - dynamic_step_reserve
-    required_static = warmup_steps + cooldown_steps
-    if cooldown_steps == 0:
-        required_static += 1
-    if static_anchor_budget < required_static:
-        raise ValueError(
-            "target speed leaves too few static anchors after the dynamic-step reserve"
-        )
-    predicted_static_latency = intercept + incremental * static_anchor_budget
-    predicted_reserved_latency = intercept + incremental * total_real_budget
-    return {
-        "selection_rule": "largest_total_real_step_budget_meeting_minimum_target_speedup",
-        "budget_formula": (
-            "floor((baseline_latency_s/target_speedup-intercept_s)"
-            "/incremental_real_step_s)"
-        ),
-        "target_speedup": target,
-        "maximum_aggregate_latency_s": maximum_latency,
-        "total_real_step_budget": total_real_budget,
-        "dynamic_step_reserve": dynamic_step_reserve,
-        "static_anchor_budget": static_anchor_budget,
-        "predicted_static_latency_s": predicted_static_latency,
-        "predicted_static_speedup": baseline / predicted_static_latency,
-        "predicted_reserved_latency_s": predicted_reserved_latency,
-        "predicted_reserved_speedup": baseline / predicted_reserved_latency,
-        "fail_closed_steps_exempt_from_speed_target": True,
-    }
 
 
 def scheduler_sigmas(generation: Mapping[str, Any]) -> tuple[float, ...]:
@@ -307,6 +171,52 @@ def optimize_mask(
     return anchors, result[0]
 
 
+def optimize_budget_frontier(
+    segment_costs: Mapping[tuple[int, int, int], float],
+    *,
+    num_steps: int,
+    warmup_steps: int,
+    minimum_anchor_budget: int,
+    phase_boundary: int,
+    middle_gap_cap: int,
+    tail_gap_cap: int,
+) -> tuple[tuple[int, tuple[int, ...], float], ...]:
+    """Optimize every feasible budget at or above a frozen search floor.
+
+    Budget is deliberately not selected here.  This function is a label-free
+    candidate generator; an independent closed-loop quality gate chooses the
+    minimum qualified budget from the generated ascending ladder.
+    """
+
+    if (
+        isinstance(minimum_anchor_budget, bool)
+        or not isinstance(minimum_anchor_budget, int)
+        or minimum_anchor_budget <= warmup_steps
+        or minimum_anchor_budget > num_steps
+    ):
+        raise ValueError("minimum anchor budget is incompatible with the horizon")
+    frontier: list[tuple[int, tuple[int, ...], float]] = []
+    for anchor_budget in range(minimum_anchor_budget, num_steps + 1):
+        try:
+            anchors, objective = optimize_mask(
+                segment_costs,
+                num_steps=num_steps,
+                warmup_steps=warmup_steps,
+                anchor_budget=anchor_budget,
+                phase_boundary=phase_boundary,
+                middle_gap_cap=middle_gap_cap,
+                tail_gap_cap=tail_gap_cap,
+            )
+        except ValueError as error:
+            if str(error).startswith("no valid anchor mask exists for budget "):
+                continue
+            raise
+        frontier.append((anchor_budget, anchors, objective))
+    if not frontier:
+        raise ValueError("no structurally feasible static anchor budget exists")
+    return tuple(frontier)
+
+
 def materialized_path_segments(
     anchors: Sequence[int],
     segment_costs: Mapping[tuple[int, int, int], float],
@@ -349,12 +259,10 @@ def trajectory_gram(path: Path, deltas: Sequence[float]) -> Any:
 
 
 __all__ = [
-    "derive_hardware_budget",
-    "finite_positive",
-    "fit_affine_step_cost",
     "gap_cap",
     "materialized_path_segments",
     "nearest_rank",
+    "optimize_budget_frontier",
     "optimize_mask",
     "relative_prediction_error",
     "scheduler_sigmas",
