@@ -1,0 +1,80 @@
+{
+  "schema": "difflet-flux-gram-transfer-cache-rollout-gate-registered-result",
+  "schema_revision": 1,
+  "study_id": "flux-gram-transfer-cache-rollout-gate-20260811",
+  "status": "advance_to_conditional_bound_fit",
+  "serving_claim": false,
+  "timing_claim": false,
+  "scope": {
+    "model": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "candidate_id": "derived-static-a12-o1-index",
+    "resolution": "1024x1024",
+    "num_steps": 50,
+    "tp_degree": 4,
+    "prompt_count": 32,
+    "seed": 7,
+    "feedback_loop": "real cache rollout",
+    "skipped_step_label": "shadow full-DiT on the identical pre-step cache latent while advancing the original prediction"
+  },
+  "artifacts": {
+    "protocol": {
+      "path": "benchmark/flux_cache/gram-transfer-cache-rollout-gate.json",
+      "file_sha256": "4276304b4bbcf1b8f3e452ae0d19dde4ca2f9510547b4bf64bf66829fb65e4b6"
+    },
+    "collector_and_analyzer": {
+      "path": "scripts/collect_flux_gram_transfer_rollout.py",
+      "file_sha256": "6e4a648939d28f95d6e948367dbcb0113627564c61ecd708541a92a8697b10b4"
+    },
+    "hardware_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-gram-transfer-gate-b-20260811/gate-b-result.json",
+      "file_sha256": "6f1da16db5e2afc02447016273dcf9c77cb88d812ce499474191f40a17385c61"
+    },
+    "incremental_trace": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-gram-transfer-gate-b-20260811/partial-trace.json",
+      "file_sha256": "c957354cf4aa0ca43ed9fd940aa78273e8240b1457b0cfc71ad0d0cc44b3aee2"
+    }
+  },
+  "execution": {
+    "sample_count": 32,
+    "full_steps_per_sample": 12,
+    "natural_skips_per_sample": 38,
+    "shadow_full_dit_calls": 1216,
+    "fixed_segment_count": 6,
+    "all_step_and_shadow_count_checks_passed": true
+  },
+  "primary": {
+    "estimand": "equal-weight mean of within-fixed-segment Spearman correlations",
+    "mean_spearman_rho": 0.7065615835777126,
+    "bootstrap_95pct_ci": [
+      0.6008075824869875,
+      0.7679893797420544
+    ],
+    "positive_association_permutation_p_one_sided": 0.00009999000099990002,
+    "positive_fixed_segment_count": 6,
+    "fixed_segment_count": 6,
+    "gate_passed": true
+  },
+  "fixed_segment_spearman": {
+    "5": 0.8016862170087976,
+    "9": 0.7613636363636364,
+    "15": 0.6143695014662757,
+    "21": 0.7518328445747801,
+    "31": 0.5197947214076246,
+    "41": 0.7903225806451613
+  },
+  "raw_absolute_sensitivity": {
+    "mean_spearman_rho": 0.7393084066471163,
+    "bootstrap_95pct_ci": [
+      0.6420025216508696,
+      0.791310426562225
+    ],
+    "positive_association_permutation_p_one_sided": 0.00009999000099990002
+  },
+  "decision": {
+    "measurement_proxy_supported_for_this_predictor_and_schedule": true,
+    "adaptive_cache_control_proven": false,
+    "quality_budget_claim_supported": false,
+    "next": "Fit a monotone conditional upper bound on a disjoint development set and evaluate coverage plus efficiency on a prospectively frozen holdout."
+  }
+}

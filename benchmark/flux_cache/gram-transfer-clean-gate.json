@@ -1,0 +1,43 @@
+{
+  "schema": "difflet-flux-gram-transfer-clean-gate",
+  "schema_revision": 1,
+  "study_id": "flux-gram-transfer-clean-gate-20260811",
+  "evidence_role": "teacher-forced-kill-test-only",
+  "serving_claim": false,
+  "source_quality": {
+    "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260809/quality-input-v2.json",
+    "file_sha256": "ff16ae729c4fb2b4b9147ba7b2e8d51caa21e335682227b85fdc1773d93ad720"
+  },
+  "candidate": {
+    "path": "benchmark/flux_cache/derived-static-a12-o1-index.json",
+    "file_sha256": "cf8d84c619b92ea3395d428f34befea994e18316e8321c1af413e599acd3f04e",
+    "candidate_id": "derived-static-a12-o1-index"
+  },
+  "sample_count": 48,
+  "predictor": "order-1 TaylorSeer over the two most recent real anchors",
+  "primary": {
+    "anchor_score": "sum_c |delta_sigma_c| ||vhat_c-v_c|| / sum_c |delta_sigma_c| ||v_c|| over anchors followed by a nonempty skip segment",
+    "skip_score": "sum_t |delta_sigma_t| ||vhat_t-v_t|| / sum_t |delta_sigma_t| ||v_t|| over skipped steps",
+    "association": "Spearman across prompts",
+    "advance_if": {
+      "minimum_spearman_rho": 0.4,
+      "bootstrap_95pct_lower_bound_strictly_positive": true,
+      "maximum_one_sided_permutation_p": 0.05,
+      "minimum_positive_fixed_segment_fraction": 0.5
+    }
+  },
+  "mandatory_sensitivity": {
+    "prompt_aggregation": "scheduler-weighted mean of per-step relative L2 errors",
+    "causal_alignment": "for each fixed segment, correlate anchor c counterfactual relative error with the following c-to-d skipped-step weighted relative error across prompts"
+  },
+  "numerical_audit": "Compare the FP32 Gram quadratic with direct residual L2 before treating scalar reconstruction as stable.",
+  "interpretation": {
+    "pass": "Only authorize a real-cache Gate B shadow rollout.",
+    "fail": "Close Gram-driven adaptive control for this predictor and schedule; the Gram measurement identity itself remains valid.",
+    "not_established": [
+      "feedback-loop transfer",
+      "conditional quality bound",
+      "serving qualification"
+    ]
+  }
+}

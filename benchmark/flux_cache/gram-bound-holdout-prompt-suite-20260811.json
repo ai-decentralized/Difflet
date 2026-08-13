@@ -1,0 +1,253 @@
+{
+  "schema": "difflet-flux-cache-prompt-suite-v1",
+  "suite_id": "flux-gram-bound-holdout-20260811",
+  "source": {
+    "created_at": "2026-08-11",
+    "origin": "Prospectively authored after the bound family was chosen and before any holdout generation",
+    "selection": "Eight semantic categories with six prompts each; no exact prompt overlap with Gate A or Gate B development cohorts; no images, shadow labels, or scores inspected"
+  },
+  "splits": {
+    "gram_bound_holdout": [
+      {
+        "prompt_id": "gram-bound-001",
+        "category": "counting",
+        "text": "exactly six yellow lemons arranged around two empty turquoise bowls on a marble counter"
+      },
+      {
+        "prompt_id": "gram-bound-002",
+        "category": "counting",
+        "text": "four bronze bells hanging above seven folded white napkins on a wooden rack"
+      },
+      {
+        "prompt_id": "gram-bound-003",
+        "category": "counting",
+        "text": "nine red toy trains divided into three equal rows beside one green station sign"
+      },
+      {
+        "prompt_id": "gram-bound-004",
+        "category": "counting",
+        "text": "two black teapots and five silver cups arranged on separate shelves in a cafe"
+      },
+      {
+        "prompt_id": "gram-bound-005",
+        "category": "counting",
+        "text": "eight violet balloons tied in pairs to four stone posts along a garden path"
+      },
+      {
+        "prompt_id": "gram-bound-006",
+        "category": "counting",
+        "text": "three orange starfish beside six striped shells in a shallow tidal pool"
+      },
+      {
+        "prompt_id": "gram-bound-007",
+        "category": "spatial-relation",
+        "text": "a copper watering can behind a blue wheelbarrow with a white bucket inside the wheelbarrow"
+      },
+      {
+        "prompt_id": "gram-bound-008",
+        "category": "spatial-relation",
+        "text": "a small red cabin below a suspension bridge while a gray eagle circles above its left tower"
+      },
+      {
+        "prompt_id": "gram-bound-009",
+        "category": "spatial-relation",
+        "text": "a round mirror between two narrow windows with a green bench directly beneath it"
+      },
+      {
+        "prompt_id": "gram-bound-010",
+        "category": "spatial-relation",
+        "text": "a white sailboat to the right of a striped buoy and a black lighthouse far behind both"
+      },
+      {
+        "prompt_id": "gram-bound-011",
+        "category": "spatial-relation",
+        "text": "a brass lamp above an open atlas with a magnifying glass resting across the lower page"
+      },
+      {
+        "prompt_id": "gram-bound-012",
+        "category": "spatial-relation",
+        "text": "a yellow helmet under a metal ladder and a coil of blue rope hanging from its third rung"
+      },
+      {
+        "prompt_id": "gram-bound-013",
+        "category": "attribute-binding",
+        "text": "a glossy teal violin with a black bow beside a matte burgundy cello with a white bow"
+      },
+      {
+        "prompt_id": "gram-bound-014",
+        "category": "attribute-binding",
+        "text": "a tall glass jar filled with red beads and a short ceramic jar filled with blue buttons"
+      },
+      {
+        "prompt_id": "gram-bound-015",
+        "category": "attribute-binding",
+        "text": "a brown rabbit wearing a green ribbon beside a gray rabbit wearing a yellow ribbon"
+      },
+      {
+        "prompt_id": "gram-bound-016",
+        "category": "attribute-binding",
+        "text": "a square copper clock on a white pedestal and a round silver clock on a black pedestal"
+      },
+      {
+        "prompt_id": "gram-bound-017",
+        "category": "attribute-binding",
+        "text": "a translucent purple umbrella with a wooden handle beside an opaque orange umbrella with a steel handle"
+      },
+      {
+        "prompt_id": "gram-bound-018",
+        "category": "attribute-binding",
+        "text": "a tiny blue robot carrying a red toolbox next to a large red robot carrying a blue toolbox"
+      },
+      {
+        "prompt_id": "gram-bound-019",
+        "category": "text-rendering",
+        "text": "a green airport sign displaying GATE 27 in large white letters above an empty corridor"
+      },
+      {
+        "prompt_id": "gram-bound-020",
+        "category": "text-rendering",
+        "text": "a black bakery chalkboard reading FRESH BREAD AT SIX in neat cream lettering"
+      },
+      {
+        "prompt_id": "gram-bound-021",
+        "category": "text-rendering",
+        "text": "a red library return box labeled BOOKS ONLY and OPEN UNTIL 9 PM"
+      },
+      {
+        "prompt_id": "gram-bound-022",
+        "category": "text-rendering",
+        "text": "a blue ceramic tile printed with the words NORTH PIER in gold capital letters"
+      },
+      {
+        "prompt_id": "gram-bound-023",
+        "category": "text-rendering",
+        "text": "a paper ticket showing ROW B SEAT 14 beside a silver fountain pen"
+      },
+      {
+        "prompt_id": "gram-bound-024",
+        "category": "text-rendering",
+        "text": "a roadside billboard reading TURN LEFT FOR LAKE VIEW beneath a painted white arrow"
+      },
+      {
+        "prompt_id": "gram-bound-025",
+        "category": "interaction",
+        "text": "a florist handing a bundle of yellow tulips to a child standing beside a blue bicycle"
+      },
+      {
+        "prompt_id": "gram-bound-026",
+        "category": "interaction",
+        "text": "two carpenters lifting opposite ends of a long oak plank onto a workbench"
+      },
+      {
+        "prompt_id": "gram-bound-027",
+        "category": "interaction",
+        "text": "a goalkeeper tossing a red ball toward a teammate waiting near the penalty line"
+      },
+      {
+        "prompt_id": "gram-bound-028",
+        "category": "interaction",
+        "text": "a veterinarian wrapping a purple bandage around a small dog's front right paw"
+      },
+      {
+        "prompt_id": "gram-bound-029",
+        "category": "interaction",
+        "text": "a street musician showing a young visitor how to hold a brass trumpet"
+      },
+      {
+        "prompt_id": "gram-bound-030",
+        "category": "interaction",
+        "text": "three scientists passing a sealed glass vial through the round opening of a glove box"
+      },
+      {
+        "prompt_id": "gram-bound-031",
+        "category": "fine-detail",
+        "text": "a macro photograph of a dragonfly wing revealing transparent cells and fine black veins"
+      },
+      {
+        "prompt_id": "gram-bound-032",
+        "category": "fine-detail",
+        "text": "an opened music box showing tiny brass gears, a pinned cylinder, and a steel comb"
+      },
+      {
+        "prompt_id": "gram-bound-033",
+        "category": "fine-detail",
+        "text": "a close view of frost crystals forming branching hexagons along the edge of a dark leaf"
+      },
+      {
+        "prompt_id": "gram-bound-034",
+        "category": "fine-detail",
+        "text": "an illuminated manuscript page with miniature birds, gold vines, and precise red annotations"
+      },
+      {
+        "prompt_id": "gram-bound-035",
+        "category": "fine-detail",
+        "text": "a cutaway pocket compass displaying engraved bearings, a jeweled pivot, and a thin needle"
+      },
+      {
+        "prompt_id": "gram-bound-036",
+        "category": "fine-detail",
+        "text": "a woven basket rim photographed closely enough to show alternating reeds and frayed fibers"
+      },
+      {
+        "prompt_id": "gram-bound-037",
+        "category": "scene-composition",
+        "text": "a mountain monastery at dawn with a stone stairway, three courtyards, and snowy peaks behind it"
+      },
+      {
+        "prompt_id": "gram-bound-038",
+        "category": "scene-composition",
+        "text": "a crowded ferry terminal with two gangways, waiting passengers, and a city skyline across the water"
+      },
+      {
+        "prompt_id": "gram-bound-039",
+        "category": "scene-composition",
+        "text": "an indoor botanical garden with a curved pond, suspended walkways, and a glass dome overhead"
+      },
+      {
+        "prompt_id": "gram-bound-040",
+        "category": "scene-composition",
+        "text": "a winter village square with a central clock tower, market stalls, and sled tracks through fresh snow"
+      },
+      {
+        "prompt_id": "gram-bound-041",
+        "category": "scene-composition",
+        "text": "a desert observatory at night with three silver domes, service buildings, and a bright Milky Way"
+      },
+      {
+        "prompt_id": "gram-bound-042",
+        "category": "scene-composition",
+        "text": "a riverside factory district at sunset with brick chimneys, cranes, warehouses, and reflections in the water"
+      },
+      {
+        "prompt_id": "gram-bound-043",
+        "category": "material-texture",
+        "text": "a folded velvet cloth touching rough limestone, polished brass, and a sheet of cloudy glass"
+      },
+      {
+        "prompt_id": "gram-bound-044",
+        "category": "material-texture",
+        "text": "a wet black feather across cracked ivory paint beside a smooth green ceramic bead"
+      },
+      {
+        "prompt_id": "gram-bound-045",
+        "category": "material-texture",
+        "text": "braided hemp rope resting on brushed aluminum next to a translucent slab of amber resin"
+      },
+      {
+        "prompt_id": "gram-bound-046",
+        "category": "material-texture",
+        "text": "a wrinkled linen glove holding a glossy obsidian sphere above coarse red sand"
+      },
+      {
+        "prompt_id": "gram-bound-047",
+        "category": "material-texture",
+        "text": "a strip of pale leather beside oxidized copper, dark cork, and a clear ice cube"
+      },
+      {
+        "prompt_id": "gram-bound-048",
+        "category": "material-texture",
+        "text": "soft gray felt layered over chipped blue enamel and a mirror-finished steel plate"
+      }
+    ]
+  }
+}

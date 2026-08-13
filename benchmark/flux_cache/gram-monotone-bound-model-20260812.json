@@ -1,0 +1,191 @@
+{
+  "bound_family": "U_c(z)=lambda_c*z",
+  "candidate_id": "derived-static-a12-o1-index",
+  "coverage_scope": "finite-sample marginal coverage within each fixed denoise segment under exchangeability; not distribution-free pointwise conditional coverage in z",
+  "development_source": {
+    "file_sha256": "6f1da16db5e2afc02447016273dcf9c77cb88d812ce499474191f40a17385c61",
+    "path": "/home/ubuntu/difflet-artifacts/flux-gram-transfer-gate-b-20260811/gate-b-result.json",
+    "sample_count": 32
+  },
+  "holdout_gate": {
+    "expected_sample_count": 48,
+    "gate_interpretation": "pass authorizes a separately frozen supported-action dynamic-policy experiment; it is not a semantic quality or serving qualification",
+    "maximum_overall_median_bound_slack": 2.0,
+    "maximum_overall_q90_bound_slack": 3.0,
+    "maximum_per_segment_median_bound_slack": 2.5,
+    "minimum_coverage_per_segment": 0.9583333333333334,
+    "minimum_overall_coverage": 0.95,
+    "z_quartile_coverage": "diagnostic_only"
+  },
+  "model_id": "flux-a12-segment-monotone-conformal-bound-20260812",
+  "schema": "difflet-flux-gram-monotone-bound",
+  "schema_revision": 1,
+  "segments": {
+    "15": {
+      "anchor_step": 15,
+      "conformal_order_rank_one_based": 32,
+      "development_bound_slack_quantiles": {
+        "maximum": 3.120362294142621,
+        "median": 1.8494012254299208,
+        "minimum": 1.0,
+        "q25": 1.5645780354891778,
+        "q75": 2.171284869258616,
+        "q90": 2.328060323961585,
+        "q95": 2.355558994637165
+      },
+      "development_sample_count": 32,
+      "development_score_quantiles": {
+        "maximum": 0.7979109025601586,
+        "median": 0.43153590116920343,
+        "minimum": 0.2557109807594954,
+        "q25": 0.3674839142176017,
+        "q75": 0.5105935436193852,
+        "q90": 0.5981917757630983,
+        "q95": 0.6863115136272188
+      },
+      "finite_sample_marginal_coverage_lower_bound": 0.9696969696969697,
+      "lambda": 0.7979109025601586,
+      "next_anchor_step": 21,
+      "score": "next_segment_integrated_ratio/anchor_relative_error"
+    },
+    "21": {
+      "anchor_step": 21,
+      "conformal_order_rank_one_based": 32,
+      "development_bound_slack_quantiles": {
+        "maximum": 1.8785190023811682,
+        "median": 1.1980773579202788,
+        "minimum": 1.0,
+        "q25": 1.1283449920339232,
+        "q75": 1.2928124653187216,
+        "q90": 1.486315619103613,
+        "q95": 1.7573578758249238
+      },
+      "development_sample_count": 32,
+      "development_score_quantiles": {
+        "maximum": 0.7882127998673522,
+        "median": 0.6579071985559604,
+        "minimum": 0.41959266787731797,
+        "q25": 0.6100996726929829,
+        "q75": 0.6985732264676134,
+        "q90": 0.7420052887253207,
+        "q95": 0.7643907929978118
+      },
+      "finite_sample_marginal_coverage_lower_bound": 0.9696969696969697,
+      "lambda": 0.7882127998673522,
+      "next_anchor_step": 31,
+      "score": "next_segment_integrated_ratio/anchor_relative_error"
+    },
+    "31": {
+      "anchor_step": 31,
+      "conformal_order_rank_one_based": 32,
+      "development_bound_slack_quantiles": {
+        "maximum": 2.78981445088519,
+        "median": 1.5308879602942815,
+        "minimum": 1.0,
+        "q25": 1.3187578216940283,
+        "q75": 1.749714707571697,
+        "q90": 1.9770450720474,
+        "q95": 2.2609485233555375
+      },
+      "development_sample_count": 32,
+      "development_score_quantiles": {
+        "maximum": 0.48150867989747353,
+        "median": 0.3145357849552315,
+        "minimum": 0.17259523469193228,
+        "q25": 0.27519356995205563,
+        "q75": 0.3651413939115085,
+        "q90": 0.447893414667328,
+        "q95": 0.4749318628978704
+      },
+      "finite_sample_marginal_coverage_lower_bound": 0.9696969696969697,
+      "lambda": 0.48150867989747353,
+      "next_anchor_step": 41,
+      "score": "next_segment_integrated_ratio/anchor_relative_error"
+    },
+    "41": {
+      "anchor_step": 41,
+      "conformal_order_rank_one_based": 32,
+      "development_bound_slack_quantiles": {
+        "maximum": 1.8506733191557494,
+        "median": 1.4200059394482212,
+        "minimum": 1.0,
+        "q25": 1.2597485396731696,
+        "q75": 1.5583619448354296,
+        "q90": 1.701479074114184,
+        "q95": 1.7915961668691849
+      },
+      "development_sample_count": 32,
+      "development_score_quantiles": {
+        "maximum": 1.3104461500466391,
+        "median": 0.9228455678276374,
+        "minimum": 0.7080915559124427,
+        "q25": 0.8409126741855415,
+        "q75": 1.0402443573638176,
+        "q90": 1.1461211193026895,
+        "q95": 1.2107568506250461
+      },
+      "finite_sample_marginal_coverage_lower_bound": 0.9696969696969697,
+      "lambda": 1.3104461500466391,
+      "next_anchor_step": 49,
+      "score": "next_segment_integrated_ratio/anchor_relative_error"
+    },
+    "5": {
+      "anchor_step": 5,
+      "conformal_order_rank_one_based": 32,
+      "development_bound_slack_quantiles": {
+        "maximum": 2.8547317978413407,
+        "median": 1.7156469788318187,
+        "minimum": 1.0,
+        "q25": 1.405931689436374,
+        "q75": 2.1488575303552353,
+        "q90": 2.4956727588456147,
+        "q95": 2.6321867651801267
+      },
+      "development_sample_count": 32,
+      "development_score_quantiles": {
+        "maximum": 3.0414400721334305,
+        "median": 1.7729371923259092,
+        "minimum": 1.0654030877553096,
+        "q25": 1.415898435585928,
+        "q75": 2.1639513471487435,
+        "q90": 2.763027130371118,
+        "q95": 2.878182682106969
+      },
+      "finite_sample_marginal_coverage_lower_bound": 0.9696969696969697,
+      "lambda": 3.0414400721334305,
+      "next_anchor_step": 9,
+      "score": "next_segment_integrated_ratio/anchor_relative_error"
+    },
+    "9": {
+      "anchor_step": 9,
+      "conformal_order_rank_one_based": 32,
+      "development_bound_slack_quantiles": {
+        "maximum": 4.727300325521524,
+        "median": 1.9913864988795351,
+        "minimum": 1.0,
+        "q25": 1.653086297514508,
+        "q75": 2.6990295606592807,
+        "q90": 3.0482955811499037,
+        "q95": 4.025611440789895
+      },
+      "development_sample_count": 32,
+      "development_score_quantiles": {
+        "maximum": 0.9477678515413203,
+        "median": 0.47593366468414927,
+        "minimum": 0.20048818274239025,
+        "q25": 0.3514489449498961,
+        "q75": 0.5733480112720506,
+        "q90": 0.6581971163813183,
+        "q95": 0.7875903467669283
+      },
+      "finite_sample_marginal_coverage_lower_bound": 0.9696969696969697,
+      "lambda": 0.9477678515413203,
+      "next_anchor_step": 15,
+      "score": "next_segment_integrated_ratio/anchor_relative_error"
+    }
+  },
+  "semantic_quality_claim": false,
+  "serving_claim": false,
+  "sha256": "6c8406d833bb499d3d264aa10f376873ada32ad3e3fac971a9ffd4f78dd20d05",
+  "target_miscoverage_alpha": 0.05
+}

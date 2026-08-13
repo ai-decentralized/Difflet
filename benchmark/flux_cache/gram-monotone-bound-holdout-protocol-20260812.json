@@ -1,0 +1,76 @@
+{
+  "schema": "difflet-flux-gram-monotone-bound-holdout-protocol",
+  "schema_revision": 1,
+  "study_id": "flux-a12-gram-monotone-bound-holdout-20260812",
+  "frozen_before_holdout_generation": true,
+  "evidence_role": "prospective-independent-bound-validation",
+  "candidate": {
+    "path": "benchmark/flux_cache/derived-static-a12-o1-index.json",
+    "file_sha256": "cf8d84c619b92ea3395d428f34befea994e18316e8321c1af413e599acd3f04e",
+    "candidate_id": "derived-static-a12-o1-index",
+    "anchor_steps": [0, 1, 2, 3, 4, 5, 9, 15, 21, 31, 41, 49]
+  },
+  "bound_model": {
+    "path": "benchmark/flux_cache/gram-monotone-bound-model-20260812.json",
+    "file_sha256": "46a062cf48cf71fb0c115f0633e885fef51c95d99eab83850076cbe2f79c5e9d",
+    "content_sha256": "6c8406d833bb499d3d264aa10f376873ada32ad3e3fac971a9ffd4f78dd20d05",
+    "family": "U_c(z)=lambda_c*z",
+    "target_miscoverage_alpha": 0.05,
+    "calibration_sample_count": 32,
+    "calibration_source": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-gram-transfer-gate-b-20260811/gate-b-result.json",
+      "file_sha256": "6f1da16db5e2afc02447016273dcf9c77cb88d812ce499474191f40a17385c61"
+    },
+    "guarantee_scope": "Finite-sample marginal coverage within each fixed denoise segment under exchangeability; not distribution-free pointwise conditional coverage in z."
+  },
+  "holdout_cohort": {
+    "path": "benchmark/flux_cache/gram-bound-holdout-prompt-suite-20260811.json",
+    "file_sha256": "75105310c6a4423cfab98a8ce8e99312d9f173bf396741cbad66ad6adc41af09",
+    "split": "gram_bound_holdout",
+    "prompt_count": 48,
+    "seed": 11,
+    "relationship_to_calibration": "Prospectively authored prompts with zero exact overlap with the Gate A or Gate B development cohorts; no holdout images or labels were inspected before this protocol was frozen."
+  },
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "measurement": {
+    "anchor_signal": "z_c = ||Taylor(v_a,v_b;c)-v_c|| / ||v_c|| at each actual A12 anchor c followed by skips",
+    "future_segment_damage": "D_c_to_d = sum_t |delta_sigma_t| ||vhat_t-v_t_shadow|| / sum_t |delta_sigma_t| ||v_t_shadow|| for c<t<d",
+    "shadow_semantics": "At each A12 skip, evaluate full DiT on the identical pre-step cached latent, retain scalar L2 summaries, and advance the original cached prediction.",
+    "serving_timing": false
+  },
+  "primary_holdout_gate": {
+    "minimum_per_segment_covered_count": 46,
+    "per_segment_sample_count": 48,
+    "minimum_coverage_per_segment": 0.9583333333333334,
+    "minimum_overall_coverage": 0.95,
+    "maximum_overall_median_bound_slack": 2.0,
+    "maximum_overall_q90_bound_slack": 3.0,
+    "maximum_per_segment_median_bound_slack": 2.5,
+    "all_conditions_required": true
+  },
+  "secondary_diagnostics": {
+    "z_quartile_coverage": "Report only; no distribution-free conditional-coverage claim.",
+    "category_coverage": "Report only; each category has six prompts and is underpowered as a gate.",
+    "association": "Secondary because Gate B already established association."
+  },
+  "decision_rule": {
+    "pass": "Authorize a new, separately frozen dynamic-policy experiment restricted to actions with labels supported by the measurement schedule.",
+    "fail": "Do not tune this bound on the holdout. Diagnose the failure and require a new development cohort before changing the family or thresholds."
+  },
+  "claims_excluded": [
+    "pointwise conditional coverage for every z",
+    "semantic image-quality preservation",
+    "safe skipping beyond the labeled next A12 segment",
+    "on-device Gram-tap latency",
+    "serving qualification"
+  ]
+}

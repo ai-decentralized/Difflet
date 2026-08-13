@@ -1,0 +1,538 @@
+{
+  "artifacts": {
+    "bound_model": {
+      "content_sha256": "6c8406d833bb499d3d264aa10f376873ada32ad3e3fac971a9ffd4f78dd20d05",
+      "file_sha256": "46a062cf48cf71fb0c115f0633e885fef51c95d99eab83850076cbe2f79c5e9d",
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/gram-monotone-bound-model-20260812.json"
+    },
+    "holdout_trace": {
+      "file_sha256": "26ded594195fc7e0e65ff080d8459be8b19d559741af77e0b191dac7315151c0",
+      "path": "/home/ubuntu/difflet-artifacts/flux-gram-bound-holdout-20260812/gate-b-result.json"
+    }
+  },
+  "category_diagnostics": {
+    "attribute-binding": {
+      "coverage": 1.0,
+      "coverage_wilson_95pct_ci": [
+        0.9035813714055363,
+        1.0
+      ],
+      "covered_count": 36,
+      "sample_segment_count": 36
+    },
+    "counting": {
+      "coverage": 0.9722222222222222,
+      "coverage_wilson_95pct_ci": [
+        0.8583028134672614,
+        0.9950795928601897
+      ],
+      "covered_count": 35,
+      "sample_segment_count": 36
+    },
+    "fine-detail": {
+      "coverage": 0.9444444444444444,
+      "coverage_wilson_95pct_ci": [
+        0.8185534279135275,
+        0.9846300133358382
+      ],
+      "covered_count": 34,
+      "sample_segment_count": 36
+    },
+    "interaction": {
+      "coverage": 1.0,
+      "coverage_wilson_95pct_ci": [
+        0.9035813714055363,
+        1.0
+      ],
+      "covered_count": 36,
+      "sample_segment_count": 36
+    },
+    "material-texture": {
+      "coverage": 0.9444444444444444,
+      "coverage_wilson_95pct_ci": [
+        0.8185534279135275,
+        0.9846300133358382
+      ],
+      "covered_count": 34,
+      "sample_segment_count": 36
+    },
+    "scene-composition": {
+      "coverage": 0.8333333333333334,
+      "coverage_wilson_95pct_ci": [
+        0.6810920568872054,
+        0.9212955240498188
+      ],
+      "covered_count": 30,
+      "sample_segment_count": 36
+    },
+    "spatial-relation": {
+      "coverage": 0.9722222222222222,
+      "coverage_wilson_95pct_ci": [
+        0.8583028134672614,
+        0.9950795928601897
+      ],
+      "covered_count": 35,
+      "sample_segment_count": 36
+    },
+    "text-rendering": {
+      "coverage": 0.9722222222222222,
+      "coverage_wilson_95pct_ci": [
+        0.8583028134672614,
+        0.9950795928601897
+      ],
+      "covered_count": 35,
+      "sample_segment_count": 36
+    }
+  },
+  "gate": {
+    "next_if_passed": "freeze a supported-action dynamic policy and compare its anchor use and semantic quality frontier against static A12/A13 and qualified A14",
+    "not_established": [
+      "pointwise conditional coverage for every z",
+      "coverage after policy-induced distribution shift",
+      "semantic quality protection",
+      "serving speedup"
+    ],
+    "overall_coverage_passed": true,
+    "overall_tightness_passed": true,
+    "passed": false,
+    "segment_coverage_passed": false,
+    "segment_tightness_passed": true
+  },
+  "overall": {
+    "bound_slack_quantiles": {
+      "maximum": 4.813764093664854,
+      "median": 1.5400566327401508,
+      "minimum": 0.7067981814422586,
+      "q25": 1.2430401787055072,
+      "q75": 1.9596655563789087,
+      "q90": 2.442043929899438,
+      "q95": 2.8110384885891193
+    },
+    "coverage": 0.9548611111111112,
+    "coverage_wilson_95pct_ci": [
+      0.9243140652002159,
+      0.9734336402105203
+    ],
+    "covered_count": 275,
+    "miss_count": 13,
+    "sample_segment_count": 288
+  },
+  "sample_count": 48,
+  "schema": "difflet-flux-gram-monotone-bound-holdout-result",
+  "schema_revision": 1,
+  "segment_results": {
+    "15": {
+      "anchor_step": 15,
+      "bound_slack_quantiles": {
+        "maximum": 2.917613008919574,
+        "median": 1.8572983245931343,
+        "minimum": 0.8150977449921797,
+        "q25": 1.5134057757254071,
+        "q75": 2.130549689387614,
+        "q90": 2.4810093560612216,
+        "q95": 2.6850218166691424
+      },
+      "coverage": 0.9375,
+      "coverage_wilson_95pct_ci": [
+        0.8316456194505365,
+        0.9785167670916107
+      ],
+      "covered_count": 45,
+      "gate": {
+        "coverage_passed": false,
+        "median_slack_passed": true
+      },
+      "lambda": 0.7979109025601586,
+      "miss_count": 3,
+      "next_anchor_step": 21,
+      "sample_count": 48,
+      "z_quartile_coverage": [
+        {
+          "coverage": 0.75,
+          "covered_count": 9,
+          "sample_count": 12,
+          "z_quartile": 1,
+          "z_range": [
+            0.15537943696757267,
+            0.326445542427196
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 2,
+          "z_range": [
+            0.3491996074344291,
+            0.45856044634485915
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 3,
+          "z_range": [
+            0.4590138241256389,
+            0.5899282188289848
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 4,
+          "z_range": [
+            0.5989486705304956,
+            0.8421932187388698
+          ]
+        }
+      ]
+    },
+    "21": {
+      "anchor_step": 21,
+      "bound_slack_quantiles": {
+        "maximum": 1.6161009151047057,
+        "median": 1.196062592520585,
+        "minimum": 0.9242595762962386,
+        "q25": 1.1092232642830206,
+        "q75": 1.382319536739204,
+        "q90": 1.4508707815931363,
+        "q95": 1.563647875693686
+      },
+      "coverage": 0.9166666666666666,
+      "coverage_wilson_95pct_ci": [
+        0.8044669820963272,
+        0.9671162431819081
+      ],
+      "covered_count": 44,
+      "gate": {
+        "coverage_passed": false,
+        "median_slack_passed": true
+      },
+      "lambda": 0.7882127998673522,
+      "miss_count": 4,
+      "next_anchor_step": 31,
+      "sample_count": 48,
+      "z_quartile_coverage": [
+        {
+          "coverage": 0.6666666666666666,
+          "covered_count": 8,
+          "sample_count": 12,
+          "z_quartile": 1,
+          "z_range": [
+            0.18210617201369264,
+            0.28779375649238703
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 2,
+          "z_range": [
+            0.30008827226647883,
+            0.3466148495738091
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 3,
+          "z_range": [
+            0.34776250888287275,
+            0.40017268620702623
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 4,
+          "z_range": [
+            0.41592078724698617,
+            0.5001135616433027
+          ]
+        }
+      ]
+    },
+    "31": {
+      "anchor_step": 31,
+      "bound_slack_quantiles": {
+        "maximum": 2.6315832190981507,
+        "median": 1.5067411983182235,
+        "minimum": 0.9574215428712848,
+        "q25": 1.2390531616137253,
+        "q75": 1.8806270049490186,
+        "q90": 2.1158366669656665,
+        "q95": 2.323745725547987
+      },
+      "coverage": 0.9791666666666666,
+      "coverage_wilson_95pct_ci": [
+        0.8910078200474814,
+        0.9963128890224893
+      ],
+      "covered_count": 47,
+      "gate": {
+        "coverage_passed": true,
+        "median_slack_passed": true
+      },
+      "lambda": 0.48150867989747353,
+      "miss_count": 1,
+      "next_anchor_step": 41,
+      "sample_count": 48,
+      "z_quartile_coverage": [
+        {
+          "coverage": 0.9166666666666666,
+          "covered_count": 11,
+          "sample_count": 12,
+          "z_quartile": 1,
+          "z_range": [
+            0.24717098519701555,
+            0.3684565270833043
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 2,
+          "z_range": [
+            0.37158624384525496,
+            0.4057833404743058
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 3,
+          "z_range": [
+            0.40825172799987697,
+            0.44599982997528737
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 4,
+          "z_range": [
+            0.46351749328505265,
+            0.5786450462370094
+          ]
+        }
+      ]
+    },
+    "41": {
+      "anchor_step": 41,
+      "bound_slack_quantiles": {
+        "maximum": 1.9098882524912435,
+        "median": 1.3809417583599015,
+        "minimum": 0.9868203580632032,
+        "q25": 1.2650580035714367,
+        "q75": 1.551146114470927,
+        "q90": 1.6308162945733284,
+        "q95": 1.6751673842928985
+      },
+      "coverage": 0.9791666666666666,
+      "coverage_wilson_95pct_ci": [
+        0.8910078200474814,
+        0.9963128890224893
+      ],
+      "covered_count": 47,
+      "gate": {
+        "coverage_passed": true,
+        "median_slack_passed": true
+      },
+      "lambda": 1.3104461500466391,
+      "miss_count": 1,
+      "next_anchor_step": 49,
+      "sample_count": 48,
+      "z_quartile_coverage": [
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 1,
+          "z_range": [
+            0.15087514999169455,
+            0.21498233405857334
+          ]
+        },
+        {
+          "coverage": 0.9166666666666666,
+          "covered_count": 11,
+          "sample_count": 12,
+          "z_quartile": 2,
+          "z_range": [
+            0.2153102953010135,
+            0.24932676320964706
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 3,
+          "z_range": [
+            0.2536349630369886,
+            0.28951103532705075
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 4,
+          "z_range": [
+            0.2927589234044691,
+            0.41313443019564744
+          ]
+        }
+      ]
+    },
+    "5": {
+      "anchor_step": 5,
+      "bound_slack_quantiles": {
+        "maximum": 4.813764093664854,
+        "median": 1.6879589439724807,
+        "minimum": 0.8751396611713366,
+        "q25": 1.3593533362804247,
+        "q75": 2.2286905905641436,
+        "q90": 2.574291501904848,
+        "q95": 2.710657581775907
+      },
+      "coverage": 0.9375,
+      "coverage_wilson_95pct_ci": [
+        0.8316456194505365,
+        0.9785167670916107
+      ],
+      "covered_count": 45,
+      "gate": {
+        "coverage_passed": false,
+        "median_slack_passed": true
+      },
+      "lambda": 3.0414400721334305,
+      "miss_count": 3,
+      "next_anchor_step": 9,
+      "sample_count": 48,
+      "z_quartile_coverage": [
+        {
+          "coverage": 0.9166666666666666,
+          "covered_count": 11,
+          "sample_count": 12,
+          "z_quartile": 1,
+          "z_range": [
+            0.04789056992609364,
+            0.10991184067398767
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 2,
+          "z_range": [
+            0.11716955989161014,
+            0.1366331382711808
+          ]
+        },
+        {
+          "coverage": 0.9166666666666666,
+          "covered_count": 11,
+          "sample_count": 12,
+          "z_quartile": 3,
+          "z_range": [
+            0.14009814794642242,
+            0.20985680259898623
+          ]
+        },
+        {
+          "coverage": 0.9166666666666666,
+          "covered_count": 11,
+          "sample_count": 12,
+          "z_quartile": 4,
+          "z_range": [
+            0.21389315841866208,
+            0.5874969034551268
+          ]
+        }
+      ]
+    },
+    "9": {
+      "anchor_step": 9,
+      "bound_slack_quantiles": {
+        "maximum": 4.685233883011226,
+        "median": 1.9796701462028734,
+        "minimum": 0.7067981814422586,
+        "q25": 1.6751869515076785,
+        "q75": 2.7606148598197344,
+        "q90": 3.4730548938485786,
+        "q95": 3.721651356065438
+      },
+      "coverage": 0.9791666666666666,
+      "coverage_wilson_95pct_ci": [
+        0.8910078200474814,
+        0.9963128890224893
+      ],
+      "covered_count": 47,
+      "gate": {
+        "coverage_passed": true,
+        "median_slack_passed": true
+      },
+      "lambda": 0.9477678515413203,
+      "miss_count": 1,
+      "next_anchor_step": 15,
+      "sample_count": 48,
+      "z_quartile_coverage": [
+        {
+          "coverage": 0.9166666666666666,
+          "covered_count": 11,
+          "sample_count": 12,
+          "z_quartile": 1,
+          "z_range": [
+            0.14572008962820202,
+            0.34757805910076917
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 2,
+          "z_range": [
+            0.39994548321492246,
+            0.5839153106603693
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 3,
+          "z_range": [
+            0.5860916090802271,
+            0.7064551466737675
+          ]
+        },
+        {
+          "coverage": 1.0,
+          "covered_count": 12,
+          "sample_count": 12,
+          "z_quartile": 4,
+          "z_range": [
+            0.7342697292941406,
+            1.5890737580707959
+          ]
+        }
+      ]
+    }
+  },
+  "semantic_quality_claim": false,
+  "serving_claim": false,
+  "sha256": "670533e3d646a831803347804d981abc5f7234fe26b4f64213a01d6f9b1f6f81",
+  "status": "bound_holdout_rejected",
+  "study_id": "flux-gram-monotone-bound-holdout-20260812"
+}

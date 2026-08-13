@@ -1,0 +1,56 @@
+{
+  "schema": "difflet-flux-gram-transfer-cache-rollout-gate",
+  "schema_revision": 1,
+  "study_id": "flux-gram-transfer-cache-rollout-gate-20260811",
+  "evidence_role": "real-cache-feedback-transfer-gate",
+  "serving_claim": false,
+  "timing_claim": false,
+  "candidate": {
+    "path": "benchmark/flux_cache/derived-static-a12-o1-index.json",
+    "file_sha256": "cf8d84c619b92ea3395d428f34befea994e18316e8321c1af413e599acd3f04e",
+    "candidate_id": "derived-static-a12-o1-index"
+  },
+  "prompt_cohort": {
+    "path": "benchmark/flux_cache/qualified-profile-confirmation-prompt-suite-20260808.json",
+    "file_sha256": "d9d301114d733a0b869506f3f0d28eb83c98f2bb47f3ceee5c1617b5f62861e8",
+    "split": "qualified_profile_confirmation",
+    "prompt_count": 32,
+    "seed": 7,
+    "relationship_to_gate_a": "No exact prompt overlap with the 48 clean calibration trajectories used by Gate A."
+  },
+  "generation_identity": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "num_steps": 50,
+    "height": 1024,
+    "width": 1024,
+    "guidance_scale": 3.5,
+    "dtype": "bfloat16",
+    "tp_degree": 4
+  },
+  "measurement": {
+    "anchor_signal": "z_c = ||Taylor(v_a,v_b;c)-v_c|| / ||v_c|| at each actual anchor c followed by skips",
+    "skipped_step_truth": "At each natural skip, run shadow full-DiT on the identical pre-step cache latent and record relative L2; advance the original cached prediction.",
+    "segment_damage": "sum_t |delta_sigma_t| ||vhat_t-v_t_shadow|| / sum_t |delta_sigma_t| ||v_t_shadow|| between c and the next actual anchor d",
+    "phase_control": "Compute association within each fixed c-to-d segment across prompts before aggregating segments."
+  },
+  "primary": {
+    "estimand": "Equal-weight mean of within-fixed-segment Spearman correlations.",
+    "advance_if": {
+      "minimum_mean_spearman_rho": 0.4,
+      "bootstrap_95pct_lower_bound_strictly_positive": true,
+      "maximum_one_sided_permutation_p": 0.05,
+      "minimum_positive_fixed_segment_fraction": 0.5
+    }
+  },
+  "interpretation": {
+    "pass": "Only authorize a disjoint fit/holdout conditional-upper-bound study.",
+    "fail": "Do not use anchor Gram measurements to control future skip budgets for this predictor and schedule.",
+    "not_established": [
+      "a conditional upper bound",
+      "quality-budget accounting",
+      "on-device tap latency",
+      "serving qualification"
+    ]
+  }
+}
