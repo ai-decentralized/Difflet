@@ -35,9 +35,9 @@ def _write_candidate(root: Path) -> Path:
     payload = {
         "schema": "difflet-flux-cache-phased-candidate",
         "schema_revision": 1,
-        "candidate_id": "unit-static-plus-brake",
+        "candidate_id": "unit-static-frontier-a17",
         "policy": {
-            "type": "phased_static_plus_brake",
+            "type": "phased_static",
             "num_steps": 50,
             "static_anchor_steps": [
                 0,
@@ -61,15 +61,8 @@ def _write_candidate(root: Path) -> Path:
             "warmup_steps": 6,
             "cooldown_steps": 1,
             "require_final_anchor": True,
-            "dynamic_budget": 2,
+            "dynamic_budget": 0,
             "invalid_measurement_fail_closed": True,
-            "plastic_window": [6, 37],
-            "tighten_error": 1.19,
-            "recovery_error": 1.5,
-            "recovery_steps": 2,
-            "disable_after_recoveries": 2,
-            "tighten_rule": "bisect_next_static_gap",
-            "allow_acceleration": False,
         },
         "predictor": {"type": "taylorseer", "order": 1, "coord": "index"},
         "horizon_ref": {
@@ -218,8 +211,13 @@ def _quality_contract(metric_config: dict) -> dict:
             "dtype": "bfloat16",
             "tp_degree": 4,
         },
-        "margin_calibration": {},
-        "automatic_damage_rule": {},
+        "observed_seed_variation_calibration": {
+            "method": natural_gate.CALIBRATION_METHOD,
+            "decision_statistic": "maximum_observed",
+            "candidate_images_excluded_from_margin_estimation": True,
+            "pooling_across_resolutions_forbidden": True,
+        },
+        "automatic_damage_rule": natural_gate.AUTOMATIC_DAMAGE_RULE,
         "metric_identity": {
             "config": metric_config,
             "sha256": canonical_sha256(metric_config),
@@ -229,10 +227,13 @@ def _quality_contract(metric_config: dict) -> dict:
                 "bucket_id": "square-1024",
                 "height": 1024,
                 "width": 1024,
-                "margins": {"image_reward": 0.8, "vqa_score": 0.2},
-                "calibration_summary": {
-                    "image_reward": {"maximum": 1.0},
-                    "vqa_score": {"maximum": 0.25},
+                "observed_seed_variation_envelope": {
+                    "image_reward": 1.0,
+                    "vqa_score": 0.25,
+                },
+                "calibration_diagnostics": {
+                    "image_reward": {"maximum_observed": 1.0},
+                    "vqa_score": {"maximum_observed": 0.25},
                 },
                 "evidence": {},
             }
@@ -240,6 +241,21 @@ def _quality_contract(metric_config: dict) -> dict:
         "limitations": [],
     }
     return {**payload, "sha256": canonical_sha256(payload)}
+
+
+def test_natural_range_contract_rejects_legacy_quantile_contract(tmp_path):
+    contract = _quality_contract({"image_reward": {}, "vqa_score": {}})
+    payload = {key: value for key, value in contract.items() if key != "sha256"}
+    payload.pop("observed_seed_variation_calibration")
+    payload["margin_calibration"] = {
+        "method": "absolute-baseline-seed-pair-difference-nearest-rank",
+        "quantile": 0.95,
+    }
+    path = tmp_path / "legacy-contract.json"
+    _write_json(path, {**payload, "sha256": canonical_sha256(payload)})
+
+    with pytest.raises(ValueError, match="observed-maximum calibration rule"):
+        natural_gate.load_natural_range_contract(path)
 
 
 def test_natural_range_gate_automatically_rejects_without_review_state(
@@ -331,8 +347,12 @@ def test_natural_range_gate_automatically_rejects_without_review_state(
     )
     summaries = {row["candidate_id"]: row for row in result["candidate_summaries"]}
 
+    assert result["max_allowed_failures"] == 0
     assert summaries["safe"]["decision"] == "automatic_pass"
+    assert summaries["safe"]["passes_failure_budget_gate"] is True
     assert summaries["unsafe"]["decision"] == "automatic_reject"
+    assert summaries["unsafe"]["passes_failure_budget_gate"] is False
+    assert summaries["unsafe"]["max_allowed_failures"] == 0
     assert result["review_policy"] == {
         "within_natural_range_action": "automatic_pass",
         "outside_natural_range_action": "automatic_reject",
@@ -342,6 +362,21 @@ def test_natural_range_gate_automatically_rejects_without_review_state(
     serialized = json.dumps(result)
     assert "ambiguous" not in serialized
     assert "needs_review" not in serialized
+
+    budgeted = natural_gate.evaluate_natural_range(
+        contract_path,
+        report_path,
+        bucket_id="square-1024",
+        max_allowed_failures=1,
+    )
+    budgeted_summaries = {
+        row["candidate_id"]: row for row in budgeted["candidate_summaries"]
+    }
+
+    assert budgeted["max_allowed_failures"] == 1
+    assert budgeted_summaries["unsafe"]["failure_count"] == 1
+    assert budgeted_summaries["unsafe"]["decision"] == "automatic_pass"
+    assert budgeted_summaries["unsafe"]["passes_failure_budget_gate"] is True
 
 
 def test_natural_range_gate_rejects_incomplete_scoring_coverage(tmp_path, monkeypatch):
@@ -409,7 +444,7 @@ def test_natural_range_cli_returns_nonzero_when_any_candidate_is_rejected(
         "candidate_summaries": [
             {
                 "candidate_id": "unsafe",
-                "passes_zero_failure_gate": False,
+                "passes_failure_budget_gate": False,
             }
         ]
     }
@@ -487,10 +522,78 @@ def test_scoped_wrapper_runs_one_frozen_confirmation_candidate(tmp_path, monkeyp
     )
     assert record["stage"] == "confirmation"
     assert record["request_count"] == 64
-    assert observed["candidate_id"] == "unit-static-plus-brake"
+    assert observed["candidate_id"] == "unit-static-frontier-a17"
 
 
-def test_scoped_wrapper_runs_two_point_trajectory_calibration(tmp_path, monkeypatch):
+def test_scoped_wrapper_authorizes_only_candidate_requests_when_reusing_baseline(
+    tmp_path,
+    monkeypatch,
+):
+    output_root = tmp_path / "artifacts"
+    output_directory = output_root / "confirmation-rung-2"
+    policy_path = tmp_path / "execution-policy.json"
+    _write_json(policy_path, _execution_policy(output_root))
+    candidate_path = _write_candidate(tmp_path / "candidate")
+    baseline_quality = tmp_path / "baseline-quality.json"
+    baseline_speed = tmp_path / "baseline-speed.json"
+    _write_json(baseline_quality, {})
+    _write_json(baseline_speed, {})
+    prompt_suite = (
+        Path(__file__).resolve().parents[3]
+        / "benchmark"
+        / "flux_cache"
+        / "qualified-profile-confirmation-prompt-suite-20260808.json"
+    )
+
+    def fake_collect(args, _arm):
+        output_directory.mkdir(parents=True)
+        assert args.baseline_quality_manifest == str(baseline_quality)
+        assert args.baseline_speed_manifest == str(baseline_speed)
+        return output_directory / "quality.json", output_directory / "speed.json"
+
+    monkeypatch.setattr(
+        authorized_collector.confirmation_collector,
+        "collect_confirmation",
+        fake_collect,
+    )
+    wrapper_args = type(
+        "Args",
+        (),
+        {
+            "execution_stage": "confirmation",
+            "execution_policy": str(policy_path),
+            "hardware_backend": "trainium",
+            "hardware_product": "trn2.3xlarge",
+            "phased_candidate": (str(candidate_path),),
+        },
+    )()
+    authorized_collector._collect_ab(
+        wrapper_args,
+        (
+            "--out-dir",
+            str(output_directory),
+            "--model-revision",
+            MODEL_REVISION,
+            "--prompt-suite",
+            str(prompt_suite),
+            "--prompt-split",
+            "qualified_profile_confirmation",
+            "--seed",
+            "0",
+            "--baseline-quality-manifest",
+            str(baseline_quality),
+            "--baseline-speed-manifest",
+            str(baseline_speed),
+        ),
+    )
+
+    record = json.loads(
+        (output_directory / "execution-authorization.json").read_text(encoding="utf-8")
+    )
+    assert record["request_count"] == 32
+
+
+def test_scoped_wrapper_runs_baseline_only_trajectory_calibration(tmp_path, monkeypatch):
     output_root = tmp_path / "artifacts"
     output_directory = output_root / "calibration"
     policy_path = tmp_path / "execution-policy.json"
@@ -502,27 +605,6 @@ def test_scoped_wrapper_runs_two_point_trajectory_calibration(tmp_path, monkeypa
     )
     _write_json(policy_path, policy)
 
-    candidate_paths = []
-    for index, anchors in enumerate(((0, 1, 3, 49), (0, 1, 2, 3, 49))):
-        candidate_path = _write_candidate(tmp_path / f"candidate-{index}")
-        candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
-        candidate["candidate_id"] = f"unit-static-{index}"
-        candidate["policy"] = {
-            "type": "phased_static",
-            "num_steps": 50,
-            "static_anchor_steps": list(anchors),
-            "warmup_steps": 1,
-            "cooldown_steps": 1,
-            "require_final_anchor": True,
-            "dynamic_budget": 0,
-            "invalid_measurement_fail_closed": True,
-        }
-        candidate["sha256"] = canonical_sha256(
-            {key: value for key, value in candidate.items() if key != "sha256"}
-        )
-        _write_json(candidate_path, candidate)
-        candidate_paths.append(candidate_path)
-
     prompt_suite = (
         Path(__file__).resolve().parents[3]
         / "benchmark"
@@ -531,10 +613,10 @@ def test_scoped_wrapper_runs_two_point_trajectory_calibration(tmp_path, monkeypa
     )
     observed = {}
 
-    def fake_collect(args, arms):
+    def fake_collect(args):
         output_directory.mkdir(parents=True)
-        observed["candidate_ids"] = [arm.candidate_id for arm in arms]
-        return output_directory / "quality.json", output_directory / "speed.json"
+        observed["called"] = True
+        return output_directory / "trajectory-input-v1.json"
 
     monkeypatch.setattr(
         authorized_collector.confirmation_collector,
@@ -549,7 +631,7 @@ def test_scoped_wrapper_runs_two_point_trajectory_calibration(tmp_path, monkeypa
             "execution_policy": str(policy_path),
             "hardware_backend": "trainium",
             "hardware_product": "trn2.3xlarge",
-            "phased_candidate": tuple(str(path) for path in candidate_paths),
+            "phased_candidate": None,
         },
     )()
 
@@ -573,8 +655,8 @@ def test_scoped_wrapper_runs_two_point_trajectory_calibration(tmp_path, monkeypa
         (output_directory / "execution-authorization.json").read_text(encoding="utf-8")
     )
     assert record["stage"] == "trajectory_collection"
-    assert record["request_count"] == 144
-    assert observed["candidate_ids"] == ["unit-static-0", "unit-static-1"]
+    assert record["request_count"] == 48
+    assert observed["called"] is True
 
 
 def test_scoped_wrapper_rejects_user_supplied_legacy_ack(tmp_path):

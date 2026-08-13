@@ -126,9 +126,31 @@ def _qualified_bundle(tmp_path: Path) -> tuple[Path, Path]:
             "decision": {
                 "quality_passed": True,
                 "failure_count": 0,
+                "max_allowed_failures": 0,
+                "selected_anchor_budget": 5,
                 "measured_speedup": 3.4,
-                "minimum_speedup": 3.2,
-                "speed_passed": True,
+                "selection_rule": "ascending_first_quality_pass",
+                "qualification_order": "ascending_anchor_budget",
+                "candidate_domain": [4, 5, 6],
+                "tested_anchor_budgets": [4, 5],
+                "stop_reason": "first_quality_pass",
+                "speed_is_selection_input": False,
+                "tested_frontier": [
+                    {
+                        "candidate_id": "quality-static-a4-o1-index",
+                        "anchor_budget": 4,
+                        "quality_passed": False,
+                        "failure_count": 1,
+                        "measured_speedup": 4.0,
+                    },
+                    {
+                        "candidate_id": candidate["candidate_id"],
+                        "anchor_budget": 5,
+                        "quality_passed": True,
+                        "failure_count": 0,
+                        "measured_speedup": 3.4,
+                    },
+                ],
             },
             "evidence": {},
         },
@@ -162,6 +184,127 @@ def test_load_qualified_profile_validates_evidence_and_builds_request_session(tm
     assert isinstance(session, CacheSession)
     assert profile.candidate_id == "qualified-test-profile"
     assert profile.measured_speedup == 3.4
+    assert profile.minimum_speedup is None
+    assert profile.selected_anchor_budget == 5
+
+
+def test_load_qualified_profile_keeps_revision_one_compatibility(tmp_path):
+    profile_path, qualification_path = _qualified_bundle(tmp_path)
+    qualification = json.loads(qualification_path.read_text(encoding="utf-8"))
+    qualification["schema_revision"] = 1
+    qualification["decision"] = {
+        "quality_passed": True,
+        "failure_count": 0,
+        "measured_speedup": 3.4,
+        "minimum_speedup": 3.2,
+        "speed_passed": True,
+    }
+    payload = {key: value for key, value in qualification.items() if key != "sha256"}
+    qualification["sha256"] = canonical_sha256(payload)
+    qualification_path.write_text(
+        json.dumps(qualification, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    profile = load_qualified_cache_profile(profile_path, qualification_path)
+
+    assert profile.minimum_speedup == 3.2
+    assert profile.selected_anchor_budget is None
+
+
+def test_load_qualified_profile_keeps_revision_two_compatibility(tmp_path):
+    profile_path, qualification_path = _qualified_bundle(tmp_path)
+    qualification = json.loads(qualification_path.read_text(encoding="utf-8"))
+    qualification["schema_revision"] = 2
+    qualification["decision"] = {
+        "quality_passed": True,
+        "failure_count": 0,
+        "selected_anchor_budget": 5,
+        "measured_speedup": 3.4,
+        "selection_rule": "minimum_anchor_budget_among_quality_passed_candidates",
+        "speed_is_selection_input": False,
+        "frontier": [
+            {
+                "candidate_id": "quality-static-a4-o1-index",
+                "anchor_budget": 4,
+                "quality_passed": False,
+                "failure_count": 1,
+                "measured_speedup": 4.0,
+            },
+            {
+                "candidate_id": "qualified-test-profile",
+                "anchor_budget": 5,
+                "quality_passed": True,
+                "failure_count": 0,
+                "measured_speedup": 3.4,
+            },
+        ],
+    }
+    payload = {key: value for key, value in qualification.items() if key != "sha256"}
+    qualification["sha256"] = canonical_sha256(payload)
+    qualification_path.write_text(
+        json.dumps(qualification, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    profile = load_qualified_cache_profile(profile_path, qualification_path)
+
+    assert profile.minimum_speedup is None
+    assert profile.selected_anchor_budget == 5
+
+
+def test_load_qualified_profile_keeps_revision_three_compatibility(tmp_path):
+    profile_path, qualification_path = _qualified_bundle(tmp_path)
+    qualification = json.loads(qualification_path.read_text(encoding="utf-8"))
+    qualification["schema_revision"] = 3
+    del qualification["decision"]["max_allowed_failures"]
+    payload = {key: value for key, value in qualification.items() if key != "sha256"}
+    qualification["sha256"] = canonical_sha256(payload)
+    qualification_path.write_text(
+        json.dumps(qualification, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    profile = load_qualified_cache_profile(profile_path, qualification_path)
+
+    assert profile.selected_anchor_budget == 5
+
+
+def test_load_qualified_profile_accepts_a_registered_failure_budget(tmp_path):
+    profile_path, qualification_path = _qualified_bundle(tmp_path)
+    qualification = json.loads(qualification_path.read_text(encoding="utf-8"))
+    decision = qualification["decision"]
+    decision["max_allowed_failures"] = 2
+    decision["failure_count"] = 2
+    decision["tested_frontier"][0]["failure_count"] = 3
+    decision["tested_frontier"][1]["failure_count"] = 2
+    payload = {key: value for key, value in qualification.items() if key != "sha256"}
+    qualification["sha256"] = canonical_sha256(payload)
+    qualification_path.write_text(
+        json.dumps(qualification, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    profile = load_qualified_cache_profile(profile_path, qualification_path)
+
+    assert profile.selected_anchor_budget == 5
+
+
+def test_load_qualified_profile_rejects_failures_beyond_the_registered_budget(tmp_path):
+    profile_path, qualification_path = _qualified_bundle(tmp_path)
+    qualification = json.loads(qualification_path.read_text(encoding="utf-8"))
+    decision = qualification["decision"]
+    decision["failure_count"] = 1
+    decision["tested_frontier"][1]["failure_count"] = 1
+    payload = {key: value for key, value in qualification.items() if key != "sha256"}
+    qualification["sha256"] = canonical_sha256(payload)
+    qualification_path.write_text(
+        json.dumps(qualification, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CacheProfileError, match="ladder is invalid"):
+        load_qualified_cache_profile(profile_path, qualification_path)
 
 
 def test_qualified_profile_rejects_runtime_identity_mismatch(tmp_path):
@@ -195,7 +338,40 @@ def test_qualified_profile_rejects_failed_decision(tmp_path):
         encoding="utf-8",
     )
 
-    with pytest.raises(CacheProfileError, match="did not pass"):
+    with pytest.raises(CacheProfileError, match="ladder is invalid"):
+        load_qualified_cache_profile(profile_path, qualification_path)
+
+
+def test_qualified_profile_rejects_inconsistent_frontier_decision(tmp_path):
+    profile_path, qualification_path = _qualified_bundle(tmp_path)
+    qualification = json.loads(qualification_path.read_text(encoding="utf-8"))
+    qualification["decision"]["tested_frontier"][0]["quality_passed"] = True
+    payload = {key: value for key, value in qualification.items() if key != "sha256"}
+    qualification["sha256"] = canonical_sha256(payload)
+    qualification_path.write_text(
+        json.dumps(qualification, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CacheProfileError, match="ladder is invalid"):
+        load_qualified_cache_profile(profile_path, qualification_path)
+
+
+def test_qualified_profile_rejects_a_ladder_that_skipped_a_lower_budget(tmp_path):
+    profile_path, qualification_path = _qualified_bundle(tmp_path)
+    qualification = json.loads(qualification_path.read_text(encoding="utf-8"))
+    qualification["decision"]["tested_anchor_budgets"] = [5]
+    qualification["decision"]["tested_frontier"] = qualification["decision"][
+        "tested_frontier"
+    ][1:]
+    payload = {key: value for key, value in qualification.items() if key != "sha256"}
+    qualification["sha256"] = canonical_sha256(payload)
+    qualification_path.write_text(
+        json.dumps(qualification, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CacheProfileError, match="ladder is invalid"):
         load_qualified_cache_profile(profile_path, qualification_path)
 
 

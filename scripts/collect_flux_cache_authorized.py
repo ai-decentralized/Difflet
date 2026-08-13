@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Run FLUX profile collection under one frozen execution-scope policy.
 
-The confirmation command accepts exactly one frozen cache profile. It validates
-the complete hardware request before invoking the minimal paired collector and
-writes a policy-bound authorization record only after collection succeeds.
+Each confirmation command evaluates one rung of the ascending static-budget
+ladder. Later rungs may reuse the first rung's hash-bound full-compute baseline.
+The wrapper authorizes only the hardware requests actually executed.
 """
 
 from __future__ import annotations
@@ -52,6 +52,11 @@ def _authorize_ab(
     prompt_selection = confirmation_collector.select_prompts(args)
     seeds = tuple(confirmation_collector.DEFAULT_SEEDS if args.seed is None else args.seed)
     samples = confirmation_collector.sample_matrix(prompt_selection.prompts, seeds)
+    reuse_quality = getattr(args, "baseline_quality_manifest", None)
+    reuse_speed = getattr(args, "baseline_speed_manifest", None)
+    if bool(reuse_quality) != bool(reuse_speed):
+        raise ValueError("baseline reuse requires both quality and speed manifests")
+    baseline_multiplier = 0 if reuse_quality else 1
     return authorize_execution(
         policy_path,
         ExecutionRequest(
@@ -66,7 +71,7 @@ def _authorize_ab(
             width=args.width,
             guidance_scale=args.guidance_scale,
             dtype=args.dtype,
-            request_count=len(samples) * (1 + len(arms)),
+            request_count=len(samples) * (baseline_multiplier + len(arms)),
             output_directory=Path(args.out_dir),
         ),
     )
@@ -83,35 +88,11 @@ def _collect_ab(
 
     phased_paths = tuple(wrapper_args.phased_candidate or ())
     if len(phased_paths) != 1:
-        raise ValueError("confirmation requires exactly one --phased-candidate")
-    arm = load_phased_candidates(phased_paths)[0]
-
-    authorization = _authorize_ab(
-        policy_path=Path(wrapper_args.execution_policy),
-        stage=wrapper_args.execution_stage,
-        args=args,
-        arms=(arm,),
-        backend=wrapper_args.hardware_backend,
-        product_name=wrapper_args.hardware_product,
-    )
-    result = confirmation_collector.collect_confirmation(args, arm)
-    record_path = write_authorization_record(Path(args.out_dir), authorization)
-    print(f"[scoped-hardware] authorization record: {record_path}", flush=True)
-    return result
-
-
-def _collect_calibration(
-    wrapper_args: argparse.Namespace,
-    remaining: Sequence[str],
-) -> tuple[Path, Path]:
-    if wrapper_args.execution_stage != "trajectory_collection":
-        raise ValueError("the calibration command requires --execution-stage trajectory_collection")
-    _reject_legacy_authorization(remaining)
-    args = confirmation_collector.parse_confirmation_args(remaining)
-    phased_paths = tuple(wrapper_args.phased_candidate or ())
-    if len(phased_paths) != 2:
-        raise ValueError("calibration requires exactly two --phased-candidate values")
+        raise ValueError("each confirmation ladder rung requires one --phased-candidate")
     arms = load_phased_candidates(phased_paths)
+    if any(arm.policy["type"] != "phased_static" for arm in arms):
+        raise ValueError("confirmation ladder requires a phased-static candidate")
+
     authorization = _authorize_ab(
         policy_path=Path(wrapper_args.execution_policy),
         stage=wrapper_args.execution_stage,
@@ -120,7 +101,32 @@ def _collect_calibration(
         backend=wrapper_args.hardware_backend,
         product_name=wrapper_args.hardware_product,
     )
-    result = confirmation_collector.collect_calibration(args, arms)
+    result = confirmation_collector.collect_confirmation(args, arms[0])
+    record_path = write_authorization_record(Path(args.out_dir), authorization)
+    print(f"[scoped-hardware] authorization record: {record_path}", flush=True)
+    return result
+
+
+def _collect_calibration(
+    wrapper_args: argparse.Namespace,
+    remaining: Sequence[str],
+) -> Path:
+    if wrapper_args.execution_stage != "trajectory_collection":
+        raise ValueError("the calibration command requires --execution-stage trajectory_collection")
+    _reject_legacy_authorization(remaining)
+    args = confirmation_collector.parse_confirmation_args(remaining)
+    phased_paths = tuple(wrapper_args.phased_candidate or ())
+    if phased_paths:
+        raise ValueError("calibration no longer accepts --phased-candidate")
+    authorization = _authorize_ab(
+        policy_path=Path(wrapper_args.execution_policy),
+        stage=wrapper_args.execution_stage,
+        args=args,
+        arms=(),
+        backend=wrapper_args.hardware_backend,
+        product_name=wrapper_args.hardware_product,
+    )
+    result = confirmation_collector.collect_calibration(args)
     record_path = write_authorization_record(Path(args.out_dir), authorization)
     print(f"[scoped-hardware] authorization record: {record_path}", flush=True)
     return result

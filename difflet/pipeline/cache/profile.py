@@ -23,7 +23,7 @@ from difflet.pipeline.cache.session import CacheSession
 PHASED_CANDIDATE_SCHEMA = "difflet-flux-cache-phased-candidate"
 PHASED_CANDIDATE_SCHEMA_REVISION = 1
 PROFILE_QUALIFICATION_SCHEMA = "difflet-flux-cache-profile-qualification"
-PROFILE_QUALIFICATION_SCHEMA_REVISION = 1
+PROFILE_QUALIFICATION_SCHEMA_REVISION = 4
 QUALITY_CONTRACT_SCHEMA = "difflet-flux-cache-multires-quality-contract"
 QUALITY_CONTRACT_SCHEMA_REVISION = 1
 ROOT = Path(__file__).resolve().parents[3]
@@ -440,7 +440,8 @@ class QualifiedCacheProfile:
     qualification_sha256: str
     build_id: str
     measured_speedup: float
-    minimum_speedup: float
+    minimum_speedup: float | None
+    selected_anchor_budget: int | None
     generation: Mapping[str, Any]
     resolution: Mapping[str, Any]
 
@@ -552,9 +553,10 @@ def load_qualified_cache_profile(
     }
     if set(qualification) != expected:
         raise CacheProfileError("profile qualification fields do not match the schema")
+    revision = qualification.get("schema_revision")
     if (
         qualification["schema"] != PROFILE_QUALIFICATION_SCHEMA
-        or qualification["schema_revision"] != PROFILE_QUALIFICATION_SCHEMA_REVISION
+        or revision not in (1, 2, 3, PROFILE_QUALIFICATION_SCHEMA_REVISION)
         or qualification["status"] != "qualified"
     ):
         raise CacheProfileError("profile qualification is unsupported or not qualified")
@@ -576,25 +578,214 @@ def load_qualified_cache_profile(
     ):
         raise CacheProfileError("qualification binds a different cache profile")
     decision = qualification["decision"]
-    if not isinstance(decision, Mapping) or set(decision) != {
-        "quality_passed",
-        "failure_count",
-        "measured_speedup",
-        "minimum_speedup",
-        "speed_passed",
-    }:
+    if not isinstance(decision, Mapping):
         raise CacheProfileError("profile qualification decision fields are invalid")
-    measured = float(decision["measured_speedup"])
-    minimum = float(decision["minimum_speedup"])
-    if (
-        decision["quality_passed"] is not True
-        or decision["speed_passed"] is not True
-        or decision["failure_count"] != 0
-        or not math.isfinite(measured)
-        or not math.isfinite(minimum)
-        or measured < minimum
-    ):
-        raise CacheProfileError("profile qualification decision did not pass")
+    if revision == 1:
+        if set(decision) != {
+            "quality_passed",
+            "failure_count",
+            "measured_speedup",
+            "minimum_speedup",
+            "speed_passed",
+        }:
+            raise CacheProfileError("profile qualification decision fields are invalid")
+        measured = float(decision["measured_speedup"])
+        minimum: float | None = float(decision["minimum_speedup"])
+        selected_budget: int | None = None
+        if (
+            decision["quality_passed"] is not True
+            or decision["speed_passed"] is not True
+            or decision["failure_count"] != 0
+            or not math.isfinite(measured)
+            or not math.isfinite(minimum)
+            or measured < minimum
+        ):
+            raise CacheProfileError("profile qualification decision did not pass")
+    elif revision == 2:
+        if set(decision) != {
+            "quality_passed",
+            "failure_count",
+            "selected_anchor_budget",
+            "measured_speedup",
+            "selection_rule",
+            "speed_is_selection_input",
+            "frontier",
+        }:
+            raise CacheProfileError("profile qualification decision fields are invalid")
+        measured = float(decision["measured_speedup"])
+        minimum = None
+        selected_budget = decision["selected_anchor_budget"]
+        frontier = decision["frontier"]
+        if (
+            decision["quality_passed"] is not True
+            or decision["failure_count"] != 0
+            or decision["selection_rule"]
+            != "minimum_anchor_budget_among_quality_passed_candidates"
+            or decision["speed_is_selection_input"] is not False
+            or isinstance(selected_budget, bool)
+            or not isinstance(selected_budget, int)
+            or selected_budget <= 0
+            or not math.isfinite(measured)
+            or measured <= 0.0
+            or not isinstance(frontier, list)
+            or not frontier
+        ):
+            raise CacheProfileError("profile qualification decision did not pass")
+        passed_budgets: list[int] = []
+        seen_budgets: list[int] = []
+        seen_candidate_ids: list[str] = []
+        selected_row = None
+        for row in frontier:
+            if not isinstance(row, Mapping) or set(row) != {
+                "candidate_id",
+                "anchor_budget",
+                "quality_passed",
+                "failure_count",
+                "measured_speedup",
+            }:
+                raise CacheProfileError("profile qualification frontier is invalid")
+            budget = row["anchor_budget"]
+            candidate_id = row["candidate_id"]
+            row_speed = float(row["measured_speedup"])
+            if (
+                isinstance(budget, bool)
+                or not isinstance(budget, int)
+                or budget <= 0
+                or not isinstance(candidate_id, str)
+                or not candidate_id
+                or not math.isfinite(row_speed)
+                or row_speed <= 0.0
+                or type(row["quality_passed"]) is not bool
+                or isinstance(row["failure_count"], bool)
+                or not isinstance(row["failure_count"], int)
+                or row["failure_count"] < 0
+                or row["quality_passed"] != (row["failure_count"] == 0)
+            ):
+                raise CacheProfileError("profile qualification frontier is invalid")
+            seen_budgets.append(budget)
+            seen_candidate_ids.append(candidate_id)
+            if row["quality_passed"]:
+                passed_budgets.append(budget)
+            if candidate_id == candidate.candidate_id:
+                selected_row = row
+        if (
+            seen_budgets != sorted(set(seen_budgets))
+            or len(seen_candidate_ids) != len(set(seen_candidate_ids))
+            or not passed_budgets
+        ):
+            raise CacheProfileError("profile qualification frontier is invalid")
+        if (
+            selected_budget != min(passed_budgets)
+            or selected_budget != len(candidate.policy["static_anchor_steps"])
+            or selected_row is None
+            or selected_row["anchor_budget"] != selected_budget
+            or selected_row["quality_passed"] is not True
+            or selected_row["failure_count"] != 0
+            or float(selected_row["measured_speedup"]) != measured
+        ):
+            raise CacheProfileError("profile qualification did not select the static floor")
+    else:
+        expected_decision_fields = {
+            "quality_passed",
+            "failure_count",
+            "selected_anchor_budget",
+            "measured_speedup",
+            "selection_rule",
+            "qualification_order",
+            "candidate_domain",
+            "tested_anchor_budgets",
+            "stop_reason",
+            "speed_is_selection_input",
+            "tested_frontier",
+        }
+        if revision >= 4:
+            expected_decision_fields.add("max_allowed_failures")
+        if set(decision) != expected_decision_fields:
+            raise CacheProfileError("profile qualification decision fields are invalid")
+        allowed_failures = decision["max_allowed_failures"] if revision >= 4 else 0
+        if (
+            isinstance(allowed_failures, bool)
+            or not isinstance(allowed_failures, int)
+            or allowed_failures < 0
+        ):
+            raise CacheProfileError("profile qualification failure budget is invalid")
+        measured = float(decision["measured_speedup"])
+        minimum = None
+        selected_budget = decision["selected_anchor_budget"]
+        candidate_domain = decision["candidate_domain"]
+        tested_budgets = decision["tested_anchor_budgets"]
+        frontier = decision["tested_frontier"]
+        if (
+            decision["quality_passed"] is not True
+            or isinstance(decision["failure_count"], bool)
+            or not isinstance(decision["failure_count"], int)
+            or decision["failure_count"] < 0
+            or decision["failure_count"] > allowed_failures
+            or decision["selection_rule"] != "ascending_first_quality_pass"
+            or decision["qualification_order"] != "ascending_anchor_budget"
+            or decision["stop_reason"] != "first_quality_pass"
+            or decision["speed_is_selection_input"] is not False
+            or isinstance(selected_budget, bool)
+            or not isinstance(selected_budget, int)
+            or selected_budget <= 0
+            or not math.isfinite(measured)
+            or measured <= 0.0
+            or not isinstance(candidate_domain, list)
+            or not candidate_domain
+            or any(
+                isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0
+                for budget in candidate_domain
+            )
+            or candidate_domain != sorted(set(candidate_domain))
+            or not isinstance(tested_budgets, list)
+            or not tested_budgets
+            or tested_budgets != candidate_domain[: len(tested_budgets)]
+            or not isinstance(frontier, list)
+            or len(frontier) != len(tested_budgets)
+        ):
+            raise CacheProfileError("profile qualification ladder is invalid")
+
+        seen_candidate_ids: list[str] = []
+        selected_row = None
+        for expected_budget, row in zip(tested_budgets, frontier, strict=True):
+            if not isinstance(row, Mapping) or set(row) != {
+                "candidate_id",
+                "anchor_budget",
+                "quality_passed",
+                "failure_count",
+                "measured_speedup",
+            }:
+                raise CacheProfileError("profile qualification ladder is invalid")
+            candidate_id = row["candidate_id"]
+            row_speed = float(row["measured_speedup"])
+            if (
+                row["anchor_budget"] != expected_budget
+                or not isinstance(candidate_id, str)
+                or not candidate_id
+                or not math.isfinite(row_speed)
+                or row_speed <= 0.0
+                or type(row["quality_passed"]) is not bool
+                or isinstance(row["failure_count"], bool)
+                or not isinstance(row["failure_count"], int)
+                or row["failure_count"] < 0
+                or row["quality_passed"] != (row["failure_count"] <= allowed_failures)
+            ):
+                raise CacheProfileError("profile qualification ladder is invalid")
+            seen_candidate_ids.append(candidate_id)
+            if candidate_id == candidate.candidate_id:
+                selected_row = row
+        if (
+            len(seen_candidate_ids) != len(set(seen_candidate_ids))
+            or any(row["quality_passed"] for row in frontier[:-1])
+            or frontier[-1]["quality_passed"] is not True
+            or selected_budget != tested_budgets[-1]
+            or selected_budget != len(candidate.policy["static_anchor_steps"])
+            or selected_row is not frontier[-1]
+            or float(frontier[-1]["measured_speedup"]) != measured
+        ):
+            raise CacheProfileError(
+                "profile qualification did not stop at the first quality pass"
+            )
     _, build_spec = _validate_file_binding(qualification["build_spec"], "build spec")
     quality_contract = build_spec.get("quality_contract")
     if not isinstance(quality_contract, Mapping) or set(quality_contract) != {
@@ -642,6 +833,7 @@ def load_qualified_cache_profile(
         build_id=_strict_string(qualification["build_id"], "qualification.build_id"),
         measured_speedup=measured,
         minimum_speedup=minimum,
+        selected_anchor_budget=selected_budget,
         generation=controlled,
         resolution=matches[0],
     )

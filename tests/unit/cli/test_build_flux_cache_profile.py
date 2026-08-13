@@ -28,28 +28,23 @@ def _registration() -> dict:
             "guidance_scale": 3.5,
             "dtype": "bfloat16",
         },
-        "hardware_budget": {"target_speedup": 3.2},
         "optimizer": {
             "warmup_steps": 6,
             "cooldown_steps": 1,
             "require_final_anchor": True,
         },
-        "bounded_brake": {
-            "dynamic_budget": 2,
-            "plastic_window": [6, 29],
-            "recovery_steps": 2,
-            "disable_after_recoveries": 2,
-            "tighten_rule": "bisect_next_static_gap",
-        },
     }
 
 
-def _candidate(candidate_id: str = "target-static-brake-s3p2-a13-b2-o1-index") -> dict:
+def _candidate(candidate_id: str = "quality-static-a13-o1-index", budget: int = 13) -> dict:
     payload = {
         "schema": profile_builder.PHASED_CANDIDATE_SCHEMA,
         "schema_revision": profile_builder.PHASED_CANDIDATE_SCHEMA_REVISION,
         "candidate_id": candidate_id,
-        "policy": {"type": "phased_static_plus_brake"},
+        "policy": {
+            "type": "phased_static",
+            "static_anchor_steps": list(range(budget)),
+        },
         "predictor": {"type": "taylorseer", "order": 1, "coord": "index"},
         "horizon_ref": {"path": "/tmp/horizon", "sha256": "a" * 64},
         "quality_contract_ref": {"path": "/tmp/contract", "sha256": "b" * 64},
@@ -57,7 +52,7 @@ def _candidate(candidate_id: str = "target-static-brake-s3p2-a13-b2-o1-index") -
     return _hashed(payload)
 
 
-def test_materialize_combined_candidate_writes_one_runtime_loadable_profile(tmp_path):
+def test_materialize_static_frontier_writes_runtime_loadable_profiles(tmp_path):
     derivation_path = tmp_path / "derivation.json"
     contract_path = tmp_path / "contract.json"
     candidate_path = tmp_path / "candidate.json"
@@ -65,28 +60,33 @@ def test_materialize_combined_candidate_writes_one_runtime_loadable_profile(tmp_
         "schedules": [
             {
                 "anchor_budget": 13,
-                "target_speedup": 3.2,
                 "static_anchor_steps": [0, 1, 2, 3, 4, 5, 9, 15, 21, 29, 38, 45, 49],
-                "brake_thresholds": {
-                    "tighten_error": 1.18,
-                    "recovery_error": 1.45,
-                },
-            }
+            },
+            {
+                "anchor_budget": 14,
+                "static_anchor_steps": [
+                    0, 1, 2, 3, 4, 5, 9, 15, 21, 29, 35, 40, 45, 49
+                ],
+            },
         ]
     }
     _write_json(derivation_path, _hashed(derivation_payload))
     _write_json(contract_path, {})
 
-    document = profile_builder._materialize_combined_candidate(
+    frontier = profile_builder._materialize_static_frontier(
         _registration(),
         derivation_path,
         contract_path,
-        candidate_path,
+        tmp_path,
         reference_root=tmp_path,
     )
 
+    candidate_path, document = frontier[0]
     loaded = profile_builder.load_phased_candidate(candidate_path)
-    assert loaded.candidate_id == "target-static-brake-s3p2-a13-b2-o1-index"
+    assert [item[1]["candidate_id"] for item in frontier] == [
+        "quality-static-a13-o1-index",
+        "quality-static-a14-o1-index",
+    ]
     assert document["policy"]["static_anchor_steps"] == [
         0,
         1,
@@ -102,7 +102,8 @@ def test_materialize_combined_candidate_writes_one_runtime_loadable_profile(tmp_
         45,
         49,
     ]
-    assert document["policy"]["allow_acceleration"] is False
+    assert document["policy"]["type"] == "phased_static"
+    assert document["policy"]["dynamic_budget"] == 0
     assert document["horizon_ref"]["path"] == "derivation.json"
     assert document["quality_contract_ref"]["path"] == "contract.json"
 
@@ -144,6 +145,72 @@ def test_confirmation_manifest_validation_requires_exact_candidate(tmp_path):
         )
 
 
+def test_quality_ladder_prefix_appends_and_rebases_prior_evidence(tmp_path):
+    protocol = {"sha256": "a" * 64}
+    candidates = (
+        _candidate("quality-static-a11-o1-index", 11),
+        _candidate("quality-static-a12-o1-index", 12),
+    )
+    previous_prefix = None
+    for index, candidate in enumerate(candidates):
+        rung = tmp_path / f"rung-{index}"
+        baseline = tmp_path / "rung-0" / "artifacts" / "baseline.png"
+        image = rung / "artifacts" / "candidate.png"
+        baseline.parent.mkdir(parents=True, exist_ok=True)
+        image.parent.mkdir(parents=True, exist_ok=True)
+        baseline.write_bytes(b"baseline")
+        image.write_bytes(candidate["candidate_id"].encode())
+        quality_path = rung / "quality-input-v2.json"
+        definition = {
+            "candidate_id": candidate["candidate_id"],
+            "policy": candidate["policy"],
+            "predictor": candidate["predictor"],
+        }
+        _write_json(
+            quality_path,
+            {
+                "schema": "quality-input-v2",
+                "protocol": protocol,
+                "hardware_measured": True,
+                "started_at": "start",
+                "completed_at": f"end-{index}",
+                "candidates": [definition],
+                "comparisons": [
+                    {
+                        "sample_id": "p000-s0",
+                        "candidate_id": candidate["candidate_id"],
+                        "baseline": {
+                            "image": Path(
+                                profile_builder.os.path.relpath(baseline, rung)
+                            ).as_posix(),
+                            "image_sha256": profile_builder.sha256_file(baseline),
+                        },
+                        "candidate": {
+                            "image": "artifacts/candidate.png",
+                            "image_sha256": profile_builder.sha256_file(image),
+                        },
+                    }
+                ],
+            },
+        )
+        prefix_path = rung / "quality-ladder-prefix-v2.json"
+        prefix = profile_builder._write_ladder_quality_prefix(
+            previous_prefix,
+            quality_path,
+            prefix_path,
+            candidate,
+        )
+        previous_prefix = prefix_path
+
+    assert [row["candidate_id"] for row in prefix["candidates"]] == [
+        candidate["candidate_id"] for candidate in candidates
+    ]
+    assert prefix["completed_at"] == "end-1"
+    for comparison in prefix["comparisons"]:
+        for role in ("baseline", "candidate"):
+            assert (previous_prefix.parent / comparison[role]["image"]).resolve().is_file()
+
+
 def _prompt_suite(path: Path) -> None:
     _write_json(
         path,
@@ -164,7 +231,15 @@ def _prompt_suite(path: Path) -> None:
     )
 
 
-def _orchestration_fixture(tmp_path, monkeypatch, *, quality_passed, measured_speedup):
+def _orchestration_fixture(
+    tmp_path,
+    monkeypatch,
+    *,
+    quality_passed,
+    measured_speedup,
+    max_allowed_failures=0,
+    failure_counts=None,
+):
     output_root = tmp_path / "output"
     registration_path = tmp_path / "registration.json"
     contract_path = tmp_path / "contract.json"
@@ -196,7 +271,9 @@ def _orchestration_fixture(tmp_path, monkeypatch, *, quality_passed, measured_sp
             "prompt_suite": {"path": str(prompt_path)},
             "prompt_split": "confirmation",
             "seeds": [0],
-            "minimum_speedup": 3.2,
+            "max_allowed_failures": max_allowed_failures,
+            "selection_rule": "ascending_first_quality_pass",
+            "speed_is_selection_input": False,
         },
         "execution_policy": {"path": str(policy_path)},
         "runtimes": {
@@ -213,7 +290,11 @@ def _orchestration_fixture(tmp_path, monkeypatch, *, quality_passed, measured_sp
         "sha256": "f" * 64,
     }
     registration = _registration()
-    candidate = _candidate()
+    candidates = (
+        _candidate("quality-static-a11-o1-index", 11),
+        _candidate("quality-static-a12-o1-index", 12),
+        _candidate("quality-static-a13-o1-index", 13),
+    )
     monkeypatch.setattr(profile_builder, "load_build_spec", lambda _path: spec)
     monkeypatch.setattr(
         profile_builder,
@@ -227,62 +308,128 @@ def _orchestration_fixture(tmp_path, monkeypatch, *, quality_passed, measured_sp
     )
 
     def fake_derive(args):
-        _write_json(Path(args.out), _hashed({"schedules": [{}]}))
+        _write_json(Path(args.out), _hashed({"schedules": [{}, {}]}))
 
     def fake_materialize(
         _registration,
         _derivation,
         _contract,
-        candidate_path,
+        output_directory,
         **_kwargs,
     ):
-        _write_json(candidate_path, candidate)
-        return candidate
+        frontier = []
+        for candidate in candidates:
+            candidate_path = output_directory / f".{candidate['candidate_id']}.json"
+            _write_json(candidate_path, candidate)
+            frontier.append((candidate_path, candidate))
+        return tuple(frontier)
+
+    hardware_commands = []
 
     def fake_command(command):
         if any(value.endswith("collect_flux_cache_authorized.py") for value in command):
-            confirmation = output_root / "confirmation"
-            _write_json(confirmation / "quality-input-v2.json", {})
-            _write_json(confirmation / "speedup-candidates-v1.json", {})
+            hardware_commands.append(command)
+            confirmation = Path(command[command.index("--out-dir") + 1])
+            candidate_path = Path(command[command.index("--phased-candidate") + 1])
+            candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+            definition = {
+                "candidate_id": candidate["candidate_id"],
+                "policy": candidate["policy"],
+                "predictor": candidate["predictor"],
+            }
+            _write_json(
+                confirmation / "quality-input-v2.json",
+                {"candidates": [definition]},
+            )
+            index = [row["candidate_id"] for row in candidates].index(
+                candidate["candidate_id"]
+            )
+            _write_json(
+                confirmation / "speedup-candidates-v1.json",
+                {
+                    "hardware_measured": True,
+                    "candidates": [
+                        {
+                            **definition,
+                            "measured_speedup": measured_speedup - index * 0.1,
+                        }
+                    ],
+                },
+            )
         elif any(value.endswith("evaluate_flux_cache_semantics.py") for value in command):
             semantic_path = Path(command[command.index("--out") + 1])
             _write_json(semantic_path, {})
         else:
             raise AssertionError(command)
 
-    gate_payload = {
-        "candidate_summaries": [
+    quality_results = (
+        (quality_passed,) * len(candidates)
+        if isinstance(quality_passed, bool)
+        else tuple(quality_passed)
+    )
+    assert len(quality_results) == len(candidates)
+    if failure_counts is None:
+        failure_counts = tuple(
+            0 if passing else max_allowed_failures + 1 for passing in quality_results
+        )
+    assert len(failure_counts) == len(candidates)
+    assert all(
+        (count <= max_allowed_failures) == passing
+        for count, passing in zip(failure_counts, quality_results)
+    )
+
+    def fake_prefix(previous_path, _rung_path, output_path, candidate):
+        definitions = []
+        if previous_path is not None:
+            definitions.extend(
+                json.loads(previous_path.read_text(encoding="utf-8"))["candidates"]
+            )
+        definitions.append(
             {
                 "candidate_id": candidate["candidate_id"],
-                "failure_count": 0 if quality_passed else 1,
-                "passes_zero_failure_gate": quality_passed,
+                "policy": candidate["policy"],
+                "predictor": candidate["predictor"],
             }
-        ]
-    }
-    gate = _hashed(gate_payload)
+        )
+        document = {"candidates": definitions}
+        _write_json(output_path, document)
+        return document
+
+    def fake_gate(_contract, semantic_path, **kwargs):
+        rung_index = int(semantic_path.parent.name.split("-", 1)[0])
+        allowed = kwargs.get("max_allowed_failures", 0)
+        payload = {
+            "max_allowed_failures": allowed,
+            "candidate_summaries": [
+                {
+                    "candidate_id": candidate["candidate_id"],
+                    "failure_count": failure_counts[index],
+                    "passes_failure_budget_gate": failure_counts[index] <= allowed,
+                }
+                for index, candidate in enumerate(candidates[: rung_index + 1])
+            ],
+        }
+        return _hashed(payload)
+
     monkeypatch.setattr(profile_builder.schedule_derivation, "derive", fake_derive)
-    monkeypatch.setattr(profile_builder, "_materialize_combined_candidate", fake_materialize)
+    monkeypatch.setattr(profile_builder, "_materialize_static_frontier", fake_materialize)
+    monkeypatch.setattr(profile_builder, "_write_ladder_quality_prefix", fake_prefix)
     monkeypatch.setattr(profile_builder, "_run_command", fake_command)
-    monkeypatch.setattr(profile_builder, "evaluate_natural_range", lambda *args, **kwargs: gate)
-    monkeypatch.setattr(
-        profile_builder,
-        "_validate_confirmation_manifests",
-        lambda *args: measured_speedup,
-    )
+    monkeypatch.setattr(profile_builder, "evaluate_natural_range", fake_gate)
     monkeypatch.setattr(
         profile_builder,
         "load_phased_candidate",
         lambda path: SimpleNamespace(
-            candidate_id=candidate["candidate_id"],
+            candidate_id=json.loads(path.read_text(encoding="utf-8"))["candidate_id"],
             file_sha256=profile_builder.sha256_file(path),
-            content_sha256=candidate["sha256"],
+            content_sha256=json.loads(path.read_text(encoding="utf-8"))["sha256"],
         ),
     )
-    return spec_path, output_root
+    return spec_path, output_root, hardware_commands
 
 
-def test_one_command_exports_profile_only_after_quality_and_speed_pass(tmp_path, monkeypatch):
-    spec_path, output_root = _orchestration_fixture(
+def test_one_command_exports_minimum_quality_passed_budget(tmp_path, monkeypatch):
+    spec_path, output_root, hardware_commands = _orchestration_fixture(
         tmp_path,
         monkeypatch,
         quality_passed=True,
@@ -298,25 +445,74 @@ def test_one_command_exports_profile_only_after_quality_and_speed_pass(tmp_path,
     )
     assert qualification["status"] == "qualified"
     assert qualification["decision"]["quality_passed"] is True
-    assert qualification["decision"]["speed_passed"] is True
+    assert qualification["decision"]["max_allowed_failures"] == 0
+    assert qualification["decision"]["selected_anchor_budget"] == 11
+    assert qualification["decision"]["candidate_domain"] == [11, 12, 13]
+    assert qualification["decision"]["tested_anchor_budgets"] == [11]
+    assert qualification["decision"]["stop_reason"] == "first_quality_pass"
+    assert qualification["decision"]["speed_is_selection_input"] is False
+    assert qualification["decision"]["measured_speedup"] == 3.25
+    assert len(hardware_commands) == 1
     assert not (output_root / "rejection-report.json").exists()
 
 
-@pytest.mark.parametrize(
-    ("quality_passed", "measured_speedup"),
-    [(False, 3.25), (True, 3.19)],
-)
-def test_one_command_rejects_without_exporting_profile(
-    tmp_path,
-    monkeypatch,
-    quality_passed,
-    measured_speedup,
-):
-    spec_path, output_root = _orchestration_fixture(
+def test_one_command_selects_first_passing_budget_after_a_failure(tmp_path, monkeypatch):
+    spec_path, output_root, hardware_commands = _orchestration_fixture(
         tmp_path,
         monkeypatch,
-        quality_passed=quality_passed,
-        measured_speedup=measured_speedup,
+        quality_passed=(False, True, True),
+        measured_speedup=2.5,
+    )
+
+    profile_builder.build_profile(spec_path)
+
+    qualification = json.loads(
+        (output_root / "profile-qualification.json").read_text(encoding="utf-8")
+    )
+    assert qualification["decision"]["selected_anchor_budget"] == 12
+    assert [
+        row["quality_passed"]
+        for row in qualification["decision"]["tested_frontier"]
+    ] == [False, True]
+    assert len(hardware_commands) == 2
+    assert "--baseline-quality-manifest" not in hardware_commands[0]
+    assert "--baseline-quality-manifest" in hardware_commands[1]
+    assert "--baseline-speed-manifest" in hardware_commands[1]
+
+
+def test_one_command_applies_the_registered_failure_budget(tmp_path, monkeypatch):
+    spec_path, output_root, hardware_commands = _orchestration_fixture(
+        tmp_path,
+        monkeypatch,
+        quality_passed=(False, True, True),
+        measured_speedup=2.5,
+        max_allowed_failures=2,
+        failure_counts=(3, 2, 0),
+    )
+
+    profile_builder.build_profile(spec_path)
+
+    qualification = json.loads(
+        (output_root / "profile-qualification.json").read_text(encoding="utf-8")
+    )
+    assert qualification["decision"]["selected_anchor_budget"] == 12
+    assert qualification["decision"]["max_allowed_failures"] == 2
+    assert qualification["decision"]["failure_count"] == 2
+    frontier = qualification["decision"]["tested_frontier"]
+    assert [row["quality_passed"] for row in frontier] == [False, True]
+    assert [row["failure_count"] for row in frontier] == [3, 2]
+    assert len(hardware_commands) == 2
+
+
+def test_one_command_rejects_only_when_no_budget_passes_quality(
+    tmp_path,
+    monkeypatch,
+):
+    spec_path, output_root, hardware_commands = _orchestration_fixture(
+        tmp_path,
+        monkeypatch,
+        quality_passed=False,
+        measured_speedup=3.25,
     )
 
     with pytest.raises(profile_builder.ProfileRejected):
@@ -326,6 +522,26 @@ def test_one_command_rejects_without_exporting_profile(
     rejection = json.loads((output_root / "rejection-report.json").read_text(encoding="utf-8"))
     assert rejection["status"] == "rejected"
     assert rejection["deployable_profile_written"] is False
+    assert rejection["decision"]["stop_reason"] == "candidate_domain_exhausted"
+    assert len(hardware_commands) == 3
+
+
+def test_measured_speed_below_historical_target_does_not_reject(tmp_path, monkeypatch):
+    spec_path, output_root, _hardware_commands = _orchestration_fixture(
+        tmp_path,
+        monkeypatch,
+        quality_passed=True,
+        measured_speedup=1.01,
+    )
+
+    profile_builder.build_profile(spec_path)
+
+    qualification = json.loads(
+        (output_root / "profile-qualification.json").read_text(encoding="utf-8")
+    )
+    assert qualification["status"] == "qualified"
+    assert qualification["decision"]["measured_speedup"] == 1.01
+    assert qualification["decision"]["speed_is_selection_input"] is False
 
 
 def test_cli_uses_distinct_exit_code_for_a_quality_rejection(monkeypatch):

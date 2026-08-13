@@ -26,13 +26,15 @@ from difflet.offline.cache_profile.quality import (  # noqa: E402
 )
 from scripts.flux_cache_protocol import canonical_sha256  # noqa: E402
 from scripts.multires_quality_contract import (  # noqa: E402
+    AUTOMATIC_DAMAGE_RULE,
+    CALIBRATION_METHOD,
     CONTRACT_SCHEMA,
     SCHEMA_REVISION,
 )
 
 
 EVALUATION_SCHEMA = "difflet-flux-cache-natural-range-evaluation"
-EVALUATION_SCHEMA_REVISION = 1
+EVALUATION_SCHEMA_REVISION = 2
 AUTOMATIC_REVIEW_POLICY = {
     "within_natural_range_action": "automatic_pass",
     "outside_natural_range_action": "automatic_reject",
@@ -78,6 +80,18 @@ def load_natural_range_contract(path: Path) -> dict[str, Any]:
     ):
         raise ValueError("multires quality contract schema is unsupported")
     _validate_digest(document, "multires quality contract")
+    calibration = document.get("observed_seed_variation_calibration")
+    if calibration != {
+        "method": CALIBRATION_METHOD,
+        "decision_statistic": "maximum_observed",
+        "candidate_images_excluded_from_margin_estimation": True,
+        "pooling_across_resolutions_forbidden": True,
+    }:
+        raise ValueError(
+            "multires quality contract does not use the observed-maximum calibration rule"
+        )
+    if document.get("automatic_damage_rule") != AUTOMATIC_DAMAGE_RULE:
+        raise ValueError("multires quality contract damage rule is unsupported")
     if set(document.get("metric_identity", {}).get("config", {})) != set(METRICS):
         raise ValueError("multires quality contract metric identity is incomplete")
     buckets = document.get("resolution_contracts")
@@ -91,15 +105,29 @@ def load_natural_range_contract(path: Path) -> dict[str, Any]:
         if not isinstance(bucket_id, str) or not bucket_id or bucket_id in seen:
             raise ValueError("multires quality contract bucket id is invalid")
         seen.add(bucket_id)
-        summary = bucket.get("calibration_summary")
-        if not isinstance(summary, dict) or set(summary) != set(METRICS):
-            raise ValueError("multires quality contract natural ranges are incomplete")
+        envelope = bucket.get("observed_seed_variation_envelope")
+        diagnostics = bucket.get("calibration_diagnostics")
+        if (
+            not isinstance(envelope, dict)
+            or set(envelope) != set(METRICS)
+            or not isinstance(diagnostics, dict)
+            or set(diagnostics) != set(METRICS)
+        ):
+            raise ValueError("multires quality contract seed-variation envelope is incomplete")
         for metric in METRICS:
-            maximum = summary[metric].get("maximum")
-            if isinstance(maximum, bool) or not math.isfinite(float(maximum)):
-                raise ValueError("multires quality contract natural-range maximum is invalid")
-            if float(maximum) < 0.0:
-                raise ValueError("multires quality contract natural-range maximum is negative")
+            limit = envelope[metric]
+            diagnostic = diagnostics[metric]
+            if isinstance(limit, bool) or not math.isfinite(float(limit)):
+                raise ValueError("multires quality contract observed maximum is invalid")
+            if float(limit) < 0.0:
+                raise ValueError("multires quality contract observed maximum is negative")
+            if (
+                not isinstance(diagnostic, dict)
+                or diagnostic.get("maximum_observed") != limit
+            ):
+                raise ValueError(
+                    "multires quality contract envelope differs from its diagnostics"
+                )
     return document
 
 
@@ -208,7 +236,14 @@ def evaluate_natural_range(
     semantic_report_path: Path,
     *,
     bucket_id: str,
+    max_allowed_failures: int = 0,
 ) -> dict[str, Any]:
+    if (
+        isinstance(max_allowed_failures, bool)
+        or not isinstance(max_allowed_failures, int)
+        or max_allowed_failures < 0
+    ):
+        raise ValueError("max_allowed_failures must be a nonnegative integer")
     contract_path = Path(contract_path).expanduser().resolve()
     semantic_report_path = Path(semantic_report_path).expanduser().resolve()
     contract = load_natural_range_contract(contract_path)
@@ -227,7 +262,10 @@ def evaluate_natural_range(
         raise ValueError("semantic report contains no cache comparisons")
     _validate_comparison_coverage(manifest, comparisons)
 
-    limits = {metric: float(bucket["calibration_summary"][metric]["maximum"]) for metric in METRICS}
+    limits = {
+        metric: float(bucket["observed_seed_variation_envelope"][metric])
+        for metric in METRICS
+    }
     rows: list[dict[str, Any]] = []
     for comparison in comparisons:
         deltas = comparison.get("candidate_minus_baseline")
@@ -256,13 +294,15 @@ def evaluate_natural_range(
     for candidate_id in sorted(grouped):
         candidate_rows = grouped[candidate_id]
         failures = [row for row in candidate_rows if not row["passes"]]
+        within_budget = len(failures) <= max_allowed_failures
         summaries.append(
             {
                 "candidate_id": candidate_id,
                 "sample_count": len(candidate_rows),
                 "failure_count": len(failures),
-                "decision": "automatic_reject" if failures else "automatic_pass",
-                "passes_zero_failure_gate": not failures,
+                "max_allowed_failures": max_allowed_failures,
+                "decision": "automatic_pass" if within_budget else "automatic_reject",
+                "passes_failure_budget_gate": within_budget,
             }
         )
 
@@ -288,6 +328,8 @@ def evaluate_natural_range(
         "split": selection["split"],
         "split_sha256": selection["sha256"],
         "natural_range_limits": limits,
+        "limit_semantics": "maximum_observed_baseline_seed_pair_variation",
+        "max_allowed_failures": max_allowed_failures,
         "review_policy": AUTOMATIC_REVIEW_POLICY,
         "candidate_summaries": summaries,
         "rows": rows,
@@ -300,6 +342,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--contract", required=True)
     parser.add_argument("--semantic-report", required=True)
     parser.add_argument("--bucket-id", required=True)
+    parser.add_argument("--max-allowed-failures", type=int, default=0)
     parser.add_argument("--out", required=True)
     return parser
 
@@ -311,10 +354,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             Path(args.contract),
             Path(args.semantic_report),
             bucket_id=args.bucket_id,
+            max_allowed_failures=args.max_allowed_failures,
         )
         output = Path(args.out).expanduser().resolve()
         _write_json(output, result)
-        passed = sum(row["passes_zero_failure_gate"] for row in result["candidate_summaries"])
+        passed = sum(row["passes_failure_budget_gate"] for row in result["candidate_summaries"])
         rejected = len(result["candidate_summaries"]) - passed
         print(
             f"[natural-range] evaluated={len(result['candidate_summaries'])} "

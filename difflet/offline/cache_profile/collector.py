@@ -1,16 +1,17 @@
 """Collect frozen FLUX cache evidence against a full-compute baseline.
 
 This module is intentionally narrower than the historical experiment collector:
-it accepts exactly one already-frozen profile, records only the decoded images
-needed by the semantic gate, and emits the two manifests consumed by profile
-qualification. Candidate sweeps, trajectory dumps, spatial probes, and learned
-online-signal collection belong to archived research code.
+each confirmation call accepts one frozen rung of an ascending static-budget
+ladder, records only the decoded images needed by the semantic gate, and emits
+the two manifests consumed by profile qualification. Arbitrary candidate
+sweeps, spatial probes, and learned online-signal collection belong to archived
+research code.
 
 The calibration entry point is deliberately separate from confirmation. It
-accepts exactly two already-frozen phased-static profiles, records the shared
-full-compute trajectories needed by deterministic schedule derivation, and
-uses those two profiles only to fit the Trainium real-step cost model. It does
-not search, rank, or semantically score candidates.
+accepts no cache candidate and records only the full-compute trajectories
+needed by deterministic schedule derivation. Candidate budgets are enumerated
+later from structural feasibility; calibration neither derives a budget from
+speed nor semantically scores candidates.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from scripts.flux_cache_protocol import (
 
 QUALITY_INPUT_SCHEMA = "quality-input-v2"
 SPEEDUP_CANDIDATES_SCHEMA = "speedup-candidates-v1"
+TRAJECTORY_INPUT_SCHEMA = "difflet-flux-cache-trajectory-input-v1"
 MODEL_ID = "black-forest-labs/FLUX.1-dev"
 MODEL_LABEL = "flux"
 DEFAULT_SEEDS = (0, 1)
@@ -344,6 +346,113 @@ def build_manifests(
     return quality, speed
 
 
+def load_reusable_baseline(
+    quality_path: Path,
+    speed_path: Path,
+    *,
+    protocol: Mapping[str, Any],
+    samples: Sequence[Mapping[str, Any]],
+    output_root: Path,
+) -> list[dict[str, Any]]:
+    """Load one hash-bound baseline without repeating full-compute generation."""
+
+    quality_path = Path(quality_path).expanduser().resolve()
+    speed_path = Path(speed_path).expanduser().resolve()
+    quality = json.loads(quality_path.read_text(encoding="utf-8"))
+    speed = json.loads(speed_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(quality, dict)
+        or quality.get("schema") != QUALITY_INPUT_SCHEMA
+        or quality.get("hardware_measured") is not True
+        or quality.get("protocol") != protocol
+    ):
+        raise ValueError("reusable baseline quality manifest is incompatible")
+    if (
+        not isinstance(speed, dict)
+        or speed.get("schema") != SPEEDUP_CANDIDATES_SCHEMA
+        or speed.get("hardware_measured") is not True
+        or speed.get("protocol") != protocol
+    ):
+        raise ValueError("reusable baseline speed manifest is incompatible")
+
+    expected = {str(row["sample_id"]): dict(row) for row in samples}
+    if len(expected) != len(samples):
+        raise ValueError("reusable baseline sample matrix contains duplicates")
+    artifacts_by_id: dict[str, dict[str, Any]] = {}
+    comparisons = quality.get("comparisons")
+    if not isinstance(comparisons, list) or not comparisons:
+        raise ValueError("reusable baseline quality manifest has no comparisons")
+    for comparison in comparisons:
+        if not isinstance(comparison, dict):
+            raise ValueError("reusable baseline comparison is malformed")
+        sample_id = comparison.get("sample_id")
+        sample = expected.get(str(sample_id))
+        if sample is None or any(
+            comparison.get(key) != sample[key]
+            for key in ("prompt_index", "prompt", "seed")
+        ):
+            raise ValueError("reusable baseline sample identity differs")
+        artifacts = comparison.get("baseline")
+        if not isinstance(artifacts, dict):
+            raise ValueError("reusable baseline artifacts are malformed")
+        previous = artifacts_by_id.setdefault(str(sample_id), dict(artifacts))
+        if previous != artifacts:
+            raise ValueError("reusable baseline artifacts disagree across candidates")
+    if set(artifacts_by_id) != set(expected):
+        raise ValueError("reusable baseline artifacts do not cover the sample matrix")
+
+    baseline = speed.get("baseline")
+    timing_rows = baseline.get("samples") if isinstance(baseline, dict) else None
+    if not isinstance(timing_rows, list):
+        raise ValueError("reusable baseline timing manifest is malformed")
+    elapsed_by_id: dict[str, float] = {}
+    for row in timing_rows:
+        if not isinstance(row, dict) or str(row.get("sample_id")) not in expected:
+            raise ValueError("reusable baseline timing row is malformed")
+        sample_id = str(row["sample_id"])
+        elapsed = float(row.get("elapsed_s"))
+        if sample_id in elapsed_by_id or not math.isfinite(elapsed) or elapsed <= 0.0:
+            raise ValueError("reusable baseline timing row is invalid")
+        elapsed_by_id[sample_id] = elapsed
+    if set(elapsed_by_id) != set(expected):
+        raise ValueError("reusable baseline timings do not cover the sample matrix")
+    baseline_total = float(baseline.get("total_s"))
+    if not math.isfinite(baseline_total) or not math.isclose(
+        baseline_total,
+        sum(elapsed_by_id.values()),
+        rel_tol=1e-12,
+        abs_tol=1e-12,
+    ):
+        raise ValueError("reusable baseline total duration is invalid")
+
+    runs = []
+    for sample in samples:
+        sample_id = str(sample["sample_id"])
+        artifacts = artifacts_by_id[sample_id]
+        relative = artifacts.get("image")
+        digest = artifacts.get("image_sha256")
+        if not isinstance(relative, str) or Path(relative).is_absolute():
+            raise ValueError("reusable baseline image path is invalid")
+        image_path = (quality_path.parent / relative).resolve()
+        if (
+            not image_path.is_file()
+            or not isinstance(digest, str)
+            or sha256_file(image_path) != digest
+        ):
+            raise ValueError("reusable baseline image binding is invalid")
+        runs.append(
+            {
+                "sample_id": sample_id,
+                "elapsed_s": elapsed_by_id[sample_id],
+                "artifacts": {
+                    "image": Path(os.path.relpath(image_path, output_root)).as_posix(),
+                    "image_sha256": digest,
+                },
+            }
+        )
+    return runs
+
+
 def load_pipeline(args: argparse.Namespace):
     import torch
 
@@ -396,7 +505,7 @@ def _collect_profiles(
     *,
     label: str,
     save_baseline_trajectories: bool,
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path] | Path:
     if args.model_id != MODEL_ID:
         raise ValueError(f"this collector is FLUX-only; expected --model-id {MODEL_ID!r}")
     if not args.model_revision:
@@ -433,39 +542,88 @@ def _collect_profiles(
         dtype=args.dtype,
         tp_degree=args.tp_degree,
         requested_model_revision=args.model_revision,
-        cache_coordinate=arms[0].coord,
+        cache_coordinate=arms[0].coord if arms else "index",
         pipeline_warmup_enabled=not bool(args.skip_warmup),
     )
     print(
         f"[flux-cache-{label}] protocol={protocol['sha256']} "
-        f"profiles={','.join(arm.candidate_id for arm in arms)} "
+        f"profiles={','.join(arm.candidate_id for arm in arms) if arms else 'none'} "
         f"samples={len(samples)}",
         flush=True,
     )
 
-    baseline_adapter = build_baseline_adapter(num_steps)
-    flux_pipeline.teacache_controller = baseline_adapter
-    baseline_runs = []
-    for sample in samples:
-        run = run_image_sample(
-            pipe,
-            sample=sample,
-            num_steps=num_steps,
-            height=height,
-            width=width,
-            guidance_scale=guidance_scale,
-            artifact_dir=output_root / "artifacts" / "baseline",
+    reuse_quality = getattr(args, "baseline_quality_manifest", None)
+    reuse_speed = getattr(args, "baseline_speed_manifest", None)
+    if bool(reuse_quality) != bool(reuse_speed):
+        raise ValueError("baseline reuse requires both quality and speed manifests")
+    if reuse_quality and not arms:
+        raise ValueError("baseline-only calibration cannot reuse confirmation evidence")
+    if reuse_quality:
+        baseline_runs = load_reusable_baseline(
+            Path(reuse_quality),
+            Path(reuse_speed),
+            protocol=protocol,
+            samples=samples,
             output_root=output_root,
-            save_trajectory=save_baseline_trajectories,
         )
-        stats = baseline_adapter.stats()
-        if stats["full_steps"] != num_steps or stats["skipped_steps"] != 0:
-            raise RuntimeError("baseline adapter did not execute every denoise step")
-        baseline_runs.append(run)
         print(
-            f"[flux-cache-{label}] baseline {sample['sample_id']} {run['elapsed_s']:.3f}s",
+            f"[flux-cache-{label}] reused baseline from {reuse_quality}",
             flush=True,
         )
+    else:
+        baseline_adapter = build_baseline_adapter(num_steps)
+        flux_pipeline.teacache_controller = baseline_adapter
+        baseline_runs = []
+        for sample in samples:
+            run = run_image_sample(
+                pipe,
+                sample=sample,
+                num_steps=num_steps,
+                height=height,
+                width=width,
+                guidance_scale=guidance_scale,
+                artifact_dir=output_root / "artifacts" / "baseline",
+                output_root=output_root,
+                save_trajectory=save_baseline_trajectories,
+            )
+            stats = baseline_adapter.stats()
+            if stats["full_steps"] != num_steps or stats["skipped_steps"] != 0:
+                raise RuntimeError("baseline adapter did not execute every denoise step")
+            baseline_runs.append(run)
+            print(
+                f"[flux-cache-{label}] baseline {sample['sample_id']} "
+                f"{run['elapsed_s']:.3f}s",
+                flush=True,
+            )
+
+    if not arms:
+        trajectories = []
+        by_sample = {row["sample_id"]: row for row in baseline_runs}
+        for sample in samples:
+            artifacts = by_sample[sample["sample_id"]]["artifacts"]
+            trajectories.append(
+                {
+                    **dict(sample),
+                    "path": artifacts["trajectory"],
+                    "file_sha256": artifacts["trajectory_sha256"],
+                }
+            )
+        manifest = {
+            "schema": TRAJECTORY_INPUT_SCHEMA,
+            "protocol": protocol,
+            "prompt_count": len(prompt_selection.prompts),
+            "seed_count": len(seeds),
+            "trajectory_count": len(trajectories),
+            "trajectories": trajectories,
+            "semantic_labels_collected": False,
+            "hardware_measured": True,
+            "started_at": started_at,
+            "completed_at": utc_now(),
+        }
+        path = output_root / "trajectory-input-v1.json"
+        write_json(path, manifest)
+        print(f"[flux-cache-{label}] trajectory manifest: {path}", flush=True)
+        return path
 
     candidate_runs: dict[str, list[dict[str, Any]]] = {}
     for arm in arms:
@@ -513,6 +671,19 @@ def _collect_profiles(
         started_at=started_at,
         completed_at=utc_now(),
     )
+    if reuse_quality:
+        baseline_source = {
+            "quality_manifest": {
+                "path": str(Path(reuse_quality).expanduser().resolve()),
+                "file_sha256": sha256_file(Path(reuse_quality).expanduser().resolve()),
+            },
+            "speed_manifest": {
+                "path": str(Path(reuse_speed).expanduser().resolve()),
+                "file_sha256": sha256_file(Path(reuse_speed).expanduser().resolve()),
+            },
+        }
+        quality["baseline_source"] = baseline_source
+        speed["baseline_source"] = baseline_source
     quality_path = output_root / "quality-input-v2.json"
     speed_path = output_root / "speedup-candidates-v1.json"
     write_json(quality_path, quality)
@@ -524,13 +695,14 @@ def _collect_profiles(
 
 def collect_confirmation(
     args: argparse.Namespace,
-    arm: PhasedCandidateArm,
+    arm: PhasedCandidateArm | Sequence[PhasedCandidateArm],
 ) -> tuple[Path, Path]:
-    """Run a paired baseline/candidate confirmation for exactly one profile."""
+    """Run confirmation for one or more explicitly supplied static rungs."""
 
+    arms = (arm,) if isinstance(arm, PhasedCandidateArm) else tuple(arm)
     return _collect_profiles(
         args,
-        (arm,),
+        arms,
         label="confirmation",
         save_baseline_trajectories=False,
     )
@@ -538,23 +710,12 @@ def collect_confirmation(
 
 def collect_calibration(
     args: argparse.Namespace,
-    arms: Sequence[PhasedCandidateArm],
-) -> tuple[Path, Path]:
-    """Collect label-free trajectories and a two-point Trainium cost model."""
+) -> Path:
+    """Collect only full-compute trajectories for quality-led derivation."""
 
-    if len(arms) != 2:
-        raise ValueError("calibration requires exactly two phased-static profiles")
-    policies = [arm.policy_spec() for arm in arms]
-    if any(
-        policy.get("type") != "phased_static" or policy.get("dynamic_budget") != 0
-        for policy in policies
-    ):
-        raise ValueError("cost calibration profiles must be purely phased-static")
-    if len({len(policy["static_anchor_steps"]) for policy in policies}) != 2:
-        raise ValueError("cost calibration profiles must have distinct real-step counts")
     return _collect_profiles(
         args,
-        arms,
+        (),
         label="calibration",
         save_baseline_trajectories=True,
     )
@@ -581,4 +742,6 @@ def parse_confirmation_args(argv: Sequence[str] | None = None) -> argparse.Names
     parser.add_argument("--compile-cache-dir", default=None)
     parser.add_argument("--force-compile", action="store_true")
     parser.add_argument("--skip-warmup", action="store_true")
+    parser.add_argument("--baseline-quality-manifest", default=None)
+    parser.add_argument("--baseline-speed-manifest", default=None)
     return parser.parse_args(argv)

@@ -8,6 +8,7 @@ from PIL import Image
 
 from difflet.offline.cache_profile.collector import (
     build_manifests,
+    load_reusable_baseline,
     run_image_sample,
     sample_matrix,
 )
@@ -171,7 +172,7 @@ def test_manifest_builder_emits_exactly_one_candidate(tmp_path):
     assert speed["candidates"][0]["hardware_measured"] is True
 
 
-def test_manifest_builder_supports_two_point_trajectory_calibration(tmp_path):
+def test_manifest_builder_supports_multiple_static_frontier_candidates(tmp_path):
     samples = sample_matrix(("prompt",), (0,))
     arms = (
         _arm(tmp_path, candidate_id="static-3", static=True, anchors=(0, 1, 3)),
@@ -235,3 +236,70 @@ def test_manifest_builder_supports_two_point_trajectory_calibration(tmp_path):
     assert [row["measured_speedup"] for row in speed["candidates"]] == pytest.approx(
         [2.0, 4.0 / 3.0]
     )
+
+
+def test_reusable_baseline_is_hash_bound_and_rebased(tmp_path):
+    import hashlib
+    import json
+
+    source_root = tmp_path / "first-rung"
+    image_path = source_root / "artifacts" / "baseline" / "p000-s0.png"
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(b"baseline")
+    digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
+    protocol = {"sha256": "a" * 64}
+    sample = {
+        "sample_id": "p000-s0",
+        "prompt_index": 0,
+        "prompt": "prompt",
+        "seed": 0,
+    }
+    quality_path = source_root / "quality-input-v2.json"
+    quality_path.write_text(
+        json.dumps(
+            {
+                "schema": "quality-input-v2",
+                "hardware_measured": True,
+                "protocol": protocol,
+                "comparisons": [
+                    {
+                        **sample,
+                        "candidate_id": "a10",
+                        "baseline": {
+                            "image": "artifacts/baseline/p000-s0.png",
+                            "image_sha256": digest,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    speed_path = source_root / "speedup-candidates-v1.json"
+    speed_path.write_text(
+        json.dumps(
+            {
+                "schema": "speedup-candidates-v1",
+                "hardware_measured": True,
+                "protocol": protocol,
+                "baseline": {
+                    "total_s": 4.0,
+                    "samples": [{"sample_id": "p000-s0", "elapsed_s": 4.0}],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    next_root = tmp_path / "second-rung"
+
+    runs = load_reusable_baseline(
+        quality_path,
+        speed_path,
+        protocol=protocol,
+        samples=(sample,),
+        output_root=next_root,
+    )
+
+    assert runs[0]["elapsed_s"] == 4.0
+    assert (next_root / runs[0]["artifacts"]["image"]).resolve() == image_path.resolve()
+    assert runs[0]["artifacts"]["image_sha256"] == digest

@@ -28,13 +28,10 @@ from difflet.pipeline.cache.profile import (  # noqa: E402
     PHASED_CANDIDATE_SCHEMA_REVISION,
     load_phased_candidate,
 )
-from scripts.flux_cache_execution_policy import (  # noqa: E402
-    ExecutionRequest,
-    authorize_execution,
-    load_execution_policy,
-)
+from scripts.flux_cache_execution_policy import load_execution_policy  # noqa: E402
 from scripts.flux_cache_natural_range_gate import (  # noqa: E402
     evaluate_natural_range,
+    load_natural_range_contract,
 )
 from scripts.flux_cache_protocol import (  # noqa: E402
     canonical_sha256,
@@ -42,11 +39,11 @@ from scripts.flux_cache_protocol import (  # noqa: E402
 )
 
 BUILD_SPEC_SCHEMA = "difflet-flux-cache-profile-build-spec"
-BUILD_SPEC_SCHEMA_REVISION = 2
+BUILD_SPEC_SCHEMA_REVISION = 5
 BUILD_STATE_SCHEMA = "difflet-flux-cache-profile-build-state"
 BUILD_STATE_SCHEMA_REVISION = 1
 QUALIFICATION_SCHEMA = "difflet-flux-cache-profile-qualification"
-QUALIFICATION_SCHEMA_REVISION = 1
+QUALIFICATION_SCHEMA_REVISION = 4
 REJECTION_SCHEMA = "difflet-flux-cache-profile-rejection"
 REJECTION_SCHEMA_REVISION = 1
 
@@ -175,17 +172,22 @@ def _quality_bucket(contract: Mapping[str, Any], bucket_id: str) -> Mapping[str,
 
 
 def _calibration_prompt_texts(registration: Mapping[str, Any]) -> set[str]:
-    quality_path = Path(registration["source"]["quality_input_path"]).resolve()
-    quality = _load_json(quality_path, "calibration quality input")
+    trajectory_input_path = Path(
+        registration["source"]["trajectory_input_path"]
+    ).resolve()
+    trajectory_input = _load_json(
+        trajectory_input_path,
+        "calibration trajectory input",
+    )
     try:
-        rows = quality["protocol"]["prompt_selection"]["prompts"]
+        rows = trajectory_input["protocol"]["prompt_selection"]["prompts"]
     except (KeyError, TypeError) as error:
-        raise ValueError("calibration quality input has no prompt selection") from error
+        raise ValueError("calibration trajectory input has no prompt selection") from error
     if not isinstance(rows, list) or not rows:
-        raise ValueError("calibration quality input prompt selection is empty")
+        raise ValueError("calibration trajectory input prompt selection is empty")
     texts = {row.get("text") for row in rows if isinstance(row, dict)}
     if len(texts) != len(rows) or None in texts:
-        raise ValueError("calibration quality input prompt identities are invalid")
+        raise ValueError("calibration trajectory input prompt identities are invalid")
     return {str(value) for value in texts}
 
 
@@ -230,8 +232,9 @@ def load_build_spec(path: Path) -> dict[str, Any]:
             "prompt_split",
             "prompt_split_sha256",
             "seeds",
-            "minimum_speedup",
-            "require_zero_failures",
+            "max_allowed_failures",
+            "selection_rule",
+            "speed_is_selection_input",
             "output_directory",
         },
         "runtimes": {"hardware_python", "semantic_python"},
@@ -252,11 +255,23 @@ def load_build_spec(path: Path) -> dict[str, Any]:
         content_hash=True,
     )
     registration = schedule_derivation.load_registration(registration_path)
-    contract_path, contract = _validate_binding(
+    contract_path, _ = _validate_binding(
         document["quality_contract"]["contract"],
         "natural-range quality contract",
         content_hash=True,
     )
+    contract = load_natural_range_contract(contract_path)
+    registered_contract = registration.get("quality_contract_ref")
+    if not isinstance(registered_contract, Mapping):
+        raise ValueError("schedule calibration has no quality-contract binding")
+    registered_contract_path = _resolve_path(str(registered_contract.get("path", "")))
+    if (
+        registered_contract_path != contract_path
+        or registered_contract.get("file_sha256") != sha256_file(contract_path)
+    ):
+        raise ValueError(
+            "schedule calibration and profile build bind different quality contracts"
+        )
     bucket_id = document["quality_contract"].get("bucket_id")
     if not isinstance(bucket_id, str) or not bucket_id:
         raise ValueError("profile build quality bucket is invalid")
@@ -280,10 +295,23 @@ def load_build_spec(path: Path) -> dict[str, Any]:
         raise ValueError("confirmation seeds are invalid")
     if _calibration_prompt_texts(registration) & set(selection.prompts):
         raise ValueError("confirmation prompts overlap schedule-calibration prompts")
-    if document["confirmation"].get("candidate_family") != "combined":
-        raise ValueError("profile build must confirm exactly one combined candidate")
-    if document["confirmation"].get("require_zero_failures") is not True:
-        raise ValueError("profile build confirmation must require zero failures")
+    if document["confirmation"].get("candidate_family") != "static_frontier":
+        raise ValueError("profile build must confirm the static budget frontier")
+    max_allowed_failures = document["confirmation"].get("max_allowed_failures")
+    if (
+        isinstance(max_allowed_failures, bool)
+        or not isinstance(max_allowed_failures, int)
+        or max_allowed_failures < 0
+    ):
+        raise ValueError(
+            "profile build confirmation failure budget must be a nonnegative integer"
+        )
+    if (
+        document["confirmation"].get("selection_rule")
+        != "ascending_first_quality_pass"
+        or document["confirmation"].get("speed_is_selection_input") is not False
+    ):
+        raise ValueError("profile build frontier selection contract is invalid")
 
     generation = registration["controlled_generation"]
     controlled = contract["controlled_generation"]
@@ -307,14 +335,6 @@ def load_build_spec(path: Path) -> dict[str, Any]:
     }
     if generation_identity != expected_generation:
         raise ValueError("schedule calibration and quality-contract generation differ")
-    target_speedup = float(registration["hardware_budget"]["target_speedup"])
-    if (
-        not math.isfinite(target_speedup)
-        or target_speedup <= 1.0
-        or float(document["confirmation"].get("minimum_speedup")) != target_speedup
-    ):
-        raise ValueError("confirmation speed target differs from schedule calibration")
-
     policy_path, policy_document = _validate_binding(
         document["execution_policy"],
         "execution policy",
@@ -325,26 +345,6 @@ def load_build_spec(path: Path) -> dict[str, Any]:
     if not output_directory.is_absolute():
         raise ValueError("confirmation output_directory must be absolute")
     model = policy["scope"]["model"]
-    hardware = policy["scope"]["hardware"]
-    request_count = len(selection.prompts) * len(seeds) * 2
-    authorize_execution(
-        policy_path,
-        ExecutionRequest(
-            stage="confirmation",
-            model_id=controlled["model_id"],
-            model_revision=controlled["model_revision"],
-            backend=hardware["backend"],
-            product_name=hardware["product_name"],
-            tp_degree=controlled["tp_degree"],
-            num_steps=controlled["num_steps"],
-            height=bucket["height"],
-            width=bucket["width"],
-            guidance_scale=controlled["guidance_scale"],
-            dtype=controlled["dtype"],
-            request_count=request_count,
-            output_directory=output_directory / "confirmation",
-        ),
-    )
     if model != {
         "model_id": controlled["model_id"],
         "model_revision": controlled["model_revision"],
@@ -375,7 +375,7 @@ def _build_spec_payload(args: argparse.Namespace) -> dict[str, Any]:
     registration_path = Path(args.calibration_registration).expanduser().resolve()
     registration = schedule_derivation.load_registration(registration_path)
     contract_path = Path(args.quality_contract).expanduser().resolve()
-    contract = _load_json(contract_path, "natural-range quality contract")
+    contract = load_natural_range_contract(contract_path)
     policy_path = Path(args.execution_policy).expanduser().resolve()
     policy = load_execution_policy(policy_path)
     prompt_path = Path(args.confirmation_prompt_suite).expanduser().resolve()
@@ -397,13 +397,14 @@ def _build_spec_payload(args: argparse.Namespace) -> dict[str, Any]:
             "bucket_id": args.bucket_id,
         },
         "confirmation": {
-            "candidate_family": "combined",
+            "candidate_family": "static_frontier",
             "prompt_suite": _binding(prompt_path),
             "prompt_split": args.confirmation_prompt_split,
             "prompt_split_sha256": selection.descriptor["sha256"],
             "seeds": list(args.seed),
-            "minimum_speedup": float(registration["hardware_budget"]["target_speedup"]),
-            "require_zero_failures": True,
+            "max_allowed_failures": int(args.max_allowed_failures),
+            "selection_rule": "ascending_first_quality_pass",
+            "speed_is_selection_input": False,
             "output_directory": str(Path(args.output_directory).expanduser().resolve()),
         },
         "execution_policy": _binding(policy_path, content_sha256=policy["sha256"]),
@@ -434,30 +435,29 @@ def register_build(args: argparse.Namespace) -> Path:
     return output
 
 
-def _materialize_combined_candidate(
+def _materialize_static_frontier(
     registration: Mapping[str, Any],
     derivation_path: Path,
     quality_contract_path: Path,
-    output_path: Path,
+    output_root: Path,
     *,
     reference_root: Path | None = None,
-) -> dict[str, Any]:
+) -> tuple[tuple[Path, dict[str, Any]], ...]:
     derivation = _load_json(derivation_path, "schedule derivation")
     derivation_payload = {key: value for key, value in derivation.items() if key != "sha256"}
     if canonical_sha256(derivation_payload) != derivation.get("sha256"):
         raise ValueError("schedule derivation sha256 does not match its contents")
     schedules = derivation.get("schedules")
-    if not isinstance(schedules, list) or len(schedules) != 1:
-        raise ValueError("profile build requires exactly one derived schedule")
-    schedule = schedules[0]
+    if not isinstance(schedules, list) or not schedules:
+        raise ValueError("profile build requires a nonempty derived budget frontier")
+    budgets = [row.get("anchor_budget") for row in schedules if isinstance(row, Mapping)]
+    if (
+        len(budgets) != len(schedules)
+        or any(isinstance(value, bool) or not isinstance(value, int) for value in budgets)
+        or budgets != sorted(set(budgets))
+    ):
+        raise ValueError("derived budget frontier must be unique and ascending")
     optimizer = registration["optimizer"]
-    brake = registration["bounded_brake"]
-    budget = int(schedule["anchor_budget"])
-    target = float(schedule["target_speedup"])
-    target_token = format(target, ".6g").replace(".", "p")
-    candidate_id = (
-        f"target-static-brake-s{target_token}-a{budget}-b{brake['dynamic_budget']}-o1-index"
-    )
 
     def reference(path: Path) -> str:
         resolved = path.resolve()
@@ -468,41 +468,44 @@ def _materialize_combined_candidate(
         except ValueError as error:
             raise ValueError("profile bundle reference escapes its root") from error
 
-    policy = {
-        "type": "phased_static_plus_brake",
-        "num_steps": int(registration["controlled_generation"]["num_steps"]),
-        "static_anchor_steps": list(schedule["static_anchor_steps"]),
-        "warmup_steps": int(optimizer["warmup_steps"]),
-        "cooldown_steps": int(optimizer["cooldown_steps"]),
-        "require_final_anchor": bool(optimizer["require_final_anchor"]),
-        "dynamic_budget": int(brake["dynamic_budget"]),
-        "invalid_measurement_fail_closed": True,
-        "plastic_window": list(brake["plastic_window"]),
-        "tighten_error": float(schedule["brake_thresholds"]["tighten_error"]),
-        "recovery_error": float(schedule["brake_thresholds"]["recovery_error"]),
-        "recovery_steps": int(brake["recovery_steps"]),
-        "disable_after_recoveries": int(brake["disable_after_recoveries"]),
-        "tighten_rule": brake["tighten_rule"],
-        "allow_acceleration": False,
-    }
-    payload = {
-        "schema": PHASED_CANDIDATE_SCHEMA,
-        "schema_revision": PHASED_CANDIDATE_SCHEMA_REVISION,
-        "candidate_id": candidate_id,
-        "policy": policy,
-        "predictor": {"type": "taylorseer", "order": 1, "coord": "index"},
-        "horizon_ref": {
-            "path": reference(derivation_path),
-            "sha256": sha256_file(derivation_path),
-        },
-        "quality_contract_ref": {
-            "path": reference(quality_contract_path),
-            "sha256": sha256_file(quality_contract_path),
-        },
-    }
-    document = _write_hashed_json(output_path, payload)
-    load_phased_candidate(output_path)
-    return document
+    output_root.mkdir(parents=True, exist_ok=True)
+    candidates: list[tuple[Path, dict[str, Any]]] = []
+    for schedule in schedules:
+        budget = int(schedule["anchor_budget"])
+        anchors = list(schedule["static_anchor_steps"])
+        if len(anchors) != budget:
+            raise ValueError(f"derived schedule a{budget} has a mismatched anchor count")
+        candidate_id = f"quality-static-a{budget}-o1-index"
+        policy = {
+            "type": "phased_static",
+            "num_steps": int(registration["controlled_generation"]["num_steps"]),
+            "static_anchor_steps": anchors,
+            "warmup_steps": int(optimizer["warmup_steps"]),
+            "cooldown_steps": int(optimizer["cooldown_steps"]),
+            "require_final_anchor": bool(optimizer["require_final_anchor"]),
+            "dynamic_budget": 0,
+            "invalid_measurement_fail_closed": True,
+        }
+        payload = {
+            "schema": PHASED_CANDIDATE_SCHEMA,
+            "schema_revision": PHASED_CANDIDATE_SCHEMA_REVISION,
+            "candidate_id": candidate_id,
+            "policy": policy,
+            "predictor": {"type": "taylorseer", "order": 1, "coord": "index"},
+            "horizon_ref": {
+                "path": reference(derivation_path),
+                "sha256": sha256_file(derivation_path),
+            },
+            "quality_contract_ref": {
+                "path": reference(quality_contract_path),
+                "sha256": sha256_file(quality_contract_path),
+            },
+        }
+        output_path = output_root / f".candidate-a{budget}.json"
+        document = _write_hashed_json(output_path, payload)
+        load_phased_candidate(output_path)
+        candidates.append((output_path, document))
+    return tuple(candidates)
 
 
 def _run_command(command: Sequence[str]) -> None:
@@ -622,6 +625,110 @@ def _validate_confirmation_manifests(
     return measured
 
 
+def _rebase_quality_comparison(
+    comparison: Mapping[str, Any],
+    *,
+    source_root: Path,
+    destination_root: Path,
+) -> dict[str, Any]:
+    result = dict(comparison)
+    for role in ("baseline", "candidate"):
+        artifact = comparison.get(role)
+        if not isinstance(artifact, Mapping):
+            raise ValueError("quality ladder comparison artifacts are malformed")
+        relative = artifact.get("image")
+        digest = artifact.get("image_sha256")
+        if not isinstance(relative, str) or Path(relative).is_absolute():
+            raise ValueError("quality ladder image path is invalid")
+        image_path = (source_root / relative).resolve()
+        if (
+            not image_path.is_file()
+            or not isinstance(digest, str)
+            or sha256_file(image_path) != digest
+        ):
+            raise ValueError("quality ladder image binding is invalid")
+        result[role] = {
+            **dict(artifact),
+            "image": Path(os.path.relpath(image_path, destination_root)).as_posix(),
+        }
+    return result
+
+
+def _write_ladder_quality_prefix(
+    previous_path: Path | None,
+    rung_path: Path,
+    output_path: Path,
+    candidate: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Write an immutable quality manifest for the tested ladder prefix."""
+
+    rung = _load_json(rung_path, "quality ladder rung")
+    expected_definition = {
+        "candidate_id": candidate["candidate_id"],
+        "policy": candidate["policy"],
+        "predictor": candidate["predictor"],
+    }
+    if rung.get("candidates") != [expected_definition]:
+        raise ValueError("quality ladder rung contains a different candidate")
+    rung_comparisons = rung.get("comparisons")
+    if not isinstance(rung_comparisons, list) or not rung_comparisons:
+        raise ValueError("quality ladder rung contains no comparisons")
+
+    ignored = {"candidates", "comparisons", "started_at", "completed_at", "baseline_source"}
+    common = {key: value for key, value in rung.items() if key not in ignored}
+    candidates: list[dict[str, Any]] = []
+    comparisons: list[dict[str, Any]] = []
+    started_at = rung.get("started_at")
+    if previous_path is not None:
+        previous = _load_json(previous_path, "quality ladder prefix")
+        previous_common = {
+            key: value for key, value in previous.items() if key not in ignored
+        }
+        if previous_common != common:
+            raise ValueError("quality ladder generation identity changed between rungs")
+        previous_candidates = previous.get("candidates")
+        previous_comparisons = previous.get("comparisons")
+        if (
+            not isinstance(previous_candidates, list)
+            or not isinstance(previous_comparisons, list)
+            or any(
+                row.get("candidate_id") == candidate["candidate_id"]
+                for row in previous_candidates
+                if isinstance(row, Mapping)
+            )
+        ):
+            raise ValueError("quality ladder prefix is malformed or duplicated")
+        candidates.extend(dict(row) for row in previous_candidates)
+        comparisons.extend(
+            _rebase_quality_comparison(
+                row,
+                source_root=previous_path.parent,
+                destination_root=output_path.parent,
+            )
+            for row in previous_comparisons
+        )
+        started_at = previous.get("started_at")
+
+    candidates.append(expected_definition)
+    comparisons.extend(
+        _rebase_quality_comparison(
+            row,
+            source_root=rung_path.parent,
+            destination_root=output_path.parent,
+        )
+        for row in rung_comparisons
+    )
+    document = {
+        **common,
+        "started_at": started_at,
+        "completed_at": rung.get("completed_at"),
+        "candidates": candidates,
+        "comparisons": comparisons,
+    }
+    _write_json(output_path, document)
+    return document
+
+
 def _existing_confirmation(confirmation_dir: Path) -> tuple[Path, Path] | None:
     quality_path = confirmation_dir / "quality-input-v2.json"
     speed_path = confirmation_dir / "speedup-candidates-v1.json"
@@ -658,7 +765,6 @@ def build_profile(spec_path: Path) -> Path:
     prompt_path = _resolve_path(spec["confirmation"]["prompt_suite"]["path"])
     derivation_path = internal_dir / "schedule-derivation.json"
     bundled_contract_path = internal_dir / "natural-range-quality-contract.json"
-    candidate_path = output_root / ".candidate.json"
 
     _write_state(
         state_path,
@@ -673,150 +779,271 @@ def build_profile(spec_path: Path) -> Path:
         )
     )
     shutil.copyfile(contract_path, bundled_contract_path)
-    candidate = _materialize_combined_candidate(
+    frontier = _materialize_static_frontier(
         registration,
         derivation_path,
         bundled_contract_path,
-        candidate_path,
+        output_root,
         reference_root=output_root,
     )
+    candidates = [candidate for _, candidate in frontier]
     _write_state(
         state_path,
         build_id=build_id,
         stage="derive",
         status="complete",
         details={
-            "candidate_id": candidate["candidate_id"],
-            "candidate_sha256": candidate["sha256"],
+            "candidate_count": len(candidates),
+            "anchor_budgets": [
+                len(candidate["policy"]["static_anchor_steps"])
+                for candidate in candidates
+            ],
+            "speed_is_selection_input": False,
         },
     )
 
-    existing = _existing_confirmation(confirmation_dir)
-    if existing is None:
-        confirmation_dir.parent.mkdir(parents=True, exist_ok=True)
-        generation = registration["controlled_generation"]
-        contract = _load_json(contract_path, "natural-range quality contract")
-        controlled = contract["controlled_generation"]
-        hardware_python = spec["runtimes"]["hardware_python"]
-        command = [
-            hardware_python,
-            "scripts/collect_flux_cache_authorized.py",
-            "ab",
-            "--execution-policy",
-            str(policy_path),
-            "--execution-stage",
-            "confirmation",
-            "--phased-candidate",
-            str(candidate_path),
-            "--out-dir",
-            str(confirmation_dir),
-            "--model-id",
-            controlled["model_id"],
-            "--model-revision",
-            controlled["model_revision"],
-            "--prompt-suite",
-            str(prompt_path),
-            "--prompt-split",
-            spec["confirmation"]["prompt_split"],
-            "--num-steps",
-            str(generation["num_steps"]),
-            "--height",
-            str(generation["height"]),
-            "--width",
-            str(generation["width"]),
-            "--guidance-scale",
-            str(generation["guidance_scale"]),
-            "--tp-degree",
-            str(controlled["tp_degree"]),
-            "--dtype",
-            generation["dtype"],
-        ]
-        for seed in spec["confirmation"]["seeds"]:
-            command.extend(("--seed", str(seed)))
-        _write_state(
-            state_path,
-            build_id=build_id,
-            stage="confirm",
-            status="collecting",
-        )
-        _run_command(command)
-        existing = _existing_confirmation(confirmation_dir)
-        if existing is None:
-            raise RuntimeError("hardware collector completed without confirmation manifests")
-    quality_path, speed_path = existing
-
+    confirmation_dir.mkdir(parents=True, exist_ok=True)
     selection = load_prompt_suite(prompt_path, spec["confirmation"]["prompt_split"])
-    expected_images = len(selection.prompts) * len(spec["confirmation"]["seeds"]) * 2
-    semantic_path = output_root / "semantic-scores.json"
+    sample_count = len(selection.prompts) * len(spec["confirmation"]["seeds"])
+    generation = registration["controlled_generation"]
+    contract = _load_json(contract_path, "natural-range quality contract")
+    controlled = contract["controlled_generation"]
+    candidate_domain = [
+        len(candidate["policy"]["static_anchor_steps"]) for candidate in candidates
+    ]
+    max_allowed_failures = int(spec["confirmation"]["max_allowed_failures"])
     scoring = spec["scoring"]
-    _write_state(
-        state_path,
-        build_id=build_id,
-        stage="confirm",
-        status="scoring",
-    )
-    _run_command(
-        [
-            spec["runtimes"]["semantic_python"],
-            "scripts/evaluate_flux_cache_semantics.py",
-            "--quality-input",
-            str(quality_path),
-            "--out",
-            str(semantic_path),
-            "--metrics",
-            "image_reward",
-            "vqa_score",
-            "--expected-images",
-            str(expected_images),
-            "--image-reward-cache",
-            scoring["image_reward_cache"],
-            "--vqa-model-cache",
-            scoring["vqa_model_cache"],
-            "--huggingface-cache",
-            scoring["huggingface_cache"],
-            "--vqa-batch-size",
-            str(scoring["vqa_batch_size"]),
-            "--cpu-threads",
-            str(scoring["cpu_threads"]),
-        ]
-    )
-    gate_path = output_root / "natural-range-evaluation.json"
-    gate = evaluate_natural_range(
-        contract_path,
-        semantic_path,
-        bucket_id=spec["quality_contract"]["bucket_id"],
-    )
-    _write_json(gate_path, gate)
-    summaries = gate["candidate_summaries"]
-    if len(summaries) != 1 or summaries[0]["candidate_id"] != candidate["candidate_id"]:
-        raise ValueError("quality gate did not evaluate exactly the frozen candidate")
-    quality_passed = bool(summaries[0]["passes_zero_failure_gate"])
-    measured_speedup = _validate_confirmation_manifests(
-        quality_path,
-        speed_path,
-        candidate,
-    )
-    required_speedup = float(spec["confirmation"]["minimum_speedup"])
-    speed_passed = measured_speedup >= required_speedup
+    semantic_working_path = confirmation_dir / ".semantic-scores-working.json"
+    baseline_quality_path: Path | None = None
+    baseline_speed_path: Path | None = None
+    previous_prefix_path: Path | None = None
+    frontier_decisions: list[dict[str, Any]] = []
+    tested_rungs: list[dict[str, Any]] = []
+    selected: tuple[int, Path, Mapping[str, Any], Mapping[str, Any], float] | None = None
+
+    for rung_index, (candidate_path, candidate) in enumerate(frontier):
+        candidate_id = candidate["candidate_id"]
+        budget = len(candidate["policy"]["static_anchor_steps"])
+        rung_dir = confirmation_dir / f"{rung_index:03d}-a{budget}"
+        existing = _existing_confirmation(rung_dir)
+        if existing is None:
+            command = [
+                spec["runtimes"]["hardware_python"],
+                "scripts/collect_flux_cache_authorized.py",
+                "ab",
+                "--execution-policy",
+                str(policy_path),
+                "--execution-stage",
+                "confirmation",
+                "--out-dir",
+                str(rung_dir),
+                "--model-id",
+                controlled["model_id"],
+                "--model-revision",
+                controlled["model_revision"],
+                "--prompt-suite",
+                str(prompt_path),
+                "--prompt-split",
+                spec["confirmation"]["prompt_split"],
+                "--num-steps",
+                str(generation["num_steps"]),
+                "--height",
+                str(generation["height"]),
+                "--width",
+                str(generation["width"]),
+                "--guidance-scale",
+                str(generation["guidance_scale"]),
+                "--tp-degree",
+                str(controlled["tp_degree"]),
+                "--dtype",
+                generation["dtype"],
+                "--phased-candidate",
+                str(candidate_path),
+            ]
+            if baseline_quality_path is not None and baseline_speed_path is not None:
+                command.extend(
+                    (
+                        "--baseline-quality-manifest",
+                        str(baseline_quality_path),
+                        "--baseline-speed-manifest",
+                        str(baseline_speed_path),
+                    )
+                )
+            for seed in spec["confirmation"]["seeds"]:
+                command.extend(("--seed", str(seed)))
+            _write_state(
+                state_path,
+                build_id=build_id,
+                stage="confirm",
+                status="collecting_ladder_rung",
+                details={
+                    "anchor_budget": budget,
+                    "rung_index": rung_index,
+                    "tested_anchor_budgets": [
+                        row["anchor_budget"] for row in frontier_decisions
+                    ],
+                },
+            )
+            _run_command(command)
+            existing = _existing_confirmation(rung_dir)
+            if existing is None:
+                raise RuntimeError(
+                    "hardware collector completed without ladder-rung manifests"
+                )
+        quality_path, speed_path = existing
+        if baseline_quality_path is None:
+            baseline_quality_path = quality_path
+            baseline_speed_path = speed_path
+        measured_speedup = _validate_confirmation_manifests(
+            quality_path,
+            speed_path,
+            candidate,
+        )
+
+        prefix_path = rung_dir / "quality-ladder-prefix-v2.json"
+        prefix = _write_ladder_quality_prefix(
+            previous_prefix_path,
+            quality_path,
+            prefix_path,
+            candidate,
+        )
+        expected_ids = [item["candidate_id"] for item in candidates[: rung_index + 1]]
+        if [row.get("candidate_id") for row in prefix["candidates"]] != expected_ids:
+            raise ValueError("quality ladder prefix is not an ascending candidate prefix")
+
+        semantic_path = rung_dir / "semantic-scores.json"
+        if semantic_path.is_file():
+            shutil.copyfile(semantic_path, semantic_working_path)
+        else:
+            _write_state(
+                state_path,
+                build_id=build_id,
+                stage="confirm",
+                status="scoring_ladder_rung",
+                details={"anchor_budget": budget, "rung_index": rung_index},
+            )
+            _run_command(
+                [
+                    spec["runtimes"]["semantic_python"],
+                    "scripts/evaluate_flux_cache_semantics.py",
+                    "--quality-input",
+                    str(prefix_path),
+                    "--out",
+                    str(semantic_working_path),
+                    "--metrics",
+                    "image_reward",
+                    "vqa_score",
+                    "--expected-images",
+                    str(sample_count * (2 + rung_index)),
+                    "--image-reward-cache",
+                    scoring["image_reward_cache"],
+                    "--vqa-model-cache",
+                    scoring["vqa_model_cache"],
+                    "--huggingface-cache",
+                    scoring["huggingface_cache"],
+                    "--vqa-batch-size",
+                    str(scoring["vqa_batch_size"]),
+                    "--cpu-threads",
+                    str(scoring["cpu_threads"]),
+                ]
+            )
+            shutil.copyfile(semantic_working_path, semantic_path)
+
+        gate_path = rung_dir / "natural-range-evaluation.json"
+        gate = evaluate_natural_range(
+            contract_path,
+            semantic_path,
+            bucket_id=spec["quality_contract"]["bucket_id"],
+            max_allowed_failures=max_allowed_failures,
+        )
+        if gate.get("max_allowed_failures") != max_allowed_failures:
+            raise ValueError("quality gate ignored the registered failure budget")
+        _write_json(gate_path, gate)
+        summaries = gate.get("candidate_summaries")
+        if not isinstance(summaries, list):
+            raise ValueError("quality gate did not return ladder summaries")
+        summaries_by_id = {
+            row.get("candidate_id"): row
+            for row in summaries
+            if isinstance(row, Mapping) and isinstance(row.get("candidate_id"), str)
+        }
+        if (
+            len(summaries_by_id) != len(summaries)
+            or set(summaries_by_id) != set(expected_ids)
+        ):
+            raise ValueError("quality gate did not evaluate exactly the tested ladder prefix")
+        summary = summaries_by_id[candidate_id]
+        quality_passed = summary.get("passes_failure_budget_gate")
+        failure_count = summary.get("failure_count")
+        if (
+            type(quality_passed) is not bool
+            or isinstance(failure_count, bool)
+            or not isinstance(failure_count, int)
+            or failure_count < 0
+            or quality_passed != (failure_count <= max_allowed_failures)
+        ):
+            raise ValueError("quality gate returned an inconsistent frontier decision")
+        frontier_decisions.append(
+            {
+                "candidate_id": candidate_id,
+                "anchor_budget": budget,
+                "quality_passed": quality_passed,
+                "failure_count": failure_count,
+                "measured_speedup": measured_speedup,
+            }
+        )
+        tested_rungs.append(
+            {
+                "anchor_budget": budget,
+                "candidate": _binding(
+                    candidate_path,
+                    content_sha256=candidate["sha256"],
+                ),
+                "quality_manifest": _binding(quality_path),
+                "speed_manifest": _binding(speed_path),
+                "quality_ladder_prefix": _binding(prefix_path),
+                "semantic_report": _binding(semantic_path),
+                "natural_range_evaluation": _binding(
+                    gate_path,
+                    content_sha256=gate["sha256"],
+                ),
+            }
+        )
+        previous_prefix_path = prefix_path
+        if quality_passed:
+            selected = (budget, candidate_path, candidate, summary, measured_speedup)
+            break
+
+    selected_budget = None if selected is None else selected[0]
+    selected_candidate_path = None if selected is None else selected[1]
+    selected_candidate = None if selected is None else selected[2]
+    selected_summary = None if selected is None else selected[3]
+    selected_speedup = None if selected is None else selected[4]
 
     evidence = {
-        "candidate": _binding(candidate_path, content_sha256=candidate["sha256"]),
-        "quality_manifest": _binding(quality_path),
-        "speed_manifest": _binding(speed_path),
-        "semantic_report": _binding(semantic_path),
-        "natural_range_evaluation": _binding(
-            gate_path,
-            content_sha256=gate["sha256"],
-        ),
+        "frontier_candidates": [
+            _binding(path, content_sha256=candidate["sha256"])
+            for path, candidate in frontier
+        ],
+        "tested_rungs": tested_rungs,
     }
     decision = {
-        "quality_passed": quality_passed,
-        "failure_count": int(summaries[0]["failure_count"]),
-        "measured_speedup": measured_speedup,
-        "minimum_speedup": required_speedup,
-        "speed_passed": speed_passed,
+        "quality_passed": selected is not None,
+        "failure_count": None if selected_summary is None else int(selected_summary["failure_count"]),
+        "max_allowed_failures": max_allowed_failures,
+        "selected_anchor_budget": selected_budget,
+        "measured_speedup": selected_speedup,
+        "selection_rule": "ascending_first_quality_pass",
+        "qualification_order": "ascending_anchor_budget",
+        "candidate_domain": candidate_domain,
+        "tested_anchor_budgets": [row["anchor_budget"] for row in frontier_decisions],
+        "stop_reason": (
+            "first_quality_pass" if selected is not None else "candidate_domain_exhausted"
+        ),
+        "speed_is_selection_input": False,
+        "tested_frontier": frontier_decisions,
     }
-    if not quality_passed or not speed_passed:
+    if selected is None:
         rejection_payload = {
             "schema": REJECTION_SCHEMA,
             "schema_revision": REJECTION_SCHEMA_REVISION,
@@ -838,8 +1065,10 @@ def build_profile(spec_path: Path) -> Path:
         )
         raise ProfileRejected(f"profile rejected; see {rejection_path}")
 
+    assert selected_candidate_path is not None
+    assert selected_candidate is not None
     temporary_profile = profile_path.with_name(f".{profile_path.name}.tmp")
-    shutil.copyfile(candidate_path, temporary_profile)
+    shutil.copyfile(selected_candidate_path, temporary_profile)
     os.replace(temporary_profile, profile_path)
     exported = load_phased_candidate(profile_path)
     qualification_payload = {
@@ -886,6 +1115,7 @@ def build_parser() -> argparse.ArgumentParser:
     register_parser.add_argument("--confirmation-prompt-suite", required=True)
     register_parser.add_argument("--confirmation-prompt-split", required=True)
     register_parser.add_argument("--seed", action="append", type=int, required=True)
+    register_parser.add_argument("--max-allowed-failures", type=int, default=0)
     register_parser.add_argument("--execution-policy", required=True)
     register_parser.add_argument("--output-directory", required=True)
     register_parser.add_argument(
