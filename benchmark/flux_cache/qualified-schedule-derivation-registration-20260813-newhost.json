@@ -1,0 +1,368 @@
+{
+  "cache_semantics": {
+    "prediction_target": "transformer_noise_prediction",
+    "predictor": {
+      "coord": "index",
+      "order": 1,
+      "type": "taylorseer"
+    },
+    "trajectory_reconstruction": "v_t=(x_after_t-x_after_t_minus_1)/(sigma_t_plus_1-sigma_t) for t>=1"
+  },
+  "controlled_generation": {
+    "dtype": "bfloat16",
+    "guidance_scale": 3.5,
+    "height": 1024,
+    "num_steps": 50,
+    "scheduler_class": "FlowMatchEulerDiscreteScheduler",
+    "scheduler_config": {
+      "_class_name": "FlowMatchEulerDiscreteScheduler",
+      "_diffusers_version": "0.30.0.dev0",
+      "_use_default_values": [
+        "invert_sigmas",
+        "shift_terminal",
+        "stochastic_sampling",
+        "time_shift_type",
+        "use_beta_sigmas",
+        "use_exponential_sigmas",
+        "use_karras_sigmas"
+      ],
+      "base_image_seq_len": 256,
+      "base_shift": 0.5,
+      "invert_sigmas": false,
+      "max_image_seq_len": 4096,
+      "max_shift": 1.15,
+      "num_train_timesteps": 1000,
+      "shift": 3.0,
+      "shift_terminal": null,
+      "stochastic_sampling": false,
+      "time_shift_type": "exponential",
+      "use_beta_sigmas": false,
+      "use_dynamic_shifting": true,
+      "use_exponential_sigmas": false,
+      "use_karras_sigmas": false
+    },
+    "width": 1024
+  },
+  "created_at": "2026-08-13T21:10:00Z",
+  "evidence_role": {
+    "semantic_labels_permitted": false,
+    "serving_claim_permitted": false,
+    "stage": "label_free_schedule_candidate_generation"
+  },
+  "implementation": {
+    "files": [
+      {
+        "file_sha256": "781059f5ff504e7141cb88533883fb925405a43bd8b3e90fc74a54b0508d85da",
+        "path": "difflet/offline/cache_profile/derivation.py"
+      },
+      {
+        "file_sha256": "18d0664a69f1858c1517a3e5a40d271540ebb1df7cf08607284f5eecc50b24cb",
+        "path": "difflet/offline/cache_profile/provenance.py"
+      },
+      {
+        "file_sha256": "3ba59f1d41ee6868dd20aabe8e1dd6e1aee246505385a10eaf28b60d2e11d07e",
+        "path": "difflet/offline/cache_profile/schedule.py"
+      },
+      {
+        "file_sha256": "a87fc65158a8ee31250ff5f1ea97ee2b2d2fb5f8e94a1bc9473d50210288319a",
+        "path": "difflet/pipeline/cache/profile.py"
+      },
+      {
+        "file_sha256": "e5cb8b4022739d328e0b0eaadceb2e5ae90e9e89982161a113de263f6789880d",
+        "path": "scripts/flux_cache_protocol.py"
+      }
+    ],
+    "schema": "difflet-cache-profile-implementation-bundle",
+    "schema_revision": 1,
+    "sha256": "ee23a97faa5757fa15c2d9f1fbc2540ec2f098cc67b249fa433e9aef9daacd84"
+  },
+  "optimizer": {
+    "anchor_budget_source": "literature_informed_empirical_search_floor",
+    "budget_selection": "ascending_first_closed_loop_quality_pass",
+    "closed_loop_mechanism_floor": 4,
+    "cooldown_steps": 0,
+    "middle_max_anchor_gap": 6,
+    "norm_floor": 1e-08,
+    "objective": "sum_of_segment_prompt_q95_scheduler_weighted_relative_l2_error",
+    "phase_boundary_step": 21,
+    "predictor_history_floor": 2,
+    "prompt_aggregation": "nearest_rank",
+    "prompt_quantile": 0.95,
+    "require_final_anchor": true,
+    "search_floor_anchor_budget": 10,
+    "search_floor_formula": "ceil(0.20 * total_steps)",
+    "search_floor_ratio": 0.2,
+    "search_floor_reference": {
+      "evidence": "FLUX.1-dev evaluates 9 and 13 full-compute key-timestep schedules over 50 denoising steps",
+      "title": "Denoising as Path Planning: Training-Free Acceleration of Diffusion Models with DPCache",
+      "url": "https://openaccess.thecvf.com/content/CVPR2026/html/Cui_Denoising_as_Path_Planning_Training-Free_Acceleration_of_Diffusion_Models_with_CVPR_2026_paper.html",
+      "venue": "CVPR 2026"
+    },
+    "search_floor_role": "candidate_domain_floor_not_quality_guarantee",
+    "segment_formula": "sum_skipped(abs(delta_sigma_t)*l2(vhat_t-v_t)/max(l2(v_t),norm_floor))",
+    "tail_max_anchor_gap": 10,
+    "tie_break": "lexicographically_smallest_anchor_sequence",
+    "trajectory_observation_floor": 3,
+    "warmup_steps": 3,
+    "working_dtype": "float32"
+  },
+  "parameters_frozen_before_derivation": true,
+  "quality_contract_ref": {
+    "file_sha256": "52a3d7dd1107a6d28826c1b21ca89a0ba3b2cf15f98fd5a69857ae0b51e814c6",
+    "path": "benchmark/flux_cache/multires-quality-contract-v1.json"
+  },
+  "schema": "difflet-flux-cache-schedule-derivation-registration",
+  "schema_revision": 5,
+  "sha256": "788b23d0dd4297285c9290a276f9e1a870e53d5d1db10b5262337644b5ddc450",
+  "source": {
+    "protocol_sha256": "ab393905e807a708de3ccdf58a53ef25c644bd760c0deba77304bc011ec17660",
+    "trajectories": [
+      {
+        "file_sha256": "0fd4f58da4cb946d8a2a3e71d71b84fdc6d8eef0314dbd843b3235aa98c6d8b0",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p000-s2.trajectory.pt",
+        "sample_id": "p000-s2"
+      },
+      {
+        "file_sha256": "9cc2c3510c4c1b8ec61c89df56c7e35bc613d9c27d85190df1cd4619feae9a3d",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p001-s2.trajectory.pt",
+        "sample_id": "p001-s2"
+      },
+      {
+        "file_sha256": "0bbaf2d17664bd2635f284b95036be15527cdcf9e30be637095f0035520f7907",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p002-s2.trajectory.pt",
+        "sample_id": "p002-s2"
+      },
+      {
+        "file_sha256": "f0ea007404974bda48086b4d31843063ec02106a3b211b40a9bd8b8b8f24629f",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p003-s2.trajectory.pt",
+        "sample_id": "p003-s2"
+      },
+      {
+        "file_sha256": "94d1932eb1f7e57a6de19302914046044decdba81f112d36bceda247e6a78d7b",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p004-s2.trajectory.pt",
+        "sample_id": "p004-s2"
+      },
+      {
+        "file_sha256": "93263c1bc7e69768b0cc0d05cf4e7f10491f6dbda34a8b8e481d349001b3e33a",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p005-s2.trajectory.pt",
+        "sample_id": "p005-s2"
+      },
+      {
+        "file_sha256": "85fae85570a8892e864ebe576fe83287448ea4a879e7559275bb896a63e2a941",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p006-s2.trajectory.pt",
+        "sample_id": "p006-s2"
+      },
+      {
+        "file_sha256": "77c6b3dff01f37e35fee9e3f5f78db5d33287bf4f982b92ab0516f376186fcd7",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p007-s2.trajectory.pt",
+        "sample_id": "p007-s2"
+      },
+      {
+        "file_sha256": "1d00974d01616146d0f9f1a43810ace4eb0033a47297460979430a4f2cc929e3",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p008-s2.trajectory.pt",
+        "sample_id": "p008-s2"
+      },
+      {
+        "file_sha256": "80dd8a2725df445f83e479d6ef8ae68f13d6fdafa91cbc6415ec964c154a79dd",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p009-s2.trajectory.pt",
+        "sample_id": "p009-s2"
+      },
+      {
+        "file_sha256": "de5760eed5df15ba3b69e2cd5c914137a7671b5fecccb5a7b07fbb5dc5f76af9",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p010-s2.trajectory.pt",
+        "sample_id": "p010-s2"
+      },
+      {
+        "file_sha256": "73c7a4596b8e8122e4988009e443a190dfdc6be430f5ab2ba77a93b6b6698cd7",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p011-s2.trajectory.pt",
+        "sample_id": "p011-s2"
+      },
+      {
+        "file_sha256": "86fcce59c5e640dacd3ade16d23c373071549c2fb70427ebd7649d7a3b32f380",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p012-s2.trajectory.pt",
+        "sample_id": "p012-s2"
+      },
+      {
+        "file_sha256": "b01ed430d06958835e8eca1d3fa2582ef68efc28101137a9d8ad9d6e7efe6cf2",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p013-s2.trajectory.pt",
+        "sample_id": "p013-s2"
+      },
+      {
+        "file_sha256": "d79871f0fcc137a8b3b20b5e53131909fc3bd5e0c949d6818c26bd7eaf64f86d",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p014-s2.trajectory.pt",
+        "sample_id": "p014-s2"
+      },
+      {
+        "file_sha256": "646a0cd3ab46dda8947fe739f57fe32bd641c4a51fd934314fdd536821529f7d",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p015-s2.trajectory.pt",
+        "sample_id": "p015-s2"
+      },
+      {
+        "file_sha256": "b49ce1cc56064e5dfdabb2012772cfb3c737d9ec3f120cb8713e1b3d12e01faa",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p016-s2.trajectory.pt",
+        "sample_id": "p016-s2"
+      },
+      {
+        "file_sha256": "7eaec2c6e6594e747e7904ccb0a3490f81543eb36f55789013f35750f6a04cff",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p017-s2.trajectory.pt",
+        "sample_id": "p017-s2"
+      },
+      {
+        "file_sha256": "506bfc34f4a50cb789edc95685fb496754cf5e0c42f8a6debc7ebd2b6934340a",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p018-s2.trajectory.pt",
+        "sample_id": "p018-s2"
+      },
+      {
+        "file_sha256": "dc7b32f54f2e956a11fd6eefc1b44f3767af08056ab41f2f98a15ec5425f5537",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p019-s2.trajectory.pt",
+        "sample_id": "p019-s2"
+      },
+      {
+        "file_sha256": "e9df7c6b3e284be29904601ea937e37e4b13ff8a8ee3ecdcfca103240ce4c982",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p020-s2.trajectory.pt",
+        "sample_id": "p020-s2"
+      },
+      {
+        "file_sha256": "2d9fa53b472764c220fcd4b2be13aea3a16b8f1e8ac555c0a189ab329ab8fa1c",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p021-s2.trajectory.pt",
+        "sample_id": "p021-s2"
+      },
+      {
+        "file_sha256": "b2e77a2fb35610851634552cd15753b2e50127e75a7bb6822f1ae16cbac6031c",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p022-s2.trajectory.pt",
+        "sample_id": "p022-s2"
+      },
+      {
+        "file_sha256": "6b06ff089a29d1bead9fc68006a732147023cfcb75009c6f0ea9d0ba5564bc62",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p023-s2.trajectory.pt",
+        "sample_id": "p023-s2"
+      },
+      {
+        "file_sha256": "13b775dfb792d4f27c8714414dd0771561a0264c1e969c5c183ae9ce6eb58884",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p024-s2.trajectory.pt",
+        "sample_id": "p024-s2"
+      },
+      {
+        "file_sha256": "94ab8aedce2e6034f4b72c38322c49d2870235db68ccc292fadeedf185acd60a",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p025-s2.trajectory.pt",
+        "sample_id": "p025-s2"
+      },
+      {
+        "file_sha256": "855446cbf661ea44f125bb628fad2618d40cdd3402dec7d8da1f425968eff12c",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p026-s2.trajectory.pt",
+        "sample_id": "p026-s2"
+      },
+      {
+        "file_sha256": "0e1132a2b812bb4b82f31b85a6fc92b470a9eef33ea0cd6bb0a4969f80a28bd6",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p027-s2.trajectory.pt",
+        "sample_id": "p027-s2"
+      },
+      {
+        "file_sha256": "f4a86c78295606711513a405e202c5700c8c0830f59edf2181ef8dd2cb2630bd",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p028-s2.trajectory.pt",
+        "sample_id": "p028-s2"
+      },
+      {
+        "file_sha256": "87362212d1b60044454883b42dd8990b0a3fbe1102305f28063c78dd83ea80d5",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p029-s2.trajectory.pt",
+        "sample_id": "p029-s2"
+      },
+      {
+        "file_sha256": "81b54b107443668de9efd03395b5ac911e3bb56002cac4936316cf564cd5b373",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p030-s2.trajectory.pt",
+        "sample_id": "p030-s2"
+      },
+      {
+        "file_sha256": "5e98d23b87a8d38db8f1e3b93dff34119578814458c8a180a9399a80a3e16f0b",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p031-s2.trajectory.pt",
+        "sample_id": "p031-s2"
+      },
+      {
+        "file_sha256": "d5eb175359d4c6308349fde4590c23fbfc35ce849cd8f15589f2ead3945e5554",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p032-s2.trajectory.pt",
+        "sample_id": "p032-s2"
+      },
+      {
+        "file_sha256": "47a75c08d621c4079cec10595be465aa9b624e9c6cc211cacb6c5425a6669283",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p033-s2.trajectory.pt",
+        "sample_id": "p033-s2"
+      },
+      {
+        "file_sha256": "5553b0994eb5128da30f502511158860c00008defa0df509d47c112af76a6993",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p034-s2.trajectory.pt",
+        "sample_id": "p034-s2"
+      },
+      {
+        "file_sha256": "7656c7507e22b041ace6bb25e98b05875ec5a5dff94ce6f6a63f2208b4af3031",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p035-s2.trajectory.pt",
+        "sample_id": "p035-s2"
+      },
+      {
+        "file_sha256": "0f38314d55e6abca190f3366e3860e4f266021505f2aa4f2fd2adb66b33903b4",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p036-s2.trajectory.pt",
+        "sample_id": "p036-s2"
+      },
+      {
+        "file_sha256": "8221b704ee9168771dc76e76b1dbfd305864d0ed4e13f5a172772a9833069ff5",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p037-s2.trajectory.pt",
+        "sample_id": "p037-s2"
+      },
+      {
+        "file_sha256": "3e2e83600d3da2efd7f9adf6f305f574551bb7049cc62785e8146b05e22a5dac",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p038-s2.trajectory.pt",
+        "sample_id": "p038-s2"
+      },
+      {
+        "file_sha256": "7bbfff72f6969b86cb6a8bbef0ca8d0b42e0186485c75e76232805cbc315885e",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p039-s2.trajectory.pt",
+        "sample_id": "p039-s2"
+      },
+      {
+        "file_sha256": "7db47b3dd0650e99bc351a32d3198be119ecefc094cb5831e2ad9d378d20cc2f",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p040-s2.trajectory.pt",
+        "sample_id": "p040-s2"
+      },
+      {
+        "file_sha256": "9b4b8a8cd8cd86565f86bdd844e23856f6037c9ef480fad6be2faf5a321cd8dc",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p041-s2.trajectory.pt",
+        "sample_id": "p041-s2"
+      },
+      {
+        "file_sha256": "71921304ef340fbaed4a1956e415905644f57b4342cab23175e401c9ac67e694",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p042-s2.trajectory.pt",
+        "sample_id": "p042-s2"
+      },
+      {
+        "file_sha256": "5cf478d7567217760e4f3472ddaeb37159ed3453c5a15ec567bde62e01dba7b1",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p043-s2.trajectory.pt",
+        "sample_id": "p043-s2"
+      },
+      {
+        "file_sha256": "d5e7250405fe9c9c3ddf042c4daa13541e625021c148ae9061267b03fdedd710",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p044-s2.trajectory.pt",
+        "sample_id": "p044-s2"
+      },
+      {
+        "file_sha256": "3c42e7d6dc48a36559bad392b4f4a1710f1e3ee347145ad73d0effb974bb6c1b",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p045-s2.trajectory.pt",
+        "sample_id": "p045-s2"
+      },
+      {
+        "file_sha256": "9a9978c173245f5495a707a86b116bebd533f879cca5160f9c47c33d66bb9d36",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p046-s2.trajectory.pt",
+        "sample_id": "p046-s2"
+      },
+      {
+        "file_sha256": "e904eb416adc3b9169d6e10e0df92d93ff85b64aec4f090b3af323aacabdb48a",
+        "path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/artifacts/baseline/p047-s2.trajectory.pt",
+        "sample_id": "p047-s2"
+      }
+    ],
+    "trajectory_count": 48,
+    "trajectory_input_file_sha256": "0443c10d1a121ebcd82e1059dadf1ded98c8b2e25e6ab1bae6345fb1cd459db2",
+    "trajectory_input_path": "/home/ubuntu/difflet-artifacts/flux-cache-qualified-calibration-20260813-newhost/trajectory-input-v1.json",
+    "trajectory_input_schema": "difflet-flux-cache-trajectory-input-v1"
+  },
+  "status": "registered_not_derived",
+  "study_id": "flux-cache-qualified-schedule-derivation-rev5-newhost-2026-08-13"
+}

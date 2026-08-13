@@ -85,6 +85,14 @@ def test_teacache_kwargs_empty_when_unset():
     assert FluxOrchestrator(_flux_args())._model_kwargs() == {}
 
 
+def test_model_kwargs_tolerate_compile_namespace_without_teacache_fields():
+    args = _flux_args()
+    del args.teacache_speedup
+    del args.teacache_calibration
+
+    assert FluxOrchestrator(args)._model_kwargs() == {}
+
+
 def test_taef1_kwargs_reach_compile_and_application_cache_identity():
     kwargs = FluxOrchestrator(
         _flux_args(taef1=True, taef1_path="madebyollin/taef1")

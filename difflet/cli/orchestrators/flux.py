@@ -166,9 +166,12 @@ class FluxOrchestrator(ModelOrchestrator):
         spec and the loaded application agree.
         """
         kwargs: dict[str, Any] = {}
-        if self.args.teacache_speedup is not None:
-            kwargs["teacache_speedup"] = self.args.teacache_speedup
-            kwargs["teacache_calibration_path"] = self.args.teacache_calibration
+        teacache_speedup = getattr(self.args, "teacache_speedup", None)
+        if teacache_speedup is not None:
+            kwargs["teacache_speedup"] = teacache_speedup
+            kwargs["teacache_calibration_path"] = getattr(
+                self.args, "teacache_calibration", None
+            )
         app_kwargs = self._application_kwargs()
         if app_kwargs:
             kwargs["application_kwargs"] = app_kwargs
