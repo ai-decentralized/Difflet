@@ -1,0 +1,349 @@
+{
+  "architecture_speed_claim": false,
+  "artifacts": {
+    "inspect_json": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1a-resident-state-20260812/neuron-inspect-v1.json",
+      "sha256": "d7f009e718e19d5fe77e368d216f3e935f190807913d5424c9ed7c7f49b9274f"
+    },
+    "mechanism_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1a-resident-state-20260812/mechanism-result-v3.json",
+      "sha256": "e0e626cf9078e33babe438a5369744f3ee0003b7f00391319cab7cbcbe0241e1"
+    },
+    "profile_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1a-resident-state-20260812/profile-sequence-result.json",
+      "sha256": "c73fe1570c8b179519f6a62aa61a4dd3cdaf0e0ed74f754ecebe12f0ffb37ab7"
+    }
+  },
+  "boundary_gate": {
+    "large_tensor_host_reads_absent": false,
+    "large_tensor_host_writes_absent": false,
+    "passed": false,
+    "requires_zero_large_tensor_host_reads_on_skip": true,
+    "requires_zero_large_tensor_host_writes_on_skip": true
+  },
+  "calls": [
+    {
+      "aggregate_read_event_time_us": 164.167,
+      "aggregate_write_event_time_us": 641.808,
+      "call_index": 0,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 470.275,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 170.737,
+      "aggregate_write_event_time_us": 626.42,
+      "call_index": 1,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 222.672,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 57.916,
+      "aggregate_write_event_time_us": 597.219,
+      "call_index": 2,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 145.037,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 58.278,
+      "aggregate_write_event_time_us": 565.162,
+      "call_index": 3,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 161.733,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 59.739,
+      "aggregate_write_event_time_us": 591.526,
+      "call_index": 4,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 152.433,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 57.723,
+      "aggregate_write_event_time_us": 611.786,
+      "call_index": 5,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 131.99,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 63.135,
+      "aggregate_write_event_time_us": 604.684,
+      "call_index": 6,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 148.224,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 59.17,
+      "aggregate_write_event_time_us": 603.972,
+      "call_index": 7,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 151.445,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 58.016,
+      "aggregate_write_event_time_us": 589.949,
+      "call_index": 8,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 137.931,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 57.878,
+      "aggregate_write_event_time_us": 598.348,
+      "call_index": 9,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 132.353,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 56.879,
+      "aggregate_write_event_time_us": 585.324,
+      "call_index": 10,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 146.486,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 55.864,
+      "aggregate_write_event_time_us": 611.738,
+      "call_index": 11,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 305.034,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 58.569,
+      "aggregate_write_event_time_us": 570.729,
+      "call_index": 12,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 143.423,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 56.941,
+      "aggregate_write_event_time_us": 643.922,
+      "call_index": 13,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 128.245,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 57.734,
+      "aggregate_write_event_time_us": 619.619,
+      "call_index": 14,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 127.121,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 57.01,
+      "aggregate_write_event_time_us": 603.991,
+      "call_index": 15,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 130.207,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 57.194,
+      "aggregate_write_event_time_us": 609.648,
+      "call_index": 16,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 122.236,
+      "scalar_read_bytes": 4,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 47.738,
+      "aggregate_write_event_time_us": 608.855,
+      "call_index": 17,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 132.893,
+      "scalar_read_bytes": 0,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    },
+    {
+      "aggregate_read_event_time_us": 100.767,
+      "aggregate_write_event_time_us": 352.989,
+      "call_index": 18,
+      "large_tensor_read_bytes": 524288,
+      "large_tensor_read_count": 1,
+      "large_tensor_write_bytes": 2097152,
+      "large_tensor_write_count": 4,
+      "maximum_rank_execute_time_us": 361.887,
+      "scalar_read_bytes": 8,
+      "scalar_write_bytes": 48,
+      "worker_execute_count": 4
+    }
+  ],
+  "decision": {
+    "h1a_alias_mechanism_established": true,
+    "h1a_is_accelerator_resident_data_plane": false,
+    "next": "H1b must compose predictor, scheduler update, and latent state so a skipped step has scalar-only host control; the backbone-to-state inter-NEFF handoff remains a separate gate.",
+    "post_gather_standalone_predictor_is_better_than_host": false
+  },
+  "device_memory_peak": {
+    "note": "These are per-core category maxima from the inspect trace; the tensor peak includes aliased state and transient graph IO, not just the two anchors.",
+    "per_core_bytes": {
+      "0": {
+        "io_bytes": 8,
+        "tensors_bytes": 3145760,
+        "total_bytes": 5152804,
+        "weights_bytes": 0
+      },
+      "1": {
+        "io_bytes": 8,
+        "tensors_bytes": 3145760,
+        "total_bytes": 5152804,
+        "weights_bytes": 0
+      },
+      "2": {
+        "io_bytes": 8,
+        "tensors_bytes": 3145760,
+        "total_bytes": 5152804,
+        "weights_bytes": 0
+      },
+      "3": {
+        "io_bytes": 8,
+        "tensors_bytes": 3145760,
+        "total_bytes": 5152804,
+        "weights_bytes": 0
+      }
+    },
+    "sum_of_per_core_peak_tensor_bytes": 12583040,
+    "sum_of_per_core_peak_total_bytes": 20611216
+  },
+  "invocation_count": 19,
+  "mechanism_gate": {
+    "maximum_absolute_error": 0.0,
+    "maximum_relative_l2_error": 0.0,
+    "passed": true
+  },
+  "per_invocation_invariant_values": {
+    "large_tensor_read_bytes": [
+      524288
+    ],
+    "large_tensor_read_count": [
+      1
+    ],
+    "large_tensor_write_bytes": [
+      2097152
+    ],
+    "large_tensor_write_count": [
+      4
+    ],
+    "worker_execute_count": [
+      4
+    ]
+  },
+  "per_invocation_large_tensor_transfer_bytes": 2621440,
+  "per_invocation_large_tensor_transfer_mib": 2.5,
+  "schema": "difflet-flux-h1a-resident-state-boundary-result",
+  "schema_revision": 1,
+  "serving_claim": false,
+  "static_signature_invariant": true,
+  "status": "mechanism_passed_boundary_failed",
+  "study_id": "flux-h1a-post-gather-resident-state-boundary-20260812",
+  "tensor_bytes": 524288,
+  "timing_diagnostics": {
+    "median_aggregate_read_event_time_us": 57.916,
+    "median_aggregate_write_event_time_us": 603.991,
+    "median_maximum_rank_execute_time_us": 145.037,
+    "note": "Write/read event times are sums across workers and may overlap; bytes and counts are the primary boundary evidence."
+  },
+  "tp_degree": 4
+}

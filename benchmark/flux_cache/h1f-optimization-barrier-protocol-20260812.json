@@ -1,0 +1,31 @@
+{
+  "schema": "difflet-flux-h1f-optimization-barrier-protocol",
+  "schema_revision": 1,
+  "study_id": "flux-h1f-optimization-barrier-contract-20260812",
+  "paper_role": "dispatch-fusion kill test after the exact split cache path reduced traffic but failed the H1e wall-time gate",
+  "serving_claim": false,
+  "question": "Can an XLA optimization barrier preserve the existing predictor-to-BF16-to-Euler contract inside one scalar-only skip NEFF, removing one dispatch per skipped step without changing the cache algorithm?",
+  "frozen_system": {
+    "hardware": "Trainium TP4",
+    "shape": [1, 4096, 64],
+    "dtype": "bfloat16",
+    "schedule": "FLUX.1-dev 50-step dynamically shifted FlowMatch Euler sigmas",
+    "anchors": [0, 1, 2, 3, 4, 5, 9, 15, 21, 31, 41, 49],
+    "skips": 38,
+    "predictor": "unchanged order-1 TaylorSeer/index-coordinate K=2 linear extrapolation",
+    "reference_contract": "predict in FP32, round prediction to BF16, then latent.float() + delta_sigma * prediction.float(), round latent to BF16",
+    "candidate_skip_path": "one cache_skip_step_barrier entry point receiving two FP32 coefficients and one FP32 delta sigma",
+    "resident_state": ["anchor0", "anchor1", "latent"]
+  },
+  "gates": {
+    "F1_compile": "The four-entry application must compile and load on Trainium TP4 with the XLA barrier present in the skip graph.",
+    "F2_exact_contract": "Every one of 50 latent states and the final latent must be bit-exact to the frozen host BF16-boundary contract; agreement only with the fused-FP32 reference is failure.",
+    "F3_single_dispatch": "Each of all 38 skipped steps must execute exactly one cache skip entry point, not separate predictor and scheduler entry points.",
+    "F4_scalar_boundary": "Each skip may receive only two coefficients and one delta sigma from host; no full prediction or latent tensor crosses the host boundary.",
+    "F5_latency_direction": "Report paired steady-state single-skip latency against the already measured split path. This metric is diagnostic and does not authorize an end-to-end speed claim."
+  },
+  "decision": {
+    "if_pass": "Integrate this exact fused skip entry point into the real H1e A12 path and rerun a quick paired end-to-end timing gate before any full 24-pair confirmation.",
+    "if_fail": "Reject optimization-barrier fusion; do not alter the cache algorithm to obtain a favorable speed number. Evaluate a persistent device loop or an explicitly versioned numerical contract separately."
+  }
+}

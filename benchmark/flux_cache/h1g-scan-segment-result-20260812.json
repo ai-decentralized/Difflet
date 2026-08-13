@@ -1,0 +1,123 @@
+{
+  "schema": "difflet-flux-h1g-scan-segment-decision",
+  "schema_revision": 1,
+  "study_id": "flux-h1g-bf16-while-carry-segment-20260812",
+  "status": "persistent_scan_frontend_gate_rejected",
+  "serving_claim": false,
+  "architecture_speed_claim": false,
+  "paper_role": "persistent device-loop architecture gate after straight-line XLA optimization barrier failed",
+  "artifacts": {
+    "protocol": {
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/h1g-scan-segment-protocol-20260812.json",
+      "sha256": "1f786cb1a5445c23a6bdca1a5526e8156ed4c34fee7ec96f3d82ae7bd4e3cefa"
+    },
+    "final_compile_failure": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1g-scan-segment-20260812/compile-failure-result-v9.json",
+      "bytes": 6800,
+      "sha256": "28d70bccaf38541ac9efb0a4aabca21f6fa98f99925c2574369c31eda2545737"
+    }
+  },
+  "frozen_configuration": {
+    "hardware_environment": "Trainium TP4 on trn2.3xlarge",
+    "shape": [1, 4096, 64],
+    "tensor_bytes": 524288,
+    "dtype": "bfloat16",
+    "schedule": "FLUX.1-dev 50-step dynamically shifted FlowMatch Euler sigmas",
+    "anchors": [0, 1, 2, 3, 4, 5, 9, 15, 21, 31, 41, 49],
+    "skip_segments": [[6, 7, 8], [10, 11, 12, 13, 14], [16, 17, 18, 19, 20], [22, 23, 24, 25, 26, 27, 28, 29, 30], [32, 33, 34, 35, 36, 37, 38, 39, 40], [42, 43, 44, 45, 46, 47, 48]],
+    "max_segment_steps": 9,
+    "loop_carry": "BF16 resident latent",
+    "segment_control_packet": "fixed [9,2] FP32 coefficients plus [9,1] FP32 delta sigmas; zero-delta padding for shorter segments",
+    "reference_contract": "round each prediction to BF16 before FP32 Euler, then round the updated latent to BF16 before the next loop iteration"
+  },
+  "candidate_architecture": {
+    "cache_entry_points_per_rank": {
+      "initialize": 1,
+      "anchor_step": 12,
+      "skip_segment": 6,
+      "finalize": 1,
+      "total": 20
+    },
+    "projected_complete_resident_request_entry_points_per_rank": 33,
+    "h1e_exact_split_entry_points_per_rank": 103,
+    "projected_reduction_vs_h1e": 70,
+    "projection_status": "counterfactual_only_candidate_did_not_compile"
+  },
+  "memory_contract_addendum": {
+    "source": "hardware execution constraint supplied after the frozen H1g gate",
+    "scratchpad": "SBUF is SRAM and is cleared at every diffusion step; it cannot hold anchors or latent persistently across steps.",
+    "maximum_persistence_level": "HBM",
+    "candidate_loop_benefit_if_supported": "Host/runtime dispatch amortization and an executable BF16 iteration boundary only.",
+    "benefit_explicitly_not_claimed": [
+      "cross-step SBUF residency",
+      "cross-step SRAM traffic elimination",
+      "elimination of per-iteration HBM reads and writes"
+    ],
+    "paper_implication": "Use HBM-resident request state and dispatch-batched loop, not on-chip persistent state, as the precise architectural terminology."
+  },
+  "development_attempts": [
+    {
+      "attempt": "torch_xla.experimental.scan",
+      "outcome": "frontend_failed",
+      "diagnosis": "scan's AOTAutograd FakeTensor trace interacted with Neuron custom-op-name dispatch and raised Expected XLA tensor, Got XLAFloatType before HLO generation"
+    },
+    {
+      "attempt": "PyTorch while_loop HigherOrderOperator with registered XLA implementation",
+      "outcome": "frontend_failed",
+      "diagnosis": "Neuron ModelBuilder's default INFO-level HLO metadata TorchDispatchMode had no HigherOrderOperator rule"
+    },
+    {
+      "attempt": "HLO metadata disabled plus direct XLA While lowering with every control scalar included in carry",
+      "outcome": "hlo_construction_failed",
+      "diagnosis": "the lowered While body still captured two additional FP32 device-data parameters, so condition, body, body-result, and init tuple signatures differed"
+    }
+  ],
+  "gates": {
+    "G0_host_reference": {
+      "passed": true,
+      "evidence": "The nine-iteration CPU model, including zero-delta padding, is bit-exact to explicit per-step BF16 predictor and scheduler updates; the resident cache-step unit suite passed 4/4."
+    },
+    "G1_compile_while": {
+      "passed": false,
+      "stage_reached": "XLA While construction inside Neuron ModelBuilder trace",
+      "stage_not_reached": "neuronx-cc compilation and NEFF emission",
+      "final_error_type": "RuntimeError",
+      "final_error_summary": "While condition/body/init signatures are unequal because body lowering captures two extra FP32 device-data parameters.",
+      "hlo_metadata_level": "none",
+      "measured_final_failure_detection_seconds": 0.026310825007385574
+    },
+    "G2_single_step_exactness": {
+      "passed": false,
+      "not_run": true,
+      "reason": "G1 produced no executable NEFF."
+    },
+    "G3_segment_exactness": {
+      "passed": false,
+      "not_run": true,
+      "reason": "G1 produced no executable NEFF."
+    },
+    "G4_dispatch_contract": {
+      "passed": false,
+      "not_run": true,
+      "reason": "The 20-entry cache schedule is an architecture projection, not an executed trace."
+    },
+    "G5_scalar_boundary": {
+      "passed": false,
+      "not_run": true,
+      "reason": "No runtime execution boundary exists without a compiled segment entry point."
+    }
+  },
+  "analysis": {
+    "what_failed": "The current Torch/XLA plus Neuron ModelBuilder frontend could not express the candidate XLA While with resident module parameters and request-provided control packets as a closed, shape-stable loop signature.",
+    "what_did_not_fail": "No Trainium numerical mismatch, latency regression, HBM overflow, or neuronx-cc backend rejection was observed because execution and backend compilation were never reached.",
+    "system_significance": "The proposed loop would address H1e's host/runtime dispatch explosion at the correct granularity, but support for an XLA While primitive in the generic runtime is insufficient; the complete tracing, metadata, captured-input, alias-state, and compiler pipeline must share an executable loop contract. Even if supported, the loop carry can persist only in HBM because SBUF is cleared every diffusion step.",
+    "claim_limit": "This result rejects the tested software stack and expression path, not all possible persistent loops, NKI implementations, future runtime versions, or custom backend integrations."
+  },
+  "decision": {
+    "rerun_h1e": false,
+    "deploy_candidate": false,
+    "resident_architecture_speed_claim": false,
+    "current_deployable_dataflow": "host-materializing exact A12",
+    "next": "Stop private frontend workarounds. Continue with orthogonal system characterization: H2 TP-aware placement and H3 scalar control-plane invariance. Reopen persistent loops only with a supported executable BF16 loop-carry contract."
+  }
+}

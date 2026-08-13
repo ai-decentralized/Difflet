@@ -1,0 +1,44 @@
+{
+  "schema": "difflet-flux-h1b-cross-graph-ranked-io-protocol",
+  "schema_revision": 1,
+  "study_id": "flux-h1b-cross-graph-state-ranked-io-20260812",
+  "paper_role": "architecture feasibility gate for an accelerator-resident cache data plane",
+  "serving_claim": false,
+  "question": "Can multiple Neuron entry points share mutable K=2 anchor state and pass a predicted FLUX tensor between NEFFs as ranked device I/O without materializing it on the host?",
+  "frozen_system": {
+    "hardware": "Trainium TP4",
+    "shape": [1, 4096, 64],
+    "dtype": "bfloat16",
+    "tensor_bytes": 524288,
+    "runtime_container": "one NxDModel with four routed SPMD entry points",
+    "entry_points": {
+      "resident_anchor_update": "one full candidate input; shift and alias K=2 anchors",
+      "resident_predict": "two FP32 coefficients only; return predicted ranked tensor",
+      "resident_consume": "ranked predicted tensor plus one FP32 scalar; stand in for scheduler/latent update",
+      "resident_reset": "one int32 request token; clear aliased anchors"
+    },
+    "state_identity": "anchor0 and anchor1 have identical checkpoint keys, shapes, dtypes, and alias output positions in all four entry points"
+  },
+  "gates": {
+    "F1_cross_graph_state": {
+      "sequence": ["reset", "update A", "update B", "predict A/B twice", "ranked consume", "update C", "predict B/C", "scalar reset", "predict zero"],
+      "pass_if": "all full-tensor checks are bit-exact against FP32-accumulate/BF16-round host reference and reset prevents request leakage"
+    },
+    "F2_ranked_io_boundary": {
+      "measured_unit": "resident_predict followed by resident_consume after state is seeded",
+      "pass_if": {
+        "large_host_write_bytes_per_skip_pair": 0,
+        "large_host_read_bytes_per_skip_pair": 0,
+        "only_host_control_inputs": "two FP32 coefficients and one FP32 step scalar",
+        "only_host_observation": "one FP32 checksum"
+      },
+      "evidence": "Neuron inspect nrt_tensor_write/read events grouped by NEFF execution cluster; bytes and counts are primary"
+    }
+  },
+  "scope_limit": "The consume graph is an identity-scaled stand-in, not the real FLUX scheduler/latent update. Passing F1/F2 authorizes composition of the real cache-step graph, not an end-to-end speed claim.",
+  "decision": {
+    "if_both_pass": "Use one multi-entry NxDModel as the H1b graph boundary; next integrate scheduler and resident latent, then connect full-DiT anchor output through ranked I/O.",
+    "if_state_fails": "The current legacy ModelBuilder cannot implement a shared-state multi-NEFF cache service; redraw as one stateful entry point or adopt ModelBuilder v2.",
+    "if_boundary_fails": "Do not claim accelerator-resident inter-NEFF dataflow; fuse producer/consumer or keep the claim at host-controlled multi-graph execution."
+  }
+}

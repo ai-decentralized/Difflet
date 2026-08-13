@@ -1,0 +1,32 @@
+{
+  "schema": "difflet-flux-h1g-scan-segment-protocol",
+  "schema_revision": 1,
+  "study_id": "flux-h1g-bf16-while-carry-segment-20260812",
+  "paper_role": "persistent device-loop architecture gate after straight-line XLA optimization barrier failed",
+  "serving_claim": false,
+  "question": "Can a BF16 XLA While carry make predictor rounding executable while batching each contiguous A12 skip segment into one dispatch?",
+  "frozen_system": {
+    "hardware": "Trainium TP4",
+    "shape": [1, 4096, 64],
+    "dtype": "bfloat16",
+    "schedule": "FLUX.1-dev 50-step dynamically shifted FlowMatch Euler sigmas",
+    "anchors": [0, 1, 2, 3, 4, 5, 9, 15, 21, 31, 41, 49],
+    "skip_segments": [[6, 7, 8], [10, 11, 12, 13, 14], [16, 17, 18, 19, 20], [22, 23, 24, 25, 26, 27, 28, 29, 30], [32, 33, 34, 35, 36, 37, 38, 39, 40], [42, 43, 44, 45, 46, 47, 48]],
+    "max_segment_steps": 9,
+    "predictor": "unchanged order-1 TaylorSeer/index-coordinate K=2 extrapolation",
+    "reference_contract": "each prediction rounds to BF16 before each FP32 Euler update, and each updated latent rounds to BF16 before the next step",
+    "segment_input": "fixed [9,2] FP32 coefficients plus [9,1] FP32 delta sigmas; short segments use zero-delta padding",
+    "loop_carry": "BF16 resident latent"
+  },
+  "gates": {
+    "G1_compile_while": "The candidate must compile/load on TP4 and input HLO must contain an XLA While/scan rather than nine unrolled straight-line copies.",
+    "G2_single_step_exactness": "Using the same segment graph with one active row and eight zero-delta rows, all 50 schedule states and final latent must be bit-exact to the frozen host contract.",
+    "G3_segment_exactness": "Using the six real multi-active A12 segment packets, every anchor state, every segment endpoint, and final latent must be bit-exact.",
+    "G4_dispatch_contract": "The complete cache schedule must use 1 initialize, 12 anchor, 6 segment, and 1 finalize entry point per rank; projected full resident request including staging and backbone is 33 entry points per rank.",
+    "G5_scalar_boundary": "A segment may receive only its fixed scalar coefficient/delta packet; no latent, anchor, or prediction tensor may be materialized on host between iterations."
+  },
+  "decision": {
+    "if_pass": "Connect the scan segment entry point to the real staged FLUX backbone path, then run a quick paired H1e end-to-end A/B before freezing a full confirmation.",
+    "if_fail": "Reject the persistent scan path under the current runtime. Keep host-materializing A12 as deployable and continue only orthogonal H2/H3 characterization."
+  }
+}

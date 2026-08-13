@@ -1,0 +1,767 @@
+{
+  "D1_numerical_contract": {
+    "check_count": 24,
+    "maximum_absolute_error": 0.0,
+    "maximum_relative_l2_error": 0.0,
+    "passed": true
+  },
+  "D2_D3_lifetime_and_isolation": {
+    "allocation_contract": "host selects a free compiled slot; a slot is not reused until request release",
+    "passed": true,
+    "proof_slot_capacity": 2,
+    "single_slot_failed_checks": {
+      "backbone_A_survives_B_and_cache_execution": {
+        "maximum_absolute_error": 268.546875,
+        "name": "backbone_A_survives_B_and_cache_execution",
+        "relative_l2_error": 1.00088010864616
+      }
+    },
+    "single_slot_failure_reproduced": true,
+    "two_slot_interleave_checks": {
+      "backbone_A_survives_B_and_cache_execution": {
+        "maximum_absolute_error": 0.0,
+        "name": "backbone_A_survives_B_and_cache_execution",
+        "relative_l2_error": 0.0
+      },
+      "backbone_direct_vs_staged_A_before_interleave": {
+        "maximum_absolute_error": 0.0,
+        "name": "backbone_direct_vs_staged_A_before_interleave",
+        "relative_l2_error": 0.0
+      },
+      "backbone_direct_vs_staged_B": {
+        "maximum_absolute_error": 0.0,
+        "name": "backbone_direct_vs_staged_B",
+        "relative_l2_error": 0.0
+      }
+    }
+  },
+  "D4_boundary_accounting": {
+    "backbone_receives_only_timestep_scalar": true,
+    "calls": [
+      {
+        "execute_time_us": 52063.24,
+        "ordinal": 0,
+        "read_sizes": [],
+        "tag": "transformer",
+        "worker": 0,
+        "workload_thread": 1,
+        "write_sizes": []
+      },
+      {
+        "execute_time_us": 1494.76,
+        "ordinal": 1,
+        "read_sizes": [],
+        "tag": "request_context_stage_slot_0",
+        "worker": 0,
+        "workload_thread": 1,
+        "write_sizes": [
+          2,
+          4,
+          1536,
+          2359296,
+          4194304
+        ]
+      },
+      {
+        "execute_time_us": 218.946,
+        "ordinal": 2,
+        "read_sizes": [],
+        "tag": "cache_initialize",
+        "worker": 0,
+        "workload_thread": 1,
+        "write_sizes": [
+          16,
+          524288
+        ]
+      },
+      {
+        "execute_time_us": 440883.551,
+        "ordinal": 3,
+        "read_sizes": [],
+        "tag": "NeuronFluxTransformer2DModel",
+        "worker": 0,
+        "workload_thread": 1,
+        "write_sizes": [
+          2
+        ]
+      },
+      {
+        "execute_time_us": 220.389,
+        "ordinal": 4,
+        "read_sizes": [],
+        "tag": "cache_anchor_step",
+        "worker": 0,
+        "workload_thread": 1,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 262937.671,
+        "ordinal": 5,
+        "read_sizes": [],
+        "tag": "NeuronFluxTransformer2DModel",
+        "worker": 0,
+        "workload_thread": 1,
+        "write_sizes": [
+          2
+        ]
+      },
+      {
+        "execute_time_us": 186.181,
+        "ordinal": 6,
+        "read_sizes": [],
+        "tag": "cache_anchor_step",
+        "worker": 0,
+        "workload_thread": 1,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 169.477,
+        "ordinal": 7,
+        "read_sizes": [],
+        "tag": "cache_predict",
+        "worker": 0,
+        "workload_thread": 1,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 169.859,
+        "ordinal": 8,
+        "read_sizes": [],
+        "tag": "cache_scheduler_step",
+        "worker": 0,
+        "workload_thread": 1,
+        "write_sizes": [
+          4
+        ]
+      },
+      {
+        "execute_time_us": 262845.057,
+        "ordinal": 9,
+        "read_sizes": [],
+        "tag": "NeuronFluxTransformer2DModel",
+        "worker": 0,
+        "workload_thread": 1,
+        "write_sizes": [
+          2
+        ]
+      },
+      {
+        "execute_time_us": 202.051,
+        "ordinal": 10,
+        "read_sizes": [],
+        "tag": "cache_anchor_step",
+        "worker": 0,
+        "workload_thread": 1,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 163.034,
+        "ordinal": 11,
+        "read_sizes": [],
+        "tag": "cache_finalize",
+        "worker": 0,
+        "workload_thread": 1,
+        "write_sizes": [
+          12
+        ]
+      },
+      {
+        "execute_time_us": 51396.756,
+        "ordinal": 0,
+        "read_sizes": [],
+        "tag": "transformer",
+        "worker": 1,
+        "workload_thread": 2,
+        "write_sizes": []
+      },
+      {
+        "execute_time_us": 239924.179,
+        "ordinal": 1,
+        "read_sizes": [],
+        "tag": "request_context_stage_slot_0",
+        "worker": 1,
+        "workload_thread": 2,
+        "write_sizes": [
+          2,
+          4,
+          1536,
+          2359296,
+          4194304
+        ]
+      },
+      {
+        "execute_time_us": 422.474,
+        "ordinal": 2,
+        "read_sizes": [],
+        "tag": "cache_initialize",
+        "worker": 1,
+        "workload_thread": 2,
+        "write_sizes": [
+          16,
+          524288
+        ]
+      },
+      {
+        "execute_time_us": 441055.136,
+        "ordinal": 3,
+        "read_sizes": [],
+        "tag": "NeuronFluxTransformer2DModel",
+        "worker": 1,
+        "workload_thread": 2,
+        "write_sizes": [
+          2
+        ]
+      },
+      {
+        "execute_time_us": 238.279,
+        "ordinal": 4,
+        "read_sizes": [],
+        "tag": "cache_anchor_step",
+        "worker": 1,
+        "workload_thread": 2,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 263027.662,
+        "ordinal": 5,
+        "read_sizes": [],
+        "tag": "NeuronFluxTransformer2DModel",
+        "worker": 1,
+        "workload_thread": 2,
+        "write_sizes": [
+          2
+        ]
+      },
+      {
+        "execute_time_us": 251.098,
+        "ordinal": 6,
+        "read_sizes": [],
+        "tag": "cache_anchor_step",
+        "worker": 1,
+        "workload_thread": 2,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 225.959,
+        "ordinal": 7,
+        "read_sizes": [],
+        "tag": "cache_predict",
+        "worker": 1,
+        "workload_thread": 2,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 321.194,
+        "ordinal": 8,
+        "read_sizes": [],
+        "tag": "cache_scheduler_step",
+        "worker": 1,
+        "workload_thread": 2,
+        "write_sizes": [
+          4
+        ]
+      },
+      {
+        "execute_time_us": 263185.016,
+        "ordinal": 9,
+        "read_sizes": [],
+        "tag": "NeuronFluxTransformer2DModel",
+        "worker": 1,
+        "workload_thread": 2,
+        "write_sizes": [
+          2
+        ]
+      },
+      {
+        "execute_time_us": 354.181,
+        "ordinal": 10,
+        "read_sizes": [],
+        "tag": "cache_anchor_step",
+        "worker": 1,
+        "workload_thread": 2,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 310.264,
+        "ordinal": 11,
+        "read_sizes": [],
+        "tag": "cache_finalize",
+        "worker": 1,
+        "workload_thread": 2,
+        "write_sizes": [
+          12
+        ]
+      },
+      {
+        "execute_time_us": 51396.599,
+        "ordinal": 0,
+        "read_sizes": [],
+        "tag": "transformer",
+        "worker": 2,
+        "workload_thread": 3,
+        "write_sizes": []
+      },
+      {
+        "execute_time_us": 1203.567,
+        "ordinal": 1,
+        "read_sizes": [],
+        "tag": "request_context_stage_slot_0",
+        "worker": 2,
+        "workload_thread": 3,
+        "write_sizes": [
+          2,
+          4,
+          1536,
+          2359296,
+          4194304
+        ]
+      },
+      {
+        "execute_time_us": 417.911,
+        "ordinal": 2,
+        "read_sizes": [],
+        "tag": "cache_initialize",
+        "worker": 2,
+        "workload_thread": 3,
+        "write_sizes": [
+          16,
+          524288
+        ]
+      },
+      {
+        "execute_time_us": 440994.255,
+        "ordinal": 3,
+        "read_sizes": [],
+        "tag": "NeuronFluxTransformer2DModel",
+        "worker": 2,
+        "workload_thread": 3,
+        "write_sizes": [
+          2
+        ]
+      },
+      {
+        "execute_time_us": 486.626,
+        "ordinal": 4,
+        "read_sizes": [],
+        "tag": "cache_anchor_step",
+        "worker": 2,
+        "workload_thread": 3,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 263143.331,
+        "ordinal": 5,
+        "read_sizes": [],
+        "tag": "NeuronFluxTransformer2DModel",
+        "worker": 2,
+        "workload_thread": 3,
+        "write_sizes": [
+          2
+        ]
+      },
+      {
+        "execute_time_us": 345.584,
+        "ordinal": 6,
+        "read_sizes": [],
+        "tag": "cache_anchor_step",
+        "worker": 2,
+        "workload_thread": 3,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 354.895,
+        "ordinal": 7,
+        "read_sizes": [],
+        "tag": "cache_predict",
+        "worker": 2,
+        "workload_thread": 3,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 374.269,
+        "ordinal": 8,
+        "read_sizes": [],
+        "tag": "cache_scheduler_step",
+        "worker": 2,
+        "workload_thread": 3,
+        "write_sizes": [
+          4
+        ]
+      },
+      {
+        "execute_time_us": 263243.055,
+        "ordinal": 9,
+        "read_sizes": [],
+        "tag": "NeuronFluxTransformer2DModel",
+        "worker": 2,
+        "workload_thread": 3,
+        "write_sizes": [
+          2
+        ]
+      },
+      {
+        "execute_time_us": 331.721,
+        "ordinal": 10,
+        "read_sizes": [],
+        "tag": "cache_anchor_step",
+        "worker": 2,
+        "workload_thread": 3,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 486.757,
+        "ordinal": 11,
+        "read_sizes": [],
+        "tag": "cache_finalize",
+        "worker": 2,
+        "workload_thread": 3,
+        "write_sizes": [
+          12
+        ]
+      },
+      {
+        "execute_time_us": 52134.985,
+        "ordinal": 0,
+        "read_sizes": [],
+        "tag": "transformer",
+        "worker": 3,
+        "workload_thread": 4,
+        "write_sizes": []
+      },
+      {
+        "execute_time_us": 1522.143,
+        "ordinal": 1,
+        "read_sizes": [],
+        "tag": "request_context_stage_slot_0",
+        "worker": 3,
+        "workload_thread": 4,
+        "write_sizes": [
+          2,
+          4,
+          1536,
+          2359296,
+          4194304
+        ]
+      },
+      {
+        "execute_time_us": 346.761,
+        "ordinal": 2,
+        "read_sizes": [],
+        "tag": "cache_initialize",
+        "worker": 3,
+        "workload_thread": 4,
+        "write_sizes": [
+          16,
+          524288
+        ]
+      },
+      {
+        "execute_time_us": 441067.574,
+        "ordinal": 3,
+        "read_sizes": [],
+        "tag": "NeuronFluxTransformer2DModel",
+        "worker": 3,
+        "workload_thread": 4,
+        "write_sizes": [
+          2
+        ]
+      },
+      {
+        "execute_time_us": 397.066,
+        "ordinal": 4,
+        "read_sizes": [],
+        "tag": "cache_anchor_step",
+        "worker": 3,
+        "workload_thread": 4,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 263027.901,
+        "ordinal": 5,
+        "read_sizes": [],
+        "tag": "NeuronFluxTransformer2DModel",
+        "worker": 3,
+        "workload_thread": 4,
+        "write_sizes": [
+          2
+        ]
+      },
+      {
+        "execute_time_us": 366.836,
+        "ordinal": 6,
+        "read_sizes": [],
+        "tag": "cache_anchor_step",
+        "worker": 3,
+        "workload_thread": 4,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 336.778,
+        "ordinal": 7,
+        "read_sizes": [],
+        "tag": "cache_predict",
+        "worker": 3,
+        "workload_thread": 4,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 318.917,
+        "ordinal": 8,
+        "read_sizes": [],
+        "tag": "cache_scheduler_step",
+        "worker": 3,
+        "workload_thread": 4,
+        "write_sizes": [
+          4
+        ]
+      },
+      {
+        "execute_time_us": 263186.89,
+        "ordinal": 9,
+        "read_sizes": [],
+        "tag": "NeuronFluxTransformer2DModel",
+        "worker": 3,
+        "workload_thread": 4,
+        "write_sizes": [
+          2
+        ]
+      },
+      {
+        "execute_time_us": 340.429,
+        "ordinal": 10,
+        "read_sizes": [],
+        "tag": "cache_anchor_step",
+        "worker": 3,
+        "workload_thread": 4,
+        "write_sizes": [
+          8
+        ]
+      },
+      {
+        "execute_time_us": 293.899,
+        "ordinal": 11,
+        "read_sizes": [],
+        "tag": "cache_finalize",
+        "worker": 3,
+        "workload_thread": 4,
+        "write_sizes": [
+          12
+        ]
+      }
+    ],
+    "exact_transfer_sequence_passed": true,
+    "latent_noise_host_read_bytes_between_initialize_finalize": 0,
+    "latent_noise_host_write_bytes_between_initialize_finalize": 0,
+    "passed": true,
+    "post_stage_host_read_bytes": 0,
+    "post_stage_write_size_counts": {
+      "12": 4,
+      "16": 4,
+      "2": 12,
+      "4": 4,
+      "524288": 4,
+      "8": 16
+    },
+    "request_context_staged_once": true,
+    "stage_write_size_counts": {
+      "1536": 4,
+      "2": 4,
+      "2359296": 4,
+      "4": 4,
+      "4194304": 4
+    },
+    "workload_thread_mapping": {
+      "0": 1,
+      "1": 2,
+      "2": 3,
+      "3": 4
+    }
+  },
+  "D5_amortization": {
+    "claim_boundary": "Measured byte/count inventory and projections only; no end-to-end speedup claim.",
+    "h1c_previous_per_backbone_host_write_bytes": 26220560,
+    "one_time_stage_host_write_bytes": 26220568,
+    "per_backbone_timestep_host_write_bytes": 8,
+    "projected_a12_context_and_timestep_bytes_after": 26220664,
+    "projected_a12_context_and_timestep_bytes_before": 314646720,
+    "projected_full50_context_and_timestep_bytes_after": 26220968,
+    "projected_full50_context_and_timestep_bytes_before": 1311028000,
+    "request_context_tensor_bytes_tp4": 26220552,
+    "slot_token_bytes_tp4": 16
+  },
+  "D6_runtime_and_memory": {
+    "compile_seconds": 2.955494035006268,
+    "delta_vs_h1c_per_core_bytes": {
+      "0": {
+        "io_bytes": 16,
+        "tensors_bytes": 52441128,
+        "total_bytes": 52545592,
+        "weights_bytes": 0
+      },
+      "1": {
+        "io_bytes": 16,
+        "tensors_bytes": 52441128,
+        "total_bytes": 52545592,
+        "weights_bytes": 0
+      },
+      "2": {
+        "io_bytes": 16,
+        "tensors_bytes": 52441128,
+        "total_bytes": 52545592,
+        "weights_bytes": 0
+      },
+      "3": {
+        "io_bytes": 16,
+        "tensors_bytes": 52441128,
+        "total_bytes": 52545592,
+        "weights_bytes": 0
+      }
+    },
+    "device_memory_peak_per_core_bytes": {
+      "0": {
+        "io_bytes": 384,
+        "tensors_bytes": 6030477116,
+        "total_bytes": 6586754112,
+        "weights_bytes": 262144
+      },
+      "1": {
+        "io_bytes": 384,
+        "tensors_bytes": 6030477116,
+        "total_bytes": 6586754112,
+        "weights_bytes": 262144
+      },
+      "2": {
+        "io_bytes": 384,
+        "tensors_bytes": 6030477116,
+        "total_bytes": 6586754112,
+        "weights_bytes": 262144
+      },
+      "3": {
+        "io_bytes": 384,
+        "tensors_bytes": 6030477116,
+        "total_bytes": 6586754112,
+        "weights_bytes": 262144
+      }
+    },
+    "execution_diagnostics": {
+      "NeuronFluxTransformer2DModel": {
+        "maximum_per_rank_execute_time_us": 441067.574,
+        "median_per_rank_execute_time_us": 263185.953,
+        "rank_execution_count": 12
+      },
+      "cache_anchor_step": {
+        "maximum_per_rank_execute_time_us": 486.626,
+        "median_per_rank_execute_time_us": 336.075,
+        "rank_execution_count": 12
+      },
+      "cache_finalize": {
+        "maximum_per_rank_execute_time_us": 486.757,
+        "median_per_rank_execute_time_us": 302.0815,
+        "rank_execution_count": 4
+      },
+      "cache_initialize": {
+        "maximum_per_rank_execute_time_us": 422.474,
+        "median_per_rank_execute_time_us": 382.336,
+        "rank_execution_count": 4
+      },
+      "cache_predict": {
+        "maximum_per_rank_execute_time_us": 354.895,
+        "median_per_rank_execute_time_us": 281.36850000000004,
+        "rank_execution_count": 4
+      },
+      "cache_scheduler_step": {
+        "maximum_per_rank_execute_time_us": 374.269,
+        "median_per_rank_execute_time_us": 320.0555,
+        "rank_execution_count": 4
+      },
+      "request_context_stage_slot_0": {
+        "maximum_per_rank_execute_time_us": 239924.179,
+        "median_per_rank_execute_time_us": 1508.4515000000001,
+        "rank_execution_count": 4
+      }
+    },
+    "load_seconds": {
+      "backbone": 19.197605873006978,
+      "cache_step": 0.0658543540048413,
+      "request_context": 0.043274056995869614
+    },
+    "memory_comparison_note": "Same backbone/cache artifacts and profiler method; delta includes both retained slot outputs and runtime graph/input buffers, so it is not interpreted as payload size alone.",
+    "request_context_artifact": {
+      "file_count": 2,
+      "model_pt_sha256": "b646da1d85337ba202d063569c0457c8469d0bfddaafe8728b56955d179fe71d",
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1d-request-context-20260812/compiled-v2",
+      "total_bytes": 60440
+    }
+  },
+  "architecture_speed_claim": false,
+  "artifacts": {
+    "failed_single_slot_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1d-request-context-20260812/mechanism-result-v1.json",
+      "sha256": "a59af727ec476d7a0fea1a4706473b36ff9773155cb36e0e440df417e98b8125"
+    },
+    "h1c_boundary_result": {
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/h1c-backbone-ranked-loop-result-20260812.json",
+      "sha256": "74e4f778746e24a7687d4c86a9870abc6d8189a3aa8d36657d72bbdf1ebf57b7"
+    },
+    "inspect_json": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1d-request-context-20260812/neuron-inspect-parsed-v1.json",
+      "sha256": "8fe04675c9d44da4b4bb55122c48dcd36ebc5c1cd8264faf6dea8e625d4b4a1b"
+    },
+    "mechanism_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1d-request-context-20260812/mechanism-result-v2.json",
+      "sha256": "41f0660a2050bcbaf16c7e949dd0b475258a2a6e5f631ad17c2c8662dbc11db6"
+    },
+    "profile_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1d-request-context-20260812/profile-result-v1.json",
+      "sha256": "c639cbcb643db0d0a05fe3aa9a06fcc5e974458a5ebb223e5a80e49e21f26254"
+    },
+    "protocol": {
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/h1d-request-context-staging-protocol-20260812.json",
+      "sha256": "3c6c9e1f997be096bcb872a0c914462ba72fdc9161bc2dc3ac1f261b589d9acb"
+    }
+  },
+  "decision": {
+    "new_runtime_requirement": "A request owns a device context slot until release; re-executing one staging entry point overwrites its output buffers.",
+    "next": "Run a complete 50-step real-prompt A12 loop and a materializing-vs-resident end-to-end A/B before any speed or image-quality claim.",
+    "resident_request_state_classes": {
+      "immutable_request_state": "conditioning uses request-owned ranked slot outputs",
+      "mutable_request_state": "anchors and latent use aliased device state",
+      "step_state": "timestep, predictor coefficients, and delta sigma remain scalar host control"
+    }
+  },
+  "schema": "difflet-flux-h1d-request-context-staging-architecture-result",
+  "schema_revision": 1,
+  "serving_claim": false,
+  "status": "request_context_boundary_passed_full_loop_required",
+  "study_id": "flux-h1d-request-context-staging-20260812"
+}

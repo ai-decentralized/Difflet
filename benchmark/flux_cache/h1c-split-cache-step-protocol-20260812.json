@@ -1,0 +1,30 @@
+{
+  "schema": "difflet-flux-h1c-split-cache-step-protocol",
+  "schema_revision": 1,
+  "study_id": "flux-h1c-split-precision-boundary-20260812",
+  "paper_role": "architecture redesign after the frozen single-NEFF precision-composition gate failed",
+  "serving_claim": false,
+  "motivation": "The single cache_skip_step NEFF is bit-exact to a fused FP32 predictor-to-Euler reference, but not to the current predictor contract that rounds to BF16 before scheduling. A ranked NEFF boundary is introduced to preserve that semantic cast without host materialization.",
+  "frozen_system": {
+    "hardware": "Trainium TP4",
+    "shape": [1, 4096, 64],
+    "schedule": "FLUX.1-dev 50-step dynamically shifted FlowMatch Euler sigmas",
+    "anchors": [0, 1, 2, 3, 4, 5, 9, 15, 21, 31, 41, 49],
+    "skips": 38,
+    "skip_path": [
+      "cache_predict(two FP32 coefficients) -> BF16 ranked device tensor",
+      "cache_scheduler_step(ranked prediction, FP32 delta sigma) -> aliased BF16 latent"
+    ],
+    "resident_state": ["anchor0", "anchor1", "latent"]
+  },
+  "gates": {
+    "S1_exact_contract": "All 50 latent states and final latent must be bit-exact to predictor-BF16-round followed by FlowMatch Euler.",
+    "S2_zero_host_materialization": "All 38 ranked predictor-to-scheduler handoffs must have zero full-tensor host writes and reads.",
+    "S3_scalar_control": "A skip may write only two coefficients and delta sigma from host; a scalar checksum read is allowed for synchronized timing."
+  },
+  "scope_limit": "This split experiment still uses host-originated synthetic actual-noise tensors on anchor steps; real backbone ranked ingress and end-to-end speed remain unproven.",
+  "decision": {
+    "if_pass": "Adopt the split predictor/scheduler boundary as the exact H1c cache-step contract and connect the real FLUX backbone.",
+    "if_fail": "Preserve the single-NEFF fused numerical contract only as an explicitly different cache algorithm, or stop resident composition."
+  }
+}

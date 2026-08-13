@@ -1,0 +1,35 @@
+{
+  "schema": "difflet-flux-h1c-resident-cache-step-protocol",
+  "schema_revision": 1,
+  "study_id": "flux-h1c-resident-predictor-scheduler-latent-20260812",
+  "paper_role": "architecture composition gate between ranked-I/O feasibility and full FLUX backbone integration",
+  "serving_claim": false,
+  "question": "Can one scalar-only skip entry point compose the K=2 predictor, the exact non-stochastic FlowMatch Euler update, and aliased latent write-back for a complete A12/50-step cache schedule?",
+  "frozen_system": {
+    "hardware": "Trainium TP4",
+    "shape": [1, 4096, 64],
+    "dtype": "bfloat16",
+    "schedule": "FLUX.1-dev 50-step dynamically shifted FlowMatch Euler sigmas",
+    "anchors": [0, 1, 2, 3, 4, 5, 9, 15, 21, 31, 41, 49],
+    "skips": 38,
+    "predictor": "order-1 TaylorSeer/index-coordinate K=2 linear extrapolation",
+    "scheduler": "latent.float() + (sigma_next - sigma) * noise.float(), rounded once to BF16",
+    "resident_state": ["anchor0", "anchor1", "latent"],
+    "entry_points": {
+      "cache_initialize": "initial latent plus request token",
+      "cache_anchor_step": "full actual noise plus delta sigma",
+      "cache_skip_step": "two coefficients plus delta sigma",
+      "cache_finalize": "finalize token"
+    }
+  },
+  "gates": {
+    "C1_numerical_composition": "Every one of 50 latent states and the final latent must be bit-exact against the host predictor plus FlowMatchEulerDiscreteScheduler algebra.",
+    "C2_skip_boundary": "Across all 38 skip calls, full-tensor host writes and reads must both be zero; only coefficients and delta sigma may enter.",
+    "C3_state_lifecycle": "Initialize resets anchors and latent for a request; finalize exposes exactly one full latent at the request boundary."
+  },
+  "scope_limit": "Actual anchor noise tensors are synthetic frozen BF16 inputs in this experiment. Anchor ingress still originates on the host; H1c-b must feed ranked output from the real FLUX backbone before any end-to-end speed claim.",
+  "decision": {
+    "if_pass": "Replace the synthetic anchor source with real ranked FLUX backbone output and run a full denoise-loop A/B.",
+    "if_fail": "Do not proceed to full backbone integration until predictor, scheduler, and latent state share an exact executable contract."
+  }
+}

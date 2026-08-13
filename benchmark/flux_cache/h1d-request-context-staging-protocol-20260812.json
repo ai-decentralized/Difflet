@@ -1,0 +1,79 @@
+{
+  "schema": "difflet-flux-h1d-request-context-staging-protocol",
+  "schema_revision": 1,
+  "study_id": "flux-h1d-request-context-staging-20260812",
+  "paper_role": "request-state lifetime and host-device boundary gate",
+  "serving_claim": false,
+  "architecture_speed_claim": false,
+  "question": "Can request-invariant FLUX conditioning be copied to TP4 exactly once, retained as ranked device handles across separately compiled backbone/cache invocations, and isolated across interleaved requests?",
+  "frozen_system": {
+    "backbone_artifact": "/home/ubuntu/.cache/difflet/flux/ebbfe33fed51b364/transformer",
+    "backbone_model_pt_sha256": "fd2c5476714043ae603da0c1c0f5902eb98dc14ce222adfc18e3858c885732f8",
+    "cache_step_artifact": "/home/ubuntu/difflet-artifacts/flux-h1c-resident-cache-step-20260812/compiled-split-v2",
+    "cache_step_model_pt_sha256": "a1b5ff4179758594aa504840e0b0a7403ea6c21209cb1128ee5467a52ceb89a1",
+    "hardware": "Trainium TP4",
+    "dtype": "bfloat16",
+    "resolution": "1024x1024",
+    "latent_noise_shape": [
+      1,
+      4096,
+      64
+    ],
+    "request_invariant_inputs": {
+      "encoder_hidden_states": [
+        1,
+        512,
+        4096
+      ],
+      "pooled_projections": [
+        1,
+        768
+      ],
+      "guidance": [
+        1
+      ],
+      "rotary_embedding": [
+        4608,
+        128,
+        2
+      ]
+    },
+    "step_lifetime_input": {
+      "timestep": [
+        1
+      ]
+    },
+    "mechanism_sequence": [
+      "stage request A context",
+      "direct-host and staged-context backbone equivalence check",
+      "stage request B context",
+      "interleave backbone calls using A then B then A ranked context handles",
+      "run initialize -> anchor 0 -> anchor 1 -> resident skip 2 -> anchor 3 -> finalize with request A staged context"
+    ],
+    "profile_sequence": [
+      "stage one request context once",
+      "initialize latent",
+      "real backbone anchor 0",
+      "real backbone anchor 1",
+      "resident skip 2",
+      "real backbone anchor 3",
+      "finalize latent"
+    ]
+  },
+  "gates": {
+    "D1_numerical_contract": "Every staged tensor must be bit-exact to its host source, staged-context backbone output must be bit-exact to direct-host-context output, and the full resident latent sequence/final latent must remain bit-exact to host algebra.",
+    "D2_request_lifetime": "The same request A context handles must remain valid after cache-step executions, multiple backbone invocations, and staging request B.",
+    "D3_request_isolation": "In an A -> B -> A interleave, each backbone output must be bit-exact to the corresponding direct-host-context reference; no alias or overwrite between request handles is permitted.",
+    "D4_boundary_accounting": "In the profiled request, encoder, pooled, guidance, and rotary host writes must occur exactly once per rank in the staging call and zero times in all subsequent backbone/cache calls. Latent/noise 524288-byte host writes and reads must remain zero between initialize and finalize.",
+    "D5_amortization": "Report measured one-time request-context bytes and measured residual per-backbone scalar bytes, then project A12 and full-50 traffic from those observed counts. Do not claim end-to-end speedup from byte reduction alone.",
+    "D6_memory_and_runtime": "Report compiled artifact size, compile/load latency, per-entry execution latency, and per-core HBM peak. This is diagnostic evidence and not yet a serving throughput result."
+  },
+  "pass_status": "request_context_boundary_passed_full_loop_required",
+  "scope_limit": "Seeded synthetic conditioning uses the exact compiled shapes but does not invoke text encoders or establish image quality, multi-tenant throughput, scheduler speedup, or end-to-end latency superiority. Passing authorizes the full real-prompt A12 comparison.",
+  "decision": {
+    "if_all_gates_pass": "Promote immutable conditioning into the resident request-state architecture, run a complete 50-step real-prompt A12 path, and compare against the current materializing pipeline.",
+    "if_D1_or_D2_fails": "The standalone staging executable cannot provide the required lifetime contract; integrate context initialization into the backbone runtime container.",
+    "if_D3_fails": "Device handles are not safe request identities; add an explicit request-state slot or pool before any serving claim.",
+    "if_D4_fails": "Use profiler evidence to identify implicit materialization or layout conversion and move that operation behind the request initialization boundary."
+  }
+}

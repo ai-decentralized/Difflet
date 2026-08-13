@@ -1,0 +1,86 @@
+{
+  "schema": "difflet-flux-h1e-resident-e2e-ab-protocol",
+  "schema_revision": 1,
+  "study_id": "flux-h1e-resident-e2e-ab-20260812",
+  "paper_role": "end-to-end architecture and system performance gate",
+  "question": "Holding the real-prompt A12 predictor and all model/scheduler inputs fixed, does resident request state reduce end-to-end latency and host-device traffic relative to the current host-materializing dataflow without changing the final latent or decoded tensor?",
+  "frozen_system": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "compiled_root": "/home/ubuntu/.cache/difflet/flux/ebbfe33fed51b364",
+    "backbone_model_pt_sha256": "fd2c5476714043ae603da0c1c0f5902eb98dc14ce222adfc18e3858c885732f8",
+    "cache_step_artifact": "/home/ubuntu/difflet-artifacts/flux-h1c-resident-cache-step-20260812/compiled-split-v2",
+    "cache_step_model_pt_sha256": "a1b5ff4179758594aa504840e0b0a7403ea6c21209cb1128ee5467a52ceb89a1",
+    "request_context_artifact": "/home/ubuntu/difflet-artifacts/flux-h1d-request-context-20260812/compiled-v2",
+    "request_context_model_pt_sha256": "b646da1d85337ba202d063569c0457c8469d0bfddaafe8728b56955d179fe71d",
+    "hardware": "Trainium TP4",
+    "dtype": "bfloat16",
+    "height": 1024,
+    "width": 1024,
+    "num_steps": 50,
+    "guidance_scale": 3.5,
+    "scheduler": "FlowMatchEulerDiscreteScheduler with the model's dynamic shift",
+    "anchor_steps": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      9,
+      15,
+      21,
+      31,
+      41,
+      49
+    ],
+    "predictor": "order-1 index TaylorSeer over the two most recent real anchors, FP32 linear combination rounded once to BF16",
+    "output": "raw decoded VAE tensor; packed final latent retained for parity"
+  },
+  "arms": {
+    "materializing_A12": "Text encode and rotary setup once. At each of 12 anchors, copy host latent and all host context tensors to every TP rank, read rank-0 backbone noise to host, store two host anchors, run the same predictor and FlowMatch Euler update on host, then decode the host final latent.",
+    "resident_A12": "Text encode and rotary setup once. Stage immutable context into one request-owned device slot, initialize aliased latent once, exchange ranked handles across the same backbone and exact split cache-step runtime for all 50 steps, read only the final latent, then decode it through the same VAE."
+  },
+  "paired_latency_design": {
+    "prompts": [
+      "a red fox sitting in a snowy forest at dawn, sharp detail",
+      "a bustling night market with neon signs and steam, cinematic",
+      "a precise architectural cutaway of a compact coastal research station, labeled rooms, realistic materials",
+      "a macro photograph of a translucent blue dragonfly wing covered in morning dew, shallow depth of field"
+    ],
+    "seeds": [
+      101,
+      202,
+      303,
+      404
+    ],
+    "repetitions_per_prompt": 6,
+    "paired_request_count": 24,
+    "warmup": "one untimed complete request per arm before measurement",
+    "order": "Within each prompt, alternate AB and BA so each arm runs first three times and second three times.",
+    "synchronization": "Each arm ends only after the raw decoded tensor is materialized on host; stage timers also record encode/setup, context staging, denoise, final read, and decode separately.",
+    "statistics": "Report per-arm P50/P95, paired speedup distributions, paired geometric mean, and deterministic 10,000-resample prompt-stratified bootstrap 95% confidence intervals."
+  },
+  "profile_design": {
+    "requests": "one separate materializing request and one separate resident request, same frozen prompt and seed 101, captured in independent neuron-profile inspect sessions",
+    "accounting_window": "denoise only; text encoders and VAE are reported separately and excluded from the resident data-plane boundary count",
+    "materializing_expectation": "12 repeated context/latent host writes and 12 noise reads",
+    "resident_expectation": "one context staging, one latent initialization, scalar timestep/coefficient/delta control, zero latent/noise host materialization between initialize and finalize, and one final latent read"
+  },
+  "gates": {
+    "E1_correctness": "All 24 pairs must have final packed latent max-abs=0 and relative-L2=0; all raw decoded tensor pairs must also have max-abs=0 and relative-L2=0.",
+    "E2_data_plane_boundary": "The profiled resident denoise interval must have zero 524288-byte latent/noise host writes and reads after initialize and before finalize, and no encoder/pooled/rotary writes after staging. Its counted transfer sequence must match the frozen scalar-control design.",
+    "E3_paired_significance": "The prompt-stratified bootstrap 95% lower confidence bound must exceed 1.0 for both denoise-only and full-request paired geometric-mean speedup.",
+    "E4_materiality": "Median paired denoise speedup must be at least 1.03x and median paired full-request speedup at least 1.01x.",
+    "E5_tail": "Resident full-request P95 must be no more than 2% slower than materializing full-request P95 (baseline_P95/resident_P95 >= 0.98).",
+    "E6_resource_accounting": "Report HBM, compiled artifacts, loads, entry-point counts, and request-slot capacity. Do not extrapolate the two-slot proof to unbounded serving concurrency."
+  },
+  "pass_status": "resident_e2e_system_gate_passed",
+  "scope_limit": "This isolates an architecture change under the same static A12 algorithm. It does not re-qualify A12 against a 50-anchor quality baseline, establish multi-tenant throughput/fairness, or validate adaptive Gram control.",
+  "decision": {
+    "if_all_gates_pass": "Use the resident dataflow as the paper's single-request end-to-end system result, then proceed to TP placement and serving slot-pool experiments.",
+    "if_traffic_passes_but_latency_fails": "Retain the boundary mechanism as engineering evidence but reject latency/speedup as a paper contribution; diagnose dispatch, staging cold-start, and VAE/text dilution before expanding the architecture.",
+    "if_correctness_fails": "Stop performance interpretation and locate the first divergent step; do not relax the exact fixed-algorithm contract.",
+    "if_tail_fails": "Treat slot staging or extra cache dispatches as a tail-latency regression and do not claim a serving-ready improvement."
+  }
+}

@@ -1,0 +1,150 @@
+{
+  "anchor_update_diagnostic": {
+    "expected_bytes": 4194304,
+    "large_host_write_bytes": 4194304,
+    "note": "Full anchor ingress remains on anchor steps in this spike; the zero-copy FLUX backbone-to-state connection is the next integration gate.",
+    "profiled_anchor_updates": 2
+  },
+  "architecture_speed_claim": false,
+  "artifacts": {
+    "compile_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1b-cross-graph-20260812/mechanism-result-v3.json",
+      "sha256": "77fbf8f07ef60658e1c15331da91287647d840cfeff20282684d224af0ac7f77"
+    },
+    "inspect_json": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1b-cross-graph-20260812/neuron-inspect-v1.json",
+      "sha256": "28855f053edb77988cfdaddfd8641de58a9ce516efa98404bed98b29b6e70632"
+    },
+    "mechanism_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1b-cross-graph-20260812/mechanism-result-v4.json",
+      "sha256": "56234f629888b5a78b583f5b915b079e93a3464852ddfc12fbbbea56dcf2bcdb"
+    },
+    "profile_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1b-cross-graph-20260812/profile-result-v1.json",
+      "sha256": "6acfcf44ce612fd49e0c0efd877120fe3d51452885ff5b55231f0713c7af2bae"
+    },
+    "protocol": {
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/h1b-cross-graph-ranked-io-protocol-20260812.json",
+      "sha256": "ce715745818ac3952eda2c258e116f23acc182a8672ed7076af684c40d039653"
+    }
+  },
+  "boundary_gate": {
+    "expected_control_plane_per_pair": "TP4 replication of 8-byte coefficients + 4-byte step scale = 48 write bytes; one rank-0 FP32 checksum = 4 read bytes",
+    "large_host_read_bytes": 0,
+    "large_host_write_bytes": 0,
+    "passed": true,
+    "profiled_skip_entry_point_invocations": 20,
+    "profiled_skip_pairs": 10,
+    "profiled_skip_rank_executions": 80,
+    "scalar_host_read_bytes": 40,
+    "scalar_host_read_bytes_per_pair": 4.0,
+    "scalar_host_write_bytes": 480,
+    "scalar_host_write_bytes_per_pair": 48.0
+  },
+  "compile_seconds": 3.0081040039949585,
+  "compiled_artifact": {
+    "file_count": 2,
+    "model_pt_sha256": "7eb0bf06f9ade9b11d2d520df27b114f60f00279357ec00c42d578781d452d20",
+    "total_bytes": 243972
+  },
+  "decision": {
+    "next": "Implement the real resident cache-step entry point, then feed it ranked FLUX backbone output on anchor steps and profile the complete denoise-loop boundary.",
+    "ranked_inter_neff_tensor_handoff_without_host_materialization": true,
+    "selected_graph_boundary": "one multi-entry NxDModel with shared alias state and ranked device I/O",
+    "shared_mutable_state_across_entry_points": true,
+    "what_is_not_yet_proven": [
+      "real scheduler and latent update composition",
+      "zero-copy FLUX backbone anchor ingress",
+      "TP-sharded rather than post-gather replicated anchor placement",
+      "end-to-end speedup or serving isolation"
+    ]
+  },
+  "device_memory_peak": {
+    "per_core_bytes": {
+      "0": {
+        "io_bytes": 32,
+        "tensors_bytes": 7340096,
+        "total_bytes": 9736708,
+        "weights_bytes": 0
+      },
+      "1": {
+        "io_bytes": 32,
+        "tensors_bytes": 7340096,
+        "total_bytes": 9736708,
+        "weights_bytes": 0
+      },
+      "2": {
+        "io_bytes": 32,
+        "tensors_bytes": 7340096,
+        "total_bytes": 9736708,
+        "weights_bytes": 0
+      },
+      "3": {
+        "io_bytes": 32,
+        "tensors_bytes": 7340096,
+        "total_bytes": 9736708,
+        "weights_bytes": 0
+      }
+    },
+    "sum_of_per_core_peak_tensor_bytes": 29360384,
+    "sum_of_per_core_peak_total_bytes": 38946832
+  },
+  "host_observed_skip_pair_latency": {
+    "mechanism_run_p50_ms": 0.4570914970827289,
+    "mechanism_run_p95_ms": 0.7766110301017761,
+    "profile_run_p50_ms": 0.6089684975449927,
+    "profile_run_p95_ms": 0.9075597524642944
+  },
+  "mechanism_gate": {
+    "checks": [
+      {
+        "maximum_absolute_error": 0.0,
+        "name": "cross_neff_predict_ab",
+        "relative_l2_error": 0.0
+      },
+      {
+        "maximum_absolute_error": 0.0,
+        "name": "predict_is_read_only",
+        "relative_l2_error": 0.0
+      },
+      {
+        "maximum_absolute_error": 0.0,
+        "name": "ranked_predict_to_consumer",
+        "relative_l2_error": 0.0
+      },
+      {
+        "maximum_absolute_error": 0.0,
+        "name": "cross_neff_ring_shift",
+        "relative_l2_error": 0.0
+      },
+      {
+        "maximum_absolute_error": 0.0,
+        "name": "scalar_reset_isolation",
+        "relative_l2_error": 0.0
+      }
+    ],
+    "checksum_absolute_error_diagnostic": 2.384185791015625e-07,
+    "maximum_absolute_error": 0.0,
+    "maximum_relative_l2_error": 0.0,
+    "passed": true
+  },
+  "neff_execution_diagnostics": {
+    "resident_consume": {
+      "event_count": 40,
+      "maximum_per_rank_execute_time_us": 358.297,
+      "median_per_rank_execute_time_us": 162.951
+    },
+    "resident_predict": {
+      "event_count": 40,
+      "maximum_per_rank_execute_time_us": 380.788,
+      "median_per_rank_execute_time_us": 159.6345
+    }
+  },
+  "schema": "difflet-flux-h1b-cross-graph-ranked-io-result",
+  "schema_revision": 1,
+  "serving_claim": false,
+  "status": "feasibility_passed_integration_pending",
+  "study_id": "flux-h1b-cross-graph-state-ranked-io-20260812",
+  "tensor_bytes": 524288,
+  "tp_degree": 4
+}

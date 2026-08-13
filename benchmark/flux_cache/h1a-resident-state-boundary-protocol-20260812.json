@@ -1,0 +1,60 @@
+{
+  "schema": "difflet-flux-h1a-resident-state-boundary-protocol",
+  "schema_revision": 1,
+  "study_id": "flux-h1a-post-gather-resident-state-boundary-20260812",
+  "paper_role": "architecture mechanism and graph-boundary audit",
+  "serving_claim": false,
+  "motivation": "Separate proof that K=2 alias state is correct from the system claim that a resident cache data plane removes large host-device transfers.",
+  "generation_identity": {
+    "model_shape": "FLUX.1-dev 1024x1024 noise prediction",
+    "tensor_shape": [1, 4096, 64],
+    "tensor_dtype": "bfloat16",
+    "tensor_bytes": 524288,
+    "tp_degree": 4,
+    "placement": "post-gather full-tensor replica on every rank"
+  },
+  "graph": {
+    "resident_state": "two aliased BF16 anchor parameters",
+    "actions": {
+      "0": "reset both anchors",
+      "1": "shift ring and store candidate anchor",
+      "2": "FP32-accumulated two-anchor prediction"
+    },
+    "host_inputs": ["candidate tensor", "two FP32 coefficients", "one int32 action"],
+    "host_outputs": ["selected/predicted tensor", "FP32 checksum"],
+    "known_limitation": "The static signature includes one full candidate input and one full tensor output even on PREDICT. H1a is not the final predictor+scheduler+latent-state data plane."
+  },
+  "experiments": {
+    "mechanism": {
+      "sequence": ["reset", "anchor A", "anchor B", "predict twice", "anchor C", "predict", "reset", "predict"],
+      "checks": [
+        "resident state persists across invocations",
+        "anchor shift order is correct",
+        "predict does not mutate anchors",
+        "reset prevents cross-request leakage",
+        "device prediction matches the current FP32-accumulate then BF16-round host predictor"
+      ],
+      "pass_if": {
+        "all_sequence_checks": true,
+        "maximum_absolute_error": 0.0,
+        "maximum_relative_l2_error": 0.0
+      }
+    },
+    "runtime": {
+      "warmup_predict_calls": 10,
+      "measured_predict_calls": 100,
+      "report": [
+        "P50/P95 host-observed call latency",
+        "compile time and artifact size",
+        "Neuron HBM before/after load",
+        "nrt_tensor_write/read count, bytes, and time from Neuron Profile inspect"
+      ]
+    }
+  },
+  "decision": {
+    "mechanism_pass": "Only establishes alias state and numerical parity.",
+    "architecture_pass": "Requires zero full-tensor host write and zero full-tensor host read on a skipped step after predictor, scheduler update, and latent state are composed. H1a is expected to expose rather than satisfy this condition.",
+    "next_if_large_transfer_observed": "Implement H1b with predictor, scheduler update, and latent state inside one resident cache-step data plane; separately solve the backbone-to-state inter-NEFF handoff.",
+    "stop_if_no_zero_copy_or_composable_boundary": "Do not call the design accelerator-resident; shrink the claim to host-controlled multi-graph runtime or redraw the graph boundary."
+  }
+}

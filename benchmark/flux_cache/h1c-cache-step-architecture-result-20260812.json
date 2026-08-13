@@ -1,0 +1,154 @@
+{
+  "anchor_ingress_diagnostic": {
+    "anchor_steps": 12,
+    "expected_bytes": 25165824,
+    "large_host_write_bytes": 25165824,
+    "passed_to_backbone_integration": false
+  },
+  "architecture_speed_claim": false,
+  "artifacts": {
+    "fused_protocol": {
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/h1c-resident-cache-step-protocol-20260812.json",
+      "sha256": "8cf2a8d0a482f2c335e4415ec97cac43ab7831637c22804b366cc559846e0359"
+    },
+    "fused_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1c-resident-cache-step-20260812/mechanism-result-v2.json",
+      "sha256": "6ed3a604e392e4056b3b00f2b066cba6a275b17654e7a97225b087d34fa9544e"
+    },
+    "inspect_json": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1c-resident-cache-step-20260812/neuron-inspect-split-v1.json",
+      "sha256": "9aac2ccb1f7ff1020239f67bd181aefae142390c2d076f1445c74dea134c1b88"
+    },
+    "split_mechanism": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1c-resident-cache-step-20260812/split-mechanism-result-v2.json",
+      "sha256": "4eafd1991081671ce299ca8d172390c5f820d1c32f1301e63ff3f3996fba61fe"
+    },
+    "split_profile": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1c-resident-cache-step-20260812/split-profile-result-v1.json",
+      "sha256": "d7bf0d685a0b0fb5e155ffd89ed27c806f0e003a40d287dff98ee3e3aeb85962"
+    },
+    "split_protocol": {
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/h1c-split-cache-step-protocol-20260812.json",
+      "sha256": "d10e62ad5f823634d482b3d5b86de72d11152739557eaf27f9735957f22d4f2a"
+    }
+  },
+  "decision": {
+    "next": "Feed real FLUX backbone ranked output into cache_anchor_step and resident latent into the next backbone invocation; then profile the entire 50-step loop.",
+    "performance_reading": "The standalone split path is slower than the current host tensor algebra because it pays two small NEFF dispatches. Its system value depends on eliminating backbone/output host boundaries in H1c-b; no speedup is claimed yet.",
+    "reason": "It is bit-exact to the existing cache semantics and has zero full-tensor host materialization on all 38 skips.",
+    "selected_cache_step_contract": "cache_predict -> BF16 ranked device tensor -> cache_scheduler_step with shared aliased anchors and latent"
+  },
+  "device_memory_peak": {
+    "per_core_bytes": {
+      "0": {
+        "io_bytes": 40,
+        "tensors_bytes": 9961608,
+        "total_bytes": 12654252,
+        "weights_bytes": 0
+      },
+      "1": {
+        "io_bytes": 40,
+        "tensors_bytes": 9961608,
+        "total_bytes": 12654252,
+        "weights_bytes": 0
+      },
+      "2": {
+        "io_bytes": 40,
+        "tensors_bytes": 9961608,
+        "total_bytes": 12654252,
+        "weights_bytes": 0
+      },
+      "3": {
+        "io_bytes": 40,
+        "tensors_bytes": 9961608,
+        "total_bytes": 12654252,
+        "weights_bytes": 0
+      }
+    },
+    "sum_of_per_core_peak_tensor_bytes": 39846432,
+    "sum_of_per_core_peak_total_bytes": 50617008
+  },
+  "fused_single_neff": {
+    "diagnosis": "The compiler legally composes the FP32 predictor with Euler and removes the algorithm's intended BF16 materialization boundary.",
+    "fused_fp32_reference_maximum_absolute_error": 0.0,
+    "fused_fp32_reference_maximum_relative_l2_error": 0.0,
+    "host_contract_final_maximum_absolute_error": 0.046875,
+    "host_contract_final_relative_l2_error": 0.002632870982175462,
+    "host_contract_maximum_absolute_error": 0.0625,
+    "host_contract_maximum_relative_l2_error": 0.002632870982175462,
+    "latency": {
+      "device_p50_ms": 0.7399279929813929,
+      "device_p95_ms": 1.0793468952178955,
+      "host_reference_p50_ms": 0.23664350737817585,
+      "host_reference_p95_ms": 0.3105880916118622,
+      "measured_skips": 100,
+      "warmup_skips": 10
+    },
+    "status": "rejected_precision_contract"
+  },
+  "runtime_contract_findings": [
+    "A NEFF boundary is a numerical-semantics boundary as well as a dispatch boundary.",
+    "Legacy NxDModel routes only by input-shape lists, not dtype; every entry point requires a unique shape signature.",
+    "The failed split-v1 artifact reused [full_tensor, shape-2 scalar] for initialize and anchor despite different dtypes, causing a route collision and runtime abort; split-v2 uses a shape-4 initialize token."
+  ],
+  "schema": "difflet-flux-h1c-cache-step-architecture-result",
+  "schema_revision": 1,
+  "serving_claim": false,
+  "split_ranked_boundary": {
+    "boundary_gate": {
+      "large_host_read_bytes": 0,
+      "large_host_write_bytes": 0,
+      "passed": true,
+      "scalar_host_read_bytes": 0,
+      "scalar_host_read_bytes_per_skip": 0.0,
+      "scalar_host_write_bytes": 1824,
+      "scalar_host_write_bytes_per_skip": 48.0,
+      "skip_entry_point_invocations": 76,
+      "skip_rank_executions": 304,
+      "skip_steps": 38
+    },
+    "compile_seconds": 3.5426512519916287,
+    "compiled_artifact": {
+      "file_count": 2,
+      "model_pt_sha256": "a1b5ff4179758594aa504840e0b0a7403ea6c21209cb1128ee5467a52ceb89a1",
+      "total_bytes": 378574
+    },
+    "latency": {
+      "device_p50_ms": 1.7276729995501228,
+      "device_p95_ms": 2.033169984817505,
+      "host_reference_p50_ms": 0.26531600451562554,
+      "host_reference_p95_ms": 0.3327282965183258,
+      "measured_skips": 100,
+      "warmup_skips": 10
+    },
+    "load_seconds": 8.79300876299385,
+    "neff_execution_diagnostics": {
+      "cache_anchor_step": {
+        "maximum_per_rank_execute_time_us": 491.987,
+        "median_per_rank_execute_time_us": 154.663,
+        "rank_execution_count": 48
+      },
+      "cache_predict": {
+        "maximum_per_rank_execute_time_us": 335.928,
+        "median_per_rank_execute_time_us": 159.8105,
+        "rank_execution_count": 152
+      },
+      "cache_scheduler_step": {
+        "maximum_per_rank_execute_time_us": 398.487,
+        "median_per_rank_execute_time_us": 159.5455,
+        "rank_execution_count": 152
+      }
+    },
+    "numerical_gate": {
+      "final_maximum_absolute_error": 0.0,
+      "final_relative_l2_error": 0.0,
+      "maximum_absolute_error": 0.0,
+      "maximum_relative_l2_error": 0.0,
+      "passed": true,
+      "steps_checked": 50
+    },
+    "status": "passed"
+  },
+  "status": "split_contract_passed_backbone_integration_pending",
+  "study_id": "flux-h1c-cache-step-precision-boundary-20260812"
+}

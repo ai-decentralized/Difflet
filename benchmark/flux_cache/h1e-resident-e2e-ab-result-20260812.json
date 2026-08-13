@@ -1,0 +1,306 @@
+{
+  "E1_correctness": {
+    "design_exact": true,
+    "paired_request_count": 24,
+    "parity": {
+      "decoded_maximum_absolute_error": 0.0,
+      "decoded_maximum_relative_l2_error": 0.0,
+      "final_latent_maximum_absolute_error": 0.0,
+      "final_latent_maximum_relative_l2_error": 0.0,
+      "passed": true
+    },
+    "passed": true
+  },
+  "E2_data_plane_boundary": {
+    "materializing": {
+      "backbone_calls": 12,
+      "noise_read_count": 12,
+      "read_bytes": 6291456,
+      "total_host_transfer_bytes": 346104000,
+      "write_bytes": 339812544,
+      "write_sequence_exact": true
+    },
+    "passed": true,
+    "resident": {
+      "final_latent_read_count": 1,
+      "latent_noise_writes_after_initialize": 0,
+      "read_bytes": 524288,
+      "total_host_transfer_bytes": 28844424,
+      "write_bytes": 28320136,
+      "write_sequence_exact": true
+    },
+    "transfer_reduction_fraction": 0.9166596629914707,
+    "transfer_reduction_ratio": 11.998991555525603
+  },
+  "E3_paired_significance": {
+    "criterion": "both lower_95 > 1.0",
+    "denoise": {
+      "lower_95": 0.9868168115733296,
+      "median": 0.987333159437895,
+      "resamples": 10000,
+      "seed": 20260812,
+      "upper_95": 0.9878366388261579
+    },
+    "full_request": {
+      "lower_95": 0.9880290741195712,
+      "median": 0.9885229397289692,
+      "resamples": 10000,
+      "seed": 20260812,
+      "upper_95": 0.9890056282841451
+    },
+    "passed": false
+  },
+  "E4_materiality": {
+    "denoise_median_paired_speedup": 0.9873194632841964,
+    "full_request_median_paired_speedup": 0.9884596304627662,
+    "passed": false,
+    "required": {
+      "denoise": 1.03,
+      "full_request": 1.01
+    }
+  },
+  "E5_tail": {
+    "materializing_full_request_p95_s": 3.597758792592504,
+    "materializing_over_resident_p95_ratio": 0.9859833240102235,
+    "passed": true,
+    "required_minimum": 0.98,
+    "resident_full_request_p95_s": 3.648904301910079
+  },
+  "E6_resource_accounting": {
+    "execution_diagnostics": {
+      "materializing": {
+        "NeuronFluxTransformer2DModel": {
+          "maximum_per_rank_execute_time_us": 428968.374,
+          "median_per_rank_execute_time_us": 267458.4535,
+          "rank_execution_count": 48,
+          "sum_all_rank_execute_time_us": 13479827.645
+        }
+      },
+      "resident": {
+        "NeuronFluxTransformer2DModel": {
+          "maximum_per_rank_execute_time_us": 409944.768,
+          "median_per_rank_execute_time_us": 267092.425,
+          "rank_execution_count": 48,
+          "sum_all_rank_execute_time_us": 13392076.187
+        },
+        "cache_anchor_step": {
+          "maximum_per_rank_execute_time_us": 738.087,
+          "median_per_rank_execute_time_us": 385.9385,
+          "rank_execution_count": 48,
+          "sum_all_rank_execute_time_us": 17910.417
+        },
+        "cache_finalize": {
+          "maximum_per_rank_execute_time_us": 749.055,
+          "median_per_rank_execute_time_us": 522.3755,
+          "rank_execution_count": 4,
+          "sum_all_rank_execute_time_us": 2194.772
+        },
+        "cache_initialize": {
+          "maximum_per_rank_execute_time_us": 429.03,
+          "median_per_rank_execute_time_us": 316.4275,
+          "rank_execution_count": 4,
+          "sum_all_rank_execute_time_us": 1271.338
+        },
+        "cache_predict": {
+          "maximum_per_rank_execute_time_us": 709.349,
+          "median_per_rank_execute_time_us": 336.8915,
+          "rank_execution_count": 152,
+          "sum_all_rank_execute_time_us": 48894.73
+        },
+        "cache_scheduler_step": {
+          "maximum_per_rank_execute_time_us": 727.282,
+          "median_per_rank_execute_time_us": 332.12149999999997,
+          "rank_execution_count": 152,
+          "sum_all_rank_execute_time_us": 49105.23
+        },
+        "request_context_stage_slot_0": {
+          "maximum_per_rank_execute_time_us": 463.625,
+          "median_per_rank_execute_time_us": 423.193,
+          "rank_execution_count": 4,
+          "sum_all_rank_execute_time_us": 1627.9099999999999
+        }
+      }
+    },
+    "extra_resident_entrypoints_per_rank": 91,
+    "materializing_entrypoints_per_rank": 12,
+    "materializing_memory_peak_per_core_bytes": {
+      "0": {
+        "io_bytes": 656,
+        "tensors_bytes": 8779414546,
+        "total_bytes": 12627655582,
+        "weights_bytes": 1441792
+      },
+      "1": {
+        "io_bytes": 656,
+        "tensors_bytes": 8779414546,
+        "total_bytes": 12627655582,
+        "weights_bytes": 1441792
+      },
+      "2": {
+        "io_bytes": 656,
+        "tensors_bytes": 8779414546,
+        "total_bytes": 12627655582,
+        "weights_bytes": 1441792
+      },
+      "3": {
+        "io_bytes": 656,
+        "tensors_bytes": 8779414546,
+        "total_bytes": 12627655582,
+        "weights_bytes": 1441792
+      }
+    },
+    "materializing_tag_counts_all_ranks": {
+      "Decoder": 4,
+      "NeuronCLIPTextModel": 4,
+      "NeuronFluxTransformer2DModel": 48,
+      "NeuronT5EncoderModel": 4,
+      "transformer": 4
+    },
+    "passed": true,
+    "resident_entrypoints_per_rank": 103,
+    "resident_memory_peak_per_core_bytes": {
+      "0": {
+        "io_bytes": 656,
+        "tensors_bytes": 8779414546,
+        "total_bytes": 12627655582,
+        "weights_bytes": 1441792
+      },
+      "1": {
+        "io_bytes": 656,
+        "tensors_bytes": 8779414546,
+        "total_bytes": 12627655582,
+        "weights_bytes": 1441792
+      },
+      "2": {
+        "io_bytes": 656,
+        "tensors_bytes": 8779414546,
+        "total_bytes": 12627655582,
+        "weights_bytes": 1441792
+      },
+      "3": {
+        "io_bytes": 656,
+        "tensors_bytes": 8779414546,
+        "total_bytes": 12627655582,
+        "weights_bytes": 1441792
+      }
+    },
+    "resident_tag_counts_all_ranks": {
+      "Decoder": 4,
+      "NeuronCLIPTextModel": 4,
+      "NeuronFluxTransformer2DModel": 48,
+      "NeuronT5EncoderModel": 4,
+      "cache_anchor_step": 48,
+      "cache_finalize": 4,
+      "cache_initialize": 4,
+      "cache_predict": 152,
+      "cache_scheduler_step": 152,
+      "request_context_stage_slot_0": 4,
+      "transformer": 4
+    },
+    "slot_capacity": 2
+  },
+  "architecture_speed_claim": false,
+  "artifacts": {
+    "h1d_result": {
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/h1d-request-context-staging-result-20260812.json",
+      "sha256": "c58cfbcd99d3b6503e74ba94f63e5618a58d3481309607a9937b9622732b8505"
+    },
+    "materializing_inspect": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1e-resident-e2e-20260812/inspect-materializing-parsed-v1.json",
+      "sha256": "09c169db2d5e0636ff0c92928ce5a3e625109cbc258497a4c5eb2c6214364fd0"
+    },
+    "materializing_profile_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1e-resident-e2e-20260812/profile-materializing-result-v1.json",
+      "sha256": "ea4a64709eb6f6e499576fa3a24742219edfdc6ddfaae2f19bf863d61ca27e71"
+    },
+    "paired_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1e-resident-e2e-20260812/paired-result-v1.json",
+      "sha256": "1b3be036fb05f39f9680d3c9f7c327f5e46e28844c4860b71f9775f6983f8c5f"
+    },
+    "protocol": {
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/h1e-resident-e2e-ab-protocol-20260812.json",
+      "sha256": "77ef6eb1ad4056e1dd73a7b5279c9fb90cf73e84b8127f985d8bd88e06c04098"
+    },
+    "resident_inspect": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1e-resident-e2e-20260812/inspect-resident-parsed-v1.json",
+      "sha256": "8f0081eb006f59317d6ffd0be9af6342ea301ac3fe682511ab2c4c924c0adbcf"
+    },
+    "resident_profile_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1e-resident-e2e-20260812/profile-resident-result-v1.json",
+      "sha256": "acaf9d4b6c32c5aa1edfb038ce2874751024d264b8a69a660f9cb5cffc2f7301"
+    }
+  },
+  "decision": {
+    "claim_boundary": "No architecture speedup or serving claim. The negative wall-time result takes precedence over the positive byte reduction.",
+    "mechanism": "resident request state is numerically exact and removes the intended host materialization",
+    "next_architecture_question": "Preserve the BF16 predictor boundary while fusing or batching dispatches; otherwise retain host materialization for this post-gather A12 path.",
+    "system_result": "rejected: 91 extra exact-boundary entry points per rank outweigh the measured DMA reduction"
+  },
+  "latency": {
+    "denoise": {
+      "materializing_seconds": {
+        "maximum": 3.259185560993501,
+        "minimum": 3.2505559629935306,
+        "p50": 3.2536745304969372,
+        "p95": 3.2558202156498735
+      },
+      "metric": "denoise_total_s",
+      "paired_speedup_materializing_over_resident": {
+        "bootstrap_prompt_stratified": {
+          "lower_95": 0.9868168115733296,
+          "median": 0.987333159437895,
+          "resamples": 10000,
+          "seed": 20260812,
+          "upper_95": 0.9878366388261579
+        },
+        "geometric_mean": 0.9873314975295144,
+        "maximum": 0.9911848805123112,
+        "median": 0.9873194632841964,
+        "minimum": 0.9842427741356303,
+        "resident_win_count": 0
+      },
+      "request_count": 24,
+      "resident_seconds": {
+        "maximum": 3.3113634629989974,
+        "minimum": 3.2845267790107755,
+        "p50": 3.295118685498892,
+        "p95": 3.3066355358590958
+      }
+    },
+    "full_request": {
+      "materializing_seconds": {
+        "maximum": 3.6017577619932126,
+        "minimum": 3.5896190280036535,
+        "p50": 3.5953295350045664,
+        "p95": 3.597758792592504
+      },
+      "metric": "full_request_s",
+      "paired_speedup_materializing_over_resident": {
+        "bootstrap_prompt_stratified": {
+          "lower_95": 0.9880290741195712,
+          "median": 0.9885229397289692,
+          "resamples": 10000,
+          "seed": 20260812,
+          "upper_95": 0.9890056282841451
+        },
+        "geometric_mean": 0.9885220938954874,
+        "maximum": 0.9919765560336392,
+        "median": 0.9884596304627662,
+        "minimum": 0.9851236802097003,
+        "resident_win_count": 0
+      },
+      "request_count": 24,
+      "resident_seconds": {
+        "maximum": 3.6536051579896593,
+        "minimum": 3.6253423250018386,
+        "p50": 3.6357988020026824,
+        "p95": 3.648904301910079
+      }
+    }
+  },
+  "schema": "difflet-flux-h1e-resident-e2e-ab-result",
+  "schema_revision": 1,
+  "serving_claim": false,
+  "status": "resident_e2e_system_gate_rejected_dispatch_overhead",
+  "study_id": "flux-h1e-resident-e2e-ab-20260812"
+}

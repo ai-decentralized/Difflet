@@ -1,0 +1,36 @@
+{
+  "schema": "difflet-flux-h1c-backbone-ranked-loop-protocol",
+  "schema_revision": 1,
+  "study_id": "flux-h1c-real-backbone-ranked-loop-20260812",
+  "paper_role": "real-model architecture boundary gate",
+  "serving_claim": false,
+  "question": "Can the compiled 23GB FLUX.1-dev TP4 backbone and the exact split cache-step runtime exchange latent/noise tensors bidirectionally as ranked device handles, including a skipped step, without 512KB host materialization?",
+  "frozen_system": {
+    "backbone_artifact": "/home/ubuntu/.cache/difflet/flux/ebbfe33fed51b364/transformer",
+    "backbone_model_pt_sha256": "fd2c5476714043ae603da0c1c0f5902eb98dc14ce222adfc18e3858c885732f8",
+    "cache_step_artifact": "/home/ubuntu/difflet-artifacts/flux-h1c-resident-cache-step-20260812/compiled-split-v2",
+    "cache_step_model_pt_sha256": "a1b5ff4179758594aa504840e0b0a7403ea6c21209cb1128ee5467a52ceb89a1",
+    "hardware": "Trainium TP4",
+    "dtype": "bfloat16",
+    "latent_noise_shape": [1, 4096, 64],
+    "sequence": [
+      "initialize latent",
+      "real backbone step 0 -> ranked cache anchor",
+      "real backbone step 1 -> ranked cache anchor",
+      "cache predict -> ranked scheduler skip step 2",
+      "resident latent -> real backbone step 3 -> ranked cache anchor",
+      "finalize latent"
+    ],
+    "backbone_context": "fixed seeded synthetic tensors with the exact compiled encoder/pooled/timestep/guidance/rotary shapes; no text encoder is invoked"
+  },
+  "gates": {
+    "B1_cross_application_correctness": "At every anchor/skip update, resident latent must be bit-exact to host algebra using the same real backbone outputs; final latent must also match.",
+    "B2_bidirectional_ranked_boundary": "Between initialize and finalize, no 524288-byte host write/read may be attributable to latent input, backbone noise output, or cache-step handoff.",
+    "B3_remaining_input_inventory": "Report every other host write size and byte total, especially repeated encoder hidden states and rotary embeddings; these are architecture debt, not hidden from the result."
+  },
+  "scope_limit": "Synthetic fixed conditioning proves executable dataflow, not prompt semantics, image quality, 50-step speedup, or serving isolation. A full prompt run is authorized only after this boundary gate passes.",
+  "decision": {
+    "if_B1_B2_pass": "Make prompt/context tensors resident or ranked, then implement the full 50-step loop and compare against the current pipeline.",
+    "if_B2_fails": "The separately loaded NxDModel objects do not preserve device handles; merge backbone/cache entry points into one runtime container or adopt a different runtime API."
+  }
+}

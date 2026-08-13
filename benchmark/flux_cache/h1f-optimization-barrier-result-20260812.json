@@ -1,0 +1,139 @@
+{
+  "analysis": {
+    "compiler_interpretation": "The barrier was present in the input HLO, so this is not a Python device-branch tracing failure. Neuron's pipeline explicitly ran a RemoveOptimizationBarriers pass, and hardware output retained the same fused-FP32 behavior as H1c-a. The optimization barrier constrains motion but does not provide a durable materialization/rounding contract.",
+    "fused_reference_exact": true,
+    "system_interpretation": "The candidate would reduce the resident A12 request from 103 to 65 entry points per rank, but it changes numerical semantics. Positive dispatch potential cannot override failed algorithm identity."
+  },
+  "architecture_speed_claim": false,
+  "artifacts": {
+    "candidate_hlo": {
+      "bytes": 19407,
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1f-optimization-barrier-20260812/compiler-work-v1/cache_skip_step_barrier/_tp0_bk0/model.MODULE_c91cb225f03382adc7f6+28a6bc87.hlo_module.pb",
+      "sha256": "da0a0660b61567636855f6d406bb4163cd3e43f7318f0ab8816e3dcdacc0d234"
+    },
+    "compiler_log": {
+      "bytes": 391684,
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1f-optimization-barrier-20260812/compiler-work-v1/cache_skip_step_barrier/_tp0_bk0/log-neuron-cc.txt",
+      "sha256": "4886c3aab8919f510b657587fc9d3940fdd3b6acef73b8088d74657f9e928f4d"
+    },
+    "hardware_runs": [
+      {
+        "bytes": 15569,
+        "path": "/home/ubuntu/difflet-artifacts/flux-h1f-optimization-barrier-20260812/mechanism-result-v1.json",
+        "sha256": "c43e8c4d176bbf2284ef7c6113ce211cc3fbdece5eae37e14d5f88be19f06734"
+      },
+      {
+        "bytes": 15555,
+        "path": "/home/ubuntu/difflet-artifacts/flux-h1f-optimization-barrier-20260812/mechanism-result-v2.json",
+        "sha256": "b596d8e80b3a68dad6ea81ea4e64c893ab41023d1992f1d2fb8701846d7ca219"
+      }
+    ],
+    "prior_h1c_fused_run": {
+      "bytes": 15492,
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1c-resident-cache-step-20260812/mechanism-result-v2.json",
+      "sha256": "6ed3a604e392e4056b3b00f2b066cba6a275b17654e7a97225b087d34fa9544e"
+    },
+    "protocol": {
+      "bytes": 2493,
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/h1f-optimization-barrier-protocol-20260812.json",
+      "sha256": "e39b7a3f18fd6f544bf71c6233d704fc166bac3a90333deb03fe56c16302cc5c"
+    }
+  },
+  "decision": {
+    "deploy_candidate": false,
+    "next": "Do not search for correlation or retune A12. Either design a true persistent/multi-step device loop with an executable BF16 boundary, or retain host-materializing A12 as the deployable architecture.",
+    "reason": "F2 exact-contract failed deterministically on Trainium TP4.",
+    "rerun_h1e": false
+  },
+  "frozen_configuration": {
+    "anchors": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      9,
+      15,
+      21,
+      31,
+      41,
+      49
+    ],
+    "candidate_skip_path": "one cache_skip_step_barrier entry point receiving two FP32 coefficients and one FP32 delta sigma",
+    "dtype": "bfloat16",
+    "hardware": "Trainium TP4",
+    "predictor": "unchanged order-1 TaylorSeer/index-coordinate K=2 linear extrapolation",
+    "reference_contract": "predict in FP32, round prediction to BF16, then latent.float() + delta_sigma * prediction.float(), round latent to BF16",
+    "resident_state": [
+      "anchor0",
+      "anchor1",
+      "latent"
+    ],
+    "schedule": "FLUX.1-dev 50-step dynamically shifted FlowMatch Euler sigmas",
+    "shape": [
+      1,
+      4096,
+      64
+    ],
+    "skips": 38
+  },
+  "gates": {
+    "F1_compile": {
+      "evidence": "TP4 compile/load passed and the input HLO contains xla__optimization_barrier.",
+      "passed": false
+    },
+    "F2_exact_contract": {
+      "evidence": "The candidate is exact only to the fused-FP32 reference; it diverges from the frozen BF16-boundary host contract at step 6.",
+      "passed": false
+    },
+    "F3_single_dispatch": {
+      "evidence": "All 38 skips use one cache_skip_step_barrier invocation.",
+      "passed": true
+    },
+    "F4_scalar_boundary": {
+      "evidence": "The compiled skip signature accepts two FP32 coefficients and one FP32 delta; validation reads tensors only to audit F2.",
+      "passed": true
+    },
+    "F5_latency_direction": {
+      "evidence": "Not promoted to a paired latency decision because the earlier exact-contract gate failed. Candidate micro-latency is diagnostic only.",
+      "passed": false,
+      "stopped": true
+    }
+  },
+  "paper_role": "dispatch-fusion kill test after the exact split cache path reduced traffic but failed the H1e wall-time gate",
+  "results": {
+    "a12_cache_entry_points_per_rank": 52,
+    "candidate_skip_device_p50_ms_median": 0.8490169966535177,
+    "candidate_skip_device_p50_ms_runs": [
+      0.8418750003329478,
+      0.8561589929740876
+    ],
+    "compiled_entry_points": [
+      "cache_initialize",
+      "cache_anchor_step",
+      "cache_skip_step_barrier",
+      "cache_finalize"
+    ],
+    "compiler_log_contains_remove_optimization_barriers_pass": true,
+    "deterministic_schedule_parity_across_runs": true,
+    "final_maximum_absolute_error_vs_host_bf16_contract": 0.046875,
+    "final_relative_l2_error_vs_host_bf16_contract": 0.002632870982175462,
+    "first_divergent_step": 6,
+    "h1e_split_resident_entry_points_per_rank": 103,
+    "hardware_runs": 2,
+    "hlo_contains_xla_optimization_barrier": true,
+    "matches_prior_unbarriered_fused_error_signature": true,
+    "maximum_absolute_error_vs_fused_fp32_reference": 0.0,
+    "maximum_absolute_error_vs_host_bf16_contract": 0.0625,
+    "maximum_relative_l2_error_vs_fused_fp32_reference": 0.0,
+    "maximum_relative_l2_error_vs_host_bf16_contract": 0.002632870982175462,
+    "projected_dispatch_reduction_vs_h1e": 38,
+    "projected_full_resident_entry_points_per_rank": 65
+  },
+  "schema": "difflet-flux-h1f-optimization-barrier-decision",
+  "schema_revision": 1,
+  "serving_claim": false,
+  "status": "optimization_barrier_contract_rejected",
+  "study_id": "flux-h1f-optimization-barrier-contract-20260812"
+}

@@ -1,0 +1,155 @@
+{
+  "architecture_speed_claim": false,
+  "artifacts": {
+    "inspect_json": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1c-backbone-ranked-loop-20260812/neuron-inspect-v1.json",
+      "sha256": "2f777f1203b86cedec747195af283248471847fe0ce876bd0fc78685ad320312"
+    },
+    "mechanism_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1c-backbone-ranked-loop-20260812/mechanism-result-v1.json",
+      "sha256": "2ae311e88a7c5efe69e9dc1d63747f78582d61b71e3121105c4b657f8b806bf0"
+    },
+    "profile_result": {
+      "path": "/home/ubuntu/difflet-artifacts/flux-h1c-backbone-ranked-loop-20260812/profile-result-v1.json",
+      "sha256": "916973f4f45b0e380882ac3ac4126700a0afc9970658a5fef99f33b59b552d71"
+    },
+    "protocol": {
+      "path": "/home/ubuntu/Difflet/benchmark/flux_cache/h1c-backbone-ranked-loop-protocol-20260812.json",
+      "sha256": "795eebdec304491321792de2b1b8f75e849667603c46990b3fbbdce445e27c7c"
+    }
+  },
+  "bidirectional_ranked_boundary_gate": {
+    "latent_noise_host_read_bytes": 0,
+    "latent_noise_host_write_bytes": 0,
+    "latent_noise_tensor_bytes": 524288,
+    "passed": true,
+    "real_backbone_calls": 3,
+    "resident_skip_steps": 1
+  },
+  "correctness_gate": {
+    "checks": [
+      {
+        "action": "real_backbone_anchor",
+        "maximum_absolute_error": 0.0,
+        "relative_l2_error": 0.0,
+        "step": 0
+      },
+      {
+        "action": "real_backbone_anchor",
+        "maximum_absolute_error": 0.0,
+        "relative_l2_error": 0.0,
+        "step": 1
+      },
+      {
+        "action": "resident_skip",
+        "maximum_absolute_error": 0.0,
+        "relative_l2_error": 0.0,
+        "step": 2
+      },
+      {
+        "action": "real_backbone_anchor",
+        "maximum_absolute_error": 0.0,
+        "relative_l2_error": 0.0,
+        "step": 3
+      }
+    ],
+    "final_maximum_absolute_error": 0.0,
+    "final_relative_l2_error": 0.0,
+    "passed": true
+  },
+  "decision": {
+    "backbone_cache_step_bidirectional_dataflow": true,
+    "claim_boundary": "This is a real-model executable boundary result, not a prompt/image quality or end-to-end speed result.",
+    "new_primary_bottleneck": "request-invariant backbone conditioning is recopied on every anchor",
+    "next": "Add a request initialization/context-state entry point so encoder hidden states, pooled projections, guidance, and rotary embeddings become resident; then run the full 50-step A12 loop and end-to-end comparison.",
+    "separate_nxd_models_preserve_ranked_handles": true
+  },
+  "device_memory_peak": {
+    "per_core_bytes": {
+      "0": {
+        "io_bytes": 368,
+        "tensors_bytes": 5978035988,
+        "total_bytes": 6534208520,
+        "weights_bytes": 262144
+      },
+      "1": {
+        "io_bytes": 368,
+        "tensors_bytes": 5978035988,
+        "total_bytes": 6534208520,
+        "weights_bytes": 262144
+      },
+      "2": {
+        "io_bytes": 368,
+        "tensors_bytes": 5978035988,
+        "total_bytes": 6534208520,
+        "weights_bytes": 262144
+      },
+      "3": {
+        "io_bytes": 368,
+        "tensors_bytes": 5978035988,
+        "total_bytes": 6534208520,
+        "weights_bytes": 262144
+      }
+    },
+    "sum_of_per_core_peak_tensor_bytes": 23912143952,
+    "sum_of_per_core_peak_total_bytes": 26136834080,
+    "sum_of_per_core_peak_weight_bytes": 1048576
+  },
+  "execution_diagnostics": {
+    "NeuronFluxTransformer2DModel": {
+      "maximum_per_rank_execute_time_us": 459998.45,
+      "median_per_rank_execute_time_us": 263085.28650000005,
+      "rank_execution_count": 12
+    },
+    "cache_anchor_step": {
+      "maximum_per_rank_execute_time_us": 551.946,
+      "median_per_rank_execute_time_us": 376.948,
+      "rank_execution_count": 12
+    },
+    "cache_predict": {
+      "maximum_per_rank_execute_time_us": 579.535,
+      "median_per_rank_execute_time_us": 386.472,
+      "rank_execution_count": 4
+    },
+    "cache_scheduler_step": {
+      "maximum_per_rank_execute_time_us": 478.17,
+      "median_per_rank_execute_time_us": 360.57349999999997,
+      "rank_execution_count": 4
+    }
+  },
+  "load_seconds": {
+    "backbone": 19.046222703997046,
+    "cache_step": 0.07258255098713562
+  },
+  "remaining_host_input_inventory": {
+    "counts_match_frozen_shapes": true,
+    "note": "Encoder hidden states, pooled projections, and rotary embeddings are invariant within a request but the current backbone signature recopies them to all four ranks on every real anchor.",
+    "observed_workload_write_size_counts": {
+      "1536": 12,
+      "2": 24,
+      "2359296": 12,
+      "4": 4,
+      "4194304": 12,
+      "8": 16
+    },
+    "per_backbone_call_bytes": 26220560.0,
+    "per_backbone_call_mib": 25.005874633789062,
+    "per_call_per_rank": {
+      "encoder_hidden_states": 4194304,
+      "guidance": 2,
+      "pooled_projections": 1536,
+      "rotary_embedding": 2359296,
+      "timestep": 2
+    },
+    "projected_a12_12_anchor_bytes": 314646720.0,
+    "projected_a12_12_anchor_mib": 300.07049560546875,
+    "projected_full_50_step_bytes": 1311028000.0,
+    "projected_full_50_step_mib": 1250.2937316894531,
+    "three_backbone_calls_total_bytes": 78661680
+  },
+  "schema": "difflet-flux-h1c-backbone-ranked-loop-boundary-result",
+  "schema_revision": 1,
+  "serving_claim": false,
+  "status": "ranked_backbone_boundary_passed_context_residency_required",
+  "study_id": "flux-h1c-real-backbone-ranked-loop-20260812"
+}
