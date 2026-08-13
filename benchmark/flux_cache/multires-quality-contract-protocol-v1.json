@@ -70,9 +70,9 @@
       }
     }
   ],
-  "margin_calibration": {
-    "method": "absolute-baseline-seed-pair-difference-nearest-rank",
-    "quantile": 0.95,
+  "observed_seed_variation_calibration": {
+    "method": "maximum-observed-absolute-baseline-seed-pair-difference",
+    "decision_statistic": "maximum_observed",
     "candidate_images_excluded_from_margin_estimation": true,
     "pooling_across_resolutions_forbidden": true
   },
@@ -82,7 +82,7 @@
       "vqa_score"
     ],
     "paired_loss": "baseline_score_minus_candidate_score",
-    "comparison": "strictly-greater-than-resolution-metric-margin",
+    "comparison": "strictly-greater-than-observed-seed-variation-envelope",
     "combination": "fail-if-either-metric-fails",
     "weighted_average_forbidden": true
   },
@@ -120,45 +120,38 @@
     }
   },
   "source_registration": {
-    "python_source_sha256": "91f2222de92aacc086f16f05a5cf8083b25bd677c21075b2f7bd30a186477a1b",
+    "python_source_sha256": "d73bc945d0423f3698dd5d48abbce92f9c9e0a8944305f6474f578a7fe810e7b",
     "dirty_worktree_policy": "exact-python-source-sha256-required",
     "implementation_files": [
       {
         "path": "scripts/multires_quality_contract.py",
-        "file_sha256": "13ac0f765b884402681badaa0a211de1b612ccebdf915c2fba97460f924dec7f"
+        "file_sha256": "d69cb2292cc840bd89534fd09a0ab93a70793dadcbf24d58b827368f4071e79b"
       },
       {
         "path": "scripts/collect_flux_baseline_calibration.py",
-        "file_sha256": "57386045d8c7381674b5e3065c1588bd221f311fae4bd4874a31d9d1139db16e"
+        "file_sha256": "028428694d3c80bc6375fda4224bc7eaf84f3b20b2bd8fd80c28be195e8418d5"
       },
       {
         "path": "scripts/evaluate_flux_baseline_semantics.py",
         "file_sha256": "edd05107c83230322e806b896eea6ae4113ea40d83cc7748b117c9abd0f78656"
       },
       {
-        "path": "scripts/automatic_quality_contract.py",
-        "file_sha256": "44114c09592d1d77a69c33623304831ddb609de67b4ce346df50bf7b38bd6c8e"
-      },
-      {
         "path": "scripts/flux_cache_protocol.py",
-        "file_sha256": "70c68eb3d4a9ed11e597e9a1eeebaeba137dbad3c06149353793f8dfbbc169ba"
-      },
-      {
-        "path": "scripts/collect_flux_cache_ab.py",
-        "file_sha256": "70be04d6413fae8e01c70ca9bbb1ef289ae8ec246de3dd2a91b517d2b3f6ac30"
+        "file_sha256": "e5cb8b4022739d328e0b0eaadceb2e5ae90e9e89982161a113de263f6789880d"
       },
       {
         "path": "scripts/evaluate_flux_cache_semantics.py",
-        "file_sha256": "1aeb540b9fa365b1c00d2ae7f47b38c692319b9cbbc33f1fc5853a55c53b0de0"
+        "file_sha256": "e7fdb08ed0b151be9eeb1f778e7ee8f295e6284c37e2a35e6ef988f925ce8913"
       }
     ]
   },
   "parameters_frozen_before_collection": true,
   "limitations": [
     "Automatic semantic metrics are proxies and do not establish human-perceived equivalence.",
-    "Every margin applies only to its exact registered height and width; interpolation and pooling across shapes are forbidden.",
+    "Every observed seed-variation envelope applies only to its exact registered height and width; interpolation and pooling across shapes are forbidden.",
+    "Each envelope is the maximum in the frozen calibration matrix, not a theoretical or population maximum.",
     "This protocol calibrates the quality contract only; each cache profile still requires an independent per-resolution confirmation holdout.",
     "The worktree is intentionally uncommitted, so evidence is accepted only when the complete Python source tree matches the prospectively registered SHA-256."
   ],
-  "sha256": "6fa6d9a02c14b4196f5ef97da08fec6a1a81dd8bf7e37901a5cf5e5feb9381b9"
+  "sha256": "3d5315dd2b8cae16c0540e613e69c13a727bba23c97cf852505953f8ddce4e63"
 }

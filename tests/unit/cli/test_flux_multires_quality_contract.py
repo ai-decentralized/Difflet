@@ -67,9 +67,9 @@ def _registration() -> dict:
                 "prompt_suite": dict(prompt_binding),
             },
         ],
-        "margin_calibration": {
+        "observed_seed_variation_calibration": {
             "method": multires.CALIBRATION_METHOD,
-            "quantile": 0.95,
+            "decision_statistic": "maximum_observed",
             "candidate_images_excluded_from_margin_estimation": True,
             "pooling_across_resolutions_forbidden": True,
         },
@@ -192,7 +192,9 @@ def test_observed_generation_rejects_shape_drift():
         )
 
 
-def test_calibration_computes_independent_nearest_rank_margins(tmp_path, monkeypatch):
+def test_calibration_computes_independent_observed_maximum_envelopes(
+    tmp_path, monkeypatch
+):
     registration = _registration()
     registration_path = tmp_path / "registration.json"
     _write_json(registration_path, registration)
@@ -239,14 +241,22 @@ def test_calibration_computes_independent_nearest_rank_margins(tmp_path, monkeyp
     contract = multires.calibrate_contract(registration_path, reports)
     by_id = {row["bucket_id"]: row for row in contract["resolution_contracts"]}
 
-    assert by_id["square-1024"]["margins"] == pytest.approx(
+    assert by_id["square-1024"]["observed_seed_variation_envelope"] == pytest.approx(
         {"image_reward": 0.2, "vqa_score": 0.02}
     )
-    assert by_id["landscape-1344x768"]["margins"] == pytest.approx(
+    assert by_id["landscape-1344x768"][
+        "observed_seed_variation_envelope"
+    ] == pytest.approx(
         {"image_reward": 0.8, "vqa_score": 0.1}
     )
     assert all(
         summary["pair_count"] == 48
         for row in by_id.values()
-        for summary in row["calibration_summary"].values()
+        for summary in row["calibration_diagnostics"].values()
+    )
+    assert all(
+        row["observed_seed_variation_envelope"][metric]
+        == row["calibration_diagnostics"][metric]["maximum_observed"]
+        for row in by_id.values()
+        for metric in multires.METRICS
     )

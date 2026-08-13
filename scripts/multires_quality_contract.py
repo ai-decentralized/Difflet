@@ -3,8 +3,8 @@
 
 The registration freezes the generation identity, prompt/seed matrix, metric
 identity, source tree, and calibration rule before any baseline images are
-collected.  A calibrated contract contains one independently estimated margin
-for every registered AOT resolution bucket.
+collected.  A calibrated contract contains one observed seed-variation
+envelope for every metric in every registered AOT resolution bucket.
 """
 
 from __future__ import annotations
@@ -39,11 +39,11 @@ PROTOCOL_SCHEMA = "difflet-flux-cache-multires-quality-contract-protocol"
 CONTRACT_SCHEMA = "difflet-flux-cache-multires-quality-contract"
 BASELINE_MANIFEST_SCHEMA = "difflet-flux-baseline-calibration-manifest"
 SCHEMA_REVISION = 1
-CALIBRATION_METHOD = "absolute-baseline-seed-pair-difference-nearest-rank"
+CALIBRATION_METHOD = "maximum-observed-absolute-baseline-seed-pair-difference"
 AUTOMATIC_DAMAGE_RULE = {
     "metrics": list(METRICS),
     "paired_loss": "baseline_score_minus_candidate_score",
-    "comparison": "strictly-greater-than-resolution-metric-margin",
+    "comparison": "strictly-greater-than-observed-seed-variation-envelope",
     "combination": "fail-if-either-metric-fails",
     "weighted_average_forbidden": True,
 }
@@ -124,7 +124,7 @@ def load_protocol(path: Path, *, verify_local_source: bool = True) -> dict[str, 
         "status",
         "controlled_generation",
         "resolution_buckets",
-        "margin_calibration",
+        "observed_seed_variation_calibration",
         "automatic_damage_rule",
         "semantic_metrics",
         "source_registration",
@@ -215,21 +215,21 @@ def load_protocol(path: Path, *, verify_local_source: bool = True) -> dict[str, 
         ):
             raise ValueError(f"{name} prompt/seed registration is inconsistent")
 
-    calibration = document["margin_calibration"]
+    calibration = document["observed_seed_variation_calibration"]
     if not isinstance(calibration, dict) or set(calibration) != {
         "method",
-        "quantile",
+        "decision_statistic",
         "candidate_images_excluded_from_margin_estimation",
         "pooling_across_resolutions_forbidden",
     }:
-        raise ValueError("margin calibration fields are invalid")
+        raise ValueError("observed seed-variation calibration fields are invalid")
     if (
         calibration["method"] != CALIBRATION_METHOD
-        or not 0.0 < _finite(calibration["quantile"], "margin_calibration.quantile") <= 1.0
+        or calibration["decision_statistic"] != "maximum_observed"
         or calibration["candidate_images_excluded_from_margin_estimation"] is not True
         or calibration["pooling_across_resolutions_forbidden"] is not True
     ):
-        raise ValueError("margin calibration rule is unsupported")
+        raise ValueError("observed seed-variation calibration rule is unsupported")
     if document["automatic_damage_rule"] != AUTOMATIC_DAMAGE_RULE:
         raise ValueError("automatic damage rule is unsupported")
     if set(document["semantic_metrics"]) != set(METRICS):
@@ -440,13 +440,6 @@ def _validate_metric_identity(metrics: Mapping[str, Any], expected: Mapping[str,
             raise ValueError("VQAScore checkpoint files differ from registration")
 
 
-def _nearest_rank(values: Sequence[float], quantile: float) -> float:
-    if not values:
-        raise ValueError("cannot calculate a quantile from no values")
-    ordered = sorted(values)
-    return ordered[max(1, math.ceil(quantile * len(ordered))) - 1]
-
-
 def _load_report_evidence(
     report_path: Path,
     protocol: Mapping[str, Any],
@@ -468,7 +461,9 @@ def _load_report_evidence(
         raise ValueError("semantic report baseline-manifest binding is invalid")
     manifest = load_baseline_manifest(manifest_path, protocol, bucket["bucket_id"])
     if report["comparisons"] or report["summary"]:
-        raise ValueError("margin calibration must not contain candidate comparisons")
+        raise ValueError(
+            "seed-variation envelope calibration must not contain candidate comparisons"
+        )
     rows = report["images"]
     if len(rows) != bucket["prompt_suite"]["sample_count"]:
         raise ValueError("semantic report has the wrong baseline image count")
@@ -502,7 +497,6 @@ def calibrate_contract(
     expected_ids = set(_bucket_map(protocol))
     if set(semantic_reports) != expected_ids:
         raise ValueError("semantic reports must cover every registered bucket exactly once")
-    quantile = float(protocol["margin_calibration"]["quantile"])
     bucket_results: list[dict[str, Any]] = []
     shared_metric_identity: dict[str, Any] | None = None
     for bucket in protocol["resolution_buckets"]:
@@ -535,28 +529,25 @@ def calibrate_contract(
                                 - _finite(right["scores"][metric], metric)
                             )
                         )
-        margins: dict[str, float] = {}
+        envelopes: dict[str, float] = {}
         summaries: dict[str, Any] = {}
         for metric, values in differences.items():
-            margin = _nearest_rank(values, quantile)
-            margins[metric] = margin
+            envelope = max(values)
+            envelopes[metric] = envelope
             summaries[metric] = {
                 "pair_count": len(values),
                 "minimum": min(values),
                 "median": statistics.median(values),
                 "mean": statistics.fmean(values),
-                "maximum": max(values),
-                "selected_quantile": quantile,
-                "nearest_rank": max(1, math.ceil(quantile * len(values))),
-                "margin": margin,
+                "maximum_observed": envelope,
             }
         bucket_results.append(
             {
                 "bucket_id": bucket_id,
                 "height": bucket["height"],
                 "width": bucket["width"],
-                "margins": margins,
-                "calibration_summary": summaries,
+                "observed_seed_variation_envelope": envelopes,
+                "calibration_diagnostics": summaries,
                 "evidence": {
                     "semantic_report": str(report_path),
                     "semantic_report_sha256": sha256_file(report_path),
@@ -575,7 +566,9 @@ def calibrate_contract(
             "study_id": protocol["study_id"],
         },
         "controlled_generation": protocol["controlled_generation"],
-        "margin_calibration": protocol["margin_calibration"],
+        "observed_seed_variation_calibration": protocol[
+            "observed_seed_variation_calibration"
+        ],
         "automatic_damage_rule": protocol["automatic_damage_rule"],
         "metric_identity": shared_metric_identity,
         "resolution_contracts": bucket_results,

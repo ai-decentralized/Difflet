@@ -1,7 +1,7 @@
 {
   "automatic_damage_rule": {
     "combination": "fail-if-either-metric-fails",
-    "comparison": "strictly-greater-than-resolution-metric-margin",
+    "comparison": "strictly-greater-than-observed-seed-variation-envelope",
     "metrics": [
       "image_reward",
       "vqa_score"
@@ -21,15 +21,16 @@
   },
   "limitations": [
     "Automatic semantic metrics are proxies and do not establish human-perceived equivalence.",
-    "Every margin applies only to its exact registered height and width; interpolation and pooling across shapes are forbidden.",
+    "Every observed seed-variation envelope applies only to its exact registered height and width; interpolation and pooling across shapes are forbidden.",
+    "Each envelope is the maximum in the frozen calibration matrix, not a theoretical or population maximum.",
     "This protocol calibrates the quality contract only; each cache profile still requires an independent per-resolution confirmation holdout.",
     "The worktree is intentionally uncommitted, so evidence is accepted only when the complete Python source tree matches the prospectively registered SHA-256."
   ],
-  "margin_calibration": {
+  "observed_seed_variation_calibration": {
     "candidate_images_excluded_from_margin_estimation": true,
-    "method": "absolute-baseline-seed-pair-difference-nearest-rank",
-    "pooling_across_resolutions_forbidden": true,
-    "quantile": 0.95
+    "decision_statistic": "maximum_observed",
+    "method": "maximum-observed-absolute-baseline-seed-pair-difference",
+    "pooling_across_resolutions_forbidden": true
   },
   "metric_identity": {
     "config": {
@@ -205,34 +206,28 @@
     "sha256": "19833c749e000f78bb6138a7ddd6c9dceb050cc60a05ceb304ed8b7724269a5a"
   },
   "protocol": {
-    "content_sha256": "6fa6d9a02c14b4196f5ef97da08fec6a1a81dd8bf7e37901a5cf5e5feb9381b9",
-    "file_sha256": "71562ffc5cc765cc32f096f9da6831838e649545ec6396618a47d80adecfa5cb",
+    "content_sha256": "3d5315dd2b8cae16c0540e613e69c13a727bba23c97cf852505953f8ddce4e63",
+    "file_sha256": "5fe007c573f6dafa65d82730a99b057e0a29ef79d29c64061d5374c0fde121a3",
     "path": "/home/ubuntu/Difflet/benchmark/flux_cache/multires-quality-contract-protocol-v1.json",
     "study_id": "flux-cache-multires-quality-contract-v1-2026-08-04"
   },
   "resolution_contracts": [
     {
       "bucket_id": "square-1024",
-      "calibration_summary": {
+      "calibration_diagnostics": {
         "image_reward": {
-          "margin": 0.7824224829673767,
-          "maximum": 0.9721190482378006,
+          "maximum_observed": 0.9721190482378006,
           "mean": 0.2285592770203948,
           "median": 0.10491734743118286,
           "minimum": 0.0010179877281188965,
-          "nearest_rank": 46,
-          "pair_count": 48,
-          "selected_quantile": 0.95
+          "pair_count": 48
         },
         "vqa_score": {
-          "margin": 0.24609375,
-          "maximum": 0.26171875,
+          "maximum_observed": 0.26171875,
           "mean": 0.053059895833333336,
           "median": 0.015625,
           "minimum": 0.0,
-          "nearest_rank": 46,
-          "pair_count": 48,
-          "selected_quantile": 0.95
+          "pair_count": 48
         }
       },
       "evidence": {
@@ -242,34 +237,28 @@
         "semantic_report_sha256": "f039ddab30679df435a6aa4c444d01dbbcccbd1c629f00804ffd01c6e302145b"
       },
       "height": 1024,
-      "margins": {
-        "image_reward": 0.7824224829673767,
-        "vqa_score": 0.24609375
+      "observed_seed_variation_envelope": {
+        "image_reward": 0.9721190482378006,
+        "vqa_score": 0.26171875
       },
       "width": 1024
     },
     {
       "bucket_id": "landscape-1344x768",
-      "calibration_summary": {
+      "calibration_diagnostics": {
         "image_reward": {
-          "margin": 1.6582059171050787,
-          "maximum": 2.1130805015563965,
+          "maximum_observed": 2.1130805015563965,
           "mean": 0.43773537524975836,
           "median": 0.24125124514102936,
           "minimum": 0.006395459175109863,
-          "nearest_rank": 46,
-          "pair_count": 48,
-          "selected_quantile": 0.95
+          "pair_count": 48
         },
         "vqa_score": {
-          "margin": 0.3046875,
-          "maximum": 0.38671875,
+          "maximum_observed": 0.38671875,
           "mean": 0.0556640625,
           "median": 0.017578125,
           "minimum": 0.0,
-          "nearest_rank": 46,
-          "pair_count": 48,
-          "selected_quantile": 0.95
+          "pair_count": 48
         }
       },
       "evidence": {
@@ -279,34 +268,28 @@
         "semantic_report_sha256": "2296cfc5ac2895e2756341fa0edc48d10ae3afa6b0907e089e5f7b81ac0df987"
       },
       "height": 768,
-      "margins": {
-        "image_reward": 1.6582059171050787,
-        "vqa_score": 0.3046875
+      "observed_seed_variation_envelope": {
+        "image_reward": 2.1130805015563965,
+        "vqa_score": 0.38671875
       },
       "width": 1344
     },
     {
       "bucket_id": "portrait-768x1344",
-      "calibration_summary": {
+      "calibration_diagnostics": {
         "image_reward": {
-          "margin": 0.9788927286863327,
-          "maximum": 1.400521993637085,
+          "maximum_observed": 1.400521993637085,
           "mean": 0.26463906342784566,
           "median": 0.16983185708522797,
           "minimum": 0.004160284996032715,
-          "nearest_rank": 46,
-          "pair_count": 48,
-          "selected_quantile": 0.95
+          "pair_count": 48
         },
         "vqa_score": {
-          "margin": 0.36328125,
-          "maximum": 0.40234375,
+          "maximum_observed": 0.40234375,
           "mean": 0.060872395833333336,
           "median": 0.01953125,
           "minimum": 0.0,
-          "nearest_rank": 46,
-          "pair_count": 48,
-          "selected_quantile": 0.95
+          "pair_count": 48
         }
       },
       "evidence": {
@@ -316,14 +299,14 @@
         "semantic_report_sha256": "f88e169d60304ab5e6ae231fc224eba95465e12970cf608cd2afa2ecf84f5556"
       },
       "height": 1344,
-      "margins": {
-        "image_reward": 0.9788927286863327,
-        "vqa_score": 0.36328125
+      "observed_seed_variation_envelope": {
+        "image_reward": 1.400521993637085,
+        "vqa_score": 0.40234375
       },
       "width": 768
     }
   ],
   "schema": "difflet-flux-cache-multires-quality-contract",
   "schema_revision": 1,
-  "sha256": "60e8e44288793dcdc5940b547a035fef11ebd6d05b102ac92185ecafc73f8194"
+  "sha256": "053bd1be0e6cbd57ec4be780a4bfd52603b19bae4b16696d749a70c410968db8"
 }
