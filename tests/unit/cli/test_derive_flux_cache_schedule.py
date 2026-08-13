@@ -75,7 +75,7 @@ def test_registration_uses_label_free_trajectories_without_a_speed_budget(
     assert registration["optimizer"]["budget_selection"] == (
         "ascending_first_closed_loop_quality_pass"
     )
-    assert registration["optimizer"]["warmup_steps"] == 3
+    assert registration["optimizer"]["warmup_steps"] == 6
     assert registration["optimizer"]["cooldown_steps"] == 0
     assert registration["optimizer"]["search_floor_formula"] == (
         "ceil(0.20 * total_steps)"
@@ -86,7 +86,7 @@ def test_registration_uses_label_free_trajectories_without_a_speed_budget(
         "candidate_domain_floor_not_quality_guarantee"
     )
     assert registration["optimizer"]["predictor_history_floor"] == 2
-    assert registration["optimizer"]["trajectory_observation_floor"] == 3
+    assert registration["optimizer"]["trajectory_observation_floor"] == 6
     assert registration["optimizer"]["closed_loop_mechanism_floor"] == 4
     assert registration["quality_contract_ref"] == {
         "path": "quality-contract.json",
@@ -164,7 +164,7 @@ def test_budget_frontier_contains_every_structurally_feasible_budget():
     assert all(len(anchors) == budget for budget, anchors, _ in frontier)
 
 
-def test_flux_frontier_really_starts_at_twenty_percent_floor():
+def test_flux_frontier_starts_at_first_feasible_budget_above_twenty_percent_floor():
     num_steps = 50
     costs = {}
     for a in range(1, num_steps - 2):
@@ -176,16 +176,16 @@ def test_flux_frontier_really_starts_at_twenty_percent_floor():
     frontier = _optimize_budget_frontier(
         costs,
         num_steps=num_steps,
-        warmup_steps=3,
+        warmup_steps=6,
         minimum_anchor_budget=schedule_derivation.empirical_search_floor(num_steps),
         phase_boundary=21,
         middle_gap_cap=6,
         tail_gap_cap=10,
     )
 
-    assert frontier[0][0] == 10
-    assert len(frontier[0][1]) == 10
-    assert frontier[0][1][:3] == (0, 1, 2)
+    assert frontier[0][0] == 12
+    assert len(frontier[0][1]) == 12
+    assert frontier[0][1][:6] == (0, 1, 2, 3, 4, 5)
     assert frontier[0][1][-1] == 49
 
 

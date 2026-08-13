@@ -181,12 +181,13 @@ def _registration_payload(
     if len(rows) != 48:
         raise ValueError("trajectory input must bind 48 unique baseline trajectories")
 
-    # Order-1 TaylorSeer requires two real history anchors.  The current
-    # trajectory artifact starts after denoising step zero, so the label-free
-    # objective first becomes observable with the third real anchor.  Anchor
-    # budget selection is independent: expensive qualification starts at the
-    # pre-registered literature-informed 20% search floor below.
-    warmup_steps = 3
+    # Order-1 TaylorSeer requires two real history anchors, but the qualified
+    # FLUX path conservatively keeps the historical warmup through step five.
+    # In zero-based coordinates that is six full-compute steps: 0, 1, 2, 3,
+    # 4, and 5.  Anchor budget selection is independent: expensive
+    # qualification starts at the pre-registered literature-informed 20%
+    # search floor below.
+    warmup_steps = 6
     cooldown_steps = 0
     search_floor = empirical_search_floor(int(generation["num_steps"]))
 
@@ -319,7 +320,7 @@ def load_registration(path: Path) -> dict[str, Any]:
         or optimizer.get("search_floor_anchor_budget") != expected_search_floor
         or optimizer.get("search_floor_reference") != EMPIRICAL_SEARCH_FLOOR_REFERENCE
         or optimizer.get("predictor_history_floor") != 2
-        or optimizer.get("trajectory_observation_floor") != 3
+        or optimizer.get("trajectory_observation_floor") != 6
         or optimizer.get("closed_loop_mechanism_floor") != 4
     ):
         raise ValueError("registered empirical search floor is invalid")
