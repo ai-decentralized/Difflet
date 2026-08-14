@@ -239,6 +239,7 @@ def _orchestration_fixture(
     measured_speedup,
     max_allowed_failures=0,
     failure_counts=None,
+    evidence_role=None,
 ):
     output_root = tmp_path / "output"
     registration_path = tmp_path / "registration.json"
@@ -260,6 +261,7 @@ def _orchestration_fixture(
     )
     _prompt_suite(prompt_path)
     spec = {
+        "schema_revision": profile_builder.LEGACY_BUILD_SPEC_SCHEMA_REVISION,
         "build_id": "test-build",
         "calibration": {"schedule_registration": {"path": str(registration_path)}},
         "quality_contract": {
@@ -289,6 +291,9 @@ def _orchestration_fixture(
         },
         "sha256": "f" * 64,
     }
+    if evidence_role is not None:
+        spec["schema_revision"] = profile_builder.BUILD_SPEC_SCHEMA_REVISION
+        spec["evidence_role"] = evidence_role
     registration = _registration()
     candidates = (
         _candidate("quality-static-a11-o1-index", 11),
@@ -478,6 +483,32 @@ def test_one_command_selects_first_passing_budget_after_a_failure(tmp_path, monk
     assert "--baseline-quality-manifest" not in hardware_commands[0]
     assert "--baseline-quality-manifest" in hardware_commands[1]
     assert "--baseline-speed-manifest" in hardware_commands[1]
+
+
+def test_hardware_ladder_smoke_never_exports_a_deployable_profile(
+    tmp_path,
+    monkeypatch,
+):
+    spec_path, output_root, hardware_commands = _orchestration_fixture(
+        tmp_path,
+        monkeypatch,
+        quality_passed=(False, True, True),
+        measured_speedup=2.5,
+        evidence_role=profile_builder.HARDWARE_LADDER_SMOKE_ROLE,
+    )
+
+    report = profile_builder.build_profile(spec_path)
+
+    assert report == output_root / "hardware-ladder-smoke-report.json"
+    smoke = json.loads(report.read_text(encoding="utf-8"))
+    assert smoke["status"] == "complete"
+    assert smoke["evidence_role"] == profile_builder.HARDWARE_LADDER_SMOKE_ROLE
+    assert smoke["decision"]["tested_anchor_budgets"] == [11, 12]
+    assert smoke["decision"]["stop_reason"] == "first_quality_pass"
+    assert smoke["deployable_profile_written"] is False
+    assert len(hardware_commands) == 2
+    assert not (output_root / "cache-profile.json").exists()
+    assert not (output_root / "profile-qualification.json").exists()
 
 
 def test_one_command_applies_the_registered_failure_budget(tmp_path, monkeypatch):

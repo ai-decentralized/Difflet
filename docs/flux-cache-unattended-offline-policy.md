@@ -191,3 +191,12 @@ On success it also writes `profile-qualification.json`. On either quality or
 speed failure it writes `rejection-report.json`, returns exit status `1`, and
 does not create `cache-profile.json`. Invalid scope, evidence, or execution
 returns status `2`. No human review or intermediate candidate choice exists.
+
+Revision-6 build specs also freeze an `evidence_role`. The
+`hardware_ladder_smoke` role executes the same derived frontier, hardware
+collector, baseline reuse, append-only semantic scoring, and ascending
+first-pass decision path, but it can never export a deployable profile or a
+serving qualification. Its only terminal artifact is
+`hardware-ladder-smoke-report.json`, with `deployable_profile_written=false`.
+Revision-5 specs retain their historical implicit `serving_qualification`
+role.

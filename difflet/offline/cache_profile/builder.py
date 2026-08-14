@@ -39,13 +39,27 @@ from scripts.flux_cache_protocol import (  # noqa: E402
 )
 
 BUILD_SPEC_SCHEMA = "difflet-flux-cache-profile-build-spec"
-BUILD_SPEC_SCHEMA_REVISION = 5
+BUILD_SPEC_SCHEMA_REVISION = 6
+LEGACY_BUILD_SPEC_SCHEMA_REVISION = 5
 BUILD_STATE_SCHEMA = "difflet-flux-cache-profile-build-state"
 BUILD_STATE_SCHEMA_REVISION = 1
 QUALIFICATION_SCHEMA = "difflet-flux-cache-profile-qualification"
 QUALIFICATION_SCHEMA_REVISION = 4
 REJECTION_SCHEMA = "difflet-flux-cache-profile-rejection"
 REJECTION_SCHEMA_REVISION = 1
+HARDWARE_SMOKE_SCHEMA = "difflet-flux-cache-hardware-ladder-smoke"
+HARDWARE_SMOKE_SCHEMA_REVISION = 1
+
+SERVING_QUALIFICATION_ROLE = {
+    "stage": "serving_qualification",
+    "serving_claim_permitted": True,
+    "deployable_profile_export_permitted": True,
+}
+HARDWARE_LADDER_SMOKE_ROLE = {
+    "stage": "hardware_ladder_smoke",
+    "serving_claim_permitted": False,
+    "deployable_profile_export_permitted": False,
+}
 
 _IMPLEMENTATION_PATHS = (
     Path(__file__).resolve(),
@@ -171,6 +185,17 @@ def _quality_bucket(contract: Mapping[str, Any], bucket_id: str) -> Mapping[str,
     return matches[0]
 
 
+def _evidence_role(spec: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return the frozen export boundary, including the revision-5 default."""
+
+    if spec.get("schema_revision") == LEGACY_BUILD_SPEC_SCHEMA_REVISION:
+        return SERVING_QUALIFICATION_ROLE
+    role = spec.get("evidence_role")
+    if role not in (SERVING_QUALIFICATION_ROLE, HARDWARE_LADDER_SMOKE_ROLE):
+        raise ValueError("profile build evidence role is invalid")
+    return role
+
+
 def _calibration_prompt_texts(registration: Mapping[str, Any]) -> set[str]:
     trajectory_input_path = Path(
         registration["source"]["trajectory_input_path"]
@@ -194,6 +219,7 @@ def _calibration_prompt_texts(registration: Mapping[str, Any]) -> set[str]:
 def load_build_spec(path: Path) -> dict[str, Any]:
     path = Path(path).expanduser().resolve()
     document = _load_json(path, "profile build spec")
+    revision = document.get("schema_revision")
     expected = {
         "schema",
         "schema_revision",
@@ -209,18 +235,22 @@ def load_build_spec(path: Path) -> dict[str, Any]:
         "implementation",
         "sha256",
     }
+    if revision == BUILD_SPEC_SCHEMA_REVISION:
+        expected.add("evidence_role")
     if set(document) != expected:
         raise ValueError("profile build spec fields do not match the schema")
-    if (
-        document["schema"] != BUILD_SPEC_SCHEMA
-        or document["schema_revision"] != BUILD_SPEC_SCHEMA_REVISION
-    ):
+    supported_revisions = (
+        LEGACY_BUILD_SPEC_SCHEMA_REVISION,
+        BUILD_SPEC_SCHEMA_REVISION,
+    )
+    if document["schema"] != BUILD_SPEC_SCHEMA or revision not in supported_revisions:
         raise ValueError("profile build spec schema is unsupported")
     payload = {key: value for key, value in document.items() if key != "sha256"}
     if canonical_sha256(payload) != document["sha256"]:
         raise ValueError("profile build spec sha256 does not match its contents")
     if document["status"] != "registered_not_run":
         raise ValueError("profile build spec status is invalid")
+    _evidence_role(document)
     if not isinstance(document["build_id"], str) or not document["build_id"]:
         raise ValueError("profile build id is invalid")
     nested_fields = {
@@ -380,12 +410,18 @@ def _build_spec_payload(args: argparse.Namespace) -> dict[str, Any]:
     policy = load_execution_policy(policy_path)
     prompt_path = Path(args.confirmation_prompt_suite).expanduser().resolve()
     selection = load_prompt_suite(prompt_path, args.confirmation_prompt_split)
+    evidence_role = (
+        HARDWARE_LADDER_SMOKE_ROLE
+        if args.evidence_role == "hardware_ladder_smoke"
+        else SERVING_QUALIFICATION_ROLE
+    )
     return {
         "schema": BUILD_SPEC_SCHEMA,
         "schema_revision": BUILD_SPEC_SCHEMA_REVISION,
         "build_id": args.build_id,
         "created_at": args.created_at,
         "status": "registered_not_run",
+        "evidence_role": dict(evidence_role),
         "calibration": {
             "schedule_registration": _binding(
                 registration_path,
@@ -754,7 +790,13 @@ def build_profile(spec_path: Path) -> Path:
     profile_path = output_root / "cache-profile.json"
     qualification_path = output_root / "profile-qualification.json"
     rejection_path = output_root / "rejection-report.json"
-    if profile_path.exists() or qualification_path.exists() or rejection_path.exists():
+    smoke_report_path = output_root / "hardware-ladder-smoke-report.json"
+    if (
+        profile_path.exists()
+        or qualification_path.exists()
+        or rejection_path.exists()
+        or smoke_report_path.exists()
+    ):
         raise RuntimeError("profile build output already contains a terminal result")
     internal_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1043,6 +1085,37 @@ def build_profile(spec_path: Path) -> Path:
         "speed_is_selection_input": False,
         "tested_frontier": frontier_decisions,
     }
+    evidence_role = _evidence_role(spec)
+    if not evidence_role["deployable_profile_export_permitted"]:
+        smoke_payload = {
+            "schema": HARDWARE_SMOKE_SCHEMA,
+            "schema_revision": HARDWARE_SMOKE_SCHEMA_REVISION,
+            "build_id": build_id,
+            "completed_at": _utc_now(),
+            "status": "complete",
+            "evidence_role": dict(evidence_role),
+            "build_spec": _binding(spec_path, content_sha256=spec["sha256"]),
+            "decision": decision,
+            "evidence": evidence,
+            "deployable_profile_written": False,
+        }
+        smoke_report = _write_hashed_json(smoke_report_path, smoke_payload)
+        _write_state(
+            state_path,
+            build_id=build_id,
+            stage="evidence",
+            status="complete",
+            details={
+                "hardware_smoke_report": str(smoke_report_path),
+                "hardware_smoke_sha256": smoke_report["sha256"],
+                **decision,
+            },
+        )
+        print(
+            f"[profile-build] non-deployable hardware smoke -> {smoke_report_path}",
+            flush=True,
+        )
+        return smoke_report_path
     if selected is None:
         rejection_payload = {
             "schema": REJECTION_SCHEMA,
@@ -1109,6 +1182,11 @@ def build_parser() -> argparse.ArgumentParser:
     register_parser = subparsers.add_parser("register")
     register_parser.add_argument("--build-id", required=True)
     register_parser.add_argument("--created-at", required=True)
+    register_parser.add_argument(
+        "--evidence-role",
+        choices=("serving_qualification", "hardware_ladder_smoke"),
+        default="serving_qualification",
+    )
     register_parser.add_argument("--calibration-registration", required=True)
     register_parser.add_argument("--quality-contract", required=True)
     register_parser.add_argument("--bucket-id", required=True)
