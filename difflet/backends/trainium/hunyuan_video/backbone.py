@@ -8,6 +8,12 @@ from typing import List
 import torch
 
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
+from difflet.backends.trainium.core.bucketing import (
+    CompileShape,
+    ShapeBucketedInputGenerator,
+    canonicalize_shapes,
+    resolve_compile_shapes,
+)
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoTransformer3DModel
@@ -30,6 +36,13 @@ class HunyuanVideoBackboneInferenceConfig(InferenceConfig):
             self.cp_mode = "gather_kv"
         if not hasattr(self, "sp_enabled"):
             self.sp_enabled = False
+        # Canonicalize the bucket shape set (largest first) and pin the single
+        # height/width/num_frames convention to the largest shape so every
+        # derived property (latent_*, contracts) describes the priority bucket.
+        shapes = getattr(self, "compile_shapes", None)
+        if shapes:
+            self.compile_shapes = canonicalize_shapes(shapes)
+            self.height, self.width, self.num_frames = self.compile_shapes[0]
 
     def get_required_attributes(self) -> List[str]:
         return [
@@ -81,16 +94,34 @@ class HunyuanVideoBackboneInferenceConfig(InferenceConfig):
         image_condition_type = getattr(self, "image_condition_type", None)
         if image_condition_type == "token_replace":
             raise NotImplementedError("HunyuanVideo M3 does not support token_replace.")
-        if self.height % 8 != 0 or self.width % 8 != 0:
-            raise ValueError("HunyuanVideo compile height/width must be divisible by 8.")
-        if self.latent_height % self.patch_size != 0 or self.latent_width % self.patch_size != 0:
-            raise ValueError("HunyuanVideo latent height/width must be divisible by patch_size.")
-        if self.latent_frames % self.patch_size_t != 0:
-            raise ValueError("HunyuanVideo latent frame count must be divisible by patch_size_t.")
+        for height, width, num_frames in resolve_compile_shapes(self):
+            if num_frames is None:
+                raise ValueError("HunyuanVideo compile shapes must include num_frames.")
+            if height % 8 != 0 or width % 8 != 0:
+                raise ValueError(
+                    f"HunyuanVideo compile height/width must be divisible by 8; got {height}x{width}."
+                )
+            latent_height, latent_width = height // 8, width // 8
+            latent_frames = (num_frames - 1) // 4 + 1
+            if latent_height % self.patch_size != 0 or latent_width % self.patch_size != 0:
+                raise ValueError(
+                    "HunyuanVideo latent height/width must be divisible by patch_size; "
+                    f"got {height}x{width}x{num_frames}."
+                )
+            if latent_frames % self.patch_size_t != 0:
+                raise ValueError(
+                    "HunyuanVideo latent frame count must be divisible by patch_size_t; "
+                    f"got {height}x{width}x{num_frames}."
+                )
 
 
-class ModelWrapperHunyuanVideoBackbone(ModelWrapper):
-    """ModelBuilder wrapper for HunyuanVideo DiT compile inputs."""
+class ModelWrapperHunyuanVideoBackbone(ShapeBucketedInputGenerator, ModelWrapper):
+    """ModelBuilder wrapper for HunyuanVideo DiT compile inputs.
+
+    One bucket per entry in ``config.compile_shapes`` (largest first); only the
+    latent tensor varies with shape, the text/timestep/guidance inputs are
+    shape-invariant.
+    """
 
     def __init__(
         self,
@@ -111,30 +142,32 @@ class ModelWrapperHunyuanVideoBackbone(ModelWrapper):
         )
         self.bucket_config = None
 
-    def input_generator(self) -> list[tuple[torch.Tensor, ...]]:
+    def example_inputs_for_shape(self, shape: CompileShape) -> tuple[torch.Tensor, ...]:
+        height, width, num_frames = shape
         batch_size = int(getattr(self.config.neuron_config, "batch_size", 1))
         dtype = self.config.neuron_config.torch_dtype
         text_seq_len = int(getattr(self.config, "text_seq_len", 256))
+        latent_frames = (int(num_frames) - 1) // 4 + 1
+        latent_height = int(height) // 8
+        latent_width = int(width) // 8
 
-        return [
-            (
-                torch.randn(
-                    [
-                        batch_size,
-                        self.config.in_channels,
-                        self.config.latent_frames,
-                        self.config.latent_height,
-                        self.config.latent_width,
-                    ],
-                    dtype=dtype,
-                ),
-                torch.ones([batch_size], dtype=dtype),
-                torch.randn([batch_size, text_seq_len, self.config.text_embed_dim], dtype=dtype),
-                torch.ones([batch_size, text_seq_len], dtype=torch.int64),
-                torch.randn([batch_size, self.config.pooled_projection_dim], dtype=dtype),
-                torch.ones([batch_size], dtype=dtype),
-            )
-        ]
+        return (
+            torch.randn(
+                [
+                    batch_size,
+                    self.config.in_channels,
+                    latent_frames,
+                    latent_height,
+                    latent_width,
+                ],
+                dtype=dtype,
+            ),
+            torch.ones([batch_size], dtype=dtype),
+            torch.randn([batch_size, text_seq_len, self.config.text_embed_dim], dtype=dtype),
+            torch.ones([batch_size, text_seq_len], dtype=torch.int64),
+            torch.randn([batch_size, self.config.pooled_projection_dim], dtype=dtype),
+            torch.ones([batch_size], dtype=dtype),
+        )
 
     def get_model_instance(self):
         def _create_model():

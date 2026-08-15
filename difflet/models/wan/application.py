@@ -30,6 +30,7 @@ def create_wan_backbone_config(
     cp_mode: str = "gather_kv",
     cfg_parallel_enabled: bool = False,
     sp_enabled: bool = False,
+    compile_shapes=None,
 ):
     from difflet.backends.trainium.wan.backbone import WanBackboneInferenceConfig
 
@@ -40,6 +41,9 @@ def create_wan_backbone_config(
         world_size=world_size,
         torch_dtype=dtype,
     )
+    extra = {}
+    if compile_shapes:
+        extra["compile_shapes"] = compile_shapes
     return WanBackboneInferenceConfig(
         neuron_config=neuron_config,
         load_config=load_diffusers_config(transformer_path),
@@ -50,6 +54,7 @@ def create_wan_backbone_config(
         cp_mode=cp_mode,
         cfg_parallel_enabled=cfg_parallel_enabled,
         sp_enabled=sp_enabled,
+        **extra,
     )
 
 
@@ -88,6 +93,7 @@ def create_wan_vae_decoder_config(
     width: int,
     num_frames: int,
     batch_size: int = 1,
+    compile_shapes=None,
 ):
     from difflet.backends.trainium.wan.vae import WanVAEDecoderInferenceConfig
 
@@ -102,12 +108,16 @@ def create_wan_vae_decoder_config(
         # nrt_load fails: "compiled with --lnc=2" vs runtime NEURON_LOGICAL_NC_CONFIG=1.
         logical_nc_config=1,
     )
+    extra = {}
+    if compile_shapes:
+        extra["compile_shapes"] = compile_shapes
     return WanVAEDecoderInferenceConfig(
         neuron_config=neuron_config,
         load_config=load_diffusers_config(vae_path),
         height=height,
         width=width,
         num_frames=num_frames,
+        **extra,
     )
 
 
@@ -164,6 +174,26 @@ class NeuronWanApplication(MultiComponentApplication):
         height = int(shape.get("height") or 480)
         width = int(shape.get("width") or 832)
         num_frames = int(shape.get("num_frames") or 9)
+        # Optional bucket shape set (PIXEL h/w/frames): one artifact with K
+        # backbone/VAE NEFFs sharing one weight copy. Largest shape becomes the
+        # single-shape defaults; frames are converted to latent counts for the
+        # backbone configs (their num_frames semantics) and stay pixel for VAE.
+        self.compile_shapes = None
+        backbone_compile_shapes = None
+        raw_shapes = kwargs.get("shapes")
+        if raw_shapes:
+            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+            self.compile_shapes = canonicalize_shapes(raw_shapes)
+            height, width, num_frames = (
+                self.compile_shapes[0][0],
+                self.compile_shapes[0][1],
+                int(self.compile_shapes[0][2]),
+            )
+            self.shape = {"height": height, "width": width, "num_frames": num_frames}
+            backbone_compile_shapes = tuple(
+                (h, w, _latent_num_frames(f)) for h, w, f in self.compile_shapes
+            )
         latent_num_frames = _latent_num_frames(num_frames)
 
         if enable_transformer and os.path.exists(os.path.join(self.transformer_path, "config.json")):
@@ -182,6 +212,7 @@ class NeuronWanApplication(MultiComponentApplication):
                 cp_mode=parallel.cp_mode,
                 cfg_parallel_enabled=cfg_parallel_enabled,
                 sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
+                compile_shapes=backbone_compile_shapes,
             )
             self.transformer = NeuronWanBackboneApplication(
                 model_path=self.transformer_path,
@@ -205,6 +236,7 @@ class NeuronWanApplication(MultiComponentApplication):
                 cp_mode=parallel.cp_mode,
                 cfg_parallel_enabled=cfg_parallel_enabled,
                 sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
+                compile_shapes=backbone_compile_shapes,
             )
             self.transformer_2 = NeuronWanBackboneApplication(
                 model_path=self.transformer_2_path,
@@ -241,6 +273,7 @@ class NeuronWanApplication(MultiComponentApplication):
                 width=width,
                 num_frames=num_frames,
                 batch_size=batch_size,
+                compile_shapes=self.compile_shapes,
             )
             self.vae_decoder = NeuronWanVAEDecoderApplication(
                 model_path=self.vae_decoder_path,

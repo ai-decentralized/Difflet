@@ -15,7 +15,13 @@ import sys
 from pathlib import Path
 
 from difflet.cli import runner
-from difflet.cli.orchestrators.base import ModelOrchestrator, cp_mode_token
+from difflet.cli.orchestrators.base import (
+    ModelOrchestrator,
+    bucketed_dir_token,
+    cp_mode_token,
+    parse_shapes_arg,
+    require_request_shape_in_set,
+)
 
 _HF_MODEL_ID = "hunyuanvideo-community/HunyuanVideo"
 _MODEL_TYPE = "hunyuan_video"
@@ -57,6 +63,12 @@ def _save_video(tensor: "torch.Tensor", output_path: str) -> bool:
     return True
 
 
+def _require_request_shape_in_set(args: argparse.Namespace):
+    return require_request_shape_in_set(
+        args, default_shape=(320, 512, 61), model_tag="hunyuan_video"
+    )
+
+
 class HunyuanVideoOrchestrator(ModelOrchestrator):
 
     def download(self) -> None:
@@ -77,6 +89,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
                          num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE, cli_args=shared)
 
     def generate(self) -> None:
+        _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(self.args.work_dir or
                         Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME)
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -241,6 +254,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
 
         h, w, f = args.height or 320, args.width or 512, args.num_frames or 61
         latent_frames = (f - 1) // 4 + 1
+        compile_shapes = _require_request_shape_in_set(args)
 
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
@@ -251,6 +265,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         app = NeuronHunyuanVideoApplication(
             model_path=model_dir, parallel=parallel, dtype=torch.bfloat16,
             shape={"height": h, "width": w, "num_frames": f},
+            shapes=compile_shapes,
             text_seq_len=_TEXT_SEQ_LEN, enable_vae_decoder=True,
         )
         app.teacache_probe = None
@@ -317,6 +332,20 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         if stage == "llama":
             return base / f"hunyuan_video_llama_seq{_TEXT_SEQ_LEN + _LLAMA_CROP_START}"
         if stage == "generate":
+            shapes = parse_shapes_arg(getattr(args, "shapes", None))
+            if shapes is not None:
+                # Bucketed artifact: key the dir on the canonical shape SET so
+                # every member request shape resolves to the same artifact, and
+                # a short set hash keeps it from colliding with single-shape
+                # dirs or other sets sharing the same largest shape.
+                from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+                canonical = canonicalize_shapes(shapes)
+                lh, lw, lf = canonical[0]
+                return base / (
+                    f"hunyuan_video_dit_tp{tp}cp{cp}{cpm}{sp}"
+                    f"_h{lh}w{lw}f{lf}_{bucketed_dir_token(canonical)}"
+                )
             return base / f"hunyuan_video_dit_tp{tp}cp{cp}{cpm}{sp}_h{h}w{w}f{f}"
         raise ValueError(f"unknown stage {stage!r}")
 
@@ -335,6 +364,8 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             "--seed", str(getattr(a, "seed", 42)),
             "--stage-mode", stage_mode,
         ]
+        if getattr(a, "shapes", None):
+            parts += ["--shapes", str(a.shapes)]
         if getattr(a, "sp_enabled", False):
             parts.append("--sp")
         if getattr(a, "prompt", None):

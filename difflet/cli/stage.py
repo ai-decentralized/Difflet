@@ -51,6 +51,7 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--height", type=int, default=None)
     p.add_argument("--width", type=int, default=None)
     p.add_argument("--num-frames", type=int, default=None)
+    p.add_argument("--shapes", default=None)
     p.add_argument("--prompt", default=None)
     p.add_argument("--output", default=None)
     p.add_argument("--steps", type=int, default=None)

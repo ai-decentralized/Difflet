@@ -10,6 +10,12 @@ import torch
 import torch.nn.functional as F
 
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
+from difflet.backends.trainium.core.bucketing import (
+    CompileShape,
+    ShapeBucketedInputGenerator,
+    canonicalize_shapes,
+    resolve_compile_shapes,
+)
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.models.hunyuan_video.vae.modeling_vae import (
@@ -31,6 +37,13 @@ class HunyuanVideoVAEDecoderInferenceConfig(InferenceConfig):
         self.tile_sample_stride_num_frames = int(getattr(self, "tile_sample_stride_num_frames", 12))
         if not hasattr(self, "scaling_factor"):
             self.scaling_factor = 0.476986
+        # Keep the shape-set convention: height/width/num_frames = largest shape.
+        # The compiled tile NEFF itself is request-shape independent, so K
+        # shapes still dedupe to a single bucket in input_generator().
+        shapes = getattr(self, "compile_shapes", None)
+        if shapes:
+            self.compile_shapes = canonicalize_shapes(shapes)
+            self.height, self.width, self.num_frames = self.compile_shapes[0]
 
     def get_required_attributes(self) -> List[str]:
         return [
@@ -88,10 +101,17 @@ class HunyuanVideoVAEDecoderInferenceConfig(InferenceConfig):
 
     def validate_config(self):
         super().validate_config()
-        if int(self.height) % int(self.spatial_compression_ratio) != 0:
-            raise ValueError("HunyuanVideo VAE height must be divisible by spatial compression ratio.")
-        if int(self.width) % int(self.spatial_compression_ratio) != 0:
-            raise ValueError("HunyuanVideo VAE width must be divisible by spatial compression ratio.")
+        for height, width, _num_frames in resolve_compile_shapes(self):
+            if int(height) % int(self.spatial_compression_ratio) != 0:
+                raise ValueError(
+                    "HunyuanVideo VAE height must be divisible by spatial compression ratio; "
+                    f"got {height}."
+                )
+            if int(width) % int(self.spatial_compression_ratio) != 0:
+                raise ValueError(
+                    "HunyuanVideo VAE width must be divisible by spatial compression ratio; "
+                    f"got {width}."
+                )
         if int(self.spatial_compression_ratio) != 8:
             raise NotImplementedError("HunyuanVideo VAE spike expects spatial compression ratio 8.")
         if int(self.temporal_compression_ratio) != 4:
@@ -100,8 +120,13 @@ class HunyuanVideoVAEDecoderInferenceConfig(InferenceConfig):
             raise ValueError("HunyuanVideo VAE tile frame stride must be positive.")
 
 
-class ModelWrapperHunyuanVideoVAEDecoder(ModelWrapper):
-    """ModelBuilder wrapper for HunyuanVideo VAE tile decoder compile inputs."""
+class ModelWrapperHunyuanVideoVAEDecoder(ShapeBucketedInputGenerator, ModelWrapper):
+    """ModelBuilder wrapper for HunyuanVideo VAE tile decoder compile inputs.
+
+    The decoder consumes fixed-size tiles, so its example input is independent
+    of the request shape; a multi-shape ``compile_shapes`` set dedupes to a
+    single bucket.
+    """
 
     def __init__(
         self,
@@ -122,23 +147,22 @@ class ModelWrapperHunyuanVideoVAEDecoder(ModelWrapper):
         )
         self.bucket_config = None
 
-    def input_generator(self) -> List[Tuple[torch.Tensor]]:
+    def example_inputs_for_shape(self, shape: CompileShape) -> Tuple[torch.Tensor, ...]:
+        del shape  # tile dims come from tile config, not the request shape
         batch_size = int(getattr(self.config.neuron_config, "batch_size", 1))
         dtype = self.config.neuron_config.torch_dtype
-        return [
-            (
-                torch.randn(
-                    [
-                        batch_size,
-                        int(self.config.latent_channels),
-                        int(self.config.tile_latent_frames),
-                        int(self.config.tile_latent_height),
-                        int(self.config.tile_latent_width),
-                    ],
-                    dtype=dtype,
-                ),
-            )
-        ]
+        return (
+            torch.randn(
+                [
+                    batch_size,
+                    int(self.config.latent_channels),
+                    int(self.config.tile_latent_frames),
+                    int(self.config.tile_latent_height),
+                    int(self.config.tile_latent_width),
+                ],
+                dtype=dtype,
+            ),
+        )
 
     def get_model_instance(self):
         def _create_model():
