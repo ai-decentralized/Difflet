@@ -13,7 +13,13 @@ import sys
 from pathlib import Path
 
 from difflet.cli import runner
-from difflet.cli.orchestrators.base import ModelOrchestrator, cp_mode_token
+from difflet.cli.orchestrators.base import (
+    ModelOrchestrator,
+    bucketed_dir_token,
+    cp_mode_token,
+    parse_shapes_arg,
+    require_request_shape_in_set,
+)
 
 # Model id comes from the CLI (--model-id); both Wan 2.2 A14B (MoE, dual
 # transformer) and Wan 2.1 14B (single transformer) route here. The single-vs-
@@ -89,6 +95,12 @@ def _decode_latents_host(latents_path: str, model_id: str, output_path: str,
     print(f"[wan] video tensor saved to {out.with_suffix('.pt')}", flush=True)
 
 
+def _require_request_shape_in_set(args: argparse.Namespace):
+    return require_request_shape_in_set(
+        args, default_shape=(480, 832, 9), model_tag="wan"
+    )
+
+
 class WanOrchestrator(ModelOrchestrator):
 
     def download(self) -> None:
@@ -114,6 +126,7 @@ class WanOrchestrator(ModelOrchestrator):
                          cli_args=shared)
 
     def generate(self) -> None:
+        _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(self.args.work_dir or
                         Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME)
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -156,6 +169,7 @@ class WanOrchestrator(ModelOrchestrator):
         from difflet.pipeline.path_resolver import resolve_model_path
 
         model_dir = resolve_model_path(self.args.model_id, local_files_only=True)
+        compile_shapes = _require_request_shape_in_set(args)
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
             cp_degree=args.cp_degree or 1,
@@ -173,6 +187,7 @@ class WanOrchestrator(ModelOrchestrator):
                 "width": args.width or 832,
                 "num_frames": args.num_frames or 9,
             },
+            shapes=compile_shapes,
             text_seq_len=512,
             batch_size=1,
             enable_text_encoder=True,
@@ -217,6 +232,7 @@ class WanOrchestrator(ModelOrchestrator):
         from difflet.pipeline.path_resolver import resolve_model_path
 
         model_dir = resolve_model_path(self.args.model_id, local_files_only=True)
+        compile_shapes = _require_request_shape_in_set(args)
         parallel = DiffletParallelConfig(tp_degree=1, cp_degree=1)
         compiled_dir = self._stage_compiled_dir("vae", args)
         app = NeuronWanApplication(
@@ -228,6 +244,7 @@ class WanOrchestrator(ModelOrchestrator):
                 "width": args.width or 832,
                 "num_frames": args.num_frames or 9,
             },
+            shapes=compile_shapes,
             text_seq_len=512,
             batch_size=1,
             enable_text_encoder=False,
@@ -278,10 +295,19 @@ class WanOrchestrator(ModelOrchestrator):
         h = args.height or 480
         w = args.width or 832
         f = args.num_frames or 9
+        shapes = parse_shapes_arg(getattr(args, "shapes", None))
+        if shapes is not None:
+            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+            canonical = canonicalize_shapes(shapes)
+            h, w, f = canonical[0]
+            token = f"_{bucketed_dir_token(canonical)}"
+        else:
+            token = ""
         if stage == "transformer":
-            return base / f"{prefix}_transformer_tp{tp}cp{cp}{cpm}{cfg}{sp}_h{h}w{w}f{f}"
+            return base / f"{prefix}_transformer_tp{tp}cp{cp}{cpm}{cfg}{sp}_h{h}w{w}f{f}{token}"
         if stage == "vae":
-            return base / f"{prefix}_vae_h{h}w{w}f{f}"
+            return base / f"{prefix}_vae_h{h}w{w}f{f}{token}"
         raise ValueError(f"unknown stage {stage!r}")
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
@@ -299,6 +325,8 @@ class WanOrchestrator(ModelOrchestrator):
             "--seed", str(getattr(a, "seed", 42)),
             "--stage-mode", stage_mode,
         ]
+        if getattr(a, "shapes", None):
+            parts += ["--shapes", str(a.shapes)]
         if getattr(a, "cfg_parallel", False):
             parts.append("--cfg-parallel")
         if getattr(a, "sp_enabled", False):

@@ -11,6 +11,7 @@ from torch import nn
 from diffusers.models.attention_dispatch import dispatch_attention_fn
 
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
+from difflet.backends.trainium.core.bucketing import ShapeBucketedInputGenerator
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.ops import (
@@ -45,6 +46,15 @@ class QwenImageTransformerInferenceConfig(InferenceConfig):
             self.context_parallel_enabled = False
         if not hasattr(self, "cp_mode"):
             self.cp_mode = "gather_kv"
+        # Bucket shape set (image model: (h, w) entries), largest first; pin
+        # the single height/width convention to the priority shape.
+        shapes = getattr(self, "compile_shapes", None)
+        if shapes:
+            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+            self.compile_shapes = canonicalize_shapes(shapes)
+            self.height = self.compile_shapes[0][0]
+            self.width = self.compile_shapes[0][1]
 
     def get_required_attributes(self) -> List[str]:
         return [
@@ -91,14 +101,24 @@ class QwenImageTransformerInferenceConfig(InferenceConfig):
             raise ValueError("Qwen-Image axes_dims_rope entries must be even.")
         if int(self.patch_size) != 2:
             raise NotImplementedError("Qwen-Image M4a currently supports patch_size=2.")
-        if int(self.height) % (int(self.vae_scale_factor) * 2) != 0:
-            raise ValueError("Qwen-Image compile height must be divisible by 16.")
-        if int(self.width) % (int(self.vae_scale_factor) * 2) != 0:
-            raise ValueError("Qwen-Image compile width must be divisible by 16.")
-        if self.latent_height % int(self.patch_size) != 0:
-            raise ValueError("Qwen-Image latent height must be divisible by patch_size.")
-        if self.latent_width % int(self.patch_size) != 0:
-            raise ValueError("Qwen-Image latent width must be divisible by patch_size.")
+        from difflet.backends.trainium.core.bucketing import resolve_compile_shapes
+
+        vsf2 = int(self.vae_scale_factor) * 2
+        for height, width, _frames in resolve_compile_shapes(self):
+            if int(height) % vsf2 != 0:
+                raise ValueError(
+                    f"Qwen-Image compile height must be divisible by 16; got {height}."
+                )
+            if int(width) % vsf2 != 0:
+                raise ValueError(
+                    f"Qwen-Image compile width must be divisible by 16; got {width}."
+                )
+            latent_height = 2 * (int(height) // vsf2)
+            latent_width = 2 * (int(width) // vsf2)
+            if latent_height % int(self.patch_size) != 0:
+                raise ValueError("Qwen-Image latent height must be divisible by patch_size.")
+            if latent_width % int(self.patch_size) != 0:
+                raise ValueError("Qwen-Image latent width must be divisible by patch_size.")
         if getattr(self, "use_additional_t_cond", False):
             raise NotImplementedError("Qwen-Image M4a does not support additional_t_cond yet.")
 
@@ -128,7 +148,12 @@ def _apply_qwen_rope_real(
 
 
 class _StaticQwenImageRealRope(nn.Module):
-    """Static real-valued Qwen RoPE for one compiled image/text shape.
+    """Static real-valued Qwen RoPE for the compiled image/text shape(s).
+
+    Holds one precomputed (cos, sin) image table per compiled packed shape,
+    selected at trace time from the ``img_shapes`` argument (a Python constant
+    per bucket, so each bucket NEFF bakes exactly its own table). Text RoPE is
+    shape-independent.
 
     Under context parallelism the image RoPE buffers are scattered along the
     sequence axis (dim 0 of ``(S_img, head_dim)``) so each CP rank applies the
@@ -138,15 +163,17 @@ class _StaticQwenImageRealRope(nn.Module):
     def __init__(
         self,
         *,
-        img_rope: tuple[torch.Tensor, torch.Tensor],
+        img_ropes: dict[tuple[int, int], tuple[torch.Tensor, torch.Tensor]],
         txt_rope: tuple[torch.Tensor, torch.Tensor],
         context_parallel_enabled: bool = False,
         global_rank: SPMDRank | None = None,
         cp_group=None,
     ) -> None:
         super().__init__()
-        self.register_buffer("img_cos", img_rope[0], persistent=False)
-        self.register_buffer("img_sin", img_rope[1], persistent=False)
+        self._img_keys = list(img_ropes)
+        for (ph, pw), (cos, sin) in img_ropes.items():
+            self.register_buffer(f"img_cos_{ph}x{pw}", cos, persistent=False)
+            self.register_buffer(f"img_sin_{ph}x{pw}", sin, persistent=False)
         self.register_buffer("txt_cos", txt_rope[0], persistent=False)
         self.register_buffer("txt_sin", txt_rope[1], persistent=False)
         self.context_parallel_enabled = context_parallel_enabled
@@ -156,9 +183,15 @@ class _StaticQwenImageRealRope(nn.Module):
         self._global_rank_ref = (global_rank,) if global_rank is not None else ()
         self.cp_group = cp_group
 
-    def forward(self, *args, **kwargs):
+    def forward(self, img_shapes=None, *args, **kwargs):
         del args, kwargs
-        img_cos, img_sin = self.img_cos, self.img_sin
+        if img_shapes is not None:
+            _batch, ph, pw = img_shapes[0][0]
+            key = (int(ph), int(pw))
+        else:
+            key = self._img_keys[0]
+        img_cos = getattr(self, f"img_cos_{key[0]}x{key[1]}")
+        img_sin = getattr(self, f"img_sin_{key[0]}x{key[1]}")
         if self.context_parallel_enabled:
             cp_rank = get_cp_rank_spmd(self._global_rank_ref[0].get_rank())
             img_cos = scatter_to_process_group_spmd(
@@ -488,6 +521,19 @@ class _QwenImageTransformerTraceModule(nn.Module):
         else:
             self.cp_group = None
             self.global_rank = None
+        # One packed shape per compiled bucket, keyed by image_seq_len. The
+        # forward selects by hidden_states.shape[1], which is a concrete value
+        # during each bucket's trace, so every bucket NEFF bakes its own RoPE
+        # constants and img_shapes.
+        from difflet.backends.trainium.core.bucketing import resolve_compile_shapes
+
+        self._packed_by_seq: dict[int, tuple[int, int]] = {}
+        vsf2 = int(config.vae_scale_factor) * 2
+        patch = int(config.patch_size)
+        for height, width, _frames in resolve_compile_shapes(config):
+            ph = (2 * (int(height) // vsf2)) // patch
+            pw = (2 * (int(width) // vsf2)) // patch
+            self._packed_by_seq[ph * pw] = (ph, pw)
         self.img_shapes = [[(1, int(config.packed_height), int(config.packed_width))]]
         self.transformer = QwenImageTransformer2DModel(
             patch_size=int(config.patch_size),
@@ -504,14 +550,20 @@ class _QwenImageTransformerTraceModule(nn.Module):
         )
         _replace_qwen_linears_for_tp(self.transformer)
         _apply_qwen_block_diagnostics(self.transformer)
-        img_freqs, txt_freqs = self.transformer.pos_embed(
-            self.img_shapes,
-            max_txt_seq_len=int(config.text_seq_len),
-            device=torch.device("cpu"),
-        )
+        img_ropes: dict[tuple[int, int], tuple[torch.Tensor, torch.Tensor]] = {}
+        txt_rope = None
+        for ph, pw in self._packed_by_seq.values():
+            img_freqs, txt_freqs = self.transformer.pos_embed(
+                [[(1, ph, pw)]],
+                max_txt_seq_len=int(config.text_seq_len),
+                device=torch.device("cpu"),
+            )
+            img_ropes[(ph, pw)] = _qwen_complex_rope_to_real(img_freqs)
+            if txt_rope is None:
+                txt_rope = _qwen_complex_rope_to_real(txt_freqs)
         self.transformer.pos_embed = _StaticQwenImageRealRope(
-            img_rope=_qwen_complex_rope_to_real(img_freqs),
-            txt_rope=_qwen_complex_rope_to_real(txt_freqs),
+            img_ropes=img_ropes,
+            txt_rope=txt_rope,
             context_parallel_enabled=self.context_parallel_enabled,
             global_rank=self.global_rank,
             cp_group=self.cp_group,
@@ -538,6 +590,14 @@ class _QwenImageTransformerTraceModule(nn.Module):
         del encoder_hidden_states_mask
         guidance_arg = guidance if self.guidance_embeds else None
 
+        # Per-bucket packed shape: hidden_states.shape[1] is concrete during
+        # each bucket's trace, so this lookup resolves statically per NEFF.
+        seq_len = int(hidden_states.shape[1])
+        ph, pw = self._packed_by_seq.get(
+            seq_len, (int(self.img_shapes[0][0][1]), int(self.img_shapes[0][0][2]))
+        )
+        img_shapes = [[(1, ph, pw)]]
+
         # Context parallel: scatter the image tokens along the sequence axis
         # across the cp axis subgroup before the diffusers forward. The
         # static RoPE scatters the matching image rope, the attention processor
@@ -558,7 +618,7 @@ class _QwenImageTransformerTraceModule(nn.Module):
             encoder_hidden_states=encoder_hidden_states,
             encoder_hidden_states_mask=None,
             guidance=guidance_arg,
-            img_shapes=self.img_shapes * int(hidden_states.shape[0]),
+            img_shapes=img_shapes * int(hidden_states.shape[0]),
             return_dict=False,
         )[0]
 
@@ -599,8 +659,12 @@ class _QwenImageTransformerTraceModule(nn.Module):
         return modulated
 
 
-class ModelWrapperQwenImageTransformer(ModelWrapper):
-    """ModelBuilder wrapper for Qwen-Image transformer compile inputs."""
+class ModelWrapperQwenImageTransformer(ShapeBucketedInputGenerator, ModelWrapper):
+    """ModelBuilder wrapper for Qwen-Image transformer compile inputs.
+
+    One bucket per (h, w) in ``config.compile_shapes``; only the packed image
+    sequence length varies per bucket.
+    """
 
     def __init__(
         self,
@@ -621,26 +685,30 @@ class ModelWrapperQwenImageTransformer(ModelWrapper):
         )
         self.bucket_config = None
 
-    def input_generator(self) -> list[tuple[torch.Tensor, ...]]:
+    def example_inputs_for_shape(self, shape) -> tuple[torch.Tensor, ...]:
+        height, width, _frames = shape
         batch_size = int(getattr(self.config.neuron_config, "batch_size", 1))
         dtype = self.config.neuron_config.torch_dtype
         text_seq_len = int(getattr(self.config, "text_seq_len", 1024))
+        vsf2 = int(self.config.vae_scale_factor) * 2
+        patch = int(self.config.patch_size)
+        image_seq_len = ((2 * (int(height) // vsf2)) // patch) * (
+            (2 * (int(width) // vsf2)) // patch
+        )
 
-        return [
-            (
-                torch.randn(
-                    [batch_size, self.config.image_seq_len, self.config.in_channels],
-                    dtype=dtype,
-                ),
-                torch.ones([batch_size], dtype=dtype),
-                torch.randn(
-                    [batch_size, text_seq_len, self.config.joint_attention_dim],
-                    dtype=dtype,
-                ),
-                torch.ones([batch_size, text_seq_len], dtype=torch.bool),
-                torch.ones([batch_size], dtype=dtype),
-            )
-        ]
+        return (
+            torch.randn(
+                [batch_size, image_seq_len, self.config.in_channels],
+                dtype=dtype,
+            ),
+            torch.ones([batch_size], dtype=dtype),
+            torch.randn(
+                [batch_size, text_seq_len, self.config.joint_attention_dim],
+                dtype=dtype,
+            ),
+            torch.ones([batch_size, text_seq_len], dtype=torch.bool),
+            torch.ones([batch_size], dtype=dtype),
+        )
 
     def get_model_instance(self):
         def _create_model():
