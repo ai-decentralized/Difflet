@@ -131,6 +131,15 @@ def _add_shape_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--height", type=int, default=None)
     p.add_argument("--width", type=int, default=None)
     p.add_argument("--num-frames", type=int, default=None)
+    p.add_argument(
+        "--shapes",
+        default=None,
+        metavar="HxWxF[,HxWxF...]",
+        help="Compile a bucketed artifact covering several request shapes "
+        "(e.g. 320x512x61,320x512x33; HxW for image models). All shapes "
+        "share one weight copy on device. For generate, --height/--width/"
+        "--num-frames select the request shape, which must be in this set.",
+    )
 
 
 def _add_cache_flags(p: argparse.ArgumentParser) -> None:

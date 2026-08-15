@@ -216,13 +216,25 @@ class NeuronApplicationBase(torch.nn.Module):
                 # compiler_flag_hook=self.check_and_apply_modular_flow_optimization,
             )
             for model in self.models:
+                example_inputs = model.input_generator()
+                priority_model_idx = model.priority_model_idx
+                if len(example_inputs) > 1:
+                    # Weight-layout optimization anchors on the priority bucket
+                    # and corrupts every non-priority bucket's graph: outputs
+                    # become nondeterministic with large localized errors in
+                    # the first sequence tokens (verified on trn2, NxD
+                    # 0.19.28492 / neuronx-cc 2.26 — see
+                    # docs/verification/task1-bucketed-compile.md §6). Disable
+                    # WLO for multi-bucket artifacts until the vendor bug is
+                    # fixed; single-bucket compiles keep it.
+                    priority_model_idx = None
                 self._builder.add(
                     key=model.tag,
                     model_instance=model.get_model_instance(),
-                    example_inputs=model.input_generator(),
+                    example_inputs=example_inputs,
                     compiler_args=model.compiler_args,
                     bucket_config=model.bucket_config,
-                    priority_model_idx=model.priority_model_idx,
+                    priority_model_idx=priority_model_idx,
                 )
         return self._builder
 

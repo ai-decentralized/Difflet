@@ -102,6 +102,39 @@ class HunyuanVideo15DiTInputBundle:
         )
 
 
+def allowed_hunyuan_video_latent_shapes(config: Any) -> list[tuple[int, ...]]:
+    """One latent shape per compiled bucket, largest first."""
+
+    batch_size = int(getattr(config.neuron_config, "batch_size", 1))
+    compile_shapes = getattr(config, "compile_shapes", None)
+    if not compile_shapes:
+        # Single-bucket path: honor the config's latent_* properties directly
+        # (some callers provide latent dims without height/width).
+        return [
+            (
+                batch_size,
+                int(config.in_channels),
+                int(config.latent_frames),
+                int(config.latent_height),
+                int(config.latent_width),
+            )
+        ]
+    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+    shapes = []
+    for height, width, num_frames in canonicalize_shapes(compile_shapes):
+        shapes.append(
+            (
+                batch_size,
+                int(config.in_channels),
+                (int(num_frames) - 1) // 4 + 1,
+                int(height) // 8,
+                int(width) // 8,
+            )
+        )
+    return shapes
+
+
 def validate_hunyuan_video_dit_inputs(
     bundle: HunyuanVideoDiTInputBundle,
     *,
@@ -112,15 +145,18 @@ def validate_hunyuan_video_dit_inputs(
 
     batch_size = int(getattr(config.neuron_config, "batch_size", 1))
     text_seq_len = int(getattr(config, "text_seq_len", 256))
-    latent_shape = (
-        batch_size,
-        int(config.in_channels),
-        int(config.latent_frames),
-        int(config.latent_height),
-        int(config.latent_width),
-    )
+    allowed_latent_shapes = allowed_hunyuan_video_latent_shapes(config)
+    if tuple(bundle.hidden_states.shape) not in set(allowed_latent_shapes):
+        raise ValueError(
+            f"HunyuanVideo DiT input 'hidden_states' has shape {tuple(bundle.hidden_states.shape)}, "
+            f"expected one of the compiled bucket shapes: {allowed_latent_shapes}."
+        )
+    if bundle.hidden_states.dtype != dtype:
+        raise TypeError(
+            f"HunyuanVideo DiT input 'hidden_states' has dtype {bundle.hidden_states.dtype}, "
+            f"expected {dtype}."
+        )
     expected = {
-        "hidden_states": (latent_shape, dtype),
         "timestep": ((batch_size,), dtype),
         "encoder_hidden_states": (
             (batch_size, text_seq_len, int(config.text_embed_dim)),
@@ -131,7 +167,6 @@ def validate_hunyuan_video_dit_inputs(
         "guidance": ((batch_size,), dtype),
     }
     tensors = {
-        "hidden_states": bundle.hidden_states,
         "timestep": bundle.timestep,
         "encoder_hidden_states": bundle.encoder_hidden_states,
         "encoder_attention_mask": bundle.encoder_attention_mask,
@@ -225,6 +260,7 @@ def create_hunyuan_video_backbone_config(
     context_parallel_enabled: bool = False,
     cp_mode: str = "gather_kv",
     sp_enabled: bool = False,
+    compile_shapes=None,
 ):
     from difflet.backends.trainium.hunyuan_video.backbone import (
         HunyuanVideoBackboneInferenceConfig,
@@ -237,6 +273,9 @@ def create_hunyuan_video_backbone_config(
         world_size=world_size,
         torch_dtype=dtype,
     )
+    extra = {}
+    if compile_shapes:
+        extra["compile_shapes"] = compile_shapes
     return HunyuanVideoBackboneInferenceConfig(
         neuron_config=neuron_config,
         load_config=_load_diffusers_config(transformer_path),
@@ -247,6 +286,7 @@ def create_hunyuan_video_backbone_config(
         context_parallel_enabled=context_parallel_enabled,
         cp_mode=cp_mode,
         sp_enabled=sp_enabled,
+        **extra,
     )
 
 
@@ -296,6 +336,7 @@ def create_hunyuan_video_vae_decoder_config(
     width: int,
     num_frames: int,
     batch_size: int = 1,
+    compile_shapes=None,
 ):
     from difflet.backends.trainium.hunyuan_video.vae import HunyuanVideoVAEDecoderInferenceConfig
 
@@ -306,12 +347,16 @@ def create_hunyuan_video_vae_decoder_config(
         world_size=world_size,
         torch_dtype=dtype,
     )
+    extra = {}
+    if compile_shapes:
+        extra["compile_shapes"] = compile_shapes
     return HunyuanVideoVAEDecoderInferenceConfig(
         neuron_config=neuron_config,
         load_config=_load_diffusers_config(vae_path),
         height=height,
         width=width,
         num_frames=num_frames,
+        **extra,
     )
 
 
@@ -387,6 +432,25 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
             "width": int(shape.get("width") or default_shape["width"]),
             "num_frames": int(shape.get("num_frames") or default_shape["num_frames"]),
         }
+        # Optional bucket shape set: kwargs["shapes"] is a list of shape dicts /
+        # (h, w, f) tuples compiled into ONE artifact (K DiT NEFFs, one weight
+        # copy). self.shape becomes the largest (priority) shape.
+        self.compile_shapes = None
+        raw_shapes = kwargs.get("shapes")
+        if raw_shapes:
+            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+            self.compile_shapes = canonicalize_shapes(raw_shapes)
+            if self.model_version == "1.5" and len(self.compile_shapes) > 1:
+                raise NotImplementedError(
+                    "Multi-shape bucketing is not supported for HunyuanVideo 1.5 yet."
+                )
+            largest = self.compile_shapes[0]
+            self.shape = {
+                "height": largest[0],
+                "width": largest[1],
+                "num_frames": int(largest[2]),
+            }
         self.kwargs = kwargs
         transformer_subfolder = str(kwargs.get("transformer_subfolder", "transformer"))
         self.transformer_path = os.path.join(model_path, transformer_subfolder)
@@ -515,6 +579,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 context_parallel_enabled=parallel.cp_degree > 1,
                 cp_mode=parallel.cp_mode,
                 sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
+                compile_shapes=self.compile_shapes,
             )
             self.transformer = NeuronHunyuanVideoBackboneApplication(
                 model_path=self.transformer_path,
@@ -581,6 +646,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                     width=self.shape["width"],
                     num_frames=self.shape["num_frames"],
                     batch_size=self.batch_size,
+                    compile_shapes=self.compile_shapes,
                 )
                 self.vae_decoder = NeuronHunyuanVideoVAEDecoderApplication(
                     model_path=self.vae_decoder_path,
