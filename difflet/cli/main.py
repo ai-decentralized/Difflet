@@ -227,6 +227,14 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--width", type=int, default=None)
     p.add_argument("--num-frames", type=int, default=None)
     p.add_argument(
+        "--shapes",
+        default=None,
+        metavar="HxWxF[,HxWxF...]",
+        help="Serve several request shapes from ONE bucketed artifact / one "
+        "resident worker (HunyuanVideo video serving). Requests outside the "
+        "set are rejected with profile_mismatch.",
+    )
+    p.add_argument(
         "--cache-dir",
         default=None,
         help="Compiled artifact cache root (default: ~/.cache/difflet/)",

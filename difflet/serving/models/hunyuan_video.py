@@ -167,15 +167,23 @@ class HunyuanVideoServingRequestValidator:
             raise profile_mismatch("request model does not match the loaded HunyuanVideo profile")
         if request.output_format != "mp4":
             raise invalid_extra_body("HunyuanVideo serving only supports MP4 output")
-        if (
-            request.video is None
-            or request.height != profile.height
-            or request.width != profile.width
-            or request.video.num_frames != profile.num_frames
-            or request.video.fps != profile.output_fps
-        ):
+        if request.video is None or request.video.fps != profile.output_fps:
             raise profile_mismatch(
                 "request video shape does not match HunyuanVideo serving profile"
+            )
+        # Strict membership in the compiled bucket set: the NxD router only
+        # accepts exactly-compiled shapes, so anything else is rejected here
+        # (with the allowed set) instead of surfacing a runtime ValueError.
+        requested = (request.height, request.width, request.video.num_frames)
+        if requested not in profile.shape_set():
+            allowed = [
+                "x".join(str(d) for d in shape if d is not None)
+                for shape in profile.canonical_shapes()
+            ]
+            raise profile_mismatch(
+                "request video shape "
+                f"{'x'.join(str(d) for d in requested if d is not None)} is not in the "
+                f"HunyuanVideo serving profile's compiled shape set {allowed}"
             )
         validate_guidance_scale(request, maximum=_MAX_GUIDANCE_SCALE)
         video = request.video
@@ -480,11 +488,15 @@ class HunyuanVideoServingStageAdapter:
         self.llama_tokenizer = _load_llama_tokenizer(runtime.source.pinned_model_path)
         denoiser_binding = runtime.artifacts.require("denoiser")
         denoiser = _build_denoiser(runtime.source, runtime.profile)
+        # Warm every compiled bucket at startup (one forward per shape via the
+        # application's warmup loop) so the first request at ANY profile shape
+        # sees steady-state latency. Single-shape profiles keep the old
+        # behavior of skipping warmup (the startup smoke covers their one NEFF).
         denoiser.load(
             str(denoiser_binding.path),
             start_rank_id=0,
             local_ranks_size=runtime.profile.world_size,
-            skip_warmup=True,
+            skip_warmup=not runtime.profile.shapes,
         )
         self.denoiser = denoiser
         if clip_placement == "neuron":
@@ -672,18 +684,27 @@ def _validate_profile(profile: ServingProfile) -> None:
     if profile.dtype.lower().removeprefix("torch.") not in {"bf16", "bfloat16"}:
         raise ValueError("HunyuanVideo resident serving requires bfloat16")
     spatial_multiple = _VAE_SPATIAL_SCALE * _PATCH_SIZE
-    for value, name in ((profile.height, "height"), (profile.width, "width")):
-        if type(value) is not int or value <= 0 or value % spatial_multiple:
+    for height, width, num_frames in profile.canonical_shapes():
+        for value, name in ((height, "height"), (width, "width")):
+            if type(value) is not int or value <= 0 or value % spatial_multiple:
+                raise ValueError(
+                    f"HunyuanVideo serving {name} must be a positive integer divisible by "
+                    f"{spatial_multiple}"
+                )
+        if type(num_frames) is not int or num_frames <= 0:
+            raise ValueError("HunyuanVideo serving num_frames must be a positive integer")
+        if (num_frames - 1) % _VAE_TEMPORAL_SCALE:
             raise ValueError(
-                f"HunyuanVideo serving {name} must be a positive integer divisible by "
-                f"{spatial_multiple}"
+                "HunyuanVideo serving num_frames must equal 4n+1 for exact causal VAE "
+                "reconstruction"
             )
-    if type(profile.num_frames) is not int or profile.num_frames <= 0:
-        raise ValueError("HunyuanVideo serving num_frames must be a positive integer")
-    if (profile.num_frames - 1) % _VAE_TEMPORAL_SCALE:
-        raise ValueError(
-            "HunyuanVideo serving num_frames must equal 4n+1 for exact causal VAE reconstruction"
-        )
+    if profile.shapes:
+        largest = profile.canonical_shapes()[0]
+        if (profile.height, profile.width, profile.num_frames) != largest:
+            raise ValueError(
+                "HunyuanVideo serving profile height/width/num_frames must equal the "
+                "largest shape of the compiled shape set"
+            )
     if profile.clip_placement not in {None, "host", "neuron"}:
         raise ValueError("HunyuanVideo CLIP placement must be host or neuron")
     if profile.output_fps != _FPS:
@@ -886,6 +907,7 @@ def _build_denoiser(source: ResolvedModelSource, profile: ServingProfile):
         parallel=profile.parallel,
         dtype=_torch_bfloat16(),
         shape=profile.shape_dict(),
+        shapes=profile.canonical_shapes() if profile.shapes else None,
         text_seq_len=_TEXT_SEQ_LEN,
         enable_transformer=True,
         enable_vae_decoder=False,
@@ -932,6 +954,7 @@ def _build_vae_decoder(source: ResolvedModelSource, profile: ServingProfile):
         parallel=profile.parallel,
         dtype=_torch_bfloat16(),
         shape=profile.shape_dict(),
+        shapes=profile.canonical_shapes() if profile.shapes else None,
         text_seq_len=_TEXT_SEQ_LEN,
         enable_transformer=False,
         enable_vae_decoder=True,
