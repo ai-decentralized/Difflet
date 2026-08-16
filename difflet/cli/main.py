@@ -519,6 +519,19 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_serve_profile_flags(serve)
     _add_serve_flags(serve)
 
+    cache = sub.add_parser("cache", help="Inspect the compiled-artifact cache")
+    cache.add_argument(
+        "cache_action",
+        choices=["ls"],
+        help="ls: list artifacts (hash dir -> shapes/tp/dtype) from their manifests",
+    )
+    cache.add_argument(
+        "--cache-dir",
+        default=None,
+        help="Compiled artifact cache root (default: ~/.cache/difflet/)",
+    )
+    cache.add_argument("--json", action="store_true", help="Emit JSON instead of a table")
+
     return root
 
 
@@ -770,6 +783,11 @@ def main(argv: list[str] | None = None) -> None:
 
         run_clean(args)
         return
+
+    if args.command == "cache":
+        from difflet.cli.cache_cmd import run_cache_command
+
+        raise SystemExit(run_cache_command(args))
 
     valid_models = SERVE_VALID_MODELS if args.command == "serve" else VALID_MODELS
     if args.model_id not in valid_models:

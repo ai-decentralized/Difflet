@@ -31,7 +31,9 @@ MANIFEST_FILENAME = "manifest.json"
 # Bumps when the on-disk cache schema changes in a breaking way (e.g. fields
 # moved between cache_inputs and metadata, hash function changed). Older
 # manifests written with a different version are treated as cache miss.
-MANIFEST_SCHEMA_VERSION = 4
+# v5: single "shape" dict replaced by canonical "shapes" list (bucketed
+# artifacts; K=1 uses the same list form — old caches intentionally miss).
+MANIFEST_SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,9 @@ class CacheSpec:
     application_kwargs: dict[str, Any] | None = None
     precision_schedule: dict[str, Any] | None = None
     candidate: CandidateConfig | None = None
+    # Bucketed artifacts: full shape set compiled into one artifact. When
+    # None, the single height/width/num_frames above forms a 1-entry set.
+    shapes: tuple | None = None
 
     def cache_inputs(self) -> dict[str, Any]:
         """Fields that drive the AOT artifact identity (hash key input).
@@ -63,11 +68,7 @@ class CacheSpec:
             "revision": self.revision,
             "parallel": self.parallel.to_cache_dict(),
             "dtype": normalize_dtype(self.dtype),
-            "shape": {
-                "height": self.height,
-                "width": self.width,
-                "num_frames": self.num_frames,
-            },
+            "shapes": self.canonical_shapes(),
             "application_kwargs": _normalize_for_cache(
                 {
                     key: value
@@ -84,6 +85,19 @@ class CacheSpec:
         if self.candidate is not None and not self.candidate.is_trivial:
             inputs["candidate"] = self.candidate.to_cache_dict()
         return inputs
+
+    def canonical_shapes(self) -> list[list[int | None]]:
+        """Canonical (deduped, largest-first) shape-set list for the hash.
+
+        Uses the same ordering as the compile-side bucketing so set order or
+        duplicates in caller input never change the cache key. K=1 uses the
+        same list form (schema v5).
+        """
+        if self.shapes:
+            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+            return [list(shape) for shape in canonicalize_shapes(self.shapes)]
+        return [[self.height, self.width, self.num_frames]]
 
     def manifest_metadata(self) -> dict[str, Any]:
         """Informational fields recorded in the manifest but NOT hashed.
@@ -108,7 +122,9 @@ class CacheSpec:
 # encoder / VAE / decode), never the compiled NEFF — excluded from the cache key
 # so enabling them at generate time still hits the precompiled transformer cache.
 _RUNTIME_ONLY_APP_KWARGS: frozenset[str] = frozenset(
-    {"enable_host_pipeline", "enable_decode_components", "host_device"}
+    # "shapes" is compile-relevant but captured by the dedicated
+    # CacheSpec.shapes field; excluding it here avoids hashing it twice.
+    {"enable_host_pipeline", "enable_decode_components", "host_device", "shapes"}
 )
 
 

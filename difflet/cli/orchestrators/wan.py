@@ -15,10 +15,12 @@ from pathlib import Path
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import (
     ModelOrchestrator,
-    bucketed_dir_token,
-    cp_mode_token,
-    parse_shapes_arg,
+    canonical_shapes_list,
+    has_valid_stage_manifest,
+    hashed_stage_dir,
     require_request_shape_in_set,
+    stage_toolchain_versions,
+    write_stage_manifest,
 )
 
 # Model id comes from the CLI (--model-id); both Wan 2.2 A14B (MoE, dual
@@ -197,10 +199,12 @@ class WanOrchestrator(ModelOrchestrator):
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
+            self._finish_stage_compile("transformer", args, compiled_dir)
             return
 
         from difflet.cli.dp import stage_loop
 
+        self._require_stage_artifact("transformer", args, compiled_dir)
         app.load(str(compiled_dir), start_rank_id=0,
                  local_ranks_size=parallel.world_size, skip_warmup=True)
         for req in stage_loop.claim_requests(args):
@@ -254,10 +258,12 @@ class WanOrchestrator(ModelOrchestrator):
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
+            self._finish_stage_compile("vae", args, compiled_dir)
             return
 
         from difflet.cli.dp import stage_loop
 
+        self._require_stage_artifact("vae", args, compiled_dir)
         app.load(str(compiled_dir), start_rank_id=0, local_ranks_size=1, skip_warmup=True)
         for req in stage_loop.claimed_requests(args):
             with stage_loop.request_scope(args, req, final=True):
@@ -284,31 +290,47 @@ class WanOrchestrator(ModelOrchestrator):
 
     # ------------------------------------------------------------ helpers
 
+    def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
+        prefix = _cache_prefix(self.args.model_id)
+        if stage == "transformer":
+            return {
+                "component": f"{prefix}_transformer",
+                "model_id": self.args.model_id,
+                "tp": args.tp_degree or 4,
+                "cp": args.cp_degree or 1,
+                "cp_mode": str(getattr(args, "cp_mode", "gather_kv") or "gather_kv"),
+                "cfg_parallel": bool(getattr(args, "cfg_parallel", False)),
+                "sp": bool(getattr(args, "sp_enabled", False)),
+                "dtype": "bfloat16",
+                "text_seq_len": 512,
+                "shapes": canonical_shapes_list(args, (480, 832, 9)),
+                "toolchain": stage_toolchain_versions(),
+            }
+        if stage == "vae":
+            return {
+                "component": f"{prefix}_vae",
+                "model_id": self.args.model_id,
+                "dtype": "bfloat16",
+                "shapes": canonical_shapes_list(args, (480, 832, 9)),
+                "toolchain": stage_toolchain_versions(),
+            }
+        raise ValueError(f"unknown stage {stage!r}")
+
     def _stage_compiled_dir(self, stage: str, args: argparse.Namespace) -> Path:
         base = Path(args.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
-        prefix = _cache_prefix(self.args.model_id)
-        tp = args.tp_degree or 4
-        cp = args.cp_degree or 1
-        cfg = "cfg" if getattr(args, "cfg_parallel", False) else ""
-        sp = "sp" if getattr(args, "sp_enabled", False) else ""
-        cpm = cp_mode_token(args)
-        h = args.height or 480
-        w = args.width or 832
-        f = args.num_frames or 9
-        shapes = parse_shapes_arg(getattr(args, "shapes", None))
-        if shapes is not None:
-            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+        inputs = self._stage_cache_inputs(stage, args)
+        return hashed_stage_dir(base, str(inputs["component"]), inputs)
 
-            canonical = canonicalize_shapes(shapes)
-            h, w, f = canonical[0]
-            token = f"_{bucketed_dir_token(canonical)}"
-        else:
-            token = ""
-        if stage == "transformer":
-            return base / f"{prefix}_transformer_tp{tp}cp{cp}{cpm}{cfg}{sp}_h{h}w{w}f{f}{token}"
-        if stage == "vae":
-            return base / f"{prefix}_vae_h{h}w{w}f{f}{token}"
-        raise ValueError(f"unknown stage {stage!r}")
+    def _finish_stage_compile(self, stage: str, args: argparse.Namespace, compiled_dir: Path) -> None:
+        write_stage_manifest(compiled_dir, self._stage_cache_inputs(stage, args))
+
+    def _require_stage_artifact(self, stage: str, args: argparse.Namespace, compiled_dir: Path) -> None:
+        if not has_valid_stage_manifest(compiled_dir, self._stage_cache_inputs(stage, args)):
+            raise SystemExit(
+                f"[wan] no valid compiled artifact for stage {stage!r} at {compiled_dir} "
+                "(manifest missing or configuration changed); run `difflet compile` "
+                "with the same flags first."
+            )
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
         a = self.args

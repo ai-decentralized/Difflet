@@ -149,11 +149,8 @@ def test_compile_plan_binds_commit_and_fixed_profile(monkeypatch, tmp_path):
     assert first.identity != other_shape.identity
     cache_inputs = json.loads(first.identity.canonical_cache_inputs_json)
     assert cache_inputs["cache_inputs"]["revision"] == "a" * 40
-    assert cache_inputs["cache_inputs"]["shape"] == {
-        "height": 64,
-        "num_frames": 17,
-        "width": 96,
-    }
+    # Schema v5: single "shape" dict replaced by the canonical "shapes" list.
+    assert cache_inputs["cache_inputs"]["shapes"] == [[64, 96, 17]]
     assert str(tmp_path) not in first.identity.canonical_cache_inputs_json.decode()
 
 

@@ -52,6 +52,7 @@ class DiffletPipeline:
         height: int | None = None,
         width: int | None = None,
         num_frames: int | None = None,
+        shapes: Any | None = None,
         model_type: str | None = None,
         revision: str | None = None,
         local_files_only: bool = False,
@@ -77,6 +78,20 @@ class DiffletPipeline:
             teacache_calibration=teacache_calibration,
             teacache_calibration_path=teacache_calibration_path,
         )
+        canonical_shapes = None
+        if shapes:
+            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+            canonical_shapes = canonicalize_shapes(shapes)
+            if height is None and width is None and num_frames is None:
+                height, width = canonical_shapes[0][0], canonical_shapes[0][1]
+                num_frames = canonical_shapes[0][2]
+            # The application builds one bucket per shape; the cache key covers
+            # the set via CacheSpec.shapes (kept out of the app-kwargs hash).
+            application_kwargs = {
+                **(application_kwargs or {}),
+                "shapes": [list(shape) for shape in canonical_shapes],
+            }
         cache_application_kwargs = _cache_application_kwargs(application_kwargs)
         entry = resolve_model(model_id, model_type=model_type)
         backend_runtime = get_backend(backend)
@@ -114,6 +129,7 @@ class DiffletPipeline:
             num_frames=shape.get("num_frames"),
             revision=cache_revision,
             application_kwargs=cache_application_kwargs,
+            shapes=canonical_shapes,
         )
         compiled_path = (
             Path(compiled_path_override).expanduser().resolve()

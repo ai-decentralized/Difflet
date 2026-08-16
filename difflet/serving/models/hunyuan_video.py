@@ -707,8 +707,10 @@ def _compile_specs(
     source: ResolvedModelSource,
     profile: ServingProfile,
 ) -> tuple[DiffletCompileSpec, ...]:
+    # v2: denoiser/decoder identities carry the canonical shape SET (K=1 uses
+    # the same list form) instead of a single height/width/num_frames.
     common = {
-        "compile_contract_version": 1,
+        "compile_contract_version": 2,
         "model_type": _MODEL_TYPE,
         "model_id": source.model_id,
         "resolved_source_id": source.resolved_source_id,
@@ -720,6 +722,12 @@ def _compile_specs(
         "virtual_core_size": _VIRTUAL_CORE_SIZE,
         "toolchain": toolchain_versions(),
     }
+    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+    profile_shapes = getattr(profile, "shapes", None) or (
+        (profile.height, profile.width, profile.num_frames),
+    )
+    shapes_list = [list(shape) for shape in canonicalize_shapes(profile_shapes)]
     llama_identity = CompileArtifactIdentity.from_cache_inputs(
         {
             **common,
@@ -732,9 +740,7 @@ def _compile_specs(
         {
             **common,
             "component_id": "denoiser",
-            "height": profile.height,
-            "width": profile.width,
-            "num_frames": profile.num_frames,
+            "shapes": shapes_list,
             "text_seq_len": _TEXT_SEQ_LEN,
         }
     )
@@ -761,9 +767,7 @@ def _compile_specs(
             {
                 **common,
                 "component_id": "decoder",
-                "height": profile.height,
-                "width": profile.width,
-                "num_frames": profile.num_frames,
+                "shapes": shapes_list,
                 "component_tp_degree": 1,
                 "component_world_size": profile.world_size,
                 "segmented_causal_norm_conv": True,

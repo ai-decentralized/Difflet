@@ -218,11 +218,8 @@ def test_compile_identity_binds_commit_shape_topology_and_component(monkeypatch,
     identity = json.loads(first.identity.canonical_cache_inputs_json)
     assert identity["component_id"] == "generation"
     assert identity["cache_inputs"]["revision"] == "a" * 40
-    assert identity["cache_inputs"]["shape"] == {
-        "height": 64,
-        "num_frames": 5,
-        "width": 96,
-    }
+    # Schema v5: single "shape" dict replaced by the canonical "shapes" list.
+    assert identity["cache_inputs"]["shapes"] == [[64, 96, 5]]
     assert identity["cache_inputs"]["application_kwargs"] == {
         "batch_size": 1,
         "enable_text_encoder": True,
