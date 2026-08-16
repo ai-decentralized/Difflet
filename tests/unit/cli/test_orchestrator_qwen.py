@@ -113,11 +113,20 @@ def test_run_stage_internal_unknown_raises():
 
 
 def test_stage_compiled_dir_names():
+    # Schema v5: dirs are <cache>/<component>/<sha256[:16]>.
     orch = QwenImageOrchestrator(_qwen_args(cache_dir="/c", tp_degree=4, cp_degree=2))
-    assert orch._stage_compiled_dir("text", orch.args) == Path("/c/qwen_image_enc_tp4cp2_seq256")
-    assert orch._stage_compiled_dir("generate", orch.args) == \
-        Path("/c/qwen_image_dit_tp4cp2_h1024w1024")
-    assert orch._stage_compiled_dir("vae", orch.args) == Path("/c/qwen_image_vae_h1024w1024")
+    for stage, component in (
+        ("text", "qwen_image_enc"),
+        ("generate", "qwen_image_dit"),
+        ("vae", "qwen_image_vae"),
+    ):
+        path = orch._stage_compiled_dir(stage, orch.args)
+        assert path.parent == Path("/c") / component
+        assert len(path.name) == 16 and int(path.name, 16) >= 0
+        assert orch._stage_compiled_dir(stage, orch.args) == path
+    other = _qwen_args(cache_dir="/c", tp_degree=4, cp_degree=2, height=512)
+    assert QwenImageOrchestrator(other)._stage_compiled_dir("generate", other) != \
+        orch._stage_compiled_dir("generate", orch.args)
 
 
 def test_stage_compiled_dir_unknown_raises():
@@ -207,7 +216,9 @@ def test_stage_text_generate_saves_text_pt(monkeypatch, tmp_path):
     _setup_text(monkeypatch, FakeText)
     args = _qwen_args(stage_mode="generate", work_dir=str(tmp_path),
                       cache_dir=str(tmp_path))
-    QwenImageOrchestrator(args)._stage_text(args)
+    orch = QwenImageOrchestrator(args)
+    orch._finish_stage_compile("text", args, orch._stage_compiled_dir("text", args))
+    orch._stage_text(args)
     assert (tmp_path / "text.pt").exists()
 
 
@@ -262,7 +273,9 @@ def test_stage_generate_runs_and_saves_latents(monkeypatch, tmp_path):
                tmp_path / "text.pt")
     args = _qwen_args(stage_mode="generate", work_dir=str(tmp_path),
                       cache_dir=str(tmp_path))
-    QwenImageOrchestrator(args)._stage_generate(args)
+    orch = QwenImageOrchestrator(args)
+    orch._finish_stage_compile("generate", args, orch._stage_compiled_dir("generate", args))
+    orch._stage_generate(args)
     assert (tmp_path / "latents.pt").exists()
 
 
@@ -352,8 +365,11 @@ def test_stage_vae_generate_saves_output(monkeypatch, tmp_path):
     torch.save(torch.zeros(1, 4, 64), tmp_path / "latents.pt")
     out = tmp_path / "out.png"
     args = _qwen_args(stage_mode="generate", work_dir=str(tmp_path),
-                      cache_dir=str(tmp_path), output=str(out))
-    QwenImageOrchestrator(args)._stage_vae(args)
+                      cache_dir=str(tmp_path), output=str(out),
+                      height=32, width=32)
+    orch = QwenImageOrchestrator(args)
+    orch._finish_stage_compile("vae", args, orch._stage_compiled_dir("vae", args))
+    orch._stage_vae(args)
     # Either the png (via torchvision) or a .pt fallback exists.
     assert out.exists() or (tmp_path / "out.pt").exists()
 
@@ -372,6 +388,9 @@ def test_stage_vae_generate_pt_fallback(monkeypatch, tmp_path):
     torch.save(torch.zeros(1, 4, 64), tmp_path / "latents.pt")
     out = tmp_path / "out.png"
     args = _qwen_args(stage_mode="generate", work_dir=str(tmp_path),
-                      cache_dir=str(tmp_path), output=str(out))
-    QwenImageOrchestrator(args)._stage_vae(args)
+                      cache_dir=str(tmp_path), output=str(out),
+                      height=32, width=32)
+    orch = QwenImageOrchestrator(args)
+    orch._finish_stage_compile("vae", args, orch._stage_compiled_dir("vae", args))
+    orch._stage_vae(args)
     assert (tmp_path / "out.pt").exists()

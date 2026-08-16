@@ -108,7 +108,9 @@ def create_flux_config(
     sp_enabled=False,
     taef1: bool = False,
     taef1_path: str | None = None,
+    compile_shapes=None,
 ):
+    shape_extra = {"compile_shapes": compile_shapes} if compile_shapes else {}
     text_encoder_path = os.path.join(model_path, "text_encoder")
     text_encoder_2_path = os.path.join(model_path, "text_encoder_2")
     backbone_path = os.path.join(model_path, "transformer")
@@ -148,6 +150,7 @@ def create_flux_config(
         load_config=load_diffusers_config(backbone_path),
         height=height,
         width=width,
+        **shape_extra,
     )
 
     decoder_neuron_config = NeuronConfig(
@@ -161,6 +164,7 @@ def create_flux_config(
             load_config=load_diffusers_config(vae_decoder_path),
             height=height,
             width=width,
+            **shape_extra,
         )
     elif taef1:
         decoder_config = VAEDecoderInferenceConfig(
@@ -169,6 +173,7 @@ def create_flux_config(
             height=height,
             width=width,
             model_cls=DecoderTiny,
+            **shape_extra,
         )
     else:
         decoder_config = VAEDecoderInferenceConfig(
@@ -177,6 +182,7 @@ def create_flux_config(
             height=height,
             width=width,
             transformer_in_channels=backbone_config.in_channels,
+            **shape_extra,
         )
 
     setattr(backbone_config, "vae_scale_factor", decoder_config.vae_scale_factor)

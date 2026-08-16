@@ -33,6 +33,10 @@ from torch.nn import Parameter
 from torch.nn import functional as F, init
 
 from diffusers.models.autoencoders.vae import Decoder, DecoderTiny
+from difflet.backends.trainium.core.bucketing import (
+    ShapeBucketedInputGenerator,
+    canonicalize_shapes,
+)
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
@@ -139,6 +143,13 @@ class VAEDecoderInferenceConfig(InferenceConfig):
         # when load_config accesses it during attribute validation.
         self.decoder_config = {}
         super().__init__(*args, **kwargs)
+        # Bucket shape set ((h, w) entries), largest first; pin height/width
+        # to the priority shape so decoder_config below describes it.
+        shapes = getattr(self, "compile_shapes", None)
+        if shapes:
+            self.compile_shapes = canonicalize_shapes(shapes)
+            self.height = self.compile_shapes[0][0]
+            self.width = self.compile_shapes[0][1]
         # Now that load_config has populated all config.json keys as
         # attributes, rebuild decoder_config from the loaded values.
         self.decoder_config = get_decoder_config(
@@ -159,7 +170,7 @@ class VAEDecoderInferenceConfig(InferenceConfig):
         return get_vae_scale_factor(self._decoder_cls, self.decoder_config)
 
 
-class ModelWrapperVAEDecoder(ModelWrapper):
+class ModelWrapperVAEDecoder(ShapeBucketedInputGenerator, ModelWrapper):
 
     def __init__(
         self,
@@ -175,20 +186,20 @@ class ModelWrapperVAEDecoder(ModelWrapper):
         )
         self.bucket_config = None  # Set to None if you don't have bucketing
 
-    def input_generator(self) -> List[Tuple[torch.Tensor]]:
+    def example_inputs_for_shape(self, shape) -> Tuple[torch.Tensor, ...]:
+        height, width, _frames = shape
         in_channels = self.config.decoder_config.get("in_channels",
                           getattr(self.config, "latent_channels", 16))
         model_inputs = torch.rand(
             [
                 1,
                 in_channels,
-                self.config.height // self.config.vae_scale_factor,
-                self.config.width // self.config.vae_scale_factor,
+                int(height) // self.config.vae_scale_factor,
+                int(width) // self.config.vae_scale_factor,
             ],
             dtype=self.config.neuron_config.torch_dtype,
         )
-        inputs = [(model_inputs,)]
-        return inputs
+        return (model_inputs,)
 
     def get_model_instance(self):
         # Create the model instance
