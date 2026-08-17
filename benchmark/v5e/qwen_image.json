@@ -1,0 +1,105 @@
+{
+  "model_id": "Qwen/Qwen-Image",
+  "model_type": "qwen_image",
+  "backend": "tpu",
+  "device": "Cloud TPU v5litepod-4 / 4 chips / topology 2x2 / 16 GB HBM per chip",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "compile_seconds": 0.0,
+  "compile_breakdown": {
+    "eager": 0.0
+  },
+  "load_seconds": 7.813135019998299,
+  "e2e_cold_seconds": 87.31869340299818,
+  "e2e_breakdown": null,
+  "e2e_warm": {
+    "n": 3,
+    "mean": 19.100615527332895,
+    "median": 19.097737584001152,
+    "std": 0.05546435925740201,
+    "p50": 19.097737584001152,
+    "p90": 19.16993844999888,
+    "min": 19.034170547998656,
+    "max": 19.16993844999888,
+    "samples": [
+      19.034170547998656,
+      19.16993844999888,
+      19.097737584001152
+    ]
+  },
+  "step_latency": {
+    "n": 19,
+    "mean": 0.27646996857909373,
+    "median": 0.2760690409995732,
+    "std": 0.0014619012579450516,
+    "p50": 0.2760690409995732,
+    "p90": 0.2768382210015261,
+    "min": 0.2755133009995916,
+    "max": 0.2823927110002842,
+    "samples": [
+      0.2823927110002842,
+      0.27721718099928694,
+      0.27656252100132406,
+      0.2765870210023422,
+      0.2768382210015261,
+      0.2760575920001429,
+      0.27643230100147775,
+      0.27592645100230584,
+      0.2757855810014007,
+      0.2763032809998549,
+      0.2755470920019434,
+      0.2756285819996265,
+      0.2759334909969766,
+      0.27592493100019055,
+      0.2757856609969167,
+      0.27609775100063416,
+      0.276326691997383,
+      0.2760690409995732,
+      0.2755133009995916
+    ]
+  },
+  "throughput": {
+    "steps/s": 3.6170293834786458
+  },
+  "peak_device_mem_gb": 9.618836402893066,
+  "output": {
+    "shape": [
+      1,
+      4096,
+      64
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": -1.458275556564331,
+    "max": 1.2671537399291992,
+    "note": "packed latents; 1063979 byte PNG after decode"
+  },
+  "toolchain": {
+    "torch": "2.9.0+cpu",
+    "torch-xla": "2.9.0",
+    "libtpu": "0.0.21",
+    "diffusers": "0.38.0",
+    "transformers": "5.15.0",
+    "accelerator_type": "v5litepod-4"
+  },
+  "config_label": "tp=4, bf16, joint attention via attention_cte",
+  "status": "ok",
+  "notes": [],
+  "timestamp": "2026-08-17 03:41 UTC",
+  "config_slug": "qwen_image",
+  "device_slug": "v5e",
+  "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 4.0,
+  "output_kind": "image"
+}
