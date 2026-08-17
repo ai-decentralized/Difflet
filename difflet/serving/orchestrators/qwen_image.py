@@ -158,6 +158,21 @@ class QwenImageServingArtifactPreparer:
             revision=self.revision,
             download_policy=download_policy,
         )
+        if _backend_is_tpu():
+            # No compile phase: the TPU stages run eagerly, so there are no
+            # artifacts to build, publish or validate. An empty spec/binding
+            # pair keeps ResolvedRuntimeBundle's "every required spec has a
+            # binding" invariant true rather than special-casing it.
+            print("[difflet serve] tpu backend: eager stages, no compile artifacts")
+            pipeline = _pipeline_definition()
+            return ResolvedRuntimeBundle(
+                profile=profile,
+                source=source,
+                pipeline_definition=pipeline,
+                runtime_plan=_runtime_plan(profile, pipeline, ()),
+                compile_specs=(),
+                artifacts=ArtifactSet(()),
+            )
         specs = qwen_common.build_compile_plan(source, profile)
         manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
 
@@ -233,6 +248,15 @@ class QwenImageServingRequestValidator:
         return self._tokenizer
 
 
+def _backend_is_tpu() -> bool:
+    from difflet.backends import current_backend
+
+    try:
+        return current_backend() == "tpu"
+    except Exception:  # noqa: BLE001 - never fail load on backend lookup
+        return False
+
+
 class QwenImageServingStageAdapter:
     model_id = _HF_MODEL_ID
     model_type = _MODEL_TYPE
@@ -248,6 +272,8 @@ class QwenImageServingStageAdapter:
         self.vae_app: Any = None
         self.vae_config: Any = None
         self._runner_ownership_transferred = False
+        self._tpu: bool = False
+        self._tpu_module: Any = None
 
     async def create_loaded_runners(
         self,
@@ -260,8 +286,14 @@ class QwenImageServingStageAdapter:
         self.active_runtime = runtime
         self.active_profile = profile
         self.model_dir = runtime.source.pinned_model_path
+        self._tpu = _backend_is_tpu()
+        # The TPU path runs the graph eagerly, so there are no compiled
+        # artifacts to validate. Direction A (torch.export -> StableHLO) is
+        # implemented but has never been exercised on the real 60-layer model,
+        # so serving does not depend on it yet.
+        bindings = () if self._tpu else runtime.artifacts.bindings
         manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
-        for binding in runtime.artifacts.bindings:
+        for binding in bindings:
             spec = runtime.require_compile_spec(binding.artifact_id)
 
             def _validate_runtime_payload(path: Path) -> None:
@@ -355,6 +387,8 @@ class QwenImageServingStageAdapter:
         self._runner_ownership_transferred = False
 
     def _load_text_stage(self, profile: ServingProfile) -> None:
+        if self._tpu:
+            return self._load_text_stage_tpu(profile)
         import torch
         from neuronx_distributed_inference.models.config import NeuronConfig, TensorCaptureConfig
         from neuronx_distributed_inference.models.qwen2_vl.modeling_qwen2_vl_text import (
@@ -386,6 +420,8 @@ class QwenImageServingStageAdapter:
         self.tokenizer = AutoTokenizer.from_pretrained(str(Path(self.model_dir) / "tokenizer"))
 
     def _load_denoiser_stage(self, profile: ServingProfile) -> None:
+        if self._tpu:
+            return self._load_denoiser_stage_tpu(profile)
         import torch
         from difflet.models.qwen_image.application import NeuronQwenImageApplication
 
@@ -413,6 +449,8 @@ class QwenImageServingStageAdapter:
         )
 
     def _load_vae_stage(self, profile: ServingProfile) -> None:
+        if self._tpu:
+            return self._load_vae_stage_tpu(profile)
         import torch
         from difflet.backends.trainium.core.config import NeuronConfig
         from difflet.backends.trainium.wan.vae import (
@@ -445,9 +483,196 @@ class QwenImageServingStageAdapter:
         assert self.active_runtime is not None
         self.vae_app.load(str(self.active_runtime.artifacts.require("vae").path))
 
+    # ------------------------------------------------------------------ TPU
+    #
+    # The TPU stages mirror the Trainium ones in contract, not implementation.
+    # Every Neuron piece has no TPU counterpart: the text encoder is an NxDI
+    # model, the denoiser exposes its own pipeline object, and the VAE is a
+    # Neuron application. Each is replaced by the stock HuggingFace/diffusers
+    # equivalent, with difflet's sharded DiT substituted into the middle.
+
+    def _load_text_stage_tpu(self, profile: ServingProfile) -> None:
+        import torch
+        from transformers import AutoTokenizer, Qwen2_5_VLForConditionalGeneration
+
+        assert self.model_dir is not None
+        enc_path = str(Path(self.model_dir) / "text_encoder")
+        # Host-side and bf16. fp32 would be ~28 GiB per replica and four
+        # replicas OOM'd a 188 GiB host outright; the checkpoint is bf16
+        # anyway, so fp32 buys precision that is not in the weights.
+        self.text_app = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            enc_path, torch_dtype=torch.bfloat16
+        ).eval()
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            str(Path(self.model_dir) / "tokenizer")
+        )
+
+    def _load_denoiser_stage_tpu(self, profile: ServingProfile) -> None:
+        import torch
+        import torch_xla
+        import torch_xla.core.xla_model as xm
+
+        from difflet.models.qwen_image.entry import create_qwen_image_application
+
+        assert self.model_dir is not None
+        app = create_qwen_image_application(
+            model_path=self.model_dir,
+            parallel=profile.parallel,
+            dtype=torch.bfloat16,
+            shape=profile.shape_dict(),
+            backend="tpu",
+            text_seq_len=_TEXT_SEQ_LEN,
+        )
+        module = app.transformer._prepare_module().to(torch_xla.device())
+        xm.mark_step()
+        self.denoise_app = app
+        self._tpu_module = module
+
+    def _load_vae_stage_tpu(self, profile: ServingProfile) -> None:
+        import torch
+        import torch_xla
+        from diffusers import AutoencoderKLQwenImage
+
+        assert self.model_dir is not None
+        vae_path = str(Path(self.model_dir) / "vae")
+        vae = AutoencoderKLQwenImage.from_pretrained(
+            vae_path, torch_dtype=torch.bfloat16
+        ).eval()
+        # Kept on the HOST between requests and moved to device only for the
+        # decode. The stages are sequential so they never need to co-reside —
+        # and the headroom does not allow it: after the DiT shard ~6 GiB is
+        # free, and the DiT forward's transient footprint at 1024x1024/tp=4
+        # consumes very nearly all of it. Parking the VAE's 0.24 GiB on device
+        # was enough to turn a working generate into "Attempting to allocate
+        # 15.00M. There are 11.25M free."
+        self.vae_app = vae
+        self.vae_config = vae.config
+
+    def _encode_prompt_tpu(self, prompt: str) -> dict[str, object]:
+        import torch
+
+        if self.text_app is None or self.tokenizer is None:
+            raise RuntimeError("Qwen prompt encoder is not loaded")
+        text = _QWEN_TEMPLATE.format(prompt)
+        encoded = self.tokenizer(text, padding=False, truncation=False, return_tensors="pt")
+        if int(encoded.input_ids.shape[1]) > _ENC_SEQ:
+            raise prompt_too_long(f"Qwen prompt exceeds encoder bucket {_ENC_SEQ}")
+        with torch.no_grad():
+            out = self.text_app(
+                input_ids=encoded.input_ids,
+                attention_mask=encoded.attention_mask,
+                output_hidden_states=True,
+            )
+        # Same slice as the Trainium path: drop the template prefix, keep the
+        # valid tokens, then pad to the compiled text length.
+        hidden = out.hidden_states[-1]
+        valid = int(encoded.attention_mask.sum())
+        used = hidden[:, _QWEN_DROP_IDX:valid]
+        seq = used.shape[1]
+        states = torch.zeros(1, _TEXT_SEQ_LEN, used.shape[-1], dtype=torch.bfloat16)
+        states[:, :seq] = used.to(torch.bfloat16)
+        mask = torch.zeros(1, _TEXT_SEQ_LEN, dtype=torch.bool)
+        mask[:, :seq] = True
+        return {"encoder_hidden_states": states, "encoder_hidden_states_mask": mask}
+
+    def _denoise_tpu(self, text: dict[str, object], request: DiffletGenerateRequest):
+        import numpy as np
+        import torch
+        import torch_xla
+        import torch_xla.core.xla_model as xm
+        from diffusers import FlowMatchEulerDiscreteScheduler
+
+        if self.denoise_app is None or self.active_profile is None:
+            raise RuntimeError("Qwen denoiser is not loaded")
+        profile = self.active_profile
+        device = torch_xla.device()
+        config = self.denoise_app.config
+
+        scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
+            str(Path(self.model_dir) / "scheduler")
+        )
+        sc = scheduler.config
+        image_seq_len = (profile.height // 16) * (profile.width // 16)
+        slope = (sc.max_shift - sc.base_shift) / (sc.max_image_seq_len - sc.base_image_seq_len)
+        mu = image_seq_len * slope + (sc.base_shift - slope * sc.base_image_seq_len)
+        steps = int(request.num_inference_steps)
+        scheduler.set_timesteps(
+            sigmas=np.linspace(1.0, 1.0 / steps, steps).tolist(), mu=mu, device="cpu"
+        )
+
+        generator = torch.Generator("cpu").manual_seed(int(request.seed))
+        latents = torch.randn(
+            1, image_seq_len, int(config.in_channels),
+            generator=generator, dtype=torch.float32,
+        ).to(device)
+        states = text["encoder_hidden_states"].to(device, torch.bfloat16)
+
+        # Latents stay on device for the whole loop. Round-tripping them to the
+        # host each step cost ~0.7 s on top of a 0.85 s forward, and - the
+        # reason this is not merely an optimization - the extra device buffers
+        # pushed a 1024x1024/tp=4 forward past the ~6 GiB of HBM left after the
+        # weight shard.
+        #
+        # Staying on device means doing the update here instead of calling
+        # scheduler.step, which wants host tensors. For flow matching the Euler
+        # update is exactly x + (sigma_next - sigma) * v; the sigmas still come
+        # from the scheduler, so the noise schedule remains its own.
+        # Every per-step scalar is precomputed as a DEVICE tensor. A Python
+        # float gets constant-folded into the graph, so each step becomes a
+        # different graph and XLA recompiles all of them: measured 2.45 s/step
+        # against 0.25 s of actual device work (~10% TensorCore utilization,
+        # confirmed with tpu-info). As tensors, one graph serves the whole loop.
+        sigmas = scheduler.sigmas.to(torch.float32)
+        steps = len(scheduler.timesteps)
+        deltas = [
+            (sigmas[i + 1] - sigmas[i]).reshape(1).to(device) for i in range(steps)
+        ]
+        timesteps = [
+            (step / 1000).to(torch.bfloat16).reshape(1).to(device)
+            for step in scheduler.timesteps
+        ]
+        with torch.no_grad():
+            for index in range(steps):
+                velocity = self._tpu_module(
+                    latents.to(torch.bfloat16), timesteps[index], states, None, None
+                )
+                latents = latents + deltas[index] * velocity.to(torch.float32)
+                xm.mark_step()
+        return latents.cpu()
+
+    def _decode_tpu(self, packed) -> bytes:
+        import torch
+        import torch_xla
+        import torch_xla.core.xla_model as xm
+
+        if self.vae_app is None or self.active_profile is None:
+            raise RuntimeError("Qwen VAE decoder is not loaded")
+        device = torch_xla.device()
+        b, seq, _ = packed.shape
+        hh, ww = _packed_latent_grid(self.active_profile, seq)
+        z = packed.float().view(b, hh, ww, 16, 2, 2)
+        z = z.permute(0, 3, 1, 4, 2, 5).reshape(b, 16, hh * 2, ww * 2).unsqueeze(2)
+        mean = torch.tensor(self.vae_config.latents_mean).view(1, -1, 1, 1, 1)
+        std = torch.tensor(self.vae_config.latents_std).view(1, -1, 1, 1, 1)
+        # Cast after the arithmetic: bf16 * fp32 promotes back to fp32, which
+        # the bf16 VAE then rejects.
+        z = ((z * std) + mean).to(torch.bfloat16).to(device)
+        self.vae_app.to(device)
+        try:
+            with torch.no_grad():
+                img = self.vae_app.decode(z, return_dict=False)[0]
+            xm.mark_step()
+            img = img.float().cpu()[:, :, 0]
+        finally:
+            # Hand the HBM back before the next request's denoise loop.
+            self.vae_app.to("cpu")
+        return _tensor_to_png_bytes((img[0] * 0.5 + 0.5).clamp(0, 1))
+
     def _encode_prompt(self, prompt: str) -> dict[str, object]:
         import torch
 
+        if self._tpu:
+            return self._encode_prompt_tpu(prompt)
         if self.text_app is None or self.tokenizer is None:
             raise RuntimeError("Qwen prompt encoder is not loaded")
         encoded = self.tokenizer(
@@ -489,6 +714,8 @@ class QwenImageServingStageAdapter:
         import numpy as np
         import torch
 
+        if self._tpu:
+            return self._denoise_tpu(text, request)
         if self.denoise_app is None or self.active_profile is None:
             raise RuntimeError("Qwen denoiser is not loaded")
         profile = self.active_profile
@@ -532,6 +759,8 @@ class QwenImageServingStageAdapter:
     def _decode(self, packed, request: DiffletGenerateRequest) -> bytes:
         import torch
 
+        if self._tpu:
+            return self._decode_tpu(packed)
         if self.vae_app is None or self.vae_config is None:
             raise RuntimeError("Qwen VAE decoder is not loaded")
         if self.active_profile is None:
@@ -626,7 +855,11 @@ def _runtime_plan(profile: ServingProfile, pipeline, specs) -> RuntimePlan:
                 cp_degree=1 if stage.stage_id == "vae" else profile.parallel.cp_degree,
                 world_size=world_size,
             ),
-            artifact_id=by_id[stage.stage_id].artifact_id,
+            # None when there is no compile plan (the tpu backend runs eagerly).
+            artifact_id=(
+                by_id[stage.stage_id].artifact_id if stage.stage_id in by_id else None
+            ),
+            placement="tpu" if not specs else "neuron",
         )
         for stage in pipeline.stages
     )
