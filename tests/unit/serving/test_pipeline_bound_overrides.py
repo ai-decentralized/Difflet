@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from difflet.pipeline.difflet_pipeline import DiffletPipeline
+from difflet.pipeline.compile_cache import CacheSpec, write_manifest
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 
 
@@ -108,6 +109,19 @@ def test_bound_pipeline_cache_identity_keeps_only_teacache_probe_mode(monkeypatc
     compiled_path = tmp_path / "generation"
     model_path.mkdir(parents=True)
     compiled_path.mkdir()
+    spec = CacheSpec(
+        model_id="org/model",
+        model_path=str(model_path),
+        model_name="fake",
+        parallel=DiffletParallelConfig(),
+        dtype="bfloat16",
+        height=64,
+        width=64,
+        num_frames=None,
+        revision="a" * 40,
+        application_kwargs={"teacache_probe_enabled": True},
+    )
+    write_manifest(compiled_path, spec)
 
     first = DiffletPipeline.from_pretrained(
         "org/model",
@@ -140,3 +154,5 @@ def test_bound_pipeline_cache_identity_keeps_only_teacache_probe_mode(monkeypatc
     assert first.cache_spec.cache_inputs() == second.cache_spec.cache_inputs()
     assert first.app.created_with["application_kwargs"]["teacache_speedup"] == 1.3
     assert second.app.created_with["application_kwargs"]["teacache_speedup"] == 1.8
+    assert first.policy_receipt.executable_cache_key == second.policy_receipt.executable_cache_key
+    assert first.policy_receipt.sha256 != second.policy_receipt.sha256

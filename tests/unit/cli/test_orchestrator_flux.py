@@ -118,6 +118,42 @@ def test_qualified_cache_profile_is_forwarded_to_application():
     }
 
 
+def test_cli_profile_preflight_uses_executable_identity_without_policy_paths(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        "difflet.pipeline.path_resolver.resolve_model_path",
+        lambda *args, **kwargs: "/fake/model",
+    )
+    monkeypatch.setattr(
+        "difflet.cli.prewarm.prewarm_neuron_runtime",
+        lambda *args, **kwargs: None,
+    )
+
+    def cache_path(cache_dir, spec):
+        del cache_dir
+        captured["cache_inputs"] = spec.cache_inputs()
+        return "/fake/compiled"
+
+    monkeypatch.setattr("difflet.pipeline.compile_cache.cache_path", cache_path)
+    monkeypatch.setattr(
+        "difflet.pipeline.compile_cache.has_valid_manifest",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        "difflet.pipeline.difflet_pipeline.DiffletPipeline.from_pretrained",
+        classmethod(lambda cls, *args, **kwargs: object()),
+    )
+
+    FluxOrchestrator(
+        _flux_args(
+            cache_profile_file="/profile.json",
+            cache_profile_qualification_file="/qualification.json",
+        )
+    )._load_pipeline()
+
+    assert captured["cache_inputs"]["application_kwargs"] == {}
+
+
 def test_parallel_uses_explicit_tp_and_cp_mode():
     parallel = FluxOrchestrator(_flux_args(tp_degree=8, cp_degree=1,
                                            cp_mode="gather_kv"))._parallel()

@@ -22,10 +22,15 @@ import json
 import math
 import os
 import time
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from difflet.pipeline.cache import (
+    ANCHOR_ERROR_TRACE_SCHEMA,
+    ANCHOR_ERROR_TRACE_SCHEMA_REVISION,
+)
 from difflet.pipeline.cache.profile import PhasedCandidateArm
 from scripts.flux_cache_protocol import (
     DEFAULT_PROMPT_SUITE_PATH,
@@ -41,6 +46,7 @@ TRAJECTORY_INPUT_SCHEMA = "difflet-flux-cache-trajectory-input-v1"
 MODEL_ID = "black-forest-labs/FLUX.1-dev"
 MODEL_LABEL = "flux"
 DEFAULT_SEEDS = (0, 1)
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def utc_now() -> str:
@@ -224,6 +230,159 @@ def aggregate_runner_stats(rows: Iterable[Mapping[str, Any]]) -> dict[str, int]:
     return aggregate
 
 
+def _registration_phase_boundary(arm: PhasedCandidateArm) -> tuple[int | None, str]:
+    """Resolve the registered middle/tail boundary without trusting an unbound path."""
+
+    horizon_path = Path(str(arm.horizon_ref.get("path", ""))).expanduser()
+    try:
+        horizon = json.loads(horizon_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None, "unavailable"
+    optimizer = horizon.get("optimizer") if isinstance(horizon, dict) else None
+    if isinstance(optimizer, Mapping):
+        value = optimizer.get("phase_boundary_step")
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value, str(horizon_path.resolve())
+
+    registration = horizon.get("registration") if isinstance(horizon, dict) else None
+    if not isinstance(registration, Mapping):
+        return None, "unavailable"
+    candidates: list[Path] = []
+    path_value = registration.get("path")
+    if isinstance(path_value, str):
+        candidates.append(Path(path_value).expanduser())
+    content_digest = registration.get("content_sha256")
+    if isinstance(content_digest, str) and len(content_digest) == 64:
+        for path in (ROOT / "benchmark" / "flux_cache").glob("**/*.json"):
+            try:
+                document = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            if isinstance(document, dict) and document.get("sha256") == content_digest:
+                candidates.append(path)
+                break
+
+    expected_file_digest = registration.get("file_sha256")
+    for path in candidates:
+        if not path.is_file():
+            continue
+        if (
+            isinstance(expected_file_digest, str)
+            and len(expected_file_digest) == 64
+            and sha256_file(path) != expected_file_digest
+        ):
+            continue
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        optimizer = document.get("optimizer") if isinstance(document, dict) else None
+        value = optimizer.get("phase_boundary_step") if isinstance(optimizer, Mapping) else None
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value, str(path.resolve())
+    return None, "unavailable"
+
+
+def bind_anchor_error_trace(
+    trace: Mapping[str, Any],
+    arm: PhasedCandidateArm,
+) -> dict[str, Any]:
+    """Bind a runtime trace to the exact candidate and its scheduling phases."""
+
+    if not isinstance(trace, Mapping):
+        raise ValueError("anchor-error trace must be a mapping")
+    expected = {
+        "schema",
+        "schema_revision",
+        "measurement",
+        "path_semantics",
+        "physical_rollback_attempts_included",
+        "entries",
+    }
+    if set(trace) != expected:
+        raise ValueError("anchor-error trace fields do not match the schema")
+    if (
+        trace.get("schema") != ANCHOR_ERROR_TRACE_SCHEMA
+        or trace.get("schema_revision") != ANCHOR_ERROR_TRACE_SCHEMA_REVISION
+        or trace.get("physical_rollback_attempts_included") is not False
+    ):
+        raise ValueError("anchor-error trace schema or path semantics are unsupported")
+    entries = trace.get("entries")
+    if not isinstance(entries, list):
+        raise ValueError("anchor-error trace entries must be a list")
+
+    num_steps = int(arm.policy["num_steps"])
+    warmup_steps = int(arm.policy["warmup_steps"])
+    cooldown_steps = int(arm.policy["cooldown_steps"])
+    phase_boundary, phase_source = _registration_phase_boundary(arm)
+    bound_entries: list[dict[str, Any]] = []
+    previous_measured_step = -1
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            raise ValueError("anchor-error trace entry must be a mapping")
+        row = deepcopy(dict(entry))
+        anchor_step = row.get("anchor_step_index")
+        previous_anchor = row.get("previous_anchor_step_index")
+        if (
+            isinstance(anchor_step, bool)
+            or not isinstance(anchor_step, int)
+            or not 0 <= anchor_step < num_steps
+            or anchor_step <= previous_measured_step
+            or row.get("num_steps") != num_steps
+        ):
+            raise ValueError("anchor-error trace step coordinates are invalid")
+        if previous_anchor is not None and (
+            isinstance(previous_anchor, bool)
+            or not isinstance(previous_anchor, int)
+            or not 0 <= previous_anchor < anchor_step
+        ):
+            raise ValueError("anchor-error trace previous anchor is invalid")
+        estimate_steps = row.get("estimate_step_indices")
+        expected_estimates = (
+            [] if previous_anchor is None else list(range(previous_anchor + 1, anchor_step))
+        )
+        if estimate_steps != expected_estimates:
+            raise ValueError("anchor-error trace does not cover its exact segment")
+        z = row.get("endpoint_z")
+        if z is not None and (
+            isinstance(z, bool) or not math.isfinite(float(z)) or float(z) < 0.0
+        ):
+            raise ValueError("anchor-error trace endpoint z is invalid")
+
+        if previous_anchor is None:
+            region = "bootstrap"
+        elif anchor_step < warmup_steps:
+            region = "warmup"
+        elif cooldown_steps and anchor_step >= num_steps - cooldown_steps:
+            region = "cooldown"
+        elif phase_boundary is None:
+            region = "cacheable_unresolved_phase"
+        elif previous_anchor < phase_boundary:
+            region = "middle"
+        else:
+            region = "tail"
+        row["policy_region"] = region
+        bound_entries.append(row)
+        previous_measured_step = anchor_step
+
+    result = deepcopy(dict(trace))
+    result["candidate_binding"] = {
+        "candidate_id": arm.candidate_id,
+        "candidate_content_sha256": arm.content_sha256,
+        "candidate_file_sha256": arm.file_sha256,
+        "horizon_ref": dict(arm.horizon_ref),
+    }
+    result["phase_binding"] = {
+        "warmup_steps": warmup_steps,
+        "cooldown_steps": cooldown_steps,
+        "derivation_phase_boundary_step": phase_boundary,
+        "derivation_phase_boundary_source": phase_source,
+        "gap_phase_uses_previous_anchor": True,
+    }
+    result["entries"] = bound_entries
+    return result
+
+
 def build_manifests(
     *,
     identity: Mapping[str, Any],
@@ -268,6 +427,7 @@ def build_manifests(
 
     baseline_total = total_duration(baseline_runs, "baseline")
     comparisons, definitions, speed_rows = [], [], []
+    trace_presence: list[bool] = []
     for item in arms:
         rows = tuple(runs_by_candidate.get(item.candidate_id, ()))
         rows_by_id = {row["sample_id"]: row for row in rows}
@@ -286,21 +446,38 @@ def build_manifests(
                 raise ValueError("candidate runner statistics are invalid")
             if stats["full_steps"] + stats["skipped_steps"] != num_steps:
                 raise ValueError("candidate runner steps do not sum to num_steps")
+            trace = row.get("anchor_error_trace")
+            trace_presence.append(trace is not None)
+            if trace is not None:
+                if not isinstance(trace, Mapping):
+                    raise ValueError("candidate anchor-error trace is invalid")
+                entries = trace.get("entries")
+                binding = trace.get("candidate_binding")
+                if (
+                    not isinstance(entries, list)
+                    or len(entries) != stats["full_steps"]
+                    or not isinstance(binding, Mapping)
+                    or binding.get("candidate_id") != item.candidate_id
+                    or binding.get("candidate_content_sha256") != item.content_sha256
+                ):
+                    raise ValueError("candidate anchor-error trace binding is invalid")
         definition = {
             "candidate_id": item.candidate_id,
             "policy": item.policy_spec(),
             "predictor": item.predictor_spec(),
         }
         definitions.append(definition)
-        comparisons.extend(
-            {
+        for sample_id, sample in sample_by_id.items():
+            comparison = {
                 **dict(sample),
                 "candidate_id": item.candidate_id,
                 "baseline": dict(baseline_by_id[sample_id]["artifacts"]),
                 "candidate": dict(rows_by_id[sample_id]["artifacts"]),
             }
-            for sample_id, sample in sample_by_id.items()
-        )
+            trace = rows_by_id[sample_id].get("anchor_error_trace")
+            if trace is not None:
+                comparison["anchor_error_trace"] = deepcopy(trace)
+            comparisons.append(comparison)
         candidate_total = total_duration(rows, item.candidate_id)
         speed_rows.append(
             {
@@ -314,14 +491,26 @@ def build_manifests(
                         "sample_id": row["sample_id"],
                         "elapsed_s": float(row["elapsed_s"]),
                         "runner_stats": dict(row["runner_stats"]),
+                        **(
+                            {
+                                "anchor_error_measurement_count": len(
+                                    row["anchor_error_trace"]["entries"]
+                                )
+                            }
+                            if row.get("anchor_error_trace") is not None
+                            else {}
+                        ),
                     }
                     for row in rows
                 ],
             }
         )
+    if trace_presence and any(trace_presence) and not all(trace_presence):
+        raise ValueError("candidate anchor-error traces must be collected for every sample")
     common = {
         **dict(identity),
         "hardware_measured": True,
+        "anchor_error_traces_collected": bool(trace_presence and all(trace_presence)),
         "started_at": started_at,
         "completed_at": completed_at,
     }
@@ -642,6 +831,10 @@ def _collect_profiles(
                 output_root=output_root,
             )
             run["runner_stats"] = adapter.stats()
+            run["anchor_error_trace"] = bind_anchor_error_trace(
+                adapter.anchor_error_trace(),
+                arm,
+            )
             rows.append(run)
             print(
                 f"[flux-cache-{label}] {arm.candidate_id} {sample['sample_id']} "

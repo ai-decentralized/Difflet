@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Sequence
 
 from difflet.pipeline.cache.types import CacheHistory, CachePredictor, CacheStepContext
 
@@ -16,6 +16,9 @@ AnchorEstimateStatus = Literal[
     "invalid_estimated_output",
     "prediction_error",
 ]
+
+ANCHOR_ERROR_TRACE_SCHEMA = "difflet-cache-anchor-error-trace"
+ANCHOR_ERROR_TRACE_SCHEMA_REVISION = 1
 
 _RELATIVE_NORM_FLOOR = 1e-12
 _STATUSES = {
@@ -62,6 +65,139 @@ class AnchorErrorMeasurement:
                 raise ValueError("measured anchor estimates must be numerically valid")
         elif error is not None:
             raise ValueError("unmeasured anchor estimates cannot have a relative error")
+
+
+@dataclass(frozen=True)
+class AnchorErrorTraceEntry:
+    """One endpoint measurement bound to the segment that produced it.
+
+    This is logical-path evidence: if a speculative segment is rolled back,
+    its entry must disappear with the runner snapshot.  A future physical
+    transaction ledger belongs outside this structure so rollback cost is not
+    accidentally erased with logical controller state.
+    """
+
+    previous_anchor_step_index: int | None
+    anchor_step_index: int
+    num_steps: int
+    estimate_step_indices: tuple[int, ...]
+    previous_timestep: float | None
+    anchor_timestep: float | None
+    previous_sigma: float | None
+    anchor_sigma: float | None
+    scheduler_signed_delta_sigma: float | None
+    scheduler_abs_delta_sigma: float | None
+    estimate_status: AnchorEstimateStatus
+    endpoint_z: float | None
+    numerically_valid: bool
+
+    @classmethod
+    def from_measurement(
+        cls,
+        measurement: AnchorErrorMeasurement,
+        *,
+        context: CacheStepContext,
+        previous_anchor: Any | None,
+        estimate_contexts: Sequence[CacheStepContext],
+    ) -> "AnchorErrorTraceEntry":
+        """Bind a scalar endpoint error to its exact logical cache segment."""
+
+        if not isinstance(measurement, AnchorErrorMeasurement):
+            raise TypeError("measurement must be an AnchorErrorMeasurement")
+        if not isinstance(context, CacheStepContext):
+            raise TypeError("context must be a CacheStepContext")
+        if (
+            context.step_index != measurement.step_index
+            or context.num_steps != measurement.num_steps
+        ):
+            raise ValueError("measurement and anchor context coordinates differ")
+        contexts = tuple(estimate_contexts)
+        if any(not isinstance(context, CacheStepContext) for context in contexts):
+            raise TypeError("estimate_contexts must contain CacheStepContext values")
+        indices = tuple(context.step_index for context in contexts)
+        if indices != tuple(sorted(set(indices))):
+            raise ValueError("estimated steps must be strictly increasing")
+        if indices and indices[-1] >= measurement.step_index:
+            raise ValueError("estimated steps must precede the measured anchor")
+
+        previous_context = None if previous_anchor is None else previous_anchor.context
+        previous_step = None if previous_context is None else int(previous_context.step_index)
+        if previous_step is not None:
+            if previous_context.num_steps != measurement.num_steps:
+                raise ValueError("previous anchor num_steps differs from the measurement")
+            expected = tuple(range(previous_step + 1, measurement.step_index))
+            if indices != expected:
+                raise ValueError(
+                    "estimated steps must exactly cover the segment between real anchors"
+                )
+        elif indices:
+            raise ValueError("estimated steps cannot precede the first real anchor")
+
+        if any(candidate.num_steps != measurement.num_steps for candidate in contexts):
+            raise ValueError("estimated-step num_steps differs from the measurement")
+
+        sigma_deltas: tuple[float, ...] | None = ()
+        if contexts:
+            coordinate_contexts = (*contexts, context)
+            if any(candidate.sigma is None for candidate in coordinate_contexts):
+                sigma_deltas = None
+            else:
+                sigma_deltas = tuple(
+                    float(right.sigma) - float(left.sigma)
+                    for left, right in zip(
+                        coordinate_contexts[:-1], coordinate_contexts[1:], strict=True
+                    )
+                )
+        signed_delta = (
+            None if sigma_deltas is None else float(sum(sigma_deltas))
+        )
+        abs_delta = (
+            None if sigma_deltas is None else float(sum(abs(value) for value in sigma_deltas))
+        )
+
+        return cls(
+            previous_anchor_step_index=previous_step,
+            anchor_step_index=measurement.step_index,
+            num_steps=measurement.num_steps,
+            estimate_step_indices=indices,
+            previous_timestep=(
+                None if previous_context is None else previous_context.timestep
+            ),
+            anchor_timestep=context.timestep,
+            previous_sigma=None if previous_context is None else previous_context.sigma,
+            anchor_sigma=context.sigma,
+            scheduler_signed_delta_sigma=signed_delta,
+            scheduler_abs_delta_sigma=abs_delta,
+            estimate_status=measurement.estimate_status,
+            endpoint_z=measurement.estimate_relative_error,
+            numerically_valid=measurement.numerically_valid,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe record without device tensors or references."""
+
+        anchor_gap = (
+            None
+            if self.previous_anchor_step_index is None
+            else self.anchor_step_index - self.previous_anchor_step_index
+        )
+        return {
+            "previous_anchor_step_index": self.previous_anchor_step_index,
+            "anchor_step_index": self.anchor_step_index,
+            "num_steps": self.num_steps,
+            "anchor_gap": anchor_gap,
+            "estimate_step_count": len(self.estimate_step_indices),
+            "estimate_step_indices": list(self.estimate_step_indices),
+            "previous_timestep": self.previous_timestep,
+            "anchor_timestep": self.anchor_timestep,
+            "previous_sigma": self.previous_sigma,
+            "anchor_sigma": self.anchor_sigma,
+            "scheduler_signed_delta_sigma": self.scheduler_signed_delta_sigma,
+            "scheduler_abs_delta_sigma": self.scheduler_abs_delta_sigma,
+            "estimate_status": self.estimate_status,
+            "endpoint_z": self.endpoint_z,
+            "numerically_valid": self.numerically_valid,
+        }
 
 
 def _torch_tensor(value: Any) -> bool:
@@ -169,4 +305,11 @@ def measure_anchor_error(
     )
 
 
-__all__ = ["AnchorErrorMeasurement", "AnchorEstimateStatus", "measure_anchor_error"]
+__all__ = [
+    "ANCHOR_ERROR_TRACE_SCHEMA",
+    "ANCHOR_ERROR_TRACE_SCHEMA_REVISION",
+    "AnchorErrorMeasurement",
+    "AnchorErrorTraceEntry",
+    "AnchorEstimateStatus",
+    "measure_anchor_error",
+]

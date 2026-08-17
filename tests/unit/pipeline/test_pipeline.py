@@ -173,21 +173,24 @@ def test_pipeline_call_delegates_to_application(tmp_path):
 def test_pipeline_forwards_teacache_kwargs_and_canonicalizes_compile_cache(tmp_path):
     model_dir = tmp_path / "unit-dummy-model"
     model_dir.mkdir()
+    calibration_path = tmp_path / "calibration.json"
+    calibration_path.write_text("{}\n", encoding="utf-8")
 
     pipe = DiffletPipeline.from_pretrained(
         str(model_dir),
         model_type="unit_dummy",
         dtype="bf16",
         compile_cache_dir=str(tmp_path / "cache"),
-        skip_compile=True,
         load=False,
         teacache_speedup=1.5,
-        teacache_calibration_path="calibration.json",
+        teacache_calibration_path=str(calibration_path),
     )
 
     assert pipe.app.kwargs["teacache_speedup"] == 1.5
-    assert pipe.app.kwargs["teacache_calibration_path"] == "calibration.json"
+    assert pipe.app.kwargs["teacache_calibration_path"] == str(calibration_path)
     assert pipe.cache_spec.application_kwargs == {"teacache_probe_enabled": True}
+    assert pipe.policy_receipt is not None
+    assert pipe.app.policy_binding_receipt["sha256"] == pipe.policy_receipt.sha256
 
 
 def test_pipeline_rejects_conflicting_teacache_kwargs(tmp_path):

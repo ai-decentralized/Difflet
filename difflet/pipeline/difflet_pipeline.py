@@ -7,7 +7,16 @@ from pathlib import Path
 from typing import Any
 
 from difflet.backends import BackendRuntime, get_backend
-from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest, write_manifest
+from difflet.pipeline.compile_cache import (
+    CacheSpec,
+    PolicyBindingReceipt,
+    cache_path,
+    executable_application_kwargs,
+    has_valid_manifest,
+    issue_policy_binding_receipt,
+    validate_policy_binding_receipt,
+    write_manifest,
+)
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.pipeline.path_resolver import resolve_model_path
 from difflet.registry import ModelEntry, resolve_model
@@ -29,6 +38,7 @@ class DiffletPipeline:
         parallel: DiffletParallelConfig,
         dtype: Any,
         backend: BackendRuntime,
+        policy_receipt: PolicyBindingReceipt | None,
     ) -> None:
         self.app = app
         self.model_id = model_id
@@ -40,6 +50,7 @@ class DiffletPipeline:
         self.parallel = parallel
         self.dtype = dtype
         self.backend = backend
+        self.policy_receipt = policy_receipt
 
     @classmethod
     def from_pretrained(
@@ -77,7 +88,6 @@ class DiffletPipeline:
             teacache_calibration=teacache_calibration,
             teacache_calibration_path=teacache_calibration_path,
         )
-        cache_application_kwargs = _cache_application_kwargs(application_kwargs)
         entry = resolve_model(model_id, model_type=model_type)
         backend_runtime = get_backend(backend)
         entry.require_backend(backend_runtime.name)
@@ -109,6 +119,7 @@ class DiffletPipeline:
             model_path=model_path,
             revision=cache_revision,
         )
+        cache_application_kwargs = executable_application_kwargs(application_kwargs)
         spec = CacheSpec(
             model_id=model_id,
             model_path=model_path,
@@ -143,6 +154,20 @@ class DiffletPipeline:
             _compile_app(app, compiled_path, debug=debug_compile)
             write_manifest(compiled_path, spec)
 
+        policy_receipt = issue_policy_binding_receipt(
+            compiled_path,
+            spec,
+            application_kwargs,
+            qualified_profile=getattr(app, "_qualified_cache_profile", None),
+        )
+        if policy_receipt is not None:
+            if not _compiled_artifacts_ready(app, compiled_path):
+                raise RuntimeError(
+                    "cannot bind policy receipt to incomplete compiled artifacts"
+                )
+            validate_policy_binding_receipt(policy_receipt, spec)
+            _bind_policy_receipt(app, policy_receipt)
+
         if load:
             _load_app(
                 app,
@@ -164,6 +189,7 @@ class DiffletPipeline:
             parallel=parallel_cfg,
             dtype=dtype,
             backend=backend_runtime,
+            policy_receipt=policy_receipt,
         )
 
     @classmethod
@@ -190,6 +216,12 @@ class DiffletPipeline:
         local_ranks_size: int | None = None,
         skip_warmup: bool = False,
     ) -> None:
+        if self.policy_receipt is not None:
+            if not has_valid_manifest(self.compiled_path, self.cache_spec):
+                raise RuntimeError(
+                    "cannot load a policy against an absent or mismatched executable manifest"
+                )
+            validate_policy_binding_receipt(self.policy_receipt, self.cache_spec)
         _load_app(
             self.app,
             self.compiled_path,
@@ -237,27 +269,9 @@ def _merge_teacache_kwargs(
 
 
 def _cache_application_kwargs(application_kwargs: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not application_kwargs:
-        return None
-    cache_kwargs = dict(application_kwargs)
-    probe_enabled = bool(
-        cache_kwargs.pop("teacache_speedup", None) is not None
-        or cache_kwargs.pop("teacache_fused", False)
-    )
-    cache_kwargs.pop("teacache_calibration", None)
-    cache_kwargs.pop("teacache_calibration_path", None)
-    cache_kwargs.pop("teacache_cadence", None)
-    cache_kwargs.pop("teacache_online_delta_alpha", None)
-    for runtime_key in (
-        "cache_profile_file",
-        "cache_profile_qualification_file",
-        "cache_runtime_model_id",
-        "cache_runtime_model_revision",
-    ):
-        cache_kwargs.pop(runtime_key, None)
-    if probe_enabled:
-        cache_kwargs["teacache_probe_enabled"] = True
-    return cache_kwargs or None
+    """Backward-compatible alias for the centralized executable projection."""
+
+    return executable_application_kwargs(application_kwargs)
 
 
 def _bind_qualified_profile_identity(
@@ -293,6 +307,15 @@ def _compile_app(app: Any, compiled_path: Path, *, debug: bool) -> None:
         app.compile(str(compiled_path), debug=debug)
     else:
         app.compile(str(compiled_path))
+
+
+def _bind_policy_receipt(app: Any, receipt: PolicyBindingReceipt) -> None:
+    binder = getattr(app, "bind_policy_receipt", None)
+    document = receipt.to_dict()
+    if callable(binder):
+        binder(document)
+    else:
+        setattr(app, "policy_binding_receipt", document)
 
 
 def _compiled_artifacts_ready(app: Any, compiled_path: Path) -> bool:

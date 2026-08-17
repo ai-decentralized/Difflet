@@ -87,13 +87,20 @@ class FluxOrchestrator(ModelOrchestrator):
         from difflet.cli.prewarm import prewarm_neuron_runtime
         prewarm_neuron_runtime(parallel.world_size)
         shape = entry.resolve_shape(height=self.args.height, width=self.args.width)
+        identity_kwargs = self._application_kwargs()
+        teacache_speedup = getattr(self.args, "teacache_speedup", None)
+        if teacache_speedup is not None:
+            identity_kwargs["teacache_speedup"] = teacache_speedup
+            calibration_path = getattr(self.args, "teacache_calibration", None)
+            if calibration_path is not None:
+                identity_kwargs["teacache_calibration_path"] = calibration_path
         spec = CacheSpec(
             model_id=_HF_MODEL_ID, model_path=model_path,
             model_name=entry.name, parallel=parallel,
             dtype=self._dtype(),
             height=shape.get("height"), width=shape.get("width"),
             num_frames=shape.get("num_frames"), revision=self.args.revision,
-            application_kwargs=self._application_kwargs() or None,
+            application_kwargs=identity_kwargs or None,
         )
         compiled = cache_path(self.args.cache_dir, spec)
         if not has_valid_manifest(compiled, spec):
@@ -139,7 +146,11 @@ class FluxOrchestrator(ModelOrchestrator):
         return torch.bfloat16
 
     def _application_kwargs(self) -> dict[str, Any]:
-        """Model-opt kwargs shared by compile and load (hashed into the cache key)."""
+        """Model options shared by compile and load.
+
+        ``CacheSpec`` projects these into executable and policy identities; not
+        every option in this mapping belongs in the compiled-graph cache key.
+        """
         app_kwargs: dict[str, Any] = {}
         if getattr(self.args, "teacache_cadence", None) is not None:
             app_kwargs["teacache_cadence"] = self.args.teacache_cadence

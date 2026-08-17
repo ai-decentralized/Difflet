@@ -7,7 +7,7 @@ one state machine:
 * predictors decide *which value* replaces that evaluation; and
 * :class:`CacheRunner` owns history, safety checks, and accounting;
 * :class:`CacheSession` owns one request's schedule and lifecycle;
-* the anchor-error path exposes only the scalar needed for bounded braking; and
+* the anchor-error path exposes a scalar for control plus rollback-aware trace evidence; and
 * :class:`TeaCacheControllerAdapter` only translates the existing loop API.
 
 Only real transformer outputs enter :class:`CacheHistory`. Predicted outputs
@@ -30,11 +30,14 @@ from difflet.pipeline.cache.recovery import (
     QualityRecoveryConfig,
     QualityRecoveryGuard,
 )
-from difflet.pipeline.cache.runner import CacheRunner
-from difflet.pipeline.cache.session import CacheSession
+from difflet.pipeline.cache.runner import CacheRunner, CacheRunnerSnapshot
+from difflet.pipeline.cache.session import CacheSession, CacheSessionSnapshot
 from difflet.pipeline.cache.control_error import (
+    ANCHOR_ERROR_TRACE_SCHEMA,
+    ANCHOR_ERROR_TRACE_SCHEMA_REVISION,
     AnchorEstimateStatus,
     AnchorErrorMeasurement,
+    AnchorErrorTraceEntry,
     measure_anchor_error,
 )
 from difflet.pipeline.cache.profile import (
@@ -65,9 +68,14 @@ from difflet.pipeline.cache.types import (
     RecoveryDecision,
     StepContext,
 )
-from difflet.pipeline.cache.teacache_adapter import TeaCacheControllerAdapter
+from difflet.pipeline.cache.teacache_adapter import (
+    TeaCacheControllerAdapter,
+    TeaCacheControllerSnapshot,
+)
 
 __all__ = [
+    "ANCHOR_ERROR_TRACE_SCHEMA",
+    "ANCHOR_ERROR_TRACE_SCHEMA_REVISION",
     "PHASED_CANDIDATE_SCHEMA",
     "PHASED_CANDIDATE_SCHEMA_REVISION",
     "PROFILE_QUALIFICATION_SCHEMA",
@@ -75,6 +83,7 @@ __all__ = [
     "Anchor",
     "AnchorEstimateStatus",
     "AnchorErrorMeasurement",
+    "AnchorErrorTraceEntry",
     "CacheAnchor",
     "CacheDecision",
     "CacheHistory",
@@ -84,7 +93,9 @@ __all__ = [
     "CalibratedLinearPredictor",
     "CacheRecovery",
     "CacheSession",
+    "CacheSessionSnapshot",
     "CacheRunner",
+    "CacheRunnerSnapshot",
     "CacheRunnerStats",
     "CacheStepContext",
     "Context",
@@ -102,6 +113,7 @@ __all__ = [
     "TaylorSeerPredictor",
     "TeaCachePolicy",
     "TeaCacheControllerAdapter",
+    "TeaCacheControllerSnapshot",
     "load_phased_candidate",
     "load_phased_candidates",
     "load_qualified_cache_profile",

@@ -19,6 +19,13 @@ from difflet.pipeline.cache.profile import (
     load_qualified_cache_profile,
     sha256_file,
 )
+from difflet.pipeline.compile_cache import (
+    CacheSpec,
+    issue_policy_binding_receipt,
+    validate_policy_binding_receipt,
+    write_manifest,
+)
+from difflet.pipeline.parallel_config import DiffletParallelConfig
 
 
 def _write_json(path: Path, payload: dict, *, hashed: bool = True) -> dict:
@@ -186,6 +193,41 @@ def test_load_qualified_profile_validates_evidence_and_builds_request_session(tm
     assert profile.measured_speedup == 3.4
     assert profile.minimum_speedup is None
     assert profile.selected_anchor_budget == 5
+
+
+def test_qualified_profile_issues_executable_bound_policy_receipt(tmp_path):
+    profile_path, qualification_path = _qualified_bundle(tmp_path)
+    profile = load_qualified_cache_profile(profile_path, qualification_path)
+    application_kwargs = {
+        "cache_profile_file": str(profile_path),
+        "cache_profile_qualification_file": str(qualification_path),
+        "cache_runtime_model_id": "black-forest-labs/FLUX.1-dev",
+        "cache_runtime_model_revision": "3" * 40,
+    }
+    spec = CacheSpec(
+        model_id="black-forest-labs/FLUX.1-dev",
+        model_path=str(tmp_path / "model"),
+        model_name="flux",
+        parallel=DiffletParallelConfig(tp_degree=4),
+        dtype="bfloat16",
+        height=64,
+        width=64,
+        revision="3" * 40,
+        application_kwargs=application_kwargs,
+    )
+    compiled_path = tmp_path / "compiled"
+    write_manifest(compiled_path, spec)
+
+    receipt = issue_policy_binding_receipt(
+        compiled_path,
+        spec,
+        application_kwargs,
+        qualified_profile=profile,
+    )
+
+    assert receipt is not None
+    validate_policy_binding_receipt(receipt, spec)
+    assert receipt.to_dict()["policy"]["candidate_id"] == profile.candidate_id
 
 
 def test_load_qualified_profile_keeps_revision_one_compatibility(tmp_path):

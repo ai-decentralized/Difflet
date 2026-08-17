@@ -24,7 +24,8 @@
 # <<< NxDI fork banner <<<
 import functools
 import logging
-from typing import Any, Callable, Dict, List, Optional, Union
+from copy import deepcopy
+from typing import Any, Callable, Dict, List, Mapping, Optional, Union
 
 import numpy as np
 import torch
@@ -41,6 +42,61 @@ else:
     XLA_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+def _clone_rollback_value(value: Any) -> Any:
+    if torch.is_tensor(value):
+        return value.detach().clone()
+    return deepcopy(value)
+
+
+def _snapshot_scheduler_cursor(scheduler: Any) -> tuple[tuple[str, Any], ...]:
+    """Capture the mutable scheduler cursor owned by the denoising host."""
+
+    names = ("_step_index", "_begin_index")
+    if not hasattr(scheduler, "_step_index"):
+        raise TypeError("rollback requires a scheduler with a _step_index cursor")
+    return tuple(
+        (name, _clone_rollback_value(getattr(scheduler, name)))
+        for name in names
+        if hasattr(scheduler, name)
+    )
+
+
+def _restore_scheduler_cursor(
+    scheduler: Any,
+    snapshot: tuple[tuple[str, Any], ...],
+) -> None:
+    for name, value in snapshot:
+        setattr(scheduler, name, _clone_rollback_value(value))
+
+
+def _forced_rollback_plan(value: Any, *, num_steps: int) -> tuple[int, int] | None:
+    """Validate the private P1 forced-rollback acceptance-test hook."""
+
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise TypeError("_cache_forced_rollback_plan must be a mapping")
+    expected = {"checkpoint_step", "rollback_after_step"}
+    if set(value) != expected:
+        raise ValueError(
+            "_cache_forced_rollback_plan must contain exactly "
+            "checkpoint_step and rollback_after_step"
+        )
+    checkpoint_step = value["checkpoint_step"]
+    rollback_after_step = value["rollback_after_step"]
+    for item, name in (
+        (checkpoint_step, "checkpoint_step"),
+        (rollback_after_step, "rollback_after_step"),
+    ):
+        if isinstance(item, bool) or not isinstance(item, int):
+            raise ValueError(f"{name} must be an integer")
+        if not 0 <= item < num_steps:
+            raise ValueError(f"{name} must be in [0, {num_steps})")
+    if checkpoint_step > rollback_after_step:
+        raise ValueError("checkpoint_step must not exceed rollback_after_step")
+    return checkpoint_step, rollback_after_step
 
 
 class NeuronFluxPipeline(FluxPipeline):
@@ -624,6 +680,24 @@ class NeuronFluxPipeline(FluxPipeline):
         counterfactual_hook = getattr(self, "_cache_counterfactual_hook", None)
         if counterfactual_hook is not None and not callable(counterfactual_hook):
             raise TypeError("_cache_counterfactual_hook must be callable")
+        rollback_plan = _forced_rollback_plan(
+            getattr(self, "_cache_forced_rollback_plan", None),
+            num_steps=len(timesteps),
+        )
+        if rollback_plan is not None:
+            if controller is None:
+                raise ValueError("forced rollback requires a cache controller")
+            for method_name in ("snapshot", "restore"):
+                if not callable(getattr(controller, method_name, None)):
+                    raise TypeError(
+                        f"forced rollback requires controller.{method_name}()"
+                    )
+            if record:
+                raise ValueError("forced rollback is incompatible with TeaCache record mode")
+            if counterfactual_hook is not None:
+                raise ValueError("forced rollback is incompatible with counterfactual hooks")
+            if callback_on_step_end is not None:
+                raise ValueError("forced rollback is incompatible with step-end callbacks")
 
         def _full_noise_pred(t):
             timestep = t.expand(latents.shape[0]).to(latents.dtype)
@@ -655,10 +729,33 @@ class NeuronFluxPipeline(FluxPipeline):
             neg = neg[0] if isinstance(neg, (tuple, list)) else neg
             return neg + true_cfg_scale * (pos - neg)
 
+        controller_checkpoint = None
+        latent_checkpoint = None
+        scheduler_checkpoint = None
+        trajectory_checkpoint_size = 0
+        rollback_complete = False
+        dense_replay_end: int | None = None
+        progressed_steps: set[int] = set()
+        i = 0
         with self.progress_bar(total=num_inference_steps) as progress_bar:
-            for i, t in enumerate(timesteps):
+            while i < len(timesteps):
+                t = timesteps[i]
                 if self.interrupt:
+                    i += 1
                     continue
+
+                if (
+                    rollback_plan is not None
+                    and not rollback_complete
+                    and controller_checkpoint is None
+                    and i == rollback_plan[0]
+                ):
+                    # Controller state is framework-neutral.  Latents and the
+                    # scheduler cursor are host-owned and must be captured here.
+                    controller_checkpoint = controller.snapshot()
+                    latent_checkpoint = latents.detach().clone()
+                    scheduler_checkpoint = _snapshot_scheduler_cursor(self.scheduler)
+                    trajectory_checkpoint_size = len(self._tc_last_trajectory)
 
                 ts01 = (t.expand(latents.shape[0]).to(latents.dtype)) / 1000
                 delta = None
@@ -677,8 +774,11 @@ class NeuronFluxPipeline(FluxPipeline):
                         .cpu()
                         .item()
                     )
-                used_cache_prediction = bool(
+                requested_cache_prediction = bool(
                     controller is not None and controller.should_skip(i, None, diff_norm=delta)
+                )
+                used_cache_prediction = (
+                    requested_cache_prediction and dense_replay_end is None
                 )
                 if used_cache_prediction:
                     noise_pred = controller.skip_noise_pred(None)
@@ -737,12 +837,41 @@ class NeuronFluxPipeline(FluxPipeline):
                     latents = callback_outputs.pop("latents", latents)
                     prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
 
-                if i == len(timesteps) - 1 or (
+                should_update_progress = i == len(timesteps) - 1 or (
                     (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
-                ):
+                )
+                if should_update_progress and i not in progressed_steps:
                     progress_bar.update()
+                    progressed_steps.add(i)
                 if XLA_AVAILABLE:
                     xm.mark_step()
+
+                if (
+                    rollback_plan is not None
+                    and not rollback_complete
+                    and i == rollback_plan[1]
+                ):
+                    if (
+                        controller_checkpoint is None
+                        or latent_checkpoint is None
+                        or scheduler_checkpoint is None
+                    ):
+                        raise RuntimeError("forced rollback reached no active checkpoint")
+                    controller.restore(controller_checkpoint)
+                    latents = latent_checkpoint.detach().clone()
+                    _restore_scheduler_cursor(self.scheduler, scheduler_checkpoint)
+                    del self._tc_last_trajectory[trajectory_checkpoint_size:]
+                    rollback_complete = True
+                    dense_replay_end = rollback_plan[1]
+                    controller_checkpoint = None
+                    latent_checkpoint = None
+                    scheduler_checkpoint = None
+                    i = rollback_plan[0]
+                    continue
+
+                if dense_replay_end is not None and i == dense_replay_end:
+                    dense_replay_end = None
+                i += 1
 
         if output_type == "latent":
             image = latents

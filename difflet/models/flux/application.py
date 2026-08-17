@@ -29,7 +29,8 @@
 import inspect
 import logging
 import os
-from typing import Any, Optional
+from copy import deepcopy
+from typing import Any, Mapping, Optional
 
 import torch
 
@@ -225,6 +226,7 @@ class NeuronFluxApplication(MultiComponentApplication):
         self.max_sequence_length = 512
         self._probe_free_recovery_config = None
         self._qualified_cache_profile = None
+        self._policy_binding_receipt = None
         self._cache_runtime_model_id = cache_runtime_model_id
         self._cache_runtime_model_revision = cache_runtime_model_revision
         self._teacache_cadence = teacache_cadence
@@ -473,6 +475,23 @@ class NeuronFluxApplication(MultiComponentApplication):
             kwargs["cache_session"] = cache_session
         return self.pipe(*args, **kwargs)
 
+    def bind_policy_receipt(self, receipt: Mapping[str, Any]) -> None:
+        """Bind the host policy to the executable selected by DiffletPipeline."""
+
+        if not isinstance(receipt, Mapping) or not receipt:
+            raise ValueError("policy receipt must be a non-empty mapping")
+        policy = receipt.get("policy")
+        if not isinstance(policy, Mapping):
+            raise ValueError("policy receipt is missing its policy identity")
+        if self._qualified_cache_profile is not None and policy.get("kind") != (
+            "qualified_cache_profile"
+        ):
+            raise ValueError("qualified cache profile requires a qualified policy receipt")
+        document = deepcopy(dict(receipt))
+        if self._policy_binding_receipt is not None and self._policy_binding_receipt != document:
+            raise RuntimeError("Flux application is already bound to another policy receipt")
+        self._policy_binding_receipt = document
+
     def _request_identity(self, *args: Any, **kwargs: Any) -> tuple[int, int, int]:
         signature = inspect.signature(self.pipe.__call__)
         bound = signature.bind_partial(*args, **kwargs)
@@ -593,4 +612,11 @@ class NeuronFluxApplication(MultiComponentApplication):
             raise RuntimeError("no qualified cache profile is configured")
         num_steps, _, _ = self._request_identity(*args, **kwargs)
         self._validate_qualified_cache_request(*args, **kwargs)
-        return profile.build_session(num_steps)
+        receipt = getattr(self, "_policy_binding_receipt", None)
+        if receipt is None:
+            raise RuntimeError(
+                "qualified cache profile is not bound to an executable policy receipt"
+            )
+        session = profile.build_session(num_steps)
+        session.bind_policy_receipt(receipt)
+        return session

@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from difflet.pipeline.cache.runner import CacheRunner
-from difflet.pipeline.cache.session import CacheSession
+from difflet.pipeline.cache.session import CacheSession, CacheSessionSnapshot
+
+
+@dataclass(frozen=True)
+class TeaCacheControllerSnapshot:
+    """Opaque adapter checkpoint paired with its underlying session token."""
+
+    _owner_id: int
+    _session: CacheSessionSnapshot
+    _last_delta_estimate: float | None
 
 
 class TeaCacheControllerAdapter:
@@ -49,6 +59,34 @@ class TeaCacheControllerAdapter:
 
     def bind_schedule(self, timesteps: Any, sigmas: Any = None) -> None:
         self.session.bind_schedule_coordinates(timesteps, sigmas)
+
+    def snapshot(self) -> TeaCacheControllerSnapshot:
+        """Capture controller state at a completed denoising-step boundary."""
+
+        return TeaCacheControllerSnapshot(
+            _owner_id=id(self),
+            _session=self.session.snapshot(),
+            _last_delta_estimate=self.last_delta_estimate,
+        )
+
+    def restore(self, snapshot: TeaCacheControllerSnapshot) -> None:
+        """Restore and consume one controller checkpoint."""
+
+        self._validate_snapshot(snapshot)
+        self.session.restore(snapshot._session)
+        self.last_delta_estimate = snapshot._last_delta_estimate
+
+    def commit_snapshot(self, snapshot: TeaCacheControllerSnapshot) -> None:
+        """Commit work since a checkpoint and consume its retained state."""
+
+        self._validate_snapshot(snapshot)
+        self.session.commit_snapshot(snapshot._session)
+
+    def _validate_snapshot(self, snapshot: TeaCacheControllerSnapshot) -> None:
+        if not isinstance(snapshot, TeaCacheControllerSnapshot):
+            raise TypeError("controller snapshot must be a TeaCacheControllerSnapshot")
+        if snapshot._owner_id != id(self):
+            raise ValueError("controller snapshot belongs to another adapter")
 
     def needs_signal(self) -> bool:
         return self.session.policy_requires_signal()
@@ -101,5 +139,10 @@ class TeaCacheControllerAdapter:
     def stats(self) -> dict[str, Any]:
         return self.session.statistics()
 
+    def anchor_error_trace(self) -> dict[str, Any]:
+        """Expose request-scoped segment evidence to offline collectors."""
 
-__all__ = ["TeaCacheControllerAdapter"]
+        return self.session.anchor_error_trace()
+
+
+__all__ = ["TeaCacheControllerAdapter", "TeaCacheControllerSnapshot"]

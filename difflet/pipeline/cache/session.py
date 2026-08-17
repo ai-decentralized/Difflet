@@ -3,10 +3,25 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import Any, Mapping
 
-from difflet.pipeline.cache.runner import CacheRunner
+from difflet.pipeline.cache.runner import CacheRunner, CacheRunnerSnapshot
 from difflet.pipeline.cache.types import CacheDecision, CacheStepContext
+
+
+@dataclass(frozen=True)
+class CacheSessionSnapshot:
+    """Opaque token for one active, request-scoped rollback checkpoint."""
+
+    _owner_id: int
+    _generation: int
+    _runner: CacheRunnerSnapshot
+    _contexts: tuple[tuple[int, CacheStepContext], ...]
+    _timesteps: tuple[float, ...] | None
+    _sigmas: tuple[float, ...] | None
+    _policy_receipt: dict[str, Any] | None
 
 
 class CacheSession:
@@ -69,6 +84,21 @@ class CacheSession:
         self._timesteps: tuple[float, ...] | None = None
         self._sigmas: tuple[float, ...] | None = None
         self._active_step_index: int | None = None
+        self._policy_receipt: dict[str, Any] | None = None
+        self._snapshot_generation = 0
+        self._active_snapshot: CacheSessionSnapshot | None = None
+
+    def bind_policy_receipt(self, receipt: Mapping[str, Any]) -> None:
+        """Bind one immutable executable/policy receipt to this request."""
+
+        if self._active_snapshot is not None:
+            raise RuntimeError("policy receipt cannot change while a rollback snapshot is active")
+        if not isinstance(receipt, Mapping) or not receipt:
+            raise ValueError("policy receipt must be a non-empty mapping")
+        document = deepcopy(dict(receipt))
+        if self._policy_receipt is not None and self._policy_receipt != document:
+            raise RuntimeError("cache session is already bound to another policy receipt")
+        self._policy_receipt = document
 
     @property
     def active_step_index(self) -> int | None:
@@ -82,6 +112,77 @@ class CacheSession:
 
         value = getattr(self.runner.policy, "last_delta_estimate", None)
         return None if value is None else float(value)
+
+    @property
+    def has_active_snapshot(self) -> bool:
+        """Return whether this request currently owns an unconsumed checkpoint."""
+
+        return self._active_snapshot is not None
+
+    def snapshot(self) -> CacheSessionSnapshot:
+        """Create the request's single rollback checkpoint.
+
+        Checkpoints are accepted only between completed steps.  A checkpoint
+        must be consumed by :meth:`restore` or :meth:`commit_snapshot` before a
+        new one can be created, which bounds retained device state to one
+        controller snapshot per request.
+        """
+
+        self._require_quiescent("snapshot")
+        if self._active_snapshot is not None:
+            raise RuntimeError("cache session already has an active rollback snapshot")
+        self._snapshot_generation += 1
+        snapshot = CacheSessionSnapshot(
+            _owner_id=id(self),
+            _generation=self._snapshot_generation,
+            _runner=self.runner.snapshot(),
+            _contexts=tuple(
+                (step_index, deepcopy(context))
+                for step_index, context in sorted(self._contexts.items())
+            ),
+            _timesteps=deepcopy(self._timesteps),
+            _sigmas=deepcopy(self._sigmas),
+            _policy_receipt=deepcopy(self._policy_receipt),
+        )
+        self._active_snapshot = snapshot
+        return snapshot
+
+    def restore(self, snapshot: CacheSessionSnapshot) -> None:
+        """Consume ``snapshot`` and reopen the trajectory at its boundary."""
+
+        self._validate_active_snapshot(snapshot)
+        self._require_quiescent("restore")
+        self.runner.restore(snapshot._runner)
+        self._contexts = {
+            step_index: deepcopy(context) for step_index, context in snapshot._contexts
+        }
+        self._timesteps = deepcopy(snapshot._timesteps)
+        self._sigmas = deepcopy(snapshot._sigmas)
+        self._policy_receipt = deepcopy(snapshot._policy_receipt)
+        self._active_step_index = None
+        self._active_snapshot = None
+
+    def commit_snapshot(self, snapshot: CacheSessionSnapshot) -> None:
+        """Consume a checkpoint while retaining all work completed after it."""
+
+        self._validate_active_snapshot(snapshot)
+        self._require_quiescent("commit snapshot")
+        self._active_snapshot = None
+
+    def _validate_active_snapshot(self, snapshot: CacheSessionSnapshot) -> None:
+        if not isinstance(snapshot, CacheSessionSnapshot):
+            raise TypeError("session snapshot must be a CacheSessionSnapshot")
+        if snapshot._owner_id != id(self):
+            raise ValueError("session snapshot belongs to another CacheSession")
+        if self._active_snapshot is not snapshot:
+            raise RuntimeError("session snapshot is not the active rollback checkpoint")
+
+    def _require_quiescent(self, operation: str) -> None:
+        if self._active_step_index is not None:
+            raise RuntimeError(
+                f"cannot {operation} cache session while step "
+                f"{self._active_step_index} awaits output"
+            )
 
     def clear_request_state(self) -> None:
         """Clear all trajectory state before the session is reused in tests.
@@ -99,6 +200,7 @@ class CacheSession:
         self._timesteps = None
         self._sigmas = None
         self._active_step_index = None
+        self._active_snapshot = None
 
     @staticmethod
     def _finite_coordinates(
@@ -126,6 +228,10 @@ class CacheSession:
 
         if self._active_step_index is not None:
             raise RuntimeError("schedule coordinates cannot change while a step awaits output")
+        if self._active_snapshot is not None:
+            raise RuntimeError(
+                "schedule coordinates cannot change while a rollback snapshot is active"
+            )
         self._timesteps = self._finite_coordinates(
             timesteps,
             "timesteps",
@@ -262,7 +368,15 @@ class CacheSession:
             # consistently calls the operation an estimate rather than a skip.
             statistics["planned_skip_steps"] = int(self._planned_estimate_steps)
         statistics["source"] = self.configuration_source
+        if self._policy_receipt is not None:
+            statistics["policy_receipt"] = deepcopy(self._policy_receipt)
         return statistics
 
+    def anchor_error_trace(self) -> dict[str, Any]:
+        """Return per-segment endpoint measurements for this logical request path."""
 
-__all__ = ["CacheSession"]
+        self._require_quiescent("read anchor-error trace")
+        return self.runner.anchor_error_trace()
+
+
+__all__ = ["CacheSession", "CacheSessionSnapshot"]

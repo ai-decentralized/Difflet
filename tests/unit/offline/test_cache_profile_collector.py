@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from difflet.offline.cache_profile.collector import (
+    bind_anchor_error_trace,
     build_manifests,
     load_reusable_baseline,
     run_image_sample,
@@ -170,6 +171,63 @@ def test_manifest_builder_emits_exactly_one_candidate(tmp_path):
     assert len(quality["comparisons"]) == 1
     assert speed["candidates"][0]["measured_speedup"] == pytest.approx(2.0)
     assert speed["candidates"][0]["hardware_measured"] is True
+
+
+def test_manifest_pairs_bound_segment_trace_with_same_candidate_image(tmp_path):
+    import torch
+
+    arm = _arm(tmp_path, static=True, anchors=(0, 1, 3))
+    adapter = arm.build_pipeline_adapter(4)
+    adapter.bind_schedule(
+        (100.0, 90.0, 80.0, 70.0),
+        (1.0, 0.7, 0.4, 0.1),
+    )
+    outputs = (torch.tensor([1.0]), torch.tensor([2.0]), None, torch.tensor([5.0]))
+    for step_index, output in enumerate(outputs):
+        if adapter.should_skip(step_index):
+            adapter.skip_noise_pred()
+        else:
+            adapter.record_full_step(output)
+
+    trace = bind_anchor_error_trace(adapter.anchor_error_trace(), arm)
+    candidate = [
+        {
+            "sample_id": "p000-s0",
+            "elapsed_s": 2.0,
+            "artifacts": {"image": "candidate.png", "image_sha256": "b" * 64},
+            "runner_stats": adapter.stats(),
+            "anchor_error_trace": trace,
+        }
+    ]
+    quality, speed = build_manifests(
+        identity={"num_steps": 4, "model": "flux"},
+        samples=sample_matrix(("prompt",), (0,)),
+        arm=arm,
+        baseline_runs=[
+            {
+                "sample_id": "p000-s0",
+                "elapsed_s": 4.0,
+                "artifacts": {"image": "baseline.png", "image_sha256": "a" * 64},
+            }
+        ],
+        candidate_runs=candidate,
+        started_at="2026-08-15T00:00:00Z",
+        completed_at="2026-08-15T00:01:00Z",
+    )
+
+    comparison = quality["comparisons"][0]
+    segment = comparison["anchor_error_trace"]["entries"][-1]
+    assert quality["anchor_error_traces_collected"] is True
+    assert comparison["sample_id"] == "p000-s0"
+    assert comparison["candidate"]["image"] == "candidate.png"
+    assert segment["previous_anchor_step_index"] == 1
+    assert segment["anchor_step_index"] == 3
+    assert segment["estimate_step_indices"] == [2]
+    assert segment["scheduler_abs_delta_sigma"] == pytest.approx(0.3)
+    assert segment["policy_region"] == "cooldown"
+    assert speed["candidates"][0]["samples"][0][
+        "anchor_error_measurement_count"
+    ] == 3
 
 
 def test_manifest_builder_supports_multiple_static_frontier_candidates(tmp_path):

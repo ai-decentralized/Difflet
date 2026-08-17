@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import Any, Callable, Mapping
 
-from difflet.pipeline.cache.control_error import measure_anchor_error
+from difflet.pipeline.cache.control_error import (
+    ANCHOR_ERROR_TRACE_SCHEMA,
+    ANCHOR_ERROR_TRACE_SCHEMA_REVISION,
+    AnchorErrorTraceEntry,
+    measure_anchor_error,
+)
 from difflet.pipeline.cache.types import (
     CacheAnchor,
     CacheDecision,
@@ -17,6 +24,27 @@ from difflet.pipeline.cache.types import (
     RecoveryDecision,
     RuntimeObservation,
 )
+
+
+@dataclass(frozen=True)
+class _ComponentSnapshot:
+    uses_hook: bool
+    state: Any
+
+
+@dataclass(frozen=True)
+class CacheRunnerSnapshot:
+    """Opaque, owner-bound state captured at a completed step boundary."""
+
+    _owner_id: int
+    _history: tuple[CacheAnchor, ...]
+    _observation: RuntimeObservation
+    _counters: CacheRunnerStats
+    _last_context: CacheStepContext | None
+    _segment_estimate_contexts: tuple[CacheStepContext, ...]
+    _anchor_error_trace: tuple[AnchorErrorTraceEntry, ...]
+    _policy: _ComponentSnapshot
+    _recovery: _ComponentSnapshot
 
 
 class CacheRunner:
@@ -86,6 +114,8 @@ class CacheRunner:
         self._pending_context: CacheStepContext | None = None
         self._compute_context: CacheStepContext | None = None
         self._last_context: CacheStepContext | None = None
+        self._segment_estimate_contexts: list[CacheStepContext] = []
+        self._anchor_error_trace: list[AnchorErrorTraceEntry] = []
 
     @property
     def ready(self) -> bool:
@@ -103,9 +133,56 @@ class CacheRunner:
         self._pending_context = None
         self._compute_context = None
         self._last_context = None
+        self._segment_estimate_contexts.clear()
+        self._anchor_error_trace.clear()
         if reset_policy:
             self.policy.reset()
         self.recovery.reset()
+
+    def snapshot(self) -> CacheRunnerSnapshot:
+        """Capture all request-derived runner state at a quiescent boundary."""
+
+        self._require_quiescent("snapshot")
+        return CacheRunnerSnapshot(
+            _owner_id=id(self),
+            _history=tuple(_clone_anchor(anchor) for anchor in self.history),
+            _observation=_clone_observation(self.observation),
+            _counters=deepcopy(self.counters),
+            _last_context=deepcopy(self._last_context),
+            _segment_estimate_contexts=tuple(
+                deepcopy(context) for context in self._segment_estimate_contexts
+            ),
+            _anchor_error_trace=tuple(deepcopy(self._anchor_error_trace)),
+            _policy=_snapshot_component(self.policy),
+            _recovery=_snapshot_component(self.recovery),
+        )
+
+    def restore(self, snapshot: CacheRunnerSnapshot) -> None:
+        """Restore one explicit snapshot without weakening normal step ordering."""
+
+        if not isinstance(snapshot, CacheRunnerSnapshot):
+            raise TypeError("runner snapshot must be a CacheRunnerSnapshot")
+        if snapshot._owner_id != id(self):
+            raise ValueError("runner snapshot belongs to another CacheRunner")
+        self._require_quiescent("restore")
+        history = CacheHistory(self.history.capacity)
+        for anchor in snapshot._history:
+            history.push(_clone_anchor(anchor))
+        self.history = history
+        self.observation = _clone_observation(snapshot._observation)
+        self.counters = deepcopy(snapshot._counters)
+        self._pending_context = None
+        self._compute_context = None
+        self._last_context = deepcopy(snapshot._last_context)
+        self._segment_estimate_contexts = [
+            deepcopy(context) for context in snapshot._segment_estimate_contexts
+        ]
+        self._anchor_error_trace = list(deepcopy(snapshot._anchor_error_trace))
+        _restore_component(self.policy, snapshot._policy)
+        _restore_component(self.recovery, snapshot._recovery)
+        # Predictor memoization is derived solely from restored real anchors.
+        # Recompute lazily so a cached tensor can never alias pre-rollback state.
+        self._reset_predictor_cache()
 
     def reset_history(
         self,
@@ -121,6 +198,7 @@ class CacheRunner:
         self._pending_context = None
         self._compute_context = None
         self._last_context = None
+        self._segment_estimate_contexts.clear()
         if reset_policy:
             self.policy.reset()
         if reset_recovery:
@@ -213,6 +291,7 @@ class CacheRunner:
         self.recovery.observe_prediction(context, output, self.history, self.observation)
         self.observation.record(context, output, predicted=True)
         self.counters.skipped_steps += 1
+        self._segment_estimate_contexts.append(deepcopy(context))
         self._pending_context = None
         return output
 
@@ -234,8 +313,18 @@ class CacheRunner:
                 predictor=self.predictor,
                 history=self.history,
             )
+        trace_entry = None
+        if measurement is not None:
+            trace_entry = AnchorErrorTraceEntry.from_measurement(
+                measurement,
+                context=context,
+                previous_anchor=self.history.latest,
+                estimate_contexts=self._segment_estimate_contexts,
+            )
         if measurement is not None and callable(measurement_hook):
             measurement_hook(measurement)
+        if trace_entry is not None:
+            self._anchor_error_trace.append(trace_entry)
         if self._pending_context is not None:
             # A caller may elect to compute after seeing a skip decision. That
             # is safe, but the stale pending decision must not leak.
@@ -253,11 +342,18 @@ class CacheRunner:
         self.observation.record(context, output, predicted=False)
         self.counters.full_steps += 1
         self._last_context = context
+        self._segment_estimate_contexts.clear()
 
     def _reset_predictor_cache(self) -> None:
         reset_predictor_cache = getattr(self.predictor, "reset_cache", None)
         if callable(reset_predictor_cache):
             reset_predictor_cache()
+
+    def _require_quiescent(self, operation: str) -> None:
+        if self._pending_context is not None or self._compute_context is not None:
+            raise RuntimeError(
+                f"cannot {operation} cache runner while a step decision awaits completion"
+            )
 
     def record_full_step(self, output: Any, context: CacheStepContext | None = None) -> None:
         context = context or self._last_context
@@ -297,6 +393,19 @@ class CacheRunner:
 
     def stats(self) -> dict[str, int]:
         return self.counters.to_dict(history_size=len(self.history))
+
+    def anchor_error_trace(self) -> dict[str, Any]:
+        """Return the completed request's rollback-aware logical trace."""
+
+        self._require_quiescent("read anchor-error trace")
+        return {
+            "schema": ANCHOR_ERROR_TRACE_SCHEMA,
+            "schema_revision": ANCHOR_ERROR_TRACE_SCHEMA_REVISION,
+            "measurement": "endpoint_transformer_output_relative_l2",
+            "path_semantics": "logical_post_restore_path",
+            "physical_rollback_attempts_included": False,
+            "entries": [entry.to_dict() for entry in self._anchor_error_trace],
+        }
 
     def _validate_step_order(self, context: CacheStepContext) -> None:
         if self._last_context is None:
@@ -354,4 +463,83 @@ def _longest_false_run(mask) -> int:
     return longest
 
 
-__all__ = ["CacheRunner"]
+def _clone_runtime_value(value: Any) -> Any:
+    try:
+        import torch
+
+        if torch.is_tensor(value):
+            return value.detach().clone()
+    except ImportError:
+        pass
+    if isinstance(value, dict):
+        return {
+            _clone_runtime_value(key): _clone_runtime_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_clone_runtime_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_clone_runtime_value(item) for item in value)
+    if isinstance(value, set):
+        return {_clone_runtime_value(item) for item in value}
+    return deepcopy(value)
+
+
+def _clone_anchor(anchor: CacheAnchor) -> CacheAnchor:
+    return CacheAnchor(
+        context=deepcopy(anchor.context),
+        output=_clone_runtime_value(anchor.output),
+    )
+
+
+def _clone_observation(observation: RuntimeObservation) -> RuntimeObservation:
+    return RuntimeObservation(
+        last_output=_clone_runtime_value(observation.last_output),
+        last_step_index=observation.last_step_index,
+        last_was_prediction=observation.last_was_prediction,
+        consecutive_predictions=observation.consecutive_predictions,
+        policy_state=_clone_runtime_value(observation.policy_state),
+    )
+
+
+def _snapshot_component(component: Any) -> _ComponentSnapshot:
+    hook = getattr(component, "snapshot_state", None)
+    if callable(hook):
+        if not callable(getattr(component, "restore_state", None)):
+            raise TypeError(
+                f"{type(component).__name__} snapshot_state() requires restore_state()"
+            )
+        return _ComponentSnapshot(True, _clone_runtime_value(hook()))
+    try:
+        attributes = vars(component)
+    except TypeError as error:
+        raise TypeError(
+            f"{type(component).__name__} must expose snapshot_state() for rollback"
+        ) from error
+    # The protocol does not prescribe how third-party components name mutable
+    # request state.  Capture every instance attribute instead of relying on a
+    # private-name convention that could silently omit a public counter.
+    state = {key: _clone_runtime_value(value) for key, value in attributes.items()}
+    return _ComponentSnapshot(False, state)
+
+
+def _restore_component(component: Any, snapshot: _ComponentSnapshot) -> None:
+    if snapshot.uses_hook:
+        hook = getattr(component, "restore_state", None)
+        if not callable(hook):
+            raise TypeError(
+                f"{type(component).__name__} snapshot_state() requires restore_state()"
+            )
+        hook(_clone_runtime_value(snapshot.state))
+        return
+    if not isinstance(snapshot.state, Mapping):
+        raise TypeError("fallback component snapshot must contain a mapping")
+    attributes = vars(component)
+    for key in tuple(attributes):
+        if key not in snapshot.state:
+            del attributes[key]
+    for key, value in snapshot.state.items():
+        attributes[key] = _clone_runtime_value(value)
+
+
+__all__ = ["CacheRunner", "CacheRunnerSnapshot"]

@@ -325,6 +325,50 @@ def test_application_creates_a_fresh_session_for_each_request(monkeypatch):
     assert not hasattr(instance, "cache_session")
 
 
+def test_qualified_session_carries_executable_bound_policy_receipt():
+    class FakePipeline:
+        def __call__(self, *, num_inference_steps=12, height=None, width=None):
+            del num_inference_steps, height, width
+
+    class FakeSession:
+        receipt = None
+
+        def bind_policy_receipt(self, receipt):
+            self.receipt = receipt
+
+    session = FakeSession()
+    profile = SimpleNamespace(build_session=lambda num_steps: session)
+    instance = object.__new__(app.NeuronFluxApplication)
+    instance.pipe = FakePipeline()
+    instance.height = 1024
+    instance.width = 1024
+    instance._qualified_cache_profile = profile
+    instance._policy_binding_receipt = {"sha256": "receipt", "policy": {}}
+    instance._validate_qualified_cache_request = lambda *args, **kwargs: None
+
+    result = instance._prepare_cache_session(num_inference_steps=12)
+
+    assert result is session
+    assert session.receipt == instance._policy_binding_receipt
+
+
+def test_qualified_session_rejects_missing_executable_policy_receipt():
+    class FakePipeline:
+        def __call__(self, *, num_inference_steps=12, height=None, width=None):
+            del num_inference_steps, height, width
+
+    instance = object.__new__(app.NeuronFluxApplication)
+    instance.pipe = FakePipeline()
+    instance.height = 1024
+    instance.width = 1024
+    instance._qualified_cache_profile = SimpleNamespace(build_session=lambda steps: object())
+    instance._policy_binding_receipt = None
+    instance._validate_qualified_cache_request = lambda *args, **kwargs: None
+
+    with pytest.raises(RuntimeError, match="not bound to an executable policy receipt"):
+        instance._prepare_cache_session(num_inference_steps=12)
+
+
 def test_application_isolates_sessions_for_simultaneous_requests(monkeypatch):
     instance = object.__new__(app.NeuronFluxApplication)
     instance._qualified_cache_profile = "configured"
