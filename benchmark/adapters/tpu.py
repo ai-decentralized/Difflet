@@ -139,6 +139,9 @@ def _worker(rank, world, spec_payload, cmd_q, reply_q):
                 "latent_shape": list(latents.shape),
                 "finite": bool(latents.isfinite().all()),
                 "min": float(latents.min()), "max": float(latents.max()),
+                # mean/std are part of harness.OutputInfo; the report renderer
+                # prints them unconditionally alongside the range.
+                "mean": float(latents.mean()), "std": float(latents.std()),
                 "dtype": str(latents.dtype),
             })
 
@@ -272,6 +275,7 @@ class TpuAdapter(BackendAdapter):
             "output": {
                 "shape": reply["latent_shape"], "dtype": reply["dtype"],
                 "finite": reply["finite"], "min": reply["min"], "max": reply["max"],
+                "mean": reply["mean"], "std": reply["std"],
                 "note": f"packed latents; {reply['png_bytes']} byte PNG after decode",
             },
             "stage_seconds": {

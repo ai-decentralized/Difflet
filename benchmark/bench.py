@@ -58,6 +58,15 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
             "compile). The tp=4/cp=1 shown in Configuration/Reproduction is the Trainium "
             "sharding for the difflet recipe — NOT how this GPU run executed (effective "
             "tp=1). Per-step latency is the load-independent metric comparable to trn2.")
+    if backend == "tpu":
+        res.notes.append(
+            "The config_label comes from models.py::MATRIX and describes the "
+            "TRAINIUM recipe — 'attention_cte' is a Neuron kernel and is NOT what "
+            "ran here; the TPU backend uses scaled_dot_product_attention. The "
+            "tp=4/cp=1 sharding IS accurate: the DiT is split across 4 v5e chips, "
+            "one worker process per chip. compile_seconds=0 means no AOT artifact "
+            "was built or reused, not that compilation is free — XLA compiles on "
+            "each process's first execution, which is inside e2e_cold.")
     try:
         if not skip_download:
             adapter.prepare(cfg)
