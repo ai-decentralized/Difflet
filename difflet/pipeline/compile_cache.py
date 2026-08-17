@@ -53,6 +53,12 @@ class CacheSpec:
     # Bucketed artifacts: full shape set compiled into one artifact. When
     # None, the single height/width/num_frames above forms a 1-entry set.
     shapes: tuple | None = None
+    # Backend that produced the artifact. ``None`` and ``"trainium"`` are
+    # equivalent and leave the cache key byte-identical to every pre-backend
+    # key (additive-only policy, same pattern as ``candidate``); any other
+    # backend is injected into the key together with its extra toolchain
+    # packages so e.g. TPU and Trainium artifacts can never collide.
+    backend: str | None = None
 
     def cache_inputs(self) -> dict[str, Any]:
         """Fields that drive the AOT artifact identity (hash key input).
@@ -84,6 +90,11 @@ class CacheSpec:
         # every pre-candidate model cache.
         if self.candidate is not None and not self.candidate.is_trivial:
             inputs["candidate"] = self.candidate.to_cache_dict()
+        # Additive-only: only a non-default backend enters the key, so every
+        # existing Trainium cache stays valid.
+        if self.backend not in (None, "trainium"):
+            inputs["backend"] = self.backend
+            inputs["toolchain"].update(_backend_extra_toolchain_versions(self.backend))
         return inputs
 
     def canonical_shapes(self) -> list[list[int | None]]:
@@ -206,6 +217,24 @@ def _python_version_short() -> str:
 def _cache_relevant_toolchain_versions() -> dict[str, str | None]:
     versions: dict[str, str | None] = {"python": _python_version_short()}
     for package in _TOOLCHAIN_PACKAGES:
+        try:
+            versions[package] = metadata.version(package)
+        except metadata.PackageNotFoundError:
+            versions[package] = None
+    return versions
+
+
+# Extra packages hashed into the key only for the named backend. Kept out of
+# ``_TOOLCHAIN_PACKAGES`` because adding a key there (even with value None)
+# would change every existing Trainium cache hash.
+_BACKEND_EXTRA_TOOLCHAIN_PACKAGES: dict[str, tuple[str, ...]] = {
+    "tpu": ("libtpu",),
+}
+
+
+def _backend_extra_toolchain_versions(backend: str) -> dict[str, str | None]:
+    versions: dict[str, str | None] = {}
+    for package in _BACKEND_EXTRA_TOOLCHAIN_PACKAGES.get(backend, ()):
         try:
             versions[package] = metadata.version(package)
         except metadata.PackageNotFoundError:

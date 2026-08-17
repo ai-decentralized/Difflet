@@ -12,6 +12,7 @@ from difflet.backends.base import BackendRuntime
 _BACKEND_FACTORIES = {
     "cpu": "difflet.backends.cpu.runtime:create_backend",
     "trainium": "difflet.backends.trainium.runtime:create_backend",
+    "tpu": "difflet.backends.tpu.runtime:create_backend",
     "cuda": "difflet.backends.cuda.runtime:create_backend",
     "rocm": "difflet.backends.rocm.runtime:create_backend",
 }
@@ -53,6 +54,15 @@ def _get_backend_by_name(backend_name: str) -> BackendRuntime:
 def _auto_detect_backend() -> str:
     if importlib.util.find_spec("torch_neuronx") is not None:
         return "trainium"
+
+    # TPU hosts: torch_xla plus the TPU runtime library. The torch_neuronx
+    # check above must stay first — Neuron venvs also ship torch_xla but
+    # never libtpu, so a Trainium host cannot mis-detect as TPU.
+    if (
+        importlib.util.find_spec("torch_xla") is not None
+        and importlib.util.find_spec("libtpu") is not None
+    ):
+        return "tpu"
 
     try:
         import torch

@@ -122,6 +122,7 @@ class DiffletPipeline:
             model_id=model_id,
             model_path=model_path,
             model_name=entry.name,
+            backend=backend_runtime.name,
             parallel=parallel_cfg,
             dtype=dtype,
             height=shape.get("height"),
