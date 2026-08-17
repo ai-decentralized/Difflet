@@ -18,27 +18,11 @@ from difflet.backends.trainium.core.multi_component_application import (
     ComponentSpec,
     MultiComponentApplication,
 )
+from difflet.models.qwen_image.contract import (  # noqa: F401 — re-exported
+    QwenImageDiTInputBundle,
+    normalize_dtype as _normalize_dtype,
+)
 from difflet.utils.diffusers_adapter import load_diffusers_config
-
-
-@dataclass(frozen=True)
-class QwenImageDiTInputBundle:
-    """Host-side contract for one Qwen-Image transformer call."""
-
-    hidden_states: torch.Tensor
-    timestep: torch.Tensor
-    encoder_hidden_states: torch.Tensor
-    encoder_hidden_states_mask: torch.Tensor
-    guidance: torch.Tensor
-
-    def as_model_inputs(self) -> tuple[torch.Tensor, ...]:
-        return (
-            self.hidden_states,
-            self.timestep,
-            self.encoder_hidden_states,
-            self.encoder_hidden_states_mask,
-            self.guidance,
-        )
 
 
 def validate_qwen_image_dit_inputs(
@@ -143,16 +127,6 @@ def create_qwen_image_transformer_config(
         cp_mode=cp_mode,
         **extra,
     )
-
-
-def _normalize_dtype(dtype: Any) -> torch.dtype:
-    if isinstance(dtype, torch.dtype):
-        return dtype
-    if dtype in {"bf16", "bfloat16", "torch.bfloat16"}:
-        return torch.bfloat16
-    if dtype in {"fp32", "float32", "torch.float32"}:
-        return torch.float32
-    raise ValueError(f"Unsupported Qwen-Image dtype: {dtype!r}")
 
 
 class NeuronQwenImageApplication(MultiComponentApplication):
