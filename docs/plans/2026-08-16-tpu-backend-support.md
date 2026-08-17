@@ -1061,22 +1061,135 @@ same hardware.
 Two compiles rather than one is the ordinary torch_xla warm-up pattern (the
 first trace differs slightly from the steady-state one); it stabilizes after.
 
-**Next actions:**
 
-0. **Decide the process model** (1/2/3 above) — it changes the Phase 4 and
-   Phase 6 shape more than anything else remaining.
-1. Compose the full pipeline — text encoder and VAE around the DiT — and
-   produce an actual image. This is where the rank-aware pipeline question
-   from decision 0 becomes concrete.
-2. `DiffletPipeline.from_pretrained(..., backend="tpu")` end to end — the
-   Phase 1 exit criterion, finally reachable for real.
-3. Wire `compile()`/`load()` into this path so the exported artifact is used,
-   and measure whether it changes the 75 s warm-up at all (it should not —
-   export saves tracing, not compilation — which is worth confirming rather
-   than assuming).
-2. Real checkpoint loading: `weights.py` handles the split, but nothing yet
-   reads safetensors off disk or handles fused-projection remapping.
-3. Graph/weight separation in the artifact, so ranks can share one exported
-   graph instead of each carrying its own copy.
-4. File the torch_xla executable-deserialization gap as the tracked risk
-   behind any future re-evaluation of Direction C.
+---
+
+# Handoff: state, context, and what is left
+
+Written 2026-08-17, after Phases 0-4 and most of 6. Everything below was
+measured on the machine described in "Context", not estimated.
+
+## Where this landed
+
+`difflet serve` runs Qwen-Image on four v5e chips and returns real images over
+the OpenAI Chat Completions API. Benchmarked through the repo's own harness:
+**19.10 s warm end-to-end** at 1024x1024 / 20 steps / tp=4 — 3.3x faster than
+trn2, level with an H100 PCIe, at about a sixth of the peak device memory.
+Full numbers and reproduction in `benchmark/v5e/RESULTS.md`.
+
+Trainium is unaffected: 2119 passed / 3 failed on the full unit suite, and the
+three failures pre-date this work (verified against a clean HEAD worktree).
+
+## Context a newcomer needs
+
+**The dev box IS the TPU.** `machine-type n2d-192-112-v5lite-tpu`,
+`accelerator-type v5litepod-4`: 4 x v5e, 2x2, 16 GB HBM per chip, us-west4-a,
+chips at `/dev/vfio/{0..3}`. No provisioning step exists or is needed. Read it
+from GCP metadata under `instance/attributes/tpu-env`.
+
+**Two separate virtualenvs, neither of them the system Python** (which has no
+torch at all):
+
+| purpose | contents | notes |
+|---|---|---|
+| TPU work | torch 2.9.0+cpu, torch_xla 2.9.0, libtpu 0.0.21, diffusers 0.38.0, torchvision 0.24.0 | `python -m virtualenv` — `python3-venv` is not installed |
+| Trainium tests | the Neuron toolchain | built by `scripts/setup_neuron_venv_offhost.sh` |
+
+The Neuron venv matters more than it sounds: without it the unit suite reports
+~107 failures and 29 collection errors purely from missing imports, which hides
+real regressions. With it, 2119/3. It gives import-level and CPU-level coverage
+only — no driver, no device — so a green run means "did not break the Trainium
+code path", never "verified on Trainium".
+
+**Weights live under `/mnt/models/`** (a 2 TB volume; the root filesystem has
+~88 GB and a single checkpoint would fill it). Qwen-Image is at
+`/mnt/models/hf/hub/models--Qwen--Qwen-Image/snapshots/75e0b4be...` — the same
+revision `models.py::MATRIX` pins.
+
+**Chips are held until the holder dies.** A worker that outlives its parent
+(a SIGKILLed server orphans its daemon replicas) keeps `/dev/vfio/*` open, and
+the next run fails with "Device or resource busy". `tpu-info` lists the PIDs.
+
+## Design decisions and why
+
+| decision | why |
+|---|---|
+| Direction A (torch.export -> StableHLO) | The only direction that works. B cannot deserialize executables on torch_xla; C's eager interop crashes on torch 2.9. |
+| Collectives wrapped as opaque custom ops | `torch.export` fails outright on a raw `xm.all_gather`, and the wrapper still lowers to a real HLO all-gather. |
+| One process per chip | SPMD and AOT export are mutually exclusive on torch_xla 2.9 (`Unknown device SPMD:0`), and export is required by the compile contract. |
+| TP implemented in Phase 2, not deferred to 5 | No candidate model fits a 16 GB chip at tp=1. |
+| Serving runs eagerly | The compile path exists but is unproven at 20B scale, and an artifact would save tracing, not compilation. |
+
+## What is left, roughly by value
+
+**1. Numerical validation of the real model (Phase 5).** The 20B has only been
+checked for "finite" and "the image looks right". The cosine 1.000000 result is
+from a small config. `tests/numerical/` exists and DEVELOPER.md requires the
+diffusers reference as the oracle — never TPU-vs-Trainium, since two
+independently-wrong implementations can agree.
+
+**2. Direction A on the real model.** `TpuApplicationBase` implements
+compile/load and was verified on a toy module across a process boundary, but
+the 60-layer 20B has never been exported. Collectives were exactly where export
+broke before, so this is a real unknown, and the whole Phase 0 decision rests
+on it. Serving does not depend on it today.
+
+**3. Parallel modes beyond TP.** Context parallelism (ring / ulysses /
+gather_kv), cfg-parallel and sequence parallelism all raise
+`NotImplementedError`. Sequence parallelism is the interesting one: difflet's
+ops surface already has `scatter_to_sequence_parallel_region` and friends, and
+activations at block boundaries are currently replicated on every rank.
+
+**4. Performance.** Two known items, both measured:
+   - The text encoder runs on the host. After the thread fix it is ~1 s, so it
+     is no longer the bottleneck, but it leaves the chips idle.
+   - Attention has no fused kernel. The TPU Pallas flash-attention kernel needs
+     jax 0.7.1, which requires Python >= 3.11 while this toolchain is on 3.10;
+     a standalone 3.12 (e.g. `uv python install`) would unblock it without
+     touching the system Python or the 3.10 Neuron venv.
+
+**5. Serving completeness.**
+   - `difflet generate --backend tpu` is not wired; only `serve` is.
+   - There is no `/v1/images/generations` endpoint — image generation goes
+     through `/v1/chat/completions`. Adding the OpenAI Images shape would
+     mirror what the Videos API already does.
+   - No web UI ships with difflet. A standalone one exists outside the repo
+     (page + server-side proxy, because difflet installs no CORS middleware).
+
+**6. More models.** Only Qwen-Image is ported. Wan, HunyuanVideo and LTX-2 have
+backend-neutral backbones and should follow the same path; Flux stays
+quarantined as the legacy NxDI fork. Each needs its `backends` tuple extended
+and a TPU branch in its entry factory.
+
+**7. Artifact layout.** Exported artifacts are per-rank because each rank's
+weight shard differs. Separating graph from weights would let ranks share one
+graph.
+
+**8. Multi-host TPU pod.** Deliberately out of v1 scope; a materially different
+runtime topology.
+
+**9. The Trainium side of the Qwen-Image extraction** has only import-level and
+CPU-level verification. It is pure code motion with re-export and the suite is
+green, but it has not run on Trainium hardware.
+
+## Mistakes worth not repeating
+
+Recorded because each cost real time and none would be obvious from the code:
+
+- **A Python scalar in the denoise loop** (`delta = float(...)`) is
+  constant-folded into the graph, so every step becomes a different graph and
+  XLA recompiles all of them. 2.45 s/step against 0.25 s of device work. Pass
+  per-step scalars as device tensors.
+- **PyTorch defaults to one thread per core per process.** Four replicas
+  oversubscribed the host four-fold; a text encode measured 22 s in the worker
+  against 0.43 s standalone.
+- **A missing `torch.no_grad()`** kept every block's intermediates alive and
+  overran HBM. The structural fix is `requires_grad_(False)` at load.
+- **`Module.to_empty()` blanks buffers**, including the RoPE computed in
+  `__init__` — correct shapes, no error, garbage images.
+- **Converting the incoming tensor to bf16 while the parameter is fp32** just
+  upcasts it back: 20.4 GiB per rank instead of 9.5 GiB.
+- **XLA's default TPU matmul precision is not fp32** (~1e-2 error per matmul).
+  Silent: every shape is right and nothing raises.
+- **Forcing a device sync per step to measure it changes the workload**, not
+  just the clock — 0.858 s/step measured, 0.276 s actual.
