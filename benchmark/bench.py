@@ -33,6 +33,9 @@ def _make_adapter(name: str):
     if name in ("diffusers", "cpu", "cuda"):
         from benchmark.adapters.diffusers_ref import DiffusersRefAdapter
         return DiffusersRefAdapter(device="cuda" if name == "cuda" else "cpu")
+    if name == "tpu":
+        from benchmark.adapters.tpu import TpuAdapter
+        return TpuAdapter()
     raise SystemExit(f"unknown backend: {name}")
 
 
