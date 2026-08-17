@@ -282,7 +282,8 @@ def _register_builtin_qwen_image() -> None:
         detector=is_qwen_image,
         default_parallel=DiffletParallelConfig(tp_degree=4),
         default_shape={"height": 1024, "width": 1024, "num_frames": None},
-        backends=("trainium",),
+        # Qwen-Image is the first model on the TPU backend (plan Phase 4).
+        backends=("trainium", "tpu"),
     )
     class _QwenImageRegistration:
         pass
