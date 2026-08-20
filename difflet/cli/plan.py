@@ -28,6 +28,8 @@ def run(args: argparse.Namespace) -> None:
         total_cores=getattr(args, "total_cores", None),
         serving=bool(getattr(args, "serving", False)),
         cache_dir=getattr(args, "cache_dir", None),
+        survivors=getattr(args, "survivors", None),
+        topology_aware=not getattr(args, "no_topology", False),
     )
     if getattr(args, "json", False):
         json.dump(_as_dict(result), sys.stdout, indent=2)
@@ -51,6 +53,41 @@ def flags_for(parallel) -> str:
     if parallel.dp_degree > 1:
         parts += ["--dp", str(parallel.dp_degree)]
     return " ".join(parts)
+
+
+def placement_lines(entry) -> list[str]:
+    """Human-readable stage-2 notes for one ranked entry.
+
+    Says which axis order the runtime uses today, where each collective family
+    physically lands under it, and what the best alternative order would buy --
+    with the caveat that only the default order is executable, so an
+    alternative is a recommendation, not something to paste after
+    ``difflet compile``.
+    """
+
+    choice = entry.placement
+    if choice is None:
+        return []
+    lines = [f"placement: order {choice.default.order_text} (runtime default)"]
+    for family in choice.default.families:
+        if family.collective.barrier:
+            lines.append(
+                f"  {family.collective.family:>14} on {family.bottleneck_tier} "
+                f"(barrier, {family.collective.axis} axis)"
+            )
+    if not choice.default_is_best:
+        delta = 1.0 - choice.best.step_seconds / choice.default.step_seconds
+        lines.append(
+            f"  best order {choice.best.order_text} would cut the predicted step by "
+            f"{delta:.1%} -- needs a runtime mesh-order flag (not executable today)"
+        )
+    total_contention = sum(family.contention_seconds for family in choice.default.families)
+    if total_contention > 0:
+        lines.append(
+            f"  shared-link contention costs ~{total_contention * 1000:.1f} ms/step "
+            "at the default order"
+        )
+    return lines
 
 
 def _as_dict(result: Plan) -> dict:
@@ -95,13 +132,48 @@ def _as_dict(result: Plan) -> dict:
                 "measurement_source": (
                     entry.prediction.measurement.source if entry.prediction.measurement else None
                 ),
+                "stage2_step_seconds": entry.stage2_step_seconds,
+                "placement": _placement_dict(entry),
             }
             for index, entry in enumerate(result.ranked, start=1)
         ],
+        "survivors": list(result.survivors),
         "rejected": [
             {"label": r.label, "kind": r.kind, "reason": r.reason}
             for r in result.feasibility.rejected
         ],
+    }
+
+
+def _placement_dict(entry) -> dict | None:
+    choice = entry.placement
+    if choice is None:
+        return None
+
+    def score_dict(score) -> dict:
+        return {
+            "order": score.order_text,
+            "is_default": score.placement.is_default,
+            "step_seconds": score.step_seconds,
+            "barrier_seconds": score.barrier_seconds,
+            "overlappable_seconds": score.overlappable_seconds,
+            "families": [
+                {
+                    "family": family.collective.family,
+                    "axis": family.collective.axis,
+                    "barrier": family.collective.barrier,
+                    "multiplier": family.multiplier,
+                    "bottleneck_tier": family.bottleneck_tier,
+                    "contention_seconds": family.contention_seconds,
+                }
+                for family in score.families
+            ],
+        }
+
+    return {
+        "best": score_dict(choice.best),
+        "default": score_dict(choice.default),
+        "alternates": [score_dict(score) for score in choice.alternates],
     }
 
 
@@ -130,8 +202,10 @@ def _print_text(result: Plan) -> None:
 
     if result.ranked:
         width = max(len(entry.label) for entry in result.ranked)
-        print(f"{'#':>2}  {'config':<{width}}  {'step':>8}  {'request':>9}  {'req/s':>7}  "
-              f"{'weights':>9}  {'evidence':<22}  flags")
+        print(
+            f"{'#':>2}  {'config':<{width}}  {'step':>8}  {'request':>9}  {'req/s':>7}  "
+            f"{'weights':>9}  {'evidence':<22}  flags"
+        )
         for index, entry in enumerate(result.ranked, start=1):
             marker = " *cached" if entry.cached else ""
             weights = f"{entry.weight_bytes / 1e9:.0f}GB" if entry.weight_bytes else "-"
@@ -152,6 +226,7 @@ def _print_text(result: Plan) -> None:
                 "staged models never hold every component at once, so this over-counts. "
                 "Not yet validated against measured peak HBM."
             )
+        _print_placements(result.ranked)
     else:
         print("no feasible configuration -- every candidate was rejected below.")
 
@@ -162,6 +237,24 @@ def _print_text(result: Plan) -> None:
         print(f"{len(rejected)} rejected:")
         for rejection in rejected:
             print(f"  {rejection.label:<{width}}  [{rejection.kind}] {rejection.reason}")
+
+
+def _print_placements(ranked) -> None:
+    """Stage-2 detail block: where each survivor's collectives physically land.
+
+    Top five entries only -- the block is supporting detail for the ranking,
+    not a second table; ``--json`` carries every entry's placement.
+    """
+
+    with_placement = [entry for entry in ranked if entry.placement is not None][:5]
+    if not with_placement:
+        return
+    print()
+    print("placements (stage 2, topology-aware, top 5):")
+    for entry in with_placement:
+        for line in placement_lines(entry):
+            prefix = f"  [{entry.label}] "
+            print(prefix + line if not line.startswith("  ") else prefix + line[2:])
 
 
 def _calibration_note(result: Plan) -> str:

@@ -22,6 +22,15 @@ re-states them:
    ``scripts/verify_cli.py``'s expected-failure table. Reported separately from
    infeasible ones: "the compiler crashes on this" is different information from
    "this configuration is meaningless", and only the first can be fixed upstream.
+5. **Memory infeasibility** -- for models whose whole footprint is co-resident
+   on the device (``staged=False``: Flux and LTX-2 load as one pipeline), the
+   ``dp * cfg * cp`` replicated weight bytes are a physical upper bound on
+   device HBM. A candidate over that bound cannot run, so it is rejected
+   outright rather than flagged (D35: the 2026-08-20 traversal measured the
+   planner recommending exactly such a config -- flux tp1cp4 at ~135 GB
+   against a 96 GB device). Staged models keep the advisory-only treatment
+   (D22): their components are never all resident, so the same arithmetic
+   over-counts and must not reject.
 """
 
 from __future__ import annotations
@@ -126,6 +135,9 @@ def enumerate_candidates(
     cores: int,
     serving: bool = False,
     max_dp: int | None = None,
+    weight_bytes: int = 0,
+    weight_budget: int = 0,
+    staged: bool = True,
 ) -> FeasibilityReport:
     """All configurations that exactly fill ``cores``, split into kept and rejected.
 
@@ -137,6 +149,13 @@ def enumerate_candidates(
     the report explains real choices rather than arithmetic. Each label is
     reported once, with the first reason found; the check order runs from most
     fundamental (mutual exclusion) to most contingent (a compiler bug).
+
+    ``weight_bytes``/``weight_budget``/``staged`` drive the memory rule: when
+    the model is not staged (whole footprint co-resident) and its replicated
+    weight bytes cannot fit the budget, the candidate is rejected as
+    physically unrunnable. Zero for either byte count disables the rule, which
+    keeps callers without weight data (tests, out-of-tree models) on the old
+    behavior.
     """
 
     if cores < 1:
@@ -156,6 +175,9 @@ def enumerate_candidates(
             capabilities=capabilities,
             heads=heads,
             serving=serving,
+            weight_bytes=weight_bytes,
+            weight_budget=weight_budget,
+            staged=staged,
         )
         if reason is None:
             if not any(existing.label == label for existing in feasible):
@@ -165,8 +187,13 @@ def enumerate_candidates(
 
     feasible.sort(key=lambda candidate: _sort_key(candidate.parallel))
     order = {
-        "exclusivity": 0, "capability": 1, "divisibility": 2,
-        "degenerate": 3, "serving": 4, "known-bad": 5,
+        "exclusivity": 0,
+        "capability": 1,
+        "divisibility": 2,
+        "degenerate": 3,
+        "serving": 4,
+        "memory": 5,
+        "known-bad": 6,
     }
     ordered = sorted(rejected.values(), key=lambda r: (order.get(r.kind, 9), r.label))
     return FeasibilityReport(
@@ -198,17 +225,13 @@ def _lattice(
                 for tp in divisors(cores):
                     if dp * cfg * cp * tp != cores:
                         continue
-                    for cp_mode in (cp_modes if cp > 1 else ["gather_kv"]):
-                        out.append(
-                            _build(tp=tp, cp=cp, cfg=cfg, dp=dp, sp=False, cp_mode=cp_mode)
-                        )
+                    for cp_mode in cp_modes if cp > 1 else ["gather_kv"]:
+                        out.append(_build(tp=tp, cp=cp, cfg=cfg, dp=dp, sp=False, cp_mode=cp_mode))
                     # SP is only *legal* at cp==1, but emitting one cp>1 variant
                     # per (tp, cp) means the report explains the exclusion
                     # instead of silently omitting it. One representative is
                     # enough: repeating it per cp_mode would be pure noise.
-                    out.append(
-                        _build(tp=tp, cp=cp, cfg=cfg, dp=dp, sp=True, cp_mode="gather_kv")
-                    )
+                    out.append(_build(tp=tp, cp=cp, cfg=cfg, dp=dp, sp=True, cp_mode="gather_kv"))
     return out
 
 
@@ -230,8 +253,13 @@ def _build(*, tp: int, cp: int, cfg: int, dp: int, sp: bool, cp_mode: str):
         )
     except ValueError as exc:
         return _ExcludedConfig(
-            tp_degree=tp, cp_degree=cp, cfg_parallel_enabled=cfg == 2,
-            cp_mode=cp_mode, sp_enabled=sp, dp_degree=dp, error=str(exc),
+            tp_degree=tp,
+            cp_degree=cp,
+            cfg_parallel_enabled=cfg == 2,
+            cp_mode=cp_mode,
+            sp_enabled=sp,
+            dp_degree=dp,
+            error=str(exc),
         )
 
 
@@ -263,6 +291,9 @@ def _reject(
     capabilities: ModelCapabilities,
     heads: int,
     serving: bool,
+    weight_bytes: int = 0,
+    weight_budget: int = 0,
+    staged: bool = True,
 ) -> Rejection | None:
     label = config_label(parallel)
 
@@ -279,9 +310,7 @@ def _reject(
     if parallel.cp_degree > 1 and not capabilities.supports_cp:
         return Rejection(label, "model does not wire context parallelism", "capability")
     if parallel.cp_degree > 1 and parallel.cp_mode not in capabilities.cp_modes:
-        return Rejection(
-            label, f"model does not wire cp_mode={parallel.cp_mode!r}", "capability"
-        )
+        return Rejection(label, f"model does not wire cp_mode={parallel.cp_mode!r}", "capability")
     if parallel.sp_enabled and not capabilities.supports_sp:
         return Rejection(label, "model does not wire sequence parallelism", "capability")
     if parallel.sp_enabled and parallel.tp_degree == 1:
@@ -307,6 +336,21 @@ def _reject(
                 f"ulysses shards heads over cp on top of the TP head shard, so it "
                 f"needs heads % (tp * cp) == 0: {heads} % {shard} != 0",
                 "divisibility",
+            )
+
+    if weight_bytes and weight_budget and not staged:
+        copies = (
+            parallel.dp_degree * (2 if parallel.cfg_parallel_enabled else 1) * parallel.cp_degree
+        )
+        resident = copies * weight_bytes
+        if resident > weight_budget:
+            return Rejection(
+                label,
+                f"{copies} resident copies of the {weight_bytes / 1e9:.1f} GB footprint "
+                f"need ~{resident / 1e9:.0f} GB of device HBM, over the "
+                f"{weight_budget / 1e9:.0f} GB budget -- the whole pipeline is "
+                f"co-resident on this model, so this cannot run",
+                "memory",
             )
 
     if serving:

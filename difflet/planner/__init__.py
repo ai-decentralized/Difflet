@@ -5,7 +5,11 @@ a given (hardware, model, shape), scores them, and ranks them. Every entry point
 here is read-only: nothing in this package compiles, loads weights, or touches a
 NeuronCore, so ``difflet plan`` is safe to run on a laptop.
 
-Design notes live in ``docs/plans/2026-07-27-parallelism-planner.md``.
+Ranking is two-stage (AoiZora port): an analytic placement-oblivious prune, then
+topology-aware placement ranking over the Trainium core/chip hierarchy.
+
+Design notes live in ``docs/plans/2026-07-27-parallelism-planner.md`` and
+``docs/plans/2026-08-20-planner-aoizora-topology-prototype.md``.
 """
 
 from __future__ import annotations

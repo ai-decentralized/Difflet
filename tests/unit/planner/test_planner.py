@@ -1,11 +1,11 @@
 """End-to-end planning: ranking, objectives, evidence, and cache awareness."""
+
 from __future__ import annotations
 
 import json
 
 import pytest
 
-from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.planner.hardware import HardwareProfile
 from difflet.planner.measurements import Measurement, MeasurementStore
 from difflet.planner.planner import OBJECTIVES, plan
@@ -29,10 +29,18 @@ def _store(*rows: tuple[str, float]) -> MeasurementStore:
     return MeasurementStore(
         tuple(
             Measurement(
-                instance_type="trn2.3xlarge", model="flux", model_id=FLUX, label=label,
-                height=1024, width=1024, num_frames=None, steps=28,
-                step_latency_seconds=seconds, e2e_warm_seconds=None,
-                compile_seconds=None, source="test",
+                instance_type="trn2.3xlarge",
+                model="flux",
+                model_id=FLUX,
+                label=label,
+                height=1024,
+                width=1024,
+                num_frames=None,
+                steps=28,
+                step_latency_seconds=seconds,
+                e2e_warm_seconds=None,
+                compile_seconds=None,
+                source="test",
             )
             for label, seconds in rows
         )
@@ -95,8 +103,11 @@ def test_throughput_and_latency_disagree_on_this_host():
     assert _plan(objective="latency").best.label != _plan(objective="throughput").best.label
 
 
-def test_dp4_wins_on_throughput():
-    assert _plan(objective="throughput").best.parallel.dp_degree == 4
+def test_dp_replication_wins_on_throughput():
+    # dp4tp1 would be the old winner but is memory-rejected for flux (D35:
+    # 4 resident copies of 33.7 GB do not fit one device), so the objective's
+    # dp-preference now expresses through the largest replication that fits.
+    assert _plan(objective="throughput").best.parallel.dp_degree > 1
 
 
 def test_balanced_sits_between_the_two():
@@ -145,9 +156,14 @@ def test_measurements_for_another_shape_do_not_leak_in():
 
 def test_measurements_for_another_host_do_not_leak_in():
     other = HardwareProfile(
-        instance_type="trn2.48xlarge", platform_target="trn2", num_devices=1,
-        cores_per_device=4, hbm_bytes_per_device=103079215104, lnc=2,
-        allocated_cores=4, source="neuron-ls",
+        instance_type="trn2.48xlarge",
+        platform_target="trn2",
+        num_devices=1,
+        cores_per_device=4,
+        hbm_bytes_per_device=103079215104,
+        lnc=2,
+        allocated_cores=4,
+        source="neuron-ls",
     )
     assert _plan(hardware=other).calibration.kind == "uncalibrated"
 
@@ -205,31 +221,44 @@ def test_cache_labels_survive_the_additive_key_elisions(tmp_path):
     assert {e.label for e in result.ranked if e.cached} == {"tp4"}
 
 
-# ------------------------------------------------------------ memory advisory
+# ------------------------------------------------------------ memory rule
 
 
-def test_weight_estimate_flags_configs_that_replicate_too_much():
-    result = _plan()
-    over = {entry.label for entry in result.ranked if entry.weights_over_budget}
-    # Four copies of Flux's 33.7 GB do not fit one 96 GB device.
-    assert "tp1cp4" in over
-    assert "tp4" not in over
-
-
-def test_weight_advisory_does_not_remove_candidates():
-    """Advisory means advisory: the residency model is not validated yet."""
+def test_resident_model_over_budget_is_rejected():
+    """D35: for co-resident (non-staged) models the replicated-copy bound is
+    physics, not advice -- flux tp1cp4 needs ~135 GB against a 96 GB device,
+    the exact class of config the 2026-08-20 traversal caught the planner
+    recommending."""
 
     result = _plan()
-    assert any(entry.weights_over_budget for entry in result.ranked)
-    assert "tp1cp4" in result.feasibility.labels()
+    rejection = next((r for r in result.feasibility.rejected if r.label == "tp1cp4"), None)
+    assert rejection is not None
+    assert rejection.kind == "memory"
+    assert "HBM" in rejection.reason
+    assert "tp1cp4" not in result.feasibility.labels()
+    assert "tp1cp4ulysses" not in result.feasibility.labels()
+    # Two copies fit and stay feasible.
+    assert "tp2cp2" in result.feasibility.labels()
+
+
+def test_staged_model_keeps_the_advisory_only_treatment():
+    """D22 still governs staged models: components are never all resident, so
+    the same arithmetic over-counts and must not reject (wan tp2cfg passed on
+    device despite its 137.6 GB naive bound)."""
+
+    result = _plan(model_id=WAN, model_type="wan", steps=20, store=MeasurementStore(()))
+    assert "tp2cfg" in result.feasibility.labels()
+    entry = next(e for e in result.ranked if e.label == "tp2cfg")
+    assert entry.weights_over_budget  # flagged, not dropped
 
 
 # ------------------------------------------------------------------- serving
 
 
 def test_serving_mode_drops_dp_and_cfg_candidates():
-    result = _plan(model_id=WAN, model_type="wan", steps=20, serving=True,
-                   store=MeasurementStore(()))
+    result = _plan(
+        model_id=WAN, model_type="wan", steps=20, serving=True, store=MeasurementStore(())
+    )
     labels = {entry.label for entry in result.ranked}
     assert not any(label.startswith("dp") for label in labels)
     assert not any("cfg" in label for label in labels)

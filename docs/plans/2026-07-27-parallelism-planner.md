@@ -2,7 +2,9 @@
 
 Date: 2026-07-27
 
-Status: P0–P3 已实现（见 Part 7 的决策记录）。P4/P5 待做。
+Status: P0–P3 已实现（见 Part 7 的决策记录）。P4/P5 待做。后续增量：
+[AoiZora 两阶段原型（拓扑感知 placement 排序）](2026-08-20-planner-aoizora-topology-prototype.md)
+落地了 Part 6 预留的 placement 方向。
 
 会话记录（含调研全过程与决策理由）：<https://claude.ai/code/artifact/0fbea154-8055-45ff-b573-2404215efe9e>
 

@@ -327,8 +327,7 @@ def _add_serve_flags(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="SECONDS",
         help=(
-            "Maximum time a request may wait in the queue "
-            "(default: 30 for image, 86400 for video)"
+            "Maximum time a request may wait in the queue (default: 30 for image, 86400 for video)"
         ),
     )
     p.add_argument(
@@ -504,6 +503,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "--serving",
         action="store_true",
         help="Apply the extra restrictions `difflet serve` imposes",
+    )
+    plan_cmd.add_argument(
+        "--survivors",
+        type=int,
+        default=None,
+        metavar="K",
+        help="Stage-1 cut: only the top-K candidates reach the topology-aware "
+        "stage 2 (default: all)",
+    )
+    plan_cmd.add_argument(
+        "--no-topology",
+        action="store_true",
+        help="Skip stage 2 (topology-aware placement ranking) entirely",
     )
     plan_cmd.add_argument(
         "--json",

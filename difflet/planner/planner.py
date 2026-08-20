@@ -5,13 +5,25 @@ to pick. Three inputs decide it: the analytic cost model, any real measurement
 that matches, and whether a candidate is already compiled -- the last mattering
 because switching configurations means a fresh AOT compile, which for Flux is
 about 25 minutes of wall clock before a single image appears.
+
+Since the AoiZora port the ranking is two-stage (arXiv 2606.17566, §4.5):
+
+- **Stage 1** scores *every* feasible candidate with the placement-oblivious
+  cost model and cuts the field to a survivor set (``survivors``; the default
+  keeps all of them because Difflet's search space is a handful of configs,
+  not the thousands that motivated the paper's pruning).
+- **Stage 2** (``difflet.planner.topology``) enumerates each survivor's
+  physical placements over the Trainium core/chip hierarchy and rescores the
+  communication terms topology-aware: which axis's traffic lands on
+  intra-chip links, which crosses the chip-to-chip NeuronLink, and which
+  concurrent groups contend on a shared link.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from difflet.pipeline.parallel_config import DiffletParallelConfig
@@ -30,6 +42,7 @@ from difflet.planner.model_profile import (
     device_weight_bytes,
     load_profile,
 )
+from difflet.planner.topology import PlacementChoice, choose_placement
 
 OBJECTIVES = ("latency", "throughput", "balanced")
 
@@ -49,6 +62,14 @@ class RankedConfig:
     # model_profile.WeightFootprint for why this does not gate feasibility.
     weight_bytes: int = 0
     weights_over_budget: bool = False
+    # Stage-2 result: every distinct physical placement of this candidate's
+    # mesh, ranked. None when topology ranking is off, the candidate did not
+    # survive stage 1, or the config admits only one placement.
+    placement: PlacementChoice | None = None
+    # The step time stage 2 ranked this candidate by -- the paper's Q2 at the
+    # chosen placement. Equal to `step_seconds` whenever stage 2 ran and the
+    # entry was predicted rather than measured.
+    stage2_step_seconds: float | None = None
 
     @property
     def label(self) -> str:
@@ -71,6 +92,8 @@ class Plan:
     calibration: Calibration
     ranked: tuple[RankedConfig, ...]
     feasibility: FeasibilityReport
+    # Labels that reached stage 2. Empty when topology ranking is off.
+    survivors: tuple[str, ...] = ()
 
     @property
     def best(self) -> RankedConfig | None:
@@ -104,7 +127,26 @@ def plan(
     serving: bool = False,
     store: MeasurementStore | None = None,
     cache_dir: str | os.PathLike[str] | None = None,
+    survivors: int | None = None,
+    topology_aware: bool = True,
+    rank_by_best_placement: bool = False,
 ) -> Plan:
+    """Two-stage ranking: analytic prune, then topology-aware placement.
+
+    ``survivors`` is the stage-1 cut -- how many candidates stage 2 scores.
+    ``None`` keeps all of them: AoiZora needs aggressive pruning because its
+    stage 2 compiles every survivor, while this stage 2 is analytic and costs
+    microseconds, so the default keeps the machinery exercised on the whole
+    (tiny) field.
+
+    ``rank_by_best_placement`` selects what stage 2's ranking means. The
+    default (False) ranks by the Q2 at the *default* axis order -- the only
+    placement the runtime can execute today -- and reports better orders as
+    advisory deltas. True ranks by the best placement outright, which is the
+    paper's semantics and the right switch once the runtime grows a mesh-order
+    flag.
+    """
+
     if objective not in OBJECTIVES:
         raise ValueError(f"unknown objective {objective!r}; expected one of {OBJECTIVES}")
 
@@ -114,11 +156,22 @@ def plan(
     sequence = profile.sequence_lengths(height=height, width=width, num_frames=num_frames)
     resolved_steps = steps or DEFAULT_STEPS
 
+    # Headroom for activations, KV and the runtime's own allocations. For
+    # models whose whole footprint is co-resident (not staged) this budget is
+    # also a hard feasibility rule: the dp*cfg*cp replicated copies are a
+    # physical upper bound on device HBM (D35). Staged models keep the
+    # budget advisory-only (D22).
+    weight_budget = int(
+        hardware.num_devices * hardware.hbm_bytes_per_device * WEIGHT_BUDGET_FRACTION
+    )
     feasibility = enumerate_candidates(
         model_name=profile.name,
         capabilities=profile.capabilities,
         cores=hardware.allocated_cores,
         serving=serving,
+        weight_bytes=profile.weights.total_bytes,
+        weight_budget=weight_budget,
+        staged=profile.weights.staged,
     )
 
     store = store if store is not None else load_store()
@@ -136,13 +189,9 @@ def plan(
         parallel_of=by_label.get,
     )
 
-    # Headroom for activations, KV and the runtime's own allocations. Only used
-    # to flag a candidate, never to drop one.
-    weight_budget = int(
-        hardware.num_devices * hardware.hbm_bytes_per_device * WEIGHT_BUDGET_FRACTION
-    )
+    # Surviving candidates keep the budget as an advisory flag, never a drop.
     compiled = _compiled_labels(cache_dir, profile.name)
-    ranked = [
+    stage1 = [
         _rank(
             candidate,
             profile=profile,
@@ -158,7 +207,29 @@ def plan(
         )
         for candidate in feasibility.feasible
     ]
-    ranked.sort(key=lambda entry: (-entry.score, entry.label))
+
+    # ------------------------------------------------------------- stage 2
+    survivor_labels: tuple[str, ...] = ()
+    if topology_aware and stage1:
+        ordered = _scored(stage1, objective)  # stage-1 order decides the cut
+        cut = ordered[:survivors] if survivors is not None else ordered
+        survivor_labels = tuple(entry.label for entry in cut)
+        by_label_stage1 = {entry.label: entry for entry in stage1}
+        stage2 = {
+            label: _stage2(
+                by_label_stage1[label],
+                profile=profile,
+                sequence=sequence,
+                calibration=calibration,
+                hardware=hardware,
+                steps=resolved_steps,
+                rank_by_best_placement=rank_by_best_placement,
+            )
+            for label in survivor_labels
+        }
+        merged = [stage2.get(entry.label, entry) for entry in stage1]
+    else:
+        merged = stage1
 
     return Plan(
         model_id=model_id,
@@ -169,8 +240,9 @@ def plan(
         shape=shape,
         sequence=sequence,
         calibration=calibration,
-        ranked=tuple(_scored(ranked, objective)),
+        ranked=tuple(_scored(merged, objective)),
         feasibility=feasibility,
+        survivors=survivor_labels,
     )
 
 
@@ -219,6 +291,63 @@ def _rank(
     )
 
 
+def _stage2(
+    entry: RankedConfig,
+    *,
+    profile: ModelProfile,
+    sequence: SequenceLengths,
+    calibration: Calibration,
+    hardware: HardwareProfile,
+    steps: int,
+    rank_by_best_placement: bool,
+) -> RankedConfig:
+    """Topology-aware rescoring of one survivor.
+
+    Measured entries keep their measured step time: a measurement was taken at
+    the default axis order, and scaling it by the predicted ratio for another
+    order would launder an assumption into a number the user reads as ground
+    truth. Predicted entries adopt the stage-2 Q2, which at the default
+    placement differs from stage 1 only by the paper's overlap structure
+    (communication that hides under compute stops being charged serially).
+    """
+
+    from difflet.planner import topology as topology_module
+
+    parallel = entry.parallel
+    compute_seconds = calibration.compute_seconds_single_core * cost_model.compute_share(parallel)
+    comm_by_axis = topology_module.comm_seconds_by_axis(
+        parallel,
+        profile=profile,
+        seq=sequence,
+        bandwidth_bytes_per_second=calibration.bandwidth_bytes_per_second,
+    )
+    choice = choose_placement(
+        parallel,
+        topology=topology_module.PhysicalTopology.from_hardware(hardware),
+        profile=profile,
+        seq=sequence,
+        compute_seconds=compute_seconds,
+        comm_seconds_by_axis=comm_by_axis,
+    )
+    if choice is None:
+        return entry
+
+    if entry.prediction.evidence == "measured":
+        stage2_seconds = entry.step_seconds  # measured, at the default order
+    else:
+        picked = choice.best if rank_by_best_placement else choice.default
+        stage2_seconds = picked.step_seconds
+    request_seconds = stage2_seconds * steps
+    return replace(
+        entry,
+        step_seconds=stage2_seconds,
+        request_seconds=request_seconds,
+        throughput=parallel.dp_degree / request_seconds if request_seconds > 0 else 0.0,
+        placement=choice,
+        stage2_step_seconds=stage2_seconds,
+    )
+
+
 def _scored(ranked: list[RankedConfig], objective: str) -> list[RankedConfig]:
     """Turn latency and throughput into one comparable score per objective.
 
@@ -243,19 +372,7 @@ def _scored(ranked: list[RankedConfig], objective: str) -> list[RankedConfig]:
             score = throughput_score
         else:
             score = (latency_score * throughput_score) ** 0.5
-        out.append(
-            RankedConfig(
-                candidate=entry.candidate,
-                prediction=entry.prediction,
-                step_seconds=entry.step_seconds,
-                request_seconds=entry.request_seconds,
-                throughput=entry.throughput,
-                score=score,
-                cached=entry.cached,
-                weight_bytes=entry.weight_bytes,
-                weights_over_budget=entry.weights_over_budget,
-            )
-        )
+        out.append(replace(entry, score=score))
     out.sort(key=lambda entry: (-entry.score, entry.label))
     return out
 
