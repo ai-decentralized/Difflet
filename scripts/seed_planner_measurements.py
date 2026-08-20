@@ -36,8 +36,18 @@ BENCHMARK_ROOT = REPO / "benchmark"
 OUTPUT = REPO / "difflet" / "planner" / "data" / "measurements.json"
 
 # benchmark/<slug>.json uses report slugs; the planner keys on registry names.
+# The flux_<label> entries come from scripts/flux_parallel_sweep.py, the
+# one-config-per-file parallel sweep that anchors the planner's rankings on
+# real per-step measurements.
 SLUG_TO_MODEL = {
     "flux_1_dev": "flux",
+    "flux_tp4": "flux",
+    "flux_tp4sp": "flux",
+    "flux_tp2cp2": "flux",
+    "flux_tp2cp2ring": "flux",
+    "flux_tp2cp2ulysses": "flux",
+    "flux_dp2tp2": "flux",
+    "flux_dp2tp2sp": "flux",
     "qwen_image": "qwen_image",
     "wan_2_1": "wan",
     "wan_2_2": "wan",
