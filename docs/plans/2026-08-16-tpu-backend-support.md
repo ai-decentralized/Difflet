@@ -1318,6 +1318,58 @@ replicas were independent. Per-replica retry or partial cancellation would
 break it. The cancellation path was read but not exercised; its failure mode is
 bounded (cancel timeout, then worker recovery).
 
+### 2026-08-24 — numerical validation against the diffusers oracle
+
+The thing this backend most needed, and the reason it mattered today: the
+fused attention kernel changed the numerics and nothing in the repo would have
+caught a regression.
+
+Method, in two stages so the CPU reference and the four TPU workers never
+compete for host RAM: `tests/numerical/tpu_oracle_reference.py` loads
+**diffusers' own** transformer class with the real checkpoint and runs one
+fp32 forward on seeded inputs (Wan 49.9 s, Qwen-Image 40.1 s on 112 cores);
+`tpu_oracle_compare.py` then runs difflet's sharded tp=4 bf16 model on the same
+inputs, once with the fused kernel and once with SDPA.
+
+| | cos vs upstream fp32 | rel_l1 | cos vs upstream **bf16** |
+|---|---|---|---|
+| Qwen-Image, fused | 0.99983573 | 1.74e-2 | 0.99995130 |
+| Qwen-Image, SDPA | 0.99983740 | 1.74e-2 | 0.99995089 |
+| *control*: upstream bf16 | 0.99984860 | 1.71e-2 | — |
+| Wan 2.2, fused | 0.99861133 | 5.26e-2 | 0.99891466 |
+| Wan 2.2, SDPA | 0.99860734 | 5.27e-2 | 0.99891216 |
+| *control*: upstream bf16 | 0.99872804 | 5.05e-2 | — |
+
+**The control is what makes the numbers readable, and it was not obvious to
+add.** Comparing bf16 against fp32 conflates "difflet is wrong" with "bf16
+costs this much", and for Wan the dtype costs a lot: upstream's own bf16
+forward scores 0.99873 against its own fp32. So difflet at 0.99861 is sitting
+essentially on the format's floor, adding 1.042x (Wan) and 1.021x (Qwen-Image)
+on top of what bf16 already costs.
+
+**The fused kernel is free.** Fused and SDPA differ by 4.0e-6 (Wan) and 1.7e-6
+(Qwen-Image) of cosine — noise, in both directions. The op-level result held
+at model scale.
+
+**The gate had to be rebuilt.** This directory's other gates use
+`cosine >= 0.999`, which is right for a trajectory of latents and unreachable
+for a raw DiT output in bf16 — it fails upstream itself on Wan. The gate is
+now relative: difflet may add at most 1.15x on top of the control's error, and
+must sit within 1.2x of the control's own distance from fp32. Writing it the
+absolute way first was useful: it failed on Wan at 0.99891 and forced the
+question of whether that was a defect. It is not — two implementations
+deviating from fp32 independently by e would sit ~1.41e apart, and difflet is
+0.91e (Wan) / 0.38e (Qwen-Image) from the control, i.e. closer than
+independence, which is correlated rounding rather than divergent math. tp=4
+reorders reductions, the cross-rank qk-norm sums across ranks, and the TPU MXU
+accumulates in fp32 where CPU bf16 GEMM does not.
+
+**What this does not cover.** A single forward, not a 20-step trajectory —
+error growth across the denoise loop is unmeasured. Random-normal inputs, not
+real encoder output. The VAE and text encoder are not checked at all. And the
+residual against the same-dtype reference is unexplained at the 1e-3 level;
+"consistent with accumulation order" is an argument, not a proof.
+
 ---
 
 # Handoff: state, context, and what is left
@@ -1378,11 +1430,15 @@ the next run fails with "Device or resource busy". `tpu-info` lists the PIDs.
 
 ## What is left, roughly by value
 
-**1. Numerical validation of the real models (Phase 5).** Neither the 20B nor
-Wan's 14B has been checked beyond "finite" and "the output looks right". The
-cosine 1.000000 result is from a small config. `tests/numerical/` exists and DEVELOPER.md requires the
-diffusers reference as the oracle — never TPU-vs-Trainium, since two
-independently-wrong implementations can agree.
+**1. ~~Numerical validation of the real models (Phase 5).~~ Done 2026-08-24.**
+Both real models are now checked against diffusers' own implementation with
+the real weights — see the status entry. Qwen-Image 0.99984 and Wan 0.99861
+cosine against upstream fp32, both essentially at the floor bf16 itself sets
+(0.99985 / 0.99873 measured on upstream in the same dtype), and the fused
+kernel is neutral. `tests/numerical/test_tpu_vs_diffusers.py` is the gate.
+Still open underneath it: the residual disagreement with the same-dtype
+reference (0.99891 on Wan) is consistent with accumulation order but is not
+explained; and this covers a single DiT forward, not a full trajectory.
 
 **2. Direction A on the real model.** `TpuApplicationBase` implements
 compile/load and was verified on a toy module across a process boundary, but
