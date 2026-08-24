@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Callable
 
 import torch
 import torch.nn as nn
@@ -88,11 +89,20 @@ def load_checkpoint_into(
     prefix: str = "",
     dtype: torch.dtype | None = None,
     strict: bool = True,
+    rename: Callable[[str], str] | None = None,
 ) -> dict[str, list[str]]:
     """Load ``model_dir`` into ``module``, sharding per ``_difflet_shard``.
 
     ``prefix`` is stripped from module parameter names to get checkpoint keys
     (difflet's trace modules nest the diffusers model under ``transformer.``).
+
+    ``rename`` maps a (prefix-stripped) *module* parameter name to the
+    checkpoint key holding it, for modeling whose attribute names diverge from
+    upstream diffusers — Wan's FFN is ``net_in``/``net_out`` where diffusers
+    has ``net.0.proj``/``net.2``. It runs in the module→checkpoint direction so
+    a parameter that exists has exactly one place to come from; the reverse
+    direction would have to guess. Defaults to identity.
+
     Returns ``{"missing": [...], "unexpected": [...]}`` — with ``strict`` the
     missing list is an error instead.
     """
@@ -114,6 +124,8 @@ def load_checkpoint_into(
     with torch.no_grad():
         for name, target in targets.items():
             key = name[len(prefix):] if prefix and name.startswith(prefix) else name
+            if rename is not None:
+                key = rename(key)
             path = weight_map.get(key)
             if path is None:
                 missing.append(name)
@@ -130,9 +142,11 @@ def load_checkpoint_into(
             target.copy_(tensor.to(dtype or target.dtype))
             loaded += 1
 
-    unexpected = sorted(set(weight_map) - {
-        (n[len(prefix):] if prefix and n.startswith(prefix) else n) for n in targets
-    })
+    wanted = set()
+    for n in targets:
+        key = n[len(prefix):] if prefix and n.startswith(prefix) else n
+        wanted.add(rename(key) if rename is not None else key)
+    unexpected = sorted(set(weight_map) - wanted)
     logger.info(
         "loaded %d tensors from %s (rank %d/%d); %d missing, %d unexpected",
         loaded, model_dir, tp_rank, tp_size, len(missing), len(unexpected),

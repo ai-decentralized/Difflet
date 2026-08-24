@@ -1,10 +1,31 @@
 # Cloud TPU v5e (v5litepod-4) — difflet benchmark
 
 Measured on a Cloud TPU VM: `v5litepod-4`, 4 × v5e chips, 2x2 topology,
-16 GB HBM per chip, us-west4-a. Run through `benchmark/adapters/tpu.py`, the
-same harness and metric schema as the other device folders.
+16 GB HBM per chip, us-west4-a.
 
-## Configuration
+## Models measured
+
+| model | detail | harness | resident weights |
+|---|---|---|---|
+| [Qwen-Image](qwen_image.md) | 1024x1024, 20 steps, tp=4 | `benchmark/adapters/tpu.py` | 9.62 GB per chip |
+| [Wan 2.2 A14B](wan_2_2.md) | 480x832x9, 20 steps, tp=4, **single expert** | standalone runner (the TPU adapter is Qwen-specific) | 7.5-8.1 GB per chip |
+
+**Both models now use the Pallas fused attention kernel**, which needs Python
+3.12; see [wan_2_2.md](wan_2_2.md) for the toolchain and the measurements. The
+e2e figures below for Qwen-Image predate it and have not been re-run.
+
+Qwen-Image runs through `benchmark/adapters/tpu.py`, the same harness and
+metric schema as the other device folders. Wan does not yet: that adapter
+drives `QwenImageServingStageAdapter` directly, so the Wan numbers come from a
+standalone one-process-per-chip runner (`benchmark/wan_tpu_run.py`) using
+difflet's own `WanOrchestrator` and the same frozen `MATRIX` config. Folding
+Wan into the adapter is outstanding.
+
+## Configuration — Qwen-Image
+
+Wan 2.2's configuration and its TPU-specific rows are in
+[wan_2_2.md](wan_2_2.md); the two differ in more than shape (text-encoder
+dtype, VAE placement, expert residency).
 
 The model and config rows are hardware-agnostic — any backend must match these
 to reproduce. The pinned HF `revision` fixes the exact weights.
@@ -44,37 +65,73 @@ here. The tp=4/cp=1 part *is* accurate: the DiT is sharded across the 4 chips.
 
 ## Results — Qwen-Image, 1024x1024, 20 steps, tp=4, bf16
 
+Re-measured 2026-08-24 with the fused attention kernel and on the cross-device
+per-step rule (see the correction below).
+
 | metric | value |
 |---|---|
 | `compile_seconds` | 0 (eager — see caveats) |
-| `load_seconds` | 7.8 |
-| `e2e_cold_seconds` | 87.3 |
-| **`e2e_warm` mean** | **19.10 s** (n=3, std 0.055) |
-| **`step_latency` mean** | **0.276 s** (n=19) |
-| `throughput` | 3.6 steps/s |
+| `e2e_cold_seconds` | 80.7 |
+| **`e2e_warm` mean (synced)** | **13.32 s** (n=3) |
+| **`e2e_warm` mean (natural)** | **8.98 s** (n=3) |
+| **`step_latency` mean (synced)** | **505.4 ms** (n=19) |
+| `step_latency` (natural) | 289.9 ms |
 | `peak_device_mem_gb` | 9.62 per chip |
-| `output` | `[1, 4096, 64]` packed latents, finite; 1.06 MB PNG after decode |
+| stages (warm) | text_encode 2.00 s / denoise 10.14 s / vae_decode 1.16 s |
+| `output` | `[1, 4096, 64]` packed latents, finite |
 
-## Cross-device (same harness, same model config)
+The text encode was 5.74 s — a third of the e2e — because all four replicas
+encoded the same prompt, in bf16, which this VM emulates (AMD EPYC, no
+AVX512-BF16). One rank now encodes in fp32 and broadcasts: **2.00 s**, and
+e2e warm 17.44 -> 13.32 s. See the 2026-08-24 entry in the plan.
 
-| device | e2e_warm (s) | step (s) | compile (s) | load (s) | peak GB |
-|---|---|---|---|---|---|
-| B300 SXM6 | 10.65 | 0.140 | 0 | 5.2 | 58.29 |
-| H100 PCIe | 18.32 | 0.298 | 0 | 9.9 | 58.38 |
-| **v5e x4** | **19.10** | **0.276** | **0** | **7.8** | **9.62** |
-| trn3 (4 cores) | 54.56 | 0.324 | 1189.4 | 372.8 | — |
-| trn2 (4 cores) | 62.71 | 0.447 | 1316.4 | 452.9 | — |
+**Validated through `difflet serve`**, not only the harness: health/ready 200,
+a real 1024x1024 / 20-step HTTP generation in 8.75 s, an over-long prompt
+returning 400 in 10 ms without hanging any replica, and a clean SIGTERM
+shutdown with the chips released.
 
-Reading it:
+## Results — Wan 2.2 A14B, 480x832x9, 20 steps, tp=4, bf16, single expert
 
-- **3.3x faster than trn2 and 2.9x faster than trn3** on warm end-to-end, and
-  faster per step than either.
-- **Level with an H100 PCIe** (19.10 vs 18.32 warm; 0.276 vs 0.298 per step),
-  at roughly a sixth of the peak device memory, because tp=4 shards the weights
-  across chips while the GPU runs dense on one.
-- **~1.8x slower than a B300.**
-- Compile and load are the largest contrast with Trainium: 0 s and 7.8 s here
-  against ~1200-1300 s and ~370-450 s there.
+| metric | value |
+|---|---|
+| `load_seconds` | 4.2-37 (page-cache dependent; see caveats) |
+| **`e2e_warm`** | **41.66 s** |
+| **`step_latency` mean (synced)** | **608.5 ms** (n=38, std 2.1) |
+| same loop, unsynced | no different basis — the loop round-trips to the host every step by construction |
+| `peak_device_mem_gb` | 7.5-8.1 per chip |
+| stages (warm) | text_encode 0.78 s / denoise 12.20 s / vae_decode 26.8-42.7 s |
+| `output` | `[1, 16, 3, 60, 104]` latents, finite; coherent 9-frame video |
+
+**Only one of the two 14.288B experts is resident** — each is 7.15 GB per chip
+at tp=4 and two would not fit. Matches trn2's configuration, not the GPU rows.
+**The host VAE decode (26.77 s) is now larger than the entire denoise loop**;
+it is blocked on device by an unsupported negative index in `AutoencoderKLWan`
+under torch_xla, not by memory.
+
+## Cross-device — DiT per-step, all on the same rule
+
+Device-synced inter-step deltas of a real generate loop, step 0 excluded
+(`benchmark/harness.py::RealLoopStepTimer`).
+
+| device | Qwen-Image | Wan 2.2 A14B |
+|---|---|---|
+| B300 SXM6 | **140.0 ms** | **240.7 ms** |
+| H100 PCIe | 297.7 ms | 553.7 ms |
+| trn3 (4 cores) | 324.1 ms | — |
+| trn2 (4 cores) | 447.1 ms | 554.8 ms |
+| **v5e x4** | **508.4 ms** | **608.5 ms** |
+
+On this basis v5e is last on both. Qwen-Image has a second, faster basis —
+290.9 ms with no per-step sync, level with the H100's synced 298 ms — because
+its denoise loop is device-resident. **Wan does not**: its orchestrator holds
+the latents on the host in fp32 for UniPC, so every step ends in a `.cpu()`
+whether the harness asks for a sync or not. Removing that was measured and is
+worth ~2 ms/step; see [wan_2_2.md](wan_2_2.md). And no GPU has been measured on
+a natural basis, so that pairing is not like-for-like either way.
+
+Everything else about the two backends is a different story: v5e uses ~9.6 and
+~7.5 GB **per chip** against 58 and 71 GB on the GPUs, and pays 0 s of AOT
+compile against trn2/trn3's 20-131 minutes.
 
 ## Reproduce
 
@@ -136,6 +193,10 @@ the text encoder runs on the host, and attention has no fused kernel — the TPU
 Pallas flash-attention kernel needs jax 0.7.1, which requires Python >= 3.11
 while this toolchain is on 3.10.
 
-**Single sample of a single model.** Only Qwen-Image has been ported to the
-TPU backend so far, so there is no matrix here yet. `n=3` warm iterations,
-one run.
+**Two models, small n.** Qwen-Image and Wan 2.2 are the only models ported to
+the TPU backend so far. Qwen-Image: `n=3` warm iterations, one run. Wan 2.2:
+`n=2` warm iterations, one run, single expert.
+
+**Neither is numerically validated.** Both are checked only for "finite" and
+"the output looks right". Per DEVELOPER.md the oracle must be the diffusers
+reference, never TPU-vs-Trainium.

@@ -1062,6 +1062,262 @@ Two compiles rather than one is the ordinary torch_xla warm-up pattern (the
 first trace differs slightly from the steady-state one); it stabilizes after.
 
 
+### 2026-08-23 — Wan 2.2 A14B is the second model on the TPU backend
+
+The zero-change claim held. `difflet/models/wan/modeling_wan.py` was not
+touched: the port is `difflet/backends/tpu/wan/{config,transformer}.py`, a
+`difflet/models/wan/tpu_application.py`, a TPU branch in `wan/entry.py`, and
+`"tpu"` added to the registry tuple. Wan is a better test of the abstraction
+than Qwen-Image was, because it also exercises the ops Qwen does not touch —
+`RMSNorm`, `apply_rotary_emb`, and 3D RoPE over a video latent grid.
+
+**Two shared pieces became shared rather than copied.** `materialize_meta_`
+moved into `core/weights.py` (Qwen's method now delegates), and
+`load_checkpoint_into` grew an optional `rename` hook, module→checkpoint, for
+modeling whose attribute names diverge from diffusers. Wan's FFN is the only
+divergence today (`net_in`/`net_out` against `net.0.proj`/`net.2`), and the
+mapping is exact: **1095 of 1095 parameters resolve, zero missing, zero
+unexpected**, verified on meta tensors before any device work.
+
+**Single expert, and that was the decision worth making.** A14B ships two
+14.288B experts behind a 0.875 timestep boundary. Each is 7.15 GB per chip at
+tp=4 — measured 6.985 GB resident — so two would be 14.3 GB of the 15.748 GB
+a v5e exposes. That leaves less than the DiT forward needs; the Qwen-Image
+experience (a 0.24 GB VAE was enough to break a working generate) says the
+transient footprint is the binding constraint, not the weights. So
+`enable_transformer_2` defaults to False, matching what Trainium serving
+already does. Both-experts-resident is not viable on a v5litepod-4; a
+host-resident second expert swapped in at the boundary would be, and is not
+implemented.
+
+**Results** (480x832x9, 20 steps, tp=4, bf16 — `benchmark/v5e/wan_2_2.md`):
+denoise 18.19 s warm, 899 ms/step, 7.02 GB peak per chip, output a coherent
+9-frame video of the prompt. Per step that is ~1.6x slower than an H100 or a
+trn2 core group (both ~554 ms) — the opposite of the Qwen-Image result, where
+v5e is level with an H100. The likely cause is attention: plain SDPA over 4680
+tokens against `attention_cte` and a fused GPU kernel.
+
+**Where the per-step actually goes.** The orchestrator holds latents on the
+host in fp32, so every step round-trips. Measured on the same graph: 887.7 ms
+with the round-trip, 739.7 ms device-resident with `mark_step` per step and no
+wait. So the sync costs 17%, not the 3x Qwen-Image saw — the DiT call itself
+dominates. A device-resident loop is worth ~3 s of the 18 s, no more.
+
+**A measurement trap worth recording.** Chaining N forwards with no
+`mark_step` between them does not measure pipelining: XLA fuses all N into one
+graph and recompiles it, which measured 20.7 s/step. The per-step `mark_step`
+is what cuts the graph while leaving execution asynchronous.
+
+**Two host-side findings, neither Wan-specific.** On this VM (`n2d`, AMD EPYC,
+no AVX512-BF16) an fp32 text encode beats bf16 by 4.5x — bf16 matmul is
+emulated, so the Qwen-Image path's bf16 text encoder is likely leaving time on
+the table too. And encoding at the prompt's real length rather than padding to
+512 is ~4x cheaper and numerically identical, since T5 attention is masked and
+the padded positions get zeroed either way. Together: 39.44 s → 2.43 s.
+
+**Profiled the 1.6x gap, and it is one thing.** Ablating a real
+`WanTransformerBlock`: self-attention is 68% of the block's 20.0 ms while
+being 43% of its FLOPs; the FFN is 18% of the time for 40% of the FLOPs. The
+MXU is healthy — isolated projections hit 82% MFU and the FFN matmul 90%.
+`F.scaled_dot_product_attention` runs at **6.2%**: on XLA it has no fused
+kernel, so it materializes the 219 M-element score matrix and runs the softmax
+in fp32, ~0.82 GiB written and re-read several times. Written out by hand the
+same math takes 2.01 ms against SDPA's 9.24 ms (**4.6x**), and 6.59 ms with an
+fp32 softmax — so ~2.6 ms is lowering overhead beyond the precision choice.
+Chunking does not help; XLA materializes the fp32 intermediates either way,
+which also means `_should_chunk` not firing at this size costs nothing.
+
+**This also corrected a headline claim about Qwen-Image.** SDPA's cost turned
+out to be a shape-independent 42 ps per score-matrix element, which made the
+existing Qwen v5e numbers impossible: its attention alone is 60 x 6 x 5120^2 =
+9.44 G elements = 0.40 s, more than the 0.276 s/step the report recorded for
+the whole step. Re-measuring the same DiT three ways settled it — enqueue rate
+274.9 ms (reproducing the reported figure), throughput 619.6 ms, synced
+860.5 ms (reproducing the 0.858 s already in that report's caveats). Under
+lazy XLA an unsynced loop measures how fast Python *enqueues*, not how long the
+device takes; the backlog is paid at the final sync. So "level with an H100
+PCIe" does not hold: Qwen-Image is ~2.1x an H100 per step, a worse ratio than
+Wan's ~1.3x, and 64% of its step is SDPA against Wan's 56%. Both models are
+dominated by the same missing kernel. The e2e_warm numbers were never affected.
+Corrections are in `benchmark/v5e/{RESULTS,qwen_image}.md`; the measurement is
+`benchmark/qwen_step_truth.py`.
+
+Both baselines have a fused kernel (CUDA SDPA dispatches to flash; trn2 uses
+`attention_cte`), which is the whole gap. At the efficiency the projections
+already reach, the step would land near 0.32 s — faster than either, as the
+peak numbers predict (4 x v5e ~788 TFLOP/s bf16 vs an H100 PCIe's ~378).
+
+`flash_attention` and `splash_attention` do ship in torch_xla 2.9, so the
+handoff's "needs jax 0.7.1 / Python >= 3.11" is worth restating precisely: the
+kernels are present but lower through Pallas and need `jax`, and on Python
+3.10 `pip install jax[tpu]` resolves to jax 0.6.2, which would downgrade
+libtpu 0.0.21 -> 0.0.17 and break torch_xla. A standalone 3.12 interpreter is
+the unblock. Full tables in `benchmark/v5e/wan_2_2.md`; the ablation harness is
+`benchmark/wan_block_profile.py`.
+
+Two smaller items, both measured: the two row-parallel all-reduces cost 15% of
+the block (3.1 ms/layer), which is what sequence parallelism would convert to
+reduce-scatters; and the cross-rank qk-norm reduce, which looked like a
+plausible suspect at 4 extra collectives per layer, costs 0.1 ms — 0.7%. Not
+worth touching.
+
+**Still open on Wan specifically.** The VAE decode runs on the host (36.67 s,
+the largest single phase) because `AutoencoderKLWan` raises `Value out of
+range (expected to be in range of [-1, 0], but got -2)` under torch_xla — an
+unsupported negative index, not a memory problem; the DiT leaves 8.7 GB free.
+Wan is not in `benchmark/adapters/tpu.py` either: that adapter drives
+`QwenImageServingStageAdapter` directly, so these numbers come from a
+standalone runner over difflet's own `WanOrchestrator`. And serving is not
+wired — there is no Wan TPU stage adapter, only the application.
+
+### 2026-08-24 — the fused attention kernel, and both models get faster
+
+The 1.6x gap turned out to be one thing, and it is fixed. Ablating a real
+`WanTransformerBlock`: self-attention was 68% of the block's 20.0 ms for 43% of
+its FLOPs, while the FFN was 18% of the time for 40% of the FLOPs. The MXU was
+never the problem — isolated projections hit 82% MFU and the FFN matmul 90%.
+`F.scaled_dot_product_attention` ran at 6-7%: on XLA it materializes the score
+matrix and runs the softmax in fp32, costing a shape-independent **42 ps per
+score element**.
+
+**The handoff's "blocked on jax" note was too pessimistic.** The kernels do
+ship in torch_xla 2.9, and they work: a standalone Python 3.12 venv with jax
+0.7.1 (which pulls libtpu 0.0.20, and torch_xla 2.9 runs on it fine) brings up
+the TPU normally. On 3.10 the block is real — `jax[tpu]` resolves to 0.6.2 and
+downgrades libtpu to 0.0.17 — but 3.12 costs nothing beyond a second venv, and
+the 3.10 Neuron venv is untouched.
+
+Measured per rank against an fp32 reference: Wan self-attention 7.99 ms ->
+**1.19 ms** (47.9% MFU) and Qwen joint-attention 5.65 -> **0.73 ms**, both
+**more accurate** than SDPA (2.76e-3 / 2.80e-3 against 3.31e-3 / 3.37e-3) —
+the kernel keeps the softmax statistics in fp32 without materializing anything.
+
+**The trap worth recording: an unaligned sequence is silently wrong.** The
+kernel accepts a length that is not a multiple of its 512 block without
+complaint, pads internally with zeros, and lets the padding into the softmax.
+At Wan's 4680 that is 5.39e-2 relative error — 20x worse, nothing raised, and
+the images still look plausible. Padding to a multiple of 512 with
+`q_segment_ids`/`kv_segment_ids` restores 2.76e-3 at no measurable cost. (4736,
+a multiple of 128 but not 512, raises instead.)
+
+Small shapes stay on SDPA: the kernel is near-flat in score-matrix size while
+SDPA grows linearly, so the crossover sits between 24 M and 48 M elements and
+`FLASH_MIN_SCORE_ELEMENTS` is 32 M. Wan's cross-attention (24 M) is on the
+SDPA side, measured, not assumed. Masked and causal calls also fall back.
+
+End to end, on the cross-device synced basis (the same rule the other device
+folders use; see the 2026-08-24 harness entry):
+
+| model | SDPA | fused | vs H100 |
+|---|---|---|---|
+| Wan 2.2 | 899 ms | **610 ms** (1.47x) | 1.10x slower than 554 ms |
+| Qwen-Image | 861 ms | **510 ms** (1.69x) | 1.71x slower than 298 ms |
+
+Which is roughly what peak throughput predicts (4 x v5e ~788 TFLOP/s bf16
+against an H100 PCIe's ~378). Wan's warm denoise went 18.19 s -> 12.19 s;
+memory 7.02 -> 8.10 GB per chip for the padding buffers; the first denoise got
+*slower*, 38.09 -> 56.07 s, because Pallas compiles the kernel too.
+
+**This also cost Qwen-Image a headline claim, and then gave it back.** SDPA's
+42 ps/element made the recorded Qwen numbers impossible: its attention alone is
+9.44 G elements = 0.40 s, more than the 0.276 s/step the report gave for the
+whole step. Measuring the same DiT three ways settled it — enqueue 274.9 ms
+(reproducing the reported figure), throughput 619.6 ms, synced 860.5 ms
+(reproducing the 0.858 s already in that report's caveats). Under lazy XLA an
+unsynced loop measures how fast Python *enqueues*, not how long the device
+takes. So "level with an H100" was not supported at the time. With the fused
+kernel it is true again, at 303.3 vs 298 ms, on a real measurement. Corrections
+are in `benchmark/v5e/{RESULTS,qwen_image}.md`; the measurement is
+`benchmark/qwen_step_truth.py`.
+
+**Wan's host round-trip: measured, and not worth removing.** Its orchestrator
+holds the latents on the host in fp32 (UniPC's order-2 corrector collapses in
+bf16), so every step ends in a `.cpu()`. That looked like an obvious target.
+`benchmark/wan_device_loop_probe.py` runs the real orchestrator four ways:
+host as shipped **610 ms/step**; device latents with the scheduler's sigmas
+left on CPU **~15 600 ms** (four recompiles, ~196 s, because diffusers keeps
+sigmas on the host by design and those per-step scalars fold into the graph as
+constants — the same failure mode the mistakes list already records); device
+latents with sigmas moved across, no recompiles, 645 ms synced and **612 ms**
+without the per-step wait. So the answer is 612 against 610: the DiT is 610 ms
+of device work and a 1.2 MB latent round-trip vanishes next to it. Left as is.
+
+This also retires a number I had quoted: `wan_tpu_stepcost.py`'s 441.7 ms is a
+scheduler-less probe (raw DiT calls chained), not something this pipeline can
+reach, and the ~170 ms difference is what UniPC costs on the chip. Anywhere it
+implied "v5e is faster than an H100 on Wan" was wrong and has been corrected.
+Qwen-Image *does* have a faster natural basis (291 ms vs 510 synced) because
+its loop is device-resident with pre-materialised per-step scalars; Wan's
+stateful order-2 scheduler would have to be restructured the same way, and the
+measurement above says that would buy nothing.
+
+Two smaller items, both measured and both left alone: the two row-parallel
+all-reduces cost 3.1 ms/layer (15% of the block before the fix, a larger share
+now), which is what sequence parallelism would convert to reduce-scatters; and
+the cross-rank qk-norm reduce, a plausible-looking suspect at 4 extra
+collectives per layer, costs 0.1 ms.
+
+### 2026-08-24 — encode once and broadcast; two defects found by doing it
+
+Every replica was encoding the same prompt from the same text, so three of the
+four encodes were waste. Now XLA ordinal 0 holds the encoder and broadcasts the
+embeddings (`xm.collective_broadcast`), which also makes fp32 affordable: one
+copy is ~28 GiB where four were what OOM'd a 188 GiB host and forced bf16 in
+the first place, and fp32 is 4.5x faster here because this VM is an AMD EPYC
+with no AVX512-BF16 so bf16 matmul is emulated.
+
+| | before | after |
+|---|---|---|
+| Qwen-Image text encode | 5.76 s | **2.00 s** |
+| Qwen-Image e2e warm (synced) | 17.44 s | **13.32 s** |
+| Qwen-Image e2e warm (natural) | 12.80 s | **8.98 s** |
+| Wan 2.2 text encode | 2.69 s | **0.78 s** |
+| host RAM for the encoder | 4 copies | 1 copy |
+
+Per-step is unchanged (505 / 290 ms) — this touches no DiT work. Wan's output
+is **bit-identical** to the four-replica baseline; Qwen's differs only as the
+bf16 -> fp32 encoder should (PNG 1,066,634 against 1,063,979 bytes).
+
+**Defect 1: multiprocessing rank is NOT the XLA ordinal.** Measured mapping on
+this host: worker 0 -> ordinal 2, 1 -> 0, 2 -> 3, 3 -> 1. Encoding on worker 0
+while broadcasting with `root_ordinal=0` therefore ships whichever process
+happens to be ordinal 0 — a zero placeholder — to everyone. Nothing raises,
+nothing is NaN, the image is merely different. It was caught only by diffing
+the output against a previous run (mean |diff| 0.136). difflet's own TPU code
+is unaffected because it derives rank from `parallel_mesh.get_tp_rank()`, which
+is ordinal-based; this was new code assuming the two agree.
+
+**Defect 2: a raise before a collective hangs every other rank.** The
+`prompt_too_long` check sat inside the encoder-only branch, so an over-long
+prompt — user input — would raise on one rank while three blocked on the
+collective until the engine's 10 s cancel timeout. Failures are now converted
+to a status code, broadcast with the embeddings, and re-raised identically
+everywhere. Verified on hardware: 4/4 ranks raise `prompt_too_long`, none hang
+(`benchmark/qwen_encode_broadcast_probe.py`).
+
+**Defect 3, found only by starting the server**: `smoke_request()` asserted all
+four stages on every replica, so startup failed outright with "did not
+initialize all stages" on the three ranks that no longer hold a text encoder.
+The text stage is now required only where it is meant to live. Neither the unit
+suite (no TPU serving coverage) nor the benchmark (it calls the stage methods
+directly, bypassing `smoke_request`) can catch this.
+
+**End-to-end serving validation.** `difflet serve` on 4 chips: health/ready 200
+after ~100 s, startup smoke passed, a real 1024x1024 / 20-step HTTP generation
+returned 200 in 8.75 s with a correct image, an over-long prompt returned
+400 `prompt_too_long` in 10 ms (the orchestrator's message, so it did traverse
+the broadcast), a normal request after that error returned 200 in 5.21 s with
+health/ready still 200, and SIGTERM shut down cleanly with no orphaned workers
+and the chips released. Zero tracebacks, segfaults or leak warnings in the log.
+
+**The residual risk is now a contract, not a bug.** Every replica must reach
+the encode collective for the same request in the same order. That holds
+because the resident-worker engine drives all replicas through one request at a
+time — but it is a correctness requirement of the engine now, where before the
+replicas were independent. Per-replica retry or partial cancellation would
+break it. The cancellation path was read but not exercised; its failure mode is
+bounded (cancel timeout, then worker recovery).
+
 ---
 
 # Handoff: state, context, and what is left
@@ -1122,9 +1378,9 @@ the next run fails with "Device or resource busy". `tpu-info` lists the PIDs.
 
 ## What is left, roughly by value
 
-**1. Numerical validation of the real model (Phase 5).** The 20B has only been
-checked for "finite" and "the image looks right". The cosine 1.000000 result is
-from a small config. `tests/numerical/` exists and DEVELOPER.md requires the
+**1. Numerical validation of the real models (Phase 5).** Neither the 20B nor
+Wan's 14B has been checked beyond "finite" and "the output looks right". The
+cosine 1.000000 result is from a small config. `tests/numerical/` exists and DEVELOPER.md requires the
 diffusers reference as the oracle — never TPU-vs-Trainium, since two
 independently-wrong implementations can agree.
 
@@ -1140,26 +1396,36 @@ gather_kv), cfg-parallel and sequence parallelism all raise
 ops surface already has `scatter_to_sequence_parallel_region` and friends, and
 activations at block boundaries are currently replicated on every rank.
 
-**4. Performance.** Two known items, both measured:
-   - The text encoder runs on the host. After the thread fix it is ~1 s, so it
-     is no longer the bottleneck, but it leaves the chips idle.
-   - Attention has no fused kernel. The TPU Pallas flash-attention kernel needs
-     jax 0.7.1, which requires Python >= 3.11 while this toolchain is on 3.10;
-     a standalone 3.12 (e.g. `uv python install`) would unblock it without
-     touching the system Python or the 3.10 Neuron venv.
+**4. Performance.**
+   - ~~Attention has no fused kernel.~~ **Done 2026-08-24** — the standalone
+     3.12 route works; see that status entry. Both models gained 1.7-2.0x.
+   - ~~The text encoder runs redundantly on every replica.~~ **Done
+     2026-08-24** — one rank encodes and broadcasts, in fp32. It still runs on
+     the host and still leaves the chips idle for ~2 s.
+   - The two row-parallel all-reduces are now a larger share of the step than
+     they were; sequence parallelism would convert them to reduce-scatters.
+   - Wan's VAE decode (36.67 s on host) is now larger than its entire denoise
+     loop, and is blocked on device by an unsupported negative index in
+     `AutoencoderKLWan` under torch_xla, not by memory.
 
 **5. Serving completeness.**
    - `difflet generate --backend tpu` is not wired; only `serve` is.
+   - Serving covers Qwen-Image only. Wan has a TPU application but no stage
+     adapter, so `serve` cannot run it; the benchmark adapter is Qwen-specific
+     for the same reason.
    - There is no `/v1/images/generations` endpoint — image generation goes
      through `/v1/chat/completions`. Adding the OpenAI Images shape would
      mirror what the Videos API already does.
    - No web UI ships with difflet. A standalone one exists outside the repo
      (page + server-side proxy, because difflet installs no CORS middleware).
 
-**6. More models.** Only Qwen-Image is ported. Wan, HunyuanVideo and LTX-2 have
-backend-neutral backbones and should follow the same path; Flux stays
-quarantined as the legacy NxDI fork. Each needs its `backends` tuple extended
-and a TPU branch in its entry factory.
+**6. More models.** Qwen-Image and Wan 2.2 are ported (see the 2026-08-23
+status entry). HunyuanVideo and LTX-2 have backend-neutral backbones and
+should follow the same path; Flux stays quarantined as the legacy NxDI fork.
+Each needs its `backends` tuple extended and a TPU branch in its entry
+factory. Wan's port is the better template of the two — it needed a
+checkpoint key rename and exercises RMSNorm/rotary/3D-RoPE, which Qwen-Image
+does not.
 
 **7. Artifact layout.** Exported artifacts are per-rank because each rank's
 weight shard differs. Separating graph from weights would let ranks share one

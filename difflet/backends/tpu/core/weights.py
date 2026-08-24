@@ -124,8 +124,38 @@ def load_sharded_state_dict(
     module.load_state_dict(sharded, strict=strict)
 
 
+def materialize_meta_(
+    module: nn.Module, device="cpu", dtype: torch.dtype | None = None
+) -> None:
+    """Give storage to meta tensors only, leaving real ones alone.
+
+    NOT ``Module.to_empty()``: that blanks buffers as well, and a module built
+    under ``init_empty_weights(include_buffers=False)`` keeps buffers it
+    computed for real in ``__init__`` — rotary tables, frequency grids.
+    Blanking those yields uninitialized positional embeddings, which corrupts
+    every output without raising anything.
+
+    ``dtype`` is applied here rather than after loading, and that is the
+    difference between fitting on a v5e chip and not: allocating fp32 and
+    converting the *incoming* tensor just upcasts it straight back, doubling
+    the per-rank footprint. Buffers keep their computed dtype — the rope math
+    runs in fp32 internally.
+    """
+    for sub in module.modules():
+        for name, param in list(sub._parameters.items()):
+            if param is not None and param.is_meta:
+                sub._parameters[name] = torch.nn.Parameter(
+                    torch.empty_like(param, device=device, dtype=dtype),
+                    requires_grad=param.requires_grad,
+                )
+        for name, buf in list(sub._buffers.items()):
+            if buf is not None and buf.is_meta:
+                sub._buffers[name] = torch.empty_like(buf, device=device)
+
+
 __all__ = [
     "load_sharded_state_dict",
+    "materialize_meta_",
     "narrow_to_rank",
     "shard_dim",
     "shard_state_dict",

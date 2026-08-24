@@ -40,7 +40,7 @@ def _make_adapter(name: str):
 
 
 def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
-            iters: int) -> BenchResult:
+            iters: int, natural_iters: int = 2) -> BenchResult:
     cfg = MATRIX[slug]
     adapter = _make_adapter(backend)
     res = BenchResult(
@@ -64,9 +64,14 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
             "TRAINIUM recipe — 'attention_cte' is a Neuron kernel and is NOT what "
             "ran here; the TPU backend uses scaled_dot_product_attention. The "
             "tp=4/cp=1 sharding IS accurate: the DiT is split across 4 v5e chips, "
-            "one worker process per chip. compile_seconds=0 means no AOT artifact "
-            "was built or reused, not that compilation is free — XLA compiles on "
-            "each process's first execution, which is inside e2e_cold.")
+            "one worker process per chip. Attention uses the Pallas fused kernel "
+            "(torch_xla.experimental.custom_kernel) above 32M score elements and "
+            "scaled_dot_product_attention below it. compile_seconds=0 means no AOT "
+            "artifact was built or reused, not that compilation is free — XLA "
+            "compiles on each process's first execution, inside e2e_cold. "
+            "step_latency is on a throughput basis (denoise wall clock / steps): "
+            "unsynced inter-step deltas under lazy XLA measure the enqueue rate, "
+            "not device time.")
     try:
         if not skip_download:
             adapter.prepare(cfg)
@@ -84,6 +89,10 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
                 res.throughput["steps/s"] = 1.0 / st.mean
         res.peak_device_mem_gb = g.get("peak_mem_gb")
         res.output = g.get("output")
+        # Carried through so a backend can publish the comparable number and
+        # still show what its own basis costs it. stage_seconds was previously
+        # computed by the adapters and then dropped on the floor here.
+        res.step_basis = g.get("step_basis") or ""
         # NOTE on per-step: the marginal-across-process method (run at 2 step
         # counts, subtract) is NOT used — each `difflet generate` reloads the
         # text encoder (5-11 GB) whose latency swings with OS page-cache warmth,
@@ -93,9 +102,40 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
         # (prints "trainium forward elapsed"); see each report.
         if iters > 0:
             warm = []
+            last = None
             for _ in range(iters):
-                warm.append(adapter.run_generate(cfg)["wall_seconds"])
+                last = adapter.run_generate(cfg)
+                warm.append(last["wall_seconds"])
             res.e2e_warm = Stats.from_samples(warm).__dict__
+            # Stage split and the alternative per-step bases come from a WARM
+            # iteration. Taking them from the cold generate folds XLA's
+            # first-execution compile into them -- it read as a 2.08 s/step
+            # "throughput" against a real 0.5 s.
+            if natural_iters > 0 and getattr(adapter, "supports_natural_mode", False):
+                # Same generate, no per-step sync: what a real serving loop
+                # actually delivers, as opposed to what the cross-device rule
+                # measures. Both are kept; neither replaces the other.
+                nat_wall, nat_step = [], []
+                for _ in range(max(1, natural_iters)):
+                    n = adapter.run_generate(cfg, sync_steps=False)
+                    nat_wall.append(n["wall_seconds"])
+                    if n.get("throughput_step_seconds") is not None:
+                        nat_step.append(n["throughput_step_seconds"])
+                res.e2e_warm_natural = Stats.from_samples(nat_wall).__dict__
+                if nat_step:
+                    res.step_latency_natural = Stats.from_samples(nat_step).__dict__
+            if last:
+                res.stage_seconds = last.get("stage_seconds") or {}
+                alt: dict = {}
+                if last.get("throughput_step_seconds") is not None:
+                    alt["throughput"] = last["throughput_step_seconds"]
+                # Only meaningful when the deltas were NOT synced; with a sync
+                # they are the same samples as step_latency, and reporting them
+                # as a second basis would invent a distinction that is not there.
+                if last.get("step_basis") == "throughput" and last.get("enqueue_step_seconds"):
+                    samples = last["enqueue_step_seconds"]
+                    alt["enqueue_mean"] = sum(samples) / len(samples)
+                res.step_latency_alt = alt
         res.status = "ok"
     except Exception as e:  # keep partial results + record the failure honestly
         res.status = "failed"
@@ -132,6 +172,10 @@ def main() -> int:
     p.add_argument("--skip-download", action="store_true")
     p.add_argument("--skip-compile", action="store_true",
                    help="reuse an existing compile cache")
+    p.add_argument("--natural-iters", type=int, default=2,
+                   help="extra warm iterations run WITHOUT the per-step device "
+                        "sync, reported as the natural basis (0 disables). Only "
+                        "used by adapters advertising supports_natural_mode.")
     p.add_argument("--iters", type=int, default=0,
                    help="extra warm end-to-end iterations (cold run always done)")
     args = p.parse_args()
@@ -148,7 +192,8 @@ def main() -> int:
     for slug in slugs:
         print(f"\n========== benchmarking {slug} ({MATRIX[slug].model_id}) ==========", flush=True)
         res = run_one(slug, args.backend, skip_download=args.skip_download,
-                      skip_compile=args.skip_compile, iters=args.iters)
+                      skip_compile=args.skip_compile, iters=args.iters,
+                      natural_iters=args.natural_iters)
         write_outputs(slug, res)
     return 0
 
