@@ -193,3 +193,52 @@ def test_non_persistent_buffers_are_not_expected_in_the_checkpoint(tmp_path):
     # the computed buffer keeps its computed value, untouched by the load
     assert torch.equal(module.rope, torch.ones(4))
     assert torch.equal(module.kept, torch.ones(2))
+
+
+def test_rename_maps_module_names_to_checkpoint_keys(tmp_path):
+    """Wan's FFN attribute names diverge from diffusers; the hook bridges it.
+
+    The rename runs module -> checkpoint, so a parameter that exists has
+    exactly one place to come from.
+    """
+    renamed = {f"ffn.net.0.proj.{leaf}": FULL[f"up.{leaf}"] for leaf in ("weight", "bias")}
+    renamed.update({f"ffn.net.2.{leaf}": FULL[f"down.{leaf}"] for leaf in ("weight", "bias")})
+    safetensors_torch.save_file(renamed, str(tmp_path / "model.safetensors"))
+
+    class _Ffn(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.ffn = nn.Module()
+            self.ffn.net_in = L.ColumnParallelLinear(8, 16, bias=True, gather_output=False)
+            self.ffn.net_out = L.RowParallelLinear(16, 8, bias=True, input_is_parallel=True)
+
+    pm.init_parallel_mesh(MeshSpec(tp=4))
+
+    def rename(name):
+        return name.replace(".net_in.", ".net.0.proj.").replace(".net_out.", ".net.2.")
+
+    module = _Ffn()
+    report = ckpt.load_checkpoint_into(
+        module, tmp_path, tp_size=4, tp_rank=1, rename=rename
+    )
+    assert report == {"missing": [], "unexpected": []}
+    # Sharding still follows _difflet_shard, not the renamed key.
+    assert torch.equal(module.ffn.net_in.weight, FULL["up.weight"][4:8])
+    assert torch.equal(module.ffn.net_out.weight, FULL["down.weight"][:, 4:8])
+
+
+def test_without_rename_the_same_module_reports_every_key_missing(tmp_path):
+    """The hook is load-bearing: without it nothing resolves, loudly."""
+    renamed = {f"ffn.net.0.proj.{leaf}": FULL[f"up.{leaf}"] for leaf in ("weight", "bias")}
+    renamed.update({f"ffn.net.2.{leaf}": FULL[f"down.{leaf}"] for leaf in ("weight", "bias")})
+    safetensors_torch.save_file(renamed, str(tmp_path / "model.safetensors"))
+
+    class _Ffn(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.ffn = nn.Module()
+            self.ffn.net_in = L.ColumnParallelLinear(8, 16, bias=True, gather_output=False)
+
+    pm.init_parallel_mesh(MeshSpec(tp=4))
+    with pytest.raises(ValueError, match="had no checkpoint entry"):
+        ckpt.load_checkpoint_into(_Ffn(), tmp_path, tp_size=4, tp_rank=0)

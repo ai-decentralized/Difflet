@@ -203,7 +203,9 @@ def _register_builtin_wan() -> None:
         detector=is_wan,
         default_parallel=DiffletParallelConfig(tp_degree=4),
         default_shape={"height": 480, "width": 832, "num_frames": 9},
-        backends=("trainium",),
+        # Wan is the second model on the TPU backend, single-expert by default
+        # (see difflet/models/wan/tpu_application.py on expert residency).
+        backends=("trainium", "tpu"),
     )
     class _WanRegistration:
         pass

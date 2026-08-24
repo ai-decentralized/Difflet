@@ -31,6 +31,27 @@ from benchmark.harness import BackendAdapter
 _REPLICA_TIMEOUT = 3600
 
 
+def _reported_steps(deltas, denoise_seconds, sync_steps):
+    """Per-step latencies the report should quote.
+
+    ``deltas`` comes from ``RealLoopStepTimer.deltas()`` and already excludes
+    step 0.
+
+    With ``sync_steps`` -- the default, and the cross-device method -- they are
+    real device time and are used as-is. Without it they are enqueue times, so
+    the loop is only resolvable in aggregate: every entry becomes the denoise
+    wall clock divided by the step count. That distribution is deliberately
+    degenerate -- identical mean/median/p90 -- because it is exactly as much as
+    the method can resolve, and a plausible-looking spread would be fiction.
+    Note it also absorbs step 0's share, including first-execution compile on a
+    cold process, so read it on warm iterations only.
+    """
+    if sync_steps or not deltas:
+        return list(deltas)
+    per_step = denoise_seconds / (len(deltas) + 1)
+    return [per_step] * len(deltas)
+
+
 def _worker(rank, world, spec_payload, cmd_q, reply_q):
     """One rank: bring up its chip, load the stages, then serve commands."""
     from torch_xla._internal import pjrt
@@ -80,18 +101,48 @@ def _worker(rank, world, spec_payload, cmd_q, reply_q):
     # backends, but under XLA's lazy execution that extra sync breaks
     # pipelining and slows the loop it is measuring — it is a different
     # workload, not just a different clock. Default off; set it to compare.
-    steps: list[float] = []
     inner = adapter._tpu_module
-    sync_steps = os.environ.get("DIFFLET_BENCH_SYNC_STEPS", "") not in ("", "0")
+    # Device-synced per step, DEFAULT ON, because that is the cross-device
+    # metric. benchmark/step_realloop.py defines it: "inter-step deltas of a
+    # real generate loop, cuda-synced, step 0 excluded", and trn2/trn3 were
+    # re-measured to match the H100 that way. A TPU number produced by any
+    # other rule is not comparable to the rows beside it, whatever else it
+    # might be worth.
+    #
+    # This was previously OFF, on the reasoning that forcing a sync breaks
+    # XLA's pipelining and so measures a different workload. That reasoning is
+    # sound, but the conclusion drawn from it was not: the unsynced deltas are
+    # not a different measure of device time, they are not device time at all.
+    # Under lazy XLA the Python loop enqueues faster than the chips execute, so
+    # an unsynced delta is the *enqueue rate* and the backlog is paid at the
+    # loop's final sync -- measured on Qwen-Image, 274.9 ms enqueued against
+    # 619.6 ms of real device time, which is how a step figure ended up in this
+    # report that was smaller than the model's own attention.
+    #
+    # The overlap XLA loses to the sync is real, and larger than an eager
+    # backend loses, so both numbers are recorded: `step_seconds` is the
+    # comparable synced one, `throughput_step_seconds` is the denoise wall
+    # clock divided by steps, and `enqueue_step_seconds` is the raw deltas.
+    # DIFFLET_BENCH_SYNC_STEPS=0 restores the old behaviour.
+    sync_steps = os.environ.get("DIFFLET_BENCH_SYNC_STEPS", "1") not in ("0", "false", "no")
+
+    from benchmark.harness import RealLoopStepTimer
+
+    # Mutable so a single worker can serve both bases without a reload: the
+    # comparable synced pass and the natural pass a real serving loop runs.
+    sync_now = {"on": sync_steps}
+
+    def _tpu_sync():
+        xm.mark_step()
+        if sync_now["on"]:
+            xm.wait_device_ops()
+
+    timer = RealLoopStepTimer(sync=_tpu_sync)
 
     class _Timed:
         def __call__(self, *args, **kwargs):
-            mark = time.monotonic()
             out = inner(*args, **kwargs)
-            xm.mark_step()
-            if sync_steps:
-                xm.wait_device_ops()
-            steps.append(time.monotonic() - mark)
+            timer.step()
             return out
 
         def __getattr__(self, item):
@@ -115,7 +166,8 @@ def _worker(rank, world, spec_payload, cmd_q, reply_q):
         cmd = cmd_q.get()
         if cmd["type"] == "shutdown":
             return
-        steps.clear()
+        sync_now["on"] = bool(cmd.get("sync_steps", sync_steps))
+        timer.stamps.clear()
         request = SimpleNamespace(
             prompt=spec.prompt, num_inference_steps=spec.steps,
             seed=spec.seed, guidance_scale=spec.guidance_scale, request_id="bench",
@@ -124,17 +176,30 @@ def _worker(rank, world, spec_payload, cmd_q, reply_q):
         text = adapter._encode_prompt(request.prompt)
         encode_s = time.monotonic() - wall
         mark = time.monotonic()
+        # _denoise ends by pulling the latents to the host, so this wall clock
+        # already includes every queued step -- it is real, unlike the deltas.
         latents = adapter._denoise(text, request)
         denoise_s = time.monotonic() - mark
         mark = time.monotonic()
         png = adapter._decode(latents)
         decode_s = time.monotonic() - mark
+        # A cheap visual check for changes that alter numerics: the metrics
+        # above stay finite and in range even when an image is wrong.
+        save_to = os.environ.get("DIFFLET_BENCH_SAVE_PNG")
+        if save_to and rank == 0:
+            Path(save_to).write_bytes(png)
         total = time.monotonic() - wall
+        steps = timer.deltas()
         if rank == 0:
             reply_q.put({
                 "type": "result", "wall_seconds": total, "load_seconds": load_seconds,
                 "encode_seconds": encode_s, "denoise_seconds": denoise_s,
-                "decode_seconds": decode_s, "step_seconds": list(steps),
+                "decode_seconds": decode_s,
+                # deltas() already drops step 0, so no further slicing here
+                "step_seconds": _reported_steps(steps, denoise_s, sync_now["on"]),
+                "enqueue_step_seconds": list(steps),
+                "throughput_step_seconds": denoise_s / max(len(steps) + 1, 1),
+                "step_basis": "synced" if sync_now["on"] else "natural",
                 "peak_mem_gb": peak_gb(), "png_bytes": len(png),
                 "latent_shape": list(latents.shape),
                 "finite": bool(latents.isfinite().all()),
@@ -261,16 +326,20 @@ class TpuAdapter(BackendAdapter):
             if "load_seconds" in reply:
                 self._load_seconds = reply["load_seconds"]
 
-    def run_generate(self, spec) -> dict:
+    #: This adapter can run the denoise loop without the per-step sync, so the
+    #: harness can report the natural basis alongside the comparable one.
+    supports_natural_mode = True
+
+    def run_generate(self, spec, sync_steps: bool = True) -> dict:
         self._ensure_started(spec)
         for queue in self._cmd_qs:
-            queue.put({"type": "generate"})
+            queue.put({"type": "generate", "sync_steps": sync_steps})
         reply = self._reply_q.get(timeout=_REPLICA_TIMEOUT)
         return {
             "wall_seconds": reply["wall_seconds"],
             "load_seconds": reply["load_seconds"],
-            # Harness rule: drop step 0, which carries first-call compilation.
-            "step_seconds": reply["step_seconds"][1:],
+            # RealLoopStepTimer.deltas() already excludes step 0.
+            "step_seconds": reply["step_seconds"],
             "peak_mem_gb": reply.get("peak_mem_gb"),
             "output": {
                 "shape": reply["latent_shape"], "dtype": reply["dtype"],
@@ -283,6 +352,11 @@ class TpuAdapter(BackendAdapter):
                 "denoise": reply["denoise_seconds"],
                 "vae_decode": reply["decode_seconds"],
             },
+            # Kept alongside the comparable synced figure so the XLA-specific
+            # tracing/execution overlap it gives up stays visible.
+            "step_basis": reply.get("step_basis"),
+            "throughput_step_seconds": reply.get("throughput_step_seconds"),
+            "enqueue_step_seconds": reply.get("enqueue_step_seconds", []),
         }
 
     def shutdown(self) -> None:

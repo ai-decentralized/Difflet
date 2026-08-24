@@ -1,22 +1,32 @@
-"""TPU application for the Qwen-Image DiT transformer.
+"""TPU application for one Wan DiT expert.
 
-The Trainium counterpart is ``NeuronQwenImageTransformerApplication`` in
-``difflet/backends/trainium/qwen_image/transformer.py``. Both wrap the *same*
-modeling — ``difflet/models/qwen_image/modeling_qwen_image.py`` — and differ
-only in the compile/load lifecycle underneath.
+The Trainium counterpart is ``NeuronWanBackboneApplication`` in
+``difflet/backends/trainium/wan/backbone.py``. Both wrap the *same* modeling —
+``difflet/models/wan/modeling_wan.py`` — and differ only in the compile/load
+lifecycle underneath. This is the second model on the TPU backend and the
+first that reuses an existing hardware-neutral config class rather than
+restating the geometry.
+
+"One expert" is the unit deliberately: Wan 2.2 A14B ships two 14B experts
+(``transformer`` and ``transformer_2``) selected by a timestep boundary, and
+each is an independent 28.6 GiB bf16 checkpoint. Making the expert the
+application means the caller decides how many are resident, which is the
+decision that determines whether the model fits — at tp=4 one expert is
+7.2 GiB per chip against a v5e's 16 GB, and two are 14.3 GiB, leaving less
+than the DiT forward's own transient footprint.
 
 Weights are never materialized unsharded: the module is built under
 ``accelerate.init_empty_weights`` so nothing is allocated, then each rank
-reads only its own slices off disk. At tp=4 that is 9.5 GiB per rank rather
-than 38 GiB, and the four ranks together would otherwise need ~152 GiB of
-host RAM.
+reads only its own slices off disk.
 
-Phase 4 of docs/plans/2026-08-16-tpu-backend-support.md.
+Follows Phase 4 of docs/plans/2026-08-16-tpu-backend-support.md, extended to
+Wan.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 import torch
@@ -29,10 +39,25 @@ from difflet.pipeline.parallel_mesh import MeshSpec
 
 logger = logging.getLogger(__name__)
 
-CHECKPOINT_PREFIX = "transformer."
+# The module→checkpoint direction of ``wan.checkpoint.backbone``'s renames.
+# difflet's WanFeedForward uses explicit net_in/net_out attributes where
+# diffusers wraps the projections in a ModuleList with non-trivial indices.
+_MODULE_TO_CHECKPOINT: list[tuple[str, str]] = [
+    (r"\.ffn\.net_in\.", ".ffn.net.0.proj."),
+    (r"\.ffn\.net_out\.", ".ffn.net.2."),
+]
 
 
-class TpuQwenImageTransformerApplication(TpuApplicationBase):
+def checkpoint_key(name: str) -> str:
+    """Checkpoint key holding the parameter named ``name`` on the module."""
+    for pattern, replacement in _MODULE_TO_CHECKPOINT:
+        name = re.sub(pattern, replacement, name)
+    return name
+
+
+class TpuWanTransformerApplication(TpuApplicationBase):
+    """One Wan DiT expert, sharded across the TP group."""
+
     def __init__(self, *, model_path, config):
         super().__init__(config=config)
         self.model_path = Path(model_path)
@@ -50,42 +75,31 @@ class TpuQwenImageTransformerApplication(TpuApplicationBase):
         )
 
     def build_module(self) -> torch.nn.Module:
-        from difflet.models.qwen_image.modeling_qwen_image import (
-            _QwenImageTransformerTraceModule,
-        )
+        from difflet.models.wan.modeling_wan import WanTransformer3DModel
 
         try:
             from accelerate import init_empty_weights
         except ImportError:  # pragma: no cover - accelerate is a hard dep
             init_empty_weights = None
 
+        dtype = getattr(self.config, "torch_dtype", None)
         if init_empty_weights is None:
-            return _QwenImageTransformerTraceModule(self.config)
+            return WanTransformer3DModel(self.config, dtype=dtype)
 
-        # include_buffers=False is required, not cosmetic: the trace module
-        # precomputes the static RoPE in __init__, which reads pos_freqs data.
-        # On meta buffers that raises "Cannot copy out of meta tensor".
+        # include_buffers=False for the same reason as Qwen-Image: the 3D RoPE
+        # frequency grid is computed for real in __init__, and on meta buffers
+        # that arithmetic raises "Cannot copy out of meta tensor".
         with init_empty_weights(include_buffers=False):
-            return _QwenImageTransformerTraceModule(self.config)
-
-    @staticmethod
-    def _materialize_meta_(module: torch.nn.Module, device="cpu", dtype=None) -> None:
-        """Give storage to meta tensors only — see ``weights.materialize_meta_``.
-
-        Kept as a method because the reasoning it carries (never ``to_empty()``,
-        cast at allocation not after) is load-bearing for this class; the
-        implementation is shared with the other TPU components.
-        """
-        materialize_meta_(module, device=device, dtype=dtype)
+            return WanTransformer3DModel(self.config, dtype=dtype)
 
     def _prepare_module(self) -> torch.nn.Module:
         if self.module is not None:
             return self.module
 
-        # build_module reads the tp size to size its shards, so the mesh has
-        # to exist first. Doing it here rather than relying on the caller:
-        # an uninitialized mesh silently degrades to tp=1 and builds a model
-        # four times too large.
+        # WanAttention reads the tp size in its own __init__ (via
+        # _safe_tp_size) to size its head shard, and that guard falls back to
+        # tp=1 rather than raising — so an uninitialized mesh here does not
+        # fail, it silently builds a model four times too large.
         try:
             parallel_mesh.get_mesh_spec()
         except RuntimeError:
@@ -93,18 +107,17 @@ class TpuQwenImageTransformerApplication(TpuApplicationBase):
 
         module = self.build_module()
         spec = self._mesh()
-        self._materialize_meta_(
-            module, dtype=getattr(self.config, "torch_dtype", None)
-        )
+        dtype = getattr(self.config, "torch_dtype", None)
+        materialize_meta_(module, dtype=dtype)
         load_checkpoint_into(
             module,
             self.model_path,
             tp_size=spec.tp,
             tp_rank=parallel_mesh.get_tp_rank(),
-            prefix=CHECKPOINT_PREFIX,
-            dtype=getattr(self.config, "torch_dtype", None),
+            dtype=dtype,
+            rename=checkpoint_key,
             # strict: a parameter with no checkpoint entry would otherwise keep
-            # the uninitialized storage _materialize_meta_ just gave it, and
+            # the uninitialized storage materialize_meta_ just gave it, and
             # propagate garbage silently.
             strict=True,
         )
@@ -118,19 +131,23 @@ class TpuQwenImageTransformerApplication(TpuApplicationBase):
     def get_example_inputs(self) -> tuple:
         """Fixed-shape inputs that pin the exported graph.
 
-        Must match ``dit_input_contract`` — the pipeline builds real inputs to
-        this shape, and an exported graph only accepts what it was traced on.
+        Wan's DiT takes unpatchified 5D latents, not a packed sequence: the
+        patch embedding is a Conv3d inside the model.
         """
         cfg = self.config
         dtype = getattr(cfg, "torch_dtype", torch.bfloat16)
         batch = int(getattr(cfg, "batch_size", 1))
         return (
-            torch.zeros(batch, cfg.image_seq_len, int(cfg.in_channels), dtype=dtype),
+            torch.zeros(
+                batch,
+                int(cfg.in_channels),
+                cfg.latent_frames,
+                cfg.latent_height,
+                cfg.latent_width,
+                dtype=dtype,
+            ),
             torch.zeros(batch, dtype=dtype),
-            torch.zeros(batch, int(cfg.text_seq_len), int(cfg.joint_attention_dim),
-                        dtype=dtype),
-            None,   # encoder_hidden_states_mask — the modeling drops it
-            None,   # guidance — Qwen-Image is guidance-distilled
+            torch.zeros(batch, int(cfg.text_seq_len), int(cfg.text_dim), dtype=dtype),
         )
 
     def forward(self, *args, **kwargs):
@@ -148,4 +165,4 @@ class TpuQwenImageTransformerApplication(TpuApplicationBase):
         return self.module(*args, **kwargs)
 
 
-__all__ = ["TpuQwenImageTransformerApplication"]
+__all__ = ["TpuWanTransformerApplication", "checkpoint_key"]

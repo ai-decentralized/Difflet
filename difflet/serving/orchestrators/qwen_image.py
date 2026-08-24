@@ -248,6 +248,14 @@ class QwenImageServingRequestValidator:
         return self._tokenizer
 
 
+#: Encode outcomes broadcast alongside the embeddings so every rank fails the
+#: same way. A raise on the encoding rank alone would hang the others on the
+#: collective.
+_ENCODE_OK = 0
+_ENCODE_TOO_LONG = 1
+_ENCODE_FAILED = 2
+
+
 def _backend_is_tpu() -> bool:
     from difflet.backends import current_backend
 
@@ -346,7 +354,16 @@ class QwenImageServingStageAdapter:
         ).output
 
     def smoke_request(self) -> DiffletGenerateRequest:
-        if not (self.text_app and self.tokenizer and self.denoise_app and self.vae_app):
+        # On TPU the text encoder is deliberately resident on ONE rank, which
+        # broadcasts the embeddings (see _load_text_stage_tpu), so requiring it
+        # everywhere would fail startup on three replicas out of four. The
+        # denoiser and VAE are still per-rank and are still required.
+        needs_text_stage = not getattr(self, "_tpu", False) or getattr(
+            self, "_tpu_is_encoder", True
+        )
+        if needs_text_stage and not (self.text_app and self.tokenizer):
+            raise RuntimeError("Qwen shared-worker load did not initialize the text stage")
+        if not (self.denoise_app and self.vae_app):
             raise RuntimeError("Qwen shared-worker load did not initialize all stages")
         if self.active_profile is None:
             raise RuntimeError("Qwen serving profile is not loaded")
@@ -493,15 +510,30 @@ class QwenImageServingStageAdapter:
 
     def _load_text_stage_tpu(self, profile: ServingProfile) -> None:
         import torch
+        import torch_xla.runtime as xr
         from transformers import AutoTokenizer, Qwen2_5_VLForConditionalGeneration
 
         assert self.model_dir is not None
         enc_path = str(Path(self.model_dir) / "text_encoder")
-        # Host-side and bf16. fp32 would be ~28 GiB per replica and four
-        # replicas OOM'd a 188 GiB host outright; the checkpoint is bf16
-        # anyway, so fp32 buys precision that is not in the weights.
+        # ONE replica holds the encoder and broadcasts the embeddings, rather
+        # than four computing the same tensor from the same prompt. That is
+        # what makes fp32 affordable: one copy is ~28 GiB, four were what OOM'd
+        # a 188 GiB host and forced bf16 here. fp32 is worth having -- measured
+        # on this VM (an AMD EPYC with no AVX512-BF16, so bf16 matmul is
+        # emulated) a 512-token encode is 3.6 s in fp32 against 16.1 s in bf16.
+        #
+        # It must be XLA *ordinal* 0, not worker index 0: the two are a
+        # scrambled mapping (measured: worker 0 -> ordinal 2, 1 -> 0, 2 -> 3,
+        # 3 -> 1), and encoding on the wrong one silently broadcasts a zero
+        # placeholder to every rank -- it does not fail, it generates a
+        # different image.
+        self._tpu_is_encoder = int(xr.global_ordinal()) == 0
+        if not self._tpu_is_encoder:
+            self.text_app = None
+            self.tokenizer = None
+            return
         self.text_app = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            enc_path, torch_dtype=torch.bfloat16
+            enc_path, torch_dtype=torch.float32
         ).eval()
         self.tokenizer = AutoTokenizer.from_pretrained(
             str(Path(self.model_dir) / "tokenizer")
@@ -549,31 +581,90 @@ class QwenImageServingStageAdapter:
         self.vae_config = vae.config
 
     def _encode_prompt_tpu(self, prompt: str) -> dict[str, object]:
-        import torch
+        """Encode on ordinal 0, then broadcast to every replica.
 
-        if self.text_app is None or self.tokenizer is None:
-            raise RuntimeError("Qwen prompt encoder is not loaded")
-        text = _QWEN_TEMPLATE.format(prompt)
-        encoded = self.tokenizer(text, padding=False, truncation=False, return_tensors="pt")
-        if int(encoded.input_ids.shape[1]) > _ENC_SEQ:
+        Every replica needs the identical tensor, so three of the four encodes
+        were pure waste. The broadcast payload is small next to a second of
+        host matmul.
+
+        Every replica MUST reach this collective, in the same order, or the
+        request deadlocks -- which holds here because the resident-worker
+        engine drives all replicas through the same request in lockstep.
+        """
+        import torch
+        import torch_xla
+        import torch_xla.core.xla_model as xm
+
+        device = torch_xla.device()
+        width = self._tpu_joint_dim()
+        states = torch.zeros(1, _TEXT_SEQ_LEN, width, dtype=torch.bfloat16)
+        seq, status = 0, _ENCODE_OK
+
+        if getattr(self, "_tpu_is_encoder", True):
+            # The encoding rank must NOT raise before the collective below.
+            # Every other rank is already committed to reaching it, so an
+            # early raise here hangs them until the engine's cancel timeout --
+            # and `prompt_too_long` makes that reachable from user input. So
+            # failures are converted to a status code, broadcast with the
+            # embeddings, and re-raised identically on every rank.
+            try:
+                if self.text_app is None or self.tokenizer is None:
+                    raise RuntimeError("Qwen prompt encoder is not loaded")
+                text = _QWEN_TEMPLATE.format(prompt)
+                encoded = self.tokenizer(
+                    text, padding=False, truncation=False, return_tensors="pt"
+                )
+                if int(encoded.input_ids.shape[1]) > _ENC_SEQ:
+                    status = _ENCODE_TOO_LONG
+                else:
+                    with torch.no_grad():
+                        out = self.text_app(
+                            input_ids=encoded.input_ids,
+                            attention_mask=encoded.attention_mask,
+                            output_hidden_states=True,
+                        )
+                    # Same slice as the Trainium path: drop the template
+                    # prefix, keep the valid tokens, then pad to the compiled
+                    # text length.
+                    hidden = out.hidden_states[-1]
+                    valid = int(encoded.attention_mask.sum())
+                    used = hidden[:, _QWEN_DROP_IDX:valid]
+                    seq = int(used.shape[1])
+                    states[:, :seq] = used.to(torch.bfloat16)
+            except Exception:  # noqa: BLE001 - re-raised below on every rank
+                logger.exception("qwen.tpu_encode_failed")
+                status = _ENCODE_FAILED
+                seq = 0
+
+        meta = torch.tensor([seq, status], dtype=torch.int32)
+        payload = [states.to(device), meta.to(device)]
+        xm.collective_broadcast(payload, root_ordinal=0)
+        xm.mark_step()
+        states = payload[0].cpu()
+        seq, status = (int(v) for v in payload[1].cpu().tolist())
+
+        if status == _ENCODE_TOO_LONG:
             raise prompt_too_long(f"Qwen prompt exceeds encoder bucket {_ENC_SEQ}")
-        with torch.no_grad():
-            out = self.text_app(
-                input_ids=encoded.input_ids,
-                attention_mask=encoded.attention_mask,
-                output_hidden_states=True,
-            )
-        # Same slice as the Trainium path: drop the template prefix, keep the
-        # valid tokens, then pad to the compiled text length.
-        hidden = out.hidden_states[-1]
-        valid = int(encoded.attention_mask.sum())
-        used = hidden[:, _QWEN_DROP_IDX:valid]
-        seq = used.shape[1]
-        states = torch.zeros(1, _TEXT_SEQ_LEN, used.shape[-1], dtype=torch.bfloat16)
-        states[:, :seq] = used.to(torch.bfloat16)
+        if status != _ENCODE_OK:
+            raise RuntimeError("Qwen prompt encoding failed on the encoder rank")
+
+        # The mask is derived rather than broadcast: bool is an awkward
+        # collective dtype and the valid length is one int.
         mask = torch.zeros(1, _TEXT_SEQ_LEN, dtype=torch.bool)
         mask[:, :seq] = True
         return {"encoder_hidden_states": states, "encoder_hidden_states_mask": mask}
+
+    def _tpu_joint_dim(self) -> int:
+        """Width of the DiT's text input, known on every rank from the config."""
+        if self.denoise_app is not None:
+            return int(self.denoise_app.config.joint_attention_dim)
+        import json
+
+        assert self.model_dir is not None
+        body = json.loads(
+            (Path(self.model_dir) / "transformer" / "config.json").read_text()
+        )
+        return int(body["joint_attention_dim"])
 
     def _denoise_tpu(self, text: dict[str, object], request: DiffletGenerateRequest):
         import numpy as np
