@@ -594,3 +594,97 @@ and `git diff --check` passed. The broader local Qwen CLI run additionally had 9
 environment-only failures because this workstation lacks Torch/NumPy and cannot
 write `~/.cache`; those Neuron-backed paths were already verified on the remote
 Trainium environment.
+
+Wan 2.2 on the TPU backend (2026-08-23):
+- [x] Port Wan 2.2 A14B to the TPU backend without touching `modeling_wan.py`.
+- [x] Decide expert residency from measurement rather than from the checkpoint's
+  advertised size.
+- [x] Share `materialize_meta_` and add a checkpoint key-rename hook instead of
+  copying the Qwen-Image lifecycle.
+- [x] Benchmark against the other device folders and record the configuration.
+- Rationale: the port is the first real test of whether `difflet.ops` lets a
+  second backend reuse the modeling layer unchanged; Wan exercises RMSNorm,
+  rotary and 3D RoPE, which Qwen-Image does not, so it is the stronger test.
+- Verification: 1095 of 1095 parameters map to the checkpoint with zero missing
+  and zero unexpected keys, checked on meta tensors before any device work.
+  One expert is 6.985 GB per chip at tp=4; two would be 14.3 GB of the
+  15.748 GB a v5e exposes, so `enable_transformer_2` defaults to False,
+  matching Trainium serving. Denoise 18.19 s warm at 899 ms/step, output a
+  coherent 9-frame video of the prompt. Unit suite 2137 passed / 3 failed, the
+  three failing identically on a stashed clean tree.
+
+TPU attention, benchmark methodology, and a corrected claim (2026-08-24):
+- [x] Profile the per-step gap against H100/trn2 rather than attributing it.
+- [x] Wire in the Pallas fused attention kernel and prove the switch is free.
+- [x] Make the TPU benchmark harness comparable with the other devices.
+- [x] Correct the Qwen-Image per-step figure and everything built on it.
+- Rationale: self-attention was 68% of the block's time for 43% of its FLOPs
+  while the projections already ran at 82-90% MFU, so the kernel was the whole
+  gap, not the silicon. And a cross-device table is only a table if every row
+  was measured the same way.
+- Verification: fused attention is 6.7-7.8x faster than SDPA at the real shapes
+  and closer to an fp32 reference (2.76e-3 against 3.31e-3). Per step, Wan
+  899 -> 610 ms and Qwen-Image 861 -> 510 ms on the synced basis. The rule now
+  lives once in `harness.py::RealLoopStepTimer`; syncing is the default because
+  that is what every other device folder does, with the natural basis reported
+  alongside rather than instead.
+- Findings: the fused kernel accepts a sequence length that is not a multiple
+  of its block and pads with zeros that join the softmax -- at Wan's 4680 that
+  is 5.4e-2 relative error with nothing raised. Padding to 512 with segment ids
+  fixes it at no measurable cost. Separately, the recorded Qwen-Image figure of
+  0.276 s/step was an enqueue rate, not device time: under lazy XLA an unsynced
+  loop measures how fast Python enqueues and the backlog is paid at the final
+  sync. Re-measuring reproduces both ends of that report exactly (274.9 /
+  619.6 / 860.5 ms), so "level with an H100 PCIe" was not supported at the
+  time. Corrections are in `benchmark/v5e/`.
+
+Numerical validation against the diffusers oracle (2026-08-24):
+- [x] Check both real models against the upstream implementation with real
+  weights, never against another difflet backend.
+- [x] Record a same-dtype control so the numbers are readable.
+- [x] Land the gate as `tests/numerical/test_tpu_vs_diffusers.py`.
+- Rationale: the fused kernel changed the numerics and nothing in the repo
+  would have caught a regression; DEVELOPER.md requires the diffusers reference
+  as the oracle because two independently wrong implementations can agree.
+- Verification: Qwen-Image 0.99984 and Wan 0.99861 cosine against upstream
+  fp32, against a bf16 floor of 0.99985 / 0.99873 measured on upstream itself.
+  difflet adds 1.021x and 1.042x on top of what the dtype alone costs. Fused
+  and SDPA differ by 1.7e-6 and 4.0e-6 of cosine, in both directions.
+- Findings: this directory's usual `cosine >= 0.999` gate is unreachable for a
+  raw DiT output in bf16 -- it fails upstream itself on Wan -- so the gate is
+  relative to the control. Writing it the absolute way first was useful: it
+  failed at 0.99891 and forced the question of whether that was a defect. It is
+  not; two implementations deviating from fp32 independently by e would sit
+  ~1.41e apart, and difflet is 0.91e / 0.38e from the control. The residual is
+  nevertheless unexplained at the 1e-3 level, and this covers a single forward
+  rather than a trajectory.
+
+Encode once and broadcast, and Wan serving on TPU (2026-08-24):
+- [x] Stop every replica encoding the same prompt; encode on one and broadcast.
+- [x] Wire `difflet serve` to run Wan through the Videos API on TPU.
+- [x] Validate both end to end against a live server, not only the harness.
+- Rationale: three of four encodes were computing the same tensor from the same
+  prompt, and that redundancy is what forced bf16 on a host where bf16 matmul
+  is emulated. Wan serving then needed no new stage runners -- they only touch
+  the backend-neutral `WanOrchestrator`.
+- Verification: Qwen-Image text encode 5.76 -> 2.00 s and e2e warm 17.44 ->
+  13.32 s; Wan 2.69 -> 0.78 s with bit-identical output. `difflet serve` on
+  four chips returned ready 200, a 1024x1024 HTTP image in 8.75 s, an async
+  video job in 35 s with a 213,855 B mp4, `/v1/videos/sync` in 56 s, 400
+  `profile_mismatch` on a shape mismatch, `deleted: true` then 404 on the
+  content endpoint, and a clean SIGTERM with the chips released.
+- Findings: three defects, none of which raised anything obviously wrong.
+  Multiprocessing rank is not the XLA ordinal (measured 0->2, 1->0, 2->3,
+  3->1), so broadcasting from "rank 0" ships a zero placeholder to everyone and
+  merely changes the image; caught only by diffing output against a previous
+  run. A raise before a collective hangs every other rank until the cancel
+  timeout, and `prompt_too_long` made that reachable from user input. And
+  `smoke_request` asserted all four stages on every replica, so startup failed
+  outright on the three that no longer hold a text encoder -- reachable only by
+  starting the server, since the benchmark calls the stage methods directly.
+  Wan serving then exposed a fourth: the decoder writes media into the
+  request's storage, so four replicas each wrote a staging file, the primary's
+  reply completed the request, its staging was torn down, and the three
+  stragglers tripped over their own deleted files -- three tracebacks per
+  request, after `run_complete`, with the request succeeding anyway. Skipping
+  the decode on non-primary replicas takes an async job from 62 s to 35 s.

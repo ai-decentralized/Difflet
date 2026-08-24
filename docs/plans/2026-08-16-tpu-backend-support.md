@@ -1370,6 +1370,63 @@ real encoder output. The VAE and text encoder are not checked at all. And the
 residual against the same-dtype reference is unexplained at the 1e-3 level;
 "consistent with accumulation order" is an argument, not a proof.
 
+### 2026-08-24 — Wan serving on TPU, and a replica-fanout bug it exposed
+
+`difflet serve` now runs Wan on four v5e chips through the Videos API: async
+create/poll/download, the sync endpoint, list and delete, all verified against
+a live server.
+
+**The stage runners needed no TPU branch.** They only ever touch
+`adapter._require_application().pipeline`, which is the backend-neutral
+`WanOrchestrator`, so the work was confined to building one on TPU:
+`TpuWanApplication.load_eager()` puts the sharded DiT on the chips, wraps it in
+a host round-trip, gives the orchestrator a broadcast text encoder, and leaves
+the VAE on the host. The serving adapter then needed the eager-path branches
+Qwen-Image already had — no compile specs, no bindings to validate, and a
+runtime plan carrying `artifact_id=None` / `placement="tpu"` rather than a
+digest.
+
+**The bug this exposed is worth the entry.** Every request logged three
+`FileNotFoundError` tracebacks on a staging `.part.mp4`, *after* the engine had
+already reported `run_complete` — and the request succeeded anyway, which is
+exactly why it would have survived unnoticed.
+
+The resident worker's contract is that "replicas > 0 are silent: they execute
+the identical work so the sharded model's collectives complete, but only rank 0
+owns the reply channel". That holds for pure compute. The Wan decoder is not
+pure compute: the VAE is on the host, it issues no collective, and it *writes
+media into the request's storage*. So four replicas each decoded and each wrote
+a staging file; the primary's reply completed the request, the request's
+staging was torn down, and the three stragglers tripped over their own
+now-deleted files.
+
+This never happened on Trainium because a Trainium worker is one process owning
+four cores. One process per chip is what makes it reachable, so it arrived with
+this feature.
+
+Fixed by publishing `DIFFLET_REPLICA_RANK` from the worker and skipping the
+decode entirely on non-primary replicas. Measured: three `generate_error`
+tracebacks per request go to zero, and an async job goes **62 s -> 35 s**,
+because three redundant 21 s host VAE decodes were competing for the same CPU.
+The smoke-output validation is skipped on those replicas for the same reason —
+they deliberately produce no file, while still running load, encode and denoise
+because those *are* collective work.
+
+**The general shape, for the next stage that has a side effect:** a stage that
+touches anything outside its own process — storage, a socket, a counter — must
+ask whether it is the primary replica. Pure compute must not.
+
+Two missing runtime dependencies also surfaced, both unrelated to TPU and both
+only reachable through video serving: `av` (PyAV) for encoding and
+`python-multipart` for the form parser, whose absence surfaced as an opaque
+"request form is not valid" 400.
+
+Verified end to end: ready 200 after ~4 min; async job completed and returned a
+213,855 B mp4 with real inter-frame motion; `/v1/videos/sync` returned 302,044 B
+in 56 s; a shape mismatch returned 400 `profile_mismatch`; DELETE returned
+`deleted: true` and the content endpoint then 404'd; SIGTERM shut down cleanly
+with no orphans and the chips released.
+
 ---
 
 # Handoff: state, context, and what is left
@@ -1466,9 +1523,9 @@ activations at block boundaries are currently replicated on every rank.
 
 **5. Serving completeness.**
    - `difflet generate --backend tpu` is not wired; only `serve` is.
-   - Serving covers Qwen-Image only. Wan has a TPU application but no stage
-     adapter, so `serve` cannot run it; the benchmark adapter is Qwen-specific
-     for the same reason.
+   - ~~Serving covers Qwen-Image only.~~ **Done 2026-08-24** — `difflet serve`
+     runs Wan through the Videos API on TPU. The benchmark adapter is still
+     Qwen-specific, so Wan's numbers come from a standalone runner.
    - There is no `/v1/images/generations` endpoint — image generation goes
      through `/v1/chat/completions`. Adding the OpenAI Images shape would
      mirror what the Videos API already does.
