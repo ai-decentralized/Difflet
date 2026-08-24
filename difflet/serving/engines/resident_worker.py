@@ -995,6 +995,14 @@ def _worker_main(
     # the heartbeat pipe. Two writers on one reply queue would race, and the
     # engine would read whichever landed first.
     is_primary = replica_rank == 0
+    # Published so a stage runner can tell whether it is the replica whose
+    # reply is kept. Stages that are pure compute must still run everywhere --
+    # the sharded model's collectives need every rank -- but a stage with a
+    # side effect outside the process, such as writing media to the request's
+    # storage, must not run four times. Set for every backend: on Trainium
+    # there is a single worker, so it reads 0 and nothing changes.
+    os.environ["DIFFLET_REPLICA_RANK"] = str(replica_rank)
+    os.environ["DIFFLET_REPLICA_COUNT"] = str(replica_count)
     reply_q = _RankedReplyQueue(reply_q, replica_rank, primary=is_primary)
     if status_conn is None:
         status_conn = _NullConnection()
