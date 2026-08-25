@@ -530,6 +530,51 @@ def phase_step(model: str, label: str, cfg: dict, spec: Spec, out: dict,
 # ------------------------------------------------------------------ driver
 
 
+def _wan_compiled_dir_name(label: str) -> str:
+    """Mirror ``WanOrchestrator._stage_compiled_dir``'s transformer naming."""
+    cfg = WAN_CONFIGS[label]
+    spec = SPECS["wan"]
+    cpm = "" if cfg["cp_mode"] == "gather_kv" else cfg["cp_mode"]
+    cfgtok = "cfg" if cfg["cfg_parallel_enabled"] else ""
+    sptok = "sp" if cfg["sp_enabled"] else ""
+    return (f"wan_transformer_tp{cfg['tp_degree']}cp{cfg['cp_degree']}"
+            f"{cpm}{cfgtok}{sptok}_h{spec['height']}w{spec['width']}"
+            f"f{spec['num_frames']}")
+
+
+def _maybe_prune(model: str, label: str, result: dict, state: dict) -> None:
+    """With --prune: drop a finished config's compiled artifacts to bound disk.
+
+    A config is pruned once every phase is present and error-free AND every DP
+    row that loads its artifact (same tp base) has also finished — the shared
+    VAE dir is never pruned during the sweep. Deleting means a later re-run of
+    that config recompiles from scratch; the measurement JSONs/logs survive.
+    """
+    if not state.get("prune"):
+        return
+    if result.get("errors"):
+        return
+    if any(p not in result for p in _phases_for(model, label)):
+        return
+    base = label if label not in DP_ROWS else DP_ROWS[label][0]
+    if model == "wan":
+        if any(not state["done"].get(dp) for dp, b in DP_ROWS.items()
+               if b == base):
+            return
+        target = Path("~/.cache/difflet").expanduser() / _wan_compiled_dir_name(base)
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+            print(f"    pruned cache {target.name}", flush=True)
+        state["done"][label] = True
+
+
+def _phases_for(model: str, label: str) -> list[str]:
+    phases = ["compile", "generate"]
+    if label not in DP_ROWS:
+        phases.append("step")
+    return phases
+
+
 def _load_result(model: str, label: str) -> dict:
     path = ART_ROOT / model / f"{label}.json"
     if path.exists():
@@ -543,7 +588,8 @@ def _save_result(model: str, label: str, result: dict) -> None:
     path.write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
 
 
-def run_model(model: str, only: list[str] | None, phases: list[str] | None) -> int:
+def run_model(model: str, only: list[str] | None, phases: list[str] | None,
+              prune: bool = False) -> int:
     spec = SPECS[model]
     configs = _CFG_REGISTRY[model]
     labels = [l for l in configs if not only or l in only]
@@ -552,6 +598,7 @@ def run_model(model: str, only: list[str] | None, phases: list[str] | None) -> i
     out_dir = ART_ROOT / model / "out"
     log_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
+    state: dict = {"prune": prune, "done": {}}
 
     for label in labels:
         result = _load_result(model, label)
@@ -601,6 +648,7 @@ def run_model(model: str, only: list[str] | None, phases: list[str] | None) -> i
             _save_result(model, label, result)
             print(f"    [{model}:{label}] ERROR: {exc}", flush=True)
             continue
+        _maybe_prune(model, label, result, state)
 
     write_summary(model)
     return 0
@@ -679,6 +727,10 @@ def main() -> int:
     p.add_argument("--phase", nargs="*",
                    help="restrict to these phases (compile/generate/step); "
                         "default: every phase missing from the saved JSON")
+    p.add_argument("--prune", action="store_true",
+                   help="delete a config's compiled artifacts once measured "
+                        "(bounds disk use; the config would recompile if "
+                        "re-run)")
     p.add_argument("--step-worker", nargs=2, metavar=("MODEL", "LABEL"),
                    help=argparse.SUPPRESS)  # internal: in-process measurement
     args = p.parse_args()
@@ -686,7 +738,7 @@ def main() -> int:
         return _WORKERS[args.step_worker[0]](args.step_worker[1])
     if not args.model:
         p.error("--model is required")
-    return run_model(args.model, args.only, args.phase)
+    return run_model(args.model, args.only, args.phase, prune=args.prune)
 
 
 if __name__ == "__main__":
