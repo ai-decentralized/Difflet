@@ -54,3 +54,4 @@ log-neuron-cc.txt
 # Flux parallel sweep working logs (compile/generate logs and PNGs are machine-local;
 # the distilled anchors live in benchmark/trn2/flux_*.json)
 artifacts/flux_parallel_sweep/
+artifacts/parallel_phase_sweep/
