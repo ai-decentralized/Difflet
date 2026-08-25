@@ -111,7 +111,11 @@ FLUX_CONFIGS: dict[str, dict] = {
     "tp2": _cfg(tp=2),
     "tp2sp": _cfg(tp=2, sp=True),
 }
-WAN_CONFIGS: dict[str, dict] = dict(FLUX_CONFIGS, tp2cfg=_cfg(tp=2, cfg=True))
+WAN_CONFIGS: dict[str, dict] = dict(
+    FLUX_CONFIGS,
+    tp2cfg=_cfg(tp=2, cfg=True),
+    tp2cfgsp=_cfg(tp=2, cfg=True, sp=True),
+)
 
 # label -> (artifact base, dp degree). Compile/per-step are the base's.
 DP_ROWS: dict[str, tuple[str, int]] = {
@@ -260,10 +264,23 @@ def _drop_page_cache() -> bool:
         return False
 
 
+def _generate_env(cfg: dict) -> dict | None:
+    """Pin cores for under-filling configs (the CLI itself never sets these).
+
+    ``difflet generate`` for in-process models (flux) inherits the ambient
+    NEURON_RT_* env; with nothing set, a world-2 load bootstraps a 4-rank
+    group and the ranks beyond world_size never find a root — the same issue
+    the flux sweep and the DP router work around by pinning. Full-host
+    configs keep the ambient environment.
+    """
+    return _worker_env(cfg) if world_size(cfg) < 4 else None
+
+
 def phase_generate(model: str, label: str, cfg: dict, spec: Spec, out: dict,
                    log_dir: Path, out_dir: Path) -> None:
     """One cold + WARM_ITERS warm generates, with per-stage load breakdowns."""
     difflet = _venv_difflet()
+    env = _generate_env(cfg)
 
     dropped = _drop_page_cache()
     if not dropped:
@@ -275,7 +292,8 @@ def phase_generate(model: str, label: str, cfg: dict, spec: Spec, out: dict,
         cold_note = "page cache dropped (sync; echo 3 > drop_caches)"
     ext = spec["output_ext"]
     cmd = _generate_cmd(difflet, cfg, spec, str(out_dir / f"{label}_cold.{ext}"))
-    wall, text = _run(cmd, log_dir / f"{label}_gen_cold.log", GENERATE_TIMEOUT)
+    wall, text = _run(cmd, log_dir / f"{label}_gen_cold.log", GENERATE_TIMEOUT,
+                      env=env)
     out["e2e_cold"] = _parse_generate(text, wall)
     out["e2e_cold"]["note"] = cold_note
 
@@ -285,7 +303,7 @@ def phase_generate(model: str, label: str, cfg: dict, spec: Spec, out: dict,
         cmd = _generate_cmd(
             difflet, cfg, spec, str(out_dir / f"{label}_warm{i}.{ext}"))
         wall, text = _run(
-            cmd, log_dir / f"{label}_gen_warm{i}.log", GENERATE_TIMEOUT)
+            cmd, log_dir / f"{label}_gen_warm{i}.log", GENERATE_TIMEOUT, env=env)
         walls.append(wall)
         breakdowns.append(_parse_generate(text, wall))
     out["e2e_warm"] = {
