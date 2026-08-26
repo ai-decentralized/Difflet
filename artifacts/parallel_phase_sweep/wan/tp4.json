@@ -1,0 +1,123 @@
+{
+ "model": "wan",
+ "label": "tp4",
+ "parallel": {
+  "tp_degree": 4,
+  "cp_degree": 1,
+  "cp_mode": "gather_kv",
+  "cfg_parallel_enabled": false,
+  "sp_enabled": false,
+  "dp_degree": 1
+ },
+ "spec": {
+  "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+  "revision": "5be7df9619b54f4e2667b2755bc6a756675b5cd7",
+  "steps": 20,
+  "guidance": 4.0,
+  "seed": 42,
+  "height": 480,
+  "width": 832,
+  "num_frames": 9,
+  "prompt": "a cat walking through a garden"
+ },
+ "compile": {
+  "wall_s": 6448.7,
+  "cache_hit": false,
+  "breakdown_s": {
+   "text_encoder_t5": {
+    "module_load_s": 0.498,
+    "hlo_generate_s": 2.0,
+    "priority_hlo_compile_s": 30.748,
+    "all_hlo_compile_s": 0.001,
+    "build_total_s": 62.782,
+    "other_s": 29.534
+   },
+   "transformer": {
+    "module_load_s": 2.523,
+    "hlo_generate_s": 23.941,
+    "priority_hlo_compile_s": 71.885,
+    "all_hlo_compile_s": 0.003,
+    "build_total_s": 263.748,
+    "other_s": 165.395
+   },
+   "vae_decoder": {
+    "module_load_s": 0.369,
+    "hlo_generate_s": 0.75,
+    "priority_hlo_compile_s": 5499.078,
+    "all_hlo_compile_s": 0.001,
+    "build_total_s": 5510.87,
+    "other_s": 10.672
+   },
+   "wall_total_s": 5837.4
+  }
+ },
+ "e2e_cold": {
+  "stages": [
+   {
+    "stage": "stage_0",
+    "load_s": 87.012
+   },
+   {
+    "stage": "stage_1",
+    "load_s": 234.987
+   },
+   {
+    "stage": "vae_decoder",
+    "load_s": 27.719
+   }
+  ],
+  "weights_load_total_s": 349.718,
+  "weights_shard_total_s": 0.0,
+  "wall_total_s": 425.592,
+  "compute_and_overhead_s": 75.874,
+  "note": "page cache dropped (sync; echo 3 > drop_caches)"
+ },
+ "e2e_warm": {
+  "wall_s": {
+   "n": 3,
+   "mean": 88.47711845999947,
+   "median": 87.99392969399923,
+   "min": 87.89278524699876,
+   "max": 89.54464043900043,
+   "p90": 89.54464043900043,
+   "std": 0.755980569206797
+  },
+  "stages": [
+   {
+    "stage": "stage_0",
+    "load_s_median": 6.342,
+    "shard_s_median": 0.0
+   },
+   {
+    "stage": "stage_1",
+    "load_s_median": 8.852,
+    "shard_s_median": 0.0
+   },
+   {
+    "stage": "vae_decoder",
+    "load_s_median": 27.257,
+    "shard_s_median": 0.0
+   }
+  ],
+  "weights_load_total_s_median": 42.311,
+  "runs": [
+   89.545,
+   87.994,
+   87.893
+  ]
+ },
+ "step": {
+  "build_s": 44.9,
+  "generate_wall_s": 37.2,
+  "finite": true,
+  "step_s": {
+   "n": 39,
+   "mean": 0.576584,
+   "median": 0.575549,
+   "min": 0.574183,
+   "max": 0.620341,
+   "p90": 0.576792,
+   "std": 0.007176
+  }
+ }
+}

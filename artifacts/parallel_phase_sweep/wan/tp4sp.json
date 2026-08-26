@@ -1,0 +1,115 @@
+{
+ "model": "wan",
+ "label": "tp4sp",
+ "parallel": {
+  "tp_degree": 4,
+  "cp_degree": 1,
+  "cp_mode": "gather_kv",
+  "cfg_parallel_enabled": false,
+  "sp_enabled": true,
+  "dp_degree": 1
+ },
+ "spec": {
+  "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+  "revision": "5be7df9619b54f4e2667b2755bc6a756675b5cd7",
+  "steps": 20,
+  "guidance": 4.0,
+  "seed": 42,
+  "height": 480,
+  "width": 832,
+  "num_frames": 9,
+  "prompt": "a cat walking through a garden"
+ },
+ "compile": {
+  "wall_s": 1086.4,
+  "cache_hit": false,
+  "breakdown_s": {
+   "text_encoder_t5": {
+    "module_load_s": 0.438,
+    "hlo_generate_s": 1.021,
+    "priority_hlo_compile_s": 0.313,
+    "all_hlo_compile_s": 0.001,
+    "build_total_s": 32.02,
+    "other_s": 30.248
+   },
+   "transformer": {
+    "module_load_s": 2.123,
+    "hlo_generate_s": 23.382,
+    "priority_hlo_compile_s": 63.963,
+    "all_hlo_compile_s": 0.003,
+    "build_total_s": 253.928,
+    "other_s": 164.457
+   },
+   "wall_total_s": 285.949
+  }
+ },
+ "e2e_cold": {
+  "stages": [
+   {
+    "stage": "stage_0",
+    "load_s": 86.524
+   },
+   {
+    "stage": "stage_1",
+    "load_s": 234.992
+   },
+   {
+    "stage": "vae_decoder",
+    "load_s": 27.392
+   }
+  ],
+  "weights_load_total_s": 348.908,
+  "weights_shard_total_s": 0.0,
+  "wall_total_s": 417.212,
+  "compute_and_overhead_s": 68.304,
+  "note": "page cache dropped (sync; echo 3 > drop_caches)"
+ },
+ "e2e_warm": {
+  "wall_s": {
+   "n": 3,
+   "mean": 89.4668039833329,
+   "median": 88.69592172500052,
+   "min": 88.34740697400048,
+   "max": 91.35708325099768,
+   "p90": 91.35708325099768,
+   "std": 1.3441806464010315
+  },
+  "stages": [
+   {
+    "stage": "stage_0",
+    "load_s_median": 6.772,
+    "shard_s_median": 0.0
+   },
+   {
+    "stage": "stage_1",
+    "load_s_median": 8.659,
+    "shard_s_median": 0.0
+   },
+   {
+    "stage": "vae_decoder",
+    "load_s_median": 28.678,
+    "shard_s_median": 0.0
+   }
+  ],
+  "weights_load_total_s_median": 43.29,
+  "runs": [
+   88.696,
+   88.347,
+   91.357
+  ]
+ },
+ "step": {
+  "build_s": 44.0,
+  "generate_wall_s": 36.8,
+  "finite": true,
+  "step_s": {
+   "n": 39,
+   "mean": 0.578687,
+   "median": 0.578077,
+   "min": 0.575465,
+   "max": 0.621665,
+   "p90": 0.579316,
+   "std": 0.00711
+  }
+ }
+}
