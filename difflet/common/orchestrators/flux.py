@@ -41,6 +41,7 @@ def build_pipeline(
         dtype=_torch_bfloat16(),
         height=profile.height,
         width=profile.width,
+        shapes=profile.shapes,
         compile_cache_dir=profile.cache_dir,
         revision=profile.revision,
         local_files_only=True,
@@ -83,6 +84,7 @@ def build_compile_plan(
         height=profile.height,
         width=profile.width,
         num_frames=profile.num_frames,
+        shapes=profile.shapes,
         revision=source.resolved_source_id,
         application_kwargs=application_kwargs or None,
     )
