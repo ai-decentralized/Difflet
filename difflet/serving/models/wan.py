@@ -155,14 +155,22 @@ class WanServingRequestValidator:
             raise profile_mismatch("request model does not match the loaded Wan profile")
         if request.output_format != "mp4":
             raise invalid_extra_body("Wan serving only supports MP4 output")
-        if (
-            request.height != profile.height
-            or request.width != profile.width
-            or request.video is None
-            or request.video.num_frames != profile.num_frames
-            or request.video.fps != profile.output_fps
-        ):
+        if request.video is None or request.video.fps != profile.output_fps:
             raise profile_mismatch("request video shape does not match Wan serving profile")
+        # Strict membership in the compiled bucket set: the NxD router only
+        # accepts exactly-compiled shapes, so anything else is rejected here
+        # (with the allowed set) instead of surfacing a runtime ValueError.
+        requested = (request.height, request.width, request.video.num_frames)
+        if requested not in profile.shape_set():
+            allowed = [
+                "x".join(str(d) for d in shape if d is not None)
+                for shape in profile.canonical_shapes()
+            ]
+            raise profile_mismatch(
+                "request video shape "
+                f"{'x'.join(str(d) for d in requested if d is not None)} is not in the "
+                f"Wan serving profile's compiled shape set {allowed}"
+            )
         validate_guidance_scale(request, maximum=_MAX_GUIDANCE_SCALE)
         if request.video.guidance_scale_2 is not None:
             raise invalid_extra_body(
@@ -374,11 +382,15 @@ class WanServingStageAdapter:
             )
         binding = runtime.artifacts.require("generation")
         application = _build_application(runtime.source, runtime.profile)
+        # Warm every compiled bucket at startup (one forward per shape via the
+        # application's warmup loop) so the first request at ANY profile shape
+        # sees steady-state latency. Single-shape profiles keep the old
+        # behavior of skipping warmup (the startup smoke covers their one NEFF).
         application.load(
             str(binding.path),
             start_rank_id=0,
             local_ranks_size=runtime.profile.world_size,
-            skip_warmup=True,
+            skip_warmup=not runtime.profile.shapes,
         )
         self.application = application
         if runtime.profile.host_vae:
@@ -386,11 +398,14 @@ class WanServingStageAdapter:
         else:
             decoder_binding = runtime.artifacts.require("decoder")
             vae_app = _build_neuron_vae(runtime.source, runtime.profile)
+            # The Wan VAE decoder genuinely has one bucket per shape (unlike
+            # HunyuanVideo's tile-fixed decoder), so multi-shape profiles warm
+            # it the same way as the backbone.
             vae_app.load(
                 str(decoder_binding.path),
                 start_rank_id=0,
                 local_ranks_size=runtime.profile.world_size,
-                skip_warmup=True,
+                skip_warmup=not runtime.profile.shapes,
             )
             self.vae_app = vae_app
         self.runtime = runtime
@@ -516,17 +531,26 @@ def _validate_profile(profile: ServingProfile) -> None:
     if profile.dtype.lower().removeprefix("torch.") not in {"bf16", "bfloat16"}:
         raise ValueError("Wan resident serving requires bfloat16")
     spatial_multiple = _VAE_SPATIAL_SCALE * _PATCH_SIZE
-    for value, name in ((profile.height, "height"), (profile.width, "width")):
-        if type(value) is not int or value <= 0 or value % spatial_multiple:
+    for height, width, num_frames in profile.canonical_shapes():
+        for value, name in ((height, "height"), (width, "width")):
+            if type(value) is not int or value <= 0 or value % spatial_multiple:
+                raise ValueError(
+                    f"Wan serving {name} must be a positive integer divisible by "
+                    f"{spatial_multiple}"
+                )
+        if type(num_frames) is not int or num_frames <= 0:
+            raise ValueError("Wan serving num_frames must be a positive integer")
+        if (num_frames - 1) % _VAE_TEMPORAL_SCALE:
             raise ValueError(
-                f"Wan serving {name} must be a positive integer divisible by {spatial_multiple}"
+                "Wan serving num_frames must equal 4n+1 for exact causal VAE reconstruction"
             )
-    if type(profile.num_frames) is not int or profile.num_frames <= 0:
-        raise ValueError("Wan serving num_frames must be a positive integer")
-    if (profile.num_frames - 1) % _VAE_TEMPORAL_SCALE:
-        raise ValueError(
-            "Wan serving num_frames must equal 4n+1 for exact causal VAE reconstruction"
-        )
+    if profile.shapes:
+        largest = profile.canonical_shapes()[0]
+        if (profile.height, profile.width, profile.num_frames) != largest:
+            raise ValueError(
+                "Wan serving profile height/width/num_frames must equal the "
+                "largest shape of the compiled shape set"
+            )
     if profile.output_fps != _FPS:
         raise ValueError(f"Wan video profile requires {_FPS} FPS")
     parallel = profile.parallel
@@ -557,6 +581,7 @@ def _compile_spec(
         height=profile.height,
         width=profile.width,
         num_frames=profile.num_frames,
+        shapes=profile.shapes,
         revision=source.resolved_source_id,
         application_kwargs=_application_kwargs(),
     )
@@ -579,16 +604,20 @@ def _compile_specs(
     generation = _compile_spec(source, profile)
     if profile.host_vae:
         return (generation,)
+    # v2: the decoder identity carries the canonical shape SET (K=1 uses the
+    # same list form) instead of a single height/width/num_frames.
+    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+    profile_shapes = profile.shapes or ((profile.height, profile.width, profile.num_frames),)
+    shapes_list = [list(shape) for shape in canonicalize_shapes(profile_shapes)]
     decoder_identity = CompileArtifactIdentity.from_cache_inputs(
         {
-            "compile_contract_version": 1,
+            "compile_contract_version": 2,
             "component_id": "decoder",
             "model_type": _MODEL_TYPE,
             "model_id": source.model_id,
             "resolved_source_id": source.resolved_source_id,
-            "height": profile.height,
-            "width": profile.width,
-            "num_frames": profile.num_frames,
+            "shapes": shapes_list,
             "dtype": profile.dtype,
             "component_tp_degree": 1,
             "component_world_size": profile.world_size,
@@ -625,6 +654,7 @@ def _build_application(source: ResolvedModelSource, profile: ServingProfile):
         parallel=profile.parallel,
         dtype=_torch_bfloat16(),
         shape=profile.shape_dict(),
+        shapes=profile.canonical_shapes() if profile.shapes else None,
         **_application_kwargs(),
     )
 
@@ -782,6 +812,8 @@ def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
         height=profile.height,
         width=profile.width,
         num_frames=int(profile.num_frames),
+        # PIXEL frames per shape; the config derives per-bucket latents itself.
+        compile_shapes=profile.canonical_shapes() if profile.shapes else None,
     )
     decoder = NeuronWanVAEDecoderApplication(
         model_path=vae_path,
