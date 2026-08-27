@@ -3,9 +3,20 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NEURON_VENV="/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference"
-PYTHON_BIN="${PYTHON_BIN:-${NEURON_VENV}/bin/python}"
+if [[ -z "${PYTHON_BIN:-}" ]]; then
+  if [[ -x "${ROOT}/.venv/bin/python" ]]; then
+    PYTHON_BIN="${ROOT}/.venv/bin/python"
+  elif [[ -x "${NEURON_VENV}/bin/python" ]]; then
+    PYTHON_BIN="${NEURON_VENV}/bin/python"
+  else
+    PYTHON_BIN="python3"
+  fi
+fi
 
-export PATH="${NEURON_VENV}/bin:${PATH}"
+VENV_BIN="$(dirname "${PYTHON_BIN}")"
+if [[ -d "${VENV_BIN}" ]]; then
+  export PATH="${VENV_BIN}:${PATH}"
+fi
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 export TORCH_DISABLE_ADDR2LINE="${TORCH_DISABLE_ADDR2LINE:-1}"
 export NEURON_RT_LOG_LEVEL="${NEURON_RT_LOG_LEVEL:-ERROR}"

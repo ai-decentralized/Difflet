@@ -369,6 +369,21 @@ All scripts auto-set the Neuron venv on `PATH`, the project on `PYTHONPATH`, and
 `NEURON_RT_NUM_CORES`. The M2.5 scripts use a 115 GB peak-RSS gate
 (`DIFFLET_M25{B,C}_PEAK_RSS_MAX_GB`) to avoid OOM on the 4-core spike host.
 
+**Environment.** `./scripts/setup_env.sh` builds the reference environment at `<repo>/.venv`
+from `requirements-neuron.lock` (recent Neuron DLAMIs no longer ship the old
+`/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference` venv). Scripts default to the legacy `/opt`
+venv path; when it is absent, export `PYTHON_BIN=<repo>/.venv/bin/python` (the flux smoke
+scripts fall back to `<repo>/.venv` automatically). Keep the lock in sync with the venv —
+regenerate after any toolchain change with:
+
+```bash
+.venv/bin/pip freeze --exclude-editable > requirements-neuron.lock
+```
+
+Identical pins are what make `~/.cache/difflet` compile caches portable across hosts: the cache
+key includes the Python minor version and the torch / neuronx-cc / neuronx-distributed /
+diffusers / transformers versions, so any drift silently forces a full recompile.
+
 Run unit tests directly:
 
 ```bash
