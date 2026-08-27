@@ -384,6 +384,10 @@ Identical pins are what make `~/.cache/difflet` compile caches portable across h
 key includes the Python minor version and the torch / neuronx-cc / neuronx-distributed /
 diffusers / transformers versions, so any drift silently forces a full recompile.
 
+Known-bad pin: `neuronx-cc==2.27.5334.0` fails with an internal compiler error
+(`[NCC_ISMP902] Simplifier error: is_subset()`) on the Flux CLIP text encoder; the lock pins
+`2.26.6360.0`, which compiles everything cleanly.
+
 Run unit tests directly:
 
 ```bash
