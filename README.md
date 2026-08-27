@@ -97,6 +97,9 @@ source .venv/bin/activate
 huggingface-cli login
 ```
 
+See [QUICKSTART.md](QUICKSTART.md) for a verified step-by-step walkthrough of
+environment setup, CLI generation, and HTTP serving.
+
 ## Quick start
 
 Generate an image or video in a single command with `difflet run`. It downloads the weights,
