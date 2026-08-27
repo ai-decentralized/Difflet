@@ -79,7 +79,10 @@ Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-p
   presented as 4 logical NeuronCores under the Trn2 default `LNC=2`). Other Trn2 shapes should
   work; the tensor-parallel degree must divide the number of visible NeuronCores.
 - **Runtime** — a Neuron PyTorch 2.9 environment with `neuronx-cc`, `neuronx-distributed`, `nki`,
-  `nkilib`, `torch-neuronx`, and `libneuronxla`. The reference development image bundles all of these at `/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/`.
+  `nkilib`, `torch-neuronx`, and `libneuronxla`. `./scripts/setup_env.sh` builds it at
+  `<repo>/.venv` from `requirements-neuron.lock` (recent Neuron DLAMI releases no longer ship
+  the old `/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/` venv). A `Dockerfile` building the
+  same environment is provided for container-based setups.
 - **Python** — 3.10+.
 
 ### Install
@@ -87,9 +90,9 @@ Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-p
 ```bash
 git clone git@github.com:ai-decentralized/Difflet.git
 cd Difflet
-source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
-# This installs the `difflet` CLI on your `PATH`.
-pip install -e .
+# Builds .venv from requirements-neuron.lock (Neuron toolchain + difflet CLI).
+./scripts/setup_env.sh
+source .venv/bin/activate
 # Setup your huggingface credential
 huggingface-cli login
 ```
