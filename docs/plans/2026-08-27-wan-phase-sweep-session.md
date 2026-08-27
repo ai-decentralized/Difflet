@@ -62,6 +62,12 @@ diffusers  0.38.0                         （与记录一致）
 ## 4. 剩余与节奏
 
 - 剩余：tp2、tp2sp、tp2cfg、tp2cfgsp、dp2tp2、dp2tp2sp 排队中。
+- **tp2cp2ulysses 设备执行失败（待补测）**：冷生成阶段报
+  `alltoall cannot be supported without Mesh algorithm`——AMI 自带的 libneuronxla
+  2.2.14584 不支持 mesh alltoall。挂住的 worker 将被 driver 的 2h 超时杀掉
+  （~11:25 UTC），sweep 自动继续 tp2 等（均不需要 alltoall）。
+  补测方案：升级 libneuronxla → 2.2.17544 后 `--only tp2cp2ulysses`，
+  并跑 tp2 step 对照（存 `tp2_libneuronxla17544_control.json`）量化 runtime 差异。
 - **tp2cp2ring 已修复待补测**：其 ring 内核 `nkilib.experimental.attention.ring_attention_fwd`
   在公开 index 的所有 wheel（cc 2.22-2.27 / nki 0.1-0.6 / nxd / nxd-inference /
   torch-neuronx）中都不存在，8/25 FLUX 旧机能跑通说明旧机栈另有来源。已从
@@ -70,8 +76,9 @@ diffusers  0.38.0                         （与记录一致）
   导入 / `[2]` 索引 / difflet 路径已验证（该内核只在 ring 配置的 trace 时经
   nki 0.5.0 → cc 2.24 编译，不影响其余 10 行）。**补测命令（主 sweep 结束后）**：
   `sudo -n docker exec -d wan_sweep bash
-  /home/ec2-user/Difflet/artifacts/parallel_phase_sweep/run_ring_gapfill.sh`
-  （`--only tp2cp2ring`，避免 resume bug 重测其他行的 e2e。）
+  /home/ec2-user/Difflet/artifacts/parallel_phase_sweep/run_gapfill.sh`
+  （主 sweep EXIT 后触发；stage1=tp2cp2ring 同 runtime 补测，
+  stage2=升级 libneuronxla 后补测 ulysses，stage3=tp2 对照。）
 - 实测节奏：单配置 ≈ 编译 16-23min + 测量 ~20min；ETA 全部完成 **UTC 15:00-17:00**。
 - 监控：每 30 分钟自动检查（失败自动续跑/重建容器），完成时自动拉回 JSON、校验、
   写 FLUX+Wan 合成报告并 push；每 6 小时强制 push 检查点文档（本文档滚动更新）。
@@ -84,3 +91,5 @@ diffusers  0.38.0                         （与记录一致）
 - **05:52 最终栈启动**；07:36 tp4 四阶段完成（63.8s / 581.1ms）。
 - 08:0x tp4sp 完成（65.2s / 612.0ms）；08:46 tp2cp2 编译完（1387s）、测量中。
 - 09:3x tp2cp2ring 编译失败：缺 nkilib.experimental.attention（公开 index 无此模块，见 §4）；已 vendor GitHub nki-library 修复，待主 sweep 结束后补测。tp2cp2ulysses 编译正常推进。
+
+- 09:36 ulysses 冷生成设备错误（alltoall 需 Mesh，libneuronxla 2.2.14584 不支持）；10:1x run_gapfill.sh 就绪（ring 同 runtime + ulysses 升级后补测 + tp2 对照），文档已推送。
