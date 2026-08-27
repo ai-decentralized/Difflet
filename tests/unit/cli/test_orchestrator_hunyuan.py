@@ -130,11 +130,45 @@ def test_run_stage_internal_unknown_raises():
 # ----------------------------------------------------------------- helpers
 
 def test_stage_compiled_dir_names():
+    # Schema v5: dirs are <cache>/<component>/<sha256[:16]>; the manifest
+    # inside is the authoritative record. Assert scheme + stability +
+    # sensitivity, not literal names.
     orch = HunyuanVideoOrchestrator(_hv_args(cache_dir="/c", tp_degree=4, cp_degree=2))
-    assert orch._stage_compiled_dir("clip", orch.args) == Path("/c/hunyuan_video_clip")
-    assert orch._stage_compiled_dir("llama", orch.args) == Path("/c/hunyuan_video_llama_seq351")
-    assert orch._stage_compiled_dir("generate", orch.args) == \
-        Path("/c/hunyuan_video_dit_tp4cp2_h320w512f61")
+    for stage, component in (
+        ("clip", "hunyuan_video_clip"),
+        ("llama", "hunyuan_video_llama"),
+        ("generate", "hunyuan_video_dit"),
+    ):
+        path = orch._stage_compiled_dir(stage, orch.args)
+        assert path.parent == Path("/c") / component
+        assert len(path.name) == 16 and int(path.name, 16) >= 0
+        # deterministic across calls
+        assert orch._stage_compiled_dir(stage, orch.args) == path
+
+    # shape changes move the generate artifact; clip is shape-independent
+    other = HunyuanVideoOrchestrator(_hv_args(cache_dir="/c", tp_degree=4, cp_degree=2, height=384))
+    assert orch._stage_compiled_dir("generate", other.args) != orch._stage_compiled_dir(
+        "generate", orch.args
+    )
+    assert orch._stage_compiled_dir("clip", other.args) == orch._stage_compiled_dir(
+        "clip", orch.args
+    )
+
+
+def test_stage_compiled_dir_shape_set_is_order_invariant():
+    a = HunyuanVideoOrchestrator(_hv_args(cache_dir="/c", shapes="320x512x61,320x512x33"))
+    b = HunyuanVideoOrchestrator(_hv_args(cache_dir="/c", shapes="320x512x33,320x512x61"))
+    dup = HunyuanVideoOrchestrator(
+        _hv_args(cache_dir="/c", shapes="320x512x33,320x512x61,320x512x33")
+    )
+    single = HunyuanVideoOrchestrator(_hv_args(cache_dir="/c"))
+    assert a._stage_compiled_dir("generate", a.args) == b._stage_compiled_dir("generate", b.args)
+    assert a._stage_compiled_dir("generate", a.args) == dup._stage_compiled_dir(
+        "generate", dup.args
+    )
+    assert a._stage_compiled_dir("generate", a.args) != single._stage_compiled_dir(
+        "generate", single.args
+    )
 
 
 def test_stage_compiled_dir_unknown_raises():
@@ -239,7 +273,9 @@ def test_stage_clip_generate_saves_clip_pt(monkeypatch, tmp_path):
 
     args = _hv_args(stage_mode="generate", work_dir=str(tmp_path),
                     cache_dir=str(tmp_path))
-    HunyuanVideoOrchestrator(args)._stage_clip(args)
+    orch = HunyuanVideoOrchestrator(args)
+    orch._finish_stage_compile("clip", args, orch._stage_compiled_dir("clip", args))
+    orch._stage_clip(args)
     assert (tmp_path / "clip.pt").exists()
 
 
@@ -295,7 +331,9 @@ def test_stage_llama_generate_saves_llama_pt(monkeypatch, tmp_path):
     _setup_llama(monkeypatch, FakeLlama)
     args = _hv_args(stage_mode="generate", work_dir=str(tmp_path),
                     cache_dir=str(tmp_path))
-    HunyuanVideoOrchestrator(args)._stage_llama(args)
+    orch = HunyuanVideoOrchestrator(args)
+    orch._finish_stage_compile("llama", args, orch._stage_compiled_dir("llama", args))
+    orch._stage_llama(args)
     assert (tmp_path / "llama.pt").exists()
 
 
@@ -348,7 +386,9 @@ def test_stage_generate_runs_and_saves_pt(monkeypatch, tmp_path):
     out = tmp_path / "out.png"  # non-mp4 -> .pt branch
     args = _hv_args(stage_mode="generate", work_dir=str(tmp_path),
                     cache_dir=str(tmp_path), output=str(out))
-    HunyuanVideoOrchestrator(args)._stage_generate(args)
+    orch = HunyuanVideoOrchestrator(args)
+    orch._finish_stage_compile("generate", args, orch._stage_compiled_dir("generate", args))
+    orch._stage_generate(args)
     assert (tmp_path / "out.pt").exists()
 
 
@@ -372,5 +412,7 @@ def test_stage_generate_mp4_branch(monkeypatch, tmp_path):
     out = tmp_path / "out.mp4"
     args = _hv_args(stage_mode="generate", work_dir=str(tmp_path),
                     cache_dir=str(tmp_path), output=str(out))
-    HunyuanVideoOrchestrator(args)._stage_generate(args)
+    orch = HunyuanVideoOrchestrator(args)
+    orch._finish_stage_compile("generate", args, orch._stage_compiled_dir("generate", args))
+    orch._stage_generate(args)
     assert not (tmp_path / "out.pt").exists()

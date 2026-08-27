@@ -1,7 +1,76 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 from abc import ABC, abstractmethod
+from pathlib import Path
+
+STAGE_MANIFEST_FILENAME = "manifest.json"
+# Kept in lockstep with difflet.pipeline.compile_cache.MANIFEST_SCHEMA_VERSION
+# semantics: v5 = canonical "shapes" list identity.
+STAGE_MANIFEST_SCHEMA_VERSION = 5
+
+
+def stage_cache_key(cache_inputs: dict) -> str:
+    raw = json.dumps(cache_inputs, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def hashed_stage_dir(cache_root: Path, component_prefix: str, cache_inputs: dict) -> Path:
+    """Pure-hash artifact dir: <cache>/<component_prefix>/<sha256[:16]>.
+
+    The authoritative, human-readable content record is the manifest.json
+    written into the dir (see write_stage_manifest / `difflet cache ls`).
+    """
+    return Path(cache_root).expanduser() / component_prefix / stage_cache_key(cache_inputs)
+
+
+def write_stage_manifest(path: Path, cache_inputs: dict) -> None:
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    data = {
+        "schema_version": STAGE_MANIFEST_SCHEMA_VERSION,
+        "cache_key": stage_cache_key(cache_inputs),
+        "cache_inputs": cache_inputs,
+    }
+    with (path / STAGE_MANIFEST_FILENAME).open("w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+
+
+def has_valid_stage_manifest(path: Path, cache_inputs: dict) -> bool:
+    manifest = Path(path) / STAGE_MANIFEST_FILENAME
+    try:
+        with manifest.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return False
+    if data.get("schema_version") != STAGE_MANIFEST_SCHEMA_VERSION:
+        return False
+    return data.get("cache_inputs") == cache_inputs
+
+
+def stage_toolchain_versions() -> dict:
+    from difflet.pipeline.compile_cache import toolchain_versions
+
+    return toolchain_versions()
+
+
+def canonical_shapes_list(args: argparse.Namespace, default_shape: tuple[int, ...]):
+    """Canonical shapes list for stage identity: --shapes set, or 1-entry list
+    from --height/--width[/--num-frames] with per-model defaults."""
+    shapes = parse_shapes_arg(getattr(args, "shapes", None))
+    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+    if shapes is None:
+        h = args.height or default_shape[0]
+        w = args.width or default_shape[1]
+        if len(default_shape) == 3:
+            shapes = [(h, w, getattr(args, "num_frames", None) or default_shape[2])]
+        else:
+            shapes = [(h, w)]
+    return [list(shape) for shape in canonicalize_shapes(shapes)]
 
 
 def parse_shapes_arg(value: str | None) -> list[tuple[int, ...]] | None:

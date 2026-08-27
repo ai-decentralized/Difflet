@@ -16,7 +16,16 @@ import sys
 from pathlib import Path
 
 from difflet.common.orchestrators import qwen_image as qwen_common
-from difflet.cli.orchestrators.base import ModelOrchestrator, cp_mode_token
+from difflet.cli.orchestrators.base import (
+    ModelOrchestrator,
+    canonical_shapes_list,
+    has_valid_stage_manifest,
+    hashed_stage_dir,
+    parse_shapes_arg,
+    require_request_shape_in_set,
+    stage_toolchain_versions,
+    write_stage_manifest,
+)
 from difflet.cli import runner
 
 _HF_MODEL_ID = "Qwen/Qwen-Image"
@@ -32,6 +41,12 @@ _QWEN_TEMPLATE = (
     "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
 )
 _QWEN_DROP_IDX = 34
+
+
+def _require_request_shape_in_set(args: argparse.Namespace):
+    return require_request_shape_in_set(
+        args, default_shape=(1024, 1024), model_tag="qwen_image"
+    )
 
 
 class QwenImageOrchestrator(ModelOrchestrator):
@@ -66,6 +81,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
         )
 
     def generate(self) -> None:
+        _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(
             self.args.work_dir or Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME
         )
@@ -160,10 +176,12 @@ class QwenImageOrchestrator(ModelOrchestrator):
         app = NeuronQwen2VLTextForCausalLM(enc_path, config)
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
+            self._finish_stage_compile("text", args, compiled_dir)
             return
 
         from difflet.cli.dp import stage_loop
 
+        self._require_stage_artifact("text", args, compiled_dir)
         app.load(str(compiled_dir))
         tok = AutoTokenizer.from_pretrained(str(Path(model_dir) / "tokenizer"))
         for req in stage_loop.claim_requests(args):
@@ -213,11 +231,13 @@ class QwenImageOrchestrator(ModelOrchestrator):
             cp_degree=args.cp_degree or 1,
             cp_mode=getattr(args, "cp_mode", "gather_kv"),
         )
+        compile_shapes = _require_request_shape_in_set(args)
         app = NeuronQwenImageApplication(
             model_path=model_dir,
             parallel=parallel,
             dtype=torch.bfloat16,
             shape={"height": h, "width": w, "num_frames": None},
+            shapes=compile_shapes,
             text_seq_len=_TEXT_SEQ_LEN,
             enable_transformer=True,
             teacache_fused=getattr(args, "teacache_speedup", None) is not None,
@@ -226,10 +246,12 @@ class QwenImageOrchestrator(ModelOrchestrator):
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
+            self._finish_stage_compile("generate", args, compiled_dir)
             return
 
         from difflet.cli.dp import stage_loop
 
+        self._require_stage_artifact("generate", args, compiled_dir)
         app.load(str(compiled_dir), skip_warmup=True)
         sched = app.pipeline.scheduler
         sc = sched.config
@@ -279,6 +301,14 @@ class QwenImageOrchestrator(ModelOrchestrator):
         h, w = args.height or 1024, args.width or 1024
         vae_tp_degree = getattr(args, "vae_tp_degree", None) or 1
 
+        # Image bucket set -> single-frame video shapes for the reused Wan VAE
+        # decoder config ((h, w) entries become (h, w, 1)).
+        compile_shapes = _require_request_shape_in_set(args)
+        extra = {}
+        if compile_shapes:
+            extra["compile_shapes"] = tuple(
+                (shape[0], shape[1], 1) for shape in compile_shapes
+            )
         config = WanVAEDecoderInferenceConfig(
             neuron_config=NeuronConfig(
                 tp_degree=vae_tp_degree,
@@ -289,20 +319,29 @@ class QwenImageOrchestrator(ModelOrchestrator):
             height=h,
             width=w,
             num_frames=1,
+            **extra,
         )
         app = NeuronWanVAEDecoderApplication(model_path=vae_path, config=config)
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
+            self._finish_stage_compile("vae", args, compiled_dir)
             return
 
         from difflet.cli.dp import stage_loop
 
+        self._require_stage_artifact("vae", args, compiled_dir)
         app.load(str(compiled_dir))
         for req in stage_loop.claimed_requests(args):
             with stage_loop.request_scope(args, req, final=True):
                 packed = torch.load(stage_loop.work_file(args, req, "latents.pt")).float()
                 b, seq, _ = packed.shape
-                hh = ww = int(seq**0.5)
+                # Packed grid follows the REQUEST shape (not necessarily square).
+                hh = (args.height or 1024) // 16
+                ww = (args.width or 1024) // 16
+                if hh * ww != seq:
+                    raise ValueError(
+                        f"packed latent length {seq} does not match request grid {hh}x{ww}"
+                    )
                 z = (
                     packed.view(b, hh, ww, 16, 2, 2)
                     .permute(0, 3, 1, 4, 2, 5)
@@ -346,19 +385,60 @@ class QwenImageOrchestrator(ModelOrchestrator):
             local_files_only=True,
         )
 
+    def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
+        if stage == "text":
+            return {
+                "component": "qwen_image_enc",
+                "model_id": _HF_MODEL_ID,
+                "tp": args.tp_degree or 4,
+                "cp": args.cp_degree or 1,
+                "seq_len": _ENC_SEQ,
+                "dtype": "bfloat16",
+                "toolchain": stage_toolchain_versions(),
+            }
+        if stage == "generate":
+            return {
+                "component": "qwen_image_dit",
+                "model_id": _HF_MODEL_ID,
+                "tp": args.tp_degree or 4,
+                "cp": args.cp_degree or 1,
+                "cp_mode": str(getattr(args, "cp_mode", "gather_kv") or "gather_kv"),
+                "dtype": "bfloat16",
+                "text_seq_len": _TEXT_SEQ_LEN,
+                "shapes": canonical_shapes_list(args, (1024, 1024)),
+                "toolchain": stage_toolchain_versions(),
+            }
+        if stage == "vae":
+            return {
+                "component": "qwen_image_vae",
+                "model_id": _HF_MODEL_ID,
+                "vae_tp": getattr(args, "vae_tp_degree", None) or 1,
+                "dtype": "bfloat16",
+                "shapes": canonical_shapes_list(args, (1024, 1024)),
+                "toolchain": stage_toolchain_versions(),
+            }
+        raise ValueError(f"unknown Qwen stage {stage!r}")
+
     def _stage_compiled_dir(self, stage: str, args: argparse.Namespace) -> Path:
         compiled_dir = getattr(args, "compiled_dir", None)
         if compiled_dir:
             return Path(compiled_dir)
-        return qwen_common.stage_compiled_dir_from_values(
-            stage,
-            cache_dir=args.cache_dir,
-            tp_degree=args.tp_degree or 4,
-            cp_degree=args.cp_degree or 1,
-            cp_mode_suffix=cp_mode_token(args),
-            height=args.height or 1024,
-            width=args.width or 1024,
-        )
+        base = Path(args.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
+        inputs = self._stage_cache_inputs(stage, args)
+        return hashed_stage_dir(base, str(inputs["component"]), inputs)
+
+    def _finish_stage_compile(self, stage: str, args: argparse.Namespace, compiled_dir: Path) -> None:
+        write_stage_manifest(compiled_dir, self._stage_cache_inputs(stage, args))
+
+    def _require_stage_artifact(self, stage: str, args: argparse.Namespace, compiled_dir: Path) -> None:
+        if getattr(args, "compiled_dir", None):
+            return  # explicit dir override bypasses manifest gating
+        if not has_valid_stage_manifest(compiled_dir, self._stage_cache_inputs(stage, args)):
+            raise SystemExit(
+                f"[qwen_image] no valid compiled artifact for stage {stage!r} at "
+                f"{compiled_dir} (manifest missing or configuration changed); run "
+                "`difflet compile` with the same flags first."
+            )
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
         a = self.args
@@ -384,6 +464,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
             "--stage-mode",
             stage_mode,
         ]
+        if getattr(a, "shapes", None):
+            parts += ["--shapes", str(a.shapes)]
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
         if getattr(a, "output", None):
