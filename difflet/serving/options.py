@@ -59,6 +59,9 @@ class ServeOptions:
     height: int | None = None
     width: int | None = None
     num_frames: int | None = None
+    # CSV shape set ("320x512x61,320x512x33"): serve K shapes from one
+    # bucketed artifact / one resident worker (HunyuanVideo video serving).
+    shapes: str | None = None
     cache_dir: str | None = None
     host_vae: bool = False
     clip_placement: ServingPlacement | None = None
@@ -151,6 +154,7 @@ def build_serving_profile(
     height: int | None,
     width: int | None,
     num_frames: int | None,
+    shapes: str | None = None,
     host_vae: bool,
     clip_placement: ServingPlacement | None,
     teacache_cadence: int | None,
@@ -190,6 +194,22 @@ def build_serving_profile(
         )
     if output_modality == "video" and teacache_speedup is not None:
         raise invalid_extra_body("resident video serving does not yet expose adaptive TeaCache.")
+    canonical_shapes = None
+    if shapes:
+        if model_type != "hunyuan_video" or output_modality != "video":
+            raise invalid_extra_body(
+                "--shapes (multi-shape bucketed serving) is currently supported for "
+                "HunyuanVideo video serving only."
+            )
+        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+        from difflet.cli.orchestrators.base import parse_shapes_arg
+
+        try:
+            canonical_shapes = canonicalize_shapes(parse_shapes_arg(shapes))
+        except ValueError as exc:
+            raise invalid_extra_body(f"invalid --shapes: {exc}") from exc
+        # The profile's single h/w/f is pinned to the largest (priority) shape.
+        height, width, num_frames = canonical_shapes[0]
     shape = entry.resolve_shape(
         height=height,
         width=width,
@@ -265,6 +285,7 @@ def build_serving_profile(
         output_fps=default_fps if output_modality == "video" else None,
         host_vae=(default_host_vae or host_vae) if output_modality == "video" else False,
         clip_placement=resolved_clip_placement,
+        shapes=canonical_shapes,
     )
 
 

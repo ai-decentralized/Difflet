@@ -51,11 +51,32 @@ def validate_qwen_image_dit_inputs(
 
     batch_size = int(getattr(config.neuron_config, "batch_size", 1))
     text_seq_len = int(getattr(config, "text_seq_len", 1024))
+    # One packed sequence length per compiled bucket (single entry when no
+    # bucket set is configured).
+    compile_shapes = getattr(config, "compile_shapes", None)
+    if compile_shapes:
+        vsf2 = int(config.vae_scale_factor) * 2
+        patch = int(config.patch_size)
+        allowed_seq_lens = {
+            ((2 * (int(h) // vsf2)) // patch) * ((2 * (int(w) // vsf2)) // patch)
+            for h, w, _frames in compile_shapes
+        }
+    else:
+        allowed_seq_lens = {int(config.image_seq_len)}
+    allowed_hidden = [
+        (batch_size, seq, int(config.in_channels)) for seq in sorted(allowed_seq_lens, reverse=True)
+    ]
+    if tuple(bundle.hidden_states.shape) not in set(allowed_hidden):
+        raise ValueError(
+            f"Qwen-Image DiT input 'hidden_states' has shape {tuple(bundle.hidden_states.shape)}, "
+            f"expected one of the compiled bucket shapes: {allowed_hidden}."
+        )
+    if bundle.hidden_states.dtype != dtype:
+        raise TypeError(
+            f"Qwen-Image DiT input 'hidden_states' has dtype {bundle.hidden_states.dtype}, "
+            f"expected {dtype}."
+        )
     expected = {
-        "hidden_states": (
-            (batch_size, int(config.image_seq_len), int(config.in_channels)),
-            dtype,
-        ),
         "timestep": ((batch_size,), dtype),
         "encoder_hidden_states": (
             (batch_size, text_seq_len, int(config.joint_attention_dim)),
@@ -65,7 +86,6 @@ def validate_qwen_image_dit_inputs(
         "guidance": ((batch_size,), dtype),
     }
     tensors = {
-        "hidden_states": bundle.hidden_states,
         "timestep": bundle.timestep,
         "encoder_hidden_states": bundle.encoder_hidden_states,
         "encoder_hidden_states_mask": bundle.encoder_hidden_states_mask,
@@ -97,6 +117,7 @@ def create_qwen_image_transformer_config(
     batch_size: int = 1,
     context_parallel_enabled: bool = False,
     cp_mode: str = "gather_kv",
+    compile_shapes=None,
 ):
     from difflet.backends.trainium.qwen_image.transformer import (
         QwenImageTransformerInferenceConfig,
@@ -109,6 +130,9 @@ def create_qwen_image_transformer_config(
         world_size=world_size,
         torch_dtype=dtype,
     )
+    extra = {}
+    if compile_shapes:
+        extra["compile_shapes"] = compile_shapes
     return QwenImageTransformerInferenceConfig(
         neuron_config=neuron_config,
         load_config=load_diffusers_config(transformer_path),
@@ -117,6 +141,7 @@ def create_qwen_image_transformer_config(
         text_seq_len=text_seq_len,
         context_parallel_enabled=context_parallel_enabled,
         cp_mode=cp_mode,
+        **extra,
     )
 
 
@@ -149,6 +174,17 @@ class NeuronQwenImageApplication(MultiComponentApplication):
             "width": int(shape.get("width") or 1024),
             "num_frames": None,
         }
+        # Optional bucket shape set ((h, w) entries): one artifact with K
+        # transformer NEFFs sharing one weight copy. The config pins its own
+        # height/width to the largest (priority) shape; self.shape stays the
+        # REQUESTED shape so the pipeline prepares latents at request size and
+        # the runtime router picks the matching bucket.
+        self.compile_shapes = None
+        raw_shapes = kwargs.get("shapes")
+        if raw_shapes:
+            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+            self.compile_shapes = canonicalize_shapes(raw_shapes)
         self.kwargs = kwargs
         self.transformer_path = os.path.join(model_path, "transformer")
         self.transformer = None
@@ -175,6 +211,7 @@ class NeuronQwenImageApplication(MultiComponentApplication):
                 batch_size=self.batch_size,
                 context_parallel_enabled=parallel.cp_degree > 1,
                 cp_mode=getattr(parallel, "cp_mode", "gather_kv"),
+                compile_shapes=self.compile_shapes,
             )
             self.transformer = NeuronQwenImageTransformerApplication(
                 model_path=self.transformer_path,

@@ -1494,6 +1494,11 @@ class FluxBackboneInferenceConfig(InferenceConfig):
             self.compile_shapes = canonicalize_shapes(shapes)
             self.height = self.compile_shapes[0][0]
             self.width = self.compile_shapes[0][1]
+        for height, width, _frames in (getattr(self, "compile_shapes", None) or ()):
+            if int(height) % 16 or int(width) % 16:
+                raise ValueError(
+                    f"Flux compile shapes must be divisible by 16; got {height}x{width}."
+                )
 
         # Validate mutual exclusivity
         if self.cfg_parallel_enabled and self.context_parallel_enabled:

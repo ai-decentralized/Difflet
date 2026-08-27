@@ -98,9 +98,10 @@ def test_wan_compiled_dir_marks_cfg():
     orch = WanOrchestrator(_wan_args())
     with_cfg = orch._stage_compiled_dir("transformer", _wan_args(cfg_parallel=True))
     without = orch._stage_compiled_dir("transformer", _wan_args(cfg_parallel=False))
-    assert "cfg" in with_cfg.name
-    assert "cfg" not in without.name
+    # Hash-dir scheme (v5): cfg_parallel is part of the hashed identity, so
+    # the two configs must land in different artifact dirs.
     assert with_cfg != without
+    assert with_cfg.parent == without.parent
 
 
 def test_wan_shared_cli_args_forwards_flag():

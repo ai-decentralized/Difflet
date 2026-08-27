@@ -170,6 +170,7 @@ def options_from_args(args: argparse.Namespace) -> ServeOptions:
         height=args.height,
         width=args.width,
         num_frames=getattr(args, "num_frames", None),
+        shapes=getattr(args, "shapes", None),
         cache_dir=args.cache_dir,
         host_vae=getattr(args, "host_vae", False),
         clip_placement=getattr(args, "clip_placement", None),

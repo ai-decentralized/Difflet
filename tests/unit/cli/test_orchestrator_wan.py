@@ -131,12 +131,19 @@ def test_run_stage_internal_unknown_raises():
 # ------------------------------------------------------ _stage_compiled_dir
 
 def test_stage_compiled_dir_names():
+    # Schema v5: <cache>/<component>/<sha256[:16]>; manifest is authoritative.
     orch = WanOrchestrator(_wan_args(cache_dir="/c", tp_degree=4, cp_degree=2,
                                      cfg_parallel=True))
     t = orch._stage_compiled_dir("transformer", orch.args)
     v = orch._stage_compiled_dir("vae", orch.args)
-    assert t == Path("/c/wan_transformer_tp4cp2cfg_h480w832f9")
-    assert v == Path("/c/wan_vae_h480w832f9")
+    assert t.parent == Path("/c/wan_transformer")
+    assert v.parent == Path("/c/wan_vae")
+    for path in (t, v):
+        assert len(path.name) == 16 and int(path.name, 16) >= 0
+    # deterministic + shape-sensitive
+    assert orch._stage_compiled_dir("transformer", orch.args) == t
+    other = _wan_args(cache_dir="/c", tp_degree=4, cp_degree=2, cfg_parallel=True, height=320)
+    assert WanOrchestrator(other)._stage_compiled_dir("transformer", other) != t
 
 
 def test_stage_compiled_dir_unknown_raises():
@@ -155,14 +162,17 @@ def test_stage_compiled_dir_distinguishes_wan_2_1_from_2_2():
         assert o22._stage_compiled_dir(stage, a22) != o21._stage_compiled_dir(stage, a21)
 
 
-def test_stage_compiled_dir_wan_2_2_keeps_legacy_names():
-    # Additive-only: the historical model id keeps its pre-fix dir names so
-    # existing compile caches stay valid.
+def test_stage_compiled_dir_wan_2_2_keeps_legacy_prefix():
+    # The historical model id keeps its bare "wan" component prefix; other
+    # Wan versions get a model-derived prefix (schema v5 hash dirs below it).
     args = _wan_args(cache_dir="/c")
     orch = WanOrchestrator(args)
-    assert orch._stage_compiled_dir("transformer", args) == \
-        Path("/c/wan_transformer_tp4cp1_h480w832f9")
-    assert orch._stage_compiled_dir("vae", args) == Path("/c/wan_vae_h480w832f9")
+    assert orch._stage_compiled_dir("transformer", args).parent == Path("/c/wan_transformer")
+    assert orch._stage_compiled_dir("vae", args).parent == Path("/c/wan_vae")
+    a21 = _wan_args(cache_dir="/c", model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers")
+    assert WanOrchestrator(a21)._stage_compiled_dir("transformer", a21).parent == Path(
+        "/c/wan2_1_t2v_14b_diffusers_transformer"
+    )
 
 
 # ------------------------------------------------------ _shared_cli_args
@@ -252,7 +262,9 @@ def test_stage_transformer_generate_saves_latents(monkeypatch, tmp_path):
     _setup_wan_fakes(monkeypatch)
     args = _wan_args(stage_mode="generate", work_dir=str(tmp_path),
                      cache_dir=str(tmp_path))
-    WanOrchestrator(args)._stage_transformer(args)
+    orch = WanOrchestrator(args)
+    orch._finish_stage_compile("transformer", args, orch._stage_compiled_dir("transformer", args))
+    orch._stage_transformer(args)
     assert (tmp_path / "latents.pt").exists()
 
 
@@ -264,7 +276,9 @@ def test_stage_transformer_lets_pipeline_prepare_latents(monkeypatch, tmp_path):
     _setup_wan_fakes(monkeypatch)
     args = _wan_args(stage_mode="generate", work_dir=str(tmp_path),
                      cache_dir=str(tmp_path), seed=1234)
-    WanOrchestrator(args)._stage_transformer(args)
+    orch = WanOrchestrator(args)
+    orch._finish_stage_compile("transformer", args, orch._stage_compiled_dir("transformer", args))
+    orch._stage_transformer(args)
     kw = _FakeWanApp.instances[-1].call_kwargs
     assert "latents" not in kw
     gen = kw.get("generator")
@@ -286,7 +300,9 @@ def test_stage_vae_generate_saves_pt_for_non_mp4(monkeypatch, tmp_path):
     out = tmp_path / "out.png"  # non-mp4 -> .pt branch
     args = _wan_args(stage_mode="generate", work_dir=str(tmp_path),
                      cache_dir=str(tmp_path), output=str(out))
-    WanOrchestrator(args)._stage_vae(args)
+    orch = WanOrchestrator(args)
+    orch._finish_stage_compile("vae", args, orch._stage_compiled_dir("vae", args))
+    orch._stage_vae(args)
     assert (tmp_path / "out.pt").exists()
 
 
@@ -298,7 +314,9 @@ def test_stage_vae_generate_mp4_branch(monkeypatch, tmp_path):
     out = tmp_path / "out.mp4"
     args = _wan_args(stage_mode="generate", work_dir=str(tmp_path),
                      cache_dir=str(tmp_path), output=str(out))
-    WanOrchestrator(args)._stage_vae(args)
+    orch = WanOrchestrator(args)
+    orch._finish_stage_compile("vae", args, orch._stage_compiled_dir("vae", args))
+    orch._stage_vae(args)
     # mp4 path taken -> no .pt fallback written.
     assert not (tmp_path / "out.pt").exists()
 
