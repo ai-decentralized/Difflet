@@ -135,6 +135,19 @@ class ServeOptions:
         return 24.0 * 60.0 * 60.0 if output_modality == "video" else 30.0
 
 
+# (model_type, output_modality) pairs whose serving adapters route a compiled
+# shape SET on one resident worker. HunyuanVideo 1.5 and LTX-2 are excluded:
+# their applications do not accept K>1 bucket sets.
+_MULTI_SHAPE_SERVING_MODELS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("hunyuan_video", "video"),
+        ("wan", "video"),
+        ("flux", "image"),
+        ("qwen_image", "image"),
+    }
+)
+
+
 def build_serving_profile(
     *,
     model_id: str,
@@ -196,10 +209,15 @@ def build_serving_profile(
         raise invalid_extra_body("resident video serving does not yet expose adaptive TeaCache.")
     canonical_shapes = None
     if shapes:
-        if model_type != "hunyuan_video" or output_modality != "video":
+        if (model_type, output_modality) not in _MULTI_SHAPE_SERVING_MODELS:
             raise invalid_extra_body(
-                "--shapes (multi-shape bucketed serving) is currently supported for "
-                "HunyuanVideo video serving only."
+                "--shapes (multi-shape bucketed serving) is supported for "
+                "HunyuanVideo/Wan video serving and Flux/Qwen-Image image serving only."
+            )
+        if teacache_speedup is not None:
+            raise invalid_extra_body(
+                "multi-shape serving does not support TeaCache: calibrations are frozen "
+                "per shape; drop --shapes or --teacache-speedup."
             )
         from difflet.backends.trainium.core.bucketing import canonicalize_shapes
         from difflet.cli.orchestrators.base import parse_shapes_arg
@@ -208,6 +226,14 @@ def build_serving_profile(
             canonical_shapes = canonicalize_shapes(parse_shapes_arg(shapes))
         except ValueError as exc:
             raise invalid_extra_body(f"invalid --shapes: {exc}") from exc
+        if output_modality == "video" and canonical_shapes[0][2] is None:
+            raise invalid_extra_body(
+                "invalid --shapes: video serving takes HxWxF entries (e.g. 480x832x9)."
+            )
+        if output_modality == "image" and canonical_shapes[0][2] is not None:
+            raise invalid_extra_body(
+                "invalid --shapes: image serving takes HxW entries (e.g. 1024x1024)."
+            )
         # The profile's single h/w/f is pinned to the largest (priority) shape.
         height, width, num_frames = canonical_shapes[0]
     shape = entry.resolve_shape(

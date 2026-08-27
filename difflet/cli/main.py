@@ -231,8 +231,9 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="HxWxF[,HxWxF...]",
         help="Serve several request shapes from ONE bucketed artifact / one "
-        "resident worker (HunyuanVideo video serving). Requests outside the "
-        "set are rejected with profile_mismatch.",
+        "resident worker (HxWxF for HunyuanVideo/Wan video serving, HxW for "
+        "Flux/Qwen-Image image serving). Requests outside the set are "
+        "rejected with profile_mismatch.",
     )
     p.add_argument(
         "--cache-dir",
