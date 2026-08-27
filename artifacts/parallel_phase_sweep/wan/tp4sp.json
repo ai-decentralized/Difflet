@@ -21,95 +21,95 @@
   "prompt": "a cat walking through a garden"
  },
  "compile": {
-  "wall_s": 1086.4,
+  "wall_s": 987.1,
   "cache_hit": false,
   "breakdown_s": {
    "text_encoder_t5": {
-    "module_load_s": 0.438,
-    "hlo_generate_s": 1.021,
-    "priority_hlo_compile_s": 0.313,
-    "all_hlo_compile_s": 0.001,
-    "build_total_s": 32.02,
-    "other_s": 30.248
+    "module_load_s": 0.412,
+    "hlo_generate_s": 0.683,
+    "priority_hlo_compile_s": 0.149,
+    "all_hlo_compile_s": 0.0,
+    "build_total_s": 36.329,
+    "other_s": 35.085
    },
    "transformer": {
-    "module_load_s": 2.123,
-    "hlo_generate_s": 23.382,
-    "priority_hlo_compile_s": 63.963,
-    "all_hlo_compile_s": 0.003,
-    "build_total_s": 253.928,
-    "other_s": 164.457
+    "module_load_s": 2.043,
+    "hlo_generate_s": 21.991,
+    "priority_hlo_compile_s": 68.469,
+    "all_hlo_compile_s": 0.002,
+    "build_total_s": 271.285,
+    "other_s": 178.779
    },
-   "wall_total_s": 285.949
+   "wall_total_s": 307.614
   }
  },
  "e2e_cold": {
   "stages": [
    {
     "stage": "stage_0",
-    "load_s": 86.524
+    "load_s": 86.052
    },
    {
     "stage": "stage_1",
-    "load_s": 234.992
+    "load_s": 232.909
    },
    {
     "stage": "vae_decoder",
-    "load_s": 27.392
+    "load_s": 9.595
    }
   ],
-  "weights_load_total_s": 348.908,
+  "weights_load_total_s": 328.556,
   "weights_shard_total_s": 0.0,
-  "wall_total_s": 417.212,
-  "compute_and_overhead_s": 68.304,
+  "wall_total_s": 388.22,
+  "compute_and_overhead_s": 59.664,
   "note": "page cache dropped (sync; echo 3 > drop_caches)"
  },
  "e2e_warm": {
   "wall_s": {
    "n": 3,
-   "mean": 89.4668039833329,
-   "median": 88.69592172500052,
-   "min": 88.34740697400048,
-   "max": 91.35708325099768,
-   "p90": 91.35708325099768,
-   "std": 1.3441806464010315
+   "mean": 64.94658327866637,
+   "median": 65.21585669200067,
+   "min": 63.661940322999726,
+   "max": 65.9619528209987,
+   "p90": 65.9619528209987,
+   "std": 0.9580868092486555
   },
   "stages": [
    {
     "stage": "stage_0",
-    "load_s_median": 6.772,
+    "load_s_median": 6.918,
     "shard_s_median": 0.0
    },
    {
     "stage": "stage_1",
-    "load_s_median": 8.659,
+    "load_s_median": 6.252,
     "shard_s_median": 0.0
    },
    {
     "stage": "vae_decoder",
-    "load_s_median": 28.678,
+    "load_s_median": 10.317,
     "shard_s_median": 0.0
    }
   ],
-  "weights_load_total_s_median": 43.29,
+  "weights_load_total_s_median": 23.486,
   "runs": [
-   88.696,
-   88.347,
-   91.357
+   63.662,
+   65.216,
+   65.962
   ]
  },
  "step": {
-  "build_s": 44.0,
-  "generate_wall_s": 36.8,
+  "build_s": 41.5,
+  "generate_wall_s": 34.5,
   "finite": true,
   "step_s": {
    "n": 39,
-   "mean": 0.578687,
-   "median": 0.578077,
-   "min": 0.575465,
-   "max": 0.621665,
-   "p90": 0.579316,
-   "std": 0.00711
+   "mean": 0.612835,
+   "median": 0.611995,
+   "min": 0.610171,
+   "max": 0.654546,
+   "p90": 0.613312,
+   "std": 0.006883
   }
  }
 }

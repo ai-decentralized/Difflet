@@ -21,103 +21,103 @@
   "prompt": "a cat walking through a garden"
  },
  "compile": {
-  "wall_s": 6448.7,
+  "wall_s": 6262.8,
   "cache_hit": false,
   "breakdown_s": {
    "text_encoder_t5": {
-    "module_load_s": 0.498,
-    "hlo_generate_s": 2.0,
-    "priority_hlo_compile_s": 30.748,
+    "module_load_s": 0.431,
+    "hlo_generate_s": 0.585,
+    "priority_hlo_compile_s": 0.32,
     "all_hlo_compile_s": 0.001,
-    "build_total_s": 62.782,
-    "other_s": 29.534
+    "build_total_s": 35.458,
+    "other_s": 34.122
    },
    "transformer": {
-    "module_load_s": 2.523,
-    "hlo_generate_s": 23.941,
-    "priority_hlo_compile_s": 71.885,
-    "all_hlo_compile_s": 0.003,
-    "build_total_s": 263.748,
-    "other_s": 165.395
+    "module_load_s": 2.023,
+    "hlo_generate_s": 21.55,
+    "priority_hlo_compile_s": 82.12,
+    "all_hlo_compile_s": 0.002,
+    "build_total_s": 298.297,
+    "other_s": 192.602
    },
    "vae_decoder": {
-    "module_load_s": 0.369,
-    "hlo_generate_s": 0.75,
-    "priority_hlo_compile_s": 5499.078,
+    "module_load_s": 0.332,
+    "hlo_generate_s": 0.528,
+    "priority_hlo_compile_s": 5353.151,
     "all_hlo_compile_s": 0.001,
-    "build_total_s": 5510.87,
-    "other_s": 10.672
+    "build_total_s": 5363.487,
+    "other_s": 9.476
    },
-   "wall_total_s": 5837.4
+   "wall_total_s": 5697.242
   }
  },
  "e2e_cold": {
   "stages": [
    {
     "stage": "stage_0",
-    "load_s": 87.012
+    "load_s": 86.159
    },
    {
     "stage": "stage_1",
-    "load_s": 234.987
+    "load_s": 233.099
    },
    {
     "stage": "vae_decoder",
-    "load_s": 27.719
+    "load_s": 8.883
    }
   ],
-  "weights_load_total_s": 349.718,
+  "weights_load_total_s": 328.141,
   "weights_shard_total_s": 0.0,
-  "wall_total_s": 425.592,
-  "compute_and_overhead_s": 75.874,
+  "wall_total_s": 391.718,
+  "compute_and_overhead_s": 63.577,
   "note": "page cache dropped (sync; echo 3 > drop_caches)"
  },
  "e2e_warm": {
   "wall_s": {
    "n": 3,
-   "mean": 88.47711845999947,
-   "median": 87.99392969399923,
-   "min": 87.89278524699876,
-   "max": 89.54464043900043,
-   "p90": 89.54464043900043,
-   "std": 0.755980569206797
+   "mean": 64.28457164500044,
+   "median": 63.821207971999684,
+   "min": 63.76398322300156,
+   "max": 65.26852374000009,
+   "p90": 65.26852374000009,
+   "std": 0.696151306309732
   },
   "stages": [
    {
     "stage": "stage_0",
-    "load_s_median": 6.342,
+    "load_s_median": 6.479,
     "shard_s_median": 0.0
    },
    {
     "stage": "stage_1",
-    "load_s_median": 8.852,
+    "load_s_median": 6.452,
     "shard_s_median": 0.0
    },
    {
     "stage": "vae_decoder",
-    "load_s_median": 27.257,
+    "load_s_median": 9.355,
     "shard_s_median": 0.0
    }
   ],
-  "weights_load_total_s_median": 42.311,
+  "weights_load_total_s_median": 23.001,
   "runs": [
-   89.545,
-   87.994,
-   87.893
+   65.269,
+   63.821,
+   63.764
   ]
  },
  "step": {
-  "build_s": 44.9,
-  "generate_wall_s": 37.2,
+  "build_s": 41.0,
+  "generate_wall_s": 33.7,
   "finite": true,
   "step_s": {
    "n": 39,
-   "mean": 0.576584,
-   "median": 0.575549,
-   "min": 0.574183,
-   "max": 0.620341,
-   "p90": 0.576792,
-   "std": 0.007176
+   "mean": 0.582692,
+   "median": 0.58112,
+   "min": 0.58031,
+   "max": 0.625269,
+   "p90": 0.582843,
+   "std": 0.006985
   }
  }
 }
