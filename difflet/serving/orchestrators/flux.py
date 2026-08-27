@@ -11,7 +11,7 @@ from pathlib import Path
 from difflet.common.orchestrators import flux as flux_common
 from difflet.registry import resolve_model
 from difflet.serving.artifact_manager import ArtifactPublishTarget, ImmutableArtifactManager
-from difflet.serving.errors import prompt_too_long
+from difflet.serving.errors import profile_mismatch, prompt_too_long
 from difflet.serving.options import CompilePolicy, DownloadPolicy
 from difflet.serving.orchestrators.base import (
     request_uses_teacache,
@@ -121,6 +121,16 @@ class FluxServingRequestValidator:
 
     def validate(self, request: DiffletGenerateRequest) -> None:
         validate_guidance_scale(request, maximum=_MAX_GUIDANCE_SCALE)
+        profile = self.runtime.profile
+        # Strict membership in the compiled bucket set: the NxD router only
+        # accepts exactly-compiled shapes, so anything else is rejected here
+        # (with the allowed set) instead of surfacing a runtime ValueError.
+        if (request.height, request.width, None) not in profile.shape_set():
+            allowed = [f"{h}x{w}" for h, w, _ in profile.canonical_shapes()]
+            raise profile_mismatch(
+                f"request shape {request.height}x{request.width} is not in the "
+                f"Flux serving profile's compiled shape set {allowed}"
+            )
         encoded = self._tokenizer_for_runtime()(
             request.prompt,
             padding=False,
