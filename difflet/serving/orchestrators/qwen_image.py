@@ -17,7 +17,7 @@ from difflet.serving.engines.stage_pipeline import (
     require_exact_payload,
     stage_result,
 )
-from difflet.serving.errors import prompt_too_long
+from difflet.serving.errors import profile_mismatch, prompt_too_long
 from difflet.serving.options import CompilePolicy, DownloadPolicy
 from difflet.serving.orchestrators.base import (
     request_uses_teacache,
@@ -122,7 +122,9 @@ class QwenVaeStageRunner:
         return stage_result(
             QwenFinalPayload(
                 output=DiffletGenerateOutput(
-                    data=self.adapter._decode(invocation.input.packed_latents),
+                    data=self.adapter._decode(
+                        invocation.input.packed_latents, invocation.request
+                    ),
                     mime_type="image/png",
                     output_format="png",
                 )
@@ -202,6 +204,16 @@ class QwenImageServingRequestValidator:
 
     def validate(self, request: DiffletGenerateRequest) -> None:
         validate_guidance_scale(request, maximum=_MAX_GUIDANCE_SCALE)
+        profile = self.runtime.profile
+        # Strict membership in the compiled bucket set: the NxD router only
+        # accepts exactly-compiled shapes, so anything else is rejected here
+        # (with the allowed set) instead of surfacing a runtime ValueError.
+        if (request.height, request.width, None) not in profile.shape_set():
+            allowed = [f"{h}x{w}" for h, w, _ in profile.canonical_shapes()]
+            raise profile_mismatch(
+                f"request shape {request.height}x{request.width} is not in the "
+                f"Qwen-Image serving profile's compiled shape set {allowed}"
+            )
         encoded = self._tokenizer_for_runtime()(
             _QWEN_TEMPLATE.format(request.prompt),
             padding=False,
@@ -244,6 +256,7 @@ class QwenImageServingStageAdapter:
         profile = runtime.profile
         if profile.parallel.cp_degree != 1:
             raise RuntimeError("Qwen-Image P0 shared-worker serving requires cp_degree=1")
+        _validate_profile_shapes(profile)
         self.active_runtime = runtime
         self.active_profile = profile
         self.model_dir = runtime.source.pinned_model_path
@@ -382,6 +395,7 @@ class QwenImageServingStageAdapter:
             parallel=profile.parallel,
             dtype=torch.bfloat16,
             shape=profile.shape_dict(),
+            shapes=profile.canonical_shapes() if profile.shapes else None,
             text_seq_len=_TEXT_SEQ_LEN,
             enable_transformer=True,
             teacache_fused=profile.teacache_speedup is not None,
@@ -390,8 +404,12 @@ class QwenImageServingStageAdapter:
             teacache_calibration_path=profile.teacache_calibration,
         )
         assert self.active_runtime is not None
+        # Warm every compiled bucket at startup for multi-shape profiles so the
+        # first request at ANY profile shape sees steady-state latency;
+        # single-shape profiles keep relying on the startup smoke.
         self.denoise_app.load(
-            str(self.active_runtime.artifacts.require("generate").path), skip_warmup=True
+            str(self.active_runtime.artifacts.require("generate").path),
+            skip_warmup=not profile.shapes,
         )
 
     def _load_vae_stage(self, profile: ServingProfile) -> None:
@@ -415,6 +433,13 @@ class QwenImageServingStageAdapter:
             height=profile.height,
             width=profile.width,
             num_frames=1,
+            # Image bucket set -> single-frame video shapes for the reused Wan
+            # VAE decoder (same mapping as the CLI vae stage).
+            compile_shapes=(
+                tuple((h, w, 1) for h, w, _ in profile.canonical_shapes())
+                if profile.shapes
+                else None
+            ),
         )
         self.vae_app = NeuronWanVAEDecoderApplication(model_path=vae_path, config=self.vae_config)
         assert self.active_runtime is not None
@@ -470,7 +495,10 @@ class QwenImageServingStageAdapter:
         guidance = torch.full([1], float(request.guidance_scale), dtype=torch.bfloat16)
         sched = self.denoise_app.pipeline.scheduler
         sc = sched.config
-        image_seq_len = (profile.height // 16) * (profile.width // 16)
+        # The resident pipeline is pinned to the profile's largest shape, so
+        # the request shape drives the schedule and latents explicitly; the
+        # runtime router picks the matching compiled bucket by signature.
+        image_seq_len = (request.height // 16) * (request.width // 16)
         slope = (sc.max_shift - sc.base_shift) / (sc.max_image_seq_len - sc.base_image_seq_len)
         mu = image_seq_len * slope + (sc.base_shift - slope * sc.base_image_seq_len)
         num_steps = request.num_inference_steps
@@ -485,7 +513,12 @@ class QwenImageServingStageAdapter:
         sigmas = np.linspace(1.0, 1.0 / num_steps, num_steps).tolist()
         sched.set_timesteps(sigmas=sigmas, mu=mu, device="cpu")
         torch.manual_seed(request.seed)
+        latents = torch.randn(
+            (1, 1, 16, request.height // 8, request.width // 8),
+            dtype=torch.bfloat16,
+        )
         out = self.denoise_app.pipeline(
+            latents=latents,
             encoder_hidden_states=text["encoder_hidden_states"],
             encoder_hidden_states_mask=text["encoder_hidden_states_mask"],
             guidance=guidance,
@@ -496,7 +529,7 @@ class QwenImageServingStageAdapter:
         )
         return out.latents.cpu()
 
-    def _decode(self, packed) -> bytes:
+    def _decode(self, packed, request: DiffletGenerateRequest) -> bytes:
         import torch
 
         if self.vae_app is None or self.vae_config is None:
@@ -504,7 +537,7 @@ class QwenImageServingStageAdapter:
         if self.active_profile is None:
             raise RuntimeError("Qwen serving profile is not loaded")
         b, seq, _ = packed.shape
-        hh, ww = _packed_latent_grid(self.active_profile, seq)
+        hh, ww = _packed_latent_grid(request.height, request.width, seq)
         z = packed.float().view(b, hh, ww, 16, 2, 2)
         z = z.permute(0, 3, 1, 4, 2, 5).reshape(b, 16, hh * 2, ww * 2)
         z = z.unsqueeze(2)
@@ -521,16 +554,32 @@ class QwenImageServingStageAdapter:
         return _tensor_to_png_bytes((img[0] * 0.5 + 0.5).clamp(0, 1))
 
 
-def _packed_latent_grid(profile: ServingProfile, seq: int) -> tuple[int, int]:
-    height = int(profile.height) // 16
-    width = int(profile.width) // 16
-    if int(seq) != height * width:
+def _validate_profile_shapes(profile: ServingProfile) -> None:
+    for height, width, _frames in profile.canonical_shapes():
+        for value, name in ((height, "height"), (width, "width")):
+            if type(value) is not int or value <= 0 or value % 16:
+                raise ValueError(
+                    f"Qwen-Image serving {name} must be a positive integer divisible by 16"
+                )
+    if profile.shapes:
+        largest = profile.canonical_shapes()[0]
+        if (profile.height, profile.width, None) != largest:
+            raise ValueError(
+                "Qwen-Image serving profile height/width must equal the largest "
+                "shape of the compiled shape set"
+            )
+
+
+def _packed_latent_grid(height: int, width: int, seq: int) -> tuple[int, int]:
+    grid_height = int(height) // 16
+    grid_width = int(width) // 16
+    if int(seq) != grid_height * grid_width:
         raise ValueError(
-            "Qwen packed latent sequence does not match the serving profile: "
-            f"seq={seq}, expected={height * width} for "
-            f"height={profile.height}, width={profile.width}."
+            "Qwen packed latent sequence does not match the request shape: "
+            f"seq={seq}, expected={grid_height * grid_width} for "
+            f"height={height}, width={width}."
         )
-    return height, width
+    return grid_height, grid_width
 
 
 def _tensor_to_png_bytes(tensor) -> bytes:
