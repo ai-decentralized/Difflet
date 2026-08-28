@@ -530,3 +530,27 @@ def test_serve_accepts_heartbeat_boundaries(monkeypatch, interval):
     )
 
     assert calls[0].worker_heartbeat_interval == float(interval)
+
+
+def test_serve_options_maps_shapes_csv_for_multi_shape_serving():
+    args = argparse.Namespace(
+        model_id="black-forest-labs/FLUX.1-dev",
+        revision=None,
+        host="0.0.0.0",
+        port=8091,
+        tp_degree=None,
+        cp_degree=None,
+        cp_mode=None,
+        cfg_parallel=False,
+        sp_enabled=False,
+        height=None,
+        width=None,
+        num_frames=None,
+        shapes="1024x1024,512x512",
+        cache_dir=None,
+        force=False,
+    )
+
+    options = options_from_args(args)
+
+    assert options.shapes == "1024x1024,512x512"
