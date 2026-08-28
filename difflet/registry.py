@@ -376,10 +376,12 @@ def _register_builtin_qwen_image() -> None:
             num_attention_heads=24,
             is_distilled=True,
             supports_cp=True,
-            # SP is deferred: Qwen's forward monkey-patches the upstream diffusers
-            # transformer, where the SPMDRank id the sequence scatter needs is not
-            # a live graph input, so every rank would read rank 0.
-            supports_sp=False,
+            # Megatron-SP via the modeling_qwen fork: dual-stream g/ḡ with the
+            # SPMDRank-materialized entry scatter (the rank-id-as-graph-input
+            # problem below is solved by scattering through
+            # scatter_to_process_group_spmd with a materialized SPMDRank buffer,
+            # the same primitive wan's validated SP path uses).
+            supports_sp=True,
         ),
         backends=("trainium",),
     )

@@ -90,6 +90,18 @@ SPECS: dict[str, Spec] = {
         num_frames=9,
         output_ext="mp4",
     ),
+    "qwen": Spec(
+        model_id="Qwen/Qwen-Image",
+        revision="75e0b4be04f60ec59a75f475837eced720f823b6",
+        prompt="a cinematic shot of a red fox running through a snowy forest",
+        steps=20,
+        guidance=4.0,  # matches benchmark/trn2/qwen_image.json test conditions
+        seed=42,
+        height=1024,
+        width=1024,
+        num_frames=None,
+        output_ext="png",
+    ),
 }
 
 
@@ -116,6 +128,12 @@ WAN_CONFIGS: dict[str, dict] = dict(
     tp2cfg=_cfg(tp=2, cfg=True),
     tp2cfgsp=_cfg(tp=2, cfg=True, sp=True),
 )
+# Qwen-Image: distilled (no cfg axis), CP supported but this sweep measures the
+# SP comparison rows — tp4 baseline vs tp4sp (the new modeling_qwen fork).
+QWEN_CONFIGS: dict[str, dict] = {
+    "tp4": _cfg(tp=4),
+    "tp4sp": _cfg(tp=4, sp=True),
+}
 
 # label -> (artifact base, dp degree). Compile/per-step are the base's.
 DP_ROWS: dict[str, tuple[str, int]] = {
@@ -499,8 +517,72 @@ def worker_wan(label: str) -> int:
     return 0
 
 
-_CFG_REGISTRY = {"flux": FLUX_CONFIGS, "wan": WAN_CONFIGS}
-_WORKERS = {"flux": worker_flux, "wan": worker_wan}
+def worker_qwen(label: str) -> int:
+    """In-process realloop per-step for one qwen config (flux worker's method)."""
+    import torch
+    from difflet.backends.trainium.qwen_image.transformer import (
+        NeuronQwenImageTransformerApplication,
+    )
+    from difflet.pipeline.difflet_pipeline import DiffletPipeline
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    spec = SPECS["qwen"]
+    cfg = QWEN_CONFIGS[label]
+    parallel = DiffletParallelConfig(**{k: v for k, v in cfg.items()})
+    cache = Path("~/.cache/difflet").expanduser()
+    print(f"[step:{label}] building pipeline {parallel}...", flush=True)
+    t0 = time.perf_counter()
+    pipe = DiffletPipeline.from_pretrained(
+        spec["model_id"], model_type="qwen_image", parallel=parallel,
+        dtype=torch.bfloat16, height=spec["height"], width=spec["width"],
+        compile_cache_dir=str(cache), revision=spec["revision"],
+        skip_compile=True)
+    build_s = time.perf_counter() - t0
+    dit_cls = NeuronQwenImageTransformerApplication
+    print(f"[step:{label}] pipeline ready in {build_s:.1f}s", flush=True)
+
+    stamps: list[float] = []
+    orig = dit_cls.__call__
+
+    def timed(self, *a, **k):
+        r = orig(self, *a, **k)
+        stamps.append(time.perf_counter())  # host tensors returned -> synced
+        return r
+
+    gen_kwargs = dict(
+        prompt=spec["prompt"], num_inference_steps=spec["steps"],
+        height=spec["height"], width=spec["width"],
+        guidance_scale=spec["guidance"],
+        generator=torch.Generator().manual_seed(spec["seed"]),
+        output_type="pt")
+    dit_cls.__call__ = timed
+    try:
+        pipe(**gen_kwargs)            # warm-up: page cache + NEFF dispatch
+        stamps.clear()
+        t1 = time.perf_counter()
+        result = pipe(**gen_kwargs)   # timed
+        gen_s = time.perf_counter() - t1
+    finally:
+        dit_cls.__call__ = orig
+
+    deltas = [stamps[i] - stamps[i - 1] for i in range(1, len(stamps))]
+    finite = None
+    try:
+        img = getattr(result, "images", None) or result[0]
+        if isinstance(img, torch.Tensor):
+            finite = bool(torch.isfinite(img).all())
+    except Exception as exc:
+        print(f"[step:{label}] finite-check skipped: {exc}", flush=True)
+    print("STEP_RESULT " + json.dumps({
+        "label": label, "build_s": build_s, "generate_wall_s": gen_s,
+        "finite": finite, "step_s": deltas}))
+    return 0
+
+
+_CFG_REGISTRY = {"flux": FLUX_CONFIGS, "wan": WAN_CONFIGS, "qwen": QWEN_CONFIGS}
+_WORKERS = {"flux": worker_flux, "wan": worker_wan, "qwen": worker_qwen}
+
+
 
 
 def phase_step(model: str, label: str, cfg: dict, spec: Spec, out: dict,
@@ -593,7 +675,10 @@ def run_model(model: str, only: list[str] | None, phases: list[str] | None,
     spec = SPECS[model]
     configs = _CFG_REGISTRY[model]
     labels = [l for l in configs if not only or l in only]
-    labels += [l for l in DP_ROWS if (not only or l in only)]
+    # DP rows only apply when the model's registry has their tp base (the
+    # qwen two-row sweep has no tp2, so its dp rows are skipped).
+    labels += [l for l in DP_ROWS
+               if (not only or l in only) and DP_ROWS[l][0] in configs]
     log_dir = ART_ROOT / model / "logs"
     out_dir = ART_ROOT / model / "out"
     log_dir.mkdir(parents=True, exist_ok=True)

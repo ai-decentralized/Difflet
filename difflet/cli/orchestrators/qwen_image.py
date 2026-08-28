@@ -212,6 +212,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             tp_degree=args.tp_degree or 4,
             cp_degree=args.cp_degree or 1,
             cp_mode=getattr(args, "cp_mode", "gather_kv"),
+            sp_enabled=bool(getattr(args, "sp_enabled", None)),
         )
         app = NeuronQwenImageApplication(
             model_path=model_dir,
@@ -356,6 +357,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             tp_degree=args.tp_degree or 4,
             cp_degree=args.cp_degree or 1,
             cp_mode_suffix=cp_mode_token(args),
+            sp_suffix="sp" if getattr(args, "sp_enabled", None) else "",
             height=args.height or 1024,
             width=args.width or 1024,
         )
@@ -392,6 +394,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
             parts += ["--cache-dir", a.cache_dir]
         if getattr(a, "revision", None):
             parts += ["--revision", a.revision]
+        if getattr(a, "sp_enabled", None):
+            parts += ["--sp"]
         if getattr(a, "teacache_speedup", None) is not None:
             parts += ["--teacache-speedup", str(a.teacache_speedup)]
         if getattr(a, "teacache_calibration", None):

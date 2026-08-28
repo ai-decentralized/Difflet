@@ -31,6 +31,7 @@ def stage_compiled_dir_from_values(
     tp_degree: int,
     cp_degree: int,
     cp_mode_suffix: str = "",
+    sp_suffix: str = "",
     height: int,
     width: int,
 ) -> Path:
@@ -41,7 +42,7 @@ def stage_compiled_dir_from_values(
     if stage == "text":
         return base / f"qwen_image_enc_tp{tp}cp{cp}_seq{ENC_SEQ}"
     if stage == "generate":
-        return base / f"qwen_image_dit_tp{tp}cp{cp}{cp_mode_suffix}_h{h}w{w}"
+        return base / f"qwen_image_dit_tp{tp}cp{cp}{cp_mode_suffix}{sp_suffix}_h{h}w{w}"
     if stage == "vae":
         return base / f"qwen_image_vae_h{h}w{w}"
     raise ValueError(f"unknown Qwen stage {stage!r}")
