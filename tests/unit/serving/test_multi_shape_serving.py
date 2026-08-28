@@ -173,37 +173,137 @@ class TestIdentity:
         assert llama(multi) == llama(single)
 
 
-class TestServeOptionsPlumbing:
-    def test_build_serving_profile_rejects_non_hunyuan_shapes(self):
-        from difflet.serving.options import build_serving_profile
+def _build_profile_with_shapes(
+    *,
+    model_id: str,
+    model_type: str,
+    output_modality: str,
+    shapes: str,
+    teacache_speedup: float | None = None,
+):
+    from difflet.serving.options import build_serving_profile
 
-        with pytest.raises(DiffletServingError):
-            build_serving_profile(
-                model_id="Qwen/Qwen-Image",
-                model_type="qwen_image",
-                entry=SimpleNamespace(
-                    resolve_shape=lambda **kw: {"height": 1024, "width": 1024},
-                    default_parallel=DiffletParallelConfig(tp_degree=4),
-                ),
+    is_video = output_modality == "video"
+    return build_serving_profile(
+        model_id=model_id,
+        model_type=model_type,
+        entry=SimpleNamespace(
+            resolve_shape=lambda **kw: {
+                "height": kw.get("height"),
+                "width": kw.get("width"),
+                "num_frames": kw.get("num_frames"),
+            },
+            default_parallel=DiffletParallelConfig(tp_degree=4),
+        ),
+        output_modality=output_modality,
+        output_mime_type="video/mp4" if is_video else "image/png",
+        default_fps=24 if is_video else None,
+        default_host_vae=False,
+        revision=None,
+        cache_dir=None,
+        tp_degree=None,
+        cp_degree=None,
+        cp_mode=None,
+        cfg_parallel=None,
+        sp_enabled=None,
+        height=None,
+        width=None,
+        num_frames=None,
+        shapes=shapes,
+        host_vae=False,
+        clip_placement=None,
+        teacache_cadence=None,
+        teacache_online_delta=None,
+        teacache_speedup=teacache_speedup,
+        teacache_calibration=None,
+    )
+
+
+class TestServeOptionsPlumbing:
+    @pytest.mark.parametrize(
+        "model_id,model_type,output_modality,shapes,expected_pin,expected_shapes",
+        [
+            (
+                "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+                "wan",
+                "video",
+                "480x832x5,480x832x9",
+                (480, 832, 9),
+                ((480, 832, 9), (480, 832, 5)),
+            ),
+            (
+                "black-forest-labs/FLUX.1-dev",
+                "flux",
+                "image",
+                "512x512,1024x1024",
+                (1024, 1024, None),
+                ((1024, 1024, None), (512, 512, None)),
+            ),
+            (
+                "Qwen/Qwen-Image",
+                "qwen_image",
+                "image",
+                "1024x1024,512x512",
+                (1024, 1024, None),
+                ((1024, 1024, None), (512, 512, None)),
+            ),
+        ],
+    )
+    def test_build_serving_profile_accepts_shapes_for_supported_models(
+        self, model_id, model_type, output_modality, shapes, expected_pin, expected_shapes
+    ):
+        profile = _build_profile_with_shapes(
+            model_id=model_id,
+            model_type=model_type,
+            output_modality=output_modality,
+            shapes=shapes,
+        )
+        assert (profile.height, profile.width, profile.num_frames) == expected_pin
+        assert profile.shapes == expected_shapes
+
+    @pytest.mark.parametrize(
+        "model_id,model_type,output_modality,shapes,match",
+        [
+            (
+                "Lightricks/LTX-2",
+                "ltx_2",
+                "video",
+                "480x832x9,480x832x5",
+                "supported for",
+            ),
+            (
+                "black-forest-labs/FLUX.1-dev",
+                "flux",
+                "image",
+                "1024x1024x9,512x512x9",
+                "image serving takes HxW",
+            ),
+            (
+                "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+                "wan",
+                "video",
+                "480x832,480x416",
+                "video serving takes HxWxF",
+            ),
+        ],
+    )
+    def test_build_serving_profile_rejects_unsupported_shape_requests(
+        self, model_id, model_type, output_modality, shapes, match
+    ):
+        with pytest.raises(DiffletServingError, match=match):
+            _build_profile_with_shapes(
+                model_id=model_id,
+                model_type=model_type,
+                output_modality=output_modality,
+                shapes=shapes,
+            )
+
+    def test_build_serving_profile_rejects_shapes_with_teacache(self):
+        with pytest.raises(DiffletServingError, match="TeaCache"):
+            _build_profile_with_shapes(
+                model_id="black-forest-labs/FLUX.1-dev",
+                model_type="flux",
                 output_modality="image",
-                output_mime_type="image/png",
-                default_fps=None,
-                default_host_vae=False,
-                revision=None,
-                cache_dir=None,
-                tp_degree=None,
-                cp_degree=None,
-                cp_mode=None,
-                cfg_parallel=None,
-                sp_enabled=None,
-                height=None,
-                width=None,
-                num_frames=None,
                 shapes="1024x1024,512x512",
-                host_vae=False,
-                clip_placement=None,
-                teacache_cadence=None,
-                teacache_online_delta=None,
-                teacache_speedup=None,
-                teacache_calibration=None,
+                teacache_speedup=1.5,
             )

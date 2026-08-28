@@ -606,3 +606,25 @@ def test_s3_backend_errors_are_logged_and_sanitized(monkeypatch, caplog, operati
     assert exc.value.message == "Internal artifact storage error"
     assert "secret" not in exc.value.message
     assert "secret" in caplog.text
+
+
+def test_normalize_chat_request_enforces_shape_set_membership():
+    resolved = resolve_serving_model(
+        ServeOptions(model_id="black-forest-labs/FLUX.1-dev", shapes="1024x1024,512x512")
+    )
+
+    defaulted = normalize_chat_request(_body(), resolved_model=resolved)
+    assert (defaulted.height, defaulted.width) == (1024, 1024)
+
+    member = normalize_chat_request(
+        _body(extra_body={"height": 512, "width": 512}), resolved_model=resolved
+    )
+    assert (member.height, member.width) == (512, 512)
+
+    with pytest.raises(DiffletServingError) as exc:
+        normalize_chat_request(
+            _body(extra_body={"height": 768, "width": 768}), resolved_model=resolved
+        )
+    assert exc.value.code == "profile_mismatch"
+    assert "768x768" in exc.value.message
+    assert "1024x1024" in exc.value.message and "512x512" in exc.value.message

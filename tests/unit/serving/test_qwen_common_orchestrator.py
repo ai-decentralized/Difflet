@@ -329,15 +329,13 @@ def test_staged_cli_compiled_path_helper_is_unchanged(tmp_path):
     )
 
 
-def test_qwen_serving_derives_rectangular_packed_latent_grid_from_profile(tmp_path):
-    profile = replace(_profile(tmp_path), height=512, width=1024)
-
-    assert _packed_latent_grid(profile, seq=2048) == (32, 64)
+def test_qwen_serving_derives_rectangular_packed_latent_grid_from_request_shape():
+    assert _packed_latent_grid(512, 1024, seq=2048) == (32, 64)
 
 
-def test_qwen_serving_rejects_packed_latents_that_do_not_match_profile(tmp_path):
-    with pytest.raises(ValueError, match="does not match the serving profile"):
-        _packed_latent_grid(_profile(tmp_path), seq=2048)
+def test_qwen_serving_rejects_packed_latents_that_do_not_match_request_shape():
+    with pytest.raises(ValueError, match="does not match the request shape"):
+        _packed_latent_grid(1024, 1024, seq=2048)
 
 
 @pytest.mark.parametrize("steps,expected", [(50, True), (4, False)])
@@ -385,6 +383,7 @@ def test_qwen_serving_selects_teacache_per_request_steps(monkeypatch, tmp_path, 
             bfloat16="bf16",
             full=lambda *args, **kwargs: "guidance",
             manual_seed=lambda seed: None,
+            randn=lambda *args, **kwargs: "request-shape-latents",
         ),
     )
     monkeypatch.setitem(
@@ -414,3 +413,112 @@ def test_qwen_serving_selects_teacache_per_request_steps(monkeypatch, tmp_path, 
     )
 
     assert captured["teacache_enabled"] is expected
+
+
+# --- Multi-shape (--shapes) serving: one worker serves the compiled shape set ---
+
+_QWEN_SHAPES = ((512, 512, None), (1024, 1024, None))
+
+
+def _multi_shape_profile(tmp_path: Path) -> ServingProfile:
+    return replace(_profile(tmp_path), shapes=_QWEN_SHAPES)
+
+
+def test_qwen_compile_identities_cover_the_shape_set(tmp_path):
+    source = _source(tmp_path)
+    single = {
+        spec.component_id: spec.identity
+        for spec in qwen_image.build_compile_plan(source, _profile(tmp_path))
+    }
+    multi = {
+        spec.component_id: spec.identity
+        for spec in qwen_image.build_compile_plan(source, _multi_shape_profile(tmp_path))
+    }
+
+    # The text encoder is shape-invariant: one artifact serves every set.
+    assert multi["text"] == single["text"]
+    assert multi["generate"] != single["generate"]
+    assert multi["vae"] != single["vae"]
+
+    inputs = json.loads(multi["generate"].canonical_cache_inputs_json)
+    assert inputs["compile_contract_version"] == 3
+    assert inputs["shapes"] == [[1024, 1024, None], [512, 512, None]]
+    assert "height" not in inputs
+    text_inputs = json.loads(multi["text"].canonical_cache_inputs_json)
+    assert "shapes" not in text_inputs and "height" not in text_inputs
+
+    reordered = {
+        spec.component_id: spec.identity
+        for spec in qwen_image.build_compile_plan(
+            source,
+            replace(
+                _profile(tmp_path),
+                shapes=((1024, 1024, None), (512, 512, None), (512, 512, None)),
+            ),
+        )
+    }
+    assert reordered == multi
+
+    # K=1 as an explicit one-member set matches the legacy single-shape form.
+    explicit_single = {
+        spec.component_id: spec.identity
+        for spec in qwen_image.build_compile_plan(
+            source, replace(_profile(tmp_path), shapes=((1024, 1024, None),))
+        )
+    }
+    assert explicit_single == single
+
+
+def test_qwen_compile_forwards_shape_set_to_the_cli_stage(monkeypatch, tmp_path):
+    profile = _multi_shape_profile(tmp_path)
+    source = _source(tmp_path)
+    spec = qwen_image.build_compile_plan(source, profile)[1]
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    target = ArtifactPublishTarget("generate", spec.identity, tmp_path, staging)
+    calls = []
+
+    def fake_run_stage(orchestrator, stage, *, cli_args, **kwargs):
+        calls.append(cli_args)
+        _write_component(staging, stage)
+
+    monkeypatch.setattr("difflet.cli.runner.run_stage", fake_run_stage)
+
+    qwen_image.compile_serving_artifact(source, profile, spec, target)
+
+    args = calls[0]
+    assert args[args.index("--shapes") + 1] == "1024x1024,512x512"
+
+
+def test_qwen_namespace_from_profile_omits_shapes_for_single_shape(tmp_path):
+    namespace = qwen_image.namespace_from_profile(_profile(tmp_path), stage_mode="compile")
+    assert namespace.shapes is None
+
+
+def test_qwen_request_validator_enforces_shape_set_membership(tmp_path):
+    validator = object.__new__(QwenImageServingRequestValidator)
+    validator.runtime = SimpleNamespace(profile=_multi_shape_profile(tmp_path))
+    validator._tokenizer = lambda *args, **kwargs: SimpleNamespace(
+        input_ids=SimpleNamespace(shape=(1, 10))
+    )
+
+    def _request(height, width):
+        return DiffletGenerateRequest(
+            "request",
+            "Qwen/Qwen-Image",
+            "prompt",
+            height,
+            width,
+            4,
+            1.0,
+            0,
+        )
+
+    validator.validate(_request(1024, 1024))
+    validator.validate(_request(512, 512))
+
+    with pytest.raises(DiffletServingError) as exc:
+        validator.validate(_request(768, 768))
+    assert exc.value.code == "profile_mismatch"
+    assert "768x768" in exc.value.message
+    assert "1024x1024" in exc.value.message and "512x512" in exc.value.message

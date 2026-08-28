@@ -36,13 +36,15 @@ def _profile(
     *,
     parallel: DiffletParallelConfig | None = None,
     host_vae: bool = True,
+    shapes: tuple[tuple[int, int, int | None], ...] | None = None,
+    num_frames: int = 5,
 ) -> ServingProfile:
     return ServingProfile(
         model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers",
         model_type="wan",
         height=64,
         width=96,
-        num_frames=5,
+        num_frames=num_frames,
         parallel=parallel or DiffletParallelConfig(tp_degree=4),
         cache_dir=str(tmp_path / "cache"),
         dtype="bfloat16",
@@ -50,6 +52,7 @@ def _profile(
         output_mime_type="video/mp4",
         output_fps=16,
         host_vae=host_vae,
+        shapes=shapes,
     )
 
 
@@ -910,3 +913,89 @@ def test_host_decoder_propagates_encoding_failure(monkeypatch, tmp_path):
                 )
             )
         )
+
+
+# --- Multi-shape (--shapes) serving: one worker serves the compiled shape set ---
+
+_SHAPE_A = (64, 96, 9)  # largest (priority)
+_SHAPE_B = (64, 96, 5)
+
+
+def _multi_shape_profile(tmp_path, *, host_vae: bool = True) -> ServingProfile:
+    return _profile(
+        tmp_path,
+        host_vae=host_vae,
+        shapes=(_SHAPE_B, _SHAPE_A),
+        num_frames=_SHAPE_A[2],
+    )
+
+
+def test_multi_shape_profile_validates_every_shape_and_largest_pin(tmp_path):
+    wan._validate_profile(_multi_shape_profile(tmp_path))
+
+    with pytest.raises(ValueError, match="largest shape"):
+        wan._validate_profile(
+            _profile(tmp_path, shapes=(_SHAPE_B, _SHAPE_A), num_frames=_SHAPE_B[2])
+        )
+    with pytest.raises(ValueError, match="4n\\+1"):
+        wan._validate_profile(
+            _profile(tmp_path, shapes=((64, 96, 6), _SHAPE_A), num_frames=_SHAPE_A[2])
+        )
+
+
+def test_multi_shape_validator_accepts_members_and_rejects_out_of_set(monkeypatch, tmp_path):
+    runtime = _runtime(tmp_path, monkeypatch, profile=_multi_shape_profile(tmp_path))
+    validator = wan.WanServingRequestValidator(runtime)
+    validator._tokenizer = lambda *args, **kwargs: SimpleNamespace(
+        input_ids=SimpleNamespace(shape=(1, 10))
+    )
+    request = _request(runtime.profile)
+
+    for _height, _width, num_frames in (_SHAPE_A, _SHAPE_B):
+        validator.validate(
+            replace(request, video=replace(request.video, num_frames=num_frames))
+        )
+
+    with pytest.raises(DiffletServingError) as exc:
+        validator.validate(replace(request, video=replace(request.video, num_frames=13)))
+    assert exc.value.code == "profile_mismatch"
+    assert "64x96x13" in exc.value.message
+    assert "64x96x9" in exc.value.message and "64x96x5" in exc.value.message
+
+
+def test_multi_shape_generation_identity_covers_the_set(monkeypatch, tmp_path):
+    monkeypatch.setattr(wan, "_torch_bfloat16", lambda: "bfloat16")
+    source = _source(tmp_path)
+    single = wan._compile_spec(source, _profile(tmp_path))
+    multi = wan._compile_spec(source, _multi_shape_profile(tmp_path))
+    assert multi.identity != single.identity
+
+    reordered = wan._compile_spec(
+        source,
+        _profile(tmp_path, shapes=(_SHAPE_A, _SHAPE_B, _SHAPE_A), num_frames=_SHAPE_A[2]),
+    )
+    assert reordered.identity == multi.identity
+
+    # K=1 as an explicit one-member set matches the legacy single-shape form.
+    explicit_single = wan._compile_spec(
+        source, _profile(tmp_path, shapes=((64, 96, 5),))
+    )
+    assert explicit_single.identity == single.identity
+
+
+def test_multi_shape_decoder_identity_covers_the_set(monkeypatch, tmp_path):
+    monkeypatch.setattr(wan, "_torch_bfloat16", lambda: "bfloat16")
+    source = _source(tmp_path)
+    single = {
+        spec.component_id: spec
+        for spec in wan._compile_specs(source, _profile(tmp_path, host_vae=False))
+    }
+    multi = {
+        spec.component_id: spec
+        for spec in wan._compile_specs(source, _multi_shape_profile(tmp_path, host_vae=False))
+    }
+    assert multi["decoder"].identity != single["decoder"].identity
+    inputs = json.loads(multi["decoder"].identity.canonical_cache_inputs_json)
+    assert inputs["compile_contract_version"] == 2
+    assert inputs["shapes"] == [[64, 96, 9], [64, 96, 5]]
+    assert "height" not in inputs
