@@ -1,0 +1,26 @@
+{
+ "model": "wan",
+ "label": "tp2cp2ring",
+ "parallel": {
+  "tp_degree": 2,
+  "cp_degree": 2,
+  "cp_mode": "ring",
+  "cfg_parallel_enabled": false,
+  "sp_enabled": false,
+  "dp_degree": 1
+ },
+ "spec": {
+  "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+  "revision": "5be7df9619b54f4e2667b2755bc6a756675b5cd7",
+  "steps": 20,
+  "guidance": 4.0,
+  "seed": 42,
+  "height": 480,
+  "width": 832,
+  "num_frames": 9,
+  "prompt": "a cat walking through a garden"
+ },
+ "errors": {
+  "compile": "failed (1): /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/difflet compile --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers --revision 5be7df9619b54f4e2667b2755bc6a756675b5cd7 --tp-degree 2 --cp-degree 2 --cp-mode ring --height 480 --width 832 --num-frames 9\n    compilation_result = frontend.compile(\n                         ^^^^^^^^^^^^^^^^^\n  File \"/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/lib/python3.12/site-packages/nki/compiler/frontend.py\", line 171, in compile\n    result = self._compile(\n             ^^^^^^^^^^^^^^\n  File \"/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/lib/python3.12/site-packages/nki/compiler/frontend.py\", line 300, in _compile\n    mod_capsule = parser_kernel.compile(context, \"\", options=options)\n                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nRuntimeError: error: failed to compile NKI kernel:\nCollected 1 different diagnostics:\n- [x1] error: min requires all iterable elements be numbers, got (function, function)\n\nTraceback (most recent call last):\n  File \"/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/difflet\", line 8, in <module>\n    sys.exit(main())\n             ^^^^^^\n  File \"/home/ec2-user/Difflet/difflet/cli/main.py\", line 880, in main\n    getattr(orchestrator, args.command)()\n  File \"/home/ec2-user/Difflet/difflet/cli/orchestrators/wan.py\", line 107, in compile\n    runner.run_stage(self.args.model_id, \"transformer\",\n  File \"/home/ec2-user/Difflet/difflet/cli/runner.py\", line 49, in run_stage\n    subprocess.run(cmd, env=env, check=True)\n  File \"/usr/lib/python3.12/subprocess.py\", line 571, in run\n    raise CalledProcessError(retcode, process.args,\nsubprocess.CalledProcessError: Command '['/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/python3.12', '-m', 'difflet.cli.stage', '--orchestrator', 'Wan-AI/Wan2.2-T2V-A14B-Diffusers', '--stage', 'transformer', '--model-id', 'Wan-AI/Wan2.2-T2V-A14B-Diffusers', '--tp-degree', '2', '--cp-degree', '2', '--cp-mode', 'ring', '--height', '480', '--width', '832', "
+ }
+}

@@ -1,0 +1,73 @@
+{
+ "model": "wan",
+ "label": "tp2cp2ulysses",
+ "parallel": {
+  "tp_degree": 2,
+  "cp_degree": 2,
+  "cp_mode": "ulysses",
+  "cfg_parallel_enabled": false,
+  "sp_enabled": false,
+  "dp_degree": 1
+ },
+ "spec": {
+  "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+  "revision": "5be7df9619b54f4e2667b2755bc6a756675b5cd7",
+  "steps": 20,
+  "guidance": 4.0,
+  "seed": 42,
+  "height": 480,
+  "width": 832,
+  "num_frames": 9,
+  "prompt": "a cat walking through a garden"
+ },
+ "compile": {
+  "wall_s": 1341.6,
+  "cache_hit": false,
+  "breakdown_s": {
+   "text_encoder_t5": {
+    "module_load_s": 0.801,
+    "hlo_generate_s": 0.647,
+    "priority_hlo_compile_s": 0.409,
+    "all_hlo_compile_s": 0.001,
+    "build_total_s": 81.786,
+    "other_s": 79.93
+   },
+   "transformer": {
+    "module_load_s": 3.069,
+    "hlo_generate_s": 22.102,
+    "priority_hlo_compile_s": 74.854,
+    "all_hlo_compile_s": 0.002,
+    "build_total_s": 396.965,
+    "other_s": 296.938
+   },
+   "wall_total_s": 478.751
+  }
+ },
+ "notes": [
+  "cold run skipped: sudo drop_caches unavailable \u2014 cold numbers come from the first post-compile generate instead"
+ ],
+ "errors": {
+  "generate": "failed (1): /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/difflet generate --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers --revision 5be7df9619b54f4e2667b2755bc6a756675b5cd7 --tp-degree 2 --cp-degree 2 --cp-mode ulysses --height 480 --width 832 --num-frames 9 --steps 20 --guidance-scale 4.0 --seed 42 --prompt a cat walking through a garden --output /home/ec2-user/Difflet/artifacts/parallel_phase_sweep/wan/out/tp2cp2ulysses_warm0.mp4\n2026-Aug-27 14:15:42.161536 26085:26112 ERROR   ENC:post_ops                                [nec_dev 2] Failed to post op 2 for function 1\n2026-Aug-27 14:15:42.164132 26085:26113 ERROR   ENC:post_ops                                [nec_dev 3] Failed to post op 2 for function 1\n2026-Aug-27 14:15:42.166787 26085:26112 ERROR   ENC:enc_post_function                       [nec_dev 2] Failed to post function 1\n2026-Aug-27 14:15:42.168287 26085:26113 ERROR   ENC:enc_post_function                       [nec_dev 3] Failed to post function 1\n2026-Aug-27 14:15:42.170967 26085:26112 ERROR   ENC:enc_load_operations                     [nec_dev 2] failed to post an operation/function\n2026-Aug-27 14:15:42.175167 26085:26112 ERROR  TDRV:kbl_exec_build_and_load_cc_resources    [nec_dev 2, gid 2] failed to load operations, model: /tmp/nxd_model/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_f6bc464bdddf2ed0c278+186cc38a.neff\n2026-Aug-27 14:15:42.173650 26085:26113 ERROR   ENC:enc_load_operations                     [nec_dev 3] failed to post an operation/function\n2026-Aug-27 14:15:42.175173 26085:26112 ERROR  NMGR:dlr_build_and_load_cc_resources         Failed to build and load collectives resources for /tmp/nxd_model/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_f6bc464bdddf2ed0c278+186cc38a.neff, exec_id 13\n2026-Aug-27 14:15:42.176591 26085:26113 ERROR  TDRV:kbl_exec_build_and_load_cc_resources    [nec_dev 3, gid 3] failed to load operations, model: /tmp/nxd_model/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_f6bc464bdddf"
+ },
+ "e2e_cold": {
+  "stages": [
+   {
+    "stage": "stage_0",
+    "load_s": 177.631
+   },
+   {
+    "stage": "stage_1",
+    "load_s": 452.046
+   },
+   {
+    "stage": "vae_decoder",
+    "load_s": 9.035
+   }
+  ],
+  "weights_load_total_s": 638.712,
+  "weights_shard_total_s": 0.0,
+  "wall_total_s": 701.471,
+  "compute_and_overhead_s": 62.759,
+  "note": "page cache dropped (sync; echo 3 > drop_caches)"
+ }
+}
