@@ -163,6 +163,15 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
     The ring membership IS the cp-axis subgroup the model scattered Q with,
     so K/V rotate consistently with the scatter by construction.
     """
+    s_local = int(q.shape[2])
+    if s_local % 128 != 0:
+        raise ValueError(
+            f"ring cp_mode requires the per-rank sequence length to be a multiple "
+            f"of 128 (nkilib ring_attention_spmd_fwd kernel constraint, "
+            f"NCC_INKI016); got {s_local}. Pick a resolution whose latent token "
+            f"count divides by cp_degree*128 (e.g. Wan 512x512xF instead of "
+            f"480x832xF), or use --cp-mode gather_kv or ulysses at this shape."
+        )
     if ring_attention_spmd_fwd is None:
         raise RuntimeError(
             "ring attention requires nkilib.experimental.attention.ring_attention_fwd "
