@@ -525,3 +525,38 @@ def test_fused_probe_still_selected_when_enabled(monkeypatch, tmp_path):
     application = _app_with_probe_branch(monkeypatch, tmp_path, teacache_fused=True)
     assert isinstance(application.teacache_probe, _FakeFusedProbe)
     assert application.teacache_probe_fused is True
+
+
+def test_vae_decoder_world_size_is_process_world(monkeypatch):
+    # Under context parallelism the process world is tp*cp; a VAE config
+    # claiming world_size=tp_degree (2) while the DiT initialized ranks 0..3
+    # segfaults the Neuron runtime at weight init (found on device, tp2cp2
+    # ulysses, 2026-08-30). The application must wire the full process world.
+    captured = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_cfg(**kwargs):
+        captured.update(kwargs)
+        raise _Stop()
+
+    monkeypatch.setattr(app, "create_hunyuan_video_vae_decoder_config", fake_cfg)
+    with tempfile.TemporaryDirectory() as path:
+        os.makedirs(os.path.join(path, "vae"))
+        with open(os.path.join(path, "vae", "config.json"), "w") as fh:
+            fh.write("{}")
+        parallel = SimpleNamespace(
+            tp_degree=2, world_size=4, cp_degree=2, cp_mode="ulysses")
+        try:
+            app.NeuronHunyuanVideoApplication(
+                model_path=path,
+                parallel=parallel,
+                dtype="bf16",
+                shape={"height": None, "width": None, "num_frames": None},
+                enable_vae_decoder=True,
+            )
+        except _Stop:
+            pass
+    assert captured["world_size"] == 4
+    assert captured["tp_degree"] == 1
