@@ -645,9 +645,14 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                     NeuronHunyuanVideoVAEDecoderApplication,
                 )
 
+                # world_size must be the PROCESS world (tp*cp*cfg), not tp: with
+                # context parallelism the DiT initializes ranks 0..world-1 and a
+                # VAE claiming a smaller world in the same process segfaults the
+                # Neuron runtime at weight init (found on device: tp2cp2 ulysses,
+                # DiT w4 + VAE w2 -> SIGSEGV loading the VAE).
                 vae_config = create_hunyuan_video_vae_decoder_config(
                     model_path=model_path,
-                    world_size=parallel.tp_degree,
+                    world_size=parallel.world_size,
                     tp_degree=1,
                     dtype=self.dtype,
                     height=self.shape["height"],
