@@ -31,6 +31,21 @@ _MODEL_TYPE = "wan"
 _CLI_NAME = "wan"
 _VIRTUAL_CORE_SIZE = None  # Wan does not require NEURON_RT_VIRTUAL_CORE_SIZE
 
+
+def _transformer_virtual_core_size(args) -> int | None:
+    """Ring CP is the one Wan path that needs NEURON_RT_VIRTUAL_CORE_SIZE=2.
+
+    The nkilib ring kernel allocates per-core shared_hbm send/recv buffers and
+    a core_barrier that only exist in its LNC2 SPMD-grid variant, selected in
+    ops_impl.attention.ring_attention off this env var; without it neuronx-cc
+    fails with NCC_ILLC059 ("Could not find MemoryLocation ... send_k_buf on
+    core 1"). Every other Wan stage/mode stays at None so its existing compile
+    caches remain valid (ring's transformer cache is a separate key anyway).
+    """
+    if getattr(args, "cp_mode", None) == "ring" and (args.cp_degree or 1) > 1:
+        return 2
+    return _VIRTUAL_CORE_SIZE
+
 # The historical model id keeps the bare "wan" compiled-dir prefix so existing
 # compile caches stay valid (additive-only, same policy as
 # DiffletParallelConfig.to_cache_dict).
@@ -119,7 +134,8 @@ class WanOrchestrator(ModelOrchestrator):
         )
         shared = self._shared_cli_args(stage_mode="compile")
         runner.run_stage(self.args.model_id, "transformer",
-                         num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE,
+                         num_cores=full_cores,
+                         virtual_core_size=_transformer_virtual_core_size(self.args),
                          cli_args=shared)
         if getattr(self.args, "host_vae", False):
             return
@@ -138,7 +154,8 @@ class WanOrchestrator(ModelOrchestrator):
         shared = self._shared_cli_args(stage_mode="generate", work_dir=str(work_dir))
         try:
             runner.run_stage(self.args.model_id, "transformer",
-                             num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE,
+                             num_cores=full_cores,
+                             virtual_core_size=_transformer_virtual_core_size(self.args),
                              cli_args=shared)
             if getattr(self.args, "host_vae", False):
                 _decode_latents_host(str(work_dir / "latents.pt"), self.args.model_id,

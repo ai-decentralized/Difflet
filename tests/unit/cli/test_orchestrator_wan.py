@@ -399,3 +399,17 @@ def test_stage_transformer_threads_cadence_into_app_without_changing_artifact(
     kw = _FakeWanApp.instances[-1].kwargs
     assert kw["teacache_cadence"] == 2
     assert kw["teacache_online_delta_alpha"] is None
+
+
+def test_transformer_virtual_core_size_ring_only():
+    # Ring CP needs NEURON_RT_VIRTUAL_CORE_SIZE=2: the nkilib ring kernel's
+    # per-core send/recv buffers exist only in its LNC2 SPMD-grid variant, and
+    # without the env the compile dies with NCC_ILLC059 (found on device,
+    # wan ring 512x512x9, 2026-08-30). Every other mode keeps None so existing
+    # compile caches stay valid.
+    f = wan_mod._transformer_virtual_core_size
+    assert f(_wan_args(cp_degree=2, cp_mode="ring")) == 2
+    assert f(_wan_args(cp_degree=1, cp_mode="ring")) is None  # ring needs cp>1
+    assert f(_wan_args(cp_degree=2, cp_mode="gather_kv")) is None
+    assert f(_wan_args(cp_degree=2, cp_mode="ulysses")) is None
+    assert f(_wan_args(cp_degree=1, cp_mode="gather_kv")) is None
