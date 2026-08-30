@@ -355,6 +355,11 @@ class NeuronFluxApplication(MultiComponentApplication):
                     online_delta_alpha=float(teacache_online_delta_alpha or 0.0),
                 )
             )
+            print(
+                f"[teacache] probe-free controller enabled: cadence="
+                f"{int(teacache_cadence or 0)} online_delta_alpha="
+                f"{float(teacache_online_delta_alpha or 0.0)}"
+            )
 
     def components(self) -> list[ComponentSpec]:
         # Compile order follows the original Flux application. Load order is

@@ -127,7 +127,13 @@ class NeuronFluxPipeline(FluxPipeline):
         # parallel is incompatible (asserted off in the application).
         if teacache_enabled is False and getattr(self, "teacache_controller", None) is not None:
             self.teacache_controller.reset()
-        if getattr(self, "teacache_probe", None) is not None and teacache_enabled is not False:
+        # Probe-free modes (fixed cadence / online-delta) have a controller but
+        # no probe — they need the same teacache loop, which handles fused=False
+        # by never dispatching a probe call.
+        if (
+            getattr(self, "teacache_probe", None) is not None
+            or getattr(self, "teacache_controller", None) is not None
+        ) and teacache_enabled is not False:
             with self.transformer.image_rotary_emb_cache_context():
                 return self._call_with_teacache(
                     prompt=prompt,
@@ -688,6 +694,9 @@ class NeuronFluxPipeline(FluxPipeline):
                     progress_bar.update()
                 if XLA_AVAILABLE:
                     xm.mark_step()
+
+        if controller is not None:
+            print(f"[teacache] stats: {controller.stats()}")
 
         if output_type == "latent":
             image = latents
