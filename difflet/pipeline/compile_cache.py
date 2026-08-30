@@ -135,7 +135,17 @@ class CacheSpec:
 _RUNTIME_ONLY_APP_KWARGS: frozenset[str] = frozenset(
     # "shapes" is compile-relevant but captured by the dedicated
     # CacheSpec.shapes field; excluding it here avoids hashing it twice.
-    {"enable_host_pipeline", "enable_decode_components", "host_device", "shapes"}
+    {
+        "enable_host_pipeline",
+        "enable_decode_components",
+        "host_device",
+        "shapes",
+        # Probe-free TeaCache modes are host-side-only skip logic: no probe
+        # NEFF, no graph change — a cadence flag must not force a recompile
+        # (nor pollute the key so a warm cache misses).
+        "teacache_cadence",
+        "teacache_online_delta_alpha",
+    }
 )
 
 

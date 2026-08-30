@@ -586,6 +586,17 @@ class NeuronFluxPipeline(FluxPipeline):
         record = getattr(self, "_tc_record", False)
         empty_guidance = torch.tensor([], device=device, dtype=latents.dtype)
         if controller is not None:
+            # Probe-free modes (cadence / online-delta) are built before the
+            # request's step count is known; sync it so the cooldown window
+            # ([num_steps - cooldown, num_steps)) protects the real tail.
+            cal = controller.calibration
+            probe_free = int(cal.cadence) > 0 or float(cal.online_delta_alpha) > 0.0
+            if probe_free and int(cal.num_steps) != int(num_inference_steps):
+                import dataclasses
+
+                controller.calibration = dataclasses.replace(
+                    cal, num_steps=int(num_inference_steps)
+                )
             controller.reset()
         self._tc_last_trajectory = []
         self._tc_pairs = []
