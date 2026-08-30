@@ -243,6 +243,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
             teacache_fused=getattr(args, "teacache_speedup", None) is not None,
             teacache_speedup=getattr(args, "teacache_speedup", None),
             teacache_calibration_path=getattr(args, "teacache_calibration", None),
+            teacache_cadence=getattr(args, "teacache_cadence", None),
+            teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))

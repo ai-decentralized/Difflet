@@ -42,6 +42,8 @@ class QwenImageOrchestrator:
         teacache_speedup: float | None = None,
         teacache_calibration: Any | None = None,
         teacache_calibration_path: str | None = None,
+        teacache_cadence: int | None = None,
+        teacache_online_delta_alpha: float | None = None,
     ) -> None:
         self.model_path = model_path
         self.transformer = transformer
@@ -88,6 +90,29 @@ class QwenImageOrchestrator:
                     f"{calibration.target_speedup}."
                 )
             self.teacache_controller = TeaCacheController(calibration)
+
+        # Probe-free TeaCache modes (fixed cadence / online-delta): host-side
+        # skip decisions only — no probe NEFF, no calibration file. num_steps
+        # is synced to the request in __call__.
+        if teacache_cadence is not None or teacache_online_delta_alpha is not None:
+            if teacache_speedup is not None:
+                raise ValueError(
+                    "teacache_cadence/teacache_online_delta_alpha are mutually "
+                    "exclusive with teacache_speedup."
+                )
+            from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
+
+            self.teacache_controller = TeaCacheController(
+                TeaCacheCalibration(
+                    model="qwen_image",
+                    shape_label=_teacache_shape_label(height=self.height, width=self.width),
+                    num_steps=0,  # synced to the request in __call__
+                    poly_coef=(0.0,),
+                    threshold=0.0,
+                    cadence=int(teacache_cadence or 0),
+                    online_delta_alpha=float(teacache_online_delta_alpha or 0.0),
+                )
+            )
 
     def has_runtime_components(self) -> bool:
         return self.transformer is not None or self.vae is not None
@@ -194,6 +219,14 @@ class QwenImageOrchestrator:
                     timesteps = timesteps[None]
             controller = self.teacache_controller
             if controller is not None:
+                cal = controller.calibration
+                probe_free = int(cal.cadence) > 0 or float(cal.online_delta_alpha) > 0.0
+                if probe_free and int(cal.num_steps) != len(timesteps):
+                    import dataclasses
+
+                    controller.calibration = dataclasses.replace(
+                        cal, num_steps=len(timesteps)
+                    )
                 controller.reset()
                 if teacache_enabled is False or len(timesteps) != int(
                     controller.calibration.num_steps
