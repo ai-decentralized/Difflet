@@ -42,8 +42,12 @@ def run_batch(model_id, dp, tp, steps, out_dir, extra):
            "--work-dir", str(out_dir / "work"), "--keep-work-dir", *extra]
     print("+", " ".join(cmd), flush=True)
     subprocess.run(cmd, check=True)
-    # Compare pre-VAE latents from the kept work dirs (spec §Testing 1): final
-    # outputs may be mp4 (encoder is not bit-stable); the denoised latents are.
+    if ext == "png":
+        # Image models write PNGs directly and their outputs are byte
+        # deterministic on device — compare the artifacts themselves.
+        return [out_dir / f"out_{i}.png" for i in range(len(lines))]
+    # Video models: compare pre-VAE latents from the kept work dirs (spec
+    # §Testing 1): mp4 encoding is not bit-stable; the denoised latents are.
     latents = []
     for i in range(len(lines)):
         matches = list((out_dir / "work").rglob(f"latents_req{i:04d}.pt"))
@@ -71,6 +75,13 @@ def main():
 
     failures = 0
     for s, p in zip(serial, parallel):
+        if s.suffix == ".png":
+            if s.read_bytes() == p.read_bytes():
+                print(f"IDENTICAL {s.name}", flush=True)
+            else:
+                print(f"DIFFERS {s.name}", flush=True)
+                failures += 1
+            continue
         a, b = torch.load(s), torch.load(p)
         if torch.equal(a, b):
             print(f"PASS bit-identical: {s.name}")
