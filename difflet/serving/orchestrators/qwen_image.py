@@ -640,7 +640,7 @@ class QwenImageServingStageAdapter:
                 xm.mark_step()
         return latents.cpu()
 
-    def _decode_tpu(self, packed) -> bytes:
+    def _decode_tpu(self, packed, request) -> bytes:
         import torch
         import torch_xla
         import torch_xla.core.xla_model as xm
@@ -649,7 +649,7 @@ class QwenImageServingStageAdapter:
             raise RuntimeError("Qwen VAE decoder is not loaded")
         device = torch_xla.device()
         b, seq, _ = packed.shape
-        hh, ww = _packed_latent_grid(self.active_profile, seq)
+        hh, ww = _packed_latent_grid(request.height, request.width, seq)
         z = packed.float().view(b, hh, ww, 16, 2, 2)
         z = z.permute(0, 3, 1, 4, 2, 5).reshape(b, 16, hh * 2, ww * 2).unsqueeze(2)
         mean = torch.tensor(self.vae_config.latents_mean).view(1, -1, 1, 1, 1)
@@ -760,7 +760,7 @@ class QwenImageServingStageAdapter:
         import torch
 
         if self._tpu:
-            return self._decode_tpu(packed)
+            return self._decode_tpu(packed, request)
         if self.vae_app is None or self.vae_config is None:
             raise RuntimeError("Qwen VAE decoder is not loaded")
         if self.active_profile is None:
