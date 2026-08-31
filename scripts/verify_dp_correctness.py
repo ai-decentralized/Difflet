@@ -26,10 +26,13 @@ PROMPTS = ["a red fox in snow", "a sailboat at dusk", "a neon city street",
 
 
 def run_batch(model_id, dp, tp, steps, out_dir, extra):
+    ext = "png" if ("FLUX" in model_id or "Qwen" in model_id) else "mp4"
     out_dir.mkdir(parents=True, exist_ok=True)
     req_file = out_dir / "requests.jsonl"
     lines = [
-        {"prompt": p, "output": str(out_dir / f"out_{i}.mp4"), "seed": 1000 + i}
+        # Model-appropriate extension: image models save via PIL, which
+        # rejects .mp4 outright ("unknown file extension").
+        {"prompt": p, "output": str(out_dir / f"out_{i}.{ext}"), "seed": 1000 + i}
         for i, p in enumerate(PROMPTS)
     ]
     req_file.write_text("\n".join(json.dumps(l) for l in lines) + "\n")
