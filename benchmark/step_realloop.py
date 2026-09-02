@@ -58,7 +58,7 @@ def _build_flux(cfg, cache):
     from difflet.pipeline.difflet_pipeline import DiffletPipeline
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-    parallel = DiffletParallelConfig(tp_degree=cfg.tp, cp_degree=cfg.cp)
+    parallel = DiffletParallelConfig(tp_degree=cfg.tp, cp_degree=cfg.cp, cp_mode=cfg.cp_mode, cfg_parallel_enabled=cfg.cfg_parallel, sp_enabled=cfg.sp)
     pipe = DiffletPipeline.from_pretrained(
         cfg.model_id, model_type="flux", parallel=parallel, dtype=torch.bfloat16,
         height=cfg.height, width=cfg.width, compile_cache_dir=str(cache),
@@ -84,7 +84,7 @@ def _build_ltx2(cfg, cache):
     from difflet.pipeline.difflet_pipeline import DiffletPipeline
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-    parallel = DiffletParallelConfig(tp_degree=cfg.tp, cp_degree=cfg.cp)
+    parallel = DiffletParallelConfig(tp_degree=cfg.tp, cp_degree=cfg.cp, cp_mode=cfg.cp_mode, cfg_parallel_enabled=cfg.cfg_parallel, sp_enabled=cfg.sp)
     pipe = DiffletPipeline.from_pretrained(
         cfg.model_id, model_type="ltx_2", parallel=parallel, dtype=torch.bfloat16,
         height=cfg.height, width=cfg.width, num_frames=cfg.num_frames,

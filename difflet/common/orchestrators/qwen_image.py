@@ -161,6 +161,11 @@ def _compile_identity(
             "model_id": source.model_id,
             "resolved_source_id": source.resolved_source_id,
             "component_id": stage,
+            # sp changes the DiT graph (the modeling_qwen fork) and the staged
+            # dir name, so it must be part of the generate-stage identity or
+            # two profiles differing only in --sp would collide (hunyuan's
+            # identity carries the same field; wan goes through CacheSpec).
+            "sp_enabled": bool(profile.parallel.sp_enabled) if stage == "generate" else False,
             "tp_degree": tp_degree,
             "cp_degree": cp_degree,
             "cp_mode": "gather_kv" if stage == "vae" else profile.parallel.cp_mode,

@@ -159,12 +159,12 @@ def test_flux_serving_profile_accepts_sequence_parallelism():
     assert resolved.profile.parallel.sp_enabled is True
 
 
-def test_qwen_serving_profile_rejects_sequence_parallelism():
-    with pytest.raises(DiffletServingError) as exc:
-        resolve_serving_model(ServeOptions(model_id="Qwen/Qwen-Image", sp_enabled=True))
+def test_qwen_serving_profile_accepts_sequence_parallelism():
+    resolved = resolve_serving_model(
+        ServeOptions(model_id="Qwen/Qwen-Image", sp_enabled=True)
+    )
 
-    assert exc.value.code == "invalid_extra_body"
-    assert "--sp" in exc.value.message
+    assert resolved.profile.parallel.sp_enabled is True
 
 
 def test_serving_profile_rejects_cfg_parallel_without_true_cfg_contract():

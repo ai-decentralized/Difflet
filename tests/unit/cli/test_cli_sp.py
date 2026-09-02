@@ -40,6 +40,7 @@ def test_sp_flag_sets_true():
         "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
         "Wan-AI/Wan2.1-T2V-14B-Diffusers",
         "hunyuanvideo-community/HunyuanVideo",
+        "Qwen/Qwen-Image",
     ],
 )
 def test_sp_allowed_for_supported_models(model_id, monkeypatch):
@@ -60,7 +61,6 @@ def test_sp_allowed_for_supported_models(model_id, monkeypatch):
     [
         "Lightricks/LTX-2",
         "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
-        "Qwen/Qwen-Image",
     ],
 )
 def test_sp_rejected_for_unsupported_models(model_id, monkeypatch, capsys):
@@ -141,6 +141,8 @@ def _staged_args(model_id, **over):
          "Wan-AI/Wan2.1-T2V-14B-Diffusers", "transformer"),
         ("difflet.cli.orchestrators.hunyuan_video", "HunyuanVideoOrchestrator",
          "hunyuanvideo-community/HunyuanVideo", "generate"),
+        ("difflet.cli.orchestrators.qwen_image", "QwenImageOrchestrator",
+         "Qwen/Qwen-Image", "generate"),
     ],
 )
 def test_staged_compiled_dir_marks_sp(module_path, cls_name, model_id, stage):
@@ -164,6 +166,8 @@ def test_staged_compiled_dir_marks_sp(module_path, cls_name, model_id, stage):
          "Wan-AI/Wan2.1-T2V-14B-Diffusers"),
         ("difflet.cli.orchestrators.hunyuan_video", "HunyuanVideoOrchestrator",
          "hunyuanvideo-community/HunyuanVideo"),
+        ("difflet.cli.orchestrators.qwen_image", "QwenImageOrchestrator",
+         "Qwen/Qwen-Image"),
     ],
 )
 def test_staged_shared_cli_args_forwards_sp(module_path, cls_name, model_id):

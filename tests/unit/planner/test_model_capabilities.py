@@ -14,7 +14,7 @@ from difflet.registry import ModelCapabilities, registered_models, resolve_model
 # model name -> (heads, distilled, supports_cp, supports_sp)
 EXPECTED = {
     "flux": (24, True, True, True),
-    "qwen_image": (24, True, True, False),
+    "qwen_image": (24, True, True, True),
     "wan": (40, False, True, True),
     "hunyuan_video": (24, True, True, True),
     "hunyuan_video_15": (16, True, False, False),
@@ -130,13 +130,16 @@ def test_cli_sp_validation_reads_the_registry():
     from difflet.cli.main import _validate_sp
 
     args = argparse.Namespace(
-        sp_enabled=True, cp_degree=1, model_id="Qwen/Qwen-Image",
+        sp_enabled=True, cp_degree=1, model_id="Lightricks/LTX-2",
     )
     with pytest.raises(SystemExit):
         _validate_sp(args)
 
     args.model_id = "black-forest-labs/FLUX.1-dev"
     _validate_sp(args)  # supported: must not raise
+
+    args.model_id = "Qwen/Qwen-Image"
+    _validate_sp(args)  # supported since the modeling_qwen SP fork landed
 
 
 def test_cli_cfg_parallel_validation_reads_the_registry():

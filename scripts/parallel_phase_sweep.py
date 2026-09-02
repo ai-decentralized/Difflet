@@ -380,9 +380,20 @@ def phase_generate_dp(model: str, label: str, base: str, dp: int, spec: Spec,
 
 def _worker_env(cfg: dict) -> dict:
     import os
+    from difflet.common.neuron_cores import default_neuron_core_ids
+
     env = dict(os.environ)
     world = world_size(cfg)
-    env["NEURON_RT_NUM_CORES"] = str(world)
+    # An explicit NEURON_RT_NUM_CORES equal to the whole device is rejected by
+    # some driver builds ("must request one core, or the whole device") even
+    # though it names every core — whole-device workers must leave it unset
+    # and take the default allocation.
+    try:
+        whole_device = world >= len(default_neuron_core_ids())
+    except Exception:
+        whole_device = False
+    if not whole_device:
+        env["NEURON_RT_NUM_CORES"] = str(world)
     if world < 4:
         # In-process loads otherwise boot a 4-rank group and the ranks beyond
         # world_size never find a root (same pinning the DP router uses).
@@ -518,59 +529,78 @@ def worker_wan(label: str) -> int:
 
 
 def worker_qwen(label: str) -> int:
-    """In-process realloop per-step for one qwen config (flux worker's method)."""
+    """Real generate stage of the Qwen-Image CLI, DiT __call__ wrapped.
+
+    Qwen is a staged model like Wan (text/generate/vae subprocess stages with
+    their own compiled-dir naming), NOT an in-process DiffletPipeline model like
+    flux: the pipeline's hash-keyed cache never holds the staged artifact, so
+    the flux-style worker loaded a path that does not exist. Instead drive the
+    orchestrator's own text + generate stages (the wan worker's method) with
+    ``NeuronQwenImageTransformerApplication.__call__`` timed per step.
+    """
+    import argparse as _ap
     import torch
+
     from difflet.backends.trainium.qwen_image.transformer import (
         NeuronQwenImageTransformerApplication,
     )
-    from difflet.pipeline.difflet_pipeline import DiffletPipeline
-    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from difflet.cli.orchestrators.qwen_image import QwenImageOrchestrator
 
     spec = SPECS["qwen"]
     cfg = QWEN_CONFIGS[label]
-    parallel = DiffletParallelConfig(**{k: v for k, v in cfg.items()})
-    cache = Path("~/.cache/difflet").expanduser()
-    print(f"[step:{label}] building pipeline {parallel}...", flush=True)
-    t0 = time.perf_counter()
-    pipe = DiffletPipeline.from_pretrained(
-        spec["model_id"], model_type="qwen_image", parallel=parallel,
-        dtype=torch.bfloat16, height=spec["height"], width=spec["width"],
-        compile_cache_dir=str(cache), revision=spec["revision"],
-        skip_compile=True)
-    build_s = time.perf_counter() - t0
-    dit_cls = NeuronQwenImageTransformerApplication
-    print(f"[step:{label}] pipeline ready in {build_s:.1f}s", flush=True)
+    work_dir = ART_ROOT / "qwen" / "work" / label
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    parent = _ap.Namespace(
+        model_id=spec["model_id"], revision=spec["revision"],
+        tp_degree=cfg["tp_degree"], cp_degree=cfg["cp_degree"],
+        cp_mode=cfg["cp_mode"], height=spec["height"], width=spec["width"],
+        num_frames=None, steps=spec["steps"],
+        guidance_scale=spec["guidance"], seed=spec["seed"],
+        cfg_parallel=False, sp_enabled=cfg["sp_enabled"],
+        prompt=spec["prompt"],
+        output=str(work_dir / "out.png"),
+        cache_dir=None, work_dir=str(work_dir), requests_dir=None,
+        worker_index=0, dp_schedule="round_robin", host_vae=False,
+        dp_degree=cfg["dp_degree"])
+    orch = QwenImageOrchestrator(parent)
+    argv = orch._shared_cli_args(stage_mode="generate", work_dir=str(work_dir))
+
+    from difflet.cli.stage import _build_stage_parser
+    parser = _build_stage_parser()
 
     stamps: list[float] = []
-    orig = dit_cls.__call__
+    orig = NeuronQwenImageTransformerApplication.__call__
 
     def timed(self, *a, **k):
         r = orig(self, *a, **k)
         stamps.append(time.perf_counter())  # host tensors returned -> synced
         return r
 
-    gen_kwargs = dict(
-        prompt=spec["prompt"], num_inference_steps=spec["steps"],
-        height=spec["height"], width=spec["width"],
-        guidance_scale=spec["guidance"],
-        generator=torch.Generator().manual_seed(spec["seed"]),
-        output_type="pt")
-    dit_cls.__call__ = timed
+    NeuronQwenImageTransformerApplication.__call__ = timed
     try:
-        pipe(**gen_kwargs)            # warm-up: page cache + NEFF dispatch
+        t0 = time.perf_counter()
+        # text once (produces work_dir/text.pt), then the real generate stage
+        # twice: warm-up (loads the DiT artifact) + timed scheduler loop.
+        ns_text = parser.parse_args(
+            ["--orchestrator", spec["model_id"], "--stage", "text"] + argv)
+        orch._run_stage_internal("text", ns_text)
+        ns_gen = parser.parse_args(
+            ["--orchestrator", spec["model_id"], "--stage", "generate"] + argv)
+        orch._run_stage_internal("generate", ns_gen)   # warm-up (loads too)
+        build_s = time.perf_counter() - t0
         stamps.clear()
         t1 = time.perf_counter()
-        result = pipe(**gen_kwargs)   # timed
+        orch._run_stage_internal("generate", ns_gen)   # timed
         gen_s = time.perf_counter() - t1
     finally:
-        dit_cls.__call__ = orig
+        NeuronQwenImageTransformerApplication.__call__ = orig
 
     deltas = [stamps[i] - stamps[i - 1] for i in range(1, len(stamps))]
     finite = None
     try:
-        img = getattr(result, "images", None) or result[0]
-        if isinstance(img, torch.Tensor):
-            finite = bool(torch.isfinite(img).all())
+        latents = torch.load(work_dir / "latents.pt", map_location="cpu")
+        finite = bool(torch.isfinite(latents).all())
     except Exception as exc:
         print(f"[step:{label}] finite-check skipped: {exc}", flush=True)
     print("STEP_RESULT " + json.dumps({
@@ -638,6 +668,9 @@ def _maybe_prune(model: str, label: str, result: dict, state: dict) -> None:
         return
     if any(p not in result for p in _phases_for(model, label)):
         return
+    # Completed configs are marked done even when there is nothing to prune,
+    # so DP rows gated on their base proceed (the 8/26 §4.1 fix).
+    state["done"][label] = True
     base = label if label not in DP_ROWS else DP_ROWS[label][0]
     if model == "wan":
         if any(not state["done"].get(dp) for dp, b in DP_ROWS.items()
@@ -647,11 +680,12 @@ def _maybe_prune(model: str, label: str, result: dict, state: dict) -> None:
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)
             print(f"    pruned cache {target.name}", flush=True)
-        state["done"][label] = True
 
 
 def _phases_for(model: str, label: str) -> list[str]:
-    phases = ["compile", "generate"]
+    # The real result-JSON keys (the run loop's phase names "generate" never
+    # appear in the JSON — the generate phase writes e2e_cold + e2e_warm).
+    phases = ["compile", "e2e_cold", "e2e_warm"]
     if label not in DP_ROWS:
         phases.append("step")
     return phases

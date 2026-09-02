@@ -89,7 +89,7 @@ class TrainiumAdapter(BackendAdapter):
         cfg = spec
         log = self.log_dir / f"{spec_slug(cfg)}_compile.log"
         cmd = [_DIFFLET, "compile", "--model-id", cfg.model_id] + self._rev(cfg) + [
-               "--tp-degree", str(cfg.tp), "--cp-degree", str(cfg.cp),
+               *cfg.parallel_flags(),
                "--cache-dir", self.cache_dir] + cfg.shape_flags()
         t0 = time.perf_counter()
         text = self._run(cmd, log, timeout=14400)
@@ -106,7 +106,7 @@ class TrainiumAdapter(BackendAdapter):
         # image models save via PIL (needs an image extension); video -> .mp4
         out_ext = ".png" if getattr(cfg, "output_kind", "video") == "image" else ".mp4"
         cmd = [_DIFFLET, "generate", "--model-id", cfg.model_id] + self._rev(cfg) + [
-               "--tp-degree", str(cfg.tp), "--cp-degree", str(cfg.cp),
+               *cfg.parallel_flags(),
                "--cache-dir", self.cache_dir,
                "--prompt", cfg.prompt, "--steps", str(cfg.steps),
                "--seed", str(getattr(cfg, "seed", 42)),

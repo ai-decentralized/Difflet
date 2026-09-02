@@ -600,7 +600,7 @@ def _validate_sp(args: argparse.Namespace) -> None:
     if not _capabilities(args.model_id).supports_sp:
         print(
             f"Error: {args.model_id} does not support --sp. Sequence parallelism "
-            "is available for Flux, Wan, and HunyuanVideo.",
+            "is available for Flux, Wan, HunyuanVideo, and Qwen-Image.",
             file=sys.stderr,
         )
         raise SystemExit(1)

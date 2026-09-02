@@ -104,14 +104,15 @@ rank       = tp + T·(cp + C·(cfg + G·dp))     # tp 最内、dp 最外
 | 模型 | TP | CP gather | CP ring | CP ulysses | SP | CFG-par |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|
 | FLUX.1-dev | ✅ | ✅ | ✅¹ | ✅ | ✅ | ❌ 蒸馏 |
-| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ❌² | ❌ 蒸馏 |
+| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅² | ❌ 蒸馏 |
 | Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | HunyuanVideo | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ 蒸馏 |
 | HunyuanVideo 1.5 | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ 蒸馏 |
 | LTX-2 | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
-¹ TRN1 上静默回退 gather_kv。² Qwen 的 forward 是 monkey-patch 上游 diffusers 的，
-`SPMDRank` 不是活图输入，每个 rank 都读成 rank 0。
+¹ TRN1 上静默回退 gather_kv。² Qwen 经 `modeling_qwen` fork（双流纯 SP，入口 scatter 用
+materialized `SPMDRank` buffer）于 9a00746 落地，09-02 设备 parity 通过（见
+`docs/plans/2026-09-02-qwen-sp-completion.md`）。
 
 ### C. 数值/整除约束
 

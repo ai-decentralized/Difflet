@@ -99,7 +99,7 @@ def test_distilled_set_matches_documented_matrix():
 
 
 def test_sp_supported_set_matches_documented_matrix():
-    assert SP_SUPPORTED == {"flux", "wan", "wan2_1", "hunyuan_video"}
+    assert SP_SUPPORTED == {"flux", "wan", "wan2_1", "hunyuan_video", "qwen_image"}
 
 
 def test_all_model_ids_valid_in_cli():
@@ -128,7 +128,6 @@ def test_expected_fail_cells():
 _EXPECTED_SKIPS = {
     ("flux", "tp2cfg"): "distilled",
     ("qwen_image", "tp2cfg"): "distilled",
-    ("qwen_image", "tp4sp"): "no-SP",
     ("ltx_2", "tp2cp2"): "no-CP",
     ("ltx_2", "tp2cp2ulysses"): "no-CP",
     ("ltx_2", "tp4sp"): "no-SP",
@@ -153,8 +152,8 @@ def test_plan_cells_counts():
     skipped = [c for c in cells if c.skip_reason]
     runnable = [c for c in cells if not c.skip_reason]
     # tp2cp2ulysses is a CP config, so it adds the same two no-CP skips as tp2cp2.
-    assert len(skipped) == 11
-    assert len(runnable) == 31
+    assert len(skipped) == 10
+    assert len(runnable) == 32
     xfail = {(c.model_key, c.config_key) for c in runnable if c.expected_fail}
     assert xfail == {("hunyuan_video_15", "tp4"), ("hunyuan_video_15", "dp2tp2"),
                      ("hunyuan_video", "tp2cp2"), ("hunyuan_video", "dp2tp2")}

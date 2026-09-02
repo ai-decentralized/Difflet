@@ -143,7 +143,7 @@ def test_exclusivity_reason_comes_from_the_runtime_type():
 
 
 def test_model_without_sp_rejects_sp():
-    kind, _ = _reason(_report("qwen_image"), "tp4sp")
+    kind, _ = _reason(_report("ltx_2"), "tp4sp")
     assert kind == "capability"
 
 

@@ -748,11 +748,18 @@ class NeuronQwenImageTransformerApplication(NeuronApplicationBase):
             key if key.startswith("transformer.") else f"transformer.{key}": value
             for key, value in state_dict.items()
         }
-        # The SPMDRank buffer sits on the trace module (not under transformer.),
-        # so its key is un-prefixed. arange(world_size) lets each rank read its id.
+        # The SPMDRank buffers sit on the trace module (not under
+        # transformer.), so their keys are un-prefixed. arange(world) lets
+        # each rank read its id.
         if getattr(config, "context_parallel_enabled", False):
             world_size = config.neuron_config.world_size
             out["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)
+        # SP's entry scatter reads the same materialized rank buffer through
+        # the fork's tp_rank_util; without this the load fails with "Missing
+        # weight tensor with key sp_rank_util.rank".
+        if getattr(config, "sp_enabled", False):
+            tp_size = int(config.neuron_config.tp_degree)
+            out["sp_rank_util.rank"] = torch.arange(0, tp_size, dtype=torch.int32)
         return out
 
     @staticmethod

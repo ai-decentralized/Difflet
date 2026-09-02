@@ -34,7 +34,7 @@ def _load_transformer(slug, cfg):
 
     cache = Path("~/.cache/difflet").expanduser()
     model_dir = resolve_model_path(cfg.model_id, local_files_only=True)
-    parallel = DiffletParallelConfig(tp_degree=cfg.tp, cp_degree=cfg.cp)
+    parallel = DiffletParallelConfig(tp_degree=cfg.tp, cp_degree=cfg.cp, cp_mode=cfg.cp_mode, cfg_parallel_enabled=cfg.cfg_parallel, sp_enabled=cfg.sp)
     shape = {"height": cfg.height, "width": cfg.width, "num_frames": cfg.num_frames}
 
     if cfg.model_type == "ltx_2":

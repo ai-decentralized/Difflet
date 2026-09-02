@@ -187,10 +187,10 @@ def test_pipeline_forwards_teacache_kwargs_to_application(tmp_path):
 
     assert pipe.app.kwargs["teacache_speedup"] == 1.5
     assert pipe.app.kwargs["teacache_calibration_path"] == "calibration.json"
-    assert pipe.cache_spec.application_kwargs == {
-        "teacache_calibration_path": "calibration.json",
-        "teacache_speedup": 1.5,
-    }
+    # The cache key keeps only what changes the compiled artifact: a speedup
+    # request compiles the extra teacache probe NEFF (teacache_probe_enabled),
+    # while the calibration *path* is runtime data and is deliberately dropped.
+    assert pipe.cache_spec.application_kwargs == {"teacache_probe_enabled": True}
 
 
 def test_pipeline_rejects_conflicting_teacache_kwargs(tmp_path):
