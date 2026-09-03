@@ -133,6 +133,19 @@ class LTX2Orchestrator(ModelOrchestrator):
             )
             raise SystemExit(1)
 
+        # Load the host pipeline (text encoder + connectors + VAE/vocoder) so
+        # prompt encoding and latent decode run on CPU around the Neuron DiT.
+        # These are runtime-only and excluded from the compile cache key, as
+        # are the probe-free TeaCache modes (host-side skip logic, no NEFF).
+        application_kwargs: dict[str, Any] = {
+            "enable_host_pipeline": True,
+            "enable_decode_components": True,
+        }
+        if getattr(self.args, "teacache_cadence", None) is not None:
+            application_kwargs["teacache_cadence"] = self.args.teacache_cadence
+        if getattr(self.args, "teacache_online_delta", None) is not None:
+            application_kwargs["teacache_online_delta_alpha"] = self.args.teacache_online_delta
+
         return DiffletPipeline.from_pretrained(
             _HF_MODEL_ID,
             model_type=_MODEL_TYPE,
@@ -144,13 +157,7 @@ class LTX2Orchestrator(ModelOrchestrator):
             compile_cache_dir=self.args.cache_dir,
             revision=self.args.revision,
             skip_compile=True,
-            # Load the host pipeline (text encoder + connectors + VAE/vocoder) so
-            # prompt encoding and latent decode run on CPU around the Neuron DiT.
-            # These are runtime-only and excluded from the compile cache key.
-            application_kwargs={
-                "enable_host_pipeline": True,
-                "enable_decode_components": True,
-            },
+            application_kwargs=application_kwargs,
         )
 
     def _parallel(self):
