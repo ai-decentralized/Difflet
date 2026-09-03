@@ -268,6 +268,11 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             cp_mode=getattr(args, "cp_mode", "gather_kv"),
             sp_enabled=getattr(args, "sp_enabled", False),
         )
+        # Adaptive TeaCache (--teacache-speedup + --teacache-calibration) is the
+        # only mode that needs the probe NEFF (block-0 modulated input + the
+        # on-device L2 delta). Plain and probe-free (cadence / online-delta)
+        # runs opt out, so no probe is compiled or loaded for them.
+        adaptive = getattr(args, "teacache_speedup", None) is not None
         app = NeuronHunyuanVideoApplication(
             model_path=model_dir, parallel=parallel, dtype=torch.bfloat16,
             shape={"height": h, "width": w, "num_frames": f},
@@ -277,15 +282,10 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             # logic only; not in _stage_cache_inputs, so the warm artifact hits.
             teacache_cadence=getattr(args, "teacache_cadence", None),
             teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
+            enable_teacache_probe=adaptive,
+            teacache_speedup=getattr(args, "teacache_speedup", None),
+            teacache_calibration_path=getattr(args, "teacache_calibration", None),
         )
-        # The application builds a TeaCache probe sub-app unconditionally
-        # whenever the transformer is enabled (application.py, teacache_fused
-        # branch); as a component it would be compiled (an extra probe NEFF)
-        # and loaded on every CLI run. The CLI runs no adaptive TeaCache, and
-        # the probe-free modes above need no probe, so drop it here (same as
-        # examples/hunyuan_video_example.py). Adaptive CLI TeaCache would
-        # need an opt-in probe plus an additive stage-cache key field.
-        app.teacache_probe = None
 
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
@@ -295,6 +295,16 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         from difflet.cli.dp import stage_loop
 
         self._require_stage_artifact("generate", args, compiled_dir)
+        if adaptive and not app.has_compiled_artifacts(str(compiled_dir), select=["teacache_probe"]):
+            # The probe is an additive component of the DiT stage artifact
+            # (<compiled_dir>/teacache_probe/): its identity is the DiT's, the
+            # DiT/VAE NEFFs are reused untouched, and it is built on first use.
+            print(
+                f"[hunyuan_video] compiling the TeaCache probe NEFF into {compiled_dir} "
+                "(first adaptive run; the DiT artifact is reused)",
+                flush=True,
+            )
+            app.compile(str(compiled_dir), select=["teacache_probe"])
         app.load(str(compiled_dir), skip_warmup=True)
         for req in stage_loop.claimed_requests(args):
             with stage_loop.request_scope(args, req, final=True):
@@ -412,6 +422,10 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             parts += ["--teacache-cadence", str(a.teacache_cadence)]
         if getattr(a, "teacache_online_delta", None) is not None:
             parts += ["--teacache-online-delta", str(a.teacache_online_delta)]
+        if getattr(a, "teacache_speedup", None) is not None:
+            parts += ["--teacache-speedup", str(a.teacache_speedup)]
+        if getattr(a, "teacache_calibration", None):
+            parts += ["--teacache-calibration", str(a.teacache_calibration)]
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
         if getattr(a, "output", None):

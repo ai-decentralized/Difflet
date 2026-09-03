@@ -431,45 +431,104 @@ def test_shared_cli_args_forward_probe_free_teacache_flags():
     assert "--teacache-cadence" not in parts
 
 
-def test_stage_generate_threads_cadence_and_keeps_probe_off(monkeypatch, tmp_path):
-    # --teacache-cadence must reach the app (it was dropped before), the
-    # probe sub-app stays off (probe-free), and the compiled-dir identity is
-    # that of a plain generate so the warm cache hits.
+class _FakeGenApp(_Recorder):
+    """Generate-stage fake: records kwargs, compile(select=...) and load calls."""
+
+    instances: list = []
+    probe_compiled = True  # what has_compiled_artifacts(select=["teacache_probe"]) reports
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.pipeline = types.SimpleNamespace(scheduler=object())
+        self.compile_calls = []
+        _FakeGenApp.instances.append(self)
+
+    def compile(self, path, select=None):
+        self.compile_calls.append((path, select))
+        self.compiled = path
+
+    def has_compiled_artifacts(self, path, select=None):
+        return _FakeGenApp.probe_compiled
+
+    def __call__(self, **kw):
+        import torch
+        return types.SimpleNamespace(frames=torch.zeros(1, 3, 2, 8, 8))
+
+
+def _run_generate_stage(monkeypatch, tmp_path, **arg_overrides):
     import torch
 
-    class FakeGen(_Recorder):
-        def __init__(self, *a, **kw):
-            super().__init__(*a, **kw)
-            self.pipeline = types.SimpleNamespace(scheduler=object())
-            self.teacache_probe = object()  # what the real app builds by default
-
-        def __call__(self, **kw):
-            return types.SimpleNamespace(frames=torch.zeros(1, 3, 2, 8, 8))
-
-    created = []
-    orig = FakeGen.__init__
-
-    def spy(self, *a, **kw):
-        orig(self, *a, **kw)
-        created.append(self)
-
-    monkeypatch.setattr(FakeGen, "__init__", spy)
-    _setup_generate(monkeypatch, FakeGen)
+    _FakeGenApp.instances = []
+    _setup_generate(monkeypatch, _FakeGenApp)
     torch.save({"encoder_hidden_states": torch.zeros(1, 256, 16),
                 "encoder_attention_mask": torch.ones(1, 256, dtype=torch.int64)},
                tmp_path / "llama.pt")
     torch.save({"pooled_projections": torch.zeros(1, 768)}, tmp_path / "clip.pt")
+    args = _hv_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
+                    output=str(tmp_path / "out.png"), **arg_overrides)
+    orch = HunyuanVideoOrchestrator(args)
+    orch._finish_stage_compile("generate", args, orch._stage_compiled_dir("generate", args))
+    orch._stage_generate(args)
+    return args, orch, _FakeGenApp.instances[-1]
 
-    plain = _hv_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
-                     output=str(tmp_path / "out.png"))
-    cadence = _hv_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
-                       output=str(tmp_path / "out.png"), teacache_cadence=2)
-    orch = HunyuanVideoOrchestrator(cadence)
+
+def test_stage_generate_threads_cadence_and_keeps_probe_off(monkeypatch, tmp_path):
+    # --teacache-cadence must reach the app (it was dropped before), the
+    # probe sub-app stays off (probe-free), and the compiled-dir identity is
+    # that of a plain generate so the warm cache hits.
+    cadence, orch, app = _run_generate_stage(monkeypatch, tmp_path, teacache_cadence=2)
+    plain = _hv_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path))
     assert orch._stage_compiled_dir("generate", cadence) == \
         HunyuanVideoOrchestrator(plain)._stage_compiled_dir("generate", plain)
-    orch._finish_stage_compile("generate", cadence, orch._stage_compiled_dir("generate", cadence))
-    orch._stage_generate(cadence)
-    app = created[-1]
     assert app.kwargs["teacache_cadence"] == 2
     assert app.kwargs["teacache_online_delta_alpha"] is None
-    assert app.teacache_probe is None
+    assert app.kwargs["enable_teacache_probe"] is False
+    assert app.kwargs["teacache_speedup"] is None
+    assert app.compile_calls == []  # nothing compiled on a warm generate
+
+
+def test_stage_generate_plain_run_never_builds_the_probe(monkeypatch, tmp_path):
+    _, _, app = _run_generate_stage(monkeypatch, tmp_path)
+    assert app.kwargs["enable_teacache_probe"] is False
+    assert app.compile_calls == []
+
+
+def test_stage_generate_adaptive_compiles_missing_probe_additively(monkeypatch, tmp_path):
+    # Adaptive TeaCache enables the probe sub-app and, when the stage artifact
+    # has no probe NEFF yet, compiles ONLY that component into the same dir
+    # (the DiT/VAE NEFFs and the stage identity are untouched).
+    _FakeGenApp.probe_compiled = False
+    try:
+        args, orch, app = _run_generate_stage(
+            monkeypatch, tmp_path, teacache_speedup=1.5,
+            teacache_calibration=str(tmp_path / "cal.json"),
+        )
+    finally:
+        _FakeGenApp.probe_compiled = True
+    assert app.kwargs["enable_teacache_probe"] is True
+    assert app.kwargs["teacache_speedup"] == 1.5
+    assert app.kwargs["teacache_calibration_path"] == str(tmp_path / "cal.json")
+    compiled_dir = str(orch._stage_compiled_dir("generate", args))
+    assert app.compile_calls == [(compiled_dir, ["teacache_probe"])]
+    assert app.loaded[0] == compiled_dir
+    # Same identity as a plain generate: the probe is not a cache-key field.
+    plain = _hv_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path))
+    assert compiled_dir == str(HunyuanVideoOrchestrator(plain)._stage_compiled_dir("generate", plain))
+
+
+def test_stage_generate_adaptive_reuses_compiled_probe(monkeypatch, tmp_path):
+    _, _, app = _run_generate_stage(
+        monkeypatch, tmp_path, teacache_speedup=1.5, teacache_calibration="/tmp/cal.json",
+    )
+    assert app.kwargs["enable_teacache_probe"] is True
+    assert app.compile_calls == []
+
+
+def test_shared_cli_args_forward_adaptive_teacache_flags():
+    parts = HunyuanVideoOrchestrator(
+        _hv_args(teacache_speedup=1.5, teacache_calibration="/tmp/cal.json")
+    )._shared_cli_args("generate")
+    assert parts[parts.index("--teacache-speedup") + 1] == "1.5"
+    assert parts[parts.index("--teacache-calibration") + 1] == "/tmp/cal.json"
+    parts = HunyuanVideoOrchestrator(_hv_args())._shared_cli_args("generate")
+    assert "--teacache-speedup" not in parts and "--teacache-calibration" not in parts
