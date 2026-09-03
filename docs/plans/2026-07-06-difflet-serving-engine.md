@@ -1353,7 +1353,7 @@ Model/profile flags:
 | `--profile-load-policy {single-active}` | `single-active` | P0 supports only one loaded profile. Values other than `single-active` should be rejected. |
 | `--cp-mode {gather_kv,ring}` | model/default | Context parallel attention strategy. |
 | `--cfg-parallel` | `false` | Parsed for CLI parity; reject when the selected model/request contract has no true-CFG path. |
-| `--sp` | `false` | Sequence parallelism startup profile. Supported for Flux; rejected for Qwen. |
+| `--sp` | `false` | Sequence parallelism startup profile. Supported for every registry model with `supports_sp` (Flux, Wan, HunyuanVideo, Qwen-Image since 2026-09-02). |
 | `--dtype DTYPE` | adapter default | Runtime dtype, for example `bf16`. |
 | `--host-vae` | `false` | Host decode startup profile. Parsed for CLI parity; rejected by current image serving adapters. |
 | `--teacache-cadence N` | unset | Fixed-cadence TeaCache mode, fixed for the resident profile. Mutually exclusive with the other TeaCache modes. |
@@ -1573,7 +1573,7 @@ Startup flags:
 | `--cp-degree` | registry default unless overridden | Context-parallel degree for supported models. Qwen defaults to the registry value `1`. | Yes: affects world size, NeuronCore use, cache key. |
 | `--cp-mode` | registry default unless overridden | Context-parallel attention strategy. | Yes: affects compiled graph/cache for CP-capable stages. |
 | `--cfg-parallel` | `false` | Parsed at serving startup; current Qwen/Flux request contracts reject it because neither exposes a true-CFG branch. | Yes: changes world size/runtime topology and cache key. |
-| `--sp` | `false` | Supported for Flux resident profiles and rejected for Qwen by model capability validation. | Yes: affects compiled graph/cache. |
+| `--sp` | `false` | Accepted per registry `supports_sp` (Flux, Wan, HunyuanVideo, Qwen-Image since 2026-09-02; Qwen's compile identity carries `sp_enabled`). | Yes: affects compiled graph/cache. |
 | `--height` | model registry default | Fixed output height for this server instance. | Yes: fixed shape, cache key, NEFF shape. |
 | `--width` | model registry default | Fixed output width for this server instance. | Yes: fixed shape, cache key, NEFF shape. |
 | `--num-frames` | model registry default, often `None` for image | Fixed output frame count for video models. | Yes: fixed shape, cache key, NEFF shape. |

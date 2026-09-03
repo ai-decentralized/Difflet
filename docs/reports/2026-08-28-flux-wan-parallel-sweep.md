@@ -110,5 +110,6 @@ ssh ec2-16-50-102-159.ap-southeast-4.compute.amazonaws.com
 sudo docker exec -it wan_sweep bash
 source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate && cd ~/Difflet
 python scripts/parallel_phase_sweep.py --model wan    # 断点续跑
-python scripts/parallel_phase_sweep.py --model flux   # FLUX 同法（需 Ubuntu 宿主或容器）
+python scripts/parallel_phase_sweep.py --model flux   # FLUX 同法（AL2023 宿主已可原生跑：
+                                                        #  见 2026-09-02-qwen-sp-completion.md §1；不再需要 Ubuntu 宿主或容器）
 ```
