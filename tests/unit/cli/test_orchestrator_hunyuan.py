@@ -416,3 +416,60 @@ def test_stage_generate_mp4_branch(monkeypatch, tmp_path):
     orch._finish_stage_compile("generate", args, orch._stage_compiled_dir("generate", args))
     orch._stage_generate(args)
     assert not (tmp_path / "out.pt").exists()
+
+
+# ------------------------------------------------------ probe-free TeaCache
+
+def test_shared_cli_args_forward_probe_free_teacache_flags():
+    parts = HunyuanVideoOrchestrator(_hv_args(teacache_cadence=2))._shared_cli_args("generate")
+    assert parts[parts.index("--teacache-cadence") + 1] == "2"
+    assert "--teacache-online-delta" not in parts
+    parts = HunyuanVideoOrchestrator(
+        _hv_args(teacache_online_delta=0.6)
+    )._shared_cli_args("generate")
+    assert parts[parts.index("--teacache-online-delta") + 1] == "0.6"
+    assert "--teacache-cadence" not in parts
+
+
+def test_stage_generate_threads_cadence_and_keeps_probe_off(monkeypatch, tmp_path):
+    # --teacache-cadence must reach the app (it was dropped before), the
+    # probe sub-app stays off (probe-free), and the compiled-dir identity is
+    # that of a plain generate so the warm cache hits.
+    import torch
+
+    class FakeGen(_Recorder):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.pipeline = types.SimpleNamespace(scheduler=object())
+            self.teacache_probe = object()  # what the real app builds by default
+
+        def __call__(self, **kw):
+            return types.SimpleNamespace(frames=torch.zeros(1, 3, 2, 8, 8))
+
+    created = []
+    orig = FakeGen.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        created.append(self)
+
+    monkeypatch.setattr(FakeGen, "__init__", spy)
+    _setup_generate(monkeypatch, FakeGen)
+    torch.save({"encoder_hidden_states": torch.zeros(1, 256, 16),
+                "encoder_attention_mask": torch.ones(1, 256, dtype=torch.int64)},
+               tmp_path / "llama.pt")
+    torch.save({"pooled_projections": torch.zeros(1, 768)}, tmp_path / "clip.pt")
+
+    plain = _hv_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
+                     output=str(tmp_path / "out.png"))
+    cadence = _hv_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
+                       output=str(tmp_path / "out.png"), teacache_cadence=2)
+    orch = HunyuanVideoOrchestrator(cadence)
+    assert orch._stage_compiled_dir("generate", cadence) == \
+        HunyuanVideoOrchestrator(plain)._stage_compiled_dir("generate", plain)
+    orch._finish_stage_compile("generate", cadence, orch._stage_compiled_dir("generate", cadence))
+    orch._stage_generate(cadence)
+    app = created[-1]
+    assert app.kwargs["teacache_cadence"] == 2
+    assert app.kwargs["teacache_online_delta_alpha"] is None
+    assert app.teacache_probe is None

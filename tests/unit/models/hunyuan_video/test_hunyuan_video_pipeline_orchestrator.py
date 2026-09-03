@@ -314,3 +314,50 @@ def test_hunyuan_orchestrator_requires_inputs_when_no_bundle(tmp_path):
 
     with pytest.raises(ValueError, match="Missing HunyuanVideo DiT inputs"):
         pipeline()
+
+
+# ------------------------------------------------------ probe-free TeaCache
+
+def test_hunyuan_fixed_cadence_skips_without_any_probe(tmp_path, capsys):
+    # Regression for the CLI-dropped flag: a plain FakeTransformer has NO
+    # teacache_mod_input hook and no probe NEFF — the probe-free controller
+    # must never ask for a signal, must sync num_steps to the request, and
+    # must print the stats line.
+    transformer = FakeTransformer(value=1.0)
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        pipeline = HunyuanVideoOrchestrator(
+            model_path=str(tmp_path), transformer=transformer, dtype=torch.float32,
+            teacache_cadence=2,
+        )
+    assert pipeline.teacache_controller.needs_signal() is False
+
+    # 14 steps, warmup/cooldown 5, cadence 2 -> skips at steps 6 and 8.
+    timesteps = torch.linspace(1000.0, 300.0, steps=14)
+    output = pipeline(bundle=_bundle(), timesteps=timesteps)
+    stats = pipeline.teacache_controller.stats()
+    assert stats == {**stats, "full_steps": 12, "skipped_steps": 2, "probe_calls": 0}
+    assert len(transformer.calls) == 12
+    assert pipeline.teacache_controller.calibration.num_steps == 14
+    # Constant model output -> zero residual -> skips reproduce the baseline
+    # (fallback scheduler: latents -= noise_pred / num_steps, 14 times).
+    assert torch.allclose(output.latents, torch.full((1, 16, 2, 2, 2), -1.0))
+    out = capsys.readouterr().out
+    assert "[teacache] probe-free controller enabled for hunyuan_video/320x512x61" in out
+    assert "[teacache] stats: {'full_steps': 12, 'skipped_steps': 2" in out
+
+
+def test_hunyuan_probe_free_modes_are_exclusive_with_teacache_speedup(tmp_path):
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        HunyuanVideoOrchestrator(
+            model_path=str(tmp_path), transformer=FakeTransformer(), dtype=torch.float32,
+            scheduler=FakeScheduler(), teacache_cadence=2, teacache_speedup=1.5,
+        )
+
+
+def test_hunyuan_online_delta_mode_is_probe_free(tmp_path):
+    pipeline = HunyuanVideoOrchestrator(
+        model_path=str(tmp_path), transformer=FakeTransformer(), dtype=torch.float32,
+        scheduler=FakeScheduler(), teacache_online_delta_alpha=0.6,
+    )
+    assert pipeline.teacache_controller.needs_signal() is False
+    assert pipeline.teacache_controller.calibration.online_delta_alpha == pytest.approx(0.6)
