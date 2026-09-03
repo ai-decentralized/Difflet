@@ -1,0 +1,129 @@
+{
+  "schema": "difflet-dit-step-attribution-protocol",
+  "schema_revision": 1,
+  "study_id": "dit-step-attribution-20260903",
+  "paper_role": "direction gate: decides whether the paper stays on cache placement laws (route A) or moves to DiT single-step multi-engine dataflow (route B)",
+  "question": "Of one real backbone step's wall time on the new trn2.3xlarge node, how much is non-overlapped TensorE (PE) work, how much is exposed collective time, and how much is non-PE engine work (VectorE/ScalarE/GpSimdE/DMA) on the critical path?",
+  "why_this_gate": "The cache line has no architecture headroom left inside a cached request on this chip (see placement-laws protocol). The only remaining large lever is the anchor step itself, which reaches only ~42% of BF16 peak by FLOP accounting. Whether that gap is recoverable by work placement is an engine-attribution question, not a cache question.",
+  "frozen_systems": {
+    "flux": {
+      "model_id": "black-forest-labs/FLUX.1-dev",
+      "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+      "hardware": "trn2.3xlarge, one Trainium2 device, 4 logical NeuronCores (LNC=2), 96 GiB HBM",
+      "instance_id": "i-0242f795bbf32ebc2",
+      "neuron_sdk": {
+        "neuronx-cc": "2.27.5334.0",
+        "torch-neuronx": "2.9.0.2.15.32035",
+        "neuronx-distributed": "0.19.28492",
+        "runtime-lib": "2.34.10.0",
+        "tools": "2.32.28.0"
+      },
+      "parallelism": "TP4, CP1, no CFG-parallel, SP off (the qualified A12 topology)",
+      "dtype": "bfloat16",
+      "height": 1024,
+      "width": 1024,
+      "batch": 1,
+      "num_steps": 50,
+      "guidance_scale": 3.5,
+      "joint_tokens": 4608,
+      "image_tokens": 4096,
+      "text_tokens": 512,
+      "hidden": 3072,
+      "double_blocks": 19,
+      "single_blocks": 38,
+      "compiled_root": "recorded in the result file (artifact hash), not known before compile"
+    },
+    "wan": {
+      "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+      "model_revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+      "hardware": "trn2.3xlarge, one Trainium2 device, 4 logical NeuronCores (LNC=2), 96 GiB HBM",
+      "instance_id": "i-0242f795bbf32ebc2",
+      "neuron_sdk": {
+        "neuronx-cc": "2.27.5334.0",
+        "torch-neuronx": "2.9.0.2.15.32035",
+        "neuronx-distributed": "0.19.28492",
+        "runtime-lib": "2.34.10.0",
+        "tools": "2.32.28.0"
+      },
+      "parallelism": "TP4 (registry default), serial CFG (two backbone forwards per step)",
+      "dtype": "bfloat16",
+      "height": 480,
+      "width": 832,
+      "num_frames": 9,
+      "batch": 1,
+      "num_steps": "registry default",
+      "hidden": 5120,
+      "blocks": 40,
+      "compiled_root": "recorded in the result file"
+    }
+  },
+  "measurement": {
+    "compile": "difflet compile --model-id <id> --tp-degree 4 --height/--width (--num-frames for Wan); artifact model.pt sha256 recorded in the result",
+    "step_wall": "benchmark/step_realloop.py: real denoise loop, inter-step deltas (steps 1..N-1), one generate per model; report P50/P95",
+    "neff_profile": "scripts/profile_dit_backbone.py --neff <backbone graph.neff> --world-size 4: neuron-profile summary-json -> per-engine active-time %, MFU/MBU, HBM bytes, DMA active %",
+    "timeline": "neuron-profile inspect of one full request; per-core engine/DMA/cc intervals",
+    "attribution": "engine-union critical path (CARDAN method): merge each engine's intervals, compute non-overlapped union per engine and exposed cc time (cc_running intervals not covered by any compute-engine interval); dominant engine = largest total AND largest non-overlapped union. Tooling adapted from /home/ubuntu/rd-moe/experiments/engine-breakdown/analyze_frozen_profiles.py and gemma4-decode/scripts/analyze_engine_activity.py",
+    "accounting_window": "denoise loop only; text encoders and VAE excluded",
+    "repetitions": "5 profiled steps per model; medians reported; the timeline used for interval metrics is the one whose makespan is closest to the median"
+  },
+  "pre_estimates": {
+    "flux_flop_per_step": "74.3 TFLOP (57 blocks x 4608 tokens x 141.5 MMAC x 2)",
+    "flux_step_wall_ms": {
+      "prior_old_node": 266.53,
+      "predicted_range": [
+        255,
+        285
+      ]
+    },
+    "flux_mfu_pct": {
+      "predicted_range": [
+        38,
+        46
+      ],
+      "basis": "74.3 TFLOP / 0.267 s / 667 TFLOP/s BF16 dense peak = 41.7%"
+    },
+    "flux_weight_stream_ms_per_step": {
+      "predicted_range": [
+        7,
+        10
+      ],
+      "basis": "11.9 B params x 2 B / 4 cores = 5.95 GB/core at ~0.73 TB/s/core"
+    },
+    "flux_cc_ops_per_step": {
+      "predicted": 180,
+      "basis": "2167 cc ops per request per core over 12 anchors (H1e)"
+    },
+    "flux_cc_running_ms_per_step": {
+      "predicted_range": [
+        90,
+        110
+      ],
+      "basis": "1215 ms per core per request / 12 anchors (H1e); overlap fraction unknown"
+    },
+    "flux_exposed_cc_pct_of_step": {
+      "predicted_range": [
+        5,
+        20
+      ],
+      "basis": "compiled with --enable-ccop-compute-overlap; no direct prior"
+    },
+    "flux_non_pe_engine_nonoverlapped_pct": {
+      "predicted_range": [
+        5,
+        25
+      ],
+      "basis": "AdaLN modulation, RMSNorm, GELU, RoPE, softmax; no direct prior"
+    },
+    "wan": "no prior on this node; record only, no prediction scored"
+  },
+  "decision_rule": {
+    "metric": "X = exposed_cc_pct + non_pe_engine_nonoverlapped_pct, measured on FLUX (primary) and Wan (secondary), median of 5 steps",
+    "route_A_cache_laws": "X < 20 and TensorE non-overlapped union >= 80% of step -> single-step optimisation headroom <= 1.25x; paper stays on cache placement laws; DiT dataflow is at most an implementation note",
+    "route_B_dit_dataflow": "X >= 30 on FLUX -> main line becomes DiT single-step multi-engine dataflow (CARDAN method); cache becomes a multiplier and one section",
+    "middle": "20 <= X < 30 -> route A main line; the single largest non-PE item becomes one kernel section inside route A",
+    "wan_override": "if Wan X >= 30 while FLUX X < 20, route B is pursued on Wan only and the paper's DiT section is video-specific",
+    "tie_breaker": "the rule is evaluated once on the frozen measurement; no re-profiling after the fact to move X across a threshold"
+  },
+  "not_claimed": "This gate produces no speedup claim. Engine-active percentages are occupancy, not FLOP utilisation; the FLOP-based MFU is reported separately.",
+  "sha256": "dce6a81624ea46cf1637c60f84d1735da2e7ee6fa8d0ebdc760a1cb69d89ccf5"
+}

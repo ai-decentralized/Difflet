@@ -33,10 +33,10 @@
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 268.1 ms | 265.4 ms | 265.7 ms | 265.1 ms | 27 |
+| per denoise step (transformer fwd) | 269.2 ms | 268.9 ms | 269.0 ms | 268.6 ms | 27 |
 | end-to-end (warm) | 35.31 s | 35.29 s | 35.64 s | 34.99 s | 3 |
 
-**Throughput:** 3.729 DiT steps/s
+**Throughput:** 3.715 DiT steps/s
 
 ## Compile breakdown
 
@@ -86,7 +86,7 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 ## Notes
 
-- per-step = 268.1 ms/DiT-step (median 265.4, p90 265.7, n=27) — measured the SAME way as H100: inter-step deltas of a real 28-step generate (wrapping NeuronFluxBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 28 DiT calls timed; warm generate 8s; output finite=True.
+- per-step = 269.2 ms/DiT-step (median 268.9, p90 269.0, n=27) — measured the SAME way as H100: inter-step deltas of a real 28-step generate (wrapping NeuronFluxBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 28 DiT calls timed; warm generate 8s; output finite=True.
 - e2e_cold = 321 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
 - e2e_warm = 35 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
 

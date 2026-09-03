@@ -1,0 +1,144 @@
+{
+  "schema": "difflet-dit-step-attribution-diagnostics",
+  "schema_revision": 1,
+  "result_sha256": "ce3d1054b766423e9f3f4f45023c5ae90fbf45658d7e78e2b3c7af3e84da1a5b",
+  "study_id": "dit-step-attribution-20260903",
+  "note": "post-hoc decomposition of the non-PE non-overlapped share on the representative FLUX capture; hlo_name/layer are empty because the production NEFF carries no debug metadata, so op-level mapping needs a debug-compiled NEFF",
+  "makespan_ms": 250.29218196868896,
+  "non_pe_minus_tensor_ms": 41.298671,
+  "non_pe_minus_tensor_pct": 16.500184174816283,
+  "gap_with_vector_scalar_gpsimd_active_ms": 36.618465,
+  "gap_with_vector_scalar_gpsimd_active_pct": 14.630287175562238,
+  "gap_sync_only_ms": 4.680206,
+  "gap_sync_only_pct": 1.8698969992540495,
+  "per_engine_in_gap_ms": {
+    "vector": 25.328649,
+    "scalar": 23.420413,
+    "gpsimd": 8.533321,
+    "sync": 19.381786
+  },
+  "top_engine_opcode_ms": [
+    {
+      "engine": "Scalar",
+      "opcode": "ACTIVATE",
+      "ms": 22.097
+    },
+    {
+      "engine": "Vector",
+      "opcode": "TENSOR_TENSOR",
+      "ms": 16.004
+    },
+    {
+      "engine": "Scalar",
+      "opcode": "DMA_DIRECT2D",
+      "ms": 10.749
+    },
+    {
+      "engine": "Vector",
+      "opcode": "TENSOR_SCALAR",
+      "ms": 9.691
+    },
+    {
+      "engine": "GpSimd",
+      "opcode": "DMA_DIRECT2D",
+      "ms": 9.618
+    },
+    {
+      "engine": "Vector",
+      "opcode": "TENSOR_SCALAR_CACHE_REDUCE",
+      "ms": 9.173
+    },
+    {
+      "engine": "GpSimd",
+      "opcode": "EVENT_SEMAPHORE",
+      "ms": 8.992
+    },
+    {
+      "engine": "Scalar",
+      "opcode": "COPY",
+      "ms": 5.554
+    },
+    {
+      "engine": "Vector",
+      "opcode": "BATCH_NORM_STATS2",
+      "ms": 5.062
+    },
+    {
+      "engine": "Scalar",
+      "opcode": "ACTIVATION_READ_ACCUMULATOR",
+      "ms": 4.153
+    },
+    {
+      "engine": "Scalar",
+      "opcode": "EVENT_SEMAPHORE",
+      "ms": 3.731
+    },
+    {
+      "engine": "Vector",
+      "opcode": "COPY",
+      "ms": 1.69
+    },
+    {
+      "engine": "Vector",
+      "opcode": "DVE_READ_ACCUMULATOR",
+      "ms": 1.579
+    },
+    {
+      "engine": "Vector",
+      "opcode": "EVENT_SEMAPHORE",
+      "ms": 0.842
+    },
+    {
+      "engine": "Vector",
+      "opcode": "BATCH_NORM_AGGREGATE",
+      "ms": 0.428
+    }
+  ],
+  "top_scalar_activation_fn_ms": [
+    {
+      "engine": "Vector",
+      "fn": "",
+      "ms": 45.321
+    },
+    {
+      "engine": "Scalar",
+      "fn": "",
+      "ms": 24.877
+    },
+    {
+      "engine": "GpSimd",
+      "fn": "",
+      "ms": 18.898
+    },
+    {
+      "engine": "Scalar",
+      "fn": "SOFTPLUS",
+      "ms": 12.297
+    },
+    {
+      "engine": "Scalar",
+      "fn": "IDENTITY(scale/bias enabled)",
+      "ms": 4.494
+    },
+    {
+      "engine": "Scalar",
+      "fn": "COPY(scale/bias enabled)",
+      "ms": 4.303
+    },
+    {
+      "engine": "Scalar",
+      "fn": "UNKNOWN",
+      "ms": 0.787
+    },
+    {
+      "engine": "Scalar",
+      "fn": "SQRT",
+      "ms": 0.214
+    },
+    {
+      "engine": "Scalar",
+      "fn": "NEG",
+      "ms": 0.002
+    }
+  ]
+}

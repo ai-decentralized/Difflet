@@ -1,0 +1,443 @@
+{
+  "schema": "difflet-dit-step-attribution-result",
+  "schema_revision": 1,
+  "study_id": "dit-step-attribution-20260903",
+  "protocol_sha256": "dce6a81624ea46cf1637c60f84d1735da2e7ee6fa8d0ebdc760a1cb69d89ccf5",
+  "status": "flux_and_wan_measured",
+  "flux": {
+    "neff": "/tmp/nxd_model/transformer/NeuronFluxTransformer2DModel/_tp0_bk0/graph.neff",
+    "neff_sha256": "4fab711ae149a4019e3b4228b7da1a3454e160bc91d13999a740a8612c4b969e",
+    "world_size": 4,
+    "host_step_baseline": {
+      "source": "benchmark/trn2/flux_1_dev.json via benchmark.step_realloop (real 28-step generate)",
+      "per_step_ms": 269.1595743332679,
+      "per_step_median_ms": 268.87654699385166,
+      "n": 27
+    },
+    "summary_medians_over_reps": {
+      "total_time_s": 0.250292186418,
+      "tensor_active_pct": 77.8763678285493,
+      "vector_active_pct": 40.605510885486765,
+      "scalar_active_pct": 53.91289202222115,
+      "gpsimd_active_pct": 20.21309906391267,
+      "sync_active_pct": 29.664309839657165,
+      "cc_cores_active_pct": 0.055134525761638305,
+      "cc_op_active_time_s": 0.024640603855,
+      "mfu_pct": 49.01275413255769,
+      "mbu_pct": 39.88317953335044,
+      "hfu_pct": 51.63461100977293,
+      "hbm_read_bytes": 58982370768.0,
+      "hbm_write_bytes": 12491958392.0,
+      "dma_active_pct": 129.2981232530863
+    },
+    "reps": [
+      {
+        "rep": 0,
+        "ntff": "/tmp/claude-1000/-home-ubuntu-Difflet/70b5db1a-3b71-4052-b9d8-3f4be43cb116/scratchpad/dit_attr/flux-1024-tp4/rep0/profile_rank_0_exec_2.ntff",
+        "total_time_s": 0.250292186418,
+        "tensor_active_pct": 77.8763678285493,
+        "vector_active_pct": 40.58875832996999,
+        "scalar_active_pct": 53.89111172561142,
+        "gpsimd_active_pct": 20.209627156128544,
+        "sync_active_pct": 29.716818461837118,
+        "cc_cores_active_pct": 0.055134525761638305,
+        "cc_op_active_time_s": 0.024585735698,
+        "mfu_pct": 49.01275413255769,
+        "mbu_pct": 39.88317953335044,
+        "hfu_pct": 51.63461100977293,
+        "hbm_read_bytes": 58982370768.0,
+        "hbm_write_bytes": 12491958392.0,
+        "dma_active_pct": 129.2350936847854
+      },
+      {
+        "rep": 1,
+        "ntff": "/tmp/claude-1000/-home-ubuntu-Difflet/70b5db1a-3b71-4052-b9d8-3f4be43cb116/scratchpad/dit_attr/flux-1024-tp4/rep1/profile_rank_0_exec_2.ntff",
+        "total_time_s": 0.250383044609,
+        "tensor_active_pct": 77.80929154497434,
+        "vector_active_pct": 40.598099226622374,
+        "scalar_active_pct": 53.91289202222115,
+        "gpsimd_active_pct": 20.1666315304423,
+        "sync_active_pct": 29.67783281133925,
+        "cc_cores_active_pct": 0.0551168731155526,
+        "cc_op_active_time_s": 0.024639634436,
+        "mfu_pct": 48.994968542549515,
+        "mbu_pct": 39.868706853902886,
+        "hfu_pct": 51.61587400880443,
+        "hbm_read_bytes": 58982370768.0,
+        "hbm_write_bytes": 12491958392.0,
+        "dma_active_pct": 129.3756391767097
+      },
+      {
+        "rep": 2,
+        "ntff": "/tmp/claude-1000/-home-ubuntu-Difflet/70b5db1a-3b71-4052-b9d8-3f4be43cb116/scratchpad/dit_attr/flux-1024-tp4/rep2/profile_rank_0_exec_2.ntff",
+        "total_time_s": 0.250311629721,
+        "tensor_active_pct": 77.83191794050921,
+        "vector_active_pct": 40.605510885486765,
+        "scalar_active_pct": 53.94050034450816,
+        "gpsimd_active_pct": 20.21309906391267,
+        "sync_active_pct": 29.614825042138616,
+        "cc_cores_active_pct": 0.05513025110092303,
+        "cc_op_active_time_s": 0.024761942481,
+        "mfu_pct": 49.00894699890383,
+        "mbu_pct": 39.880081552065526,
+        "hfu_pct": 51.630600219749844,
+        "hbm_read_bytes": 58982370768.0,
+        "hbm_write_bytes": 12491958392.0,
+        "dma_active_pct": 129.35844218740854
+      },
+      {
+        "rep": 3,
+        "ntff": "/tmp/claude-1000/-home-ubuntu-Difflet/70b5db1a-3b71-4052-b9d8-3f4be43cb116/scratchpad/dit_attr/flux-1024-tp4/rep3/profile_rank_0_exec_2.ntff",
+        "total_time_s": 0.250168944111,
+        "tensor_active_pct": 77.88270018182202,
+        "vector_active_pct": 40.64194810962925,
+        "scalar_active_pct": 53.89000648425093,
+        "gpsimd_active_pct": 20.241914370686825,
+        "sync_active_pct": 29.626996439699578,
+        "cc_cores_active_pct": 0.055165457283445365,
+        "cc_op_active_time_s": 0.024686802611,
+        "mfu_pct": 49.036899595189695,
+        "mbu_pct": 39.90282743598541,
+        "hfu_pct": 51.660048094317965,
+        "hbm_read_bytes": 58982370768.0,
+        "hbm_write_bytes": 12491958392.0,
+        "dma_active_pct": 129.24599437352103
+      },
+      {
+        "rep": 4,
+        "ntff": "/tmp/claude-1000/-home-ubuntu-Difflet/70b5db1a-3b71-4052-b9d8-3f4be43cb116/scratchpad/dit_attr/flux-1024-tp4/rep4/profile_rank_0_exec_2.ntff",
+        "total_time_s": 0.250170397441,
+        "tensor_active_pct": 77.92483310859177,
+        "vector_active_pct": 40.65638247946073,
+        "scalar_active_pct": 54.04212196404446,
+        "gpsimd_active_pct": 20.225786385830567,
+        "sync_active_pct": 29.664309839657165,
+        "cc_cores_active_pct": 0.055167492801600895,
+        "cc_op_active_time_s": 0.024640603855,
+        "mfu_pct": 49.03661472216708,
+        "mbu_pct": 39.90259562607988,
+        "hfu_pct": 51.65974798248034,
+        "hbm_read_bytes": 58982370768.0,
+        "hbm_write_bytes": 12491958392.0,
+        "dma_active_pct": 129.2981232530863
+      }
+    ],
+    "representative_rep": 0,
+    "timeline_attribution": {
+      "engines_present_in_ActiveTime": [
+        "cc_instruction",
+        "gpsimd",
+        "scalar",
+        "sync",
+        "tensor",
+        "vector"
+      ],
+      "device_makespan_ms": 250.29218196868896,
+      "hbm_read_mb_per_rank": 58982.370768,
+      "hbm_write_mb_per_rank": 12491.958392,
+      "active_union_ms": {
+        "cc_instruction": 0.137995,
+        "gpsimd_non_dma": 0.842466,
+        "scalar": 134.884932,
+        "sync": 74.378787,
+        "tensor": 194.918562,
+        "vector": 101.590481,
+        "dma_service": 230.513522,
+        "collective": 24.585739
+      },
+      "exclusive_union_ms": {
+        "cc_instruction": 0.004409,
+        "gpsimd_non_dma": 0.043689,
+        "scalar": 0.384388,
+        "sync": 0.182141,
+        "tensor": 3.650407,
+        "vector": 2.522592,
+        "dma_service": 4.55945,
+        "collective": 1.294112
+      },
+      "active_union_pct": {
+        "cc_instruction": 0.055133563867073916,
+        "gpsimd_non_dma": 0.33659301436166744,
+        "scalar": 53.89098889907549,
+        "sync": 29.71678396623057,
+        "tensor": 77.8764084706345,
+        "vector": 40.588755190407326,
+        "dma_service": 92.09777156716656,
+        "collective": 9.822815401831297
+      },
+      "exclusive_union_pct": {
+        "cc_instruction": 0.0017615412376530228,
+        "gpsimd_non_dma": 0.01745519962164276,
+        "scalar": 0.15357571178475168,
+        "sync": 0.07277135009466075,
+        "tensor": 1.4584582591783304,
+        "vector": 1.00785888722468,
+        "dma_service": 1.8216509857149186,
+        "collective": 0.5170405203315102
+      },
+      "tensor_union_pct": 77.8764084706345,
+      "non_pe_engine_nonoverlapped_pct": 15.774777577726837,
+      "exposed_collective_pct": 4.398144565848687,
+      "exposed_dma_pct": 1.8216509857149186,
+      "uncovered_idle_pct": 0.12901840007506427,
+      "gate_metric_X": 20.172922143575526,
+      "critical_path_attribution": "dma_service",
+      "critical_path_definition": "leader of both total and exclusive interval-union service; a split label reports disagreement and is not dependency proof",
+      "definitions": {
+        "non_pe_engine_nonoverlapped_pct": "union of all non-tensor compute engines (vector, scalar, gpsimd non-DMA, sync/other) minus tensor-engine active intervals, as % of makespan",
+        "exposed_collective_pct": "CcOp intervals (not Invalid/BARRIER) minus the union of all compute engines, as % of makespan",
+        "exposed_dma_pct": "DMA service intervals minus compute and collective unions",
+        "uncovered_idle_pct": "makespan not covered by any compute, collective, or DMA interval"
+      }
+    },
+    "gate": {
+      "X_exposed_cc_plus_non_pe_pct": 20.172922143575526,
+      "tensor_union_pct": 77.8764084706345,
+      "exposed_collective_pct": 4.398144565848687,
+      "non_pe_engine_nonoverlapped_pct": 15.774777577726837,
+      "rule": "X<20 and tensor_union>=80 -> route A; X>=30 -> route B; else middle (see protocol)"
+    }
+  },
+  "scored_pre_estimates": {
+    "flux_step_wall_ms": {
+      "predicted_range": [
+        255,
+        285
+      ],
+      "measured": 269.1595743332679,
+      "hit": true
+    },
+    "flux_mfu_pct": {
+      "predicted_range": [
+        38,
+        46
+      ],
+      "measured": 49.01275413255769,
+      "hit": false
+    },
+    "flux_exposed_cc_pct_of_step": {
+      "predicted_range": [
+        5,
+        20
+      ],
+      "measured": 4.398144565848687,
+      "hit": false
+    },
+    "flux_non_pe_engine_nonoverlapped_pct": {
+      "predicted_range": [
+        5,
+        25
+      ],
+      "measured": 15.774777577726837,
+      "hit": true
+    },
+    "flux_device_makespan_ms_vs_host_step": {
+      "device_makespan_ms": 250.29218196868896,
+      "host_step_ms": 269.1595743332679
+    }
+  },
+  "decision": {
+    "metric_X": 20.172922143575526,
+    "tensor_union_pct": 77.8764084706345,
+    "route": "middle (A main line + one kernel section)",
+    "rule_applied": {
+      "metric": "X = exposed_cc_pct + non_pe_engine_nonoverlapped_pct, measured on FLUX (primary) and Wan (secondary), median of 5 steps",
+      "route_A_cache_laws": "X < 20 and TensorE non-overlapped union >= 80% of step -> single-step optimisation headroom <= 1.25x; paper stays on cache placement laws; DiT dataflow is at most an implementation note",
+      "route_B_dit_dataflow": "X >= 30 on FLUX -> main line becomes DiT single-step multi-engine dataflow (CARDAN method); cache becomes a multiplier and one section",
+      "middle": "20 <= X < 30 -> route A main line; the single largest non-PE item becomes one kernel section inside route A",
+      "wan_override": "if Wan X >= 30 while FLUX X < 20, route B is pursued on Wan only and the paper's DiT section is video-specific",
+      "tie_breaker": "the rule is evaluated once on the frozen measurement; no re-profiling after the fact to move X across a threshold"
+    }
+  },
+  "wan": {
+    "neff": "/home/ubuntu/neffs/wan21_tp4_480x832x9/graph.neff",
+    "neff_sha256": "8b1d5bd2fc4e40d5435237cb5ff0889bdf2dda7c9312ee3bdc009378f8607736",
+    "world_size": 4,
+    "summary_medians_over_reps": {
+      "total_time_s": 0.530022218506,
+      "tensor_active_pct": 67.42370279745896,
+      "vector_active_pct": 31.76299359141167,
+      "scalar_active_pct": 40.41016342305947,
+      "gpsimd_active_pct": 17.972945427185465,
+      "sync_active_pct": 11.153499874190826,
+      "cc_cores_active_pct": 0.06250489483761676,
+      "cc_op_active_time_s": 0.069364930443,
+      "mfu_pct": 30.237223856962668,
+      "mbu_pct": 22.519401978347055,
+      "hfu_pct": 34.61169892009734,
+      "hbm_read_bytes": 69786584664.0,
+      "hbm_write_bytes": 15673690156.0,
+      "dma_active_pct": 111.46461587943992
+    },
+    "reps": [
+      {
+        "rep": 0,
+        "ntff": "/tmp/claude-1000/-home-ubuntu-Difflet/70b5db1a-3b71-4052-b9d8-3f4be43cb116/scratchpad/dit_attr/wan21-480x832x9-tp4/rep0/profile_rank_0_exec_2.ntff",
+        "total_time_s": 0.530065905104,
+        "tensor_active_pct": 67.41233635689277,
+        "vector_active_pct": 31.771452957612905,
+        "scalar_active_pct": 40.42098153214811,
+        "gpsimd_active_pct": 17.956170816040565,
+        "sync_active_pct": 11.153499874190826,
+        "cc_cores_active_pct": 0.06249967656968853,
+        "cc_op_active_time_s": 0.068755279635,
+        "mfu_pct": 30.234700939913882,
+        "mbu_pct": 22.517523016725168,
+        "hfu_pct": 34.60881100797597,
+        "hbm_read_bytes": 69786584664.0,
+        "hbm_write_bytes": 15673690156.0,
+        "dma_active_pct": 111.28879809579296
+      },
+      {
+        "rep": 1,
+        "ntff": "/tmp/claude-1000/-home-ubuntu-Difflet/70b5db1a-3b71-4052-b9d8-3f4be43cb116/scratchpad/dit_attr/wan21-480x832x9-tp4/rep1/profile_rank_0_exec_2.ntff",
+        "total_time_s": 0.530125174178,
+        "tensor_active_pct": 67.42953700332365,
+        "vector_active_pct": 31.767024595171193,
+        "scalar_active_pct": 40.302640097265495,
+        "gpsimd_active_pct": 17.987515459489767,
+        "sync_active_pct": 11.17339838446276,
+        "cc_cores_active_pct": 0.06249435157747111,
+        "cc_op_active_time_s": 0.068846595957,
+        "mfu_pct": 30.231265329070713,
+        "mbu_pct": 22.51496431947225,
+        "hfu_pct": 34.60487836096204,
+        "hbm_read_bytes": 69786584664.0,
+        "hbm_write_bytes": 15673690156.0,
+        "dma_active_pct": 111.46461587943992
+      },
+      {
+        "rep": 2,
+        "ntff": "/tmp/claude-1000/-home-ubuntu-Difflet/70b5db1a-3b71-4052-b9d8-3f4be43cb116/scratchpad/dit_attr/wan21-480x832x9-tp4/rep2/profile_rank_0_exec_2.ntff",
+        "total_time_s": 0.530005766032,
+        "tensor_active_pct": 67.44636471754404,
+        "vector_active_pct": 31.74920963564206,
+        "scalar_active_pct": 40.41016342305947,
+        "gpsimd_active_pct": 17.971586957896236,
+        "sync_active_pct": 11.16938344230573,
+        "cc_cores_active_pct": 0.06269878764433194,
+        "cc_op_active_time_s": 0.069364930443,
+        "mfu_pct": 30.23813657092753,
+        "mbu_pct": 22.520081729000193,
+        "hfu_pct": 34.61274367807847,
+        "hbm_read_bytes": 69786584664.0,
+        "hbm_write_bytes": 15673690156.0,
+        "dma_active_pct": 111.60874998912101
+      },
+      {
+        "rep": 3,
+        "ntff": "/tmp/claude-1000/-home-ubuntu-Difflet/70b5db1a-3b71-4052-b9d8-3f4be43cb116/scratchpad/dit_attr/wan21-480x832x9-tp4/rep3/profile_rank_0_exec_2.ntff",
+        "total_time_s": 0.530022218506,
+        "tensor_active_pct": 67.41438884056795,
+        "vector_active_pct": 31.76299359141167,
+        "scalar_active_pct": 40.43560364269773,
+        "gpsimd_active_pct": 17.973628841856517,
+        "sync_active_pct": 11.145040179745598,
+        "cc_cores_active_pct": 0.06250489483761676,
+        "cc_op_active_time_s": 0.069699601674,
+        "mfu_pct": 30.237223856962668,
+        "mbu_pct": 22.519401978347055,
+        "hfu_pct": 34.61169892009734,
+        "hbm_read_bytes": 69786584664.0,
+        "hbm_write_bytes": 15673690156.0,
+        "dma_active_pct": 111.63838486631286
+      },
+      {
+        "rep": 4,
+        "ntff": "/tmp/claude-1000/-home-ubuntu-Difflet/70b5db1a-3b71-4052-b9d8-3f4be43cb116/scratchpad/dit_attr/wan21-480x832x9-tp4/rep4/profile_rank_0_exec_2.ntff",
+        "total_time_s": 0.529963156932,
+        "tensor_active_pct": 67.42370279745896,
+        "vector_active_pct": 31.734879220328942,
+        "scalar_active_pct": 40.32159864369928,
+        "gpsimd_active_pct": 17.972945427185465,
+        "sync_active_pct": 11.098017184137426,
+        "cc_cores_active_pct": 0.06270482168095448,
+        "cc_op_active_time_s": 0.069867397871,
+        "mfu_pct": 30.240506185534155,
+        "mbu_pct": 22.52184651746466,
+        "hfu_pct": 34.615456109210015,
+        "hbm_read_bytes": 69786584664.0,
+        "hbm_write_bytes": 15673690156.0,
+        "dma_active_pct": 111.35342518814491
+      }
+    ],
+    "representative_rep": 3,
+    "timeline_attribution": {
+      "engines_present_in_ActiveTime": [
+        "cc_instruction",
+        "gpsimd",
+        "scalar",
+        "sync",
+        "tensor",
+        "vector"
+      ],
+      "device_makespan_ms": 530.0222039222717,
+      "hbm_read_mb_per_rank": 69786.584664,
+      "hbm_write_mb_per_rank": 15673.690156,
+      "active_union_ms": {
+        "cc_instruction": 0.331308,
+        "gpsimd_non_dma": 3.358711,
+        "scalar": 214.317691,
+        "sync": 59.071009,
+        "tensor": 357.311309,
+        "vector": 168.350947,
+        "dma_service": 448.747118,
+        "collective": 69.699587
+      },
+      "exclusive_union_ms": {
+        "cc_instruction": 0.006846,
+        "gpsimd_non_dma": 0.136296,
+        "scalar": 1.49064,
+        "sync": 0.341322,
+        "tensor": 18.674599,
+        "vector": 2.555422,
+        "dma_service": 61.892098,
+        "collective": 2.244429
+      },
+      "active_union_pct": {
+        "cc_instruction": 0.06250832466041115,
+        "gpsimd_non_dma": 0.6336925085675389,
+        "scalar": 40.435606171591616,
+        "sync": 11.145006485174122,
+        "tensor": 67.41440384116436,
+        "vector": 31.76299893743486,
+        "dma_service": 84.66572054513573,
+        "collective": 13.150314549882802
+      },
+      "exclusive_union_pct": {
+        "cc_instruction": 0.0012916440008245338,
+        "gpsimd_non_dma": 0.02571514909967582,
+        "scalar": 0.281241047821952,
+        "sync": 0.06439767946968034,
+        "tensor": 3.5233616368907157,
+        "vector": 0.4821348956872673,
+        "dma_service": 11.677265130023974,
+        "collective": 0.4234594293202757
+      },
+      "tensor_union_pct": 67.41440384116436,
+      "non_pe_engine_nonoverlapped_pct": 14.016811833584056,
+      "exposed_collective_pct": 3.82930504605359,
+      "exposed_dma_pct": 11.677265130023974,
+      "uncovered_idle_pct": 3.062214149174011,
+      "gate_metric_X": 17.846116879637645,
+      "critical_path_attribution": "dma_service",
+      "critical_path_definition": "leader of both total and exclusive interval-union service; a split label reports disagreement and is not dependency proof",
+      "definitions": {
+        "non_pe_engine_nonoverlapped_pct": "union of all non-tensor compute engines (vector, scalar, gpsimd non-DMA, sync/other) minus tensor-engine active intervals, as % of makespan",
+        "exposed_collective_pct": "CcOp intervals (not Invalid/BARRIER) minus the union of all compute engines, as % of makespan",
+        "exposed_dma_pct": "DMA service intervals minus compute and collective unions",
+        "uncovered_idle_pct": "makespan not covered by any compute, collective, or DMA interval"
+      }
+    },
+    "gate": {
+      "X_exposed_cc_plus_non_pe_pct": 17.846116879637645,
+      "tensor_union_pct": 67.41440384116436,
+      "exposed_collective_pct": 3.82930504605359,
+      "non_pe_engine_nonoverlapped_pct": 14.016811833584056,
+      "rule": "X<20 and tensor_union>=80 -> route A; X>=30 -> route B; else middle (see protocol)"
+    },
+    "scored": "record only per protocol; no prediction scored",
+    "override_clause_fires": false
+  },
+  "sha256": "3a85b9d4083fd201ac245e0d7bf92dd9ec2d5b3deabc08bd8dfc41095544d342"
+}

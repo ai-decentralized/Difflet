@@ -1,0 +1,177 @@
+{
+  "schema": "difflet-placement-laws-protocol",
+  "schema_revision": 1,
+  "study_id": "placement-laws-20260903",
+  "paper_role": "pre-registered numeric predictions for the five closed-form placement laws, to be scored against fresh measurements on the new node (prediction error is itself a reported result; the 2026-08 Gram-tap estimate missed by 40x)",
+  "frozen_system": {
+    "model_id": "black-forest-labs/FLUX.1-dev",
+    "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    "hardware": "trn2.3xlarge, one Trainium2 device, 4 logical NeuronCores (LNC=2), 96 GiB HBM",
+    "instance_id": "i-0242f795bbf32ebc2",
+    "neuron_sdk": {
+      "neuronx-cc": "2.27.5334.0",
+      "torch-neuronx": "2.9.0.2.15.32035",
+      "neuronx-distributed": "0.19.28492",
+      "runtime-lib": "2.34.10.0",
+      "tools": "2.32.28.0"
+    },
+    "parallelism": "TP4, CP1, no CFG-parallel, SP off (the qualified A12 topology)",
+    "dtype": "bfloat16",
+    "height": 1024,
+    "width": 1024,
+    "batch": 1,
+    "num_steps": 50,
+    "guidance_scale": 3.5,
+    "joint_tokens": 4608,
+    "image_tokens": 4096,
+    "text_tokens": 512,
+    "hidden": 3072,
+    "double_blocks": 19,
+    "single_blocks": 38,
+    "compiled_root": "recorded in the result file (artifact hash), not known before compile"
+  },
+  "scoring": "a law counts as predictive if the measured value falls within 2x of the point prediction (or inside the predicted range where a range is given); misses are reported, not re-fitted",
+  "laws": {
+    "L1_dispatch_floor": {
+      "statement": "A graph invocation on an AOT accelerator has a fixed cost independent of its arithmetic; control logic moved on-device can recover at most the host critical-path cost it removes.",
+      "prediction": {
+        "per_invocation_floor_us": {
+          "point": 337,
+          "range": [
+            250,
+            450
+          ]
+        },
+        "host_cache_work_pct_of_denoise": {
+          "point": 0.19,
+          "range": [
+            0.1,
+            0.4
+          ]
+        }
+      },
+      "measurement": "H1a-style weightless K=2 predictor graph, 100 timed device calls (scripts/run_flux_h1a_resident_state.py); host predictor timing from CacheRunner on the same tensors",
+      "prior": "H1a/H1e 2026-08-12 on the old node"
+    },
+    "L2_alias_tax": {
+      "statement": "Fusing work into an existing graph call is free only if it needs no cross-invocation resident state; an aliased output adds a fixed per-call cost independent of its size.",
+      "prediction": {
+        "aliased_output_ms_per_backbone_step": {
+          "point": 3.1,
+          "range": [
+            1.5,
+            6.0
+          ]
+        },
+        "reduction_without_alias_ms": {
+          "point": 0.0,
+          "range": [
+            -1.5,
+            1.5
+          ]
+        },
+        "bf16_vs_fp32_writeback_delta_ms": {
+          "point": 0.0,
+          "range": [
+            -1.0,
+            1.0
+          ]
+        }
+      },
+      "measurement": "gram-tap backbone variants post / noalias / bf16 vs baseline, 30 host-side wall-clock calls each, same entry and inputs (difflet/backends/trainium/flux/gram_tap.py)",
+      "prior": "H2' 2026-08-12"
+    },
+    "L3_numerical_boundary": {
+      "statement": "A graph boundary is a numerical-semantics boundary: an intermediate dtype cast inside one AOT graph is not a contract; the compiler may fuse across it.",
+      "prediction": {
+        "fused_predictor_euler_final_latent_rel_l2": {
+          "point": 0.00263,
+          "range": [
+            0.001,
+            0.006
+          ]
+        },
+        "split_two_graph_rel_l2": {
+          "point": 0.0,
+          "range": [
+            0.0,
+            0.0
+          ]
+        },
+        "first_divergent_step": {
+          "point": 6,
+          "range": [
+            6,
+            6
+          ]
+        }
+      },
+      "measurement": "H1c single-NEFF vs split cache-step runners over the fixed A12 50-step schedule with synthetic anchors (scripts/run_flux_h1c_resident_cache_step.py)",
+      "prior": "H1c-a / H1f 2026-08-12"
+    },
+    "L4_weight_streaming_floor": {
+      "statement": "Any full-depth backbone pass pays weight streaming HBM->SBUF plus per-layer collective floors even at zero tokens; partial-step mechanisms (residual split, token subsets) cannot beat host-side skipping at a 3.95x operating point because they must displace an anchor to pay for themselves (38*c < 267*dA => c < 7 ms per displaced anchor).",
+      "prediction": {
+        "intercept_ms_shape_ladder": {
+          "point": 12,
+          "range": [
+            7,
+            24
+          ],
+          "basis": "weights 5.95 GB/core at ~0.73 TB/s = 8.2 ms + 114 all-reduce floors x 7 us = 0.8 ms + dispatch 0.34 ms; overlap may hide part of it"
+        },
+        "token_linear_coeff_ms_per_1k_tokens": {
+          "point": 52,
+          "range": [
+            35,
+            75
+          ]
+        }
+      },
+      "measurement": "compile FLUX TP4 at 256^2, 512^2, 768^2, 1024^2 (256/1024/2304/4096 image tokens + 512 text); fit step_ms = F + a*N + b*N^2 by least squares over per-step medians; report F with its CI",
+      "prior": "none measured; analytic only"
+    },
+    "L5_amortization_bound": {
+      "statement": "Batching (cohort, CFG, DP lanes) can recover at most the token-independent fixed cost F per step: G(B) = F(1-1/B)/t1.",
+      "prediction": {
+        "t2_over_t1": {
+          "point": 1.94,
+          "range": [
+            1.88,
+            1.99
+          ]
+        },
+        "throughput_gain_pct_B2": {
+          "point": 3,
+          "range": [
+            0.5,
+            6
+          ]
+        }
+      },
+      "measurement": "compile FLUX TP4 1024^2 at B=2; paired per-step timing B=1 vs B=2 on the same prompts (24 pairs, AB/BA alternated, prompt-stratified bootstrap as in the H1e protocol)",
+      "prior": "none measured; analytic only",
+      "stop_condition": "t2/t1 > 1.96 on FLUX and Wan -> the batching section is dropped and only this bound row remains"
+    },
+    "L6_video_crossover_corollary": {
+      "statement": "Host-side cache control stays optimal until the anchor tensor is large enough that host tensor algebra plus PCIe transfer exceeds the on-device dispatch+alias cost: S* where 3*S/BW_host = 0.34 ms + 3.1 ms.",
+      "prediction": {
+        "crossover_anchor_bytes": {
+          "point": 70000000.0,
+          "range": [
+            30000000.0,
+            150000000.0
+          ]
+        },
+        "wan_default_anchor_bytes": 1200000.0,
+        "ltx2_default_anchor_bytes": 1500000.0,
+        "consequence": "no default single-chip video configuration crosses; resident state stays rejected for video"
+      },
+      "measurement": "host predictor + scheduler timing vs anchor size on synthetic tensors 0.5 MB .. 512 MB (CPU only), and the L1/L2 device constants",
+      "prior": "L1/L2 on the old node"
+    }
+  },
+  "quality_policy": "Only designs that change outputs (asymmetric CFG schedules, video schedules) are scored, and only with the existing frozen ImageReward/VQAScore contract; no new thresholds are fitted. Pure architecture comparisons (batching, TP layout, policy switching) must be bit-exact.",
+  "sealed": "transactional rollback P3-P6 (benchmark/flux_cache/transactional-rollback-status-20260816.md) are sealed: mechanics retained, no trigger-rule research",
+  "sha256": "d85d74e19555352a382cde85ca387ad82f122915872213e8d2177147f40b44f9"
+}
