@@ -456,3 +456,72 @@ def test_dit_input_contract_15_shapes():
     assert "image_embeds" in contract
     assert "encoder_hidden_states_2" in contract
     assert contract["image_embeds"]["shape"] == (1, 4, 7)
+
+
+# --------------------------------------------------------------------------- #
+# TeaCache probe sub-app: opt-out for callers that never run adaptive modes
+# --------------------------------------------------------------------------- #
+class _FakeBackbone:
+    def __init__(self, *, model_path, config):
+        self.model_path = model_path
+        self.config = config
+
+
+class _FakeProbe(_FakeBackbone):
+    pass
+
+
+class _FakeFusedProbe(_FakeBackbone):
+    pass
+
+
+def _app_with_probe_branch(monkeypatch, tmp_path, **kwargs):
+    import sys
+    import types
+    import warnings
+
+    (tmp_path / "transformer").mkdir()
+    (tmp_path / "transformer" / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(app, "_load_diffusers_config", lambda path: SimpleNamespace())
+    monkeypatch.setattr(
+        app, "create_hunyuan_video_backbone_config",
+        lambda **kw: SimpleNamespace(neuron_config=SimpleNamespace(world_size=1, tp_degree=1)),
+    )
+    backbone = types.ModuleType("difflet.backends.trainium.hunyuan_video.backbone")
+    backbone.NeuronHunyuanVideoBackboneApplication = _FakeBackbone
+    probe = types.ModuleType("difflet.backends.trainium.hunyuan_video.teacache_probe")
+    probe.NeuronHunyuanVideoTeacacheProbeApplication = _FakeProbe
+    probe.NeuronHunyuanVideoTeacacheProbeFusedApplication = _FakeFusedProbe
+    monkeypatch.setitem(sys.modules, backbone.__name__, backbone)
+    monkeypatch.setitem(sys.modules, probe.__name__, probe)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # scheduler config is absent in tmp_path
+        return app.NeuronHunyuanVideoApplication(
+            model_path=str(tmp_path), parallel=_parallel(), dtype=torch.float32,
+            shape={}, enable_vae_decoder=False, **kwargs,
+        )
+
+
+def test_probe_is_built_by_default_and_listed_as_a_component(monkeypatch, tmp_path):
+    application = _app_with_probe_branch(monkeypatch, tmp_path)
+    assert isinstance(application.transformer, _FakeBackbone)
+    assert isinstance(application.teacache_probe, _FakeProbe)
+    assert application.teacache_probe_fused is False
+    assert [spec.name for spec in application.components()] == ["transformer", "teacache_probe"]
+
+
+def test_probe_opt_out_builds_no_probe_component(monkeypatch, tmp_path):
+    # The CLI's plain and probe-free runs opt out: no probe NEFF is ever
+    # compiled or loaded for them (this used to be done by nulling the
+    # attribute after construction).
+    application = _app_with_probe_branch(monkeypatch, tmp_path, enable_teacache_probe=False)
+    assert isinstance(application.transformer, _FakeBackbone)
+    assert application.teacache_probe is None
+    assert application.teacache_probe_fused is False
+    assert [spec.name for spec in application.components()] == ["transformer"]
+
+
+def test_fused_probe_still_selected_when_enabled(monkeypatch, tmp_path):
+    application = _app_with_probe_branch(monkeypatch, tmp_path, teacache_fused=True)
+    assert isinstance(application.teacache_probe, _FakeFusedProbe)
+    assert application.teacache_probe_fused is True
