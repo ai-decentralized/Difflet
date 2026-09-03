@@ -664,6 +664,9 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
             num_frames=self.shape["num_frames"],
             teacache_speedup=kwargs.get("teacache_speedup"),
             teacache_calibration_path=kwargs.get("teacache_calibration_path"),
+            # Probe-free modes: runtime-only, never part of the artifact identity.
+            teacache_cadence=kwargs.get("teacache_cadence"),
+            teacache_online_delta_alpha=kwargs.get("teacache_online_delta_alpha"),
         )
 
     def components(self) -> list[ComponentSpec]:

@@ -42,6 +42,8 @@ class HunyuanVideoOrchestrator:
         scheduler: Any = None,
         teacache_speedup: float | None = None,
         teacache_calibration_path: str | None = None,
+        teacache_cadence: int | None = None,
+        teacache_online_delta_alpha: float | None = None,
     ) -> None:
         self.model_path = model_path
         self.transformer = transformer
@@ -57,6 +59,14 @@ class HunyuanVideoOrchestrator:
         )
         self.teacache_speedup = teacache_speedup
         self.teacache_controller = None
+        probe_free_requested = (
+            teacache_cadence is not None or teacache_online_delta_alpha is not None
+        )
+        if probe_free_requested and teacache_speedup is not None:
+            raise ValueError(
+                "teacache_cadence/teacache_online_delta_alpha are mutually "
+                "exclusive with teacache_speedup."
+            )
         if teacache_speedup is not None:
             from difflet.pipeline.teacache import (
                 TeaCacheController,
@@ -83,6 +93,21 @@ class HunyuanVideoOrchestrator:
                     f"{calibration.target_speedup}."
                 )
             self.teacache_controller = TeaCacheController(calibration)
+
+        # Probe-free TeaCache modes (fixed cadence / online-delta): host-side
+        # skip decisions only — no probe NEFF (app.teacache_probe stays None),
+        # no calibration file. num_steps is synced to the request in _denoise.
+        if probe_free_requested:
+            from difflet.pipeline.teacache import build_probe_free_controller
+
+            self.teacache_controller = build_probe_free_controller(
+                model="hunyuan_video",
+                shape_label=_teacache_shape_label(
+                    height=self.height, width=self.width, num_frames=self.num_frames
+                ),
+                cadence=teacache_cadence,
+                online_delta_alpha=teacache_online_delta_alpha,
+            )
 
     def has_runtime_components(self) -> bool:
         return self.transformer is not None or self.vae is not None
@@ -178,19 +203,30 @@ class HunyuanVideoOrchestrator:
         trajectory: list[torch.Tensor] | None,
     ) -> torch.Tensor:
         latents = bundle.hidden_states
+        controller = self.teacache_controller
+        # Probe-free modes (fixed cadence / online-delta) never touch a probe:
+        # the skip decision is index-based or uses the noise_pred trajectory.
+        probe_free = controller is not None and not controller.needs_signal()
+        if controller is not None:
+            from difflet.pipeline.teacache import sync_probe_free_num_steps
+
+            sync_probe_free_num_steps(controller, len(timesteps))
+            controller.reset()
         # cclog 72 mid-term path: when the transformer exposes
         # ``teacache_mod_input_with_delta`` (Trainium probe NEFF), keep
         # ``prev_mod_handle`` on device across denoise steps and let the probe
         # compute the L2 diff on device — host only sees a scalar per step.
         device_probe = (
-            self.teacache_controller is not None
-            and self.teacache_controller.calibration.mod_input_source == "block0_modulated_input"
+            controller is not None
+            and not probe_free
+            and controller.calibration.mod_input_source == "block0_modulated_input"
             and hasattr(self.transformer, "teacache_mod_input_with_delta")
         )
         # fused-A (cclog 80): prev_mod is a persistent on-device Parameter; the
         # probe returns only the scalar delta — no host prev_mod_handle.
         fused_probe = (
-            self.teacache_controller is not None
+            controller is not None
+            and not probe_free
             and getattr(self.transformer, "teacache_probe_fused", False)
             and hasattr(self.transformer, "teacache_delta")
         )
@@ -239,7 +275,7 @@ class HunyuanVideoOrchestrator:
                         )
                         delta_scalar = float(delta_t.detach().cpu().item())
                         prev_mod_handle = mod_input
-            else:
+            elif not probe_free:
                 mod_input = _teacache_mod_input(
                     self.transformer,
                     model_bundle,
@@ -268,6 +304,8 @@ class HunyuanVideoOrchestrator:
             latents = self._scheduler_step(noise_pred, timestep, latents, len(timesteps))
             if trajectory is not None:
                 trajectory.append(latents.detach().cpu())
+        if controller is not None:
+            print(f"[teacache] stats: {controller.stats()}", flush=True)
         return latents
 
     def _scheduler_step(

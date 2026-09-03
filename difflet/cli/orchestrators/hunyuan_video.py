@@ -273,7 +273,18 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             shape={"height": h, "width": w, "num_frames": f},
             shapes=compile_shapes,
             text_seq_len=_TEXT_SEQ_LEN, enable_vae_decoder=True,
+            # Probe-free TeaCache (fixed cadence / online-delta): host-side skip
+            # logic only; not in _stage_cache_inputs, so the warm artifact hits.
+            teacache_cadence=getattr(args, "teacache_cadence", None),
+            teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
         )
+        # The application builds a TeaCache probe sub-app unconditionally
+        # whenever the transformer is enabled (application.py, teacache_fused
+        # branch); as a component it would be compiled (an extra probe NEFF)
+        # and loaded on every CLI run. The CLI runs no adaptive TeaCache, and
+        # the probe-free modes above need no probe, so drop it here (same as
+        # examples/hunyuan_video_example.py). Adaptive CLI TeaCache would
+        # need an opt-in probe plus an additive stage-cache key field.
         app.teacache_probe = None
 
         if args.stage_mode == "compile":
@@ -397,6 +408,10 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             parts += ["--shapes", str(a.shapes)]
         if getattr(a, "sp_enabled", False):
             parts.append("--sp")
+        if getattr(a, "teacache_cadence", None) is not None:
+            parts += ["--teacache-cadence", str(a.teacache_cadence)]
+        if getattr(a, "teacache_online_delta", None) is not None:
+            parts += ["--teacache-online-delta", str(a.teacache_online_delta)]
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
         if getattr(a, "output", None):
