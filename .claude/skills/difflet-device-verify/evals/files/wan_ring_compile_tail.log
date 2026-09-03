@@ -1,0 +1,60 @@
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/difflet/models/wan/modeling_wan.py", line 649, in forward
+    attn_out = self.attn1(norm_h, None, rotary_emb)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/difflet/models/wan/modeling_wan.py", line 549, in forward
+    out = ring_attention(q, k, v, scale=1.0 / math.sqrt(self.head_dim), causal=False)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/difflet/backends/trainium/ops_impl/attention.py", line 185, in ring_attention
+    return kernel(
+           ^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/lib/python3.12/site-packages/nki/framework/kernel.py", line 245, in __call__
+    return k(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/lib/python3.12/site-packages/nki/framework/compiled.py", line 238, in __call__
+    return self._to_subclass(cls)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/lib/python3.12/site-packages/nki/framework/_torch_xla.py", line 147, in __call__
+    nir = self._cached_compile_to_bir(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/lib/python3.12/site-packages/nki/framework/compiled.py", line 197, in _cached_compile_to_bir
+    result = compile_kernel_to_nir(
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/lib/python3.12/site-packages/nki/framework/compiled.py", line 42, in compile_kernel_to_nir
+    return compile_to_bir(
+           ^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/lib/python3.12/site-packages/nki/compiler/driver.py", line 47, in compile_to_bir
+    compilation_result = frontend.compile(
+                         ^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/lib/python3.12/site-packages/nki/compiler/frontend.py", line 171, in compile
+    result = self._compile(
+             ^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/lib/python3.12/site-packages/nki/compiler/frontend.py", line 300, in _compile
+    mod_capsule = parser_kernel.compile(context, "", options=options)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: error: failed to compile NKI kernel:
+Collected 1 different diagnostics:
+- [x1] error: assertion failed: [INTERNAL_ERROR] [NCC_INKI016] Kernel validation exception: seqlen must be divisible by 128, got 2340 - Please check the validation message and adjust kernel inputs accordingly
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/difflet/cli/main.py", line 855, in <module>
+    main()
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/difflet/cli/main.py", line 851, in main
+    getattr(orchestrator, args.command)()
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/difflet/cli/orchestrators/wan.py", line 121, in compile
+    runner.run_stage(self.args.model_id, "transformer",
+  File "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/difflet/cli/runner.py", line 63, in run_stage
+    subprocess.run(cmd, env=env, check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/bin/python', '-m', 'difflet.cli.stage', '--orchestrator', 'Wan-AI/Wan2.2-T2V-A14B-Diffusers', '--stage', 'transformer', '--model-id', 'Wan-AI/Wan2.2-T2V-A14B-Diffusers', '--tp-degree', '2', '--cp-degree', '2', '--cp-mode', 'ring', '--height', '480', '--width', '832', '--num-frames', '9', '--steps', '2', '--guidance-scale', '1.0', '--seed', '42', '--stage-mode', 'compile']' returned non-zero exit status 1.
+
+FINISHED in 77.7s (exit 1)

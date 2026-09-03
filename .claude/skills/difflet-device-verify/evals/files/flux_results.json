@@ -1,0 +1,228 @@
+{
+  "downloads": {
+    "flux": {
+      "status": "PASS",
+      "duration_s": 272.3691283490007,
+      "reason": "",
+      "cmd": [
+        "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/bin/python",
+        "-m",
+        "difflet.cli.main",
+        "download",
+        "--model-id",
+        "black-forest-labs/FLUX.1-dev"
+      ]
+    }
+  },
+  "cells": {
+    "flux/tp4": {
+      "outcome": "PASS",
+      "reason": "",
+      "compile": {
+        "status": "PASS",
+        "duration_s": 940.7147405409996,
+        "reason": "",
+        "cmd": [
+          "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/bin/python",
+          "-m",
+          "difflet.cli.main",
+          "compile",
+          "--model-id",
+          "black-forest-labs/FLUX.1-dev",
+          "--tp-degree",
+          "4",
+          "--height",
+          "1024",
+          "--width",
+          "1024"
+        ]
+      },
+      "generate": {
+        "status": "PASS",
+        "duration_s": 40.09438076100014,
+        "reason": "",
+        "cmd": [
+          "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/bin/python",
+          "-m",
+          "difflet.cli.main",
+          "generate",
+          "--model-id",
+          "black-forest-labs/FLUX.1-dev",
+          "--tp-degree",
+          "4",
+          "--height",
+          "1024",
+          "--width",
+          "1024",
+          "--steps",
+          "28",
+          "--prompt",
+          "a cat sitting on a bench",
+          "--output",
+          "/tmp/logs/verify_matrix_20260829_071722/flux/tp4/flux.png"
+        ]
+      }
+    },
+    "flux/tp2cp2": {
+      "outcome": "PASS",
+      "reason": "",
+      "compile": {
+        "status": "PASS",
+        "duration_s": 1161.8176236520012,
+        "reason": "",
+        "cmd": [
+          "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/bin/python",
+          "-m",
+          "difflet.cli.main",
+          "compile",
+          "--model-id",
+          "black-forest-labs/FLUX.1-dev",
+          "--tp-degree",
+          "2",
+          "--cp-degree",
+          "2",
+          "--height",
+          "1024",
+          "--width",
+          "1024"
+        ]
+      },
+      "generate": {
+        "status": "PASS",
+        "duration_s": 42.452983414999835,
+        "reason": "",
+        "cmd": [
+          "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/bin/python",
+          "-m",
+          "difflet.cli.main",
+          "generate",
+          "--model-id",
+          "black-forest-labs/FLUX.1-dev",
+          "--tp-degree",
+          "2",
+          "--cp-degree",
+          "2",
+          "--height",
+          "1024",
+          "--width",
+          "1024",
+          "--steps",
+          "28",
+          "--prompt",
+          "a cat sitting on a bench",
+          "--output",
+          "/tmp/logs/verify_matrix_20260829_071722/flux/tp2cp2/flux.png"
+        ]
+      }
+    },
+    "flux/tp2cfg": {
+      "outcome": "SKIP",
+      "reason": "distilled",
+      "compile": null,
+      "generate": null
+    },
+    "flux/tp4sp": {
+      "outcome": "PASS",
+      "reason": "",
+      "compile": {
+        "status": "PASS",
+        "duration_s": 1111.5012630810015,
+        "reason": "",
+        "cmd": [
+          "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/bin/python",
+          "-m",
+          "difflet.cli.main",
+          "compile",
+          "--model-id",
+          "black-forest-labs/FLUX.1-dev",
+          "--tp-degree",
+          "4",
+          "--sp",
+          "--height",
+          "1024",
+          "--width",
+          "1024"
+        ]
+      },
+      "generate": {
+        "status": "PASS",
+        "duration_s": 108.54000018999977,
+        "reason": "",
+        "cmd": [
+          "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/bin/python",
+          "-m",
+          "difflet.cli.main",
+          "generate",
+          "--model-id",
+          "black-forest-labs/FLUX.1-dev",
+          "--tp-degree",
+          "4",
+          "--sp",
+          "--height",
+          "1024",
+          "--width",
+          "1024",
+          "--steps",
+          "28",
+          "--prompt",
+          "a cat sitting on a bench",
+          "--output",
+          "/tmp/logs/verify_matrix_20260829_071722/flux/tp4sp/flux.png"
+        ]
+      }
+    },
+    "flux/dp2tp2": {
+      "outcome": "PASS",
+      "reason": "",
+      "compile": {
+        "status": "PASS",
+        "duration_s": 446.90450983200026,
+        "reason": "",
+        "cmd": [
+          "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/bin/python",
+          "-m",
+          "difflet.cli.main",
+          "compile",
+          "--model-id",
+          "black-forest-labs/FLUX.1-dev",
+          "--tp-degree",
+          "2",
+          "--dp",
+          "2",
+          "--height",
+          "1024",
+          "--width",
+          "1024"
+        ]
+      },
+      "generate": {
+        "status": "PASS",
+        "duration_s": 57.12733809800011,
+        "reason": "",
+        "cmd": [
+          "/home/ubuntu/Difflet/.claude/worktrees/feature_verification/.venv/bin/python",
+          "-m",
+          "difflet.cli.main",
+          "generate",
+          "--model-id",
+          "black-forest-labs/FLUX.1-dev",
+          "--tp-degree",
+          "2",
+          "--dp",
+          "2",
+          "--height",
+          "1024",
+          "--width",
+          "1024",
+          "--steps",
+          "28",
+          "--requests",
+          "/tmp/logs/verify_matrix_20260829_071722/flux/dp2tp2/requests.jsonl",
+          "--work-dir",
+          "/tmp/logs/verify_matrix_20260829_071722/flux/dp2tp2/work",
+          "--keep-work-dir"
+        ]
+      }
+    }
+  }
+}
