@@ -55,3 +55,6 @@ log-neuron-cc.txt
 # the distilled anchors live in benchmark/trn2/flux_*.json)
 artifacts/flux_parallel_sweep/
 artifacts/parallel_phase_sweep/
+
+# nkd/neuroncc compile temp dirs leaked into CWD when compiling from repo root
+/c[0-9a-f][0-9a-f][0-9a-f]*/
