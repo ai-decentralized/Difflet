@@ -249,3 +249,50 @@ def test_run_gate_zero_per_model_no_signal_picks_online():
     )
     assert summ["probe_pearson"] is None        # no signal captured
     assert summ["method"] == "online_delta" and cal.online_delta_alpha > 0
+
+
+def test_build_probe_free_controller_cadence_needs_no_signal(capsys):
+    from difflet.pipeline.teacache import build_probe_free_controller
+
+    ctrl = build_probe_free_controller(model="wan", shape_label="480x832x9", cadence=2)
+    assert ctrl.needs_signal() is False
+    assert ctrl.calibration.cadence == 2
+    assert ctrl.calibration.online_delta_alpha == 0.0
+    assert ctrl.calibration.num_steps == 0  # synced at denoise time
+    assert "[teacache] probe-free controller enabled" in capsys.readouterr().out
+
+
+def test_build_probe_free_controller_online_delta():
+    from difflet.pipeline.teacache import build_probe_free_controller
+
+    ctrl = build_probe_free_controller(
+        model="ltx_2", shape_label="256x384x121", online_delta_alpha=0.6
+    )
+    assert ctrl.needs_signal() is False
+    assert ctrl.calibration.online_delta_alpha == pytest.approx(0.6)
+
+
+def test_build_probe_free_controller_rejects_empty_and_both_modes():
+    from difflet.pipeline.teacache import build_probe_free_controller
+
+    with pytest.raises(ValueError, match="cadence > 0 or online_delta_alpha > 0"):
+        build_probe_free_controller(model="wan", shape_label="s")
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        build_probe_free_controller(model="wan", shape_label="s", cadence=2, online_delta_alpha=0.5)
+
+
+def test_sync_probe_free_num_steps_follows_request_but_not_for_adaptive():
+    from difflet.pipeline.teacache import build_probe_free_controller, sync_probe_free_num_steps
+
+    ctrl = build_probe_free_controller(model="wan", shape_label="s", cadence=2)
+    sync_probe_free_num_steps(ctrl, 40)
+    assert ctrl.calibration.num_steps == 40
+    # Cadence 2, warmup/cooldown 5 at 40 steps: skips at steps 6, 8, ..., 34.
+    ctrl.prev_noise_pred = torch.zeros(1)
+    ctrl.cached_residual = torch.zeros(1)
+    skips = [i for i in range(40) if ctrl.should_skip(i, None)]
+    assert skips == list(range(6, 35, 2))
+
+    adaptive = TeaCacheController(_calibration())
+    sync_probe_free_num_steps(adaptive, 40)
+    assert adaptive.calibration.num_steps == 4  # calibration contract untouched
