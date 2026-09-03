@@ -37,7 +37,9 @@ global_metric_store.json
 cclogs/
 CLAUDE.md
 AGENTS.md
-.claude/
+# Claude Code local state stays ignored; project skills under .claude/skills/ are shared.
+.claude/*
+!.claude/skills/
 
 # Design specs (local working docs, not committed)
 .specs/

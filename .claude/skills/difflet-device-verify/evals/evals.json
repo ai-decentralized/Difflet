@@ -1,0 +1,49 @@
+{
+  "skill_name": "difflet-device-verify",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "I'm on branch verify/feature-matrix-2026-08-29 of the Difflet repo (cwd). Plan an on-device verification campaign for the wan and flux models covering the parallelism matrix (all seven verify_cli configs) and TeaCache fixed-cadence, to run on a trn2.3xlarge next week. Do NOT launch anything on device now (there are no NeuronCores on this machine) and do not modify tracked files. Deliver two files: (1) plan.md — expected outcome for every model x config cell (which will PASS, SKIP, or XFAIL and why, citing the gates in scripts/verify_cli.py), the exact driver and supervision commands, the checkpoint/commit cadence, and a disk plan; (2) an evidence-doc skeleton wan-flux-smoke-evidence.md ready to fill in.",
+      "expected_output": "plan.md predicts flux tp2cfg SKIP (distilled), wan tp2cp2ring XFAIL (per-rank tokens 2340 % 128), all other 12 cells PASS; names the per-cell driver + supervisor pattern; commits after each model row; evidence skeleton has per-phase tables with compile/generate time columns and a How-to-inspect section.",
+      "files": ["evals/files/flux_results.json"],
+      "expectations": [
+        "plan.md predicts flux tp2cfg as SKIP because FLUX is guidance-distilled",
+        "plan.md predicts wan tp2cp2ring as XFAIL/LIMIT because of the per-rank seqlen %128 ring rule (2340 tokens per rank at 480x832x9)",
+        "plan.md predicts all remaining wan and flux cells as PASS (no false SKIPs such as wan tp2cfg or flux ulysses)",
+        "plan.md specifies running cells one per verify_cli invocation with resume from results.json and a supervisor/monitor that restarts swept jobs",
+        "plan.md states a checkpoint policy of committing and pushing evidence after each model row or phase",
+        "plan.md includes a disk plan that does not delete caches without user approval",
+        "the evidence skeleton has a per-config table with compile and generate time columns and evidence-path column, plus a How to inspect manually section",
+        "no device job was launched and no tracked repo file was modified"
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "Attached is a real scripts/verify_cli.py results.json from a flux verification run (run dir run-20260829_071722). Write the evidence-doc section for the flux row: a markdown table with one line per config giving outcome, compile seconds, generate seconds, and evidence path; footnotes for anything anomalous or missing; a one-line row summary; and a 'How to inspect manually' recipe telling a reader which files to open and what they must contain. Save it as flux_section.md.",
+      "expected_output": "Table with tp4 PASS 940.7s/40.1s, tp2cp2 PASS 1161.8s/42.5s, tp2cfg SKIP (distilled), tp4sp PASS 1111.5s/108.5s, dp2tp2 PASS 446.9s/57.1s; notes that tp2cp2ulysses and tp2cp2ring are absent from this run; inspection recipe naming step_compile.log/step_generate.log 'FINISHED ... (exit 0)' tails, flux.png outputs, dp0/dp1 outputs.",
+      "files": ["evals/files/flux_results.json"],
+      "expectations": [
+        "the table lists tp4 as PASS with compile 940.7 s and generate 40.1 s",
+        "the table lists tp2cp2, tp4sp, and dp2tp2 as PASS with their compile/generate seconds taken from the file (1161.8/42.5, 1111.5/108.5, 446.9/57.1)",
+        "tp2cfg is shown as SKIP with the reason 'distilled' rather than as a failure",
+        "the section notes that the ulysses and ring CP cells are not present in this results.json rather than silently omitting them",
+        "the inspection recipe names step_compile.log and step_generate.log with the exit-0 FINISHED tail, and the flux.png / per-replica dp outputs",
+        "generate time is described as warm-cache inference time, not compile+inference"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "A verification cell wan/tp2cp2ring (Wan 2.2, 480x832x9 frames, --tp-degree 2 --cp-degree 2 --cp-mode ring) failed during compile; the tail of its step_compile.log is attached. Triage it: decide whether this is spurious (disk, killed task, harness) or a real bug; if a bug, give the root cause with the exact shape arithmetic, where in difflet the fix belongs and what it should do, what device experiment would confirm the analysis, and a draft commit message in the problem/solution format. Do not modify the repository. Save triage.md.",
+      "expected_output": "Classifies as a real constraint: nkilib ring kernel requires per-rank seqlen % 128 == 0; Wan latent tokens = (480/16)*(832/16)*((9-1)/4+1) = 30*52*3 = 4680, /cp2 = 2340; proposes a fail-fast ValueError in the trainium ring_attention op with shape guidance and gather_kv/ulysses alternatives; suggests a 512x512x9 (1536/rank) control run; commit message has Problem and Solution paragraphs.",
+      "files": ["evals/files/wan_ring_compile_tail.log"],
+      "expectations": [
+        "triage.md rules out spurious causes (disk, killed task) and classifies the failure as a genuine kernel constraint, not a compiler crash to ignore",
+        "triage.md derives 2340 tokens per rank from the 480x832x9 shape (4680 latent tokens / cp 2) and states the %128 rule",
+        "triage.md places the fix in the trainium ring_attention op (difflet/backends/trainium/ops_impl/attention.py) as a fail-fast validation with actionable guidance",
+        "triage.md proposes a device control experiment at a %128-conforming shape such as 512x512x9",
+        "the draft commit message contains explicit Problem and Solution statements and covers a single bug",
+        "no repository file was modified"
+      ]
+    }
+  ]
+}
