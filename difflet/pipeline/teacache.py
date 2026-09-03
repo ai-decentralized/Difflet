@@ -349,3 +349,61 @@ def load_teacache_calibration_or_raise(
             f"expected {shape_label!r}, got {calibration.shape_label!r}"
         )
     return calibration
+
+
+def build_probe_free_controller(
+    *,
+    model: str,
+    shape_label: str,
+    cadence: int | None = None,
+    online_delta_alpha: float | None = None,
+) -> TeaCacheController:
+    """Controller for the probe-free modes (fixed cadence / online-delta).
+
+    Neither mode needs a probe NEFF, a signal, or a calibration file — the
+    skip decision is index-based (cadence) or uses the noise_pred trajectory
+    the pipeline already has (online-delta). ``num_steps`` starts at 0 and is
+    synced to the request by :func:`sync_probe_free_num_steps`, so the
+    cooldown window always protects the real tail of the schedule.
+    """
+    cadence = int(cadence or 0)
+    online_delta_alpha = float(online_delta_alpha or 0.0)
+    if cadence <= 0 and online_delta_alpha <= 0.0:
+        raise ValueError(
+            "probe-free TeaCache needs cadence > 0 or online_delta_alpha > 0 "
+            f"(got cadence={cadence}, online_delta_alpha={online_delta_alpha})."
+        )
+    if cadence > 0 and online_delta_alpha > 0.0:
+        raise ValueError("teacache cadence and online_delta_alpha are mutually exclusive.")
+    controller = TeaCacheController(
+        TeaCacheCalibration(
+            model=model,
+            shape_label=shape_label,
+            num_steps=0,  # synced to the request at denoise time
+            poly_coef=(0.0,),
+            threshold=0.0,
+            cadence=cadence,
+            online_delta_alpha=online_delta_alpha,
+        )
+    )
+    print(
+        f"[teacache] probe-free controller enabled for {model}/{shape_label}: "
+        f"cadence={cadence} online_delta_alpha={online_delta_alpha}",
+        flush=True,
+    )
+    return controller
+
+
+def sync_probe_free_num_steps(controller: TeaCacheController, num_steps: int) -> None:
+    """Sync a probe-free controller's ``num_steps`` to the request.
+
+    No-op for adaptive (calibrated) controllers, whose num_steps is part of
+    the calibration contract and must not silently follow the request.
+    """
+    import dataclasses
+
+    cal = controller.calibration
+    if not (int(cal.cadence) > 0 or float(cal.online_delta_alpha) > 0.0):
+        return
+    if int(cal.num_steps) != int(num_steps):
+        controller.calibration = dataclasses.replace(cal, num_steps=int(num_steps))
