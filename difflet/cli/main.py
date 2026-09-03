@@ -131,6 +131,15 @@ def _add_shape_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--height", type=int, default=None)
     p.add_argument("--width", type=int, default=None)
     p.add_argument("--num-frames", type=int, default=None)
+    p.add_argument(
+        "--shapes",
+        default=None,
+        metavar="HxWxF[,HxWxF...]",
+        help="Compile a bucketed artifact covering several request shapes "
+        "(e.g. 320x512x61,320x512x33; HxW for image models). All shapes "
+        "share one weight copy on device. For generate, --height/--width/"
+        "--num-frames select the request shape, which must be in this set.",
+    )
 
 
 def _add_cache_flags(p: argparse.ArgumentParser) -> None:
@@ -150,6 +159,20 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "compiled Neuron VAE. Required for Wan clips beyond ~9 "
         "frames: the single-shot Neuron VAE graph exceeds the "
         "compiler instruction limit (NCC_EVRF007).",
+    )
+    p.add_argument(
+        "--taef1",
+        dest="taef1",
+        action="store_true",
+        help="Replace the standard VAE decoder with the lightweight TAEF1 "
+        "decoder (Flux only). Requires --taef1-path.",
+    )
+    p.add_argument(
+        "--taef1-path",
+        default=None,
+        metavar="REPO_ID",
+        help="HuggingFace repo id of the tiny VAE (e.g. madebyollin/taef1). "
+        "Implies --taef1.",
     )
 
 
@@ -203,6 +226,15 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--height", type=int, default=None)
     p.add_argument("--width", type=int, default=None)
     p.add_argument("--num-frames", type=int, default=None)
+    p.add_argument(
+        "--shapes",
+        default=None,
+        metavar="HxWxF[,HxWxF...]",
+        help="Serve several request shapes from ONE bucketed artifact / one "
+        "resident worker (HxWxF for HunyuanVideo/Wan video serving, HxW for "
+        "Flux/Qwen-Image image serving). Requests outside the set are "
+        "rejected with profile_mismatch.",
+    )
     p.add_argument(
         "--cache-dir",
         default=None,
@@ -546,6 +578,19 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_serve_profile_flags(serve)
     _add_serve_flags(serve)
 
+    cache = sub.add_parser("cache", help="Inspect the compiled-artifact cache")
+    cache.add_argument(
+        "cache_action",
+        choices=["ls"],
+        help="ls: list artifacts (hash dir -> shapes/tp/dtype) from their manifests",
+    )
+    cache.add_argument(
+        "--cache-dir",
+        default=None,
+        help="Compiled artifact cache root (default: ~/.cache/difflet/)",
+    )
+    cache.add_argument("--json", action="store_true", help="Emit JSON instead of a table")
+
     return root
 
 
@@ -601,6 +646,26 @@ def _validate_sp(args: argparse.Namespace) -> None:
         print(
             f"Error: {args.model_id} does not support --sp. Sequence parallelism "
             "is available for Flux, Wan, HunyuanVideo, and Qwen-Image.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
+def _validate_taef1(args: argparse.Namespace) -> None:
+    if getattr(args, "taef1_path", None) is not None:
+        setattr(args, "taef1", True)  # --taef1-path implies --taef1
+    if not getattr(args, "taef1", False):
+        return
+    if not args.taef1_path:
+        print(
+            "Error: --taef1 requires --taef1-path REPO_ID (e.g. madebyollin/taef1).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if args.model_id != "black-forest-labs/FLUX.1-dev":
+        print(
+            f"Error: {args.model_id} does not support --taef1. The lightweight "
+            "TAEF1 VAE is only wired into the Flux application.",
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -819,6 +884,11 @@ def main(argv: list[str] | None = None) -> None:
         run_clean(args)
         return
 
+    if args.command == "cache":
+        from difflet.cli.cache_cmd import run_cache_command
+
+        raise SystemExit(run_cache_command(args))
+
     valid_models = SERVE_VALID_MODELS if args.command == "serve" else VALID_MODELS
     if args.command == "plan" and getattr(args, "serving", False):
         valid_models = SERVE_VALID_MODELS
@@ -833,6 +903,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command in ("compile", "generate", "run"):
         _validate_cfg_parallel(args)
         _validate_sp(args)
+        _validate_taef1(args)
         from difflet.cli.modes import resolve_mode
 
         mode_cfg = resolve_mode(args.model_id, getattr(args, "mode", None), args)

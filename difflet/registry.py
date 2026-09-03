@@ -278,7 +278,9 @@ def _register_builtin_wan() -> None:
             supports_cp=True,
             supports_sp=True,
         ),
-        backends=("trainium",),
+        # Wan is the second model on the TPU backend, single-expert by default
+        # (see difflet/models/wan/tpu_application.py on expert residency).
+        backends=("trainium", "tpu"),
     )
     class _WanRegistration:
         pass
@@ -383,7 +385,8 @@ def _register_builtin_qwen_image() -> None:
             # the same primitive wan's validated SP path uses).
             supports_sp=True,
         ),
-        backends=("trainium",),
+        # Qwen-Image is the first model on the TPU backend (plan Phase 4).
+        backends=("trainium", "tpu"),
     )
     class _QwenImageRegistration:
         pass

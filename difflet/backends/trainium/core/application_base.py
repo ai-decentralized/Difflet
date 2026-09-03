@@ -33,6 +33,7 @@ from neuronx_distributed.trace.trace import get_sharded_checkpoint
 from neuronx_distributed.utils.model_utils import init_on_device
 from safetensors.torch import load_file
 
+from difflet.backends.trainium.core import shared_weights
 from difflet.backends.trainium.core.config import InferenceConfig, NeuronConfig
 from difflet.backends.trainium.core.model_wrapper import (
     CONTEXT_ENCODING_MODEL_TAG,
@@ -215,13 +216,25 @@ class NeuronApplicationBase(torch.nn.Module):
                 # compiler_flag_hook=self.check_and_apply_modular_flow_optimization,
             )
             for model in self.models:
+                example_inputs = model.input_generator()
+                priority_model_idx = model.priority_model_idx
+                if len(example_inputs) > 1:
+                    # Weight-layout optimization anchors on the priority bucket
+                    # and corrupts every non-priority bucket's graph: outputs
+                    # become nondeterministic with large localized errors in
+                    # the first sequence tokens (verified on trn2, NxD
+                    # 0.19.28492 / neuronx-cc 2.26 — see
+                    # docs/verification/task1-bucketed-compile.md §6). Disable
+                    # WLO for multi-bucket artifacts until the vendor bug is
+                    # fixed; single-bucket compiles keep it.
+                    priority_model_idx = None
                 self._builder.add(
                     key=model.tag,
                     model_instance=model.get_model_instance(),
-                    example_inputs=model.input_generator(),
+                    example_inputs=example_inputs,
                     compiler_args=model.compiler_args,
                     bucket_config=model.bucket_config,
-                    priority_model_idx=model.priority_model_idx,
+                    priority_model_idx=priority_model_idx,
                 )
         return self._builder
 
@@ -293,8 +306,42 @@ class NeuronApplicationBase(torch.nn.Module):
                 "SKIPPING pre-sharding the checkpoints. The checkpoints will be sharded during load time."
             )
         else:
-            logger.info("Pre-sharding checkpoints.")
-            self.get_builder(debug).shard_checkpoint(serialize_path=sharded_checkpoint_dir)
+            # Sharded weights depend on model/dtype/tp/rank-marker but not on
+            # shape, so every compiled resolution can hardlink one copy instead
+            # of writing its own tens of GB. Falls through to a normal shard
+            # when the store is disabled, empty, or on another filesystem.
+            store = shared_weights.store_dir(self)
+            if store is not None and shared_weights.link_from_store(
+                store, sharded_checkpoint_dir, self
+            ):
+                logger.info("Reusing pre-sharded checkpoints from %s.", store)
+            else:
+                logger.info("Pre-sharding checkpoints.")
+                shard_start = time.monotonic()
+                # Existing files here may be hardlinks into the store; writing
+                # through them would mutate every artifact sharing the inode.
+                shared_weights.prepare_for_write(sharded_checkpoint_dir)
+                self.get_builder(debug).shard_checkpoint(serialize_path=sharded_checkpoint_dir)
+                shard_elapsed = time.monotonic() - shard_start
+                shard_files = sorted(
+                    filename
+                    for filename in os.listdir(sharded_checkpoint_dir)
+                    if "sharded_checkpoint" in filename
+                )
+                total_mb = sum(
+                    os.path.getsize(os.path.join(sharded_checkpoint_dir, filename))
+                    for filename in shard_files
+                ) / (1024 * 1024)
+                logger.info(
+                    "Pre-sharding complete in %.1fs: %d shard file(s), "
+                    "%.1f MB total under %s",
+                    shard_elapsed,
+                    len(shard_files),
+                    total_mb,
+                    sharded_checkpoint_dir,
+                )
+                if store is not None:
+                    shared_weights.publish_to_store(store, sharded_checkpoint_dir, self)
 
             if self.neuron_config.lora_config and self.neuron_config.lora_config.dynamic_multi_lora:
                 logger.info("Pre-sharding CPU LoRA adapter checkpoints.")
@@ -485,8 +532,28 @@ class NeuronApplicationBase(torch.nn.Module):
                 f"Loading presharded checkpoints for ranks: "
                 f"{weight_start_rank_id}...{weight_start_rank_id + weight_local_ranks_size - 1}"
             )
-            for path in presharded_paths:
-                weights.append(load_file(path))
+            file_read_start = time.monotonic()
+            # Parallel I/O: load multiple presharded safetensors files concurrently
+            # to amortize OS page-cache / EBS read latency across shards.
+            if len(presharded_paths) > 1:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                path_to_weight: dict[str, dict] = {}
+                with ThreadPoolExecutor(max_workers=min(len(presharded_paths), 8)) as pool:
+                    futures = {pool.submit(load_file, p): p for p in presharded_paths}
+                    for future in as_completed(futures):
+                        path_to_weight[futures[future]] = future.result()
+                weights = [path_to_weight[p] for p in presharded_paths]
+            else:
+                for path in presharded_paths:
+                    weights.append(load_file(path))
+            file_read_elapsed = time.monotonic() - file_read_start
+            logger.info(
+                "Presharded file read: %.2fs for %d shard(s) (%.1f MB total)",
+                file_read_elapsed,
+                len(presharded_paths),
+                sum(os.path.getsize(p) for p in presharded_paths) / (1024 * 1024),
+            )
 
             if self.neuron_config.lora_config and self.neuron_config.lora_config.dynamic_multi_lora:
                 lora_cpu_weights = self.lora_model_manager.lora_checkpoint.load_sharded_cpu_checkpoints(compiled_model_path, start_rank_id, local_ranks_size)
@@ -512,15 +579,20 @@ class NeuronApplicationBase(torch.nn.Module):
             f"{start_rank_id}...{start_rank_id + local_ranks_size - 1} "
             f"(runtime_start_rank_id={runtime_start_rank_id})"
         )
+        init_start = time.monotonic()
         start_rank_tensor = torch.tensor([runtime_start_rank_id], dtype=torch.int32, device="cpu")
         self.traced_model.nxd_model.initialize(weights, start_rank_tensor)
-        logger.info("Finished traced model weight initialization")
+        init_elapsed = time.monotonic() - init_start
+        total_elapsed = time.monotonic() - start_time
+        logger.info(
+            "Finished traced model weight initialization in %.2fs "
+            "(device init %.2fs, total load_weights %.2fs)",
+            init_elapsed, init_elapsed, total_elapsed,
+        )
 
         if self.neuron_config.lora_config and self.neuron_config.lora_config.dynamic_multi_lora:
             cte_model = self.get_cte_model()
             self.lora_model_manager.init_dynamic_multi_lora(lora_cpu_weights, cte_model)
-
-        logger.info(f"Finished weights loading in {time.monotonic() - start_time} seconds")
 
     def _register_snapshot_hooks_from_env(self):
         """

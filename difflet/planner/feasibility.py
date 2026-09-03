@@ -56,6 +56,13 @@ KNOWN_BAD: dict[tuple[str, str | None], str] = {
     ),
 }
 
+# Ulysses all-to-alls the sequence shard into a head shard and that kernel has
+# no path for an attention mask; HunyuanVideo always carries one (its Llama
+# text encoder emits padded, variable-length sequences). Mirrors
+# ULYSSES_UNSUPPORTED in scripts/verify_cli.py -- keep the two in step.
+# Qwen-Image reaches the branch with attention_mask=None and is unaffected.
+ULYSSES_UNSUPPORTED: frozenset[str] = frozenset({"hunyuan_video"})
+
 # Serving pins that are not expressible as ModelCapabilities, from
 # difflet/serving/options.py and the resident adapters.
 _SERVING_REJECTS_CFG_PARALLEL = "serving does not expose the true-CFG request path"
@@ -311,6 +318,12 @@ def _reject(
         return Rejection(label, "model does not wire context parallelism", "capability")
     if parallel.cp_degree > 1 and parallel.cp_mode not in capabilities.cp_modes:
         return Rejection(label, f"model does not wire cp_mode={parallel.cp_mode!r}", "capability")
+    if parallel.cp_mode == "ulysses" and model_name in ULYSSES_UNSUPPORTED:
+        return Rejection(
+            label,
+            "ulysses attention has no kernel path for this model's attention mask",
+            "capability",
+        )
     if parallel.sp_enabled and not capabilities.supports_sp:
         return Rejection(label, "model does not wire sequence parallelism", "capability")
     if parallel.sp_enabled and parallel.tp_degree == 1:

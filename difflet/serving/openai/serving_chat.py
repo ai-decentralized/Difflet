@@ -119,8 +119,19 @@ def normalize_chat_request(
     metadata = resolved_model.metadata
     height = _int_field(extra.get("height", profile.height), "height")
     width = _int_field(extra.get("width", profile.width), "width")
-    if height != profile.height or width != profile.width:
-        raise profile_mismatch("request shape does not match serving profile")
+    # Membership in the compiled shape set (single-shape profiles are a
+    # one-member set); mirrors normalize_video_request.
+    if hasattr(profile, "shape_set"):
+        allowed_shapes = profile.shape_set()
+        allowed_display = [f"{h}x{w}" for h, w, _ in profile.canonical_shapes()]
+    else:
+        allowed_shapes = {(profile.height, profile.width, None)}
+        allowed_display = [f"{profile.height}x{profile.width}"]
+    if (height, width, None) not in allowed_shapes:
+        raise profile_mismatch(
+            f"request shape {height}x{width} is not in the serving profile's "
+            f"compiled shape set {allowed_display}"
+        )
 
     if extra.get("num_frames") is not None:
         raise invalid_extra_body("num_frames is reserved for future video serving")

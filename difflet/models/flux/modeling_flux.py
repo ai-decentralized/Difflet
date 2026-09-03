@@ -71,6 +71,7 @@ from difflet.ops import (
 )
 
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
+from difflet.backends.trainium.core.bucketing import ShapeBucketedInputGenerator
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.layer_boundary_marker import (
     ModuleMarkerEndWrapper,
@@ -1484,6 +1485,20 @@ class FluxBackboneInferenceConfig(InferenceConfig):
         self.cp_mode = cp_mode
         # Megatron-style sequence parallelism reuses the TP group.
         self.sp_enabled = sp_enabled
+        # Bucket shape set (image model: (h, w) entries). Largest-first; pin the
+        # single height/width convention to the priority shape.
+        shapes = getattr(self, "compile_shapes", None)
+        if shapes:
+            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+            self.compile_shapes = canonicalize_shapes(shapes)
+            self.height = self.compile_shapes[0][0]
+            self.width = self.compile_shapes[0][1]
+        for height, width, _frames in (getattr(self, "compile_shapes", None) or ()):
+            if int(height) % 16 or int(width) % 16:
+                raise ValueError(
+                    f"Flux compile shapes must be divisible by 16; got {height}x{width}."
+                )
 
         # Validate mutual exclusivity
         if self.cfg_parallel_enabled and self.context_parallel_enabled:
@@ -1513,7 +1528,7 @@ class FluxBackboneInferenceConfig(InferenceConfig):
         ]
 
 
-class ModelWrapperFluxBackbone(ModelWrapper):
+class ModelWrapperFluxBackbone(ShapeBucketedInputGenerator, ModelWrapper):
 
     def __init__(
         self,
@@ -1532,16 +1547,19 @@ class ModelWrapperFluxBackbone(ModelWrapper):
         self.cache_image_rotary_emb = False
         self.pos_embed = FluxPosEmbed(theta=10000, axes_dim=(16, 56, 56))
 
-    def input_generator(self) -> List[Tuple[torch.Tensor]]:
+    def example_inputs_for_shape(self, shape) -> Tuple[torch.Tensor, ...]:
+        height, width, _frames = shape
         joint_attention_dim = self.config.joint_attention_dim
         in_channels = self.config.in_channels
         pooled_projection_dim = self.config.pooled_projection_dim
         attention_head_dim = self.config.attention_head_dim
-        num_patches = self.config.height * self.config.width // ((2 * self.config.vae_scale_factor) ** 2)
+        # image_rotary_emb is a per-request HOST-computed input (see forward):
+        # its example must track num_patches per bucket shape.
+        num_patches = int(height) * int(width) // ((2 * self.config.vae_scale_factor) ** 2)
 
         batch_size = 2 if self.config.cfg_parallel_enabled else 1
 
-        model_inputs = (
+        return (
             torch.randn(
                 [batch_size, num_patches, in_channels], dtype=self.config.neuron_config.torch_dtype
             ),
@@ -1552,11 +1570,6 @@ class ModelWrapperFluxBackbone(ModelWrapper):
             if self.config.guidance_embeds else torch.tensor([], dtype=self.config.neuron_config.torch_dtype),
             torch.randn([num_patches + 512, attention_head_dim, 2], dtype=self.config.neuron_config.torch_dtype),
         )
-
-        inputs = [
-            model_inputs,
-        ]
-        return inputs
 
     def get_model_instance(self):
         # Create the model instance

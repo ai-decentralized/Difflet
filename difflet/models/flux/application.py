@@ -49,6 +49,7 @@ from difflet.models.flux.modeling_flux import (
     NeuronFluxBackboneApplication,
 )
 from difflet.models.flux.pipeline import NeuronFluxPipeline
+from diffusers.models.autoencoders.vae import Decoder, DecoderTiny
 from difflet.models.flux.vae.modeling_vae import (
     NeuronVAEDecoderApplication,
     VAEDecoderInferenceConfig,
@@ -105,7 +106,11 @@ def create_flux_config(
     context_parallel_enabled=False,
     cp_mode="gather_kv",
     sp_enabled=False,
+    taef1: bool = False,
+    taef1_path: str | None = None,
+    compile_shapes=None,
 ):
+    shape_extra = {"compile_shapes": compile_shapes} if compile_shapes else {}
     text_encoder_path = os.path.join(model_path, "text_encoder")
     text_encoder_2_path = os.path.join(model_path, "text_encoder_2")
     backbone_path = os.path.join(model_path, "transformer")
@@ -145,6 +150,7 @@ def create_flux_config(
         load_config=load_diffusers_config(backbone_path),
         height=height,
         width=width,
+        **shape_extra,
     )
 
     decoder_neuron_config = NeuronConfig(
@@ -158,6 +164,16 @@ def create_flux_config(
             load_config=load_diffusers_config(vae_decoder_path),
             height=height,
             width=width,
+            **shape_extra,
+        )
+    elif taef1:
+        decoder_config = VAEDecoderInferenceConfig(
+            neuron_config=decoder_neuron_config,
+            load_config=load_diffusers_config(taef1_path or vae_decoder_path),
+            height=height,
+            width=width,
+            model_cls=DecoderTiny,
+            **shape_extra,
         )
     else:
         decoder_config = VAEDecoderInferenceConfig(
@@ -166,6 +182,7 @@ def create_flux_config(
             height=height,
             width=width,
             transformer_in_channels=backbone_config.in_channels,
+            **shape_extra,
         )
 
     setattr(backbone_config, "vae_scale_factor", decoder_config.vae_scale_factor)
@@ -192,6 +209,8 @@ class NeuronFluxApplication(MultiComponentApplication):
         teacache_speedup: Optional[float] = None,
         teacache_calibration=None,
         teacache_calibration_path: Optional[str] = None,
+        taef1: bool = False,
+        taef1_path: Optional[str] = None,
     ):
         super().__init__()
         self.model_path = model_path
@@ -230,9 +249,31 @@ class NeuronFluxApplication(MultiComponentApplication):
             model_path=self.transformer_path,
             config=self.backbone_config,
         )
-        self.pipe.vae.decoder = NeuronVAEDecoderApplication(
-            model_path=self.vae_decoder_path, config=self.decoder_config
-        )
+        # TAEF1: replace the entire VAE with the tiny autoencoder so the
+        # pipeline's decode() path uses the lightweight decoder transparently.
+        if taef1:
+            from diffusers import AutoencoderTiny
+            from difflet.pipeline.path_resolver import resolve_model_path
+            taef1_model_path = taef1_path or vae_decoder_path
+            # AutoencoderTiny.from_pretrained accepts a repo id, but the
+            # compiled decoder application needs a LOCAL snapshot dir —
+            # get_state_dict() only handles local paths (load_hf_model is
+            # unimplemented in this fork). TAEF1 is ~9 MB, so pull everything.
+            taef1_local_path = resolve_model_path(
+                taef1_model_path,
+                allow_patterns=["*.json", "*.safetensors", "*.md", "*.txt"],
+            )
+            self.pipe.vae = AutoencoderTiny.from_pretrained(
+                taef1_model_path, torch_dtype=torch.bfloat16,
+            )
+            self.pipe.vae.decoder = NeuronVAEDecoderApplication(
+                model_path=taef1_local_path, config=self.decoder_config,
+                model_cls=DecoderTiny,
+            )
+        else:
+            self.pipe.vae.decoder = NeuronVAEDecoderApplication(
+                model_path=self.vae_decoder_path, config=self.decoder_config
+            )
 
         # TeaCache fused-A (cclog 85). Mount the probe NEFF when teacache is
         # requested; build the controller when a calibration is provided.

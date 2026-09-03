@@ -94,6 +94,54 @@ def timed(fn: Callable[[], Any], *, warmup: int = 1, iters: int = 5,
 # --------------------------------------------------------------------------- #
 # Metrics container
 # --------------------------------------------------------------------------- #
+class RealLoopStepTimer:
+    """The cross-device per-step rule, in one place.
+
+    Every device folder's ``DiT per-step`` column is defined the same way, and
+    ``benchmark/step_realloop.py`` is where that definition is written down:
+
+        inter-step deltas of a **real generate loop**, **device-synced**,
+        **step 0 excluded**
+
+    "Real generate" is load-bearing: it was adopted precisely to replace an
+    isolated synthetic-input timer that used a different method per model, so
+    its numbers were comparable neither to each other nor to the H100.
+
+    Backends differ in exactly one thing -- what counts as a sync:
+
+    ==========  =======================================================
+    CUDA        ``torch.cuda.synchronize()``
+    Trainium    nothing; the forward returns host tensors, so the
+                post-call timestamp is already a sync point
+    TPU         ``xm.wait_device_ops()``; without it the timestamp
+                records when Python *enqueued* the step, not when the
+                chip finished it
+    ==========  =======================================================
+
+    That last row is why this class exists. The rule was re-implemented in
+    every adapter, and the TPU copy left the sync out -- reasonably, since
+    syncing does cost a lazy backend more than an eager one, but the result was
+    a published per-step figure smaller than the model's own attention. A
+    backend that wants to argue for a different basis should report it
+    *alongside* this one, not instead of it.
+    """
+
+    def __init__(self, sync: Optional[Callable[[], None]] = None):
+        self._sync = sync
+        self.stamps: list[float] = []
+
+    def step(self) -> None:
+        """Call once per denoise step, immediately after that step's DiT eval."""
+        if self._sync is not None:
+            self._sync()
+        self.stamps.append(time.perf_counter())
+
+    def deltas(self) -> list[float]:
+        """Inter-step deltas. Step 0 is excluded: no delta covers it, and on a
+        cold process it carries first-execution compilation."""
+        return [b - a for a, b in zip(self.stamps, self.stamps[1:])]
+
+
 @dataclass
 class OutputInfo:
     shape: Optional[list[int]] = None
@@ -125,6 +173,16 @@ class BenchResult:
     e2e_breakdown: Optional[dict] = None     # per-stage load/compute split of cold e2e
     e2e_warm: Optional[dict] = None          # Stats as dict
     step_latency: Optional[dict] = None      # Stats as dict (per denoise step)
+    step_basis: str = ""                     # how step_latency was measured
+    step_latency_alt: dict[str, Any] = field(default_factory=dict)
+    stage_seconds: dict[str, float] = field(default_factory=dict)
+    # The "natural" pass: the same generate with no per-step instrumentation
+    # sync. step_latency is for comparing devices; these are for knowing what a
+    # real serving loop delivers. On an eager backend the two nearly coincide;
+    # on a lazy one they do not, because the sync serialises tracing against
+    # execution. Only populated by adapters advertising supports_natural_mode.
+    e2e_warm_natural: Optional[dict] = None
+    step_latency_natural: Optional[dict] = None
     throughput: dict[str, float] = field(default_factory=dict)
     peak_device_mem_gb: Optional[float] = None
     output: Optional[dict] = None            # OutputInfo as dict
@@ -143,6 +201,14 @@ class BenchResult:
 # Backend adapter contract
 # --------------------------------------------------------------------------- #
 class BackendAdapter:
+    #: Set True when ``run_generate`` accepts ``sync_steps=False`` and can run
+    #: the denoise loop without a per-step device sync. The harness then
+    #: reports that pass separately as the natural basis. Meaningful on every
+    #: backend -- an eager one loses little to the sync, a lazy one loses a
+    #: lot -- so implementing it everywhere is what would make the real-loop
+    #: numbers comparable across devices too.
+    supports_natural_mode: bool = False
+
     """Contract every backend implements. The harness only ever calls these.
 
     A backend is "compiled" (AOT: Trainium, TensorRT) or "eager" (CUDA/CPU via

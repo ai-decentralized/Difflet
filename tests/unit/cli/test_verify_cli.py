@@ -25,6 +25,7 @@ from verify_cli import (
     MODELS,
     PARALLEL_CONFIGS,
     SP_SUPPORTED,
+    ULYSSES_UNSUPPORTED,
     Status,
     StepResult,
     build_compile_cmd,
@@ -113,6 +114,13 @@ def test_cp_unsupported_models():
     assert CP_UNSUPPORTED == {"ltx_2", "hunyuan_video_15"}
 
 
+def test_ulysses_unsupported_models():
+    # Rule lives in the model attention paths (modeling_hunyuan_video.py,
+    # qwen_image/transformer.py raise on attention_mask under ulysses/ring),
+    # not in difflet.cli.main — pinned here as data.
+    assert ULYSSES_UNSUPPORTED == {"hunyuan_video"}
+
+
 def test_expected_fail_cells():
     assert EXPECTED_FAIL_CELLS == {
         ("hunyuan_video_15", "tp4"),      # scaffold: NotImplementedError
@@ -132,6 +140,7 @@ _EXPECTED_SKIPS = {
     ("ltx_2", "tp2cp2ulysses"): "no-CP",
     ("ltx_2", "tp4sp"): "no-SP",
     ("hunyuan_video", "tp2cfg"): "distilled",
+    ("hunyuan_video", "tp2cp2ulysses"): "no-ulysses",
     ("hunyuan_video_15", "tp2cp2"): "no-CP",
     ("hunyuan_video_15", "tp2cp2ulysses"): "no-CP",
     ("hunyuan_video_15", "tp2cfg"): "distilled",
@@ -151,9 +160,11 @@ def test_plan_cells_counts():
     assert len(cells) == 42
     skipped = [c for c in cells if c.skip_reason]
     runnable = [c for c in cells if not c.skip_reason]
-    # tp2cp2ulysses is a CP config, so it adds the same two no-CP skips as tp2cp2.
-    assert len(skipped) == 10
-    assert len(runnable) == 32
+    # tp2cp2ulysses is a CP config, so it adds the same two no-CP skips as
+    # tp2cp2, plus hunyuan_video's no-ulysses skip (attention_mask); qwen's
+    # tp4sp is runnable since the modeling_qwen SP fork landed (2026-09-02).
+    assert len(skipped) == 11
+    assert len(runnable) == 31
     xfail = {(c.model_key, c.config_key) for c in runnable if c.expected_fail}
     assert xfail == {("hunyuan_video_15", "tp4"), ("hunyuan_video_15", "dp2tp2"),
                      ("hunyuan_video", "tp2cp2"), ("hunyuan_video", "dp2tp2")}

@@ -324,3 +324,97 @@ def test_flux_smoke_runs_real_inference_and_uses_profile_steps(monkeypatch, adap
     assert captured["teacache_enabled"] is adaptive
     assert captured["height"] == profile.height
     assert captured["width"] == profile.width
+
+
+# --- Multi-shape (--shapes) serving: one worker serves the compiled shape set ---
+
+_FLUX_SHAPES = ((512, 512, None), (1024, 1024, None))
+
+
+def _flux_profile(*, shapes=None) -> ServingProfile:
+    return ServingProfile(
+        model_id="black-forest-labs/FLUX.1-dev",
+        model_type="flux",
+        height=1024,
+        width=1024,
+        num_frames=None,
+        parallel=DiffletParallelConfig(tp_degree=4),
+        shapes=shapes,
+    )
+
+
+def test_flux_build_pipeline_forwards_shape_set(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(flux_common, "_torch_bfloat16", lambda: "bfloat16")
+
+    class FakePipeline:
+        @classmethod
+        def from_pretrained(cls, *args, **kwargs):
+            captured.update(kwargs)
+            return object()
+
+    monkeypatch.setattr(
+        "difflet.pipeline.difflet_pipeline.DiffletPipeline",
+        FakePipeline,
+    )
+    profile = _flux_profile(shapes=_FLUX_SHAPES)
+
+    flux_common.build_pipeline(profile.model_id, profile, load=False)
+
+    assert captured["shapes"] == _FLUX_SHAPES
+    assert captured["height"] == 1024 and captured["width"] == 1024
+
+
+def test_flux_compile_plan_identity_covers_the_shape_set(monkeypatch, tmp_path):
+    monkeypatch.setattr(flux_common, "_torch_bfloat16", lambda: "bfloat16")
+    source = ResolvedModelSource(
+        source_kind="hf_snapshot",
+        model_id="black-forest-labs/FLUX.1-dev",
+        requested_revision=None,
+        pinned_model_path=str(tmp_path),
+        resolved_source_id="a" * 40,
+    )
+    single = flux_common.build_compile_plan(source, _flux_profile())[0]
+    multi = flux_common.build_compile_plan(source, _flux_profile(shapes=_FLUX_SHAPES))[0]
+    assert multi.identity != single.identity
+
+    reordered = flux_common.build_compile_plan(
+        source,
+        _flux_profile(shapes=((1024, 1024, None), (512, 512, None), (512, 512, None))),
+    )[0]
+    assert reordered.identity == multi.identity
+
+    # K=1 as an explicit one-member set matches the legacy single-shape form.
+    explicit_single = flux_common.build_compile_plan(
+        source, _flux_profile(shapes=((1024, 1024, None),))
+    )[0]
+    assert explicit_single.identity == single.identity
+
+
+def test_flux_request_validator_enforces_shape_set_membership():
+    validator = object.__new__(FluxServingRequestValidator)
+    validator.runtime = SimpleNamespace(profile=_flux_profile(shapes=_FLUX_SHAPES))
+    validator._tokenizer = lambda *args, **kwargs: SimpleNamespace(
+        input_ids=SimpleNamespace(shape=(1, 10))
+    )
+
+    def _request(height, width):
+        return DiffletGenerateRequest(
+            "request",
+            "black-forest-labs/FLUX.1-dev",
+            "prompt",
+            height,
+            width,
+            28,
+            3.5,
+            0,
+        )
+
+    validator.validate(_request(1024, 1024))
+    validator.validate(_request(512, 512))
+
+    with pytest.raises(DiffletServingError) as exc:
+        validator.validate(_request(768, 768))
+    assert exc.value.code == "profile_mismatch"
+    assert "768x768" in exc.value.message
+    assert "1024x1024" in exc.value.message and "512x512" in exc.value.message

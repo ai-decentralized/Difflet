@@ -16,9 +16,20 @@ def create_wan_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
+    if backend == "tpu":
+        from difflet.models.wan.tpu_application import TpuWanApplication
+
+        return TpuWanApplication(
+            model_path=model_path,
+            parallel=parallel,
+            dtype=dtype,
+            shape=shape,
+            **kwargs,
+        )
+
     if backend != "trainium":
         raise NotImplementedError(
-            f"Wan currently supports only the trainium backend, got {backend!r}"
+            f"Wan supports the trainium and tpu backends, got {backend!r}"
         )
 
     from difflet.models.wan.application import NeuronWanApplication

@@ -12,6 +12,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 @dataclass
@@ -104,6 +105,7 @@ class HunyuanVideoVAEDecoderModel(nn.Module):
             mid_block_add_attention=bool(config.mid_block_add_attention),
         )
         _replace_interpolate_upsamplers(self.decoder)
+        _replace_group_norms_with_fp32(self.decoder)
 
     def forward(self, latents: torch.Tensor) -> torch.Tensor:
         latents = self.post_quant_conv(latents)
@@ -152,6 +154,38 @@ def _repeat_causal_time(x: torch.Tensor, factor: int) -> torch.Tensor:
         frame_slice = x[:, :, frame : frame + 1]
         chunks.extend([frame_slice] * factor)
     return torch.cat(chunks, dim=2)
+
+
+class _Fp32GroupNorm(nn.GroupNorm):
+    """``GroupNorm`` whose reduction runs in fp32.
+
+    The decoder normalizes over group volumes of several million elements
+    (4.5M per group at the 256x256x17 tile). A bf16 accumulator saturates well
+    before that, so the on-device statistics come out wrong by far more than
+    bf16 rounding would explain. Subclassing keeps ``weight``/``bias`` names
+    intact, so checkpoint keys are unchanged.
+    """
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out_dtype = x.dtype
+        weight = self.weight.float() if self.weight is not None else None
+        bias = self.bias.float() if self.bias is not None else None
+        return F.group_norm(x.float(), self.num_groups, weight, bias, self.eps).to(out_dtype)
+
+
+def _replace_group_norms_with_fp32(module: nn.Module) -> None:
+    for name, child in list(module.named_children()):
+        if isinstance(child, nn.GroupNorm) and not isinstance(child, _Fp32GroupNorm):
+            replacement = _Fp32GroupNorm(
+                child.num_groups,
+                child.num_channels,
+                eps=child.eps,
+                affine=child.affine,
+            )
+            replacement.load_state_dict(child.state_dict())
+            setattr(module, name, replacement)
+        else:
+            _replace_group_norms_with_fp32(child)
 
 
 def _replace_interpolate_upsamplers(module: nn.Module) -> None:

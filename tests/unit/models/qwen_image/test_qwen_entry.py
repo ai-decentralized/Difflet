@@ -21,8 +21,10 @@ def _force_cpu_backend():
         os.environ["DIFFLET_BACKEND"] = prev
 
 
-def test_entry_rejects_non_trainium_backend(tmp_path):
-    with pytest.raises(NotImplementedError, match="trainium backend"):
+def test_entry_rejects_an_unsupported_backend(tmp_path):
+    # Qwen-Image gained the tpu backend in plan Phase 4; everything else must
+    # still be refused rather than silently falling through to Trainium.
+    with pytest.raises(NotImplementedError, match="trainium and tpu"):
         create_qwen_image_application(
             model_path=str(tmp_path),
             parallel=DiffletParallelConfig(tp_degree=1),
@@ -30,6 +32,22 @@ def test_entry_rejects_non_trainium_backend(tmp_path):
             shape={"height": 64, "width": 64},
             backend="cpu",
         )
+
+
+def test_entry_builds_the_tpu_application(tmp_path):
+    # No transformer/config.json under tmp_path, so the app builds with no
+    # components — enough to prove the tpu branch is wired without needing a
+    # checkpoint or a TPU.
+    app = create_qwen_image_application(
+        model_path=str(tmp_path),
+        parallel=DiffletParallelConfig(tp_degree=1),
+        dtype="bf16",
+        shape={"height": 64, "width": 64},
+        backend="tpu",
+    )
+    assert type(app).__name__ == "TpuQwenImageApplication"
+    assert app.transformer is None
+    assert app.has_compiled_artifacts(str(tmp_path)) is False
 
 
 def test_entry_rejects_cfg_parallel(tmp_path):

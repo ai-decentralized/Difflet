@@ -111,6 +111,55 @@ def render(r: dict) -> str:
     if r.get("throughput"):
         a("**Throughput:** " + ", ".join(f"{v:.3f} {k}" for k, v in r["throughput"].items()))
         a("")
+    basis = r.get("step_basis")
+    alt = r.get("step_latency_alt") or {}
+    if basis or alt:
+        # State the basis explicitly. Cross-device comparison only holds when
+        # every row was measured the same way, and on a lazy backend the same
+        # loop yields several very different numbers.
+        if basis:
+            a(f"Per-step basis: **{basis}** — device-synced inter-step deltas of a "
+              "real generate loop, step 0 excluded, the same rule the other "
+              "device folders use (`benchmark/harness.py::RealLoopStepTimer`).")
+            a("")
+        if alt:
+            a("| same loop, other bases | per step |")
+            a("|---|---|")
+            if "throughput" in alt:
+                a(f"| throughput (denoise wall clock / steps) | {alt['throughput']*1000:.1f} ms |")
+            if "enqueue_mean" in alt:
+                a(f"| enqueue rate (unsynced deltas — **not device time**) | "
+                  f"{alt['enqueue_mean']*1000:.1f} ms |")
+            a("")
+
+    nat = r.get("step_latency_natural")
+    nat_e2e = r.get("e2e_warm_natural")
+    if nat or nat_e2e:
+        a("### Natural basis (no per-step sync)")
+        a("")
+        a("The same generate with no per-step device sync — what a real serving "
+          "loop delivers, as opposed to what the cross-device rule measures. "
+          "Both are real; the sync serialises work a lazy backend would "
+          "otherwise overlap, so the gap is large on XLA and small on an eager "
+          "backend.")
+        a("")
+        a("| metric | mean | median | p90 | min | n |")
+        a("|---|---|---|---|---|---|")
+        if nat:
+            a(_stats_row("per denoise step (natural)", nat))
+        if nat_e2e:
+            a(_stats_row("end-to-end warm (natural)", nat_e2e))
+        a("")
+
+    st = r.get("stage_seconds") or {}
+    if st:
+        a("## Stage breakdown (one warm generate)")
+        a("")
+        a("| stage | seconds |")
+        a("|---|---|")
+        for name, value in st.items():
+            a(f"| {name} | {value:.2f} |")
+        a("")
 
     # compile breakdown
     cb = r.get("compile_breakdown")

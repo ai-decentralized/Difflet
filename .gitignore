@@ -11,7 +11,8 @@ dist/
 .venv/
 venv/
 env/
-
+docs/
+.history/
 # Compile cache (Trainium AOT artifacts can be huge)
 .difflet_compile_cache/
 .difflet-cache/
@@ -39,6 +40,9 @@ AGENTS.md
 
 # Design specs (local working docs, not committed)
 .specs/
+
+# Sample renders / parity captures from local runs (large binaries)
+generated_samples/
 
 # Coverage artifacts
 .coverage

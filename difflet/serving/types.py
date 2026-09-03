@@ -20,7 +20,7 @@ OutputModality = Literal["image", "video"]
 ServingPlacement = Literal["host", "neuron"]
 StageRole = Literal["prompt_encoder", "denoiser", "decoder", "pipeline"]
 StageKind = Literal["extracted", "opaque_pipeline"]
-StagePlacement = Literal["host", "neuron", "hybrid"]
+StagePlacement = Literal["host", "neuron", "hybrid", "tpu"]
 
 
 @dataclass(frozen=True)
@@ -116,6 +116,16 @@ class StageRuntimeSpec:
                 raise ValueError(
                     f"host stage {self.stage_id!r} must not claim a Neuron "
                     "allocation, topology, or compiled artifact"
+                )
+            return
+        if self.placement == "tpu":
+            # On an accelerator like a neuron stage, but without a compiled
+            # artifact: the TPU backend executes the graph eagerly. Requiring
+            # one here would be requiring a file that is never produced, and
+            # loosening the neuron rule instead would drop a real invariant.
+            if self.allocation_id is None or self.topology is None:
+                raise ValueError(
+                    f"tpu stage {self.stage_id!r} requires allocation and topology"
                 )
             return
         if self.placement not in {"neuron", "hybrid"}:
@@ -245,6 +255,11 @@ class ServingProfile:
     output_fps: int | None = None
     host_vae: bool = False
     clip_placement: ServingPlacement | None = None
+    # Bucketed serving: the full shape set this profile serves from ONE
+    # compiled artifact / one resident weight copy. None = single-shape
+    # profile (height/width/num_frames above). By convention height/width/
+    # num_frames equal the largest (priority) shape of the set.
+    shapes: tuple[tuple[int, int, int | None], ...] | None = None
 
     @property
     def world_size(self) -> int:
@@ -256,6 +271,22 @@ class ServingProfile:
 
     def shape_dict(self) -> dict[str, int | None]:
         return {"height": self.height, "width": self.width, "num_frames": self.num_frames}
+
+    def canonical_shapes(self) -> tuple[tuple[int, int, int | None], ...]:
+        """Deduped largest-first shape set (1-entry for single-shape profiles)."""
+        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+        if self.shapes:
+            return canonicalize_shapes(self.shapes)
+        return ((self.height, self.width, self.num_frames),)
+
+    def shape_set(self) -> frozenset[tuple[int, int, int | None]]:
+        return frozenset(self.canonical_shapes())
+
+    def shape_dicts(self) -> list[dict[str, int | None]]:
+        return [
+            {"height": h, "width": w, "num_frames": f} for h, w, f in self.canonical_shapes()
+        ]
 
 
 @dataclass(frozen=True)

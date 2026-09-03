@@ -53,7 +53,15 @@ PROMPTS = [
 ]
 NUM_STEPS = 28
 HEIGHT = WIDTH = 1024
-TARGET_SKIP = 0.4  # accumulator threshold tuned to ~this skip fraction
+# TARGET_SKIP: fraction of denoising steps to skip (0.0 = none, 0.5 = half).
+# At 0.4 → 1.67x theoretical speedup; at 0.5 → 2.0x.
+# Tune upward until final_cosine drops below 0.98.
+TARGET_SKIP = 0.5
+# ONLINE_DELTA_ALPHA: if > 0, enables cclog 91 probe-free online-delta mode.
+# The controller skips a step iff the previous full step's output rel-L1 delta
+# was below alpha * baseline. No per-model calibration needed.
+# Set > 0 to bypass signal-gate + poly-fit; set 0 to use calibration-based mode.
+ONLINE_DELTA_ALPHA = 0.0
 SEED = 0
 
 
@@ -122,7 +130,20 @@ def main() -> int:
 
     shape_label = f"{HEIGHT}x{WIDTH}"
     warmup, cooldown = 3, 3
-    if pearson >= 0.5:
+    # cclog 91 online-delta mode: probe-free, calibration-free.
+    # Uses the real noise_pred trajectory to detect flat steps — no per-model
+    # calibration JSON needed. Set ONLINE_DELTA_ALPHA > 0 at the top of this file.
+    if ONLINE_DELTA_ALPHA > 0:
+        mode = "online_delta"
+        calib = TeaCacheCalibration(
+            model="flux", shape_label=shape_label, num_steps=NUM_STEPS,
+            poly_coef=(0.0,), threshold=0.0, warmup_steps=warmup, cooldown_steps=cooldown,
+            online_delta_alpha=float(ONLINE_DELTA_ALPHA),
+            target_speedup=1.0 / (1.0 - TARGET_SKIP),
+            fit_r2=0.0, n_samples=0,
+        )
+        print(f"[flux-tc] mode=online_delta alpha={ONLINE_DELTA_ALPHA} (no calibration needed)", flush=True)
+    elif pearson >= 0.5:
         mode = "controller"
         coef = np.polyfit(np.array(xs), np.array(ys), 4)  # highest-degree first
         coef_asc = tuple(float(c) for c in coef[::-1])

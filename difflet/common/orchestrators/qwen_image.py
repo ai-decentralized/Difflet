@@ -154,30 +154,34 @@ def _compile_identity(
         },
         "vae": {"num_frames": 1},
     }[stage]
-    return CompileArtifactIdentity.from_cache_inputs(
-        {
-            "compile_contract_version": 2,
-            "model_type": MODEL_TYPE,
-            "model_id": source.model_id,
-            "resolved_source_id": source.resolved_source_id,
-            "component_id": stage,
-            # sp changes the DiT graph (the modeling_qwen fork) and the staged
-            # dir name, so it must be part of the generate-stage identity or
-            # two profiles differing only in --sp would collide (hunyuan's
-            # identity carries the same field; wan goes through CacheSpec).
-            "sp_enabled": bool(profile.parallel.sp_enabled) if stage == "generate" else False,
-            "tp_degree": tp_degree,
-            "cp_degree": cp_degree,
-            "cp_mode": "gather_kv" if stage == "vae" else profile.parallel.cp_mode,
-            "world_size": profile.world_size,
-            "height": profile.height,
-            "width": profile.width,
-            "dtype": profile.dtype,
-            "virtual_core_size": VIRTUAL_CORE_SIZE,
-            "stage_inputs": stage_inputs,
-            "toolchain": toolchain_versions(),
-        }
-    )
+    # v3: shape-dependent stages carry the canonical shape SET (K=1 uses the
+    # same list form); the text encoder is shape-invariant, so its identity
+    # carries no shape at all and one artifact serves every shape set.
+    # sp changes the DiT graph (the modeling_qwen fork), so it must be part of
+    # the generate-stage identity or two profiles differing only in --sp would
+    # collide (hunyuan's identity carries the same field).
+    inputs: dict[str, object] = {
+        "compile_contract_version": 3,
+        "model_type": MODEL_TYPE,
+        "model_id": source.model_id,
+        "resolved_source_id": source.resolved_source_id,
+        "component_id": stage,
+        "sp_enabled": bool(profile.parallel.sp_enabled) if stage == "generate" else False,
+        "tp_degree": tp_degree,
+        "cp_degree": cp_degree,
+        "cp_mode": "gather_kv" if stage == "vae" else profile.parallel.cp_mode,
+        "world_size": profile.world_size,
+        "dtype": profile.dtype,
+        "virtual_core_size": VIRTUAL_CORE_SIZE,
+        "stage_inputs": stage_inputs,
+        "toolchain": toolchain_versions(),
+    }
+    if stage != "text":
+        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+        profile_shapes = profile.shapes or ((profile.height, profile.width, None),)
+        inputs["shapes"] = [list(shape) for shape in canonicalize_shapes(profile_shapes)]
+    return CompileArtifactIdentity.from_cache_inputs(inputs)
 
 
 def _requires_probe(profile: ServingProfile, stage: str) -> bool:
@@ -192,6 +196,12 @@ def _validate_payload_files(path: Path, *, stage: str, requires_probe: bool) -> 
 
 
 def namespace_from_profile(profile: ServingProfile, *, stage_mode: str) -> Namespace:
+    # CSV form so _shared_cli_args forwards --shapes to the stage subprocess.
+    shapes_csv = (
+        ",".join(f"{h}x{w}" for h, w, _ in profile.canonical_shapes())
+        if profile.shapes
+        else None
+    )
     return Namespace(
         model_id=profile.model_id,
         revision=profile.revision,
@@ -201,6 +211,7 @@ def namespace_from_profile(profile: ServingProfile, *, stage_mode: str) -> Names
         height=profile.height,
         width=profile.width,
         num_frames=None,
+        shapes=shapes_csv,
         cache_dir=profile.cache_dir,
         force=stage_mode == "compile",
         prompt=None,

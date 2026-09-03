@@ -1,0 +1,119 @@
+{
+  "model_id": "Qwen/Qwen-Image",
+  "model_type": "qwen_image",
+  "backend": "tpu",
+  "device": "Cloud TPU v5litepod-4 / 4 chips / topology 2x2 / 16 GB HBM per chip",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "compile_seconds": 0.0,
+  "compile_breakdown": {
+    "eager": 0.0
+  },
+  "load_seconds": 8.012742861999868,
+  "e2e_cold_seconds": 80.5655543720004,
+  "e2e_breakdown": null,
+  "e2e_warm": {
+    "n": 2,
+    "mean": 13.518202239000857,
+    "median": 13.518202239000857,
+    "std": 0.2703394770005616,
+    "p50": 13.247862762000295,
+    "p90": 13.788541716001419,
+    "min": 13.247862762000295,
+    "max": 13.788541716001419,
+    "samples": [
+      13.788541716001419,
+      13.247862762000295
+    ]
+  },
+  "step_latency": {
+    "n": 19,
+    "mean": 0.5023355577367942,
+    "median": 0.4990238059999683,
+    "std": 0.013233919970441559,
+    "p50": 0.4990238059999683,
+    "p90": 0.5008601949994045,
+    "min": 0.49797564500113367,
+    "max": 0.558300311999119,
+    "samples": [
+      0.558300311999119,
+      0.5023765860005369,
+      0.4998989949999668,
+      0.49865669700011495,
+      0.4979790050001611,
+      0.49873719599963806,
+      0.49952893599947856,
+      0.5004440060001798,
+      0.499367386000813,
+      0.5008601949994045,
+      0.4984594460001972,
+      0.4996673360001296,
+      0.49915528599922254,
+      0.49877348600057303,
+      0.49816194499908306,
+      0.498445086999709,
+      0.49797564500113367,
+      0.4990238059999683,
+      0.49856424599965976
+    ]
+  },
+  "step_basis": "synced",
+  "step_latency_alt": {
+    "throughput": 0.505891839349988
+  },
+  "stage_seconds": {
+    "text_encode": 1.913731058999474,
+    "denoise": 10.11783678699976,
+    "vae_decode": 1.2152180970006157
+  },
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "steps/s": 1.9907012047989725
+  },
+  "peak_device_mem_gb": 9.618131160736084,
+  "output": {
+    "shape": [
+      1,
+      4096,
+      64
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": -1.455435037612915,
+    "max": 1.2626093626022339,
+    "mean": 0.013640274293720722,
+    "std": 0.47430700063705444,
+    "note": "packed latents; 1066634 byte PNG after decode"
+  },
+  "toolchain": {
+    "torch": "2.9.0+cpu",
+    "torch-xla": "2.9.0",
+    "libtpu": "0.0.20",
+    "diffusers": "0.38.0",
+    "transformers": "5.15.1",
+    "accelerator_type": "v5litepod-4"
+  },
+  "config_label": "tp=4, bf16, joint attention via attention_cte",
+  "status": "ok",
+  "notes": [
+    "The config_label comes from models.py::MATRIX and describes the TRAINIUM recipe \u2014 'attention_cte' is a Neuron kernel and is NOT what ran here; the TPU backend uses scaled_dot_product_attention. The tp=4/cp=1 sharding IS accurate: the DiT is split across 4 v5e chips, one worker process per chip. Attention uses the Pallas fused kernel (torch_xla.experimental.custom_kernel) above 32M score elements and scaled_dot_product_attention below it. compile_seconds=0 means no AOT artifact was built or reused, not that compilation is free \u2014 XLA compiles on each process's first execution, inside e2e_cold. step_latency is on a throughput basis (denoise wall clock / steps): unsynced inter-step deltas under lazy XLA measure the enqueue rate, not device time."
+  ],
+  "timestamp": "2026-08-24 02:17 UTC",
+  "config_slug": "qwen_image",
+  "device_slug": "v5e",
+  "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 4.0,
+  "output_kind": "image"
+}

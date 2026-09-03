@@ -199,66 +199,48 @@ def test_hunyuan_video_vae_decoder_inference_config_shapes(tmp_path):
     assert inputs[0][0].dtype == torch.bfloat16
 
 
-def test_hunyuan_video_vae_segment_specs_materialize_norm_conv_boundaries(tmp_path):
-    from difflet.backends.trainium.core.config import NeuronConfig
+def test_hunyuan_video_vae_decoder_group_norms_run_in_fp32():
+    """Every decoder GroupNorm must reduce in fp32.
+
+    bf16 statistics over the decoder's multi-million-element groups are wrong
+    on device by far more than bf16 rounding; this is what replaced the old
+    16-NEFF norm/conv split.
+    """
+    import torch.nn as nn
+
+    from difflet.models.hunyuan_video.vae import modeling_vae as mv
+
+    model = mv.HunyuanVideoVAEDecoderModel(mv.HunyuanVideoVAEDecoderConfig())
+
+    group_norms = [m for m in model.modules() if isinstance(m, nn.GroupNorm)]
+    assert group_norms, "decoder should contain GroupNorm layers"
+    assert all(isinstance(m, mv._Fp32GroupNorm) for m in group_norms)
+
+    # The swap must not disturb checkpoint keys.
+    original = mv._replace_group_norms_with_fp32
+    mv._replace_group_norms_with_fp32 = lambda module: None
+    try:
+        stock = mv.HunyuanVideoVAEDecoderModel(mv.HunyuanVideoVAEDecoderConfig())
+    finally:
+        mv._replace_group_norms_with_fp32 = original
+    assert list(model.state_dict()) == list(stock.state_dict())
+
+    # Nor may it mutate torch globally, the way the Flux VAE's patch does.
+    assert not issubclass(torch.nn.GroupNorm, mv._Fp32GroupNorm)
+
+    norm = mv._Fp32GroupNorm(2, 4).to(torch.bfloat16)
+    out = norm(torch.randn(1, 4, 2, 2, dtype=torch.bfloat16))
+    assert out.dtype == torch.bfloat16
+
+
+def test_hunyuan_video_vae_decoder_compiles_as_single_neff():
+    """Drift guard: the segmented decoder path is gone."""
     from difflet.backends.trainium.hunyuan_video.vae import (
         NeuronHunyuanVideoVAEDecoderApplication,
-        HunyuanVideoVAEDecoderInferenceConfig,
     )
-    from difflet.utils.diffusers_adapter import load_diffusers_config
 
-    vae_dir = tmp_path / "vae"
-    vae_dir.mkdir()
-    (vae_dir / "config.json").write_text(
-        json.dumps(
-            {
-                "_class_name": "AutoencoderKLHunyuanVideo",
-                "out_channels": 3,
-                "latent_channels": 16,
-                "up_block_types": ["HunyuanVideoUpBlock3D"] * 4,
-                "block_out_channels": [128, 256, 512, 512],
-                "layers_per_block": 2,
-                "act_fn": "silu",
-                "norm_num_groups": 32,
-                "scaling_factor": 0.476986,
-                "spatial_compression_ratio": 8,
-                "temporal_compression_ratio": 4,
-                "mid_block_add_attention": True,
-            }
-        )
-    )
-    cfg = HunyuanVideoVAEDecoderInferenceConfig(
-        neuron_config=NeuronConfig(
-            batch_size=1,
-            tp_degree=1,
-            world_size=1,
-            torch_dtype=torch.bfloat16,
-            skip_sharding=True,
-        ),
-        load_config=load_diffusers_config(vae_dir),
-        height=320,
-        width=512,
-        num_frames=61,
-    )
-    app = object.__new__(NeuronHunyuanVideoVAEDecoderApplication)
-    app.config = cfg
-
-    specs = app._segment_specs()
-    names = [spec.name for spec in specs]
-
-    assert names[0] == "body_up2"
-    assert names[-2:] == ["final_norm_act", "final_conv_out"]
-    assert "up3_r0_norm1_act" in names
-    assert "up3_r0_conv1" in names
-    assert "up3_r0_shortcut" in names
-    assert "up3_r2_conv2" in names
-    assert len(specs) == 16
-
-    by_name = {spec.name: spec for spec in specs}
-    assert by_name["body_up2"].input_shape == (1, 16, 5, 32, 32)
-    assert by_name["up3_r0_norm1_act"].input_shape == (1, 256, 17, 256, 256)
-    assert by_name["up3_r1_norm1_act"].input_shape == (1, 128, 17, 256, 256)
-    assert by_name["final_conv_out"].input_shape == (1, 128, 17, 256, 256)
+    for removed in ("_segment_specs", "_run_segment", "component_specs"):
+        assert not hasattr(NeuronHunyuanVideoVAEDecoderApplication, removed)
 
 
 def test_hunyuan_video_vae_host_tiling_reconstructs_v0_shape():

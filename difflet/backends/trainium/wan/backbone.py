@@ -8,6 +8,12 @@ from typing import List, Tuple
 import torch
 
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
+from difflet.backends.trainium.core.bucketing import (
+    CompileShape,
+    ShapeBucketedInputGenerator,
+    canonicalize_shapes,
+    resolve_compile_shapes,
+)
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.models.wan.modeling_wan import WanTransformer3DModel
@@ -32,6 +38,13 @@ class WanBackboneInferenceConfig(InferenceConfig):
             self.cfg_parallel_enabled = False
         if not hasattr(self, "sp_enabled"):
             self.sp_enabled = False
+        # Bucket shape set. NOTE: for the Wan backbone, the frames component of
+        # each compile shape is the LATENT frame count (matching the semantics
+        # of config.num_frames, which the application layer pre-converts).
+        shapes = getattr(self, "compile_shapes", None)
+        if shapes:
+            self.compile_shapes = canonicalize_shapes(shapes)
+            self.height, self.width, self.num_frames = self.compile_shapes[0]
 
     def get_required_attributes(self) -> List[str]:
         return [
@@ -76,12 +89,21 @@ class WanBackboneInferenceConfig(InferenceConfig):
                 "Wan T2V spike does not support I2V/added-kv config fields: "
                 + ", ".join(f"{name}={value!r}" for name, value in active.items())
             )
-        if self.height % 8 != 0 or self.width % 8 != 0:
-            raise ValueError("Wan compile height/width must be divisible by 8.")
+        for height, width, num_frames in resolve_compile_shapes(self):
+            if num_frames is None:
+                raise ValueError("Wan compile shapes must include a frame count.")
+            if height % 8 != 0 or width % 8 != 0:
+                raise ValueError(
+                    f"Wan compile height/width must be divisible by 8; got {height}x{width}."
+                )
 
 
-class ModelWrapperWanBackbone(ModelWrapper):
-    """ModelBuilder wrapper for Wan DiT compile inputs."""
+class ModelWrapperWanBackbone(ShapeBucketedInputGenerator, ModelWrapper):
+    """ModelBuilder wrapper for Wan DiT compile inputs.
+
+    One bucket per entry in ``config.compile_shapes`` (largest first); shape
+    frames are LATENT frames. Only the latent tensor varies per bucket.
+    """
 
     def __init__(
         self,
@@ -102,30 +124,28 @@ class ModelWrapperWanBackbone(ModelWrapper):
         )
         self.bucket_config = None
 
-    def input_generator(self) -> List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    def example_inputs_for_shape(
+        self, shape: CompileShape
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        height, width, latent_frames = shape
         batch_size = int(getattr(self.config.neuron_config, "batch_size", 1))
         dtype = self.config.neuron_config.torch_dtype
-        latent_height = int(self.config.height) // 8
-        latent_width = int(self.config.width) // 8
-        num_frames = int(self.config.num_frames)
         text_seq_len = int(getattr(self.config, "text_seq_len", 512))
 
-        return [
-            (
-                torch.randn(
-                    [
-                        batch_size,
-                        self.config.in_channels,
-                        num_frames,
-                        latent_height,
-                        latent_width,
-                    ],
-                    dtype=dtype,
-                ),
-                torch.randn([batch_size], dtype=dtype),
-                torch.randn([batch_size, text_seq_len, self.config.text_dim], dtype=dtype),
-            )
-        ]
+        return (
+            torch.randn(
+                [
+                    batch_size,
+                    self.config.in_channels,
+                    int(latent_frames),
+                    int(height) // 8,
+                    int(width) // 8,
+                ],
+                dtype=dtype,
+            ),
+            torch.randn([batch_size], dtype=dtype),
+            torch.randn([batch_size, text_seq_len, self.config.text_dim], dtype=dtype),
+        )
 
     def get_model_instance(self):
         def _create_model():

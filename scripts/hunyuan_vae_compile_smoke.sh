@@ -52,7 +52,7 @@ print("[hunyuan-vae] tp_degree = 1")
 
 app = NeuronHunyuanVideoApplication(
     model_path=model_dir,
-    parallel=DiffletParallelConfig(tp_degree=world_size, cp_enabled=False),
+    parallel=DiffletParallelConfig(tp_degree=world_size, cp_degree=1),
     dtype=torch.bfloat16,
     shape={"height": height, "width": width, "num_frames": frames},
     enable_transformer=False,

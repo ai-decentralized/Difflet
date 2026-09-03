@@ -154,9 +154,10 @@ def test_staged_compiled_dir_marks_sp(module_path, cls_name, model_id, stage):
     without = orch_cls(_staged_args(model_id))._stage_compiled_dir(
         stage, _staged_args(model_id, sp_enabled=False)
     )
-    assert "sp" in with_sp.name
-    assert "sp" not in without.name
+    # Hash-dir scheme (v5): sp is part of the hashed identity, so the two
+    # configs must land in different artifact dirs (no name marker anymore).
     assert with_sp != without
+    assert with_sp.parent == without.parent
 
 
 @pytest.mark.parametrize(

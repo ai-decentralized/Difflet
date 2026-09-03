@@ -506,6 +506,27 @@ def _engine_draining() -> DiffletServingError:
     return DiffletServingError(503, "engine_draining", "engine is draining", "server_error")
 
 
+def _replica_count(runtime: ResolvedRuntimeBundle) -> int:
+    """How many worker processes this backend needs for one resident model.
+
+    Trainium's runtime protocol forbids one-process-per-device, so it is
+    always 1 and the code below stays on its original single-process path.
+    TPU is the opposite: the DiT is sharded across chips and every rank must
+    execute the identical collective sequence, so the model needs one process
+    per device and a command has to reach all of them. That difference is
+    exactly what ``supports_torchrun_mpmd`` encodes.
+    """
+    from difflet.backends import get_backend
+
+    try:
+        capabilities = get_backend().capabilities
+    except Exception:  # noqa: BLE001 - never fail startup on capability lookup
+        return 1
+    if not getattr(capabilities, "supports_torchrun_mpmd", False):
+        return 1
+    return max(1, int(runtime.profile.world_size))
+
+
 class _ResidentWorkerProcess:
     def __init__(
         self,
@@ -522,12 +543,19 @@ class _ResidentWorkerProcess:
         self.heartbeat_interval = float(heartbeat_interval)
         self._admission_snapshot = admission_snapshot
         self._ctx = mp.get_context("spawn")
+        # One command/cancel queue PER replica: a single shared queue would be
+        # drained by whichever process reached it first, so three of four ranks
+        # would miss the command and the first collective would hang forever.
+        self._cmd_qs: list[mp.Queue] = []
+        self._cancel_qs: list[mp.Queue] = []
         self._cmd_q: mp.Queue | None = None
         self._cancel_q: mp.Queue | None = None
         self._reply_q: mp.Queue | None = None
         self._status_recv: Connection | None = None
         self._status_send: Connection | None = None
         self._process: mp_process.BaseProcess | None = None
+        self._replicas: list[mp_process.BaseProcess] = []
+        self._replica_count = _replica_count(runtime)
         self._status_stop: threading.Event | None = None
         self._status_thread: threading.Thread | None = None
         self._inflight_request_id: str | None = None
@@ -542,35 +570,56 @@ class _ResidentWorkerProcess:
             self.startup_timeout,
         )
         self.terminate()
-        self._cmd_q = self._ctx.Queue()
-        self._cancel_q = self._ctx.Queue()
+        replicas = self._replica_count
+        self._cmd_qs = [self._ctx.Queue() for _ in range(replicas)]
+        self._cancel_qs = [self._ctx.Queue() for _ in range(replicas)]
         self._reply_q = self._ctx.Queue()
+        # Rank 0's queues stay reachable under the original names so the
+        # single-replica path and its tests are untouched.
+        self._cmd_q = self._cmd_qs[0]
+        self._cancel_q = self._cancel_qs[0]
         self._status_recv, self._status_send = self._ctx.Pipe(duplex=False)
         self._start_status_consumer()
-        self._process = self._ctx.Process(
-            target=_worker_main,
-            args=(
-                self.orchestrator_factory,
-                self.runtime,
-                self._cmd_q,
-                self._cancel_q,
-                self._reply_q,
-                self._status_send,
-                self.heartbeat_interval,
-            ),
-            daemon=True,
-        )
+        self._replicas = [
+            self._ctx.Process(
+                target=_worker_main,
+                args=(
+                    self.orchestrator_factory,
+                    self.runtime,
+                    self._cmd_qs[rank],
+                    self._cancel_qs[rank],
+                    self._reply_q,
+                    self._status_send if rank == 0 else None,
+                    self.heartbeat_interval,
+                    rank,
+                    replicas,
+                ),
+                daemon=True,
+            )
+            for rank in range(replicas)
+        ]
+        self._process = self._replicas[0]
         try:
-            self._process.start()
+            for process in self._replicas:
+                process.start()
             self._status_send.close()
             self._status_send = None
-            reply = self._get_reply(timeout=self.startup_timeout)
-            if reply.get("type") != "ready":
-                self.mark_error()
-                raise _error_from_reply(reply)
+            # EVERY replica must report ready. Proceeding when one is still
+            # loading would deadlock on the first collective rather than fail.
+            pending = set(range(replicas))
+            while pending:
+                reply = self._get_reply(timeout=self.startup_timeout)
+                if reply.get("type") != "ready":
+                    self.mark_error()
+                    raise _error_from_reply(reply)
+                pending.discard(int(reply.get("rank", 0)))
             self.ready = True
             self.healthy = True
-            logger.info("worker_process_ready model=%s", self.runtime.profile.model_id)
+            logger.info(
+                "worker_process_ready model=%s replicas=%d",
+                self.runtime.profile.model_id,
+                replicas,
+            )
         except BaseException:
             self.terminate()
             raise
@@ -594,16 +643,21 @@ class _ResidentWorkerProcess:
                 503, "engine_unavailable", "worker is not started", "server_error"
             )
         self._inflight_request_id = request.request_id
-        cmd_q.put(
-            {
-                "type": "generate",
-                "request": request,
-                "deadline": deadline_monotonic,
-            }
-        )
+        # Broadcast: every replica runs the identical denoise loop in lockstep
+        # because the model is sharded across them. Only rank 0 replies.
+        command = {
+            "type": "generate",
+            "request": request,
+            "deadline": deadline_monotonic,
+        }
+        for queue_ in self._cmd_qs or [cmd_q]:
+            queue_.put(command)
         while True:
             timeout = max(min(deadline_monotonic - time.monotonic(), 0.1), 0.01)
-            if not process.is_alive():
+            # Any dead replica breaks the group: the survivors would block in a
+            # collective waiting for a rank that is gone, so the whole worker
+            # is unavailable, not just that process.
+            if not self._all_replicas_alive(process):
                 self.mark_error()
                 raise DiffletServingError(
                     503, "engine_unavailable", "worker exited", "server_error"
@@ -630,8 +684,11 @@ class _ResidentWorkerProcess:
 
     def cancel_inflight(self) -> None:
         logger.info("worker_process_cancel_inflight request_id=%s", self._inflight_request_id)
-        if self._cancel_q is not None and self._inflight_request_id is not None:
-            self._cancel_q.put({"type": "cancel", "request_id": self._inflight_request_id})
+        if self._inflight_request_id is None:
+            return
+        cancel = {"type": "cancel", "request_id": self._inflight_request_id}
+        for queue_ in self._cancel_qs or ([self._cancel_q] if self._cancel_q else []):
+            queue_.put(cancel)
 
     def shutdown(self) -> None:
         logger.info(
@@ -639,14 +696,40 @@ class _ResidentWorkerProcess:
             self.runtime.profile.model_id,
             self._process is not None and self._process.is_alive(),
         )
-        if self._cmd_q is not None and self._process is not None and self._process.is_alive():
-            self._cmd_q.put({"type": "shutdown"})
-            self._process.join(timeout=5)
+        live = [p for p in self._replicas if p.is_alive()]
+        if self._cmd_qs and live:
+            for queue_ in self._cmd_qs:
+                queue_.put({"type": "shutdown"})
+            for process in live:
+                process.join(timeout=5)
         self.terminate()
+
+    def _all_replicas_alive(self, fallback) -> bool:
+        """Every replica must be alive; one dead rank hangs the rest.
+
+        ``fallback`` covers tests that install a process double directly
+        without going through ``start()``.
+        """
+        if self._replicas:
+            return all(process.is_alive() for process in self._replicas)
+        return fallback is not None and fallback.is_alive()
 
     def terminate(self) -> None:
         logger.info("worker_process_terminate model=%s", self.runtime.profile.model_id)
-        process = self._process
+        # _replicas is the normal path; _process alone covers a double
+        # installed directly by a test, which must still be torn down.
+        targets = list(self._replicas) or ([self._process] if self._process else [])
+        for process in targets:
+            self._terminate_one(process)
+        self._replicas = []
+        self._process = None
+        self._stop_status_consumer()
+        self._close_queues()
+        self._clear_inflight()
+        self.ready = False
+        self.healthy = False
+
+    def _terminate_one(self, process) -> None:
         if process is not None and process.is_alive():
             process.terminate()
             process.join(timeout=10)
@@ -665,12 +748,6 @@ class _ResidentWorkerProcess:
                 process.join()
             if process.is_alive():  # defensive for non-standard process doubles
                 raise RuntimeError("resident worker did not terminate")
-        self._process = None
-        self._stop_status_consumer()
-        self._close_queues()
-        self._clear_inflight()
-        self.ready = False
-        self.healthy = False
 
     def mark_error(self) -> None:
         self.ready = False
@@ -702,7 +779,16 @@ class _ResidentWorkerProcess:
             self._inflight_request_id = None
 
     def _refresh_process_state(self) -> None:
-        if self._process is not None and self.ready and not self._process.is_alive():
+        # "No process yet" is not "process died": a worker that was never
+        # started must keep whatever readiness the caller set, or an engine
+        # waiting on its run lock reports engine_unavailable instead of the
+        # timeout it should.
+        if not self.ready:
+            return
+        if self._replicas:
+            if not all(process.is_alive() for process in self._replicas):
+                self.mark_error()
+        elif self._process is not None and not self._process.is_alive():
             self.mark_error()
 
     def _start_status_consumer(self) -> None:
@@ -731,6 +817,13 @@ class _ResidentWorkerProcess:
         self._status_thread = None
 
     def _close_queues(self) -> None:
+        for channel in [*self._cmd_qs, *self._cancel_qs]:
+            with suppress(Exception):
+                channel.close()
+            with suppress(Exception):
+                channel.join_thread()
+        self._cmd_qs = []
+        self._cancel_qs = []
         for name in ("_cmd_q", "_cancel_q", "_reply_q"):
             channel = getattr(self, name)
             if channel is None:
@@ -825,18 +918,101 @@ class _ResidentWorkerProcess:
                 last_summary = now
 
 
+class _NullConnection:
+    """Stand-in for the heartbeat pipe on non-primary replicas."""
+
+    def send(self, _payload) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class _RankedReplyQueue:
+    """Reply channel that only the primary replica actually writes to.
+
+    Non-primary replicas still call ``put`` all over the worker loop; dropping
+    their messages here keeps that code rank-agnostic. ``ready`` is the one
+    exception: the engine must hear from every replica before it may dispatch
+    work, or the first collective deadlocks.
+    """
+
+    def __init__(self, inner, rank: int, *, primary: bool) -> None:
+        self._inner = inner
+        self._rank = rank
+        self._primary = primary
+
+    def put(self, payload) -> None:
+        if isinstance(payload, dict) and payload.get("type") == "ready":
+            self._inner.put({**payload, "rank": self._rank})
+            return
+        if self._primary:
+            self._inner.put(payload)
+
+
+def _initialize_replica_runtime(replica_rank: int, replica_count: int) -> None:
+    """Give this process its own accelerator before anything else touches it.
+
+    This is what ``torch_xla.launch`` does internally. It cannot be used here:
+    it owns the process lifecycle and blocks, while a resident worker has to
+    stay alive on a command queue across many requests.
+
+    Also divides the CPU threads. PyTorch defaults to one thread per core *per
+    process*, so N replicas oversubscribe the host N-fold — measured as a
+    host-side text encode taking 22 s in the worker against 0.43 s standalone,
+    a 51x penalty from 448 threads fighting over 112 cores.
+    """
+    import os
+
+    import torch
+    from torch_xla._internal import pjrt
+
+    pjrt.initialize_multiprocess(replica_rank, replica_count)
+
+    cores = os.cpu_count() or replica_count
+    share = max(1, cores // max(1, replica_count))
+    torch.set_num_threads(share)
+    logger.info(
+        "worker_replica_threads rank=%d/%d threads=%d of %d cores",
+        replica_rank, replica_count, share, cores,
+    )
+
+
 def _worker_main(
     orchestrator_factory: str,
     runtime: ResolvedRuntimeBundle,
     cmd_q: mp.Queue,
     cancel_q: mp.Queue,
     reply_q: mp.Queue,
-    status_conn: Connection,
+    status_conn: Connection | None,
     heartbeat_interval: float,
+    replica_rank: int = 0,
+    replica_count: int = 1,
 ) -> None:
     stage_engine: StagePipelineEngine | None = None
+    # Replicas > 0 are silent: they execute the identical work so the sharded
+    # model's collectives complete, but only rank 0 owns the reply channel and
+    # the heartbeat pipe. Two writers on one reply queue would race, and the
+    # engine would read whichever landed first.
+    is_primary = replica_rank == 0
+    # Published so a stage runner can tell whether it is the replica whose
+    # reply is kept. Stages that are pure compute must still run everywhere --
+    # the sharded model's collectives need every rank -- but a stage with a
+    # side effect outside the process, such as writing media to the request's
+    # storage, must not run four times. Set for every backend: on Trainium
+    # there is a single worker, so it reads 0 and nothing changes.
+    os.environ["DIFFLET_REPLICA_RANK"] = str(replica_rank)
+    os.environ["DIFFLET_REPLICA_COUNT"] = str(replica_count)
+    reply_q = _RankedReplyQueue(reply_q, replica_rank, primary=is_primary)
+    if status_conn is None:
+        status_conn = _NullConnection()
     try:
-        logger.info("worker_main start model=%s", runtime.profile.model_id)
+        logger.info(
+            "worker_main start model=%s rank=%d/%d",
+            runtime.profile.model_id, replica_rank, replica_count,
+        )
+        if replica_count > 1:
+            _initialize_replica_runtime(replica_rank, replica_count)
         _apply_worker_runtime_environment(runtime)
     except BaseException as exc:
         logger.exception("worker_main environment_apply_failed model=%s", runtime.profile.model_id)
@@ -859,13 +1035,21 @@ def _worker_main(
         model_id=runtime.profile.model_id,
         profile_identity=runtime.runtime_plan.profile_identity,
     )
-    heartbeat_thread = threading.Thread(
-        target=_heartbeat_loop,
-        args=(status_conn, heartbeat_state, heartbeat_stop, heartbeat_interval),
-        name="difflet-worker-heartbeat",
-        daemon=True,
+    # Only the primary replica has a status pipe, and only its heartbeat is
+    # watched. Non-primary replicas skip the thread outright rather than being
+    # handed a fake connection — the loop calls fileno() on it.
+    heartbeat_thread = (
+        threading.Thread(
+            target=_heartbeat_loop,
+            args=(status_conn, heartbeat_state, heartbeat_stop, heartbeat_interval),
+            name="difflet-worker-heartbeat",
+            daemon=True,
+        )
+        if is_primary
+        else None
     )
-    heartbeat_thread.start()
+    if heartbeat_thread is not None:
+        heartbeat_thread.start()
     try:
         logger.info("worker_main loading stage_adapter=%s", orchestrator_factory)
         factory = _load_factory(orchestrator_factory)
@@ -935,7 +1119,8 @@ def _worker_main(
             with suppress(BaseException):
                 asyncio.run(stage_engine.shutdown())
         heartbeat_stop.set()
-        heartbeat_thread.join(timeout=1.0)
+        if heartbeat_thread is not None:
+            heartbeat_thread.join(timeout=1.0)
         logger.info("worker_main exit model=%s", runtime.profile.model_id)
         status_conn.close()
 

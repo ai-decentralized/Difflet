@@ -29,6 +29,13 @@ def create_flux_application(
 
     height = int(shape.get("height") or 1024)
     width = int(shape.get("width") or 1024)
+    taef1 = bool(kwargs.pop("taef1", False))
+    taef1_path = kwargs.pop("taef1_path", None)
+    compile_shapes = kwargs.pop("shapes", None)
+    if compile_shapes:
+        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+        compile_shapes = canonicalize_shapes(compile_shapes)
     world_size = get_flux_parallelism_config(
         backbone_tp_degree=parallel.tp_degree,
         cp_degree=parallel.cp_degree,
@@ -45,11 +52,16 @@ def create_flux_application(
         context_parallel_enabled=parallel.cp_degree > 1,
         cp_mode=parallel.cp_mode,
         sp_enabled=getattr(parallel, "sp_enabled", False),
+        taef1=taef1,
+        taef1_path=taef1_path,
+        compile_shapes=compile_shapes,
     )
     return NeuronFluxApplication(
         model_path,
         *configs,
         height=height,
         width=width,
+        taef1=taef1,
+        taef1_path=taef1_path,
         **kwargs,
     )

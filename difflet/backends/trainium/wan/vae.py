@@ -8,6 +8,12 @@ from typing import List, Tuple
 import torch
 
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
+from difflet.backends.trainium.core.bucketing import (
+    CompileShape,
+    ShapeBucketedInputGenerator,
+    canonicalize_shapes,
+    resolve_compile_shapes,
+)
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.models.wan.vae.modeling_vae import WanVAEDecoderConfig, WanVAEDecoderModel
@@ -26,6 +32,12 @@ class WanVAEDecoderInferenceConfig(InferenceConfig):
             self.scale_factor_temporal = 4
         if not hasattr(self, "scale_factor_spatial"):
             self.scale_factor_spatial = 8
+        # Bucket shape set (frames component = PIXEL frames, matching
+        # config.num_frames semantics for the Wan VAE decoder).
+        shapes = getattr(self, "compile_shapes", None)
+        if shapes:
+            self.compile_shapes = canonicalize_shapes(shapes)
+            self.height, self.width, self.num_frames = self.compile_shapes[0]
 
     def get_required_attributes(self) -> List[str]:
         return [
@@ -55,10 +67,15 @@ class WanVAEDecoderInferenceConfig(InferenceConfig):
 
     def validate_config(self):
         super().validate_config()
-        if int(self.height) % int(self.scale_factor_spatial) != 0:
-            raise ValueError("Wan VAE height must be divisible by spatial scale factor.")
-        if int(self.width) % int(self.scale_factor_spatial) != 0:
-            raise ValueError("Wan VAE width must be divisible by spatial scale factor.")
+        for height, width, _num_frames in resolve_compile_shapes(self):
+            if int(height) % int(self.scale_factor_spatial) != 0:
+                raise ValueError(
+                    f"Wan VAE height must be divisible by spatial scale factor; got {height}."
+                )
+            if int(width) % int(self.scale_factor_spatial) != 0:
+                raise ValueError(
+                    f"Wan VAE width must be divisible by spatial scale factor; got {width}."
+                )
         if int(self.scale_factor_temporal) != 4:
             raise NotImplementedError("Wan VAE spike expects temporal scale factor 4.")
         if getattr(self, "is_residual", False):
@@ -67,8 +84,12 @@ class WanVAEDecoderInferenceConfig(InferenceConfig):
             raise NotImplementedError("Wan VAE spike does not support patchified VAE.")
 
 
-class ModelWrapperWanVAEDecoder(ModelWrapper):
-    """ModelBuilder wrapper for Wan VAE decoder compile inputs."""
+class ModelWrapperWanVAEDecoder(ShapeBucketedInputGenerator, ModelWrapper):
+    """ModelBuilder wrapper for Wan VAE decoder compile inputs.
+
+    Decodes the full latent in one shot, so each compile shape genuinely
+    becomes its own bucket NEFF (unlike the tiled HunyuanVideo decoder).
+    """
 
     def __init__(
         self,
@@ -89,23 +110,22 @@ class ModelWrapperWanVAEDecoder(ModelWrapper):
         )
         self.bucket_config = None
 
-    def input_generator(self) -> List[Tuple[torch.Tensor]]:
+    def example_inputs_for_shape(self, shape: CompileShape) -> Tuple[torch.Tensor, ...]:
+        height, width, num_frames = shape
         batch_size = int(getattr(self.config.neuron_config, "batch_size", 1))
         dtype = self.config.neuron_config.torch_dtype
-        return [
-            (
-                torch.randn(
-                    [
-                        batch_size,
-                        int(self.config.z_dim),
-                        int(self.config.latent_frames),
-                        int(self.config.latent_height),
-                        int(self.config.latent_width),
-                    ],
-                    dtype=dtype,
-                ),
-            )
-        ]
+        return (
+            torch.randn(
+                [
+                    batch_size,
+                    int(self.config.z_dim),
+                    (int(num_frames) - 1) // int(self.config.scale_factor_temporal) + 1,
+                    int(height) // int(self.config.scale_factor_spatial),
+                    int(width) // int(self.config.scale_factor_spatial),
+                ],
+                dtype=dtype,
+            ),
+        )
 
     def get_model_instance(self):
         def _create_model():

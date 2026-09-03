@@ -262,9 +262,9 @@ def test_compile_identities_bind_commit_toolchain_components_and_denoiser_shape(
     assert llama["sequence_length"] == 351
     assert llama["tensor_capture"] == "layers.29"
     assert llama["virtual_core_size"] == 2
-    assert denoiser["height"] == 64
-    assert denoiser["width"] == 96
-    assert denoiser["num_frames"] == 5
+    # Contract v2: denoiser identity carries the canonical shape set.
+    assert denoiser["shapes"] == [[64, 96, 5]]
+    assert denoiser["compile_contract_version"] == 2
     assert denoiser["text_seq_len"] == 256
     assert str(tmp_path) not in first[0].identity.canonical_cache_inputs_json.decode()
 

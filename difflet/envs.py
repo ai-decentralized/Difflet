@@ -71,6 +71,23 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: os.path.expanduser(
         os.environ.get("DIFFLET_COMPILE_CACHE", "~/.cache/difflet")),
 
+    # Hardlink pre-sharded weights into a shape-independent store under
+    # ``<DIFFLET_COMPILE_CACHE>/_shared_weights/`` so that every compiled shape
+    # of the same (model, dtype, tp_degree, rank-marker) reuses one copy on
+    # disk. Sharded weights do not depend on height/width/num_frames — only the
+    # NEFF does — so a second resolution otherwise duplicates tens of GB.
+    # Set to "0" to fall back to a private copy per compiled artifact.
+    "DIFFLET_SHARE_WEIGHTS":
+    lambda: os.environ.get("DIFFLET_SHARE_WEIGHTS", "1") not in ("0", "false", "False"),
+
+    # Where the shared weight store lives. Defaults to
+    # ``<DIFFLET_COMPILE_CACHE>/_shared_weights``. Note that the ``--cache-dir``
+    # CLI flag does *not* move it — hardlinks only need a common filesystem, and
+    # a store on another device degrades to a private copy rather than failing.
+    # Set this when the compiled artifacts live on a different mount.
+    "DIFFLET_SHARED_WEIGHTS_DIR":
+    lambda: os.environ.get("DIFFLET_SHARED_WEIGHTS_DIR"),
+
     # ================== Distributed framework ==================
     # These are typically set by torchrun / launcher / test fixtures. Difflet
     # reads them; it does not set them in production paths.

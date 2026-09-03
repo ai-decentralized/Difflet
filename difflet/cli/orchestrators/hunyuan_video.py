@@ -15,7 +15,15 @@ import sys
 from pathlib import Path
 
 from difflet.cli import runner
-from difflet.cli.orchestrators.base import ModelOrchestrator, cp_mode_token
+from difflet.cli.orchestrators.base import (
+    ModelOrchestrator,
+    canonical_shapes_list,
+    has_valid_stage_manifest,
+    hashed_stage_dir,
+    require_request_shape_in_set,
+    stage_toolchain_versions,
+    write_stage_manifest,
+)
 
 _HF_MODEL_ID = "hunyuanvideo-community/HunyuanVideo"
 _MODEL_TYPE = "hunyuan_video"
@@ -57,6 +65,12 @@ def _save_video(tensor: "torch.Tensor", output_path: str) -> bool:
     return True
 
 
+def _require_request_shape_in_set(args: argparse.Namespace):
+    return require_request_shape_in_set(
+        args, default_shape=(320, 512, 61), model_tag="hunyuan_video"
+    )
+
+
 class HunyuanVideoOrchestrator(ModelOrchestrator):
 
     def download(self) -> None:
@@ -77,6 +91,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
                          num_cores=full_cores, virtual_core_size=_VIRTUAL_CORE_SIZE, cli_args=shared)
 
     def generate(self) -> None:
+        _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(self.args.work_dir or
                         Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME)
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -134,10 +149,12 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         app = NeuronClipApplication(model_path=clip_path, config=config)
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
+            self._finish_stage_compile("clip", args, compiled_dir)
             return
 
         from difflet.cli.dp import stage_loop
 
+        self._require_stage_artifact("clip", args, compiled_dir)
         app.load(str(compiled_dir))
         tok = CLIPTokenizer.from_pretrained(str(Path(model_dir) / "tokenizer_2"))
         for req in stage_loop.claim_requests(args):
@@ -195,10 +212,12 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         app = NeuronLlamaForCausalLM(enc_path, config)
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
+            self._finish_stage_compile("llama", args, compiled_dir)
             return
 
         from difflet.cli.dp import stage_loop
 
+        self._require_stage_artifact("llama", args, compiled_dir)
         app.load(str(compiled_dir))
         tok = AutoTokenizer.from_pretrained(str(Path(model_dir) / "tokenizer"))
         for req in stage_loop.claimed_requests(args):
@@ -241,6 +260,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
 
         h, w, f = args.height or 320, args.width or 512, args.num_frames or 61
         latent_frames = (f - 1) // 4 + 1
+        compile_shapes = _require_request_shape_in_set(args)
 
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
@@ -251,16 +271,19 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         app = NeuronHunyuanVideoApplication(
             model_path=model_dir, parallel=parallel, dtype=torch.bfloat16,
             shape={"height": h, "width": w, "num_frames": f},
+            shapes=compile_shapes,
             text_seq_len=_TEXT_SEQ_LEN, enable_vae_decoder=True,
         )
         app.teacache_probe = None
 
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
+            self._finish_stage_compile("generate", args, compiled_dir)
             return
 
         from difflet.cli.dp import stage_loop
 
+        self._require_stage_artifact("generate", args, compiled_dir)
         app.load(str(compiled_dir), skip_warmup=True)
         for req in stage_loop.claimed_requests(args):
             with stage_loop.request_scope(args, req, final=True):
@@ -305,20 +328,55 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
 
     # ------------------------------------------------------------ helpers
 
+    def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
+        """Identity for one stage artifact (hashed into the dir name; recorded
+        verbatim in the dir's manifest.json)."""
+        if stage == "clip":
+            return {
+                "component": "hunyuan_video_clip",
+                "model_id": _HF_MODEL_ID,
+                "dtype": "bfloat16",
+                "toolchain": stage_toolchain_versions(),
+            }
+        if stage == "llama":
+            return {
+                "component": "hunyuan_video_llama",
+                "model_id": _HF_MODEL_ID,
+                "tp": args.tp_degree or 4,
+                "seq_len": _TEXT_SEQ_LEN + _LLAMA_CROP_START,
+                "dtype": "bfloat16",
+                "toolchain": stage_toolchain_versions(),
+            }
+        if stage == "generate":
+            return {
+                "component": "hunyuan_video_dit",
+                "model_id": _HF_MODEL_ID,
+                "tp": args.tp_degree or 4,
+                "cp": args.cp_degree or 1,
+                "cp_mode": str(getattr(args, "cp_mode", "gather_kv") or "gather_kv"),
+                "sp": bool(getattr(args, "sp_enabled", False)),
+                "dtype": "bfloat16",
+                "text_seq_len": _TEXT_SEQ_LEN,
+                "shapes": canonical_shapes_list(args, (320, 512, 61)),
+                "toolchain": stage_toolchain_versions(),
+            }
+        raise ValueError(f"unknown stage {stage!r}")
+
     def _stage_compiled_dir(self, stage: str, args: argparse.Namespace) -> Path:
         base = Path(args.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
-        tp = args.tp_degree or 4
-        cp = args.cp_degree or 1
-        sp = "sp" if getattr(args, "sp_enabled", False) else ""
-        cpm = cp_mode_token(args)
-        h, w, f = args.height or 320, args.width or 512, args.num_frames or 61
-        if stage == "clip":
-            return base / "hunyuan_video_clip"
-        if stage == "llama":
-            return base / f"hunyuan_video_llama_seq{_TEXT_SEQ_LEN + _LLAMA_CROP_START}"
-        if stage == "generate":
-            return base / f"hunyuan_video_dit_tp{tp}cp{cp}{cpm}{sp}_h{h}w{w}f{f}"
-        raise ValueError(f"unknown stage {stage!r}")
+        inputs = self._stage_cache_inputs(stage, args)
+        return hashed_stage_dir(base, str(inputs["component"]), inputs)
+
+    def _finish_stage_compile(self, stage: str, args: argparse.Namespace, compiled_dir: Path) -> None:
+        write_stage_manifest(compiled_dir, self._stage_cache_inputs(stage, args))
+
+    def _require_stage_artifact(self, stage: str, args: argparse.Namespace, compiled_dir: Path) -> None:
+        if not has_valid_stage_manifest(compiled_dir, self._stage_cache_inputs(stage, args)):
+            raise SystemExit(
+                f"[hunyuan_video] no valid compiled artifact for stage {stage!r} at "
+                f"{compiled_dir} (manifest missing or configuration changed); run "
+                "`difflet compile` with the same flags first."
+            )
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
         a = self.args
@@ -335,6 +393,8 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             "--seed", str(getattr(a, "seed", 42)),
             "--stage-mode", stage_mode,
         ]
+        if getattr(a, "shapes", None):
+            parts += ["--shapes", str(a.shapes)]
         if getattr(a, "sp_enabled", False):
             parts.append("--sp")
         if getattr(a, "prompt", None):

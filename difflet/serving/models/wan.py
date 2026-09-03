@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, replace
@@ -88,6 +89,14 @@ class WanFinalPayload(StagePayload):
     output: FileBackedGenerateOutput
 
 
+def _backend_is_tpu() -> bool:
+    try:
+        from difflet.backends.registry import current_backend
+    except Exception:  # noqa: BLE001 - registry is optional on old installs
+        return False
+    return current_backend() == "tpu"
+
+
 class WanServingArtifactPreparer:
     model_id = _HF_MODEL_ID
     model_type = _MODEL_TYPE
@@ -111,6 +120,22 @@ class WanServingArtifactPreparer:
             download_policy=download_policy,
             allow_patterns=entry.download_patterns,
         )
+        if _backend_is_tpu():
+            # No compile phase: the TPU stages run eagerly, so there are no
+            # artifacts to build, publish or validate. Empty spec/binding sets
+            # keep ResolvedRuntimeBundle's "every required spec has a binding"
+            # invariant true rather than special-casing it. Mirrors the
+            # Qwen-Image orchestrator.
+            print("[difflet serve] tpu backend: eager stages, no compile artifacts")
+            pipeline = _pipeline_definition(profile)
+            return ResolvedRuntimeBundle(
+                profile=profile,
+                source=source,
+                pipeline_definition=pipeline,
+                runtime_plan=_runtime_plan(profile, pipeline, ()),
+                compile_specs=(),
+                artifacts=ArtifactSet(()),
+            )
         specs = _compile_specs(source, profile)
         manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
         bindings = tuple(
@@ -155,14 +180,22 @@ class WanServingRequestValidator:
             raise profile_mismatch("request model does not match the loaded Wan profile")
         if request.output_format != "mp4":
             raise invalid_extra_body("Wan serving only supports MP4 output")
-        if (
-            request.height != profile.height
-            or request.width != profile.width
-            or request.video is None
-            or request.video.num_frames != profile.num_frames
-            or request.video.fps != profile.output_fps
-        ):
+        if request.video is None or request.video.fps != profile.output_fps:
             raise profile_mismatch("request video shape does not match Wan serving profile")
+        # Strict membership in the compiled bucket set: the NxD router only
+        # accepts exactly-compiled shapes, so anything else is rejected here
+        # (with the allowed set) instead of surfacing a runtime ValueError.
+        requested = (request.height, request.width, request.video.num_frames)
+        if requested not in profile.shape_set():
+            allowed = [
+                "x".join(str(d) for d in shape if d is not None)
+                for shape in profile.canonical_shapes()
+            ]
+            raise profile_mismatch(
+                "request video shape "
+                f"{'x'.join(str(d) for d in requested if d is not None)} is not in the "
+                f"Wan serving profile's compiled shape set {allowed}"
+            )
         validate_guidance_scale(request, maximum=_MAX_GUIDANCE_SCALE)
         if request.video.guidance_scale_2 is not None:
             raise invalid_extra_body(
@@ -265,6 +298,26 @@ class WanDenoiserStageRunner:
         return None
 
 
+def _is_primary_replica() -> bool:
+    """Whether this process is the replica whose reply the engine keeps.
+
+    Pure-compute stages run on every replica because the sharded model's
+    collectives need them all. This decode does not: the VAE is on the host and
+    issues no collective, and it *writes media into the request's storage*.
+    Running it four times means three replicas produce output nobody reads,
+    into staging files the completed request has already torn down -- measured
+    as three FileNotFoundError tracebacks per request, and three redundant
+    21 s host decodes competing for the same CPU.
+    """
+    return int(os.environ.get("DIFFLET_REPLICA_RANK", "0")) == 0
+
+
+#: Returned by the replicas whose reply is dropped. Deliberately not a
+#: plausible descriptor: if it ever escaped, an empty path and a zero size fail
+#: loudly rather than serving a file that is not there.
+_DISCARDED_OUTPUT_PATH = ""
+
+
 class WanHostDecoderStageRunner:
     def __init__(self, adapter: "WanServingStageAdapter") -> None:
         self.adapter = adapter
@@ -277,6 +330,25 @@ class WanHostDecoderStageRunner:
 
         started = time.monotonic()
         invocation.context.cancellation.throw_if_cancelled()
+        if not _is_primary_replica():
+            request = invocation.request
+            assert request.video is not None
+            return stage_result(
+                WanFinalPayload(
+                    FileBackedGenerateOutput(
+                        path=_DISCARDED_OUTPUT_PATH,
+                        mime_type="video/mp4",
+                        output_format="mp4",
+                        size_bytes=0,
+                        width=request.width,
+                        height=request.height,
+                        num_frames=request.video.num_frames,
+                        fps=float(request.video.fps),
+                        duration_s=0.0,
+                    )
+                ),
+                started_monotonic=started,
+            )
         vae = self.adapter._require_vae()
         latents = invocation.input.latents.detach().to(device="cpu", dtype=torch.float32)
         mean = torch.tensor(vae.config.latents_mean).view(1, int(vae.config.z_dim), 1, 1, 1)
@@ -361,10 +433,12 @@ class WanServingStageAdapter:
         runtime: ResolvedRuntimeBundle,
     ) -> OrderedDict[str, ErasedStageRunner]:
         _validate_profile(runtime.profile)
+        tpu = _backend_is_tpu()
         manager = ImmutableArtifactManager(
             runtime.profile.cache_dir or Path.home() / ".cache" / "difflet"
         )
-        for binding in runtime.artifacts.bindings:
+        # Nothing was compiled on TPU, so there is nothing to validate.
+        for binding in (() if tpu else runtime.artifacts.bindings):
             spec = runtime.require_compile_spec(binding.artifact_id)
             manager.validate_binding(
                 binding,
@@ -372,32 +446,45 @@ class WanServingStageAdapter:
                     runtime.source, runtime.profile, spec, path
                 ),
             )
-        binding = runtime.artifacts.require("generation")
         application = _build_application(runtime.source, runtime.profile)
-        application.load(
-            str(binding.path),
-            start_rank_id=0,
-            local_ranks_size=runtime.profile.world_size,
-            skip_warmup=True,
-        )
+        if tpu:
+            application.load_eager()
+        else:
+            binding = runtime.artifacts.require("generation")
+            # Warm every compiled bucket at startup (one forward per shape via the
+            # application's warmup loop) so the first request at ANY profile shape
+            # sees steady-state latency. Single-shape profiles keep the old
+            # behavior of skipping warmup (the startup smoke covers their one NEFF).
+            application.load(
+                str(binding.path),
+                start_rank_id=0,
+                local_ranks_size=runtime.profile.world_size,
+                skip_warmup=not runtime.profile.shapes,
+            )
         self.application = application
-        if runtime.profile.host_vae:
+        # The TPU VAE decode is host-only: AutoencoderKLWan raises an
+        # unsupported-negative-index error under torch_xla. Not a memory
+        # limit -- the DiT leaves ~7.6 GB free per chip.
+        if runtime.profile.host_vae or tpu:
             self.vae = _load_host_vae(runtime.source.pinned_model_path)
         else:
             decoder_binding = runtime.artifacts.require("decoder")
             vae_app = _build_neuron_vae(runtime.source, runtime.profile)
+            # The Wan VAE decoder genuinely has one bucket per shape (unlike
+            # HunyuanVideo's tile-fixed decoder), so multi-shape profiles warm
+            # it the same way as the backbone.
             vae_app.load(
                 str(decoder_binding.path),
                 start_rank_id=0,
                 local_ranks_size=runtime.profile.world_size,
-                skip_warmup=True,
+                skip_warmup=not runtime.profile.shapes,
             )
             self.vae_app = vae_app
         self.runtime = runtime
         self.profile = runtime.profile
         decoder_runner = (
             WanHostDecoderStageRunner(self)
-            if runtime.profile.host_vae
+            if (runtime.profile.host_vae or tpu)
             else WanNeuronDecoderStageRunner(self)
         )
         return OrderedDict(
@@ -466,6 +553,15 @@ class WanServingStageAdapter:
     def validate_smoke_output(self, output: FileBackedGenerateOutput) -> None:
         if self.profile is None or self._smoke is None:
             raise RuntimeError("Wan serving profile is not loaded")
+        if not _is_primary_replica():
+            # This replica deliberately produced no file (see
+            # WanHostDecoderStageRunner), so there is nothing to validate. The
+            # smoke still ran everywhere: load, prompt encode and denoise are
+            # collective work and every rank had to reach them.
+            if self._smoke is not None:
+                self._smoke.cleanup()
+                self._smoke = None
+            return
         try:
             validate_smoke_output(
                 output,
@@ -516,17 +612,26 @@ def _validate_profile(profile: ServingProfile) -> None:
     if profile.dtype.lower().removeprefix("torch.") not in {"bf16", "bfloat16"}:
         raise ValueError("Wan resident serving requires bfloat16")
     spatial_multiple = _VAE_SPATIAL_SCALE * _PATCH_SIZE
-    for value, name in ((profile.height, "height"), (profile.width, "width")):
-        if type(value) is not int or value <= 0 or value % spatial_multiple:
+    for height, width, num_frames in profile.canonical_shapes():
+        for value, name in ((height, "height"), (width, "width")):
+            if type(value) is not int or value <= 0 or value % spatial_multiple:
+                raise ValueError(
+                    f"Wan serving {name} must be a positive integer divisible by "
+                    f"{spatial_multiple}"
+                )
+        if type(num_frames) is not int or num_frames <= 0:
+            raise ValueError("Wan serving num_frames must be a positive integer")
+        if (num_frames - 1) % _VAE_TEMPORAL_SCALE:
             raise ValueError(
-                f"Wan serving {name} must be a positive integer divisible by {spatial_multiple}"
+                "Wan serving num_frames must equal 4n+1 for exact causal VAE reconstruction"
             )
-    if type(profile.num_frames) is not int or profile.num_frames <= 0:
-        raise ValueError("Wan serving num_frames must be a positive integer")
-    if (profile.num_frames - 1) % _VAE_TEMPORAL_SCALE:
-        raise ValueError(
-            "Wan serving num_frames must equal 4n+1 for exact causal VAE reconstruction"
-        )
+    if profile.shapes:
+        largest = profile.canonical_shapes()[0]
+        if (profile.height, profile.width, profile.num_frames) != largest:
+            raise ValueError(
+                "Wan serving profile height/width/num_frames must equal the "
+                "largest shape of the compiled shape set"
+            )
     if profile.output_fps != _FPS:
         raise ValueError(f"Wan video profile requires {_FPS} FPS")
     parallel = profile.parallel
@@ -557,6 +662,7 @@ def _compile_spec(
         height=profile.height,
         width=profile.width,
         num_frames=profile.num_frames,
+        shapes=profile.shapes,
         revision=source.resolved_source_id,
         application_kwargs=_application_kwargs(),
     )
@@ -579,16 +685,20 @@ def _compile_specs(
     generation = _compile_spec(source, profile)
     if profile.host_vae:
         return (generation,)
+    # v2: the decoder identity carries the canonical shape SET (K=1 uses the
+    # same list form) instead of a single height/width/num_frames.
+    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+
+    profile_shapes = profile.shapes or ((profile.height, profile.width, profile.num_frames),)
+    shapes_list = [list(shape) for shape in canonicalize_shapes(profile_shapes)]
     decoder_identity = CompileArtifactIdentity.from_cache_inputs(
         {
-            "compile_contract_version": 1,
+            "compile_contract_version": 2,
             "component_id": "decoder",
             "model_type": _MODEL_TYPE,
             "model_id": source.model_id,
             "resolved_source_id": source.resolved_source_id,
-            "height": profile.height,
-            "width": profile.width,
-            "num_frames": profile.num_frames,
+            "shapes": shapes_list,
             "dtype": profile.dtype,
             "component_tp_degree": 1,
             "component_world_size": profile.world_size,
@@ -618,6 +728,18 @@ def _application_kwargs() -> dict[str, Any]:
 
 
 def _build_application(source: ResolvedModelSource, profile: ServingProfile):
+    if _backend_is_tpu():
+        from difflet.models.wan.entry import create_wan_application
+
+        return create_wan_application(
+            model_path=source.pinned_model_path,
+            parallel=profile.parallel,
+            dtype=_torch_bfloat16(),
+            shape=profile.shape_dict(),
+            backend="tpu",
+            **_application_kwargs(),
+        )
+
     from difflet.models.wan.application import NeuronWanApplication
 
     return NeuronWanApplication(
@@ -625,6 +747,7 @@ def _build_application(source: ResolvedModelSource, profile: ServingProfile):
         parallel=profile.parallel,
         dtype=_torch_bfloat16(),
         shape=profile.shape_dict(),
+        shapes=profile.canonical_shapes() if profile.shapes else None,
         **_application_kwargs(),
     )
 
@@ -684,7 +807,13 @@ def _runtime_plan(
     if isinstance(specs, DiffletCompileSpec):
         specs = (specs,)
     by_component = {spec.component_id: spec for spec in specs}
-    generation = by_component["generation"]
+    # No specs means the TPU backend, which runs eagerly: there is no compiled
+    # artifact to name, and the profile identity has nothing to hash. Mirrors
+    # the Qwen-Image orchestrator, which carries artifact_id=None and
+    # placement="tpu" through the same structure rather than branching the
+    # whole plan.
+    tpu = not specs
+    generation = by_component.get("generation")
     environment, allocation = resident_environment(profile, allocation_id="wan-resident")
     topology = ParallelTopology(
         tp_degree=profile.parallel.tp_degree,
@@ -694,7 +823,9 @@ def _runtime_plan(
     return RuntimePlan(
         mode="resident",
         profile_identity=(
-            generation.identity.digest
+            ""
+            if tpu
+            else generation.identity.digest
             if profile.host_vae
             else combined_profile_identity(
                 generation.identity.digest,
@@ -709,13 +840,15 @@ def _runtime_plan(
                 stage_id="prompt_encoder",
                 allocation_id=allocation.allocation_id,
                 topology=topology,
-                artifact_id=generation.artifact_id,
+                artifact_id=None if tpu else generation.artifact_id,
+                placement="tpu" if tpu else "neuron",
             ),
             StageRuntimeSpec(
                 stage_id="denoiser",
                 allocation_id=allocation.allocation_id,
                 topology=topology,
-                artifact_id=generation.artifact_id,
+                artifact_id=None if tpu else generation.artifact_id,
+                placement="tpu" if tpu else "neuron",
             ),
             (
                 StageRuntimeSpec(
@@ -725,7 +858,7 @@ def _runtime_plan(
                     artifact_id=None,
                     placement="host",
                 )
-                if profile.host_vae
+                if (profile.host_vae or tpu)
                 else StageRuntimeSpec(
                     stage_id="decoder",
                     allocation_id=allocation.allocation_id,
@@ -782,6 +915,8 @@ def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
         height=profile.height,
         width=profile.width,
         num_frames=int(profile.num_frames),
+        # PIXEL frames per shape; the config derives per-bucket latents itself.
+        compile_shapes=profile.canonical_shapes() if profile.shapes else None,
     )
     decoder = NeuronWanVAEDecoderApplication(
         model_path=vae_path,

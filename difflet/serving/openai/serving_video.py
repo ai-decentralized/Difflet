@@ -256,8 +256,6 @@ def normalize_video_request(
     height = explicit_height if explicit_height is not None else size_height
     width = profile_width if width is None else width
     height = profile_height if height is None else height
-    if (width, height) != (profile_width, profile_height):
-        raise profile_mismatch("request width and height do not match serving profile")
 
     requested_fps = _optional_positive_int(values, "fps")
     fps = profile_fps if requested_fps is None else requested_fps
@@ -278,8 +276,25 @@ def normalize_video_request(
         if explicit_frames is not None
         else derived_frames if derived_frames is not None else profile_frames
     )
-    if num_frames != profile_frames:
-        raise profile_mismatch("request num_frames does not match serving profile")
+    # Multi-shape profiles serve every compiled bucket shape from one resident
+    # worker; the request (h, w, frames) must be a member of that set. For
+    # single-shape profiles the set has exactly one entry, preserving the old
+    # exact-match behavior. (Profile doubles without the helper degrade to the
+    # single-shape set.)
+    if hasattr(profile, "shape_set"):
+        allowed_shapes = profile.shape_set()
+        allowed_display = [
+            "x".join(str(dim) for dim in shape if dim is not None)
+            for shape in profile.canonical_shapes()
+        ]
+    else:
+        allowed_shapes = {(profile_height, profile_width, profile_frames)}
+        allowed_display = [f"{profile_height}x{profile_width}x{profile_frames}"]
+    if (height, width, num_frames) not in allowed_shapes:
+        raise profile_mismatch(
+            f"request shape {height}x{width}x{num_frames} is not in the serving "
+            f"profile's compiled shape set {allowed_display}"
+        )
 
     steps = _optional_bounded_int(
         values,
