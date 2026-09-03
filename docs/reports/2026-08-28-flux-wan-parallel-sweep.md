@@ -85,6 +85,12 @@
 下纯属开销；CP 只有在序列长到 KV 通信占比下降时才可能转正（两模型当前分辨率都不
 够长）。cfg-parallel 是真 CFG 模型的免费午餐（Wan 实测省 20%）。
 
+**补记（2026-09-02，Qwen-Image）**：SP 首次转正 —— tp4sp 单步 367.7ms vs tp4
+421.7ms（**-12.8%**），热 e2e 59.6 vs 60.8s。双流 MMDiT（image/text 残差流都被
+分片）+ 1024² 长序列，与"SP 收益随分片流条数 × 序列长度增长"的规律一致。详见
+`docs/plans/2026-09-02-qwen-sp-completion.md` 与
+`artifacts/parallel_phase_sweep/qwen/`（tp4sp 编译峰值内存 >124GiB，需 swap）。
+
 ## 5. 环境与工具链
 
 | | FLUX（8/25） | Wan（8/27） |

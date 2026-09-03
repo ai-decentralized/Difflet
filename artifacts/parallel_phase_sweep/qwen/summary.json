@@ -1,0 +1,30 @@
+[
+ {
+  "label": "tp4",
+  "compile_wall_s": 1204.9,
+  "compile_cache_hit": false,
+  "e2e_cold_s": 494.391,
+  "load_cold_s": 447.691,
+  "e2e_warm_median_s": 60.79980675200022,
+  "e2e_warm_std_s": 0.981401732468565,
+  "load_warm_median_s": 31.126,
+  "step_median_ms": 421.7,
+  "step_n": 19,
+  "finite": true,
+  "errors": null
+ },
+ {
+  "label": "tp4sp",
+  "compile_wall_s": 1464.4,
+  "compile_cache_hit": false,
+  "e2e_cold_s": 490.452,
+  "load_cold_s": 443.938,
+  "e2e_warm_median_s": 59.55359957200017,
+  "e2e_warm_std_s": 0.9217314782619566,
+  "load_warm_median_s": 31.19,
+  "step_median_ms": 367.7,
+  "step_n": 19,
+  "finite": true,
+  "errors": null
+ }
+]

@@ -731,11 +731,16 @@ def run_model(model: str, only: list[str] | None, phases: list[str] | None,
         def want(phase: str) -> bool:
             return (phases is None or phase in phases) and phase not in result
 
+        def succeeded(phase: str) -> None:
+            # a retry that fills the phase invalidates an earlier error record
+            result.get("errors", {}).pop(phase, None)
+
         try:
             if want("compile"):
                 cfg = configs[DP_ROWS[label][0]] if is_dp else configs[label]
                 print(f">>> [{model}:{label}] compile ...", flush=True)
                 phase_compile(model, label, cfg, spec, result, log_dir)
+                succeeded("compile")
                 _save_result(model, label, result)
                 c = result["compile"]
                 print(f"    wall {c['wall_s']:.0f}s "
@@ -750,6 +755,7 @@ def run_model(model: str, only: list[str] | None, phases: list[str] | None,
                 else:
                     phase_generate(model, label, configs[label], spec, result,
                                    log_dir, out_dir)
+                succeeded("generate")
                 _save_result(model, label, result)
                 w = result["e2e_warm"]["wall_s"]
                 print(f"    warm e2e median {w['median']:.1f}s "
@@ -757,6 +763,7 @@ def run_model(model: str, only: list[str] | None, phases: list[str] | None,
             if want("step") and not is_dp:
                 print(f">>> [{model}:{label}] per-step realloop ...", flush=True)
                 phase_step(model, label, configs[label], spec, result, log_dir)
+                succeeded("step")
                 _save_result(model, label, result)
                 s = result["step"]["step_s"]
                 print(f"    step median {s['median'] * 1000:.1f} ms "
