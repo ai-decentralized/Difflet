@@ -1,19 +1,36 @@
 #!/usr/bin/env bash
 # Sweep-resilient supervisor. Run INSIDE a Monitor tool call:
 #   bash supervise.sh <job-script> <done-marker> <name> [report-file...]
-# Restarts the job when no process matches "<basename of job-script>" and the
-# marker is absent (a swept task); a job that fails writes its marker and is
-# reported, never retried. Extra args are per-stage marker files to echo once.
-# The pgrep pattern is path-anchored ("/<basename>") so this supervisor's own
-# name can never match it.
+# Restarts the job when it is not alive and the marker is absent (a swept task);
+# a job that fails writes its marker and is reported, never retried. Extra args
+# are per-stage marker files to echo once.
+#
+# Liveness is tracked by the PID of the job WE launched, recorded in
+# /tmp/logs/<name>.pid — never by pgrep on the job's name. A pgrep pattern built
+# from the job path always matches this supervisor too, because the supervisor's
+# own argv contains that path ("bash supervise.sh /…/job.sh …"), so the check
+# would report "already running" forever and the job would never start.
+# setsid detaches the job into its own session so it survives if the supervisor
+# (or the Monitor task running it) is killed; the PID file lets a restarted
+# supervisor adopt a job that is still running.
 JOB=$1; MARKER=$2; NAME=$3; shift 3
 STAGES=("$@")
+PIDFILE="/tmp/logs/$NAME.pid"
+mkdir -p /tmp/logs
 rm -f "$MARKER"
 seen=""
+
+job_alive() {
+  local p
+  p=$(cat "$PIDFILE" 2>/dev/null) || return 1
+  [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+
 while [ ! -f "$MARKER" ]; do
-  if ! pgrep -f "/$(basename "$JOB")" > /dev/null; then
-    bash "$JOB" >> "/tmp/logs/$NAME.supervised.log" 2>&1 &
-    echo "$NAME (re)started, pid $!"
+  if ! job_alive; then
+    setsid bash "$JOB" >> "/tmp/logs/$NAME.supervised.log" 2>&1 &
+    echo $! > "$PIDFILE"
+    echo "$NAME (re)started, pid $(cat "$PIDFILE")"
     sleep 15
   fi
   for f in "${STAGES[@]}"; do
@@ -27,3 +44,4 @@ while [ ! -f "$MARKER" ]; do
   sleep 30
 done
 cat "$MARKER"
+rm -f "$PIDFILE"
