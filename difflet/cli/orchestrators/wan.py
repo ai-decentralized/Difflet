@@ -196,6 +196,10 @@ class WanOrchestrator(ModelOrchestrator):
             enable_transformer=True,
             enable_transformer_2=False,
             enable_vae_decoder=False,
+            # Probe-free TeaCache (fixed cadence / online-delta): host-side skip
+            # logic only; not in _stage_cache_inputs, so the warm artifact hits.
+            teacache_cadence=getattr(args, "teacache_cadence", None),
+            teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
@@ -353,6 +357,10 @@ class WanOrchestrator(ModelOrchestrator):
             parts.append("--cfg-parallel")
         if getattr(a, "sp_enabled", False):
             parts.append("--sp")
+        if getattr(a, "teacache_cadence", None) is not None:
+            parts += ["--teacache-cadence", str(a.teacache_cadence)]
+        if getattr(a, "teacache_online_delta", None) is not None:
+            parts += ["--teacache-online-delta", str(a.teacache_online_delta)]
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
         if getattr(a, "output", None):

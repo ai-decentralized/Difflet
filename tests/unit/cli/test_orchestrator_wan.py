@@ -368,3 +368,34 @@ def test_generate_host_vae_decodes_on_host(monkeypatch, tmp_path):
     assert stages == ["transformer"]
     assert decoded["out"] == str(out)
     assert decoded["latents"].endswith("latents.pt")
+
+
+# ------------------------------------------------------ probe-free TeaCache
+
+def test_shared_cli_args_forward_probe_free_teacache_flags():
+    parts = WanOrchestrator(_wan_args(teacache_cadence=2))._shared_cli_args("generate")
+    assert parts[parts.index("--teacache-cadence") + 1] == "2"
+    assert "--teacache-online-delta" not in parts
+    parts = WanOrchestrator(_wan_args(teacache_online_delta=0.6))._shared_cli_args("generate")
+    assert parts[parts.index("--teacache-online-delta") + 1] == "0.6"
+    assert "--teacache-cadence" not in parts
+
+
+def test_stage_transformer_threads_cadence_into_app_without_changing_artifact(
+    monkeypatch, tmp_path,
+):
+    # --teacache-cadence was dropped by the stage (device-confirmed no-op); the
+    # transformer stage must hand it to the app, while the compiled-dir identity
+    # stays that of a plain generate so the warm cache hits.
+    _setup_wan_fakes(monkeypatch)
+    plain = _wan_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path))
+    cadence = _wan_args(stage_mode="generate", work_dir=str(tmp_path),
+                        cache_dir=str(tmp_path), teacache_cadence=2)
+    orch = WanOrchestrator(cadence)
+    assert orch._stage_compiled_dir("transformer", cadence) == \
+        WanOrchestrator(plain)._stage_compiled_dir("transformer", plain)
+    orch._finish_stage_compile("transformer", cadence, orch._stage_compiled_dir("transformer", cadence))
+    orch._stage_transformer(cadence)
+    kw = _FakeWanApp.instances[-1].kwargs
+    assert kw["teacache_cadence"] == 2
+    assert kw["teacache_online_delta_alpha"] is None
