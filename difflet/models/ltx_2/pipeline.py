@@ -55,6 +55,8 @@ class LTX2Orchestrator:
         frame_rate: float = 24.0,
         scheduler: Any = None,
         teacache_calibration_path: str | None = None,
+        teacache_cadence: int | None = None,
+        teacache_online_delta_alpha: float | None = None,
     ) -> None:
         self.model_path = model_path
         self.transformer = transformer
@@ -97,13 +99,30 @@ class LTX2Orchestrator:
         # TeaCache (cclog 87): adaptive step-skipping. Built lazily on first denoise.
         self.teacache_calibration_path = teacache_calibration_path
         self._teacache_controller = None
+        # Probe-free TeaCache modes (fixed cadence / online-delta): host-side
+        # skip decisions only — no block-0 signal, no calibration file, no NEFF
+        # change. num_steps is synced to the request in _denoise.
+        if teacache_cadence is not None or teacache_online_delta_alpha is not None:
+            if teacache_calibration_path:
+                raise ValueError(
+                    "teacache_cadence/teacache_online_delta_alpha are mutually "
+                    "exclusive with teacache_calibration_path."
+                )
+            from difflet.pipeline.teacache import build_probe_free_controller
+
+            self._teacache_controller = build_probe_free_controller(
+                model="ltx_2",
+                shape_label=f"{self.height}x{self.width}x{self.num_frames}",
+                cadence=teacache_cadence,
+                online_delta_alpha=teacache_online_delta_alpha,
+            )
 
     def _maybe_init_teacache(self) -> bool:
         """Build the TeaCache controller once. Returns whether TeaCache is enabled."""
-        if not self.teacache_calibration_path:
-            return False
         if self._teacache_controller is not None:
             return True
+        if not self.teacache_calibration_path:
+            return False
         from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
 
         calibration = TeaCacheCalibration.from_json(self.teacache_calibration_path)
@@ -524,6 +543,14 @@ class LTX2Orchestrator:
         # via (latents-x0)/sigma amplifies the reused-x0 error at small sigma (late steps),
         # which destroyed cosine (0.27). Velocity caching matches Wan (cosine 0.985).
         ctrl = self._teacache_controller if self._maybe_init_teacache() else None
+        # Probe-free modes (fixed cadence / online-delta) never compute the
+        # block-0 signal on the host CPU transformer.
+        probe_free = ctrl is not None and not ctrl.needs_signal()
+        if ctrl is not None:
+            from difflet.pipeline.teacache import sync_probe_free_num_steps
+
+            sync_probe_free_num_steps(ctrl, len(timesteps))
+            ctrl.reset()
         prev_audio_vel: torch.Tensor | None = None
         cached_audio_vel_res: torch.Tensor | None = None
         for step_index, timestep in enumerate(timesteps):
@@ -606,7 +633,9 @@ class LTX2Orchestrator:
             # un-doubled latent + the un-doubled per-batch timestep.
             mod_input = None
             skip = False
-            if ctrl is not None:
+            if ctrl is not None and probe_free:
+                skip = ctrl.should_skip(step_index, None)
+            elif ctrl is not None:
                 timestep_batch_single = _batch_timestep(
                     timestep, latents.shape[0], latents.device, model_dtype
                 )
@@ -687,7 +716,7 @@ class LTX2Orchestrator:
             if trajectory is not None:
                 trajectory.append((latents.detach().cpu(), audio_latents.detach().cpu()))
         if ctrl is not None:
-            print(f"[ltx2-teacache] {ctrl.stats()}", flush=True)
+            print(f"[teacache] stats: {ctrl.stats()}", flush=True)
         return latents, audio_latents
 
     def _full_dit_step(
