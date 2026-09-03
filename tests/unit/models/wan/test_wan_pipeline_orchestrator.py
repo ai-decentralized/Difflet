@@ -373,3 +373,73 @@ def test_loop_latents_held_in_float32(tmp_path):
                    generator=torch.Generator().manual_seed(0))
     assert out.latents.dtype == torch.float32
     assert transformer.calls[0]["hidden_states"].dtype == torch.bfloat16
+
+
+# ------------------------------------------------------ probe-free TeaCache
+
+def _run_cadence(pipeline, *, steps, guidance_scale=1.0):
+    return pipeline(
+        prompt_embeds=torch.ones((1, 5, 8), dtype=torch.float32),
+        negative_prompt_embeds=torch.zeros((1, 5, 8), dtype=torch.float32),
+        latents=torch.zeros((1, 16, 3, 4, 4), dtype=torch.float32),
+        height=32, width=32, num_frames=9,
+        num_inference_steps=steps, guidance_scale=guidance_scale,
+        output_type="latent",
+    )
+
+
+def test_fixed_cadence_skips_dit_steps_and_prints_stats(tmp_path, capsys):
+    # Regression for the CLI-dropped flag: the pipeline must build a probe-free
+    # controller from teacache_cadence (no calibration file, no CPU shadow),
+    # sync num_steps to the request, and report the skip stats.
+    transformer = FakeTransformer(bias=0.25)
+    pipeline = WanOrchestrator(
+        model_path=str(tmp_path), transformer=transformer, dtype=torch.float32,
+        boundary_ratio=None, teacache_cadence=2,
+    )
+    assert pipeline._teacache_controller is not None
+    assert pipeline._teacache_shadows == {}
+
+    # 14 steps, warmup/cooldown 5, cadence 2 -> skips at steps 6 and 8.
+    _run_cadence(pipeline, steps=14, guidance_scale=4.0)
+    stats = pipeline._teacache_last_stats
+    assert stats["skipped_steps"] == 2
+    assert stats["full_steps"] == 12
+    # Dense CFG: a full step is 2 DiT calls (cond + uncond); a skip saves both.
+    assert len(transformer.calls) == 24
+    assert pipeline._teacache_controller.calibration.num_steps == 14
+    out = capsys.readouterr().out
+    assert "[teacache] probe-free controller enabled" in out
+    assert "[teacache] stats: {'full_steps': 12, 'skipped_steps': 2" in out
+
+
+def test_fixed_cadence_controller_resets_between_requests(tmp_path):
+    transformer = FakeTransformer(bias=0.25)
+    pipeline = WanOrchestrator(
+        model_path=str(tmp_path), transformer=transformer, dtype=torch.float32,
+        boundary_ratio=None, teacache_cadence=2,
+    )
+    _run_cadence(pipeline, steps=14)
+    _run_cadence(pipeline, steps=12)  # window [5, 7): one skip (step 6)
+    assert pipeline._teacache_last_stats == {
+        **pipeline._teacache_last_stats, "full_steps": 11, "skipped_steps": 1,
+    }
+    assert pipeline._teacache_controller.calibration.num_steps == 12
+
+
+def test_probe_free_modes_are_exclusive_with_calibration_path(tmp_path):
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        WanOrchestrator(
+            model_path=str(tmp_path), transformer=FakeTransformer(), dtype=torch.float32,
+            boundary_ratio=None, teacache_cadence=2,
+            teacache_calibration_path=str(tmp_path / "cal.json"),
+        )
+
+
+def test_online_delta_mode_builds_probe_free_controller(tmp_path):
+    pipeline = WanOrchestrator(
+        model_path=str(tmp_path), transformer=FakeTransformer(), dtype=torch.float32,
+        boundary_ratio=None, teacache_online_delta_alpha=0.6,
+    )
+    assert pipeline._teacache_controller.needs_signal() is False
+    assert pipeline._teacache_controller.calibration.online_delta_alpha == pytest.approx(0.6)
