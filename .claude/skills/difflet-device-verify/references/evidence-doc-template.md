@@ -52,6 +52,28 @@ Rules that keep the doc honest:
 - Quote rejection messages and diagnostics verbatim — they are the evidence.
 - Bug ledger entries: SHA + one-line symptom + what the fix does.
 
+## Feature-by-feature view (part of the public deliverable)
+
+Readers ask "does model X have feature Y?" far more often than they read a matrix row.
+After the per-axis tables, add one block **per tested feature** listing every model in
+the campaign with a status chip and a one-line reason or measurement:
+
+```
+### <Feature name>   `<flag or runner>`
+<one sentence: what the feature does>
+| FLUX | Qwen-Image | Wan | HunyuanVideo | LTX-2 |
+| PASS · 45 s | PASS · 490 s | LIMIT · %128 rule; PASS @512² | N/A · always masked | N/A · CP deferred |
+```
+
+Statuses: **PASS** (ran end-to-end this campaign) · **LIMIT** (works with a documented
+constraint — say the constraint and where it passes) · **BLOCKED** (diagnosed toolchain
+issue — name the diagnostic) · **N/A** (excluded by design or feature is model-specific —
+say why) · **NOT MEASURED** (not gated off, but this campaign did not run that check —
+never fold this into PASS or N/A; it is the honest gap list for the next campaign).
+One block for every feature the campaign touched, including the ones that are model-
+specific (e.g. TAEF1: PASS on FLUX, N/A elsewhere) — an absent block reads as "not
+considered", which is worse than N/A.
+
 ## The public support matrix (terminal + optional artifact page)
 
 Statuses: PASS · LIMIT (works with a documented constraint) · BLOCKED (diagnosed toolchain issue)

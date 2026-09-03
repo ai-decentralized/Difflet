@@ -144,9 +144,11 @@ Two deliverables, both built from the same evidence:
   time → evidence path, a *How to inspect manually* recipe per phase, the per-axis fingerprints that
   let a reader verify a parallelism claim from artifacts alone, the bug ledger, and a final summary.
 - **The support matrix** for the user's audience: PASS / LIMIT (works with a documented constraint)
-  / BLOCKED (diagnosed toolchain issue) / N/A (by design), with numbered constraint notes, timings,
-  and the evidence trail. Offer it as a terminal table and, when the user wants to share it, as a
-  polished artifact page.
+  / BLOCKED (diagnosed toolchain issue) / N/A (by design) / NOT MEASURED (not gated off, not run),
+  with numbered constraint notes, timings, and the evidence trail — presented **both** as the
+  model × feature tables **and** as one block per feature listing every model (the form people
+  actually query: "does Wan have ring?"). Offer it as a terminal table and, when the user wants to
+  share it, as a polished artifact page. The template has the block format.
 
 Be exact about what was and wasn't verified: "functional but not beneficial with this calibration"
 and "PASS at a conforming shape, fail-fast at the default shape" are the kind of statements that make

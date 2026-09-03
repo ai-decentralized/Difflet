@@ -3,6 +3,29 @@
 Everything here was device-verified on trn2.3xlarge (4 NeuronCores, LNC=2, 96 GiB HBM) with
 neuronx-cc 2.26. Model keys are `scripts/verify_cli.py` keys; CLI model ids in parentheses.
 
+## Verified support snapshot (2026-08-31, use as the default expectation per cell)
+
+| Feature | FLUX | Qwen-Image | Wan 2.2 | HunyuanVideo | LTX-2 |
+|---|---|---|---|---|---|
+| TP | PASS | PASS | PASS | PASS | PASS |
+| CP gather_kv | PASS | PASS | PASS | BLOCKED (NCC_INLA001 behind %128 bounds) | N/A |
+| CP ring | PASS | PASS | LIMIT (%128; PASS @512×512×9) | N/A (mask) | N/A |
+| CP ulysses | PASS | PASS | PASS | PASS (bounds route) | N/A |
+| SP | PASS | N/A (deferred) | PASS | PASS | N/A |
+| CFG-parallel | N/A (distilled) | N/A | PASS | N/A | PASS |
+| DP router | PASS | PASS | PASS | BLOCKED (HBM @121f) | PASS |
+| DP bit-identity | PASS | NOT MEASURED | NOT MEASURED | BLOCKED | NOT MEASURED |
+| Bucketed `--shapes` compile | PASS | PASS | PASS | PASS (earlier) | LIMIT (flag ignored) |
+| Shared weight store | PASS (proof) | PASS | PASS (proof) | PASS | PASS |
+| Serving | PASS chat | PASS chat (cp=1) | PASS videos | PASS videos | PASS videos (host VAE) |
+| Multi-shape serving | PASS | PASS | PASS | PASS (earlier) | N/A |
+| TeaCache fixed cadence | PASS | PASS | N/A (CLI) | N/A (CLI) | N/A (CLI) |
+| TeaCache adaptive | PASS | LIMIT (weak signal) | N/A (CLI) | N/A (CLI) | N/A (CLI) |
+| TAEF1 | PASS | N/A | N/A | N/A | N/A |
+
+Anything that lands differently from this table in a new campaign is a finding: either a
+regression, a fix that upgraded a cell, or a NOT MEASURED cell finally measured — call it out.
+
 ## Models and their verification shapes (verify_cli.py MODELS)
 
 | key | model id | shape | steps | pipeline |
