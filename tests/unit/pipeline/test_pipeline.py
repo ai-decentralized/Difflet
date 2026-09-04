@@ -187,10 +187,11 @@ def test_pipeline_forwards_teacache_kwargs_to_application(tmp_path):
 
     assert pipe.app.kwargs["teacache_speedup"] == 1.5
     assert pipe.app.kwargs["teacache_calibration_path"] == "calibration.json"
-    assert pipe.cache_spec.application_kwargs == {
-        "teacache_calibration_path": "calibration.json",
-        "teacache_speedup": 1.5,
-    }
+    # The cache identity records only the canonical probe marker: the probe
+    # NEFF is compiled or not — speedup values and calibration path strings
+    # are runtime inputs and must not change the artifact key
+    # (_cache_application_kwargs).
+    assert pipe.cache_spec.application_kwargs == {"teacache_probe_enabled": True}
 
 
 def test_pipeline_rejects_conflicting_teacache_kwargs(tmp_path):

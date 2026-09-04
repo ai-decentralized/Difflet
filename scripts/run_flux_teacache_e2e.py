@@ -45,6 +45,7 @@ import torch.nn.functional as F  # noqa: E402
 
 MODEL = "black-forest-labs/FLUX.1-dev"
 CCLOG = ROOT / "cclogs" / "m9-teacache"
+CCLOG.mkdir(parents=True, exist_ok=True)
 PROMPTS = [
     "a red fox sitting in a snowy forest at dawn, sharp detail",
     "a bustling night market with neon signs and steam, cinematic",

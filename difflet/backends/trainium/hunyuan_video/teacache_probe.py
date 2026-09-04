@@ -25,8 +25,10 @@ from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.backends.trainium.hunyuan_video.backbone import (
     HunyuanVideoBackboneInferenceConfig,
+    NeuronHunyuanVideoBackboneApplication,
 )
 from difflet.backends.trainium.hunyuan_video.teacache_probe_model import (
+    PROBE_STATE_TENSORS,
     HunyuanVideoTeacacheProbeFusedModel,
     HunyuanVideoTeacacheProbeModel,
 )
@@ -169,12 +171,13 @@ class NeuronHunyuanVideoTeacacheProbeApplication(NeuronApplicationBase):
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
         return compiler_args
 
-    @staticmethod
-    def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
-        """Prefix every HF key with ``model.`` so it matches the probe's nested
-        ``self.model = HunyuanVideoTransformer3DModel(...)`` structure."""
-        del config
-        return {f"model.{key}": value for key, value in state_dict.items()}
+    # The probe model is a HunyuanVideoTransformer3DModel subclass, so its
+    # weights live under the backbone's own names and the backbone converter
+    # (single-block proj_out split + optional global_rank.rank) applies as-is.
+    # That is what lets the shared weight store hand it the backbone's shards.
+    convert_hf_to_neuron_state_dict = staticmethod(
+        NeuronHunyuanVideoBackboneApplication.convert_hf_to_neuron_state_dict
+    )
 
     @staticmethod
     def update_state_dict_for_tied_weights(state_dict):
@@ -355,6 +358,7 @@ class NeuronHunyuanVideoTeacacheProbeFusedApplication(NeuronApplicationBase):
     """fused-A standalone probe app: prev_mod persistent on device, returns only delta."""
 
     _model_cls = HunyuanVideoTeacacheProbeFusedModel
+    state_tensor_names = PROBE_STATE_TENSORS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -386,13 +390,12 @@ class NeuronHunyuanVideoTeacacheProbeFusedApplication(NeuronApplicationBase):
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
         return compiler_args
 
-    @staticmethod
-    def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
-        """Prefix HF keys with 'model.' (the fused model wraps the transformer at
-        self.model). prev_mod is NOT in the checkpoint — it stays the init zero
-        Parameter and is overwritten in place at runtime via the alias."""
-        del config
-        return {f"model.{key}": value for key, value in state_dict.items()}
+    # Same weights under the backbone's names => the backbone's converter.
+    # prev_mod is NOT in the checkpoint: it is aliased, hence NEFF state that
+    # NxD zero-initialises at load (see state_tensor_names above).
+    convert_hf_to_neuron_state_dict = staticmethod(
+        NeuronHunyuanVideoBackboneApplication.convert_hf_to_neuron_state_dict
+    )
 
     @staticmethod
     def update_state_dict_for_tied_weights(state_dict):

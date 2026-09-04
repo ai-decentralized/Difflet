@@ -109,10 +109,43 @@ def init_custom_process_group_fn(config):
             parallel_state.initialize_speculative_draft_group(draft_tp)
 
 
+def checkpoint_missing_weights(
+    model: torch.nn.Module,
+    checkpoint_keys,
+    state_tensor_names=(),
+) -> set[str]:
+    """Names ``model`` would look up in the shard table that the checkpoint lacks.
+
+    This is the host-side statement of the NEFF weight contract:
+
+    * ``torch_neuronx`` names every parameter/buffer the traced graph reads by
+      its module path (``model.state_dict()`` key) and stores that path as the
+      metaneff ``checkpoint_key``. At ``nxd_model.initialize`` each
+      INPUT_WEIGHT is looked up by that exact string in the per-rank shard —
+      a miss is a hard runtime error (``Missing weight tensor with key …``).
+      NxD's ``preprocess_checkpoint`` only ever *drops* checkpoint keys the
+      model does not have; it never invents missing ones.
+    * Tensors named in ``input_output_aliases`` are INPUT_STATE instead:
+      allocated zero-filled by NxD's ``StateInitializer`` at load and never
+      read from the checkpoint. Applications list those in
+      ``state_tensor_names`` (the TeaCache probes' ``prev_mod``).
+
+    So ``checkpoint_missing_weights(model, keys, app.state_tensor_names)`` must
+    be empty for the checkpoint to be loadable; it is what the unit tests
+    assert for every probe against the backbone-converted checkpoint.
+    """
+    expected = set(model.state_dict().keys()) - set(state_tensor_names)
+    return expected - set(checkpoint_keys)
+
+
 class NeuronApplicationBase(torch.nn.Module):
     _STATE_DICT_MODEL_PREFIX = "model."
     _NEW_STATE_DICT_MODEL_PREFIX = ""
     _FUSED_PREFIX = ""
+    # Tensors in the traced model that are NEFF state, not checkpoint weights
+    # (see checkpoint_missing_weights). Empty for every ordinary application;
+    # the TeaCache probes add their aliased ``prev_mod``.
+    state_tensor_names: frozenset = frozenset()
 
     def __init__(
         self,
