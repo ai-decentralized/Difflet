@@ -20,6 +20,14 @@ text/image embeds are irrelevant to the timestep-only modulation. The hook reuse
 diffusers model's own submodules (time_embed -> x_embedder -> transformer_blocks[0].norm1),
 faithful to the real forward by construction.
 
+Weight naming: the probe model *is* the backbone's ``_HunyuanVideo15TraceModule`` (a
+subclass), so the diffusers transformer stays at ``self.transformer`` — the path the
+monolithic backbone traces — and the probe's checkpoint converter is the backbone's
+converter object. The shared weight store can therefore serve the probe from the
+backbone's pre-sharded checkpoint with no layout tag and no duplicate copy (issue
+#39; supersedes ``3f04080``). ``prev_mod`` is aliased, hence NEFF state that NxD
+zero-initialises at load — see ``state_tensor_names`` on the application.
+
 Monolithic runtime only. The segmented runtime (segmented15.py, per-block process
 loading) has no single graph to attach a persistent prev_mod Parameter to — teacache
 is unsupported there and the application raises for it.
@@ -34,25 +42,30 @@ import torch.nn as nn
 
 from neuronx_distributed.trace.model_builder import BaseModelInstance
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
-from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import ModelWrapper
 from difflet.backends.trainium.hunyuan_video.backbone15 import (
     HunyuanVideo15BackboneInferenceConfig,
-    _model_kwargs_from_config,
+    NeuronHunyuanVideo15BackboneApplication,
+    _HunyuanVideo15TraceModule,
 )
 
+#: Tensors the probe adds on top of the backbone trace module; aliased in place,
+#: so NEFF state rather than checkpoint weights.
+PROBE_STATE_TENSORS: frozenset[str] = frozenset({"prev_mod"})
 
-class _HunyuanVideo15ProbeTraceModule(nn.Module):
-    """Holds the diffusers HV-1.5 transformer; exposes the block-0 modulated input."""
 
-    def __init__(self, config: HunyuanVideo15BackboneInferenceConfig) -> None:
-        super().__init__()
-        from diffusers.models.transformers.transformer_hunyuan_video15 import (
-            HunyuanVideo15Transformer3DModel,
+class HunyuanVideo15TeacacheProbeFusedModel(_HunyuanVideo15TraceModule):
+    """The backbone trace module plus a persistent ``prev_mod`` state.
+
+    Forward returns ``(rel_l1, mod_input)``; ``mod_input`` is aliased back into
+    ``prev_mod`` in place.
+    """
+
+    def __init__(self, config, *, seq_len: int, inner_dim: int, batch_size: int = 1) -> None:
+        super().__init__(config)
+        self.prev_mod = nn.Parameter(
+            torch.zeros(batch_size, seq_len, inner_dim), requires_grad=False
         )
-
-        self.use_meanflow = bool(getattr(config, "use_meanflow", False))
-        self.transformer = HunyuanVideo15Transformer3DModel(**_model_kwargs_from_config(config))
 
     def teacache_mod_input(
         self,
@@ -72,24 +85,13 @@ class _HunyuanVideo15ProbeTraceModule(nn.Module):
         norm_hidden_states, *_ = t.transformer_blocks[0].norm1(h, emb=temb)
         return norm_hidden_states
 
-
-class HunyuanVideo15TeacacheProbeFusedModel(nn.Module):
-    """prev_mod nn.Parameter; forward returns (rel_l1, mod_input), aliased in place."""
-
-    def __init__(self, config, *, seq_len: int, inner_dim: int, batch_size: int = 1) -> None:
-        super().__init__()
-        self.trace_module = _HunyuanVideo15ProbeTraceModule(config)
-        self.prev_mod = nn.Parameter(
-            torch.zeros(batch_size, seq_len, inner_dim), requires_grad=False
-        )
-
-    def forward(
+    def forward(  # type: ignore[override] — the probe traces its own signature
         self,
         hidden_states: torch.Tensor,
         timestep: torch.Tensor,
         timestep_r: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        mod_input = self.trace_module.teacache_mod_input(hidden_states, timestep, timestep_r)
+        mod_input = self.teacache_mod_input(hidden_states, timestep, timestep_r)
         # cclog 83 relative-L1 (mean|mod-prev|/mean|prev|), reduced in float32;
         # mod_input (out[1]) stays bf16 so it aliases back into the bf16 prev_mod.
         m = mod_input.float()
@@ -170,6 +172,7 @@ class NeuronHunyuanVideo15TeacacheProbeFusedApplication(NeuronApplicationBase):
     """HV-1.5 fused-A probe app (monolithic only)."""
 
     _model_cls = HunyuanVideo15TeacacheProbeFusedModel
+    state_tensor_names = PROBE_STATE_TENSORS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -196,19 +199,11 @@ class NeuronHunyuanVideo15TeacacheProbeFusedApplication(NeuronApplicationBase):
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
         return "--model-type=transformer -O1 --auto-cast=none"
 
-    @staticmethod
-    def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
-        # The probe nests the diffusers model under trace_module.transformer.* ;
-        # prev_mod stays the init Parameter (overwritten in place via the alias).
-        del config
-        return {
-            (
-                f"trace_module.{key}"
-                if key.startswith("transformer.")
-                else f"trace_module.transformer.{key}"
-            ): value
-            for key, value in state_dict.items()
-        }
+    # Same weights under the same names (transformer.*) => the backbone's
+    # converter object. prev_mod is never expected from the checkpoint.
+    convert_hf_to_neuron_state_dict = staticmethod(
+        NeuronHunyuanVideo15BackboneApplication.convert_hf_to_neuron_state_dict
+    )
 
     @staticmethod
     def update_state_dict_for_tied_weights(state_dict):

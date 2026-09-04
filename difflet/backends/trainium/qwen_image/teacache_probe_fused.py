@@ -11,6 +11,16 @@ The only per-architecture difference from HV is the block-0 hook (Qwen:
 img_in -> time_text_embed -> block0 img_mod/img_norm1/_modulate). The alias
 machinery (nn.Parameter, distinct extra output, custom ModelInstance.get())
 is identical.
+
+Weight naming: the probe model *is* the backbone's trace module
+(``_QwenImageTransformerTraceModule``, a subclass), so every transformer tensor
+keeps its backbone attribute path (``transformer.*``, plus the optional
+``global_rank.rank`` marker) and the probe's checkpoint converter is the
+backbone's converter object. The shared weight store can therefore serve the
+probe from the backbone's pre-sharded checkpoint with no layout tag and no
+duplicate copy (issue #39; supersedes ``3f04080``). ``prev_mod`` is aliased,
+hence NEFF state (zero-initialised at load) rather than a checkpoint weight —
+see ``NeuronQwenImageTeacacheProbeFusedApplication.state_tensor_names``.
 """
 
 from __future__ import annotations
@@ -22,26 +32,33 @@ import torch.nn as nn
 
 from neuronx_distributed.trace.model_builder import BaseModelInstance
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
-from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import ModelWrapper
 from difflet.backends.trainium.qwen_image.transformer import (
+    NeuronQwenImageTransformerApplication,
     QwenImageTransformerInferenceConfig,
     _QwenImageTransformerTraceModule,
 )
 
+#: Tensors the probe adds on top of the backbone trace module; aliased in place,
+#: so NEFF state rather than checkpoint weights.
+PROBE_STATE_TENSORS: frozenset[str] = frozenset({"prev_mod"})
 
-class QwenImageTeacacheProbeFusedModel(nn.Module):
-    """prev_mod nn.Parameter; forward returns (delta, mod_input), mod_input
-    aliased back to prev_mod."""
+
+class QwenImageTeacacheProbeFusedModel(_QwenImageTransformerTraceModule):
+    """The backbone trace module plus a persistent ``prev_mod`` state.
+
+    Forward returns ``(delta, mod_input)``; ``mod_input`` is aliased back into
+    ``prev_mod``. Subclassing keeps the transformer at ``self.transformer`` —
+    the same path the backbone traces — so the shard keys match by construction.
+    """
 
     def __init__(self, config, *, seq_len: int, inner_dim: int, batch_size: int = 1) -> None:
-        super().__init__()
-        self.trace_module = _QwenImageTransformerTraceModule(config)
+        super().__init__(config)
         self.prev_mod = nn.Parameter(
             torch.zeros(batch_size, seq_len, inner_dim), requires_grad=False
         )
 
-    def forward(
+    def forward(  # type: ignore[override] — the probe traces its own signature
         self,
         hidden_states: torch.Tensor,
         timestep: torch.Tensor,
@@ -50,7 +67,7 @@ class QwenImageTeacacheProbeFusedModel(nn.Module):
         guidance: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         del encoder_hidden_states_mask
-        mod_input = self.trace_module.teacache_mod_input(
+        mod_input = self.teacache_mod_input(
             hidden_states, timestep, encoder_hidden_states, guidance
         )
         # cclog 83: relative-L1 signal (the TeaCache-paper / vLLM-Omni metric),
@@ -129,6 +146,7 @@ class NeuronQwenImageTeacacheProbeFusedApplication(NeuronApplicationBase):
     """Qwen-Image fused-A probe app."""
 
     _model_cls = QwenImageTeacacheProbeFusedModel
+    state_tensor_names = PROBE_STATE_TENSORS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -154,12 +172,11 @@ class NeuronQwenImageTeacacheProbeFusedApplication(NeuronApplicationBase):
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
         return "--model-type=transformer -O1 --auto-cast=none"
 
-    @staticmethod
-    def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
-        # the fused model nests the diffusers model under
-        # trace_module.transformer.* ; prev_mod stays the init Parameter.
-        del config
-        return {f"trace_module.transformer.{k}": v for k, v in state_dict.items()}
+    # Same weights under the same names => the backbone's converter object
+    # (transformer.* prefix + the CP-only global_rank.rank marker).
+    convert_hf_to_neuron_state_dict = staticmethod(
+        NeuronQwenImageTransformerApplication.convert_hf_to_neuron_state_dict
+    )
 
     @staticmethod
     def update_state_dict_for_tied_weights(state_dict):

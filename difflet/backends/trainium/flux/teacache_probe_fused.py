@@ -4,10 +4,32 @@ Same recipe as the HunyuanVideo (cclog 80) and Qwen-Image (cclog 81) fused
 probes: ``prev_mod`` is a persistent on-device ``nn.Parameter`` updated in place
 via ``input_output_aliases``; the forward returns ``(rel_l1, mod_input)`` and
 only the 4-byte scalar reaches host. The block-0 modulated input is computed by
-``_FluxTransformerTraceModule.teacache_mod_input``, which reuses the real
+``FluxTeacacheProbeFusedModel.teacache_mod_input``, which reuses the real
 ``NeuronFluxTransformer2DModel.forward`` prefix (x_embedder -> time_text_embed ->
 transformer_blocks[0].norm1) and stops at the modulated image input, so it is
 faithful to the real forward by construction (modeling_flux.py:401-411, 693).
+
+Weight naming — "same weights => same names by construction"
+------------------------------------------------------------
+The probe model *is* a ``NeuronFluxTransformer2DModel`` (a subclass), not a
+module that wraps one. Every transformer parameter therefore keeps the exact
+attribute path it has in the backbone, and the names the probe NEFF looks up at
+``nxd_model.initialize`` (``torch_neuronx`` names INPUT_WEIGHT tensors by module
+path) are the backbone's shard keys. That is what lets the shared weight store
+(``core/shared_weights.py``) hand the probe the backbone's pre-sharded
+checkpoint: no layout tag in the store key, and no second ~22.7 GB copy of the
+transformer (GitHub issue #39; the campaign fix ``3f04080`` is superseded).
+The earlier wrapper design nested everything under
+``trace_module.transformer.*`` and failed on device with
+``Missing weight tensor with key trace_module.transformer.transformer_blocks.0.norm1.linear.bias``
+(2026-08-30) once the store deduped it onto the backbone's shards.
+
+The only tensor the probe adds is ``prev_mod``. It is aliased to output 1, so
+NxD classifies it as INPUT_STATE: allocated zero-filled by ``StateInitializer``
+at load and never looked up in the checkpoint. It is listed in
+``NeuronFluxTeacacheProbeFusedApplication.state_tensor_names`` so the unit
+tests can prove that every *other* tensor in the probe's state dict is served
+by the backbone's converted checkpoint.
 
 Flux is predicted HV-good for TeaCache because the block-0 AdaLN modulation
 ``temb`` incorporates the pooled CLIP text (time_text_embed(timestep[, guidance],
@@ -17,7 +39,7 @@ before trusting the adaptive controller over a fixed cadence.
 
 Per-architecture differences from the Qwen/HV probes:
 - Flux is a Difflet fork (NeuronFluxTransformer2DModel with NXD parallel layers),
-  not a diffusers wrapper, so the trace module wraps the Difflet transformer.
+  not a diffusers wrapper, so the probe subclasses the Difflet transformer.
 - The block-0 IMAGE modulation does NOT depend on encoder_hidden_states (the T5
   sequence enters only via context_embedder + attention, after norm1), so the
   probe inputs are (hidden_states, timestep, pooled_projections, guidance) — one
@@ -36,7 +58,6 @@ import torch.nn as nn
 
 from neuronx_distributed.trace.model_builder import BaseModelInstance
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
-from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import ModelWrapper
 from difflet.models.flux.modeling_flux import (
     FluxBackboneInferenceConfig,
@@ -44,13 +65,26 @@ from difflet.models.flux.modeling_flux import (
     NeuronFluxTransformer2DModel,
 )
 
+#: Tensors the probe adds on top of the backbone. Aliased in place by the
+#: ModelInstance below, so they are NEFF state (zero-initialised at load), not
+#: checkpoint weights.
+PROBE_STATE_TENSORS: frozenset[str] = frozenset({"prev_mod"})
 
-class _FluxTransformerTraceModule(nn.Module):
-    """Wraps the Difflet Flux transformer; exposes the block-0 modulated input."""
 
-    def __init__(self, config: FluxBackboneInferenceConfig) -> None:
-        super().__init__()
-        self.transformer = NeuronFluxTransformer2DModel(config)
+class FluxTeacacheProbeFusedModel(NeuronFluxTransformer2DModel):
+    """The backbone transformer plus a persistent ``prev_mod`` state.
+
+    Forward returns ``(rel_l1, mod_input)``; ``mod_input`` is aliased back into
+    ``prev_mod`` in place. Being a subclass (not a wrapper) keeps every
+    transformer parameter at its backbone attribute path — see the module
+    docstring.
+    """
+
+    def __init__(self, config, *, seq_len: int, inner_dim: int, batch_size: int = 1) -> None:
+        super().__init__(config)
+        self.prev_mod = nn.Parameter(
+            torch.zeros(batch_size, seq_len, inner_dim), requires_grad=False
+        )
 
     def teacache_mod_input(
         self,
@@ -63,15 +97,14 @@ class _FluxTransformerTraceModule(nn.Module):
         # 693), stopping at the block-0 modulated image input. The forward
         # rescales timestep/guidance by 1000 internally, so this hook does too;
         # callers must pass the [0,1] diffusers-scale timestep (cclog 83).
-        t = self.transformer
-        hs = t.x_embedder(hidden_states)
+        hs = self.x_embedder(hidden_states)
         timestep = timestep * 1000
-        if t.config.guidance_embeds:
+        if self.config.guidance_embeds:
             guidance = guidance * 1000
-            temb = t.time_text_embed(timestep, guidance, pooled_projections)
+            temb = self.time_text_embed(timestep, guidance, pooled_projections)
         else:
-            temb = t.time_text_embed(timestep, pooled_projections)
-        block0 = t.transformer_blocks[0]
+            temb = self.time_text_embed(timestep, pooled_projections)
+        block0 = self.transformer_blocks[0]
         # NeuronAdaLayerNormZero.forward returns
         # (norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp); index 0
         # is the modulated image input. Stops before attention, so
@@ -79,26 +112,14 @@ class _FluxTransformerTraceModule(nn.Module):
         norm_hidden_states, *_ = block0.norm1(hs, emb=temb, hlomarker=True)
         return norm_hidden_states
 
-
-class FluxTeacacheProbeFusedModel(nn.Module):
-    """prev_mod nn.Parameter; forward returns (rel_l1, mod_input), mod_input
-    aliased back to prev_mod in place."""
-
-    def __init__(self, config, *, seq_len: int, inner_dim: int, batch_size: int = 1) -> None:
-        super().__init__()
-        self.trace_module = _FluxTransformerTraceModule(config)
-        self.prev_mod = nn.Parameter(
-            torch.zeros(batch_size, seq_len, inner_dim), requires_grad=False
-        )
-
-    def forward(
+    def forward(  # type: ignore[override] — the probe traces its own signature
         self,
         hidden_states: torch.Tensor,
         timestep: torch.Tensor,
         pooled_projections: torch.Tensor,
         guidance: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        mod_input = self.trace_module.teacache_mod_input(
+        mod_input = self.teacache_mod_input(
             hidden_states, timestep, pooled_projections, guidance
         )
         # cclog 83 relative-L1 signal (mean|mod-prev|/mean|prev|), reduced in
@@ -176,6 +197,7 @@ class NeuronFluxTeacacheProbeFusedApplication(NeuronApplicationBase):
     """Flux fused-A probe app."""
 
     _model_cls = FluxTeacacheProbeFusedModel
+    state_tensor_names = PROBE_STATE_TENSORS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -202,15 +224,12 @@ class NeuronFluxTeacacheProbeFusedApplication(NeuronApplicationBase):
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
         return "--model-type=transformer -O1 --auto-cast=none"
 
-    @staticmethod
-    def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
-        # Reuse the backbone converter (adds global_rank.rank + single-block
-        # proj_out splits), then nest under trace_module.transformer.* — one
-        # level deeper than the backbone's own keys.
-        base = NeuronFluxBackboneApplication.convert_hf_to_neuron_state_dict(
-            dict(state_dict), config
-        )
-        return {f"trace_module.transformer.{k}": v for k, v in base.items()}
+    # The probe's weights ARE the backbone's weights under the backbone's names,
+    # so its checkpoint converter is the backbone's converter object — the two
+    # cannot drift apart. (global_rank.rank + single-block proj_out splits.)
+    convert_hf_to_neuron_state_dict = staticmethod(
+        NeuronFluxBackboneApplication.convert_hf_to_neuron_state_dict
+    )
 
     @staticmethod
     def update_state_dict_for_tied_weights(state_dict):

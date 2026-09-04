@@ -303,3 +303,61 @@ def test_link_failure_leaves_no_partial_directory(tmp_path, monkeypatch):
     target = tmp_path / "b" / "weights"
     assert shared_weights.link_from_store(store, target, app) is False
     assert list(target.glob(shared_weights.SHARD_GLOB)) == []
+
+
+# ------------------------------------------------- probe apps share the entry
+
+def test_probe_and_backbone_apps_share_one_store_entry(tmp_path):
+    """The TeaCache probe apps must dedupe onto the backbone's shards.
+
+    They share (source, dtype, topology) with the backbone and — since the
+    probes became subclasses of the backbone model (refactor/teacache-probe-
+    canonical-keys) — also its weight names, so one store entry serves both.
+    This is the inverse of the campaign branch's layout-tag test (3f04080):
+    nothing about the application class, its declared NEFF-state tensors or
+    any probe marker may enter the key, or the transformer would be stored
+    twice (issue #39).
+    """
+    from difflet.backends.trainium.flux.teacache_probe_fused import (
+        NeuronFluxTeacacheProbeFusedApplication,
+    )
+    from difflet.backends.trainium.hunyuan_video.teacache_probe import (
+        NeuronHunyuanVideoTeacacheProbeFusedApplication,
+    )
+    from difflet.backends.trainium.qwen_image.teacache_probe_fused import (
+        NeuronQwenImageTeacacheProbeFusedApplication,
+    )
+    from difflet.models.flux.modeling_flux import NeuronFluxBackboneApplication
+
+    def as_app(cls, **extra):
+        # store_key reads only model_path / config / neuron_config; build the
+        # real application class around the stand-in surface without running
+        # its __init__ (which needs a checkpoint directory).
+        stand_in = make_app(tmp_path)
+        app = cls.__new__(cls)
+        app.model_path = stand_in.model_path
+        app.config = stand_in.config
+        app.neuron_config = stand_in.neuron_config
+        for name, value in extra.items():
+            setattr(app, name, value)
+        return app
+
+    backbone = as_app(NeuronFluxBackboneApplication)
+    backbone_key = shared_weights.store_key(backbone)
+    backbone_dir = shared_weights.store_dir(backbone)
+
+    for probe_cls in (
+        NeuronFluxTeacacheProbeFusedApplication,
+        NeuronQwenImageTeacacheProbeFusedApplication,
+        NeuronHunyuanVideoTeacacheProbeFusedApplication,
+    ):
+        probe = as_app(probe_cls, teacache_probe_fused=True)
+        assert probe.state_tensor_names == {"prev_mod"}
+        assert shared_weights.store_key(probe) == backbone_key
+        assert shared_weights.store_dir(probe) == backbone_dir
+
+    # A stray layout attribute from the superseded design is ignored too.
+    tagged = as_app(NeuronFluxTeacacheProbeFusedApplication)
+    tagged.weights_layout_tag = "trace-module-nested-v1"
+    assert shared_weights.store_key(tagged) == backbone_key
+    assert "layout" not in shared_weights._key_inputs(tagged)

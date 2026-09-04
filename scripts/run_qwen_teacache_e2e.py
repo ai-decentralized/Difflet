@@ -73,6 +73,7 @@ DEFAULT_TRANSFORMER_CACHE = (
 BUNDLE_DIR = ROOT / ".difflet-cache" / "qwen_image_dit_inputs" / "m9_calib_50step"
 COMPILED = ROOT / ".difflet-cache" / "qwen_m9_e2e" / "compiled"
 CCLOG = ROOT / "cclogs" / "m9-teacache"
+CCLOG.mkdir(parents=True, exist_ok=True)
 
 
 def _load_bundle(path: Path) -> tuple[dict[str, Any], dict[str, torch.Tensor]]:
@@ -244,7 +245,9 @@ def main() -> int:
     from difflet.pipeline.parallel_config import DiffletParallelConfig
     from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
 
-    calib_bundles = sorted(BUNDLE_DIR.glob("calibration_*.safetensors"))
+    # cache_qwen_calibration_bundles.py names files "{split}_{idx}_{slug}" with
+    # split values from the prompts TSV ("calib"/"holdout") — not "calibration_".
+    calib_bundles = sorted(BUNDLE_DIR.glob("calib_*.safetensors"))
     holdout_bundles = sorted(BUNDLE_DIR.glob("holdout_*.safetensors"))
     if not calib_bundles or not holdout_bundles:
         raise FileNotFoundError(
