@@ -645,11 +645,21 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                     NeuronHunyuanVideoVAEDecoderApplication,
                 )
 
-                # world_size must be the PROCESS world (tp*cp*cfg), not tp: with
-                # context parallelism the DiT initializes ranks 0..world-1 and a
-                # VAE claiming a smaller world in the same process segfaults the
-                # Neuron runtime at weight init (found on device: tp2cp2 ulysses,
-                # DiT w4 + VAE w2 -> SIGSEGV loading the VAE).
+                # world_size must be the PROCESS world (tp*cp*cfg), not tp. The
+                # VAE is not tensor-parallel (its convolutions are not TP-aware),
+                # so tp_degree stays 1 and it is replicated across the ranks of
+                # the process communicator the DiT establishes. One NxD process
+                # has exactly one world: a VAE claiming a smaller world in the
+                # same process segfaults the Neuron runtime at weight init (on
+                # device, tp2cp2 ulysses 2026-08-30: DiT w4 + VAE w2 -> SIGSEGV),
+                # and a world-1 VAE co-resident with world-4 components was
+                # rejected by three runtime experiments on Qwen (see
+                # docs/design/qwen_trn2_topology/03_adaptation_assessment.md;
+                # the validated one-world/mixed-TP topology is in
+                # 05_flux_runtime_validation.md). world_check.py enforces this
+                # at load time. HunyuanVideo's DiT and VAE share the generate
+                # stage process, unlike Wan/Qwen whose VAE has its own 1-core
+                # stage — that is why this VAE cannot be world_size=1.
                 vae_config = create_hunyuan_video_vae_decoder_config(
                     model_path=model_path,
                     world_size=parallel.world_size,

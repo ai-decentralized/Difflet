@@ -527,28 +527,51 @@ def test_fused_probe_still_selected_when_enabled(monkeypatch, tmp_path):
     assert application.teacache_probe_fused is True
 
 
-def test_vae_decoder_world_size_is_process_world(monkeypatch):
-    # Under context parallelism the process world is tp*cp; a VAE config
-    # claiming world_size=tp_degree (2) while the DiT initialized ranks 0..3
-    # segfaults the Neuron runtime at weight init (found on device, tp2cp2
-    # ulysses, 2026-08-30). The application must wire the full process world.
-    captured = {}
+# --------------------------------------------------------------------------- #
+# Component world wiring: one process, one world (world_check.py)
+# --------------------------------------------------------------------------- #
+# Every parallel config that can share the generate-stage process. tp==world
+# in the first two is exactly the coincidence that hid the bug: a wiring that
+# used tp_degree passed for two months until cp>1 made the two numbers differ.
+_PARALLEL_CONFIGS = [
+    pytest.param(SimpleNamespace(tp_degree=1, world_size=1, cp_degree=1, cp_mode="gather_kv"),
+                 id="tp1"),
+    pytest.param(SimpleNamespace(tp_degree=4, world_size=4, cp_degree=1, cp_mode="gather_kv"),
+                 id="tp4"),
+    pytest.param(SimpleNamespace(tp_degree=2, world_size=4, cp_degree=2, cp_mode="gather_kv"),
+                 id="tp2cp2"),
+    pytest.param(SimpleNamespace(tp_degree=2, world_size=4, cp_degree=2, cp_mode="ulysses"),
+                 id="tp2cp2ulysses"),
+]
 
-    class _Stop(Exception):
-        pass
+
+class _Stop(Exception):
+    pass
+
+
+def _capture_config_factory(monkeypatch, name):
+    captured = {}
 
     def fake_cfg(**kwargs):
         captured.update(kwargs)
         raise _Stop()
 
-    monkeypatch.setattr(app, "create_hunyuan_video_vae_decoder_config", fake_cfg)
+    monkeypatch.setattr(app, name, fake_cfg)
+    return captured
+
+
+@pytest.mark.parametrize("parallel", _PARALLEL_CONFIGS)
+def test_vae_decoder_world_size_is_process_world(monkeypatch, parallel):
+    # The VAE shares the generate-stage process with the DiT (world tp*cp), so
+    # it must declare that world: a VAE claiming world_size=tp_degree (2) while
+    # the DiT initialized ranks 0..3 segfaulted the Neuron runtime at weight
+    # init (on device, tp2cp2 ulysses, 2026-08-30).
+    captured = _capture_config_factory(monkeypatch, "create_hunyuan_video_vae_decoder_config")
     with tempfile.TemporaryDirectory() as path:
         os.makedirs(os.path.join(path, "vae"))
         with open(os.path.join(path, "vae", "config.json"), "w") as fh:
             fh.write("{}")
-        parallel = SimpleNamespace(
-            tp_degree=2, world_size=4, cp_degree=2, cp_mode="ulysses")
-        try:
+        with pytest.raises(_Stop):
             app.NeuronHunyuanVideoApplication(
                 model_path=path,
                 parallel=parallel,
@@ -556,7 +579,25 @@ def test_vae_decoder_world_size_is_process_world(monkeypatch):
                 shape={"height": None, "width": None, "num_frames": None},
                 enable_vae_decoder=True,
             )
-        except _Stop:
-            pass
-    assert captured["world_size"] == 4
-    assert captured["tp_degree"] == 1
+    assert captured["world_size"] == parallel.world_size
+    assert captured["tp_degree"] == 1  # convolutions are not TP-aware: replicated
+
+
+@pytest.mark.parametrize("parallel", _PARALLEL_CONFIGS)
+def test_backbone_world_size_is_process_world(monkeypatch, parallel):
+    captured = _capture_config_factory(monkeypatch, "create_hunyuan_video_backbone_config")
+    monkeypatch.setattr(app, "_load_diffusers_config", lambda path: SimpleNamespace())
+    with tempfile.TemporaryDirectory() as path:
+        os.makedirs(os.path.join(path, "transformer"))
+        with open(os.path.join(path, "transformer", "config.json"), "w") as fh:
+            fh.write("{}")
+        with pytest.raises(_Stop):
+            app.NeuronHunyuanVideoApplication(
+                model_path=path,
+                parallel=parallel,
+                dtype="bf16",
+                shape={"height": None, "width": None, "num_frames": None},
+                enable_vae_decoder=False,
+            )
+    assert captured["world_size"] == parallel.world_size
+    assert captured["tp_degree"] == parallel.tp_degree
