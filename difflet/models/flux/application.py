@@ -209,6 +209,8 @@ class NeuronFluxApplication(MultiComponentApplication):
         teacache_speedup: Optional[float] = None,
         teacache_calibration=None,
         teacache_calibration_path: Optional[str] = None,
+        teacache_cadence: Optional[int] = None,
+        teacache_online_delta_alpha: Optional[float] = None,
         taef1: bool = False,
         taef1_path: Optional[str] = None,
     ):
@@ -328,6 +330,36 @@ class NeuronFluxApplication(MultiComponentApplication):
                     )
                 self.pipe.teacache_controller = TeaCacheController(calibration)
                 self.pipe.teacache_speedup = float(teacache_speedup)
+
+        # Probe-free TeaCache modes (fixed cadence / online-delta): purely
+        # host-side skip decisions — no probe NEFF, no graph change, so these
+        # are runtime-only kwargs excluded from the compile-cache key. The
+        # pipeline syncs calibration.num_steps to the request at call time.
+        if teacache_cadence is not None or teacache_online_delta_alpha is not None:
+            if enable_teacache:
+                raise ValueError(
+                    "teacache_cadence/teacache_online_delta_alpha are mutually "
+                    "exclusive with the adaptive probe modes "
+                    "(teacache_fused/teacache_speedup)."
+                )
+            from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
+
+            self.pipe.teacache_controller = TeaCacheController(
+                TeaCacheCalibration(
+                    model="flux",
+                    shape_label=f"{int(self.height)}x{int(self.width)}",
+                    num_steps=0,  # synced to the request by the pipeline
+                    poly_coef=(0.0,),
+                    threshold=0.0,
+                    cadence=int(teacache_cadence or 0),
+                    online_delta_alpha=float(teacache_online_delta_alpha or 0.0),
+                )
+            )
+            print(
+                f"[teacache] probe-free controller enabled: cadence="
+                f"{int(teacache_cadence or 0)} online_delta_alpha="
+                f"{float(teacache_online_delta_alpha or 0.0)}"
+            )
 
     def components(self) -> list[ComponentSpec]:
         # Compile order follows the original Flux application. Load order is

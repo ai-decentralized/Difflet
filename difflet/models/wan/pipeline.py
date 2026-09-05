@@ -44,6 +44,8 @@ class WanOrchestrator:
         tokenizer_path: str | None = None,
         max_text_length: int = 512,
         teacache_calibration_path: str | None = None,
+        teacache_cadence: int | None = None,
+        teacache_online_delta_alpha: float | None = None,
     ) -> None:
         self.model_path = model_path
         self.text_encoder = text_encoder
@@ -67,13 +69,30 @@ class WanOrchestrator:
         self._teacache_controller = None
         self._teacache_shadows: dict[int, Any] = {}
         self._teacache_last_model_id: int | None = None
+        # Probe-free TeaCache modes (fixed cadence / online-delta): host-side
+        # skip decisions only — no CPU shadow, no calibration file, no NEFF
+        # change. num_steps is synced to the request in _denoise.
+        if teacache_cadence is not None or teacache_online_delta_alpha is not None:
+            if teacache_calibration_path:
+                raise ValueError(
+                    "teacache_cadence/teacache_online_delta_alpha are mutually "
+                    "exclusive with teacache_calibration_path."
+                )
+            from difflet.pipeline.teacache import build_probe_free_controller
+
+            self._teacache_controller = build_probe_free_controller(
+                model="wan",
+                shape_label=f"{self.height}x{self.width}x{self.num_frames}",
+                cadence=teacache_cadence,
+                online_delta_alpha=teacache_online_delta_alpha,
+            )
 
     def _maybe_init_teacache(self) -> bool:
         """Build the TeaCache controller + per-stage CPU shadows once. Returns enabled."""
-        if not self.teacache_calibration_path:
-            return False
         if self._teacache_controller is not None:
             return True
+        if not self.teacache_calibration_path:
+            return False
         from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
         from difflet.backends.trainium.wan.teacache_cpu_shadow import WanTeacacheCPUShadow
 
@@ -326,6 +345,14 @@ class WanOrchestrator:
         )
         teacache_on = False if cfg_parallel else self._maybe_init_teacache()
         ctrl = self._teacache_controller if teacache_on else None
+        if ctrl is not None:
+            from difflet.pipeline.teacache import sync_probe_free_num_steps
+
+            # Probe-free controllers are built before the request's step count
+            # is known; sync it so the cooldown window protects the real tail.
+            sync_probe_free_num_steps(ctrl, len(timesteps))
+            ctrl.reset()
+            self._teacache_last_model_id = None
 
         for step_index, timestep in enumerate(timesteps):
             current_model = self._select_transformer(timestep, boundary_timestep)
@@ -403,7 +430,7 @@ class WanOrchestrator:
 
         if ctrl is not None:
             self._teacache_last_stats = ctrl.stats()
-            print(f"[wan-teacache] {self._teacache_last_stats}", flush=True)
+            print(f"[teacache] stats: {self._teacache_last_stats}", flush=True)
         return latents
 
     def _select_transformer(self, timestep: torch.Tensor, boundary_timestep: float | None):

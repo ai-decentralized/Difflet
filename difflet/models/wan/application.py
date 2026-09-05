@@ -294,6 +294,9 @@ class NeuronWanApplication(MultiComponentApplication):
             num_frames=num_frames,
             max_text_length=text_seq_len,
             teacache_calibration_path=self.kwargs.get("teacache_calibration_path"),
+            # Probe-free modes: runtime-only, never part of the artifact identity.
+            teacache_cadence=self.kwargs.get("teacache_cadence"),
+            teacache_online_delta_alpha=self.kwargs.get("teacache_online_delta_alpha"),
         )
 
     def components(self) -> list[ComponentSpec]:

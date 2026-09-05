@@ -197,13 +197,53 @@ def test_teacache_denoise_skips_and_caches(tmp_path, capsys):
     )
     out = pipe(bundle=_bundle(), timesteps=torch.tensor([1.0, 0.6, 0.3]))
     # cadence=1: step0/step1 run full, step2 is skipped (reuses cached residuals).
-    assert transformer.mod_calls == 3
+    # A cadence calibration is probe-free: the host block-0 signal is never
+    # computed (same rule as Wan's shadow skip, cclog 84/89).
+    assert transformer.mod_calls == 0
     assert len(transformer.calls) == 2
     assert pipe._teacache_controller.stats()["skipped_steps"] == 1
     assert out.latents.shape == (1, 6, 128)
-    assert "[ltx2-teacache]" in capsys.readouterr().out
+    assert "[teacache] stats:" in capsys.readouterr().out
     # controller is built once and reused on subsequent calls
     assert pipe._maybe_init_teacache() is True
+
+
+def test_fixed_cadence_skips_without_block0_signal(tmp_path, capsys):
+    # Regression for the CLI-dropped flag: a plain FakeDualStreamTransformer
+    # has NO teacache_mod_input hook — the probe-free controller must never
+    # compute the host block-0 signal, must sync num_steps to the request,
+    # and must report the skip stats.
+    transformer = FakeDualStreamTransformer(video_value=0.5, audio_value=0.25)
+    pipe = _orch(tmp_path, transformer=transformer, teacache_cadence=2)
+    assert pipe._maybe_init_teacache() is True
+    assert pipe._teacache_controller.needs_signal() is False
+
+    # 14 steps, warmup/cooldown 5, cadence 2 -> skips at steps 6 and 8.
+    out = pipe(bundle=_bundle(), timesteps=torch.linspace(1.0, 0.1, steps=14))
+    stats = pipe._teacache_controller.stats()
+    assert stats == {**stats, "full_steps": 12, "skipped_steps": 2, "probe_calls": 0}
+    assert len(transformer.calls) == 12
+    assert pipe._teacache_controller.calibration.num_steps == 14
+    assert out.latents.shape == (1, 6, 128)
+    assert torch.isfinite(out.latents).all() and torch.isfinite(out.audio_latents).all()
+    printed = capsys.readouterr().out
+    assert "[teacache] probe-free controller enabled for ltx_2/64x96x17" in printed
+    assert "[teacache] stats: {'full_steps': 12, 'skipped_steps': 2" in printed
+
+
+def test_probe_free_modes_are_exclusive_with_calibration_path(tmp_path):
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        _orch(
+            tmp_path, transformer=FakeDualStreamTransformer(), teacache_cadence=2,
+            teacache_calibration_path=_write_calibration(tmp_path),
+        )
+
+
+def test_online_delta_mode_builds_probe_free_controller(tmp_path):
+    pipe = _orch(tmp_path, transformer=FakeDualStreamTransformer(),
+                 teacache_online_delta_alpha=0.6)
+    assert pipe._teacache_controller.needs_signal() is False
+    assert pipe._teacache_controller.calibration.online_delta_alpha == pytest.approx(0.6)
 
 
 # --------------------------------------------------------------------------- #

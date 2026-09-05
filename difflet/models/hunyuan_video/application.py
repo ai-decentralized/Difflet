@@ -586,8 +586,16 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 config=config,
             )
 
+            # The probe is a sibling sub-app with its own NEFF (compiled and
+            # loaded as the "teacache_probe" component). Only the adaptive
+            # TeaCache modes need it; callers that never run them (the CLI's
+            # plain / probe-free runs) opt out so no probe NEFF is compiled or
+            # loaded. Default True keeps the Python API unchanged.
             teacache_fused = bool(kwargs.get("teacache_fused", False))
-            if teacache_fused:
+            enable_teacache_probe = bool(kwargs.get("enable_teacache_probe", True))
+            if not enable_teacache_probe:
+                pass
+            elif teacache_fused:
                 from difflet.backends.trainium.hunyuan_video.teacache_probe import (
                     NeuronHunyuanVideoTeacacheProbeFusedApplication,
                 )
@@ -664,6 +672,9 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
             num_frames=self.shape["num_frames"],
             teacache_speedup=kwargs.get("teacache_speedup"),
             teacache_calibration_path=kwargs.get("teacache_calibration_path"),
+            # Probe-free modes: runtime-only, never part of the artifact identity.
+            teacache_cadence=kwargs.get("teacache_cadence"),
+            teacache_online_delta_alpha=kwargs.get("teacache_online_delta_alpha"),
         )
 
     def components(self) -> list[ComponentSpec]:

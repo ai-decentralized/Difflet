@@ -127,7 +127,13 @@ class NeuronFluxPipeline(FluxPipeline):
         # parallel is incompatible (asserted off in the application).
         if teacache_enabled is False and getattr(self, "teacache_controller", None) is not None:
             self.teacache_controller.reset()
-        if getattr(self, "teacache_probe", None) is not None and teacache_enabled is not False:
+        # Probe-free modes (fixed cadence / online-delta) have a controller but
+        # no probe — they need the same teacache loop, which handles fused=False
+        # by never dispatching a probe call.
+        if (
+            getattr(self, "teacache_probe", None) is not None
+            or getattr(self, "teacache_controller", None) is not None
+        ) and teacache_enabled is not False:
             with self.transformer.image_rotary_emb_cache_context():
                 return self._call_with_teacache(
                     prompt=prompt,
@@ -586,6 +592,17 @@ class NeuronFluxPipeline(FluxPipeline):
         record = getattr(self, "_tc_record", False)
         empty_guidance = torch.tensor([], device=device, dtype=latents.dtype)
         if controller is not None:
+            # Probe-free modes (cadence / online-delta) are built before the
+            # request's step count is known; sync it so the cooldown window
+            # ([num_steps - cooldown, num_steps)) protects the real tail.
+            cal = controller.calibration
+            probe_free = int(cal.cadence) > 0 or float(cal.online_delta_alpha) > 0.0
+            if probe_free and int(cal.num_steps) != int(num_inference_steps):
+                import dataclasses
+
+                controller.calibration = dataclasses.replace(
+                    cal, num_steps=int(num_inference_steps)
+                )
             controller.reset()
         self._tc_last_trajectory = []
         self._tc_pairs = []
@@ -677,6 +694,9 @@ class NeuronFluxPipeline(FluxPipeline):
                     progress_bar.update()
                 if XLA_AVAILABLE:
                     xm.mark_step()
+
+        if controller is not None:
+            print(f"[teacache] stats: {controller.stats()}")
 
         if output_type == "latent":
             image = latents

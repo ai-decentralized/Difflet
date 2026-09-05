@@ -218,6 +218,8 @@ class NeuronQwenImageApplication(MultiComponentApplication):
             teacache_speedup=kwargs.get("teacache_speedup"),
             teacache_calibration=kwargs.get("teacache_calibration"),
             teacache_calibration_path=kwargs.get("teacache_calibration_path"),
+            teacache_cadence=kwargs.get("teacache_cadence"),
+            teacache_online_delta_alpha=kwargs.get("teacache_online_delta_alpha"),
         )
 
     def components(self) -> list[ComponentSpec]:

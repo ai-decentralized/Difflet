@@ -66,6 +66,17 @@ def test_runtime_only_app_kwargs_excluded_from_key():
     assert cache_key(spec_a) == cache_key(spec_b)
 
 
+def test_probe_free_teacache_kwargs_excluded_from_key():
+    # Fixed-cadence / online-delta TeaCache are host-side-only skip logic (no
+    # probe NEFF): --teacache-cadence must hit the same warm cache as a plain
+    # generate. Regression for the cadence cache-miss found on device
+    # (2026-08-30: 'no compiled artifacts found' for a warm tp4 cache).
+    spec_a = _spec(application_kwargs={
+        "teacache_cadence": 2, "teacache_online_delta_alpha": 0.3, "foo": 1})
+    spec_b = _spec(application_kwargs={"foo": 1})
+    assert cache_key(spec_a) == cache_key(spec_b)
+
+
 def test_trivial_candidate_keeps_key_identical():
     spec_default = _spec()
     spec_trivial = _spec(candidate=CandidateConfig(max_candidates=1))

@@ -282,6 +282,10 @@ class NeuronLTX2Application(MultiComponentApplication):
             audio_num_frames=self.audio_num_frames,
             frame_rate=self.frame_rate,
             teacache_calibration_path=self.kwargs.get("teacache_calibration_path"),
+            # Probe-free modes: runtime-only (_RUNTIME_ONLY_APP_KWARGS), never
+            # part of the compile-cache key.
+            teacache_cadence=self.kwargs.get("teacache_cadence"),
+            teacache_online_delta_alpha=self.kwargs.get("teacache_online_delta_alpha"),
         )
 
     def components(self) -> list[ComponentSpec]:
