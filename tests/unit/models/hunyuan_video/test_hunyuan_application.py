@@ -601,3 +601,26 @@ def test_backbone_world_size_is_process_world(monkeypatch, parallel):
             )
     assert captured["world_size"] == parallel.world_size
     assert captured["tp_degree"] == parallel.tp_degree
+
+
+@pytest.mark.parametrize("parallel", _PARALLEL_CONFIGS)
+def test_backbone15_world_size_is_process_world(monkeypatch, parallel):
+    # 1.5 had the same tp_degree wiring the 1.0 VAE crashed on; it is latent
+    # only because 1.5 has no CP yet.
+    captured = _capture_config_factory(monkeypatch, "create_hunyuan_video15_backbone_config")
+    monkeypatch.setattr(app, "_load_diffusers_config", lambda path: SimpleNamespace())
+    with tempfile.TemporaryDirectory() as path:
+        os.makedirs(os.path.join(path, "transformer"))
+        with open(os.path.join(path, "transformer", "config.json"), "w") as fh:
+            fh.write("{}")
+        with pytest.raises(_Stop):
+            app.NeuronHunyuanVideoApplication(
+                model_path=path,
+                parallel=parallel,
+                dtype="bf16",
+                shape={},
+                model_version="1.5",
+                enable_vae_decoder=False,
+            )
+    assert captured["world_size"] == parallel.world_size
+    assert captured["tp_degree"] == parallel.tp_degree
