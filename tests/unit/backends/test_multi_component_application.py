@@ -9,6 +9,7 @@ from difflet.backends.trainium.core.multi_component_application import (
     ComponentSpec,
     MultiComponentApplication,
 )
+from difflet.backends.trainium.core.world_check import NeuronWorldMismatchError
 
 
 class DummyComponent:
@@ -120,7 +121,9 @@ def test_load_sorts_by_priority_then_world_size_and_clamps_single_core(tmp_path)
     events: list[str] = []
     small = DummyComponent(name="small", tp_degree=1, world_size=1, events=events)
     big = DummyComponent(name="big", tp_degree=4, world_size=4, events=events)
-    explicit = DummyComponent(name="explicit", tp_degree=2, world_size=2, events=events)
+    # Same process world as `big` (mixed TP is fine; mixed world is rejected —
+    # see test_load_rejects_mixed_worlds_before_touching_any_component).
+    explicit = DummyComponent(name="explicit", tp_degree=2, world_size=4, events=events)
     app = DummyMultiComponentApplication(
         [
             ComponentSpec("small", small),
@@ -145,6 +148,46 @@ def test_load_sorts_by_priority_then_world_size_and_clamps_single_core(tmp_path)
     assert small.load_calls[0]["start_rank_id"] == 0
     assert small.load_calls[0]["local_ranks_size"] == 1
     assert small.load_calls[0]["skip_warmup"] is True
+
+
+def test_load_rejects_mixed_worlds_before_touching_any_component(tmp_path):
+    # The HunyuanVideo tp2cp2 signature (DiT world 4 + VAE world 2 in one
+    # process) SIGSEGVed the Neuron runtime at weight init on device
+    # (2026-08-30). It must now fail before the first component loads.
+    events: list[str] = []
+    dit = DummyComponent(name="transformer", tp_degree=2, world_size=4, events=events)
+    vae = DummyComponent(name="vae_decoder", tp_degree=1, world_size=2, events=events)
+    app = DummyMultiComponentApplication(
+        [ComponentSpec("transformer", dit), ComponentSpec("vae_decoder", vae)]
+    )
+
+    with pytest.raises(NeuronWorldMismatchError) as excinfo:
+        app.load(str(tmp_path / "compiled"), skip_warmup=True)
+
+    assert events == []  # zero device time spent
+    assert dit.load_calls == [] and vae.load_calls == []
+    assert "transformer=w4" in str(excinfo.value)
+    assert "vae_decoder=w2" in str(excinfo.value)
+
+
+def test_load_accepts_one_world_with_mixed_tp_and_a_standalone_component(tmp_path):
+    # Flux/HunyuanVideo resident topology: tp4/w4 + tp1/w4 co-resident, plus a
+    # world-1 standalone component clamped to rank 0.
+    events: list[str] = []
+    t5 = DummyComponent(name="t5", tp_degree=4, world_size=4, events=events)
+    clip = DummyComponent(name="clip", tp_degree=1, world_size=4, events=events)
+    vae = DummyComponent(name="vae", tp_degree=1, world_size=1, events=events)
+    app = DummyMultiComponentApplication(
+        [ComponentSpec("clip", clip), ComponentSpec("t5", t5), ComponentSpec("vae", vae)]
+    )
+
+    app.load(str(tmp_path / "compiled"), start_rank_id=0, local_ranks_size=4, skip_warmup=True)
+
+    assert events == ["load:clip", "load:t5", "load:vae"]
+    assert clip.load_calls[0]["local_ranks_size"] == 4
+    assert t5.load_calls[0]["local_ranks_size"] == 4
+    assert vae.load_calls[0]["local_ranks_size"] == 1
+    assert vae.load_calls[0]["start_rank_id"] == 0
 
 
 def test_select_filters_components_and_rejects_unknown(tmp_path):

@@ -33,7 +33,7 @@ from neuronx_distributed.trace.trace import get_sharded_checkpoint
 from neuronx_distributed.utils.model_utils import init_on_device
 from safetensors.torch import load_file
 
-from difflet.backends.trainium.core import shared_weights
+from difflet.backends.trainium.core import shared_weights, world_check
 from difflet.backends.trainium.core.config import InferenceConfig, NeuronConfig
 from difflet.backends.trainium.core.model_wrapper import (
     CONTEXT_ENCODING_MODEL_TAG,
@@ -443,6 +443,23 @@ class NeuronApplicationBase(torch.nn.Module):
         self, compiled_model_path, start_rank_id=None, local_ranks_size=None, skip_warmup=False
     ):
         compiled_model_path = normalize_path(compiled_model_path)
+
+        # Fail fast on a topology mismatch before anything touches the device:
+        # a NEFF compiled for another world/tp, or a component whose world
+        # disagrees with the world this process already committed to. Both
+        # used to surface as runtime crashes (SIGSEGV / std::out_of_range);
+        # see world_check.py for the on-device history.
+        world_check.check_artifact_world(
+            type(self).__name__,
+            declared_world=self.neuron_config.world_size,
+            declared_tp=self.neuron_config.tp_degree,
+            saved_neuron_config=world_check.read_saved_neuron_config(compiled_model_path),
+        )
+        world_check.check_process_world(
+            type(self).__name__,
+            declared_world=self.neuron_config.world_size,
+            local_ranks_size=local_ranks_size,
+        )
 
         # set runtime env vars if needed
         set_env_vars(self.neuron_config)

@@ -15,6 +15,7 @@ from typing import Any
 import torch.nn as nn
 
 from difflet import envs
+from difflet.backends.trainium.core import world_check
 from difflet.backends.trainium.utils.compile_allocator import without_allocator_preload
 from difflet.backends.trainium.utils.compile_retry import retrying_cached_failures
 
@@ -80,6 +81,13 @@ class MultiComponentApplication(nn.Module, ABC):
         specs = self._selected_components(select)
         if not specs:
             raise NotImplementedError(self.no_components_message("load"))
+
+        # One process, one world: refuse a mixed-world component set before any
+        # component is loaded, so a mis-wired topology costs zero device time
+        # instead of a SIGSEGV halfway through (see world_check.py).
+        world_check.check_component_worlds(
+            (spec.name, self._component_world_size(spec)) for spec in specs
+        )
 
         for spec in self._load_ordered(specs):
             self._load_one(
@@ -258,6 +266,18 @@ class MultiComponentApplication(nn.Module, ABC):
         start_rank_id: int | None,
         local_ranks_size: int | None,
     ) -> tuple[int | None, int | None]:
+        """Rank range a component loads on.
+
+        A ``world_size == 1`` component is the standalone-stage convention
+        (Wan/Qwen ``vae`` subprocesses, HunyuanVideo 1.5 ``process`` block
+        load): it runs alone on rank 0 regardless of the app-level range.
+        Every other component must already match the process world — that is
+        enforced up front by ``world_check.check_component_worlds`` in
+        ``load`` — so it inherits the app-level range unchanged. There is
+        deliberately no "clamp a smaller world to a sub-range" branch: mixing
+        worlds in one process crashes the Neuron runtime (SIGSEGV on device,
+        2026-08-30), so such a component is rejected, not accommodated.
+        """
         config = getattr(component, "config", None)
         neuron_config = getattr(config, "neuron_config", None)
         world_size = getattr(neuron_config, "world_size", None)

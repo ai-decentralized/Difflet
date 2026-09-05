@@ -331,27 +331,13 @@ class NeuronWanApplication(MultiComponentApplication):
             )
         return super().no_components_message(action)
 
-    @staticmethod
-    def _component_load_rank_range(
-        component,
-        *,
-        start_rank_id: int | None,
-        local_ranks_size: int | None,
-    ) -> tuple[int | None, int | None]:
-        """Clamp each component to its own world_size.
-
-        Text encoder uses tp-only (world_size=tp), transformer uses tp*cp.
-        When the app-level local_ranks_size=tp*cp, text encoder must still
-        load on only tp ranks or weight initialization crashes.
-        """
-        config = getattr(component, "config", None)
-        neuron_config = getattr(config, "neuron_config", None)
-        world_size = getattr(neuron_config, "world_size", None)
-        if world_size == 1:
-            return 0 if start_rank_id is not None else None, 1
-        if world_size is not None and local_ranks_size is not None and world_size < local_ranks_size:
-            return start_rank_id, world_size
-        return start_rank_id, local_ranks_size
+    # No _component_load_rank_range override: every co-resident Wan component
+    # (text encoder, transformer, transformer_2) declares world_size =
+    # parallel.world_size since cc9316c, and the VAE (world_size=1) runs in its
+    # own stage subprocess. The former override's "clamp a smaller world to a
+    # sub-range" branch described a text-encoder wiring that never shipped and
+    # was dead code from the day it landed; the base class now rejects mixed
+    # worlds outright (world_check.py).
 
     def __call__(self, *args: Any, **kwargs: Any):
         if self.transformer is not None and len(args) >= 3:
