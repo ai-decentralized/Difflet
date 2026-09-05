@@ -1,89 +1,17 @@
-"""CPU regression tests for Qwen's probe-free TeaCache path (b27284b).
+"""CPU regression tests for Qwen's probe-free TeaCache path, fixed in b27284b.
 
-Two separate defects, device-confirmed on 2026-08-30 (b27284b's commit
-message): a 50-step cadence-2 run completed with zero skipped steps. Neither
-had any coverage before this file.
-
-(a) Constructor wiring: --teacache-cadence / --teacache-online-delta were
-    forwarded into the staged CLI's argv, but the flag was then silently
-    dropped across three hops before ever reaching
-    ``QwenImageOrchestrator`` -- the staged app-construction call
-    (``cli/orchestrators/qwen_image.py``) never passed it to
-    ``NeuronQwenImageApplication``, whose own constructor
-    (``models/qwen_image/application.py``) never forwarded it out of
-    ``**kwargs`` into the pipeline, whose constructor
-    (``models/qwen_image/pipeline.py:31-45``, pre-b27284b) had no matching
-    parameters at all. This test exercises the last and decisive hop: the
-    constructor itself now accepts the kwargs and builds a working
-    probe-free controller. The two upstream hops are pure argument
-    threading through the real Neuron application/CLI layers, which need
-    the Neuron SDK to construct -- unavailable here (see the audit of
-    b27284b for the by-hop trace).
-
-(b) The num_steps sync at ``models/qwen_image/pipeline.py:220-234``:
-    the probe-free controller is built once, in ``__init__``, with
-    ``num_steps=0`` (the request's step count isn't known yet). Without the
-    sync, ``TeaCacheController.should_skip``'s tail guard
-    (``difflet/pipeline/teacache.py``: ``step_index >= num_steps -
-    cooldown_steps``) reads ``step_index >= 0 - 5 == -5``, which is true for
-    every non-negative step_index -- so should_skip returns False on its
-    very first branch, every step, and cadence never gets consulted. Zero
-    skips, no error, no warning: exactly the device symptom.
-
-Qwen has no dispatch bug: ``__call__`` always calls one ``_denoise`` (no
-diffusers-style baseline/teacache method split, unlike Flux's a9f71fa,
-tests/unit/models/flux/test_flux_teacache_dispatch.py); every gate inside
-``_denoise`` is an inline ``if controller is not None``. So this is not a
-port of the flux test. ``QwenImageOrchestrator`` is a bespoke pipeline class
-(not a diffusers subclass) exactly like ``WanOrchestrator``, so this follows
-the wan pattern instead
-(``tests/unit/models/wan/test_wan_pipeline_orchestrator.py:391-449``): a
-``FakeTransformer`` that records calls, direct construction, exact skip-
-index assertions measured off the real ``TeaCacheController``.
+Two defects, both of which let a cadence-2 run complete with zero skipped
+steps and no error: ``--teacache-cadence`` / ``--teacache-online-delta`` never
+reached ``QwenImageOrchestrator.__init__``, and the controller's ``num_steps``
+was left at 0, so ``should_skip``'s cooldown guard fired on every step. Each
+test fails against its pre-fix condition and passes against the current code.
 """
-
-import sys
-import types
 
 import torch
 
-# ---------------------------------------------------------------------------
-# Sandbox-only workaround: this environment has no Neuron SDK
-# (neuronx_distributed) installed, and pipeline.py imports one name
-# (QwenImageDiTInputBundle) from application.py at module level -- which
-# pulls in the whole Trainium toolchain just for that. application.py exists
-# specifically to avoid this: QwenImageDiTInputBundle and its dtype helpers
-# were split out into contract.py "for the same reason the modeling was:
-# [application.py] imports NxD at module level, so anything importing it
-# drags the whole Neuron toolchain in. These two pieces are pure ... and
-# application.py re-exports them" (contract.py's own docstring). So the real
-# import is tried first; only on failure (no Neuron SDK) does a minimal
-# stand-in module get installed, re-exporting the REAL contract.py dataclass
-# -- not a fake one -- under application.py's name, exactly the re-export
-# application.py itself does. A correctly provisioned environment (the
-# reference test environment per tests/conftest.py) never touches this.
-#
-# This is unrelated to and does not overlap with the torchvision workaround
-# in tests/unit/models/flux/test_flux_teacache_dispatch.py (that one works
-# around a broken torchvision/torch ABI pairing so diffusers.FluxPipeline can
-# import at all; Qwen's pipeline.py doesn't touch diffusers or torchvision).
-# Two different sandbox defects with two different narrow fixes -- neither
-# belongs in conftest.py on this evidence; conftest.py would only make sense
-# if a third file needed the *same* shim.
-# ---------------------------------------------------------------------------
-try:
-    import difflet.models.qwen_image.application  # noqa: F401
-except Exception:
-    from difflet.models.qwen_image.contract import QwenImageDiTInputBundle as _RealBundle
-
-    _stub = types.ModuleType("difflet.models.qwen_image.application")
-    _stub.QwenImageDiTInputBundle = _RealBundle
-    sys.modules["difflet.models.qwen_image.application"] = _stub
-
-
-from difflet.models.qwen_image.contract import QwenImageDiTInputBundle  # noqa: E402
-from difflet.models.qwen_image.pipeline import QwenImageOrchestrator  # noqa: E402
-from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController  # noqa: E402
+from difflet.models.qwen_image.contract import QwenImageDiTInputBundle
+from difflet.models.qwen_image.pipeline import QwenImageOrchestrator
+from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
 
 
 class FakeTransformer:
@@ -116,7 +44,7 @@ def test_probe_free_kwargs_reach_the_orchestrator_constructor():
     Fails against the pre-fix constructor (``QwenImageOrchestrator.__init__``
     with no ``teacache_cadence``/``teacache_online_delta_alpha`` parameters
     at all -- a TypeError on the call below) and passes against the current
-    one (``models/qwen_image/pipeline.py:31-45,94-114``).
+    one (``models/qwen_image/pipeline.py``).
     """
     pipeline = QwenImageOrchestrator(
         model_path="/fake/model",
@@ -140,13 +68,12 @@ def test_probe_free_kwargs_reach_the_orchestrator_constructor():
 
 
 def test_num_steps_sync_is_required_for_probe_free_skips():
-    """Regression for the num_steps sync at pipeline.py:220-234.
+    """Regression for the num_steps sync in ``models/qwen_image/pipeline.py``.
 
-    The controller here is attached directly (not via the constructor
-    kwarg) so this test is independent of (a): reverting the constructor
-    wiring cannot affect it. Fails (zero skips, should_skip never leaves
-    its tail-guard branch) if the sync before the length-mismatch disable
-    check is removed; passes against the current code.
+    The controller is attached directly rather than through the constructor
+    kwarg, so this test is independent of the wiring fix above. Fails (zero
+    skips, should_skip never leaves its tail-guard branch) if the sync
+    before the length-mismatch disable check is removed.
     """
     transformer = FakeTransformer()
     pipeline = QwenImageOrchestrator(

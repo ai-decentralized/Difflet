@@ -1,133 +1,19 @@
-"""CPU regression test for the a9f71fa dispatch bug.
+"""CPU regression test for the FLUX TeaCache dispatch bug fixed in a9f71fa.
 
 ``NeuronFluxPipeline.__call__`` gated entry to the TeaCache denoise loop on
-``teacache_probe is not None`` alone. A probe-free controller (fixed cadence
-/ online-delta -- cclog 84/91, no probe NEFF, no graph change) was built
-correctly by the application layer but the pipeline never checked for it, so
-the request silently fell through to the baseline diffusers denoise loop: a
-clean run, a valid image, zero skips, no error. The worst kind of bug --
-nothing looked wrong.
-
-The fix (``difflet/models/flux/pipeline.py:133-136``) widened the dispatch
-condition to ``teacache_probe is not None or teacache_controller is not
-None``, routing probe-free requests into ``_call_with_teacache`` -- the same
-loop already handled ``fused=False`` (no probe NEFF dispatch) correctly.
-
-Mirrors the probe-free behavioural pattern in
-``tests/unit/models/wan/test_wan_pipeline_orchestrator.py:391-449`` (a
-``FakeTransformer`` that records calls, direct construction with a
-probe-free controller, exact skip assertions), adapted to FLUX's structure:
-unlike Wan's single bespoke ``WanOrchestrator``, ``NeuronFluxPipeline``
-subclasses ``diffusers.FluxPipeline`` directly, and application-level probe-
-free wiring lives in ``NeuronFluxApplication`` (``difflet/models/flux/
-application.py:338-361``), which loads real Neuron checkpoints and needs the
-Neuron SDK -- unavailable here. So this test builds a real
-``NeuronFluxPipeline`` with light fakes for the diffusers-side components
-(scheduler, vae, tokenizers, text encoders, transformer) and mounts
-``teacache_probe``/``teacache_controller`` directly the same way
-``NeuronFluxApplication.__init__`` does, so the real ``__call__`` dispatch
-and the real ``_call_with_teacache`` loop -- the code under test -- run
-unmodified.
+``teacache_probe is not None`` alone, so a probe-free controller was built
+but never consulted -- the request fell through to the baseline diffusers
+loop with zero skips and no error. Fails against that condition; passes
+against the widened one in ``difflet/models/flux/pipeline.py``.
 """
 
-import enum
-import importlib.abc
-import importlib.machinery
-import sys
-import types
 from types import SimpleNamespace
 
 import torch
+from diffusers import FlowMatchEulerDiscreteScheduler
 
-# ---------------------------------------------------------------------------
-# Sandbox-only workaround: this test environment's installed torchvision
-# build is ABI-incompatible with its torch build (`torchvision::nms` operator
-# missing), so bare `import torchvision` crashes -- and transformers'
-# `image_utils.py` imports torchvision unconditionally, so importing
-# `diffusers.FluxPipeline` (and therefore difflet.models.flux.pipeline)
-# crashes with it. None of that machinery (CLIP image processors, video
-# utils) is reachable from the __call__ dispatch / _call_with_teacache code
-# path this test exercises. The reference test environment (tests/conftest.py:
-# "the rest of the validated Neuron stack ... is importable") hits none of
-# this, so the block below is a no-op there.
-# ---------------------------------------------------------------------------
-try:
-    import torchvision  # noqa: F401
-except Exception:
-
-    class _TorchvisionDummy:
-        def __init__(self, *a, **k):
-            pass
-
-        def __call__(self, *a, **k):
-            return _TorchvisionDummy()
-
-        def __getattr__(self, name):
-            # Dunder lookups must behave like a real module missing the
-            # attribute (raise AttributeError), not fabricate a value:
-            # inspect.getmodule()'s global sys.modules scan reads __file__ on
-            # every loaded module, and a fabricated non-string __file__
-            # crashes unrelated code (confirmed: breaks plain `import torch`
-            # inside torch._library.custom_ops -> inspect.getsourcefile).
-            if name.startswith("__") and name.endswith("__"):
-                raise AttributeError(name)
-            return _TorchvisionDummy()
-
-    class _StubModule(types.ModuleType):
-        __getattr__ = _TorchvisionDummy.__getattr__
-
-    class _StubLoader(importlib.abc.Loader):
-        def create_module(self, spec):
-            mod = _StubModule(spec.name)
-            mod.__path__ = []
-            return mod
-
-        def exec_module(self, module):
-            pass
-
-    class _BlockedTorchvisionFinder(importlib.abc.MetaPathFinder):
-        """Implements only the modern find_spec protocol and declines (returns
-        None) for every non-torchvision name. A finder left in sys.meta_path
-        for the rest of the pytest session (as this one is -- there's no
-        per-module import hook to unregister it after) is consulted for
-        EVERY import in the process, including pytest's own test-module
-        loader (_pytest.pathlib._import_module_using_spec calls
-        `find_spec` directly on each registered finder). An earlier version
-        of this finder implemented only the legacy find_module/load_module
-        pair; Python's import system tolerated that for torchvision imports
-        but pytest's own loader called find_spec directly and crashed with
-        `AttributeError: '_BlockedTorchvisionFinder' object has no attribute
-        'find_spec'` collecting every test file after this one in the same
-        session -- confirmed by running this file followed by
-        tests/unit/test_envs.py together. find_spec avoids that entirely by
-        being a well-behaved finder for the one prefix it cares about.
-        """
-
-        def find_spec(self, fullname, path, target=None):
-            if fullname == "torchvision" or fullname.startswith("torchvision."):
-                return importlib.machinery.ModuleSpec(fullname, _StubLoader(), is_package=True)
-            return None
-
-    sys.meta_path.insert(0, _BlockedTorchvisionFinder())
-
-    import torchvision.transforms as _tv_transforms
-
-    class _InterpolationMode(enum.Enum):
-        NEAREST_EXACT = "nearest_exact"
-        NEAREST = "nearest"
-        BOX = "box"
-        BILINEAR = "bilinear"
-        HAMMING = "hamming"
-        BICUBIC = "bicubic"
-        LANCZOS = "lanczos"
-
-    _tv_transforms.InterpolationMode = _InterpolationMode
-
-
-from diffusers import FlowMatchEulerDiscreteScheduler  # noqa: E402
-
-from difflet.models.flux.pipeline import NeuronFluxPipeline  # noqa: E402
-from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController  # noqa: E402
+from difflet.models.flux.pipeline import NeuronFluxPipeline
+from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
 
 
 class _NullCtx:
@@ -220,8 +106,7 @@ def test_probe_free_controller_is_consulted_without_a_mounted_probe():
 
     Fails against the old dispatch condition (``teacache_probe is not
     None`` alone) and passes against the current one (``... or
-    teacache_controller is not None``) --
-    difflet/models/flux/pipeline.py:133-136.
+    teacache_controller is not None``).
     """
     pipe, transformer = _build_pipeline()
 
