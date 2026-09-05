@@ -78,7 +78,7 @@ Resulting cells: **28 total = 18 expected PASS + 1 expected XFAIL (hunyuan_video
 |  | tp4 | tp2cp2 | tp2cfg | tp4sp |
 |---|---|---|---|---|
 | flux | run | run | SKIP (distilled) | run |
-| qwen_image | run | run | SKIP (distilled) | run (SP since 2026-09-02) |
+| qwen_image | run | run | SKIP (distilled) | SKIP (no SP) |
 | ltx_2 | run | SKIP (no CP) | run | SKIP (no SP) |
 | wan | run | run | run | run |
 | wan2_1 | run | run | run | run |

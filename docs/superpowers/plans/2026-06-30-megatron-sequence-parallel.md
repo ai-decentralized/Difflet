@@ -61,12 +61,11 @@ are about stream structure and which forward code is CPU-reachable (coverage sco
 | **LTX-2** | tri-stream (video/audio/text) + cross-modality; CFG-parallel only, no CP | row-parallel per stream | under `backends/trainium/` (omitted) | **Deferred** (tri-stream + no CP foundation) |
 
 **Scope (this increment):** Wan, Flux, HunyuanVideo — **device-verified** (dense-vs-SP
-cosine ≥ 0.999 at tp=4 on trn2). Qwen-Image landed 2026-09-02 via the `modeling_qwen`
-fork (dual-stream pure SP) with its own device parity gate; LTX-2 **deferred** (see below).
+cosine ≥ 0.999 at tp=4 on trn2). Qwen-Image and LTX-2 **deferred** (see below).
 
 ### On-device verification (trn2.3xlarge, 4 NeuronCores, tp=4)
 
-`scripts/{wan,flux,hunyuan,qwen}_sp_parity_smoke.sh` compile a dense backbone and an SP
+`scripts/{wan,flux,hunyuan}_sp_parity_smoke.sh` compile a dense backbone and an SP
 backbone, run a fixed-seed forward on each, and compare:
 
 | Model | dense-vs-SP cosine | verdict |
@@ -74,7 +73,6 @@ backbone, run a fixed-seed forward on each, and compare:
 | Wan | 0.99993 | ✅ |
 | Flux | 0.99997 | ✅ |
 | HunyuanVideo | 0.999997 | ✅ |
-| Qwen-Image | 0.999991 (tp=4, 2026-09-02) | ✅ |
 
 All three also generate end-to-end via `difflet generate --sp --tp-degree 4`.
 
@@ -90,23 +88,18 @@ tests, which use identity collectives — see [[difflet-sp-cpu-identity-testing]
 
 Both proved that **device parity, not CPU equivalence, is the real correctness gate.**
 
-### Resolved: Qwen-Image (was Deferred)
+### Deferred: Qwen-Image
 
-Qwen's runtime originally **monkey-patched the upstream diffusers
-`QwenImageTransformer2DModel`** rather than reimplementing the forward (as
-Wan/Flux/HunyuanVideo do). In that wrapped trace, the `SPMDRank` per-rank id used by
-the entry sequence scatter was not a live/loaded graph input — it constant-folded to
-its `zeros(1)` init, so every rank read rank 0 and kept chunk 0 (device parity stuck
-at ~0.30, bit-stable).
-
-**Resolution (commit 9a00746 + 2026-09-02 completion):** `difflet/models/qwen_image/
-modeling_qwen.py` now subclasses the diffusers model with SP-aware blocks — per-block
-`g`/`ḡ` around the joint attention and each stream's MLP, norm/modulation/residual on
-sequence shards, `_sp_unbias` on the four row-parallel outputs, and the entry scatter
-through the **materialized SPMD rank buffer** (`scatter_to_process_group_spmd`), the
-same primitive wan's validated SP path uses. `--sp` is accepted for Qwen; the device
-parity gate is `scripts/qwen_sp_parity_smoke.sh`. LTX-2 (tri-stream, no CP foundation)
-and HunyuanVideo-1.5 (segmented runtime) remain out of scope.
+Qwen's runtime **monkey-patches the upstream diffusers `QwenImageTransformer2DModel`**
+rather than reimplementing the forward (as Wan/Flux/HunyuanVideo do). In that wrapped
+trace, the `SPMDRank` per-rank id used by the entry sequence scatter is not a
+live/loaded graph input — it constant-folds to its `zeros(1)` init, so every rank
+reads rank 0 and keeps chunk 0 (device parity stuck at ~0.30, bit-stable). This is a
+weight/trace-plumbing issue specific to the diffusers-patch structure, **not** the SP
+algorithm. Proper fix: reimplement Qwen's forward like the other models (or make the
+SPMDRank buffer a live, sharded graph input in the patched module). `--sp` is rejected
+for Qwen until then. LTX-2 (tri-stream, no CP foundation) and HunyuanVideo-1.5
+(segmented runtime) remain out of scope.
 
 ## 3. Reality checks that shape the plan
 
