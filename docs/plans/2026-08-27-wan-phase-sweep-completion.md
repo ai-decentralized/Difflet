@@ -10,7 +10,8 @@
 
 规格：Wan2.2-T2V-A14B-Diffusers @ `5be7df96`，480×832×9，20 步，guidance 4.0
 （真 CFG），seed 42，commit `6b73692`，四阶段法（compile / drop_caches 冷 e2e /
-3 次 warm 取中位 / realloop step）。详 JSON：`artifacts/parallel_phase_sweep/wan/`。
+3 次 warm 取中位 / realloop step）。详 JSON（机器本地，已 gitignore 不入库，
+有效数据以本表与 §3-§4 为准）：`artifacts/parallel_phase_sweep/wan/`。
 
 | config | compile 冷(s) | e2e 冷(s) | load 冷(s) | load 热(s) | **e2e 热 中位(s)** | **step 中位(ms)** | finite |
 |---|---:|---:|---:|---:|---:|---:|---|

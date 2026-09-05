@@ -99,7 +99,8 @@
 
 旧 `tp4.json`（它机、含 stale 错误记录）移至
 `artifacts/parallel_phase_sweep/qwen/crossref-0828/`。本机（ip-172-31-38-211，
-AL2023 原生 + §1 工具链）tp4 与 tp4sp 均从冷编译起测，四阶段齐测。
+AL2023 原生 + §1 工具链）tp4 与 tp4sp 均从冷编译起测，四阶段齐测。原始 JSON
+机器本地（已 gitignore 不入库），有效数据以下表为准。
 
 | config | compile 冷(s) | load 冷(s) | load 热(s) | e2e 冷(s) | **e2e 热中位(s)** | **step 中位(ms)** (n=19) | finite |
 |---|---:|---:|---:|---:|---:|---:|---|

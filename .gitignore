@@ -55,8 +55,9 @@ htmlcov/
 neuronxcc-*/
 log-neuron-cc.txt
 
-# Flux parallel sweep working logs (compile/generate logs and PNGs are machine-local;
-# the distilled anchors live in benchmark/trn2/flux_*.json)
+# Parallel sweep working artifacts (raw run JSONs, toolchain snapshots, control
+# runs are machine-local; distilled anchors live in benchmark/trn2/flux_*.json,
+# difflet/planner/data/measurements.json, and the docs/reports + docs/plans tables)
 artifacts/flux_parallel_sweep/
 artifacts/parallel_phase_sweep/
 

@@ -4,7 +4,9 @@
 > Wan 在 trn2.3xlarge（4 NeuronCore / 96GB）上**所有可行并行配置**的四阶段实测
 > （compile / 冷 e2e / 热 e2e×3 中位 / 逐步 realloop），并给出跨模型结论。
 >
-> 数据：`artifacts/parallel_phase_sweep/{flux,wan}/`（强制入库）；过程记录见
+> 数据：`artifacts/parallel_phase_sweep/{flux,wan}/`（机器本地原始 JSON，已
+> gitignore 不入库；有效数据以本报告与各 session/completion 文档的表格为准，
+> FLUX 蒸馏锚点在 `benchmark/trn2/flux_*.json`）；过程记录见
 > `docs/plans/2026-08-25-parallel-phase-sweep-session.md`（FLUX 方法论与事故）、
 > `2026-08-26-wan-phase-sweep-session.md`、`2026-08-27-wan-phase-sweep-session.md`
 > 与 `2026-08-27-wan-phase-sweep-completion.md`（Wan 两度换机、容器重建与终局）。
@@ -88,8 +90,8 @@
 **补记（2026-09-02，Qwen-Image）**：SP 首次转正 —— tp4sp 单步 367.7ms vs tp4
 421.7ms（**-12.8%**），热 e2e 59.6 vs 60.8s。双流 MMDiT（image/text 残差流都被
 分片）+ 1024² 长序列，与"SP 收益随分片流条数 × 序列长度增长"的规律一致。详见
-`docs/plans/2026-09-02-qwen-sp-completion.md` 与
-`artifacts/parallel_phase_sweep/qwen/`（tp4sp 编译峰值内存 >124GiB，需 swap）。
+`docs/plans/2026-09-02-qwen-sp-completion.md` §4（原始 JSON 机器本地；
+tp4sp 编译峰值内存 >124GiB，需 swap）。
 
 ## 5. 环境与工具链
 
