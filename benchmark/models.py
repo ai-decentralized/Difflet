@@ -44,6 +44,13 @@ class BenchConfig:
     revision: Optional[str] = None           # pinned HF commit (exact weights for repro)
     tp: int = 4
     cp: int = 1
+    # Parallel axes beyond tp/cp. First-class fields (not extra_generate_flags)
+    # so the result JSON keys configs correctly: a tp4 --sp run must record
+    # sp_enabled=True or it is indistinguishable from plain tp4 (the
+    # planner-benchmark-collection doc's pre-collection must-fix).
+    cp_mode: str = "gather_kv"               # gather_kv | ring | ulysses (cp>1 only)
+    cfg_parallel: bool = False               # --cfg-parallel (true-CFG models only)
+    sp: bool = False                         # --sp (Megatron sequence parallelism)
     dtype: str = "bf16"
     height: Optional[int] = None
     width: Optional[int] = None
@@ -72,6 +79,27 @@ class BenchConfig:
         if self.num_frames is not None:
             f += ["--num-frames", str(self.num_frames)]
         return f
+
+    def parallel_flags(self) -> list[str]:
+        """The full parallel-configuration CLI tokens for this config."""
+        f = ["--tp-degree", str(self.tp), "--cp-degree", str(self.cp)]
+        if self.cp > 1 and self.cp_mode != "gather_kv":
+            f += ["--cp-mode", self.cp_mode]
+        if self.cfg_parallel:
+            f.append("--cfg-parallel")
+        if self.sp:
+            f.append("--sp")
+        return f
+
+    def parallel_dict(self) -> dict:
+        """Result-JSON parallel record (same schema as the phase-sweep JSONs)."""
+        return {
+            "tp_degree": self.tp,
+            "cp_degree": self.cp,
+            "cp_mode": self.cp_mode,
+            "cfg_parallel_enabled": self.cfg_parallel,
+            "sp_enabled": self.sp,
+        }
 
 
 # Keyed by a short slug used for the report filename (benchmark/<slug>.md).

@@ -359,8 +359,7 @@ def _add_serve_flags(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="SECONDS",
         help=(
-            "Maximum time a request may wait in the queue "
-            "(default: 30 for image, 86400 for video)"
+            "Maximum time a request may wait in the queue (default: 30 for image, 86400 for video)"
         ),
     )
     p.add_argument(
@@ -505,6 +504,57 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_cache_flags(run_cmd)
     _add_generate_flags(run_cmd)
 
+    plan_cmd = sub.add_parser(
+        "plan",
+        help="List the parallel configurations this host and model allow "
+        "(read-only: no device, no compile)",
+    )
+    _add_model_flag(plan_cmd)
+    _add_shape_flags(plan_cmd)
+    _add_cache_flags(plan_cmd)
+    plan_cmd.add_argument(
+        "--objective",
+        choices=["latency", "throughput", "balanced"],
+        default="latency",
+        help="What to optimize: single-request latency, aggregate throughput, "
+        "or the geometric mean of both (default: latency)",
+    )
+    plan_cmd.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        help="Denoise steps to score against (default: 20)",
+    )
+    plan_cmd.add_argument(
+        "--total-cores",
+        type=int,
+        default=None,
+        help="Plan for this many NeuronCores instead of the detected count",
+    )
+    plan_cmd.add_argument(
+        "--serving",
+        action="store_true",
+        help="Apply the extra restrictions `difflet serve` imposes",
+    )
+    plan_cmd.add_argument(
+        "--survivors",
+        type=int,
+        default=None,
+        metavar="K",
+        help="Stage-1 cut: only the top-K candidates reach the topology-aware "
+        "stage 2 (default: all)",
+    )
+    plan_cmd.add_argument(
+        "--no-topology",
+        action="store_true",
+        help="Skip stage 2 (topology-aware placement ranking) entirely",
+    )
+    plan_cmd.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON instead of a table",
+    )
+
     clean = sub.add_parser(
         "clean",
         help="Remove Neuron compiler scratch (hash dirs, neuronxcc-*/, "
@@ -567,34 +617,18 @@ def _validate_teacache(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
-# Guidance-distilled models run a single forward pass with the guidance scale
-# baked into the timestep embedding, so CFG-parallel has no second branch to
-# split via the CLI. Hunyuan/Qwen have no true-CFG path at all; Flux is also
-# guidance-distilled and *does* have an opt-in true-CFG path, but we don't expose
-# its --true-cfg-scale/--negative-prompt knobs through the CLI, so cfg-parallel is
-# rejected here too. The staged CLI path builds the app directly (bypassing each
-# model's entry.py guard), so reject before dispatch.
-_DISTILLED_MODELS = {
-    "black-forest-labs/FLUX.1-dev",
-    "hunyuanvideo-community/HunyuanVideo",
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
-    "Qwen/Qwen-Image",
-}
+def _capabilities(model_id: str):
+    """The registry's parallel-strategy declaration for a CLI model id.
 
+    ``difflet/registry.py`` is the single source of truth; the CLI used to keep
+    its own ``_DISTILLED_MODELS`` / ``_SP_SUPPORTED_MODELS`` copies, which
+    ``scripts/verify_cli.py`` then copied again and a drift-guard test pinned
+    together.
+    """
 
-# Models whose backbone wires Megatron-style sequence parallelism, device-verified
-# (dense-vs-SP cosine >= 0.999). Qwen-Image is deferred: its forward monkey-patches
-# the upstream diffusers transformer, where the SPMDRank per-rank id used by the
-# sequence scatter is not a live/loaded graph input, so every rank reads rank 0
-# (tracked follow-up — needs reimplementing Qwen's forward like the others). LTX-2
-# (tri-stream, no CP foundation) and HunyuanVideo-1.5 (segmented runtime) are also
-# out of scope for this increment.
-_SP_SUPPORTED_MODELS = {
-    "black-forest-labs/FLUX.1-dev",
-    "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers",
-    "hunyuanvideo-community/HunyuanVideo",
-}
+    from difflet.registry import resolve_model
+
+    return resolve_model(model_id, model_type=_MODEL_TYPE[model_id]).require_capabilities()
 
 
 def _validate_sp(args: argparse.Namespace) -> None:
@@ -608,10 +642,10 @@ def _validate_sp(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
-    if args.model_id not in _SP_SUPPORTED_MODELS:
+    if not _capabilities(args.model_id).supports_sp:
         print(
             f"Error: {args.model_id} does not support --sp. Sequence parallelism "
-            "is available for Flux, Wan, and HunyuanVideo.",
+            "is available for Flux, Wan, HunyuanVideo, and Qwen-Image.",
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -647,7 +681,9 @@ def _validate_cfg_parallel(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
-    if args.model_id in _DISTILLED_MODELS:
+    # The staged CLI path builds the app directly, bypassing each model's
+    # entry.py guard, so this has to reject before dispatch.
+    if not _capabilities(args.model_id).supports_cfg_parallel:
         print(
             f"Error: {args.model_id} is guidance-distilled (single forward pass "
             "with the guidance scale baked into the timestep embedding); "
@@ -665,6 +701,70 @@ def _replica_cores(args: argparse.Namespace) -> int:
     tp = args.tp_degree or entry.default_parallel.tp_degree
     cfg = 2 if getattr(args, "cfg_parallel", False) else 1
     return tp * (args.cp_degree or 1) * cfg
+
+
+def _resolve_total_cores(args: argparse.Namespace) -> tuple[int | None, str]:
+    """The core budget to validate against, and where the number came from.
+
+    Returns ``(None, ...)`` when the budget is genuinely unknown -- no flag, no
+    env var, and no ``neuron-ls`` to ask. An unknown budget must not be treated
+    as zero or as "fits": validating against a guess would reject configurations
+    that run fine on the user's actual box. Detected values are only trusted
+    when they came from the driver; ``hardware``'s per-platform fallback
+    constants are a shape assumption, not a measurement.
+    """
+
+    total = getattr(args, "total_cores", None)
+    if total is not None:
+        return total, "--total-cores"
+
+    env_value = os.environ.get("NEURON_RT_NUM_CORES", "").strip()
+    if env_value:
+        try:
+            return int(env_value), "NEURON_RT_NUM_CORES"
+        except ValueError:
+            pass
+
+    from difflet.planner.hardware import detect_hardware
+
+    hardware = detect_hardware()
+    if hardware.source.startswith("neuron-ls"):
+        return hardware.allocated_cores, f"detected on {hardware.instance_type}"
+    return None, "undetected"
+
+
+def _validate_capacity(args: argparse.Namespace) -> None:
+    """Reject a parallel config that cannot fit the available NeuronCores.
+
+    ``world_size = dp * cfg * cp * tp`` is a hard requirement: every rank needs
+    its own core. Before hardware detection this could only be checked when the
+    user volunteered ``--total-cores`` or ``NEURON_RT_NUM_CORES``, so the usual
+    outcome of an over-subscribed config was a SIGSEGV or a ``global
+    communicator`` error minutes into a compile. Failing here costs nothing.
+    """
+
+    total, origin = _resolve_total_cores(args)
+    if total is None:
+        return
+    replica = _replica_cores(args)
+    needed = (getattr(args, "dp", None) or 1) * replica
+    if needed <= total:
+        return
+
+    from difflet.registry import resolve_model
+
+    entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
+    tp = args.tp_degree or entry.default_parallel.tp_degree
+    tp_note = "" if args.tp_degree else f" (registry default for {entry.name})"
+    print(
+        f"Error: this parallel config needs {needed} NeuronCores but only "
+        f"{total} are available ({origin}).\n"
+        f"  dp={getattr(args, 'dp', None) or 1} x cfg={2 if getattr(args, 'cfg_parallel', False) else 1} "
+        f"x cp={args.cp_degree or 1} x tp={tp}{tp_note} = {needed}\n"
+        f"  Lower a degree, or pass --total-cores to plan for a larger host.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 
 
 def _validate_dp(args: argparse.Namespace) -> None:
@@ -691,16 +791,7 @@ def _validate_dp(args: argparse.Namespace) -> None:
         )
         raise SystemExit(1)
     if (getattr(args, "dp", None) or 1) > 1 and not worker:
-        total = getattr(args, "total_cores", None)
-        if total is None and os.environ.get("NEURON_RT_NUM_CORES"):
-            total = int(os.environ["NEURON_RT_NUM_CORES"])
-        needed = args.dp * _replica_cores(args)
-        if total is not None and needed > total:
-            print(
-                f"Error: dp*cfg*cp*tp = {needed} cores exceeds available cores ({total}).",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
+        _validate_capacity(args)
 
 
 def _dispatch_dp(args: argparse.Namespace) -> None:
@@ -799,6 +890,8 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(run_cache_command(args))
 
     valid_models = SERVE_VALID_MODELS if args.command == "serve" else VALID_MODELS
+    if args.command == "plan" and getattr(args, "serving", False):
+        valid_models = SERVE_VALID_MODELS
     if args.model_id not in valid_models:
         print(
             f"Error: Unknown model-id '{args.model_id}'. Valid model IDs:\n"
@@ -826,6 +919,9 @@ def main(argv: list[str] | None = None) -> None:
             )
             _validate_cfg_parallel(args)  # re-run with resolved flags
             _validate_sp(args)
+        # After mode resolution: --mode rewrites dp/cfg/cp, so the core budget
+        # has to be checked against the values that will actually be compiled.
+        _validate_capacity(args)
 
     if args.command in ("generate", "run"):
         _validate_teacache(args)
@@ -841,7 +937,11 @@ def main(argv: list[str] | None = None) -> None:
     if argv is None and args.command in ("generate", "run"):
         _ensure_jemalloc()
 
-    if args.command == "serve":
+    if args.command == "plan":
+        from difflet.cli.plan import run as run_plan
+
+        run_plan(args)
+    elif args.command == "serve":
         from difflet.cli.serve import run, validate_serve_args
 
         validate_serve_args(args)

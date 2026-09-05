@@ -46,7 +46,7 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
     res = BenchResult(
         model_id=cfg.model_id, model_type=cfg.model_type, backend=backend,
         device=adapter.device_info(), dtype=cfg.dtype,
-        parallel={"tp_degree": cfg.tp, "cp_degree": cfg.cp},
+        parallel=cfg.parallel_dict(),
         shape={"height": cfg.height, "width": cfg.width, "num_frames": cfg.num_frames},
         steps=cfg.steps, toolchain=adapter.toolchain(),
         config_label=cfg.config_label, timestamp=_utc(),

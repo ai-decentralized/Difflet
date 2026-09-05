@@ -1,5 +1,6 @@
 """DP isolation invariants (spec §Testing 2): the dp axis must never reach a
 worker's compiled graph, and dp>1 must not perturb the compile-cache key."""
+import re
 from pathlib import Path
 
 import difflet
@@ -30,10 +31,18 @@ def test_dp1_cache_key_identical_to_no_dp():
 
 
 def test_no_cli_code_constructs_dp_parallel_config():
-    """Workers must always build dp_degree=1 configs (the dataclass default)."""
+    """Workers must always build dp_degree=1 configs (the dataclass default).
+
+    Matches the *binding* forms -- ``dp_degree=`` as a keyword argument or an
+    assignment -- rather than any mention of the name. Reading
+    ``parallel.dp_degree`` or emitting it as a JSON key (cli/plan.py does both,
+    to report a configuration it was handed) leaves the invariant intact; only
+    setting it would put the dp axis into a worker's compiled graph.
+    """
+    binding = re.compile(r"(?<![.\w])dp_degree\s*=")
     offenders = []
     for path in sorted((REPO / "cli").rglob("*.py")):
-        if "dp_degree" in path.read_text(encoding="utf-8"):
+        if binding.search(path.read_text(encoding="utf-8")):
             offenders.append(str(path.relative_to(REPO)))
     assert offenders == [], f"CLI code must never set dp_degree: {offenders}"
 

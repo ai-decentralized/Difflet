@@ -31,6 +31,7 @@ def stage_compiled_dir_from_values(
     tp_degree: int,
     cp_degree: int,
     cp_mode_suffix: str = "",
+    sp_suffix: str = "",
     height: int,
     width: int,
 ) -> Path:
@@ -41,7 +42,7 @@ def stage_compiled_dir_from_values(
     if stage == "text":
         return base / f"qwen_image_enc_tp{tp}cp{cp}_seq{ENC_SEQ}"
     if stage == "generate":
-        return base / f"qwen_image_dit_tp{tp}cp{cp}{cp_mode_suffix}_h{h}w{w}"
+        return base / f"qwen_image_dit_tp{tp}cp{cp}{cp_mode_suffix}{sp_suffix}_h{h}w{w}"
     if stage == "vae":
         return base / f"qwen_image_vae_h{h}w{w}"
     raise ValueError(f"unknown Qwen stage {stage!r}")
@@ -156,12 +157,16 @@ def _compile_identity(
     # v3: shape-dependent stages carry the canonical shape SET (K=1 uses the
     # same list form); the text encoder is shape-invariant, so its identity
     # carries no shape at all and one artifact serves every shape set.
+    # sp changes the DiT graph (the modeling_qwen fork), so it must be part of
+    # the generate-stage identity or two profiles differing only in --sp would
+    # collide (hunyuan's identity carries the same field).
     inputs: dict[str, object] = {
         "compile_contract_version": 3,
         "model_type": MODEL_TYPE,
         "model_id": source.model_id,
         "resolved_source_id": source.resolved_source_id,
         "component_id": stage,
+        "sp_enabled": bool(profile.parallel.sp_enabled) if stage == "generate" else False,
         "tp_degree": tp_degree,
         "cp_degree": cp_degree,
         "cp_mode": "gather_kv" if stage == "vae" else profile.parallel.cp_mode,

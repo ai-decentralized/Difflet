@@ -153,12 +153,15 @@ def _column_parallel_like(linear: nn.Linear, *, gather_output: bool) -> ColumnPa
     )
 
 
-def _row_parallel_like(linear: nn.Linear, *, input_is_parallel: bool) -> RowParallelLinear:
+def _row_parallel_like(
+    linear: nn.Linear, *, input_is_parallel: bool, reduce_output: bool = True
+) -> RowParallelLinear:
     return RowParallelLinear(
         linear.in_features,
         linear.out_features,
         bias=linear.bias is not None,
         input_is_parallel=input_is_parallel,
+        reduce_output=reduce_output,
     )
 
 
@@ -172,8 +175,14 @@ def _safe_tensor_parallel_size() -> int:
         return 1
 
 
-def _replace_qwen_linears_for_tp(transformer: nn.Module) -> None:
-    """Shard Qwen's largest transformer linears across tensor-parallel ranks."""
+def _replace_qwen_linears_for_tp(transformer: nn.Module, sp_enabled: bool = False) -> None:
+    """Shard Qwen's largest transformer linears across tensor-parallel ranks.
+
+    Under Megatron-SP (``sp_enabled``) the four row-parallel outputs keep
+    their partial sums (``reduce_output=False``); the forked block forward's
+    ``ḡ`` reduce-scatter performs the cross-rank sum while re-sharding the
+    sequence, and the fork's ``_sp_unbias`` corrects the bias double-count.
+    """
 
     tp_degree = _safe_tensor_parallel_size()
     if tp_degree <= 1:
@@ -220,8 +229,12 @@ def _replace_qwen_linears_for_tp(transformer: nn.Module) -> None:
             attn.add_q_proj = _column_parallel_like(attn.add_q_proj, gather_output=False)
             attn.add_k_proj = _column_parallel_like(attn.add_k_proj, gather_output=False)
             attn.add_v_proj = _column_parallel_like(attn.add_v_proj, gather_output=False)
-            attn.to_out[0] = _row_parallel_like(attn.to_out[0], input_is_parallel=True)
-            attn.to_add_out = _row_parallel_like(attn.to_add_out, input_is_parallel=True)
+            attn.to_out[0] = _row_parallel_like(
+                attn.to_out[0], input_is_parallel=True, reduce_output=not sp_enabled
+            )
+            attn.to_add_out = _row_parallel_like(
+                attn.to_add_out, input_is_parallel=True, reduce_output=not sp_enabled
+            )
 
         if not replicate_mlp:
             block.img_mlp.net[0].proj = _column_parallel_like(
@@ -231,6 +244,7 @@ def _replace_qwen_linears_for_tp(transformer: nn.Module) -> None:
             block.img_mlp.net[2] = _row_parallel_like(
                 block.img_mlp.net[2],
                 input_is_parallel=True,
+                reduce_output=not sp_enabled,
             )
             block.txt_mlp.net[0].proj = _column_parallel_like(
                 block.txt_mlp.net[0].proj,
@@ -239,6 +253,7 @@ def _replace_qwen_linears_for_tp(transformer: nn.Module) -> None:
             block.txt_mlp.net[2] = _row_parallel_like(
                 block.txt_mlp.net[2],
                 input_is_parallel=True,
+                reduce_output=not sp_enabled,
             )
 
 
@@ -434,6 +449,7 @@ class _QwenImageTransformerTraceModule(nn.Module):
         self.guidance_embeds = bool(getattr(config, "guidance_embeds", False))
         self.context_parallel_enabled = bool(getattr(config, "context_parallel_enabled", False))
         self.cp_mode = str(getattr(config, "cp_mode", "gather_kv"))
+        self.sp_enabled = bool(getattr(config, "sp_enabled", False))
         if self.context_parallel_enabled:
             # CP scatters RoPE/KV over the cp axis subgroup; the mesh must be
             # initialized before the rope module / attention processors below
@@ -444,6 +460,12 @@ class _QwenImageTransformerTraceModule(nn.Module):
         else:
             self.cp_group = None
             self.global_rank = None
+        # SP reuses the TP group: the materialized SPMDRank buffer is the
+        # per-rank id the fork's entry scatter reads (loaded as
+        # ``sp_rank_util.rank = arange(tp)``; see convert_hf_to_neuron_state_dict).
+        self.sp_rank_util = (
+            SPMDRank(world_size=int(config.neuron_config.tp_degree)) if self.sp_enabled else None
+        )
         # One packed shape per compiled bucket, keyed by image_seq_len. The
         # forward selects by hidden_states.shape[1], which is a concrete value
         # during each bucket's trace, so every bucket NEFF bakes its own RoPE
@@ -458,7 +480,17 @@ class _QwenImageTransformerTraceModule(nn.Module):
             pw = (2 * (int(width) // vsf2)) // patch
             self._packed_by_seq[ph * pw] = (ph, pw)
         self.img_shapes = [[(1, int(config.packed_height), int(config.packed_width))]]
-        self.transformer = QwenImageTransformer2DModel(
+        if self.sp_enabled:
+            # SP fork: same submodule layout as diffusers' class, so weight
+            # loading and the TP patches below apply unchanged.
+            from difflet.models.qwen_image.modeling_qwen import QwenImageSPTransformer2DModel
+
+            transformer_cls = QwenImageSPTransformer2DModel
+            sp_ctor_kwargs = {"sp_enabled": True, "tp_rank_util": self.sp_rank_util}
+        else:
+            transformer_cls = QwenImageTransformer2DModel
+            sp_ctor_kwargs = {}
+        self.transformer = transformer_cls(
             patch_size=int(config.patch_size),
             in_channels=int(config.in_channels),
             out_channels=int(config.out_channels),
@@ -470,8 +502,9 @@ class _QwenImageTransformerTraceModule(nn.Module):
             axes_dims_rope=tuple(config.axes_dims_rope),
             zero_cond_t=bool(getattr(config, "zero_cond_t", False)),
             use_layer3d_rope=bool(getattr(config, "use_layer3d_rope", False)),
+            **sp_ctor_kwargs,
         )
-        _replace_qwen_linears_for_tp(self.transformer)
+        _replace_qwen_linears_for_tp(self.transformer, sp_enabled=self.sp_enabled)
         _apply_qwen_block_diagnostics(self.transformer)
         img_ropes: dict[tuple[int, int], tuple[torch.Tensor, torch.Tensor]] = {}
         txt_rope = None

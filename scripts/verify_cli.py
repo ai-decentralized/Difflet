@@ -159,13 +159,21 @@ MODELS: dict[str, ModelSpec] = {
     ),
 }
 
-# Skip-rule sets. DISTILLED and SP_SUPPORTED mirror difflet.cli.main
-# (_DISTILLED_MODELS / _SP_SUPPORTED_MODELS); unit tests pin them to the source
-# of truth. CP_UNSUPPORTED lives in the model entries (ltx_2/entry.py raises for
-# cp_degree>1; hunyuan_video/entry.py for HunyuanVideo 1.5), not in main.py.
-DISTILLED = frozenset({"flux", "qwen_image", "hunyuan_video", "hunyuan_video_15"})
-SP_SUPPORTED = frozenset({"flux", "wan", "wan2_1", "hunyuan_video"})
-CP_UNSUPPORTED = frozenset({"ltx_2", "hunyuan_video_15"})
+# Skip-rule sets, derived from each model's registry ModelCapabilities so they
+# cannot drift from what the CLI enforces. They used to be hand-written literals
+# mirroring difflet.cli.main, pinned by a drift-guard unit test.
+# CP support is additionally guarded at the model entries (ltx_2/entry.py raises
+# for cp_degree>1, hunyuan_video/entry.py for HunyuanVideo 1.5); the registry
+# declaration is what lets this matrix skip those cells instead of failing them.
+def _capabilities(model_key: str):
+    from difflet.registry import resolve_model
+
+    return resolve_model(MODELS[model_key].model_id).require_capabilities()
+
+
+DISTILLED = frozenset(k for k in MODELS if _capabilities(k).is_distilled)
+SP_SUPPORTED = frozenset(k for k in MODELS if _capabilities(k).supports_sp)
+CP_UNSUPPORTED = frozenset(k for k in MODELS if not _capabilities(k).supports_cp)
 # Ulysses all-to-alls the sequence shard into a head shard, and that kernel has
 # no path for an attention mask: both the ring and ulysses branches raise
 # NotImplementedError when one is passed (modeling_hunyuan_video.py:490,

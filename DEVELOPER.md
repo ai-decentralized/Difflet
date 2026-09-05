@@ -172,7 +172,9 @@ mesh `{dp, cfg, cp, tp}` (tp innermost, dp outermost):
   norm/modulation/residual regions along the sequence axis across the *existing*
   tensor-parallel group (reduce-scatter replaces the row-parallel all-reduce). Adds no mesh
   axis, so `world_size` is unchanged. Mutually exclusive with `cp_degree > 1`. Device-verified
-  for Flux, Wan 2.1/2.2, and HunyuanVideo (`_SP_SUPPORTED_MODELS` in `difflet/cli/main.py`).
+  for Flux, Wan 2.1/2.2, HunyuanVideo, and Qwen-Image (support is read from each model's
+  registry `ModelCapabilities.supports_sp`, not a hand-list; parity gates live in
+  `scripts/*_sp_parity_smoke.sh`).
 - `dp_degree` — data-parallel replica axis (reserved: groups exist, the replication feature is
   not wired yet). The dp axis carries **no** per-layer/per-step collective — enforced by
   `tests/unit/test_no_dp_parasites.py`.

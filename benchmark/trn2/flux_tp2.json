@@ -1,0 +1,38 @@
+{
+ "model_id": "black-forest-labs/FLUX.1-dev",
+ "model_type": "flux",
+ "backend": "trainium",
+ "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+ "dtype": "bf16",
+ "parallel": {
+  "tp_degree": 2,
+  "cp_degree": 1,
+  "cp_mode": "gather_kv",
+  "cfg_parallel_enabled": false,
+  "sp_enabled": false,
+  "dp_degree": 1
+ },
+ "shape": {
+  "height": 1024,
+  "width": 1024,
+  "num_frames": null
+ },
+ "steps": 28,
+ "compile_seconds": null,
+ "step_latency": {
+  "mean": 0.49959122785178434,
+  "median": 0.4995623059985519,
+  "min": 0.49933078899994143,
+  "max": 0.5001654740008235,
+  "p90": 0.49980132299970137,
+  "n": 27,
+  "generate_wall_s": 14.354680820000794
+ },
+ "e2e_warm": {
+  "median": 14.354680820000794,
+  "n": 1
+ },
+ "notes": [
+  "per-step measured by scripts/flux_parallel_sweep.py on trn2.3xlarge (2026-08-20) using the step_realloop method: inter-step deltas of a real 28-step generate wrapping NeuronFluxBackboneApplication.__call__, synced, step 0 excluded, one discarded warm-up generate. output finite=True."
+ ]
+}

@@ -86,16 +86,21 @@ def test_staged_flags():
     assert staged == {"qwen_image", "wan", "wan2_1", "hunyuan_video"}
 
 
-# ---------------------------------------------------------------- drift guards
+# ------------------------------------------------------------- skip-rule sets
+#
+# These were drift guards pinning hand-written literals here to hand-written
+# literals in difflet.cli.main. Both sides now derive from each model's registry
+# ModelCapabilities, so pinning them to each other would only assert that
+# frozenset comprehension works. What is still worth asserting is that the
+# derived sets match the support matrix documented in README.md -- that catches
+# a capability edited in the registry without the docs following.
 
-def test_distilled_set_matches_cli_source_of_truth():
-    from difflet.cli.main import _DISTILLED_MODELS
-    assert {MODELS[k].model_id for k in DISTILLED} == _DISTILLED_MODELS
+def test_distilled_set_matches_documented_matrix():
+    assert DISTILLED == {"flux", "qwen_image", "hunyuan_video", "hunyuan_video_15"}
 
 
-def test_sp_supported_set_matches_cli_source_of_truth():
-    from difflet.cli.main import _SP_SUPPORTED_MODELS
-    assert {MODELS[k].model_id for k in SP_SUPPORTED} == _SP_SUPPORTED_MODELS
+def test_sp_supported_set_matches_documented_matrix():
+    assert SP_SUPPORTED == {"flux", "wan", "wan2_1", "hunyuan_video", "qwen_image"}
 
 
 def test_all_model_ids_valid_in_cli():
@@ -131,7 +136,6 @@ def test_expected_fail_cells():
 _EXPECTED_SKIPS = {
     ("flux", "tp2cfg"): "distilled",
     ("qwen_image", "tp2cfg"): "distilled",
-    ("qwen_image", "tp4sp"): "no-SP",
     ("ltx_2", "tp2cp2"): "no-CP",
     ("ltx_2", "tp2cp2ulysses"): "no-CP",
     ("ltx_2", "tp4sp"): "no-SP",
@@ -157,9 +161,10 @@ def test_plan_cells_counts():
     skipped = [c for c in cells if c.skip_reason]
     runnable = [c for c in cells if not c.skip_reason]
     # tp2cp2ulysses is a CP config, so it adds the same two no-CP skips as
-    # tp2cp2, plus hunyuan_video's no-ulysses skip (attention_mask).
-    assert len(skipped) == 12
-    assert len(runnable) == 30
+    # tp2cp2, plus hunyuan_video's no-ulysses skip (attention_mask); qwen's
+    # tp4sp is runnable since the modeling_qwen SP fork landed (2026-09-02).
+    assert len(skipped) == 11
+    assert len(runnable) == 31
     xfail = {(c.model_key, c.config_key) for c in runnable if c.expected_fail}
     assert xfail == {("hunyuan_video_15", "tp4"), ("hunyuan_video_15", "dp2tp2"),
                      ("hunyuan_video", "tp2cp2"), ("hunyuan_video", "dp2tp2")}

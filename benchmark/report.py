@@ -21,6 +21,30 @@ def _stats_row(name: str, st: Optional[dict]) -> str:
             f"{_fmt_s(st['p90'])} | {_fmt_s(st['min'])} | {st['n']} |")
 
 
+def _extra_axis_tokens(par: dict) -> str:
+    """Non-default parallel-axis tokens (cp_mode/cfg/sp) for display strings."""
+    tokens = []
+    if par.get("cp_degree", 1) > 1 and par.get("cp_mode", "gather_kv") != "gather_kv":
+        tokens.append(str(par.get("cp_mode")))
+    if par.get("cfg_parallel_enabled"):
+        tokens.append("cfg")
+    if par.get("sp_enabled"):
+        tokens.append("sp")
+    return (" " + " ".join(tokens)) if tokens else ""
+
+
+def _extra_axis_flags(par: dict) -> str:
+    """Non-default parallel-axis CLI flags for the reproduction commands."""
+    flags = ""
+    if par.get("cp_degree", 1) > 1 and par.get("cp_mode", "gather_kv") != "gather_kv":
+        flags += f" --cp-mode {par.get('cp_mode')}"
+    if par.get("cfg_parallel_enabled"):
+        flags += " --cfg-parallel"
+    if par.get("sp_enabled"):
+        flags += " --sp"
+    return flags
+
+
 def render(r: dict) -> str:
     L: list[str] = []
     a = L.append
@@ -42,7 +66,8 @@ def render(r: dict) -> str:
     a(f"| model type | {r.get('model_type', '—')} |")
     a(f"| dtype | {r.get('dtype', '—')} |")
     par = r.get("parallel", {})
-    a(f"| parallel | tp={par.get('tp_degree', '?')} cp={par.get('cp_degree', '?')} |")
+    a(f"| parallel | tp={par.get('tp_degree', '?')} cp={par.get('cp_degree', '?')}"
+      + _extra_axis_tokens(par) + " |")
     sh = r.get("shape", {})
     a(f"| shape | {sh} |")
     a(f"| steps | {r.get('steps', '—')} |")
@@ -249,7 +274,8 @@ def render(r: dict) -> str:
     a(f"| HF revision (pinned) | `{r.get('revision') or '—'}` |")
     a(f"| model type | {r.get('model_type','?')} |")
     a(f"| dtype | {r.get('dtype','bf16')} |")
-    a(f"| parallel | tp={par.get('tp_degree','?')}, cp={par.get('cp_degree','?')} |")
+    a(f"| parallel | tp={par.get('tp_degree','?')}, cp={par.get('cp_degree','?')}"
+      + _extra_axis_tokens(par) + " |")
     a(f"| shape (H×W×F) | {dims or '?'} |")
     a(f"| steps | {r.get('steps','?')} |")
     if r.get("guidance_scale") is not None:
@@ -274,12 +300,13 @@ def render(r: dict) -> str:
         a("> ⚠️ This model is **pending** (not yet runnable in difflet) — the commands "
           "below are the *intended* recipe, not a reproduced run.")
         a("")
+    extra = _extra_axis_flags(par)
     a("```bash")
     a("# difflet (Neuron / trn2) — compile is one-time and cached (reused, never recompiled):")
     a(f"difflet compile  --model-id {r.get('model_id','<id>')}{rev} \\")
-    a(f"    --tp-degree {par.get('tp_degree',4)} --cp-degree {par.get('cp_degree',1)} {shp}")
+    a(f"    --tp-degree {par.get('tp_degree',4)} --cp-degree {par.get('cp_degree',1)}{extra} {shp}")
     a(f"difflet generate --model-id {r.get('model_id','<id>')}{rev} \\")
-    a(f"    --tp-degree {par.get('tp_degree',4)} --cp-degree {par.get('cp_degree',1)} {shp} \\")
+    a(f"    --tp-degree {par.get('tp_degree',4)} --cp-degree {par.get('cp_degree',1)}{extra} {shp} \\")
     a(f"    --steps {r.get('steps',20)}{g} --seed {r.get('seed',42)} \\")
     a(f"    --prompt \"{r.get('prompt','...')}\" --output out.{ext}")
     if not pending:

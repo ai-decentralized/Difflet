@@ -6,10 +6,32 @@ def test_sets_neuron_rt_num_cores(monkeypatch):
     captured = {}
     monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
     monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    # a 16-core host, so 8 cores is a genuine under-fill (host-size probing is
+    # patched: this suite also runs on 4-core dev boxes and CI containers)
+    monkeypatch.setattr(
+        "difflet.cli.runner.resolve_available_neuron_core_ids",
+        lambda required_num_cores: tuple(range(16)),
+    )
     from difflet.cli.runner import run_stage
 
     run_stage("wan", "transformer", num_cores=8, virtual_core_size=None, cli_args=[])
     assert captured["env"]["NEURON_RT_NUM_CORES"] == "8"
+
+
+def test_whole_device_stage_leaves_num_cores_unset(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    monkeypatch.setattr(
+        "difflet.cli.runner.resolve_available_neuron_core_ids",
+        lambda required_num_cores: tuple(range(4)),
+    )
+    from difflet.cli.runner import run_stage
+
+    # An explicit NEURON_RT_NUM_CORES equal to the whole device is rejected by
+    # some driver builds; the default allocation is what it describes anyway.
+    run_stage("wan", "transformer", num_cores=4, virtual_core_size=None, cli_args=[])
+    assert "NEURON_RT_NUM_CORES" not in captured["env"]
 
 
 def test_respects_existing_neuron_rt_num_cores(monkeypatch):
@@ -92,7 +114,10 @@ def test_strict_environment_preserves_inherited_visible_cores(monkeypatch):
     )
 
     assert captured["env"]["NEURON_RT_VISIBLE_CORES"] == "4,5,6,7"
-    assert captured["env"]["NEURON_RT_NUM_CORES"] == "4"
+    # num_cores (4) covers the whole inherited visible set (4-7), so the
+    # stale inherited NEURON_RT_NUM_CORES=8 is dropped rather than forwarded —
+    # an explicit whole-device count is rejected by some driver builds.
+    assert "NEURON_RT_NUM_CORES" not in captured["env"]
     assert captured["env"]["NEURON_RT_VIRTUAL_CORE_SIZE"] == "2"
     assert "NEURON_LOGICAL_NC_CONFIG" not in captured["env"]
     assert [

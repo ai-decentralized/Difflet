@@ -230,6 +230,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             tp_degree=args.tp_degree or 4,
             cp_degree=args.cp_degree or 1,
             cp_mode=getattr(args, "cp_mode", "gather_kv"),
+            sp_enabled=bool(getattr(args, "sp_enabled", None)),
         )
         compile_shapes = _require_request_shape_in_set(args)
         app = NeuronQwenImageApplication(
@@ -405,6 +406,11 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 "tp": args.tp_degree or 4,
                 "cp": args.cp_degree or 1,
                 "cp_mode": str(getattr(args, "cp_mode", "gather_kv") or "gather_kv"),
+                # sp changes the DiT graph (the modeling_qwen fork); without
+                # this field tp4sp and tp4 hash to the same dir and silently
+                # reuse each other's artifact (the 9a00746 naming bug, now on
+                # the hashed system). Same encoding wan/hunyuan use.
+                "sp": bool(getattr(args, "sp_enabled", False)),
                 "dtype": "bfloat16",
                 "text_seq_len": _TEXT_SEQ_LEN,
                 "shapes": canonical_shapes_list(args, (1024, 1024)),
@@ -476,6 +482,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
             parts += ["--cache-dir", a.cache_dir]
         if getattr(a, "revision", None):
             parts += ["--revision", a.revision]
+        if getattr(a, "sp_enabled", None):
+            parts += ["--sp"]
         if getattr(a, "teacache_speedup", None) is not None:
             parts += ["--teacache-speedup", str(a.teacache_speedup)]
         if getattr(a, "teacache_calibration", None):

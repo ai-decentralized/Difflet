@@ -12,6 +12,7 @@ dist/
 venv/
 env/
 docs/
+docs_human/
 .history/
 # Compile cache (Trainium AOT artifacts can be huge)
 .difflet_compile_cache/
@@ -54,3 +55,12 @@ htmlcov/
 [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]/
 neuronxcc-*/
 log-neuron-cc.txt
+
+# Parallel sweep working artifacts (raw run JSONs, toolchain snapshots, control
+# runs are machine-local; distilled anchors live in benchmark/trn2/flux_*.json,
+# difflet/planner/data/measurements.json, and the docs/reports + docs/plans tables)
+artifacts/flux_parallel_sweep/
+artifacts/parallel_phase_sweep/
+
+# nkd/neuroncc compile temp dirs leaked into CWD when compiling from repo root
+/c[0-9a-f][0-9a-f][0-9a-f]*/

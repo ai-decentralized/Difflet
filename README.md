@@ -50,7 +50,7 @@ Which acceleration features each model supports. ✅ = supported, ❌ = not supp
 | Model | TP | CP — all-gather | CP — ring | SP | TeaCache (adaptive) | TeaCache (fixed cadence) | CFG-parallel |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ |
-| Qwen-Image | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ ¹ |
+| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ |
 | Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | HunyuanVideo | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ |
 | LTX-2 | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |

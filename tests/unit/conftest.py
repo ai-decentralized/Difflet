@@ -28,3 +28,23 @@ def _restore_difflet_backend_default():
     else:
         os.environ["DIFFLET_BACKEND"] = _TRUE_DIFFLET_BACKEND
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_hardware_probe(monkeypatch):
+    """Keep unit tests off the host's real Neuron topology.
+
+    ``difflet.planner.hardware`` shells out to ``neuron-ls`` so the CLI can
+    enforce a core budget it actually knows. Left live, that would make unit
+    tests pass or fail depending on the box they run on -- the same core-budget
+    assertion would hold on a laptop and trip on a trn2. Stub the probe so every
+    unit test sees the undetected/fallback path, and let the planner suite
+    exercise real parses by injecting ``neuron-ls`` payloads directly.
+    """
+
+    from difflet.planner import hardware
+
+    hardware._probe_neuron_ls_cached.cache_clear()
+    monkeypatch.setattr(hardware, "_run_neuron_ls", lambda: [])
+    yield
+    hardware._probe_neuron_ls_cached.cache_clear()
