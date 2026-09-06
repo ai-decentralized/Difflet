@@ -162,11 +162,57 @@ def test_rank_range_single_core_without_start():
     ) == (None, 1)
 
 
-def test_rank_range_clamps_to_smaller_world():
+def test_rank_range_no_longer_clamps_a_smaller_world():
+    # Wan used to override _component_load_rank_range with a "clamp a smaller
+    # world to a sub-range" branch for a text-encoder wiring (world=tp) that the
+    # same commit (cc9316c) replaced with world_size=parallel.world_size — dead
+    # from day one. Mixing worlds in one process crashes the Neuron runtime
+    # (SIGSEGV on device, 2026-08-30) and is now rejected up front by
+    # world_check.check_component_worlds, so Wan inherits the base rule:
+    # world 1 -> rank 0, everything else passes the app-level range through.
+    from difflet.backends.trainium.core.multi_component_application import (
+        MultiComponentApplication,
+    )
+
+    assert "_component_load_rank_range" not in vars(app.NeuronWanApplication)
+    assert (
+        app.NeuronWanApplication._component_load_rank_range
+        is MultiComponentApplication._component_load_rank_range
+    )
     comp = _component_with_world(2)
     assert app.NeuronWanApplication._component_load_rank_range(
         comp, start_rank_id=0, local_ranks_size=8
-    ) == (0, 2)
+    ) == (0, 8)
+
+
+def test_load_rejects_mixed_world_components_before_loading():
+    # Wan-shaped mixed set: text encoder w2 next to a w4 transformer. The old
+    # override would have clamped it; the base class refuses it with zero
+    # component loads.
+    from difflet.backends.trainium.core.world_check import NeuronWorldMismatchError
+
+    loads = []
+
+    def _fake_component(name, world):
+        def load(path, start_rank_id=None, local_ranks_size=None, skip_warmup=False):
+            loads.append(name)
+
+        return SimpleNamespace(
+            config=SimpleNamespace(neuron_config=SimpleNamespace(world_size=world, tp_degree=2)),
+            load=load,
+        )
+
+    from difflet.backends.trainium.core.multi_component_application import ComponentSpec
+
+    application = app.NeuronWanApplication.__new__(app.NeuronWanApplication)
+    specs = [
+        ComponentSpec("text_encoder", _fake_component("text_encoder", 2)),
+        ComponentSpec("transformer", _fake_component("transformer", 4)),
+    ]
+    application.components = lambda: specs  # type: ignore[method-assign]
+    with pytest.raises(NeuronWorldMismatchError, match="text_encoder=w2"):
+        app.NeuronWanApplication.load(application, "/nonexistent", skip_warmup=True)
+    assert loads == []
 
 
 def test_rank_range_passes_through_when_world_ge_local():
