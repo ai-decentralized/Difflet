@@ -5,10 +5,9 @@ REPO=${REPO:-$PWD}
 echo "== repo: $REPO ($(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null))"
 echo "== NeuronCores"
 if command -v neuron-ls >/dev/null; then
-  neuron-ls -j 2>/dev/null | python3 -c 'import json,sys
-for d in json.load(sys.stdin):
-    print(f"  {d[\"instance_type\"]}: {d[\"nc_count\"]} cores, LNC={d[\"logical_neuroncore_config\"]}, "
-          f"{d[\"memory_size\"]/2**30:.0f} GiB, busy processes: {len(d.get(\"neuron_processes\", []))}")'
+  # The summary lives in a sibling .py: an inline `python3 -c '...'` with
+  # escaped double quotes inside single quotes is a SyntaxError.
+  neuron-ls -j 2>/dev/null | python3 "$(dirname "$0")/env_check.py"
 else
   echo "  neuron-ls not found — not a Neuron host"
 fi
