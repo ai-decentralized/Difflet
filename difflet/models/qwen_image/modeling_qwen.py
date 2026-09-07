@@ -290,7 +290,13 @@ class QwenImageSPTransformer2DModel(QwenImageTransformer2DModel):
         num_attention_heads = int(kwargs["num_attention_heads"])
         attention_head_dim = int(kwargs["attention_head_dim"])
         zero_cond_t = bool(kwargs.get("zero_cond_t", False))
-        super().__init__(**kwargs)
+        # Build the parent with an empty block list: its ``transformer_blocks``
+        # are replaced below, and constructing the dense set first doubled the
+        # host-RAM peak (two fp32 copies of a 20B-param block stack, > 124 GiB
+        # on trn2.3xlarge — the SP compile livelocked and was OOM-killed).
+        # Re-register the real depth so ``self.config`` stays truthful.
+        super().__init__(**{**kwargs, "num_layers": 0})
+        self.register_to_config(num_layers=num_layers)
         self.sp_enabled = bool(sp_enabled) and _safe_tp_size() > 1
         # Materialized per-rank buffer for the entry scatter (see
         # ``_shard_sequence``); the trace module wires it after construction.
