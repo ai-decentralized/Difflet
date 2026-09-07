@@ -20,6 +20,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent.parent / "scripts"))
 
 from verify_cli import (
+    allocate_run_dir,
     _DIFFLET_CMD,
     CP_UNSUPPORTED,
     DISTILLED,
@@ -549,3 +550,19 @@ def test_wan_models_all_device_at_f9():
     wan cells stay all-device; --host-vae remains available for long clips."""
     for key in ("wan", "wan2_1"):
         assert "--host-vae" not in build_compile_cmd(MODELS[key], PARALLEL_CONFIGS["tp4"])
+
+
+def test_run_dirs_started_in_the_same_second_do_not_collide(tmp_path):
+    # Device evidence (2026-09-07): qwen_image/tp2cfg (SKIP, < 1 s) and
+    # qwen_image/tp4sp both started at 08:39:53 and shared
+    # verify_matrix_20260907_083953; the SKIP's results.json was overwritten.
+    import datetime as _dt
+
+    now = _dt.datetime(2026, 9, 7, 8, 39, 53)
+    first = allocate_run_dir(tmp_path, now)
+    second = allocate_run_dir(tmp_path, now)
+    third = allocate_run_dir(tmp_path, now)
+    assert first.name == "verify_matrix_20260907_083953"
+    assert second.name == "verify_matrix_20260907_083953-2"
+    assert third.name == "verify_matrix_20260907_083953-3"
+    assert len({first, second, third}) == 3 and all(p.is_dir() for p in (first, second, third))
