@@ -188,3 +188,36 @@ def test_sp_rejects_zero_cond_t(monkeypatch):
     assert model.sp_enabled is True
     with pytest.raises(NotImplementedError, match="zero_cond_t"):
         _forward(model)
+
+
+# ------------------------------------------------------------ construction cost
+
+def test_sp_constructor_builds_each_block_once(monkeypatch):
+    # Device evidence (qwen_image/tp4sp, trn2.3xlarge, 2026-09-07): the SP
+    # fork's __init__ let diffusers' parent build all 60 dense blocks (fp32,
+    # ~78 GB for the 20B checkpoint) and then built a second full set of SP
+    # blocks before the first was released. Peak host RSS hit 128 GB on a
+    # 124 GiB / no-swap host, the compile livelocked in page reclaim for 4 h
+    # and was OOM-killed. The fork must construct every block exactly once.
+    import diffusers.models.transformers.transformer_qwenimage as dq
+
+    dense_ctor_calls: list[int] = []
+    orig_init = dq.QwenImageTransformerBlock.__init__
+
+    def counting_init(self, *args, **kwargs):
+        dense_ctor_calls.append(1)
+        return orig_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(dq.QwenImageTransformerBlock, "__init__", counting_init)
+
+    kw = _tiny_kwargs()
+    model = qwen.QwenImageSPTransformer2DModel(**kw, sp_enabled=True)
+
+    assert dense_ctor_calls == [], "throwaway dense blocks were constructed"
+    assert len(model.transformer_blocks) == kw["num_layers"]
+    assert all(
+        type(b) is qwen.QwenImageSPTransformerBlock for b in model.transformer_blocks
+    )
+    # The registered config must still describe the real depth: consumers
+    # (and diffusers' save/load) read it, not the constructor kwargs.
+    assert int(model.config.num_layers) == kw["num_layers"]
