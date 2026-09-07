@@ -475,6 +475,28 @@ def _results_json(results: dict) -> dict:
     }
 
 
+def allocate_run_dir(root: pathlib.Path, now: datetime.datetime) -> pathlib.Path:
+    """Create and return a fresh, unique run dir under ``root``.
+
+    The name is second-resolution, so two invocations inside one second (a
+    by-design SKIP cell finishes in well under a second and the driver starts
+    the next cell immediately) would otherwise share a dir and the second run
+    would overwrite the first's ``results.json`` and ``main.log`` — observed on
+    device: qwen_image/tp2cfg's SKIP record vanished under tp4sp's run. Suffix
+    ``-2``, ``-3``, … until the path is new.
+    """
+    ts = now.strftime("%Y%m%d_%H%M%S")
+    candidate = root / f"verify_matrix_{ts}"
+    n = 1
+    while True:
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
+            return candidate
+        except FileExistsError:
+            n += 1
+            candidate = root / f"verify_matrix_{ts}-{n}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="verify_cli",
@@ -492,9 +514,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Per-step subprocess timeout in seconds (default: 14400)")
     args = parser.parse_args(argv)
 
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = pathlib.Path(f"/tmp/logs/verify_matrix_{ts}")
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = allocate_run_dir(pathlib.Path("/tmp/logs"), datetime.datetime.now())
     main_log = run_dir / "main.log"
     print(f"Run dir: {run_dir}")
 
