@@ -724,7 +724,12 @@ def _validate_profile(
         or profile.world_size != _WORLD_SIZE
     ):
         raise ValueError("LTX-2 serving requires TP4, CP1, DP1, CFG off, and SP off")
-    if profile.teacache_speedup is not None or profile.teacache_calibration_data is not None:
+    if (
+        profile.teacache_speedup is not None
+        or profile.teacache_calibration_data is not None
+        or profile.teacache_cadence is not None
+        or profile.teacache_online_delta is not None
+    ):
         raise ValueError("LTX-2 resident serving does not support TeaCache")
 
 
