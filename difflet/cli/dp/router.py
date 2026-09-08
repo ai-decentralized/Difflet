@@ -8,8 +8,10 @@ parent's).
 
 from __future__ import annotations
 
+import ctypes
 import dataclasses
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -65,6 +67,21 @@ def worker_env(
     # value inherited from the parent is just as shared, so it is replaced too.
     env["NEURON_RT_ROOT_COMM_ID"] = root_comm_id or f"localhost:{_free_localhost_port()}"
     return env
+
+
+def _die_with_parent() -> None:
+    """``preexec_fn`` for worker processes: SIGKILL the worker when the router
+    dies. The verification driver SIGKILLs a timed-out ``difflet generate``;
+    without this the workers outlived it and kept all four NeuronCores
+    (observed on device, 2026-09-07: two LTX-2 workers held cores 0-3 for hours
+    after the router was gone)."""
+    if not sys.platform.startswith("linux"):
+        return
+    PR_SET_PDEATHSIG = 1
+    libc = ctypes.CDLL("libc.so.6", use_errno=True)
+    libc.prctl(PR_SET_PDEATHSIG, int(signal.SIGKILL), 0, 0, 0)
+    if os.getppid() == 1:  # the parent already died between fork and here
+        os.kill(os.getpid(), signal.SIGKILL)
 
 
 def worker_cli_args(args) -> list[str]:
@@ -137,7 +154,7 @@ def run_router(
         ]
         env = worker_env(os.environ, core_range, replica_cores)
         print(f"[dp-router] worker {w}: cores {core_range}", flush=True)
-        procs.append(subprocess.Popen(argv, env=env, preexec_fn=None))
+        procs.append(subprocess.Popen(argv, env=env, preexec_fn=_die_with_parent))
 
     exit_codes = [p.wait() for p in procs]
 
