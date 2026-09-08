@@ -181,3 +181,46 @@ def test_worker_env_honours_an_explicit_root_comm_id():
     assert env["NEURON_RT_ROOT_COMM_ID"] == "localhost:50000"
 
 
+# ------------------------------------------------- workers die with the router
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="prctl is Linux-only")
+def test_workers_are_killed_when_the_router_dies(tmp_path):
+    # A stand-in router spawns a long-lived worker exactly the way run_router
+    # does (preexec_fn=_die_with_parent), reports the worker pid, then blocks.
+    # SIGKILL the router: the worker must be gone within a couple of seconds.
+    pidfile = tmp_path / "worker.pid"
+    code = (
+        "import subprocess, sys, time\n"
+        "from difflet.cli.dp.router import _die_with_parent\n"
+        "p = subprocess.Popen(['sleep', '300'], preexec_fn=_die_with_parent)\n"
+        f"open({str(pidfile)!r}, 'w').write(str(p.pid))\n"
+        "time.sleep(300)\n"
+    )
+    router = subprocess.Popen([sys.executable, "-c", code])
+    try:
+        deadline = time.monotonic() + 20
+        while not pidfile.exists() or not pidfile.read_text().strip():
+            assert time.monotonic() < deadline, "stand-in router never spawned its worker"
+            time.sleep(0.05)
+        worker_pid = int(pidfile.read_text())
+        assert _alive(worker_pid)
+    finally:
+        router.kill()
+        router.wait()
+    deadline = time.monotonic() + 5
+    while _alive(worker_pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not _alive(worker_pid), "worker outlived the killed router"
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    # Zombies answer kill(0); treat a zombie as dead.
+    try:
+        with open(f"/proc/{pid}/status") as fh:
+            return "State:\tZ" not in fh.read()
+    except FileNotFoundError:
+        return False
