@@ -210,17 +210,73 @@ def test_flux_serving_profile_carries_frozen_adaptive_teacache(tmp_path):
     assert resolved.profile.teacache_calibration_data.target_speedup == 1.5
 
 
-def test_serving_profile_rejects_unimplemented_teacache_modes():
+@pytest.mark.parametrize(
+    ("model_id", "options", "cadence", "alpha"),
+    [
+        ("Qwen/Qwen-Image", {"teacache_cadence": 2}, 2, None),
+        ("Qwen/Qwen-Image", {"teacache_online_delta": 0.6}, None, 0.6),
+        ("Wan-AI/Wan2.2-T2V-A14B-Diffusers", {"teacache_cadence": 3}, 3, None),
+        ("Wan-AI/Wan2.2-T2V-A14B-Diffusers", {"teacache_online_delta": 0.5}, None, 0.5),
+    ],
+)
+def test_serving_profile_carries_probe_free_teacache_modes(model_id, options, cadence, alpha):
+    """Fixed cadence / online-delta are host-side controller state in the Qwen
+    and Wan pipelines (no probe graph, no calibration), so the profile carries
+    them through to the adapter — on Trainium and on the eager TPU backend."""
+    resolved = resolve_serving_model(ServeOptions(model_id=model_id, **options))
+
+    assert resolved.profile.teacache_cadence == cadence
+    assert resolved.profile.teacache_online_delta == alpha
+    # Probe-free never means adaptive: no frozen calibration is synthesized.
+    assert resolved.profile.teacache_speedup is None
+    assert resolved.profile.teacache_calibration_data is None
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "black-forest-labs/FLUX.1-dev",
+        "hunyuanvideo-community/HunyuanVideo",
+        "Lightricks/LTX-2",
+    ],
+)
+def test_serving_profile_rejects_probe_free_teacache_for_unwired_adapters(model_id):
+    """Adapters that do not wire the probe-free controller fail at option
+    resolution, not after a worker has loaded the weights."""
     with pytest.raises(DiffletServingError) as exc:
-        resolve_serving_model(
-            ServeOptions(
-                model_id="black-forest-labs/FLUX.1-dev",
-                teacache_cadence=2,
-            )
-        )
+        resolve_serving_model(ServeOptions(model_id=model_id, teacache_cadence=2))
 
     assert exc.value.code == "invalid_extra_body"
     assert "--teacache-cadence" in exc.value.message
+    assert "qwen_image, wan" in exc.value.message
+
+
+@pytest.mark.parametrize(
+    ("options", "match"),
+    [
+        ({"teacache_cadence": 2, "teacache_online_delta": 0.6}, "mutually exclusive"),
+        (
+            {
+                "teacache_cadence": 2,
+                "teacache_speedup": 1.5,
+                "teacache_calibration": "/unused.json",
+            },
+            "mutually exclusive",
+        ),
+        ({"teacache_cadence": 1}, ">= 2"),
+        ({"teacache_cadence": 0}, ">= 2"),
+        ({"teacache_cadence": True}, ">= 2"),
+        ({"teacache_online_delta": 0.0}, "finite positive"),
+        ({"teacache_online_delta": -0.5}, "finite positive"),
+        ({"teacache_online_delta": float("inf")}, "finite positive"),
+    ],
+)
+def test_serving_profile_rejects_invalid_probe_free_teacache(options, match):
+    with pytest.raises(DiffletServingError) as exc:
+        resolve_serving_model(ServeOptions(model_id="Qwen/Qwen-Image", **options))
+
+    assert exc.value.code == "invalid_extra_body"
+    assert match in exc.value.message
 
 
 def test_serving_profile_ignores_calibration_without_speedup():

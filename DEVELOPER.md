@@ -267,6 +267,29 @@ denoise time. Three modes are exposed on `difflet generate` / `difflet run`:
 The modes are mutually exclusive. The latent-metrics helpers (`difflet/pipeline/latent_metrics.py`)
 support a CPU-shadow gate for calibrating skip decisions against a reference trajectory.
 
+**In `difflet serve`.** The two probe-free modes are accepted for Qwen-Image and Wan serving
+(`--teacache-cadence N` / `--teacache-online-delta ALPHA`); they carry no compile-cache
+identity, so they can be toggled on a resident profile without a recompile. Adaptive
+`--teacache-speedup` remains Flux/Qwen-Image image serving only. HunyuanVideo and LTX-2
+serving reject every TeaCache flag at option resolution.
+
+**On the TPU backend** (`DIFFLET_BACKEND=tpu`, eager torch_xla) only the probe-free modes exist:
+the adaptive signal comes from a fused probe NEFF on Trainium that has no TPU counterpart. Qwen's
+device-resident loop keeps the controller's residual on the chip, so a skipped step is one
+elementwise add instead of a DiT forward and XLA sees three cached graph shapes (step 0, full,
+skip). Fixed cadence forces no device sync; online-delta reads one scalar back per full step,
+which is a sync on that step. Wan's orchestrator already round-trips the latents to the host
+every step for UniPC, so neither mode adds a sync there. A/B on a v5e:
+
+```bash
+DIFFLET_BENCH_TEACACHE_CADENCE=2 DIFFLET_BACKEND=tpu python -m benchmark.bench --backend tpu ...
+DIFFLET_BACKEND=tpu python benchmark/wan_tpu_run.py --steps 20 --teacache-cadence 2 ...
+```
+
+Both report the controller's `{full_steps, skipped_steps}` next to the timings. The skip
+window is `[warmup_steps, num_steps - cooldown_steps)` with 5/5 defaults, so 20 steps at
+cadence 2 skip 5 DiT forwards; a 4-step smoke run skips none.
+
 ## Adding a new model
 
 To port a diffusion model, add three things:
