@@ -13,8 +13,10 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -303,17 +305,37 @@ def build_generate_cmd(
 
 # ---------------------------------------------------------------- execution
 
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the session ``proc`` leads (it was started with
+    ``start_new_session=True``), then reap it."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def run_step(cmd: list[str], log_fh, *, timeout: float) -> StepResult:
     ts = datetime.datetime.now().isoformat()
     log_fh.write(f"\n{'=' * 60}\nCMD: {' '.join(cmd)}\nSTARTED: {ts}\n{'=' * 60}\n")
     log_fh.flush()
 
     start = time.monotonic()
+    # Own session so a timeout kills the whole tree: the DP router's workers
+    # and the staged orchestrators' stage subprocesses, not just the direct
+    # child. subprocess.run(timeout=) only kills the child; on device the
+    # orphaned LTX-2 DP workers then held all four NeuronCores (2026-09-07).
+    proc = subprocess.Popen(cmd, stdout=log_fh, stderr=subprocess.STDOUT,
+                            start_new_session=True)
     try:
-        proc = subprocess.run(cmd, stdout=log_fh, stderr=subprocess.STDOUT, timeout=timeout)
+        proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         duration = time.monotonic() - start
-        log_fh.write(f"\nTIMEOUT after {duration:.0f}s\n")
+        _kill_process_group(proc)
+        log_fh.write(f"\nTIMEOUT after {duration:.0f}s (process group killed)\n")
         return StepResult(status=Status.FAIL, duration=duration,
                           reason=f"timeout after {timeout:.0f}s", cmd=cmd)
     duration = time.monotonic() - start

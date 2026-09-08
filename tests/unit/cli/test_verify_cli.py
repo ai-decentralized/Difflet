@@ -8,6 +8,8 @@ source-of-truth sets.
 from __future__ import annotations
 
 import io
+import time
+import os
 import pathlib
 import subprocess
 import sys
@@ -293,6 +295,20 @@ def test_build_generate_cmd_dp_batches_requests(tmp_path):
     ]
 
 
+
+def _as_popen(fake_run):
+    """Adapt a ``fake_run(cmd, **kw) -> MagicMock(returncode=N)`` stub to the
+    ``subprocess.Popen`` seam ``run_step`` uses (``.wait()`` then ``.returncode``).
+    Every run_cell test must go through this: an unpatched Popen launches the
+    real ``difflet`` CLI on the host."""
+    def fake_popen(cmd, **kwargs):
+        proc = fake_run(cmd, **kwargs)
+        proc.wait = MagicMock(return_value=proc.returncode)
+        proc.pid = os.getpid()
+        return proc
+    return fake_popen
+
+
 def test_run_cell_dp_requires_every_request_artifact(tmp_path):
     spec, cfg = MODELS["flux"], PARALLEL_CONFIGS["dp2tp2"]
 
@@ -302,7 +318,7 @@ def test_run_cell_dp_requires_every_request_artifact(tmp_path):
             (tmp_path / "flux" / "dp2tp2" / "flux_dp0.png").touch()
         return MagicMock(returncode=0)
 
-    with patch("subprocess.run", side_effect=fake_run):
+    with patch("subprocess.Popen", side_effect=_as_popen(fake_run)):
         result = run_cell(spec, cfg, tmp_path / "flux" / "dp2tp2", timeout=60)
     assert result["generate"].status == Status.FAIL
     assert "flux_dp1" in result["generate"].reason
@@ -314,28 +330,47 @@ def _log():
     return io.StringIO()
 
 
-def test_run_step_pass_records_duration():
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        result = run_step(["difflet", "compile"], _log(), timeout=60)
+def _file_log(tmp_path):
+    # run_step hands the log to Popen as stdout, so it must be a real file.
+    return open(tmp_path / "step.log", "w")
+
+
+def test_run_step_pass_records_duration(tmp_path):
+    result = run_step([sys.executable, "-c", "pass"], _file_log(tmp_path), timeout=60)
     assert result.status == Status.PASS
     assert result.duration is not None and result.duration >= 0.0
 
 
-def test_run_step_fail_nonzero_exit():
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=2)
-        result = run_step(["difflet", "compile"], _log(), timeout=60)
+def test_run_step_fail_nonzero_exit(tmp_path):
+    result = run_step([sys.executable, "-c", "raise SystemExit(2)"], _file_log(tmp_path), timeout=60)
     assert result.status == Status.FAIL
     assert "exit code 2" in result.reason
 
 
-def test_run_step_timeout_is_fail():
-    with patch("subprocess.run",
-               side_effect=subprocess.TimeoutExpired(cmd=["difflet"], timeout=60)):
-        result = run_step(["difflet", "compile"], _log(), timeout=60)
+def test_run_step_timeout_is_fail(tmp_path):
+    result = run_step([sys.executable, "-c", "import time; time.sleep(30)"], _file_log(tmp_path), timeout=0.5)
     assert result.status == Status.FAIL
     assert "timeout" in result.reason
+
+
+def test_run_step_timeout_kills_the_whole_process_tree(tmp_path):
+    # Device evidence (ltx_2/dp2tp2, 2026-09-07): the driver's timeout killed
+    # `difflet generate` (the DP router) but its two worker children survived
+    # and held all four NeuronCores. A grandchild must not outlive a timeout.
+    pidfile = tmp_path / "grandchild.pid"
+    cmd = ["bash", "-c", f"sleep 300 & echo $! > {pidfile}; wait"]
+    result = run_step(cmd, _file_log(tmp_path), timeout=1)
+    assert result.status == Status.FAIL and "timeout" in result.reason
+    pid = int(pidfile.read_text())
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("grandchild sleep outlived the step timeout")
 
 
 # ---------------------------------------------------------------- run_cell
@@ -350,7 +385,7 @@ def test_run_cell_pass(tmp_path):
             pathlib.Path(out).touch()
         return MagicMock(returncode=0)
 
-    with patch("subprocess.run", side_effect=fake_run):
+    with patch("subprocess.Popen", side_effect=_as_popen(fake_run)):
         result = run_cell(spec, cfg, tmp_path / "flux" / "tp4", timeout=60)
     assert result["compile"].status == Status.PASS
     assert result["generate"].status == Status.PASS
@@ -363,7 +398,7 @@ def test_run_cell_compile_fail_skips_generate(tmp_path):
     def fake_run(cmd, **kwargs):
         return MagicMock(returncode=1 if "compile" in cmd else 0)
 
-    with patch("subprocess.run", side_effect=fake_run):
+    with patch("subprocess.Popen", side_effect=_as_popen(fake_run)):
         result = run_cell(spec, cfg, tmp_path / "flux" / "tp4", timeout=60)
     assert result["compile"].status == Status.FAIL
     assert result["generate"].status == Status.SKIP
@@ -371,8 +406,8 @@ def test_run_cell_compile_fail_skips_generate(tmp_path):
 
 def test_run_cell_generate_fail_when_artifact_missing(tmp_path):
     spec, cfg = MODELS["flux"], PARALLEL_CONFIGS["tp4"]
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)  # exit 0, no file written
+    with patch("subprocess.Popen", side_effect=_as_popen(lambda cmd, **kw: MagicMock(returncode=0))):
+        # exit 0, no file written
         result = run_cell(spec, cfg, tmp_path / "flux" / "tp4", timeout=60)
     assert result["generate"].status == Status.FAIL
     assert "artifact" in result["generate"].reason
@@ -388,7 +423,7 @@ def test_run_cell_accepts_fallback_artifact(tmp_path):
             out.with_suffix(".pt").touch()  # mp4 export failed, .pt fallback
         return MagicMock(returncode=0)
 
-    with patch("subprocess.run", side_effect=fake_run):
+    with patch("subprocess.Popen", side_effect=_as_popen(fake_run)):
         result = run_cell(spec, cfg, tmp_path / "wan" / "tp4", timeout=60)
     assert result["generate"].status == Status.PASS
 
