@@ -9,6 +9,8 @@ import pytest
 import difflet
 from difflet.cli.dp.claims import summarize
 from difflet.cli.dp.requests_io import RequestSpec
+import subprocess
+import time
 from difflet.cli.dp.router import (
     replica_core_ranges,
     run_router,
@@ -157,3 +159,25 @@ def test_run_router_crashed_worker_round_robin(tmp_path):
     s = summarize(tmp_path / "work" / "requests")
     assert sorted(s.done) == [0, 2]            # worker 0's assignments
     assert set(s.failed) == {1, 3}             # dead worker's assignments marked failed
+
+
+# ------------------------------------------------- per-worker bootstrap root
+
+def test_worker_env_gives_each_replica_its_own_root_comm_id():
+    # ltx_2/dp2tp2 on device (2026-09-07): both workers bootstrapped their
+    # 2-rank world through the same localhost:62182 root and hung for 4 h.
+    base = {"NEURON_RT_ROOT_COMM_ID": "localhost:62182"}
+    envs = [worker_env(base, r, 2) for r in replica_core_ranges(2, 2)]
+    ids = [e["NEURON_RT_ROOT_COMM_ID"] for e in envs]
+    assert len(set(ids)) == 2, ids
+    assert "localhost:62182" not in ids  # the inherited, shared value is replaced
+    for value in ids:
+        host, port = value.rsplit(":", 1)
+        assert host == "localhost" and 1024 <= int(port) <= 65535
+
+
+def test_worker_env_honours_an_explicit_root_comm_id():
+    env = worker_env({}, "0-1", 2, root_comm_id="localhost:50000")
+    assert env["NEURON_RT_ROOT_COMM_ID"] == "localhost:50000"
+
+

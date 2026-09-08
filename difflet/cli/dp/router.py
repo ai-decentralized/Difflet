@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -28,10 +29,41 @@ def replica_core_ranges(dp: int, replica_cores: int) -> list[str]:
     return ranges
 
 
-def worker_env(base_env: Mapping[str, str], core_range: str, replica_cores: int) -> dict[str, str]:
+_ROOT_COMM_PORTS_HANDED_OUT: set[int] = set()
+
+
+def _free_localhost_port() -> int:
+    """A currently-free TCP port on localhost, never one handed out earlier in
+    this process (two back-to-back ``bind(0)`` calls can return the same port)."""
+    for _ in range(64):
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        if port not in _ROOT_COMM_PORTS_HANDED_OUT:
+            _ROOT_COMM_PORTS_HANDED_OUT.add(port)
+            return port
+    raise RuntimeError("could not find a free localhost port for NEURON_RT_ROOT_COMM_ID")
+
+
+def worker_env(
+    base_env: Mapping[str, str],
+    core_range: str,
+    replica_cores: int,
+    *,
+    root_comm_id: str | None = None,
+) -> dict[str, str]:
     env = dict(base_env)
     env["NEURON_RT_VISIBLE_CORES"] = core_range
     env["NEURON_RT_NUM_CORES"] = str(replica_cores)
+    # Each replica is its own Neuron world and bootstraps its collectives
+    # through a root socket at NEURON_RT_ROOT_COMM_ID. Left unset, torch_neuronx
+    # pins it to localhost:62182 at import time (before libneuronxla's
+    # free-port hook can run — the LTX-2 backend imports torch_neuronx at
+    # module scope), so every worker shared one root and concurrent replica
+    # bootstraps collided: "rank 1 of 2 ranks has already checked in", then
+    # both replicas waited forever (ltx_2/dp2tp2 on device, 2026-09-07). A
+    # value inherited from the parent is just as shared, so it is replaced too.
+    env["NEURON_RT_ROOT_COMM_ID"] = root_comm_id or f"localhost:{_free_localhost_port()}"
     return env
 
 
@@ -105,7 +137,7 @@ def run_router(
         ]
         env = worker_env(os.environ, core_range, replica_cores)
         print(f"[dp-router] worker {w}: cores {core_range}", flush=True)
-        procs.append(subprocess.Popen(argv, env=env))
+        procs.append(subprocess.Popen(argv, env=env, preexec_fn=None))
 
     exit_codes = [p.wait() for p in procs]
 
