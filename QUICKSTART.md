@@ -31,17 +31,6 @@ Notes:
   run them as `PYTHON_BIN=$PWD/.venv/bin/python ./scripts/<script>.sh`
   (the flux smoke scripts fall back to `<repo>/.venv` automatically).
 
-Alternatively, build the same environment as a container image:
-
-```bash
-docker build -t difflet .
-docker run --rm --device /dev/neuron0 \
-  -v $HOME/.cache/difflet:/root/.cache/difflet \
-  -v $HOME/.cache/huggingface:/root/.cache/huggingface \
-  difflet run --model-id black-forest-labs/FLUX.1-dev --tp-degree 4 \
-    --height 1024 --width 1024 --prompt "a cat" --output /out/cat.png
-```
-
 ## 2. Sanity-check without touching the device
 
 ```bash
@@ -152,7 +141,7 @@ Serve logs go to the console and `./logs/` in the working directory.
 
 Do not copy or commit `.venv` — it is ~10 GB of machine-specific binaries with
 absolute paths baked in. Share the recipe instead: `requirements-neuron.lock`
-plus `scripts/setup_env.sh` (or the `Dockerfile`) rebuilds an identical
+plus `scripts/setup_env.sh` rebuilds an identical
 environment anywhere. Because the compile-cache key includes the toolchain
 versions, identical envs can also share `~/.cache/difflet` artifacts across
 hosts (set `DIFFLET_COMPILE_CACHE`, and `DIFFLET_SHARED_WEIGHTS_DIR` on the
