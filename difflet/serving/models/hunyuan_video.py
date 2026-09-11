@@ -735,6 +735,13 @@ class HunyuanVideoServingStageAdapter:
     def validate_smoke_output(self, output: FileBackedGenerateOutput) -> None:
         if self.profile is None or self._smoke is None:
             raise RuntimeError("HunyuanVideo serving profile is not loaded")
+        if not _is_primary_replica():
+            # This replica deliberately produced no file (see the host
+            # decoder), so there is nothing to validate; the collective parts
+            # of the smoke still ran here. Same rule as Wan.
+            self._smoke.cleanup()
+            self._smoke = None
+            return
         try:
             validate_smoke_output(
                 output,
