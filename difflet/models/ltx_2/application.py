@@ -13,11 +13,35 @@ from typing import Any
 
 import torch
 
-from difflet.backends.trainium.core.config import NeuronConfig
-from difflet.backends.trainium.core.multi_component_application import (
-    ComponentSpec,
-    MultiComponentApplication,
-)
+# Same guard as the HunyuanVideo application: the package must import on a
+# host without the Neuron toolchain (the TPU backend), and only the Neuron
+# application itself needs these.
+try:
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.backends.trainium.core.multi_component_application import (
+        ComponentSpec,
+        MultiComponentApplication,
+    )
+except (ImportError, FileNotFoundError) as exc:
+    _TRAINIUM_IMPORT_ERROR = exc
+
+    class NeuronConfig:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs) -> None:
+            raise RuntimeError("Trainium runtime dependencies are unavailable.") from (
+                _TRAINIUM_IMPORT_ERROR
+            )
+
+    @dataclass(frozen=True)
+    class ComponentSpec:  # type: ignore[no-redef]
+        name: str
+        component: Any
+
+    class MultiComponentApplication:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs) -> None:
+            raise RuntimeError("Trainium runtime dependencies are unavailable.") from (
+                _TRAINIUM_IMPORT_ERROR
+            )
+
 from difflet.utils.diffusers_adapter import load_diffusers_config
 
 LTX_2_DEFAULT_TEXT_SEQ_LEN = 1024
