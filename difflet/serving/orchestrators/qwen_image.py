@@ -744,7 +744,11 @@ class QwenImageServingStageAdapter:
             )
         if self._tpu_teacache is not None:
             self._tpu_teacache_last_stats = self._tpu_teacache.stats()
-            logger.info("qwen.tpu_teacache stats=%s", self._tpu_teacache_last_stats)
+            # print, not logger.info: the serving worker is a spawned process
+            # with no logging handler, so INFO records vanish there (nothing
+            # from the worker reaches the serve log at INFO). The Wan / LTX-2 /
+            # HunyuanVideo pipelines print this line for the same reason.
+            print(f"[teacache] stats: {self._tpu_teacache_last_stats}", flush=True)
         return latents.cpu()
 
     def _decode_tpu(self, packed, request) -> bytes:
