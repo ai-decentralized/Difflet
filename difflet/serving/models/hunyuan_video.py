@@ -516,7 +516,7 @@ class HunyuanVideoServingStageAdapter:
     ) -> OrderedDict[str, ErasedStageRunner]:
         _validate_profile(runtime.profile)
         if _backend_is_tpu():
-            return self._create_loaded_runners_tpu(runtime)
+            return await self._create_loaded_runners_tpu(runtime)
         manager = ImmutableArtifactManager(
             runtime.profile.cache_dir or Path.home() / ".cache" / "difflet"
         )

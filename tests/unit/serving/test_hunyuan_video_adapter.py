@@ -1585,3 +1585,48 @@ def test_tpu_build_denoiser_routes_to_the_tpu_application_with_teacache(tmp_path
     assert seen["teacache_cadence"] == 2
     assert seen["text_seq_len"] == 256
     assert "teacache_online_delta_alpha" not in seen
+
+
+def test_tpu_create_loaded_runners_loads_dit_then_host_encoders(tmp_path, tpu_backend, monkeypatch):
+    """On the v5e the first serve died in every rank with
+    `TypeError: 'coroutine' object is not iterable`: the TPU branch returned
+    the coroutine instead of awaiting it. Drive the real async path with fakes
+    and check the load order (DiT warmup before the 32 GB Llama)."""
+    import types
+
+    order = []
+
+    class FakeDenoiser:
+        def load_eager(self):
+            order.append("denoiser.load_eager")
+
+    class FakeLlama:
+        def __init__(self, path, *, seq_len, capture_layer, dtype):
+            order.append(("llama", seq_len, capture_layer))
+
+    fake_module = types.SimpleNamespace(TpuBroadcastLlamaEncoder=FakeLlama)
+    monkeypatch.setitem(sys.modules, "difflet.models.hunyuan_video.tpu_application", fake_module)
+    monkeypatch.setattr(hunyuan_video, "_build_denoiser", lambda source, profile: FakeDenoiser())
+    monkeypatch.setattr(hunyuan_video, "_load_host_clip", lambda path: order.append("clip") or ("tok", "clip"))
+    monkeypatch.setattr(hunyuan_video, "_load_llama_tokenizer", lambda path: "llama-tok")
+    monkeypatch.setattr(hunyuan_video, "_load_host_vae", lambda path: order.append("vae") or "vae")
+    monkeypatch.setattr(
+        video_common, "resolve_available_neuron_core_ids", lambda required_num_cores: tuple(range(required_num_cores))
+    )
+    profile = _profile(tmp_path)
+    runtime = ResolvedRuntimeBundle(
+        profile=profile,
+        source=_source(tmp_path),
+        pipeline_definition=hunyuan_video._pipeline_definition(profile),
+        runtime_plan=hunyuan_video._runtime_plan(profile, ()),
+        compile_specs=(),
+        artifacts=ArtifactSet(()),
+    )
+    adapter = hunyuan_video.HunyuanVideoServingStageAdapter()
+
+    runners = asyncio.run(adapter.create_loaded_runners(runtime))
+
+    assert tuple(runners) == ("clip", "llama", "denoiser", "decoder")
+    assert order == ["denoiser.load_eager", "clip", ("llama", 351, 29), "vae"]
+    assert adapter.llama_tokenizer == "llama-tok"
+    assert adapter.profile is profile
