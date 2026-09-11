@@ -86,3 +86,17 @@ def test_taef1_path_implies_taef1(monkeypatch):
         "taef1": True,
         "taef1_path": "madebyollin/taef1",
     }
+
+
+def test_generate_refuses_the_tpu_backend_before_spawning_stages(monkeypatch, capsys):
+    """v5e: `difflet generate` for a TPU-ported model spawned difflet.cli.stage,
+    which imports the Neuron toolchain and died with ModuleNotFoundError."""
+    cli = _cli()
+    monkeypatch.setenv("DIFFLET_BACKEND", "tpu")
+    monkeypatch.setattr(cli, "_get_orchestrator", lambda args: pytest.fail("orchestrator built"))
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["generate", "--model-id", "Qwen/Qwen-Image", "--prompt", "x", "--output", "o.png"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "not available on the 'tpu' backend" in err
+    assert "difflet serve" in err
