@@ -16,15 +16,25 @@ def create_hunyuan_video_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
-    if backend != "trainium":
-        raise NotImplementedError(
-            f"HunyuanVideo currently supports only the trainium backend, got {backend!r}"
-        )
     if parallel.cfg_parallel_enabled:
         raise NotImplementedError(
             "HunyuanVideo is guidance-distilled (single forward pass with the "
             "guidance scale baked into the timestep embedding); CFG-parallel "
             "requires true two-pass classifier-free guidance and does not apply."
+        )
+    if backend == "tpu":
+        from difflet.models.hunyuan_video.tpu_application import TpuHunyuanVideoApplication
+
+        return TpuHunyuanVideoApplication(
+            model_path=model_path,
+            parallel=parallel,
+            dtype=dtype,
+            shape=shape,
+            **kwargs,
+        )
+    if backend != "trainium":
+        raise NotImplementedError(
+            f"HunyuanVideo supports the trainium and tpu backends, got {backend!r}"
         )
 
     from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication

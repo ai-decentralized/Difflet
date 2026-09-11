@@ -310,7 +310,9 @@ def _register_builtin_hunyuan_video() -> None:
             supports_cp=True,
             supports_sp=True,
         ),
-        backends=("trainium",),
+        # Third model on the TPU backend: DiT on the chips, Llama/CLIP/VAE on
+        # the host (see difflet/models/hunyuan_video/tpu_application.py).
+        backends=("trainium", "tpu"),
     )
     class _HunyuanVideoRegistration:
         pass

@@ -27,6 +27,7 @@ Phase 3 of docs/plans/2026-08-16-tpu-backend-support.md.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -42,6 +43,45 @@ logger = logging.getLogger(__name__)
 
 MANIFEST_FILE_NAME = "tpu_manifest.json"
 RANK_DIR_TEMPLATE = "tpu_rank{rank}"
+
+
+@contextlib.contextmanager
+def compile_slot(slots: int | None = None, *, poll_seconds: float = 1.0):
+    """Hold one of ``slots`` cross-process compile slots (flock files).
+
+    ``slots`` <= 0 disables the gate. The files live under
+    ``$DIFFLET_TPU_COMPILE_LOCK_DIR`` (default ``/tmp``); processes on one
+    host that share the directory share the budget.
+    """
+    import fcntl
+    import time
+
+    if slots is None:
+        slots = int(os.environ.get("DIFFLET_TPU_COMPILE_SLOTS", "2") or 0)
+    if slots <= 0:
+        yield
+        return
+    directory = Path(os.environ.get("DIFFLET_TPU_COMPILE_LOCK_DIR", "/tmp"))
+    directory.mkdir(parents=True, exist_ok=True)
+    handles = [open(directory / f"difflet-tpu-compile.{i}.lock", "a+") for i in range(slots)]
+    held = None
+    try:
+        while held is None:
+            for handle in handles:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    continue
+                held = handle
+                break
+            else:
+                time.sleep(poll_seconds)
+        yield
+    finally:
+        if held is not None:
+            fcntl.flock(held.fileno(), fcntl.LOCK_UN)
+        for handle in handles:
+            handle.close()
 
 
 def normalize_path(path) -> str:
@@ -201,6 +241,38 @@ class TpuApplicationBase(torch.nn.Module):
         return all(
             _rank_dir(compiled_model_path, r).is_dir() for r in range(world)
         )
+
+    def warmup_eager(self, module, device, *, slots: int | None = None) -> float:
+        """Run one forward of ``module`` (already on ``device``) so XLA compiles
+        the request-shaped graph now, not on the first request.
+
+        The first execution is where the host memory goes: XLA's compile of a
+        60-block DiT peaked at ~43 GB *per rank* on a v5e host (HunyuanVideo),
+        and four ranks compiling at once plus the host text encoder is more
+        than a 188 GB box. The compile is transient — RSS fell back to ~10 GB
+        afterwards — so ranks take turns: at most ``slots`` compile at a time
+        (``DIFFLET_TPU_COMPILE_SLOTS``, default 2 → ~2 x 43 GB). The slot is
+        released after ``mark_step`` dispatches the execution and before
+        waiting for it, so a rank blocked in its first collective does not
+        hold a slot while the others compile. Returns the seconds taken.
+        """
+        import time
+
+        import torch
+        import torch_xla.core.xla_model as xm
+
+        try:
+            inputs = self.get_example_inputs()
+        except NotImplementedError:
+            return 0.0
+        started = time.monotonic()
+        with compile_slot(slots):
+            with torch.no_grad():
+                out = module(*[t.to(device) if hasattr(t, "to") else t for t in inputs])
+            xm.mark_step()
+        xm.wait_device_ops()
+        del out
+        return time.monotonic() - started
 
     def warmup(self) -> None:
         if self.graph_module is None:

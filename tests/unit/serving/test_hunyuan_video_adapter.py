@@ -1515,3 +1515,73 @@ def test_startup_smoke_is_target_bound_reentrant_and_cleans_on_error(
 
     assert not success_target.parent.exists()
     assert adapter._smoke is None
+
+
+# --- TPU backend --------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _trainium_unless_asked(monkeypatch):
+    """The Trainium-path tests above must not depend on the venv's ambient
+    backend (a torch_xla venv auto-detects tpu); the TPU tests opt in below."""
+    monkeypatch.setattr(hunyuan_video, "_backend_is_tpu", lambda: False)
+
+
+@pytest.fixture
+def tpu_backend(monkeypatch):
+    monkeypatch.setattr(hunyuan_video, "_backend_is_tpu", lambda: True)
+
+
+def test_tpu_runtime_plan_has_no_artifacts_and_no_neuron_vcore_knob(monkeypatch, tmp_path, tpu_backend):
+    monkeypatch.setattr(
+        video_common, "resolve_available_neuron_core_ids", lambda required_num_cores: tuple(range(required_num_cores))
+    )
+    plan = hunyuan_video._runtime_plan(_profile(tmp_path), ())
+    assert plan.profile_identity == ""
+    assert plan.environment.virtual_core_size_override is None
+    assert [stage.placement for stage in plan.stages] == ["host", "tpu", "tpu", "host"]
+    assert [stage.artifact_id for stage in plan.stages] == [None, None, None, None]
+
+
+def test_tpu_profile_accepts_probe_free_teacache_and_host_placements(tmp_path, tpu_backend):
+    profile = replace(_profile(tmp_path), teacache_cadence=2)
+    hunyuan_video._validate_profile(profile)  # no raise
+    profile = replace(_profile(tmp_path), teacache_online_delta=0.6)
+    hunyuan_video._validate_profile(profile)
+
+
+@pytest.mark.parametrize(
+    "changed, match",
+    [
+        ({"clip_placement": "neuron"}, "CLIP on the host"),
+        ({"host_vae": False}, "decodes on the host"),
+        ({"teacache_speedup": 1.5}, "adaptive TeaCache"),
+    ],
+)
+def test_tpu_profile_rejects_neuron_placements_and_adaptive_teacache(tmp_path, tpu_backend, changed, match):
+    with pytest.raises(ValueError, match=match):
+        hunyuan_video._validate_profile(replace(_profile(tmp_path), **changed))
+
+
+def test_trainium_profile_still_rejects_probe_free_teacache(tmp_path, monkeypatch):
+    monkeypatch.setattr(hunyuan_video, "_backend_is_tpu", lambda: False)
+    with pytest.raises(ValueError, match="TPU backend only"):
+        hunyuan_video._validate_profile(replace(_profile(tmp_path), teacache_cadence=2))
+
+
+def test_tpu_build_denoiser_routes_to_the_tpu_application_with_teacache(tmp_path, tpu_backend, monkeypatch):
+    seen = {}
+
+    def fake_create(**kwargs):
+        seen.update(kwargs)
+        return "app"
+
+    import difflet.models.hunyuan_video.entry as entry
+
+    monkeypatch.setattr(entry, "create_hunyuan_video_application", fake_create)
+    profile = replace(_profile(tmp_path), teacache_cadence=2)
+    assert hunyuan_video._build_denoiser(_source(tmp_path), profile) == "app"
+    assert seen["backend"] == "tpu"
+    assert seen["teacache_cadence"] == 2
+    assert seen["text_seq_len"] == 256
+    assert "teacache_online_delta_alpha" not in seen
