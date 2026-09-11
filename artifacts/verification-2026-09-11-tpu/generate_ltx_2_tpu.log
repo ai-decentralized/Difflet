@@ -1,0 +1,3 @@
+Error: model weights not found.
+Run: difflet download --model-id Lightricks/LTX-2
+exit=1

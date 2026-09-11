@@ -1,0 +1,40 @@
+[difflet serve] resolving LTX-2 weights for Lightricks/LTX-2
+Fetching 46 files:   0%|          | 0/46 [00:00<?, ?it/s]Fetching 46 files: 100%|██████████| 46/46 [00:00<00:00, 2887.60it/s]
+Traceback (most recent call last):
+  File "/mnt/models/tpuenv312/bin/difflet", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/mnt/models/Difflet/difflet/cli/main.py", line 950, in main
+    run(args)
+  File "/mnt/models/Difflet/difflet/cli/serve.py", line 226, in run
+    stack = build_serving_stack(options)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/factory.py", line 39, in build_serving_stack
+    runtime = preparer.prepare_runtime(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/models/ltx_2.py", line 328, in prepare_runtime
+    bindings = tuple(_prepare_binding(spec) for spec in specs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/models/ltx_2.py", line 328, in <genexpr>
+    bindings = tuple(_prepare_binding(spec) for spec in specs)
+                     ^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/models/ltx_2.py", line 315, in _prepare_binding
+    return manager.prepare(
+           ^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/artifact_manager.py", line 82, in prepare
+    compile_artifact(target)
+  File "/mnt/models/Difflet/difflet/serving/models/ltx_2.py", line 320, in <lambda>
+    compile_artifact=lambda target: compile_serving_artifact(
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/models/ltx_2.py", line 194, in compile_serving_artifact
+    pipe = build_pipeline(
+           ^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/models/ltx_2.py", line 148, in build_pipeline
+    return DiffletPipeline.from_pretrained(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/pipeline/difflet_pipeline.py", line 98, in from_pretrained
+    entry.require_backend(backend_runtime.name)
+  File "/mnt/models/Difflet/difflet/registry.py", line 138, in require_backend
+    raise ValueError(
+ValueError: model 'ltx_2' does not support backend 'tpu'; supported backends: trainium
+exit=1

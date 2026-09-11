@@ -1,0 +1,63 @@
+Traceback (most recent call last):
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/_snapshot_download.py", line 268, in snapshot_download
+    repo_info = api.repo_info(repo_id=repo_id, repo_type=repo_type, revision=revision)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/hf_api.py", line 3655, in repo_info
+    return method(
+           ^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/hf_api.py", line 3334, in model_info
+    r = get_session().get(path, headers=headers, timeout=timeout, params=params)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/httpx/_client.py", line 1053, in get
+    return self.request(
+           ^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/httpx/_client.py", line 825, in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/httpx/_client.py", line 914, in send
+    response = self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/httpx/_client.py", line 942, in _send_handling_auth
+    response = self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/httpx/_client.py", line 977, in _send_handling_redirects
+    hook(request)
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 260, in hf_request_event_hook
+    raise OfflineModeIsEnabled(
+huggingface_hub.errors.OfflineModeIsEnabled: Cannot reach https://huggingface.co/api/models/hunyuanvideo-community/HunyuanVideo/revision/main: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/mnt/models/tpuenv312/bin/difflet", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/mnt/models/Difflet/difflet/cli/main.py", line 950, in main
+    run(args)
+  File "/mnt/models/Difflet/difflet/cli/serve.py", line 226, in run
+    stack = build_serving_stack(options)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/factory.py", line 39, in build_serving_stack
+    runtime = preparer.prepare_runtime(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/models/hunyuan_video.py", line 121, in prepare_runtime
+    source = resolve_hf_model_source(
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/orchestrators/base.py", line 37, in resolve_hf_model_source
+    resolve_model_path(
+  File "/mnt/models/Difflet/difflet/pipeline/path_resolver.py", line 75, in resolve_model_path
+    return snapshot_download(
+           ^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/_snapshot_download.py", line 360, in snapshot_download
+    raise LocalEntryNotFoundError(
+huggingface_hub.errors.LocalEntryNotFoundError: Cannot find an appropriate cached snapshot folder for the specified revision on the local disk and outgoing traffic has been disabled. To enable repo look-ups and downloads online, set 'HF_HUB_OFFLINE=0' as environment variable.
+exit=1
