@@ -390,8 +390,8 @@ artifacts. `difflet clean` is a housekeeping command that takes no `--model-id`.
 TeaCache step-skipping flags (`--teacache-cadence`, `--teacache-online-delta`,
 `--teacache-speedup`, `--teacache-calibration`) are available on `generate` and `run`.
 `difflet serve` accepts the probe-free pair (`--teacache-cadence`, `--teacache-online-delta`)
-for Qwen-Image and Wan on both Trainium and the TPU backend, and adaptive
-`--teacache-speedup` for Flux and Qwen-Image image serving.
+for Qwen-Image and Wan on both Trainium and the TPU backend, for HunyuanVideo on the TPU
+backend, and adaptive `--teacache-speedup` for Flux and Qwen-Image image serving.
 TAEF1 lightweight-VAE flags (`--taef1`, `--taef1-path`) are available on `compile`,
 `generate`, and `run` (Flux only, see [Quick start](#quick-start)).
 

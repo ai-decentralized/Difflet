@@ -245,7 +245,6 @@ def test_serving_profile_carries_probe_free_teacache_modes(model_id, options, ca
     "model_id",
     [
         "black-forest-labs/FLUX.1-dev",
-        "hunyuanvideo-community/HunyuanVideo",
         "Lightricks/LTX-2",
     ],
 )
@@ -257,7 +256,17 @@ def test_serving_profile_rejects_probe_free_teacache_for_unwired_adapters(model_
 
     assert exc.value.code == "invalid_extra_body"
     assert "--teacache-cadence" in exc.value.message
-    assert "qwen_image, wan" in exc.value.message
+    assert "hunyuan_video, qwen_image, wan" in exc.value.message
+
+
+def test_serving_profile_carries_probe_free_teacache_for_hunyuan_on_tpu(monkeypatch):
+    """The option layer lets the modes through for HunyuanVideo; the adapter
+    then accepts them on TPU and rejects them on Trainium."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "tpu")
+    resolved = resolve_serving_model(
+        ServeOptions(model_id="hunyuanvideo-community/HunyuanVideo", teacache_cadence=2)
+    )
+    assert resolved.profile.teacache_cadence == 2
 
 
 @pytest.mark.parametrize(
