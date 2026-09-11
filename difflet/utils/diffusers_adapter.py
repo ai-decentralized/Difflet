@@ -2,14 +2,17 @@
 # Forked from neuronx-distributed-inference v0.9.17334+ced6ae4e
 # Original path: neuronx_distributed_inference/utils/diffusers_adapter.py
 # Fork date: 2026-05-08
-# Modifications: (none — verbatim copy; see git log for divergence)
+# Modifications: InferenceConfig import is annotation-only (TYPE_CHECKING) so the
+#   module imports on hosts without the Neuron toolchain (TPU backend).
 # <<< NxDI fork banner <<<
+from __future__ import annotations
+
 from diffusers.configuration_utils import ConfigMixin
-from typing import Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 import os
-from difflet.backends.trainium.core.config import (
-    InferenceConfig,
-)
+
+if TYPE_CHECKING:  # only used in a type annotation below
+    from difflet.backends.trainium.core.config import InferenceConfig
 
 
 def load_diffusers_config(
