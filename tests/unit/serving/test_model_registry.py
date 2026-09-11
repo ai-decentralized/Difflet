@@ -369,3 +369,31 @@ def test_serving_profile_reports_invalid_parallel_values(options, message):
 
     assert exc.value.code == "invalid_extra_body"
     assert message in exc.value.message
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "black-forest-labs/FLUX.1-dev",
+        "hunyuanvideo-community/HunyuanVideo",
+        "Lightricks/LTX-2",
+    ],
+)
+def test_serving_rejects_unported_models_on_tpu_before_touching_weights(monkeypatch, model_id):
+    """Seen on a v5e: `difflet serve` for HunyuanVideo resolved the snapshot and
+    then died in _build_llama_app with ModuleNotFoundError('neuronx_distributed_inference');
+    FLUX got as far as a gated-repo 401. The registry's backend list must gate
+    serving the way it gates DiffletPipeline."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "tpu")
+
+    with pytest.raises(ValueError, match="does not support backend 'tpu'"):
+        resolve_serving_model(ServeOptions(model_id=model_id))
+
+
+@pytest.mark.parametrize(
+    "model_id", ["Qwen/Qwen-Image", "Wan-AI/Wan2.2-T2V-A14B-Diffusers", "Wan-AI/Wan2.1-T2V-14B-Diffusers"]
+)
+def test_serving_accepts_the_tpu_ported_models(monkeypatch, model_id):
+    monkeypatch.setenv("DIFFLET_BACKEND", "tpu")
+
+    assert resolve_serving_model(ServeOptions(model_id=model_id)).model_id == model_id
