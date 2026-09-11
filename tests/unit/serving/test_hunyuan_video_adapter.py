@@ -1630,3 +1630,20 @@ def test_tpu_create_loaded_runners_loads_dit_then_host_encoders(tmp_path, tpu_ba
     assert order == ["denoiser.load_eager", "clip", ("llama", 351, 29), "vae"]
     assert adapter.llama_tokenizer == "llama-tok"
     assert adapter.profile is profile
+
+
+def test_non_primary_replicas_skip_smoke_output_validation(tmp_path, monkeypatch):
+    """v5e: with the host decoder on the primary replica only, the other three
+    returned the discarded-output descriptor and validate_smoke_output raised
+    "startup smoke wrote outside its temporary target" in each of them."""
+    monkeypatch.setenv("DIFFLET_REPLICA_RANK", "2")
+    adapter = hunyuan_video.HunyuanVideoServingStageAdapter()
+    adapter.profile = _profile(tmp_path)
+    adapter.smoke_request()
+    assert adapter._smoke is not None
+    discarded = FileBackedGenerateOutput(
+        path=hunyuan_video._DISCARDED_OUTPUT_PATH, mime_type="video/mp4", output_format="mp4",
+        size_bytes=0, width=96, height=64, num_frames=5, fps=24.0, duration_s=0.0,
+    )
+    adapter.validate_smoke_output(discarded)  # no raise
+    assert adapter._smoke is None
