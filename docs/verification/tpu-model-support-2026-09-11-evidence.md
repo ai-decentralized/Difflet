@@ -41,7 +41,7 @@ instead start a Neuron compile on a TPU box).
 | Wan 2.2 | **PASS** · 30.4 s / 832×480×9 20 steps | **PASS** · 12.18 s wall | N/A | **PASS** cadence 2 = 0.75× | single expert resident ¹ |
 | Wan 2.1 | **PASS** · 33.5 s (20 st) / 70.4 s (40 st, CFG) | NOT MEASURED (runner is 2.2-shaped) | N/A | NOT MEASURED (same controller as 2.2) | quality = upstream ² |
 | FLUX.1-dev | N/A · not ported (fail-fast 0.17 s, `d384b5c`) | N/A | N/A | N/A | gated repo; port plan option (b) |
-| HunyuanVideo | N/A · not ported (fail-fast 0.16 s) | N/A | N/A | N/A | first port candidate |
+| HunyuanVideo | **PASS** (port, `tpu-port-hunyuan`) · 191 s / 512×320×61 20 steps (165 s of it host VAE) | **PASS** · 20.1 s denoise, 1.0 s/step | N/A | **PASS** cadence 2 = 0.75×, 0.0064/px | ported 2026-09-11; VAE on chip is the follow-up |
 | LTX-2 | N/A · not ported (fail-fast 0.16 s) | N/A | N/A | N/A | tightest HBM fit |
 
 ¹ two experts do not fit 16 GB HBM; `benchmark/v5e/wan_2_2.md`. ² block artifacts at 9 frames /
@@ -52,7 +52,7 @@ guidance 1.0 are the model's own — reproduced with upstream diffusers fp32 on 
 **`difflet serve` on TPU**
 | FLUX | Qwen-Image | Wan 2.2 | Wan 2.1 | HunyuanVideo | LTX-2 |
 |---|---|---|---|---|---|
-| N/A · fail-fast | PASS · 7.6 s | PASS · 30.4 s | PASS · 33.5 s | N/A · fail-fast | N/A · fail-fast |
+| N/A · fail-fast | PASS · 7.6 s | PASS · 30.4 s | PASS · 33.5 s | PASS · 191 s (port) | N/A · fail-fast |
 
 **Backend gate (unported model refused before weights)** — new in this campaign
 | FLUX | Qwen-Image | Wan 2.2 | Wan 2.1 | HunyuanVideo | LTX-2 |
@@ -62,7 +62,7 @@ guidance 1.0 are the model's own — reproduced with upstream diffusers fp32 on 
 **Numerical parity vs. upstream diffusers fp32 (single DiT forward on chip)**
 | FLUX | Qwen-Image | Wan 2.2 | Wan 2.1 | HunyuanVideo | LTX-2 |
 |---|---|---|---|---|---|
-| N/A | PASS (port acceptance, `oracle_qwen_cmp.log`) | PASS · cos 0.99861 | PASS · cos 0.99967 | N/A | N/A |
+| N/A | PASS (port acceptance, `oracle_qwen_cmp.log`) | PASS · cos 0.99861 | PASS · cos 0.99967 | PASS · cos 0.99949 | N/A |
 
 ## Phase plan
 
@@ -220,6 +220,31 @@ HBM/latency budget than the 9-frame smoke shape.
 | qwen_image | `benchmark.bench --backend tpu` | PASS — denoise 10.12 s baseline | `benchmark/v5e-teacache-baseline/qwen_image.json` |
 | wan (2.2) | `difflet serve` 832×480×9, 20 steps, `/v1/videos/sync` | PASS — 200 in 30.4 s | same worklog, step 3 |
 | wan (2.2) | `benchmark/wan_tpu_run.py` | PASS — 12.18 s wall | `/mnt/models/teacache_runs/wan_baseline.json` |
+
+## Phase 5 — HunyuanVideo ported to TPU (branch `tpu-port-hunyuan`, same day)
+
+The plan's first port (`docs/plans/2026-09-11-tpu-port-hunyuan-ltx2-flux.md`), done after the
+matrix above was written. Same host, 320×512×61, tp=4, bf16.
+
+| check | result | evidence |
+|---|---|---|
+| single-forward parity vs diffusers fp32 (CPU) | **cos 0.99949 / rel-L1 3.08e-2** fused; 0.99949 / 3.09e-2 SDPA; control (diffusers bf16 vs fp32) 0.99946 / 3.15e-2 | `oracle_hunyuan_cmp2.log`, `oracle_hunyuan_ref.log` |
+| first attempt, before `c7b9d09` | cos **0.9086** (rel-L1 0.57), fused == SDPA → TPU `RowParallelLinear` ignored `reduce_output`/`skip_bias_add` (double reduce, bias × tp in all 40 single blocks) | `oracle_hunyuan_cmp.log` |
+| HBM | 10.84 GB resident, 12.5 GB peak of 15.75 (per-rank shard 5.8 B params, 3.5 B of them replicated adaLN linears) | oracle + bench logs |
+| DiT step | **1.006 s** synced == natural (host-side Euler step syncs anyway); SDPA path 2.0 s | `hunyuan_baseline.json` |
+| first compile | 100 s alone; 168–174 s under the 2-slot gate with 4 ranks; host RSS ~43 GB per compiling rank (peak 174 GB ungated → 118 GB gated in serving) | serve/bench logs |
+| `difflet serve` (`--host-vae`) | ready in **372 s**; 20-step `POST /v1/videos/sync` **200 in 191 s**, 457 KB mp4, 61 finite frames, coherent motion | `serve_hunyuan_video_tpu_port.log`, `serve_hunyuan_video_tpu.mp4`, `hunyuan_video_tpu_frames_0_30_60.png` |
+| benchmark runner | denoise 20.1 s (20 steps), Llama encode 4.1–7.0 s (fp32 on ordinal 0 + broadcast), **host VAE decode 167 s** | `hunyuan_baseline.{json,log}`, `hunyuan_video_tpu_bench_baseline.mp4` |
+| TeaCache cadence 2 | **15 full / 5 skipped** every iteration; denoise **15.07 s vs 20.12 s = 0.749×**, per-full-step 1.004 s unchanged, HBM unchanged; video vs baseline **mean abs 0.0064/px, PSNR 36.9 dB** (per-frame 0.004–0.012), frame 30 side by side indistinguishable | `hunyuan_cadence2.{json,log}`, `hunyuan_video_tpu_bench_cadence2.mp4`, `hunyuan_video_tpu_baseline_vs_cadence2_f30.png` |
+
+Where the 191 s request goes: ~20 s denoise + ~5 s text encode + ~165 s host VAE decode of 61
+frames (`AutoencoderKLHunyuanVideo`, fp32, tiled, 112-thread EPYC). VAE-on-chip is the port's
+biggest follow-up; the DiT itself is 1 s/step.
+
+Bugs found by the port's on-device passes (each its own commit, each pinned):
+`c7b9d09` RowParallelLinear kwargs · missing `await` in the TPU runner builder · non-primary
+replicas validating a smoke file they never wrote · `8403351` benchmark ranks exiting while
+rank 0 still decodes (TPU runtime kills the straggler, exit 1, no traceback).
 
 ## Bug ledger
 

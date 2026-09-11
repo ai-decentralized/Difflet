@@ -1,0 +1,192 @@
+[
+  {
+    "type": "result",
+    "iteration": 0,
+    "basis": "synced",
+    "throughput_step_seconds": 1.0043417763999363,
+    "wall_seconds": 15.065126645999044,
+    "encode_seconds": 6.095079421000264,
+    "load_seconds": 175.3747469989994,
+    "step_seconds": [
+      1.0083796700000676,
+      1.0058526700013317,
+      1.000145669999256,
+      1.0006002610007272,
+      1.0016596109999227,
+      1.0061379300004774,
+      1.005786639998405,
+      1.008766890001425,
+      1.001671500998782,
+      1.0024918600011006,
+      1.0047365209993586,
+      1.0034544499994809,
+      1.0085250000011001,
+      1.0003819909998128
+    ],
+    "mem_before": {
+      "bytes_used": 0.0,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 0.0
+    },
+    "mem_after_load": {
+      "bytes_used": 12.503,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 12.526
+    },
+    "mem_after_run": {
+      "bytes_used": 12.504,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 12.526
+    },
+    "latent_shape": [
+      1,
+      16,
+      16,
+      40,
+      64
+    ],
+    "finite": true,
+    "min": -3.28125,
+    "max": 2.75,
+    "mean": -0.07177734375,
+    "std": 0.98046875,
+    "teacache": {
+      "full_steps": 15,
+      "skipped_steps": 5,
+      "probe_calls": 0,
+      "last_delta_estimate": null,
+      "cache_initialized": true
+    }
+  },
+  {
+    "type": "result",
+    "iteration": 1,
+    "basis": "synced",
+    "throughput_step_seconds": 1.0055373036667636,
+    "wall_seconds": 15.083059555001455,
+    "encode_seconds": 3.502077670998915,
+    "load_seconds": 175.3747469989994,
+    "step_seconds": [
+      1.014174930000081,
+      1.0039271810001082,
+      1.0017944100000022,
+      1.0025365309993504,
+      1.0045075600010023,
+      1.0048528999996051,
+      1.0041777309997997,
+      1.0031691299991508,
+      1.0113557500008028,
+      1.0116180700006225,
+      1.0060634499986918,
+      1.0019016910009668,
+      1.001403209998898,
+      1.0089751110008365
+    ],
+    "mem_before": {
+      "bytes_used": 0.0,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 0.0
+    },
+    "mem_after_load": {
+      "bytes_used": 12.503,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 12.526
+    },
+    "mem_after_run": {
+      "bytes_used": 12.504,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 12.526
+    },
+    "latent_shape": [
+      1,
+      16,
+      16,
+      40,
+      64
+    ],
+    "finite": true,
+    "min": -3.28125,
+    "max": 2.75,
+    "mean": -0.07177734375,
+    "std": 0.98046875,
+    "teacache": {
+      "full_steps": 15,
+      "skipped_steps": 5,
+      "probe_calls": 0,
+      "last_delta_estimate": null,
+      "cache_initialized": true
+    }
+  },
+  {
+    "type": "result",
+    "iteration": 2,
+    "basis": "natural",
+    "throughput_step_seconds": 1.0127125588666483,
+    "wall_seconds": 15.190688382999724,
+    "encode_seconds": 3.438653451999926,
+    "load_seconds": 175.3747469989994,
+    "step_seconds": [
+      1.0098931400007132,
+      1.007388001000436,
+      1.0305663689996436,
+      1.0096577410004102,
+      1.0285519399985787,
+      1.0129478500002733,
+      1.0081845300010173,
+      1.0045905509996373,
+      1.0052474200001598,
+      1.0034527499992691,
+      1.004560360999676,
+      1.0027076200003648,
+      1.0032139499999175,
+      1.0034524410002632
+    ],
+    "mem_before": {
+      "bytes_used": 0.0,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 0.0
+    },
+    "mem_after_load": {
+      "bytes_used": 12.503,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 12.526
+    },
+    "mem_after_run": {
+      "bytes_used": 12.504,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 12.526
+    },
+    "latent_shape": [
+      1,
+      16,
+      16,
+      40,
+      64
+    ],
+    "finite": true,
+    "min": -3.28125,
+    "max": 2.75,
+    "mean": -0.07177734375,
+    "std": 0.98046875,
+    "teacache": {
+      "full_steps": 15,
+      "skipped_steps": 5,
+      "probe_calls": 0,
+      "last_delta_estimate": null,
+      "cache_initialized": true
+    }
+  },
+  {
+    "type": "decoded",
+    "seconds": 167.80313098199986,
+    "where": "host",
+    "shape": [
+      1,
+      3,
+      61,
+      320,
+      512
+    ],
+    "finite": true
+  }
+]
