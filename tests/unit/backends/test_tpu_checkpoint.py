@@ -242,3 +242,59 @@ def test_without_rename_the_same_module_reports_every_key_missing(tmp_path):
     pm.init_parallel_mesh(MeshSpec(tp=4))
     with pytest.raises(ValueError, match="had no checkpoint entry"):
         ckpt.load_checkpoint_into(_Ffn(), tmp_path, tp_size=4, tp_rank=0)
+
+
+# --- CheckpointSlice: one checkpoint tensor feeding two row-parallel params ---
+
+
+class _FusedOut(nn.Module):
+    """HunyuanVideo's single-stream block shape: upstream stores one
+    ``proj_out`` over cat([attn, mlp]); the modeling keeps two row-parallel
+    projections, one per input stream, so each matches its own sharding."""
+
+    def __init__(self):
+        super().__init__()
+        self.proj_out_attn = L.RowParallelLinear(8, 4, bias=True, input_is_parallel=True)
+        self.proj_out_mlp = L.RowParallelLinear(16, 4, bias=False, input_is_parallel=True)
+
+
+_FUSED = {
+    "proj_out.weight": torch.arange(4 * 24, dtype=torch.float32).reshape(4, 24),
+    "proj_out.bias": torch.arange(4, dtype=torch.float32),
+}
+
+
+def _fused_rename(name: str):
+    if name == "proj_out_attn.weight":
+        return ckpt.CheckpointSlice("proj_out.weight", dim=1, start=0, stop=8)
+    if name == "proj_out_mlp.weight":
+        return ckpt.CheckpointSlice("proj_out.weight", dim=1, start=8, stop=None)
+    if name == "proj_out_attn.bias":
+        return "proj_out.bias"
+    return name
+
+
+@pytest.mark.parametrize("rank", range(4))
+def test_checkpoint_slice_windows_then_shards(tmp_path, rank):
+    pm.init_parallel_mesh(MeshSpec(tp=4))
+    safetensors_torch.save_file(_FUSED, str(tmp_path / "model.safetensors"))
+    block = _FusedOut()
+    ckpt.load_checkpoint_into(block, tmp_path, tp_size=4, tp_rank=rank, rename=_fused_rename)
+
+    full = _FUSED["proj_out.weight"]
+    # attn half: columns 0..8, this rank's 2 of them; mlp half: 8..24, 4 of them.
+    assert torch.equal(block.proj_out_attn.weight, full[:, rank * 2 : (rank + 1) * 2])
+    assert torch.equal(block.proj_out_mlp.weight, full[:, 8 + rank * 4 : 8 + (rank + 1) * 4])
+    assert torch.equal(block.proj_out_attn.bias, _FUSED["proj_out.bias"])
+
+
+def test_checkpoint_slice_tiles_the_source_exactly(tmp_path):
+    pm.init_parallel_mesh(MeshSpec(tp=4))
+    safetensors_torch.save_file(_FUSED, str(tmp_path / "model.safetensors"))
+    attn, mlp = [], []
+    for rank in range(4):
+        block = _FusedOut()
+        ckpt.load_checkpoint_into(block, tmp_path, tp_size=4, tp_rank=rank, rename=_fused_rename)
+        attn.append(block.proj_out_attn.weight.clone())
+        mlp.append(block.proj_out_mlp.weight.clone())
+    assert torch.equal(torch.cat(attn + mlp, dim=1), _FUSED["proj_out.weight"])
