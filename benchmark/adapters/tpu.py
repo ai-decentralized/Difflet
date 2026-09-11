@@ -349,10 +349,35 @@ class TpuAdapter(BackendAdapter):
             process.start()
         pending = set(range(world))
         while pending:
-            reply = self._reply_q.get(timeout=_REPLICA_TIMEOUT)
+            reply = self._wait_reply()
             pending.discard(reply["rank"])
             if "load_seconds" in reply:
                 self._load_seconds = reply["load_seconds"]
+
+    def _wait_reply(self) -> dict:
+        """Next worker reply, or RuntimeError as soon as a rank has died.
+
+        A plain ``reply_q.get(timeout=_REPLICA_TIMEOUT)`` sat for the full hour
+        after every rank had already crashed (the ``_decode`` TypeError of
+        f9689ec left four tracebacks in the log and a parent that never
+        returned). Poll instead, and check the ranks between polls.
+        """
+        import queue as _queue
+
+        deadline = time.monotonic() + _REPLICA_TIMEOUT
+        while True:
+            try:
+                return self._reply_q.get(timeout=5)
+            except _queue.Empty:
+                pass
+            dead = [(rank, p.exitcode) for rank, p in enumerate(self._procs) if not p.is_alive()]
+            if dead:
+                self.shutdown()
+                codes = ", ".join(f"rank{rank}={code}" for rank, code in dead)
+                raise RuntimeError(f"TPU worker exited before replying ({codes}); see the log above")
+            if time.monotonic() > deadline:
+                self.shutdown()
+                raise TimeoutError(f"no reply from TPU workers within {_REPLICA_TIMEOUT}s")
 
     #: This adapter can run the denoise loop without the per-step sync, so the
     #: harness can report the natural basis alongside the comparable one.
@@ -362,7 +387,7 @@ class TpuAdapter(BackendAdapter):
         self._ensure_started(spec)
         for queue in self._cmd_qs:
             queue.put({"type": "generate", "sync_steps": sync_steps})
-        reply = self._reply_q.get(timeout=_REPLICA_TIMEOUT)
+        reply = self._wait_reply()
         return {
             "wall_seconds": reply["wall_seconds"],
             "load_seconds": reply["load_seconds"],
