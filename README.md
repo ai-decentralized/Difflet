@@ -1,3 +1,10 @@
+<div align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/yotta-logo-white.svg">
+  <img alt="Yotta AI" src="docs/assets/yotta-logo-black.svg" width="260">
+</picture>
+</div>
+
 # Difflet
 
 **Run diffusion transformers on AWS Trainium: FLUX, Qwen-Image, Wan, HunyuanVideo, and LTX-2, from one CLI, one Python API, and one OpenAI-compatible server.**
@@ -19,6 +26,10 @@ load and denoise.
 [Quick start](#quick-start) · [Choose a topology](#choose-a-topology) · [Serving](#serving) ·
 [Go further](#go-further) · [CLI reference](#cli-reference) · [Troubleshooting](#troubleshooting) ·
 [Developer guide](DEVELOPER.md)
+
+## Latest News
+
+- [09/10] **Difflet 1.0 is released.**
 
 ## What Difflet does
 
