@@ -52,18 +52,21 @@ def _mem(xm, device):
         return {"error": str(exc)}
 
 
-def worker(rank, world, args, reply_q):
+def worker(rank, world, args, reply_q, decode_done):
     try:
-        _worker(rank, world, args, reply_q)
+        _worker(rank, world, args, reply_q, decode_done)
     except Exception as exc:  # noqa: BLE001
         import traceback
 
         reply_q.put({"type": "error", "rank": rank, "error": repr(exc),
                      "traceback": traceback.format_exc()})
         raise
+    finally:
+        # Whatever happens on rank 0, never leave the others parked.
+        decode_done.set()
 
 
-def _worker(rank, world, args, reply_q):
+def _worker(rank, world, args, reply_q, decode_done):
     from torch_xla._internal import pjrt
 
     pjrt.initialize_multiprocess(rank, world)
@@ -204,6 +207,13 @@ def _worker(rank, world, args, reply_q):
                 "teacache": controller.stats() if controller is not None else None,
             })
 
+    # The host decode on rank 0 takes ~2 min at 61 frames. The other ranks
+    # must stay alive for it: on the first run they exited as soon as they
+    # were done, and rank 0 -- still decoding -- died with exit code 1 and no
+    # traceback once its TPU peers were gone. (Serving never sees this: the
+    # replicas outlive every request.)
+    if rank != 0 and args["decode"]:
+        decode_done.wait()
     if rank == 0 and args["decode"]:
         from diffusers import AutoencoderKLHunyuanVideo
 
@@ -229,6 +239,7 @@ def _worker(rank, world, args, reply_q):
             imageio.mimsave(args["out"] + ".mp4", (video.numpy() * 255).astype("uint8"), fps=24)
         except Exception as exc:  # noqa: BLE001
             print(f"[rank0] mp4 write skipped: {exc}", flush=True)
+        decode_done.set()
 
     reply_q.put({"type": "done", "rank": rank})
 
@@ -262,18 +273,21 @@ def main() -> int:
     print(f"world={world} args={args}", flush=True)
     ctx = mp.get_context("spawn")
     reply_q = ctx.Queue()
-    procs = [ctx.Process(target=worker, args=(r, world, args, reply_q), daemon=False)
+    decode_done = ctx.Event()
+    procs = [ctx.Process(target=worker, args=(r, world, args, reply_q, decode_done), daemon=False)
              for r in range(world)]
     for p in procs:
         p.start()
     results, done, failed = [], 0, False
     while done < world:
-        if not any(p.is_alive() for p in procs) and reply_q.empty():
-            break
+        alive = any(p.is_alive() for p in procs)
         try:
-            msg = reply_q.get(timeout=60)
+            # A rank's last message (an error, typically) can still be in the
+            # queue's feeder thread when is_alive() flips, so always drain
+            # with a timeout before concluding the ranks are gone.
+            msg = reply_q.get(timeout=60 if alive else 5)
         except Exception:  # noqa: BLE001
-            if not any(p.is_alive() for p in procs):
+            if not alive:
                 break
             continue
         if msg["type"] == "done":
@@ -285,10 +299,15 @@ def main() -> int:
         else:
             results.append(msg)
             print(json.dumps(msg, indent=2), flush=True)
-    for p in procs:
+    for rank, p in enumerate(procs):
         p.join(timeout=120)
         if p.is_alive():
             p.terminate()
+        # A rank killed by a signal (OOM, segfault) never reaches the queue;
+        # its exit code is the only trace, so say it.
+        if p.exitcode not in (0, None):
+            failed = True
+            print(f"rank{rank} exited with code {p.exitcode}", file=sys.stderr, flush=True)
     Path(options.out + ".json").write_text(json.dumps(results, indent=2))
     return 1 if failed or not results else 0
 
