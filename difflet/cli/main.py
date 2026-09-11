@@ -824,6 +824,30 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
     raise SystemExit(router.run_router(args, requests, replica_cores=_replica_cores(args)))
 
 
+def _validate_backend_has_cli_runtime(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """compile/generate/run exist only for the Trainium backend.
+
+    The staged CLI orchestrators spawn ``difflet.cli.stage`` subprocesses that
+    import the Neuron toolchain directly, so on a TPU host they never reach
+    ``TpuBackend.prepare_runtime``'s NotImplementedError: measured on a v5e,
+    ``difflet generate`` for Qwen-Image and Wan died in the stage subprocess
+    with ``ModuleNotFoundError: No module named 'neuronx_distributed'``.
+    Refuse up front and say what does run on TPU.
+    """
+    from difflet.backends.registry import current_backend
+
+    backend = current_backend()
+    if backend == "trainium":
+        return
+    parser.error(
+        f"'difflet {args.command}' is not available on the {backend!r} backend "
+        "(no CLI compile/generate runtime; only Trainium has one). On TPU use "
+        "'difflet serve' (Qwen-Image, Wan) or the benchmark runners "
+        "(python -m benchmark.bench --backend tpu, benchmark/wan_tpu_run.py). "
+        "Set DIFFLET_BACKEND=trainium on a Trainium host."
+    )
+
+
 def _get_orchestrator(args: argparse.Namespace):
     from difflet.cli.orchestrators.flux import FluxOrchestrator
     from difflet.cli.orchestrators.hunyuan_video import HunyuanVideoOrchestrator
@@ -903,6 +927,7 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(1)
 
     if args.command in ("compile", "generate", "run"):
+        _validate_backend_has_cli_runtime(args, parser)
         _validate_cfg_parallel(args)
         _validate_sp(args)
         _validate_taef1(args)
