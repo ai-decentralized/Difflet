@@ -2,7 +2,7 @@
 
 Date: 2026-09-08
 
-Status: Implemented and CPU-verified; **on-device verification pending**
+Status: Implemented; **verified on a v5e 2026-09-11** — see `docs/worklog/2026-09-11-tpu-teacache-device.md`
 
 Branch: `tpu-teacache`, commit `993b56a` (on top of `main` @ `967e38f`)
 
@@ -169,7 +169,7 @@ weights under `/mnt/models`, chips free (`tpu-info` lists holders of
    iterations and the decoded `.mp4`.
 3. **Serving smoke** — `difflet serve … --teacache-cadence 2`, one request
    through `/v1/chat/completions`; the worker log must show
-   `qwen.tpu_teacache stats={'full_steps': 15, 'skipped_steps': 5, …}` (Qwen)
+   `[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, …}` (Qwen)
    or `[teacache] stats: {...}` (Wan).
 4. **Quality** — same seed, compare against the baseline output: mean absolute
    per-pixel difference (the fused-attention A/B used 0.002/pixel as its
@@ -182,11 +182,11 @@ weights under `/mnt/models`, chips free (`tpu-info` lists holders of
 | model | mode | denoise warm (s) | step, full steps (ms) | skipped / full | first-request extra compile (s) | quality vs. baseline |
 |---|---|---|---|---|---|---|
 | Qwen-Image | baseline | 10.14 (`benchmark/v5e`) | 508 synced / 291 natural | 0 / 20 | — | — |
-| Qwen-Image | cadence 2 | | | | | |
-| Qwen-Image | online-delta 0.6 | | | | | |
+| Qwen-Image | cadence 2 | **7.60** | 501 synced / 295 natural | 5 / 15 | ≲ 0.3 | mean abs 0.0019/px, PSNR 47.3 dB |
+| Qwen-Image | online-delta 0.6 | 7.62 synced; **natural e2e 10.1–10.3 s, slower than baseline (8.7)** | 500 synced / 485 natural | 5 / 15 | ≲ 0.4 | 0.0027/px, 44.3 dB |
 | Wan 2.2 | baseline | 12.20 (`benchmark/v5e`) | 610 | 0 / 20 | — | — |
-| Wan 2.2 | cadence 2 | | | | | |
-| Wan 2.2 | online-delta 0.6 | | | | | |
+| Wan 2.2 | cadence 2 | **9.10** wall | 606 | 5 / 15 | none | 0.0126/px, 31.3 dB (video) |
+| Wan 2.2 | online-delta 0.6 | 9.11 wall | 608 | 5 / 15 | none | 0.0194/px, 29.1 dB (video) |
 
 **Expected, unmeasured:** cadence 2 at 20 steps removes 5 of 20 forwards, so
 denoise ≈ 0.75× baseline — Qwen ≈ 7.6 s, Wan ≈ 9.2 s — with the per-full-step
@@ -232,6 +232,14 @@ Ranked by expected value; evidence from `benchmark/v5e/` and the handoff in
 | int8 weight-only | v5e int8 MXU peak is ~2× bf16; 9.6 GB → ~5 GB per chip would let both Wan experts co-reside (quality item as much as speed) | long-term |
 
 ## Status log
+
+### 2026-09-11 — verified on v5e
+
+Five commits `f9689ec`..`dc215f5` on `tpu-teacache`. Both models, both modes,
+bench + `difflet serve`: 5 of 20 steps skipped, denoise 0.75× baseline,
+per-full-step and HBM unchanged, outputs deterministic. Online-delta is a
+net loss on the Qwen TPU loop in the natural basis (per-step sync) — use
+cadence. Full log: `docs/worklog/2026-09-11-tpu-teacache-device.md`.
 
 ### 2026-09-08 — implemented, CPU-verified
 
