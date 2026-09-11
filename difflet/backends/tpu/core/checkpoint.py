@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -29,6 +30,25 @@ from difflet.backends.tpu.core.weights import shard_dim
 logger = logging.getLogger(__name__)
 
 INDEX_SUFFIX = ".safetensors.index.json"
+
+
+@dataclass(frozen=True)
+class CheckpointSlice:
+    """A parameter that comes from a *window* of one checkpoint tensor.
+
+    ``rename`` may return this instead of a bare key when the modeling splits
+    an upstream tensor into several parameters — HunyuanVideo's single-stream
+    ``proj_out`` becomes ``proj_out_attn`` (columns ``[:inner_dim]``) and
+    ``proj_out_mlp`` (columns ``[inner_dim:]``) so each half can be
+    row-parallel over its own input sharding. The window is applied before
+    the rank shard, and both stay lazy: only the rank's slice of the window is
+    read off disk.
+    """
+
+    key: str
+    dim: int
+    start: int
+    stop: int | None = None  # None: to the end of the axis
 
 
 def build_weight_map(model_dir) -> dict[str, str]:
@@ -56,27 +76,47 @@ def build_weight_map(model_dir) -> dict[str, str]:
     return weight_map
 
 
-def _read_shard(path: str, key: str, *, dim: int | None, tp_size: int, tp_rank: int):
-    """Read one tensor, taking only this rank's slice along ``dim``."""
+def _read_shard(
+    path: str,
+    key: str,
+    *,
+    dim: int | None,
+    tp_size: int,
+    tp_rank: int,
+    window: tuple[int, int, int | None] | None = None,
+):
+    """Read one tensor, taking only this rank's slice along ``dim``.
+
+    ``window`` is ``(axis, start, stop)`` from a ``CheckpointSlice``: the
+    rank shard is taken *within* that range of the checkpoint tensor.
+    """
     from safetensors import safe_open
 
     with safe_open(path, framework="pt") as handle:
-        if dim is None or tp_size == 1:
+        if window is None and (dim is None or tp_size == 1):
             return handle.get_tensor(key)
 
         view = handle.get_slice(key)
-        shape = view.get_shape()
-        axis = dim % len(shape)
-        size = shape[axis]
-        if size % tp_size != 0:
-            raise ValueError(
-                f"{key}: dim {axis} of size {size} is not divisible by tp={tp_size}"
-            )
-        width = size // tp_size
-        lo, hi = tp_rank * width, (tp_rank + 1) * width
-        # safetensors slices with plain indexing; only this range is read.
+        shape = list(view.get_shape())
         selector = [slice(None)] * len(shape)
-        selector[axis] = slice(lo, hi)
+        if window is not None:
+            w_axis, w_lo, w_hi = window
+            w_axis %= len(shape)
+            if w_hi is None:
+                w_hi = shape[w_axis]
+            selector[w_axis] = slice(w_lo, w_hi)
+            shape[w_axis] = w_hi - w_lo
+        if dim is not None and tp_size > 1:
+            axis = dim % len(shape)
+            size = shape[axis]
+            if size % tp_size != 0:
+                raise ValueError(
+                    f"{key}: dim {axis} of size {size} is not divisible by tp={tp_size}"
+                )
+            width = size // tp_size
+            base = selector[axis].start or 0
+            selector[axis] = slice(base + tp_rank * width, base + (tp_rank + 1) * width)
+        # safetensors slices with plain indexing; only this range is read.
         return view[tuple(selector)]
 
 
@@ -89,7 +129,7 @@ def load_checkpoint_into(
     prefix: str = "",
     dtype: torch.dtype | None = None,
     strict: bool = True,
-    rename: Callable[[str], str] | None = None,
+    rename: Callable[[str], "str | CheckpointSlice"] | None = None,
 ) -> dict[str, list[str]]:
     """Load ``model_dir`` into ``module``, sharding per ``_difflet_shard``.
 
@@ -124,15 +164,19 @@ def load_checkpoint_into(
     with torch.no_grad():
         for name, target in targets.items():
             key = name[len(prefix):] if prefix and name.startswith(prefix) else name
+            window = None
             if rename is not None:
                 key = rename(key)
+                if isinstance(key, CheckpointSlice):
+                    window = (key.dim, key.start, key.stop)
+                    key = key.key
             path = weight_map.get(key)
             if path is None:
                 missing.append(name)
                 continue
             dim = shard_dim(module, name)
             tensor = _read_shard(
-                path, key, dim=dim, tp_size=tp_size, tp_rank=tp_rank
+                path, key, dim=dim, tp_size=tp_size, tp_rank=tp_rank, window=window
             )
             if tuple(tensor.shape) != tuple(target.shape):
                 raise ValueError(
@@ -145,7 +189,11 @@ def load_checkpoint_into(
     wanted = set()
     for n in targets:
         key = n[len(prefix):] if prefix and n.startswith(prefix) else n
-        wanted.add(rename(key) if rename is not None else key)
+        if rename is not None:
+            key = rename(key)
+            if isinstance(key, CheckpointSlice):
+                key = key.key
+        wanted.add(key)
     unexpected = sorted(set(weight_map) - wanted)
     logger.info(
         "loaded %d tensors from %s (rank %d/%d); %d missing, %d unexpected",
@@ -158,4 +206,4 @@ def load_checkpoint_into(
     return {"missing": missing, "unexpected": unexpected}
 
 
-__all__ = ["build_weight_map", "load_checkpoint_into"]
+__all__ = ["CheckpointSlice", "build_weight_map", "load_checkpoint_into"]

@@ -230,6 +230,57 @@ def _flash_attention(q, k, v, *, scale: float):
     return out[:, :, :seq_q, :].reshape(shape[:-1] + (v.shape[-1],))
 
 
+def _flash_attention_key_bounds(q, k, v, *, scale: float, bound_min, bound_max):
+    """Fused attention with a per-row key window ``[bound_min, bound_max)``.
+
+    The masked SDPA path materializes the score matrix, which at HunyuanVideo's
+    joint sequence (10 496 tokens, 6 heads per rank) is 1.3 GB in bf16 plus
+    the fp32 softmax — on a v5e that sits on top of an 11.6 GB weight shard.
+    The kernel never builds it: the window becomes kv segment ids, exactly
+    like the block padding in ``_flash_attention``.
+
+    Bounds are laid out per (row, query, 1) by the attention_cte contract;
+    the kernel's segment ids are per (batch, key), so each row is treated as
+    its own batch element and its window is taken as the union over the
+    row's queries (``amin``/``amax`` — device ops, no host sync). That is
+    exact whenever the window does not vary across queries within a row,
+    which is what every producer in the repo emits (HunyuanVideo's
+    ``_keypad_bounds_from_mask``: ``[0, #valid keys)``, uniform). Query-
+    varying windows are attention_cte's generality, not a difflet need.
+    """
+    kernel = _flash_kernel()
+    leading = _leading_size(q)
+    seq_q, seq_k = int(q.shape[-2]), int(k.shape[-2])
+    pad_q, pad_k = _align(seq_q), _align(seq_k)
+
+    shape = q.shape
+    # batch=rows, heads=1: segment ids are per batch element, so this is what
+    # lets every row carry its own window.
+    q4 = q.reshape(leading, 1, seq_q, q.shape[-1])
+    k4 = k.reshape(leading, 1, seq_k, k.shape[-1])
+    v4 = v.reshape(leading, 1, seq_k, v.shape[-1])
+    if pad_q != seq_q or pad_k != seq_k:
+        q4 = F.pad(q4, (0, 0, 0, pad_q - seq_q))
+        k4 = F.pad(k4, (0, 0, 0, pad_k - seq_k))
+        v4 = F.pad(v4, (0, 0, 0, pad_k - seq_k))
+
+    lo = bound_min.reshape(leading, -1).amin(dim=-1, keepdim=True).to(torch.int32)
+    hi = bound_max.reshape(leading, -1).amax(dim=-1, keepdim=True).to(torch.int32)
+    key_idx = torch.arange(pad_k, device=k.device, dtype=torch.int32).view(1, -1)
+    # Segment 0 = attend, 1 = never: real queries carry 0; keys outside the
+    # window (and the block padding, which is >= seq_k >= hi) carry 1.
+    kv_ids = ((key_idx < lo) | (key_idx >= hi)).to(torch.int32)
+    q_ids = torch.zeros(leading, pad_q, dtype=torch.int32, device=q.device)
+    if pad_q != seq_q:
+        q_ids[:, seq_q:] = 1
+
+    out = kernel.flash_attention(
+        q4, k4, v4, causal=False, sm_scale=float(scale),
+        q_segment_ids=q_ids, kv_segment_ids=kv_ids,
+    )
+    return out[:, :, :seq_q, :].reshape(shape[:-1] + (v.shape[-1],))
+
+
 def attention(
     q,
     k,
@@ -246,11 +297,21 @@ def attention(
     **kwargs,
 ):
     del tp_q, tp_k, tp_out, kwargs
-    attention_mask = _bounds_to_mask(k, bound_min, bound_max, attention_mask)
     # NOTE: the op contract treats scale=None as 1.0, NOT as SDPA's default
     # 1/sqrt(head_dim). Passing None through to SDPA would silently rescale
     # every score.
     scale = 1.0 if scale is None else scale
+
+    if (
+        bound_min is not None
+        and bound_max is not None
+        and attention_mask is None
+        and _should_flash(q, k, causal)
+    ):
+        return _flash_attention_key_bounds(
+            q, k, v, scale=scale, bound_min=bound_min, bound_max=bound_max
+        )
+    attention_mask = _bounds_to_mask(k, bound_min, bound_max, attention_mask)
 
     if attention_mask is None:
         # The fused kernel removes the score matrix rather than merely
