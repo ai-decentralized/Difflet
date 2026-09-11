@@ -1,0 +1,55 @@
+Fetching 29 files:   0%|          | 0/29 [00:00<?, ?it/s]Fetching 29 files:  97%|█████████▋| 28/29 [00:00<00:00, 1390.91it/s]
+huggingface_hub.errors.OfflineModeIsEnabled: Cannot reach https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/e8c2aaa66fe3742a32c11a6766aecbf07c56e773/README.md: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/mnt/models/tpuenv312/bin/difflet", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/mnt/models/Difflet/difflet/cli/main.py", line 950, in main
+    run(args)
+  File "/mnt/models/Difflet/difflet/cli/serve.py", line 226, in run
+    stack = build_serving_stack(options)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/factory.py", line 39, in build_serving_stack
+    runtime = preparer.prepare_runtime(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/models/hunyuan_video.py", line 121, in prepare_runtime
+    source = resolve_hf_model_source(
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/orchestrators/base.py", line 37, in resolve_hf_model_source
+    resolve_model_path(
+  File "/mnt/models/Difflet/difflet/pipeline/path_resolver.py", line 75, in resolve_model_path
+    return snapshot_download(
+           ^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/_snapshot_download.py", line 522, in snapshot_download
+    hf_thread_map(
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/utils/tqdm.py", line 441, in hf_thread_map
+    results[future_to_index[future]] = future.result()
+                                       ^^^^^^^^^^^^^^^
+  File "/mnt/models/uvpy/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/uvpy/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/mnt/models/uvpy/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/concurrent/futures/thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/_snapshot_download.py", line 502, in _inner_hf_hub_download
+    hf_hub_download(  # type: ignore
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1019, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1166, in _hf_hub_download_to_cache_dir
+    _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1908, in _raise_on_head_call_error
+    raise LocalEntryNotFoundError(
+huggingface_hub.errors.LocalEntryNotFoundError: An error happened while trying to locate the file on the Hub and we cannot find the requested files in the local cache. Please check your connection and try again or make sure your Internet connection is on.
+exit=1

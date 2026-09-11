@@ -1,0 +1,18 @@
+Traceback (most recent call last):
+  File "/mnt/models/tpuenv312/bin/difflet", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/mnt/models/Difflet/difflet/cli/main.py", line 950, in main
+    run(args)
+  File "/mnt/models/Difflet/difflet/cli/serve.py", line 226, in run
+    stack = build_serving_stack(options)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/factory.py", line 33, in build_serving_stack
+    resolved = resolve_serving_model(options)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/model_registry.py", line 41, in resolve_serving_model
+    entry.require_backend(current_backend())
+  File "/mnt/models/Difflet/difflet/registry.py", line 138, in require_backend
+    raise ValueError(
+ValueError: model 'hunyuan_video' does not support backend 'tpu'; supported backends: trainium
+exit=1
