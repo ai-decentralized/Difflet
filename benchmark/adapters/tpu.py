@@ -188,6 +188,9 @@ def _worker(rank, world, spec_payload, cmd_q, reply_q):
         request = SimpleNamespace(
             prompt=spec.prompt, num_inference_steps=spec.steps,
             seed=spec.seed, guidance_scale=spec.guidance_scale, request_id="bench",
+            # _decode reads the shape off the request since f31e433 (a profile
+            # may carry a whole shape set; the request says which one ran).
+            height=spec.height, width=spec.width,
         )
         wall = time.monotonic()
         text = adapter._encode_prompt(request.prompt)
@@ -198,7 +201,7 @@ def _worker(rank, world, spec_payload, cmd_q, reply_q):
         latents = adapter._denoise(text, request)
         denoise_s = time.monotonic() - mark
         mark = time.monotonic()
-        png = adapter._decode(latents)
+        png = adapter._decode(latents, request)
         decode_s = time.monotonic() - mark
         # A cheap visual check for changes that alter numerics: the metrics
         # above stay finite and in range even when an image is wrong.
