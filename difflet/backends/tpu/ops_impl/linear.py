@@ -129,7 +129,20 @@ class ColumnParallelLinear(nn.Module):
 
 
 class RowParallelLinear(nn.Module):
-    """``y = xA^T + b`` with ``A`` split along its input dim."""
+    """``y = xA^T + b`` with ``A`` split along its input dim.
+
+    ``reduce_output`` and ``skip_bias_add`` follow NxD's contract exactly,
+    because the modeling relies on them: HunyuanVideo's single-stream block
+    projects its two streams with ``reduce_output=False`` and all-reduces
+    their *sum* once, and takes the attn bias back from ``skip_bias_add``
+    (which returns ``(partial, bias)``) to add it after that reduce. Ignoring
+    the kwargs reduced twice — every rank's fully reduced output summed again
+    across the group — and added the bias tp times; measured on a v5e as
+    cosine 0.909 against diffusers for the whole DiT, against 0.9995 for
+    diffusers' own bf16. Wan/Qwen-Image only use ``reduce_output=False``
+    under Megatron-SP, which the TPU backend does not run yet, so they never
+    tripped over it.
+    """
 
     def __init__(
         self,
@@ -139,6 +152,8 @@ class RowParallelLinear(nn.Module):
         input_is_parallel=False,
         dtype=None,
         device=None,
+        reduce_output=True,
+        skip_bias_add=False,
         **kwargs,
     ):
         super().__init__()
@@ -146,6 +161,8 @@ class RowParallelLinear(nn.Module):
         self.input_size = input_size
         self.output_size = output_size
         self.input_is_parallel = input_is_parallel
+        self.reduce_output = bool(reduce_output)
+        self.skip_bias_add = bool(skip_bias_add)
         self.input_size_per_partition = _split_evenly(input_size, "input_size")
 
         factory = {"dtype": dtype, "device": device}
@@ -164,10 +181,18 @@ class RowParallelLinear(nn.Module):
     def forward(self, x):
         if not self.input_is_parallel:
             x = scatter_tp_dim(x, dim=-1)
-        # Partial sum over this rank's input slice; the all-reduce completes it.
-        out = reduce_tp(F.linear(x, self.weight))
+        # Partial sum over this rank's input slice; the all-reduce completes it
+        # unless the caller has asked to do that reduce itself.
+        out = F.linear(x, self.weight)
+        if self.reduce_output:
+            out = reduce_tp(out)
+        if self.skip_bias_add:
+            # NxD contract: the caller adds the bias, once, where it sees fit.
+            return out, self.bias
         if self.bias is not None:
             # After the reduce — adding before would sum the bias tp times.
+            # (With reduce_output=False this is NxD's documented per-rank
+            # bias; the modeling's ``_sp_unbias`` corrects that overcount.)
             out = out + self.bias
         return out
 
@@ -175,7 +200,8 @@ class RowParallelLinear(nn.Module):
         return (
             f"in={self.input_size}, out={self.output_size}, "
             f"in_per_partition={self.input_size_per_partition}, "
-            f"input_is_parallel={self.input_is_parallel}"
+            f"input_is_parallel={self.input_is_parallel}, "
+            f"reduce_output={self.reduce_output}, skip_bias_add={self.skip_bias_add}"
         )
 
 
