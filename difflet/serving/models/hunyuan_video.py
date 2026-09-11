@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, replace
@@ -63,6 +64,28 @@ _WORLD_SIZE = 4
 _VAE_TEMPORAL_SCALE = 4
 _VAE_SPATIAL_SCALE = 8
 _PATCH_SIZE = 2
+def _backend_is_tpu() -> bool:
+    try:
+        from difflet.backends.registry import current_backend
+    except Exception:  # noqa: BLE001 - registry is optional on old installs
+        return False
+    return current_backend() == "tpu"
+
+
+def _is_primary_replica() -> bool:
+    """Whether this process is the replica whose reply the engine keeps.
+
+    Same rule as Wan: the host VAE decode issues no collective and writes
+    media into the request's storage, so running it on every replica means
+    three decodes nobody reads, into staging files already torn down.
+    """
+    return int(os.environ.get("DIFFLET_REPLICA_RANK", "0")) == 0
+
+
+#: Returned by the replicas whose reply is dropped (see Wan): an empty path
+#: and a zero size fail loudly if they ever escaped.
+_DISCARDED_OUTPUT_PATH = ""
+
 _LLAMA_TEMPLATE = (
     "<|start_header_id|>system<|end_header_id|>\n\nDescribe the video by detailing the "
     "following aspects: 1. The main content and theme of the video."
@@ -124,6 +147,19 @@ class HunyuanVideoServingArtifactPreparer:
             download_policy=download_policy,
             allow_patterns=entry.download_patterns,
         )
+        if _backend_is_tpu():
+            # No compile phase: the TPU stages run eagerly, so there are no
+            # artifacts to build, publish or validate (see the Wan adapter).
+            print("[difflet serve] tpu backend: eager stages, no compile artifacts")
+            pipeline = _pipeline_definition(profile)
+            return ResolvedRuntimeBundle(
+                profile=profile,
+                source=source,
+                pipeline_definition=pipeline,
+                runtime_plan=_runtime_plan(profile, ()),
+                compile_specs=(),
+                artifacts=ArtifactSet(()),
+            )
         specs = _compile_specs(source, profile)
         manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
         bindings = tuple(
@@ -385,6 +421,25 @@ class HunyuanVideoHostDecoderStageRunner:
 
         started = time.monotonic()
         invocation.context.cancellation.throw_if_cancelled()
+        if not _is_primary_replica():
+            request = invocation.request
+            assert request.video is not None
+            return stage_result(
+                HunyuanVideoFinalPayload(
+                    FileBackedGenerateOutput(
+                        path=_DISCARDED_OUTPUT_PATH,
+                        mime_type="video/mp4",
+                        output_format="mp4",
+                        size_bytes=0,
+                        width=request.width,
+                        height=request.height,
+                        num_frames=request.video.num_frames,
+                        fps=float(request.video.fps),
+                        duration_s=0.0,
+                    )
+                ),
+                started_monotonic=started,
+            )
         vae = self.adapter._require_vae()
         scaling_factor = float(getattr(vae.config, "scaling_factor", 1.0))
         latents = invocation.input.latents.detach().to(device="cpu", dtype=torch.float32)
@@ -460,6 +515,8 @@ class HunyuanVideoServingStageAdapter:
         runtime: ResolvedRuntimeBundle,
     ) -> OrderedDict[str, ErasedStageRunner]:
         _validate_profile(runtime.profile)
+        if _backend_is_tpu():
+            return self._create_loaded_runners_tpu(runtime)
         manager = ImmutableArtifactManager(
             runtime.profile.cache_dir or Path.home() / ".cache" / "difflet"
         )
@@ -566,6 +623,70 @@ class HunyuanVideoServingStageAdapter:
                     "decoder",
                     ValidatedStageRunner(
                         decoder_runner,
+                        HunyuanVideoLatentPayload,
+                        HunyuanVideoFinalPayload,
+                    ),
+                ),
+            )
+        )
+
+    async def _create_loaded_runners_tpu(
+        self,
+        runtime: ResolvedRuntimeBundle,
+    ) -> OrderedDict[str, ErasedStageRunner]:
+        """TPU: DiT on the chips (eager), Llama on ordinal 0 + broadcast,
+        CLIP and VAE on the host. Same stage runners as the Trainium host
+        placements — the Llama encoder mimics the Neuron app's call surface."""
+        from difflet.models.hunyuan_video.tpu_application import TpuBroadcastLlamaEncoder
+
+        source_path = runtime.source.pinned_model_path
+        # DiT first: load_eager compiles the graph, which is the host-memory
+        # peak (~43 GB per compiling rank, transient); the 32 GB fp32 Llama
+        # on ordinal 0 is loaded only after that has drained.
+        denoiser = _build_denoiser(runtime.source, runtime.profile)
+        denoiser.load_eager()
+        self.denoiser = denoiser
+        self.clip_tokenizer, self.clip_model = _load_host_clip(source_path)
+        self.llama_app = TpuBroadcastLlamaEncoder(
+            source_path,
+            seq_len=_LLAMA_SEQ_LEN,
+            capture_layer=int(_LLAMA_CAPTURE.rsplit(".", 1)[1]),
+            dtype=_torch_bfloat16(),
+        )
+        self.llama_tokenizer = _load_llama_tokenizer(source_path)
+        self.vae = _load_host_vae(source_path)
+        self.runtime = runtime
+        self.profile = runtime.profile
+        return OrderedDict(
+            (
+                (
+                    "clip",
+                    ValidatedStageRunner(
+                        HunyuanVideoHostClipStageRunner(self),
+                        HunyuanVideoInitialPayload,
+                        HunyuanVideoClipPayload,
+                    ),
+                ),
+                (
+                    "llama",
+                    ValidatedStageRunner(
+                        HunyuanVideoLlamaStageRunner(self),
+                        HunyuanVideoClipPayload,
+                        HunyuanVideoConditioningPayload,
+                    ),
+                ),
+                (
+                    "denoiser",
+                    ValidatedStageRunner(
+                        HunyuanVideoDenoiserStageRunner(self),
+                        HunyuanVideoConditioningPayload,
+                        HunyuanVideoLatentPayload,
+                    ),
+                ),
+                (
+                    "decoder",
+                    ValidatedStageRunner(
+                        HunyuanVideoHostDecoderStageRunner(self),
                         HunyuanVideoLatentPayload,
                         HunyuanVideoFinalPayload,
                     ),
@@ -720,13 +841,23 @@ def _validate_profile(profile: ServingProfile) -> None:
         raise ValueError("HunyuanVideo resident serving requires dp_degree=1")
     if profile.world_size != _WORLD_SIZE:
         raise ValueError("HunyuanVideo resident serving requires world_size=4")
-    if (
-        profile.teacache_speedup is not None
-        or profile.teacache_calibration_data is not None
-        or profile.teacache_cadence is not None
-        or profile.teacache_online_delta is not None
-    ):
-        raise ValueError("HunyuanVideo resident video serving does not support TeaCache")
+    if profile.teacache_speedup is not None or profile.teacache_calibration_data is not None:
+        raise ValueError("HunyuanVideo resident video serving does not support adaptive TeaCache")
+    probe_free = profile.teacache_cadence is not None or profile.teacache_online_delta is not None
+    if probe_free and not _backend_is_tpu():
+        raise ValueError(
+            "HunyuanVideo resident video serving supports probe-free TeaCache "
+            "(--teacache-cadence / --teacache-online-delta) on the TPU backend only"
+        )
+    if _backend_is_tpu():
+        # The TPU port keeps CLIP and the VAE on the host (no Neuron CLIP /
+        # VAE NEFFs exist there); the profile must not ask for the other.
+        if profile.clip_placement not in {None, "host"}:
+            raise ValueError("HunyuanVideo on TPU runs CLIP on the host (--clip-placement host)")
+        if not profile.host_vae:
+            raise ValueError("HunyuanVideo on TPU decodes on the host: pass --host-vae")
+        if profile.shapes:
+            raise ValueError("HunyuanVideo on TPU serves a single shape (no --shapes)")
 
 
 def _compile_specs(
@@ -904,7 +1035,29 @@ def _build_llama_app(
     return NeuronLlamaForCausalLM(encoder_path, config)
 
 
+def _teacache_kwargs(profile: ServingProfile) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    if profile.teacache_cadence is not None:
+        kwargs["teacache_cadence"] = int(profile.teacache_cadence)
+    if profile.teacache_online_delta is not None:
+        kwargs["teacache_online_delta_alpha"] = float(profile.teacache_online_delta)
+    return kwargs
+
+
 def _build_denoiser(source: ResolvedModelSource, profile: ServingProfile):
+    if _backend_is_tpu():
+        from difflet.models.hunyuan_video.entry import create_hunyuan_video_application
+
+        return create_hunyuan_video_application(
+            model_path=source.pinned_model_path,
+            parallel=profile.parallel,
+            dtype=_torch_bfloat16(),
+            shape=profile.shape_dict(),
+            backend="tpu",
+            text_seq_len=_TEXT_SEQ_LEN,
+            **_teacache_kwargs(profile),
+        )
+
     from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
 
     app = NeuronHunyuanVideoApplication(
@@ -970,10 +1123,14 @@ def _runtime_plan(
     profile: ServingProfile,
     specs: tuple[DiffletCompileSpec, ...],
 ) -> RuntimePlan:
+    # No specs means the TPU backend (eager, no artifacts): the accelerator
+    # stages carry placement="tpu" and no artifact id, as in the Wan adapter.
+    tpu = not specs
     environment, allocation = resident_environment(
         profile,
         allocation_id="hunyuan-video-resident",
-        virtual_core_size=_VIRTUAL_CORE_SIZE,
+        # The virtual-core setting is a Neuron (LNC) knob; leave it unset on TPU.
+        virtual_core_size=None if tpu else _VIRTUAL_CORE_SIZE,
     )
     topology = ParallelTopology(
         tp_degree=profile.parallel.tp_degree,
@@ -988,10 +1145,14 @@ def _runtime_plan(
     clip_placement = _clip_placement(profile)
     return RuntimePlan(
         mode="resident",
-        profile_identity=combined_profile_identity(
-            f"clip:{clip_placement}",
-            *(spec.identity.digest for spec in specs),
-            f"vae:{profile.vae_placement}",
+        profile_identity=(
+            ""
+            if tpu
+            else combined_profile_identity(
+                f"clip:{clip_placement}",
+                *(spec.identity.digest for spec in specs),
+                f"vae:{profile.vae_placement}",
+            )
         ),
         environment=environment,
         allocations=(allocation,),
@@ -1001,8 +1162,14 @@ def _runtime_plan(
                 if clip_placement == "host"
                 else StageRuntimeSpec("clip", allocation.allocation_id, replicated_topology, "clip")
             ),
-            StageRuntimeSpec("llama", allocation.allocation_id, topology, "llama"),
-            StageRuntimeSpec("denoiser", allocation.allocation_id, topology, "denoiser"),
+            StageRuntimeSpec(
+                "llama", allocation.allocation_id, topology,
+                None if tpu else "llama", placement="tpu" if tpu else "neuron",
+            ),
+            StageRuntimeSpec(
+                "denoiser", allocation.allocation_id, topology,
+                None if tpu else "denoiser", placement="tpu" if tpu else "neuron",
+            ),
             (
                 StageRuntimeSpec("decoder", None, None, None, placement="host")
                 if profile.host_vae

@@ -196,3 +196,43 @@ def test_tp1_sharding_is_identity():
     got = W.shard_state_dict(block, full, tp_size=1, tp_rank=0)
     for name, tensor in full.items():
         assert torch.equal(got[name], tensor)
+
+
+# --- compile slots -------------------------------------------------------------
+
+
+def test_compile_slot_limits_concurrent_holders(tmp_path, monkeypatch):
+    """Two slots: a third holder must wait until one is released."""
+    import threading
+    import time
+
+    from difflet.backends.tpu.core.application_base import compile_slot
+
+    monkeypatch.setenv("DIFFLET_TPU_COMPILE_LOCK_DIR", str(tmp_path))
+    inside, peak, lock = [0], [0], threading.Lock()
+
+    def hold():
+        with compile_slot(2, poll_seconds=0.01):
+            with lock:
+                inside[0] += 1
+                peak[0] = max(peak[0], inside[0])
+            time.sleep(0.15)
+            with lock:
+                inside[0] -= 1
+
+    threads = [threading.Thread(target=hold) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert peak[0] <= 2
+    assert inside[0] == 0
+
+
+def test_compile_slot_zero_disables_the_gate(tmp_path, monkeypatch):
+    from difflet.backends.tpu.core.application_base import compile_slot
+
+    monkeypatch.setenv("DIFFLET_TPU_COMPILE_LOCK_DIR", str(tmp_path))
+    with compile_slot(0):
+        pass
+    assert not list(tmp_path.glob("*.lock"))
