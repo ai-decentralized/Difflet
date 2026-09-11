@@ -16,6 +16,12 @@ import sys
 import time
 from pathlib import Path
 
+# Documented as `python benchmark/wan_tpu_run.py`, which puts benchmark/ (not
+# the repo root) at sys.path[0]; the spawned workers inherit that and then
+# fail on `from benchmark.harness import ...`. Put the root first so the
+# script works as documented without PYTHONPATH.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 SNAP = os.environ.get(
     "DIFFLET_WAN_SNAPSHOT",
     "/mnt/models/hf/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/"
