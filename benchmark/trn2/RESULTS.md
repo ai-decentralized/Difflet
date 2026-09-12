@@ -225,20 +225,30 @@ Same host class as above (**trn2.3xlarge**, 4 NeuronCores under LNC=2, 96 GB HBM
 
 | engine | compile | **e2e cold** | **e2e warm** | Neuron load cold→warm | host-side load (warm) | **DiT per-step** | outputs/hr (warm) | output |
 |---|---:|---:|---:|---:|---:|---:|---:|---|
-| [difflet `flux_1_dev` tp4](flux_1_dev.md) | 21.2 min | **308 s** | **41 s** | 269→23 s | — | **270.7 ms (n=27)** | 87 | ? |
+| [difflet `flux_1_dev` tp4](flux_1_dev.md) | 21.2 min | **308 s** | **41 s** | 269→23 s | — | **270.7 ms (n=27)** | 87 | ✓ finite |
 | [**native NxDI** `generate_flux.py` setup, tp4](flux_1_dev_nxdi.md) | 15.1 min | **330 s** | **57 s** | 290→39 s | 0 s | **271.9 ms (n=27)** | 64 | ✓ finite |
 
 NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in every process (the host-side column, inside its e2e) and runs a warm-up forward per component inside `load()`; difflet loads only the Neuron stages from presharded per-rank checkpoints. The DiT per-step (same attention_cte lineage, same compiler flags) is the like-for-like number; e2e differences are mostly load-path design. Measured by `benchmark/trn2/nxdi_flux_baseline.sh` with the campaign rules (timed compile into a fresh workdir; cold = page cache dropped; one generate per process, no warm-up; real-loop per-step).
 
+### Feature: tp2cp2 — tp=2 × context parallel 2, `--cp-mode ulysses`
+
+| model | shape / steps | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁶ | **DiT per-step**⁰ | outputs/hr (warm)⁴ | cost / 1k⁵ | guidance | output | status |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| [FLUX.1-dev](flux_1_dev_tp2cp2.md) | 1024×1024 / 28 | 19.7 min | **491 s** | **44 s** | 452→25 s | **263.1 ms (n=27)** | 82 | $11.05 | 3.5 | ✓ finite | ok |
+| [Qwen-Image](qwen_image_tp2cp2.md) | 1024×1024 / 20 | 34.2 min | **820 s** | **71 s** | 771→39 s | **454.3 ms (n=19)** | 51 | $17.88 | 4.0 | ✓ finite | ok |
+| LTX-2 | — | — | — | — | — | — | — | — | — | — | **N/A** — LTX-2 has no context-parallel path |
+| [HunyuanVideo](hunyuan_video_tp2cp2.md) | 320×512×61 / 20 | 88.8 min | **748 s** | **116 s** | 672→58 s | **849.0 ms (n=19)** | 31 | $29.38 | 6.0 | ✓ finite | ok |
+| [Wan 2.1 14B](wan_2_1_tp2cp2.md) | 480×832×9 / 20 | 24.8 min | **623 s** | **87 s** | 570→54 s | **575.5 ms (n=19)** | 41 | $21.99 | 1.0 | ✓ finite | ok |
+
 ### DiT per-step vs tp4 (lower is better; ratio = tp4 / config)
 
-| model | tp4 |
-|---|---:|
-| FLUX.1-dev | 270.7 ms |
-| Qwen-Image | 417.3 ms |
-| LTX-2 | 459.2 ms |
-| HunyuanVideo | 814.1 ms |
-| Wan 2.1 14B | 575.5 ms |
+| model | tp4 | tp2cp2 |
+|---|---:|---:|
+| FLUX.1-dev | 270.7 ms | 263.1 ms (1.03×) |
+| Qwen-Image | 417.3 ms | 454.3 ms (0.92×) |
+| LTX-2 | 459.2 ms | N/A |
+| HunyuanVideo | 814.1 ms | 849.0 ms (0.96×) |
+| Wan 2.1 14B | 575.5 ms | 575.5 ms (1.00×) |
 
 ⁰ DiT per-step: mean of the inter-step deltas (n = steps − 1). ¹ compile = full `difflet compile` wall (all stages, incl. per-rank presharding); stage caches shared across features are reused, so a later feature's compile can be shorter than tp4's. ² cold = `sync; echo 3 > drop_caches` then one generate. ³ warm = the immediately following generate. ⁴ outputs/hr = 3600 / warm e2e (one image or one video per generate, batch 1, fresh process each — a served deployment with a resident model does better). ⁵ cost / 1k outputs = hourly price ÷ outputs/hr × 1000; AWS publishes no list price for trn2.3xlarge; $0.91/h is trn2.48xlarge on-demand ($14.5556/h, us-east-2, third-party listing sparecores.com fetched 2026-09-12) ÷ 16 chips — indicative only. ⁶ Neuron weight load summed over the pipeline's stages (from the generate log), cold vs warm — the bulk of the cold→warm gap; LTX-2's text encoder and VAE run on the host and are not in it.
 
@@ -283,6 +293,19 @@ checkpoints that make its later loads faster — a one-time cost moved from ever
 compile. Measured with the same rules by `benchmark/trn2/nxdi_flux_baseline.sh`; the AWS
 example's own "Average generation time" (resident model, 5 warm-ups) corresponds to NxDI's
 `generate_s` = 8.0 s here (difflet's realloop generate: 7.9 s).
+
+**tp2cp2 (ulysses) vs tp4, per-step**: FLUX **263.1 ms** (270.7, 1.03× faster) · Qwen-Image
+**454.3 ms** (417.3, 0.92×) · HunyuanVideo **849.0 ms** (814.1, 0.96×) · Wan 2.1 **575.5 ms**
+(575.5, 1.00× — identical to within 0.1 ms; it is a different artifact — its own compile,
+`cp_mode=ulysses` manifest, a 4-shard `tp2w4-cp` weight entry whose cold read is 570 s vs
+354 s — so at 480×832×9 the Wan step is FFN/TP-bound and the attention layout does not
+move it). On a single 4-core chip CP trades TP width for sequence sharding, so a small loss
+or a wash is the expected outcome; the win case is more cores per replica. **Cold e2e is
+uniformly worse under CP** (FLUX 491 s vs 308, Qwen 820 vs 494, Wan 623 vs 407): the CP
+weight-store entry holds 4 ranks × a tp2 shard = 2× the bytes of the tp4 entry, and cold
+e2e is the disk read of those bytes; warm e2e is within a few seconds of tp4. Compile is
+shorter where a stage cache is shared (Wan 24.8 min: the VAE from tp4 is reused; Hunyuan
+88.8 min: its VAE is inside the DiT stage and recompiles per topology).
 
 **New capability**: HunyuanVideo context parallel now runs with `--cp-mode ulysses` (its
 padded-Llama key-padding mask is expressed as attention_cte bounds inside the ulysses op —
