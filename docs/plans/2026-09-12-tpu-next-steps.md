@@ -12,7 +12,7 @@ Date: 2026-09-12 · Branch: `tpu-port-hunyuan` (on `verify/tpu-models-2026-09-11
 | LTX-2 | ported: parity 0.99983, 1.68 s/step, HBM 9.36 GB; **serving startup times out in the smoke** | Phase 6 |
 | FLUX.1-dev | not started; weights not on this host (gated repo, no HF token) | — |
 
-## 1. Fix LTX-2 serving (today)
+## 1. Fix LTX-2 serving (today) — DONE 03:16: ready 246 s, requests 200 in 51 s, bench + cadence-2 recorded
 
 **Diagnosis so far.** Takes 1–3 died on three one-line wiring slips (fixed, pinned). Take 3's
 timeout was the cold first read of the 46 GB Gemma-3 checkpoint (warm: 2.5 s). Take 4, with the
