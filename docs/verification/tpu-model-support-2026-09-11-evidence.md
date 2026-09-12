@@ -42,7 +42,7 @@ instead start a Neuron compile on a TPU box).
 | Wan 2.1 | **PASS** · 33.5 s (20 st) / 70.4 s (40 st, CFG) | NOT MEASURED (runner is 2.2-shaped) | N/A | NOT MEASURED (same controller as 2.2) | quality = upstream ² |
 | FLUX.1-dev | N/A · not ported (fail-fast 0.17 s, `d384b5c`) | N/A | N/A | N/A | gated repo; port plan option (b) |
 | HunyuanVideo | **PASS** (port, `tpu-port-hunyuan`) · 191 s / 512×320×61 20 steps (165 s of it host VAE) | **PASS** · 20.1 s denoise, 1.0 s/step | N/A | **PASS** cadence 2 = 0.75×, 0.0064/px | ported 2026-09-11; VAE on chip is the follow-up |
-| LTX-2 | N/A · not ported (fail-fast 0.16 s) | N/A | N/A | N/A | tightest HBM fit |
+| LTX-2 | port in progress (`tpu-port-hunyuan`) — parity PASS cos 0.99983, HBM 9.36 GB peak, 1.68 s/step; serving smoke running | NOT MEASURED | N/A | wired, NOT MEASURED | see Phase 6 |
 
 ¹ two experts do not fit 16 GB HBM; `benchmark/v5e/wan_2_2.md`. ² block artifacts at 9 frames /
 guidance 1.0 are the model's own — reproduced with upstream diffusers fp32 on CPU.
@@ -245,6 +245,25 @@ Bugs found by the port's on-device passes (each its own commit, each pinned):
 `c7b9d09` RowParallelLinear kwargs · missing `await` in the TPU runner builder · non-primary
 replicas validating a smoke file they never wrote · `8403351` benchmark ranks exiting while
 rank 0 still decodes (TPU runtime kills the straggler, exit 1, no traceback).
+
+## Phase 6 — LTX-2 ported to TPU (branch `tpu-port-hunyuan`, 2026-09-12)
+
+Second port from the plan. 512×768×121 (the registry default), tp=4, bf16; 6144 video +
+126 audio + 1024 text tokens.
+
+| check | result | evidence |
+|---|---|---|
+| sharded build vs checkpoint | 3510 parameters map 1:1 to diffusers' keys; **4.98 B params / 9.3 GiB per rank** (4.63 B sharded, 0.35 B replicated) | dry run in the port commit |
+| HBM fit (random inputs) | **9.28 GB resident, 9.36 GB peak** of 15.75; first compile 73 s; **1.68 s/step**; host peak 59 GB | `ltx2_fit_probe.log` |
+| parity vs diffusers fp32 (CPU, 984/1024 text positions padded), first attempt | video cos **0.9932** / rel-L1 0.131, audio 0.946 — the shared TP attention processor runs text cross-attention *unmasked* (a Trainium kernel limitation) | `oracle_ltx2_cmp.log` |
+| parity after honoring the mask on TPU (`5bca57d`) | video **cos 0.99983 / rel-L1 1.83e-2**, audio 0.99957; vs diffusers bf16 0.99985; control (diffusers bf16 vs fp32) 0.99983 / 1.78e-2 — indistinguishable from upstream's own bf16 | `oracle_ltx2_cmp2.log`, `oracle_ltx2_ref.log` (fp32 forward 86 s, bf16 control 413 s, 18.88 B params) |
+| `difflet serve` | in progress: DiT warmup 143 s (gated), Gemma-3 12B fp32 on ordinal 0 (47 GB), host pipeline loaded; two startup slips fixed on the way (warmup called the bare module positionally; prompt-encoder wrapper rejected diffusers' `dtype=`) | `serve_ltx2_tpu.log` |
+
+Structure: `difflet/models/ltx_2/tp_sharding.py` (the Trainium recipe, lifted unchanged, `365315b`),
+`backends/tpu/ltx_2/{config,transformer}.py`, `models/ltx_2/tpu_application.py` (Gemma on
+ordinal 0 + `collective_broadcast` of the packed [1, 1024, 188160] embeddings), serving adapter
+TPU branch, registry flip. Venv fix: torchvision was the CUDA wheel (`torchvision::nms does not
+exist` → Gemma3 import failed); now `0.24.0+cpu`.
 
 ## Bug ledger
 
