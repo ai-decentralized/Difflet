@@ -1,0 +1,123 @@
+{
+  "model_id": "black-forest-labs/FLUX.1-dev",
+  "model_type": "flux",
+  "backend": "nxdi",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 28,
+  "compile_seconds": 907.798,
+  "compile_breakdown": {
+    "host_pipeline_load_s": 1.819,
+    "wall_total_s": 907.798
+  },
+  "e2e_cold_seconds": 329.898,
+  "load_seconds": 290.497,
+  "e2e_breakdown": {
+    "host_pipeline_load_s": 1.944,
+    "weights_load_total_s": 290.497,
+    "generate_s": 8.121,
+    "wall_total_s": 329.898216058
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 56.509946466,
+    "median": 56.509946466,
+    "std": 0.0,
+    "p50": 56.509946466,
+    "p90": 56.509946466,
+    "min": 56.509946466,
+    "max": 56.509946466,
+    "samples": [
+      56.509946466
+    ]
+  },
+  "e2e_warm_breakdown": {
+    "host_pipeline_load_s": 0.345,
+    "weights_load_total_s": 39.276,
+    "generate_s": 7.976,
+    "wall_total_s": 56.509946466
+  },
+  "step_latency": {
+    "n": 27,
+    "mean": 0.27193633333333334,
+    "median": 0.271692,
+    "std": 0.001709791475265004,
+    "p50": 0.271692,
+    "p90": 0.27207,
+    "min": 0.269978,
+    "max": 0.280377,
+    "samples": [
+      0.280377,
+      0.271692,
+      0.271652,
+      0.269978,
+      0.27066,
+      0.271644,
+      0.271466,
+      0.271465,
+      0.271504,
+      0.271447,
+      0.271751,
+      0.272107,
+      0.271874,
+      0.271744,
+      0.271369,
+      0.271554,
+      0.271593,
+      0.271697,
+      0.271628,
+      0.27189,
+      0.271927,
+      0.272149,
+      0.271974,
+      0.27207,
+      0.271543,
+      0.271727,
+      0.271799
+    ]
+  },
+  "step_basis": "real-loop (NxDI backbone forward, synced)",
+  "throughput": {
+    "DiT steps/s": 3.677
+  },
+  "output": {
+    "finite": true,
+    "note": "saved flux_1_dev_nxdi_out.png"
+  },
+  "status": "ok",
+  "config_slug": "flux_1_dev_nxdi",
+  "model_slug": "flux_1_dev",
+  "config": "tp4",
+  "device_slug": "trn2",
+  "revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 3.5,
+  "output_kind": "image",
+  "config_label": "NATIVE NxDI baseline (neuronx_distributed_inference 0.10.18399+ed62453e), examples/generate_flux.py setup: backbone tp=4, world=4, bf16, CLIP tp=1, T5 tp=world, VAE decoder tp=1",
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "timestamp": "2026-09-12 13:30 UTC",
+  "notes": [
+    "Native NxDI baseline for the difflet FLUX tp4 row, same weights/shape/steps/seed/prompt/guidance. Measured with the campaign rules: compile = timed NeuronFluxApplication.compile into a fresh workdir; e2e cold = a fresh process after dropping the OS page cache, load + ONE generate, no warm-up; e2e warm = the next identical process; per-step = inter-step deltas of the backbone forward inside that real generate, step 0 excluded (n=27).",
+    "NOT apples-to-apples with difflet: NxDI's NeuronFluxApplication loads the full diffusers pipeline on the host in every process (host_pipeline_load 2 s cold / 0 s warm, inside e2e) and load() runs a warm-up forward per component; difflet loads only the Neuron stages from presharded per-rank checkpoints. The DiT per-step is the comparable number.",
+    "NxDI's own metric (examples/generate_flux.py 'Average generation time', resident model, after 5 warm-ups) corresponds to generate_s = 8.0 s here (1 generate, no warm-up)."
+  ]
+}
