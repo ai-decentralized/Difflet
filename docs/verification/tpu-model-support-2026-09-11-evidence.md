@@ -42,7 +42,7 @@ instead start a Neuron compile on a TPU box).
 | Wan 2.1 | **PASS** · 33.5 s (20 st) / 70.4 s (40 st, CFG) | NOT MEASURED (runner is 2.2-shaped) | N/A | NOT MEASURED (same controller as 2.2) | quality = upstream ² |
 | FLUX.1-dev | N/A · not ported (fail-fast 0.17 s, `d384b5c`) | N/A | N/A | N/A | gated repo; port plan option (b) |
 | HunyuanVideo | **PASS** (port, `tpu-port-hunyuan`) · 191 s / 512×320×61 20 steps (165 s of it host VAE) | **PASS** · 20.1 s denoise, 1.0 s/step | N/A | **PASS** cadence 2 = 0.75×, 0.0064/px | ported 2026-09-11; VAE on chip is the follow-up |
-| LTX-2 | port in progress (`tpu-port-hunyuan`) — parity PASS cos 0.99983, HBM 9.36 GB peak, 1.68 s/step; serving smoke running | NOT MEASURED | N/A | wired, NOT MEASURED | see Phase 6 |
+| LTX-2 | **PASS** (port, `tpu-port-hunyuan`) · 51 s / 704×480×49 20 steps | **PASS** · 49 s to latents, 1453 ms/step, decode 0.2 s on chip | N/A | **PASS** cadence 2: DiT 0.75×, 0.0088/px | 512×768×121 also fits (VAE 0.7 s on chip); ported 2026-09-12 |
 
 ¹ two experts do not fit 16 GB HBM; `benchmark/v5e/wan_2_2.md`. ² block artifacts at 9 frames /
 guidance 1.0 are the model's own — reproduced with upstream diffusers fp32 on CPU.
@@ -52,7 +52,7 @@ guidance 1.0 are the model's own — reproduced with upstream diffusers fp32 on 
 **`difflet serve` on TPU**
 | FLUX | Qwen-Image | Wan 2.2 | Wan 2.1 | HunyuanVideo | LTX-2 |
 |---|---|---|---|---|---|
-| N/A · fail-fast | PASS · 7.6 s | PASS · 30.4 s | PASS · 33.5 s | PASS · 191 s (port) | N/A · fail-fast |
+| N/A · fail-fast | PASS · 7.6 s | PASS · 30.4 s | PASS · 33.5 s | PASS · 191 s (port) | PASS · 51 s (port) |
 
 **Backend gate (unported model refused before weights)** — new in this campaign
 | FLUX | Qwen-Image | Wan 2.2 | Wan 2.1 | HunyuanVideo | LTX-2 |
@@ -62,7 +62,7 @@ guidance 1.0 are the model's own — reproduced with upstream diffusers fp32 on 
 **Numerical parity vs. upstream diffusers fp32 (single DiT forward on chip)**
 | FLUX | Qwen-Image | Wan 2.2 | Wan 2.1 | HunyuanVideo | LTX-2 |
 |---|---|---|---|---|---|
-| N/A | PASS (port acceptance, `oracle_qwen_cmp.log`) | PASS · cos 0.99861 | PASS · cos 0.99967 | PASS · cos 0.99949 | N/A |
+| N/A | PASS (port acceptance, `oracle_qwen_cmp.log`) | PASS · cos 0.99861 | PASS · cos 0.99967 | PASS · cos 0.99949 | PASS · cos 0.99983 |
 
 ## Phase plan
 
@@ -246,6 +246,11 @@ Bugs found by the port's on-device passes (each its own commit, each pinned):
 replicas validating a smoke file they never wrote · `8403351` benchmark ranks exiting while
 rank 0 still decodes (TPU runtime kills the straggler, exit 1, no traceback).
 
+LTX-2's (Phase 6): `5bca57d` unmasked text cross-attention · warmup via the bare module ·
+prompt-encoder `dtype=` · `e03df45` bf16 host pipeline (emulated) · `f3aa906` device-VAE
+wrapper without `latents_mean/std` · plus the two serving-shape facts: the 121-frame host
+decode and the cold Gemma read both exceed the default 900 s startup budget.
+
 ## Phase 6 — LTX-2 ported to TPU (branch `tpu-port-hunyuan`, 2026-09-12)
 
 Second port from the plan. 512×768×121 (the registry default), tp=4, bf16; 6144 video +
@@ -257,7 +262,14 @@ Second port from the plan. 512×768×121 (the registry default), tp=4, bf16; 614
 | HBM fit (random inputs) | **9.28 GB resident, 9.36 GB peak** of 15.75; first compile 73 s; **1.68 s/step**; host peak 59 GB | `ltx2_fit_probe.log` |
 | parity vs diffusers fp32 (CPU, 984/1024 text positions padded), first attempt | video cos **0.9932** / rel-L1 0.131, audio 0.946 — the shared TP attention processor runs text cross-attention *unmasked* (a Trainium kernel limitation) | `oracle_ltx2_cmp.log` |
 | parity after honoring the mask on TPU (`5bca57d`) | video **cos 0.99983 / rel-L1 1.83e-2**, audio 0.99957; vs diffusers bf16 0.99985; control (diffusers bf16 vs fp32) 0.99983 / 1.78e-2 — indistinguishable from upstream's own bf16 | `oracle_ltx2_cmp2.log`, `oracle_ltx2_ref.log` (fp32 forward 86 s, bf16 control 413 s, 18.88 B params) |
-| `difflet serve` | in progress: DiT warmup 143 s (gated), Gemma-3 12B fp32 on ordinal 0 (47 GB), host pipeline loaded; two startup slips fixed on the way (warmup called the bare module positionally; prompt-encoder wrapper rejected diffusers' `dtype=`) | `serve_ltx2_tpu.log` |
+| `difflet serve`, 512×768×121 | takes 1–3: one-line slips (warmup called the bare module positionally; prompt-encoder wrapper rejected diffusers' `dtype=`; missing `await` class); take 3 **timed out at 900 s** loading Gemma-3 (cold first read of the 46 GB checkpoint — 2.5 s once the page cache is warm); take 4 timed out at 1800 s *inside the smoke*: the fp32 host decode of 121 frames on every replica (standalone: not finished in 14 min) | `serve_ltx2_tpu.log` (overwritten per take) |
+| video VAE on the chip | `AutoencoderKLLTX2Video` under torch_xla: **480×704×49 in 0.2 s** (54.6 s first compile, 2.98 GB), **512×768×121 in 0.7 s** (29 s compile, 3.99 GB), finite; numerics vs host fp32 on the real latents bf16 0.0048/px, fp32 0.0006/px | `ltx2_vae_device_probe*.log`, `ltx2_vae_ctor_probe.log` |
+| the fp32-host finding | the host pipeline had been loaded in the DiT's bf16 → bf16 is *emulated* on the EPYC host: audio VAE decode **114 s**, vocoder **196 s**, connectors ~40 s per prompt (vs 0.1 s / 0.6 s / ~0 in fp32). e2e-to-latents 93.6 → 50.7 s | `e03df45`, runner decode split |
+| the VAE-buffer finding | first videos off the chip: right structure, cyan cast + dithered grid; same latents decoded on the host: a proper red fox. `_denormalize_ltx_2_video_latents` reads `vae.latents_mean/latents_std` as *attributes* (buffers) and skips when absent — the device wrapper exposed only `config`. Device-vs-host on the same latents **0.1713 → 0.0024/px** | `f3aa906`, `ltx2_wrapper_probe{,2}.log`, `ltx_2_vae_buffer_bug_device_vs_host_f24.png` |
+| **benchmark, 480×704×49 (the trn2 MATRIX row), 20 steps, guidance 1.0** | e2e-to-latents **49.6 / 48.2 s** synced, 49.5 s natural; **DiT 1453 ms/step** (29 s of the 49; the rest is Gemma-3 fp32 on 1024 tokens); decode: video VAE 0.2 s warm (51.8 s first compile), audio VAE 0.11 s, vocoder 0.56 s; HBM peak 12.3 GB (DiT + VAE on rank 0); latents finite | `ltx2_baseline.{json,log}`, `ltx_2_tpu_bench_baseline.mp4`, `ltx_2_tpu_frames_0_24_48.png` |
+| TeaCache cadence 2 | **15 full / 5 skipped**; e2e-to-latents **42.4 / 43.3 / 42.0 s** (DiT 29 → 22 s = 0.75×; 0.86× overall because the encode is fixed); video vs baseline mean abs 0.0088/px, PSNR 37.9 dB | `ltx2_cadence2.{json,log}`, `ltx_2_tpu_bench_cadence2.mp4` |
+| quality note | at guidance 1.0 / 20 steps (the timing row) the subject is muddy; at guidance 3.0 the host decode of the same pipeline's latents shows a clear red fox — the model at CFG-free settings, not the port (trn2 also only judged quality at 40 steps with CFG) | `ltx2_g3*` |
+| **`difflet serve`, 480×704×49** (device VAE, primary-only decode, fp32 host) | **ready in 246 s** (warm cache; 595 s on the earlier take with the VAE compile in the smoke); `POST /v1/videos/sync` 20 steps → **200 in 51.6 s and 50.2 s**, 705 067 B mp4, 49 finite frames, **bit-identical across the two requests**; SIGTERM clean in 10 s | `serve_ltx_2_tpu_port.log`, `serve_ltx_2_tpu.mp4`, `ltx2_campaign.log` |
 
 Structure: `difflet/models/ltx_2/tp_sharding.py` (the Trainium recipe, lifted unchanged, `365315b`),
 `backends/tpu/ltx_2/{config,transformer}.py`, `models/ltx_2/tpu_application.py` (Gemma on

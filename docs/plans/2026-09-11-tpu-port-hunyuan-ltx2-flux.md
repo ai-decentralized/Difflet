@@ -177,3 +177,13 @@ Commits `365315b` (lift), `1a06144` (port), `5bca57d` (masked cross-attention on
 1.68 s/step. The one real finding: the shared TP attention processor's unmasked text
 cross-attention (a Trainium attention_cte limitation) is measurably wrong when most of the
 1024-token prompt is padding; TPU now honors the mask through the bounded flash path.
+
+### 2026-09-12 — LTX-2: serving and benchmark PASS
+
+`4469023` (video VAE on the chip, primary-only decode, runner), `e03df45` (fp32 host pipeline —
+bf16 is emulated on the host), `f3aa906` (the device-VAE wrapper hid `latents_mean/std`, so
+frames were decoded un-denormalized: cyan cast + dithering, 0.17/px vs the host decode).
+480×704×49 / 20 steps: 49 s to latents (1453 ms/step DiT, ~20 s Gemma-3 fp32 encode), decode
+0.2 s on chip; `difflet serve` ready in 246 s, requests 200 in 51 s, bit-identical; cadence 2
+skips 5/20 (DiT 0.75×, 0.0088/px). The 512×768×121 default also fits (VAE 0.7 s on chip) but
+serve it with a longer `--worker-restart-timeout` on a cold cache. Next: FLUX (needs an HF token).

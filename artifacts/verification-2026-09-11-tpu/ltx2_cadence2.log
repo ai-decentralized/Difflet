@@ -1,0 +1,258 @@
+world=4 args={'model_dir': '/mnt/models/hf/hub/models--Lightricks--LTX-2/snapshots/47da56e2ad66ce4125a9922b4a8826bf407f9d0a', 'height': 480, 'width': 704, 'num_frames': 49, 'steps': 20, 'guidance': 1.0, 'seed': 42, 'iters': 2, 'natural_iters': 1, 'decode': True, 'teacache_cadence': 2, 'teacache_online_delta': None, 'out': '/mnt/models/teacache_runs/ltx2_cadence2'}
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+[rank0] config video_seq=2310 audio_seq=51
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank2] config video_seq=2310 audio_seq=51
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank1] config video_seq=2310 audio_seq=51
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank3] config video_seq=2310 audio_seq=51
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[ltx_2] tpu warmup (first compile) in 142.2s
+[ltx_2] tpu warmup (first compile) in 141.3s
+[ltx_2] tpu warmup (first compile) in 141.1s
+[ltx_2] tpu warmup (first compile) in 141.3s
+Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]Loading weights:   0%|          | 0/1065 [00:00<?, ?it/s]Loading weights:  82%|████████▏ | 871/1065 [00:00<00:00, 8709.07it/s]Loading weights: 100%|██████████| 1065/1065 [00:00<00:00, 8665.19it/s]
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Loading pipeline components...:  43%|████▎     | 3/7 [00:00<00:00, 10.32it/s]Loading pipeline components...:  17%|█▋        | 1/6 [00:00<00:04,  1.24it/s]Loading pipeline components...:  33%|███▎      | 2/6 [00:01<00:03,  1.24it/s]Loading pipeline components...:  50%|█████     | 3/6 [00:01<00:01,  1.83it/s]Loading pipeline components...:  50%|█████     | 3/6 [00:02<00:02,  1.46it/s]Loading pipeline components...:  67%|██████▋   | 4/6 [00:02<00:01,  1.81it/s]Loading pipeline components...:  71%|███████▏  | 5/7 [00:01<00:00,  2.21it/s]Loading pipeline components...:  83%|████████▎ | 5/6 [00:02<00:00,  2.32it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:02<00:00,  2.30it/s]
+Loading pipeline components...:  83%|████████▎ | 5/6 [00:02<00:00,  1.97it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:02<00:00,  2.29it/s]
+[ltx_2] host pipeline loaded in 2.8s (text encoder on this rank: False)
+[teacache] probe-free controller enabled for ltx_2/480x704x49: cadence=2 online_delta_alpha=0.0
+[rank2] loaded in 153.2s mem={'bytes_used': 9.329, 'bytes_limit': 15.748, 'peak_bytes_used': 9.345}
+[ltx_2] host pipeline loaded in 2.8s (text encoder on this rank: False)
+[teacache] probe-free controller enabled for ltx_2/480x704x49: cadence=2 online_delta_alpha=0.0
+[rank3] loaded in 153.2s mem={'bytes_used': 9.329, 'bytes_limit': 15.748, 'peak_bytes_used': 9.345}
+Loading pipeline components...:  86%|████████▌ | 6/7 [00:02<00:00,  2.44it/s]Loading pipeline components...:  33%|███▎      | 2/6 [00:02<00:05,  1.47s/it]Loading pipeline components...: 100%|██████████| 7/7 [00:02<00:00,  3.07it/s]
+[ltx_2] host pipeline loaded in 2.9s (text encoder on this rank: True)
+[teacache] probe-free controller enabled for ltx_2/480x704x49: cadence=2 online_delta_alpha=0.0
+[rank1] loaded in 153.3s mem={'bytes_used': 9.329, 'bytes_limit': 15.748, 'peak_bytes_used': 9.345}
+Loading pipeline components...: 100%|██████████| 6/6 [00:03<00:00,  2.38it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:03<00:00,  1.89it/s]
+[ltx_2] host pipeline loaded in 3.3s (text encoder on this rank: False)
+[ltx_2] video VAE resident on the chip (primary replica)
+[teacache] probe-free controller enabled for ltx_2/480x704x49: cadence=2 online_delta_alpha=0.0
+[rank0] loaded in 154.1s mem={'bytes_used': 11.607, 'bytes_limit': 15.748, 'peak_bytes_used': 11.607}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank0] iter0 [synced] e2e_latent=42.37s steps=14 mean_step=1.451s
+[rank1] iter0 [synced] e2e_latent=42.98s steps=14 mean_step=1.451s
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank2] iter0 [synced] e2e_latent=43.14s steps=14 mean_step=1.451s
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank3] iter0 [synced] e2e_latent=43.13s steps=14 mean_step=1.451s
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+{
+  "type": "result",
+  "iteration": 0,
+  "basis": "synced",
+  "wall_seconds": 42.36759872699986,
+  "load_seconds": 154.08091043700188,
+  "step_seconds": [
+    1.4471552510003676,
+    1.4495525109996379,
+    1.4569831699991482,
+    1.4588649310026085,
+    1.4475215309976193,
+    1.4458068310013914,
+    1.456737020998844,
+    1.4448553399997763,
+    1.4476638010019087,
+    1.448242530997959,
+    1.4475333510017663,
+    1.4556318209979509,
+    1.4522070000020904,
+    1.4488575010000204
+  ],
+  "mem_before": {
+    "bytes_used": 0.0,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 0.0
+  },
+  "mem_after_load": {
+    "bytes_used": 11.607,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 11.607
+  },
+  "mem_after_run": {
+    "bytes_used": 11.607,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 12.325
+  },
+  "latent_shape": [
+    1,
+    2310,
+    128
+  ],
+  "finite": true,
+  "mean": 0.025887398049235344,
+  "std": 0.7188282608985901,
+  "teacache": {
+    "full_steps": 15,
+    "skipped_steps": 5,
+    "probe_calls": 0,
+    "last_delta_estimate": null,
+    "cache_initialized": true
+  }
+}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank2] iter1 [synced] e2e_latent=43.34s steps=14 mean_step=1.452s
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank0] iter1 [synced] e2e_latent=43.34s steps=14 mean_step=1.453s
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank1] iter1 [synced] e2e_latent=43.34s steps=14 mean_step=1.452s
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank3] iter1 [synced] e2e_latent=43.34s steps=14 mean_step=1.452s
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+{
+  "type": "result",
+  "iteration": 1,
+  "basis": "synced",
+  "wall_seconds": 43.33738299700053,
+  "load_seconds": 154.08091043700188,
+  "step_seconds": [
+    1.4504661209975893,
+    1.4594424300012179,
+    1.4479181110000354,
+    1.4423076409984787,
+    1.4426307810026628,
+    1.4674915399991733,
+    1.457978030997765,
+    1.462798221000412,
+    1.4548222299999907,
+    1.44215191100011,
+    1.447329611000896,
+    1.4542734610004118,
+    1.453116840999428,
+    1.453831970000465
+  ],
+  "mem_before": {
+    "bytes_used": 0.0,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 0.0
+  },
+  "mem_after_load": {
+    "bytes_used": 11.607,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 11.607
+  },
+  "mem_after_run": {
+    "bytes_used": 11.607,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 12.325
+  },
+  "latent_shape": [
+    1,
+    2310,
+    128
+  ],
+  "finite": true,
+  "mean": 0.025887398049235344,
+  "std": 0.7188282608985901,
+  "teacache": {
+    "full_steps": 15,
+    "skipped_steps": 5,
+    "probe_calls": 0,
+    "last_delta_estimate": null,
+    "cache_initialized": true
+  }
+}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank2] iter2 [natural] e2e_latent=42.01s steps=14 mean_step=1.451s
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank1] iter2 [natural] e2e_latent=42.01s steps=14 mean_step=1.450s
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank3] iter2 [natural] e2e_latent=42.01s steps=14 mean_step=1.451s
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank0] iter2 [natural] e2e_latent=42.01s steps=14 mean_step=1.451s
+[teacache] stats: {'full_steps': 15, 'skipped_steps': 5, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+{
+  "type": "result",
+  "iteration": 2,
+  "basis": "natural",
+  "wall_seconds": 42.00983900400024,
+  "load_seconds": 154.08091043700188,
+  "step_seconds": [
+    1.465774191001401,
+    1.4560079799994128,
+    1.4505255809999653,
+    1.453298131000338,
+    1.4392652409987932,
+    1.4492017010015843,
+    1.452075409997633,
+    1.449111111000093,
+    1.4547900710022077,
+    1.436558260997117,
+    1.4521651009999914,
+    1.4503501910003251,
+    1.4519572900026105,
+    1.4465847309984383
+  ],
+  "mem_before": {
+    "bytes_used": 0.0,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 0.0
+  },
+  "mem_after_load": {
+    "bytes_used": 11.607,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 11.607
+  },
+  "mem_after_run": {
+    "bytes_used": 11.607,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 12.325
+  },
+  "latent_shape": [
+    1,
+    2310,
+    128
+  ],
+  "finite": true,
+  "mean": 0.025887398049235344,
+  "std": 0.7188282608985901,
+  "teacache": {
+    "full_steps": 15,
+    "skipped_steps": 5,
+    "probe_calls": 0,
+    "last_delta_estimate": null,
+    "cache_initialized": true
+  }
+}
+{
+  "type": "decoded",
+  "seconds": 52.46182295300241,
+  "where": "device(video)+host(audio)",
+  "shape": [
+    1,
+    49,
+    3,
+    480,
+    704
+  ],
+  "finite": true,
+  "split": {
+    "video_vae": 51.79,
+    "audio_vae": 0.12,
+    "vocoder": 0.54
+  }
+}
+/mnt/models/uvpy/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/subprocess.py:1885: RuntimeWarning: os.fork() was called. os.fork() is incompatible with multithreaded code, and JAX is multithreaded, so this will likely lead to a deadlock.
+  self.pid = _fork_exec(
