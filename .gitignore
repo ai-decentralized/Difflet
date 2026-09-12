@@ -66,3 +66,8 @@ artifacts/parallel_phase_sweep/
 
 # nkd/neuroncc compile temp dirs leaked into CWD when compiling from repo root
 /c[0-9a-f][0-9a-f][0-9a-f]*/
+
+# Benchmark / verification media — evidence stays on the device and in the
+# runner's artifacts dir; the repo keeps the JSON/MD, not the pixels.
+artifacts/**/*.png
+artifacts/**/*.mp4

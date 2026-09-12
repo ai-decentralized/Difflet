@@ -141,3 +141,27 @@ Open items, none started, in order of payoff:
    device-resident loops (Qwen, now FLUX too); expose warmup/cooldown as serving flags;
    fold the `*_tpu_run.py` runners into `benchmark/adapters/tpu.py`; a video-quality
    acceptance figure for TeaCache on the video models.
+
+## Addendum 2026-09-12 07:30 UTC — section 3 re-done on the trn2 protocol
+
+The section-3 table above compared trn2's warm e2e with resident-request numbers from five
+different runners. On request ("对比 trainium 的测试方法 / 统一他们") the harness now carries the
+trn2 protocol for every backend and the TPU adapter runs every model through it
+(`7a8c6c2`; `benchmark/README.md` "Cloud TPU"). Rows on the unified protocol, same MATRIX
+conditions (`benchmark/v5e/RESULTS.md`, per-model `<slug>.md`):
+
+| model | v5e cold / warm (fresh process) | v5e resident request | v5e per-step | trn2 warm / warm−load / per-step |
+|---|---:|---:|---:|---|
+| FLUX.1-dev | 261 / 212 s | **9.1 s** | **187 ms** | 35.3 / 17.5 s / 268 ms |
+| Qwen-Image | 172 / 92 s | **8.8 s** | **277 ms** | 62.7 / 32.9 s / 447 ms |
+| Wan 2.1 | 197 / 93 s | 33.1 s (20 s host VAE) | 613 ms | 56.4 / 28.5 s / 555 ms |
+| Wan 2.2 | 192 / 94 s | 33.2 s (20 s host VAE) | 610 ms | 57.4 / 28.4 s / 555 ms |
+| LTX-2 | 494 / 269 s | 54.0 s (24 s Gemma fp32) | 1460 ms | 58.5 / 43.8 s / 438 ms |
+| HunyuanVideo | not re-run (campaign stopped at the user's request during its cold process) | ~191 s port-era | 1006 ms port-era | 144.3 / 101.5 s / 851 ms |
+
+Findings while unifying: the 2026-08-24 Qwen per-step of 505 ms was a timer artifact (a
+`mark_step` inside the sync serialised the ~275 ms host trace with the chip; the real loop
+delivers 277 ms, host-trace-bound); every fresh process pays XLA's compile again, so
+"warm e2e" on the v5e is 92–269 s where trn2's is 35–144 s, while the resident request is
+9–54 s. Open: re-run HunyuanVideo (`MODELS=hunyuan_video …/campaign.sh`, ~50 min); decide
+whether the superseded `benchmark/*_tpu_run.py` runners are deleted.

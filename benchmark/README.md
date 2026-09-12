@@ -95,14 +95,53 @@ benchmark/
 The runner writes to `benchmark/<device>/`; the device defaults to `trn2` and is set
 with `DIFFLET_BENCH_DEVICE` (e.g. `DIFFLET_BENCH_DEVICE=h100 python -m benchmark.bench …`).
 
-The TPU adapter (`benchmark/adapters/tpu.py`) takes two more A/B switches, both off by
-default so the frozen `MATRIX` row stays the baseline: `DIFFLET_BENCH_TEACACHE_CADENCE=N`
-and `DIFFLET_BENCH_TEACACHE_ONLINE_DELTA=ALPHA` enable probe-free TeaCache in the Qwen-Image
-denoise loop, exactly as `difflet serve --teacache-cadence/--teacache-online-delta` would.
-The result then carries a `teacache` block with the controller's `full_steps` /
-`skipped_steps`; `step_seconds` covers the full steps only (a skipped step never calls the
-DiT), so read the saving off `denoise_seconds`. `benchmark/wan_tpu_run.py` exposes the same
-two as `--teacache-cadence` / `--teacache-online-delta`.
+## Cloud TPU (`--backend tpu`) — the same protocol, one adapter for every model
+
+`benchmark/adapters/tpu.py` runs every MATRIX model through the same harness path and the
+same protocol as the Trainium folder, via one driver per model type
+(`benchmark/adapters/tpu_models.py`) that loads exactly what `difflet serve` loads on the TPU
+backend (the application factories, orchestrators, host encoders and VAEs of
+`difflet/serving/models/*`):
+
+```bash
+DIFFLET_BENCH_DEVICE=v5e DIFFLET_BACKEND=tpu HF_HOME=/mnt/models/hf \
+    python -m benchmark.bench --backend tpu --model wan_2_1 --skip-download \
+        --iters 3 --warm-discard 1 --resident-iters 2 --natural-iters 2 \
+        --save-dir artifacts/benchmark-v5e
+python -m benchmark.cross_device --reference trn2 --device v5e   # the comparison table
+```
+
+The protocol, in `benchmark/bench.py`, is the trn2 one and applies to every backend:
+
+1. **e2e cold** — `sync; echo 3 > /proc/sys/vm/drop_caches` (passwordless sudo; the JSON
+   records whether it worked), then ONE fresh process: weights load + one generate to a
+   decoded output. On TPU a "process" is the four per-chip workers, spawned again.
+2. **e2e warm** — `--warm-discard` fresh processes thrown away (cache warming), then
+   `--iters` fresh processes reported (trn2: 1 discarded, n=3).
+3. **resident request** — adapters that keep the model loaded (`supports_resident_mode`)
+   serve `--resident-iters` more requests on the last process. That is what a served request
+   costs; trn2's CLI reloads every process, so its counterpart is warm e2e minus the warm load
+   (`e2e_warm_breakdown.compute_and_overhead_s`). The per-step figure comes from these
+   synced iterations, never from a cold process.
+4. **natural** — `--natural-iters` resident requests with no per-step sync (lazy XLA overlaps
+   tracing and execution; the synced number is the comparable one, this is the delivered one).
+
+XLA compiles on each process's first execution and torch_xla cannot persist the executables,
+so on TPU that compile is inside e2e cold **and** e2e warm; the resident row is where it is
+gone. `compile_seconds` stays 0 (no AOT artifact). The decoded output of every run is checked
+for finiteness / range like the trn2 `.pt` outputs and, with `--save-dir`, written out (PNG,
+or MP4 plus a first/middle/last contact sheet) so the picture can be looked at, not only the
+numbers.
+
+Two A/B switches stay available and off by default so the frozen `MATRIX` row is the
+baseline: `DIFFLET_BENCH_TEACACHE_CADENCE=N` and `DIFFLET_BENCH_TEACACHE_ONLINE_DELTA=ALPHA`
+enable probe-free TeaCache exactly as `difflet serve --teacache-cadence/--teacache-online-delta`
+would; the result then carries a `teacache` block (`full_steps` / `skipped_steps`) and
+`step_seconds` covers the full steps only. The older per-model runners
+(`benchmark/{wan,hunyuan,ltx2,flux}_tpu_run.py`) predate the generic adapter and the cold/warm
+protocol; they remain as the scripts behind the 2026-09-11/12 port evidence but are superseded
+for benchmark rows.
+
 Every per-model report carries a **Reproduction** section with the exact,
 hardware-agnostic test conditions (model id + pinned revision, shape, tp/cp, dtype,
 steps, guidance, seed, prompt) and the precise commands + measurement protocol — so

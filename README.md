@@ -72,13 +72,13 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 
 **Runtime features**
 
-| Model | Multi-shape compile | TeaCache (adaptive) | TeaCache (fixed cadence) | Serving | Batch (JSONL) |
-|---|:---:|:---:|:---:|:---:|:---:|
-| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ image | ✅ |
-| Qwen-Image | ✅ | ✅ | ✅ | ✅ image | ✅ |
-| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ video ⁴ | ✅ |
-| HunyuanVideo | ✅ | ✅ | ✅ | ✅ video | ✅ |
-| LTX-2 | ❌ | ✅ | ✅ | ✅ video | ✅ |
+| Model | Multi-shape compile | TeaCache (adaptive) | TeaCache (fixed cadence) | Serving | Batch (JSONL) | TPU backend ⁵ |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ image | ✅  ✅ |
+| Qwen-Image | ✅ | ✅ | ✅ | ✅ image | ✅  ✅ |
+| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ video ⁴ | ✅  ✅ |
+| HunyuanVideo | ✅ | ✅ | ✅ | ✅ video | ✅  ✅ |
+| LTX-2 | ❌ | ✅ | ✅ | ✅ video | ✅  ✅ |
 
 **Feature legend**
 
@@ -91,9 +91,10 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 - **DP** — data-parallel replicas (`--dp N`). A router spawns N full model copies on disjoint core ranges and distributes requests across them; use `--mode throughput` or `--mode mixed` for a preset.
 - **Multi-shape compile** — one bucketed artifact covering several request shapes (`--shapes 320x512x61,320x512x33`), sharing a single weight copy on device. `difflet serve --shapes` serves all of them from one resident worker.
 - **TeaCache (adaptive)** — calibration-driven step-skipping (`--teacache-speedup` / `--teacache-online-delta`, with `--teacache-calibration`).
-- **TeaCache (fixed cadence)** — blind skip-every-N-steps (`--teacache-cadence N`, no calibration needed). `difflet serve` accepts the probe-free pair (`--teacache-cadence`, `--teacache-online-delta`) for Qwen-Image and Wan on both Trainium and the TPU backend, and adaptive `--teacache-speedup` for Flux and Qwen-Image image serving.
+- **TeaCache (fixed cadence)** — blind skip-every-N-steps (`--teacache-cadence N`, no calibration needed). `difflet serve` accepts the probe-free pair (`--teacache-cadence`, `--teacache-online-delta`) for Qwen-Image and Wan on both Trainium and the TPU backend, for HunyuanVideo, LTX-2 and Flux on the TPU backend, and adaptive `--teacache-speedup` for Flux and Qwen-Image image serving.
 - **Serving** — resident `difflet serve` worker. Image models answer `/v1/chat/completions`; video models answer the [Videos API](docs/serving/videos_api.md).
 - **Batch (JSONL)** — `--requests FILE` runs one request per line (prompt, output, seed, optional negative prompt, guidance scale, steps) through one loaded model.
+- **TPU backend** — the same models served from Cloud TPU (`DIFFLET_BACKEND=tpu`, eager torch_xla, tensor-parallel only). See note 5.
 
 **Notes**
 
@@ -101,6 +102,7 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 2. `tp2 cp2` with gather-KV hits a `neuronx-cc` internal error (`NCC_INLA001` / `NCC_IBIR243`) on the CP-degree-2 DiT graph; ring CP and `tp4 --sp` are the working multi-core paths. See [DEVELOPER.md](DEVELOPER.md).
 3. DP works, but on a 4-core `trn2.3xlarge` each 2-core replica runs out of HBM loading the compiled VAE at the default 320×512×61 shape. Use a smaller shape or a host with more cores per replica.
 4. Wan 2.1 is the qualified serving checkpoint. Wan 2.2 can be started for experiments but its dual-transformer path has not passed resident-serving acceptance.
+5. Cloud TPU (`DIFFLET_BACKEND=tpu`, eager torch_xla, tp only): `difflet serve`, the `benchmark/*_tpu_run.py` runners and probe-free TeaCache (`--teacache-cadence` / `--teacache-online-delta`) for all five models; no CLI `compile/generate/run`, CP/SP/CFG-parallel or adaptive TeaCache there. Measured on a v5litepod-4 in `benchmark/v5e/`.
 
 Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive (and each is mutually exclusive with `--sp`). `world_size = dp × (2 if cfg-parallel else 1) × cp_degree × tp_degree`; `--sp` leaves it unchanged. `difflet plan --model-id <id>` lists the combinations your host can run.
 

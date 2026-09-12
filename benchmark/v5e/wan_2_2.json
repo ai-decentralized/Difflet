@@ -1,0 +1,235 @@
+{
+  "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+  "model_type": "wan",
+  "backend": "tpu",
+  "device": "Cloud TPU v5litepod-4 / 4 chips / topology 2x2 / 16 GB HBM per chip",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "compile_seconds": 0.0,
+  "compile_breakdown": {
+    "eager": 0.0
+  },
+  "load_seconds": 86.438,
+  "e2e_cold_seconds": 191.85328535700683,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "transformer (DiT -> chips) + text_encoder (umT5, host fp32, ordinal 0)",
+        "shard_s": null,
+        "load_s": 79.572
+      },
+      {
+        "stage": "vae (host fp32, primary replica)",
+        "shard_s": null,
+        "load_s": 6.866
+      }
+    ],
+    "weights_shard_total_s": 0.0,
+    "weights_load_total_s": 86.438,
+    "wall_total_s": 191.853,
+    "compute_and_overhead_s": 105.415,
+    "note": "fresh worker processes, one per chip. The residual is process start + imports + one request (text encode + denoise + decode on the primary replica). XLA's first-execution compile is inside the load stages where the model's load_eager warms up (HunyuanVideo, LTX-2, FLUX) and inside the request otherwise (Qwen-Image, Wan)."
+  },
+  "e2e_warm": {
+    "n": 3,
+    "mean": 93.762993818668,
+    "median": 93.76250970499677,
+    "std": 0.7888028470564066,
+    "p50": 93.76250970499677,
+    "p90": 94.72931802600215,
+    "min": 92.79715372500505,
+    "max": 94.72931802600215,
+    "samples": [
+      94.72931802600215,
+      93.76250970499677,
+      92.79715372500505
+    ]
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "transformer (DiT -> chips) + text_encoder (umT5, host fp32, ordinal 0)",
+        "shard_s": null,
+        "load_s": 4.809
+      },
+      {
+        "stage": "vae (host fp32, primary replica)",
+        "shard_s": null,
+        "load_s": 1.538
+      }
+    ],
+    "weights_shard_total_s": 0.0,
+    "weights_load_total_s": 6.347,
+    "wall_total_s": 92.797,
+    "compute_and_overhead_s": 86.45,
+    "note": "fresh worker processes, one per chip. The residual is process start + imports + one request (text encode + denoise + decode on the primary replica). XLA's first-execution compile is inside the load stages where the model's load_eager warms up (HunyuanVideo, LTX-2, FLUX) and inside the request otherwise (Qwen-Image, Wan)."
+  },
+  "step_latency": {
+    "n": 38,
+    "mean": 0.6097595006840971,
+    "median": 0.6084088959942164,
+    "std": 0.004230461729130535,
+    "p50": 0.6084031059945119,
+    "p90": 0.6125860750034917,
+    "min": 0.6061833959975047,
+    "max": 0.6303351849928731,
+    "samples": [
+      0.6303351849928731,
+      0.6119003560015699,
+      0.6125860750034917,
+      0.6134675459979917,
+      0.6068560749990866,
+      0.6107869359984761,
+      0.6108936450036708,
+      0.6077057660004357,
+      0.6078929459981737,
+      0.6076234260035562,
+      0.608414685993921,
+      0.6129491650062846,
+      0.6106698559960932,
+      0.6078764859994408,
+      0.6074754350047442,
+      0.6084031059945119,
+      0.6088193760006106,
+      0.6081810149989906,
+      0.60888082600286,
+      0.6207299859961495,
+      0.6086872250016313,
+      0.6061833959975047,
+      0.6080041360037285,
+      0.6078104760017595,
+      0.6079523959997459,
+      0.6084535849950043,
+      0.609194896002009,
+      0.6070381059980718,
+      0.6071071550031775,
+      0.6082690659968648,
+      0.6095722360041691,
+      0.6104405349979061,
+      0.6076473560024169,
+      0.6089952749971417,
+      0.6081359160016291,
+      0.6095061759988312,
+      0.6077879459990072,
+      0.6076272560021607
+    ]
+  },
+  "step_basis": "synced",
+  "step_latency_alt": {
+    "throughput": 0.6105947926502268,
+    "enqueue_mean": 0.614482901841831
+  },
+  "stage_seconds": {
+    "text_encode": 0.6952879239979666,
+    "denoise": 12.211895853004535,
+    "vae_decode": 20.031917057996907
+  },
+  "teacache": null,
+  "e2e_warm_natural": {
+    "n": 2,
+    "mean": 32.98545588899651,
+    "median": 32.98545588899651,
+    "std": 0.0881283529997745,
+    "p50": 32.89732753599674,
+    "p90": 33.073584241996286,
+    "min": 32.89732753599674,
+    "max": 33.073584241996286,
+    "samples": [
+      32.89732753599674,
+      33.073584241996286
+    ]
+  },
+  "step_latency_natural": {
+    "n": 2,
+    "mean": 0.6129162016000919,
+    "median": 0.6129162016000919,
+    "std": 0.0021711249501095153,
+    "p50": 0.6107450766499823,
+    "p90": 0.6150873265502014,
+    "min": 0.6107450766499823,
+    "max": 0.6150873265502014,
+    "samples": [
+      0.6107450766499823,
+      0.6150873265502014
+    ]
+  },
+  "e2e_warm_resident": {
+    "n": 2,
+    "mean": 33.19507707949742,
+    "median": 33.19507707949742,
+    "std": 0.25597413449941087,
+    "p50": 32.93910294499801,
+    "p90": 33.451051213996834,
+    "min": 32.93910294499801,
+    "max": 33.451051213996834,
+    "samples": [
+      33.451051213996834,
+      32.93910294499801
+    ]
+  },
+  "protocol": {
+    "drop_page_cache_before_cold": true,
+    "page_cache_dropped": true,
+    "warm_discarded_runs": 1,
+    "warm_iters": 3,
+    "resident_iters": 2,
+    "natural_iters": 2,
+    "fresh_process_per_run": true
+  },
+  "throughput": {
+    "steps/s": 1.6399908470111364
+  },
+  "peak_device_mem_gb": 7.512986183166504,
+  "output": {
+    "shape": [
+      1,
+      3,
+      9,
+      480,
+      832
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": -1.0,
+    "max": 0.9576323628425598,
+    "mean": -0.19744901359081268,
+    "std": 0.39257556200027466,
+    "note": "decoded video (BCTHW, minus_one_to_one); saved wan_2_2_warm2.mp4, wan_2_2_warm2_frames_0_4_8.png"
+  },
+  "toolchain": {
+    "torch": "2.9.0+cpu",
+    "torch-xla": "2.9.0",
+    "libtpu": "0.0.20",
+    "jax": "0.7.1",
+    "diffusers": "0.38.0",
+    "transformers": "5.15.1",
+    "accelerator_type": "v5litepod-4"
+  },
+  "config_label": "tp=4, bf16, A14B (high/low-noise experts), attention_cte",
+  "status": "ok",
+  "notes": [
+    "The config_label comes from models.py::MATRIX and describes the TRAINIUM recipe -- 'attention_cte' is a Neuron kernel and is NOT what ran here; the TPU backend uses the Pallas fused attention kernel (torch_xla.experimental.custom_kernel) above 32M score elements and scaled_dot_product_attention below it. The tp=4/cp=1 sharding IS accurate: the DiT is split across 4 v5e chips, one worker process per chip. compile_seconds=0 means no AOT artifact was built or reused, not that compilation is free -- XLA compiles on each process's first execution, inside e2e cold AND e2e warm (both are fresh processes, as on trn2), and torch_xla cannot persist the executables. The resident-process request row is the same request with the weights already on the chips: what `difflet serve` delivers. Per-step is the device-synced real-loop rule (harness.RealLoopStepTimer), taken from the resident synced iterations.",
+    "e2e_cold = 192 s -- TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 94 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). Every run is a fresh process that reloads the weights, so 'warm' = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-09-12 06:30 UTC",
+  "config_slug": "wan_2_2",
+  "device_slug": "v5e",
+  "revision": "5be7df9619b54f4e2667b2755bc6a756675b5cd7",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video"
+}

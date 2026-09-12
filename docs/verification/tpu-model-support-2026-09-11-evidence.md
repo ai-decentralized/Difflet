@@ -39,12 +39,12 @@ instead start a Neuron compile on a TPU box).
 
 | model | `difflet serve` | benchmark runner | CLI `generate` | TeaCache (probe-free) | notes |
 |---|---|---|---|---|---|
-| Qwen-Image | **PASS** · 7.6 s / 1024² 20 steps (cadence 2) | **PASS** · 10.12 s denoise baseline | N/A · no CLI runtime on TPU (fail-fast, `619d98b`) | **PASS** cadence 2 = 0.75×; online-delta LIMIT (slower in natural basis) | |
-| Wan 2.2 | **PASS** · 30.4 s / 832×480×9 20 steps | **PASS** · 12.18 s wall | N/A | **PASS** cadence 2 = 0.75× | single expert resident ¹ |
-| Wan 2.1 | **PASS** · 33.5 s (20 st) / 70.4 s (40 st, CFG) | NOT MEASURED (runner is 2.2-shaped) | N/A | NOT MEASURED (same controller as 2.2) | quality = upstream ² |
-| FLUX.1-dev | **PASS** (port, `tpu-port-hunyuan`) · 10.1 / 9.3 s / 1024² 28 steps, bit-identical to the bench | **PASS** · 8.7 s to latents, **187 ms/step**, decode on chip | N/A | **PASS** cadence 2: 9/28 skipped, DiT 0.69×, 0.0041/px | ported 2026-09-12 (option (b): diffusers DiT sharded, Trainium fork untouched); first model faster per step than trn2 |
-| HunyuanVideo | **PASS** (port, `tpu-port-hunyuan`) · 191 s / 512×320×61 20 steps (165 s of it host VAE) | **PASS** · 20.1 s denoise, 1.0 s/step | N/A | **PASS** cadence 2 = 0.75×, 0.0064/px | ported 2026-09-11; VAE on chip is the follow-up |
-| LTX-2 | **PASS** (port, `tpu-port-hunyuan`) · 51 s / 704×480×49 20 steps | **PASS** · 49 s to latents, 1453 ms/step, decode 0.2 s on chip | N/A | **PASS** cadence 2: DiT 0.75×, 0.0088/px | 512×768×121 also fits (VAE 0.7 s on chip); ported 2026-09-12 |
+| Qwen-Image | **PASS** · 7.6 s / 1024² 20 steps (cadence 2) | **PASS** · harness (Phase 8): resident 8.8 s, 277 ms/step | N/A · no CLI runtime on TPU (fail-fast, `619d98b`) | **PASS** cadence 2 = 0.75×; online-delta LIMIT (slower in natural basis) | |
+| Wan 2.2 | **PASS** · 30.4 s / 832×480×9 20 steps | **PASS** · harness (Phase 8): resident 33.2 s, 610 ms/step | N/A | **PASS** cadence 2 = 0.75× | single expert resident ¹ |
+| Wan 2.1 | **PASS** · 33.5 s (20 st) / 70.4 s (40 st, CFG) | **PASS** · harness (Phase 8): resident 33.1 s, 613 ms/step | N/A | NOT MEASURED (same controller as 2.2) | quality = upstream ² |
+| FLUX.1-dev | **PASS** (port, `tpu-port-hunyuan`) · 10.1 / 9.3 s / 1024² 28 steps, bit-identical to the bench | **PASS** · harness (Phase 8): resident 9.1 s, **187 ms/step** | N/A | **PASS** cadence 2: 9/28 skipped, DiT 0.69×, 0.0041/px | ported 2026-09-12 (option (b): diffusers DiT sharded, Trainium fork untouched); first model faster per step than trn2 |
+| HunyuanVideo | **PASS** (port, `tpu-port-hunyuan`) · 191 s / 512×320×61 20 steps (165 s of it host VAE) | **PASS** · 20.1 s denoise, 1.0 s/step (runner; harness row not re-run) | N/A | **PASS** cadence 2 = 0.75×, 0.0064/px | ported 2026-09-11; VAE on chip is the follow-up |
+| LTX-2 | **PASS** (port, `tpu-port-hunyuan`) · 51 s / 704×480×49 20 steps | **PASS** · harness (Phase 8): resident 54 s, 1460 ms/step | N/A | **PASS** cadence 2: DiT 0.75×, 0.0088/px | 512×768×121 also fits (VAE 0.7 s on chip); ported 2026-09-12 |
 
 ¹ two experts do not fit 16 GB HBM; `benchmark/v5e/wan_2_2.md`. ² block artifacts at 9 frames /
 guidance 1.0 are the model's own — reproduced with upstream diffusers fp32 on CPU.
@@ -76,6 +76,7 @@ guidance 1.0 are the model's own — reproduced with upstream diffusers fp32 on 
 | 3 | Wan 2.1 serving on TPU (registered for `tpu`, never measured) | `difflet serve` + `/v1/videos/sync` + oracle + upstream CPU pipeline | done — PASS |
 | 4 | controls: Qwen-Image, Wan 2.2 serving on TPU | from the TeaCache campaign | done |
 | 5–7 | ports: HunyuanVideo, LTX-2, FLUX.1-dev (oracle + serve + bench + cadence-2 each) | `*_tpu_run.py`, `difflet serve`, `oracle_*_cmp.py` | done — PASS ×3 |
+| 8 | every model through `benchmark.bench --backend tpu` on the trn2 protocol (2026-09-12) | `benchmark/adapters/tpu.py` + `tpu_models.py`, `/mnt/models/teacache_runs/bench_v5e/campaign.sh` | PASS ×5; HunyuanVideo not re-run (stopped) |
 
 ## Phase 0 — what the code says
 
@@ -307,6 +308,56 @@ ordinal 0 + broadcast, CLIP-L per rank, `TpuDeviceImageVae`, device-resident loo
 probe-free controller), the TPU branch of `serving/orchestrators/flux.py`, registry
 `backends=("trainium","tpu")`, `--teacache-cadence/--teacache-online-delta` accepted for flux on
 the TPU backend only, `benchmark/flux_tpu_run.py`.
+
+## Phase 8 — every model through one harness on the trn2 protocol (2026-09-12)
+
+Question: *are the v5e rows measured the way the trn2 rows are, and does every ported model
+still run end to end?* Until this phase they were not: Qwen-Image went through
+`benchmark.bench` (a Qwen-only TPU adapter), the other four through standalone runners with
+no page-cache drop, no process restart for "warm", decode only on some, and FLUX on its own
+prompt. `benchmark/adapters/tpu.py` is now model-generic (one driver per model type in
+`benchmark/adapters/tpu_models.py`, each loading exactly what `difflet serve` loads), and
+`benchmark/bench.py` carries the trn2 protocol for every backend: page cache dropped → cold
+fresh process → 1 discarded warm-up → 3 warm fresh processes → 2 resident synced requests
+(the per-step source) → 2 natural requests. Every run decodes on the primary replica and the
+decoded tensor is range/finite-checked like trn2's `.pt` outputs; media go to
+`artifacts/benchmark-v5e-2026-09-12/`.
+
+Plumbing smoke first (`/mnt/models/teacache_runs/bench_v5e/smoke.py`, 2 steps, fresh + resident,
+decoded; FLUX's and Qwen's resident 2-step requests here include the ~20–30 s natural-basis recompile that the `_sync` fix below removed): 
+
+| model | fresh process (load + 2-step request, decoded) | load | resident 2-step request | encode / denoise / decode | HBM peak | decoded output |
+|---|---:|---:|---:|---|---:|---|
+| flux_1_dev | 207 s | 52 s | 28.4 s | 4.0 / 24.1 / 0.3 s | 10.5 GB | (1×3×1024×1024) finite=True |
+| qwen_image | 165 s | 81 s | 35.7 s | 1.9 / 32.7 / 1.1 s | 11.1 GB | (1×3×1024×1024) finite=True |
+| wan_2_1 | 158 s | 53 s | 22.0 s | 0.6 / 1.2 / 20.1 s | 7.5 GB | (1×3×9×480×832) finite=True |
+| wan_2_2 | 174 s | 83 s | 22.0 s | 0.7 / 1.2 / 20.1 s | 7.5 GB | (1×3×9×480×832) finite=True |
+| ltx_2 | 530 s | 206 s | 25.0 s | 20.7 / 3.4 / 0.9 s | 12.5 GB | (1×49×3×480×704) finite=True |
+| hunyuan_video | 428 s | 227 s | 173.8 s | 4.6 / 2.0 / 167.1 s | 12.5 GB | (1×3×61×320×512) finite=True |
+
+All six PASS (`/mnt/models/teacache_runs/bench_v5e/smoke_summary.json`, media in `smoke_out/`).
+
+Campaign (`/mnt/models/teacache_runs/bench_v5e/campaign.sh`, logs `benchmark/v5e/logs/<slug>_bench.log`):
+
+| model | v5e cold | v5e warm (n=3) | v5e resident request | v5e per-step (synced, n) | trn2 warm / warm−load / per-step | output (v5e) | media identical across the 9 runs |
+|---|---:|---:|---:|---:|---|---|---|
+| flux_1_dev | 261 s | 211.7 s | **9.1 s** | **187 ms** (n=54) | 35.3 s / 17.5 s / 268 ms | (1×3×1024×1024) finite | yes (md5 325f1405…) |
+| qwen_image | 172 s | 92.4 s | **8.8 s** | **277 ms** (n=38) | 62.7 s / 32.9 s / 447 ms | (1×3×1024×1024) finite | yes (md5 287e425e…) |
+| wan_2_1 | 197 s | 92.9 s | **33.1 s** | **613 ms** (n=38) | 56.4 s / 28.5 s / 555 ms | (1×3×9×480×832) finite | yes (md5 e0ec224d…) |
+| wan_2_2 | 192 s | 93.8 s | **33.2 s** | **610 ms** (n=38) | 57.4 s / 28.4 s / 555 ms | (1×3×9×480×832) finite | yes (md5 ec46bca5…) |
+| ltx_2 | 494 s | 268.8 s | **54.0 s** | **1460 ms** (n=38) | 58.5 s / 43.8 s / 438 ms | (1×49×3×480×704) finite | yes (md5 c94fa61c…) |
+| hunyuan_video | — | — | — | — | 144.3 s / 101.5 s / 851 ms | (1×3×61×320×512) finite (smoke) | **not re-run**: stopped at the user's request 07:21 UTC during the cold process; port-era 1006 ms/step, 191 s served |
+
+PASS ×5 on the unified protocol (`benchmark/v5e/<slug>.{json,md}`, commits `2582646` FLUX, `5c7d75d` Qwen, `1a9460b` Wan 2.1, `ada3a75` Wan 2.2, `197a782` LTX-2); HunyuanVideo NOT MEASURED on it. Cross-device tables: `benchmark/v5e/RESULTS.md` (generated by `benchmark/cross_device.py`).
+
+Method differences that surfaced while unifying (all pinned or documented):
+
+| finding | where | consequence |
+|---|---|---|
+| `snapshot_download(local_files_only=True)` refuses every checkpoint on this host (`IncompleteSnapshotError: .gitattributes missing`) because they were fetched with `allow_patterns` | `TpuAdapter._resolve_model_dir` | pinned revisions are resolved straight in the hub cache; `snapshot_download` only as fallback |
+| a `mark_step` inside the per-step timer splits the step graph at the DiT output → a different executable from the natural/serving one → recompile on the first natural request (FLUX: 24 s denoise for 2 steps) | `tpu.py::_sync` | sync is `xm.wait_device_ops()` alone, as `RealLoopStepTimer` documents; every loop already `mark_step`s per step |
+| the cold generate's per-step deltas on a lazy backend can still carry compiles past step 0 | `bench.py` | `step_latency` comes from the resident synced requests only; the cold deltas are the fallback for adapters without a resident mode (trn2, diffusers) |
+| a Qwen DiT load read 79 s when the page cache held other checkpoints (8 s warm on 2026-08-24) | smoke | exactly why cold/warm are separate fresh-process rows |
 
 ## Bug ledger
 

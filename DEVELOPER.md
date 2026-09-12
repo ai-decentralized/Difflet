@@ -284,7 +284,8 @@ to read). FLUX.1-dev is a gated repo: a token with access must be in `$HF_HOME/t
 
 **On the TPU backend** (`DIFFLET_BACKEND=tpu`, eager torch_xla; Qwen-Image, Wan 2.2/2.1,
 HunyuanVideo, LTX-2 and FLUX.1-dev are ported — `difflet/models/<model>/tpu_application.py`; the
-per-model rows live in `benchmark/v5e/`) only the probe-free modes exist:
+per-model rows live in `benchmark/v5e/`, measured by `benchmark.bench --backend tpu` on the same
+cold/warm/per-step protocol as the trn2 rows) only the probe-free modes exist:
 the adaptive signal comes from a fused probe NEFF on Trainium that has no TPU counterpart. Qwen's
 device-resident loop keeps the controller's residual on the chip, so a skipped step is one
 elementwise add instead of a DiT forward and XLA sees three cached graph shapes (step 0, full,
@@ -294,7 +295,7 @@ every step for UniPC, so neither mode adds a sync there. A/B on a v5e:
 
 ```bash
 DIFFLET_BENCH_TEACACHE_CADENCE=2 DIFFLET_BACKEND=tpu python -m benchmark.bench --backend tpu ...
-DIFFLET_BACKEND=tpu python benchmark/wan_tpu_run.py --steps 20 --teacache-cadence 2 ...
+DIFFLET_BENCH_TEACACHE_CADENCE=2 DIFFLET_BACKEND=tpu python -m benchmark.bench --backend tpu --model wan_2_1 ...
 ```
 
 Both report the controller's `{full_steps, skipped_steps}` next to the timings. The skip
