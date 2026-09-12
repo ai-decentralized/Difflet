@@ -109,7 +109,7 @@ table in `benchmark/v5e/RESULTS.md`. Every row: warm e2e (stage split: encode / 
 decode), synced per-step, natural per-step, HBM peak, output finiteness, and the TeaCache
 cadence-2 A/B.
 
-## 4. Records
+## 4. Records — DONE (`a73efb0`)
 
 - `docs/verification/tpu-model-support-2026-09-11-evidence.md`: Phase 6 (LTX-2) and Phase 7
   (FLUX) tables, matrix rows, bug ledger.
@@ -117,3 +117,27 @@ cadence-2 A/B.
 - README feature matrix: a TPU column (serving / bench / TeaCache per model); DEVELOPER.md
   TPU section: ported models, the cold-start note, the compile-slot gate.
 - Worklog addendum per model.
+
+## Outcome (2026-09-12 04:40) and open items
+
+All four steps are done and committed on `tpu-port-hunyuan` (41 commits ahead of `main`,
+nothing pushed): every serving model — Qwen-Image, Wan 2.2/2.1, HunyuanVideo, LTX-2,
+FLUX.1-dev — has a TPU serving smoke, a benchmark row beside trn2, a parity figure and a
+cadence-2 A/B (`benchmark/v5e/RESULTS.md`, evidence doc Phases 3–7). Chips idle, tree clean.
+
+Open items, none started, in order of payoff:
+
+1. **Wan and HunyuanVideo VAEs on the chip.** Their served requests are 30 s / 191 s of which
+   24 s / 165 s is the host decode; LTX-2's and FLUX's on-chip decodes are 0.2–0.3 s. The Wan
+   VAE failed under torch_xla on a negative-index op in the first attempt (Wan port notes) —
+   that op needs a rewrite, not a wrapper.
+2. **Shard the adaLN modulation linears** (HunyuanVideo, FLUX): FLUX holds 5.45 B params per
+   rank of which 2.4 B are these replicated layers — 10.18 → ~7 GB HBM, and less per-step
+   weight traffic.
+3. **Push / merge**: the chain `tpu-teacache` → `verify/tpu-models-2026-09-11` →
+   `tpu-port-hunyuan` can go up as one PR or be split per model (the commits are already
+   grouped by model).
+4. Smaller, from the earlier sessions: online-delta without the per-full-step sync on the
+   device-resident loops (Qwen, now FLUX too); expose warmup/cooldown as serving flags;
+   fold the `*_tpu_run.py` runners into `benchmark/adapters/tpu.py`; a video-quality
+   acceptance figure for TeaCache on the video models.

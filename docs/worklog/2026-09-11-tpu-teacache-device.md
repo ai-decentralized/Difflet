@@ -187,4 +187,7 @@ then — the token arrived 04:11 — on the real weights within 20 minutes: pari
 (0.99974 vs diffusers' own bf16 @256²), bench **8.7 s to latents / 187 ms per step** (trn2:
 268 ms — the first model where the v5e is faster per step), cadence 2 skips 9/28 (DiT 0.69×,
 0.0041/px), `difflet serve` ready in 216 s and **200 in 10.1 / 9.3 s**, PNGs bit-identical to
-the bench. No device bugs. Records: `benchmark/v5e/flux_1_dev.md`, evidence doc Phase 7.
+the bench; VAE on the chip 0.31 s warm (116 s first compile). At 1024² the device is 0.99986 from
+diffusers' own bf16 while both are 0.99946 from fp32. No device bugs. Commits: `0389f74`
+(scaffold + tests), `c7b88ea` (runner, probes), `a73efb0` (row + records). Records:
+`benchmark/v5e/flux_1_dev.md`, evidence doc Phase 7, `benchmark/v5e/RESULTS.md`.
