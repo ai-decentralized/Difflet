@@ -58,19 +58,23 @@ def _shape(d) -> str:
 
 def feature_table(label: str, price: float | None, models=CAMPAIGN_MODELS) -> list[str]:
     L = [f"### Feature: {_CONFIG_TITLE.get(label, label)}", "",
-         "| model | shape / steps | compile¹ | **e2e cold**² | **e2e warm**³ | **DiT per-step**⁰ | "
-         "outputs/hr (warm)⁴ | cost / 1k⁵ | guidance | output | status |",
-         "|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|"]
+         "| model | shape / steps | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁶ | "
+         "**DiT per-step**⁰ | outputs/hr (warm)⁴ | cost / 1k⁵ | guidance | output | status |",
+         "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|"]
     for slug in models:
         name = _NAMES.get(slug, slug)
         d = _load(slug, label)
         if (slug, label) in UNSUPPORTED:
             reason = UNSUPPORTED[(slug, label)].split(" (")[0].split(":")[0]
-            L.append(f"| {name} | — | — | — | — | — | — | — | — | — | **N/A** — {reason} |")
+            L.append(f"| {name} | — | — | — | — | — | — | — | — | — | — | **N/A** — {reason} |")
             continue
         if d is None:
-            L.append(f"| {name} | — | — | — | — | — | — | — | — | — | not measured |")
+            L.append(f"| {name} | — | — | — | — | — | — | — | — | — | — | not measured |")
             continue
+        cold_load = (d.get("e2e_breakdown") or {}).get("weights_load_total_s")
+        warm_load = (d.get("e2e_warm_breakdown") or {}).get("weights_load_total_s")
+        load_s = (f"{cold_load:.0f}→{warm_load:.0f} s" if cold_load is not None and warm_load is not None
+                  else "—")
         cfg = resolve(slug, label)
         warm = (d.get("e2e_warm") or {}).get("mean")
         per_hr = 3600.0 / warm if warm else None
@@ -98,6 +102,7 @@ def feature_table(label: str, price: float | None, models=CAMPAIGN_MODELS) -> li
             _min(d.get("compile_seconds")),
             f"**{_sec(d.get('e2e_cold_seconds'))}**",
             f"**{_sec(warm)}**",
+            load_s,
             f"**{_ms(st)}**{note}",
             f"{per_hr:.0f}" if per_hr else "—",
             f"${cost:.2f}" if cost is not None else "—",
@@ -107,6 +112,50 @@ def feature_table(label: str, price: float | None, models=CAMPAIGN_MODELS) -> li
         ]
         L.append("| " + " | ".join(cells) + " |")
     L.append("")
+    return L
+
+
+def nxdi_table(price: float | None) -> list[str]:
+    """difflet vs the native NxDI FLUX baseline (benchmark/nxdi_flux_baseline.py)."""
+    p = Path(json_path("flux_1_dev_nxdi"))
+    if not p.exists():
+        return []
+    n = json.loads(p.read_text())
+    d = _load("flux_1_dev", "tp4") or {}
+    rows = [("difflet `flux_1_dev` tp4", d, "flux_1_dev.md"),
+            ("**native NxDI** `generate_flux.py` setup, tp4", n, "flux_1_dev_nxdi.md")]
+    L = ["#### FLUX.1-dev tp4: difflet vs the native NxDI baseline (same weights, 1024², 28 steps, "
+         "seed 42, guidance 3.5, bf16)", "",
+         "| engine | compile | **e2e cold** | **e2e warm** | Neuron load cold→warm | host-side load (warm) | "
+         "**DiT per-step** | outputs/hr (warm) | output |",
+         "|---|---:|---:|---:|---:|---:|---:|---:|---|"]
+    for name, r, md in rows:
+        if not r:
+            continue
+        warm = (r.get("e2e_warm") or {}).get("mean")
+        cl = (r.get("e2e_breakdown") or {}).get("weights_load_total_s")
+        wl = (r.get("e2e_warm_breakdown") or {}).get("weights_load_total_s")
+        host = (r.get("e2e_warm_breakdown") or {}).get("host_pipeline_load_s")
+        fin = (r.get("output") or {}).get("finite")
+        cells = [
+            f"[{name}]({md})", _min(r.get("compile_seconds")),
+            f"**{_sec(r.get('e2e_cold_seconds'))}**", f"**{_sec(warm)}**",
+            "—" if cl is None or wl is None else f"{cl:.0f}→{wl:.0f} s",
+            "—" if host is None else f"{host:.0f} s",
+            f"**{_ms(r.get('step_latency'))}**",
+            f"{3600 / warm:.0f}" if warm else "—",
+            "✓ finite" if fin else "?",
+        ]
+        L.append("| " + " | ".join(cells) + " |")
+    L += ["",
+          "NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in every "
+          "process (the host-side column, inside its e2e) and runs a warm-up forward per "
+          "component inside `load()`; difflet loads only the Neuron stages from presharded "
+          "per-rank checkpoints. The DiT per-step (same attention_cte lineage, same compiler "
+          "flags) is the like-for-like number; e2e differences are mostly load-path design. "
+          "Measured by `benchmark/trn2/nxdi_flux_baseline.sh` with the campaign rules "
+          "(timed compile into a fresh workdir; cold = page cache dropped; one generate per "
+          "process, no warm-up; real-loop per-step).", ""]
     return L
 
 
@@ -160,6 +209,8 @@ def render(labels: list[str], price: float | None, price_note: str) -> str:
          ""]
     for label in labels:
         L += feature_table(label, price)
+        if label == "tp4":
+            L += nxdi_table(price)
     L += speedup_table(labels)
     L += [
         "⁰ DiT per-step: mean of the inter-step deltas (n = steps − 1). ¹ compile = full `difflet "
@@ -168,7 +219,10 @@ def render(labels: list[str], price: float | None, price_note: str) -> str:
         "`sync; echo 3 > drop_caches` then one generate. ³ warm = the immediately following "
         "generate. ⁴ outputs/hr = 3600 / warm e2e (one image or one video per generate, batch 1, "
         "fresh process each — a served deployment with a resident model does better). "
-        f"⁵ cost / 1k outputs = hourly price ÷ outputs/hr × 1000; {price_note}",
+        f"⁵ cost / 1k outputs = hourly price ÷ outputs/hr × 1000; {price_note}. "
+        "⁶ Neuron weight load summed over the pipeline's stages (from the generate log), cold vs "
+        "warm — the bulk of the cold→warm gap; LTX-2's text encoder and VAE run on the host and "
+        "are not in it.",
         "",
         "N/A cells are by design (the gate is named in the cell's `.md`): guidance-distilled "
         "models (FLUX, Qwen-Image, HunyuanVideo) have no second CFG branch to parallelise; LTX-2 "
