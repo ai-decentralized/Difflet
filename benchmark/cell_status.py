@@ -35,6 +35,11 @@ def missing(slug: str, config: str) -> list[str]:
     if not jp.exists():
         return ["result file"]
     d = json.loads(jp.read_text())
+    if "config" not in d:
+        # A pre-campaign file (the historical tp4 <slug>.json has no `config`
+        # field) is history, not a measurement of this campaign: bench
+        # --compile-only rewrites it wholesale and the later steps patch that.
+        return ["result file (pre-campaign history, not this run)"]
     if d.get("status") == "skipped":
         return []
     out: list[str] = []
