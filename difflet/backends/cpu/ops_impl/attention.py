@@ -105,7 +105,8 @@ def ulysses_attention(q, k, v, *, scale: float, causal: bool = False):
 
 
 def joint_ulysses_attention(
-    q_img, q_txt, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False
+    q_img, q_txt, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False,
+    key_valid_len=None,
 ):
     # cp_degree == 1 reference: the all-to-alls degenerate to identity, so this is
     # plain full joint attention over the concatenated [image, text] keys. The two
@@ -115,11 +116,17 @@ def joint_ulysses_attention(
     full_v = torch.cat([image_v, text_v], dim=2)
     b, h, s_q, d = full_q.shape
     s_k = full_k.shape[2]
+    bounds = {}
+    if key_valid_len is not None:
+        # Same contract as the device path: keys [0, count) valid for every query.
+        count = key_valid_len.to(torch.int32).reshape(b, 1, 1, 1)
+        bound_max = count.expand(b, h, s_q, 1).reshape(b * h, s_q, 1).contiguous()
+        bounds = {"bound_min": torch.zeros_like(bound_max), "bound_max": bound_max}
     out = attention(
         full_q.reshape(b * h, s_q, d),
         full_k.reshape(b * h, s_k, d),
         full_v.reshape(b * h, s_k, d),
-        scale=scale, causal=causal, tp_q=True, tp_k=True, tp_out=False,
+        scale=scale, causal=causal, tp_q=True, tp_k=True, tp_out=False, **bounds,
     )
     out = out.reshape(b, h, s_q, d)
     s_img = q_img.shape[2]
