@@ -9,7 +9,7 @@ Measured on a Cloud TPU VM: `v5litepod-4`, 4 × v5e chips, 2x2 topology,
 |---|---|---|---|
 | [Qwen-Image](qwen_image.md) | 1024x1024, 20 steps, tp=4 | `benchmark/adapters/tpu.py` | 9.62 GB per chip |
 | [Wan 2.2 A14B](wan_2_2.md) | 480x832x9, 20 steps, tp=4, **single expert** | standalone runner (the TPU adapter is Qwen-specific) | 7.5-8.1 GB per chip |
-| Wan 2.1 14B | 480x832x9, 20 steps, tp=4 | `benchmark/wan_tpu_run.py --model-dir <2.1 snapshot>` | see the cross-device table |
+| Wan 2.1 14B | 480x832x9, 20 steps, tp=4 | `benchmark/wan_tpu_run.py --model-dir <2.1 snapshot>` | 6.99 GB per chip (single transformer) |
 | [HunyuanVideo](hunyuan_video.md) | 320x512x61, 20 steps, tp=4 | `benchmark/hunyuan_tpu_run.py` | 10.84 GB per chip |
 | [LTX-2](ltx_2.md) | 480x704x49, 20 steps, tp=4 | `benchmark/ltx2_tpu_run.py` | 9.3 GB per chip (+2.4 GB video VAE on rank 0) |
 
@@ -124,7 +124,7 @@ Device-synced inter-step deltas of a real generate loop, step 0 excluded
 | H100 PCIe | 297.7 ms | 553.7 ms | — | — | — |
 | trn3 (4 cores) | 324.1 ms | — | — | — | — |
 | trn2 (4 cores) | 447.1 ms | 554.8 ms | 554.8 ms | 850.6 ms | 441.8 ms |
-| **v5e x4** | **508.4 ms** | **608.5 ms** | (running) | **1006 ms** | **1453 ms** |
+| **v5e x4** | **508.4 ms** | **608.5 ms** | **608 ms** | **1006 ms** | **1453 ms** |
 
 ### v5e vs trn2, whole request (same MATRIX rows, 2026-09-11/12)
 
@@ -132,7 +132,7 @@ Device-synced inter-step deltas of a real generate loop, step 0 excluded
 |---|---|---|---|---|
 | Qwen-Image 1024², 20 st | 63 s | 10.1 s (natural 5.7 s) | 7.6 s (cadence 2) | encode 2 s, denoise, decode 1.2 s |
 | Wan 2.2 480×832×9, 20 st | 57 s | 12.2 s | 30.4 s | **24 s host VAE decode** |
-| Wan 2.1 480×832×9, 20 st | 56 s | (running) | 33.5 s | host VAE decode |
+| Wan 2.1 480×832×9, 20 st | 56 s | 12.2 s | 33.5 s | **24 s host VAE decode** |
 | HunyuanVideo 320×512×61, 20 st | 144 s | 20.1 s | 191 s | **165 s host VAE decode** |
 | LTX-2 480×704×49, 20 st | 58 s | 29 s (+20 s Gemma-3 fp32 encode) | 51 s | decode 0.2 s on chip; the encode |
 
