@@ -143,6 +143,17 @@ class ServeOptions:
 # _validate_profile reject the modes on Trainium, where the Neuron
 # denoisers do not wire them).
 _PROBE_FREE_TEACACHE_SERVING_MODELS = frozenset({"qwen_image", "wan", "hunyuan_video", "ltx_2"})
+# Flux's Trainium serving pipeline is the legacy NxDI fork with adaptive TeaCache
+# only; the probe-free controller exists in its TPU application alone.
+_PROBE_FREE_TEACACHE_TPU_ONLY_MODELS = frozenset({"flux"})
+
+
+def _probe_free_teacache_models() -> frozenset[str]:
+    from difflet.backends.registry import current_backend
+
+    if current_backend() == "tpu":
+        return _PROBE_FREE_TEACACHE_SERVING_MODELS | _PROBE_FREE_TEACACHE_TPU_ONLY_MODELS
+    return _PROBE_FREE_TEACACHE_SERVING_MODELS
 
 # (model_type, output_modality) pairs whose serving adapters route a compiled
 # shape SET on one resident worker. HunyuanVideo 1.5 and LTX-2 are excluded:
@@ -354,8 +365,9 @@ def _validate_probe_free_teacache(
         raise invalid_extra_body(f"{active[0]} and {active[1]} are mutually exclusive.")
     if teacache_cadence is None and teacache_online_delta is None:
         return
-    if model_type not in _PROBE_FREE_TEACACHE_SERVING_MODELS:
-        supported = ", ".join(sorted(_PROBE_FREE_TEACACHE_SERVING_MODELS))
+    supported_models = _probe_free_teacache_models()
+    if model_type not in supported_models:
+        supported = ", ".join(sorted(supported_models))
         raise invalid_extra_body(
             "--teacache-cadence / --teacache-online-delta are implemented for "
             f"{supported} serving only (got model type {model_type!r}); use adaptive "

@@ -842,8 +842,9 @@ def _validate_backend_has_cli_runtime(args: argparse.Namespace, parser: argparse
     parser.error(
         f"'difflet {args.command}' is not available on the {backend!r} backend "
         "(no CLI compile/generate runtime; only Trainium has one). On TPU use "
-        "'difflet serve' (Qwen-Image, Wan) or the benchmark runners "
-        "(python -m benchmark.bench --backend tpu, benchmark/wan_tpu_run.py). "
+        "'difflet serve' (Qwen-Image, Wan, HunyuanVideo, LTX-2, FLUX) or the "
+        "benchmark runners (python -m benchmark.bench --backend tpu, "
+        "benchmark/{wan,hunyuan,ltx2,flux}_tpu_run.py). "
         "Set DIFFLET_BACKEND=trainium on a Trainium host."
     )
 

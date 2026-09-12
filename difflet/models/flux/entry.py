@@ -16,9 +16,17 @@ def create_flux_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
+    if backend == "tpu":
+        if parallel.cp_degree > 1:
+            raise NotImplementedError("Flux on TPU runs with tp only (no CP yet)")
+        from difflet.models.flux.tpu_application import TpuFluxApplication
+
+        return TpuFluxApplication(
+            model_path=model_path, parallel=parallel, dtype=dtype, shape=shape, **kwargs
+        )
     if backend != "trainium":
         raise NotImplementedError(
-            f"Flux currently supports only the trainium backend, got {backend!r}"
+            f"Flux supports the trainium and tpu backends, got {backend!r}"
         )
 
     from difflet.models.flux.application import (

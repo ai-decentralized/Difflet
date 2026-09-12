@@ -252,6 +252,9 @@ def _register_builtin_flux() -> None:
             supports_cp=True,
             supports_sp=True,
         ),
+        # TPU: option (b) of the 2026-09-11 port plan -- diffusers' transformer
+        # TP-sharded per rank (models/flux/tp_sharding.py), tp only.
+        backends=("trainium", "tpu"),
     )
     class _FluxRegistration:
         pass
