@@ -40,7 +40,8 @@ def _make_adapter(name: str):
 
 
 def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
-            iters: int, natural_iters: int = 2, config: str = "tp4") -> BenchResult:
+            iters: int, natural_iters: int = 2, config: str = "tp4",
+            compile_only: bool = False) -> BenchResult:
     cfg = resolve(slug, config)
     adapter = _make_adapter(backend)
     res = BenchResult(
@@ -77,6 +78,14 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
             adapter.prepare(cfg)
         if not skip_compile:
             res.compile_seconds, res.compile_breakdown = adapter.compile(cfg)
+        if compile_only:
+            # The Trainium campaign measures e2e with benchmark.cold_warm_e2e
+            # (true cold start) and per-step with benchmark.step_realloop; the
+            # untimed generate here would only add 5-13 min per cell.
+            res.status = "compiled"
+            res.notes.append("compile-only run: e2e/per-step come from "
+                             "cold_warm_e2e / step_realloop")
+            return res
         # cold generate
         g = adapter.run_generate(cfg)
         res.e2e_cold_seconds = g.get("wall_seconds")
@@ -174,6 +183,9 @@ def main() -> int:
     p.add_argument("--skip-download", action="store_true")
     p.add_argument("--skip-compile", action="store_true",
                    help="reuse an existing compile cache")
+    p.add_argument("--compile-only", action="store_true",
+                   help="download+compile and record compile_seconds only; no generate "
+                        "(pair with cold_warm_e2e / step_realloop)")
     p.add_argument("--natural-iters", type=int, default=2,
                    help="extra warm iterations run WITHOUT the per-step device "
                         "sync, reported as the natural basis (0 disables). Only "
@@ -197,7 +209,8 @@ def main() -> int:
               f"[{args.config}] ==========", flush=True)
         res = run_one(slug, args.backend, skip_download=args.skip_download,
                       skip_compile=args.skip_compile, iters=args.iters,
-                      natural_iters=args.natural_iters, config=args.config)
+                      natural_iters=args.natural_iters, config=args.config,
+                      compile_only=args.compile_only)
         write_outputs(slug, res, args.config)
     return 0
 
