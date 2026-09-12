@@ -18,19 +18,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 from benchmark import report
 from benchmark.adapters.trainium import TrainiumAdapter
-from benchmark.harness import Stats
+from benchmark.harness import Stats, drop_page_cache
 from benchmark.models import MATRIX
 
 
 def drop_caches() -> bool:
-    r = subprocess.run(["sudo", "-n", "sh", "-c", "sync; echo 3 > /proc/sys/vm/drop_caches"])
-    return r.returncode == 0
+    return drop_page_cache()
 
 
 def _patch(slug: str, note: str | None = None, **kv) -> dict:

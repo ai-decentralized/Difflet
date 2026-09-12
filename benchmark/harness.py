@@ -172,6 +172,7 @@ class BenchResult:
     e2e_cold_seconds: Optional[float] = None
     e2e_breakdown: Optional[dict] = None     # per-stage load/compute split of cold e2e
     e2e_warm: Optional[dict] = None          # Stats as dict
+    e2e_warm_breakdown: Optional[dict] = None  # the e2e_breakdown of the last warm run
     step_latency: Optional[dict] = None      # Stats as dict (per denoise step)
     step_basis: str = ""                     # how step_latency was measured
     step_latency_alt: dict[str, Any] = field(default_factory=dict)
@@ -186,6 +187,15 @@ class BenchResult:
     # execution. Only populated by adapters advertising supports_natural_mode.
     e2e_warm_natural: Optional[dict] = None
     step_latency_natural: Optional[dict] = None
+    # The request-only figure on a process that already holds the weights --
+    # what a served request costs. ``e2e_warm`` is a fresh process on every
+    # backend (trn2's CLI reloads weights each time; the TPU adapter restarts
+    # its workers to match), so this is the other basis, reported alongside.
+    # Its trn2 counterpart is e2e_warm_breakdown.compute_and_overhead_s.
+    e2e_warm_resident: Optional[dict] = None
+    # How the run was conducted: page cache dropped before the cold run,
+    # discarded warm-up runs, iteration counts per basis.
+    protocol: dict[str, Any] = field(default_factory=dict)
     throughput: dict[str, float] = field(default_factory=dict)
     peak_device_mem_gb: Optional[float] = None
     output: Optional[dict] = None            # OutputInfo as dict
@@ -211,6 +221,11 @@ class BackendAdapter:
     #: lot -- so implementing it everywhere is what would make the real-loop
     #: numbers comparable across devices too.
     supports_natural_mode: bool = False
+    #: Set True when the adapter keeps the loaded model resident after
+    #: ``run_generate`` and serves further requests on it via ``run_request``.
+    #: ``run_generate`` itself is "fresh process -> one output" on every
+    #: backend; that is what keeps e2e cold/warm comparable across devices.
+    supports_resident_mode: bool = False
 
     """Contract every backend implements. The harness only ever calls these.
 
@@ -236,7 +251,40 @@ class BackendAdapter:
         raise NotImplementedError
 
     def run_generate(self, spec) -> dict:
-        """Run one full end-to-end generate. Return a dict with at least
-        ``wall_seconds`` and optionally ``load_seconds``, ``step_seconds`` (list),
+        """Run one full end-to-end generate in a FRESH process (weights loaded
+        again). Return a dict with at least ``wall_seconds`` and optionally
+        ``load_seconds``, ``e2e_breakdown``, ``step_seconds`` (list),
         ``peak_mem_gb``, ``output`` (OutputInfo dict), and ``log`` (path)."""
         raise NotImplementedError
+
+    def run_request(self, spec, sync_steps: bool = True) -> dict:
+        """One more request on the process ``run_generate`` left resident
+        (``supports_resident_mode`` only). Same result shape as ``run_generate``
+        minus the load."""
+        raise NotImplementedError
+
+    def tag(self, name: str) -> None:
+        """Label the next run; adapters that save per-run media use it."""
+
+    def shutdown(self) -> None:
+        """Release resident processes / devices. No-op by default."""
+
+
+def drop_page_cache() -> bool:
+    """``sync; echo 3 > /proc/sys/vm/drop_caches`` through passwordless sudo.
+
+    The trn2 protocol (``benchmark/cold_warm_e2e.py``): the cold run's weight
+    load has to be a real disk read, otherwise "cold" means whatever the page
+    cache happened to hold. Returns False when sudo is unavailable, and the
+    caller records that in the result instead of pretending.
+    """
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["sudo", "-n", "sh", "-c", "sync; echo 3 > /proc/sys/vm/drop_caches"],
+            capture_output=True, timeout=900,
+        )
+    except Exception:  # noqa: BLE001 - no sudo, no sh, timeout: all "not dropped"
+        return False
+    return proc.returncode == 0

@@ -88,9 +88,19 @@ def render(r: dict) -> str:
         a(f"| **e2e generate — warm cache** | **{_fmt_s(r['e2e_warm']['mean'])}** |")
         if warm_load is not None:
             a(f"| &nbsp;&nbsp;↳ of which weights load (from page cache) | {_fmt_s(warm_load)} |")
+    if r.get("e2e_warm_resident"):
+        a(f"| **request on the resident process** (weights already on the device, "
+          f"n={r['e2e_warm_resident']['n']}) | **{_fmt_s(r['e2e_warm_resident']['mean'])}** |")
     if r.get("peak_device_mem_gb") is not None:
         a(f"| peak device memory | {r['peak_device_mem_gb']:.1f} GB |")
     a("")
+    if r.get("e2e_warm_resident") and r.get("e2e_warm"):
+        a("> e2e cold and warm are **fresh processes** (weights reloaded, XLA compiled "
+          "again where the backend is eager), the same definition as every other device "
+          "folder. The resident-process row is the same request with the model already "
+          "loaded: what a served request costs. Its trn2 counterpart is warm e2e minus "
+          "the warm load (`compute + overhead` in the breakdown).")
+        a("")
     if r.get("e2e_cold_seconds") and r.get("e2e_warm"):
         cold, warm = r["e2e_cold_seconds"], r["e2e_warm"]["mean"]
         a(f"> Cold vs warm: **{_fmt_s(cold)} → {_fmt_s(warm)}** "
@@ -106,7 +116,9 @@ def render(r: dict) -> str:
     a("|---|---|---|---|---|---|")
     a(_stats_row("per denoise step (transformer fwd)", r.get("step_latency")))
     if r.get("e2e_warm"):
-        a(_stats_row("end-to-end (warm)", r.get("e2e_warm")))
+        a(_stats_row("end-to-end (warm, fresh process)", r.get("e2e_warm")))
+    if r.get("e2e_warm_resident"):
+        a(_stats_row("request (resident process)", r.get("e2e_warm_resident")))
     a("")
     if r.get("throughput"):
         a("**Throughput:** " + ", ".join(f"{v:.3f} {k}" for k, v in r["throughput"].items()))
@@ -149,6 +161,23 @@ def render(r: dict) -> str:
             a(_stats_row("per denoise step (natural)", nat))
         if nat_e2e:
             a(_stats_row("end-to-end warm (natural)", nat_e2e))
+        a("")
+
+    proto = r.get("protocol") or {}
+    if proto:
+        a("## Protocol")
+        a("")
+        a("| step | value |")
+        a("|---|---|")
+        dropped = proto.get("page_cache_dropped")
+        a(f"| page cache dropped before the cold run | "
+          f"{'yes' if dropped else ('no (sudo failed)' if proto.get('drop_page_cache_before_cold') else 'no (not requested)')} |")
+        a(f"| warm runs discarded (cache warming) | {proto.get('warm_discarded_runs', 0)} |")
+        a(f"| warm runs reported (fresh process each) | {proto.get('warm_iters', 0)} |")
+        if proto.get("resident_iters"):
+            a(f"| resident requests (synced per-step) | {proto['resident_iters']} |")
+        if proto.get("natural_iters"):
+            a(f"| resident requests, natural (no per-step sync) | {proto['natural_iters']} |")
         a("")
 
     st = r.get("stage_seconds") or {}
@@ -209,9 +238,13 @@ def render(r: dict) -> str:
     if eb and eb.get("stages"):
         a("## End-to-end breakdown (cold generate)")
         a("")
-        a("difflet runs the pipeline stages sequentially in one process, each "
-          "(re)loading its component to device. e2e cold is **load-dominated**, "
-          "not compute-bound.")
+        if r.get("backend") == "tpu":
+            a("One worker process per chip; every stage below is loaded once per "
+              "process. e2e cold is **load-dominated**, not compute-bound.")
+        else:
+            a("difflet runs the pipeline stages sequentially in one process, each "
+              "(re)loading its component to device. e2e cold is **load-dominated**, "
+              "not compute-bound.")
         a("")
         a("| stage | weight shard | weight load |")
         a("|---|---:|---:|")
@@ -227,6 +260,21 @@ def render(r: dict) -> str:
           "= text-encode + denoise loop + VAE decode + process/runtime startup")
         if eb.get("note"):
             a(f"- {eb['note']}")
+        a("")
+
+    wb = r.get("e2e_warm_breakdown")
+    if wb and wb.get("stages") and r.get("e2e_warm"):
+        a("## End-to-end breakdown (warm generate, fresh process)")
+        a("")
+        a("| stage | weight load |")
+        a("|---|---:|")
+        for st in wb["stages"]:
+            a(f"| {st['stage']} | {_fmt_s(st.get('load_s'))} |")
+        a(f"| **weights load total** | **{_fmt_s(wb.get('weights_load_total_s'))}** |")
+        a("")
+        a(f"- **weights load total:** {_fmt_s(wb.get('weights_load_total_s'))} "
+          f"of {_fmt_s(wb.get('wall_total_s'))} wall")
+        a(f"- **compute + overhead (residual):** {_fmt_s(wb.get('compute_and_overhead_s'))}")
         a("")
 
     # output validity
@@ -306,6 +354,37 @@ def render(r: dict) -> str:
           "below are the *intended* recipe, not a reproduced run.")
         a("")
     extra = _extra_axis_flags(par)
+    if r.get("backend") == "tpu":
+        a("```bash")
+        a("# Cloud TPU (eager XLA, one worker per chip). The same MATRIX row through the")
+        a("# same harness; the adapter restarts its workers per run to match trn2's")
+        a("# fresh-process cold/warm definition, then measures resident requests.")
+        a(f"DIFFLET_BENCH_DEVICE={r.get('device_slug','v5e')} DIFFLET_BACKEND=tpu HF_HOME=/mnt/models/hf \\")
+        a(f"    python -m benchmark.bench --backend tpu --model {slug} --skip-download \\")
+        a("        --iters 3 --warm-discard 1 --resident-iters 2 --natural-iters 2 \\")
+        a(f"        --save-dir artifacts/benchmark-{r.get('device_slug','v5e')}")
+        a("")
+        a("# the same request through serving:")
+        a(f"DIFFLET_BACKEND=tpu difflet serve --model-id {r.get('model_id','<id>')}{rev} \\")
+        a(f"    --tp-degree {par.get('tp_degree',4)} --cp-degree {par.get('cp_degree',1)} {shp}")
+        a("```")
+        a("")
+        a("**Measurement protocol** (identical to the trn2 folder, see there):")
+        a("- **compile**: none ahead of time. XLA compiles on each process's first execution; "
+          "that lands in the load stages (where the model's `load_eager` warms up) or in the "
+          "first request, and is paid again by every fresh process.")
+        a("- **e2e cold**: OS page cache dropped (`sync; echo 3 > /proc/sys/vm/drop_caches`), "
+          "then one fresh set of worker processes -> a decoded output.")
+        a("- **e2e warm**: fresh worker processes again, weights served from the page cache; "
+          "runs after the discarded cache-warming run(s).")
+        a("- **resident request**: one more request on the workers left running -- the "
+          "served-request cost.")
+        a("- **DiT per-step**: device-synced inter-step deltas of the real generate loop, "
+          "step 0 excluded (`benchmark/harness.py::RealLoopStepTimer`), from the resident "
+          "synced requests.")
+        a("- device otherwise **idle**; one model at a time.")
+        a("")
+        return "\n".join(L)
     a("```bash")
     a("# difflet (Neuron / trn2) — compile is one-time and cached (reused, never recompiled):")
     a(f"difflet compile  --model-id {r.get('model_id','<id>')}{rev} \\")
