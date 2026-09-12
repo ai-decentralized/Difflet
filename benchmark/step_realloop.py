@@ -272,6 +272,11 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True, choices=sorted(_BUILDERS))
     add_config_arg(p)
+    p.add_argument("--generates", type=int, default=1,
+                   help="run N generates back to back with the model resident; per-step "
+                        "comes from the LAST one and every generate's wall is recorded as "
+                        "resident_generate_s (the serving steady state, no reload). Default 1 "
+                        "= the campaign rule (first generate of a fresh process).")
     args = p.parse_args()
     cfg = resolve(args.model, args.config)
     # --attention-impl is carried by the DIFFLET_ATTENTION_IMPL env var (the CLI
@@ -297,10 +302,17 @@ def _main(args, cfg) -> int:
 
     stamps: list[float] = []
     restore = _install_timer(cls, method, stamps)
+    resident: list[float] = []   # wall of each generate with the model resident
     try:
-        t1 = time.perf_counter()
-        result = run()
-        gen_s = time.perf_counter() - t1
+        for i in range(max(1, args.generates)):
+            stamps.clear()
+            t1 = time.perf_counter()
+            result = run()
+            gen_s = time.perf_counter() - t1
+            resident.append(gen_s)
+            if args.generates > 1:
+                print(f"[realloop] {slug}: generate {i + 1}/{args.generates} "
+                      f"{gen_s:.1f}s (model resident)", flush=True)
     finally:
         restore()
 
@@ -330,6 +342,14 @@ def _main(args, cfg) -> int:
     d["config_slug"] = slug
     d["model_slug"] = args.model
     d["config"] = cfg.config
+    if args.generates > 1:
+        # steady state with the model resident (no process start, no reload)
+        d["resident_generate_s"] = [round(x, 3) for x in resident]
+        d["notes"] = [n for n in d.get("notes", []) if not n.startswith("resident generate")]
+        d["notes"].append(
+            f"resident generate = {resident[-1]:.1f} s (generate {len(resident)} of "
+            f"{len(resident)} in one process, model loaded once; walls {[round(x, 1) for x in resident]}) "
+            "-- the serving steady state; per-step above is from the last generate.")
     # drop the prior (inconsistent-method) per-step note, append the H100-consistent one
     notes = [n for n in d.get("notes", []) if not n.lstrip().startswith("per-step =")]
     notes.insert(0,

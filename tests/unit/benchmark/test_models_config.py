@@ -31,8 +31,19 @@ def test_attention_impl_config():
     assert "attention_impl" not in base.parallel_dict()
 
 
+def test_cfg_baseline_config():
+    cfg = resolve("wan_2_1", "tp4cfg2")
+    assert cfg.tp == 4 and not cfg.cfg_parallel and cfg.guidance_scale == 2.0
+    assert cfg.parallel_flags() == ["--tp-degree", "4", "--cp-degree", "1"]
+    assert cfg.config_slug == "wan_2_1_tp4cfg2"
+    for m in ("flux_1_dev", "qwen_image", "hunyuan_video"):
+        assert (m, "tp4cfg2") in UNSUPPORTED
+    for m in ("wan_2_1", "ltx_2"):
+        assert (m, "tp4cfg2") not in UNSUPPORTED
+
+
 def test_configs_are_the_verify_cli_labels_sized_to_four_cores():
-    assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa"}
+    assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4cfg2"}
     for label in CONFIGS:
         cfg = resolve("flux_1_dev", label)
         world = cfg.tp * cfg.cp * (2 if cfg.cfg_parallel else 1)
@@ -78,7 +89,8 @@ def test_resolve_rejects_unknown():
 
 
 def test_unsupported_cells_are_exactly_the_documented_five_for_the_campaign():
-    cells = {(m, c) for m in CAMPAIGN for c in CONFIGS if (m, c) in UNSUPPORTED}
+    topologies = ["tp4", "tp2cp2", "tp4sp", "tp2cfg"]
+    cells = {(m, c) for m in CAMPAIGN for c in topologies if (m, c) in UNSUPPORTED}
     assert cells == {
         ("flux_1_dev", "tp2cfg"), ("qwen_image", "tp2cfg"), ("hunyuan_video", "tp2cfg"),
         ("ltx_2", "tp2cp2"), ("ltx_2", "tp4sp"),

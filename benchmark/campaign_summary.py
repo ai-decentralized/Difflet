@@ -30,6 +30,7 @@ _CONFIG_TITLE = {
     "tp4sp": "tp4sp — tp=4 + Megatron sequence parallel (`--sp`)",
     "tp2cfg": "tp2cfg — tp=2 × CFG-parallel (uncond/cond branches on separate core pairs, guidance 2.0)",
     "tp4sdpa": "tp4sdpa — tp=4 with `--attention-impl sdpa` (PyTorch SDPA through XLA instead of the attention_cte megakernel routing)",
+    "tp4cfg2": "tp4cfg2 — tp=4 at guidance 2.0 (two sequential CFG branches: the same-work baseline for tp2cfg)",
 }
 _BEGIN, _END = "<!-- campaign:begin -->", "<!-- campaign:end -->"
 
@@ -249,7 +250,7 @@ def main() -> int:
                    help="provenance of the price (region, date, source)")
     p.add_argument("--write", default=None, help="RESULTS.md to update in place")
     a = p.parse_args()
-    labels = [l for l in ["tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa"] if l in a.labels]
+    labels = [l for l in ["tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4cfg2", "tp4sdpa"] if l in a.labels]
     md = render(labels, a.price_per_hour, a.price_note)
     if not a.write:
         print(md)
