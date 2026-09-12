@@ -163,3 +163,17 @@ Artifacts: `/mnt/models/teacache_runs/` (logs, PNGs, mp4/npy, JSON), `benchmark/
 | 4 | `benchmark/adapters/tpu.py` | parent sits silent for 3600 s after all workers have crashed (seen with bug 1 — had to be killed by hand) | `reply_q.get(timeout=3600)` never checks `Process.is_alive()` | `f3e2021` — `_wait_reply` polls in 5 s slices and raises with the dead ranks' exit codes |
 
 **Hang-proofing for the rest of this session** (the "no response" problem): every run is launched with `nohup … &` and waited on with a `kill -0` loop plus a hard timeout; if a run stops producing log lines, check `ps` for dead workers and kill the parent instead of waiting. `wan_tpu_run.py` already breaks out of its wait when no rank is alive (worst case 60 s); the Qwen adapter now does the same (bug 4).
+
+
+## Addendum (same day) — HunyuanVideo, after its TPU port
+
+`benchmark/hunyuan_tpu_run.py --steps 20 --iters 2 --natural-iters 1 [--teacache-cadence 2]`, 320×512×61, tp=4:
+
+| mode | denoise (s) | per full step (ms) | skipped / full | quality vs baseline |
+|---|---|---|---|---|
+| baseline | 20.12 / 20.14 / 20.11 (natural) | 1006 | 0 / 20 | — |
+| cadence 2 | **15.07 / 15.08 / 15.19** (0.749×) | 1004 | 5 / 15 | mean abs 0.0064/px, PSNR 36.9 dB (61 frames) |
+
+Same 0.75× as Qwen-Image and Wan; no natural-basis penalty (the orchestrator's Euler step is
+host-side, so every step syncs regardless). Online-delta not measured on Hunyuan. Host VAE decode
+(167 s) dominates the request either way.

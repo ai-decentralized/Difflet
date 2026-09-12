@@ -1,6 +1,6 @@
 # Porting HunyuanVideo, LTX-2 and FLUX to the TPU backend
 
-Date: 2026-09-11 · Status: **plan, not started** · Branch to be: `tpu-port-<model>` per model
+Date: 2026-09-11 · Status: **HunyuanVideo ported and serving on the v5e (branch `tpu-port-hunyuan`); LTX-2 and FLUX not started** · Branch: `tpu-port-<model>` per model
 
 Context: the model-support campaign of 2026-09-11
 (`docs/verification/tpu-model-support-2026-09-11-evidence.md`) confirmed that only Qwen-Image
@@ -148,3 +148,23 @@ gated-repo 401).
 
 Sequential on one v5e host; each port ends with a `benchmark/v5e/<model>.md` and a
 `difflet-device-verify`-style evidence doc.
+
+
+## Status log
+
+### 2026-09-11 — HunyuanVideo: ported, parity-verified, serving on the v5e
+
+Branch `tpu-port-hunyuan` (on `verify/tpu-models-2026-09-11`). Commits: `c7b9d09` (TPU
+RowParallelLinear ignored `reduce_output`/`skip_bias_add` — the one real backend bug, found by
+the oracle: cosine 0.909 → 0.9995), `bd957f6` (CheckpointSlice windows; fused attention for
+key-window bounds), `299a6ec` (test isolation), `13cedbc` (the port), two serving fixes found
+by the startup smoke (missing `await`; non-primary replicas validating a file they never wrote).
+
+Measured (320×512×61, tp=4, bf16): oracle cos 0.99949 vs diffusers fp32 (control 0.99946);
+HBM 10.84 GB resident / 12.5 GB peak; 1.0 s/step fused; first compile 100 s alone, 174 s with
+the 2-slot gate under serving; host peak 118 GB with the gate (174 GB without); `difflet serve`
+ready in 372 s; 20-step request 200 in 191 s (host Llama fp32 + host 61-frame VAE decode
+dominate — see the benchmark row in the evidence doc). Video coherent.
+
+Follow-ups: shard the 3.5 B replicated adaLN linears (per-rank 5.8 B → ~3 B params) before
+trying larger shapes; VAE decode on chip; Llama bf16-vs-fp32 host trade-off.

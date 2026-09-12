@@ -1,0 +1,247 @@
+world=4 args={'model_dir': '/mnt/models/hf/hub/models--hunyuanvideo-community--HunyuanVideo/snapshots/e8c2aaa66fe3742a32c11a6766aecbf07c56e773', 'height': 320, 'width': 512, 'num_frames': 61, 'steps': 20, 'guidance': 6.0, 'seed': 42, 'iters': 2, 'natural_iters': 1, 'decode': True, 'teacache_cadence': None, 'teacache_online_delta': None, 'out': '/mnt/models/teacache_runs/hunyuan_baseline'}
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+[rank1] config seq_len=10240 latent=16x40x64
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank0] config seq_len=10240 latent=16x40x64
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank2] config seq_len=10240 latent=16x40x64
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank3] config seq_len=10240 latent=16x40x64
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[hunyuan_video] tpu warmup (first compile) in 173.9s
+[hunyuan_video] tpu warmup (first compile) in 174.1s
+[hunyuan_video] tpu warmup (first compile) in 174.1s
+[hunyuan_video] tpu warmup (first compile) in 174.1s
+[rank2] DiT resident in 179.8s mem={'bytes_used': 12.503, 'bytes_limit': 15.748, 'peak_bytes_used': 12.526}
+[rank3] DiT resident in 179.8s mem={'bytes_used': 12.503, 'bytes_limit': 15.748, 'peak_bytes_used': 12.526}
+[rank1] DiT resident in 179.9s mem={'bytes_used': 12.503, 'bytes_limit': 15.748, 'peak_bytes_used': 12.526}
+[rank0] DiT resident in 179.9s mem={'bytes_used': 12.503, 'bytes_limit': 15.748, 'peak_bytes_used': 12.526}
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights: 100%|██████████| 196/196 [00:00<00:00, 6827.99it/s]
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s][rank2] host encoders in 1.0s (ordinal 3; llama skipped, not ordinal 0)
+Loading weights: 100%|██████████| 196/196 [00:00<00:00, 7382.88it/s]
+[rank3] host encoders in 1.0s (ordinal 1; llama skipped, not ordinal 0)
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights: 100%|██████████| 196/196 [00:00<00:00, 6097.82it/s]
+[rank0] host encoders in 1.1s (ordinal 2; llama skipped, not ordinal 0)
+Loading weights:  20%|█▉        | 57/290 [00:01<00:04, 47.85it/s]Loading weights:  32%|███▏      | 93/290 [00:01<00:02, 79.88it/s]Loading weights:  44%|████▍     | 129/290 [00:01<00:01, 113.87it/s]Loading weights:  57%|█████▋    | 165/290 [00:01<00:00, 147.40it/s]Loading weights:  69%|██████▉   | 201/290 [00:01<00:00, 179.51it/s]Loading weights:  82%|████████▏ | 237/290 [00:01<00:00, 206.76it/s]Loading weights:  94%|█████████▍| 273/290 [00:01<00:00, 232.44it/s]Loading weights: 100%|██████████| 290/290 [00:01<00:00, 150.37it/s]
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights: 100%|██████████| 196/196 [00:00<00:00, 4786.71it/s]
+[rank1] host encoders in 3.3s (ordinal 0; llama loaded)
+[rank1] iter0 [synced] denoise=20.12s encode=4.14s steps=19 mean_step=1.006s throughput_step=1.006s
+[rank2] iter0 [synced] denoise=20.12s encode=6.46s steps=19 mean_step=1.006s throughput_step=1.006s
+[rank0] iter0 [synced] denoise=20.12s encode=6.31s steps=19 mean_step=1.006s throughput_step=1.006s
+[rank3] iter0 [synced] denoise=20.14s encode=6.41s steps=19 mean_step=1.006s throughput_step=1.007s
+{
+  "type": "result",
+  "iteration": 0,
+  "basis": "synced",
+  "throughput_step_seconds": 1.0062440402999528,
+  "wall_seconds": 20.124880805999055,
+  "encode_seconds": 6.31239790699874,
+  "load_seconds": 179.92764471999908,
+  "step_seconds": [
+    1.00938141000006,
+    0.99936180000077,
+    1.0017337810004392,
+    1.0033728899998096,
+    1.0041311610002595,
+    1.0028060999993613,
+    1.0046330799996213,
+    1.0039574109996465,
+    1.0072465600005671,
+    1.005245880000075,
+    1.011923250000109,
+    1.0080956609999703,
+    1.0055762800002412,
+    1.0030071000001044,
+    1.021924761000264,
+    1.0038671999991493,
+    1.0005268000004435,
+    1.003646099999969,
+    1.0089853310000763
+  ],
+  "mem_before": {
+    "bytes_used": 0.0,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 0.0
+  },
+  "mem_after_load": {
+    "bytes_used": 12.503,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 12.526
+  },
+  "mem_after_run": {
+    "bytes_used": 12.504,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 12.526
+  },
+  "latent_shape": [
+    1,
+    16,
+    16,
+    40,
+    64
+  ],
+  "finite": true,
+  "min": -3.296875,
+  "max": 2.71875,
+  "mean": -0.0712890625,
+  "std": 0.97265625,
+  "teacache": null
+}
+[rank2] iter1 [synced] denoise=20.14s encode=4.36s steps=19 mean_step=1.007s throughput_step=1.007s
+[rank1] iter1 [synced] denoise=20.17s encode=4.33s steps=19 mean_step=1.007s throughput_step=1.008s
+[rank3] iter1 [synced] denoise=20.14s encode=4.36s steps=19 mean_step=1.007s throughput_step=1.007s
+[rank0] iter1 [synced] denoise=20.14s encode=4.36s steps=19 mean_step=1.006s throughput_step=1.007s
+{
+  "type": "result",
+  "iteration": 1,
+  "basis": "synced",
+  "throughput_step_seconds": 1.006951581300018,
+  "wall_seconds": 20.13903162600036,
+  "encode_seconds": 4.361766643998635,
+  "load_seconds": 179.92764471999908,
+  "step_seconds": [
+    1.0023509810016549,
+    1.0061508899998444,
+    1.0064754399991216,
+    1.0118953500004864,
+    1.010568980998869,
+    1.0038190400009626,
+    1.0027592900005402,
+    1.0060607999985223,
+    1.0070892910007387,
+    1.004338380000263,
+    1.0042370810006105,
+    1.009698269999717,
+    1.006126629999926,
+    1.005016209999667,
+    1.0062742909994995,
+    1.0099812500011467,
+    1.0059869109991268,
+    1.0107054199997947,
+    1.0037649599998986
+  ],
+  "mem_before": {
+    "bytes_used": 0.0,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 0.0
+  },
+  "mem_after_load": {
+    "bytes_used": 12.503,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 12.526
+  },
+  "mem_after_run": {
+    "bytes_used": 12.504,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 12.526
+  },
+  "latent_shape": [
+    1,
+    16,
+    16,
+    40,
+    64
+  ],
+  "finite": true,
+  "min": -3.296875,
+  "max": 2.71875,
+  "mean": -0.0712890625,
+  "std": 0.97265625,
+  "teacache": null
+}
+[rank2] iter2 [natural] denoise=20.09s encode=4.09s steps=19 mean_step=1.004s throughput_step=1.004s
+[rank3] iter2 [natural] denoise=20.12s encode=4.06s steps=19 mean_step=1.004s throughput_step=1.006s
+[rank1] iter2 [natural] denoise=20.13s encode=4.05s steps=19 mean_step=1.004s throughput_step=1.007s
+[rank0] iter2 [natural] denoise=20.11s encode=4.07s steps=19 mean_step=1.004s throughput_step=1.006s
+{
+  "type": "result",
+  "iteration": 2,
+  "basis": "natural",
+  "throughput_step_seconds": 1.005603544800033,
+  "wall_seconds": 20.11207089600066,
+  "encode_seconds": 4.06775086000016,
+  "load_seconds": 179.92764471999908,
+  "step_seconds": [
+    1.00765685999977,
+    1.0081963009997708,
+    1.0015280100014934,
+    1.001207239998621,
+    1.0016703310011508,
+    1.0016040699993027,
+    1.0018960699999298,
+    1.0082055109996872,
+    1.0046332000001712,
+    1.0004895800011582,
+    1.0103004509983293,
+    1.0041389000016352,
+    1.0097111909999512,
+    1.0037354399992182,
+    1.0037564510002994,
+    1.0047101599993766,
+    1.003590450000047,
+    1.0039339510003629,
+    1.00363674899927
+  ],
+  "mem_before": {
+    "bytes_used": 0.0,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 0.0
+  },
+  "mem_after_load": {
+    "bytes_used": 12.503,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 12.526
+  },
+  "mem_after_run": {
+    "bytes_used": 12.504,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 12.526
+  },
+  "latent_shape": [
+    1,
+    16,
+    16,
+    40,
+    64
+  ],
+  "finite": true,
+  "min": -3.296875,
+  "max": 2.71875,
+  "mean": -0.0712890625,
+  "std": 0.97265625,
+  "teacache": null
+}
+{
+  "type": "decoded",
+  "seconds": 167.01691383300022,
+  "where": "host",
+  "shape": [
+    1,
+    3,
+    61,
+    320,
+    512
+  ],
+  "finite": true
+}
+/mnt/models/uvpy/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/subprocess.py:1885: RuntimeWarning: os.fork() was called. os.fork() is incompatible with multithreaded code, and JAX is multithreaded, so this will likely lead to a deadlock.
+  self.pid = _fork_exec(
