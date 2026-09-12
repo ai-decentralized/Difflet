@@ -83,10 +83,12 @@ def test_cache_key_differs_for_tpu_backend():
 
 
 def test_registry_models_reject_tpu_backend():
-    # No model opts into TPU yet; the guard must fire before any model code
-    # is imported (this is what quarantines the legacy Flux fork).
+    # The guard must fire before any model code is imported. HunyuanVideo-1.5
+    # is the one remaining Trainium-only registration (FLUX, the last of the
+    # serving models, was ported in 2026-09; its TPU path never imports the
+    # legacy NxDI fork).
     from difflet.registry import resolve_model
 
-    entry = resolve_model("black-forest-labs/FLUX.1-dev")
+    entry = resolve_model("tencent/HunyuanVideo-1.5")
     with pytest.raises(ValueError, match="tpu"):
         entry.require_backend("tpu")

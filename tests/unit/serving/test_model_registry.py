@@ -386,19 +386,23 @@ def test_serving_profile_reports_invalid_parallel_values(options, message):
     assert message in exc.value.message
 
 
-@pytest.mark.parametrize(
-    "model_id",
-    ["black-forest-labs/FLUX.1-dev"],
-)
-def test_serving_rejects_unported_models_on_tpu_before_touching_weights(monkeypatch, model_id):
+def test_serving_rejects_unported_models_on_tpu_before_touching_weights(monkeypatch):
     """Seen on a v5e: `difflet serve` for HunyuanVideo resolved the snapshot and
     then died in _build_llama_app with ModuleNotFoundError('neuronx_distributed_inference');
     FLUX got as far as a gated-repo 401. The registry's backend list must gate
-    serving the way it gates DiffletPipeline."""
+    serving the way it gates DiffletPipeline. Every serving model is ported to
+    TPU now, so the gate is pinned by presenting FLUX as Trainium-only."""
+    from dataclasses import replace
+
+    from difflet.registry import resolve_model
+    from difflet.serving import model_registry
+
     monkeypatch.setenv("DIFFLET_BACKEND", "tpu")
+    trainium_only = replace(resolve_model("black-forest-labs/FLUX.1-dev"), backends=("trainium",))
+    monkeypatch.setattr(model_registry, "resolve_model", lambda model_id: trainium_only)
 
     with pytest.raises(ValueError, match="does not support backend 'tpu'"):
-        resolve_serving_model(ServeOptions(model_id=model_id))
+        resolve_serving_model(ServeOptions(model_id="black-forest-labs/FLUX.1-dev"))
 
 
 @pytest.mark.parametrize(
@@ -409,6 +413,7 @@ def test_serving_rejects_unported_models_on_tpu_before_touching_weights(monkeypa
         "Wan-AI/Wan2.1-T2V-14B-Diffusers",
         "hunyuanvideo-community/HunyuanVideo",
         "Lightricks/LTX-2",
+        "black-forest-labs/FLUX.1-dev",
     ],
 )
 def test_serving_accepts_the_tpu_ported_models(monkeypatch, model_id):

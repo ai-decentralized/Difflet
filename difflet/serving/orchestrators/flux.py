@@ -52,6 +52,12 @@ _MAX_GUIDANCE_SCALE = 20.0
 logger = logging.getLogger(__name__)
 
 
+def _backend_is_tpu() -> bool:
+    from difflet.backends.registry import current_backend
+
+    return current_backend() == "tpu"
+
+
 class FluxServingArtifactPreparer:
     model_id = _HF_MODEL_ID
     model_type = _MODEL_TYPE
@@ -75,6 +81,18 @@ class FluxServingArtifactPreparer:
             download_policy=download_policy,
             allow_patterns=entry.download_patterns,
         )
+        if _backend_is_tpu():
+            # Eager stages, no compile artifacts (see the LTX-2 / Wan adapters).
+            print("[difflet serve] tpu backend: eager stages, no compile artifacts")
+            pipeline = _pipeline_definition()
+            return ResolvedRuntimeBundle(
+                profile=profile,
+                source=source,
+                pipeline_definition=pipeline,
+                runtime_plan=_runtime_plan(profile, pipeline, ()),
+                compile_specs=(),
+                artifacts=ArtifactSet(()),
+            )
         specs = flux_common.build_compile_plan(source, profile)
         manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
 
@@ -216,6 +234,26 @@ class FluxServingStageAdapter:
         print(f"[difflet serve] loading Flux worker profile {profile}")
         self.active_runtime = runtime
         self.active_profile = profile
+        if _backend_is_tpu():
+            import torch
+
+            from difflet.models.flux.entry import create_flux_application
+
+            app = create_flux_application(
+                model_path=runtime.source.pinned_model_path,
+                parallel=profile.parallel,
+                dtype=torch.bfloat16,
+                shape=profile.shape_dict(),
+                backend="tpu",
+                teacache_cadence=profile.teacache_cadence,
+                teacache_online_delta_alpha=profile.teacache_online_delta,
+            )
+            app.load_eager()
+            runner = ValidatedStageRunner(
+                FluxPipelineRunner(app, profile), FluxInitialPayload, FluxFinalPayload
+            )
+            print("[difflet serve] Flux worker loaded (tpu)", flush=True)
+            return OrderedDict((("pipeline", runner),))
         binding = runtime.artifacts.require("pipeline")
         spec = runtime.require_compile_spec("pipeline")
         manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
@@ -323,7 +361,10 @@ def _runtime_plan(profile: ServingProfile, pipeline, specs) -> RuntimePlan:
         effective_num_cores=world_size,
         world_size=world_size,
     )
-    spec = specs[0]
+    # No specs means the TPU backend (eager, no artifacts): the stage carries
+    # placement="tpu" and no artifact id, as in the other TPU adapters.
+    tpu = not specs
+    spec = None if tpu else specs[0]
     stages = (
         StageRuntimeSpec(
             stage_id=pipeline.stages[0].stage_id,
@@ -333,12 +374,13 @@ def _runtime_plan(profile: ServingProfile, pipeline, specs) -> RuntimePlan:
                 cp_degree=profile.parallel.cp_degree,
                 world_size=world_size,
             ),
-            artifact_id=spec.artifact_id,
+            artifact_id=None if tpu else spec.artifact_id,
+            placement="tpu" if tpu else "neuron",
         ),
     )
     return RuntimePlan(
         mode="resident",
-        profile_identity=spec.identity.digest,
+        profile_identity="" if tpu else spec.identity.digest,
         environment=environment,
         allocations=(allocation,),
         stages=stages,
