@@ -22,6 +22,12 @@ from __future__ import annotations
 import re
 
 _RE_LOAD = re.compile(r"Finished weights loading in ([\d.]+) seconds")
+# The presharded load path (application_base, 2026-07+) logs its per-component
+# load as "Finished traced model weight initialization in Xs (device init Ys,
+# total load_weights Zs)"; Z is the whole load of that component.
+_RE_LOAD2 = re.compile(
+    r"Finished traced model weight initialization in [\d.]+s \(.*?total load_weights ([\d.]+)s\)"
+)
 _RE_SHARD = re.compile(r"Done Sharding weights in ([\d.]+)")
 _RE_ROLE = re.compile(r"\[(text|llama|clip|generate|decode|vae)\]")
 
@@ -45,7 +51,7 @@ def parse(text: str, wall_total_s: float | None = None) -> dict:
         if (g := _RE_SHARD.search(line)):
             pending_shard = float(g.group(1))
             continue
-        if (g := _RE_LOAD.search(line)):
+        if (g := _RE_LOAD.search(line)) or (g := _RE_LOAD2.search(line)):
             st = {"load_s": round(float(g.group(1)), 3)}
             if pending_shard is not None:
                 st["shard_s"] = round(pending_shard, 3)
