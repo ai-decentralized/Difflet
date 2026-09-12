@@ -10,7 +10,7 @@ Date: 2026-09-12 · Branch: `tpu-port-hunyuan` (on `verify/tpu-models-2026-09-11
 | Wan 2.2 / 2.1 | serving + bench + TeaCache PASS (2.1: serving) | `docs/verification/tpu-model-support-2026-09-11-evidence.md` |
 | HunyuanVideo | ported: parity 0.99949, serving 200/191 s, bench 1.0 s/step, TeaCache 0.75× | Phase 5 of the evidence doc |
 | LTX-2 | ported: parity 0.99983, 1.68 s/step, HBM 9.36 GB; **serving startup times out in the smoke** | Phase 6 |
-| FLUX.1-dev | not started; weights not on this host (gated repo, no HF token) | — |
+| FLUX.1-dev | **port scaffold committed (`0389f74`): sharded diffusers DiT, TPU app, serving branch, 16 CPU-pinned tests; weights not on this host (gated repo, no HF token)** | this doc §2 |
 
 ## 1. Fix LTX-2 serving (today) — DONE 03:16: ready 246 s, requests 200 in 51 s, bench + cadence-2 recorded
 
@@ -57,6 +57,36 @@ Work, following the LTX-2 shape of things (diffusers module + lifted sharding re
 4. TAEF1 / adaptive TeaCache stay Trainium-only.
 
 Estimate: 1–2 days at today's cadence once weights are present; HBM 6 GB/chip.
+
+**Status 2026-09-12 04:00 — steps 1–3 written weight-free, committed as `0389f74`:**
+- `models/flux/tp_sharding.py` + `backends/tpu/flux/{config,transformer}.py` + `models/flux/tpu_application.py`
+  + the TPU branch of `serving/orchestrators/flux.py`; registry `backends=("trainium","tpu")`;
+  `--teacache-cadence/--teacache-online-delta` accepted for flux on TPU only.
+- Pinned on CPU: the rewritten module equals diffusers' forward at tp=1 (1e-5); the device
+  Euler loop equals `FlowMatchEulerDiscreteScheduler.step` (1e-6); packing / sigmas+mu / PIL
+  postprocess equal diffusers' helpers; cadence-2 skips 5/20; T5 broadcast re-raises on every rank.
+- Deviations from the sketch above: RoPE is *not* sliced per rank (Flux applies one (cos, sin)
+  per position to every head, so head sharding leaves it untouched); the benchmark runner is
+  `benchmark/flux_tpu_run.py` (fork of the LTX-2 runner) rather than an extension of
+  `benchmark/adapters/tpu.py` — same shape of results as the other v5e rows.
+- Weight-free device probes (`/mnt/models/teacache_runs/flux_synth_probe.py`): a seeded
+  synthetic checkpoint in the diffusers layout loaded on 4 chips through the real sharded
+  path (CheckpointSlice windows) vs its CPU fp32 reference, and the full FLUX.1-dev geometry
+  with random per-rank weights at 1024²/tp=4 for compile time, per-forward latency and HBM.
+  Results (04:01–04:05, `/mnt/models/teacache_runs/flux_synth/{parity,timing}.json`):
+  - parity: device tp=4 **fp32 vs CPU fp32 cos 0.9999995** (max abs 5e-3 on O(10) outputs);
+    device bf16 vs CPU bf16 0.99991 (the random 2-layer model is badly conditioned in bf16:
+    its own bf16-vs-fp32 control is 0.816, so only the fp32 row is a parity statement).
+    The sharded load path, the `proj_out` windows, the collectives and the attention are right
+    on the hardware.
+  - timing at 1024²/tp=4/bf16: **5.445 B params per rank** (the adaLN modulation linears are
+    unsharded, as in the HunyuanVideo port), **10.18 GB HBM** resident (5.5 GB left for
+    activations + the VAE), first compile **44 s** (2-slot gate, 62 GB host peak for 4 ranks),
+    **0.335 s per forward** → ≈ 9.4 s for 28 steps (trn2: 268 ms/step, 35 s e2e).
+- 04:11 the token arrived; FLUX.1-dev @ `3de623fc` downloaded (34 GB incl. T5) to
+  `/mnt/models/hf/hub/`; campaign A (oracle 1024²/512 fp32 + 256²/64 with bf16 control, device
+  parity, bench baseline, cadence 2) and B (serve smoke + 2 requests) queued —
+  `/mnt/models/teacache_runs/flux_campaign_{a,b}.sh`.
 
 ## 3. Benchmarks vs Trainium — one row per model, same MATRIX conditions
 
