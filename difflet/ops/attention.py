@@ -89,9 +89,17 @@ def ulysses_attention(q, k, v, *, scale: float, causal: bool = False):
 
 
 def joint_ulysses_attention(
-    q_img, q_txt, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False
+    q_img, q_txt, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False,
+    key_valid_len=None,
 ):
     """Joint-MMDiT Ulysses self-attention for text-replicated models.
+
+    ``key_valid_len`` (optional, int32 ``[B]``): number of valid keys per batch row
+    in the joint ``[image_full ‖ text]`` order, for a right-padded text stream
+    (HunyuanVideo's padded-Llama key-padding mask). Keys at index >=
+    ``key_valid_len[b]`` are masked out for every query, losslessly, via the
+    attention kernel's contiguous ``[0, n)`` bound range -- the same route
+    ``dual_stream_attention`` takes for the non-CP masked case. ``None`` = no mask.
 
     The image stream is sequence-sharded over the cp axis while the text stream is
     replicated on every rank, so the two cannot share one pre-concatenated query the
@@ -106,7 +114,8 @@ def joint_ulysses_attention(
     """
 
     return _load("joint_ulysses_attention")(
-        q_img, q_txt, image_k, image_v, text_k, text_v, scale=scale, causal=causal
+        q_img, q_txt, image_k, image_v, text_k, text_v, scale=scale, causal=causal,
+        key_valid_len=key_valid_len,
     )
 
 

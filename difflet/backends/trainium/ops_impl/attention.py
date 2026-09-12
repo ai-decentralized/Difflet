@@ -446,10 +446,29 @@ def ulysses_attention(q, k, v, *, scale: float, causal: bool = False):
     return _cp_all_to_all(out, split_dim=2, concat_dim=1, mesh=mesh)
 
 
+def _keypad_bounds(key_valid_len, *, batch: int, heads: int, s_q: int):
+    """int32 ``[B]`` valid-key counts -> attention_cte ``(bound_min, bound_max)`` of
+    shape ``(B*heads, s_q, 1)``: every query attends the contiguous key prefix
+    ``[0, count)``. Plain expand/reshape only (trace-safe; the general
+    mask_to_contiguous_bounds must not run in-graph -- see commit cd54d0f)."""
+    count = key_valid_len.to(torch.int32).reshape(batch, 1, 1, 1)
+    bound_max = count.expand(batch, heads, s_q, 1).reshape(batch * heads, s_q, 1).contiguous()
+    return torch.zeros_like(bound_max), bound_max
+
+
 def joint_ulysses_attention(
-    q_img, q_txt, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False
+    q_img, q_txt, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False,
+    key_valid_len=None,
 ):
     """Joint-MMDiT Ulysses attention: sharded image stream + replicated text stream.
+
+    ``key_valid_len`` (int32 ``[B]`` or None): valid-key count per batch row in the
+    joint ``[image_full ‖ text]`` order (a right-padded text stream). When given, the
+    dense attention below runs on attention_cte's lossless contiguous-bound path
+    instead of unmasked -- and it is exactly this path that makes a key-padding
+    mask expressible under Ulysses: after the all-to-all both Q and K are the full
+    joint sequence, so q_len == kv_len, which the bound kernel requires (the
+    gather_kv route's sharded-query-vs-full-key shape is what neuronx-cc rejects).
 
     q_img/image_k/image_v  [B, H_local, S_img/cp, d]  sequence-sharded over cp
     q_txt/text_k/text_v    [B, H_local, S_txt,    d]  replicated on every rank
@@ -503,7 +522,23 @@ def joint_ulysses_attention(
     k = torch.cat([k_i, k_t], dim=2)
     v = torch.cat([v_i, v_t], dim=2)
 
-    out = _dense_attention(q, k, v, scale=scale, causal=False)
+    if key_valid_len is None:
+        out = _dense_attention(q, k, v, scale=scale, causal=False)
+    else:
+        b, h, s_q, d = q.shape
+        bound_min, bound_max = _keypad_bounds(key_valid_len, batch=b, heads=h, s_q=s_q)
+        out = attention(
+            q.reshape(b * h, s_q, d),
+            k.reshape(b * h, s_q, d),
+            v.reshape(b * h, s_q, d),
+            scale=scale,
+            causal=False,
+            bound_min=bound_min,
+            bound_max=bound_max,
+            tp_q=True,
+            tp_k=True,
+            tp_out=False,
+        ).reshape(b, h, s_q, d)
 
     s_img = q_i.shape[2]
     img_out = out.narrow(2, 0, s_img)   # [B, H_local/cp, S_img, d]
