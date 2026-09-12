@@ -218,3 +218,96 @@ def test_ulysses_rejects_causal():
     q = k = v = torch.zeros(1, 4, 8, 16)
     with pytest.raises(NotImplementedError, match="non-causal"):
         dev_ulysses(q, k, v, scale=1.0 / math.sqrt(16), causal=True)
+
+
+# --------------------------------------------------------------------------
+# key_valid_len: a right-padded text stream expressed as the joint valid-key count
+# (HunyuanVideo's padded-Llama key-padding mask under Ulysses CP).
+
+
+def _dense_keypad(q, k, v, scale, valid_len):
+    """Reference dense attention with keys >= valid_len[b] masked for every query."""
+    scores = torch.matmul(q.float(), k.float().transpose(-1, -2)) * scale
+    key_idx = torch.arange(k.shape[2]).view(1, 1, 1, -1)
+    masked = key_idx >= valid_len.view(-1, 1, 1, 1)
+    scores = scores.masked_fill(masked, float("-inf"))
+    return torch.matmul(torch.softmax(scores, dim=-1), v.float())
+
+
+def test_joint_ulysses_attention_cpu_key_valid_len_matches_masked_reference(monkeypatch):
+    _set_cpu_backend(monkeypatch)
+    from difflet.ops import joint_ulysses_attention
+
+    torch.manual_seed(0)
+    b, h, s_img, s_txt, d = 2, 2, 64, 16, 32
+    q_img, image_k, image_v = (torch.randn(b, h, s_img, d) for _ in range(3))
+    q_txt, text_k, text_v = (torch.randn(b, h, s_txt, d) for _ in range(3))
+    scale = 1.0 / math.sqrt(d)
+    n_valid_txt = torch.tensor([16, 5])          # row 1 has 11 padded text tokens
+    key_valid_len = (s_img + n_valid_txt).to(torch.int32)
+
+    img_out, txt_out = joint_ulysses_attention(
+        q_img, q_txt, image_k, image_v, text_k, text_v,
+        scale=scale, causal=False, key_valid_len=key_valid_len,
+    )
+    ref = _dense_keypad(
+        torch.cat([q_img, q_txt], dim=2),
+        torch.cat([image_k, text_k], dim=2),
+        torch.cat([image_v, text_v], dim=2),
+        scale, key_valid_len,
+    )
+    assert torch.allclose(ref[:, :, :s_img], img_out.float(), atol=1e-4, rtol=1e-4)
+    assert torch.allclose(ref[:, :, s_img:], txt_out.float(), atol=1e-4, rtol=1e-4)
+    # and the mask really bit: the unmasked result differs on the padded row
+    img_un, _ = joint_ulysses_attention(
+        q_img, q_txt, image_k, image_v, text_k, text_v, scale=scale, causal=False
+    )
+    assert not torch.allclose(img_un[1].float(), img_out[1].float(), atol=1e-4)
+    assert torch.allclose(img_un[0].float(), img_out[0].float(), atol=1e-4)  # row 0 unpadded
+
+
+@pytest.mark.parametrize("cp", [2, 4])
+def test_joint_ulysses_layout_with_keypad_bounds_reconstructs_masked_joint_attention(cp):
+    """Under Ulysses every rank holds the FULL joint [image ‖ text] key sequence for
+    its head block, so a key-pad mask on the (replicated) text is the same
+    contiguous [0, n) prefix on every rank -- one per-row count suffices, and the
+    reassembled result equals one masked dense joint attention."""
+    torch.manual_seed(0)
+    b, h_local, s_img, s_txt, d = 2, 8, 128, 32, 64
+    q_img, k_img, v_img = (torch.randn(b, h_local, s_img, d, dtype=torch.float64) for _ in range(3))
+    q_txt, k_txt, v_txt = (torch.randn(b, h_local, s_txt, d, dtype=torch.float64) for _ in range(3))
+    scale = 1.0 / math.sqrt(d)
+    valid_len = torch.tensor([s_img + s_txt, s_img + 7])   # row 1: 25 padded text keys
+
+    qi_r, ki_r, vi_r = _shard_seq(q_img, cp), _shard_seq(k_img, cp), _shard_seq(v_img, cp)
+    qt_r, kt_r, vt_r = ([t] * cp for t in (q_txt, k_txt, v_txt))
+
+    def to_head_shard(sharded, replicated):
+        full = _sim_all_to_all(sharded, split_dim=1, concat_dim=2)
+        tiled = _sim_all_to_all(replicated, split_dim=1, concat_dim=2)
+        return full, [t.narrow(2, 0, s_txt) for t in tiled]
+
+    qi_f, qt_f = to_head_shard(qi_r, qt_r)
+    ki_f, kt_f = to_head_shard(ki_r, kt_r)
+    vi_f, vt_f = to_head_shard(vi_r, vt_r)
+    out_f = [
+        _dense_keypad(
+            torch.cat([qi_f[r], qt_f[r]], dim=2),
+            torch.cat([ki_f[r], kt_f[r]], dim=2),
+            torch.cat([vi_f[r], vt_f[r]], dim=2),
+            scale, valid_len,
+        )
+        for r in range(cp)
+    ]
+    img_r = _sim_all_to_all([o.narrow(2, 0, s_img) for o in out_f], split_dim=2, concat_dim=1)
+    txt_r = _sim_all_gather([o.narrow(2, s_img, s_txt) for o in out_f], dim=1)
+
+    ref = _dense_keypad(
+        torch.cat([q_img, q_txt], dim=2),
+        torch.cat([k_img, k_txt], dim=2),
+        torch.cat([v_img, v_txt], dim=2),
+        scale, valid_len,
+    )
+    assert torch.allclose(ref[:, :, :s_img], torch.cat(img_r, dim=2), atol=1e-10)
+    for r in range(cp):
+        assert torch.allclose(ref[:, :, s_img:], txt_r[r], atol=1e-10)

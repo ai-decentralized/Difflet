@@ -479,3 +479,72 @@ def test_keypad_bounds_from_mask(_cpu_backend):
     assert bound_max.shape == (1, 2, 1)
     assert torch.equal(bound_min, torch.zeros(1, 2, 1, dtype=torch.int32))
     assert int(bound_max[0, 0, 0]) == 2
+
+
+# --------------------------------------------------------------------------- #
+# Ulysses CP + key-padding mask (cp == 1 on the CPU backend, so the all-to-alls
+# are identities and the ulysses branch must equal the masked gather_kv branch)
+# --------------------------------------------------------------------------- #
+def _hv_attention_pair(m, *, pre_only: bool):
+    heads, hd = 2, 4
+    kw = dict(hidden_size=heads * hd, num_attention_heads=heads, attention_head_dim=hd,
+              added_kv_proj_dim=heads * hd,
+              context_pre_only=None if pre_only else False, pre_only=pre_only)
+    torch.manual_seed(3)
+    base = m.HunyuanVideoAttention(**kw).eval()                       # gather_kv, no CP
+    cp = m.HunyuanVideoAttention(**kw, context_parallel_enabled=True,
+                                 cp_mode="ulysses").eval()
+    cp.load_state_dict(base.state_dict())
+    return base, cp
+
+
+@pytest.mark.parametrize("pre_only", [False, True], ids=["dual_stream", "single_stream"])
+def test_attention_ulysses_honours_key_padding_mask(_cpu_backend, pre_only):
+    """Under ulysses a padded text mask used to raise NotImplementedError; it now
+    routes through the joint valid-key count and must match the masked
+    dual_stream_attention (gather_kv) result on the same weights and inputs."""
+    m = _cpu_backend
+    base, cp = _hv_attention_pair(m, pre_only=pre_only)
+    torch.manual_seed(4)
+    b, ls, cs = 2, 6, 4
+    hs = torch.randn(b, ls, 8)
+    enc = torch.randn(b, cs, 8)
+    rot = _rotary(m, ls, 4)
+    mask = torch.ones(b, 1, 1, ls + cs, dtype=torch.bool)
+    mask[1, :, :, ls + 1:] = False        # row 1: only 1 of 4 text tokens is valid
+    with torch.no_grad():
+        ref_h, ref_c = base(hidden_states=hs, encoder_hidden_states=enc,
+                            attention_mask=mask, image_rotary_emb=rot)
+        got_h, got_c = cp(hidden_states=hs, encoder_hidden_states=enc,
+                          attention_mask=mask, image_rotary_emb=rot)
+        # the mask must matter: unmasked ulysses differs on the padded row
+        un_h, _ = cp(hidden_states=hs, encoder_hidden_states=enc, image_rotary_emb=rot)
+    assert torch.allclose(got_h, ref_h, atol=1e-5, rtol=1e-5)
+    assert torch.allclose(got_c, ref_c, atol=1e-5, rtol=1e-5)
+    assert not torch.allclose(un_h[1], got_h[1], atol=1e-5)
+    assert torch.allclose(un_h[0], got_h[0], atol=1e-5)
+
+
+def test_attention_ulysses_key_valid_len_is_the_mask_row_sum(_cpu_backend, monkeypatch):
+    """The count handed to the op is the trace-safe row sum of the joint mask."""
+    m = _cpu_backend
+    _, cp = _hv_attention_pair(m, pre_only=False)
+    seen = {}
+    real = m.joint_ulysses_attention
+
+    def spy(*a, **k):
+        seen["key_valid_len"] = k.get("key_valid_len")
+        return real(*a, **k)
+
+    monkeypatch.setattr(m, "joint_ulysses_attention", spy)
+    b, ls, cs = 2, 6, 4
+    mask = torch.ones(b, 1, 1, ls + cs, dtype=torch.bool)
+    mask[1, :, :, ls + 1:] = False
+    with torch.no_grad():
+        cp(hidden_states=torch.randn(b, ls, 8), encoder_hidden_states=torch.randn(b, cs, 8),
+           attention_mask=mask)
+    assert seen["key_valid_len"].dtype == torch.int32
+    assert seen["key_valid_len"].tolist() == [ls + cs, ls + 1]
+    with torch.no_grad():
+        cp(hidden_states=torch.randn(b, ls, 8), encoder_hidden_states=torch.randn(b, cs, 8))
+    assert seen["key_valid_len"] is None

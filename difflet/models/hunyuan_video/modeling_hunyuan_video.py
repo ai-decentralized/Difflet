@@ -486,19 +486,29 @@ class HunyuanVideoAttention(nn.Module):
             hidden_states = o_joint[:, :img_len]          # [B, S_img/cp, H, d]
             encoder_hidden_states = o_joint[:, img_len:]  # [B, S_txt, H, d]
         elif self.context_parallel_enabled and self.cp_mode == "ulysses":
-            if attention_mask is not None:
-                raise NotImplementedError("ulysses cp_mode does not support attention_mask")
             # Joint ulysses: image (latent) K,V sharded → all-to-all'd into a head shard
             # at full sequence length; text (context) K,V replicated → reduced to the
             # same head shard. The op returns each stream in the sharding it arrived
             # with, so the image stays sequence-sharded and the text stays replicated —
             # exactly what the two assignments below expect.
+            #
+            # The joint key-padding mask (built in the model forward with the FULL
+            # latent length, valid keys = the contiguous prefix
+            # [0, S_latent + n_valid_text) in [latent ‖ text] order -- the op's own
+            # joint order) is handed over as the per-row valid-key COUNT, which the
+            # op turns into attention_cte's lossless contiguous-bound range. Counting
+            # with a plain sum is trace-safe (mirrors _keypad_bounds_from_mask).
+            key_valid_len = None
+            if attention_mask is not None:
+                m = attention_mask.reshape(attention_mask.shape[0], -1)
+                valid = m if m.dtype == torch.bool else (m != 0)
+                key_valid_len = valid.sum(dim=-1).to(torch.int32)   # [B]
             scale = 1.0 / math.sqrt(self.head_dim)
             img_out, txt_out = joint_ulysses_attention(
                 latent_q.transpose(1, 2), context_q.transpose(1, 2),
                 latent_k.transpose(1, 2), latent_v.transpose(1, 2),
                 context_k.transpose(1, 2), context_v.transpose(1, 2),
-                scale=scale, causal=False,
+                scale=scale, causal=False, key_valid_len=key_valid_len,
             )  # [B, H, S_img/cp, d], [B, H, S_txt, d]
             hidden_states = img_out.transpose(1, 2)          # [B, S_img/cp, H, d]
             encoder_hidden_states = txt_out.transpose(1, 2)  # [B, S_txt, H, d]
