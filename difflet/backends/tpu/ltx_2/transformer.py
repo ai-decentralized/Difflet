@@ -56,8 +56,12 @@ class TpuLTX2TransformerApplication(TpuApplicationBase):
             transformer = build_ltx2_transformer(self.config)
             if tp > 1:
                 # SPMDRank on TPU answers with this rank's Python int, which is
-                # what the per-rank RoPE / qk-norm-weight slices need.
-                shard_ltx2_transformer(transformer, tp, SPMDRank(tp))
+                # what the per-rank RoPE / qk-norm-weight slices need. The TPU
+                # attention op takes key-window bounds for cross-attention, so
+                # the text padding mask is honored here (Trainium cannot).
+                shard_ltx2_transformer(
+                    transformer, tp, SPMDRank(tp), honor_cross_attention_mask=True
+                )
             return transformer
 
         if init_empty_weights is None:

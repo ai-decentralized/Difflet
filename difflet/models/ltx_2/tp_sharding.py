@@ -214,12 +214,21 @@ class _LTX2TrainiumTPAttnProcessor:
     sized to this rank's local head count automatically.
     """
 
-    def __init__(self, *, tp_degree: int, rank_util: "SPMDRank") -> None:
+    def __init__(
+        self, *, tp_degree: int, rank_util: "SPMDRank", honor_cross_attention_mask: bool = False
+    ) -> None:
         # RoPE is pre-sliced once at the rope modules (_patch_ltx2_rope_for_tp);
         # rank_util is still needed to slice the (replicated) qk-norm affine
         # weight, which the NxD weight loader does not shard for a plain RMSNorm.
         self.tp_degree = int(tp_degree)
         self._rank_util = rank_util
+        # Trainium runs the text cross-attention UNMASKED (attention_cte's
+        # bounds path is self-attn only, see below). A backend whose attention
+        # op takes key-window bounds for cross-attention -- TPU -- passes True
+        # and gets the exact masked result: measured on a v5e, unmasked
+        # cross-attention over 984 padded text positions cost cosine 0.9932
+        # against diffusers where the masked path gives 0.9998.
+        self.honor_cross_attention_mask = bool(honor_cross_attention_mask)
 
     def _global_rms_norm(self, norm, x: torch.Tensor) -> torch.Tensor:
         in_dim = x.shape[-1]
@@ -324,11 +333,28 @@ class _LTX2TrainiumTPAttnProcessor:
             v3 = value.reshape(bsz, kx_len, n_heads, head_dim).permute(0, 2, 1, 3).reshape(
                 bsz * n_heads, kx_len, head_dim
             )
+            bounds = {}
+            if self.honor_cross_attention_mask:
+                # The transformer hands the processor an additive mask
+                # ((1 - m) * -10000, then prepare_attention_mask -> (B*H, 1, kv)
+                # -> view (B, H, 1, kv)); the valid keys are one contiguous run
+                # (left- or right-padded tokenizer), so they are exactly a
+                # [bound_min, bound_max) window per row. Device-side argmin /
+                # argmax, no host sync.
+                valid = attention_mask.reshape(bsz * n_heads, -1, kx_len)[:, :1, :] > -1.0
+                idx = torch.arange(kx_len, device=valid.device, dtype=torch.int32).view(1, 1, -1)
+                lo = torch.where(valid, idx, torch.full_like(idx, kx_len)).amin(dim=-1, keepdim=True)
+                hi = torch.where(valid, idx + 1, torch.zeros_like(idx)).amax(dim=-1, keepdim=True)
+                bounds = {
+                    "bound_min": lo.expand(bsz * n_heads, qx_len, 1).contiguous(),
+                    "bound_max": hi.expand(bsz * n_heads, qx_len, 1).contiguous(),
+                }
             out3 = difflet_attention(
                 q3, k3, v3,
                 scale=1.0 / math.sqrt(head_dim),
                 causal=False,
                 tp_q=True, tp_k=True, tp_out=False,
+                **bounds,
             )
             hidden_states = out3.reshape(bsz, n_heads, qx_len, head_dim).permute(0, 2, 1, 3).reshape(
                 bsz, qx_len, inner
@@ -387,14 +413,23 @@ def _patch_ltx2_rope_for_tp(transformer: nn.Module, rank_util: "SPMDRank") -> No
         rope.forward = _make(rope.forward)
 
 
-def _shard_ltx2_transformer(transformer: nn.Module, tp_degree: int, rank_util: "SPMDRank") -> None:
+def _shard_ltx2_transformer(
+    transformer: nn.Module,
+    tp_degree: int,
+    rank_util: "SPMDRank",
+    *,
+    honor_cross_attention_mask: bool = False,
+) -> None:
     """Tensor-parallel shard LTX-2's attention + FFN linears across ``tp_degree`` ranks."""
     if tp_degree <= 1:
         return
 
     replicate_attn = _env_flag("DIFFLET_LTX2_TP_REPLICATE_ATTN")
     replicate_mlp = _env_flag("DIFFLET_LTX2_TP_REPLICATE_MLP")
-    processor = _LTX2TrainiumTPAttnProcessor(tp_degree=tp_degree, rank_util=rank_util)
+    processor = _LTX2TrainiumTPAttnProcessor(
+        tp_degree=tp_degree, rank_util=rank_util,
+        honor_cross_attention_mask=honor_cross_attention_mask,
+    )
 
     for block in transformer.transformer_blocks:
         if not replicate_attn:
