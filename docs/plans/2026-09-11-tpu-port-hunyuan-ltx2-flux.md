@@ -30,7 +30,7 @@ cadence A/B (probe-free modes only; adaptive stays Trainium) · README matrix ro
 |---|---|---|---|---|---|
 | HunyuanVideo | 23.9 GiB | **6.0 GiB** | ~9 GiB | LLaMA-3 8B + CLIP-L, 14 GB | fits comfortably; 320×512×61 default shape = 3.5 k tokens |
 | LTX-2 | 35.2 GiB | **8.8 GiB** | ~6 GiB | Gemma-3 12B, 93 GB fp32 on disk → ~47 GB bf16 host RAM | tightest; measured Qwen at 9.5 GiB/chip ran at 1024² with ~6 GiB headroom, so this is at the edge — profile transient footprint first |
-| FLUX.1-dev | 23.8 GiB | **6.0 GiB** | ~9 GiB | T5-XXL 9.5 GB + CLIP | gated repo — needs an HF token on the host (none today) |
+| FLUX.1-dev | 23.8 GiB | **6.0 GiB** | ~9 GiB | T5-XXL 9.5 GB + CLIP | gated repo — token provided 2026-09-12; measured **10.18 GiB** resident (the sharded 3.0 B plus 2.4 B replicated adaLN linears), 10.45 peak with the VAE |
 
 Host RAM is 188 GB; the Wan 2.1 load peaked at 67 GB (4 ranks reading fp32 shards). LTX-2's
 Gemma-3 in bf16 (~24 GB) plus four ranks streaming a 70 GB fp32 transformer checkpoint should stay
@@ -145,6 +145,10 @@ gated-repo 401).
 | HunyuanVideo | 1 week | ~1.2 k lines | oracle parity on chip (day 2–3) |
 | LTX-2 | 1.5–2 weeks | ~1.8 k lines | HBM fit at default shape (day 1) |
 | FLUX (option b) | 2–3 weeks | ~1.5 k lines + serving orchestrator branch | diffusers Flux forward sharded on 4 chips |
+
+Actual (status log below): HunyuanVideo one day (09-11), LTX-2 one day (09-12, four serving
+takes), FLUX ~4 hours (3 h weight-free scaffold + probes, 20 min on the real weights once the
+token arrived) — the LTX-2 template made FLUX mostly transcription.
 
 Sequential on one v5e host; each port ends with a `benchmark/v5e/<model>.md` and a
 `difflet-device-verify`-style evidence doc.

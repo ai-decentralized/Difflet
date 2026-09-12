@@ -278,7 +278,8 @@ Two TPU host-side rules learned the hard way: keep every host component (text en
 connectors, audio VAE, vocoder) in **fp32** — bf16 is emulated on the EPYC host and runs 100×
 slower — and budget the first cold start of a model with a large host encoder
 (`--worker-restart-timeout`; Gemma-3's 46 GB checkpoint alone can take the default 900 s
-to read). The first execution's XLA compile is host-memory heavy (~43 GB per rank for the
+to read). FLUX.1-dev is a gated repo: a token with access must be in `$HF_HOME/token` before
+`difflet serve` resolves the snapshot. The first execution's XLA compile is host-memory heavy (~43 GB per rank for the
 60-block HunyuanVideo DiT), so ranks take turns through `DIFFLET_TPU_COMPILE_SLOTS` (default 2).
 
 **On the TPU backend** (`DIFFLET_BACKEND=tpu`, eager torch_xla; Qwen-Image, Wan 2.2/2.1,
