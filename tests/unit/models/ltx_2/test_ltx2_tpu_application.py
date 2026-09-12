@@ -83,9 +83,11 @@ def test_broadcast_prompt_encoder_matches_diffusers_call_surface(monkeypatch):
         return torch.ones(1, max_sequence_length, 6, dtype=dtype), torch.ones(1, max_sequence_length)
 
     pipe = types.SimpleNamespace(_get_gemma_prompt_embeds=original)
-    mod._install_broadcast_prompt_encoder(pipe, is_encoder=True, dtype=torch.bfloat16, packed_width=6)
+    mod._install_broadcast_prompt_encoder(pipe, is_encoder=True, dtype=torch.float32, packed_width=6)
     embeds, mask = pipe._get_gemma_prompt_embeds("a fox", num_videos_per_prompt=1, max_sequence_length=8,
-                                                 scale_factor=8, device="cpu", dtype=torch.float32)
-    assert calls["prompt"] == "a fox" and calls["L"] == 8 and calls["dtype"] is torch.bfloat16
-    assert embeds.shape == (1, 8, 6) and embeds.dtype is torch.float32  # cast to the caller's dtype
+                                                 scale_factor=8, device="cpu", dtype=torch.bfloat16)
+    assert calls["prompt"] == "a fox" and calls["L"] == 8 and calls["dtype"] is torch.float32
+    # Stays in the host pipeline's dtype: the fp32 connectors consume it next;
+    # the orchestrator casts to the DiT dtype when it builds the bundle.
+    assert embeds.shape == (1, 8, 6) and embeds.dtype is torch.float32
     assert mask.dtype is torch.int64 and mask.shape == (1, 8)
