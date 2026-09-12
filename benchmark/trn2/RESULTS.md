@@ -221,6 +221,15 @@ Same host class as above (**trn2.3xlarge**, 4 NeuronCores under LNC=2, 96 GB HBM
 | [HunyuanVideo](hunyuan_video.md) | 320×512×61 / 20 | 82.3 min | **594 s** | **115 s** | 519→58 s | **814.1 ms (n=19)** | 31 | $28.98 | 6.0 | ✓ finite | ok |
 | [Wan 2.1 14B](wan_2_1.md) | 480×832×9 / 20 | 111.6 min | **407 s** | **85 s** | 354→52 s | **575.5 ms (n=19)** | 43 | $21.40 | 1.0 | ✓ finite | ok |
 
+#### FLUX.1-dev tp4: difflet vs the native NxDI baseline (same weights, 1024², 28 steps, seed 42, guidance 3.5, bf16)
+
+| engine | compile | **e2e cold** | **e2e warm** | Neuron load cold→warm | host-side load (warm) | **DiT per-step** | outputs/hr (warm) | output |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| [difflet `flux_1_dev` tp4](flux_1_dev.md) | 21.2 min | **308 s** | **41 s** | 269→23 s | — | **270.7 ms (n=27)** | 87 | ? |
+| [**native NxDI** `generate_flux.py` setup, tp4](flux_1_dev_nxdi.md) | 15.1 min | **330 s** | **57 s** | 290→39 s | 0 s | **271.9 ms (n=27)** | 64 | ✓ finite |
+
+NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in every process (the host-side column, inside its e2e) and runs a warm-up forward per component inside `load()`; difflet loads only the Neuron stages from presharded per-rank checkpoints. The DiT per-step (same attention_cte lineage, same compiler flags) is the like-for-like number; e2e differences are mostly load-path design. Measured by `benchmark/trn2/nxdi_flux_baseline.sh` with the campaign rules (timed compile into a fresh workdir; cold = page cache dropped; one generate per process, no warm-up; real-loop per-step).
+
 ### DiT per-step vs tp4 (lower is better; ratio = tp4 / config)
 
 | model | tp4 |
@@ -263,6 +272,17 @@ cold→warm gap is the disk read of the weights.
 HunyuanVideo **82.3 min** (47.1 — the old row was stale, host-VAE; now the VAE decoder is
 compiled on-chip inside the DiT stage and its neuronx-cc build is 62 of the 82 min, paid
 again for every topology) · Wan 2.1 111.6 min (131, VAE-dominated).
+
+**Native NxDI FLUX baseline** (table under tp4): per-step **271.9 ms** vs difflet 270.7 ms —
+identical within noise, as expected: difflet's FLUX backbone is a fork of NxDI's and both run
+attention_cte with the same compiler flags. The e2e rows differ by load path: NxDI warm 57 s
+(process) with 39 s of component loads incl. a warm-up forward per component in `load()`,
+difflet 41 s with 23 s of presharded loads; NxDI cold 330 s vs 308 s. NxDI's compile is
+shorter (15.1 vs 21.2 min) because difflet's compile also writes the per-rank presharded
+checkpoints that make its later loads faster — a one-time cost moved from every load to the
+compile. Measured with the same rules by `benchmark/trn2/nxdi_flux_baseline.sh`; the AWS
+example's own "Average generation time" (resident model, 5 warm-ups) corresponds to NxDI's
+`generate_s` = 8.0 s here (difflet's realloop generate: 7.9 s).
 
 **New capability**: HunyuanVideo context parallel now runs with `--cp-mode ulysses` (its
 padded-Llama key-padding mask is expressed as attention_cte bounds inside the ulysses op —
