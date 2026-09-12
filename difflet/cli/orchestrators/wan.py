@@ -11,6 +11,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from difflet.ops.attention_config import attention_cache_inputs
 
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import (
@@ -320,6 +321,7 @@ class WanOrchestrator(ModelOrchestrator):
                 "tp": args.tp_degree or 4,
                 "cp": args.cp_degree or 1,
                 "cp_mode": str(getattr(args, "cp_mode", "gather_kv") or "gather_kv"),
+                **attention_cache_inputs(getattr(args, "attention_impl", "megakernel")),
                 "cfg_parallel": bool(getattr(args, "cfg_parallel", False)),
                 "sp": bool(getattr(args, "sp_enabled", False)),
                 "dtype": "bfloat16",
@@ -356,6 +358,7 @@ class WanOrchestrator(ModelOrchestrator):
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
         a = self.args
         parts = [
+            "--attention-impl", getattr(a, "attention_impl", "megakernel"),
             "--model-id", self.args.model_id,
             "--tp-degree", str(a.tp_degree or 4),
             "--cp-degree", str(a.cp_degree or 1),
