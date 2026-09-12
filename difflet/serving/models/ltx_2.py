@@ -463,16 +463,20 @@ class LTX2PipelineRunner:
         context = invocation.context
         context.cancellation.throw_if_cancelled()
         video, target = _require_video_target(request)
+        primary = _is_primary_replica()
         output = self.pipe(
             prompt=request.prompt,
             negative_prompt=video.negative_prompt,
             num_inference_steps=request.num_inference_steps,
             guidance_scale=request.guidance_scale,
             generator=_seeded_generator(request.seed),
-            output_type="pt",
+            # The collective parts (prompt broadcast, sharded DiT) run on every
+            # replica; the host VAE decode of 121 frames only where the output
+            # is kept -- four concurrent decodes on one host are pure waste.
+            output_type="pt" if primary else "latent",
         )
         context.cancellation.throw_if_cancelled()
-        if not _is_primary_replica():
+        if not primary:
             # This replica's media is never read (the engine keeps the primary
             # replica's reply); writing it would race the request's storage
             # teardown. The collective work above still had to run here.
@@ -564,7 +568,7 @@ class LTX2ServingStageAdapter:
             runner = ValidatedStageRunner(
                 LTX2PipelineRunner(app, profile), LTX2InitialPayload, LTX2FinalPayload
             )
-            print("[difflet serve] LTX-2 worker loaded (tpu)")
+            print("[difflet serve] LTX-2 worker loaded (tpu)", flush=True)
             return OrderedDict((("pipeline", runner),))
         binding = runtime.artifacts.require(_PIPELINE_ARTIFACT_ID)
         spec = runtime.require_compile_spec(_PIPELINE_ARTIFACT_ID)
