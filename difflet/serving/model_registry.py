@@ -6,6 +6,7 @@ import importlib
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from difflet.backends.registry import current_backend
 from difflet.common.registry.base import ServingModelMetadata
 from difflet.registry import ModelEntry, resolve_model
 from difflet.serving.options import ServeOptions, build_serving_profile
@@ -33,6 +34,11 @@ def register_serving_model(metadata: ServingModelMetadata) -> ServingModelMetada
 def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
     _ensure_builtin_serving_models_registered()
     entry = resolve_model(options.model_id)
+    # The CLI path gates on the registry's backend list in DiffletPipeline;
+    # serving never did, so on a TPU host an unported model resolved (or
+    # downloaded) its weights and then died inside the Neuron compile path
+    # with a ModuleNotFoundError. Fail here, before any weight traffic.
+    entry.require_backend(current_backend())
     try:
         metadata = _SERVING_METADATA[entry.name]
     except KeyError as exc:

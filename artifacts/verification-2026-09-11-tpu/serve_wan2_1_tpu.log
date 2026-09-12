@@ -1,0 +1,87 @@
+Fetching 30 files:   0%|          | 0/30 [00:00<?, ?it/s]Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Fetching 30 files: 100%|██████████| 30/30 [00:00<00:00, 97.41it/s]Fetching 30 files: 100%|██████████| 30/30 [00:00<00:00, 97.21it/s]
+2026-09-11 21:37:56.487 INFO:     Started server process [66509]
+2026-09-11 21:37:56.488 INFO:     Waiting for application startup.
+2026-09-11 21:37:56.488 INFO:     serving startup begin model=Wan-AI/Wan2.1-T2V-14B-Diffusers
+2026-09-11 21:37:59.285 WARNING:  libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+2026-09-11 21:38:00.832 INFO:     worker_process_start model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile_identity= startup_timeout=900.0
+2026-09-11 21:38:00.832 INFO:     worker_process_terminate model=Wan-AI/Wan2.1-T2V-14B-Diffusers
+[difflet serve] tpu backend: eager stages, no compile artifacts
+[difflet serve] stage topology:
+  - prompt_encoder: role=prompt_encoder kind=extracted placement=tpu artifact=-
+  - denoiser: role=denoiser kind=extracted placement=tpu artifact=-
+  - decoder: role=decoder kind=extracted placement=host artifact=-
+2026-09-11 21:38:09.406 INFO:     worker heartbeat transition state=starting request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+2026-09-11 21:38:39.407 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=starting to_state=loading
+2026-09-11 21:38:39.407 INFO:     worker heartbeat transition state=loading request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 21:39:09.407 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+Loading weights:   0%|          | 0/242 [00:00<?, ?it/s]Loading weights:  46%|████▌     | 111/242 [00:00<00:00, 1094.90it/s]Loading weights:  93%|█████████▎| 224/242 [00:00<00:00, 1086.53it/s]Loading weights: 100%|██████████| 242/242 [00:00<00:00, 1136.37it/s]
+2026-09-11 21:39:39.407 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+2026-09-11 21:40:09.407 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 21:40:39.407 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 21:41:02.794 INFO:     worker_process_ready model=Wan-AI/Wan2.1-T2V-14B-Diffusers replicas=4
+2026-09-11 21:41:02.795 INFO:     video.service_start ephemeral_jobs=true staging_removed=0 artifacts_removed=0
+2026-09-11 21:41:02.795 INFO:     serving startup complete model=Wan-AI/Wan2.1-T2V-14B-Diffusers
+2026-09-11 21:41:02.795 INFO:     Application startup complete.
+2026-09-11 21:41:02.795 INFO:     Uvicorn running on http://127.0.0.1:8096 (Press CTRL+C to quit)
+2026-09-11 21:41:04.743 INFO:     127.0.0.1:53856 - "GET /ready HTTP/1.1" 200
+2026-09-11 21:41:05.548 INFO:     127.0.0.1:53860 - "GET /ready HTTP/1.1" 200
+2026-09-11 21:41:09.407 INFO:     worker heartbeat state_dwell_seconds=150.00 from_state=loading to_state=ready
+2026-09-11 21:41:09.408 INFO:     worker heartbeat transition state=ready request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 21:41:25.360 INFO:     engine.generate admitted request_id=video_sync_185ee321b4784429b8a4b427d3019cf0 model=Wan-AI/Wan2.1-T2V-14B-Diffusers queued=0/1
+2026-09-11 21:41:25.360 INFO:     engine.queue_acquired request_id=video_sync_185ee321b4784429b8a4b427d3019cf0
+2026-09-11 21:41:25.360 INFO:     engine.lock_acquired request_id=video_sync_185ee321b4784429b8a4b427d3019cf0
+2026-09-11 21:41:25.360 INFO:     engine.run_start request_id=video_sync_185ee321b4784429b8a4b427d3019cf0
+2026-09-11 21:41:25.360 INFO:     worker_process_run_start request_id=video_sync_185ee321b4784429b8a4b427d3019cf0 model=Wan-AI/Wan2.1-T2V-14B-Diffusers deadline_remaining=300.000
+2026-09-11 21:41:39.408 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=ready to_state=busy
+2026-09-11 21:41:39.408 INFO:     worker heartbeat transition state=busy request_id=video_sync_185ee321b4784429b8a4b427d3019cf0 stage=decoder running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-11 21:41:58.741 INFO:     worker_process_generation_ok request_id=video_sync_185ee321b4784429b8a4b427d3019cf0
+2026-09-11 21:41:58.742 INFO:     engine.run_complete request_id=video_sync_185ee321b4784429b8a4b427d3019cf0
+2026-09-11 21:41:58.894 INFO:     127.0.0.1:50302 - "POST /v1/videos/sync HTTP/1.1" 200
+2026-09-11 21:42:09.408 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=busy to_state=ready
+2026-09-11 21:42:09.408 INFO:     worker heartbeat transition state=ready request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 21:42:36.052 INFO:     engine.generate admitted request_id=video_sync_96b330dded0441dea04c2b44165e063a model=Wan-AI/Wan2.1-T2V-14B-Diffusers queued=0/1
+2026-09-11 21:42:36.052 INFO:     engine.queue_acquired request_id=video_sync_96b330dded0441dea04c2b44165e063a
+2026-09-11 21:42:36.052 INFO:     engine.lock_acquired request_id=video_sync_96b330dded0441dea04c2b44165e063a
+2026-09-11 21:42:36.052 INFO:     engine.run_start request_id=video_sync_96b330dded0441dea04c2b44165e063a
+2026-09-11 21:42:36.052 INFO:     worker_process_run_start request_id=video_sync_96b330dded0441dea04c2b44165e063a model=Wan-AI/Wan2.1-T2V-14B-Diffusers deadline_remaining=299.999
+2026-09-11 21:42:39.408 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=ready to_state=busy
+2026-09-11 21:42:39.408 INFO:     worker heartbeat transition state=busy request_id=video_sync_96b330dded0441dea04c2b44165e063a stage=denoiser running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-11 21:43:09.408 INFO:     worker heartbeat alive state=busy request_id=video_sync_96b330dded0441dea04c2b44165e063a stage=denoiser model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile= running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-11 21:43:39.408 INFO:     worker heartbeat state_dwell_seconds=60.00 from_state=busy to_state=busy
+2026-09-11 21:43:39.409 INFO:     worker heartbeat transition state=busy request_id=video_sync_96b330dded0441dea04c2b44165e063a stage=decoder running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-11 21:43:46.422 INFO:     worker_process_generation_ok request_id=video_sync_96b330dded0441dea04c2b44165e063a
+2026-09-11 21:43:46.422 INFO:     engine.run_complete request_id=video_sync_96b330dded0441dea04c2b44165e063a
+2026-09-11 21:43:46.441 INFO:     127.0.0.1:44370 - "POST /v1/videos/sync HTTP/1.1" 200
+2026-09-11 21:44:09.408 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=busy to_state=ready
+2026-09-11 21:44:09.409 INFO:     worker heartbeat transition state=ready request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 21:44:39.409 INFO:     worker heartbeat alive state=ready request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 21:45:08.777 INFO:     Shutting down
+2026-09-11 21:45:08.877 INFO:     Waiting for application shutdown.
+2026-09-11 21:45:08.877 INFO:     serving shutdown begin model=Wan-AI/Wan2.1-T2V-14B-Diffusers
+2026-09-11 21:45:08.878 INFO:     video.service_stop ephemeral_jobs=true staging_removed=0 artifacts_removed=0
+2026-09-11 21:45:08.878 INFO:     worker_process_shutdown requested model=Wan-AI/Wan2.1-T2V-14B-Diffusers alive=True
+2026-09-11 21:45:17.639 INFO:     worker_process_terminate model=Wan-AI/Wan2.1-T2V-14B-Diffusers
+2026-09-11 21:45:17.640 INFO:     serving shutdown complete model=Wan-AI/Wan2.1-T2V-14B-Diffusers
+2026-09-11 21:45:17.641 INFO:     Application shutdown complete.
+2026-09-11 21:45:17.641 INFO:     Finished server process [66509]

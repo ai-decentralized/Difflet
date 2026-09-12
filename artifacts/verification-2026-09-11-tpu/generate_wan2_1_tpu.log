@@ -1,0 +1,32 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/mnt/models/Difflet/difflet/cli/stage.py", line 96, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/mnt/models/Difflet/difflet/cli/stage.py", line 91, in main
+    orchestrator._run_stage_internal(args.stage, args)
+  File "/mnt/models/Difflet/difflet/cli/orchestrators/wan.py", line 175, in _run_stage_internal
+    self._stage_transformer(args)
+  File "/mnt/models/Difflet/difflet/cli/orchestrators/wan.py", line 186, in _stage_transformer
+    from difflet.models.wan.application import NeuronWanApplication
+  File "/mnt/models/Difflet/difflet/models/wan/application.py", line 10, in <module>
+    from difflet.backends.trainium.core.config import NeuronConfig
+  File "/mnt/models/Difflet/difflet/backends/trainium/core/config.py", line 16, in <module>
+    from neuronx_distributed.quantization.quantization_config import (
+ModuleNotFoundError: No module named 'neuronx_distributed'
+[difflet] work dir preserved at /home/shiyangcheng/.cache/difflet/work/wan for inspection
+Traceback (most recent call last):
+  File "/mnt/models/tpuenv312/bin/difflet", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/mnt/models/Difflet/difflet/cli/main.py", line 953, in main
+    getattr(orchestrator, args.command)()
+  File "/mnt/models/Difflet/difflet/cli/orchestrators/wan.py", line 156, in generate
+    runner.run_stage(self.args.model_id, "transformer",
+  File "/mnt/models/Difflet/difflet/cli/runner.py", line 88, in run_stage
+    subprocess.run(cmd, env=env, check=True)
+  File "/mnt/models/uvpy/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/mnt/models/tpuenv312/bin/python', '-m', 'difflet.cli.stage', '--orchestrator', 'Wan-AI/Wan2.1-T2V-14B-Diffusers', '--stage', 'transformer', '--model-id', 'Wan-AI/Wan2.1-T2V-14B-Diffusers', '--tp-degree', '4', '--cp-degree', '1', '--cp-mode', 'gather_kv', '--height', '480', '--width', '832', '--num-frames', '9', '--steps', '2', '--guidance-scale', '1.0', '--seed', '42', '--stage-mode', 'generate', '--prompt', 'a red fox', '--output', '/mnt/models/teacache_runs/cli_wan2_1.out', '--work-dir', '/home/shiyangcheng/.cache/difflet/work/wan']' returned non-zero exit status 1.
+exit=1

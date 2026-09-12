@@ -61,6 +61,38 @@ def test_row_parallel_shards_the_input_dim_and_replicates_bias():
     assert L_shard(layer, "bias") is None
 
 
+def test_row_parallel_reduce_output_and_skip_bias_add_follow_nxd(monkeypatch):
+    """HunyuanVideo's single block sums two ``reduce_output=False`` partials and
+    reduces once; ``skip_bias_add`` hands the bias back for after that reduce.
+    Ignoring the kwargs reduced twice and added the bias tp times (v5e: cosine
+    0.909 vs diffusers). At tp=1 the reduce is identity, so count the calls."""
+    _reinit(MeshSpec(tp=1))
+    calls = []
+    monkeypatch.setattr(L, "reduce_tp", lambda t: calls.append(1) or t)
+    x = torch.randn(3, 8)
+
+    plain = L.RowParallelLinear(8, 4, bias=True, input_is_parallel=True)
+    ref = F.linear(x, plain.weight, plain.bias)
+    assert torch.allclose(plain(x), ref)
+    assert len(calls) == 1
+
+    partial = L.RowParallelLinear(8, 4, bias=True, input_is_parallel=True,
+                                  reduce_output=False, skip_bias_add=True)
+    partial.weight.data.copy_(plain.weight.data)
+    partial.bias.data.copy_(plain.bias.data)
+    out, bias = partial(x)
+    assert len(calls) == 1  # no reduce inside
+    assert bias is partial.bias
+    assert torch.allclose(out + bias, ref)
+
+    unreduced_biased = L.RowParallelLinear(8, 4, bias=True, input_is_parallel=True,
+                                           reduce_output=False)
+    unreduced_biased.weight.data.copy_(plain.weight.data)
+    unreduced_biased.bias.data.copy_(plain.bias.data)
+    assert torch.allclose(unreduced_biased(x), ref)  # NxD: per-rank bias on the partial
+    assert len(calls) == 1
+
+
 def test_indivisible_shapes_are_rejected_at_construction():
     _reinit(MeshSpec(tp=4))
     with pytest.raises(ValueError, match="cannot shard output_size"):

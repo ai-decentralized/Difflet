@@ -1,0 +1,13 @@
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  20%|██        | 1/5 [00:01<00:05,  1.29s/it]
+Loading weights:   0%|          | 0/242 [00:00<?, ?it/s][ALoading weights: 100%|██████████| 242/242 [00:00<00:00, 8293.95it/s]
+Loading pipeline components...:  80%|████████  | 4/5 [00:01<00:00,  3.34it/s]
+Loading checkpoint shards:   0%|          | 0/12 [00:00<?, ?it/s][A
+Loading checkpoint shards:  92%|█████████▏| 11/12 [00:00<00:00, 102.99it/s][ALoading checkpoint shards: 100%|██████████| 12/12 [00:00<00:00, 104.54it/s]
+Loading pipeline components...: 100%|██████████| 5/5 [00:01<00:00,  3.75it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:01<00:00,  2.98it/s]
+loaded in 2s
+  0%|          | 0/20 [00:00<?, ?it/s]  5%|▌         | 1/20 [00:57<18:14, 57.61s/it] 10%|█         | 2/20 [01:54<17:07, 57.08s/it] 15%|█▌        | 3/20 [02:48<15:44, 55.55s/it] 20%|██        | 4/20 [03:39<14:19, 53.75s/it] 25%|██▌       | 5/20 [04:35<13:38, 54.60s/it] 30%|███       | 6/20 [05:29<12:42, 54.47s/it] 35%|███▌      | 7/20 [06:25<11:55, 55.04s/it] 40%|████      | 8/20 [07:17<10:50, 54.18s/it] 45%|████▌     | 9/20 [08:11<09:53, 53.92s/it] 50%|█████     | 10/20 [09:03<08:54, 53.45s/it] 55%|█████▌    | 11/20 [09:56<07:59, 53.30s/it] 60%|██████    | 12/20 [10:50<07:08, 53.59s/it] 65%|██████▌   | 13/20 [11:46<06:18, 54.13s/it] 70%|███████   | 14/20 [12:38<05:21, 53.64s/it] 75%|███████▌  | 15/20 [13:31<04:27, 53.41s/it] 80%|████████  | 16/20 [14:25<03:34, 53.54s/it] 85%|████████▌ | 17/20 [15:17<02:39, 53.17s/it] 90%|█████████ | 18/20 [16:10<01:45, 52.89s/it] 95%|█████████▌| 19/20 [17:02<00:52, 52.89s/it]100%|██████████| 20/20 [17:57<00:00, 53.38s/it]100%|██████████| 20/20 [17:57<00:00, 53.87s/it]
+generated in 1101s shape=(9, 480, 832, 3) finite=True
+wrote
