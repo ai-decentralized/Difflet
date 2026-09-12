@@ -240,15 +240,25 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 | [HunyuanVideo](hunyuan_video_tp2cp2.md) | 320×512×61 / 20 | 88.8 min | **748 s** | **116 s** | 672→58 s | **849.0 ms (n=19)** | 31 | $29.38 | 6.0 | ✓ finite | ok |
 | [Wan 2.1 14B](wan_2_1_tp2cp2.md) | 480×832×9 / 20 | 24.8 min | **623 s** | **87 s** | 570→54 s | **575.5 ms (n=19)** | 41 | $21.99 | 1.0 | ✓ finite | ok |
 
+### Feature: tp4sp — tp=4 + Megatron sequence parallel (`--sp`)
+
+| model | shape / steps | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁶ | **DiT per-step**⁰ | outputs/hr (warm)⁴ | cost / 1k⁵ | guidance | output | status |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| [FLUX.1-dev](flux_1_dev_tp4sp.md) | 1024×1024 / 28 | 18.9 min | **307 s** | **40 s** | 269→22 s | **278.8 ms (n=27)** | 89 | $10.21 | 3.5 | ✓ finite | ok |
+| [Qwen-Image](qwen_image_tp4sp.md) | 1024×1024 / 20 | 26.4 min | **508 s** | **65 s** | 461→35 s | **365.6 ms (n=19)** | 56 | $16.32 | 4.0 | ✓ finite | ok |
+| LTX-2 | — | — | — | — | — | — | — | — | — | — | **N/A** — LTX-2 has no sequence-parallel path |
+| [HunyuanVideo](hunyuan_video_tp4sp.md) | 320×512×61 / 20 | 82.7 min | **596 s** | **112 s** | 520→56 s | **790.6 ms (n=19)** | 32 | $28.29 | 6.0 | ✓ finite | ok |
+| [Wan 2.1 14B](wan_2_1_tp4sp.md) | 480×832×9 / 20 | 16.1 min | **406 s** | **79 s** | 353→47 s | **578.2 ms (n=19)** | 45 | $20.06 | 1.0 | ✓ finite | ok |
+
 ### DiT per-step vs tp4 (lower is better; ratio = tp4 / config)
 
-| model | tp4 | tp2cp2 |
-|---|---:|---:|
-| FLUX.1-dev | 270.7 ms | 263.1 ms (1.03×) |
-| Qwen-Image | 417.3 ms | 454.3 ms (0.92×) |
-| LTX-2 | 459.2 ms | N/A |
-| HunyuanVideo | 814.1 ms | 849.0 ms (0.96×) |
-| Wan 2.1 14B | 575.5 ms | 575.5 ms (1.00×) |
+| model | tp4 | tp2cp2 | tp4sp |
+|---|---:|---:|---:|
+| FLUX.1-dev | 270.7 ms | 263.1 ms (1.03×) | 278.8 ms (0.97×) |
+| Qwen-Image | 417.3 ms | 454.3 ms (0.92×) | 365.6 ms (1.14×) |
+| LTX-2 | 459.2 ms | N/A | N/A |
+| HunyuanVideo | 814.1 ms | 849.0 ms (0.96×) | 790.6 ms (1.03×) |
+| Wan 2.1 14B | 575.5 ms | 575.5 ms (1.00×) | 578.2 ms (1.00×) |
 
 ⁰ DiT per-step: mean of the inter-step deltas (n = steps − 1). ¹ compile = full `difflet compile` wall (all stages, incl. per-rank presharding); stage caches shared across features are reused, so a later feature's compile can be shorter than tp4's. ² cold = `sync; echo 3 > drop_caches` then one generate. ³ warm = the immediately following generate. ⁴ outputs/hr = 3600 / warm e2e (one image or one video per generate, batch 1, fresh process each — a served deployment with a resident model does better). ⁵ cost / 1k outputs = hourly price ÷ outputs/hr × 1000; AWS publishes no list price for trn2.3xlarge; $0.91/h is trn2.48xlarge on-demand ($14.5556/h, us-east-2, third-party listing sparecores.com fetched 2026-09-12) ÷ 16 chips — indicative only. ⁶ Neuron weight load summed over the pipeline's stages (from the generate log), cold vs warm — the bulk of the cold→warm gap; LTX-2's text encoder and VAE run on the host and are not in it.
 
@@ -306,6 +316,17 @@ weight-store entry holds 4 ranks × a tp2 shard = 2× the bytes of the tp4 entry
 e2e is the disk read of those bytes; warm e2e is within a few seconds of tp4. Compile is
 shorter where a stage cache is shared (Wan 24.8 min: the VAE from tp4 is reused; Hunyuan
 88.8 min: its VAE is inside the DiT stage and recompiles per topology).
+
+**tp4sp (tp4 + Megatron sequence parallel) vs tp4, per-step**: Qwen-Image **365.6 ms**
+(417.3, **1.14× faster** — the one clear win of the campaign: Qwen's joint-attention blocks
+carry the most per-layer LayerNorm/residual traffic, which SP shards instead of
+replicating) · HunyuanVideo **790.6 ms** (814.1, 1.03×) · FLUX **278.8 ms** (270.7, 0.97×) ·
+Wan 2.1 **578.2 ms** (575.5, 1.00×). SP reuses the tp4 weight shards (same store entry), so
+cold and warm e2e match tp4 within noise (FLUX 307/40 s, Qwen 508/65 s, Hunyuan 596/112 s,
+Wan 406/79 s) and compile is the transformer NEFF only where a stage cache is shared
+(Wan 16.1 min). Combined with tp2cp2 this gives the per-topology recommendation on a
+4-core chip: **Qwen-Image → tp4sp**, **FLUX → tp2cp2 (ulysses)**, HunyuanVideo → tp4sp
+(marginal), Wan 2.1 and LTX-2 → tp4.
 
 **New capability**: HunyuanVideo context parallel now runs with `--cp-mode ulysses` (its
 padded-Llama key-padding mask is expressed as attention_cte bounds inside the ulysses op —
