@@ -168,3 +168,12 @@ dominate — see the benchmark row in the evidence doc). Video coherent.
 
 Follow-ups: shard the 3.5 B replicated adaLN linears (per-rank 5.8 B → ~3 B params) before
 trying larger shapes; VAE decode on chip; Llama bf16-vs-fp32 host trade-off.
+
+### 2026-09-12 — LTX-2: ported, parity-verified; serving smoke in progress
+
+Commits `365315b` (lift), `1a06144` (port), `5bca57d` (masked cross-attention on TPU: parity
+0.9932 → 0.99983), plus two startup fixes (warmup via the application's forward; prompt-encoder
+`dtype=`). Fit at the default shape was never in doubt in the end: 9.36 GB peak of 15.75,
+1.68 s/step. The one real finding: the shared TP attention processor's unmasked text
+cross-attention (a Trainium attention_cte limitation) is measurably wrong when most of the
+1024-token prompt is padding; TPU now honors the mask through the bounded flash path.
