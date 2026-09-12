@@ -304,6 +304,23 @@ def render(r: dict) -> str:
           "below are the *intended* recipe, not a reproduced run.")
         a("")
     extra = _extra_axis_flags(par)
+    if r.get("backend") == "nxdi":
+        # Native AWS NxDI baseline row (benchmark/nxdi_flux_baseline.py): not a
+        # difflet run, so the difflet command lines below would be misleading.
+        a("```bash")
+        a("# native NxDI (neuronx_distributed_inference) baseline, campaign rules:")
+        a("source .venv/bin/activate")
+        a(f"DIFFLET_BENCH_DEVICE={r.get('device_slug','trn2')} bash benchmark/trn2/nxdi_flux_baseline.sh")
+        a("#   = python -m benchmark.nxdi_flux_baseline compile|generate|record (see its docstring)")
+        a("```")
+        a("")
+        a("**Measurement protocol**: see the Notes above — compile is a timed "
+          "`NeuronFluxApplication.compile` into a fresh workdir; e2e cold/warm are one "
+          "fresh process each (page cache dropped before the cold one), load + one "
+          "generate, no warm-up; per-step = inter-step deltas of the NxDI backbone forward "
+          "inside that generate, step 0 excluded.")
+        a("")
+        return "\n".join(L)
     a("```bash")
     a("# difflet (Neuron / trn2) — compile is one-time and cached (reused, never recompiled):")
     a(f"difflet compile  --model-id {r.get('model_id','<id>')}{rev} \\")
