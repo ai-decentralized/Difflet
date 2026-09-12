@@ -613,3 +613,70 @@ def test_startup_smoke_uses_temporary_target_and_cleans_it(monkeypatch, tmp_path
     ]
     assert not parent.exists()
     assert adapter._smoke_target is None
+
+
+# --- TPU backend --------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _trainium_unless_asked(monkeypatch):
+    monkeypatch.setattr(ltx_2, "_backend_is_tpu", lambda: False)
+
+
+@pytest.fixture
+def tpu_backend(monkeypatch):
+    monkeypatch.setattr(ltx_2, "_backend_is_tpu", lambda: True)
+
+
+def test_tpu_runtime_plan_has_no_artifact(monkeypatch, tmp_path, tpu_backend):
+    monkeypatch.setattr(
+        ltx_2, "resolve_available_neuron_core_ids", lambda required_num_cores: tuple(range(required_num_cores))
+    )
+    plan = ltx_2.build_runtime_plan(_profile(tmp_path), ltx_2._pipeline_definition(), ())
+    assert plan.profile_identity == ""
+    assert [(s.stage_id, s.placement, s.artifact_id) for s in plan.stages] == [("pipeline", "tpu", None)]
+
+
+def test_tpu_profile_accepts_probe_free_teacache(tmp_path, tpu_backend):
+    ltx_2._validate_profile(replace(_profile(tmp_path), teacache_cadence=2))
+    ltx_2._validate_profile(replace(_profile(tmp_path), teacache_online_delta=0.6))
+    with pytest.raises(ValueError, match="adaptive TeaCache"):
+        ltx_2._validate_profile(replace(_profile(tmp_path), teacache_speedup=1.5))
+
+
+def test_trainium_profile_still_rejects_probe_free_teacache(tmp_path):
+    with pytest.raises(ValueError, match="TPU backend only"):
+        ltx_2._validate_profile(replace(_profile(tmp_path), teacache_cadence=2))
+
+
+def test_tpu_create_loaded_runners_builds_the_tpu_application(tmp_path, tpu_backend, monkeypatch):
+    import types
+
+    seen = {}
+
+    class FakeApp:
+        def load_eager(self):
+            seen["loaded"] = True
+
+    def fake_create(**kwargs):
+        seen.update(kwargs)
+        return FakeApp()
+
+    monkeypatch.setitem(
+        __import__("sys").modules, "difflet.models.ltx_2.entry",
+        types.SimpleNamespace(create_ltx_2_application=fake_create),
+    )
+    monkeypatch.setattr(
+        ltx_2, "resolve_available_neuron_core_ids", lambda required_num_cores: tuple(range(required_num_cores))
+    )
+    profile = replace(_profile(tmp_path), teacache_cadence=2)
+    runtime = ResolvedRuntimeBundle(
+        profile=profile, source=_source(tmp_path), pipeline_definition=ltx_2._pipeline_definition(),
+        runtime_plan=ltx_2.build_runtime_plan(profile, ltx_2._pipeline_definition(), ()),
+        compile_specs=(), artifacts=ArtifactSet(()),
+    )
+    adapter = ltx_2.LTX2ServingStageAdapter()
+    runners = asyncio.run(adapter.create_loaded_runners(runtime))
+    assert tuple(runners) == ("pipeline",)
+    assert seen["backend"] == "tpu" and seen["loaded"] and seen["teacache_cadence"] == 2
+    assert seen["enable_host_pipeline"] is True

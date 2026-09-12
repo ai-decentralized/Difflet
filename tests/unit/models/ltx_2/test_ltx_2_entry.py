@@ -34,8 +34,8 @@ def test_package_reexports_public_symbols():
         assert hasattr(ltx_2_pkg, name)
 
 
-def test_entry_rejects_non_trainium_backend(tmp_path):
-    with pytest.raises(NotImplementedError, match="trainium backend"):
+def test_entry_rejects_unknown_backend(tmp_path):
+    with pytest.raises(NotImplementedError, match="trainium and tpu backends"):
         create_ltx_2_application(
             model_path=str(tmp_path),
             parallel=DiffletParallelConfig(tp_degree=1),

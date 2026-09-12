@@ -236,3 +236,37 @@ def test_compile_slot_zero_disables_the_gate(tmp_path, monkeypatch):
     with compile_slot(0):
         pass
     assert not list(tmp_path.glob("*.lock"))
+
+
+def test_warmup_eager_goes_through_the_subclass_forward(monkeypatch):
+    """LTX-2's application maps the positional bundle onto diffusers' keyword
+    arguments in its forward; calling the bare module positionally instead
+    misfiled them (v5e: `arange() ... end=NoneType`)."""
+    import sys
+    import types
+
+    from difflet.backends.tpu.core.application_base import TpuApplicationBase
+
+    fake_xm = types.SimpleNamespace(mark_step=lambda: None, wait_device_ops=lambda: None)
+    monkeypatch.setitem(sys.modules, "torch_xla", types.SimpleNamespace(core=types.SimpleNamespace(xla_model=fake_xm)))
+    monkeypatch.setitem(sys.modules, "torch_xla.core", types.SimpleNamespace(xla_model=fake_xm))
+    monkeypatch.setitem(sys.modules, "torch_xla.core.xla_model", fake_xm)
+    seen = {}
+
+    class App(TpuApplicationBase):
+        def __init__(self):
+            super().__init__(config=None)
+            self.module = None
+
+        def get_example_inputs(self):
+            return (torch.ones(2), torch.zeros(2))
+
+        def forward(self, a, b):
+            seen["called_with"] = (a, b)
+            return self.module(a=a, b=b)
+
+    app = App()
+    module = lambda *, a, b: a + b  # keyword-only: a positional call would raise
+    app.warmup_eager(module, device="cpu", slots=0)
+    assert app.module is module
+    assert torch.equal(seen["called_with"][0], torch.ones(2))

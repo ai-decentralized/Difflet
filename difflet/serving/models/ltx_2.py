@@ -59,6 +59,19 @@ from difflet.serving.video_media import (
 )
 from difflet.serving.models._common import compiled_model_payloads_ready
 
+def _backend_is_tpu() -> bool:
+    try:
+        from difflet.backends.registry import current_backend
+    except Exception:  # noqa: BLE001 - registry is optional on old installs
+        return False
+    return current_backend() == "tpu"
+
+
+def _is_primary_replica() -> bool:
+    """Same rule as Wan/HunyuanVideo: only the primary replica's output is kept."""
+    return int(os.environ.get("DIFFLET_REPLICA_RANK", "0")) == 0
+
+
 _HF_MODEL_ID = "Lightricks/LTX-2"
 _MODEL_TYPE = "ltx_2"
 _PIPELINE_ARTIFACT_ID = "pipeline"
@@ -233,11 +246,15 @@ def build_runtime_plan(
     """Describe one TP4 hybrid resident worker with host encode/decode."""
 
     _validate_profile(profile)
-    if len(specs) != 1:
-        raise ValueError("LTX-2 serving requires exactly one compile spec")
-    spec = specs[0]
-    if spec.artifact_id != _PIPELINE_ARTIFACT_ID or spec.component_id != _PIPELINE_ARTIFACT_ID:
-        raise ValueError("LTX-2 serving requires the pipeline compile artifact")
+    # No specs means the TPU backend (eager, no artifacts): the stage carries
+    # placement="tpu" and no artifact id, as in the other TPU adapters.
+    tpu = not specs
+    if not tpu:
+        if len(specs) != 1:
+            raise ValueError("LTX-2 serving requires exactly one compile spec")
+        spec = specs[0]
+        if spec.artifact_id != _PIPELINE_ARTIFACT_ID or spec.component_id != _PIPELINE_ARTIFACT_ID:
+            raise ValueError("LTX-2 serving requires the pipeline compile artifact")
     if len(pipeline_definition.stages) != 1:
         raise ValueError("LTX-2 serving requires exactly one opaque pipeline stage")
     stage_definition = pipeline_definition.stages[0]
@@ -261,7 +278,7 @@ def build_runtime_plan(
     )
     return RuntimePlan(
         mode="resident",
-        profile_identity=spec.identity.digest,
+        profile_identity="" if tpu else spec.identity.digest,
         environment=environment,
         allocations=(allocation,),
         stages=(
@@ -273,8 +290,8 @@ def build_runtime_plan(
                     cp_degree=1,
                     world_size=_WORLD_SIZE,
                 ),
-                artifact_id=spec.artifact_id,
-                placement="hybrid",
+                artifact_id=None if tpu else spec.artifact_id,
+                placement="tpu" if tpu else "hybrid",
             ),
         ),
     )
@@ -308,6 +325,18 @@ class LTX2ServingArtifactPreparer:
             download_policy=download_policy,
             allow_patterns=entry.download_patterns,
         )
+        if _backend_is_tpu():
+            # No compile phase on TPU (eager stages); see the Wan/Hunyuan adapters.
+            print("[difflet serve] tpu backend: eager stages, no compile artifacts")
+            pipeline_definition = _pipeline_definition()
+            return ResolvedRuntimeBundle(
+                profile=profile,
+                source=source,
+                pipeline_definition=pipeline_definition,
+                runtime_plan=build_runtime_plan(profile, pipeline_definition, ()),
+                compile_specs=(),
+                artifacts=ArtifactSet(()),
+            )
         specs = build_compile_plan(source, profile)
         manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
 
@@ -434,15 +463,39 @@ class LTX2PipelineRunner:
         context = invocation.context
         context.cancellation.throw_if_cancelled()
         video, target = _require_video_target(request)
+        primary = _is_primary_replica()
         output = self.pipe(
             prompt=request.prompt,
             negative_prompt=video.negative_prompt,
             num_inference_steps=request.num_inference_steps,
             guidance_scale=request.guidance_scale,
             generator=_seeded_generator(request.seed),
-            output_type="pt",
+            # The collective parts (prompt broadcast, sharded DiT) run on every
+            # replica; the host VAE decode of 121 frames only where the output
+            # is kept -- four concurrent decodes on one host are pure waste.
+            output_type="pt" if primary else "latent",
         )
         context.cancellation.throw_if_cancelled()
+        if not primary:
+            # This replica's media is never read (the engine keeps the primary
+            # replica's reply); writing it would race the request's storage
+            # teardown. The collective work above still had to run here.
+            return stage_result(
+                LTX2FinalPayload(
+                    FileBackedGenerateOutput(
+                        path="",
+                        mime_type=target.mime_type,
+                        output_format=target.output_format,
+                        size_bytes=0,
+                        width=request.width,
+                        height=request.height,
+                        num_frames=video.num_frames,
+                        fps=float(video.fps),
+                        duration_s=0.0,
+                    )
+                ),
+                started_monotonic=started,
+            )
         frames = output.frames if hasattr(output, "frames") else output[0]
         frames = frames.float().clamp(0.0, 1.0)
         media = encode_tensor_to_mp4(
@@ -498,6 +551,25 @@ class LTX2ServingStageAdapter:
         print(f"[difflet serve] loading LTX-2 worker profile {profile}")
         self.active_runtime = runtime
         self.active_profile = profile
+        if _backend_is_tpu():
+            from difflet.models.ltx_2.entry import create_ltx_2_application
+
+            app = create_ltx_2_application(
+                model_path=runtime.source.pinned_model_path,
+                parallel=profile.parallel,
+                dtype=_torch_bfloat16(),
+                shape=profile.shape_dict(),
+                backend="tpu",
+                enable_host_pipeline=True,
+                teacache_cadence=profile.teacache_cadence,
+                teacache_online_delta_alpha=profile.teacache_online_delta,
+            )
+            app.load_eager()
+            runner = ValidatedStageRunner(
+                LTX2PipelineRunner(app, profile), LTX2InitialPayload, LTX2FinalPayload
+            )
+            print("[difflet serve] LTX-2 worker loaded (tpu)", flush=True)
+            return OrderedDict((("pipeline", runner),))
         binding = runtime.artifacts.require(_PIPELINE_ARTIFACT_ID)
         spec = runtime.require_compile_spec(_PIPELINE_ARTIFACT_ID)
         manager = ImmutableArtifactManager(profile.cache_dir or Path.home() / ".cache" / "difflet")
@@ -566,6 +638,10 @@ class LTX2ServingStageAdapter:
     def validate_smoke_output(self, output: GenerateOutput) -> None:
         profile = self.active_profile
         target = self._smoke_target
+        if not _is_primary_replica():
+            # This replica deliberately produced no file (see LTX2PipelineRunner).
+            self._cleanup_smoke_target()
+            return
         try:
             if profile is None or target is None:
                 raise RuntimeError("LTX-2 smoke target is not active")
@@ -724,13 +800,14 @@ def _validate_profile(
         or profile.world_size != _WORLD_SIZE
     ):
         raise ValueError("LTX-2 serving requires TP4, CP1, DP1, CFG off, and SP off")
-    if (
-        profile.teacache_speedup is not None
-        or profile.teacache_calibration_data is not None
-        or profile.teacache_cadence is not None
-        or profile.teacache_online_delta is not None
-    ):
-        raise ValueError("LTX-2 resident serving does not support TeaCache")
+    if profile.teacache_speedup is not None or profile.teacache_calibration_data is not None:
+        raise ValueError("LTX-2 resident serving does not support adaptive TeaCache")
+    probe_free = profile.teacache_cadence is not None or profile.teacache_online_delta is not None
+    if probe_free and not _backend_is_tpu():
+        raise ValueError(
+            "LTX-2 resident serving supports probe-free TeaCache "
+            "(--teacache-cadence / --teacache-online-delta) on the TPU backend only"
+        )
 
 
 def _require_profile_int(value: int | None, field_name: str) -> int:

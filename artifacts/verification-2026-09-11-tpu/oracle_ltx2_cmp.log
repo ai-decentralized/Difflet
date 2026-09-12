@@ -1,0 +1,75 @@
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank2] checkpoint loaded on host in 7s host_rss=14.2G
+[rank1] checkpoint loaded on host in 7s host_rss=14.2G
+[rank0] checkpoint loaded on host in 7s host_rss=14.2G
+[rank3] checkpoint loaded on host in 7s host_rss=14.2G
+[rank2] resident hbm={'bytes_used': 9.28, 'bytes_limit': 15.75, 'peak_bytes_used': 9.28} host_rss=14.5G
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank3] resident hbm={'bytes_used': 9.28, 'bytes_limit': 15.75, 'peak_bytes_used': 9.28} host_rss=14.5G
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank1] resident hbm={'bytes_used': 9.28, 'bytes_limit': 15.75, 'peak_bytes_used': 9.28} host_rss=14.5G
+[rank0] resident hbm={'bytes_used': 9.28, 'bytes_limit': 15.75, 'peak_bytes_used': 9.28} host_rss=14.5G
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank1] forward 0 in 74.43s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.35} host_rss=14.7G
+[rank2] forward 0 in 75.312s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.7G
+[rank3] forward 0 in 74.578s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.7G
+[rank0] forward 0 in 74.361s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.7G
+[rank1] forward 1 in 1.678s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.35} host_rss=14.7G
+[rank2] forward 1 in 1.678s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.7G
+[rank0] forward 1 in 1.678s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.7G
+[rank3] forward 1 in 1.678s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.7G
+[rank1] forward 2 in 1.667s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.35} host_rss=14.7G
+[rank2] forward 2 in 1.667s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.7G
+[rank3] forward 2 in 1.667s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.7G
+[rank0] forward 2 in 1.667s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.7G
+{
+ "step_s": [
+  74.361,
+  1.678,
+  1.667
+ ],
+ "video_shape": [
+  1,
+  6144,
+  128
+ ],
+ "audio_shape": [
+  1,
+  126,
+  128
+ ],
+ "finite": true,
+ "hbm_peak_gb": 9.36,
+ "video": {
+  "cosine": 0.9932486414909363,
+  "rel_l1": 0.130643829703331,
+  "max_abs": 0.21376606822013855
+ },
+ "audio": {
+  "cosine": 0.9461659789085388,
+  "rel_l1": 0.3243812322616577,
+  "max_abs": 1.0513960123062134
+ },
+ "video_vs_bf16": {
+  "cosine": 0.993026614189148,
+  "rel_l1": 0.13556866347789764,
+  "max_abs": 0.224609375
+ },
+ "control": {
+  "cosine": 0.999833345413208,
+  "rel_l1": 0.017788494005799294,
+  "max_abs": 0.0362737774848938
+ }
+}
