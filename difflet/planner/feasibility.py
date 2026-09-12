@@ -56,12 +56,15 @@ KNOWN_BAD: dict[tuple[str, str | None], str] = {
     ),
 }
 
-# Ulysses all-to-alls the sequence shard into a head shard and that kernel has
-# no path for an attention mask; HunyuanVideo always carries one (its Llama
-# text encoder emits padded, variable-length sequences). Mirrors
-# ULYSSES_UNSUPPORTED in scripts/verify_cli.py -- keep the two in step.
-# Qwen-Image reaches the branch with attention_mask=None and is unaffected.
-ULYSSES_UNSUPPORTED: frozenset[str] = frozenset({"hunyuan_video"})
+# Models whose attention path cannot run under ulysses. Empty since
+# HunyuanVideo's padded-Llama key-padding mask is expressed as the joint
+# valid-key count -> attention_cte contiguous bounds inside
+# joint_ulysses_attention (key_valid_len); under ulysses both Q and K are the
+# full joint sequence after the all-to-all, so the q_len == kv_len shape the
+# bounds kernel requires holds by construction (gather_kv's sharded query vs
+# full keys is what neuronx-cc rejects). Mirrors ULYSSES_UNSUPPORTED in
+# scripts/verify_cli.py -- keep the two in step.
+ULYSSES_UNSUPPORTED: frozenset[str] = frozenset()
 
 # Serving pins that are not expressible as ModelCapabilities, from
 # difflet/serving/options.py and the resident adapters.
