@@ -94,6 +94,15 @@ benchmark/
 
 The runner writes to `benchmark/<device>/`; the device defaults to `trn2` and is set
 with `DIFFLET_BENCH_DEVICE` (e.g. `DIFFLET_BENCH_DEVICE=h100 python -m benchmark.bench …`).
+
+The TPU adapter (`benchmark/adapters/tpu.py`) takes two more A/B switches, both off by
+default so the frozen `MATRIX` row stays the baseline: `DIFFLET_BENCH_TEACACHE_CADENCE=N`
+and `DIFFLET_BENCH_TEACACHE_ONLINE_DELTA=ALPHA` enable probe-free TeaCache in the Qwen-Image
+denoise loop, exactly as `difflet serve --teacache-cadence/--teacache-online-delta` would.
+The result then carries a `teacache` block with the controller's `full_steps` /
+`skipped_steps`; `step_seconds` covers the full steps only (a skipped step never calls the
+DiT), so read the saving off `denoise_seconds`. `benchmark/wan_tpu_run.py` exposes the same
+two as `--teacache-cadence` / `--teacache-online-delta`.
 Every per-model report carries a **Reproduction** section with the exact,
 hardware-agnostic test conditions (model id + pinned revision, shape, tp/cp, dtype,
 steps, guidance, seed, prompt) and the precise commands + measurement protocol — so

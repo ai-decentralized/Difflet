@@ -31,6 +31,18 @@ from benchmark.harness import BackendAdapter
 _REPLICA_TIMEOUT = 3600
 
 
+def _env_number(name: str, kind):
+    """``kind(os.environ[name])`` or None when unset/empty.
+
+    The two TeaCache knobs (``DIFFLET_BENCH_TEACACHE_CADENCE``,
+    ``DIFFLET_BENCH_TEACACHE_ONLINE_DELTA``) are A/B switches layered on the
+    frozen MATRIX row, the same way ``DIFFLET_BENCH_SYNC_STEPS`` is; unset means
+    the baseline the other device folders measured.
+    """
+    raw = os.environ.get(name, "").strip()
+    return kind(raw) if raw else None
+
+
 def _reported_steps(deltas, denoise_seconds, sync_steps):
     """Per-step latencies the report should quote.
 
@@ -78,6 +90,11 @@ def _worker(rank, world, spec_payload, cmd_q, reply_q):
         height=spec.height, width=spec.width, num_frames=None,
         parallel=ParallelTopology(tp_degree=world, cp_degree=1, world_size=world),
         world_size=world, teacache_speedup=None, teacache_calibration_data=None,
+        # Probe-free TeaCache A/B knobs (off by default so the frozen MATRIX
+        # row stays the baseline). The adapter reads them exactly as `difflet
+        # serve --teacache-cadence/--teacache-online-delta` would.
+        teacache_cadence=spec_payload.get("teacache_cadence"),
+        teacache_online_delta=spec_payload.get("teacache_online_delta"),
         shape_dict=lambda: {"height": spec.height, "width": spec.width, "num_frames": None},
     )
 
@@ -171,6 +188,9 @@ def _worker(rank, world, spec_payload, cmd_q, reply_q):
         request = SimpleNamespace(
             prompt=spec.prompt, num_inference_steps=spec.steps,
             seed=spec.seed, guidance_scale=spec.guidance_scale, request_id="bench",
+            # _decode reads the shape off the request since f31e433 (a profile
+            # may carry a whole shape set; the request says which one ran).
+            height=spec.height, width=spec.width,
         )
         wall = time.monotonic()
         text = adapter._encode_prompt(request.prompt)
@@ -181,7 +201,7 @@ def _worker(rank, world, spec_payload, cmd_q, reply_q):
         latents = adapter._denoise(text, request)
         denoise_s = time.monotonic() - mark
         mark = time.monotonic()
-        png = adapter._decode(latents)
+        png = adapter._decode(latents, request)
         decode_s = time.monotonic() - mark
         # A cheap visual check for changes that alter numerics: the metrics
         # above stay finite and in range even when an image is wrong.
@@ -189,10 +209,16 @@ def _worker(rank, world, spec_payload, cmd_q, reply_q):
         if save_to and rank == 0:
             Path(save_to).write_bytes(png)
         total = time.monotonic() - wall
+        # With TeaCache on, a skipped step never calls the DiT, so the timer
+        # sees only the FULL steps: `step_seconds` is then the per-full-step
+        # latency and `denoise_seconds` carries the whole saving. The skip
+        # counts ride along so a report can say which steps were real.
         steps = timer.deltas()
+        teacache = getattr(adapter, "_tpu_teacache_last_stats", None)
         if rank == 0:
             reply_q.put({
                 "type": "result", "wall_seconds": total, "load_seconds": load_seconds,
+                "teacache": teacache,
                 "encode_seconds": encode_s, "denoise_seconds": denoise_s,
                 "decode_seconds": decode_s,
                 # deltas() already drops step 0, so no further slicing here
@@ -307,6 +333,8 @@ class TpuAdapter(BackendAdapter):
             "seed": getattr(spec, "seed", 42),
             "guidance_scale": getattr(spec, "guidance_scale", 1.0),
             "prompt": getattr(spec, "prompt", None) or "a red apple on a wooden table",
+            "teacache_cadence": _env_number("DIFFLET_BENCH_TEACACHE_CADENCE", int),
+            "teacache_online_delta": _env_number("DIFFLET_BENCH_TEACACHE_ONLINE_DELTA", float),
         }
         ctx = mp.get_context("spawn")
         self._cmd_qs = [ctx.Queue() for _ in range(world)]
@@ -321,10 +349,35 @@ class TpuAdapter(BackendAdapter):
             process.start()
         pending = set(range(world))
         while pending:
-            reply = self._reply_q.get(timeout=_REPLICA_TIMEOUT)
+            reply = self._wait_reply()
             pending.discard(reply["rank"])
             if "load_seconds" in reply:
                 self._load_seconds = reply["load_seconds"]
+
+    def _wait_reply(self) -> dict:
+        """Next worker reply, or RuntimeError as soon as a rank has died.
+
+        A plain ``reply_q.get(timeout=_REPLICA_TIMEOUT)`` sat for the full hour
+        after every rank had already crashed (the ``_decode`` TypeError of
+        f9689ec left four tracebacks in the log and a parent that never
+        returned). Poll instead, and check the ranks between polls.
+        """
+        import queue as _queue
+
+        deadline = time.monotonic() + _REPLICA_TIMEOUT
+        while True:
+            try:
+                return self._reply_q.get(timeout=5)
+            except _queue.Empty:
+                pass
+            dead = [(rank, p.exitcode) for rank, p in enumerate(self._procs) if not p.is_alive()]
+            if dead:
+                self.shutdown()
+                codes = ", ".join(f"rank{rank}={code}" for rank, code in dead)
+                raise RuntimeError(f"TPU worker exited before replying ({codes}); see the log above")
+            if time.monotonic() > deadline:
+                self.shutdown()
+                raise TimeoutError(f"no reply from TPU workers within {_REPLICA_TIMEOUT}s")
 
     #: This adapter can run the denoise loop without the per-step sync, so the
     #: harness can report the natural basis alongside the comparable one.
@@ -334,7 +387,7 @@ class TpuAdapter(BackendAdapter):
         self._ensure_started(spec)
         for queue in self._cmd_qs:
             queue.put({"type": "generate", "sync_steps": sync_steps})
-        reply = self._reply_q.get(timeout=_REPLICA_TIMEOUT)
+        reply = self._wait_reply()
         return {
             "wall_seconds": reply["wall_seconds"],
             "load_seconds": reply["load_seconds"],
@@ -357,6 +410,9 @@ class TpuAdapter(BackendAdapter):
             "step_basis": reply.get("step_basis"),
             "throughput_step_seconds": reply.get("throughput_step_seconds"),
             "enqueue_step_seconds": reply.get("enqueue_step_seconds", []),
+            # None unless DIFFLET_BENCH_TEACACHE_* was set: {full_steps,
+            # skipped_steps, ...} from the controller, for the A/B report.
+            "teacache": reply.get("teacache"),
         }
 
     def shutdown(self) -> None:

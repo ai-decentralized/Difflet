@@ -645,8 +645,15 @@ def _validate_profile(profile: ServingProfile) -> None:
         raise ValueError("Wan resident serving requires CFG parallel off")
     if profile.world_size != _WORLD_SIZE:
         raise ValueError("Wan resident serving requires world_size=4")
+    # Adaptive TeaCache needs the block-0 CPU shadow + a calibration file and is
+    # not wired for serving. The probe-free modes (teacache_cadence /
+    # teacache_online_delta) ARE: they live in WanOrchestrator's host-side
+    # controller and reach it through _build_application on both backends.
     if profile.teacache_speedup is not None or profile.teacache_calibration_data is not None:
-        raise ValueError("Wan resident video serving does not support TeaCache")
+        raise ValueError(
+            "Wan resident video serving does not support adaptive TeaCache; use "
+            "--teacache-cadence or --teacache-online-delta"
+        )
 
 
 def _compile_spec(
@@ -727,6 +734,22 @@ def _application_kwargs() -> dict[str, Any]:
     }
 
 
+def _teacache_kwargs(profile: ServingProfile) -> dict[str, Any]:
+    """Probe-free TeaCache kwargs for the application (both backends).
+
+    Kept OUT of ``_application_kwargs``: that dict is part of the compile-cache
+    identity (``CacheSpec.application_kwargs``), and neither mode changes the
+    compiled graph — folding them in would force a needless recompile on
+    Trainium every time the cadence is toggled.
+    """
+    kwargs: dict[str, Any] = {}
+    if profile.teacache_cadence is not None:
+        kwargs["teacache_cadence"] = int(profile.teacache_cadence)
+    if profile.teacache_online_delta is not None:
+        kwargs["teacache_online_delta_alpha"] = float(profile.teacache_online_delta)
+    return kwargs
+
+
 def _build_application(source: ResolvedModelSource, profile: ServingProfile):
     if _backend_is_tpu():
         from difflet.models.wan.entry import create_wan_application
@@ -738,6 +761,7 @@ def _build_application(source: ResolvedModelSource, profile: ServingProfile):
             shape=profile.shape_dict(),
             backend="tpu",
             **_application_kwargs(),
+            **_teacache_kwargs(profile),
         )
 
     from difflet.models.wan.application import NeuronWanApplication
@@ -749,6 +773,7 @@ def _build_application(source: ResolvedModelSource, profile: ServingProfile):
         shape=profile.shape_dict(),
         shapes=profile.canonical_shapes() if profile.shapes else None,
         **_application_kwargs(),
+        **_teacache_kwargs(profile),
     )
 
 

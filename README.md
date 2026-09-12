@@ -91,7 +91,7 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 - **DP** — data-parallel replicas (`--dp N`). A router spawns N full model copies on disjoint core ranges and distributes requests across them; use `--mode throughput` or `--mode mixed` for a preset.
 - **Multi-shape compile** — one bucketed artifact covering several request shapes (`--shapes 320x512x61,320x512x33`), sharing a single weight copy on device. `difflet serve --shapes` serves all of them from one resident worker.
 - **TeaCache (adaptive)** — calibration-driven step-skipping (`--teacache-speedup` / `--teacache-online-delta`, with `--teacache-calibration`).
-- **TeaCache (fixed cadence)** — blind skip-every-N-steps (`--teacache-cadence N`, no calibration needed).
+- **TeaCache (fixed cadence)** — blind skip-every-N-steps (`--teacache-cadence N`, no calibration needed). `difflet serve` accepts the probe-free pair (`--teacache-cadence`, `--teacache-online-delta`) for Qwen-Image and Wan on both Trainium and the TPU backend, and adaptive `--teacache-speedup` for Flux and Qwen-Image image serving.
 - **Serving** — resident `difflet serve` worker. Image models answer `/v1/chat/completions`; video models answer the [Videos API](docs/serving/videos_api.md).
 - **Batch (JSONL)** — `--requests FILE` runs one request per line (prompt, output, seed, optional negative prompt, guidance scale, steps) through one loaded model.
 
@@ -380,9 +380,9 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 | `--total-cores N` | compile, generate, run | Core budget for validation (default: `NEURON_RT_NUM_CORES`) |
 | `--height/--width/--num-frames` | compile, generate, run, serve | Output shape (default: the model's registry shape) |
 | `--shapes HxWxF[,...]` | compile, generate, run, serve | Compile or serve several shapes from one bucketed artifact |
-| `--teacache-cadence N` | generate, run | Skip every N-th denoise step |
+| `--teacache-cadence N` | generate, run, serve | Skip every N-th denoise step |
 | `--teacache-speedup F`, `--teacache-calibration PATH` | generate, run, serve | Adaptive TeaCache target and calibration file |
-| `--teacache-online-delta ALPHA` | generate, run | Probe-free online-delta TeaCache |
+| `--teacache-online-delta ALPHA` | generate, run, serve | Probe-free online-delta TeaCache |
 | `--prompt` | generate, run | Text prompt |
 | `--requests FILE` | generate, run | JSONL batch file, one request per line |
 | `--output PATH` | generate, run | Output file (`.png` or `.mp4`) |

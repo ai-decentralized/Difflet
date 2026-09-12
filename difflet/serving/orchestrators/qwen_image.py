@@ -282,6 +282,10 @@ class QwenImageServingStageAdapter:
         self._runner_ownership_transferred = False
         self._tpu: bool = False
         self._tpu_module: Any = None
+        # Probe-free TeaCache controller for the TPU denoise loop (None = off).
+        # The Trainium path keeps its controller inside the Qwen pipeline.
+        self._tpu_teacache: Any = None
+        self._tpu_teacache_last_stats: dict[str, Any] | None = None
 
     async def create_loaded_runners(
         self,
@@ -443,6 +447,7 @@ class QwenImageServingStageAdapter:
         from difflet.models.qwen_image.application import NeuronQwenImageApplication
 
         assert self.model_dir is not None
+        teacache_cadence, teacache_online_delta_alpha = _probe_free_teacache(profile)
         self.denoise_app = NeuronQwenImageApplication(
             model_path=self.model_dir,
             parallel=profile.parallel,
@@ -455,6 +460,10 @@ class QwenImageServingStageAdapter:
             teacache_speedup=profile.teacache_speedup,
             teacache_calibration=profile.teacache_calibration_data,
             teacache_calibration_path=profile.teacache_calibration,
+            # Probe-free modes: host-side controller inside QwenImagePipeline;
+            # no probe NEFF, no calibration, no change to the compiled graph.
+            teacache_cadence=teacache_cadence,
+            teacache_online_delta_alpha=teacache_online_delta_alpha,
         )
         assert self.active_runtime is not None
         # Warm every compiled bucket at startup for multi-shape profiles so the
@@ -559,6 +568,7 @@ class QwenImageServingStageAdapter:
         xm.mark_step()
         self.denoise_app = app
         self._tpu_module = module
+        self._tpu_teacache = _build_tpu_teacache(profile)
 
     def _load_vae_stage_tpu(self, profile: ServingProfile) -> None:
         import torch
@@ -723,12 +733,22 @@ class QwenImageServingStageAdapter:
             for step in scheduler.timesteps
         ]
         with torch.no_grad():
-            for index in range(steps):
-                velocity = self._tpu_module(
-                    latents.to(torch.bfloat16), timesteps[index], states, None, None
-                )
-                latents = latents + deltas[index] * velocity.to(torch.float32)
-                xm.mark_step()
+            latents = _tpu_denoise_loop(
+                self._tpu_module,
+                latents,
+                timesteps,
+                deltas,
+                states,
+                controller=self._tpu_teacache,
+                mark_step=xm.mark_step,
+            )
+        if self._tpu_teacache is not None:
+            self._tpu_teacache_last_stats = self._tpu_teacache.stats()
+            # print, not logger.info: the serving worker is a spawned process
+            # with no logging handler, so INFO records vanish there (nothing
+            # from the worker reaches the serve log at INFO). The Wan / LTX-2 /
+            # HunyuanVideo pipelines print this line for the same reason.
+            print(f"[teacache] stats: {self._tpu_teacache_last_stats}", flush=True)
         return latents.cpu()
 
     def _decode_tpu(self, packed, request) -> bytes:
@@ -828,6 +848,13 @@ class QwenImageServingStageAdapter:
                 num_steps,
                 getattr(profile.teacache_calibration_data, "num_steps", None),
             )
+        # Adaptive TeaCache is pinned to the calibration's step count, so it is
+        # switched per request. The probe-free modes have no such contract: the
+        # pipeline's controller follows the request's steps itself, and passing
+        # None leaves it in charge (False would silently disable it).
+        teacache_enabled: bool | None = (
+            use_teacache if profile.teacache_speedup is not None else None
+        )
         sigmas = np.linspace(1.0, 1.0 / num_steps, num_steps).tolist()
         sched.set_timesteps(sigmas=sigmas, mu=mu, device="cpu")
         torch.manual_seed(request.seed)
@@ -842,7 +869,7 @@ class QwenImageServingStageAdapter:
             guidance=guidance,
             timesteps=sched.timesteps,
             num_inference_steps=num_steps,
-            teacache_enabled=use_teacache,
+            teacache_enabled=teacache_enabled,
             output_type="latent",
         )
         return out.latents.cpu()
@@ -888,6 +915,91 @@ def _validate_profile_shapes(profile: ServingProfile) -> None:
                 "Qwen-Image serving profile height/width must equal the largest "
                 "shape of the compiled shape set"
             )
+
+
+def _probe_free_teacache(profile: Any) -> tuple[int | None, float | None]:
+    """``(cadence, online_delta_alpha)`` from a profile, None when off.
+
+    ``getattr`` rather than attribute access on purpose: the benchmark harness
+    drives this adapter with a ``SimpleNamespace`` profile that predates these
+    fields, and an ``AttributeError`` there would read as a TPU regression.
+    """
+    cadence = getattr(profile, "teacache_cadence", None)
+    alpha = getattr(profile, "teacache_online_delta", None)
+    return (
+        int(cadence) if cadence is not None else None,
+        float(alpha) if alpha is not None else None,
+    )
+
+
+def _build_tpu_teacache(profile: Any):
+    """Probe-free TeaCache controller for the TPU loop, or None when off.
+
+    Only the probe-free modes exist on TPU. Adaptive TeaCache needs the block-0
+    modulated-input signal, which on Trainium comes from a fused probe NEFF
+    that has no TPU counterpart; ``build_serving_profile`` never lets an
+    adaptive profile reach the TPU adapter with a cadence/online-delta set, so
+    this is not a silent downgrade of an adaptive request.
+    """
+    cadence, alpha = _probe_free_teacache(profile)
+    if cadence is None and alpha is None:
+        return None
+    from difflet.pipeline.teacache import build_probe_free_controller
+
+    return build_probe_free_controller(
+        model=_MODEL_TYPE,
+        shape_label=f"{int(profile.height)}x{int(profile.width)}",
+        cadence=cadence,
+        online_delta_alpha=alpha,
+    )
+
+
+def _tpu_denoise_loop(module, latents, timesteps, deltas, states, *, controller, mark_step):
+    """Device-resident flow-matching Euler loop with optional TeaCache skipping.
+
+    Everything the loop touches is a device tensor (see ``_denoise_tpu`` on why
+    a Python scalar here recompiles every step), and that includes the
+    controller's state: ``record_full_step`` keeps ``noise_pred - prev`` lazy on
+    the chip and ``skip_noise_pred`` is one lazy add, so a skipped step costs an
+    elementwise op instead of a 20B forward. XLA sees three graph shapes over
+    the whole loop — step 0 (no residual yet), a full step, a skipped step —
+    and caches each after its first compile.
+
+    Two modes, both probe-free (no per-model signal, no calibration file):
+
+    * fixed cadence — the decision is index-based and forces no device sync,
+      so the loop keeps the tracing/execution overlap the natural basis in
+      ``benchmark/v5e`` measures.
+    * online-delta — ``record_full_step`` reads one scalar back
+      (``float(...)``), which is a device sync on every FULL step. On this
+      loop that is the same cost as the harness's synced basis; the skipped
+      steps still pay nothing.
+
+    The velocity is recorded in fp32, the dtype the latent update already casts
+    to, so the cached residual is not quantized to bf16 on the way through.
+    """
+    import torch
+
+    steps = len(timesteps)
+    if controller is not None:
+        from difflet.pipeline.teacache import sync_probe_free_num_steps
+
+        # The controller is built at load time, before any request's step
+        # count is known; sync so the cooldown protects the schedule's real tail.
+        sync_probe_free_num_steps(controller, steps)
+        controller.reset()
+    for index in range(steps):
+        if controller is not None and controller.should_skip(index, None):
+            velocity = controller.skip_noise_pred()
+        else:
+            velocity = module(
+                latents.to(torch.bfloat16), timesteps[index], states, None, None
+            ).to(torch.float32)
+            if controller is not None:
+                controller.record_full_step(velocity)
+        latents = latents + deltas[index] * velocity
+        mark_step()
+    return latents
 
 
 def _packed_latent_grid(height: int, width: int, seq: int) -> tuple[int, int]:
