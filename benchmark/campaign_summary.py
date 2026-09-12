@@ -56,6 +56,16 @@ def _shape(d) -> str:
     return "×".join(str(x) for x in dims if x is not None)
 
 
+def _finite(d: dict):
+    """Output finiteness: the adapter's tensor check when the CLI saved a .pt,
+    else the real-loop run's own check of its output tensor (in its note)."""
+    fin = (d.get("output") or {}).get("finite")
+    if fin is None:
+        notes = " ".join(d.get("notes") or [])
+        fin = True if "finite=True" in notes else (False if "finite=False" in notes else None)
+    return fin
+
+
 def feature_table(label: str, price: float | None, models=CAMPAIGN_MODELS) -> list[str]:
     L = [f"### Feature: {_CONFIG_TITLE.get(label, label)}", "",
          "| model | shape / steps | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁶ | "
@@ -79,13 +89,7 @@ def feature_table(label: str, price: float | None, models=CAMPAIGN_MODELS) -> li
         warm = (d.get("e2e_warm") or {}).get("mean")
         per_hr = 3600.0 / warm if warm else None
         cost = (price / per_hr * 1000) if (price and per_hr) else None
-        out = d.get("output") or {}
-        finite = out.get("finite")
-        if finite is None:
-            # video cells save an .mp4 (no tensor to inspect); the real-loop run
-            # finite-checks its own output tensor and records it in its note
-            notes = " ".join(d.get("notes") or [])
-            finite = True if "finite=True" in notes else (False if "finite=False" in notes else None)
+        finite = _finite(d)
         out_s = "✓ finite" if finite else ("?" if finite is None else "**NaN/Inf**")
         st = d.get("step_latency")
         note = ""
@@ -136,7 +140,7 @@ def nxdi_table(price: float | None) -> list[str]:
         cl = (r.get("e2e_breakdown") or {}).get("weights_load_total_s")
         wl = (r.get("e2e_warm_breakdown") or {}).get("weights_load_total_s")
         host = (r.get("e2e_warm_breakdown") or {}).get("host_pipeline_load_s")
-        fin = (r.get("output") or {}).get("finite")
+        fin = _finite(r)
         cells = [
             f"[{name}]({md})", _min(r.get("compile_seconds")),
             f"**{_sec(r.get('e2e_cold_seconds'))}**", f"**{_sec(warm)}**",
