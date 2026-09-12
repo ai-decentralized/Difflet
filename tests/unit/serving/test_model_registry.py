@@ -243,10 +243,7 @@ def test_serving_profile_carries_probe_free_teacache_modes(model_id, options, ca
 
 @pytest.mark.parametrize(
     "model_id",
-    [
-        "black-forest-labs/FLUX.1-dev",
-        "Lightricks/LTX-2",
-    ],
+    ["black-forest-labs/FLUX.1-dev"],
 )
 def test_serving_profile_rejects_probe_free_teacache_for_unwired_adapters(model_id):
     """Adapters that do not wire the probe-free controller fail at option
@@ -256,7 +253,7 @@ def test_serving_profile_rejects_probe_free_teacache_for_unwired_adapters(model_
 
     assert exc.value.code == "invalid_extra_body"
     assert "--teacache-cadence" in exc.value.message
-    assert "hunyuan_video, qwen_image, wan" in exc.value.message
+    assert "hunyuan_video, ltx_2, qwen_image, wan" in exc.value.message
 
 
 def test_serving_profile_carries_probe_free_teacache_for_hunyuan_on_tpu(monkeypatch):
@@ -391,10 +388,7 @@ def test_serving_profile_reports_invalid_parallel_values(options, message):
 
 @pytest.mark.parametrize(
     "model_id",
-    [
-        "black-forest-labs/FLUX.1-dev",
-        "Lightricks/LTX-2",
-    ],
+    ["black-forest-labs/FLUX.1-dev"],
 )
 def test_serving_rejects_unported_models_on_tpu_before_touching_weights(monkeypatch, model_id):
     """Seen on a v5e: `difflet serve` for HunyuanVideo resolved the snapshot and
@@ -414,6 +408,7 @@ def test_serving_rejects_unported_models_on_tpu_before_touching_weights(monkeypa
         "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
         "Wan-AI/Wan2.1-T2V-14B-Diffusers",
         "hunyuanvideo-community/HunyuanVideo",
+        "Lightricks/LTX-2",
     ],
 )
 def test_serving_accepts_the_tpu_ported_models(monkeypatch, model_id):

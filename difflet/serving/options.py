@@ -139,9 +139,10 @@ class ServeOptions:
 # (--teacache-cadence / --teacache-online-delta) into their denoise loop. Both
 # run on the eager TPU backend and on Trainium. Flux/HunyuanVideo/LTX-2 keep
 # adaptive-only (or no) TeaCache in serving.
-# HunyuanVideo: on the TPU backend only (its adapter's _validate_profile
-# rejects the modes on Trainium, where the Neuron denoiser does not wire them).
-_PROBE_FREE_TEACACHE_SERVING_MODELS = frozenset({"qwen_image", "wan", "hunyuan_video"})
+# HunyuanVideo and LTX-2: on the TPU backend only (their adapters'
+# _validate_profile reject the modes on Trainium, where the Neuron
+# denoisers do not wire them).
+_PROBE_FREE_TEACACHE_SERVING_MODELS = frozenset({"qwen_image", "wan", "hunyuan_video", "ltx_2"})
 
 # (model_type, output_modality) pairs whose serving adapters route a compiled
 # shape SET on one resident worker. HunyuanVideo 1.5 and LTX-2 are excluded:
