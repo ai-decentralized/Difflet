@@ -12,6 +12,7 @@ import os
 import sys
 
 from difflet.pipeline.parallel_config import CP_MODES
+from difflet.ops.attention_config import ATTENTION_IMPLS, attention_implementation
 
 _ORCHESTRATOR_MAP: dict[str, str] = {
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": "difflet.cli.orchestrators.wan.WanOrchestrator",
@@ -46,6 +47,7 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--tp-degree", type=int, default=None)
     p.add_argument("--cp-degree", type=int, default=1)
     p.add_argument("--cp-mode", choices=list(CP_MODES), default="gather_kv")
+    p.add_argument("--attention-impl", choices=ATTENTION_IMPLS, default="megakernel")
     p.add_argument("--cfg-parallel", dest="cfg_parallel", action="store_true")
     p.add_argument("--sp", dest="sp_enabled", action="store_true")
     p.add_argument("--height", type=int, default=None)
@@ -88,7 +90,8 @@ def main(argv: list[str] | None = None) -> int:
             (args.tp_degree or 1) * (args.cp_degree or 1)
         )
         prewarm_neuron_runtime(num_cores)
-    orchestrator._run_stage_internal(args.stage, args)
+    with attention_implementation(args.attention_impl):
+        orchestrator._run_stage_internal(args.stage, args)
     return 0
 
 

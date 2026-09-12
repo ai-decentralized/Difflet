@@ -2,11 +2,13 @@
 
 import math
 import os
+from functools import lru_cache
 
 import torch
 import torch.nn.functional as F
 
 from nkilib.core.attention.attention_cte import attention_cte
+from difflet.ops.attention_config import get_attention_impl
 
 try:
     from nkilib.experimental.attention.ring_attention_fwd import ring_attention_spmd_fwd
@@ -32,6 +34,20 @@ def attention(
     tp_out: bool = False,
     **kwargs,
 ):
+    if (bound_min is None) != (bound_max is None):
+        raise ValueError("bound_min and bound_max must both be provided")
+    if bound_min is not None and attention_mask is not None:
+        raise ValueError("attention_mask and bounds are mutually exclusive")
+    if get_attention_impl() == "sdpa":
+        if bound_min is not None:
+            k_len = k.shape[-2] if tp_k else k.shape[-1]
+            keys = torch.arange(k_len, device=k.device).view(1, 1, -1)
+            attention_mask = (keys >= bound_min) & (keys < bound_max)
+        _report_kernel("sdpa")
+        return _masked_sdpa_attention(
+            q, k, v, scale=scale, causal=causal, attention_mask=attention_mask,
+            tp_q=tp_q, tp_k=tp_k, tp_out=tp_out, **kwargs,
+        )
     # Contiguous-masked (lossless) flash path: a caller that resolved its mask to
     # attention_cte's per-query bound_min/bound_max range (via
     # ops_impl.mask_bounds.mask_to_contiguous_bounds, computed OUTSIDE the traced
@@ -40,10 +56,8 @@ def attention(
     # forward — running mask_to_contiguous_bounds in-graph trips an XLA broadcast
     # error on some mask shapes, so there is deliberately no in-graph auto-route.
     # range_select requires scale==1.0, so pre-scale q here.
-    if bound_min is not None or bound_max is not None:
-        assert bound_min is not None and bound_max is not None, (
-            "bound_min and bound_max must both be provided"
-        )
+    if bound_min is not None:
+        _report_kernel("attention_cte (bounds)")
         vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
         kernel = attention_cte[2] if vc_size == 2 else attention_cte
         s = 1.0 if scale is None else float(scale)
@@ -63,6 +77,7 @@ def attention(
         )
 
     if attention_mask is not None:
+        _report_kernel("sdpa (masked fallback under megakernel policy)")
         return _masked_sdpa_attention(
             q,
             k,
@@ -75,6 +90,7 @@ def attention(
             tp_out=tp_out,
             **kwargs,
         )
+    _report_kernel("attention_cte")
     vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
     kernel = attention_cte[2] if vc_size == 2 else attention_cte
     return kernel(
@@ -88,6 +104,11 @@ def attention(
         tp_out=tp_out,
         **kwargs,
     )
+
+
+@lru_cache(maxsize=None)
+def _report_kernel(name: str) -> None:
+    print(f"[difflet] tracing attention kernel: {name}", flush=True)
 
 
 def _masked_sdpa_attention(
@@ -116,7 +137,7 @@ def _masked_sdpa_attention(
     default_scale = 1.0 / math.sqrt(q_sdpa.shape[-1])
     if desired_scale != default_scale:
         q_sdpa = q_sdpa * (desired_scale / default_scale)
-    if causal:
+    if causal and attention_mask is not None:
         attention_mask = _merge_causal_mask(q_sdpa, k_sdpa, attention_mask)
         causal = False
 
@@ -156,6 +177,11 @@ def cross_attention(q, k, v, *, scale: float | None = None, attention_mask=None,
     )
 
 
+def _require_ring_kernel():
+    if get_attention_impl() == "sdpa":
+        raise NotImplementedError("SDPA does not support ring attention; use gather_kv or ulysses")
+
+
 def ring_attention(q, k, v, *, scale: float, causal: bool = False):
     """Ring context-parallel self-attention via nkilib ring_attention_spmd_fwd.
 
@@ -163,6 +189,7 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
     The ring membership IS the cp-axis subgroup the model scattered Q with,
     so K/V rotate consistently with the scatter by construction.
     """
+    _require_ring_kernel()
     s_local = int(q.shape[2])
     if s_local % 128 != 0:
         raise ValueError(
@@ -280,6 +307,7 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float, c
     text_k, text_v   [B, H, S_txt,    d]           replicated — local partial
     returns          [B, H, S_img/cp + S_txt, d]
     """
+    _require_ring_kernel()
     if causal:
         raise NotImplementedError(
             "joint_ring_attention device path supports only non-causal joint MMDiT "
@@ -383,14 +411,12 @@ def _dense_attention(q, k, v, *, scale: float, causal: bool):
     b, h, s_q, d = q.shape
     s_k = k.shape[2]
     bs = b * h
-    vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
-    kernel = attention_cte[2] if vc_size == 2 else attention_cte
-    out = kernel(
+    out = attention(
         q.reshape(bs, s_q, d),
         k.reshape(bs, s_k, d),
         v.reshape(bs, s_k, d),
         scale=float(scale),
-        causal_mask=causal,
+        causal=causal,
         tp_q=True,
         tp_k=True,
         tp_out=False,

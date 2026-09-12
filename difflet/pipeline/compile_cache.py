@@ -13,12 +13,13 @@ import hashlib
 import json
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 from typing import Any
 
 from difflet import envs
+from difflet.ops.attention_config import attention_cache_inputs, get_attention_impl
 from difflet.pipeline.parallel_config import CandidateConfig, DiffletParallelConfig
 
 
@@ -59,6 +60,7 @@ class CacheSpec:
     # backend is injected into the key together with its extra toolchain
     # packages so e.g. TPU and Trainium artifacts can never collide.
     backend: str | None = None
+    attention_impl: str = field(default_factory=get_attention_impl)
 
     def cache_inputs(self) -> dict[str, Any]:
         """Fields that drive the AOT artifact identity (hash key input).
@@ -69,6 +71,7 @@ class CacheSpec:
         the major.minor Python version to avoid micro-version churn.
         """
         inputs: dict[str, Any] = {
+            **attention_cache_inputs(self.attention_impl),
             "model_id": self.model_id,
             "model_name": self.model_name,
             "revision": self.revision,
@@ -118,6 +121,7 @@ class CacheSpec:
         """
         return {
             "model_path": self.model_path,
+            "attention_impl": self.attention_impl,
             "python_full": sys.version.split()[0],
         }
 
