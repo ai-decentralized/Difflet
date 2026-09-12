@@ -76,13 +76,18 @@ def load_tpu_host_pipeline(model_path: str, *, dtype: torch.dtype, encoder_dtype
             os.path.join(model_path, "text_encoder"), dtype=encoder_dtype
         ).eval()
         encoder.requires_grad_(False)
+    # fp32 on the host, whatever the DiT runs in: bf16 is emulated on the
+    # EPYC host, and measured in the worker the bf16 audio VAE decode took
+    # 114 s and the vocoder 196 s where fp32 takes 0.1 s and 0.6 s. The
+    # orchestrator casts what it hands the DiT to `dtype` itself.
     pipe = LTX2Pipeline.from_pretrained(
-        model_path, torch_dtype=dtype, transformer=None, text_encoder=encoder
+        model_path, torch_dtype=torch.float32, transformer=None, text_encoder=encoder
     )
     pipe.to("cpu")
     pipe.set_progress_bar_config(disable=True)
+    # The wire/return dtype follows the host pipeline (fp32), not the DiT.
     _install_broadcast_prompt_encoder(
-        pipe, is_encoder=is_encoder, dtype=dtype, packed_width=packed_text_dim(model_path)
+        pipe, is_encoder=is_encoder, dtype=torch.float32, packed_width=packed_text_dim(model_path)
     )
     return pipe
 
@@ -128,10 +133,12 @@ def _install_broadcast_prompt_encoder(
         xm.mark_step()
         if int(payload[2].cpu()[0]) != _ENCODE_OK:
             raise RuntimeError("LTX-2 prompt encoding failed on the encoder rank")
-        embeds = payload[0].cpu()
-        if dtype is not None:
-            embeds = embeds.to(dtype)
-        return embeds, payload[1].cpu().to(torch.int64)
+        # Returned in the host pipeline's dtype, not the caller's: the fp32
+        # connectors consume these next (F.linear rejects a bf16 input on fp32
+        # weights), and the orchestrator casts the connector output to the DiT
+        # dtype when it builds the bundle.
+        del dtype
+        return payload[0].cpu(), payload[1].cpu().to(torch.int64)
 
     pipe._get_gemma_prompt_embeds = _encode
 
@@ -163,6 +170,8 @@ class TpuDeviceVideoVae:
         self.config = vae.config
         self.dtype = dtype
         self._device = torch_xla.device()
+        # The host pipeline is fp32 (see load_tpu_host_pipeline); on the chip
+        # the VAE runs in the DiT's dtype.
         self._vae = vae.to(dtype).to(self._device).eval()
 
     def decode(self, latents, timestep=None, return_dict=False):

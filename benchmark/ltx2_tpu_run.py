@@ -27,6 +27,36 @@ SNAP = os.environ.get(
 PROMPT = "a cinematic shot of a red fox running through a snowy forest"
 
 
+class _Timed:
+    """Attribute/call passthrough that records how long each component's
+    decode()/__call__ takes (the orchestrator calls vae.decode, audio_vae.decode
+    and vocoder(mel))."""
+
+    seconds: dict = {}
+
+    def __init__(self, inner, name):
+        self._inner, self._name = inner, name
+
+    def __getattr__(self, item):
+        attr = getattr(self._inner, item)
+        if item == "decode":
+            def timed(*a, **k):
+                t = time.monotonic()
+                try:
+                    return attr(*a, **k)
+                finally:
+                    _Timed.seconds[self._name] = round(time.monotonic() - t, 2)
+            return timed
+        return attr
+
+    def __call__(self, *a, **k):
+        t = time.monotonic()
+        try:
+            return self._inner(*a, **k)
+        finally:
+            _Timed.seconds[self._name] = round(time.monotonic() - t, 2)
+
+
 def _mem(xm, device):
     try:
         return {k: round(v / 2**30, 3) for k, v in xm.get_memory_info(device).items()
@@ -135,14 +165,22 @@ def _worker(rank, world, args, reply_q, decode_done):
     if rank != 0 and args["decode"]:
         decode_done.wait()
     if rank == 0 and args["decode"]:
+        # Time the two decodes apart: the video VAE is on the chip, the audio
+        # VAE + vocoder are on the host.
+        vae, audio_vae, vocoder = orchestrator.vae, orchestrator.audio_vae, orchestrator.vocoder
         mark = time.monotonic()
-        video, audio = orchestrator._decode_latents(latents, out.audio_latents if hasattr(out, "audio_latents") else None)
+        orchestrator.audio_vae = _Timed(audio_vae, "audio_vae")
+        orchestrator.vocoder = _Timed(vocoder, "vocoder")
+        orchestrator.vae = _Timed(vae, "video_vae")
+        video, audio = orchestrator._decode_latents(latents, out.audio_latents)
         seconds = time.monotonic() - mark
         reply_q.put({"type": "decoded", "seconds": seconds, "where": "device(video)+host(audio)",
-                     "shape": list(video.shape), "finite": bool(video.isfinite().all())})
+                     "shape": list(video.shape), "finite": bool(video.isfinite().all()),
+                     "split": dict(_Timed.seconds)})
         import numpy as np
 
-        frames = video[0].permute(1, 2, 3, 0).clamp(0, 1) if video.min() >= 0 else (video[0].permute(1, 2, 3, 0).clamp(-1, 1) + 1) / 2
+        # postprocess_video(output_type="pt") returns BFCHW in [0, 1].
+        frames = video[0].permute(0, 2, 3, 1).clamp(0, 1)
         np.save(args["out"] + ".npy", frames.float().numpy())
         try:
             import imageio
