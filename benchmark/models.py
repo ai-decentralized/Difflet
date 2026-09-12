@@ -9,10 +9,27 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional
 
-# The Neuron inference venv all Trainium runs use.
-NXD_VENV = "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference"
+
+def _resolve_venv() -> str:
+    """The Neuron inference venv all Trainium runs use.
+
+    Resolution order: ``$DIFFLET_VENV`` -> ``<repo>/.venv`` (what
+    ``scripts/setup_env.sh`` builds; recent Neuron DLAMIs no longer ship the
+    prebuilt ``/opt`` venv) -> the historical ``/opt`` path.
+    """
+    env = os.environ.get("DIFFLET_VENV")
+    if env:
+        return env
+    repo_venv = Path(__file__).resolve().parent.parent / ".venv"
+    if (repo_venv / "bin" / "difflet").exists():
+        return str(repo_venv)
+    return "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference"
+
+
+NXD_VENV = _resolve_venv()
 
 # Results are namespaced per hardware target so other backends reproduce
 # side-by-side: benchmark/<device>/{<slug>.json,<slug>.md,RESULTS.md,logs/}.
