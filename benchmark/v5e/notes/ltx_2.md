@@ -1,3 +1,9 @@
+> Port-era notes (2026-08/09, standalone runner). The measured row on the shared
+> cold/warm/per-step protocol is [`../ltx_2.md`](../ltx_2.md) (2026-09-12,
+> `benchmark.bench --backend tpu`); the cross-device tables are in
+> [`../RESULTS.md`](../RESULTS.md). Kept for the TPU-specific detail
+> (what is on the chip, parity, TeaCache A/B, profiling) that the generated report does not carry.
+
 # Benchmark — Lightricks/LTX-2
 
 **Status:** ok
