@@ -187,3 +187,18 @@ frames were decoded un-denormalized: cyan cast + dithering, 0.17/px vs the host 
 0.2 s on chip; `difflet serve` ready in 246 s, requests 200 in 51 s, bit-identical; cadence 2
 skips 5/20 (DiT 0.75×, 0.0088/px). The 512×768×121 default also fits (VAE 0.7 s on chip) but
 serve it with a longer `--worker-restart-timeout` on a cold cache. Next: FLUX (needs an HF token).
+
+### 2026-09-12 — FLUX: port scaffold committed, on-device work blocked on the HF token
+
+`0389f74`, option (b) as planned: diffusers' `FluxTransformer2DModel` sharded per rank
+(`models/flux/tp_sharding.py` — head-sharded attention with the per-head qk RMSNorm and the
+shared per-position RoPE left local, column→row FFNs, single-block `proj_out` split into two
+row-parallel halves reduced once), `backends/tpu/flux/{config,transformer}.py` (CheckpointSlice
+windows onto the checkpoint's fused `proj_out`), `models/flux/tpu_application.py` (T5-XXL fp32 on
+ordinal 0 + broadcast, CLIP-L per rank, VAE on the primary replica's chip, device-resident Euler
+loop with the probe-free controller), the TPU branch of the Flux serving adapter, registry and
+option-layer flips, `benchmark/flux_tpu_run.py`. The Trainium fork is untouched. 16 CPU tests
+pin the module against diffusers (tp=1, 1e-5) and the loop against the scheduler (1e-6). Not run
+on the chips with real weights: `black-forest-labs/FLUX.1-dev` is gated and the host has no
+token (only README/LICENSE cached). Weight-free device probes (synthetic sharded checkpoint
+parity, full-geometry timing) are running; see `docs/plans/2026-09-12-tpu-next-steps.md` §2.
