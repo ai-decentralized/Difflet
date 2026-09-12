@@ -91,12 +91,16 @@ def _install_broadcast_prompt_encoder(
 ) -> None:
     original = pipe._get_gemma_prompt_embeds
     packed_dim = packed_width
+    pipe_dtype = dtype
 
+    # Same signature diffusers' LTX2Pipeline uses when it calls
+    # _get_gemma_prompt_embeds(..., device=..., dtype=...) from encode_prompt.
     def _encode(prompt, num_videos_per_prompt=1, max_sequence_length=1024, scale_factor=8,
-                device=None, dtype_=None):
+                device=None, dtype=None):
         import torch_xla
         import torch_xla.core.xla_model as xm
 
+        wire_dtype = pipe_dtype  # what crosses the interconnect; cast to `dtype` after
         prompts = [prompt] if isinstance(prompt, str) else list(prompt)
         batch = len(prompts) * int(num_videos_per_prompt)
         xla = torch_xla.device()
@@ -106,24 +110,27 @@ def _install_broadcast_prompt_encoder(
                 embeds, mask = original(
                     prompt, num_videos_per_prompt=num_videos_per_prompt,
                     max_sequence_length=max_sequence_length, scale_factor=scale_factor,
-                    device=torch.device("cpu"), dtype=dtype,
+                    device=torch.device("cpu"), dtype=wire_dtype,
                 )
-                embeds = embeds.to(dtype)
+                embeds = embeds.to(wire_dtype)
                 mask = mask.to(torch.int32)
             except Exception:  # noqa: BLE001 - re-raised below on every rank
                 logger.exception("ltx_2.tpu_prompt_encode_failed")
                 status = _ENCODE_FAILED
-                embeds = torch.zeros(batch, max_sequence_length, packed_dim, dtype=dtype)
+                embeds = torch.zeros(batch, max_sequence_length, packed_dim, dtype=wire_dtype)
                 mask = torch.zeros(batch, max_sequence_length, dtype=torch.int32)
         else:
-            embeds = torch.zeros(batch, max_sequence_length, packed_width, dtype=dtype)
+            embeds = torch.zeros(batch, max_sequence_length, packed_dim, dtype=wire_dtype)
             mask = torch.zeros(batch, max_sequence_length, dtype=torch.int32)
         payload = [embeds.to(xla), mask.to(xla), torch.tensor([status], dtype=torch.int32).to(xla)]
         xm.collective_broadcast(payload, root_ordinal=0)
         xm.mark_step()
         if int(payload[2].cpu()[0]) != _ENCODE_OK:
             raise RuntimeError("LTX-2 prompt encoding failed on the encoder rank")
-        return payload[0].cpu(), payload[1].cpu().to(torch.int64)
+        embeds = payload[0].cpu()
+        if dtype is not None:
+            embeds = embeds.to(dtype)
+        return embeds, payload[1].cpu().to(torch.int64)
 
     pipe._get_gemma_prompt_embeds = _encode
 
