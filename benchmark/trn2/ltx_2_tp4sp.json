@@ -1,0 +1,39 @@
+{
+  "model_id": "Lightricks/LTX-2",
+  "model_type": "ltx_2",
+  "backend": "trainium",
+  "device": "",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": true
+  },
+  "shape": {
+    "height": 480,
+    "width": 704,
+    "num_frames": 49
+  },
+  "steps": 20,
+  "status": "skipped",
+  "skip_reason": "LTX-2 has no sequence-parallel path (registry supports_sp=False; `difflet` rejects --sp for it, cli/main.py _validate_sp)",
+  "config_slug": "ltx_2_tp4sp",
+  "model_slug": "ltx_2",
+  "config": "tp4sp",
+  "device_slug": "trn2",
+  "revision": "47da56e2ad66ce4125a9922b4a8826bf407f9d0a",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video",
+  "config_label": "tp=4 + sequence parallel; tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF)",
+  "toolchain": {},
+  "throughput": {},
+  "compile_breakdown": {},
+  "timestamp": "2026-09-12 16:31 UTC",
+  "notes": [
+    "N/A by design (tp4sp): LTX-2 has no sequence-parallel path (registry supports_sp=False; `difflet` rejects --sp for it, cli/main.py _validate_sp)"
+  ]
+}
