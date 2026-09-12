@@ -23,9 +23,9 @@
 |---|---|
 | compile (AOT, one-time) | 88.8 min (5327 s) |
 | **e2e generate — cold start** (page cache dropped) | **12.5 min (748 s)** |
-| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 2.2 min (134 s) |
+| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 11.2 min (672 s) |
 | **e2e generate — warm cache** | **116.21 s** |
-| &nbsp;&nbsp;↳ of which weights load (from page cache) | 11.19 s |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 57.64 s |
 
 > Cold vs warm: **12.5 min (748 s) → 116.21 s** (6.4× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
@@ -58,11 +58,14 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 | stage | weight shard | weight load |
 |---|---:|---:|
+| text_encoder_clip | — | 4.57 s |
 | text_encoder | — | 2.2 min (134 s) |
-| **weights load total** | 0.0 ms | **2.2 min (134 s)** |
+| stage_2 | — | 8.7 min (519 s) |
+| vae_decoder | — | 13.33 s |
+| **weights load total** | 0.0 ms | **11.2 min (672 s)** |
 
-- **weights load total:** 2.2 min (134 s) of 12.5 min (748 s) wall
-- **compute + overhead (residual):** 10.2 min (613 s) = text-encode + denoise loop + VAE decode + process/runtime startup
+- **weights load total:** 11.2 min (672 s) of 12.5 min (748 s) wall
+- **compute + overhead (residual):** 76.27 s = text-encode + denoise loop + VAE decode + process/runtime startup
 - VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode.
 
 ## Output validity

@@ -52,19 +52,31 @@
     },
     "wall_total_s": 4455.155
   },
-  "load_seconds": 134.338,
+  "load_seconds": 671.548,
   "e2e_cold_seconds": 747.815,
   "e2e_breakdown": {
     "stages": [
       {
+        "stage": "text_encoder_clip",
+        "load_s": 4.57
+      },
+      {
         "stage": "text_encoder",
         "load_s": 134.338
+      },
+      {
+        "stage": "stage_2",
+        "load_s": 519.31
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 13.33
       }
     ],
-    "weights_load_total_s": 134.338,
+    "weights_load_total_s": 671.548,
     "weights_shard_total_s": 0.0,
     "wall_total_s": 747.815,
-    "compute_and_overhead_s": 613.477,
+    "compute_and_overhead_s": 76.267,
     "note": "VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode."
   },
   "e2e_warm": {
@@ -158,14 +170,26 @@
   "e2e_warm_breakdown": {
     "stages": [
       {
+        "stage": "text_encoder_clip",
+        "load_s": 5.25
+      },
+      {
         "stage": "text_encoder",
         "load_s": 11.193
+      },
+      {
+        "stage": "stage_2",
+        "load_s": 29.94
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 11.26
       }
     ],
-    "weights_load_total_s": 11.193,
+    "weights_load_total_s": 57.643,
     "weights_shard_total_s": 0.0,
     "wall_total_s": 116.212,
-    "compute_and_overhead_s": 105.019,
+    "compute_and_overhead_s": 58.569,
     "note": "VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode."
   }
 }
