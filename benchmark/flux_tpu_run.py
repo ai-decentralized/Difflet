@@ -133,12 +133,16 @@ def _worker(rank, world, args, reply_q, decode_done):
         decode_done.wait()
     if rank == 0 and args["decode"]:
         torch.save({"latents": latents}, args["out"] + ".latents.pt")
-        mark = time.monotonic()
-        image = app.decode(latents, height=args["height"], width=args["width"])
-        seconds = time.monotonic() - mark
+        # Twice: the first decode carries the VAE graph's compile (117 s at
+        # 1024x1024 measured), the second is the warm figure serving sees.
+        seconds = []
+        for _ in range(2):
+            mark = time.monotonic()
+            image = app.decode(latents, height=args["height"], width=args["width"])
+            seconds.append(time.monotonic() - mark)
         image.save(args["out"] + ".png")
-        reply_q.put({"type": "decoded", "seconds": seconds, "where": "device", "size": list(image.size),
-                     "mem_after_decode": _mem(xm, device)})
+        reply_q.put({"type": "decoded", "seconds": seconds[-1], "first_decode_seconds": seconds[0],
+                     "where": "device", "size": list(image.size), "mem_after_decode": _mem(xm, device)})
         decode_done.set()
 
     reply_q.put({"type": "done", "rank": rank})

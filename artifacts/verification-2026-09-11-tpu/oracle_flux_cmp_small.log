@@ -1,0 +1,53 @@
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank1] checkpoint sharded on host in 5s host_rss=15.0G
+[rank2] checkpoint sharded on host in 5s host_rss=15.0G
+[rank0] checkpoint sharded on host in 5s host_rss=15.1G
+[rank3] checkpoint sharded on host in 5s host_rss=15.0G
+[rank3] resident hbm={'bytes_used': 10.14, 'bytes_limit': 15.75, 'peak_bytes_used': 10.14} host_rss=15.2G
+[rank1] resident hbm={'bytes_used': 10.14, 'bytes_limit': 15.75, 'peak_bytes_used': 10.14} host_rss=15.2G
+[rank0] resident hbm={'bytes_used': 10.14, 'bytes_limit': 15.75, 'peak_bytes_used': 10.14} host_rss=15.2G
+[rank2] resident hbm={'bytes_used': 10.14, 'bytes_limit': 15.75, 'peak_bytes_used': 10.14} host_rss=15.2G
+[rank1] forward 0 in 26.723s hbm={'bytes_used': 10.16, 'bytes_limit': 15.75, 'peak_bytes_used': 10.16} host_rss=15.2G
+[rank0] forward 0 in 26.721s hbm={'bytes_used': 10.16, 'bytes_limit': 15.75, 'peak_bytes_used': 10.16} host_rss=15.2G
+[rank2] forward 0 in 26.664s hbm={'bytes_used': 10.16, 'bytes_limit': 15.75, 'peak_bytes_used': 10.16} host_rss=15.2G
+[rank3] forward 0 in 26.783s hbm={'bytes_used': 10.16, 'bytes_limit': 15.75, 'peak_bytes_used': 10.16} host_rss=15.2G
+[rank1] forward 1 in 0.175s hbm={'bytes_used': 10.16, 'bytes_limit': 15.75, 'peak_bytes_used': 10.16} host_rss=15.2G
+[rank2] forward 1 in 0.175s hbm={'bytes_used': 10.16, 'bytes_limit': 15.75, 'peak_bytes_used': 10.16} host_rss=15.2G
+[rank0] forward 1 in 0.175s hbm={'bytes_used': 10.16, 'bytes_limit': 15.75, 'peak_bytes_used': 10.16} host_rss=15.2G
+[rank3] forward 1 in 0.175s hbm={'bytes_used': 10.16, 'bytes_limit': 15.75, 'peak_bytes_used': 10.16} host_rss=15.2G
+[rank3] forward 2 in 0.164s hbm={'bytes_used': 10.16, 'bytes_limit': 15.75, 'peak_bytes_used': 10.16} host_rss=15.2G
+[rank1] forward 2 in 0.164s hbm={'bytes_used': 10.16, 'bytes_limit': 15.75, 'peak_bytes_used': 10.16} host_rss=15.2G
+[rank2] forward 2 in 0.164s hbm={'bytes_used': 10.16, 'bytes_limit': 15.75, 'peak_bytes_used': 10.16} host_rss=15.2G
+[rank0] forward 2 in 0.164s hbm={'bytes_used': 10.16, 'bytes_limit': 15.75, 'peak_bytes_used': 10.16} host_rss=15.2G
+RESULT {
+ "step_s": [
+  26.721,
+  0.175,
+  0.164
+ ],
+ "out_shape": [
+  1,
+  256,
+  64
+ ],
+ "finite": true,
+ "hbm_peak_gb": 10.16,
+ "vs_fp32": {
+  "cosine": 0.9901911020278931,
+  "rel_l1": 0.13498131930828094,
+  "max_abs": 1.0036295652389526
+ },
+ "vs_bf16_host": {
+  "cosine": 0.9997402429580688,
+  "rel_l1": 0.021959776058793068,
+  "max_abs": 0.234375
+ },
+ "control_bf16_vs_fp32": {
+  "cosine": 0.9897407293319702,
+  "rel_l1": 0.13802233338356018,
+  "max_abs": 1.0329264402389526
+ }
+}

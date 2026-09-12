@@ -24,12 +24,14 @@ instead start a Neuron compile on a TPU box).
   benchmark path). Wan 2.1 was never measured on TPU before this campaign; its serving works and
   its output matches upstream diffusers fp32 to 0.014/px — the visible artifacts are the model's own
   at the 9-frame smoke shape.
-- **FLUX, HunyuanVideo, LTX-2: N/A by design** (registry lists no `tpu` backend) — and the way they
-  failed was a bug: serving had no backend gate and died inside the Neuron path after resolving or
+- **FLUX, HunyuanVideo, LTX-2: N/A by design at the start** (registry listed no `tpu` backend) — and
+  the way they failed was a bug: serving had no backend gate and died inside the Neuron path after resolving or
   downloading weights (`d384b5c`); the CLI died in a stage subprocess with a Neuron import error
   even for the *ported* models (`619d98b`). Both now fail in < 0.2 s with a message naming the
   supported backends / the paths that do run on TPU.
-- Porting plan for the three: `docs/plans/2026-09-11-tpu-port-hunyuan-ltx2-flux.md`.
+- Porting plan for the three: `docs/plans/2026-09-11-tpu-port-hunyuan-ltx2-flux.md` — **all three
+  are now ported** (Phases 5–7): HunyuanVideo and LTX-2 on 2026-09-11/12, FLUX.1-dev on 2026-09-12
+  once a token for the gated repo was available. Every serving model runs on the TPU backend.
 - Two commits, two bugs, both pinned by unit tests; 560/562 serving tests green in the TPU venv
   (the 2 failures reproduce on `main`, unrelated `test_video_storage` path checks).
 
@@ -40,7 +42,7 @@ instead start a Neuron compile on a TPU box).
 | Qwen-Image | **PASS** · 7.6 s / 1024² 20 steps (cadence 2) | **PASS** · 10.12 s denoise baseline | N/A · no CLI runtime on TPU (fail-fast, `619d98b`) | **PASS** cadence 2 = 0.75×; online-delta LIMIT (slower in natural basis) | |
 | Wan 2.2 | **PASS** · 30.4 s / 832×480×9 20 steps | **PASS** · 12.18 s wall | N/A | **PASS** cadence 2 = 0.75× | single expert resident ¹ |
 | Wan 2.1 | **PASS** · 33.5 s (20 st) / 70.4 s (40 st, CFG) | NOT MEASURED (runner is 2.2-shaped) | N/A | NOT MEASURED (same controller as 2.2) | quality = upstream ² |
-| FLUX.1-dev | N/A · not ported (fail-fast 0.17 s, `d384b5c`) | N/A | N/A | N/A | gated repo; port plan option (b) |
+| FLUX.1-dev | **PASS** (port, `tpu-port-hunyuan`) · 10.1 / 9.3 s / 1024² 28 steps, bit-identical to the bench | **PASS** · 8.7 s to latents, **187 ms/step**, decode on chip | N/A | **PASS** cadence 2: 9/28 skipped, DiT 0.69×, 0.0041/px | ported 2026-09-12 (option (b): diffusers DiT sharded, Trainium fork untouched); first model faster per step than trn2 |
 | HunyuanVideo | **PASS** (port, `tpu-port-hunyuan`) · 191 s / 512×320×61 20 steps (165 s of it host VAE) | **PASS** · 20.1 s denoise, 1.0 s/step | N/A | **PASS** cadence 2 = 0.75×, 0.0064/px | ported 2026-09-11; VAE on chip is the follow-up |
 | LTX-2 | **PASS** (port, `tpu-port-hunyuan`) · 51 s / 704×480×49 20 steps | **PASS** · 49 s to latents, 1453 ms/step, decode 0.2 s on chip | N/A | **PASS** cadence 2: DiT 0.75×, 0.0088/px | 512×768×121 also fits (VAE 0.7 s on chip); ported 2026-09-12 |
 
@@ -52,17 +54,17 @@ guidance 1.0 are the model's own — reproduced with upstream diffusers fp32 on 
 **`difflet serve` on TPU**
 | FLUX | Qwen-Image | Wan 2.2 | Wan 2.1 | HunyuanVideo | LTX-2 |
 |---|---|---|---|---|---|
-| N/A · fail-fast | PASS · 7.6 s | PASS · 30.4 s | PASS · 33.5 s | PASS · 191 s (port) | PASS · 51 s (port) |
+| PASS · 10.1 s (port) | PASS · 7.6 s | PASS · 30.4 s | PASS · 33.5 s | PASS · 191 s (port) | PASS · 51 s (port) |
 
 **Backend gate (unported model refused before weights)** — new in this campaign
 | FLUX | Qwen-Image | Wan 2.2 | Wan 2.1 | HunyuanVideo | LTX-2 |
 |---|---|---|---|---|---|
-| PASS · 0.17 s | (ported) | (ported) | (ported) | PASS · 0.16 s | PASS · 0.16 s |
+| PASS · 0.17 s (before the port; now ported — the gate is pinned by a test that presents FLUX as Trainium-only) | (ported) | (ported) | (ported) | PASS · 0.16 s (before the port) | PASS · 0.16 s (before the port) |
 
 **Numerical parity vs. upstream diffusers fp32 (single DiT forward on chip)**
 | FLUX | Qwen-Image | Wan 2.2 | Wan 2.1 | HunyuanVideo | LTX-2 |
 |---|---|---|---|---|---|
-| N/A | PASS (port acceptance, `oracle_qwen_cmp.log`) | PASS · cos 0.99861 | PASS · cos 0.99967 | PASS · cos 0.99949 | PASS · cos 0.99983 |
+| PASS · cos 0.99946 @1024² (vs diffusers' own bf16 0.99974 @256²) | PASS (port acceptance, `oracle_qwen_cmp.log`) | PASS · cos 0.99861 | PASS · cos 0.99967 | PASS · cos 0.99949 | PASS · cos 0.99983 |
 
 ## Phase plan
 
@@ -73,6 +75,7 @@ guidance 1.0 are the model's own — reproduced with upstream diffusers fp32 on 
 | 2 | CLI fail mode (`difflet generate`) on TPU | `difflet generate …` | done — bug 2 |
 | 3 | Wan 2.1 serving on TPU (registered for `tpu`, never measured) | `difflet serve` + `/v1/videos/sync` + oracle + upstream CPU pipeline | done — PASS |
 | 4 | controls: Qwen-Image, Wan 2.2 serving on TPU | from the TeaCache campaign | done |
+| 5–7 | ports: HunyuanVideo, LTX-2, FLUX.1-dev (oracle + serve + bench + cadence-2 each) | `*_tpu_run.py`, `difflet serve`, `oracle_*_cmp.py` | done — PASS ×3 |
 
 ## Phase 0 — what the code says
 
@@ -276,6 +279,34 @@ Structure: `difflet/models/ltx_2/tp_sharding.py` (the Trainium recipe, lifted un
 ordinal 0 + `collective_broadcast` of the packed [1, 1024, 188160] embeddings), serving adapter
 TPU branch, registry flip. Venv fix: torchvision was the CUDA wheel (`torchvision::nms does not
 exist` → Gemma3 import failed); now `0.24.0+cpu`.
+
+## Phase 7 — FLUX.1-dev ported to TPU (branch `tpu-port-hunyuan`, 2026-09-12)
+
+Third and last port. Option (b) of the plan: diffusers' `FluxTransformer2DModel` TP-sharded per
+rank; the Trainium path (the legacy NxDI fork in `modeling_flux.py`) is untouched. 1024×1024,
+tp=4, bf16; 4 096 image + 512 text tokens. The repo is gated: nothing ran on the chips with real
+weights until the token arrived at 04:11, so the port was built and pinned weight-free first.
+
+| check | result | evidence |
+|---|---|---|
+| module vs diffusers, CPU | at tp=1 the rewritten module (TP attention processor, split `proj_out`, parallel linears) equals diffusers' forward to 1e-5; the device Euler loop equals `FlowMatchEulerDiscreteScheduler.step` to 1e-6; packing / sigmas+mu / PIL postprocess equal diffusers' helpers; cadence 2 skips 5/20 | `tests/unit/models/flux/test_flux_{tp_sharding,tpu_application}.py`, `0389f74` |
+| synthetic sharded checkpoint on 4 chips (no FLUX weights) | seeded 2+2-block model saved in the diffusers layout, loaded through the real sharded path incl. the `proj_out` `CheckpointSlice` windows: device tp=4 **fp32 vs CPU fp32 cos 0.9999995**; bf16 vs bf16 0.99991 (its own bf16-vs-fp32 control is 0.816 — a badly conditioned random model) | `flux_synth_parity.{json,log}` |
+| full geometry, random weights (no FLUX weights) | **5.445 B params / 10.18 GB HBM per rank** at 1024²/tp=4 (2.4 B replicated: the adaLN modulation linears); first compile 44 s (2-slot gate, 62 GB host peak); **0.335 s per isolated forward** | `flux_synth_timing.{json,log}` |
+| weights | `black-forest-labs/FLUX.1-dev` @ `3de623fc` (the pinned trn2 revision), 34 GB incl. T5-XXL, 04:11–04:13 | `flux_download.log` |
+| parity vs diffusers fp32 (CPU, seeded random inputs) | 1024²/512: **cos 0.99946 / rel-L1 0.030** (vs diffusers' own bf16 **0.99986 / 0.014**; control bf16-vs-fp32 0.99946 / 0.029, i.e. identical to the device's distance from fp32); 256²/64: vs fp32 0.99019 / 0.135, **vs diffusers' own bf16 0.99974 / 0.022**, control bf16-vs-fp32 0.98974 / 0.138 — the device is closer to upstream bf16 than either is to fp32; sharded checkpoint load 7 s/rank | `oracle_flux_ref{,_small}.log`, `oracle_flux_cmp{,_small,_bf16}.log` |
+| **benchmark, 1024², 28 steps, guidance 3.5** (the trn2 MATRIX row) | load 52–59 s; first request 36.6 s (loop-graph compile); **e2e-to-latents 8.72 s synced / 8.59 s natural** (T5-XXL fp32 3.3 s + 28 × 0.19 s); **DiT 187 ms/step** synced, 152 ms natural; VAE on chip: 117 s first compile, 0.31 s warm; HBM 10.18 resident / 10.45 GB peak; a clean red fox at golden hour | `flux_baseline.{json,log}`, `flux_1_dev_tpu_bench_baseline.png` |
+| TeaCache cadence 2 | **19 full / 9 skipped** (window [5, 23) of 28); e2e-to-latents **7.63 / 7.09 s** (DiT 5.39 → 3.73 s = 0.69×); image vs baseline mean abs 0.0041/px, PSNR 40.7 dB | `flux_cadence2.{json,log}`, `flux_1_dev_tpu_bench_cadence2.png`, `flux_1_dev_tpu_baseline_vs_cadence2.png` |
+| **`difflet serve`, 1024²** (TPU branch: no artifacts, eager app, VAE on the primary chip) | **ready in 216 s** (4 replicas incl. smoke with the VAE compile); `POST /v1/chat/completions` 28 steps → **200 in 10.1 s and 9.3 s**, 1 118 780 B PNGs **bit-identical to each other and to the benchmark's**; SIGTERM clean in 10 s | `serve_flux_tpu_port.log`, `serve_flux_tpu.png`, `flux_campaign_b.log` |
+| bugs | none on device: the port ran first time on the real weights (the CPU-pinned tests caught the two slips — a rope-axes typo in a test config and a `DownloadPolicy` enum name — before any chip time) | — |
+
+Structure: `difflet/models/flux/tp_sharding.py` (head-sharded attention with the per-head qk
+RMSNorm and the shared per-position RoPE left local, column→row FFNs, single-block `proj_out`
+split into two row-parallel halves reduced once — HunyuanVideo's split on diffusers' module),
+`backends/tpu/flux/{config,transformer}.py`, `models/flux/tpu_application.py` (T5-XXL fp32 on
+ordinal 0 + broadcast, CLIP-L per rank, `TpuDeviceImageVae`, device-resident loop with the
+probe-free controller), the TPU branch of `serving/orchestrators/flux.py`, registry
+`backends=("trainium","tpu")`, `--teacache-cadence/--teacache-online-delta` accepted for flux on
+the TPU backend only, `benchmark/flux_tpu_run.py`.
 
 ## Bug ledger
 

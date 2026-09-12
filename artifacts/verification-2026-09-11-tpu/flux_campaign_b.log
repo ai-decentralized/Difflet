@@ -1,0 +1,28 @@
+=== serve 04:25:48
+serve alive=y ready_after=216s
+request 1: http=200 time=10.137957s bytes=1492072
+request 1: png bytes 1118780
+request 2: http=200 time=9.346935s bytes=1492072
+request 2: png bytes 1118780
+=== done 04:29:54 serve gone after 10s
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+[difflet serve] loading Flux worker profile ServingProfile(model_id='black-forest-labs/FLUX.1-dev', model_type='flux', height=1024, width=1024, num_frames=None, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir=None, revision='3de623fc3c33e44ffbe2bad470d0f45bccf2eb21', dtype='bfloat16', output_modality='image', output_mime_type='image/png', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, teacache_cadence=None, teacache_online_delta=None, output_fps=None, host_vae=False, clip_placement=None, shapes=None)
+[flux] tpu warmup (first compile) in 44.0s
+[difflet serve] loading Flux worker profile ServingProfile(model_id='black-forest-labs/FLUX.1-dev', model_type='flux', height=1024, width=1024, num_frames=None, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir=None, revision='3de623fc3c33e44ffbe2bad470d0f45bccf2eb21', dtype='bfloat16', output_modality='image', output_mime_type='image/png', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, teacache_cadence=None, teacache_online_delta=None, output_fps=None, host_vae=False, clip_placement=None, shapes=None)
+[flux] tpu warmup (first compile) in 43.8s
+[difflet serve] loading Flux worker profile ServingProfile(model_id='black-forest-labs/FLUX.1-dev', model_type='flux', height=1024, width=1024, num_frames=None, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir=None, revision='3de623fc3c33e44ffbe2bad470d0f45bccf2eb21', dtype='bfloat16', output_modality='image', output_mime_type='image/png', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, teacache_cadence=None, teacache_online_delta=None, output_fps=None, host_vae=False, clip_placement=None, shapes=None)
+[flux] tpu warmup (first compile) in 45.0s
+[difflet serve] loading Flux worker profile ServingProfile(model_id='black-forest-labs/FLUX.1-dev', model_type='flux', height=1024, width=1024, num_frames=None, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir=None, revision='3de623fc3c33e44ffbe2bad470d0f45bccf2eb21', dtype='bfloat16', output_modality='image', output_mime_type='image/png', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, teacache_cadence=None, teacache_online_delta=None, output_fps=None, host_vae=False, clip_placement=None, shapes=None)
+[flux] tpu warmup (first compile) in 44.2s
+[flux] host encoders loaded in 0.3s (T5 on this rank: False)
+[difflet serve] Flux worker loaded (tpu)
+[flux] host encoders loaded in 0.3s (T5 on this rank: False)
+[difflet serve] Flux worker loaded (tpu)
+Loading weights:   0%|          | 0/219 [00:00<?, ?it/s]Loading weights:  32%|███▏      | 70/219 [00:00<00:00, 662.69it/s][flux] VAE resident on the chip (primary replica)
+[flux] host encoders loaded in 0.6s (T5 on this rank: False)
+[difflet serve] Flux worker loaded (tpu)
+[flux] host encoders loaded in 1.2s (T5 on this rank: True)
+BDONE
