@@ -18,10 +18,14 @@ This REPLACES the isolated synthetic-input timer (``benchmark/step_latency.py``)
 for cross-device comparison: that timer used a DIFFERENT method per model (n=20
 in-process forward for Wan/Qwen/Hunyuan, an n=1 parity script for LTX-2, the tqdm
 denoise-loop rate for FLUX), so its numbers were not measured the same way as each
-other or as H100. Here every model uses one method, the H100 method.
+other or as H100. Here every model uses one method, the H100 method. (The legacy
+timer also looks up pre-hash compiled-dir names that current orchestrators no
+longer write, so it cannot find a fresh artifact at all.) The staged models
+(wan, qwen_image, hunyuan_video) are driven through their own CLI stage code --
+see the "Staged models" section below.
 
     source .venv/bin/activate
-    python -m benchmark.step_realloop --model flux_1_dev   # or ltx_2
+    python -m benchmark.step_realloop --model flux_1_dev   # ltx_2 / wan_2_1 / qwen_image / hunyuan_video
     python -m benchmark.step_realloop --model flux_1_dev --config tp2cp2
 
 Patches benchmark/<device>/<slug>[_<config>].json (step_latency, throughput) + re-renders md.
@@ -76,7 +80,7 @@ def _build_flux(cfg, cache):
         img = res.images if hasattr(res, "images") else res[0]
         t = img if isinstance(img, _t.Tensor) else None
         return None if t is None else bool(_t.isfinite(t).all())
-    return pipe, type(dit), "__call__", gen_kwargs, out_finite
+    return (lambda: pipe(**gen_kwargs)), type(dit), "__call__", out_finite
 
 
 def _build_ltx2(cfg, cache):
@@ -101,10 +105,166 @@ def _build_ltx2(cfg, cache):
         fr = res.frames if hasattr(res, "frames") else res[0]
         return bool(_t.isfinite(fr).all()) if isinstance(fr, _t.Tensor) else None
     # per-step boundary: NeuronLTX2Application.forward_dit (one batched DiT call / step)
-    return pipe, type(app), "forward_dit", gen_kwargs, out_finite
+    return (lambda: pipe(**gen_kwargs)), type(app), "forward_dit", out_finite
 
 
-_BUILDERS = {"flux_1_dev": _build_flux, "ltx_2": _build_ltx2}
+# --------------------------------------------------------------------------- #
+# Staged models (wan / qwen_image / hunyuan_video)
+#
+# These are NOT in-process DiffletPipeline models: the CLI runs their text
+# encoder / transformer / VAE as separate ``difflet.cli.stage`` subprocesses
+# with hash-named artifact dirs (orchestrators/base.py hashed_stage_dir), so the
+# pipeline-style loader above would look for an artifact that does not exist
+# (and the legacy ``benchmark/step_latency.py`` looks up pre-hash directory
+# names that current orchestrators no longer write). Instead we drive the
+# orchestrator's OWN stage code: pre-stages (text encoders) run as subprocesses
+# exactly as ``difflet generate`` runs them -- they must not share a process
+# with the DiT (mixed Neuron world sizes in one process SIGSEGV at init) -- and
+# the DiT stage runs in-process via ``_run_stage_internal`` with the backbone
+# application's ``__call__`` wrapped per step. Same method as
+# scripts/parallel_phase_sweep.py's worker_wan / worker_qwen.
+# --------------------------------------------------------------------------- #
+
+def _staged_namespace(cfg, cache, work_dir, output):
+    """The parent ``difflet generate`` argparse namespace the orchestrator expects."""
+    import argparse as _ap
+    return _ap.Namespace(
+        model_id=cfg.model_id, revision=cfg.revision,
+        tp_degree=cfg.tp, cp_degree=cfg.cp, cp_mode=cfg.cp_mode,
+        cfg_parallel=cfg.cfg_parallel, sp_enabled=cfg.sp,
+        height=cfg.height, width=cfg.width, num_frames=cfg.num_frames,
+        steps=cfg.steps, guidance_scale=cfg.guidance_scale, seed=cfg.seed,
+        prompt=cfg.prompt, output=str(output), shapes=None,
+        cache_dir=str(cache), work_dir=str(work_dir), keep_work_dir=True,
+        requests_dir=None, worker_index=0, dp_schedule="round_robin",
+        dp_degree=1, host_vae=False,
+        teacache_cadence=None, teacache_online_delta=None,
+        teacache_speedup=None, teacache_calibration=None,
+    )
+
+
+def _stage_ns(model_id, stage, argv):
+    from difflet.cli.stage import _build_stage_parser
+    return _build_stage_parser().parse_args(
+        ["--orchestrator", model_id, "--stage", stage] + argv)
+
+
+def _run_pre_stage(model_id, stage, *, num_cores, virtual_core_size, argv, produces):
+    """Run a text-encoder stage as ``difflet generate`` does (subprocess with the
+    stage's own Neuron env), unless its output already sits in the work dir."""
+    from difflet.cli import runner
+    if all(p.exists() for p in produces):
+        print(f"[realloop] pre-stage {stage}: reusing {[p.name for p in produces]}", flush=True)
+        return
+    print(f"[realloop] pre-stage {stage}: running as a subprocess "
+          f"(num_cores={num_cores}, virtual_core_size={virtual_core_size})", flush=True)
+    runner.run_stage(model_id, stage, num_cores=num_cores,
+                     virtual_core_size=virtual_core_size, cli_args=argv)
+
+
+def _latents_finite(path):
+    def out_finite(_res):
+        import torch as _t
+        try:
+            x = _t.load(path, map_location="cpu")
+            x = x[0] if isinstance(x, (list, tuple)) else x
+            return bool(_t.isfinite(x).all())
+        except Exception as exc:  # pragma: no cover - diagnostic only
+            print(f"[realloop] finite-check skipped: {exc}", flush=True)
+            return None
+    return out_finite
+
+
+def _work_dir(cfg, cache):
+    d = cache / "work" / f"bench_{cfg.config_slug}"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _build_wan(cfg, cache):
+    """Wan transformer stage (UMT5 text-encode + denoise loop in ONE stage, as
+    difflet/cli/orchestrators/wan.py runs it); NeuronWanBackboneApplication
+    is the per-step DiT call (batch 2 under CFG-parallel)."""
+    from difflet.backends.trainium.wan.backbone import NeuronWanBackboneApplication
+    from difflet.cli.orchestrators.wan import WanOrchestrator
+
+    work = _work_dir(cfg, cache)
+    orch = WanOrchestrator(_staged_namespace(cfg, cache, work, work / "out.mp4"))
+    argv = orch._shared_cli_args(stage_mode="generate", work_dir=str(work))
+    ns = _stage_ns(cfg.model_id, "transformer", argv)
+
+    def run():
+        orch._run_stage_internal("transformer", ns)   # loads + one real generate
+        return None
+    return run, NeuronWanBackboneApplication, "__call__", _latents_finite(work / "latents.pt")
+
+
+def _build_qwen(cfg, cache):
+    """Qwen-Image: ``text`` stage (Qwen2.5-VL encoder) as a subprocess, then the
+    ``generate`` (DiT) stage in-process; NeuronQwenImageTransformerApplication
+    is the per-step DiT call."""
+    from difflet.backends.trainium.qwen_image.transformer import (
+        NeuronQwenImageTransformerApplication,
+    )
+    from difflet.cli.orchestrators import qwen_image as qo
+
+    work = _work_dir(cfg, cache)
+    orch = qo.QwenImageOrchestrator(_staged_namespace(cfg, cache, work, work / "out.png"))
+    argv = orch._shared_cli_args(stage_mode="generate", work_dir=str(work))
+    full_cores = cfg.tp * cfg.cp
+    _run_pre_stage(qo._HF_MODEL_ID, "text", num_cores=full_cores,
+                   virtual_core_size=qo._VIRTUAL_CORE_SIZE, argv=argv,
+                   produces=[work / "text.pt"])
+    ns = _stage_ns(qo._HF_MODEL_ID, "generate", argv)
+
+    def run():
+        orch._run_stage_internal("generate", ns)
+        return None
+    return run, NeuronQwenImageTransformerApplication, "__call__", _latents_finite(work / "latents.pt")
+
+
+def _build_hunyuan(cfg, cache):
+    """HunyuanVideo: ``clip`` (1 core) and ``llama`` stages as subprocesses,
+    then the ``generate`` (DiT + VAE) stage in-process with the stage's
+    NEURON_RT_VIRTUAL_CORE_SIZE; NeuronHunyuanVideoBackboneApplication is the
+    per-step DiT call (guidance-distilled: one call per step)."""
+    import os
+    from difflet.backends.trainium.hunyuan_video.backbone import (
+        NeuronHunyuanVideoBackboneApplication,
+    )
+    from difflet.cli.orchestrators import hunyuan_video as ho
+
+    work = _work_dir(cfg, cache)
+    out = work / "out.pt"   # non-.mp4 -> the stage saves the frames tensor
+    orch = ho.HunyuanVideoOrchestrator(_staged_namespace(cfg, cache, work, out))
+    argv = orch._shared_cli_args(stage_mode="generate", work_dir=str(work))
+    full_cores = cfg.tp * cfg.cp
+    _run_pre_stage(ho._HF_MODEL_ID, "clip", num_cores=1,
+                   virtual_core_size=ho._VIRTUAL_CORE_SIZE, argv=argv,
+                   produces=[work / "clip.pt"])
+    _run_pre_stage(ho._HF_MODEL_ID, "llama", num_cores=full_cores,
+                   virtual_core_size=ho._VIRTUAL_CORE_SIZE, argv=argv,
+                   produces=[work / "llama.pt"])
+    # difflet.cli.runner sets this for every HunyuanVideo stage subprocess; the
+    # in-process DiT stage must see the same runtime topology as its artifact.
+    if ho._VIRTUAL_CORE_SIZE is not None:
+        os.environ.setdefault("NEURON_RT_VIRTUAL_CORE_SIZE", str(ho._VIRTUAL_CORE_SIZE))
+    ns = _stage_ns(ho._HF_MODEL_ID, "generate", argv)
+
+    def run():
+        orch._run_stage_internal("generate", ns)
+        return None
+    return run, NeuronHunyuanVideoBackboneApplication, "__call__", _latents_finite(out)
+
+
+_BUILDERS = {
+    "flux_1_dev": _build_flux,
+    "ltx_2": _build_ltx2,
+    "wan_2_1": _build_wan,
+    "wan_2_2": _build_wan,
+    "qwen_image": _build_qwen,
+    "hunyuan_video": _build_hunyuan,
+}
 
 
 def main() -> int:
@@ -119,7 +279,7 @@ def main() -> int:
     print(f"[realloop] {slug}: building pipeline ({' '.join(cfg.parallel_flags())}, "
           f"compiled NEFF, skip_compile)...", flush=True)
     t0 = time.perf_counter()
-    pipe, cls, method, gen_kwargs, out_finite = _BUILDERS[args.model](cfg, cache)
+    run, cls, method, out_finite = _BUILDERS[args.model](cfg, cache)
     load_s = time.perf_counter() - t0
     print(f"[realloop] {slug}: pipeline ready in {load_s:.1f}s; "
           f"timing {cls.__name__}.{method} per step", flush=True)
@@ -128,7 +288,7 @@ def main() -> int:
     restore = _install_timer(cls, method, stamps)
     try:
         t1 = time.perf_counter()
-        result = pipe(**gen_kwargs)
+        result = run()
         gen_s = time.perf_counter() - t1
     finally:
         restore()
