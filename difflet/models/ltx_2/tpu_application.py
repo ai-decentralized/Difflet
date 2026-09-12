@@ -169,6 +169,19 @@ class TpuDeviceVideoVae:
 
         self.config = vae.config
         self.dtype = dtype
+        # The orchestrator's _denormalize_ltx_2_video_latents reads the
+        # normalization statistics as *attributes* of the VAE
+        # (``latents_mean`` / ``latents_std`` are registered buffers, not
+        # config entries) and silently skips the denormalization when they are
+        # missing — which is exactly what happened to the first videos out of
+        # this wrapper: right structure, wrong colours (mean abs 0.17/px against
+        # the host decode of the same latents). Keep host copies here.
+        self.latents_mean = getattr(vae, "latents_mean", None)
+        self.latents_std = getattr(vae, "latents_std", None)
+        if self.latents_mean is not None:
+            self.latents_mean = self.latents_mean.detach().clone().cpu()
+        if self.latents_std is not None:
+            self.latents_std = self.latents_std.detach().clone().cpu()
         self._device = torch_xla.device()
         # The host pipeline is fp32 (see load_tpu_host_pipeline); on the chip
         # the VAE runs in the DiT's dtype.

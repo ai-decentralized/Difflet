@@ -172,6 +172,7 @@ def _worker(rank, world, args, reply_q, decode_done):
         orchestrator.audio_vae = _Timed(audio_vae, "audio_vae")
         orchestrator.vocoder = _Timed(vocoder, "vocoder")
         orchestrator.vae = _Timed(vae, "video_vae")
+        torch.save({"latents": latents, "audio_latents": out.audio_latents}, args["out"] + ".latents.pt")
         video, audio = orchestrator._decode_latents(latents, out.audio_latents)
         seconds = time.monotonic() - mark
         reply_q.put({"type": "decoded", "seconds": seconds, "where": "device(video)+host(audio)",

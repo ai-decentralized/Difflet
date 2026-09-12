@@ -91,3 +91,30 @@ def test_broadcast_prompt_encoder_matches_diffusers_call_surface(monkeypatch):
     # the orchestrator casts to the DiT dtype when it builds the bundle.
     assert embeds.shape == (1, 8, 6) and embeds.dtype is torch.float32
     assert mask.dtype is torch.int64 and mask.shape == (1, 8)
+
+
+def test_device_vae_wrapper_exposes_the_normalization_buffers(monkeypatch):
+    """_denormalize_ltx_2_video_latents reads vae.latents_mean / latents_std
+    (registered buffers) and silently skips when they are missing; the wrapper
+    must carry them, or every frame comes out un-denormalized (v5e: right
+    structure, wrong colours, 0.17/px off the host decode of the same latents)."""
+    import sys
+    import types
+
+    from difflet.models.ltx_2 import tpu_application as mod
+    from difflet.models.ltx_2.pipeline import _denormalize_ltx_2_video_latents
+
+    fake = types.SimpleNamespace(device=lambda: "cpu")
+    monkeypatch.setitem(sys.modules, "torch_xla", fake)
+
+    class FakeVae(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.config = types.SimpleNamespace(scaling_factor=1.0)
+            self.register_buffer("latents_mean", torch.tensor([1.0, 2.0]))
+            self.register_buffer("latents_std", torch.tensor([3.0, 4.0]))
+
+    wrapper = mod.TpuDeviceVideoVae(FakeVae(), torch.float32)
+    z = torch.ones(1, 2, 1, 1, 1)
+    out = _denormalize_ltx_2_video_latents(z, wrapper)
+    assert out[0, :, 0, 0, 0].tolist() == [4.0, 6.0]  # z * std + mean, not z
