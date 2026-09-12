@@ -158,6 +158,11 @@ CONFIGS: dict[str, dict[str, Any]] = {
     # Same topology as tp4, DiT attention through PyTorch SDPA instead of the
     # attention_cte megakernel routing (--attention-impl sdpa).
     "tp4sdpa": {"attention_impl": "sdpa"},
+    # tp4 at guidance 2.0: the fair (same-work) baseline for tp2cfg -- both
+    # CFG branches run on tp4, sequentially, so tp2cfg's parallel two-branch
+    # step is compared against a measured two-branch tp4 step, not 2x a
+    # single-branch one. True-CFG models only.
+    "tp4cfg2": {"guidance_scale": 2.0},
 }
 
 _CONFIG_DESC = {
@@ -166,6 +171,7 @@ _CONFIG_DESC = {
     "tp4sp": "tp=4 + sequence parallel",
     "tp2cfg": "tp=2 x CFG-parallel (uncond/cond on separate core pairs)",
     "tp4sdpa": "tp=4, --attention-impl sdpa (PyTorch SDPA via XLA instead of attention_cte)",
+    "tp4cfg2": "tp=4 at guidance 2.0 (two sequential CFG branches; baseline for tp2cfg)",
 }
 
 
@@ -180,11 +186,18 @@ _DISTILLED = ("guidance-distilled model: a single forward pass with the guidance
               "(unconditional) CFG branch to run on a separate core pair; "
               "`difflet` rejects --cfg-parallel for it (registry is_distilled=True, "
               "cli/main.py _validate_cfg_parallel)")
+_DISTILLED_CFG2 = ("guidance-distilled model: guidance is a conditioning input of its single "
+                   "forward pass, so 'guidance 2.0 on tp4' is not a two-branch CFG baseline "
+                   "-- the tp2cfg cell it would baseline is N/A for this model too")
 UNSUPPORTED: dict[tuple[str, str], str] = {
     ("flux_1_dev", "tp2cfg"): _DISTILLED,
     ("qwen_image", "tp2cfg"): _DISTILLED,
     ("hunyuan_video", "tp2cfg"): _DISTILLED,
     ("hunyuan_video_15", "tp2cfg"): _DISTILLED,
+    ("flux_1_dev", "tp4cfg2"): _DISTILLED_CFG2,
+    ("qwen_image", "tp4cfg2"): _DISTILLED_CFG2,
+    ("hunyuan_video", "tp4cfg2"): _DISTILLED_CFG2,
+    ("hunyuan_video_15", "tp4cfg2"): _DISTILLED_CFG2,
     ("ltx_2", "tp2cp2"): ("LTX-2 has no context-parallel path (registry supports_cp=False; "
                           "difflet/models/ltx_2/entry.py raises NotImplementedError: the "
                           "tri-stream video+audio+text transformer has no CP foundation yet)"),
