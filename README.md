@@ -1,141 +1,161 @@
+<div align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/yotta-logo-white.svg">
+  <img alt="Yotta AI" src="docs/assets/yotta-logo-black.svg" width="260">
+</picture>
+</div>
+
 # Difflet
 
-**A focused inference engine for diffusion transformers (DiTs) on AWS Trainium.**
+**Run diffusion transformers on AWS Trainium: FLUX, Qwen-Image, Wan, HunyuanVideo, and LTX-2, from one CLI, one Python API, and one OpenAI-compatible server.**
 
-[Installation](#installation) · [Quick start](#quick-start) · [Serving](#serving) · [Python API](#python-api) · [CLI reference](#cli-reference) · [Verified matrix](#verified-parallelism-matrix) · [Developer guide](DEVELOPER.md)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)
+![Neuron](https://img.shields.io/badge/Neuron-neuronx--cc%202.26-232F3E.svg)
 
-## About
+```bash
+difflet run --model-id black-forest-labs/FLUX.1-dev --tp-degree 4 \
+  --prompt "a photorealistic cat sitting in a sunlit garden" --output cat.png
+```
 
-Difflet runs image and video diffusion models on AWS Trainium with a single, consistent
-interface. It handles the full lifecycle — model download, ahead-of-time (AOT) compilation,
-on-disk artifact caching, and SPMD multi-core execution — so you can go from a Hugging Face
-model id to a generated image or video in one command.
+That one command downloads the weights, AOT-compiles the model for four NeuronCores, caches
+the artifact, and writes a 1024×1024 image. Later runs hit the cache and skip straight to
+load and denoise.
 
-Three entry points expose the same engine:
+[Models](#supported-models) · [Feature support](#feature-support) ·
+[Quick start](#quick-start) · [Choose a topology](#choose-a-topology) · [Serving](#serving) ·
+[Go further](#go-further) · [CLI reference](#cli-reference) · [Troubleshooting](#troubleshooting) ·
+[Developer guide](DEVELOPER.md)
 
+## Latest News
+
+- [09/10] **Difflet 1.0 is released.**
+
+## What Difflet does
+
+Difflet handles the full lifecycle of a diffusion model on Trainium: model download,
+ahead-of-time (AOT) compilation, a content-addressed artifact cache, and SPMD execution across
+NeuronCores. Text encoders, the DiT backbone, and the VAE all run on device for the supported
+models, with no CPU fallbacks in the hot path.
+
+Three entry points share one engine:
+
+- **`difflet` CLI** — `run` for one-shot generation, or `download → compile → generate` staged.
 - **`difflet serve`** — a resident, OpenAI-compatible HTTP server for image and video models.
-- **`difflet` CLI** — `download → compile → generate`, or `difflet run` to do all three at once.
-- **`DiffletPipeline`** — a Python API mirroring `diffusers` for use inside your own scripts.
-
-Core capabilities:
-
-- **One engine, many models** — Flux, Wan 2.2, HunyuanVideo, Qwen-Image, and LTX-2 behind a
-  single CLI and registry.
-- **Fully on-device** — text encoders, the DiT backbone, and the VAE all run on Trainium for
-  the supported models (no CPU fallbacks in the hot path).
-- **Content-addressed compile cache** — AOT artifacts are hashed by model, parallel config,
-  shape, and toolchain versions, so a warm cache skips straight to load + denoise.
-- **Tensor + context + CFG + sequence parallelism** — scale a single generation across
-  NeuronCores with `tp`, `cp`, CFG-parallel, and Megatron-style sequence-parallel (`--sp`)
-  modes; every mode is exercised on-device by the verification matrix
-  (`scripts/verify_cli.py`).
-- **Latency tooling** — optional TeaCache step-skipping and a lightweight TAEF1 VAE for faster
-  denoise and decode.
+- **`DiffletPipeline`** — a Python API that mirrors `diffusers`.
 
 ## Supported models
 
-| Model | Type | Resolution (default) | Notes |
+| Model | Type | Default shape | Notes |
 |---|---|---|---|
-| [black-forest-labs/FLUX.1-dev](https://huggingface.co/black-forest-labs/FLUX.1-dev) | Text-to-image | 1024×1024 | Single-process; CFG-parallel available |
+| [black-forest-labs/FLUX.1-dev](https://huggingface.co/black-forest-labs/FLUX.1-dev) | Text-to-image | 1024×1024 | Single-process |
 | [Qwen/Qwen-Image](https://huggingface.co/Qwen/Qwen-Image) | Text-to-image | 1024×1024 | 3-stage (text → generate → vae) |
-| [Wan-AI/Wan2.2-T2V-A14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers) | Text-to-video | 480×832×9 | 2-stage (transformer → vae); CFG-parallel |
+| [Wan-AI/Wan2.2-T2V-A14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers) | Text-to-video | 480×832×9 | 2-stage (transformer → vae); true CFG |
 | [Wan-AI/Wan2.1-T2V-14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.1-T2V-14B-Diffusers) | Text-to-video | 480×832×9 | Same runtime as Wan 2.2 |
 | [hunyuanvideo-community/HunyuanVideo](https://huggingface.co/hunyuanvideo-community/HunyuanVideo) | Text-to-video | 320×512×61 | 3-stage (clip → llama → generate) |
-| [Lightricks/LTX-2](https://huggingface.co/Lightricks/LTX-2) | Text-to-video | 512×768×121 | Single-process; CP/SP not supported (use `tp=4`); exports `.mp4` |
+| [Lightricks/LTX-2](https://huggingface.co/Lightricks/LTX-2) | Text-to-video | 512×768×121 | Single-process; TP only; exports `.mp4` |
 
 ## Feature support
 
-Which acceleration features each model supports. ✅ = supported, ❌ = not supported.
+Which features each model supports today. ✅ = supported · ⚠️ = supported with a caveat
+(see note) · ❌ = not supported.
 
-| Model | TP | CP — all-gather | CP — ring | SP | TeaCache (adaptive) | TeaCache (fixed cadence) | CFG-parallel | TPU backend ² |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ | ✅ |
-| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ | ✅ |
-| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| HunyuanVideo | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ | ✅ |
-| LTX-2 | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+**Parallelism**
+
+| Model | TP | CP — all-gather | CP — ring | CP — ulysses | SP | CFG-parallel | DP |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ | ✅ |
+| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ | ✅ |
+| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| HunyuanVideo | ✅ | ⚠️ ² | ✅ | ❌ | ✅ | ❌ ¹ | ⚠️ ³ |
+| LTX-2 | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+
+**Runtime features**
+
+| Model | Multi-shape compile | TeaCache (adaptive) | TeaCache (fixed cadence) | Serving | Batch (JSONL) | TPU backend ⁵ |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ image | ✅  ✅ |
+| Qwen-Image | ✅ | ✅ | ✅ | ✅ image | ✅  ✅ |
+| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ video ⁴ | ✅  ✅ |
+| HunyuanVideo | ✅ | ✅ | ✅ | ✅ video | ✅  ✅ |
+| LTX-2 | ❌ | ✅ | ✅ | ✅ video | ✅  ✅ |
 
 **Feature legend**
 
 - **TP** — tensor parallelism (`--tp-degree`). Splits each layer across NeuronCores.
 - **CP — all-gather** — context parallelism with gather-KV attention (`--cp-degree N --cp-mode gather_kv`, the default). Splits the sequence across ranks.
 - **CP — ring** — context parallelism with ring attention (`--cp-degree N --cp-mode ring`). Lower memory than all-gather for long sequences.
+- **CP — ulysses** — context parallelism with head-sharded attention (`--cp-mode ulysses`). Needs the model's head count divisible by `tp_degree × cp_degree`.
 - **SP** — Megatron-style sequence parallelism (`--sp`). Shards the norm/modulation/residual regions along the sequence axis across the existing tensor-parallel group; `world_size` is unchanged. Mutually exclusive with `--cp-degree > 1`.
+- **CFG-parallel** — splits the conditional/unconditional CFG passes across 2 data-parallel ranks (`--cfg-parallel`). Only meaningful for true two-pass classifier-free guidance, not working for distilled guidance.
+- **DP** — data-parallel replicas (`--dp N`). A router spawns N full model copies on disjoint core ranges and distributes requests across them; use `--mode throughput` or `--mode mixed` for a preset.
+- **Multi-shape compile** — one bucketed artifact covering several request shapes (`--shapes 320x512x61,320x512x33`), sharing a single weight copy on device. `difflet serve --shapes` serves all of them from one resident worker.
 - **TeaCache (adaptive)** — calibration-driven step-skipping (`--teacache-speedup` / `--teacache-online-delta`, with `--teacache-calibration`).
-- **TeaCache (fixed cadence)** — blind skip-every-N-steps (`--teacache-cadence N`, no calibration needed).
-- **CFG-parallel** — splits the conditional/unconditional CFG passes across 2 data-parallel ranks (`--cfg-parallel`). Only meaningful for true two-pass classifier-free guidance.
+- **TeaCache (fixed cadence)** — blind skip-every-N-steps (`--teacache-cadence N`, no calibration needed). `difflet serve` accepts the probe-free pair (`--teacache-cadence`, `--teacache-online-delta`) for Qwen-Image and Wan on both Trainium and the TPU backend, for HunyuanVideo, LTX-2 and Flux on the TPU backend, and adaptive `--teacache-speedup` for Flux and Qwen-Image image serving.
+- **Serving** — resident `difflet serve` worker. Image models answer `/v1/chat/completions`; video models answer the [Videos API](docs/serving/videos_api.md).
+- **Batch (JSONL)** — `--requests FILE` runs one request per line (prompt, output, seed, optional negative prompt, guidance scale, steps) through one loaded model.
+- **TPU backend** — the same models served from Cloud TPU (`DIFFLET_BACKEND=tpu`, eager torch_xla, tensor-parallel only). See note 5.
 
 **Notes**
 
 1. Guidance-distilled model (single forward pass with the guidance scale baked into the timestep embedding) — there is no second CFG branch to split.
-2. Cloud TPU (`DIFFLET_BACKEND=tpu`, eager torch_xla, tp only): `difflet serve`, the `benchmark/*_tpu_run.py` runners and probe-free TeaCache (`--teacache-cadence` / `--teacache-online-delta`) for all five models; no CLI `compile/generate/run`, CP/SP/CFG-parallel or adaptive TeaCache there. Measured on a v5litepod-4 in `benchmark/v5e/`.
+2. `tp2 cp2` with gather-KV hits a `neuronx-cc` internal error (`NCC_INLA001` / `NCC_IBIR243`) on the CP-degree-2 DiT graph; ring CP and `tp4 --sp` are the working multi-core paths. See [DEVELOPER.md](DEVELOPER.md).
+3. DP works, but on a 4-core `trn2.3xlarge` each 2-core replica runs out of HBM loading the compiled VAE at the default 320×512×61 shape. Use a smaller shape or a host with more cores per replica.
+4. Wan 2.1 is the qualified serving checkpoint. Wan 2.2 can be started for experiments but its dual-transformer path has not passed resident-serving acceptance.
+5. Cloud TPU (`DIFFLET_BACKEND=tpu`, eager torch_xla, tp only): `difflet serve`, the `benchmark/*_tpu_run.py` runners and probe-free TeaCache (`--teacache-cadence` / `--teacache-online-delta`) for all five models; no CLI `compile/generate/run`, CP/SP/CFG-parallel or adaptive TeaCache there. Measured on a v5litepod-4 in `benchmark/v5e/`.
 
-Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive (and each is mutually exclusive with `--sp`). `world_size = tp_degree × cp_degree` (or `tp_degree × 2` with CFG-parallel; `--sp` leaves it unchanged).
+Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive (and each is mutually exclusive with `--sp`). `world_size = dp × (2 if cfg-parallel else 1) × cp_degree × tp_degree`; `--sp` leaves it unchanged. `difflet plan --model-id <id>` lists the combinations your host can run.
 
-## Installation
+## Quick start
 
 ### Prerequisites
 
-- **Instance** — AWS Trainium v2 (validated on `trn2.3xlarge`: one Trainium2 chip, 96 GiB HBM,
-  presented as 4 logical NeuronCores under the Trn2 default `LNC=2`). Other Trn2 shapes should
-  work; the tensor-parallel degree must divide the number of visible NeuronCores.
-- **Runtime** — a Neuron PyTorch 2.9 environment with `neuronx-cc`, `neuronx-distributed`, `nki`,
-  `nkilib`, `torch-neuronx`, and `libneuronxla`. `./scripts/setup_env.sh` builds it at
-  `<repo>/.venv` from `requirements-neuron.lock` (recent Neuron DLAMI releases no longer ship
-  the old `/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/` venv). A `Dockerfile` building the
-  same environment is provided for container-based setups.
-- **Python** — 3.10+.
+- An AWS Trainium2 instance. Validated on `trn2.3xlarge`: one Trainium2 chip presented as 4
+  logical NeuronCores under the default `LNC=2`. Other Trn2 shapes should work; the
+  tensor-parallel degree must divide the number of visible cores.
+- Python 3.10 or newer.
+- A Hugging Face account with access to the gated FLUX.1-dev repo, if you want Flux.
+- Disk: weights are large (LTX-2 alone is 86 GB) and compiled artifacts add tens of GB.
 
 ### Install
 
 ```bash
 git clone git@github.com:ai-decentralized/Difflet.git
 cd Difflet
-# Builds .venv from requirements-neuron.lock (Neuron toolchain + difflet CLI).
-./scripts/setup_env.sh
-source .venv/bin/activate
-# Setup your huggingface credential
-huggingface-cli login
+./scripts/setup_env.sh        # builds .venv from requirements-neuron.lock
+source .venv/bin/activate     # required: the Neuron runtime needs .venv/bin on PATH
+huggingface-cli login         # for gated repos such as FLUX.1-dev
 ```
 
-See [QUICKSTART.md](QUICKSTART.md) for a verified step-by-step walkthrough of
-environment setup, CLI generation, and HTTP serving.
+`setup_env.sh` installs the pinned Neuron toolchain (`neuronx-cc`, `torch-neuronx`,
+`neuronx-distributed`, `nki`) plus the `difflet` CLI. Recent Neuron DLAMI releases no
+longer ship the old `/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference` venv, so the repo
+builds its own.
 
-## Quick start
-
-Generate an image or video in a single command with `difflet run`. It downloads the weights,
-AOT-compiles the model (cached on first run), and generates — end to end.
+Sanity-check without touching the device:
 
 ```bash
-# Text-to-image — Flux at 1024×1024
+PYTHON_BIN=$PWD/.venv/bin/python ./scripts/check_quick.sh   # import gate + CPU-only unit tests
+difflet --help
+```
+
+### First image
+
+```bash
+# The first run AOT-compiles the model, which takes tens of minutes; later runs reuse the cache.
 difflet run --model-id black-forest-labs/FLUX.1-dev \
-  --tp-degree 2 --cp-degree 2 \
-  --height 1024 --width 1024 \
+  --tp-degree 4 --height 1024 --width 1024 \
   --prompt "a photorealistic cat sitting in a sunlit garden" \
   --output cat.png
 ```
 
-Faster decode with the lightweight TAEF1 VAE — same command, two extra flags:
+The first run compiles. Artifacts are cached
+under `~/.cache/difflet/`; every later run with the same model, shape, parallel config, and
+toolchain skips straight to load and denoise.
+
+### First video
 
 ```bash
-# Flux with the TAEF1 tiny VAE — 4.3× faster VAE decode, 1.18× faster warm end-to-end
-difflet run --model-id black-forest-labs/FLUX.1-dev \
-  --tp-degree 4 --height 1024 --width 1024 \
-  --taef1 --taef1-path madebyollin/taef1 \
-  --prompt "a red fox sitting in a snowy forest" \
-  --output fox_taef1.png
-```
-
-`--taef1` swaps the standard 80M-parameter VAE decoder for the 1.2M-parameter
-[`madebyollin/taef1`](https://huggingface.co/madebyollin/taef1) decoder (measured on
-`trn2.3xlarge`, tp=4, 1024×1024). Strictly opt-in — without the flags the standard VAE is
-used. `--taef1-path` implies `--taef1`; both flags are hashed into the compile-cache key, so
-TAEF1 and standard-VAE artifacts cache independently. Output quality differs from the
-standard VAE — evaluate for your use case. For staged runs, pass the same flags to
-`difflet compile` and `difflet generate`.
-
-```bash
-# Text-to-video — Wan 2.2 at 480×832, 9 frames
 difflet run --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers \
   --tp-degree 2 --cp-degree 2 \
   --height 480 --width 832 --num-frames 9 \
@@ -144,18 +164,7 @@ difflet run --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers \
   --output cat.mp4
 ```
 
-The first run triggers AOT compilation (~10–15 minutes for Flux on 4 cores; the larger video
-DiTs take longer). Compiled artifacts are cached under `~/.cache/difflet/`; subsequent runs hit
-the cache and skip straight to load + denoise.
-
-> **Parallelism cheat-sheet.** Flux, Wan, HunyuanVideo, and Qwen-Image support `--tp-degree 2
-> --cp-degree 2` (world size 4) on a 4-core host; Flux, Wan, and HunyuanVideo also support
-> `--tp-degree 4 --sp`. LTX-2 does not support context or sequence parallelism (use
-> `--tp-degree 4`, optionally with `--cfg-parallel` at `--tp-degree 2`).
-
 ### Python API
-
-The same engine is available as a library:
 
 ```python
 from difflet import DiffletPipeline, DiffletParallelConfig
@@ -174,142 +183,60 @@ image = pipe(
 image.save("out.png")
 ```
 
+## Choose a topology
+
+Every configuration must use exactly the cores you have:
+
+```
+world_size = dp × (2 if cfg-parallel else 1) × cp_degree × tp_degree
+```
+
+`--sp` reshards within the TP group and leaves `world_size` unchanged. Context parallelism
+and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive, and
+each is mutually exclusive with `--sp`.
+
+On a 4-core host the useful presets are:
+
+| Goal | Flags | Works for |
+|---|---|---|
+| Lowest latency, one request | `--tp-degree 2 --cp-degree 2` or `--tp-degree 4 --sp` | Flux, Qwen-Image, Wan, HunyuanVideo |
+| Lowest latency, true-CFG model | `--tp-degree 2 --cfg-parallel` | Wan, LTX-2 |
+| Lowest latency, LTX-2 | `--tp-degree 4` | LTX-2 |
+| Highest throughput, many requests | `--tp-degree 2 --dp 2` or `--tp-degree 1 --dp 4` | Flux, Qwen-Image, Wan, LTX-2 |
+| Balanced | `--mode mixed` | all |
+
+`--mode latency|throughput|mixed` picks `dp`, `cfg`, and `cp` for the model class; explicit
+flags override individual fields. When in doubt, ask the planner. It reads the host's
+`neuron-ls`, scores every legal config for your model and shape, and marks which ones are
+already compiled:
+
+```bash
+difflet plan --model-id black-forest-labs/FLUX.1-dev --objective latency
+difflet plan --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --objective throughput --serving
+```
+
 ## Serving
 
-`difflet serve` keeps one image or video model loaded in a resident Trainium
-worker. S3 is not required: without an S3 bucket configuration, generated images
-are returned as Base64 data URLs in the OpenAI-style Chat Completions response,
-while completed videos remain available through the Videos content endpoint.
+`difflet serve` loads one model with one immutable compiled profile into a resident Trainium
+worker. HTTP requests never trigger compilation, so the request shape must be one the server
+was started with.
 
-For asynchronous and synchronous video generation, request fields, lifecycle,
-download, deletion, retention, and S3 behavior, see the
-[Videos API reference](docs/serving/videos_api.md).
-
-Start Flux on a four-core `trn2.3xlarge`:
-
-```bash
-difflet serve \
-  --model-id black-forest-labs/FLUX.1-dev \
-  --tp-degree 4 \
-  --cp-degree 1 \
-  --height 1024 \
-  --width 1024 \
-  --host 0.0.0.0 \
-  --port 8092
-```
-
-Generate and save an image locally on the client:
-
-```bash
-curl -sS -X POST http://127.0.0.1:8092/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "black-forest-labs/FLUX.1-dev",
-    "messages": [
-      {"role": "user", "content": "a small red sailboat on a calm blue lake"}
-    ],
-    "extra_body": {
-      "height": 1024,
-      "width": 1024,
-      "num_inference_steps": 20,
-      "guidance_scale": 3.5,
-      "seed": 42
-    }
-  }' | jq -r '.choices[0].message.content[0].image_url.url' \
-    | cut -d',' -f2- | base64 -d > output.png
-```
-
-When private S3 storage is configured, the same `image_url.url` field contains
-an expiring presigned URL instead of a data URL.
-
-### Optional API-key authentication
-
-API authentication is disabled when no key is configured. Set one key either
-with `--api-key` or through `DIFFLET_API_KEY`; the CLI flag takes precedence:
+### Start
 
 ```bash
 difflet serve \
   --model-id black-forest-labs/FLUX.1-dev \
   --tp-degree 4 --cp-degree 1 \
   --height 1024 --width 1024 \
-  --host 0.0.0.0 --port 8092 \
-  --api-key 'replace-with-a-secret'
+  --host 0.0.0.0 --port 8092
 ```
 
-When enabled, every `/v1` request requires a Bearer token:
+The first start downloads weights, compiles artifacts, loads the worker, and
+runs a real generation smoke test before `/ready` opens. Warm restarts reuse the cache. One
+serving profile owns all four cores on a `trn2.3xlarge`, so you cannot run two servers, or a
+server and a CLI generation, at the same time.
 
-```bash
-curl http://127.0.0.1:8092/v1/models \
-  -H 'Authorization: Bearer replace-with-a-secret'
-```
-
-Missing or incorrect credentials return `401 {"error":"Unauthorized"}` before
-the request body is parsed or generation capacity is reserved. `/health` and
-`/ready` intentionally remain unauthenticated. This is a single shared service
-key, not tenant isolation or per-user authorization.
-
-### Optional S3 artifact storage
-
-With no S3 variables, Difflet returns the generated PNG inline as a Base64 data
-URL. To upload generated PNG bytes to a private S3 bucket and return an expiring
-`image_url`, create an environment file:
-
-```bash
-cp .env.example .env
-```
-
-Configure the AWS S3 bucket and region:
-
-```dotenv
-DIFFLET_S3_BUCKET=difflet
-DIFFLET_S3_REGION=ap-southeast-4
-DIFFLET_S3_PREFIX=difflet
-```
-
-Run the server from the directory containing `.env`. If the file exists, it is
-loaded automatically without overriding variables already exported by the shell.
-Do not commit `.env` or credentials. Boto3 uses its standard credential provider
-chain; on EC2, attach an IAM role to the instance instead of storing access keys
-in `.env`. The role needs `s3:PutObject` and `s3:GetObject` access to
-`arn:aws:s3:::difflet/difflet/*`.
-
-Difflet always returns an S3 presigned URL whose access lifetime is controlled by
-the server-owned `artifact_ttl_seconds` setting (currently 3600 seconds). Keep S3
-Block Public Access enabled. A lifecycle rule may delete expired objects later;
-URL expiry and object deletion are independent.
-
-For non-AWS S3-compatible providers, set `DIFFLET_S3_ENDPOINT_URL` explicitly.
-AWS S3 does not require this setting; boto3 derives the endpoint from
-`DIFFLET_S3_REGION`. Providers that do not use the boto3 default credential chain
-may also set `DIFFLET_S3_ACCESS_KEY_ID` and `DIFFLET_S3_SECRET_ACCESS_KEY`;
-`DIFFLET_S3_SESSION_TOKEN` is optional for temporary credentials. The access key
-and secret key must either both be present or both be absent. Difflet uses SigV4
-and virtual-hosted addressing for AWS presigned URLs. Compatible providers that
-require path-style URLs may set `DIFFLET_S3_ADDRESSING_STYLE=path`.
-
-### Qwen-Image and startup behavior
-
-The other supported serving model is Qwen-Image. Start it with the same fixed
-four-core profile:
-
-```bash
-difflet serve \
-  --model-id Qwen/Qwen-Image \
-  --tp-degree 4 \
-  --cp-degree 1 \
-  --height 1024 \
-  --width 1024 \
-  --host 0.0.0.0 \
-  --port 8092
-```
-
-The first startup downloads missing Hugging Face weights, compiles missing serving artifacts,
-loads the resident worker, and runs a real generation smoke test before readiness opens. Warm
-restarts reuse the immutable compile cache. A four-core host cannot run these two profiles, or a
-CLI generation and one of these servers, at the same time because each profile owns all four
-NeuronCores.
-
-### Check readiness and generate
+### Check readiness
 
 ```bash
 curl http://127.0.0.1:8092/health
@@ -317,253 +244,198 @@ curl http://127.0.0.1:8092/ready
 curl http://127.0.0.1:8092/v1/models
 ```
 
-Send an image-generation request:
+### Generate an image
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8092/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "black-forest-labs/FLUX.1-dev",
-    "messages": [
-      {"role": "user", "content": "a small red sailboat on a calm blue lake"}
-    ],
-    "extra_body": {
-      "height": 1024,
-      "width": 1024,
-      "num_inference_steps": 20,
-      "guidance_scale": 3.5,
-      "seed": 42
-    }
-  }'
+    "messages": [{"role": "user", "content": "a small red sailboat on a calm blue lake"}],
+    "extra_body": {"height": 1024, "width": 1024, "num_inference_steps": 20,
+                   "guidance_scale": 3.5, "seed": 42}
+  }' | jq -r '.choices[0].message.content[0].image_url.url' \
+    | cut -d',' -f2- | base64 -d > output.png
 ```
 
-Request `height` and `width` must match the server's startup profile. Inference steps must be
-between 1 and 50. The response image is available at
-`choices[0].message.content[0].image_url.url`.
+`height` and `width` must match the server's profile. Steps must be between 1 and 50. Without
+S3 configured the URL is a Base64 data URL; with S3 it is an expiring presigned URL.
+
+### Generate a video
+
+Start a video model, then submit a job and download the result when it completes:
+
+```bash
+difflet serve --model-id hunyuanvideo-community/HunyuanVideo \
+  --tp-degree 4 --height 320 --width 512 --num-frames 61 \
+  --host 0.0.0.0 --port 8092
+```
+
+```bash
+video_id=$(curl -sS -X POST http://127.0.0.1:8092/v1/videos \
+  -F 'model=hunyuanvideo-community/HunyuanVideo' \
+  -F 'prompt=a cinematic mountain landscape at sunrise' \
+  -F 'size=512x320' -F 'num_frames=61' -F 'fps=24' \
+  -F 'num_inference_steps=4' -F 'guidance_scale=6.0' | jq -r '.id')
+
+curl -sS "http://127.0.0.1:8092/v1/videos/${video_id}" | jq .status
+curl -fL "http://127.0.0.1:8092/v1/videos/${video_id}/content" -o "${video_id}.mp4"
+```
+
+`POST /v1/videos/sync` returns the raw video bytes in one call instead. Lifecycle, retention,
+listing, deletion, and error codes are in the [Videos API reference](docs/serving/videos_api.md).
+
+### Endpoints
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | Process and worker health |
-| `GET /ready` | Model readiness after load and smoke |
+| `GET /ready` | Model readiness after load and smoke test |
 | `GET /v1/models` | The model served by this process |
 | `POST /v1/chat/completions` | Text-to-image generation |
+| `POST /v1/videos` | Create an asynchronous video job |
+| `POST /v1/videos/sync` | Generate a video and return the bytes |
+| `GET /v1/videos`, `GET /v1/videos/{id}` | List jobs, read one job's status |
+| `GET /v1/videos/{id}/content` | Download a completed video |
+| `DELETE /v1/videos/{id}` | Cancel a queued job or delete a finished one |
 
-Serving logs are written to both the console and `./logs/`. Log files are capped at 5 MiB and
-rotated on size or when the date changes. Stop the server with `Ctrl+C` or `SIGTERM`. The API
-supports the optional shared key described above; still protect a remotely exposed port with a
-security group, TLS-terminating reverse proxy, or equivalent network access control.
+Logs go to the console and `./logs/`, capped at 5 MiB per file and rotated on size or date.
+Stop the server with `Ctrl+C` or `SIGTERM`.
+
+### Hardening
+
+**API key.** Authentication is off until a key is set with `--api-key` or `DIFFLET_API_KEY`;
+the flag wins. With a key, every `/v1` route requires `Authorization: Bearer <key>` and
+rejects bad credentials with `401` before the body is parsed. `/health` and `/ready` stay
+open. This is one shared service key, not per-user authorization, so still put a remotely
+exposed port behind a security group or a TLS-terminating reverse proxy.
+
+**S3 output.** To upload generated bytes to a private bucket and return an expiring presigned
+URL instead of a data URL, copy `.env.example` to `.env` and set the bucket and region. IAM
+roles, S3-compatible providers, and URL lifetime are covered in
+[docs/serving/s3.md](docs/serving/s3.md).
+
+## Go further
+
+**Serve several shapes from one worker.** `--shapes` compiles one bucketed artifact that
+shares a single weight copy on device. Requests outside the set are rejected with
+`profile_mismatch`.
+
+```bash
+difflet serve --model-id hunyuanvideo-community/HunyuanVideo --tp-degree 4 \
+  --shapes 320x512x61,320x512x33 --host 0.0.0.0 --port 8092
+```
+
+**Batch many prompts through one loaded model.** `--requests` takes a JSONL file with one
+request per line. Pair it with `--dp` to spread the batch across replicas.
+
+```bash
+printf '%s\n' \
+  '{"prompt": "a red fox in snow", "output": "fox.png", "seed": 1}' \
+  '{"prompt": "a blue whale at dusk", "output": "whale.png", "seed": 2, "steps": 20}' \
+  > batch.jsonl
+difflet generate --model-id black-forest-labs/FLUX.1-dev --tp-degree 2 --dp 2 \
+  --height 1024 --width 1024 --requests batch.jsonl
+```
+
+Optional per-line keys: `negative_prompt`, `guidance_scale`, `steps`.
+
+**Skip denoise steps with TeaCache.** Fixed cadence needs no setup; adaptive mode uses a
+calibration file to hit a target speedup.
+
+```bash
+difflet run ... --teacache-cadence 2                                  # skip every other step
+difflet run ... --teacache-speedup 1.5 --teacache-calibration cal.json # adaptive
+```
+
+**Run the stages separately.** `download`, `compile`, and `generate` can each be run on
+their own to isolate a failure or inspect intermediate tensors. Per-model recipes, artifact
+paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-staged-commands.md).
 
 ## CLI reference
 
-The CLI has four model subcommands. `run` is the one-shot path; the other three let you run and
-verify each step independently — useful for debugging compilation or inspecting intermediate
-artifacts. `difflet clean` is a housekeeping command that takes no `--model-id`.
-
 | Command | Purpose |
 |---|---|
-| `difflet download` | Fetch model weights from Hugging Face |
-| `difflet compile` | AOT-compile the model NEFFs and cache them on disk |
-| `difflet generate` | Run inference (requires a prior `compile`) |
 | `difflet run` | `download` + `compile` + `generate` in one shot |
+| `difflet download` | Fetch model weights from Hugging Face |
+| `difflet compile` | AOT-compile the model and cache it on disk |
+| `difflet generate` | Run inference against a prior `compile` |
+| `difflet serve` | Start the OpenAI-compatible image and video server |
+| `difflet plan` | Rank the parallel configurations this host and model allow |
+| `difflet cache ls` | List compiled artifacts with their shapes, TP, and dtype |
 | `difflet clean` | Delete Neuron compiler scratch from the working directory |
 
-### Common flags
+### Flags
 
 | Flag | Applies to | Description |
 |---|---|---|
 | `--model-id` | all | Hugging Face model id (see [Supported models](#supported-models)) |
-| `--tp-degree N` | compile, generate, run | Tensor-parallel degree (default: registry default) |
-| `--cp-degree N` | compile, generate, run | Context-parallel degree (default: 1) |
-| `--cp-mode {gather_kv,ring}` | compile, generate, run | Context-parallel attention strategy |
-| `--cfg-parallel` | compile, generate, run | Split the uncond/cond CFG passes across 2 ranks (true-CFG models only) |
-| `--sp` | compile, generate, run | Megatron-style sequence parallelism over the TP group (Flux, Wan, HunyuanVideo) |
-| `--height/--width/--num-frames` | compile, generate, run | Output shape (defaults to the model's registry shape) |
-| `--cache-dir PATH` | compile, generate, run | Compiled-artifact cache root (default `~/.cache/difflet/`) |
-| `--force` | compile, generate, run | Recompile even if a valid cache entry exists |
-| `--prompt` | generate, run | Text prompt (required) |
-| `--output PATH` | generate, run | Output file (`.png` or `.mp4`) (required) |
-| `--steps N` | generate, run | Inference steps |
-| `--guidance-scale F` | generate, run | Classifier-free guidance scale |
-| `--seed N` | generate, run | RNG seed (default 42) |
-| `--work-dir PATH` | generate, run | Directory for inter-stage tensors (staged models) |
-| `--keep-work-dir` | generate, run | Keep the work-dir after a successful run |
+| `--revision REV` | download, compile, generate, run, serve | Pin a Hub revision |
+| `--tp-degree N` | compile, generate, run, serve | Tensor-parallel degree (default: registry default) |
+| `--cp-degree N` | compile, generate, run, serve | Context-parallel degree (default 1) |
+| `--cp-mode {gather_kv,ring,ulysses}` | compile, generate, run, serve | Context-parallel attention strategy |
+| `--cfg-parallel` | compile, generate, run, serve | Split the uncond/cond CFG passes across 2 ranks (true-CFG models only) |
+| `--sp` | compile, generate, run, serve | Megatron-style sequence parallelism over the TP group (Flux, Qwen-Image, Wan, HunyuanVideo) |
+| `--dp N` | compile, generate, run | Data-parallel replicas; a router spreads requests across them |
+| `--dp-schedule {round_robin,least_loaded}` | compile, generate, run | Request-to-replica schedule for `--dp > 1` |
+| `--mode {latency,throughput,mixed}` | compile, generate, run | Preset that picks `dp`, `cfg`, and `cp` for the model class |
+| `--total-cores N` | compile, generate, run | Core budget for validation (default: `NEURON_RT_NUM_CORES`) |
+| `--height/--width/--num-frames` | compile, generate, run, serve | Output shape (default: the model's registry shape) |
+| `--shapes HxWxF[,...]` | compile, generate, run, serve | Compile or serve several shapes from one bucketed artifact |
+| `--teacache-cadence N` | generate, run, serve | Skip every N-th denoise step |
+| `--teacache-speedup F`, `--teacache-calibration PATH` | generate, run, serve | Adaptive TeaCache target and calibration file |
+| `--teacache-online-delta ALPHA` | generate, run, serve | Probe-free online-delta TeaCache |
+| `--prompt` | generate, run | Text prompt |
+| `--requests FILE` | generate, run | JSONL batch file, one request per line |
+| `--output PATH` | generate, run | Output file (`.png` or `.mp4`) |
+| `--steps N`, `--guidance-scale F`, `--seed N` | generate, run | Sampler settings (seed default 42) |
+| `--cache-dir PATH` | compile, generate, run, serve, cache | Compiled-artifact cache root (default `~/.cache/difflet/`) |
+| `--force` | compile, generate, run, serve | Recompile even if a valid cache entry exists |
+| `--work-dir PATH`, `--keep-work-dir` | generate, run | Inter-stage tensor directory for staged models |
+| `--host`, `--port`, `--api-key` | serve | Bind address and optional shared API key |
+| `--clip-placement {host,neuron}` | serve | HunyuanVideo CLIP placement |
 
-TeaCache step-skipping flags (`--teacache-cadence`, `--teacache-online-delta`,
-`--teacache-speedup`, `--teacache-calibration`) are available on `generate` and `run`.
-`difflet serve` accepts the probe-free pair (`--teacache-cadence`, `--teacache-online-delta`)
-for Qwen-Image and Wan on both Trainium and the TPU backend, for HunyuanVideo, LTX-2 and
-Flux on the TPU backend, and adaptive `--teacache-speedup` for Flux and Qwen-Image image serving.
-TAEF1 lightweight-VAE flags (`--taef1`, `--taef1-path`) are available on `compile`,
-`generate`, and `run` (Flux only, see [Quick start](#quick-start)).
+`difflet <command> --help` is the authoritative list.
 
-### Staged usage
+### Where things land
 
-Run `download → compile → generate` separately to verify each step before proceeding. The
-examples below mirror the validated configurations; capture logs with `tee` so a failed step is
-easy to inspect.
-
-```bash
-mkdir -p /tmp/logs
-```
-
-> Override the compile-cache root with `DIFFLET_COMPILE_CACHE=<path>` or `--cache-dir <path>`.
-
-#### Flux (single-process image model)
-
-```bash
-difflet download --model-id black-forest-labs/FLUX.1-dev \
-  2>&1 | tee /tmp/logs/flux-download.log
-
-difflet compile --model-id black-forest-labs/FLUX.1-dev \
-  --tp-degree 2 --cp-degree 2 --height 1024 --width 1024 \
-  2>&1 | tee /tmp/logs/flux-compile.log
-
-difflet generate --model-id black-forest-labs/FLUX.1-dev \
-  --tp-degree 2 --cp-degree 2 --height 1024 --width 1024 \
-  --prompt "a cat sitting on a bench" --output flux.png \
-  2>&1 | tee /tmp/logs/flux-generate.log
-```
-
-#### LTX-2 (single-process video model, CP not supported)
-
-```bash
-difflet download --model-id Lightricks/LTX-2 \
-  2>&1 | tee /tmp/logs/ltx2-download.log
-
-difflet compile --model-id Lightricks/LTX-2 \
-  --tp-degree 4 --height 512 --width 768 --num-frames 121 \
-  2>&1 | tee /tmp/logs/ltx2-compile.log
-
-difflet generate --model-id Lightricks/LTX-2 \
-  --tp-degree 4 --height 512 --width 768 --num-frames 121 \
-  --prompt "a cat walking through a garden" --output ltx2.mp4 \
-  2>&1 | tee /tmp/logs/ltx2-generate.log
-```
-
-#### Wan 2.2 (2-stage: transformer → vae)
-
-`compile` spawns two subprocess stages (transformer @ `tp×cp` cores, VAE @ 1 core); `generate`
-spawns the same stages in inference mode and passes a latent tensor between them.
-
-```bash
-difflet download --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers \
-  2>&1 | tee /tmp/logs/wan-download.log
-
-difflet compile --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers \
-  --tp-degree 2 --cp-degree 2 --height 480 --width 832 --num-frames 9 \
-  2>&1 | tee /tmp/logs/wan-compile.log
-
-difflet generate --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers \
-  --tp-degree 2 --cp-degree 2 --height 480 --width 832 --num-frames 9 \
-  --steps 40 --guidance-scale 4.0 --seed 42 \
-  --prompt "a cat walking through a garden" --output wan.mp4 \
-  --work-dir /tmp/logs/wan-work --keep-work-dir \
-  2>&1 | tee /tmp/logs/wan-generate.log
-```
-
-
-#### HunyuanVideo (3-stage: clip → llama → generate)
-
-`compile` spawns: clip (1 core), llama (`tp×cp` cores), generate (`tp×cp` cores) — all with
-`NEURON_RT_VIRTUAL_CORE_SIZE=2`, set automatically by the orchestrator.
-
-```bash
-difflet download --model-id hunyuanvideo-community/HunyuanVideo \
-  2>&1 | tee /tmp/logs/hv-download.log
-
-difflet compile --model-id hunyuanvideo-community/HunyuanVideo \
-  --tp-degree 2 --cp-degree 2 --height 320 --width 512 --num-frames 61 \
-  2>&1 | tee /tmp/logs/hv-compile.log
-
-difflet generate --model-id hunyuanvideo-community/HunyuanVideo \
-  --tp-degree 2 --cp-degree 2 --height 320 --width 512 --num-frames 61 \
-  --steps 50 --guidance-scale 6.0 --seed 42 \
-  --prompt "a cat sitting on a bench" --output hunyuan.mp4 \
-  --work-dir /tmp/logs/hv-work --keep-work-dir \
-  2>&1 | tee /tmp/logs/hv-generate.log
-```
-
-#### Qwen-Image (3-stage: text → generate → vae)
-
-```bash
-difflet download --model-id Qwen/Qwen-Image \
-  2>&1 | tee /tmp/logs/qwen-download.log
-
-difflet compile --model-id Qwen/Qwen-Image \
-  --tp-degree 2 --cp-degree 2 --height 1024 --width 1024 \
-  2>&1 | tee /tmp/logs/qwen-compile.log
-
-difflet generate --model-id Qwen/Qwen-Image \
-  --tp-degree 2 --cp-degree 2 --height 1024 --width 1024 \
-  --steps 50 --guidance-scale 7.5 --seed 42 \
-  --prompt "a cat sitting on a bench" --output qwen.png \
-  --work-dir /tmp/logs/qwen-work --keep-work-dir \
-  2>&1 | tee /tmp/logs/qwen-generate.log
-```
-
-### Artifact locations
-
-| Step | Where artifacts land |
+| What | Where |
 |---|---|
-| `download` | `~/.cache/huggingface/hub/models--<org>--<name>/snapshots/<hash>/` |
-| `compile` (single-process: flux, ltx-2) | `~/.cache/difflet/<model_name>/<hash>/` |
-| `compile` (staged models) | `~/.cache/difflet/<stage-specific-dir>/` |
-| `generate` inter-stage tensors | `--work-dir` path (default `~/.cache/difflet/work/<model>/`) |
-| `generate` final output | `--output` path |
+| Downloaded weights | `~/.cache/huggingface/hub/models--<org>--<name>/` |
+| Compiled artifacts | `~/.cache/difflet/` (override with `--cache-dir` or `DIFFLET_COMPILE_CACHE`) |
+| Inter-stage tensors | `--work-dir` (default `~/.cache/difflet/work/<model>/`) |
+| Serving logs | `./logs/` |
+| Compiler scratch | the working directory; remove with `difflet clean` |
 
-### Cleaning up compiler scratch
+## Troubleshooting
 
-Device compiles leave scratch in the process working directory: per-kernel cache directories
-named with a 16-hex-char hash, one `neuronxcc-<id>/` work directory per compiler invocation, and
-the `log-neuron-cc.txt` / `global_metric_store.json` / `PostSPMDPassesExecutionDuration.txt`
-diagnostic files. They are gitignored but accumulate across runs.
-
-```bash
-difflet clean --dry-run     # list what would go
-difflet clean               # delete it
-difflet clean --dir PATH    # sweep somewhere other than the cwd
-```
-
-Only direct children of the target directory are touched, symlinks are never followed, and a
-hash-named directory holding anything other than compiler output is reported and left in place.
-This does **not** touch the compiled-artifact cache under `~/.cache/difflet/` — remove that by
-hand (`rm -rf ~/.cache/difflet`) or recompile over it with `--force`.
-
-## Verified parallelism matrix
-
-`scripts/verify_cli.py` runs the full CLI (`download → compile → timed generate`) for every
-model × parallel-config cell on a 4-core `trn2.3xlarge`, with per-cell logs and a
-machine-readable `results.json`. Each config uses exactly 4 NeuronCores
-(`world_size = (2 if cfg else 1) × cp × tp`). Latest full run:
-
-| Model | `tp4` | `tp2cp2` | `tp2cfg` | `tp4sp` |
-|---|:---:|:---:|:---:|:---:|
-| flux | ✅ | ✅ | — ¹ | ✅ |
-| qwen_image | ✅ | ✅ | — ¹ | — ² |
-| ltx_2 | ✅ | — ³ | ✅ | — ² |
-| wan (2.2) | ✅ | ✅ | ✅ | ✅ |
-| wan2_1 | ✅ | ✅ | ✅ | ✅ |
-| hunyuan_video | ✅ | ✗ ⁴ | — ¹ | ✅ |
-| hunyuan_video_15 | ✗ ⁵ | — ³ | — ¹ | — ² |
-
-✅ compile + generate pass with output artifact · — auto-skipped (unsupported combination) ·
-✗ expected failure (known gap). ¹ guidance-distilled, no CFG branch. ² SP not supported.
-³ CP not supported. ⁴ `NCC_INLA001` compiler crash (see [DEVELOPER.md](DEVELOPER.md)). ⁵ HunyuanVideo 1.5 is a scaffold
-(`download` only).
-
-```bash
-python scripts/verify_cli.py                     # full matrix
-python scripts/verify_cli.py --models wan ltx_2  # subset
-```
+- **`ImportError` or a missing `libneuronpjrt-path` binary.** Activate the venv. The Neuron
+  runtime shells out to helpers in `.venv/bin`, so calling `.venv/bin/difflet` by absolute
+  path without `source .venv/bin/activate` fails at import.
+- **`NCC_ISMP902` internal compiler error on the Flux text encoder.** You upgraded
+  `neuronx-cc` to 2.27. The lock pins 2.26.6360.0; reinstall from
+  `requirements-neuron.lock`.
+- **`NCC_INLA001` or `NCC_IBIR243` on HunyuanVideo.** The `tp2 cp2` gather-KV graph crashes
+  the compiler. Use `--cp-mode ring` or `--tp-degree 4 --sp`.
+- **`NRT` allocation failure while loading a DP replica.** HunyuanVideo does not fit on
+  2-core replicas at its default shape. Use `--tp-degree 4` without `--dp` or a smaller
+  shape.
+- **"Cores are already held by another process".** A previous run or server is still
+  resident. Find it with `neuron-ls` or `neuron-top`, stop it, then retry. `difflet plan`
+  reports busy cores.
+- **Compile finished but generate recompiles.** Any change to shape, parallel flags,
+  or toolchain version changes the cache key. `difflet cache ls` shows what is cached.
+- **Disk filling up.** Compiler scratch accumulates in the working directory; run
+  `difflet clean --dry-run` then `difflet clean`. The artifact cache itself is under
+  `~/.cache/difflet/` and can be deleted by hand.
 
 ## Developer guide
 
 Architecture, the backend abstraction, the compile cache, parallelism internals, the runtime
-protocol, and instructions for porting a new model live in **[DEVELOPER.md](DEVELOPER.md)**.
+protocol, and how to port a new model are in **[DEVELOPER.md](DEVELOPER.md)**.
 
 ## License
 
-Apache License 2.0. See [`LICENSE`](LICENSE).
-
-Difflet incorporates code derived from third-party Apache-2.0 projects; attributions and
-modification banners are in [`NOTICE`](NOTICE) and at the top of each derived file.
+Apache License 2.0. See [`LICENSE`](LICENSE). Difflet incorporates code derived from
+third-party Apache-2.0 projects; attributions are in [`NOTICE`](NOTICE) and at the top of
+each derived file.
