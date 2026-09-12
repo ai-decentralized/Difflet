@@ -250,15 +250,25 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 | [HunyuanVideo](hunyuan_video_tp4sp.md) | 320×512×61 / 20 | 82.7 min | **596 s** | **112 s** | 520→56 s | **790.6 ms (n=19)** | 32 | $28.29 | 6.0 | ✓ finite | ok |
 | [Wan 2.1 14B](wan_2_1_tp4sp.md) | 480×832×9 / 20 | 16.1 min | **406 s** | **79 s** | 353→47 s | **578.2 ms (n=19)** | 45 | $20.06 | 1.0 | ✓ finite | ok |
 
+### Feature: tp2cfg — tp=2 × CFG-parallel (uncond/cond branches on separate core pairs, guidance 2.0)
+
+| model | shape / steps | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁶ | **DiT per-step**⁰ | outputs/hr (warm)⁴ | cost / 1k⁵ | guidance | output | status |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| FLUX.1-dev | — | — | — | — | — | — | — | — | — | — | **N/A** — guidance-distilled model |
+| Qwen-Image | — | — | — | — | — | — | — | — | — | — | **N/A** — guidance-distilled model |
+| [LTX-2](ltx_2_tp2cfg.md) | 480×704×49 / 20 | 24.9 min | **1077 s** | **921 s** | 596→447 s | **779.4 ms (n=19)** | 4 | $232.82 | 2.0 | ✓ finite | ok |
+| HunyuanVideo | — | — | — | — | — | — | — | — | — | — | **N/A** — guidance-distilled model |
+| [Wan 2.1 14B](wan_2_1_tp2cfg.md) | 480×832×9 / 20 | 22.6 min | **640 s** | **102 s** | 577→59 s | **1070.6 ms (n=19)** | 35 | $25.91 | 2.0 | ✓ finite | ok |
+
 ### DiT per-step vs tp4 (lower is better; ratio = tp4 / config)
 
-| model | tp4 | tp2cp2 | tp4sp |
-|---|---:|---:|---:|
-| FLUX.1-dev | 270.7 ms | 263.1 ms (1.03×) | 278.8 ms (0.97×) |
-| Qwen-Image | 417.3 ms | 454.3 ms (0.92×) | 365.6 ms (1.14×) |
-| LTX-2 | 459.2 ms | N/A | N/A |
-| HunyuanVideo | 814.1 ms | 849.0 ms (0.96×) | 790.6 ms (1.03×) |
-| Wan 2.1 14B | 575.5 ms | 575.5 ms (1.00×) | 578.2 ms (1.00×) |
+| model | tp4 | tp2cp2 | tp4sp | tp2cfg |
+|---|---:|---:|---:|---:|
+| FLUX.1-dev | 270.7 ms | 263.1 ms (1.03×) | 278.8 ms (0.97×) | N/A |
+| Qwen-Image | 417.3 ms | 454.3 ms (0.92×) | 365.6 ms (1.14×) | N/A |
+| LTX-2 | 459.2 ms | N/A | N/A | 779.4 ms (0.59×) |
+| HunyuanVideo | 814.1 ms | 849.0 ms (0.96×) | 790.6 ms (1.03×) | N/A |
+| Wan 2.1 14B | 575.5 ms | 575.5 ms (1.00×) | 578.2 ms (1.00×) | 1070.6 ms (0.54×) |
 
 ⁰ DiT per-step: mean of the inter-step deltas (n = steps − 1). ¹ compile = full `difflet compile` wall (all stages, incl. per-rank presharding); stage caches shared across features are reused, so a later feature's compile can be shorter than tp4's. ² cold = `sync; echo 3 > drop_caches` then one generate. ³ warm = the immediately following generate. ⁴ outputs/hr = 3600 / warm e2e (one image or one video per generate, batch 1, fresh process each — a served deployment with a resident model does better). ⁵ cost / 1k outputs = hourly price ÷ outputs/hr × 1000; AWS publishes no list price for trn2.3xlarge; $0.91/h is trn2.48xlarge on-demand ($14.5556/h, us-east-2, third-party listing sparecores.com fetched 2026-09-12) ÷ 16 chips — indicative only. ⁶ Neuron weight load summed over the pipeline's stages (from the generate log), cold vs warm — the bulk of the cold→warm gap; LTX-2's text encoder and VAE run on the host and are not in it.
 
@@ -327,6 +337,22 @@ Wan 406/79 s) and compile is the transformer NEFF only where a stage cache is sh
 (Wan 16.1 min). Combined with tp2cp2 this gives the per-topology recommendation on a
 4-core chip: **Qwen-Image → tp4sp**, **FLUX → tp2cp2 (ulysses)**, HunyuanVideo → tp4sp
 (marginal), Wan 2.1 and LTX-2 → tp4.
+
+**tp2cfg (tp2 × CFG-parallel, guidance 2.0)** — only the two true-CFG models; the ratio
+column reads 0.5–0.6× because a tp2cfg step is a *two-branch* (uncond + cond) step while the
+tp4 row is single-branch at guidance 1.0, so the honest comparison is against two sequential
+tp4 branches: Wan 2.1 **1070.6 ms** vs a notional 2 × 575.5 = 1151 ms (≈ 7% better than serial
+CFG at tp4), LTX-2 **779.4 ms** vs 2 × 459.2 = 918 ms (≈ 15% better) — notional because tp4
+was not run at guidance 2.0. **LTX-2's tp2cfg warm e2e (921 s, load 447 s) is not a
+steady-state number**: the `tp2w4-cfg` weight entry (4 ranks × a tp2 shard of the 86 GB
+model) plus the host-side text encoder/VAE no longer fit this box's ~100 GB page cache, so
+the "warm" process reads most of it from disk again (cold 1077 s); a served deployment keeps
+the model resident and never pays this. Wan 2.1: cold 640 s, warm 102 s (load 59 s).
+
+**Campaign totals**: 15 measured cells + 5 by-design N/A, every output finite, no failed
+cell, no deleted cache (1.5 TB disk, ~1.1 TB used at the end incl. 285 GB of HF weights).
+Device time ≈ 14 h; the largest single items were the HunyuanVideo VAE-decoder compiles
+(3 × ~62 min, once per topology) and the Wan 2.1 VAE compile (once, ~100 min).
 
 **New capability**: HunyuanVideo context parallel now runs with `--cp-mode ulysses` (its
 padded-Llama key-padding mask is expressed as attention_cte bounds inside the ulysses op —
