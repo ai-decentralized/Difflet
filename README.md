@@ -71,7 +71,7 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 | FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | — ¹ | ✅ |
 | Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | — ¹ | ✅ |
 | Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| HunyuanVideo | ✅ | ⚠️ ² | ✅ | ❌ | ✅ | — ¹ | ⚠️ ³ |
+| HunyuanVideo | ✅ | ⚠️ ² | ❌ ² | ✅ | ✅ | — ¹ | ⚠️ ³ |
 | LTX-2 | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
 | MiniMax-H3 | ✅ TP4 | ❌ | ❌ | ❌ | ❌ | — ¹ | ❌ |
 
@@ -105,7 +105,7 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 **Notes**
 
 1. Guidance-distilled model (single forward pass with the guidance scale baked into the timestep embedding) — there is no second CFG branch to split.
-2. `tp2 cp2` with gather-KV hits a `neuronx-cc` internal error (`NCC_INLA001` / `NCC_IBIR243`) on the CP-degree-2 DiT graph; ring CP and `tp4 --sp` are the working multi-core paths. See [DEVELOPER.md](DEVELOPER.md).
+2. `tp2 cp2` with gather-KV hits a `neuronx-cc` internal error (`NCC_INLA001` / `NCC_IBIR243`) on the CP-degree-2 DiT graph (a sharded query against the full gathered keys is a shape the bounds kernel rejects), and ring CP has no path for HunyuanVideo's text key-padding mask. **`--cp-mode ulysses` is the working CP path**: the mask rides as the joint valid-key count into attention_cte's contiguous bounds (verified on a trn2.3xlarge, 2026-09-12: tp2 cp2 compiles and generates a clean 320×512×61 video). `tp4 --sp` also works. See [DEVELOPER.md](DEVELOPER.md).
 3. DP works, but on a 4-core `trn2.3xlarge` each 2-core replica runs out of HBM loading the compiled VAE at the default 320×512×61 shape. Use a smaller shape or a host with more cores per replica.
 4. Wan 2.1 is the qualified serving checkpoint. Wan 2.2 can be started for experiments but its dual-transformer path has not passed resident-serving acceptance.
 5. MiniMax-H3 supports the Trainium four-stage CLI at TP4 and CP1: text and DiT use four cores, and each VAE uses one core. The verified end-to-end shape is **256×448×124**; pass `--height 256 --width 448 --num-frames 124`. The registry default **768×1344×124** is not qualified on `trn2.3xlarge`: the standard DiT graph exceeds device memory, and compilation with precomputed AdaLN exceeded host memory. The 640×1152×124 DiT compiled successfully but has not been verified end to end. Python API generation, resident serving, DP, JSONL batching, multi-shape compilation, and TeaCache are not supported for H3. See the [verification](docs/design/minimax_h3/01_e2e_reverification_2026-09-30.md) and [bring-up handoff](docs/design/minimax_h3/00_trainium_bringup_handoff.md).

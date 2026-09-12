@@ -176,14 +176,14 @@ def _capabilities(model_key: str):
 DISTILLED = frozenset(k for k in MODELS if _capabilities(k).is_distilled)
 SP_SUPPORTED = frozenset(k for k in MODELS if _capabilities(k).supports_sp)
 CP_UNSUPPORTED = frozenset(k for k in MODELS if not _capabilities(k).supports_cp)
-# Ulysses all-to-alls the sequence shard into a head shard, and that kernel has
-# no path for an attention mask: both the ring and ulysses branches raise
-# NotImplementedError when one is passed (modeling_hunyuan_video.py:490,
-# qwen_image/transformer.py:391). HunyuanVideo always carries a mask -- its
-# Llama text encoder emits padded, variable-length sequences -- so the pairing
-# is unsupported no matter how the heads divide. Qwen-Image reaches the same
-# branch with attention_mask=None and is unaffected.
-ULYSSES_UNSUPPORTED = frozenset({"hunyuan_video"})
+# Models whose attention path cannot run under ulysses. Empty: HunyuanVideo's
+# padded-Llama key-padding mask now rides ulysses as the joint valid-key count
+# (joint_ulysses_attention key_valid_len -> attention_cte contiguous bounds,
+# modeling_hunyuan_video.py ulysses branch); the ring branch still raises on a
+# mask (RING_UNSUPPORTED-class rule, kept as data in the model). Qwen-Image
+# reaches the branch with attention_mask=None. Mirrors ULYSSES_UNSUPPORTED in
+# difflet/planner/feasibility.py -- keep the two in step.
+ULYSSES_UNSUPPORTED = frozenset()
 
 # Documented known gaps:
 # - hunyuan_video_15 is a scaffold: compile/generate raise NotImplementedError
