@@ -175,5 +175,8 @@ class TrainiumAdapter(BackendAdapter):
 
 
 def spec_slug(cfg) -> str:
-    base = cfg.model_id.split("/")[-1].replace(".", "_").replace("-", "_")
-    return base.lower()
+    """Log / output-file stem. Carries the parallel-config label for non-tp4
+    runs so a tp2cp2 run's logs and ``<stem>_out.*`` never clobber tp4's."""
+    base = cfg.model_id.split("/")[-1].replace(".", "_").replace("-", "_").lower()
+    config = getattr(cfg, "config", "tp4")
+    return base if config == "tp4" else f"{base}_{config}"

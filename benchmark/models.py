@@ -86,6 +86,19 @@ class BenchConfig:
     # note about stages that run on the host (not a Neuron load line), explaining
     # the compute residual for host-pipeline models.
     e2e_host_note: str = ""
+    # Filled by resolve(): the MATRIX key and the parallel-config label. Together
+    # they name the result files (see config_slug) so a tp2cp2 run never
+    # overwrites the tp4 history of the same model.
+    slug: str = ""
+    config: str = "tp4"
+
+    @property
+    def config_slug(self) -> str:
+        """Result-file stem: ``<slug>`` for tp4 (the historical files), else
+        ``<slug>_<config>`` (precedent: scripts/flux_parallel_sweep.py's
+        ``flux_<label>.json``)."""
+        base = self.slug or "<slug>"
+        return base if self.config == "tp4" else f"{base}_{self.config}"
 
     def shape_flags(self) -> list[str]:
         f: list[str] = []
@@ -117,6 +130,54 @@ class BenchConfig:
             "cfg_parallel_enabled": self.cfg_parallel,
             "sp_enabled": self.sp,
         }
+
+
+# Parallel-topology labels, all sized to the 4 NeuronCores of a trn2.3xlarge
+# (same labels as scripts/verify_cli.py PARALLEL_CONFIGS / the planner's
+# config_label). Each maps to BenchConfig field overrides applied on top of the
+# MATRIX entry by resolve(). CP runs use ulysses so HunyuanVideo (whose
+# gather_kv CP hits a neuronx-cc internal error and whose ring CP has no mask
+# path) is measurable with the same mode as the other models. tp2cfg doubles the
+# world (2 tp x 2 CFG branches = 4 cores) and needs guidance > 1 to have a
+# second branch at all: the 2026-09-12 campaign runs it at guidance 2.0.
+CONFIGS: dict[str, dict[str, Any]] = {
+    "tp4": {},
+    "tp2cp2": {"tp": 2, "cp": 2, "cp_mode": "ulysses"},
+    "tp4sp": {"tp": 4, "sp": True},
+    "tp2cfg": {"tp": 2, "cfg_parallel": True, "guidance_scale": 2.0},
+}
+
+_CONFIG_DESC = {
+    "tp4": "tp=4",
+    "tp2cp2": "tp=2 x cp=2 (ulysses)",
+    "tp4sp": "tp=4 + sequence parallel",
+    "tp2cfg": "tp=2 x CFG-parallel (uncond/cond on separate core pairs)",
+}
+
+
+def resolve(slug: str, config: str = "tp4") -> "BenchConfig":
+    """The MATRIX entry for ``slug`` with the ``config`` topology applied.
+
+    Raises KeyError for an unknown slug or config label. The returned config
+    carries ``slug``/``config`` so result paths derive from ``config_slug``.
+    """
+    from dataclasses import replace
+    if slug not in MATRIX:
+        raise KeyError(f"unknown model '{slug}'. known: {', '.join(MATRIX)}")
+    if config not in CONFIGS:
+        raise KeyError(f"unknown config '{config}'. known: {', '.join(CONFIGS)}")
+    base = MATRIX[slug]
+    overrides = dict(CONFIGS[config])
+    if config != "tp4":
+        overrides["config_label"] = f"{_CONFIG_DESC[config]}; {base.config_label}"
+    return replace(base, slug=slug, config=config, **overrides)
+
+
+def add_config_arg(parser) -> None:
+    """``--config <label>`` for every harness entry point."""
+    parser.add_argument("--config", default="tp4", choices=sorted(CONFIGS),
+                        help="parallel topology label (default tp4); non-tp4 runs "
+                             "write benchmark/<device>/<slug>_<config>.{json,md}")
 
 
 # Keyed by a short slug used for the report filename (benchmark/<slug>.md).
