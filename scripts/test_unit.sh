@@ -3,7 +3,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_PYTHON="python"
-NEURON_VENV="/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference"
+NEURON_VENV="${DIFFLET_VENV:-/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference}"
+# Recent Neuron DLAMIs no longer ship the /opt venv; scripts/setup_env.sh builds
+# <repo>/.venv instead (same resolution order as benchmark/models.py).
+if [[ ! -d "${NEURON_VENV}/bin" && -d "${ROOT}/.venv/bin" ]]; then
+  NEURON_VENV="${ROOT}/.venv"
+fi
 NEURON_PYTHON="${NEURON_VENV}/bin/python"
 
 if [[ -z "${PYTHON_BIN:-}" ]]; then
