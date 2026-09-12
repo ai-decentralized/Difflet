@@ -270,12 +270,21 @@ support a CPU-shadow gate for calibrating skip decisions against a reference tra
 **In `difflet serve`.** The two probe-free modes are accepted for Qwen-Image and Wan serving
 (`--teacache-cadence N` / `--teacache-online-delta ALPHA`); they carry no compile-cache
 identity, so they can be toggled on a resident profile without a recompile. Adaptive
-`--teacache-speedup` remains Flux/Qwen-Image image serving only. HunyuanVideo serving accepts
-the probe-free pair on the TPU backend only; LTX-2 serving rejects every TeaCache flag at
-option resolution.
+`--teacache-speedup` remains Flux/Qwen-Image image serving only. HunyuanVideo, LTX-2 and Flux
+serving accept the probe-free pair on the TPU backend only (Flux's Trainium pipeline is the
+legacy NxDI fork with adaptive TeaCache only, so the flags are refused there rather than ignored).
 
-**On the TPU backend** (`DIFFLET_BACKEND=tpu`, eager torch_xla; Qwen-Image, Wan 2.2/2.1 and
-HunyuanVideo are ported — `difflet/models/<model>/tpu_application.py`) only the probe-free modes exist:
+Two TPU host-side rules learned the hard way: keep every host component (text encoders,
+connectors, audio VAE, vocoder) in **fp32** — bf16 is emulated on the EPYC host and runs 100×
+slower — and budget the first cold start of a model with a large host encoder
+(`--worker-restart-timeout`; Gemma-3's 46 GB checkpoint alone can take the default 900 s
+to read). FLUX.1-dev is a gated repo: a token with access must be in `$HF_HOME/token` before
+`difflet serve` resolves the snapshot. The first execution's XLA compile is host-memory heavy (~43 GB per rank for the
+60-block HunyuanVideo DiT), so ranks take turns through `DIFFLET_TPU_COMPILE_SLOTS` (default 2).
+
+**On the TPU backend** (`DIFFLET_BACKEND=tpu`, eager torch_xla; Qwen-Image, Wan 2.2/2.1,
+HunyuanVideo, LTX-2 and FLUX.1-dev are ported — `difflet/models/<model>/tpu_application.py`; the
+per-model rows live in `benchmark/v5e/`) only the probe-free modes exist:
 the adaptive signal comes from a fused probe NEFF on Trainium that has no TPU counterpart. Qwen's
 device-resident loop keeps the controller's residual on the chip, so a skipped step is one
 elementwise add instead of a DiT forward and XLA sees three cached graph shapes (step 0, full,

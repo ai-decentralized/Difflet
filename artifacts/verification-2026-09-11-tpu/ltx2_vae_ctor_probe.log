@@ -1,0 +1,8 @@
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+[rank0] A from_pretrained(bf16).to(dev): mean_abs=0.0048 max=0.236
+[rank0] A' same, temb=None positional: mean_abs=0.0048 max=0.236
+[rank0] B from_pretrained(fp32).to(bf16).to(dev): mean_abs=0.0048 max=0.236
+[rank0] C wrapper: mean_abs=0.0048 max=0.236

@@ -9,6 +9,12 @@ Measured on a Cloud TPU VM: `v5litepod-4`, 4 × v5e chips, 2x2 topology,
 |---|---|---|---|
 | [Qwen-Image](qwen_image.md) | 1024x1024, 20 steps, tp=4 | `benchmark/adapters/tpu.py` | 9.62 GB per chip |
 | [Wan 2.2 A14B](wan_2_2.md) | 480x832x9, 20 steps, tp=4, **single expert** | standalone runner (the TPU adapter is Qwen-specific) | 7.5-8.1 GB per chip |
+| Wan 2.1 14B | 480x832x9, 20 steps, tp=4 | `benchmark/wan_tpu_run.py --model-dir <2.1 snapshot>` | 6.99 GB per chip (single transformer) |
+| [HunyuanVideo](hunyuan_video.md) | 320x512x61, 20 steps, tp=4 | `benchmark/hunyuan_tpu_run.py` | 10.84 GB per chip |
+| [LTX-2](ltx_2.md) | 480x704x49, 20 steps, tp=4 | `benchmark/ltx2_tpu_run.py` | 9.3 GB per chip (+2.4 GB video VAE on rank 0) |
+| [FLUX.1-dev](flux_1_dev.md) | 1024x1024, 28 steps, tp=4 | `benchmark/flux_tpu_run.py` | 10.18 GB per chip (+0.3 GB VAE on rank 0) |
+
+HunyuanVideo, LTX-2 and FLUX.1-dev were ported on 2026-09-11/12 (`docs/plans/2026-09-11-tpu-port-hunyuan-ltx2-flux.md`).
 
 **Both models now use the Pallas fused attention kernel**, which needs Python
 3.12; see [wan_2_2.md](wan_2_2.md) for the toolchain and the measurements. The
@@ -113,13 +119,35 @@ under torch_xla, not by memory.
 Device-synced inter-step deltas of a real generate loop, step 0 excluded
 (`benchmark/harness.py::RealLoopStepTimer`).
 
-| device | Qwen-Image | Wan 2.2 A14B |
-|---|---|---|
-| B300 SXM6 | **140.0 ms** | **240.7 ms** |
-| H100 PCIe | 297.7 ms | 553.7 ms |
-| trn3 (4 cores) | 324.1 ms | — |
-| trn2 (4 cores) | 447.1 ms | 554.8 ms |
-| **v5e x4** | **508.4 ms** | **608.5 ms** |
+| device | Qwen-Image | Wan 2.2 A14B | Wan 2.1 14B | HunyuanVideo | LTX-2 | FLUX.1-dev |
+|---|---|---|---|---|---|---|
+| B300 SXM6 | **140.0 ms** | **240.7 ms** | — | — | — | — |
+| H100 PCIe | 297.7 ms | 553.7 ms | — | — | — | — |
+| trn3 (4 cores) | 324.1 ms | — | — | — | — | — |
+| trn2 (4 cores) | 447.1 ms | 554.8 ms | 554.8 ms | 850.6 ms | 441.8 ms | 267.6 ms |
+| **v5e x4** | **508.4 ms** | **608.5 ms** | **608 ms** | **1006 ms** | **1453 ms** | **187 ms** |
+
+### v5e vs trn2, whole request (same MATRIX rows, 2026-09-11/12)
+
+| model | trn2 warm e2e | v5e denoise | v5e served request | where the v5e time goes |
+|---|---|---|---|---|
+| Qwen-Image 1024², 20 st | 63 s | 10.1 s (natural 5.7 s) | 7.6 s (cadence 2) | encode 2 s, denoise, decode 1.2 s |
+| Wan 2.2 480×832×9, 20 st | 57 s | 12.2 s | 30.4 s | **24 s host VAE decode** |
+| Wan 2.1 480×832×9, 20 st | 56 s | 12.2 s | 33.5 s | **24 s host VAE decode** |
+| HunyuanVideo 320×512×61, 20 st | 144 s | 20.1 s | 191 s | **165 s host VAE decode** |
+| LTX-2 480×704×49, 20 st | 58 s | 29 s (+20 s Gemma-3 fp32 encode) | 51 s | decode 0.2 s on chip; the encode |
+| FLUX.1-dev 1024², 28 st | 35 s | 5.4 s (+3.3 s T5-XXL fp32 encode) | 10.1 / 9.3 s | decode 0.31 s on chip; the encode |
+
+Per DiT step the v5e is 1.1× (Qwen, Wan) to 3.3× (LTX-2) slower than trn2's 4 cores and 1.4×
+faster on FLUX (4 608 tokens of dense matmul, little attention); per request it is faster
+wherever the decode is on the chip (Qwen, LTX-2, FLUX) and slower where it is not (the video VAEs on the host: Wan's 24 s, HunyuanVideo's 165 s). Putting those two VAEs on
+the chip is the single biggest open item — LTX-2's went from >14 min (host, 121 frames) to
+0.7 s.
+
+TeaCache cadence 2 (probe-free) skips 5 of 20 steps and delivers **0.75× denoise on every
+model** (Qwen 7.60 s, Wan 9.10 s, Hunyuan 15.07 s, LTX-2 DiT 22 s; FLUX at 28 steps skips 9 →
+0.69×, 5.39 → 3.73 s); online-delta is a net loss on
+the Qwen device-resident loop (per-full-step sync) and neutral on the host-looped video models.
 
 On this basis v5e is last on both. Qwen-Image has a second, faster basis —
 290.9 ms with no per-step sync, level with the H100's synced 298 ms — because

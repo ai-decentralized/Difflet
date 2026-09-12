@@ -1,0 +1,6 @@
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+[rank0] decode 0 (49f 480x704) in 54.6s -> (1, 3, 49, 480, 704) finite=True hbm={'bytes_used': 2.98, 'bytes_limit': 15.75, 'peak_bytes_used': 2.98}
+[rank0] decode 1 (49f 480x704) in 0.2s -> (1, 3, 49, 480, 704) finite=True hbm={'bytes_used': 2.98, 'bytes_limit': 15.75, 'peak_bytes_used': 2.98}

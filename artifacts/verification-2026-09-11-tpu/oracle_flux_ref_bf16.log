@@ -1,0 +1,5 @@
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s]Loading checkpoint shards:  33%|███▎      | 1/3 [00:01<00:02,  1.17s/it]Loading checkpoint shards:  67%|██████▋   | 2/3 [00:02<00:01,  1.16s/it]Loading checkpoint shards: 100%|██████████| 3/3 [00:02<00:00,  1.20it/s]Loading checkpoint shards: 100%|██████████| 3/3 [00:02<00:00,  1.08it/s]
+loaded fp32 in 3s
+fp32 forward 37s out (1, 4096, 64) finite=True
+bf16 host control 131s cos=0.999464
+wrote /mnt/models/teacache_runs/oracle_flux_ref.pt

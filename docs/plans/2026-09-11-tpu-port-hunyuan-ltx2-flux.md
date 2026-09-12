@@ -1,6 +1,6 @@
 # Porting HunyuanVideo, LTX-2 and FLUX to the TPU backend
 
-Date: 2026-09-11 · Status: **HunyuanVideo ported and serving on the v5e (branch `tpu-port-hunyuan`); LTX-2 and FLUX not started** · Branch: `tpu-port-<model>` per model
+Date: 2026-09-11 · Status: **all three ported and serving on the v5e (branch `tpu-port-hunyuan`): HunyuanVideo 09-11, LTX-2 and FLUX 09-12** · Branch: `tpu-port-<model>` per model
 
 Context: the model-support campaign of 2026-09-11
 (`docs/verification/tpu-model-support-2026-09-11-evidence.md`) confirmed that only Qwen-Image
@@ -30,7 +30,7 @@ cadence A/B (probe-free modes only; adaptive stays Trainium) · README matrix ro
 |---|---|---|---|---|---|
 | HunyuanVideo | 23.9 GiB | **6.0 GiB** | ~9 GiB | LLaMA-3 8B + CLIP-L, 14 GB | fits comfortably; 320×512×61 default shape = 3.5 k tokens |
 | LTX-2 | 35.2 GiB | **8.8 GiB** | ~6 GiB | Gemma-3 12B, 93 GB fp32 on disk → ~47 GB bf16 host RAM | tightest; measured Qwen at 9.5 GiB/chip ran at 1024² with ~6 GiB headroom, so this is at the edge — profile transient footprint first |
-| FLUX.1-dev | 23.8 GiB | **6.0 GiB** | ~9 GiB | T5-XXL 9.5 GB + CLIP | gated repo — needs an HF token on the host (none today) |
+| FLUX.1-dev | 23.8 GiB | **6.0 GiB** | ~9 GiB | T5-XXL 9.5 GB + CLIP | gated repo — token provided 2026-09-12; measured **10.18 GiB** resident (the sharded 3.0 B plus 2.4 B replicated adaLN linears), 10.45 peak with the VAE |
 
 Host RAM is 188 GB; the Wan 2.1 load peaked at 67 GB (4 ranks reading fp32 shards). LTX-2's
 Gemma-3 in bf16 (~24 GB) plus four ranks streaming a 70 GB fp32 transformer checkpoint should stay
@@ -146,6 +146,10 @@ gated-repo 401).
 | LTX-2 | 1.5–2 weeks | ~1.8 k lines | HBM fit at default shape (day 1) |
 | FLUX (option b) | 2–3 weeks | ~1.5 k lines + serving orchestrator branch | diffusers Flux forward sharded on 4 chips |
 
+Actual (status log below): HunyuanVideo one day (09-11), LTX-2 one day (09-12, four serving
+takes), FLUX ~4 hours (3 h weight-free scaffold + probes, 20 min on the real weights once the
+token arrived) — the LTX-2 template made FLUX mostly transcription.
+
 Sequential on one v5e host; each port ends with a `benchmark/v5e/<model>.md` and a
 `difflet-device-verify`-style evidence doc.
 
@@ -177,3 +181,37 @@ Commits `365315b` (lift), `1a06144` (port), `5bca57d` (masked cross-attention on
 1.68 s/step. The one real finding: the shared TP attention processor's unmasked text
 cross-attention (a Trainium attention_cte limitation) is measurably wrong when most of the
 1024-token prompt is padding; TPU now honors the mask through the bounded flash path.
+
+### 2026-09-12 — LTX-2: serving and benchmark PASS
+
+`4469023` (video VAE on the chip, primary-only decode, runner), `e03df45` (fp32 host pipeline —
+bf16 is emulated on the host), `f3aa906` (the device-VAE wrapper hid `latents_mean/std`, so
+frames were decoded un-denormalized: cyan cast + dithering, 0.17/px vs the host decode).
+480×704×49 / 20 steps: 49 s to latents (1453 ms/step DiT, ~20 s Gemma-3 fp32 encode), decode
+0.2 s on chip; `difflet serve` ready in 246 s, requests 200 in 51 s, bit-identical; cadence 2
+skips 5/20 (DiT 0.75×, 0.0088/px). The 512×768×121 default also fits (VAE 0.7 s on chip) but
+serve it with a longer `--worker-restart-timeout` on a cold cache. Next: FLUX (needs an HF token).
+
+### 2026-09-12 — FLUX: port scaffold committed, on-device work blocked on the HF token
+
+`0389f74`, option (b) as planned: diffusers' `FluxTransformer2DModel` sharded per rank
+(`models/flux/tp_sharding.py` — head-sharded attention with the per-head qk RMSNorm and the
+shared per-position RoPE left local, column→row FFNs, single-block `proj_out` split into two
+row-parallel halves reduced once), `backends/tpu/flux/{config,transformer}.py` (CheckpointSlice
+windows onto the checkpoint's fused `proj_out`), `models/flux/tpu_application.py` (T5-XXL fp32 on
+ordinal 0 + broadcast, CLIP-L per rank, VAE on the primary replica's chip, device-resident Euler
+loop with the probe-free controller), the TPU branch of the Flux serving adapter, registry and
+option-layer flips, `benchmark/flux_tpu_run.py`. The Trainium fork is untouched. 16 CPU tests
+pin the module against diffusers (tp=1, 1e-5) and the loop against the scheduler (1e-6). Not run
+on the chips with real weights: `black-forest-labs/FLUX.1-dev` is gated and the host has no
+token (only README/LICENSE cached). Weight-free device probes (synthetic sharded checkpoint
+parity, full-geometry timing) are running; see `docs/plans/2026-09-12-tpu-next-steps.md` §2.
+
+### 2026-09-12 — FLUX: ported, parity-verified, serving and benchmark PASS
+
+Token at 04:11, weights (34 GB, `3de623fc`) at 04:13, all device results by 04:30 with no
+code change after `0389f74`: parity vs diffusers fp32 cos 0.99946 @1024² (vs upstream's own bf16
+0.99974 @256²); bench 8.7 s to latents, **187 ms/step** (trn2 268 ms — v5e faster per step for
+the first time; 4 608 tokens of dense matmul), VAE on chip; cadence 2 skips 9/28 → DiT 0.69×,
+0.0041/px; `difflet serve` ready in 216 s, 200 in 10.1 / 9.3 s, PNGs bit-identical to the bench.
+Records: `benchmark/v5e/flux_1_dev.md`, evidence doc Phase 7, `benchmark/v5e/RESULTS.md`.

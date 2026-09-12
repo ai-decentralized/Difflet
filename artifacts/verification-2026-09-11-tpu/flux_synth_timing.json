@@ -1,0 +1,22 @@
+{
+ "params_per_rank_B": 5.445148736,
+ "hbm_after_weights": {
+  "bytes_used": 10.14,
+  "bytes_limit": 15.75,
+  "peak_bytes_used": 10.14
+ },
+ "warmup_s": 43.92357358699883,
+ "forward_s": [
+  0.342,
+  0.335,
+  0.335,
+  0.334,
+  0.336
+ ],
+ "hbm_peak_gb": 10.18,
+ "out_shape": [
+  1,
+  4096,
+  64
+ ]
+}

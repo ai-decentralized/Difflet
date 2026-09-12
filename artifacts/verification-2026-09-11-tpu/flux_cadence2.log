@@ -1,0 +1,269 @@
+world=4 args={'model_dir': '/mnt/models/hf/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21', 'height': 1024, 'width': 1024, 'steps': 28, 'guidance': 3.5, 'seed': 42, 'iters': 2, 'natural_iters': 1, 'decode': True, 'teacache_cadence': 2, 'teacache_online_delta': None, 'out': '/mnt/models/teacache_runs/flux_cadence2'}
+[rank2] config image_seq=4096 text_seq=512
+[rank0] config image_seq=4096 text_seq=512
+[rank3] config image_seq=4096 text_seq=512
+[rank1] config image_seq=4096 text_seq=512
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[flux] tpu warmup (first compile) in 44.0s
+[flux] tpu warmup (first compile) in 44.8s
+[flux] tpu warmup (first compile) in 43.9s
+[flux] tpu warmup (first compile) in 44.4s
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights: 100%|██████████| 196/196 [00:00<00:00, 5688.84it/s]
+Loading weights: 100%|██████████| 196/196 [00:00<00:00, 5580.64it/s]
+Loading weights: 100%|██████████| 196/196 [00:00<00:00, 5575.83it/s]
+[flux] host encoders loaded in 0.3s (T5 on this rank: False)
+[flux] host encoders loaded in 0.3s (T5 on this rank: False)
+[teacache] probe-free controller enabled for flux/1024x1024: cadence=2 online_delta_alpha=0.0
+[rank2] loaded in 51.5s timings={'dit_load_s': 6.367621708002844, 'warmup_s': 43.87685599999895, 'host_load_s': 0.26498622599683586} mem={'bytes_used': 10.176, 'bytes_limit': 15.748, 'peak_bytes_used': 10.181}
+[teacache] probe-free controller enabled for flux/1024x1024: cadence=2 online_delta_alpha=0.0
+[rank3] loaded in 51.5s timings={'dit_load_s': 5.372561446001782, 'warmup_s': 44.82383771199966, 'host_load_s': 0.2664616459987883} mem={'bytes_used': 10.176, 'bytes_limit': 15.748, 'peak_bytes_used': 10.181}
+Loading weights:   0%|          | 0/219 [00:00<?, ?it/s]Loading weights:  32%|███▏      | 70/219 [00:00<00:00, 657.74it/s]Loading weights:  62%|██████▏   | 136/219 [00:00<00:00, 512.98it/s]Loading weights:  87%|████████▋ | 190/219 [00:00<00:00, 420.66it/s]Loading weights: 100%|██████████| 219/219 [00:00<00:00, 421.89it/s]
+[flux] VAE resident on the chip (primary replica)
+[flux] host encoders loaded in 0.8s (T5 on this rank: False)
+[teacache] probe-free controller enabled for flux/1024x1024: cadence=2 online_delta_alpha=0.0
+[rank0] loaded in 52.1s timings={'dit_load_s': 6.23712463999982, 'warmup_s': 44.03390043699983, 'host_load_s': 0.8453053639968857} mem={'bytes_used': 10.332, 'bytes_limit': 15.748, 'peak_bytes_used': 10.332}
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights: 100%|██████████| 196/196 [00:00<00:00, 6737.12it/s]
+[flux] host encoders loaded in 1.4s (T5 on this rank: True)
+[teacache] probe-free controller enabled for flux/1024x1024: cadence=2 online_delta_alpha=0.0
+[rank1] loaded in 52.6s timings={'dit_load_s': 5.815880428002856, 'warmup_s': 44.39170241000102, 'host_load_s': 1.4353027020006266} mem={'bytes_used': 10.176, 'bytes_limit': 15.748, 'peak_bytes_used': 10.181}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank3] iter0 [synced] e2e_latent=55.99s steps=18 mean_step=2.825s stage={'dit_load_s': 5.372561446001782, 'warmup_s': 44.82383771199966, 'host_load_s': 0.2664616459987883, 'encode_s': 4.678799971999979, 'denoise_s': 51.316025529999024}
+[rank1] iter0 [synced] e2e_latent=54.83s steps=18 mean_step=2.825s stage={'dit_load_s': 5.815880428002856, 'warmup_s': 44.39170241000102, 'host_load_s': 1.4353027020006266, 'encode_s': 3.514269883999077, 'denoise_s': 51.312047520001215}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank2] iter0 [synced] e2e_latent=56.00s steps=18 mean_step=2.824s stage={'dit_load_s': 6.367621708002844, 'warmup_s': 43.87685599999895, 'host_load_s': 0.26498622599683586, 'encode_s': 4.6964922709994426, 'denoise_s': 51.30084705000263}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank0] iter0 [synced] e2e_latent=55.42s steps=18 mean_step=2.827s stage={'dit_load_s': 6.23712463999982, 'warmup_s': 44.03390043699983, 'host_load_s': 0.8453053639968857, 'encode_s': 4.101220343000023, 'denoise_s': 51.319378460000735}
+{
+  "type": "result",
+  "iteration": 0,
+  "basis": "synced",
+  "wall_seconds": 55.42064050300178,
+  "load_seconds": 52.068506584000716,
+  "stage_seconds": {
+    "dit_load_s": 6.23712463999982,
+    "warmup_s": 44.03390043699983,
+    "host_load_s": 0.8453053639968857,
+    "encode_s": 4.101220343000023,
+    "denoise_s": 51.319378460000735
+  },
+  "step_seconds": [
+    23.85946506000255,
+    24.005144396000105,
+    0.18927018599788425,
+    0.1865222470005392,
+    0.18637463599952753,
+    0.2285498759993061,
+    0.18782210600329563,
+    0.18630829699759488,
+    0.18624169599934248,
+    0.18635240600269753,
+    0.1862370569979248,
+    0.18622596700151917,
+    0.18674887599991052,
+    0.1863056959991809,
+    0.18627733700122917,
+    0.1869792769975902,
+    0.18646846600313438,
+    0.18659430699699442
+  ],
+  "mem_before": {
+    "bytes_used": 0.0,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 0.0
+  },
+  "mem_after_load": {
+    "bytes_used": 10.332,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 10.332
+  },
+  "mem_after_run": {
+    "bytes_used": 10.402,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 10.412
+  },
+  "latent_shape": [
+    1,
+    4096,
+    64
+  ],
+  "finite": true,
+  "mean": -0.07426249980926514,
+  "std": 1.1369996070861816,
+  "teacache": {
+    "full_steps": 19,
+    "skipped_steps": 9,
+    "probe_calls": 0,
+    "last_delta_estimate": null,
+    "cache_initialized": true
+  }
+}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank3] iter1 [synced] e2e_latent=7.63s steps=18 mean_step=0.188s stage={'dit_load_s': 5.372561446001782, 'warmup_s': 44.82383771199966, 'host_load_s': 0.2664616459987883, 'encode_s': 3.902438846002042, 'denoise_s': 3.7318280590006907}
+[rank1] iter1 [synced] e2e_latent=7.63s steps=18 mean_step=0.189s stage={'dit_load_s': 5.815880428002856, 'warmup_s': 44.39170241000102, 'host_load_s': 1.4353027020006266, 'encode_s': 3.8657964170015475, 'denoise_s': 3.7683520279970253}
+[rank0] iter1 [synced] e2e_latent=7.63s steps=18 mean_step=0.188s stage={'dit_load_s': 6.23712463999982, 'warmup_s': 44.03390043699983, 'host_load_s': 0.8453053639968857, 'encode_s': 3.893914706000942, 'denoise_s': 3.7341596389996994}
+{
+  "type": "result",
+  "iteration": 1,
+  "basis": "synced",
+  "wall_seconds": 7.628113075999863,
+  "load_seconds": 52.068506584000716,
+  "stage_seconds": {
+    "dit_load_s": 6.23712463999982,
+    "warmup_s": 44.03390043699983,
+    "host_load_s": 0.8453053639968857,
+    "encode_s": 3.893914706000942,
+    "denoise_s": 3.7341596389996994
+  },
+  "step_seconds": [
+    0.2067215759998362,
+    0.18773827599943615,
+    0.1864995670002827,
+    0.18653534600161947,
+    0.18673489700086066,
+    0.18778177700005472,
+    0.1865668359969277,
+    0.18667977600125596,
+    0.18637889700039523,
+    0.18638541600012104,
+    0.18688455699884798,
+    0.18759749600212672,
+    0.1863802659972862,
+    0.18634383700191393,
+    0.18636686700119753,
+    0.18628406599964364,
+    0.1874649959972885,
+    0.18627882700093323
+  ],
+  "mem_before": {
+    "bytes_used": 0.0,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 0.0
+  },
+  "mem_after_load": {
+    "bytes_used": 10.332,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 10.332
+  },
+  "mem_after_run": {
+    "bytes_used": 10.402,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 10.412
+  },
+  "latent_shape": [
+    1,
+    4096,
+    64
+  ],
+  "finite": true,
+  "mean": -0.07426249980926514,
+  "std": 1.1369996070861816,
+  "teacache": {
+    "full_steps": 19,
+    "skipped_steps": 9,
+    "probe_calls": 0,
+    "last_delta_estimate": null,
+    "cache_initialized": true
+  }
+}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank2] iter1 [synced] e2e_latent=7.64s steps=18 mean_step=0.187s stage={'dit_load_s': 6.367621708002844, 'warmup_s': 43.87685599999895, 'host_load_s': 0.26498622599683586, 'encode_s': 3.927556195001671, 'denoise_s': 3.7138335199997528}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank0] iter2 [natural] e2e_latent=7.09s steps=18 mean_step=0.154s stage={'dit_load_s': 6.23712463999982, 'warmup_s': 44.03390043699983, 'host_load_s': 0.8453053639968857, 'encode_s': 3.467880005002371, 'denoise_s': 3.625290281001071}
+[rank1] iter2 [natural] e2e_latent=7.09s steps=18 mean_step=0.154s stage={'dit_load_s': 5.815880428002856, 'warmup_s': 44.39170241000102, 'host_load_s': 1.4353027020006266, 'encode_s': 3.4318021760009287, 'denoise_s': 3.6623457800014876}
+{
+  "type": "result",
+  "iteration": 2,
+  "basis": "natural",
+  "wall_seconds": 7.093198795999342,
+  "load_seconds": 52.068506584000716,
+  "stage_seconds": {
+    "dit_load_s": 6.23712463999982,
+    "warmup_s": 44.03390043699983,
+    "host_load_s": 0.8453053639968857,
+    "encode_s": 3.467880005002371,
+    "denoise_s": 3.625290281001071
+  },
+  "step_seconds": [
+    0.15389597700050217,
+    0.15313536699977703,
+    0.15318235700033256,
+    0.15335726700141095,
+    0.15345808699930785,
+    0.15434902800188866,
+    0.15493765700011863,
+    0.15412492599716643,
+    0.1540241770017019,
+    0.1539200580009492,
+    0.15383246700002928,
+    0.1532771269994555,
+    0.1544655369980319,
+    0.1541845169995213,
+    0.1529345570015721,
+    0.15260865700111026,
+    0.1529997679972439,
+    0.15284485700249206
+  ],
+  "mem_before": {
+    "bytes_used": 0.0,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 0.0
+  },
+  "mem_after_load": {
+    "bytes_used": 10.332,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 10.332
+  },
+  "mem_after_run": {
+    "bytes_used": 10.402,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 10.427
+  },
+  "latent_shape": [
+    1,
+    4096,
+    64
+  ],
+  "finite": true,
+  "mean": -0.07426249980926514,
+  "std": 1.1369996070861816,
+  "teacache": {
+    "full_steps": 19,
+    "skipped_steps": 9,
+    "probe_calls": 0,
+    "last_delta_estimate": null,
+    "cache_initialized": true
+  }
+}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank3] iter2 [natural] e2e_latent=7.10s steps=18 mean_step=0.152s stage={'dit_load_s': 5.372561446001782, 'warmup_s': 44.82383771199966, 'host_load_s': 0.2664616459987883, 'encode_s': 3.4959704139982932, 'denoise_s': 3.600477022002451}
+[rank2] iter2 [natural] e2e_latent=7.09s steps=18 mean_step=0.152s stage={'dit_load_s': 6.367621708002844, 'warmup_s': 43.87685599999895, 'host_load_s': 0.26498622599683586, 'encode_s': 3.462621703998593, 'denoise_s': 3.625934290997975}
+{
+  "type": "decoded",
+  "seconds": 116.87853679999898,
+  "where": "device",
+  "size": [
+    1024,
+    1024
+  ],
+  "mem_after_decode": {
+    "bytes_used": 10.469,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 10.488
+  }
+}
