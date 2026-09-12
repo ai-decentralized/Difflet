@@ -155,6 +155,30 @@ _CONFIG_DESC = {
 }
 
 
+# (slug, config) cells that are unsupported BY DESIGN on this codebase, with the
+# reason the report shows. The gates live in difflet (registry capabilities +
+# difflet/cli/main.py validators); tests/unit/benchmark cross-checks this table
+# against the registry so it cannot drift silently. Cells that are supported but
+# fail on device are NOT listed here -- they get a status="failed"/"blocked"
+# result with the diagnostic, never a pre-declared skip.
+_DISTILLED = ("guidance-distilled model: a single forward pass with the guidance "
+              "scale baked into the timestep embedding, so there is no second "
+              "(unconditional) CFG branch to run on a separate core pair; "
+              "`difflet` rejects --cfg-parallel for it (registry is_distilled=True, "
+              "cli/main.py _validate_cfg_parallel)")
+UNSUPPORTED: dict[tuple[str, str], str] = {
+    ("flux_1_dev", "tp2cfg"): _DISTILLED,
+    ("qwen_image", "tp2cfg"): _DISTILLED,
+    ("hunyuan_video", "tp2cfg"): _DISTILLED,
+    ("hunyuan_video_15", "tp2cfg"): _DISTILLED,
+    ("ltx_2", "tp2cp2"): ("LTX-2 has no context-parallel path (registry supports_cp=False; "
+                          "difflet/models/ltx_2/entry.py raises NotImplementedError: the "
+                          "tri-stream video+audio+text transformer has no CP foundation yet)"),
+    ("ltx_2", "tp4sp"): ("LTX-2 has no sequence-parallel path (registry supports_sp=False; "
+                         "`difflet` rejects --sp for it, cli/main.py _validate_sp)"),
+}
+
+
 def resolve(slug: str, config: str = "tp4") -> "BenchConfig":
     """The MATRIX entry for ``slug`` with the ``config`` topology applied.
 
