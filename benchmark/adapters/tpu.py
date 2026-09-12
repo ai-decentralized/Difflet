@@ -110,9 +110,11 @@ def _worker_body(rank, world, payload, cmd_q, reply_q):
 
     # Mutable so one worker serves both bases without a reload: the
     # comparable synced pass and the natural pass a serving loop runs. Under
-    # lazy XLA an unsynced delta is the *enqueue* rate, not device time
-    # (measured on Qwen-Image: 275 ms enqueued against 620 ms real), so the
-    # synced figure is the one the cross-device table quotes.
+    # lazy XLA an unsynced delta is the *enqueue* rate, not device time (on
+    # 2026-08-16 Qwen-Image enqueued a step every 275 ms while the chips took
+    # 620 ms per step on the pre-Pallas path), so the synced figure is the one
+    # the cross-device table quotes. When enqueue ~= synced the loop is bound
+    # by the host-side trace rather than the chips (Qwen-Image today).
     #
     # The sync is ``wait_device_ops`` alone, as RealLoopStepTimer documents:
     # every loop here already ``mark_step``s once per step, so the wait
