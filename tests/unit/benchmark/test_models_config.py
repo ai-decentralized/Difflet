@@ -101,11 +101,27 @@ def test_mark_na_and_cell_status_roundtrip(tmp_path, monkeypatch):
     assert cell_status.missing("ltx_2", "tp4") == ["result file"]
 
 
+def test_cell_status_ignores_pre_campaign_history(tmp_path, monkeypatch):
+    """The historical tp4 <slug>.json (no `config` field) carries every metric
+    but is not a measurement of this run -- the driver must re-run the cell."""
+    monkeypatch.setattr("benchmark.models._RESULTS_ROOT", str(tmp_path))
+    os.makedirs(os.path.dirname(json_path("flux_1_dev")), exist_ok=True)
+    old = {"status": "ok", "parallel": {"tp_degree": 4, "cp_degree": 1},
+           "compile_seconds": 1484.0, "e2e_cold_seconds": 321.0,
+           "e2e_warm": {"mean": 35.0}, "step_latency": {"mean": 0.2676, "n": 27},
+           "config_slug": "flux_1_dev"}
+    with open(json_path("flux_1_dev"), "w") as fh:
+        json.dump(old, fh)
+    m = cell_status.missing("flux_1_dev", "tp4")
+    assert len(m) == 1 and m[0].startswith("result file")
+
+
 def test_cell_status_requires_all_four_metrics(tmp_path, monkeypatch):
     monkeypatch.setattr("benchmark.models._RESULTS_ROOT", str(tmp_path))
     cfg = resolve("flux_1_dev", "tp4sp")
     os.makedirs(os.path.dirname(json_path(cfg.config_slug)), exist_ok=True)
-    d = {"status": "ok", "parallel": cfg.parallel_dict(), "compile_seconds": 100.0,
+    d = {"status": "ok", "config": "tp4sp", "parallel": cfg.parallel_dict(),
+         "compile_seconds": 100.0,
          "e2e_cold_seconds": 300.0, "e2e_warm": {"mean": 40.0},
          "step_latency": {"mean": 0.27, "n": 27}}
     with open(json_path(cfg.config_slug), "w") as fh:
