@@ -132,6 +132,7 @@ def _staged_namespace(cfg, cache, work_dir, output):
         model_id=cfg.model_id, revision=cfg.revision,
         tp_degree=cfg.tp, cp_degree=cfg.cp, cp_mode=cfg.cp_mode,
         cfg_parallel=cfg.cfg_parallel, sp_enabled=cfg.sp,
+        attention_impl=cfg.attention_impl,
         height=cfg.height, width=cfg.width, num_frames=cfg.num_frames,
         steps=cfg.steps, guidance_scale=cfg.guidance_scale, seed=cfg.seed,
         prompt=cfg.prompt, output=str(output), shapes=None,
@@ -273,6 +274,16 @@ def main() -> int:
     add_config_arg(p)
     args = p.parse_args()
     cfg = resolve(args.model, args.config)
+    # --attention-impl is carried by the DIFFLET_ATTENTION_IMPL env var (the CLI
+    # and difflet.cli.stage set it); it selects the compile-cache identity of
+    # the in-process pipeline loaders and the kernel the in-process DiT stage
+    # traces, so it must be set here the same way before anything is built.
+    from difflet.ops.attention_config import attention_implementation
+    with attention_implementation(cfg.attention_impl):
+        return _main(args, cfg)
+
+
+def _main(args, cfg) -> int:
     slug = cfg.config_slug   # result-file stem: <model>[_<config>]
     cache = Path("~/.cache/difflet").expanduser()
 

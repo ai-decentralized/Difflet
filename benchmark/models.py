@@ -68,6 +68,11 @@ class BenchConfig:
     cp_mode: str = "gather_kv"               # gather_kv | ring | ulysses (cp>1 only)
     cfg_parallel: bool = False               # --cfg-parallel (true-CFG models only)
     sp: bool = False                         # --sp (Megatron sequence parallelism)
+    # --attention-impl: "megakernel" (attention_cte routing, the default and the
+    # identity of every pre-existing artifact) or "sdpa" (PyTorch SDPA through
+    # XLA; its own compile-cache identity). Recorded in the result JSON's
+    # parallel block only when not the default, so older files still match.
+    attention_impl: str = "megakernel"
     dtype: str = "bf16"
     height: Optional[int] = None
     width: Optional[int] = None
@@ -119,17 +124,22 @@ class BenchConfig:
             f.append("--cfg-parallel")
         if self.sp:
             f.append("--sp")
+        if self.attention_impl != "megakernel":
+            f += ["--attention-impl", self.attention_impl]
         return f
 
     def parallel_dict(self) -> dict:
         """Result-JSON parallel record (same schema as the phase-sweep JSONs)."""
-        return {
+        d = {
             "tp_degree": self.tp,
             "cp_degree": self.cp,
             "cp_mode": self.cp_mode,
             "cfg_parallel_enabled": self.cfg_parallel,
             "sp_enabled": self.sp,
         }
+        if self.attention_impl != "megakernel":
+            d["attention_impl"] = self.attention_impl
+        return d
 
 
 # Parallel-topology labels, all sized to the 4 NeuronCores of a trn2.3xlarge
@@ -145,6 +155,9 @@ CONFIGS: dict[str, dict[str, Any]] = {
     "tp2cp2": {"tp": 2, "cp": 2, "cp_mode": "ulysses"},
     "tp4sp": {"tp": 4, "sp": True},
     "tp2cfg": {"tp": 2, "cfg_parallel": True, "guidance_scale": 2.0},
+    # Same topology as tp4, DiT attention through PyTorch SDPA instead of the
+    # attention_cte megakernel routing (--attention-impl sdpa).
+    "tp4sdpa": {"attention_impl": "sdpa"},
 }
 
 _CONFIG_DESC = {
@@ -152,6 +165,7 @@ _CONFIG_DESC = {
     "tp2cp2": "tp=2 x cp=2 (ulysses)",
     "tp4sp": "tp=4 + sequence parallel",
     "tp2cfg": "tp=2 x CFG-parallel (uncond/cond on separate core pairs)",
+    "tp4sdpa": "tp=4, --attention-impl sdpa (PyTorch SDPA via XLA instead of attention_cte)",
 }
 
 

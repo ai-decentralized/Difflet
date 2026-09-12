@@ -17,8 +17,22 @@ from benchmark.models import (CONFIGS, MATRIX, UNSUPPORTED, BenchConfig, json_pa
 CAMPAIGN = ["flux_1_dev", "qwen_image", "ltx_2", "hunyuan_video", "wan_2_1"]
 
 
+def test_attention_impl_config():
+    """tp4sdpa = the tp4 topology with --attention-impl sdpa; the flag and the
+    parallel record carry it only when it is not the megakernel default, so the
+    pre-existing tp4 files (no attention_impl key) still match their label."""
+    cfg = resolve("flux_1_dev", "tp4sdpa")
+    assert cfg.tp == 4 and cfg.cp == 1 and cfg.attention_impl == "sdpa"
+    assert cfg.parallel_flags()[-2:] == ["--attention-impl", "sdpa"]
+    assert cfg.parallel_dict()["attention_impl"] == "sdpa"
+    assert cfg.config_slug == "flux_1_dev_tp4sdpa"
+    base = resolve("flux_1_dev", "tp4")
+    assert "--attention-impl" not in base.parallel_flags()
+    assert "attention_impl" not in base.parallel_dict()
+
+
 def test_configs_are_the_verify_cli_labels_sized_to_four_cores():
-    assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg"}
+    assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa"}
     for label in CONFIGS:
         cfg = resolve("flux_1_dev", label)
         world = cfg.tp * cfg.cp * (2 if cfg.cfg_parallel else 1)
@@ -69,7 +83,10 @@ def test_unsupported_cells_are_exactly_the_documented_five_for_the_campaign():
         ("flux_1_dev", "tp2cfg"), ("qwen_image", "tp2cfg"), ("hunyuan_video", "tp2cfg"),
         ("ltx_2", "tp2cp2"), ("ltx_2", "tp4sp"),
     }
-    assert sum(1 for m in CAMPAIGN for c in CONFIGS if (m, c) not in UNSUPPORTED) == 15
+    topologies = ["tp4", "tp2cp2", "tp4sp", "tp2cfg"]
+    assert sum(1 for m in CAMPAIGN for c in topologies if (m, c) not in UNSUPPORTED) == 15
+    # the attention-impl variant runs the tp4 topology for every model
+    assert all((m, "tp4sdpa") not in UNSUPPORTED for m in CAMPAIGN)
 
 
 def test_unsupported_matches_registry_capabilities():

@@ -17,7 +17,7 @@ from benchmark.models import resolve
     ("difflet.cli.orchestrators.qwen_image", "qwen_image", "generate"),
     ("difflet.cli.orchestrators.hunyuan_video", "hunyuan_video", "generate"),
 ])
-@pytest.mark.parametrize("config", ["tp4", "tp2cp2", "tp4sp", "tp2cfg"])
+@pytest.mark.parametrize("config", ["tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa"])
 def test_stage_namespace_carries_the_config_topology(tmp_path, orch_mod, model_slug,
                                                      stage, config):
     import importlib
@@ -38,6 +38,7 @@ def test_stage_namespace_carries_the_config_topology(tmp_path, orch_mod, model_s
         # distilled ones are N/A cells that the driver never runs
         assert bool(getattr(ns, "cfg_parallel", False)) == (model_slug == "wan_2_1")
     assert ns.steps == cfg.steps and ns.stage_mode == "generate"
+    assert getattr(ns, "attention_impl", "megakernel") == cfg.attention_impl
     assert ns.work_dir == str(work) and ns.cache_dir == str(tmp_path)
     assert float(ns.guidance_scale) == float(cfg.guidance_scale)
 
