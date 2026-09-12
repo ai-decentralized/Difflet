@@ -422,7 +422,9 @@ def _register_builtin_ltx_2() -> None:
             supports_sp=False,
             cp_modes=frozenset(),
         ),
-        backends=("trainium",),
+        # Fourth model on the TPU backend: DiT on the chips, Gemma-3/connectors/VAEs
+        # on the host (see difflet/models/ltx_2/tpu_application.py).
+        backends=("trainium", "tpu"),
         download_patterns=(
             "*.json",
             "*.txt",
