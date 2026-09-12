@@ -20,10 +20,11 @@ in-process forward for Wan/Qwen/Hunyuan, an n=1 parity script for LTX-2, the tqd
 denoise-loop rate for FLUX), so its numbers were not measured the same way as each
 other or as H100. Here every model uses one method, the H100 method.
 
-    source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
+    source .venv/bin/activate
     python -m benchmark.step_realloop --model flux_1_dev   # or ltx_2
+    python -m benchmark.step_realloop --model flux_1_dev --config tp2cp2
 
-Patches benchmark/<device>/<slug>.json (step_latency, throughput) + re-renders md.
+Patches benchmark/<device>/<slug>[_<config>].json (step_latency, throughput) + re-renders md.
 """
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ from pathlib import Path
 
 from benchmark import report
 from benchmark.harness import Stats
-from benchmark.models import MATRIX, json_path, report_path
+from benchmark.models import add_config_arg, json_path, report_path, resolve
 
 
 def _install_timer(cls, method_name: str, stamps: list[float]):
@@ -109,16 +110,18 @@ _BUILDERS = {"flux_1_dev": _build_flux, "ltx_2": _build_ltx2}
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True, choices=sorted(_BUILDERS))
+    add_config_arg(p)
     args = p.parse_args()
-    cfg = MATRIX[args.model]
+    cfg = resolve(args.model, args.config)
+    slug = cfg.config_slug   # result-file stem: <model>[_<config>]
     cache = Path("~/.cache/difflet").expanduser()
 
-    print(f"[realloop] {args.model}: building pipeline (tp={cfg.tp}, "
+    print(f"[realloop] {slug}: building pipeline ({' '.join(cfg.parallel_flags())}, "
           f"compiled NEFF, skip_compile)...", flush=True)
     t0 = time.perf_counter()
     pipe, cls, method, gen_kwargs, out_finite = _BUILDERS[args.model](cfg, cache)
     load_s = time.perf_counter() - t0
-    print(f"[realloop] {args.model}: pipeline ready in {load_s:.1f}s; "
+    print(f"[realloop] {slug}: pipeline ready in {load_s:.1f}s; "
           f"timing {cls.__name__}.{method} per step", flush=True)
 
     stamps: list[float] = []
@@ -134,26 +137,28 @@ def main() -> int:
     # inter-step deltas, step 0 excluded — identical to diffusers_ref.py (H100)
     deltas = [stamps[i] - stamps[i - 1] for i in range(1, n_calls)]
     if not deltas:
-        print(f"[realloop] {args.model}: ERROR only {n_calls} DiT call(s) timed; "
+        print(f"[realloop] {slug}: ERROR only {n_calls} DiT call(s) timed; "
               "cannot form per-step deltas", file=sys.stderr)
         return 2
     if n_calls != cfg.steps:
-        print(f"[realloop] {args.model}: NOTE {n_calls} DiT calls for {cfg.steps} steps "
+        print(f"[realloop] {slug}: NOTE {n_calls} DiT calls for {cfg.steps} steps "
               f"({n_calls/cfg.steps:.2g}x/step — CFG/segmented); per-step = inter-call delta",
               flush=True)
 
     st = Stats.from_samples(deltas)
     finite = out_finite(result)
-    print(f"[realloop] {args.model}: per-step {st.mean*1000:.1f} ms "
+    print(f"[realloop] {slug}: per-step {st.mean*1000:.1f} ms "
           f"(median {st.median*1000:.1f}, p90 {st.p90*1000:.1f}, n={st.n}); "
           f"generate {gen_s:.1f}s, finite={finite}", flush=True)
 
-    jp = Path(json_path(args.model))
+    jp = Path(json_path(slug))
     d = json.loads(jp.read_text())
     d["step_latency"] = st.__dict__
     if st.mean > 0:
         d["throughput"] = {"DiT steps/s": round(1.0 / st.mean, 3)}
-    d["config_slug"] = args.model
+    d["config_slug"] = slug
+    d["model_slug"] = args.model
+    d["config"] = cfg.config
     # drop the prior (inconsistent-method) per-step note, append the H100-consistent one
     notes = [n for n in d.get("notes", []) if not n.lstrip().startswith("per-step =")]
     notes.insert(0,
@@ -164,8 +169,8 @@ def main() -> int:
         f"{n_calls} DiT calls timed; warm generate {gen_s:.0f}s; output finite={finite}.")
     d["notes"] = notes
     jp.write_text(json.dumps(d, indent=2))
-    Path(report_path(args.model)).write_text(report.render(d))
-    print(f"[realloop] patched {report_path(args.model)}", flush=True)
+    Path(report_path(slug)).write_text(report.render(d))
+    print(f"[realloop] patched {report_path(slug)}", flush=True)
     return 0
 
 

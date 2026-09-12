@@ -35,7 +35,7 @@ from pathlib import Path
 
 from benchmark import report
 from benchmark.harness import Stats
-from benchmark.models import MATRIX, json_path, report_path, logs_dir
+from benchmark.models import add_config_arg, json_path, report_path, logs_dir, resolve
 
 
 def _make_adapter(backend: str):
@@ -62,8 +62,9 @@ def _note(backend: str, st: Stats, warmups: int) -> str:
             "warm = warm disk cache -> faster load, not a resident model.")
 
 
-def run(slug: str, backend: str, warmups: int, iters: int) -> int:
-    cfg = MATRIX[slug]
+def run(model: str, backend: str, warmups: int, iters: int, config: str = "tp4") -> int:
+    cfg = resolve(model, config)
+    slug = cfg.config_slug   # result-file stem: <model>[_<config>]
     ad = _make_adapter(backend)
     for i in range(warmups):  # discarded — purpose is to populate the OS page cache
         g = ad.run_generate(cfg)
@@ -100,9 +101,10 @@ def main() -> int:
                    help="discarded cache-warming runs (default: 1 for trainium, 0 for "
                         "cuda/cpu — the cold run already warmed the disk)")
     p.add_argument("--iters", type=int, default=1)
+    add_config_arg(p)
     a = p.parse_args()
     warmups = a.warmups if a.warmups is not None else (1 if a.backend == "trainium" else 0)
-    return run(a.model, a.backend, warmups, a.iters)
+    return run(a.model, a.backend, warmups, a.iters, a.config)
 
 
 if __name__ == "__main__":

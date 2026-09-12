@@ -292,7 +292,10 @@ def render(r: dict) -> str:
                    if sh.get(k) is not None)
     g = f" --guidance-scale {r['guidance_scale']}" if r.get("guidance_scale") is not None else ""
     ext = "png" if r.get("model_type") in ("flux", "qwen_image") else "mp4"
-    slug = r.get("config_slug", "<slug>")
+    # model_slug = the MATRIX key (harness --model); config_slug = the result-file
+    # stem, which carries a non-tp4 parallel label (harness --config).
+    slug = r.get("model_slug") or r.get("config_slug", "<slug>")
+    cfg_flag = f" --config {r['config']}" if r.get("config", "tp4") != "tp4" else ""
     pending = r.get("status") == "pending"
     # only models with an in-process step_latency loader (not flux/hunyuan_video_15)
     has_step = r.get("model_type") in ("ltx_2", "wan", "qwen_image", "hunyuan_video")
@@ -313,17 +316,17 @@ def render(r: dict) -> str:
         a("")
         a("# benchmark harness on this device (writes benchmark/<device>/):")
         a(f"DIFFLET_BENCH_DEVICE={r.get('device_slug','trn2')} \\")
-        a(f"    python -m benchmark.cold_warm_e2e --model {slug}    # true cold + warm e2e")
+        a(f"    python -m benchmark.cold_warm_e2e --model {slug}{cfg_flag}    # true cold + warm e2e")
         if has_step:
             a(f"DIFFLET_BENCH_DEVICE={r.get('device_slug','trn2')} \\")
-            a(f"    python -m benchmark.step_latency  --model {slug}    # warm per-step")
+            a(f"    python -m benchmark.step_latency  --model {slug}{cfg_flag}    # warm per-step")
         else:
             a(f"# (no in-process step_latency loader for model_type "
               f"'{r.get('model_type')}'; its per-step comes from the warm denoise-loop "
               "rate in the generate log — see Notes)")
     a("")
     a("# other backends (H100/B300) reproduce the SAME model+config via the generic runner:")
-    a(f"#   python -m benchmark.bench --backend cuda --model {slug}   # diffusers CUDA reference adapter")
+    a(f"#   python -m benchmark.bench --backend cuda --model {slug}{cfg_flag}   # diffusers CUDA reference adapter")
     a("```")
     a("")
     a("**Measurement protocol** (so the numbers above are comparable across hardware):")

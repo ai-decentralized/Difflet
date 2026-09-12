@@ -25,7 +25,7 @@ from pathlib import Path
 from benchmark import report
 from benchmark.adapters.trainium import TrainiumAdapter
 from benchmark.harness import Stats
-from benchmark.models import MATRIX
+from benchmark.models import add_config_arg, resolve
 
 
 def drop_caches() -> bool:
@@ -55,9 +55,10 @@ def _patch(slug: str, note: str | None = None, **kv) -> dict:
     return d
 
 
-def run(slug: str) -> int:
+def run(model: str, config: str = "tp4") -> int:
     from benchmark.models import logs_dir
-    cfg = MATRIX[slug]
+    cfg = resolve(model, config)
+    slug = cfg.config_slug   # result-file stem: <model>[_<config>]
     cold_ad = TrainiumAdapter(log_dir=f"{logs_dir()}/cold")
     warm_ad = TrainiumAdapter(log_dir=f"{logs_dir()}/warm")
 
@@ -97,8 +98,9 @@ def run(slug: str) -> int:
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
+    add_config_arg(p)
     a = p.parse_args()
-    return run(a.model)
+    return run(a.model, a.config)
 
 
 if __name__ == "__main__":
