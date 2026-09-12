@@ -266,9 +266,13 @@ class TpuApplicationBase(torch.nn.Module):
         except NotImplementedError:
             return 0.0
         started = time.monotonic()
+        # Through the application's own forward, not the bare module: a
+        # subclass may map the positional bundle onto keyword arguments (LTX-2
+        # hands diffusers' transformer its geometry as kwargs).
+        self.module = module
         with compile_slot(slots):
             with torch.no_grad():
-                out = module(*[t.to(device) if hasattr(t, "to") else t for t in inputs])
+                out = self.forward(*[t.to(device) if hasattr(t, "to") else t for t in inputs])
             xm.mark_step()
         xm.wait_device_ops()
         del out
