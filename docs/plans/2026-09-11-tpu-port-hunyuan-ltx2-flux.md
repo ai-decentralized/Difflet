@@ -1,6 +1,6 @@
 # Porting HunyuanVideo, LTX-2 and FLUX to the TPU backend
 
-Date: 2026-09-11 · Status: **HunyuanVideo ported and serving on the v5e (branch `tpu-port-hunyuan`); LTX-2 and FLUX not started** · Branch: `tpu-port-<model>` per model
+Date: 2026-09-11 · Status: **all three ported and serving on the v5e (branch `tpu-port-hunyuan`): HunyuanVideo 09-11, LTX-2 and FLUX 09-12** · Branch: `tpu-port-<model>` per model
 
 Context: the model-support campaign of 2026-09-11
 (`docs/verification/tpu-model-support-2026-09-11-evidence.md`) confirmed that only Qwen-Image
@@ -202,3 +202,12 @@ pin the module against diffusers (tp=1, 1e-5) and the loop against the scheduler
 on the chips with real weights: `black-forest-labs/FLUX.1-dev` is gated and the host has no
 token (only README/LICENSE cached). Weight-free device probes (synthetic sharded checkpoint
 parity, full-geometry timing) are running; see `docs/plans/2026-09-12-tpu-next-steps.md` §2.
+
+### 2026-09-12 — FLUX: ported, parity-verified, serving and benchmark PASS
+
+Token at 04:11, weights (34 GB, `3de623fc`) at 04:13, all device results by 04:30 with no
+code change after `0389f74`: parity vs diffusers fp32 cos 0.99946 @1024² (vs upstream's own bf16
+0.99974 @256²); bench 8.7 s to latents, **187 ms/step** (trn2 268 ms — v5e faster per step for
+the first time; 4 608 tokens of dense matmul), VAE on chip; cadence 2 skips 9/28 → DiT 0.69×,
+0.0041/px; `difflet serve` ready in 216 s, 200 in 10.1 / 9.3 s, PNGs bit-identical to the bench.
+Records: `benchmark/v5e/flux_1_dev.md`, evidence doc Phase 7, `benchmark/v5e/RESULTS.md`.

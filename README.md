@@ -47,13 +47,13 @@ Core capabilities:
 
 Which acceleration features each model supports. ✅ = supported, ❌ = not supported.
 
-| Model | TP | CP — all-gather | CP — ring | SP | TeaCache (adaptive) | TeaCache (fixed cadence) | CFG-parallel |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ |
-| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ |
-| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| HunyuanVideo | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ |
-| LTX-2 | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Model | TP | CP — all-gather | CP — ring | SP | TeaCache (adaptive) | TeaCache (fixed cadence) | CFG-parallel | TPU backend ² |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ | ✅ |
+| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ | ✅ |
+| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| HunyuanVideo | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ | ✅ |
+| LTX-2 | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
 
 **Feature legend**
 
@@ -68,6 +68,7 @@ Which acceleration features each model supports. ✅ = supported, ❌ = not supp
 **Notes**
 
 1. Guidance-distilled model (single forward pass with the guidance scale baked into the timestep embedding) — there is no second CFG branch to split.
+2. Cloud TPU (`DIFFLET_BACKEND=tpu`, eager torch_xla, tp only): `difflet serve`, the `benchmark/*_tpu_run.py` runners and probe-free TeaCache (`--teacache-cadence` / `--teacache-online-delta`) for all five models; no CLI `compile/generate/run`, CP/SP/CFG-parallel or adaptive TeaCache there. Measured on a v5litepod-4 in `benchmark/v5e/`.
 
 Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive (and each is mutually exclusive with `--sp`). `world_size = tp_degree × cp_degree` (or `tp_degree × 2` with CFG-parallel; `--sp` leaves it unchanged).
 
@@ -390,8 +391,8 @@ artifacts. `difflet clean` is a housekeeping command that takes no `--model-id`.
 TeaCache step-skipping flags (`--teacache-cadence`, `--teacache-online-delta`,
 `--teacache-speedup`, `--teacache-calibration`) are available on `generate` and `run`.
 `difflet serve` accepts the probe-free pair (`--teacache-cadence`, `--teacache-online-delta`)
-for Qwen-Image and Wan on both Trainium and the TPU backend, for HunyuanVideo and LTX-2 on
-the TPU backend, and adaptive `--teacache-speedup` for Flux and Qwen-Image image serving.
+for Qwen-Image and Wan on both Trainium and the TPU backend, for HunyuanVideo, LTX-2 and
+Flux on the TPU backend, and adaptive `--teacache-speedup` for Flux and Qwen-Image image serving.
 TAEF1 lightweight-VAE flags (`--taef1`, `--taef1-path`) are available on `compile`,
 `generate`, and `run` (Flux only, see [Quick start](#quick-start)).
 

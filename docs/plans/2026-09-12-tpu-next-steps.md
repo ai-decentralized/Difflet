@@ -10,7 +10,7 @@ Date: 2026-09-12 · Branch: `tpu-port-hunyuan` (on `verify/tpu-models-2026-09-11
 | Wan 2.2 / 2.1 | serving + bench + TeaCache PASS (2.1: serving) | `docs/verification/tpu-model-support-2026-09-11-evidence.md` |
 | HunyuanVideo | ported: parity 0.99949, serving 200/191 s, bench 1.0 s/step, TeaCache 0.75× | Phase 5 of the evidence doc |
 | LTX-2 | ported: parity 0.99983, 1.68 s/step, HBM 9.36 GB; **serving startup times out in the smoke** | Phase 6 |
-| FLUX.1-dev | **port scaffold committed (`0389f74`): sharded diffusers DiT, TPU app, serving branch, 16 CPU-pinned tests; weights not on this host (gated repo, no HF token)** | this doc §2 |
+| FLUX.1-dev | ported: parity 0.99946, serving 200/10 s, bench 187 ms/step, TeaCache 0.69× | Phase 7 of the evidence doc, `benchmark/v5e/flux_1_dev.md` |
 
 ## 1. Fix LTX-2 serving (today) — DONE 03:16: ready 246 s, requests 200 in 51 s, bench + cadence-2 recorded
 
@@ -36,7 +36,7 @@ The DiT is not the problem (1.7 s/step measured).
 `/v1/videos/sync` request returns 200, `benchmark/ltx2_tpu_run.py` (to write, fork of the
 Hunyuan runner) gives denoise / per-step / decode and a `--teacache-cadence 2` A/B.
 
-## 2. FLUX.1-dev port (option (b) of the port plan: parallel diffusers-based implementation)
+## 2. FLUX.1-dev port (option (b) of the port plan: parallel diffusers-based implementation) — DONE 04:30: parity 0.99946, bench 187 ms/step, serve 200 in 10 s, cadence 2
 
 Prerequisite: an HF token with `black-forest-labs/FLUX.1-dev` access on this host (24 GB, gated;
 today's probe stopped at 401). **Blocked until the token is provided.**
@@ -100,7 +100,7 @@ shape / steps / guidance / seed:
 | Wan 2.1 | 480×832×9 | 56 s | 555 ms | serving 33.5 s (bench runner is 2.2-shaped: add `--model-dir` 2.1 run) |
 | HunyuanVideo | 320×512×61, 20 st, g6 | 144 s | 851 ms | 20.1 s denoise + 167 s host decode, 1006 ms |
 | LTX-2 | **480×704×49**, 20 st, g1 | 58 s | 442 ms | 1.68 s/step at 512×768×121; to measure at the MATRIX shape |
-| FLUX.1-dev | 1024², 28 st, g3.5 | 35 s | 268 ms | after the port |
+| FLUX.1-dev | 1024², 28 st, g3.5 | 35 s | 268 ms | 8.7 s to latents, **187 ms**; served 10.1 s |
 
 Runner plan: `benchmark.bench --backend tpu` for the image models (adapter exists for Qwen;
 add Flux), the `*_tpu_run.py` runners for video (Wan, Hunyuan; write LTX-2), each writing

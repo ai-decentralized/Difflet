@@ -177,3 +177,14 @@ Artifacts: `/mnt/models/teacache_runs/` (logs, PNGs, mp4/npy, JSON), `benchmark/
 Same 0.75× as Qwen-Image and Wan; no natural-basis penalty (the orchestrator's Euler step is
 host-side, so every step syncs regardless). Online-delta not measured on Hunyuan. Host VAE decode
 (167 s) dominates the request either way.
+
+## Addendum (2026-09-12) — FLUX.1-dev, after its TPU port
+
+Port written weight-free (`0389f74`, 16 CPU tests incl. module-vs-diffusers at 1e-5 and
+loop-vs-scheduler at 1e-6), proven on the chips with a synthetic sharded checkpoint (cos
+0.9999995 in fp32) and the full geometry with random weights (10.18 GB/rank, 0.335 s/forward),
+then — the token arrived 04:11 — on the real weights within 20 minutes: parity cos 0.99946 @1024²
+(0.99974 vs diffusers' own bf16 @256²), bench **8.7 s to latents / 187 ms per step** (trn2:
+268 ms — the first model where the v5e is faster per step), cadence 2 skips 9/28 (DiT 0.69×,
+0.0041/px), `difflet serve` ready in 216 s and **200 in 10.1 / 9.3 s**, PNGs bit-identical to
+the bench. No device bugs. Records: `benchmark/v5e/flux_1_dev.md`, evidence doc Phase 7.
