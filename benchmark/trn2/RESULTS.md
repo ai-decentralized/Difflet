@@ -1,5 +1,7 @@
 # Benchmark results — summary
 
+> **2026-09-12 update.** The table directly below is the 2026-06/07 tp4 run, kept as history. A new **parallel-topology campaign** (main @ 38e863e, fresh toolchain, all five models re-measured with one per-step method, plus tp2cp2 / tp4sp / tp2cfg and a native NxDI FLUX baseline) is at the [bottom of this file](#2026-09-12-parallel-topology-campaign-main--38e863e--campaign-branch); its per-model files are `<slug>.json` (tp4, overwritten by the new run) and `<slug>_<config>.json`.
+
 Measured on **trn2.3xlarge** (1 Neuron device, 4 NeuronCores × 24 GB), bf16,
 `tp=4`, via the Neuron inference venv
 (`/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference`), with **per-rank presharding
@@ -203,3 +205,67 @@ python -m benchmark.step_latency --model <slug>
 # true cold + warm e2e (drops the page cache before the cold run):
 python -m benchmark.cold_warm_e2e --model <slug>
 ```
+
+<!-- campaign:begin -->
+## 2026-09-12 parallel-topology campaign (main @ 38e863e + campaign branch)
+
+Same host class as above (**trn2.3xlarge**, 4 NeuronCores under LNC=2, 96 GB HBM, 124 GB RAM), fresh venv from `requirements-neuron.lock`; toolchain `torch=2.9.1`, `torch-neuronx=2.9.0.2.15.32035+de43f57c`, `neuronx-cc=2.26.6360.0+6f180f47`, `neuronx-distributed=0.19.28492+435aae2b`, `diffusers=0.38.0`. Every cell is `compile` (one-time AOT, timed) → **true cold** e2e (page cache dropped) → **warm** e2e (the next process) → **DiT per-step** by the real-loop rule (`benchmark/step_realloop.py`: inter-step deltas of one real generate, device-synced, step 0 excluded — now the same method for all five models). Features ran in the order tp4 → tp2cp2 → tp4sp → tp2cfg, all models per feature, device otherwise idle. Files: `<slug>.json` (tp4) and `<slug>_<config>.json` per cell; run any cell with `python -m benchmark.{bench,cold_warm_e2e,step_realloop} --model <slug> --config <label>`.
+
+### Feature: tp4 — tensor parallel over all 4 cores (the baseline topology)
+
+| model | shape / steps | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁶ | **DiT per-step**⁰ | outputs/hr (warm)⁴ | cost / 1k⁵ | guidance | output | status |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| [FLUX.1-dev](flux_1_dev.md) | 1024×1024 / 28 | 21.2 min | **308 s** | **41 s** | 269→23 s | **270.7 ms (n=27)** | 87 | $10.41 | 3.5 | ✓ finite | ok |
+| [Qwen-Image](qwen_image.md) | 1024×1024 / 20 | 24.7 min | **494 s** | **65 s** | 446→35 s | **417.3 ms (n=19)** | 55 | $16.52 | 4.0 | ✓ finite | ok |
+| [LTX-2](ltx_2.md) | 480×704×49 / 20 | 18.0 min | **769 s** | **56 s** | 310→11 s | **459.2 ms (n=19)** | 64 | $14.21 | 1.0 | ✓ finite | ok |
+| [HunyuanVideo](hunyuan_video.md) | 320×512×61 / 20 | 82.3 min | **594 s** | **115 s** | 519→58 s | **814.1 ms (n=19)** | 31 | $28.98 | 6.0 | ✓ finite | ok |
+| [Wan 2.1 14B](wan_2_1.md) | 480×832×9 / 20 | 111.6 min | **407 s** | **85 s** | 354→52 s | **575.5 ms (n=19)** | 43 | $21.40 | 1.0 | ✓ finite | ok |
+
+### DiT per-step vs tp4 (lower is better; ratio = tp4 / config)
+
+| model | tp4 |
+|---|---:|
+| FLUX.1-dev | 270.7 ms |
+| Qwen-Image | 417.3 ms |
+| LTX-2 | 459.2 ms |
+| HunyuanVideo | 814.1 ms |
+| Wan 2.1 14B | 575.5 ms |
+
+⁰ DiT per-step: mean of the inter-step deltas (n = steps − 1). ¹ compile = full `difflet compile` wall (all stages, incl. per-rank presharding); stage caches shared across features are reused, so a later feature's compile can be shorter than tp4's. ² cold = `sync; echo 3 > drop_caches` then one generate. ³ warm = the immediately following generate. ⁴ outputs/hr = 3600 / warm e2e (one image or one video per generate, batch 1, fresh process each — a served deployment with a resident model does better). ⁵ cost / 1k outputs = hourly price ÷ outputs/hr × 1000; AWS publishes no list price for trn2.3xlarge; $0.91/h is trn2.48xlarge on-demand ($14.5556/h, us-east-2, third-party listing sparecores.com fetched 2026-09-12) ÷ 16 chips — indicative only. ⁶ Neuron weight load summed over the pipeline's stages (from the generate log), cold vs warm — the bulk of the cold→warm gap; LTX-2's text encoder and VAE run on the host and are not in it.
+
+N/A cells are by design (the gate is named in the cell's `.md`): guidance-distilled models (FLUX, Qwen-Image, HunyuanVideo) have no second CFG branch to parallelise; LTX-2 has no CP or SP path. tp2cfg runs the two true-CFG models at guidance 2.0 (the tp4 row is single-branch at guidance 1.0), so its per-step is a two-branch step and is not a same-work comparison with tp4.
+
+<!-- campaign:end -->
+
+<!-- campaign-findings:begin -->
+## 2026-09-12 campaign — findings vs the 2026-06/07 run (hand-written)
+
+**tp4 per-step, now the real-loop rule for all five models** (old value in parentheses):
+FLUX **270.7 ms** (267.6, +1%) · Qwen-Image **417.3 ms** (447, −7%: the old number was the
+isolated synthetic-input timer, this is the first real-loop measurement) · LTX-2 **459.2 ms**
+(441.8, +4%) · HunyuanVideo **814.1 ms** (850.6, −4%: measured with the real padded text mask
+instead of the all-ones-bound upper bound) · Wan 2.1 **575.5 ms** (554.8, +4%, old = isolated
+timer). All n = steps − 1, p90 within 1 ms of the median for every model.
+
+**Warm e2e** (n=1, the generate immediately after the true-cold one): FLUX 41 s (35) ·
+Qwen 65 s (63) · LTX-2 56 s (58) · HunyuanVideo **115 s** (144: the VAE decoder now runs on
+Neuron instead of the host) · Wan 2.1 **85 s** (56). The Wan regression sits in the stage
+loads (warm log): VAE decoder **30.4 s** (was 13.6), UMT5 12.4 s (8.3), transformer 9.2 s (6.5)
+— the denoise loop itself is unchanged. Not chased inside the campaign (it would have changed
+the code under test); flagged as a follow-up: new toolchain / NEFF size / first-warm-run
+effect (the old row was the median of n=3 after a discarded warm-up).
+
+**Cold e2e**: FLUX 308 s (321) · Qwen 494 s (509) · LTX-2 769 s (778) · HunyuanVideo 594 s
+(667) · Wan 2.1 407 s (394) — the same load-dominated picture; the load column shows the
+cold→warm gap is the disk read of the weights.
+
+**Compile**: FLUX 21.2 min (24.7) · Qwen 24.7 min (21.9) · LTX-2 18.0 min (30.6) ·
+HunyuanVideo **82.3 min** (47.1 — the old row was stale, host-VAE; now the VAE decoder is
+compiled on-chip inside the DiT stage and its neuronx-cc build is 62 of the 82 min, paid
+again for every topology) · Wan 2.1 111.6 min (131, VAE-dominated).
+
+**New capability**: HunyuanVideo context parallel now runs with `--cp-mode ulysses` (its
+padded-Llama key-padding mask is expressed as attention_cte bounds inside the ulysses op —
+commit on this branch); the tp2cp2 section carries the first measurement (849 ms/step at
+tp2 cp2 vs 814 ms at tp4: CP costs ~4% at this 61-frame shape, as expected for a 4-core box).
+<!-- campaign-findings:end -->
