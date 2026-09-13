@@ -260,6 +260,16 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 | HunyuanVideo | — | — | — | — | — | — | — | — | — | — | **N/A** — guidance-distilled model |
 | [Wan 2.1 14B](wan_2_1_tp2cfg.md) | 480×832×9 / 20 | 22.6 min | **640 s** | **102 s** | 577→59 s | **1070.6 ms (n=19)** | 35 | $25.91 | 2.0 | ✓ finite | ok |
 
+### Feature: tp4cfg2 — tp=4 at guidance 2.0 (two sequential CFG branches: the same-work baseline for tp2cfg)
+
+| model | shape / steps | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁶ | **DiT per-step**⁰ | outputs/hr (warm)⁴ | cost / 1k⁵ | guidance | output | status |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| FLUX.1-dev | — | — | — | — | — | — | — | — | — | — | **N/A** — guidance-distilled model |
+| Qwen-Image | — | — | — | — | — | — | — | — | — | — | **N/A** — guidance-distilled model |
+| [LTX-2](ltx_2_tp4cfg2.md) | 480×704×49 / 20 | 7 s | **792 s** | **77 s** | 310→11 s | **918.1 ms (2 calls × 459.1, n=39)** | 47 | $19.49 | 2.0 | ✓ finite | ok |
+| HunyuanVideo | — | — | — | — | — | — | — | — | — | — | **N/A** — guidance-distilled model |
+| [Wan 2.1 14B](wan_2_1_tp4cfg2.md) | 480×832×9 / 20 | 12 s | **419 s** | **94 s** | 354→50 s | **1151.5 ms (2 calls × 575.8, n=39)** | 38 | $23.73 | 2.0 | ✓ finite | ok |
+
 ### Feature: tp4sdpa — tp=4 with `--attention-impl sdpa` (PyTorch SDPA through XLA instead of the attention_cte megakernel routing)
 
 | model | shape / steps | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁶ | **DiT per-step**⁰ | outputs/hr (warm)⁴ | cost / 1k⁵ | guidance | output | status |
@@ -270,15 +280,15 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 | [HunyuanVideo](hunyuan_video_tp4sdpa.md) | 320×512×61 / 20 | 85.7 min | **651 s** | **168 s** | 516→53 s | **3641.3 ms (n=19)** | 21 | $42.39 | 6.0 | ✓ finite | ok |
 | [Wan 2.1 14B](wan_2_1_tp4sdpa.md) | 480×832×9 / 20 | 5.5 min | **416 s** | **88 s** | 352→45 s | **1034.8 ms (n=19)** | 41 | $22.23 | 1.0 | ✓ finite | ok |
 
-### DiT per-step vs tp4 (lower is better; ratio = tp4 / config)
+### DiT per-step vs tp4 (lower is better; ratio = tp4 / config; a step with two sequential CFG calls counts both calls)
 
-| model | tp4 | tp2cp2 | tp4sp | tp2cfg | tp4sdpa |
-|---|---:|---:|---:|---:|---:|
-| FLUX.1-dev | 270.7 ms | 263.1 ms (1.03×) | 278.8 ms (0.97×) | N/A | 682.3 ms (0.40×) |
-| Qwen-Image | 417.3 ms | 454.3 ms (0.92×) | 365.6 ms (1.14×) | N/A | 788.8 ms (0.53×) |
-| LTX-2 | 459.2 ms | N/A | N/A | 779.4 ms (0.59×) | 506.8 ms (0.91×) |
-| HunyuanVideo | 814.1 ms | 849.0 ms (0.96×) | 790.6 ms (1.03×) | N/A | 3641.3 ms (0.22×) |
-| Wan 2.1 14B | 575.5 ms | 575.5 ms (1.00×) | 578.2 ms (1.00×) | 1070.6 ms (0.54×) | 1034.8 ms (0.56×) |
+| model | tp4 | tp2cp2 | tp4sp | tp2cfg | tp4cfg2 | tp4sdpa |
+|---|---:|---:|---:|---:|---:|---:|
+| FLUX.1-dev | 270.7 ms | 263.1 ms (1.03×) | 278.8 ms (0.97×) | N/A | N/A | 682.3 ms (0.40×) |
+| Qwen-Image | 417.3 ms | 454.3 ms (0.92×) | 365.6 ms (1.14×) | N/A | N/A | 788.8 ms (0.53×) |
+| LTX-2 | 459.2 ms | N/A | N/A | 779.4 ms (0.59×) | 918.1 ms (0.50×) | 506.8 ms (0.91×) |
+| HunyuanVideo | 814.1 ms | 849.0 ms (0.96×) | 790.6 ms (1.03×) | N/A | N/A | 3641.3 ms (0.22×) |
+| Wan 2.1 14B | 575.5 ms | 575.5 ms (1.00×) | 578.2 ms (1.00×) | 1070.6 ms (0.54×) | 1151.5 ms (0.50×) | 1034.8 ms (0.56×) |
 
 ⁰ DiT per-step: mean of the inter-step deltas (n = steps − 1). ¹ compile = full `difflet compile` wall (all stages, incl. per-rank presharding); stage caches shared across features are reused, so a later feature's compile can be shorter than tp4's. ² cold = `sync; echo 3 > drop_caches` then one generate. ³ warm = the immediately following generate. ⁴ outputs/hr = 3600 / warm e2e (one image or one video per generate, batch 1, fresh process each — a served deployment with a resident model does better). ⁵ cost / 1k outputs = hourly price ÷ outputs/hr × 1000; AWS publishes no list price for trn2.3xlarge; $0.91/h is trn2.48xlarge on-demand ($14.5556/h, us-east-2, third-party listing sparecores.com fetched 2026-09-12) ÷ 16 chips — indicative only. ⁶ Neuron weight load summed over the pipeline's stages (from the generate log), cold vs warm — the bulk of the cold→warm gap; LTX-2's text encoder and VAE run on the host and are not in it.
 
@@ -374,6 +384,15 @@ build. Evidence: `[difflet] DiT attention policy: sdpa` / `tracing attention ker
 in every `<slug>_tp4sdpa_compile.log`, `attention_impl: sdpa` in the artifact manifests,
 outputs finite. So the megakernel routing (attention_cte) is worth 1.1–4.5× per step and
 is the right default; `sdpa` is the fallback/reference path, not a performance option.
+
+**Follow-up 2 — the measured CFG-parallel baseline (tp4cfg2 = tp4 at guidance 2.0, two
+sequential branches on the tp4 artifact, no recompile)**: LTX-2 step = 2 × 459.1 = **918 ms**
+vs tp2cfg **779.4 ms** → CFG-parallel **1.18× faster** per step; Wan 2.1 step = 2 × 575.8 =
+**1152 ms** vs **1070.6 ms** → **1.08×**. Both match the notional estimates above. e2e at
+guidance 2.0: LTX-2 warm **77 s** on tp4 vs tp2cfg's page-cache-bound 921 s (see follow-up 3
+for the resident number); Wan 2.1 warm **94 s** on tp4 vs **102 s** tp2cfg — the CFG-parallel
+step win is eaten by the 4-shard `tp2w4-cfg` load (50 → 59 s), so at this shape tp4 is the
+better *process-level* choice for Wan and tp2cfg only pays off with a resident model.
 
 **Campaign totals**: 15 measured cells + 5 by-design N/A, every output finite, no failed
 cell, no deleted cache (1.5 TB disk, ~1.1 TB used at the end incl. 285 GB of HF weights).

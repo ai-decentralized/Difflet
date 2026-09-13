@@ -1,0 +1,39 @@
+{
+  "model_id": "Qwen/Qwen-Image",
+  "model_type": "qwen_image",
+  "backend": "trainium",
+  "device": "",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "status": "skipped",
+  "skip_reason": "guidance-distilled model: guidance is a conditioning input of its single forward pass, so 'guidance 2.0 on tp4' is not a two-branch CFG baseline -- the tp2cfg cell it would baseline is N/A for this model too",
+  "config_slug": "qwen_image_tp4cfg2",
+  "model_slug": "qwen_image",
+  "config": "tp4cfg2",
+  "device_slug": "trn2",
+  "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 2.0,
+  "output_kind": "image",
+  "config_label": "tp=4 at guidance 2.0 (two sequential CFG branches; baseline for tp2cfg); tp=4, bf16, joint attention via attention_cte",
+  "toolchain": {},
+  "throughput": {},
+  "compile_breakdown": {},
+  "timestamp": "2026-09-13 02:17 UTC",
+  "notes": [
+    "N/A by design (tp4cfg2): guidance-distilled model: guidance is a conditioning input of its single forward pass, so 'guidance 2.0 on tp4' is not a two-branch CFG baseline -- the tp2cfg cell it would baseline is N/A for this model too"
+  ]
+}
