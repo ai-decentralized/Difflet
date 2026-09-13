@@ -394,6 +394,32 @@ for the resident number); Wan 2.1 warm **94 s** on tp4 vs **102 s** tp2cfg — t
 step win is eaten by the 4-shard `tp2w4-cfg` load (50 → 59 s), so at this shape tp4 is the
 better *process-level* choice for Wan and tp2cfg only pays off with a resident model.
 
+**Follow-up 1 — Wan 2.1 warm e2e 85 s vs the old 56 s: real, and it is NEFF device-init,
+not the page cache.** Steady state with the old protocol (2 discarded warm-ups, then n=3):
+**81.7 s** (80.7 / 81.7 / 82.7), stage loads 48–49 s every time (`benchmark/trn2fu/`).
+Per-stage `nxd_model.initialize` (the presharded reads are page-cache instant: 140 MB in
+0.00 s, 28.6 GB in 0.32 s), new vs the 2026-06 files: Wan VAE decoder **32.0 s vs 13.6**,
+UMT5 7.8 vs 8.3, transformer 9.2 vs 6.5 — and the same 2–3× on other models' small NEFFs:
+FLUX VAE decoder **6.5 vs 2.2 s**, HunyuanVideo Llama **28.7 vs 12.9 s** (LTX-2's DiT went
+the other way, 10.4 vs 13.9). The denoise loop is unchanged (576 vs 555 ms). The only
+in-repo load-path change since July is a JSON read (`world_check`, 4f59547); the toolchain
+moved from neuronx-cc 2.25.3371 / torch-neuronx 2.14 to 2.26.6360 / 2.15 with runtime 2.34,
+so the working hypothesis is a slower NEFF device-init in the new toolchain (the Wan VAE NEFF
+is 242 MB). To confirm, re-run one VAE stage under a 2.25 venv (not on this host) or bisect
+the runtime package; a served deployment never pays it — resident Wan generates in
+**26.0–26.4 s** (first 34.8 s) with the model loaded once.
+
+**Follow-up 3 — LTX-2 tp2cfg steady state.** Process-level warm converges only after the
+page cache has been fought over: **1061 → 650 → 510 s** (2 discarded warm-ups, then 1
+measured; Neuron load 600 → 173 → 41 s), and the remaining ~470 s of the 510 s is the
+host-side text encoder + VAE being re-read from disk — the `tp2w4-cfg` shard entry is
+**72 GB** (tp4's is 38 GB) and, with LTX-2's ~40 GB of host-side weights, exceeds this
+124 GB box's page cache. That is the honest process-level number on this host. **Resident**
+(model loaded once, `step_realloop --generates 3`): **52.4 s per video** (77.5 s for the
+first, 52.7 / 52.4 after), per-step 779.7 ms — vs tp4 at guidance 2.0: warm 77 s per process.
+So for LTX-2 with true CFG on a 4-core chip: serve it resident on tp2cfg (52 s/video, the
+1.18× per-step win), never as one process per request. Files: `benchmark/trn2fu/`.
+
 **Campaign totals**: 15 measured cells + 5 by-design N/A, every output finite, no failed
 cell, no deleted cache (1.5 TB disk, ~1.1 TB used at the end incl. 285 GB of HF weights).
 Device time ≈ 14 h; the largest single items were the HunyuanVideo VAE-decoder compiles
