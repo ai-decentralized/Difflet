@@ -183,3 +183,21 @@ class ModelOrchestrator(ABC):
         raise NotImplementedError(
             f"{type(self).__name__} does not implement _run_stage_internal"
         )
+
+    def _stage_is_compiled(self, stage: str, args: argparse.Namespace, compiled_dir) -> bool:
+        """True when ``compiled_dir`` already holds this stage's artifact.
+
+        The stage manifest is written only after a successful compile
+        (``_finish_stage_compile``), so a manifest whose cache inputs match the
+        current ones means the artifact is complete and current. Single-component
+        stages (NxDI text encoders, the standalone VAE decoders) recompiled
+        unconditionally in compile mode -- unlike the multi-component DiT
+        stages, whose per-component skip made ``difflet compile`` idempotent --
+        so a repeated ``difflet compile`` cost Qwen-Image ~9 min and
+        HunyuanVideo ~5 min of rebuilt NEFFs it then overwrote byte-for-byte.
+        """
+        if not has_valid_stage_manifest(compiled_dir, self._stage_cache_inputs(stage, args)):
+            return False
+        print(f"[difflet] stage {stage!r} already compiled at {compiled_dir} "
+              "(manifest matches); skipping", flush=True)
+        return True
