@@ -168,6 +168,8 @@ def write_outputs(slug: str, res: BenchResult, config: str = "tp4") -> None:
     d["prompt"] = cfg.prompt
     d["guidance_scale"] = cfg.guidance_scale
     d["output_kind"] = cfg.output_kind
+    if cfg.teacache_dict():
+        d["teacache"] = cfg.teacache_dict()
     Path(json_path(cfg.config_slug)).write_text(json.dumps(d, indent=2))
     Path(report_path(cfg.config_slug)).write_text(report.render(d))
     print(f"[bench] {cfg.config_slug}: status={res.status}  "

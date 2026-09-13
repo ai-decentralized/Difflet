@@ -73,6 +73,14 @@ class BenchConfig:
     # XLA; its own compile-cache identity). Recorded in the result JSON's
     # parallel block only when not the default, so older files still match.
     attention_impl: str = "megakernel"
+    # TeaCache (runtime-only knobs -- not in the compile-cache key, so both run
+    # on the warm tp4 artifact): fixed cadence skips every N-th DiT step
+    # (--teacache-cadence N; warmup/cooldown 5 steps each are fixed in
+    # difflet/pipeline/teacache.py), online-delta is the calibration-free
+    # adaptive controller (--teacache-online-delta ALPHA: skip when the last
+    # full step's relative-L1 delta < alpha x the latched baseline delta).
+    teacache_cadence: Optional[int] = None
+    teacache_online_delta: Optional[float] = None
     dtype: str = "bf16"
     height: Optional[int] = None
     width: Optional[int] = None
@@ -128,6 +136,24 @@ class BenchConfig:
             f += ["--attention-impl", self.attention_impl]
         return f
 
+    def teacache_flags(self) -> list[str]:
+        """``difflet generate`` TeaCache tokens (compile takes none of them)."""
+        f: list[str] = []
+        if self.teacache_cadence is not None:
+            f += ["--teacache-cadence", str(self.teacache_cadence)]
+        if self.teacache_online_delta is not None:
+            f += ["--teacache-online-delta", str(self.teacache_online_delta)]
+        return f
+
+    def teacache_dict(self) -> Optional[dict]:
+        """Result-JSON TeaCache record, or None when TeaCache is off."""
+        if self.teacache_cadence is None and self.teacache_online_delta is None:
+            return None
+        mode = "fixed_cadence" if self.teacache_cadence is not None else "online_delta"
+        return {"mode": mode, "cadence": self.teacache_cadence,
+                "online_delta_alpha": self.teacache_online_delta,
+                "warmup_steps": 5, "cooldown_steps": 5}
+
     def parallel_dict(self) -> dict:
         """Result-JSON parallel record (same schema as the phase-sweep JSONs)."""
         d = {
@@ -163,6 +189,15 @@ CONFIGS: dict[str, dict[str, Any]] = {
     # step is compared against a measured two-branch tp4 step, not 2x a
     # single-branch one. True-CFG models only.
     "tp4cfg2": {"guidance_scale": 2.0},
+    # TeaCache on the tp4 artifact (no recompile). Fixed cadence 2: skips every
+    # other DiT step between the fixed 5-step warmup and cooldown -> 9 of 28
+    # steps (FLUX) or 5 of 20 (the others). Online-delta alpha 0.6 (the repo's
+    # DEFAULT_ALPHA): the calibration-free adaptive controller, the only
+    # adaptive mode wired for all five models' CLIs; calibrated adaptive
+    # (--teacache-speedup) needs per-model calibration files that do not exist
+    # in the repo and is not threaded for Wan/LTX-2.
+    "tp4tc2": {"teacache_cadence": 2},
+    "tp4tcod": {"teacache_online_delta": 0.6},
 }
 
 _CONFIG_DESC = {
@@ -172,6 +207,8 @@ _CONFIG_DESC = {
     "tp2cfg": "tp=2 x CFG-parallel (uncond/cond on separate core pairs)",
     "tp4sdpa": "tp=4, --attention-impl sdpa (PyTorch SDPA via XLA instead of attention_cte)",
     "tp4cfg2": "tp=4 at guidance 2.0 (two sequential CFG branches; baseline for tp2cfg)",
+    "tp4tc2": "tp=4 + TeaCache fixed cadence 2 (--teacache-cadence 2)",
+    "tp4tcod": "tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.6)",
 }
 
 

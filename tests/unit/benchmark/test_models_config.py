@@ -42,8 +42,25 @@ def test_cfg_baseline_config():
         assert (m, "tp4cfg2") not in UNSUPPORTED
 
 
+def test_teacache_configs():
+    """Runtime-only TeaCache overlays on the tp4 artifact: the flags go to
+    generate only, the topology record is unchanged (same artifact), the JSON
+    carries a teacache record."""
+    tc = resolve("flux_1_dev", "tp4tc2")
+    od = resolve("wan_2_1", "tp4tcod")
+    assert tc.teacache_flags() == ["--teacache-cadence", "2"]
+    assert od.teacache_flags() == ["--teacache-online-delta", "0.6"]
+    assert tc.parallel_flags() == resolve("flux_1_dev", "tp4").parallel_flags()
+    assert tc.parallel_dict() == resolve("flux_1_dev", "tp4").parallel_dict()
+    assert tc.teacache_dict()["mode"] == "fixed_cadence" and tc.teacache_dict()["cadence"] == 2
+    assert od.teacache_dict()["mode"] == "online_delta" and od.teacache_dict()["online_delta_alpha"] == 0.6
+    assert resolve("flux_1_dev", "tp4").teacache_dict() is None
+    assert tc.config_slug == "flux_1_dev_tp4tc2" and od.config_slug == "wan_2_1_tp4tcod"
+
+
 def test_configs_are_the_verify_cli_labels_sized_to_four_cores():
-    assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4cfg2"}
+    assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4cfg2",
+                            "tp4tc2", "tp4tcod"}
     for label in CONFIGS:
         cfg = resolve("flux_1_dev", label)
         world = cfg.tp * cfg.cp * (2 if cfg.cfg_parallel else 1)
