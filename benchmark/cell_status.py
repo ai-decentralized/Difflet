@@ -50,10 +50,17 @@ def missing(slug: str, config: str) -> list[str]:
     if not _pos((d.get("e2e_warm") or {}).get("mean")):
         out.append("e2e_warm")
     st = d.get("step_latency") or {}
+    # n = DiT calls - 1. Without TeaCache every scheduler step calls the DiT
+    # (steps - 1; sequential-CFG cells call it twice per step, so >= holds);
+    # a TeaCache cell skips calls, so the bar is the recorded call count.
+    want_n = cfg.steps - 1
+    if d.get("teacache"):
+        calls = d.get("dit_calls") or (d.get("teacache") or {}).get("dit_calls")
+        want_n = max(1, int(calls) - 1) if calls else 1
     if not _pos(st.get("mean")):
         out.append("step_latency")
-    elif int(st.get("n") or 0) < cfg.steps - 1:
-        out.append(f"step_latency.n={st.get('n')} < {cfg.steps - 1}")
+    elif int(st.get("n") or 0) < want_n:
+        out.append(f"step_latency.n={st.get('n')} < {want_n}")
     if d.get("status") not in ("ok", "compiled"):
         out.append(f"status={d.get('status')!r}")
     # the parallel record must be the topology the label names
