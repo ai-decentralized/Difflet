@@ -1,0 +1,172 @@
+{
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "model_type": "hunyuan_video",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "compile_seconds": 17.252267347997986,
+  "compile_breakdown": {
+    "wall_total_s": 17.252
+  },
+  "load_seconds": 521.342,
+  "e2e_cold_seconds": 593.551,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder_clip",
+        "load_s": 3.7
+      },
+      {
+        "stage": "text_encoder",
+        "load_s": 129.662
+      },
+      {
+        "stage": "stage_2",
+        "load_s": 375.88
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 12.1
+      }
+    ],
+    "weights_load_total_s": 521.342,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 593.551,
+    "compute_and_overhead_s": 72.209,
+    "note": "VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode."
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 109.03169649100164,
+    "median": 109.03169649100164,
+    "std": 0.0,
+    "p50": 109.03169649100164,
+    "p90": 109.03169649100164,
+    "min": 109.03169649100164,
+    "max": 109.03169649100164,
+    "samples": [
+      109.03169649100164
+    ]
+  },
+  "step_latency": {
+    "n": 14,
+    "mean": 0.8147310687137568,
+    "median": 0.8145171205032966,
+    "std": 0.0007860640630142467,
+    "p50": 0.8144999610085506,
+    "p90": 0.8148997820098884,
+    "min": 0.8142287789960392,
+    "max": 0.817498024989618,
+    "samples": [
+      0.817498024989618,
+      0.8144681200064952,
+      0.8145533310016617,
+      0.8144310509960633,
+      0.814406561999931,
+      0.81477962200006,
+      0.8145968830067432,
+      0.8144495079905028,
+      0.8148997820098884,
+      0.8146201899944572,
+      0.8145342799980426,
+      0.8142688679945422,
+      0.8144999610085506,
+      0.8142287789960392
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 1.227
+  },
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved hunyuanvideo_tp4tc2_out.mp4"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 + TeaCache fixed cadence 2 (--teacache-cadence 2); tp=4, bf16, attention_cte",
+  "status": "ok",
+  "notes": [
+    "per-step = 814.7 ms/DiT-step (median 814.5, p90 814.9, n=14) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronHunyuanVideoBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 15 DiT calls timed; warm generate 82s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_cold = 594 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 109 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 594 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-09-13 04:01 UTC",
+  "config_slug": "hunyuan_video_tp4tc2",
+  "model_slug": "hunyuan_video",
+  "config": "tp4tc2",
+  "device_slug": "trn2",
+  "revision": "e8c2aaa66fe3742a32c11a6766aecbf07c56e773",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 6.0,
+  "output_kind": "video",
+  "teacache": {
+    "mode": "fixed_cadence",
+    "cadence": 2,
+    "online_delta_alpha": null,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "dit_calls": 15,
+    "skipped_steps_by_calls": 5
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder_clip",
+        "load_s": 5.4
+      },
+      {
+        "stage": "text_encoder",
+        "load_s": 12.182
+      },
+      {
+        "stage": "stage_2",
+        "load_s": 27.75
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 10.92
+      }
+    ],
+    "weights_load_total_s": 56.252,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 109.032,
+    "compute_and_overhead_s": 52.78,
+    "note": "VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode."
+  },
+  "dit_calls_per_step": 0.75,
+  "dit_calls": 15,
+  "loop_wall_s": 12.478,
+  "loop_step_ms": 623.9
+}
