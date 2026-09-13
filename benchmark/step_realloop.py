@@ -43,18 +43,32 @@ from benchmark.harness import Stats
 from benchmark.models import add_config_arg, json_path, report_path, resolve
 
 
-def _install_timer(cls, method_name: str, stamps: list[float]):
+def _install_timer(cls, method_name: str, stamps: list[float], entries: list[float] | None = None):
     """Wrap ``cls.method_name`` to append a synchronized perf_counter after each
-    call. Returns a restore() thunk. The wrapped call is the per-step DiT eval."""
+    call (and, when ``entries`` is given, before it). Returns a restore() thunk.
+    The wrapped call is the per-step DiT eval."""
     orig = getattr(cls, method_name)
 
     def timed(self, *a, **k):
+        if entries is not None:
+            entries.append(time.perf_counter())
         r = orig(self, *a, **k)
         stamps.append(time.perf_counter())  # Neuron forward returns host tensors -> synced
         return r
 
     setattr(cls, method_name, timed)
     return lambda: setattr(cls, method_name, orig)
+
+
+def _teacache_app_kwargs(cfg) -> dict:
+    """Runtime-only TeaCache application kwargs (difflet/cli/orchestrators/flux.py
+    _application_kwargs; ltx_2.py does the same): excluded from the cache key."""
+    kw = {}
+    if cfg.teacache_cadence is not None:
+        kw["teacache_cadence"] = cfg.teacache_cadence
+    if cfg.teacache_online_delta is not None:
+        kw["teacache_online_delta_alpha"] = cfg.teacache_online_delta
+    return kw
 
 
 def _build_flux(cfg, cache):
@@ -67,7 +81,8 @@ def _build_flux(cfg, cache):
     pipe = DiffletPipeline.from_pretrained(
         cfg.model_id, model_type="flux", parallel=parallel, dtype=torch.bfloat16,
         height=cfg.height, width=cfg.width, compile_cache_dir=str(cache),
-        revision=cfg.revision, skip_compile=True)
+        revision=cfg.revision, skip_compile=True,
+        application_kwargs=_teacache_app_kwargs(cfg))
     dit = pipe.app.pipe.transformer            # NeuronFluxBackboneApplication
     gen_kwargs = dict(
         prompt=cfg.prompt, num_inference_steps=cfg.steps,
@@ -94,7 +109,8 @@ def _build_ltx2(cfg, cache):
         cfg.model_id, model_type="ltx_2", parallel=parallel, dtype=torch.bfloat16,
         height=cfg.height, width=cfg.width, num_frames=cfg.num_frames,
         compile_cache_dir=str(cache), revision=cfg.revision, skip_compile=True,
-        application_kwargs={"enable_host_pipeline": True, "enable_decode_components": True})
+        application_kwargs={"enable_host_pipeline": True, "enable_decode_components": True,
+                            **_teacache_app_kwargs(cfg)})
     app = pipe.app                              # NeuronLTX2Application; loop calls forward_dit/step
     gen_kwargs = dict(
         prompt=cfg.prompt, num_inference_steps=cfg.steps,
@@ -139,7 +155,7 @@ def _staged_namespace(cfg, cache, work_dir, output):
         cache_dir=str(cache), work_dir=str(work_dir), keep_work_dir=True,
         requests_dir=None, worker_index=0, dp_schedule="round_robin",
         dp_degree=1, host_vae=False,
-        teacache_cadence=None, teacache_online_delta=None,
+        teacache_cadence=cfg.teacache_cadence, teacache_online_delta=cfg.teacache_online_delta,
         teacache_speedup=None, teacache_calibration=None,
     )
 
@@ -301,11 +317,13 @@ def _main(args, cfg) -> int:
           f"timing {cls.__name__}.{method} per step", flush=True)
 
     stamps: list[float] = []
-    restore = _install_timer(cls, method, stamps)
+    entries: list[float] = []
+    restore = _install_timer(cls, method, stamps, entries)
     resident: list[float] = []   # wall of each generate with the model resident
     try:
         for i in range(max(1, args.generates)):
             stamps.clear()
+            entries.clear()
             t1 = time.perf_counter()
             result = run()
             gen_s = time.perf_counter() - t1
@@ -347,6 +365,17 @@ def _main(args, cfg) -> int:
     # per-step figure above is then the inter-CALL delta and a step costs
     # dit_calls_per_step x that.
     d["dit_calls_per_step"] = round(n_calls / cfg.steps, 3)
+    d["dit_calls"] = n_calls
+    # Denoise-loop wall from the first DiT call's entry to the last call's exit,
+    # per scheduler step: the per-step figure that INCLUDES steps TeaCache
+    # skipped (no DiT call) and both branches of a sequential-CFG step.
+    loop_wall = stamps[-1] - entries[0]
+    d["loop_wall_s"] = round(loop_wall, 3)
+    d["loop_step_ms"] = round(loop_wall / cfg.steps * 1000, 1)
+    if cfg.teacache_dict():
+        d["teacache"] = cfg.teacache_dict()
+        d["teacache"]["dit_calls"] = n_calls
+        d["teacache"]["skipped_steps_by_calls"] = cfg.steps - n_calls
     if args.generates > 1:
         # steady state with the model resident (no process start, no reload)
         d["resident_generate_s"] = [round(x, 3) for x in resident]

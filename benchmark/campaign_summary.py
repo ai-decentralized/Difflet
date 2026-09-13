@@ -31,6 +31,8 @@ _CONFIG_TITLE = {
     "tp2cfg": "tp2cfg — tp=2 × CFG-parallel (uncond/cond branches on separate core pairs, guidance 2.0)",
     "tp4sdpa": "tp4sdpa — tp=4 with `--attention-impl sdpa` (PyTorch SDPA through XLA instead of the attention_cte megakernel routing)",
     "tp4cfg2": "tp4cfg2 — tp=4 at guidance 2.0 (two sequential CFG branches: the same-work baseline for tp2cfg)",
+    "tp4tc2": "tp4tc2 — tp=4 + TeaCache fixed cadence 2 (`--teacache-cadence 2`, warmup/cooldown 5 steps, same artifact)",
+    "tp4tcod": "tp4tcod — tp=4 + TeaCache online-delta adaptive (`--teacache-online-delta 0.6`, calibration-free, same artifact)",
 }
 _BEGIN, _END = "<!-- campaign:begin -->", "<!-- campaign:end -->"
 
@@ -189,6 +191,100 @@ def nxdi_table(price: float | None) -> list[str]:
     return L
 
 
+_RE_TC_STATS = re.compile(r"\[teacache\] stats: (\{.*?\})")
+
+
+def _teacache_skips(slug: str, label: str, d: dict) -> tuple[int | None, str]:
+    """(skipped_steps, source): the `[teacache] stats` line from the realloop
+    log (in-process generate, same stdout) or the warm generate log; else the
+    real-loop DiT-call count (steps - dit_calls) -- the only evidence for
+    Qwen-Image, whose pipeline prints no stats line."""
+    import ast
+    from benchmark.adapters.trainium import spec_slug
+    cfg = resolve(slug, label)
+    logs = Path("benchmark") / (d.get("device_slug") or "trn2") / "logs"
+    for log in (logs / label / f"{slug}_realloop.log", logs / "warm" / f"{spec_slug(cfg)}_generate.log"):
+        if log.exists():
+            hits = _RE_TC_STATS.findall(log.read_text(errors="ignore"))
+            if hits:
+                try:
+                    st = ast.literal_eval(hits[-1])
+                    return int(st.get("skipped_steps")), "stats line"
+                except Exception:
+                    pass
+    tc = d.get("teacache") or {}
+    if tc.get("skipped_steps_by_calls") is not None:
+        return int(tc["skipped_steps_by_calls"]), "DiT-call count"
+    return None, "—"
+
+
+def _parity(slug: str, label: str, d: dict) -> str:
+    """PSNR of this cell's saved output vs the tp4 output (same seed)."""
+    from benchmark.adapters.trainium import spec_slug
+    from benchmark.output_parity import compare
+    cfg, base = resolve(slug, label), resolve(slug, "tp4")
+    ext = ".png" if cfg.output_kind == "image" else ".mp4"
+    logs = Path("benchmark") / (d.get("device_slug") or "trn2") / "logs"
+    a, b = logs / f"{spec_slug(base)}_out{ext}", logs / f"{spec_slug(cfg)}_out{ext}"
+    if not (a.exists() and b.exists()):
+        return "—"
+    try:
+        r = compare(a, b)
+    except Exception as exc:
+        return f"? ({type(exc).__name__})"
+    if r.get("error"):
+        return "?"
+    if r["identical"]:
+        return "**identical (no-op)**"
+    psnr = r["psnr_db"]
+    return (f"{psnr:.1f} dB" if psnr != float('inf') else "∞") + \
+           (f", SSIM {r['ssim']:.3f}" if "ssim" in r else "")
+
+
+def teacache_table(tc_labels: list[str], models=CAMPAIGN_MODELS) -> list[str]:
+    """TeaCache vs the tp4 baseline: what was skipped, what it bought, what it cost."""
+    L = ["### TeaCache vs tp4 (same artifact, same seed)", "",
+         "| model | steps | mode | skipped steps (evidence) | warm e2e: tp4 → TC | "
+         "loop ms/step: tp4 → TC⁷ | DiT call (ms) | output vs tp4 (PSNR)⁸ |",
+         "|---|---:|---|---|---:|---:|---:|---|"]
+    for slug in models:
+        base = _load(slug, "tp4") or {}
+        b_warm = (base.get("e2e_warm") or {}).get("mean")
+        # tp4 has no skipped steps, so its loop per-step is its DiT call time
+        # (x calls per step) when the file predates the loop-wall field
+        b_loop = base.get("loop_step_ms") or _step_ms(base)
+        for label in tc_labels:
+            d = _load(slug, label)
+            if d is None:
+                L.append(f"| {_NAMES.get(slug, slug)} | — | {label} | not measured | | | | |")
+                continue
+            tc = d.get("teacache") or {}
+            mode = ("cadence " + str(tc.get("cadence"))) if tc.get("mode") == "fixed_cadence" \
+                else f"online-δ α={tc.get('online_delta_alpha')}"
+            skipped, src = _teacache_skips(slug, label, d)
+            steps = d.get("steps")
+            skip_s = f"**{skipped}/{steps}** ({src})" if skipped is not None else "—"
+            warm = (d.get("e2e_warm") or {}).get("mean")
+            warm_s = (f"{b_warm:.0f} → **{warm:.0f} s** ({b_warm/warm:.2f}×)"
+                      if b_warm and warm else "—")
+            loop = d.get("loop_step_ms")
+            loop_s = (f"{b_loop:.0f} → **{loop:.0f}** ({b_loop/loop:.2f}×)" if b_loop and loop
+                      else (f"→ {loop:.0f}" if loop else "—"))
+            st = d.get("step_latency") or {}
+            call_s = f"{st['mean']*1000:.1f} (n={st['n']})" if st.get("mean") else "—"
+            L.append(f"| {_NAMES.get(slug, slug)} | {steps} | {mode} | {skip_s} | {warm_s} | "
+                     f"{loop_s} | {call_s} | {_parity(slug, label, d)} |")
+    L += ["",
+          "⁷ loop ms/step = denoise-loop wall (first DiT call entry → last call exit) ÷ scheduler "
+          "steps, so a skipped step counts as ~0 — the per-step figure TeaCache actually changes; "
+          "the DiT call column is the unchanged cost of one real call. tp4 skips nothing, so its "
+          "loop figure is its DiT call time (× calls per step). ⁸ PSNR of this cell's "
+          "output against the tp4 output at the same seed (pixel space; SSIM when "
+          "scikit-image is installed); an identical output means the controller skipped nothing.",
+          ""]
+    return L
+
+
 def speedup_table(labels: list[str], models=CAMPAIGN_MODELS) -> list[str]:
     L = ["### DiT per-step vs tp4 (lower is better; ratio = tp4 / config; a step with two "
          "sequential CFG calls counts both calls)", "",
@@ -242,6 +338,9 @@ def render(labels: list[str], price: float | None, price_note: str) -> str:
         L += feature_table(label, price)
         if label == "tp4":
             L += nxdi_table(price)
+    tc_labels = [l for l in labels if l in ("tp4tc2", "tp4tcod")]
+    if tc_labels:
+        L += teacache_table(tc_labels)
     L += speedup_table(labels)
     L += [
         "⁰ DiT per-step: mean of the inter-step deltas (n = steps − 1). ¹ compile = full `difflet "
@@ -275,7 +374,8 @@ def main() -> int:
                    help="provenance of the price (region, date, source)")
     p.add_argument("--write", default=None, help="RESULTS.md to update in place")
     a = p.parse_args()
-    labels = [l for l in ["tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4cfg2", "tp4sdpa"] if l in a.labels]
+    labels = [l for l in ["tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4cfg2", "tp4sdpa", "tp4tc2", "tp4tcod"]
+              if l in a.labels]
     md = render(labels, a.price_per_hour, a.price_note)
     if not a.write:
         print(md)

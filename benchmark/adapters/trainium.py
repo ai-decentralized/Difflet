@@ -113,6 +113,7 @@ class TrainiumAdapter(BackendAdapter):
                "--output", str(out_path) + out_ext] + cfg.shape_flags()
         if cfg.guidance_scale is not None:
             cmd += ["--guidance-scale", str(cfg.guidance_scale)]
+        cmd += getattr(cfg, "teacache_flags", lambda: [])()
         cmd += cfg.extra_generate_flags
         t0 = time.perf_counter()
         text = self._run(cmd, log, timeout=14400)
