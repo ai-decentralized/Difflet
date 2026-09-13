@@ -1,0 +1,174 @@
+{
+  "model_id": "black-forest-labs/FLUX.1-dev",
+  "model_type": "flux",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 28,
+  "compile_seconds": 21.109405309005524,
+  "compile_breakdown": {
+    "wall_total_s": 21.109
+  },
+  "load_seconds": 270.23,
+  "e2e_cold_seconds": 306.47,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder_t5",
+        "load_s": 73.55
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 188.73
+      },
+      {
+        "stage": "text_encoder_clip",
+        "load_s": 0.97
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 6.98
+      }
+    ],
+    "weights_load_total_s": 270.23,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 306.47,
+    "compute_and_overhead_s": 36.24
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 38.702054206005414,
+    "median": 38.702054206005414,
+    "std": 0.0,
+    "p50": 38.702054206005414,
+    "p90": 38.702054206005414,
+    "min": 38.702054206005414,
+    "max": 38.702054206005414,
+    "samples": [
+      38.702054206005414
+    ]
+  },
+  "step_latency": {
+    "n": 18,
+    "mean": 0.27080376400004347,
+    "median": 0.2703680839986191,
+    "std": 0.0018661613541937558,
+    "p50": 0.27035111299483106,
+    "p90": 0.2708599010074977,
+    "min": 0.2696016980044078,
+    "max": 0.2783511699963128,
+    "samples": [
+      0.2783511699963128,
+      0.27024815599725116,
+      0.27031642899964936,
+      0.27035111299483106,
+      0.2703096920013195,
+      0.2708599010074977,
+      0.27084437099983916,
+      0.27062808399205096,
+      0.27091890000156127,
+      0.2707457350043114,
+      0.2705397340032505,
+      0.2705592239944963,
+      0.27007070000399835,
+      0.27038505500240717,
+      0.26994174798892345,
+      0.26985197501198854,
+      0.26994406699668616,
+      0.2696016980044078
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 3.693
+  },
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved flux_1_dev_tp4tc2_out.png"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 + TeaCache fixed cadence 2 (--teacache-cadence 2); tp=4 (registry default tp=8 -> 4 on trn2.3xlarge), bf16, attention_cte",
+  "status": "ok",
+  "notes": [
+    "per-step = 270.8 ms/DiT-step (median 270.4, p90 270.9, n=18) \u2014 measured the SAME way as H100: inter-step deltas of a real 28-step generate (wrapping NeuronFluxBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 19 DiT calls timed; warm generate 5s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_cold = 306 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 39 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 306 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-09-13 03:16 UTC",
+  "config_slug": "flux_1_dev_tp4tc2",
+  "model_slug": "flux_1_dev",
+  "config": "tp4tc2",
+  "device_slug": "trn2",
+  "revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 3.5,
+  "output_kind": "image",
+  "teacache": {
+    "mode": "fixed_cadence",
+    "cadence": 2,
+    "online_delta_alpha": null,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "dit_calls": 19,
+    "skipped_steps_by_calls": 9
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder_t5",
+        "load_s": 7.34
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 8.93
+      },
+      {
+        "stage": "text_encoder_clip",
+        "load_s": 0.17
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 6.47
+      }
+    ],
+    "weights_load_total_s": 22.91,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 38.702,
+    "compute_and_overhead_s": 15.792
+  },
+  "dit_calls_per_step": 0.679,
+  "dit_calls": 19,
+  "loop_wall_s": 5.148,
+  "loop_step_ms": 183.9
+}
