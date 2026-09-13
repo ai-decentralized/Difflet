@@ -42,7 +42,7 @@ for m in "${MODELS[@]}"; do
   until curl -sf "http://127.0.0.1:$PORT/ready" >/dev/null 2>&1; do
     sleep 5; t=$((t+5))
     if ! kill -0 "$spid" 2>/dev/null; then echo "[serve] $m server exited before ready"; tail -20 "$LOG/${m}_serve.log"; break; fi
-    if [[ $t -ge 3600 ]]; then echo "[serve] $m READY_TIMEOUT"; break; fi
+    if [[ $t -ge ${READY_TIMEOUT:-14400} ]]; then echo "[serve] $m READY_TIMEOUT"; break; fi
   done
   ready=$(echo "$(date +%s.%N) - $t0" | bc)
   if ! curl -sf "http://127.0.0.1:$PORT/ready" >/dev/null 2>&1; then echo "[serve] $m FAILED (not ready)"; stop_server; continue; fi
