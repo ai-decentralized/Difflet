@@ -1,0 +1,174 @@
+{
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "model_type": "wan",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "compile_seconds": 12.04341066699999,
+  "compile_breakdown": {
+    "wall_total_s": 12.043
+  },
+  "load_seconds": 353.84,
+  "e2e_cold_seconds": 419.072,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder (UMT5)",
+        "load_s": 87.72
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 235.32
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 30.8
+      }
+    ],
+    "weights_load_total_s": 353.84,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 419.072,
+    "compute_and_overhead_s": 65.232
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 93.86301141999138,
+    "median": 93.86301141999138,
+    "std": 0.0,
+    "p50": 93.86301141999138,
+    "p90": 93.86301141999138,
+    "min": 93.86301141999138,
+    "max": 93.86301141999138,
+    "samples": [
+      93.86301141999138
+    ]
+  },
+  "step_latency": {
+    "n": 39,
+    "mean": 0.5757710118203436,
+    "median": 0.5746661099983612,
+    "std": 0.007135375573427295,
+    "p50": 0.5746661099983612,
+    "p90": 0.5758430099958787,
+    "min": 0.5734796530014137,
+    "max": 0.619391498999903,
+    "samples": [
+      0.619391498999903,
+      0.5746661099983612,
+      0.5735248739947565,
+      0.5754917099984596,
+      0.5737126250023721,
+      0.5759969149949029,
+      0.5737587170006009,
+      0.5756420899997465,
+      0.5737018560030265,
+      0.5751430300006177,
+      0.5734796530014137,
+      0.5754753060027724,
+      0.5737132630019914,
+      0.5751090339908842,
+      0.573903804004658,
+      0.5757662260002689,
+      0.5739625809947029,
+      0.5757331280037761,
+      0.5734917950030649,
+      0.5750710269931005,
+      0.573490277005476,
+      0.5751967429969227,
+      0.5740124790027039,
+      0.5755530479946174,
+      0.574012851997395,
+      0.5754882640030701,
+      0.5736631470063003,
+      0.5753769720031414,
+      0.5734904899873072,
+      0.5758668930066051,
+      0.5740976959932595,
+      0.5761508950090501,
+      0.5737519590038573,
+      0.5756686839886243,
+      0.5736738910054555,
+      0.5758430099958787,
+      0.5738746560091386,
+      0.5754116169991903,
+      0.5737106449960265
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 1.737
+  },
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved wan2_1_t2v_14b_diffusers_tp4cfg2_out.mp4"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 at guidance 2.0 (two sequential CFG branches; baseline for tp2cfg); tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline",
+  "status": "ok",
+  "notes": [
+    "per-step = 575.8 ms/DiT-step (median 574.7, p90 575.8, n=39) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 40 DiT calls timed; warm generate 45s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_cold = 419 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 94 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 419 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-09-13 02:06 UTC",
+  "config_slug": "wan_2_1_tp4cfg2",
+  "model_slug": "wan_2_1",
+  "config": "tp4cfg2",
+  "device_slug": "trn2",
+  "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 2.0,
+  "output_kind": "video",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder (UMT5)",
+        "load_s": 10.95
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 9.32
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 29.83
+      }
+    ],
+    "weights_load_total_s": 50.1,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 93.863,
+    "compute_and_overhead_s": 43.763
+  }
+}

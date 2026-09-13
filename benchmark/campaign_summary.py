@@ -48,8 +48,32 @@ def _sec(s) -> str:
     return "—" if s is None else f"{s:.0f} s"
 
 
-def _ms(st) -> str:
-    return "—" if not st else f"{st['mean']*1000:.1f} ms (n={st['n']})"
+def _calls_per_step(d: dict) -> float:
+    """DiT calls per scheduler step (2 = sequential CFG branches). From the
+    JSON field when present, else from the real-loop note ('40 DiT calls timed')."""
+    cps = d.get("dit_calls_per_step")
+    if cps:
+        return float(cps)
+    m = re.search(r"(\d+) DiT calls timed", " ".join(d.get("notes") or []))
+    steps = d.get("steps") or 0
+    return (int(m.group(1)) / steps) if (m and steps) else 1.0
+
+
+def _step_ms(d: dict):
+    """Per scheduler step in ms (inter-call delta x calls per step), or None."""
+    st = d.get("step_latency") or {}
+    if not st.get("mean"):
+        return None
+    return st["mean"] * 1000 * _calls_per_step(d)
+
+
+def _ms(st, d: dict | None = None) -> str:
+    if not st:
+        return "—"
+    cps = _calls_per_step(d) if d else 1.0
+    if cps > 1:
+        return f"{st['mean']*1000*cps:.1f} ms ({cps:g} calls × {st['mean']*1000:.1f}, n={st['n']})"
+    return f"{st['mean']*1000:.1f} ms (n={st['n']})"
 
 
 def _shape(d) -> str:
@@ -109,7 +133,7 @@ def feature_table(label: str, price: float | None, models=CAMPAIGN_MODELS) -> li
             f"**{_sec(d.get('e2e_cold_seconds'))}**",
             f"**{_sec(warm)}**",
             load_s,
-            f"**{_ms(st)}**{note}",
+            f"**{_ms(st, d)}**{note}",
             f"{per_hr:.0f}" if per_hr else "—",
             f"${cost:.2f}" if cost is not None else "—",
             str(d.get("guidance_scale", "—")),
@@ -166,24 +190,25 @@ def nxdi_table(price: float | None) -> list[str]:
 
 
 def speedup_table(labels: list[str], models=CAMPAIGN_MODELS) -> list[str]:
-    L = ["### DiT per-step vs tp4 (lower is better; ratio = tp4 / config)", "",
+    L = ["### DiT per-step vs tp4 (lower is better; ratio = tp4 / config; a step with two "
+         "sequential CFG calls counts both calls)", "",
          "| model | " + " | ".join(labels) + " |", "|---|" + "---:|" * len(labels)]
     for slug in models:
         base = _load(slug, "tp4")
-        b = (base or {}).get("step_latency") or {}
+        b_ms = _step_ms(base) if base else None
         cells = []
         for label in labels:
             if (slug, label) in UNSUPPORTED:
                 cells.append("N/A")
                 continue
             d = _load(slug, label)
-            st = (d or {}).get("step_latency") or {}
-            if not st.get("mean"):
+            ms = _step_ms(d) if d else None
+            if ms is None:
                 cells.append("—")
-            elif label == "tp4" or not b.get("mean"):
-                cells.append(f"{st['mean']*1000:.1f} ms")
+            elif label == "tp4" or not b_ms:
+                cells.append(f"{ms:.1f} ms")
             else:
-                cells.append(f"{st['mean']*1000:.1f} ms ({b['mean']/st['mean']:.2f}×)")
+                cells.append(f"{ms:.1f} ms ({b_ms/ms:.2f}×)")
         L.append(f"| {_NAMES.get(slug, slug)} | " + " | ".join(cells) + " |")
     L.append("")
     return L

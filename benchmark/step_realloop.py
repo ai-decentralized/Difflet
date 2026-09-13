@@ -342,6 +342,11 @@ def _main(args, cfg) -> int:
     d["config_slug"] = slug
     d["model_slug"] = args.model
     d["config"] = cfg.config
+    # >1 when the loop calls the DiT more than once per scheduler step (two
+    # sequential CFG branches at guidance > 1 without cfg-parallel); the
+    # per-step figure above is then the inter-CALL delta and a step costs
+    # dit_calls_per_step x that.
+    d["dit_calls_per_step"] = round(n_calls / cfg.steps, 3)
     if args.generates > 1:
         # steady state with the model resident (no process start, no reload)
         d["resident_generate_s"] = [round(x, 3) for x in resident]
