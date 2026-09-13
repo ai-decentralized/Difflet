@@ -290,27 +290,42 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 | [HunyuanVideo](hunyuan_video_tp4tc2.md) | 320×512×61 / 20 | 17 s | **594 s** | **109 s** | 521→56 s | **814.7 ms (n=14)** (n=14 < 19) | 33 | $27.56 | 6.0 | ✓ finite | ok |
 | [Wan 2.1 14B](wan_2_1_tp4tc2.md) | 480×832×9 / 20 | 12 s | **403 s** | **78 s** | 353→48 s | **576.9 ms (n=14)** (n=14 < 19) | 46 | $19.78 | 1.0 | ✓ finite | ok |
 
+### Feature: tp4tcod — tp=4 + TeaCache online-delta adaptive (`--teacache-online-delta 0.6`, calibration-free, same artifact)
+
+| model | shape / steps | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁶ | **DiT per-step**⁰ | outputs/hr (warm)⁴ | cost / 1k⁵ | guidance | output | status |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| [FLUX.1-dev](flux_1_dev_tp4tcod.md) | 1024×1024 / 28 | 8 s | **307 s** | **38 s** | 270→22 s | **271.3 ms (n=18)** (n=18 < 27) | 94 | $9.68 | 3.5 | ✓ finite | ok |
+| [Qwen-Image](qwen_image_tp4tcod.md) | 1024×1024 / 20 | 19 s | **494 s** | **64 s** | 447→36 s | **417.5 ms (n=14)** (n=14 < 19) | 56 | $16.18 | 4.0 | ✓ finite | ok |
+| [LTX-2](ltx_2_tp4tcod.md) | 480×704×49 / 20 | 6 s | **767 s** | **54 s** | 310→10 s | **459.3 ms (n=15)** (n=15 < 19) | 66 | $13.73 | 1.0 | ✓ finite | ok |
+| [HunyuanVideo](hunyuan_video_tp4tcod.md) | 320×512×61 / 20 | 17 s | **596 s** | **109 s** | 523→56 s | **814.9 ms (n=14)** (n=14 < 19) | 33 | $27.59 | 6.0 | ✓ finite | ok |
+| [Wan 2.1 14B](wan_2_1_tp4tcod.md) | 480×832×9 / 20 | 12 s | **404 s** | **80 s** | 354→49 s | **576.1 ms (n=14)** (n=14 < 19) | 45 | $20.19 | 1.0 | ✓ finite | ok |
+
 ### TeaCache vs tp4 (same artifact, same seed)
 
 | model | steps | mode | skipped steps (evidence) | warm e2e: tp4 → TC | loop ms/step: tp4 → TC⁷ | DiT call (ms) | output vs tp4 (PSNR)⁸ |
 |---|---:|---|---|---:|---:|---:|---|
 | FLUX.1-dev | 28 | cadence 2 | **9/28** (stats line) | 41 → **39 s** (1.06×) | 271 → **184** (1.47×) | 270.8 (n=18) | 41.3 dB |
+| FLUX.1-dev | 28 | online-δ α=0.6 | **9/28** (stats line) | 41 → **38 s** (1.07×) | 271 → **184** (1.47×) | 271.3 (n=18) | 39.7 dB |
 | Qwen-Image | 20 | cadence 2 | **5/20** (DiT-call count) | 65 → **62 s** (1.05×) | 417 → **353** (1.18×) | 417.4 (n=14) | 45.2 dB |
+| Qwen-Image | 20 | online-δ α=0.6 | **5/20** (DiT-call count) | 65 → **64 s** (1.02×) | 417 → **344** (1.21×) | 417.5 (n=14) | 45.0 dB |
 | LTX-2 | 20 | cadence 2 | **5/20** (stats line) | 56 → **56 s** (1.01×) | 459 → **345** (1.33×) | 459.4 (n=14) | 36.6 dB |
+| LTX-2 | 20 | online-δ α=0.6 | **4/20** (stats line) | 56 → **54 s** (1.04×) | 459 → **368** (1.25×) | 459.3 (n=15) | 36.5 dB |
 | HunyuanVideo | 20 | cadence 2 | **5/20** (stats line) | 115 → **109 s** (1.05×) | 814 → **624** (1.30×) | 814.7 (n=14) | 31.8 dB |
+| HunyuanVideo | 20 | online-δ α=0.6 | **5/20** (stats line) | 115 → **109 s** (1.05×) | 814 → **623** (1.31×) | 814.9 (n=14) | 24.1 dB |
 | Wan 2.1 14B | 20 | cadence 2 | **5/20** (stats line) | 85 → **78 s** (1.08×) | 575 → **441** (1.31×) | 576.9 (n=14) | 36.7 dB |
+| Wan 2.1 14B | 20 | online-δ α=0.6 | **5/20** (stats line) | 85 → **80 s** (1.06×) | 575 → **439** (1.31×) | 576.1 (n=14) | 36.2 dB |
 
 ⁷ loop ms/step = denoise-loop wall (first DiT call entry → last call exit) ÷ scheduler steps, so a skipped step counts as ~0 — the per-step figure TeaCache actually changes; the DiT call column is the unchanged cost of one real call. tp4 skips nothing, so its loop figure is its DiT call time (× calls per step). ⁸ PSNR of this cell's output against the tp4 output at the same seed (pixel space; SSIM when scikit-image is installed); an identical output means the controller skipped nothing.
 
 ### DiT per-step vs tp4 (lower is better; ratio = tp4 / config; a step with two sequential CFG calls counts both calls)
 
-| model | tp4 | tp2cp2 | tp4sp | tp2cfg | tp4cfg2 | tp4sdpa | tp4tc2 |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| FLUX.1-dev | 270.7 ms | 263.1 ms (1.03×) | 278.8 ms (0.97×) | N/A | N/A | 682.3 ms (0.40×) | 183.9 ms (1.47×) |
-| Qwen-Image | 417.3 ms | 454.3 ms (0.92×) | 365.6 ms (1.14×) | N/A | N/A | 788.8 ms (0.53×) | 313.0 ms (1.33×) |
-| LTX-2 | 459.2 ms | N/A | N/A | 779.4 ms (0.59×) | 918.1 ms (0.50×) | 506.8 ms (0.91×) | 344.6 ms (1.33×) |
-| HunyuanVideo | 814.1 ms | 849.0 ms (0.96×) | 790.6 ms (1.03×) | N/A | N/A | 3641.3 ms (0.22×) | 611.0 ms (1.33×) |
-| Wan 2.1 14B | 575.5 ms | 575.5 ms (1.00×) | 578.2 ms (1.00×) | 1070.6 ms (0.54×) | 1151.5 ms (0.50×) | 1034.8 ms (0.56×) | 432.7 ms (1.33×) |
+| model | tp4 | tp2cp2 | tp4sp | tp2cfg | tp4cfg2 | tp4sdpa | tp4tc2 | tp4tcod |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| FLUX.1-dev | 270.7 ms | 263.1 ms (1.03×) | 278.8 ms (0.97×) | N/A | N/A | 682.3 ms (0.40×) | 183.9 ms (1.47×) | 184.2 ms (1.47×) |
+| Qwen-Image | 417.3 ms | 454.3 ms (0.92×) | 365.6 ms (1.14×) | N/A | N/A | 788.8 ms (0.53×) | 313.0 ms (1.33×) | 313.1 ms (1.33×) |
+| LTX-2 | 459.2 ms | N/A | N/A | 779.4 ms (0.59×) | 918.1 ms (0.50×) | 506.8 ms (0.91×) | 344.6 ms (1.33×) | 367.4 ms (1.25×) |
+| HunyuanVideo | 814.1 ms | 849.0 ms (0.96×) | 790.6 ms (1.03×) | N/A | N/A | 3641.3 ms (0.22×) | 611.0 ms (1.33×) | 611.1 ms (1.33×) |
+| Wan 2.1 14B | 575.5 ms | 575.5 ms (1.00×) | 578.2 ms (1.00×) | 1070.6 ms (0.54×) | 1151.5 ms (0.50×) | 1034.8 ms (0.56×) | 432.7 ms (1.33×) | 432.1 ms (1.33×) |
 
 ⁰ DiT per-step: mean of the inter-step deltas (n = steps − 1). ¹ compile = full `difflet compile` wall (all stages, incl. per-rank presharding); stage caches shared across features are reused, so a later feature's compile can be shorter than tp4's. ² cold = `sync; echo 3 > drop_caches` then one generate. ³ warm = the immediately following generate. ⁴ outputs/hr = 3600 / warm e2e (one image or one video per generate, batch 1, fresh process each — a served deployment with a resident model does better). ⁵ cost / 1k outputs = hourly price ÷ outputs/hr × 1000; AWS publishes no list price for trn2.3xlarge; $0.91/h is trn2.48xlarge on-demand ($14.5556/h, us-east-2, third-party listing sparecores.com fetched 2026-09-12) ÷ 16 chips — indicative only. ⁶ Neuron weight load summed over the pipeline's stages (from the generate log), cold vs warm — the bulk of the cold→warm gap; LTX-2's text encoder and VAE run on the host and are not in it.
 
@@ -458,6 +473,18 @@ the last full step's relative-L1 delta < α × the latched baseline; never two s
 it is the only adaptive mode wired for all five CLIs — the calibrated `--teacache-speedup`
 mode needs per-model calibration JSONs that exist nowhere in the repo or on this host, forces
 a separate full recompile for FLUX, and is not threaded for Wan/LTX-2, so it was not run.
+*Online-delta result*: at these step counts it skipped **the same number of steps as cadence 2**
+(9/28 FLUX, 5/20 Qwen / HunyuanVideo / Wan; LTX-2 4/20) — the controller latches its
+baseline delta on the first full step, when deltas are largest, so the α = 0.6 threshold is
+generous and the no-two-skips-in-a-row latch makes it behave like cadence 2 — with the same
+loop speedups (1.47× / 1.21× / 1.25× / 1.31× / 1.31×) and warm e2e within ±2 s of cadence 2.
+Where it differs is *which* steps it skips, and that shows in the output: **HunyuanVideo drops
+to 24.1 dB PSNR vs tp4 (cadence 2: 31.8 dB)**, FLUX 39.7 vs 41.3, the rest within 0.5 dB. So on
+this evidence fixed cadence is the better probe-free choice: equal speed, more predictable
+quality; online-delta would need a post-warmup baseline (the code comment already describes
+that intent) or a tighter α to earn its "adaptive" label. Calibrated adaptive for FLUX /
+HunyuanVideo (`scripts/run_flux_teacache_e2e.py`, `scripts/calibrate_teacache.py`) remains a
+separate ~1–2 h device task each if wanted.
 
 **Campaign totals**: 15 measured cells + 5 by-design N/A, every output finite, no failed
 cell, no deleted cache (1.5 TB disk, ~1.1 TB used at the end incl. 285 GB of HF weights).
