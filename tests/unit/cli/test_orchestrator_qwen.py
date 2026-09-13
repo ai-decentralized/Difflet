@@ -394,3 +394,32 @@ def test_stage_vae_generate_pt_fallback(monkeypatch, tmp_path):
     orch._finish_stage_compile("vae", args, orch._stage_compiled_dir("vae", args))
     orch._stage_vae(args)
     assert (tmp_path / "out.pt").exists()
+
+
+def test_stage_text_compile_skips_when_manifest_matches(monkeypatch, tmp_path):
+    """A repeated `difflet compile` must not rebuild a stage whose manifest
+    already matches (single-component stages recompiled unconditionally)."""
+    class FakeText(_Recorder):
+        @classmethod
+        def get_config_cls(cls):
+            return lambda *a, **kw: object()
+
+    _setup_text(monkeypatch, FakeText)
+    args = _qwen_args(stage_mode="compile", cache_dir=str(tmp_path))
+    created = []
+    orig = FakeText.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        created.append(self)
+
+    monkeypatch.setattr(FakeText, "__init__", spy)
+    orch = QwenImageOrchestrator(args)
+    orch._stage_text(args)
+    assert created[-1].compiled is not None          # first compile builds
+    orch._stage_text(args)
+    assert created[-1].compiled is None              # manifest matches -> skipped
+    # a changed configuration invalidates the manifest and compiles again
+    args2 = _qwen_args(stage_mode="compile", cache_dir=str(tmp_path), tp_degree=2)
+    QwenImageOrchestrator(args2)._stage_text(args2)
+    assert created[-1].compiled is not None

@@ -532,3 +532,32 @@ def test_shared_cli_args_forward_adaptive_teacache_flags():
     assert parts[parts.index("--teacache-calibration") + 1] == "/tmp/cal.json"
     parts = HunyuanVideoOrchestrator(_hv_args())._shared_cli_args("generate")
     assert "--teacache-speedup" not in parts and "--teacache-calibration" not in parts
+
+
+def test_stage_clip_compile_skips_when_manifest_matches(monkeypatch, tmp_path):
+    """A repeated `difflet compile` must not rebuild the CLIP stage when its
+    manifest already matches the current configuration."""
+    _common_setup(monkeypatch)
+    _inject(monkeypatch, "difflet.backends.trainium.core.config",
+            NeuronConfig=lambda **kw: object())
+    _inject(monkeypatch, "difflet.models.flux.clip.modeling_clip",
+            CLIPInferenceConfig=lambda **kw: types.SimpleNamespace(),
+            NeuronClipApplication=_Recorder)
+    _inject(monkeypatch, "difflet.utils.diffusers_adapter",
+            load_diffusers_config=lambda p: {})
+    _inject(monkeypatch, "transformers", CLIPTokenizer=object)
+
+    args = _hv_args(stage_mode="compile", cache_dir=str(tmp_path))
+    created = []
+    orig = _Recorder.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        created.append(self)
+
+    monkeypatch.setattr(_Recorder, "__init__", spy)
+    orch = HunyuanVideoOrchestrator(args)
+    orch._stage_clip(args)
+    assert created[-1].compiled is not None
+    orch._stage_clip(args)
+    assert created[-1].compiled is None

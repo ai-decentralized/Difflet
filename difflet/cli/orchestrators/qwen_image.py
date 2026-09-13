@@ -175,8 +175,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
         )
         app = NeuronQwen2VLTextForCausalLM(enc_path, config)
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
-            self._finish_stage_compile("text", args, compiled_dir)
+            if not self._stage_is_compiled("text", args, compiled_dir):
+                app.compile(str(compiled_dir))
+                self._finish_stage_compile("text", args, compiled_dir)
             return
 
         from difflet.cli.dp import stage_loop
@@ -326,8 +327,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
         )
         app = NeuronWanVAEDecoderApplication(model_path=vae_path, config=config)
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
-            self._finish_stage_compile("vae", args, compiled_dir)
+            if not self._stage_is_compiled("vae", args, compiled_dir):
+                app.compile(str(compiled_dir))
+                self._finish_stage_compile("vae", args, compiled_dir)
             return
 
         from difflet.cli.dp import stage_loop
