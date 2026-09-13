@@ -148,8 +148,9 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
 
         app = NeuronClipApplication(model_path=clip_path, config=config)
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
-            self._finish_stage_compile("clip", args, compiled_dir)
+            if not self._stage_is_compiled("clip", args, compiled_dir):
+                app.compile(str(compiled_dir))
+                self._finish_stage_compile("clip", args, compiled_dir)
             return
 
         from difflet.cli.dp import stage_loop
@@ -211,8 +212,9 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         )
         app = NeuronLlamaForCausalLM(enc_path, config)
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
-            self._finish_stage_compile("llama", args, compiled_dir)
+            if not self._stage_is_compiled("llama", args, compiled_dir):
+                app.compile(str(compiled_dir))
+                self._finish_stage_compile("llama", args, compiled_dir)
             return
 
         from difflet.cli.dp import stage_loop
