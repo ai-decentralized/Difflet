@@ -285,6 +285,70 @@ def teacache_table(tc_labels: list[str], models=CAMPAIGN_MODELS) -> list[str]:
     return L
 
 
+def serving_table(price: float | None, models=CAMPAIGN_MODELS) -> list[str]:
+    """difflet serve (resident model) vs the CLI's per-request warm e2e, from
+    benchmark/<device>/serving/<slug>_tp4.json (+ _warm.json for the load-only
+    startup) written by benchmark.serve_bench."""
+    sdir = Path("benchmark") / "trn2" / "serving"
+    rows = []
+    for slug in models:
+        p = sdir / f"{slug}_tp4.json"
+        if not p.exists():
+            continue
+        d = json.loads(p.read_text())
+        w = sdir / f"{slug}_tp4_warm.json"
+        warm = json.loads(w.read_text()) if w.exists() else None
+        base = _load(slug, "tp4") or {}
+        rows.append((slug, d, warm, base))
+    if not rows:
+        return []
+    L = ["### Serving layer: `difflet serve` (resident model, tp4) vs the CLI", "",
+         "| model | endpoint | startup → /ready: first (compiles) / warm⁹ | c=1 p50 / p90 / p99 | "
+         "c=2 p50 | c=4 p50 | throughput (any c) | CLI warm e2e → resident speedup | "
+         "NeuronCore util (c=1)¹⁰ | device mem | errors | cost / 1k¹¹ |",
+         "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|"]
+    for slug, d, warm, base in rows:
+        lv = {l["concurrency"]: l for l in d["levels"]}
+        l1, l2, l4 = lv.get(1), lv.get(2), lv.get(4)
+        lat = (l1 or {}).get("latency_s") or {}
+        thr = (l1 or {}).get("throughput_per_hour")
+        unit = "img/h" if d["kind"] == "image" else "videos/h"
+        cli_warm = (base.get("e2e_warm") or {}).get("mean")
+        speed = f"{cli_warm:.0f} s → {cli_warm/lat['p50']:.1f}×" if cli_warm and lat.get("p50") else "—"
+        neu = ((warm or d)["levels"][0].get("neuron") if (warm or d)["levels"] else None) or {}
+        if not neu and l1:
+            neu = l1.get("neuron") or {}
+        errs = sum(v for l in d["levels"] for k, v in l["http_codes"].items() if k != "200")
+        cost = f"${price / thr * 1000:.2f}" if (price and thr) else "—"
+        ready_first = d.get("ready_seconds")
+        ready_warm = warm.get("ready_seconds") if warm else None
+        ready_s = f"{ready_first/60:.0f} min" if ready_first else "—"
+        ready_s += f" / **{ready_warm:.0f} s**" if ready_warm else " / —"
+        L.append(
+            f"| {_NAMES.get(slug, slug)} | `{d['endpoint']}` | {ready_s} | "
+            f"**{lat.get('p50', '—')}** / {lat.get('p90', '—')} / {lat.get('p99', '—')} s | "
+            f"{(l2 or {}).get('latency_s', {}).get('p50', '—')} s | "
+            f"{(l4 or {}).get('latency_s', {}).get('p50', '—')} s | "
+            f"**{thr:.0f} {unit}** | {speed} | "
+            f"{neu.get('neuroncore_util_mean_pct', '—')}% | {neu.get('device_mem_used_gb_max', '—')} GB | "
+            f"{errs} | {cost} |")
+    L += ["",
+          "Closed loop: c in-flight requests until 8 complete (HunyuanVideo 6), no think time, after 2 "
+          "warm-up requests; latency = client wall per request including queueing; throughput = "
+          "successes ÷ level wall. `difflet serve` runs **one resident worker** "
+          "(`max_running_requests=1`), so c = 2 / 4 measure queueing (p50 ≈ c × service time) and "
+          "throughput is flat — parallel execution needs `--dp` replicas, which need ≥ 2 cores each. "
+          "Image requests are JSON on `/v1/chat/completions` (base64 PNG back); video requests are "
+          "multipart on `/v1/videos/sync` (mp4 bytes back), admitted through the video service FIFO "
+          "(`--max-queued-requests 8`, `--request-timeout 1800`). ⁹ Serving has its own immutable "
+          "artifact generation under `~/.cache/difflet/serving/`: the first start compiles it from "
+          "scratch (the CLI artifacts are not reused); the warm figure is a restart against the "
+          "published generation (load only). ¹⁰ Mean over all 4 cores of neuron-monitor's "
+          "`neuroncore_utilization` sampled every 1 s during the c=1 level. ¹¹ At the indicative "
+          "hourly price stated above.", ""]
+    return L
+
+
 def speedup_table(labels: list[str], models=CAMPAIGN_MODELS) -> list[str]:
     L = ["### DiT per-step vs tp4 (lower is better; ratio = tp4 / config; a step with two "
          "sequential CFG calls counts both calls)", "",
@@ -341,6 +405,7 @@ def render(labels: list[str], price: float | None, price_note: str) -> str:
     tc_labels = [l for l in labels if l in ("tp4tc2", "tp4tcod")]
     if tc_labels:
         L += teacache_table(tc_labels)
+    L += serving_table(price)
     L += speedup_table(labels)
     L += [
         "⁰ DiT per-step: mean of the inter-step deltas (n = steps − 1). ¹ compile = full `difflet "
