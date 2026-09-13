@@ -162,6 +162,21 @@ def test_cell_status_ignores_pre_campaign_history(tmp_path, monkeypatch):
     assert len(m) == 1 and m[0].startswith("result file")
 
 
+def test_cell_status_teacache_cell_uses_the_call_count(tmp_path, monkeypatch):
+    """A TeaCache cell makes fewer DiT calls than steps; completeness is judged
+    against the recorded call count, not steps - 1."""
+    monkeypatch.setattr("benchmark.models._RESULTS_ROOT", str(tmp_path))
+    cfg = resolve("flux_1_dev", "tp4tc2")
+    os.makedirs(os.path.dirname(json_path(cfg.config_slug)), exist_ok=True)
+    d = {"status": "ok", "config": "tp4tc2", "parallel": cfg.parallel_dict(),
+         "compile_seconds": 22.0, "e2e_cold_seconds": 306.0, "e2e_warm": {"mean": 38.7},
+         "step_latency": {"mean": 0.27, "n": 18}, "dit_calls": 19,
+         "teacache": cfg.teacache_dict()}
+    with open(json_path(cfg.config_slug), "w") as fh:
+        json.dump(d, fh)
+    assert cell_status.missing("flux_1_dev", "tp4tc2") == []
+
+
 def test_cell_status_requires_all_four_metrics(tmp_path, monkeypatch):
     monkeypatch.setattr("benchmark.models._RESULTS_ROOT", str(tmp_path))
     cfg = resolve("flux_1_dev", "tp4sp")
