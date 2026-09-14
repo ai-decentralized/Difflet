@@ -1,0 +1,315 @@
+{
+  "model_slug": "qwen_image",
+  "config": "tp4",
+  "model_id": "Qwen/Qwen-Image",
+  "kind": "image",
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "seed": 42,
+  "guidance_scale": 4.0,
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "endpoint": "/v1/chat/completions",
+  "ready_seconds": 1682.213153571,
+  "warmup": [
+    {
+      "latency_s": 9.057,
+      "http": 200,
+      "bytes": 1402611,
+      "error": ""
+    },
+    {
+      "latency_s": 9.02,
+      "http": 200,
+      "bytes": 1402611,
+      "error": ""
+    }
+  ],
+  "levels": [
+    {
+      "concurrency": 1,
+      "requests": 8,
+      "successes": 8,
+      "wall_s": 72.18,
+      "throughput_per_s": 0.1108,
+      "throughput_per_hour": 399.0,
+      "latency_s": {
+        "p50": 9.02,
+        "p90": 9.032,
+        "p99": 9.033,
+        "mean": 9.022,
+        "min": 9.017,
+        "max": 9.033
+      },
+      "http_codes": {
+        "200": 8
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 9.023,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 9.019,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 9.033,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 9.018,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 9.018,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 9.02,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 9.017,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 9.031,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        }
+      ],
+      "resources": {
+        "samples": 15,
+        "neuroncore_util_mean_pct": 6.7,
+        "rss_peak_gb": 8.28
+      },
+      "neuron": {
+        "samples": 73,
+        "neuroncore_util_mean_pct": 87.3,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 68.8
+      }
+    },
+    {
+      "concurrency": 2,
+      "requests": 8,
+      "successes": 8,
+      "wall_s": 72.3,
+      "throughput_per_s": 0.1107,
+      "throughput_per_hour": 398.3,
+      "latency_s": {
+        "p50": 18.058,
+        "p90": 18.152,
+        "p99": 18.163,
+        "mean": 16.946,
+        "min": 9.028,
+        "max": 18.164
+      },
+      "http_codes": {
+        "200": 8
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 9.028,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 18.051,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 18.03,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 18.016,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 18.147,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 18.164,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 18.066,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 18.069,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        }
+      ],
+      "resources": {
+        "samples": 14,
+        "neuroncore_util_mean_pct": 0.0,
+        "rss_peak_gb": 8.28
+      },
+      "neuron": {
+        "samples": 72,
+        "neuroncore_util_mean_pct": 86.1,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 68.8
+      }
+    },
+    {
+      "concurrency": 4,
+      "requests": 8,
+      "successes": 8,
+      "wall_s": 72.194,
+      "throughput_per_s": 0.1108,
+      "throughput_per_hour": 398.9,
+      "latency_s": {
+        "p50": 36.09,
+        "p90": 36.099,
+        "p99": 36.1,
+        "mean": 29.331,
+        "min": 9.031,
+        "max": 36.1
+      },
+      "http_codes": {
+        "200": 8
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 9.031,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 18.063,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 27.082,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 36.1,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 36.098,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 36.089,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 36.091,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        },
+        {
+          "latency_s": 36.092,
+          "http": 200,
+          "bytes": 1402611,
+          "error": ""
+        }
+      ],
+      "resources": {
+        "samples": 14,
+        "neuroncore_util_mean_pct": 0.0,
+        "rss_peak_gb": 8.28
+      },
+      "neuron": {
+        "samples": 72,
+        "neuroncore_util_mean_pct": 86.3,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 68.8
+      }
+    }
+  ],
+  "resources_by_phase": {
+    "startup": {
+      "samples": 1,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 8.27
+    },
+    "warmup": {
+      "samples": 3,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 8.28
+    },
+    "c1": {
+      "samples": 15,
+      "neuroncore_util_mean_pct": 6.7,
+      "rss_peak_gb": 8.28
+    },
+    "c2": {
+      "samples": 14,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 8.28
+    },
+    "c4": {
+      "samples": 14,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 8.28
+    },
+    "done": {
+      "samples": 1,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 8.28
+    }
+  },
+  "method": "closed loop: c in-flight requests until N complete, no think time; latency = client wall per request incl. queueing; throughput = successes / level wall; one resident worker (max_running_requests=1), so c>1 measures queueing, not parallel execution"
+}
