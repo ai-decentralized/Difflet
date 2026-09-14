@@ -1,0 +1,181 @@
+{
+  "model_slug": "hunyuan_video",
+  "config": "tp4",
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "kind": "video",
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "seed": 42,
+  "guidance_scale": 6.0,
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "endpoint": "/v1/videos/sync",
+  "ready_seconds": 1486.902134733,
+  "warmup": [
+    {
+      "latency_s": 34.073,
+      "http": 200,
+      "bytes": 430492,
+      "error": ""
+    },
+    {
+      "latency_s": 34.063,
+      "http": 200,
+      "bytes": 430492,
+      "error": ""
+    }
+  ],
+  "levels": [
+    {
+      "concurrency": 1,
+      "requests": 4,
+      "successes": 4,
+      "wall_s": 136.195,
+      "throughput_per_s": 0.0294,
+      "throughput_per_hour": 105.7,
+      "latency_s": {
+        "p50": 34.049,
+        "p90": 34.059,
+        "p99": 34.062,
+        "mean": 34.049,
+        "min": 34.035,
+        "max": 34.062
+      },
+      "http_codes": {
+        "200": 4
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 34.051,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 34.035,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 34.062,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 34.047,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        }
+      ],
+      "resources": {
+        "samples": 68,
+        "neuroncore_util_mean_pct": 2.2,
+        "rss_peak_gb": 14.78
+      },
+      "neuron": {
+        "samples": 136,
+        "neuroncore_util_mean_pct": 88.2,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 87.59
+      }
+    },
+    {
+      "concurrency": 2,
+      "requests": 4,
+      "successes": 4,
+      "wall_s": 136.346,
+      "throughput_per_s": 0.0293,
+      "throughput_per_hour": 105.6,
+      "latency_s": {
+        "p50": 68.088,
+        "p90": 68.206,
+        "p99": 68.251,
+        "mean": 59.619,
+        "min": 34.045,
+        "max": 68.256
+      },
+      "http_codes": {
+        "200": 4
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 34.045,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 68.089,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 68.086,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 68.256,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        }
+      ],
+      "resources": {
+        "samples": 69,
+        "neuroncore_util_mean_pct": 1.4,
+        "rss_peak_gb": 14.78
+      },
+      "neuron": {
+        "samples": 137,
+        "neuroncore_util_mean_pct": 88.3,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 87.59
+      }
+    }
+  ],
+  "resources_by_phase": {
+    "startup": {
+      "samples": 2,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 14.66
+    },
+    "warmup": {
+      "samples": 26,
+      "neuroncore_util_mean_pct": 3.8,
+      "rss_peak_gb": 14.67
+    },
+    "c1": {
+      "samples": 68,
+      "neuroncore_util_mean_pct": 2.2,
+      "rss_peak_gb": 14.78
+    },
+    "c2": {
+      "samples": 69,
+      "neuroncore_util_mean_pct": 1.4,
+      "rss_peak_gb": 14.78
+    },
+    "c4": {
+      "samples": 41,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 14.86
+    }
+  },
+  "method": "closed loop: c in-flight requests until N complete, no think time; latency = client wall per request incl. queueing; throughput = successes / level wall; one resident worker (max_running_requests=1), so c>1 measures queueing, not parallel execution"
+}

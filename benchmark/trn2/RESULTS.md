@@ -317,6 +317,18 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 
 ⁷ loop ms/step = denoise-loop wall (first DiT call entry → last call exit) ÷ scheduler steps, so a skipped step counts as ~0 — the per-step figure TeaCache actually changes; the DiT call column is the unchanged cost of one real call. tp4 skips nothing, so its loop figure is its DiT call time (× calls per step). ⁸ PSNR of this cell's output against the tp4 output at the same seed (pixel space; SSIM when scikit-image is installed); an identical output means the controller skipped nothing.
 
+### Serving layer: `difflet serve` (resident model, tp4) vs the CLI
+
+| model | endpoint | startup → /ready: first (compiles) / warm⁹ | c=1 p50 / p90 / p99 | c=2 p50 | c=4 p50 | throughput (any c) | CLI warm e2e → resident speedup | NeuronCore util (c=1)¹⁰ | device mem | errors | cost / 1k¹¹ |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| FLUX.1-dev | `/v1/chat/completions` | 21 min / **330 s** | **8.213** / 8.22 / 8.221 s | 16.429 s | 32.853 s | **438 img/h** | 41 s → 5.0× | 91.5% | 53.26 GB | 0 | $2.08 |
+| Qwen-Image | `/v1/chat/completions` | 28 min / **1339 s** | **9.02** / 9.032 / 9.033 s | 18.058 s | 36.09 s | **399 img/h** | 65 s → 7.2× | 85.9% | 68.8 GB | 0 | $2.28 |
+| LTX-2 | `/v1/videos/sync` | 34 min / **926 s** | **37.537** / 38.471 / 39.144 s | 75.752 s | 149.752 s | **95 videos/h** | 56 s → 1.5× | 22.8% | 42.31 GB | 0 | $9.54 |
+| HunyuanVideo | `/v1/videos/sync` | 3 min / **1487 s** | **34.053** / 34.118 / 34.165 s | 68.197 s | 119.548 s | **106 videos/h** | 115 s → 3.4× | 88.2% | 87.59 GB | 0 | $8.61 |
+| Wan 2.1 14B | `/v1/videos/sync` | 103 min / **426 s** | **13.182** / 13.191 / 13.194 s | 26.343 s | 52.823 s | **273 videos/h** | 85 s → 6.4× | 85.3% | 70.23 GB | 0 | $3.33 |
+
+Closed loop: c in-flight requests until 8 complete (HunyuanVideo 6), no think time, after 2 warm-up requests; latency = client wall per request including queueing; throughput = successes ÷ level wall. `difflet serve` runs **one resident worker** (`max_running_requests=1`), so c = 2 / 4 measure queueing (p50 ≈ c × service time) and throughput is flat — parallel execution needs `--dp` replicas, which need ≥ 2 cores each. Image requests are JSON on `/v1/chat/completions` (base64 PNG back); video requests are multipart on `/v1/videos/sync` (mp4 bytes back), admitted through the video service FIFO (`--max-queued-requests 8`, `--request-timeout 1800`). ⁹ Serving has its own immutable artifact generation under `~/.cache/difflet/serving/`: the first start compiles it from scratch (the CLI artifacts are not reused); the second figure is a restart against the published generation (no compile, load only) — measured after the other models had evicted this model's files from the page cache, so it is a cold-cache load; a restart right after publish, page cache warm, took 185 s for HunyuanVideo. ¹⁰ Mean over all 4 cores of neuron-monitor's `neuroncore_utilization` sampled every 1 s during the c=1 level. ¹¹ At the indicative hourly price stated above.
+
 ### DiT per-step vs tp4 (lower is better; ratio = tp4 / config; a step with two sequential CFG calls counts both calls)
 
 | model | tp4 | tp2cp2 | tp4sp | tp2cfg | tp4cfg2 | tp4sdpa | tp4tc2 | tp4tcod |
@@ -485,6 +497,27 @@ quality; online-delta would need a post-warmup baseline (the code comment alread
 that intent) or a tighter α to earn its "adaptive" label. Calibrated adaptive for FLUX /
 HunyuanVideo (`scripts/run_flux_teacache_e2e.py`, `scripts/calibrate_teacache.py`) remains a
 separate ~1–2 h device task each if wanted.
+
+**Serving layer (`difflet serve`, one resident worker, tp4; table "Serving layer" above).**
+Resident per-request latency is the denoise loop plus on-device encode/decode, with no
+weight reload: FLUX **8.2 s** (438 img/h), Qwen-Image **9.0 s** (399 img/h), Wan 2.1
+**13.2 s** (273 videos/h), HunyuanVideo **34.1 s** (106 videos/h), LTX-2 **37.5 s** (95
+videos/h) — **3.4–7.2× the CLI's per-request warm e2e** for the Neuron-resident models, only
+1.5× for LTX-2, whose serving path keeps the text encoder and VAE on the host: its
+NeuronCore utilisation during requests is **22.8%** against **85–92%** for the other four,
+so LTX-2 serving is host-bound at this shape. Concurrency 2 and 4 leave throughput flat and
+multiply p50 (queueing on the single worker; every request 200, no 429 / timeouts with
+`--max-queued-requests 8`); scaling needs `--dp` replicas, i.e. ≥ 2 cores per replica.
+Startup: serving compiles its own artifact generation on first start — 21 / 28 / 34 / 103 /
+≈ 90 min (HunyuanVideo, from the aborted attempt's log) — and a restart reuses it but the
+load is page-cache-bound: 330 s (FLUX) to 1487 s (HunyuanVideo) with a cold cache vs 185 s
+for HunyuanVideo right after publish. Three incidents, recorded so the next campaign avoids
+them: (1) a 1 h `/ready` bound cut Wan's 100-min VAE compile; (2) killing that neuronx-cc
+left a 0-byte `model.hlo_module.pb.lock` in `/var/tmp/neuron-compile-cache`, and the next
+HunyuanVideo compile waited on it for 4 h printing "Another process must be compiling";
+(3) HunyuanVideo's first worker load (cold, freshly written files; 288 s for the DiT init
+alone) exceeded the engine's default 900 s `--worker-restart-timeout`, so the server exited
+with `503 engine_unavailable` after its compile — set it to 3600 s for cold starts.
 
 **Campaign totals**: 15 measured cells + 5 by-design N/A, every output finite, no failed
 cell, no deleted cache (1.5 TB disk, ~1.1 TB used at the end incl. 285 GB of HF weights).

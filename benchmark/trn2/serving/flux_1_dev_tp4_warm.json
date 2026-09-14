@@ -1,0 +1,181 @@
+{
+  "model_slug": "flux_1_dev",
+  "config": "tp4",
+  "model_id": "black-forest-labs/FLUX.1-dev",
+  "kind": "image",
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 28,
+  "seed": 42,
+  "guidance_scale": 3.5,
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "endpoint": "/v1/chat/completions",
+  "ready_seconds": 330.429876156,
+  "warmup": [
+    {
+      "latency_s": 8.257,
+      "http": 200,
+      "bytes": 1297680,
+      "error": ""
+    },
+    {
+      "latency_s": 8.223,
+      "http": 200,
+      "bytes": 1297680,
+      "error": ""
+    }
+  ],
+  "levels": [
+    {
+      "concurrency": 1,
+      "requests": 4,
+      "successes": 4,
+      "wall_s": 32.912,
+      "throughput_per_s": 0.1215,
+      "throughput_per_hour": 437.5,
+      "latency_s": {
+        "p50": 8.227,
+        "p90": 8.23,
+        "p99": 8.232,
+        "mean": 8.228,
+        "min": 8.225,
+        "max": 8.232
+      },
+      "http_codes": {
+        "200": 4
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 8.227,
+          "http": 200,
+          "bytes": 1297680,
+          "error": ""
+        },
+        {
+          "latency_s": 8.225,
+          "http": 200,
+          "bytes": 1297680,
+          "error": ""
+        },
+        {
+          "latency_s": 8.232,
+          "http": 200,
+          "bytes": 1297680,
+          "error": ""
+        },
+        {
+          "latency_s": 8.227,
+          "http": 200,
+          "bytes": 1297680,
+          "error": ""
+        }
+      ],
+      "resources": {
+        "samples": 19,
+        "neuroncore_util_mean_pct": 0.0,
+        "rss_peak_gb": 11.82
+      },
+      "neuron": {
+        "samples": 33,
+        "neuroncore_util_mean_pct": 91.5,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 53.26
+      }
+    },
+    {
+      "concurrency": 2,
+      "requests": 4,
+      "successes": 4,
+      "wall_s": 32.892,
+      "throughput_per_s": 0.1216,
+      "throughput_per_hour": 437.8,
+      "latency_s": {
+        "p50": 16.444,
+        "p90": 16.446,
+        "p99": 16.446,
+        "mean": 14.39,
+        "min": 8.224,
+        "max": 16.446
+      },
+      "http_codes": {
+        "200": 4
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 8.224,
+          "http": 200,
+          "bytes": 1297680,
+          "error": ""
+        },
+        {
+          "latency_s": 16.446,
+          "http": 200,
+          "bytes": 1297680,
+          "error": ""
+        },
+        {
+          "latency_s": 16.444,
+          "http": 200,
+          "bytes": 1297680,
+          "error": ""
+        },
+        {
+          "latency_s": 16.445,
+          "http": 200,
+          "bytes": 1297680,
+          "error": ""
+        }
+      ],
+      "resources": {
+        "samples": 20,
+        "neuroncore_util_mean_pct": 10.0,
+        "rss_peak_gb": 11.82
+      },
+      "neuron": {
+        "samples": 33,
+        "neuroncore_util_mean_pct": 90.3,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 53.26
+      }
+    }
+  ],
+  "resources_by_phase": {
+    "startup": {
+      "samples": 2,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 11.81
+    },
+    "warmup": {
+      "samples": 6,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 11.82
+    },
+    "c1": {
+      "samples": 19,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 11.82
+    },
+    "c2": {
+      "samples": 20,
+      "neuroncore_util_mean_pct": 10.0,
+      "rss_peak_gb": 11.82
+    },
+    "c4": {
+      "samples": 13,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 11.82
+    }
+  },
+  "method": "closed loop: c in-flight requests until N complete, no think time; latency = client wall per request incl. queueing; throughput = successes / level wall; one resident worker (max_running_requests=1), so c>1 measures queueing, not parallel execution"
+}
