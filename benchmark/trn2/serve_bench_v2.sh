@@ -37,7 +37,7 @@ for m in "${MODELS[@]}"; do
   stop_server
   t0=$(date +%s.%N)
   "$PY" -m difflet.cli.main serve --model-id "$mid" --tp-degree 4 "${shape_flags[@]}" \
-    --port "$PORT" --request-timeout 1800 --max-queued-requests 8 >"$LOG/${m}_serve.log" 2>&1 &
+    --port "$PORT" --request-timeout 1800 --max-queued-requests 8 --worker-restart-timeout 3600 >"$LOG/${m}_serve.log" 2>&1 &
   spid=$!
   t=0
   until curl -sf "http://127.0.0.1:$PORT/ready" >/dev/null 2>&1; do
