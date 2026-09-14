@@ -342,8 +342,11 @@ def serving_table(price: float | None, models=CAMPAIGN_MODELS) -> list[str]:
           "multipart on `/v1/videos/sync` (mp4 bytes back), admitted through the video service FIFO "
           "(`--max-queued-requests 8`, `--request-timeout 1800`). ⁹ Serving has its own immutable "
           "artifact generation under `~/.cache/difflet/serving/`: the first start compiles it from "
-          "scratch (the CLI artifacts are not reused); the warm figure is a restart against the "
-          "published generation (load only). ¹⁰ Mean over all 4 cores of neuron-monitor's "
+          "scratch (the CLI artifacts are not reused); the second figure is a restart against the "
+          "published generation (no compile, load only) — measured after the other models had "
+          "evicted this model's files from the page cache, so it is a cold-cache load; a restart "
+          "right after publish, page cache warm, took 185 s for HunyuanVideo. ¹⁰ Mean over all 4 "
+          "cores of neuron-monitor's "
           "`neuroncore_utilization` sampled every 1 s during the c=1 level. ¹¹ At the indicative "
           "hourly price stated above.", ""]
     return L
