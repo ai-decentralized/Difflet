@@ -395,6 +395,30 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 
 `difflet <command> --help` is the authoritative list.
 
+### Attention implementation
+
+`compile`, `generate`, and `run` accept `--attention-impl megakernel|sdpa`.
+The default, `megakernel`, preserves the existing optimized DiT routing, including
+its masked SDPA fallbacks. `sdpa` forces the shared Trainium DiT attention path
+through PyTorch SDPA and XLA lowering. It supports gather-KV and Ulysses; ring
+attention requires its dedicated kernel and is rejected with `sdpa`.
+
+Use the same selection when compiling and generating; SDPA artifacts have separate
+cache identities. Compile logs identify the kernels traced through the shared
+attention entry point. For example:
+
+```bash
+difflet compile --model-id black-forest-labs/FLUX.1-dev --attention-impl sdpa
+difflet generate --model-id black-forest-labs/FLUX.1-dev --attention-impl sdpa \
+  --prompt "A mountain lake at sunrise" --output lake.png
+```
+
+This selects the attention implementation without changing normalization, RoPE,
+sampling precision, or model mask policy. In particular, it retains the existing
+LTX-2/Qwen padding behavior; it is not a switch to full upstream mask semantics.
+The option currently applies to the Trainium CLI, not `serve` or the unfinished
+HunyuanVideo 1.5 CLI stages.
+
 ### Where things land
 
 | What | Where |

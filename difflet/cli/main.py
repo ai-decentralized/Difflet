@@ -6,6 +6,7 @@ import os
 import sys
 
 from difflet.pipeline.parallel_config import CP_MODES
+from difflet.ops.attention_config import ATTENTION_IMPLS, attention_implementation
 
 VALID_MODELS = {
     "black-forest-labs/FLUX.1-dev",
@@ -56,6 +57,11 @@ def _add_serve_model_flag(p: argparse.ArgumentParser) -> None:
 
 
 def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--attention-impl", choices=ATTENTION_IMPLS, default="megakernel",
+        help="DiT attention implementation: existing optimized routing (megakernel) "
+        "or PyTorch SDPA (sdpa). Use the same value for compile and generate.",
+    )
     p.add_argument(
         "--tp-degree",
         type=int,
@@ -877,6 +883,11 @@ def _ensure_jemalloc() -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    with attention_implementation(getattr(args, "attention_impl", "megakernel")):
+        _run(args, argv)
+
+
+def _run(args: argparse.Namespace, argv: list[str] | None) -> None:
 
     if args.command == "clean":
         from difflet.cli.clean import run as run_clean
@@ -901,6 +912,11 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(1)
 
     if args.command in ("compile", "generate", "run"):
+        if args.attention_impl == "sdpa":
+            from difflet.backends import current_backend
+
+            if current_backend() != "trainium":
+                raise SystemExit("--attention-impl sdpa is currently supported on Trainium only.")
         _validate_cfg_parallel(args)
         _validate_sp(args)
         _validate_taef1(args)
@@ -921,6 +937,10 @@ def main(argv: list[str] | None = None) -> None:
             _validate_sp(args)
         # After mode resolution: --mode rewrites dp/cfg/cp, so the core budget
         # has to be checked against the values that will actually be compiled.
+        if args.attention_impl == "sdpa" and args.cp_mode == "ring":
+            raise SystemExit("--attention-impl sdpa does not support --cp-mode ring; "
+                             "use gather_kv or ulysses.")
+        print(f"[difflet] DiT attention policy: {args.attention_impl}", flush=True)
         _validate_capacity(args)
 
     if args.command in ("generate", "run"):

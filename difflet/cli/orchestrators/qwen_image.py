@@ -14,6 +14,7 @@ import argparse
 import shutil
 import sys
 from pathlib import Path
+from difflet.ops.attention_config import attention_cache_inputs
 
 from difflet.common.orchestrators import qwen_image as qwen_common
 from difflet.cli.orchestrators.base import (
@@ -408,6 +409,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 "tp": args.tp_degree or 4,
                 "cp": args.cp_degree or 1,
                 "cp_mode": str(getattr(args, "cp_mode", "gather_kv") or "gather_kv"),
+                **attention_cache_inputs(getattr(args, "attention_impl", "megakernel")),
                 # sp changes the DiT graph (the modeling_qwen fork); without
                 # this field tp4sp and tp4 hash to the same dir and silently
                 # reuse each other's artifact (the 9a00746 naming bug, now on
@@ -453,6 +455,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
         a = self.args
         parts = [
+            "--attention-impl", getattr(a, "attention_impl", "megakernel"),
             "--model-id",
             _HF_MODEL_ID,
             "--tp-degree",
