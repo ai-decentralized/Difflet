@@ -136,6 +136,38 @@ def require_request_shape_in_set(
     return canonical
 
 
+def adaptive_teacache_calibration(
+    args: argparse.Namespace, *, model: str, shape_label: str
+) -> str | None:
+    """Validated calibration path for a calibrated-adaptive TeaCache request.
+
+    For the host-signal models (Wan: block-0 CPU shadow; LTX-2: host CPU
+    transformer) ``--teacache-speedup X --teacache-calibration PATH`` needs no
+    probe NEFF, so the artifact identity is unchanged and the orchestrator only
+    threads the calibration path to the application. This performs the checks
+    the probe pipelines (flux, qwen_image, hunyuan_video) do at construction:
+    the JSON's model / shape label must match the request and the requested
+    speedup must not exceed the calibration's target. Returns None when adaptive
+    TeaCache was not requested.
+    """
+    speedup = getattr(args, "teacache_speedup", None)
+    if speedup is None:
+        return None
+    from difflet.pipeline.teacache import load_teacache_calibration_or_raise
+
+    path = getattr(args, "teacache_calibration", None)
+    calibration = load_teacache_calibration_or_raise(path, model=model, shape_label=shape_label)
+    if (
+        calibration.target_speedup is not None
+        and float(speedup) > float(calibration.target_speedup) + 1e-6
+    ):
+        raise ValueError(
+            "TeaCache calibration target speedup is lower than requested: "
+            f"requested {speedup}, calibration has {calibration.target_speedup}."
+        )
+    return str(path)
+
+
 def bucketed_dir_token(canonical) -> str:
     """Deterministic dir-name token for a canonical shape set: bkt<K>-<hash6>."""
     import hashlib

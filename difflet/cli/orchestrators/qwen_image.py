@@ -257,6 +257,18 @@ class QwenImageOrchestrator(ModelOrchestrator):
         from difflet.cli.dp import stage_loop
 
         self._require_stage_artifact("generate", args, compiled_dir)
+        adaptive = getattr(args, "teacache_speedup", None) is not None
+        if adaptive and not app.has_compiled_artifacts(str(compiled_dir), select=["teacache_probe"]):
+            # Same additive-probe rule as hunyuan_video: the fused probe is a
+            # component of the DiT stage artifact (identity unchanged; the DiT
+            # NEFF is reused). `difflet compile --teacache-speedup` builds it;
+            # a generate against an artifact compiled without it builds it here.
+            print(
+                f"[qwen_image] compiling the TeaCache probe NEFF into {compiled_dir} "
+                "(first adaptive run; the DiT artifact is reused)",
+                flush=True,
+            )
+            app.compile(str(compiled_dir), select=["teacache_probe"])
         app.load(str(compiled_dir), skip_warmup=True)
         sched = app.pipeline.scheduler
         sc = sched.config

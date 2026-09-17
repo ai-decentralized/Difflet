@@ -413,3 +413,68 @@ def test_transformer_virtual_core_size_ring_only():
     assert f(_wan_args(cp_degree=2, cp_mode="gather_kv")) is None
     assert f(_wan_args(cp_degree=2, cp_mode="ulysses")) is None
     assert f(_wan_args(cp_degree=1, cp_mode="gather_kv")) is None
+
+
+# ------------------------------------------- calibrated-adaptive TeaCache (CLI wiring)
+
+def _write_calibration(path, *, model, shape_label, target=1.5, num_steps=20):
+    import json
+
+    from difflet.pipeline.teacache import CALIBRATION_SCHEMA
+    path.write_text(json.dumps({
+        "schema": CALIBRATION_SCHEMA, "model": model, "shape_label": shape_label,
+        "num_steps": num_steps, "poly_coef": [0.0, 1.0], "threshold": 0.1,
+        "target_speedup": target,
+    }))
+    return str(path)
+
+
+def test_shared_cli_args_forward_adaptive_teacache_flags():
+    parts = WanOrchestrator(_wan_args(
+        teacache_speedup=1.5, teacache_calibration="/c.json"))._shared_cli_args("generate")
+    assert parts[parts.index("--teacache-speedup") + 1] == "1.5"
+    assert parts[parts.index("--teacache-calibration") + 1] == "/c.json"
+    plain = WanOrchestrator(_wan_args())._shared_cli_args("generate")
+    assert "--teacache-speedup" not in plain and "--teacache-calibration" not in plain
+
+
+def test_stage_transformer_threads_calibration_into_app_without_changing_artifact(
+    monkeypatch, tmp_path,
+):
+    # Calibrated-adaptive TeaCache: Wan's block-0 signal is a host CPU shadow
+    # (no probe NEFF), so the calibration path reaches the app as a runtime-only
+    # kwarg and the compiled-dir identity stays that of a plain generate.
+    _setup_wan_fakes(monkeypatch)
+    calib = _write_calibration(tmp_path / "wan.json", model="wan", shape_label="480x832x9")
+    plain = _wan_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path))
+    adaptive = _wan_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
+                         teacache_speedup=1.5, teacache_calibration=calib)
+    orch = WanOrchestrator(adaptive)
+    assert orch._stage_compiled_dir("transformer", adaptive) == \
+        WanOrchestrator(plain)._stage_compiled_dir("transformer", plain)
+    orch._finish_stage_compile("transformer", adaptive,
+                               orch._stage_compiled_dir("transformer", adaptive))
+    orch._stage_transformer(adaptive)
+    kw = _FakeWanApp.instances[-1].kwargs
+    assert kw["teacache_calibration_path"] == calib
+    assert kw["teacache_cadence"] is None and kw["teacache_online_delta_alpha"] is None
+    orch._stage_transformer(plain)
+    assert _FakeWanApp.instances[-1].kwargs["teacache_calibration_path"] is None
+
+
+@pytest.mark.parametrize("bad", [
+    dict(target=1.5, speedup=2.0, shape_label="480x832x9", match="lower than requested"),
+    dict(target=1.5, speedup=1.5, shape_label="512x512x9", match="shape mismatch"),
+])
+def test_stage_transformer_validates_the_calibration_like_the_probe_pipelines(
+    monkeypatch, tmp_path, bad,
+):
+    _setup_wan_fakes(monkeypatch)
+    calib = _write_calibration(tmp_path / "wan.json", model="wan",
+                               shape_label=bad["shape_label"], target=bad["target"])
+    args = _wan_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
+                     teacache_speedup=bad["speedup"], teacache_calibration=calib)
+    orch = WanOrchestrator(args)
+    orch._finish_stage_compile("transformer", args, orch._stage_compiled_dir("transformer", args))
+    with pytest.raises(ValueError, match=bad["match"]):
+        orch._stage_transformer(args)
