@@ -149,6 +149,11 @@ _RUNTIME_ONLY_APP_KWARGS: frozenset[str] = frozenset(
         # (nor pollute the key so a warm cache misses).
         "teacache_cadence",
         "teacache_online_delta_alpha",
+        # The calibration file only parameterises the host-side controller; the
+        # artifact identity of the calibrated modes is carried by
+        # teacache_probe_enabled (difflet_pipeline._cache_application_kwargs),
+        # and the host-signal models (Wan, LTX-2) have no probe at all.
+        "teacache_calibration_path",
     }
 )
 

@@ -288,28 +288,15 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_generate_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--prompt", required=False, default=None)
-    p.add_argument("--output", required=False, default=None, help="Output file path (.png or .mp4)")
-    p.add_argument(
-        "--requests",
-        default=None,
-        help="JSONL batch file: one request per line with prompt/output/"
-        "seed and optional negative_prompt/guidance_scale/steps",
-    )
-    p.add_argument("--requests-dir", default=None, help=argparse.SUPPRESS)  # worker mode
-    p.add_argument("--worker-index", type=int, default=None, help=argparse.SUPPRESS)
-    p.add_argument("--steps", type=int, default=None)
-    p.add_argument("--guidance-scale", type=float, default=None)
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument(
-        "--work-dir", default=None, help="Directory for inter-stage tensors (staged models only)"
-    )
-    p.add_argument(
-        "--keep-work-dir",
-        action="store_true",
-        help="Do not delete work-dir after successful generation",
-    )
+def _add_teacache_flags(p: argparse.ArgumentParser) -> None:
+    """TeaCache flags, shared by ``compile`` and ``generate``.
+
+    The probe-free modes (cadence / online-delta) are runtime-only, but the
+    calibrated-adaptive mode (--teacache-speedup + --teacache-calibration) is
+    part of the artifact: flux compiles a separate probe NEFF identity and
+    qwen_image / hunyuan_video add a probe component to the DiT stage, so
+    ``difflet compile`` has to see the same flags as ``difflet generate``.
+    """
     p.add_argument(
         "--teacache-cadence",
         type=int,
@@ -337,6 +324,31 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         metavar="PATH",
         help="Path to TeaCache calibration JSON",
     )
+
+
+def _add_generate_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--prompt", required=False, default=None)
+    p.add_argument("--output", required=False, default=None, help="Output file path (.png or .mp4)")
+    p.add_argument(
+        "--requests",
+        default=None,
+        help="JSONL batch file: one request per line with prompt/output/"
+        "seed and optional negative_prompt/guidance_scale/steps",
+    )
+    p.add_argument("--requests-dir", default=None, help=argparse.SUPPRESS)  # worker mode
+    p.add_argument("--worker-index", type=int, default=None, help=argparse.SUPPRESS)
+    p.add_argument("--steps", type=int, default=None)
+    p.add_argument("--guidance-scale", type=float, default=None)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--work-dir", default=None, help="Directory for inter-stage tensors (staged models only)"
+    )
+    p.add_argument(
+        "--keep-work-dir",
+        action="store_true",
+        help="Do not delete work-dir after successful generation",
+    )
+    _add_teacache_flags(p)
 
 
 def _add_serve_flags(p: argparse.ArgumentParser) -> None:
@@ -493,6 +505,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_parallel_flags(cp_cmd)
     _add_shape_flags(cp_cmd)
     _add_cache_flags(cp_cmd)
+    _add_teacache_flags(cp_cmd)
 
     gen = sub.add_parser("generate", help="Run inference (requires prior compile)")
     _add_model_flag(gen)
@@ -943,6 +956,10 @@ def _run(args: argparse.Namespace, argv: list[str] | None) -> None:
         print(f"[difflet] DiT attention policy: {args.attention_impl}", flush=True)
         _validate_capacity(args)
 
+    if args.command == "compile":
+        # Calibrated-adaptive TeaCache changes the artifact (probe NEFF), so
+        # compile takes the TeaCache flags and checks them like generate does.
+        _validate_teacache(args)
     if args.command in ("generate", "run"):
         _validate_teacache(args)
         _validate_dp(args)

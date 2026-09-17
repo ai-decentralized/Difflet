@@ -86,3 +86,38 @@ def test_taef1_path_implies_taef1(monkeypatch):
         "taef1": True,
         "taef1_path": "madebyollin/taef1",
     }
+
+
+def test_compile_accepts_adaptive_teacache_flags(monkeypatch, tmp_path):
+    """The probe NEFF is part of the artifact, so `difflet compile` takes the
+    calibrated-adaptive flags (flux: a separate probe identity; qwen_image /
+    hunyuan_video: an additive probe component) and routes them to the
+    orchestrator exactly like generate does."""
+    cli = _cli()
+    seen = {}
+
+    class FakeOrch:
+        def compile(self):
+            return None
+
+    def fake_orchestrator(args):
+        seen.update(vars(args))
+        return FakeOrch()
+
+    monkeypatch.setattr(cli, "_get_orchestrator", fake_orchestrator)
+    calib = tmp_path / "calib.json"
+    calib.write_text("{}")
+    cli.main(["compile", "--model-id", "black-forest-labs/FLUX.1-dev",
+              "--teacache-speedup", "1.5", "--teacache-calibration", str(calib)])
+    assert seen["teacache_speedup"] == 1.5
+    assert seen["teacache_calibration"] == str(calib)
+
+
+def test_compile_teacache_speedup_requires_calibration(monkeypatch, capsys):
+    cli = _cli()
+    monkeypatch.setattr(cli, "_get_orchestrator", lambda args: None)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["compile", "--model-id", "black-forest-labs/FLUX.1-dev",
+                  "--teacache-speedup", "1.5"])
+    assert exc.value.code == 1
+    assert "--teacache-calibration" in capsys.readouterr().err
