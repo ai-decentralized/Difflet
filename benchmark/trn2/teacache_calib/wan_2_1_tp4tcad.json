@@ -1,0 +1,47 @@
+{
+  "schema": "difflet-m9-teacache-calibration-v1",
+  "model": "wan",
+  "shape_label": "480x832x9",
+  "num_steps": 20,
+  "poly_coef": [
+    -0.08946246714354442,
+    6.490233833306919,
+    -79.87980607921861,
+    347.7859947864975,
+    -293.417842925331
+  ],
+  "threshold": 0.08276969038330505,
+  "warmup_steps": 5,
+  "cooldown_steps": 5,
+  "target_speedup": 1.333,
+  "fit_r2": 0.6107702742069328,
+  "n_samples": 57,
+  "mod_input_source": "block0_modulated_input",
+  "skip_run_length": 1,
+  "accumulate": true,
+  "cadence": 0,
+  "online_delta_alpha": 0.0,
+  "signal_pearson": 0.6821782597331301,
+  "poly_degree": 4,
+  "signal_source": "host CPU shadow (WanTeacacheCPUShadow): rel-L1 of the block-0 modulated input",
+  "target_skips": 5,
+  "target_rule": "cadence 2's skip count at warmup/cooldown 5 (tp4tc2), so tp4tcad is compared at the same skip budget",
+  "simulated_skips_per_prompt": [
+    5,
+    5,
+    5
+  ],
+  "calibration_prompts": [
+    "a cat sitting on a bench in a sunlit park",
+    "a red vintage car parked outside a diner at dusk",
+    "an astronaut riding a horse across a desert plain"
+  ],
+  "calibration_seeds": [
+    42,
+    42,
+    42
+  ],
+  "pairs_file": "benchmark/trn2/teacache_calib/wan_2_1_tp4tcad_pairs.json",
+  "hardware_measured": true,
+  "fitted_at": "2026-09-17T20:43:03Z"
+}
