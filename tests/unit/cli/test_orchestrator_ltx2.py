@@ -222,3 +222,49 @@ def test_probe_free_teacache_kwargs_do_not_change_ltx2_cache_key():
     cadence = spec({"enable_host_pipeline": True, "enable_decode_components": True,
                     "teacache_cadence": 2, "teacache_online_delta_alpha": 0.6})
     assert cache_key(plain) == cache_key(cadence) == cache_key(spec(None))
+    # the calibrated-adaptive calibration path is runtime-only too (no probe
+    # NEFF for LTX-2): the warm tp4 artifact must hit with --teacache-speedup
+    adaptive = spec({"enable_host_pipeline": True, "enable_decode_components": True,
+                     "teacache_calibration_path": "/c.json"})
+    assert cache_key(plain) == cache_key(adaptive)
+
+
+def _write_ltx2_calibration(path, *, target=1.5, shape_label="512x768x121"):
+    import json
+
+    from difflet.pipeline.teacache import CALIBRATION_SCHEMA
+    path.write_text(json.dumps({
+        "schema": CALIBRATION_SCHEMA, "model": "ltx_2", "shape_label": shape_label,
+        "num_steps": 40, "poly_coef": [0.0, 1.0], "threshold": 0.1,
+        "target_speedup": target,
+    }))
+    return str(path)
+
+
+def test_load_pipeline_threads_adaptive_calibration_as_runtime_only(monkeypatch, tmp_path):
+    # Calibrated-adaptive TeaCache on LTX-2 (host CPU block-0 signal, no probe
+    # NEFF): only the calibration path reaches the application. teacache_speedup
+    # must NOT -- it would flip the cache key to a probe identity that never
+    # exists for LTX-2 and miss the warm tp4 artifact.
+    calib = _write_ltx2_calibration(tmp_path / "ltx2.json")
+    kw = _load_pipeline_kwargs(monkeypatch, teacache_speedup=1.5, teacache_calibration=calib)
+    assert kw["application_kwargs"] == {
+        "enable_host_pipeline": True,
+        "enable_decode_components": True,
+        "teacache_calibration_path": calib,
+    }
+    assert "teacache_speedup" not in kw and "teacache_calibration_path" not in kw
+
+
+@pytest.mark.parametrize("bad", [
+    dict(target=1.5, speedup=2.0, shape_label="512x768x121", match="lower than requested"),
+    dict(target=1.5, speedup=1.5, shape_label="256x384x121", match="shape mismatch"),
+])
+def test_load_pipeline_validates_the_calibration_like_the_probe_pipelines(
+    monkeypatch, tmp_path, bad,
+):
+    calib = _write_ltx2_calibration(tmp_path / "ltx2.json", target=bad["target"],
+                                    shape_label=bad["shape_label"])
+    with pytest.raises(ValueError, match=bad["match"]):
+        _load_pipeline_kwargs(monkeypatch, teacache_speedup=bad["speedup"],
+                              teacache_calibration=calib)

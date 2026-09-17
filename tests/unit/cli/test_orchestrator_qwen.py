@@ -423,3 +423,73 @@ def test_stage_text_compile_skips_when_manifest_matches(monkeypatch, tmp_path):
     args2 = _qwen_args(stage_mode="compile", cache_dir=str(tmp_path), tp_degree=2)
     QwenImageOrchestrator(args2)._stage_text(args2)
     assert created[-1].compiled is not None
+
+
+# ------------------------------------------- calibrated-adaptive TeaCache (additive probe)
+
+def test_stage_generate_compiles_the_probe_additively_for_adaptive_teacache(monkeypatch, tmp_path):
+    """--teacache-speedup against a DiT stage compiled without the probe: the
+    fused probe is built into the SAME stage dir (the hunyuan_video rule --
+    identity unchanged, DiT NEFF reused, select=["teacache_probe"]) and the
+    load proceeds; a plain generate never touches the probe."""
+    import json
+
+    import torch
+
+    from difflet.pipeline.teacache import CALIBRATION_SCHEMA
+
+    sched = types.SimpleNamespace(
+        config=types.SimpleNamespace(
+            max_shift=1.15, base_shift=0.5,
+            max_image_seq_len=4096, base_image_seq_len=256),
+        timesteps=torch.zeros(4),
+        set_timesteps=lambda **kw: None,
+    )
+
+    class FakeGen(_Recorder):
+        instances = []
+
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.pipeline = _FakePipeline(sched)
+            self.compiled_select = None
+            self.probe_checked = None
+            FakeGen.instances.append(self)
+
+        def has_compiled_artifacts(self, path, select=None):
+            self.probe_checked = list(select or [])
+            return False
+
+        def compile(self, path, select=None):
+            self.compiled = path
+            self.compiled_select = list(select) if select else None
+
+    _setup_generate(monkeypatch, FakeGen)
+    torch.save({"encoder_hidden_states": torch.zeros(1, 1024, 16),
+                "encoder_hidden_states_mask": torch.ones(1, 1024, dtype=torch.bool)},
+               tmp_path / "text.pt")
+    calib = tmp_path / "qwen.json"
+    calib.write_text(json.dumps({
+        "schema": CALIBRATION_SCHEMA, "model": "qwen_image", "shape_label": "1024x1024",
+        "num_steps": 20, "poly_coef": [0.0, 1.0], "threshold": 0.1, "target_speedup": 1.5,
+    }))
+    plain = _qwen_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path))
+    adaptive = _qwen_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
+                          teacache_speedup=1.5, teacache_calibration=str(calib))
+    orch = QwenImageOrchestrator(adaptive)
+    compiled_dir = orch._stage_compiled_dir("generate", adaptive)
+    assert compiled_dir == QwenImageOrchestrator(plain)._stage_compiled_dir("generate", plain)
+    orch._finish_stage_compile("generate", adaptive, compiled_dir)
+    orch._stage_generate(adaptive)
+    app = FakeGen.instances[-1]
+    assert app.kwargs["teacache_fused"] is True
+    assert app.kwargs["teacache_speedup"] == 1.5
+    assert app.kwargs["teacache_calibration_path"] == str(calib)
+    assert app.probe_checked == ["teacache_probe"]
+    assert app.compiled == str(compiled_dir) and app.compiled_select == ["teacache_probe"]
+    assert app.loaded[0] == str(compiled_dir)
+
+    QwenImageOrchestrator(plain)._stage_generate(plain)
+    app = FakeGen.instances[-1]
+    assert app.kwargs["teacache_fused"] is False
+    assert app.probe_checked is None and app.compiled is None and app.loaded is not None
