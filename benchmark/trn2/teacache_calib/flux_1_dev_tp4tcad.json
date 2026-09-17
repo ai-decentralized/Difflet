@@ -1,0 +1,47 @@
+{
+  "schema": "difflet-m9-teacache-calibration-v1",
+  "model": "flux",
+  "shape_label": "1024x1024",
+  "num_steps": 28,
+  "poly_coef": [
+    -0.04503986829455685,
+    3.3020694483177757,
+    -31.099399743890796,
+    124.3327544820751,
+    -140.4649102291303
+  ],
+  "threshold": 0.08931405458307355,
+  "warmup_steps": 5,
+  "cooldown_steps": 5,
+  "target_speedup": 1.474,
+  "fit_r2": 0.6089557706603919,
+  "n_samples": 81,
+  "mod_input_source": "block0_modulated_input",
+  "skip_run_length": 1,
+  "accumulate": true,
+  "cadence": 0,
+  "online_delta_alpha": 0.0,
+  "signal_pearson": 0.7054058274110703,
+  "poly_degree": 4,
+  "signal_source": "fused probe NEFF: on-device rel-L1 of the block-0 modulated input vs the previous step",
+  "target_skips": 9,
+  "target_rule": "cadence 2's skip count at warmup/cooldown 5 (tp4tc2), so tp4tcad is compared at the same skip budget",
+  "simulated_skips_per_prompt": [
+    9,
+    9,
+    9
+  ],
+  "calibration_prompts": [
+    "a cat sitting on a bench in a sunlit park",
+    "a red vintage car parked outside a diner at dusk",
+    "an astronaut riding a horse across a desert plain"
+  ],
+  "calibration_seeds": [
+    42,
+    42,
+    42
+  ],
+  "pairs_file": "benchmark/trn2/teacache_calib/flux_1_dev_tp4tcad_pairs.json",
+  "hardware_measured": true,
+  "fitted_at": "2026-09-17T21:14:25Z"
+}

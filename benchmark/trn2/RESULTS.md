@@ -304,7 +304,7 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 
 | model | shape / steps | compile¹ | **e2e cold**² | **e2e warm**³ | load cold→warm⁶ | **DiT per-step**⁰ | outputs/hr (warm)⁴ | cost / 1k⁵ | guidance | output | status |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
-| FLUX.1-dev | — | — | — | — | — | — | — | — | — | — | not measured |
+| [FLUX.1-dev](flux_1_dev_tp4tcad.md) | 1024×1024 / 28 | 7 s | **310 s** | **41 s** | 273→25 s | **274.4 ms (n=18)** (n=18 < 27) | 88 | $10.33 | 3.5 | ✓ finite | ok |
 | [Qwen-Image](qwen_image_tp4tcad.md) | 1024×1024 / 20 | 17 s | **508 s** | **68 s** | 460→40 s | **420.5 ms (n=14)** (n=14 < 19) | 53 | $17.24 | 4.0 | ✓ finite | ok |
 | [LTX-2](ltx_2_tp4tcad.md) | 480×704×49 / 20 | 6 s | **773 s** | **56 s** | 310→10 s | **511.6 ms (n=14)** (n=14 < 19) | 64 | $14.28 | 1.0 | ✓ finite | ok |
 | HunyuanVideo | 320×512×61 / 20 | — | — | — | — | — | — | — | — | — | **BLOCKED** — HBM exhausted: the DiT already fills the core-pair HBM at this shape, so the added TeaCache probe NEFF (calibrated-adaptive only) cannot be resident with it |
@@ -316,7 +316,7 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 |---|---:|---|---|---:|---:|---:|---|
 | FLUX.1-dev | 28 | cadence 2 | **9/28** (stats line) | 41 → **39 s** (1.06×) | 271 → **184** (1.47×) | 270.8 (n=18) | 41.3 dB |
 | FLUX.1-dev | 28 | online-δ α=0.6 | **9/28** (stats line) | 41 → **38 s** (1.07×) | 271 → **184** (1.47×) | 271.3 (n=18) | 39.7 dB |
-| FLUX.1-dev | — | tp4tcad | not measured | | | | |
+| FLUX.1-dev | 28 | calibrated adaptive (target 1.474×, R² 0.61) | **9/28** (stats line) | 41 → **41 s** (1.01×) | 271 → **186** (1.45×) | 274.4 (n=18) | 37.4 dB |
 | Qwen-Image | 20 | cadence 2 | **5/20** (DiT-call count) | 65 → **62 s** (1.05×) | 417 → **353** (1.18×) | 417.4 (n=14) | 45.2 dB |
 | Qwen-Image | 20 | online-δ α=0.6 | **5/20** (DiT-call count) | 65 → **64 s** (1.02×) | 417 → **344** (1.21×) | 417.5 (n=14) | 45.0 dB |
 | Qwen-Image | 20 | calibrated adaptive (target 1.333×, R² 0.98) | **5/20** (DiT-call count) | 65 → **68 s** (0.96×) | 417 → **322** (1.30×) | 420.5 (n=14) | 45.0 dB |
@@ -348,7 +348,7 @@ Closed loop: c in-flight requests until 8 complete (HunyuanVideo 6), no think ti
 
 | model | tp4 | tp2cp2 | tp4sp | tp2cfg | tp4cfg2 | tp4sdpa | tp4tc2 | tp4tcod | tp4tcad |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| FLUX.1-dev | 270.7 ms | 263.1 ms (1.03×) | 278.8 ms (0.97×) | N/A | N/A | 682.3 ms (0.40×) | 183.9 ms (1.47×) | 184.2 ms (1.47×) | — |
+| FLUX.1-dev | 270.7 ms | 263.1 ms (1.03×) | 278.8 ms (0.97×) | N/A | N/A | 682.3 ms (0.40×) | 183.9 ms (1.47×) | 184.2 ms (1.47×) | 186.3 ms (1.45×) |
 | Qwen-Image | 417.3 ms | 454.3 ms (0.92×) | 365.6 ms (1.14×) | N/A | N/A | 788.8 ms (0.53×) | 313.0 ms (1.33×) | 313.1 ms (1.33×) | 315.4 ms (1.32×) |
 | LTX-2 | 459.2 ms | N/A | N/A | 779.4 ms (0.59×) | 918.1 ms (0.50×) | 506.8 ms (0.91×) | 344.6 ms (1.33×) | 367.4 ms (1.25×) | 383.7 ms (1.20×) |
 | HunyuanVideo | 814.1 ms | 849.0 ms (0.96×) | 790.6 ms (1.03×) | N/A | N/A | 3641.3 ms (0.22×) | 611.0 ms (1.33×) | 611.1 ms (1.33×) | — |
