@@ -91,6 +91,8 @@ class TrainiumAdapter(BackendAdapter):
         cmd = [_DIFFLET, "compile", "--model-id", cfg.model_id] + self._rev(cfg) + [
                *cfg.parallel_flags(),
                "--cache-dir", self.cache_dir] + cfg.shape_flags()
+        # calibrated-adaptive TeaCache is part of the artifact (probe NEFF)
+        cmd += getattr(cfg, "compile_teacache_flags", lambda: [])()
         t0 = time.perf_counter()
         text = self._run(cmd, log, timeout=14400)
         wall = time.perf_counter() - t0

@@ -54,6 +54,49 @@ def logs_dir(device: Optional[str] = None) -> str:
     return f"{results_dir(device)}/logs"
 
 
+# TeaCache warmup / cooldown are fixed in difflet/pipeline/teacache.py (5 + 5
+# steps never skipped); the calibrations written for tp4tcad use the same.
+TEACACHE_WARMUP = 5
+TEACACHE_COOLDOWN = 5
+
+
+def cadence2_skips(steps: int) -> int:
+    """Steps fixed cadence 2 skips: every other step inside [warmup, steps - cooldown)."""
+    return max((steps - TEACACHE_WARMUP - TEACACHE_COOLDOWN) // 2, 0)
+
+
+def adaptive_target_speedup(steps: int) -> float:
+    """tp4tcad's --teacache-speedup: the denoise-loop speedup of cadence 2's skip
+    count (steps / full steps), so the calibrated controller is compared with
+    tp4tc2 at the same skip budget -- 28 steps -> 1.474 (9 skips), 20 -> 1.333 (5)."""
+    return round(steps / (steps - cadence2_skips(steps)), 3)
+
+
+def teacache_calibration_path(slug: str, device: Optional[str] = None) -> str:
+    """A model's tp4tcad calibration JSON (benchmark.teacache_calibrate writes it
+    on the device). Absolute: the CLI cells run as subprocesses from the repo
+    root, the real-loop and calibration harnesses load it in-process."""
+    return str((Path(results_dir(device)) / "teacache_calib" / f"{slug}_tp4tcad.json").resolve())
+
+
+def _calibration_summary(path: Optional[str]) -> dict:
+    """The fit / threshold fields of a calibration JSON, for the result record
+    (so the report can show the signal quality next to the speedup)."""
+    import json
+    if not path or not Path(path).exists():
+        return {}
+    try:
+        doc = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return {}
+    keys = ("fit_r2", "signal_pearson", "threshold", "accumulate", "n_samples",
+            "calibration_prompts", "poly_degree", "target_skips", "hardware_measured")
+    out = {k: doc[k] for k in keys if k in doc}
+    if "poly_coef" in doc and "poly_degree" not in out:
+        out["poly_degree"] = len(doc["poly_coef"]) - 1
+    return out
+
+
 @dataclass
 class BenchConfig:
     model_id: str
@@ -81,6 +124,17 @@ class BenchConfig:
     # full step's relative-L1 delta < alpha x the latched baseline delta).
     teacache_cadence: Optional[int] = None
     teacache_online_delta: Optional[float] = None
+    # Calibrated adaptive (--teacache-speedup X --teacache-calibration PATH): the
+    # TeaCache paper's controller -- a per-model polynomial maps the block-0
+    # modulated-input rel-L1 signal to the expected output change, accumulated
+    # until a threshold. resolve() fills both for tp4tcad: the target is cadence
+    # 2's skip budget (adaptive_target_speedup) and the calibration is
+    # teacache_calibration_path(slug). The probe models (flux: its own probe
+    # artifact identity; qwen_image / hunyuan_video: an additive probe component
+    # of the DiT stage) need the pair on compile too (compile_teacache_flags);
+    # Wan / LTX-2 compute the signal on the host and stay on the tp4 artifact.
+    teacache_speedup: Optional[float] = None
+    teacache_calibration: Optional[str] = None
     dtype: str = "bf16"
     height: Optional[int] = None
     width: Optional[int] = None
@@ -137,22 +191,41 @@ class BenchConfig:
         return f
 
     def teacache_flags(self) -> list[str]:
-        """``difflet generate`` TeaCache tokens (compile takes none of them)."""
+        """``difflet generate`` TeaCache tokens. The probe-free modes are
+        generate-only runtime knobs; the calibrated-adaptive pair also goes to
+        compile (compile_teacache_flags), which is what builds the probe NEFF."""
         f: list[str] = []
         if self.teacache_cadence is not None:
             f += ["--teacache-cadence", str(self.teacache_cadence)]
         if self.teacache_online_delta is not None:
             f += ["--teacache-online-delta", str(self.teacache_online_delta)]
-        return f
+        return f + self.compile_teacache_flags()
+
+    def compile_teacache_flags(self) -> list[str]:
+        """``difflet compile`` TeaCache tokens: only calibrated adaptive changes
+        the artifact (flux probe identity; qwen_image / hunyuan_video probe
+        component), so only it is passed to compile."""
+        if self.teacache_speedup is None:
+            return []
+        return ["--teacache-speedup", str(self.teacache_speedup),
+                "--teacache-calibration", str(self.teacache_calibration)]
 
     def teacache_dict(self) -> Optional[dict]:
         """Result-JSON TeaCache record, or None when TeaCache is off."""
-        if self.teacache_cadence is None and self.teacache_online_delta is None:
+        if (self.teacache_cadence is None and self.teacache_online_delta is None
+                and self.teacache_speedup is None):
             return None
-        mode = "fixed_cadence" if self.teacache_cadence is not None else "online_delta"
-        return {"mode": mode, "cadence": self.teacache_cadence,
-                "online_delta_alpha": self.teacache_online_delta,
-                "warmup_steps": 5, "cooldown_steps": 5}
+        mode = ("fixed_cadence" if self.teacache_cadence is not None
+                else "online_delta" if self.teacache_online_delta is not None
+                else "adaptive")
+        d = {"mode": mode, "cadence": self.teacache_cadence,
+             "online_delta_alpha": self.teacache_online_delta,
+             "warmup_steps": TEACACHE_WARMUP, "cooldown_steps": TEACACHE_COOLDOWN}
+        if mode == "adaptive":
+            d["target_speedup"] = self.teacache_speedup
+            d["calibration"] = self.teacache_calibration
+            d.update(_calibration_summary(self.teacache_calibration))
+        return d
 
     def parallel_dict(self) -> dict:
         """Result-JSON parallel record (same schema as the phase-sweep JSONs)."""
@@ -192,12 +265,17 @@ CONFIGS: dict[str, dict[str, Any]] = {
     # TeaCache on the tp4 artifact (no recompile). Fixed cadence 2: skips every
     # other DiT step between the fixed 5-step warmup and cooldown -> 9 of 28
     # steps (FLUX) or 5 of 20 (the others). Online-delta alpha 0.6 (the repo's
-    # DEFAULT_ALPHA): the calibration-free adaptive controller, the only
-    # adaptive mode wired for all five models' CLIs; calibrated adaptive
-    # (--teacache-speedup) needs per-model calibration files that do not exist
-    # in the repo and is not threaded for Wan/LTX-2.
+    # DEFAULT_ALPHA): the calibration-free adaptive controller.
     "tp4tc2": {"teacache_cadence": 2},
     "tp4tcod": {"teacache_online_delta": 0.6},
+    # Calibrated adaptive (--teacache-speedup + --teacache-calibration): the
+    # per-model polynomial controller. resolve() sets the target to cadence 2's
+    # skip budget and the calibration to teacache_calibration_path(slug), which
+    # benchmark.teacache_calibrate writes from on-device (signal, delta) pairs.
+    # flux runs on its own probe artifact; qwen_image / hunyuan_video add a
+    # probe component to the tp4 DiT stage; Wan / LTX-2 compute the signal on
+    # the host (no NEFF change).
+    "tp4tcad": {"teacache_adaptive": True},
 }
 
 _CONFIG_DESC = {
@@ -209,6 +287,8 @@ _CONFIG_DESC = {
     "tp4cfg2": "tp=4 at guidance 2.0 (two sequential CFG branches; baseline for tp2cfg)",
     "tp4tc2": "tp=4 + TeaCache fixed cadence 2 (--teacache-cadence 2)",
     "tp4tcod": "tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.6)",
+    "tp4tcad": "tp=4 + TeaCache calibrated adaptive (--teacache-speedup at cadence 2's "
+               "skip budget, --teacache-calibration per model)",
 }
 
 
@@ -256,6 +336,10 @@ def resolve(slug: str, config: str = "tp4") -> "BenchConfig":
         raise KeyError(f"unknown config '{config}'. known: {', '.join(CONFIGS)}")
     base = MATRIX[slug]
     overrides = dict(CONFIGS[config])
+    if overrides.pop("teacache_adaptive", False):
+        # per-model: the target follows the step count, the calibration the slug
+        overrides["teacache_speedup"] = adaptive_target_speedup(base.steps)
+        overrides["teacache_calibration"] = teacache_calibration_path(slug)
     if config != "tp4":
         overrides["config_label"] = f"{_CONFIG_DESC[config]}; {base.config_label}"
     return replace(base, slug=slug, config=config, **overrides)

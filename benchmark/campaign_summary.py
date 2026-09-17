@@ -33,6 +33,7 @@ _CONFIG_TITLE = {
     "tp4cfg2": "tp4cfg2 — tp=4 at guidance 2.0 (two sequential CFG branches: the same-work baseline for tp2cfg)",
     "tp4tc2": "tp4tc2 — tp=4 + TeaCache fixed cadence 2 (`--teacache-cadence 2`, warmup/cooldown 5 steps, same artifact)",
     "tp4tcod": "tp4tcod — tp=4 + TeaCache online-delta adaptive (`--teacache-online-delta 0.6`, calibration-free, same artifact)",
+    "tp4tcad": "tp4tcad — tp=4 + TeaCache calibrated adaptive (`--teacache-speedup` at cadence 2's skip budget + per-model `--teacache-calibration`; probe NEFF for FLUX / Qwen-Image / HunyuanVideo, host signal for Wan / LTX-2)",
 }
 _BEGIN, _END = "<!-- campaign:begin -->", "<!-- campaign:end -->"
 
@@ -259,8 +260,14 @@ def teacache_table(tc_labels: list[str], models=CAMPAIGN_MODELS) -> list[str]:
                 L.append(f"| {_NAMES.get(slug, slug)} | — | {label} | not measured | | | | |")
                 continue
             tc = d.get("teacache") or {}
-            mode = ("cadence " + str(tc.get("cadence"))) if tc.get("mode") == "fixed_cadence" \
-                else f"online-δ α={tc.get('online_delta_alpha')}"
+            if tc.get("mode") == "fixed_cadence":
+                mode = "cadence " + str(tc.get("cadence"))
+            elif tc.get("mode") == "adaptive":
+                r2 = tc.get("fit_r2")
+                mode = (f"calibrated adaptive (target {tc.get('target_speedup')}×"
+                        + (f", R² {r2:.2f}" if isinstance(r2, (int, float)) else "") + ")")
+            else:
+                mode = f"online-δ α={tc.get('online_delta_alpha')}"
             skipped, src = _teacache_skips(slug, label, d)
             steps = d.get("steps")
             skip_s = f"**{skipped}/{steps}** ({src})" if skipped is not None else "—"
@@ -405,7 +412,7 @@ def render(labels: list[str], price: float | None, price_note: str) -> str:
         L += feature_table(label, price)
         if label == "tp4":
             L += nxdi_table(price)
-    tc_labels = [l for l in labels if l in ("tp4tc2", "tp4tcod")]
+    tc_labels = [l for l in labels if l in ("tp4tc2", "tp4tcod", "tp4tcad")]
     if tc_labels:
         L += teacache_table(tc_labels)
     L += serving_table(price)
@@ -442,7 +449,8 @@ def main() -> int:
                    help="provenance of the price (region, date, source)")
     p.add_argument("--write", default=None, help="RESULTS.md to update in place")
     a = p.parse_args()
-    labels = [l for l in ["tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4cfg2", "tp4sdpa", "tp4tc2", "tp4tcod"]
+    labels = [l for l in ["tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4cfg2", "tp4sdpa",
+                          "tp4tc2", "tp4tcod", "tp4tcad"]
               if l in a.labels]
     md = render(labels, a.price_per_hour, a.price_note)
     if not a.write:

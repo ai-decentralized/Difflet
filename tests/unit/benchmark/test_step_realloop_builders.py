@@ -17,7 +17,8 @@ from benchmark.models import resolve
     ("difflet.cli.orchestrators.qwen_image", "qwen_image", "generate"),
     ("difflet.cli.orchestrators.hunyuan_video", "hunyuan_video", "generate"),
 ])
-@pytest.mark.parametrize("config", ["tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4tc2", "tp4tcod"])
+@pytest.mark.parametrize("config", ["tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4tc2", "tp4tcod",
+                                    "tp4tcad"])
 def test_stage_namespace_carries_the_config_topology(tmp_path, orch_mod, model_slug,
                                                      stage, config):
     import importlib
@@ -44,9 +45,27 @@ def test_stage_namespace_carries_the_config_topology(tmp_path, orch_mod, model_s
     assert getattr(ns, "teacache_online_delta", None) == cfg.teacache_online_delta
     assert sr._teacache_app_kwargs(cfg) == (
         {"teacache_cadence": 2} if config == "tp4tc2"
-        else {"teacache_online_delta_alpha": 0.6} if config == "tp4tcod" else {})
+        else {"teacache_online_delta_alpha": 0.6} if config == "tp4tcod"
+        else {"teacache_speedup": cfg.teacache_speedup,
+              "teacache_calibration_path": cfg.teacache_calibration} if config == "tp4tcad"
+        else {})
+    # calibrated adaptive: the target and calibration reach the stage argv too
+    # (the staged orchestrators forward them; the stage parser accepts them)
+    assert getattr(ns, "teacache_speedup", None) == cfg.teacache_speedup
+    assert getattr(ns, "teacache_calibration", None) == cfg.teacache_calibration
     assert ns.work_dir == str(work) and ns.cache_dir == str(tmp_path)
     assert float(ns.guidance_scale) == float(cfg.guidance_scale)
+
+
+def test_ltx2_adaptive_kwargs_keep_the_tp4_artifact_identity():
+    """LTX-2 has no probe NEFF: the in-process loader passes only the calibration
+    path (like difflet/cli/orchestrators/ltx_2.py), never teacache_speedup, which
+    would flip DiffletPipeline's cache key to a probe identity."""
+    cfg = resolve("ltx_2", "tp4tcad")
+    assert sr._teacache_app_kwargs(cfg) == {"teacache_calibration_path": cfg.teacache_calibration}
+    fx = resolve("flux_1_dev", "tp4tcad")
+    assert sr._teacache_app_kwargs(fx) == {"teacache_speedup": fx.teacache_speedup,
+                                           "teacache_calibration_path": fx.teacache_calibration}
 
 
 def test_every_campaign_model_has_a_builder():
