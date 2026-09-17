@@ -1,0 +1,191 @@
+{
+  "model_id": "Qwen/Qwen-Image",
+  "model_type": "qwen_image",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "compile_seconds": 16.95237502099917,
+  "compile_breakdown": {
+    "wall_total_s": 16.952
+  },
+  "load_seconds": 459.813,
+  "e2e_cold_seconds": 508.039,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 120.803
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 326.56
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 3.5
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 8.95
+      }
+    ],
+    "weights_load_total_s": 459.813,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 508.039,
+    "compute_and_overhead_s": 48.226
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 68.2198894380017,
+    "median": 68.2198894380017,
+    "std": 0.0,
+    "p50": 68.2198894380017,
+    "p90": 68.2198894380017,
+    "min": 68.2198894380017,
+    "max": 68.2198894380017,
+    "samples": [
+      68.2198894380017
+    ]
+  },
+  "step_latency": {
+    "n": 14,
+    "mean": 0.4205050961428632,
+    "median": 0.41997006650035473,
+    "std": 0.0018427708857595318,
+    "p50": 0.41979224299939233,
+    "p90": 0.4220824470012303,
+    "min": 0.4188526969992381,
+    "max": 0.4258950309995271,
+    "samples": [
+      0.4258950309995271,
+      0.41930007500013744,
+      0.4192988620015967,
+      0.41979224299939233,
+      0.4219148239990318,
+      0.4220824470012303,
+      0.4217276290000882,
+      0.420663285000046,
+      0.420155617999626,
+      0.4190032499991503,
+      0.42014789000131714,
+      0.4188526969992381,
+      0.4191148970003269,
+      0.419122597999376
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 2.378
+  },
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved qwen_image_tp4tcad_out.png"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 + TeaCache calibrated adaptive (--teacache-speedup at cadence 2's skip budget, --teacache-calibration per model); tp=4, bf16, joint attention via attention_cte",
+  "status": "ok",
+  "notes": [
+    "per-step = 420.5 ms/DiT-step (median 420.0, p90 422.1, n=14) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronQwenImageTransformerApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 15 DiT calls timed; warm generate 29s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_cold = 508 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 68 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 508 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-09-17 16:08 UTC",
+  "config_slug": "qwen_image_tp4tcad",
+  "model_slug": "qwen_image",
+  "config": "tp4tcad",
+  "device_slug": "trn2",
+  "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 4.0,
+  "output_kind": "image",
+  "teacache": {
+    "mode": "adaptive",
+    "cadence": null,
+    "online_delta_alpha": null,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "target_speedup": 1.333,
+    "calibration": "/home/ubuntu/Difflet/.claude/worktrees/tp4tcad-adaptive-teacache/benchmark/trn2/teacache_calib/qwen_image_tp4tcad.json",
+    "fit_r2": 0.9816818726683145,
+    "signal_pearson": 0.6617105146377307,
+    "threshold": 0.030228675859562106,
+    "accumulate": true,
+    "n_samples": 57,
+    "calibration_prompts": [
+      "a cat sitting on a bench in a sunlit park",
+      "a red vintage car parked outside a diner at dusk",
+      "an astronaut riding a horse across a desert plain"
+    ],
+    "poly_degree": 4,
+    "target_skips": 5,
+    "hardware_measured": true,
+    "dit_calls": 15,
+    "skipped_steps_by_calls": 5
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 11.225
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 16.28
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 3.5
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 8.75
+      }
+    ],
+    "weights_load_total_s": 39.755,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 68.22,
+    "compute_and_overhead_s": 28.465
+  },
+  "dit_calls_per_step": 0.75,
+  "dit_calls": 15,
+  "loop_wall_s": 6.436,
+  "loop_step_ms": 321.8,
+  "output_vs_tp4": {
+    "identical": false,
+    "psnr_db": 45.0,
+    "mean_abs_diff": 0.625,
+    "source": "qwen_image_out.png vs qwen_image_tp4tcad_out.png on this host"
+  }
+}

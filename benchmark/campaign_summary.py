@@ -203,43 +203,74 @@ def _teacache_skips(slug: str, label: str, d: dict) -> tuple[int | None, str]:
     import ast
     from benchmark.adapters.trainium import spec_slug
     cfg = resolve(slug, label)
+    tc = d.get("teacache") or {}
     logs = Path("benchmark") / (d.get("device_slug") or "trn2") / "logs"
     for log in (logs / label / f"{slug}_realloop.log", logs / "warm" / f"{spec_slug(cfg)}_generate.log"):
         if log.exists():
             hits = _RE_TC_STATS.findall(log.read_text(errors="ignore"))
             if hits:
                 try:
-                    st = ast.literal_eval(hits[-1])
-                    return int(st.get("skipped_steps")), "stats line"
+                    skipped = int(ast.literal_eval(hits[-1]).get("skipped_steps"))
                 except Exception:
-                    pass
-    tc = d.get("teacache") or {}
+                    continue
+                # persist the log evidence into the cell JSON so a report
+                # regenerated where the logs are absent keeps its source
+                if tc.get("skipped_steps_stats_line") != skipped:
+                    jp = Path(json_path(cfg.config_slug))
+                    if jp.exists():
+                        full = json.loads(jp.read_text())
+                        full.setdefault("teacache", {})["skipped_steps_stats_line"] = skipped
+                        jp.write_text(json.dumps(full, indent=2))
+                    tc["skipped_steps_stats_line"] = skipped
+                return skipped, "stats line"
+    if tc.get("skipped_steps_stats_line") is not None:
+        return int(tc["skipped_steps_stats_line"]), "stats line"
     if tc.get("skipped_steps_by_calls") is not None:
         return int(tc["skipped_steps_by_calls"]), "DiT-call count"
     return None, "—"
 
 
 def _parity(slug: str, label: str, d: dict) -> str:
-    """PSNR of this cell's saved output vs the tp4 output (same seed)."""
+    """PSNR of this cell's saved output vs the tp4 output (same seed).
+
+    Computed from the two output files when both are on this host and then
+    persisted into the cell JSON (``output_vs_tp4``), so a report regenerated
+    on another host -- or after the logs dir is pruned -- keeps the measured
+    value instead of blanking the column."""
     from benchmark.adapters.trainium import spec_slug
     from benchmark.output_parity import compare
     cfg, base = resolve(slug, label), resolve(slug, "tp4")
     ext = ".png" if cfg.output_kind == "image" else ".mp4"
     logs = Path("benchmark") / (d.get("device_slug") or "trn2") / "logs"
     a, b = logs / f"{spec_slug(base)}_out{ext}", logs / f"{spec_slug(cfg)}_out{ext}"
-    if not (a.exists() and b.exists()):
+    r = None
+    if a.exists() and b.exists():
+        try:
+            r = compare(a, b)
+        except Exception as exc:
+            return f"? ({type(exc).__name__})"
+        if r.get("error"):
+            return "?"
+        keep = {k: r[k] for k in ("identical", "psnr_db", "ssim", "mean_abs_diff") if k in r}
+        keep["source"] = f"{a.name} vs {b.name} on this host"
+        if d.get("output_vs_tp4") != keep:
+            d["output_vs_tp4"] = keep
+            jp = Path(json_path(cfg.config_slug))
+            if jp.exists():
+                full = json.loads(jp.read_text())
+                full["output_vs_tp4"] = keep
+                jp.write_text(json.dumps(full, indent=2))
+    else:
+        r = d.get("output_vs_tp4")
+    if not r:
         return "—"
-    try:
-        r = compare(a, b)
-    except Exception as exc:
-        return f"? ({type(exc).__name__})"
-    if r.get("error"):
-        return "?"
-    if r["identical"]:
+    if r.get("identical"):
         return "**identical (no-op)**"
-    psnr = r["psnr_db"]
+    psnr = r.get("psnr_db")
+    if psnr is None:
+        return "—"
     return (f"{psnr:.1f} dB" if psnr != float('inf') else "∞") + \
-           (f", SSIM {r['ssim']:.3f}" if "ssim" in r else "")
+           (f", SSIM {r['ssim']:.3f}" if r.get("ssim") is not None else "")
 
 
 def teacache_table(tc_labels: list[str], models=CAMPAIGN_MODELS) -> list[str]:

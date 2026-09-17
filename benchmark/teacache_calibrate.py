@@ -53,8 +53,9 @@ _MODEL_LABEL = {"flux": "flux", "qwen_image": "qwen_image", "hunyuan_video": "hu
 _SIGNAL_SOURCE = {
     "flux": "fused probe NEFF: on-device rel-L1 of the block-0 modulated input vs the previous step",
     "qwen_image": "fused probe NEFF: on-device rel-L1 of the block-0 modulated input vs the previous step",
-    "hunyuan_video": "probe NEFF (teacache_mod_input_with_delta): on-device delta of the block-0 "
-                     "modulated input vs the previous step",
+    "hunyuan_video": "probe NEFF (teacache_mod_input_with_delta): on-device L2 norm of the block-0 "
+                     "modulated-input change vs the previous step (not rel-L1 -- the fit absorbs "
+                     "the scale)",
     "wan": "host CPU shadow (WanTeacacheCPUShadow): rel-L1 of the block-0 modulated input",
     "ltx_2": "host CPU transformer (teacache_mod_input): rel-L1 of the block-0 modulated input",
 }
