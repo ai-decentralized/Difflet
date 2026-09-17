@@ -58,9 +58,59 @@ def test_teacache_configs():
     assert tc.config_slug == "flux_1_dev_tp4tc2" and od.config_slug == "wan_2_1_tp4tcod"
 
 
+def test_adaptive_teacache_config():
+    """tp4tcad = calibrated adaptive at cadence 2's skip budget: the per-model
+    target and calibration path go to generate AND compile (the probe NEFF is
+    part of the artifact), the topology record is unchanged, and the result
+    record names the mode, target and calibration."""
+    from benchmark.models import (adaptive_target_speedup, cadence2_skips,
+                                  teacache_calibration_path)
+    assert cadence2_skips(28) == 9 and cadence2_skips(20) == 5
+    assert adaptive_target_speedup(28) == 1.474 and adaptive_target_speedup(20) == 1.333
+    fx = resolve("flux_1_dev", "tp4tcad")
+    assert fx.teacache_speedup == 1.474
+    assert fx.teacache_calibration == teacache_calibration_path("flux_1_dev")
+    assert fx.teacache_calibration.endswith("teacache_calib/flux_1_dev_tp4tcad.json")
+    assert os.path.isabs(fx.teacache_calibration)
+    assert fx.compile_teacache_flags() == ["--teacache-speedup", "1.474",
+                                           "--teacache-calibration", fx.teacache_calibration]
+    assert fx.teacache_flags() == fx.compile_teacache_flags()
+    assert fx.parallel_flags() == resolve("flux_1_dev", "tp4").parallel_flags()
+    assert fx.parallel_dict() == resolve("flux_1_dev", "tp4").parallel_dict()
+    assert fx.config_slug == "flux_1_dev_tp4tcad"
+    d = fx.teacache_dict()
+    assert d["mode"] == "adaptive" and d["target_speedup"] == 1.474
+    assert d["cadence"] is None and d["online_delta_alpha"] is None
+    assert d["calibration"] == fx.teacache_calibration
+    assert d["warmup_steps"] == 5 and d["cooldown_steps"] == 5
+    assert resolve("wan_2_1", "tp4tcad").teacache_speedup == 1.333
+    # the probe-free overlays never touch compile
+    assert resolve("flux_1_dev", "tp4tc2").compile_teacache_flags() == []
+    assert resolve("flux_1_dev", "tp4tcod").teacache_flags() == ["--teacache-online-delta", "0.6"]
+    # every campaign model is wired for the calibrated mode (Wan / LTX-2 via the
+    # host signal), so there is no by-design N/A cell
+    for m in CAMPAIGN:
+        assert (m, "tp4tcad") not in UNSUPPORTED
+
+
+def test_adaptive_teacache_record_carries_the_calibration_fit(tmp_path, monkeypatch):
+    import json
+    from dataclasses import replace
+    calib = tmp_path / "c.json"
+    calib.write_text(json.dumps({"fit_r2": 0.83, "signal_pearson": 0.91, "threshold": 0.27,
+                                 "accumulate": True, "poly_coef": [0, 1, 2, 3, 4],
+                                 "n_samples": 81}))
+    cfg = replace(resolve("flux_1_dev", "tp4tcad"), teacache_calibration=str(calib))
+    d = cfg.teacache_dict()
+    assert d["fit_r2"] == 0.83 and d["signal_pearson"] == 0.91 and d["threshold"] == 0.27
+    assert d["accumulate"] is True and d["poly_degree"] == 4 and d["n_samples"] == 81
+    missing = replace(cfg, teacache_calibration=str(tmp_path / "absent.json")).teacache_dict()
+    assert missing["mode"] == "adaptive" and "fit_r2" not in missing
+
+
 def test_configs_are_the_verify_cli_labels_sized_to_four_cores():
     assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4cfg2",
-                            "tp4tc2", "tp4tcod"}
+                            "tp4tc2", "tp4tcod", "tp4tcad"}
     for label in CONFIGS:
         cfg = resolve("flux_1_dev", label)
         world = cfg.tp * cfg.cp * (2 if cfg.cfg_parallel else 1)

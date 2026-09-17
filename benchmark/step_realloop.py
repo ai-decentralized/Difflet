@@ -61,13 +61,21 @@ def _install_timer(cls, method_name: str, stamps: list[float], entries: list[flo
 
 
 def _teacache_app_kwargs(cfg) -> dict:
-    """Runtime-only TeaCache application kwargs (difflet/cli/orchestrators/flux.py
-    _application_kwargs; ltx_2.py does the same): excluded from the cache key."""
+    """TeaCache application kwargs, exactly what the CLI passes: the probe-free
+    modes are runtime-only (difflet/cli/orchestrators/flux.py _application_kwargs;
+    ltx_2.py does the same); for calibrated adaptive, flux gets teacache_speedup
+    + the calibration path (flux.py _model_kwargs -- the speedup selects the
+    probe-artifact identity) while ltx_2 has no probe and gets only the
+    calibration path (ltx_2.py), so its key stays the tp4 artifact."""
     kw = {}
     if cfg.teacache_cadence is not None:
         kw["teacache_cadence"] = cfg.teacache_cadence
     if cfg.teacache_online_delta is not None:
         kw["teacache_online_delta_alpha"] = cfg.teacache_online_delta
+    if cfg.teacache_speedup is not None:
+        if cfg.model_type != "ltx_2":
+            kw["teacache_speedup"] = cfg.teacache_speedup
+        kw["teacache_calibration_path"] = cfg.teacache_calibration
     return kw
 
 
@@ -156,7 +164,7 @@ def _staged_namespace(cfg, cache, work_dir, output):
         requests_dir=None, worker_index=0, dp_schedule="round_robin",
         dp_degree=1, host_vae=False,
         teacache_cadence=cfg.teacache_cadence, teacache_online_delta=cfg.teacache_online_delta,
-        teacache_speedup=None, teacache_calibration=None,
+        teacache_speedup=cfg.teacache_speedup, teacache_calibration=cfg.teacache_calibration,
     )
 
 
