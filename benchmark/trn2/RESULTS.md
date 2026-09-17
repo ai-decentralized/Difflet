@@ -306,7 +306,7 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
 | FLUX.1-dev | — | — | — | — | — | — | — | — | — | — | not measured |
 | [Qwen-Image](qwen_image_tp4tcad.md) | 1024×1024 / 20 | 17 s | **508 s** | **68 s** | 460→40 s | **420.5 ms (n=14)** (n=14 < 19) | 53 | $17.24 | 4.0 | ✓ finite | ok |
-| LTX-2 | — | — | — | — | — | — | — | — | — | — | not measured |
+| [LTX-2](ltx_2_tp4tcad.md) | 480×704×49 / 20 | 6 s | **773 s** | **56 s** | 310→10 s | **511.6 ms (n=14)** (n=14 < 19) | 64 | $14.28 | 1.0 | ✓ finite | ok |
 | HunyuanVideo | — | — | — | — | — | — | — | — | — | — | not measured |
 | Wan 2.1 14B | — | — | — | — | — | — | — | — | — | — | not measured |
 
@@ -322,7 +322,7 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 | Qwen-Image | 20 | calibrated adaptive (target 1.333×, R² 0.98) | **5/20** (DiT-call count) | 65 → **68 s** (0.96×) | 417 → **322** (1.30×) | 420.5 (n=14) | 45.0 dB |
 | LTX-2 | 20 | cadence 2 | **5/20** (stats line) | 56 → **56 s** (1.01×) | 459 → **345** (1.33×) | 459.4 (n=14) | 36.6 dB |
 | LTX-2 | 20 | online-δ α=0.6 | **4/20** (stats line) | 56 → **54 s** (1.04×) | 459 → **368** (1.25×) | 459.3 (n=15) | 36.5 dB |
-| LTX-2 | — | tp4tcad | not measured | | | | |
+| LTX-2 | 20 | calibrated adaptive (target 1.333×, R² 0.97) | **5/20** (stats line) | 56 → **56 s** (1.00×) | 459 → **381** (1.20×) | 511.6 (n=14) | 36.2 dB |
 | HunyuanVideo | 20 | cadence 2 | **5/20** (stats line) | 115 → **109 s** (1.05×) | 814 → **624** (1.30×) | 814.7 (n=14) | 31.8 dB |
 | HunyuanVideo | 20 | online-δ α=0.6 | **5/20** (stats line) | 115 → **109 s** (1.05×) | 814 → **623** (1.31×) | 814.9 (n=14) | 24.1 dB |
 | HunyuanVideo | — | tp4tcad | not measured | | | | |
@@ -350,7 +350,7 @@ Closed loop: c in-flight requests until 8 complete (HunyuanVideo 6), no think ti
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | FLUX.1-dev | 270.7 ms | 263.1 ms (1.03×) | 278.8 ms (0.97×) | N/A | N/A | 682.3 ms (0.40×) | 183.9 ms (1.47×) | 184.2 ms (1.47×) | — |
 | Qwen-Image | 417.3 ms | 454.3 ms (0.92×) | 365.6 ms (1.14×) | N/A | N/A | 788.8 ms (0.53×) | 313.0 ms (1.33×) | 313.1 ms (1.33×) | 315.4 ms (1.32×) |
-| LTX-2 | 459.2 ms | N/A | N/A | 779.4 ms (0.59×) | 918.1 ms (0.50×) | 506.8 ms (0.91×) | 344.6 ms (1.33×) | 367.4 ms (1.25×) | — |
+| LTX-2 | 459.2 ms | N/A | N/A | 779.4 ms (0.59×) | 918.1 ms (0.50×) | 506.8 ms (0.91×) | 344.6 ms (1.33×) | 367.4 ms (1.25×) | 383.7 ms (1.20×) |
 | HunyuanVideo | 814.1 ms | 849.0 ms (0.96×) | 790.6 ms (1.03×) | N/A | N/A | 3641.3 ms (0.22×) | 611.0 ms (1.33×) | 611.1 ms (1.33×) | — |
 | Wan 2.1 14B | 575.5 ms | 575.5 ms (1.00×) | 578.2 ms (1.00×) | 1070.6 ms (0.54×) | 1151.5 ms (0.50×) | 1034.8 ms (0.56×) | 432.7 ms (1.33×) | 432.1 ms (1.33×) | — |
 
