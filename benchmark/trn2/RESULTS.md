@@ -497,9 +497,9 @@ no stats line, its evidence is the 15-of-20 DiT-call count and the changed image
 video models' lower PSNR being the visible cost of skipping a quarter of the steps at 20
 steps. *Adaptive* = **online-delta (α = 0.6)**, the calibration-free controller (skip when
 the last full step's relative-L1 delta < α × the latched baseline; never two skips in a row):
-it is the only adaptive mode wired for all five CLIs — the calibrated `--teacache-speedup`
-mode needs per-model calibration JSONs that exist nowhere in the repo or on this host, forces
-a separate full recompile for FLUX, and is not threaded for Wan/LTX-2, so it was not run.
+it was the calibration-free adaptive mode measured in the 2026-09-13 run; the calibrated
+`--teacache-speedup` mode is now wired for all five CLIs and measured on device (2026-09-17,
+the **tp4tcad** rows above and the next paragraph).
 *Online-delta result*: at these step counts it skipped **the same number of steps as cadence 2**
 (9/28 FLUX, 5/20 Qwen / HunyuanVideo / Wan; LTX-2 4/20) — the controller latches its
 baseline delta on the first full step, when deltas are largest, so the α = 0.6 threshold is
@@ -509,9 +509,61 @@ Where it differs is *which* steps it skips, and that shows in the output: **Huny
 to 24.1 dB PSNR vs tp4 (cadence 2: 31.8 dB)**, FLUX 39.7 vs 41.3, the rest within 0.5 dB. So on
 this evidence fixed cadence is the better probe-free choice: equal speed, more predictable
 quality; online-delta would need a post-warmup baseline (the code comment already describes
-that intent) or a tighter α to earn its "adaptive" label. Calibrated adaptive for FLUX /
-HunyuanVideo (`scripts/run_flux_teacache_e2e.py`, `scripts/calibrate_teacache.py`) remains a
-separate ~1–2 h device task each if wanted.
+that intent) or a tighter α to earn its "adaptive" label.
+
+**Calibrated adaptive (`tp4tcad`, `--teacache-speedup` + per-model `--teacache-calibration`;
+measured 2026-09-17).** This is the TeaCache-paper controller: a per-model degree-4 polynomial
+maps the block-0 modulated-input signal to the expected output change, accumulated to a
+threshold. Each calibration was fit on device from 3 record-only generates on prompts *distinct
+from* the benchmark prompt (the block-0 signal and the noise-prediction rel-L1 the pipeline
+actually feeds the controller; JSONs under `benchmark/trn2/teacache_calib/`), and the threshold
+was tuned to **cadence 2's skip budget** (9/28 FLUX, 5/20 the rest) so the three modes are
+compared at equal skips. Cross-host caveat handled: this host's plain-tp4 real-loop
+(`benchmark/trn2check/`) reproduces the 2026-09-13 DiT-call times within ~1 ms (FLUX 271.1 vs
+270.7, Qwen 418.0 vs 417.3, LTX-2 460.2 vs 459.2, Wan 576.5 vs 575.5), so the DiT-call and
+loop comparisons below are like-for-like; e2e is load-dominated and not compared across hosts.
+Results, and the one finding that decides it — **where the adaptive *signal* comes from**:
+
+- *Probe models (FLUX, Qwen-Image) — the fused probe rides the DiT graph, no per-step host
+  cost.* FLUX: 9/28 skips, loop 271 → **186 ms/step (1.45×)** vs cadence 2's 1.47×; the probe
+  adds **3.3 ms** to the DiT call (274.4 vs the 271.1 same-host tp4). Qwen: 5/20, loop 417 →
+  **322 ms/step (1.30×)** vs cadence 2's 1.18×, probe **+2.5 ms** (420.5 vs 418.0). So on the
+  probe models calibrated adaptive matches (FLUX) or slightly beats (Qwen) fixed cadence at the
+  same skips. Cost: a one-time probe compile — FLUX **834 s** (its own artifact identity, the
+  "FLUX needs a full recompile" cost the earlier campaign flagged), Qwen **114 s** (an additive
+  `teacache_probe` component of the tp4 DiT stage; the DiT/VAE NEFFs are reused untouched).
+- *Host-signal models (LTX-2, Wan) — the block-0 signal is computed on a host CPU shadow /
+  transformer every non-skipped step, and that cost outweighs the skips.* LTX-2: 5/20, but the
+  signal adds **+51 ms** to each DiT call (511.6 vs 460.2 same-host tp4), so the loop is only
+  459 → **381 ms/step (1.20×)** — worse than cadence 2's 1.33×. Wan is decisive: the CPU shadow
+  (block-0 of a 14B expert) adds **+287 ms/step** (863.2 vs 576.5), so the loop is 575 →
+  **640 ms/step (0.90× — slower than plain tp4)**. For these two models the probe-free modes
+  (cadence / online-delta, no per-step signal) are strictly better.
+- *Signal quality varies and, at the matched budget, doesn't change the skip count.* Pearson /
+  R² of the fit: Qwen **0.98**, LTX-2 **0.97**, FLUX **0.61** (Pearson 0.705), Wan **0.61**
+  (Pearson 0.68). All four still land on cadence 2's exact skip budget because the threshold was
+  tuned to it — so calibrated adaptive here chooses *which* steps to skip, not *how many*. Its
+  only path to beating fixed cadence is a higher target speedup (skip more of the genuinely-flat
+  steps a strong signal identifies); that upside was deliberately not exercised, to keep the
+  quality comparison fair. Output vs same-seed tp4: FLUX 37.4 dB (cadence 41.3), Qwen 45.0
+  (45.2), LTX-2 36.2 (36.6), Wan 35.7 (36.7) — equal-or-slightly-lower than cadence everywhere
+  (the controller picks different, sometimes worse, skip steps; Wan's weak signal costs the most
+  PSNR).
+- *HunyuanVideo: **BLOCKED (HBM)**.* The DiT at 320×512×61 already holds **22.0 GB of the ~24 GB**
+  per core-pair (LNC size 2), so the added probe NEFF OOMs (`nrt_tensor_allocate` ret=-12;
+  `benchmark/trn2/logs/tp4tcad_prep/hunyuan_video_collect0.log`). The probe-free tc2/tcod modes
+  compile no NEFF, which is why they measured fine. Diagnosed fix (recorded in
+  `hunyuan_video_tp4tcad.json`): wire `--host-vae` into the HV CLI generate so the VAE's HBM
+  frees for the probe (host decode exists only in serving today, `_load_host_vae`); its cost
+  includes that a fair PSNR-vs-tp4 then needs the tp4 baseline re-decoded on host too.
+
+**Bottom line vs the earlier fixed-cadence result:** at the matched skip budget, calibrated
+adaptive is **not a win over fixed cadence 2**. It ties cadence on the probe models (FLUX/Qwen)
+— at the price of a per-model calibration and a probe compile — loses on the host-signal models
+(LTX-2 slower, Wan slower than no caching at all), matches-or-slightly-trails on PSNR, and can't
+run at all on HunyuanVideo. Fixed cadence 2 remains the better probe-free default; calibrated
+adaptive earns its keep only for a probe model (fused, on-device signal) run at a higher target
+than cadence's budget — a follow-up this campaign did not measure.
 
 **Serving layer (`difflet serve`, one resident worker, tp4; table "Serving layer" above).**
 Resident per-request latency is the denoise loop plus on-device encode/decode, with no
