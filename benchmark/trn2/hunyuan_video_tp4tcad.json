@@ -1,0 +1,39 @@
+{
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "model_slug": "hunyuan_video",
+  "config": "tp4tcad",
+  "config_slug": "hunyuan_video_tp4tcad",
+  "device_slug": "trn2",
+  "status": "blocked",
+  "blocked_reason": "HBM exhausted: the DiT already fills the core-pair HBM at this shape, so the added TeaCache probe NEFF (calibrated-adaptive only) cannot be resident with it",
+  "blocked_evidence": "benchmark/trn2/logs/tp4tcad_prep/hunyuan_video_collect0.log \u2014 Neuron runtime OOM (nrt_tensor_allocate ret=-12); DiT tensors 22.037GB/~24GB per core-pair, failed to allocate 13.500MB more",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "teacache": {
+    "mode": "adaptive",
+    "cadence": null,
+    "online_delta_alpha": null,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "target_speedup": 1.333,
+    "calibration": "/home/ubuntu/Difflet/.claude/worktrees/tp4tcad-adaptive-teacache/benchmark/trn2/teacache_calib/hunyuan_video_tp4tcad.json"
+  },
+  "notes": [
+    "BLOCKED: HBM exhausted: the DiT already fills the core-pair HBM at this shape, so the added TeaCache probe NEFF (calibrated-adaptive only) cannot be resident with it",
+    "evidence: benchmark/trn2/logs/tp4tcad_prep/hunyuan_video_collect0.log \u2014 Neuron runtime OOM (nrt_tensor_allocate ret=-12); DiT tensors 22.037GB/~24GB per core-pair, failed to allocate 13.500MB more"
+  ],
+  "peak_hbm_tensors_gb": 22.037,
+  "blocked_class": "hbm_oom",
+  "blocked_followup": "Wire --host-vae into the HunyuanVideo CLI generate orchestrator (currently enable_vae_decoder is hardcoded True; host decode exists only in the serving path, difflet/serving/models/hunyuan_video.py _load_host_vae). Decoding the VAE on the host frees its HBM for the probe. Cost: ~1 day incl. matching the HV VAE denorm on host; and for a fair PSNR-vs-tp4 the tp4 baseline must be re-decoded on host too, so the whole HV column would move to host-VAE. The probe-free tp4tc2 / tp4tcod need no NEFF and already measured on device."
+}
