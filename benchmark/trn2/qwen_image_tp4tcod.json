@@ -158,5 +158,10 @@
   "dit_calls_per_step": 0.75,
   "dit_calls": 15,
   "loop_wall_s": 6.871,
-  "loop_step_ms": 343.5
+  "loop_step_ms": 343.5,
+  "output_vs_tp4": {
+    "identical": false,
+    "psnr_db": 45.0,
+    "source": "RESULTS.md 'TeaCache vs tp4' table as committed 2026-09-13 (18fe61b / e8b363a): pixel-space PSNR vs the tp4 output on the campaign host; the output files are not on the 2026-09-17 host"
+  }
 }

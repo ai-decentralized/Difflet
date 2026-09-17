@@ -141,7 +141,9 @@
     "warmup_steps": 5,
     "cooldown_steps": 5,
     "dit_calls": 19,
-    "skipped_steps_by_calls": 9
+    "skipped_steps_by_calls": 9,
+    "skipped_steps_stats_line": 9,
+    "skipped_steps_stats_line_source": "RESULTS.md 'TeaCache vs tp4' row as committed 2026-09-13 (18fe61b / e8b363a), read from the campaign host's realloop log; equals skipped_steps_by_calls"
   },
   "e2e_warm_breakdown": {
     "stages": [
@@ -170,5 +172,10 @@
   "dit_calls_per_step": 0.679,
   "dit_calls": 19,
   "loop_wall_s": 5.148,
-  "loop_step_ms": 183.9
+  "loop_step_ms": 183.9,
+  "output_vs_tp4": {
+    "identical": false,
+    "psnr_db": 41.3,
+    "source": "RESULTS.md 'TeaCache vs tp4' table as committed 2026-09-13 (18fe61b / e8b363a): pixel-space PSNR vs the tp4 output on the campaign host; the output files are not on the 2026-09-17 host"
+  }
 }
