@@ -110,6 +110,11 @@ def feature_table(label: str, price: float | None, models=CAMPAIGN_MODELS) -> li
         if d is None:
             L.append(f"| {name} | — | — | — | — | — | — | — | — | — | — | not measured |")
             continue
+        if d.get("status") == "blocked":
+            reason = d.get("blocked_reason") or (d.get("notes") or ["blocked"])[0]
+            L.append(f"| {name} | {_shape(d)} / {d.get('steps') or '—'} | — | — | — | — | — | — | — | "
+                     f"{d.get('guidance_scale', '—')} | — | **BLOCKED** — {reason} |")
+            continue
         cold_load = (d.get("e2e_breakdown") or {}).get("weights_load_total_s")
         warm_load = (d.get("e2e_warm_breakdown") or {}).get("weights_load_total_s")
         load_s = (f"{cold_load:.0f}→{warm_load:.0f} s" if cold_load is not None and warm_load is not None
@@ -289,6 +294,11 @@ def teacache_table(tc_labels: list[str], models=CAMPAIGN_MODELS) -> list[str]:
             d = _load(slug, label)
             if d is None:
                 L.append(f"| {_NAMES.get(slug, slug)} | — | {label} | not measured | | | | |")
+                continue
+            if d.get("status") == "blocked":
+                reason = d.get("blocked_reason") or "blocked"
+                L.append(f"| {_NAMES.get(slug, slug)} | {d.get('steps') or '—'} | {label} | "
+                         f"**BLOCKED** — {reason} | — | — | — | — |")
                 continue
             tc = d.get("teacache") or {}
             if tc.get("mode") == "fixed_cadence":

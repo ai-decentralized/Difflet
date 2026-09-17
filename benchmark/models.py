@@ -79,6 +79,46 @@ def teacache_calibration_path(slug: str, device: Optional[str] = None) -> str:
     return str((Path(results_dir(device)) / "teacache_calib" / f"{slug}_tp4tcad.json").resolve())
 
 
+def write_blocked_cell(slug: str, config: str, *, reason: str, evidence: str,
+                       extra: Optional[dict] = None) -> str:
+    """Record a (slug, config) cell as BLOCKED: a supported path that failed on
+    device for a diagnosed reason (e.g. an HBM OOM), NOT an unsupported-by-design
+    cell (those are UNSUPPORTED / status='skipped'). Writes the result JSON the
+    report reads, so a blocked cell shows its diagnosis instead of a blank.
+
+    ``reason`` is one line (shown in the matrix); ``evidence`` is the device
+    proof (a log path + the key figures); ``extra`` merges in structured fields
+    (peak HBM, the shape, the follow-up)."""
+    import json
+    cfg = resolve(slug, config)
+    d = {
+        "model_id": cfg.model_id, "model_slug": slug, "config": config,
+        "config_slug": cfg.config_slug, "device_slug": DEVICE,
+        "status": "blocked", "blocked_reason": reason, "blocked_evidence": evidence,
+        "parallel": cfg.parallel_dict(), "shape": {"height": cfg.height, "width": cfg.width,
+                                                   "num_frames": cfg.num_frames},
+        "steps": cfg.steps, "teacache": cfg.teacache_dict(),
+        "notes": [f"BLOCKED: {reason}", f"evidence: {evidence}"],
+    }
+    if extra:
+        d.update(extra)
+    p = Path(json_path(cfg.config_slug))
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(d, indent=2))
+    return str(p)
+
+
+def cell_is_blocked(slug: str, config: str) -> bool:
+    import json
+    p = Path(json_path(resolve(slug, config).config_slug))
+    if not p.exists():
+        return False
+    try:
+        return json.loads(p.read_text()).get("status") == "blocked"
+    except (OSError, ValueError):
+        return False
+
+
 def _calibration_summary(path: Optional[str]) -> dict:
     """The fit / threshold fields of a calibration JSON, for the result record
     (so the report can show the signal quality next to the speedup)."""

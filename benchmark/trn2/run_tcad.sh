@@ -39,6 +39,11 @@ for m in "${MODELS[@]}"; do
   echo "[tcad] $(ts) === $m: prep ==="
   if python -m benchmark.tcad_prep --model "$m" --prompts "${DIFFLET_TCAD_PROMPTS:-3}" \
        > "$LOGDIR/${m}_prep.log" 2>&1; then
+    if grep -q "BLOCKED_SKIP" "$LOGDIR/${m}_prep.log"; then
+      echo "[tcad] $(ts) $m CELL_BLOCKED (device limit; recorded, cell skipped)"
+      grep "BLOCKED" "$LOGDIR/${m}_prep.log" | tail -1 | sed 's/^/    /'
+      continue
+    fi
     echo "[tcad] $(ts) $m PREP_COMPLETE"
   else
     echo "[tcad] $(ts) $m PREP_FAILED (exit $?); tail:"; tail -n 20 "$LOGDIR/${m}_prep.log" | sed 's/^/    /'

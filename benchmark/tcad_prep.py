@@ -32,9 +32,47 @@ from dataclasses import replace
 from pathlib import Path
 
 from benchmark.adapters.trainium import TrainiumAdapter, spec_slug
-from benchmark.models import NXD_VENV, logs_dir, resolve
+from benchmark.models import (NXD_VENV, cell_is_blocked, logs_dir, resolve,
+                              write_blocked_cell)
 
 PROBE_MODELS = ("flux", "qwen_image", "hunyuan_video")
+
+# HBM out-of-memory signatures the Neuron runtime prints when a collect/generate
+# cannot fit the DiT + probe (+ VAE) resident on a core-pair.
+_OOM_SIGNATURES = (
+    "memory allocation failed (ret=-12)",
+    "Failed to allocate DEVICE memory",
+    "NRT_RESOURCE in nrt_tensor_allocate",
+    "Failed to allocate nrt tensor",
+)
+
+
+class CollectBlocked(RuntimeError):
+    """A collect failed with a diagnosed device limit (HBM OOM), not a bug."""
+
+    def __init__(self, reason: str, evidence: str, extra: dict):
+        super().__init__(reason)
+        self.reason, self.evidence, self.extra = reason, evidence, extra
+
+
+def _diagnose_oom(log: Path) -> "CollectBlocked | None":
+    """If a collect log carries an HBM-OOM signature, return the blocked
+    diagnosis (peak HBM tensors, the failed allocation, the shape); else None."""
+    text = log.read_text(errors="ignore")
+    if not any(sig in text for sig in _OOM_SIGNATURES):
+        return None
+    import re
+    tensors = re.findall(r"\\_NC \d+\s*\|\s*[\d.]+[GM]B\s*\|[^|]*\|[^|]*\|\s*([\d.]+GB)", text)
+    failed = re.search(r"Failed to allocate ([\d.]+MB)[^\n]*usage: tensors", text)
+    peak = max(tensors, default=None, key=lambda s: float(s[:-2]))
+    return CollectBlocked(
+        reason=("HBM exhausted: the DiT already fills the core-pair HBM at this shape, so the "
+                "added TeaCache probe NEFF (calibrated-adaptive only) cannot be resident with it"),
+        evidence=f"{log} — Neuron runtime OOM (nrt_tensor_allocate ret=-12)"
+                 + (f"; DiT tensors {peak}/~24GB per core-pair" if peak else "")
+                 + (f", failed to allocate {failed.group(1)} more" if failed else ""),
+        extra={"peak_hbm_tensors_gb": float(peak[:-2]) if peak else None,
+               "blocked_class": "hbm_oom"})
 
 
 def _now() -> str:
@@ -125,8 +163,14 @@ class Prep:
             log = self.logs / f"{self.slug}_collect{i}.log"
             self._say(f"collect prompt {i}: record-only generate -> {log}")
             t0 = time.perf_counter()
-            self._python(["-m", "benchmark.teacache_calibrate", "collect", "--model", self.slug,
-                          "--prompt-index", str(i)], log)
+            try:
+                self._python(["-m", "benchmark.teacache_calibrate", "collect", "--model", self.slug,
+                              "--prompt-index", str(i)], log)
+            except RuntimeError:
+                blocked = _diagnose_oom(log)
+                if blocked is not None:
+                    raise blocked
+                raise
             self._done(f"collect_{i}", wall_s=round(time.perf_counter() - t0, 1))
             self._say(f"collect prompt {i}: {time.perf_counter() - t0:.0f} s")
 
@@ -151,12 +195,24 @@ def main() -> int:
     p.add_argument("--prompts", type=int, default=3, help="calibration prompts to record")
     p.add_argument("--refit", action="store_true")
     a = p.parse_args()
+    if cell_is_blocked(a.model, "tp4tcad"):
+        print(f"[prep] {a.model}: tp4tcad already recorded BLOCKED; skipping", flush=True)
+        print(f"[prep] {a.model}: BLOCKED_SKIP", flush=True)
+        return 0
     prep = Prep(a.model, a.prompts)
     prep.compile_tp4()
     prep.reference_output()
     placeholder = prep.placeholder()
     prep.compile_adaptive(placeholder)
-    prep.collect()
+    try:
+        prep.collect()
+    except CollectBlocked as blocked:
+        path = write_blocked_cell(a.model, "tp4tcad", reason=blocked.reason,
+                                  evidence=blocked.evidence, extra=blocked.extra)
+        prep._done("blocked", reason=blocked.reason, evidence=blocked.evidence, **blocked.extra)
+        prep._say(f"BLOCKED (device limit) — recorded {path}: {blocked.reason}")
+        prep._say(f"{a.model}: BLOCKED_SKIP")
+        return 0
     prep.fit(a.refit)
     prep._say("PREP_COMPLETE")
     return 0
