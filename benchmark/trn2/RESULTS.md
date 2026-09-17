@@ -307,8 +307,8 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 | FLUX.1-dev | — | — | — | — | — | — | — | — | — | — | not measured |
 | [Qwen-Image](qwen_image_tp4tcad.md) | 1024×1024 / 20 | 17 s | **508 s** | **68 s** | 460→40 s | **420.5 ms (n=14)** (n=14 < 19) | 53 | $17.24 | 4.0 | ✓ finite | ok |
 | [LTX-2](ltx_2_tp4tcad.md) | 480×704×49 / 20 | 6 s | **773 s** | **56 s** | 310→10 s | **511.6 ms (n=14)** (n=14 < 19) | 64 | $14.28 | 1.0 | ✓ finite | ok |
-| HunyuanVideo | — | — | — | — | — | — | — | — | — | — | not measured |
-| Wan 2.1 14B | — | — | — | — | — | — | — | — | — | — | not measured |
+| HunyuanVideo | 320×512×61 / 20 | — | — | — | — | — | — | — | — | — | **BLOCKED** — HBM exhausted: the DiT already fills the core-pair HBM at this shape, so the added TeaCache probe NEFF (calibrated-adaptive only) cannot be resident with it |
+| [Wan 2.1 14B](wan_2_1_tp4tcad.md) | 480×832×9 / 20 | 13 s | **417 s** | **83 s** | 354→48 s | **863.2 ms (n=14)** (n=14 < 19) | 43 | $21.08 | 1.0 | ✓ finite | ok |
 
 ### TeaCache vs tp4 (same artifact, same seed)
 
@@ -325,10 +325,10 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 | LTX-2 | 20 | calibrated adaptive (target 1.333×, R² 0.97) | **5/20** (stats line) | 56 → **56 s** (1.00×) | 459 → **381** (1.20×) | 511.6 (n=14) | 36.2 dB |
 | HunyuanVideo | 20 | cadence 2 | **5/20** (stats line) | 115 → **109 s** (1.05×) | 814 → **624** (1.30×) | 814.7 (n=14) | 31.8 dB |
 | HunyuanVideo | 20 | online-δ α=0.6 | **5/20** (stats line) | 115 → **109 s** (1.05×) | 814 → **623** (1.31×) | 814.9 (n=14) | 24.1 dB |
-| HunyuanVideo | — | tp4tcad | not measured | | | | |
+| HunyuanVideo | 20 | tp4tcad | **BLOCKED** — HBM exhausted: the DiT already fills the core-pair HBM at this shape, so the added TeaCache probe NEFF (calibrated-adaptive only) cannot be resident with it | — | — | — | — |
 | Wan 2.1 14B | 20 | cadence 2 | **5/20** (stats line) | 85 → **78 s** (1.08×) | 575 → **441** (1.31×) | 576.9 (n=14) | 36.7 dB |
 | Wan 2.1 14B | 20 | online-δ α=0.6 | **5/20** (stats line) | 85 → **80 s** (1.06×) | 575 → **439** (1.31×) | 576.1 (n=14) | 36.2 dB |
-| Wan 2.1 14B | — | tp4tcad | not measured | | | | |
+| Wan 2.1 14B | 20 | calibrated adaptive (target 1.333×, R² 0.61) | **5/20** (stats line) | 85 → **83 s** (1.01×) | 575 → **640** (0.90×) | 863.2 (n=14) | 35.7 dB |
 
 ⁷ loop ms/step = denoise-loop wall (first DiT call entry → last call exit) ÷ scheduler steps, so a skipped step counts as ~0 — the per-step figure TeaCache actually changes; the DiT call column is the unchanged cost of one real call. tp4 skips nothing, so its loop figure is its DiT call time (× calls per step). ⁸ PSNR of this cell's output against the tp4 output at the same seed (pixel space; SSIM when scikit-image is installed); an identical output means the controller skipped nothing.
 
@@ -352,7 +352,7 @@ Closed loop: c in-flight requests until 8 complete (HunyuanVideo 6), no think ti
 | Qwen-Image | 417.3 ms | 454.3 ms (0.92×) | 365.6 ms (1.14×) | N/A | N/A | 788.8 ms (0.53×) | 313.0 ms (1.33×) | 313.1 ms (1.33×) | 315.4 ms (1.32×) |
 | LTX-2 | 459.2 ms | N/A | N/A | 779.4 ms (0.59×) | 918.1 ms (0.50×) | 506.8 ms (0.91×) | 344.6 ms (1.33×) | 367.4 ms (1.25×) | 383.7 ms (1.20×) |
 | HunyuanVideo | 814.1 ms | 849.0 ms (0.96×) | 790.6 ms (1.03×) | N/A | N/A | 3641.3 ms (0.22×) | 611.0 ms (1.33×) | 611.1 ms (1.33×) | — |
-| Wan 2.1 14B | 575.5 ms | 575.5 ms (1.00×) | 578.2 ms (1.00×) | 1070.6 ms (0.54×) | 1151.5 ms (0.50×) | 1034.8 ms (0.56×) | 432.7 ms (1.33×) | 432.1 ms (1.33×) | — |
+| Wan 2.1 14B | 575.5 ms | 575.5 ms (1.00×) | 578.2 ms (1.00×) | 1070.6 ms (0.54×) | 1151.5 ms (0.50×) | 1034.8 ms (0.56×) | 432.7 ms (1.33×) | 432.1 ms (1.33×) | 647.4 ms (0.89×) |
 
 ⁰ DiT per-step: mean of the inter-step deltas (n = steps − 1). ¹ compile = full `difflet compile` wall (all stages, incl. per-rank presharding); stage caches shared across features are reused, so a later feature's compile can be shorter than tp4's. ² cold = `sync; echo 3 > drop_caches` then one generate. ³ warm = the immediately following generate. ⁴ outputs/hr = 3600 / warm e2e (one image or one video per generate, batch 1, fresh process each — a served deployment with a resident model does better). ⁵ cost / 1k outputs = hourly price ÷ outputs/hr × 1000; AWS publishes no list price for trn2.3xlarge; $0.91/h is trn2.48xlarge on-demand ($14.5556/h, us-east-2, third-party listing sparecores.com fetched 2026-09-12) ÷ 16 chips — indicative only.. ⁶ Neuron weight load summed over the pipeline's stages (from the generate log), cold vs warm — the bulk of the cold→warm gap; LTX-2's text encoder and VAE run on the host and are not in it.
 
