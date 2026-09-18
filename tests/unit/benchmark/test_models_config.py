@@ -112,8 +112,9 @@ def test_online_delta_sweep_labels_are_tp4tcod_at_other_alphas():
     """One cell per alpha, generate-only flag, same tp4 artifact / topology record;
     the sweep labels are their own experiment (is_sweep_label), tp4tcod is not."""
     from benchmark.models import ONLINE_DELTA_SWEEP, is_sweep_label
-    assert ONLINE_DELTA_SWEEP == {"tp4tcod02": 0.2, "tp4tcod03": 0.3, "tp4tcod04": 0.4,
-                                  "tp4tcod05": 0.5, "tp4tcod06": 0.6, "tp4tcod08": 0.8}
+    assert ONLINE_DELTA_SWEEP == {"tp4tcod01": 0.1, "tp4tcod02": 0.2, "tp4tcod03": 0.3,
+                                  "tp4tcod04": 0.4, "tp4tcod05": 0.5, "tp4tcod06": 0.6,
+                                  "tp4tcod08": 0.8}
     tp4 = resolve("hunyuan_video", "tp4")
     for label, a in ONLINE_DELTA_SWEEP.items():
         cfg = resolve("hunyuan_video", label)
