@@ -1,0 +1,234 @@
+{
+  "model_id": "Lightricks/LTX-2",
+  "model_type": "ltx_2",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 480,
+    "width": 704,
+    "num_frames": 49
+  },
+  "steps": 20,
+  "compile_seconds": 6.129286402996513,
+  "compile_breakdown": {
+    "wall_total_s": 6.129
+  },
+  "load_seconds": 309.74,
+  "e2e_cold_seconds": 773.548,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "transformer (denoise loop) [Neuron]",
+        "load_s": 309.74
+      }
+    ],
+    "weights_load_total_s": 309.74,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 773.548,
+    "compute_and_overhead_s": 463.808,
+    "note": "text-encoder and VAE decode run on the host (enable_host_pipeline/enable_decode_components), so only the transformer is a Neuron load; the residual is host text-encode + denoise + host VAE decode."
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 55.983567660994595,
+    "median": 55.983567660994595,
+    "std": 0.0,
+    "p50": 55.983567660994595,
+    "p90": 55.983567660994595,
+    "min": 55.983567660994595,
+    "max": 55.983567660994595,
+    "samples": [
+      55.983567660994595
+    ]
+  },
+  "step_latency": {
+    "n": 15,
+    "mean": 0.4597819486671748,
+    "median": 0.4590850329987006,
+    "std": 0.0015579539522389124,
+    "p50": 0.4590850329987006,
+    "p90": 0.4615950090083061,
+    "min": 0.4585673539986601,
+    "max": 0.4645276619994547,
+    "samples": [
+      0.4645276619994547,
+      0.45901959300681483,
+      0.4589162479969673,
+      0.45940411199990194,
+      0.45923985600529704,
+      0.4589359129895456,
+      0.4585673539986601,
+      0.4590850329987006,
+      0.4585907610016875,
+      0.4587803800095571,
+      0.4587157829955686,
+      0.46025299100438133,
+      0.45977558998856694,
+      0.4615950090083061,
+      0.46132294500421267
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 2.175
+  },
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved ltx_2_tp4tcod06_out.mp4"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.6; alpha sweep); tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF)",
+  "status": "ok",
+  "notes": [
+    "per-step = 459.8 ms/DiT-step (median 459.1, p90 461.6, n=15) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 16 DiT calls timed; warm generate 31s; output finite=True.",
+    "Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_cold = 774 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 56 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 774 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-09-18 11:02 UTC",
+  "config_slug": "ltx_2_tp4tcod06",
+  "model_slug": "ltx_2",
+  "config": "tp4tcod06",
+  "device_slug": "trn2",
+  "revision": "47da56e2ad66ce4125a9922b4a8826bf407f9d0a",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video",
+  "teacache": {
+    "mode": "online_delta",
+    "cadence": null,
+    "online_delta_alpha": 0.6,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "dit_calls": 16,
+    "skipped_steps_by_calls": 4,
+    "stats": {
+      "full_steps": 16,
+      "skipped_steps": 4,
+      "probe_calls": 0,
+      "last_delta_estimate": 0.064453125,
+      "cache_initialized": true,
+      "online_delta_alpha": 0.6,
+      "baseline_delta": 0.11377,
+      "skipped_step_indices": [
+        5,
+        7,
+        10,
+        13
+      ],
+      "delta_trace": [
+        [
+          1,
+          0.11377
+        ],
+        [
+          2,
+          0.065918
+        ],
+        [
+          3,
+          0.062012
+        ],
+        [
+          4,
+          0.054688
+        ],
+        [
+          6,
+          0.056641
+        ],
+        [
+          8,
+          0.074219
+        ],
+        [
+          9,
+          0.051514
+        ],
+        [
+          11,
+          0.083008
+        ],
+        [
+          12,
+          0.064453
+        ],
+        [
+          14,
+          0.101562
+        ],
+        [
+          15,
+          0.089844
+        ],
+        [
+          16,
+          0.105957
+        ],
+        [
+          17,
+          0.141602
+        ],
+        [
+          18,
+          0.21582
+        ],
+        [
+          19,
+          0.519531
+        ]
+      ]
+    },
+    "skipped_steps_stats_line": 4
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "transformer (denoise loop) [Neuron]",
+        "load_s": 11.28
+      }
+    ],
+    "weights_load_total_s": 11.28,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 55.984,
+    "compute_and_overhead_s": 44.704,
+    "note": "text-encoder and VAE decode run on the host (enable_host_pipeline/enable_decode_components), so only the transformer is a Neuron load; the residual is host text-encode + denoise + host VAE decode."
+  },
+  "dit_calls_per_step": 0.8,
+  "dit_calls": 16,
+  "loop_wall_s": 7.359,
+  "loop_step_ms": 367.9,
+  "output_vs_tp4": {
+    "identical": false,
+    "psnr_db": 36.5,
+    "mean_abs_diff": 2.752,
+    "source": "ltx_2_out.mp4 vs ltx_2_tp4tcod06_out.mp4 on this host"
+  }
+}
