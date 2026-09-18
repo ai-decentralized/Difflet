@@ -169,6 +169,10 @@ def test_note_probe_and_stats_and_reset():
         "probe_calls": 0,
         "last_delta_estimate": None,
         "cache_initialized": False,
+        "online_delta_alpha": 0.0,
+        "baseline_delta": None,
+        "skipped_step_indices": [],
+        "delta_trace": [],
     }
 
 

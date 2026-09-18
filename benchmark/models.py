@@ -318,6 +318,25 @@ CONFIGS: dict[str, dict[str, Any]] = {
     "tp4tcad": {"teacache_adaptive": True},
 }
 
+# Online-delta alpha sweep (2026-09-18): the same runtime-only overlay as
+# tp4tcod at other alphas, one label per value so every point is its own cell
+# (benchmark/<device>/<slug>_tp4tcodNN.json; NN = alpha x 10). 0.6 is repeated
+# so the whole curve is measured on one host against one tp4 reference output
+# (the committed tp4tcod rows are the 2026-09-13 host and are never rerun).
+# Skips are capped at cadence 2's count by the controller's no-two-skips-in-a-
+# row latch, so values above ~0.6 can only confirm saturation.
+ONLINE_DELTA_SWEEP: dict[str, float] = {
+    f"tp4tcod{int(round(a * 10)):02d}": a for a in (0.2, 0.3, 0.4, 0.5, 0.6, 0.8)
+}
+CONFIGS.update({label: {"teacache_online_delta": a} for label, a in ONLINE_DELTA_SWEEP.items()})
+
+
+def is_sweep_label(label: str) -> bool:
+    """True for the online-delta alpha-sweep cells (reported in their own
+    table, not as campaign features)."""
+    return label in ONLINE_DELTA_SWEEP
+
+
 _CONFIG_DESC = {
     "tp4": "tp=4",
     "tp2cp2": "tp=2 x cp=2 (ulysses)",
@@ -330,6 +349,10 @@ _CONFIG_DESC = {
     "tp4tcad": "tp=4 + TeaCache calibrated adaptive (--teacache-speedup at cadence 2's "
                "skip budget, --teacache-calibration per model)",
 }
+_CONFIG_DESC.update({
+    label: f"tp=4 + TeaCache online-delta adaptive (--teacache-online-delta {a}; alpha sweep)"
+    for label, a in ONLINE_DELTA_SWEEP.items()
+})
 
 
 # (slug, config) cells that are unsupported BY DESIGN on this codebase, with the
