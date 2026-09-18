@@ -45,6 +45,21 @@ def _extra_axis_flags(par: dict) -> str:
     return flags
 
 
+def _teacache_repro_flags(r: dict) -> str:
+    """The generate-only TeaCache flag of a TeaCache cell (from its ``teacache``
+    record), so the reproduce block does not silently reproduce plain tp4."""
+    tc = r.get("teacache") or {}
+    mode = tc.get("mode")
+    if mode == "fixed_cadence" and tc.get("cadence"):
+        return f" --teacache-cadence {tc['cadence']}"
+    if mode == "online_delta" and tc.get("online_delta_alpha") is not None:
+        return f" --teacache-online-delta {tc['online_delta_alpha']}"
+    if mode == "adaptive" and tc.get("target_speedup"):
+        calib = tc.get("calibration") or "<calibration.json>"
+        return f" --teacache-speedup {tc['target_speedup']} --teacache-calibration {calib}"
+    return ""
+
+
 def render(r: dict) -> str:
     L: list[str] = []
     a = L.append
@@ -327,7 +342,7 @@ def render(r: dict) -> str:
     a(f"    --tp-degree {par.get('tp_degree',4)} --cp-degree {par.get('cp_degree',1)}{extra} {shp}")
     a(f"difflet generate --model-id {r.get('model_id','<id>')}{rev} \\")
     a(f"    --tp-degree {par.get('tp_degree',4)} --cp-degree {par.get('cp_degree',1)}{extra} {shp} \\")
-    a(f"    --steps {r.get('steps',20)}{g} --seed {r.get('seed',42)} \\")
+    a(f"    --steps {r.get('steps',20)}{g} --seed {r.get('seed',42)}{_teacache_repro_flags(r)} \\")
     a(f"    --prompt \"{r.get('prompt','...')}\" --output out.{ext}")
     if not pending:
         a("")

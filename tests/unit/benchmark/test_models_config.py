@@ -108,9 +108,29 @@ def test_adaptive_teacache_record_carries_the_calibration_fit(tmp_path, monkeypa
     assert missing["mode"] == "adaptive" and "fit_r2" not in missing
 
 
+def test_online_delta_sweep_labels_are_tp4tcod_at_other_alphas():
+    """One cell per alpha, generate-only flag, same tp4 artifact / topology record;
+    the sweep labels are their own experiment (is_sweep_label), tp4tcod is not."""
+    from benchmark.models import ONLINE_DELTA_SWEEP, is_sweep_label
+    assert ONLINE_DELTA_SWEEP == {"tp4tcod02": 0.2, "tp4tcod03": 0.3, "tp4tcod04": 0.4,
+                                  "tp4tcod05": 0.5, "tp4tcod06": 0.6, "tp4tcod08": 0.8}
+    tp4 = resolve("hunyuan_video", "tp4")
+    for label, a in ONLINE_DELTA_SWEEP.items():
+        cfg = resolve("hunyuan_video", label)
+        assert cfg.teacache_flags() == ["--teacache-online-delta", str(a)]
+        assert cfg.compile_teacache_flags() == []
+        assert cfg.parallel_dict() == tp4.parallel_dict()
+        assert cfg.teacache_dict()["mode"] == "online_delta"
+        assert cfg.teacache_dict()["online_delta_alpha"] == a
+        assert cfg.config_slug == f"hunyuan_video_{label}"
+        assert is_sweep_label(label) and str(a) in cfg.config_label
+    assert not is_sweep_label("tp4tcod") and not is_sweep_label("tp4tc2")
+
+
 def test_configs_are_the_verify_cli_labels_sized_to_four_cores():
+    from benchmark.models import ONLINE_DELTA_SWEEP
     assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4cfg2",
-                            "tp4tc2", "tp4tcod", "tp4tcad"}
+                            "tp4tc2", "tp4tcod", "tp4tcad", *ONLINE_DELTA_SWEEP}
     for label in CONFIGS:
         cfg = resolve("flux_1_dev", label)
         world = cfg.tp * cfg.cp * (2 if cfg.cfg_parallel else 1)

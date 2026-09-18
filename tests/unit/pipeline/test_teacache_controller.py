@@ -146,6 +146,32 @@ def test_online_delta_mode_is_probe_free_and_skips_only_flat_steps():
     c.record_full_step(npred(3.25))                       # delta small again
     assert c.should_skip(5, None) is True                 # flat -> SKIP again
     assert c.skipped_steps == 1                            # only one skip recorded so far
+    c.skip_noise_pred()
+    # evidence: which steps were skipped, the per-full-step delta trace (step 1 =
+    # the latched baseline, inside the warmup), flat + literal_eval-able stats
+    import ast
+    assert c.skipped_step_indices == [3, 5]
+    assert [s for s, _ in c.delta_trace] == [1, 2, 4]
+    assert c.delta_trace[0][1] == pytest.approx(2.0)
+    st = c.stats()
+    assert st["skipped_step_indices"] == [3, 5] and st["baseline_delta"] == pytest.approx(2.0)
+    assert st["online_delta_alpha"] == 0.5 and len(st["delta_trace"]) == 3
+    assert ast.literal_eval(f"{st}") == st                # the [teacache] stats: log line
+    assert TeaCacheController.last_stats == st            # harness snapshot
+    c.reset()
+    assert c.skipped_step_indices == [] and c.delta_trace == []
+
+
+def test_cadence_mode_records_skipped_indices_without_a_trace():
+    cal = _calibration(num_steps=8, warmup_steps=2, cooldown_steps=1, cadence=2)
+    c = TeaCacheController(cal)
+    for i in range(8):
+        if c.should_skip(i, None):
+            c.skip_noise_pred()
+        else:
+            c.record_full_step(torch.full((1, 4), float(i)))
+    assert c.skipped_step_indices == [3, 5]
+    assert c.delta_trace == [] and c.stats()["baseline_delta"] is None
 
 
 def test_online_delta_calibration_roundtrips(tmp_path):

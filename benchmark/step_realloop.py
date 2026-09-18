@@ -384,6 +384,12 @@ def _main(args, cfg) -> int:
         d["teacache"] = cfg.teacache_dict()
         d["teacache"]["dit_calls"] = n_calls
         d["teacache"]["skipped_steps_by_calls"] = cfg.steps - n_calls
+        # The controller's own evidence from THIS generate (which steps were
+        # skipped; in online-delta mode the per-step rel-L1 trace and the
+        # latched baseline), so the JSON stays self-contained without the log.
+        from difflet.pipeline.teacache import TeaCacheController
+        if TeaCacheController.last_stats is not None:
+            d["teacache"]["stats"] = dict(TeaCacheController.last_stats)
     if args.generates > 1:
         # steady state with the model resident (no process start, no reload)
         d["resident_generate_s"] = [round(x, 3) for x in resident]

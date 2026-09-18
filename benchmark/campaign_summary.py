@@ -17,7 +17,8 @@ import sys
 from pathlib import Path
 
 from benchmark.cell_status import CAMPAIGN_MODELS
-from benchmark.models import CONFIGS, MATRIX, UNSUPPORTED, json_path, resolve
+from benchmark.models import (CONFIGS, MATRIX, ONLINE_DELTA_SWEEP, UNSUPPORTED, is_sweep_label,
+                              json_path, resolve)
 
 _NAMES = {
     "flux_1_dev": "FLUX.1-dev", "qwen_image": "Qwen-Image", "ltx_2": "LTX-2",
@@ -35,6 +36,10 @@ _CONFIG_TITLE = {
     "tp4tcod": "tp4tcod — tp=4 + TeaCache online-delta adaptive (`--teacache-online-delta 0.6`, calibration-free, same artifact)",
     "tp4tcad": "tp4tcad — tp=4 + TeaCache calibrated adaptive (`--teacache-speedup` at cadence 2's skip budget + per-model `--teacache-calibration`; probe NEFF for FLUX / Qwen-Image / HunyuanVideo, host signal for Wan / LTX-2)",
 }
+_CONFIG_TITLE.update({
+    label: f"{label} — tp=4 + TeaCache online-delta adaptive (`--teacache-online-delta {a}`, alpha sweep)"
+    for label, a in ONLINE_DELTA_SWEEP.items()
+})
 _BEGIN, _END = "<!-- campaign:begin -->", "<!-- campaign:end -->"
 
 
@@ -333,6 +338,94 @@ def teacache_table(tc_labels: list[str], models=CAMPAIGN_MODELS) -> list[str]:
     return L
 
 
+def _trace_knee(trace: list, alpha: float | None, warmup: int, steps: int, cooldown: int):
+    """Offline what-if from one run's ``delta_trace`` (``[[step, rel_l1], ...]``,
+    baseline = its first entry): the first eligible step whose PREVIOUS full
+    step's delta is < alpha x baseline (what the controller would skip first),
+    and the knee alpha = the smallest delta/baseline ratio over the window (below
+    it nothing is ever skipped). Exact only up to that run's own first skip,
+    because a skip changes the trajectory after it."""
+    if not trace:
+        return None, None
+    by_step = {int(s): float(v) for s, v in trace}
+    baseline = float(trace[0][1]) or 1e-12
+    ratios = [(s, by_step[s - 1] / baseline) for s in range(warmup, steps - cooldown)
+              if (s - 1) in by_step]
+    if not ratios:
+        return None, None
+    knee = min(r for _, r in ratios)
+    first = next((s for s, r in ratios if alpha is not None and r < alpha), None)
+    return first, knee
+
+
+def alpha_sweep_table(sweep_labels: list[str], models=CAMPAIGN_MODELS) -> list[str]:
+    """Online-delta alpha sweep: per model, the skip / speed / quality curve over
+    alpha, next to cadence 2 and the committed alpha=0.6 row as references."""
+    sweep_labels = sorted(sweep_labels, key=ONLINE_DELTA_SWEEP.get)
+    L = ["### TeaCache online-delta α sweep (same tp4 artifact, same seed, one host)", "",
+         "| model | α (cell) | skipped / steps (evidence) | skipped step indices | "
+         "loop ms/step: tp4 → TC⁷ | warm e2e | output vs tp4 (PSNR / SSIM)⁸ | "
+         "trace what-if⁹ |",
+         "|---|---|---:|---|---:|---:|---|---|"]
+    for slug in models:
+        base = _load(slug, "tp4") or {}
+        b_warm = (base.get("e2e_warm") or {}).get("mean")
+        b_loop = base.get("loop_step_ms") or _step_ms(base)
+        # the lowest-alpha sweep run that recorded a trace = closest to the
+        # unskipped trajectory, so its trace is the what-if reference
+        ref_trace, ref_label = [], None
+        for label in sweep_labels:
+            d = _load(slug, label)
+            tr = ((d or {}).get("teacache") or {}).get("stats", {}).get("delta_trace") or []
+            if tr:
+                ref_trace, ref_label = tr, label
+                break
+        rows = [("tp4tc2", "cadence 2 (ref)"), ("tp4tcod", "0.6 (committed 2026-09-13 host)")]
+        rows += [(l, f"{ONLINE_DELTA_SWEEP[l]} ({l})") for l in sweep_labels]
+        for label, name in rows:
+            d = _load(slug, label)
+            if d is None:
+                if label in sweep_labels:
+                    L.append(f"| {_NAMES.get(slug, slug)} | {name} | not measured | | | | | |")
+                continue
+            tc = d.get("teacache") or {}
+            st = tc.get("stats") or {}
+            steps = d.get("steps")
+            skipped, src = _teacache_skips(slug, label, d)
+            skip_s = f"**{skipped}/{steps}** ({src})" if skipped is not None else "—"
+            idx = st.get("skipped_step_indices")
+            idx_s = ", ".join(str(i) for i in idx) if idx else ("none" if skipped == 0 else "—")
+            loop = d.get("loop_step_ms")
+            loop_s = (f"{b_loop:.0f} → **{loop:.0f}** ({b_loop/loop:.2f}×)" if b_loop and loop
+                      else (f"→ {loop:.0f}" if loop else "—"))
+            warm = (d.get("e2e_warm") or {}).get("mean")
+            warm_s = (f"{b_warm:.0f} → {warm:.0f} s" if b_warm and warm
+                      else (f"{warm:.0f} s" if warm else "—"))
+            alpha = tc.get("online_delta_alpha") if tc.get("mode") == "online_delta" else None
+            if alpha is not None and ref_trace and steps:
+                first, knee = _trace_knee(ref_trace, float(alpha), int(tc.get("warmup_steps", 5)),
+                                          int(steps), int(tc.get("cooldown_steps", 5)))
+                what_if = (f"first skip @ step {first}" if first is not None else "no skip") + \
+                          (f"; knee α ≈ {knee:.2f}" if knee is not None else "") + \
+                          f" (from {ref_label})"
+            else:
+                what_if = "—"
+            L.append(f"| {_NAMES.get(slug, slug)} | {name} | {skip_s} | {idx_s} | {loop_s} | "
+                     f"{warm_s} | {_parity(slug, label, d)} | {what_if} |")
+    L += ["",
+          "The controller (`difflet/pipeline/teacache.py`, online-delta mode) skips step *s* iff "
+          "the rel-L1 delta of the last full step is < α × baseline, where the baseline is the "
+          "first measured delta (step 1, inside the 5-step warmup, where the trajectory moves "
+          "fastest) and never skips two steps in a row — so skips are capped at cadence 2's count "
+          "(9/28, 5/20) whatever α, and α only chooses WHICH of the eligible steps go. Warm e2e "
+          "is load-dominated and shown only for completeness. "
+          "⁹ what-if = read off the lowest-α run's per-step delta trace: the first eligible step "
+          "the rule would skip at this α, and the knee α below which it would skip nothing; "
+          "exact only up to that run's own first skip (a skip changes the trajectory after it).",
+          ""]
+    return L
+
+
 def serving_table(price: float | None, models=CAMPAIGN_MODELS) -> list[str]:
     """difflet serve (resident model) vs the CLI's per-request warm e2e, from
     benchmark/<device>/serving/<slug>_tp4.json (+ _warm.json for the load-only
@@ -449,15 +542,22 @@ def render(labels: list[str], price: float | None, price_note: str) -> str:
          "`<slug>.json` (tp4) and `<slug>_<config>.json` per cell; run any cell with "
          "`python -m benchmark.{bench,cold_warm_e2e,step_realloop} --model <slug> --config <label>`.",
          ""]
-    for label in labels:
+    # The alpha-sweep cells are one experiment, not campaign features: they get
+    # their own table (alpha_sweep_table) and stay out of the per-feature /
+    # speedup tables, which would otherwise repeat six near-identical blocks.
+    feature_labels = [l for l in labels if not is_sweep_label(l)]
+    sweep_labels = sorted((l for l in labels if is_sweep_label(l)), key=ONLINE_DELTA_SWEEP.get)
+    for label in feature_labels:
         L += feature_table(label, price)
         if label == "tp4":
             L += nxdi_table(price)
-    tc_labels = [l for l in labels if l in ("tp4tc2", "tp4tcod", "tp4tcad")]
+    tc_labels = [l for l in feature_labels if l in ("tp4tc2", "tp4tcod", "tp4tcad")]
     if tc_labels:
         L += teacache_table(tc_labels)
+    if sweep_labels:
+        L += alpha_sweep_table(sweep_labels)
     L += serving_table(price)
-    L += speedup_table(labels)
+    L += speedup_table(feature_labels)
     L += [
         "⁰ DiT per-step: mean of the inter-step deltas (n = steps − 1). ¹ compile = full `difflet "
         "compile` wall (all stages, incl. per-rank presharding); stage caches shared across "
@@ -490,9 +590,9 @@ def main() -> int:
                    help="provenance of the price (region, date, source)")
     p.add_argument("--write", default=None, help="RESULTS.md to update in place")
     a = p.parse_args()
-    labels = [l for l in ["tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4cfg2", "tp4sdpa",
-                          "tp4tc2", "tp4tcod", "tp4tcad"]
-              if l in a.labels]
+    order = ["tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4cfg2", "tp4sdpa", "tp4tc2", "tp4tcod",
+             "tp4tcad"] + sorted(ONLINE_DELTA_SWEEP, key=ONLINE_DELTA_SWEEP.get)
+    labels = [l for l in order if l in a.labels]
     md = render(labels, a.price_per_hour, a.price_note)
     if not a.write:
         print(md)

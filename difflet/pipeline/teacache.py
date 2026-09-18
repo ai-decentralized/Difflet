@@ -52,10 +52,13 @@ class TeaCacheCalibration:
     cadence: int = 0
     # cclog 91: generic online-delta mode (probe-free, calibration-free, 0-per-model).
     # When > 0, skip a step iff the PREVIOUS full step's measured output rel-L1 delta
-    # is below ``online_delta_alpha * baseline`` (baseline = first post-warmup full
-    # step's delta). Uses the real noise_pred trajectory the pipeline already has — no
-    # per-model probe/signal. Data-driven (adaptive), unlike the blind fixed cadence;
-    # it skips only genuinely-flat steps. No two skips in a row (must re-measure).
+    # is below ``online_delta_alpha * baseline``. The baseline is the FIRST measured
+    # delta, i.e. the full step right after step 0 (inside the warmup, where the
+    # trajectory moves fastest), so a given alpha is more permissive than a
+    # post-warmup baseline would make it. Uses the real noise_pred trajectory the
+    # pipeline already has — no per-model probe/signal. Data-driven (adaptive), unlike
+    # the blind fixed cadence; it skips only genuinely-flat steps. No two skips in a
+    # row (must re-measure), so skips are capped at the cadence-2 count.
     online_delta_alpha: float = 0.0
 
     @classmethod
@@ -122,7 +125,15 @@ class TeaCacheController:
 
     `should_skip` only returns true after at least two full DiT steps have
     populated both `prev_noise_pred` and `cached_residual`.
+
+    Per-step evidence (``skipped_step_indices``, ``delta_trace``) is kept for
+    ``stats()`` so a run can show WHICH steps were skipped and, in online-delta
+    mode, the measured rel-L1 delta of every full step; ``last_stats`` on the
+    class is the most recent ``stats()`` of any controller in the process, for
+    harnesses that cannot reach the pipeline's controller object.
     """
+
+    last_stats: dict[str, Any] | None = None
 
     def __init__(self, calibration: TeaCacheCalibration) -> None:
         self.calibration = calibration
@@ -138,10 +149,16 @@ class TeaCacheController:
         # Running sum of rescaled per-step estimates (cclog 83 accumulate mode).
         self._accum = 0.0
         # cclog 91 online-delta mode: last full step's measured output rel-L1 delta,
-        # the baseline (first post-warmup full delta), and a no-two-skips-in-a-row latch.
+        # the baseline (the first measured delta, step 1), and a no-two-skips-in-a-row latch.
         self._last_full_delta: float | None = None
         self._baseline_delta: float | None = None
         self._just_skipped = False
+        # Evidence: the step index should_skip was last asked about (None once
+        # consumed), the indices that were skipped, and (online-delta only) the
+        # (step, rel-L1 delta) of every full step measured against its predecessor.
+        self._step_index: int | None = None
+        self.skipped_step_indices: list[int] = []
+        self.delta_trace: list[tuple[int, float]] = []
 
     def reset(self) -> None:
         self.prev_mod_input = None
@@ -156,6 +173,17 @@ class TeaCacheController:
         self._last_full_delta = None
         self._baseline_delta = None
         self._just_skipped = False
+        self._step_index = None
+        self.skipped_step_indices = []
+        self.delta_trace = []
+
+    def _consume_step_index(self) -> int:
+        """The scheduler step being decided/recorded: the index passed to the
+        last ``should_skip`` when the pipeline asked, else the running count
+        (pipelines that record warmup steps without asking)."""
+        idx = self._step_index
+        self._step_index = None
+        return int(idx) if idx is not None else int(self.full_steps + self.skipped_steps)
 
     def needs_signal(self) -> bool:
         """Whether the controller needs the probe's per-step signal at all.
@@ -196,6 +224,7 @@ class TeaCacheController:
         host-side diff against the cached ``prev_mod_input`` tensor.
         """
         step_index = int(step_index)
+        self._step_index = step_index
         if step_index < int(self.calibration.warmup_steps):
             self._skip_run_remaining = 0
             self._accum = 0.0
@@ -282,6 +311,7 @@ class TeaCacheController:
     def skip_noise_pred(self, mod_input: torch.Tensor | None = None) -> torch.Tensor:
         if self.prev_noise_pred is None or self.cached_residual is None:
             raise RuntimeError("TeaCache skip requested before residual cache was initialized")
+        self.skipped_step_indices.append(self._consume_step_index())
         self.skipped_steps += 1
         self._just_skipped = True  # online-delta: never skip two in a row (re-measure next)
         noise_pred = self.prev_noise_pred + self.cached_residual
@@ -294,6 +324,7 @@ class TeaCacheController:
         self, noise_pred: torch.Tensor, mod_input: torch.Tensor | None = None
     ) -> None:
         noise_pred = noise_pred.detach()
+        step_index = self._consume_step_index()
         if self.prev_noise_pred is not None:
             self.cached_residual = noise_pred - self.prev_noise_pred
             # cclog 91 online-delta: measure this full step's output rel-L1 change.
@@ -301,6 +332,7 @@ class TeaCacheController:
                 prev = self.prev_noise_pred
                 denom = prev.abs().mean().clamp_min(1e-8)
                 self._last_full_delta = float((noise_pred - prev).abs().mean() / denom)
+                self.delta_trace.append((step_index, self._last_full_delta))
                 if self._baseline_delta is None:
                     self._baseline_delta = self._last_full_delta
         self.prev_noise_pred = noise_pred
@@ -316,13 +348,25 @@ class TeaCacheController:
         self.probe_calls += 1
 
     def stats(self) -> dict[str, Any]:
-        return {
+        """Run evidence. Flat (no nested dicts) so the ``[teacache] stats:`` log
+        line stays parseable by ``ast.literal_eval`` of the first ``{...}``.
+        ``delta_trace`` = ``[[step, rel_l1_delta], ...]`` for every full step
+        measured in online-delta mode (empty in the other modes)."""
+        d = {
             "full_steps": int(self.full_steps),
             "skipped_steps": int(self.skipped_steps),
             "probe_calls": int(self.probe_calls),
             "last_delta_estimate": self.last_delta_estimate,
             "cache_initialized": self.cached_residual is not None,
+            "online_delta_alpha": float(self.calibration.online_delta_alpha),
+            "baseline_delta": (
+                round(self._baseline_delta, 6) if self._baseline_delta is not None else None
+            ),
+            "skipped_step_indices": list(self.skipped_step_indices),
+            "delta_trace": [[int(i), round(float(v), 6)] for i, v in self.delta_trace],
         }
+        TeaCacheController.last_stats = d
+        return d
 
 
 def load_teacache_calibration_or_raise(

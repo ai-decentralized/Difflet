@@ -320,6 +320,10 @@ class QwenImageOrchestrator:
             latents = self._scheduler_step(noise_pred, timestep, latents, len(timesteps))
             if trajectory is not None:
                 trajectory.append(latents.detach().cpu())
+        if controller is not None:
+            # Same evidence line the other pipelines print (benchmark harness
+            # parses it for skipped steps / the online-delta trace).
+            print(f"[teacache] stats: {controller.stats()}", flush=True)
         return latents
 
     def _scheduler_step(
