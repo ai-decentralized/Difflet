@@ -396,6 +396,22 @@ The controller (`difflet/pipeline/teacache.py`, online-delta mode) skips step *s
 
 Closed loop: c in-flight requests until 8 complete (HunyuanVideo 6), no think time, after 2 warm-up requests; latency = client wall per request including queueing; throughput = successes ÷ level wall. `difflet serve` runs **one resident worker** (`max_running_requests=1`), so c = 2 / 4 measure queueing (p50 ≈ c × service time) and throughput is flat — parallel execution needs `--dp` replicas, which need ≥ 2 cores each. Image requests are JSON on `/v1/chat/completions` (base64 PNG back); video requests are multipart on `/v1/videos/sync` (mp4 bytes back), admitted through the video service FIFO (`--max-queued-requests 8`, `--request-timeout 1800`). ⁹ Serving has its own immutable artifact generation under `~/.cache/difflet/serving/`: the first start compiles it from scratch (the CLI artifacts are not reused); the second figure is a restart against the published generation (no compile, load only) — measured after the other models had evicted this model's files from the page cache, so it is a cold-cache load; a restart right after publish, page cache warm, took 185 s for HunyuanVideo. ¹⁰ Mean over all 4 cores of neuron-monitor's `neuroncore_utilization` sampled every 1 s during the c=1 level. ¹¹ At the indicative hourly price stated above.
 
+### Serving layer: async Videos job API vs sync (same server session, tp4)
+
+| model | API | c=1 p50 / p90 | c=2 p50 | c=4 p50 | throughput (c=1) | create ack p50 / max | queue wait p50 (c=1) | poll + download overhead p50 | burst: admitted / N, all acked, wall, rate | errors |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| LTX-2 | sync (committed 2026-09-13 host) | **37.54 s** / 38.47 s | 75.75 s | 149.75 s | 95 videos/h | — | — | — | — | 0 |
+| LTX-2 | sync `/v1/videos/sync` (this session) | **34.92 s** / 35.15 s | 70.05 s | 138.74 s | 103 videos/h | — | — | — | — | 0 |
+| LTX-2 | **async `/v1/videos`** (this session) | **35.32 s** / 35.40 s | 69.99 s | 140.42 s | 102 videos/h | 2 / 2 ms | 0.25 s | 0.00 s | 8 / 8, acked in 19 ms, wall 281 s, 102/h | 0 |
+| HunyuanVideo | sync (committed 2026-09-13 host) | **34.05 s** / 34.12 s | 68.20 s | 119.55 s | 106 videos/h | — | — | — | — | 0 |
+| HunyuanVideo | sync `/v1/videos/sync` (this session) | **34.10 s** / 34.16 s | 68.22 s | 119.86 s | 106 videos/h | — | — | — | — | 0 |
+| HunyuanVideo | **async `/v1/videos`** (this session) | **34.22 s** / 34.35 s | 68.32 s | 119.65 s | 105 videos/h | 2 / 3 ms | 0.26 s | 0.00 s | 6 / 6, acked in 18 ms, wall 205 s, 106/h | 0 |
+| Wan 2.1 14B | sync (committed 2026-09-13 host) | **13.18 s** / 13.19 s | 26.34 s | 52.82 s | 273 videos/h | — | — | — | — | 0 |
+| Wan 2.1 14B | sync `/v1/videos/sync` (this session) | **13.19 s** / 13.20 s | 26.39 s | 52.77 s | 273 videos/h | — | — | — | — | 0 |
+| Wan 2.1 14B | **async `/v1/videos`** (this session) | **13.36 s** / 13.37 s | 26.49 s | 52.75 s | 269 videos/h | 2 / 3 ms | 0.26 s | 0.00 s | 8 / 8, acked in 21 ms, wall 106 s, 272/h | 0 |
+
+Same server command line and the same closed-loop client as the sync rows (c in-flight until N complete, no think time). Async request = `POST /v1/videos` (returns the queued job) → poll `GET /v1/videos/{id}` every 0.25 s → `GET …/content` → `DELETE`; latency = create → content downloaded (DELETE excluded), so it is quantised by the poll interval. Both APIs share the server's single admission FIFO and its one resident worker (`difflet/serving/video_service.py`, `factory.py`), so the device time per request is identical by construction: what async changes is the client side — the create acknowledgement (the job object) instead of a held connection, server-side queueing at c > 1, and burst absorption (N creates back to back; the server admits 1 + `--max-queued-requests` = 9, the rest get 429). Image models have no async endpoint.
+
 ### DiT per-step vs tp4 (lower is better; ratio = tp4 / config; a step with two sequential CFG calls counts both calls)
 
 | model | tp4 | tp2cp2 | tp4sp | tp2cfg | tp4cfg2 | tp4sdpa | tp4tc2 | tp4tcod | tp4tcad |
@@ -698,6 +714,49 @@ HunyuanVideo compile waited on it for 4 h printing "Another process must be comp
 (3) HunyuanVideo's first worker load (cold, freshly written files; 288 s for the DiT init
 alone) exceeded the engine's default 900 s `--worker-restart-timeout`, so the server exited
 with `503 engine_unavailable` after its compile — set it to 3600 s for cold starts.
+
+**Serving layer, async Videos job API vs sync (measured 2026-09-18; table "async Videos job API
+vs sync" above).** `difflet serve`'s asynchronous path is the OpenAI-style job API —
+`POST /v1/videos` returns the queued job at once, the client polls `GET /v1/videos/{id}`,
+downloads `/content`, and `DELETE`s — as opposed to the blocking `/v1/videos/sync` the campaign
+measured. It exists for video models only (FLUX / Qwen-Image have no async endpoint), so LTX-2,
+HunyuanVideo and Wan 2.1 were run, each in **one server session**: the same server command line as
+the sync campaign, the sync closed loop first, then the async closed loop (poll every 0.25 s) and
+one open-loop burst against the same process, so the comparison is same-host, same-generation (the
+committed 2026-09-13 sync rows are kept as the historical baseline; the same-session sync row is
+the fair one — LTX-2 is host-bound and this host's sync p50 is 34.9 s vs 37.5 s there). First
+starts recompiled the serving generation again: 2013 / 5307 / 6979 s (LTX-2 / HV / Wan).
+
+- *Latency and throughput: no difference, by construction.* Both APIs share the video service's
+  single admission FIFO and its one resident worker (`difflet/serving/video_service.py`,
+  `factory.py` disables the inner engine queue for video so neither path can bypass it), so the
+  device time per request is identical. Measured c=1 p50 async vs sync: **35.3 vs 34.9 s**
+  (LTX-2), **34.2 vs 34.1 s** (HunyuanVideo), **13.4 vs 13.2 s** (Wan); throughput 102 vs 103,
+  105 vs 106, 269 vs 273 videos/h; c = 2 / 4 queue identically (p50 ≈ c × service time, flat
+  throughput); NeuronCore utilisation identical (24 / 87 / 84 % at c=1 on both). The async
+  round trip costs **+0.1–0.4 s per request**, and the client-side overhead is not it: the
+  create acknowledgement is **2 ms** (p90 ≤ 3 ms), the content download ~2 ms, the DELETE ~5 ms,
+  and the poll-quantisation-plus-download overhead beyond the job's own completion rounds to 0.
+  The extra sits *inside* the job's completion (job-row creation and state transitions, and
+  committing the mp4 to the retained artifact store instead of streaming it) — the price of a
+  durable, retrievable job. (The table's "queue wait" column reads ~0.25 s because the first
+  poll lands one interval after create and already sees `in_progress`; it is the poll interval,
+  not queueing.)
+- *What async does buy: hand-off, not speed.* A burst of 8 creates (6 for HunyuanVideo) was
+  acknowledged **in 18–21 ms total** and every job was admitted (capacity 1 + `--max-queued-
+  requests 8` = 9) and completed back to back at the same rate as the closed loop (LTX-2 8 in
+  281 s = 102/h, HV 6 in 205 s = 106/h, Wan 8 in 106 s = 272/h; inter-completion 35.0–35.2 /
+  33.9–34.2 / 13.1–13.3 s). The sync API would need 8 connections held open for 5 minutes for the
+  same work, and a client disconnect on `/v1/videos/sync` cancels the request; async jobs survive
+  the client. Every job was DELETEd after download in this run — without that, each completed
+  job keeps its mp4 for `--video-retention-seconds` (25 h) and each admitted job reserves 8 GiB of
+  storage headroom, which is the async-specific operational cost.
+- *Bottom line:* **async has no latency or throughput advantage over sync on this server** and
+  cannot have one until the engine runs more than one request at a time (there is no `--dp`
+  serve flag today; `_replica_count()` is 1 on Trainium). Choose it for its API properties —
+  non-blocking submission, burst absorption without held connections, retrievable results — at
+  ~0.1–0.4 s per request and the storage/retention bookkeeping; choose `/v1/videos/sync` for the
+  lowest per-request latency and no state to clean up.
 
 **Campaign totals**: 15 measured cells + 5 by-design N/A, every output finite, no failed
 cell, no deleted cache (1.5 TB disk, ~1.1 TB used at the end incl. 285 GB of HF weights).
