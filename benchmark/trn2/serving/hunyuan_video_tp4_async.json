@@ -1,0 +1,723 @@
+{
+  "model_slug": "hunyuan_video",
+  "config": "tp4",
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "kind": "video",
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "seed": 42,
+  "guidance_scale": 6.0,
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "endpoint": "/v1/videos (async job API: create, poll, content, delete)",
+  "api_mode": "async",
+  "poll_interval_s": 0.25,
+  "ready_seconds": 5307.024945483,
+  "warmup": [
+    {
+      "latency_s": 34.241,
+      "http": 200,
+      "bytes": 430492,
+      "error": "",
+      "create_s": 0.0206,
+      "create_http": 200,
+      "job_id": "video_gen_a2c9d2b98074483ba46df23686f371b5",
+      "queued_s": 0.273,
+      "terminal_s": 34.238,
+      "polls": 136,
+      "poll_errors": 0,
+      "job_status": "completed",
+      "created_at": 1789746322,
+      "completed_at": 1789746356,
+      "download_s": 0.0023,
+      "delete_s": 0.0048,
+      "delete_http": 200
+    },
+    {
+      "latency_s": 34.221,
+      "http": 200,
+      "bytes": 430492,
+      "error": "",
+      "create_s": 0.0027,
+      "create_http": 200,
+      "job_id": "video_gen_6810cba8b1d54418b6d2b9869ffb8516",
+      "queued_s": 0.255,
+      "terminal_s": 34.218,
+      "polls": 136,
+      "poll_errors": 0,
+      "job_status": "completed",
+      "created_at": 1789746356,
+      "completed_at": 1789746390,
+      "download_s": 0.0027,
+      "delete_s": 0.0049,
+      "delete_http": 200
+    }
+  ],
+  "levels": [
+    {
+      "concurrency": 1,
+      "requests": 6,
+      "successes": 6,
+      "wall_s": 205.578,
+      "throughput_per_s": 0.0292,
+      "throughput_per_hour": 105.1,
+      "latency_s": {
+        "p50": 34.219,
+        "p90": 34.348,
+        "p99": 34.455,
+        "mean": 34.258,
+        "min": 34.207,
+        "max": 34.467
+      },
+      "http_codes": {
+        "200": 6
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 34.229,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0024,
+          "create_http": 200,
+          "job_id": "video_gen_fd5acc81da314e7f9e50cb641df5ef73",
+          "queued_s": 0.255,
+          "terminal_s": 34.227,
+          "polls": 136,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746390,
+          "completed_at": 1789746424,
+          "download_s": 0.0019,
+          "delete_s": 0.0048,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 34.218,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0024,
+          "create_http": 200,
+          "job_id": "video_gen_d626d7683fb7452e85353aee6e85a445",
+          "queued_s": 0.254,
+          "terminal_s": 34.216,
+          "polls": 136,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746425,
+          "completed_at": 1789746459,
+          "download_s": 0.0019,
+          "delete_s": 0.0052,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 34.207,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0027,
+          "create_http": 200,
+          "job_id": "video_gen_361afa06987a4830822a5a0473019f3d",
+          "queued_s": 0.255,
+          "terminal_s": 34.206,
+          "polls": 136,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746459,
+          "completed_at": 1789746493,
+          "download_s": 0.0016,
+          "delete_s": 0.0048,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 34.467,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0027,
+          "create_http": 200,
+          "job_id": "video_gen_8dd6160a82a44399b788ab31504a3228",
+          "queued_s": 0.255,
+          "terminal_s": 34.465,
+          "polls": 137,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746493,
+          "completed_at": 1789746527,
+          "download_s": 0.0017,
+          "delete_s": 0.0043,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 34.209,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0021,
+          "create_http": 200,
+          "job_id": "video_gen_fe02213ed1dd45cca9bcb2591a464067",
+          "queued_s": 0.254,
+          "terminal_s": 34.207,
+          "polls": 136,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746528,
+          "completed_at": 1789746562,
+          "download_s": 0.0016,
+          "delete_s": 0.0042,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 34.219,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0021,
+          "create_http": 200,
+          "job_id": "video_gen_30fea94c31d94363a76d9e89c2916a0b",
+          "queued_s": 0.254,
+          "terminal_s": 34.217,
+          "polls": 136,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746562,
+          "completed_at": 1789746596,
+          "download_s": 0.0023,
+          "delete_s": 0.0051,
+          "delete_http": 200
+        }
+      ],
+      "async": {
+        "create_s": {
+          "p50": 0.0024,
+          "p90": 0.0027,
+          "max": 0.0027
+        },
+        "queued_s": {
+          "p50": 0.255,
+          "max": 0.255
+        },
+        "terminal_s": {
+          "p50": 34.216
+        },
+        "download_s": {
+          "p50": 0.0018
+        },
+        "delete_s": {
+          "p50": 0.0048
+        },
+        "polls_mean": 136.2,
+        "overhead_s": {
+          "p50": 0.002
+        }
+      },
+      "resources": {
+        "samples": 82,
+        "neuroncore_util_mean_pct": 2.4,
+        "rss_peak_gb": 26.26
+      },
+      "neuron": {
+        "samples": 206,
+        "neuroncore_util_mean_pct": 87.5,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 87.59
+      }
+    },
+    {
+      "concurrency": 2,
+      "requests": 6,
+      "successes": 6,
+      "wall_s": 205.12,
+      "throughput_per_s": 0.0293,
+      "throughput_per_hour": 105.3,
+      "latency_s": {
+        "p50": 68.321,
+        "p90": 68.462,
+        "p99": 68.473,
+        "mean": 62.668,
+        "min": 34.24,
+        "max": 68.474
+      },
+      "http_codes": {
+        "200": 6
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 34.24,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0034,
+          "create_http": 200,
+          "job_id": "video_gen_bba62e05c46144d8b83b298e6542475c",
+          "queued_s": 0.255,
+          "terminal_s": 34.239,
+          "polls": 136,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746596,
+          "completed_at": 1789746630,
+          "download_s": 0.0016,
+          "delete_s": 0.004,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 68.474,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0061,
+          "create_http": 200,
+          "job_id": "video_gen_55a31b5cdb27413abcf908ea57a8571c",
+          "queued_s": 34.238,
+          "terminal_s": 68.472,
+          "polls": 272,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746596,
+          "completed_at": 1789746664,
+          "download_s": 0.002,
+          "delete_s": 0.0045,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 68.45,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0023,
+          "create_http": 200,
+          "job_id": "video_gen_bc0fff78250447da874e0fded88870ac",
+          "queued_s": 34.227,
+          "terminal_s": 68.449,
+          "polls": 272,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746630,
+          "completed_at": 1789746698,
+          "download_s": 0.0015,
+          "delete_s": 0.0039,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 68.203,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0022,
+          "create_http": 200,
+          "job_id": "video_gen_008e3be1f8e3443eb927f06b15c69e11",
+          "queued_s": 34.215,
+          "terminal_s": 68.201,
+          "polls": 271,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746664,
+          "completed_at": 1789746733,
+          "download_s": 0.0018,
+          "delete_s": 0.005,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 68.212,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0022,
+          "create_http": 200,
+          "job_id": "video_gen_a77a33a5f8cb4206bfbe19c167b00b81",
+          "queued_s": 33.981,
+          "terminal_s": 68.21,
+          "polls": 271,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746699,
+          "completed_at": 1789746767,
+          "download_s": 0.0017,
+          "delete_s": 0.0043,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 68.43,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0024,
+          "create_http": 200,
+          "job_id": "video_gen_285e846814aa4d36adc39a30327ea8bd",
+          "queued_s": 34.222,
+          "terminal_s": 68.428,
+          "polls": 272,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746733,
+          "completed_at": 1789746801,
+          "download_s": 0.0016,
+          "delete_s": 0.004,
+          "delete_http": 200
+        }
+      ],
+      "async": {
+        "create_s": {
+          "p50": 0.0023,
+          "p90": 0.0047,
+          "max": 0.0061
+        },
+        "queued_s": {
+          "p50": 34.219,
+          "max": 34.238
+        },
+        "terminal_s": {
+          "p50": 68.319
+        },
+        "download_s": {
+          "p50": 0.0016
+        },
+        "delete_s": {
+          "p50": 0.0042
+        },
+        "polls_mean": 249,
+        "overhead_s": {
+          "p50": 0.002
+        }
+      },
+      "resources": {
+        "samples": 82,
+        "neuroncore_util_mean_pct": 3.7,
+        "rss_peak_gb": 26.27
+      },
+      "neuron": {
+        "samples": 205,
+        "neuroncore_util_mean_pct": 87.8,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 87.59
+      }
+    },
+    {
+      "concurrency": 4,
+      "requests": 6,
+      "successes": 6,
+      "wall_s": 205.093,
+      "throughput_per_s": 0.0293,
+      "throughput_per_hour": 105.3,
+      "latency_s": {
+        "p50": 119.651,
+        "p90": 136.764,
+        "p99": 136.878,
+        "mean": 102.588,
+        "min": 34.232,
+        "max": 136.891
+      },
+      "http_codes": {
+        "200": 6
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 34.232,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0048,
+          "create_http": 200,
+          "job_id": "video_gen_e84f7737d1ff4585890905bd245da252",
+          "queued_s": 0.257,
+          "terminal_s": 34.231,
+          "polls": 136,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746801,
+          "completed_at": 1789746835,
+          "download_s": 0.0016,
+          "delete_s": 0.0046,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 68.465,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0078,
+          "create_http": 200,
+          "job_id": "video_gen_7bd1365c772647799895ce65bdaeb67f",
+          "queued_s": 34.235,
+          "terminal_s": 68.462,
+          "polls": 272,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746801,
+          "completed_at": 1789746869,
+          "download_s": 0.003,
+          "delete_s": 0.004,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 102.685,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0086,
+          "create_http": 200,
+          "job_id": "video_gen_58d6094c01334f9cb8079a6ba045ce8f",
+          "queued_s": 68.463,
+          "terminal_s": 102.683,
+          "polls": 408,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746801,
+          "completed_at": 1789746904,
+          "download_s": 0.0017,
+          "delete_s": 0.004,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 136.891,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0088,
+          "create_http": 200,
+          "job_id": "video_gen_9758ad7ee85d4aea9dd2158d3a283df2",
+          "queued_s": 102.682,
+          "terminal_s": 136.889,
+          "polls": 544,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746801,
+          "completed_at": 1789746938,
+          "download_s": 0.0019,
+          "delete_s": 0.0038,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 136.638,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0022,
+          "create_http": 200,
+          "job_id": "video_gen_c756b649c0c94189b2ec9b17f0805e9f",
+          "queued_s": 102.652,
+          "terminal_s": 136.636,
+          "polls": 543,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746835,
+          "completed_at": 1789746972,
+          "download_s": 0.0019,
+          "delete_s": 0.0039,
+          "delete_http": 200
+        },
+        {
+          "latency_s": 136.618,
+          "http": 200,
+          "bytes": 430492,
+          "error": "",
+          "create_s": 0.0021,
+          "create_http": 200,
+          "job_id": "video_gen_42a4c2be3e6141fdb608556cbb534bd4",
+          "queued_s": 102.403,
+          "terminal_s": 136.615,
+          "polls": 543,
+          "poll_errors": 0,
+          "job_status": "completed",
+          "created_at": 1789746870,
+          "completed_at": 1789747006,
+          "download_s": 0.0021,
+          "delete_s": 0.0053,
+          "delete_http": 200
+        }
+      ],
+      "async": {
+        "create_s": {
+          "p50": 0.0063,
+          "p90": 0.0087,
+          "max": 0.0088
+        },
+        "queued_s": {
+          "p50": 85.433,
+          "max": 102.682
+        },
+        "terminal_s": {
+          "p50": 119.649
+        },
+        "download_s": {
+          "p50": 0.0019
+        },
+        "delete_s": {
+          "p50": 0.004
+        },
+        "polls_mean": 407.7,
+        "overhead_s": {
+          "p50": 0.002
+        }
+      },
+      "resources": {
+        "samples": 82,
+        "neuroncore_util_mean_pct": 0.0,
+        "rss_peak_gb": 26.5
+      },
+      "neuron": {
+        "samples": 205,
+        "neuroncore_util_mean_pct": 87.4,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 87.59
+      }
+    }
+  ],
+  "burst": {
+    "jobs": 6,
+    "admitted": 6,
+    "completed": 6,
+    "http_codes": {
+      "200": 6
+    },
+    "all_acked_s": 0.0179,
+    "create_s": {
+      "p50": 0.0024,
+      "max": 0.0054
+    },
+    "wall_s": 204.704,
+    "throughput_per_hour": 105.5,
+    "completion_s": [
+      34.266,
+      68.169,
+      102.211,
+      136.42,
+      170.491,
+      204.704
+    ],
+    "inter_completion_s": [
+      33.903,
+      34.042,
+      34.209,
+      34.071,
+      34.213
+    ],
+    "records": [
+      {
+        "create_s": 0.0025,
+        "http": 200,
+        "error": "",
+        "submitted_at_s": 0.0,
+        "job_id": "video_gen_c9e41f3882bd4fcbb2cab78e069ee923",
+        "queued_s": 0.27,
+        "job_status": "completed",
+        "completed_s": 34.266,
+        "created_at": 1789747006,
+        "completed_at": 1789747040,
+        "bytes": 430492
+      },
+      {
+        "create_s": 0.0054,
+        "http": 200,
+        "error": "",
+        "submitted_at_s": 0.0026,
+        "job_id": "video_gen_d1d7de0255074475bd757a7740f8b319",
+        "queued_s": 34.267,
+        "job_status": "completed",
+        "completed_s": 68.169,
+        "created_at": 1789747006,
+        "completed_at": 1789747074,
+        "bytes": 430492
+      },
+      {
+        "create_s": 0.0027,
+        "http": 200,
+        "error": "",
+        "submitted_at_s": 0.008,
+        "job_id": "video_gen_56805255ae764b40a35e32566f3932df",
+        "queued_s": 68.169,
+        "job_status": "completed",
+        "completed_s": 102.211,
+        "created_at": 1789747006,
+        "completed_at": 1789747108,
+        "bytes": 430492
+      },
+      {
+        "create_s": 0.0023,
+        "http": 200,
+        "error": "",
+        "submitted_at_s": 0.0108,
+        "job_id": "video_gen_2972b16f001c4e80a258af0dfab4bdfb",
+        "queued_s": 102.212,
+        "job_status": "completed",
+        "completed_s": 136.42,
+        "created_at": 1789747006,
+        "completed_at": 1789747142,
+        "bytes": 430492
+      },
+      {
+        "create_s": 0.0024,
+        "http": 200,
+        "error": "",
+        "submitted_at_s": 0.0131,
+        "job_id": "video_gen_4dc2b6d76f784dbc965023d2db70e216",
+        "queued_s": 136.42,
+        "job_status": "completed",
+        "completed_s": 170.491,
+        "created_at": 1789747006,
+        "completed_at": 1789747177,
+        "bytes": 430492
+      },
+      {
+        "create_s": 0.0024,
+        "http": 200,
+        "error": "",
+        "submitted_at_s": 0.0155,
+        "job_id": "video_gen_2214865fb8cf4dc894b312ee579b24f4",
+        "queued_s": 170.492,
+        "job_status": "completed",
+        "completed_s": 204.704,
+        "created_at": 1789747006,
+        "completed_at": 1789747211,
+        "bytes": 430492
+      }
+    ]
+  },
+  "resources_by_phase": {
+    "startup": {
+      "samples": 1,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 26.13
+    },
+    "warmup": {
+      "samples": 27,
+      "neuroncore_util_mean_pct": 3.7,
+      "rss_peak_gb": 26.15
+    },
+    "c1": {
+      "samples": 82,
+      "neuroncore_util_mean_pct": 2.4,
+      "rss_peak_gb": 26.26
+    },
+    "c2": {
+      "samples": 82,
+      "neuroncore_util_mean_pct": 3.7,
+      "rss_peak_gb": 26.27
+    },
+    "c4": {
+      "samples": 82,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 26.5
+    },
+    "burst6": {
+      "samples": 41,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 26.29
+    }
+  },
+  "method": "closed loop over the async Videos job API: each request = POST /v1/videos (create) -> poll GET /v1/videos/{id} every poll_interval_s until terminal -> GET .../content -> DELETE; latency = create start -> content downloaded (DELETE excluded), so it is quantised by the poll interval; throughput = successes / level wall; the same single FIFO + one resident worker as the sync path, so c>1 measures queueing (jobs wait server-side without an open connection), not parallel execution; burst = N creates back to back then poll"
+}
