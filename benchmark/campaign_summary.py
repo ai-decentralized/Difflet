@@ -493,6 +493,80 @@ def serving_table(price: float | None, models=CAMPAIGN_MODELS) -> list[str]:
     return L
 
 
+def serving_async_table(models=CAMPAIGN_MODELS) -> list[str]:
+    """Async Videos job API (/v1/videos) vs the blocking /v1/videos/sync, from
+    benchmark/<device>/serving/<slug>_tp4_async.json and <slug>_tp4_sync.json
+    (same server session, same host) next to the committed <slug>_tp4.json
+    (the sync pass of the campaign host)."""
+    sdir = Path("benchmark") / "trn2" / "serving"
+    rows = []
+    for slug in models:
+        a = sdir / f"{slug}_tp4_async.json"
+        if not a.exists():
+            continue
+        s = sdir / f"{slug}_tp4_sync.json"
+        c = sdir / f"{slug}_tp4.json"
+        rows.append((slug, json.loads(a.read_text()),
+                     json.loads(s.read_text()) if s.exists() else None,
+                     json.loads(c.read_text()) if c.exists() else None))
+    if not rows:
+        return []
+    L = ["### Serving layer: async Videos job API vs sync (same server session, tp4)", "",
+         "| model | API | c=1 p50 / p90 | c=2 p50 | c=4 p50 | throughput (c=1) | "
+         "create ack p50 / max | queue wait p50 (c=1) | poll + download overhead p50 | "
+         "burst: admitted / N, all acked, wall, rate | errors |",
+         "|---|---|---:|---:|---:|---:|---:|---:|---:|---|---:|"]
+
+    def p50(d, c):
+        lv = {l["concurrency"]: l for l in d["levels"]}.get(c) or {}
+        return (lv.get("latency_s") or {}).get("p50")
+
+    def fmt(x, nd=1, unit=" s"):
+        return f"{x:.{nd}f}{unit}" if isinstance(x, (int, float)) else "—"
+
+    for slug, asy, syn, committed in rows:
+        for name, d in (("sync (committed 2026-09-13 host)", committed),
+                        ("sync `/v1/videos/sync` (this session)", syn),
+                        ("**async `/v1/videos`** (this session)", asy)):
+            if d is None:
+                continue
+            lv = {l["concurrency"]: l for l in d["levels"]}
+            l1 = lv.get(1) or {}
+            lat = l1.get("latency_s") or {}
+            thr = l1.get("throughput_per_hour")
+            errs = sum(v for l in d["levels"] for k, v in l["http_codes"].items() if k != "200")
+            asy_l1 = l1.get("async") or {}
+            create = asy_l1.get("create_s") or {}
+            create_s = (f"{create['p50']*1000:.0f} / {create['max']*1000:.0f} ms"
+                        if create.get("p50") is not None else "—")
+            queue_s = fmt((asy_l1.get("queued_s") or {}).get("p50"), 2)
+            over_s = fmt((asy_l1.get("overhead_s") or {}).get("p50"), 2)
+            b = d.get("burst")
+            if b:
+                burst_s = (f"{b['admitted']} / {b['jobs']}, acked in {b['all_acked_s']*1000:.0f} ms, "
+                           f"wall {b['wall_s']:.0f} s, {b['throughput_per_hour']:.0f}/h"
+                           + (f" (codes {b['http_codes']})" if len(b["http_codes"]) > 1 else ""))
+            else:
+                burst_s = "—"
+            L.append(f"| {_NAMES.get(slug, slug)} | {name} | **{fmt(lat.get('p50'), 2)}** / "
+                     f"{fmt(lat.get('p90'), 2)} | {fmt(p50(d, 2), 2)} | {fmt(p50(d, 4), 2)} | "
+                     f"{fmt(thr, 0, ' videos/h')} | {create_s} | {queue_s} | {over_s} | {burst_s} | "
+                     f"{errs} |")
+    L += ["",
+          "Same server command line and the same closed-loop client as the sync rows (c in-flight "
+          "until N complete, no think time). Async request = `POST /v1/videos` (returns the queued "
+          "job) → poll `GET /v1/videos/{id}` every 0.25 s → `GET …/content` → `DELETE`; latency = "
+          "create → content downloaded (DELETE excluded), so it is quantised by the poll interval. "
+          "Both APIs share the server's single admission FIFO and its one resident worker "
+          "(`difflet/serving/video_service.py`, `factory.py`), so the device time per request is "
+          "identical by construction: what async changes is the client side — the create "
+          "acknowledgement (the job object) instead of a held connection, server-side queueing at "
+          "c > 1, and burst absorption (N creates back to back; the server admits "
+          "1 + `--max-queued-requests` = 9, the rest get 429). Image models have no async endpoint.",
+          ""]
+    return L
+
+
 def speedup_table(labels: list[str], models=CAMPAIGN_MODELS) -> list[str]:
     L = ["### DiT per-step vs tp4 (lower is better; ratio = tp4 / config; a step with two "
          "sequential CFG calls counts both calls)", "",
@@ -557,6 +631,7 @@ def render(labels: list[str], price: float | None, price_note: str) -> str:
     if sweep_labels:
         L += alpha_sweep_table(sweep_labels)
     L += serving_table(price)
+    L += serving_async_table()
     L += speedup_table(feature_labels)
     L += [
         "⁰ DiT per-step: mean of the inter-step deltas (n = steps − 1). ¹ compile = full `difflet "
