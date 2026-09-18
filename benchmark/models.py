@@ -326,8 +326,11 @@ CONFIGS: dict[str, dict[str, Any]] = {
 # Skips are capped at cadence 2's count by the controller's no-two-skips-in-a-
 # row latch, so values above ~0.6 can only confirm saturation.
 ONLINE_DELTA_SWEEP: dict[str, float] = {
-    f"tp4tcod{int(round(a * 10)):02d}": a for a in (0.2, 0.3, 0.4, 0.5, 0.6, 0.8)
+    f"tp4tcod{int(round(a * 10)):02d}": a for a in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8)
 }
+# 0.1 was added after the 0.2 pass for the two models whose traces fall below
+# 0.1 x baseline inside the window (FLUX, HunyuanVideo); the others skip nothing
+# already at 0.2, so 0.1 is left "not measured" for them by design.
 CONFIGS.update({label: {"teacache_online_delta": a} for label, a in ONLINE_DELTA_SWEEP.items()})
 
 
