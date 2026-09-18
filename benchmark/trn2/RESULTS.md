@@ -332,6 +332,58 @@ NxDI's `NeuronFluxApplication` loads the full diffusers pipeline on the host in 
 
 ⁷ loop ms/step = denoise-loop wall (first DiT call entry → last call exit) ÷ scheduler steps, so a skipped step counts as ~0 — the per-step figure TeaCache actually changes; the DiT call column is the unchanged cost of one real call. tp4 skips nothing, so its loop figure is its DiT call time (× calls per step). ⁸ PSNR of this cell's output against the tp4 output at the same seed (pixel space; SSIM when scikit-image is installed); an identical output means the controller skipped nothing.
 
+### TeaCache online-delta α sweep (same tp4 artifact, same seed, one host)
+
+| model | α (cell) | skipped / steps (evidence) | skipped step indices | loop ms/step: tp4 → TC⁷ | warm e2e | output vs tp4 (PSNR / SSIM)⁸ | trace what-if⁹ |
+|---|---|---:|---|---:|---:|---|---|
+| FLUX.1-dev | cadence 2 (ref) | **9/28** (stats line) | — | 271 → **184** (1.47×) | 41 → 39 s | 41.3 dB | — |
+| FLUX.1-dev | 0.6 (committed 2026-09-13 host) | **9/28** (stats line) | — | 271 → **184** (1.47×) | 41 → 38 s | 39.7 dB | first skip @ step 5; knee α ≈ 0.05 (from tp4tcod01) |
+| FLUX.1-dev | 0.1 (tp4tcod01) | **6/28** (stats line) | 9, 13, 15, 17, 19, 22 | 271 → **213** (1.27×) | 41 → 41 s | 42.8 dB | first skip @ step 9; knee α ≈ 0.05 (from tp4tcod01) |
+| FLUX.1-dev | 0.2 (tp4tcod02) | **8/28** (stats line) | 5, 7, 9, 13, 15, 17, 19, 21 | 271 → **194** (1.40×) | 41 → 39 s | 37.6 dB | first skip @ step 5; knee α ≈ 0.05 (from tp4tcod01) |
+| FLUX.1-dev | 0.3 (tp4tcod03) | **9/28** (stats line) | 5, 7, 9, 11, 13, 16, 18, 20, 22 | 271 → **184** (1.47×) | 41 → 40 s | 39.0 dB | first skip @ step 5; knee α ≈ 0.05 (from tp4tcod01) |
+| FLUX.1-dev | 0.4 (tp4tcod04) | **9/28** (stats line) | 5, 7, 9, 11, 13, 15, 17, 19, 21 | 271 → **184** (1.47×) | 41 → 38 s | 39.7 dB | first skip @ step 5; knee α ≈ 0.05 (from tp4tcod01) |
+| FLUX.1-dev | 0.5 (tp4tcod05) | **9/28** (stats line) | 5, 7, 9, 11, 13, 15, 17, 19, 21 | 271 → **184** (1.47×) | 41 → 39 s | 39.7 dB | first skip @ step 5; knee α ≈ 0.05 (from tp4tcod01) |
+| FLUX.1-dev | 0.6 (tp4tcod06) | **9/28** (stats line) | 5, 7, 9, 11, 13, 15, 17, 19, 21 | 271 → **184** (1.47×) | 41 → 40 s | 39.7 dB | first skip @ step 5; knee α ≈ 0.05 (from tp4tcod01) |
+| FLUX.1-dev | 0.8 (tp4tcod08) | **9/28** (stats line) | 5, 7, 9, 11, 13, 15, 17, 19, 21 | 271 → **184** (1.47×) | 41 → 39 s | 39.7 dB | first skip @ step 5; knee α ≈ 0.05 (from tp4tcod01) |
+| Qwen-Image | cadence 2 (ref) | **5/20** (DiT-call count) | — | 417 → **353** (1.18×) | 65 → 62 s | 45.2 dB | — |
+| Qwen-Image | 0.6 (committed 2026-09-13 host) | **5/20** (DiT-call count) | — | 417 → **344** (1.21×) | 65 → 64 s | 45.0 dB | first skip @ step 5; knee α ≈ 0.14 (from tp4tcod02) |
+| Qwen-Image | 0.1 (tp4tcod01) | not measured | | | | | |
+| Qwen-Image | 0.2 (tp4tcod02) | **3/20** (stats line) | 7, 10, 13 | 417 → **392** (1.07×) | 65 → 64 s | 46.1 dB | first skip @ step 7; knee α ≈ 0.14 (from tp4tcod02) |
+| Qwen-Image | 0.3 (tp4tcod03) | **4/20** (stats line) | 5, 7, 10, 12 | 417 → **380** (1.10×) | 65 → 67 s | 44.8 dB | first skip @ step 5; knee α ≈ 0.14 (from tp4tcod02) |
+| Qwen-Image | 0.4 (tp4tcod04) | **5/20** (stats line) | 5, 7, 9, 11, 14 | 417 → **343** (1.22×) | 65 → 62 s | 45.8 dB | first skip @ step 5; knee α ≈ 0.14 (from tp4tcod02) |
+| Qwen-Image | 0.5 (tp4tcod05) | **5/20** (stats line) | 5, 7, 9, 11, 13 | 417 → **357** (1.17×) | 65 → 68 s | 45.0 dB | first skip @ step 5; knee α ≈ 0.14 (from tp4tcod02) |
+| Qwen-Image | 0.6 (tp4tcod06) | **5/20** (stats line) | 5, 7, 9, 11, 13 | 417 → **343** (1.22×) | 65 → 63 s | 45.0 dB | first skip @ step 5; knee α ≈ 0.14 (from tp4tcod02) |
+| Qwen-Image | 0.8 (tp4tcod08) | **5/20** (stats line) | 5, 7, 9, 11, 13 | 417 → **353** (1.18×) | 65 → 64 s | 45.0 dB | first skip @ step 5; knee α ≈ 0.14 (from tp4tcod02) |
+| LTX-2 | cadence 2 (ref) | **5/20** (stats line) | — | 459 → **345** (1.33×) | 56 → 56 s | 36.6 dB | — |
+| LTX-2 | 0.6 (committed 2026-09-13 host) | **4/20** (stats line) | — | 459 → **368** (1.25×) | 56 → 54 s | 36.5 dB | first skip @ step 5; knee α ≈ 0.36 (from tp4tcod02) |
+| LTX-2 | 0.1 (tp4tcod01) | not measured | | | | | |
+| LTX-2 | 0.2 (tp4tcod02) | **0/20** (stats line) | none | 459 → **460** (1.00×) | 56 → 57 s | **identical (no-op)** | no skip; knee α ≈ 0.36 (from tp4tcod02) |
+| LTX-2 | 0.3 (tp4tcod03) | **0/20** (stats line) | none | 459 → **460** (1.00×) | 56 → 58 s | **identical (no-op)** | no skip; knee α ≈ 0.36 (from tp4tcod02) |
+| LTX-2 | 0.4 (tp4tcod04) | **1/20** (stats line) | 7 | 459 → **437** (1.05×) | 56 → 57 s | 36.9 dB | first skip @ step 7; knee α ≈ 0.36 (from tp4tcod02) |
+| LTX-2 | 0.5 (tp4tcod05) | **3/20** (stats line) | 5, 7, 10 | 459 → **391** (1.17×) | 56 → 57 s | 37.1 dB | first skip @ step 5; knee α ≈ 0.36 (from tp4tcod02) |
+| LTX-2 | 0.6 (tp4tcod06) | **4/20** (stats line) | 5, 7, 10, 13 | 459 → **368** (1.25×) | 56 → 56 s | 36.5 dB | first skip @ step 5; knee α ≈ 0.36 (from tp4tcod02) |
+| LTX-2 | 0.8 (tp4tcod08) | **5/20** (stats line) | 5, 7, 9, 11, 14 | 459 → **345** (1.33×) | 56 → 56 s | 37.2 dB | first skip @ step 5; knee α ≈ 0.36 (from tp4tcod02) |
+| HunyuanVideo | cadence 2 (ref) | **5/20** (stats line) | — | 814 → **624** (1.30×) | 115 → 109 s | 31.8 dB | — |
+| HunyuanVideo | 0.6 (committed 2026-09-13 host) | **5/20** (stats line) | — | 814 → **623** (1.31×) | 115 → 109 s | 24.1 dB | first skip @ step 5; knee α ≈ 0.06 (from tp4tcod01) |
+| HunyuanVideo | 0.1 (tp4tcod01) | **3/20** (stats line) | 9, 12, 14 | 814 → **704** (1.16×) | 115 → 113 s | 35.5 dB | first skip @ step 9; knee α ≈ 0.06 (from tp4tcod01) |
+| HunyuanVideo | 0.2 (tp4tcod02) | **4/20** (stats line) | 7, 9, 12, 14 | 814 → **667** (1.22×) | 115 → 111 s | 33.2 dB | first skip @ step 7; knee α ≈ 0.06 (from tp4tcod01) |
+| HunyuanVideo | 0.3 (tp4tcod03) | **5/20** (stats line) | 5, 8, 10, 12, 14 | 814 → **623** (1.31×) | 115 → 109 s | 22.5 dB | first skip @ step 5; knee α ≈ 0.06 (from tp4tcod01) |
+| HunyuanVideo | 0.4 (tp4tcod04) | **5/20** (stats line) | 5, 8, 10, 12, 14 | 814 → **630** (1.29×) | 115 → 110 s | 22.5 dB | first skip @ step 5; knee α ≈ 0.06 (from tp4tcod01) |
+| HunyuanVideo | 0.5 (tp4tcod05) | **5/20** (stats line) | 5, 7, 9, 11, 13 | 814 → **623** (1.31×) | 115 → 109 s | 24.1 dB | first skip @ step 5; knee α ≈ 0.06 (from tp4tcod01) |
+| HunyuanVideo | 0.6 (tp4tcod06) | **5/20** (stats line) | 5, 7, 9, 11, 13 | 814 → **623** (1.31×) | 115 → 106 s | 24.1 dB | first skip @ step 5; knee α ≈ 0.06 (from tp4tcod01) |
+| HunyuanVideo | 0.8 (tp4tcod08) | **5/20** (stats line) | 5, 7, 9, 11, 13 | 814 → **626** (1.30×) | 115 → 114 s | 24.1 dB | first skip @ step 5; knee α ≈ 0.06 (from tp4tcod01) |
+| Wan 2.1 14B | cadence 2 (ref) | **5/20** (stats line) | — | 575 → **441** (1.31×) | 85 → 78 s | 36.7 dB | — |
+| Wan 2.1 14B | 0.6 (committed 2026-09-13 host) | **5/20** (stats line) | — | 575 → **439** (1.31×) | 85 → 80 s | 36.2 dB | first skip @ step 5; knee α ≈ 0.27 (from tp4tcod02) |
+| Wan 2.1 14B | 0.1 (tp4tcod01) | not measured | | | | | |
+| Wan 2.1 14B | 0.2 (tp4tcod02) | **0/20** (stats line) | none | 575 → **584** (0.99×) | 85 → 83 s | **identical (no-op)** | no skip; knee α ≈ 0.27 (from tp4tcod02) |
+| Wan 2.1 14B | 0.3 (tp4tcod03) | **2/20** (stats line) | 8, 11 | 575 → **526** (1.09×) | 85 → 80 s | 37.5 dB | first skip @ step 8; knee α ≈ 0.27 (from tp4tcod02) |
+| Wan 2.1 14B | 0.4 (tp4tcod04) | **3/20** (stats line) | 7, 9, 12 | 575 → **497** (1.16×) | 85 → 79 s | 36.7 dB | first skip @ step 7; knee α ≈ 0.27 (from tp4tcod02) |
+| Wan 2.1 14B | 0.5 (tp4tcod05) | **4/20** (stats line) | 5, 7, 9, 11 | 575 → **469** (1.23×) | 85 → 82 s | 36.4 dB | first skip @ step 5; knee α ≈ 0.27 (from tp4tcod02) |
+| Wan 2.1 14B | 0.6 (tp4tcod06) | **5/20** (stats line) | 5, 7, 9, 11, 13 | 575 → **441** (1.30×) | 85 → 79 s | 36.2 dB | first skip @ step 5; knee α ≈ 0.27 (from tp4tcod02) |
+| Wan 2.1 14B | 0.8 (tp4tcod08) | **5/20** (stats line) | 5, 7, 9, 11, 13 | 575 → **444** (1.29×) | 85 → 77 s | 36.2 dB | first skip @ step 5; knee α ≈ 0.27 (from tp4tcod02) |
+
+The controller (`difflet/pipeline/teacache.py`, online-delta mode) skips step *s* iff the rel-L1 delta of the last full step is < α × baseline, where the baseline is the first measured delta (step 1, inside the 5-step warmup, where the trajectory moves fastest) and never skips two steps in a row — so skips are capped at cadence 2's count (9/28, 5/20) whatever α, and α only chooses WHICH of the eligible steps go. Warm e2e is load-dominated and shown only for completeness. ⁹ what-if = read off the lowest-α run's per-step delta trace: the first eligible step the rule would skip at this α, and the knee α below which it would skip nothing; exact only up to that run's own first skip (a skip changes the trajectory after it).
+
 ### Serving layer: `difflet serve` (resident model, tp4) vs the CLI
 
 | model | endpoint | startup → /ready: first (compiles) / warm⁹ | c=1 p50 / p90 / p99 | c=2 p50 | c=4 p50 | throughput (any c) | CLI warm e2e → resident speedup | NeuronCore util (c=1)¹⁰ | device mem | errors | cost / 1k¹¹ |
@@ -564,6 +616,67 @@ adaptive is **not a win over fixed cadence 2**. It ties cadence on the probe mod
 run at all on HunyuanVideo. Fixed cadence 2 remains the better probe-free default; calibrated
 adaptive earns its keep only for a probe model (fused, on-device signal) run at a higher target
 than cadence's budget — a follow-up this campaign did not measure.
+
+**Online-delta α sweep (`tp4tcod01`…`tp4tcod08`, `--teacache-online-delta` 0.1 / 0.2 / 0.3 / 0.4 /
+0.5 / 0.6 / 0.8; measured 2026-09-18, one host; table "TeaCache online-delta α sweep" above).**
+The campaign's `tp4tcod` rows all used the repo default α = 0.6; this sweep varies it per model on
+the same tp4 artifact (the flag is generate-only and outside the compile-cache key, so no
+recompile), with the 0.6 point re-measured here as the cross-host check: skip counts, skipped
+steps and PSNRs reproduce the 2026-09-13 rows exactly and loop ms/step within 2 ms. For the sweep
+the controller now records *which* steps it skipped and the per-step rel-L1 delta trace (JSON
+`teacache.stats`, and the `[teacache] stats` line — Qwen-Image prints one now too), which is
+what makes the curve readable. Two mechanics decide everything:
+
+- *The skip count is capped at cadence 2's by construction.* The controller never skips two
+  steps in a row and only inside the 5-step warmup / cooldown window, so the most it can skip is
+  9/28 (FLUX) or 5/20 — every model reaches that cap somewhere between α = 0.3 and 0.8 and is
+  flat above it (0.6 and 0.8 are identical on all five). α therefore chooses *which* eligible
+  steps go, not how many; the loop speedup at the cap is cadence 2's (1.47× / 1.22× / 1.33× /
+  1.31× / 1.30× for FLUX / Qwen / LTX-2 / HV / Wan).
+- *The baseline is the step-1 delta* (the first measured one, inside the warmup, where the
+  trajectory moves fastest — not the post-warmup delta the code comment described; corrected).
+  Per-model delta traces show why the knees differ so much: by step 5 the delta has fallen to
+  ~0.1× the baseline on FLUX and HunyuanVideo, ~0.2× on Qwen, but only ~0.4× on LTX-2 and ~0.3×
+  on Wan. So the same α is "loose" on the first two and "tight" on the last two — **there is no
+  single right α**; the knee (the α below which nothing is skipped) is ≈ 0.05 FLUX, 0.06 HV,
+  0.14 Qwen, 0.27 Wan, 0.36 LTX-2.
+
+Per model (skips / loop ms/step / PSNR vs same-seed tp4; cadence 2 in brackets):
+
+- *FLUX.1-dev.* 0.1: **6/28, 213 ms (1.27×), 42.8 dB** — fewer skips than cadence 2 but a
+  *better* image than it (41.3); 0.2: 8/28, 194 ms, 37.6 dB (skips 13–21 in a run, the worst
+  quality point); 0.3: 9/28, 39.0 dB; **0.4 and above: 9/28 at exactly the cadence-2 pattern
+  (5,7,…,21), 184 ms, 39.7 dB** — the controller *becomes* cadence 2.
+- *Qwen-Image.* 0.2: 3/20, 392 ms (1.07×), 46.1 dB; 0.3: 4/20, 44.8; 0.4: 5/20 (5,7,9,11,14),
+  **343 ms (1.22×), 45.8 dB** — at the cap with the best quality; 0.5 and above: the cadence-2
+  pattern, 45.0 dB (cadence 45.2). Every point is within 1.3 dB; Qwen is insensitive to which
+  steps go.
+- *LTX-2.* Nothing skipped at 0.2 or 0.3 (output bit-identical to tp4); 0.4: 1/20 (step 7),
+  36.9 dB; 0.5: 3/20, 391 ms, 37.1; 0.6: 4/20, 368 ms, 36.5 (the committed row); **0.8: 5/20,
+  345 ms (1.33×), 37.2 dB** — the only model where going *above* 0.6 changes anything, and it
+  reaches cadence 2's speed with better PSNR than cadence (36.6).
+- *HunyuanVideo — the one that matters.* 0.1: 3/20 (9,12,14), 704 ms (1.16×), **35.5 dB**;
+  0.2: 4/20 (7,9,12,14), 667 ms (1.22×), **33.2 dB**; 0.3–0.4: 5/20 but skipping **step 5**
+  (5,8,10,12,14) → **22.5 dB**; 0.5–0.8: the cadence-2 pattern → 24.1 dB (the committed 0.6
+  row; cadence 2 itself 31.8). The step-5 skip alone costs ~10 dB: HunyuanVideo's early
+  post-warmup steps are still shaping the video even though their output delta already looks
+  flat (0.1× baseline). The α = 0.6 "cliff" reported for this model is therefore a threshold
+  choice, not an inherent cost of the controller — at 0.2 it beats fixed cadence by 1.4 dB for
+  one fewer skip.
+- *Wan 2.1.* Nothing skipped at 0.2; 0.3: 2/20, 526 ms, **37.5 dB** (above cadence's 36.7);
+  0.4: 3/20, 497 ms, 36.7; 0.5: 4/20, 469 ms, 36.4; 0.6 and above: 5/20 cadence-2 pattern,
+  441 ms (1.30×), 36.2. A smooth, ±1 dB trade of skips for quality.
+
+**Bottom line for the online-delta mode:** as shipped (step-1 baseline, no consecutive skips)
+it is a way of *selecting* a subset of cadence 2's skip slots, and the default α = 0.6 lands on
+plain cadence 2 for four of the five models — so the earlier "equal speed, more predictable
+quality → prefer fixed cadence" conclusion stands for the default. What the sweep adds is a
+per-model operating point that fixed cadence cannot express: **HunyuanVideo at α = 0.2 (1.22×,
+33.2 dB) or 0.1 (1.16×, 35.5 dB)** instead of cadence 2's 1.30× at 31.8 dB, **FLUX at 0.1
+(1.27×, 42.8 dB)** for quality-first use, and **LTX-2 at 0.8** (cadence-2 speed, +0.6 dB). A
+single global default is wrong; if one number is needed, 0.4 is the least bad (cap reached on
+FLUX / Qwen, HV at its bad pattern though) — better to set α per model, or to fix the two
+mechanics (post-warmup baseline; a minimum step index for the first skip) and re-sweep.
 
 **Serving layer (`difflet serve`, one resident worker, tp4; table "Serving layer" above).**
 Resident per-request latency is the denoise loop plus on-device encode/decode, with no
