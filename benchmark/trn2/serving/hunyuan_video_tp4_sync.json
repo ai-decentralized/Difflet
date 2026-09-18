@@ -1,0 +1,239 @@
+{
+  "model_slug": "hunyuan_video",
+  "config": "tp4",
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "kind": "video",
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "seed": 42,
+  "guidance_scale": 6.0,
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "endpoint": "/v1/videos/sync",
+  "api_mode": "sync",
+  "poll_interval_s": null,
+  "ready_seconds": 5307.024945483,
+  "warmup": [
+    {
+      "latency_s": 34.103,
+      "http": 200,
+      "bytes": 430492,
+      "error": ""
+    },
+    {
+      "latency_s": 34.051,
+      "http": 200,
+      "bytes": 430492,
+      "error": ""
+    }
+  ],
+  "levels": [
+    {
+      "concurrency": 1,
+      "requests": 6,
+      "successes": 6,
+      "wall_s": 204.679,
+      "throughput_per_s": 0.0293,
+      "throughput_per_hour": 105.5,
+      "latency_s": {
+        "p50": 34.103,
+        "p90": 34.158,
+        "p99": 34.199,
+        "mean": 34.113,
+        "min": 34.074,
+        "max": 34.204
+      },
+      "http_codes": {
+        "200": 6
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 34.112,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 34.108,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 34.074,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 34.099,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 34.204,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 34.082,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        }
+      ],
+      "resources": null,
+      "neuron": {
+        "samples": 204,
+        "neuroncore_util_mean_pct": 87.5,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 87.59
+      }
+    },
+    {
+      "concurrency": 2,
+      "requests": 6,
+      "successes": 6,
+      "wall_s": 204.666,
+      "throughput_per_s": 0.0293,
+      "throughput_per_hour": 105.5,
+      "latency_s": {
+        "p50": 68.221,
+        "p90": 68.247,
+        "p99": 68.249,
+        "mean": 62.538,
+        "min": 34.105,
+        "max": 68.249
+      },
+      "http_codes": {
+        "200": 6
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 34.105,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 68.229,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 68.212,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 68.245,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 68.249,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 68.191,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        }
+      ],
+      "resources": null,
+      "neuron": {
+        "samples": 205,
+        "neuroncore_util_mean_pct": 87.6,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 87.59
+      }
+    },
+    {
+      "concurrency": 4,
+      "requests": 6,
+      "successes": 6,
+      "wall_s": 205.287,
+      "throughput_per_s": 0.0292,
+      "throughput_per_hour": 105.2,
+      "latency_s": {
+        "p50": 119.861,
+        "p90": 136.971,
+        "p99": 136.972,
+        "mean": 102.71,
+        "min": 34.155,
+        "max": 136.972
+      },
+      "http_codes": {
+        "200": 6
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 34.155,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 68.44,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 102.874,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 136.969,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 136.972,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        },
+        {
+          "latency_s": 136.847,
+          "http": 200,
+          "bytes": 430492,
+          "error": ""
+        }
+      ],
+      "resources": null,
+      "neuron": {
+        "samples": 205,
+        "neuroncore_util_mean_pct": 87.6,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 87.59
+      }
+    }
+  ],
+  "burst": null,
+  "resources_by_phase": {},
+  "method": "closed loop: c in-flight requests until N complete, no think time; latency = client wall per request incl. queueing; throughput = successes / level wall; one resident worker (max_running_requests=1), so c>1 measures queueing, not parallel execution"
+}
