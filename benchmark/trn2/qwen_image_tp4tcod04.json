@@ -1,0 +1,243 @@
+{
+  "model_id": "Qwen/Qwen-Image",
+  "model_type": "qwen_image",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "compile_seconds": 17.253502989988192,
+  "compile_breakdown": {
+    "wall_total_s": 17.254
+  },
+  "load_seconds": 456.734,
+  "e2e_cold_seconds": 502.54,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 122.854
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 325.74
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 8.14
+      }
+    ],
+    "weights_load_total_s": 456.734,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 502.54,
+    "compute_and_overhead_s": 45.806
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 62.25432216199988,
+    "median": 62.25432216199988,
+    "std": 0.0,
+    "p50": 62.25432216199988,
+    "p90": 62.25432216199988,
+    "min": 62.25432216199988,
+    "max": 62.25432216199988,
+    "samples": [
+      62.25432216199988
+    ]
+  },
+  "step_latency": {
+    "n": 14,
+    "mean": 0.41792247150026796,
+    "median": 0.41781798349984456,
+    "std": 0.0011001927642163235,
+    "p50": 0.4177604419965064,
+    "p90": 0.4184436990035465,
+    "min": 0.4170465229981346,
+    "max": 0.4216251150064636,
+    "samples": [
+      0.4216251150064636,
+      0.4184436990035465,
+      0.41797993700311054,
+      0.41802603600081056,
+      0.41790586899151094,
+      0.4177604419965064,
+      0.41727728900150396,
+      0.4171963030094048,
+      0.4170465229981346,
+      0.4173107859969605,
+      0.4172585009946488,
+      0.4172931890061591,
+      0.4178755250031827,
+      0.4179153869918082
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 2.393
+  },
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved qwen_image_tp4tcod04_out.png"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.4; alpha sweep); tp=4, bf16, joint attention via attention_cte",
+  "status": "ok",
+  "notes": [
+    "per-step = 417.9 ms/DiT-step (median 417.8, p90 418.4, n=14) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronQwenImageTransformerApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 15 DiT calls timed; warm generate 26s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_cold = 503 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 62 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 503 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-09-18 09:00 UTC",
+  "config_slug": "qwen_image_tp4tcod04",
+  "model_slug": "qwen_image",
+  "config": "tp4tcod04",
+  "device_slug": "trn2",
+  "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 4.0,
+  "output_kind": "image",
+  "teacache": {
+    "mode": "online_delta",
+    "cadence": null,
+    "online_delta_alpha": 0.4,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "dit_calls": 15,
+    "skipped_steps_by_calls": 5,
+    "stats": {
+      "full_steps": 15,
+      "skipped_steps": 5,
+      "probe_calls": 0,
+      "last_delta_estimate": 0.018798828125,
+      "cache_initialized": true,
+      "online_delta_alpha": 0.4,
+      "baseline_delta": 0.099609,
+      "skipped_step_indices": [
+        5,
+        7,
+        9,
+        11,
+        14
+      ],
+      "delta_trace": [
+        [
+          1,
+          0.099609
+        ],
+        [
+          2,
+          0.037842
+        ],
+        [
+          3,
+          0.036377
+        ],
+        [
+          4,
+          0.022095
+        ],
+        [
+          6,
+          0.029419
+        ],
+        [
+          8,
+          0.034668
+        ],
+        [
+          10,
+          0.039551
+        ],
+        [
+          12,
+          0.045166
+        ],
+        [
+          13,
+          0.018799
+        ],
+        [
+          15,
+          0.03833
+        ],
+        [
+          16,
+          0.04126
+        ],
+        [
+          17,
+          0.069824
+        ],
+        [
+          18,
+          0.155273
+        ],
+        [
+          19,
+          0.574219
+        ]
+      ]
+    },
+    "skipped_steps_stats_line": 5
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 9.597
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 16.21
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 8.73
+      }
+    ],
+    "weights_load_total_s": 34.537,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 62.254,
+    "compute_and_overhead_s": 27.717
+  },
+  "dit_calls_per_step": 0.75,
+  "dit_calls": 15,
+  "loop_wall_s": 6.853,
+  "loop_step_ms": 342.7,
+  "output_vs_tp4": {
+    "identical": false,
+    "psnr_db": 45.81,
+    "mean_abs_diff": 0.609,
+    "source": "qwen_image_out.png vs qwen_image_tp4tcod04_out.png on this host"
+  }
+}
