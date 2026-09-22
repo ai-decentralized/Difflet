@@ -68,7 +68,9 @@ def test_probe_mod_input_matches_cpu_teacache_mod_input(monkeypatch):
     torch.manual_seed(20)
     reference = HunyuanVideoTransformer3DModel(**kwargs).eval()
     probe = HunyuanVideoTeacacheProbeModel(reference.config).eval()
-    probe.load_state_dict(reference.state_dict())
+    probe.load_state_dict(
+        {k: v for k, v in reference.state_dict().items() if k in probe.state_dict()}
+    )
 
     (
         hidden_states,
@@ -128,7 +130,9 @@ def test_probe_delta_uses_caller_prev_mod_input(monkeypatch):
     torch.manual_seed(20)
     reference = HunyuanVideoTransformer3DModel(**kwargs).eval()
     probe = HunyuanVideoTeacacheProbeModel(reference.config).eval()
-    probe.load_state_dict(reference.state_dict())
+    probe.load_state_dict(
+        {k: v for k, v in reference.state_dict().items() if k in probe.state_dict()}
+    )
 
     inputs = _tiny_bundle()
     seq_len = 2 * (4 // 2) * (4 // 2)  # latent_frames * (h/p) * (w/p)
@@ -161,7 +165,9 @@ def test_probe_delta_zero_when_prev_equals_current(monkeypatch):
     torch.manual_seed(20)
     reference = HunyuanVideoTransformer3DModel(**kwargs).eval()
     probe = HunyuanVideoTeacacheProbeModel(reference.config).eval()
-    probe.load_state_dict(reference.state_dict())
+    probe.load_state_dict(
+        {k: v for k, v in reference.state_dict().items() if k in probe.state_dict()}
+    )
 
     inputs = _tiny_bundle()
     with torch.no_grad():
@@ -173,10 +179,7 @@ def test_probe_delta_zero_when_prev_equals_current(monkeypatch):
 
 
 def test_probe_module_state_dict_matches_wrapped_model(monkeypatch):
-    """The probe IS a HunyuanVideoTransformer3DModel (subclass), so its state
-    dict keys are exactly the transformer's — no ``model.`` prefix. That is
-    what lets the shared weight store serve it from the backbone's shards
-    (see test_hunyuan_video_teacache_probe_keys.py)."""
+    """Probe weights preserve canonical keys while excluding unused blocks."""
     monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
     from difflet.backends.trainium.hunyuan_video.teacache_probe_model import (
@@ -193,5 +196,5 @@ def test_probe_module_state_dict_matches_wrapped_model(monkeypatch):
 
     reference_keys = set(reference.state_dict().keys())
     probe_keys = set(probe.state_dict().keys())
-    assert probe_keys == reference_keys
+    assert probe_keys < reference_keys
     assert not any(key.startswith("model.") for key in probe_keys)

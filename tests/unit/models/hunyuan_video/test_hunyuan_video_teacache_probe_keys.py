@@ -1,17 +1,4 @@
-"""Weight-name contract between the HunyuanVideo TeaCache probes and backbones.
-
-Same property as the flux/qwen probe key tests: each probe's traced weight
-names ARE its backbone's shard keys (plus the declared NEFF-state tensor
-``prev_mod`` for the fused probes), so the shared weight store can serve a
-probe from the backbone's pre-sharded checkpoint with no layout tag and no
-duplicate copy (3f04080 / issue #39). Covers the three HunyuanVideo probes:
-
-* HV-1.0 fused probe   (``model.`` prefix before this change)
-* HV-1.0 v1 probe      (``model.`` prefix before this change; adds no tensors)
-* HV-1.5 fused probe   (``trace_module.transformer.`` prefix before this change)
-
-CPU only — tiny configs, torch-native backend.
-"""
+"""Canonical subset keys for HV 1.0 probes; full canonical keys for HV 1.5."""
 
 from __future__ import annotations
 
@@ -38,12 +25,15 @@ def _aliased_names(wrapper):
     instance = wrapper.get_model_instance()
     instance.load_module()
     module, aliases = instance.get(0)
-    return module, aliases, {
-        name for name, param in module.named_parameters() if any(param is a for a in aliases)
-    }
+    return (
+        module,
+        aliases,
+        {name for name, param in module.named_parameters() if any(param is a for a in aliases)},
+    )
 
 
 # =========================================================== HunyuanVideo 1.0
+
 
 def _hv1_config(tmp_path):
     from difflet.models.hunyuan_video.application import create_hunyuan_video_backbone_config
@@ -107,14 +97,19 @@ def _hv1_modules():
         HunyuanVideoTransformer3DModel,
     )
 
-    return probe_app, probe_model, NeuronHunyuanVideoBackboneApplication, HunyuanVideoTransformer3DModel
+    return (
+        probe_app,
+        probe_model,
+        NeuronHunyuanVideoBackboneApplication,
+        HunyuanVideoTransformer3DModel,
+    )
 
 
-def test_hv1_probe_models_are_the_backbone_transformer():
+def test_hv1_probe_models_construct_only_the_prefix():
     probe_app, probe_model, backbone_app, transformer_cls = _hv1_modules()
     assert backbone_app._model_cls is transformer_cls
-    assert issubclass(probe_model.HunyuanVideoTeacacheProbeFusedModel, transformer_cls)
-    assert issubclass(probe_model.HunyuanVideoTeacacheProbeModel, transformer_cls)
+    assert not issubclass(probe_model.HunyuanVideoTeacacheProbeFusedModel, transformer_cls)
+    assert not issubclass(probe_model.HunyuanVideoTeacacheProbeModel, transformer_cls)
     assert probe_app.NeuronHunyuanVideoTeacacheProbeFusedApplication._model_cls is (
         probe_model.HunyuanVideoTeacacheProbeFusedModel
     )
@@ -134,7 +129,7 @@ def test_hv1_state_declarations():
     assert NeuronApplicationBase.state_tensor_names == frozenset()
 
 
-def test_hv1_parameter_names_equal_backbone_names_plus_declared_state(tmp_path):
+def test_hv1_parameter_names_are_canonical_subset_plus_state(tmp_path):
     probe_app, probe_model, _, transformer_cls = _hv1_modules()
     config = _hv1_config(tmp_path)
     backbone = transformer_cls(config)
@@ -148,25 +143,31 @@ def test_hv1_parameter_names_equal_backbone_names_plus_declared_state(tmp_path):
 
     backbone_names = set(backbone.state_dict())
     fused_state = probe_app.NeuronHunyuanVideoTeacacheProbeFusedApplication.state_tensor_names
-    assert set(fused.state_dict()) - fused_state == backbone_names
+    expected = {
+        k
+        for k in backbone_names
+        if k.startswith(probe_app._HunyuanVideoPrefixApplication.weight_prefixes)
+    }
+    assert expected < backbone_names
+    assert set(fused.state_dict()) - fused_state == expected
     assert set(fused.state_dict()) - backbone_names == fused_state
-    assert set(plain.state_dict()) == backbone_names
+    assert set(plain.state_dict()) == expected
     assert not any(k.startswith("model.") for k in fused.state_dict())
 
 
-def test_hv1_converters_are_the_backbone_converter_and_keys_match(tmp_path):
+def test_hv1_converters_filter_to_the_required_subset(tmp_path):
     probe_app, probe_model, backbone_app, transformer_cls = _hv1_modules()
     fused_app = probe_app.NeuronHunyuanVideoTeacacheProbeFusedApplication
     plain_app = probe_app.NeuronHunyuanVideoTeacacheProbeApplication
-    assert fused_app.convert_hf_to_neuron_state_dict is backbone_app.convert_hf_to_neuron_state_dict
-    assert plain_app.convert_hf_to_neuron_state_dict is backbone_app.convert_hf_to_neuron_state_dict
 
     config = _hv1_config(tmp_path)
     backbone = transformer_cls(config)
     hf = _hv1_hf_state_dict(backbone, config)
     backbone_keys = set(backbone_app.convert_hf_to_neuron_state_dict(dict(hf), config))
-    assert set(fused_app.convert_hf_to_neuron_state_dict(dict(hf), config)) == backbone_keys
-    assert set(plain_app.convert_hf_to_neuron_state_dict(dict(hf), config)) == backbone_keys
+    expected = set(probe_model.HunyuanVideoTeacacheProbeModel(config).state_dict())
+    assert expected < backbone_keys
+    assert set(fused_app.convert_hf_to_neuron_state_dict(dict(hf), config)) == expected
+    assert set(plain_app.convert_hf_to_neuron_state_dict(dict(hf), config)) == expected
     assert "single_transformer_blocks.0.proj_out_attn.weight" in backbone_keys
     assert not any(k.startswith("model.") for k in backbone_keys)
 
@@ -200,20 +201,26 @@ def test_hv1_aliased_tensors_are_exactly_the_declared_state(tmp_path):
     config = _hv1_config(tmp_path)
 
     fused_wrapper = probe_app.ModelWrapperHunyuanVideoTeacacheProbeFused(
-        config, probe_model.HunyuanVideoTeacacheProbeFusedModel, tag="probe",
-        compiler_args="", priority_model_idx=0,
+        config,
+        probe_model.HunyuanVideoTeacacheProbeFusedModel,
+        tag="probe",
+        compiler_args="",
+        priority_model_idx=0,
     )
     module, aliases, aliased = _aliased_names(fused_wrapper)
-    assert isinstance(module, transformer_cls)
+    assert isinstance(module, probe_model.HunyuanVideoTeacachePrefix)
     assert aliased == probe_app.NeuronHunyuanVideoTeacacheProbeFusedApplication.state_tensor_names
     assert set(aliases.values()) == {1}
 
     plain_wrapper = probe_app.ModelWrapperHunyuanVideoTeacacheProbe(
-        config, probe_model.HunyuanVideoTeacacheProbeModel, tag="probe",
-        compiler_args="", priority_model_idx=0,
+        config,
+        probe_model.HunyuanVideoTeacacheProbeModel,
+        tag="probe",
+        compiler_args="",
+        priority_model_idx=0,
     )
     module, aliases, aliased = _aliased_names(plain_wrapper)
-    assert isinstance(module, transformer_cls)
+    assert isinstance(module, probe_model.HunyuanVideoTeacachePrefix)
     assert aliases == {} and aliased == set()
 
 
@@ -354,3 +361,98 @@ def test_hv15_aliased_tensors_and_forward_parity(tmp_path):
     assert torch.equal(mod_input, expected)
     assert tuple(mod_input.shape) == tuple(probe.prev_mod.shape)
     assert torch.isfinite(rel_l1) and rel_l1.item() > 0
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+@pytest.mark.parametrize("guidance_embeds", [True, False])
+def test_hv1_prefix_fused_l2_matches_reference_across_steps(tmp_path, dtype, guidance_embeds):
+    probe_app, probe_model, _, transformer_cls = _hv1_modules()
+    config = _hv1_config(tmp_path)
+    config.guidance_embeds = guidance_embeds
+    reference = transformer_cls(config).to(dtype).eval()
+    probe = (
+        probe_model.HunyuanVideoTeacacheProbeFusedModel(
+            config, seq_len=probe_app._probe_seq_len(config), inner_dim=config.inner_dim
+        )
+        .to(dtype)
+        .eval()
+    )
+    subset = (
+        probe_app.NeuronHunyuanVideoTeacacheProbeFusedApplication.convert_hf_to_neuron_state_dict(
+            reference.state_dict(), config
+        )
+    )
+    missing, unexpected = probe.load_state_dict(subset, strict=False)
+    assert missing == ["prev_mod"] and unexpected == []
+    inputs = list(
+        probe_app.ModelWrapperHunyuanVideoTeacacheProbeFused(config, type(probe)).input_generator()[
+            0
+        ]
+    )
+    inputs = [x.to(dtype) if x.is_floating_point() else x for x in inputs]
+    previous = torch.zeros_like(probe.prev_mod)
+    with torch.no_grad():
+        for step in range(3):
+            inputs[0] = inputs[0] + 0.1
+            inputs[1] = torch.full_like(inputs[1], step + 1)
+            expected = reference.teacache_mod_input(*inputs)
+            delta, current = probe(*inputs)
+            torch.testing.assert_close(current, expected, rtol=0, atol=0)
+            torch.testing.assert_close(
+                delta,
+                torch.linalg.vector_norm((expected - previous).reshape(-1)),
+                rtol=0,
+                atol=0,
+            )
+            # CPU emulates the wrapper's verified device alias update.
+            probe.prev_mod.copy_(current)
+            previous = expected
+
+
+def test_hv1_selective_checkpoint_load_and_cache_identity(tmp_path):
+    from safetensors.torch import save_file
+    from difflet.pipeline.difflet_pipeline import _cache_application_kwargs
+
+    probe_app, _, _, transformer_cls = _hv1_modules()
+    config = _hv1_config(tmp_path)
+    reference = transformer_cls(config)
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    state = _hv1_hf_state_dict(reference, config)
+    save_file(state, str(checkpoint / "model.safetensors"))
+    cls = probe_app.NeuronHunyuanVideoTeacacheProbeFusedApplication
+    loaded = cls.get_state_dict(str(checkpoint), config)
+    assert set(loaded) == {k for k in state if k.startswith(cls.weight_prefixes)}
+    assert set(loaded) < set(state)
+    assert "prev_mod" not in loaded
+    cache = _cache_application_kwargs({"teacache_fused": True}, model_name="hunyuan_video")
+    assert cache["teacache_probe_layout"] == cls.shared_weights_layout
+    assert "teacache_probe_enabled" not in _cache_application_kwargs(
+        {}, model_name="hunyuan_video"
+    )
+
+
+def test_hv1_mask_fix_invalidates_backbone_cache_without_probe():
+    from dataclasses import replace
+
+    from difflet.pipeline.compile_cache import CacheSpec, cache_key
+    from difflet.pipeline.difflet_pipeline import _cache_application_kwargs
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    old = CacheSpec(
+        model_id="hunyuanvideo-community/HunyuanVideo",
+        model_path="/unused/source",
+        model_name="hunyuan_video",
+        parallel=DiffletParallelConfig(tp_degree=4),
+        dtype=torch.bfloat16,
+        height=320,
+        width=512,
+        num_frames=121,
+    )
+    updated = replace(old, application_kwargs=_cache_application_kwargs(
+        None, model_name="hunyuan_video"
+    ))
+    assert cache_key(updated) != cache_key(old)
+    assert cache_key(updated) == cache_key(replace(old, application_kwargs=(
+        _cache_application_kwargs({}, model_name="hunyuan_video")
+    )))

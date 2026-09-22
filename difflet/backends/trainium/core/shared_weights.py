@@ -87,7 +87,7 @@ def _key_inputs(app: Any) -> dict[str, Any]:
     either way, since shape appears in neither form.
     """
     config, neuron_config = app.config, app.neuron_config
-    return {
+    inputs = {
         "scheme": _SCHEME,
         # Resolved source checkpoint. For a HuggingFace cache this pins both
         # the repo and the revision (…/snapshots/<sha>/<component>). The store
@@ -103,6 +103,12 @@ def _key_inputs(app: Any) -> dict[str, Any]:
         "sequence_parallel": bool(getattr(config, "sp_enabled", False)),
         "cfg_parallel": bool(getattr(config, "cfg_parallel_enabled", False)),
     }
+    # Small prefix-only probes must not publish incomplete shards into the
+    # backbone's store. Omit for ordinary apps to preserve existing cache keys.
+    layout = getattr(app, "shared_weights_layout", None)
+    if layout is not None:
+        inputs["weight_layout"] = layout
+    return inputs
 
 
 def store_key(app: Any) -> str:

@@ -44,6 +44,7 @@ class WanOrchestrator:
         tokenizer_path: str | None = None,
         max_text_length: int = 512,
         teacache_calibration_path: str | None = None,
+        teacache_probes: dict[int, Any] | None = None,
         teacache_cadence: int | None = None,
         teacache_online_delta_alpha: float | None = None,
     ) -> None:
@@ -63,11 +64,12 @@ class WanOrchestrator:
         self.tokenizer_path = tokenizer_path or os.path.join(model_path, "tokenizer")
         self.max_text_length = int(max_text_length)
         self._tokenizer = None
-        # TeaCache (cclog 87): adaptive step-skipping. Built lazily on first denoise
-        # because the CPU shadows need the per-stage transformer checkpoint paths.
+        # Adaptive TeaCache uses per-stage device probes when supplied by the
+        # Trainium application; host-only callers retain a CPU shadow fallback.
         self.teacache_calibration_path = teacache_calibration_path
         self._teacache_controller = None
         self._teacache_shadows: dict[int, Any] = {}
+        self._teacache_probes = teacache_probes or {}
         self._teacache_last_model_id: int | None = None
         # Probe-free TeaCache modes (fixed cadence / online-delta): host-side
         # skip decisions only — no CPU shadow, no calibration file, no NEFF
@@ -88,13 +90,12 @@ class WanOrchestrator:
             )
 
     def _maybe_init_teacache(self) -> bool:
-        """Build the TeaCache controller + per-stage CPU shadows once. Returns enabled."""
+        """Build the controller; host-only runtimes retain their CPU signal fallback."""
         if self._teacache_controller is not None:
             return True
         if not self.teacache_calibration_path:
             return False
         from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
-        from difflet.backends.trainium.wan.teacache_cpu_shadow import WanTeacacheCPUShadow
 
         calibration = TeaCacheCalibration.from_json(self.teacache_calibration_path)
         self._teacache_controller = TeaCacheController(calibration)
@@ -106,6 +107,10 @@ class WanOrchestrator:
         for subfolder, model in stages.items():
             if model is None:
                 continue
+            if id(model) in self._teacache_probes:
+                continue
+            from difflet.backends.trainium.wan.teacache_cpu_shadow import WanTeacacheCPUShadow
+
             self._teacache_shadows[id(model)] = WanTeacacheCPUShadow(
                 os.path.join(self.model_path, subfolder), dtype=self.dtype
             )
@@ -379,8 +384,8 @@ class WanOrchestrator:
 
             timestep_batch = _batch_timestep(timestep, latents.shape[0], latents.device, model_dtype)
 
-            # TeaCache: the block-0 modulated-input signal is timestep-only (identical for
-            # cond/uncond), so one host-shadow probe per step drives the skip decision; the
+            # TeaCache: block-0's modulated input depends on latents and timestep,
+            # shared by cond/uncond, so one probe per step drives the skip decision; the
             # cached post-CFG residual is reused when skipping the full DiT evaluation.
             mod_input = None
             should_skip = False
@@ -391,15 +396,24 @@ class WanOrchestrator:
                 diff_norm = None
                 # Fixed-cadence mode skips the block-0 CPU shadow entirely (index-based decision).
                 if ctrl.needs_signal():
-                    shadow = self._teacache_shadows[id(current_model)]
-                    mod_input = shadow.teacache_mod_input(
-                        latents.to(dtype=model_dtype), timestep_batch, prompt_embeds.to(dtype=model_dtype)
-                    )
-                    if ctrl.prev_mod_input is not None:
-                        prev = ctrl.prev_mod_input
-                        cur = mod_input.detach().float().cpu()
-                        denom = prev.abs().mean().clamp_min(1e-8)
-                        diff_norm = float((cur - prev).abs().mean() / denom)
+                    probe = self._teacache_probes.get(id(current_model))
+                    if probe is not None:
+                        # Probe every step to preserve the calibrated step-to-step
+                        # signal, including skip runs. A fresh request/stage first
+                        # overwrites device state while ctrl has no residual yet.
+                        delta = probe.teacache_delta(latents.to(dtype=model_dtype), timestep_batch)
+                        diff_norm = float(delta.detach().cpu().item())
+                        ctrl.note_probe()
+                    else:
+                        shadow = self._teacache_shadows[id(current_model)]
+                        mod_input = shadow.teacache_mod_input(
+                            latents.to(dtype=model_dtype), timestep_batch, prompt_embeds.to(dtype=model_dtype)
+                        )
+                        if ctrl.prev_mod_input is not None:
+                            prev = ctrl.prev_mod_input
+                            cur = mod_input.detach().float().cpu()
+                            denom = prev.abs().mean().clamp_min(1e-8)
+                            diff_norm = float((cur - prev).abs().mean() / denom)
                 should_skip = ctrl.should_skip(step_index, mod_input, diff_norm=diff_norm)
 
             if should_skip:

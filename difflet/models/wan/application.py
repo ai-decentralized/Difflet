@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import os
 from typing import Any
 
@@ -157,6 +158,8 @@ class NeuronWanApplication(MultiComponentApplication):
         self.vae_decoder_path = os.path.join(model_path, "vae")
         self.transformer = None
         self.transformer_2 = None
+        self.teacache_probe = None
+        self.teacache_probe_2 = None
         self.text_encoder = None
         self.vae_decoder = None
         enable_text_encoder = bool(kwargs.get("enable_text_encoder", True))
@@ -280,6 +283,28 @@ class NeuronWanApplication(MultiComponentApplication):
                 config=vae_config,
             )
 
+        from difflet.pipeline.teacache import requires_teacache_probe
+
+        probes = {}
+        if requires_teacache_probe(kwargs):
+            if cfg_parallel_enabled:
+                raise NotImplementedError("Wan adaptive TeaCache does not support CFG parallel.")
+            from difflet.backends.trainium.wan.teacache_probe_fused import (
+                NeuronWanTeacacheProbeFusedApplication,
+            )
+
+            for suffix in ("", "_2"):
+                backbone = getattr(self, f"transformer{suffix}")
+                if backbone is None:
+                    continue
+                probe_config = copy.deepcopy(backbone.config)
+                probe_config.neuron_config.batch_size = batch_size
+                probe = NeuronWanTeacacheProbeFusedApplication(
+                    model_path=getattr(self, f"transformer{suffix}_path"), config=probe_config
+                )
+                setattr(self, f"teacache_probe{suffix}", probe)
+                probes[id(backbone)] = probe
+
         from difflet.models.wan.pipeline import WanOrchestrator
 
         self.pipeline = WanOrchestrator(
@@ -294,6 +319,7 @@ class NeuronWanApplication(MultiComponentApplication):
             num_frames=num_frames,
             max_text_length=text_seq_len,
             teacache_calibration_path=self.kwargs.get("teacache_calibration_path"),
+            teacache_probes=probes,
             # Probe-free modes: runtime-only, never part of the artifact identity.
             teacache_cadence=self.kwargs.get("teacache_cadence"),
             teacache_online_delta_alpha=self.kwargs.get("teacache_online_delta_alpha"),
@@ -313,6 +339,10 @@ class NeuronWanApplication(MultiComponentApplication):
             components.append(ComponentSpec("transformer", self.transformer))
         if self.transformer_2 is not None:
             components.append(ComponentSpec("transformer_2", self.transformer_2))
+        for suffix in ("", "_2"):
+            probe = getattr(self, f"teacache_probe{suffix}", None)
+            if probe is not None:
+                components.append(ComponentSpec(f"teacache_probe{suffix}", probe))
         if self.vae_decoder is not None:
             components.append(ComponentSpec("vae_decoder", self.vae_decoder))
         return components

@@ -546,6 +546,7 @@ class LTX2Orchestrator:
         # Probe-free modes (fixed cadence / online-delta) never compute the
         # block-0 signal on the host CPU transformer.
         probe_free = ctrl is not None and not ctrl.needs_signal()
+        device_probe = bool(getattr(self.transformer, "teacache_probe_fused", False))
         if ctrl is not None:
             from difflet.pipeline.teacache import sync_probe_free_num_steps
 
@@ -628,8 +629,8 @@ class LTX2Orchestrator:
                 dtype=audio_latents.dtype,
             )
 
-            # TeaCache skip decision. The block-0 modulated-input signal is timestep-only
-            # (identical across the cond/uncond CFG halves), so the probe uses the single
+            # TeaCache: block-0's signal depends on latents and timestep, shared
+            # across the cond/uncond CFG halves, so the probe uses the single
             # un-doubled latent + the un-doubled per-batch timestep.
             mod_input = None
             skip = False
@@ -639,15 +640,22 @@ class LTX2Orchestrator:
                 timestep_batch_single = _batch_timestep(
                     timestep, latents.shape[0], latents.device, model_dtype
                 )
-                mod_input = self.transformer.teacache_mod_input(
-                    latents.to(dtype=model_dtype), timestep_batch_single
-                )
                 diff_norm = None
-                if ctrl.prev_mod_input is not None:
-                    prev = ctrl.prev_mod_input
-                    cur = mod_input.detach().float().cpu()
-                    denom = prev.abs().mean().clamp_min(1e-8)
-                    diff_norm = float((cur - prev).abs().mean() / denom)
+                if device_probe:
+                    delta = self.transformer.teacache_delta(
+                        latents.to(dtype=model_dtype), timestep_batch_single
+                    )
+                    diff_norm = float(delta.detach().cpu().item())
+                    ctrl.note_probe()
+                else:
+                    mod_input = self.transformer.teacache_mod_input(
+                        latents.to(dtype=model_dtype), timestep_batch_single
+                    )
+                    if ctrl.prev_mod_input is not None:
+                        prev = ctrl.prev_mod_input
+                        cur = mod_input.detach().float().cpu()
+                        denom = prev.abs().mean().clamp_min(1e-8)
+                        diff_norm = float((cur - prev).abs().mean() / denom)
                 skip = ctrl.should_skip(step_index, mod_input, diff_norm=diff_norm)
 
             if skip:

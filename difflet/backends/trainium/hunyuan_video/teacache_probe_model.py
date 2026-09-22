@@ -1,39 +1,19 @@
-"""HunyuanVideo TeaCache probe models.
+"""HunyuanVideo probes with only the block-0 modulation prefix weights.
 
-Minimal compile targets whose forward executes ONLY the block-0 modulated-input
-path of the full HunyuanVideo transformer, plus a device-side diff against the
-previous step's modulated input. They compile to a small NEFF that exposes the
-modulated-input signal without forcing a full 40-block DiT forward.
-
-The CPU reference is ``HunyuanVideoTransformer3DModel.teacache_mod_input``
-in ``difflet/models/hunyuan_video/modeling_hunyuan_video.py``.
-
-Designed per ``cclogs/m9-teacache/72-teacache-probe-neff-design.md``
-(decoupled architecture: the production DiT NEFF stays untouched; this probe
-NEFF is additive). Each probe *is* a ``HunyuanVideoTransformer3DModel`` — a
-subclass that only replaces ``forward`` — so it has the full weight set for
-compatibility with the production HF state dict, and XLA dead-code
-elimination prunes the unused layers when the NEFF is compiled.
-
-Weight naming — "same weights => same names by construction"
-------------------------------------------------------------
-Subclassing (rather than holding the transformer at ``self.model``) keeps
-every transformer parameter at the attribute path the backbone traces, so the
-names the probe NEFF looks up at ``nxd_model.initialize`` are exactly the
-backbone's shard keys. That lets the shared weight store
-(``core/shared_weights.py``) serve the probe from the backbone's pre-sharded
-checkpoint with no layout tag and no duplicate copy (issue #39; supersedes
-the campaign fix ``3f04080``, which was needed because the wrapper design
-made the probe expect ``<wrapper>.<backbone key>`` and fail with
-``Missing weight tensor with key ...`` when handed the backbone's shards).
+Canonical parameter names are preserved, but unused attention, FFN, token
+refiner and later-block parameters are never constructed or loaded. Both
+probe variants retain the backbone's signal computation and L2 reduction.
 """
 
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
+from diffusers.models.normalization import AdaLayerNormZero
 
 from difflet.models.hunyuan_video.modeling_hunyuan_video import (
+    HunyuanVideoConditionEmbedding,
+    HunyuanVideoPatchEmbed,
     HunyuanVideoTransformer3DModel,
 )
 
@@ -42,7 +22,30 @@ from difflet.models.hunyuan_video.modeling_hunyuan_video import (
 PROBE_STATE_TENSORS: frozenset[str] = frozenset({"prev_mod"})
 
 
-class HunyuanVideoTeacacheProbeFusedModel(HunyuanVideoTransformer3DModel):
+class HunyuanVideoTeacachePrefix(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        inner_dim = config.inner_dim
+        self.x_embedder = HunyuanVideoPatchEmbed(
+            (config.patch_size_t, config.patch_size, config.patch_size),
+            config.in_channels,
+            inner_dim,
+        )
+        self.time_text_embed = HunyuanVideoConditionEmbedding(
+            inner_dim,
+            config.pooled_projection_dim,
+            config.guidance_embeds,
+            getattr(config, "image_condition_type", None),
+        )
+        block = nn.Module()
+        block.norm1 = AdaLayerNormZero(inner_dim, norm_type="layer_norm")
+        self.transformer_blocks = nn.ModuleList([block])
+
+    # Reuse the reference computation without constructing the full backbone.
+    teacache_mod_input = HunyuanVideoTransformer3DModel.teacache_mod_input
+
+
+class HunyuanVideoTeacacheProbeFusedModel(HunyuanVideoTeacachePrefix):
     """fused-A probe (cclog 80): prev_mod lives ON the model as an nn.Parameter
     (NOT an input, NOT a buffer — the alias machinery in hlo_conversion.py only
     scans named_parameters()). forward returns ``(delta, mod_input)`` where
@@ -87,7 +90,7 @@ class HunyuanVideoTeacacheProbeFusedModel(HunyuanVideoTransformer3DModel):
         return delta, mod_input
 
 
-class HunyuanVideoTeacacheProbeModel(HunyuanVideoTransformer3DModel):
+class HunyuanVideoTeacacheProbeModel(HunyuanVideoTeacachePrefix):
     """Compile target for the (v1, non-fused) TeaCache probe NEFF.
 
     The forward returns ``(delta_scalar, mod_input_tensor)`` where ``delta_scalar``
