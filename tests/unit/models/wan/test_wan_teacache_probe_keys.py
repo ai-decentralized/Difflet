@@ -84,6 +84,8 @@ def _config(**overrides):
         num_layers=2,
         cross_attn_norm=True,
         qk_norm="rms_norm_across_heads",
+        eps=1e-6,
+        rope_theta=10000.0,
         rope_max_seq_len=1024,
         text_seq_len=8,
         height=64,
