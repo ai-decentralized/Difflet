@@ -236,6 +236,28 @@ to reclaim on those grounds. The runner is fixed to pass the transformer directo
 15 GB free. The Wan functional results are unaffected: compile, load, alias persistence and
 host parity all hold regardless of the store key.
 
+#### Reclaiming it needs both links, not just the store entry
+
+Every shard has link count 2. Deleting only the `_shared_weights` entry frees **nothing**,
+because the probe artifact's link keeps the inode alive, and deleting only the probe artifact
+frees nothing for the same reason in reverse. The natural reading of "the store entry is
+orphaned" is to remove just that entry and then wonder why `df` did not move.
+
+Both of these have to go to recover the 28 GB:
+
+```
+~/.cache/difflet/_shared_weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__38ec498c__bfloat16__tp4__f12d41373bfb4132/
+~/.cache/difflet/wan21_teacache_probe_fused/
+```
+
+That takes the host from 15 GB free to roughly 43 GB, which fits a rerun of the fixed runner
+with room to spare. **Nothing here has been deleted** — this is a recipe, and the call is the
+user's, because a cache is hours of compute and only they know what else is planned on this host.
+
+The same two-link structure holds for LTX-2 (inodes 570494–570497, four shards of 9964438532
+bytes each), but its entry is correctly keyed and a production run will reuse it, so it is **not**
+a reclaim candidate.
+
 The LTX-2 runner passed `<snap>/transformer` and matches `difflet/models/ltx_2/application.py`,
 so its entry is correctly keyed and would be reused.
 
