@@ -16,16 +16,14 @@ its OWN compiled directory and its OWN ``traced_model``.
 from __future__ import annotations
 
 import os
-from typing import List
 
 import torch
 
-from difflet.backends.trainium.core.application_base import NeuronApplicationBase
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
+from difflet.backends.trainium.core.teacache_probe import PrefixProbeApplication
 from difflet.backends.trainium.hunyuan_video.backbone import (
     HunyuanVideoBackboneInferenceConfig,
-    NeuronHunyuanVideoBackboneApplication,
 )
 from difflet.backends.trainium.hunyuan_video.teacache_probe_model import (
     PROBE_STATE_TENSORS,
@@ -34,12 +32,18 @@ from difflet.backends.trainium.hunyuan_video.teacache_probe_model import (
 )
 
 
+class _HunyuanVideoPrefixApplication(PrefixProbeApplication):
+    weight_prefixes = ("x_embedder.", "time_text_embed.", "transformer_blocks.0.norm1.")
+
+    @classmethod
+    def convert_hf_to_neuron_state_dict(cls, state_dict, config):
+        return {k: v for k, v in state_dict.items() if k.startswith(cls.weight_prefixes)}
+
+
 class ModelWrapperHunyuanVideoTeacacheProbe(ModelWrapper):
     """ModelBuilder wrapper for the standalone TeaCache probe NEFF.
 
-    XLA dead-code elimination prunes the rest of the wrapped
-    ``HunyuanVideoTransformer3DModel`` so the compiled NEFF stays small
-    (Stage 2 measured ~2.3 MiB for HV N4 4d8s1r).
+    The model and checkpoint contain only the modulation prefix.
     """
 
     def __init__(
@@ -130,7 +134,7 @@ class ModelWrapperHunyuanVideoTeacacheProbe(ModelWrapper):
         )
 
 
-class NeuronHunyuanVideoTeacacheProbeApplication(NeuronApplicationBase):
+class NeuronHunyuanVideoTeacacheProbeApplication(_HunyuanVideoPrefixApplication):
     """Standalone compile/load wrapper for the HunyuanVideo TeaCache probe.
 
     Mirrors ``NeuronHunyuanVideoBackboneApplication`` but with a single
@@ -170,14 +174,6 @@ class NeuronHunyuanVideoTeacacheProbeApplication(NeuronApplicationBase):
         )
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
         return compiler_args
-
-    # The probe model is a HunyuanVideoTransformer3DModel subclass, so its
-    # weights live under the backbone's own names and the backbone converter
-    # (single-block proj_out split + optional global_rank.rank) applies as-is.
-    # That is what lets the shared weight store hand it the backbone's shards.
-    convert_hf_to_neuron_state_dict = staticmethod(
-        NeuronHunyuanVideoBackboneApplication.convert_hf_to_neuron_state_dict
-    )
 
     @staticmethod
     def update_state_dict_for_tied_weights(state_dict):
@@ -354,7 +350,7 @@ class ModelWrapperHunyuanVideoTeacacheProbeFused(ModelWrapper):
         )
 
 
-class NeuronHunyuanVideoTeacacheProbeFusedApplication(NeuronApplicationBase):
+class NeuronHunyuanVideoTeacacheProbeFusedApplication(_HunyuanVideoPrefixApplication):
     """fused-A standalone probe app: prev_mod persistent on device, returns only delta."""
 
     _model_cls = HunyuanVideoTeacacheProbeFusedModel
@@ -389,13 +385,6 @@ class NeuronHunyuanVideoTeacacheProbeFusedApplication(NeuronApplicationBase):
         )
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
         return compiler_args
-
-    # Same weights under the backbone's names => the backbone's converter.
-    # prev_mod is NOT in the checkpoint: it is aliased, hence NEFF state that
-    # NxD zero-initialises at load (see state_tensor_names above).
-    convert_hf_to_neuron_state_dict = staticmethod(
-        NeuronHunyuanVideoBackboneApplication.convert_hf_to_neuron_state_dict
-    )
 
     @staticmethod
     def update_state_dict_for_tied_weights(state_dict):

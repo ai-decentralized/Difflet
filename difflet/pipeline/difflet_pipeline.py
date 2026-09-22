@@ -92,9 +92,12 @@ class DiffletPipeline:
                 **(application_kwargs or {}),
                 "shapes": [list(shape) for shape in canonical_shapes],
             }
-        cache_application_kwargs = _cache_application_kwargs(application_kwargs)
         entry = resolve_model(model_id, model_type=model_type)
         backend_runtime = get_backend(backend)
+        cache_application_kwargs = _cache_application_kwargs(
+            application_kwargs,
+            model_name=entry.name if backend_runtime.name == "trainium" else None,
+        )
         entry.require_backend(backend_runtime.name)
         parallel_cfg = parallel or entry.default_parallel
         backend_runtime.prepare_runtime(parallel_cfg)
@@ -247,18 +250,31 @@ def _merge_teacache_kwargs(
     return merged or None
 
 
-def _cache_application_kwargs(application_kwargs: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not application_kwargs:
+def _cache_application_kwargs(
+    application_kwargs: dict[str, Any] | None, *, model_name: str | None = None
+) -> dict[str, Any] | None:
+    if not application_kwargs and model_name != "hunyuan_video":
         return None
-    cache_kwargs = dict(application_kwargs)
+    cache_kwargs = dict(application_kwargs or {})
+    if model_name == "hunyuan_video":
+        # Recompile backbones whose long-mask integer reduction could truncate
+        # the attention range on Trainium LNC2, including non-TeaCache requests.
+        cache_kwargs["attention_mask_accumulation"] = "fp32-v1"
+    from difflet.pipeline.teacache import requires_teacache_probe
+
+    calibrated_probe = model_name in {"wan", "ltx_2"} and requires_teacache_probe(
+        application_kwargs or {}
+    )
     probe_enabled = bool(
         cache_kwargs.pop("teacache_speedup", None) is not None
         or cache_kwargs.pop("teacache_fused", False)
     )
     cache_kwargs.pop("teacache_calibration", None)
     cache_kwargs.pop("teacache_calibration_path", None)
-    if probe_enabled:
+    if probe_enabled or calibrated_probe:
         cache_kwargs["teacache_probe_enabled"] = True
+        if model_name == "hunyuan_video":
+            cache_kwargs["teacache_probe_layout"] = "teacache-prefix-v1"
     return cache_kwargs or None
 
 

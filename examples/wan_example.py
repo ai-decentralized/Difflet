@@ -335,6 +335,12 @@ def main(argv: list[str] | None = None) -> int:
         teacache_calibration_path=args.teacache_calibration,
     )
 
+    # Backbone artifacts are staged above. Adaptive TeaCache additionally needs
+    # the small per-stage device probes; cadence/online-delta add no components.
+    probe_names = [spec.name for spec in app.components() if spec.name.startswith("teacache_probe")]
+    if probe_names:
+        app.compile(str(compiled_dir), select=probe_names)
+
     t0 = time.monotonic()
     app.load(
         str(compiled_dir),

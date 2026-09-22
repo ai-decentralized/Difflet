@@ -502,7 +502,7 @@ class HunyuanVideoAttention(nn.Module):
             if attention_mask is not None:
                 m = attention_mask.reshape(attention_mask.shape[0], -1)
                 valid = m if m.dtype == torch.bool else (m != 0)
-                key_valid_len = valid.sum(dim=-1).to(torch.int32)   # [B]
+                key_valid_len = valid.sum(dim=-1, dtype=torch.float32).to(torch.int32)  # [B]
             scale = 1.0 / math.sqrt(self.head_dim)
             img_out, txt_out = joint_ulysses_attention(
                 latent_q.transpose(1, 2), context_q.transpose(1, 2),
@@ -1429,8 +1429,12 @@ def _keypad_bounds_from_mask(
     """
     bh = mask_flat.shape[0]
     valid = mask_flat if mask_flat.dtype == torch.bool else (mask_flat != 0)
-    # sum() promotes to int64; attention_cte wants int32 bounds (cf. mask_bounds.py).
-    count = valid.sum(dim=-1, keepdim=True).to(torch.int32)   # (B*heads, q_or_1, 1)
+    # Trainium LNC2 miscompiles long integer reductions (also with an explicit
+    # int32 accumulator): at 20,096 keys, a valid prefix of 19,858 becomes 9,938.
+    # Accumulate the 0/1 mask in FP32, then convert to attention_cte's int32 bounds.
+    # FP32 represents these token counts exactly. See the device regression in
+    # tests/manual/check_hunyuan_video_mask_bounds.py.
+    count = valid.sum(dim=-1, keepdim=True, dtype=torch.float32).to(torch.int32)
     bound_max = count.expand(bh, q_len, 1).contiguous()       # (B*heads, q_len, 1)
     bound_min = torch.zeros_like(bound_max)
     return bound_min, bound_max

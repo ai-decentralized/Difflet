@@ -351,6 +351,17 @@ def load_teacache_calibration_or_raise(
     return calibration
 
 
+def requires_teacache_probe(application_kwargs: dict[str, Any]) -> bool:
+    """Whether Wan/LTX-2 must compile a signal probe for these runtime options."""
+    if application_kwargs.get("teacache_fused", False):
+        return True
+    path = application_kwargs.get("teacache_calibration_path")
+    if not path:
+        return False
+    calibration = TeaCacheCalibration.from_json(path)
+    return calibration.cadence <= 0 and calibration.online_delta_alpha <= 0.0
+
+
 def build_probe_free_controller(
     *,
     model: str,

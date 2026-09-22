@@ -481,6 +481,18 @@ def test_keypad_bounds_from_mask(_cpu_backend):
     assert int(bound_max[0, 0, 0]) == 2
 
 
+@pytest.mark.parametrize("key_len", [10496, 20096])
+@pytest.mark.parametrize("dtype", [torch.bool, torch.int64])
+def test_keypad_bounds_long_prefixes(_cpu_backend, key_len, dtype):
+    m = _cpu_backend
+    counts = torch.tensor([0, 18, key_len - 238, key_len])
+    mask = (torch.arange(key_len)[None, None, :] < counts[:, None, None]).to(dtype)
+    lo, hi = m._keypad_bounds_from_mask(mask, q_len=3)
+    assert lo.dtype == hi.dtype == torch.int32
+    assert torch.equal(lo, torch.zeros(4, 3, 1, dtype=torch.int32))
+    assert torch.equal(hi, counts.to(torch.int32)[:, None, None].expand(4, 3, 1))
+
+
 # --------------------------------------------------------------------------- #
 # Ulysses CP + key-padding mask (cp == 1 on the CPU backend, so the all-to-alls
 # are identities and the ulysses branch must equal the masked gather_kv branch)

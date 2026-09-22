@@ -308,16 +308,7 @@ def test_link_failure_leaves_no_partial_directory(tmp_path, monkeypatch):
 # ------------------------------------------------- probe apps share the entry
 
 def test_probe_and_backbone_apps_share_one_store_entry(tmp_path):
-    """The TeaCache probe apps must dedupe onto the backbone's shards.
-
-    They share (source, dtype, topology) with the backbone and — since the
-    probes became subclasses of the backbone model (refactor/teacache-probe-
-    canonical-keys) — also its weight names, so one store entry serves both.
-    This is the inverse of the campaign branch's layout-tag test (3f04080):
-    nothing about the application class, its declared NEFF-state tensors or
-    any probe marker may enter the key, or the transformer would be stored
-    twice (issue #39).
-    """
+    """Full-layout probes share shards; prefix-only probes use a separate store."""
     from difflet.backends.trainium.flux.teacache_probe_fused import (
         NeuronFluxTeacacheProbeFusedApplication,
     )
@@ -349,12 +340,16 @@ def test_probe_and_backbone_apps_share_one_store_entry(tmp_path):
     for probe_cls in (
         NeuronFluxTeacacheProbeFusedApplication,
         NeuronQwenImageTeacacheProbeFusedApplication,
-        NeuronHunyuanVideoTeacacheProbeFusedApplication,
     ):
         probe = as_app(probe_cls, teacache_probe_fused=True)
         assert probe.state_tensor_names == {"prev_mod"}
         assert shared_weights.store_key(probe) == backbone_key
         assert shared_weights.store_dir(probe) == backbone_dir
+
+    # HV now loads only its prefix; it must not use or overwrite full shards.
+    hv_probe = as_app(NeuronHunyuanVideoTeacacheProbeFusedApplication)
+    assert shared_weights.store_key(hv_probe) != backbone_key
+    assert shared_weights.store_dir(hv_probe) != backbone_dir
 
     # A stray layout attribute from the superseded design is ignored too.
     tagged = as_app(NeuronFluxTeacacheProbeFusedApplication)
