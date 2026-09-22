@@ -639,15 +639,28 @@ class LTX2Orchestrator:
                 timestep_batch_single = _batch_timestep(
                     timestep, latents.shape[0], latents.device, model_dtype
                 )
-                mod_input = self.transformer.teacache_mod_input(
-                    latents.to(dtype=model_dtype), timestep_batch_single
-                )
                 diff_norm = None
-                if ctrl.prev_mod_input is not None:
-                    prev = ctrl.prev_mod_input
-                    cur = mod_input.detach().float().cpu()
-                    denom = prev.abs().mean().clamp_min(1e-8)
-                    diff_norm = float((cur - prev).abs().mean() / denom)
+                if getattr(self.transformer, "teacache_probe_fused", False):
+                    # Fused-A device probe: prev_mod is a persistent on-device
+                    # Parameter updated in place, so only the 4-byte rel-L1
+                    # scalar crosses to host and mod_input stays None (the
+                    # controller then never makes its own host-side copy).
+                    # Step 0 sees a zero prev_mod; that garbage delta is
+                    # absorbed by the controller's warmup window.
+                    ctrl.note_probe()
+                    delta = self.transformer.teacache_delta(
+                        latents.to(dtype=model_dtype), timestep_batch_single
+                    )
+                    diff_norm = float(delta.detach().cpu().item())
+                else:
+                    mod_input = self.transformer.teacache_mod_input(
+                        latents.to(dtype=model_dtype), timestep_batch_single
+                    )
+                    if ctrl.prev_mod_input is not None:
+                        prev = ctrl.prev_mod_input
+                        cur = mod_input.detach().float().cpu()
+                        denom = prev.abs().mean().clamp_min(1e-8)
+                        diff_norm = float((cur - prev).abs().mean() / denom)
                 skip = ctrl.should_skip(step_index, mod_input, diff_norm=diff_norm)
 
             if skip:

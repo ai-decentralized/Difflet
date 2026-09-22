@@ -46,6 +46,8 @@ class WanOrchestrator:
         teacache_calibration_path: str | None = None,
         teacache_cadence: int | None = None,
         teacache_online_delta_alpha: float | None = None,
+        teacache_probe: Any = None,
+        teacache_probe_2: Any = None,
     ) -> None:
         self.model_path = model_path
         self.text_encoder = text_encoder
@@ -69,6 +71,15 @@ class WanOrchestrator:
         self._teacache_controller = None
         self._teacache_shadows: dict[int, Any] = {}
         self._teacache_last_model_id: int | None = None
+        # Fused-A device probes, one per expert stage, keyed by the id() of the
+        # transformer they shadow. When a stage has a probe whose compiled shape
+        # matches the request, the block-0 signal is computed on device and only
+        # the 4-byte rel-L1 scalar crosses to host; otherwise the stage falls
+        # back to its host CPU shadow.
+        self._teacache_probes: dict[int, Any] = {}
+        for model, probe in ((transformer, teacache_probe), (transformer_2, teacache_probe_2)):
+            if model is not None and probe is not None:
+                self._teacache_probes[id(model)] = probe
         # Probe-free TeaCache modes (fixed cadence / online-delta): host-side
         # skip decisions only — no CPU shadow, no calibration file, no NEFF
         # change. num_steps is synced to the request in _denoise.
@@ -102,14 +113,43 @@ class WanOrchestrator:
         # block-0 CPU shadow is never consulted — don't build it (saves load + per-step cost).
         if not self._teacache_controller.needs_signal():
             return True
-        stages = {"transformer": self.transformer, "transformer_2": self.transformer_2}
-        for subfolder, model in stages.items():
-            if model is None:
+        for subfolder, model in self._stages():
+            # A stage whose device probe covers the served shape never needs its
+            # host shadow; skip the load. Any other stage prebuilds here so the
+            # cost is paid once, before the first step.
+            if model is None or self._probe_for(model) is not None:
                 continue
             self._teacache_shadows[id(model)] = WanTeacacheCPUShadow(
                 os.path.join(self.model_path, subfolder), dtype=self.dtype
             )
         return True
+
+    def _stages(self) -> list[tuple[str, Any]]:
+        return [
+            ("transformer", self.transformer),
+            ("transformer_2", self.transformer_2),
+        ]
+
+    def _probe_for(self, model: Any) -> Any:
+        """The fused device probe for ``model``, or None if it has none."""
+        return self._teacache_probes.get(id(model))
+
+    def _shadow_for(self, model: Any) -> Any:
+        """Host CPU shadow for ``model``, built on first use.
+
+        Prebuilt in ``_maybe_init_teacache`` for probe-less stages; built here
+        for a stage whose probe turned out not to cover the request's shape.
+        """
+        from difflet.backends.trainium.wan.teacache_cpu_shadow import WanTeacacheCPUShadow
+
+        shadow = self._teacache_shadows.get(id(model))
+        if shadow is None:
+            subfolder = next(name for name, stage in self._stages() if stage is model)
+            shadow = WanTeacacheCPUShadow(
+                os.path.join(self.model_path, subfolder), dtype=self.dtype
+            )
+            self._teacache_shadows[id(model)] = shadow
+        return shadow
 
     def has_runtime_components(self) -> bool:
         return any(
@@ -389,17 +429,35 @@ class WanOrchestrator:
                     ctrl.reset()  # stage switch (high->low noise) invalidates the residual
                     self._teacache_last_model_id = id(current_model)
                 diff_norm = None
-                # Fixed-cadence mode skips the block-0 CPU shadow entirely (index-based decision).
+                # Fixed-cadence mode skips the block-0 signal entirely (index-based decision).
                 if ctrl.needs_signal():
-                    shadow = self._teacache_shadows[id(current_model)]
-                    mod_input = shadow.teacache_mod_input(
-                        latents.to(dtype=model_dtype), timestep_batch, prompt_embeds.to(dtype=model_dtype)
-                    )
-                    if ctrl.prev_mod_input is not None:
-                        prev = ctrl.prev_mod_input
-                        cur = mod_input.detach().float().cpu()
-                        denom = prev.abs().mean().clamp_min(1e-8)
-                        diff_norm = float((cur - prev).abs().mean() / denom)
+                    probe = self._probe_for(current_model)
+                    if probe is not None and _probe_covers(probe, latents):
+                        # Fused-A device probe: prev_mod is a persistent on-device
+                        # Parameter updated in place, so only the 4-byte rel-L1
+                        # scalar crosses to host and mod_input stays None (the
+                        # controller then never makes its own host-side copy).
+                        # Step 0 sees a zero prev_mod; that garbage delta is
+                        # absorbed by the controller's warmup window.
+                        ctrl.note_probe()
+                        delta = probe.teacache_delta(
+                            latents.to(dtype=model_dtype),
+                            timestep_batch,
+                            prompt_embeds.to(dtype=model_dtype),
+                        )
+                        diff_norm = float(delta.detach().cpu().item())
+                    else:
+                        shadow = self._shadow_for(current_model)
+                        mod_input = shadow.teacache_mod_input(
+                            latents.to(dtype=model_dtype),
+                            timestep_batch,
+                            prompt_embeds.to(dtype=model_dtype),
+                        )
+                        if ctrl.prev_mod_input is not None:
+                            prev = ctrl.prev_mod_input
+                            cur = mod_input.detach().float().cpu()
+                            denom = prev.abs().mean().clamp_min(1e-8)
+                            diff_norm = float((cur - prev).abs().mean() / denom)
                 should_skip = ctrl.should_skip(step_index, mod_input, diff_norm=diff_norm)
 
             if should_skip:
@@ -551,6 +609,28 @@ def _component_dtype(component: Any, fallback: torch.dtype) -> torch.dtype:
 
 def _component_config(component: Any) -> Any:
     return getattr(component, "config", None)
+
+
+def _probe_covers(probe: Any, latents: torch.Tensor) -> bool:
+    """Whether the fused probe's single compiled shape matches these latents.
+
+    ``prev_mod`` is a fixed-shape device Parameter, so the probe compiles at the
+    primary compile shape only. Any other bucket falls back to the host shadow
+    rather than dispatching a NEFF built for a different sequence length.
+    """
+    config = _component_config(probe)
+    if config is None or latents.ndim != 5:
+        return False
+    batch, _, frames, latent_height, latent_width = latents.shape
+    try:
+        return (
+            int(batch) == 1
+            and int(config.num_frames) == int(frames)
+            and int(config.height) // 8 == int(latent_height)
+            and int(config.width) // 8 == int(latent_width)
+        )
+    except (AttributeError, TypeError, ValueError):
+        return False
 
 
 def _batch_timestep(

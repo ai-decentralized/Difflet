@@ -182,6 +182,7 @@ class NeuronLTX2Application(MultiComponentApplication):
         self.kwargs = kwargs
         self.transformer_path = os.path.join(model_path, "transformer")
         self.transformer = None
+        self.teacache_probe = None
         self.text_seq_len = int(kwargs.get("text_seq_len", LTX_2_DEFAULT_TEXT_SEQ_LEN))
         self.audio_text_seq_len = int(kwargs.get("audio_text_seq_len", self.text_seq_len))
         self.audio_num_frames = kwargs.get("audio_num_frames")
@@ -243,6 +244,31 @@ class NeuronLTX2Application(MultiComponentApplication):
                     f"got {transformer_mode!r}."
                 )
 
+            # TeaCache fused-A device probe. Opt-in, because it adds a NEFF to
+            # the compiled artifact — the same ``teacache_fused`` contract Flux
+            # and HunyuanVideo use. Single mode only: there the host CPU
+            # transformer exists purely for this signal, so moving it on device
+            # retires a full host copy of the model. In segmented mode that copy
+            # is load-bearing for the frontend and final projection, so the
+            # signal is already free and the host path stays.
+            if bool(kwargs.get("teacache_fused", False)):
+                if transformer_mode != "single":
+                    raise ValueError(
+                        "LTX-2 teacache_fused requires transformer_mode='single'. In "
+                        "segmented mode the host transformer is already resident for "
+                        "the frontend, so the TeaCache signal costs nothing on host."
+                    )
+                from difflet.backends.trainium.ltx_2.teacache_probe_fused import (
+                    NeuronLTX2TeacacheProbeFusedApplication,
+                )
+
+                # Same config object as the backbone, so the probe shares its
+                # weight-store entry and resolves to its shards.
+                self.teacache_probe = NeuronLTX2TeacacheProbeFusedApplication(
+                    model_path=self.transformer_path,
+                    config=config,
+                )
+
         if bool(kwargs.get("enable_host_pipeline", False)):
             self.host_pipeline = _load_ltx_2_host_pipeline(
                 model_path=model_path,
@@ -296,6 +322,10 @@ class NeuronLTX2Application(MultiComponentApplication):
                 components.extend(component_specs(prefix="transformer"))
             else:
                 components.append(ComponentSpec("transformer", self.transformer))
+        if self.teacache_probe is not None:
+            # Same world_size as the backbone, and it shares the backbone's
+            # weight-store entry, so it loads alongside the transformer.
+            components.append(ComponentSpec("teacache_probe", self.teacache_probe))
         return components
 
     def load(self, compiled_model_path: str, *args: Any, **kwargs: Any) -> None:
@@ -366,6 +396,23 @@ class NeuronLTX2Application(MultiComponentApplication):
         if self.transformer is None:
             raise NotImplementedError("LTX-2 teacache_mod_input requires an active transformer.")
         return self.transformer.teacache_mod_input(hidden_states, timestep)
+
+    @property
+    def teacache_probe_fused(self) -> bool:
+        """Whether a fused device probe is mounted for the TeaCache signal."""
+        return self.teacache_probe is not None
+
+    def teacache_delta(self, hidden_states, timestep):
+        """Relative-L1 of the block-0 modulated input, computed on device.
+
+        Only the scalar crosses to host; ``prev_mod`` lives on the probe and is
+        updated in place, so no modulated-input tensor is copied per step.
+        """
+        if self.teacache_probe is None:
+            raise NotImplementedError(
+                "LTX-2 teacache_delta requires teacache_fused=True (no probe is mounted)."
+            )
+        return self.teacache_probe.teacache_delta(hidden_states, timestep)
 
     def __call__(self, *args: Any, **kwargs: Any):
         if len(args) == 1 and isinstance(args[0], LTX2DiTInputBundle):

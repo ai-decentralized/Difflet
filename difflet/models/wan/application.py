@@ -243,6 +243,42 @@ class NeuronWanApplication(MultiComponentApplication):
                 config=config,
             )
 
+        # TeaCache fused-A device probes, one per expert stage. Opt-in, because
+        # each probe adds a NEFF to the compiled artifact — the same
+        # ``teacache_fused`` contract Flux and HunyuanVideo use. Probe-free modes
+        # (fixed cadence / online-delta) never consult a signal and must not pay
+        # for a probe.
+        self.teacache_probe = None
+        self.teacache_probe_2 = None
+        if bool(kwargs.get("teacache_fused", False)):
+            if cfg_parallel_enabled:
+                # CFG parallel scatters [uncond, cond] across DP ranks, which a
+                # single probe and a single skip decision cannot represent; the
+                # pipeline already refuses TeaCache in that mode, so a probe
+                # would compile a NEFF that can never be used.
+                raise ValueError(
+                    "Wan teacache_fused requires cfg_parallel_enabled=False (the probe "
+                    "plus a single skip decision is unsound across CFG-parallel ranks). "
+                    "Disable CFG parallelism when enabling the TeaCache probe."
+                )
+            from difflet.backends.trainium.wan.teacache_probe_fused import (
+                NeuronWanTeacacheProbeFusedApplication,
+            )
+
+            # The probe shares its stage's backbone config, so it compiles at the
+            # primary compile shape and its weights resolve to the backbone's
+            # shards under the backbone's own names.
+            if self.transformer is not None:
+                self.teacache_probe = NeuronWanTeacacheProbeFusedApplication(
+                    model_path=self.transformer_path,
+                    config=self.transformer.config,
+                )
+            if self.transformer_2 is not None:
+                self.teacache_probe_2 = NeuronWanTeacacheProbeFusedApplication(
+                    model_path=self.transformer_2_path,
+                    config=self.transformer_2.config,
+                )
+
         if enable_text_encoder and os.path.exists(os.path.join(self.text_encoder_path, "config.json")):
             from difflet.backends.trainium.wan.text_encoder import (
                 NeuronWanTextEncoderApplication,
@@ -297,6 +333,8 @@ class NeuronWanApplication(MultiComponentApplication):
             # Probe-free modes: runtime-only, never part of the artifact identity.
             teacache_cadence=self.kwargs.get("teacache_cadence"),
             teacache_online_delta_alpha=self.kwargs.get("teacache_online_delta_alpha"),
+            teacache_probe=self.teacache_probe,
+            teacache_probe_2=self.teacache_probe_2,
         )
 
     def components(self) -> list[ComponentSpec]:
@@ -313,6 +351,12 @@ class NeuronWanApplication(MultiComponentApplication):
             components.append(ComponentSpec("transformer", self.transformer))
         if self.transformer_2 is not None:
             components.append(ComponentSpec("transformer_2", self.transformer_2))
+        # Probes share their stage's weight-store entry, so they load alongside
+        # the transformer they shadow.
+        if self.teacache_probe is not None:
+            components.append(ComponentSpec("teacache_probe", self.teacache_probe))
+        if self.teacache_probe_2 is not None:
+            components.append(ComponentSpec("teacache_probe_2", self.teacache_probe_2))
         if self.vae_decoder is not None:
             components.append(ComponentSpec("vae_decoder", self.vae_decoder))
         return components
