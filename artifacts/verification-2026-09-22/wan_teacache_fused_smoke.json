@@ -1,0 +1,23 @@
+{
+  "schema": "difflet-wan-teacache-fused-smoke-v1",
+  "model": "wan2_1_t2v_14b",
+  "snapshot": "/home/ubuntu/hf/hub/models--Wan-AI--Wan2.1-T2V-14B-Diffusers/snapshots/38ec498cb3208fb688890f8cc7e94ede2cbd7f68/",
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "latent_frames": 21,
+    "seq_len": 32760
+  },
+  "tp_degree": 4,
+  "compile_s": 448.9087700259988,
+  "load_s": 11.572349049005425,
+  "call1_delta_zero_prev": 43654672.0,
+  "call2_delta_same_input": 0.0,
+  "prev_mod_persists": true,
+  "device_rel_l1_ab": 0.22936861217021942,
+  "host_rel_l1_ab": 0.2292909026145935,
+  "relative_difference": 0.00033891251131116444,
+  "device_probe_median_ms": 27.422009996371344,
+  "host_shadow_median_ms": 941.3073319956311,
+  "hardware_measured": true
+}
