@@ -188,20 +188,62 @@ of the host path they replace, and both are faster than that host path on this h
 
 ## Host budget after the campaign
 
-The probes were compiled **alone**, with no backbone alongside, so each one wrote its own shard
-set rather than attaching to a backbone's weight-store entry:
+Disk went from 80 GB free to **15 GB free (98% full)**. Nothing was deleted.
 
-| Path | Size |
-|---|---|
-| `~/.cache/difflet/wan21_teacache_probe_fused` | 28 GB |
-| `~/.cache/difflet/ltx2_teacache_probe_fused` | 38 GB |
+**The shared weight store worked.** An earlier revision of this document said each probe "wrote
+its own shard set rather than attaching to a backbone's weight-store entry". That was wrong, and
+it was wrong because `du` counts a hardlinked inode only once per invocation, so measuring a
+directory on its own attributes the shared bytes to it. The shards exist **once**; the probe
+artifact directory holds hardlinks to them:
 
-Disk went from 80 GB free to **15 GB free (98% full)**. Nothing was deleted. Further compiles on
-this host need space freed first, and the caches are hours of work, so that is the user's call.
+```
+wan21_teacache_probe_fused/weights/tp0_sharded_checkpoint.safetensors   2 links  ino=567020
+_shared_weights/Wan-AI--…__38ec498c__bfloat16__tp4__f12d…/shard0.safetensors  2 links  ino=567020
+```
 
-This also means the campaign verified **name resolution**, not weight-store **sharing**. Proving
-that the probe attaches to the backbone's existing entry with zero duplicate bytes needs the
-backbone compiled in the same artifact and a link-count check on the topology's
+Same inode, link count 2, 7498045044 bytes each across 4 shards. `du --total` over the two probe
+directories *and* `_shared_weights` together reports 135 GB, not the ~203 GB that independent
+copies would produce.
+
+The practical consequence matters more than the bookkeeping: **deleting a probe artifact
+directory reclaims almost nothing**, because the `_shared_weights` link keeps the inode alive,
+and vice versa. Freeing those bytes requires removing both links.
+
+| Store entry | Size | Written |
+|---|---|---|
+| `Qwen--Qwen-Image__transformer__75e0b4be__bfloat16__tp4__…` | 39 GB | 2026-09-21 |
+| `Lightricks--LTX-2__transformer__dfcc2108__bfloat16__tp4__…` | 38 GB | this campaign |
+| `Wan-AI--Wan2.1-T2V-14B-Diffusers__38ec498c__bfloat16__tp4__…` | 28 GB | this campaign |
+| `black-forest-labs--FLUX.1-dev__transformer__3de623fc__bfloat16__tp4__…` | 23 GB | 2026-09-21 |
+
+### Known defect in this campaign's Wan artifact
+
+The Wan entry above has **no `__transformer__` component segment**, while LTX-2, Qwen and FLUX
+all have one. That is not a store bug — it is a defect in this campaign's runner.
+
+`_key_inputs` keys on `os.path.realpath(app.model_path)` (shared_weights.py:96), and
+`difflet/models/wan/application.py` builds both the backbone and the probe with
+`model_path=self.transformer_path`. The first version of
+`scripts/run_wan_teacache_fused_smoke.py` passed the **model root** instead. The weights still
+resolved correctly — the 0.034% parity against a shadow built from `<snap>/transformer` proves
+the probe read the right tensors — but the entry was filed under a key that **no production Wan
+run will ever look up**. A real Wan backbone or application-mounted probe at bf16/tp4 will miss
+it and re-shard the same 28 GB under the correct key.
+
+So that 28 GB entry is effectively orphaned, and is the one item in the table above that is safe
+to reclaim on those grounds. The runner is fixed to pass the transformer directory; the fix is
+**not re-verified on device**, because a rerun would write a second 28 GB entry and this host has
+15 GB free. The Wan functional results are unaffected: compile, load, alias persistence and
+host parity all hold regardless of the store key.
+
+The LTX-2 runner passed `<snap>/transformer` and matches `difflet/models/ltx_2/application.py`,
+so its entry is correctly keyed and would be reused.
+
+### Still not measured
+
+Store **sharing between a probe and its backbone** — the probes were compiled with no backbone
+alongside, so each created the entry rather than attaching to an existing one. Proving the attach
+path needs the backbone compiled first and a link-count rise on the topology's
 `shard0.safetensors`. That is **NOT MEASURED** here.
 
 ## Scope and limits

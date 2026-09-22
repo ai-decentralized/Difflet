@@ -78,7 +78,15 @@ def main() -> int:
     ts_a = torch.full([1], 1000.0, dtype=torch.bfloat16)
     ts_b = torch.full([1], 900.0, dtype=torch.bfloat16)
 
-    app = NeuronWanTeacacheProbeFusedApplication(model_path=snap, config=config)
+    # Must be the transformer directory, not the model root: the shared weight
+    # store keys on os.path.realpath(app.model_path), and
+    # difflet/models/wan/application.py builds both the backbone and the probe
+    # with `model_path=self.transformer_path`. Passing the root here still loads
+    # the right weights, but files a store entry under a key no production run
+    # would ever look up.
+    app = NeuronWanTeacacheProbeFusedApplication(
+        model_path=os.path.join(snap, "transformer"), config=config
+    )
     print("[wan] compiling probe...", flush=True)
     t = time.perf_counter()
     app.compile(out_dir)
