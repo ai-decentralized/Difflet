@@ -145,9 +145,64 @@ device probe costs 27 ms/call — the device path is about 34x faster. The earli
 measured on a different model at a different sequence length; it was never a general claim about
 host-versus-device probes, and it should not be read as one.
 
-#### LTX-2 single mode
+#### LTX-2 single mode — PASS
 
-_Pending — runner in flight._
+Evidence: `artifacts/verification-2026-09-22/ltx2_probe_smoke.log`,
+`artifacts/verification-2026-09-22/ltx2_teacache_fused_smoke.json`.
+Shape 512x768, 121 frames, sequence length 6144, inner dim 4096, tp 4. Runner exit 0.
+
+| Check | Result |
+|---|---|
+| Compile | 564.8 s |
+| Load | 118.4 s, no missing-weight error |
+| Call 1 delta, `prev_mod` zero-filled | 28423100.0 |
+| Call 2 delta, same input | 0.0 |
+| `prev_mod` persists on device | yes |
+| Device rel-L1(B vs A) | 0.144422 |
+| Host CPU transformer rel-L1(B vs A) | 0.144454 |
+| Relative difference | 0.022% |
+| Device probe, median of 20 | 3.05 ms/call |
+| Host CPU transformer, median of 5 | 26.70 ms/call |
+
+The clean load is the result that mattered most for LTX-2, because its backbone is *already* a
+wrapper: `_LTX2TransformerTraceModule` holds the diffusers model at `self.transformer`, and the
+converter prefixes every checkpoint key with `transformer.`. The probe subclasses that trace
+module and adds only `prev_mod`, so its keys land at exactly the depth the converter emits. Had
+the probe wrapped the trace module instead, every key would have gained a second level and the
+load would have failed with `Missing weight tensor with key ...`.
+
+The device path is about 8.8x faster per call here. Its benefit is not only latency: in single
+mode `_load_cpu_transformer` had exactly one caller, `teacache_mod_input`, so with the probe
+mounted the runtime no longer needs a full bf16 host copy of the 48-block transformer at all.
+That host copy is 37.8 GB of weights.
+
+### Summary
+
+| Model | Compile | Load | `prev_mod` persists | Device vs host rel-L1 | Device ms/call | Host ms/call | Outcome |
+|---|---|---|---|---|---|---|---|
+| Wan 2.1 T2V 14B | 448.9 s | 11.6 s | yes | 0.034% apart | 27.42 | 941.31 | PASS |
+| LTX-2 single | 564.8 s | 118.4 s | yes | 0.022% apart | 3.05 | 26.70 | PASS |
+
+Both device probes produce the number the TeaCache controller consumes, to within bf16 rounding
+of the host path they replace, and both are faster than that host path on this hardware.
+
+## Host budget after the campaign
+
+The probes were compiled **alone**, with no backbone alongside, so each one wrote its own shard
+set rather than attaching to a backbone's weight-store entry:
+
+| Path | Size |
+|---|---|
+| `~/.cache/difflet/wan21_teacache_probe_fused` | 28 GB |
+| `~/.cache/difflet/ltx2_teacache_probe_fused` | 38 GB |
+
+Disk went from 80 GB free to **15 GB free (98% full)**. Nothing was deleted. Further compiles on
+this host need space freed first, and the caches are hours of work, so that is the user's call.
+
+This also means the campaign verified **name resolution**, not weight-store **sharing**. Proving
+that the probe attaches to the backbone's existing entry with zero duplicate bytes needs the
+backbone compiled in the same artifact and a link-count check on the topology's
+`shard0.safetensors`. That is **NOT MEASURED** here.
 
 ## Scope and limits
 

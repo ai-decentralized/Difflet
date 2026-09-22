@@ -1,0 +1,24 @@
+{
+  "schema": "difflet-ltx2-teacache-fused-smoke-v1",
+  "model": "ltx_2",
+  "transformer_mode": "single",
+  "snapshot": "/home/ubuntu/hf/hub/models--Lightricks--LTX-2/snapshots/dfcc2108383fe1aaa0584bdf55d368a4bdadd90c/",
+  "shape": {
+    "height": 512,
+    "width": 768,
+    "num_frames": 121,
+    "seq_len": 6144
+  },
+  "tp_degree": 4,
+  "compile_s": 564.769495255001,
+  "load_s": 118.39197731800232,
+  "call1_delta_zero_prev": 28423100.0,
+  "call2_delta_same_input": 0.0,
+  "prev_mod_persists": true,
+  "device_rel_l1_ab": 0.14442168176174164,
+  "host_rel_l1_ab": 0.1444535255432129,
+  "relative_difference": 0.0002204430895784988,
+  "device_probe_median_ms": 3.047641002922319,
+  "host_cpu_median_ms": 26.700162998167798,
+  "hardware_measured": true
+}
