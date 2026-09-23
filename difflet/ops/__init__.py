@@ -9,6 +9,7 @@ _EXPORTS = {
     "CustomRMSNorm": ("norm", "CustomRMSNorm"),
     "SPMDRank": ("collectives", "SPMDRank"),
     "attention": ("attention", "attention"),
+    "gla_attention": ("gla", "gla_attention"),
     "cross_attention": ("attention", "cross_attention"),
     "ring_attention": ("attention", "ring_attention"),
     "joint_ring_attention": ("attention", "joint_ring_attention"),
