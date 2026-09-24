@@ -103,8 +103,58 @@ and the decode runs once per generation outside it, and PSNR compares cached
 against uncached output decoded the same way — and costs only the end-to-end
 column, where host decode adds roughly 400–500 s.
 
-Results: see `cclogs/caching-official-steps/results.json` once the sweep
-completes; this document is updated with the table when it does.
+Three repetitions per mode; medians, with the spread across runs in brackets.
+
+| mode | skipped | loop (ms/step) | speedup | e2e (s) | PSNR (dB) | SSIM |
+|---|---|---|---|---|---|---|
+| caching off | 0/50 | 6681.1 [6676.9–6715.3] | ref. | 892.5 [878–1191] | ref. | ref. |
+| fixed cadence 2 | 20/50 | 3919.0 [3918.2–3919.8] | 1.71x | 748.6 [739–758] | 30.4 | 0.927 |
+| online-delta (α=0.6) | 20/50 | 3919.4 [3912.1–3920.6] | 1.71x | 745.0 [744–745] | 36.6 | 0.954 |
+
+### online-delta beats fixed cadence here, and loses on HunyuanVideo
+
+Same skip count, same loop time, opposite quality:
+
+| model | fixed cadence 2 | online-delta | difference |
+|---|---|---|---|
+| Wan 2.1 14B | 30.4 dB (SSIM 0.927) | **36.6 dB (0.954)** | online +6.2 dB |
+| HunyuanVideo | **33.0 dB (0.937)** | 25.3 dB (0.866) | cadence +7.7 dB |
+
+SSIM agrees with PSNR in both directions, and the 20-step measurement showed the
+same sign on HunyuanVideo (31.8 vs 24.1), so this is not a step-count artifact.
+The earlier table had no model where online-delta won, which supported reading
+it as "reduces to fixed cadence and buys nothing". Wan at its own frame count is
+a counterexample: whether the mode is worth its threshold is model-dependent.
+
+### Why the speedup exceeds the 1.667x ceiling
+
+1.71x is above what 20 skipped steps out of 50 should allow. The per-step series
+says the ceiling is right and the baseline is what moves:
+
+```
+off        50 steps, all ~6489 ms mid-run, but 7243 / 7272 / 7297 ms at the tail
+cadence2   30 executed steps ~6526 ms, 20 skipped steps ~6.9 ms
+```
+
+Skipped steps cost 6.9 ms, not zero — the cached add plus dispatch. Executed
+steps cost 6526 ms against the baseline's 6489 ms mid-run, a 0.6% difference, so
+caching still saves the calls it skips rather than time per call. The excess
+comes from the caching-off run's tail slowing to ~7270 ms, which raises its mean
+to 6677 ms and inflates the ratio. Against the mid-run steady state the speedup
+is 1.65x, inside the bound. **The cause of that tail slowdown is not
+established** — thermal or memory pressure are guesses, not findings.
+
+### The loop column is the one that can carry a claim
+
+| column | spread across three runs |
+|---|---|
+| loop (ms/step) | ±0.1% (3918.2–3919.8) |
+| e2e (s) | ±35% (878–1191) |
+
+The end-to-end spread is dominated by page-cache state on the first run of a
+mode, and at 81 frames also by the host VAE decode. Differences between modes
+are smaller than that spread, which is why the caching claims rest on the loop
+column.
 
 ## Why Wan's VAE has no device build at 81 frames
 
