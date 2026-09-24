@@ -84,6 +84,42 @@ def create_wan_text_encoder_config(
     )
 
 
+# Largest latent-frame count whose single-shot VAE graph compiles at 480x832.
+# Measured on trn2, 2026-09-23: 4 latent frames already needs 6,675,705
+# instructions against neuronx-cc's 5,000,000 ceiling (NCC_EBVF030), and the 21
+# behind 81 output frames need 39,093,968.
+MAX_SINGLE_SHOT_LATENT_FRAMES = 3
+
+
+# The later-chunk graph also takes the 19 cache tensors as inputs, which the
+# first-chunk graph does not, and those reads cost instructions: at 3 latent
+# frames it compiled to 5,426,220 against the 5,000,000 ceiling (NCC_EBVF030,
+# measured 2026-09-24) while the first chunk at the same size compiled fine. Two
+# latent frames brings it under. Only the FIRST chunk needs 3 -- it has to span
+# the empty, "Rep"-sentinel and settled cache regimes; later chunks see settled
+# tensors only.
+LATER_CHUNK_LATENT_FRAMES = 2
+
+
+def _vae_chunk_for(latent_frames: int) -> tuple[int, int]:
+    """Chunk sizes for the first and later graphs, as (first, later).
+
+    The clip must be the first chunk plus a whole number of later chunks. At
+    480x832 with (3, 2) that admits 21 latent frames -- the 81 output frames Wan
+    defaults to -- as 3 + 2x9.
+    """
+    first = MAX_SINGLE_SHOT_LATENT_FRAMES
+    later = LATER_CHUNK_LATENT_FRAMES
+    remainder = latent_frames - first
+    if remainder < 0 or remainder % later:
+        raise ValueError(
+            f"Wan VAE chunked decode needs latent frames = {first} + a multiple of {later}; "
+            f"got {latent_frames}. At 480x832 that admits num_frames in "
+            f"{{9, 17, 25, 33, ..., 81, ...}} (4n+1 with (latent - {first}) divisible by {later})."
+        )
+    return first, later
+
+
 def create_wan_vae_decoder_config(
     *,
     model_path: str,
@@ -265,8 +301,6 @@ class NeuronWanApplication(MultiComponentApplication):
             )
 
         if enable_vae_decoder and os.path.exists(os.path.join(self.vae_decoder_path, "config.json")):
-            from difflet.backends.trainium.wan.vae import NeuronWanVAEDecoderApplication
-
             vae_config = create_wan_vae_decoder_config(
                 model_path=model_path,
                 world_size=1,
@@ -278,10 +312,32 @@ class NeuronWanApplication(MultiComponentApplication):
                 batch_size=batch_size,
                 compile_shapes=self.compile_shapes,
             )
-            self.vae_decoder = NeuronWanVAEDecoderApplication(
-                model_path=self.vae_decoder_path,
-                config=vae_config,
-            )
+            # Tracing flattens the decoder's per-latent-frame loop, so the
+            # single-shot graph grows with frames and neuronx-cc rejects it past
+            # MAX_SINGLE_SHOT_LATENT_FRAMES at 480x832 (NCC_EBVF030, limit
+            # 5,000,000 instructions). Beyond that, compile the loop body for a
+            # fixed chunk and call it repeatedly -- bit-identical, since the body
+            # was already per-frame (difflet/models/wan/vae/chunked.py).
+            latent_frames = (int(num_frames) - 1) // 4 + 1
+            if latent_frames > MAX_SINGLE_SHOT_LATENT_FRAMES:
+                from difflet.backends.trainium.wan.vae_chunked_app import (
+                    NeuronWanVAEDecoderChunkedApplication,
+                )
+
+                chunk, later = _vae_chunk_for(latent_frames)
+                self.vae_decoder = NeuronWanVAEDecoderChunkedApplication(
+                    model_path=self.vae_decoder_path,
+                    config=vae_config,
+                    chunk=chunk,
+                    later_chunk=later,
+                )
+            else:
+                from difflet.backends.trainium.wan.vae import NeuronWanVAEDecoderApplication
+
+                self.vae_decoder = NeuronWanVAEDecoderApplication(
+                    model_path=self.vae_decoder_path,
+                    config=vae_config,
+                )
 
         from difflet.pipeline.teacache import requires_teacache_probe
 
