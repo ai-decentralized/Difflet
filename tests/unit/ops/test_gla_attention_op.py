@@ -45,10 +45,14 @@ def test_causal_matches_fla_reference(monkeypatch):
     fp64 reference test below covers causal correctness unconditionally.
     """
     monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
-    naive = pytest.importorskip(
-        "fla.ops.gla.naive",
-        reason="install flash-linear-attention, or put the clone on PYTHONPATH",
-    )
+    #naive = pytest.importorskip(
+    #    "fla.ops.gla.naive",
+    #    reason="install flash-linear-attention, or put the clone on PYTHONPATH",
+    #)
+    try:
+        from fla.ops.gla import naive
+    except (ImportError, OSError):
+        pytest.skip("flash-linear-attention is not importable")
     from difflet.ops import gla_attention
 
     torch.manual_seed(0)
