@@ -14,6 +14,24 @@ def _inputs(t=T):
     g = F.logsigmoid(torch.randn(B, t, H, K))  # log-space gate, <= 0
     return q, k, v, g
 
+def _chunkwise_non_causal(q, k, v, scale, C):
+    """Non-causal ungated linear attention in the NKI kernel's two-pass structure.
+
+    Pass 1 accumulates S = sum over tiles of K_tile^T V_tile.
+    Pass 2 computes O_tile = (Q_tile * scale) @ S for each tile.
+    """
+    B, T, H, K = q.shape
+    V = v.shape[-1]
+    q, k, v = (x.to(torch.float64) for x in (q, k, v))
+
+    S = q.new_zeros(B, H, K, V)
+    for start in range(0, T, C):
+        S += torch.einsum("bchk,bchv->bhkv", k[:, start:start + C], v[:, start:start + C])
+
+    o = q.new_empty(B, T, H, V)
+    for start in range(0, T, C):
+        o[:, start:start + C] = torch.einsum("bchk,bhkv->bchv", q[:, start:start + C] * scale, S)
+    return o
 
 def _reference_causal(q, k, v, g, scale, initial_state=None):
     """Independent recurrent reference, fp64, written from the definition.
@@ -166,6 +184,25 @@ def test_non_causal_matches_plain_linear_attention(monkeypatch):
 
     assert torch.allclose(ref.float(), out.float(), **TOL)
 
+@pytest.mark.parametrize("C", [1, 8, 32, 128, 300, 512])
+def test_non_causal_chunkwise_matches_op(monkeypatch, C):
+    """The kernel's tiled structure agrees with the op for any tile size,
+    including tiles that don't divide T and a single tile covering all of T."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
+    from difflet.ops import gla_attention
+
+    torch.manual_seed(0)
+    Bt, Tt, Ht, Kt, Vt = 2, 300, 3, 16, 16
+    q = torch.randn(Bt, Tt, Ht, Kt)
+    k = torch.randn(Bt, Tt, Ht, Kt)
+    v = torch.randn(Bt, Tt, Ht, Vt)
+    g = torch.nn.functional.logsigmoid(torch.randn(Bt, Tt, Ht, Kt))
+
+    scale = Kt ** -0.5
+    ref, _ = gla_attention(q, k, v, g, scale=scale, causal=False)
+    out = _chunkwise_non_causal(q, k, v, scale, C)
+
+    torch.testing.assert_close(out, ref.to(torch.float64), **TOL)
 
 # ------------------------------------------------------- degenerate identity
 
