@@ -108,6 +108,17 @@ def _key_inputs(app: Any) -> dict[str, Any]:
     layout = getattr(app, "shared_weights_layout", None)
     if layout is not None:
         inputs["weight_layout"] = layout
+    # FP8 PTQ (additive-only): the shards come from the quantized checkpoint,
+    # not the bf16 source, so both its identity and the scheme enter the key.
+    if getattr(neuron_config, "quantized", False):
+        quantized_path = getattr(neuron_config, "quantized_checkpoints_path", None)
+        inputs["quantized_checkpoint"] = (
+            os.path.realpath(str(quantized_path)) if quantized_path else None
+        )
+        inputs["quantization"] = {
+            "dtype": str(getattr(neuron_config, "quantization_dtype", None)),
+            "type": str(getattr(neuron_config, "quantization_type", None)),
+        }
     return inputs
 
 
@@ -156,6 +167,8 @@ def store_label(app: Any) -> str:
     config, neuron_config = app.config, app.neuron_config
     bits = _describe_source(str(app.model_path))
     bits.append(normalize_dtype(neuron_config.torch_dtype))
+    if getattr(neuron_config, "quantized", False):
+        bits.append(f"q{getattr(neuron_config, 'quantization_dtype', 'quant')}")
     layout = f"tp{int(neuron_config.tp_degree)}"
     world = int(neuron_config.world_size)
     if world != int(neuron_config.tp_degree):

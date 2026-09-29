@@ -152,6 +152,12 @@ class ModelWrapperWanBackbone(ShapeBucketedInputGenerator, ModelWrapper):
             model = self.model_cls(self.config)
             model = model.to(dtype=self.config.neuron_config.torch_dtype)
             model.eval()
+            # FP8 PTQ: swap the NxD parallel linears for their quantized forms
+            # (no-op unless neuron_config.quantized). Runs at trace time and at
+            # load, so the graph and the weight loader agree on the layer set.
+            from difflet.backends.trainium.core.quant import quantize_traced_model_
+
+            quantize_traced_model_(model, self.config.neuron_config)
             return model
 
         return BaseModelInstance(module_cls=_create_model, input_output_aliases={})
@@ -191,11 +197,16 @@ class NeuronWanBackboneApplication(NeuronApplicationBase):
         return self.models[0](*model_inputs, **kwargs)
 
     def get_compiler_args(self) -> str:
+        from difflet.backends.trainium.core.quant import fp8_hlo2tensorizer_options
+
+        # FP8 PTQ adds --experimental-unsafe-fp8e4m3fn-as-fp8e4m3 here as well as
+        # in ModelWrapper's own appended options (see core/quant.py).
+        hlo2tensorizer = fp8_hlo2tensorizer_options(self.config.neuron_config) + "--verify-hlo=true"
         compiler_args = (
             "--model-type=transformer -O1 "
             "--tensorizer-options='--enable-ccop-compute-overlap' "
             "--auto-cast=none "
-            "--internal-hlo2tensorizer-options='--verify-hlo=true'"
+            f"--internal-hlo2tensorizer-options='{hlo2tensorizer}'"
         )
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
         return compiler_args

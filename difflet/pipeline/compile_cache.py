@@ -145,6 +145,9 @@ _RUNTIME_ONLY_APP_KWARGS: frozenset[str] = frozenset(
         # (nor pollute the key so a warm cache misses).
         "teacache_cadence",
         "teacache_online_delta_alpha",
+        # FP8 PTQ: the spec ("quant") is hashed; the machine-local root the
+        # quantized checkpoint is resolved under is not.
+        "quant_cache_dir",
     }
 )
 
