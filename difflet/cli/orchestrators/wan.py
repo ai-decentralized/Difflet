@@ -197,6 +197,7 @@ class WanOrchestrator(ModelOrchestrator):
             sp_enabled=getattr(args, "sp_enabled", False),
         )
         compiled_dir = self._stage_compiled_dir("transformer", args)
+        quant_spec = self._quant_spec(args)
         app = NeuronWanApplication(
             model_path=model_dir,
             parallel=parallel,
@@ -217,6 +218,10 @@ class WanOrchestrator(ModelOrchestrator):
             # logic only; not in _stage_cache_inputs, so the warm artifact hits.
             teacache_cadence=getattr(args, "teacache_cadence", None),
             teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
+            # FP8 PTQ of the DiT linears: the spec is in _stage_cache_inputs (new
+            # artifact identity); the cache root only locates the quantized copy.
+            quant=quant_spec.to_dict() if quant_spec is not None else None,
+            quant_cache_dir=args.cache_dir,
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
@@ -311,10 +316,16 @@ class WanOrchestrator(ModelOrchestrator):
 
     # ------------------------------------------------------------ helpers
 
+    @staticmethod
+    def _quant_spec(args: argparse.Namespace):
+        from difflet.quant.spec import QuantSpec
+
+        return QuantSpec.from_args(args)
+
     def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         prefix = _cache_prefix(self.args.model_id)
         if stage == "transformer":
-            return {
+            inputs = {
                 "component": f"{prefix}_transformer",
                 "model_id": self.args.model_id,
                 "tp": args.tp_degree or 4,
@@ -327,6 +338,11 @@ class WanOrchestrator(ModelOrchestrator):
                 "shapes": canonical_shapes_list(args, (480, 832, 9)),
                 "toolchain": stage_toolchain_versions(),
             }
+            # Additive-only: absent for bf16 so every existing artifact keeps its key.
+            quant_spec = self._quant_spec(args)
+            if quant_spec is not None:
+                inputs["quant"] = quant_spec.to_dict()
+            return inputs
         if stage == "vae":
             return {
                 "component": f"{prefix}_vae",
@@ -378,6 +394,9 @@ class WanOrchestrator(ModelOrchestrator):
             parts += ["--teacache-cadence", str(a.teacache_cadence)]
         if getattr(a, "teacache_online_delta", None) is not None:
             parts += ["--teacache-online-delta", str(a.teacache_online_delta)]
+        quant_spec = self._quant_spec(a)
+        if quant_spec is not None:
+            parts += quant_spec.cli_args()
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
         if getattr(a, "output", None):

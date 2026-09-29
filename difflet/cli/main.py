@@ -178,6 +178,32 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_quant_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--quant",
+        choices=["fp8"],
+        default=None,
+        help="Post-training quantization of the DiT linear layers (attention q/k/v/out "
+        "and FFN) to FP8 e4m3 with absmax scales, FastVideo-style; embedders, "
+        "modulation, norms and proj_out stay bf16. Wan only for now. Changes the "
+        "compiled artifact identity.",
+    )
+    p.add_argument(
+        "--quant-granularity",
+        choices=["tensor", "channel"],
+        default="tensor",
+        help="Weight scale granularity: one scale per tensor (default) or per "
+        "output channel. Requires --quant.",
+    )
+    p.add_argument(
+        "--quant-act",
+        choices=["dynamic", "none"],
+        default="dynamic",
+        help="Activation quantization: dynamic per-tensor FP8 at run time (default, "
+        "W8A8) or none (weight-only). Requires --quant.",
+    )
+
+
 def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--tp-degree",
@@ -489,6 +515,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_parallel_flags(cp_cmd)
     _add_shape_flags(cp_cmd)
     _add_cache_flags(cp_cmd)
+    _add_quant_flags(cp_cmd)
 
     gen = sub.add_parser("generate", help="Run inference (requires prior compile)")
     _add_model_flag(gen)
@@ -496,6 +523,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_parallel_flags(gen)
     _add_shape_flags(gen)
     _add_cache_flags(gen)
+    _add_quant_flags(gen)
     _add_generate_flags(gen)
 
     run_cmd = sub.add_parser("run", help="Download + compile + generate in one shot")
@@ -504,6 +532,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_parallel_flags(run_cmd)
     _add_shape_flags(run_cmd)
     _add_cache_flags(run_cmd)
+    _add_quant_flags(run_cmd)
     _add_generate_flags(run_cmd)
 
     plan_cmd = sub.add_parser(
@@ -578,7 +607,27 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_serve_model_flag(serve)
     serve.add_argument("--revision", default=None)
     _add_serve_profile_flags(serve)
+    _add_quant_flags(serve)
     _add_serve_flags(serve)
+
+    quantize = sub.add_parser(
+        "quantize",
+        help="Build the FP8 PTQ checkpoint copy of a model's DiT on the CPU "
+        "(also done implicitly by `compile --quant`)",
+    )
+    _add_model_flag(quantize)
+    quantize.add_argument("--revision", default=None)
+    _add_quant_flags(quantize)
+    quantize.set_defaults(quant="fp8")
+    quantize.add_argument(
+        "--cache-dir",
+        default=None,
+        help="Difflet cache root the quantized checkpoint is written under "
+        "(default: ~/.cache/difflet/)",
+    )
+    quantize.add_argument(
+        "--force", action="store_true", help="Rebuild even if a valid quantized checkpoint exists"
+    )
 
     cache = sub.add_parser("cache", help="Inspect the compiled-artifact cache")
     cache.add_argument(
@@ -648,6 +697,28 @@ def _validate_sp(args: argparse.Namespace) -> None:
         print(
             f"Error: {args.model_id} does not support --sp. Sequence parallelism "
             "is available for Flux, Wan, HunyuanVideo, and Qwen-Image.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
+def _validate_quant(args: argparse.Namespace) -> None:
+    """--quant is wired for the Wan backbones only (see the PTQ design spec)."""
+    if getattr(args, "quant", None) is None:
+        return
+    from difflet.cli.quantize import QUANT_MODEL_TYPES
+
+    if _MODEL_TYPE.get(args.model_id) not in QUANT_MODEL_TYPES:
+        print(
+            f"Error: {args.model_id} does not support --quant yet. FP8 PTQ of the DiT "
+            "linear layers is wired for Wan 2.1 / 2.2 only.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if getattr(args, "teacache_speedup", None) is not None:
+        print(
+            "Error: --quant and adaptive TeaCache (--teacache-speedup) are mutually "
+            "exclusive; use --teacache-cadence or --teacache-online-delta.",
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -903,6 +974,14 @@ def main(argv: list[str] | None = None) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+    if args.command in ("compile", "generate", "run", "serve", "quantize"):
+        _validate_quant(args)
+
+    if args.command == "quantize":
+        from difflet.cli.quantize import run as run_quantize
+
+        raise SystemExit(run_quantize(args))
 
     if args.command in ("compile", "generate", "run"):
         _validate_cfg_parallel(args)

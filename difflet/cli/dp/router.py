@@ -108,6 +108,11 @@ def worker_cli_args(args) -> list[str]:
         argv.append("--sp")
     if getattr(args, "keep_work_dir", False):
         argv.append("--keep-work-dir")
+    from difflet.quant.spec import QuantSpec
+
+    spec = QuantSpec.from_args(args)
+    if spec is not None:
+        argv += spec.cli_args()
     return argv
 
 
