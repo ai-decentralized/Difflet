@@ -664,7 +664,7 @@ def _compile_spec(
         num_frames=profile.num_frames,
         shapes=profile.shapes,
         revision=source.resolved_source_id,
-        application_kwargs=_application_kwargs(),
+        application_kwargs=_application_kwargs(profile),
     )
     identity = CompileArtifactIdentity.from_cache_inputs(
         {"component_id": "generation", "cache_inputs": cache_spec.cache_inputs()}
@@ -716,8 +716,8 @@ def _compile_specs(
     )
 
 
-def _application_kwargs() -> dict[str, Any]:
-    return {
+def _application_kwargs(profile: ServingProfile | None = None) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
         "text_seq_len": _TEXT_SEQ_LEN,
         "batch_size": 1,
         "enable_text_encoder": True,
@@ -725,10 +725,19 @@ def _application_kwargs() -> dict[str, Any]:
         "enable_transformer_2": False,
         "enable_vae_decoder": False,
     }
+    if profile is not None and profile.quant is not None:
+        # The spec is hashed into the generation identity; the cache root only
+        # locates the quantized checkpoint copy and is runtime-only (see
+        # compile_cache._RUNTIME_ONLY_APP_KWARGS).
+        kwargs["quant"] = profile.quant.to_dict()
+        kwargs["quant_cache_dir"] = profile.cache_dir
+    return kwargs
 
 
 def _build_application(source: ResolvedModelSource, profile: ServingProfile):
     if _backend_is_tpu():
+        if profile.quant is not None:
+            raise ValueError("FP8 PTQ (--quant) is Trainium-only; the TPU backend runs bf16")
         from difflet.models.wan.entry import create_wan_application
 
         return create_wan_application(
@@ -748,7 +757,7 @@ def _build_application(source: ResolvedModelSource, profile: ServingProfile):
         dtype=_torch_bfloat16(),
         shape=profile.shape_dict(),
         shapes=profile.canonical_shapes() if profile.shapes else None,
-        **_application_kwargs(),
+        **_application_kwargs(profile),
     )
 
 

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeAlias, TypeVar
 
 from difflet.pipeline.parallel_config import DiffletParallelConfig
+from difflet.quant.spec import QuantSpec
 
 if TYPE_CHECKING:
     from difflet.pipeline.teacache import TeaCacheCalibration
@@ -260,6 +261,9 @@ class ServingProfile:
     # profile (height/width/num_frames above). By convention height/width/
     # num_frames equal the largest (priority) shape of the set.
     shapes: tuple[tuple[int, int, int | None], ...] | None = None
+    # FP8 PTQ of the DiT linear layers (None = bf16). Part of the compiled
+    # artifact identity; see docs/superpowers/specs/2026-09-29-ptq-fp8-linear-design.md.
+    quant: QuantSpec | None = None
 
     @property
     def world_size(self) -> int:

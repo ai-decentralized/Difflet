@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from difflet.pipeline.parallel_config import DiffletParallelConfig
+from difflet.quant.spec import QuantSpec
 from difflet.registry import ModelEntry
 from difflet.serving.errors import invalid_extra_body
 from difflet.serving.types import OutputModality, ServingPlacement, ServingProfile
@@ -69,6 +70,10 @@ class ServeOptions:
     teacache_online_delta: float | None = None
     teacache_speedup: float | None = None
     teacache_calibration: str | None = None
+    # --quant / --quant-granularity / --quant-act (FP8 PTQ of the DiT linears)
+    quant: str | None = None
+    quant_granularity: str = "tensor"
+    quant_act: str = "dynamic"
     download_policy: DownloadPolicy = DownloadPolicy.AUTO
     compile_policy: CompilePolicy = CompilePolicy.AUTO
     max_running_requests: int = 1
@@ -174,8 +179,30 @@ def build_serving_profile(
     teacache_online_delta: float | None,
     teacache_speedup: float | None,
     teacache_calibration: str | None,
+    quant: str | None = None,
+    quant_granularity: str = "tensor",
+    quant_act: str = "dynamic",
 ) -> ServingProfile:
     """Resolve registry defaults plus `difflet serve` overrides."""
+
+    quant_spec = None
+    if quant is not None:
+        from difflet.cli.quantize import QUANT_MODEL_TYPES
+
+        if model_type not in QUANT_MODEL_TYPES:
+            raise invalid_extra_body(
+                f"{model_id} does not support --quant yet; FP8 PTQ is wired for Wan only."
+            )
+        if teacache_speedup is not None:
+            raise invalid_extra_body(
+                "--quant and adaptive TeaCache (--teacache-speedup) are mutually exclusive."
+            )
+        try:
+            quant_spec = QuantSpec.from_args(
+                _QuantArgs(quant=quant, quant_granularity=quant_granularity, quant_act=quant_act)
+            )
+        except ValueError as exc:
+            raise invalid_extra_body(f"invalid --quant settings: {exc}") from exc
 
     if output_modality == "image" and num_frames is not None:
         raise invalid_extra_body(
@@ -312,7 +339,17 @@ def build_serving_profile(
         host_vae=(default_host_vae or host_vae) if output_modality == "video" else False,
         clip_placement=resolved_clip_placement,
         shapes=canonical_shapes,
+        quant=quant_spec,
     )
+
+
+@dataclass(frozen=True)
+class _QuantArgs:
+    """The three CLI fields ``QuantSpec.from_args`` reads, for callers without argparse."""
+
+    quant: str | None
+    quant_granularity: str = "tensor"
+    quant_act: str = "dynamic"
 
 
 def _load_serving_teacache_calibration(

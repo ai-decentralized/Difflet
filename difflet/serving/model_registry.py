@@ -69,6 +69,9 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         teacache_online_delta=options.teacache_online_delta,
         teacache_speedup=options.teacache_speedup,
         teacache_calibration=options.teacache_calibration,
+        quant=getattr(options, "quant", None),
+        quant_granularity=getattr(options, "quant_granularity", "tensor"),
+        quant_act=getattr(options, "quant_act", "dynamic"),
     )
     return ResolvedServingModel(
         model_id=options.model_id,
