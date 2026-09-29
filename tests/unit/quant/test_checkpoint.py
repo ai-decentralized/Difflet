@@ -129,3 +129,30 @@ def test_checkpoint_dir_is_keyed_by_source_and_uses_hf_cache_slug(tmp_path):
     other = tmp_path / "hub" / "models--Wan-AI--Wan2.1-T2V-14B-Diffusers" / "snapshots" / "def" / "transformer"
     other.mkdir(parents=True)
     assert ckpt.quantized_checkpoint_dir(tmp_path / "cache", other, spec) != path
+
+
+def test_quantized_hf_checkpoint_maps_onto_difflet_wan_names(tmp_path):
+    """HF-layout fp8 checkpoint -> vendored loader renames -> Difflet Wan keys.
+
+    Mirrors what NeuronApplicationBase.get_state_dict does on device
+    (``.weight_scale`` -> ``.scale``) followed by convert_backbone_state_dict,
+    so the quantized FFN keys land on ``ffn.net_in`` / ``ffn.net_out``.
+    """
+    from difflet.backends.trainium.core.modules.checkpoint import load_state_dict
+    from difflet.models.wan.checkpoint.backbone import convert_backbone_state_dict
+
+    src = _write_source(tmp_path / "model")
+    dest = tmp_path / "q"
+    ckpt.quantize_checkpoint_dir(src, dest, QuantSpec(weight_granularity="channel"))
+    loaded = load_state_dict(str(dest))
+    renamed = {
+        (k[: -len(".weight_scale")] + ".scale" if k.endswith(".weight_scale") else k): v
+        for k, v in loaded.items()
+    }
+    converted = convert_backbone_state_dict(renamed)
+    assert converted["blocks.0.ffn.net_in.weight"].dtype == torch.float8_e4m3fn
+    assert converted["blocks.0.ffn.net_in.scale"].shape == (16, 1)
+    assert converted["blocks.0.ffn.net_out.scale"].shape == (8, 1)
+    assert converted["blocks.0.attn1.to_out.0.scale"].dtype == torch.float32
+    assert "blocks.0.ffn.net.0.proj.weight" not in converted
+    assert converted["proj_out.weight"].dtype == torch.bfloat16

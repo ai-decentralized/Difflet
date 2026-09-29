@@ -256,10 +256,11 @@ def render_markdown(summary: dict) -> str:
         out = entry.get("output") or {}
         lat = entry.get("latents") or {}
         lpips = out.get("lpips")
+        lpips_str = "n/a" if lpips is None else f"{lpips:.4f}"
+        mse_str = "—" if lat.get("mse") is None else f"{lat['mse']:.3e}"
         lines.append(
             f"| {tag} | {fmt(out.get('psnr_db'), 2)} | {fmt(out.get('ssim'), 4)} | "
-            f"{'n/a' if lpips is None else f'{lpips:.4f}'} | {fmt(lat.get('cosine'), 6)} | "
-            f"{'—' if lat.get('mse') is None else f'{lat['mse']:.3e}'} | {fmt(lat.get('snr_db'), 2)} |"
+            f"{lpips_str} | {fmt(lat.get('cosine'), 6)} | {mse_str} | {fmt(lat.get('snr_db'), 2)} |"
         )
         if entry.get("output_error"):
             lines.append(f"| {tag} (output error) | {entry['output_error']} | | | | | |")

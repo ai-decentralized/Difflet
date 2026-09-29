@@ -19,6 +19,10 @@ a sanity signal only; the per-step number that matters comes from the 14B A/B
     PYTHONPATH=$PWD python scripts/ptq_fp8_device_probe.py --work-dir /tmp/ptq_probe \\
         [--quant-granularity tensor|channel] [--quant-act dynamic|none] [--only bf16|fp8|both]
 
+The CPU reference and the device build run in separate processes (the op
+dispatch is frozen at first import per process: a process that bound the CPU
+backend cannot build the Neuron model). ``--stage cpu`` / ``--stage device`` are
+those halves; the default ``--stage all`` runs both and writes the report.
 Exit 0 when the fp8 arm compiles, loads, and matches the CPU fp8 reference
 (cosine >= --min-cosine); the JSON report is written either way.
 """
@@ -30,6 +34,7 @@ import json
 import os
 import shutil
 import statistics
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -59,6 +64,7 @@ TINY_CONFIG = {
 }
 # Difflet <-> diffusers FFN naming (the on-device loader reads diffusers keys).
 _TO_DIFFUSERS = ((".ffn.net_in.", ".ffn.net.0.proj."), (".ffn.net_out.", ".ffn.net.2."))
+REPORT = "ptq_probe_report.json"
 
 
 def ensure_runtime_python() -> None:
@@ -76,6 +82,7 @@ def ensure_runtime_python() -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--work-dir", type=Path, default=Path("/tmp/difflet_ptq_probe"))
+    p.add_argument("--stage", choices=["all", "cpu", "device"], default="all")
     p.add_argument("--height", type=int, default=64)
     p.add_argument("--width", type=int, default=64)
     p.add_argument("--text-seq-len", type=int, default=16)
@@ -89,25 +96,30 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _write_tiny_model(model_dir: Path, seed: int):
-    """Random tiny Wan transformer in HF layout + the CPU bf16/fp8 references."""
+def _spec(args):
+    from difflet.quant.spec import QuantSpec
+
+    return QuantSpec(weight_granularity=args.quant_granularity, activation=args.quant_act)
+
+
+def _first(value):
+    return value[0] if isinstance(value, (list, tuple)) else value
+
+
+# ------------------------------------------------------------------ cpu stage
+
+
+def stage_cpu(args) -> int:
+    """Random tiny Wan transformer in HF layout + the CPU bf16 / fp8 references."""
+    os.environ["DIFFLET_BACKEND"] = "cpu"
     import torch
     from safetensors.torch import save_file
 
-    os.environ["DIFFLET_BACKEND"] = "cpu"
-    import importlib
-
-    import difflet.ops as ops
-
-    importlib.reload(ops)
     import difflet.models.wan.modeling_wan as wan
-
-    importlib.reload(wan)
     from difflet.quant.fake_linear import quantize_module_
-    from difflet.quant.spec import QuantSpec
 
     cfg = wan.WanTransformerConfig.from_diffusers_dict(TINY_CONFIG)
-    torch.manual_seed(seed)
+    torch.manual_seed(args.seed)
     model = wan.WanTransformer3DModel(cfg).to(torch.bfloat16).eval()
     state = {}
     for key, value in model.state_dict().items():
@@ -116,25 +128,25 @@ def _write_tiny_model(model_dir: Path, seed: int):
         for ours, theirs in _TO_DIFFUSERS:
             key = key.replace(ours, theirs)
         state[key] = value.contiguous()
-    transformer_dir = model_dir / "transformer"
+    transformer_dir = args.work_dir / "tiny_wan" / "transformer"
     transformer_dir.mkdir(parents=True, exist_ok=True)
     save_file(state, str(transformer_dir / "diffusion_pytorch_model.safetensors"))
     (transformer_dir / "config.json").write_text(json.dumps(TINY_CONFIG, indent=2))
-    return model, cfg, QuantSpec, quantize_module_
 
-
-def _inputs(cfg, args, seed):
-    import torch
-
-    g = torch.Generator().manual_seed(seed + 1)
+    g = torch.Generator().manual_seed(args.seed + 1)
     latents = torch.randn(1, cfg.in_channels, 1, args.height // 8, args.width // 8, generator=g)
     text = torch.randn(1, args.text_seq_len, cfg.text_dim, generator=g)
-    timestep = torch.tensor([500.0])
-    return latents.to(torch.bfloat16), timestep.to(torch.bfloat16), text.to(torch.bfloat16)
+    inputs = (latents.to(torch.bfloat16), torch.tensor([500.0]).to(torch.bfloat16), text.to(torch.bfloat16))
+    with torch.no_grad():
+        cpu_bf16 = _first(model(*inputs)).float()
+        quantize_module_(model, _spec(args))
+        cpu_fp8 = _first(model(*inputs)).float()
+    torch.save({"inputs": inputs, "cpu_bf16": cpu_bf16, "cpu_fp8": cpu_fp8}, args.work_dir / "cpu_reference.pt")
+    print(f"[probe:cpu] tiny model + references written under {args.work_dir}", flush=True)
+    return 0
 
 
-def _first(value):
-    return value[0] if isinstance(value, (list, tuple)) else value
+# --------------------------------------------------------------- device stage
 
 
 def _device_arm(name, transformer_dir, args, inputs, spec, cache_dir):
@@ -179,49 +191,38 @@ def _device_arm(name, transformer_dir, args, inputs, spec, cache_dir):
         samples.append((time.perf_counter() - started) * 1000.0)
     record["forward_ms"] = {"n": len(samples), "mean": statistics.fmean(samples),
                             "median": statistics.median(samples), "min": min(samples), "max": max(samples)}
-    return output.detach().cpu(), record
+    return output.detach().cpu().float(), record
 
 
-def main() -> int:
-    ensure_runtime_python()
-    args = build_parser().parse_args()
+def stage_device(args) -> int:
     os.environ.setdefault("NEURON_RT_NUM_CORES", "1")
-    if args.force_clean and args.work_dir.exists():
-        shutil.rmtree(args.work_dir)
-    args.work_dir.mkdir(parents=True, exist_ok=True)
-    report_path = args.work_dir / "ptq_probe_report.json"
-
     import torch
 
     from difflet.quant.metrics import tensor_error_metrics
 
-    model_dir = args.work_dir / "tiny_wan"
-    model, cfg, QuantSpec, quantize_module_ = _write_tiny_model(model_dir, args.seed)
-    spec = QuantSpec(weight_granularity=args.quant_granularity, activation=args.quant_act)
-    inputs = _inputs(cfg, args, args.seed)
-    with torch.no_grad():
-        cpu_bf16 = _first(model(*inputs)).float()
-        quantize_module_(model, spec)
-        cpu_fp8 = _first(model(*inputs)).float()
+    reference = torch.load(args.work_dir / "cpu_reference.pt", map_location="cpu")
+    inputs, cpu_bf16, cpu_fp8 = reference["inputs"], reference["cpu_bf16"], reference["cpu_fp8"]
+    spec = _spec(args)
+    report_path = args.work_dir / REPORT
     report = {
         "spec": spec.to_dict(),
         "shape": {"height": args.height, "width": args.width, "text_seq_len": args.text_seq_len},
         "cpu_fp8_vs_cpu_bf16": tensor_error_metrics(cpu_bf16, cpu_fp8),
         "arms": {},
         "checks": {},
+        "passed": False,
     }
     report_path.write_text(json.dumps(report, indent=2) + "\n")
 
-    os.environ["DIFFLET_BACKEND"] = "trainium"
-    cache_dir = args.work_dir / "cache"
     outputs = {}
+    transformer_dir = args.work_dir / "tiny_wan" / "transformer"
     for name in ("bf16", "fp8"):
         if args.only not in ("both", name):
             continue
         try:
-            output, record = _device_arm(name, model_dir / "transformer", args, inputs,
-                                         spec if name == "fp8" else None, cache_dir)
-            outputs[name] = output.float()
+            output, record = _device_arm(name, transformer_dir, args, inputs,
+                                         spec if name == "fp8" else None, args.work_dir / "cache")
+            outputs[name] = output
         except Exception as exc:  # keep the partial report: the failure IS the finding
             import traceback
 
@@ -230,28 +231,52 @@ def main() -> int:
         report["arms"][name] = record
         report_path.write_text(json.dumps(report, indent=2) + "\n")
 
+    checks = report["checks"]
     if "bf16" in outputs:
-        report["checks"]["device_bf16_vs_cpu_bf16"] = tensor_error_metrics(cpu_bf16, outputs["bf16"])
+        checks["device_bf16_vs_cpu_bf16"] = tensor_error_metrics(cpu_bf16, outputs["bf16"])
     if "fp8" in outputs:
-        report["checks"]["device_fp8_vs_cpu_fp8"] = tensor_error_metrics(cpu_fp8, outputs["fp8"])
-        report["checks"]["device_fp8_vs_cpu_bf16"] = tensor_error_metrics(cpu_bf16, outputs["fp8"])
+        checks["device_fp8_vs_cpu_fp8"] = tensor_error_metrics(cpu_fp8, outputs["fp8"])
+        checks["device_fp8_vs_cpu_bf16"] = tensor_error_metrics(cpu_bf16, outputs["fp8"])
     if "bf16" in outputs and "fp8" in outputs:
-        report["checks"]["device_fp8_vs_device_bf16"] = tensor_error_metrics(outputs["bf16"], outputs["fp8"])
-    fp8_ok = (
-        report["arms"].get("fp8", {}).get("loaded", False)
-        and report["checks"].get("device_fp8_vs_cpu_fp8", {}).get("cosine", 0.0) >= args.min_cosine
-    )
-    report["passed"] = bool(fp8_ok) if args.only != "bf16" else bool(outputs.get("bf16") is not None)
+        checks["device_fp8_vs_device_bf16"] = tensor_error_metrics(outputs["bf16"], outputs["fp8"])
+    if args.only == "bf16":
+        report["passed"] = "bf16" in outputs
+    else:
+        report["passed"] = bool(
+            report["arms"].get("fp8", {}).get("loaded", False)
+            and checks.get("device_fp8_vs_cpu_fp8", {}).get("cosine", 0.0) >= args.min_cosine
+        )
     report_path.write_text(json.dumps(report, indent=2) + "\n")
 
     print(json.dumps({k: v for k, v in report.items() if k != "arms"}, indent=2))
     for name, record in report["arms"].items():
-        summary = {k: v for k, v in record.items() if k not in ("traceback", "compiler_args")}
+        summary = {k: v for k, v in record.items() if k not in ("traceback",)}
         print(f"[probe] {name}: {json.dumps(summary)}")
         if "traceback" in record:
             print(record["traceback"])
     print(f"[probe] report: {report_path}  passed={report['passed']}")
     return 0 if report["passed"] else 1
+
+
+def main() -> int:
+    ensure_runtime_python()
+    args = build_parser().parse_args()
+    if args.stage == "cpu":
+        return stage_cpu(args)
+    if args.stage == "device":
+        return stage_device(args)
+    if args.force_clean and args.work_dir.exists():
+        shutil.rmtree(args.work_dir)
+    args.work_dir.mkdir(parents=True, exist_ok=True)
+    forwarded = [a for a in sys.argv[1:] if a not in ("--force-clean",)]
+    base = [sys.executable, str(Path(__file__).resolve()), *forwarded]
+    env = dict(os.environ, PYTHONPATH=f"{ROOT}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")
+    cpu = subprocess.run(base + ["--stage", "cpu"], env=dict(env, DIFFLET_BACKEND="cpu"))
+    if cpu.returncode != 0:
+        return cpu.returncode
+    device_env = dict(env)
+    device_env.pop("DIFFLET_BACKEND", None)  # auto-detects trainium in the Neuron venv
+    return subprocess.run(base + ["--stage", "device"], env=device_env).returncode
 
 
 if __name__ == "__main__":

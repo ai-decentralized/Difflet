@@ -99,7 +99,9 @@ def _load_model(args, wan):
     if args.max_blocks is not None:
         state = {k: v for k, v in state.items()
                  if not k.startswith("blocks.") or int(k.split(".")[1]) < config.num_layers}
-    missing, unexpected = model.load_state_dict(state, strict=False)
+    # assign=True adopts the loaded tensors instead of copying them: the 14B
+    # model would otherwise be resident twice (56 GB) during the load.
+    missing, unexpected = model.load_state_dict(state, strict=False, assign=True)
     missing = [m for m in missing if not m.endswith(".rank")]
     if missing or unexpected:
         print(f"[sweep] WARNING load_state_dict missing={missing[:5]} unexpected={unexpected[:5]}")
