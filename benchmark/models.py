@@ -52,6 +52,11 @@ class BenchConfig:
     cfg_parallel: bool = False               # --cfg-parallel (true-CFG models only)
     sp: bool = False                         # --sp (Megatron sequence parallelism)
     dtype: str = "bf16"
+    # FP8 PTQ of the DiT linears (--quant / --quant-granularity / --quant-act).
+    # None = bf16. Part of the result identity (slug suffix + JSON "quant").
+    quant: Optional[str] = None
+    quant_granularity: str = "tensor"
+    quant_act: str = "dynamic"
     height: Optional[int] = None
     width: Optional[int] = None
     num_frames: Optional[int] = None
@@ -91,6 +96,26 @@ class BenchConfig:
             f.append("--sp")
         return f
 
+    def quant_flags(self) -> list[str]:
+        """--quant CLI tokens for compile AND generate (both must agree)."""
+        if self.quant is None:
+            return []
+        return ["--quant", self.quant, "--quant-granularity", self.quant_granularity,
+                "--quant-act", self.quant_act]
+
+    def quant_dict(self) -> Optional[dict]:
+        if self.quant is None:
+            return None
+        return {"format": self.quant, "weight_granularity": self.quant_granularity,
+                "activation": self.quant_act}
+
+    def slug_suffix(self) -> str:
+        """Result-file suffix so an fp8 run never overwrites the bf16 report."""
+        if self.quant is None:
+            return ""
+        act = "dyn" if self.quant_act == "dynamic" else "wo"
+        return f"_{self.quant}_{self.quant_granularity}_{act}"
+
     def parallel_dict(self) -> dict:
         """Result-JSON parallel record (same schema as the phase-sweep JSONs)."""
         return {
@@ -128,6 +153,20 @@ MATRIX: dict[str, BenchConfig] = {
         output_kind="video",
         config_label="tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage "
                      "(transformer + VAE) subprocess pipeline",
+        stage_names=["text_encoder (UMT5)", "transformer (denoise loop)", "vae_decoder"],
+    ),
+    # FP8 PTQ A/B partner of wan_2_1: same shape/steps/seed, DiT linears in fp8
+    # (per-tensor absmax weights, dynamic per-tensor activations — FastVideo's
+    # FP8Config defaults). Compare against wan_2_1 for compile / e2e / per-step.
+    "wan_2_1_fp8": BenchConfig(
+        model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers",
+        revision="38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+        model_type="wan",
+        tp=4, height=480, width=832, num_frames=9, steps=20, guidance_scale=1.0,
+        quant="fp8", quant_granularity="tensor", quant_act="dynamic",
+        output_kind="video",
+        config_label="tp=4, FP8 PTQ (e4m3, per-tensor weights, dynamic activations) on the "
+                     "DiT linears, bf16 elsewhere, attention_cte, 2-stage subprocess pipeline",
         stage_names=["text_encoder (UMT5)", "transformer (denoise loop)", "vae_decoder"],
     ),
     "wan_2_2": BenchConfig(

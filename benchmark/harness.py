@@ -165,6 +165,7 @@ class BenchResult:
     parallel: dict[str, int] = field(default_factory=dict)
     shape: dict[str, Any] = field(default_factory=dict)
     steps: Optional[int] = None
+    quant: Optional[dict] = None             # FP8 PTQ knobs (None = bf16)
     # phase timings (seconds)
     compile_seconds: Optional[float] = None
     compile_breakdown: dict[str, float] = field(default_factory=dict)

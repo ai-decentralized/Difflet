@@ -204,3 +204,27 @@ def test_denoise_with_real_unipc_scheduler(tmp_path):
     assert isinstance(out, WanPipelineOutput)
     # 3 scheduler timesteps → 3 transformer evaluations (guidance_scale defaults to 1).
     assert len(transformer.calls) == 3
+
+
+def test_denoise_reports_per_step_dit_seconds(tmp_path, capsys):
+    """The denoise loop times every DiT step and prints the two lines the
+    benchmark adapter parses (raw list + summary with step 0 excluded)."""
+    transformer = FakeTransformer(bias=0.1)
+    orch = WanOrchestrator(model_path=str(tmp_path), dtype=torch.float32, transformer=transformer)
+    orch(
+        prompt_embeds=torch.ones((1, 5, 8)),
+        latents=torch.zeros((1, 16, 1, 1, 1)),
+        height=8,
+        width=8,
+        num_frames=1,
+        num_inference_steps=4,
+        guidance_scale=3.0,  # cond + uncond per step: both passes count toward one step
+        output_type="latent",
+    )
+    assert len(transformer.calls) == 8
+    assert len(orch._last_dit_step_seconds) == 4
+    assert all(s >= 0.0 for s in orch._last_dit_step_seconds)
+    out = capsys.readouterr().out
+    assert "[wan] dit-step-seconds: [" in out
+    assert "[wan] dit-step ms: n=3 mean=" in out and "(step 0 excluded)" in out
+    assert pl._format_dit_step_report([0.5]).endswith("no per-step stat)")

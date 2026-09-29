@@ -24,6 +24,19 @@ _RE_BUILD = re.compile(r"Finished building model in ([\d.]+) seconds")
 _RE_LOAD = re.compile(r"Finished weights loading in ([\d.]+) seconds")
 _RE_FWD = re.compile(r"trainium forward elapsed = ([\d.]+)s")
 _RE_SHARD = re.compile(r"Done Sharding weights in ([\d.]+)")
+# Real-loop per-step DiT seconds printed by the Wan pipeline after the denoise
+# loop ("[wan] dit-step-seconds: [0.55, 0.55, ...]"); step 0 is dropped here so
+# the samples follow the cross-device rule (benchmark/harness.py).
+_RE_DIT_STEPS = re.compile(r"dit-step-seconds: \[([^\]]*)\]")
+
+
+def parse_dit_step_seconds(text: str) -> list[float]:
+    """Per-step DiT seconds from a generate log, step 0 excluded (last loop wins)."""
+    matches = _RE_DIT_STEPS.findall(text)
+    if not matches:
+        return []
+    values = [float(v) for v in matches[-1].split(",") if v.strip()]
+    return values[1:]
 
 
 def _filter(text: str) -> str:
@@ -89,7 +102,7 @@ class TrainiumAdapter(BackendAdapter):
         cfg = spec
         log = self.log_dir / f"{spec_slug(cfg)}_compile.log"
         cmd = [_DIFFLET, "compile", "--model-id", cfg.model_id] + self._rev(cfg) + [
-               *cfg.parallel_flags(),
+               *cfg.parallel_flags(), *_quant_flags(cfg),
                "--cache-dir", self.cache_dir] + cfg.shape_flags()
         t0 = time.perf_counter()
         text = self._run(cmd, log, timeout=14400)
@@ -106,7 +119,7 @@ class TrainiumAdapter(BackendAdapter):
         # image models save via PIL (needs an image extension); video -> .mp4
         out_ext = ".png" if getattr(cfg, "output_kind", "video") == "image" else ".mp4"
         cmd = [_DIFFLET, "generate", "--model-id", cfg.model_id] + self._rev(cfg) + [
-               *cfg.parallel_flags(),
+               *cfg.parallel_flags(), *_quant_flags(cfg),
                "--cache-dir", self.cache_dir,
                "--prompt", cfg.prompt, "--steps", str(cfg.steps),
                "--seed", str(getattr(cfg, "seed", 42)),
@@ -130,6 +143,10 @@ class TrainiumAdapter(BackendAdapter):
         fwd = [float(x) for x in _RE_FWD.findall(text)]
         if fwd:
             res["step_seconds"] = fwd
+        dit_steps = parse_dit_step_seconds(text)
+        if dit_steps:
+            res["step_seconds"] = dit_steps
+            res["step_basis"] = "real-loop DiT wall time per step, device-synced, step 0 excluded"
         res["output"] = self._inspect_output(out_path)
         return res
 
@@ -174,6 +191,12 @@ class TrainiumAdapter(BackendAdapter):
         return text
 
 
+def _quant_flags(cfg) -> list[str]:
+    quant_flags = getattr(cfg, "quant_flags", None)
+    return quant_flags() if callable(quant_flags) else []
+
+
 def spec_slug(cfg) -> str:
     base = cfg.model_id.split("/")[-1].replace(".", "_").replace("-", "_")
-    return base.lower()
+    suffix = getattr(cfg, "slug_suffix", None)
+    return base.lower() + (suffix() if callable(suffix) else "")

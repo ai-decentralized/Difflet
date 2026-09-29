@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import statistics
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -350,6 +352,11 @@ class WanOrchestrator:
         )
         teacache_on = False if cfg_parallel else self._maybe_init_teacache()
         ctrl = self._teacache_controller if teacache_on else None
+        # Per-step DiT wall time (both CFG passes of a step summed; TeaCache-
+        # skipped steps excluded). The Neuron forward returns host tensors, so
+        # the timer is device-synced. Reported after the loop with step 0
+        # excluded, the cross-device per-step rule (benchmark/harness.py).
+        dit_step_seconds: list[float] = []
         if ctrl is not None:
             from difflet.pipeline.teacache import sync_probe_free_num_steps
 
@@ -374,9 +381,11 @@ class WanOrchestrator:
                     [negative_prompt_embeds, prompt_embeds], dim=0
                 ).to(dtype=model_dtype)
                 batched_timestep = _batch_timestep(timestep, 2, latents.device, model_dtype)
+                step_started = time.perf_counter()
                 out = _first_tensor(
                     current_model(batched_latents, batched_timestep, batched_embeds)
                 )
+                dit_step_seconds.append(time.perf_counter() - step_started)
                 uncond, cond = out[0:1], out[1:2]
                 noise_pred = uncond + scale * (cond - uncond)
                 latents = self._scheduler_step(noise_pred, timestep, latents, num_inference_steps)
@@ -419,6 +428,7 @@ class WanOrchestrator:
             if should_skip:
                 noise_pred = ctrl.skip_noise_pred(mod_input=mod_input)
             else:
+                step_started = time.perf_counter()
                 noise_pred = _first_tensor(
                     current_model(
                         latents.to(dtype=model_dtype),
@@ -437,6 +447,7 @@ class WanOrchestrator:
                         )
                     )
                     noise_pred = uncond + scale * (noise_pred - uncond)
+                dit_step_seconds.append(time.perf_counter() - step_started)
                 if ctrl is not None:
                     ctrl.record_full_step(noise_pred, mod_input=mod_input)
 
@@ -445,6 +456,8 @@ class WanOrchestrator:
         if ctrl is not None:
             self._teacache_last_stats = ctrl.stats()
             print(f"[teacache] stats: {self._teacache_last_stats}", flush=True)
+        self._last_dit_step_seconds = dit_step_seconds
+        print(_format_dit_step_report(dit_step_seconds), flush=True)
         return latents
 
     def _select_transformer(self, timestep: torch.Tensor, boundary_timestep: float | None):
@@ -501,6 +514,22 @@ class WanOrchestrator:
             std_tensor = torch.tensor(std, dtype=dtype, device=latents.device).view(1, -1, 1, 1, 1)
             latents = latents * std_tensor + mean_tensor
         return _first_tensor(self.vae_decoder(latents))
+
+
+def _format_dit_step_report(step_seconds: list[float]) -> str:
+    """Two log lines the benchmark adapter parses: the raw per-step list and a
+    summary over steps 1..N-1 (step 0 excluded, as in benchmark/step_realloop.py)."""
+    raw = "[wan] dit-step-seconds: [" + ", ".join(f"{s:.4f}" for s in step_seconds) + "]"
+    tail = step_seconds[1:]
+    if not tail:
+        return raw + "\n[wan] dit-step ms: n=0 (fewer than two DiT steps; no per-step stat)"
+    ms = [s * 1000.0 for s in tail]
+    summary = (
+        f"[wan] dit-step ms: n={len(ms)} mean={statistics.fmean(ms):.1f} "
+        f"median={statistics.median(ms):.1f} min={min(ms):.1f} max={max(ms):.1f} "
+        "(step 0 excluded)"
+    )
+    return raw + "\n" + summary
 
 
 def has_wan_components(app: Any) -> bool:

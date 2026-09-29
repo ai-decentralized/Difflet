@@ -48,7 +48,7 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
         device=adapter.device_info(), dtype=cfg.dtype,
         parallel=cfg.parallel_dict(),
         shape={"height": cfg.height, "width": cfg.width, "num_frames": cfg.num_frames},
-        steps=cfg.steps, toolchain=adapter.toolchain(),
+        steps=cfg.steps, quant=cfg.quant_dict(), toolchain=adapter.toolchain(),
         config_label=cfg.config_label, timestamp=_utc(),
     )
     res.notes.append(cfg.notes) if cfg.notes else None
