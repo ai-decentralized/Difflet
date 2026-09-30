@@ -1,0 +1,4 @@
+compile_generate rc=0 wall=1713s
+compile_video_vae rc=0 wall=221s
+compile_audio_vae rc=0 wall=1145s
+e2e_generate rc=0 wall=1297s

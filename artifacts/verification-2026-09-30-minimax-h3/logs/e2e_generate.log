@@ -1,0 +1,56 @@
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Neuron: Loading presharded checkpoints for ranks: 0...3
+Neuron: Finished weights loading in 517.462773106 seconds
+Neuron: Warming up the model.
+Neuron: Warmup completed in 0.9619014263153076 seconds.
+[text] Qwen3-VL hidden_states[50] (1, 1024, 5120) (27 live tokens) -> /home/ubuntu/difflet-artifacts/h3-verify-2026-09-30/work/text.pt
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Neuron: Loading presharded checkpoints for ranks: 0...3
+Neuron: Presharded file read: 3.11s for 4 shard(s) (63438.5 MB total)
+Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+Neuron: Finished traced model weight initialization in 522.56s (device init 522.56s, total load_weights 525.67s)
+Neuron: Skipping model warmup
+[generate] video latents (1, 24, 37, 16, 28), audio latents (2, 32, 207) -> /home/ubuntu/difflet-artifacts/h3-verify-2026-09-30/work/latents.pt
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Neuron: Loading presharded checkpoints for ranks: 0...0
+Neuron: Presharded file read: 0.40s for 1 shard(s) (9245.1 MB total)
+Neuron: Initializing traced model weights for ranks: 0...0 (runtime_start_rank_id=0)
+Neuron: Finished traced model weight initialization in 75.11s (device init 75.11s, total load_weights 75.51s)
+Neuron: Skipping model warmup
+[video_vae] RGB video (1, 3, 124, 256, 448) -> /home/ubuntu/difflet-artifacts/h3-verify-2026-09-30/work/video.pt
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Neuron: Loading presharded checkpoints for ranks: 0...0
+Neuron: Presharded file read: 0.10s for 1 shard(s) (247.7 MB total)
+Neuron: Initializing traced model weights for ranks: 0...0 (runtime_start_rank_id=0)
+Neuron: Finished traced model weight initialization in 23.37s (device init 23.37s, total load_weights 23.47s)
+Neuron: Skipping model warmup
+[minimax-h3] video with audio saved to /home/ubuntu/difflet-artifacts/h3-verify-2026-09-30/fox_256x448x124.mp4

@@ -1,0 +1,204 @@
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/minimax_h3_dit_tp4_h256w448f124_text1024/
+INFO:Neuron:Generating HLOs for the following models: ['MiniMaxH3Transformer3DModel']
+[2026-09-30 17:22:52.878: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-09-30 17:22:52.878: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-09-30 17:22:52.878: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-09-30 17:22:52.878: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-09-30 17:22:52.878: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-09-30 17:22:52.878: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x7777a45ad440>, 'Ascending Ring PG Group')>
+[2026-09-30 17:22:52.878: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-09-30 17:22:52.878: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-09-30 17:22:52.878: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-09-30 17:22:52.878: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-09-30 17:22:52.878: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-09-30 17:22:52.878: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+INFO:Neuron:Generating 1 hlos for key: MiniMaxH3Transformer3DModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module MiniMaxH3Transformer3DModel
+INFO:Neuron:Finished loading module MiniMaxH3Transformer3DModel in 426.84454131126404 seconds
+INFO:Neuron:generating HLO: MiniMaxH3Transformer3DModel, input example shape = torch.Size([1, 4144, 96])
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+INFO:Neuron:Finished generating HLO for MiniMaxH3Transformer3DModel in 38.3697407245636 seconds, input example shape = torch.Size([1, 4144, 96])
+INFO:Neuron:Generated all HLOs in 465.34637689590454 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'MiniMaxH3Transformer3DModel' is the priority model with bucket rank 0
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+.......
+Compiler status PASS
+2026-09-30 17:32:54.000454:  25420  [INFO]: Compilation Successfully Completed for model.MODULE_5b7ca3d4077174bd5273+194a0fd4.hlo_module.pb
+INFO:Neuron:Done compilation for the priority HLO in 136.351224899292 seconds
+INFO:Neuron:Done optimizing weight layout for all HLOs in 0.025616168975830078 seconds
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Finished Compilation for all HLOs in 0.002358675003051758 seconds
+...........
+Compiler status PASS
+INFO:Neuron:Done preparing weight layout transformation
+INFO:Neuron:Finished building model in 808.2543244361877 seconds
+INFO:Neuron:Pre-sharding checkpoints.
+INFO:Neuron:Sharding weights for ranks: 0...3
+[2026-09-30 17:36:21.309: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-09-30 17:36:21.309: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-09-30 17:36:21.309: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-09-30 17:36:21.309: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-09-30 17:36:21.309: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-09-30 17:36:21.309: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x7777a45ad440>, 'Ascending Ring PG Group')>
+[2026-09-30 17:36:21.310: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-09-30 17:36:21.310: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-09-30 17:36:21.310: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-09-30 17:36:21.310: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-09-30 17:36:21.310: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-09-30 17:36:21.310: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+/home/ubuntu/Difflet/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.audio_proj_in.bias. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.audio_proj_in.weight. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.audio_proj_out.bias. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.audio_proj_out.weight. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.proj_in.bias. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.proj_in.weight. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.proj_out.bias. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.proj_out.weight. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.time_embedder.linear_1.bias. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.time_embedder.linear_1.weight. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.time_embedder.linear_2.bias. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.time_embedder.linear_2.weight. Will convert to torch.bfloat16
+  warnings.warn(
+WARNING:root:Found shared tensors {'transformer.token_refiner.refiner_blocks.0.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.token_refiner.refiner_blocks.0.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.token_refiner.refiner_blocks.1.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.token_refiner.refiner_blocks.1.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.0.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.0.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.1.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.1.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.2.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.2.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.3.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.3.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.4.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.4.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.5.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.5.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.6.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.6.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.7.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.7.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.8.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.8.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.9.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.9.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.10.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.10.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.11.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.11.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.12.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.12.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.13.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.13.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.14.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.14.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.15.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.15.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.16.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.16.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.17.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.17.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.18.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.18.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.19.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.19.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.20.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.20.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.21.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.21.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.22.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.22.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.23.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.23.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.24.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.24.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.25.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.25.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.26.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.26.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.27.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.27.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.28.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.28.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.29.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.29.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.30.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.30.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.31.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.31.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.32.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.32.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.33.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.33.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.34.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.34.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.35.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.35.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.36.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.36.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.37.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.37.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.38.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.38.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.39.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.39.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.40.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.40.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.41.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.41.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.42.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.42.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.43.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.43.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.44.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.44.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.45.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.45.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.46.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.46.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.47.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.47.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.48.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.48.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.49.ff.up_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+WARNING:root:Found shared tensors {'transformer.transformer_blocks.49.ff.gate_proj.weight'}, this can cause checkpoint saving to fail. This warning can be safely ignored when using shard-on-load.
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/trace.py:642: UserWarning: Removing redundant keys from checkpoint: []
+  warnings.warn(f"Removing redundant keys from checkpoint: {keys_to_delete}")
+WARNING:Neuron:casting transformer.proj_in.weight from torch.bfloat16 to torch.float32
+WARNING:Neuron:casting transformer.proj_in.bias from torch.bfloat16 to torch.float32
+WARNING:Neuron:casting transformer.audio_proj_in.weight from torch.bfloat16 to torch.float32
+WARNING:Neuron:casting transformer.audio_proj_in.bias from torch.bfloat16 to torch.float32
+WARNING:Neuron:casting transformer.time_embedder.linear_1.weight from torch.bfloat16 to torch.float32
+WARNING:Neuron:casting transformer.time_embedder.linear_1.bias from torch.bfloat16 to torch.float32
+WARNING:Neuron:casting transformer.time_embedder.linear_2.weight from torch.bfloat16 to torch.float32
+WARNING:Neuron:casting transformer.time_embedder.linear_2.bias from torch.bfloat16 to torch.float32
+WARNING:Neuron:casting transformer.proj_out.weight from torch.bfloat16 to torch.float32
+WARNING:Neuron:casting transformer.proj_out.bias from torch.bfloat16 to torch.float32
+WARNING:Neuron:casting transformer.audio_proj_out.weight from torch.bfloat16 to torch.float32
+WARNING:Neuron:casting transformer.audio_proj_out.bias from torch.bfloat16 to torch.float32
+INFO:Neuron:Done Sharding weights in 857.206807992
+INFO:Neuron:Pre-sharding complete in 857.6s: 4 shard file(s), 63438.5 MB total under /home/ubuntu/.cache/difflet/minimax_h3_dit_tp4_h256w448f124_text1024/weights/
