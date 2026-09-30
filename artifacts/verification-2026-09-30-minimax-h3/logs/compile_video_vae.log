@@ -1,0 +1,63 @@
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/minimax_h3_video_vae_h256w448f124/
+WARNING:Neuron:Compiler argument ``--auto-cast=none`` not detected. Other values might result in lower accuracy
+INFO:Neuron:Generating HLOs for the following models: ['MiniMaxH3VideoVAEDecoderModel']
+[2026-09-30 17:51:27.283: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 1
+[2026-09-30 17:51:27.283: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-09-30 17:51:27.284: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-09-30 17:51:27.284: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-09-30 17:51:27.284: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 1
+[2026-09-30 17:51:27.284: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x7a9b43e8d440>, 'Ascending Ring PG Group')>
+[2026-09-30 17:51:27.284: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0]]
+[2026-09-30 17:51:27.284: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0]]
+[2026-09-30 17:51:27.284: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0]]
+[2026-09-30 17:51:27.284: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0]]
+[2026-09-30 17:51:27.284: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0]]
+[2026-09-30 17:51:27.284: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0]]
+INFO:Neuron:Generating 1 hlos for key: MiniMaxH3VideoVAEDecoderModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module MiniMaxH3VideoVAEDecoderModel
+INFO:Neuron:Finished loading module MiniMaxH3VideoVAEDecoderModel in 10.036001682281494 seconds
+INFO:Neuron:generating HLO: MiniMaxH3VideoVAEDecoderModel, input example shape = torch.Size([1, 24, 7, 16, 16])
+INFO:Neuron:Finished generating HLO for MiniMaxH3VideoVAEDecoderModel in 11.864388704299927 seconds, input example shape = torch.Size([1, 24, 7, 16, 16])
+INFO:Neuron:Generated all HLOs in 21.967735767364502 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'MiniMaxH3VideoVAEDecoderModel' is the priority model with bucket rank 0
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+..
+Compiler status PASS
+2026-09-30 17:52:27.000975:  26995  [INFO]: Compilation Successfully Completed for model.MODULE_c49de57fb3f6386aab96+2e0e419d.hlo_module.pb
+INFO:Neuron:Done compilation for the priority HLO in 38.80027437210083 seconds
+INFO:Neuron:Done optimizing weight layout for all HLOs in 0.011493206024169922 seconds
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Finished Compilation for all HLOs in 0.0012209415435791016 seconds
+...
+Compiler status PASS
+INFO:Neuron:Done preparing weight layout transformation
+INFO:Neuron:Finished building model in 119.04140019416809 seconds
+INFO:Neuron:Pre-sharding checkpoints.
+INFO:Neuron:Sharding weights for ranks: 0...0
+[2026-09-30 17:53:26.353: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 1
+[2026-09-30 17:53:26.353: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-09-30 17:53:26.353: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-09-30 17:53:26.353: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-09-30 17:53:26.353: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 1
+[2026-09-30 17:53:26.353: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x7a9b43e8d440>, 'Ascending Ring PG Group')>
+[2026-09-30 17:53:26.353: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0]]
+[2026-09-30 17:53:26.353: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0]]
+[2026-09-30 17:53:26.353: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0]]
+[2026-09-30 17:53:26.353: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0]]
+[2026-09-30 17:53:26.353: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0]]
+[2026-09-30 17:53:26.353: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0]]
+/home/ubuntu/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/trace.py:642: UserWarning: Removing redundant keys from checkpoint: []
+  warnings.warn(f"Removing redundant keys from checkpoint: {keys_to_delete}")
+INFO:Neuron:Done Sharding weights in 94.19090615499954
+INFO:Neuron:Pre-sharding complete in 94.2s: 1 shard file(s), 9245.1 MB total under /home/ubuntu/.cache/difflet/minimax_h3_video_vae_h256w448f124/weights/
