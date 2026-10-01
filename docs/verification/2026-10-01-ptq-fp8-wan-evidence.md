@@ -161,7 +161,47 @@ carry `arms.fp8.error` and `traceback` verbatim.
 
 ## Phase 1 — quantize + compile
 
-_pending_
+Driver: `scripts/ptq_fp8_ab.py --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision 38ec498…
+--tp-degree 4 --height 480 --width 832 --num-frames 9 --steps 20 --guidance-scale 1.0 --seed 42
+--runs 2 --drop-caches --out-dir artifacts/verification-2026-10-01/ptq-wan21/ab`, launched
+after the idle gate (`gate_before_ab.txt`: no NeuronCore holder, no foreign processes, load
+0.33) with nothing else on the host. Subprocess logs under `ab/logs/`.
+
+**Quantize** (`ab/logs/quantize.log`): `difflet quantize --quant fp8 --quant-granularity tensor`
+→ `~/.cache/difflet/quantized/Wan-AI--Wan2.1-T2V-14B-Diffusers/transformer/fp8-tensor-1d3afee3/`
+(2 safetensors shards + index, `config.json`, `difflet_quant.json`): **400 linears quantized,
+57,153,966,336 → 15,001,212,736 bytes, 30.8 s wall** (CPU; the source snapshot is fp32, so the
+"before" is the fp32 size — the bf16 equivalent is 28.6 GB). Manifest `checkpoint_identity`
+= `{format: fp8_e4m3, fp8_max: 240.0, weight_granularity: tensor, targets: [...]}`.
+
+**Compile** (`ab/logs/compile_{bf16,fp8}.log`, breakdown via `benchmark.parse_compile`; neither
+arm was a cache hit for the transformer — fresh host):
+
+| stage | bf16 build s (priority HLO s) | fp8 build s (priority HLO s) |
+|---|---:|---:|
+| text_encoder_t5 | 39.4 (7.2) | 39.7 (5.2) |
+| transformer | 297.4 (82.9); presharding 116.3 s, 4 shards, 28,602.8 MB | 395.2 (161.0); presharding 138.9 s, 4 shards, **15,211.0 MB** |
+| vae_decoder | 5918.2 (5903.8) | — (shared stage, reused) |
+| **wall** | **6255.0** | **434.9** |
+
+The fp8 transformer graph takes ~2× the compiler time of the bf16 one (161 s vs 83 s for the
+priority HLO); the presharded fp8 shards are 53 % of the bf16 bytes (A4 at tp4 ✅; the
+remaining non-fp8 tensors — patch embed, adaLN, norms, `proj_out`, biases, scales — stay
+bf16/float32). The VAE decoder dominates the bf16 wall (98 min) and is shared with the fp8
+arm, so the fp8 arm's compile cost is the transformer stage only.
+
+**A4 fingerprints** (`ab/fingerprints.txt`, from `ls -la` / `stat` on `~/.cache/difflet`):
+
+- compiled transformer artifacts: bf16 `wan2_1_t2v_14b_diffusers_transformer/c3e3b1be10ccc035/`
+  (manifest `cache_inputs` has **no** `quant` key — bf16 identity unchanged), fp8
+  `…/edb936fbb4e3825e/` (manifest `cache_inputs.quant = {activation: dynamic, format:
+  fp8_e4m3, targets: [...], weight_granularity: tensor}`);
+- `transformer/weights/tp{0..3}_sharded_checkpoint.safetensors`: bf16 4 × 7,498,045,044 B,
+  fp8 4 × 3,987,469,508 B; every shard has link count 2 (hardlinked from the store);
+- `_shared_weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__transformer__38ec498c__bfloat16__qf8e4m3__tp4__c7ca57f373d92cea/`
+  (the `qf8e4m3` label from `shared_weights.store_label`) next to the bf16 entry
+  `…__transformer__38ec498c__bfloat16__tp4__c06caa3c7836f86e/`, the text-encoder entry
+  (4 × 2,840,786,528 B, link count 3: shared by both arms' artifacts) and the VAE entry.
 
 ## Phase 2a — per-linear matmul error (CPU, real weights)
 
@@ -213,11 +253,79 @@ each `rows[i]` carries per-scheme `cosine / mse / max_abs / rel_l2 / snr_db` for
 
 ## Phase 2b — latent and pixel error on device
 
-_pending_
+Same prompt ("a cinematic shot of a red fox running through a snowy forest"), seed 42,
+480×832×9, 20 steps, guidance 1.0, tp4, Neuron VAE; two runs per arm. From
+`ab/ab_summary.{json,md}` (`difflet.quant.metrics`: PSNR / SSIM on the decoded mp4 frames,
+LPIPS-alex, latent metrics on the DiT output `latents.pt` before the VAE):
+
+| pair | PSNR dB | SSIM | LPIPS | latent cosine | latent MSE | latent SNR dB |
+|---|---:|---:|---:|---:|---:|---:|
+| fp8 vs bf16, run 0 | 36.50 | 0.9269 | 0.0789 | 0.997457 | 2.240e-03 | 22.93 |
+| fp8 vs bf16, run 1 | 36.50 | 0.9269 | 0.0789 | 0.997457 | 2.240e-03 | 22.93 |
+| bf16 run 1 vs run 0 (control) | ∞ | 1.0000 | 0.0000 | 1.000000 | 0 | ∞ |
+| fp8 run 1 vs run 0 (control) | ∞ | 1.0000 | 0.0000 | 1.000000 | 0 | ∞ |
+
+Both arms are bit-deterministic run to run (the controls are exact), so the fp8-vs-bf16 numbers
+are the quantization effect alone. PSNR 36.5 dB / SSIM 0.927 vs the bf16 render is inside the
+plan's "not visible in the video" regime (> 30 dB / > 0.9). Latent SNR 22.9 dB over 20
+denoising steps, against ~30 dB per linear (Phase 2a): the per-step errors compound but stay
+well-conditioned (cosine 0.9975). Videos: `ab/bf16_run{0,1}.mp4`, `ab/fp8_run{0,1}.mp4`;
+frame grid `ab/frames_bf16_vs_fp8.png` (bf16 / fp8 / 8×|diff| at frames 0, 2, 4, 6, 8; mean
+|diff| 2.85 / 255, max 136).
+
+**Visual verdict.** Frame 0 of both arms is a clean render of the prompt (red fox, snowy
+trunks); the fp8 frame is indistinguishable from the bf16 frame at a glance and the |diff|
+image is edge-aligned noise with no structure of its own. **Frames 2–8 are a washed-out
+brown-grey texture in *both* arms** — the bf16 baseline itself degrades after the first frame
+at this configuration (20 steps, guidance 1.0, 9 frames, Neuron VAE), reproduced
+independently by decoding `bf16_run1.mp4` with ffmpeg (frames 0 / 4 / 8). Per latent frame
+(`work_*/latents.pt`, 3 latent frames) the fp8 arm tracks bf16 equally well on all three
+(cosine 0.997575 / 0.997259 / 0.997576; SNR 23.1 / 22.6 / 23.2 dB), and the bf16 latents
+themselves have a rising std over latent frames (0.496 / 0.682 / 0.771), so the degradation
+is already present in the DiT output or introduced by the decoder equally for both arms —
+it is not a quantization finding, but it limits what "not visible" means here to frame 0.
+Whether it is the DiT at guidance 1.0 or the Neuron VAE's temporal decode is checked below
+with a host-VAE decode of the same latents.
 
 ## Phase 3 — performance
 
-_pending_
+From `ab/ab_summary.json` and the `Neuron: Finished traced model weight initialization` lines
+of `ab/logs/generate_*.log` (transformer stage; the text encoder is 89 s cold / 8.5 s warm and
+the VAE 32 s in every run, identical across arms). Run 0 of each arm follows a page-cache drop
+(`sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'`, `page_cache_dropped: true`); run 1 is
+warm. e2e is the staged CLI wall (two process loads + text encode + denoise + VAE decode).
+
+| arm | compile wall s | e2e cold s | e2e warm s | transformer weight load cold s (file read / device init) | warm s | DiT step ms, mean / median (n=19) |
+|---|---:|---:|---:|---:|---:|---:|
+| bf16 | 6711.9 | 412.7 | 87.1 | 236.0 (2.5 / 233.5) | 9.9 | **573.2 / 573.0** (run 1: 573.7 / 573.6) |
+| fp8-tensor-dyn | 590.1 (+32.2 quantize) | 317.4 | 94.7 | 132.0 (2.8 / 129.2) | 11.7 | **822.1 / 821.9** (run 1: 822.0 / 821.7) |
+
+- **A3 FAIL — the fp8 DiT step is 1.43× slower than bf16** (822 vs 573 ms), identically on the
+  cold and the warm run. The compiler did receive fp8 matmuls: the fp8 transformer HLO in the
+  compile cache (`/var/tmp/neuron-compile-cache/neuronxcc-2.26.6360.0+6f180f47/MODULE_a1cd99ffd9d0c5735511+04929ab2/model.hlo_module.pb`,
+  parsed with `torch_neuronx.pyhlo`) has **400 `dot` ops with `F8E4M3FN × F8E4M3FN` operands**
+  (result dtype `F8E4M3FN`, immediately converted to F32), 400 `F32 → F8E4M3FN` converts (the
+  dynamic activation quantization) and 400 `F8E4M3FN → F32` converts, plus 5 bf16 dots; the bf16
+  HLO has 406 `BF16 × BF16` dots and none of those converts. Its `compile_flags.json` carries
+  `--experimental-unsafe-fp8e4m3fn-as-fp8e4m3` (twice, by design). So neuronx-cc 2.26 lowers an
+  fp8 dot more slowly than a bf16 one on trn2 and the 800 extra elementwise converts on
+  [1, 4680, 5120]-class activations add on top; the per-linear numerics (Phase 0, 2b) show the
+  math is right, the speed is not. Follow-up per the plan: an NKI FP8 matmul kernel behind the
+  same `QuantSpec` (not in this delivery); the weight-only arm below separates the dot cost
+  from the quantize/dequantize cost.
+- **Weight load (cold) −44 %**: 132 s vs 236 s for the transformer stage, tracking the shard
+  bytes (15.2 GB vs 28.6 GB). Warm loads are within 2 s of each other (page cache hot; the fp8
+  arm is 1.8 s slower — inference: the per-layer `scale` tensors and fp8 → device transfers).
+- **e2e cold −23 %** (317 vs 413 s) because the cold weight read dominates; **e2e warm +9 %**
+  (94.7 vs 87.1 s) because the 19 slower DiT steps (+4.7 s) and the slower warm load outweigh
+  nothing else.
+- Compile: the fp8 arm compiles in 590 s wall because only the transformer stage is new
+  (text encoder and VAE reused); the bf16 arm's 6712 s is dominated by the VAE decoder
+  (Phase 1 table). Note the harness's `weights_load_total_seconds` field is 0 for every run:
+  `benchmark.parse_generate` does not match this toolchain's `load_weights` lines — a harness
+  gap, recorded here rather than fixed mid-campaign; the numbers above are read from the logs.
+
+_Weight-only arm and benchmark-harness files: see below._
 
 ## Phase 4 — serving
 

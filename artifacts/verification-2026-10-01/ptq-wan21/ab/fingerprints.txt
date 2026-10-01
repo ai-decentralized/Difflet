@@ -1,0 +1,112 @@
+== cache root
+_shared_weights
+quantized
+wan2_1_t2v_14b_diffusers_transformer
+wan2_1_t2v_14b_diffusers_vae
+== shared weight store
+total 40
+drwxrwxr-x 10 ubuntu ubuntu 4096 Oct  1 18:03 .
+drwxrwxr-x  6 ubuntu ubuntu 4096 Oct  1 16:15 ..
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  1 16:06 Wan-AI--Wan2.1-T2V-14B-Diffusers__text_encoder__38ec498c__bfloat16__tp4__4ef6774dfe12b8b2
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  1 18:03 Wan-AI--Wan2.1-T2V-14B-Diffusers__transformer__38ec498c__bfloat16__qf8e4m3__tp4__c7ca57f373d92cea
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  1 16:13 Wan-AI--Wan2.1-T2V-14B-Diffusers__transformer__38ec498c__bfloat16__tp4__c06caa3c7836f86e
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  1 17:53 Wan-AI--Wan2.1-T2V-14B-Diffusers__vae__38ec498c__bfloat16__tp1__7229c30930966cfe
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  1 15:15 tiny_wan__transformer__bfloat16__qf8e4m3__tp1__163a274cfc7643b0
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  1 15:03 tiny_wan__transformer__bfloat16__qf8e4m3__tp1__52ab2cebf84184c1
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  1 15:11 tiny_wan__transformer__bfloat16__qf8e4m3__tp1__a3e0c72587f88e65
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  1 14:56 tiny_wan__transformer__bfloat16__tp1__f854b5b01b30a4f3
+-- /home/ubuntu/.cache/difflet/_shared_weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__text_encoder__38ec498c__bfloat16__tp4__4ef6774dfe12b8b2/
+total 11096856
+drwxrwxr-x  2 ubuntu ubuntu       4096 Oct  1 16:06 .
+drwxrwxr-x 10 ubuntu ubuntu       4096 Oct  1 18:03 ..
+-rw-------  3 ubuntu ubuntu 2840786528 Oct  1 16:06 shard0.safetensors
+-rw-------  3 ubuntu ubuntu 2840786528 Oct  1 16:06 shard1.safetensors
+-rw-------  3 ubuntu ubuntu 2840786528 Oct  1 16:06 shard2.safetensors
+-rw-------  3 ubuntu ubuntu 2840786528 Oct  1 16:06 shard3.safetensors
+-- /home/ubuntu/.cache/difflet/_shared_weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__transformer__38ec498c__bfloat16__qf8e4m3__tp4__c7ca57f373d92cea/
+total 15576088
+drwxrwxr-x  2 ubuntu ubuntu       4096 Oct  1 18:03 .
+drwxrwxr-x 10 ubuntu ubuntu       4096 Oct  1 18:03 ..
+-rw-------  2 ubuntu ubuntu 3987469508 Oct  1 18:02 shard0.safetensors
+-rw-------  2 ubuntu ubuntu 3987469508 Oct  1 18:02 shard1.safetensors
+-rw-------  2 ubuntu ubuntu 3987469508 Oct  1 18:03 shard2.safetensors
+-rw-------  2 ubuntu ubuntu 3987469508 Oct  1 18:03 shard3.safetensors
+-- /home/ubuntu/.cache/difflet/_shared_weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__transformer__38ec498c__bfloat16__tp4__c06caa3c7836f86e/
+total 29289272
+drwxrwxr-x  2 ubuntu ubuntu       4096 Oct  1 16:13 .
+drwxrwxr-x 10 ubuntu ubuntu       4096 Oct  1 18:03 ..
+-rw-------  2 ubuntu ubuntu 7498045044 Oct  1 16:11 shard0.safetensors
+-rw-------  2 ubuntu ubuntu 7498045044 Oct  1 16:11 shard1.safetensors
+-rw-------  2 ubuntu ubuntu 7498045044 Oct  1 16:12 shard2.safetensors
+-rw-------  2 ubuntu ubuntu 7498045044 Oct  1 16:13 shard3.safetensors
+-- /home/ubuntu/.cache/difflet/_shared_weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__vae__38ec498c__bfloat16__tp1__7229c30930966cfe/
+total 143176
+drwxrwxr-x  2 ubuntu ubuntu      4096 Oct  1 17:53 .
+drwxrwxr-x 10 ubuntu ubuntu      4096 Oct  1 18:03 ..
+-rw-------  2 ubuntu ubuntu 146603614 Oct  1 17:53 shard0.safetensors
+-- /home/ubuntu/.cache/difflet/_shared_weights/tiny_wan__transformer__bfloat16__qf8e4m3__tp1__163a274cfc7643b0/
+total 744
+drwxrwxr-x  2 ubuntu ubuntu   4096 Oct  1 15:15 .
+drwxrwxr-x 10 ubuntu ubuntu   4096 Oct  1 18:03 ..
+-rw-------  2 ubuntu ubuntu 749976 Oct  1 15:15 shard0.safetensors
+-- /home/ubuntu/.cache/difflet/_shared_weights/tiny_wan__transformer__bfloat16__qf8e4m3__tp1__52ab2cebf84184c1/
+total 744
+drwxrwxr-x  2 ubuntu ubuntu   4096 Oct  1 15:03 .
+drwxrwxr-x 10 ubuntu ubuntu   4096 Oct  1 18:03 ..
+-rw-------  1 ubuntu ubuntu 749976 Oct  1 15:03 shard0.safetensors
+-- /home/ubuntu/.cache/difflet/_shared_weights/tiny_wan__transformer__bfloat16__qf8e4m3__tp1__a3e0c72587f88e65/
+total 744
+drwxrwxr-x  2 ubuntu ubuntu   4096 Oct  1 15:11 .
+drwxrwxr-x 10 ubuntu ubuntu   4096 Oct  1 18:03 ..
+-rw-------  2 ubuntu ubuntu 749976 Oct  1 15:11 shard0.safetensors
+-- /home/ubuntu/.cache/difflet/_shared_weights/tiny_wan__transformer__bfloat16__tp1__f854b5b01b30a4f3/
+total 1120
+drwxrwxr-x  2 ubuntu ubuntu    4096 Oct  1 14:56 .
+drwxrwxr-x 10 ubuntu ubuntu    4096 Oct  1 18:03 ..
+-rw-------  2 ubuntu ubuntu 1135864 Oct  1 14:56 shard0.safetensors
+== artifact /home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/c3e3b1be10ccc035/
+/home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/c3e3b1be10ccc035/:
+manifest.json
+text_encoder
+transformer
+
+/home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/c3e3b1be10ccc035//transformer:
+model.pt
+neuron_config.json
+weights
+total 29289272
+drwxrwxr-x 2 ubuntu ubuntu       4096 Oct  1 16:13 .
+drwxrwxr-x 3 ubuntu ubuntu       4096 Oct  1 16:11 ..
+-rw------- 2 ubuntu ubuntu 7498045044 Oct  1 16:11 tp0_sharded_checkpoint.safetensors
+-rw------- 2 ubuntu ubuntu 7498045044 Oct  1 16:11 tp1_sharded_checkpoint.safetensors
+-rw------- 2 ubuntu ubuntu 7498045044 Oct  1 16:12 tp2_sharded_checkpoint.safetensors
+-rw------- 2 ubuntu ubuntu 7498045044 Oct  1 16:13 tp3_sharded_checkpoint.safetensors
+/home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/c3e3b1be10ccc035//transformer/weights/tp0_sharded_checkpoint.safetensors links=2 size=7498045044
+/home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/c3e3b1be10ccc035//transformer/weights/tp1_sharded_checkpoint.safetensors links=2 size=7498045044
+/home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/c3e3b1be10ccc035//transformer/weights/tp2_sharded_checkpoint.safetensors links=2 size=7498045044
+/home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/c3e3b1be10ccc035//transformer/weights/tp3_sharded_checkpoint.safetensors links=2 size=7498045044
+-- /home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/c3e3b1be10ccc035//manifest.json
+{}
+== artifact /home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/edb936fbb4e3825e/
+/home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/edb936fbb4e3825e/:
+manifest.json
+text_encoder
+transformer
+
+/home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/edb936fbb4e3825e//transformer:
+model.pt
+neuron_config.json
+weights
+total 15576088
+drwxrwxr-x 2 ubuntu ubuntu       4096 Oct  1 18:03 .
+drwxrwxr-x 3 ubuntu ubuntu       4096 Oct  1 18:01 ..
+-rw------- 2 ubuntu ubuntu 3987469508 Oct  1 18:02 tp0_sharded_checkpoint.safetensors
+-rw------- 2 ubuntu ubuntu 3987469508 Oct  1 18:02 tp1_sharded_checkpoint.safetensors
+-rw------- 2 ubuntu ubuntu 3987469508 Oct  1 18:03 tp2_sharded_checkpoint.safetensors
+-rw------- 2 ubuntu ubuntu 3987469508 Oct  1 18:03 tp3_sharded_checkpoint.safetensors
+/home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/edb936fbb4e3825e//transformer/weights/tp0_sharded_checkpoint.safetensors links=2 size=3987469508
+/home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/edb936fbb4e3825e//transformer/weights/tp1_sharded_checkpoint.safetensors links=2 size=3987469508
+/home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/edb936fbb4e3825e//transformer/weights/tp2_sharded_checkpoint.safetensors links=2 size=3987469508
+/home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/edb936fbb4e3825e//transformer/weights/tp3_sharded_checkpoint.safetensors links=2 size=3987469508
+-- /home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/edb936fbb4e3825e//manifest.json
+{}
