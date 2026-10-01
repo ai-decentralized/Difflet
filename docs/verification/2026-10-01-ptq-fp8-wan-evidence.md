@@ -438,7 +438,25 @@ error. A CPU reference is the way to attribute it (full-forward numerics below; 
 fp32 / fp8 loop at this shape is the follow-up). Per-step and per-linear, the device fp8 math
 is verified against the CPU reference (Phase 0, fixed-layer probe below).
 
-_Benchmark-harness files: see below._
+### Phase 3b — benchmark harness report files
+
+`python -m benchmark.bench --model <slug> --skip-download --skip-compile --iters 1` then
+`python -m benchmark.cold_warm_e2e --model <slug>` (page cache dropped before the cold run,
+warm run immediately after), on the fixed artifacts, nothing else on the host (`gate_before_bench.txt`).
+Logs under `bench/`; report files in `benchmark/trn2/` (committed):
+
+| slug | report | e2e cold s | e2e warm s (n=1) | DiT step s (real loop, n=19) |
+|---|---|---:|---:|---:|
+| `wan_2_1` (bf16, re-measured on this host) | `wan_2_1.{json,md}` | 413.9 | 85.7 | 0.5548 ¹ |
+| `wan_2_1_fp8` (dynamic) | `wan_2_1_fp8.{json,md}` | 304.3 | 84.2 | 0.6568 |
+| `wan_2_1_fp8_wo` (weight-only) | `wan_2_1_fp8_wo.{json,md}` | 302.9 | 82.6 | 0.5627 |
+
+¹ `cold_warm_e2e` only re-measures e2e; the bf16 step field is the prior host's value carried
+over by the harness (the note in the JSON says so). The same-host bf16 real-loop step from
+the A/B is 573.2 ms, which is the number to compare the fp8 steps against.
+The harness numbers reproduce the A/B within 1–3 s on e2e and within 1 ms on the step.
+
+_Serving: see Phase 4._
 
 ## Phase 4 — serving
 

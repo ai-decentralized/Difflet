@@ -72,13 +72,13 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 
 **Runtime features**
 
-| Model | Multi-shape compile | TeaCache (adaptive) | TeaCache (fixed cadence) | Serving | Batch (JSONL) |
-|---|:---:|:---:|:---:|:---:|:---:|
-| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ image | ✅ |
-| Qwen-Image | ✅ | ✅ | ✅ | ✅ image | ✅ |
-| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ video ⁴ | ✅ |
-| HunyuanVideo | ✅ | ✅ | ✅ | ✅ video | ✅ |
-| LTX-2 | ❌ | ✅ | ✅ | ✅ video | ✅ |
+| Model | Multi-shape compile | TeaCache (adaptive) | TeaCache (fixed cadence) | Serving | Batch (JSONL) | FP8 PTQ |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ image | ✅ | ❌ |
+| Qwen-Image | ✅ | ✅ | ✅ | ✅ image | ✅ | ❌ |
+| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ video ⁴ | ✅ | ⚠️ ⁵ |
+| HunyuanVideo | ✅ | ✅ | ✅ | ✅ video | ✅ | ❌ |
+| LTX-2 | ❌ | ✅ | ✅ | ✅ video | ✅ | ❌ |
 
 **Feature legend**
 
@@ -94,6 +94,7 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 - **TeaCache (fixed cadence)** — blind skip-every-N-steps (`--teacache-cadence N`, no calibration needed).
 - **Serving** — resident `difflet serve` worker. Image models answer `/v1/chat/completions`; video models answer the [Videos API](docs/serving/videos_api.md).
 - **Batch (JSONL)** — `--requests FILE` runs one request per line (prompt, output, seed, optional negative prompt, guidance scale, steps) through one loaded model.
+- **FP8 PTQ** — post-training FP8 (e4m3) quantization of the DiT's attention and FFN linears (`--quant fp8`, `difflet quantize`); weights per-tensor or per-channel (`--quant-granularity`), activations dynamic or left in bf16 (`--quant-act`). Halves the transformer bytes on disk and in HBM.
 
 **Notes**
 
@@ -101,6 +102,7 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 2. `tp2 cp2` with gather-KV hits a `neuronx-cc` internal error (`NCC_INLA001` / `NCC_IBIR243`) on the CP-degree-2 DiT graph; ring CP and `tp4 --sp` are the working multi-core paths. See [DEVELOPER.md](DEVELOPER.md).
 3. DP works, but on a 4-core `trn2.3xlarge` each 2-core replica runs out of HBM loading the compiled VAE at the default 320×512×61 shape. Use a smaller shape or a host with more cores per replica.
 4. Wan 2.1 is the qualified serving checkpoint. Wan 2.2 can be started for experiments but its dual-transformer path has not passed resident-serving acceptance.
+5. Verified on Wan 2.1 14B, trn2, tp4, 480×832×9, 20 steps (`docs/verification/2026-10-01-ptq-fp8-wan-evidence.md`). Weight-only (`--quant-act none`, recommended): DiT step at bf16 parity (563 vs 573 ms), cold weight load −46 % (128 vs 236 s), cold e2e −25 %. Dynamic activations (`--quant-act dynamic`): the fp8 × fp8 matmul is 1.15× slower per step on neuronx-cc 2.26 (no tensor-engine FP8 win yet). Quality vs the bf16 render: PSNR ≈ 33 dB, SSIM ≈ 0.88, latent cosine ≈ 0.975 at 20 steps. Per-channel weights measured no better than per-tensor.
 
 Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive (and each is mutually exclusive with `--sp`). `world_size = dp × (2 if cfg-parallel else 1) × cp_degree × tp_degree`; `--sp` leaves it unchanged. `difflet plan --model-id <id>` lists the combinations your host can run.
 
@@ -389,6 +391,9 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 | `--steps N`, `--guidance-scale F`, `--seed N` | generate, run | Sampler settings (seed default 42) |
 | `--cache-dir PATH` | compile, generate, run, serve, cache | Compiled-artifact cache root (default `~/.cache/difflet/`) |
 | `--force` | compile, generate, run, serve | Recompile even if a valid cache entry exists |
+| `--quant fp8` | compile, generate, run, serve, quantize | FP8 PTQ of the DiT linears (Wan); builds the fp8 checkpoint copy on first use |
+| `--quant-granularity {tensor,channel}` | compile, generate, run, serve, quantize | Weight scale per tensor (default) or per output channel |
+| `--quant-act {dynamic,none}` | compile, generate, run, serve | Dynamic per-tensor fp8 activations, or weight-only (`none`, recommended on trn2) |
 | `--work-dir PATH`, `--keep-work-dir` | generate, run | Inter-stage tensor directory for staged models |
 | `--host`, `--port`, `--api-key` | serve | Bind address and optional shared API key |
 | `--clip-placement {host,neuron}` | serve | HunyuanVideo CLIP placement |

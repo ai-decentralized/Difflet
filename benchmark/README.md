@@ -112,6 +112,8 @@ per-step comparison (NVIDIA B300 SXM6 275 GB, stock-diffusers reference, single-
 |---|---|---|---|---|
 | LTX-2 (video+audio) | `ltx_2` | [trn2](trn2/ltx_2.md) | [trn3](trn3/ltx_2.md) | see report |
 | Wan 2.1 14B (T2V) | `wan_2_1` | [trn2](trn2/wan_2_1.md) | [trn3](trn3/wan_2_1.md) | see report |
+| Wan 2.1 14B, FP8 PTQ dynamic activations | `wan_2_1_fp8` | [trn2](trn2/wan_2_1_fp8.md) | — | see report |
+| Wan 2.1 14B, FP8 PTQ weight-only | `wan_2_1_fp8_wo` | [trn2](trn2/wan_2_1_fp8_wo.md) | — | see report |
 | Wan 2.2 A14B (T2V) | `wan_2_2` | [trn2](trn2/wan_2_2.md) | — (shares 2.1 NEFF) | see report |
 | Qwen-Image (T2I) | `qwen_image` | [trn2](trn2/qwen_image.md) | [trn3](trn3/qwen_image.md) | see report |
 | HunyuanVideo (T2V) | `hunyuan_video` | [trn2](trn2/hunyuan_video.md) | [trn3](trn3/hunyuan_video.md) | see report |

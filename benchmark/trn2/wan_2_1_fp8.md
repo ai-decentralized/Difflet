@@ -3,9 +3,9 @@
 **Status:** ok  
 **Backend:** trainium  
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
-**Timestamp:** 2026-06-30 16:53 UTC
+**Timestamp:** 2026-10-01 19:13 UTC
 
-> Best-performing configuration: tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline
+> Best-performing configuration: tp=4, FP8 PTQ (e4m3, per-tensor weights, dynamic activations) on the DiT linears, bf16 elsewhere, attention_cte, 2-stage subprocess pipeline
 
 ## Configuration
 
@@ -21,33 +21,22 @@
 
 | phase | time |
 |---|---|
-| compile (AOT, one-time) | 131.3 min (7879 s) |
-| **e2e generate — cold start** (page cache dropped) | **6.9 min (414 s)** |
-| **e2e generate — warm cache** | **85.65 s** |
+| compile (AOT, one-time) | — |
+| **e2e generate — cold start** (page cache dropped) | **5.1 min (304 s)** |
+| **e2e generate — warm cache** | **84.19 s** |
 
-> Cold vs warm: **6.9 min (414 s) → 85.65 s** (4.8× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
+> Cold vs warm: **5.1 min (304 s) → 84.19 s** (3.6× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 554.8 ms | 554.8 ms | 554.8 ms | 554.8 ms | 20 |
-| end-to-end (warm) | 85.65 s | 85.65 s | 85.65 s | 85.65 s | 1 |
+| per denoise step (transformer fwd) | 656.8 ms | 656.5 ms | 657.1 ms | 656.3 ms | 19 |
+| end-to-end (warm) | 84.19 s | 84.19 s | 84.19 s | 84.19 s | 1 |
 
-**Throughput:** 1.802 DiT steps/s
+**Throughput:** 1.523 steps/s
 
-## Compile breakdown
-
-Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-save tail (not timed by a single log line).
-
-| component | module load | HLO gen | priority-HLO compile | all-HLO compile | other | **build total** |
-|---|---:|---:|---:|---:|---:|---:|
-| text_encoder_t5 | 477.0 ms | 2.21 s | 5.4 min (324 s) | 538.0 ms | 39.08 s | **6.1 min (366 s)** |
-| transformer | 2.20 s | 14.40 s | 96.12 s | 3.0 ms | 2.4 min (143 s) | **4.3 min (255 s)** |
-| vae_decoder | 474.0 ms | 1.45 s | 101.5 min (6087 s) | 1.0 ms | 8.72 s | **101.6 min (6098 s)** |
-| **Σ component builds** | | | | | | **112.0 min (6719 s)** |
-
-> The headline **compile = 131.3 min (7879 s)** is the full `difflet compile` wall; the **Σ component builds = 112.0 min (6719 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
+Per-step basis: **real-loop DiT wall time per step, device-synced, step 0 excluded** — device-synced inter-step deltas of a real generate loop, step 0 excluded, the same rule the other device folders use (`benchmark/harness.py::RealLoopStepTimer`).
 
 ## Output validity
 
@@ -56,21 +45,20 @@ Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-
 | shape | None |
 | dtype | None |
 | finite (no NaN/Inf) | None |
-| note | saved wan2_1_t2v_14b_diffusers_out.mp4 |
+| note | saved wan2_1_t2v_14b_diffusers_fp8_tensor_dyn_out.mp4 |
 
 ## Toolchain
 
 - `torch` = 2.9.1
-- `torch-neuronx` = 2.9.0.2.14.27725+e2ff0410
-- `neuronx-cc` = 2.25.3371.0+f524f7f8
-- `neuronx-distributed` = 0.19.28093+fc70b593
+- `torch-neuronx` = 2.9.0.2.15.32035+de43f57c
+- `neuronx-cc` = 2.26.6360.0+6f180f47
+- `neuronx-distributed` = 0.19.28492+435aae2b
 - `diffusers` = 0.38.0
 
 ## Notes
 
-- step_latency carried over from prior trn2 measurement (presharding-independent — DiT compute unaffected by weight-load path; ltx cross-check: realloop 437.9ms vs prior 442ms).
-- e2e_cold = 414 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
-- e2e_warm = 86 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 414 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
+- e2e_cold = 304 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
+- e2e_warm = 84 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 304 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
 
 ## Reproduction
 
@@ -88,7 +76,7 @@ Exact test conditions. The **model + config rows are hardware-agnostic** — an 
 | guidance scale | 1.0 |
 | seed | 42 |
 | prompt | "a cinematic shot of a red fox running through a snowy forest" |
-| best-perf knobs | tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline |
+| best-perf knobs | tp=4, FP8 PTQ (e4m3, per-tensor weights, dynamic activations) on the DiT linears, bf16 elsewhere, attention_cte, 2-stage subprocess pipeline |
 | measured on | trn2.3xlarge / 4 NeuronCores / 96 GB/device (device folder `trn2`) |
 
 ```bash
@@ -102,12 +90,12 @@ difflet generate --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision 38ec498cb
 
 # benchmark harness on this device (writes benchmark/<device>/):
 DIFFLET_BENCH_DEVICE=trn2 \
-    python -m benchmark.cold_warm_e2e --model wan_2_1    # true cold + warm e2e
+    python -m benchmark.cold_warm_e2e --model wan_2_1_fp8    # true cold + warm e2e
 DIFFLET_BENCH_DEVICE=trn2 \
-    python -m benchmark.step_latency  --model wan_2_1    # warm per-step
+    python -m benchmark.step_latency  --model wan_2_1_fp8    # warm per-step
 
 # other backends (H100/B300) reproduce the SAME model+config via the generic runner:
-#   python -m benchmark.bench --backend cuda --model wan_2_1   # diffusers CUDA reference adapter
+#   python -m benchmark.bench --backend cuda --model wan_2_1_fp8   # diffusers CUDA reference adapter
 ```
 
 **Measurement protocol** (so the numbers above are comparable across hardware):

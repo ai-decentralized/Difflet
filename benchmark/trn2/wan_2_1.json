@@ -42,41 +42,20 @@
     },
     "wall_total_s": 6719.31
   },
-  "load_seconds": 343.279,
-  "e2e_cold_seconds": 394.177,
-  "e2e_breakdown": {
-    "stages": [
-      {
-        "stage": "text_encoder (UMT5)",
-        "load_s": 94.393
-      },
-      {
-        "stage": "transformer (denoise loop)",
-        "load_s": 234.937
-      },
-      {
-        "stage": "vae_decoder",
-        "load_s": 13.949
-      }
-    ],
-    "weights_load_total_s": 343.279,
-    "weights_shard_total_s": 0.0,
-    "wall_total_s": 394.177,
-    "compute_and_overhead_s": 50.898
-  },
+  "load_seconds": null,
+  "e2e_cold_seconds": 413.922,
+  "e2e_breakdown": null,
   "e2e_warm": {
-    "n": 3,
-    "mean": 56.404766790001304,
-    "median": 56.23771499400027,
-    "std": 0.38713464484493026,
-    "p50": 56.23771499400027,
-    "p90": 56.939823553999304,
-    "min": 56.03676182200434,
-    "max": 56.939823553999304,
+    "n": 1,
+    "mean": 85.65104882400192,
+    "median": 85.65104882400192,
+    "std": 0.0,
+    "p50": 85.65104882400192,
+    "p90": 85.65104882400192,
+    "min": 85.65104882400192,
+    "max": 85.65104882400192,
     "samples": [
-      56.23771499400027,
-      56.03676182200434,
-      56.939823553999304
+      85.65104882400192
     ]
   },
   "step_latency": {
@@ -95,20 +74,14 @@
   },
   "peak_device_mem_gb": null,
   "output": {
-    "shape": [
-      1,
-      3,
-      9,
-      480,
-      832
-    ],
-    "dtype": "torch.float32",
-    "finite": true,
-    "min": -0.875,
-    "max": -0.255859375,
-    "mean": -0.5515965819358826,
-    "std": 0.08401277661323547,
-    "note": "saved wan2_1_t2v_14b_diffusers_out.pt"
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved wan2_1_t2v_14b_diffusers_out.mp4"
   },
   "toolchain": {
     "torch": "2.9.1",
@@ -120,9 +93,9 @@
   "config_label": "tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline",
   "status": "ok",
   "notes": [
-    "e2e_cold = 394 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
     "step_latency carried over from prior trn2 measurement (presharding-independent \u2014 DiT compute unaffected by weight-load path; ltx cross-check: realloop 437.9ms vs prior 442ms).",
-    "e2e_warm = 56 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+    "e2e_cold = 414 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 86 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 414 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
   ],
   "timestamp": "2026-06-30 16:53 UTC",
   "config_slug": "wan_2_1",
@@ -132,24 +105,5 @@
   "prompt": "a cinematic shot of a red fox running through a snowy forest",
   "guidance_scale": 1.0,
   "output_kind": "video",
-  "e2e_warm_breakdown": {
-    "stages": [
-      {
-        "stage": "text_encoder (UMT5)",
-        "load_s": 8.27
-      },
-      {
-        "stage": "transformer (denoise loop)",
-        "load_s": 6.52
-      },
-      {
-        "stage": "vae_decoder",
-        "load_s": 13.608
-      }
-    ],
-    "weights_load_total_s": 28.398,
-    "weights_shard_total_s": 0.0,
-    "wall_total_s": 56.94,
-    "compute_and_overhead_s": 28.542
-  }
+  "e2e_warm_breakdown": null
 }
