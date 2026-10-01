@@ -25,7 +25,10 @@ _NXD_QUANTIZATION_TYPE = {
     "tensor": "per_tensor_symmetric",
     "channel": "per_channel_symmetric",
 }
-_NXD_ACTIVATION_TYPE = {"dynamic": "DYNAMIC", "none": None}
+# NxD's ActivationQuantizationType enum *values* are lowercase ("dynamic",
+# "static"); NeuronConfig validates the raw string against those values, so the
+# member name "DYNAMIC" is rejected ("Unsupported activation quantization type").
+_NXD_ACTIVATION_TYPE = {"dynamic": "dynamic", "none": None}
 _NXD_QUANTIZED_DTYPE = {"fp8_e4m3": "f8e4m3"}
 FP8_HLO2TENSORIZER_FLAG = "--experimental-unsafe-fp8e4m3fn-as-fp8e4m3"
 

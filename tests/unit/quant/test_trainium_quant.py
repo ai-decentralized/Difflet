@@ -23,13 +23,37 @@ def test_neuron_config_kwargs_map_the_spec_onto_nxdi_fields(tmp_path):
         "quantized_checkpoints_path": str(tmp_path / "q"),
         "quantization_type": "per_tensor_symmetric",
         "quantization_dtype": "f8e4m3",
-        "activation_quantization_type": "DYNAMIC",
+        "activation_quantization_type": "dynamic",
     }
     weight_only = tq.neuron_config_kwargs(
         QuantSpec(weight_granularity="channel", activation="none"), "/q"
     )
     assert weight_only["quantization_type"] == "per_channel_symmetric"
     assert "activation_quantization_type" not in weight_only
+
+
+def test_neuron_config_kwargs_pass_nxd_validation():
+    """The raw strings must be the NxD enum *values* — NeuronConfig validates them.
+
+    Pins the Phase-0 probe failure of 2026-10-01 on trn2: ``"DYNAMIC"`` (the
+    member name) raised ``AssertionError: Unsupported activation quantization
+    type: DYNAMIC`` from ``validate_activation_quantization_type`` before the
+    fp8 arm could compile. Runs where neuronx_distributed is installed.
+    """
+    pytest.importorskip("neuronx_distributed")
+    from neuronx_distributed.quantization.quantization_config import (
+        ActivationQuantizationType,
+        QuantizationType,
+    )
+
+    from difflet.backends.trainium.core.config import validate_activation_quantization_type
+
+    for spec in (QuantSpec(), QuantSpec(weight_granularity="channel")):
+        kwargs = tq.neuron_config_kwargs(spec, "/q")
+        validate_activation_quantization_type(kwargs["activation_quantization_type"])
+        assert ActivationQuantizationType(kwargs["activation_quantization_type"]) \
+            is ActivationQuantizationType.DYNAMIC
+        assert QuantizationType(kwargs["quantization_type"])
 
 
 def test_fp8_compiler_flag_only_for_fp8_quantized_configs():
@@ -63,10 +87,10 @@ def fake_nxd(monkeypatch):
         def get_dtype(cls, name):
             return cls(name)
 
-    class ActivationQuantizationType(enum.Enum):
+    class ActivationQuantizationType(enum.Enum):  # values as in NxD: lowercase
         NONE = None
-        DYNAMIC = "DYNAMIC"
-        STATIC = "STATIC"
+        DYNAMIC = "dynamic"
+        STATIC = "static"
 
     calls = []
 
@@ -99,7 +123,7 @@ def test_build_q_config_mirrors_nxdi_for_each_granularity(fake_nxd):
     _, QuantizedDtype, ActivationQuantizationType = fake_nxd.types
     per_tensor = tq.build_q_config(SimpleNamespace(
         quantization_type="per_tensor_symmetric", quantization_dtype="f8e4m3",
-        activation_quantization_type="DYNAMIC", quantize_clamp_bound=float("inf"),
+        activation_quantization_type="dynamic", quantize_clamp_bound=float("inf"),
     ))
     assert per_tensor["quantization_type"] == "per_tensor"
     assert per_tensor["quantized_dtype"] is QuantizedDtype.F8E4M3
@@ -124,7 +148,7 @@ def test_quantize_traced_model_calls_convert_in_place(fake_nxd):
     model = SimpleNamespace(name="wan")
     neuron_config = SimpleNamespace(
         quantized=True, quantization_type="per_tensor_symmetric", quantization_dtype="f8e4m3",
-        activation_quantization_type="DYNAMIC", quantize_clamp_bound=float("inf"),
+        activation_quantization_type="dynamic", quantize_clamp_bound=float("inf"),
         modules_to_not_convert=["proj_out"],
     )
     assert tq.quantize_traced_model_(model, neuron_config) is model
