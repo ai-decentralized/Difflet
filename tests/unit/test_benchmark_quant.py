@@ -18,11 +18,14 @@ def test_quant_flags_and_slug_suffix():
     assert spec_slug(fp8) == "wan2_1_t2v_14b_diffusers_fp8_channel_wo"
 
 
-def test_matrix_has_the_fp8_partner_of_wan_2_1():
-    base, fp8 = MATRIX["wan_2_1"], MATRIX["wan_2_1_fp8"]
-    assert fp8.quant == "fp8" and base.quant is None
-    for field in ("model_id", "revision", "tp", "height", "width", "num_frames", "steps", "seed", "prompt"):
-        assert getattr(base, field) == getattr(fp8, field)
+def test_matrix_has_the_fp8_partners_of_wan_2_1():
+    base, fp8, wo = MATRIX["wan_2_1"], MATRIX["wan_2_1_fp8"], MATRIX["wan_2_1_fp8_wo"]
+    assert fp8.quant == "fp8" and wo.quant == "fp8" and base.quant is None
+    assert fp8.quant_act == "dynamic" and wo.quant_act == "none"
+    assert spec_slug(fp8) != spec_slug(wo)  # separate report files
+    for partner in (fp8, wo):
+        for field in ("model_id", "revision", "tp", "height", "width", "num_frames", "steps", "seed", "prompt"):
+            assert getattr(base, field) == getattr(partner, field)
 
 
 def test_parse_dit_step_seconds_drops_step_zero_and_takes_the_last_loop():

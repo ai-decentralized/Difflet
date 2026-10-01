@@ -169,6 +169,19 @@ MATRIX: dict[str, BenchConfig] = {
                      "DiT linears, bf16 elsewhere, attention_cte, 2-stage subprocess pipeline",
         stage_names=["text_encoder (UMT5)", "transformer (denoise loop)", "vae_decoder"],
     ),
+    # Weight-only FP8 (fp8 weights dequantized to bf16 at run time, bf16 matmuls):
+    # on trn2 (2026-10-01) the per-step matches bf16 while the weight bytes halve.
+    "wan_2_1_fp8_wo": BenchConfig(
+        model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers",
+        revision="38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+        model_type="wan",
+        tp=4, height=480, width=832, num_frames=9, steps=20, guidance_scale=1.0,
+        quant="fp8", quant_granularity="tensor", quant_act="none",
+        output_kind="video",
+        config_label="tp=4, FP8 PTQ weight-only (e4m3, per-tensor weights, bf16 activations) on "
+                     "the DiT linears, bf16 elsewhere, attention_cte, 2-stage subprocess pipeline",
+        stage_names=["text_encoder (UMT5)", "transformer (denoise loop)", "vae_decoder"],
+    ),
     "wan_2_2": BenchConfig(
         model_id="Wan-AI/Wan2.2-T2V-A14B-Diffusers",
         revision="5be7df9619b54f4e2667b2755bc6a756675b5cd7",
