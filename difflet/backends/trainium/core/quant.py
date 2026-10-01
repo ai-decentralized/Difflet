@@ -32,6 +32,15 @@ _NXD_ACTIVATION_TYPE = {"dynamic": "dynamic", "none": None}
 _NXD_QUANTIZED_DTYPE = {"fp8_e4m3": "f8e4m3"}
 FP8_HLO2TENSORIZER_FLAG = "--experimental-unsafe-fp8e4m3fn-as-fp8e4m3"
 
+# Version of the quantized-layer graph/parameter layout Difflet produces from a
+# given QuantSpec. It enters the transformer stage's cache key and the shared
+# weight store key (quantized apps only), because neither sees code: on trn2
+# (2026-10-01) a fixed layer dtype left the old NEFF "already compiled" and the
+# store relinking the old fp32-bias shards over a forced re-shard.
+#   1 — layers typed from mod.dtype (fp32 bias / dequantized dtype); never released
+#   2 — layers typed from the live weight dtype (bf16 bias), per-tensor dynamic path
+QUANT_LAYER_SCHEMA = 2
+
 
 def neuron_config_kwargs(spec: QuantSpec, quantized_checkpoints_path: str | os.PathLike[str]) -> dict[str, Any]:
     """``NeuronConfig(**kwargs)`` fields that turn a backbone into its FP8 form."""

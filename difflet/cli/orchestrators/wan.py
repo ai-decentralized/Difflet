@@ -341,7 +341,10 @@ class WanOrchestrator(ModelOrchestrator):
             # Additive-only: absent for bf16 so every existing artifact keeps its key.
             quant_spec = self._quant_spec(args)
             if quant_spec is not None:
+                from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+
                 inputs["quant"] = quant_spec.to_dict()
+                inputs["quant_layer_schema"] = QUANT_LAYER_SCHEMA
             return inputs
         if stage == "vae":
             return {

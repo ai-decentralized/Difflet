@@ -103,8 +103,13 @@ def test_wan_stage_identity_is_unchanged_for_bf16_and_extended_for_fp8(monkeypat
         "format": "fp8_e4m3", "weight_granularity": "tensor", "activation": "none",
         "targets": list(__import__("difflet.quant.spec", fromlist=["DEFAULT_TARGETS"]).DEFAULT_TARGETS),
     }
-    assert {k: v for k, v in fp8_inputs.items() if k != "quant"} == inputs
+    from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+
+    # The quantized-layer schema version keys the NEFF too (fp8 only, additive).
+    assert fp8_inputs["quant_layer_schema"] == QUANT_LAYER_SCHEMA
+    assert {k: v for k, v in fp8_inputs.items() if k not in ("quant", "quant_layer_schema")} == inputs
     assert "quant" not in fp8._stage_cache_inputs("vae", fp8.args)
+    assert "quant_layer_schema" not in fp8._stage_cache_inputs("vae", fp8.args)
     assert fp8._stage_compiled_dir("transformer", fp8.args) != bf16._stage_compiled_dir(
         "transformer", bf16.args
     )

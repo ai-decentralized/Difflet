@@ -115,9 +115,13 @@ def _key_inputs(app: Any) -> dict[str, Any]:
         inputs["quantized_checkpoint"] = (
             os.path.realpath(str(quantized_path)) if quantized_path else None
         )
+        from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+
         inputs["quantization"] = {
             "dtype": str(getattr(neuron_config, "quantization_dtype", None)),
             "type": str(getattr(neuron_config, "quantization_type", None)),
+            # The shards carry the quantized layers' parameter dtypes/layout.
+            "layer_schema": QUANT_LAYER_SCHEMA,
         }
     return inputs
 

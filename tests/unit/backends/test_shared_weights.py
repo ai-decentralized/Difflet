@@ -356,3 +356,25 @@ def test_probe_and_backbone_apps_share_one_store_entry(tmp_path):
     tagged.weights_layout_tag = "trace-module-nested-v1"
     assert shared_weights.store_key(tagged) == backbone_key
     assert "layout" not in shared_weights._key_inputs(tagged)
+
+
+def test_quantized_store_key_carries_the_layer_schema(tmp_path):
+    """FP8 apps key their shards on the quantized-layer schema version too.
+
+    On trn2 (2026-10-01) a fix to the quantized layers' parameter dtypes left
+    the store relinking the old fp32-bias shards: nothing in the key saw code.
+    bf16 apps stay untouched (no "quantization" entry at all).
+    """
+    from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+
+    bf16 = make_app(tmp_path)
+    assert "quantization" not in shared_weights._key_inputs(bf16)
+
+    fp8 = make_app(tmp_path)
+    fp8.neuron_config.quantized = True
+    fp8.neuron_config.quantized_checkpoints_path = str(tmp_path / "q")
+    fp8.neuron_config.quantization_dtype = "f8e4m3"
+    fp8.neuron_config.quantization_type = "per_tensor_symmetric"
+    inputs = shared_weights._key_inputs(fp8)
+    assert inputs["quantization"]["layer_schema"] == QUANT_LAYER_SCHEMA
+    assert shared_weights.store_key(fp8) != shared_weights.store_key(bf16)
