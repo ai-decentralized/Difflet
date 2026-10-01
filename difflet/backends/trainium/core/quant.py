@@ -175,14 +175,24 @@ def quant_module_mapping() -> dict[Any, Any]:
     from neuronx_distributed.quantization import quantization_layers as ql
     from neuronx_distributed.quantization.quantization_config import ActivationQuantizationType
 
-    def _adopt(cls, new_mod):
+    def _adopt(cls, mod, new_mod):
         new_mod.__class__ = cls  # NxD's from_float instantiates its own class by name
+        # NxD types the bias and the dequantized dtype from mod.dtype — the
+        # construction-time dtype. Difflet builds the model and then casts it
+        # (model.to(bf16)), so mod.dtype is still float32 and every biased
+        # quantized linear promoted its output to fp32 (trn2, 2026-10-01: the
+        # weight-only HLO ran 316/400 dots as F32 x F32). Use the live dtype.
+        dtype = mod.weight.dtype
+        new_mod.dtype = dtype
+        new_mod.dequantized_dtype = dtype
+        if getattr(new_mod, "bias", None) is not None:
+            new_mod.bias.data = new_mod.bias.data.to(dtype)
         return new_mod
 
     class PerTensorDynamicColumnParallel(ql.QuantizedColumnParallel):
         @classmethod
         def from_float(cls, mod, q_config=ql._DEFAULT_CUSTOM_QCONFIG_DICT):
-            return _adopt(cls, super().from_float(mod, q_config))
+            return _adopt(cls, mod, super().from_float(mod, q_config))
 
         def forward(self, input, *args, **kwargs):
             if self.activation_quantization_type != ActivationQuantizationType.DYNAMIC:
@@ -214,7 +224,7 @@ def quant_module_mapping() -> dict[Any, Any]:
     class PerTensorDynamicRowParallel(ql.QuantizedRowParallel):
         @classmethod
         def from_float(cls, mod, q_config=ql._DEFAULT_CUSTOM_QCONFIG_DICT):
-            return _adopt(cls, super().from_float(mod, q_config))
+            return _adopt(cls, mod, super().from_float(mod, q_config))
 
         def forward(self, input_, *args, **kwargs):
             if self.activation_quantization_type != ActivationQuantizationType.DYNAMIC:

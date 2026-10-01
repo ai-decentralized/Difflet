@@ -133,10 +133,19 @@ def fake_nxd(monkeypatch):
     class RowParallelLinear:
         pass
 
-    class QuantizedColumnParallel:  # NxD's quantized forms Difflet subclasses
-        pass
+    import torch
 
-    class QuantizedRowParallel:
+    class QuantizedColumnParallel:  # NxD's quantized forms Difflet subclasses
+        @classmethod
+        def from_float(cls, mod, q_config=None):
+            # NxD builds the quantized layer from mod.dtype (construction-time dtype)
+            new = QuantizedColumnParallel()
+            new.dtype = mod.dtype
+            new.dequantized_dtype = mod.dtype
+            new.bias = torch.nn.Parameter(torch.zeros(4, dtype=mod.dtype), requires_grad=False)
+            return new
+
+    class QuantizedRowParallel(QuantizedColumnParallel):
         pass
 
     layers = types.ModuleType("neuronx_distributed.parallel_layers.layers")
@@ -210,6 +219,20 @@ def test_quantize_traced_model_calls_convert_with_difflet_layers(fake_nxd):
     assert issubclass(call["mapping"][column], q_column) and call["mapping"][column] is not q_column
     assert issubclass(call["mapping"][row], q_row) and call["mapping"][row] is not q_row
     assert tq.quant_module_mapping() is call["mapping"]  # built once
+
+
+def test_from_float_types_the_quantized_layer_from_the_live_weight_dtype(fake_nxd):
+    """Pins the fp32 promotion seen on trn2 (2026-10-01): the model is built in fp32
+    and cast to bf16, NxD's from_float reads the construction-time mod.dtype, so the
+    bias / dequantized dtype were fp32 and 316 of 400 weight-only dots ran as F32."""
+    import torch
+
+    column, _, q_column, _ = fake_nxd.layers
+    mod = SimpleNamespace(dtype=torch.float32, weight=torch.zeros(4, 4, dtype=torch.bfloat16))
+    new = tq.quant_module_mapping()[column].from_float(mod, {})
+    assert isinstance(new, q_column) and type(new) is not q_column
+    assert new.dtype is torch.bfloat16 and new.dequantized_dtype is torch.bfloat16
+    assert new.bias.dtype is torch.bfloat16
 
 
 def test_quantize_activation_per_tensor_matches_the_cpu_reference():
