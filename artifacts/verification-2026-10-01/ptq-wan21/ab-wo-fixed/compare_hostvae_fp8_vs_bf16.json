@@ -1,0 +1,21 @@
+{
+  "output": {
+    "reference": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-01/ptq-wan21/ab/bf16_run1_hostvae.mp4",
+    "test": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-01/ptq-wan21/ab-wo-fixed/fp8_run1_hostvae.mp4",
+    "frames": 9,
+    "height": 480,
+    "width": 832,
+    "psnr_db": 24.611722703343506,
+    "ssim": 0.8780173063278198,
+    "pixel": {
+      "mse": 0.0035287966596405963,
+      "mean_abs": 0.028771432524654913,
+      "max_abs": 0.9960784311406314,
+      "cosine": 0.9885345137251712,
+      "rel_l2": 0.1514712894443154,
+      "snr_db": 16.39339355012275
+    },
+    "lpips": 0.12249080340067546,
+    "lpips_net": "alex"
+  }
+}

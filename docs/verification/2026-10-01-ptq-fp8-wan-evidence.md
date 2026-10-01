@@ -460,7 +460,48 @@ _Serving: see Phase 4._
 
 ## Phase 4 — serving
 
-_pending_
+`NEURON_RT_NUM_CORES=4 difflet serve --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision 38ec498…
+--tp-degree 4 --height 480 --width 832 --num-frames 9 --host-vae --port 8091 --quant fp8
+--quant-granularity tensor --quant-act dynamic`, then two identical multipart
+`POST /v1/videos/sync` requests (prompt, 480×832×9, 20 steps, guidance 1.0, seed 42) and one
+off-profile shape; then the same without `--quant` (bf16). Logs and outputs under `serve/`;
+gate `gate_before_serve.txt`. A first attempt without `--host-vae` was aborted after 30 min:
+the serving profile's Neuron VAE decoder has its own artifact identity and started a fresh
+~98-minute VAE compile (`serve/serve_fp8_neuronvae_attempt_aborted.log`); given the Neuron
+VAE finding above, the smoke was rerun with the host decoder, which also makes the served clip
+comparable to the host-decoded CLI clips.
+
+| serve | ready after | request 0 wall | request 1 wall | off-profile 320×576×9 | DiT step ms (server log) |
+|---|---:|---:|---:|---|---:|
+| fp8 (dynamic, fixed layers) | 330 s (no compile: fixed artifact reused) | 79.7 s | 78.8 s | **400** `request shape 320x576x9 is not in the serving profile's compiled shape set ['480x832x9']` | 656.6 |
+| bf16 | 550 s (no compile: bf16 artifact reused) | 76.5 s | 76.7 s | **400** (same message) | 573.1 |
+
+Request wall is warm resident-worker time: text encode + 20 DiT steps (≈13.1 s) + the host
+VAE decode (≈70 s, the dominant term with `--host-vae`). The server's own `[wan] dit-step ms`
+line (656.6 ms) is the fixed fp8 artifact's number, i.e. **`--quant fp8` resolves the same
+transformer artifact in serving as in the CLI (S ✅)**.
+
+Served output vs the CLI outputs (host VAE on both sides, `serve/compare_*.json`):
+
+| pair | PSNR dB | SSIM | LPIPS |
+|---|---:|---:|---:|
+| served fp8 run 0 vs CLI fp8 (fixed, run 1) | 36.85 | 0.9600 | 0.0293 |
+| served fp8 run 1 vs served fp8 run 0 | 43.83 | 0.9869 | 0.0058 |
+| served fp8 run 0 vs CLI bf16 | 24.96 | 0.8858 | 0.1151 |
+| served bf16 run 0 vs CLI bf16 (run 1) | 36.61 | 0.9605 | 0.0280 |
+
+The served fp8 clip is the CLI fp8 clip to the eye (36.9 dB) and sits at the same distance
+from bf16 as the CLI fp8 clip does (25.0 vs 24.9 dB). Serving is **not bit-identical** to the
+CLI for either arm — served-bf16 vs CLI-bf16 is also 36.6 dB — and two identical fp8 requests
+to the resident worker differ from each other at 43.8 dB while the CLI is bit-deterministic
+run to run: a serving-path property (seeded generator or prompt-encoder state in the resident
+worker), identical for bf16 and fp8, not investigated here and recorded as a follow-up. The
+bf16 server's own `[wan] dit-step ms` (573.1) matches the CLI bf16 artifact, so the bf16
+profile still resolves its pre-existing artifact (identity unchanged by the fp8 work).
+
+**How to inspect manually:** `serve/serve_{fp8,bf16}.log` (`worker_process_ready`, the
+`GET /ready` 200s, `[wan] dit-step ms`, `worker_process_generation_ok`), `serve/*_badshape.json`
+(the 400 body), `serve/serve_*_run{0,1}.mp4`.
 
 ## Assumption table
 

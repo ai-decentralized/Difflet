@@ -1,0 +1,1 @@
+{"error":{"message":"request shape 320x576x9 is not in the serving profile's compiled shape set ['480x832x9']","type":"invalid_request_error","code":"profile_mismatch"}}
