@@ -14,7 +14,37 @@ Statuses: PASS / FAIL / NOT MEASURED. Assumption ids (A1–A5, Q, P, S) are the 
 
 ## Campaign result (final)
 
-_filled at the end_
+FP8 PTQ of the Wan 2.1 14B DiT **works end to end on trn2** after six Difflet fixes found on
+the device (bug ledger at the end), with these measured outcomes (tp4, 480×832×9, 20 steps,
+guidance 1.0, seed 42; bf16 arm on the same host as the reference):
+
+- **Weight-only fp8 (`--quant fp8 --quant-act none`) — recommended.** DiT step **563 ms vs
+  573 ms bf16** (parity, −1.8 %); transformer cold load **128 s vs 236 s (−46 %)**; cold e2e
+  **305 s vs 413 s (−25 %)**; warm e2e 85 vs 87 s; transformer bytes 15.2 GB vs 28.6 GB on
+  disk and in HBM; fp8 checkpoint built in 31 s; artifact compile 355 s (transformer stage
+  only; the VAE stage is shared).
+- **Dynamic per-tensor activations (`--quant-act dynamic`).** Same load/e2e gains, but the DiT
+  step is **657 ms (1.15× bf16)**: the fp8 × fp8 dots reach neuronx-cc 2.26 (400 of them in
+  the HLO) and it lowers them slower than bf16 matmuls, plus 800 quantize/dequantize passes.
+  No tensor-engine FP8 win on this toolchain; the hook for an NKI FP8 matmul kernel (A3's
+  follow-up, out of scope by design).
+- **Quality vs the bf16 render at 20 steps:** latent cosine 0.974–0.976 (SNR 12.8–13.2 dB);
+  decoded with the host VAE, PSNR 24.6–24.9 dB, SSIM 0.88, LPIPS 0.12: the scene, trees,
+  snow and lighting are identical, the fox's pose and silhouette diverge. Per step the device
+  fp8 math reproduces the CPU fp8 reference (44.5–46.5 dB, probe); per linear the fp8 matmul
+  error is 30 dB SNR (sweep). The 20-step gap is accumulation; whether it is acceptable is a
+  product decision — it is well beyond "invisible" and well short of "a different video".
+- **Serving:** `difflet serve --quant fp8` resolves the fp8 artifact (ready in 330 s, 656.6 ms
+  steps, 400 on off-profile shapes); bf16 serving unchanged.
+- **Assumptions:** A1, A4, A5 PASS; A2 PASS only through Difflet's own activation path (NxD's
+  DYNAMIC forward cannot trace DiT activations); **A3 FAIL** (no per-step gain from fp8 dots);
+  Q and P measured as above; S PASS.
+- **Found and not fixed (pre-existing, bf16):** the Neuron VAE decoder degrades frames 2–8 at
+  480×832×9 (host VAE of the same latents is clean); serving is not bit-deterministic across
+  identical requests (CLI is); the serving-profile VAE has its own identity and recompiles.
+
+Six fixes, each its own commit with a pinned test: `dece4f4`, `6fe599d`, `959f2cc`,
+`cfc1adf`, `42ae642`, `c3357c6`; harness fixes `5fe2a49`, `f21d79b`, `e5636be`.
 
 ## Host and toolchain (Phase 0a)
 
@@ -49,11 +79,11 @@ processes) passed; the gate output is quoted at the start of each timed phase.
 |---|---|---|---|
 | 0a | host prep (venv, weights) | `scripts/setup_env.sh`, `hf download` | PASS |
 | 0b | quant unit tests + tiny device probe (A1 A2 A4 A5) | `pytest`, `scripts/ptq_fp8_device_probe.py` | PASS after 4 fixes |
-| 1 | quantize + compile, timed (A4, A5) | `scripts/ptq_fp8_ab.py` | _pending_ |
-| 2a | CPU per-linear fp8 error sweep, t = 500 / 900 / 100 | `scripts/ptq_linear_error_sweep.py` | _pending_ |
-| 2b | device latent + pixel error vs bf16 (Q, A2) | `scripts/ptq_fp8_ab.py` | _pending_ |
-| 3 | performance: compile, e2e cold/warm, weight load, DiT per-step (P, A3) | `scripts/ptq_fp8_ab.py`, `benchmark.bench`, `benchmark.cold_warm_e2e` | _pending_ |
-| 4 | `difflet serve --quant fp8` (S) | `difflet serve`, `scripts/ptq_compare_outputs.py` | _pending_ |
+| 1 | quantize + compile, timed (A4, A5) | `scripts/ptq_fp8_ab.py` | PASS |
+| 2a | CPU per-linear fp8 error sweep, t = 500 / 900 / 100 | `scripts/ptq_linear_error_sweep.py` | PASS (measured) |
+| 2b | device latent + pixel error vs bf16 (Q, A2) | `scripts/ptq_fp8_ab.py` | measured (see verdict) |
+| 3 | performance: compile, e2e cold/warm, weight load, DiT per-step (P, A3) | `scripts/ptq_fp8_ab.py`, `benchmark.bench`, `benchmark.cold_warm_e2e` | measured; A3 FAIL, weight-only at parity |
+| 4 | `difflet serve --quant fp8` (S) | `difflet serve`, `scripts/ptq_compare_outputs.py` | PASS (host VAE) |
 
 ## Phase 0b — unit tests and tiny device probe
 
@@ -438,6 +468,21 @@ error. A CPU reference is the way to attribute it (full-forward numerics below; 
 fp32 / fp8 loop at this shape is the follow-up). Per-step and per-linear, the device fp8 math
 is verified against the CPU reference (Phase 0, fixed-layer probe below).
 
+### Fixed-layer tiny probe (A2 after fix 5)
+
+`scripts/ptq_fp8_device_probe.py` rerun with the fixed layers (`phase0-fixed/`, gate `phase0-fixed/gate.txt`):
+
+| arm | compile s | forward ms | device vs CPU reference (cosine / SNR dB) | CPU-fp8 vs CPU-bf16 |
+|---|---:|---:|---|---|
+| bf16 | 7.0 | 0.93 | device-bf16 vs CPU-bf16 **0.9999911 / 47.45** (control) | — |
+| fp8-dyn | 17.0 | 1.05 | device-fp8 vs CPU-fp8 **0.9999823 / 44.50**; vs CPU-bf16 0.9999666 / 41.75 | 0.9999686 / 42.02 |
+| fp8-wo | 15.3 | 0.97 | device-fp8 vs CPU-fp8 **0.9999888 / 46.47**; vs CPU-bf16 0.9999745 / 42.92 | 0.9999784 / 43.65 |
+
+Both pass (`passed: true`); the fixed layers reproduce the CPU reference as well as the
+pre-fix ones did (44.5 vs 44.6 dB for dynamic) and weight-only sits within 1 dB of the bf16
+control. The device-side fp8 math per step is right; the 20-step divergence above is
+accumulation, not a layer bug.
+
 ### Phase 3b — benchmark harness report files
 
 `python -m benchmark.bench --model <slug> --skip-download --skip-compile --iters 1` then
@@ -509,12 +554,75 @@ profile still resolves its pre-existing artifact (identity unchanged by the fp8 
 |---|---|---|---|
 | A1 | fp8 weight + scale load into NxD quantized parallel linears | PASS (tp1) | phase0: fp8 shard with `.scale` loads, attempts 2b/3/5 |
 | A2 | NxD DYNAMIC activation quant = per-tensor absmax (device-fp8 ≈ CPU-fp8) | PASS — with Difflet's activation path; NxD's own DYNAMIC path is unusable (bug 2) | phase0 attempt 5: device-fp8 vs CPU-fp8 cosine 0.9999827 |
-| A3 | neuronx-cc runs the fp8 layers as tensor-engine FP8 (per-step drops) | _pending_ | |
-| A4 | fp8 tensors survive sharding / presharded safetensors / shared store | PASS (tp1); tp4 pending Phase 1 | phase0 shard sizes 749,976 B vs 1,135,864 B |
+| A3 | neuronx-cc runs the fp8 layers as tensor-engine FP8 (per-step drops) | **FAIL** — fp8 × fp8 dots reach the compiler but the step is 1.15× bf16; weight-only is at parity | Phase 3 re-measured table; `ab/hlo_dots_*.txt` |
+| A4 | fp8 tensors survive sharding / presharded safetensors / shared store | PASS (tp1 and tp4) | phase0 shard sizes 749,976 B vs 1,135,864 B |
 | A5 | `--experimental-unsafe-fp8e4m3fn-as-fp8e4m3` reaches the compiler | PASS | phase0 `arms.fp8.compiler_args` |
-| Q | FP8 output quality vs bf16 | _pending_ | |
-| P | compile / e2e / per-step, bf16 vs fp8 | _pending_ | |
-| S | `difflet serve --quant fp8` serves the same result | _pending_ | |
+| Q | FP8 output quality vs bf16 | measured: latent cosine 0.974–0.976 / SNR ~13 dB; host-VAE PSNR 24.6–24.9 dB, SSIM 0.88, LPIPS 0.12 (fixed layers) | Phase 2b, re-measured quality table, `latent_matrix_run1.txt` |
+| P | compile / e2e / per-step, bf16 vs fp8 | measured: compile 355 / 505 s vs 6712 s (VAE-dominated); cold load −46 %; cold e2e −25 %; step 563 (wo) / 657 (dyn) vs 573 ms | Phase 3, Phase 3b harness files |
+| S | `difflet serve --quant fp8` serves the same result | PASS — fp8 artifact resolved, 400 on off-profile shape, bf16 unchanged | Phase 4, `serve/` |
+
+## Feature-by-feature view
+
+### FP8 PTQ, weight-only   `--quant fp8 --quant-act none` (+ `--quant-granularity tensor|channel`)
+fp8 e4m3 weights for the DiT attention/FFN linears (per-tensor absmax at the Trainium 240 range),
+cast to bf16 on the device at run time, bf16 matmuls; halves the transformer bytes.
+
+| FLUX.1-dev | Qwen-Image | Wan 2.1 | Wan 2.2 | HunyuanVideo | LTX-2 |
+|---|---|---|---|---|---|
+| N/A · not wired (Wan backbone only) | N/A | **LIMIT** · step 563 vs 573 ms bf16, cold load −46 %, cold e2e −25 %; quality: latent cosine 0.974 / host-VAE PSNR 24.6 dB vs bf16 at 20 steps ¹ | NOT MEASURED · shares the Wan runtime (two transformers), not run | N/A | N/A |
+
+### FP8 PTQ, dynamic activations   `--quant fp8 --quant-act dynamic`
+As above plus per-tensor dynamic fp8 activation quantization and fp8 × fp8 matmuls (Difflet's
+own path: NxD's DYNAMIC forward cannot trace 3-D activations).
+
+| FLUX.1-dev | Qwen-Image | Wan 2.1 | Wan 2.2 | HunyuanVideo | LTX-2 |
+|---|---|---|---|---|---|
+| N/A | N/A | **LIMIT** · functional, numerically verified per step; **step 657 ms = 1.15× bf16** (no FP8 tensor-engine gain on neuronx-cc 2.26); same load/e2e gains as weight-only ² | NOT MEASURED | N/A | N/A |
+
+### FP8 PTQ in serving   `difflet serve --quant fp8 …`
+| FLUX.1-dev | Qwen-Image | Wan 2.1 | Wan 2.2 | HunyuanVideo | LTX-2 |
+|---|---|---|---|---|---|
+| N/A | N/A | **PASS** · fp8 artifact resolved, 330 s to ready, shape set enforced (400); measured with `--host-vae` ³ | NOT MEASURED | N/A | N/A |
+
+Constraint notes:
+1. The 20-step divergence from the bf16 render (fox pose/silhouette, scene identical) is the
+   accumulated fp8 weight-quantization error; per-channel scales do not reduce it (sweep). Fewer
+   or more steps, other prompts and other seeds were not measured.
+2. Expected to turn into a per-step gain only with an NKI FP8 matmul kernel behind the same
+   `QuantSpec`; until then prefer weight-only.
+3. Without `--host-vae` the serving profile's Neuron VAE starts its own ~98-minute compile
+   (own identity) and that decoder degrades frames 2–8 at this shape (bf16 finding).
+
+## Follow-ups (not fixed in this campaign)
+
+| finding | evidence | suggested owner / cost |
+|---|---|---|
+| Neuron VAE decoder degrades frames 2–8 at 480×832×9 (bf16); host VAE of the same latents is clean | `ab/frames_bf16_neuronvae_0_4_8.png` vs `ab/frames_bf16_hostvae_0_4_8.png` | Wan VAE stage; reproduce with any bf16 generate at this shape |
+| fp8 × fp8 dot lowers slower than bf16 on neuronx-cc 2.26 | `ab/hlo_dots_fp8_dyn_fixed.txt`, re-measured table | NKI FP8 matmul kernel behind `QuantSpec` (design's stated follow-up) |
+| `difflet serve` not bit-deterministic across identical requests (CLI is); served vs CLI ≈ 37 dB for both arms | `serve/compare_serve_*.json` | serving denoiser/prompt-encoder seeding |
+| serving-profile VAE artifact identity differs from the CLI's (fresh compile) | `serve/serve_fp8_neuronvae_attempt_aborted.log` | share the VAE artifact between CLI and serve profiles |
+| `benchmark.parse_generate` does not match this toolchain's `load_weights` lines (`weights_load_total_seconds` = 0) | `ab/ab_summary.json` | benchmark harness |
+| 20-step CPU fp32 / fp8 reference loop at this shape to attribute the 13 dB latent gap between bf16 and fp8 arms | `latent_matrix_run1.txt`, `full_forward/` | CPU, ~1 h per arm |
+
+## How to reproduce
+
+```bash
+source .venv/bin/activate && export PYTHONPATH=$PWD
+# Phase 0
+pytest tests/unit/quant tests/unit/cli/test_cli_quant.py tests/unit/serving/test_serve_quant.py tests/unit/test_ptq_scripts.py -q
+python scripts/ptq_fp8_device_probe.py --work-dir /tmp/ptq_probe --force-clean            # dynamic
+python scripts/ptq_fp8_device_probe.py --work-dir /tmp/ptq_probe_wo --force-clean --quant-act none --only fp8
+# Phase 1-3 (bf16 + fp8 dynamic), then the weight-only arm
+python scripts/ptq_fp8_ab.py --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68 \
+  --tp-degree 4 --height 480 --width 832 --num-frames 9 --steps 20 --guidance-scale 1.0 --seed 42 --runs 2 --drop-caches --out-dir out/ab
+python scripts/ptq_fp8_ab.py ... --only fp8 --quant-act none --skip-quantize --out-dir out/ab-wo
+# Phase 2a
+python scripts/ptq_linear_error_sweep.py --model-dir <snapshot> --height 480 --width 832 --num-frames 9 --timestep 500 --m-slice 1024 --out out/t500.json
+# Phase 3b / Phase 4
+python -m benchmark.bench --model wan_2_1_fp8_wo --skip-download --skip-compile --iters 1 && python -m benchmark.cold_warm_e2e --model wan_2_1_fp8_wo
+NEURON_RT_NUM_CORES=4 difflet serve --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --tp-degree 4 --height 480 --width 832 --num-frames 9 --host-vae --quant fp8 --port 8091
+```
+The exact job scripts, idle gate and watchers used are under `artifacts/verification-2026-10-01/ptq-wan21/scripts/`.
 
 ## Bug ledger
 
