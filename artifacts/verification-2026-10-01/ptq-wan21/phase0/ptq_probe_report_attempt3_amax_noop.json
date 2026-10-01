@@ -1,0 +1,64 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "activation": "dynamic",
+    "targets": [
+      "to_q",
+      "to_k",
+      "to_v",
+      "to_out.0",
+      "ffn.net_in",
+      "ffn.net_out",
+      "ffn.net.0.proj",
+      "ffn.net.2"
+    ]
+  },
+  "shape": {
+    "height": 64,
+    "width": 64,
+    "text_seq_len": 512
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 1.9386442250635127e-05,
+    "mean_abs": 0.0033394936472177505,
+    "max_abs": 0.015625,
+    "cosine": 0.9999685752039225,
+    "rel_l2": 0.007927762176680007,
+    "snr_db": 42.01698773277839
+  },
+  "arms": {
+    "bf16": {
+      "arm": "bf16",
+      "compiled": true,
+      "loaded": true,
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'",
+      "compile_seconds": 15.911,
+      "load_seconds": 7.299,
+      "forward_ms": {
+        "n": 10,
+        "mean": 0.46499160016537644,
+        "median": 0.4709500003627909,
+        "min": 0.4228059997331002,
+        "max": 0.48316999982489506
+      },
+      "output_nonfinite": 0
+    },
+    "fp8": {
+      "arm": "fp8",
+      "error": "RuntimeError: Shapes are not compatible for broadcasting: f32[1,16,256] vs. f32[1,16,128]. Expected dimension 2 of shape f32[1,16,256] (256) to match dimension 2 of shape f32[1,16,128] (128). Either that or that any of them is either 1 or unbounded. Try reshaping one of the tensors to match the other.",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_device_probe.py\", line 229, in stage_device\n    output, record = _device_arm(name, transformer_dir, args, inputs,\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_device_probe.py\", line 180, in _device_arm\n    app.compile(str(compiled_dir))\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/application_base.py\", line 429, in compile\n    traced_model = self.get_builder(debug).trace(**trace_kwargs)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/model_builder.py\", line 576, in trace\n    hlo_artifact_collection = self._generate_hlo(key)\n                              ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/model_builder.py\", line 904, in _generate_hlo\n    hlo_artifacts = torch_neuronx.xla_impl.trace.generate_hlo(\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py\", line 460, in generate_hlo\n    ) = xla_trace(\n        ^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py\", line 601, in xla_trace\n    return _xla_trace(func, example_inputs, states, input_output_aliases,\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py\", line 387, in _xla_trace\n    outputs = func(*example_inputs)\n              ^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/models/wan/modeling_wan.py\", line 885, in forward\n    hidden_states = block(\n                    ^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/models/wan/modeling_wan.py\", line 659, in forward\n    ff_out = self.ffn(norm_h)\n             ^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/models/wan/modeling_wan.py\", line 346, in forward\n    x = self.net_in(x)\n        ^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/quant.py\", line 194, in forward\n    output_parallel = dynamic_fp8_linear(\n                      ^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/quant.py\", line 155, in dynamic_fp8_linear\n    output = output.to(torch.float32) * input_scale * layer.scale.to(torch.float32).reshape(-1)\n             ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch_neuronx/experimental/profiler/v2_x/custom_op_name.py\", line 634, in __torch_dispatch__\n    res = func(*args, **kwargs)\n          ^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/_ops.py\", line 841, in __call__\n    return self._op(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\nRuntimeError: Shapes are not compatible for broadcasting: f32[1,16,256] vs. f32[1,16,128]. Expected dimension 2 of shape f32[1,16,256] (256) to match dimension 2 of shape f32[1,16,128] (128). Either that or that any of them is either 1 or unbounded. Try reshaping one of the tensors to match the other.\n"
+    }
+  },
+  "checks": {
+    "device_bf16_vs_cpu_bf16": {
+      "mse": 5.547863441535128e-06,
+      "mean_abs": 0.0015879329293966293,
+      "max_abs": 0.0078125,
+      "cosine": 0.9999911435810429,
+      "rel_l2": 0.004240962543296704,
+      "snr_db": 47.45071126531365
+    }
+  },
+  "passed": false
+}

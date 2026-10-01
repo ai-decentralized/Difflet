@@ -1,0 +1,63 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "activation": "dynamic",
+    "targets": [
+      "to_q",
+      "to_k",
+      "to_v",
+      "to_out.0",
+      "ffn.net_in",
+      "ffn.net_out",
+      "ffn.net.0.proj",
+      "ffn.net.2"
+    ]
+  },
+  "shape": {
+    "height": 64,
+    "width": 64,
+    "text_seq_len": 512
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 1.6726097588737332e-05,
+    "mean_abs": 0.0030663302168250084,
+    "max_abs": 0.015625,
+    "cosine": 0.9999728883698362,
+    "rel_l2": 0.007363747166627527,
+    "snr_db": 42.658022627215814
+  },
+  "arms": {
+    "bf16": {
+      "arm": "bf16",
+      "compiled": true,
+      "loaded": true,
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'",
+      "compile_seconds": 16.753,
+      "load_seconds": 6.571,
+      "forward_ms": {
+        "n": 10,
+        "mean": 0.6304882999756956,
+        "median": 0.6326890002128494,
+        "min": 0.5793489999632584,
+        "max": 0.7118749999790452
+      }
+    },
+    "fp8": {
+      "arm": "fp8",
+      "error": "RuntimeError: Check failed: input_sizes.size() <= output_sizes.size() (4 vs. 3)",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_device_probe.py\", line 226, in stage_device\n    output, record = _device_arm(name, transformer_dir, args, inputs,\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_device_probe.py\", line 180, in _device_arm\n    app.compile(str(compiled_dir))\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/application_base.py\", line 429, in compile\n    traced_model = self.get_builder(debug).trace(**trace_kwargs)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/model_builder.py\", line 576, in trace\n    hlo_artifact_collection = self._generate_hlo(key)\n                              ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/model_builder.py\", line 904, in _generate_hlo\n    hlo_artifacts = torch_neuronx.xla_impl.trace.generate_hlo(\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py\", line 460, in generate_hlo\n    ) = xla_trace(\n        ^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py\", line 601, in xla_trace\n    return _xla_trace(func, example_inputs, states, input_output_aliases,\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py\", line 387, in _xla_trace\n    outputs = func(*example_inputs)\n              ^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/models/wan/modeling_wan.py\", line 885, in forward\n    hidden_states = block(\n                    ^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/models/wan/modeling_wan.py\", line 649, in forward\n    attn_out = self.attn1(norm_h, None, rotary_emb)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/models/wan/modeling_wan.py\", line 523, in forward\n    q = self.to_q(hidden_states)\n        ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/quantization/quantization_layers.py\", line 667, in forward\n    output_parallel = scale_dequantize(tensor=scale_dequantize(tensor=output_parallel, scale=input_scale, upcast_dtype=original_dtype), scale=self.scale.t(), upcast_dtype=original_dtype)\n                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/quantization/dequantize.py\", line 38, in scale_dequantize\n    upcast_tensor *= scale.unsqueeze(len(scale.shape)-1)\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch_neuronx/experimental/profiler/v2_x/custom_op_name.py\", line 634, in __torch_dispatch__\n    res = func(*args, **kwargs)\n          ^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/_ops.py\", line 841, in __call__\n    return self._op(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\nRuntimeError: Check failed: input_sizes.size() <= output_sizes.size() (4 vs. 3)\n"
+    }
+  },
+  "checks": {
+    "device_bf16_vs_cpu_bf16": {
+      "mse": 5.547863441535128e-06,
+      "mean_abs": 0.0015879329293966293,
+      "max_abs": 0.0078125,
+      "cosine": 0.9999911435810429,
+      "rel_l2": 0.004240962543296704,
+      "snr_db": 47.45071126531365
+    }
+  },
+  "passed": false
+}

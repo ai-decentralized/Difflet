@@ -1,0 +1,68 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "activation": "none",
+    "targets": [
+      "to_q",
+      "to_k",
+      "to_v",
+      "to_out.0",
+      "ffn.net_in",
+      "ffn.net_out",
+      "ffn.net.0.proj",
+      "ffn.net.2"
+    ]
+  },
+  "shape": {
+    "height": 64,
+    "width": 64,
+    "text_seq_len": 512
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 1.2465404498840371e-05,
+    "mean_abs": 0.002626148983836174,
+    "max_abs": 0.015625,
+    "cosine": 0.999979805149208,
+    "rel_l2": 0.006357037061340464,
+    "snr_db": 43.934905132760264
+  },
+  "arms": {
+    "fp8": {
+      "arm": "fp8",
+      "compiled": true,
+      "loaded": true,
+      "quantize_seconds": 0.007,
+      "quantized_checkpoint": "/home/ubuntu/.claude/jobs/b5f130d0/tmp/ptq_probe_wo/cache/quantized/tiny_wan_transformer/transformer/fp8-tensor-51ff5c55",
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+      "compile_seconds": 16.275,
+      "load_seconds": 5.599,
+      "forward_ms": {
+        "n": 10,
+        "mean": 0.4245488002197817,
+        "median": 0.41742949997569667,
+        "min": 0.4063700007463922,
+        "max": 0.4945959999531624
+      }
+    }
+  },
+  "checks": {
+    "device_fp8_vs_cpu_fp8": {
+      "mse": NaN,
+      "mean_abs": NaN,
+      "max_abs": NaN,
+      "cosine": NaN,
+      "rel_l2": NaN,
+      "snr_db": Infinity
+    },
+    "device_fp8_vs_cpu_bf16": {
+      "mse": NaN,
+      "mean_abs": NaN,
+      "max_abs": NaN,
+      "cosine": NaN,
+      "rel_l2": NaN,
+      "snr_db": Infinity
+    }
+  },
+  "passed": false
+}

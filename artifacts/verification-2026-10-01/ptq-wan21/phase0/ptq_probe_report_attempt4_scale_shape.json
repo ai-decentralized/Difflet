@@ -1,0 +1,64 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "activation": "dynamic",
+    "targets": [
+      "to_q",
+      "to_k",
+      "to_v",
+      "to_out.0",
+      "ffn.net_in",
+      "ffn.net_out",
+      "ffn.net.0.proj",
+      "ffn.net.2"
+    ]
+  },
+  "shape": {
+    "height": 64,
+    "width": 64,
+    "text_seq_len": 512
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 1.9386442250635127e-05,
+    "mean_abs": 0.0033394936472177505,
+    "max_abs": 0.015625,
+    "cosine": 0.9999685752039225,
+    "rel_l2": 0.007927762176680007,
+    "snr_db": 42.01698773277839
+  },
+  "arms": {
+    "bf16": {
+      "arm": "bf16",
+      "compiled": true,
+      "loaded": true,
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'",
+      "compile_seconds": 7.154,
+      "load_seconds": 4.908,
+      "forward_ms": {
+        "n": 10,
+        "mean": 0.8786202999544912,
+        "median": 0.9614350001356797,
+        "min": 0.5456609997054329,
+        "max": 1.0554809996392578
+      },
+      "output_nonfinite": 0
+    },
+    "fp8": {
+      "arm": "fp8",
+      "error": "RuntimeError: expected shape torch.Size([128, 1]) for blocks.0.attn1.to_q.scale but found torch.Size([1])",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_device_probe.py\", line 229, in stage_device\n    output, record = _device_arm(name, transformer_dir, args, inputs,\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_device_probe.py\", line 180, in _device_arm\n    app.compile(str(compiled_dir))\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/application_base.py\", line 439, in compile\n    self.shard_weights(compiled_model_path, debug, pre_shard_weights_hook)\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/application_base.py\", line 357, in shard_weights\n    self.get_builder(debug).shard_checkpoint(serialize_path=sharded_checkpoint_dir)\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/model_builder.py\", line 853, in shard_checkpoint\n    sharded_checkpoints.append(self.shard_weights_with_cache(rank, model, checkpoint, serialize_path))\n                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/model_builder.py\", line 996, in shard_weights_with_cache\n    get_sharded_checkpoint(sharded_checkpoint, model, rank, self.tp_degree, is_cached=True)\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/trace.py\", line 656, in get_sharded_checkpoint\n    shard_children(model, checkpoint, \"\", dtype, rank, tp_degree)\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/trace.py\", line 750, in shard_children\n    shard_children(child, checkpoint, prefix + name + \".\", dtype, rank, tp_degree, is_lora_cpu_shard)\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/trace.py\", line 750, in shard_children\n    shard_children(child, checkpoint, prefix + name + \".\", dtype, rank, tp_degree, is_lora_cpu_shard)\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/trace.py\", line 750, in shard_children\n    shard_children(child, checkpoint, prefix + name + \".\", dtype, rank, tp_degree, is_lora_cpu_shard)\n  [Previous line repeated 1 more time]\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/trace.py\", line 825, in shard_children\n    raise RuntimeError(f\"expected shape {module_parameter.shape} for {parameter_name} but found {checkpoint[parameter_name].shape}\")\nRuntimeError: expected shape torch.Size([128, 1]) for blocks.0.attn1.to_q.scale but found torch.Size([1])\n"
+    }
+  },
+  "checks": {
+    "device_bf16_vs_cpu_bf16": {
+      "mse": 5.547863441535128e-06,
+      "mean_abs": 0.0015879329293966293,
+      "max_abs": 0.0078125,
+      "cosine": 0.9999911435810429,
+      "rel_l2": 0.004240962543296704,
+      "snr_db": 47.45071126531365
+    }
+  },
+  "passed": false
+}

@@ -1,0 +1,44 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "activation": "dynamic",
+    "targets": [
+      "to_q",
+      "to_k",
+      "to_v",
+      "to_out.0",
+      "ffn.net_in",
+      "ffn.net_out",
+      "ffn.net.0.proj",
+      "ffn.net.2"
+    ]
+  },
+  "shape": {
+    "height": 64,
+    "width": 64,
+    "text_seq_len": 16
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 2.1838414284047758e-05,
+    "mean_abs": 0.0035888925194740295,
+    "max_abs": 0.015625,
+    "cosine": 0.9999650517940379,
+    "rel_l2": 0.008382377596594702,
+    "snr_db": 41.532655592487146
+  },
+  "arms": {
+    "bf16": {
+      "arm": "bf16",
+      "error": "Error: The following operation failed in the TorchScript interpreter.\nTraceback of TorchScript, serialized code (most recent call last):\n  File \"code/__torch__/neuronx_distributed/trace/spmd.py\", line 135, in forward\n      input_shape_map0 = self.input_shape_map\n      _24 = torch.format(_19, actual_shape, torch.keys(input_shape_map0))\n      ops.prim.RaiseException(_24, \"builtins.ValueError\")\n      ~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE\n    else:\n      pass\n\nTraceback of TorchScript, original code (most recent call last):\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/spmd.py\", line 218, in forward\n        actual_shape = str([tensor.shape for tensor in inputs])\n        if actual_shape not in self.input_shape_map:\n            raise ValueError(f\"Input shape {actual_shape} not found in input_shape_map: {self.input_shape_map.keys()}\")\n            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE\n        return self.input_shape_map[actual_shape]\nbuiltins.ValueError: Input shape [[1, 16, 1, 8, 8], [1], [1, 16, 64]] not found in input_shape_map: [[[1, 16, 1, 8, 8], [1], [1, 512, 64]]]\n",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_device_probe.py\", line 223, in stage_device\n    output, record = _device_arm(name, transformer_dir, args, inputs,\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_device_probe.py\", line 185, in _device_arm\n    _first(app(*inputs))\n           ^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/wan/backbone.py\", line 197, in forward\n    return self.models[0](*model_inputs, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/wan/backbone.py\", line 168, in forward\n    return self._forward(hidden_states, timestep, encoder_hidden_states)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/model_wrapper.py\", line 730, in _forward\n    return self.model(*args)\n           ^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntorch.jit.Error: The following operation failed in the TorchScript interpreter.\nTraceback of TorchScript, serialized code (most recent call last):\n  File \"code/__torch__/neuronx_distributed/trace/spmd.py\", line 135, in forward\n      input_shape_map0 = self.input_shape_map\n      _24 = torch.format(_19, actual_shape, torch.keys(input_shape_map0))\n      ops.prim.RaiseException(_24, \"builtins.ValueError\")\n      ~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE\n    else:\n      pass\n\nTraceback of TorchScript, original code (most recent call last):\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/spmd.py\", line 218, in forward\n        actual_shape = str([tensor.shape for tensor in inputs])\n        if actual_shape not in self.input_shape_map:\n            raise ValueError(f\"Input shape {actual_shape} not found in input_shape_map: {self.input_shape_map.keys()}\")\n            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE\n        return self.input_shape_map[actual_shape]\nbuiltins.ValueError: Input shape [[1, 16, 1, 8, 8], [1], [1, 16, 64]] not found in input_shape_map: [[[1, 16, 1, 8, 8], [1], [1, 512, 64]]]\n\n"
+    },
+    "fp8": {
+      "arm": "fp8",
+      "error": "AssertionError: Unsupported activation quantization type: DYNAMIC",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_device_probe.py\", line 223, in stage_device\n    output, record = _device_arm(name, transformer_dir, args, inputs,\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_device_probe.py\", line 168, in _device_arm\n    config = create_wan_backbone_config(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/models/wan/application.py\", line 58, in create_wan_backbone_config\n    neuron_config = NeuronConfig(**neuron_kwargs)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/config.py\", line 448, in __init__\n    validate_activation_quantization_type(self.activation_quantization_type)\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/config.py\", line 67, in validate_activation_quantization_type\n    assert type in ActivationQuantizationType, f\"Unsupported activation quantization type: {type}\"\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Unsupported activation quantization type: DYNAMIC\n"
+    }
+  },
+  "checks": {},
+  "passed": false
+}
