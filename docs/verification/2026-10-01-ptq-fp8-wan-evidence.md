@@ -468,6 +468,31 @@ error. A CPU reference is the way to attribute it (full-forward numerics below; 
 fp32 / fp8 loop at this shape is the follow-up). Per-step and per-linear, the device fp8 math
 is verified against the CPU reference (Phase 0, fixed-layer probe below).
 
+### CPU full-forward numerics on the real weights (one step, four regimes)
+
+`scripts/ptq_full_forward_error.py` — the whole 40-block DiT once at 480×832×9 / 512 text
+tokens / t = 500 with the same Gaussian inputs as the sweep, on the CPU: fp32 reference, bf16,
+fp8 weight-only and fp8 dynamic (CPU fake-quant, the law the device reproduces per the probes).
+`full_forward/full_forward_error_t500.json`, `full_forward_t500.log` (fp32 forward 478 s,
+bf16 119 s):
+
+| pair | cosine | rel-L2 | SNR dB |
+|---|---:|---:|---:|
+| bf16 vs fp32 (bf16's own one-step error) | 0.999728 | 0.0239 | **32.42** |
+| fp8-wo vs fp32 | 0.998927 | 0.0464 | **26.67** |
+| fp8-dyn vs fp32 | 0.998706 | 0.0509 | **25.87** |
+| fp8-wo vs bf16 | 0.998805 | 0.0490 | 26.20 |
+| fp8-dyn vs bf16 | 0.998540 | 0.0541 | 25.33 |
+| fp8-dyn vs fp8-wo | 0.999440 | 0.0335 | 29.51 |
+
+Reading: one DiT step in fp8 is ~6 dB further from the fp32 truth than one bf16 step is
+(26–27 vs 32 dB; about 2× the error amplitude), and dynamic activation quantization costs
+only 0.8 dB over weight-only — the same ordering the device arms show after 20 steps
+(wo-fixed and dyn-fixed 24.5 dB apart, both ~13 dB from bf16). A per-step error of 26 dB
+compounding over 20 steps to a 13 dB final-latent gap is the expected regime; the pre-fix
+dynamic arm's 22.9 dB stays the unexplained outlier (its run is kept: `ab/fp8_run*.mp4`,
+`ab/work_fp8_run1/latents.pt` was pruned; the comparison files remain).
+
 ### Fixed-layer tiny probe (A2 after fix 5)
 
 `scripts/ptq_fp8_device_probe.py` rerun with the fixed layers (`phase0-fixed/`, gate `phase0-fixed/gate.txt`):
@@ -602,7 +627,7 @@ Constraint notes:
 | `difflet serve` not bit-deterministic across identical requests (CLI is); served vs CLI ≈ 37 dB for both arms | `serve/compare_serve_*.json` | serving denoiser/prompt-encoder seeding |
 | serving-profile VAE artifact identity differs from the CLI's (fresh compile) | `serve/serve_fp8_neuronvae_attempt_aborted.log` | share the VAE artifact between CLI and serve profiles |
 | `benchmark.parse_generate` does not match this toolchain's `load_weights` lines (`weights_load_total_seconds` = 0) | `ab/ab_summary.json` | benchmark harness |
-| 20-step CPU fp32 / fp8 reference loop at this shape to attribute the 13 dB latent gap between bf16 and fp8 arms | `latent_matrix_run1.txt`, `full_forward/` | CPU, ~1 h per arm |
+| 20-step CPU fp32 / fp8 reference loop at this shape (one-step numerics are in `full_forward/`; the loop would attribute the pre-fix outlier) | `latent_matrix_run1.txt`, `full_forward/` | CPU, ~1 h per arm |
 
 ## How to reproduce
 
