@@ -165,7 +165,51 @@ _pending_
 
 ## Phase 2a — per-linear matmul error (CPU, real weights)
 
-_pending_
+`scripts/ptq_linear_error_sweep.py` on the 14B snapshot (all 40 blocks, 400 target linears),
+480×832×9 latent, 512 text tokens, random Gaussian latent / text inputs (no `--bundle`),
+1024 tokens kept per captured activation; one bf16 forward per timestep captures every
+target linear's real input, then each linear is recomputed under every scheme and compared
+with the fp32 exact product. **All numbers are at the 240 range** (the first t=500 pass ran
+before fix `959f2cc`; it is kept as `linear_error_t500_fp8max448_superseded.json` and was
+rerun). Files: `linear_sweep/linear_error_t{900,500,100}.json`, `sweep_t*.log`. The sweep ran
+on the CPU while nothing else used the host except, for part of t=500/t=900, the tiny device
+probe; its `forward_seconds` (130–146 s) is not a timing claim.
+
+| t | scheme | min cos | mean cos | max rel-L2 | min SNR dB | mean SNR dB | worst cell |
+|---:|---|---:|---:|---:|---:|---:|---|
+| 900 | bf16 (floor) | 0.999999 | 0.999999 | 0.0017 | 55.41 | 55.60 | blocks.14.attn2.to_out.0 |
+| 900 | fp8-tensor-dyn | 0.999069 | 0.999480 | 0.0431 | 27.30 | 30.09 | blocks.19.attn1.to_out.0 |
+| 900 | fp8-tensor-wo | 0.999540 | 0.999738 | 0.0303 | 30.36 | 33.08 | blocks.19.attn1.to_out.0 |
+| 900 | fp8-channel-dyn | 0.999069 | 0.999484 | 0.0432 | 27.29 | 30.12 | blocks.16.attn1.to_out.0 |
+| 900 | fp8-channel-wo | 0.999557 | 0.999742 | 0.0298 | 30.53 | 33.14 | blocks.16.attn1.to_out.0 |
+| 500 | bf16 (floor) | 0.999999 | 0.999999 | 0.0017 | 55.30 | 55.60 | blocks.14.attn2.to_out.0 |
+| 500 | fp8-tensor-dyn | 0.999083 | 0.999485 | 0.0428 | 27.37 | 30.15 | blocks.19.attn1.to_out.0 |
+| 500 | fp8-tensor-wo | 0.999539 | 0.999741 | 0.0304 | 30.35 | 33.14 | blocks.16.attn1.to_out.0 |
+| 500 | fp8-channel-dyn | 0.999105 | 0.999490 | 0.0423 | 27.47 | 30.19 | blocks.17.attn1.to_out.0 |
+| 500 | fp8-channel-wo | 0.999553 | 0.999745 | 0.0299 | 30.49 | 33.20 | blocks.16.attn1.to_out.0 |
+| 100 | bf16 (floor) | 0.999999 | 0.999999 | 0.0017 | 55.32 | 55.60 | blocks.14.attn2.to_out.0 |
+| 100 | fp8-tensor-dyn | 0.999107 | 0.999493 | 0.0423 | 27.48 | 30.21 | blocks.16.attn1.to_out.0 |
+| 100 | fp8-tensor-wo | 0.999539 | 0.999742 | 0.0304 | 30.35 | 33.17 | blocks.16.attn1.to_out.0 |
+| 100 | fp8-channel-dyn | 0.999111 | 0.999497 | 0.0422 | 27.50 | 30.25 | blocks.17.attn1.to_out.0 |
+| 100 | fp8-channel-wo | 0.999554 | 0.999747 | 0.0299 | 30.50 | 33.24 | blocks.16.attn1.to_out.0 |
+
+Mean SNR of the production scheme (fp8-tensor-dyn) by linear type, t=500: attn1.to_q 30.3 ·
+to_k 31.0 · to_v 29.5 · to_out 28.7 · attn2.to_q 30.0 · to_k 29.9 · to_v 29.5 · to_out 31.1 ·
+ffn.net_in 30.0 · ffn.net_out 31.4 dB. The five worst cells at every timestep are
+`blocks.{14..19}.attn1.to_out.0` (self-attention output projections, cosine ≥ 0.99907).
+
+Reading: (1) the per-linear error is timestep-independent to the second decimal (the random
+inputs only change the adaLN modulation), (2) weight-only sits ~3 dB above dynamic — the
+activation quantization costs as much as the weights do, (3) per-channel weight scales buy
+nothing over per-tensor on these weights (≤ 0.1 dB), so the default `tensor` granularity is
+the right choice, (4) the cross-attention `to_k`/`to_v` the plan flagged are *not* the weak
+cells; the self-attention output projections of blocks 14–19 are, at ~27.4 dB. Caveat: the
+inputs are Gaussian, not denoising-trajectory activations (`--bundle`), so this measures the
+weights' quantization behaviour under typical-magnitude inputs, not outlier channels of real
+activations; the device latent / pixel metrics (Phase 2b) are the end-to-end answer.
+
+**How to inspect manually:** `python -c "import json; d=json.load(open('…/linear_error_t500.json')); print(d['summary'])"`;
+each `rows[i]` carries per-scheme `cosine / mse / max_abs / rel_l2 / snr_db` for one linear.
 
 ## Phase 2b — latent and pixel error on device
 
