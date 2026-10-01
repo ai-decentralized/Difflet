@@ -43,7 +43,9 @@ support "in a future Neuron release". Neuron 2.32.0 (Aug 2026) still ships the X
 stack is `libtorch-neuronx-lite` ("Lite", torch 2.10 through 2.13 builds, Alpha, proprietary
 licence), a vLLM-oriented runtime that vendors TorchNeuron's compiler and reserves the `neuron`
 backend name for the real package; AWS's own Wan 2.2 serving plugin runs on Lite's native lane, not
-on `backend="neuron"`.
+on `backend="neuron"`. Lite's own device layer has **no on-device eager compute** (alloc/copy/view
+kernels plus a CPU fallback; everything else must be inside a compiled graph), and its native-lane
+binaries are built for **Python 3.13 only**.
 
 **What Difflet has to replace.** The whole Trainium execution model, not just API spellings:
 the NxD `ModelBuilder.trace()` AOT lifecycle (`model.pt` + presharded weights + `nxd_model.initialize`),
@@ -101,7 +103,7 @@ native runtime need, and does it still ICE on FLUX CLIP" as the first question o
 | Aspect | TorchNeuron (native) | torch-neuronx 2.9 (what Difflet uses) |
 |---|---|---|
 | Device | `torch.device("neuron")` (PrivateUse1 renamed), `torch.accelerator` aware, autoloaded via the `torch.backends` entry point on torch >= 2.9 | `xla` lazy device; Difflet never names it, NxD traces on CPU |
-| Eager | Real eager dispatch of ATen ops to per-op NEFFs; "Adaptive Eager Execution" fuses consecutive ops ("op concatenation") and folds view/transpose prologues, async execution engine, caching allocator, CPU fallback for unregistered ops | Not applicable (lazy tensors) |
+| Eager | TorchNeuron proper: real eager dispatch of ATen ops to per-op NEFFs; "Adaptive Eager Execution" fuses consecutive ops ("op concatenation") and folds view/transpose prologues, async execution engine, caching allocator, CPU fallback for unregistered ops. **Lite: no on-device eager compute at all** (PrivateUse1 has alloc/copy/view kernels and a boxed CPU fallback; the vendored eager-op library is disabled), so every op meant for the device must sit inside a compiled graph | Not applicable (lazy tensors) |
 | Compile | `torch.compile(backend="neuron")`: Dynamo -> AOT autograd graphs -> FX passes (dynamic-shape check, collective legalisation, aliasing, functionalisation) -> torch-mlir -> StableHLO -> `neuronx-cc` -> one NEFF per graph segment; graph breaks supported | `neuronx_distributed.trace.ModelBuilder.trace()` -> HLO -> `neuronx-cc` -> bucketed NEFFs saved as `model.pt` |
 | Shapes | **Static only.** `DynamicShapeAnalysis` raises on any symbolic dim; a new shape is a Dynamo guard miss and a new NEFF | Explicit bucket list, router dispatches by input shape signature |
 | Distributed | `dist.init_process_group(backend="neuron")`; one device per process, device index = local rank; `new_group`, `init_device_mesh("neuron", ...)`, DTensor TP, DDP, FSDP; collectives compiled into graphs with SPMD replica groups from a mesh registry | Single process owns N cores; NxD `parallel_state`; XLA collectives inside the traced graph |
@@ -133,32 +135,69 @@ upsample/interpolate, pixel_shuffle, einsum, baddbmm, roll.** channels_last conv
 
 ### 1.2 The public derivative: `libtorch-neuronx-lite` and vLLM's two routes
 
-`libtorch-neuronx-lite` ("Custom torch-neuronx runtime for vLLM inference", Development Status
-Alpha, proprietary licence) is on the public index for torch 2.10, 2.11, 2.12 and 2.13 and is installed
-in this host's AMI vLLM venv (`torch 2.11.0 + torch-xla 2.11.0 + libtorch-neuronx-lite 2.11.0.1.0.1284 +
-neuronx-cc 2.27.5334.0 + nki 0.6.0`; note that this particular build predates the native lane). It
-renames PrivateUse1 to `neuron`, sets `NEURON_LOGICAL_NC_CONFIG=2`, requires torch-xla (NKI's torch
-glue still imports `torch_neuronx.pyhlo` / `xla_impl`), and has two compile lanes:
+`libtorch-neuronx-lite` ("Custom torch-neuronx runtime for vLLM inference with DI on Neuron", where DI
+is disaggregated inference; Development Status Alpha, proprietary licence) is on the public index for
+torch 2.10, 2.11, 2.12 and 2.13. It is one wheel carrying two stacks:
 
-- `neuron_libtorch` (default "XLA route"): Dynamo FX graph -> HLO via `torch_xla.core.xla_builder`
-  -> `neuronx-cc --framework XLA` -> NEFF executed by Lite's runtime; distributed backend `gloo` for
-  the control plane, collectives compiled into the NEFF from registered replica groups.
-- `neuron_native_lite` ("native route", `VLLM_NEURON_BACKEND=neuron_native`,
-  `NEURON_EXECUTION_BACKEND=native`): the **vendored TorchNeuron compiler** (`_compiler/neuron_dynamo_backend`,
-  torch-mlir, StableHLO) used compile-only, writing `module.mlir` and calling `neuronx-cc compile module.mlir
-  --framework XLA --target <trn2> --model-type transformer --lnc 2 -O1 --auto-cast=none`; execution by Lite;
-  distributed backend `cpu:gloo,neuron:neuron` (composite, dispatch by tensor device). Its code says the
-  `neuron` backend name "stays reserved for the real torch-neuronx package", and with
-  `TORCH_NEURONX_DYNAMO_BACKEND_ONLY=1` Lite delegates `torch.compile(backend="neuron")` to
-  `torch_neuronx.neuron_dynamo_backend`, i.e. acts purely as the runtime under TorchNeuron proper.
+- **Lite proper** (about 15 K Python LOC plus `libtorchneuron.so`): owns PrivateUse1 `neuron` with only
+  alloc/copy/view kernels and a boxed CPU fallback, and executes prebuilt NEFFs through
+  `torch.classes.neuron.Executor`. It has **no on-device eager compute**; `torch.neuron.synchronize`,
+  `device_count`, streams and memory APIs do not exist on it. It requires torch-xla of the same torch
+  version because its main compile lane traces FX with torch_xla lazy tensors on `PJRT_DEVICE=CPU`, and
+  it forces `NEURON_LOGICAL_NC_CONFIG=2`.
+- **A vendored copy of native TorchNeuron** in `_compiler/` (`aws-neuron/private-torch-neuronx@bb1d1dcc`,
+  version `0.1.0+main.bb1d1dcc`, `BUILD_TYPE = "DEV"`), loaded compile-only (its eager-op library,
+  streams and memory modules are stubbed out) and exposed as `libtorch_neuronx_lite.compiler_api`
+  (`fx_to_stablehlo`, `stablehlo_to_neff`, `fx_to_neff`). Its binaries are built for **Python 3.13 only**
+  (`build_python_tag: cp313` in the 2.11, 2.12 and 2.13 wheels of build 2651, despite the `py3-none`
+  wheel tag), which is why AWS's setup guide uses Python 3.13. The 2.11 build installed in this host's
+  AMI venv (`2.11.0.1.0.1284`, Python 3.12, with `torch 2.11.0 + torch-xla 2.11.0 + neuronx-cc 2.27.5334.0
+  + nki 0.6.0`) predates the native lane and has no `_compiler/` at all.
 
-The plugin reaches Lite through one compatibility module and uses **private** Lite APIs for the three
+Compile lanes (Dynamo backend names):
+
+- XLA lane, registered at import: `neuron_libtorch` / `vllm_neuron` (plus `*_graph_capture` variants
+  that only capture HLO for a later `parallel_compile`): FX -> HLO via `torch_xla.core.xla_builder` ->
+  `neuronx-cc compile graph.hlo --framework XLA --target <trn2>` as a subprocess -> NEFF executed by Lite;
+  collectives are `xm.*` ops inside the graph with replica groups from Lite's own `parallel.replica_mesh`,
+  declared with `active_mesh(mesh)` or `dist.new_group(..., pg_options={"xla_pg_options": {"mesh": [[0,1],[2,3]]}})`,
+  the same idiom Difflet already uses in `core/parallel_mesh.py`; distributed backend `gloo` for the
+  control plane.
+- Native lane, registered on demand by `compile.native_backend.register()`: `neuron_native_lite`.
+  It runs the vendored FX passes (static-shape check, aliasing), AOT autograd with the Neuron
+  decompositions, torch-mlir -> StableHLO, then the vendored C++ compile service writes `module.mlir`
+  and launches `neuronx-cc compile module.mlir --framework XLA --target <trn2> --model-type transformer
+  --lnc 2 -O1 --auto-cast=none` asynchronously; NEFFs land in `TORCH_NEURONX_NEFF_CACHE_DIR` and are
+  executed by Lite's `Executor`. Its only option is `compiler_args`, copied into the process-global
+  `NEURON_CC_FLAGS`. Replica groups come from the vendored `_compiler.distributed.mesh_registry`, which
+  infers the world partition from disjoint equal-width `new_group` calls (or is written directly, as the
+  Wan plugin does). The vendored code also registers a c10d backend named `neuron` at import. Selected in
+  vLLM with `VLLM_NEURON_BACKEND=neuron_native` and `NEURON_EXECUTION_BACKEND=native`; distributed
+  backend `cpu:gloo,neuron:neuron` (composite, dispatch by tensor device).
+
+Lite deliberately registers **no** backend named `neuron`: "the vendored compiler here is compile-only,
+and that name stays reserved for the real torch-neuronx package". With `TORCH_NEURONX_DYNAMO_BACKEND_ONLY=1`
+Lite imports no torch_xla and delegates `torch.compile(backend="neuron")` to an installed TorchNeuron,
+acting purely as its runtime.
+
+Facts from the vendored compiler that matter for a DiT: the built-in NKI SDPA kernel is used only when
+`L % 512 == 0 and S % 512 == 0 and D <= 128 and B*H <= 512` with no bias and no dropout (otherwise a manual
+softmax decomposition); there is no RoPE kernel; `_C.so` carries `torch.neuron._scaled_mm` and
+`fused_quantize_mx_scaled_mm` symbols that nothing exposes yet; a DTensor context-parallel ring-attention
+handler exists for SDPA (`Shard(2)`); an experimental dynamic-shape NKI kernel path
+(`TORCH_NEURONX_USE_DYNAMIC_NKI_KERNELS=1`, "compiles once at minimum tile size and is reused for all valid
+shapes") covers matmul with dynamic M/K and elementwise ops; on trn2 the compiler is always given
+`--internal-hlo2tensorizer-options=--experimental-unsafe-fp8e4m3fn-as-fp8e4m3` because "trn2 lacks native
+OCP fp8_e4m3fn support".
+
+The Wan plugin reaches Lite through one compatibility module and uses **private** Lite APIs for the three
 things Difflet would also need: device count (`_compiler.device_count()`), kernel registration
 (`_compiler.nki_op`), and replica-group registration (`_compiler.distributed.mesh_registry._MESH_REGISTRY`).
 
 This matters for Difflet in two ways: Lite is the only *public* artifact of the native stack today
 (installable without approval), and it shows the exact wiring AWS uses in production serving for a
-diffusion model. It is also Alpha, vLLM-shaped, and its private APIs are not a contract.
+diffusion model. It is also Alpha, vLLM-shaped, Python-3.13-only on its native lane, and its private
+APIs are not a contract.
 
 ### 1.3 AWS's own video DiT on this stack (vllm-omni-neuron, Wan 2.2)
 
@@ -313,10 +352,10 @@ migration:
 | 4 | NxD `parallel_state` + `torch.distributed.new_group(pg_options={"xla_pg_options": ...})` (`core/parallel_mesh.py`) | `init_device_mesh("neuron", (dp, cfg, cp, tp))` or `dist.new_group(ranks)` per axis from the backend-neutral `difflet.pipeline.parallel_mesh.MeshSpec` (already shared with the TPU backend); register every group's full world partition in the backend's mesh registry so compiled collectives are SPMD-identical across ranks | Honour the 4/8/16/32 replica-group alignment, contiguous-start constraints, and on `trn2.48xlarge` the torus-ring layout |
 | 5 | `ColumnParallelLinear` / `RowParallelLinear` / `ParallelEmbedding` from `neuronx_distributed.parallel_layers` (`ops_impl/linear.py`) | Difflet-owned TP linears on plain `nn.Linear` shards + `all_reduce` / `all_gather` on the TP group (or DTensor `ColwiseParallel`/`RowwiseParallel`); AWS's Wan DiT uses raw parameters plus hand-written collectives, with row-parallel biases pre-divided by TP | The TPU backend already has a 252-line `ops_impl/linear.py` of this shape to crib from |
 | 6 | NxD mappings (`gather_from_tensor_model_parallel_region_with_dim`, `reduce_scatter_to_sequence_parallel_region`, ...) and `xm.all_gather/reduce_scatter/all_to_all/collective_permute` (`ops_impl/collectives.py`, `ops_impl/attention.py`) | `torch.distributed` collectives inside compiled regions (`all_gather_into_tensor`, `reduce_scatter_tensor`, `all_reduce`, functional `all_gather_tensor`); `all_to_all_single` for Ulysses | `all_to_all_single` is tested in eager but was commented out of the compiled-collectives test; no `collective_permute`/`send`/`recv` at all; on Lite every device collective must be inside a compiled graph |
-| 7 | `difflet.ops.attention` -> nkilib `attention_cte[2]` with mask bounds; `ring_attention` -> nkilib `ring_attention_spmd_fwd[2]`; joint ring via partial softmax + `collective_permute` | Default: nkilib `attention_cte` via a custom-op wrapper (AWS's choice for the Wan DiT), with `F.scaled_dot_product_attention` (built-in NKI flash, head dim 128/192) as the fallback; `attention_const_max` for QK-RMSNorm models; ring: NKI ring kernel with `nki.collectives` inside (`ring_attention_spmd_fwd` or AWS's `ring_attention_const_max_fwd`), `gather_kv` all-gather as the fallback | Ring CP is the single riskiest feature: it needs in-kernel collectives or point-to-point, and the native c10d backend has no send/recv; the joint-MMDiT ring (`collective_permute` + partial-softmax merge) needs re-expression as an in-kernel collective or an all-gather |
+| 7 | `difflet.ops.attention` -> nkilib `attention_cte[2]` with mask bounds; `ring_attention` -> nkilib `ring_attention_spmd_fwd[2]`; joint ring via partial softmax + `collective_permute` | Default: nkilib `attention_cte` via a custom-op wrapper (AWS's choice for the Wan DiT), with `F.scaled_dot_product_attention` (built-in NKI flash, head dim 128/192) as the fallback; `attention_const_max` for QK-RMSNorm models; ring: NKI ring kernel with `nki.collectives` inside (`ring_attention_spmd_fwd` or AWS's `ring_attention_const_max_fwd`), `gather_kv` all-gather as the fallback | Ring CP is the single riskiest feature: it needs in-kernel collectives or point-to-point, and the native c10d backend has no send/recv; the joint-MMDiT ring (`collective_permute` + partial-softmax merge) needs re-expression as an in-kernel collective or an all-gather. The built-in SDPA kernel only engages for token counts that are multiples of 512, so DiT attention should go through `attention_cte` (pad only where needed); TorchNeuron proper also ships a DTensor context-parallel ring handler for SDPA that is worth evaluating |
 | 8 | `torch_neuronx.xla_impl.ops.RmsNorm` custom call; `AwsNeuronModuleMarker*` HLO markers | `torch.nn.functional.rms_norm` (fused `aten::_fused_rms_norm` on torch >= 2.9) / plain `nn.RMSNorm`; markers dropped (they exist to steer the HLO compiler; FX graphs have module scopes) | `layers/normalization.py:34` and `models/flux/modeling_flux.py:76-79` must stop importing the marker |
 | 9 | 8 MX FP8 NKI kernels via `TorchXlaKernel` (`nki_kernels/mx.py`, `ops_impl/mx.py`); `split_along_dim0_kernel` | Same kernel bodies (NKI 0.6 `nki.*` namespace), registered as custom ops (`@nki_op` around a Python function that launches the kernel) with fake shape functions; call sites unchanged | Kernels must compile under NKI 0.6 (the venv has 0.5); the NKI library treats every MX kernel as Trainium3-only, so re-verify the trn2 MX path early; `neuronxcc.nki` legacy namespace is on the way out |
-| 10 | FP8 PTQ via NxD `QuantizedColumnParallelLinear`/`QuantizedRowParallelLinear`, `quantize_traced_model_`, `--experimental-unsafe-fp8e4m3fn-as-fp8e4m3` (`core/quant.py`, `wan/backbone.py`) | No `_scaled_mm` in the native suite; options are an NKI FP8 linear kernel registered as a custom op (nkilib `output_projection_cte`/`mlp`/`qkv` accept FP8 ROW/STATIC inputs; `rmsnorm_quant_kernel` produces the packed `[B,S,H+4]` activations), or weight-only FP8 storage with bf16 compute as a stop-gap | On trn2 only non-OCP e4m3 (max 240) exists; AWS's Wan 2.2 FP8 path is Trainium3-only and unvalidated; the FP8 verification plan in `docs/verification/2026-09-29-ptq-fp8-wan-plan.md` stays on the XLA path and on native becomes a kernel project |
+| 10 | FP8 PTQ via NxD `QuantizedColumnParallelLinear`/`QuantizedRowParallelLinear`, `quantize_traced_model_`, `--experimental-unsafe-fp8e4m3fn-as-fp8e4m3` (`core/quant.py`, `wan/backbone.py`) | No `_scaled_mm` in the native suite; options are an NKI FP8 linear kernel registered as a custom op (nkilib `output_projection_cte`/`mlp`/`qkv` accept FP8 ROW/STATIC inputs; `rmsnorm_quant_kernel` produces the packed `[B,S,H+4]` activations), or weight-only FP8 storage with bf16 compute as a stop-gap | On trn2 only non-OCP e4m3 (max 240) exists; AWS's Wan 2.2 FP8 path is Trainium3-only and unvalidated; the vendored compiler binary carries `torch.neuron._scaled_mm` symbols that are not exposed yet (ask AWS); the FP8 verification plan in `docs/verification/2026-09-29-ptq-fp8-wan-plan.md` stays on the XLA path and on native becomes a kernel project |
 | 11 | NxDI text encoders: `NeuronLlamaForCausalLM` (HunyuanVideo), `NeuronQwen2VLTextForCausalLM` / `NeuronQwen3VLTextForCausalLM` (Qwen-Image), forked validation utils (`utils/accuracy.py`, `utils/benchmark.py`) | HF `transformers` models run compiled on `neuron`, TP via Difflet TP linears or DTensor; AWS TP-shards UMT5 across all world ranks with the rank passed as a tensor so one NEFF serves every rank | Second-largest chunk of work; interim option is CPU text encoding |
 | 12 | TeaCache adaptive probe = separate probe NEFF with `prev_mod` as aliased NEFF state (`core/teacache_probe.py`, `*/teacache_probe_fused.py`, CPU shadows) | Compute the probe signal inside the compiled DiT (extra output) and decide on host in Python (AWS's cache-dit integration does the same with a host `.item()` per step); eager makes the 51 ms probe-dispatch floor and the CPU shadow unnecessary | Simplification; the cache-key exclusions for runtime-only TeaCache modes stay |
 | 13 | LTX-2 / HV1.5 segmented block streaming re-execs a worker per block (`ltx_2/segmented.py`, `hunyuan_video/segmented15.py`) | Stream blocks to device in eager, compile per block | Simplification |
@@ -352,7 +391,8 @@ Put a single runtime-adapter module (`backends/neuron/runtime_api.py`, the role 
 `platform_target()`, `neff_cache_dir()`. Two implementations: TorchNeuron proper (`"neuron"`,
 `init_process_group("neuron")`, `torch_neuronx.nki_op`, `torch_neuronx.distributed.mesh_registry`) and
 Lite (`neuron_native_lite`, `"cpu:gloo,neuron:neuron"`, `libtorch_neuronx_lite._compiler.nki_op`,
-`_MESH_REGISTRY`). Everything else in the backend talks to the adapter only.
+`_MESH_REGISTRY`; on Lite's XLA lane the `xla_pg_options={"mesh": ...}` idiom Difflet already uses).
+Everything else in the backend talks to the adapter only.
 
 Auto-detection must change: `registry._auto_detect_backend()` returns `trainium` whenever
 `torch_neuronx` is importable, which is also true for the native package. Detect the native stack by
@@ -520,7 +560,9 @@ methodology is there to keep "ordinary bf16 noise" from being misread as a defec
 SSIM gate is there because per-step noise compounds over the denoising loop.
 
 **Operations and dependencies.** Two venvs during the transition (the native package replaces the
-`torch_neuronx` namespace), Python >= 3.11 (3.12 for `nki-library`), torch 2.10+ with
+`torch_neuronx` namespace), Python >= 3.11 (3.12 for `nki-library`; 3.13 for Lite's native lane as
+shipped, which on this 3.12-only host means installing a 3.13 interpreter or using AWS's py313 DLC),
+torch 2.10+ with
 diffusers/transformers re-validation, a compiler version change (section 8), a full compile-cache
 rebuild, a one-process-per-core process model that changes how `difflet serve` and the DP router allocate
 cores, and an upstream that is either closed beta (TorchNeuron) or Alpha with private APIs (Lite) and whose
@@ -539,7 +581,7 @@ Phase gates are hard: do not start the next phase until the exit criteria are me
 
 | Phase | Scope | Exit criteria | Effort (one engineer, rough) |
 |---|---|---|---|
-| **0. Access and spike** | Request the native `torch-neuronx` beta wheel from the account team; meanwhile build the second venv on the public stack (Python 3.12, torch 2.11-2.13, `libtorch-neuronx-lite` native lane, `nki 0.6`, `nki-library`, `neuronx-cc 2.27.5334.0`) mirroring vllm-omni-neuron's setup guide; port the tiny-Wan PTQ probe model (`scripts/ptq_fp8_device_probe.py`) to `neuron` eager and to `torch.compile`; TP=2 and TP=4 process groups; one `attention_cte` custom op, one RMSNorm, one compiled all_gather, one MX kernel under `@nki_op`; a conv3d/GroupNorm/upsample VAE block; measure compile time and per-step latency vs the XLA artifact; confirm which `neuronx-cc` the runtime needs and whether it compiles the FLUX CLIP encoder | A written spike report: op coverage hits, compile times, step latency, collective constraints observed, compiler version decision, runtime decision (Lite vs beta), go/no-go | 2-3 weeks |
+| **0. Access and spike** | Request the native `torch-neuronx` beta wheel from the account team; meanwhile build the second venv on the public stack (Python 3.13, because Lite's native-lane binaries are cp313-only, or AWS's DLC `pytorch-inference-vllm-neuronx:0.24.0.1.1.0-neuronx-py313-sdk2.32.0-ubuntu24.04`; torch 2.11-2.13, `libtorch-neuronx-lite` native lane, `nki 0.6`, `nki-library`, `neuronx-cc 2.27.5334.0`) mirroring vllm-omni-neuron's setup guide; port the tiny-Wan PTQ probe model (`scripts/ptq_fp8_device_probe.py`) to `neuron` eager and to `torch.compile`; TP=2 and TP=4 process groups; one `attention_cte` custom op, one RMSNorm, one compiled all_gather, one MX kernel under `@nki_op`; a conv3d/GroupNorm/upsample VAE block; measure compile time and per-step latency vs the XLA artifact; confirm which `neuronx-cc` the runtime needs and whether it compiles the FLUX CLIP encoder | A written spike report: op coverage hits, compile times, step latency, collective constraints observed, compiler version decision, runtime decision (Lite vs beta), go/no-go | 2-3 weeks |
 | **1. Backend scaffold** | `backends/neuron/` runtime, registry entry and detection, runtime adapter (Lite + TorchNeuron implementations), launcher, mesh/groups with replica-group registration, lifecycle base class, manifest/NEFF-cache integration, cache-key changes, env lock | `DIFFLET_BACKEND=neuron` runs a CPU-built dummy module on 4 ranks through compile/load/forward with a manifest; unit tests | 2 weeks |
 | **2. Ops and kernels** | `ops_impl/*` per section 4.4; TP linears; attention custom op + SDPA fallback; `gather_kv` CP; Ulysses; MX kernels and `split_along_dim0` as custom ops; NKI simulator tests; op parity tier 2 | Tier 2 green for all `difflet.ops` symbols at TP=1/2/4 | 4-6 weeks |
 | **3. Wan 2.1 end to end** | Wan backbone, UMT5 text encoder (TP-sharded, compiled), VAE (rank 0, `unet-inference` flags, tiling without `fullgraph`); multi-shape; CFG-parallel; TeaCache cadence + adaptive; `difflet generate` and `difflet serve` on the native worker; tiers 3-5, 8 for Wan | Wan tiers 3-5 pass; serving smoke passes; per-step latency within band | 4-6 weeks |
@@ -612,8 +654,9 @@ and `neuronx_cc_wrapper` tests; Lite's `CompilerSubprocess.find_neuronx_cc()`), 
    over unchanged; `--lnc`/`--target` are derived automatically; the `--internal-*` tensorizer options
    should be re-justified one by one on the new front end.
 4. **Python.** `neuronx-cc 2.27.5334.0`, `2.26.6360.0` and `2.25.3371.0` wheels are cp311/cp312/cp313 only;
-   the Difflet venv is 3.12, so no interpreter change on this host, but the repo's "Python 3.10+" claim
-   must become 3.11+ (3.12 with `nki-library`), and the hardcoded `/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference`
+   the Difflet venv is 3.12, which satisfies the compiler and NKI; Lite's native lane as shipped
+   additionally needs Python 3.13 (its vendored compiler binaries are cp313). The repo's "Python 3.10+"
+   claim must become 3.11+ (3.12 with `nki-library`), and the hardcoded `/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference`
    paths in `benchmark/models.py`, `benchmark/step_realloop.py`, `tests/numerical/test_mx_ops_neff.py`,
    `scripts/ptq_fp8_device_probe.py` should be retired at the same time.
 
@@ -631,7 +674,7 @@ legacy `neuronxcc.nki` namespace used by some research scripts is being retired.
 import torch, torch_neuronx            # explicit import only needed on torch < 2.9
 x = torch.randn(4096, 4096, device="neuron")
 y = (x @ x.T).softmax(-1)              # eager: per-op NEFFs, fused by adaptive eager
-torch.neuron.synchronize()             # the mark_step analogue: wait for queued ops + compiles
+torch.neuron.synchronize()             # the mark_step analogue: wait for queued ops + compiles (TorchNeuron proper only; absent on Lite)
 
 # compile (static shapes only)
 f = torch.compile(model, backend="neuron", fullgraph=True, dynamic=False,
@@ -681,7 +724,9 @@ Environment variables seen in the suite, Lite and the Wan plugin: `NEURON_CC_FLA
 `TORCH_NEURONX_SPMD_DISABLE`, `TORCH_NEURONX_DISABLE_FALLBACK_EXECUTION`,
 `TORCH_NEURONX_DYNAMO_DISABLE_CPU_AUTOCOPY`, `TORCH_NEURONX_METRICS_ENABLED`, `NKI_COMPILE_CACHE_URL`,
 `NKI_SIMULATOR`, `NKILIB_USE_TORCH_REF`, `NEURON_LIBTORCH_CACHE_ROOT`, `NEURON_LIBTORCH_COMPILATION_TIMEOUT`,
-`NEURON_LIBTORCH_CPU_MODE`.
+`NEURON_LIBTORCH_CPU_MODE`, `NEURON_LIBTORCH_CPU_COMPILE`, `NEURON_LIBTORCH_REMOTE_CACHE`,
+`LITE_DISABLE_VENDORED_COMPILER`, `TORCH_NEURONX_ENABLE_NKI_SDPA`, `TORCH_NEURONX_COMPLEX_DECOMPOSE`,
+`TORCH_NEURONX_USE_DYNAMIC_NKI_KERNELS`, `TORCH_NEURONX_INT64_MODE`.
 
 ## Appendix B. References
 
