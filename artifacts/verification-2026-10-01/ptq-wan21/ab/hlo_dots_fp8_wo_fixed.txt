@@ -1,0 +1,11 @@
+=== fp8-wo-fixed MODULE_32ad40a41217be5fec9e+77b143b0: 687 computations, 29111 instructions
+  element types: {'F32': 14365, 'BF16': 11063, 'S64': 1320, 'TUPLE': 682, 'PRED': 640, 'S32': 481, 'F8E4M3FN': 400, 'U32': 160}
+  dot (operand types -> result):
+      406  ('BF16', 'BF16') -> BF16
+  convert (src -> dst):
+     2083  BF16 -> F32
+     1202  F32 -> BF16
+      400  F8E4M3FN -> BF16
+      160  S32 -> S64
+      160  S64 -> U32
+       40  S64 -> F32

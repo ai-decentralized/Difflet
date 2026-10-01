@@ -292,8 +292,12 @@ VAE decode of the *same* tensor (`ab/frames_bf16_neuronvae_0_4_8.png`) is sharp 
 frame 0. **The frame-2…8 degradation is the compiled Neuron VAE decoder at 480×832×9, not
 the DiT and not quantization** — a pre-existing bf16 pipeline issue outside this campaign's
 scope (`--host-vae` is the documented workaround; recorded as a follow-up, not fixed here).
-The fp8-vs-bf16 host-VAE comparison is in `ab/compare_hostvae_fp8_vs_bf16.json` and
-`ab/frames_hostvae_bf16_vs_fp8.png`.
+On the host-decoded clips (`ab/compare_hostvae_fp8_vs_bf16.json`,
+`ab/frames_hostvae_bf16_vs_fp8.png`), where every frame carries content, **fp8 vs bf16 is
+PSNR 32.70 dB, SSIM 0.9515, LPIPS 0.0381**, pixel cosine 0.99825 — and the two clips are the
+same clip to the eye in all nine frames; the 8×-amplified difference image sits on the fox's
+fur edges and eye highlights. (These are the Phase-0-era fp8 layers; the pre-VAE latents of
+the fixed arms are compared in the re-measured table below.)
 
 ## Phase 3 — performance
 
@@ -361,7 +365,80 @@ converts vs 1683 in the bf16 arm: fewer casts because the tensors already *are* 
 (bias cast, `dtype`/`dequantized_dtype` set); pinned by a unit test. The fp8 arms are
 re-measured below with the fix.
 
-_Benchmark-harness files and the re-measured fp8 arms: see below._
+### Re-measured fp8 arms after bug 5 (final numbers)
+
+Same commands with the fixed layers (`42ae642`) and the schema-keyed artifacts (`c3357c6`):
+new transformer artifacts / store entries (`…transformer/9c7576a9fdbb564b`, store
+`…qf8e4m3__tp4__62aade90b95a3378`), `--only fp8 --skip-quantize`, two runs each with the
+page-cache drop before run 0; the bf16 arm is unchanged (its keys and NEFF are untouched, and
+its numbers above stand). Dirs `ab-fixed/` (dynamic) and `ab-wo-fixed/` (weight-only); gate
+`gate_before_ab_fixed.txt`.
+
+| arm | compile wall s (transformer priority HLO s) | e2e cold s | e2e warm s | transformer load cold / warm s | DiT step ms, mean / median (n=19), run 0 · run 1 |
+|---|---:|---:|---:|---:|---:|
+| bf16 (unchanged) | 6711.9 (82.9) | 412.7 | 87.1 | 236.0 / 9.9 | **573.2** / 573.0 · 573.7 / 573.6 |
+| fp8-tensor-dyn, fixed | 505.0 (99.9) | 307.5 | **85.2** | 128.0 / 8.2 | **656.7** / 656.6 · 656.9 / 656.8 |
+| fp8-tensor-wo, fixed | 354.9 (79.3) | 305.5 | **85.2** | 127.9 / 8.0 | **563.0** / 562.9 · 563.0 / 562.7 |
+| fp8-tensor-dyn, before fix 5 | 590.1 (161.0) | 317.4 | 94.7 | 132.0 / 11.7 | 822.1 / 821.9 · 822.0 / 821.7 |
+| fp8-tensor-wo, before fix 5 | 444.6 (151.5) | 312.3 | 92.4 | 131.7 / — | 732.8 / 732.7 · 733.0 / 732.9 |
+
+Fixed-arm HLO (`ab/hlo_dots_fp8_dyn_fixed.txt`, `MODULE_f1d9baa9d8bbf1aadd37+a0010e47`): still
+400 `F8E4M3FN × F8E4M3FN` dots and the 400 + 400 quantize/dequantize converts, but 9,463 bf16
+instructions instead of 977 — the block runs in bf16 again, and the priority-HLO compile
+drops from 161 s to 100 s.
+
+Fixed weight-only HLO (`ab/hlo_dots_fp8_wo_fixed.txt`, `MODULE_32ad40a41217be5fec9e+77b143b0`):
+406 `BF16 × BF16` dots — the same dot set as the bf16 arm — plus 400 `F8E4M3FN → BF16` weight
+casts, no fp32 dots; its priority-HLO compile (79 s) matches bf16's (83 s).
+
+**A3 verdict (final).** With fp8 × fp8 dots (per-tensor dynamic activations) the DiT step is
+**1.15× bf16** (656.7 vs 573.2 ms; 1.43× before fix 5): the fp8 dot lowering plus the 400
+activation-quantize and 400 dequantize passes over `[1, 4680, 5120]`-class tensors cost more
+than the bf16 matmul — neuronx-cc 2.26 gives no tensor-engine FP8 win on trn2 for this graph.
+**Weight-only fp8 runs the step at 563.0 ms, 1.8 % *faster* than bf16**, i.e. per-step parity
+with half the transformer bytes: the fp8 → bf16 weight cast is cheaper than reading twice the
+bytes from HBM. Both fp8 modes give **−46 % cold transformer load (128 vs 236 s), −25 % cold e2e
+(305–308 vs 413 s) and warm e2e at parity or better (85.2 vs 87.1 s)**. Recommendation for
+users today: `--quant fp8 --quant-act none`; the dynamic path is the hook for an NKI FP8
+matmul kernel (the follow-up that could turn the fp8 dot into a per-step win, out of scope by
+design).
+
+**Quality of the fixed arms vs bf16** (run 1 pairs, Neuron VAE decode;
+`ab-fixed/compare_fp8_vs_bf16_run1.json`, `ab-wo-fixed/compare_fp8_vs_bf16_run1.json`; both
+arms remain bit-deterministic run to run):
+
+| pair | PSNR dB | SSIM | LPIPS | latent cosine | latent MSE | latent SNR dB |
+|---|---:|---:|---:|---:|---:|---:|
+| fp8-dyn (fixed) vs bf16 | 32.97 | 0.8876 | 0.1285 | 0.975817 | 2.104e-02 | 13.20 |
+| fp8-wo (fixed) vs bf16 | 32.61 | 0.8812 | 0.1374 | 0.973650 | 2.293e-02 | 12.83 |
+| fp8-dyn (before fix 5) vs bf16 | 36.50 | 0.9269 | 0.0789 | 0.997457 | 2.240e-03 | 22.93 |
+
+Pairwise latent similarity of every run-1 arm (`latent_matrix_run1.txt`, cosine / SNR):
+
+| | bf16 | dyn-pre | wo-pre | dyn-fixed | wo-fixed |
+|---|---|---|---|---|---|
+| bf16 | — | 0.99746 / 22.9 | 0.97486 / 13.0 | 0.97582 / 13.2 | 0.97365 / 12.8 |
+| dyn-pre | | — | 0.97770 / 13.6 | 0.97840 / 13.7 | 0.97597 / 13.2 |
+| wo-pre | | | — | 0.99731 / 22.7 | 0.99850 / 25.0 |
+| dyn-fixed | | | | — | 0.99822 / 24.5 |
+
+Reading: the three arms that quantize only the weights or run the fixed layers (wo-pre,
+dyn-fixed, wo-fixed) agree with each other at 22–25 dB — three independent compiles, two
+different forwards (NxD's weight-only and Difflet's dynamic) — and all sit ~13 dB from the
+bf16 run. **That 13 dB (PSNR ~32.6–33 dB, SSIM ~0.88, LPIPS ~0.13 after the Neuron VAE) is
+the measured fp8 weight-quantization effect over 20 steps at this shape**; dynamic activation
+quantization adds little on top of it (dyn-fixed vs wo-fixed 24.5 dB). The pre-fix dynamic
+arm is the outlier: it matched bf16 at 22.9 dB while differing from the three others by
+13.6 dB — its fp32-typed block (fix 5) ran the attention core and FFN intermediates in fp32,
+a different numerics regime from every other arm. Why that regime lands *closer* to the bf16
+run than the bf16-regime fp8 arms do is not explained by this campaign's data; the honest
+reading is that the bf16 run is itself ~13 dB from the fp32 truth over 20 steps, so that the
+distance between two arms measures their numerics regimes as much as their quantization
+error. A CPU reference is the way to attribute it (full-forward numerics below; a 20-step CPU
+fp32 / fp8 loop at this shape is the follow-up). Per-step and per-linear, the device fp8 math
+is verified against the CPU reference (Phase 0, fixed-layer probe below).
+
+_Benchmark-harness files: see below._
 
 ## Phase 4 — serving
 

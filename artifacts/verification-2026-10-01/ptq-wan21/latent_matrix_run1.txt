@@ -1,0 +1,12 @@
+bf16       mean=-0.0687 std=0.6598 absmax=3.545
+dyn-pre    mean=-0.0727 std=0.6556 absmax=3.634
+wo-pre     mean=-0.0707 std=0.6422 absmax=3.531
+dyn-fixed  mean=-0.0690 std=0.6474 absmax=3.487
+wo-fixed   mean=-0.0695 std=0.6489 absmax=3.509
+
+                        bf16           dyn-pre            wo-pre         dyn-fixed          wo-fixed
+bf16         1.00000/296.4dB   0.99746/ 22.9dB   0.97486/ 13.0dB   0.97582/ 13.2dB   0.97365/ 12.8dB
+dyn-pre      0.99746/ 22.9dB   1.00000/296.4dB   0.97770/ 13.6dB   0.97840/ 13.7dB   0.97597/ 13.2dB
+wo-pre       0.97486/ 12.8dB   0.97770/ 13.4dB   1.00000/296.2dB   0.99731/ 22.6dB   0.99850/ 25.0dB
+dyn-fixed    0.97582/ 13.0dB   0.97840/ 13.6dB   0.99731/ 22.7dB   1.00000/296.3dB   0.99822/ 24.5dB
+wo-fixed     0.97365/ 12.7dB   0.97597/ 13.1dB   0.99850/ 25.1dB   0.99822/ 24.5dB   1.00000/296.3dB

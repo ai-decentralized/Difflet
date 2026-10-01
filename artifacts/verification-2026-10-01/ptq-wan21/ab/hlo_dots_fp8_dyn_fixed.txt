@@ -1,0 +1,13 @@
+=== fp8-dyn-fixed MODULE_f1d9baa9d8bbf1aadd37+a0010e47: 1087 computations, 36711 instructions
+  element types: {'F32': 21965, 'BF16': 9463, 'F8E4M3FN': 2000, 'S64': 1320, 'TUPLE': 682, 'PRED': 640, 'S32': 481, 'U32': 160}
+  dot (operand types -> result):
+      400  ('F8E4M3FN', 'F8E4M3FN') -> F8E4M3FN
+        6  ('BF16', 'BF16') -> BF16
+  convert (src -> dst):
+     2083  BF16 -> F32
+     1202  F32 -> BF16
+      400  F32 -> F8E4M3FN
+      400  F8E4M3FN -> F32
+      160  S32 -> S64
+      160  S64 -> U32
+       40  S64 -> F32
