@@ -85,7 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--stage", choices=["all", "cpu", "device"], default="all")
     p.add_argument("--height", type=int, default=64)
     p.add_argument("--width", type=int, default=64)
-    p.add_argument("--text-seq-len", type=int, default=16)
+    p.add_argument("--text-seq-len", type=int, default=512, help="traced text length (production default 512)")
     p.add_argument("--quant-granularity", choices=["tensor", "channel"], default="tensor")
     p.add_argument("--quant-act", choices=["dynamic", "none"], default="dynamic")
     p.add_argument("--only", choices=["bf16", "fp8", "both"], default="both")
@@ -170,6 +170,9 @@ def _device_arm(name, transformer_dir, args, inputs, spec, cache_dir):
         height=args.height, width=args.width, num_frames=1, batch_size=1,
         quant=spec, quant_checkpoint_dir=quant_dir,
     )
+    # The backbone traces its text input at config.text_seq_len (512 unless
+    # set); the loaded graph rejects any other shape, so trace at the probe's.
+    config.text_seq_len = args.text_seq_len
     app = NeuronWanBackboneApplication(model_path=str(transformer_dir), config=config)
     record["compiler_args"] = app.get_compiler_args()
     compiled_dir = args.work_dir / f"compiled_{name}"
@@ -191,7 +194,10 @@ def _device_arm(name, transformer_dir, args, inputs, spec, cache_dir):
         samples.append((time.perf_counter() - started) * 1000.0)
     record["forward_ms"] = {"n": len(samples), "mean": statistics.fmean(samples),
                             "median": statistics.median(samples), "min": min(samples), "max": max(samples)}
-    return output.detach().cpu().float(), record
+    output = output.detach().cpu().float()
+    torch.save(output, args.work_dir / f"device_{name}_output.pt")  # kept for NaN / pattern inspection
+    record["output_nonfinite"] = int((~torch.isfinite(output)).sum())
+    return output, record
 
 
 def stage_device(args) -> int:
