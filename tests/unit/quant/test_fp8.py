@@ -8,6 +8,20 @@ import torch
 from difflet.quant import fp8
 
 
+def test_fp8_range_is_the_trainium_e4m3_range():
+    """Pins the all-NaN weight-only probe of 2026-10-01 on trn2: e4m3fn encodings
+    above 240 decode as inf/NaN under the e4m3fn-as-e4m3 compiler flag, so the
+    absmax law must saturate at 240, never at torch's 448."""
+    assert fp8.FP8_MAX == 240.0
+    assert fp8.FP8_MAX < torch.finfo(torch.float8_e4m3fn).max
+    w = torch.randn(32, 32) * 5.0
+    for granularity in ("tensor", "channel"):
+        q, _ = fp8.quantize_weight(w, granularity)
+        assert q.float().abs().max() <= 240.0
+    q, _ = fp8.quantize_activation(torch.randn(2, 9, 16) * 50.0)
+    assert q.float().abs().max() <= 240.0
+
+
 def test_weight_scale_shapes_and_absmax_law():
     w = torch.randn(6, 8) * 3.0
     per_tensor = fp8.weight_scale(w, "tensor")
@@ -28,7 +42,7 @@ def test_quantize_weight_rounds_within_e4m3_precision():
         back = fp8.dequantize(q, scale)
         rel = ((back - w).abs() / w.abs()).max().item()
         assert rel <= 2**-4 + 1e-6, rel  # 3 mantissa bits -> half-ulp relative error 2^-4
-        # The absmax element maps exactly onto +-448 * scale.
+        # The absmax element maps exactly onto +-FP8_MAX * scale.
         assert torch.isclose(back.abs().max(), w.abs().max(), rtol=1e-6, atol=0)
 
 

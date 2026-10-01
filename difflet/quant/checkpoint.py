@@ -62,11 +62,14 @@ def quantize_state_dict(
             out[key] = value
             if torch.is_tensor(value):
                 bytes_after += value.numel() * value.element_size()
+    from difflet.quant.fp8 import FP8_MAX
+
     report = {
         "num_quantized": len(quantized),
         "quantized": quantized,
         "bytes_before": bytes_before,
         "bytes_after": bytes_after,
+        "fp8_max": FP8_MAX,
     }
     return out, report
 

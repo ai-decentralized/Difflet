@@ -114,8 +114,13 @@ class QuantSpec:
         The activation mode is a graph-time choice, so one checkpoint serves
         both ``dynamic`` and ``none``.
         """
+        from difflet.quant.fp8 import FP8_MAX
+
         return {
             "format": self.format,
+            # The saturation range is baked into the stored weights: a checkpoint
+            # quantized against 448 (torch's e4m3fn max) is NaN on Trainium.
+            "fp8_max": FP8_MAX,
             "weight_granularity": self.weight_granularity,
             "targets": list(self.targets),
         }

@@ -83,6 +83,7 @@ def test_checkpoint_identity_ignores_activation_mode():
     dyn = QuantSpec(activation="dynamic")
     wo = QuantSpec(activation="none")
     assert dyn.checkpoint_identity() == wo.checkpoint_identity()
+    assert dyn.checkpoint_identity()["fp8_max"] == 240.0  # Trainium e4m3 range, in the hash
     assert dyn.checkpoint_label() == "fp8-tensor"
     assert dyn.checkpoint_hash("/a") == wo.checkpoint_hash("/a")
     assert dyn.checkpoint_hash("/a") != dyn.checkpoint_hash("/b")

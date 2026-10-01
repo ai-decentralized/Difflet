@@ -1,11 +1,19 @@
 """FP8 e4m3 absmax quantization math (pure torch, CPU-runnable).
 
-Same law as FastVideo ``fp8_config.py``: ``scale = amax / 448`` with a floor so
-an all-zero tensor divides cleanly; values are clamped to the e4m3fn range and
-rounded to nearest-even by the dtype cast. Per-channel means one scale per
-output row of a ``[out, in]`` weight. Activation quantization is dynamic:
-one absmax scale over the whole activation tensor per call (FastVideo's
-``granularity="tensor"`` default).
+Same law as FastVideo ``fp8_config.py`` — ``scale = amax / FP8_MAX`` with a
+floor so an all-zero tensor divides cleanly; values are clamped to the
+representable range and rounded to nearest-even by the dtype cast — except for
+the range itself. Tensors are stored as ``torch.float8_e4m3fn`` (max 448), but
+Trainium's native fp8 e4m3 tops out at **240** and neuronx-cc's
+``--experimental-unsafe-fp8e4m3fn-as-fp8e4m3`` reinterprets the e4m3fn bit
+patterns as that format: every encoding above 240 decodes as inf/NaN on the
+device (trn2, 2026-10-01: a weight-only tiny probe returned all-NaN with 44.7 %
+of its elements above 240). NxD's own quantizers clamp to
+``DtypeBound.F8E4M3_MAX = 240`` for the same reason; so does this module, and
+the CPU reference therefore matches the device bit-for-bit in value.
+Per-channel means one scale per output row of a ``[out, in]`` weight.
+Activation quantization is dynamic: one absmax scale over the whole activation
+tensor per call (FastVideo's ``granularity="tensor"`` default).
 """
 
 from __future__ import annotations
@@ -13,7 +21,8 @@ from __future__ import annotations
 import torch
 
 FP8_DTYPE = torch.float8_e4m3fn
-FP8_MAX = float(torch.finfo(FP8_DTYPE).max)  # 448.0
+# Trainium fp8 e4m3 range (NxD DtypeBound.F8E4M3_MAX), not torch.finfo(e4m3fn).max == 448.
+FP8_MAX = 240.0
 # FastVideo FP8Config.FP8_MIN_SCALE: keeps scale finite/non-zero for zero tensors.
 FP8_MIN_SCALE = 1.0 / (FP8_MAX * 512.0)
 
