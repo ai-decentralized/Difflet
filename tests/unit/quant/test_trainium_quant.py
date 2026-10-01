@@ -107,16 +107,44 @@ def fake_nxd(monkeypatch):
     cfg.get_default_per_channel_custom_qconfig_dict = lambda: {"quantization_type": "per_channel", "default": True}
     quantize = types.ModuleType("neuronx_distributed.quantization.quantize")
     quantize.convert = convert
+
+    class ColumnParallelLinear:  # the float layers convert() maps from
+        pass
+
+    class RowParallelLinear:
+        pass
+
+    class QuantizedColumnParallel:  # NxD's quantized forms Difflet subclasses
+        pass
+
+    class QuantizedRowParallel:
+        pass
+
+    layers = types.ModuleType("neuronx_distributed.parallel_layers.layers")
+    layers.ColumnParallelLinear = ColumnParallelLinear
+    layers.RowParallelLinear = RowParallelLinear
+    q_layers = types.ModuleType("neuronx_distributed.quantization.quantization_layers")
+    q_layers.QuantizedColumnParallel = QuantizedColumnParallel
+    q_layers.QuantizedRowParallel = QuantizedRowParallel
+    q_layers._DEFAULT_CUSTOM_QCONFIG_DICT = {}
     root = types.ModuleType("neuronx_distributed")
     pkg = types.ModuleType("neuronx_distributed.quantization")
+    pkg.quantization_layers = q_layers
+    parallel = types.ModuleType("neuronx_distributed.parallel_layers")
     for name, module in {
         "neuronx_distributed": root,
         "neuronx_distributed.quantization": pkg,
         "neuronx_distributed.quantization.quantization_config": cfg,
         "neuronx_distributed.quantization.quantize": quantize,
+        "neuronx_distributed.quantization.quantization_layers": q_layers,
+        "neuronx_distributed.parallel_layers": parallel,
+        "neuronx_distributed.parallel_layers.layers": layers,
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
-    return SimpleNamespace(calls=calls, types=(QuantizationType, QuantizedDtype, ActivationQuantizationType))
+    monkeypatch.setattr(tq, "_MAPPING", None)  # never leak stub-derived classes
+    return SimpleNamespace(calls=calls, types=(QuantizationType, QuantizedDtype, ActivationQuantizationType),
+                           layers=(ColumnParallelLinear, RowParallelLinear,
+                                   QuantizedColumnParallel, QuantizedRowParallel))
 
 
 def test_build_q_config_mirrors_nxdi_for_each_granularity(fake_nxd):
@@ -144,7 +172,9 @@ def test_build_q_config_mirrors_nxdi_for_each_granularity(fake_nxd):
                                           activation_quantization_type=None))
 
 
-def test_quantize_traced_model_calls_convert_in_place(fake_nxd):
+def test_quantize_traced_model_calls_convert_with_difflet_layers(fake_nxd):
+    """convert() must map NxD's float layers onto Difflet's subclasses of the
+    NxD quantized layers (the ones with the per-tensor DYNAMIC forward)."""
     model = SimpleNamespace(name="wan")
     neuron_config = SimpleNamespace(
         quantized=True, quantization_type="per_tensor_symmetric", quantization_dtype="f8e4m3",
@@ -153,9 +183,62 @@ def test_quantize_traced_model_calls_convert_in_place(fake_nxd):
     )
     assert tq.quantize_traced_model_(model, neuron_config) is model
     (call,) = fake_nxd.calls
-    assert call["model"] is model and call["inplace"] is True and call["mapping"] is None
+    assert call["model"] is model and call["inplace"] is True
     assert call["modules_to_not_convert"] == ["proj_out"]
     assert call["q_config"]["quantized_dtype"].value == "f8e4m3"
+    column, row, q_column, q_row = fake_nxd.layers
+    assert set(call["mapping"]) == {column, row}
+    assert issubclass(call["mapping"][column], q_column) and call["mapping"][column] is not q_column
+    assert issubclass(call["mapping"][row], q_row) and call["mapping"][row] is not q_row
+    assert tq.quant_module_mapping() is call["mapping"]  # built once
+
+
+def test_quantize_activation_per_tensor_matches_the_cpu_reference():
+    """Same law as difflet.quant.fp8.quantize_activation, 0-D scale, clamp bound honoured.
+
+    Pins the trace failure of 2026-10-01 on trn2 ("input_sizes.size() <=
+    output_sizes.size() (4 vs. 3)"): NxD's DYNAMIC path makes a per-channel
+    (axis 1) scale that cannot dequantize a 3-D output; a per-tensor scale can.
+    """
+    import torch
+
+    from difflet.quant import fp8
+
+    torch.manual_seed(0)
+    x = torch.randn(2, 7, 16, dtype=torch.bfloat16) * 3
+    q, scale = tq.quantize_activation_per_tensor(x)
+    ref_q, ref_scale = fp8.quantize_activation(x)
+    assert q.dtype == torch.float8_e4m3fn and scale.shape == () and scale.dtype == torch.float32
+    assert torch.equal(q.float(), ref_q.float()) and torch.equal(scale.reshape(1), ref_scale)
+    assert q.float().abs().max() <= fp8.FP8_MAX
+
+    clamped_q, clamped_scale = tq.quantize_activation_per_tensor(x, clamp_bound=1.0)
+    assert clamped_scale.item() == pytest.approx(1.0 / fp8.FP8_MAX)
+    assert clamped_q.float().abs().max() == fp8.FP8_MAX  # saturated at the clamp
+
+
+@pytest.mark.parametrize("granularity", ["tensor", "channel"])
+def test_dynamic_fp8_linear_matches_the_reference_on_3d_inputs(granularity):
+    import torch
+
+    from difflet.quant import fp8
+
+    torch.manual_seed(1)
+    x = torch.randn(2, 5, 32, dtype=torch.bfloat16)
+    weight = torch.randn(24, 32, dtype=torch.bfloat16) * 0.1
+    q_weight, scale = fp8.quantize_weight(weight, granularity)  # scale [1] or [out, 1]
+
+    def forward_impl(input, weight, bias, **kwargs):  # the NxD matmul, emulated in fp32
+        assert input.dtype == torch.float8_e4m3fn and weight.dtype == torch.float8_e4m3fn
+        assert kwargs["process_group"] == "tp"
+        return torch.nn.functional.linear(input.float(), weight.float())
+
+    layer = SimpleNamespace(weight=q_weight, scale=scale, clamp_bound=float("inf"),
+                            _forward_impl=forward_impl)
+    out = tq.dynamic_fp8_linear(layer, x, process_group="tp")
+    ref = fp8.fp8_linear_reference(x, q_weight, scale, None, activation="dynamic")
+    assert out.dtype == torch.bfloat16 and out.shape == (2, 5, 24)
+    assert torch.allclose(out.float(), ref.float(), rtol=2e-2, atol=1e-3)
 
 
 def test_wan_application_resolves_and_ensures_quantized_checkpoints(tmp_path):
