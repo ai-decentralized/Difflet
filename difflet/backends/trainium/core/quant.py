@@ -128,7 +128,9 @@ def quantize_activation_per_tensor(
     from difflet.quant.fp8 import FP8_DTYPE, FP8_MAX, FP8_MIN_SCALE
 
     x32 = x.to(torch.float32)
-    amax = x32.abs().amax()
+    # Explicit dims: on XLA, amax() with no dims traced as a no-op "reduction"
+    # (trn2, 2026-10-01: the scale came back input-shaped, f32[1,16,128]).
+    amax = x32.abs().amax(dim=tuple(range(x32.ndim)))
     if clamp_bound != float("inf"):
         amax = amax.clamp(max=clamp_bound)
     scale = (amax / FP8_MAX).clamp_min(FP8_MIN_SCALE)

@@ -56,6 +56,25 @@ def test_neuron_config_kwargs_pass_nxd_validation():
         assert QuantizationType(kwargs["quantization_type"])
 
 
+def test_neuron_config_keeps_the_spec_weight_granularity_with_dynamic_activations():
+    """NxDI's NeuronConfig rewrote quantization_type to per_channel_symmetric for any
+    activation quantization (its quantized-MLP-kernel scheme); on trn2 (2026-10-01)
+    that made the layers expect [out, 1] scales for a per-tensor [1] checkpoint
+    ("expected shape torch.Size([128, 1]) for blocks.0.attn1.to_q.scale but found
+    torch.Size([1])"). The override now applies only with the quantized MLP kernel."""
+    pytest.importorskip("neuronx_distributed")
+    import torch
+
+    from difflet.backends.trainium.core.config import NeuronConfig
+
+    for granularity in ("tensor", "channel"):
+        kwargs = tq.neuron_config_kwargs(QuantSpec(weight_granularity=granularity), "/q")
+        config = NeuronConfig(tp_degree=1, world_size=1, batch_size=1, torch_dtype=torch.bfloat16, **kwargs)
+        assert config.quantization_type == kwargs["quantization_type"]
+        assert config.activation_quantization_type == "dynamic"
+        assert config.quantization_dtype == "f8e4m3"
+
+
 def test_fp8_compiler_flag_only_for_fp8_quantized_configs():
     assert tq.fp8_hlo2tensorizer_options(SimpleNamespace(quantized=False)) == ""
     assert tq.fp8_hlo2tensorizer_options(SimpleNamespace(quantized=True, quantization_dtype="int8")) == ""

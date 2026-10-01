@@ -581,7 +581,14 @@ class NeuronConfig:
         self.lm_head_pad = kwargs.pop("lm_head_pad", self.logical_nc_config > 1)
         self.lm_head_pad_alignment_size = kwargs.pop("lm_head_pad_alignment_size", 1)
 
-        if self.is_mlp_quantized():
+        # NxDI forces per-channel f8e4m3 weights for *any* activation quantization
+        # (is_mlp_quantized) because its DYNAMIC path is the per-token/per-channel
+        # quantized-MLP kernel scheme. Difflet's dynamic path (core/quant.py) is
+        # per-tensor and keeps the spec's weight granularity — on trn2 (2026-10-01)
+        # the override made the layers expect [out, 1] scales for a [1]-scale
+        # checkpoint ("expected shape torch.Size([128, 1]) for ...to_q.scale but
+        # found torch.Size([1])"). Only the kernel keeps the override.
+        if self.quantized_mlp_kernel_enabled:
             self.quantization_type = "per_channel_symmetric"
             self.quantization_dtype = "f8e4m3"
 
