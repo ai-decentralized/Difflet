@@ -10,14 +10,20 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 from benchmark.harness import BackendAdapter, OutputInfo
 from benchmark.models import NXD_VENV
 
-_PY = f"{NXD_VENV}/bin/python"
-_DIFFLET = f"{NXD_VENV}/bin/difflet"
+# Prefer the interpreter the harness itself runs in (a lockfile venv built by
+# scripts/setup_env.sh, or the DLAMI venv); the DLAMI path is only a fallback.
+# Hosts without /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference failed with
+# "FileNotFoundError: .../bin/difflet" (trn2, 2026-10-01).
+_VENV_BIN = os.path.dirname(sys.executable)
+_PY = sys.executable if os.path.isfile(os.path.join(_VENV_BIN, "difflet")) else f"{NXD_VENV}/bin/python"
+_DIFFLET = os.path.join(_VENV_BIN, "difflet") if os.path.isfile(os.path.join(_VENV_BIN, "difflet")) else f"{NXD_VENV}/bin/difflet"
 
 # difflet log signals we parse for sub-phase timings.
 _RE_BUILD = re.compile(r"Finished building model in ([\d.]+) seconds")
@@ -180,7 +186,7 @@ class TrainiumAdapter(BackendAdapter):
 
     def _run(self, cmd: list[str], log: Path, timeout: int) -> str:
         env = dict(os.environ)
-        env["PATH"] = f"{NXD_VENV}/bin:" + env.get("PATH", "")
+        env["PATH"] = f"{_VENV_BIN}:" + env.get("PATH", "")
         with open(log, "w") as fh:
             proc = subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT,
                                   env=env, timeout=timeout)

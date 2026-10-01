@@ -58,6 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--only", choices=["bf16", "fp8", "both"], default="both")
     p.add_argument("--skip-quantize", action="store_true")
     p.add_argument("--skip-compile", action="store_true")
+    p.add_argument("--force-compile", action="store_true",
+                   help="pass --force to difflet compile (rebuild the artifact even if cached)")
     p.add_argument("--drop-caches", action="store_true",
                    help="sudo-drop the OS page cache before run 0 of each arm (true cold e2e)")
     p.add_argument("--no-lpips", action="store_true")
@@ -159,6 +161,8 @@ def main() -> int:
         cmd = _difflet(args, "compile", *_shape_flags(args), *_arm_flags(args, arm))
         if args.host_vae:
             cmd.append("--host-vae")
+        if args.force_compile:
+            cmd.append("--force")
         wall, text, _ = runner.run(f"compile_{arm}", cmd)
         summary["arms"][arm]["compile_seconds"] = round(wall, 3)
         summary["arms"][arm]["compile_cache_hit"] = "already compiled" in text
