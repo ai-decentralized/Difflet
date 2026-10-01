@@ -284,8 +284,16 @@ independently by decoding `bf16_run1.mp4` with ffmpeg (frames 0 / 4 / 8). Per la
 themselves have a rising std over latent frames (0.496 / 0.682 / 0.771), so the degradation
 is already present in the DiT output or introduced by the decoder equally for both arms —
 it is not a quantization finding, but it limits what "not visible" means here to frame 0.
-Whether it is the DiT at guidance 1.0 or the Neuron VAE's temporal decode is checked below
-with a host-VAE decode of the same latents.
+**Host-VAE decode of the same latents settles it:** `work_{bf16,fp8}_run1/latents.pt` decoded
+on the host with the diffusers `AutoencoderKLWan` (fp32, 73 s per clip;
+`ab/{bf16,fp8}_run1_hostvae.mp4`, frames `ab/frames_bf16_hostvae_0_4_8.png`) give a proper
+clip — the fox runs through the forest in every frame, 0 / 4 / 8 alike — while the Neuron
+VAE decode of the *same* tensor (`ab/frames_bf16_neuronvae_0_4_8.png`) is sharp only at
+frame 0. **The frame-2…8 degradation is the compiled Neuron VAE decoder at 480×832×9, not
+the DiT and not quantization** — a pre-existing bf16 pipeline issue outside this campaign's
+scope (`--host-vae` is the documented workaround; recorded as a follow-up, not fixed here).
+The fp8-vs-bf16 host-VAE comparison is in `ab/compare_hostvae_fp8_vs_bf16.json` and
+`ab/frames_hostvae_bf16_vs_fp8.png`.
 
 ## Phase 3 — performance
 
@@ -325,7 +333,35 @@ warm. e2e is the staged CLI wall (two process loads + text encode + denoise + VA
   `benchmark.parse_generate` does not match this toolchain's `load_weights` lines — a harness
   gap, recorded here rather than fixed mid-campaign; the numbers above are read from the logs.
 
-_Weight-only arm and benchmark-harness files: see below._
+**Weight-only arm** (`--quant-act none`, same fp8 checkpoint, own transformer compile;
+`ab-wo/ab_summary.{json,md}`, `ab-wo/logs/`; gate `gate_before_ab_wo.txt`):
+
+| arm | compile wall s | e2e cold s | e2e warm s | transformer load cold s | DiT step ms, mean / median (n=19) |
+|---|---:|---:|---:|---:|---:|
+| fp8-tensor-wo | 444.6 (priority HLO 151.5) | 312.3 | 92.4 | 131.7 | **732.8 / 732.7** (run 1: 733.0 / 732.9) |
+
+So the weight-only path is already 1.28× slower than bf16 and the dynamic activation
+quantization adds another 90 ms on top. Its HLO (`ab/hlo_dots_fp8_wo.txt`, module
+`MODULE_764c515c759bcef5a61e+fd859317`) explains the first part: **316 of its 400 quantized
+linears run as `F32 × F32 → F32` dots** (84 as bf16), with 316 `F8E4M3FN → F32` and 84
+`F8E4M3FN → BF16` weight converts — NxD dequantizes the fp8 weight to the *input's* dtype, and
+those inputs are fp32. In the bf16 arm every one of the 400 linears is a `BF16 × BF16` dot.
+
+**Bug 5 — the quantized layers are typed float32, which leaks fp32 into the whole block.**
+NxD's `from_float` builds the quantized layer with `dtype=mod.dtype`, the *construction-time*
+dtype of the float layer; Difflet builds the Wan model and then casts it (`model.to(bf16)` in
+`WanBackbone.get_model_instance`), so `mod.dtype` is still float32. The quantized layers'
+`bias` (and `dequantized_dtype`) therefore come out float32 — visible in the presharded
+checkpoint of Phase 0 (`blocks.0.attn1.to_k.bias torch.float32` next to bf16 norms) — and
+every biased quantized linear (`to_q/k/v`, `ffn.net_in`) promotes its output to fp32: the
+attention core, the GELU and the next linear's input run in fp32 until the residual add casts
+back. The dynamic arm's HLO shows the same leak from the other side (816 `BF16 → F32`
+converts vs 1683 in the bf16 arm: fewer casts because the tensors already *are* fp32). Fix
+`42ae642`: Difflet's `from_float` overrides type the layer from the live `mod.weight.dtype`
+(bias cast, `dtype`/`dequantized_dtype` set); pinned by a unit test. The fp8 arms are
+re-measured below with the fix.
+
+_Benchmark-harness files and the re-measured fp8 arms: see below._
 
 ## Phase 4 — serving
 
@@ -352,4 +388,8 @@ _pending_
 | 2 | `6fe599d` | fp8 trace: `Check failed: input_sizes.size() <= output_sizes.size() (4 vs. 3)` in NxD's DYNAMIC forward | Difflet-owned per-tensor dynamic activation quantization in subclassed NxD layers |
 | 3 | `959f2cc` | weight-only fp8 output all NaN; 44.7 % of fp8 weights above 240 | absmax law saturates at Trainium's e4m3 max 240; range in checkpoint identity |
 | 4 | `cfc1adf` | fp8-dyn load: `expected shape torch.Size([128, 1]) for ...to_q.scale but found torch.Size([1])`; XLA `amax()` no-op | NeuronConfig keeps the spec granularity unless the quantized MLP kernel is on; explicit-dims absmax |
+| 5 | `42ae642` | fp8 arms: 316/400 weight-only dots `F32 × F32`; biased quantized linears promote the block to fp32 (DiT step 733 / 822 ms vs 573) | type the quantized layers from the live weight dtype (bias bf16) |
+| 6 | `c3357c6` | after bug 5, `difflet compile` would reuse the old NEFF and the store would relink the old fp32-bias shards | `QUANT_LAYER_SCHEMA` in the fp8 stage cache key and the store key (fp8 only, additive) |
 | – | `5fe2a49` | probe: text traced at 16 tokens vs backbone's 512; no device output kept | probe script |
+| – | `f21d79b` | `benchmark.bench` / `cold_warm_e2e`: `FileNotFoundError: /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/difflet` (harness rot) | adapter uses its own interpreter's `difflet`; A/B runner `--force-compile` |
+| – | not fixed | **Neuron VAE decoder at 480×832×9 degrades frames 2–8 in bf16** (host VAE of the same latents is clean) | follow-up for the Wan VAE stage; `--host-vae` works |

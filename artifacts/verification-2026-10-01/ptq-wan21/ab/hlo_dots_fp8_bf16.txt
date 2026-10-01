@@ -1,0 +1,24 @@
+=== fp8 MODULE_a1cd99ffd9d0c5735511+04929ab2: 1087 computations, 34330 instructions
+  element types: {'F32': 28070, 'F8E4M3FN': 2000, 'S64': 1320, 'BF16': 977, 'TUPLE': 682, 'PRED': 640, 'S32': 481, 'U32': 160}
+  dot (operand types -> result):
+      400  ('F8E4M3FN', 'F8E4M3FN') -> F8E4M3FN
+        5  ('BF16', 'BF16') -> BF16
+        1  ('F32', 'BF16') -> F32
+  convert (src -> dst):
+      816  BF16 -> F32
+      400  F32 -> F8E4M3FN
+      400  F8E4M3FN -> F32
+      160  S32 -> S64
+      160  S64 -> U32
+       88  F32 -> BF16
+       40  S64 -> F32
+=== bf16 MODULE_f79148cf7ed21271b9e2+f934ae74: 687 computations, 25111 instructions
+  element types: {'F32': 11165, 'BF16': 10663, 'S64': 1320, 'TUPLE': 682, 'PRED': 640, 'S32': 481, 'U32': 160}
+  dot (operand types -> result):
+      406  ('BF16', 'BF16') -> BF16
+  convert (src -> dst):
+     1683  BF16 -> F32
+      802  F32 -> BF16
+      160  S32 -> S64
+      160  S64 -> U32
+       40  S64 -> F32
