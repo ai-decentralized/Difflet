@@ -199,7 +199,33 @@ def quant_module_mapping() -> dict[Any, Any]:
         new_mod.dequantized_dtype = dtype
         if getattr(new_mod, "bias", None) is not None:
             new_mod.bias.data = new_mod.bias.data.to(dtype)
+        # NxD's from_float drops skip_bias_add and its forward adds the bias
+        # unconditionally. FLUX / HunyuanVideo single blocks build proj_out_attn
+        # with reduce_output=False + skip_bias_add=True and add the returned bias
+        # once after their merged all-reduce (trn2, 2026-10-02: the FLUX fp8
+        # compile failed unpacking (out, bias); HunyuanVideo would have added the
+        # bias on every TP rank). Carry the flag and honour it on both paths.
+        new_mod.skip_bias_add = bool(getattr(mod, "skip_bias_add", False))
         return new_mod
+
+    def _finish(mod, output):
+        """Apply the module's bias the way NxD's float layers do."""
+        if getattr(mod, "skip_bias_add", False):
+            return output, mod.bias
+        return (output + mod.bias) if mod.bias is not None else output
+
+    def _forward_skipping_bias(mod, forward, *args, **kwargs):
+        """Run NxD's own forward (weight-only path) without its bias add: NxD adds
+        ``self.bias`` at the very end, so detach it for the call and hand it back."""
+        if not getattr(mod, "skip_bias_add", False):
+            return forward(*args, **kwargs)
+        bias = mod.bias
+        mod.bias = None
+        try:
+            output = forward(*args, **kwargs)
+        finally:
+            mod.bias = bias
+        return output, bias
 
     class PerTensorDynamicColumnParallel(ql.QuantizedColumnParallel):
         @classmethod
@@ -208,7 +234,7 @@ def quant_module_mapping() -> dict[Any, Any]:
 
         def forward(self, input, *args, **kwargs):
             if self.activation_quantization_type != ActivationQuantizationType.DYNAMIC:
-                return super().forward(input, *args, **kwargs)
+                return _forward_skipping_bias(self, super().forward, input, *args, **kwargs)
             if self.async_tensor_model_parallel_allreduce or self.sequence_parallel_enabled:
                 input_parallel = input
             else:
@@ -231,7 +257,7 @@ def quant_module_mapping() -> dict[Any, Any]:
                 )
             else:
                 output = output_parallel
-            return (output + self.bias) if self.bias is not None else output
+            return _finish(self, output)
 
     class PerTensorDynamicRowParallel(ql.QuantizedRowParallel):
         @classmethod
@@ -240,7 +266,7 @@ def quant_module_mapping() -> dict[Any, Any]:
 
         def forward(self, input_, *args, **kwargs):
             if self.activation_quantization_type != ActivationQuantizationType.DYNAMIC:
-                return super().forward(input_, *args, **kwargs)
+                return _forward_skipping_bias(self, super().forward, input_, *args, **kwargs)
             if self.input_is_parallel:
                 input_parallel = input_
             else:
@@ -268,7 +294,7 @@ def quant_module_mapping() -> dict[Any, Any]:
                     output_ = ql.reduce_from_tensor_model_parallel_region(
                         output_, process_group=self.tensor_parallel_group
                     )
-            return (output_ + self.bias) if self.bias is not None else output_
+            return _finish(self, output_)
 
     _MAPPING = {
         ColumnParallelLinear: PerTensorDynamicColumnParallel,

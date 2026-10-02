@@ -136,18 +136,30 @@ def fake_nxd(monkeypatch):
     class RowParallelLinear(torch.nn.Module):
         pass
 
-    class QuantizedColumnParallel:  # NxD's quantized forms Difflet subclasses
+    class QuantizedColumnParallel(torch.nn.Module):  # NxD's quantized forms Difflet subclasses
+        activation_quantization_type = ActivationQuantizationType.NONE
+
         @classmethod
         def from_float(cls, mod, q_config=None):
             # NxD builds the quantized layer from mod.dtype (construction-time dtype)
+            # and never looks at mod.skip_bias_add.
             new = QuantizedColumnParallel()
             new.dtype = mod.dtype
             new.dequantized_dtype = mod.dtype
-            new.bias = torch.nn.Parameter(torch.zeros(4, dtype=mod.dtype), requires_grad=False)
+            new.bias = torch.nn.Parameter(torch.ones(4, dtype=mod.dtype), requires_grad=False)
             return new
 
+        def forward(self, input, *args, **kwargs):  # NxD: bias added unconditionally
+            return (input + self.bias) if self.bias is not None else input
+
     class QuantizedRowParallel(QuantizedColumnParallel):
-        pass
+        @classmethod
+        def from_float(cls, mod, q_config=None):
+            new = QuantizedRowParallel()
+            new.dtype = mod.dtype
+            new.dequantized_dtype = mod.dtype
+            new.bias = torch.nn.Parameter(torch.ones(4, dtype=mod.dtype), requires_grad=False)
+            return new
 
     layers = types.ModuleType("neuronx_distributed.parallel_layers.layers")
     layers.ColumnParallelLinear = ColumnParallelLinear
@@ -425,3 +437,64 @@ def test_wan_application_resolves_and_ensures_quantized_checkpoints(tmp_path):
     bf16.quant_checkpoint_dirs = {}
     assert bf16._quant_checkpoint_dir("transformer") is None
     assert bf16.ensure_quantized_checkpoints(create=True) == {}
+
+
+def test_from_float_carries_skip_bias_add(fake_nxd):
+    """NxD's from_float drops RowParallelLinear.skip_bias_add; FLUX / HunyuanVideo single
+    blocks rely on it (proj_out_attn returns (out, bias), the bias is added once after
+    the merged all-reduce)."""
+    import torch
+
+    _, row, _, q_row = fake_nxd.layers
+    weight = torch.zeros(4, 4, dtype=torch.bfloat16)
+    plain = tq.quant_module_mapping()[row].from_float(SimpleNamespace(dtype=torch.float32, weight=weight), {})
+    assert isinstance(plain, q_row) and plain.skip_bias_add is False
+    skip = tq.quant_module_mapping()[row].from_float(
+        SimpleNamespace(dtype=torch.float32, weight=weight, skip_bias_add=True), {})
+    assert skip.skip_bias_add is True
+
+
+@pytest.mark.parametrize("layer_index", [0, 1], ids=["column", "row"])
+def test_skip_bias_add_returns_output_and_bias_on_the_weight_only_path(fake_nxd, layer_index):
+    """Pins the trn2 failure of 2026-10-02 (FLUX fp8 weight-only compile):
+    ``out_attn, bias = self.proj_out_attn(attn_output)`` → ``ValueError: not enough values
+    to unpack (expected 2, got 1)`` because NxD's QuantizedRowParallel.forward adds the
+    bias and returns one tensor. With reduce_output=False that would also add the bias on
+    every TP rank before the model's own all-reduce (HunyuanVideo tolerates the single
+    tensor and would be silently wrong)."""
+    import torch
+
+    float_layer = fake_nxd.layers[layer_index]
+    weight = torch.zeros(4, 4, dtype=torch.bfloat16)
+    layer = tq.quant_module_mapping()[float_layer].from_float(
+        SimpleNamespace(dtype=torch.float32, weight=weight, skip_bias_add=True), {})
+    x = torch.full((2, 4), 2.0, dtype=torch.bfloat16)
+    out, bias = layer(x)
+    assert torch.equal(out, x)  # bias NOT added
+    assert bias is layer.bias and torch.equal(bias, torch.ones(4, dtype=torch.bfloat16))
+    assert layer.bias is not None  # restored after the call
+    plain = tq.quant_module_mapping()[float_layer].from_float(SimpleNamespace(dtype=torch.float32, weight=weight), {})
+    assert torch.equal(plain(x), x + 1)
+
+
+def test_skip_bias_add_returns_output_and_bias_on_the_dynamic_path(fake_nxd, monkeypatch):
+    import torch
+
+    ActivationQuantizationType = fake_nxd.types[2]
+    _, row, _, _ = fake_nxd.layers
+    weight = torch.zeros(4, 4, dtype=torch.bfloat16)
+    layer = tq.quant_module_mapping()[row].from_float(
+        SimpleNamespace(dtype=torch.float32, weight=weight, skip_bias_add=True), {})
+    layer.activation_quantization_type = ActivationQuantizationType.DYNAMIC
+    layer.input_is_parallel = True
+    layer.reduce_output = False
+    layer.sequence_parallel_enabled = False
+    layer.sequence_dimension = None
+    layer.autograd_func_class = None
+    layer.tensor_parallel_group = None
+    monkeypatch.setattr(tq, "dynamic_fp8_linear", lambda mod, inp, **kw: inp * 3)
+    x = torch.full((2, 4), 2.0, dtype=torch.bfloat16)
+    out, bias = layer(x)
+    assert torch.equal(out, x * 3) and bias is layer.bias
+    layer.skip_bias_add = False
+    assert torch.equal(layer(x), x * 3 + 1)

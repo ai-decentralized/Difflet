@@ -33,7 +33,9 @@ echo "model $MODEL_ID revision ${REV:-main}"
 
 run quantize python -m difflet.cli.main quantize --model-id "$MODEL_ID" ${REV:+--revision "$REV"} --quant fp8 --quant-granularity tensor
 echo "QUANTIZE_RC=$?"
+# SKIP_BF16=1 re-runs only the fp8 arms (after a device fix) against an already measured bf16 arm.
 for arm in "" _fp8_wo _fp8; do
+  if [ -z "$arm" ] && [ "${SKIP_BF16:-0}" = 1 ]; then echo "=== bf16 arm skipped (SKIP_BF16=1)"; continue; fi
   s=$SLUG$arm
   run "bench_$s" python -m benchmark.bench --model "$s" --skip-download --iters 1
   echo "BENCH_${s}_RC=$?"
