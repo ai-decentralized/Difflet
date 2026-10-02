@@ -1,0 +1,6 @@
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  2 06:16 Qwen--Qwen-Image__transformer__75e0b4be__bfloat16__qf8e4m3__tp4__f00372d95d4aba48
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  2 05:45 Qwen--Qwen-Image__transformer__75e0b4be__bfloat16__tp4__8ad7cab52bbb1b05
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  2 05:52 Qwen--Qwen-Image__vae__75e0b4be__bfloat16__tp1__44d6b3c0dcd91187
+26G	/home/ubuntu/.cache/difflet/quantized/Qwen--Qwen-Image/transformer/
+14G	/home/ubuntu/.cache/difflet/quantized/Wan-AI--Wan2.1-T2V-14B-Diffusers/transformer/
+15G	/home/ubuntu/.cache/difflet/quantized/black-forest-labs--FLUX.1-dev/transformer/

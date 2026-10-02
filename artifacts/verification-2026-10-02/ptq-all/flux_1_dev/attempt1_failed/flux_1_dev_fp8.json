@@ -1,0 +1,60 @@
+{
+  "model_id": "black-forest-labs/FLUX.1-dev",
+  "model_type": "flux",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 28,
+  "quant": {
+    "format": "fp8",
+    "weight_granularity": "tensor",
+    "activation": "dynamic"
+  },
+  "compile_seconds": null,
+  "compile_breakdown": {},
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": null,
+  "step_latency": null,
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {},
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 (registry default tp=8 -> 4 on trn2.3xlarge), bf16, attention_cte; FP8 PTQ (dynamic activations) on the DiT linears",
+  "status": "failed",
+  "notes": [
+    "FAILED: command failed (1): /home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/bin/difflet compile --model-id black-forest-labs/FLUX.1-dev --revision 3de623fc3c33e44ffbe2bad470d0f45bccf2eb21 --tp-degree 4 --cp-degree 1 --quant fp8 --quant-granularity tensor --quant-act dynamic --cache-dir /home/ubuntu/.cache/difflet --height 1024 --width 1024\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py\", line 601, in xla_trace\n    return _xla_trace(func, example_inputs, states, input_output_aliases,\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py\", line 387, in _xla_trace\n    outputs = func(*example_inputs)\n              ^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/models/flux/modeling_flux.py\", line 573, in forward\n    hidden_states = block(\n                    ^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1775, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1786, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/models/flux/modeling_flux.py\", line 727, in forward\n    out_attn, bias = self.proj_out_attn(attn_output)\n    ^^^^^^^^^^^^^^\nValueError: not enough values to unpack (expected 2, got 1)"
+  ],
+  "timestamp": "2026-10-02 05:23 UTC",
+  "config_slug": "flux_1_dev_fp8",
+  "device_slug": "trn2",
+  "revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 3.5,
+  "output_kind": "image"
+}

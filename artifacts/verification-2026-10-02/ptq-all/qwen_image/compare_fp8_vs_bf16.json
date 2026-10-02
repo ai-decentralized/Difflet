@@ -1,0 +1,21 @@
+{
+  "output": {
+    "reference": "benchmark/trn2/qwen_image_out.png",
+    "test": "benchmark/trn2/qwen_image_fp8_tensor_dyn_out.png",
+    "frames": 1,
+    "height": 1024,
+    "width": 1024,
+    "psnr_db": 36.4048037970433,
+    "ssim": 0.990094780921936,
+    "pixel": {
+      "mse": 0.00022883349989394775,
+      "mean_abs": 0.00898177954037512,
+      "max_abs": 0.3921568691730499,
+      "cosine": 0.9997224408394298,
+      "rel_l2": 0.02443795325158929,
+      "snr_db": 32.23870340618059
+    },
+    "lpips": 0.016945917159318924,
+    "lpips_net": "alex"
+  }
+}

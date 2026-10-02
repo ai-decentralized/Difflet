@@ -1,0 +1,127 @@
+{
+  "model_id": "Qwen/Qwen-Image",
+  "model_type": "qwen_image",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "quant": null,
+  "compile_seconds": 1254.1531512479996,
+  "compile_breakdown": {
+    "text_encoder": {
+      "module_load_s": 0.193,
+      "hlo_generate_s": 5.563,
+      "priority_hlo_compile_s": 67.714,
+      "all_hlo_compile_s": 9.449,
+      "build_total_s": 118.944,
+      "other_s": 36.026
+    },
+    "transformer": {
+      "module_load_s": 85.555,
+      "hlo_generate_s": 16.789,
+      "priority_hlo_compile_s": 39.315,
+      "all_hlo_compile_s": 0.006,
+      "build_total_s": 296.127,
+      "other_s": 154.462
+    },
+    "vae_decoder": {
+      "module_load_s": 0.339,
+      "hlo_generate_s": 0.368,
+      "priority_hlo_compile_s": 386.374,
+      "all_hlo_compile_s": 0.0,
+      "build_total_s": 396.579,
+      "other_s": 9.498
+    },
+    "wall_total_s": 811.65
+  },
+  "load_seconds": 122.047,
+  "e2e_cold_seconds": 501.165,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 122.047
+      }
+    ],
+    "weights_load_total_s": 122.047,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 501.165,
+    "compute_and_overhead_s": 379.118
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 64.19375970499823,
+    "median": 64.19375970499823,
+    "std": 0.0,
+    "p50": 64.19375970499823,
+    "p90": 64.19375970499823,
+    "min": 64.19375970499823,
+    "max": 64.19375970499823,
+    "samples": [
+      64.19375970499823
+    ]
+  },
+  "step_latency": null,
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {},
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved qwen_image_out.png"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4, bf16, joint attention via attention_cte",
+  "status": "ok",
+  "notes": [
+    "e2e_cold = 501 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 64 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 501 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-10-02 05:31 UTC",
+  "config_slug": "qwen_image",
+  "device_slug": "trn2",
+  "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 4.0,
+  "output_kind": "image",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 10.377
+      }
+    ],
+    "weights_load_total_s": 10.377,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 64.194,
+    "compute_and_overhead_s": 53.817
+  }
+}

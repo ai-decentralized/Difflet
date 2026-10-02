@@ -1,0 +1,6 @@
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  2 04:59 black-forest-labs--FLUX.1-dev__text_encoder_2__3de623fc__bfloat16__tp4__96ec5177ffc945e4
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  2 04:58 black-forest-labs--FLUX.1-dev__text_encoder__3de623fc__bfloat16__tp1w4__3a7d6a1d8623aa36
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  2 05:03 black-forest-labs--FLUX.1-dev__transformer__3de623fc__bfloat16__tp4__725b456c1a7101e9
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  2 05:14 black-forest-labs--FLUX.1-dev__vae__3de623fc__bfloat16__tp1w4__5847a250b71ac1fd
+14G	/home/ubuntu/.cache/difflet/quantized/Wan-AI--Wan2.1-T2V-14B-Diffusers/transformer/
+15G	/home/ubuntu/.cache/difflet/quantized/black-forest-labs--FLUX.1-dev/transformer/
