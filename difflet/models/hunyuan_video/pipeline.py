@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 import os
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -202,6 +202,13 @@ class HunyuanVideoOrchestrator:
         timesteps: torch.Tensor,
         trajectory: list[torch.Tensor] | None,
     ) -> torch.Tensor:
+        # The Llama stage hands back raw hidden states at the ~240/256 pad
+        # positions. The DiT masks them in attention and pools with the mask, so
+        # they never reach the video output (pinned by
+        # test_padded_text_rows_do_not_affect_the_video_output) — but FP8 dynamic
+        # per-tensor activation scales would be set by them (trn2, 2026-10-02:
+        # the fp8-dyn render was binary noise). Zero them once, like Wan / Qwen.
+        bundle = _zero_padded_text_rows(bundle)
         latents = bundle.hidden_states
         controller = self.teacache_controller
         # Probe-free modes (fixed cadence / online-delta) never touch a probe:
@@ -345,6 +352,18 @@ class HunyuanVideoOrchestrator:
         if decode is None:
             return _first_tensor(self.vae(latents))
         return _first_tensor(decode(latents, return_dict=False))
+
+
+def _zero_padded_text_rows(bundle: HunyuanVideoDiTInputBundle) -> HunyuanVideoDiTInputBundle:
+    """Return the bundle with ``encoder_hidden_states`` zeroed where the mask is 0."""
+    mask = bundle.encoder_attention_mask
+    if mask is None:
+        return bundle
+    hidden = bundle.encoder_hidden_states
+    keep = mask.to(device=hidden.device).bool()
+    if bool(keep.all()):
+        return bundle
+    return replace(bundle, encoder_hidden_states=hidden * keep.unsqueeze(-1).to(hidden.dtype))
 
 
 def _bundle_from_tensors(

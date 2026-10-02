@@ -373,3 +373,29 @@ def test_hunyuan_orchestrator_reports_per_step_dit_seconds(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "[hunyuan_video] dit-step-seconds: [" in out
     assert "[hunyuan_video] dit-step ms: n=2 mean=" in out and "(step 0 excluded)" in out
+
+
+
+def test_hunyuan_orchestrator_zeroes_padded_text_rows_before_the_dit(tmp_path):
+    """Pins the trn2 finding of 2026-10-02: the Llama stage hands the DiT raw hidden
+    states at ~240 of 256 pad positions. They are masked in attention (bf16 output
+    unaffected, see the modeling test) but they dominate FP8 dynamic per-tensor
+    activation scales — the fp8-dyn HunyuanVideo render was binary noise (PSNR 6 dB)
+    while weight-only was fine. Zero them once, like the Wan and Qwen stages do."""
+    transformer = FakeTransformer(value=0.25)
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        pipeline = HunyuanVideoOrchestrator(model_path=str(tmp_path), transformer=transformer, dtype=torch.float32)
+    bundle = _bundle()
+    mask = torch.zeros_like(bundle.encoder_attention_mask)
+    mask[:, :2] = 1
+    noisy = bundle.encoder_hidden_states.clone()
+    noisy[:, 2:] = 1000.0
+    bundle = HunyuanVideoDiTInputBundle(
+        hidden_states=bundle.hidden_states, timestep=bundle.timestep, encoder_hidden_states=noisy,
+        encoder_attention_mask=mask, pooled_projections=bundle.pooled_projections, guidance=bundle.guidance,
+    )
+    pipeline(bundle=bundle, timesteps=torch.tensor([1000.0, 500.0]))
+    seen = transformer.calls[0].encoder_hidden_states
+    assert torch.equal(seen[:, :2], noisy[:, :2])
+    assert torch.count_nonzero(seen[:, 2:]) == 0
+    assert torch.equal(transformer.calls[0].encoder_attention_mask, mask)

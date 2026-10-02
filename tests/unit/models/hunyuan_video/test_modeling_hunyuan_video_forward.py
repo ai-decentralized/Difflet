@@ -560,3 +560,24 @@ def test_attention_ulysses_key_valid_len_is_the_mask_row_sum(_cpu_backend, monke
     with torch.no_grad():
         cp(hidden_states=torch.randn(b, ls, 8), encoder_hidden_states=torch.randn(b, cs, 8))
     assert seen["key_valid_len"] is None
+
+
+
+def test_padded_text_rows_do_not_affect_the_video_output(_cpu_backend):
+    """Masked (pad) text rows are keys nobody attends to and queries whose outputs
+    are discarded, and the refiner pools with the mask — so their values must not
+    reach the video output. This is what lets the pipeline zero them (FP8 dynamic
+    activation scales are per tensor; garbage pad rows would otherwise set them)."""
+    m = _cpu_backend
+    model = _tiny_model(m)
+    inputs = _tiny_inputs()
+    mask = inputs["encoder_attention_mask"].bool().unsqueeze(-1)
+    with torch.no_grad():
+        garbage = inputs["encoder_hidden_states"].clone()
+        garbage[~mask.expand_as(garbage)] = 1000.0
+        out_garbage = model(**{**inputs, "encoder_hidden_states": garbage}, return_dict=False)[0]
+        zeroed = inputs["encoder_hidden_states"] * mask
+        out_zeroed = model(**{**inputs, "encoder_hidden_states": zeroed}, return_dict=False)[0]
+        out_plain = model(**inputs, return_dict=False)[0]
+    assert torch.allclose(out_plain, out_zeroed, atol=1e-5)
+    assert torch.allclose(out_plain, out_garbage, atol=1e-4)
