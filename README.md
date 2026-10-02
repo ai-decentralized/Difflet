@@ -9,6 +9,8 @@
 
 **Run diffusion transformers on AWS Trainium: FLUX, Qwen-Image, Wan, HunyuanVideo, and LTX-2, from one CLI, one Python API, and one OpenAI-compatible server.**
 
+MiniMax-H3 also supports text-to-video with audio through the staged CLI.
+
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)
 ![Neuron](https://img.shields.io/badge/Neuron-neuronx--cc%202.26-232F3E.svg)
@@ -22,13 +24,14 @@ That one command downloads the weights, AOT-compiles the model for four NeuronCo
 the artifact, and writes a 1024×1024 image. Later runs hit the cache and skip straight to
 load and denoise.
 
-[Models](#supported-models) · [Feature support](#feature-support) ·
+[Latest news](#latest-news) · [Models](#supported-models) · [Feature support](#feature-support) ·
 [Quick start](#quick-start) · [Choose a topology](#choose-a-topology) · [Serving](#serving) ·
 [Go further](#go-further) · [CLI reference](#cli-reference) · [Troubleshooting](#troubleshooting) ·
 [Developer guide](DEVELOPER.md)
 
 ## Latest News
 
+- [09/30] **MiniMax-H3 text-to-video with audio is verified on Trainium2.** The four-stage CLI generated a 256×448, 124-frame MP4 with stereo audio on `trn2.3xlarge` using TP4. See the [end-to-end verification](docs/design/minimax_h3/01_e2e_reverification_2026-09-30.md).
 - [09/10] **Difflet 1.0 is released.**
 
 ## What Difflet does
@@ -54,31 +57,34 @@ Three entry points share one engine:
 | [Wan-AI/Wan2.1-T2V-14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.1-T2V-14B-Diffusers) | Text-to-video | 480×832×9 | Same runtime as Wan 2.2 |
 | [hunyuanvideo-community/HunyuanVideo](https://huggingface.co/hunyuanvideo-community/HunyuanVideo) | Text-to-video | 320×512×61 | 3-stage (clip → llama → generate) |
 | [Lightricks/LTX-2](https://huggingface.co/Lightricks/LTX-2) | Text-to-video | 512×768×121 | Single-process; TP only; exports `.mp4` |
+| [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) | Text-to-video with audio | 768×1344×124 ⚠️ ⁵ | Verified at **256×448×124**; TP4; 4-stage CLI (text → generate → video_vae → audio_vae); `.mp4` with stereo audio |
 
 ## Feature support
 
 Which features each model supports today. ✅ = supported · ⚠️ = supported with a caveat
-(see note) · ❌ = not supported.
+(see note) · ❌ = not supported · — = not applicable.
 
 **Parallelism**
 
 | Model | TP | CP — all-gather | CP — ring | CP — ulysses | SP | CFG-parallel | DP |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ | ✅ |
-| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ ¹ | ✅ |
+| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | — ¹ | ✅ |
+| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | — ¹ | ✅ |
 | Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| HunyuanVideo | ✅ | ⚠️ ² | ✅ | ❌ | ✅ | ❌ ¹ | ⚠️ ³ |
+| HunyuanVideo | ✅ | ⚠️ ² | ✅ | ❌ | ✅ | — ¹ | ⚠️ ³ |
 | LTX-2 | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| MiniMax-H3 | ✅ TP4 | ❌ | ❌ | ❌ | ❌ | — ¹ | ❌ |
 
 **Runtime features**
 
-| Model | Multi-shape compile | TeaCache (adaptive) | TeaCache (fixed cadence) | Serving | Batch (JSONL) |
-|---|:---:|:---:|:---:|:---:|:---:|
-| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ image | ✅ |
-| Qwen-Image | ✅ | ✅ | ✅ | ✅ image | ✅ |
-| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ video ⁴ | ✅ |
-| HunyuanVideo | ✅ | ✅ | ✅ | ✅ video | ✅ |
-| LTX-2 | ❌ | ✅ | ✅ | ✅ video | ✅ |
+| Model | CLI generation | Multi-shape compile | TeaCache (adaptive) | TeaCache (fixed cadence) | Serving | Batch (JSONL) |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ image | ✅ | ✅ | ✅ | ✅ image | ✅ |
+| Qwen-Image | ✅ image | ✅ | ✅ | ✅ | ✅ image | ✅ |
+| Wan 2.2 / 2.1 | ✅ video | ✅ | ✅ | ✅ | ✅ video ⁴ | ✅ |
+| HunyuanVideo | ✅ video | ✅ | ✅ | ✅ | ✅ video | ✅ |
+| LTX-2 | ✅ video | ❌ | ✅ | ✅ | ✅ video | ✅ |
+| MiniMax-H3 | ✅ video + stereo audio | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 **Feature legend**
 
@@ -89,6 +95,7 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 - **SP** — Megatron-style sequence parallelism (`--sp`). Shards the norm/modulation/residual regions along the sequence axis across the existing tensor-parallel group; `world_size` is unchanged. Mutually exclusive with `--cp-degree > 1`.
 - **CFG-parallel** — splits the conditional/unconditional CFG passes across 2 data-parallel ranks (`--cfg-parallel`). Only meaningful for true two-pass classifier-free guidance, not working for distilled guidance.
 - **DP** — data-parallel replicas (`--dp N`). A router spawns N full model copies on disjoint core ranges and distributes requests across them; use `--mode throughput` or `--mode mixed` for a preset.
+- **CLI generation** — generate media with `difflet run` or `download → compile → generate`. MiniMax-H3 exports video and stereo audio together in one MP4.
 - **Multi-shape compile** — one bucketed artifact covering several request shapes (`--shapes 320x512x61,320x512x33`), sharing a single weight copy on device. `difflet serve --shapes` serves all of them from one resident worker.
 - **TeaCache (adaptive)** — calibration-driven step-skipping (`--teacache-speedup` / `--teacache-online-delta`, with `--teacache-calibration`).
 - **TeaCache (fixed cadence)** — blind skip-every-N-steps (`--teacache-cadence N`, no calibration needed).
@@ -101,6 +108,7 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 2. `tp2 cp2` with gather-KV hits a `neuronx-cc` internal error (`NCC_INLA001` / `NCC_IBIR243`) on the CP-degree-2 DiT graph; ring CP and `tp4 --sp` are the working multi-core paths. See [DEVELOPER.md](DEVELOPER.md).
 3. DP works, but on a 4-core `trn2.3xlarge` each 2-core replica runs out of HBM loading the compiled VAE at the default 320×512×61 shape. Use a smaller shape or a host with more cores per replica.
 4. Wan 2.1 is the qualified serving checkpoint. Wan 2.2 can be started for experiments but its dual-transformer path has not passed resident-serving acceptance.
+5. MiniMax-H3 supports the Trainium four-stage CLI at TP4 and CP1: text and DiT use four cores, and each VAE uses one core. The verified end-to-end shape is **256×448×124**; pass `--height 256 --width 448 --num-frames 124`. The registry default **768×1344×124** is not qualified on `trn2.3xlarge`: the standard DiT graph exceeds device memory, and compilation with precomputed AdaLN exceeded host memory. The 640×1152×124 DiT compiled successfully but has not been verified end to end. Python API generation, resident serving, DP, JSONL batching, multi-shape compilation, and TeaCache are not supported for H3. See the [verification](docs/design/minimax_h3/01_e2e_reverification_2026-09-30.md) and [bring-up handoff](docs/design/minimax_h3/00_trainium_bringup_handoff.md).
 
 Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive (and each is mutually exclusive with `--sp`). `world_size = dp × (2 if cfg-parallel else 1) × cp_degree × tp_degree`; `--sp` leaves it unchanged. `difflet plan --model-id <id>` lists the combinations your host can run.
 
