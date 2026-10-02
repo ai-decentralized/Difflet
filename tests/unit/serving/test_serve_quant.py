@@ -206,3 +206,41 @@ def test_qwen_serving_quant_kwargs_add_quant_only_when_set(tmp_path):
     assert _quant_kwargs(_profile(tmp_path, None)) == {}
     spec = QuantSpec.for_model("qwen_image", activation="none")
     assert _quant_kwargs(_profile(tmp_path, spec)) == {"quant": spec.to_dict(), "quant_cache_dir": str(tmp_path / "cache")}
+
+
+
+
+def test_hunyuan_serving_quant_kwargs_and_denoiser_identity(tmp_path):
+    """fp8 is keyed into the serving denoiser identity only (CLIP/Llama/decoder
+    untouched); the cache root is runtime-only; bf16 identities are unchanged."""
+    from difflet.serving.models import hunyuan_video as hv
+
+    def profile(quant):
+        return ServingProfile(
+            model_id="hunyuanvideo-community/HunyuanVideo", model_type="hunyuan_video",
+            height=320, width=512, num_frames=61, parallel=DiffletParallelConfig(tp_degree=4),
+            cache_dir=str(tmp_path / "cache"), dtype="bfloat16", output_modality="video",
+            output_mime_type="video/mp4", output_fps=24, host_vae=True, quant=quant,
+        )
+
+    source = ResolvedModelSource(
+        source_kind="hf_snapshot", model_id="hunyuanvideo-community/HunyuanVideo", requested_revision=None,
+        pinned_model_path=str(tmp_path / "snapshots" / ("a" * 40)), resolved_source_id="a" * 40,
+    )
+    assert hv._quant_kwargs(profile(None)) == {}
+    spec = QuantSpec.for_model("hunyuan_video", activation="none")
+    assert hv._quant_kwargs(profile(spec)) == {"quant": spec.to_dict(), "quant_cache_dir": str(tmp_path / "cache")}
+
+    def by_component(specs):
+        return {s.component_id: s.identity for s in specs}
+
+    bf16 = by_component(hv._compile_specs(source, profile(None)))
+    fp8 = by_component(hv._compile_specs(source, profile(spec)))
+    dyn = by_component(hv._compile_specs(source, profile(QuantSpec.for_model("hunyuan_video"))))
+    assert set(bf16) == set(fp8) == {"llama", "denoiser"}
+    assert bf16["llama"].digest == fp8["llama"].digest
+    assert len({bf16["denoiser"].digest, fp8["denoiser"].digest, dyn["denoiser"].digest}) == 3
+    inputs = json.loads(fp8["denoiser"].canonical_cache_inputs_json)
+    assert inputs["quant"] == spec.to_dict() and "quant_layer_schema" in inputs
+    assert str(tmp_path) not in fp8["denoiser"].canonical_cache_inputs_json.decode()
+    assert "quant" not in json.loads(bf16["denoiser"].canonical_cache_inputs_json)

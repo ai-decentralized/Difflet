@@ -17,6 +17,7 @@ from difflet.backends.trainium.core.bucketing import (
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoTransformer3DModel
+from difflet.quant.checkpoint import split_fused_proj_out
 
 
 class HunyuanVideoBackboneInferenceConfig(InferenceConfig):
@@ -174,6 +175,11 @@ class ModelWrapperHunyuanVideoBackbone(ShapeBucketedInputGenerator, ModelWrapper
             model = self.model_cls(self.config)
             model = model.to(dtype=self.config.neuron_config.torch_dtype)
             model.eval()
+            # FP8 PTQ: swap the target NxD parallel linears for their quantized
+            # forms (no-op unless neuron_config.quantized); trace time and load.
+            from difflet.backends.trainium.core.quant import quantize_traced_model_
+
+            quantize_traced_model_(model, self.config.neuron_config)
             return model
 
         return BaseModelInstance(module_cls=_create_model, input_output_aliases={})
@@ -228,11 +234,15 @@ class NeuronHunyuanVideoBackboneApplication(NeuronApplicationBase):
         return self.models[0](*model_inputs, **kwargs)
 
     def get_compiler_args(self) -> str:
+        from difflet.backends.trainium.core.quant import fp8_hlo2tensorizer_options
+
+        # FP8 PTQ adds --experimental-unsafe-fp8e4m3fn-as-fp8e4m3 (see core/quant.py).
+        hlo2tensorizer = fp8_hlo2tensorizer_options(self.config.neuron_config) + "--verify-hlo=true"
         compiler_args = (
             "--model-type=transformer -O1 "
             "--tensorizer-options='--enable-ccop-compute-overlap' "
             "--auto-cast=none "
-            "--internal-hlo2tensorizer-options='--verify-hlo=true'"
+            f"--internal-hlo2tensorizer-options='{hlo2tensorizer}'"
         )
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
         return compiler_args
@@ -243,18 +253,16 @@ class NeuronHunyuanVideoBackboneApplication(NeuronApplicationBase):
         # matches the TP sharding of its input (attention head-shard vs MLP column-shard).
         # The fused RowParallelLinear over cat([attn, mlp]) is TP-incorrect — see
         # HunyuanVideoSingleTransformerBlock. Split point = inner_dim (the attn width).
+        # The attn half keeps the bias; an fp8 checkpoint's scale is copied to both
+        # halves (exact: the split is along the input dim).
         inner_dim = config.num_attention_heads * config.attention_head_dim
         for i in range(config.num_single_layers):
-            w = state_dict.pop(f"single_transformer_blocks.{i}.proj_out.weight")
-            b = state_dict.pop(f"single_transformer_blocks.{i}.proj_out.bias")
-            state_dict[f"single_transformer_blocks.{i}.proj_out_attn.weight"] = (
-                w[:, :inner_dim].clone().detach().contiguous()
-            )
-            state_dict[f"single_transformer_blocks.{i}.proj_out_attn.bias"] = (
-                b.clone().detach().contiguous()
-            )
-            state_dict[f"single_transformer_blocks.{i}.proj_out_mlp.weight"] = (
-                w[:, inner_dim:].clone().detach().contiguous()
+            split_fused_proj_out(
+                state_dict,
+                f"single_transformer_blocks.{i}.proj_out",
+                attn_name=f"single_transformer_blocks.{i}.proj_out_attn",
+                mlp_name=f"single_transformer_blocks.{i}.proj_out_mlp",
+                cols=inner_dim,
             )
         # The model-root global_rank SPMDRank must hold arange(world_size) whenever any
         # sequence/batch-sharding mode is on (CP, CFG, or Megatron-SP), so each rank reads

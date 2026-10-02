@@ -388,3 +388,51 @@ def test_cache_spec_keys_fp8_with_the_layer_schema_and_ignores_the_cache_root():
     # Compile-side (pipeline) and generate-side (orchestrator) specs hash identically.
     assert cache_key(spec({"quant": q, "quant_cache_dir": "/c"})) == cache_key(spec({"quant": q}))
     assert cache_key(spec({"quant": q})) != cache_key(spec(None))
+
+
+
+
+# ------------------------------------------------------------------ HunyuanVideo orchestrator
+
+
+def _hv_args(**overrides) -> argparse.Namespace:
+    defaults = dict(
+        model_id="hunyuanvideo-community/HunyuanVideo", tp_degree=4, cp_degree=1, cp_mode="gather_kv",
+        sp_enabled=False, height=320, width=512, num_frames=61, cache_dir="/tmp/cache", force=False,
+        revision=None, prompt="a cat", output="/tmp/h.mp4", steps=2, guidance_scale=6.0, seed=42,
+        work_dir=None, keep_work_dir=False, teacache_cadence=None, teacache_online_delta=None,
+        teacache_speedup=None, teacache_calibration=None, quant=None, quant_granularity="tensor",
+        quant_act="dynamic", shapes=None,
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def test_hunyuan_stage_identity_is_unchanged_for_bf16_and_extended_for_fp8(monkeypatch):
+    from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+    from difflet.cli.orchestrators import hunyuan_video as hv_orch
+
+    monkeypatch.setattr(hv_orch, "stage_toolchain_versions", lambda: {"toolchain": "x"})
+    bf16 = hv_orch.HunyuanVideoOrchestrator(_hv_args())
+    inputs = bf16._stage_cache_inputs("generate", bf16.args)
+    assert "quant" not in inputs and "quant_layer_schema" not in inputs
+    fp8 = hv_orch.HunyuanVideoOrchestrator(_hv_args(quant="fp8", quant_act="none"))
+    fp8_inputs = fp8._stage_cache_inputs("generate", fp8.args)
+    assert fp8_inputs["quant"] == QuantSpec.for_model("hunyuan_video", activation="none").to_dict()
+    assert fp8_inputs["quant_layer_schema"] == QUANT_LAYER_SCHEMA
+    assert {k: v for k, v in fp8_inputs.items() if k not in ("quant", "quant_layer_schema")} == inputs
+    for stage in ("clip", "llama"):
+        assert "quant" not in fp8._stage_cache_inputs(stage, fp8.args)
+    assert fp8._quant_app_kwargs(fp8.args) == {"quant": fp8_inputs["quant"], "quant_cache_dir": "/tmp/cache"}
+    assert bf16._quant_app_kwargs(bf16.args) == {}
+
+
+def test_hunyuan_shared_cli_args_forward_quant_flags_only_when_set():
+    from difflet.cli.orchestrators import hunyuan_video as hv_orch
+
+    bf16 = hv_orch.HunyuanVideoOrchestrator(_hv_args())._shared_cli_args(stage_mode="generate", work_dir="/w")
+    assert "--quant" not in bf16
+    fp8 = hv_orch.HunyuanVideoOrchestrator(_hv_args(quant="fp8", quant_act="none"))._shared_cli_args(
+        stage_mode="generate", work_dir="/w")
+    assert fp8[: len(bf16)] == bf16
+    assert fp8[len(bf16):] == QuantSpec.for_model("hunyuan_video", activation="none").cli_args()

@@ -13,6 +13,8 @@ from typing import Any
 
 import torch
 
+from difflet.quant.application_mixin import QuantApplicationMixin
+
 try:
     from difflet.backends.trainium.core.config import NeuronConfig
     from difflet.backends.trainium.core.multi_component_application import (
@@ -261,18 +263,31 @@ def create_hunyuan_video_backbone_config(
     cp_mode: str = "gather_kv",
     sp_enabled: bool = False,
     compile_shapes=None,
+    quant=None,
+    quant_checkpoint_dir=None,
 ):
     from difflet.backends.trainium.hunyuan_video.backbone import (
         HunyuanVideoBackboneInferenceConfig,
     )
+    from difflet.quant.spec import QuantSpec
 
     transformer_path = os.path.join(model_path, "transformer")
-    neuron_config = NeuronConfig(
+    neuron_kwargs: dict[str, Any] = dict(
         batch_size=batch_size,
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
     )
+    quant_spec = QuantSpec.coerce(quant)
+    if quant_spec is not None:
+        # FP8 PTQ: NxD's quantized parallel linears, weights from the offline
+        # quantized copy of transformer/ (see difflet.backends.trainium.core.quant).
+        if quant_checkpoint_dir is None:
+            raise ValueError("quant requires quant_checkpoint_dir (the quantized checkpoint path)")
+        from difflet.backends.trainium.core.quant import neuron_config_kwargs
+
+        neuron_kwargs.update(neuron_config_kwargs(quant_spec, quant_checkpoint_dir))
+    neuron_config = NeuronConfig(**neuron_kwargs)
     extra = {}
     if compile_shapes:
         extra["compile_shapes"] = compile_shapes
@@ -407,7 +422,9 @@ def _normalize_dtype(dtype: Any) -> torch.dtype:
     raise ValueError(f"Unsupported HunyuanVideo dtype: {dtype!r}")
 
 
-class NeuronHunyuanVideoApplication(MultiComponentApplication):
+class NeuronHunyuanVideoApplication(QuantApplicationMixin, MultiComponentApplication):
+    quant_tag = "hunyuan_video"
+
     def __init__(
         self,
         *,
@@ -487,6 +504,19 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
 
         enable_transformer = bool(kwargs.get("enable_transformer", True))
         enable_vae_decoder = bool(kwargs.get("enable_vae_decoder", False))
+        # FP8 PTQ of the 1.0 DiT linears (None = bf16); see QuantApplicationMixin.
+        self._init_quant(kwargs, model_type="hunyuan_video")
+        if self.quant_spec is not None and self.model_version == "1.5":
+            raise NotImplementedError("FP8 PTQ (--quant) is wired for HunyuanVideo 1.0 only.")
+        if self.quant_spec is not None and (
+            bool(kwargs.get("teacache_fused", False)) or kwargs.get("teacache_speedup") is not None
+        ):
+            # The probe sub-app shares this config and traces its own copy of the
+            # backbone without the quantization hook: it cannot load fp8 weights.
+            raise NotImplementedError(
+                "HunyuanVideo adaptive TeaCache (probe) is not supported together with --quant; "
+                "use --teacache-cadence / --teacache-online-delta or drop --quant."
+            )
         transformer_config_path = os.path.join(self.transformer_path, "config.json")
         self.transformer_config = None
         if os.path.exists(transformer_config_path):
@@ -583,6 +613,8 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 cp_mode=parallel.cp_mode,
                 sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
                 compile_shapes=self.compile_shapes,
+                quant=self.quant_spec,
+                quant_checkpoint_dir=self._quant_checkpoint_dir("transformer"),
             )
             self.transformer = NeuronHunyuanVideoBackboneApplication(
                 model_path=self.transformer_path,
@@ -593,9 +625,12 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
             # loaded as the "teacache_probe" component). Only the adaptive
             # TeaCache modes need it; callers that never run them (the CLI's
             # plain / probe-free runs) opt out so no probe NEFF is compiled or
-            # loaded. Default True keeps the Python API unchanged.
+            # loaded. Default True keeps the Python API unchanged; with --quant
+            # the probe (which cannot load fp8 weights) is never built.
             teacache_fused = bool(kwargs.get("teacache_fused", False))
             enable_teacache_probe = bool(kwargs.get("enable_teacache_probe", True))
+            if self.quant_spec is not None:
+                enable_teacache_probe = False
             if not enable_teacache_probe:
                 pass
             elif teacache_fused:

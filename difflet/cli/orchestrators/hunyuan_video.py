@@ -287,6 +287,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             enable_teacache_probe=adaptive,
             teacache_speedup=getattr(args, "teacache_speedup", None),
             teacache_calibration_path=getattr(args, "teacache_calibration", None),
+            **self._quant_app_kwargs(args),
         )
 
         if args.stage_mode == "compile":
@@ -371,7 +372,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
                 "toolchain": stage_toolchain_versions(),
             }
         if stage == "generate":
-            return {
+            inputs = {
                 "component": "hunyuan_video_dit",
                 "model_id": _HF_MODEL_ID,
                 "tp": args.tp_degree or 4,
@@ -383,7 +384,28 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
                 "shapes": canonical_shapes_list(args, (320, 512, 61)),
                 "toolchain": stage_toolchain_versions(),
             }
+            # Additive-only: absent for bf16 so every existing artifact keeps its key.
+            quant_spec = self._quant_spec(args)
+            if quant_spec is not None:
+                from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+
+                inputs["quant"] = quant_spec.to_dict()
+                inputs["quant_layer_schema"] = QUANT_LAYER_SCHEMA
+            return inputs
         raise ValueError(f"unknown stage {stage!r}")
+
+    @staticmethod
+    def _quant_spec(args: argparse.Namespace):
+        from difflet.quant.spec import QuantSpec
+
+        return QuantSpec.from_args(args, model_type="hunyuan_video")
+
+    def _quant_app_kwargs(self, args: argparse.Namespace) -> dict:
+        """FP8 PTQ kwargs for the application ({} for bf16)."""
+        spec = self._quant_spec(args)
+        if spec is None:
+            return {}
+        return {"quant": spec.to_dict(), "quant_cache_dir": args.cache_dir}
 
     def _stage_compiled_dir(self, stage: str, args: argparse.Namespace) -> Path:
         base = Path(args.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
@@ -440,4 +462,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             parts += ["--requests-dir", str(a.requests_dir),
                       "--worker-index", str(a.worker_index),
                       "--dp-schedule", str(getattr(a, "dp_schedule", "round_robin"))]
+        quant_spec = self._quant_spec(a)
+        if quant_spec is not None:
+            parts += quant_spec.cli_args()
         return parts

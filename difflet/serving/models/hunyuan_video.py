@@ -757,14 +757,20 @@ def _compile_specs(
             "tensor_capture": _LLAMA_CAPTURE,
         }
     )
-    denoiser_identity = CompileArtifactIdentity.from_cache_inputs(
-        {
-            **common,
-            "component_id": "denoiser",
-            "shapes": shapes_list,
-            "text_seq_len": _TEXT_SEQ_LEN,
-        }
-    )
+    denoiser_inputs = {
+        **common,
+        "component_id": "denoiser",
+        "shapes": shapes_list,
+        "text_seq_len": _TEXT_SEQ_LEN,
+    }
+    if profile.quant is not None:
+        # FP8 PTQ (additive, fp8 only): the spec and the quantized-layer schema
+        # key the denoiser NEFF; the cache root is runtime-only.
+        from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+
+        denoiser_inputs["quant"] = profile.quant.to_dict()
+        denoiser_inputs["quant_layer_schema"] = QUANT_LAYER_SCHEMA
+    denoiser_identity = CompileArtifactIdentity.from_cache_inputs(denoiser_inputs)
     specs: list[DiffletCompileSpec] = []
     if _clip_placement(profile) == "neuron":
         clip_identity = CompileArtifactIdentity.from_cache_inputs(
@@ -899,6 +905,15 @@ def _build_llama_app(
     return NeuronLlamaForCausalLM(encoder_path, config)
 
 
+def _quant_kwargs(profile: ServingProfile) -> dict:
+    """FP8 PTQ application kwargs ({} for bf16): the spec is hashed into the
+    denoiser identity, the cache root only locates the quantized copy."""
+    quant = getattr(profile, "quant", None)
+    if quant is None:
+        return {}
+    return {"quant": quant.to_dict(), "quant_cache_dir": profile.cache_dir}
+
+
 def _build_denoiser(source: ResolvedModelSource, profile: ServingProfile):
     from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
 
@@ -911,6 +926,7 @@ def _build_denoiser(source: ResolvedModelSource, profile: ServingProfile):
         text_seq_len=_TEXT_SEQ_LEN,
         enable_transformer=True,
         enable_vae_decoder=False,
+        **_quant_kwargs(profile),
     )
     # The current CLI does not compile/load the optional TeaCache probe for its
     # baseline generation artifact; preserve that exact lower-layer contract.
