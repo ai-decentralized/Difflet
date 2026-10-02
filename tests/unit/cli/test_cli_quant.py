@@ -275,3 +275,38 @@ def test_pipeline_cache_kwargs_key_the_layer_schema_for_fp8_only():
     fp8 = _cache_application_kwargs({"taef1": True, "quant": spec, "quant_cache_dir": "/c"}, model_name="flux")
     assert fp8["quant"] == spec and fp8["quant_layer_schema"] == QUANT_LAYER_SCHEMA
     assert fp8["taef1"] is True
+
+
+
+def test_quantize_command_uses_the_model_targets_and_rejects_unwired_models(monkeypatch, tmp_path, capsys):
+    import torch
+    from safetensors.torch import save_file
+
+    from difflet.cli import quantize as quantize_cmd
+    from difflet.quant.checkpoint import read_manifest
+
+    model_dir = tmp_path / "flux"
+    (model_dir / "transformer").mkdir(parents=True)
+    save_file(
+        {"transformer_blocks.0.attn.to_q.weight": torch.randn(8, 8, dtype=torch.bfloat16),
+         "blocks.0.attn1.to_q.weight": torch.randn(8, 8, dtype=torch.bfloat16),   # a Wan-style name: not a FLUX target
+         "proj_out.weight": torch.randn(4, 8, dtype=torch.bfloat16)},
+        str(model_dir / "transformer" / "diffusion_pytorch_model.safetensors"),
+    )
+    (model_dir / "transformer" / "config.json").write_text(json.dumps({}))
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", lambda *a, **k: str(model_dir))
+
+    args = argparse.Namespace(model_id="black-forest-labs/FLUX.1-dev", revision=None, quant="fp8",
+                              quant_granularity="tensor", quant_act="dynamic",
+                              cache_dir=str(tmp_path / "cache"), force=False)
+    assert quantize_cmd.run(args) == 0
+    dest = next((tmp_path / "cache" / "quantized").rglob("difflet_quant.json")).parent
+    manifest = read_manifest(dest)
+    assert manifest["report"]["quantized"] == ["transformer_blocks.0.attn.to_q"]  # FLUX targets, not Wan's
+    assert manifest["spec"]["targets"] == list(QuantSpec.for_model("flux").targets)
+
+    unwired = argparse.Namespace(model_id="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+                                 revision=None, quant="fp8", quant_granularity="tensor", quant_act="dynamic",
+                                 cache_dir=str(tmp_path / "cache"), force=False)
+    assert quantize_cmd.run(unwired) == 1
+    assert "does not support --quant" in capsys.readouterr().err

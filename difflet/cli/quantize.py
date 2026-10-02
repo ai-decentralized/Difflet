@@ -36,9 +36,18 @@ def transformer_subfolders(model_dir: str) -> list[str]:
 def run(args: argparse.Namespace) -> int:
     from difflet.pipeline.path_resolver import resolve_model_path
 
-    spec = QuantSpec.from_args(args)
+    from difflet.cli.main import _MODEL_TYPE  # lazy: main imports this module
+
+    model_type = _MODEL_TYPE.get(args.model_id)
+    spec = QuantSpec.from_args(args, model_type=model_type if model_type in QUANT_MODEL_TYPES else None)
     if spec is None:
         print("Error: --quant is required (e.g. --quant fp8).", file=sys.stderr)
+        return 1
+    if model_type not in QUANT_MODEL_TYPES:
+        print(
+            f"Error: {args.model_id} does not support --quant (wired: {', '.join(sorted(QUANT_MODEL_TYPES))}).",
+            file=sys.stderr,
+        )
         return 1
     try:
         model_dir = resolve_model_path(args.model_id, revision=args.revision, local_files_only=True)
