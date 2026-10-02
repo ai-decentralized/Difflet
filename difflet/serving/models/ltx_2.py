@@ -145,6 +145,13 @@ def build_pipeline(
             "enable_decode_components": True,
             "host_device": "cpu",
         }
+    # FP8 PTQ: the spec is hashed into the generation identity (plus the layer
+    # schema the pipeline's cache step adds); the cache root is runtime-only.
+    from difflet.common.orchestrators.flux import quant_application_kwargs
+
+    quant_kwargs = quant_application_kwargs(profile)
+    if quant_kwargs:
+        application_kwargs = {**(application_kwargs or {}), **quant_kwargs}
     return DiffletPipeline.from_pretrained(
         source.model_id,
         model_type=_MODEL_TYPE,

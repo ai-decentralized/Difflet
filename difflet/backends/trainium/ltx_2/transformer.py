@@ -717,6 +717,11 @@ class ModelWrapperLTX2Transformer(ModelWrapper):
             model = self.model_cls(self.config)
             model = model.to(dtype=self.config.neuron_config.torch_dtype)
             model.eval()
+            # FP8 PTQ: swap the target NxD parallel linears for their quantized
+            # forms (no-op unless neuron_config.quantized); trace time and load.
+            from difflet.backends.trainium.core.quant import quantize_traced_model_
+
+            quantize_traced_model_(model, self.config.neuron_config)
             return model
 
         return BaseModelInstance(module_cls=_create_model, input_output_aliases={})
@@ -818,17 +823,22 @@ class NeuronLTX2TransformerApplication(NeuronApplicationBase):
         return self.models[0](*model_inputs, **kwargs)
 
     def get_compiler_args(self) -> str:
+        from difflet.backends.trainium.core.quant import fp8_hlo2tensorizer_options
+
+        # FP8 PTQ adds --experimental-unsafe-fp8e4m3fn-as-fp8e4m3 (see core/quant.py).
+        hlo2tensorizer = fp8_hlo2tensorizer_options(self.config.neuron_config) + "--verify-hlo=true"
         compiler_args = (
             "--model-type=transformer -O1 "
             "--tensorizer-options='--enable-ccop-compute-overlap' "
             "--auto-cast=none "
-            "--internal-hlo2tensorizer-options='--verify-hlo=true'"
+            f"--internal-hlo2tensorizer-options='{hlo2tensorizer}'"
         )
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
         return compiler_args
 
     @staticmethod
     def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
+        # Every key (fp8 weights and their .scale alike) gets the transformer. prefix.
         out = {
             key if key.startswith("transformer.") else f"transformer.{key}": value
             for key, value in state_dict.items()

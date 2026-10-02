@@ -262,19 +262,16 @@ def test_flux_application_kwargs_add_quant_only_when_set():
     assert {k: v for k, v in fp8.items() if k not in ("quant", "quant_cache_dir")} == plain
 
 
-def test_pipeline_cache_kwargs_key_the_layer_schema_for_fp8_only():
-    """DiffletPipeline models (FLUX, LTX-2): the cache key gains quant + the layer
-    schema; quant_cache_dir is runtime-only; bf16 kwargs are untouched."""
-    from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+def test_pipeline_cache_kwargs_pass_quant_through_unchanged():
+    """DiffletPipeline models (FLUX, LTX-2): the compile-time cache kwargs keep
+    quant as-is (CacheSpec adds the layer schema); bf16 kwargs are untouched."""
     from difflet.pipeline.difflet_pipeline import _cache_application_kwargs
 
     assert _cache_application_kwargs({}, model_name="flux") is None
-    bf16 = _cache_application_kwargs({"taef1": True}, model_name="flux")
-    assert bf16 == {"taef1": True}
+    assert _cache_application_kwargs({"taef1": True}, model_name="flux") == {"taef1": True}
     spec = QuantSpec.for_model("flux").to_dict()
     fp8 = _cache_application_kwargs({"taef1": True, "quant": spec, "quant_cache_dir": "/c"}, model_name="flux")
-    assert fp8["quant"] == spec and fp8["quant_layer_schema"] == QUANT_LAYER_SCHEMA
-    assert fp8["taef1"] is True
+    assert fp8 == {"taef1": True, "quant": spec, "quant_cache_dir": "/c"}
 
 
 
@@ -345,3 +342,49 @@ def test_qwen_stage_identity_is_unchanged_for_bf16_and_extended_for_fp8(monkeypa
         assert "quant" not in fp8._stage_cache_inputs(stage, fp8.args)
     assert fp8._quant_app_kwargs(fp8.args) == {"quant": fp8_inputs["quant"], "quant_cache_dir": "/tmp/cache"}
     assert bf16._quant_app_kwargs(bf16.args) == {}
+
+
+
+# ------------------------------------------------------------------ LTX-2 orchestrator
+
+
+def _ltx2_args(**overrides) -> argparse.Namespace:
+    defaults = dict(
+        model_id="Lightricks/LTX-2", tp_degree=4, cp_degree=1, cfg_parallel=False, height=480, width=704,
+        num_frames=49, cache_dir="/tmp/cache", force=False, revision=None, prompt="a cat",
+        output="/tmp/l.mp4", steps=2, guidance_scale=3.5, seed=42, teacache_cadence=None,
+        teacache_online_delta=None, teacache_speedup=None, teacache_calibration=None,
+        quant=None, quant_granularity="tensor", quant_act="dynamic", shapes=None,
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def test_ltx2_application_kwargs_add_quant_only_when_set():
+    from difflet.cli.orchestrators import ltx_2 as ltx_orch
+
+    assert ltx_orch.LTX2Orchestrator(_ltx2_args())._application_kwargs() == {}
+    fp8 = ltx_orch.LTX2Orchestrator(_ltx2_args(quant="fp8", quant_act="none"))._application_kwargs()
+    assert fp8 == {"quant": QuantSpec.for_model("ltx_2", activation="none").to_dict(), "quant_cache_dir": "/tmp/cache"}
+
+
+def test_cache_spec_keys_fp8_with_the_layer_schema_and_ignores_the_cache_root():
+    """Compile (DiffletPipeline.precompile) and generate (the orchestrators' own CacheSpec)
+    must agree on the fp8 key, so the schema is part of CacheSpec itself; bf16 keys are untouched."""
+    from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+    from difflet.pipeline.compile_cache import CacheSpec, cache_key
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    def spec(app_kwargs):
+        return CacheSpec(model_id="m", model_path="/m", model_name="flux", parallel=DiffletParallelConfig(tp_degree=4),
+                         dtype="bfloat16", height=64, width=64, num_frames=None, revision=None,
+                         application_kwargs=app_kwargs)
+
+    bf16 = spec(None).cache_inputs()["application_kwargs"]
+    assert bf16 == spec({"quant_cache_dir": "/c"}).cache_inputs()["application_kwargs"]  # runtime-only
+    q = QuantSpec.for_model("flux").to_dict()
+    fp8 = spec({"quant": q, "quant_cache_dir": "/c"}).cache_inputs()["application_kwargs"]
+    assert fp8["quant"] == q and fp8["quant_layer_schema"] == QUANT_LAYER_SCHEMA and "quant_cache_dir" not in fp8
+    # Compile-side (pipeline) and generate-side (orchestrator) specs hash identically.
+    assert cache_key(spec({"quant": q, "quant_cache_dir": "/c"})) == cache_key(spec({"quant": q}))
+    assert cache_key(spec({"quant": q})) != cache_key(spec(None))

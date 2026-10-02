@@ -68,6 +68,18 @@ class CacheSpec:
         the same key (enables cross-machine cache sharing). Also uses only
         the major.minor Python version to avoid micro-version churn.
         """
+        app_kwargs = {
+            key: value
+            for key, value in (self.application_kwargs or {}).items()
+            if key not in _RUNTIME_ONLY_APP_KWARGS
+        }
+        if app_kwargs.get("quant") is not None:
+            # FP8 PTQ (additive, fp8 only): the quantized-layer schema keys the
+            # NEFF. Lives here so compile (DiffletPipeline.precompile) and the
+            # orchestrators' generate-time CacheSpec agree on the key.
+            from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+
+            app_kwargs["quant_layer_schema"] = QUANT_LAYER_SCHEMA
         inputs: dict[str, Any] = {
             "model_id": self.model_id,
             "model_name": self.model_name,
@@ -75,13 +87,7 @@ class CacheSpec:
             "parallel": self.parallel.to_cache_dict(),
             "dtype": normalize_dtype(self.dtype),
             "shapes": self.canonical_shapes(),
-            "application_kwargs": _normalize_for_cache(
-                {
-                    key: value
-                    for key, value in (self.application_kwargs or {}).items()
-                    if key not in _RUNTIME_ONLY_APP_KWARGS
-                }
-            ),
+            "application_kwargs": _normalize_for_cache(app_kwargs),
             "toolchain": _cache_relevant_toolchain_versions(),
         }
         # Additive-only (cclog 56 D3): inject the candidate sub-dict

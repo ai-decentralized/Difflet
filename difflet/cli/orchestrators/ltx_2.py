@@ -63,7 +63,20 @@ class LTX2Orchestrator(ModelOrchestrator):
             compile_cache_dir=self.args.cache_dir,
             force_compile=self.args.force,
             revision=self.args.revision,
+            application_kwargs=self._application_kwargs() or None,
         )
+
+    def _application_kwargs(self) -> dict[str, Any]:
+        """Model-opt kwargs shared by compile and load (hashed into the cache key):
+        FP8 PTQ's spec (the cache root is runtime-only)."""
+        from difflet.quant.spec import QuantSpec
+
+        app_kwargs: dict[str, Any] = {}
+        quant_spec = QuantSpec.from_args(self.args, model_type="ltx_2")
+        if quant_spec is not None:
+            app_kwargs["quant"] = quant_spec.to_dict()
+            app_kwargs["quant_cache_dir"] = self.args.cache_dir
+        return app_kwargs
 
     def generate(self) -> None:
         import torch
@@ -123,6 +136,7 @@ class LTX2Orchestrator(ModelOrchestrator):
             model_name=entry.name, parallel=parallel, dtype=self._dtype(),
             height=shape.get("height"), width=shape.get("width"),
             num_frames=shape.get("num_frames"), revision=self.args.revision,
+            application_kwargs=self._application_kwargs() or None,
         )
         compiled = cache_path(self.args.cache_dir, spec)
         if not has_valid_manifest(compiled, spec):
@@ -145,6 +159,7 @@ class LTX2Orchestrator(ModelOrchestrator):
             application_kwargs["teacache_cadence"] = self.args.teacache_cadence
         if getattr(self.args, "teacache_online_delta", None) is not None:
             application_kwargs["teacache_online_delta_alpha"] = self.args.teacache_online_delta
+        application_kwargs.update(self._application_kwargs())
 
         return DiffletPipeline.from_pretrained(
             _HF_MODEL_ID,

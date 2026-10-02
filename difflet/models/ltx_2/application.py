@@ -15,6 +15,7 @@ from typing import Any
 import torch
 
 from difflet.backends.trainium.core.config import NeuronConfig
+from difflet.quant.application_mixin import QuantApplicationMixin
 from difflet.backends.trainium.core.multi_component_application import (
     ComponentSpec,
     MultiComponentApplication,
@@ -112,6 +113,42 @@ def validate_ltx_2_dit_inputs(
             )
 
 
+def transformer_neuron_config(
+    *,
+    tp_degree: int,
+    world_size: int,
+    dtype,
+    batch_size: int = 1,
+    quant=None,
+    quant_checkpoint_dir=None,
+) -> NeuronConfig:
+    """The LTX-2 transformer's NeuronConfig; FP8 PTQ adds NxD's quant fields
+    (+ quant_targets from the LTX-2 target set). bf16 configs are unchanged."""
+    from difflet.quant.spec import QuantSpec
+
+    kwargs: dict[str, Any] = dict(
+        batch_size=batch_size, tp_degree=tp_degree, world_size=world_size, torch_dtype=dtype
+    )
+    quant_spec = QuantSpec.coerce(quant)
+    if quant_spec is not None:
+        if quant_checkpoint_dir is None:
+            raise ValueError("quant requires quant_checkpoint_dir (the quantized checkpoint path)")
+        from difflet.backends.trainium.core.quant import neuron_config_kwargs
+
+        kwargs.update(neuron_config_kwargs(quant_spec, quant_checkpoint_dir))
+    return NeuronConfig(**kwargs)
+
+
+def reject_quant_for_segmented(transformer_mode: str, quant_spec) -> None:
+    """The segmented runtime loads blocks itself (plain nn.Linear, bf16 cast,
+    own loader) and bypasses the quantized checkpoint: fail before any compile."""
+    if transformer_mode == "segmented" and quant_spec is not None:
+        raise ValueError(
+            "LTX-2 segmented mode does not support --quant (FP8 PTQ is wired for "
+            "--transformer-mode single); drop --quant or use single mode."
+        )
+
+
 def create_ltx_2_transformer_config(
     *,
     model_path: str,
@@ -127,15 +164,19 @@ def create_ltx_2_transformer_config(
     frame_rate: float = 24.0,
     batch_size: int = 1,
     cfg_parallel_enabled: bool = False,
+    quant=None,
+    quant_checkpoint_dir=None,
 ):
     from difflet.backends.trainium.ltx_2.transformer import LTX2TransformerInferenceConfig
 
     transformer_path = os.path.join(model_path, "transformer")
-    neuron_config = NeuronConfig(
-        batch_size=batch_size,
+    neuron_config = transformer_neuron_config(
         tp_degree=tp_degree,
         world_size=world_size,
-        torch_dtype=dtype,
+        dtype=dtype,
+        batch_size=batch_size,
+        quant=quant,
+        quant_checkpoint_dir=quant_checkpoint_dir,
     )
     return LTX2TransformerInferenceConfig(
         neuron_config=neuron_config,
@@ -161,7 +202,9 @@ def _normalize_dtype(dtype: Any) -> torch.dtype:
     raise ValueError(f"Unsupported LTX-2 dtype: {dtype!r}")
 
 
-class NeuronLTX2Application(MultiComponentApplication):
+class NeuronLTX2Application(QuantApplicationMixin, MultiComponentApplication):
+    quant_tag = "ltx_2"
+
     def __init__(
         self,
         *,
@@ -182,6 +225,9 @@ class NeuronLTX2Application(MultiComponentApplication):
         }
         self.kwargs = kwargs
         self.transformer_path = os.path.join(model_path, "transformer")
+        # FP8 PTQ of the DiT linears (None = bf16); see QuantApplicationMixin.
+        self._init_quant(kwargs, model_type="ltx_2")
+        reject_quant_for_segmented(str(kwargs.get("transformer_mode", "single")), self.quant_spec)
         self.transformer = None
         self.teacache_probe = None
         self.teacache_probe_fused = False
@@ -220,6 +266,8 @@ class NeuronLTX2Application(MultiComponentApplication):
                 frame_rate=self.frame_rate,
                 batch_size=transformer_batch_size,
                 cfg_parallel_enabled=cfg_parallel_enabled,
+                quant=self.quant_spec,
+                quant_checkpoint_dir=self._quant_checkpoint_dir("transformer"),
             )
             if transformer_mode == "single":
                 from difflet.backends.trainium.ltx_2.transformer import (
