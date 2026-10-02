@@ -14,6 +14,7 @@ import argparse
 import hashlib
 import json
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from typing import Any
 
 FORMAT_FP8_E4M3 = "fp8_e4m3"
@@ -21,21 +22,11 @@ FORMATS = (FORMAT_FP8_E4M3,)
 GRANULARITIES = ("tensor", "channel")
 ACTIVATIONS = ("dynamic", "none")
 
-# Module-name suffixes of the FastVideo FP8 layer set. ``to_out.0`` is the
-# diffusers/Difflet attention output projection (index 1 is the dropout). The
-# FFN is listed in both spellings: Difflet's ``ffn.net_in`` / ``ffn.net_out``
-# (the traced model, the CPU model) and diffusers' ``ffn.net.0.proj`` /
-# ``ffn.net.2`` (the HF checkpoint the offline quantizer reads).
-DEFAULT_TARGETS: tuple[str, ...] = (
-    "to_q",
-    "to_k",
-    "to_v",
-    "to_out.0",
-    "ffn.net_in",
-    "ffn.net_out",
-    "ffn.net.0.proj",
-    "ffn.net.2",
-)
+# The Wan target set is the default (the first wired model); the per-model
+# sets live in difflet.quant.targets. ``to_out.0`` is the diffusers/Difflet
+# attention output projection (index 1 is the dropout). A target is a dotted
+# suffix or, when it contains ``*``, a glob over the full module name.
+from difflet.quant.targets import WAN_TARGETS as DEFAULT_TARGETS  # noqa: E402
 
 # CLI spelling -> spec value.
 CLI_FORMATS = {"fp8": FORMAT_FP8_E4M3}
@@ -69,8 +60,26 @@ class QuantSpec:
     # ---------------------------------------------------------------- matching
 
     def matches(self, module_name: str) -> bool:
-        """True when ``module_name`` (dotted, no trailing ``.weight``) is a target."""
-        return any(module_name == t or module_name.endswith("." + t) for t in self.targets)
+        """True when ``module_name`` (dotted, no trailing ``.weight``) is a target.
+
+        Globs (``*`` in the pattern) match the whole name; because the Qwen /
+        LTX-2 device names carry a ``transformer.`` prefix, a glob also
+        matches with any dotted prefix in front of it.
+        """
+        for t in self.targets:
+            if "*" in t:
+                if fnmatchcase(module_name, t) or fnmatchcase(module_name, "*." + t):
+                    return True
+            elif module_name == t or module_name.endswith("." + t):
+                return True
+        return False
+
+    @classmethod
+    def for_model(cls, model_type: str, **fields: Any) -> "QuantSpec":
+        """A spec with ``model_type``'s target set (``ValueError`` if not wired)."""
+        from difflet.quant.targets import targets_for
+
+        return cls(targets=targets_for(model_type), **fields)
 
     # ------------------------------------------------------------- serialization
 
@@ -138,18 +147,25 @@ class QuantSpec:
     # ----------------------------------------------------------------------- CLI
 
     @classmethod
-    def from_args(cls, args: argparse.Namespace) -> "QuantSpec | None":
-        """Build from ``--quant/--quant-granularity/--quant-act``; None when unset."""
+    def from_args(
+        cls, args: argparse.Namespace, model_type: str | None = None
+    ) -> "QuantSpec | None":
+        """Build from ``--quant/--quant-granularity/--quant-act``; None when unset.
+
+        ``model_type`` selects that model's target set; without it the default
+        (Wan) targets apply.
+        """
         fmt = getattr(args, "quant", None)
         if not fmt:
             return None
         if fmt not in CLI_FORMATS:
             raise ValueError(f"--quant must be one of {sorted(CLI_FORMATS)}, got {fmt!r}")
-        return cls(
+        fields = dict(
             format=CLI_FORMATS[fmt],
             weight_granularity=getattr(args, "quant_granularity", None) or "tensor",
             activation=getattr(args, "quant_act", None) or "dynamic",
         )
+        return cls.for_model(model_type, **fields) if model_type else cls(**fields)
 
     def cli_args(self) -> list[str]:
         return [
