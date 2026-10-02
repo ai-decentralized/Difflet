@@ -68,6 +68,19 @@ LTX_2_TARGETS: tuple[str, ...] = tuple(
     "transformer_blocks.*.audio_ff.net.2",
 )
 
+# Spellings that exist only in the HF checkpoint the offline quantizer reads,
+# never as a module of the traced device model: Wan's diffusers FFN names and
+# the fused single-block proj_out that FLUX / HunyuanVideo split at load.
+HF_ONLY_TARGETS: frozenset[str] = frozenset(
+    {"ffn.net.0.proj", "ffn.net.2", "single_transformer_blocks.*.proj_out"}
+)
+
+
+def device_targets(targets: "tuple[str, ...] | list[str]") -> list[str]:
+    """The targets the device-side convert must find as modules."""
+    return [t for t in targets if t not in HF_ONLY_TARGETS]
+
+
 TARGETS_BY_MODEL: dict[str, tuple[str, ...]] = {
     "wan": WAN_TARGETS,
     "flux": FLUX_TARGETS,

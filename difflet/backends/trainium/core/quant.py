@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from difflet.quant.spec import QuantSpec
+from difflet.quant.spec import DEFAULT_TARGETS, QuantSpec
 
 _NXD_QUANTIZATION_TYPE = {
     "tensor": "per_tensor_symmetric",
@@ -53,6 +53,9 @@ def neuron_config_kwargs(spec: QuantSpec, quantized_checkpoints_path: str | os.P
     activation = _NXD_ACTIVATION_TYPE[spec.activation]
     if activation is not None:
         kwargs["activation_quantization_type"] = activation
+    # Which modules the device-side convert swaps (difflet.quant.targets);
+    # additive: only quantized apps carry it, bf16 identities are unchanged.
+    kwargs["quant_targets"] = list(spec.targets)
     return kwargs
 
 
@@ -274,23 +277,63 @@ def quant_module_mapping() -> dict[Any, Any]:
     return _MAPPING
 
 
+def include_patterns(targets: "list[str] | tuple[str, ...]") -> list[str]:
+    """NxD ``convert(include=...)`` patterns (fnmatch on the full module name).
+
+    Each target is matched as the whole name and under any dotted prefix, so
+    both a dotted suffix (``to_q``) and a glob
+    (``single_transformer_blocks.*.proj_out``) scope exactly the modules
+    ``QuantSpec.matches`` would.
+    """
+    patterns: list[str] = []
+    for t in targets:
+        patterns += [t, f"*.{t}"]
+    return patterns
+
+
+def _target_matches(target: str, names: "list[str]") -> bool:
+    from fnmatch import fnmatchcase
+
+    return any(
+        n == target or n.endswith("." + target) or fnmatchcase(n, target) or fnmatchcase(n, f"*.{target}")
+        for n in names
+    )
+
+
 def quantize_traced_model_(model: Any, neuron_config: Any) -> Any:
-    """In place: swap the model's NxD parallel linears for their quantized forms.
+    """In place: swap the model's target NxD parallel linears for their quantized forms.
 
     No-op unless ``neuron_config.quantized``. Called from a backbone's
     ``_create_model`` after the bf16 cast, i.e. at trace time and at every
     load, so the traced graph and the weight loader agree on the layer set.
+    The swap is scoped to ``neuron_config.quant_targets`` (the spec's targets)
+    rather than every parallel linear in the model: FLUX / Qwen-Image /
+    HunyuanVideo also build embedders, modulation and the root ``proj_out``
+    as parallel linears, and those carry no fp8 weights. A device target that
+    matches no module raises, so a renamed layer cannot silently stay bf16;
+    HF-only spellings (``difflet.quant.targets.HF_ONLY_TARGETS``) are the
+    offline quantizer's business and are skipped here.
     """
     if not getattr(neuron_config, "quantized", False):
         return model
     from neuronx_distributed.quantization.quantize import convert
 
+    from difflet.quant.targets import device_targets
+
+    targets = device_targets(getattr(neuron_config, "quant_targets", None) or DEFAULT_TARGETS)
+    names = [name for name, _ in model.named_modules()]
+    unmatched = [t for t in targets if not _target_matches(t, names)]
+    if unmatched:
+        raise ValueError(
+            f"FP8 targets match no module in {type(model).__name__}: {unmatched} "
+            "(renamed layer? see difflet.quant.targets)"
+        )
     convert(
         model,
         q_config=build_q_config(neuron_config),
         inplace=True,
         mapping=quant_module_mapping(),
-        modules_to_not_convert=getattr(neuron_config, "modules_to_not_convert", None),
+        include=include_patterns(targets),
     )
     return model
 
@@ -300,6 +343,7 @@ __all__ = [
     "build_q_config",
     "dynamic_fp8_linear",
     "fp8_hlo2tensorizer_options",
+    "include_patterns",
     "is_fp8_quantized",
     "neuron_config_kwargs",
     "quant_module_mapping",

@@ -24,6 +24,7 @@ def test_neuron_config_kwargs_map_the_spec_onto_nxdi_fields(tmp_path):
         "quantization_type": "per_tensor_symmetric",
         "quantization_dtype": "f8e4m3",
         "activation_quantization_type": "dynamic",
+        "quant_targets": list(QuantSpec().targets),
     }
     weight_only = tq.neuron_config_kwargs(
         QuantSpec(weight_granularity="channel", activation="none"), "/q"
@@ -113,9 +114,9 @@ def fake_nxd(monkeypatch):
 
     calls = []
 
-    def convert(model, q_config, inplace, mapping, modules_to_not_convert):
-        calls.append(dict(model=model, q_config=q_config, inplace=inplace,
-                          mapping=mapping, modules_to_not_convert=modules_to_not_convert))
+    def convert(model, q_config, inplace, mapping, modules_to_not_convert=None, include=None):
+        calls.append(dict(model=model, q_config=q_config, inplace=inplace, mapping=mapping,
+                          modules_to_not_convert=modules_to_not_convert, include=include))
         return model
 
     cfg = types.ModuleType("neuronx_distributed.quantization.quantization_config")
@@ -127,13 +128,13 @@ def fake_nxd(monkeypatch):
     quantize = types.ModuleType("neuronx_distributed.quantization.quantize")
     quantize.convert = convert
 
-    class ColumnParallelLinear:  # the float layers convert() maps from
-        pass
-
-    class RowParallelLinear:
-        pass
-
     import torch
+
+    class ColumnParallelLinear(torch.nn.Module):  # the float layers convert() maps from
+        pass
+
+    class RowParallelLinear(torch.nn.Module):
+        pass
 
     class QuantizedColumnParallel:  # NxD's quantized forms Difflet subclasses
         @classmethod
@@ -200,25 +201,124 @@ def test_build_q_config_mirrors_nxdi_for_each_granularity(fake_nxd):
                                           activation_quantization_type=None))
 
 
+def _tiny_wan_module(fake_nxd):
+    """The Wan device layer set, as stand-in parallel linears (no HF spellings)."""
+    import torch
+
+    column, row = fake_nxd.layers[0], fake_nxd.layers[1]
+    block = torch.nn.Module()
+    block.to_q, block.to_k, block.to_v = column(), column(), column()
+    block.to_out = torch.nn.ModuleList([row()])
+    block.ffn = torch.nn.Module()
+    block.ffn.net_in, block.ffn.net_out = column(), row()
+    model = torch.nn.Module()
+    model.blocks = torch.nn.ModuleList([block])
+    model.proj_out = torch.nn.Linear(4, 4)
+    return model
+
+
 def test_quantize_traced_model_calls_convert_with_difflet_layers(fake_nxd):
     """convert() must map NxD's float layers onto Difflet's subclasses of the
     NxD quantized layers (the ones with the per-tensor DYNAMIC forward)."""
-    model = SimpleNamespace(name="wan")
+    model = _tiny_wan_module(fake_nxd)
     neuron_config = SimpleNamespace(
         quantized=True, quantization_type="per_tensor_symmetric", quantization_dtype="f8e4m3",
         activation_quantization_type="dynamic", quantize_clamp_bound=float("inf"),
-        modules_to_not_convert=["proj_out"],
+        modules_to_not_convert=["proj_out"],   # NxDI field; Difflet ignores it (scoped by include)
     )
     assert tq.quantize_traced_model_(model, neuron_config) is model
     (call,) = fake_nxd.calls
     assert call["model"] is model and call["inplace"] is True
-    assert call["modules_to_not_convert"] == ["proj_out"]
+    assert call["modules_to_not_convert"] is None  # scoped by include, never by exclusion
     assert call["q_config"]["quantized_dtype"].value == "f8e4m3"
     column, row, q_column, q_row = fake_nxd.layers
     assert set(call["mapping"]) == {column, row}
     assert issubclass(call["mapping"][column], q_column) and call["mapping"][column] is not q_column
     assert issubclass(call["mapping"][row], q_row) and call["mapping"][row] is not q_row
     assert tq.quant_module_mapping() is call["mapping"]  # built once
+
+
+def test_neuron_config_kwargs_carry_the_targets(tmp_path):
+    kwargs = tq.neuron_config_kwargs(QuantSpec.for_model("flux"), tmp_path / "q")
+    assert kwargs["quant_targets"] == list(QuantSpec.for_model("flux").targets)
+    assert tq.neuron_config_kwargs(QuantSpec(), "/q")["quant_targets"] == list(QuantSpec().targets)
+
+
+def test_include_patterns_cover_suffixes_and_globs():
+    assert tq.include_patterns(("to_q", "single_transformer_blocks.*.proj_out")) == [
+        "to_q", "*.to_q",
+        "single_transformer_blocks.*.proj_out", "*.single_transformer_blocks.*.proj_out",
+    ]
+
+
+def _model_with(fake_nxd, **children):
+    import torch
+
+    column = fake_nxd.layers[0]
+    model = torch.nn.Module()
+    for name in children:
+        setattr(model, name, column())
+    return model
+
+
+def test_quantize_traced_model_scopes_convert_to_the_targets(fake_nxd):
+    model = _model_with(fake_nxd, to_q=True)
+    neuron_config = SimpleNamespace(
+        quantized=True, quantization_type="per_tensor_symmetric", quantization_dtype="f8e4m3",
+        activation_quantization_type="dynamic", quantize_clamp_bound=float("inf"),
+        quant_targets=["to_q"],
+    )
+    tq.quantize_traced_model_(model, neuron_config)
+    (call,) = fake_nxd.calls
+    assert call["include"] == ["to_q", "*.to_q"]
+    assert call["modules_to_not_convert"] is None
+
+
+def test_scoped_convert_raises_on_unmatched_target(fake_nxd):
+    """A renamed layer must not silently stay bf16 (Review Focus 1)."""
+    model = _model_with(fake_nxd, to_q=True)
+    neuron_config = SimpleNamespace(
+        quantized=True, quantization_type="per_tensor_symmetric", quantization_dtype="f8e4m3",
+        activation_quantization_type=None, quantize_clamp_bound=float("inf"),
+        quant_targets=["to_q", "ffn.net_in"],
+    )
+    with pytest.raises(ValueError, match="ffn.net_in"):
+        tq.quantize_traced_model_(model, neuron_config)
+    assert fake_nxd.calls == []
+
+
+def test_hf_only_proj_out_glob_is_satisfied_by_the_device_halves(fake_nxd):
+    """FLUX / HunyuanVideo: the HF fused proj_out exists on device only as its halves."""
+    import torch
+
+    column = fake_nxd.layers[0]
+    model = torch.nn.Module()
+    model.single_transformer_blocks = torch.nn.ModuleList([torch.nn.Module()])
+    model.single_transformer_blocks[0].proj_out_attn = column()
+    model.single_transformer_blocks[0].proj_out_mlp = column()
+    neuron_config = SimpleNamespace(
+        quantized=True, quantization_type="per_tensor_symmetric", quantization_dtype="f8e4m3",
+        activation_quantization_type=None, quantize_clamp_bound=float("inf"),
+        quant_targets=["single_transformer_blocks.*.proj_out", "single_transformer_blocks.*.proj_out_attn",
+                       "single_transformer_blocks.*.proj_out_mlp"],
+    )
+    tq.quantize_traced_model_(model, neuron_config)   # must not raise on the HF-only glob
+    (call,) = fake_nxd.calls
+    assert "single_transformer_blocks.*.proj_out_attn" in call["include"]
+    assert "single_transformer_blocks.*.proj_out" not in call["include"]  # HF-only, not a device module
+
+
+def test_wan_default_targets_without_quant_targets_field_still_convert(fake_nxd):
+    """A NeuronConfig from before quant_targets existed: Wan's device set applies."""
+    model = _tiny_wan_module(fake_nxd)
+    neuron_config = SimpleNamespace(
+        quantized=True, quantization_type="per_tensor_symmetric", quantization_dtype="f8e4m3",
+        activation_quantization_type=None, quantize_clamp_bound=float("inf"),
+    )
+    tq.quantize_traced_model_(model, neuron_config)
+    (call,) = fake_nxd.calls
+    assert call["include"] == tq.include_patterns(
+        ["to_q", "to_k", "to_v", "to_out.0", "ffn.net_in", "ffn.net_out"])
 
 
 def test_from_float_types_the_quantized_layer_from_the_live_weight_dtype(fake_nxd):
