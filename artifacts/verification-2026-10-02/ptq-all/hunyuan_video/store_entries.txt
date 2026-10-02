@@ -1,0 +1,8 @@
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  2 06:51 hunyuanvideo-community--HunyuanVideo__text_encoder_2__e8c2aaa6__bfloat16__tp1__2c0a07ccd645b6f7
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  2 08:38 hunyuanvideo-community--HunyuanVideo__transformer__e8c2aaa6__bfloat16__qf8e4m3__tp4__0d50185019153d37
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  2 07:07 hunyuanvideo-community--HunyuanVideo__transformer__e8c2aaa6__bfloat16__tp4__ad736a671a4f48be
+drwxrwxr-x  2 ubuntu ubuntu 4096 Oct  2 08:08 hunyuanvideo-community--HunyuanVideo__vae__e8c2aaa6__bfloat16__tp1w4__26ecbb733d554269
+26G	/home/ubuntu/.cache/difflet/quantized/Qwen--Qwen-Image/transformer/
+14G	/home/ubuntu/.cache/difflet/quantized/Wan-AI--Wan2.1-T2V-14B-Diffusers/transformer/
+15G	/home/ubuntu/.cache/difflet/quantized/black-forest-labs--FLUX.1-dev/transformer/
+16G	/home/ubuntu/.cache/difflet/quantized/hunyuanvideo-community--HunyuanVideo/transformer/

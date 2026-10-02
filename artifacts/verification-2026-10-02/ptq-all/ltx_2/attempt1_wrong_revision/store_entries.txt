@@ -1,0 +1,3 @@
+26G	/home/ubuntu/.cache/difflet/quantized/Qwen--Qwen-Image/transformer/
+14G	/home/ubuntu/.cache/difflet/quantized/Wan-AI--Wan2.1-T2V-14B-Diffusers/transformer/
+15G	/home/ubuntu/.cache/difflet/quantized/black-forest-labs--FLUX.1-dev/transformer/

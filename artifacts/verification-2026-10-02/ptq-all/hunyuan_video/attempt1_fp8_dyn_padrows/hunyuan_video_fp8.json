@@ -1,0 +1,157 @@
+{
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "model_type": "hunyuan_video",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "quant": {
+    "format": "fp8",
+    "weight_granularity": "tensor",
+    "activation": "dynamic"
+  },
+  "compile_seconds": 4167.528145550998,
+  "compile_breakdown": {
+    "transformer": {
+      "module_load_s": 16.036,
+      "hlo_generate_s": 56.746,
+      "priority_hlo_compile_s": 176.092,
+      "all_hlo_compile_s": 0.005,
+      "build_total_s": 499.688,
+      "other_s": 250.809
+    },
+    "vae_decoder": {
+      "module_load_s": 1.101,
+      "hlo_generate_s": 0.346,
+      "priority_hlo_compile_s": 3551.931,
+      "all_hlo_compile_s": 0.001,
+      "build_total_s": 3649.259,
+      "other_s": 95.881
+    },
+    "wall_total_s": 4148.946
+  },
+  "load_seconds": 130.033,
+  "e2e_cold_seconds": 526.663,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 130.033
+      }
+    ],
+    "weights_load_total_s": 130.033,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 526.663,
+    "compute_and_overhead_s": 396.63,
+    "note": "VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode."
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 112.72610104600608,
+    "median": 112.72610104600608,
+    "std": 0.0,
+    "p50": 112.72610104600608,
+    "p90": 112.72610104600608,
+    "min": 112.72610104600608,
+    "max": 112.72610104600608,
+    "samples": [
+      112.72610104600608
+    ]
+  },
+  "step_latency": {
+    "n": 19,
+    "mean": 0.7770684210526316,
+    "median": 0.7768,
+    "std": 0.0007827432405389525,
+    "p50": 0.7768,
+    "p90": 0.7774,
+    "min": 0.7764,
+    "max": 0.7802,
+    "samples": [
+      0.7802,
+      0.7767,
+      0.7768,
+      0.7772,
+      0.7774,
+      0.7769,
+      0.7767,
+      0.7764,
+      0.7769,
+      0.7772,
+      0.7768,
+      0.7766,
+      0.7774,
+      0.7768,
+      0.7766,
+      0.7768,
+      0.7771,
+      0.7768,
+      0.777
+    ]
+  },
+  "step_basis": "real-loop DiT wall time per step, device-synced, step 0 excluded",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "steps/s": 1.2868879662428967
+  },
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved hunyuanvideo_fp8_tensor_dyn_out.mp4"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4, bf16, attention_cte; FP8 PTQ (dynamic activations) on the DiT linears",
+  "status": "ok",
+  "notes": [
+    "e2e_cold = 527 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 113 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 527 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-10-02 09:58 UTC",
+  "config_slug": "hunyuan_video_fp8",
+  "device_slug": "trn2",
+  "revision": "e8c2aaa66fe3742a32c11a6766aecbf07c56e773",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 6.0,
+  "output_kind": "video",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 9.665
+      }
+    ],
+    "weights_load_total_s": 9.665,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 112.726,
+    "compute_and_overhead_s": 103.061,
+    "note": "VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode."
+  }
+}

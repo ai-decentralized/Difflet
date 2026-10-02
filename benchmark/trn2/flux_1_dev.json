@@ -6,7 +6,10 @@
   "dtype": "bf16",
   "parallel": {
     "tp_degree": 4,
-    "cp_degree": 1
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
   },
   "shape": {
     "height": 1024,
@@ -14,122 +17,63 @@
     "num_frames": null
   },
   "steps": 28,
-  "compile_seconds": 1484.141739759998,
+  "quant": null,
+  "compile_seconds": 1038.297007207002,
   "compile_breakdown": {
     "text_encoder_clip": {
-      "module_load_s": 0.325,
-      "hlo_generate_s": 0.489,
-      "all_hlo_compile_s": 0.045,
-      "build_total_s": 0.956,
-      "other_s": 0.097
+      "module_load_s": 0.315,
+      "hlo_generate_s": 1.15,
+      "all_hlo_compile_s": 30.403,
+      "build_total_s": 32.039,
+      "other_s": 0.171
     },
     "text_encoder_t5": {
-      "module_load_s": 0.364,
-      "hlo_generate_s": 0.627,
-      "all_hlo_compile_s": 0.097,
-      "build_total_s": 1.169,
-      "other_s": 0.08
+      "module_load_s": 0.386,
+      "hlo_generate_s": 0.713,
+      "all_hlo_compile_s": 7.792,
+      "build_total_s": 8.963,
+      "other_s": 0.072
     },
     "transformer": {
-      "module_load_s": 1.977,
-      "hlo_generate_s": 9.411,
-      "priority_hlo_compile_s": 99.129,
+      "module_load_s": 1.605,
+      "hlo_generate_s": 14.112,
+      "priority_hlo_compile_s": 61.63,
       "all_hlo_compile_s": 0.002,
-      "build_total_s": 241.287,
-      "other_s": 130.767
+      "build_total_s": 159.259,
+      "other_s": 81.91
     },
     "vae_decoder": {
-      "module_load_s": 0.176,
-      "hlo_generate_s": 0.619,
-      "all_hlo_compile_s": 5.674,
-      "build_total_s": 6.877,
-      "other_s": 0.408
+      "module_load_s": 0.165,
+      "hlo_generate_s": 0.398,
+      "all_hlo_compile_s": 682.317,
+      "build_total_s": 683.283,
+      "other_s": 0.403
     },
-    "wall_total_s": 250.289
+    "wall_total_s": 883.543
   },
-  "load_seconds": 280.356,
-  "e2e_cold_seconds": 321.204,
-  "e2e_breakdown": {
-    "stages": [
-      {
-        "stage": "text_encoder_t5",
-        "load_s": 79.976
-      },
-      {
-        "stage": "transformer (denoise loop)",
-        "load_s": 188.489
-      },
-      {
-        "stage": "text_encoder_clip",
-        "load_s": 6.553
-      },
-      {
-        "stage": "vae_decoder",
-        "load_s": 5.338
-      }
-    ],
-    "weights_load_total_s": 280.356,
-    "weights_shard_total_s": 0.0,
-    "wall_total_s": 321.204,
-    "compute_and_overhead_s": 40.848
-  },
+  "load_seconds": null,
+  "e2e_cold_seconds": 306.685,
+  "e2e_breakdown": null,
   "e2e_warm": {
-    "n": 3,
-    "mean": 35.309720673666256,
-    "median": 35.29093960400496,
-    "std": 0.2659179004666863,
-    "p50": 35.29093960400496,
-    "p90": 35.64438639699074,
-    "min": 34.99383602000307,
-    "max": 35.64438639699074,
+    "n": 1,
+    "mean": 39.88936958499835,
+    "median": 39.88936958499835,
+    "std": 0.0,
+    "p50": 39.88936958499835,
+    "p90": 39.88936958499835,
+    "min": 39.88936958499835,
+    "max": 39.88936958499835,
     "samples": [
-      35.29093960400496,
-      34.99383602000307,
-      35.64438639699074
+      39.88936958499835
     ]
   },
-  "step_latency": {
-    "n": 27,
-    "mean": 0.26813758862974485,
-    "median": 0.26536884500819724,
-    "std": 0.01386195210656742,
-    "p50": 0.26536884500819724,
-    "p90": 0.2656687169946963,
-    "min": 0.2651213109929813,
-    "max": 0.33881384099368006,
-    "samples": [
-      0.33881384099368006,
-      0.2653992710111197,
-      0.26529385898902547,
-      0.26548657500825357,
-      0.26520485000219196,
-      0.26548338199791033,
-      0.26533039000059944,
-      0.2652651909884298,
-      0.2653296210046392,
-      0.265910112997517,
-      0.26536884500819724,
-      0.2655943709978601,
-      0.26528957100526895,
-      0.26571171199611854,
-      0.2656687169946963,
-      0.2653172970021842,
-      0.26548390100651886,
-      0.26563757099211216,
-      0.2655711789993802,
-      0.2651741040026536,
-      0.26536812099220697,
-      0.26558399701025337,
-      0.2651213109929813,
-      0.26536354499694426,
-      0.26528718500048853,
-      0.26548147600260563,
-      0.265174897009274
-    ]
-  },
-  "throughput": {
-    "DiT steps/s": 3.729
-  },
+  "step_latency": null,
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {},
   "peak_device_mem_gb": null,
   "output": {
     "shape": null,
@@ -143,19 +87,18 @@
   },
   "toolchain": {
     "torch": "2.9.1",
-    "torch-neuronx": "2.9.0.2.14.27725+e2ff0410",
-    "neuronx-cc": "2.25.3371.0+f524f7f8",
-    "neuronx-distributed": "0.19.28093+fc70b593",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
     "diffusers": "0.38.0"
   },
   "config_label": "tp=4 (registry default tp=8 -> 4 on trn2.3xlarge), bf16, attention_cte",
   "status": "ok",
   "notes": [
-    "per-step = 268.1 ms/DiT-step (median 265.4, p90 265.7, n=27) \u2014 measured the SAME way as H100: inter-step deltas of a real 28-step generate (wrapping NeuronFluxBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 28 DiT calls timed; warm generate 8s; output finite=True.",
-    "e2e_cold = 321 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
-    "e2e_warm = 35 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+    "e2e_cold = 307 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 40 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 307 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
   ],
-  "timestamp": "2026-06-30 06:06 UTC",
+  "timestamp": "2026-10-02 04:57 UTC",
   "config_slug": "flux_1_dev",
   "device_slug": "trn2",
   "revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
@@ -163,28 +106,5 @@
   "prompt": "a cinematic shot of a red fox running through a snowy forest",
   "guidance_scale": 3.5,
   "output_kind": "image",
-  "e2e_warm_breakdown": {
-    "stages": [
-      {
-        "stage": "text_encoder_t5",
-        "load_s": 9.126
-      },
-      {
-        "stage": "transformer (denoise loop)",
-        "load_s": 6.703
-      },
-      {
-        "stage": "text_encoder_clip",
-        "load_s": 0.124
-      },
-      {
-        "stage": "vae_decoder",
-        "load_s": 2.204
-      }
-    ],
-    "weights_load_total_s": 18.157,
-    "weights_shard_total_s": 0.0,
-    "wall_total_s": 35.644,
-    "compute_and_overhead_s": 17.487
-  }
+  "e2e_warm_breakdown": null
 }

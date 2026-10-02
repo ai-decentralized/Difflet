@@ -1,0 +1,21 @@
+{
+  "output": {
+    "reference": "benchmark/trn2/hunyuanvideo_out.mp4",
+    "test": "benchmark/trn2/hunyuanvideo_fp8_tensor_wo_out.mp4",
+    "frames": 61,
+    "height": 320,
+    "width": 512,
+    "psnr_db": 31.08454332884805,
+    "ssim": 0.9333953857421875,
+    "pixel": {
+      "mse": 0.0009594784745063064,
+      "mean_abs": 0.015337800979954262,
+      "max_abs": 0.7843137308955193,
+      "cosine": 0.998173259798543,
+      "rel_l2": 0.060434729292271026,
+      "snr_db": 24.37426837800829
+    },
+    "lpips": 0.05803876040411777,
+    "lpips_net": "alex"
+  }
+}

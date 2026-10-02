@@ -3,9 +3,9 @@
 **Status:** ok  
 **Backend:** trainium  
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
-**Timestamp:** 2026-10-02 06:50 UTC
+**Timestamp:** 2026-10-02 09:58 UTC
 
-> Best-performing configuration: tp=4, bf16, attention_cte
+> Best-performing configuration: tp=4, bf16, attention_cte; FP8 PTQ (dynamic activations) on the DiT linears
 
 ## Configuration
 
@@ -21,22 +21,22 @@
 
 | phase | time |
 |---|---|
-| compile (AOT, one-time) | 77.2 min (4632 s) |
-| **e2e generate — cold start** (page cache dropped) | **9.9 min (596 s)** |
-| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 2.1 min (129 s) |
-| **e2e generate — warm cache** | **113.02 s** |
-| &nbsp;&nbsp;↳ of which weights load (from page cache) | 11.45 s |
+| compile (AOT, one-time) | 69.5 min (4168 s) |
+| **e2e generate — cold start** (page cache dropped) | **8.8 min (527 s)** |
+| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 2.2 min (130 s) |
+| **e2e generate — warm cache** | **112.73 s** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 9.66 s |
 
-> Cold vs warm: **9.9 min (596 s) → 113.02 s** (5.3× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
+> Cold vs warm: **8.8 min (527 s) → 112.73 s** (4.7× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 858.7 ms | 869.7 ms | 880.1 ms | 811.0 ms | 19 |
-| end-to-end (warm) | 113.02 s | 113.02 s | 113.02 s | 113.02 s | 1 |
+| per denoise step (transformer fwd) | 777.1 ms | 776.8 ms | 777.4 ms | 776.4 ms | 19 |
+| end-to-end (warm) | 112.73 s | 112.73 s | 112.73 s | 112.73 s | 1 |
 
-**Throughput:** 1.165 steps/s
+**Throughput:** 1.287 steps/s
 
 Per-step basis: **real-loop DiT wall time per step, device-synced, step 0 excluded** — device-synced inter-step deltas of a real generate loop, step 0 excluded, the same rule the other device folders use (`benchmark/harness.py::RealLoopStepTimer`).
 
@@ -46,13 +46,11 @@ Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-
 
 | component | module load | HLO gen | priority-HLO compile | all-HLO compile | other | **build total** |
 |---|---:|---:|---:|---:|---:|---:|
-| text_encoder_clip | 385.0 ms | 1.48 s | — | 30.73 s | 331.0 ms | **32.92 s** |
-| text_encoder | 96.0 ms | 4.28 s | 77.16 s | 8.21 s | 62.24 s | **2.5 min (152 s)** |
-| transformer | 15.89 s | 54.54 s | 3.0 min (180 s) | 4.0 ms | 3.1 min (184 s) | **7.2 min (434 s)** |
-| vae_decoder | 764.0 ms | 535.0 ms | 59.3 min (3559 s) | 1.0 ms | 95.47 s | **60.9 min (3656 s)** |
-| **Σ component builds** | | | | | | **71.3 min (4275 s)** |
+| transformer | 16.04 s | 56.75 s | 2.9 min (176 s) | 5.0 ms | 4.2 min (251 s) | **8.3 min (500 s)** |
+| vae_decoder | 1.10 s | 346.0 ms | 59.2 min (3552 s) | 1.0 ms | 95.88 s | **60.8 min (3649 s)** |
+| **Σ component builds** | | | | | | **69.1 min (4149 s)** |
 
-> The headline **compile = 77.2 min (4632 s)** is the full `difflet compile` wall; the **Σ component builds = 71.3 min (4275 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
+> The headline **compile = 69.5 min (4168 s)** is the full `difflet compile` wall; the **Σ component builds = 69.1 min (4149 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
 
 ## End-to-end breakdown (cold generate)
 
@@ -60,11 +58,11 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 | stage | weight shard | weight load |
 |---|---:|---:|
-| text_encoder | — | 2.1 min (129 s) |
-| **weights load total** | 0.0 ms | **2.1 min (129 s)** |
+| text_encoder | — | 2.2 min (130 s) |
+| **weights load total** | 0.0 ms | **2.2 min (130 s)** |
 
-- **weights load total:** 2.1 min (129 s) of 9.9 min (596 s) wall
-- **compute + overhead (residual):** 7.8 min (467 s) = text-encode + denoise loop + VAE decode + process/runtime startup
+- **weights load total:** 2.2 min (130 s) of 8.8 min (527 s) wall
+- **compute + overhead (residual):** 6.6 min (397 s) = text-encode + denoise loop + VAE decode + process/runtime startup
 - VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode.
 
 ## Output validity
@@ -74,7 +72,7 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 | shape | None |
 | dtype | None |
 | finite (no NaN/Inf) | None |
-| note | saved hunyuanvideo_out.mp4 |
+| note | saved hunyuanvideo_fp8_tensor_dyn_out.mp4 |
 
 ## Toolchain
 
@@ -86,8 +84,8 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 ## Notes
 
-- e2e_cold = 596 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
-- e2e_warm = 113 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 596 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
+- e2e_cold = 527 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
+- e2e_warm = 113 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 527 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
 
 ## Reproduction
 
@@ -105,7 +103,7 @@ Exact test conditions. The **model + config rows are hardware-agnostic** — an 
 | guidance scale | 6.0 |
 | seed | 42 |
 | prompt | "a cinematic shot of a red fox running through a snowy forest" |
-| best-perf knobs | tp=4, bf16, attention_cte |
+| best-perf knobs | tp=4, bf16, attention_cte; FP8 PTQ (dynamic activations) on the DiT linears |
 | measured on | trn2.3xlarge / 4 NeuronCores / 96 GB/device (device folder `trn2`) |
 
 ```bash
@@ -119,12 +117,12 @@ difflet generate --model-id hunyuanvideo-community/HunyuanVideo --revision e8c2a
 
 # benchmark harness on this device (writes benchmark/<device>/):
 DIFFLET_BENCH_DEVICE=trn2 \
-    python -m benchmark.cold_warm_e2e --model hunyuan_video    # true cold + warm e2e
+    python -m benchmark.cold_warm_e2e --model hunyuan_video_fp8    # true cold + warm e2e
 DIFFLET_BENCH_DEVICE=trn2 \
-    python -m benchmark.step_latency  --model hunyuan_video    # warm per-step
+    python -m benchmark.step_latency  --model hunyuan_video_fp8    # warm per-step
 
 # other backends (H100/B300) reproduce the SAME model+config via the generic runner:
-#   python -m benchmark.bench --backend cuda --model hunyuan_video   # diffusers CUDA reference adapter
+#   python -m benchmark.bench --backend cuda --model hunyuan_video_fp8   # diffusers CUDA reference adapter
 ```
 
 **Measurement protocol** (so the numbers above are comparable across hardware):
