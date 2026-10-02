@@ -247,6 +247,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             teacache_calibration_path=getattr(args, "teacache_calibration", None),
             teacache_cadence=getattr(args, "teacache_cadence", None),
             teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
+            **self._quant_app_kwargs(args),
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
@@ -402,7 +403,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 "toolchain": stage_toolchain_versions(),
             }
         if stage == "generate":
-            return {
+            inputs = {
                 "component": "qwen_image_dit",
                 "model_id": _HF_MODEL_ID,
                 "tp": args.tp_degree or 4,
@@ -418,6 +419,14 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 "shapes": canonical_shapes_list(args, (1024, 1024)),
                 "toolchain": stage_toolchain_versions(),
             }
+            # Additive-only: absent for bf16 so every existing artifact keeps its key.
+            quant_spec = self._quant_spec(args)
+            if quant_spec is not None:
+                from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+
+                inputs["quant"] = quant_spec.to_dict()
+                inputs["quant_layer_schema"] = QUANT_LAYER_SCHEMA
+            return inputs
         if stage == "vae":
             return {
                 "component": "qwen_image_vae",
@@ -449,6 +458,19 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 f"{compiled_dir} (manifest missing or configuration changed); run "
                 "`difflet compile` with the same flags first."
             )
+
+    @staticmethod
+    def _quant_spec(args: argparse.Namespace):
+        from difflet.quant.spec import QuantSpec
+
+        return QuantSpec.from_args(args, model_type="qwen_image")
+
+    def _quant_app_kwargs(self, args: argparse.Namespace) -> dict:
+        """FP8 PTQ kwargs for the application ({} for bf16)."""
+        spec = self._quant_spec(args)
+        if spec is None:
+            return {}
+        return {"quant": spec.to_dict(), "quant_cache_dir": args.cache_dir}
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
         a = self.args
@@ -494,6 +516,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
             parts += ["--teacache-cadence", str(a.teacache_cadence)]
         if getattr(a, "teacache_online_delta", None) is not None:
             parts += ["--teacache-online-delta", str(a.teacache_online_delta)]
+        quant_spec = self._quant_spec(a)
+        if quant_spec is not None:
+            parts += quant_spec.cli_args()
         if work_dir:
             parts += ["--work-dir", work_dir]
         if getattr(a, "requests_dir", None):

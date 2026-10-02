@@ -14,6 +14,8 @@ from typing import Any
 import torch
 
 from difflet.backends.trainium.core.config import NeuronConfig
+from difflet.quant.application_mixin import QuantApplicationMixin
+from difflet.quant.spec import QuantSpec
 from difflet.backends.trainium.core.multi_component_application import (
     ComponentSpec,
     MultiComponentApplication,
@@ -103,18 +105,30 @@ def create_qwen_image_transformer_config(
     cp_mode: str = "gather_kv",
     sp_enabled: bool = False,
     compile_shapes=None,
+    quant=None,
+    quant_checkpoint_dir=None,
 ):
     from difflet.backends.trainium.qwen_image.transformer import (
         QwenImageTransformerInferenceConfig,
     )
 
     transformer_path = os.path.join(model_path, "transformer")
-    neuron_config = NeuronConfig(
+    neuron_kwargs: dict[str, Any] = dict(
         batch_size=batch_size,
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
     )
+    quant_spec = QuantSpec.coerce(quant)
+    if quant_spec is not None:
+        # FP8 PTQ: NxD's quantized parallel linears, weights from the offline
+        # quantized copy of transformer/ (see difflet.backends.trainium.core.quant).
+        if quant_checkpoint_dir is None:
+            raise ValueError("quant requires quant_checkpoint_dir (the quantized checkpoint path)")
+        from difflet.backends.trainium.core.quant import neuron_config_kwargs
+
+        neuron_kwargs.update(neuron_config_kwargs(quant_spec, quant_checkpoint_dir))
+    neuron_config = NeuronConfig(**neuron_kwargs)
     extra = {}
     if compile_shapes:
         extra["compile_shapes"] = compile_shapes
@@ -131,7 +145,9 @@ def create_qwen_image_transformer_config(
     )
 
 
-class NeuronQwenImageApplication(MultiComponentApplication):
+class NeuronQwenImageApplication(QuantApplicationMixin, MultiComponentApplication):
+    quant_tag = "qwen_image"
+
     def __init__(
         self,
         *,
@@ -170,6 +186,17 @@ class NeuronQwenImageApplication(MultiComponentApplication):
         self.batch_size = int(kwargs.get("batch_size", 1))
 
         enable_transformer = bool(kwargs.get("enable_transformer", True))
+        # FP8 PTQ of the DiT linears (None = bf16); see QuantApplicationMixin.
+        self._init_quant(kwargs, model_type="qwen_image")
+        if self.quant_spec is not None and (
+            bool(kwargs.get("teacache_fused", False)) or kwargs.get("teacache_speedup") is not None
+        ):
+            # The fused probe shares this config and traces its own copy of the
+            # backbone without the quantization hook: it cannot load fp8 weights.
+            raise NotImplementedError(
+                "Qwen-Image adaptive TeaCache (probe) is not supported together with --quant; "
+                "use --teacache-cadence / --teacache-online-delta or drop --quant."
+            )
         transformer_config_path = os.path.join(self.transformer_path, "config.json")
         if enable_transformer and os.path.exists(transformer_config_path):
             from difflet.backends.trainium.qwen_image.transformer import (
@@ -189,6 +216,8 @@ class NeuronQwenImageApplication(MultiComponentApplication):
                 cp_mode=getattr(parallel, "cp_mode", "gather_kv"),
                 sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
                 compile_shapes=self.compile_shapes,
+                quant=self.quant_spec,
+                quant_checkpoint_dir=self._quant_checkpoint_dir("transformer"),
             )
             self.transformer = NeuronQwenImageTransformerApplication(
                 model_path=self.transformer_path,

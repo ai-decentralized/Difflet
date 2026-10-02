@@ -310,3 +310,38 @@ def test_quantize_command_uses_the_model_targets_and_rejects_unwired_models(monk
                                  cache_dir=str(tmp_path / "cache"), force=False)
     assert quantize_cmd.run(unwired) == 1
     assert "does not support --quant" in capsys.readouterr().err
+
+
+
+# ---------------------------------------------------------- Qwen-Image orchestrator
+
+
+def _qwen_args(**overrides) -> argparse.Namespace:
+    defaults = dict(
+        model_id="Qwen/Qwen-Image", tp_degree=4, cp_degree=1, cp_mode="gather_kv", sp_enabled=False,
+        height=1024, width=1024, num_frames=None, cache_dir="/tmp/cache", force=False, revision=None,
+        prompt="a cat", output="/tmp/q.png", steps=2, guidance_scale=4.0, seed=42, work_dir=None,
+        keep_work_dir=False, teacache_cadence=None, teacache_online_delta=None, teacache_speedup=None,
+        teacache_calibration=None, quant=None, quant_granularity="tensor", quant_act="dynamic", shapes=None,
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def test_qwen_stage_identity_is_unchanged_for_bf16_and_extended_for_fp8(monkeypatch):
+    from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+    from difflet.cli.orchestrators import qwen_image as qwen_orch
+
+    monkeypatch.setattr(qwen_orch, "stage_toolchain_versions", lambda: {"toolchain": "x"})
+    bf16 = qwen_orch.QwenImageOrchestrator(_qwen_args())
+    inputs = bf16._stage_cache_inputs("generate", bf16.args)
+    assert "quant" not in inputs and "quant_layer_schema" not in inputs
+    fp8 = qwen_orch.QwenImageOrchestrator(_qwen_args(quant="fp8", quant_act="none"))
+    fp8_inputs = fp8._stage_cache_inputs("generate", fp8.args)
+    assert fp8_inputs["quant"] == QuantSpec.for_model("qwen_image", activation="none").to_dict()
+    assert fp8_inputs["quant_layer_schema"] == QUANT_LAYER_SCHEMA
+    assert {k: v for k, v in fp8_inputs.items() if k not in ("quant", "quant_layer_schema")} == inputs
+    for stage in ("text", "vae"):
+        assert "quant" not in fp8._stage_cache_inputs(stage, fp8.args)
+    assert fp8._quant_app_kwargs(fp8.args) == {"quant": fp8_inputs["quant"], "quant_cache_dir": "/tmp/cache"}
+    assert bf16._quant_app_kwargs(bf16.args) == {}

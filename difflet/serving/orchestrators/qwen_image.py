@@ -50,6 +50,15 @@ _HF_MODEL_ID = "Qwen/Qwen-Image"
 _MODEL_TYPE = "qwen_image"
 _ENC_SEQ = qwen_common.ENC_SEQ
 _TEXT_SEQ_LEN = qwen_common.TEXT_SEQ_LEN
+
+
+def _quant_kwargs(profile) -> dict:
+    """FP8 PTQ application kwargs ({} for bf16): the spec is hashed into the
+    generation identity, the cache root only locates the quantized copy."""
+    quant = getattr(profile, "quant", None)
+    if quant is None:
+        return {}
+    return {"quant": quant.to_dict(), "quant_cache_dir": profile.cache_dir}
 _MAX_GUIDANCE_SCALE = 20.0
 _QWEN_TEMPLATE = (
     "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, "
@@ -455,6 +464,7 @@ class QwenImageServingStageAdapter:
             teacache_speedup=profile.teacache_speedup,
             teacache_calibration=profile.teacache_calibration_data,
             teacache_calibration_path=profile.teacache_calibration,
+            **_quant_kwargs(profile),
         )
         assert self.active_runtime is not None
         # Warm every compiled bucket at startup for multi-shape profiles so the

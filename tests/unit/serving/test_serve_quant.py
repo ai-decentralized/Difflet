@@ -197,3 +197,12 @@ def test_flux_serving_application_kwargs_add_quant_only_when_set(tmp_path):
     kwargs = quant_application_kwargs(_profile(tmp_path, QuantSpec.for_model("flux", activation="none")))
     assert kwargs == {"quant": QuantSpec.for_model("flux", activation="none").to_dict(),
                       "quant_cache_dir": str(tmp_path / "cache")}
+
+
+
+def test_qwen_serving_quant_kwargs_add_quant_only_when_set(tmp_path):
+    from difflet.serving.orchestrators.qwen_image import _quant_kwargs
+
+    assert _quant_kwargs(_profile(tmp_path, None)) == {}
+    spec = QuantSpec.for_model("qwen_image", activation="none")
+    assert _quant_kwargs(_profile(tmp_path, spec)) == {"quant": spec.to_dict(), "quant_cache_dir": str(tmp_path / "cache")}
