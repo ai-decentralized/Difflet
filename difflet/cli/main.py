@@ -710,8 +710,8 @@ def _validate_quant(args: argparse.Namespace) -> None:
 
     if _MODEL_TYPE.get(args.model_id) not in QUANT_MODEL_TYPES:
         print(
-            f"Error: {args.model_id} does not support --quant yet. FP8 PTQ of the DiT "
-            "linear layers is wired for Wan 2.1 / 2.2 only.",
+            f"Error: {args.model_id} does not support --quant. FP8 PTQ of the DiT linear "
+            f"layers is wired for: {', '.join(sorted(QUANT_MODEL_TYPES))}.",
             file=sys.stderr,
         )
         raise SystemExit(1)

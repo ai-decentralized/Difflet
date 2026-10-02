@@ -8,6 +8,7 @@ tp=8, overridden to 4 here). Adjust ``shape``/``tp``/``steps`` to retune.
 from __future__ import annotations
 
 import os
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -229,3 +230,26 @@ MATRIX: dict[str, BenchConfig] = {
         config_label="tp=4, bf16, attention_cte + MX precision ops",
     ),
 }
+
+
+def fp8_partners(slug: str, base: "BenchConfig") -> dict:
+    """``<slug>_fp8`` (dynamic activations) and ``<slug>_fp8_wo`` (weight-only)
+    mirroring ``base`` field for field, so an fp8 run is comparable to its bf16
+    entry and never overwrites its report (``slug_suffix``)."""
+    out = {}
+    for suffix, act, label in (
+        ("_fp8", "dynamic", "dynamic activations"),
+        ("_fp8_wo", "none", "weight-only"),
+    ):
+        out[slug + suffix] = dataclasses.replace(
+            base,
+            quant="fp8",
+            quant_granularity="tensor",
+            quant_act=act,
+            config_label=f"{base.config_label}; FP8 PTQ ({label}) on the DiT linears",
+        )
+    return out
+
+
+for _slug in ("flux_1_dev", "qwen_image", "hunyuan_video", "ltx_2", "wan_2_2"):
+    MATRIX.update(fp8_partners(_slug, MATRIX[_slug]))

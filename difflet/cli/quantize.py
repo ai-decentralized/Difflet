@@ -16,8 +16,12 @@ import time
 from difflet.quant.checkpoint import quantize_checkpoint_dir, quantized_checkpoint_dir
 from difflet.quant.spec import QuantSpec
 
-# Model types whose backbone is wired for FP8 PTQ (see difflet/models/wan/application.py).
-QUANT_MODEL_TYPES: frozenset[str] = frozenset({"wan"})
+# Model types whose backbone is wired for FP8 PTQ (QuantApplicationMixin +
+# quantize_traced_model_ in the backbone; see difflet/quant/targets.py for the
+# per-model layer sets). HunyuanVideo 1.5 and the segmented runtimes are not.
+QUANT_MODEL_TYPES: frozenset[str] = frozenset(
+    {"wan", "flux", "qwen_image", "hunyuan_video", "ltx_2"}
+)
 _TRANSFORMER_SUBFOLDERS = ("transformer", "transformer_2")
 
 

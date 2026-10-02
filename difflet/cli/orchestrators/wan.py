@@ -320,7 +320,7 @@ class WanOrchestrator(ModelOrchestrator):
     def _quant_spec(args: argparse.Namespace):
         from difflet.quant.spec import QuantSpec
 
-        return QuantSpec.from_args(args)
+        return QuantSpec.from_args(args, model_type="wan")
 
     def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         prefix = _cache_prefix(self.args.model_id)

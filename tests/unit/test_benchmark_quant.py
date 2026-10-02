@@ -18,6 +18,19 @@ def test_quant_flags_and_slug_suffix():
     assert spec_slug(fp8) == "wan2_1_t2v_14b_diffusers_fp8_channel_wo"
 
 
+def test_fp8_partners_mirror_their_bf16_entry():
+    for slug in ("flux_1_dev", "qwen_image", "hunyuan_video", "ltx_2", "wan_2_1", "wan_2_2"):
+        base = MATRIX[slug]
+        for suffix, act in (("_fp8", "dynamic"), ("_fp8_wo", "none")):
+            fp8 = MATRIX[slug + suffix]
+            assert fp8.quant == "fp8" and fp8.quant_granularity == "tensor" and fp8.quant_act == act
+            assert spec_slug(fp8) != spec_slug(base)
+            for field in ("model_id", "revision", "model_type", "tp", "cp", "sp", "height", "width",
+                          "num_frames", "steps", "guidance_scale", "seed", "prompt", "output_kind"):
+                assert getattr(base, field) == getattr(fp8, field), (slug, suffix, field)
+            assert "FP8 PTQ" in fp8.config_label
+
+
 def test_matrix_has_the_fp8_partners_of_wan_2_1():
     base, fp8, wo = MATRIX["wan_2_1"], MATRIX["wan_2_1_fp8"], MATRIX["wan_2_1_fp8_wo"]
     assert fp8.quant == "fp8" and wo.quant == "fp8" and base.quant is None

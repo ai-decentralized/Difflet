@@ -191,7 +191,8 @@ def build_serving_profile(
 
         if model_type not in QUANT_MODEL_TYPES:
             raise invalid_extra_body(
-                f"{model_id} does not support --quant yet; FP8 PTQ is wired for Wan only."
+                f"{model_id} does not support --quant; FP8 PTQ is wired for: "
+                f"{', '.join(sorted(QUANT_MODEL_TYPES))}."
             )
         if teacache_speedup is not None:
             raise invalid_extra_body(
@@ -199,7 +200,8 @@ def build_serving_profile(
             )
         try:
             quant_spec = QuantSpec.from_args(
-                _QuantArgs(quant=quant, quant_granularity=quant_granularity, quant_act=quant_act)
+                _QuantArgs(quant=quant, quant_granularity=quant_granularity, quant_act=quant_act),
+                model_type=model_type,  # the model's own target set
             )
         except ValueError as exc:
             raise invalid_extra_body(f"invalid --quant settings: {exc}") from exc

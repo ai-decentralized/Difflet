@@ -42,9 +42,10 @@ def test_quantize_subcommand_defaults_to_fp8():
 
 def test_validate_quant_rejects_unwired_models_and_probe_teacache():
     cli_main._validate_quant(argparse.Namespace(model_id=WAN, quant="fp8"))
-    cli_main._validate_quant(argparse.Namespace(model_id="black-forest-labs/FLUX.1-dev", quant=None))
+    hv15 = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
+    cli_main._validate_quant(argparse.Namespace(model_id=hv15, quant=None))
     with pytest.raises(SystemExit):
-        cli_main._validate_quant(argparse.Namespace(model_id="black-forest-labs/FLUX.1-dev", quant="fp8"))
+        cli_main._validate_quant(argparse.Namespace(model_id=hv15, quant="fp8"))
     with pytest.raises(SystemExit):
         cli_main._validate_quant(argparse.Namespace(model_id=WAN, quant="fp8", teacache_speedup=1.5))
     cli_main._validate_quant(argparse.Namespace(model_id=WAN, quant="fp8", teacache_cadence=2))
@@ -64,10 +65,21 @@ def test_main_dispatches_quantize_and_exits_with_its_code(monkeypatch):
     assert seen["args"].quant == "fp8" and seen["args"].quant_granularity == "channel"
 
 
-def test_main_rejects_quant_for_flux_before_dispatch(capsys):
+def test_validate_quant_accepts_every_wired_model_and_rejects_hunyuan_video_15(capsys):
+    for model_id in (
+        "black-forest-labs/FLUX.1-dev",
+        "Qwen/Qwen-Image",
+        "hunyuanvideo-community/HunyuanVideo",
+        "Lightricks/LTX-2",
+        "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+    ):
+        cli_main._validate_quant(argparse.Namespace(model_id=model_id, quant="fp8", teacache_speedup=None))
     with pytest.raises(SystemExit):
-        cli_main.main(["compile", "--model-id", "black-forest-labs/FLUX.1-dev", "--quant", "fp8"])
-    assert "does not support --quant" in capsys.readouterr().err
+        cli_main._validate_quant(argparse.Namespace(
+            model_id="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+            quant="fp8", teacache_speedup=None))
+    err = capsys.readouterr().err
+    assert "does not support --quant" in err and "flux" in err and "ltx_2" in err
 
 
 # ---------------------------------------------------------------- Wan orchestrator

@@ -78,7 +78,8 @@ def test_profile_carries_the_spec_for_wan_and_rejects_other_models():
     assert _build(WAN, "wan").quant is None
 
     with pytest.raises(DiffletServingError, match="does not support --quant"):
-        _build("black-forest-labs/FLUX.1-dev", "flux", quant="fp8")
+        _build("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v", "hunyuan_video_15",
+               output_modality="video", quant="fp8")
     with pytest.raises(DiffletServingError, match="mutually exclusive"):
         _build(WAN, "wan", quant="fp8", teacache_speedup=1.5, teacache_calibration="c.json")
     with pytest.raises(DiffletServingError, match="invalid --quant"):
@@ -167,3 +168,22 @@ def test_build_application_passes_quant_kwargs_and_rejects_tpu(monkeypatch, tmp_
     monkeypatch.setattr(wan, "_backend_is_tpu", lambda: True)
     with pytest.raises(ValueError, match="Trainium-only"):
         wan._build_application(_source(tmp_path), _profile(tmp_path, QuantSpec()))
+
+
+def test_profile_carries_model_targets_for_every_wired_model():
+    """The serving profile's spec uses the model's own target set (Review Focus 2/5):
+    a FLUX profile must never carry Wan's ffn.* targets."""
+    for model_id, model_type, modality in (
+        ("black-forest-labs/FLUX.1-dev", "flux", "image"),
+        ("Qwen/Qwen-Image", "qwen_image", "image"),
+        ("hunyuanvideo-community/HunyuanVideo", "hunyuan_video", "video"),
+        ("Lightricks/LTX-2", "ltx_2", "video"),
+        (WAN, "wan", "video"),
+    ):
+        extra = {"output_modality": modality, "default_fps": 16 if modality == "video" else None}
+        profile = _build(model_id, model_type, quant="fp8", quant_act="none", **extra)
+        assert profile.quant is not None, model_id
+        assert profile.quant.targets == QuantSpec.for_model(model_type).targets, model_id
+        assert profile.quant.activation == "none"
+        plain = _build(model_id, model_type, **extra)
+        assert plain.quant is None
