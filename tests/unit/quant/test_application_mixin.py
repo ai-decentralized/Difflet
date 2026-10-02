@@ -56,3 +56,38 @@ def test_mixin_is_a_no_op_for_bf16(tmp_path):
     assert app.quant_spec is None
     assert app._quant_checkpoint_dir("transformer") is None
     assert app.ensure_quantized_checkpoints(create=True) == {}
+
+
+
+def test_resolve_quant_matches_the_mixin_resolution(tmp_path):
+    from difflet.quant.application_mixin import resolve_quant
+
+    model_dir = _write_source(tmp_path)
+    spec, dest = resolve_quant(str(model_dir), "transformer", {"format": "fp8_e4m3", "activation": "none"},
+                               str(tmp_path / "cache"), model_type="flux")
+    app = _App(str(model_dir), quant={"format": "fp8_e4m3", "activation": "none"},
+               quant_cache_dir=str(tmp_path / "cache"))
+    assert spec == app.quant_spec and dest == app._quant_checkpoint_dir("transformer")
+    assert resolve_quant(str(model_dir), "transformer", None, None, model_type="flux") == (None, None)
+
+
+def test_mixin_compile_ensures_the_checkpoint_before_the_base_compile(tmp_path):
+    calls = []
+
+    class _Base:
+        def compile(self, compiled_model_path, debug=False, select=None):
+            calls.append(("compile", compiled_model_path, debug, select))
+
+    class _CompilingApp(QuantApplicationMixin, _Base):
+        quant_tag = "test"
+
+        def __init__(self, model_path, **kwargs):
+            self.model_path = model_path
+            self._init_quant(kwargs, model_type="flux")
+            self._quant_checkpoint_dir("transformer")
+
+    model_dir = _write_source(tmp_path)
+    app = _CompilingApp(str(model_dir), quant={"format": "fp8_e4m3"}, quant_cache_dir=str(tmp_path / "cache"))
+    app.compile("/out", debug=True)
+    assert calls == [("compile", "/out", True, None)]
+    assert app.ensure_quantized_checkpoints(create=False) == {"transformer": app._quant_checkpoint_dir("transformer")}

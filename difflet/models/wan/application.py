@@ -357,11 +357,7 @@ class NeuronWanApplication(QuantApplicationMixin, MultiComponentApplication):
     # ------------------------------------------------------------ FP8 PTQ
     # _quant_checkpoint_dir / ensure_quantized_checkpoints: QuantApplicationMixin.
 
-    def compile(self, compiled_model_path: str, debug: bool = False, select=None) -> None:
-        # The trace-time checkpoint loader reads the quantized copy, so it must
-        # exist before the first component compiles.
-        self.ensure_quantized_checkpoints(create=True)
-        super().compile(compiled_model_path, debug=debug, select=select)
+    # compile(): QuantApplicationMixin ensures the fp8 checkpoints, then the base compiles.
 
     def components(self) -> list[ComponentSpec]:
         """Yield ``(name, component)`` for every active sub-app, in compile order.

@@ -9,6 +9,8 @@ import types
 
 import pytest
 
+from difflet.quant.spec import QuantSpec
+
 import importlib
 
 cli_main = importlib.import_module("difflet.cli.main")
@@ -229,3 +231,47 @@ def test_quantize_command_builds_the_checkpoint_copy(monkeypatch, tmp_path, caps
 
     monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", missing)
     assert quantize_cmd.run(args) == 1
+
+
+
+# --------------------------------------------------------------- FLUX orchestrator
+
+
+def _flux_args(**overrides) -> argparse.Namespace:
+    defaults = dict(
+        model_id="black-forest-labs/FLUX.1-dev", tp_degree=4, cp_degree=1, cp_mode="gather_kv",
+        sp_enabled=False, height=1024, width=1024, num_frames=None, cache_dir="/tmp/cache",
+        force=False, revision=None, prompt="a cat", output="/tmp/f.png", steps=2,
+        guidance_scale=3.5, seed=42, teacache_cadence=None, teacache_online_delta=None,
+        teacache_speedup=None, teacache_calibration=None, taef1=False, taef1_path=None,
+        quant=None, quant_granularity="tensor", quant_act="dynamic", shapes=None,
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def test_flux_application_kwargs_add_quant_only_when_set():
+    from difflet.cli.orchestrators import flux as flux_orch
+
+    plain = flux_orch.FluxOrchestrator(_flux_args())._application_kwargs()
+    assert "quant" not in plain and "quant_cache_dir" not in plain
+    fp8 = flux_orch.FluxOrchestrator(_flux_args(quant="fp8", quant_act="none"))._application_kwargs()
+    assert fp8["quant"] == QuantSpec.for_model("flux", activation="none").to_dict()
+    assert fp8["quant"]["targets"] != list(QuantSpec().targets)  # FLUX targets, not Wan's
+    assert fp8["quant_cache_dir"] == "/tmp/cache"
+    assert {k: v for k, v in fp8.items() if k not in ("quant", "quant_cache_dir")} == plain
+
+
+def test_pipeline_cache_kwargs_key_the_layer_schema_for_fp8_only():
+    """DiffletPipeline models (FLUX, LTX-2): the cache key gains quant + the layer
+    schema; quant_cache_dir is runtime-only; bf16 kwargs are untouched."""
+    from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+    from difflet.pipeline.difflet_pipeline import _cache_application_kwargs
+
+    assert _cache_application_kwargs({}, model_name="flux") is None
+    bf16 = _cache_application_kwargs({"taef1": True}, model_name="flux")
+    assert bf16 == {"taef1": True}
+    spec = QuantSpec.for_model("flux").to_dict()
+    fp8 = _cache_application_kwargs({"taef1": True, "quant": spec, "quant_cache_dir": "/c"}, model_name="flux")
+    assert fp8["quant"] == spec and fp8["quant_layer_schema"] == QUANT_LAYER_SCHEMA
+    assert fp8["taef1"] is True

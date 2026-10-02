@@ -33,6 +33,7 @@ from typing import Optional
 import torch
 
 from difflet.backends.trainium.core.config import InferenceConfig, NeuronConfig
+from difflet.quant.application_mixin import QuantApplicationMixin
 from difflet.backends.trainium.core.multi_component_application import (
     ComponentSpec,
     MultiComponentApplication,
@@ -94,6 +95,34 @@ def get_flux_parallelism_config(
     return backbone_tp_degree * cp_degree
 
 
+def backbone_neuron_config(
+    *,
+    tp_degree: int,
+    world_size: int,
+    dtype,
+    quant=None,
+    quant_checkpoint_dir=None,
+) -> NeuronConfig:
+    """The FLUX backbone's NeuronConfig; FP8 PTQ adds NxD's quant fields.
+
+    ``quant`` is a QuantSpec (or its dict) with the FLUX targets and
+    ``quant_checkpoint_dir`` the quantized copy of ``transformer/`` (resolved by
+    ``difflet.quant.application_mixin.resolve_quant``). bf16 configs are
+    unchanged (additive).
+    """
+    from difflet.quant.spec import QuantSpec
+
+    kwargs = dict(tp_degree=tp_degree, world_size=world_size, torch_dtype=dtype)
+    quant_spec = QuantSpec.coerce(quant)
+    if quant_spec is not None:
+        if quant_checkpoint_dir is None:
+            raise ValueError("quant requires quant_checkpoint_dir (the quantized checkpoint path)")
+        from difflet.backends.trainium.core.quant import neuron_config_kwargs
+
+        kwargs.update(neuron_config_kwargs(quant_spec, quant_checkpoint_dir))
+    return NeuronConfig(**kwargs)
+
+
 def create_flux_config(
     model_path,
     world_size,
@@ -109,6 +138,8 @@ def create_flux_config(
     taef1: bool = False,
     taef1_path: str | None = None,
     compile_shapes=None,
+    quant=None,
+    quant_checkpoint_dir=None,
 ):
     shape_extra = {"compile_shapes": compile_shapes} if compile_shapes else {}
     text_encoder_path = os.path.join(model_path, "text_encoder")
@@ -136,17 +167,19 @@ def create_flux_config(
         load_config=load_pretrained_config(text_encoder_2_path),
     )
 
-    backbone_neuron_config = NeuronConfig(
+    backbone_neuron_config_ = backbone_neuron_config(
         tp_degree=backbone_tp_degree,
         world_size=world_size,
-        torch_dtype=dtype,
+        dtype=dtype,
+        quant=quant,
+        quant_checkpoint_dir=quant_checkpoint_dir,
     )
     backbone_config = FluxBackboneInferenceConfig(
         cfg_parallel_enabled=cfg_parallel_enabled,
         context_parallel_enabled=context_parallel_enabled,
         cp_mode=cp_mode,
         sp_enabled=sp_enabled,
-        neuron_config=backbone_neuron_config,
+        neuron_config=backbone_neuron_config_,
         load_config=load_diffusers_config(backbone_path),
         height=height,
         width=width,
@@ -190,7 +223,9 @@ def create_flux_config(
     return (clip_config, t5_config, backbone_config, decoder_config)
 
 
-class NeuronFluxApplication(MultiComponentApplication):
+class NeuronFluxApplication(QuantApplicationMixin, MultiComponentApplication):
+    quant_tag = "flux"
+
     def __init__(
         self,
         model_path: str,
@@ -213,9 +248,24 @@ class NeuronFluxApplication(MultiComponentApplication):
         teacache_online_delta_alpha: Optional[float] = None,
         taef1: bool = False,
         taef1_path: Optional[str] = None,
+        quant=None,
+        quant_cache_dir: Optional[str] = None,
     ):
         super().__init__()
         self.model_path = model_path
+        # FP8 PTQ of the DiT linears (None = bf16); see QuantApplicationMixin.
+        # The backbone config already carries the quantized checkpoint path
+        # (create_flux_config); registering the subfolder here lets
+        # ensure_quantized_checkpoints build / check it.
+        self._init_quant({"quant": quant, "quant_cache_dir": quant_cache_dir}, model_type="flux")
+        self._quant_checkpoint_dir("transformer")
+        if self.quant_spec is not None and (teacache_fused or teacache_speedup is not None):
+            # The probe application traces its own copy of the backbone without
+            # the quantization hook, so it cannot load the fp8 checkpoint.
+            raise NotImplementedError(
+                "FLUX adaptive TeaCache (probe) is not supported together with --quant; "
+                "use --teacache-cadence / --teacache-online-delta or drop --quant."
+            )
         self.text_encoder_path = text_encoder_path or os.path.join(model_path, "text_encoder")
         self.text_encoder_2_path = text_encoder_2_path or os.path.join(model_path, "text_encoder_2")
         self.transformer_path = transformer_path or os.path.join(model_path, "transformer")

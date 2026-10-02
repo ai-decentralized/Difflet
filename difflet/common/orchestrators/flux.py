@@ -21,6 +21,18 @@ MODEL_TYPE = "flux"
 MAX_SEQUENCE_LENGTH = 512
 
 
+def quant_application_kwargs(profile: ServingProfile) -> dict | None:
+    """FP8 PTQ application kwargs for a DiffletPipeline model, or None for bf16.
+
+    The spec is hashed into the generation identity; the cache root only
+    locates the quantized checkpoint copy and is runtime-only.
+    """
+    quant = getattr(profile, "quant", None)
+    if quant is None:
+        return None
+    return {"quant": quant.to_dict(), "quant_cache_dir": profile.cache_dir}
+
+
 def build_pipeline(
     model_id: str,
     profile: ServingProfile,
@@ -51,6 +63,7 @@ def build_pipeline(
         teacache_speedup=profile.teacache_speedup,
         teacache_calibration=profile.teacache_calibration_data,
         teacache_calibration_path=profile.teacache_calibration,
+        application_kwargs=quant_application_kwargs(profile),
         model_path_override=model_path_override,
         resolved_source_id=resolved_source_id,
         compiled_path_override=compiled_path_override,

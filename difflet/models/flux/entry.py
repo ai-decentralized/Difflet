@@ -32,6 +32,14 @@ def create_flux_application(
     taef1 = bool(kwargs.pop("taef1", False))
     taef1_path = kwargs.pop("taef1_path", None)
     compile_shapes = kwargs.pop("shapes", None)
+    # FP8 PTQ: the backbone config needs the quantized checkpoint path before
+    # the application exists, so resolve the spec (FLUX targets) and dir here.
+    from difflet.quant.application_mixin import resolve_quant
+
+    quant_cache_dir = kwargs.pop("quant_cache_dir", None)
+    quant_spec, quant_checkpoint_dir = resolve_quant(
+        model_path, "transformer", kwargs.pop("quant", None), quant_cache_dir, model_type="flux"
+    )
     if compile_shapes:
         from difflet.backends.trainium.core.bucketing import canonicalize_shapes
 
@@ -55,6 +63,8 @@ def create_flux_application(
         taef1=taef1,
         taef1_path=taef1_path,
         compile_shapes=compile_shapes,
+        quant=quant_spec,
+        quant_checkpoint_dir=quant_checkpoint_dir,
     )
     return NeuronFluxApplication(
         model_path,
@@ -63,5 +73,7 @@ def create_flux_application(
         width=width,
         taef1=taef1,
         taef1_path=taef1_path,
+        quant=quant_spec,
+        quant_cache_dir=quant_cache_dir,
         **kwargs,
     )

@@ -161,6 +161,14 @@ class FluxOrchestrator(ModelOrchestrator):
         if getattr(self.args, "taef1", False):
             app_kwargs["taef1"] = True
             app_kwargs["taef1_path"] = self.args.taef1_path
+        # FP8 PTQ: the spec is hashed into the cache key (plus the layer schema,
+        # added by the pipeline's cache-kwargs step); the cache root is runtime-only.
+        from difflet.quant.spec import QuantSpec
+
+        quant_spec = QuantSpec.from_args(self.args, model_type="flux")
+        if quant_spec is not None:
+            app_kwargs["quant"] = quant_spec.to_dict()
+            app_kwargs["quant_cache_dir"] = self.args.cache_dir
         return app_kwargs
 
     def _model_kwargs(self) -> dict[str, Any]:

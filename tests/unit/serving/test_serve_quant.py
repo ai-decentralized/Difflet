@@ -187,3 +187,13 @@ def test_profile_carries_model_targets_for_every_wired_model():
         assert profile.quant.activation == "none"
         plain = _build(model_id, model_type, **extra)
         assert plain.quant is None
+
+
+
+def test_flux_serving_application_kwargs_add_quant_only_when_set(tmp_path):
+    from difflet.common.orchestrators.flux import quant_application_kwargs
+
+    assert quant_application_kwargs(_profile(tmp_path, None)) is None
+    kwargs = quant_application_kwargs(_profile(tmp_path, QuantSpec.for_model("flux", activation="none")))
+    assert kwargs == {"quant": QuantSpec.for_model("flux", activation="none").to_dict(),
+                      "quant_cache_dir": str(tmp_path / "cache")}

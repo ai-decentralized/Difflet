@@ -244,6 +244,9 @@ class NeuronConfig:
         self.draft_model_modules_to_not_convert = kwargs.pop(
             "draft_model_modules_to_not_convert", None
         )
+        # Difflet FP8 PTQ: the module names the scoped convert swaps
+        # (difflet.quant.targets); None for bf16 and for NxDI-style quantization.
+        self.quant_targets = kwargs.pop("quant_targets", None)
         # TODO: Add validation for quantized_checkpoints_path after the design discussions
         self.kv_cache_quant = kwargs.pop("kv_cache_quant", False)
 

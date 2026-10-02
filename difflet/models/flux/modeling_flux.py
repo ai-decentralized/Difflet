@@ -71,6 +71,7 @@ from difflet.ops import (
 )
 
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
+from difflet.quant.checkpoint import split_fused_proj_out
 from difflet.backends.trainium.core.bucketing import ShapeBucketedInputGenerator
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.layer_boundary_marker import (
@@ -1577,6 +1578,12 @@ class ModelWrapperFluxBackbone(ShapeBucketedInputGenerator, ModelWrapper):
             model = self.model_cls(self.config)
             model = model.to(dtype=self.config.neuron_config.torch_dtype)
             model.eval()
+            # FP8 PTQ: swap the target NxD parallel linears for their quantized
+            # forms (no-op unless neuron_config.quantized). Runs at trace time
+            # and at load, so the graph and the weight loader agree.
+            from difflet.backends.trainium.core.quant import quantize_traced_model_
+
+            quantize_traced_model_(model, self.config.neuron_config)
             return model
 
         model_instance = BaseModelInstance(module_cls=_create_model, input_output_aliases={})
@@ -1695,7 +1702,11 @@ class NeuronFluxBackboneApplication(NeuronApplicationBase):
         else:
             compiler_args += " --tensorizer-options='--enable-ccop-compute-overlap'"
 
-        compiler_args += " --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'"
+        from difflet.backends.trainium.core.quant import fp8_hlo2tensorizer_options
+
+        # FP8 PTQ adds --experimental-unsafe-fp8e4m3fn-as-fp8e4m3 (see core/quant.py).
+        hlo2tensorizer = fp8_hlo2tensorizer_options(self.config.neuron_config) + "--verify-hlo=true"
+        compiler_args += f" --auto-cast=none --internal-hlo2tensorizer-options='{hlo2tensorizer}'"
 
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
         if _HARDWARE == hardware.TRN2:
@@ -1713,18 +1724,15 @@ class NeuronFluxBackboneApplication(NeuronApplicationBase):
         )
         inner_dim = config.num_attention_heads * config.attention_head_dim
         for i in range(config.num_single_layers):
-            state_dict[f"single_transformer_blocks.{i}.proj_out_attn.weight"] = state_dict[
-                f"single_transformer_blocks.{i}.proj_out.weight"
-            ][:, :inner_dim].contiguous()
-            state_dict[f"single_transformer_blocks.{i}.proj_out_attn.bias"] = (
-                state_dict[f"single_transformer_blocks.{i}.proj_out.bias"]
-                .clone()
-                .detach()
-                .contiguous()
+            # Fused proj_out -> the two row-parallel halves (attn / mlp). With FP8
+            # PTQ the weight is fp8 and the scale is copied to both halves.
+            split_fused_proj_out(
+                state_dict,
+                f"single_transformer_blocks.{i}.proj_out",
+                attn_name=f"single_transformer_blocks.{i}.proj_out_attn",
+                mlp_name=f"single_transformer_blocks.{i}.proj_out_mlp",
+                cols=inner_dim,
             )
-            state_dict[f"single_transformer_blocks.{i}.proj_out_mlp.weight"] = state_dict[
-                f"single_transformer_blocks.{i}.proj_out.weight"
-            ][:, inner_dim:].contiguous()
         for k, v in state_dict.items():
             state_dict[k] = v.clone().detach().contiguous()
         return state_dict

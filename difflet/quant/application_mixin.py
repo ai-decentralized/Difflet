@@ -16,6 +16,33 @@ from difflet.quant.checkpoint import ensure_quantized_checkpoint, quantized_chec
 from difflet.quant.spec import QuantSpec
 
 
+def resolve_quant(
+    model_path: str,
+    subfolder: str,
+    quant: "QuantSpec | dict[str, Any] | None",
+    quant_cache_dir: "str | os.PathLike[str] | None",
+    *,
+    model_type: str,
+) -> "tuple[QuantSpec | None, str | None]":
+    """``(spec with the model's targets, quantized checkpoint dir)`` or ``(None, None)``.
+
+    For applications that build their backbone config before the application
+    object exists (FLUX, LTX-2 factories): the same resolution
+    ``QuantApplicationMixin._quant_checkpoint_dir`` performs, as a function.
+    """
+    spec = QuantSpec.coerce(quant)
+    if spec is None:
+        return None, None
+    spec = QuantSpec.for_model(
+        model_type,
+        format=spec.format,
+        weight_granularity=spec.weight_granularity,
+        activation=spec.activation,
+    )
+    source = os.path.join(model_path, subfolder)
+    return spec, str(quantized_checkpoint_dir(quant_cache_dir, source, spec))
+
+
 class QuantApplicationMixin:
     quant_tag: str = "quant"  # print prefix, e.g. "wan", "flux"
     model_path: str
@@ -74,6 +101,13 @@ class QuantApplicationMixin:
                 flush=True,
             )
         return resolved
+
+    def compile(self, compiled_model_path: str, debug: bool = False, select=None) -> None:
+        """The trace-time checkpoint loader reads the quantized copy, so it must
+        exist before the first component compiles (cooperative: the mixin comes
+        first in the MRO, the multi-component base does the actual compile)."""
+        self.ensure_quantized_checkpoints(create=True)
+        super().compile(compiled_model_path, debug=debug, select=select)  # type: ignore[misc]
 
 
 __all__ = ["QuantApplicationMixin"]

@@ -275,6 +275,12 @@ def _cache_application_kwargs(
         cache_kwargs["teacache_probe_enabled"] = True
         if model_name == "hunyuan_video":
             cache_kwargs["teacache_probe_layout"] = "teacache-prefix-v1"
+    if cache_kwargs.get("quant") is not None:
+        # FP8 PTQ: the quantized-layer schema keys the NEFF (additive, fp8 only);
+        # the application never receives it (cache-only, like the probe flags).
+        from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
+
+        cache_kwargs["quant_layer_schema"] = QUANT_LAYER_SCHEMA
     return cache_kwargs or None
 
 
