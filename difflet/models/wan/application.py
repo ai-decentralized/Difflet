@@ -13,7 +13,7 @@ from difflet.backends.trainium.core.multi_component_application import (
     ComponentSpec,
     MultiComponentApplication,
 )
-from difflet.quant.checkpoint import ensure_quantized_checkpoint, quantized_checkpoint_dir
+from difflet.quant.application_mixin import QuantApplicationMixin
 from difflet.quant.spec import QuantSpec
 from difflet.utils.diffusers_adapter import load_diffusers_config
 
@@ -150,7 +150,8 @@ def _latent_num_frames(num_frames: int) -> int:
     return (int(num_frames) - 1) // 4 + 1
 
 
-class NeuronWanApplication(MultiComponentApplication):
+class NeuronWanApplication(QuantApplicationMixin, MultiComponentApplication):
+    quant_tag = "wan"
     def __init__(
         self,
         *,
@@ -180,12 +181,8 @@ class NeuronWanApplication(MultiComponentApplication):
         enable_transformer = bool(kwargs.get("enable_transformer", True))
         enable_transformer_2 = bool(kwargs.get("enable_transformer_2", True))
         enable_vae_decoder = bool(kwargs.get("enable_vae_decoder", True))
-        # FP8 PTQ of the DiT linears (None = bf16). ``quant_cache_dir`` is the
-        # difflet cache root the quantized checkpoint copies live under; it is
-        # runtime-only (never hashed), the spec itself is part of every identity.
-        self.quant_spec = QuantSpec.coerce(kwargs.get("quant"))
-        self._quant_cache_dir = kwargs.get("quant_cache_dir")
-        self.quant_checkpoint_dirs: dict[str, str] = {}
+        # FP8 PTQ of the DiT linears (None = bf16); see QuantApplicationMixin.
+        self._init_quant(kwargs, model_type="wan")
 
         text_seq_len = int(kwargs.get("text_seq_len", 512))
         batch_size = int(kwargs.get("batch_size", 1))
@@ -358,40 +355,7 @@ class NeuronWanApplication(MultiComponentApplication):
         )
 
     # ------------------------------------------------------------ FP8 PTQ
-
-    def _quant_checkpoint_dir(self, subfolder: str) -> str | None:
-        """Where the quantized copy of ``<model_path>/<subfolder>`` lives (None = bf16)."""
-        if self.quant_spec is None:
-            return None
-        if subfolder not in self.quant_checkpoint_dirs:
-            source = os.path.join(self.model_path, subfolder)
-            self.quant_checkpoint_dirs[subfolder] = str(
-                quantized_checkpoint_dir(self._quant_cache_dir, source, self.quant_spec)
-            )
-        return self.quant_checkpoint_dirs[subfolder]
-
-    def ensure_quantized_checkpoints(self, *, create: bool, force: bool = False) -> dict[str, str]:
-        """Make sure every quantized transformer checkpoint exists.
-
-        ``create=True`` (compile, ``difflet quantize``) builds missing copies on
-        the CPU; ``create=False`` (generate / serve load) raises with the
-        command to run. No-op for a bf16 application.
-        """
-        if self.quant_spec is None:
-            return {}
-        resolved: dict[str, str] = {}
-        for subfolder, dest in self.quant_checkpoint_dirs.items():
-            source = os.path.join(self.model_path, subfolder)
-            path = ensure_quantized_checkpoint(
-                source, dest, self.quant_spec, create=create, force=force
-            )
-            resolved[subfolder] = str(path)
-            print(
-                f"[wan] quantized checkpoint ({self.quant_spec.checkpoint_label()}) "
-                f"for {subfolder}: {path}",
-                flush=True,
-            )
-        return resolved
+    # _quant_checkpoint_dir / ensure_quantized_checkpoints: QuantApplicationMixin.
 
     def compile(self, compiled_model_path: str, debug: bool = False, select=None) -> None:
         # The trace-time checkpoint loader reads the quantized copy, so it must

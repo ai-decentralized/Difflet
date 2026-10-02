@@ -74,6 +74,35 @@ def quantize_state_dict(
     return out, report
 
 
+def split_fused_proj_out(
+    state_dict: dict[str, Any],
+    prefix: str,
+    *,
+    attn_name: str,
+    mlp_name: str,
+    cols: int,
+) -> None:
+    """Split ``<prefix>.weight`` (``[out, in]``) at column ``cols`` into two linears, in place.
+
+    FLUX / HunyuanVideo single blocks store one fused ``proj_out`` over
+    ``cat([attn, mlp])`` that the device runs as two row-parallel linears. The
+    attn half keeps the bias (the device adds it once, after the reduce); the
+    fp8 ``scale`` — per-tensor ``[1]`` or per-channel ``[out, 1]`` — is copied to
+    both halves, which is exact because the split is along the input dim. A
+    bf16 checkpoint (no ``.scale``) takes the same path without a scale.
+    """
+    w = state_dict.pop(f"{prefix}.weight")
+    state_dict[f"{attn_name}.weight"] = w[:, :cols].clone().contiguous()
+    state_dict[f"{mlp_name}.weight"] = w[:, cols:].clone().contiguous()
+    bias = state_dict.pop(f"{prefix}.bias", None)
+    if bias is not None:
+        state_dict[f"{attn_name}.bias"] = bias.clone().contiguous()
+    scale = state_dict.pop(f"{prefix}.scale", None)
+    if scale is not None:
+        state_dict[f"{attn_name}.scale"] = scale.clone()
+        state_dict[f"{mlp_name}.scale"] = scale.clone()
+
+
 def _source_slug(source: str) -> str:
     """Human-readable dir token for a resolved source: the HF ``models--org--name``
     cache component when present, else ``<parent>_<name>``."""

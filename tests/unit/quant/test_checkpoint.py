@@ -156,3 +156,31 @@ def test_quantized_hf_checkpoint_maps_onto_difflet_wan_names(tmp_path):
     assert converted["blocks.0.attn1.to_out.0.scale"].dtype == torch.float32
     assert "blocks.0.ffn.net.0.proj.weight" not in converted
     assert converted["proj_out.weight"].dtype == torch.bfloat16
+
+
+@pytest.mark.parametrize("granularity", ["tensor", "channel"])
+def test_split_fused_proj_out_copies_scale_for_both_granularities(granularity):
+    """FLUX / HunyuanVideo split the single-block proj_out along the input dim at
+    load; the fp8 weight splits the same way and the scale (per-tensor [1] or
+    per-channel [out, 1]) is valid for both halves, so it is copied (Review Focus 3)."""
+    from difflet.quant.fp8 import quantize_weight
+
+    w = torch.randn(8, 12, dtype=torch.bfloat16)
+    q, scale = quantize_weight(w, granularity)
+    sd = {"blk.0.proj_out.weight": q, "blk.0.proj_out.scale": scale, "blk.0.proj_out.bias": torch.zeros(8)}
+    ckpt.split_fused_proj_out(sd, "blk.0.proj_out", attn_name="blk.0.proj_out_attn",
+                              mlp_name="blk.0.proj_out_mlp", cols=4)
+    assert "blk.0.proj_out.weight" not in sd and "blk.0.proj_out.scale" not in sd
+    attn, mlp = sd["blk.0.proj_out_attn.weight"], sd["blk.0.proj_out_mlp.weight"]
+    assert attn.shape == (8, 4) and attn.dtype == torch.float8_e4m3fn and mlp.shape == (8, 8)
+    assert torch.equal(attn.float(), q[:, :4].float()) and torch.equal(mlp.float(), q[:, 4:].float())
+    assert torch.equal(sd["blk.0.proj_out_attn.scale"], scale)
+    assert torch.equal(sd["blk.0.proj_out_mlp.scale"], scale)
+    assert "blk.0.proj_out_attn.bias" in sd and "blk.0.proj_out_mlp.bias" not in sd
+
+
+def test_split_fused_proj_out_without_scale_keeps_the_bf16_path():
+    sd = {"blk.0.proj_out.weight": torch.randn(8, 12), "blk.0.proj_out.bias": torch.zeros(8)}
+    ckpt.split_fused_proj_out(sd, "blk.0.proj_out", attn_name="a", mlp_name="m", cols=4)
+    assert set(sd) == {"a.weight", "a.bias", "m.weight"}
+    assert sd["a.weight"].shape == (8, 4) and sd["m.weight"].shape == (8, 8)
