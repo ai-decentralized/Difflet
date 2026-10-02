@@ -132,7 +132,9 @@ class BenchConfig:
 MATRIX: dict[str, BenchConfig] = {
     "ltx_2": BenchConfig(
         model_id="Lightricks/LTX-2",
-        revision="47da56e2ad66ce4125a9922b4a8826bf407f9d0a",
+        # The snapshot on the trn2 host (refs/main as of 2026-10-02); the previous pin
+        # 47da56e2 was never downloaded there and failed every arm with "weights not found".
+        revision="dfcc2108383fe1aaa0584bdf55d368a4bdadd90c",
         model_type="ltx_2",
         tp=4, height=480, width=704, num_frames=49, steps=20, guidance_scale=1.0,
         output_kind="video",

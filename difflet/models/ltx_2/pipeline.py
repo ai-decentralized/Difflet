@@ -554,6 +554,11 @@ class LTX2Orchestrator:
             ctrl.reset()
         prev_audio_vel: torch.Tensor | None = None
         cached_audio_vel_res: torch.Tensor | None = None
+        # Per-step DiT wall time (all guidance passes of a step summed; TeaCache-
+        # skipped steps excluded), printed after the loop for the benchmark adapter.
+        from difflet.pipeline.step_timing import DiTStepTimer
+
+        step_timer = DiTStepTimer("ltx_2")
         for step_index, timestep in enumerate(timesteps):
             model_dtype = _component_dtype(self.transformer, self.dtype)
             do_cfg = float(guidance_scale) > 1.0 or float(audio_guidance_scale) > 1.0
@@ -663,27 +668,28 @@ class LTX2Orchestrator:
                 noise_pred_video = ctrl.skip_noise_pred(mod_input=mod_input)
                 noise_pred_audio = prev_audio_vel + cached_audio_vel_res
             else:
-                noise_pred_video_x0, noise_pred_audio_x0, video_cond_x0, audio_cond_x0 = (
-                    self._full_dit_step(
-                        model_bundle=model_bundle,
-                        latents=latents,
-                        audio_latents=audio_latents,
-                        video_sigma=video_sigma,
-                        audio_sigma=audio_sigma,
-                        do_cfg=do_cfg,
-                        do_stg=do_stg,
-                        do_modality=do_modality,
-                        guidance_scale=guidance_scale,
-                        audio_guidance_scale=audio_guidance_scale,
-                        stg_scale=stg_scale,
-                        audio_stg_scale=audio_stg_scale,
-                        modality_scale=modality_scale,
-                        audio_modality_scale=audio_modality_scale,
-                        spatio_temporal_guidance_blocks=spatio_temporal_guidance_blocks,
-                        use_cross_timestep=use_cross_timestep,
-                        attention_kwargs=attention_kwargs,
+                with step_timer.step():
+                    noise_pred_video_x0, noise_pred_audio_x0, video_cond_x0, audio_cond_x0 = (
+                        self._full_dit_step(
+                            model_bundle=model_bundle,
+                            latents=latents,
+                            audio_latents=audio_latents,
+                            video_sigma=video_sigma,
+                            audio_sigma=audio_sigma,
+                            do_cfg=do_cfg,
+                            do_stg=do_stg,
+                            do_modality=do_modality,
+                            guidance_scale=guidance_scale,
+                            audio_guidance_scale=audio_guidance_scale,
+                            stg_scale=stg_scale,
+                            audio_stg_scale=audio_stg_scale,
+                            modality_scale=modality_scale,
+                            audio_modality_scale=audio_modality_scale,
+                            spatio_temporal_guidance_blocks=spatio_temporal_guidance_blocks,
+                            use_cross_timestep=use_cross_timestep,
+                            attention_kwargs=attention_kwargs,
+                        )
                     )
-                )
                 if float(guidance_rescale) > 0.0:
                     noise_pred_video_x0 = rescale_ltx_2_noise_cfg(
                         noise_pred_video_x0,
@@ -723,6 +729,7 @@ class LTX2Orchestrator:
             )
             if trajectory is not None:
                 trajectory.append((latents.detach().cpu(), audio_latents.detach().cpu()))
+        print(step_timer.report(), flush=True)
         if ctrl is not None:
             print(f"[teacache] stats: {ctrl.stats()}", flush=True)
         return latents, audio_latents

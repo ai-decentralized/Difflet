@@ -231,6 +231,11 @@ class HunyuanVideoOrchestrator:
             and hasattr(self.transformer, "teacache_delta")
         )
         prev_mod_handle: torch.Tensor | None = None
+        # Per-step DiT wall time (TeaCache-skipped steps excluded), printed after
+        # the loop in the form the benchmark adapter parses.
+        from difflet.pipeline.step_timing import DiTStepTimer
+
+        step_timer = DiTStepTimer("hunyuan_video")
         for step_index, timestep in enumerate(timesteps):
             model_dtype = _component_dtype(self.transformer, self.dtype)
             timestep_batch = _batch_timestep(
@@ -298,12 +303,14 @@ class HunyuanVideoOrchestrator:
             ):
                 noise_pred = self.teacache_controller.skip_noise_pred(controller_mod_input)
             else:
-                noise_pred = _first_tensor(self.transformer(model_bundle))
+                with step_timer.step():
+                    noise_pred = _first_tensor(self.transformer(model_bundle))
                 if self.teacache_controller is not None:
                     self.teacache_controller.record_full_step(noise_pred, controller_mod_input)
             latents = self._scheduler_step(noise_pred, timestep, latents, len(timesteps))
             if trajectory is not None:
                 trajectory.append(latents.detach().cpu())
+        print(step_timer.report(), flush=True)
         if controller is not None:
             print(f"[teacache] stats: {controller.stats()}", flush=True)
         return latents

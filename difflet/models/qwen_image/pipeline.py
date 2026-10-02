@@ -284,6 +284,11 @@ class QwenImageOrchestrator:
             and getattr(self.transformer, "teacache_probe_fused", False)
             and hasattr(self.transformer, "teacache_delta")
         )
+        # Per-step DiT wall time (TeaCache-skipped steps excluded), printed after
+        # the loop in the form the benchmark adapter parses.
+        from difflet.pipeline.step_timing import DiTStepTimer
+
+        step_timer = DiTStepTimer("qwen_image")
         for step_index, timestep in enumerate(timesteps):
             model_dtype = _component_dtype(self.transformer, self.dtype)
             timestep_batch = _batch_timestep(
@@ -314,12 +319,14 @@ class QwenImageOrchestrator:
             ):
                 noise_pred = controller.skip_noise_pred(None)
             else:
-                noise_pred = _first_tensor(self.transformer(model_bundle))
+                with step_timer.step():
+                    noise_pred = _first_tensor(self.transformer(model_bundle))
                 if controller is not None:
                     controller.record_full_step(noise_pred, None)
             latents = self._scheduler_step(noise_pred, timestep, latents, len(timesteps))
             if trajectory is not None:
                 trajectory.append(latents.detach().cpu())
+        print(step_timer.report(), flush=True)
         return latents
 
     def _scheduler_step(

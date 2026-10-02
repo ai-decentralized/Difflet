@@ -144,3 +144,17 @@ def test_qwen_orchestrator_requires_encoder_hidden_states(tmp_path):
 
     with pytest.raises(ValueError, match="encoder_hidden_states"):
         pipeline()
+
+
+def test_qwen_orchestrator_reports_per_step_dit_seconds(tmp_path, capsys):
+    """The denoise loop prints the two per-step timing lines the benchmark adapter
+    parses (same contract as Wan), tagged with the model name."""
+    transformer = FakeTransformer(value=0.5)
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        pipeline = QwenImageOrchestrator(
+            model_path=str(tmp_path), transformer=transformer, dtype=torch.float32, height=64, width=64,
+        )
+    pipeline(bundle=_bundle(), timesteps=torch.tensor([1.0, 0.5, 0.25]))
+    out = capsys.readouterr().out
+    assert "[qwen_image] dit-step-seconds: [" in out
+    assert "[qwen_image] dit-step ms: n=2 mean=" in out and "(step 0 excluded)" in out

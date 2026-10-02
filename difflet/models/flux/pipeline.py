@@ -379,6 +379,9 @@ class NeuronFluxPipeline(FluxPipeline):
             batched_guidance = None
 
         # 9. Denoising loop with parallel CFG
+        from difflet.pipeline.step_timing import DiTStepTimer
+
+        step_timer = DiTStepTimer("flux")  # per-step DiT wall time for the benchmark adapter
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -391,17 +394,18 @@ class NeuronFluxPipeline(FluxPipeline):
                 timestep = t.expand(batched_latents.shape[0]).to(batched_latents.dtype)
 
                 # Single batched transformer call
-                transformer_output = self.transformer(
-                    hidden_states=batched_latents,
-                    timestep=timestep / 1000,
-                    guidance=batched_guidance,
-                    pooled_projections=batched_pooled_embeds,
-                    encoder_hidden_states=batched_prompt_embeds,
-                    txt_ids=text_ids,
-                    img_ids=latent_image_ids,
-                    joint_attention_kwargs=self.joint_attention_kwargs,
-                    return_dict=False,
-                )
+                with step_timer.step():
+                    transformer_output = self.transformer(
+                        hidden_states=batched_latents,
+                        timestep=timestep / 1000,
+                        guidance=batched_guidance,
+                        pooled_projections=batched_pooled_embeds,
+                        encoder_hidden_states=batched_prompt_embeds,
+                        txt_ids=text_ids,
+                        img_ids=latent_image_ids,
+                        joint_attention_kwargs=self.joint_attention_kwargs,
+                        return_dict=False,
+                    )
                 batched_noise_pred = (
                     transformer_output[0]
                     if isinstance(transformer_output, (tuple, list))
@@ -439,6 +443,7 @@ class NeuronFluxPipeline(FluxPipeline):
 
                 if XLA_AVAILABLE:
                     xm.mark_step()
+        print(step_timer.report(), flush=True)
 
         # 10. Decode latents
         if output_type == "latent":
@@ -638,6 +643,9 @@ class NeuronFluxPipeline(FluxPipeline):
             neg = neg[0] if isinstance(neg, (tuple, list)) else neg
             return neg + true_cfg_scale * (pos - neg)
 
+        from difflet.pipeline.step_timing import DiTStepTimer
+
+        step_timer = DiTStepTimer("flux")  # per-step DiT wall time (both CFG passes; skips excluded)
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -661,7 +669,8 @@ class NeuronFluxPipeline(FluxPipeline):
                 if controller is not None and controller.should_skip(i, None, diff_norm=delta):
                     noise_pred = controller.skip_noise_pred(None)
                 else:
-                    noise_pred = _full_noise_pred(t)
+                    with step_timer.step():
+                        noise_pred = _full_noise_pred(t)
                     if controller is not None:
                         controller.record_full_step(noise_pred, None)
 
@@ -694,6 +703,7 @@ class NeuronFluxPipeline(FluxPipeline):
                     progress_bar.update()
                 if XLA_AVAILABLE:
                     xm.mark_step()
+        print(step_timer.report(), flush=True)
 
         if controller is not None:
             print(f"[teacache] stats: {controller.stats()}")

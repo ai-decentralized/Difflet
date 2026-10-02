@@ -805,3 +805,18 @@ def test_ltx_2_orchestrator_applies_decode_noise_before_video_denormalize(tmp_pa
     expected = expected_noise * 4.0 / 2.0 + 2.0
     assert torch.allclose(vae.calls[0][0], expected)
     assert torch.allclose(vae.calls[0][1], torch.tensor([0.5]))
+
+
+def test_ltx_2_orchestrator_reports_per_step_dit_seconds(tmp_path, capsys):
+    """The denoise loop prints the two per-step timing lines the benchmark adapter
+    parses (same contract as Wan), tagged with the model name."""
+    transformer = FakeDualStreamTransformer(video_value=0.5, audio_value=0.25)
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        pipeline = LTX2Orchestrator(
+            model_path=str(tmp_path), transformer=transformer, dtype=torch.float32,
+            height=64, width=96, num_frames=17, audio_num_frames=4,
+        )
+    pipeline(bundle=_bundle(), timesteps=torch.tensor([1.0, 0.5, 0.25]))
+    out = capsys.readouterr().out
+    assert "[ltx_2] dit-step-seconds: [" in out
+    assert "[ltx_2] dit-step ms: n=2 mean=" in out and "(step 0 excluded)" in out

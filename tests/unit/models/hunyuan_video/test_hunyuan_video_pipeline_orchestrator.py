@@ -361,3 +361,15 @@ def test_hunyuan_online_delta_mode_is_probe_free(tmp_path):
     )
     assert pipeline.teacache_controller.needs_signal() is False
     assert pipeline.teacache_controller.calibration.online_delta_alpha == pytest.approx(0.6)
+
+
+def test_hunyuan_orchestrator_reports_per_step_dit_seconds(tmp_path, capsys):
+    """The denoise loop prints the two per-step timing lines the benchmark adapter
+    parses (same contract as Wan), tagged with the model name."""
+    transformer = FakeTransformer(value=0.25)
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        pipeline = HunyuanVideoOrchestrator(model_path=str(tmp_path), transformer=transformer, dtype=torch.float32)
+    pipeline(bundle=_bundle(), timesteps=torch.tensor([1000.0, 500.0, 250.0]))
+    out = capsys.readouterr().out
+    assert "[hunyuan_video] dit-step-seconds: [" in out
+    assert "[hunyuan_video] dit-step ms: n=2 mean=" in out and "(step 0 excluded)" in out

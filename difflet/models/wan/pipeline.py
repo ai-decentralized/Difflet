@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-import statistics
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -518,18 +517,11 @@ class WanOrchestrator:
 
 def _format_dit_step_report(step_seconds: list[float]) -> str:
     """Two log lines the benchmark adapter parses: the raw per-step list and a
-    summary over steps 1..N-1 (step 0 excluded, as in benchmark/step_realloop.py)."""
-    raw = "[wan] dit-step-seconds: [" + ", ".join(f"{s:.4f}" for s in step_seconds) + "]"
-    tail = step_seconds[1:]
-    if not tail:
-        return raw + "\n[wan] dit-step ms: n=0 (fewer than two DiT steps; no per-step stat)"
-    ms = [s * 1000.0 for s in tail]
-    summary = (
-        f"[wan] dit-step ms: n={len(ms)} mean={statistics.fmean(ms):.1f} "
-        f"median={statistics.median(ms):.1f} min={min(ms):.1f} max={max(ms):.1f} "
-        "(step 0 excluded)"
-    )
-    return raw + "\n" + summary
+    summary over steps 1..N-1 (step 0 excluded, as in benchmark/step_realloop.py).
+    Shared with the other models' loops via difflet.pipeline.step_timing."""
+    from difflet.pipeline.step_timing import format_dit_step_report
+
+    return format_dit_step_report("wan", step_seconds)
 
 
 def has_wan_components(app: Any) -> bool:
