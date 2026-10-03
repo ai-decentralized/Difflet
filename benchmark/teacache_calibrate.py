@@ -249,7 +249,9 @@ def fit(args) -> int:
 
     from difflet.pipeline.teacache import TeaCacheCalibration
 
-    cfg = resolve(args.model, "tp4tcad")
+    target_skips = getattr(args, "target_skips", None)
+    label = "tp4tcad" if target_skips is None else f"tp4tcad{target_skips}"
+    cfg = resolve(args.model, label)
     pp = pairs_path(cfg)
     doc = json.loads(pp.read_text())
     trajs = doc["trajectories"]
@@ -267,7 +269,7 @@ def fit(args) -> int:
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
     coef_asc = tuple(float(c) for c in coef_desc[::-1])
 
-    target = cadence2_skips(cfg.steps)
+    target = cadence2_skips(cfg.steps) if target_skips is None else target_skips
     per_traj = [{p["step"]: p["signal"] for p in t["trajectory"]} for t in trajs]
     # the largest threshold worth trying skips the whole window on every prompt
     window = range(TEACACHE_WARMUP, cfg.steps - TEACACHE_COOLDOWN)
@@ -291,8 +293,9 @@ def fit(args) -> int:
         "poly_degree": int(args.degree),
         "signal_source": doc["signal_source"],
         "target_skips": int(target),
-        "target_rule": "cadence 2's skip count at warmup/cooldown 5 (tp4tc2), so tp4tcad is "
-                       "compared at the same skip budget",
+        "target_rule": ("cadence 2's skip count at warmup/cooldown 5 (tp4tc2), so tp4tcad is "
+                        "compared at the same skip budget" if target_skips is None else
+                        f"explicit --target-skips {target_skips} (best-combination search)"),
         "simulated_skips_per_prompt": best_sim,
         "calibration_prompts": [t["prompt"] for t in trajs],
         "calibration_seeds": [t["seed"] for t in trajs],
@@ -321,6 +324,9 @@ def main() -> int:
     ft = sub.add_parser("fit")
     ft.add_argument("--model", required=True)
     ft.add_argument("--degree", type=int, default=4)
+    ft.add_argument("--target-skips", type=int, default=None,
+                    help="skip budget to fit the threshold to (default: cadence 2's); "
+                         "writes <slug>_tp4tcad_s<N>.json, the tcadN labels' calibration")
     a = p.parse_args()
     if a.cmd == "placeholder":
         print(write_placeholder(resolve(a.model, "tp4tcad")))

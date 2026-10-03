@@ -65,18 +65,23 @@ def cadence2_skips(steps: int) -> int:
     return max((steps - TEACACHE_WARMUP - TEACACHE_COOLDOWN) // 2, 0)
 
 
-def adaptive_target_speedup(steps: int) -> float:
+def adaptive_target_speedup(steps: int, skips: Optional[int] = None) -> float:
     """tp4tcad's --teacache-speedup: the denoise-loop speedup of cadence 2's skip
     count (steps / full steps), so the calibrated controller is compared with
-    tp4tc2 at the same skip budget -- 28 steps -> 1.474 (9 skips), 20 -> 1.333 (5)."""
-    return round(steps / (steps - cadence2_skips(steps)), 3)
+    tp4tc2 at the same skip budget -- 28 steps -> 1.474 (9 skips), 20 -> 1.333 (5).
+    ``skips`` overrides the budget (the tcadNN combo labels)."""
+    n = cadence2_skips(steps) if skips is None else skips
+    return round(steps / (steps - n), 3)
 
 
-def teacache_calibration_path(slug: str, device: Optional[str] = None) -> str:
+def teacache_calibration_path(slug: str, device: Optional[str] = None,
+                              skips: Optional[int] = None) -> str:
     """A model's tp4tcad calibration JSON (benchmark.teacache_calibrate writes it
     on the device). Absolute: the CLI cells run as subprocesses from the repo
     root, the real-loop and calibration harnesses load it in-process."""
-    return str((Path(results_dir(device)) / "teacache_calib" / f"{slug}_tp4tcad.json").resolve())
+    suffix = "" if skips is None else f"_s{skips}"
+    return str((Path(results_dir(device)) / "teacache_calib"
+                / f"{slug}_tp4tcad{suffix}.json").resolve())
 
 
 def write_blocked_cell(slug: str, config: str, *, reason: str, evidence: str,
@@ -387,6 +392,10 @@ COMBO_TEACACHE: dict[str, dict[str, Any]] = {
     "tcod02": {"teacache_online_delta": 0.2},
     "tcod04": {"teacache_online_delta": 0.4},
     "tcad": {"teacache_adaptive": True},
+    # calibrated adaptive at larger skip budgets (calibrate fit --target-skips N);
+    # the probe artifact is shared -- only teacache_probe_enabled is in the key
+    "tcad12": {"teacache_adaptive": 12},
+    "tcad14": {"teacache_adaptive": 14},
 }
 TAEF1_REPO = "madebyollin/taef1"
 _COMBO_LAYOUT_DESC = {
@@ -398,6 +407,8 @@ _COMBO_TC_DESC = {
     "tcod005": "TeaCache online-delta 0.05", "tcod01": "TeaCache online-delta 0.1",
     "tcod02": "TeaCache online-delta 0.2", "tcod04": "TeaCache online-delta 0.4",
     "tcad": "TeaCache calibrated adaptive",
+    "tcad12": "TeaCache calibrated adaptive, 12-skip budget",
+    "tcad14": "TeaCache calibrated adaptive, 14-skip budget",
 }
 COMBO_LABELS: list[str] = []
 for _lay, _lo in COMBO_LAYOUTS.items():
@@ -457,10 +468,13 @@ def resolve(slug: str, config: str = "tp4") -> "BenchConfig":
         raise KeyError(f"unknown config '{config}'. known: {', '.join(CONFIGS)}")
     base = MATRIX[slug]
     overrides = dict(CONFIGS[config])
-    if overrides.pop("teacache_adaptive", False):
-        # per-model: the target follows the step count, the calibration the slug
-        overrides["teacache_speedup"] = adaptive_target_speedup(base.steps)
-        overrides["teacache_calibration"] = teacache_calibration_path(slug)
+    adaptive = overrides.pop("teacache_adaptive", False)
+    if adaptive:
+        # per-model: the target follows the step count, the calibration the slug;
+        # an int is an explicit skip budget with its own calibration file
+        skips = None if adaptive is True else int(adaptive)
+        overrides["teacache_speedup"] = adaptive_target_speedup(base.steps, skips)
+        overrides["teacache_calibration"] = teacache_calibration_path(slug, skips=skips)
     if config != "tp4":
         overrides["config_label"] = f"{_CONFIG_DESC[config]}; {base.config_label}"
     return replace(base, slug=slug, config=config, **overrides)

@@ -284,3 +284,18 @@ def test_combo_labels_cross_layout_decoder_and_teacache():
     assert resolve("flux_1_dev", "tp2cp2").cp_mode == "ulysses"
     tcad = resolve("flux_1_dev", "tp4sptaef1tcad")
     assert tcad.sp and tcad.teacache_speedup is not None and tcad.taef1_path
+
+
+def test_combo_tcad_budgets_have_their_own_calibration_and_target():
+    from benchmark.models import adaptive_target_speedup
+    base = resolve("flux_1_dev", "tp4tcad")
+    c12 = resolve("flux_1_dev", "tp4tcad12")
+    c14 = resolve("flux_1_dev", "tp2cp2tcad14")
+    assert base.teacache_speedup == adaptive_target_speedup(28) == 1.474
+    assert c12.teacache_speedup == round(28 / 16, 3)
+    assert c14.teacache_speedup == 2.0
+    assert c12.teacache_calibration.endswith("flux_1_dev_tp4tcad_s12.json")
+    assert c14.teacache_calibration.endswith("flux_1_dev_tp4tcad_s14.json")
+    assert base.teacache_calibration.endswith("flux_1_dev_tp4tcad.json")
+    # a budget never changes the artifact: only the probe flag is compiled in
+    assert c12.compile_teacache_flags()[0] == "--teacache-speedup"
