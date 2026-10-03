@@ -43,7 +43,8 @@ FP8_HLO2TENSORIZER_FLAG = "--experimental-unsafe-fp8e4m3fn-as-fp8e4m3"
 #   3 — lean activation law (bf16-domain quantize, no abs / clamp, margin scale,
 #       one combined dequant multiply); weight-only path removed
 #   4 — lean law, fp32 multiply + direct fp8 cast (no bf16 round trip)
-QUANT_LAYER_SCHEMA = 4
+#   5 — shared-input quantization (q / k / v / proj_mlp quantize their common input once)
+QUANT_LAYER_SCHEMA = 5
 
 
 def neuron_config_kwargs(spec: QuantSpec, quantized_checkpoints_path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -161,21 +162,57 @@ def quantize_activation_per_tensor(
     return scaled.to(FP8_DTYPE), scale
 
 
-def dynamic_fp8_linear(layer: Any, input_parallel: "torch.Tensor", **impl_kwargs: Any) -> "torch.Tensor":
+_SHARED_FP8_ATTR = "_difflet_fp8_quantized"
+
+
+def quantize_activation_shared(
+    x: "torch.Tensor", clamp_bound: float = float("inf")
+) -> "tuple[torch.Tensor, torch.Tensor]":
+    """:func:`quantize_activation_per_tensor`, memoised on the tensor object.
+
+    q / k / v (and FLUX / HunyuanVideo's single-block ``proj_mlp``) consume the
+    same activation; with a per-tensor dynamic scale their fp8 input is the
+    same tensor, so it is computed once per input object and reused (the Wan
+    2.1 HLO carried three identical quantize passes per attention, each a full
+    pass over the [1, 4680, 5120] activation). The cache lives on the tensor,
+    so a new forward (new tensors) never sees a stale entry.
+    """
+    cached = getattr(x, _SHARED_FP8_ATTR, None)
+    if cached is not None and cached[0] == clamp_bound:
+        return cached[1], cached[2]
+    quantized, scale = quantize_activation_per_tensor(x, clamp_bound)
+    try:
+        setattr(x, _SHARED_FP8_ATTR, (clamp_bound, quantized, scale))
+    except (AttributeError, TypeError):  # tensor types without an attribute dict
+        pass
+    return quantized, scale
+
+
+def dynamic_fp8_linear(
+    layer: Any,
+    input_parallel: "torch.Tensor",
+    *,
+    quantized: "tuple[torch.Tensor, torch.Tensor] | None" = None,
+    **impl_kwargs: Any,
+) -> "torch.Tensor":
     """``input @ W^T`` with both operands fp8 and a per-tensor dynamic input scale.
 
     ``layer`` is an NxD quantized parallel linear: ``weight`` (fp8), ``scale``
     (float32, ``[1]`` per-tensor or ``[out, 1]`` per-channel), ``_forward_impl``
-    and ``clamp_bound``. The output is dequantized by ``input_scale *
-    weight_scale`` and cast back to the input dtype; the weight scale is
-    flattened so it broadcasts over the output's last dim for any rank.
+    and ``clamp_bound``. ``quantized`` is an already quantized ``(fp8, scale)``
+    of the input (see :func:`quantize_activation_shared`); otherwise the input
+    is quantized here, memoised on the tensor. The output is dequantized by
+    ``input_scale * weight_scale`` and cast back to the input dtype; the weight
+    scale is flattened so it broadcasts over the output's last dim for any rank.
     """
     import torch
 
     original_dtype = input_parallel.dtype
-    quantized, input_scale = quantize_activation_per_tensor(
-        input_parallel, getattr(layer, "clamp_bound", float("inf"))
-    )
+    if quantized is None:
+        quantized = quantize_activation_shared(
+            input_parallel, getattr(layer, "clamp_bound", float("inf"))
+        )
+    quantized, input_scale = quantized
     output = layer._forward_impl(input=quantized, weight=layer.weight, bias=None, **impl_kwargs)
     # One combined (tiny) scale, one multiply over the output: the 2.26 HLO
     # carried two full-size F32 multiplies per linear for the two scales.
@@ -232,14 +269,17 @@ def quant_module_mapping() -> dict[Any, Any]:
             return _adopt(cls, mod, super().from_float(mod, q_config))
 
         def forward(self, input, *args, **kwargs):
-            if self.async_tensor_model_parallel_allreduce or self.sequence_parallel_enabled:
-                input_parallel = input
-            else:
-                input_parallel = ql.copy_to_tensor_model_parallel_region(
-                    input, process_group=self.tensor_parallel_group
+            # Quantize the caller's tensor (shared by q / k / v) before NxD's TP
+            # copy, which would hand each projection a fresh tensor object.
+            fp8_input, input_scale = quantize_activation_shared(
+                input, getattr(self, "clamp_bound", float("inf"))
+            )
+            if not (self.async_tensor_model_parallel_allreduce or self.sequence_parallel_enabled):
+                fp8_input = ql.copy_to_tensor_model_parallel_region(
+                    fp8_input, process_group=self.tensor_parallel_group
                 )
             output_parallel = dynamic_fp8_linear(
-                self, input_parallel,
+                self, input, quantized=(fp8_input, input_scale),
                 async_grad_allreduce=self.async_tensor_model_parallel_allreduce,
                 sequence_parallel_enabled=self.sequence_parallel_enabled,
                 sequence_dimension=self.sequence_dimension,
@@ -369,5 +409,6 @@ __all__ = [
     "neuron_config_kwargs",
     "quant_module_mapping",
     "quantize_activation_per_tensor",
+    "quantize_activation_shared",
     "quantize_traced_model_",
 ]
