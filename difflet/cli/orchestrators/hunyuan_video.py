@@ -279,7 +279,12 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             model_path=model_dir, parallel=parallel, dtype=torch.bfloat16,
             shape={"height": h, "width": w, "num_frames": f},
             shapes=compile_shapes,
-            text_seq_len=_TEXT_SEQ_LEN, enable_vae_decoder=True,
+            text_seq_len=_TEXT_SEQ_LEN,
+            # --host-vae: DiT only; the pipeline falls back to the diffusers VAE on
+            # the host. Saves the ~1 h VAE compile that every new DiT identity
+            # (e.g. an fp8 arm) would otherwise repeat, since the VAE shares this
+            # stage artifact.
+            enable_vae_decoder=not getattr(args, "host_vae", False),
             # Probe-free TeaCache (fixed cadence / online-delta): host-side skip
             # logic only; not in _stage_cache_inputs, so the warm artifact hits.
             teacache_cadence=getattr(args, "teacache_cadence", None),
@@ -384,7 +389,11 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
                 "shapes": canonical_shapes_list(args, (320, 512, 61)),
                 "toolchain": stage_toolchain_versions(),
             }
-            # Additive-only: absent for bf16 so every existing artifact keeps its key.
+            # Additive-only: absent unless set, so every existing artifact keeps
+            # its key. A host-VAE artifact has no VAE NEFF and must not be taken
+            # for one that does.
+            if getattr(args, "host_vae", False):
+                inputs["host_vae"] = True
             quant_spec = self._quant_spec(args)
             if quant_spec is not None:
                 from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
@@ -442,6 +451,8 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             parts += ["--shapes", str(a.shapes)]
         if getattr(a, "sp_enabled", False):
             parts.append("--sp")
+        if getattr(a, "host_vae", False):
+            parts.append("--host-vae")
         if getattr(a, "teacache_cadence", None) is not None:
             parts += ["--teacache-cadence", str(a.teacache_cadence)]
         if getattr(a, "teacache_online_delta", None) is not None:

@@ -561,3 +561,38 @@ def test_stage_clip_compile_skips_when_manifest_matches(monkeypatch, tmp_path):
     assert created[-1].compiled is not None
     orch._stage_clip(args)
     assert created[-1].compiled is None
+
+
+# ------------------------------------------------------------ --host-vae
+
+
+def test_host_vae_enters_the_generate_identity_only_when_set(monkeypatch):
+    # Additive-only: a bf16/device-VAE artifact keeps its key; a host-VAE artifact
+    # (no VAE NEFF inside) must never be mistaken for one that has the VAE.
+    monkeypatch.setattr(hv_mod, "stage_toolchain_versions", lambda: {"toolchain": "x"})
+    plain = HunyuanVideoOrchestrator(_hv_args())
+    inputs = plain._stage_cache_inputs("generate", plain.args)
+    assert "host_vae" not in inputs
+    host = HunyuanVideoOrchestrator(_hv_args(host_vae=True))
+    host_inputs = host._stage_cache_inputs("generate", host.args)
+    assert host_inputs["host_vae"] is True
+    assert {k: v for k, v in host_inputs.items() if k != "host_vae"} == inputs
+    for stage in ("clip", "llama"):
+        assert "host_vae" not in host._stage_cache_inputs(stage, host.args)
+
+
+def test_shared_cli_args_forward_host_vae():
+    plain = HunyuanVideoOrchestrator(_hv_args())._shared_cli_args(stage_mode="generate", work_dir="/w")
+    assert "--host-vae" not in plain
+    host = HunyuanVideoOrchestrator(_hv_args(host_vae=True))._shared_cli_args(
+        stage_mode="generate", work_dir="/w")
+    assert "--host-vae" in host
+
+
+def test_stage_generate_host_vae_builds_no_device_vae(monkeypatch, tmp_path):
+    # --host-vae: the generate stage builds the DiT only (enable_vae_decoder=False);
+    # the orchestrator's pipeline then decodes with the diffusers VAE on the host.
+    _, _, app = _run_generate_stage(monkeypatch, tmp_path, host_vae=True)
+    assert app.kwargs["enable_vae_decoder"] is False
+    _, _, default_app = _run_generate_stage(monkeypatch, tmp_path)
+    assert default_app.kwargs["enable_vae_decoder"] is True
