@@ -1,0 +1,3 @@
+neuron-explorer exited with an error.neuron-explorer 2.32.0.498-b1f3998 built on 2026-08-10T05:09:49Z (commit b1f3998a)
+
+Please unset the --output-file CLI argument because for output formats "summary-json" and "summary-text" we print to console so there is no output file.

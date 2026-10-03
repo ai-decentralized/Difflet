@@ -1,0 +1,100 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "to_q",
+      "to_k",
+      "to_v",
+      "to_out.0",
+      "ffn.net_in",
+      "ffn.net_out",
+      "ffn.net.0.proj",
+      "ffn.net.2"
+    ]
+  },
+  "shape": {
+    "height": 64,
+    "width": 64,
+    "text_seq_len": 512
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 0.00034940246291981225,
+    "mean_abs": 0.01241535134613514,
+    "max_abs": 0.06640625,
+    "cosine": 0.9993800198720694,
+    "rel_l2": 0.035211549530880175,
+    "snr_db": 29.066297256106402
+  },
+  "arms": {
+    "bf16": {
+      "arm": "bf16",
+      "compiled": true,
+      "loaded": true,
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'",
+      "compile_seconds": 8.098,
+      "load_seconds": 4.844,
+      "forward_ms": {
+        "n": 10,
+        "mean": 0.5503754975507036,
+        "median": 0.578782994125504,
+        "min": 0.39661600021645427,
+        "max": 0.7904619997134432
+      },
+      "output_nonfinite": 0
+    },
+    "fp8": {
+      "arm": "fp8",
+      "compiled": true,
+      "loaded": true,
+      "quantize_seconds": 0.007,
+      "quantized_checkpoint": "/home/ubuntu/.claude/jobs/b5f130d0/tmp/ptq_probe_out1e2x200/cache/quantized/tiny_wan_transformer/transformer/fp8-tensor-e3a19c68",
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+      "compile_seconds": 6.64,
+      "load_seconds": 0.06,
+      "forward_ms": {
+        "n": 10,
+        "mean": 0.562107699806802,
+        "median": 0.512047998199705,
+        "min": 0.452702006441541,
+        "max": 0.8222659962484613
+      },
+      "output_nonfinite": 0
+    }
+  },
+  "checks": {
+    "device_bf16_vs_cpu_bf16": {
+      "mse": 7.380511721777339e-06,
+      "mean_abs": 0.0019136685878038406,
+      "max_abs": 0.013671875,
+      "cosine": 0.9999869494640754,
+      "rel_l2": 0.005117588872154671,
+      "snr_db": 45.81869213265948
+    },
+    "device_fp8_vs_cpu_fp8": {
+      "mse": 7.155695433258558e-05,
+      "mean_abs": 0.0055954353883862495,
+      "max_abs": 0.037109375,
+      "cosine": 0.999872741530789,
+      "rel_l2": 0.015953145728381767,
+      "snr_db": 35.94307335210561
+    },
+    "device_fp8_vs_cpu_bf16": {
+      "mse": 0.0003512033431976036,
+      "mean_abs": 0.012690884061157703,
+      "max_abs": 0.0625,
+      "cosine": 0.9993769266872432,
+      "rel_l2": 0.035302176090377585,
+      "snr_db": 29.043970461696933
+    },
+    "device_fp8_vs_device_bf16": {
+      "mse": 0.0003434052424120537,
+      "mean_abs": 0.012431046925485134,
+      "max_abs": 0.0625,
+      "cosine": 0.9993913713858913,
+      "rel_l2": 0.034898107388863904,
+      "snr_db": 29.14396250543566
+    }
+  },
+  "passed": true
+}

@@ -190,6 +190,10 @@ def dynamic_fp8_linear(layer: Any, input_parallel: "torch.Tensor", **impl_kwargs
         from difflet.quant.fp8 import FP8_DTYPE, FP8_MAX
 
         input_scale = static_scale.to(torch.float32).reshape(())
+        # The clamp is mandatory: the device's fp8 cast of a value above 240 is NaN,
+        # not a saturate (trn2, 2026-10-03: tiny probe at 8x the calibration -> NaN;
+        # the Wan 2.1 render without the clamp collapsed to 8 dB). It is also free:
+        # 586.4 ms per DiT step without it vs 586.9 with it.
         quantized = (
             (input_parallel.to(torch.float32) * (1.0 / input_scale))
             .clamp(-FP8_MAX, FP8_MAX)

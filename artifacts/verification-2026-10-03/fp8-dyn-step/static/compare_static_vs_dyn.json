@@ -1,0 +1,21 @@
+{
+  "output": {
+    "reference": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-03/fp8-dyn-step/lean_round1/ab/fp8_run0.mp4",
+    "test": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-03/fp8-dyn-step/static/ab/fp8_run0.mp4",
+    "frames": 9,
+    "height": 480,
+    "width": 832,
+    "psnr_db": 24.82558680369025,
+    "ssim": 0.8849623203277588,
+    "pixel": {
+      "mse": 0.003362591779210864,
+      "mean_abs": 0.02717665170484021,
+      "max_abs": 1.0,
+      "cosine": 0.9890532741572882,
+      "rel_l2": 0.14815133833059288,
+      "snr_db": 16.58588841897329
+    },
+    "lpips": 0.1174793036447631,
+    "lpips_net": "alex"
+  }
+}

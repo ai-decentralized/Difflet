@@ -1,0 +1,102 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "to_q",
+      "to_k",
+      "to_v",
+      "to_out.0",
+      "ffn.net_in",
+      "ffn.net_out",
+      "ffn.net.0.proj",
+      "ffn.net.2"
+    ],
+    "calibration": "/home/ubuntu/.claude/jobs/b5f130d0/tmp/ptq_probe_static_g8_noclamp/calib.json",
+    "calibration_sha": "a84eaf2ab36d9207"
+  },
+  "shape": {
+    "height": 64,
+    "width": 64,
+    "text_seq_len": 512
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 0.001012115540832248,
+    "mean_abs": 0.026586015708744526,
+    "max_abs": 0.0859375,
+    "cosine": 0.9983675218307817,
+    "rel_l2": 0.057344681752030106,
+    "snr_db": 24.830137062785425
+  },
+  "arms": {
+    "bf16": {
+      "arm": "bf16",
+      "compiled": true,
+      "loaded": true,
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'",
+      "compile_seconds": 9.101,
+      "load_seconds": 6.26,
+      "forward_ms": {
+        "n": 10,
+        "mean": 0.4234546000816408,
+        "median": 0.40723650010932033,
+        "min": 0.3957210001317435,
+        "max": 0.5728730000100768
+      },
+      "output_nonfinite": 0
+    },
+    "fp8": {
+      "arm": "fp8",
+      "compiled": true,
+      "loaded": true,
+      "quantize_seconds": 0.007,
+      "quantized_checkpoint": "/home/ubuntu/.claude/jobs/b5f130d0/tmp/ptq_probe_static_g8_noclamp/cache/quantized/tiny_wan_transformer/transformer/fp8-tensor-static-c6457bea",
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+      "compile_seconds": 18.816,
+      "load_seconds": 0.049,
+      "forward_ms": {
+        "n": 10,
+        "mean": 0.9794966999834287,
+        "median": 0.5827929999213666,
+        "min": 0.5550829998810514,
+        "max": 3.8266060000751168
+      },
+      "output_nonfinite": 1024
+    }
+  },
+  "checks": {
+    "device_bf16_vs_cpu_bf16": {
+      "mse": 4.858221103631877e-06,
+      "mean_abs": 0.001396089792251587,
+      "max_abs": 0.0078125,
+      "cosine": 0.9999922799129377,
+      "rel_l2": 0.003972983288122573,
+      "snr_db": 48.01766523496832
+    },
+    "device_fp8_vs_cpu_fp8": {
+      "mse": NaN,
+      "mean_abs": NaN,
+      "max_abs": NaN,
+      "cosine": NaN,
+      "rel_l2": NaN,
+      "snr_db": Infinity
+    },
+    "device_fp8_vs_cpu_bf16": {
+      "mse": NaN,
+      "mean_abs": NaN,
+      "max_abs": NaN,
+      "cosine": NaN,
+      "rel_l2": NaN,
+      "snr_db": Infinity
+    },
+    "device_fp8_vs_device_bf16": {
+      "mse": NaN,
+      "mean_abs": NaN,
+      "max_abs": NaN,
+      "cosine": NaN,
+      "rel_l2": NaN,
+      "snr_db": Infinity
+    }
+  },
+  "passed": false
+}

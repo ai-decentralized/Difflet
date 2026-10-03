@@ -1,0 +1,31 @@
+layers 400
+spread quantiles p50 1.58 p90 2.91 p99 23.09 max 52.34
+count spread>4: 24  >8: 8  >16: 5
+worst 15 (spread, name, amax, min_step_amax, argmax_step, argmin_step):
+  52.3  blocks.34.attn2.to_out.0  amax=0.342 min=0.00653 argmax=14 argmin=2
+  30.3  blocks.37.attn2.to_out.0  amax=0.279 min=0.00922 argmax=19 argmin=2
+  30.0  blocks.35.attn2.to_out.0  amax=0.316 min=0.0106 argmax=13 argmin=0
+  23.1  blocks.39.attn2.to_out.0  amax=0.547 min=0.0237 argmax=19 argmin=0
+  22.0  blocks.38.attn2.to_out.0  amax=0.363 min=0.0165 argmax=19 argmin=1
+  10.5  blocks.30.attn2.to_out.0  amax=0.264 min=0.0251 argmax=16 argmin=2
+  10.2  blocks.1.attn2.to_out.0  amax=1.1 min=0.108 argmax=0 argmin=18
+  8.9  blocks.2.attn2.to_out.0  amax=1.27 min=0.143 argmax=1 argmin=19
+  8.0  blocks.8.attn2.to_out.0  amax=2.81 min=0.354 argmax=5 argmin=19
+  7.2  blocks.11.attn2.to_out.0  amax=1.4 min=0.195 argmax=0 argmin=19
+  6.0  blocks.18.attn2.to_out.0  amax=1.62 min=0.27 argmax=1 argmin=16
+  6.0  blocks.4.attn2.to_out.0  amax=1.88 min=0.312 argmax=1 argmin=19
+  5.4  blocks.6.ffn.net_out  amax=22.9 min=4.22 argmax=0 argmin=19
+  5.1  blocks.0.attn1.to_v  amax=23.8 min=4.66 argmax=0 argmin=17
+  5.1  blocks.0.attn1.to_q  amax=23.8 min=4.66 argmax=0 argmin=17
+excluding step 0: p50 1.51 max 52.34
+  attn1.to_k             n= 40 median 1.78 max 5.10
+  attn1.to_out.0         n= 40 median 1.71 max 4.71
+  attn1.to_q             n= 40 median 1.78 max 5.10
+  attn1.to_v             n= 40 median 1.78 max 5.10
+  attn2.to_k             n= 40 median 1.00 max 1.00
+  attn2.to_out.0         n= 40 median 3.58 max 52.34
+  attn2.to_q             n= 40 median 1.03 max 1.31
+  attn2.to_v             n= 40 median 1.00 max 1.00
+  ffn.net_in             n= 40 median 1.75 max 2.51
+  ffn.net_out            n= 40 median 1.66 max 5.42
+amax quantiles min 0.175 p50 6.56 max 69

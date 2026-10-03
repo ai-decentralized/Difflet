@@ -1,0 +1,86 @@
+{
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "guidance_scale": 6.0,
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "tp_degree": 4,
+  "quant": {
+    "format": "fp8",
+    "weight_granularity": "tensor",
+    "calibration": null
+  },
+  "arms": {
+    "bf16": {
+      "runs": [
+        {
+          "run": 0,
+          "e2e_wall_seconds": 967.252,
+          "weights_load_total_seconds": 128.302,
+          "compute_and_overhead_seconds": 838.95,
+          "dit_step_ms": {
+            "n": 19,
+            "mean": 831.3421052631579,
+            "median": 832.0,
+            "min": 815.5,
+            "max": 849.0
+          },
+          "output": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-03/hv-fp8/ab/bf16_run0.mp4",
+          "latents": "None"
+        }
+      ],
+      "compile_seconds": 450.925,
+      "compile_cache_hit": true
+    },
+    "fp8": {
+      "runs": [
+        {
+          "run": 0,
+          "e2e_wall_seconds": 841.939,
+          "weights_load_total_seconds": 128.57,
+          "compute_and_overhead_seconds": 713.369,
+          "dit_step_ms": {
+            "n": 19,
+            "mean": 760.7526315789474,
+            "median": 760.8000000000001,
+            "min": 757.9,
+            "max": 766.2
+          },
+          "output": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-03/hv-fp8/ab/fp8_run0.mp4",
+          "latents": "None"
+        }
+      ],
+      "quantize_seconds": 1.261,
+      "compile_seconds": 1013.814,
+      "compile_cache_hit": true
+    }
+  },
+  "compare": {
+    "fp8_vs_bf16_run0": {
+      "output": {
+        "reference": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-03/hv-fp8/ab/bf16_run0.mp4",
+        "test": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-03/hv-fp8/ab/fp8_run0.mp4",
+        "frames": 61,
+        "height": 320,
+        "width": 512,
+        "psnr_db": 5.831493485960708,
+        "ssim": 0.011045074090361595,
+        "pixel": {
+          "mse": 0.2665145451040795,
+          "mean_abs": 0.4286508802570757,
+          "max_abs": 1.0,
+          "cosine": 0.0,
+          "rel_l2": 1.0,
+          "snr_db": 0.0
+        },
+        "lpips": 0.943854594816927,
+        "lpips_net": "alex"
+      }
+    }
+  }
+}

@@ -126,6 +126,91 @@ the two absmax reductions per linear that must finish before the scale is known 
 reads of the activation per forward). That is what static, calibrated scales remove
 (`static/`).
 
+## Static calibrated activation scales (`static/`): 607.2 → 586.9 ms, and a quality surprise
+
+Commit `946cb89`: `--quant-calibration <json>` stores a per-layer `input_scale`
+(= calibrated input absmax × 1.25 / 240) in the fp8 checkpoint and the device quantizes as
+`(x.f32 × 1/input_scale).clamp(±240).to(f8)` — no reductions. Calibration
+(`scripts/ptq_calibrate_activations.py`, real CPU loop, real UMT5 prompt, 20 steps, 46 min on
+12 cores): 400 layers; per-step absmax spread median ×1.58, p90 ×2.9; only `attn2.to_out.0`
+swings widely (up to ×52, `calibration_spread.txt`).
+
+| arm (same fp8-tensor weights) | DiT step ms (median, n=19) | vs bf16 573.0 | latent SNR vs bf16 | host-VAE PSNR / SSIM / LPIPS |
+|---|---:|---:|---:|---|
+| dynamic law (round 2, `lean_round2`) | 607.2 | 1.060× | 13.2 dB (cos 0.9758, `ab-fixed` 10-01) | 24.5–24.9 dB / 0.88 / 0.12 |
+| **static scales** (`static/ab`, module `MODULE_caa9e95d…`) | **586.9** | **1.024×** | **24.9 dB** (cos 0.9984) | **33.7 dB / 0.953 / 0.035** |
+| same static checkpoint, dynamic law forced (`static/forced_dynamic`, `DIFFLET_FP8_IGNORE_INPUT_SCALE=1`) | 607.7 | 1.061× | 12.8 dB (cos 0.9735) | — |
+
+The speed gain is the two absmax reductions per linear (20 ms). The quality gap is **not** a
+static-scale advantage in exact arithmetic — it is a defect of the dynamic path end to end:
+
+- the forced-dynamic run proves the checkpoint, weights, calibration and compiler cache are
+  not the cause (same checkpoint, only the scale source differs);
+- the HLO of the dynamic module is exactly the intended math (`hlo_scale.py`: bf16 max / −min
+  reductions over all dims, ÷240 × 1.0078, clamp_min 8.1e-6, reciprocal, broadcast multiply,
+  fp8 cast — no clamp, as designed);
+- the tiny Wan probe agrees with the CPU dynamic reference at cosine 0.99997 with plain inputs
+  and 0.9994–0.99997 with heavy-tailed inputs (`static/outlier_probe`); the HunyuanVideo
+  probe with the REAL first 2+2 blocks and real text at production shape agrees at 0.99995
+  (`../hv-fp8/real_probe`);
+- on CPU, on the real activations of steps 0 / 10 / 19 (`act_quant_error_cpu.json`,
+  `act_quant_error_cpu_summary.txt`), dynamic and static are numerically equivalent per layer:
+  median linear-output SNR 32.2 vs 32.0 dB (weight-only 35.0), activation SNR 31.5 dB both,
+  subnormal share 0.2 % both, no clipping in the static law.
+
+So a single forward of the dynamic law is right on the device and equal to static on CPU, yet
+20 steps of it on the device (tp4) drift to 13 dB while static stays at 25 dB. Hypotheses
+measured and eliminated:
+
+- step-to-step coherence of the fp8 grid (`DIFFLET_FP8_DYN_POW2=1`: power-of-two scales, the
+  grid only moves across binades, `static/pow2_dynamic`): latent SNR 13.8 dB, PSNR 25.4 dB —
+  no better than plain dynamic (and 652 ms: the scalar log2/pow is not free);
+- TP4 (`static/real_probe/probe_tp4_tiny_out.log`): the tiny model with 1 % × 200 outliers at
+  `--tp-degree 4` still agrees with the CPU dynamic reference (cosine 0.9996);
+- non-finite activation elements (`DIFFLET_FP8_SANITIZE=1`, HunyuanVideo): no change.
+
+One denoise step at full depth on the device (`static/onestep`): static vs forced-dynamic
+latents agree at 27.3 dB SNR (cosine 0.99908) — consistent with two independent ~30 dB
+quantization errors, i.e. after ONE step the dynamic prediction is as good as the static one.
+The 12 dB gap only exists after 20 steps: whatever the mechanism, it is an accumulation effect
+of the amax-derived scale through the sampling loop, not a wrong forward. Practical
+conclusion: ship static scales, keep dynamic as the uncalibrated fallback and say so.
+
+### Where the static step's remaining 14 ms over bf16 go (`profile/fp8_static`)
+
+Same capture as the first two profiles (rank 0, exec 3 of 3):
+
+| metric (per forward) | bf16 | fp8 dynamic | **fp8 static** |
+|---|---:|---:|---:|
+| total active time | 517 ms | 576 ms | **539 ms** |
+| tensor engine active | 358 ms | 322 ms | 349 ms |
+| vector engine active | 202 ms | 268 ms | 211 ms |
+| scalar engine active | 191 ms | 234 ms | **254 ms** |
+| gpsimd engine active | 93 ms | 36 ms | 45 ms |
+| HBM read / write | 69.7 / 15.7 GB | 40.5 / 31.7 GB | **27.5 / 14.6 GB** |
+| spill save / reload | 11.1 / 13.4 GB | 28.0 / 27.3 GB | **10.1 / 9.2 GB** |
+| vector / scalar instructions | 758 k / 529 k | 994 k / 674 k | 887 k / 713 k |
+
+Static removed the memory traffic the dynamic path added (reads below bf16: fp8 weights;
+writes and spills back at bf16 level) and the vector engine is back at bf16 level. What is
+left is the **scalar engine (+63 ms over bf16)** — the per-element quantize chain
+(convert → multiply → clamp → fp8 cast) feeding every dot — and it is 20 ms more than the
+dynamic law's scalar time, which has no clamp. Experiment `static/clamp`:
+
+| run | result |
+|---|---|
+| tiny probe, static scales, gain 1 | device static == CPU static, cosine 0.99999 |
+| tiny probe, static, inputs ×8 past the calibration, clamp on | device == CPU (both clamp), cosine 0.99837 |
+| same, clamp off (`DIFFLET_FP8_STATIC_NO_CLAMP=1`) | device output NaN: the fp8 cast of a value above 240 is **NaN, not a saturate** |
+| Wan 2.1 production static arm, clamp off | **586.4 ms** (clamp on: 586.9) and the render collapsed to 8.1 dB PSNR |
+
+So the clamp is mandatory and free; the scalar-engine cost is the convert chain itself
+(bf16 → f32, multiply, cast). The remaining levers for it are structural (fold the
+per-layer 1/input_scale into the preceding modulation so the layer input arrives pre-scaled
+and only the cast remains, or an NKI kernel that quantizes in SBUF) and are out of scope for
+this pass: static scales close the gap to 1.024× bf16 with better fidelity than the dynamic
+law, and that is the path the fan-out uses.
+
 ## Levers (cheapest first)
 
 1. **Do the quantize math in bf16, not fp32**: the input is already bf16; converting to F32

@@ -1,0 +1,66 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "transformer_blocks.*.attn.to_q",
+      "transformer_blocks.*.attn.to_k",
+      "transformer_blocks.*.attn.to_v",
+      "transformer_blocks.*.attn.to_out.0",
+      "transformer_blocks.*.attn.add_q_proj",
+      "transformer_blocks.*.attn.add_k_proj",
+      "transformer_blocks.*.attn.add_v_proj",
+      "transformer_blocks.*.attn.to_add_out",
+      "transformer_blocks.*.ff.net.0.proj",
+      "transformer_blocks.*.ff.net.2",
+      "transformer_blocks.*.ff_context.net.0.proj",
+      "transformer_blocks.*.ff_context.net.2",
+      "single_transformer_blocks.*.attn.to_q",
+      "single_transformer_blocks.*.attn.to_k",
+      "single_transformer_blocks.*.attn.to_v",
+      "single_transformer_blocks.*.proj_mlp",
+      "single_transformer_blocks.*.proj_out",
+      "single_transformer_blocks.*.proj_out_attn",
+      "single_transformer_blocks.*.proj_out_mlp"
+    ]
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61,
+    "text_seq_len": 256,
+    "valid_text_rows": 13,
+    "pad_value": 0.0,
+    "num_layers": 4,
+    "num_single_layers": 8
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 0.003997265805999358,
+    "mean_abs": 0.049128561446923416,
+    "max_abs": 0.3125,
+    "cosine": 0.9999454609930587,
+    "rel_l2": 0.010456581144883632,
+    "snr_db": 39.61220575988433
+  },
+  "arms": {
+    "bf16": {
+      "arm": "bf16",
+      "compiled": true,
+      "loaded": true,
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'",
+      "compile_seconds": 950.047,
+      "load_seconds": 115.515,
+      "forward_ms": {
+        "n": 3,
+        "mean": 754.8735043383203,
+        "median": 754.9107280210592,
+        "min": 754.7164830029942,
+        "max": 754.9933019909076
+      },
+      "output_nonfinite": 0,
+      "output_absmax": 27.25
+    }
+  },
+  "checks": {},
+  "passed": false
+}

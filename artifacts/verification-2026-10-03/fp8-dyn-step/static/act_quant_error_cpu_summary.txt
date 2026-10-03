@@ -1,0 +1,6 @@
+[err] step 0: n=400 median SNR wo 35.0 dyn 32.2 static 32.0 dB; act SNR dyn 31.5 static 31.5; subnormal share dyn 0.002 static 0.003; clip static 0.00e+00
+[err]   worst dyn layers: [(28.2, 28.2), (28.2, 28.3), (28.3, 28.3)]
+[err] step 10: n=400 median SNR wo 35.4 dyn 32.5 static 32.4 dB; act SNR dyn 31.5 static 31.5; subnormal share dyn 0.002 static 0.003; clip static 0.00e+00
+[err]   worst dyn layers: [(28.0, 28.0), (28.1, 28.1), (28.2, 28.2)]
+[err] step 19: n=400 median SNR wo 35.7 dyn 32.8 static 32.7 dB; act SNR dyn 31.5 static 31.5; subnormal share dyn 0.001 static 0.002; clip static 1.55e-08
+[err]   worst dyn layers: [(28.1, 28.1), (28.2, 28.2), (28.2, 28.2)]
