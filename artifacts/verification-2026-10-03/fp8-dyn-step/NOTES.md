@@ -109,6 +109,23 @@ pass + the fp8 cast) and dequantize (fp8→fp32, scale, →bf16) traffic that th
 not fuse into the matmul. Structural levers from here: quantize a shared input once for
 q/k/v (the three projections re-quantize the same tensor), and the NKI W8A8 kernel.
 
+## Round 3 (`lean_round3/`): quantize a shared input once for q/k/v — 639.3 ms, reverted
+
+Commit `3cefaf1` quantized the attention input once and fed the fp8 tensor plus its scale to
+the q / k / v projections (and `proj_mlp` in the fused single blocks), saving two of the
+three quantize passes per attention block. Measured 639.3 ms median (n=19, min 638.9), a
+**32 ms regression** over 607.2 ms, so `48f8eb9` reverts it (back to schema 4). Tiny probe
+still passed (cosine 0.99997), so it was not a numerics bug.
+
+Why sharing is slower: with one quantize per linear the compiler fuses the
+`convert→multiply→convert` chain into each matmul's operand load and never materialises the
+fp8 activation. A shared fp8 tensor with three consumers must be written to HBM and read back
+three times (new modules `MODULE_e889ec0d…` / `MODULE_f9f4db2d…`, 68 op kinds each). Lesson:
+the elementwise quantize / dequantize is already fused away; what is left of the 34 ms gap is
+the two absmax reductions per linear that must finish before the scale is known (640 full
+reads of the activation per forward). That is what static, calibrated scales remove
+(`static/`).
+
 ## Levers (cheapest first)
 
 1. **Do the quantize math in bf16, not fp32**: the input is already bf16; converting to F32
