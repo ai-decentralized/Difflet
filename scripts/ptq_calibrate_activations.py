@@ -170,7 +170,8 @@ def main() -> int:
     torch.set_num_threads(args.threads)
     from difflet.models.wan.pipeline import WanOrchestrator
 
-    spec = QuantSpec.for_model(args.model_type)
+    # Plugin types that share a model type's target set (Wan 2.2 = two Wan experts).
+    spec = QuantSpec.for_model({"wan22": "wan"}.get(args.model_type, args.model_type))
     records: dict[str, list[float]] = {}
     step_counter = {"calls": 0}
     if args.model_type == "hunyuan_video":

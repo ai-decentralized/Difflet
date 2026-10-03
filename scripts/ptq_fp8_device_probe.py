@@ -102,6 +102,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--num-layers", type=int, default=2, help="blocks (tiny model, or truncation of the real one)")
     p.add_argument("--text-pt", type=Path, default=None, help="real {prompt_embeds} (zero-padded rows)")
     p.add_argument("--tp-degree", type=int, default=1, help="device tensor-parallel degree (production: 4)")
+    p.add_argument("--static", action="store_true",
+                   help="static activation scales: calibrate per-layer input absmax on the probe's own inputs "
+                        "(CPU stage, gain 1) and run the fp8 arms with that calibration")
+    p.add_argument("--input-gain", type=float, default=1.0,
+                   help="multiply the compared inputs by this after calibration (>1 drives activations past "
+                        "the calibrated range: an fp8 overflow / clamp test)")
     p.add_argument("--force-clean", action="store_true")
     return p
 
@@ -133,7 +139,8 @@ def _real_truncated_state(model_dir: Path, num_layers: int) -> dict:
 def _spec(args):
     from difflet.quant.spec import QuantSpec
 
-    return QuantSpec(weight_granularity=args.quant_granularity)
+    calibration = str(args.work_dir / "calib.json") if getattr(args, "static", False) else None
+    return QuantSpec(weight_granularity=args.quant_granularity, calibration=calibration)
 
 
 def _first(value):
@@ -194,6 +201,27 @@ def stage_cpu(args) -> int:
             mask = torch.rand(t.shape, generator=g) < args.outlier_frac
             t[mask] *= args.outlier_mag
     inputs = (latents.to(torch.bfloat16), torch.tensor([500.0]).to(torch.bfloat16), text.to(torch.bfloat16))
+    if args.static:
+        # Calibrate on the gain-1 inputs: per-target input absmax, written like
+        # scripts/ptq_calibrate_activations.py does (one "step").
+        from difflet.quant.spec import QuantSpec
+
+        dyn_spec = QuantSpec(weight_granularity=args.quant_granularity)
+        amax: dict[str, float] = {}
+        handles = []
+        for name, module in model.named_modules():
+            if isinstance(module, torch.nn.Linear) and dyn_spec.matches(name):
+                handles.append(module.register_forward_pre_hook(
+                    lambda mod, inp, _n=name: amax.__setitem__(_n, float(inp[0].detach().abs().amax()))))
+        with torch.no_grad():
+            model(*inputs)
+        for handle in handles:
+            handle.remove()
+        (args.work_dir / "calib.json").write_text(json.dumps(
+            {"layers": {n: {"amax": v, "per_step": [v], "min_step_amax": v, "n": 1} for n, v in amax.items()}}, indent=1))
+        print(f"[probe:cpu] calibrated {len(amax)} target linears (static scales)", flush=True)
+    if args.input_gain != 1.0:
+        inputs = (inputs[0] * args.input_gain, inputs[1], inputs[2] * args.input_gain)
     with torch.no_grad():
         cpu_bf16 = _first(model(*inputs)).float()
         quantize_module_(model, _spec(args))
