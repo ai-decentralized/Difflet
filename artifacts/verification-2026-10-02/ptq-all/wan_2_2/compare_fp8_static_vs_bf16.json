@@ -1,0 +1,21 @@
+{
+  "output": {
+    "reference": "benchmark/trn2/wan2_2_t2v_a14b_diffusers_out.mp4",
+    "test": "benchmark/trn2/wan2_2_t2v_a14b_diffusers_fp8_tensor_static_out.mp4",
+    "frames": 9,
+    "height": 480,
+    "width": 832,
+    "psnr_db": 35.186692681261626,
+    "ssim": 0.9186566472053528,
+    "pixel": {
+      "mse": 0.0004269635985834674,
+      "mean_abs": 0.014030949306180797,
+      "max_abs": 0.43921568989753723,
+      "cosine": 0.9985407496186816,
+      "rel_l2": 0.05401927390348759,
+      "snr_db": 25.34902515293355
+    },
+    "lpips": 0.0990079210864173,
+    "lpips_net": "alex"
+  }
+}

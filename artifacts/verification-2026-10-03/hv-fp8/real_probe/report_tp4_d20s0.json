@@ -1,0 +1,80 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "transformer_blocks.*.attn.to_q",
+      "transformer_blocks.*.attn.to_k",
+      "transformer_blocks.*.attn.to_v",
+      "transformer_blocks.*.attn.to_out.0",
+      "transformer_blocks.*.attn.add_q_proj",
+      "transformer_blocks.*.attn.add_k_proj",
+      "transformer_blocks.*.attn.add_v_proj",
+      "transformer_blocks.*.attn.to_add_out",
+      "transformer_blocks.*.ff.net.0.proj",
+      "transformer_blocks.*.ff.net.2",
+      "transformer_blocks.*.ff_context.net.0.proj",
+      "transformer_blocks.*.ff_context.net.2",
+      "single_transformer_blocks.*.attn.to_q",
+      "single_transformer_blocks.*.attn.to_k",
+      "single_transformer_blocks.*.attn.to_v",
+      "single_transformer_blocks.*.proj_mlp",
+      "single_transformer_blocks.*.proj_out",
+      "single_transformer_blocks.*.proj_out_attn",
+      "single_transformer_blocks.*.proj_out_mlp"
+    ]
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61,
+    "text_seq_len": 256,
+    "valid_text_rows": 13,
+    "pad_value": 0.0,
+    "num_layers": 20,
+    "num_single_layers": 0
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 0.004198786147447018,
+    "mean_abs": 0.05023953641266417,
+    "max_abs": 0.5,
+    "cosine": 0.9999432344099393,
+    "rel_l2": 0.010654951815772409,
+    "snr_db": 39.44897019856663
+  },
+  "arms": {
+    "bf16": {
+      "arm": "bf16",
+      "compiled": true,
+      "loaded": true,
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'",
+      "compile_seconds": 750.166,
+      "load_seconds": 189.693,
+      "forward_ms": {
+        "n": 2,
+        "mean": 419.38883700004226,
+        "median": 419.38883700004226,
+        "min": 417.78845800035924,
+        "max": 420.9892159997253
+      },
+      "output_nonfinite": 0,
+      "output_absmax": 27.0
+    },
+    "fp8": {
+      "arm": "fp8",
+      "error": "ValueError: FP8 targets match no module in HunyuanVideoTransformer3DModel: ['single_transformer_blocks.*.attn.to_q', 'single_transformer_blocks.*.attn.to_k', 'single_transformer_blocks.*.attn.to_v', 'single_transformer_blocks.*.proj_mlp', 'single_transformer_blocks.*.proj_out_attn', 'single_transformer_blocks.*.proj_out_mlp'] (renamed layer? see difflet.quant.targets)",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_hv_device_probe.py\", line 320, in stage_device\n    output, record = _device_arm(name, transformer_dir, args, inputs,\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_hv_device_probe.py\", line 267, in _device_arm\n    app.compile(str(compiled_dir))\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/application_base.py\", line 429, in compile\n    traced_model = self.get_builder(debug).trace(**trace_kwargs)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/model_builder.py\", line 576, in trace\n    hlo_artifact_collection = self._generate_hlo(key)\n                              ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/model_builder.py\", line 875, in _generate_hlo\n    model_input_container.model_instance.load_module()\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/model_builder.py\", line 388, in load_module\n    self.module = self.module_cls()\n                  ^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/hunyuan_video/backbone.py\", line 182, in _create_model\n    quantize_traced_model_(model, self.config.neuron_config)\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/quant.py\", line 375, in quantize_traced_model_\n    raise ValueError(\nValueError: FP8 targets match no module in HunyuanVideoTransformer3DModel: ['single_transformer_blocks.*.attn.to_q', 'single_transformer_blocks.*.attn.to_k', 'single_transformer_blocks.*.attn.to_v', 'single_transformer_blocks.*.proj_mlp', 'single_transformer_blocks.*.proj_out_attn', 'single_transformer_blocks.*.proj_out_mlp'] (renamed layer? see difflet.quant.targets)\n"
+    }
+  },
+  "checks": {
+    "device_bf16_vs_cpu_bf16": {
+      "mse": 0.000947694964585025,
+      "mean_abs": 0.02147024675432476,
+      "max_abs": 0.25,
+      "cosine": 0.9999873015307792,
+      "rel_l2": 0.005062020489940728,
+      "snr_db": 45.91352202492162
+    }
+  },
+  "passed": false
+}

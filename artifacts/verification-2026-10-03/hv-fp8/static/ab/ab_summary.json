@@ -1,0 +1,43 @@
+{
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "guidance_scale": 6.0,
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "tp_degree": 4,
+  "quant": {
+    "format": "fp8",
+    "weight_granularity": "tensor",
+    "calibration": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-03/hv-fp8/static/act_calibration_hv.json"
+  },
+  "arms": {
+    "fp8": {
+      "runs": [
+        {
+          "run": 0,
+          "e2e_wall_seconds": 688.039,
+          "weights_load_total_seconds": 151.809,
+          "compute_and_overhead_seconds": 536.23,
+          "dit_step_ms": {
+            "n": 19,
+            "mean": 729.6315789473684,
+            "median": 728.4000000000001,
+            "min": 726.5,
+            "max": 736.3
+          },
+          "output": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-03/hv-fp8/static/ab/fp8_run0.mp4",
+          "latents": "None"
+        }
+      ],
+      "quantize_seconds": 218.93,
+      "compile_seconds": 1044.406,
+      "compile_cache_hit": true
+    }
+  },
+  "compare": {}
+}

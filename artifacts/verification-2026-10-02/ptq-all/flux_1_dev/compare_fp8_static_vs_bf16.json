@@ -1,0 +1,21 @@
+{
+  "output": {
+    "reference": "benchmark/trn2/flux_1_dev_out.png",
+    "test": "benchmark/trn2/flux_1_dev_fp8_tensor_static_out.png",
+    "frames": 1,
+    "height": 1024,
+    "width": 1024,
+    "psnr_db": 29.211337007525863,
+    "ssim": 0.9742692708969116,
+    "pixel": {
+      "mse": 0.001199130071121125,
+      "mean_abs": 0.010766238657907934,
+      "max_abs": 0.8549019619822502,
+      "cosine": 0.9984293093599663,
+      "rel_l2": 0.056034189528225815,
+      "snr_db": 25.03093810535664
+    },
+    "lpips": 0.05087442696094513,
+    "lpips_net": "alex"
+  }
+}
