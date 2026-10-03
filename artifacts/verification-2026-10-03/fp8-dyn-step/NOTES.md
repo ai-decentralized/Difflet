@@ -54,6 +54,30 @@ Both arms gain about 1 % from the newer compiler; the fp8 graph is lowered the s
 `hlo_ops_fp8_dyn_2_27.txt` identical to the 2.26 histogram). Transformer compile 309 s (bf16)
 / 319 s (fp8). The compiler version is not the lever; the quantize / dequantize traffic is.
 
+## Device profile confirms it (neuron-explorer, one forward of the 2.26 NEFFs, tp4, rank 0)
+
+`profile/bf16/summary_full.txt`, `profile/fp8_dyn/summary_full.txt` (captures:
+`neuron-explorer capture -n model.neff -r 4 --collectives-worker-count 4 --num-exec 3
+--profile-nth-exec 3`; the 3.6 GB `.ntff` traces stay on the host under the same dirs).
+
+| metric (per forward) | bf16 | fp8 dynamic | delta |
+|---|---:|---:|---:|
+| total active time | 517 ms | 576 ms | **+59 ms** |
+| tensor engine active | 358 ms | 322 ms | **−36 ms** (the fp8 dots are faster) |
+| vector engine active | 202 ms | 268 ms | **+66 ms** |
+| scalar engine active | 191 ms | 234 ms | **+43 ms** |
+| gpsimd engine active | 93 ms | 36 ms | −57 ms |
+| HBM read | 69.7 GB | 40.5 GB | −29 GB (fp8 weights) |
+| HBM write | 15.7 GB | 31.7 GB | **+16 GB** (fp32 intermediates) |
+| spill save / reload | 11.1 / 13.4 GB | 28.0 / 27.3 GB | **×2.5 / ×2.0** |
+| vector / scalar / activate instructions | 758 k / 529 k / 233 k | 994 k / 674 k / 317 k | +31 % / +27 % / +36 % |
+| tensor-engine instructions | 6.39 M | 6.17 M | −3 % |
+
+So the matmuls already win from fp8 (−36 ms); the step loses because the un-fused fp32
+quantize / dequantize passes land on the vector and scalar engines and spill through HBM.
+If that overhead went to zero the fp8 step would be ~7 % *faster* than bf16 at this shape
+(and more once the dot is the only cost, i.e. with an NKI kernel that quantizes in SBUF).
+
 ## Levers (cheapest first)
 
 1. **Do the quantize math in bf16, not fp32**: the input is already bf16; converting to F32
