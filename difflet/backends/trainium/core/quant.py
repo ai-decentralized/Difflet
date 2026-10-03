@@ -178,6 +178,12 @@ def dynamic_fp8_linear(layer: Any, input_parallel: "torch.Tensor", **impl_kwargs
 
     original_dtype = input_parallel.dtype
     static_scale = getattr(layer, "input_scale", None)
+    if os.environ.get("DIFFLET_FP8_IGNORE_INPUT_SCALE") == "1":
+        # A/B switch (read once, at trace time): run a static checkpoint through the
+        # dynamic law, everything else in the graph identical. On trn2 (2026-10-03,
+        # Wan 2.1) this is how the dynamic law was isolated as the cause of the
+        # 13 dB vs 25 dB end-to-end latent fidelity gap; keep it for re-measuring.
+        static_scale = None
     if static_scale is not None:
         # Static per-layer scale (calibrated): one fused multiply + clamp + cast, no
         # absmax reductions over the activation.

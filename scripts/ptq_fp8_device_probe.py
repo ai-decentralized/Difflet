@@ -91,8 +91,43 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--iters", type=int, default=10, help="timed forwards per arm (after 2 warmups)")
     p.add_argument("--min-cosine", type=float, default=0.999)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--outlier-frac", type=float, default=0.0,
+                   help="fraction of latent / text elements multiplied by --outlier-mag (heavy-tailed "
+                        "activations like the real model's; 0 = plain normal inputs)")
+    p.add_argument("--outlier-mag", type=float, default=50.0)
+    p.add_argument("--num-frames", type=int, default=1, help="pixel frames (latent frames = (n-1)//4+1)")
+    p.add_argument("--real-model-dir", type=Path, default=None,
+                   help="HF transformer/ dir: the REAL config and weights truncated to --num-layers blocks "
+                        "(device-vs-CPU check with real activation statistics)")
+    p.add_argument("--num-layers", type=int, default=2, help="blocks (tiny model, or truncation of the real one)")
+    p.add_argument("--text-pt", type=Path, default=None, help="real {prompt_embeds} (zero-padded rows)")
+    p.add_argument("--tp-degree", type=int, default=1, help="device tensor-parallel degree (production: 4)")
     p.add_argument("--force-clean", action="store_true")
     return p
+
+
+def _real_truncated_state(model_dir: Path, num_layers: int) -> dict:
+    """The real HF Wan transformer tensors for blocks < ``num_layers`` plus every non-block tensor."""
+    import torch
+    from safetensors import safe_open
+
+    index_path = model_dir / "diffusion_pytorch_model.safetensors.index.json"
+    if index_path.exists():
+        index = json.loads(index_path.read_text())["weight_map"]
+    else:
+        index = None
+    shards = sorted(model_dir.glob("diffusion_pytorch_model*.safetensors"))
+
+    def keep(key: str) -> bool:
+        return not key.startswith("blocks.") or int(key.split(".")[1]) < num_layers
+
+    state = {}
+    for shard in shards:
+        with safe_open(str(shard), "pt") as f:
+            for key in f.keys():
+                if keep(key) and (index is None or index.get(key) == shard.name):
+                    state[key] = f.get_tensor(key).to(torch.bfloat16).contiguous()
+    return state
 
 
 def _spec(args):
@@ -117,24 +152,47 @@ def stage_cpu(args) -> int:
     import difflet.models.wan.modeling_wan as wan
     from difflet.quant.fake_linear import quantize_module_
 
-    cfg = wan.WanTransformerConfig.from_diffusers_dict(TINY_CONFIG)
+    raw = dict(TINY_CONFIG)
+    if args.real_model_dir:
+        raw = json.loads((args.real_model_dir / "config.json").read_text())
+    raw["num_layers"] = args.num_layers
+    cfg = wan.WanTransformerConfig.from_diffusers_dict(raw)
     torch.manual_seed(args.seed)
     model = wan.WanTransformer3DModel(cfg).to(torch.bfloat16).eval()
-    state = {}
-    for key, value in model.state_dict().items():
-        if key.endswith(".rank"):
-            continue
-        for ours, theirs in _TO_DIFFUSERS:
-            key = key.replace(ours, theirs)
-        state[key] = value.contiguous()
     transformer_dir = args.work_dir / "tiny_wan" / "transformer"
     transformer_dir.mkdir(parents=True, exist_ok=True)
+    if args.real_model_dir:
+        from difflet.models.wan.checkpoint.backbone import convert_backbone_state_dict
+
+        state = _real_truncated_state(args.real_model_dir, cfg.num_layers)
+        missing, unexpected = model.load_state_dict(convert_backbone_state_dict(dict(state)), strict=False)
+        print(f"[probe:cpu] real weights: {len(state)} HF tensors, missing {len(missing)}, unexpected {len(unexpected)}",
+              flush=True)
+    else:
+        state = {}
+        for key, value in model.state_dict().items():
+            if key.endswith(".rank"):
+                continue
+            for ours, theirs in _TO_DIFFUSERS:
+                key = key.replace(ours, theirs)
+            state[key] = value.contiguous()
     save_file(state, str(transformer_dir / "diffusion_pytorch_model.safetensors"))
-    (transformer_dir / "config.json").write_text(json.dumps(TINY_CONFIG, indent=2))
+    (transformer_dir / "config.json").write_text(json.dumps(raw, indent=2))
 
     g = torch.Generator().manual_seed(args.seed + 1)
-    latents = torch.randn(1, cfg.in_channels, 1, args.height // 8, args.width // 8, generator=g)
-    text = torch.randn(1, args.text_seq_len, cfg.text_dim, generator=g)
+    latent_frames = (args.num_frames - 1) // 4 + 1
+    latents = torch.randn(1, cfg.in_channels, latent_frames, args.height // 8, args.width // 8, generator=g)
+    if args.text_pt:
+        text = torch.load(args.text_pt, map_location="cpu")["prompt_embeds"].float()
+        args.text_seq_len = int(text.shape[1])
+    else:
+        text = torch.randn(1, args.text_seq_len, cfg.text_dim, generator=g)
+    if args.outlier_frac > 0:
+        # Real DiT activations are heavy-tailed (Wan 2.1 calibration: per-tensor absmax
+        # 20-70 with a bulk near 1); plain randn inputs never exercise that range.
+        for t in (latents, text):
+            mask = torch.rand(t.shape, generator=g) < args.outlier_frac
+            t[mask] *= args.outlier_mag
     inputs = (latents.to(torch.bfloat16), torch.tensor([500.0]).to(torch.bfloat16), text.to(torch.bfloat16))
     with torch.no_grad():
         cpu_bf16 = _first(model(*inputs)).float()
@@ -165,8 +223,9 @@ def _device_arm(name, transformer_dir, args, inputs, spec, cache_dir):
         record["quantize_seconds"] = round(time.perf_counter() - started, 3)
         record["quantized_checkpoint"] = str(quant_dir)
     config = create_wan_backbone_config(
-        model_path=str(transformer_dir.parent), world_size=1, tp_degree=1, dtype=torch.bfloat16,
-        height=args.height, width=args.width, num_frames=1, batch_size=1,
+        model_path=str(transformer_dir.parent), world_size=args.tp_degree, tp_degree=args.tp_degree, dtype=torch.bfloat16,
+        # the backbone config counts LATENT frames (the traced latent is [1, 16, F, H/8, W/8])
+        height=args.height, width=args.width, num_frames=(args.num_frames - 1) // 4 + 1, batch_size=1,
         quant=spec, quant_checkpoint_dir=quant_dir,
     )
     # The backbone traces its text input at config.text_seq_len (512 unless
@@ -180,7 +239,7 @@ def _device_arm(name, transformer_dir, args, inputs, spec, cache_dir):
     record["compile_seconds"] = round(time.perf_counter() - started, 3)
     record["compiled"] = True
     started = time.perf_counter()
-    app.load(str(compiled_dir), start_rank_id=0, local_ranks_size=1, skip_warmup=True)
+    app.load(str(compiled_dir), start_rank_id=0, local_ranks_size=args.tp_degree, skip_warmup=True)
     record["load_seconds"] = round(time.perf_counter() - started, 3)
     record["loaded"] = True
     for _ in range(2):
@@ -200,7 +259,7 @@ def _device_arm(name, transformer_dir, args, inputs, spec, cache_dir):
 
 
 def stage_device(args) -> int:
-    os.environ.setdefault("NEURON_RT_NUM_CORES", "1")
+    os.environ.setdefault("NEURON_RT_NUM_CORES", str(args.tp_degree))
     import torch
 
     from difflet.quant.metrics import tensor_error_metrics

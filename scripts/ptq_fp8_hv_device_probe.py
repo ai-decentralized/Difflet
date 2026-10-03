@@ -32,6 +32,7 @@ import statistics
 import subprocess
 import sys
 import time
+import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +45,13 @@ REPORT = "ptq_hv_probe_report.json"
 
 
 def tiny_config(args) -> dict:
+    if getattr(args, "real_model_dir", None):
+        # The real transformer config, truncated to the probe's block counts: a
+        # device-vs-CPU check with the real weights' activation statistics.
+        raw = json.loads((args.real_model_dir / "config.json").read_text())
+        raw["num_layers"] = args.num_layers
+        raw["num_single_layers"] = args.num_single_layers
+        return raw
     return {
         "_class_name": "HunyuanVideoTransformer3DModel",
         "attention_head_dim": 32,
@@ -95,6 +103,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--iters", type=int, default=10)
     p.add_argument("--min-cosine", type=float, default=0.999)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--real-model-dir", type=Path, default=None,
+                   help="HF transformer/ dir: use the REAL config and weights, truncated to --num-layers / "
+                        "--num-single-layers (device-vs-CPU check with real activation statistics)")
+    p.add_argument("--text-pt", type=Path, default=None,
+                   help="real conditioning {encoder_hidden_states, encoder_attention_mask, pooled_projections}; "
+                        "pass --text-seq-len / --valid-text-rows matching it for the device stage")
     p.add_argument("--force-clean", action="store_true")
     return p
 
@@ -128,6 +142,32 @@ def _to_diffusers_layout(state: dict, num_single_layers: int) -> dict:
     return out
 
 
+def _real_truncated_state(model_dir, num_layers: int, num_single_layers: int) -> dict:
+    """The real HF transformer tensors for the first ``num_layers`` double and
+    ``num_single_layers`` single blocks plus every non-block tensor (bf16)."""
+    import torch
+    from safetensors import safe_open
+
+    index = json.loads((model_dir / "diffusion_pytorch_model.safetensors.index.json").read_text())["weight_map"]
+
+    def keep(key: str) -> bool:
+        for prefix, limit in (("transformer_blocks.", num_layers), ("single_transformer_blocks.", num_single_layers)):
+            if key.startswith(prefix):
+                return int(key[len(prefix):].split(".")[0]) < limit
+        return True
+
+    wanted: dict[str, list[str]] = {}
+    for key, shard in index.items():
+        if keep(key):
+            wanted.setdefault(shard, []).append(key)
+    state = {}
+    for shard, keys in wanted.items():
+        with safe_open(str(model_dir / shard), "pt") as f:
+            for key in keys:
+                state[key] = f.get_tensor(key).to(torch.bfloat16).contiguous()
+    return state
+
+
 def stage_cpu(args) -> int:
     os.environ["DIFFLET_BACKEND"] = "cpu"
     import torch
@@ -142,18 +182,42 @@ def stage_cpu(args) -> int:
     model = hv.HunyuanVideoTransformer3DModel(cfg).to(torch.bfloat16).eval()
     transformer_dir = args.work_dir / "tiny_hv" / "transformer"
     transformer_dir.mkdir(parents=True, exist_ok=True)
-    save_file(_to_diffusers_layout(model.state_dict(), cfg.num_single_layers),
-              str(transformer_dir / "diffusion_pytorch_model.safetensors"))
+    if args.real_model_dir:
+        state = _real_truncated_state(args.real_model_dir, cfg.num_layers, cfg.num_single_layers)
+        save_file(state, str(transformer_dir / "diffusion_pytorch_model.safetensors"))
+        from difflet.backends.trainium.hunyuan_video.backbone import NeuronHunyuanVideoBackboneApplication
+
+        converted = NeuronHunyuanVideoBackboneApplication.convert_hf_to_neuron_state_dict(
+            dict(state), types.SimpleNamespace(
+                num_attention_heads=cfg.num_attention_heads, attention_head_dim=cfg.attention_head_dim,
+                num_single_layers=cfg.num_single_layers, neuron_config=types.SimpleNamespace(world_size=1)))
+        converted = {k: v for k, v in converted.items() if not k.endswith(".rank")}
+        missing, unexpected = model.load_state_dict(converted, strict=False)
+        print(f"[probe:cpu] real weights: {len(state)} HF tensors, missing {len(missing)}, unexpected {len(unexpected)}",
+              flush=True)
+    else:
+        save_file(_to_diffusers_layout(model.state_dict(), cfg.num_single_layers),
+                  str(transformer_dir / "diffusion_pytorch_model.safetensors"))
     (transformer_dir / "config.json").write_text(json.dumps(raw, indent=2))
 
     g = torch.Generator().manual_seed(args.seed + 1)
     latent_frames = (args.num_frames - 1) // 4 + 1
     latents = torch.randn(1, cfg.in_channels, latent_frames, args.height // 8, args.width // 8, generator=g)
-    text = torch.randn(1, args.text_seq_len, cfg.text_embed_dim, generator=g)
-    mask = torch.zeros(1, args.text_seq_len, dtype=torch.int64)
-    mask[:, : args.valid_text_rows] = 1
-    text[:, args.valid_text_rows:] *= args.pad_value
-    pooled = torch.randn(1, cfg.pooled_projection_dim, generator=g)
+    if args.text_pt:
+        # Real conditioning (the pipeline zeroes the pad rows before the DiT).
+        real = torch.load(args.text_pt, map_location="cpu")
+        text = real["encoder_hidden_states"].float()
+        mask = real["encoder_attention_mask"].to(torch.int64)
+        text = text * mask.unsqueeze(-1).to(text.dtype)
+        pooled = real["pooled_projections"].float()
+        args.text_seq_len = int(text.shape[1])
+        args.valid_text_rows = int(mask.sum())
+    else:
+        text = torch.randn(1, args.text_seq_len, cfg.text_embed_dim, generator=g)
+        mask = torch.zeros(1, args.text_seq_len, dtype=torch.int64)
+        mask[:, : args.valid_text_rows] = 1
+        text[:, args.valid_text_rows:] *= args.pad_value
+        pooled = torch.randn(1, cfg.pooled_projection_dim, generator=g)
     inputs = (
         latents.to(torch.bfloat16),
         torch.tensor([500.0]).to(torch.bfloat16),

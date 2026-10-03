@@ -49,6 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--text-seq-len", type=int, default=512)
     p.add_argument("--threads", type=int, default=12)
+    p.add_argument("--text-pt", type=Path, default=None,
+                   help="hunyuan_video: real conditioning {encoder_hidden_states, encoder_attention_mask, "
+                        "pooled_projections} (the CLI's llama.pt + clip.pt contents)")
     p.add_argument("--out", type=Path, required=True)
     return p
 
@@ -80,12 +83,124 @@ def _prompt_embeds(model_dir: Path, prompt: str, seq_len: int, dtype: torch.dtyp
     return (hidden * ti.attention_mask.unsqueeze(-1).to(hidden.dtype)).to(dtype)
 
 
+def _load_transformer_hv(model_dir: Path, dtype: torch.dtype):
+    """The real HunyuanVideo 1.0 DiT in Difflet's module layout (fused proj_out split)."""
+    from types import SimpleNamespace
+
+    import difflet.models.hunyuan_video.modeling_hunyuan_video as hv
+    from difflet.backends.trainium.core.modules.checkpoint import load_state_dict
+    from difflet.backends.trainium.hunyuan_video.backbone import NeuronHunyuanVideoBackboneApplication
+
+    transformer_dir = model_dir / "transformer"
+    cfg = hv.HunyuanVideoTransformerConfig.from_diffusers_dict(json.loads((transformer_dir / "config.json").read_text()))
+    model = hv.HunyuanVideoTransformer3DModel(cfg).to(dtype).eval()
+    state = NeuronHunyuanVideoBackboneApplication.convert_hf_to_neuron_state_dict(
+        load_state_dict(str(transformer_dir)),
+        SimpleNamespace(num_attention_heads=cfg.num_attention_heads, attention_head_dim=cfg.attention_head_dim,
+                        num_single_layers=cfg.num_single_layers, neuron_config=SimpleNamespace(world_size=1)))
+    state = {k: v.to(dtype) for k, v in state.items()}
+    model.load_state_dict(state, strict=False)
+    return model
+
+
+class _HVModelAdapter:
+    """What HunyuanVideoOrchestrator calls: ``transformer(bundle)`` on a plain CPU module."""
+
+    def __init__(self, model):
+        self.model = model
+        self.dtype = torch.bfloat16
+
+    def __call__(self, bundle):
+        return self.model(*bundle.as_model_inputs(), return_dict=False)
+
+
+def _run_hunyuan_video(args, spec, records, step_counter) -> float:
+    from difflet.models.hunyuan_video.pipeline import HunyuanVideoOrchestrator
+
+    started = time.perf_counter()
+    model = _load_transformer_hv(args.model_dir, torch.bfloat16)
+    print(f"[calib] transformer loaded in {time.perf_counter() - started:.1f}s", flush=True)
+    if not args.text_pt:
+        raise SystemExit("--text-pt (encoder_hidden_states / encoder_attention_mask / pooled_projections) is required")
+    text = torch.load(args.text_pt, map_location="cpu")
+    hooked = _hook_targets(model, spec, records, step_counter, args.max_steps)
+    print(f"[calib] hooked {hooked} target linears", flush=True)
+    orch = HunyuanVideoOrchestrator(model_path=str(args.model_dir), transformer=_HVModelAdapter(model),
+                                    dtype=torch.bfloat16, height=args.height, width=args.width, num_frames=args.num_frames)
+    torch.manual_seed(args.seed)  # the CLI's noise: manual_seed(seed) then randn of the latent shape
+    latent_frames = (args.num_frames - 1) // 4 + 1
+    latents = torch.randn(1, 16, latent_frames, args.height // 8, args.width // 8, dtype=torch.bfloat16)
+    started = time.perf_counter()
+    try:
+        with torch.no_grad():
+            orch(latents=latents, encoder_hidden_states=text["encoder_hidden_states"].to(torch.bfloat16),
+                 encoder_attention_mask=text["encoder_attention_mask"].to(torch.int64),
+                 pooled_projections=text["pooled_projections"].to(torch.bfloat16),
+                 num_inference_steps=args.steps, guidance_scale=args.guidance_scale, output_type="latent")
+    except _Stop:
+        pass
+    return time.perf_counter() - started
+
+
+class _Stop(Exception):
+    pass
+
+
+def _hook_targets(model, spec, records, step_counter, max_steps) -> int:
+    def make_hook(name):
+        def hook(module, inputs):
+            x = inputs[0]
+            records.setdefault(name, []).append(float(x.detach().abs().amax()))
+        return hook
+
+    targets = [(n, m) for n, m in model.named_modules() if isinstance(m, torch.nn.Linear) and spec.matches(n)]
+    for name, module in targets:
+        module.register_forward_pre_hook(make_hook(name))
+    if max_steps is not None and targets:
+        def stop_hook(module, inputs):
+            step_counter["calls"] += 1
+            if step_counter["calls"] > max_steps:
+                raise _Stop()
+        targets[0][1].register_forward_pre_hook(stop_hook)
+    return len(targets)
+
+
 def main() -> int:
     args = build_parser().parse_args()
     torch.set_num_threads(args.threads)
     from difflet.models.wan.pipeline import WanOrchestrator
 
     spec = QuantSpec.for_model(args.model_type)
+    records: dict[str, list[float]] = {}
+    step_counter = {"calls": 0}
+    if args.model_type == "hunyuan_video":
+        elapsed = _run_hunyuan_video(args, spec, records, step_counter)
+        return _write(args, records, elapsed)
+    if args.model_type != "wan":
+        # Other models plug in as scripts/calib_models/<model_type>.py exposing
+        #   run(args, install_hooks) -> elapsed_seconds
+        # where install_hooks(model) registers the absmax hooks on the loaded CPU
+        # model (it returns the number of hooked linears) and run() then drives
+        # the model's real denoise loop with its real conditioning.
+        import importlib.util
+
+        plugin = Path(__file__).resolve().parent / "calib_models" / f"{args.model_type}.py"
+        if not plugin.exists():
+            raise SystemExit(f"no calibration loop for model type {args.model_type!r} ({plugin} missing)")
+        module_spec = importlib.util.spec_from_file_location(f"calib_models_{args.model_type}", plugin)
+        module = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(module)
+
+        def install_hooks(model) -> int:
+            hooked = _hook_targets(model, spec, records, step_counter, args.max_steps)
+            print(f"[calib] hooked {hooked} target linears", flush=True)
+            return hooked
+
+        try:
+            elapsed = module.run(args, install_hooks)
+        except _Stop:
+            elapsed = float("nan")
+        return _write(args, records, elapsed)
     started = time.perf_counter()
     model = _load_transformer(args.model_dir, torch.bfloat16)
     print(f"[calib] transformer loaded in {time.perf_counter() - started:.1f}s", flush=True)
@@ -95,33 +210,8 @@ def main() -> int:
 
     # Per-target absmax of the input, per call (one call per step at guidance 1).
     records: dict[str, list[float]] = {}
-    step_counter = {"calls": 0}
-
-    def make_hook(name):
-        def hook(module, inputs):
-            x = inputs[0]
-            records.setdefault(name, []).append(float(x.detach().abs().amax()))
-        return hook
-
-    hooked = 0
-    for name, module in model.named_modules():
-        if isinstance(module, torch.nn.Linear) and spec.matches(name):
-            module.register_forward_pre_hook(make_hook(name))
-            hooked += 1
+    hooked = _hook_targets(model, spec, records, step_counter, args.max_steps)
     print(f"[calib] hooked {hooked} target linears", flush=True)
-
-    class _Stop(Exception):
-        pass
-
-    if args.max_steps is not None:
-        first = next(n for n, m in model.named_modules() if isinstance(m, torch.nn.Linear) and spec.matches(n))
-
-        def stop_hook(module, inputs):
-            step_counter["calls"] += 1
-            if step_counter["calls"] > args.max_steps:
-                raise _Stop()
-
-        dict(model.named_modules())[first].register_forward_pre_hook(stop_hook)
 
     orch = WanOrchestrator(model_path=str(args.model_dir), transformer=model, dtype=torch.bfloat16)
     g = torch.Generator().manual_seed(args.seed)
@@ -135,7 +225,10 @@ def main() -> int:
                  guidance_scale=args.guidance_scale, output_type="latent")
     except _Stop:
         pass
-    elapsed = time.perf_counter() - started
+    return _write(args, records, time.perf_counter() - started)
+
+
+def _write(args, records: dict[str, list[float]], elapsed: float) -> int:
     steps_recorded = max(len(v) for v in records.values()) if records else 0
     print(f"[calib] {steps_recorded} steps recorded in {elapsed:.1f}s", flush=True)
 
