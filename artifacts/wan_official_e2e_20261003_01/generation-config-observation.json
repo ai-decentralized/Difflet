@@ -1,0 +1,20 @@
+{
+  "observed_at": "2026-10-03T09:09:01.296151+00:00",
+  "pid": 472362,
+  "scope": "Read-only Python stack snapshot during actual device denoising; step_index is zero-based.",
+  "num_inference_steps": 50,
+  "guidance_scale": 5,
+  "cfg_parallel": false,
+  "teacache_on": false,
+  "step_index": 3,
+  "should_skip": false,
+  "last_step_observation": {
+    "observed_at": "2026-10-03T09:24:05.151494+00:00",
+    "num_inference_steps": 50,
+    "guidance_scale": 5,
+    "cfg_parallel": false,
+    "teacache_on": false,
+    "step_index": 49,
+    "should_skip": false
+  }
+}

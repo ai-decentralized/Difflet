@@ -414,26 +414,32 @@ class WanDecoder3d(nn.Module):
         feat_cache: Optional[list[Optional[torch.Tensor] | str]] = None,
         feat_idx: list[int] | None = None,
         first_chunk: bool = False,
+        start_block: int = 0,
+        end_block: int | None = None,
     ) -> torch.Tensor:
         del first_chunk
-        if feat_cache is not None:
-            assert feat_idx is not None
-            idx = feat_idx[0]
-            cache_x = _tail_cache(x)
-            if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
-                cache_x = torch.cat(
-                    [feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x],
-                    dim=2,
-                )
-            x = self.conv_in(x, feat_cache[idx])
-            feat_cache[idx] = cache_x
-            feat_idx[0] += 1
-        else:
-            x = self.conv_in(x)
+        if start_block == 0:
+            if feat_cache is not None:
+                assert feat_idx is not None
+                idx = feat_idx[0]
+                cache_x = _tail_cache(x)
+                if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
+                    cache_x = torch.cat(
+                        [feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x],
+                        dim=2,
+                    )
+                x = self.conv_in(x, feat_cache[idx])
+                feat_cache[idx] = cache_x
+                feat_idx[0] += 1
+            else:
+                x = self.conv_in(x)
 
-        x = self.mid_block(x, feat_cache=feat_cache, feat_idx=feat_idx)
-        for up_block in self.up_blocks:
+            x = self.mid_block(x, feat_cache=feat_cache, feat_idx=feat_idx)
+        stop = len(self.up_blocks) if end_block is None else end_block
+        for up_block in self.up_blocks[start_block:stop]:
             x = up_block(x, feat_cache=feat_cache, feat_idx=feat_idx)
+        if stop < len(self.up_blocks):
+            return x
         x = self.nonlinearity(self.norm_out(x))
 
         if feat_cache is not None:

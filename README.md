@@ -392,6 +392,7 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 | `--teacache-speedup F`, `--teacache-calibration PATH` | generate, run, serve | Adaptive TeaCache target and calibration file |
 | `--teacache-online-delta ALPHA` | generate, run | Probe-free online-delta TeaCache |
 | `--prompt` | generate, run | Text prompt |
+| `--negative-prompt` | generate, run | Negative prompt for the staged Wan pipeline |
 | `--requests FILE` | generate, run | JSONL batch file, one request per line |
 | `--output PATH` | generate, run | Output file (`.png` or `.mp4`) |
 | `--steps N`, `--guidance-scale F`, `--seed N` | generate, run | Sampler settings (seed default 42) |
@@ -400,8 +401,87 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 | `--work-dir PATH`, `--keep-work-dir` | generate, run | Inter-stage tensor directory for staged models |
 | `--host`, `--port`, `--api-key` | serve | Bind address and optional shared API key |
 | `--clip-placement {host,neuron}` | serve | HunyuanVideo CLIP placement |
+| `--wan-vae-chunked` | compile, generate, run | Wan FP32 VAE with reusable frame graphs and explicit causal state (staged CLI) |
 
 `difflet <command> --help` is the authoritative list.
+
+### Wan VAE compilation for long videos
+
+`--wan-vae-chunked` splits the decoder after temporal upsampling. The early
+partition processes one latent frame; the spatial tail processes one output
+frame at a time. Initial, transition, and steady-state signatures produce six
+fixed-size graphs per spatial size. All graphs share the decoder weights.
+Temporal convolution histories
+are passed separately for each partition and reset for every request, keeping
+unrelated histories out of each graph's I/O buffers.
+At runtime, only one graph per partition is resident; phase changes reload
+NEFFs while retaining shared weights to bound HBM buffer allocation.
+The VAE uses FP32; the DiT retains its configured precision. The staged VAE cache is keyed by
+spatial dimensions and revision, so changing only video length reuses these
+graphs. The DiT still requires an artifact for the requested video shape.
+Bucket compiler jobs run serially to limit host memory pressure; the first
+FP32 compile at 480P is still expensive and should be cached before timing
+inference.
+
+For the Wan 2.1 14B 480P configuration, use `--height 480 --width 832
+--num-frames 81 --steps 50 --guidance-scale 5.0 --wan-vae-chunked` with
+`difflet run`, along with the model ID, prompt, output, and pinned revision.
+This option is mutually exclusive with `--host-vae`. It currently supports
+the standalone TP1/W1 VAE stage; it is not a resident serving option.
+
+To measure the VAE independently of the DiT, run:
+
+```bash
+python -m scripts.benchmark_wan_vae_chunked \
+  --model-path /path/to/pinned/wan-diffusers-snapshot \
+  --output-dir artifacts/wan-vae-run-01 \
+  --height 480 --width 832 --num-frames 81 --reference-frames 81
+```
+
+Use a new output directory for each compile, or `--resume-compile` to retry
+an interrupted attempt while reusing its compiler cache. Each attempt writes
+a separate receipt. The script records compilation,
+load and warm decode times, source hashes, software versions, repeated-output
+consistency, and errors against the FP32 Diffusers decoder. Inputs are seeded
+synthetic VAE latents; this does not measure complete text-to-video generation
+or perceptual quality. The initial implementation transfers convolution state
+through the host between calls, so compile savings do not imply decode speedup.
+
+On trn2.3xlarge, the FP32 480×832×81 VAE-only check passed against all 81
+Diffusers reference frames (max absolute error 8.82e-6). Three measured
+requests took 151.32–151.87 seconds and produced bitwise-identical outputs;
+these times include host state transfers and phase-specific NEFF loading.
+A fresh process also decoded 9 frames from the same compiled artifact.
+The verified checkpoint revision is `38ec498cb3208fb688890f8cc7e94ede2cbd7f68`.
+See the [81-frame verification receipt](artifacts/wan_vae_chunked_20261003_480p_split02/receipt-20261003T072407403560Z.json)
+and [9-frame reuse receipt](artifacts/wan_vae_chunked_20261003_480p_split02/receipt-20261003T073935647758Z.json).
+
+To compile and validate the complete pinned text-to-video profile, run:
+
+```bash
+python -m scripts.benchmark_wan_official \
+  --output-dir artifacts/wan_official_e2e_run01
+```
+
+This uses the checkpoint's example prompt and negative prompt, 480×832×81,
+50 steps, guidance 5.0, seed 42, TP4, and no step caching. It records separate
+compile and generation logs, checks the latent tensor and all 81 exported
+video frames, and retains the MP4 for visual review. Export uses the staged
+CLI's 16 fps. Generation timing includes process startup, weight loading,
+denoising, VAE decoding, and export. Use `--compile-only` followed by
+`--generate-only` to separate preparation from measurement.
+
+The complete 480P/81-frame profile passed on trn2.3xlarge: the 50-step
+request exported 81 distinct frames and took 1,477.64 seconds including
+loading, denoising, decoding, and export. Sampled frames show a coherent cat
+in grass. This is one functional end-to-end run. The compile stage took
+3,559.49 seconds for the text encoder, DiT, and weight preparation while
+reusing the separately verified VAE artifact. Runtime snapshots recorded
+78.35 GiB for the text encoder plus DiT and 17.57 GiB for the VAE; these are
+snapshots rather than measured peaks.
+See the [end-to-end receipt](artifacts/wan_official_e2e_20261003_01/receipt-20261003T080249990682Z.json),
+[validation summary](artifacts/wan_official_e2e_20261003_01/validation-summary.json),
+and [sampled frames](artifacts/wan_official_e2e_20261003_01/frames-0-20-40-60-80.png).
 
 ### Where things land
 

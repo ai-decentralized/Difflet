@@ -1,0 +1,58 @@
+{
+  "status": "passed",
+  "receipt": "receipt-20261003T080249990682Z.json",
+  "profile": {
+    "height": 480,
+    "width": 832,
+    "frames": 81,
+    "steps": 50,
+    "guidance_scale": 5.0,
+    "seed": 42,
+    "tp": 4,
+    "step_cache": false,
+    "dit_dtype": "bfloat16",
+    "vae_dtype": "float32"
+  },
+  "compile_stage_seconds": 3559.4895430429897,
+  "compile_scope": "Fresh text encoder and DiT artifacts plus checkpoint conversion/sharding. The separately verified chunked VAE artifact was reused.",
+  "generation_seconds": 1477.636503835005,
+  "timing_scope": "One staged CLI request, including process startup/teardown, weight loading, text encoding, denoising, VAE decoding, and MP4 export. Includes read-only external runtime/stack sampling.",
+  "video_validation": {
+    "fully_decoded_frames": 81,
+    "unique_decoded_frames": 81,
+    "adjacent_frame_mean_absolute_difference_rgb_0_255": {
+      "min": 1.3865009546279907,
+      "mean": 3.1067817211151123,
+      "max": 5.154544830322266
+    },
+    "visual_review_frames": [
+      0,
+      20,
+      40,
+      60,
+      80
+    ],
+    "contact_sheet": "frames-0-20-40-60-80.png",
+    "visual_observation": "Sampled frames show a coherent cat in grass with small temporal changes. This is a single-prompt functional check."
+  },
+  "tests": {
+    "passed": 135,
+    "skipped": 1,
+    "log": "unit-tests.log"
+  },
+  "software_versions": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0",
+    "nki": "0.5.0+28631259367.ga768afa6"
+  },
+  "source_hashes_match_current_tree": true,
+  "runtime_snapshots": [
+    "runtime-denoising-active-snapshot.json",
+    "runtime-vae-snapshot.json"
+  ],
+  "runtime_config_observation": "generation-config-observation.json",
+  "memory_scope": "Snapshots only; not measured peaks."
+}

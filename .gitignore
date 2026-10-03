@@ -64,5 +64,12 @@ log-neuron-cc.txt
 artifacts/flux_parallel_sweep/
 artifacts/parallel_phase_sweep/
 
+# Keep Wan VAE verification receipts, but exclude local compiler/model binaries.
+artifacts/wan_vae_chunked_*/compiler/
+artifacts/wan_vae_chunked_*/compiled/
+artifacts/wan_official_e2e*/compiler/
+artifacts/wan_official_e2e*/work-*/
+artifacts/wan_official_e2e*/*.mp4
+
 # nkd/neuroncc compile temp dirs leaked into CWD when compiling from repo root
 /c[0-9a-f][0-9a-f][0-9a-f]*/

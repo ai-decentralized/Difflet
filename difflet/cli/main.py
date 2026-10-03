@@ -146,6 +146,10 @@ def _add_shape_flags(p: argparse.ArgumentParser) -> None:
 
 def _add_cache_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument(
+        "--wan-vae-chunked", action="store_true",
+        help="Compile Wan VAE as reusable FP32 frame graphs with causal state (staged CLI only)",
+    )
+    p.add_argument(
         "--cache-dir",
         default=None,
         help="Compiled artifact cache root (default: ~/.cache/difflet/)",
@@ -158,9 +162,8 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         dest="host_vae",
         action="store_true",
         help="Decode the VAE on host CPU via diffusers instead of a "
-        "compiled Neuron VAE. Required for Wan clips beyond ~9 "
-        "frames: the single-shot Neuron VAE graph exceeds the "
-        "compiler instruction limit (NCC_EVRF007).",
+        "compiled Neuron VAE. Wan long clips can alternatively use "
+        "--wan-vae-chunked to avoid expanding the entire decode into one graph.",
     )
     p.add_argument(
         "--taef1",
@@ -286,6 +289,7 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
 
 def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--prompt", required=False, default=None)
+    p.add_argument("--negative-prompt", default=None, help="Negative prompt for the staged Wan pipeline")
     p.add_argument("--output", required=False, default=None, help="Output file path (.png or .mp4)")
     p.add_argument(
         "--requests",
@@ -843,6 +847,8 @@ def _get_orchestrator(args: argparse.Namespace):
         "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v": HunyuanVideo15Orchestrator,
         "Qwen/Qwen-Image": QwenImageOrchestrator,
     }
+    if getattr(args, "wan_vae_chunked", False) and mapping[args.model_id] is not WanOrchestrator:
+        raise ValueError("--wan-vae-chunked is supported only for Wan")
     return mapping[args.model_id](args)
 
 

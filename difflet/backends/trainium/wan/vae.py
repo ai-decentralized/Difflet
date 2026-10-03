@@ -12,6 +12,7 @@ from difflet.backends.trainium.core.bucketing import (
     CompileShape,
     ShapeBucketedInputGenerator,
     canonicalize_shapes,
+    dedupe_example_inputs,
     resolve_compile_shapes,
 )
 from difflet.backends.trainium.core.config import InferenceConfig
@@ -205,3 +206,149 @@ class NeuronWanVAEDecoderApplication(NeuronApplicationBase):
     @staticmethod
     def update_state_dict_for_tied_weights(state_dict):
         pass
+
+
+class ModelWrapperWanVAEChunk(ModelWrapperWanVAEDecoder):
+    """Signature-routed partition/phase buckets, independent of video length."""
+
+    def input_generator(self):
+        from difflet.models.wan.vae.chunked import split_input_shapes
+
+        config = WanVAEDecoderConfig.from_diffusers_dict(vars(self.config))
+        dtype = self.config.neuron_config.torch_dtype
+        batch = int(self.config.neuron_config.batch_size)
+        examples = []
+        for height, width, _frames in resolve_compile_shapes(self.config):
+            shape = (batch, config.z_dim, 1, height // 8, width // 8)
+            for signature in split_input_shapes(config, shape):
+                self.state_count = len(signature) - 1
+                examples.append(tuple(torch.zeros(s, dtype=dtype) for s in signature))
+        return dedupe_example_inputs(examples)
+
+    def forward(self, latents, *state):
+        if self.model is None:
+            raise RuntimeError("Forward called before load. Run load() first.")
+        if not state:
+            if not hasattr(self, "state_count"):
+                from difflet.models.wan.vae.chunked import WanVAESplitChunkModel
+                config = WanVAEDecoderConfig.from_diffusers_dict(vars(self.config))
+                with torch.device("meta"):
+                    self.state_count = WanVAESplitChunkModel(config).state_count
+            state = tuple(latents.new_zeros((1,)) for _ in range(self.state_count))
+        if hasattr(self, "bucket_loader"):
+            return self.bucket_loader.run((latents, *state))
+        return self._forward(latents, *state)
+
+
+class _WanBucketLoader:
+    """Keep one prefix and one tail NEFF resident; weights stay shared."""
+
+    def __init__(self, nxd_model, weights, start_rank):
+        import ast
+        from pathlib import Path
+        import tempfile
+
+        self.weights = weights
+        self.start_rank = start_rank
+        self.routes = {
+            tuple(tuple(shape) for shape in ast.literal_eval(signature)): tuple(route)
+            for signature, route in nxd_model.input_shape_map.items()
+        }
+        self.artifacts = {}
+        # The SDK's Python __getstate__ decodes binary NEFF strings as UTF-8;
+        # use its supported file exporters instead. Original scripted models
+        # remain uninitialized and therefore own no device I/O buffers.
+        with tempfile.TemporaryDirectory(prefix="wan-vae-neff-") as directory:
+            neff = Path(directory) / "model.neff"
+            metadata = Path(directory) / "model.metaneff"
+            for name, bucket in nxd_model.models.named_children():
+                for index, model in enumerate(bucket.models):
+                    model.save_neff(str(neff))
+                    model.save_metaneff(str(metadata))
+                    self.artifacts[(name, index)] = (neff.read_bytes(), metadata.read_bytes())
+        self.flatteners = dict(nxd_model.flattener_map.named_children())
+        self.packer = nxd_model.packer
+        self.resident = {}
+
+    def run(self, inputs):
+        signature = tuple(tuple(t.shape) for t in inputs)
+        if signature not in self.routes:
+            raise ValueError("Wan VAE input signature is absent from the compiled artifact")
+        route = self.routes[signature]
+        partition = inputs[0].ndim
+        previous = self.resident.get(partition)
+        if previous is None or previous[0] != route:
+            if previous is not None:
+                del self.resident[partition]
+                # SPMDModel.unload() alone retains tensor pools. Destroy the
+                # object before allocating the replacement's buffers.
+                del previous
+            model = torch.classes.neuron.SPMDModel(*self.artifacts[route], 1, 1)
+            model.initialize([], self.weights, self.start_rank)
+            self.resident[partition] = (route, model)
+        model = self.resident[partition][1]
+        flat_inputs = self.flatteners[f"{route[0]}_{route[1]}"](list(inputs))
+        return self.packer(model.forward(flat_inputs))
+
+
+class NeuronWanVAEChunkedApplication(NeuronWanVAEDecoderApplication):
+    """FP32 streaming decoder; NxD shares weights across partition/phase buckets.
+
+    Causal state is explicit input/output and currently crosses the host on
+    each call. This bounds compilation size; it does not claim zero-copy state.
+    """
+
+    def __init__(self, *args, **kwargs):
+        from difflet.models.wan.vae.chunked import WanVAESplitChunkModel
+
+        self._model_cls = WanVAESplitChunkModel
+        super().__init__(*args, **kwargs)
+        if self.neuron_config.tp_degree != 1 or self.neuron_config.world_size != 1:
+            raise ValueError("Chunked Wan VAE currently requires standalone TP1/W1")
+        if self.dtype != torch.float32:
+            raise ValueError("Chunked Wan VAE requires float32 to match the official VAE")
+        self.config.wan_vae_chunked_version = 3
+
+    def get_model_wrapper_cls(self):
+        return ModelWrapperWanVAEChunk
+
+    def compile(self, *args, **kwargs):
+        from difflet.backends.trainium.utils.compile_serial import serial_bucket_compilation
+
+        # Each 480P FP32 bucket can use tens of GiB of host compiler memory.
+        with serial_bucket_compilation():
+            return super().compile(*args, **kwargs)
+
+    def load_weights(self, compiled_model_path, start_rank_id=None, local_ranks_size=None):
+        from safetensors.torch import load_file
+        from difflet.backends.trainium.core.application_base import _runtime_start_rank_id
+
+        start_rank_id = self.neuron_config.start_rank_id if start_rank_id is None else start_rank_id
+        local_ranks_size = self.neuron_config.local_ranks_size if local_ranks_size is None else local_ranks_size
+        if local_ranks_size != 1:
+            raise ValueError("Chunked Wan VAE loading requires one local rank")
+        path = os.path.join(compiled_model_path, "weights", "tp0_sharded_checkpoint.safetensors")
+        checkpoint = [load_file(path)] if os.path.exists(path) else self.get_builder().shard_checkpoint()
+        # NxD.initialize eagerly allocates I/O buffers for EVERY bucket. With
+        # large causal histories that exceeds a core's HBM. Load shared weights
+        # once and initialize only the active graph for each partition.
+        weights = torch.ops.neuron._parallel_load(checkpoint)
+        self.model.bucket_loader = _WanBucketLoader(
+            self.traced_model.nxd_model, weights,
+            _runtime_start_rank_id(start_rank_id, local_ranks_size),
+        )
+
+    def warmup(self):
+        for inputs in self.model.input_generator():
+            self.model(*inputs)
+
+    def forward(self, latents):
+        from difflet.models.wan.vae.chunked import decode_split_chunks
+
+        expected = {
+            (int(self.neuron_config.batch_size), int(self.config.z_dim), h // 8, w // 8)
+            for h, w, _frames in resolve_compile_shapes(self.config)
+        }
+        if latents.ndim != 5 or (latents.shape[0], latents.shape[1], latents.shape[3], latents.shape[4]) not in expected:
+            raise ValueError("Wan VAE latent batch/channels/spatial shape does not match the compiled profile")
+        return decode_split_chunks(self.model, latents.to(dtype=self.dtype))

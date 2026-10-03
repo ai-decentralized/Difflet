@@ -35,6 +35,29 @@ def _inject(monkeypatch, name, **attrs):
     return mod
 
 
+def test_chunked_vae_flags_reach_stage_and_change_only_vae_cache():
+    from difflet.cli.stage import _build_stage_parser
+
+    old = WanOrchestrator(_wan_args())
+    new = WanOrchestrator(_wan_args(wan_vae_chunked=True))
+    assert old._stage_cache_inputs("transformer", old.args) == new._stage_cache_inputs("transformer", new.args)
+    assert old._stage_compiled_dir("vae", old.args) != new._stage_compiled_dir("vae", new.args)
+    assert new._stage_cache_inputs("vae", new.args)["dtype"] == "float32"
+    stage_args = _build_stage_parser().parse_args([
+        "--orchestrator", new.args.model_id, "--stage", "vae",
+        *new._shared_cli_args("compile"),
+    ])
+    assert stage_args.wan_vae_chunked
+    long = WanOrchestrator(_wan_args(wan_vae_chunked=True, num_frames=81))
+    assert new._stage_compiled_dir("vae", new.args) == long._stage_compiled_dir("vae", long.args)
+    assert new._stage_compiled_dir("transformer", new.args) != long._stage_compiled_dir("transformer", long.args)
+
+
+def test_chunked_vae_conflicts_with_host_vae():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        WanOrchestrator(_wan_args(wan_vae_chunked=True, host_vae=True))
+
+
 class _FakeWanApp:
     instances = []
 
@@ -66,10 +89,17 @@ def test_download_resolves_remote(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "difflet.pipeline.path_resolver.resolve_model_path",
-        lambda model_id, *, local_files_only, allow_patterns=None: calls.append(local_files_only),
+        lambda model_id, *, local_files_only, allow_patterns=None, revision=None:
+        calls.append((local_files_only, revision)),
     )
-    WanOrchestrator(_wan_args()).download()
-    assert calls == [False]
+    WanOrchestrator(_wan_args(revision="pinned-checkpoint")).download()
+    assert calls == [(False, "pinned-checkpoint")]
+
+
+def test_pinned_revision_separates_transformer_cache():
+    first = WanOrchestrator(_wan_args(revision="first"))
+    second = WanOrchestrator(_wan_args(revision="second"))
+    assert first._stage_compiled_dir("transformer", first.args) != second._stage_compiled_dir("transformer", second.args)
 
 
 # ------------------------------------------------------ generate error path
@@ -275,7 +305,7 @@ def test_stage_transformer_lets_pipeline_prepare_latents(monkeypatch, tmp_path):
     import torch
     _setup_wan_fakes(monkeypatch)
     args = _wan_args(stage_mode="generate", work_dir=str(tmp_path),
-                     cache_dir=str(tmp_path), seed=1234)
+                     cache_dir=str(tmp_path), seed=1234, negative_prompt="blurred details")
     orch = WanOrchestrator(args)
     orch._finish_stage_compile("transformer", args, orch._stage_compiled_dir("transformer", args))
     orch._stage_transformer(args)
@@ -284,6 +314,12 @@ def test_stage_transformer_lets_pipeline_prepare_latents(monkeypatch, tmp_path):
     gen = kw.get("generator")
     assert isinstance(gen, torch.Generator)
     assert gen.initial_seed() == 1234
+    assert kw["negative_prompt"] == "blurred details"
+
+
+def test_shared_cli_args_forward_negative_prompt():
+    parts = WanOrchestrator(_wan_args(negative_prompt="blurred details"))._shared_cli_args("generate")
+    assert parts[parts.index("--negative-prompt") + 1] == "blurred details"
 
 
 def test_stage_vae_compile(monkeypatch, tmp_path):

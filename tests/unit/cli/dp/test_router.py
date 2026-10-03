@@ -60,6 +60,10 @@ def test_worker_cli_args_forward_sp_and_keep_work_dir():
     assert "--sp" in argv and "--keep-work-dir" in argv
 
 
+def test_worker_cli_args_forward_chunked_vae():
+    assert "--wan-vae-chunked" in worker_cli_args(_args(wan_vae_chunked=True))
+
+
 def test_check_hbm_skips_when_weights_missing(monkeypatch, capsys):
     from difflet.cli.dp import router as router_mod
 

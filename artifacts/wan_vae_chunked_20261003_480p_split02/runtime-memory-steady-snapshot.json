@@ -1,0 +1,15 @@
+{
+  "timestamp_utc": "2026-10-03T07:42:49.184691+00:00",
+  "kind": "runtime_snapshot_not_peak_measurement",
+  "main_81_frame_pid": 449452,
+  "records": [
+    {
+      "pid": 449452,
+      "device_bytes": 18864937656,
+      "loaded_models": [
+        "/home/ubuntu/Difflet/artifacts/wan_vae_chunked_20261003_480p_split02/compiler/WanVAESplitChunkModel/_tp0_bk4/model.MODULE_4f033ee2abcaab3c1e8d+a8bbfc3d.neff",
+        "/home/ubuntu/Difflet/artifacts/wan_vae_chunked_20261003_480p_split02/compiler/WanVAESplitChunkModel/_tp0_bk5/model.MODULE_95a7c0aec1e78cde3b04+64dc0f34.neff"
+      ]
+    }
+  ]
+}

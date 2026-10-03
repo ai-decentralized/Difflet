@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "implementation": "wan_vae_chunked_version=3; split prefix and per-output-frame tail, separate causal histories, serial compiler jobs, and at most one live execution object per partition",
+  "checkpoint_revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+  "compile_seconds": 1380.7493480459962,
+  "compile_note": "All six NEFFs compiled in the first attempt in this directory. That receipt reports failed because eager runtime initialization exhausted HBM; the final on-demand object lifecycle reused these same artifacts successfully.",
+  "verification_81_frames": "receipt-20261003T072407403560Z.json",
+  "verification_9_frames": "receipt-20261003T073935647758Z.json",
+  "scope": "VAE-only synthetic latents; complete DiT/text-to-video pipeline was not run.",
+  "tests": {
+    "passed": 133,
+    "skipped": 1
+  },
+  "memory_note": "runtime-memory-steady-snapshot.json records 17.57 GiB for one process with two graphs; this is a snapshot, not a measured peak."
+}

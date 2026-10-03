@@ -120,12 +120,17 @@ def _require_request_shape_in_set(args: argparse.Namespace):
 
 class WanOrchestrator(ModelOrchestrator):
 
+    def __init__(self, args):
+        super().__init__(args)
+        if getattr(args, "wan_vae_chunked", False) and getattr(args, "host_vae", False):
+            raise ValueError("--wan-vae-chunked and --host-vae are mutually exclusive")
+
     def download(self) -> None:
         from difflet.pipeline.path_resolver import resolve_model_path
         from difflet.registry import resolve_model
         entry = resolve_model(self.args.model_id, model_type=_MODEL_TYPE)
         resolve_model_path(self.args.model_id, local_files_only=False,
-                           allow_patterns=entry.download_patterns)
+                           revision=self.args.revision, allow_patterns=entry.download_patterns)
         print(f"[difflet] weights ready for {self.args.model_id}")
 
     def compile(self) -> None:
@@ -187,7 +192,7 @@ class WanOrchestrator(ModelOrchestrator):
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        model_dir = resolve_model_path(self.args.model_id, local_files_only=True)
+        model_dir = resolve_model_path(self.args.model_id, revision=self.args.revision, local_files_only=True)
         compile_shapes = _require_request_shape_in_set(args)
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
@@ -235,6 +240,7 @@ class WanOrchestrator(ModelOrchestrator):
                     # draws unit-variance noise from this seeded generator.
                     generator=torch.Generator().manual_seed(req.seed),
                     prompt=req.prompt,
+                    negative_prompt=stage_loop.effective(req, args, "negative_prompt", ""),
                     height=args.height or 480,
                     width=args.width or 832,
                     num_frames=args.num_frames or 9,
@@ -256,7 +262,7 @@ class WanOrchestrator(ModelOrchestrator):
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        model_dir = resolve_model_path(self.args.model_id, local_files_only=True)
+        model_dir = resolve_model_path(self.args.model_id, revision=self.args.revision, local_files_only=True)
         compile_shapes = _require_request_shape_in_set(args)
         parallel = DiffletParallelConfig(tp_degree=1, cp_degree=1)
         compiled_dir = self._stage_compiled_dir("vae", args)
@@ -276,6 +282,7 @@ class WanOrchestrator(ModelOrchestrator):
             enable_transformer=False,
             enable_transformer_2=False,
             enable_vae_decoder=True,
+            wan_vae_chunked=getattr(args, "wan_vae_chunked", False),
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
@@ -290,7 +297,7 @@ class WanOrchestrator(ModelOrchestrator):
             with stage_loop.request_scope(args, req, final=True):
                 latents = torch.load(
                     stage_loop.work_file(args, req, "latents.pt")
-                ).to(torch.bfloat16)
+                ).to(torch.float32 if getattr(args, "wan_vae_chunked", False) else torch.bfloat16)
                 out = app(
                     latents=latents,
                     height=args.height or 480,
@@ -317,6 +324,7 @@ class WanOrchestrator(ModelOrchestrator):
             return {
                 "component": f"{prefix}_transformer",
                 "model_id": self.args.model_id,
+                "revision": getattr(args, "revision", None),
                 "tp": args.tp_degree or 4,
                 "cp": args.cp_degree or 1,
                 "cp_mode": str(getattr(args, "cp_mode", "gather_kv") or "gather_kv"),
@@ -328,13 +336,22 @@ class WanOrchestrator(ModelOrchestrator):
                 "toolchain": stage_toolchain_versions(),
             }
         if stage == "vae":
-            return {
+            inputs = {
                 "component": f"{prefix}_vae",
                 "model_id": self.args.model_id,
                 "dtype": "bfloat16",
                 "shapes": canonical_shapes_list(args, (480, 832, 9)),
                 "toolchain": stage_toolchain_versions(),
             }
+            if getattr(args, "wan_vae_chunked", False):
+                # Decode length only controls the runtime loop. All lengths at
+                # the same spatial size use exactly the same partition graphs.
+                inputs.update(
+                    dtype="float32", wan_vae_chunked_version=3,
+                    revision=getattr(args, "revision", None),
+                    shapes=[list(shape) for shape in sorted({(h, w, 1) for h, w, _ in inputs["shapes"]})],
+                )
+            return inputs
         raise ValueError(f"unknown stage {stage!r}")
 
     def _stage_compiled_dir(self, stage: str, args: argparse.Namespace) -> Path:
@@ -370,6 +387,10 @@ class WanOrchestrator(ModelOrchestrator):
         ]
         if getattr(a, "shapes", None):
             parts += ["--shapes", str(a.shapes)]
+        if getattr(a, "revision", None):
+            parts += ["--revision", str(a.revision)]
+        if getattr(a, "wan_vae_chunked", False):
+            parts.append("--wan-vae-chunked")
         if getattr(a, "cfg_parallel", False):
             parts.append("--cfg-parallel")
         if getattr(a, "sp_enabled", False):
@@ -380,6 +401,8 @@ class WanOrchestrator(ModelOrchestrator):
             parts += ["--teacache-online-delta", str(a.teacache_online_delta)]
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
+        if getattr(a, "negative_prompt", None) is not None:
+            parts += ["--negative-prompt", a.negative_prompt]
         if getattr(a, "output", None):
             parts += ["--output", a.output]
         if a.cache_dir:

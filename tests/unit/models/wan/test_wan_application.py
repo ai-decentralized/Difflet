@@ -138,6 +138,31 @@ def test_create_wan_vae_decoder_config(tmp_path):
     assert cfg.neuron_config.logical_nc_config == 1
 
 
+def test_chunked_vae_uses_fp32_and_length_independent_graphs(tmp_path):
+    from difflet.backends.trainium.wan.vae import NeuronWanVAEChunkedApplication
+
+    _write_config(tmp_path, "vae", {
+        **_VAE_CFG, "base_dim": 8, "dim_mult": [1, 2, 4, 4],
+        "temperal_downsample": [False, True, True],
+    })
+    application = app.NeuronWanApplication(
+        model_path=str(tmp_path), parallel=_parallel(), dtype="bf16",
+        shape={"height": 32, "width": 48, "num_frames": 81},
+        wan_vae_chunked=True, enable_text_encoder=False, enable_transformer=False,
+    )
+    vae = application.vae_decoder
+    assert isinstance(vae, NeuronWanVAEChunkedApplication)
+    assert vae.dtype is torch.float32
+    assert application.components()[0].name == "vae_decoder_chunked"
+    examples = vae.model.input_generator()
+    assert len(examples) == 6
+    assert len({len(inputs) for inputs in examples}) == 1
+    assert len({tuple(tuple(x.shape) for x in inputs) for inputs in examples}) == 6
+    assert sum(inputs[0].shape == (1, 16, 1, 4, 6) for inputs in examples) == 3
+    vae.config.compile_shapes = ((32, 48, 81), (32, 48, 9))
+    assert len(vae.model.input_generator()) == 6
+
+
 # ---------------------------------------------------------------------------
 # _component_load_rank_range
 

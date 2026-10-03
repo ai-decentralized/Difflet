@@ -265,20 +265,25 @@ class NeuronWanApplication(MultiComponentApplication):
             )
 
         if enable_vae_decoder and os.path.exists(os.path.join(self.vae_decoder_path, "config.json")):
-            from difflet.backends.trainium.wan.vae import NeuronWanVAEDecoderApplication
+            from difflet.backends.trainium.wan.vae import (
+                NeuronWanVAEDecoderApplication,
+                NeuronWanVAEChunkedApplication,
+            )
 
+            chunked_vae = bool(kwargs.get("wan_vae_chunked", False))
             vae_config = create_wan_vae_decoder_config(
                 model_path=model_path,
                 world_size=1,
                 tp_degree=1,
-                dtype=self.dtype,
+                dtype=torch.float32 if chunked_vae else self.dtype,
                 height=height,
                 width=width,
                 num_frames=num_frames,
                 batch_size=batch_size,
                 compile_shapes=self.compile_shapes,
             )
-            self.vae_decoder = NeuronWanVAEDecoderApplication(
+            vae_class = NeuronWanVAEChunkedApplication if chunked_vae else NeuronWanVAEDecoderApplication
+            self.vae_decoder = vae_class(
                 model_path=self.vae_decoder_path,
                 config=vae_config,
             )
@@ -344,7 +349,8 @@ class NeuronWanApplication(MultiComponentApplication):
             if probe is not None:
                 components.append(ComponentSpec(f"teacache_probe{suffix}", probe))
         if self.vae_decoder is not None:
-            components.append(ComponentSpec("vae_decoder", self.vae_decoder))
+            name = "vae_decoder_chunked" if self.kwargs.get("wan_vae_chunked", False) else "vae_decoder"
+            components.append(ComponentSpec(name, self.vae_decoder))
         return components
 
     def no_components_message(self, action: str) -> str:

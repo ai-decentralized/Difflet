@@ -108,6 +108,8 @@ def worker_cli_args(args) -> list[str]:
         argv.append("--sp")
     if getattr(args, "keep_work_dir", False):
         argv.append("--keep-work-dir")
+    if getattr(args, "wan_vae_chunked", False):
+        argv.append("--wan-vae-chunked")
     return argv
 
 

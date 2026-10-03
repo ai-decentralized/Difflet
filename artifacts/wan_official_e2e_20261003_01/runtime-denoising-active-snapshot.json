@@ -1,0 +1,186 @@
+{
+  "observed_at": "2026-10-03T09:13:06.461004+00:00",
+  "note": "Single runtime snapshot, not a measured peak. Execution counts cover only the reporting interval.",
+  "processes": [
+    {
+      "pid": 472362,
+      "memory_used_bytes": {
+        "host": 52311703552,
+        "neuron_device": 84124998336,
+        "usage_breakdown": {
+          "host": {
+            "application_memory": 52294926336,
+            "constants": 0,
+            "dma_buffers": 16777216,
+            "tensors": 0
+          },
+          "neuroncore_memory_usage": {
+            "0": {
+              "constants": 59847536,
+              "model_code": 6637471256,
+              "model_shared_scratchpad": 3959422976,
+              "runtime_memory": 2256032,
+              "tensors": 10372251784
+            },
+            "1": {
+              "constants": 59847536,
+              "model_code": 6637471256,
+              "model_shared_scratchpad": 3959422976,
+              "runtime_memory": 2256032,
+              "tensors": 10372251784
+            },
+            "2": {
+              "constants": 59847536,
+              "model_code": 6637471256,
+              "model_shared_scratchpad": 3959422976,
+              "runtime_memory": 2256032,
+              "tensors": 10372251784
+            },
+            "3": {
+              "constants": 59847536,
+              "model_code": 6637471256,
+              "model_shared_scratchpad": 3959422976,
+              "runtime_memory": 2256032,
+              "tensors": 10372251784
+            }
+          }
+        }
+      },
+      "execution_stats": {
+        "period": 5.000048449,
+        "error_summary": {
+          "numerical": 0,
+          "transient": 0,
+          "model": 0,
+          "runtime": 0,
+          "hardware": 0
+        },
+        "execution_summary": {
+          "completed": 8,
+          "completed_with_err": 0,
+          "completed_with_num_err": 0,
+          "timed_out": 0,
+          "incorrect_input": 0,
+          "failed_to_queue": 0
+        },
+        "latency_stats": {
+          "total_latency": {
+            "p0": 9.788331031799316,
+            "p1": 9.788331031799316,
+            "p100": 9.789090871810913,
+            "p25": 9.788331031799316,
+            "p50": 9.788414239883423,
+            "p75": 9.788774490356445,
+            "p99": 9.789090871810913
+          },
+          "device_latency": {
+            "p0": 9.788331031799316,
+            "p1": 9.788331031799316,
+            "p100": 9.789090871810913,
+            "p25": 9.788331031799316,
+            "p50": 9.788414239883423,
+            "p75": 9.788774490356445,
+            "p99": 9.789090871810913
+          }
+        },
+        "error": ""
+      },
+      "neuroncore_counters": {
+        "period": 5.000115289,
+        "neuroncores_in_use": {
+          "0": {
+            "neuroncore_utilization": 100,
+            "effective_flops": 0,
+            "v3d": {
+              "nc_v3.0": {
+                "neuroncore_utilization": 100
+              },
+              "nc_v3.1": {
+                "neuroncore_utilization": 100
+              }
+            }
+          },
+          "1": {
+            "neuroncore_utilization": 100,
+            "effective_flops": 0,
+            "v3d": {
+              "nc_v3.2": {
+                "neuroncore_utilization": 100
+              },
+              "nc_v3.3": {
+                "neuroncore_utilization": 100
+              }
+            }
+          },
+          "2": {
+            "neuroncore_utilization": 100,
+            "effective_flops": 0,
+            "v3d": {
+              "nc_v3.4": {
+                "neuroncore_utilization": 100
+              },
+              "nc_v3.5": {
+                "neuroncore_utilization": 100
+              }
+            }
+          },
+          "3": {
+            "neuroncore_utilization": 100,
+            "effective_flops": 0,
+            "v3d": {
+              "nc_v3.6": {
+                "neuroncore_utilization": 100
+              },
+              "nc_v3.7": {
+                "neuroncore_utilization": 100
+              }
+            }
+          }
+        },
+        "error": ""
+      },
+      "models": [
+        {
+          "name": "/home/ubuntu/Difflet/artifacts/wan_official_e2e_20261003_01/compiler/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_4c17658c12c6dc5b6de5+e7d829f4.neff",
+          "model_id": 10005,
+          "is_running": false
+        },
+        {
+          "name": "/home/ubuntu/Difflet/artifacts/wan_official_e2e_20261003_01/compiler/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_4c17658c12c6dc5b6de5+e7d829f4.neff",
+          "model_id": 10008,
+          "is_running": false
+        },
+        {
+          "name": "/home/ubuntu/Difflet/artifacts/wan_official_e2e_20261003_01/compiler/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_6c74e83e1d137d1f95c5+843d2789.neff",
+          "model_id": 10014,
+          "is_running": false
+        },
+        {
+          "name": "/home/ubuntu/Difflet/artifacts/wan_official_e2e_20261003_01/compiler/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_4c17658c12c6dc5b6de5+e7d829f4.neff",
+          "model_id": 10006,
+          "is_running": false
+        },
+        {
+          "name": "/home/ubuntu/Difflet/artifacts/wan_official_e2e_20261003_01/compiler/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_4c17658c12c6dc5b6de5+e7d829f4.neff",
+          "model_id": 10007,
+          "is_running": false
+        },
+        {
+          "name": "/home/ubuntu/Difflet/artifacts/wan_official_e2e_20261003_01/compiler/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_6c74e83e1d137d1f95c5+843d2789.neff",
+          "model_id": 10013,
+          "is_running": false
+        },
+        {
+          "name": "/home/ubuntu/Difflet/artifacts/wan_official_e2e_20261003_01/compiler/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_6c74e83e1d137d1f95c5+843d2789.neff",
+          "model_id": 10015,
+          "is_running": false
+        },
+        {
+          "name": "/home/ubuntu/Difflet/artifacts/wan_official_e2e_20261003_01/compiler/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_6c74e83e1d137d1f95c5+843d2789.neff",
+          "model_id": 10016,
+          "is_running": false
+        }
+      ]
+    }
+  ]
+}

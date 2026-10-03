@@ -1,0 +1,100 @@
+{
+  "observed_at": "2026-10-03T09:26:22.864616+00:00",
+  "note": "Single runtime snapshot, not a measured peak.",
+  "processes": [
+    {
+      "pid": 476790,
+      "memory_used_bytes": {
+        "host": 16703094784,
+        "neuron_device": 18864937656,
+        "usage_breakdown": {
+          "host": {
+            "application_memory": 16698900480,
+            "constants": 0,
+            "dma_buffers": 4194304,
+            "tensors": 0
+          },
+          "neuroncore_memory_usage": {
+            "0": {
+              "constants": 0,
+              "model_code": 0,
+              "model_shared_scratchpad": 0,
+              "runtime_memory": 0,
+              "tensors": 0
+            },
+            "1": {
+              "constants": 0,
+              "model_code": 0,
+              "model_shared_scratchpad": 0,
+              "runtime_memory": 0,
+              "tensors": 0
+            },
+            "2": {
+              "constants": 655364,
+              "model_code": 267267480,
+              "model_shared_scratchpad": 2415919104,
+              "runtime_memory": 2171168,
+              "tensors": 16178924540
+            },
+            "3": {
+              "constants": 0,
+              "model_code": 0,
+              "model_shared_scratchpad": 0,
+              "runtime_memory": 0,
+              "tensors": 0
+            }
+          }
+        }
+      },
+      "execution_stats": {
+        "period": 5.000878881,
+        "error_summary": {
+          "numerical": 0,
+          "transient": 0,
+          "model": 0,
+          "runtime": 0,
+          "hardware": 0
+        },
+        "execution_summary": {
+          "completed": 14,
+          "completed_with_err": 0,
+          "completed_with_num_err": 0,
+          "timed_out": 0,
+          "incorrect_input": 0,
+          "failed_to_queue": 0
+        },
+        "latency_stats": {
+          "total_latency": {
+            "p0": 0.24482989311218262,
+            "p1": 0.24482989311218262,
+            "p100": 0.6914870738983154,
+            "p25": 0.24483609199523926,
+            "p50": 0.24487948417663574,
+            "p75": 0.2449169158935547,
+            "p99": 0.6914870738983154
+          },
+          "device_latency": {
+            "p0": 0.24482989311218262,
+            "p1": 0.24482989311218262,
+            "p100": 0.6914870738983154,
+            "p25": 0.24483609199523926,
+            "p50": 0.24487948417663574,
+            "p75": 0.2449169158935547,
+            "p99": 0.6914870738983154
+          }
+        },
+        "error": ""
+      },
+      "models": [
+        {
+          "name": "/home/ubuntu/Difflet/artifacts/wan_vae_chunked_20261003_480p_split02/compiler/WanVAESplitChunkModel/_tp0_bk5/model.MODULE_95a7c0aec1e78cde3b04+64dc0f34.neff",
+          "is_running": false
+        },
+        {
+          "name": "/home/ubuntu/Difflet/artifacts/wan_vae_chunked_20261003_480p_split02/compiler/WanVAESplitChunkModel/_tp0_bk4/model.MODULE_4f033ee2abcaab3c1e8d+a8bbfc3d.neff",
+          "is_running": false
+        }
+      ]
+    }
+  ]
+}
