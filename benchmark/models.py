@@ -175,6 +175,9 @@ class BenchConfig:
     # Wan / LTX-2 compute the signal on the host and stay on the tp4 artifact.
     teacache_speedup: Optional[float] = None
     teacache_calibration: Optional[str] = None
+    # TAEF1 tiny decoder (--taef1-path <repo>, implies --taef1; flux only). It
+    # replaces the VAE decoder NEFF, so it goes to compile AND generate.
+    taef1_path: Optional[str] = None
     dtype: str = "bf16"
     height: Optional[int] = None
     width: Optional[int] = None
@@ -249,6 +252,10 @@ class BenchConfig:
             return []
         return ["--teacache-speedup", str(self.teacache_speedup),
                 "--teacache-calibration", str(self.teacache_calibration)]
+
+    def decoder_flags(self) -> list[str]:
+        """``difflet compile`` / ``generate`` decoder tokens (TAEF1 or none)."""
+        return ["--taef1-path", self.taef1_path] if self.taef1_path else []
 
     def teacache_dict(self) -> Optional[dict]:
         """Result-JSON TeaCache record, or None when TeaCache is off."""
@@ -356,6 +363,54 @@ _CONFIG_DESC.update({
     label: f"tp=4 + TeaCache online-delta adaptive (--teacache-online-delta {a}; alpha sweep)"
     for label, a in ONLINE_DELTA_SWEEP.items()
 })
+
+
+# Best-combination search (2026-10-03): every 4-core layout crossed with the
+# runtime TeaCache modes and the TAEF1 decoder, one label per combination,
+# <layout>[taef1][<teacache>]. Layout and TAEF1 pick the artifact (compile);
+# the TeaCache suffix is runtime-only except tcad (probe NEFF). Labels that
+# already exist above keep their definition (same overrides).
+COMBO_LAYOUTS: dict[str, dict[str, Any]] = {
+    "tp4": {},
+    "tp4sp": {"tp": 4, "sp": True},
+    "tp2cp2": {"tp": 2, "cp": 2, "cp_mode": "ulysses"},
+    "tp2cp2gkv": {"tp": 2, "cp": 2, "cp_mode": "gather_kv"},
+    "tp2cp2ring": {"tp": 2, "cp": 2, "cp_mode": "ring"},
+}
+COMBO_TEACACHE: dict[str, dict[str, Any]] = {
+    "": {},
+    "tc2": {"teacache_cadence": 2},
+    "tc3": {"teacache_cadence": 3},
+    "tc4": {"teacache_cadence": 4},
+    "tcod005": {"teacache_online_delta": 0.05},
+    "tcod01": {"teacache_online_delta": 0.1},
+    "tcod02": {"teacache_online_delta": 0.2},
+    "tcod04": {"teacache_online_delta": 0.4},
+    "tcad": {"teacache_adaptive": True},
+}
+TAEF1_REPO = "madebyollin/taef1"
+_COMBO_LAYOUT_DESC = {
+    "tp4": "tp=4", "tp4sp": "tp=4 + sequence parallel", "tp2cp2": "tp=2 x cp=2 (ulysses)",
+    "tp2cp2gkv": "tp=2 x cp=2 (gather_kv)", "tp2cp2ring": "tp=2 x cp=2 (ring)",
+}
+_COMBO_TC_DESC = {
+    "tc2": "TeaCache cadence 2", "tc3": "TeaCache cadence 3", "tc4": "TeaCache cadence 4",
+    "tcod005": "TeaCache online-delta 0.05", "tcod01": "TeaCache online-delta 0.1",
+    "tcod02": "TeaCache online-delta 0.2", "tcod04": "TeaCache online-delta 0.4",
+    "tcad": "TeaCache calibrated adaptive",
+}
+COMBO_LABELS: list[str] = []
+for _lay, _lo in COMBO_LAYOUTS.items():
+    for _dec in ("", "taef1"):
+        for _tc, _to in COMBO_TEACACHE.items():
+            _label = f"{_lay}{_dec}{_tc}"
+            COMBO_LABELS.append(_label)
+            if _label in CONFIGS:
+                continue
+            CONFIGS[_label] = {**_lo, **({"taef1_path": TAEF1_REPO} if _dec else {}), **_to}
+            _CONFIG_DESC[_label] = " + ".join(
+                [_COMBO_LAYOUT_DESC[_lay]] + (["TAEF1 decoder"] if _dec else [])
+                + ([_COMBO_TC_DESC[_tc]] if _tc else []))
 
 
 # (slug, config) cells that are unsupported BY DESIGN on this codebase, with the

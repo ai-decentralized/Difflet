@@ -129,9 +129,10 @@ def test_online_delta_sweep_labels_are_tp4tcod_at_other_alphas():
 
 
 def test_configs_are_the_verify_cli_labels_sized_to_four_cores():
-    from benchmark.models import ONLINE_DELTA_SWEEP
+    from benchmark.models import COMBO_LABELS, ONLINE_DELTA_SWEEP
     assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4cfg2",
-                            "tp4tc2", "tp4tcod", "tp4tcad", *ONLINE_DELTA_SWEEP}
+                            "tp4tc2", "tp4tcod", "tp4tcad", *ONLINE_DELTA_SWEEP,
+                            *COMBO_LABELS}
     for label in CONFIGS:
         cfg = resolve("flux_1_dev", label)
         world = cfg.tp * cfg.cp * (2 if cfg.cfg_parallel else 1)
@@ -266,3 +267,20 @@ def test_cell_status_requires_all_four_metrics(tmp_path, monkeypatch):
     m = cell_status.missing("flux_1_dev", "tp4sp")
     assert any(x.startswith("step_latency.n=5") for x in m)
     assert any(x.startswith("parallel mismatch") for x in m)
+
+
+def test_combo_labels_cross_layout_decoder_and_teacache():
+    from benchmark.models import COMBO_LABELS, COMBO_LAYOUTS, COMBO_TEACACHE
+    assert len(COMBO_LABELS) == len(set(COMBO_LABELS)) == len(COMBO_LAYOUTS) * 2 * len(COMBO_TEACACHE)
+    ring = resolve("flux_1_dev", "tp2cp2ringtaef1tc3")
+    assert ring.parallel_flags() == ["--tp-degree", "2", "--cp-degree", "2", "--cp-mode", "ring"]
+    assert ring.decoder_flags() == ["--taef1-path", "madebyollin/taef1"]
+    assert ring.teacache_flags() == ["--teacache-cadence", "3"]
+    gkv = resolve("flux_1_dev", "tp2cp2gkv")
+    assert gkv.parallel_flags() == ["--tp-degree", "2", "--cp-degree", "2"]
+    assert gkv.cp_mode == "gather_kv" and gkv.decoder_flags() == []
+    # pre-existing labels keep their definition
+    assert resolve("flux_1_dev", "tp4tcod01").teacache_online_delta == 0.1
+    assert resolve("flux_1_dev", "tp2cp2").cp_mode == "ulysses"
+    tcad = resolve("flux_1_dev", "tp4sptaef1tcad")
+    assert tcad.sp and tcad.teacache_speedup is not None and tcad.taef1_path

@@ -170,6 +170,8 @@ def write_outputs(slug: str, res: BenchResult, config: str = "tp4") -> None:
     d["output_kind"] = cfg.output_kind
     if cfg.teacache_dict():
         d["teacache"] = cfg.teacache_dict()
+    if getattr(cfg, "taef1_path", None):
+        d["decoder"] = {"kind": "taef1", "path": cfg.taef1_path}
     Path(json_path(cfg.config_slug)).write_text(json.dumps(d, indent=2))
     Path(report_path(cfg.config_slug)).write_text(report.render(d))
     print(f"[bench] {cfg.config_slug}: status={res.status}  "

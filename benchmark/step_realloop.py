@@ -79,6 +79,15 @@ def _teacache_app_kwargs(cfg) -> dict:
     return kw
 
 
+def _taef1_app_kwargs(cfg) -> dict:
+    """TAEF1 application kwargs, exactly what the CLI passes (flux.py
+    _application_kwargs): they are in the cache key, so a TAEF1 cell must load
+    its own artifact."""
+    if not getattr(cfg, "taef1_path", None):
+        return {}
+    return {"taef1": True, "taef1_path": cfg.taef1_path}
+
+
 def _build_flux(cfg, cache):
     """Mirror difflet/cli/orchestrators/flux.py exactly."""
     import torch
@@ -90,7 +99,7 @@ def _build_flux(cfg, cache):
         cfg.model_id, model_type="flux", parallel=parallel, dtype=torch.bfloat16,
         height=cfg.height, width=cfg.width, compile_cache_dir=str(cache),
         revision=cfg.revision, skip_compile=True,
-        application_kwargs=_teacache_app_kwargs(cfg))
+        application_kwargs={**_teacache_app_kwargs(cfg), **_taef1_app_kwargs(cfg)})
     dit = pipe.app.pipe.transformer            # NeuronFluxBackboneApplication
     gen_kwargs = dict(
         prompt=cfg.prompt, num_inference_steps=cfg.steps,
