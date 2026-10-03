@@ -101,6 +101,17 @@ test (the Wan Phase-0 pattern).
    final whole-branch review by a fresh reviewer against the plan's Review Focus, rulings list,
    then `superpowers:finishing-a-development-branch`.
 
+## Known inefficiency worth fixing on resume
+
+HunyuanVideo's fp8 arms recompile the **VAE decoder** (3674 s in `hunyuan_video_fp8_wo.json`'s
+`compile_breakdown`) because the CLI compiles the VAE inside the same `generate` stage artifact
+as the DiT, and that artifact's identity carries `quant`. The other models reuse their shared
+VAE stage (fp8 arms compile only the transformer: Qwen ~397 s, Wan 2.1 355 / 505 s). Splitting
+the HunyuanVideo VAE into its own stage key (or keeping `quant` out of the VAE's key) saves
+about an hour per fp8 arm. bf16 transformer-only compile times for reference: Wan 2.1 255 s,
+Wan 2.2 262 s, FLUX 159 s, Qwen-Image 296 s, HunyuanVideo 434 s; every model's total is
+dominated by the VAE decoder (Wan 6100 s, HunyuanVideo 3656 s, FLUX 683 s, Qwen 397 s).
+
 ## Host state to be aware of
 
 - `~/.cache/difflet/` holds every compiled artifact and quantized copy (≈ 300 GB in use overall;
