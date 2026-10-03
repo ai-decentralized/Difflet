@@ -70,9 +70,10 @@ class ServeOptions:
     teacache_online_delta: float | None = None
     teacache_speedup: float | None = None
     teacache_calibration: str | None = None
-    # --quant / --quant-granularity (FP8 PTQ of the DiT linears, always W8A8)
+    # --quant / --quant-granularity / --quant-calibration (FP8 PTQ of the DiT linears, W8A8)
     quant: str | None = None
     quant_granularity: str = "tensor"
+    quant_calibration: str | None = None
     download_policy: DownloadPolicy = DownloadPolicy.AUTO
     compile_policy: CompilePolicy = CompilePolicy.AUTO
     max_running_requests: int = 1
@@ -180,6 +181,7 @@ def build_serving_profile(
     teacache_calibration: str | None,
     quant: str | None = None,
     quant_granularity: str = "tensor",
+    quant_calibration: str | None = None,
 ) -> ServingProfile:
     """Resolve registry defaults plus `difflet serve` overrides."""
 
@@ -198,7 +200,8 @@ def build_serving_profile(
             )
         try:
             quant_spec = QuantSpec.from_args(
-                _QuantArgs(quant=quant, quant_granularity=quant_granularity),
+                _QuantArgs(quant=quant, quant_granularity=quant_granularity,
+                           quant_calibration=quant_calibration),
                 model_type=model_type,  # the model's own target set
             )
         except ValueError as exc:
@@ -349,6 +352,7 @@ class _QuantArgs:
 
     quant: str | None
     quant_granularity: str = "tensor"
+    quant_calibration: str | None = None
 
 
 def _load_serving_teacache_calibration(

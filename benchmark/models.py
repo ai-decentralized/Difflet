@@ -58,6 +58,7 @@ class BenchConfig:
     # identity (slug suffix + JSON "quant").
     quant: Optional[str] = None
     quant_granularity: str = "tensor"
+    quant_calibration: Optional[str] = None   # static activation scales (calibration JSON)
     height: Optional[int] = None
     width: Optional[int] = None
     num_frames: Optional[int] = None
@@ -101,18 +102,25 @@ class BenchConfig:
         """--quant CLI tokens for compile AND generate (both must agree)."""
         if self.quant is None:
             return []
-        return ["--quant", self.quant, "--quant-granularity", self.quant_granularity]
+        flags = ["--quant", self.quant, "--quant-granularity", self.quant_granularity]
+        if self.quant_calibration:
+            flags += ["--quant-calibration", self.quant_calibration]
+        return flags
 
     def quant_dict(self) -> Optional[dict]:
         if self.quant is None:
             return None
-        return {"format": self.quant, "weight_granularity": self.quant_granularity}
+        out = {"format": self.quant, "weight_granularity": self.quant_granularity}
+        if self.quant_calibration:
+            out["calibration"] = self.quant_calibration
+        return out
 
     def slug_suffix(self) -> str:
         """Result-file suffix so an fp8 run never overwrites the bf16 report."""
         if self.quant is None:
             return ""
-        return f"_{self.quant}_{self.quant_granularity}"
+        static = "_static" if self.quant_calibration else ""
+        return f"_{self.quant}_{self.quant_granularity}{static}"
 
     def parallel_dict(self) -> dict:
         """Result-JSON parallel record (same schema as the phase-sweep JSONs)."""

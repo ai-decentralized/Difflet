@@ -438,3 +438,22 @@ def test_hunyuan_shared_cli_args_forward_quant_flags_only_when_set():
         stage_mode="generate", work_dir="/w")
     assert fp8[: len(bf16)] == bf16
     assert fp8[len(bf16):] == QuantSpec.for_model("hunyuan_video").cli_args()
+
+
+
+def test_quant_calibration_flag_parses_and_reaches_the_spec(tmp_path):
+    """--quant-calibration JSON selects static activation scales on every device
+    command and the stage parser; the file must exist."""
+    from difflet.cli import stage
+
+    calib = tmp_path / "calib.json"
+    calib.write_text('{"layers": {}}')
+    args = cli_main._build_parser().parse_args(
+        ["compile", "--model-id", WAN, "--quant", "fp8", "--quant-calibration", str(calib)])
+    assert args.quant_calibration == str(calib)
+    assert QuantSpec.from_args(args, model_type="wan") == QuantSpec.for_model("wan", calibration=str(calib))
+    stage_args = stage._build_stage_parser().parse_known_args(
+        ["--orchestrator", WAN, "--stage", "transformer", "--quant", "fp8", "--quant-calibration", str(calib)])[0]
+    assert stage_args.quant_calibration == str(calib)
+    default = cli_main._build_parser().parse_args(["compile", "--model-id", WAN, "--quant", "fp8"])
+    assert default.quant_calibration is None

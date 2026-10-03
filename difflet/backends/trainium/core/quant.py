@@ -53,7 +53,11 @@ def neuron_config_kwargs(spec: QuantSpec, quantized_checkpoints_path: str | os.P
         "quantized_checkpoints_path": str(quantized_checkpoints_path),
         "quantization_type": _NXD_QUANTIZATION_TYPE[spec.weight_granularity],
         "quantization_dtype": _NXD_QUANTIZED_DTYPE[spec.format],
-        "activation_quantization_type": _NXD_ACTIVATION_DYNAMIC,
+        # "static" makes NxD's from_float create the per-layer input_scale parameter
+        # (loaded from the checkpoint's <layer>.input_scale); "dynamic" = per call.
+        "activation_quantization_type": (
+            "static" if spec.activation_scales == "static" else _NXD_ACTIVATION_DYNAMIC
+        ),
     }
     # Which modules the device-side convert swaps (difflet.quant.targets);
     # additive: only quantized apps carry it, bf16 identities are unchanged.
@@ -173,9 +177,22 @@ def dynamic_fp8_linear(layer: Any, input_parallel: "torch.Tensor", **impl_kwargs
     import torch
 
     original_dtype = input_parallel.dtype
-    quantized, input_scale = quantize_activation_per_tensor(
-        input_parallel, getattr(layer, "clamp_bound", float("inf"))
-    )
+    static_scale = getattr(layer, "input_scale", None)
+    if static_scale is not None:
+        # Static per-layer scale (calibrated): one fused multiply + clamp + cast, no
+        # absmax reductions over the activation.
+        from difflet.quant.fp8 import FP8_DTYPE, FP8_MAX
+
+        input_scale = static_scale.to(torch.float32).reshape(())
+        quantized = (
+            (input_parallel.to(torch.float32) * (1.0 / input_scale))
+            .clamp(-FP8_MAX, FP8_MAX)
+            .to(FP8_DTYPE)
+        )
+    else:
+        quantized, input_scale = quantize_activation_per_tensor(
+            input_parallel, getattr(layer, "clamp_bound", float("inf"))
+        )
     output = layer._forward_impl(input=quantized, weight=layer.weight, bias=None, **impl_kwargs)
     # One combined (tiny) scale, one multiply over the output: the 2.26 HLO
     # carried two full-size F32 multiplies per linear for the two scales.

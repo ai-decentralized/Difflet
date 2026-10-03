@@ -52,6 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prompt", default="a cinematic shot of a red fox running through a snowy forest")
     p.add_argument("--runs", type=int, default=2, help="generate runs per arm (run 0 is the cold one)")
     p.add_argument("--quant-granularity", choices=["tensor", "channel"], default="tensor")
+    p.add_argument("--quant-calibration", default=None, help="static activation scales (calibration JSON)")
     p.add_argument("--cache-dir", default=None)
     p.add_argument("--out-dir", type=Path, required=True)
     p.add_argument("--only", choices=["bf16", "fp8", "both"], default="both")
@@ -77,7 +78,10 @@ def _difflet(args, command: str, *extra: str) -> list[str]:
 
 
 def _quant_flags(args) -> list[str]:
-    return ["--quant", "fp8", "--quant-granularity", args.quant_granularity]
+    flags = ["--quant", "fp8", "--quant-granularity", args.quant_granularity]
+    if args.quant_calibration:
+        flags += ["--quant-calibration", args.quant_calibration]
+    return flags
 
 
 def _shape_flags(args) -> list[str]:
@@ -139,7 +143,8 @@ def main() -> int:
                                              "num_frames": args.num_frames},
         "steps": args.steps, "guidance_scale": args.guidance_scale, "seed": args.seed,
         "prompt": args.prompt, "tp_degree": args.tp_degree,
-        "quant": {"format": "fp8", "weight_granularity": args.quant_granularity},
+        "quant": {"format": "fp8", "weight_granularity": args.quant_granularity,
+                  "calibration": args.quant_calibration},
         "arms": {arm: {"runs": []} for arm in arms}, "compare": {},
     }
 

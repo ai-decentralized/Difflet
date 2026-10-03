@@ -53,6 +53,11 @@ class QuantSpec:
     format: str = FORMAT_FP8_E4M3
     weight_granularity: str = "tensor"
     targets: tuple[str, ...] = DEFAULT_TARGETS
+    # Path of a calibration JSON (``scripts/ptq_calibrate_activations.py``): per
+    # target linear, the input absmax over a real denoising run. When set the
+    # activation scales are static per layer (checkpoint ``input_scale`` tensors,
+    # no absmax reductions on the device); when None they are dynamic per call.
+    calibration: str | None = None
 
     def __post_init__(self) -> None:
         if self.format not in FORMATS:
@@ -62,10 +67,34 @@ class QuantSpec:
                 f"unsupported weight granularity {self.weight_granularity!r}; "
                 f"known: {GRANULARITIES}"
             )
+        if self.calibration is not None and self.weight_granularity != "tensor":
+            # NxD creates the static input_scale parameter only for per-tensor weights.
+            raise ValueError("static activation scales (calibration) require weight_granularity='tensor'")
         targets = tuple(str(t) for t in self.targets)
         if not targets or any(not t for t in targets):
             raise ValueError("quant targets must be a non-empty tuple of module-name suffixes")
         object.__setattr__(self, "targets", targets)
+
+    # ---------------------------------------------------------------- activations
+
+    @property
+    def activation_scales(self) -> str:
+        """``"static"`` (calibrated per-layer constants) or ``"dynamic"`` (per call)."""
+        return "static" if self.calibration else "dynamic"
+
+    def calibration_sha(self) -> str:
+        """Content hash of the calibration file (16 hex chars); ``FileNotFoundError`` if missing."""
+        if not self.calibration:
+            raise ValueError("spec has no calibration file")
+        with open(self.calibration, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()[:16]
+
+    def calibration_layers(self) -> dict[str, float]:
+        """``{layer name: input absmax}`` from the calibration file."""
+        with open(self.calibration or "", "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        layers = data.get("layers", data)
+        return {name: float(entry["amax"] if isinstance(entry, dict) else entry) for name, entry in layers.items()}
 
     # ---------------------------------------------------------------- matching
 
@@ -94,11 +123,16 @@ class QuantSpec:
     # ------------------------------------------------------------- serialization
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "format": self.format,
             "weight_granularity": self.weight_granularity,
             "targets": list(self.targets),
         }
+        if self.calibration:
+            # The content hash is what identifies the artifact; the path locates the file.
+            data["calibration"] = self.calibration
+            data["calibration_sha"] = self.calibration_sha()
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "QuantSpec":
@@ -107,6 +141,7 @@ class QuantSpec:
             format=str(data.get("format", FORMAT_FP8_E4M3)),
             weight_granularity=str(data.get("weight_granularity", "tensor")),
             targets=tuple(data.get("targets") or DEFAULT_TARGETS),
+            calibration=data.get("calibration") or None,
         )
 
     @classmethod
@@ -122,14 +157,15 @@ class QuantSpec:
     # ------------------------------------------------------------------ identity
 
     def label(self) -> str:
-        """Short human label, e.g. ``fp8-tensor`` / ``fp8-channel``."""
-        return f"{_FORMAT_TO_CLI[self.format]}-{self.weight_granularity}"
+        """Short human label, e.g. ``fp8-tensor`` / ``fp8-channel`` / ``fp8-tensor-static``."""
+        suffix = "-static" if self.calibration else ""
+        return f"{_FORMAT_TO_CLI[self.format]}-{self.weight_granularity}{suffix}"
 
     def checkpoint_identity(self) -> dict[str, Any]:
-        """The part of the spec that changes the quantized *weights* on disk."""
-        from difflet.quant.fp8 import FP8_MAX
+        """The part of the spec that changes the quantized checkpoint on disk."""
+        from difflet.quant.fp8 import FP8_MAX, STATIC_ACT_MARGIN
 
-        return {
+        identity: dict[str, Any] = {
             "format": self.format,
             # The saturation range is baked into the stored weights: a checkpoint
             # quantized against 448 (torch's e4m3fn max) is NaN on Trainium.
@@ -137,9 +173,13 @@ class QuantSpec:
             "weight_granularity": self.weight_granularity,
             "targets": list(self.targets),
         }
+        if self.calibration:
+            identity["calibration_sha"] = self.calibration_sha()
+            identity["static_margin"] = STATIC_ACT_MARGIN
+        return identity
 
     def checkpoint_label(self) -> str:
-        return f"{_FORMAT_TO_CLI[self.format]}-{self.weight_granularity}"
+        return self.label()
 
     def checkpoint_hash(self, source: str | None = None) -> str:
         payload = dict(self.checkpoint_identity())
@@ -168,16 +208,20 @@ class QuantSpec:
         fields = dict(
             format=CLI_FORMATS[fmt],
             weight_granularity=getattr(args, "quant_granularity", None) or "tensor",
+            calibration=getattr(args, "quant_calibration", None) or None,
         )
         return cls.for_model(model_type, **fields) if model_type else cls(**fields)
 
     def cli_args(self) -> list[str]:
-        return [
+        out = [
             "--quant",
             _FORMAT_TO_CLI[self.format],
             "--quant-granularity",
             self.weight_granularity,
         ]
+        if self.calibration:
+            out += ["--quant-calibration", self.calibration]
+        return out
 
 
 __all__ = [

@@ -184,3 +184,47 @@ def test_split_fused_proj_out_without_scale_keeps_the_bf16_path():
     ckpt.split_fused_proj_out(sd, "blk.0.proj_out", attn_name="a", mlp_name="m", cols=4)
     assert set(sd) == {"a.weight", "a.bias", "m.weight"}
     assert sd["a.weight"].shape == (8, 4) and sd["m.weight"].shape == (8, 8)
+
+
+
+def test_static_calibration_adds_input_scales_to_the_quantized_targets(tmp_path):
+    """With a calibration file the checkpoint carries ``<prefix>.input_scale`` (float32
+    [1]) = absmax * STATIC_ACT_MARGIN / 240 for every quantized target; calibration
+    names are Difflet's (ffn.net_in / net_out), HF keys are diffusers' (ffn.net.0.proj /
+    net.2), so the lookup maps between them. A target without a calibration entry is
+    an error (a silently dynamic layer would defeat the point)."""
+    from difflet.quant.fp8 import FP8_MAX, STATIC_ACT_MARGIN
+
+    calib = tmp_path / "calib.json"
+    calib.write_text(json.dumps({"layers": {
+        "blocks.0.attn1.to_q": {"amax": 3.0}, "blocks.0.attn1.to_out.0": {"amax": 1.5},
+        "blocks.0.ffn.net_in": {"amax": 6.0}, "blocks.0.ffn.net_out": {"amax": 12.0},
+    }}))
+    out, report = ckpt.quantize_state_dict(_wan_like_state_dict(), QuantSpec(calibration=str(calib)))
+    for prefix, amax in (("blocks.0.attn1.to_q", 3.0), ("blocks.0.attn1.to_out.0", 1.5),
+                         ("blocks.0.ffn.net.0.proj", 6.0), ("blocks.0.ffn.net.2", 12.0)):
+        scale = out[prefix + ".input_scale"]
+        assert scale.dtype == torch.float32 and scale.shape == (1,)
+        assert scale.item() == pytest.approx(amax * STATIC_ACT_MARGIN / FP8_MAX)
+        assert out[prefix + ".weight"].dtype == torch.float8_e4m3fn
+    assert "proj_out.input_scale" not in out and "patch_embedding.input_scale" not in out
+    assert report["static_activation_scales"] == 4 and report["static_margin"] == STATIC_ACT_MARGIN
+    dyn_out, dyn_report = ckpt.quantize_state_dict(_wan_like_state_dict(), QuantSpec())
+    assert not any(k.endswith(".input_scale") for k in dyn_out) and "static_activation_scales" not in dyn_report
+
+    calib.write_text(json.dumps({"layers": {"blocks.0.attn1.to_q": {"amax": 3.0}}}))
+    with pytest.raises(ValueError, match="calibration"):
+        ckpt.quantize_state_dict(_wan_like_state_dict(), QuantSpec(calibration=str(calib)))
+
+
+def test_split_fused_proj_out_carries_the_input_scale_to_both_halves():
+    sd = {"single_transformer_blocks.0.proj_out.weight": torch.zeros(4, 6, dtype=torch.float8_e4m3fn),
+          "single_transformer_blocks.0.proj_out.bias": torch.zeros(4),
+          "single_transformer_blocks.0.proj_out.scale": torch.tensor([0.5]),
+          "single_transformer_blocks.0.proj_out.input_scale": torch.tensor([0.25])}
+    ckpt.split_fused_proj_out(sd, "single_transformer_blocks.0.proj_out",
+                              attn_name="single_transformer_blocks.0.proj_out_attn",
+                              mlp_name="single_transformer_blocks.0.proj_out_mlp", cols=2)
+    assert sd["single_transformer_blocks.0.proj_out_attn.input_scale"].item() == 0.25
+    assert sd["single_transformer_blocks.0.proj_out_mlp.input_scale"].item() == 0.25
+    assert "single_transformer_blocks.0.proj_out.input_scale" not in sd

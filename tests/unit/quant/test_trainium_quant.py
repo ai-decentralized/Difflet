@@ -511,3 +511,46 @@ def test_dynamic_row_forward_honours_skip_bias_add_toggle(fake_nxd, monkeypatch)
     assert torch.equal(out, x * 3) and bias is layer.bias
     layer.skip_bias_add = False
     assert torch.equal(layer(x), x * 3 + 1)
+
+
+
+def test_neuron_config_kwargs_select_static_activation_quantization(tmp_path):
+    calib = tmp_path / "calib.json"
+    calib.write_text('{"layers": {}}')
+    kwargs = tq.neuron_config_kwargs(QuantSpec(calibration=str(calib)), "/q")
+    assert kwargs["activation_quantization_type"] == "static"
+    assert tq.neuron_config_kwargs(QuantSpec(), "/q")["activation_quantization_type"] == "dynamic"
+
+
+def test_static_input_scale_path_skips_the_reductions_and_clamps(monkeypatch):
+    """A layer carrying NxD's static ``input_scale`` quantizes with that constant: no
+    absmax reductions, one fused multiply + clamp + cast; outputs match the CPU
+    reference; values beyond the calibrated range saturate at ±240 (finite)."""
+    import torch
+
+    from difflet.quant import fp8
+
+    torch.manual_seed(5)
+    x = torch.randn(2, 5, 32, dtype=torch.bfloat16)
+    q_weight, w_scale = fp8.quantize_weight(torch.randn(24, 32, dtype=torch.bfloat16) * 0.1, "tensor")
+    input_scale = torch.tensor([float(x.abs().max()) * 1.25 / fp8.FP8_MAX], dtype=torch.float32)
+
+    def forward_impl(input, weight, bias, **kwargs):
+        assert input.dtype == torch.float8_e4m3fn
+        assert float(input.float().abs().max()) <= fp8.FP8_MAX
+        return torch.nn.functional.linear(input.float(), weight.float())
+
+    def no_reductions(*args, **kwargs):
+        raise AssertionError("static path must not take the dynamic absmax")
+
+    monkeypatch.setattr(tq, "quantize_activation_per_tensor", no_reductions)
+    layer = SimpleNamespace(weight=q_weight, scale=w_scale, input_scale=input_scale,
+                            clamp_bound=float("inf"), _forward_impl=forward_impl)
+    out = tq.dynamic_fp8_linear(layer, x)
+    ref = fp8.fp8_linear_reference(x, q_weight, w_scale, None, input_scale=input_scale)
+    assert out.dtype == torch.bfloat16
+    assert torch.allclose(out.float(), ref.float(), rtol=2e-2, atol=1e-3)
+    # Beyond the calibrated range: saturates instead of overflowing to 256 / NaN.
+    big = x * 8
+    out_big = tq.dynamic_fp8_linear(layer, big)
+    assert torch.isfinite(out_big.float()).all()

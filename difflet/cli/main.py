@@ -195,6 +195,14 @@ def _add_quant_flags(p: argparse.ArgumentParser) -> None:
         help="Weight scale granularity: one scale per tensor (default) or per "
         "output channel. Requires --quant.",
     )
+    p.add_argument(
+        "--quant-calibration",
+        default=None,
+        metavar="JSON",
+        help="Static per-layer activation scales from a calibration run "
+        "(scripts/ptq_calibrate_activations.py). Default: dynamic per-tensor scales "
+        "computed every call. Requires --quant and per-tensor weights.",
+    )
 
 
 def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
@@ -714,6 +722,10 @@ def _validate_quant(args: argparse.Namespace) -> None:
             "exclusive; use --teacache-cadence or --teacache-online-delta.",
             file=sys.stderr,
         )
+        raise SystemExit(1)
+    calibration = getattr(args, "quant_calibration", None)
+    if calibration and not os.path.isfile(calibration):
+        print(f"Error: --quant-calibration file not found: {calibration}", file=sys.stderr)
         raise SystemExit(1)
 
 

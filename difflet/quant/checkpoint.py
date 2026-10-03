@@ -34,10 +34,44 @@ MANIFEST_SCHEMA_VERSION = 1
 _MODEL_FILES = ("model.safetensors", "model.safetensors.index.json")
 
 
+# HF (diffusers) spellings of targets whose Difflet module name differs; the
+# calibration run names layers the Difflet way (the CPU model), the checkpoint
+# keys are the HF ones.
+_HF_TO_DIFFLET_NAME = (
+    (".ffn.net.0.proj", ".ffn.net_in"),
+    (".ffn.net.2", ".ffn.net_out"),
+)
+
+
+def calibrated_amax(layers: dict[str, float], prefix: str) -> float:
+    """Input absmax for the HF-named target ``prefix`` from a calibration map.
+
+    Tries the HF name, its Difflet rename, and — for FLUX / HunyuanVideo's fused
+    single-block ``proj_out`` — the max over the two device halves.
+    """
+    candidates = [prefix] + [prefix.replace(hf, ours) for hf, ours in _HF_TO_DIFFLET_NAME if hf in prefix]
+    for name in candidates:
+        if name in layers:
+            return layers[name]
+    if prefix.endswith(".proj_out"):
+        halves = [layers[n] for n in (prefix + "_attn", prefix + "_mlp") if n in layers]
+        if halves:
+            return max(halves)
+    raise ValueError(f"calibration has no input absmax for target {prefix!r}")
+
+
 def quantize_state_dict(
     state_dict: dict[str, Any], spec: QuantSpec
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Quantize the target 2-D ``.weight`` tensors; pass everything else through."""
+    """Quantize the target 2-D ``.weight`` tensors; pass everything else through.
+
+    With ``spec.calibration`` every quantized target also gets a float32 ``[1]``
+    ``.input_scale`` (= calibrated absmax * STATIC_ACT_MARGIN / 240) that NxD's
+    static activation path loads next to the weight scale.
+    """
+    from difflet.quant.fp8 import FP8_MAX, STATIC_ACT_MARGIN
+
+    layers = spec.calibration_layers() if spec.calibration else None
     out: dict[str, Any] = {}
     quantized: list[str] = []
     bytes_before = 0
@@ -55,6 +89,12 @@ def quantize_state_dict(
             weight_fp8, scale = quantize_weight(value, spec.weight_granularity)
             out[key] = weight_fp8
             out[prefix + ".weight_scale"] = scale
+            if layers is not None:
+                amax = calibrated_amax(layers, prefix)
+                out[prefix + ".input_scale"] = torch.tensor(
+                    [amax * STATIC_ACT_MARGIN / FP8_MAX], dtype=torch.float32
+                )
+                bytes_after += 4
             quantized.append(prefix)
             bytes_after += weight_fp8.numel() * weight_fp8.element_size()
             bytes_after += scale.numel() * scale.element_size()
@@ -62,15 +102,18 @@ def quantize_state_dict(
             out[key] = value
             if torch.is_tensor(value):
                 bytes_after += value.numel() * value.element_size()
-    from difflet.quant.fp8 import FP8_MAX
 
-    report = {
+    report: dict[str, Any] = {
         "num_quantized": len(quantized),
         "quantized": quantized,
         "bytes_before": bytes_before,
         "bytes_after": bytes_after,
         "fp8_max": FP8_MAX,
     }
+    if layers is not None:
+        report["static_activation_scales"] = len(quantized)
+        report["static_margin"] = STATIC_ACT_MARGIN
+        report["calibration_sha"] = spec.calibration_sha()
     return out, report
 
 
@@ -101,6 +144,12 @@ def split_fused_proj_out(
     if scale is not None:
         state_dict[f"{attn_name}.scale"] = scale.clone()
         state_dict[f"{mlp_name}.scale"] = scale.clone()
+    # Static activation scale: calibrated over the fused cat([attn, mlp]) input, so
+    # the same (conservative) constant serves both halves.
+    input_scale = state_dict.pop(f"{prefix}.input_scale", None)
+    if input_scale is not None:
+        state_dict[f"{attn_name}.input_scale"] = input_scale.clone()
+        state_dict[f"{mlp_name}.input_scale"] = input_scale.clone()
 
 
 def _source_slug(source: str) -> str:

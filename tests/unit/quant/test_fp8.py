@@ -108,3 +108,19 @@ def test_reference_linear_tracks_bf16_and_quantizes_both_operands():
     x_q, x_scale = fp8.quantize_activation(x)
     composed = (x_q.float() * x_scale) @ fp8.dequantize(q, scale).t() + bias.float()
     assert torch.allclose(w8a8.float(), composed.to(torch.bfloat16).float())
+
+
+
+def test_reference_linear_static_input_scale_matches_the_static_law():
+    """Static mode of the CPU reference: quantize with the given constant input scale
+    (multiply by its reciprocal, clamp to ±240, cast) instead of the dynamic absmax."""
+    torch.manual_seed(7)
+    x = torch.randn(4, 16, dtype=torch.bfloat16)
+    weight = torch.randn(8, 16, dtype=torch.bfloat16) * 0.1
+    q, scale = fp8.quantize_weight(weight, "tensor")
+    input_scale = torch.tensor([0.02], dtype=torch.float32)
+    out = fp8.fp8_linear_reference(x, q, scale, None, input_scale=input_scale)
+    x_q = (x.float() * (1.0 / input_scale)).clamp(-fp8.FP8_MAX, fp8.FP8_MAX).to(torch.float8_e4m3fn)
+    expected = ((x_q.float() * input_scale) @ fp8.dequantize(q, scale).t()).to(torch.bfloat16)
+    assert torch.equal(out, expected)
+    assert fp8.STATIC_ACT_MARGIN >= 1.0

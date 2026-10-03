@@ -97,3 +97,34 @@ def test_checkpoint_identity_is_the_weight_recipe():
     assert spec.checkpoint_hash("/a") != spec.checkpoint_hash("/b")
     assert spec.checkpoint_hash("/a") != QuantSpec(weight_granularity="channel").checkpoint_hash("/a")
     assert len(spec.checkpoint_hash()) == 8
+
+
+
+def test_calibration_file_selects_static_activation_scales(tmp_path):
+    """Static per-tensor activation scales (2026-10-03): a calibration JSON (per-layer
+    input absmax from ptq_calibrate_activations.py) turns the dynamic per-tensor
+    scale into a per-layer constant; the checkpoint carries input_scale tensors and
+    the device path skips the two absmax reductions per linear. The spec hashes the
+    file's content so a different calibration is a different checkpoint / artifact."""
+    calib = tmp_path / "calib.json"
+    calib.write_text('{"layers": {"blocks.0.attn1.to_q": {"amax": 3.0}}}')
+    dyn = QuantSpec()
+    static = QuantSpec(calibration=str(calib))
+    assert dyn.activation_scales == "dynamic" and static.activation_scales == "static"
+    assert dyn.label() == "fp8-tensor" and static.label() == "fp8-tensor-static"
+    assert static.checkpoint_label() == "fp8-tensor-static"
+    assert static.checkpoint_identity()["calibration_sha"] == static.calibration_sha()
+    assert len(static.calibration_sha()) == 16
+    assert static.checkpoint_hash("/a") != dyn.checkpoint_hash("/a")
+    data = static.to_dict()
+    assert data["calibration"] == str(calib) and data["calibration_sha"] == static.calibration_sha()
+    assert "calibration" not in dyn.to_dict()
+    assert QuantSpec.from_dict(data) == static
+    calib.write_text('{"layers": {"blocks.0.attn1.to_q": {"amax": 4.0}}}')
+    assert QuantSpec(calibration=str(calib)).calibration_sha() != data["calibration_sha"]
+    args = argparse.Namespace(quant="fp8", quant_calibration=str(calib))
+    assert QuantSpec.from_args(args) == QuantSpec(calibration=str(calib))
+    assert QuantSpec(calibration=str(calib)).cli_args() == [
+        "--quant", "fp8", "--quant-granularity", "tensor", "--quant-calibration", str(calib)]
+    with pytest.raises(FileNotFoundError):
+        QuantSpec(calibration=str(tmp_path / "missing.json")).calibration_sha()

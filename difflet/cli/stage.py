@@ -69,6 +69,7 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--teacache-calibration", default=None)
     p.add_argument("--quant", choices=["fp8"], default=None)
     p.add_argument("--quant-granularity", choices=["tensor", "channel"], default="tensor")
+    p.add_argument("--quant-calibration", default=None)
     # DP worker-mode flags (parse_known_args silently drops what isn't declared
     # here — the --sp bug class; keep in sync with main._add_generate_flags).
     p.add_argument("--requests-dir", default=None)

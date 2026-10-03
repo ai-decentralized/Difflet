@@ -34,7 +34,8 @@ def resolve_quant(
     if spec is None:
         return None, None
     spec = QuantSpec.for_model(
-        model_type, format=spec.format, weight_granularity=spec.weight_granularity
+        model_type, format=spec.format, weight_granularity=spec.weight_granularity,
+        calibration=spec.calibration,
     )
     source = os.path.join(model_path, subfolder)
     return spec, str(quantized_checkpoint_dir(quant_cache_dir, source, spec))
@@ -56,7 +57,8 @@ class QuantApplicationMixin:
             None
             if spec is None
             else QuantSpec.for_model(
-                model_type, format=spec.format, weight_granularity=spec.weight_granularity
+                model_type, format=spec.format, weight_granularity=spec.weight_granularity,
+                calibration=spec.calibration,
             )
         )
         self._quant_cache_dir = kwargs.get("quant_cache_dir")

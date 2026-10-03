@@ -66,6 +66,15 @@ def dequantize(q: torch.Tensor, scale: torch.Tensor, dtype: torch.dtype = torch.
 # Same law here so CPU-fp8 == device-fp8 in value.
 ACT_SCALE_MARGIN = 1.0 + 2.0**-7
 
+# Static activation scales (2026-10-03): a calibration run records each target
+# linear's input absmax over the real denoising trajectory; the checkpoint stores
+# input_scale = absmax * STATIC_ACT_MARGIN / 240 per layer, and the device quantizes
+# with that constant (one fused multiply + clamp + cast, no absmax reductions —
+# the two reductions per linear were the remaining fp8-vs-bf16 step cost on
+# Wan 2.1). The margin absorbs prompts / seeds whose activations exceed the
+# calibration's; anything beyond it saturates at ±240 (clamped, never NaN).
+STATIC_ACT_MARGIN = 1.25
+
 
 def activation_scale(x: torch.Tensor) -> torch.Tensor:
     """Dynamic per-tensor absmax scale of an activation (shape ``[1]``, float32)."""
@@ -87,21 +96,34 @@ def fake_quant_activation(x: torch.Tensor) -> torch.Tensor:
     return dequantize(q, scale, x.dtype)
 
 
+def quantize_activation_static(x: torch.Tensor, input_scale: torch.Tensor) -> torch.Tensor:
+    """``x`` -> fp8 with a calibrated constant scale: multiply by its reciprocal,
+    clamp to the Trainium e4m3 range (values beyond the calibration saturate), cast."""
+    inv = 1.0 / input_scale.to(torch.float32).reshape(())
+    return (x.to(torch.float32) * inv).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
+
+
 def fp8_linear_reference(
     x: torch.Tensor,
     weight_fp8: torch.Tensor,
     weight_scale_: torch.Tensor,
     bias: torch.Tensor | None = None,
+    *,
+    input_scale: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Reference W8A8 ``x @ W^T + b``: dynamic per-tensor fp8 activation, fp8
-    weight, fp32 accumulation.
+    """Reference W8A8 ``x @ W^T + b``: per-tensor fp8 activation (dynamic absmax
+    scale, or the calibrated ``input_scale`` when given), fp8 weight, fp32
+    accumulation.
 
-    The activation is quantized in its own dtype (the device law) and the fp8
-    values are used exactly; the dequantize-then-matmul form is bit-equivalent
-    in value to a true fp8 GEMM with fp32 accumulate (the products are exact
-    in fp32); only the accumulation order can differ from the device.
+    The activation's fp8 values are used exactly; the dequantize-then-matmul
+    form is bit-equivalent in value to a true fp8 GEMM with fp32 accumulate
+    (the products are exact in fp32); only the accumulation order can differ
+    from the device.
     """
-    q, scale = quantize_activation(x)
+    if input_scale is None:
+        q, scale = quantize_activation(x)
+    else:
+        q, scale = quantize_activation_static(x, input_scale), input_scale.to(torch.float32).reshape(())
     x32 = q.to(torch.float32) * scale
     w32 = dequantize(weight_fp8, weight_scale_)
     out = x32 @ w32.t()
@@ -112,9 +134,11 @@ def fp8_linear_reference(
 
 __all__ = [
     "ACT_SCALE_MARGIN",
+    "STATIC_ACT_MARGIN",
     "FP8_DTYPE",
     "FP8_MAX",
     "FP8_MIN_SCALE",
+    "quantize_activation_static",
     "activation_scale",
     "dequantize",
     "fake_quant_activation",
