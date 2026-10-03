@@ -40,3 +40,21 @@ def test_parse_dit_step_seconds_drops_step_zero_and_takes_the_last_loop():
     assert parse_dit_step_seconds(log) == [0.50, 0.51, 0.52]
     assert parse_dit_step_seconds("no timing here") == []
     assert parse_dit_step_seconds("[wan] dit-step-seconds: []") == []
+
+
+def test_fp8_static_partners_carry_their_calibration_file():
+    # The static arms (calibrated per-tensor activation scales) mirror the bf16 entry
+    # like the dynamic ones and point at the model's calibration JSON in the evidence tree.
+    from benchmark.models import CALIBRATION_FILES
+
+    for slug in ("flux_1_dev", "qwen_image", "hunyuan_video", "ltx_2", "wan_2_1", "wan_2_2"):
+        base, static = MATRIX[slug], MATRIX[slug + "_fp8_static"]
+        assert static.quant == "fp8" and static.quant_granularity == "tensor"
+        assert static.quant_calibration == CALIBRATION_FILES[slug]
+        assert static.quant_calibration.startswith("artifacts/verification-2026-10-03/") and static.quant_calibration.endswith(".json")
+        assert spec_slug(static) == spec_slug(base) + "_fp8_tensor_static"
+        assert "--quant-calibration" in static.quant_flags() and static.quant_dict()["calibration"] == static.quant_calibration
+        for field in ("model_id", "revision", "model_type", "tp", "cp", "sp", "height", "width",
+                      "num_frames", "steps", "guidance_scale", "seed", "prompt", "output_kind"):
+            assert getattr(base, field) == getattr(static, field), (slug, field)
+        assert "static" in static.config_label

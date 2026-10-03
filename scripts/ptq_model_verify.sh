@@ -31,12 +31,21 @@ MODEL_ID=$(python -c "from benchmark.models import MATRIX; print(MATRIX['$SLUG']
 REV=$(python -c "from benchmark.models import MATRIX; print(MATRIX['$SLUG'].revision or '')")
 echo "model $MODEL_ID revision ${REV:-main}"
 
-run quantize python -m difflet.cli.main quantize --model-id "$MODEL_ID" ${REV:+--revision "$REV"} --quant fp8 --quant-granularity tensor
-echo "QUANTIZE_RC=$?"
 # SKIP_BF16=1 re-runs only the fp8 arm (after a device fix) against an already measured bf16 arm.
-for arm in "" _fp8; do
+# ARMS overrides the arm list (default: bf16 + dynamic fp8), e.g. ARMS="_fp8_static" for the
+# calibrated static-scale arm alone (its calibration JSON must exist, see benchmark/models.py).
+ARMS=${ARMS:-"\"\" _fp8"}
+eval "arm_list=($ARMS)"
+for arm in "${arm_list[@]}"; do
   if [ -z "$arm" ] && [ "${SKIP_BF16:-0}" = 1 ]; then echo "=== bf16 arm skipped (SKIP_BF16=1)"; continue; fi
   s=$SLUG$arm
+  if [ -n "$arm" ]; then
+    # quantize (CPU, once per arm) with exactly the arm's quant flags, so a static arm
+    # builds its calibrated checkpoint here and not lazily inside the compile stage
+    QFLAGS=$(python -c "from benchmark.models import MATRIX; print(' '.join(MATRIX['$s'].quant_flags()))")
+    run "quantize_$s" python -m difflet.cli.main quantize --model-id "$MODEL_ID" ${REV:+--revision "$REV"} $QFLAGS
+    echo "QUANTIZE_${s}_RC=$?"
+  fi
   run "bench_$s" python -m benchmark.bench --model "$s" --skip-download --iters 1
   echo "BENCH_${s}_RC=$?"
   run "cold_warm_$s" python -m benchmark.cold_warm_e2e --model "$s"
@@ -47,7 +56,8 @@ if [ "$DRY" = 1 ]; then echo "DRY_DONE $SLUG"; exit 0; fi
 # Output comparisons: the harness writes <results>/<spec_slug>_out.<ext> per arm.
 bf16_slug=$(python -c "from benchmark.models import MATRIX; from benchmark.adapters.trainium import spec_slug; print(spec_slug(MATRIX['$SLUG']))")
 REF=$(ls "$RESULTS/${bf16_slug}_out".* 2>/dev/null | grep -vE '\.pt$' | head -1)
-for arm in _fp8; do
+for arm in "${arm_list[@]}"; do
+  [ -n "$arm" ] || continue
   arm_slug=$(python -c "from benchmark.models import MATRIX; from benchmark.adapters.trainium import spec_slug; print(spec_slug(MATRIX['$SLUG$arm']))")
   TEST=$(ls "$RESULTS/${arm_slug}_out".* 2>/dev/null | grep -vE '\.pt$' | head -1)
   if [ -n "$REF" ] && [ -n "$TEST" ]; then

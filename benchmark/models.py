@@ -242,3 +242,37 @@ def fp8_partners(slug: str, base: "BenchConfig") -> dict:
 
 for _slug in ("flux_1_dev", "qwen_image", "hunyuan_video", "ltx_2", "wan_2_2"):
     MATRIX.update(fp8_partners(_slug, MATRIX[_slug]))
+
+
+# Static per-tensor activation scales: the per-model calibration JSON (real CPU
+# denoise loop at the bench shape / prompt / seed, scripts/ptq_calibrate_activations.py)
+# that ``--quant-calibration`` loads. Kept in the evidence tree of the run that
+# produced it; the CLI refuses a missing file, so an arm without its JSON fails fast.
+_STATIC_EVIDENCE = "artifacts/verification-2026-10-03/fp8-dyn-step/static"
+CALIBRATION_FILES: dict[str, str] = {
+    "wan_2_1": f"{_STATIC_EVIDENCE}/act_calibration_wan21.json",
+    "wan_2_2": f"{_STATIC_EVIDENCE}/act_calibration_wan22.json",
+    "flux_1_dev": f"{_STATIC_EVIDENCE}/act_calibration_flux.json",
+    "qwen_image": f"{_STATIC_EVIDENCE}/act_calibration_qwen_image.json",
+    "ltx_2": f"{_STATIC_EVIDENCE}/act_calibration_ltx_2.json",
+    "hunyuan_video": "artifacts/verification-2026-10-03/hv-fp8/static/act_calibration_hv.json",
+}
+
+
+def fp8_static_partners(slug: str, base: "BenchConfig") -> dict:
+    """``<slug>_fp8_static``: fp8 weights + calibrated static per-tensor activation
+    scales (the path the 2026-10-03 Wan 2.1 A/B showed faster and closer to bf16
+    than dynamic scales), mirroring ``base`` like :func:`fp8_partners`."""
+    return {
+        slug + "_fp8_static": dataclasses.replace(
+            base,
+            quant="fp8",
+            quant_granularity="tensor",
+            quant_calibration=CALIBRATION_FILES[slug],
+            config_label=f"{base.config_label}; FP8 PTQ (static calibrated activation scales) on the DiT linears",
+        )
+    }
+
+
+for _slug in CALIBRATION_FILES:
+    MATRIX.update(fp8_static_partners(_slug, MATRIX[_slug]))

@@ -97,3 +97,21 @@ def test_ab_markdown_renders_partial_summaries():
         "compare": {"x": {"output": {"psnr_db": 30.0, "ssim": 0.9, "lpips": None}, "latents": {}}},
     })
     assert "| bf16 |" in md and "| x | 30.00 | 0.9000 | n/a |" in md
+
+
+def test_model_verify_runner_arms_override_selects_the_static_arm(tmp_path):
+    # ARMS="_fp8_static" runs (and quantizes with the arm's own flags) only the static arm;
+    # the default still runs bf16 + dynamic fp8.
+    import os
+    import subprocess
+
+    env = dict(os.environ, DRY="1", PYTHONPATH=str(ROOT))
+    default = subprocess.run(["bash", str(SCRIPTS / "ptq_model_verify.sh"), "wan_2_1"], capture_output=True,
+                             text=True, cwd=ROOT, env=env).stdout
+    assert "=== bench_wan_2_1 " in default and "=== bench_wan_2_1_fp8 " in default
+    assert "=== quantize_wan_2_1_fp8 " in default and "--quant-calibration" not in default
+    static = subprocess.run(["bash", str(SCRIPTS / "ptq_model_verify.sh"), "wan_2_1"], capture_output=True,
+                            text=True, cwd=ROOT, env=dict(env, ARMS="_fp8_static")).stdout
+    assert "=== bench_wan_2_1_fp8_static " in static and "=== bench_wan_2_1 " not in static
+    assert "=== bench_wan_2_1_fp8 " not in static
+    assert "--quant-calibration artifacts/verification-2026-10-03/fp8-dyn-step/static/act_calibration_wan21.json" in static
