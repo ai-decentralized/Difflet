@@ -17,7 +17,7 @@ a sanity signal only; the per-step number that matters comes from the 14B A/B
 (scripts/ptq_fp8_ab.py).
 
     PYTHONPATH=$PWD python scripts/ptq_fp8_device_probe.py --work-dir /tmp/ptq_probe \\
-        [--quant-granularity tensor|channel] [--quant-act dynamic|none] [--only bf16|fp8|both]
+        [--quant-granularity tensor|channel] [--only bf16|fp8|both]
 
 The CPU reference and the device build run in separate processes (the op
 dispatch is frozen at first import per process: a process that bound the CPU
@@ -87,7 +87,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--width", type=int, default=64)
     p.add_argument("--text-seq-len", type=int, default=512, help="traced text length (production default 512)")
     p.add_argument("--quant-granularity", choices=["tensor", "channel"], default="tensor")
-    p.add_argument("--quant-act", choices=["dynamic", "none"], default="dynamic")
     p.add_argument("--only", choices=["bf16", "fp8", "both"], default="both")
     p.add_argument("--iters", type=int, default=10, help="timed forwards per arm (after 2 warmups)")
     p.add_argument("--min-cosine", type=float, default=0.999)
@@ -99,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _spec(args):
     from difflet.quant.spec import QuantSpec
 
-    return QuantSpec(weight_granularity=args.quant_granularity, activation=args.quant_act)
+    return QuantSpec(weight_granularity=args.quant_granularity)
 
 
 def _first(value):

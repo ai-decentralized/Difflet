@@ -11,7 +11,7 @@ arms; the bf16 run-to-run pair is a determinism control.
     PYTHONPATH=$PWD python scripts/ptq_fp8_ab.py --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers \\
         --tp-degree 4 --height 480 --width 832 --num-frames 9 --steps 20 --guidance-scale 1.0 \\
         --seed 42 --runs 2 --out-dir artifacts/ptq/wan21-ab [--quant-granularity tensor] \\
-        [--quant-act dynamic] [--cache-dir ~/.cache/difflet] [--skip-compile] [--drop-caches]
+        [--quant-granularity tensor] [--cache-dir ~/.cache/difflet] [--skip-compile] [--drop-caches]
 
 ``--dry-run`` prints every command without running anything. Logs of every
 subprocess land under ``<out-dir>/logs``; the summary is ``<out-dir>/ab_summary.json``
@@ -52,7 +52,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prompt", default="a cinematic shot of a red fox running through a snowy forest")
     p.add_argument("--runs", type=int, default=2, help="generate runs per arm (run 0 is the cold one)")
     p.add_argument("--quant-granularity", choices=["tensor", "channel"], default="tensor")
-    p.add_argument("--quant-act", choices=["dynamic", "none"], default="dynamic")
     p.add_argument("--cache-dir", default=None)
     p.add_argument("--out-dir", type=Path, required=True)
     p.add_argument("--only", choices=["bf16", "fp8", "both"], default="both")
@@ -78,7 +77,7 @@ def _difflet(args, command: str, *extra: str) -> list[str]:
 
 
 def _quant_flags(args) -> list[str]:
-    return ["--quant", "fp8", "--quant-granularity", args.quant_granularity, "--quant-act", args.quant_act]
+    return ["--quant", "fp8", "--quant-granularity", args.quant_granularity]
 
 
 def _shape_flags(args) -> list[str]:
@@ -140,8 +139,7 @@ def main() -> int:
                                              "num_frames": args.num_frames},
         "steps": args.steps, "guidance_scale": args.guidance_scale, "seed": args.seed,
         "prompt": args.prompt, "tp_degree": args.tp_degree,
-        "quant": {"format": "fp8", "weight_granularity": args.quant_granularity,
-                  "activation": args.quant_act},
+        "quant": {"format": "fp8", "weight_granularity": args.quant_granularity},
         "arms": {arm: {"runs": []} for arm in arms}, "compare": {},
     }
 

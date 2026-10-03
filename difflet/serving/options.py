@@ -70,10 +70,9 @@ class ServeOptions:
     teacache_online_delta: float | None = None
     teacache_speedup: float | None = None
     teacache_calibration: str | None = None
-    # --quant / --quant-granularity / --quant-act (FP8 PTQ of the DiT linears)
+    # --quant / --quant-granularity (FP8 PTQ of the DiT linears, always W8A8)
     quant: str | None = None
     quant_granularity: str = "tensor"
-    quant_act: str = "dynamic"
     download_policy: DownloadPolicy = DownloadPolicy.AUTO
     compile_policy: CompilePolicy = CompilePolicy.AUTO
     max_running_requests: int = 1
@@ -181,7 +180,6 @@ def build_serving_profile(
     teacache_calibration: str | None,
     quant: str | None = None,
     quant_granularity: str = "tensor",
-    quant_act: str = "dynamic",
 ) -> ServingProfile:
     """Resolve registry defaults plus `difflet serve` overrides."""
 
@@ -200,7 +198,7 @@ def build_serving_profile(
             )
         try:
             quant_spec = QuantSpec.from_args(
-                _QuantArgs(quant=quant, quant_granularity=quant_granularity, quant_act=quant_act),
+                _QuantArgs(quant=quant, quant_granularity=quant_granularity),
                 model_type=model_type,  # the model's own target set
             )
         except ValueError as exc:
@@ -347,11 +345,10 @@ def build_serving_profile(
 
 @dataclass(frozen=True)
 class _QuantArgs:
-    """The three CLI fields ``QuantSpec.from_args`` reads, for callers without argparse."""
+    """The CLI fields ``QuantSpec.from_args`` reads, for callers without argparse."""
 
     quant: str | None
     quant_granularity: str = "tensor"
-    quant_act: str = "dynamic"
 
 
 def _load_serving_teacache_calibration(

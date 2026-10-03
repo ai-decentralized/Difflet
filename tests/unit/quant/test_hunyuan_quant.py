@@ -119,7 +119,7 @@ def test_hunyuan_backbone_config_carries_the_quant_fields(tmp_path):
     plain = happ.create_hunyuan_video_backbone_config(**common)
     assert not getattr(plain.neuron_config, "quantized", False)
     fp8 = happ.create_hunyuan_video_backbone_config(
-        **common, quant=QuantSpec.for_model("hunyuan_video", activation="none"), quant_checkpoint_dir=tmp_path / "q")
+        **common, quant=QuantSpec.for_model("hunyuan_video"), quant_checkpoint_dir=tmp_path / "q")
     nc = fp8.neuron_config
     assert nc.quantized and nc.quantized_checkpoints_path == str(tmp_path / "q")
     assert nc.quant_targets == list(QuantSpec.for_model("hunyuan_video").targets)

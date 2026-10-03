@@ -3,9 +3,9 @@
 
     PYTHONPATH=$PWD python scripts/ptq_model_section.py <bf16-slug> [--evidence-dir DIR] [--results-dir DIR]
 
-Reads benchmark/trn2/<slug>{,_fp8_wo,_fp8}.json (the harness reports),
-artifacts/verification-2026-10-02/ptq-all/<slug>/{compare_fp8_wo_vs_bf16.json,
-compare_fp8_vs_bf16.json,logs/quantize.log,store_entries.txt} and prints Markdown
+Reads benchmark/trn2/<slug>{,_fp8}.json (the harness reports),
+artifacts/verification-2026-10-02/ptq-all/<slug>/{compare_fp8_vs_bf16.json,
+logs/quantize.log,store_entries.txt} and prints Markdown
 tables (performance, quality, quantized checkpoint, store entries). Missing inputs
 render as "—" so a partial run still produces a section.
 """
@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-ARMS = (("", "bf16"), ("_fp8_wo", "fp8-tensor-wo"), ("_fp8", "fp8-tensor-dyn"))
+ARMS = (("", "bf16"), ("_fp8", "fp8-tensor (W8A8)"))
 
 
 def _load(path: Path) -> dict | None:
@@ -162,7 +162,7 @@ def render(slug: str, results: Path, evidence: Path) -> str:
         "",
         f"Shape {shape_txt or '—'}, steps {base.get('steps', '—')}, tp {parallel.get('tp_degree', '—')} "
         f"(cp {parallel.get('cp_degree', 1)}), seed {base.get('seed', '—')}; revision `{base.get('revision') or 'main'}`; "
-        f"reports `benchmark/trn2/{slug}{{,_fp8_wo,_fp8}}.json`, evidence `{evidence.relative_to(ROOT) if evidence.is_relative_to(ROOT) else evidence}/`.",
+        f"reports `benchmark/trn2/{slug}{{,_fp8}}.json`, evidence `{evidence.relative_to(ROOT) if evidence.is_relative_to(ROOT) else evidence}/`.",
         "",
         "**Performance** (harness: `benchmark.bench --iters 1` → compile + step latency, `benchmark.cold_warm_e2e` → "
         "true cold / warm e2e):",

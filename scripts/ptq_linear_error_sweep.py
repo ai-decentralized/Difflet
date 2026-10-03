@@ -5,11 +5,11 @@ For every FastVideo-set linear (attention q/k/v/out, FFN in/out) in every block,
 capture its real input activation from one bf16 forward, then compare the FP8
 matmul against the exact fp32 matmul under each PTQ scheme:
 
-    fp8-tensor-dyn   per-tensor weights + dynamic per-tensor activations (default)
-    fp8-tensor-wo    per-tensor weights, bf16 activations (weight-only)
-    fp8-channel-dyn  per-channel weights + dynamic activations
-    fp8-channel-wo   per-channel weights, bf16 activations
-    bf16             the bf16 matmul itself — the noise floor to read fp8 against
+    fp8-tensor   per-tensor weights + dynamic per-tensor activations (default)
+    fp8-channel  per-channel weights + dynamic activations
+    bf16         the bf16 matmul itself — the noise floor to read fp8 against
+
+(Weight-only schemes were removed on 2026-10-03; FP8 PTQ is always W8A8.)
 
 Metrics per cell: MSE, cosine, max-abs, mean-abs, relative L2, SNR(dB). The fp8
 numbers are exact for the algorithm the device runs (only fp32 accumulation order
@@ -45,10 +45,8 @@ from difflet.quant.metrics import tensor_error_metrics  # noqa: E402
 from difflet.quant.spec import QuantSpec  # noqa: E402
 
 SCHEMES = {
-    "fp8-tensor-dyn": ("tensor", "dynamic"),
-    "fp8-tensor-wo": ("tensor", "none"),
-    "fp8-channel-dyn": ("channel", "dynamic"),
-    "fp8-channel-wo": ("channel", "none"),
+    "fp8-tensor": "tensor",
+    "fp8-channel": "channel",
 }
 
 
@@ -179,9 +177,9 @@ def main() -> int:
         bf16_out = torch.nn.functional.linear(x, weight, bias).float()
         metrics["bf16"] = tensor_error_metrics(exact, bf16_out)
         for scheme in schemes:
-            granularity, activation = SCHEMES[scheme]
+            granularity = SCHEMES[scheme]
             wq, scale = quantize_weight(weight, granularity)
-            out = fp8_linear_reference(x.float(), wq, scale, bias, activation=activation)
+            out = fp8_linear_reference(x.float(), wq, scale, bias)
             metrics[scheme] = tensor_error_metrics(exact, out)
         parts = name.split(".")
         block = int(parts[1]) if parts[0] == "blocks" and parts[1].isdigit() else None

@@ -184,9 +184,9 @@ def _add_quant_flags(p: argparse.ArgumentParser) -> None:
         choices=["fp8"],
         default=None,
         help="Post-training quantization of the DiT linear layers (attention q/k/v/out "
-        "and FFN) to FP8 e4m3 with absmax scales, FastVideo-style; embedders, "
-        "modulation, norms and proj_out stay bf16. Wan only for now. Changes the "
-        "compiled artifact identity.",
+        "and FFN) to FP8 e4m3 with absmax scales, FastVideo-style W8A8 (fp8 weights, "
+        "dynamic per-tensor fp8 activations); embedders, modulation, norms and "
+        "proj_out stay bf16. Changes the compiled artifact identity.",
     )
     p.add_argument(
         "--quant-granularity",
@@ -194,13 +194,6 @@ def _add_quant_flags(p: argparse.ArgumentParser) -> None:
         default="tensor",
         help="Weight scale granularity: one scale per tensor (default) or per "
         "output channel. Requires --quant.",
-    )
-    p.add_argument(
-        "--quant-act",
-        choices=["dynamic", "none"],
-        default="dynamic",
-        help="Activation quantization: dynamic per-tensor FP8 at run time (default, "
-        "W8A8) or none (weight-only). Requires --quant.",
     )
 
 

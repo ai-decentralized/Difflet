@@ -77,20 +77,15 @@ def fp8_linear_reference(
     weight_fp8: torch.Tensor,
     weight_scale_: torch.Tensor,
     bias: torch.Tensor | None = None,
-    *,
-    activation: str = "dynamic",
 ) -> torch.Tensor:
-    """Reference ``x @ W^T + b`` with fp8 operands and fp32 accumulation.
+    """Reference W8A8 ``x @ W^T + b``: dynamic per-tensor fp8 activation, fp8
+    weight, fp32 accumulation.
 
     The dequantize-then-matmul form is bit-equivalent in value to a true fp8
     GEMM with fp32 accumulate (the products are exact in fp32); only the
     accumulation order can differ from the device.
     """
-    x32 = x.to(torch.float32)
-    if activation == "dynamic":
-        x32 = fake_quant_activation(x32)
-    elif activation != "none":
-        raise ValueError(f"unknown activation mode {activation!r}")
+    x32 = fake_quant_activation(x.to(torch.float32))
     w32 = dequantize(weight_fp8, weight_scale_)
     out = x32 @ w32.t()
     if bias is not None:

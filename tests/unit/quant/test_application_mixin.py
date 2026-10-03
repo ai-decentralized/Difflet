@@ -36,11 +36,10 @@ def _write_source(root):
 
 def test_mixin_resolves_memoizes_and_ensures(tmp_path, capsys):
     model_dir = _write_source(tmp_path)
-    app = _App(str(model_dir), quant={"format": "fp8_e4m3", "activation": "none"},
+    app = _App(str(model_dir), quant={"format": "fp8_e4m3"},
                quant_cache_dir=str(tmp_path / "cache"))
     # The CLI/serving dict may carry the default (Wan) targets; the model's own set wins.
     assert app.quant_spec.targets == QuantSpec.for_model("flux").targets
-    assert app.quant_spec.activation == "none"
     dest = app._quant_checkpoint_dir("transformer")
     assert dest.startswith(str(tmp_path / "cache" / "quantized"))
     assert app._quant_checkpoint_dir("transformer") == dest  # memoized
@@ -63,9 +62,9 @@ def test_resolve_quant_matches_the_mixin_resolution(tmp_path):
     from difflet.quant.application_mixin import resolve_quant
 
     model_dir = _write_source(tmp_path)
-    spec, dest = resolve_quant(str(model_dir), "transformer", {"format": "fp8_e4m3", "activation": "none"},
+    spec, dest = resolve_quant(str(model_dir), "transformer", {"format": "fp8_e4m3"},
                                str(tmp_path / "cache"), model_type="flux")
-    app = _App(str(model_dir), quant={"format": "fp8_e4m3", "activation": "none"},
+    app = _App(str(model_dir), quant={"format": "fp8_e4m3"},
                quant_cache_dir=str(tmp_path / "cache"))
     assert spec == app.quant_spec and dest == app._quant_checkpoint_dir("transformer")
     assert resolve_quant(str(model_dir), "transformer", None, None, model_type="flux") == (None, None)

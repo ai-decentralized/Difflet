@@ -66,6 +66,6 @@ def test_per_model_checkpoint_identities_follow_the_target_sets():
 
 
 def test_from_args_uses_the_model_targets():
-    args = argparse.Namespace(quant="fp8", quant_granularity="tensor", quant_act="none")
+    args = argparse.Namespace(quant="fp8", quant_granularity="tensor")
     assert QuantSpec.from_args(args, model_type="flux").targets == targets_for("flux")
     assert QuantSpec.from_args(args).targets == targets_for("wan")  # default unchanged

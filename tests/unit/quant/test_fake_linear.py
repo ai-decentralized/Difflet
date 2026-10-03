@@ -54,7 +54,7 @@ def test_fake_quant_linear_matches_reference_and_keeps_bias():
     cos = torch.nn.functional.cosine_similarity(out.flatten(), exact.flatten(), dim=0)
     assert cos > 0.995
     assert (out - exact).abs().max() > 0
-    assert "fp8-tensor-dyn" in repr(quant)
+    assert "fp8-tensor" in repr(quant)
 
     no_bias = FakeQuantLinear(nn.Linear(4, 4, bias=False), QuantSpec(weight_granularity="channel"))
     assert no_bias.bias is None and no_bias.weight_scale.shape == (4, 1)

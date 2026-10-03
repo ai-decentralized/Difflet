@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Per-model FP8 PTQ device verification: bf16, fp8 weight-only, fp8 dynamic through the
+# Per-model FP8 PTQ device verification: bf16 and fp8 (W8A8, dynamic activations) through the
 # benchmark harness (bench + true cold / warm e2e), then output comparisons against the
 # bf16 output and the A4 fingerprints (store entries). Serialized on the device.
 #
@@ -7,7 +7,7 @@
 #   scripts/ptq_model_verify.sh <bf16-slug>            # e.g. flux_1_dev, qwen_image, ltx_2, hunyuan_video, wan_2_2
 #   DRY=1 scripts/ptq_model_verify.sh <bf16-slug>      # print the commands only
 #
-# Results: benchmark/trn2/<slug>{,_fp8_wo,_fp8}.{json,md} (patched by the harness) and
+# Results: benchmark/trn2/<slug>{,_fp8}.{json,md} (patched by the harness) and
 # artifacts/verification-2026-10-02/ptq-all/<slug>/ (logs, compare JSONs, outputs, store listing).
 set -uo pipefail
 SLUG=${1:?usage: ptq_model_verify.sh <bf16-slug>}
@@ -33,8 +33,8 @@ echo "model $MODEL_ID revision ${REV:-main}"
 
 run quantize python -m difflet.cli.main quantize --model-id "$MODEL_ID" ${REV:+--revision "$REV"} --quant fp8 --quant-granularity tensor
 echo "QUANTIZE_RC=$?"
-# SKIP_BF16=1 re-runs only the fp8 arms (after a device fix) against an already measured bf16 arm.
-for arm in "" _fp8_wo _fp8; do
+# SKIP_BF16=1 re-runs only the fp8 arm (after a device fix) against an already measured bf16 arm.
+for arm in "" _fp8; do
   if [ -z "$arm" ] && [ "${SKIP_BF16:-0}" = 1 ]; then echo "=== bf16 arm skipped (SKIP_BF16=1)"; continue; fi
   s=$SLUG$arm
   run "bench_$s" python -m benchmark.bench --model "$s" --skip-download --iters 1
@@ -47,7 +47,7 @@ if [ "$DRY" = 1 ]; then echo "DRY_DONE $SLUG"; exit 0; fi
 # Output comparisons: the harness writes <results>/<spec_slug>_out.<ext> per arm.
 bf16_slug=$(python -c "from benchmark.models import MATRIX; from benchmark.adapters.trainium import spec_slug; print(spec_slug(MATRIX['$SLUG']))")
 REF=$(ls "$RESULTS/${bf16_slug}_out".* 2>/dev/null | grep -vE '\.pt$' | head -1)
-for arm in _fp8_wo _fp8; do
+for arm in _fp8; do
   arm_slug=$(python -c "from benchmark.models import MATRIX; from benchmark.adapters.trainium import spec_slug; print(spec_slug(MATRIX['$SLUG$arm']))")
   TEST=$(ls "$RESULTS/${arm_slug}_out".* 2>/dev/null | grep -vE '\.pt$' | head -1)
   if [ -n "$REF" ] && [ -n "$TEST" ]; then
@@ -58,7 +58,7 @@ for arm in _fp8_wo _fp8; do
   fi
 done
 [ -n "$REF" ] && cp "$REF" "$EVID/" 2>/dev/null
-cp "$RESULTS/$SLUG".json "$RESULTS/$SLUG".md "$RESULTS/${SLUG}_fp8_wo".json "$RESULTS/${SLUG}_fp8_wo".md "$RESULTS/${SLUG}_fp8".json "$RESULTS/${SLUG}_fp8".md "$EVID/" 2>/dev/null
+cp "$RESULTS/$SLUG".json "$RESULTS/$SLUG".md "$RESULTS/${SLUG}_fp8".json "$RESULTS/${SLUG}_fp8".md "$EVID/" 2>/dev/null
 ls -la ~/.cache/difflet/_shared_weights 2>/dev/null | grep -i "$(echo "$MODEL_ID" | sed 's|/|--|')" > "$EVID/store_entries.txt"
 du -sh ~/.cache/difflet/quantized/*/transformer*/ 2>/dev/null >> "$EVID/store_entries.txt"
 echo "VERIFY_DONE $SLUG"

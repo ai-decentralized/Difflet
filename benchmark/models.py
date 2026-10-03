@@ -53,11 +53,11 @@ class BenchConfig:
     cfg_parallel: bool = False               # --cfg-parallel (true-CFG models only)
     sp: bool = False                         # --sp (Megatron sequence parallelism)
     dtype: str = "bf16"
-    # FP8 PTQ of the DiT linears (--quant / --quant-granularity / --quant-act).
-    # None = bf16. Part of the result identity (slug suffix + JSON "quant").
+    # FP8 PTQ of the DiT linears (--quant / --quant-granularity; always W8A8 —
+    # weight-only was removed 2026-10-03). None = bf16. Part of the result
+    # identity (slug suffix + JSON "quant").
     quant: Optional[str] = None
     quant_granularity: str = "tensor"
-    quant_act: str = "dynamic"
     height: Optional[int] = None
     width: Optional[int] = None
     num_frames: Optional[int] = None
@@ -101,21 +101,18 @@ class BenchConfig:
         """--quant CLI tokens for compile AND generate (both must agree)."""
         if self.quant is None:
             return []
-        return ["--quant", self.quant, "--quant-granularity", self.quant_granularity,
-                "--quant-act", self.quant_act]
+        return ["--quant", self.quant, "--quant-granularity", self.quant_granularity]
 
     def quant_dict(self) -> Optional[dict]:
         if self.quant is None:
             return None
-        return {"format": self.quant, "weight_granularity": self.quant_granularity,
-                "activation": self.quant_act}
+        return {"format": self.quant, "weight_granularity": self.quant_granularity}
 
     def slug_suffix(self) -> str:
         """Result-file suffix so an fp8 run never overwrites the bf16 report."""
         if self.quant is None:
             return ""
-        act = "dyn" if self.quant_act == "dynamic" else "wo"
-        return f"_{self.quant}_{self.quant_granularity}_{act}"
+        return f"_{self.quant}_{self.quant_granularity}"
 
     def parallel_dict(self) -> dict:
         """Result-JSON parallel record (same schema as the phase-sweep JSONs)."""
@@ -166,23 +163,10 @@ MATRIX: dict[str, BenchConfig] = {
         revision="38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
         model_type="wan",
         tp=4, height=480, width=832, num_frames=9, steps=20, guidance_scale=1.0,
-        quant="fp8", quant_granularity="tensor", quant_act="dynamic",
+        quant="fp8", quant_granularity="tensor",
         output_kind="video",
         config_label="tp=4, FP8 PTQ (e4m3, per-tensor weights, dynamic activations) on the "
                      "DiT linears, bf16 elsewhere, attention_cte, 2-stage subprocess pipeline",
-        stage_names=["text_encoder (UMT5)", "transformer (denoise loop)", "vae_decoder"],
-    ),
-    # Weight-only FP8 (fp8 weights dequantized to bf16 at run time, bf16 matmuls):
-    # on trn2 (2026-10-01) the per-step matches bf16 while the weight bytes halve.
-    "wan_2_1_fp8_wo": BenchConfig(
-        model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers",
-        revision="38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
-        model_type="wan",
-        tp=4, height=480, width=832, num_frames=9, steps=20, guidance_scale=1.0,
-        quant="fp8", quant_granularity="tensor", quant_act="none",
-        output_kind="video",
-        config_label="tp=4, FP8 PTQ weight-only (e4m3, per-tensor weights, bf16 activations) on "
-                     "the DiT linears, bf16 elsewhere, attention_cte, 2-stage subprocess pipeline",
         stage_names=["text_encoder (UMT5)", "transformer (denoise loop)", "vae_decoder"],
     ),
     "wan_2_2": BenchConfig(
@@ -235,22 +219,17 @@ MATRIX: dict[str, BenchConfig] = {
 
 
 def fp8_partners(slug: str, base: "BenchConfig") -> dict:
-    """``<slug>_fp8`` (dynamic activations) and ``<slug>_fp8_wo`` (weight-only)
+    """``<slug>_fp8`` (W8A8: fp8 weights, dynamic per-tensor fp8 activations)
     mirroring ``base`` field for field, so an fp8 run is comparable to its bf16
     entry and never overwrites its report (``slug_suffix``)."""
-    out = {}
-    for suffix, act, label in (
-        ("_fp8", "dynamic", "dynamic activations"),
-        ("_fp8_wo", "none", "weight-only"),
-    ):
-        out[slug + suffix] = dataclasses.replace(
+    return {
+        slug + "_fp8": dataclasses.replace(
             base,
             quant="fp8",
             quant_granularity="tensor",
-            quant_act=act,
-            config_label=f"{base.config_label}; FP8 PTQ ({label}) on the DiT linears",
+            config_label=f"{base.config_label}; FP8 PTQ (dynamic activations) on the DiT linears",
         )
-    return out
+    }
 
 
 for _slug in ("flux_1_dev", "qwen_image", "hunyuan_video", "ltx_2", "wan_2_2"):

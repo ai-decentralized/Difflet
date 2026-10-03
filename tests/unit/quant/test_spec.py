@@ -13,10 +13,25 @@ def test_defaults_mirror_fastvideo_fp8_config():
     spec = QuantSpec()
     assert spec.format == "fp8_e4m3"
     assert spec.weight_granularity == "tensor"
-    assert spec.activation == "dynamic"
     assert spec.targets == DEFAULT_TARGETS
-    assert spec.label() == "fp8-tensor-dyn"
-    assert QuantSpec(weight_granularity="channel", activation="none").label() == "fp8-channel-wo"
+    assert spec.label() == "fp8-tensor"
+    assert QuantSpec(weight_granularity="channel").label() == "fp8-channel"
+
+
+def test_activations_are_always_dynamic():
+    """Weight-only (``activation="none"``) was removed on 2026-10-03: FP8 PTQ is
+    FastVideo's W8A8 scheme only. The field is gone, and legacy dicts / CLI
+    namespaces that ask for weight-only fail loudly instead of silently running
+    dynamic."""
+    with pytest.raises(TypeError):
+        QuantSpec(activation="none")  # type: ignore[call-arg]
+    assert QuantSpec.from_dict({"format": "fp8_e4m3", "activation": "dynamic"}) == QuantSpec()
+    with pytest.raises(ValueError, match="weight-only"):
+        QuantSpec.from_dict({"format": "fp8_e4m3", "activation": "none"})
+    with pytest.raises(ValueError, match="weight-only"):
+        QuantSpec.from_args(argparse.Namespace(quant="fp8", quant_act="none"))
+    assert "activation" not in QuantSpec().to_dict()
+    assert "--quant-act" not in QuantSpec().cli_args()
 
 
 @pytest.mark.parametrize(
@@ -24,7 +39,6 @@ def test_defaults_mirror_fastvideo_fp8_config():
     [
         {"format": "int8"},
         {"weight_granularity": "token"},
-        {"activation": "static"},
         {"targets": ()},
         {"targets": ("",)},
     ],
@@ -50,12 +64,11 @@ def test_matches_targets_by_dotted_suffix_only():
 
 
 def test_dict_round_trip_and_coerce():
-    spec = QuantSpec(weight_granularity="channel", activation="none", targets=("to_q",))
+    spec = QuantSpec(weight_granularity="channel", targets=("to_q",))
     data = spec.to_dict()
     assert data == {
         "format": "fp8_e4m3",
         "weight_granularity": "channel",
-        "activation": "none",
         "targets": ["to_q"],
     }
     assert QuantSpec.from_dict(data) == spec
@@ -67,25 +80,20 @@ def test_dict_round_trip_and_coerce():
 
 
 def test_cli_args_round_trip():
-    args = argparse.Namespace(quant="fp8", quant_granularity="channel", quant_act="none")
+    args = argparse.Namespace(quant="fp8", quant_granularity="channel")
     spec = QuantSpec.from_args(args)
-    assert spec == QuantSpec(weight_granularity="channel", activation="none")
-    assert spec.cli_args() == [
-        "--quant", "fp8", "--quant-granularity", "channel", "--quant-act", "none",
-    ]
+    assert spec == QuantSpec(weight_granularity="channel")
+    assert spec.cli_args() == ["--quant", "fp8", "--quant-granularity", "channel"]
     assert QuantSpec.from_args(argparse.Namespace(quant=None)) is None
     assert QuantSpec.from_args(argparse.Namespace()) is None
     with pytest.raises(ValueError):
         QuantSpec.from_args(argparse.Namespace(quant="int4"))
 
 
-def test_checkpoint_identity_ignores_activation_mode():
-    dyn = QuantSpec(activation="dynamic")
-    wo = QuantSpec(activation="none")
-    assert dyn.checkpoint_identity() == wo.checkpoint_identity()
-    assert dyn.checkpoint_identity()["fp8_max"] == 240.0  # Trainium e4m3 range, in the hash
-    assert dyn.checkpoint_label() == "fp8-tensor"
-    assert dyn.checkpoint_hash("/a") == wo.checkpoint_hash("/a")
-    assert dyn.checkpoint_hash("/a") != dyn.checkpoint_hash("/b")
-    assert dyn.checkpoint_hash("/a") != QuantSpec(weight_granularity="channel").checkpoint_hash("/a")
-    assert len(dyn.checkpoint_hash()) == 8
+def test_checkpoint_identity_is_the_weight_recipe():
+    spec = QuantSpec()
+    assert spec.checkpoint_identity()["fp8_max"] == 240.0  # Trainium e4m3 range, in the hash
+    assert spec.checkpoint_label() == "fp8-tensor"
+    assert spec.checkpoint_hash("/a") != spec.checkpoint_hash("/b")
+    assert spec.checkpoint_hash("/a") != QuantSpec(weight_granularity="channel").checkpoint_hash("/a")
+    assert len(spec.checkpoint_hash()) == 8

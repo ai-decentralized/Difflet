@@ -64,7 +64,9 @@ def test_dynamic_activation_quantization_is_per_tensor_absmax():
     assert (back - x).abs().max() <= x.abs().max() * 2**-4 + 1e-6
 
 
-def test_reference_linear_tracks_bf16_and_weight_only_is_more_accurate():
+def test_reference_linear_tracks_bf16_and_quantizes_both_operands():
+    """W8A8 only (weight-only was removed 2026-10-03): the reference quantizes the
+    activation dynamically per call and the weight from its stored scale."""
     torch.manual_seed(1)
     x = torch.randn(16, 32, dtype=torch.bfloat16)
     weight = torch.randn(24, 32, dtype=torch.bfloat16) * 0.1
@@ -72,13 +74,15 @@ def test_reference_linear_tracks_bf16_and_weight_only_is_more_accurate():
     exact = torch.nn.functional.linear(x.float(), weight.float(), bias.float())
     q, scale = fp8.quantize_weight(weight, "tensor")
 
-    w8a8 = fp8.fp8_linear_reference(x, q, scale, bias, activation="dynamic")
-    w8 = fp8.fp8_linear_reference(x, q, scale, bias, activation="none")
+    w8a8 = fp8.fp8_linear_reference(x, q, scale, bias)
     assert w8a8.dtype == torch.bfloat16 and w8a8.shape == (16, 24)
+    with pytest.raises(TypeError):
+        fp8.fp8_linear_reference(x, q, scale, bias, activation="none")  # type: ignore[call-arg]
 
     cos = torch.nn.functional.cosine_similarity
     assert cos(w8a8.float().flatten(), exact.flatten(), dim=0) > 0.995
-    err_w8a8 = (w8a8.float() - exact).norm()
-    err_w8 = (w8.float() - exact).norm()
-    assert err_w8 < err_w8a8  # quantizing activations too can only add error
-    assert err_w8a8 > 0  # and quantization actually happened
+    assert (w8a8.float() - exact).norm() > 0  # quantization actually happened
+    # Matches the explicit fake-quant composition (the device path's contract).
+    x_q = fp8.fake_quant_activation(x.float())
+    composed = x_q @ fp8.dequantize(q, scale).t() + bias.float()
+    assert torch.allclose(w8a8.float(), composed.to(torch.bfloat16).float())

@@ -15,8 +15,7 @@ run() {  # run <label> <probe args...>
   echo "PROBE_${label}_RC=${PIPESTATUS[0]}"
   cp "$T/hv_probe_$label/ptq_hv_probe_report.json" "$E/report_$label.json" 2>/dev/null
 }
-run dyn_rawpads  --quant-act dynamic --pad-value 1.0
-run dyn_zeropads --quant-act dynamic --pad-value 0.0
-run wo_rawpads   --quant-act none    --pad-value 1.0
-run dyn_bigger   --quant-act dynamic --pad-value 1.0 --num-single-layers 4 --text-seq-len 256 --valid-text-rows 13 --height 128 --width 128 --num-frames 9
+run dyn_rawpads  --pad-value 1.0
+run dyn_zeropads --pad-value 0.0
+run dyn_bigger   --pad-value 1.0 --num-single-layers 4 --text-seq-len 256 --valid-text-rows 13 --height 128 --width 128 --num-frames 9
 echo "PROBES_DONE"

@@ -28,7 +28,8 @@ _NXD_QUANTIZATION_TYPE = {
 # NxD's ActivationQuantizationType enum *values* are lowercase ("dynamic",
 # "static"); NeuronConfig validates the raw string against those values, so the
 # member name "DYNAMIC" is rejected ("Unsupported activation quantization type").
-_NXD_ACTIVATION_TYPE = {"dynamic": "dynamic", "none": None}
+# FP8 PTQ is always W8A8 (weight-only was removed 2026-10-03).
+_NXD_ACTIVATION_DYNAMIC = "dynamic"
 _NXD_QUANTIZED_DTYPE = {"fp8_e4m3": "f8e4m3"}
 FP8_HLO2TENSORIZER_FLAG = "--experimental-unsafe-fp8e4m3fn-as-fp8e4m3"
 
@@ -49,10 +50,8 @@ def neuron_config_kwargs(spec: QuantSpec, quantized_checkpoints_path: str | os.P
         "quantized_checkpoints_path": str(quantized_checkpoints_path),
         "quantization_type": _NXD_QUANTIZATION_TYPE[spec.weight_granularity],
         "quantization_dtype": _NXD_QUANTIZED_DTYPE[spec.format],
+        "activation_quantization_type": _NXD_ACTIVATION_DYNAMIC,
     }
-    activation = _NXD_ACTIVATION_TYPE[spec.activation]
-    if activation is not None:
-        kwargs["activation_quantization_type"] = activation
     # Which modules the device-side convert swaps (difflet.quant.targets);
     # additive: only quantized apps carry it, bf16 identities are unchanged.
     kwargs["quant_targets"] = list(spec.targets)
@@ -121,8 +120,8 @@ def build_q_config(neuron_config: Any) -> dict[str, Any]:
 # fails with "Check failed: input_sizes.size() <= output_sizes.size() (4 vs. 3)"
 # (trn2, 2026-10-01). NxDI only consumes DYNAMIC through its NKI MLP kernels.
 # Difflet therefore owns the activation path: per-tensor absmax scales, the
-# same law as the CPU reference, in subclasses of the NxD layers that fall back
-# to NxD's forward for weight-only quantization.
+# same law as the CPU reference, in subclasses of the NxD layers (their
+# parameters, checkpoint adaptors and sharding; Difflet's forward).
 
 
 def quantize_activation_per_tensor(
@@ -177,15 +176,14 @@ def quant_module_mapping() -> dict[Any, Any]:
     """``convert()`` mapping: NxD parallel linears -> Difflet's quantized forms.
 
     The classes are NxD's ``QuantizedColumnParallel`` / ``QuantizedRowParallel``
-    (same parameters, same checkpoint adaptors, same weight-only forward) with
-    the DYNAMIC activation branch replaced by :func:`dynamic_fp8_linear`.
+    (same parameters, same checkpoint adaptors) with the forward replaced by
+    :func:`dynamic_fp8_linear` (always W8A8; weight-only was removed 2026-10-03).
     """
     global _MAPPING
     if _MAPPING is not None:
         return _MAPPING
     from neuronx_distributed.parallel_layers.layers import ColumnParallelLinear, RowParallelLinear
     from neuronx_distributed.quantization import quantization_layers as ql
-    from neuronx_distributed.quantization.quantization_config import ActivationQuantizationType
 
     def _adopt(cls, mod, new_mod):
         new_mod.__class__ = cls  # NxD's from_float instantiates its own class by name
@@ -204,7 +202,7 @@ def quant_module_mapping() -> dict[Any, Any]:
         # with reduce_output=False + skip_bias_add=True and add the returned bias
         # once after their merged all-reduce (trn2, 2026-10-02: the FLUX fp8
         # compile failed unpacking (out, bias); HunyuanVideo would have added the
-        # bias on every TP rank). Carry the flag and honour it on both paths.
+        # bias on every TP rank). Carry the flag and honour it.
         new_mod.skip_bias_add = bool(getattr(mod, "skip_bias_add", False))
         return new_mod
 
@@ -214,27 +212,12 @@ def quant_module_mapping() -> dict[Any, Any]:
             return output, mod.bias
         return (output + mod.bias) if mod.bias is not None else output
 
-    def _forward_skipping_bias(mod, forward, *args, **kwargs):
-        """Run NxD's own forward (weight-only path) without its bias add: NxD adds
-        ``self.bias`` at the very end, so detach it for the call and hand it back."""
-        if not getattr(mod, "skip_bias_add", False):
-            return forward(*args, **kwargs)
-        bias = mod.bias
-        mod.bias = None
-        try:
-            output = forward(*args, **kwargs)
-        finally:
-            mod.bias = bias
-        return output, bias
-
     class PerTensorDynamicColumnParallel(ql.QuantizedColumnParallel):
         @classmethod
         def from_float(cls, mod, q_config=ql._DEFAULT_CUSTOM_QCONFIG_DICT):
             return _adopt(cls, mod, super().from_float(mod, q_config))
 
         def forward(self, input, *args, **kwargs):
-            if self.activation_quantization_type != ActivationQuantizationType.DYNAMIC:
-                return _forward_skipping_bias(self, super().forward, input, *args, **kwargs)
             if self.async_tensor_model_parallel_allreduce or self.sequence_parallel_enabled:
                 input_parallel = input
             else:
@@ -265,8 +248,6 @@ def quant_module_mapping() -> dict[Any, Any]:
             return _adopt(cls, mod, super().from_float(mod, q_config))
 
         def forward(self, input_, *args, **kwargs):
-            if self.activation_quantization_type != ActivationQuantizationType.DYNAMIC:
-                return _forward_skipping_bias(self, super().forward, input_, *args, **kwargs)
             if self.input_is_parallel:
                 input_parallel = input_
             else:

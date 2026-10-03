@@ -27,14 +27,14 @@ def test_linear_error_sweep_on_tiny_model(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     table = json.loads(out.read_text())
     assert table["row_count"] == 20  # 2 blocks x (attn1 4 + attn2 4 + ffn 2)
-    assert set(table["summary"]) == {"bf16", "fp8-tensor-dyn", "fp8-tensor-wo", "fp8-channel-dyn", "fp8-channel-wo"}
+    assert set(table["summary"]) == {"bf16", "fp8-tensor", "fp8-channel"}
     row = table["rows"][0]
     assert row["block"] == 0 and row["linear"] == "attn1.to_q"
-    assert {"mse", "cosine", "max_abs", "mean_abs", "rel_l2", "snr_db"} <= set(row["metrics"]["fp8-tensor-dyn"])
+    assert {"mse", "cosine", "max_abs", "mean_abs", "rel_l2", "snr_db"} <= set(row["metrics"]["fp8-tensor"])
     # fp8 error sits above the bf16 noise floor but stays a small perturbation.
-    assert table["summary"]["fp8-tensor-dyn"]["min_cosine"] < table["summary"]["bf16"]["min_cosine"]
-    assert table["summary"]["fp8-tensor-dyn"]["min_cosine"] > 0.99
-    assert "fp8-tensor-dyn" in proc.stdout
+    assert table["summary"]["fp8-tensor"]["min_cosine"] < table["summary"]["bf16"]["min_cosine"]
+    assert table["summary"]["fp8-tensor"]["min_cosine"] > 0.99
+    assert "fp8-tensor" in proc.stdout
 
 
 def test_compare_outputs_script_on_tensor_files(tmp_path):
@@ -62,7 +62,8 @@ def test_ab_runner_dry_run_prints_both_arms(tmp_path):
     names = [l.split(":")[0].removeprefix("[ab] ") for l in lines]
     assert names[:5] == ["quantize", "compile_bf16", "compile_fp8", "generate_bf16_run0", "generate_fp8_run0"]
     by_name = {l.split(":")[0].removeprefix("[ab] "): l for l in lines}
-    assert "--quant fp8 --quant-granularity channel --quant-act dynamic" in by_name["compile_fp8"]
+    assert "--quant fp8 --quant-granularity channel" in by_name["compile_fp8"]
+    assert "--quant-act" not in by_name["compile_fp8"]  # weight-only removed 2026-10-03
     assert "--quant" not in by_name["compile_bf16"] and "--quant" not in by_name["generate_bf16_run0"]
     assert "--keep-work-dir" in by_name["generate_fp8_run0"] and "--steps 4" in by_name["generate_fp8_run0"]
     assert not (tmp_path / "ab").exists()  # dry run writes nothing

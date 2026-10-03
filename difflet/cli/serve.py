@@ -180,7 +180,6 @@ def options_from_args(args: argparse.Namespace) -> ServeOptions:
         teacache_calibration=getattr(args, "teacache_calibration", None),
         quant=getattr(args, "quant", None),
         quant_granularity=getattr(args, "quant_granularity", None) or "tensor",
-        quant_act=getattr(args, "quant_act", None) or "dynamic",
         download_policy=download_policy,
         compile_policy=compile_policy,
         max_queued_requests=getattr(args, "max_queued_requests", 8),

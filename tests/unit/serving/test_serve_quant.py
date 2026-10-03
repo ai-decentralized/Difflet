@@ -57,7 +57,7 @@ def _ns(**overrides) -> argparse.Namespace:
         model_id=WAN, revision=None, host="0.0.0.0", port=8091, api_key=None,
         tp_degree=4, cp_degree=None, cp_mode=None, cfg_parallel=None, sp_enabled=None,
         height=None, width=None, num_frames=None, shapes=None, cache_dir=None,
-        quant=None, quant_granularity=None, quant_act=None,
+        quant=None, quant_granularity=None,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -66,15 +66,16 @@ def _ns(**overrides) -> argparse.Namespace:
 def test_options_from_args_carries_quant_fields():
     from difflet.cli.serve import options_from_args
 
-    options = options_from_args(_ns(quant="fp8", quant_granularity="channel", quant_act="none"))
-    assert (options.quant, options.quant_granularity, options.quant_act) == ("fp8", "channel", "none")
+    options = options_from_args(_ns(quant="fp8", quant_granularity="channel"))
+    assert (options.quant, options.quant_granularity) == ("fp8", "channel")
+    assert not hasattr(options, "quant_act")  # weight-only removed 2026-10-03
     plain = options_from_args(_ns())
-    assert plain.quant is None and plain.quant_granularity == "tensor" and plain.quant_act == "dynamic"
+    assert plain.quant is None and plain.quant_granularity == "tensor"
 
 
 def test_profile_carries_the_spec_for_wan_and_rejects_other_models():
-    profile = _build(WAN, "wan", quant="fp8", quant_granularity="channel", quant_act="none")
-    assert profile.quant == QuantSpec(weight_granularity="channel", activation="none")
+    profile = _build(WAN, "wan", quant="fp8", quant_granularity="channel")
+    assert profile.quant == QuantSpec(weight_granularity="channel")
     assert _build(WAN, "wan").quant is None
 
     with pytest.raises(DiffletServingError, match="does not support --quant"):
@@ -90,8 +91,8 @@ def test_model_registry_threads_options_into_the_profile():
     from difflet.serving.model_registry import resolve_serving_model
     from difflet.serving.options import ServeOptions
 
-    resolved = resolve_serving_model(ServeOptions(model_id=WAN, quant="fp8", quant_act="none"))
-    assert resolved.profile.quant == QuantSpec(activation="none")
+    resolved = resolve_serving_model(ServeOptions(model_id=WAN, quant="fp8"))
+    assert resolved.profile.quant == QuantSpec()
     assert resolve_serving_model(ServeOptions(model_id=WAN)).profile.quant is None
 
 
@@ -138,8 +139,8 @@ def test_generation_identity_hashes_the_spec_but_not_the_cache_path(monkeypatch,
     source = _source(tmp_path)
     bf16 = wan._compile_spec(source, _profile(tmp_path, None))
     fp8 = wan._compile_spec(source, _profile(tmp_path, QuantSpec()))
-    fp8_wo = wan._compile_spec(source, _profile(tmp_path, QuantSpec(activation="none")))
-    assert len({bf16.identity.digest, fp8.identity.digest, fp8_wo.identity.digest}) == 3
+    fp8_ch = wan._compile_spec(source, _profile(tmp_path, QuantSpec(weight_granularity="channel")))
+    assert len({bf16.identity.digest, fp8.identity.digest, fp8_ch.identity.digest}) == 3
     app_kwargs = json.loads(fp8.identity.canonical_cache_inputs_json)["cache_inputs"]["application_kwargs"]
     assert app_kwargs["quant"] == QuantSpec().to_dict()
     assert "quant_cache_dir" not in app_kwargs
@@ -181,10 +182,9 @@ def test_profile_carries_model_targets_for_every_wired_model():
         (WAN, "wan", "video"),
     ):
         extra = {"output_modality": modality, "default_fps": 16 if modality == "video" else None}
-        profile = _build(model_id, model_type, quant="fp8", quant_act="none", **extra)
+        profile = _build(model_id, model_type, quant="fp8", **extra)
         assert profile.quant is not None, model_id
         assert profile.quant.targets == QuantSpec.for_model(model_type).targets, model_id
-        assert profile.quant.activation == "none"
         plain = _build(model_id, model_type, **extra)
         assert plain.quant is None
 
@@ -194,8 +194,8 @@ def test_flux_serving_application_kwargs_add_quant_only_when_set(tmp_path):
     from difflet.common.orchestrators.flux import quant_application_kwargs
 
     assert quant_application_kwargs(_profile(tmp_path, None)) is None
-    kwargs = quant_application_kwargs(_profile(tmp_path, QuantSpec.for_model("flux", activation="none")))
-    assert kwargs == {"quant": QuantSpec.for_model("flux", activation="none").to_dict(),
+    kwargs = quant_application_kwargs(_profile(tmp_path, QuantSpec.for_model("flux")))
+    assert kwargs == {"quant": QuantSpec.for_model("flux").to_dict(),
                       "quant_cache_dir": str(tmp_path / "cache")}
 
 
@@ -204,7 +204,7 @@ def test_qwen_serving_quant_kwargs_add_quant_only_when_set(tmp_path):
     from difflet.serving.orchestrators.qwen_image import _quant_kwargs
 
     assert _quant_kwargs(_profile(tmp_path, None)) == {}
-    spec = QuantSpec.for_model("qwen_image", activation="none")
+    spec = QuantSpec.for_model("qwen_image")
     assert _quant_kwargs(_profile(tmp_path, spec)) == {"quant": spec.to_dict(), "quant_cache_dir": str(tmp_path / "cache")}
 
 
@@ -228,7 +228,7 @@ def test_hunyuan_serving_quant_kwargs_and_denoiser_identity(tmp_path):
         pinned_model_path=str(tmp_path / "snapshots" / ("a" * 40)), resolved_source_id="a" * 40,
     )
     assert hv._quant_kwargs(profile(None)) == {}
-    spec = QuantSpec.for_model("hunyuan_video", activation="none")
+    spec = QuantSpec.for_model("hunyuan_video")
     assert hv._quant_kwargs(profile(spec)) == {"quant": spec.to_dict(), "quant_cache_dir": str(tmp_path / "cache")}
 
     def by_component(specs):
@@ -236,7 +236,8 @@ def test_hunyuan_serving_quant_kwargs_and_denoiser_identity(tmp_path):
 
     bf16 = by_component(hv._compile_specs(source, profile(None)))
     fp8 = by_component(hv._compile_specs(source, profile(spec)))
-    dyn = by_component(hv._compile_specs(source, profile(QuantSpec.for_model("hunyuan_video"))))
+    dyn = by_component(hv._compile_specs(
+        source, profile(QuantSpec.for_model("hunyuan_video", weight_granularity="channel"))))
     assert set(bf16) == set(fp8) == {"llama", "denoiser"}
     assert bf16["llama"].digest == fp8["llama"].digest
     assert len({bf16["denoiser"].digest, fp8["denoiser"].digest, dyn["denoiser"].digest}) == 3

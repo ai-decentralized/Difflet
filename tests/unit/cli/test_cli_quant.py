@@ -24,11 +24,12 @@ def test_quant_flags_parse_on_every_device_command(command):
     extra = ["--prompt", "p", "--output", "o.mp4"] if command in ("generate", "run") else []
     args = parser.parse_args(
         [command, "--model-id", WAN, "--quant", "fp8", "--quant-granularity", "channel",
-         "--quant-act", "none", *extra]
+         *extra]
     )
-    assert (args.quant, args.quant_granularity, args.quant_act) == ("fp8", "channel", "none")
+    assert (args.quant, args.quant_granularity) == ("fp8", "channel")
+    assert not hasattr(args, "quant_act")  # weight-only removed 2026-10-03
     default = parser.parse_args([command, "--model-id", WAN, *extra])
-    assert default.quant is None and default.quant_granularity == "tensor" and default.quant_act == "dynamic"
+    assert default.quant is None and default.quant_granularity == "tensor"
     with pytest.raises(SystemExit):
         parser.parse_args([command, "--model-id", WAN, "--quant", "int8", *extra])
 
@@ -94,7 +95,7 @@ def _wan_args(**overrides) -> argparse.Namespace:
         output="/tmp/w.mp4", steps=2, guidance_scale=1.0, seed=42, work_dir=None,
         keep_work_dir=False, teacache_cadence=None, teacache_online_delta=None,
         teacache_speedup=None, teacache_calibration=None, quant=None,
-        quant_granularity="tensor", quant_act="dynamic", shapes=None,
+        quant_granularity="tensor", shapes=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -111,10 +112,10 @@ def test_wan_stage_identity_is_unchanged_for_bf16_and_extended_for_fp8(monkeypat
         "text_seq_len", "shapes", "toolchain",
     }  # additive-only: no "quant" key for bf16, every existing artifact keeps its hash
 
-    fp8 = wan_orch.WanOrchestrator(_wan_args(quant="fp8", quant_act="none"))
+    fp8 = wan_orch.WanOrchestrator(_wan_args(quant="fp8"))
     fp8_inputs = fp8._stage_cache_inputs("transformer", fp8.args)
     assert fp8_inputs["quant"] == {
-        "format": "fp8_e4m3", "weight_granularity": "tensor", "activation": "none",
+        "format": "fp8_e4m3", "weight_granularity": "tensor",
         "targets": list(__import__("difflet.quant.spec", fromlist=["DEFAULT_TARGETS"]).DEFAULT_TARGETS),
     }
     from difflet.backends.trainium.core.quant import QUANT_LAYER_SCHEMA
@@ -139,7 +140,8 @@ def test_wan_shared_cli_args_forward_quant_flags_only_when_set():
         stage_mode="compile"
     )
     idx = quant.index("--quant")
-    assert quant[idx : idx + 6] == ["--quant", "fp8", "--quant-granularity", "channel", "--quant-act", "dynamic"]
+    assert quant[idx : idx + 4] == ["--quant", "fp8", "--quant-granularity", "channel"]
+    assert "--quant-act" not in quant
 
 
 def test_wan_transformer_stage_passes_quant_kwargs_to_the_application(monkeypatch, tmp_path):
@@ -163,10 +165,10 @@ def test_wan_transformer_stage_passes_quant_kwargs_to_the_application(monkeypatc
     monkeypatch.setattr(wan_orch, "stage_toolchain_versions", lambda: {})
     monkeypatch.setattr(wan_orch.WanOrchestrator, "_finish_stage_compile", lambda *a, **k: None)
 
-    args = _wan_args(quant="fp8", quant_act="none", cache_dir=str(tmp_path / "cache"))
+    args = _wan_args(quant="fp8", cache_dir=str(tmp_path / "cache"))
     args.stage_mode = "compile"
     wan_orch.WanOrchestrator(args)._stage_transformer(args)
-    assert captured["quant"]["activation"] == "none"
+    assert "activation" not in captured["quant"]
     assert captured["quant_cache_dir"] == str(tmp_path / "cache")
     assert "compiled" in captured
 
@@ -182,13 +184,13 @@ def test_stage_parser_and_dp_router_carry_quant_flags():
     from difflet.cli.dp.router import worker_cli_args
 
     args, _ = stage._build_stage_parser().parse_known_args(
-        ["--orchestrator", WAN, "--stage", "transformer", "--quant", "fp8", "--quant-act", "none"]
+        ["--orchestrator", WAN, "--stage", "transformer", "--quant", "fp8"]
     )
-    assert args.quant == "fp8" and args.quant_act == "none" and args.quant_granularity == "tensor"
+    assert args.quant == "fp8" and args.quant_granularity == "tensor" and not hasattr(args, "quant_act")
 
     argv = worker_cli_args(_wan_args(quant="fp8", quant_granularity="channel"))
     assert argv[argv.index("--quant") :][:6] == [
-        "--quant", "fp8", "--quant-granularity", "channel", "--quant-act", "dynamic",
+        "--quant", "fp8", "--quant-granularity", "channel",
     ]
     assert "--quant" not in worker_cli_args(_wan_args())
 
@@ -216,7 +218,7 @@ def test_quantize_command_builds_the_checkpoint_copy(monkeypatch, tmp_path, caps
     assert quantize_cmd.transformer_subfolders(str(model_dir)) == ["transformer", "transformer_2"]
 
     args = argparse.Namespace(model_id=WAN, revision=None, quant="fp8", quant_granularity="tensor",
-                              quant_act="dynamic", cache_dir=str(tmp_path / "cache"), force=False)
+                              cache_dir=str(tmp_path / "cache"), force=False)
     assert quantize_cmd.run(args) == 0
     out = capsys.readouterr().out
     assert "[quantize] transformer:" in out and "[quantize] transformer_2:" in out
@@ -244,7 +246,7 @@ def _flux_args(**overrides) -> argparse.Namespace:
         force=False, revision=None, prompt="a cat", output="/tmp/f.png", steps=2,
         guidance_scale=3.5, seed=42, teacache_cadence=None, teacache_online_delta=None,
         teacache_speedup=None, teacache_calibration=None, taef1=False, taef1_path=None,
-        quant=None, quant_granularity="tensor", quant_act="dynamic", shapes=None,
+        quant=None, quant_granularity="tensor", shapes=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -255,8 +257,8 @@ def test_flux_application_kwargs_add_quant_only_when_set():
 
     plain = flux_orch.FluxOrchestrator(_flux_args())._application_kwargs()
     assert "quant" not in plain and "quant_cache_dir" not in plain
-    fp8 = flux_orch.FluxOrchestrator(_flux_args(quant="fp8", quant_act="none"))._application_kwargs()
-    assert fp8["quant"] == QuantSpec.for_model("flux", activation="none").to_dict()
+    fp8 = flux_orch.FluxOrchestrator(_flux_args(quant="fp8"))._application_kwargs()
+    assert fp8["quant"] == QuantSpec.for_model("flux").to_dict()
     assert fp8["quant"]["targets"] != list(QuantSpec().targets)  # FLUX targets, not Wan's
     assert fp8["quant_cache_dir"] == "/tmp/cache"
     assert {k: v for k, v in fp8.items() if k not in ("quant", "quant_cache_dir")} == plain
@@ -294,7 +296,7 @@ def test_quantize_command_uses_the_model_targets_and_rejects_unwired_models(monk
     monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", lambda *a, **k: str(model_dir))
 
     args = argparse.Namespace(model_id="black-forest-labs/FLUX.1-dev", revision=None, quant="fp8",
-                              quant_granularity="tensor", quant_act="dynamic",
+                              quant_granularity="tensor",
                               cache_dir=str(tmp_path / "cache"), force=False)
     assert quantize_cmd.run(args) == 0
     dest = next((tmp_path / "cache" / "quantized").rglob("difflet_quant.json")).parent
@@ -303,7 +305,7 @@ def test_quantize_command_uses_the_model_targets_and_rejects_unwired_models(monk
     assert manifest["spec"]["targets"] == list(QuantSpec.for_model("flux").targets)
 
     unwired = argparse.Namespace(model_id="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
-                                 revision=None, quant="fp8", quant_granularity="tensor", quant_act="dynamic",
+                                 revision=None, quant="fp8", quant_granularity="tensor",
                                  cache_dir=str(tmp_path / "cache"), force=False)
     assert quantize_cmd.run(unwired) == 1
     assert "does not support --quant" in capsys.readouterr().err
@@ -319,7 +321,7 @@ def _qwen_args(**overrides) -> argparse.Namespace:
         height=1024, width=1024, num_frames=None, cache_dir="/tmp/cache", force=False, revision=None,
         prompt="a cat", output="/tmp/q.png", steps=2, guidance_scale=4.0, seed=42, work_dir=None,
         keep_work_dir=False, teacache_cadence=None, teacache_online_delta=None, teacache_speedup=None,
-        teacache_calibration=None, quant=None, quant_granularity="tensor", quant_act="dynamic", shapes=None,
+        teacache_calibration=None, quant=None, quant_granularity="tensor", shapes=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -333,9 +335,9 @@ def test_qwen_stage_identity_is_unchanged_for_bf16_and_extended_for_fp8(monkeypa
     bf16 = qwen_orch.QwenImageOrchestrator(_qwen_args())
     inputs = bf16._stage_cache_inputs("generate", bf16.args)
     assert "quant" not in inputs and "quant_layer_schema" not in inputs
-    fp8 = qwen_orch.QwenImageOrchestrator(_qwen_args(quant="fp8", quant_act="none"))
+    fp8 = qwen_orch.QwenImageOrchestrator(_qwen_args(quant="fp8"))
     fp8_inputs = fp8._stage_cache_inputs("generate", fp8.args)
-    assert fp8_inputs["quant"] == QuantSpec.for_model("qwen_image", activation="none").to_dict()
+    assert fp8_inputs["quant"] == QuantSpec.for_model("qwen_image").to_dict()
     assert fp8_inputs["quant_layer_schema"] == QUANT_LAYER_SCHEMA
     assert {k: v for k, v in fp8_inputs.items() if k not in ("quant", "quant_layer_schema")} == inputs
     for stage in ("text", "vae"):
@@ -354,7 +356,7 @@ def _ltx2_args(**overrides) -> argparse.Namespace:
         num_frames=49, cache_dir="/tmp/cache", force=False, revision=None, prompt="a cat",
         output="/tmp/l.mp4", steps=2, guidance_scale=3.5, seed=42, teacache_cadence=None,
         teacache_online_delta=None, teacache_speedup=None, teacache_calibration=None,
-        quant=None, quant_granularity="tensor", quant_act="dynamic", shapes=None,
+        quant=None, quant_granularity="tensor", shapes=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -364,8 +366,8 @@ def test_ltx2_application_kwargs_add_quant_only_when_set():
     from difflet.cli.orchestrators import ltx_2 as ltx_orch
 
     assert ltx_orch.LTX2Orchestrator(_ltx2_args())._application_kwargs() == {}
-    fp8 = ltx_orch.LTX2Orchestrator(_ltx2_args(quant="fp8", quant_act="none"))._application_kwargs()
-    assert fp8 == {"quant": QuantSpec.for_model("ltx_2", activation="none").to_dict(), "quant_cache_dir": "/tmp/cache"}
+    fp8 = ltx_orch.LTX2Orchestrator(_ltx2_args(quant="fp8"))._application_kwargs()
+    assert fp8 == {"quant": QuantSpec.for_model("ltx_2").to_dict(), "quant_cache_dir": "/tmp/cache"}
 
 
 def test_cache_spec_keys_fp8_with_the_layer_schema_and_ignores_the_cache_root():
@@ -402,7 +404,7 @@ def _hv_args(**overrides) -> argparse.Namespace:
         revision=None, prompt="a cat", output="/tmp/h.mp4", steps=2, guidance_scale=6.0, seed=42,
         work_dir=None, keep_work_dir=False, teacache_cadence=None, teacache_online_delta=None,
         teacache_speedup=None, teacache_calibration=None, quant=None, quant_granularity="tensor",
-        quant_act="dynamic", shapes=None,
+        shapes=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -416,9 +418,9 @@ def test_hunyuan_stage_identity_is_unchanged_for_bf16_and_extended_for_fp8(monke
     bf16 = hv_orch.HunyuanVideoOrchestrator(_hv_args())
     inputs = bf16._stage_cache_inputs("generate", bf16.args)
     assert "quant" not in inputs and "quant_layer_schema" not in inputs
-    fp8 = hv_orch.HunyuanVideoOrchestrator(_hv_args(quant="fp8", quant_act="none"))
+    fp8 = hv_orch.HunyuanVideoOrchestrator(_hv_args(quant="fp8"))
     fp8_inputs = fp8._stage_cache_inputs("generate", fp8.args)
-    assert fp8_inputs["quant"] == QuantSpec.for_model("hunyuan_video", activation="none").to_dict()
+    assert fp8_inputs["quant"] == QuantSpec.for_model("hunyuan_video").to_dict()
     assert fp8_inputs["quant_layer_schema"] == QUANT_LAYER_SCHEMA
     assert {k: v for k, v in fp8_inputs.items() if k not in ("quant", "quant_layer_schema")} == inputs
     for stage in ("clip", "llama"):
@@ -432,7 +434,7 @@ def test_hunyuan_shared_cli_args_forward_quant_flags_only_when_set():
 
     bf16 = hv_orch.HunyuanVideoOrchestrator(_hv_args())._shared_cli_args(stage_mode="generate", work_dir="/w")
     assert "--quant" not in bf16
-    fp8 = hv_orch.HunyuanVideoOrchestrator(_hv_args(quant="fp8", quant_act="none"))._shared_cli_args(
+    fp8 = hv_orch.HunyuanVideoOrchestrator(_hv_args(quant="fp8"))._shared_cli_args(
         stage_mode="generate", work_dir="/w")
     assert fp8[: len(bf16)] == bf16
-    assert fp8[len(bf16):] == QuantSpec.for_model("hunyuan_video", activation="none").cli_args()
+    assert fp8[len(bf16):] == QuantSpec.for_model("hunyuan_video").cli_args()

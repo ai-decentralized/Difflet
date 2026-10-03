@@ -3,8 +3,8 @@
 ``FakeQuantLinear`` replaces an ``nn.Linear`` (the CPU backend's
 ``ColumnParallelLinear`` / ``RowParallelLinear`` are ``nn.Linear`` subclasses):
 the weight is stored as fp8 e4m3fn plus its float32 absmax scale, activations
-are optionally round-tripped through fp8 with a dynamic per-tensor scale, and
-the matmul accumulates in fp32. It is the numerical reference the Trainium
+are round-tripped through fp8 with a dynamic per-tensor scale (W8A8), and the
+matmul accumulates in fp32. It is the numerical reference the Trainium
 NxD quantized layers are checked against, and what CPU metric scripts run.
 """
 
@@ -40,9 +40,7 @@ class FakeQuantLinear(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return fp8_linear_reference(
-            x, self.weight, self.weight_scale, self.bias, activation=self.spec.activation
-        )
+        return fp8_linear_reference(x, self.weight, self.weight_scale, self.bias)
 
 
 def quantize_module_(

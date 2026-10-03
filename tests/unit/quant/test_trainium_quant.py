@@ -26,11 +26,9 @@ def test_neuron_config_kwargs_map_the_spec_onto_nxdi_fields(tmp_path):
         "activation_quantization_type": "dynamic",
         "quant_targets": list(QuantSpec().targets),
     }
-    weight_only = tq.neuron_config_kwargs(
-        QuantSpec(weight_granularity="channel", activation="none"), "/q"
-    )
-    assert weight_only["quantization_type"] == "per_channel_symmetric"
-    assert "activation_quantization_type" not in weight_only
+    per_channel = tq.neuron_config_kwargs(QuantSpec(weight_granularity="channel"), "/q")
+    assert per_channel["quantization_type"] == "per_channel_symmetric"
+    assert per_channel["activation_quantization_type"] == "dynamic"  # always W8A8
 
 
 def test_neuron_config_kwargs_pass_nxd_validation():
@@ -199,13 +197,13 @@ def test_build_q_config_mirrors_nxdi_for_each_granularity(fake_nxd):
     assert per_tensor["activation_quantization_type"] is ActivationQuantizationType.DYNAMIC
     assert per_tensor["clamp_bound"] == float("inf")
 
-    weight_only = tq.build_q_config(SimpleNamespace(
+    per_channel = tq.build_q_config(SimpleNamespace(
         quantization_type="per_channel_symmetric", quantization_dtype="f8e4m3",
-        activation_quantization_type=None, quantize_clamp_bound=100.0,
+        activation_quantization_type="dynamic", quantize_clamp_bound=100.0,
     ))
-    assert weight_only["quantization_type"] == "per_channel"
-    assert weight_only["activation_quantization_type"] is ActivationQuantizationType.NONE
-    assert weight_only["clamp_bound"] == 100.0
+    assert per_channel["quantization_type"] == "per_channel"
+    assert per_channel["activation_quantization_type"] is ActivationQuantizationType.DYNAMIC
+    assert per_channel["clamp_bound"] == 100.0
 
     with pytest.raises(ValueError):
         tq.build_q_config(SimpleNamespace(quantization_type="blockwise_symmetric",
@@ -390,7 +388,7 @@ def test_dynamic_fp8_linear_matches_the_reference_on_3d_inputs(granularity):
     layer = SimpleNamespace(weight=q_weight, scale=scale, clamp_bound=float("inf"),
                             _forward_impl=forward_impl)
     out = tq.dynamic_fp8_linear(layer, x, process_group="tp")
-    ref = fp8.fp8_linear_reference(x, q_weight, scale, None, activation="dynamic")
+    ref = fp8.fp8_linear_reference(x, q_weight, scale, None)
     assert out.dtype == torch.bfloat16 and out.shape == (2, 5, 24)
     assert torch.allclose(out.float(), ref.float(), rtol=2e-2, atol=1e-3)
 
@@ -455,29 +453,42 @@ def test_from_float_carries_skip_bias_add(fake_nxd):
 
 
 @pytest.mark.parametrize("layer_index", [0, 1], ids=["column", "row"])
-def test_skip_bias_add_returns_output_and_bias_on_the_weight_only_path(fake_nxd, layer_index):
-    """Pins the trn2 failure of 2026-10-02 (FLUX fp8 weight-only compile):
-    ``out_attn, bias = self.proj_out_attn(attn_output)`` → ``ValueError: not enough values
-    to unpack (expected 2, got 1)`` because NxD's QuantizedRowParallel.forward adds the
-    bias and returns one tensor. With reduce_output=False that would also add the bias on
-    every TP rank before the model's own all-reduce (HunyuanVideo tolerates the single
-    tensor and would be silently wrong)."""
+def test_skip_bias_add_returns_output_and_bias(fake_nxd, layer_index, monkeypatch):
+    """Pins the trn2 failure of 2026-10-02 (FLUX fp8 compile): ``out_attn, bias =
+    self.proj_out_attn(attn_output)`` → ``ValueError: not enough values to unpack``
+    because NxD's quantized forward adds the bias and returns one tensor. With
+    reduce_output=False that would also add the bias on every TP rank before the
+    model's own all-reduce. Difflet's dynamic forward (the only path now) returns
+    ``(out, bias)`` when the float layer had skip_bias_add."""
     import torch
 
+    ActivationQuantizationType = fake_nxd.types[2]
     float_layer = fake_nxd.layers[layer_index]
     weight = torch.zeros(4, 4, dtype=torch.bfloat16)
-    layer = tq.quant_module_mapping()[float_layer].from_float(
-        SimpleNamespace(dtype=torch.float32, weight=weight, skip_bias_add=True), {})
+    monkeypatch.setattr(tq, "dynamic_fp8_linear", lambda mod, inp, **kw: inp * 3)
+
+    def make(**extra):
+        layer = tq.quant_module_mapping()[float_layer].from_float(
+            SimpleNamespace(dtype=torch.float32, weight=weight, **extra), {})
+        layer.activation_quantization_type = ActivationQuantizationType.DYNAMIC
+        layer.async_tensor_model_parallel_allreduce = True  # column: input already parallel
+        layer.gather_output = False
+        layer.input_is_parallel = True  # row
+        layer.reduce_output = False
+        layer.sequence_parallel_enabled = False
+        layer.sequence_dimension = None
+        layer.autograd_func_class = None
+        layer.tensor_parallel_group = None
+        return layer
+
     x = torch.full((2, 4), 2.0, dtype=torch.bfloat16)
-    out, bias = layer(x)
-    assert torch.equal(out, x)  # bias NOT added
-    assert bias is layer.bias and torch.equal(bias, torch.ones(4, dtype=torch.bfloat16))
-    assert layer.bias is not None  # restored after the call
-    plain = tq.quant_module_mapping()[float_layer].from_float(SimpleNamespace(dtype=torch.float32, weight=weight), {})
-    assert torch.equal(plain(x), x + 1)
+    out, bias = make(skip_bias_add=True)(x)
+    assert torch.equal(out, x * 3)  # bias NOT added
+    assert torch.equal(bias, torch.ones(4, dtype=torch.bfloat16))
+    assert torch.equal(make()(x), x * 3 + 1)
 
 
-def test_skip_bias_add_returns_output_and_bias_on_the_dynamic_path(fake_nxd, monkeypatch):
+def test_dynamic_row_forward_honours_skip_bias_add_toggle(fake_nxd, monkeypatch):
     import torch
 
     ActivationQuantizationType = fake_nxd.types[2]

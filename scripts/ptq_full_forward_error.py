@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""One full Wan DiT forward on the CPU, real weights, four numerics regimes.
+"""One full Wan DiT forward on the CPU, real weights, three numerics regimes.
 
 Answers "how far is one fp8 step from bf16, and how far is bf16 itself from
 fp32?" at the production shape, without the device: the same random inputs go
-through the model in fp32 (reference), bf16, fp8 weight-only and fp8 dynamic
+through the model in fp32 (reference), bf16 and fp8 W8A8
 (CPU fake-quant, ``difflet.quant.fake_linear``), and every pair is compared
 with cosine / rel-L2 / SNR. The per-linear sweep (``ptq_linear_error_sweep.py``)
 measures each matmul in isolation; this measures the whole block stack once.
@@ -103,13 +103,8 @@ def main() -> int:
 
     model16 = _load(args, wan, torch.bfloat16)
     run("bf16", model16, torch.bfloat16)
-    quantize_module_(model16, QuantSpec(activation="none"))
-    run("fp8-tensor-wo", model16, torch.bfloat16)
-    # Re-quantising the already-swapped layers is a no-op: rebuild for the dynamic variant.
-    del model16
-    model16 = _load(args, wan, torch.bfloat16)
-    quantize_module_(model16, QuantSpec(activation="dynamic"))
-    run("fp8-tensor-dyn", model16, torch.bfloat16)
+    quantize_module_(model16, QuantSpec())
+    run("fp8-tensor", model16, torch.bfloat16)
     del model16
 
     pairs = {}

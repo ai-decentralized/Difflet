@@ -83,7 +83,7 @@ def test_qwen_transformer_config_carries_the_quant_fields(tmp_path, monkeypatch)
     fp8 = qapp.create_qwen_image_transformer_config(
         model_path=str(tmp_path), world_size=4, tp_degree=4, dtype=torch.bfloat16,
         height=64, width=64, text_seq_len=8,
-        quant=QuantSpec.for_model("qwen_image", activation="none"), quant_checkpoint_dir=tmp_path / "q")
+        quant=QuantSpec.for_model("qwen_image"), quant_checkpoint_dir=tmp_path / "q")
     nc = fp8.neuron_config
     assert nc.quantized and nc.quantized_checkpoints_path == str(tmp_path / "q")
     assert nc.quant_targets == list(QuantSpec.for_model("qwen_image").targets)

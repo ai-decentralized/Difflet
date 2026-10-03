@@ -111,8 +111,8 @@ def test_ensure_checkpoint_respects_create_flag_and_spec_identity(tmp_path):
     with pytest.raises(FileNotFoundError, match="difflet quantize"):
         ckpt.ensure_quantized_checkpoint(src, dest, spec, create=False)
     assert ckpt.ensure_quantized_checkpoint(src, dest, spec, create=True) == dest
-    # The activation mode does not change the weights: same checkpoint serves both.
-    assert ckpt.ensure_quantized_checkpoint(src, dest, QuantSpec(activation="none"), create=False) == dest
+    # Idempotent: an existing checkpoint is resolved, not rebuilt.
+    assert ckpt.ensure_quantized_checkpoint(src, dest, QuantSpec(), create=False) == dest
     # A different weight granularity is a different checkpoint.
     channel = QuantSpec(weight_granularity="channel")
     assert not ckpt.is_valid_quantized_checkpoint(dest, channel, src)

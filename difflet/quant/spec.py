@@ -2,10 +2,15 @@
 
 Mirrors FastVideo's ``FP8Config`` (``fastvideo/layers/quantization/fp8_config.py``):
 FP8 e4m3 absmax scales, no calibration set, weights per-tensor (default) or
-per-output-channel, activations quantized dynamically per call or left in
-bf16 (weight-only). Only the attention q/k/v/out projections and the FFN
-up/down projections are targets; patch embedding, time/text embedders, adaLN
-modulation, norms and ``proj_out`` stay bf16.
+per-output-channel, activations quantized dynamically per call (W8A8). Only the
+attention q/k/v/out projections and the FFN up/down projections are targets;
+patch embedding, time/text embedders, adaLN modulation, norms and ``proj_out``
+stay bf16.
+
+Weight-only FP8 (``activation="none"``, fp8 weights dequantized to bf16 at run
+time) existed until 2026-10-03 and was removed: FP8 PTQ is always dynamic now,
+and legacy dicts / flags asking for weight-only are rejected rather than
+silently run as dynamic.
 """
 
 from __future__ import annotations
@@ -20,7 +25,6 @@ from typing import Any
 FORMAT_FP8_E4M3 = "fp8_e4m3"
 FORMATS = (FORMAT_FP8_E4M3,)
 GRANULARITIES = ("tensor", "channel")
-ACTIVATIONS = ("dynamic", "none")
 
 # The Wan target set is the default (the first wired model); the per-model
 # sets live in difflet.quant.targets. ``to_out.0`` is the diffusers/Difflet
@@ -32,12 +36,22 @@ from difflet.quant.targets import WAN_TARGETS as DEFAULT_TARGETS  # noqa: E402
 CLI_FORMATS = {"fp8": FORMAT_FP8_E4M3}
 _FORMAT_TO_CLI = {value: key for key, value in CLI_FORMATS.items()}
 
+_WEIGHT_ONLY_REMOVED = (
+    "weight-only FP8 (activation 'none' / --quant-act none) was removed on 2026-10-03; "
+    "FP8 PTQ is always dynamic (W8A8)"
+)
+
+
+def _reject_weight_only(activation: Any) -> None:
+    if activation in (None, "dynamic"):
+        return
+    raise ValueError(f"{_WEIGHT_ONLY_REMOVED}; got activation={activation!r}")
+
 
 @dataclass(frozen=True)
 class QuantSpec:
     format: str = FORMAT_FP8_E4M3
     weight_granularity: str = "tensor"
-    activation: str = "dynamic"
     targets: tuple[str, ...] = DEFAULT_TARGETS
 
     def __post_init__(self) -> None:
@@ -47,10 +61,6 @@ class QuantSpec:
             raise ValueError(
                 f"unsupported weight granularity {self.weight_granularity!r}; "
                 f"known: {GRANULARITIES}"
-            )
-        if self.activation not in ACTIVATIONS:
-            raise ValueError(
-                f"unsupported activation mode {self.activation!r}; known: {ACTIVATIONS}"
             )
         targets = tuple(str(t) for t in self.targets)
         if not targets or any(not t for t in targets):
@@ -87,16 +97,15 @@ class QuantSpec:
         return {
             "format": self.format,
             "weight_granularity": self.weight_granularity,
-            "activation": self.activation,
             "targets": list(self.targets),
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "QuantSpec":
+        _reject_weight_only(data.get("activation"))  # legacy key: "dynamic" tolerated
         return cls(
             format=str(data.get("format", FORMAT_FP8_E4M3)),
             weight_granularity=str(data.get("weight_granularity", "tensor")),
-            activation=str(data.get("activation", "dynamic")),
             targets=tuple(data.get("targets") or DEFAULT_TARGETS),
         )
 
@@ -113,16 +122,11 @@ class QuantSpec:
     # ------------------------------------------------------------------ identity
 
     def label(self) -> str:
-        """Short human label, e.g. ``fp8-tensor-dyn`` / ``fp8-channel-wo``."""
-        act = "dyn" if self.activation == "dynamic" else "wo"
-        return f"{_FORMAT_TO_CLI[self.format]}-{self.weight_granularity}-{act}"
+        """Short human label, e.g. ``fp8-tensor`` / ``fp8-channel``."""
+        return f"{_FORMAT_TO_CLI[self.format]}-{self.weight_granularity}"
 
     def checkpoint_identity(self) -> dict[str, Any]:
-        """The part of the spec that changes the quantized *weights* on disk.
-
-        The activation mode is a graph-time choice, so one checkpoint serves
-        both ``dynamic`` and ``none``.
-        """
+        """The part of the spec that changes the quantized *weights* on disk."""
         from difflet.quant.fp8 import FP8_MAX
 
         return {
@@ -150,7 +154,7 @@ class QuantSpec:
     def from_args(
         cls, args: argparse.Namespace, model_type: str | None = None
     ) -> "QuantSpec | None":
-        """Build from ``--quant/--quant-granularity/--quant-act``; None when unset.
+        """Build from ``--quant/--quant-granularity``; None when unset.
 
         ``model_type`` selects that model's target set; without it the default
         (Wan) targets apply.
@@ -160,10 +164,10 @@ class QuantSpec:
             return None
         if fmt not in CLI_FORMATS:
             raise ValueError(f"--quant must be one of {sorted(CLI_FORMATS)}, got {fmt!r}")
+        _reject_weight_only(getattr(args, "quant_act", None))
         fields = dict(
             format=CLI_FORMATS[fmt],
             weight_granularity=getattr(args, "quant_granularity", None) or "tensor",
-            activation=getattr(args, "quant_act", None) or "dynamic",
         )
         return cls.for_model(model_type, **fields) if model_type else cls(**fields)
 
@@ -173,13 +177,10 @@ class QuantSpec:
             _FORMAT_TO_CLI[self.format],
             "--quant-granularity",
             self.weight_granularity,
-            "--quant-act",
-            self.activation,
         ]
 
 
 __all__ = [
-    "ACTIVATIONS",
     "CLI_FORMATS",
     "DEFAULT_TARGETS",
     "FORMATS",

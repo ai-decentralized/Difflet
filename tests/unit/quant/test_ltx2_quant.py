@@ -70,7 +70,7 @@ def test_ltx2_transformer_neuron_config_carries_the_quant_fields(tmp_path):
     plain = transformer_neuron_config(tp_degree=4, world_size=4, dtype=torch.bfloat16, batch_size=1)
     assert not getattr(plain, "quantized", False)
     fp8 = transformer_neuron_config(tp_degree=4, world_size=4, dtype=torch.bfloat16, batch_size=1,
-                                    quant=QuantSpec.for_model("ltx_2", activation="none"),
+                                    quant=QuantSpec.for_model("ltx_2"),
                                     quant_checkpoint_dir=tmp_path / "q")
     assert fp8.quantized and fp8.quantized_checkpoints_path == str(tmp_path / "q")
     assert fp8.quant_targets == list(QuantSpec.for_model("ltx_2").targets)

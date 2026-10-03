@@ -71,12 +71,12 @@ def test_flux_backbone_neuron_config_carries_the_quant_fields(tmp_path):
     plain = backbone_neuron_config(tp_degree=4, world_size=4, dtype=torch.bfloat16)
     assert not getattr(plain, "quantized", False)
     fp8 = backbone_neuron_config(tp_degree=4, world_size=4, dtype=torch.bfloat16,
-                                 quant=QuantSpec.for_model("flux", activation="none"),
+                                 quant=QuantSpec.for_model("flux"),
                                  quant_checkpoint_dir=tmp_path / "q")
     assert fp8.quantized and fp8.quantization_type == "per_tensor_symmetric"
     assert fp8.quantized_checkpoints_path == str(tmp_path / "q")
     assert fp8.quant_targets == list(QuantSpec.for_model("flux").targets)
-    assert getattr(fp8, "activation_quantization_type", None) is None  # weight-only
+    assert fp8.activation_quantization_type == "dynamic"  # always W8A8
     with pytest.raises(ValueError, match="quant_checkpoint_dir"):
         backbone_neuron_config(tp_degree=4, world_size=4, dtype=torch.bfloat16,
                                quant=QuantSpec.for_model("flux"))

@@ -12,11 +12,10 @@ input), so the model-specific pieces are checked in minutes:
     ``proj_out_attn`` (``skip_bias_add``, ``reduce_output=False``) + ``proj_out_mlp``
   * the token refiner left in bf16
   * the attention mask over padded text rows
-  * Difflet's per-tensor dynamic activation path (``--quant-act dynamic``) or
-    NxD's weight-only path (``--quant-act none``)
+  * Difflet's per-tensor dynamic activation path (W8A8)
 
     PYTHONPATH=$PWD python scripts/ptq_fp8_hv_device_probe.py --work-dir /tmp/ptq_hv_probe \\
-        [--quant-act dynamic|none] [--only bf16|fp8|both] [--num-single-layers 2] [--text-seq-len 64]
+        [--quant-granularity tensor|channel] [--only bf16|fp8|both] [--num-single-layers 2] [--text-seq-len 64]
 
 The CPU reference and the device build run in separate processes (op dispatch is
 frozen at first import). Exit 0 when the fp8 arm compiles, loads, and matches the
@@ -92,7 +91,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--num-layers", type=int, default=1)
     p.add_argument("--num-single-layers", type=int, default=2)
     p.add_argument("--quant-granularity", choices=["tensor", "channel"], default="tensor")
-    p.add_argument("--quant-act", choices=["dynamic", "none"], default="dynamic")
     p.add_argument("--only", choices=["bf16", "fp8", "both"], default="both")
     p.add_argument("--iters", type=int, default=10)
     p.add_argument("--min-cosine", type=float, default=0.999)
@@ -104,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _spec(args):
     from difflet.quant.spec import QuantSpec
 
-    return QuantSpec.for_model("hunyuan_video", weight_granularity=args.quant_granularity, activation=args.quant_act)
+    return QuantSpec.for_model("hunyuan_video", weight_granularity=args.quant_granularity)
 
 
 def _first(value):
