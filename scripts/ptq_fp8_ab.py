@@ -153,8 +153,7 @@ def main() -> int:
 
     # 1. quantize (CPU, once per granularity)
     if "fp8" in arms and not args.skip_quantize:
-        wall, text, _ = runner.run("quantize", _difflet(
-            args, "quantize", "--quant", "fp8", "--quant-granularity", args.quant_granularity))
+        wall, text, _ = runner.run("quantize", _difflet(args, "quantize", *_quant_flags(args)))
         summary["arms"]["fp8"]["quantize_seconds"] = round(wall, 3)
 
     # 2. compile both arms

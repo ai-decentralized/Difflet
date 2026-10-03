@@ -69,6 +69,17 @@ def test_ab_runner_dry_run_prints_both_arms(tmp_path):
     assert not (tmp_path / "ab").exists()  # dry run writes nothing
 
 
+def test_ab_runner_quantize_step_carries_the_calibration(tmp_path):
+    # The quantize step must build the *static* checkpoint when --quant-calibration is
+    # given (2026-10-03: it built the dynamic one and the compile stage quantized again).
+    proc = _run(str(SCRIPTS / "ptq_fp8_ab.py"), "--out-dir", str(tmp_path / "ab"), "--dry-run",
+                "--runs", "1", "--only", "fp8", "--quant-calibration", "/tmp/calib.json")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    by_name = {l.split(":")[0].removeprefix("[ab] "): l for l in proc.stdout.splitlines() if l.startswith("[ab] ")}
+    for step in ("quantize", "compile_fp8", "generate_fp8_run0"):
+        assert "--quant fp8 --quant-granularity tensor --quant-calibration /tmp/calib.json" in by_name[step], step
+
+
 def test_device_probe_parses_arguments_without_neuron():
     proc = _run(str(SCRIPTS / "ptq_fp8_device_probe.py"), "--help")
     assert proc.returncode == 0 and "--quant-granularity" in proc.stdout
