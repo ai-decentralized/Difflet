@@ -101,6 +101,20 @@ test (the Wan Phase-0 pattern).
    final whole-branch review by a fresh reviewer against the plan's Review Focus, rulings list,
    then `superpowers:finishing-a-development-branch`.
 
+## 2026-10-03 update: weight-only removed; 2.27 spike; fp8-dynamic step investigation
+
+- **Weight-only FP8 removed** (`c93c83f`): `--quant-act` is gone, FP8 PTQ is always W8A8
+  (FastVideo's scheme). The `_fp8_wo` arms / rows in the tables above are historical.
+  The runner now runs two arms (bf16, `_fp8`); `SKIP_BF16=1` still re-runs only fp8.
+- **neuronx-cc 2.27 spike** (`artifacts/verification-2026-10-03/cc227/`): needs
+  `islpy==2026.1` (2026.2 → `NCC_ISMP902`); Wan 2.1 DiT step bf16 568.7 / fp8 648.2 ms vs
+  573.0 / 656.6 on 2.26 — about 1 % each, ratio unchanged (1.14×). Not the lever.
+- **Why fp8-dynamic is slower** (`artifacts/verification-2026-10-03/fp8-dyn-step/NOTES.md`):
+  the fp8 graph adds ~76 G extra F32 element-writes per forward around the 320 quantized dots
+  (abs / divide / clamp / converts / broadcast scales). Levers: bf16-domain quantize math, no
+  abs pass, reciprocal multiply, no clamp, bf16 dequant; ultimately an NKI W8A8 kernel. The
+  per-engine device profile of the 2.26 bf16 vs fp8 NEFFs is under `fp8-dyn-step/profile/`.
+
 ## Known inefficiency worth fixing on resume
 
 HunyuanVideo's fp8 arms recompile the **VAE decoder** (3674 s in `hunyuan_video_fp8_wo.json`'s

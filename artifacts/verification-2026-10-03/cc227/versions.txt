@@ -1,0 +1,2 @@
+neuronx-cc 2.27.5334.0+f702b353 nki 0.6.0+31049202112.g85070674
+NeuronX Compiler version 2.27.5334.0+f702b353

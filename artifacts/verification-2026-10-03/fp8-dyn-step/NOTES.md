@@ -38,6 +38,22 @@ HBM traffic if nothing fuses, which at trn2's bandwidth is the same order as the
 **+84 ms per step** (657 vs 573 ms). The fp8 dots themselves are not the problem; the
 un-fused, fp32, memory-bound quantize / dequantize passes around them are.
 
+## neuronx-cc 2.27 does not change the picture (spike, `../cc227/`)
+
+Same Wan 2.1 A/B recompiled with neuronx-cc 2.27.5334 (venv clone with `nki 0.6.0` and
+`islpy==2026.1`; islpy 2026.2 makes 2.27 fail with `NCC_ISMP902 is_subset()`), host VAE,
+one generate per arm:
+
+| compiler | bf16 DiT step (ms, median) | fp8-dynamic DiT step | ratio | fp8 vs bf16 quality |
+|---|---:|---:|---:|---|
+| 2.26.6360 | 573.0 | 656.6 | 1.146× | PSNR 24.6–24.9 dB, SSIM 0.88 |
+| 2.27.5334 | 568.7 | 648.2 | 1.140× | PSNR 24.9 dB, SSIM 0.885, LPIPS 0.117 |
+
+Both arms gain about 1 % from the newer compiler; the fp8 graph is lowered the same way
+(400 `F8E4M3FN × F8E4M3FN → F8E4M3FN` dots, 2083 `BF16 → F32` converts vs 1683 in bf16,
+`hlo_ops_fp8_dyn_2_27.txt` identical to the 2.26 histogram). Transformer compile 309 s (bf16)
+/ 319 s (fp8). The compiler version is not the lever; the quantize / dequantize traffic is.
+
 ## Levers (cheapest first)
 
 1. **Do the quantize math in bf16, not fp32**: the input is already bf16; converting to F32
