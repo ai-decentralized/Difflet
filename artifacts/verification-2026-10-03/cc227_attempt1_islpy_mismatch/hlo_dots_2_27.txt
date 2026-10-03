@@ -1,0 +1,34 @@
+=== MODULE_8bcdd3fe9acd1dedb38a+5364eabb: 47 computations, 1775 instructions, 26 dots
+  flags: ["--target=trn2", "--model-type=transformer", "-O1", "--tensorizer-options=--enable-ccop-compute-overlap", "--auto-cast=none", "--internal-hlo2tensorizer-options=--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true", "--internal-hlo2tensorizer-options= --experimental-unsafe-fp8e4m3fn-as-fp8e
+  element types: {'F32': 1079, 'BF16': 554, 'F8E4M3FN': 100, 'PRED': 32, 'TUPLE': 8, 'S64': 2}
+  dot (operand types -> result):
+       20  ('F8E4M3FN', 'F8E4M3FN') -> F8E4M3FN
+        6  ('BF16', 'BF16') -> BF16
+  convert (src -> dst):
+      102  BF16 -> F32
+       56  F32 -> BF16
+       20  F32 -> F8E4M3FN
+       20  F8E4M3FN -> F32
+        2  S64 -> F32
+=== MODULE_25846fe597b5d8419c6e+8fbe0ecd: 171 computations, 6645 instructions, 216 dots
+  flags: ["--target=trn2", "--model-type=transformer", "-O1", "--tensorizer-options=--enable-ccop-compute-overlap", "--auto-cast=none", "--internal-hlo2tensorizer-options=--verify-hlo=true", "--internal-hlo2tensorizer-options=--verify-hlo=true", "--verbose=35", "--logfile=/tmp/nxd_model/wan2.1-t2v-14b-diffus
+  element types: {'BF16': 3359, 'F32': 1861, 'S64': 1058, 'S32': 245, 'TUPLE': 49, 'PRED': 48, 'U32': 25}
+  dot (operand types -> result):
+      216  ('BF16', 'BF16') -> BF16
+  convert (src -> dst):
+      387  BF16 -> F32
+      339  F32 -> BF16
+       25  S64 -> U32
+       24  S64 -> F32
+       24  F32 -> S64
+       24  PRED -> S64
+        1  S32 -> BF16
+=== MODULE_75dddc6b41a651743c51+ad76e07d: 27 computations, 1195 instructions, 26 dots
+  flags: ["--target=trn2", "--model-type=transformer", "-O1", "--tensorizer-options=--enable-ccop-compute-overlap", "--auto-cast=none", "--internal-hlo2tensorizer-options=--verify-hlo=true", "--internal-hlo2tensorizer-options=--verify-hlo=true", "--verbose=35", "--logfile=/tmp/nxd_model/WanTransformer3DModel
+  element types: {'BF16': 614, 'F32': 539, 'PRED': 32, 'TUPLE': 8, 'S64': 2}
+  dot (operand types -> result):
+       26  ('BF16', 'BF16') -> BF16
+  convert (src -> dst):
+       82  BF16 -> F32
+       36  F32 -> BF16
+        2  S64 -> F32
