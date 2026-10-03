@@ -228,3 +228,31 @@ def test_split_fused_proj_out_carries_the_input_scale_to_both_halves():
     assert sd["single_transformer_blocks.0.proj_out_attn.input_scale"].item() == 0.25
     assert sd["single_transformer_blocks.0.proj_out_mlp.input_scale"].item() == 0.25
     assert "single_transformer_blocks.0.proj_out.input_scale" not in sd
+
+
+def test_calibration_lookup_prefers_the_subfolder_prefixed_entry(tmp_path):
+    """A multi-expert model (Wan 2.2: transformer/ + transformer_2/) calibrates both
+    experts into one file, the second under ``transformer_2.``-prefixed names. The
+    quantizer for subfolder ``transformer_2`` must take those; the first expert (and
+    single-transformer models) keep the plain names."""
+    from difflet.quant.fp8 import FP8_MAX, STATIC_ACT_MARGIN
+
+    layers = {}
+    for name, amax in (("blocks.0.attn1.to_q", 3.0), ("blocks.0.attn1.to_out.0", 1.5),
+                       ("blocks.0.ffn.net_in", 6.0), ("blocks.0.ffn.net_out", 12.0)):
+        layers[name] = {"amax": amax}
+        layers["transformer_2." + name] = {"amax": amax * 10}
+    calib = tmp_path / "calib.json"
+    calib.write_text(json.dumps({"layers": layers}))
+    spec = QuantSpec(calibration=str(calib))
+    first, _ = ckpt.quantize_state_dict(_wan_like_state_dict(), spec, subfolder="transformer")
+    second, _ = ckpt.quantize_state_dict(_wan_like_state_dict(), spec, subfolder="transformer_2")
+    assert first["blocks.0.attn1.to_q.input_scale"].item() == pytest.approx(3.0 * STATIC_ACT_MARGIN / FP8_MAX)
+    assert second["blocks.0.attn1.to_q.input_scale"].item() == pytest.approx(30.0 * STATIC_ACT_MARGIN / FP8_MAX)
+    assert second["blocks.0.ffn.net.2.input_scale"].item() == pytest.approx(120.0 * STATIC_ACT_MARGIN / FP8_MAX)
+    # a file without prefixed entries still serves transformer_2 with the plain names
+    calib.write_text(json.dumps({"layers": {k: v for k, v in layers.items() if not k.startswith("transformer_2.")}}))
+    fallback, _ = ckpt.quantize_state_dict(_wan_like_state_dict(), QuantSpec(calibration=str(calib)), subfolder="transformer_2")
+    assert fallback["blocks.0.attn1.to_q.input_scale"].item() == pytest.approx(3.0 * STATIC_ACT_MARGIN / FP8_MAX)
+    assert ckpt.calibrated_amax({"transformer_2.a.to_q": 2.0, "a.to_q": 1.0}, "a.to_q", subfolder="transformer_2") == 2.0
+    assert ckpt.calibrated_amax({"a.to_q": 1.0}, "a.to_q", subfolder="transformer_2") == 1.0

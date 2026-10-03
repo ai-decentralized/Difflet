@@ -20,7 +20,13 @@ from difflet.quant.spec import QuantSpec
 
 
 class FakeQuantLinear(nn.Module):
-    def __init__(self, src: nn.Linear, spec: QuantSpec) -> None:
+    def __init__(
+        self,
+        src: nn.Linear,
+        spec: QuantSpec,
+        name: str | None = None,
+        calibration: dict[str, float] | None = None,
+    ) -> None:
         super().__init__()
         self.in_features = int(src.in_features)
         self.out_features = int(src.out_features)
@@ -32,6 +38,20 @@ class FakeQuantLinear(nn.Module):
             self.bias = nn.Parameter(src.bias.detach().clone(), requires_grad=False)
         else:
             self.register_parameter("bias", None)
+        # Static activation scale (spec.calibration): the layer's calibrated input
+        # absmax * STATIC_ACT_MARGIN / 240, looked up like the checkpoint writer does
+        # (HF name, Difflet rename, fused proj_out halves). None = dynamic per call.
+        if spec.calibration:
+            if name is None:
+                raise ValueError("a calibrated QuantSpec needs the layer's qualified name")
+            from difflet.quant.checkpoint import calibrated_amax
+            from difflet.quant.fp8 import FP8_MAX, STATIC_ACT_MARGIN
+
+            layers = calibration if calibration is not None else spec.calibration_layers()
+            amax = calibrated_amax(layers, name)
+            self.register_buffer("input_scale", torch.tensor(amax * STATIC_ACT_MARGIN / FP8_MAX, dtype=torch.float32))
+        else:
+            self.input_scale = None
 
     def extra_repr(self) -> str:
         return (
@@ -40,7 +60,7 @@ class FakeQuantLinear(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return fp8_linear_reference(x, self.weight, self.weight_scale, self.bias)
+        return fp8_linear_reference(x, self.weight, self.weight_scale, self.bias, input_scale=self.input_scale)
 
 
 def quantize_module_(
@@ -52,11 +72,12 @@ def quantize_module_(
     """In-place: swap every target ``nn.Linear`` (by dotted name suffix) for a
     ``FakeQuantLinear``. Returns ``{"num_quantized", "quantized": [names]}``."""
     swapped: list[str] = []
+    calibration = spec.calibration_layers() if spec.calibration else None
     for parent_name, parent in list(model.named_modules()):
         for child_name, child in list(parent.named_children()):
             qualified = f"{parent_name}.{child_name}" if parent_name else child_name
             if isinstance(child, linear_types) and spec.matches(qualified):
-                setattr(parent, child_name, FakeQuantLinear(child, spec))
+                setattr(parent, child_name, FakeQuantLinear(child, spec, name=qualified, calibration=calibration))
                 swapped.append(qualified)
     return {"num_quantized": len(swapped), "quantized": swapped}
 

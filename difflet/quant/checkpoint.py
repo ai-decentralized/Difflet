@@ -43,25 +43,32 @@ _HF_TO_DIFFLET_NAME = (
 )
 
 
-def calibrated_amax(layers: dict[str, float], prefix: str) -> float:
+def calibrated_amax(layers: dict[str, float], prefix: str, subfolder: str | None = None) -> float:
     """Input absmax for the HF-named target ``prefix`` from a calibration map.
 
     Tries the HF name, its Difflet rename, and — for FLUX / HunyuanVideo's fused
-    single-block ``proj_out`` — the max over the two device halves.
+    single-block ``proj_out`` — the max over the two device halves. A multi-expert
+    model (Wan 2.2: ``transformer/`` + ``transformer_2/``) calibrates every expert
+    into one file, the extra experts under ``<subfolder>.``-prefixed names; those
+    are preferred when ``subfolder`` is given and fall back to the plain names.
     """
-    candidates = [prefix] + [prefix.replace(hf, ours) for hf, ours in _HF_TO_DIFFLET_NAME if hf in prefix]
-    for name in candidates:
-        if name in layers:
-            return layers[name]
-    if prefix.endswith(".proj_out"):
-        halves = [layers[n] for n in (prefix + "_attn", prefix + "_mlp") if n in layers]
-        if halves:
-            return max(halves)
+    prefixes = [prefix]
+    if subfolder and subfolder != "transformer":
+        prefixes.insert(0, f"{subfolder}.{prefix}")
+    for base in prefixes:
+        candidates = [base] + [base.replace(hf, ours) for hf, ours in _HF_TO_DIFFLET_NAME if hf in base]
+        for name in candidates:
+            if name in layers:
+                return layers[name]
+        if base.endswith(".proj_out"):
+            halves = [layers[n] for n in (base + "_attn", base + "_mlp") if n in layers]
+            if halves:
+                return max(halves)
     raise ValueError(f"calibration has no input absmax for target {prefix!r}")
 
 
 def quantize_state_dict(
-    state_dict: dict[str, Any], spec: QuantSpec
+    state_dict: dict[str, Any], spec: QuantSpec, subfolder: str | None = None
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Quantize the target 2-D ``.weight`` tensors; pass everything else through.
 
@@ -90,7 +97,7 @@ def quantize_state_dict(
             out[key] = weight_fp8
             out[prefix + ".weight_scale"] = scale
             if layers is not None:
-                amax = calibrated_amax(layers, prefix)
+                amax = calibrated_amax(layers, prefix, subfolder)
                 out[prefix + ".input_scale"] = torch.tensor(
                     [amax * STATIC_ACT_MARGIN / FP8_MAX], dtype=torch.float32
                 )
@@ -235,7 +242,7 @@ def quantize_checkpoint_dir(
     started = time.perf_counter()
     state_dict = load_state_dict(str(source_dir))
     load_s = time.perf_counter() - started
-    quantized, report = quantize_state_dict(state_dict, spec)
+    quantized, report = quantize_state_dict(state_dict, spec, subfolder=source_dir.name)
     del state_dict
     if dest_dir.exists():
         shutil.rmtree(dest_dir)

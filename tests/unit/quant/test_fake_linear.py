@@ -117,3 +117,36 @@ def test_quantized_wan_forward_stays_close_to_the_bf16_reference():
     cos = torch.nn.functional.cosine_similarity(out.flatten().float(), ref.flatten().float(), dim=0)
     assert cos > 0.95
     assert not torch.equal(out, ref)
+
+
+def test_fake_quant_linear_uses_the_calibrated_static_input_scale(tmp_path):
+    # With spec.calibration the CPU emulation quantizes the activation with the layer's
+    # calibrated input_scale (absmax * STATIC_ACT_MARGIN / 240, clamped to +-240), exactly
+    # like the device's static path, instead of the dynamic per-call absmax.
+    import json
+
+    from difflet.quant.fp8 import FP8_MAX, STATIC_ACT_MARGIN, fp8_linear_reference
+
+    torch.manual_seed(0)
+    lin = nn.Linear(16, 8)
+    x = torch.randn(3, 16)
+    calib = tmp_path / "calib.json"
+    calib.write_text(json.dumps({"layers": {"blocks.0.ffn.net_in": {"amax": 2.0}}}))
+    spec = QuantSpec(calibration=str(calib))
+    # the HF name of the target maps onto the Difflet calibration name via calibrated_amax
+    quant = FakeQuantLinear(lin, spec, name="blocks.0.ffn.net.0.proj")
+    expected_scale = torch.tensor(2.0 * STATIC_ACT_MARGIN / FP8_MAX)
+    assert torch.allclose(quant.input_scale, expected_scale)
+    out = quant(x)
+    ref = fp8_linear_reference(x, quant.weight, quant.weight_scale, quant.bias, input_scale=expected_scale)
+    assert torch.equal(out, ref)
+    dyn = fp8_linear_reference(x, quant.weight, quant.weight_scale, quant.bias)
+    assert not torch.equal(out, dyn)
+    assert "static" in repr(quant)
+
+    # quantize_module_ hands every swapped layer its own qualified name
+    model = nn.Sequential()
+    model.add_module("blocks", nn.ModuleList([nn.ModuleDict({"ffn": nn.ModuleDict({"net_in": nn.Linear(16, 8)})})]))
+    quantize_module_(model, spec)
+    swapped = model.blocks[0]["ffn"]["net_in"]
+    assert isinstance(swapped, FakeQuantLinear) and torch.allclose(swapped.input_scale, expected_scale)
