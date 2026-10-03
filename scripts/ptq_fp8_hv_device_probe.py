@@ -109,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--text-pt", type=Path, default=None,
                    help="real conditioning {encoder_hidden_states, encoder_attention_mask, pooled_projections}; "
                         "pass --text-seq-len / --valid-text-rows matching it for the device stage")
+    p.add_argument("--tp-degree", type=int, default=1, help="device tensor-parallel degree (production: 4)")
     p.add_argument("--force-clean", action="store_true")
     return p
 
@@ -255,7 +256,7 @@ def _device_arm(name, transformer_dir, args, inputs, spec, cache_dir):
         record["quantize_seconds"] = round(time.perf_counter() - started, 3)
         record["quantized_checkpoint"] = str(quant_dir)
     config = create_hunyuan_video_backbone_config(
-        model_path=str(transformer_dir.parent), world_size=1, tp_degree=1, dtype=torch.bfloat16,
+        model_path=str(transformer_dir.parent), world_size=args.tp_degree, tp_degree=args.tp_degree, dtype=torch.bfloat16,
         height=args.height, width=args.width, num_frames=args.num_frames, text_seq_len=args.text_seq_len,
         batch_size=1, quant=spec, quant_checkpoint_dir=quant_dir,
     )
@@ -267,7 +268,7 @@ def _device_arm(name, transformer_dir, args, inputs, spec, cache_dir):
     record["compile_seconds"] = round(time.perf_counter() - started, 3)
     record["compiled"] = True
     started = time.perf_counter()
-    app.load(str(compiled_dir), start_rank_id=0, local_ranks_size=1, skip_warmup=True)
+    app.load(str(compiled_dir), start_rank_id=0, local_ranks_size=args.tp_degree, skip_warmup=True)
     record["load_seconds"] = round(time.perf_counter() - started, 3)
     record["loaded"] = True
     for _ in range(2):
@@ -288,7 +289,7 @@ def _device_arm(name, transformer_dir, args, inputs, spec, cache_dir):
 
 
 def stage_device(args) -> int:
-    os.environ.setdefault("NEURON_RT_NUM_CORES", "1")
+    os.environ.setdefault("NEURON_RT_NUM_CORES", str(args.tp_degree))
     import torch
 
     from difflet.quant.metrics import tensor_error_metrics
