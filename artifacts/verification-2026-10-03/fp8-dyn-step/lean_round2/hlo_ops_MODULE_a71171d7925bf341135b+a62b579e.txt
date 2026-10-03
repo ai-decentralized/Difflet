@@ -1,0 +1,68 @@
+=== MODULE_a71171d7925bf341135b+a62b579e: ops on tensors with numel >= 1e+06
+--- count by (op, dtype, shape):
+    168  convert            F32       [1, 512, 2560]
+    121  transpose          BF16      [1, 512, 4096]
+    120  multiply           F32       [1, 512, 2560]
+    120  convert            BF16      [1, 512, 2560]
+     98  parameter          F32       [1, 512, 4096]
+     98  call               F32       [1, 512, 4096]
+     97  all-gather         BF16      [4096, 512, 1]
+     97  reshape            BF16      [4096, 1, 512]
+     96  parameter          BF16      [1024, 4096]
+     96  transpose          BF16      [4096, 1024]
+     73  convert            F32       [1, 512, 4096]
+     73  convert            BF16      [1, 512, 4096]
+     72  reshape            BF16      [1, 512, 64, 64]
+     72  transpose          BF16      [1, 64, 512, 64]
+     72  broadcast          BF16      [1, 64, 512, 512]
+     72  broadcast          BF16      [1, 512, 2560]
+     72  broadcast          F32       [1, 512, 2560]
+     49  custom-call        F32       [1, 512, 4096]
+     48  broadcast          BF16      [1, 64, 512, 64]
+     48  reshape            BF16      [64, 512, 64]
+     48  reshape            BF16      [1, 64, 512, 512]
+     48  add                BF16      [1, 64, 512, 512]
+     48  broadcast          F32       [1, 64, 512, 512]
+     48  parameter          BF16      [2560, 4096]
+     48  transpose          BF16      [4096, 2560]
+     48  broadcast          BF16      [1, 512, 4096]
+     48  multiply           BF16      [1, 512, 4096]
+     48  add                BF16      [1, 512, 4096]
+     48  dot                BF16      [1, 512, 2560]
+     48  transpose          BF16      [1, 512, 2560]
+     48  add                BF16      [1, 512, 2560]
+     48  get-tuple-element  F32       [1, 512, 4096]
+     24  gather             BF16      [262144, 16]
+     24  reshape            BF16      [512, 512, 16]
+     24  transpose          BF16      [16, 512, 512]
+     24  broadcast          BF16      [16, 512, 512]
+     24  add                BF16      [16, 512, 512]
+     24  all-gather         BF16      [64, 512, 512]
+     24  transpose          BF16      [512, 512, 64]
+     24  transpose          BF16      [64, 512, 512]
+--- total elements written by (op, dtype) [G]:
+      2.63  transpose          BF16
+      1.91  reshape            BF16
+      1.65  broadcast          BF16
+      1.42  parameter          BF16
+      1.07  add                BF16
+      0.90  broadcast          F32
+      0.78  convert            F32
+      0.71  convert            BF16
+      0.61  all-gather         BF16
+      0.57  dot                BF16
+      0.53  multiply           BF16
+      0.40  subtract           F32
+      0.40  exponential        F32
+      0.40  divide             F32
+      0.21  parameter          F32
+      0.21  call               F32
+      0.16  multiply           F32
+      0.10  custom-call        F32
+      0.10  gather             BF16
+      0.10  get-tuple-element  F32
+--- dots:
+     48  ('BF16', 'BF16') -> BF16 [1, 512, 2560]
+     24  ('BF16', 'BF16') -> BF16 [64, 512, 512]
+     24  ('BF16', 'BF16') -> BF16 [64, 512, 64]
+     24  ('BF16', 'BF16') -> BF16 [1, 512, 4096]

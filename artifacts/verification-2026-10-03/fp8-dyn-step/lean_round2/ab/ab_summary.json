@@ -1,0 +1,41 @@
+{
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "guidance_scale": 1.0,
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "tp_degree": 4,
+  "quant": {
+    "format": "fp8",
+    "weight_granularity": "tensor"
+  },
+  "arms": {
+    "fp8": {
+      "runs": [
+        {
+          "run": 0,
+          "e2e_wall_seconds": 85.457,
+          "weights_load_total_seconds": 0,
+          "compute_and_overhead_seconds": 85.457,
+          "dit_step_ms": {
+            "n": 19,
+            "mean": 607.3526315789474,
+            "median": 607.1999999999999,
+            "min": 606.9,
+            "max": 610.4000000000001
+          },
+          "output": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-03/fp8-dyn-step/lean_round2/ab/fp8_run0.mp4",
+          "latents": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-03/fp8-dyn-step/lean_round2/ab/work_fp8_run0/latents.pt"
+        }
+      ],
+      "compile_seconds": 320.75,
+      "compile_cache_hit": false
+    }
+  },
+  "compare": {}
+}

@@ -1,0 +1,4 @@
+=== MODULE_b2b2634ef5a6ad310a8d+5364eabb: ops on tensors with numel >= 1e+06
+--- count by (op, dtype, shape):
+--- total elements written by (op, dtype) [G]:
+--- dots:

@@ -55,14 +55,15 @@ def dequantize(q: torch.Tensor, scale: torch.Tensor, dtype: torch.dtype = torch.
     return (q.to(torch.float32) * scale.to(torch.float32)).to(dtype)
 
 
-# Lean activation law (2026-10-03). The device quantizes in the activation's own
-# dtype (bf16): absmax from the min / max reductions (no abs tensor), a multiply
-# by the reciprocal scale (no divide, no fp32 up-cast) and no clamp. Without a
-# clamp the bf16 rounding of ``1/scale`` and of the product could push the
-# absmax element above 240 (fp8 e4m3 spacing there is 16: 240 -> 256, and 256
-# is inf/NaN on Trainium), so the scale carries a 2^-7 margin: the scaled
-# absmax lands at ~238 and rounding (<= 2^-8 relative) cannot reach 248, the
-# round-to-nearest boundary of 256. Same law here so CPU-fp8 == device-fp8.
+# Lean activation law (2026-10-03): absmax from the min / max reductions (no abs
+# tensor), one fp32 multiply by the reciprocal scale (no divide), a direct
+# fp32 -> fp8 cast and no clamp. (A bf16-domain multiply was tried first; XLA
+# lowers it as fp32 multiply + an extra bf16 round trip, so fp32 is fewer
+# passes.) Without a clamp, rounding could in principle push the absmax element
+# above 240 (fp8 e4m3 spacing there is 16: 240 -> 256, and 256 is inf/NaN on
+# Trainium), so the scale carries a 2^-7 margin: the scaled absmax lands at
+# ~238 and no rounding can reach 248, the round-to-nearest boundary of 256.
+# Same law here so CPU-fp8 == device-fp8 in value.
 ACT_SCALE_MARGIN = 1.0 + 2.0**-7
 
 
@@ -74,11 +75,10 @@ def activation_scale(x: torch.Tensor) -> torch.Tensor:
 
 
 def quantize_activation(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """``x`` -> (fp8 tensor, float32 scale) with the lean law: the multiply by the
-    reciprocal scale happens in ``x``'s dtype and there is no clamp."""
+    """``x`` -> (fp8 tensor, float32 scale) with the lean law: one fp32 multiply by
+    the reciprocal scale, direct cast to fp8, no clamp."""
     scale = activation_scale(x)
-    inv = (1.0 / scale).to(x.dtype)
-    return (x * inv).to(FP8_DTYPE), scale
+    return (x.to(torch.float32) * (1.0 / scale)).to(FP8_DTYPE), scale
 
 
 def fake_quant_activation(x: torch.Tensor) -> torch.Tensor:

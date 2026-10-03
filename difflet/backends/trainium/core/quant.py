@@ -42,7 +42,8 @@ FP8_HLO2TENSORIZER_FLAG = "--experimental-unsafe-fp8e4m3fn-as-fp8e4m3"
 #   2 — layers typed from the live weight dtype (bf16 bias), per-tensor dynamic path
 #   3 — lean activation law (bf16-domain quantize, no abs / clamp, margin scale,
 #       one combined dequant multiply); weight-only path removed
-QUANT_LAYER_SCHEMA = 3
+#   4 — lean law, fp32 multiply + direct fp8 cast (no bf16 round trip)
+QUANT_LAYER_SCHEMA = 4
 
 
 def neuron_config_kwargs(spec: QuantSpec, quantized_checkpoints_path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -134,12 +135,13 @@ def quantize_activation_per_tensor(
     Returns ``(fp8 tensor, float32 0-D scale)``; the scale broadcasts over any
     output rank. Same (lean) law as ``difflet.quant.fp8.quantize_activation``,
     so device-fp8 and CPU-fp8 agree in value: absmax from the min / max
-    reductions, one multiply by the reciprocal scale in the activation's own
-    dtype, no clamp (the scale's 2^-7 margin keeps the rounded absmax below the
+    reductions, one fp32 multiply by the reciprocal scale, direct cast to
+    fp8, no clamp (the scale's 2^-7 margin keeps the rounded absmax below the
     next fp8 value, see ``ACT_SCALE_MARGIN``). The 2.26 profile of the Wan
-    transformer showed the previous fp32 abs / divide / clamp passes, not the
-    fp8 dots, as the cost of the dynamic path. ``clamp_bound`` is NxD's
-    ``quantize_clamp_bound`` applied to the absmax; when set, the scaled
+    transformer showed the previous abs / divide / clamp passes and the second
+    scale multiply, not the fp8 dots, as the cost of the dynamic path (step
+    657 -> 608 ms on Wan 2.1 with the first lean variant). ``clamp_bound`` is
+    NxD's ``quantize_clamp_bound`` applied to the absmax; when set, the scaled
     tensor is clamped (values above the bound would otherwise exceed 240).
     """
     import torch
@@ -153,7 +155,7 @@ def quantize_activation_per_tensor(
     if clamp_bound != float("inf"):
         amax = amax.clamp(max=clamp_bound)
     scale = (amax / FP8_MAX * ACT_SCALE_MARGIN).clamp_min(FP8_MIN_SCALE)
-    scaled = x * (1.0 / scale).to(x.dtype)
+    scaled = x.to(torch.float32) * (1.0 / scale)
     if clamp_bound != float("inf"):
         scaled = scaled.clamp(-FP8_MAX, FP8_MAX)
     return scaled.to(FP8_DTYPE), scale

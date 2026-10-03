@@ -95,6 +95,20 @@ but the bf16 multiply came back as `convert→F32, multiply F32, convert→BF16,
 (`hlo_chain.py`): XLA keeps bf16 arithmetic in fp32 with a round trip, so the next variant
 multiplies in fp32 and casts straight to fp8 (one convert fewer per linear).
 
+## Lean law, round 2 (`lean_round2/`): fp32 multiply form — 607.2 ms, no change
+
+Quantizing as `convert→F32, multiply, convert→F8` (instead of the bf16 multiply that XLA
+lowered with an extra bf16 round trip; new module `MODULE_a71171d7…`, compile 321 s,
+schema 4 to bust the stage key — the runner's `--force` does not recompile an existing
+stage artifact) measures 607.2 ms median — identical to round 1: the compiler already fused
+that round trip. Numerics: device fp8 vs CPU fp8 cosine 0.999985 / 45.3 dB (tiny probe).
+This form is kept (fewer HLO ops, same speed).
+
+What is left between 607 and 573 ms is the per-linear quantize (two reductions + one fp32
+pass + the fp8 cast) and dequantize (fp8→fp32, scale, →bf16) traffic that the compiler does
+not fuse into the matmul. Structural levers from here: quantize a shared input once for
+q/k/v (the three projections re-quantize the same tensor), and the NKI W8A8 kernel.
+
 ## Levers (cheapest first)
 
 1. **Do the quantize math in bf16, not fp32**: the input is already bf16; converting to F32
