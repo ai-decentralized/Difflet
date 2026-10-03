@@ -1,0 +1,21 @@
+{
+  "output": {
+    "reference": "artifacts/verification-2026-10-01/ptq-wan21/ab-fixed/fp8_run1_hostvae.mp4",
+    "test": "artifacts/verification-2026-10-03/fp8-dyn-step/lean/ab/fp8_run0.mp4",
+    "frames": 9,
+    "height": 480,
+    "width": 832,
+    "psnr_db": 31.355728652254893,
+    "ssim": 0.9476959705352783,
+    "pixel": {
+      "mse": 0.0007719090176294749,
+      "mean_abs": 0.01397525320246606,
+      "max_abs": 0.9647058807313442,
+      "cosine": 0.9974880232939125,
+      "rel_l2": 0.07083681231765752,
+      "snr_db": 22.994819808990854
+    },
+    "lpips": 0.04179657126466433,
+    "lpips_net": "alex"
+  }
+}

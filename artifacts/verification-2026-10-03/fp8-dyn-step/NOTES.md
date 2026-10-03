@@ -78,6 +78,23 @@ quantize / dequantize passes land on the vector and scalar engines and spill thr
 If that overhead went to zero the fp8 step would be ~7 % *faster* than bf16 at this shape
 (and more once the dot is the only cost, i.e. with an NKI kernel that quantizes in SBUF).
 
+## Lean law, round 1 (`lean/`): 656.6 → 607.7 ms
+
+Commit `4f3f585`: absmax from min/max reductions (no abs tensor), scale with a 2^-7 margin,
+multiply by the bf16 reciprocal, no clamp, one combined dequant multiply. Measured on the
+device with neuronx-cc 2.26 (same prompt / seed / shape, host VAE, `ab/`):
+
+| arm | DiT step ms (median) | vs bf16 (573.0) | quality vs bf16 host-VAE render |
+|---|---:|---:|---|
+| fp8 dynamic, original law | 656.6 | 1.146× | PSNR 24.6–24.9 dB, SSIM 0.88, LPIPS 0.12 |
+| fp8 dynamic, lean round 1 | **607.7** | **1.061×** | PSNR 24.53 dB, SSIM 0.879, LPIPS 0.124 (`compare_lean_fp8_vs_bf16_hostvae.json`); vs the old fp8 render 31.4 dB |
+
+Tiny probe unchanged (device fp8 vs CPU fp8 cosine 0.999982). Transformer compile 479 s.
+HLO (`hlo_ops_MODULE_97fda…`): abs / divide / clamp gone (−18 G writes), broadcasts 41 → 24 G,
+but the bf16 multiply came back as `convert→F32, multiply F32, convert→BF16, convert→F8E4M3FN`
+(`hlo_chain.py`): XLA keeps bf16 arithmetic in fp32 with a round trip, so the next variant
+multiplies in fp32 and casts straight to fp8 (one convert fewer per linear).
+
 ## Levers (cheapest first)
 
 1. **Do the quantize math in bf16, not fp32**: the input is already bf16; converting to F32
