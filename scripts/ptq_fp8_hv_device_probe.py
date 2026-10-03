@@ -106,6 +106,8 @@ def _spec(args):
 
 
 def _first(value):
+    if isinstance(value, dict):  # the device backbone returns {"sample": tensor}
+        return value["sample"] if "sample" in value else next(iter(value.values()))
     return value[0] if isinstance(value, (list, tuple)) else value
 
 
