@@ -55,15 +55,30 @@ def dequantize(q: torch.Tensor, scale: torch.Tensor, dtype: torch.dtype = torch.
     return (q.to(torch.float32) * scale.to(torch.float32)).to(dtype)
 
 
+# Lean activation law (2026-10-03). The device quantizes in the activation's own
+# dtype (bf16): absmax from the min / max reductions (no abs tensor), a multiply
+# by the reciprocal scale (no divide, no fp32 up-cast) and no clamp. Without a
+# clamp the bf16 rounding of ``1/scale`` and of the product could push the
+# absmax element above 240 (fp8 e4m3 spacing there is 16: 240 -> 256, and 256
+# is inf/NaN on Trainium), so the scale carries a 2^-7 margin: the scaled
+# absmax lands at ~238 and rounding (<= 2^-8 relative) cannot reach 248, the
+# round-to-nearest boundary of 256. Same law here so CPU-fp8 == device-fp8.
+ACT_SCALE_MARGIN = 1.0 + 2.0**-7
+
+
 def activation_scale(x: torch.Tensor) -> torch.Tensor:
-    """Dynamic per-tensor absmax scale of an activation (shape ``[1]``)."""
-    amax = x.detach().to(torch.float32).abs().amax().reshape(1)
-    return (amax / FP8_MAX).clamp_min(FP8_MIN_SCALE)
+    """Dynamic per-tensor absmax scale of an activation (shape ``[1]``, float32)."""
+    lo, hi = torch.aminmax(x.detach())
+    amax = torch.maximum(hi, -lo).to(torch.float32).reshape(1)
+    return (amax / FP8_MAX * ACT_SCALE_MARGIN).clamp_min(FP8_MIN_SCALE)
 
 
 def quantize_activation(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """``x`` -> (fp8 tensor, float32 scale) with the lean law: the multiply by the
+    reciprocal scale happens in ``x``'s dtype and there is no clamp."""
     scale = activation_scale(x)
-    return quantize_with_scale(x, scale), scale
+    inv = (1.0 / scale).to(x.dtype)
+    return (x * inv).to(FP8_DTYPE), scale
 
 
 def fake_quant_activation(x: torch.Tensor) -> torch.Tensor:
@@ -81,11 +96,13 @@ def fp8_linear_reference(
     """Reference W8A8 ``x @ W^T + b``: dynamic per-tensor fp8 activation, fp8
     weight, fp32 accumulation.
 
-    The dequantize-then-matmul form is bit-equivalent in value to a true fp8
-    GEMM with fp32 accumulate (the products are exact in fp32); only the
-    accumulation order can differ from the device.
+    The activation is quantized in its own dtype (the device law) and the fp8
+    values are used exactly; the dequantize-then-matmul form is bit-equivalent
+    in value to a true fp8 GEMM with fp32 accumulate (the products are exact
+    in fp32); only the accumulation order can differ from the device.
     """
-    x32 = fake_quant_activation(x.to(torch.float32))
+    q, scale = quantize_activation(x)
+    x32 = q.to(torch.float32) * scale
     w32 = dequantize(weight_fp8, weight_scale_)
     out = x32 @ w32.t()
     if bias is not None:
@@ -94,6 +111,7 @@ def fp8_linear_reference(
 
 
 __all__ = [
+    "ACT_SCALE_MARGIN",
     "FP8_DTYPE",
     "FP8_MAX",
     "FP8_MIN_SCALE",

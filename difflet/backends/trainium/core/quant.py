@@ -40,7 +40,9 @@ FP8_HLO2TENSORIZER_FLAG = "--experimental-unsafe-fp8e4m3fn-as-fp8e4m3"
 # store relinking the old fp32-bias shards over a forced re-shard.
 #   1 — layers typed from mod.dtype (fp32 bias / dequantized dtype); never released
 #   2 — layers typed from the live weight dtype (bf16 bias), per-tensor dynamic path
-QUANT_LAYER_SCHEMA = 2
+#   3 — lean activation law (bf16-domain quantize, no abs / clamp, margin scale,
+#       one combined dequant multiply); weight-only path removed
+QUANT_LAYER_SCHEMA = 3
 
 
 def neuron_config_kwargs(spec: QuantSpec, quantized_checkpoints_path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -130,23 +132,31 @@ def quantize_activation_per_tensor(
     """Dynamic per-tensor absmax fp8 quantization of an activation of any rank.
 
     Returns ``(fp8 tensor, float32 0-D scale)``; the scale broadcasts over any
-    output rank. Same law as ``difflet.quant.fp8.quantize_activation`` (so
-    device-fp8 and CPU-fp8 agree in value); ``clamp_bound`` is NxD's
-    ``quantize_clamp_bound`` applied to the absmax before scaling.
+    output rank. Same (lean) law as ``difflet.quant.fp8.quantize_activation``,
+    so device-fp8 and CPU-fp8 agree in value: absmax from the min / max
+    reductions, one multiply by the reciprocal scale in the activation's own
+    dtype, no clamp (the scale's 2^-7 margin keeps the rounded absmax below the
+    next fp8 value, see ``ACT_SCALE_MARGIN``). The 2.26 profile of the Wan
+    transformer showed the previous fp32 abs / divide / clamp passes, not the
+    fp8 dots, as the cost of the dynamic path. ``clamp_bound`` is NxD's
+    ``quantize_clamp_bound`` applied to the absmax; when set, the scaled
+    tensor is clamped (values above the bound would otherwise exceed 240).
     """
     import torch
 
-    from difflet.quant.fp8 import FP8_DTYPE, FP8_MAX, FP8_MIN_SCALE
+    from difflet.quant.fp8 import ACT_SCALE_MARGIN, FP8_DTYPE, FP8_MAX, FP8_MIN_SCALE
 
-    x32 = x.to(torch.float32)
     # Explicit dims: on XLA, amax() with no dims traced as a no-op "reduction"
     # (trn2, 2026-10-01: the scale came back input-shaped, f32[1,16,128]).
-    amax = x32.abs().amax(dim=tuple(range(x32.ndim)))
+    dims = tuple(range(x.ndim))
+    amax = torch.maximum(x.amax(dim=dims), -x.amin(dim=dims)).to(torch.float32)
     if clamp_bound != float("inf"):
         amax = amax.clamp(max=clamp_bound)
-    scale = (amax / FP8_MAX).clamp_min(FP8_MIN_SCALE)
-    quantized = (x32 / scale).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
-    return quantized, scale
+    scale = (amax / FP8_MAX * ACT_SCALE_MARGIN).clamp_min(FP8_MIN_SCALE)
+    scaled = x * (1.0 / scale).to(x.dtype)
+    if clamp_bound != float("inf"):
+        scaled = scaled.clamp(-FP8_MAX, FP8_MAX)
+    return scaled.to(FP8_DTYPE), scale
 
 
 def dynamic_fp8_linear(layer: Any, input_parallel: "torch.Tensor", **impl_kwargs: Any) -> "torch.Tensor":
@@ -165,8 +175,10 @@ def dynamic_fp8_linear(layer: Any, input_parallel: "torch.Tensor", **impl_kwargs
         input_parallel, getattr(layer, "clamp_bound", float("inf"))
     )
     output = layer._forward_impl(input=quantized, weight=layer.weight, bias=None, **impl_kwargs)
-    output = output.to(torch.float32) * input_scale * layer.scale.to(torch.float32).reshape(-1)
-    return output.to(original_dtype)
+    # One combined (tiny) scale, one multiply over the output: the 2.26 HLO
+    # carried two full-size F32 multiplies per linear for the two scales.
+    combined = input_scale * layer.scale.to(torch.float32).reshape(-1)
+    return (output.to(torch.float32) * combined).to(original_dtype)
 
 
 _MAPPING: dict[Any, Any] | None = None

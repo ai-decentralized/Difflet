@@ -55,13 +55,34 @@ def test_zero_weight_uses_scale_floor_and_stays_finite():
 
 
 def test_dynamic_activation_quantization_is_per_tensor_absmax():
+    """Lean law (2026-10-03): scale = absmax / 240 * (1 + 2^-7); the margin lets the
+    device skip the clamp — bf16 rounding of x * (1/scale) can then never reach the
+    next fp8 value above 240 (256, which is inf/NaN on Trainium)."""
     x = torch.randn(3, 5, 7)
     q, scale = fp8.quantize_activation(x)
     assert q.dtype == torch.float8_e4m3fn and scale.shape == (1,)
-    assert torch.isclose(scale, x.abs().amax().reshape(1) / fp8.FP8_MAX)
+    assert torch.isclose(scale, x.abs().amax().reshape(1) / fp8.FP8_MAX * fp8.ACT_SCALE_MARGIN)
+    assert fp8.ACT_SCALE_MARGIN == 1 + 2**-7
     back = fp8.fake_quant_activation(x)
     assert back.dtype == x.dtype and back.shape == x.shape
-    assert (back - x).abs().max() <= x.abs().max() * 2**-4 + 1e-6
+    assert (back - x).abs().max() <= x.abs().max() * 2**-4 * fp8.ACT_SCALE_MARGIN + 1e-6
+
+
+def test_activation_quantization_in_bf16_never_exceeds_240_without_a_clamp():
+    """The device quantizes in the activation's dtype (bf16) with a multiply by the
+    bf16 reciprocal scale and no clamp; the worst-case product must round to <= 240.
+    Adversarial inputs: the absmax element, values just below it, large magnitudes."""
+    torch.manual_seed(3)
+    for scale_pow in (-10, 0, 7, 15):
+        base = torch.randn(64, 256, dtype=torch.bfloat16) * (2.0**scale_pow)
+        base[0, 0] = base.abs().max() * 1.0  # exact absmax, positive
+        base[1, 1] = -base.abs().max()  # and negative
+        q, scale = fp8.quantize_activation(base)
+        assert q.float().abs().max() <= 240.0, (scale_pow, q.float().abs().max())
+        assert torch.isfinite(q.float()).all()
+        # Round trip stays within fp8 precision of the (margin-scaled) range.
+        back = fp8.dequantize(q, scale, torch.float32)
+        assert (back - base.float()).abs().max() <= base.float().abs().max() * 2**-4 * 1.02 + 1e-30
 
 
 def test_reference_linear_tracks_bf16_and_quantizes_both_operands():
@@ -82,7 +103,8 @@ def test_reference_linear_tracks_bf16_and_quantizes_both_operands():
     cos = torch.nn.functional.cosine_similarity
     assert cos(w8a8.float().flatten(), exact.flatten(), dim=0) > 0.995
     assert (w8a8.float() - exact).norm() > 0  # quantization actually happened
-    # Matches the explicit fake-quant composition (the device path's contract).
-    x_q = fp8.fake_quant_activation(x.float())
-    composed = x_q @ fp8.dequantize(q, scale).t() + bias.float()
+    # Matches the explicit composition (the device path's contract): the activation is
+    # quantized in its own dtype and its fp8 values are used exactly.
+    x_q, x_scale = fp8.quantize_activation(x)
+    composed = (x_q.float() * x_scale) @ fp8.dequantize(q, scale).t() + bias.float()
     assert torch.allclose(w8a8.float(), composed.to(torch.bfloat16).float())

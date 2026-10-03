@@ -365,8 +365,10 @@ def test_quantize_activation_per_tensor_matches_the_cpu_reference():
     assert q.float().abs().max() <= fp8.FP8_MAX
 
     clamped_q, clamped_scale = tq.quantize_activation_per_tensor(x, clamp_bound=1.0)
-    assert clamped_scale.item() == pytest.approx(1.0 / fp8.FP8_MAX)
+    assert clamped_scale.item() == pytest.approx(1.0 / fp8.FP8_MAX * fp8.ACT_SCALE_MARGIN)
     assert clamped_q.float().abs().max() == fp8.FP8_MAX  # saturated at the clamp
+    # Lean law: no fp32 up-cast of the activation, no clamp, bf16 multiply (x * 1/scale).
+    assert (q.float().abs().max() <= fp8.FP8_MAX) and q.float().abs().max() < 248
 
 
 @pytest.mark.parametrize("granularity", ["tensor", "channel"])
