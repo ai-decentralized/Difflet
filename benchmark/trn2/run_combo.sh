@@ -30,6 +30,13 @@ export DIFFLET_BENCH_DEVICE="${DIFFLET_BENCH_DEVICE:-trn2combo}"
 PY="$DIFFLET_VENV/bin/python"
 MIN_FREE_GB="${DIFFLET_MIN_FREE_GB:-200}"
 WARM_ITERS="${DIFFLET_WARM_ITERS:-3}"
+# In-process resident generates: only flux's real-loop builder keeps the model
+# loaded across calls. The staged models' builders (wan, qwen_image,
+# hunyuan_video) reload the stage per call -- not resident, and repeated loads
+# leak Neuron RT resources -- so they get one generate (their denoise-loop
+# wall, loop_wall_s, is the step-reduction signal instead).
+if [[ "$MODEL" == flux_1_dev ]]; then RESIDENT_GENS="${DIFFLET_RESIDENT_GENERATES:-$WARM_ITERS}"
+else RESIDENT_GENS="${DIFFLET_RESIDENT_GENERATES:-1}"; fi
 ts() { date -u +%FT%TZ; }
 
 need() {  # need <label> -> prints the missing metrics (compile warm step), space-separated
@@ -89,7 +96,7 @@ for label in "${LABELS[@]}"; do
   if [[ $ok == 1 && " $miss " == *" step "* ]]; then
     run_step "$label" step_realloop "$logdir/${MODEL}_realloop.log" \
       "$PY" -m benchmark.step_realloop --model "$MODEL" --config "$label" \
-        --generates "$WARM_ITERS" || ok=0
+        --generates "$RESIDENT_GENS" || ok=0
   fi
   if [[ $ok == 1 && -z "$(need "$label")" ]]; then
     echo "[combo] $(ts) $MODEL/$label CELL_COMPLETE"

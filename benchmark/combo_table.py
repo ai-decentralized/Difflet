@@ -17,7 +17,8 @@ import json
 import statistics
 from pathlib import Path
 
-from benchmark.models import COMBO_LABELS, logs_dir, json_path, resolve
+from benchmark.models import (CFG_TRACK, CFG_TRACK_REF, COMBO_LABELS, MATRIX, logs_dir,
+                              json_path, resolve)
 
 
 def _row(slug: str, label: str) -> dict | None:
@@ -28,11 +29,12 @@ def _row(slug: str, label: str) -> dict | None:
     d = json.loads(p.read_text())
     st = d.get("step_latency") or {}
     tc = d.get("teacache") or {}
-    calls = tc.get("dit_calls") or (cfg.steps if not tc else None)
+    # sequential CFG calls the DiT twice per step: prefer the measured count
+    calls = d.get("dit_calls") or tc.get("dit_calls") or (cfg.steps if not tc else None)
     resident = d.get("resident_generate_s") or []
     warm = d.get("e2e_warm") or {}
     bd = d.get("e2e_warm_breakdown") or {}
-    loop = st.get("generate_wall_s") or st.get("loop_wall_s")
+    loop = d.get("loop_wall_s")
     return {
         "label": label, "desc": cfg.config_label.split(";")[0],
         "step_ms": st.get("mean") and st["mean"] * 1000, "n": st.get("n"),
@@ -46,14 +48,22 @@ def _row(slug: str, label: str) -> dict | None:
     }
 
 
+def ref_label(slug: str, label: str) -> str:
+    """The same-workload reference: tp4, or the CFG track's tp4g5 when the
+    guidance differs from the matrix workload."""
+    cfg = resolve(slug, label)
+    return CFG_TRACK_REF if cfg.guidance_scale != MATRIX[slug].guidance_scale else "tp4"
+
+
 def _parity(slug: str, label: str, cfg) -> dict | None:
-    if label == "tp4":
+    ref = ref_label(slug, label)
+    if label == ref:
         return {"identical": True}
     from benchmark.adapters.trainium import spec_slug
     from benchmark.output_parity import compare
     ext = ".png" if cfg.output_kind == "image" else ".mp4"
     logs = Path(logs_dir())
-    a = logs / f"{spec_slug(resolve(slug, 'tp4'))}_out{ext}"
+    a = logs / f"{spec_slug(resolve(slug, ref))}_out{ext}"
     b = logs / f"{spec_slug(cfg)}_out{ext}"
     if not (a.exists() and b.exists()):
         return None
@@ -77,17 +87,19 @@ def _psnr(r: dict | None) -> str:
 
 
 def table(slug: str) -> list[str]:
-    rows = [r for r in (_row(slug, l) for l in COMBO_LABELS) if r]
-    L = ["| label | configuration | per-step (ms) | DiT calls | resident (s) | "
-         "warm e2e (s) | load (s) | PSNR / SSIM vs tp4 |",
-         "|---|---|---|---|---|---|---|---|"]
+    rows = [r for r in (_row(slug, l) for l in [*COMBO_LABELS, *CFG_TRACK]) if r]
+    L = ["| label | configuration | per-step (ms) | DiT calls | denoise loop (s) | "
+         "resident (s) | warm e2e (s) | load (s) | PSNR vs ref |",
+         "|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         if r["status"] == "blocked":
-            L.append(f"| `{r['label']}` | {r['desc']} | **BLOCKED (HBM)** — {r['blocked']} |||||||")
+            L.append(f"| `{r['label']}` | {r['desc']} | **BLOCKED** — {r['blocked']} ||||||||")
             continue
         L.append(f"| `{r['label']}` | {r['desc']} | {_fmt(r['step_ms'])} | "
-                 f"{_fmt(r['calls'], '{}')}/{r['steps']} | {_fmt(r['resident_s'], '{:.2f}')} | "
-                 f"{_fmt(r['warm_s'])} | {_fmt(r['load_s'])} | {_psnr(r['parity'])} |")
+                 f"{_fmt(r['calls'], '{}')}/{r['steps']} | {_fmt(r['loop_s'], '{:.2f}')} | "
+                 f"{_fmt(r['resident_s'], '{:.2f}')} | "
+                 f"{_fmt(r['warm_s'])} | {_fmt(r['load_s'])} | {_psnr(r['parity'])}"
+                 f"{'' if ref_label(slug, r['label']) == 'tp4' else ' (vs ' + CFG_TRACK_REF + ')'} |")
     return L
 
 

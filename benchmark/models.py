@@ -394,6 +394,7 @@ COMBO_TEACACHE: dict[str, dict[str, Any]] = {
     "tcad": {"teacache_adaptive": True},
     # calibrated adaptive at larger skip budgets (calibrate fit --target-skips N);
     # the probe artifact is shared -- only teacache_probe_enabled is in the key
+    "tcad7": {"teacache_adaptive": 7},     # 20-step models: cadence 2's budget is 5
     "tcad12": {"teacache_adaptive": 12},
     "tcad14": {"teacache_adaptive": 14},
 }
@@ -407,9 +408,28 @@ _COMBO_TC_DESC = {
     "tcod005": "TeaCache online-delta 0.05", "tcod01": "TeaCache online-delta 0.1",
     "tcod02": "TeaCache online-delta 0.2", "tcod04": "TeaCache online-delta 0.4",
     "tcad": "TeaCache calibrated adaptive",
+    "tcad7": "TeaCache calibrated adaptive, 7-skip budget",
     "tcad12": "TeaCache calibrated adaptive, 12-skip budget",
     "tcad14": "TeaCache calibrated adaptive, 14-skip budget",
 }
+# Wan CFG track (true-CFG models only): the same search at guidance 5.0, where
+# the second (unconditional) branch exists -- sequential on tp4 (with and
+# without TeaCache) vs CFG-parallel on tp=2 x 2 branches. TeaCache is off in
+# the loop under CFG-parallel (difflet/models/wan/pipeline.py), so there is
+# no tp2cfg TeaCache cell. Quality is compared against tp4g5, not tp4.
+CFG_TRACK: dict[str, dict[str, Any]] = {
+    "tp4g5": {"guidance_scale": 5.0},
+    "tp4g5tc2": {"guidance_scale": 5.0, "teacache_cadence": 2},
+    "tp2cfgg5": {"tp": 2, "cfg_parallel": True, "guidance_scale": 5.0},
+}
+CFG_TRACK_REF = "tp4g5"
+CONFIGS.update(CFG_TRACK)
+_CONFIG_DESC.update({
+    "tp4g5": "tp=4 at guidance 5.0 (two sequential CFG branches)",
+    "tp4g5tc2": "tp=4 at guidance 5.0 + TeaCache cadence 2",
+    "tp2cfgg5": "tp=2 x CFG-parallel at guidance 5.0",
+})
+
 COMBO_LABELS: list[str] = []
 for _lay, _lo in COMBO_LAYOUTS.items():
     for _dec in ("", "taef1"):

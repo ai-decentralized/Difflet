@@ -129,10 +129,10 @@ def test_online_delta_sweep_labels_are_tp4tcod_at_other_alphas():
 
 
 def test_configs_are_the_verify_cli_labels_sized_to_four_cores():
-    from benchmark.models import COMBO_LABELS, ONLINE_DELTA_SWEEP
+    from benchmark.models import CFG_TRACK, COMBO_LABELS, ONLINE_DELTA_SWEEP
     assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4cfg2",
                             "tp4tc2", "tp4tcod", "tp4tcad", *ONLINE_DELTA_SWEEP,
-                            *COMBO_LABELS}
+                            *COMBO_LABELS, *CFG_TRACK}
     for label in CONFIGS:
         cfg = resolve("flux_1_dev", label)
         world = cfg.tp * cfg.cp * (2 if cfg.cfg_parallel else 1)
@@ -299,3 +299,14 @@ def test_combo_tcad_budgets_have_their_own_calibration_and_target():
     assert base.teacache_calibration.endswith("flux_1_dev_tp4tcad.json")
     # a budget never changes the artifact: only the probe flag is compiled in
     assert c12.compile_teacache_flags()[0] == "--teacache-speedup"
+
+
+def test_wan_cfg_track_and_twenty_step_budget():
+    assert resolve("wan_2_1", "tp4g5").guidance_scale == 5.0
+    assert resolve("wan_2_1", "tp4g5tc2").teacache_flags() == ["--teacache-cadence", "2"]
+    cfgp = resolve("wan_2_1", "tp2cfgg5")
+    assert cfgp.parallel_flags() == ["--tp-degree", "2", "--cp-degree", "1", "--cfg-parallel"]
+    assert cfgp.guidance_scale == 5.0
+    t7 = resolve("wan_2_1", "tp4tcad7")
+    assert t7.teacache_speedup == round(20 / 13, 3)
+    assert t7.teacache_calibration.endswith("wan_2_1_tp4tcad_s7.json")
