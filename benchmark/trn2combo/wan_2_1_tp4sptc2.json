@@ -24,14 +24,57 @@
   "load_seconds": null,
   "e2e_cold_seconds": null,
   "e2e_breakdown": null,
-  "e2e_warm": null,
-  "step_latency": null,
+  "e2e_warm": {
+    "n": 5,
+    "mean": 77.97714819140383,
+    "median": 78.29318757500732,
+    "std": 0.8073540821948362,
+    "p50": 78.29318757500732,
+    "p90": 78.88653170299949,
+    "min": 76.57746074801253,
+    "max": 78.88653170299949,
+    "samples": [
+      78.88653170299949,
+      78.48732585400285,
+      77.64123507699696,
+      78.29318757500732,
+      76.57746074801253
+    ]
+  },
+  "step_latency": {
+    "n": 14,
+    "mean": 0.5773367927862897,
+    "median": 0.5771472619962879,
+    "std": 0.0005890411276000612,
+    "p50": 0.5771352619922254,
+    "p90": 0.5779054529994028,
+    "min": 0.5767081059893826,
+    "max": 0.5790182830096455,
+    "samples": [
+      0.5790182830096455,
+      0.5771352619922254,
+      0.5775731390021974,
+      0.5768782969971653,
+      0.5768518510012655,
+      0.5776096570043592,
+      0.5771592620003503,
+      0.5774383170064539,
+      0.5779054529994028,
+      0.5776715079991845,
+      0.5767081059893826,
+      0.5769370140042156,
+      0.5768030320032267,
+      0.5770259179989807
+    ]
+  },
   "step_basis": "",
   "step_latency_alt": {},
   "stage_seconds": {},
   "e2e_warm_natural": null,
   "step_latency_natural": null,
-  "throughput": {},
+  "throughput": {
+    "DiT steps/s": 1.732
+  },
   "peak_device_mem_gb": null,
   "output": null,
   "toolchain": {
@@ -44,7 +87,9 @@
   "config_label": "tp=4 + sequence parallel + TeaCache cadence 2; tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline",
   "status": "compiled",
   "notes": [
-    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop"
+    "per-step = 577.3 ms/DiT-step (median 577.1, p90 577.9, n=14) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 15 DiT calls timed; warm generate 32s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_warm = 78 s (n=5; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-10-04 18:16 UTC",
   "config_slug": "wan_2_1_tp4sptc2",
@@ -61,6 +106,79 @@
     "cadence": 2,
     "online_delta_alpha": null,
     "warmup_steps": 5,
-    "cooldown_steps": 5
+    "cooldown_steps": 5,
+    "dit_calls": 15,
+    "skipped_steps_by_calls": 5,
+    "stats": {
+      "full_steps": 15,
+      "skipped_steps": 5,
+      "probe_calls": 0,
+      "last_delta_estimate": null,
+      "cache_initialized": true,
+      "online_delta_alpha": 0.0,
+      "baseline_delta": null,
+      "skipped_step_indices": [
+        6,
+        8,
+        10,
+        12,
+        14
+      ],
+      "delta_trace": []
+    }
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder (UMT5)",
+        "load_s": 7.8
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 9.08
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 29.73
+      }
+    ],
+    "weights_load_total_s": 46.61,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 76.577,
+    "compute_and_overhead_s": 29.967
+  },
+  "dit_calls_per_step": 0.75,
+  "dit_calls": 15,
+  "loop_wall_s": 8.763,
+  "loop_step_ms": 438.2,
+  "quality_holdout": {
+    "tp4": {
+      "ref": "tp4",
+      "prompts": 4,
+      "psnr_db": [
+        37.73,
+        36.98,
+        36.58,
+        37.13
+      ],
+      "mean_psnr_db": 37.1,
+      "min_psnr_db": 36.58,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    },
+    "tp4sp": {
+      "ref": "tp4sp",
+      "prompts": 4,
+      "psnr_db": [
+        37.73,
+        36.98,
+        36.68,
+        37.07
+      ],
+      "mean_psnr_db": 37.11,
+      "min_psnr_db": 36.68,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    }
   }
 }

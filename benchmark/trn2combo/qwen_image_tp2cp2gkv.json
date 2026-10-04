@@ -1,0 +1,29 @@
+{
+  "model_id": "Qwen/Qwen-Image",
+  "model_slug": "qwen_image",
+  "config": "tp2cp2gkv",
+  "config_slug": "qwen_image_tp2cp2gkv",
+  "device_slug": "trn2combo",
+  "status": "blocked",
+  "blocked_reason": "HANG: the generate stage stalled at 'Initializing traced model weights' (ranks 0..3) for 26 min with no CPU (futex wait); killed by the operator, not retried",
+  "blocked_evidence": "benchmark/trn2combo/logs/warm/qwen_image_tp2cp2gkv_generate.log (last line 'Initializing traced model weights for ranks: 0...3' at 22:51:05 UTC; stage pid 302577 in futex_do_wait, 9% CPU, killed 23:17:46)",
+  "parallel": {
+    "tp_degree": 2,
+    "cp_degree": 2,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "teacache": null,
+  "notes": [
+    "BLOCKED: HANG: the generate stage stalled at 'Initializing traced model weights' (ranks 0..3) for 26 min with no CPU (futex wait); killed by the operator, not retried",
+    "evidence: benchmark/trn2combo/logs/warm/qwen_image_tp2cp2gkv_generate.log (last line 'Initializing traced model weights for ranks: 0...3' at 22:51:05 UTC; stage pid 302577 in futex_do_wait, 9% CPU, killed 23:17:46)"
+  ],
+  "follow_up": "reproduce with NEURON_RT_LOG_LEVEL=INFO; the compile itself passed (454 s)"
+}

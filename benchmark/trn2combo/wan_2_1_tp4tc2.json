@@ -25,18 +25,20 @@
   "e2e_cold_seconds": null,
   "e2e_breakdown": null,
   "e2e_warm": {
-    "n": 3,
-    "mean": 80.22657099599503,
-    "median": 79.25492349900014,
-    "std": 1.558236584018981,
-    "p50": 79.25492349900014,
-    "p90": 82.42530972599343,
-    "min": 78.99947976299154,
-    "max": 82.42530972599343,
+    "n": 5,
+    "mean": 77.8972593012033,
+    "median": 78.1879729580105,
+    "std": 1.2657109412392198,
+    "p50": 78.1879729580105,
+    "p90": 79.67937607000931,
+    "min": 76.33492765900155,
+    "max": 79.67937607000931,
     "samples": [
-      82.42530972599343,
-      78.99947976299154,
-      79.25492349900014
+      76.59834289799619,
+      78.1879729580105,
+      76.33492765900155,
+      78.68567692099896,
+      79.67937607000931
     ]
   },
   "step_latency": {
@@ -87,7 +89,7 @@
   "notes": [
     "per-step = 575.1 ms/DiT-step (median 574.6, p90 576.4, n=14) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 15 DiT calls timed; warm generate 33s; output finite=True.",
     "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
-    "e2e_warm = 80 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+    "e2e_warm = 78 s (n=5; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-10-04 15:39 UTC",
   "config_slug": "wan_2_1_tp4tc2",
@@ -129,24 +131,40 @@
     "stages": [
       {
         "stage": "text_encoder (UMT5)",
-        "load_s": 8.85
+        "load_s": 10.69
       },
       {
         "stage": "transformer (denoise loop)",
-        "load_s": 9.32
+        "load_s": 9.02
       },
       {
         "stage": "vae_decoder",
-        "load_s": 30.73
+        "load_s": 30.61
       }
     ],
-    "weights_load_total_s": 48.9,
+    "weights_load_total_s": 50.32,
     "weights_shard_total_s": 0.0,
-    "wall_total_s": 79.255,
-    "compute_and_overhead_s": 30.355
+    "wall_total_s": 79.679,
+    "compute_and_overhead_s": 29.359
   },
   "dit_calls_per_step": 0.75,
   "dit_calls": 15,
   "loop_wall_s": 8.768,
-  "loop_step_ms": 438.4
+  "loop_step_ms": 438.4,
+  "quality_holdout": {
+    "tp4": {
+      "ref": "tp4",
+      "prompts": 4,
+      "psnr_db": [
+        37.67,
+        36.97,
+        36.49,
+        37.29
+      ],
+      "mean_psnr_db": 37.11,
+      "min_psnr_db": 36.49,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    }
+  }
 }

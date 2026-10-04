@@ -1,0 +1,139 @@
+{
+  "model_id": "Qwen/Qwen-Image",
+  "model_type": "qwen_image",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 2,
+    "cp_degree": 2,
+    "cp_mode": "ring",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "compile_seconds": 443.02313202500227,
+  "compile_breakdown": {
+    "transformer": {
+      "module_load_s": 88.11,
+      "hlo_generate_s": 16.967,
+      "priority_hlo_compile_s": 38.521,
+      "all_hlo_compile_s": 0.007,
+      "build_total_s": 422.574,
+      "other_s": 278.969
+    },
+    "wall_total_s": 422.574
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": {
+    "n": 3,
+    "mean": 75.615456852994,
+    "median": 75.1304241209873,
+    "std": 0.7945390407249124,
+    "p50": 75.1304241209873,
+    "p90": 76.735752159002,
+    "min": 74.98019427899271,
+    "max": 76.735752159002,
+    "samples": [
+      74.98019427899271,
+      76.735752159002,
+      75.1304241209873
+    ]
+  },
+  "step_latency": {
+    "n": 19,
+    "mean": 0.4923534083684085,
+    "median": 0.4922090750042116,
+    "std": 0.0008413215899903477,
+    "p50": 0.4922090750042116,
+    "p90": 0.49239875200146344,
+    "min": 0.49181975099781994,
+    "max": 0.4958385880017886,
+    "samples": [
+      0.4958385880017886,
+      0.4923143609921681,
+      0.4923971380048897,
+      0.4922090750042116,
+      0.49205567900207825,
+      0.49201073599397205,
+      0.4920897599949967,
+      0.4919974980002735,
+      0.4919273880077526,
+      0.49181975099781994,
+      0.49195128299470525,
+      0.4922206420014845,
+      0.4923952420067508,
+      0.4924077909963671,
+      0.49228933500126004,
+      0.492086903002928,
+      0.49239875200146344,
+      0.49196895299246535,
+      0.4923358840023866
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 2.031
+  },
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=2 x cp=2 (ring); tp=4, bf16, joint attention via attention_cte",
+  "status": "compiled",
+  "notes": [
+    "per-step = 492.4 ms/DiT-step (median 492.2, p90 492.4, n=19) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronQwenImageTransformerApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 37s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_warm = 76 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+  ],
+  "timestamp": "2026-10-04 23:17 UTC",
+  "config_slug": "qwen_image_tp2cp2ring",
+  "model_slug": "qwen_image",
+  "config": "tp2cp2ring",
+  "device_slug": "trn2combo",
+  "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 4.0,
+  "output_kind": "image",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 13.431
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 20.5
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 8.17
+      }
+    ],
+    "weights_load_total_s": 42.101,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 75.13,
+    "compute_and_overhead_s": 33.029
+  },
+  "dit_calls_per_step": 1.0,
+  "dit_calls": 20,
+  "loop_wall_s": 10.854,
+  "loop_step_ms": 542.7
+}
