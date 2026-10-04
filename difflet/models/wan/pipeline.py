@@ -359,7 +359,9 @@ class WanOrchestrator:
             ctrl.reset()
             self._teacache_last_model_id = None
 
-        for step_index, timestep in enumerate(timesteps):
+        from difflet.pipeline.step_timing import timed_steps
+
+        for step_index, timestep in timed_steps("wan", timesteps):
             current_model = self._select_transformer(timestep, boundary_timestep)
             scale = self._select_guidance_scale(timestep, boundary_timestep, guidance_scale, guidance_scale_2)
             model_dtype = _component_dtype(current_model, self.dtype)

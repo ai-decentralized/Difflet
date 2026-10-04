@@ -231,7 +231,9 @@ class HunyuanVideoOrchestrator:
             and hasattr(self.transformer, "teacache_delta")
         )
         prev_mod_handle: torch.Tensor | None = None
-        for step_index, timestep in enumerate(timesteps):
+        from difflet.pipeline.step_timing import timed_steps
+
+        for step_index, timestep in timed_steps("hunyuan_video", timesteps):
             model_dtype = _component_dtype(self.transformer, self.dtype)
             timestep_batch = _batch_timestep(
                 timestep,
