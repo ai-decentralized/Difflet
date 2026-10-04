@@ -1,0 +1,99 @@
+{
+  "model_id": "black-forest-labs/FLUX.1-dev",
+  "model_slug": "flux_1_dev",
+  "config": "tp2cp2tcad",
+  "config_slug": "flux_1_dev_tp2cp2tcad",
+  "device_slug": "trn2combo",
+  "status": "blocked",
+  "blocked_reason": "HBM OOM: tp=2 x cp=2 + the TeaCache probe NEFF leaves NC 2 at 23.3 GB of tensors (of ~24 GB); the first generate's 36 MB tensor allocation fails",
+  "blocked_evidence": "benchmark/trn2combo/logs/warm/flux_1_dev_tp2cp2tcad_generate.log (TDRV: Failed to allocate DEVICE memory (37748736 bytes) on ND 0:NC 2); breakdown: benchmark/trn2combo/logs/tp2cp2tcad/neuron_mem_table_nc2.log",
+  "parallel": {
+    "tp_degree": 2,
+    "cp_degree": 2,
+    "cp_mode": "ulysses",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 28,
+  "teacache": {
+    "mode": "adaptive",
+    "cadence": null,
+    "online_delta_alpha": null,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "target_speedup": 1.474,
+    "calibration": "/home/ubuntu/Difflet/.claude/worktrees/flux-best-combo/benchmark/trn2combo/teacache_calib/flux_1_dev_tp4tcad.json",
+    "fit_r2": 0.5905420232330068,
+    "signal_pearson": 0.7077722173414339,
+    "threshold": 0.08461038372182426,
+    "accumulate": true,
+    "n_samples": 216,
+    "calibration_prompts": [
+      "a cat sitting on a bench in a sunlit park",
+      "a red vintage car parked outside a diner at dusk",
+      "an astronaut riding a horse across a desert plain",
+      "a bowl of ramen with steam rising, studio lighting",
+      "a lighthouse on a cliff during a thunderstorm",
+      "a robot barista pouring latte art in a cozy cafe",
+      "a snow-covered temple garden with stone lanterns",
+      "a macro photo of a dragonfly on a dewy leaf"
+    ],
+    "poly_degree": 4,
+    "target_skips": 9,
+    "hardware_measured": true
+  },
+  "notes": [
+    "BLOCKED: HBM OOM: tp=2 x cp=2 + the TeaCache probe NEFF leaves NC 2 at 23.3 GB of tensors (of ~24 GB); the first generate's 36 MB tensor allocation fails",
+    "evidence: benchmark/trn2combo/logs/warm/flux_1_dev_tp2cp2tcad_generate.log (TDRV: Failed to allocate DEVICE memory (37748736 bytes) on ND 0:NC 2); breakdown: benchmark/trn2combo/logs/tp2cp2tcad/neuron_mem_table_nc2.log"
+  ],
+  "compile_seconds": 191.44556893499976,
+  "compile_breakdown": {
+    "text_encoder_clip": {
+      "module_load_s": 0.283,
+      "hlo_generate_s": 0.326,
+      "all_hlo_compile_s": 0.04,
+      "build_total_s": 0.732,
+      "other_s": 0.084
+    },
+    "text_encoder_t5": {
+      "module_load_s": 0.366,
+      "hlo_generate_s": 0.809,
+      "all_hlo_compile_s": 0.078,
+      "build_total_s": 1.324,
+      "other_s": 0.07
+    },
+    "transformer": {
+      "module_load_s": 1.739,
+      "hlo_generate_s": 11.736,
+      "priority_hlo_compile_s": 0.651,
+      "all_hlo_compile_s": 0.003,
+      "build_total_s": 164.423,
+      "other_s": 150.294
+    },
+    "vae_decoder": {
+      "module_load_s": 0.21,
+      "hlo_generate_s": 0.409,
+      "all_hlo_compile_s": 0.789,
+      "build_total_s": 1.716,
+      "other_s": 0.308
+    },
+    "FluxTeacacheProbeFusedModel": {
+      "module_load_s": 2.991,
+      "hlo_generate_s": 0.174,
+      "priority_hlo_compile_s": 3.661,
+      "all_hlo_compile_s": 0.0,
+      "build_total_s": 14.957,
+      "other_s": 8.131
+    },
+    "wall_total_s": 183.153
+  },
+  "hbm_nc2_tensors_gb": 23.285,
+  "hbm_nc_capacity_gb": 24.0,
+  "failed_alloc_bytes": 37748736,
+  "follow_up": "fits under tp4 (a quarter of the transformer per core); on tp2 it needs a larger instance (trn2.48xlarge) or T5 off the DiT cores"
+}

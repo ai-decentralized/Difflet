@@ -1,0 +1,62 @@
+{
+  "schema": "difflet-m9-teacache-calibration-v1",
+  "model": "flux",
+  "shape_label": "1024x1024",
+  "num_steps": 28,
+  "poly_coef": [
+    -0.06570621730647891,
+    3.8014115558603234,
+    -36.75264338915988,
+    150.62412196329652,
+    -179.74329247585484
+  ],
+  "threshold": 0.1636266924868337,
+  "warmup_steps": 5,
+  "cooldown_steps": 5,
+  "target_speedup": 1.75,
+  "fit_r2": 0.5905420232330068,
+  "n_samples": 216,
+  "mod_input_source": "block0_modulated_input",
+  "skip_run_length": 1,
+  "accumulate": true,
+  "cadence": 0,
+  "online_delta_alpha": 0.0,
+  "signal_pearson": 0.7077722173414339,
+  "poly_degree": 4,
+  "signal_source": "fused probe NEFF: on-device rel-L1 of the block-0 modulated input vs the previous step",
+  "target_skips": 12,
+  "target_rule": "explicit --target-skips 12 (best-combination search)",
+  "simulated_skips_per_prompt": [
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12
+  ],
+  "calibration_prompts": [
+    "a cat sitting on a bench in a sunlit park",
+    "a red vintage car parked outside a diner at dusk",
+    "an astronaut riding a horse across a desert plain",
+    "a bowl of ramen with steam rising, studio lighting",
+    "a lighthouse on a cliff during a thunderstorm",
+    "a robot barista pouring latte art in a cozy cafe",
+    "a snow-covered temple garden with stone lanterns",
+    "a macro photo of a dragonfly on a dewy leaf"
+  ],
+  "calibration_seeds": [
+    42,
+    42,
+    42,
+    42,
+    42,
+    42,
+    42,
+    42
+  ],
+  "pairs_file": "benchmark/trn2combo/teacache_calib/flux_1_dev_tp4tcad_pairs.json",
+  "hardware_measured": true,
+  "fitted_at": "2026-10-04T00:36:41Z"
+}
