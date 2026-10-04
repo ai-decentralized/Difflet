@@ -42,6 +42,7 @@ def _row(slug: str, label: str) -> dict | None:
         "load_s": bd.get("weights_load_total_s"),
         "parity": _parity(slug, label, cfg),
         "status": d.get("status"), "loop_s": loop,
+        "blocked": d.get("blocked_reason"),
     }
 
 
@@ -81,6 +82,9 @@ def table(slug: str) -> list[str]:
          "warm e2e (s) | load (s) | PSNR / SSIM vs tp4 |",
          "|---|---|---|---|---|---|---|---|"]
     for r in rows:
+        if r["status"] == "blocked":
+            L.append(f"| `{r['label']}` | {r['desc']} | **BLOCKED (HBM)** — {r['blocked']} |||||||")
+            continue
         L.append(f"| `{r['label']}` | {r['desc']} | {_fmt(r['step_ms'])} | "
                  f"{_fmt(r['calls'], '{}')}/{r['steps']} | {_fmt(r['resident_s'], '{:.2f}')} | "
                  f"{_fmt(r['warm_s'])} | {_fmt(r['load_s'])} | {_psnr(r['parity'])} |")

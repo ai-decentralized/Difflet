@@ -1,0 +1,182 @@
+{
+  "model_id": "black-forest-labs/FLUX.1-dev",
+  "model_type": "flux",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 2,
+    "cp_degree": 2,
+    "cp_mode": "ulysses",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 28,
+  "compile_seconds": 246.32240671199543,
+  "compile_breakdown": {
+    "text_encoder_clip": {
+      "module_load_s": 0.295,
+      "hlo_generate_s": 0.328,
+      "all_hlo_compile_s": 0.038,
+      "build_total_s": 0.746,
+      "other_s": 0.085
+    },
+    "text_encoder_t5": {
+      "module_load_s": 0.366,
+      "hlo_generate_s": 0.82,
+      "all_hlo_compile_s": 0.079,
+      "build_total_s": 1.338,
+      "other_s": 0.073
+    },
+    "transformer": {
+      "module_load_s": 1.816,
+      "hlo_generate_s": 12.084,
+      "priority_hlo_compile_s": 0.458,
+      "all_hlo_compile_s": 0.003,
+      "build_total_s": 172.141,
+      "other_s": 157.78
+    },
+    "vae_decoder": {
+      "module_load_s": 0.01,
+      "hlo_generate_s": 0.076,
+      "all_hlo_compile_s": 62.981,
+      "build_total_s": 63.229,
+      "other_s": 0.162
+    },
+    "wall_total_s": 237.455
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": {
+    "n": 3,
+    "mean": 37.73305285666478,
+    "median": 37.545355543996266,
+    "std": 0.3327324571588276,
+    "p50": 37.545355543996266,
+    "p90": 38.200590716995066,
+    "min": 37.45321230900299,
+    "max": 38.200590716995066,
+    "samples": [
+      37.45321230900299,
+      38.200590716995066,
+      37.545355543996266
+    ]
+  },
+  "step_latency": {
+    "n": 27,
+    "mean": 0.2627733555925294,
+    "median": 0.26267841499793576,
+    "std": 0.0002851552150252481,
+    "p50": 0.26267841499793576,
+    "p90": 0.26311652600270463,
+    "min": 0.26231214200379327,
+    "max": 0.26334395600133575,
+    "samples": [
+      0.26298755899915705,
+      0.26267841499793576,
+      0.2628755949990591,
+      0.26334395600133575,
+      0.2629861230016104,
+      0.26285267699859105,
+      0.26231214200379327,
+      0.26242969300074037,
+      0.2625819569948362,
+      0.2625705980026396,
+      0.2625152149994392,
+      0.2626368139972328,
+      0.26252908700553235,
+      0.26239044799876865,
+      0.26248143799602985,
+      0.2625442380012828,
+      0.2624907690042164,
+      0.2625615029974142,
+      0.26259658899653004,
+      0.26326149600208737,
+      0.26296768500469625,
+      0.2630476779959281,
+      0.26311652600270463,
+      0.2631612769982894,
+      0.2630053359971498,
+      0.26294541700190166,
+      0.2630103699993924
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 3.806
+  },
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=2 x cp=2 (ulysses) + TAEF1 decoder; tp=4 (registry default tp=8 -> 4 on trn2.3xlarge), bf16, attention_cte",
+  "status": "compiled",
+  "notes": [
+    "per-step = 262.8 ms/DiT-step (median 262.7, p90 263.1, n=27) \u2014 measured the SAME way as H100: inter-step deltas of a real 28-step generate (wrapping NeuronFluxBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 28 DiT calls timed; warm generate 7s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_warm = 38 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.",
+    "resident generate = 7.5 s (generate 3 of 3 in one process, model loaded once; walls [7.5, 7.5, 7.5]) -- the serving steady state; per-step above is from the last generate."
+  ],
+  "timestamp": "2026-10-04 01:01 UTC",
+  "config_slug": "flux_1_dev_tp2cp2taef1",
+  "model_slug": "flux_1_dev",
+  "config": "tp2cp2taef1",
+  "device_slug": "trn2combo",
+  "revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 3.5,
+  "output_kind": "image",
+  "decoder": {
+    "kind": "taef1",
+    "path": "madebyollin/taef1"
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder_t5",
+        "load_s": 6.7
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 12.01
+      },
+      {
+        "stage": "text_encoder_clip",
+        "load_s": 0.17
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 0.72
+      }
+    ],
+    "weights_load_total_s": 19.6,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 37.545,
+    "compute_and_overhead_s": 17.945
+  },
+  "dit_calls_per_step": 1.0,
+  "dit_calls": 28,
+  "loop_wall_s": 7.358,
+  "loop_step_ms": 262.8,
+  "resident_generate_s": [
+    7.481,
+    7.481,
+    7.472
+  ]
+}
