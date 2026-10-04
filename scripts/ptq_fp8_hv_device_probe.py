@@ -54,7 +54,8 @@ def tiny_config(args) -> dict:
         return raw
     return {
         "_class_name": "HunyuanVideoTransformer3DModel",
-        "attention_head_dim": 32,
+        # 128 = the real head dim; attention_cte rejects 32 once heads are sharded (tp > 1)
+        "attention_head_dim": args.head_dim,
         "guidance_embeds": True,
         "in_channels": 16,
         "mlp_ratio": 4.0,
@@ -67,7 +68,7 @@ def tiny_config(args) -> dict:
         "patch_size_t": 1,
         "pooled_projection_dim": 32,
         "qk_norm": "rms_norm",
-        "rope_axes_dim": [8, 12, 12],
+        "rope_axes_dim": [8, 12, 12] if args.head_dim == 32 else [16, 56, 56],
         "rope_theta": 256.0,
         "text_embed_dim": 64,
     }
@@ -110,6 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="real conditioning {encoder_hidden_states, encoder_attention_mask, pooled_projections}; "
                         "pass --text-seq-len / --valid-text-rows matching it for the device stage")
     p.add_argument("--tp-degree", type=int, default=1, help="device tensor-parallel degree (production: 4)")
+    p.add_argument("--text-pad-to", type=int, default=0,
+                   help="with --text-pt: zero-pad the text to this many rows (masked); pass the same --text-seq-len")
+    p.add_argument("--head-dim", type=int, default=32, help="tiny-model attention head dim (128 for tp > 1)")
+    p.add_argument("--targets", default=None,
+                   help="comma-separated fp8 target globs replacing the model's set (layer-type bisection)")
     p.add_argument("--force-clean", action="store_true")
     return p
 
@@ -117,7 +123,12 @@ def build_parser() -> argparse.ArgumentParser:
 def _spec(args):
     from difflet.quant.spec import QuantSpec
 
-    return QuantSpec.for_model("hunyuan_video", weight_granularity=args.quant_granularity)
+    spec = QuantSpec.for_model("hunyuan_video", weight_granularity=args.quant_granularity)
+    if getattr(args, "targets", None):
+        # Restrict the fp8 layer set (layer-type bisection); same matching rules.
+        spec = QuantSpec(weight_granularity=args.quant_granularity,
+                         targets=tuple(t for t in args.targets.split(",") if t))
+    return spec
 
 
 def _first(value):
@@ -211,6 +222,11 @@ def stage_cpu(args) -> int:
         mask = real["encoder_attention_mask"].to(torch.int64)
         text = text * mask.unsqueeze(-1).to(text.dtype)
         pooled = real["pooled_projections"].float()
+        if args.text_pad_to and args.text_pad_to > text.shape[1]:
+            # extra zero rows, masked out: same tokens, a longer text sequence (shape test)
+            extra = args.text_pad_to - text.shape[1]
+            text = torch.cat([text, text.new_zeros(text.shape[0], extra, text.shape[2])], dim=1)
+            mask = torch.cat([mask, mask.new_zeros(mask.shape[0], extra)], dim=1)
         args.text_seq_len = int(text.shape[1])
         args.valid_text_rows = int(mask.sum())
     else:

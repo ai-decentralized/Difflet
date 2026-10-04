@@ -67,7 +67,8 @@ def test_quantized_hf_checkpoint_maps_onto_difflet_hunyuan_names():
     from difflet.backends.trainium.hunyuan_video.backbone import NeuronHunyuanVideoBackboneApplication
 
     quantized, report = ckpt.quantize_state_dict(_hv_like_hf_state_dict(), QuantSpec.for_model("hunyuan_video"))
-    assert report["num_quantized"] == 7
+    assert report["num_quantized"] == 6  # add_q_proj stays bf16 (tp4 NaN, see difflet.quant.targets)
+    assert quantized["transformer_blocks.0.attn.add_q_proj.weight"].dtype == torch.bfloat16
     renamed = {k.replace(".weight_scale", ".scale"): v for k, v in quantized.items()}  # get_state_dict
     config = SimpleNamespace(
         num_attention_heads=1, attention_head_dim=16, num_single_layers=1,

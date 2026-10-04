@@ -47,8 +47,14 @@ QWEN_IMAGE_TARGETS: tuple[str, ...] = (
     "transformer_blocks.*.txt_mlp.net.2",
 )
 
-# Same block layout as FLUX; the anchored globs exclude the token refiner.
-HUNYUAN_VIDEO_TARGETS: tuple[str, ...] = FLUX_TARGETS
+# Same block layout as FLUX (the anchored globs exclude the token refiner), minus the
+# double blocks' text-stream q / k projections. With add_q_proj or add_k_proj in fp8 the
+# tp4 device graph returns all-NaN, even with the activation clamped and with static
+# scales (trn2, 2026-10-04, real weights + real text; tp1 and every other layer type are
+# clean, add_v_proj included). Both feed the per-head RMSNorm (norm_added_q / _k); the
+# text stream is 256 of ~10.5k tokens, so keeping them bf16 costs ~nothing.
+_HV_BF16_TEXT_QK = ("transformer_blocks.*.attn.add_q_proj", "transformer_blocks.*.attn.add_k_proj")
+HUNYUAN_VIDEO_TARGETS: tuple[str, ...] = tuple(t for t in FLUX_TARGETS if t not in _HV_BF16_TEXT_QK)
 
 LTX_2_TARGETS: tuple[str, ...] = tuple(
     f"transformer_blocks.*.{attn}.{n}"

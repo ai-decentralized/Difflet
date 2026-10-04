@@ -37,6 +37,14 @@ def test_glob_targets_exclude_root_and_refiner():
     assert hv.matches("single_transformer_blocks.0.proj_out")
     assert not hv.matches("context_embedder.token_refiner.refiner_blocks.0.attn.to_q")
     assert not hv.matches("proj_out")
+    # The text-stream q / k projections stay bf16: with them in fp8 the tp4 device graph
+    # returns all-NaN (trn2, 2026-10-04, real weights); v and the other text layers are fine.
+    assert not hv.matches("transformer_blocks.0.attn.add_q_proj")
+    assert not hv.matches("transformer_blocks.0.attn.add_k_proj")
+    assert hv.matches("transformer_blocks.0.attn.add_v_proj")
+    assert hv.matches("transformer_blocks.0.attn.to_add_out")
+    assert hv.matches("transformer_blocks.0.ff_context.net.0.proj")
+    assert flux.matches("transformer_blocks.0.attn.add_k_proj")  # FLUX is unaffected
 
     ltx = QuantSpec.for_model("ltx_2")
     assert ltx.matches("transformer.transformer_blocks.1.audio_to_video_attn.to_k")
@@ -56,13 +64,13 @@ def test_wan_targets_are_the_default_and_still_suffix_matched():
 
 
 def test_per_model_checkpoint_identities_follow_the_target_sets():
-    # FLUX and HunyuanVideo share one block layout (one tuple); every distinct
-    # target set hashes differently, and the checkpoint dir is keyed by the
-    # source model path on top, so no model can pick up another's checkpoint.
+    # Every distinct target set hashes differently (HunyuanVideo = FLUX's layout minus the
+    # text q / k, so its own set), and the checkpoint dir is keyed by the source model path
+    # on top, so no model can pick up another's checkpoint.
     ids = {m: QuantSpec.for_model(m).checkpoint_hash("/src") for m in TARGETS_BY_MODEL}
     distinct_sets = {tuple(t) for t in TARGETS_BY_MODEL.values()}
-    assert len(set(ids.values())) == len(distinct_sets) == 4
-    assert ids["wan"] != ids["flux"] != ids["qwen_image"] != ids["ltx_2"]
+    assert len(set(ids.values())) == len(distinct_sets) == 5
+    assert len(set(ids.values())) == len(ids)
 
 
 def test_from_args_uses_the_model_targets():
