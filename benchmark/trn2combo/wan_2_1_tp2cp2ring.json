@@ -1,0 +1,30 @@
+{
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "model_slug": "wan_2_1",
+  "config": "tp2cp2ring",
+  "config_slug": "wan_2_1_tp2cp2ring",
+  "device_slug": "trn2combo",
+  "status": "blocked",
+  "blocked_reason": "LIMIT: ring needs per-rank tokens % 128 == 0 (nkilib ring_attention_spmd_fwd, NCC_INKI016); 480x832x9 gives 2340 per rank, so the stage fails fast",
+  "blocked_evidence": "benchmark/trn2combo/logs/wan2_1_t2v_14b_diffusers_tp2cp2ring_compile.log (ValueError: ring cp_mode requires the per-rank sequence length to be a multiple of 128 ... got 2340)",
+  "parallel": {
+    "tp_degree": 2,
+    "cp_degree": 2,
+    "cp_mode": "ring",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "teacache": null,
+  "notes": [
+    "BLOCKED: LIMIT: ring needs per-rank tokens % 128 == 0 (nkilib ring_attention_spmd_fwd, NCC_INKI016); 480x832x9 gives 2340 per rank, so the stage fails fast",
+    "evidence: benchmark/trn2combo/logs/wan2_1_t2v_14b_diffusers_tp2cp2ring_compile.log (ValueError: ring cp_mode requires the per-rank sequence length to be a multiple of 128 ... got 2340)"
+  ],
+  "limit": "shape",
+  "follow_up": "conforming shape e.g. 512x512xF (1536 per rank)"
+}

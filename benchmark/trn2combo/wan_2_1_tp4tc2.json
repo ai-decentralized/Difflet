@@ -1,0 +1,152 @@
+{
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "model_type": "wan",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "compile_seconds": 11.893096550993505,
+  "compile_breakdown": {
+    "wall_total_s": 11.893
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": {
+    "n": 3,
+    "mean": 80.22657099599503,
+    "median": 79.25492349900014,
+    "std": 1.558236584018981,
+    "p50": 79.25492349900014,
+    "p90": 82.42530972599343,
+    "min": 78.99947976299154,
+    "max": 82.42530972599343,
+    "samples": [
+      82.42530972599343,
+      78.99947976299154,
+      79.25492349900014
+    ]
+  },
+  "step_latency": {
+    "n": 14,
+    "mean": 0.575076742571712,
+    "median": 0.5746403294979245,
+    "std": 0.0010303028364272372,
+    "p50": 0.5744449920020998,
+    "p90": 0.5763750180049101,
+    "min": 0.5739355309924576,
+    "max": 0.5765144280012464,
+    "samples": [
+      0.5762655120051932,
+      0.5742049800028326,
+      0.5748356669937493,
+      0.5742410620005103,
+      0.5740710560057778,
+      0.5759494959929725,
+      0.5759363910037791,
+      0.5763320679980097,
+      0.5765144280012464,
+      0.5763750180049101,
+      0.5744449920020998,
+      0.5739355309924576,
+      0.5740164540038677,
+      0.5739517409965629
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 1.739
+  },
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 + TeaCache fixed cadence 2 (--teacache-cadence 2); tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline",
+  "status": "compiled",
+  "notes": [
+    "per-step = 575.1 ms/DiT-step (median 574.6, p90 576.4, n=14) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 15 DiT calls timed; warm generate 33s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_warm = 80 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+  ],
+  "timestamp": "2026-10-04 15:39 UTC",
+  "config_slug": "wan_2_1_tp4tc2",
+  "model_slug": "wan_2_1",
+  "config": "tp4tc2",
+  "device_slug": "trn2combo",
+  "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video",
+  "teacache": {
+    "mode": "fixed_cadence",
+    "cadence": 2,
+    "online_delta_alpha": null,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "dit_calls": 15,
+    "skipped_steps_by_calls": 5,
+    "stats": {
+      "full_steps": 15,
+      "skipped_steps": 5,
+      "probe_calls": 0,
+      "last_delta_estimate": null,
+      "cache_initialized": true,
+      "online_delta_alpha": 0.0,
+      "baseline_delta": null,
+      "skipped_step_indices": [
+        6,
+        8,
+        10,
+        12,
+        14
+      ],
+      "delta_trace": []
+    }
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder (UMT5)",
+        "load_s": 8.85
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 9.32
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 30.73
+      }
+    ],
+    "weights_load_total_s": 48.9,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 79.255,
+    "compute_and_overhead_s": 30.355
+  },
+  "dit_calls_per_step": 0.75,
+  "dit_calls": 15,
+  "loop_wall_s": 8.768,
+  "loop_step_ms": 438.4
+}
