@@ -25,18 +25,20 @@
   "e2e_cold_seconds": null,
   "e2e_breakdown": null,
   "e2e_warm": {
-    "n": 3,
-    "mean": 38.4043803613337,
-    "median": 38.55768908100072,
-    "std": 0.32654111411554676,
-    "p50": 38.55768908100072,
-    "p90": 38.704973898999015,
-    "min": 37.95047810400138,
-    "max": 38.704973898999015,
+    "n": 5,
+    "mean": 38.598720282598514,
+    "median": 38.301510523000616,
+    "std": 1.076699899150767,
+    "p50": 38.301510523000616,
+    "p90": 39.999257401999785,
+    "min": 37.29056697299529,
+    "max": 39.999257401999785,
     "samples": [
-      38.704973898999015,
-      38.55768908100072,
-      37.95047810400138
+      39.999257401999785,
+      38.301510523000616,
+      37.29056697299529,
+      39.70471025600273,
+      37.697556258994155
     ]
   },
   "step_latency": {
@@ -91,8 +93,8 @@
   "notes": [
     "per-step = 269.9 ms/DiT-step (median 270.0, p90 270.0, n=18) \u2014 measured the SAME way as H100: inter-step deltas of a real 28-step generate (wrapping NeuronFluxBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 19 DiT calls timed; warm generate 5s; output finite=True.",
     "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
-    "e2e_warm = 38 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.",
-    "resident generate = 5.5 s (generate 3 of 3 in one process, model loaded once; walls [5.5, 5.5, 5.5]) -- the serving steady state; per-step above is from the last generate."
+    "resident generate = 5.5 s (generate 3 of 3 in one process, model loaded once; walls [5.5, 5.5, 5.5]) -- the serving steady state; per-step above is from the last generate.",
+    "e2e_warm = 39 s (n=5; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-10-03 23:33 UTC",
   "config_slug": "flux_1_dev_tp4tc2",
@@ -138,11 +140,11 @@
     "stages": [
       {
         "stage": "text_encoder_t5",
-        "load_s": 7.05
+        "load_s": 6.64
       },
       {
         "stage": "transformer (denoise loop)",
-        "load_s": 8.96
+        "load_s": 8.89
       },
       {
         "stage": "text_encoder_clip",
@@ -150,13 +152,13 @@
       },
       {
         "stage": "vae_decoder",
-        "load_s": 6.22
+        "load_s": 6.49
       }
     ],
-    "weights_load_total_s": 22.4,
+    "weights_load_total_s": 22.19,
     "weights_shard_total_s": 0.0,
-    "wall_total_s": 37.95,
-    "compute_and_overhead_s": 15.55
+    "wall_total_s": 37.698,
+    "compute_and_overhead_s": 15.508
   },
   "dit_calls_per_step": 0.679,
   "dit_calls": 19,
@@ -166,5 +168,21 @@
     5.492,
     5.478,
     5.466
-  ]
+  ],
+  "quality_holdout": {
+    "tp4": {
+      "ref": "tp4",
+      "prompts": 4,
+      "psnr_db": [
+        47.28,
+        32.35,
+        37.98,
+        33.56
+      ],
+      "mean_psnr_db": 37.79,
+      "min_psnr_db": 32.35,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    }
+  }
 }

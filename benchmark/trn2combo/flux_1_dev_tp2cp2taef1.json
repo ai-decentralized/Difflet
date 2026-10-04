@@ -178,5 +178,21 @@
     7.481,
     7.481,
     7.472
-  ]
+  ],
+  "quality_holdout": {
+    "tp4": {
+      "ref": "tp4",
+      "prompts": 4,
+      "psnr_db": [
+        31.51,
+        28.31,
+        31.46,
+        33.64
+      ],
+      "mean_psnr_db": 31.23,
+      "min_psnr_db": 28.31,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    }
+  }
 }
