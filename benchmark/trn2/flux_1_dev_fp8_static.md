@@ -22,17 +22,17 @@
 | phase | time |
 |---|---|
 | compile (AOT, one-time) | 22.5 min (1349 s) |
-| **e2e generate — cold start** (page cache dropped) | **4.2 min (250 s)** |
-| **e2e generate — warm cache** | **47.68 s** |
+| **e2e generate — cold start** (page cache dropped) | **4.1 min (243 s)** |
+| **e2e generate — warm cache** | **38.59 s** |
 
-> Cold vs warm: **4.2 min (250 s) → 47.68 s** (5.2× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
+> Cold vs warm: **4.1 min (243 s) → 38.59 s** (6.3× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
 | per denoise step (transformer fwd) | — | — | — | — | — |
-| end-to-end (warm) | 47.68 s | 47.68 s | 47.68 s | 47.68 s | 1 |
+| end-to-end (warm) | 38.59 s | 38.59 s | 38.59 s | 38.59 s | 1 |
 
 ## Compile breakdown
 
@@ -67,8 +67,8 @@ Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-
 
 ## Notes
 
-- e2e_cold = 250 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
-- e2e_warm = 48 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 250 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
+- e2e_cold = 243 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
+- e2e_warm = 39 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 243 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
 
 ## Reproduction
 

@@ -42,48 +42,48 @@ Benchmark harness (`benchmark/trn2/<slug>{,_fp8_static}.json`, `scripts/ptq_mode
 with `ARMS="_fp8_static"`): compile wall, true-cold and warm e2e (device VAE where the model
 compiles one), in-process DiT step, and the fp8 render compared to the bf16 render of the same
 prompt / seed / shape. Calibration = `scripts/ptq_calibrate_activations.py` on the real CPU
-loop at the benchmark shape (per-model loops in `scripts/calib_models/`).
+loop at the benchmark shape (per-model loops in `scripts/calib_models/`). All fp8-static
+rows and the Qwen-Image / LTX-2 bf16 rows were measured on an idle host on 2026-10-03/04.
 
-| model (shape, steps) | arm | compile s | cold e2e s | warm e2e s | DiT step ms | fp8 vs bf16 step | render vs bf16 (PSNR / SSIM / LPIPS) | status |
+| model (shape, steps) | arm | compile s | cold e2e s | warm e2e s | DiT step ms | fp8 / bf16 step | render vs bf16 (PSNR / SSIM / LPIPS) | status |
 |---|---|---:|---:|---:|---:|---:|---|---|
 | Wan 2.1 14B (480×832×9, 20) | bf16 | 7879 ¹ | 413.9 | 85.7 | 573.0 ² | — | — | ok |
-| | fp8 dynamic | 505 ³ | 304.3 | 84.2 | 607.2 ² | 1.060× | 33.0 / 0.888 / 0.128 | ok, drifts (see above) |
-| | **fp8 static** | **478** | **314.6** | 102.4 ⁴ | **586.9** ² | **1.024×** | **36.7 / 0.929 / 0.076** | **ok** |
+| | fp8 dynamic | 505 | 304.3 | 84.2 | 607.2 ² | 1.060× | 33.0 / 0.888 / 0.128 | ok, drifts |
+| | **fp8 static** | **478** | **298.0** | **82.5** | **586.9** ² | **1.024×** | **36.7 / 0.929 / 0.076** | **ok** |
 | Wan 2.2 A14B (480×832×9, 20) | bf16 | 6581 ¹ | 404.9 | 81.5 | 572.6 | — | — | ok |
-| | **fp8 static** | **661** | **321.2** | 103.5 ⁴ | 597.2 ⁴ | 1.043× | **35.2 / 0.919 / 0.099** | **ok** |
-| FLUX.1-dev 12B (1024², 28) | bf16 | 1038 | 306.7 | 39.9 | 277 ⁶ | — | — | ok |
-| | **fp8 static** | 1349 | **250.3** | 47.7 ⁴ | **263** ⁶ | **0.95×** | 29.2 / 0.974 / 0.051 | **ok** |
-| Qwen-Image 20B (1024², 20) | bf16 | 1254 | 501.2 | 64.2 | — | — | — | ok |
+| | **fp8 static** | **661** | **300.1** | **78.3** | 597.2 | 1.043× | **35.2 / 0.919 / 0.099** | **ok** |
+| FLUX.1-dev 12B (1024², 28) | bf16 | 1038 | 306.7 | 39.9 | 277 ³ | — | — | ok |
+| | **fp8 static** | 1349 | **243.1** | **38.6** | **263** ³ | **0.95×** | 29.2 / 0.974 / 0.051 | **ok** |
+| Qwen-Image 20B (1024², 20) | bf16 | 1254 ⁴ | 481.8 | 66.5 | 415.3 | — | — | ok |
 | | fp8 dynamic (10-02) | 416 | 402.4 | 62.9 | — | — | 36.4 / 0.990 / 0.017 | ok |
-| | fp8 static | — | — | — | — | — | — | **re-running** ⁷ |
-| LTX-2 (480×704×49, 20) | bf16 | 1839 | 777.8 | 58.4 | 437.5 | — | — | ok |
-| | fp8 static | — | — | — | — | — | — | **re-running** ⁷ |
+| | **fp8 static** | **721** | **400.5** | **64.5** | **361.3** | **0.870×** | **33.3 / 0.988 / 0.026** | **ok** |
+| LTX-2 19B (480×704×49, 20) | bf16 | 1839 ⁴ | 823.6 | 60.4 | 457.9 | — | — | ok |
+| | **fp8 static** | **834** | **631.9** | **55.4** | **440.3** | **0.962×** | **33.9 / 0.936 / 0.080** | **ok** |
 | HunyuanVideo 13B (320×512×61, 20) | bf16 | 4632 ¹ | 596 | 113.0 | 832.0 ⁵ | — | — | ok |
-| | fp8 dynamic | — | — | — | 760.8 ⁵ | 0.914× | 5.8 / — / —: garbage | **FAIL** |
+| | fp8 dynamic | — | — | — | 760.8 ⁵ | 0.914× | 5.8 dB: garbage | **FAIL** |
 | | fp8 static | — | — | — | 728.4 ⁵ | 0.875× | 9.3 / 0.156 / 0.889: garbage | **FAIL (open, below)** |
 
-¹ dominated by the VAE decoder compile (Wan 6100 s). ² today's A/B numbers (`fp8-dyn-step`),
-same harness for the three arms (the static bench run measured 593.7 ms with the host
-loaded, see ⁴). ³ 10-01 measurement of the pre-lean dynamic law. ⁴ **not comparable yet**: these
-runs overlapped a 13B CPU job on all 12 host cores (host-side load / decode slowed, device
-step noisier: Wan 2.2 static σ = 7.6 ms vs 0.6 ms for bf16); idle-host re-measurement running.
-⁵ host-VAE A/B runs (`hv-fp8/`); the DiT step does not depend on the decode placement.
-⁶ FLUX has no per-step timer line in these logs; the number is the 28-step denoise-loop rate
-(bf16 3.61 it/s, static 3.80 it/s). ⁷ Qwen-Image's compile stage was SIGKILLed (host memory
-shared with the same CPU job) and LTX-2 was refused by the idle gate; both re-run on an idle host.
+¹ dominated by the VAE decoder compile (Wan 6100 s). ² Wan 2.1 A/B numbers (`fp8-dyn-step`),
+same harness for the three arms. ³ FLUX logs carry no per-step timer line; the number is the
+28-step denoise-loop rate (bf16 3.61 it/s, static 3.80 it/s). ⁴ full bf16 build from 10-02 (the
+10-04 bf16 re-run hit the compile cache). ⁵ host-VAE A/B runs (`hv-fp8/`); the DiT step does
+not depend on the decode placement.
 
-What the finished rows show:
+What the table shows (five of six models pass):
 
-- **Load / cold e2e**: fp8 halves the transformer bytes, so cold e2e drops 19–24 %
-  (Wan 2.1 414 → 315 s, Wan 2.2 405 → 321 s, FLUX 307 → 250 s).
-- **Compile**: fp8 arms reuse the bf16 VAE / text-encoder artifacts and compile only the
-  transformer (Wan 478–661 s vs 6600–7900 s for a full bf16 build); FLUX recompiles more
-  (1349 s) because its components share one stage.
-- **DiT step**: within 2–4 % of bf16 on Wan (the fp8 dots are faster, the per-element
-  quantize chain on the scalar engine costs slightly more), 5 % faster on FLUX.
-- **Quality**: Wan 2.1 / 2.2 at 35–37 dB against the bf16 render, FLUX at 29 dB PSNR with
-  SSIM 0.974 / LPIPS 0.05 (an image: per-pixel PSNR is stricter than for video; frame grids
-  under `artifacts/verification-2026-10-02/ptq-all/<model>/`).
+- **DiT step**: fp8 static is faster than bf16 on the image / joint-attention models
+  (Qwen-Image −13 %, FLUX −5 %, LTX-2 −4 %) and 2–4 % slower on Wan, where the scalar-engine
+  quantize chain costs a little more than the fp8 dots save (profile in `fp8-dyn-step/NOTES.md`).
+- **Cold e2e**: −17 % to −28 % everywhere (fp8 transformer weights are half the bytes):
+  Wan 2.1 414 → 298 s, Wan 2.2 405 → 300 s, FLUX 307 → 243 s, Qwen-Image 482 → 401 s,
+  LTX-2 824 → 632 s.
+- **Warm e2e**: at or below bf16 on every model (−1 % to −8 %).
+- **Compile**: the fp8 arms reuse the bf16 VAE / text-encoder artifacts and build only the
+  transformer (Wan 478–661 s against 6600–7900 s for a full bf16 build); FLUX's components
+  share one stage, so its fp8 build (1349 s) is longer than its bf16 one.
+- **Quality**: 33–37 dB PSNR against the bf16 render for Wan 2.1 / 2.2, Qwen-Image and LTX-2;
+  FLUX 29.2 dB with SSIM 0.974 / LPIPS 0.05 (a single sharp 1024² image, where per-pixel PSNR
+  is strict). Frame grids and compare JSONs under `artifacts/verification-2026-10-02/ptq-all/<model>/`.
 
 ## HunyuanVideo: open
 

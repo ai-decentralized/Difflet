@@ -43,19 +43,19 @@
     "wall_total_s": 435.599
   },
   "load_seconds": null,
-  "e2e_cold_seconds": 321.157,
+  "e2e_cold_seconds": 300.054,
   "e2e_breakdown": null,
   "e2e_warm": {
     "n": 1,
-    "mean": 103.54306169700067,
-    "median": 103.54306169700067,
+    "mean": 78.26642499599984,
+    "median": 78.26642499599984,
     "std": 0.0,
-    "p50": 103.54306169700067,
-    "p90": 103.54306169700067,
-    "min": 103.54306169700067,
-    "max": 103.54306169700067,
+    "p50": 78.26642499599984,
+    "p90": 78.26642499599984,
+    "min": 78.26642499599984,
+    "max": 78.26642499599984,
     "samples": [
-      103.54306169700067
+      78.26642499599984
     ]
   },
   "step_latency": {
@@ -118,8 +118,8 @@
   "config_label": "tp=4, bf16, A14B (high/low-noise experts), attention_cte; FP8 PTQ (static calibrated activation scales) on the DiT linears",
   "status": "ok",
   "notes": [
-    "e2e_cold = 321 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
-    "e2e_warm = 104 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 321 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+    "e2e_cold = 300 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 78 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 300 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
   ],
   "timestamp": "2026-10-03 21:34 UTC",
   "config_slug": "wan_2_2_fp8_static",

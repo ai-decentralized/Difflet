@@ -1,40 +1,40 @@
-# Benchmark — Wan-AI/Wan2.1-T2V-14B-Diffusers
+# Benchmark — Lightricks/LTX-2
 
 **Status:** ok  
 **Backend:** trainium  
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
-**Timestamp:** 2026-10-03 17:51 UTC
+**Timestamp:** 2026-10-03 23:43 UTC
 
-> Best-performing configuration: tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline; FP8 PTQ (static calibrated activation scales) on the DiT linears
+> Best-performing configuration: tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF); FP8 PTQ (static calibrated activation scales) on the DiT linears
 
 ## Configuration
 
 | key | value |
 |---|---|
-| model type | wan |
+| model type | ltx_2 |
 | dtype | bf16 |
 | parallel | tp=4 cp=1 |
-| shape | {'height': 480, 'width': 832, 'num_frames': 9} |
+| shape | {'height': 480, 'width': 704, 'num_frames': 49} |
 | steps | 20 |
 
 ## End-to-end performance
 
 | phase | time |
 |---|---|
-| compile (AOT, one-time) | 8.0 min (478 s) |
-| **e2e generate — cold start** (page cache dropped) | **5.0 min (298 s)** |
-| **e2e generate — warm cache** | **82.51 s** |
+| compile (AOT, one-time) | 13.9 min (834 s) |
+| **e2e generate — cold start** (page cache dropped) | **10.5 min (632 s)** |
+| **e2e generate — warm cache** | **55.43 s** |
 
-> Cold vs warm: **5.0 min (298 s) → 82.51 s** (3.6× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
+> Cold vs warm: **10.5 min (632 s) → 55.43 s** (11.4× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 594.4 ms | 593.7 ms | 598.8 ms | 589.4 ms | 19 |
-| end-to-end (warm) | 82.51 s | 82.51 s | 82.51 s | 82.51 s | 1 |
+| per denoise step (transformer fwd) | 440.5 ms | 440.3 ms | 440.8 ms | 440.0 ms | 19 |
+| end-to-end (warm) | 55.43 s | 55.43 s | 55.43 s | 55.43 s | 1 |
 
-**Throughput:** 1.682 steps/s
+**Throughput:** 2.270 steps/s
 
 Per-step basis: **real-loop DiT wall time per step, device-synced, step 0 excluded** — device-synced inter-step deltas of a real generate loop, step 0 excluded, the same rule the other device folders use (`benchmark/harness.py::RealLoopStepTimer`).
 
@@ -44,11 +44,10 @@ Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-
 
 | component | module load | HLO gen | priority-HLO compile | all-HLO compile | other | **build total** |
 |---|---:|---:|---:|---:|---:|---:|
-| text_encoder_t5 | 606.0 ms | 2.01 s | 15.66 s | 1.0 ms | 35.75 s | **54.03 s** |
-| transformer | 2.90 s | 28.54 s | 116.24 s | 4.0 ms | 4.3 min (257 s) | **6.7 min (405 s)** |
-| **Σ component builds** | | | | | | **7.6 min (459 s)** |
+| transformer | 83.52 s | 34.09 s | 102.97 s | 15.0 ms | 6.7 min (403 s) | **10.4 min (624 s)** |
+| **Σ component builds** | | | | | | **10.4 min (624 s)** |
 
-> The headline **compile = 8.0 min (478 s)** is the full `difflet compile` wall; the **Σ component builds = 7.6 min (459 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
+> The headline **compile = 13.9 min (834 s)** is the full `difflet compile` wall; the **Σ component builds = 10.4 min (624 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
 
 ## Output validity
 
@@ -57,7 +56,7 @@ Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-
 | shape | None |
 | dtype | None |
 | finite (no NaN/Inf) | None |
-| note | saved wan2_1_t2v_14b_diffusers_fp8_tensor_static_out.mp4 |
+| note | saved ltx_2_fp8_tensor_static_out.mp4 |
 
 ## Toolchain
 
@@ -69,8 +68,9 @@ Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-
 
 ## Notes
 
-- e2e_cold = 298 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
-- e2e_warm = 83 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 298 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
+- Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.
+- e2e_cold = 632 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
+- e2e_warm = 55 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 632 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
 
 ## Reproduction
 
@@ -78,36 +78,36 @@ Exact test conditions. The **model + config rows are hardware-agnostic** — an 
 
 | key | value |
 |---|---|
-| model id | `Wan-AI/Wan2.1-T2V-14B-Diffusers` |
-| HF revision (pinned) | `38ec498cb3208fb688890f8cc7e94ede2cbd7f68` |
-| model type | wan |
+| model id | `Lightricks/LTX-2` |
+| HF revision (pinned) | `dfcc2108383fe1aaa0584bdf55d368a4bdadd90c` |
+| model type | ltx_2 |
 | dtype | bf16 |
 | parallel | tp=4, cp=1 |
-| shape (H×W×F) | 480×832×9 |
+| shape (H×W×F) | 480×704×49 |
 | steps | 20 |
 | guidance scale | 1.0 |
 | seed | 42 |
 | prompt | "a cinematic shot of a red fox running through a snowy forest" |
-| best-perf knobs | tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline; FP8 PTQ (static calibrated activation scales) on the DiT linears |
+| best-perf knobs | tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF); FP8 PTQ (static calibrated activation scales) on the DiT linears |
 | measured on | trn2.3xlarge / 4 NeuronCores / 96 GB/device (device folder `trn2`) |
 
 ```bash
 # difflet (Neuron / trn2) — compile is one-time and cached (reused, never recompiled):
-difflet compile  --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68 \
-    --tp-degree 4 --cp-degree 1 --height 480 --width 832 --num-frames 9
-difflet generate --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68 \
-    --tp-degree 4 --cp-degree 1 --height 480 --width 832 --num-frames 9 \
+difflet compile  --model-id Lightricks/LTX-2 --revision dfcc2108383fe1aaa0584bdf55d368a4bdadd90c \
+    --tp-degree 4 --cp-degree 1 --height 480 --width 704 --num-frames 49
+difflet generate --model-id Lightricks/LTX-2 --revision dfcc2108383fe1aaa0584bdf55d368a4bdadd90c \
+    --tp-degree 4 --cp-degree 1 --height 480 --width 704 --num-frames 49 \
     --steps 20 --guidance-scale 1.0 --seed 42 \
     --prompt "a cinematic shot of a red fox running through a snowy forest" --output out.mp4
 
 # benchmark harness on this device (writes benchmark/<device>/):
 DIFFLET_BENCH_DEVICE=trn2 \
-    python -m benchmark.cold_warm_e2e --model wan_2_1_fp8_static    # true cold + warm e2e
+    python -m benchmark.cold_warm_e2e --model ltx_2_fp8_static    # true cold + warm e2e
 DIFFLET_BENCH_DEVICE=trn2 \
-    python -m benchmark.step_latency  --model wan_2_1_fp8_static    # warm per-step
+    python -m benchmark.step_latency  --model ltx_2_fp8_static    # warm per-step
 
 # other backends (H100/B300) reproduce the SAME model+config via the generic runner:
-#   python -m benchmark.bench --backend cuda --model wan_2_1_fp8_static   # diffusers CUDA reference adapter
+#   python -m benchmark.bench --backend cuda --model ltx_2_fp8_static   # diffusers CUDA reference adapter
 ```
 
 **Measurement protocol** (so the numbers above are comparable across hardware):

@@ -1,0 +1,147 @@
+{
+  "model_id": "Qwen/Qwen-Image",
+  "model_type": "qwen_image",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "quant": {
+    "format": "fp8",
+    "weight_granularity": "tensor",
+    "calibration": "artifacts/verification-2026-10-03/fp8-dyn-step/static/act_calibration_qwen_image.json"
+  },
+  "compile_seconds": 721.0548161330007,
+  "compile_breakdown": {
+    "transformer": {
+      "module_load_s": 86.729,
+      "hlo_generate_s": 19.376,
+      "priority_hlo_compile_s": 34.209,
+      "all_hlo_compile_s": 0.008,
+      "build_total_s": 401.894,
+      "other_s": 261.571
+    },
+    "wall_total_s": 401.894
+  },
+  "load_seconds": 122.341,
+  "e2e_cold_seconds": 400.538,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 122.341
+      }
+    ],
+    "weights_load_total_s": 122.341,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 400.538,
+    "compute_and_overhead_s": 278.197
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 64.53858303500238,
+    "median": 64.53858303500238,
+    "std": 0.0,
+    "p50": 64.53858303500238,
+    "p90": 64.53858303500238,
+    "min": 64.53858303500238,
+    "max": 64.53858303500238,
+    "samples": [
+      64.53858303500238
+    ]
+  },
+  "step_latency": {
+    "n": 19,
+    "mean": 0.3614631578947368,
+    "median": 0.3613,
+    "std": 0.000753385709780073,
+    "p50": 0.3613,
+    "p90": 0.3615,
+    "min": 0.3611,
+    "max": 0.3646,
+    "samples": [
+      0.3646,
+      0.3615,
+      0.3615,
+      0.3613,
+      0.3612,
+      0.3613,
+      0.3613,
+      0.3615,
+      0.3612,
+      0.3611,
+      0.3613,
+      0.3613,
+      0.3615,
+      0.3612,
+      0.3615,
+      0.3611,
+      0.3611,
+      0.3611,
+      0.3612
+    ]
+  },
+  "step_basis": "real-loop DiT wall time per step, device-synced, step 0 excluded",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "steps/s": 2.766533678907365
+  },
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved qwen_image_fp8_tensor_static_out.png"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4, bf16, joint attention via attention_cte; FP8 PTQ (static calibrated activation scales) on the DiT linears",
+  "status": "ok",
+  "notes": [
+    "e2e_cold = 401 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 65 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 401 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-10-03 23:14 UTC",
+  "config_slug": "qwen_image_fp8_static",
+  "device_slug": "trn2",
+  "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 4.0,
+  "output_kind": "image",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 12.125
+      }
+    ],
+    "weights_load_total_s": 12.125,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 64.539,
+    "compute_and_overhead_s": 52.414
+  }
+}

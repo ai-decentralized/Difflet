@@ -1,0 +1,21 @@
+{
+  "output": {
+    "reference": "benchmark/trn2/ltx_2_out.mp4",
+    "test": "benchmark/trn2/ltx_2_fp8_tensor_static_out.mp4",
+    "frames": 49,
+    "height": 480,
+    "width": 704,
+    "psnr_db": 33.87688926528439,
+    "ssim": 0.9359240531921387,
+    "pixel": {
+      "mse": 0.000414153655063257,
+      "mean_abs": 0.015055598074027328,
+      "max_abs": 0.36862747371196747,
+      "cosine": 0.9986966831282814,
+      "rel_l2": 0.05188591614589278,
+      "snr_db": 25.69901021086305
+    },
+    "lpips": 0.07978768251380142,
+    "lpips_net": "alex"
+  }
+}

@@ -18,68 +18,76 @@
   },
   "steps": 20,
   "quant": null,
-  "compile_seconds": 1254.1531512479996,
+  "compile_seconds": 18.006258964000153,
   "compile_breakdown": {
-    "text_encoder": {
-      "module_load_s": 0.193,
-      "hlo_generate_s": 5.563,
-      "priority_hlo_compile_s": 67.714,
-      "all_hlo_compile_s": 9.449,
-      "build_total_s": 118.944,
-      "other_s": 36.026
-    },
-    "transformer": {
-      "module_load_s": 85.555,
-      "hlo_generate_s": 16.789,
-      "priority_hlo_compile_s": 39.315,
-      "all_hlo_compile_s": 0.006,
-      "build_total_s": 296.127,
-      "other_s": 154.462
-    },
-    "vae_decoder": {
-      "module_load_s": 0.339,
-      "hlo_generate_s": 0.368,
-      "priority_hlo_compile_s": 386.374,
-      "all_hlo_compile_s": 0.0,
-      "build_total_s": 396.579,
-      "other_s": 9.498
-    },
-    "wall_total_s": 811.65
+    "wall_total_s": 18.006
   },
-  "load_seconds": 122.047,
-  "e2e_cold_seconds": 501.165,
+  "load_seconds": 123.615,
+  "e2e_cold_seconds": 481.78006941799686,
   "e2e_breakdown": {
     "stages": [
       {
         "stage": "text_encoder",
-        "load_s": 122.047
+        "load_s": 123.615
       }
     ],
-    "weights_load_total_s": 122.047,
+    "weights_load_total_s": 123.615,
     "weights_shard_total_s": 0.0,
-    "wall_total_s": 501.165,
-    "compute_and_overhead_s": 379.118
+    "wall_total_s": 481.78,
+    "compute_and_overhead_s": 358.165
   },
   "e2e_warm": {
     "n": 1,
-    "mean": 64.19375970499823,
-    "median": 64.19375970499823,
+    "mean": 66.49279160399601,
+    "median": 66.49279160399601,
     "std": 0.0,
-    "p50": 64.19375970499823,
-    "p90": 64.19375970499823,
-    "min": 64.19375970499823,
-    "max": 64.19375970499823,
+    "p50": 66.49279160399601,
+    "p90": 66.49279160399601,
+    "min": 66.49279160399601,
+    "max": 66.49279160399601,
     "samples": [
-      64.19375970499823
+      66.49279160399601
     ]
   },
-  "step_latency": null,
-  "step_basis": "",
+  "step_latency": {
+    "n": 19,
+    "mean": 0.41560526315789476,
+    "median": 0.4153,
+    "std": 0.0008055555024888279,
+    "p50": 0.4153,
+    "p90": 0.4162,
+    "min": 0.4148,
+    "max": 0.4183,
+    "samples": [
+      0.4183,
+      0.4158,
+      0.4151,
+      0.4162,
+      0.4162,
+      0.4167,
+      0.4158,
+      0.4153,
+      0.4152,
+      0.4151,
+      0.415,
+      0.4149,
+      0.4148,
+      0.4152,
+      0.4151,
+      0.4153,
+      0.4151,
+      0.4156,
+      0.4158
+    ]
+  },
+  "step_basis": "real-loop DiT wall time per step, device-synced, step 0 excluded",
   "step_latency_alt": {},
   "stage_seconds": {},
   "e2e_warm_natural": null,
   "step_latency_natural": null,
-  "throughput": {},
+  "throughput": {
+    "steps/s": 2.40612929779016
+  },
   "peak_device_mem_gb": null,
   "output": {
     "shape": null,
@@ -100,28 +108,13 @@
   },
   "config_label": "tp=4, bf16, joint attention via attention_cte",
   "status": "ok",
-  "notes": [
-    "e2e_cold = 501 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
-    "e2e_warm = 64 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 501 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
-  ],
-  "timestamp": "2026-10-02 05:31 UTC",
+  "notes": [],
+  "timestamp": "2026-10-04 00:39 UTC",
   "config_slug": "qwen_image",
   "device_slug": "trn2",
   "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
   "seed": 42,
   "prompt": "a cinematic shot of a red fox running through a snowy forest",
   "guidance_scale": 4.0,
-  "output_kind": "image",
-  "e2e_warm_breakdown": {
-    "stages": [
-      {
-        "stage": "text_encoder",
-        "load_s": 10.377
-      }
-    ],
-    "weights_load_total_s": 10.377,
-    "weights_shard_total_s": 0.0,
-    "wall_total_s": 64.194,
-    "compute_and_overhead_s": 53.817
-  }
+  "output_kind": "image"
 }

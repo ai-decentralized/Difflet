@@ -3,9 +3,9 @@
 **Status:** ok  
 **Backend:** trainium  
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
-**Timestamp:** 2026-10-04 00:39 UTC
+**Timestamp:** 2026-10-03 23:14 UTC
 
-> Best-performing configuration: tp=4, bf16, joint attention via attention_cte
+> Best-performing configuration: tp=4, bf16, joint attention via attention_cte; FP8 PTQ (static calibrated activation scales) on the DiT linears
 
 ## Configuration
 
@@ -21,29 +21,35 @@
 
 | phase | time |
 |---|---|
-| compile (AOT, one-time) | 18.01 s |
-| **e2e generate — cold start** (page cache dropped) | **8.0 min (482 s)** |
-| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 2.1 min (124 s) |
-| **e2e generate — warm cache** | **66.49 s** |
+| compile (AOT, one-time) | 12.0 min (721 s) |
+| **e2e generate — cold start** (page cache dropped) | **6.7 min (401 s)** |
+| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 2.0 min (122 s) |
+| **e2e generate — warm cache** | **64.54 s** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 12.12 s |
 
-> Cold vs warm: **8.0 min (482 s) → 66.49 s** (7.2× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
+> Cold vs warm: **6.7 min (401 s) → 64.54 s** (6.2× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 415.6 ms | 415.3 ms | 416.2 ms | 414.8 ms | 19 |
-| end-to-end (warm) | 66.49 s | 66.49 s | 66.49 s | 66.49 s | 1 |
+| per denoise step (transformer fwd) | 361.5 ms | 361.3 ms | 361.5 ms | 361.1 ms | 19 |
+| end-to-end (warm) | 64.54 s | 64.54 s | 64.54 s | 64.54 s | 1 |
 
-**Throughput:** 2.406 steps/s
+**Throughput:** 2.767 steps/s
 
 Per-step basis: **real-loop DiT wall time per step, device-synced, step 0 excluded** — device-synced inter-step deltas of a real generate loop, step 0 excluded, the same rule the other device folders use (`benchmark/harness.py::RealLoopStepTimer`).
 
 ## Compile breakdown
 
-| component | build time |
-|---|---|
-| wall_total_s | 18.01 s |
+Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-save tail (not timed by a single log line).
+
+| component | module load | HLO gen | priority-HLO compile | all-HLO compile | other | **build total** |
+|---|---:|---:|---:|---:|---:|---:|
+| transformer | 86.73 s | 19.38 s | 34.21 s | 8.0 ms | 4.4 min (262 s) | **6.7 min (402 s)** |
+| **Σ component builds** | | | | | | **6.7 min (402 s)** |
+
+> The headline **compile = 12.0 min (721 s)** is the full `difflet compile` wall; the **Σ component builds = 6.7 min (402 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
 
 ## End-to-end breakdown (cold generate)
 
@@ -51,11 +57,11 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 | stage | weight shard | weight load |
 |---|---:|---:|
-| text_encoder | — | 2.1 min (124 s) |
-| **weights load total** | 0.0 ms | **2.1 min (124 s)** |
+| text_encoder | — | 2.0 min (122 s) |
+| **weights load total** | 0.0 ms | **2.0 min (122 s)** |
 
-- **weights load total:** 2.1 min (124 s) of 8.0 min (482 s) wall
-- **compute + overhead (residual):** 6.0 min (358 s) = text-encode + denoise loop + VAE decode + process/runtime startup
+- **weights load total:** 2.0 min (122 s) of 6.7 min (401 s) wall
+- **compute + overhead (residual):** 4.6 min (278 s) = text-encode + denoise loop + VAE decode + process/runtime startup
 
 ## Output validity
 
@@ -64,7 +70,7 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 | shape | None |
 | dtype | None |
 | finite (no NaN/Inf) | None |
-| note | saved qwen_image_out.png |
+| note | saved qwen_image_fp8_tensor_static_out.png |
 
 ## Toolchain
 
@@ -73,6 +79,11 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 - `neuronx-cc` = 2.26.6360.0+6f180f47
 - `neuronx-distributed` = 0.19.28492+435aae2b
 - `diffusers` = 0.38.0
+
+## Notes
+
+- e2e_cold = 401 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
+- e2e_warm = 65 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 401 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
 
 ## Reproduction
 
@@ -90,7 +101,7 @@ Exact test conditions. The **model + config rows are hardware-agnostic** — an 
 | guidance scale | 4.0 |
 | seed | 42 |
 | prompt | "a cinematic shot of a red fox running through a snowy forest" |
-| best-perf knobs | tp=4, bf16, joint attention via attention_cte |
+| best-perf knobs | tp=4, bf16, joint attention via attention_cte; FP8 PTQ (static calibrated activation scales) on the DiT linears |
 | measured on | trn2.3xlarge / 4 NeuronCores / 96 GB/device (device folder `trn2`) |
 
 ```bash
@@ -104,12 +115,12 @@ difflet generate --model-id Qwen/Qwen-Image --revision 75e0b4be04f60ec59a75f4758
 
 # benchmark harness on this device (writes benchmark/<device>/):
 DIFFLET_BENCH_DEVICE=trn2 \
-    python -m benchmark.cold_warm_e2e --model qwen_image    # true cold + warm e2e
+    python -m benchmark.cold_warm_e2e --model qwen_image_fp8_static    # true cold + warm e2e
 DIFFLET_BENCH_DEVICE=trn2 \
-    python -m benchmark.step_latency  --model qwen_image    # warm per-step
+    python -m benchmark.step_latency  --model qwen_image_fp8_static    # warm per-step
 
 # other backends (H100/B300) reproduce the SAME model+config via the generic runner:
-#   python -m benchmark.bench --backend cuda --model qwen_image   # diffusers CUDA reference adapter
+#   python -m benchmark.bench --backend cuda --model qwen_image_fp8_static   # diffusers CUDA reference adapter
 ```
 
 **Measurement protocol** (so the numbers above are comparable across hardware):
