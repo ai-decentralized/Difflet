@@ -1,0 +1,70 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "transformer_blocks.*.attn.to_q",
+      "transformer_blocks.*.attn.to_k",
+      "transformer_blocks.*.attn.to_v",
+      "single_transformer_blocks.*.attn.to_q"
+    ]
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61,
+    "text_seq_len": 256,
+    "valid_text_rows": 13,
+    "pad_value": 0.0,
+    "num_layers": 1,
+    "num_single_layers": 1
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 0.00030495581094356586,
+    "mean_abs": 0.009362359095257488,
+    "max_abs": 0.125,
+    "cosine": 0.9999961464157993,
+    "rel_l2": 0.002776179956499543,
+    "snr_db": 51.13104771260272
+  },
+  "arms": {
+    "fp8": {
+      "arm": "fp8",
+      "compiled": true,
+      "loaded": true,
+      "quantize_seconds": 0.935,
+      "quantized_checkpoint": "/home/ubuntu/.claude/jobs/b5f130d0/tmp/hvtiny_qkv_img/cache/quantized/tiny_hv_transformer/transformer/fp8-tensor-b2c89025",
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+      "compile_seconds": 268.517,
+      "load_seconds": 23.269,
+      "forward_ms": {
+        "n": 1,
+        "mean": 57.14674200862646,
+        "median": 57.14674200862646,
+        "min": 57.14674200862646,
+        "max": 57.14674200862646
+      },
+      "output_nonfinite": 0,
+      "output_absmax": 28.125
+    }
+  },
+  "checks": {
+    "device_fp8_vs_cpu_fp8": {
+      "mse": 0.000826796586446922,
+      "mean_abs": 0.019616026279300057,
+      "max_abs": 0.125,
+      "cosine": 0.9999896548885159,
+      "rel_l2": 0.004571178184658538,
+      "snr_db": 46.799436991383736
+    },
+    "device_fp8_vs_cpu_bf16": {
+      "mse": 0.0008314204102524255,
+      "mean_abs": 0.01968583943798876,
+      "max_abs": 0.25,
+      "cosine": 0.9999895968289283,
+      "rel_l2": 0.004583946059780662,
+      "snr_db": 46.77521002883008
+    }
+  },
+  "passed": true
+}

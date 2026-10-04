@@ -1,0 +1,68 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "single_transformer_blocks.*.proj_mlp",
+      "transformer_blocks.*.attn.to_q"
+    ]
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61,
+    "text_seq_len": 256,
+    "valid_text_rows": 13,
+    "pad_value": 0.0,
+    "num_layers": 1,
+    "num_single_layers": 1
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 0.0002812609833375726,
+    "mean_abs": 0.00871867722580646,
+    "max_abs": 0.125,
+    "cosine": 0.9999964458806061,
+    "rel_l2": 0.0026661458473791807,
+    "snr_db": 51.48232193730689
+  },
+  "arms": {
+    "fp8": {
+      "arm": "fp8",
+      "compiled": true,
+      "loaded": true,
+      "quantize_seconds": 0.988,
+      "quantized_checkpoint": "/home/ubuntu/.claude/jobs/b5f130d0/tmp/hvd1_single_mlp/cache/quantized/tiny_hv_transformer/transformer/fp8-tensor-2dac542a",
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+      "compile_seconds": 280.042,
+      "load_seconds": 24.593,
+      "forward_ms": {
+        "n": 1,
+        "mean": 57.712654990609735,
+        "median": 57.712654990609735,
+        "min": 57.712654990609735,
+        "max": 57.712654990609735
+      },
+      "output_nonfinite": 0,
+      "output_absmax": 28.125
+    }
+  },
+  "checks": {
+    "device_fp8_vs_cpu_fp8": {
+      "mse": 0.0008206561133502509,
+      "mean_abs": 0.019525885480106808,
+      "max_abs": 0.125,
+      "cosine": 0.9999897315850168,
+      "rel_l2": 0.004554144458989327,
+      "snr_db": 46.83186395071579
+    },
+    "device_fp8_vs_cpu_bf16": {
+      "mse": 0.0008217269939256765,
+      "mean_abs": 0.01953373592605203,
+      "max_abs": 0.25,
+      "cosine": 0.9999897210152314,
+      "rel_l2": 0.004557145917326049,
+      "snr_db": 46.82614130645086
+    }
+  },
+  "passed": true
+}

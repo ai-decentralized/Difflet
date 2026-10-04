@@ -1,0 +1,68 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "transformer_blocks.*.attn.to_add_out",
+      "single_transformer_blocks.*.attn.to_q"
+    ]
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61,
+    "text_seq_len": 256,
+    "valid_text_rows": 13,
+    "pad_value": 0.0,
+    "num_layers": 1,
+    "num_single_layers": 1
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 3.3337211847155088e-06,
+    "mean_abs": 0.00011866213080793386,
+    "max_abs": 0.125,
+    "cosine": 0.9999999578732925,
+    "rel_l2": 0.0002902644139646362,
+    "snr_db": 70.74412409674048
+  },
+  "arms": {
+    "fp8": {
+      "arm": "fp8",
+      "compiled": true,
+      "loaded": true,
+      "quantize_seconds": 0.906,
+      "quantized_checkpoint": "/home/ubuntu/.claude/jobs/b5f130d0/tmp/hvtiny_out_txt/cache/quantized/tiny_hv_transformer/transformer/fp8-tensor-9f1a65c9",
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+      "compile_seconds": 266.206,
+      "load_seconds": 22.466,
+      "forward_ms": {
+        "n": 1,
+        "mean": 57.46449399157427,
+        "median": 57.46449399157427,
+        "min": 57.46449399157427,
+        "max": 57.46449399157427
+      },
+      "output_nonfinite": 0,
+      "output_absmax": 28.125
+    }
+  },
+  "checks": {
+    "device_fp8_vs_cpu_fp8": {
+      "mse": 0.000819173782557247,
+      "mean_abs": 0.01949547919211909,
+      "max_abs": 0.25,
+      "cosine": 0.9999897474327086,
+      "rel_l2": 0.0045500601978744415,
+      "snr_db": 46.839657150674235
+    },
+    "device_fp8_vs_cpu_bf16": {
+      "mse": 0.0008192462673091826,
+      "mean_abs": 0.019495291359817202,
+      "max_abs": 0.25,
+      "cosine": 0.9999897465537471,
+      "rel_l2": 0.004550261892338343,
+      "snr_db": 46.83927213224589
+    }
+  },
+  "passed": true
+}

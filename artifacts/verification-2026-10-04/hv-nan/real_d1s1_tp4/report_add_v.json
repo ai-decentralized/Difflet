@@ -1,0 +1,68 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "transformer_blocks.*.attn.add_v_proj",
+      "single_transformer_blocks.*.attn.to_q"
+    ]
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61,
+    "text_seq_len": 256,
+    "valid_text_rows": 13,
+    "pad_value": 0.0,
+    "num_layers": 1,
+    "num_single_layers": 1
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 0.00023910644651493643,
+    "mean_abs": 0.007623083860198676,
+    "max_abs": 0.125,
+    "cosine": 0.9999969800214239,
+    "rel_l2": 0.0024582429388275238,
+    "snr_db": 52.18750399303821
+  },
+  "arms": {
+    "fp8": {
+      "arm": "fp8",
+      "compiled": true,
+      "loaded": true,
+      "quantize_seconds": 0.91,
+      "quantized_checkpoint": "/home/ubuntu/.claude/jobs/b5f130d0/tmp/hvd1_add_v/cache/quantized/tiny_hv_transformer/transformer/fp8-tensor-c6477b55",
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+      "compile_seconds": 265.444,
+      "load_seconds": 24.363,
+      "forward_ms": {
+        "n": 1,
+        "mean": 57.42712000210304,
+        "median": 57.42712000210304,
+        "min": 57.42712000210304,
+        "max": 57.42712000210304
+      },
+      "output_nonfinite": 0,
+      "output_absmax": 28.125
+    }
+  },
+  "checks": {
+    "device_fp8_vs_cpu_fp8": {
+      "mse": 0.0008254282114503637,
+      "mean_abs": 0.019606984306301457,
+      "max_abs": 0.25,
+      "cosine": 0.9999896732419218,
+      "rel_l2": 0.004567160729775408,
+      "snr_db": 46.80707408436433
+    },
+    "device_fp8_vs_cpu_bf16": {
+      "mse": 0.0008211881188070587,
+      "mean_abs": 0.01952761490956618,
+      "max_abs": 0.25,
+      "cosine": 0.9999897505636768,
+      "rel_l2": 0.004555651421402046,
+      "snr_db": 46.82899027286464
+    }
+  },
+  "passed": true
+}

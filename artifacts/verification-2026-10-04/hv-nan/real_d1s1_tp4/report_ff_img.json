@@ -1,0 +1,69 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "transformer_blocks.*.ff.net.0.proj",
+      "transformer_blocks.*.ff.net.2",
+      "single_transformer_blocks.*.attn.to_q"
+    ]
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61,
+    "text_seq_len": 256,
+    "valid_text_rows": 13,
+    "pad_value": 0.0,
+    "num_layers": 1,
+    "num_single_layers": 1
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 0.0039020834763792587,
+    "mean_abs": 0.048392693196183244,
+    "max_abs": 0.3125,
+    "cosine": 0.9999506949823105,
+    "rel_l2": 0.009930644511944859,
+    "snr_db": 40.06045128608881
+  },
+  "arms": {
+    "fp8": {
+      "arm": "fp8",
+      "compiled": true,
+      "loaded": true,
+      "quantize_seconds": 1.033,
+      "quantized_checkpoint": "/home/ubuntu/.claude/jobs/b5f130d0/tmp/hvtiny_ff_img/cache/quantized/tiny_hv_transformer/transformer/fp8-tensor-28f7112a",
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+      "compile_seconds": 272.33,
+      "load_seconds": 24.325,
+      "forward_ms": {
+        "n": 1,
+        "mean": 57.50109600194264,
+        "median": 57.50109600194264,
+        "min": 57.50109600194264,
+        "max": 57.50109600194264
+      },
+      "output_nonfinite": 0,
+      "output_absmax": 28.125
+    }
+  },
+  "checks": {
+    "device_fp8_vs_cpu_fp8": {
+      "mse": 0.003503049379593671,
+      "mean_abs": 0.04555218471068656,
+      "max_abs": 0.3125,
+      "cosine": 0.9999558420743062,
+      "rel_l2": 0.009410600619543272,
+      "snr_db": 40.52765314797108
+    },
+    "device_fp8_vs_cpu_bf16": {
+      "mse": 0.004279319101737704,
+      "mean_abs": 0.0508126184298817,
+      "max_abs": 0.3125,
+      "cosine": 0.9999459859217781,
+      "rel_l2": 0.01039959661278534,
+      "snr_db": 39.65967012217638
+    }
+  },
+  "passed": true
+}

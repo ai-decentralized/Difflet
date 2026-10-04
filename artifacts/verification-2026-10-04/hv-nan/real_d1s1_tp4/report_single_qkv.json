@@ -1,0 +1,70 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "single_transformer_blocks.*.attn.to_q",
+      "single_transformer_blocks.*.attn.to_k",
+      "single_transformer_blocks.*.attn.to_v",
+      "transformer_blocks.*.attn.to_q"
+    ]
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61,
+    "text_seq_len": 256,
+    "valid_text_rows": 13,
+    "pad_value": 0.0,
+    "num_layers": 1,
+    "num_single_layers": 1
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 0.00028175396432054733,
+    "mean_abs": 0.008726690058210806,
+    "max_abs": 0.125,
+    "cosine": 0.9999964396288695,
+    "rel_l2": 0.002668481371760291,
+    "snr_db": 51.47471649179623
+  },
+  "arms": {
+    "fp8": {
+      "arm": "fp8",
+      "compiled": true,
+      "loaded": true,
+      "quantize_seconds": 0.921,
+      "quantized_checkpoint": "/home/ubuntu/.claude/jobs/b5f130d0/tmp/hvd1_single_qkv/cache/quantized/tiny_hv_transformer/transformer/fp8-tensor-97af2b28",
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+      "compile_seconds": 266.321,
+      "load_seconds": 23.427,
+      "forward_ms": {
+        "n": 1,
+        "mean": 58.653209009207785,
+        "median": 58.653209009207785,
+        "min": 58.653209009207785,
+        "max": 58.653209009207785
+      },
+      "output_nonfinite": 0,
+      "output_absmax": 28.125
+    }
+  },
+  "checks": {
+    "device_fp8_vs_cpu_fp8": {
+      "mse": 0.00082114211424379,
+      "mean_abs": 0.019531858505069978,
+      "max_abs": 0.125,
+      "cosine": 0.9999897252783991,
+      "rel_l2": 0.004555503801829634,
+      "snr_db": 46.82927173164415
+    },
+    "device_fp8_vs_cpu_bf16": {
+      "mse": 0.0008207386850495654,
+      "mean_abs": 0.019520423506583028,
+      "max_abs": 0.25,
+      "cosine": 0.9999897322729754,
+      "rel_l2": 0.004554404603706697,
+      "snr_db": 46.83136780401008
+    }
+  },
+  "passed": true
+}

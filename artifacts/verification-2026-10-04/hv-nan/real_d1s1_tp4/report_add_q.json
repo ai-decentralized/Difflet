@@ -1,0 +1,68 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "transformer_blocks.*.attn.add_q_proj",
+      "single_transformer_blocks.*.attn.to_q"
+    ]
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61,
+    "text_seq_len": 256,
+    "valid_text_rows": 13,
+    "pad_value": 0.0,
+    "num_layers": 1,
+    "num_single_layers": 1
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 3.365121765905321e-06,
+    "mean_abs": 0.00011953053090110188,
+    "max_abs": 0.125,
+    "cosine": 0.999999957476523,
+    "rel_l2": 0.0002916282216739047,
+    "snr_db": 70.70340900871507
+  },
+  "arms": {
+    "fp8": {
+      "arm": "fp8",
+      "compiled": true,
+      "loaded": true,
+      "quantize_seconds": 0.916,
+      "quantized_checkpoint": "/home/ubuntu/.claude/jobs/b5f130d0/tmp/hvd1_add_q/cache/quantized/tiny_hv_transformer/transformer/fp8-tensor-f97e73be",
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+      "compile_seconds": 265.285,
+      "load_seconds": 23.247,
+      "forward_ms": {
+        "n": 1,
+        "mean": 57.307434995891526,
+        "median": 57.307434995891526,
+        "min": 57.307434995891526,
+        "max": 57.307434995891526
+      },
+      "output_nonfinite": 655360,
+      "output_absmax": NaN
+    }
+  },
+  "checks": {
+    "device_fp8_vs_cpu_fp8": {
+      "mse": NaN,
+      "mean_abs": NaN,
+      "max_abs": NaN,
+      "cosine": NaN,
+      "rel_l2": NaN,
+      "snr_db": Infinity
+    },
+    "device_fp8_vs_cpu_bf16": {
+      "mse": NaN,
+      "mean_abs": NaN,
+      "max_abs": NaN,
+      "cosine": NaN,
+      "rel_l2": NaN,
+      "snr_db": Infinity
+    }
+  },
+  "passed": false
+}

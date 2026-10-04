@@ -59,46 +59,55 @@ rows and the Qwen-Image / LTX-2 bf16 rows were measured on an idle host on 2026-
 | | **fp8 static** | **721** | **400.5** | **64.5** | **361.3** | **0.870×** | **33.3 / 0.988 / 0.026** | **ok** |
 | LTX-2 19B (480×704×49, 20) | bf16 | 1839 ⁴ | 823.6 | 60.4 | 457.9 | — | — | ok |
 | | **fp8 static** | **834** | **631.9** | **55.4** | **440.3** | **0.962×** | **33.9 / 0.936 / 0.080** | **ok** |
-| HunyuanVideo 13B (320×512×61, 20) | bf16 | 4632 ¹ | 596 | 113.0 | 832.0 ⁵ | — | — | ok |
-| | fp8 dynamic | — | — | — | 760.8 ⁵ | 0.914× | 5.8 dB: garbage | **FAIL** |
-| | fp8 static | — | — | — | 728.4 ⁵ | 0.875× | 9.3 / 0.156 / 0.889: garbage | **FAIL (open, below)** |
+| HunyuanVideo 13B (320×512×61, 20) | bf16 | 4632 ¹ | 596.1 | 113.0 | 869.7 | — | — | ok |
+| | fp8 dynamic ⁶ | — | — | — | 774.5 ⁵ | 0.89× | 28.9 / 0.907 / 0.087 ⁵ | ok |
+| | **fp8 static** ⁶ | 4144 ¹ | **530.4** | **111.6** | **724.4** | **0.833×** | **26.8 / 0.892 / 0.102** ⁵ | **ok** |
 
 ¹ dominated by the VAE decoder compile (Wan 6100 s). ² Wan 2.1 A/B numbers (`fp8-dyn-step`),
 same harness for the three arms. ³ FLUX logs carry no per-step timer line; the number is the
 28-step denoise-loop rate (bf16 3.61 it/s, static 3.80 it/s). ⁴ full bf16 build from 10-02 (the
-10-04 bf16 re-run hit the compile cache). ⁵ host-VAE A/B runs (`hv-fp8/`); the DiT step does
-not depend on the decode placement.
+10-04 bf16 re-run hit the compile cache). ⁵ host-VAE A/B runs (`hv-fixed/`), compared with the bf16 host-VAE render of the same seed; the DiT step
+does not depend on the decode placement. ⁶ with the double blocks' text q / k projections kept bf16 (section below).
 
-What the table shows (five of six models pass):
+What the table shows (all six models pass):
 
 - **DiT step**: fp8 static is faster than bf16 on the image / joint-attention models
-  (Qwen-Image −13 %, FLUX −5 %, LTX-2 −4 %) and 2–4 % slower on Wan, where the scalar-engine
+  (HunyuanVideo −17 %, Qwen-Image −13 %, FLUX −5 %, LTX-2 −4 %) and 2–4 % slower on Wan, where the scalar-engine
   quantize chain costs a little more than the fp8 dots save (profile in `fp8-dyn-step/NOTES.md`).
-- **Cold e2e**: −17 % to −28 % everywhere (fp8 transformer weights are half the bytes):
+- **Cold e2e**: −11 % to −28 % everywhere (fp8 transformer weights are half the bytes):
   Wan 2.1 414 → 298 s, Wan 2.2 405 → 300 s, FLUX 307 → 243 s, Qwen-Image 482 → 401 s,
-  LTX-2 824 → 632 s.
+  LTX-2 824 → 632 s, HunyuanVideo 596 → 530 s.
 - **Warm e2e**: at or below bf16 on every model (−1 % to −8 %).
 - **Compile**: the fp8 arms reuse the bf16 VAE / text-encoder artifacts and build only the
   transformer (Wan 478–661 s against 6600–7900 s for a full bf16 build); FLUX's components
-  share one stage, so its fp8 build (1349 s) is longer than its bf16 one.
+  share one stage, so its fp8 build (1349 s) is longer than its bf16 one; HunyuanVideo's fp8
+  build (4144 s) still recompiles its device VAE (use `--host-vae` to skip it, `d8252c8`).
 - **Quality**: 33–37 dB PSNR against the bf16 render for Wan 2.1 / 2.2, Qwen-Image and LTX-2;
   FLUX 29.2 dB with SSIM 0.974 / LPIPS 0.05 (a single sharp 1024² image, where per-pixel PSNR
-  is strict). Frame grids and compare JSONs under `artifacts/verification-2026-10-02/ptq-all/<model>/`.
+  is strict); HunyuanVideo 26.8 dB / SSIM 0.892 (static) and 28.9 dB / 0.907 (dynamic), same scene and
+  motion, finer texture differences (its 10-02 weight-only arm, bf16 matmuls, measured 31.1 dB). Frame grids and compare JSONs under `artifacts/verification-2026-10-02/ptq-all/<model>/`.
 
-## HunyuanVideo: open
+## HunyuanVideo: the tp4 failure and its fix
 
-The fp8 × fp8 path renders garbage at production depth with both activation laws, while
-weight-only (bf16 matmuls on dequantized fp8 weights, 10-02) rendered at 31 dB.
+Before the fix, HunyuanVideo fp8 rendered garbage at tp4 with both activation laws (PSNR 6–9 dB),
+while the CPU reference was healthy. Bisected on the device with the real weights and real text at
+the production shape (`artifacts/verification-2026-10-04/hv-nan/`):
 
-**Full-model probe (real weights, real text, production shape, tp4, one forward;
-`hv-fp8/real_probe/report_tp4_d20s40.json`)**: the device bf16 arm matches the CPU at cosine
-0.99996; the CPU fp8-dynamic reference is healthy (31.6 dB against CPU bf16); the **device
-fp8-dynamic output is entirely NaN** (655 360 of 655 360 elements). The shallow probe (2
-double + 2 single blocks) matched at 0.9999, so a single forward goes non-finite somewhere
-in the deep stack on the device only. The leading hypothesis: the lean dynamic law has no
-clamp (it relies on `scale = absmax/240 × (1+2⁻⁷)` bounding the scaled tensor), and the
-device's fp8 cast of a value above 240 is NaN (proven today on the static path); if the
-on-device absmax reduction under-reads at HunyuanVideo's joint sequence length (10 496 tokens
-× 3072), values exceed 240 and turn into NaN. The static path clamps, which explains why it
-is not NaN but still wrong if the same reduction / cast issue sits elsewhere. Next: re-add the
-clamp to the dynamic law behind a switch and re-run this probe; probe the reduction length.
+| probe (tp4 unless noted) | device fp8 vs CPU fp8 |
+|---|---|
+| real 2+2 blocks, tp1 | cosine 0.99995 |
+| real 2+2 blocks, tp4 | all NaN |
+| real full model, dynamic law clamped | finite but wrong (cosine 0.96, −7 dB) |
+| 1+1 blocks, only image q/k/v, either attention output, image or text FFN, any single-block layer | cosine 0.99990–0.99996 |
+| 1+1 blocks, only `add_q_proj` or only `add_k_proj` | all NaN |
+| 1+1 blocks, only `add_v_proj` | cosine 0.99990 |
+| text q/k/v fp8, dynamic law clamped | all NaN (so not an fp8 overflow) |
+| text q/k/v fp8, text padded 256 → 512 or 1024 rows | cosine 0.99999 |
+
+So the device graph mis-executes the fp8 text-stream q / k projection, which feeds the per-head
+RMSNorm (`norm_added_q` / `_k`), at exactly 256 text rows under tp4. FLUX's text stream is 512 rows,
+so it never hit this. Fix (`ec483f4`): HunyuanVideo's target set is FLUX's minus the double
+blocks' `add_q_proj` / `add_k_proj` (bf16). The text stream is 256 of about 10.5 k tokens, so the cost is
+negligible. After the fix: the real full model at tp4 matches the CPU at cosine 0.99981; the 20-step
+render is 26.8 dB (static) / 28.9 dB (dynamic) against bf16, the same scene and motion
+(`hv-fixed/frames_bf16_vs_static.png`); DiT step 0.83× bf16.

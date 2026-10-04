@@ -1,0 +1,54 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "transformer_blocks.*.attn.to_q",
+      "transformer_blocks.*.attn.to_k",
+      "transformer_blocks.*.attn.to_v",
+      "transformer_blocks.*.attn.to_out.0",
+      "transformer_blocks.*.attn.add_q_proj",
+      "transformer_blocks.*.attn.add_k_proj",
+      "transformer_blocks.*.attn.add_v_proj",
+      "transformer_blocks.*.attn.to_add_out",
+      "transformer_blocks.*.ff.net.0.proj",
+      "transformer_blocks.*.ff.net.2",
+      "transformer_blocks.*.ff_context.net.0.proj",
+      "transformer_blocks.*.ff_context.net.2",
+      "single_transformer_blocks.*.attn.to_q",
+      "single_transformer_blocks.*.attn.to_k",
+      "single_transformer_blocks.*.attn.to_v",
+      "single_transformer_blocks.*.proj_mlp",
+      "single_transformer_blocks.*.proj_out",
+      "single_transformer_blocks.*.proj_out_attn",
+      "single_transformer_blocks.*.proj_out_mlp"
+    ]
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61,
+    "text_seq_len": 256,
+    "valid_text_rows": 13,
+    "pad_value": 0.0,
+    "num_layers": 20,
+    "num_single_layers": 4
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 0.004125402382294639,
+    "mean_abs": 0.04964753797603407,
+    "max_abs": 0.5,
+    "cosine": 0.9999351876722814,
+    "rel_l2": 0.011403990021084004,
+    "snr_db": 38.85886342772516
+  },
+  "arms": {
+    "fp8": {
+      "arm": "fp8",
+      "error": "SafetensorError: Error while serializing: I/O error: No space left on device (os error 28)",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_hv_device_probe.py\", line 320, in stage_device\n    output, record = _device_arm(name, transformer_dir, args, inputs,\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_hv_device_probe.py\", line 267, in _device_arm\n    app.compile(str(compiled_dir))\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/application_base.py\", line 439, in compile\n    self.shard_weights(compiled_model_path, debug, pre_shard_weights_hook)\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/application_base.py\", line 357, in shard_weights\n    self.get_builder(debug).shard_checkpoint(serialize_path=sharded_checkpoint_dir)\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/model_builder.py\", line 853, in shard_checkpoint\n    sharded_checkpoints.append(self.shard_weights_with_cache(rank, model, checkpoint, serialize_path))\n                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/model_builder.py\", line 999, in shard_weights_with_cache\n    save_file({ k: v.contiguous() for k, v in sharded_checkpoint.items() }, os.path.join(serialize_path, f\"tp{rank}_sharded_checkpoint.safetensors\"))\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/safetensors/torch.py\", line 323, in save_file\n    serialize_file(\nsafetensors._safetensors_rust.SafetensorError: Error while serializing: I/O error: No space left on device (os error 28)\n"
+    }
+  },
+  "checks": {},
+  "passed": false
+}

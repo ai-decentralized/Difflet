@@ -1,0 +1,68 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "transformer_blocks.*.attn.to_out.0",
+      "single_transformer_blocks.*.attn.to_q"
+    ]
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61,
+    "text_seq_len": 256,
+    "valid_text_rows": 13,
+    "pad_value": 0.0,
+    "num_layers": 1,
+    "num_single_layers": 1
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 0.0005049601826026251,
+    "mean_abs": 0.014092489254107932,
+    "max_abs": 0.125,
+    "cosine": 0.9999936196255234,
+    "rel_l2": 0.0035723806215064327,
+    "snr_db": 48.94084550287289
+  },
+  "arms": {
+    "fp8": {
+      "arm": "fp8",
+      "compiled": true,
+      "loaded": true,
+      "quantize_seconds": 0.886,
+      "quantized_checkpoint": "/home/ubuntu/.claude/jobs/b5f130d0/tmp/hvtiny_out_img/cache/quantized/tiny_hv_transformer/transformer/fp8-tensor-896908b5",
+      "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+      "compile_seconds": 267.137,
+      "load_seconds": 23.665,
+      "forward_ms": {
+        "n": 1,
+        "mean": 56.64754399913363,
+        "median": 56.64754399913363,
+        "min": 56.64754399913363,
+        "max": 56.64754399913363
+      },
+      "output_nonfinite": 0,
+      "output_absmax": 28.0
+    }
+  },
+  "checks": {
+    "device_fp8_vs_cpu_fp8": {
+      "mse": 0.0008371668726342728,
+      "mean_abs": 0.01979649900149525,
+      "max_abs": 0.125,
+      "cosine": 0.9999895158304049,
+      "rel_l2": 0.004599948397632515,
+      "snr_db": 46.74494080440831
+    },
+    "device_fp8_vs_cpu_bf16": {
+      "mse": 0.0008596959723175142,
+      "mean_abs": 0.020158397788873118,
+      "max_abs": 0.1875,
+      "cosine": 0.9999892150440368,
+      "rel_l2": 0.004661241493101863,
+      "snr_db": 46.62996792459359
+    }
+  },
+  "passed": true
+}

@@ -1,0 +1,54 @@
+{
+  "spec": {
+    "format": "fp8_e4m3",
+    "weight_granularity": "tensor",
+    "targets": [
+      "transformer_blocks.*.attn.to_q",
+      "transformer_blocks.*.attn.to_k",
+      "transformer_blocks.*.attn.to_v",
+      "transformer_blocks.*.attn.to_out.0",
+      "transformer_blocks.*.attn.add_q_proj",
+      "transformer_blocks.*.attn.add_k_proj",
+      "transformer_blocks.*.attn.add_v_proj",
+      "transformer_blocks.*.attn.to_add_out",
+      "transformer_blocks.*.ff.net.0.proj",
+      "transformer_blocks.*.ff.net.2",
+      "transformer_blocks.*.ff_context.net.0.proj",
+      "transformer_blocks.*.ff_context.net.2",
+      "single_transformer_blocks.*.attn.to_q",
+      "single_transformer_blocks.*.attn.to_k",
+      "single_transformer_blocks.*.attn.to_v",
+      "single_transformer_blocks.*.proj_mlp",
+      "single_transformer_blocks.*.proj_out",
+      "single_transformer_blocks.*.proj_out_attn",
+      "single_transformer_blocks.*.proj_out_mlp"
+    ]
+  },
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61,
+    "text_seq_len": 256,
+    "valid_text_rows": 13,
+    "pad_value": 0.0,
+    "num_layers": 1,
+    "num_single_layers": 1
+  },
+  "cpu_fp8_vs_cpu_bf16": {
+    "mse": 0.003944315366516079,
+    "mean_abs": 0.04866659289627932,
+    "max_abs": 0.3125,
+    "cosine": 0.9999501615652793,
+    "rel_l2": 0.009984239115374062,
+    "snr_db": 40.01370052990779
+  },
+  "arms": {
+    "fp8": {
+      "arm": "fp8",
+      "error": "RuntimeError: The following operation failed in the TorchScript interpreter.\nTraceback of TorchScript, serialized code (most recent call last):\n  File \"code/__torch__/neuronx_distributed/trace/spmd.py\", line 113, in initialize\n    start_rank = int(start_rank_tensor)\n    weight_loader = self.weight_loader\n    _15 = (weight_loader).forward(checkpoint, False, )\n           ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE\n    self.weights = _15\n    weights = self.weights\n\nTraceback of TorchScript, original code (most recent call last):\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/spmd.py\", line 185, in initialize\n        start_rank = torch.ops.aten.Int(start_rank_tensor)\n        if self.weight_loader is not None:\n            self.weights = self.weight_loader.forward(checkpoint, False)\n                           ~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE\n        else:\n            self.weights = torch.ops.neuron._parallel_load(checkpoint)\nRuntimeError: The PyTorch Neuron Runtime could not be initialized. Neuron Driver issues are logged\nto your system logs. See the Neuron Runtime's troubleshooting guide for help on this\ntopic: https://awsdocs-neuron.readthedocs-hosted.com/en/latest/\n",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_hv_device_probe.py\", line 329, in stage_device\n    output, record = _device_arm(name, transformer_dir, args, inputs,\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/scripts/ptq_fp8_hv_device_probe.py\", line 280, in _device_arm\n    app.load(str(compiled_dir), start_rank_id=0, local_ranks_size=args.tp_degree, skip_warmup=True)\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/application_base.py\", line 470, in load\n    self.load_weights(\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/difflet/backends/trainium/core/application_base.py\", line 634, in load_weights\n    self.traced_model.nxd_model.initialize(weights, start_rank_tensor)\nRuntimeError: The following operation failed in the TorchScript interpreter.\nTraceback of TorchScript, serialized code (most recent call last):\n  File \"code/__torch__/neuronx_distributed/trace/spmd.py\", line 113, in initialize\n    start_rank = int(start_rank_tensor)\n    weight_loader = self.weight_loader\n    _15 = (weight_loader).forward(checkpoint, False, )\n           ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE\n    self.weights = _15\n    weights = self.weights\n\nTraceback of TorchScript, original code (most recent call last):\n  File \"/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/spmd.py\", line 185, in initialize\n        start_rank = torch.ops.aten.Int(start_rank_tensor)\n        if self.weight_loader is not None:\n            self.weights = self.weight_loader.forward(checkpoint, False)\n                           ~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE\n        else:\n            self.weights = torch.ops.neuron._parallel_load(checkpoint)\nRuntimeError: The PyTorch Neuron Runtime could not be initialized. Neuron Driver issues are logged\nto your system logs. See the Neuron Runtime's troubleshooting guide for help on this\ntopic: https://awsdocs-neuron.readthedocs-hosted.com/en/latest/\n\n"
+    }
+  },
+  "checks": {},
+  "passed": false
+}
