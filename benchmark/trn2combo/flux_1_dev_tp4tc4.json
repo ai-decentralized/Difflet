@@ -1,0 +1,170 @@
+{
+  "model_id": "black-forest-labs/FLUX.1-dev",
+  "model_type": "flux",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 28,
+  "compile_seconds": 6.980128700997739,
+  "compile_breakdown": {
+    "wall_total_s": 6.98
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": {
+    "n": 3,
+    "mean": 40.362954226333386,
+    "median": 40.312432864000584,
+    "std": 0.6027764345073134,
+    "p50": 40.312432864000584,
+    "p90": 41.12516459299877,
+    "min": 39.6512652220008,
+    "max": 41.12516459299877,
+    "samples": [
+      40.312432864000584,
+      39.6512652220008,
+      41.12516459299877
+    ]
+  },
+  "step_latency": {
+    "n": 23,
+    "mean": 0.2700476754347935,
+    "median": 0.27000972000314505,
+    "std": 0.0001784210738441249,
+    "p50": 0.27000972000314505,
+    "p90": 0.2703142709979147,
+    "min": 0.2696985360016697,
+    "max": 0.27049540400184924,
+    "samples": [
+      0.2699942059989553,
+      0.26990393300002324,
+      0.26999160000195843,
+      0.26997402199776843,
+      0.2700595930000418,
+      0.2696985360016697,
+      0.269834955000988,
+      0.27009265199740184,
+      0.27023707199987257,
+      0.2700874410002143,
+      0.27049540400184924,
+      0.2699987890009652,
+      0.27006320099826553,
+      0.2704161719993863,
+      0.27011772700279835,
+      0.2699807079989114,
+      0.2703142709979147,
+      0.27000972000314505,
+      0.26999385799717857,
+      0.26980447599999025,
+      0.2700289109998266,
+      0.2699470490006206,
+      0.27005223900050623
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 3.703
+  },
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 + TeaCache cadence 4; tp=4 (registry default tp=8 -> 4 on trn2.3xlarge), bf16, attention_cte",
+  "status": "compiled",
+  "notes": [
+    "per-step = 270.0 ms/DiT-step (median 270.0, p90 270.3, n=23) \u2014 measured the SAME way as H100: inter-step deltas of a real 28-step generate (wrapping NeuronFluxBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 24 DiT calls timed; warm generate 7s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_warm = 40 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.",
+    "resident generate = 6.8 s (generate 3 of 3 in one process, model loaded once; walls [6.8, 6.8, 6.8]) -- the serving steady state; per-step above is from the last generate."
+  ],
+  "timestamp": "2026-10-03 23:40 UTC",
+  "config_slug": "flux_1_dev_tp4tc4",
+  "model_slug": "flux_1_dev",
+  "config": "tp4tc4",
+  "device_slug": "trn2combo",
+  "revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 3.5,
+  "output_kind": "image",
+  "teacache": {
+    "mode": "fixed_cadence",
+    "cadence": 4,
+    "online_delta_alpha": null,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "dit_calls": 24,
+    "skipped_steps_by_calls": 4,
+    "stats": {
+      "full_steps": 24,
+      "skipped_steps": 4,
+      "probe_calls": 0,
+      "last_delta_estimate": null,
+      "cache_initialized": true,
+      "online_delta_alpha": 0.0,
+      "baseline_delta": null,
+      "skipped_step_indices": [
+        8,
+        12,
+        16,
+        20
+      ],
+      "delta_trace": []
+    }
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder_t5",
+        "load_s": 8.12
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 8.97
+      },
+      {
+        "stage": "text_encoder_clip",
+        "load_s": 0.17
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 6.66
+      }
+    ],
+    "weights_load_total_s": 23.92,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 41.125,
+    "compute_and_overhead_s": 17.205
+  },
+  "dit_calls_per_step": 0.857,
+  "dit_calls": 24,
+  "loop_wall_s": 6.482,
+  "loop_step_ms": 231.5,
+  "resident_generate_s": [
+    6.841,
+    6.826,
+    6.822
+  ]
+}
