@@ -91,6 +91,7 @@ def worker_cli_args(args) -> list[str]:
         ("--tp-degree", args.tp_degree),
         ("--cp-degree", args.cp_degree),
         ("--cp-mode", args.cp_mode),
+        ("--attention-impl", getattr(args, "attention_impl", "megakernel")),
         ("--height", args.height),
         ("--width", args.width),
         ("--num-frames", args.num_frames),

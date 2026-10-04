@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from difflet.cli.orchestrators.base import ModelOrchestrator
+from difflet.cli.orchestrators.base import ModelOrchestrator, adaptive_teacache_calibration
 
 _HF_MODEL_ID = "Lightricks/LTX-2"
 _MODEL_TYPE = "ltx_2"
@@ -145,6 +145,17 @@ class LTX2Orchestrator(ModelOrchestrator):
             application_kwargs["teacache_cadence"] = self.args.teacache_cadence
         if getattr(self.args, "teacache_online_delta", None) is not None:
             application_kwargs["teacache_online_delta_alpha"] = self.args.teacache_online_delta
+        # Calibrated-adaptive TeaCache: LTX-2 computes its block-0 signal on the
+        # host CPU transformer (no probe NEFF), so only the calibration path
+        # reaches the application. It is runtime-only for the cache key; passing
+        # teacache_speedup as well would flip the key to a probe-artifact identity
+        # that does not exist for LTX-2 and miss the warm tp4 artifact.
+        calibration = adaptive_teacache_calibration(
+            self.args, model="ltx_2",
+            shape_label=f"{shape['height']}x{shape['width']}x{shape['num_frames']}",
+        )
+        if calibration is not None:
+            application_kwargs["teacache_calibration_path"] = calibration
 
         return DiffletPipeline.from_pretrained(
             _HF_MODEL_ID,

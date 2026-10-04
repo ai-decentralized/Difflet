@@ -1,0 +1,18 @@
+Displaying Current Memory Utilization:
+(NOTE: the lines are LONG, and NEFF id to name mapping is printed after)
+
+              |          |  Model   |  Model   |          |  Shared  |          |          |DMA Rings |DMA Rings | DMA Rings |DMA Rings |           | Profiler |
+              |  TOTAL   |   Code   |Constants | Tensors  |Scratchpad|Scratchpad| Runtime  |    IO    |  Spill   |Collectives| Runtime  |Collectives| Buffers  |
+ND 0 HBM 1    | 23.912GB | 48.303MB | 1.125MB  | 23.285GB |256.000MB |  0.000B  | 2.152MB  | 64.000KB |239.229MB |  6.468MB  | 72.000KB | 88.170MB  |  0.000B  |
+\_NC 2        | 23.770GB | 24.193MB |576.000KB | 23.285GB |256.000MB |  0.000B  | 1.076MB  | 32.000KB |119.726MB |  6.468MB  | 36.000KB | 88.170MB  |  0.000B  |
+  \_NEFF 1002 | 3.507MB  | 1.777MB  | 96.000KB |   n/a    |157.758MB*|  0.000B  |190.195KB |  0.000B  |320.000KB |  1.057MB  | 4.000KB  | 79.352KB  |   n/a    |
+  \_NEFF 1009 |146.493MB | 20.726MB |480.000KB |   n/a    |208.391MB*|  0.000B  |354.461KB | 32.000KB |119.413MB |  5.411MB  | 4.000KB  | 94.750KB  |   n/a    |
+\_NC 3        |145.318MB | 24.110MB |576.000KB |  0.000B  |  0.000B  |  0.000B  | 1.076MB  | 32.000KB |119.503MB |  0.000B   | 36.000KB |  0.000B   |  0.000B  |
+  \_NEFF 1002 | 2.206MB  | 1.751MB  | 96.000KB |   n/a    | 0.000B*  |  0.000B  |190.195KB |  0.000B  |176.000KB |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+  \_NEFF 1009 |140.851MB | 20.670MB |480.000KB |   n/a    | 0.000B*  |  0.000B  |354.461KB | 32.000KB |119.331MB |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+
+NEFF id to name mapping:
+1002: "/tmp/nxd_model/text_encoder_2/NeuronT5EncoderModel/_tp0_bk0/model.MODULE_f1ce610f0c16cf002593+359a15e9.neff"
+1009: "/tmp/nxd_model/transformer/NeuronFluxTransformer2DModel/_tp0_bk0/model.MODULE_8039a999d545c6d728c3+28b9ccee.neff"
+
+(*) Per-NEFF scratchpad reservation. Total HBM scratchpad usage is the max across loaded NEFFs, rounded up to page size (64.000MB).

@@ -11,10 +11,12 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from difflet.ops.attention_config import attention_cache_inputs
 
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import (
     ModelOrchestrator,
+    adaptive_teacache_calibration,
     canonical_shapes_list,
     has_valid_stage_manifest,
     hashed_stage_dir,
@@ -202,15 +204,19 @@ class WanOrchestrator(ModelOrchestrator):
             sp_enabled=getattr(args, "sp_enabled", False),
         )
         compiled_dir = self._stage_compiled_dir("transformer", args)
+        h, w, f = args.height or 480, args.width or 832, args.num_frames or 9
+        # Calibrated-adaptive TeaCache (--teacache-speedup + --teacache-calibration):
+        # Wan's block-0 signal comes from a host CPU shadow, no probe NEFF, so like
+        # the probe-free modes it is runtime-only (not in _stage_cache_inputs; the
+        # warm artifact hits). Validated here the way the probe pipelines do.
+        teacache_calibration = adaptive_teacache_calibration(
+            args, model="wan", shape_label=f"{h}x{w}x{f}"
+        )
         app = NeuronWanApplication(
             model_path=model_dir,
             parallel=parallel,
             dtype=torch.bfloat16,
-            shape={
-                "height": args.height or 480,
-                "width": args.width or 832,
-                "num_frames": args.num_frames or 9,
-            },
+            shape={"height": h, "width": w, "num_frames": f},
             shapes=compile_shapes,
             text_seq_len=512,
             batch_size=1,
@@ -222,6 +228,7 @@ class WanOrchestrator(ModelOrchestrator):
             # logic only; not in _stage_cache_inputs, so the warm artifact hits.
             teacache_cadence=getattr(args, "teacache_cadence", None),
             teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
+            teacache_calibration_path=teacache_calibration,
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
@@ -328,6 +335,7 @@ class WanOrchestrator(ModelOrchestrator):
                 "tp": args.tp_degree or 4,
                 "cp": args.cp_degree or 1,
                 "cp_mode": str(getattr(args, "cp_mode", "gather_kv") or "gather_kv"),
+                **attention_cache_inputs(getattr(args, "attention_impl", "megakernel")),
                 "cfg_parallel": bool(getattr(args, "cfg_parallel", False)),
                 "sp": bool(getattr(args, "sp_enabled", False)),
                 "dtype": "bfloat16",
@@ -373,6 +381,7 @@ class WanOrchestrator(ModelOrchestrator):
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
         a = self.args
         parts = [
+            "--attention-impl", getattr(a, "attention_impl", "megakernel"),
             "--model-id", self.args.model_id,
             "--tp-degree", str(a.tp_degree or 4),
             "--cp-degree", str(a.cp_degree or 1),
@@ -399,6 +408,10 @@ class WanOrchestrator(ModelOrchestrator):
             parts += ["--teacache-cadence", str(a.teacache_cadence)]
         if getattr(a, "teacache_online_delta", None) is not None:
             parts += ["--teacache-online-delta", str(a.teacache_online_delta)]
+        if getattr(a, "teacache_speedup", None) is not None:
+            parts += ["--teacache-speedup", str(a.teacache_speedup)]
+        if getattr(a, "teacache_calibration", None):
+            parts += ["--teacache-calibration", str(a.teacache_calibration)]
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
         if getattr(a, "negative_prompt", None) is not None:

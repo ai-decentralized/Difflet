@@ -1,0 +1,186 @@
+{
+  "model_slug": "wan_2_1",
+  "config": "tp4",
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "kind": "video",
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "seed": 42,
+  "guidance_scale": 1.0,
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "endpoint": "/v1/videos/sync",
+  "ready_seconds": 425.54795838,
+  "warmup": [
+    {
+      "latency_s": 13.278,
+      "http": 200,
+      "bytes": 434763,
+      "error": ""
+    },
+    {
+      "latency_s": 13.176,
+      "http": 200,
+      "bytes": 434859,
+      "error": ""
+    }
+  ],
+  "levels": [
+    {
+      "concurrency": 1,
+      "requests": 4,
+      "successes": 4,
+      "wall_s": 52.676,
+      "throughput_per_s": 0.0759,
+      "throughput_per_hour": 273.4,
+      "latency_s": {
+        "p50": 13.169,
+        "p90": 13.173,
+        "p99": 13.173,
+        "mean": 13.169,
+        "min": 13.164,
+        "max": 13.173
+      },
+      "http_codes": {
+        "200": 4
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 13.173,
+          "http": 200,
+          "bytes": 434760,
+          "error": ""
+        },
+        {
+          "latency_s": 13.173,
+          "http": 200,
+          "bytes": 434798,
+          "error": ""
+        },
+        {
+          "latency_s": 13.166,
+          "http": 200,
+          "bytes": 434695,
+          "error": ""
+        },
+        {
+          "latency_s": 13.164,
+          "http": 200,
+          "bytes": 434669,
+          "error": ""
+        }
+      ],
+      "resources": {
+        "samples": 31,
+        "neuroncore_util_mean_pct": 0.0,
+        "rss_peak_gb": 16.35
+      },
+      "neuron": {
+        "samples": 53,
+        "neuroncore_util_mean_pct": 85.3,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 70.23
+      }
+    },
+    {
+      "concurrency": 2,
+      "requests": 4,
+      "successes": 4,
+      "wall_s": 52.677,
+      "throughput_per_s": 0.0759,
+      "throughput_per_hour": 273.4,
+      "latency_s": {
+        "p50": 26.334,
+        "p90": 26.349,
+        "p99": 26.351,
+        "mean": 23.048,
+        "min": 13.173,
+        "max": 26.351
+      },
+      "http_codes": {
+        "200": 4
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 13.173,
+          "http": 200,
+          "bytes": 434712,
+          "error": ""
+        },
+        {
+          "latency_s": 26.351,
+          "http": 200,
+          "bytes": 434712,
+          "error": ""
+        },
+        {
+          "latency_s": 26.343,
+          "http": 200,
+          "bytes": 434712,
+          "error": ""
+        },
+        {
+          "latency_s": 26.325,
+          "http": 200,
+          "bytes": 434712,
+          "error": ""
+        }
+      ],
+      "resources": {
+        "samples": 32,
+        "neuroncore_util_mean_pct": 0.0,
+        "rss_peak_gb": 16.35
+      },
+      "neuron": {
+        "samples": 53,
+        "neuroncore_util_mean_pct": 86.0,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 70.23
+      }
+    }
+  ],
+  "resources_by_phase": {
+    "startup": {
+      "samples": 2,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 16.29
+    },
+    "warmup": {
+      "samples": 10,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 16.35
+    },
+    "c1": {
+      "samples": 31,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 16.35
+    },
+    "c2": {
+      "samples": 32,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 16.35
+    },
+    "c4": {
+      "samples": 21,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 16.29
+    },
+    "done": {
+      "samples": 1,
+      "neuroncore_util_mean_pct": 0.0,
+      "rss_peak_gb": 16.29
+    }
+  },
+  "method": "closed loop: c in-flight requests until N complete, no think time; latency = client wall per request incl. queueing; throughput = successes / level wall; one resident worker (max_running_requests=1), so c>1 measures queueing, not parallel execution"
+}

@@ -19,7 +19,7 @@ from pathlib import Path
 
 from benchmark import report
 from benchmark.harness import BenchResult, Stats
-from benchmark.models import MATRIX
+from benchmark.models import MATRIX, add_config_arg, resolve
 
 
 def _utc() -> str:
@@ -40,8 +40,9 @@ def _make_adapter(name: str):
 
 
 def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
-            iters: int, natural_iters: int = 2) -> BenchResult:
-    cfg = MATRIX[slug]
+            iters: int, natural_iters: int = 2, config: str = "tp4",
+            compile_only: bool = False) -> BenchResult:
+    cfg = resolve(slug, config)
     adapter = _make_adapter(backend)
     res = BenchResult(
         model_id=cfg.model_id, model_type=cfg.model_type, backend=backend,
@@ -77,6 +78,14 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
             adapter.prepare(cfg)
         if not skip_compile:
             res.compile_seconds, res.compile_breakdown = adapter.compile(cfg)
+        if compile_only:
+            # The Trainium campaign measures e2e with benchmark.cold_warm_e2e
+            # (true cold start) and per-step with benchmark.step_realloop; the
+            # untimed generate here would only add 5-13 min per cell.
+            res.status = "compiled"
+            res.notes.append("compile-only run: e2e/per-step come from "
+                             "cold_warm_e2e / step_realloop")
+            return res
         # cold generate
         g = adapter.run_generate(cfg)
         res.e2e_cold_seconds = g.get("wall_seconds")
@@ -143,25 +152,31 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
     return res
 
 
-def write_outputs(slug: str, res: BenchResult) -> None:
+def write_outputs(slug: str, res: BenchResult, config: str = "tp4") -> None:
     from benchmark.models import DEVICE, results_dir, json_path, report_path
     Path(results_dir()).mkdir(parents=True, exist_ok=True)
     d = res.to_dict()
-    d["config_slug"] = slug
+    cfg = resolve(slug, config)
+    d["config_slug"] = cfg.config_slug   # result-file stem (<slug>[_<config>])
+    d["model_slug"] = slug               # MATRIX key, for the harness repro commands
+    d["config"] = config                 # parallel-topology label
     d["device_slug"] = DEVICE
     # carry the hardware-agnostic repro fields into the JSON so the report's
     # Reproduction section is complete and matches the schema across devices.
-    cfg = MATRIX[slug]
     d["revision"] = cfg.revision
     d["seed"] = cfg.seed
     d["prompt"] = cfg.prompt
     d["guidance_scale"] = cfg.guidance_scale
     d["output_kind"] = cfg.output_kind
-    Path(json_path(slug)).write_text(json.dumps(d, indent=2))
-    Path(report_path(slug)).write_text(report.render(d))
-    print(f"[bench] {slug}: status={res.status}  "
+    if cfg.teacache_dict():
+        d["teacache"] = cfg.teacache_dict()
+    if getattr(cfg, "taef1_path", None):
+        d["decoder"] = {"kind": "taef1", "path": cfg.taef1_path}
+    Path(json_path(cfg.config_slug)).write_text(json.dumps(d, indent=2))
+    Path(report_path(cfg.config_slug)).write_text(report.render(d))
+    print(f"[bench] {cfg.config_slug}: status={res.status}  "
           f"compile={res.compile_seconds}  e2e_cold={res.e2e_cold_seconds}  "
-          f"-> {report_path(slug)}", flush=True)
+          f"-> {report_path(cfg.config_slug)}", flush=True)
 
 
 def main() -> int:
@@ -172,12 +187,16 @@ def main() -> int:
     p.add_argument("--skip-download", action="store_true")
     p.add_argument("--skip-compile", action="store_true",
                    help="reuse an existing compile cache")
+    p.add_argument("--compile-only", action="store_true",
+                   help="download+compile and record compile_seconds only; no generate "
+                        "(pair with cold_warm_e2e / step_realloop)")
     p.add_argument("--natural-iters", type=int, default=2,
                    help="extra warm iterations run WITHOUT the per-step device "
                         "sync, reported as the natural basis (0 disables). Only "
                         "used by adapters advertising supports_natural_mode.")
     p.add_argument("--iters", type=int, default=0,
                    help="extra warm end-to-end iterations (cold run always done)")
+    add_config_arg(p)
     args = p.parse_args()
 
     if args.all:
@@ -190,11 +209,13 @@ def main() -> int:
         raise SystemExit("specify --model <slug> or --all")
 
     for slug in slugs:
-        print(f"\n========== benchmarking {slug} ({MATRIX[slug].model_id}) ==========", flush=True)
+        print(f"\n========== benchmarking {slug} ({MATRIX[slug].model_id}) "
+              f"[{args.config}] ==========", flush=True)
         res = run_one(slug, args.backend, skip_download=args.skip_download,
                       skip_compile=args.skip_compile, iters=args.iters,
-                      natural_iters=args.natural_iters)
-        write_outputs(slug, res)
+                      natural_iters=args.natural_iters, config=args.config,
+                      compile_only=args.compile_only)
+        write_outputs(slug, res, args.config)
     return 0
 
 

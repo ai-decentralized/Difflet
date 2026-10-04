@@ -91,6 +91,9 @@ class TrainiumAdapter(BackendAdapter):
         cmd = [_DIFFLET, "compile", "--model-id", cfg.model_id] + self._rev(cfg) + [
                *cfg.parallel_flags(),
                "--cache-dir", self.cache_dir] + cfg.shape_flags()
+        # calibrated-adaptive TeaCache is part of the artifact (probe NEFF)
+        cmd += getattr(cfg, "compile_teacache_flags", lambda: [])()
+        cmd += getattr(cfg, "decoder_flags", lambda: [])()  # TAEF1 decoder NEFF
         t0 = time.perf_counter()
         text = self._run(cmd, log, timeout=14400)
         wall = time.perf_counter() - t0
@@ -113,6 +116,8 @@ class TrainiumAdapter(BackendAdapter):
                "--output", str(out_path) + out_ext] + cfg.shape_flags()
         if cfg.guidance_scale is not None:
             cmd += ["--guidance-scale", str(cfg.guidance_scale)]
+        cmd += getattr(cfg, "teacache_flags", lambda: [])()
+        cmd += getattr(cfg, "decoder_flags", lambda: [])()
         cmd += cfg.extra_generate_flags
         t0 = time.perf_counter()
         text = self._run(cmd, log, timeout=14400)
@@ -175,5 +180,8 @@ class TrainiumAdapter(BackendAdapter):
 
 
 def spec_slug(cfg) -> str:
-    base = cfg.model_id.split("/")[-1].replace(".", "_").replace("-", "_")
-    return base.lower()
+    """Log / output-file stem. Carries the parallel-config label for non-tp4
+    runs so a tp2cp2 run's logs and ``<stem>_out.*`` never clobber tp4's."""
+    base = cfg.model_id.split("/")[-1].replace(".", "_").replace("-", "_").lower()
+    config = getattr(cfg, "config", "tp4")
+    return base if config == "tp4" else f"{base}_{config}"

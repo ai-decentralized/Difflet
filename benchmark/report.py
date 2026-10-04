@@ -45,6 +45,21 @@ def _extra_axis_flags(par: dict) -> str:
     return flags
 
 
+def _teacache_repro_flags(r: dict) -> str:
+    """The generate-only TeaCache flag of a TeaCache cell (from its ``teacache``
+    record), so the reproduce block does not silently reproduce plain tp4."""
+    tc = r.get("teacache") or {}
+    mode = tc.get("mode")
+    if mode == "fixed_cadence" and tc.get("cadence"):
+        return f" --teacache-cadence {tc['cadence']}"
+    if mode == "online_delta" and tc.get("online_delta_alpha") is not None:
+        return f" --teacache-online-delta {tc['online_delta_alpha']}"
+    if mode == "adaptive" and tc.get("target_speedup"):
+        calib = tc.get("calibration") or "<calibration.json>"
+        return f" --teacache-speedup {tc['target_speedup']} --teacache-calibration {calib}"
+    return ""
+
+
 def render(r: dict) -> str:
     L: list[str] = []
     a = L.append
@@ -292,7 +307,10 @@ def render(r: dict) -> str:
                    if sh.get(k) is not None)
     g = f" --guidance-scale {r['guidance_scale']}" if r.get("guidance_scale") is not None else ""
     ext = "png" if r.get("model_type") in ("flux", "qwen_image") else "mp4"
-    slug = r.get("config_slug", "<slug>")
+    # model_slug = the MATRIX key (harness --model); config_slug = the result-file
+    # stem, which carries a non-tp4 parallel label (harness --config).
+    slug = r.get("model_slug") or r.get("config_slug", "<slug>")
+    cfg_flag = f" --config {r['config']}" if r.get("config", "tp4") != "tp4" else ""
     pending = r.get("status") == "pending"
     # only models with an in-process step_latency loader (not flux/hunyuan_video_15)
     has_step = r.get("model_type") in ("ltx_2", "wan", "qwen_image", "hunyuan_video")
@@ -301,29 +319,46 @@ def render(r: dict) -> str:
           "below are the *intended* recipe, not a reproduced run.")
         a("")
     extra = _extra_axis_flags(par)
+    if r.get("backend") == "nxdi":
+        # Native AWS NxDI baseline row (benchmark/nxdi_flux_baseline.py): not a
+        # difflet run, so the difflet command lines below would be misleading.
+        a("```bash")
+        a("# native NxDI (neuronx_distributed_inference) baseline, campaign rules:")
+        a("source .venv/bin/activate")
+        a(f"DIFFLET_BENCH_DEVICE={r.get('device_slug','trn2')} bash benchmark/trn2/nxdi_flux_baseline.sh")
+        a("#   = python -m benchmark.nxdi_flux_baseline compile|generate|record (see its docstring)")
+        a("```")
+        a("")
+        a("**Measurement protocol**: see the Notes above — compile is a timed "
+          "`NeuronFluxApplication.compile` into a fresh workdir; e2e cold/warm are one "
+          "fresh process each (page cache dropped before the cold one), load + one "
+          "generate, no warm-up; per-step = inter-step deltas of the NxDI backbone forward "
+          "inside that generate, step 0 excluded.")
+        a("")
+        return "\n".join(L)
     a("```bash")
     a("# difflet (Neuron / trn2) — compile is one-time and cached (reused, never recompiled):")
     a(f"difflet compile  --model-id {r.get('model_id','<id>')}{rev} \\")
     a(f"    --tp-degree {par.get('tp_degree',4)} --cp-degree {par.get('cp_degree',1)}{extra} {shp}")
     a(f"difflet generate --model-id {r.get('model_id','<id>')}{rev} \\")
     a(f"    --tp-degree {par.get('tp_degree',4)} --cp-degree {par.get('cp_degree',1)}{extra} {shp} \\")
-    a(f"    --steps {r.get('steps',20)}{g} --seed {r.get('seed',42)} \\")
+    a(f"    --steps {r.get('steps',20)}{g} --seed {r.get('seed',42)}{_teacache_repro_flags(r)} \\")
     a(f"    --prompt \"{r.get('prompt','...')}\" --output out.{ext}")
     if not pending:
         a("")
         a("# benchmark harness on this device (writes benchmark/<device>/):")
         a(f"DIFFLET_BENCH_DEVICE={r.get('device_slug','trn2')} \\")
-        a(f"    python -m benchmark.cold_warm_e2e --model {slug}    # true cold + warm e2e")
+        a(f"    python -m benchmark.cold_warm_e2e --model {slug}{cfg_flag}    # true cold + warm e2e")
         if has_step:
             a(f"DIFFLET_BENCH_DEVICE={r.get('device_slug','trn2')} \\")
-            a(f"    python -m benchmark.step_latency  --model {slug}    # warm per-step")
+            a(f"    python -m benchmark.step_latency  --model {slug}{cfg_flag}    # warm per-step")
         else:
             a(f"# (no in-process step_latency loader for model_type "
               f"'{r.get('model_type')}'; its per-step comes from the warm denoise-loop "
               "rate in the generate log — see Notes)")
     a("")
     a("# other backends (H100/B300) reproduce the SAME model+config via the generic runner:")
-    a(f"#   python -m benchmark.bench --backend cuda --model {slug}   # diffusers CUDA reference adapter")
+    a(f"#   python -m benchmark.bench --backend cuda --model {slug}{cfg_flag}   # diffusers CUDA reference adapter")
     a("```")
     a("")
     a("**Measurement protocol** (so the numbers above are comparable across hardware):")

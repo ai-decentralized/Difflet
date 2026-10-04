@@ -1,0 +1,171 @@
+{
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "model_type": "wan",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false,
+    "attention_impl": "sdpa"
+  },
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "compile_seconds": 328.72784298699116,
+  "compile_breakdown": {
+    "text_encoder_t5": {
+      "module_load_s": 0.603,
+      "hlo_generate_s": 0.868,
+      "priority_hlo_compile_s": 6.523,
+      "all_hlo_compile_s": 0.001,
+      "build_total_s": 36.368,
+      "other_s": 28.374
+    },
+    "transformer": {
+      "module_load_s": 2.12,
+      "hlo_generate_s": 2.993,
+      "priority_hlo_compile_s": 96.926,
+      "all_hlo_compile_s": 0.003,
+      "build_total_s": 279.335,
+      "other_s": 177.292
+    },
+    "wall_total_s": 315.704
+  },
+  "load_seconds": 352.37,
+  "e2e_cold_seconds": 416.234,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder (UMT5)",
+        "load_s": 87.97
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 233.03
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 31.37
+      }
+    ],
+    "weights_load_total_s": 352.37,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 416.234,
+    "compute_and_overhead_s": 63.864
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 87.9442254559981,
+    "median": 87.9442254559981,
+    "std": 0.0,
+    "p50": 87.9442254559981,
+    "p90": 87.9442254559981,
+    "min": 87.9442254559981,
+    "max": 87.9442254559981,
+    "samples": [
+      87.9442254559981
+    ]
+  },
+  "step_latency": {
+    "n": 19,
+    "mean": 1.0348452185265302,
+    "median": 1.0347434699942823,
+    "std": 0.0005514369371822171,
+    "p50": 1.0347434699942823,
+    "p90": 1.0352947180072078,
+    "min": 1.0340771990013309,
+    "max": 1.0365794190001907,
+    "samples": [
+      1.0365794190001907,
+      1.0348062240082072,
+      1.034944953993545,
+      1.0340771990013309,
+      1.0355046890035737,
+      1.0347043600049801,
+      1.0345039809908485,
+      1.03425214800518,
+      1.0346856099931756,
+      1.0342437930084998,
+      1.034663881000597,
+      1.0342205880006077,
+      1.0347434699942823,
+      1.0350464390066918,
+      1.0347117740020622,
+      1.0348139019915834,
+      1.0352947180072078,
+      1.035113369987812,
+      1.0351486330037005
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 0.966
+  },
+  "peak_device_mem_gb": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved wan2_1_t2v_14b_diffusers_tp4sdpa_out.mp4"
+  },
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4, --attention-impl sdpa (PyTorch SDPA via XLA instead of attention_cte); tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline",
+  "status": "ok",
+  "notes": [
+    "per-step = 1034.8 ms/DiT-step (median 1034.7, p90 1035.3, n=19) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 41s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_cold = 416 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 88 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 416 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
+  ],
+  "timestamp": "2026-09-13 01:35 UTC",
+  "config_slug": "wan_2_1_tp4sdpa",
+  "model_slug": "wan_2_1",
+  "config": "tp4sdpa",
+  "device_slug": "trn2",
+  "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder (UMT5)",
+        "load_s": 7.9
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 7.1
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 30.06
+      }
+    ],
+    "weights_load_total_s": 45.06,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 87.944,
+    "compute_and_overhead_s": 42.884
+  }
+}

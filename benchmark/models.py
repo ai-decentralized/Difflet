@@ -9,10 +9,27 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional
 
-# The Neuron inference venv all Trainium runs use.
-NXD_VENV = "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference"
+
+def _resolve_venv() -> str:
+    """The Neuron inference venv all Trainium runs use.
+
+    Resolution order: ``$DIFFLET_VENV`` -> ``<repo>/.venv`` (what
+    ``scripts/setup_env.sh`` builds; recent Neuron DLAMIs no longer ship the
+    prebuilt ``/opt`` venv) -> the historical ``/opt`` path.
+    """
+    env = os.environ.get("DIFFLET_VENV")
+    if env:
+        return env
+    repo_venv = Path(__file__).resolve().parent.parent / ".venv"
+    if (repo_venv / "bin" / "difflet").exists():
+        return str(repo_venv)
+    return "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference"
+
+
+NXD_VENV = _resolve_venv()
 
 # Results are namespaced per hardware target so other backends reproduce
 # side-by-side: benchmark/<device>/{<slug>.json,<slug>.md,RESULTS.md,logs/}.
@@ -37,6 +54,94 @@ def logs_dir(device: Optional[str] = None) -> str:
     return f"{results_dir(device)}/logs"
 
 
+# TeaCache warmup / cooldown are fixed in difflet/pipeline/teacache.py (5 + 5
+# steps never skipped); the calibrations written for tp4tcad use the same.
+TEACACHE_WARMUP = 5
+TEACACHE_COOLDOWN = 5
+
+
+def cadence2_skips(steps: int) -> int:
+    """Steps fixed cadence 2 skips: every other step inside [warmup, steps - cooldown)."""
+    return max((steps - TEACACHE_WARMUP - TEACACHE_COOLDOWN) // 2, 0)
+
+
+def adaptive_target_speedup(steps: int, skips: Optional[int] = None) -> float:
+    """tp4tcad's --teacache-speedup: the denoise-loop speedup of cadence 2's skip
+    count (steps / full steps), so the calibrated controller is compared with
+    tp4tc2 at the same skip budget -- 28 steps -> 1.474 (9 skips), 20 -> 1.333 (5).
+    ``skips`` overrides the budget (the tcadNN combo labels)."""
+    n = cadence2_skips(steps) if skips is None else skips
+    return round(steps / (steps - n), 3)
+
+
+def teacache_calibration_path(slug: str, device: Optional[str] = None,
+                              skips: Optional[int] = None) -> str:
+    """A model's tp4tcad calibration JSON (benchmark.teacache_calibrate writes it
+    on the device). Absolute: the CLI cells run as subprocesses from the repo
+    root, the real-loop and calibration harnesses load it in-process."""
+    suffix = "" if skips is None else f"_s{skips}"
+    return str((Path(results_dir(device)) / "teacache_calib"
+                / f"{slug}_tp4tcad{suffix}.json").resolve())
+
+
+def write_blocked_cell(slug: str, config: str, *, reason: str, evidence: str,
+                       extra: Optional[dict] = None) -> str:
+    """Record a (slug, config) cell as BLOCKED: a supported path that failed on
+    device for a diagnosed reason (e.g. an HBM OOM), NOT an unsupported-by-design
+    cell (those are UNSUPPORTED / status='skipped'). Writes the result JSON the
+    report reads, so a blocked cell shows its diagnosis instead of a blank.
+
+    ``reason`` is one line (shown in the matrix); ``evidence`` is the device
+    proof (a log path + the key figures); ``extra`` merges in structured fields
+    (peak HBM, the shape, the follow-up)."""
+    import json
+    cfg = resolve(slug, config)
+    d = {
+        "model_id": cfg.model_id, "model_slug": slug, "config": config,
+        "config_slug": cfg.config_slug, "device_slug": DEVICE,
+        "status": "blocked", "blocked_reason": reason, "blocked_evidence": evidence,
+        "parallel": cfg.parallel_dict(), "shape": {"height": cfg.height, "width": cfg.width,
+                                                   "num_frames": cfg.num_frames},
+        "steps": cfg.steps, "teacache": cfg.teacache_dict(),
+        "notes": [f"BLOCKED: {reason}", f"evidence: {evidence}"],
+    }
+    if extra:
+        d.update(extra)
+    p = Path(json_path(cfg.config_slug))
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(d, indent=2))
+    return str(p)
+
+
+def cell_is_blocked(slug: str, config: str) -> bool:
+    import json
+    p = Path(json_path(resolve(slug, config).config_slug))
+    if not p.exists():
+        return False
+    try:
+        return json.loads(p.read_text()).get("status") == "blocked"
+    except (OSError, ValueError):
+        return False
+
+
+def _calibration_summary(path: Optional[str]) -> dict:
+    """The fit / threshold fields of a calibration JSON, for the result record
+    (so the report can show the signal quality next to the speedup)."""
+    import json
+    if not path or not Path(path).exists():
+        return {}
+    try:
+        doc = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return {}
+    keys = ("fit_r2", "signal_pearson", "threshold", "accumulate", "n_samples",
+            "calibration_prompts", "poly_degree", "target_skips", "hardware_measured")
+    out = {k: doc[k] for k in keys if k in doc}
+    if "poly_coef" in doc and "poly_degree" not in out:
+        out["poly_degree"] = len(doc["poly_coef"]) - 1
+    return out
+
+
 @dataclass
 class BenchConfig:
     model_id: str
@@ -51,6 +156,33 @@ class BenchConfig:
     cp_mode: str = "gather_kv"               # gather_kv | ring | ulysses (cp>1 only)
     cfg_parallel: bool = False               # --cfg-parallel (true-CFG models only)
     sp: bool = False                         # --sp (Megatron sequence parallelism)
+    # --attention-impl: "megakernel" (attention_cte routing, the default and the
+    # identity of every pre-existing artifact) or "sdpa" (PyTorch SDPA through
+    # XLA; its own compile-cache identity). Recorded in the result JSON's
+    # parallel block only when not the default, so older files still match.
+    attention_impl: str = "megakernel"
+    # TeaCache (runtime-only knobs -- not in the compile-cache key, so both run
+    # on the warm tp4 artifact): fixed cadence skips every N-th DiT step
+    # (--teacache-cadence N; warmup/cooldown 5 steps each are fixed in
+    # difflet/pipeline/teacache.py), online-delta is the calibration-free
+    # adaptive controller (--teacache-online-delta ALPHA: skip when the last
+    # full step's relative-L1 delta < alpha x the latched baseline delta).
+    teacache_cadence: Optional[int] = None
+    teacache_online_delta: Optional[float] = None
+    # Calibrated adaptive (--teacache-speedup X --teacache-calibration PATH): the
+    # TeaCache paper's controller -- a per-model polynomial maps the block-0
+    # modulated-input rel-L1 signal to the expected output change, accumulated
+    # until a threshold. resolve() fills both for tp4tcad: the target is cadence
+    # 2's skip budget (adaptive_target_speedup) and the calibration is
+    # teacache_calibration_path(slug). The probe models (flux: its own probe
+    # artifact identity; qwen_image / hunyuan_video: an additive probe component
+    # of the DiT stage) need the pair on compile too (compile_teacache_flags);
+    # Wan / LTX-2 compute the signal on the host and stay on the tp4 artifact.
+    teacache_speedup: Optional[float] = None
+    teacache_calibration: Optional[str] = None
+    # TAEF1 tiny decoder (--taef1-path <repo>, implies --taef1; flux only). It
+    # replaces the VAE decoder NEFF, so it goes to compile AND generate.
+    taef1_path: Optional[str] = None
     dtype: str = "bf16"
     height: Optional[int] = None
     width: Optional[int] = None
@@ -69,6 +201,19 @@ class BenchConfig:
     # note about stages that run on the host (not a Neuron load line), explaining
     # the compute residual for host-pipeline models.
     e2e_host_note: str = ""
+    # Filled by resolve(): the MATRIX key and the parallel-config label. Together
+    # they name the result files (see config_slug) so a tp2cp2 run never
+    # overwrites the tp4 history of the same model.
+    slug: str = ""
+    config: str = "tp4"
+
+    @property
+    def config_slug(self) -> str:
+        """Result-file stem: ``<slug>`` for tp4 (the historical files), else
+        ``<slug>_<config>`` (precedent: scripts/flux_parallel_sweep.py's
+        ``flux_<label>.json``)."""
+        base = self.slug or "<slug>"
+        return base if self.config == "tp4" else f"{base}_{self.config}"
 
     def shape_flags(self) -> list[str]:
         f: list[str] = []
@@ -89,17 +234,277 @@ class BenchConfig:
             f.append("--cfg-parallel")
         if self.sp:
             f.append("--sp")
+        if self.attention_impl != "megakernel":
+            f += ["--attention-impl", self.attention_impl]
         return f
+
+    def teacache_flags(self) -> list[str]:
+        """``difflet generate`` TeaCache tokens. The probe-free modes are
+        generate-only runtime knobs; the calibrated-adaptive pair also goes to
+        compile (compile_teacache_flags), which is what builds the probe NEFF."""
+        f: list[str] = []
+        if self.teacache_cadence is not None:
+            f += ["--teacache-cadence", str(self.teacache_cadence)]
+        if self.teacache_online_delta is not None:
+            f += ["--teacache-online-delta", str(self.teacache_online_delta)]
+        return f + self.compile_teacache_flags()
+
+    def compile_teacache_flags(self) -> list[str]:
+        """``difflet compile`` TeaCache tokens: only calibrated adaptive changes
+        the artifact (flux probe identity; qwen_image / hunyuan_video probe
+        component), so only it is passed to compile."""
+        if self.teacache_speedup is None:
+            return []
+        return ["--teacache-speedup", str(self.teacache_speedup),
+                "--teacache-calibration", str(self.teacache_calibration)]
+
+    def decoder_flags(self) -> list[str]:
+        """``difflet compile`` / ``generate`` decoder tokens (TAEF1 or none)."""
+        return ["--taef1-path", self.taef1_path] if self.taef1_path else []
+
+    def teacache_dict(self) -> Optional[dict]:
+        """Result-JSON TeaCache record, or None when TeaCache is off."""
+        if (self.teacache_cadence is None and self.teacache_online_delta is None
+                and self.teacache_speedup is None):
+            return None
+        mode = ("fixed_cadence" if self.teacache_cadence is not None
+                else "online_delta" if self.teacache_online_delta is not None
+                else "adaptive")
+        d = {"mode": mode, "cadence": self.teacache_cadence,
+             "online_delta_alpha": self.teacache_online_delta,
+             "warmup_steps": TEACACHE_WARMUP, "cooldown_steps": TEACACHE_COOLDOWN}
+        if mode == "adaptive":
+            d["target_speedup"] = self.teacache_speedup
+            d["calibration"] = self.teacache_calibration
+            d.update(_calibration_summary(self.teacache_calibration))
+        return d
 
     def parallel_dict(self) -> dict:
         """Result-JSON parallel record (same schema as the phase-sweep JSONs)."""
-        return {
+        d = {
             "tp_degree": self.tp,
             "cp_degree": self.cp,
             "cp_mode": self.cp_mode,
             "cfg_parallel_enabled": self.cfg_parallel,
             "sp_enabled": self.sp,
         }
+        if self.attention_impl != "megakernel":
+            d["attention_impl"] = self.attention_impl
+        return d
+
+
+# Parallel-topology labels, all sized to the 4 NeuronCores of a trn2.3xlarge
+# (same labels as scripts/verify_cli.py PARALLEL_CONFIGS / the planner's
+# config_label). Each maps to BenchConfig field overrides applied on top of the
+# MATRIX entry by resolve(). CP runs use ulysses so HunyuanVideo (whose
+# gather_kv CP hits a neuronx-cc internal error and whose ring CP has no mask
+# path) is measurable with the same mode as the other models. tp2cfg doubles the
+# world (2 tp x 2 CFG branches = 4 cores) and needs guidance > 1 to have a
+# second branch at all: the 2026-09-12 campaign runs it at guidance 2.0.
+CONFIGS: dict[str, dict[str, Any]] = {
+    "tp4": {},
+    "tp2cp2": {"tp": 2, "cp": 2, "cp_mode": "ulysses"},
+    "tp4sp": {"tp": 4, "sp": True},
+    "tp2cfg": {"tp": 2, "cfg_parallel": True, "guidance_scale": 2.0},
+    # Same topology as tp4, DiT attention through PyTorch SDPA instead of the
+    # attention_cte megakernel routing (--attention-impl sdpa).
+    "tp4sdpa": {"attention_impl": "sdpa"},
+    # tp4 at guidance 2.0: the fair (same-work) baseline for tp2cfg -- both
+    # CFG branches run on tp4, sequentially, so tp2cfg's parallel two-branch
+    # step is compared against a measured two-branch tp4 step, not 2x a
+    # single-branch one. True-CFG models only.
+    "tp4cfg2": {"guidance_scale": 2.0},
+    # TeaCache on the tp4 artifact (no recompile). Fixed cadence 2: skips every
+    # other DiT step between the fixed 5-step warmup and cooldown -> 9 of 28
+    # steps (FLUX) or 5 of 20 (the others). Online-delta alpha 0.6 (the repo's
+    # DEFAULT_ALPHA): the calibration-free adaptive controller.
+    "tp4tc2": {"teacache_cadence": 2},
+    "tp4tcod": {"teacache_online_delta": 0.6},
+    # Calibrated adaptive (--teacache-speedup + --teacache-calibration): the
+    # per-model polynomial controller. resolve() sets the target to cadence 2's
+    # skip budget and the calibration to teacache_calibration_path(slug), which
+    # benchmark.teacache_calibrate writes from on-device (signal, delta) pairs.
+    # flux runs on its own probe artifact; qwen_image / hunyuan_video add a
+    # probe component to the tp4 DiT stage; Wan / LTX-2 compute the signal on
+    # the host (no NEFF change).
+    "tp4tcad": {"teacache_adaptive": True},
+}
+
+# Online-delta alpha sweep (2026-09-18): the same runtime-only overlay as
+# tp4tcod at other alphas, one label per value so every point is its own cell
+# (benchmark/<device>/<slug>_tp4tcodNN.json; NN = alpha x 10). 0.6 is repeated
+# so the whole curve is measured on one host against one tp4 reference output
+# (the committed tp4tcod rows are the 2026-09-13 host and are never rerun).
+# Skips are capped at cadence 2's count by the controller's no-two-skips-in-a-
+# row latch, so values above ~0.6 can only confirm saturation.
+ONLINE_DELTA_SWEEP: dict[str, float] = {
+    f"tp4tcod{int(round(a * 10)):02d}": a for a in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8)
+}
+# 0.1 was added after the 0.2 pass for the two models whose traces fall below
+# 0.1 x baseline inside the window (FLUX, HunyuanVideo); the others skip nothing
+# already at 0.2, so 0.1 is left "not measured" for them by design.
+CONFIGS.update({label: {"teacache_online_delta": a} for label, a in ONLINE_DELTA_SWEEP.items()})
+
+
+def is_sweep_label(label: str) -> bool:
+    """True for the online-delta alpha-sweep cells (reported in their own
+    table, not as campaign features)."""
+    return label in ONLINE_DELTA_SWEEP
+
+
+_CONFIG_DESC = {
+    "tp4": "tp=4",
+    "tp2cp2": "tp=2 x cp=2 (ulysses)",
+    "tp4sp": "tp=4 + sequence parallel",
+    "tp2cfg": "tp=2 x CFG-parallel (uncond/cond on separate core pairs)",
+    "tp4sdpa": "tp=4, --attention-impl sdpa (PyTorch SDPA via XLA instead of attention_cte)",
+    "tp4cfg2": "tp=4 at guidance 2.0 (two sequential CFG branches; baseline for tp2cfg)",
+    "tp4tc2": "tp=4 + TeaCache fixed cadence 2 (--teacache-cadence 2)",
+    "tp4tcod": "tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.6)",
+    "tp4tcad": "tp=4 + TeaCache calibrated adaptive (--teacache-speedup at cadence 2's "
+               "skip budget, --teacache-calibration per model)",
+}
+_CONFIG_DESC.update({
+    label: f"tp=4 + TeaCache online-delta adaptive (--teacache-online-delta {a}; alpha sweep)"
+    for label, a in ONLINE_DELTA_SWEEP.items()
+})
+
+
+# Best-combination search (2026-10-03): every 4-core layout crossed with the
+# runtime TeaCache modes and the TAEF1 decoder, one label per combination,
+# <layout>[taef1][<teacache>]. Layout and TAEF1 pick the artifact (compile);
+# the TeaCache suffix is runtime-only except tcad (probe NEFF). Labels that
+# already exist above keep their definition (same overrides).
+COMBO_LAYOUTS: dict[str, dict[str, Any]] = {
+    "tp4": {},
+    "tp4sp": {"tp": 4, "sp": True},
+    "tp2cp2": {"tp": 2, "cp": 2, "cp_mode": "ulysses"},
+    "tp2cp2gkv": {"tp": 2, "cp": 2, "cp_mode": "gather_kv"},
+    "tp2cp2ring": {"tp": 2, "cp": 2, "cp_mode": "ring"},
+}
+COMBO_TEACACHE: dict[str, dict[str, Any]] = {
+    "": {},
+    "tc2": {"teacache_cadence": 2},
+    "tc3": {"teacache_cadence": 3},
+    "tc4": {"teacache_cadence": 4},
+    "tcod005": {"teacache_online_delta": 0.05},
+    "tcod01": {"teacache_online_delta": 0.1},
+    "tcod02": {"teacache_online_delta": 0.2},
+    "tcod04": {"teacache_online_delta": 0.4},
+    "tcad": {"teacache_adaptive": True},
+    # calibrated adaptive at larger skip budgets (calibrate fit --target-skips N);
+    # the probe artifact is shared -- only teacache_probe_enabled is in the key
+    "tcad7": {"teacache_adaptive": 7},     # 20-step models: cadence 2's budget is 5
+    "tcad12": {"teacache_adaptive": 12},
+    "tcad14": {"teacache_adaptive": 14},
+}
+TAEF1_REPO = "madebyollin/taef1"
+_COMBO_LAYOUT_DESC = {
+    "tp4": "tp=4", "tp4sp": "tp=4 + sequence parallel", "tp2cp2": "tp=2 x cp=2 (ulysses)",
+    "tp2cp2gkv": "tp=2 x cp=2 (gather_kv)", "tp2cp2ring": "tp=2 x cp=2 (ring)",
+}
+_COMBO_TC_DESC = {
+    "tc2": "TeaCache cadence 2", "tc3": "TeaCache cadence 3", "tc4": "TeaCache cadence 4",
+    "tcod005": "TeaCache online-delta 0.05", "tcod01": "TeaCache online-delta 0.1",
+    "tcod02": "TeaCache online-delta 0.2", "tcod04": "TeaCache online-delta 0.4",
+    "tcad": "TeaCache calibrated adaptive",
+    "tcad7": "TeaCache calibrated adaptive, 7-skip budget",
+    "tcad12": "TeaCache calibrated adaptive, 12-skip budget",
+    "tcad14": "TeaCache calibrated adaptive, 14-skip budget",
+}
+# Wan CFG track (true-CFG models only): the same search at guidance 5.0, where
+# the second (unconditional) branch exists -- sequential on tp4 (with and
+# without TeaCache) vs CFG-parallel on tp=2 x 2 branches. TeaCache is off in
+# the loop under CFG-parallel (difflet/models/wan/pipeline.py), so there is
+# no tp2cfg TeaCache cell. Quality is compared against tp4g5, not tp4.
+CFG_TRACK: dict[str, dict[str, Any]] = {
+    "tp4g5": {"guidance_scale": 5.0},
+    "tp4g5tc2": {"guidance_scale": 5.0, "teacache_cadence": 2},
+    "tp2cfgg5": {"tp": 2, "cfg_parallel": True, "guidance_scale": 5.0},
+}
+CFG_TRACK_REF = "tp4g5"
+CONFIGS.update(CFG_TRACK)
+_CONFIG_DESC.update({
+    "tp4g5": "tp=4 at guidance 5.0 (two sequential CFG branches)",
+    "tp4g5tc2": "tp=4 at guidance 5.0 + TeaCache cadence 2",
+    "tp2cfgg5": "tp=2 x CFG-parallel at guidance 5.0",
+})
+
+COMBO_LABELS: list[str] = []
+for _lay, _lo in COMBO_LAYOUTS.items():
+    for _dec in ("", "taef1"):
+        for _tc, _to in COMBO_TEACACHE.items():
+            _label = f"{_lay}{_dec}{_tc}"
+            COMBO_LABELS.append(_label)
+            if _label in CONFIGS:
+                continue
+            CONFIGS[_label] = {**_lo, **({"taef1_path": TAEF1_REPO} if _dec else {}), **_to}
+            _CONFIG_DESC[_label] = " + ".join(
+                [_COMBO_LAYOUT_DESC[_lay]] + (["TAEF1 decoder"] if _dec else [])
+                + ([_COMBO_TC_DESC[_tc]] if _tc else []))
+
+
+# (slug, config) cells that are unsupported BY DESIGN on this codebase, with the
+# reason the report shows. The gates live in difflet (registry capabilities +
+# difflet/cli/main.py validators); tests/unit/benchmark cross-checks this table
+# against the registry so it cannot drift silently. Cells that are supported but
+# fail on device are NOT listed here -- they get a status="failed"/"blocked"
+# result with the diagnostic, never a pre-declared skip.
+_DISTILLED = ("guidance-distilled model: a single forward pass with the guidance "
+              "scale baked into the timestep embedding, so there is no second "
+              "(unconditional) CFG branch to run on a separate core pair; "
+              "`difflet` rejects --cfg-parallel for it (registry is_distilled=True, "
+              "cli/main.py _validate_cfg_parallel)")
+_DISTILLED_CFG2 = ("guidance-distilled model: guidance is a conditioning input of its single "
+                   "forward pass, so 'guidance 2.0 on tp4' is not a two-branch CFG baseline "
+                   "-- the tp2cfg cell it would baseline is N/A for this model too")
+UNSUPPORTED: dict[tuple[str, str], str] = {
+    ("flux_1_dev", "tp2cfg"): _DISTILLED,
+    ("qwen_image", "tp2cfg"): _DISTILLED,
+    ("hunyuan_video", "tp2cfg"): _DISTILLED,
+    ("hunyuan_video_15", "tp2cfg"): _DISTILLED,
+    ("flux_1_dev", "tp4cfg2"): _DISTILLED_CFG2,
+    ("qwen_image", "tp4cfg2"): _DISTILLED_CFG2,
+    ("hunyuan_video", "tp4cfg2"): _DISTILLED_CFG2,
+    ("hunyuan_video_15", "tp4cfg2"): _DISTILLED_CFG2,
+    ("ltx_2", "tp2cp2"): ("LTX-2 has no context-parallel path (registry supports_cp=False; "
+                          "difflet/models/ltx_2/entry.py raises NotImplementedError: the "
+                          "tri-stream video+audio+text transformer has no CP foundation yet)"),
+    ("ltx_2", "tp4sp"): ("LTX-2 has no sequence-parallel path (registry supports_sp=False; "
+                         "`difflet` rejects --sp for it, cli/main.py _validate_sp)"),
+}
+
+
+def resolve(slug: str, config: str = "tp4") -> "BenchConfig":
+    """The MATRIX entry for ``slug`` with the ``config`` topology applied.
+
+    Raises KeyError for an unknown slug or config label. The returned config
+    carries ``slug``/``config`` so result paths derive from ``config_slug``.
+    """
+    from dataclasses import replace
+    if slug not in MATRIX:
+        raise KeyError(f"unknown model '{slug}'. known: {', '.join(MATRIX)}")
+    if config not in CONFIGS:
+        raise KeyError(f"unknown config '{config}'. known: {', '.join(CONFIGS)}")
+    base = MATRIX[slug]
+    overrides = dict(CONFIGS[config])
+    adaptive = overrides.pop("teacache_adaptive", False)
+    if adaptive:
+        # per-model: the target follows the step count, the calibration the slug;
+        # an int is an explicit skip budget with its own calibration file
+        skips = None if adaptive is True else int(adaptive)
+        overrides["teacache_speedup"] = adaptive_target_speedup(base.steps, skips)
+        overrides["teacache_calibration"] = teacache_calibration_path(slug, skips=skips)
+    if config != "tp4":
+        overrides["config_label"] = f"{_CONFIG_DESC[config]}; {base.config_label}"
+    return replace(base, slug=slug, config=config, **overrides)
+
+
+def add_config_arg(parser) -> None:
+    """``--config <label>`` for every harness entry point."""
+    parser.add_argument("--config", default="tp4", choices=sorted(CONFIGS),
+                        help="parallel topology label (default tp4); non-tp4 runs "
+                             "write benchmark/<device>/<slug>_<config>.{json,md}")
 
 
 # Keyed by a short slug used for the report filename (benchmark/<slug>.md).
