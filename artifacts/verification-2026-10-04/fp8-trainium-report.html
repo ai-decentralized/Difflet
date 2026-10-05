@@ -113,6 +113,7 @@ footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--rule);
 <div class="col">
 <p>We quantize the large linear layers of each DiT (attention q/k/v/out and the FFN) to <span class="fp8">FP8 e4m3</span>, with FP8 weights and FP8 activations, and run the matmuls in FP8 on trn2.3xlarge at tensor parallelism 4. Everything else (embedders, modulation, norms, the final projection, text encoders, VAE) stays bf16.</p>
 <p>The scheme we started from is the one FastVideo uses on GPUs: per-tensor weight scales and <em>dynamic</em> per-tensor activation scales computed on every forward pass. On Trainium that scheme made the DiT step <strong>15&nbsp;% slower than bf16</strong>, even though the FP8 matmuls themselves were faster. We ship <strong>static activation scales calibrated offline</strong> instead, which is both faster and closer to bf16 in output quality.</p>
+<p>We also built the GPU-style answer, a hand-written NKI kernel that quantizes, multiplies and rescales in one pass. It is correct but <strong>17–33&nbsp;% slower than the XLA path</strong> in the full Wan model: on Trainium the compiler's whole-graph fusion is worth more than a fused epilogue per linear.</p>
 </div>
 <div class="facts">
   <div class="fact"><div class="num">6 / 6</div><div class="lbl">models pass on device at tp4 (Wan 2.1, Wan 2.2, FLUX.1-dev, Qwen-Image, LTX-2, HunyuanVideo)</div></div>
@@ -191,7 +192,7 @@ y       = (x_fp8 @ W_fp8) × scale_x × scale_w   # dequantize, then + bias</pre
 <div class="col">
 <p>The tensor engine cannot write to HBM directly, so a vector or scalar engine already handles every result on its way out of PSUM, and that instruction can apply a scale, a bias or an activation function in the same step. That is exactly a GPU epilogue. An NKI kernel can request it explicitly.</p>
 <p>The reason it does not happen today: our FP8 linear is written in PyTorch, lowered to XLA HLO, and compiled by neuronx-cc. In the HLO the chain after the matmul is <code>dot (fp8) → transpose → convert to f32 → multiply(scale) → convert to bf16</code>. The compiler treats the dequantize as ordinary elementwise work, so it evicts the matmul result first and then traverses it again for the multiply and the converts. The <code>transpose</code> and the two type conversions sitting between the matmul and the multiply are typical reasons a compiler's fusion rule does not fire. On GPUs this never comes up, because the scale is an argument of the library GEMM rather than something a compiler has to discover.</p>
-<p>There are two ways to get the GPU behaviour on Trainium. A hand-written NKI kernel controls the PSUM eviction directly; this is in progress (see Next steps). Rewriting the PyTorch so the chain lowers more favourably (merging the multiply with the bias add, removing the transpose) is cheaper to try, but depends on the compiler.</p>
+<p>There are two ways to get the GPU behaviour on Trainium. A hand-written NKI kernel controls the PSUM eviction directly; we built and measured one (see <a href="#nki">NKI kernel results</a>): correct, but slower than the XLA graph, because the kernel boundary blocks the compiler's fusion. Rewriting the PyTorch so the chain lowers more favourably (merging the multiply with the bias add, removing the transpose) is cheaper to try, but depends on the compiler.</p>
 </div>
 
 <div class="col">
@@ -250,7 +251,7 @@ y       = (x_fp8 @ W_fp8) × scale_x × scale_w   # dequantize, then + bias</pre
   <p class="note" style="margin:10px 0 0">Without a calibration file Difflet falls back to dynamic per-tensor scales: the same flow as FastVideo, plus two full reductions per layer on the device (the slower, lower-fidelity path).</p>
 </div></div>
 
-<h3>3. Difflet with the NKI FP8 linear kernel (in progress)</h3>
+<h3>3. Difflet with the NKI FP8 linear kernel (built, measured, not shipped)</h3>
 <div class="flow"><div class="lane">
   <h4>Setup</h4>
   <div class="steps">
@@ -346,46 +347,48 @@ y       = (x_fp8 @ W_fp8) × scale_x × scale_w   # dequantize, then + bias</pre
 </section>
 
 <section id="nki">
-<h2>NKI kernel results (Wan 2.1, in progress)</h2>
+<h2>NKI kernel results (Wan 2.1)</h2>
 <div class="col">
-<p>The kernel (<code>difflet/backends/trainium/nki_kernels/fp8_linear.py</code>) is numerically correct: on the device both modes match the CPU reference at 64 dB, the same as the XLA path, and inside the real compiled model at tp4 (two real Wan blocks, real text) the output matches the CPU at cosine 0.99998.</p>
-<p>A standalone single-layer benchmark showed that the existing XLA FP8 static linear is already as fast as or faster than bf16 for every Wan layer shape in isolation (q/k/v 0.70 vs 0.70 ms, FFN-in 1.37 vs 1.46, attention-out 0.74 vs 0.81, FFN-out 1.25 vs 1.60 ms). The remaining whole-model gap is therefore about graph-level scheduling around the linears, which a kernel has to beat inside the full model.</p>
+<p>The kernel (<code>difflet/backends/trainium/nki_kernels/fp8_linear.py</code>, flow 3 above) is numerically correct: on the device both modes match the CPU reference at 64 dB, the same as the XLA path, and inside the real compiled model at tp4 (two real Wan blocks, real text) the output matches the CPU at cosine 0.99998. <strong>It is slower than the XLA path in the real model, so we do not ship it.</strong></p>
 </div>
 <div class="tbl"><table>
-  <thead><tr><th>Two real Wan blocks at tp4, one forward</th><th class="n">Time</th></tr></thead>
+  <thead><tr><th>Wan 2.1 14B, tp4, 480×832×9, 20 steps</th><th class="n">DiT step</th><th class="n">vs bf16</th><th class="n">Latent SNR vs bf16</th><th class="n">Render vs bf16 (host VAE)</th></tr></thead>
   <tbody>
-    <tr><td>bf16</td><td class="n">35.7 ms</td></tr>
-    <tr><td>FP8, XLA-compiled</td><td class="n">35.6 ms</td></tr>
-    <tr><td>FP8, NKI kernel v1 (static or per-token)</td><td class="n">45.8 ms</td></tr>
+    <tr><td>bf16</td><td class="n">573.0 ms</td><td class="n">—</td><td class="n">—</td><td class="n">—</td></tr>
+    <tr><td><strong>FP8, XLA, static scales (shipped)</strong></td><td class="n"><strong>586.9 ms</strong></td><td class="n">+2.4 %</td><td class="n">24.9 dB</td><td class="n">33.7 dB / 0.953</td></tr>
+    <tr><td>FP8, XLA, dynamic per-tensor scales</td><td class="n">607.2 ms</td><td class="n">+6.0 %</td><td class="n">13.2 dB</td><td class="n">24.5 dB / 0.88</td></tr>
+    <tr><td>FP8, NKI kernel v2, static scales</td><td class="n">686.8 ms</td><td class="n">+19.9 %</td><td class="n">13.3 dB</td><td class="n">24.8 dB / 0.887</td></tr>
+    <tr><td>FP8, NKI kernel v2, per-token scales</td><td class="n">747.7 ms</td><td class="n">+30.5 %</td><td class="n">12.8 dB</td><td class="n">24.5 dB / 0.880</td></tr>
+    <tr><td>FP8, NKI kernel v1, static scales</td><td class="n">763.8 ms</td><td class="n">+33.3 %</td><td class="n">13.3 dB</td><td class="n">24.8 dB / 0.887</td></tr>
   </tbody>
 </table></div>
 <div class="col">
-<p>Version 1 is 28 % slower. It transposes x on the tensor engine (the same engine as the matmul; for q/k/v nearly as much work as the matmul itself), and the prototype transposes the weight with XLA on every call. Version 2 loads x with a DMA transpose instead; the planned next step stores the transposed weight in the checkpoint. Full 20-step Wan 2.1 numbers for each version are added here as they are measured.</p>
+<p class="note">Render is PSNR / SSIM against the bf16 render decoded on the host. Two real blocks, one forward: bf16 35.7 ms, XLA FP8 35.6 ms, NKI v1 45.8 ms, NKI v2 41.7 ms (static) / 44.4 ms (per-token).</p>
+<h3>Why the GPU-style kernel loses on Trainium</h3>
+<ul>
+  <li><strong>The XLA FP8 linear was never the slow part.</strong> In isolation it already matches or beats bf16 for every Wan layer shape (q/k/v 0.70 vs 0.70 ms, FFN-in 1.37 vs 1.46, attention-out 0.74 vs 0.81, FFN-out 1.25 vs 1.60 ms). A per-linear kernel only wins if it beats an already-good matmul.</li>
+  <li><strong>A custom kernel is a fusion wall.</strong> neuronx-cc cannot see inside an NKI call, so it can no longer overlap the linear with the neighbouring norm, modulation, RoPE and attention work, or keep the output on chip for the next op. Every call reads its input from HBM and writes its output back, about 240 calls per DiT step. On a GPU the surrounding ops are separate kernels anyway, so a fused GEMM loses nothing. On Trainium the compiler's whole-graph schedule is what we give up.</li>
+  <li><strong>Prototype overheads.</strong> The FP8 weight is still transposed by XLA on every call, and the bias is added outside the kernel. Moving x's transpose from the tensor engine to a DMA (v1 → v2) took 77 ms off the step. The rest is the fusion wall plus untuned tiling.</li>
+  <li><strong>Per-token scales cost 61 ms per step more than static</strong> (row max, reciprocal and per-row broadcast on every tile) with no fidelity gain on the device.</li>
+</ul>
+<h3>An open fidelity question</h3>
+<p>The NKI kernel uses <em>the same calibrated static scales</em> as the shipped path, yet its end-to-end fidelity (13 dB latent SNR) matches the XLA dynamic path and an earlier weight-only FP8 run, not the 25 dB of XLA static. So the earlier explanation, that dynamic scales drift over the 20-step loop, is not the whole story: a W8A8 path should not beat weight-only quantization with the same weights. Every single-forward check passes for every path. A CPU replay of the full 20-step loop (bf16, weight-only, W8A8 static, W8A8 dynamic) is running to establish which device result is the true FP8 fidelity. Until then, quote the 33.7 dB figure with that caveat.</p>
 </div>
 </section>
 
 <section id="next">
 <h2>Next steps</h2>
 <div class="col">
-<p>The remaining gap on Wan is the unfused quantize / dequantize around each matmul. The option closest to the GPU design is a <strong>hand-written NKI kernel</strong> per FP8 linear:</p>
-</div>
-<pre>for each output tile:
-    load x tile and W_fp8 tile into SBUF
-    quantize x in SBUF (static scale, or a per-token scale computed on the tile)
-    fp8 matmul on the tensor engine, fp32 accumulation in PSUM
-    on the PSUM → SBUF move: × scale, + bias, cast to bf16     # the GPU "epilogue"
-    write to HBM</pre>
-<div class="col">
 <ul>
-  <li><strong>Static scales first</strong>: a constant scale lets the whole layer run in one pass over the activation.</li>
-  <li><strong>Then per-token dynamic scales</strong>: a row of 5,120 values fits in one SBUF tile, so each token's scale can be computed in place without a global barrier. This is also the granularity the Wan report uses on GPUs, and it would remove the calibration step if quality holds.</li>
-  <li><strong>Cheaper experiments alongside</strong>: rewrite the PyTorch so the dequantize fuses (merge it with the bias add, avoid the transpose between matmul and multiply), and fold scales algebraically (q/k feed an RMSNorm, which cancels a constant scale; attention is linear in V, so V's scale can merge into the next layer's quantize).</li>
+  <li><strong>Ship XLA FP8 static scales</strong> (the fastest and, on the device, the most faithful FP8 path). Keep the NKI kernel behind the off-by-default <code>DIFFLET_FP8_NKI</code> switch.</li>
+  <li><strong>Close the fidelity question</strong> with the CPU 20-step reference before quoting FP8 quality externally.</li>
+  <li><strong>If kernel work continues, fuse bigger pieces, not single linears.</strong> One kernel for q/k/v with three outputs, or FFN-in + GELU + FFN-out in one kernel, pays the fusion-wall cost once per sub-block and removes an HBM round trip the compiler cannot. Store the FP8 weight pre-transposed in the checkpoint, fuse the bias, and tune tiling.</li>
+  <li><strong>Cheaper experiments on the XLA path</strong>: rewrite the PyTorch so the dequantize fuses (merge it with the bias add), and fold scales algebraically (q/k feed an RMSNorm, which cancels a constant scale; attention is linear in V).</li>
 </ul>
-<p>Work in progress on Wan 2.1: an NKI FP8 linear kernel in both variants, measured against the current 586.9 ms static path and the 573.0 ms bf16 baseline.</p>
 </div>
 </section>
 
 <footer>
-  Difflet FP8 PTQ work, branch <span class="mono">quantization</span>. Detailed evidence: <span class="mono">docs/verification/2026-10-03-ptq-fp8-static-fanout.md</span> and <span class="mono">artifacts/verification-2026-10-03/fp8-dyn-step/NOTES.md</span>. External references: Wan technical report (arXiv 2503.20314), vLLM FP8 documentation, vLLM issue #28234.
+  Difflet FP8 PTQ work, branch <span class="mono">quantization</span>. Detailed evidence: <span class="mono">docs/verification/2026-10-03-ptq-fp8-static-fanout.md</span>, <span class="mono">docs/verification/2026-10-05-nki-fp8-kernel.md</span> and <span class="mono">artifacts/verification-2026-10-03/fp8-dyn-step/NOTES.md</span>. External references: Wan technical report (arXiv 2503.20314), vLLM FP8 documentation, vLLM issue #28234.
 </footer>
 </div>
