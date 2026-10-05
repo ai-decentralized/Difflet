@@ -30,7 +30,7 @@ Cross-model findings:
    DiT calls at ≥ 34 dB. HunyuanVideo tolerates fewer skips — online-delta 0.1 (3 skips).
    Cadence 3/4 skip *fewer* steps (cadence N skips every N-th) and are never better.
 2. **Calibrated adaptive only pays on Qwen-Image** (fit R² 0.99): 13/20 calls at 37.0 dB.
-   On FLUX (R² 0.59), Wan (0.59) and HunyuanVideo (0.77) it gives the same calls as
+   On FLUX (R² 0.59), Wan (0.59), HunyuanVideo (0.77) and LTX-2 (0.94) it gives the same calls as
    cadence 2 at lower quality, or fewer calls at failing quality, plus a probe cost.
 3. **Layouts:** sequence parallel wins per-step on Qwen-Image (−12%) and HunyuanVideo
    (−3%); ulysses on FLUX (−2.4%); ring on Wan at a conforming shape (−17%). tp2 layouts
@@ -44,7 +44,7 @@ Cross-model findings:
 |---|---|---|
 | 1 | **Neuron Wan VAE corrupts every frame after the first** (frames 1+ at 8–15 dB vs the host VAE on the same latents; eager module bit-identical to diffusers, so the trace / compile is at fault) | **filed: issue #73** (assigned). Wan measured with `--host-vae`. |
 | 2 | **Wan calibrated-adaptive TeaCache could never load** — CLI stage cache key omitted the probe NEFF added in 0f9ef0f | **fixed: a330828** (+ test); measured after the fix |
-| 3 | **LTX-2 calibrated-adaptive TeaCache could never load** — `compile()` never built the probe artifact the load resolves | **fixed: f43928d** (+ test) |
+| 3 | **LTX-2 calibrated-adaptive TeaCache could never load** — `compile()` never built the probe artifact the load resolves | **fixed: f43928d** (+ test); measured after the fix |
 | 4 | Harness: holdout files keyed by label only (cross-model collision) | fixed: 26e3411 |
 
 Limits recorded (not bugs): FLUX tp2cp2 + probe exceeds 24 GB HBM per core; Wan ring needs
@@ -330,7 +330,7 @@ run on the host, so the Neuron weight load is only ~11 s and step savings show i
 | fewest calls / best e2e | **tp4 + cadence 2** | 15/20 calls, denoise 9.16 → 6.88 s, warm 57.0 → 55.3 s (n=5) | 37.1 dB mean |
 
 Online-delta 0.1 / 0.2 skip nothing on LTX-2 and 0.4 skips one step. At guidance 1.0 the
-subject renders weakly (as on Wan). __LTX_TCAD__
+subject renders weakly (as on Wan). Calibrated adaptive (after fix f43928d; 8-prompt fit R² 0.94): the 5-skip budget matches cadence 2 (15 calls, 6.92 s) at 36.0 dB mean; the 7-skip budget reaches 13 calls / 6.02 s but averages 34.0 dB with one prompt at 25.4 dB — so cadence 2 stays the answer.
 
 ### All ltx_2 cells
 
@@ -341,6 +341,8 @@ subject renders weakly (as on Wan). __LTX_TCAD__
 | `tp4tcod01` | tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.1 | 458.3 | 20/20 | 9.17 | — | 57.2 | 10.4 | identical |
 | `tp4tcod02` | tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.2 | 458.3 | 20/20 | 9.17 | — | 57.0 | 14.7 | identical |
 | `tp4tcod04` | tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.4 | 458.6 | 19/20 | 8.72 | — | 56.8 | 11.5 | 36.9 dB |
+| `tp4tcad` | tp=4 + TeaCache calibrated adaptive (--teacache-speedup at cadence 2's skip budget, --teacache-calibration per model) | 461.7 | 15/20 | 6.92 | — | 56.6 | 11.4 | 36.2 dB |
+| `tp4tcad7` | tp=4 + TeaCache calibrated adaptive, 7-skip budget | 463.3 | 13/20 | 6.02 | — | 55.3 | 11.7 | 32.7 dB |
 
 ## Reproduce
 
