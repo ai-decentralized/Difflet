@@ -1,0 +1,188 @@
+{
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "model_type": "wan",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "compile_seconds": 5.927783649996854,
+  "compile_breakdown": {
+    "wall_total_s": 5.928
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": {
+    "n": 3,
+    "mean": 83.96321495933807,
+    "median": 84.09637832999579,
+    "std": 0.503054522066399,
+    "p50": 84.09637832999579,
+    "p90": 84.50185754301492,
+    "min": 83.29140900500352,
+    "max": 84.50185754301492,
+    "samples": [
+      84.50185754301492,
+      83.29140900500352,
+      84.09637832999579
+    ]
+  },
+  "step_latency": {
+    "n": 12,
+    "mean": 0.5839869438350433,
+    "median": 0.5801337460143259,
+    "std": 0.005903787358888398,
+    "p50": 0.5801774810242932,
+    "p90": 0.592664699011948,
+    "min": 0.579426826996496,
+    "max": 0.5985176249814685,
+    "samples": [
+      0.5838841780205257,
+      0.579426826996496,
+      0.5799270389834419,
+      0.5801774810242932,
+      0.5985176249814685,
+      0.592664699011948,
+      0.5865748820069712,
+      0.5868507229897659,
+      0.5800655449857004,
+      0.5800900110043585,
+      0.5799454539956059,
+      0.5797188620199449
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 1.712
+  },
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 + host VAE + TeaCache calibrated adaptive, 7-skip budget; tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline",
+  "status": "compiled",
+  "notes": [
+    "per-step = 584.0 ms/DiT-step (median 580.1, p90 592.7, n=12) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 13 DiT calls timed; warm generate 33s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_warm = 84 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+  ],
+  "timestamp": "2026-10-05 15:17 UTC",
+  "config_slug": "wan_2_1_tp4hostvaetcad7",
+  "model_slug": "wan_2_1",
+  "config": "tp4hostvaetcad7",
+  "device_slug": "trn2combo",
+  "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video",
+  "teacache": {
+    "mode": "adaptive",
+    "cadence": null,
+    "online_delta_alpha": null,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "target_speedup": 1.538,
+    "calibration": "/home/ubuntu/Difflet/.claude/worktrees/flux-best-combo/benchmark/trn2combo/teacache_calib/wan_2_1_tp4tcad_s7.json",
+    "fit_r2": 0.5921245976291392,
+    "signal_pearson": 0.6592552043535008,
+    "threshold": 0.16076889975594452,
+    "accumulate": true,
+    "n_samples": 152,
+    "calibration_prompts": [
+      "a cat sitting on a bench in a sunlit park",
+      "a red vintage car parked outside a diner at dusk",
+      "an astronaut riding a horse across a desert plain",
+      "a bowl of ramen with steam rising, studio lighting",
+      "a lighthouse on a cliff during a thunderstorm",
+      "a robot barista pouring latte art in a cozy cafe",
+      "a snow-covered temple garden with stone lanterns",
+      "a macro photo of a dragonfly on a dewy leaf"
+    ],
+    "poly_degree": 4,
+    "target_skips": 7,
+    "hardware_measured": true,
+    "dit_calls": 13,
+    "skipped_steps_by_calls": 7,
+    "stats": {
+      "full_steps": 13,
+      "skipped_steps": 7,
+      "probe_calls": 20,
+      "last_delta_estimate": 0.08605448278265189,
+      "cache_initialized": true,
+      "online_delta_alpha": 0.0,
+      "baseline_delta": null,
+      "skipped_step_indices": [
+        5,
+        6,
+        7,
+        9,
+        10,
+        12,
+        14
+      ],
+      "delta_trace": []
+    }
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder (UMT5)",
+        "load_s": 9.35
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 9.23
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 0.53
+      }
+    ],
+    "weights_load_total_s": 19.11,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 84.096,
+    "compute_and_overhead_s": 64.986
+  },
+  "dit_calls_per_step": 0.65,
+  "dit_calls": 13,
+  "loop_wall_s": 7.729,
+  "loop_step_ms": 386.5,
+  "quality_holdout": {
+    "tp4hostvae": {
+      "ref": "tp4hostvae",
+      "prompts": 4,
+      "psnr_db": [
+        29.9,
+        28.75,
+        30.05,
+        31.04
+      ],
+      "mean_psnr_db": 29.93,
+      "min_psnr_db": 28.75,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    }
+  }
+}
