@@ -129,10 +129,11 @@ def test_online_delta_sweep_labels_are_tp4tcod_at_other_alphas():
 
 
 def test_configs_are_the_verify_cli_labels_sized_to_four_cores():
-    from benchmark.models import CFG_TRACK, COMBO_LABELS, ONLINE_DELTA_SWEEP
+    from benchmark.models import (CFG_TRACK, CFG_TRACK_HOSTVAE, COMBO_LABELS,
+                                  ONLINE_DELTA_SWEEP, RING_STUDY)
     assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4cfg2",
                             "tp4tc2", "tp4tcod", "tp4tcad", *ONLINE_DELTA_SWEEP,
-                            *COMBO_LABELS, *CFG_TRACK}
+                            *COMBO_LABELS, *CFG_TRACK, *CFG_TRACK_HOSTVAE, *RING_STUDY}
     for label in CONFIGS:
         cfg = resolve("flux_1_dev", label)
         world = cfg.tp * cfg.cp * (2 if cfg.cfg_parallel else 1)
@@ -271,7 +272,7 @@ def test_cell_status_requires_all_four_metrics(tmp_path, monkeypatch):
 
 def test_combo_labels_cross_layout_decoder_and_teacache():
     from benchmark.models import COMBO_LABELS, COMBO_LAYOUTS, COMBO_TEACACHE
-    assert len(COMBO_LABELS) == len(set(COMBO_LABELS)) == len(COMBO_LAYOUTS) * 2 * len(COMBO_TEACACHE)
+    assert len(COMBO_LABELS) == len(set(COMBO_LABELS)) == len(COMBO_LAYOUTS) * 3 * len(COMBO_TEACACHE)
     ring = resolve("flux_1_dev", "tp2cp2ringtaef1tc3")
     assert ring.parallel_flags() == ["--tp-degree", "2", "--cp-degree", "2", "--cp-mode", "ring"]
     assert ring.decoder_flags() == ["--taef1-path", "madebyollin/taef1"]
@@ -310,3 +311,20 @@ def test_wan_cfg_track_and_twenty_step_budget():
     t7 = resolve("wan_2_1", "tp4tcad7")
     assert t7.teacache_speedup == round(20 / 13, 3)
     assert t7.teacache_calibration.endswith("wan_2_1_tp4tcad_s7.json")
+
+
+def test_host_vae_cells_ring_study_and_references():
+    from benchmark.models import reference_label
+    hv = resolve("wan_2_1", "tp4hostvaetc2")
+    assert hv.decoder_flags() == ["--host-vae"] and hv.teacache_cadence == 2
+    assert resolve("wan_2_1", "tp4").decoder_flags() == []
+    cfgp = resolve("wan_2_1", "tp2cfgg5hostvae")
+    assert cfgp.cfg_parallel and cfgp.guidance_scale == 5.0 and cfgp.host_vae
+    ring = resolve("wan_2_1", "r768tp2cp2ring")
+    assert (ring.height, ring.width, ring.num_frames) == (512, 768, 9) and ring.cp_mode == "ring"
+    # per-rank tokens must divide by 128 (the reason for the shape)
+    assert (9 - 1) // 4 + 1 == 3 and 3 * (512 // 16) * (768 // 16) // 2 % 128 == 0
+    assert reference_label("r768tp2cp2ring") == "r768tp4"
+    assert reference_label("tp4hostvaetc2") == "tp4hostvae"
+    assert reference_label("tp2cfgg5hostvae", guidance_differs=True) == "tp4hostvaeg5"
+    assert reference_label("tp4tc2") == "tp4"

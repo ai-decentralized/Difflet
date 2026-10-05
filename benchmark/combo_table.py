@@ -17,8 +17,8 @@ import json
 import statistics
 from pathlib import Path
 
-from benchmark.models import (CFG_TRACK, CFG_TRACK_REF, COMBO_LABELS, MATRIX, logs_dir,
-                              json_path, resolve)
+from benchmark.models import (CFG_TRACK, CFG_TRACK_HOSTVAE, COMBO_LABELS, MATRIX, RING_STUDY,
+                              json_path, logs_dir, reference_label, resolve)
 
 
 def _row(slug: str, label: str) -> dict | None:
@@ -49,10 +49,9 @@ def _row(slug: str, label: str) -> dict | None:
 
 
 def ref_label(slug: str, label: str) -> str:
-    """The same-workload reference: tp4, or the CFG track's tp4g5 when the
-    guidance differs from the matrix workload."""
+    """The same-workload, same-decoder reference (models.reference_label)."""
     cfg = resolve(slug, label)
-    return CFG_TRACK_REF if cfg.guidance_scale != MATRIX[slug].guidance_scale else "tp4"
+    return reference_label(label, cfg.guidance_scale != MATRIX[slug].guidance_scale)
 
 
 def _parity(slug: str, label: str, cfg) -> dict | None:
@@ -87,7 +86,7 @@ def _psnr(r: dict | None) -> str:
 
 
 def table(slug: str) -> list[str]:
-    rows = [r for r in (_row(slug, l) for l in [*COMBO_LABELS, *CFG_TRACK]) if r]
+    rows = [r for r in (_row(slug, l) for l in [*COMBO_LABELS, *CFG_TRACK, *CFG_TRACK_HOSTVAE, *RING_STUDY]) if r]
     L = ["| label | configuration | per-step (ms) | DiT calls | denoise loop (s) | "
          "resident (s) | warm e2e (s) | load (s) | PSNR vs ref |",
          "|---|---|---|---|---|---|---|---|---|"]
@@ -99,7 +98,7 @@ def table(slug: str) -> list[str]:
                  f"{_fmt(r['calls'], '{}')}/{r['steps']} | {_fmt(r['loop_s'], '{:.2f}')} | "
                  f"{_fmt(r['resident_s'], '{:.2f}')} | "
                  f"{_fmt(r['warm_s'])} | {_fmt(r['load_s'])} | {_psnr(r['parity'])}"
-                 f"{'' if ref_label(slug, r['label']) == 'tp4' else ' (vs ' + CFG_TRACK_REF + ')'} |")
+                 f"{'' if ref_label(slug, r['label']) == 'tp4' else ' (vs ' + ref_label(slug, r['label']) + ')'} |")
     return L
 
 

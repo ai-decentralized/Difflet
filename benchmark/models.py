@@ -183,6 +183,9 @@ class BenchConfig:
     # TAEF1 tiny decoder (--taef1-path <repo>, implies --taef1; flux only). It
     # replaces the VAE decoder NEFF, so it goes to compile AND generate.
     taef1_path: Optional[str] = None
+    # --host-vae (wan): decode on the host with the diffusers VAE; on compile it
+    # skips the Neuron VAE stage. Goes to compile AND generate.
+    host_vae: bool = False
     dtype: str = "bf16"
     height: Optional[int] = None
     width: Optional[int] = None
@@ -259,8 +262,10 @@ class BenchConfig:
                 "--teacache-calibration", str(self.teacache_calibration)]
 
     def decoder_flags(self) -> list[str]:
-        """``difflet compile`` / ``generate`` decoder tokens (TAEF1 or none)."""
-        return ["--taef1-path", self.taef1_path] if self.taef1_path else []
+        """``difflet compile`` / ``generate`` decoder tokens (TAEF1, host VAE or none)."""
+        if self.taef1_path:
+            return ["--taef1-path", self.taef1_path]
+        return ["--host-vae"] if self.host_vae else []
 
     def teacache_dict(self) -> Optional[dict]:
         """Result-JSON TeaCache record, or None when TeaCache is off."""
@@ -399,6 +404,10 @@ COMBO_TEACACHE: dict[str, dict[str, Any]] = {
     "tcad14": {"teacache_adaptive": 14},
 }
 TAEF1_REPO = "madebyollin/taef1"
+_DECODERS: dict[str, dict[str, Any]] = {
+    "": {}, "taef1": {"taef1_path": TAEF1_REPO}, "hostvae": {"host_vae": True},
+}
+_DECODER_DESC = {"taef1": "TAEF1 decoder", "hostvae": "host VAE"}
 _COMBO_LAYOUT_DESC = {
     "tp4": "tp=4", "tp4sp": "tp=4 + sequence parallel", "tp2cp2": "tp=2 x cp=2 (ulysses)",
     "tp2cp2gkv": "tp=2 x cp=2 (gather_kv)", "tp2cp2ring": "tp=2 x cp=2 (ring)",
@@ -432,16 +441,48 @@ _CONFIG_DESC.update({
 
 COMBO_LABELS: list[str] = []
 for _lay, _lo in COMBO_LAYOUTS.items():
-    for _dec in ("", "taef1"):
+    for _dec in ("", "taef1", "hostvae"):
         for _tc, _to in COMBO_TEACACHE.items():
             _label = f"{_lay}{_dec}{_tc}"
             COMBO_LABELS.append(_label)
             if _label in CONFIGS:
                 continue
-            CONFIGS[_label] = {**_lo, **({"taef1_path": TAEF1_REPO} if _dec else {}), **_to}
+            CONFIGS[_label] = {**_lo, **_DECODERS[_dec], **_to}
             _CONFIG_DESC[_label] = " + ".join(
-                [_COMBO_LAYOUT_DESC[_lay]] + (["TAEF1 decoder"] if _dec else [])
+                [_COMBO_LAYOUT_DESC[_lay]] + ([_DECODER_DESC[_dec]] if _dec else [])
                 + ([_COMBO_TC_DESC[_tc]] if _tc else []))
+
+# Wan CFG track with the host VAE (the Neuron Wan VAE corrupts frames 1+).
+_CFG_HOSTVAE_NAMES = {"tp4g5": "tp4hostvaeg5", "tp4g5tc2": "tp4hostvaeg5tc2",
+                      "tp2cfgg5": "tp2cfgg5hostvae"}
+CFG_TRACK_HOSTVAE = {_CFG_HOSTVAE_NAMES[k]: {**v, "host_vae": True} for k, v in CFG_TRACK.items()}
+CONFIGS.update(CFG_TRACK_HOSTVAE)
+_CONFIG_DESC.update({_CFG_HOSTVAE_NAMES[k]: f"{_CONFIG_DESC[k]} + host VAE" for k in CFG_TRACK})
+
+# Wan ring study (2026-10-05): ring needs per-rank tokens % 128 == 0, which
+# 480x832x9 (2340/rank) misses; 512x768x9 (4608 tokens, 2304/rank) is the
+# closest conforming shape (480x832x9 is 4680). Host VAE: no 2 h Neuron VAE
+# compile for the new shape. Compared within the study only.
+RING_STUDY = {
+    f"r768{lay}": {**COMBO_LAYOUTS[lay], "height": 512, "width": 768, "num_frames": 9,
+                   "host_vae": True}
+    for lay in ("tp4", "tp2cp2", "tp2cp2ring")
+}
+CONFIGS.update(RING_STUDY)
+_CONFIG_DESC.update({k: f"512x768x9 (ring-conforming), {_COMBO_LAYOUT_DESC[k[4:]]} + host VAE"
+                     for k in RING_STUDY})
+
+
+def reference_label(label: str, guidance_differs: bool = False) -> str:
+    """The same-workload, same-decoder reference a cell's output is scored
+    against: the ring study's r768tp4, the CFG track's tp4g5[hostvae], or
+    tp4[hostvae|taef1-less] -- never a different decoder or shape."""
+    if label in RING_STUDY:
+        return "r768tp4"
+    hv = "hostvae" in label
+    if guidance_differs:
+        return "tp4hostvaeg5" if hv else CFG_TRACK_REF
+    return "tp4hostvae" if hv else "tp4"
 
 
 # (slug, config) cells that are unsupported BY DESIGN on this codebase, with the
