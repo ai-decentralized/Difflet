@@ -1,0 +1,391 @@
+<title>FP8 DiT Inference on Trainium</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (~70ch) with full-width tables and flow diagrams breaking out to ~980px. Datasheet feel: ruled tables, mono for figures, one teal accent, amber marks fp8. */
+:root {
+  --bg: #f7f8f7;
+  --surface: #ffffff;
+  --fg: #1d2326;
+  --muted: #5b666b;
+  --rule: #d6dcda;
+  --accent: #0f6a70;
+  --accent-soft: #e2f0ef;
+  --fp8: #a35b00;
+  --fp8-soft: #fbefdc;
+  --good: #2f7a3b;
+  --bad: #b3261e;
+  --code-bg: #eef1f0;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121617; --surface: #1a2022; --fg: #e3e8e6; --muted: #9aa6a9; --rule: #2e3739;
+    --accent: #5fc4c9; --accent-soft: #163233; --fp8: #f0a94b; --fp8-soft: #33250f;
+    --good: #7fcf8b; --bad: #f2867e; --code-bg: #20282a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121617; --surface: #1a2022; --fg: #e3e8e6; --muted: #9aa6a9; --rule: #2e3739;
+  --accent: #5fc4c9; --accent-soft: #163233; --fp8: #f0a94b; --fp8-soft: #33250f;
+  --good: #7fcf8b; --bad: #f2867e; --code-bg: #20282a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.62 var(--f-body); }
+.wrap { max-width: 980px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 80px; }
+.col { max-width: 70ch; }
+header.top { border-bottom: 2px solid var(--fg); padding-block: 8px 22px; margin-bottom: 28px; }
+.eyebrow { font: 500 12px/1.4 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font: 600 clamp(30px, 5vw, 44px)/1.08 var(--f-display); margin: 10px 0 12px; text-wrap: balance; letter-spacing: -.01em; }
+.lede { font-size: 18px; color: var(--muted); margin: 0; max-width: 64ch; }
+h2 { font: 600 26px/1.2 var(--f-display); margin: 56px 0 14px; text-wrap: balance; }
+h3 { font: 600 18px/1.3 var(--f-body); margin: 30px 0 8px; }
+p { margin: 0 0 14px; }
+ul, ol { margin: 0 0 16px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+code, .mono { font-family: var(--f-mono); font-size: .9em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+pre { background: var(--code-bg); padding: 14px 16px; border-radius: 4px; overflow-x: auto; font: 13.5px/1.55 var(--f-mono); margin: 0 0 18px; }
+a { color: var(--accent); }
+.fp8 { color: var(--fp8); font-weight: 600; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 500 14px/1.4 var(--f-body); margin: 0 0 8px; padding: 0; list-style: none; }
+.toc a { text-decoration: none; border-bottom: 1px solid var(--rule); }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); margin: 22px 0 8px; }
+.fact { padding: 16px 16px 16px 0; min-width: 0; }
+.fact + .fact { border-left: 1px solid var(--rule); padding-left: 16px; }
+.fact .num { font: 500 26px/1.1 var(--f-mono); font-variant-numeric: tabular-nums; }
+.fact .lbl { font-size: 13px; color: var(--muted); margin-top: 6px; }
+@media (max-width: 640px) { .fact + .fact { border-left: 0; padding-left: 0; border-top: 1px solid var(--rule); } }
+.tbl { overflow-x: auto; margin: 6px 0 18px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 12px/1.3 var(--f-body); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border-bottom: 1.5px solid var(--fg); white-space: nowrap; }
+td.n, th.n { text-align: right; font-family: var(--f-mono); white-space: nowrap; }
+tr.hl td { background: var(--fp8-soft); }
+.note { font-size: 13px; color: var(--muted); }
+.flow { display: grid; gap: 14px; margin: 10px 0 20px; }
+.lane { border: 1px solid var(--rule); background: var(--surface); border-radius: 4px; padding: 14px; min-width: 0; }
+.lane h4 { margin: 0 0 10px; font: 600 14px/1.3 var(--f-body); }
+.steps { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
+.step { flex: 1 1 150px; min-width: 0; border: 1px solid var(--rule); border-radius: 3px; padding: 8px 10px; font-size: 13px; background: var(--bg); }
+.step b { display: block; font: 600 12px/1.3 var(--f-mono); margin-bottom: 4px; }
+.step.cost { border-color: var(--bad); }
+.step.cost b { color: var(--bad); }
+.step.free { border-color: var(--good); }
+.step.free b { color: var(--good); }
+.callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; margin: 6px 0 18px; border-radius: 0 4px 4px 0; }
+.callout p:last-child { margin-bottom: 0; }
+.decisions { list-style: none; padding: 0; margin: 10px 0 18px; border-top: 1px solid var(--rule); }
+.decisions li { display: grid; grid-template-columns: 110px 1fr; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--rule); margin: 0; }
+.decisions .v { font: 600 12px/1.4 var(--f-mono); text-transform: uppercase; letter-spacing: .05em; padding-top: 3px; }
+.decisions .keep { color: var(--good); }
+.decisions .drop { color: var(--bad); }
+.decisions .info { color: var(--muted); }
+@media (max-width: 560px) { .decisions li { grid-template-columns: 1fr; gap: 2px; } }
+footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 13px; color: var(--muted); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">Difflet · Tech report · October 2026</div>
+  <h1>FP8 DiT Inference on Trainium</h1>
+  <p class="lede">What it took to make W8A8 FP8 quantization pay off for diffusion transformers on AWS Trainium (trn2), how that differs from FP8 on GPUs, and the decisions we made along the way.</p>
+</header>
+
+<ul class="toc">
+  <li><a href="#summary">Summary</a></li>
+  <li><a href="#gemm">FP8 GEMM in one page</a></li>
+  <li><a href="#gpu-vs-trn">GPU vs Trainium</a></li>
+  <li><a href="#flows">Quantization flows</a></li>
+  <li><a href="#decisions">Decisions</a></li>
+  <li><a href="#results">Results</a></li>
+  <li><a href="#difficulties">Trainium difficulties</a></li>
+  <li><a href="#hunyuan">HunyuanVideo case study</a></li>
+  <li><a href="#nki">NKI kernel results</a></li>
+  <li><a href="#next">Next steps</a></li>
+</ul>
+
+<section id="summary">
+<h2>Summary</h2>
+<div class="col">
+<p>We quantize the large linear layers of each DiT (attention q/k/v/out and the FFN) to <span class="fp8">FP8 e4m3</span>, with FP8 weights and FP8 activations, and run the matmuls in FP8 on trn2.3xlarge at tensor parallelism 4. Everything else (embedders, modulation, norms, the final projection, text encoders, VAE) stays bf16.</p>
+<p>The scheme we started from is the one FastVideo uses on GPUs: per-tensor weight scales and <em>dynamic</em> per-tensor activation scales computed on every forward pass. On Trainium that scheme made the DiT step <strong>15&nbsp;% slower than bf16</strong>, even though the FP8 matmuls themselves were faster. We ship <strong>static activation scales calibrated offline</strong> instead, which is both faster and closer to bf16 in output quality.</p>
+</div>
+<div class="facts">
+  <div class="fact"><div class="num">6 / 6</div><div class="lbl">models pass on device at tp4 (Wan 2.1, Wan 2.2, FLUX.1-dev, Qwen-Image, LTX-2, HunyuanVideo)</div></div>
+  <div class="fact"><div class="num">0.83–1.04×</div><div class="lbl">FP8 DiT step relative to bf16</div></div>
+  <div class="fact"><div class="num">−11 to −28 %</div><div class="lbl">cold end-to-end latency (half the weight bytes to load)</div></div>
+  <div class="fact"><div class="num">27–37 dB</div><div class="lbl">PSNR of the FP8 render against the bf16 render</div></div>
+</div>
+</section>
+
+<section id="gemm">
+<h2>FP8 GEMM in one page</h2>
+<div class="col">
+<p>A GEMM (General Matrix Multiply) is a matrix multiply, <code>C = A × B</code>. Each value of C is one row of A multiplied element by element with one column of B, then summed. A tiny example:</p>
+</div>
+<pre>A (2×3)        B (3×2)          C = A × B (2×2)
+[1 2 3]        [ 7  8]          [1·7 + 2·9 + 3·11   1·8 + 2·10 + 3·12]   [ 58  64]
+[4 5 6]   ×    [ 9 10]    =     [4·7 + 5·9 + 6·11   4·8 + 5·10 + 6·12] = [139 154]
+               [11 12]</pre>
+<div class="col">
+<p>Every output value here needs 3 multiply-adds, one per shared index. Every linear layer in a DiT is a GEMM: <code>y = x · Wᵀ</code>, where <code>x</code> is the activation (one row per token) and <code>W</code> the weight. For Wan 2.1 at 480×832×9, one <code>to_q</code> multiplies a <span class="mono">[4680, 5120]</span> activation by a <span class="mono">[5120, 5120]</span> weight. That is 24 million output values, each a sum of 5,120 products, roughly 120 billion multiply-adds. Wan has 400 such layers per step, so the GEMMs dominate the step time.</p>
+<p>FP8 GEMM scales both operands into the FP8 range before multiplying and scales the result back afterwards:</p>
+</div>
+<pre>scale_x = max(|x|) / 240          # 240 = largest FP8 e4m3 value on Trainium
+x_fp8   = cast_fp8(x / scale_x)   # quantize the activation
+W_fp8   = cast_fp8(W / scale_w)   # done once, offline
+y       = (x_fp8 @ W_fp8) × scale_x × scale_w   # dequantize, then + bias</pre>
+<div class="col">
+<p>A worked example with one activation row <code>[0.5, −2.0, 1.0]</code>: <code>max(|x|) = 2.0</code>, so <code>scale_x = 2.0 / 240 ≈ 0.00833</code> and the row quantizes to <code>[60, −240, 120]</code>, all inside FP8's ±240 range. The matrix engine multiplies these small 8-bit values, and multiplying the result by <code>scale_x × scale_w</code> brings it back to the original magnitude.</p>
+<p>FP8 roughly doubles the multiply rate of the matrix engine and halves the weight bytes. The cost is the extra work around the matmul: finding <code>max(|x|)</code>, the quantize pass and the dequantize pass. Whether FP8 is a net win depends entirely on how cheaply the hardware and software stack can do that extra work.</p>
+<p><strong>Dynamic</strong> scales compute <code>scale_x</code> from the live activation on every call. <strong>Static</strong> scales use a constant per layer, calibrated offline by running the real denoising loop once and recording each layer's largest input.</p>
+</div>
+</section>
+
+<section id="gpu-vs-trn">
+<h2>GPU vs Trainium: where the extra work goes</h2>
+<div class="flow">
+  <div class="lane">
+    <h4>GPU (FastVideo, vLLM-style dynamic per-tensor FP8)</h4>
+    <div class="steps">
+      <div class="step cost"><b>quant kernel</b>Read x, find max, write x_fp8. One extra pass, but HBM at ~3.35 TB/s makes it a few microseconds.</div>
+      <div class="step free"><b>fp8 GEMM</b>Tensor Cores, fp32 accumulation (cuBLASLt / CUTLASS).</div>
+      <div class="step free"><b>epilogue</b>Multiply by scale_x·scale_w and add bias while the tile is still in registers, then write bf16.</div>
+    </div>
+  </div>
+  <div class="lane">
+    <h4>Trainium (graph generated by neuronx-cc from PyTorch / XLA)</h4>
+    <div class="steps">
+      <div class="step cost"><b>2 reductions</b>max and min over the whole activation. A barrier: nothing can be quantized until the full tensor is read. 48&nbsp;MB does not fit in SBUF, so it spills to HBM.</div>
+      <div class="step free"><b>quantize</b>Fused by the compiler into the matmul's operand load.</div>
+      <div class="step free"><b>fp8 matmul</b>Tensor engine, fp32 accumulation in PSUM.</div>
+      <div class="step cost"><b>dequantize</b>A separate elementwise pass on the scalar / vector engines after the result leaves PSUM.</div>
+    </div>
+  </div>
+</div>
+<h3>Why the extra FP8 work costs less on a GPU</h3>
+<div class="col">
+<p>The key fact: multiplying is cheap, moving data is expensive. Chips have a large, slower off-chip memory (HBM, tens of GB) and a small, fast on-chip memory (GPU registers and shared memory; Trainium's SBUF and PSUM, tens of MB). A GEMM is computed tile by tile: blocks of the inputs are brought on chip, multiplied, and the results written back. Any step that adds an extra round trip through HBM adds real time.</p>
+<p>For one Wan linear layer the activation is <span class="mono">[4680, 5120]</span> in bf16, about 48 MB.</p>
+<ul>
+  <li><strong>On a GPU, the dequantize costs nothing extra.</strong> cuBLASLt and CUTLASS FP8 GEMMs take the two scales as arguments. When an output tile is finished it is still in registers; the GEMM's epilogue multiplies it by <code>scale_x × scale_w</code>, adds the bias and writes bf16. No extra pass over the output.</li>
+  <li><strong>On a GPU, max-and-quantize is a separate but cheap pass.</strong> It reads the activation once more and writes the FP8 copy. At about 3.35 TB/s on an H100, moving those ~72 MB takes around 20 µs, while the GEMM itself is 120 billion multiply-adds. The kernels are hand-tuned library code.</li>
+  <li><strong>It is not free on GPUs either.</strong> A vLLM issue reports online dynamic FP8 running about 18 % slower than BF16 on an RTX 5090. The balance depends on the hardware and the matrix sizes.</li>
+  <li><strong>On Trainium today, both steps cost a full pass.</strong> The dynamic max is a barrier: the whole 48 MB activation must be read before any element can be quantized, it does not fit in the 24 MB SBUF, so it spills to HBM. The dequantize is a separate pass on the scalar and vector engines. The matmul got faster (358 → 322 ms) but the vector engine (+66 ms), scalar engine (+43 ms) and doubled HBM writes ate the gain.</li>
+</ul>
+<p>An analogy: on the GPU, a fast prep cook chops the ingredients (quantize) and the chef seasons each dish as it leaves the pan (epilogue). On Trainium today, every ingredient has to be weighed before any chopping starts, the counter is too small so they go back and forth to the storeroom, and each finished dish is carried back to be seasoned separately.</p>
+</div>
+
+<h3>Why doesn't Trainium apply the scale before writing to HBM, like a GPU?</h3>
+<div class="col">
+<p>The hardware can. The software stack we use today does not do it. A matmul result on Trainium flows like this:</p>
+</div>
+<pre>tensor engine matmul
+   → result accumulates in PSUM (on-chip fp32 accumulation buffer)
+   → the vector or scalar engine moves it from PSUM to SBUF   ← can multiply by a scale on the way, at no extra cost
+   → DMA writes it to HBM</pre>
+<div class="col">
+<p>The tensor engine cannot write to HBM directly, so a vector or scalar engine already handles every result on its way out of PSUM, and that instruction can apply a scale, a bias or an activation function in the same step. That is exactly a GPU epilogue. An NKI kernel can request it explicitly.</p>
+<p>The reason it does not happen today: our FP8 linear is written in PyTorch, lowered to XLA HLO, and compiled by neuronx-cc. In the HLO the chain after the matmul is <code>dot (fp8) → transpose → convert to f32 → multiply(scale) → convert to bf16</code>. The compiler treats the dequantize as ordinary elementwise work, so it evicts the matmul result first and then traverses it again for the multiply and the converts. The <code>transpose</code> and the two type conversions sitting between the matmul and the multiply are typical reasons a compiler's fusion rule does not fire. On GPUs this never comes up, because the scale is an argument of the library GEMM rather than something a compiler has to discover.</p>
+<p>There are two ways to get the GPU behaviour on Trainium. A hand-written NKI kernel controls the PSUM eviction directly; this is in progress (see Next steps). Rewriting the PyTorch so the chain lowers more favourably (merging the multiply with the bias add, removing the transpose) is cheaper to try, but depends on the compiler.</p>
+</div>
+
+<div class="col">
+<p>In short: on a GPU the dequantize is fused into the GEMM epilogue by the library, and the max-and-quantize kernel is a short, hand-tuned pass on very fast memory. On Trainium the hardware could do the same, but the compiler emitted the dequantize as its own pass, and the dynamic reduction becomes a barrier that forces spills.</p>
+</div>
+<h3>What the device profile showed (Wan 2.1, one forward, rank 0)</h3>
+<div class="tbl"><table>
+  <thead><tr><th>Metric</th><th class="n">bf16</th><th class="n">FP8 dynamic</th><th class="n">FP8 static</th></tr></thead>
+  <tbody>
+    <tr><td>Tensor engine (matmul) active</td><td class="n">358 ms</td><td class="n">322 ms</td><td class="n">349 ms</td></tr>
+    <tr><td>Vector engine active</td><td class="n">202 ms</td><td class="n">268 ms</td><td class="n">211 ms</td></tr>
+    <tr><td>Scalar engine active</td><td class="n">191 ms</td><td class="n">234 ms</td><td class="n">254 ms</td></tr>
+    <tr><td>HBM read / write</td><td class="n">69.7 / 15.7 GB</td><td class="n">40.5 / 31.7 GB</td><td class="n">27.5 / 14.6 GB</td></tr>
+    <tr><td>Spill save / reload</td><td class="n">11.1 / 13.4 GB</td><td class="n">28.0 / 27.3 GB</td><td class="n">10.1 / 9.2 GB</td></tr>
+    <tr class="hl"><td>DiT step (20-step loop, median)</td><td class="n">573.0 ms</td><td class="n">607.2 ms</td><td class="n">586.9 ms</td></tr>
+  </tbody>
+</table></div>
+<div class="col">
+<p>The FP8 matmuls are faster (358 → 322 ms). The dynamic path loses that gain to the reductions and the separate dequantize: vector +66 ms, scalar +43 ms, HBM writes doubled, spills ×2.5. Static scales remove the reductions, bringing memory traffic back to bf16 levels. The remaining gap is the unfused quantize / dequantize chain on the scalar engine.</p>
+<p class="note">For reference, the Wan technical report measures a 1.13× DiT speedup from FP8 GEMM on GPUs, with per-tensor weights and per-token activations. We have not found public FastVideo numbers for Wan 2.1 14B bf16 vs FP8 at a matching configuration, so we do not quote any.</p>
+</div>
+</section>
+
+<section id="flows">
+<h2>Quantization flows side by side</h2>
+<p class="col">Same idea in all three: FP8 weights, FP8 activations, FP8 matmul with fp32 accumulation, dequantize to bf16. They differ in when the activation scale is computed and in how much of the per-layer work happens on chip.</p>
+
+<h3>1. FastVideo on GPU (dynamic per-tensor)</h3>
+<div class="flow"><div class="lane">
+  <h4>Setup</h4>
+  <div class="steps">
+    <div class="step"><b>load model</b>Read bf16 weights; quantize the target linears to FP8 in memory at load time (scale_w = max|W| / FP8_MAX). No separate checkpoint, no calibration.</div>
+    <div class="step"><b>no compile step</b>GPU kernels run eagerly (or with torch.compile).</div>
+  </div>
+  <h4 style="margin-top:12px">Each linear, every step</h4>
+  <div class="steps">
+    <div class="step cost"><b>quant kernel</b>Read x, compute max|x|, write x_fp8 (one extra pass over x; fast HBM).</div>
+    <div class="step free"><b>FP8 GEMM + epilogue</b>cuBLASLt / CUTLASS: Tensor Cores multiply, epilogue applies scale_x · scale_w and bias, writes bf16.</div>
+  </div>
+</div></div>
+
+<h3>2. Difflet on Trainium today (static calibrated scales, XLA-compiled)</h3>
+<div class="flow"><div class="lane">
+  <h4>Setup (offline)</h4>
+  <div class="steps">
+    <div class="step"><b>calibrate</b><code>scripts/ptq_calibrate_activations.py</code>: run the real denoising loop once on CPU, record each layer's max input (20 min to 2.5 h per model).</div>
+    <div class="step"><b>quantize</b><code>difflet quantize --quant fp8 --quant-calibration calib.json</code>: FP8 weights + weight_scale + input_scale (= max × 1.25 / 240) per layer, half-size checkpoint.</div>
+    <div class="step"><b>compile</b><code>difflet compile ... --quant-calibration calib.json</code>: neuronx-cc builds the graph; weights sharded tp4 into the shared store.</div>
+  </div>
+  <h4 style="margin-top:12px">Each linear, every step (<code>difflet generate</code>)</h4>
+  <div class="steps">
+    <div class="step free"><b>quantize</b>x × 1/input_scale, clamp ±240, cast FP8. No reduction; the compiler fuses it into the matmul's operand load.</div>
+    <div class="step free"><b>FP8 matmul</b>Tensor engine, fp32 accumulation in PSUM.</div>
+    <div class="step cost"><b>dequantize</b>× (input_scale · scale_w), cast bf16, then + bias: separate elementwise passes after PSUM eviction.</div>
+  </div>
+  <p class="note" style="margin:10px 0 0">Without a calibration file Difflet falls back to dynamic per-tensor scales: the same flow as FastVideo, plus two full reductions per layer on the device (the slower, lower-fidelity path).</p>
+</div></div>
+
+<h3>3. Difflet with the NKI FP8 linear kernel (in progress)</h3>
+<div class="flow"><div class="lane">
+  <h4>Setup</h4>
+  <div class="steps">
+    <div class="step"><b>same as today</b>Calibrate and quantize for the static mode; nothing extra for the per-token mode.</div>
+    <div class="step"><b>planned</b>Store the FP8 weight pre-transposed ([in, out]) in the checkpoint so the kernel reads it directly.</div>
+  </div>
+  <h4 style="margin-top:12px">Each linear, every step: one kernel, everything on chip</h4>
+  <div class="steps">
+    <div class="step free"><b>load + transpose</b>128-token tile of x DMA-transposed from HBM straight into K-major SBUF.</div>
+    <div class="step free"><b>quantize in SBUF</b>Static: × 1/input_scale, clamp. Per-token: each row's max computed in place (no global barrier).</div>
+    <div class="step free"><b>FP8 matmul</b>Double-row mode, fp32 accumulation in PSUM, FP8 weight block resident in SBUF.</div>
+    <div class="step free"><b>epilogue</b>One instruction on the PSUM → SBUF move: × scale, + bias, cast bf16. Then write to HBM.</div>
+  </div>
+</div></div>
+<div class="col">
+<p>Flow 3 is the closest Trainium equivalent of the GPU design in flow 1, and with static or per-token scales it removes even the separate quantize pass that GPUs pay for dynamic scales. Its numbers on Wan 2.1 are in <a href="#nki">NKI kernel results</a>.</p>
+</div>
+</section>
+
+<section id="decisions">
+<h2>Decisions and why</h2>
+<p class="col">Every optimization was measured on the device with the same prompt, seed and shape, and kept only if the DiT step improved. Wan 2.1, 480×832×9, 20 steps, tp4.</p>
+<ul class="decisions">
+  <li><span class="v drop">Dropped</span><div><strong>FP8 weight-only mode.</strong> Weights stored in FP8, matmuls in bf16. Fast to load but no matmul speedup, and not what FastVideo does. Removed to keep one W8A8 path.</div></li>
+  <li><span class="v info">No change</span><div><strong>neuronx-cc 2.27.</strong> About 1&nbsp;% on both bf16 and FP8 (568.7 / 648.2 ms vs 573.0 / 656.6 ms on 2.26). Not the lever.</div></li>
+  <li><span class="v keep">Kept</span><div><strong>Lean dynamic law: 656.6 → 607.2 ms.</strong> Absmax from max/−min reductions instead of an abs pass, multiply by a reciprocal instead of dividing, no clamp, one combined dequantize multiply. Removed abs / divide / clamp passes the profile pointed at.</div></li>
+  <li><span class="v drop">Reverted</span><div><strong>Quantize a shared input once for q, k and v: 639.3 ms.</strong> Looked cheaper, measured 32 ms slower. With one quantize per linear the compiler fuses it into each matmul's operand load; a shared FP8 tensor with three consumers must be written to HBM and read back three times.</div></li>
+  <li><span class="v keep">Kept</span><div><strong>Static calibrated activation scales: 607.2 → 586.9 ms.</strong> A per-layer constant (calibrated input max × 1.25 / 240) stored in the FP8 checkpoint. No reductions on the device. Calibration runs the real denoising loop once on CPU (20 min to 2.5 h per model).</div></li>
+  <li><span class="v keep">Kept</span><div><strong>Clamp before the FP8 cast in the static path.</strong> Mandatory: on Trainium, casting a value above 240 to FP8 gives NaN rather than saturating. Without the clamp the Wan render collapsed to 8 dB. It is also free (586.4 vs 586.9 ms).</div></li>
+  <li><span class="v keep">Kept</span><div><strong>Static over dynamic as the default</strong>, also for quality. Same FP8 weights: static gives 24.9 dB latent SNR and 36.7 dB render PSNR vs bf16, dynamic 13.2 dB and 33.0 dB. Dynamic is correct per forward pass (it matches the CPU reference at cosine ≥ 0.9994 in every probe) but drifts over the 20-step loop. Dynamic stays as the fallback when no calibration file exists.</div></li>
+</ul>
+</section>
+
+<section id="results">
+<h2>Results across models</h2>
+<p class="col">trn2.3xlarge, tp4, benchmark harness, idle host. Render quality compares the FP8 output with the bf16 output of the same prompt, seed and shape.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Model</th><th>Shape, steps</th><th class="n">DiT step bf16 → FP8</th><th class="n">Ratio</th><th class="n">Cold e2e</th><th class="n">Warm e2e</th><th class="n">Render vs bf16</th></tr></thead>
+  <tbody>
+    <tr><td>Wan 2.1 14B</td><td>480×832×9, 20</td><td class="n">573 → 587 ms</td><td class="n">1.024×</td><td class="n">414 → 298 s</td><td class="n">85.7 → 82.5 s</td><td class="n">36.7 dB / 0.929</td></tr>
+    <tr><td>Wan 2.2 A14B</td><td>480×832×9, 20</td><td class="n">573 → 597 ms</td><td class="n">1.043×</td><td class="n">405 → 300 s</td><td class="n">81.5 → 78.3 s</td><td class="n">35.2 dB / 0.919</td></tr>
+    <tr><td>FLUX.1-dev 12B</td><td>1024², 28</td><td class="n">277 → 263 ms*</td><td class="n">0.95×</td><td class="n">307 → 243 s</td><td class="n">39.9 → 38.6 s</td><td class="n">29.2 dB / 0.974</td></tr>
+    <tr><td>Qwen-Image 20B</td><td>1024², 20</td><td class="n">415 → 361 ms</td><td class="n">0.870×</td><td class="n">482 → 401 s</td><td class="n">66.5 → 64.5 s</td><td class="n">33.3 dB / 0.988</td></tr>
+    <tr><td>LTX-2 19B</td><td>480×704×49, 20</td><td class="n">458 → 440 ms</td><td class="n">0.962×</td><td class="n">824 → 632 s</td><td class="n">60.4 → 55.4 s</td><td class="n">33.9 dB / 0.936</td></tr>
+    <tr><td>HunyuanVideo 13B</td><td>320×512×61, 20</td><td class="n">870 → 724 ms</td><td class="n">0.833×</td><td class="n">596 → 530 s</td><td class="n">113.0 → 111.6 s</td><td class="n">26.8 dB / 0.892</td></tr>
+  </tbody>
+</table></div>
+<div class="col">
+<p class="note">Render vs bf16 is PSNR / SSIM. * FLUX logs carry no per-step timer; its figure is the 28-step denoise-loop rate.</p>
+<ul>
+  <li><strong>Joint-attention and image models gain the most</strong> (HunyuanVideo −17&nbsp;%, Qwen-Image −13&nbsp;%), Wan is 2–4&nbsp;% slower than bf16: the unfused dequantize costs slightly more than its FP8 matmuls save.</li>
+  <li><strong>Cold start improves everywhere</strong> because FP8 weights are half the bytes to read and shard.</li>
+  <li><strong>Compile time drops sharply</strong> for models whose VAE has its own compile stage: Wan's FP8 arm builds only the transformer (478–661 s against 6,600–7,900 s for a full bf16 build).</li>
+</ul>
+</div>
+</section>
+
+<section id="difficulties">
+<h2>Trainium-specific difficulties</h2>
+<div class="col">
+<ol>
+  <li><strong>No library FP8 GEMM with a fused epilogue.</strong> On GPUs, cuBLASLt and CUTLASS take the scales as GEMM arguments. On Trainium the graph comes from the compiler, which treats the dequantize as a separate elementwise op. Fusion depends on how the PyTorch code happens to lower to HLO.</li>
+  <li><strong>Global reductions are barriers.</strong> A dynamic per-tensor scale needs the whole activation before any element can be quantized. The activation does not fit in on-chip SBUF (24&nbsp;MB), so it spills to HBM.</li>
+  <li><strong>"Cheaper-looking" graph changes can be slower.</strong> Sharing one quantize across q/k/v cost 32 ms because it defeated an operand-load fusion. Every change has to be measured on the device.</li>
+  <li><strong>FP8 cast does not saturate.</strong> Values above 240 become NaN, so any static scale needs an explicit clamp.</li>
+  <li><strong>Shape-specific compiler failures.</strong> HunyuanVideo's FP8 text-stream q/k projections produced all-NaN output only at 256 text rows and tp4 (next section). Correct on CPU, correct at tp1, correct at 512 rows.</li>
+  <li><strong>Long feedback loops.</strong> A full-model compile takes 5–70 minutes, and AOT compilation means every graph variant is a new artifact. A tiny-model probe harness (device vs CPU reference, real weights optional, tp1/tp4) was essential to bisect issues in minutes instead of hours.</li>
+  <li><strong>Host resources matter for measurement.</strong> A CPU calibration job running alongside a benchmark inflated warm end-to-end numbers and once got a compile killed for memory. All published numbers were re-measured on an idle host.</li>
+</ol>
+</div>
+</section>
+
+<section id="hunyuan">
+<h2>Case study: HunyuanVideo at tp4</h2>
+<div class="col">
+<p>HunyuanVideo rendered garbage in FP8 (6–9 dB) while FLUX, with the same block layout, worked. The CPU reference was healthy. We bisected on the device with the real weights, real text conditioning and production shape:</p>
+</div>
+<div class="tbl"><table>
+  <thead><tr><th>Probe</th><th>Device FP8 vs CPU FP8</th></tr></thead>
+  <tbody>
+    <tr><td>Real 2 + 2 blocks, tp1</td><td>cosine 0.99995</td></tr>
+    <tr><td>Real 2 + 2 blocks, tp4</td><td>all NaN</td></tr>
+    <tr><td>Only image q/k/v, either attention output, image or text FFN, any single-stream layer in FP8</td><td>cosine 0.99990–0.99996</td></tr>
+    <tr><td>Only <code>add_q_proj</code> or only <code>add_k_proj</code> (text-stream q / k) in FP8</td><td>all NaN</td></tr>
+    <tr><td>Only <code>add_v_proj</code> in FP8</td><td>cosine 0.99990</td></tr>
+    <tr><td>Text q/k/v in FP8 with the activation clamped</td><td>all NaN (not an FP8 overflow)</td></tr>
+    <tr><td>Text q/k/v in FP8, text padded from 256 to 512 or 1024 rows</td><td>cosine 0.99999</td></tr>
+  </tbody>
+</table></div>
+<div class="col">
+<p>The compiled graph mis-executes the FP8 text-stream q/k projection, which feeds a per-head RMSNorm, at exactly 256 text rows under tp4. FLUX's text stream is 512 rows, so it never hit this. The fix keeps those two projections in bf16. They process 256 of about 10,500 tokens, so the cost is negligible. Afterwards the full model matches the CPU at cosine 0.99981 and the step is 0.83× bf16.</p>
+</div>
+</section>
+
+<section id="nki">
+<h2>NKI kernel results (Wan 2.1, in progress)</h2>
+<div class="col">
+<p>The kernel (<code>difflet/backends/trainium/nki_kernels/fp8_linear.py</code>) is numerically correct: on the device both modes match the CPU reference at 64 dB, the same as the XLA path, and inside the real compiled model at tp4 (two real Wan blocks, real text) the output matches the CPU at cosine 0.99998.</p>
+<p>A standalone single-layer benchmark showed that the existing XLA FP8 static linear is already as fast as or faster than bf16 for every Wan layer shape in isolation (q/k/v 0.70 vs 0.70 ms, FFN-in 1.37 vs 1.46, attention-out 0.74 vs 0.81, FFN-out 1.25 vs 1.60 ms). The remaining whole-model gap is therefore about graph-level scheduling around the linears, which a kernel has to beat inside the full model.</p>
+</div>
+<div class="tbl"><table>
+  <thead><tr><th>Two real Wan blocks at tp4, one forward</th><th class="n">Time</th></tr></thead>
+  <tbody>
+    <tr><td>bf16</td><td class="n">35.7 ms</td></tr>
+    <tr><td>FP8, XLA-compiled</td><td class="n">35.6 ms</td></tr>
+    <tr><td>FP8, NKI kernel v1 (static or per-token)</td><td class="n">45.8 ms</td></tr>
+  </tbody>
+</table></div>
+<div class="col">
+<p>Version 1 is 28 % slower. It transposes x on the tensor engine (the same engine as the matmul; for q/k/v nearly as much work as the matmul itself), and the prototype transposes the weight with XLA on every call. Version 2 loads x with a DMA transpose instead; the planned next step stores the transposed weight in the checkpoint. Full 20-step Wan 2.1 numbers for each version are added here as they are measured.</p>
+</div>
+</section>
+
+<section id="next">
+<h2>Next steps</h2>
+<div class="col">
+<p>The remaining gap on Wan is the unfused quantize / dequantize around each matmul. The option closest to the GPU design is a <strong>hand-written NKI kernel</strong> per FP8 linear:</p>
+</div>
+<pre>for each output tile:
+    load x tile and W_fp8 tile into SBUF
+    quantize x in SBUF (static scale, or a per-token scale computed on the tile)
+    fp8 matmul on the tensor engine, fp32 accumulation in PSUM
+    on the PSUM → SBUF move: × scale, + bias, cast to bf16     # the GPU "epilogue"
+    write to HBM</pre>
+<div class="col">
+<ul>
+  <li><strong>Static scales first</strong>: a constant scale lets the whole layer run in one pass over the activation.</li>
+  <li><strong>Then per-token dynamic scales</strong>: a row of 5,120 values fits in one SBUF tile, so each token's scale can be computed in place without a global barrier. This is also the granularity the Wan report uses on GPUs, and it would remove the calibration step if quality holds.</li>
+  <li><strong>Cheaper experiments alongside</strong>: rewrite the PyTorch so the dequantize fuses (merge it with the bias add, avoid the transpose between matmul and multiply), and fold scales algebraically (q/k feed an RMSNorm, which cancels a constant scale; attention is linear in V, so V's scale can merge into the next layer's quantize).</li>
+</ul>
+<p>Work in progress on Wan 2.1: an NKI FP8 linear kernel in both variants, measured against the current 586.9 ms static path and the 573.0 ms bf16 baseline.</p>
+</div>
+</section>
+
+<footer>
+  Difflet FP8 PTQ work, branch <span class="mono">quantization</span>. Detailed evidence: <span class="mono">docs/verification/2026-10-03-ptq-fp8-static-fanout.md</span> and <span class="mono">artifacts/verification-2026-10-03/fp8-dyn-step/NOTES.md</span>. External references: Wan technical report (arXiv 2503.20314), vLLM FP8 documentation, vLLM issue #28234.
+</footer>
+</div>

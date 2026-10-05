@@ -165,6 +165,33 @@ def quantize_activation_per_tensor(
     return scaled.to(FP8_DTYPE), scale
 
 
+def _nki_fp8_linear(layer: Any, input_parallel: "torch.Tensor", static_scale, mode: str) -> "torch.Tensor":
+    """The same W8A8 linear as one NKI kernel (difflet.backends.trainium.nki_kernels.fp8_linear):
+    quantize in SBUF, fp8 double-row matmul, scale applied on the PSUM eviction. ``mode``
+    "static" uses the calibrated ``input_scale`` (falls back to "token" without one), "token" a
+    per-token dynamic scale. The bias is left to the caller (``_finish``), as on the XLA path."""
+    import torch
+
+    os.environ.setdefault("NKI_FP8_E4M3_MODE", "non_ocp")  # torch's e4m3fn tensors = Trainium e4m3
+    from difflet.backends.trainium.nki_kernels.fp8_linear import (
+        fp8_linear_static_kernel,
+        fp8_linear_token_kernel,
+    )
+
+    k_in = input_parallel.shape[-1]
+    x2d = input_parallel.reshape(-1, k_in).to(torch.bfloat16)
+    w_t = layer.weight.t().contiguous()  # [K, N] fp8 (prototype: transposed per call)
+    w_scale = layer.scale.to(torch.float32).reshape(1, 1)
+    if mode == "static" and static_scale is not None:
+        kernel = fp8_linear_static_kernel
+        in_scale = static_scale.to(torch.float32).reshape(1, 1)
+    else:
+        kernel = fp8_linear_token_kernel
+        in_scale = w_scale
+    out = kernel(x2d, w_t, w_scale, in_scale, None)
+    return out.reshape(*input_parallel.shape[:-1], out.shape[-1]).to(input_parallel.dtype)
+
+
 def dynamic_fp8_linear(layer: Any, input_parallel: "torch.Tensor", **impl_kwargs: Any) -> "torch.Tensor":
     """``input @ W^T`` with both operands fp8 and a per-tensor dynamic input scale.
 
@@ -178,6 +205,9 @@ def dynamic_fp8_linear(layer: Any, input_parallel: "torch.Tensor", **impl_kwargs
 
     original_dtype = input_parallel.dtype
     static_scale = getattr(layer, "input_scale", None)
+    nki_mode = os.environ.get("DIFFLET_FP8_NKI")  # experiment (trace time): "static" | "token"
+    if nki_mode in ("static", "token") and input_parallel.shape[-1] % 128 == 0:
+        return _nki_fp8_linear(layer, input_parallel, static_scale, nki_mode)
     if os.environ.get("DIFFLET_FP8_IGNORE_INPUT_SCALE") == "1":
         # A/B switch (read once, at trace time): run a static checkpoint through the
         # dynamic law, everything else in the graph identical. On trn2 (2026-10-03,

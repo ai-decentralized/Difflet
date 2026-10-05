@@ -1,0 +1,33 @@
+[
+ {
+  "layer": "attn.to_q/k/v (col)",
+  "S": 4680,
+  "K": 5120,
+  "N": 1280,
+  "flops_g": 61.3,
+  "xla_static": {
+   "ms": 0.693,
+   "ms_min": 0.687,
+   "cos_vs_ref": 1.000086,
+   "snr_vs_ref": 64.24,
+   "cos_vs_bf16": 0.99938,
+   "snr_vs_bf16": 28.51
+  },
+  "own_static": {
+   "ms": 51.993,
+   "ms_min": 51.499,
+   "cos_vs_ref": 1.000086,
+   "snr_vs_ref": 64.23,
+   "cos_vs_bf16": 0.99938,
+   "snr_vs_bf16": 28.51
+  },
+  "own_token": {
+   "ms": 52.35,
+   "ms_min": 51.674,
+   "cos_vs_ref": 1.000085,
+   "snr_vs_ref": 64.12,
+   "cos_vs_bf16": 0.999383,
+   "snr_vs_bf16": 28.52
+  }
+ }
+]
