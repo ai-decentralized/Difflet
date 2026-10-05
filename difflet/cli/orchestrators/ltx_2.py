@@ -48,10 +48,30 @@ class LTX2Orchestrator(ModelOrchestrator):
                            allow_patterns=entry.download_patterns)
         print(f"[difflet] weights ready for {_HF_MODEL_ID}")
 
+    def _adaptive_teacache_kwargs(self, shape: dict) -> dict[str, Any]:
+        """Application kwargs a calibrated-adaptive request adds: the calibration
+        path. For an adaptive calibration the application builds the fused
+        block-0 probe NEFF and DiffletPipeline keys it (calibrated_probe in
+        _cache_application_kwargs), so compile and load must both pass it."""
+        calibration = adaptive_teacache_calibration(
+            self.args, model="ltx_2",
+            shape_label=f"{shape['height']}x{shape['width']}x{shape['num_frames']}",
+        )
+        return {} if calibration is None else {"teacache_calibration_path": calibration}
+
+    def _resolved_shape(self) -> dict:
+        from difflet.registry import resolve_model
+        entry = resolve_model(_HF_MODEL_ID, model_type=_MODEL_TYPE)
+        return entry.resolve_shape(height=self.args.height, width=self.args.width,
+                                   num_frames=self.args.num_frames)
+
     def compile(self) -> None:
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.path_resolver import resolve_model_path
         resolve_model_path(_HF_MODEL_ID, revision=self.args.revision, local_files_only=True)
+        # A calibrated-adaptive request compiles the probe artifact (its own
+        # cache identity); every other request keeps the plain tp4 key.
+        adaptive = self._adaptive_teacache_kwargs(self._resolved_shape())
         DiffletPipeline.precompile(
             _HF_MODEL_ID,
             model_type=_MODEL_TYPE,
@@ -63,6 +83,7 @@ class LTX2Orchestrator(ModelOrchestrator):
             compile_cache_dir=self.args.cache_dir,
             force_compile=self.args.force,
             revision=self.args.revision,
+            **({"application_kwargs": adaptive} if adaptive else {}),
         )
 
     def generate(self) -> None:
@@ -118,11 +139,16 @@ class LTX2Orchestrator(ModelOrchestrator):
         prewarm_neuron_runtime(parallel.world_size)
         shape = entry.resolve_shape(height=self.args.height, width=self.args.width,
                                     num_frames=self.args.num_frames)
+        adaptive = self._adaptive_teacache_kwargs(shape)
+        from difflet.pipeline.difflet_pipeline import _cache_application_kwargs
         spec = CacheSpec(
             model_id=_HF_MODEL_ID, model_path=model_path,
             model_name=entry.name, parallel=parallel, dtype=self._dtype(),
             height=shape.get("height"), width=shape.get("width"),
             num_frames=shape.get("num_frames"), revision=self.args.revision,
+            # the same artifact identity from_pretrained resolves below, so a
+            # missing probe artifact fails here with the compile hint
+            application_kwargs=_cache_application_kwargs(adaptive, model_name=entry.name),
         )
         compiled = cache_path(self.args.cache_dir, spec)
         if not has_valid_manifest(compiled, spec):
@@ -145,17 +171,11 @@ class LTX2Orchestrator(ModelOrchestrator):
             application_kwargs["teacache_cadence"] = self.args.teacache_cadence
         if getattr(self.args, "teacache_online_delta", None) is not None:
             application_kwargs["teacache_online_delta_alpha"] = self.args.teacache_online_delta
-        # Calibrated-adaptive TeaCache: LTX-2 computes its block-0 signal on the
-        # host CPU transformer (no probe NEFF), so only the calibration path
-        # reaches the application. It is runtime-only for the cache key; passing
-        # teacache_speedup as well would flip the key to a probe-artifact identity
-        # that does not exist for LTX-2 and miss the warm tp4 artifact.
-        calibration = adaptive_teacache_calibration(
-            self.args, model="ltx_2",
-            shape_label=f"{shape['height']}x{shape['width']}x{shape['num_frames']}",
-        )
-        if calibration is not None:
-            application_kwargs["teacache_calibration_path"] = calibration
+        # Calibrated-adaptive TeaCache: the calibration path reaches the
+        # application, which builds the fused block-0 probe NEFF for an adaptive
+        # calibration; DiffletPipeline keys that probe (calibrated_probe), and
+        # compile() passes the same kwarg so the probe artifact exists.
+        application_kwargs.update(adaptive)
 
         return DiffletPipeline.from_pretrained(
             _HF_MODEL_ID,
