@@ -1,0 +1,43 @@
+{
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "guidance_scale": 1.0,
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "tp_degree": 4,
+  "quant": {
+    "format": "fp8",
+    "weight_granularity": "tensor",
+    "calibration": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-03/fp8-dyn-step/static/act_calibration_wan21.json"
+  },
+  "arms": {
+    "fp8": {
+      "runs": [
+        {
+          "run": 0,
+          "e2e_wall_seconds": 263.981,
+          "weights_load_total_seconds": 0,
+          "compute_and_overhead_seconds": 263.981,
+          "dit_step_ms": {
+            "n": 19,
+            "mean": 686.778947368421,
+            "median": 686.6,
+            "min": 686.2,
+            "max": 689.6999999999999
+          },
+          "output": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-05/nki-fp8/v2/ab_static/fp8_run0.mp4",
+          "latents": "/home/ubuntu/Difflet/.claude/worktrees/verify-ptq-fp8-wan/artifacts/verification-2026-10-05/nki-fp8/v2/ab_static/work_fp8_run0/latents.pt"
+        }
+      ],
+      "quantize_seconds": 1.266,
+      "compile_seconds": 217.747,
+      "compile_cache_hit": false
+    }
+  },
+  "compare": {}
+}

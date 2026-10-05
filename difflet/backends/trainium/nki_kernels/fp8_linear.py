@@ -6,11 +6,11 @@ step on chip, the Trainium counterpart of a GPU FP8 GEMM with a fused epilogue:
 
   for each output column block (fp8 weight block resident in SBUF):
     for each 128-token tile of x:
-      load x [128, K] bf16 (one contiguous DMA, tokens on partitions)
+      load x K-major with a DMA transpose (K onto partitions; the "_te" v1 kernels instead load
+        x [128, K] token-major and transpose 128x128 fp8 blocks on the tensor engine)
       scale:  static  -> the calibrated per-tensor input scale
               token   -> per-row absmax over K on the vector engine (one row = one token)
-      quantize to fp8 on the scalar engine (per-partition reciprocal scale; static also clamps)
-      transpose 128x128 fp8 blocks on the tensor engine (K onto partitions)
+      quantize to fp8 (static: reciprocal scale + clamp; token: per-token reciprocal broadcast)
       fp8 matmul, double-row mode, fp32 accumulation in PSUM
       PSUM -> SBUF eviction applies (input scale x weight scale) and the bias in one instruction
       write bf16 rows
