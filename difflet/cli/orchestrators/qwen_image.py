@@ -419,6 +419,10 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 "shapes": canonical_shapes_list(args, (1024, 1024)),
                 "toolchain": stage_toolchain_versions(),
             }
+            # Additive-only: tensorizer extras (empty at the historical defaults).
+            from difflet.backends.trainium.core.compiler_flags import tensorizer_cache_inputs
+
+            inputs.update(tensorizer_cache_inputs("qwen_image"))
             # Additive-only: absent for bf16 so every existing artifact keeps its key.
             quant_spec = self._quant_spec(args)
             if quant_spec is not None:

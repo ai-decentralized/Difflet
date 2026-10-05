@@ -7,6 +7,7 @@ Inter-stage tensor: {work_dir}/latents.pt
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import sys
@@ -29,22 +30,30 @@ from difflet.cli.orchestrators.base import (
 # are loaded only when present), so the orchestrator is version-agnostic.
 _MODEL_TYPE = "wan"
 _CLI_NAME = "wan"
-_VIRTUAL_CORE_SIZE = None  # Wan does not require NEURON_RT_VIRTUAL_CORE_SIZE
+_VIRTUAL_CORE_SIZE = None  # the VAE stage does not use NEURON_RT_VIRTUAL_CORE_SIZE
+# The transformer stage runs with NEURON_RT_VIRTUAL_CORE_SIZE=2 (attention_cte[2]): on trn2
+# tp4 it is -15 % per DiT step on both bf16 and fp8 (2026-10-05, Wan 2.1 480x832x9: 573.7 ->
+# 486.1 ms / 585.1 -> 473.0 ms, numerics unchanged; see
+# docs/verification/2026-10-05-fp8-step-levers.md). FLUX / Qwen-Image / HunyuanVideo already
+# ran this way. DIFFLET_WAN_VIRTUAL_CORE_SIZE=1 restores the old single-core graph (A/B).
+_TRANSFORMER_VIRTUAL_CORE_SIZE = 2
 
 
 def _transformer_virtual_core_size(args) -> int | None:
-    """Ring CP is the one Wan path that needs NEURON_RT_VIRTUAL_CORE_SIZE=2.
+    """NEURON_RT_VIRTUAL_CORE_SIZE for the Wan transformer stage: 2 by default (see above).
 
-    The nkilib ring kernel allocates per-core shared_hbm send/recv buffers and
-    a core_barrier that only exist in its LNC2 SPMD-grid variant, selected in
-    ops_impl.attention.ring_attention off this env var; without it neuronx-cc
-    fails with NCC_ILLC059 ("Could not find MemoryLocation ... send_k_buf on
-    core 1"). Every other Wan stage/mode stays at None so its existing compile
-    caches remain valid (ring's transformer cache is a separate key anyway).
+    Ring CP needs 2 regardless: the nkilib ring kernel allocates per-core shared_hbm
+    send/recv buffers and a core_barrier that only exist in its LNC2 SPMD-grid variant,
+    selected in ops_impl.attention.ring_attention off this env var; without it neuronx-cc
+    fails with NCC_ILLC059 ("Could not find MemoryLocation ... send_k_buf on core 1").
     """
     if getattr(args, "cp_mode", None) == "ring" and (args.cp_degree or 1) > 1:
         return 2
-    return _VIRTUAL_CORE_SIZE
+    override = os.environ.get("DIFFLET_WAN_VIRTUAL_CORE_SIZE", "").strip()
+    if override:
+        value = int(override)
+        return value if value > 1 else None
+    return _TRANSFORMER_VIRTUAL_CORE_SIZE
 
 # The historical model id keeps the bare "wan" compiled-dir prefix so existing
 # compile caches stay valid (additive-only, same policy as
@@ -338,6 +347,15 @@ class WanOrchestrator(ModelOrchestrator):
                 "shapes": canonical_shapes_list(args, (480, 832, 9)),
                 "toolchain": stage_toolchain_versions(),
             }
+            # Additive-only (absent when at the pre-2026-10-05 defaults, so those artifacts
+            # keep their key): the virtual core size the graph was traced for and the
+            # tensorizer extras the backbone compiles with. Both change the NEFF.
+            from difflet.backends.trainium.core.compiler_flags import tensorizer_cache_inputs
+
+            vc = _transformer_virtual_core_size(args)
+            if vc is not None:
+                inputs["virtual_core_size"] = vc
+            inputs.update(tensorizer_cache_inputs("wan"))
             # Additive-only: absent for bf16 so every existing artifact keeps its key.
             quant_spec = self._quant_spec(args)
             if quant_spec is not None:

@@ -202,12 +202,17 @@ class NeuronWanBackboneApplication(NeuronApplicationBase):
         # FP8 PTQ adds --experimental-unsafe-fp8e4m3fn-as-fp8e4m3 here as well as
         # in ModelWrapper's own appended options (see core/quant.py).
         hlo2tensorizer = fp8_hlo2tensorizer_options(self.config.neuron_config) + "--verify-hlo=true"
+        from difflet.backends.trainium.core.compiler_flags import tensorizer_options
+
         # Experiment switches (speed studies; the compile cache key does not see them,
         # so use a separate --cache-dir per setting): DIFFLET_WAN_OPT_LEVEL (default -O1),
         # DIFFLET_WAN_TENSORIZER_EXTRA / DIFFLET_WAN_HLO2T_EXTRA (appended to those
         # option strings), DIFFLET_WAN_CC_EXTRA (appended to the command line).
+        # --vectorize-strided-dma is on by default for Wan (2026-10-05: -15 % DiT step on
+        # both bf16 and fp8 together with NEURON_RT_VIRTUAL_CORE_SIZE=2; DIFFLET_STRIDED_DMA=0
+        # turns it off). The orchestrator mirrors it into the stage cache key.
         opt = os.environ.get("DIFFLET_WAN_OPT_LEVEL", "-O1")
-        tensorizer = ("--enable-ccop-compute-overlap " + os.environ.get("DIFFLET_WAN_TENSORIZER_EXTRA", "")).strip()
+        tensorizer = tensorizer_options("wan")
         hlo2tensorizer = (hlo2tensorizer + " " + os.environ.get("DIFFLET_WAN_HLO2T_EXTRA", "")).strip()
         compiler_args = (
             f"--model-type=transformer {opt} "

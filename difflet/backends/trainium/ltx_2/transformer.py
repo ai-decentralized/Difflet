@@ -827,9 +827,12 @@ class NeuronLTX2TransformerApplication(NeuronApplicationBase):
 
         # FP8 PTQ adds --experimental-unsafe-fp8e4m3fn-as-fp8e4m3 (see core/quant.py).
         hlo2tensorizer = fp8_hlo2tensorizer_options(self.config.neuron_config) + "--verify-hlo=true"
+        from difflet.backends.trainium.core.compiler_flags import tensorizer_options
+
+        # strided DMA off until screened on this model (DIFFLET_STRIDED_DMA=1 / DIFFLET_TENSORIZER_EXTRA).
         compiler_args = (
             "--model-type=transformer -O1 "
-            "--tensorizer-options='--enable-ccop-compute-overlap' "
+            f"--tensorizer-options='{tensorizer_options('ltx_2')}' "
             "--auto-cast=none "
             f"--internal-hlo2tensorizer-options='{hlo2tensorizer}'"
         )

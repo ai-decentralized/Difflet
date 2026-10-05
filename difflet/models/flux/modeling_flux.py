@@ -1700,7 +1700,10 @@ class NeuronFluxBackboneApplication(NeuronApplicationBase):
         if self.context_parallel_enabled and _HARDWARE == hardware.TRN1:
             compiler_args = "--model-type=transformer -O2"
         else:
-            compiler_args += " --tensorizer-options='--enable-ccop-compute-overlap'"
+            from difflet.backends.trainium.core.compiler_flags import tensorizer_options
+
+            # strided DMA off until screened on FLUX (DIFFLET_STRIDED_DMA=1 / DIFFLET_TENSORIZER_EXTRA).
+            compiler_args += f" --tensorizer-options='{tensorizer_options('flux')}'"
 
         from difflet.backends.trainium.core.quant import fp8_hlo2tensorizer_options
 

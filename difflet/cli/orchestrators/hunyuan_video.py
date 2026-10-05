@@ -389,6 +389,10 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
                 "shapes": canonical_shapes_list(args, (320, 512, 61)),
                 "toolchain": stage_toolchain_versions(),
             }
+            # Additive-only: tensorizer extras (empty at the historical defaults).
+            from difflet.backends.trainium.core.compiler_flags import tensorizer_cache_inputs
+
+            inputs.update(tensorizer_cache_inputs("hunyuan_video"))
             # Additive-only: absent unless set, so every existing artifact keeps
             # its key. A host-VAE artifact has no VAE NEFF and must not be taken
             # for one that does.

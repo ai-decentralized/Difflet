@@ -106,11 +106,18 @@ def test_wan_stage_identity_is_unchanged_for_bf16_and_extended_for_fp8(monkeypat
 
     monkeypatch.setattr(wan_orch, "stage_toolchain_versions", lambda: {"python": "3.12"})
     bf16 = wan_orch.WanOrchestrator(_wan_args())
-    inputs = bf16._stage_cache_inputs("transformer", bf16.args)
-    assert set(inputs) == {
+    historical = {
         "component", "model_id", "tp", "cp", "cp_mode", "cfg_parallel", "sp", "dtype",
         "text_seq_len", "shapes", "toolchain",
-    }  # additive-only: no "quant" key for bf16, every existing artifact keeps its hash
+    }
+    # 2026-10-05 defaults (VC2 transformer stage, strided DMA) are additive keys; the
+    # pre-2026-10-05 configuration reproduces the historical identity exactly.
+    assert set(bf16._stage_cache_inputs("transformer", bf16.args)) == historical | {
+        "virtual_core_size", "tensorizer_extras"}
+    monkeypatch.setenv("DIFFLET_WAN_VIRTUAL_CORE_SIZE", "1")
+    monkeypatch.setenv("DIFFLET_STRIDED_DMA", "0")
+    inputs = bf16._stage_cache_inputs("transformer", bf16.args)
+    assert set(inputs) == historical  # additive-only: no "quant" key for bf16, every existing artifact keeps its hash
 
     fp8 = wan_orch.WanOrchestrator(_wan_args(quant="fp8"))
     fp8_inputs = fp8._stage_cache_inputs("transformer", fp8.args)

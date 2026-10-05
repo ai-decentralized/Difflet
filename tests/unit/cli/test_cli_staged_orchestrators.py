@@ -68,15 +68,22 @@ class TestWanOrchestrator:
         WanOrchestrator(_wan_args()).generate()
         assert core_counts["vae"] == 1
 
-    def test_wan_does_not_set_virtual_core_size(self, monkeypatch):
+    def test_wan_sets_virtual_core_size_2_for_the_transformer_only(self, monkeypatch):
+        # 2026-10-05: the transformer stage traces attention_cte[2] (-15 % DiT step);
+        # the VAE stage is untouched. DIFFLET_WAN_VIRTUAL_CORE_SIZE=1 restores the old graph.
         from difflet.cli.orchestrators.wan import WanOrchestrator
+        monkeypatch.delenv("DIFFLET_WAN_VIRTUAL_CORE_SIZE", raising=False)
         vcs_values = {}
         monkeypatch.setattr(
             "difflet.cli.runner.run_stage",
             lambda orch, stage, virtual_core_size, **kw: vcs_values.update({stage: virtual_core_size}),
         )
         WanOrchestrator(_wan_args()).generate()
-        assert all(v is None for v in vcs_values.values())
+        assert vcs_values == {"transformer": 2, "vae": None}
+        monkeypatch.setenv("DIFFLET_WAN_VIRTUAL_CORE_SIZE", "1")
+        vcs_values.clear()
+        WanOrchestrator(_wan_args()).generate()
+        assert vcs_values == {"transformer": None, "vae": None}
 
 
 # ---------------------------------------------------------------- HunyuanVideo helpers

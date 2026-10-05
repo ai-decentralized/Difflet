@@ -401,15 +401,56 @@ def test_stage_transformer_threads_cadence_into_app_without_changing_artifact(
     assert kw["teacache_online_delta_alpha"] is None
 
 
-def test_transformer_virtual_core_size_ring_only():
+def test_transformer_virtual_core_size_ring_ignores_the_override(monkeypatch):
     # Ring CP needs NEURON_RT_VIRTUAL_CORE_SIZE=2: the nkilib ring kernel's
     # per-core send/recv buffers exist only in its LNC2 SPMD-grid variant, and
     # without the env the compile dies with NCC_ILLC059 (found on device,
-    # wan ring 512x512x9, 2026-08-30). Every other mode keeps None so existing
-    # compile caches stay valid.
+    # wan ring 512x512x9, 2026-08-30). Since 2026-10-05 every mode defaults to 2
+    # (-15 % DiT step); DIFFLET_WAN_VIRTUAL_CORE_SIZE=1 restores the single-core
+    # graph for every mode except ring.
     f = wan_mod._transformer_virtual_core_size
+    monkeypatch.setenv("DIFFLET_WAN_VIRTUAL_CORE_SIZE", "1")
     assert f(_wan_args(cp_degree=2, cp_mode="ring")) == 2
     assert f(_wan_args(cp_degree=1, cp_mode="ring")) is None  # ring needs cp>1
     assert f(_wan_args(cp_degree=2, cp_mode="gather_kv")) is None
     assert f(_wan_args(cp_degree=2, cp_mode="ulysses")) is None
     assert f(_wan_args(cp_degree=1, cp_mode="gather_kv")) is None
+
+
+# ------------------------------------------------------ virtual core size (2026-10-05)
+
+def test_transformer_stage_runs_with_virtual_core_size_2_by_default(monkeypatch):
+    monkeypatch.delenv("DIFFLET_WAN_VIRTUAL_CORE_SIZE", raising=False)
+    seen = {}
+    monkeypatch.setattr(
+        wan_mod.runner, "run_stage",
+        lambda orch, stage, num_cores, virtual_core_size=None, **kw: seen.update({stage: virtual_core_size}),
+    )
+    WanOrchestrator(_wan_args(tp_degree=4, cp_degree=1)).compile()
+    assert seen["transformer"] == 2
+    assert seen["vae"] is None  # the VAE stage is untouched
+
+
+def test_transformer_virtual_core_size_override_and_ring(monkeypatch):
+    monkeypatch.setenv("DIFFLET_WAN_VIRTUAL_CORE_SIZE", "1")
+    assert wan_mod._transformer_virtual_core_size(_wan_args(tp_degree=4, cp_degree=1)) is None
+    # ring CP needs the LNC2 kernel variant regardless of the override
+    assert wan_mod._transformer_virtual_core_size(_wan_args(tp_degree=2, cp_degree=2, cp_mode="ring")) == 2
+    monkeypatch.delenv("DIFFLET_WAN_VIRTUAL_CORE_SIZE")
+    assert wan_mod._transformer_virtual_core_size(_wan_args(tp_degree=4, cp_degree=1)) == 2
+
+
+def test_transformer_cache_key_carries_virtual_core_and_tensorizer_extras(monkeypatch):
+    for name in ("DIFFLET_WAN_VIRTUAL_CORE_SIZE", "DIFFLET_STRIDED_DMA", "DIFFLET_TENSORIZER_EXTRA",
+                 "DIFFLET_WAN_TENSORIZER_EXTRA"):
+        monkeypatch.delenv(name, raising=False)
+    orch = WanOrchestrator(_wan_args(tp_degree=4, cp_degree=1))
+    inputs = orch._stage_cache_inputs("transformer", orch.args)
+    assert inputs["virtual_core_size"] == 2
+    assert inputs["tensorizer_extras"] == ["--vectorize-strided-dma"]
+    # The pre-2026-10-05 configuration yields the pre-2026-10-05 key (additive-only).
+    monkeypatch.setenv("DIFFLET_WAN_VIRTUAL_CORE_SIZE", "1")
+    monkeypatch.setenv("DIFFLET_STRIDED_DMA", "0")
+    legacy = orch._stage_cache_inputs("transformer", orch.args)
+    assert "virtual_core_size" not in legacy and "tensorizer_extras" not in legacy
+    assert "virtual_core_size" not in orch._stage_cache_inputs("vae", orch.args)
