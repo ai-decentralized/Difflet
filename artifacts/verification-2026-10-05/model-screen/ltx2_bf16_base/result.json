@@ -1,0 +1,23 @@
+{
+ "name": "ltx2_bf16_base",
+ "flags": "--model-id Lightricks/LTX-2 --revision dfcc2108383fe1aaa0584bdf55d368a4bdadd90c --tp-degree 4 --height 480 --width 704 --num-frames 49",
+ "compile_s": 1043,
+ "runs": [
+  {
+   "run": 0,
+   "e2e_wall_s": 810,
+   "dit_step_ms_median": 459.7,
+   "dit_step_ms_mean": 459.4,
+   "n_steps": 19,
+   "it_per_s": 2493.38
+  },
+  {
+   "run": 1,
+   "e2e_wall_s": 105,
+   "dit_step_ms_median": 458.8,
+   "dit_step_ms_mean": 459.0,
+   "n_steps": 19,
+   "it_per_s": 1.3
+  }
+ ]
+}
