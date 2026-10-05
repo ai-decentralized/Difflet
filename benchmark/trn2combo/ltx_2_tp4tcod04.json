@@ -1,0 +1,237 @@
+{
+  "model_id": "Lightricks/LTX-2",
+  "model_type": "ltx_2",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 480,
+    "width": 704,
+    "num_frames": 49
+  },
+  "steps": 20,
+  "compile_seconds": 6.3806477960024495,
+  "compile_breakdown": {
+    "wall_total_s": 6.381
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": {
+    "n": 5,
+    "mean": 57.0620378290012,
+    "median": 56.84286277301726,
+    "std": 0.48966815336498354,
+    "p50": 56.84286277301726,
+    "p90": 57.84335141300107,
+    "min": 56.49056750300224,
+    "max": 57.84335141300107,
+    "samples": [
+      56.739775597001426,
+      56.84286277301726,
+      57.39363185898401,
+      56.49056750300224,
+      57.84335141300107
+    ]
+  },
+  "step_latency": {
+    "n": 18,
+    "mean": 0.4586245529434463,
+    "median": 0.4583772494952427,
+    "std": 0.0011712318276499414,
+    "p50": 0.4583754079940263,
+    "p90": 0.458686703001149,
+    "min": 0.4577850050118286,
+    "max": 0.4632968840014655,
+    "samples": [
+      0.4632968840014655,
+      0.4583790909964591,
+      0.4577876509865746,
+      0.4581163410039153,
+      0.45836669599520974,
+      0.4585514320060611,
+      0.45898236200446263,
+      0.4586255250032991,
+      0.4585347890097182,
+      0.45798677898710594,
+      0.4583754079940263,
+      0.4577850050118286,
+      0.458151614991948,
+      0.458686703001149,
+      0.4585627219930757,
+      0.4583128410158679,
+      0.45840778399724513,
+      0.4583323249826208
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 2.18
+  },
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.4; alpha sweep); tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF)",
+  "status": "compiled",
+  "notes": [
+    "per-step = 458.6 ms/DiT-step (median 458.4, p90 458.7, n=18) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 19 DiT calls timed; warm generate 33s; output finite=True.",
+    "Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_warm = 57 s (n=5; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+  ],
+  "timestamp": "2026-10-05 16:27 UTC",
+  "config_slug": "ltx_2_tp4tcod04",
+  "model_slug": "ltx_2",
+  "config": "tp4tcod04",
+  "device_slug": "trn2combo",
+  "revision": "47da56e2ad66ce4125a9922b4a8826bf407f9d0a",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video",
+  "teacache": {
+    "mode": "online_delta",
+    "cadence": null,
+    "online_delta_alpha": 0.4,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "dit_calls": 19,
+    "skipped_steps_by_calls": 1,
+    "stats": {
+      "full_steps": 19,
+      "skipped_steps": 1,
+      "probe_calls": 0,
+      "last_delta_estimate": 0.072265625,
+      "cache_initialized": true,
+      "online_delta_alpha": 0.4,
+      "baseline_delta": 0.11377,
+      "skipped_step_indices": [
+        7
+      ],
+      "delta_trace": [
+        [
+          1,
+          0.11377
+        ],
+        [
+          2,
+          0.065918
+        ],
+        [
+          3,
+          0.062012
+        ],
+        [
+          4,
+          0.054688
+        ],
+        [
+          5,
+          0.048828
+        ],
+        [
+          6,
+          0.04126
+        ],
+        [
+          8,
+          0.065918
+        ],
+        [
+          9,
+          0.051758
+        ],
+        [
+          10,
+          0.054443
+        ],
+        [
+          11,
+          0.066895
+        ],
+        [
+          12,
+          0.064453
+        ],
+        [
+          13,
+          0.072266
+        ],
+        [
+          14,
+          0.077148
+        ],
+        [
+          15,
+          0.09082
+        ],
+        [
+          16,
+          0.10498
+        ],
+        [
+          17,
+          0.140625
+        ],
+        [
+          18,
+          0.21582
+        ],
+        [
+          19,
+          0.519531
+        ]
+      ]
+    }
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "transformer (denoise loop) [Neuron]",
+        "load_s": 11.54
+      }
+    ],
+    "weights_load_total_s": 11.54,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 57.843,
+    "compute_and_overhead_s": 46.303,
+    "note": "text-encoder and VAE decode run on the host (enable_host_pipeline/enable_decode_components), so only the transformer is a Neuron load; the residual is host text-encode + denoise + host VAE decode."
+  },
+  "dit_calls_per_step": 0.95,
+  "dit_calls": 19,
+  "loop_wall_s": 8.716,
+  "loop_step_ms": 435.8,
+  "quality_holdout": {
+    "tp4": {
+      "ref": "tp4",
+      "prompts": 4,
+      "psnr_db": [
+        39.95,
+        Infinity,
+        38.78,
+        32.81
+      ],
+      "mean_psnr_db": Infinity,
+      "min_psnr_db": 32.81,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    }
+  }
+}

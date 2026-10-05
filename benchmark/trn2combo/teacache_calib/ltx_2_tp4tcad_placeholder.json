@@ -1,0 +1,18 @@
+{
+  "schema": "difflet-m9-teacache-calibration-v1",
+  "model": "ltx_2",
+  "shape_label": "480x704x49",
+  "num_steps": 20,
+  "poly_coef": [
+    0.0
+  ],
+  "threshold": -1.0,
+  "warmup_steps": 5,
+  "cooldown_steps": 5,
+  "target_speedup": null,
+  "fit_r2": null,
+  "n_samples": 0,
+  "mod_input_source": "block0_modulated_input",
+  "accumulate": false,
+  "placeholder": "record-only: never skips; replaced by `fit`"
+}
