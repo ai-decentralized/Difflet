@@ -591,8 +591,12 @@ def test_dynamic_fp8_linear_defers_the_scale_for_a_post_reduce_epilogue():
     x = torch.randn(2, 5, 32, dtype=torch.bfloat16)
     raw, combined = tq.dynamic_fp8_linear(layer, x, defer_scale=True)
     assert combined.numel() == 1
+    # The deferred path casts the raw dot output to bf16 before the caller's all-reduce
+    # (the 2026-10-05 fused-bias NaN fix), so it differs from the in-line dequant by one
+    # bf16 rounding of the unscaled output.
+    assert raw.dtype == torch.bfloat16
     assert torch.allclose((raw.float() * combined).to(torch.bfloat16).float(),
-                          tq.dynamic_fp8_linear(layer, x).float())
+                          tq.dynamic_fp8_linear(layer, x).float(), rtol=1.6e-2, atol=1e-3)
 
 
 def test_fp8_targets_env_override(monkeypatch):
@@ -613,3 +617,28 @@ def test_dynamic_fp8_linear_row_padding_is_exact(monkeypatch):
     padded = tq.dynamic_fp8_linear(layer, x)
     assert padded.shape == plain.shape == (1, 300, 24)
     assert torch.equal(padded, plain)
+
+
+def test_dynamic_fp8_linear_bf16_dequant_matches_the_fp32_dequant(monkeypatch):
+    """``DIFFLET_FP8_BF16_DEQUANT=1`` casts the dot output to the activation dtype and
+    applies the combined scale as one bf16 multiply (2026-10-05 speed switch: the fp32
+    dequant ACTIVATE was 48.5 ms of the Wan 2.1 DiT step). Same values as the fp32
+    dequant up to one bf16 rounding; the switch is read at import time, so flip the
+    module constant directly."""
+    import torch
+
+    layer = _static_layer()
+    x = torch.randn(2, 5, 32, dtype=torch.bfloat16)
+    reference = tq.dynamic_fp8_linear(layer, x)
+    monkeypatch.setattr(tq, "_BF16_DEQUANT", True)
+    out = tq.dynamic_fp8_linear(layer, x)
+    assert out.dtype == torch.bfloat16
+    assert torch.isfinite(out.float()).all()
+    # One extra bf16 rounding of the raw dot output (|rel| <= 2^-8) plus the scale cast.
+    assert torch.allclose(out.float(), reference.float(), rtol=1.6e-2, atol=1e-3)
+    # The fused-bias and deferred-scale epilogues are unaffected by the switch.
+    bias = torch.randn(24, dtype=torch.bfloat16)
+    fused = tq.dynamic_fp8_linear(layer, x, bias=bias)
+    assert torch.allclose(fused.float(), (reference + bias).float(), rtol=2e-2, atol=2e-2)
+    raw, combined = tq.dynamic_fp8_linear(layer, x, defer_scale=True)
+    assert raw.dtype == torch.bfloat16 and combined.numel() == 1

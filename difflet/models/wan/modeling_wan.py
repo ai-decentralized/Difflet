@@ -363,12 +363,32 @@ class WanFeedForward(nn.Module):
 # Attention (self / cross)
 
 
+def _pad_tokens() -> int:
+    """``DIFFLET_WAN_PAD_TOKENS=N`` (experiment, read at trace time): pad the patch
+    sequence once per forward to a multiple of N before the blocks, so every linear's
+    token rows (and the attention's sequence) are N-aligned. 0 / unset = off.
+
+    Why: on trn2 the fp8 double-row matmul (2x tensor-engine throughput) needs the
+    moving tile's free extent to be a multiple of 16; Wan's 480x832x9 sequence is 4680
+    = 12 x 390 tokens and 390 % 16 != 0, so 79 % of the fp8 dots ran single-row at bf16
+    speed (trace, 2026-10-05). FLUX / Qwen-Image / HunyuanVideo, whose sequences are
+    16-aligned, are the models where fp8 beats bf16. Per-linear padding (DIFFLET_FP8_PAD_ROWS)
+    was 6x slower because of the pad / slice around every dot; here the pad happens once.
+    Padded keys are excluded from self-attention through attention_cte's contiguous
+    bound_min / bound_max range; padded query rows are sliced off before norm_out.
+    """
+    import os
+
+    return int(os.environ.get("DIFFLET_WAN_PAD_TOKENS", "0") or 0)
+
+
 def _attn_kernel(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
     *,
     head_dim: int,
+    kv_valid: Optional[int] = None,
 ) -> torch.Tensor:
     """Run attention on (B, heads, S, head_dim) tensors via ``difflet.ops.attention``.
 
@@ -385,6 +405,13 @@ def _attn_kernel(
     q_flat = q.reshape(batch * heads, seq_q, dim)
     k_flat = k.reshape(batch * heads, seq_k, dim)
     v_flat = v.reshape(batch * heads, seq_k, dim)
+    bounds = {}
+    if kv_valid is not None and kv_valid < seq_k:
+        # Sequence padding (see _pad_tokens): keys [kv_valid, seq_k) are padding and
+        # must not be attended. attention_cte's per-query contiguous [lo, hi) range
+        # expresses this losslessly (ops_impl.mask_bounds); the CPU reference masks.
+        bound_max = torch.full((batch * heads, seq_q, 1), kv_valid, dtype=torch.int32, device=q.device)
+        bounds = {"bound_min": torch.zeros_like(bound_max), "bound_max": bound_max}
     out = attention(
         q_flat,
         k_flat,
@@ -395,6 +422,7 @@ def _attn_kernel(
         tp_q=True,
         tp_k=True,
         tp_out=False,
+        **bounds,
     )
     return out.reshape(batch, heads, seq_q, dim)
 
@@ -514,6 +542,7 @@ class WanAttention(nn.Module):
         hidden_states: torch.Tensor,
         encoder_hidden_states: Optional[torch.Tensor] = None,
         rotary_emb: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+        kv_valid: Optional[int] = None,
     ) -> torch.Tensor:
         # Megatron-SP: the image/query stream arrives sequence-sharded
         # [B, S/tp, H]; gather it to the full sequence (g) before the
@@ -563,7 +592,7 @@ class WanAttention(nn.Module):
                     stacked_kv, gather_dim=3, process_group=self.cp_group
                 )  # [2, B, heads, S, head_dim]
                 k, v = torch.unbind(stacked_kv, dim=0)
-            out = _attn_kernel(q, k, v, head_dim=self.head_dim)
+            out = _attn_kernel(q, k, v, head_dim=self.head_dim, kv_valid=kv_valid)
 
         # (B, local_heads, S, dim) → (B, S, local_heads * dim); RowParallelLinear then
         # all-reduces each rank's partial output projection back to the full model dim.
@@ -634,6 +663,7 @@ class WanTransformerBlock(nn.Module):
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
         rotary_emb: tuple[torch.Tensor, torch.Tensor],
+        kv_valid: Optional[int] = None,
     ) -> torch.Tensor:
         if temb.ndim == 4:
             shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
@@ -653,7 +683,7 @@ class WanTransformerBlock(nn.Module):
         norm_h = (self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa).type_as(
             hidden_states
         )
-        attn_out = self.attn1(norm_h, None, rotary_emb)
+        attn_out = self.attn1(norm_h, None, rotary_emb, kv_valid=kv_valid)
         hidden_states = (hidden_states.float() + attn_out * gate_msa).type_as(hidden_states)
 
         norm_h = self.norm2(hidden_states.float()).type_as(hidden_states)
@@ -888,10 +918,32 @@ class WanTransformer3DModel(nn.Module):
             timestep_proj = self._sp_seq_scatter(timestep_proj, dim=1)
             temb = self._sp_seq_scatter(temb, dim=1)
 
+        # Sequence padding experiment (DIFFLET_WAN_PAD_TOKENS, see _pad_tokens): pad the
+        # token axis once here, run the blocks N-aligned, slice before norm_out.
+        seq_real = hidden_states.shape[1]
+        pad_to = _pad_tokens()
+        pad = (-seq_real) % pad_to if pad_to else 0
+        kv_valid = None
+        if pad:
+            if self.sp_enabled or self.context_parallel_enabled:
+                raise ValueError("DIFFLET_WAN_PAD_TOKENS is not supported with SP / CP")
+            hidden_states = F.pad(hidden_states, (0, 0, 0, pad))
+            cos, sin = rotary_emb  # (1, S, 1, head_dim): any value works on padded rows
+            rotary_emb = (F.pad(cos, (0, 0, 0, 0, 0, pad)), F.pad(sin, (0, 0, 0, 0, 0, pad)))
+            if ts_seq_len is not None:  # per-token modulation carries the sequence axis
+                timestep_proj = F.pad(timestep_proj, (0, 0, 0, 0, 0, pad))
+                temb = F.pad(temb, (0, 0, 0, pad))
+            kv_valid = seq_real
+
         for block in self.blocks:
             hidden_states = block(
-                hidden_states, encoder_hidden_states, timestep_proj, rotary_emb
+                hidden_states, encoder_hidden_states, timestep_proj, rotary_emb, kv_valid=kv_valid
             )
+
+        if pad:
+            hidden_states = hidden_states[:, :seq_real]
+            if temb.ndim == 3:
+                temb = temb[:, :seq_real]
 
         if temb.ndim == 3:
             shift, scale = (

@@ -242,3 +242,57 @@ def test_teacache_mod_input_2d_timestep():
     timestep = torch.randint(0, 1000, (1, seq)).float()
     sig = model.teacache_mod_input(hidden, timestep, enc)
     assert sig.shape == (1, seq, 64)
+
+
+# ---------------------------------------------------------------------------
+# Sequence padding experiment (DIFFLET_WAN_PAD_TOKENS)
+
+
+@pytest.mark.parametrize("pad_to", [24, 128])
+def test_transformer_forward_with_sequence_padding_matches_unpadded(monkeypatch, pad_to):
+    """Padding the token axis to a multiple of N before the blocks (padded keys
+    excluded from self-attention through the bounds, padded rows sliced off) must
+    reproduce the unpadded forward exactly up to float rounding. 2*4*4 = 32 tokens:
+    24 pads by 16, 128 pads by 96."""
+    torch.manual_seed(0)
+    model = wan.WanTransformer3DModel(_tiny_config())
+    hidden = torch.randn(1, 4, 2, 8, 8)
+    timestep = torch.tensor([3.0])
+    enc = torch.randn(1, 5, 24)
+    monkeypatch.delenv("DIFFLET_WAN_PAD_TOKENS", raising=False)
+    reference = model(hidden, timestep, enc)
+    monkeypatch.setenv("DIFFLET_WAN_PAD_TOKENS", str(pad_to))
+    padded = model(hidden, timestep, enc)
+    assert padded.shape == reference.shape
+    assert torch.allclose(padded, reference, rtol=1e-4, atol=1e-5)
+
+
+def test_transformer_forward_sequence_padding_ti2v_per_token_timestep(monkeypatch):
+    torch.manual_seed(0)
+    model = wan.WanTransformer3DModel(_tiny_config())
+    hidden = torch.randn(1, 4, 2, 8, 8)
+    timestep = torch.randint(0, 1000, (1, 2 * 4 * 4)).float()
+    enc = torch.randn(1, 5, 24)
+    monkeypatch.delenv("DIFFLET_WAN_PAD_TOKENS", raising=False)
+    reference = model(hidden, timestep, enc)
+    monkeypatch.setenv("DIFFLET_WAN_PAD_TOKENS", "48")
+    padded = model(hidden, timestep, enc)
+    assert torch.allclose(padded, reference, rtol=1e-4, atol=1e-5)
+
+
+def test_transformer_forward_sequence_padding_noop_when_aligned(monkeypatch):
+    torch.manual_seed(0)
+    model = wan.WanTransformer3DModel(_tiny_config())
+    hidden = torch.randn(1, 4, 2, 8, 8)
+    enc = torch.randn(1, 5, 24)
+    monkeypatch.setenv("DIFFLET_WAN_PAD_TOKENS", "16")  # 32 tokens: already aligned
+    calls = []
+    orig = wan._attn_kernel
+
+    def spy(q, k, v, **kw):
+        calls.append(kw.get("kv_valid"))
+        return orig(q, k, v, **kw)
+
+    monkeypatch.setattr(wan, "_attn_kernel", spy)
+    model(hidden, torch.tensor([3.0]), enc)
+    assert calls and all(c is None for c in calls)
