@@ -46,6 +46,18 @@ FP8_HLO2TENSORIZER_FLAG = "--experimental-unsafe-fp8e4m3fn-as-fp8e4m3"
 QUANT_LAYER_SCHEMA = 4
 
 
+# Experiment switches (read once at import, i.e. before tracing; off by default):
+#   DIFFLET_FP8_BF16_QUANT=1  quantize the activation in bf16 instead of fp32
+#   DIFFLET_FP8_FUSE_BIAS=1   fold the bias into the dequantize (column-parallel) and
+#                             apply scale + bias once after the all-reduce (row-parallel)
+_BF16_QUANT = os.environ.get("DIFFLET_FP8_BF16_QUANT") == "1"
+_FUSE_BIAS = os.environ.get("DIFFLET_FP8_FUSE_BIAS") == "1"
+#   DIFFLET_FP8_PAD_ROWS=N    zero-pad the fp8 dot's token rows to a multiple of N (trace analysis
+#                             2026-10-05: 4680 rows tile as 12 x 390, which keeps 79 % of the fp8
+#                             matmul work out of the 2x double-row mode; 512-row tiles get it)
+_PAD_ROWS = int(os.environ.get("DIFFLET_FP8_PAD_ROWS", "0") or 0)
+
+
 def neuron_config_kwargs(spec: QuantSpec, quantized_checkpoints_path: str | os.PathLike[str]) -> dict[str, Any]:
     """``NeuronConfig(**kwargs)`` fields that turn a backbone into its FP8 form."""
     kwargs: dict[str, Any] = {
@@ -188,11 +200,66 @@ def _nki_fp8_linear(layer: Any, input_parallel: "torch.Tensor", static_scale, mo
     else:
         kernel = fp8_linear_token_kernel
         in_scale = w_scale
-    out = kernel(x2d, w_t, w_scale, in_scale, None)
+    # SPMD grid over the physical cores of a logical core (same rule as attention_cte's [2]
+    # launch); DIFFLET_FP8_NKI_GRID overrides. Without the grid the kernel runs on one core.
+    grid = int(os.environ.get("DIFFLET_FP8_NKI_GRID", os.environ.get("NEURON_RT_VIRTUAL_CORE_SIZE", "1")))
+    out = (kernel[grid] if grid > 1 else kernel)(x2d, w_t, w_scale, in_scale, None)
     return out.reshape(*input_parallel.shape[:-1], out.shape[-1]).to(input_parallel.dtype)
 
 
-def dynamic_fp8_linear(layer: Any, input_parallel: "torch.Tensor", **impl_kwargs: Any) -> "torch.Tensor":
+def nki_fp8_mlp_enabled(net_in: Any, net_out: Any) -> bool:
+    """``DIFFLET_FP8_NKI_MLP=1`` (experiment, trace time) and both FFN linears carry fp8 weights
+    with static input scales."""
+    if os.environ.get("DIFFLET_FP8_NKI_MLP") != "1":
+        return False
+    return all(getattr(m, "input_scale", None) is not None and hasattr(m, "scale") for m in (net_in, net_out))
+
+
+def nki_fp8_mlp(net_in: Any, net_out: Any, x: "torch.Tensor") -> "torch.Tensor":
+    """Wan's FFN (up -> GELU-tanh -> down) as ONE nkilib fused MLP kernel (``nkilib.core.mlp``,
+    ``skip_gate_proj``, ``QuantizationType.STATIC``): both fp8 double-row matmuls, the activation
+    and the re-quantization of the intermediate stay on chip. ``x`` is quantized here (the CTE
+    kernel takes an fp8 input). Returns the row-parallel PARTIAL sum without the down bias; the
+    caller all-reduces and adds the bias once."""
+    import torch
+
+    from difflet.quant.fp8 import FP8_DTYPE, FP8_MAX
+
+    os.environ.setdefault("NKI_FP8_E4M3_MODE", "non_ocp")
+    from nkilib.core.mlp.mlp import mlp
+    from nkilib.core.utils.common_types import ActFnType, QuantizationType
+
+    s1 = net_in.input_scale.to(torch.float32).reshape(())
+    s2 = net_out.input_scale.to(torch.float32).reshape(())
+    xq = (x.to(torch.float32) * (1.0 / s1)).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
+    w_up = net_in.weight.t().contiguous()    # [H, I/tp] fp8 (prototype: transposed per call)
+    w_down = net_out.weight.t().contiguous()  # [I/tp, H] fp8
+
+    def col(v):
+        return v.to(torch.float32).reshape(1, 1).expand(128, 1).contiguous()
+
+    grid = int(os.environ.get("DIFFLET_FP8_NKI_GRID", os.environ.get("NEURON_RT_VIRTUAL_CORE_SIZE", "1")))
+    kernel = mlp[grid] if grid > 1 else mlp
+    out = kernel(
+        xq, w_up, w_up, w_down,
+        up_proj_bias_tensor=net_in.bias.reshape(1, -1),
+        activation_fn=ActFnType.GELU_Tanh_Approx, skip_gate_proj=True,
+        quantization_type=QuantizationType.STATIC,
+        gate_w_scale=col(net_in.scale), up_w_scale=col(net_in.scale), down_w_scale=col(net_out.scale),
+        gate_up_in_scale=col(s1), down_in_scale=col(s2),
+        output_dtype=x.dtype, force_cte_mode=True,
+    )
+    return out[0] if isinstance(out, (list, tuple)) else out
+
+
+def dynamic_fp8_linear(
+    layer: Any,
+    input_parallel: "torch.Tensor",
+    *,
+    bias: "torch.Tensor | None" = None,
+    defer_scale: bool = False,
+    **impl_kwargs: Any,
+):
     """``input @ W^T`` with both operands fp8 and a per-tensor dynamic input scale.
 
     ``layer`` is an NxD quantized parallel linear: ``weight`` (fp8), ``scale``
@@ -200,10 +267,21 @@ def dynamic_fp8_linear(layer: Any, input_parallel: "torch.Tensor", **impl_kwargs
     and ``clamp_bound``. The output is dequantized by ``input_scale *
     weight_scale`` and cast back to the input dtype; the weight scale is
     flattened so it broadcasts over the output's last dim for any rank.
+
+    ``bias`` folds the bias add into the dequantize (one fp32 multiply-add over the
+    output instead of a multiply, a cast and a separate add). ``defer_scale``
+    returns ``(raw_output, combined_scale)`` so a row-parallel layer can apply the
+    scale (and bias) once after its all-reduce — valid because the static input
+    scale and the per-tensor weight scale are the same on every TP rank.
     """
     import torch
 
     original_dtype = input_parallel.dtype
+    rows = input_parallel.shape[-2] if input_parallel.dim() >= 2 else 0
+    pad = (-rows) % _PAD_ROWS if _PAD_ROWS and rows > 128 and not os.environ.get("DIFFLET_FP8_NKI") else 0
+    if pad:
+        # Zero rows quantize to fp8 zeros; the dot's padded output rows are sliced off below.
+        input_parallel = torch.nn.functional.pad(input_parallel, (0, 0, 0, pad))
     static_scale = getattr(layer, "input_scale", None)
     nki_mode = os.environ.get("DIFFLET_FP8_NKI")  # experiment (trace time): "static" | "token"
     if nki_mode in ("static", "token") and input_parallel.shape[-1] % 128 == 0:
@@ -224,19 +302,33 @@ def dynamic_fp8_linear(layer: Any, input_parallel: "torch.Tensor", **impl_kwargs
         # not a saturate (trn2, 2026-10-03: tiny probe at 8x the calibration -> NaN;
         # the Wan 2.1 render without the clamp collapsed to 8 dB). It is also free:
         # 586.4 ms per DiT step without it vs 586.9 with it.
-        quantized = (
-            (input_parallel.to(torch.float32) * (1.0 / input_scale))
-            .clamp(-FP8_MAX, FP8_MAX)
-            .to(FP8_DTYPE)
-        )
+        if _BF16_QUANT:
+            # Experiment: quantize in the activation's own dtype (no fp32 convert).
+            quantized = (
+                (input_parallel * (1.0 / input_scale).to(input_parallel.dtype))
+                .clamp(-FP8_MAX, FP8_MAX)
+                .to(FP8_DTYPE)
+            )
+        else:
+            quantized = (
+                (input_parallel.to(torch.float32) * (1.0 / input_scale))
+                .clamp(-FP8_MAX, FP8_MAX)
+                .to(FP8_DTYPE)
+            )
     else:
         quantized, input_scale = quantize_activation_per_tensor(
             input_parallel, getattr(layer, "clamp_bound", float("inf"))
         )
     output = layer._forward_impl(input=quantized, weight=layer.weight, bias=None, **impl_kwargs)
+    if pad:
+        output = output[..., :rows, :]
     # One combined (tiny) scale, one multiply over the output: the 2.26 HLO
     # carried two full-size F32 multiplies per linear for the two scales.
     combined = input_scale * layer.scale.to(torch.float32).reshape(-1)
+    if defer_scale:
+        return output, combined
+    if bias is not None:
+        return (output.to(torch.float32) * combined + bias.to(torch.float32)).to(original_dtype)
     return (output.to(torch.float32) * combined).to(original_dtype)
 
 
@@ -254,6 +346,7 @@ def quant_module_mapping() -> dict[Any, Any]:
     if _MAPPING is not None:
         return _MAPPING
     from neuronx_distributed.parallel_layers.layers import ColumnParallelLinear, RowParallelLinear
+    import torch
     from neuronx_distributed.quantization import quantization_layers as ql
 
     def _adopt(cls, mod, new_mod):
@@ -295,8 +388,11 @@ def quant_module_mapping() -> dict[Any, Any]:
                 input_parallel = ql.copy_to_tensor_model_parallel_region(
                     input, process_group=self.tensor_parallel_group
                 )
+            fuse = (_FUSE_BIAS and self.bias is not None and not self.gather_output
+                    and not getattr(self, "skip_bias_add", False))
             output_parallel = dynamic_fp8_linear(
                 self, input_parallel,
+                bias=self.bias if fuse else None,
                 async_grad_allreduce=self.async_tensor_model_parallel_allreduce,
                 sequence_parallel_enabled=self.sequence_parallel_enabled,
                 sequence_dimension=self.sequence_dimension,
@@ -311,6 +407,8 @@ def quant_module_mapping() -> dict[Any, Any]:
                 )
             else:
                 output = output_parallel
+            if fuse:
+                return output
             return _finish(self, output)
 
     class PerTensorDynamicRowParallel(ql.QuantizedRowParallel):
@@ -328,8 +426,12 @@ def quant_module_mapping() -> dict[Any, Any]:
                 )
             # Under TP each rank scales its own input slice: the partial products
             # are dequantized exactly before the all-reduce.
-            output_ = dynamic_fp8_linear(
+            defer = (_FUSE_BIAS and self.reduce_output and not self.sequence_parallel_enabled
+                     and not getattr(self, "skip_bias_add", False)
+                     and getattr(self, "input_scale", None) is not None)
+            result = dynamic_fp8_linear(
                 self, input_parallel,
+                defer_scale=defer,
                 async_grad_allreduce=False,
                 sequence_parallel_enabled=False,
                 sequence_dimension=self.sequence_dimension,
@@ -337,6 +439,7 @@ def quant_module_mapping() -> dict[Any, Any]:
                 save_for_backward=False,
                 process_group=self.tensor_parallel_group,
             )
+            output_, combined = result if defer else (result, None)
             if self.reduce_output:
                 if self.sequence_parallel_enabled:
                     output_ = ql.reduce_scatter_to_sequence_parallel_region(
@@ -346,6 +449,11 @@ def quant_module_mapping() -> dict[Any, Any]:
                     output_ = ql.reduce_from_tensor_model_parallel_region(
                         output_, process_group=self.tensor_parallel_group
                     )
+            if defer:
+                out = output_.to(torch.float32) * combined
+                if self.bias is not None:
+                    out = out + self.bias.to(torch.float32)
+                return out.to(input_parallel.dtype)
             return _finish(self, output_)
 
     _MAPPING = {

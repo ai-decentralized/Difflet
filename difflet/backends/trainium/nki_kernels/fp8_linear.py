@@ -25,6 +25,7 @@ import nki
 import nki.isa as nisa
 import nki.language as nl
 
+from nkilib.core.utils.kernel_helpers import get_program_sharding_info
 from nkilib.core.utils.stream_shuffle_broadcast import stream_shuffle_broadcast
 
 _P = 128
@@ -86,6 +87,7 @@ def _fp8_linear(x, w_t, w_scale, in_scale, bias, mode, xpose):
     KT = K // _P
     has_bias = bias is not None
     out = nl.ndarray((S, N), dtype=nl.bfloat16, buffer=nl.shared_hbm)
+    _, n_prgs, prg_id = get_program_sharding_info()
 
     ws_vec = _broadcast_scalar(w_scale)
     inv_in = ws_vec
@@ -112,12 +114,14 @@ def _fp8_linear(x, w_t, w_scale, in_scale, bias, mode, xpose):
             nisa.tensor_copy(dst=b_sb[0:1, :], src=b_row)
             stream_shuffle_broadcast(b_sb, b_sb)
 
+        # Launched as kernel[2] under LNC=2 (one program per physical core), the token tiles are
+        # split across the programs; without a grid this is (1 program, id 0) = all tiles.
         num_full = S // _P
         tail = S - num_full * _P
-        for st in range(num_full):
+        for st in range(prg_id, num_full, n_prgs):
             _token_tile(x, out, w_sb, b_sb, ws_vec, inv_in, comb_static, st * _P, _P, K, KT, nb0, nbs,
                         has_bias, mode, xpose, ones)
-        if tail > 0:
+        if tail > 0 and prg_id == num_full % n_prgs:
             _token_tile(x, out, w_sb, b_sb, ws_vec, inv_in, comb_static, num_full * _P, tail, K, KT, nb0, nbs,
                         has_bias, mode, xpose, ones)
     return out

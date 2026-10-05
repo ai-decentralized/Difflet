@@ -97,7 +97,17 @@ TARGETS_BY_MODEL: dict[str, tuple[str, ...]] = {
 
 
 def targets_for(model_type: str) -> tuple[str, ...]:
-    """The target set of a wired model type; ``ValueError`` names the wired ones."""
+    """The target set of a wired model type; ``ValueError`` names the wired ones.
+
+    ``DIFFLET_FP8_TARGETS`` (comma-separated targets) overrides the set — an
+    experiment switch for per-layer speed studies; it changes the spec, so the
+    quantized checkpoint gets its own directory.
+    """
+    import os
+
+    override = os.environ.get("DIFFLET_FP8_TARGETS")
+    if override:
+        return tuple(t.strip() for t in override.split(",") if t.strip())
     try:
         return TARGETS_BY_MODEL[model_type]
     except KeyError:

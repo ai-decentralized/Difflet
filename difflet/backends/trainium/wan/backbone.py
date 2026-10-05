@@ -202,12 +202,21 @@ class NeuronWanBackboneApplication(NeuronApplicationBase):
         # FP8 PTQ adds --experimental-unsafe-fp8e4m3fn-as-fp8e4m3 here as well as
         # in ModelWrapper's own appended options (see core/quant.py).
         hlo2tensorizer = fp8_hlo2tensorizer_options(self.config.neuron_config) + "--verify-hlo=true"
+        # Experiment switches (speed studies; the compile cache key does not see them,
+        # so use a separate --cache-dir per setting): DIFFLET_WAN_OPT_LEVEL (default -O1),
+        # DIFFLET_WAN_TENSORIZER_EXTRA / DIFFLET_WAN_HLO2T_EXTRA (appended to those
+        # option strings), DIFFLET_WAN_CC_EXTRA (appended to the command line).
+        opt = os.environ.get("DIFFLET_WAN_OPT_LEVEL", "-O1")
+        tensorizer = ("--enable-ccop-compute-overlap " + os.environ.get("DIFFLET_WAN_TENSORIZER_EXTRA", "")).strip()
+        hlo2tensorizer = (hlo2tensorizer + " " + os.environ.get("DIFFLET_WAN_HLO2T_EXTRA", "")).strip()
         compiler_args = (
-            "--model-type=transformer -O1 "
-            "--tensorizer-options='--enable-ccop-compute-overlap' "
+            f"--model-type=transformer {opt} "
+            f"--tensorizer-options='{tensorizer}' "
             "--auto-cast=none "
             f"--internal-hlo2tensorizer-options='{hlo2tensorizer}'"
         )
+        if os.environ.get("DIFFLET_WAN_CC_EXTRA"):
+            compiler_args += " " + os.environ["DIFFLET_WAN_CC_EXTRA"]
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
         return compiler_args
 

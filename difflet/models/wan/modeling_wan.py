@@ -343,6 +343,13 @@ class WanFeedForward(nn.Module):
         # the row-parallel partial back to a sequence shard (ḡ).
         if self.sp_enabled:
             x = gather_from_sequence_parallel_region(x, dim=1)
+        from difflet.backends.trainium.core import quant as _q
+
+        if not self.sp_enabled and _q.nki_fp8_mlp_enabled(self.net_in, self.net_out):
+            # Experiment (DIFFLET_FP8_NKI_MLP=1): fused fp8 FFN kernel, then the row-parallel
+            # all-reduce and the down bias once.
+            x =reduce_from_tensor_model_parallel_region(_q.nki_fp8_mlp(self.net_in, self.net_out, x))
+            return x + self.net_out.bias
         x = self.net_in(x)
         x = F.gelu(x, approximate="tanh")
         x = self.net_out(x)

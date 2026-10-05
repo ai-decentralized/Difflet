@@ -554,3 +554,62 @@ def test_static_input_scale_path_skips_the_reductions_and_clamps(monkeypatch):
     big = x * 8
     out_big = tq.dynamic_fp8_linear(layer, big)
     assert torch.isfinite(out_big.float()).all()
+
+
+def _static_layer():
+    import torch
+
+    from difflet.quant import fp8
+
+    torch.manual_seed(2)
+    weight = torch.randn(24, 32, dtype=torch.bfloat16) * 0.1
+    q_weight, scale = fp8.quantize_weight(weight, "tensor")
+
+    def forward_impl(input, weight, bias, **kwargs):
+        return torch.nn.functional.linear(input.float(), weight.float())
+
+    return SimpleNamespace(weight=q_weight, scale=scale, clamp_bound=float("inf"),
+                           input_scale=torch.tensor([3.0 / 240.0]), _forward_impl=forward_impl)
+
+
+def test_dynamic_fp8_linear_folds_the_bias_into_the_dequantize():
+    import torch
+
+    layer = _static_layer()
+    x = torch.randn(2, 5, 32, dtype=torch.bfloat16)
+    bias = torch.randn(24, dtype=torch.bfloat16)
+    fused = tq.dynamic_fp8_linear(layer, x, bias=bias)
+    separate = tq.dynamic_fp8_linear(layer, x) + bias
+    assert fused.dtype == torch.bfloat16
+    assert torch.allclose(fused.float(), separate.float(), rtol=2e-2, atol=2e-2)
+
+
+def test_dynamic_fp8_linear_defers_the_scale_for_a_post_reduce_epilogue():
+    import torch
+
+    layer = _static_layer()
+    x = torch.randn(2, 5, 32, dtype=torch.bfloat16)
+    raw, combined = tq.dynamic_fp8_linear(layer, x, defer_scale=True)
+    assert combined.numel() == 1
+    assert torch.allclose((raw.float() * combined).to(torch.bfloat16).float(),
+                          tq.dynamic_fp8_linear(layer, x).float())
+
+
+def test_fp8_targets_env_override(monkeypatch):
+    from difflet.quant.targets import WAN_TARGETS, targets_for
+
+    assert targets_for("wan") == WAN_TARGETS
+    monkeypatch.setenv("DIFFLET_FP8_TARGETS", "ffn.net_in, ffn.net_out")
+    assert targets_for("wan") == ("ffn.net_in", "ffn.net_out")
+
+
+def test_dynamic_fp8_linear_row_padding_is_exact(monkeypatch):
+    import torch
+
+    layer = _static_layer()
+    x = torch.randn(1, 300, 32, dtype=torch.bfloat16)
+    plain = tq.dynamic_fp8_linear(layer, x)
+    monkeypatch.setattr(tq, "_PAD_ROWS", 512)
+    padded = tq.dynamic_fp8_linear(layer, x)
+    assert padded.shape == plain.shape == (1, 300, 24)
+    assert torch.equal(padded, plain)

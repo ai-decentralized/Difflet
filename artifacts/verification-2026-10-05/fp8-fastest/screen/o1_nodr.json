@@ -1,0 +1,8 @@
+{
+ "fp8": {
+  "forward_ms": 38.804311797139235,
+  "compile_s": 216.484,
+  "nonfinite": 0,
+  "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap --internal-disable-double-row-gen3' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'"
+ }
+}
