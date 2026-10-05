@@ -1,0 +1,22 @@
+{
+ "switches": "DIFFLET_WAN_PAD_TOKENS=128 DIFFLET_WAN_PAD_NOBOUNDS=1",
+ "passed": true,
+ "bf16": {
+  "forward_ms": 40.34271400032594,
+  "forward_ms_median": 40.371205000155896,
+  "compile_s": 151.043,
+  "nonfinite": 0,
+  "cosine_vs_cpu": 0.9999136870304215,
+  "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'",
+  "error": null
+ },
+ "fp8": {
+  "forward_ms": 37.058138500106,
+  "forward_ms_median": 37.06252050051262,
+  "compile_s": 122.584,
+  "nonfinite": 0,
+  "cosine_vs_cpu": 0.9996977853082886,
+  "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+  "error": null
+ }
+}

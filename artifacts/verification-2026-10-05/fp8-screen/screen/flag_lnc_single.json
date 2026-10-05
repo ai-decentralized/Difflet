@@ -1,0 +1,13 @@
+{
+ "switches": "DIFFLET_WAN_CC_EXTRA=--enable-lnc-single-graph-compilation",
+ "passed": false,
+ "fp8": {
+  "forward_ms": null,
+  "forward_ms_median": null,
+  "compile_s": null,
+  "nonfinite": null,
+  "cosine_vs_cpu": null,
+  "compiler_args": null,
+  "error": "CalledProcessError: Command '['neuronx-cc', 'compile', '--framework=XLA', '/tmp/nxd_model/WanTransformer3DModel/_tp0_bk0/model.MODULE_445536ed8d32c4950894+aaf5775f.hlo_module.pb', '--output', '/tmp/nxd_model/WanTransformer3DModel/_tp0_bk0/model.MODULE_445536ed8d32c4950894+aaf5775f.neff', '--target=trn2', '--model-type=transformer', '-O1', '--tensorizer-options=--enable-ccop-compute-overlap', '--auto-cast=none', '--internal-hlo2tensorizer-options=--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true', '--enable-lnc-single-graph-compilation', '--internal-hlo2tensorizer-options= --experimental-unsafe-fp8e4m3fn-as-fp8e4m3  --verify-hlo=true', '--verbose=35', '--logfile=/tmp/nxd_model/WanTransformer3DModel/_tp0_bk0/log-neuron-cc.txt', '--enable-internal-neff-wrapper']' returned non-zero exit status 70."
+ }
+}

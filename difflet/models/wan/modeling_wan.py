@@ -382,6 +382,15 @@ def _pad_tokens() -> int:
     return int(os.environ.get("DIFFLET_WAN_PAD_TOKENS", "0") or 0)
 
 
+def _pad_nobounds() -> bool:
+    """``DIFFLET_WAN_PAD_NOBOUNDS=1``: timing-only variant of the padding experiment that
+    skips the attention bounds (padded keys are attended, output is wrong), to separate
+    the cost of attention_cte's bounded path from the cost of the padded shapes."""
+    import os
+
+    return os.environ.get("DIFFLET_WAN_PAD_NOBOUNDS") == "1"
+
+
 def _attn_kernel(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -406,6 +415,8 @@ def _attn_kernel(
     k_flat = k.reshape(batch * heads, seq_k, dim)
     v_flat = v.reshape(batch * heads, seq_k, dim)
     bounds = {}
+    if kv_valid is not None and kv_valid < seq_k and _pad_nobounds():
+        kv_valid = None  # timing-only: attend the padded keys too (wrong numerics)
     if kv_valid is not None and kv_valid < seq_k:
         # Sequence padding (see _pad_tokens): keys [kv_valid, seq_k) are padding and
         # must not be attended. attention_cte's per-query contiguous [lo, hi) range

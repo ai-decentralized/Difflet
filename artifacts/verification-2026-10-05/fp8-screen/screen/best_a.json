@@ -1,0 +1,22 @@
+{
+ "switches": "NEURON_RT_VIRTUAL_CORE_SIZE=2 DIFFLET_WAN_TENSORIZER_EXTRA=--vectorize-strided-dma",
+ "passed": true,
+ "bf16": {
+  "forward_ms": 30.233696499999496,
+  "forward_ms_median": 30.241715999636654,
+  "compile_s": 143.596,
+  "nonfinite": 0,
+  "cosine_vs_cpu": 0.9999113857876653,
+  "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap --vectorize-strided-dma' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'",
+  "error": null
+ },
+ "fp8": {
+  "forward_ms": 27.31883629994627,
+  "forward_ms_median": 27.337729499777197,
+  "compile_s": 119.3,
+  "nonfinite": 0,
+  "cosine_vs_cpu": 0.9997003898740613,
+  "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap --vectorize-strided-dma' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'",
+  "error": null
+ }
+}
