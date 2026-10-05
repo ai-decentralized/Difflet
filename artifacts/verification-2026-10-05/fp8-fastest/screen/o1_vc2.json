@@ -1,0 +1,14 @@
+{
+ "bf16": {
+  "forward_ms": 32.31241629982833,
+  "compile_s": 202.35,
+  "nonfinite": 0,
+  "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'"
+ },
+ "fp8": {
+  "forward_ms": 30.61800138966646,
+  "compile_s": 170.872,
+  "nonfinite": 0,
+  "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'"
+ }
+}

@@ -27,21 +27,40 @@ Instruction-level analysis of `/home/ubuntu/ptq-profiles/wan21_{bf16,fp8static}_
 - NxD Inference gets fp8 speed from nkilib kernels (`mlp[lnc]`, `rmsnorm_quant`) with explicit
   `perf_mode=double_row`, launched with an LNC grid (`kernel[logical_nc_config]`).
 
-## Screen (2 real Wan blocks, tp4, static scales, 10 forwards, CPU job running alongside)
+## Screen (2 real Wan blocks, tp4, static scales, 10 forwards; CPU job running alongside)
 
-| config | bf16 ms | fp8 ms | note |
+Forward ms of one 2-block forward (`screen/*.json`, `scripts`: job `job_screen.sh`). bf16 -O1 read
+35.7 ms on an idle host earlier the same day; the CPU job inflates all arms by ~2 ms.
+
+| config | bf16 | fp8 | verdict |
 |---|---:|---:|---|
-| -O1 (shipped) | 37.71 | 35.49 | bf16 read 35.7 earlier on an idle host |
-| -O1, double-row disabled | — | 38.80 | double-row does fire at -O1 (worth 3.3 ms here) |
-| -O2 | 45.48 | 43.13 | slower for both |
-| -O3 | 45.46 | 43.73 | slower for both |
-
-Pending in the queue: --vectorize-strided-dma, fused bias, bf16-domain quantize, VC2 (attention_cte[2]),
-NKI linear kernel with an LNC [2] grid, nkilib fused MLP (FFN) with/without grid, row padding 512/256.
+| -O1 (shipped) | 37.71 | 35.49 | base |
+| -O1, double-row disabled | — | 38.80 | double-row fires at -O1 (3.3 ms), on a minority of dots |
+| -O2 | 45.48 | 43.13 | slower |
+| -O3 | 45.46 | 43.73 | slower |
+| `--vectorize-strided-dma` (NxDI's flag) | 34.50 | 32.71 | −8 % both |
+| `NEURON_RT_VIRTUAL_CORE_SIZE=2` (attention_cte[2]) | 32.31 | 30.62 | **−14 % both** |
+| bf16-domain quantize | — | 34.74 | −2 % |
+| fused bias, column-parallel | — | 34.81 | −2 % |
+| fused bias, row-parallel (after the bf16-cast fix; first try was NaN) | — | 34.00 | −4 % |
+| fused bias, both | — | 34.75 | −2 % |
+| NKI fp8 linear, [2] grid | — | 38.36 | slower than XLA (was 41.7 without the grid) |
+| NKI fp8 linear, VC2 | 32.88 | 34.95 | slower than XLA fp8 VC2 (30.62) |
+| nkilib fused MLP (skip_gate, static) | — | compile error | nkilib: static fp8 + up bias unsupported in the non-gated path |
+| row padding to 512 / 256 | — | 206 / 239 | 6x slower (pad / slice breaks the layout) |
+| best_a = VC2 + strided DMA | 31.77 | 30.66 | general levers |
+| **best_a + bf16 quantize** | — | **28.27** | **winner: −20 % vs shipped fp8, −11 % vs bf16 best_a** |
+| best_a + bf16 quantize + fused bias (both / row) | — | 28.53 / 28.70 | no further gain |
+| VC2 + bf16 quantize (no strided DMA) | — | 30.94 | strided DMA matters with bf16 quantize |
+| best_a + 512 padding | — | 222.22 | no |
 
 ## Fidelity
 
 CPU bf16 vs device bf16 final latents (same prompt, seed, shape): **14.05 dB SNR, cosine 0.980** —
 the 20-step trajectory amplifies any numerical difference to ~13-14 dB, so the "13 dB" fp8 arms
 (NKI, dynamic, weight-only) are at the same divergence as a different bf16 implementation.
-CPU W8A8 arms running (`../nki-fp8/cpu_e2e/`).
+CPU W8A8 static (same checkpoint law) vs CPU bf16: **14.09 dB, cosine 0.981** — identical arithmetic,
+only the fp8 rounding differs, and the trajectory lands at the same ~14 dB. So ~13-14 dB latent SNR
+after 20 steps is the *normal* fp8 (and bf16-vs-bf16) divergence on this seed; XLA static's 24.9 dB on
+the device is the outlier, not the others' 13 dB. Single-seed latent SNR is not a usable fp8 quality
+gate; use decoded-video LPIPS / SSIM across several seeds.

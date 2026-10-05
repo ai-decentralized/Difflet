@@ -51,7 +51,11 @@ QUANT_LAYER_SCHEMA = 4
 #   DIFFLET_FP8_FUSE_BIAS=1   fold the bias into the dequantize (column-parallel) and
 #                             apply scale + bias once after the all-reduce (row-parallel)
 _BF16_QUANT = os.environ.get("DIFFLET_FP8_BF16_QUANT") == "1"
-_FUSE_BIAS = os.environ.get("DIFFLET_FP8_FUSE_BIAS") == "1"
+#   DIFFLET_FP8_BF16_DEQUANT=1 dequantize in bf16 (cast the dot output, one bf16 multiply)
+_BF16_DEQUANT = os.environ.get("DIFFLET_FP8_BF16_DEQUANT") == "1"
+_FUSE_BIAS_MODE = os.environ.get("DIFFLET_FP8_FUSE_BIAS", "")  # "1" = both, "col", "row"
+_FUSE_COL = _FUSE_BIAS_MODE in ("1", "col")
+_FUSE_ROW = _FUSE_BIAS_MODE in ("1", "row")
 #   DIFFLET_FP8_PAD_ROWS=N    zero-pad the fp8 dot's token rows to a multiple of N (trace analysis
 #                             2026-10-05: 4680 rows tile as 12 x 390, which keeps 79 % of the fp8
 #                             matmul work out of the 2x double-row mode; 512-row tiles get it)
@@ -326,9 +330,14 @@ def dynamic_fp8_linear(
     # carried two full-size F32 multiplies per linear for the two scales.
     combined = input_scale * layer.scale.to(torch.float32).reshape(-1)
     if defer_scale:
-        return output, combined
+        # Cast before the caller's all-reduce: the raw dot output is unscaled (|values| far
+        # above 240), so it must not travel in the dot's own dtype (trn2, 2026-10-05: without
+        # this cast the fused-bias probe produced NaN).
+        return output.to(original_dtype), combined
     if bias is not None:
         return (output.to(torch.float32) * combined + bias.to(torch.float32)).to(original_dtype)
+    if _BF16_DEQUANT:
+        return output.to(original_dtype) * combined.to(original_dtype)
     return (output.to(torch.float32) * combined).to(original_dtype)
 
 
@@ -388,7 +397,7 @@ def quant_module_mapping() -> dict[Any, Any]:
                 input_parallel = ql.copy_to_tensor_model_parallel_region(
                     input, process_group=self.tensor_parallel_group
                 )
-            fuse = (_FUSE_BIAS and self.bias is not None and not self.gather_output
+            fuse = (_FUSE_COL and self.bias is not None and not self.gather_output
                     and not getattr(self, "skip_bias_add", False))
             output_parallel = dynamic_fp8_linear(
                 self, input_parallel,
@@ -426,7 +435,7 @@ def quant_module_mapping() -> dict[Any, Any]:
                 )
             # Under TP each rank scales its own input slice: the partial products
             # are dequantized exactly before the all-reduce.
-            defer = (_FUSE_BIAS and self.reduce_output and not self.sequence_parallel_enabled
+            defer = (_FUSE_ROW and self.reduce_output and not self.sequence_parallel_enabled
                      and not getattr(self, "skip_bias_add", False)
                      and getattr(self, "input_scale", None) is not None)
             result = dynamic_fp8_linear(
