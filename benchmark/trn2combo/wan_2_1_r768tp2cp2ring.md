@@ -3,9 +3,9 @@
 **Status:** compiled  
 **Backend:** trainium  
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
-**Timestamp:** 2026-10-05 10:24 UTC
+**Timestamp:** 2026-10-05 12:26 UTC
 
-> Best-performing configuration: tp=4 + host VAE; tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline
+> Best-performing configuration: 512x768x9 (ring-conforming), tp=2 x cp=2 (ring) + host VAE; tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline
 
 ## Configuration
 
@@ -13,33 +13,39 @@
 |---|---|
 | model type | wan |
 | dtype | bf16 |
-| parallel | tp=4 cp=1 |
-| shape | {'height': 480, 'width': 832, 'num_frames': 9} |
+| parallel | tp=2 cp=2 ring |
+| shape | {'height': 512, 'width': 768, 'num_frames': 9} |
 | steps | 20 |
 
 ## End-to-end performance
 
 | phase | time |
 |---|---|
-| compile (AOT, one-time) | 6.08 s |
+| compile (AOT, one-time) | 6.7 min (402 s) |
 | **e2e generate — cold start** (page cache dropped) | **—** |
-| **e2e generate — warm cache** | **110.57 s** |
-| &nbsp;&nbsp;↳ of which weights load (from page cache) | 17.30 s |
+| **e2e generate — warm cache** | **91.92 s** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 22.09 s |
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 575.0 ms | 574.9 ms | 575.2 ms | 574.6 ms | 19 |
-| end-to-end (warm) | 110.57 s | 87.60 s | 2.6 min (158 s) | 86.00 s | 3 |
+| per denoise step (transformer fwd) | 447.3 ms | 447.2 ms | 447.4 ms | 446.7 ms | 19 |
+| end-to-end (warm) | 91.92 s | 90.30 s | 95.36 s | 90.10 s | 3 |
 
-**Throughput:** 1.739 DiT steps/s
+**Throughput:** 2.236 DiT steps/s
 
 ## Compile breakdown
 
-| component | build time |
-|---|---|
-| wall_total_s | 6.08 s |
+Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-save tail (not timed by a single log line).
+
+| component | module load | HLO gen | priority-HLO compile | all-HLO compile | other | **build total** |
+|---|---:|---:|---:|---:|---:|---:|
+| text_encoder_t5 | 971.0 ms | 1.19 s | 10.47 s | 1.0 ms | 53.84 s | **66.47 s** |
+| transformer | 3.23 s | 23.70 s | 48.44 s | 3.0 ms | 4.2 min (253 s) | **5.5 min (328 s)** |
+| **Σ component builds** | | | | | | **6.6 min (395 s)** |
+
+> The headline **compile = 6.7 min (402 s)** is the full `difflet compile` wall; the **Σ component builds = 6.6 min (395 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
 
 ## Toolchain
 
@@ -51,9 +57,9 @@
 
 ## Notes
 
-- per-step = 575.0 ms/DiT-step (median 574.9, p90 575.2, n=19) — measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 36s; output finite=True.
+- per-step = 447.3 ms/DiT-step (median 447.2, p90 447.4, n=19) — measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 37s; output finite=True.
 - compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop
-- e2e_warm = 111 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
+- e2e_warm = 92 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
 
 ## Reproduction
 
@@ -65,32 +71,32 @@ Exact test conditions. The **model + config rows are hardware-agnostic** — an 
 | HF revision (pinned) | `38ec498cb3208fb688890f8cc7e94ede2cbd7f68` |
 | model type | wan |
 | dtype | bf16 |
-| parallel | tp=4, cp=1 |
-| shape (H×W×F) | 480×832×9 |
+| parallel | tp=2, cp=2 ring |
+| shape (H×W×F) | 512×768×9 |
 | steps | 20 |
 | guidance scale | 1.0 |
 | seed | 42 |
 | prompt | "a cinematic shot of a red fox running through a snowy forest" |
-| best-perf knobs | tp=4 + host VAE; tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline |
+| best-perf knobs | 512x768x9 (ring-conforming), tp=2 x cp=2 (ring) + host VAE; tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline |
 | measured on | trn2.3xlarge / 4 NeuronCores / 96 GB/device (device folder `trn2combo`) |
 
 ```bash
 # difflet (Neuron / trn2) — compile is one-time and cached (reused, never recompiled):
 difflet compile  --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68 \
-    --tp-degree 4 --cp-degree 1 --height 480 --width 832 --num-frames 9
+    --tp-degree 2 --cp-degree 2 --cp-mode ring --height 512 --width 768 --num-frames 9
 difflet generate --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68 \
-    --tp-degree 4 --cp-degree 1 --height 480 --width 832 --num-frames 9 \
+    --tp-degree 2 --cp-degree 2 --cp-mode ring --height 512 --width 768 --num-frames 9 \
     --steps 20 --guidance-scale 1.0 --seed 42 \
     --prompt "a cinematic shot of a red fox running through a snowy forest" --output out.mp4
 
 # benchmark harness on this device (writes benchmark/<device>/):
 DIFFLET_BENCH_DEVICE=trn2combo \
-    python -m benchmark.cold_warm_e2e --model wan_2_1 --config tp4hostvae    # true cold + warm e2e
+    python -m benchmark.cold_warm_e2e --model wan_2_1 --config r768tp2cp2ring    # true cold + warm e2e
 DIFFLET_BENCH_DEVICE=trn2combo \
-    python -m benchmark.step_latency  --model wan_2_1 --config tp4hostvae    # warm per-step
+    python -m benchmark.step_latency  --model wan_2_1 --config r768tp2cp2ring    # warm per-step
 
 # other backends (H100/B300) reproduce the SAME model+config via the generic runner:
-#   python -m benchmark.bench --backend cuda --model wan_2_1 --config tp4hostvae   # diffusers CUDA reference adapter
+#   python -m benchmark.bench --backend cuda --model wan_2_1 --config r768tp2cp2ring   # diffusers CUDA reference adapter
 ```
 
 **Measurement protocol** (so the numbers above are comparable across hardware):

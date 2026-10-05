@@ -24,14 +24,60 @@
   "load_seconds": null,
   "e2e_cold_seconds": null,
   "e2e_breakdown": null,
-  "e2e_warm": null,
-  "step_latency": null,
+  "e2e_warm": {
+    "n": 3,
+    "mean": 110.56896457798818,
+    "median": 87.60133779898752,
+    "std": 33.622662011078475,
+    "p50": 87.60133779898752,
+    "p90": 158.10955529398052,
+    "min": 85.9960006409965,
+    "max": 158.10955529398052,
+    "samples": [
+      158.10955529398052,
+      87.60133779898752,
+      85.9960006409965
+    ]
+  },
+  "step_latency": {
+    "n": 19,
+    "mean": 0.5750346697888361,
+    "median": 0.5748719830007758,
+    "std": 0.0005000194483886556,
+    "p50": 0.5748719830007758,
+    "p90": 0.5751860889722593,
+    "min": 0.5746461770031601,
+    "max": 0.5769525069918018,
+    "samples": [
+      0.5769525069918018,
+      0.575099311012309,
+      0.5755783490021713,
+      0.5746806410024874,
+      0.5751860889722593,
+      0.5746461770031601,
+      0.5746833410230465,
+      0.5748597399797291,
+      0.574804246018175,
+      0.5747816289949697,
+      0.5748069100081921,
+      0.5748280669795349,
+      0.5749639669957105,
+      0.5748719830007758,
+      0.5750486990145873,
+      0.5748007670044899,
+      0.5751187969872262,
+      0.5749157660175115,
+      0.5750317399797495
+    ]
+  },
   "step_basis": "",
   "step_latency_alt": {},
   "stage_seconds": {},
   "e2e_warm_natural": null,
   "step_latency_natural": null,
-  "throughput": {},
+  "throughput": {
+    "DiT steps/s": 1.739
+  },
   "peak_device_mem_gb": null,
   "output": null,
   "toolchain": {
@@ -44,7 +90,9 @@
   "config_label": "tp=4 + host VAE; tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline",
   "status": "compiled",
   "notes": [
-    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop"
+    "per-step = 575.0 ms/DiT-step (median 574.9, p90 575.2, n=19) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 36s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_warm = 111 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-10-05 10:24 UTC",
   "config_slug": "wan_2_1_tp4hostvae",
@@ -55,5 +103,25 @@
   "seed": 42,
   "prompt": "a cinematic shot of a red fox running through a snowy forest",
   "guidance_scale": 1.0,
-  "output_kind": "video"
+  "output_kind": "video",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "stage_0",
+        "load_s": 8.09
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 9.21
+      }
+    ],
+    "weights_load_total_s": 17.3,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 85.996,
+    "compute_and_overhead_s": 68.696
+  },
+  "dit_calls_per_step": 1.0,
+  "dit_calls": 20,
+  "loop_wall_s": 11.646,
+  "loop_step_ms": 582.3
 }
