@@ -1,0 +1,36 @@
+=== 18:13:58 pad512 --only both DIFFLET_WAN_PAD_TOKENS=512
+[screen] pad512: only=both switches: DIFFLET_WAN_PAD_TOKENS=512
+DIFFLET_WAN_PAD_TOKENS=512
+[probe:cpu] real weights: 69 HF tensors, missing 0, unexpected 0
+[probe:cpu] calibrated 20 target linears (static scales)
+[probe:cpu] tiny model + references written under /home/ubuntu/.claude/jobs/887aa970/tmp/screen/pad512
+[probe] bf16: {"arm": "bf16", "compiled": true, "loaded": true, "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'", "compile_seconds": 159.052, "load_seconds": 15.567, "forward_ms": {"n": 10, "mean": 42.73427739972249, "median": 42.712941500212764, "min": 42.65137200127356, "max": 42.862830001467955}, "output_nonfinite": 0}
+[probe] fp8: {"arm": "fp8", "compiled": true, "loaded": true, "quantize_seconds": 2.206, "quantized_checkpoint": "/home/ubuntu/.claude/jobs/887aa970/tmp/screen/pad512/cache/quantized/tiny_wan_transformer/transformer/fp8-tensor-static-ea6b8aa1", "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'", "compile_seconds": 131.055, "load_seconds": 7.279, "forward_ms": {"n": 10, "mean": 39.759151299949735, "median": 39.75530749994505, "min": 39.61619099936797, "max": 40.01925400007167}, "output_nonfinite": 0}
+[probe] report: /home/ubuntu/.claude/jobs/887aa970/tmp/screen/pad512/ptq_probe_report.json  passed=True
+[screen] probe exit 0, wall 373 s
+{"switches": "DIFFLET_WAN_PAD_TOKENS=512", "passed": true, "bf16": 42.73427739972249, "fp8": 39.759151299949735}
+=== 18:20:11 pad256 --only both DIFFLET_WAN_PAD_TOKENS=256
+[screen] pad256: only=both switches: DIFFLET_WAN_PAD_TOKENS=256
+DIFFLET_WAN_PAD_TOKENS=256
+[probe:cpu] real weights: 69 HF tensors, missing 0, unexpected 0
+[probe:cpu] calibrated 20 target linears (static scales)
+[probe:cpu] tiny model + references written under /home/ubuntu/.claude/jobs/887aa970/tmp/screen/pad256
+[probe] bf16: {"arm": "bf16", "compiled": true, "loaded": true, "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'", "compile_seconds": 156.977, "load_seconds": 18.128, "forward_ms": {"n": 10, "mean": 41.243118499915, "median": 41.244735999498516, "min": 41.057333000935614, "max": 41.37689799972577}, "output_nonfinite": 0}
+[probe] fp8: {"arm": "fp8", "compiled": true, "loaded": true, "quantize_seconds": 2.161, "quantized_checkpoint": "/home/ubuntu/.claude/jobs/887aa970/tmp/screen/pad256/cache/quantized/tiny_wan_transformer/transformer/fp8-tensor-static-dbdf673d", "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'", "compile_seconds": 125.219, "load_seconds": 6.491, "forward_ms": {"n": 10, "mean": 38.138097999944875, "median": 38.12807149915898, "min": 38.057773001128226, "max": 38.26907700022275}, "output_nonfinite": 0}
+[probe] report: /home/ubuntu/.claude/jobs/887aa970/tmp/screen/pad256/ptq_probe_report.json  passed=True
+[screen] probe exit 0, wall 364 s
+{"switches": "DIFFLET_WAN_PAD_TOKENS=256", "passed": true, "bf16": 41.243118499915, "fp8": 38.138097999944875}
+=== 18:26:15 best_a_pad512 --only both NEURON_RT_VIRTUAL_CORE_SIZE=2 DIFFLET_WAN_TENSORIZER_EXTRA=--vectorize-strided-dma DIFFLET_WAN_PAD_TOKENS=512
+[screen] best_a_pad512: only=both switches: NEURON_RT_VIRTUAL_CORE_SIZE=2 DIFFLET_WAN_TENSORIZER_EXTRA=--vectorize-strided-dma DIFFLET_WAN_PAD_TOKENS=512
+DIFFLET_WAN_PAD_TOKENS=512
+DIFFLET_WAN_TENSORIZER_EXTRA=--vectorize-strided-dma
+NEURON_RT_VIRTUAL_CORE_SIZE=2
+[probe:cpu] real weights: 69 HF tensors, missing 0, unexpected 0
+[probe:cpu] calibrated 20 target linears (static scales)
+[probe:cpu] tiny model + references written under /home/ubuntu/.claude/jobs/887aa970/tmp/screen/best_a_pad512
+[probe] bf16: {"arm": "bf16", "compiled": true, "loaded": true, "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap --vectorize-strided-dma' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'", "compile_seconds": 145.535, "load_seconds": 14.157, "forward_ms": {"n": 10, "mean": 36.600691100466065, "median": 36.607466500754526, "min": 36.435594000067795, "max": 36.73531500135141}, "output_nonfinite": 0}
+[probe] fp8: {"arm": "fp8", "compiled": true, "loaded": true, "quantize_seconds": 2.122, "quantized_checkpoint": "/home/ubuntu/.claude/jobs/887aa970/tmp/screen/best_a_pad512/cache/quantized/tiny_wan_transformer/transformer/fp8-tensor-static-5fb48236", "compiler_args": "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap --vectorize-strided-dma' --auto-cast=none --internal-hlo2tensorizer-options='--experimental-unsafe-fp8e4m3fn-as-fp8e4m3 --verify-hlo=true'", "compile_seconds": 117.755, "load_seconds": 5.696, "forward_ms": {"n": 10, "mean": 33.49989470025321, "median": 33.50063299967587, "min": 33.38471700044465, "max": 33.63894500034803}, "output_nonfinite": 0}
+[probe] report: /home/ubuntu/.claude/jobs/887aa970/tmp/screen/best_a_pad512/ptq_probe_report.json  passed=True
+[screen] probe exit 0, wall 341 s
+{"switches": "NEURON_RT_VIRTUAL_CORE_SIZE=2 DIFFLET_WAN_TENSORIZER_EXTRA=--vectorize-strided-dma DIFFLET_WAN_PAD_TOKENS=512", "passed": true, "bf16": 36.600691100466065, "fp8": 33.49989470025321}
+=== 18:31:56 queue2 done

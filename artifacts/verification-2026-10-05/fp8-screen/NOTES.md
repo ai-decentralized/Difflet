@@ -51,6 +51,18 @@ screen had a CPU job alongside and read ~2 ms higher on every arm).
 `DIFFLET_WAN_PAD_NOBOUNDS=1` (padded keys attended, wrong numerics): bf16 40.34 ms, fp8
 37.06 ms vs 40.72 / 37.46 with the bounds. The bounded attention path costs ~0.4 ms; the other
 ~5 ms is the padded shape itself: the compiler tiles 4736 rows (37 x 128) worse than 4680
-(12 x 390). So 128-alignment is the wrong target; `job_screen2.sh` tries 512 / 256 multiples
-(5120 = 10 x 512, +9.4 % tokens), the tile width the trace saw on the one layer pair that got
-the double-row 2x.
+(12 x 390).
+
+## pad 512 / 256 (`job_screen2.sh`, after the A/B)
+
+| config | rows | bf16 | fp8 | vs same levers unpadded |
+|---|---:|---:|---:|---:|
+| pad512 | 5120 (+9.4 %) | 42.73 | 39.76 | +20 % / +23 % |
+| pad256 | 4864 (+3.9 %) | 41.24 | 38.14 | +16 % / +18 % |
+| best_a + pad512 | 5120 | 36.60 | 33.50 | +21 % / +23 % |
+
+Every alignment is slower than the raw 4680-row shape, by far more than the extra tokens, and
+bf16 is penalised as much as fp8. Whatever makes 79 % of the fp8 dots single-row at 4680, the
+compiler's tiling of the padded shapes is worse still; the double-row hypothesis cannot be
+cashed in by padding the sequence. **E9 closed, negative.** The `DIFFLET_WAN_PAD_TOKENS` switch
+stays as an off-by-default experiment (correct numerics, cosine 0.9997 vs CPU).
