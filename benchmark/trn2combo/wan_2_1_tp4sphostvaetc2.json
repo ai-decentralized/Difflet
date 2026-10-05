@@ -144,5 +144,35 @@
   "dit_calls_per_step": 0.75,
   "dit_calls": 15,
   "loop_wall_s": 8.77,
-  "loop_step_ms": 438.5
+  "loop_step_ms": 438.5,
+  "quality_holdout": {
+    "tp4hostvae": {
+      "ref": "tp4hostvae",
+      "prompts": 4,
+      "psnr_db": [
+        34.94,
+        35.09,
+        33.91,
+        33.79
+      ],
+      "mean_psnr_db": 34.43,
+      "min_psnr_db": 33.79,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    },
+    "tp4sphostvae": {
+      "ref": "tp4sphostvae",
+      "prompts": 4,
+      "psnr_db": [
+        34.76,
+        35.06,
+        34.03,
+        33.65
+      ],
+      "mean_psnr_db": 34.38,
+      "min_psnr_db": 33.65,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    }
+  }
 }

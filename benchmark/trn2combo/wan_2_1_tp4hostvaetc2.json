@@ -144,5 +144,21 @@
   "dit_calls_per_step": 0.75,
   "dit_calls": 15,
   "loop_wall_s": 8.796,
-  "loop_step_ms": 439.8
+  "loop_step_ms": 439.8,
+  "quality_holdout": {
+    "tp4hostvae": {
+      "ref": "tp4hostvae",
+      "prompts": 4,
+      "psnr_db": [
+        34.37,
+        35.22,
+        33.91,
+        34.38
+      ],
+      "mean_psnr_db": 34.47,
+      "min_psnr_db": 33.91,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    }
+  }
 }
