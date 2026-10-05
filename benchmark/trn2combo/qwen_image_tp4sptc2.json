@@ -25,18 +25,20 @@
   "e2e_cold_seconds": null,
   "e2e_breakdown": null,
   "e2e_warm": {
-    "n": 3,
-    "mean": 81.93807082799806,
-    "median": 63.36042382600135,
-    "std": 27.237325010354372,
-    "p50": 63.36042382600135,
-    "p90": 120.44950688300014,
-    "min": 62.004281774992705,
-    "max": 120.44950688300014,
+    "n": 5,
+    "mean": 62.97296545559948,
+    "median": 62.85992153399275,
+    "std": 0.9205623799450106,
+    "p50": 62.85992153399275,
+    "p90": 64.50385340499633,
+    "min": 62.04921079000633,
+    "max": 64.50385340499633,
     "samples": [
-      120.44950688300014,
-      62.004281774992705,
-      63.36042382600135
+      62.04921079000633,
+      64.50385340499633,
+      62.05309323199617,
+      62.85992153399275,
+      63.39874831700581
     ]
   },
   "step_latency": {
@@ -87,7 +89,7 @@
   "notes": [
     "per-step = 365.0 ms/DiT-step (median 364.7, p90 365.3, n=14) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronQwenImageTransformerApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 15 DiT calls timed; warm generate 26s; output finite=True.",
     "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
-    "e2e_warm = 82 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+    "e2e_warm = 63 s (n=5; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-10-04 23:38 UTC",
   "config_slug": "qwen_image_tp4sptc2",
@@ -129,24 +131,54 @@
     "stages": [
       {
         "stage": "text_encoder",
-        "load_s": 10.187
+        "load_s": 10.769
       },
       {
         "stage": "transformer (denoise loop)",
-        "load_s": 17.56
+        "load_s": 16.19
       },
       {
         "stage": "vae_decoder",
-        "load_s": 8.47
+        "load_s": 9.19
       }
     ],
-    "weights_load_total_s": 36.217,
+    "weights_load_total_s": 36.149,
     "weights_shard_total_s": 0.0,
-    "wall_total_s": 63.36,
-    "compute_and_overhead_s": 27.143
+    "wall_total_s": 63.399,
+    "compute_and_overhead_s": 27.25
   },
   "dit_calls_per_step": 0.75,
   "dit_calls": 15,
   "loop_wall_s": 6.044,
-  "loop_step_ms": 302.2
+  "loop_step_ms": 302.2,
+  "quality_holdout": {
+    "tp4": {
+      "ref": "tp4",
+      "prompts": 4,
+      "psnr_db": [
+        43.28,
+        44.03,
+        36.22,
+        42.02
+      ],
+      "mean_psnr_db": 41.39,
+      "min_psnr_db": 36.22,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    },
+    "tp4sp": {
+      "ref": "tp4sp",
+      "prompts": 4,
+      "psnr_db": [
+        43.95,
+        44.16,
+        32.79,
+        43.64
+      ],
+      "mean_psnr_db": 41.13,
+      "min_psnr_db": 32.79,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    }
+  }
 }
