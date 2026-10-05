@@ -222,8 +222,9 @@ def test_probe_free_teacache_kwargs_do_not_change_ltx2_cache_key():
     cadence = spec({"enable_host_pipeline": True, "enable_decode_components": True,
                     "teacache_cadence": 2, "teacache_online_delta_alpha": 0.6})
     assert cache_key(plain) == cache_key(cadence) == cache_key(spec(None))
-    # the calibrated-adaptive calibration path is runtime-only too (no probe
-    # NEFF for LTX-2): the warm tp4 artifact must hit with --teacache-speedup
+    # The calibration path itself is excluded at the CacheSpec layer; the probe
+    # identity of a calibrated-adaptive request is added one layer up, by
+    # DiffletPipeline's _cache_application_kwargs (see the probe-artifact test).
     adaptive = spec({"enable_host_pipeline": True, "enable_decode_components": True,
                      "teacache_calibration_path": "/c.json"})
     assert cache_key(plain) == cache_key(adaptive)
@@ -268,3 +269,48 @@ def test_load_pipeline_validates_the_calibration_like_the_probe_pipelines(
     with pytest.raises(ValueError, match=bad["match"]):
         _load_pipeline_kwargs(monkeypatch, teacache_speedup=bad["speedup"],
                               teacache_calibration=calib)
+
+
+# --------------------------------------------- calibrated-adaptive probe artifact
+
+def test_adaptive_compile_builds_the_probe_artifact_the_load_resolves(monkeypatch, tmp_path):
+    # Since 0f9ef0f the LTX-2 application builds the fused block-0 probe NEFF for
+    # an adaptive calibration and DiffletPipeline keys it (calibrated_probe).
+    # Before the fix compile() never passed the calibration, so the probe
+    # artifact was never built and every --teacache-speedup generate failed at
+    # load on trn2.3xlarge (2026-10-05): ~/.cache/difflet/ltx_2/77eb732b1ad71d99/
+    # transformer/model.pt does not exist.
+    from difflet.pipeline.difflet_pipeline import _cache_application_kwargs
+
+    calib = _write_ltx2_calibration(tmp_path / "ltx2.json")
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **kw: "/fake/path")
+    compiled = {}
+    monkeypatch.setattr(
+        "difflet.pipeline.difflet_pipeline.DiffletPipeline.precompile",
+        classmethod(lambda cls, *a, **kw: compiled.update(kw) or object()),
+    )
+    LTX2Orchestrator(_ltx2_args(teacache_speedup=1.5, teacache_calibration=calib)).compile()
+    assert compiled["application_kwargs"] == {"teacache_calibration_path": calib}
+    # the pipeline-level identity of that request carries the probe ...
+    assert _cache_application_kwargs(compiled["application_kwargs"], model_name="ltx_2") == \
+        {"teacache_probe_enabled": True}
+    # ... and the load resolves the same calibration
+    kw = _load_pipeline_kwargs(monkeypatch, teacache_speedup=1.5, teacache_calibration=calib)
+    assert kw["application_kwargs"]["teacache_calibration_path"] == calib
+
+
+def test_plain_and_probe_free_compiles_keep_the_tp4_identity(monkeypatch):
+    from difflet.pipeline.difflet_pipeline import _cache_application_kwargs
+
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **kw: "/fake/path")
+    for overrides in ({}, {"teacache_cadence": 2}, {"teacache_online_delta": 0.6}):
+        compiled = {}
+        monkeypatch.setattr(
+            "difflet.pipeline.difflet_pipeline.DiffletPipeline.precompile",
+            classmethod(lambda cls, *a, **kw: compiled.update(kw) or object()),
+        )
+        LTX2Orchestrator(_ltx2_args(**overrides)).compile()
+        assert "application_kwargs" not in compiled
+    assert _cache_application_kwargs({}, model_name="ltx_2") is None
