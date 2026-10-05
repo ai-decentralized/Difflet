@@ -1,45 +1,40 @@
-# Benchmark — hunyuanvideo-community/HunyuanVideo
+# Benchmark — Wan-AI/Wan2.1-T2V-14B-Diffusers
 
 **Status:** compiled  
 **Backend:** trainium  
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
-**Timestamp:** 2026-10-05 03:54 UTC
+**Timestamp:** 2026-10-05 10:24 UTC
 
-> Best-performing configuration: tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.1; alpha sweep); tp=4, bf16, attention_cte
+> Best-performing configuration: tp=4 + host VAE; tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline
 
 ## Configuration
 
 | key | value |
 |---|---|
-| model type | hunyuan_video |
+| model type | wan |
 | dtype | bf16 |
 | parallel | tp=4 cp=1 |
-| shape | {'height': 320, 'width': 512, 'num_frames': 61} |
+| shape | {'height': 480, 'width': 832, 'num_frames': 9} |
 | steps | 20 |
 
 ## End-to-end performance
 
 | phase | time |
 |---|---|
-| compile (AOT, one-time) | 17.00 s |
+| compile (AOT, one-time) | 6.08 s |
 | **e2e generate — cold start** (page cache dropped) | **—** |
-| **e2e generate — warm cache** | **111.52 s** |
-| &nbsp;&nbsp;↳ of which weights load (from page cache) | 57.06 s |
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 812.9 ms | 812.6 ms | 813.3 ms | 812.1 ms | 16 |
-| end-to-end (warm) | 111.52 s | 111.61 s | 113.61 s | 108.69 s | 5 |
-
-**Throughput:** 1.230 DiT steps/s
+| per denoise step (transformer fwd) | — | — | — | — | — |
 
 ## Compile breakdown
 
 | component | build time |
 |---|---|
-| wall_total_s | 17.00 s |
+| wall_total_s | 6.08 s |
 
 ## Toolchain
 
@@ -51,9 +46,7 @@
 
 ## Notes
 
-- per-step = 812.9 ms/DiT-step (median 812.6, p90 813.3, n=16) — measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronHunyuanVideoBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 17 DiT calls timed; warm generate 83s; output finite=True.
 - compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop
-- e2e_warm = 112 s (n=5; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
 
 ## Reproduction
 
@@ -61,36 +54,36 @@ Exact test conditions. The **model + config rows are hardware-agnostic** — an 
 
 | key | value |
 |---|---|
-| model id | `hunyuanvideo-community/HunyuanVideo` |
-| HF revision (pinned) | `e8c2aaa66fe3742a32c11a6766aecbf07c56e773` |
-| model type | hunyuan_video |
+| model id | `Wan-AI/Wan2.1-T2V-14B-Diffusers` |
+| HF revision (pinned) | `38ec498cb3208fb688890f8cc7e94ede2cbd7f68` |
+| model type | wan |
 | dtype | bf16 |
 | parallel | tp=4, cp=1 |
-| shape (H×W×F) | 320×512×61 |
+| shape (H×W×F) | 480×832×9 |
 | steps | 20 |
-| guidance scale | 6.0 |
+| guidance scale | 1.0 |
 | seed | 42 |
 | prompt | "a cinematic shot of a red fox running through a snowy forest" |
-| best-perf knobs | tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.1; alpha sweep); tp=4, bf16, attention_cte |
+| best-perf knobs | tp=4 + host VAE; tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage (transformer + VAE) subprocess pipeline |
 | measured on | trn2.3xlarge / 4 NeuronCores / 96 GB/device (device folder `trn2combo`) |
 
 ```bash
 # difflet (Neuron / trn2) — compile is one-time and cached (reused, never recompiled):
-difflet compile  --model-id hunyuanvideo-community/HunyuanVideo --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773 \
-    --tp-degree 4 --cp-degree 1 --height 320 --width 512 --num-frames 61
-difflet generate --model-id hunyuanvideo-community/HunyuanVideo --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773 \
-    --tp-degree 4 --cp-degree 1 --height 320 --width 512 --num-frames 61 \
-    --steps 20 --guidance-scale 6.0 --seed 42 --teacache-online-delta 0.1 \
+difflet compile  --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68 \
+    --tp-degree 4 --cp-degree 1 --height 480 --width 832 --num-frames 9
+difflet generate --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68 \
+    --tp-degree 4 --cp-degree 1 --height 480 --width 832 --num-frames 9 \
+    --steps 20 --guidance-scale 1.0 --seed 42 \
     --prompt "a cinematic shot of a red fox running through a snowy forest" --output out.mp4
 
 # benchmark harness on this device (writes benchmark/<device>/):
 DIFFLET_BENCH_DEVICE=trn2combo \
-    python -m benchmark.cold_warm_e2e --model hunyuan_video --config tp4tcod01    # true cold + warm e2e
+    python -m benchmark.cold_warm_e2e --model wan_2_1 --config tp4hostvae    # true cold + warm e2e
 DIFFLET_BENCH_DEVICE=trn2combo \
-    python -m benchmark.step_latency  --model hunyuan_video --config tp4tcod01    # warm per-step
+    python -m benchmark.step_latency  --model wan_2_1 --config tp4hostvae    # warm per-step
 
 # other backends (H100/B300) reproduce the SAME model+config via the generic runner:
-#   python -m benchmark.bench --backend cuda --model hunyuan_video --config tp4tcod01   # diffusers CUDA reference adapter
+#   python -m benchmark.bench --backend cuda --model wan_2_1 --config tp4hostvae   # diffusers CUDA reference adapter
 ```
 
 **Measurement protocol** (so the numbers above are comparable across hardware):

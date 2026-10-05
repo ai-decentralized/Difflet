@@ -24,14 +24,59 @@
   "load_seconds": null,
   "e2e_cold_seconds": null,
   "e2e_breakdown": null,
-  "e2e_warm": null,
-  "step_latency": null,
+  "e2e_warm": {
+    "n": 5,
+    "mean": 109.53937710738974,
+    "median": 109.34995250197244,
+    "std": 0.5622166108752549,
+    "p50": 109.34995250197244,
+    "p90": 110.41549505799776,
+    "min": 108.92512146598892,
+    "max": 110.41549505799776,
+    "samples": [
+      108.92512146598892,
+      109.94871388599859,
+      109.34995250197244,
+      109.05760262499098,
+      110.41549505799776
+    ]
+  },
+  "step_latency": {
+    "n": 16,
+    "mean": 0.7887584176241944,
+    "median": 0.7883716850046767,
+    "std": 0.0011833346492217856,
+    "p50": 0.7883886859926861,
+    "p90": 0.7904394429933745,
+    "min": 0.7878439780033659,
+    "max": 0.7927351559919771,
+    "samples": [
+      0.7927351559919771,
+      0.7904394429933745,
+      0.7888610509980936,
+      0.7880491010146216,
+      0.788139981974382,
+      0.7880033290130086,
+      0.7886277140059974,
+      0.7880937269947026,
+      0.7886838380072732,
+      0.7878439780033659,
+      0.7886770269833505,
+      0.7888610569934826,
+      0.7883546840166673,
+      0.7883886859926861,
+      0.7880664269905537,
+      0.7883094820135739
+    ]
+  },
   "step_basis": "",
   "step_latency_alt": {},
   "stage_seconds": {},
   "e2e_warm_natural": null,
   "step_latency_natural": null,
-  "throughput": {},
+  "throughput": {
+    "DiT steps/s": 1.268
+  },
   "peak_device_mem_gb": null,
   "output": null,
   "toolchain": {
@@ -44,7 +89,9 @@
   "config_label": "tp=4 + sequence parallel + TeaCache online-delta 0.1; tp=4, bf16, attention_cte",
   "status": "compiled",
   "notes": [
-    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop"
+    "per-step = 788.8 ms/DiT-step (median 788.4, p90 790.4, n=16) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronHunyuanVideoBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 17 DiT calls timed; warm generate 81s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_warm = 110 s (n=5; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-10-05 07:34 UTC",
   "config_slug": "hunyuan_video_tp4sptcod01",
@@ -61,6 +108,133 @@
     "cadence": null,
     "online_delta_alpha": 0.1,
     "warmup_steps": 5,
-    "cooldown_steps": 5
+    "cooldown_steps": 5,
+    "dit_calls": 17,
+    "skipped_steps_by_calls": 3,
+    "stats": {
+      "full_steps": 17,
+      "skipped_steps": 3,
+      "probe_calls": 0,
+      "last_delta_estimate": 0.033203125,
+      "cache_initialized": true,
+      "online_delta_alpha": 0.1,
+      "baseline_delta": 0.384766,
+      "skipped_step_indices": [
+        9,
+        12,
+        14
+      ],
+      "delta_trace": [
+        [
+          1,
+          0.384766
+        ],
+        [
+          2,
+          0.204102
+        ],
+        [
+          3,
+          0.088867
+        ],
+        [
+          4,
+          0.109863
+        ],
+        [
+          5,
+          0.10498
+        ],
+        [
+          6,
+          0.068359
+        ],
+        [
+          7,
+          0.051025
+        ],
+        [
+          8,
+          0.03833
+        ],
+        [
+          10,
+          0.048828
+        ],
+        [
+          11,
+          0.024902
+        ],
+        [
+          13,
+          0.033203
+        ],
+        [
+          15,
+          0.042236
+        ],
+        [
+          16,
+          0.026367
+        ],
+        [
+          17,
+          0.032227
+        ],
+        [
+          18,
+          0.045166
+        ],
+        [
+          19,
+          0.084961
+        ]
+      ]
+    }
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder_clip",
+        "load_s": 5.95
+      },
+      {
+        "stage": "text_encoder",
+        "load_s": 10.395
+      },
+      {
+        "stage": "stage_2",
+        "load_s": 28.54
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 11.01
+      }
+    ],
+    "weights_load_total_s": 55.895,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 110.415,
+    "compute_and_overhead_s": 54.52,
+    "note": "VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode."
+  },
+  "dit_calls_per_step": 0.85,
+  "dit_calls": 17,
+  "loop_wall_s": 13.663,
+  "loop_step_ms": 683.1,
+  "quality_holdout": {
+    "tp4sp": {
+      "ref": "tp4sp",
+      "prompts": 4,
+      "psnr_db": [
+        36.43,
+        39.71,
+        40.61,
+        32.85
+      ],
+      "mean_psnr_db": 37.4,
+      "min_psnr_db": 32.85,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    }
   }
 }

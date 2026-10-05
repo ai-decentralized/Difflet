@@ -25,18 +25,20 @@
   "e2e_cold_seconds": null,
   "e2e_breakdown": null,
   "e2e_warm": {
-    "n": 3,
-    "mean": 110.9233974639986,
-    "median": 111.10151366199716,
-    "std": 1.9300528218454578,
-    "p50": 111.10151366199716,
-    "p90": 113.19312333299604,
-    "min": 108.47555539700261,
-    "max": 113.19312333299604,
+    "n": 5,
+    "mean": 111.52305856520543,
+    "median": 111.60824005299946,
+    "std": 1.7631788547809593,
+    "p50": 111.60824005299946,
+    "p90": 113.60897137998836,
+    "min": 108.6860332180222,
+    "max": 113.60897137998836,
     "samples": [
-      111.10151366199716,
-      113.19312333299604,
-      108.47555539700261
+      113.06334867401165,
+      108.6860332180222,
+      110.64869950100547,
+      113.60897137998836,
+      111.60824005299946
     ]
   },
   "step_latency": {
@@ -89,7 +91,7 @@
   "notes": [
     "per-step = 812.9 ms/DiT-step (median 812.6, p90 813.3, n=16) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronHunyuanVideoBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 17 DiT calls timed; warm generate 83s; output finite=True.",
     "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
-    "e2e_warm = 111 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+    "e2e_warm = 112 s (n=5; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-10-05 03:54 UTC",
   "config_slug": "hunyuan_video_tp4tcod01",
@@ -194,29 +196,45 @@
     "stages": [
       {
         "stage": "text_encoder_clip",
-        "load_s": 4.58
+        "load_s": 5.72
       },
       {
         "stage": "text_encoder",
-        "load_s": 9.788
+        "load_s": 11.15
       },
       {
         "stage": "stage_2",
-        "load_s": 28.71
+        "load_s": 29.23
       },
       {
         "stage": "vae_decoder",
-        "load_s": 11.22
+        "load_s": 10.96
       }
     ],
-    "weights_load_total_s": 54.298,
+    "weights_load_total_s": 57.06,
     "weights_shard_total_s": 0.0,
-    "wall_total_s": 108.476,
-    "compute_and_overhead_s": 54.178,
+    "wall_total_s": 111.608,
+    "compute_and_overhead_s": 54.548,
     "note": "VAE decode runs on the host (no Neuron load line); the residual is CLIP+Llama encode + denoise loop + host VAE decode."
   },
   "dit_calls_per_step": 0.85,
   "dit_calls": 17,
   "loop_wall_s": 14.049,
-  "loop_step_ms": 702.5
+  "loop_step_ms": 702.5,
+  "quality_holdout": {
+    "tp4": {
+      "ref": "tp4",
+      "prompts": 4,
+      "psnr_db": [
+        37.12,
+        40.21,
+        41.22,
+        33.25
+      ],
+      "mean_psnr_db": 37.95,
+      "min_psnr_db": 33.25,
+      "seed": 42,
+      "source": "benchmark.combo_quality, holdout split of m9_teacache_prompts.tsv"
+    }
+  }
 }

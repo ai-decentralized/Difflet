@@ -3,9 +3,9 @@
 **Status:** compiled  
 **Backend:** trainium  
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
-**Timestamp:** 2026-10-05 04:23 UTC
+**Timestamp:** 2026-10-05 08:42 UTC
 
-> Best-performing configuration: tp=4 + sequence parallel; tp=4, bf16, attention_cte
+> Best-performing configuration: tp=4 + TeaCache calibrated adaptive, 7-skip budget; tp=4, bf16, attention_cte
 
 ## Configuration
 
@@ -13,7 +13,7 @@
 |---|---|
 | model type | hunyuan_video |
 | dtype | bf16 |
-| parallel | tp=4 cp=1 sp |
+| parallel | tp=4 cp=1 |
 | shape | {'height': 320, 'width': 512, 'num_frames': 61} |
 | steps | 20 |
 
@@ -21,31 +21,25 @@
 
 | phase | time |
 |---|---|
-| compile (AOT, one-time) | 75.7 min (4543 s) |
+| compile (AOT, one-time) | 18.41 s |
 | **e2e generate — cold start** (page cache dropped) | **—** |
-| **e2e generate — warm cache** | **112.91 s** |
-| &nbsp;&nbsp;↳ of which weights load (from page cache) | 55.21 s |
+| **e2e generate — warm cache** | **107.62 s** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 56.87 s |
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | 787.9 ms | 787.7 ms | 787.8 ms | 787.4 ms | 19 |
-| end-to-end (warm) | 112.91 s | 113.06 s | 114.46 s | 111.30 s | 5 |
+| per denoise step (transformer fwd) | 874.5 ms | 856.6 ms | 922.8 ms | 845.6 ms | 12 |
+| end-to-end (warm) | 107.62 s | 107.31 s | 108.59 s | 106.95 s | 3 |
 
-**Throughput:** 1.269 DiT steps/s
+**Throughput:** 1.144 DiT steps/s
 
 ## Compile breakdown
 
-Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-save tail (not timed by a single log line).
-
-| component | module load | HLO gen | priority-HLO compile | all-HLO compile | other | **build total** |
-|---|---:|---:|---:|---:|---:|---:|
-| transformer | 16.64 s | 82.52 s | 3.6 min (216 s) | 4.0 ms | 2.2 min (132 s) | **7.5 min (447 s)** |
-| vae_decoder | 2.53 s | 1.38 s | 60.9 min (3654 s) | 1.0 ms | 100.84 s | **62.6 min (3759 s)** |
-| **Σ component builds** | | | | | | **70.1 min (4206 s)** |
-
-> The headline **compile = 75.7 min (4543 s)** is the full `difflet compile` wall; the **Σ component builds = 70.1 min (4206 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
+| component | build time |
+|---|---|
+| wall_total_s | 18.41 s |
 
 ## Toolchain
 
@@ -57,9 +51,9 @@ Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-
 
 ## Notes
 
-- per-step = 787.9 ms/DiT-step (median 787.7, p90 787.8, n=19) — measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronHunyuanVideoBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 86s; output finite=True.
+- per-step = 874.5 ms/DiT-step (median 856.6, p90 922.8, n=12) — measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronHunyuanVideoBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 13 DiT calls timed; warm generate 82s; output finite=True.
 - compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop
-- e2e_warm = 113 s (n=5; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
+- e2e_warm = 108 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
 
 ## Reproduction
 
@@ -71,32 +65,32 @@ Exact test conditions. The **model + config rows are hardware-agnostic** — an 
 | HF revision (pinned) | `e8c2aaa66fe3742a32c11a6766aecbf07c56e773` |
 | model type | hunyuan_video |
 | dtype | bf16 |
-| parallel | tp=4, cp=1 sp |
+| parallel | tp=4, cp=1 |
 | shape (H×W×F) | 320×512×61 |
 | steps | 20 |
 | guidance scale | 6.0 |
 | seed | 42 |
 | prompt | "a cinematic shot of a red fox running through a snowy forest" |
-| best-perf knobs | tp=4 + sequence parallel; tp=4, bf16, attention_cte |
+| best-perf knobs | tp=4 + TeaCache calibrated adaptive, 7-skip budget; tp=4, bf16, attention_cte |
 | measured on | trn2.3xlarge / 4 NeuronCores / 96 GB/device (device folder `trn2combo`) |
 
 ```bash
 # difflet (Neuron / trn2) — compile is one-time and cached (reused, never recompiled):
 difflet compile  --model-id hunyuanvideo-community/HunyuanVideo --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773 \
-    --tp-degree 4 --cp-degree 1 --sp --height 320 --width 512 --num-frames 61
+    --tp-degree 4 --cp-degree 1 --height 320 --width 512 --num-frames 61
 difflet generate --model-id hunyuanvideo-community/HunyuanVideo --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773 \
-    --tp-degree 4 --cp-degree 1 --sp --height 320 --width 512 --num-frames 61 \
-    --steps 20 --guidance-scale 6.0 --seed 42 \
+    --tp-degree 4 --cp-degree 1 --height 320 --width 512 --num-frames 61 \
+    --steps 20 --guidance-scale 6.0 --seed 42 --teacache-speedup 1.538 --teacache-calibration /home/ubuntu/Difflet/.claude/worktrees/flux-best-combo/benchmark/trn2combo/teacache_calib/hunyuan_video_tp4tcad_s7.json \
     --prompt "a cinematic shot of a red fox running through a snowy forest" --output out.mp4
 
 # benchmark harness on this device (writes benchmark/<device>/):
 DIFFLET_BENCH_DEVICE=trn2combo \
-    python -m benchmark.cold_warm_e2e --model hunyuan_video --config tp4sp    # true cold + warm e2e
+    python -m benchmark.cold_warm_e2e --model hunyuan_video --config tp4tcad7    # true cold + warm e2e
 DIFFLET_BENCH_DEVICE=trn2combo \
-    python -m benchmark.step_latency  --model hunyuan_video --config tp4sp    # warm per-step
+    python -m benchmark.step_latency  --model hunyuan_video --config tp4tcad7    # warm per-step
 
 # other backends (H100/B300) reproduce the SAME model+config via the generic runner:
-#   python -m benchmark.bench --backend cuda --model hunyuan_video --config tp4sp   # diffusers CUDA reference adapter
+#   python -m benchmark.bench --backend cuda --model hunyuan_video --config tp4tcad7   # diffusers CUDA reference adapter
 ```
 
 **Measurement protocol** (so the numbers above are comparable across hardware):

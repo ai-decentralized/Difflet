@@ -1,0 +1,867 @@
+{
+  "schema": "difflet-bench-teacache-pairs-v1",
+  "model": "hunyuan_video",
+  "slug": "hunyuan_video",
+  "shape_label": "320x512x61",
+  "num_steps": 20,
+  "signal_source": "probe NEFF (teacache_mod_input_with_delta): on-device L2 norm of the block-0 modulated-input change vs the previous step (not rel-L1 -- the fit absorbs the scale)",
+  "delta": "rel-L1 of the noise prediction vs the previous full step",
+  "trajectories": [
+    {
+      "prompt_index": 0,
+      "prompt": "a cat sitting on a bench in a sunlit park",
+      "seed": 42,
+      "recorded_at": "2026-10-05T08:17:33Z",
+      "load_s": 34.4,
+      "generate_s": 446.0,
+      "output_finite": true,
+      "n_pairs": 19,
+      "trajectory": [
+        {
+          "step": 1,
+          "signal": 984.0,
+          "delta": 0.4381144046783447
+        },
+        {
+          "step": 2,
+          "signal": 470.0,
+          "delta": 0.19858330488204956
+        },
+        {
+          "step": 3,
+          "signal": 272.0,
+          "delta": 0.09207727015018463
+        },
+        {
+          "step": 4,
+          "signal": 328.0,
+          "delta": 0.052482638508081436
+        },
+        {
+          "step": 5,
+          "signal": 172.0,
+          "delta": 0.04701898247003555
+        },
+        {
+          "step": 6,
+          "signal": 213.0,
+          "delta": 0.030179232358932495
+        },
+        {
+          "step": 7,
+          "signal": 219.0,
+          "delta": 0.03740102797746658
+        },
+        {
+          "step": 8,
+          "signal": 190.0,
+          "delta": 0.04911981150507927
+        },
+        {
+          "step": 9,
+          "signal": 202.0,
+          "delta": 0.04177511855959892
+        },
+        {
+          "step": 10,
+          "signal": 190.0,
+          "delta": 0.023849479854106903
+        },
+        {
+          "step": 11,
+          "signal": 224.0,
+          "delta": 0.019633371382951736
+        },
+        {
+          "step": 12,
+          "signal": 228.0,
+          "delta": 0.019098641350865364
+        },
+        {
+          "step": 13,
+          "signal": 243.0,
+          "delta": 0.018986575305461884
+        },
+        {
+          "step": 14,
+          "signal": 294.0,
+          "delta": 0.019242318347096443
+        },
+        {
+          "step": 15,
+          "signal": 340.0,
+          "delta": 0.022007334977388382
+        },
+        {
+          "step": 16,
+          "signal": 440.0,
+          "delta": 0.025417564436793327
+        },
+        {
+          "step": 17,
+          "signal": 532.0,
+          "delta": 0.03056415356695652
+        },
+        {
+          "step": 18,
+          "signal": 608.0,
+          "delta": 0.04270439222455025
+        },
+        {
+          "step": 19,
+          "signal": 704.0,
+          "delta": 0.07517462968826294
+        }
+      ]
+    },
+    {
+      "prompt_index": 1,
+      "prompt": "a red vintage car parked outside a diner at dusk",
+      "seed": 42,
+      "recorded_at": "2026-10-05T08:19:46Z",
+      "load_s": 39.7,
+      "generate_s": 88.3,
+      "output_finite": true,
+      "n_pairs": 19,
+      "trajectory": [
+        {
+          "step": 1,
+          "signal": 968.0,
+          "delta": 0.2417389303445816
+        },
+        {
+          "step": 2,
+          "signal": 470.0,
+          "delta": 0.13010893762111664
+        },
+        {
+          "step": 3,
+          "signal": 268.0,
+          "delta": 0.08725399523973465
+        },
+        {
+          "step": 4,
+          "signal": 334.0,
+          "delta": 0.10280685126781464
+        },
+        {
+          "step": 5,
+          "signal": 185.0,
+          "delta": 0.06812281906604767
+        },
+        {
+          "step": 6,
+          "signal": 214.0,
+          "delta": 0.037865057587623596
+        },
+        {
+          "step": 7,
+          "signal": 229.0,
+          "delta": 0.031053533777594566
+        },
+        {
+          "step": 8,
+          "signal": 201.0,
+          "delta": 0.022030062973499298
+        },
+        {
+          "step": 9,
+          "signal": 204.0,
+          "delta": 0.027150996029376984
+        },
+        {
+          "step": 10,
+          "signal": 209.0,
+          "delta": 0.021459287032485008
+        },
+        {
+          "step": 11,
+          "signal": 234.0,
+          "delta": 0.01884039118885994
+        },
+        {
+          "step": 12,
+          "signal": 255.0,
+          "delta": 0.01761855185031891
+        },
+        {
+          "step": 13,
+          "signal": 282.0,
+          "delta": 0.01808233931660652
+        },
+        {
+          "step": 14,
+          "signal": 318.0,
+          "delta": 0.015657052397727966
+        },
+        {
+          "step": 15,
+          "signal": 374.0,
+          "delta": 0.016037236899137497
+        },
+        {
+          "step": 16,
+          "signal": 444.0,
+          "delta": 0.01679353229701519
+        },
+        {
+          "step": 17,
+          "signal": 490.0,
+          "delta": 0.017069805413484573
+        },
+        {
+          "step": 18,
+          "signal": 516.0,
+          "delta": 0.024213522672653198
+        },
+        {
+          "step": 19,
+          "signal": 568.0,
+          "delta": 0.04609163850545883
+        }
+      ]
+    },
+    {
+      "prompt_index": 2,
+      "prompt": "an astronaut riding a horse across a desert plain",
+      "seed": 42,
+      "recorded_at": "2026-10-05T08:21:56Z",
+      "load_s": 38.0,
+      "generate_s": 88.5,
+      "output_finite": true,
+      "n_pairs": 19,
+      "trajectory": [
+        {
+          "step": 1,
+          "signal": 976.0,
+          "delta": 0.3916930556297302
+        },
+        {
+          "step": 2,
+          "signal": 474.0,
+          "delta": 0.12934575974941254
+        },
+        {
+          "step": 3,
+          "signal": 272.0,
+          "delta": 0.07791487127542496
+        },
+        {
+          "step": 4,
+          "signal": 338.0,
+          "delta": 0.09498784691095352
+        },
+        {
+          "step": 5,
+          "signal": 178.0,
+          "delta": 0.0805000439286232
+        },
+        {
+          "step": 6,
+          "signal": 213.0,
+          "delta": 0.027163084596395493
+        },
+        {
+          "step": 7,
+          "signal": 228.0,
+          "delta": 0.02146279811859131
+        },
+        {
+          "step": 8,
+          "signal": 195.0,
+          "delta": 0.012356880120933056
+        },
+        {
+          "step": 9,
+          "signal": 215.0,
+          "delta": 0.011811414733529091
+        },
+        {
+          "step": 10,
+          "signal": 199.0,
+          "delta": 0.010696162469685078
+        },
+        {
+          "step": 11,
+          "signal": 225.0,
+          "delta": 0.009663905017077923
+        },
+        {
+          "step": 12,
+          "signal": 245.0,
+          "delta": 0.009469978511333466
+        },
+        {
+          "step": 13,
+          "signal": 258.0,
+          "delta": 0.009123018011450768
+        },
+        {
+          "step": 14,
+          "signal": 314.0,
+          "delta": 0.009592759422957897
+        },
+        {
+          "step": 15,
+          "signal": 362.0,
+          "delta": 0.010248645208775997
+        },
+        {
+          "step": 16,
+          "signal": 458.0,
+          "delta": 0.011841373518109322
+        },
+        {
+          "step": 17,
+          "signal": 528.0,
+          "delta": 0.015678511932492256
+        },
+        {
+          "step": 18,
+          "signal": 580.0,
+          "delta": 0.021964285522699356
+        },
+        {
+          "step": 19,
+          "signal": 656.0,
+          "delta": 0.0425853468477726
+        }
+      ]
+    },
+    {
+      "prompt_index": 3,
+      "prompt": "a bowl of ramen with steam rising, studio lighting",
+      "seed": 42,
+      "recorded_at": "2026-10-05T08:24:07Z",
+      "load_s": 35.1,
+      "generate_s": 91.4,
+      "output_finite": true,
+      "n_pairs": 19,
+      "trajectory": [
+        {
+          "step": 1,
+          "signal": 976.0,
+          "delta": 0.4082074463367462
+        },
+        {
+          "step": 2,
+          "signal": 476.0,
+          "delta": 0.21633149683475494
+        },
+        {
+          "step": 3,
+          "signal": 274.0,
+          "delta": 0.07986196130514145
+        },
+        {
+          "step": 4,
+          "signal": 336.0,
+          "delta": 0.04824278503656387
+        },
+        {
+          "step": 5,
+          "signal": 183.0,
+          "delta": 0.03481176123023033
+        },
+        {
+          "step": 6,
+          "signal": 222.0,
+          "delta": 0.015597849152982235
+        },
+        {
+          "step": 7,
+          "signal": 231.0,
+          "delta": 0.01751231588423252
+        },
+        {
+          "step": 8,
+          "signal": 201.0,
+          "delta": 0.012880179099738598
+        },
+        {
+          "step": 9,
+          "signal": 221.0,
+          "delta": 0.013231364078819752
+        },
+        {
+          "step": 10,
+          "signal": 203.0,
+          "delta": 0.010739069432020187
+        },
+        {
+          "step": 11,
+          "signal": 247.0,
+          "delta": 0.00923908967524767
+        },
+        {
+          "step": 12,
+          "signal": 258.0,
+          "delta": 0.008586055599153042
+        },
+        {
+          "step": 13,
+          "signal": 276.0,
+          "delta": 0.008997124619781971
+        },
+        {
+          "step": 14,
+          "signal": 328.0,
+          "delta": 0.008972243405878544
+        },
+        {
+          "step": 15,
+          "signal": 366.0,
+          "delta": 0.010910320095717907
+        },
+        {
+          "step": 16,
+          "signal": 438.0,
+          "delta": 0.012105274014174938
+        },
+        {
+          "step": 17,
+          "signal": 490.0,
+          "delta": 0.014422413893043995
+        },
+        {
+          "step": 18,
+          "signal": 528.0,
+          "delta": 0.021095773205161095
+        },
+        {
+          "step": 19,
+          "signal": 596.0,
+          "delta": 0.04618213698267937
+        }
+      ]
+    },
+    {
+      "prompt_index": 4,
+      "prompt": "a lighthouse on a cliff during a thunderstorm",
+      "seed": 42,
+      "recorded_at": "2026-10-05T08:26:10Z",
+      "load_s": 33.2,
+      "generate_s": 86.3,
+      "output_finite": true,
+      "n_pairs": 19,
+      "trajectory": [
+        {
+          "step": 1,
+          "signal": 976.0,
+          "delta": 0.37676554918289185
+        },
+        {
+          "step": 2,
+          "signal": 472.0,
+          "delta": 0.14887544512748718
+        },
+        {
+          "step": 3,
+          "signal": 272.0,
+          "delta": 0.06638006865978241
+        },
+        {
+          "step": 4,
+          "signal": 334.0,
+          "delta": 0.05373029783368111
+        },
+        {
+          "step": 5,
+          "signal": 182.0,
+          "delta": 0.041947830468416214
+        },
+        {
+          "step": 6,
+          "signal": 214.0,
+          "delta": 0.025267191231250763
+        },
+        {
+          "step": 7,
+          "signal": 234.0,
+          "delta": 0.02044692076742649
+        },
+        {
+          "step": 8,
+          "signal": 200.0,
+          "delta": 0.013767536729574203
+        },
+        {
+          "step": 9,
+          "signal": 215.0,
+          "delta": 0.015474832616746426
+        },
+        {
+          "step": 10,
+          "signal": 208.0,
+          "delta": 0.011800622567534447
+        },
+        {
+          "step": 11,
+          "signal": 237.0,
+          "delta": 0.010161241516470909
+        },
+        {
+          "step": 12,
+          "signal": 262.0,
+          "delta": 0.009276553057134151
+        },
+        {
+          "step": 13,
+          "signal": 286.0,
+          "delta": 0.009586579166352749
+        },
+        {
+          "step": 14,
+          "signal": 326.0,
+          "delta": 0.009891635738313198
+        },
+        {
+          "step": 15,
+          "signal": 386.0,
+          "delta": 0.011674837209284306
+        },
+        {
+          "step": 16,
+          "signal": 452.0,
+          "delta": 0.012475702911615372
+        },
+        {
+          "step": 17,
+          "signal": 500.0,
+          "delta": 0.015161621384322643
+        },
+        {
+          "step": 18,
+          "signal": 520.0,
+          "delta": 0.020246092230081558
+        },
+        {
+          "step": 19,
+          "signal": 572.0,
+          "delta": 0.044945262372493744
+        }
+      ]
+    },
+    {
+      "prompt_index": 5,
+      "prompt": "a robot barista pouring latte art in a cozy cafe",
+      "seed": 42,
+      "recorded_at": "2026-10-05T08:28:18Z",
+      "load_s": 35.8,
+      "generate_s": 87.9,
+      "output_finite": true,
+      "n_pairs": 19,
+      "trajectory": [
+        {
+          "step": 1,
+          "signal": 980.0,
+          "delta": 0.2782634496688843
+        },
+        {
+          "step": 2,
+          "signal": 468.0,
+          "delta": 0.16470478475093842
+        },
+        {
+          "step": 3,
+          "signal": 272.0,
+          "delta": 0.13580024242401123
+        },
+        {
+          "step": 4,
+          "signal": 330.0,
+          "delta": 0.1214483380317688
+        },
+        {
+          "step": 5,
+          "signal": 182.0,
+          "delta": 0.09250643104314804
+        },
+        {
+          "step": 6,
+          "signal": 215.0,
+          "delta": 0.07149240374565125
+        },
+        {
+          "step": 7,
+          "signal": 223.0,
+          "delta": 0.051911063492298126
+        },
+        {
+          "step": 8,
+          "signal": 197.0,
+          "delta": 0.02584076300263405
+        },
+        {
+          "step": 9,
+          "signal": 206.0,
+          "delta": 0.01949678361415863
+        },
+        {
+          "step": 10,
+          "signal": 198.0,
+          "delta": 0.016321197152137756
+        },
+        {
+          "step": 11,
+          "signal": 231.0,
+          "delta": 0.01570846699178219
+        },
+        {
+          "step": 12,
+          "signal": 245.0,
+          "delta": 0.018105650320649147
+        },
+        {
+          "step": 13,
+          "signal": 268.0,
+          "delta": 0.01625118963420391
+        },
+        {
+          "step": 14,
+          "signal": 312.0,
+          "delta": 0.014509087428450584
+        },
+        {
+          "step": 15,
+          "signal": 362.0,
+          "delta": 0.014998409897089005
+        },
+        {
+          "step": 16,
+          "signal": 446.0,
+          "delta": 0.016079243272542953
+        },
+        {
+          "step": 17,
+          "signal": 512.0,
+          "delta": 0.020034629851579666
+        },
+        {
+          "step": 18,
+          "signal": 564.0,
+          "delta": 0.02611517533659935
+        },
+        {
+          "step": 19,
+          "signal": 640.0,
+          "delta": 0.050907183438539505
+        }
+      ]
+    },
+    {
+      "prompt_index": 6,
+      "prompt": "a snow-covered temple garden with stone lanterns",
+      "seed": 42,
+      "recorded_at": "2026-10-05T08:30:22Z",
+      "load_s": 32.8,
+      "generate_s": 86.9,
+      "output_finite": true,
+      "n_pairs": 19,
+      "trajectory": [
+        {
+          "step": 1,
+          "signal": 988.0,
+          "delta": 0.34500816464424133
+        },
+        {
+          "step": 2,
+          "signal": 472.0,
+          "delta": 0.12022193521261215
+        },
+        {
+          "step": 3,
+          "signal": 274.0,
+          "delta": 0.07395251095294952
+        },
+        {
+          "step": 4,
+          "signal": 330.0,
+          "delta": 0.060526043176651
+        },
+        {
+          "step": 5,
+          "signal": 176.0,
+          "delta": 0.04377711936831474
+        },
+        {
+          "step": 6,
+          "signal": 208.0,
+          "delta": 0.02000054530799389
+        },
+        {
+          "step": 7,
+          "signal": 229.0,
+          "delta": 0.02378087118268013
+        },
+        {
+          "step": 8,
+          "signal": 189.0,
+          "delta": 0.022385839372873306
+        },
+        {
+          "step": 9,
+          "signal": 207.0,
+          "delta": 0.02218337170779705
+        },
+        {
+          "step": 10,
+          "signal": 192.0,
+          "delta": 0.01865352690219879
+        },
+        {
+          "step": 11,
+          "signal": 224.0,
+          "delta": 0.018655065447092056
+        },
+        {
+          "step": 12,
+          "signal": 229.0,
+          "delta": 0.018260598182678223
+        },
+        {
+          "step": 13,
+          "signal": 245.0,
+          "delta": 0.016349956393241882
+        },
+        {
+          "step": 14,
+          "signal": 294.0,
+          "delta": 0.01822587661445141
+        },
+        {
+          "step": 15,
+          "signal": 340.0,
+          "delta": 0.0185814518481493
+        },
+        {
+          "step": 16,
+          "signal": 440.0,
+          "delta": 0.02180267684161663
+        },
+        {
+          "step": 17,
+          "signal": 532.0,
+          "delta": 0.026464764028787613
+        },
+        {
+          "step": 18,
+          "signal": 616.0,
+          "delta": 0.03881622478365898
+        },
+        {
+          "step": 19,
+          "signal": 724.0,
+          "delta": 0.07495911419391632
+        }
+      ]
+    },
+    {
+      "prompt_index": 7,
+      "prompt": "a macro photo of a dragonfly on a dewy leaf",
+      "seed": 42,
+      "recorded_at": "2026-10-05T08:32:29Z",
+      "load_s": 34.3,
+      "generate_s": 88.8,
+      "output_finite": true,
+      "n_pairs": 19,
+      "trajectory": [
+        {
+          "step": 1,
+          "signal": 996.0,
+          "delta": 0.3297414481639862
+        },
+        {
+          "step": 2,
+          "signal": 474.0,
+          "delta": 0.10380425304174423
+        },
+        {
+          "step": 3,
+          "signal": 278.0,
+          "delta": 0.07553151994943619
+        },
+        {
+          "step": 4,
+          "signal": 336.0,
+          "delta": 0.06091548874974251
+        },
+        {
+          "step": 5,
+          "signal": 193.0,
+          "delta": 0.053075242787599564
+        },
+        {
+          "step": 6,
+          "signal": 217.0,
+          "delta": 0.039101194590330124
+        },
+        {
+          "step": 7,
+          "signal": 236.0,
+          "delta": 0.021606765687465668
+        },
+        {
+          "step": 8,
+          "signal": 210.0,
+          "delta": 0.012475676834583282
+        },
+        {
+          "step": 9,
+          "signal": 218.0,
+          "delta": 0.011753617785871029
+        },
+        {
+          "step": 10,
+          "signal": 216.0,
+          "delta": 0.00915553979575634
+        },
+        {
+          "step": 11,
+          "signal": 253.0,
+          "delta": 0.009218799881637096
+        },
+        {
+          "step": 12,
+          "signal": 270.0,
+          "delta": 0.008773444220423698
+        },
+        {
+          "step": 13,
+          "signal": 294.0,
+          "delta": 0.008854051120579243
+        },
+        {
+          "step": 14,
+          "signal": 340.0,
+          "delta": 0.008995169773697853
+        },
+        {
+          "step": 15,
+          "signal": 384.0,
+          "delta": 0.009950211271643639
+        },
+        {
+          "step": 16,
+          "signal": 440.0,
+          "delta": 0.011346028186380863
+        },
+        {
+          "step": 17,
+          "signal": 474.0,
+          "delta": 0.01308215968310833
+        },
+        {
+          "step": 18,
+          "signal": 496.0,
+          "delta": 0.01805492490530014
+        },
+        {
+          "step": 19,
+          "signal": 564.0,
+          "delta": 0.03574048727750778
+        }
+      ]
+    }
+  ]
+}
