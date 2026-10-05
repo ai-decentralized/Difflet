@@ -1,11 +1,14 @@
 # Benchmark results — summary
 
-> **2026-10-04 — best feature combination per model.** Every layout × TeaCache mode ×
-> TAEF1 combination, measured for DiT step time, DiT calls, resident and warm e2e with a
-> 4-prompt quality check: [`../trn2combo/RESULTS.md`](../trn2combo/RESULTS.md). FLUX.1-dev
-> answer: **tp4 + `--teacache-cadence 2`** — 19/28 DiT calls, warm e2e 40.7 → 38.3 s,
-> resident 7.88 → 5.48 s, 37.8 dB mean PSNR; + TAEF1 reaches 31.6 s warm but below the
-> PSNR bar.
+> **2026-10-05 — best feature combination per model** (FLUX.1-dev, Wan 2.1, Qwen-Image,
+> HunyuanVideo, LTX-2): every layout × TeaCache mode × decoder combination, measured for
+> DiT step time, DiT calls, denoise loop and warm e2e with a 4-prompt quality check —
+> [`../trn2combo/RESULTS.md`](../trn2combo/RESULTS.md). TeaCache cadence 2 is the default
+> winner (HunyuanVideo: online-delta 0.1; Qwen-Image's fewest-call option: calibrated
+> adaptive); sequence parallel wins per-step on Qwen-Image (−12%), ring on Wan at a
+> conforming shape (−17%). **The Neuron Wan VAE corrupts frames after the first (issue
+> #73) — use `--host-vae` for Wan; the Wan rows below were decoded with it and only checked
+> `isfinite`.**
 
 > **2026-09-12 update.** The table directly below is the 2026-06/07 tp4 run, kept as history. A new **parallel-topology campaign** (main @ 38e863e, fresh toolchain, all five models re-measured with one per-step method, plus tp2cp2 / tp4sp / tp2cfg and a native NxDI FLUX baseline) is at the [bottom of this file](#2026-09-12-parallel-topology-campaign-main--38e863e--campaign-branch); its per-model files are `<slug>.json` (tp4, overwritten by the new run) and `<slug>_<config>.json`.
 
