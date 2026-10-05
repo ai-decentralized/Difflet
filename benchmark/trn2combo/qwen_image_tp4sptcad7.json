@@ -1,0 +1,176 @@
+{
+  "model_id": "Qwen/Qwen-Image",
+  "model_type": "qwen_image",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": true
+  },
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "compile_seconds": 17.510025392999523,
+  "compile_breakdown": {
+    "wall_total_s": 17.51
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": {
+    "n": 3,
+    "mean": 66.33814545900289,
+    "median": 66.72428889101138,
+    "std": 0.6494395466226796,
+    "p50": 66.72428889101138,
+    "p90": 66.86675755500619,
+    "min": 65.4233899309911,
+    "max": 66.86675755500619,
+    "samples": [
+      65.4233899309911,
+      66.72428889101138,
+      66.86675755500619
+    ]
+  },
+  "step_latency": {
+    "n": 12,
+    "mean": 0.3674505962493034,
+    "median": 0.36625886848923983,
+    "std": 0.0019717883527177447,
+    "p50": 0.36625958199147135,
+    "p90": 0.3696218550030608,
+    "min": 0.3657458710076753,
+    "max": 0.37216491300205234,
+    "samples": [
+      0.37216491300205234,
+      0.3662581549870083,
+      0.3657458710076753,
+      0.36590489899390377,
+      0.3696218550030608,
+      0.36902722499507945,
+      0.3690282730094623,
+      0.3674844429915538,
+      0.3659661400015466,
+      0.36584291500912514,
+      0.3661028839997016,
+      0.36625958199147135
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 2.721
+  },
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 + sequence parallel + TeaCache calibrated adaptive, 7-skip budget; tp=4, bf16, joint attention via attention_cte",
+  "status": "compiled",
+  "notes": [
+    "per-step = 367.5 ms/DiT-step (median 366.3, p90 369.6, n=12) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronQwenImageTransformerApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 13 DiT calls timed; warm generate 33s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_warm = 66 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+  ],
+  "timestamp": "2026-10-05 00:43 UTC",
+  "config_slug": "qwen_image_tp4sptcad7",
+  "model_slug": "qwen_image",
+  "config": "tp4sptcad7",
+  "device_slug": "trn2combo",
+  "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 4.0,
+  "output_kind": "image",
+  "teacache": {
+    "mode": "adaptive",
+    "cadence": null,
+    "online_delta_alpha": null,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "target_speedup": 1.538,
+    "calibration": "/home/ubuntu/Difflet/.claude/worktrees/flux-best-combo/benchmark/trn2combo/teacache_calib/qwen_image_tp4tcad_s7.json",
+    "fit_r2": 0.985997343666514,
+    "signal_pearson": 0.6730840528620662,
+    "threshold": 0.05447618067517066,
+    "accumulate": true,
+    "n_samples": 152,
+    "calibration_prompts": [
+      "a cat sitting on a bench in a sunlit park",
+      "a red vintage car parked outside a diner at dusk",
+      "an astronaut riding a horse across a desert plain",
+      "a bowl of ramen with steam rising, studio lighting",
+      "a lighthouse on a cliff during a thunderstorm",
+      "a robot barista pouring latte art in a cozy cafe",
+      "a snow-covered temple garden with stone lanterns",
+      "a macro photo of a dragonfly on a dewy leaf"
+    ],
+    "poly_degree": 4,
+    "target_skips": 7,
+    "hardware_measured": true,
+    "dit_calls": 13,
+    "skipped_steps_by_calls": 7,
+    "stats": {
+      "full_steps": 13,
+      "skipped_steps": 7,
+      "probe_calls": 0,
+      "last_delta_estimate": 0.03386190305679623,
+      "cache_initialized": true,
+      "online_delta_alpha": 0.0,
+      "baseline_delta": null,
+      "skipped_step_indices": [
+        5,
+        6,
+        8,
+        9,
+        11,
+        12,
+        14
+      ],
+      "delta_trace": []
+    }
+  },
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 11.553
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 16.48
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 3.48
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 8.71
+      }
+    ],
+    "weights_load_total_s": 40.223,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 66.867,
+    "compute_and_overhead_s": 26.644
+  },
+  "dit_calls_per_step": 0.65,
+  "dit_calls": 13,
+  "loop_wall_s": 4.893,
+  "loop_step_ms": 244.7
+}

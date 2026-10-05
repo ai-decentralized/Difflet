@@ -36,10 +36,11 @@ def _ext(cfg) -> str:
     return ".png" if cfg.output_kind == "image" else ".mp4"
 
 
-def out_path(label: str, i: int, ext: str = ".png") -> Path:
+def out_path(model: str, label: str, i: int, ext: str = ".png") -> Path:
+    # the model slug is part of the name: labels repeat across models
     d = Path(logs_dir()) / "quality"
     d.mkdir(parents=True, exist_ok=True)
-    return d / f"{label}_p{i}{ext}"
+    return d / f"{model}_{label}_p{i}{ext}"
 
 
 def gen(args) -> int:
@@ -55,7 +56,7 @@ def gen(args) -> int:
     ext = _ext(cfg)
     ad = TrainiumAdapter(log_dir=f"{logs_dir()}/quality/gen")
     for i, prompt in enumerate(holdout_prompts(args.prompts)):
-        dst = out_path(args.config, i, ext)
+        dst = out_path(args.model, args.config, i, ext)
         if dst.exists():
             print(f"[quality] {args.config} p{i} exists, skipping", flush=True)
             continue
@@ -75,7 +76,7 @@ def score(args) -> int:
     for label in args.configs:
         psnrs = []
         for i in range(n):
-            a, b = out_path(args.ref, i, ext), out_path(label, i, ext)
+            a, b = out_path(args.model, args.ref, i, ext), out_path(args.model, label, i, ext)
             if a.exists() and b.exists():
                 psnrs.append(compare(a, b)["psnr_db"])
         if not psnrs:
