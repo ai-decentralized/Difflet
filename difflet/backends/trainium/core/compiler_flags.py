@@ -31,8 +31,47 @@ STRIDED_DMA_DEFAULTS: dict[str, bool] = {
     "flux": False,
     "qwen_image": False,
     "hunyuan_video": False,
-    "ltx_2": False,
+    # LTX-2 480x704x49 tp4 (2026-10-05, with VC2): bf16 459.7 -> 413.7 ms per DiT step.
+    "ltx_2": True,
 }
+
+# NEURON_RT_VIRTUAL_CORE_SIZE for the models whose orchestrator runs in-process and used to
+# follow the caller's environment (Wan has its own switch in its orchestrator; FLUX forces 2 in
+# its backbone; Qwen-Image / HunyuanVideo set 2 in their orchestrators). ``None`` = leave the
+# environment alone. ``DIFFLET_VIRTUAL_CORE_SIZE=1`` restores the single-core graph.
+VIRTUAL_CORE_DEFAULTS: dict[str, int | None] = {
+    "ltx_2": 2,
+}
+
+
+def virtual_core_size(model: str | None) -> int | None:
+    """The virtual core size a model's DiT graph is traced for (None = environment default)."""
+    default = VIRTUAL_CORE_DEFAULTS.get(model or "")
+    if default is None:
+        return None
+    override = os.environ.get("DIFFLET_VIRTUAL_CORE_SIZE", "").strip()
+    if override:
+        value = int(override)
+        return value if value > 1 else None
+    return default
+
+
+def apply_virtual_core_env(model: str | None) -> int | None:
+    """Export ``NEURON_RT_VIRTUAL_CORE_SIZE`` for an in-process compile / load of ``model``
+    when the model has a default (see ``VIRTUAL_CORE_DEFAULTS``); returns the value set."""
+    value = virtual_core_size(model)
+    if value is not None:
+        os.environ["NEURON_RT_VIRTUAL_CORE_SIZE"] = str(value)
+    elif model in VIRTUAL_CORE_DEFAULTS:
+        os.environ.pop("NEURON_RT_VIRTUAL_CORE_SIZE", None)  # explicit single-core request
+    return value
+
+
+def virtual_core_cache_inputs(model: str | None) -> dict:
+    """Cache-key contribution: ``{"virtual_core_size": N}`` for a model with a default, ``{}``
+    otherwise (additive-only, like ``tensorizer_cache_inputs``)."""
+    value = virtual_core_size(model)
+    return {"virtual_core_size": value} if value is not None else {}
 
 # model_name -> model-specific env var appended after DIFFLET_TENSORIZER_EXTRA (legacy switch).
 _MODEL_EXTRA_ENV: dict[str, str] = {"wan": "DIFFLET_WAN_TENSORIZER_EXTRA"}
