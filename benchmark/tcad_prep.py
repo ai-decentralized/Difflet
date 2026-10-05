@@ -35,7 +35,9 @@ from benchmark.adapters.trainium import TrainiumAdapter, spec_slug
 from benchmark.models import (NXD_VENV, cell_is_blocked, logs_dir, resolve,
                               write_blocked_cell)
 
-PROBE_MODELS = ("flux", "qwen_image", "hunyuan_video")
+# Wan builds a fused block-0 probe NEFF for an adaptive calibration since
+# 0f9ef0f (difflet/models/wan/application.py), keyed into its transformer stage.
+PROBE_MODELS = ("flux", "qwen_image", "hunyuan_video", "wan")
 
 # HBM out-of-memory signatures the Neuron runtime prints when a collect/generate
 # cannot fit the DiT + probe (+ VAE) resident on a core-pair.
