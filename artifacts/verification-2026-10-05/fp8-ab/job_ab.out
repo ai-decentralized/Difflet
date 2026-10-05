@@ -1,0 +1,18 @@
+=== 17:03:13 A/B levers_bf16q (--only both) switches: NEURON_RT_VIRTUAL_CORE_SIZE=2 DIFFLET_WAN_TENSORIZER_EXTRA=--vectorize-strided-dma DIFFLET_FP8_BF16_QUANT=1
+=== 17:04:06 A/B levers_bf16q exit 0
+=== 17:04:06 A/B levers (--only fp8) switches: NEURON_RT_VIRTUAL_CORE_SIZE=2 DIFFLET_WAN_TENSORIZER_EXTRA=--vectorize-strided-dma
+=== 17:06:50 A/B levers_bf16q (--only both) switches: NEURON_RT_VIRTUAL_CORE_SIZE=2 DIFFLET_WAN_TENSORIZER_EXTRA=--vectorize-strided-dma DIFFLET_FP8_BF16_QUANT=1
+=== 17:31:01 A/B levers_bf16q exit 0
+=== 17:31:01 A/B levers (--only fp8) switches: NEURON_RT_VIRTUAL_CORE_SIZE=2 DIFFLET_WAN_TENSORIZER_EXTRA=--vectorize-strided-dma
+=== 17:45:05 A/B levers exit 0
+=== 17:45:05 A/B shipped (--only both) switches: 
+=== 18:13:43 A/B shipped exit 0
+=== 18:13:43 cross-config quality: fp8 renders vs the levers bf16 control
+latents [1, 16, 3, 60, 104]: cosine=0.998393 mse=1.415e-03 rel_l2=0.0567 snr=24.93 dB
+wrote /home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/compare_levers_bf16q_fp8_vs_levers_bf16.json
+latents [1, 16, 3, 60, 104]: cosine=0.998393 mse=1.415e-03 rel_l2=0.0567 snr=24.93 dB
+wrote /home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/compare_levers_fp8_vs_levers_bf16.json
+latents [1, 16, 3, 60, 104]: cosine=0.998393 mse=1.415e-03 rel_l2=0.0567 snr=24.93 dB
+wrote /home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/compare_shipped_fp8_vs_levers_bf16.json
+wrote /home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/compare_shipped_bf16_vs_levers_bf16.json
+=== 18:13:58 AB_DONE

@@ -1,0 +1,21 @@
+{
+  "output": {
+    "reference": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/levers_bf16q/bf16_run1.mp4",
+    "test": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/bf16_run1.mp4",
+    "frames": 9,
+    "height": 480,
+    "width": 832,
+    "psnr_db": Infinity,
+    "ssim": 1.0,
+    "pixel": {
+      "mse": 0.0,
+      "mean_abs": 0.0,
+      "max_abs": 0.0,
+      "cosine": 0.9999999999992951,
+      "rel_l2": 0.0,
+      "snr_db": Infinity
+    },
+    "lpips": 0.0,
+    "lpips_net": "alex"
+  }
+}

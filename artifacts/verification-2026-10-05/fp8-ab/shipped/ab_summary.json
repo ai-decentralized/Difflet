@@ -1,0 +1,247 @@
+{
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 20,
+  "guidance_scale": 1.0,
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "tp_degree": 4,
+  "quant": {
+    "format": "fp8",
+    "weight_granularity": "tensor",
+    "calibration": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-03/fp8-dyn-step/static/act_calibration_wan21.json"
+  },
+  "arms": {
+    "bf16": {
+      "runs": [
+        {
+          "run": 0,
+          "e2e_wall_seconds": 338.751,
+          "weights_load_total_seconds": 0,
+          "compute_and_overhead_seconds": 338.751,
+          "dit_step_ms": {
+            "n": 19,
+            "mean": 573.857894736842,
+            "median": 573.6999999999999,
+            "min": 573.5,
+            "max": 576.2
+          },
+          "output": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/bf16_run0.mp4",
+          "latents": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/work_bf16_run0/latents.pt"
+        },
+        {
+          "run": 1,
+          "e2e_wall_seconds": 111.461,
+          "weights_load_total_seconds": 0,
+          "compute_and_overhead_seconds": 111.461,
+          "dit_step_ms": {
+            "n": 19,
+            "mean": 573.7526315789473,
+            "median": 573.6,
+            "min": 573.4,
+            "max": 576.3000000000001
+          },
+          "output": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/bf16_run1.mp4",
+          "latents": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/work_bf16_run1/latents.pt"
+        }
+      ],
+      "compile_seconds": 324.641,
+      "compile_cache_hit": false
+    },
+    "fp8": {
+      "runs": [
+        {
+          "run": 0,
+          "e2e_wall_seconds": 88.584,
+          "weights_load_total_seconds": 0,
+          "compute_and_overhead_seconds": 88.584,
+          "dit_step_ms": {
+            "n": 19,
+            "mean": 585.4421052631578,
+            "median": 585.3000000000001,
+            "min": 584.6,
+            "max": 588.0
+          },
+          "output": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/fp8_run0.mp4",
+          "latents": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/work_fp8_run0/latents.pt"
+        },
+        {
+          "run": 1,
+          "e2e_wall_seconds": 89.236,
+          "weights_load_total_seconds": 0,
+          "compute_and_overhead_seconds": 89.236,
+          "dit_step_ms": {
+            "n": 19,
+            "mean": 585.142105263158,
+            "median": 585.0,
+            "min": 584.5,
+            "max": 586.9
+          },
+          "output": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/fp8_run1.mp4",
+          "latents": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/work_fp8_run1/latents.pt"
+        }
+      ],
+      "quantize_seconds": 414.822,
+      "compile_seconds": 342.106,
+      "compile_cache_hit": false
+    }
+  },
+  "compare": {
+    "fp8_vs_bf16_run0": {
+      "output": {
+        "reference": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/bf16_run0.mp4",
+        "test": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/fp8_run0.mp4",
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "psnr_db": 33.68613937556342,
+        "ssim": 0.9531354904174805,
+        "pixel": {
+          "mse": 0.0004299675540232649,
+          "mean_abs": 0.013173778029379996,
+          "max_abs": 0.8235294204205275,
+          "cosine": 0.9986027263470515,
+          "rel_l2": 0.052873108956841185,
+          "snr_db": 25.53530304356553
+        },
+        "lpips": 0.03461949568655756,
+        "lpips_net": "alex"
+      },
+      "latents": {
+        "reference": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/work_bf16_run0/latents.pt",
+        "test": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/work_fp8_run0/latents.pt",
+        "shape": [
+          1,
+          16,
+          3,
+          60,
+          104
+        ],
+        "mse": 0.0014145311220667466,
+        "mean_abs": 0.02663215821479909,
+        "max_abs": 0.8328588306903839,
+        "cosine": 0.9983926845605919,
+        "rel_l2": 0.056695693772398505,
+        "snr_db": 24.92899851946217
+      }
+    },
+    "fp8_vs_bf16_run1": {
+      "output": {
+        "reference": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/bf16_run1.mp4",
+        "test": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/fp8_run1.mp4",
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "psnr_db": 33.68613937556342,
+        "ssim": 0.9531354904174805,
+        "pixel": {
+          "mse": 0.0004299675540232649,
+          "mean_abs": 0.013173778029379996,
+          "max_abs": 0.8235294204205275,
+          "cosine": 0.9986027263470515,
+          "rel_l2": 0.052873108956841185,
+          "snr_db": 25.53530304356553
+        },
+        "lpips": 0.03461949568655756,
+        "lpips_net": "alex"
+      },
+      "latents": {
+        "reference": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/work_bf16_run1/latents.pt",
+        "test": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/work_fp8_run1/latents.pt",
+        "shape": [
+          1,
+          16,
+          3,
+          60,
+          104
+        ],
+        "mse": 0.0014145311220667466,
+        "mean_abs": 0.02663215821479909,
+        "max_abs": 0.8328588306903839,
+        "cosine": 0.9983926845605919,
+        "rel_l2": 0.056695693772398505,
+        "snr_db": 24.92899851946217
+      }
+    },
+    "bf16_run1_vs_run0_control": {
+      "output": {
+        "reference": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/bf16_run0.mp4",
+        "test": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/bf16_run1.mp4",
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "psnr_db": Infinity,
+        "ssim": 1.0,
+        "pixel": {
+          "mse": 0.0,
+          "mean_abs": 0.0,
+          "max_abs": 0.0,
+          "cosine": 0.9999999999992951,
+          "rel_l2": 0.0,
+          "snr_db": Infinity
+        },
+        "lpips": 0.0,
+        "lpips_net": "alex"
+      },
+      "latents": {
+        "reference": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/work_bf16_run0/latents.pt",
+        "test": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/work_bf16_run1/latents.pt",
+        "shape": [
+          1,
+          16,
+          3,
+          60,
+          104
+        ],
+        "mse": 0.0,
+        "mean_abs": 0.0,
+        "max_abs": 0.0,
+        "cosine": 0.9999999999999359,
+        "rel_l2": 0.0,
+        "snr_db": Infinity
+      }
+    },
+    "fp8_run1_vs_run0_control": {
+      "output": {
+        "reference": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/fp8_run0.mp4",
+        "test": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/fp8_run1.mp4",
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "psnr_db": Infinity,
+        "ssim": 1.0,
+        "pixel": {
+          "mse": 0.0,
+          "mean_abs": 0.0,
+          "max_abs": 0.0,
+          "cosine": 0.9999999999994047,
+          "rel_l2": 0.0,
+          "snr_db": Infinity
+        },
+        "lpips": 0.0,
+        "lpips_net": "alex"
+      },
+      "latents": {
+        "reference": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/work_fp8_run0/latents.pt",
+        "test": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/shipped/work_fp8_run1/latents.pt",
+        "shape": [
+          1,
+          16,
+          3,
+          60,
+          104
+        ],
+        "mse": 0.0,
+        "mean_abs": 0.0,
+        "max_abs": 0.0,
+        "cosine": 0.9999999999999316,
+        "rel_l2": 0.0,
+        "snr_db": Infinity
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "output": {
+    "reference": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/levers_bf16q/bf16_run1.mp4",
+    "test": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/levers_bf16q/fp8_run1.mp4",
+    "frames": 9,
+    "height": 480,
+    "width": 832,
+    "psnr_db": 33.68613937556342,
+    "ssim": 0.9531354904174805,
+    "pixel": {
+      "mse": 0.0004299675540232649,
+      "mean_abs": 0.013173778029379996,
+      "max_abs": 0.8235294204205275,
+      "cosine": 0.9986027263470515,
+      "rel_l2": 0.052873108956841185,
+      "snr_db": 25.53530304356553
+    },
+    "lpips": 0.03461949568655756,
+    "lpips_net": "alex"
+  },
+  "latents": {
+    "reference": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/levers_bf16q/work_bf16_run1/latents.pt",
+    "test": "/home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-05/fp8-ab/levers_bf16q/work_fp8_run1/latents.pt",
+    "shape": [
+      1,
+      16,
+      3,
+      60,
+      104
+    ],
+    "mse": 0.0014145311220667466,
+    "mean_abs": 0.02663215821479909,
+    "max_abs": 0.8328588306903839,
+    "cosine": 0.9983926845605919,
+    "rel_l2": 0.056695693772398505,
+    "snr_db": 24.92899851946217
+  }
+}
