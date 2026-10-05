@@ -438,22 +438,35 @@ def test_shared_cli_args_forward_adaptive_teacache_flags():
     assert "--teacache-speedup" not in plain and "--teacache-calibration" not in plain
 
 
-def test_stage_transformer_threads_calibration_into_app_without_changing_artifact(
-    monkeypatch, tmp_path,
-):
-    # Calibrated-adaptive TeaCache: Wan's block-0 signal is a host CPU shadow
-    # (no probe NEFF), so the calibration path reaches the app as a runtime-only
-    # kwarg and the compiled-dir identity stays that of a plain generate.
+def test_adaptive_teacache_gets_its_own_probe_artifact(monkeypatch, tmp_path):
+    # Calibrated-adaptive TeaCache builds the fused block-0 probe NEFF
+    # (application.py, requires_teacache_probe), so the transformer artifact
+    # identity must carry it. Before the fix the key ignored the probe: an
+    # adaptive generate hit the plain artifact and failed on device with
+    # "teacache_probe/model.pt does not exist" (trn2.3xlarge, 2026-10-04).
     _setup_wan_fakes(monkeypatch)
     calib = _write_calibration(tmp_path / "wan.json", model="wan", shape_label="480x832x9")
     plain = _wan_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path))
+    cadence = _wan_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
+                        teacache_cadence=2)
     adaptive = _wan_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
                          teacache_speedup=1.5, teacache_calibration=calib)
     orch = WanOrchestrator(adaptive)
-    assert orch._stage_compiled_dir("transformer", adaptive) == \
+    plain_inputs = WanOrchestrator(plain)._stage_cache_inputs("transformer", plain)
+    # additive: plain and probe-free requests keep the exact pre-fix key
+    assert "teacache_probe" not in plain_inputs
+    assert WanOrchestrator(cadence)._stage_cache_inputs("transformer", cadence) == plain_inputs
+    assert orch._stage_cache_inputs("transformer", adaptive) == {**plain_inputs,
+                                                                "teacache_probe": True}
+    assert orch._stage_compiled_dir("transformer", adaptive) != \
         WanOrchestrator(plain)._stage_compiled_dir("transformer", plain)
+    # the VAE stage is unaffected
+    assert orch._stage_cache_inputs("vae", adaptive) == \
+        WanOrchestrator(plain)._stage_cache_inputs("vae", plain)
     orch._finish_stage_compile("transformer", adaptive,
                                orch._stage_compiled_dir("transformer", adaptive))
+    WanOrchestrator(plain)._finish_stage_compile(
+        "transformer", plain, WanOrchestrator(plain)._stage_compiled_dir("transformer", plain))
     orch._stage_transformer(adaptive)
     kw = _FakeWanApp.instances[-1].kwargs
     assert kw["teacache_calibration_path"] == calib

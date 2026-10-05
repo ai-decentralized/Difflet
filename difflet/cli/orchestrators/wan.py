@@ -54,6 +54,21 @@ def _transformer_virtual_core_size(args) -> int | None:
 _LEGACY_CACHE_PREFIX_MODEL_ID = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
 
 
+def _teacache_probe_required(args: argparse.Namespace) -> bool:
+    """Whether this request's transformer artifact must carry the TeaCache probe
+    NEFF: a calibrated-adaptive request (--teacache-speedup) whose calibration is
+    adaptive -- the same predicate the application uses to build the probe
+    (difflet.pipeline.teacache.requires_teacache_probe)."""
+    if getattr(args, "teacache_speedup", None) is None:
+        return False
+    path = getattr(args, "teacache_calibration", None)
+    if not path:
+        return False
+    from difflet.pipeline.teacache import requires_teacache_probe
+
+    return requires_teacache_probe({"teacache_calibration_path": path})
+
+
 def _cache_prefix(model_id: str) -> str:
     """Per-model compiled-dir prefix: two Wan versions must never share
     artifacts (same architecture, different weights)."""
@@ -201,9 +216,10 @@ class WanOrchestrator(ModelOrchestrator):
         compiled_dir = self._stage_compiled_dir("transformer", args)
         h, w, f = args.height or 480, args.width or 832, args.num_frames or 9
         # Calibrated-adaptive TeaCache (--teacache-speedup + --teacache-calibration):
-        # Wan's block-0 signal comes from a host CPU shadow, no probe NEFF, so like
-        # the probe-free modes it is runtime-only (not in _stage_cache_inputs; the
-        # warm artifact hits). Validated here the way the probe pipelines do.
+        # the application builds the fused block-0 probe NEFF for an adaptive
+        # calibration (application.py, requires_teacache_probe), so the probe is
+        # part of the transformer artifact identity (_teacache_probe_required in
+        # _stage_cache_inputs). Validated here the way the probe pipelines do.
         teacache_calibration = adaptive_teacache_calibration(
             args, model="wan", shape_label=f"{h}x{w}x{f}"
         )
@@ -321,7 +337,11 @@ class WanOrchestrator(ModelOrchestrator):
     def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         prefix = _cache_prefix(self.args.model_id)
         if stage == "transformer":
+            # Additive: the probe key appears only for a calibrated-adaptive
+            # request, so every existing artifact keeps its identity.
+            probe = {"teacache_probe": True} if _teacache_probe_required(args) else {}
             return {
+                **probe,
                 "component": f"{prefix}_transformer",
                 "model_id": self.args.model_id,
                 "tp": args.tp_degree or 4,
