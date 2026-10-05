@@ -44,6 +44,10 @@ if [[ -z "${MODEL_DIR:-}" ]]; then
 fi
 mkdir -p "${SCREEN_DIR}" "${WORK_ROOT}"
 work="${WORK_ROOT}/${name}"
+# Private compiler scratch: the vendor ModelBuilder rmtree's its workdir at trace start, and the
+# default /tmp/nxd_model/ is shared with every other difflet compile on the host (a probe running
+# alongside an A/B compile wiped the A/B's text-encoder scratch mid-packaging, 2026-10-05 17:04).
+export BASE_COMPILE_WORK_DIR="${work}/nxd_scratch/"
 
 args=(--work-dir "${work}" --real-model-dir "${MODEL_DIR}" --num-layers "${NUM_LAYERS:-2}"
       --tp-degree "${TP:-4}" --static --height 480 --width 832 --num-frames 9
