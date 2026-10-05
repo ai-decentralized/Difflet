@@ -23,15 +23,15 @@
 |---|---|
 | compile (AOT, one-time) | 6.03 s |
 | **e2e generate — cold start** (page cache dropped) | **—** |
-| **e2e generate — warm cache** | **83.29 s** |
-| &nbsp;&nbsp;↳ of which weights load (from page cache) | 17.28 s |
+| **e2e generate — warm cache** | **83.42 s** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 17.34 s |
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
 | per denoise step (transformer fwd) | 577.9 ms | 577.9 ms | 578.5 ms | 577.1 ms | 14 |
-| end-to-end (warm) | 83.29 s | 83.23 s | 83.69 s | 82.94 s | 3 |
+| end-to-end (warm) | 83.42 s | 83.23 s | 84.19 s | 82.68 s | 5 |
 
 **Throughput:** 1.730 DiT steps/s
 
@@ -53,7 +53,7 @@
 
 - per-step = 577.9 ms/DiT-step (median 577.9, p90 578.5, n=14) — measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 15 DiT calls timed; warm generate 31s; output finite=True.
 - compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop
-- e2e_warm = 83 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
+- e2e_warm = 83 s (n=5; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
 
 ## Reproduction
 

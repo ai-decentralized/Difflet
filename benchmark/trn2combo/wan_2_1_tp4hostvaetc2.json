@@ -25,18 +25,20 @@
   "e2e_cold_seconds": null,
   "e2e_breakdown": null,
   "e2e_warm": {
-    "n": 3,
-    "mean": 84.68703594865899,
-    "median": 84.04204566701083,
-    "std": 1.0159012279323603,
-    "p50": 84.04204566701083,
-    "p90": 86.12131956298253,
-    "min": 83.89774261598359,
-    "max": 86.12131956298253,
+    "n": 5,
+    "mean": 83.83194062520052,
+    "median": 83.94163044900051,
+    "std": 1.041594750499311,
+    "p50": 83.94163044900051,
+    "p90": 85.04103364000912,
+    "min": 82.5957521009841,
+    "max": 85.04103364000912,
     "samples": [
-      83.89774261598359,
-      84.04204566701083,
-      86.12131956298253
+      84.89043603200116,
+      85.04103364000912,
+      83.94163044900051,
+      82.69085090400768,
+      82.5957521009841
     ]
   },
   "step_latency": {
@@ -87,7 +89,7 @@
   "notes": [
     "per-step = 574.7 ms/DiT-step (median 574.6, p90 575.1, n=14) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 15 DiT calls timed; warm generate 32s; output finite=True.",
     "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
-    "e2e_warm = 85 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+    "e2e_warm = 84 s (n=5; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-10-05 10:37 UTC",
   "config_slug": "wan_2_1_tp4hostvaetc2",
@@ -129,17 +131,17 @@
     "stages": [
       {
         "stage": "stage_0",
-        "load_s": 8.8
+        "load_s": 7.86
       },
       {
         "stage": "vae_decoder",
-        "load_s": 9.48
+        "load_s": 9.23
       }
     ],
-    "weights_load_total_s": 18.28,
+    "weights_load_total_s": 17.09,
     "weights_shard_total_s": 0.0,
-    "wall_total_s": 86.121,
-    "compute_and_overhead_s": 67.841
+    "wall_total_s": 82.596,
+    "compute_and_overhead_s": 65.506
   },
   "dit_calls_per_step": 0.75,
   "dit_calls": 15,

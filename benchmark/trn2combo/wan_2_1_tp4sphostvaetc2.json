@@ -25,18 +25,20 @@
   "e2e_cold_seconds": null,
   "e2e_breakdown": null,
   "e2e_warm": {
-    "n": 3,
-    "mean": 83.28799604765179,
-    "median": 83.23464626198984,
-    "std": 0.30746082483342196,
-    "p50": 83.23464626198984,
-    "p90": 83.68838685998344,
-    "min": 82.94095502098207,
-    "max": 83.68838685998344,
+    "n": 5,
+    "mean": 83.41551604699343,
+    "median": 83.23279731199727,
+    "std": 0.5473758101548468,
+    "p50": 83.23279731199727,
+    "p90": 84.1851398369763,
+    "min": 82.68345743400278,
+    "max": 84.1851398369763,
     "samples": [
-      83.68838685998344,
-      83.23464626198984,
-      82.94095502098207
+      83.89179437598796,
+      82.68345743400278,
+      84.1851398369763,
+      83.08439127600286,
+      83.23279731199727
     ]
   },
   "step_latency": {
@@ -87,7 +89,7 @@
   "notes": [
     "per-step = 577.9 ms/DiT-step (median 577.9, p90 578.5, n=14) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 15 DiT calls timed; warm generate 31s; output finite=True.",
     "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
-    "e2e_warm = 83 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
+    "e2e_warm = 83 s (n=5; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
   "timestamp": "2026-10-05 11:01 UTC",
   "config_slug": "wan_2_1_tp4sphostvaetc2",
@@ -129,17 +131,17 @@
     "stages": [
       {
         "stage": "stage_0",
-        "load_s": 8.21
+        "load_s": 8.32
       },
       {
         "stage": "vae_decoder",
-        "load_s": 9.07
+        "load_s": 9.02
       }
     ],
-    "weights_load_total_s": 17.28,
+    "weights_load_total_s": 17.34,
     "weights_shard_total_s": 0.0,
-    "wall_total_s": 82.941,
-    "compute_and_overhead_s": 65.661
+    "wall_total_s": 83.233,
+    "compute_and_overhead_s": 65.893
   },
   "dit_calls_per_step": 0.75,
   "dit_calls": 15,

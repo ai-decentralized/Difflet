@@ -1,12 +1,9 @@
 {
   "model_id": "Qwen/Qwen-Image",
-  "model_slug": "qwen_image",
-  "config": "tp2cp2gkv",
-  "config_slug": "qwen_image_tp2cp2gkv",
-  "device_slug": "trn2combo",
-  "status": "blocked",
-  "blocked_reason": "HANG: the generate stage stalled at 'Initializing traced model weights' (ranks 0..3) for 26 min with no CPU (futex wait); killed by the operator, not retried",
-  "blocked_evidence": "benchmark/trn2combo/logs/warm/qwen_image_tp2cp2gkv_generate.log (last line 'Initializing traced model weights for ranks: 0...3' at 22:51:05 UTC; stage pid 302577 in futex_do_wait, 9% CPU, killed 23:17:46)",
+  "model_type": "qwen_image",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
   "parallel": {
     "tp_degree": 2,
     "cp_degree": 2,
@@ -20,10 +17,115 @@
     "num_frames": null
   },
   "steps": 20,
-  "teacache": null,
+  "compile_seconds": 17.559790580999106,
+  "compile_breakdown": {
+    "wall_total_s": 17.56
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": {
+    "n": 3,
+    "mean": 104.25645099732598,
+    "median": 76.65784731699387,
+    "std": 41.76624251652724,
+    "p50": 76.65784731699387,
+    "p90": 163.28147922299104,
+    "min": 72.83002645199304,
+    "max": 163.28147922299104,
+    "samples": [
+      163.28147922299104,
+      76.65784731699387,
+      72.83002645199304
+    ]
+  },
+  "step_latency": {
+    "n": 19,
+    "mean": 0.4557366486314047,
+    "median": 0.45556579300318845,
+    "std": 0.0009591561234469329,
+    "p50": 0.45556579300318845,
+    "p90": 0.4560402189963497,
+    "min": 0.45500193000771105,
+    "max": 0.45958116999827325,
+    "samples": [
+      0.45958116999827325,
+      0.45527647400740534,
+      0.4550380290020257,
+      0.45532412998727523,
+      0.45507833201554604,
+      0.45533501700265333,
+      0.45500193000771105,
+      0.4562184179958422,
+      0.4558512259973213,
+      0.45568491498124786,
+      0.4555091180081945,
+      0.4553101100027561,
+      0.45568430999992415,
+      0.45556579300318845,
+      0.45575998499407433,
+      0.4560402189963497,
+      0.45548237100592814,
+      0.45562936799251474,
+      0.4556254089984577
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 2.194
+  },
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=2 x cp=2 (gather_kv); tp=4, bf16, joint attention via attention_cte",
+  "status": "compiled",
   "notes": [
-    "BLOCKED: HANG: the generate stage stalled at 'Initializing traced model weights' (ranks 0..3) for 26 min with no CPU (futex wait); killed by the operator, not retried",
-    "evidence: benchmark/trn2combo/logs/warm/qwen_image_tp2cp2gkv_generate.log (last line 'Initializing traced model weights for ranks: 0...3' at 22:51:05 UTC; stage pid 302577 in futex_do_wait, 9% CPU, killed 23:17:46)"
+    "per-step = 455.7 ms/DiT-step (median 455.6, p90 456.0, n=19) \u2014 measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronQwenImageTransformerApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 37s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_warm = 104 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown."
   ],
-  "follow_up": "reproduce with NEURON_RT_LOG_LEVEL=INFO; the compile itself passed (454 s)"
+  "timestamp": "2026-10-05 14:32 UTC",
+  "config_slug": "qwen_image_tp2cp2gkv",
+  "model_slug": "qwen_image",
+  "config": "tp2cp2gkv",
+  "device_slug": "trn2combo",
+  "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 4.0,
+  "output_kind": "image",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "text_encoder",
+        "load_s": 12.018
+      },
+      {
+        "stage": "transformer (denoise loop)",
+        "load_s": 20.09
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 8.27
+      }
+    ],
+    "weights_load_total_s": 40.378,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 72.83,
+    "compute_and_overhead_s": 32.452
+  },
+  "dit_calls_per_step": 1.0,
+  "dit_calls": 20,
+  "loop_wall_s": 10.287,
+  "loop_step_ms": 514.4
 }

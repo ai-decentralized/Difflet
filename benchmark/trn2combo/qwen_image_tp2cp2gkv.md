@@ -3,7 +3,7 @@
 **Status:** compiled  
 **Backend:** trainium  
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
-**Timestamp:** 2026-10-04 22:24 UTC
+**Timestamp:** 2026-10-05 14:32 UTC
 
 > Best-performing configuration: tp=2 x cp=2 (gather_kv); tp=4, bf16, joint attention via attention_cte
 
@@ -21,25 +21,25 @@
 
 | phase | time |
 |---|---|
-| compile (AOT, one-time) | 7.6 min (453 s) |
+| compile (AOT, one-time) | 17.56 s |
 | **e2e generate — cold start** (page cache dropped) | **—** |
+| **e2e generate — warm cache** | **104.26 s** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 40.38 s |
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | — | — | — | — | — |
+| per denoise step (transformer fwd) | 455.7 ms | 455.6 ms | 456.0 ms | 455.0 ms | 19 |
+| end-to-end (warm) | 104.26 s | 76.66 s | 2.7 min (163 s) | 72.83 s | 3 |
+
+**Throughput:** 2.194 DiT steps/s
 
 ## Compile breakdown
 
-Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-save tail (not timed by a single log line).
-
-| component | module load | HLO gen | priority-HLO compile | all-HLO compile | other | **build total** |
-|---|---:|---:|---:|---:|---:|---:|
-| transformer | 88.13 s | 19.04 s | 38.21 s | 7.0 ms | 4.4 min (267 s) | **6.9 min (412 s)** |
-| **Σ component builds** | | | | | | **6.9 min (412 s)** |
-
-> The headline **compile = 7.6 min (453 s)** is the full `difflet compile` wall; the **Σ component builds = 6.9 min (412 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
+| component | build time |
+|---|---|
+| wall_total_s | 17.56 s |
 
 ## Toolchain
 
@@ -51,7 +51,9 @@ Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-
 
 ## Notes
 
+- per-step = 455.7 ms/DiT-step (median 455.6, p90 456.0, n=19) — measured the SAME way as H100: inter-step deltas of a real 20-step generate (wrapping NeuronQwenImageTransformerApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 20 DiT calls timed; warm generate 37s; output finite=True.
 - compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop
+- e2e_warm = 104 s (n=3; reported after 1 discarded cache-warming run(s) so the OS page cache is warm). The difflet CLI reloads weights every process, so 'warm' = warm disk cache -> faster load, not a resident model; cf. e2e cold and the load/compute breakdown.
 
 ## Reproduction
 
