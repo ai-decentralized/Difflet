@@ -7,8 +7,8 @@
 > winner (HunyuanVideo: online-delta 0.1; Qwen-Image's fewest-call option: calibrated
 > adaptive); sequence parallel wins per-step on Qwen-Image (−12%), ring on Wan at a
 > conforming shape (−17%). **The Neuron Wan VAE corrupts frames after the first (issue
-> #73) — use `--host-vae` for Wan; the Wan rows below were decoded with it and only checked
-> `isfinite`.**
+> #73) — use `--host-vae` for Wan. The 2026-09 Wan rows below were decoded by the Neuron
+> VAE and only checked for `isfinite`; their DiT timings stand, their outputs do not.**
 
 > **2026-09-12 update.** The table directly below is the 2026-06/07 tp4 run, kept as history. A new **parallel-topology campaign** (main @ 38e863e, fresh toolchain, all five models re-measured with one per-step method, plus tp2cp2 / tp4sp / tp2cfg and a native NxDI FLUX baseline) is at the [bottom of this file](#2026-09-12-parallel-topology-campaign-main--38e863e--campaign-branch); its per-model files are `<slug>.json` (tp4, overwritten by the new run) and `<slug>_<config>.json`.
 
