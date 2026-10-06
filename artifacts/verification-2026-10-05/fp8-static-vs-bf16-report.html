@@ -1,0 +1,256 @@
+<title>FP8 Static vs bf16 on Trainium</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (~70ch); the comparison tables break out to ~980px. Same datasheet identity as the FP8 tech report: ruled tables, mono figures, teal accent, amber marks fp8, green/red mark faster/slower. */
+:root {
+  --bg: #f7f8f7;
+  --surface: #ffffff;
+  --fg: #1d2326;
+  --muted: #5b666b;
+  --rule: #d6dcda;
+  --accent: #0f6a70;
+  --accent-soft: #e2f0ef;
+  --fp8: #a35b00;
+  --fp8-soft: #fbefdc;
+  --good: #2f7a3b;
+  --bad: #b3261e;
+  --code-bg: #eef1f0;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121617; --surface: #1a2022; --fg: #e3e8e6; --muted: #9aa6a9; --rule: #2e3739;
+    --accent: #5fc4c9; --accent-soft: #163233; --fp8: #f0a94b; --fp8-soft: #33250f;
+    --good: #7fcf8b; --bad: #f2867e; --code-bg: #20282a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121617; --surface: #1a2022; --fg: #e3e8e6; --muted: #9aa6a9; --rule: #2e3739;
+  --accent: #5fc4c9; --accent-soft: #163233; --fp8: #f0a94b; --fp8-soft: #33250f;
+  --good: #7fcf8b; --bad: #f2867e; --code-bg: #20282a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.62 var(--f-body); }
+.wrap { max-width: 980px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 80px; }
+.col { max-width: 70ch; }
+header.top { border-bottom: 2px solid var(--fg); padding-block: 8px 22px; margin-bottom: 28px; }
+.eyebrow { font: 500 12px/1.4 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font: 600 clamp(30px, 5vw, 44px)/1.08 var(--f-display); margin: 10px 0 12px; text-wrap: balance; letter-spacing: -.01em; }
+.lede { font-size: 18px; color: var(--muted); margin: 0; max-width: 64ch; }
+h2 { font: 600 26px/1.2 var(--f-display); margin: 56px 0 14px; text-wrap: balance; }
+h3 { font: 600 18px/1.3 var(--f-body); margin: 30px 0 8px; }
+p { margin: 0 0 14px; }
+ul { margin: 0 0 16px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+code, .mono { font-family: var(--f-mono); font-size: .9em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+a { color: var(--accent); }
+.fp8 { color: var(--fp8); font-weight: 600; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 500 14px/1.4 var(--f-body); margin: 0 0 8px; padding: 0; list-style: none; }
+.toc a { text-decoration: none; border-bottom: 1px solid var(--rule); }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); margin: 22px 0 8px; }
+.fact { padding: 16px 16px 16px 0; min-width: 0; }
+.fact + .fact { border-left: 1px solid var(--rule); padding-left: 16px; }
+.fact .num { font: 500 26px/1.1 var(--f-mono); font-variant-numeric: tabular-nums; }
+.fact .lbl { font-size: 13px; color: var(--muted); margin-top: 6px; }
+@media (max-width: 640px) { .fact + .fact { border-left: 0; padding-left: 0; border-top: 1px solid var(--rule); } }
+.tbl { overflow-x: auto; margin: 6px 0 18px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 12px/1.3 var(--f-body); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border-bottom: 1.5px solid var(--fg); white-space: nowrap; }
+td.n, th.n { text-align: right; font-family: var(--f-mono); white-space: nowrap; }
+td.faster { color: var(--good); font-weight: 600; }
+td.slower { color: var(--bad); font-weight: 600; }
+tr.hl td { background: var(--fp8-soft); }
+tr.dim td { color: var(--muted); }
+.note { font-size: 13px; color: var(--muted); }
+.callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; margin: 6px 0 18px; border-radius: 0 4px 4px 0; }
+.callout p:last-child { margin-bottom: 0; }
+.bars { display: grid; gap: 10px; margin: 14px 0 20px; }
+.bar { display: grid; grid-template-columns: minmax(120px, 160px) 1fr; gap: 12px; align-items: center; min-width: 0; }
+.bar .name { font-size: 14px; }
+.bar .track { position: relative; height: 34px; min-width: 0; }
+.bar .seg { position: absolute; top: 0; height: 15px; border-radius: 2px; }
+.bar .seg.bf16 { background: var(--muted); top: 0; }
+.bar .seg.q { background: var(--fp8); top: 19px; }
+.bar .seg span { position: absolute; left: calc(100% + 8px); top: -1px; font: 500 12px/1.3 var(--f-mono); white-space: nowrap; color: var(--fg); }
+.legend { display: flex; gap: 18px; font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; }
+footer { margin-top: 56px; border-top: 1px solid var(--rule); padding-top: 14px; font-size: 13px; color: var(--muted); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">Difflet · Performance report · 2026-10-06</div>
+  <h1>FP8 Static vs bf16 on Trainium</h1>
+  <p class="lede">What <span class="fp8">FP8 W8A8 static-scale</span> quantization of the DiT linears buys over the unquantized bf16 path on trn2 at tensor parallelism 4: per-step latency, end-to-end latency, compile cost and render quality, across six models.</p>
+</header>
+
+<ul class="toc">
+  <li><a href="#summary">Summary</a></li>
+  <li><a href="#step">DiT step</a></li>
+  <li><a href="#e2e">End to end</a></li>
+  <li><a href="#compile">Compile and preparation</a></li>
+  <li><a href="#quality">Render quality</a></li>
+  <li><a href="#levers">The VC2 finding</a></li>
+  <li><a href="#method">Method and evidence</a></li>
+</ul>
+
+<section id="summary">
+<h2>Summary</h2>
+<div class="col">
+<p>FP8 static quantizes the attention q/k/v/out and FFN in/out linears of each DiT to FP8 e4m3 with per-tensor weight scales and one calibrated activation scale per layer; everything else stays bf16. Measured against the same bf16 model, same prompt, seed and shape, on trn2.3xlarge:</p>
+</div>
+<div class="facts">
+  <div class="fact"><div class="num">0.83–0.97×</div><div class="lbl">DiT step vs bf16 on Wan 2.1, HunyuanVideo, Qwen-Image, FLUX (LTX-2 is the exception at 1.035×)</div></div>
+  <div class="fact"><div class="num">−11 to −28 %</div><div class="lbl">cold end-to-end latency: FP8 weights are half the bytes to read and shard</div></div>
+  <div class="fact"><div class="num">27–35 dB</div><div class="lbl">PSNR of the FP8 render against the bf16 render; LPIPS 0.03–0.10</div></div>
+  <div class="fact"><div class="num">478 s</div><div class="lbl">Wan 2.1 FP8 compile (transformer only) against 7,879 s for a full bf16 build</div></div>
+</div>
+<div class="col">
+<p>The step-time picture changed on 2026-10-05. Until then FP8 was 2–4&nbsp;% slower than bf16 on Wan while winning everywhere else. The cause was not quantization: Wan's transformer stage ran without <code>NEURON_RT_VIRTUAL_CORE_SIZE=2</code>, which the other models already had. With that and <code>--vectorize-strided-dma</code> as the new Wan default, both arms get 15&nbsp;% faster and FP8 ends 2.7&nbsp;% ahead of bf16. Section 5 has the detail.</p>
+</div>
+</section>
+
+<section id="step">
+<h2>DiT step: bf16 vs FP8 static</h2>
+<p class="col">Per-step wall time of the denoising loop on the device, step 0 excluded, median of 19 steps, two generate runs each. All runs tp4; shapes are each model's benchmark shape. Rows marked <em>new defaults</em> were measured on 2026-10-05/06 with VC2 and strided DMA on; the others are the 2026-10-03 fan-out on the same host image and compiler (neuronx-cc 2.26).</p>
+<div class="tbl"><table>
+  <thead><tr><th>Model</th><th>Shape, steps</th><th class="n">bf16</th><th class="n">FP8 static</th><th class="n">FP8 / bf16</th><th>Note</th></tr></thead>
+  <tbody>
+    <tr class="hl"><td>Wan 2.1 14B</td><td>480×832×9, 20</td><td class="n">486.2 ms</td><td class="n">473.0 ms</td><td class="n faster">0.973×</td><td>new defaults (VC2 + strided DMA)</td></tr>
+    <tr class="dim"><td>Wan 2.1 14B</td><td>480×832×9, 20</td><td class="n">573.7 ms</td><td class="n">585.1 ms</td><td class="n slower">1.020×</td><td>old defaults, re-measured 2026-10-05 (10-03: 573.0 / 586.9)</td></tr>
+    <tr class="dim"><td>Wan 2.2 A14B</td><td>480×832×9, 20</td><td class="n">572.6 ms</td><td class="n">597.2 ms</td><td class="n slower">1.043×</td><td>old defaults (10-03); not yet re-run with VC2</td></tr>
+    <tr><td>HunyuanVideo 13B</td><td>320×512×61, 20</td><td class="n">869.7 ms</td><td class="n">724.4 ms</td><td class="n faster">0.833×</td><td>10-03; FP8 re-measured 2026-10-05 at 726.0 ms</td></tr>
+    <tr><td>Qwen-Image 20B</td><td>1024², 20</td><td class="n">415.3 ms</td><td class="n">361.3 ms</td><td class="n faster">0.870×</td><td>10-03; FP8 re-measured at 362.2 ms</td></tr>
+    <tr><td>FLUX.1-dev 12B</td><td>1024², 28</td><td class="n">3.61 it/s</td><td class="n">3.80 it/s</td><td class="n faster">0.95×</td><td>no per-step timer in the FLUX log; denoise-loop rate (FP8 re-measured at 4.31–4.39 it/s)</td></tr>
+    <tr class="hl"><td>LTX-2 19B</td><td>480×704×49, 20</td><td class="n">413.7 ms</td><td class="n">428.4 ms</td><td class="n slower">1.035×</td><td>new defaults; the one model where FP8 is now slower</td></tr>
+    <tr class="dim"><td>LTX-2 19B</td><td>480×704×49, 20</td><td class="n">457.9 ms</td><td class="n">440.3 ms</td><td class="n faster">0.962×</td><td>old defaults (10-03)</td></tr>
+  </tbody>
+</table></div>
+
+<div class="legend"><span><i style="background: var(--muted)"></i>bf16</span><span><i style="background: var(--fp8)"></i>FP8 static</span><span>DiT step, ms, current defaults per model</span></div>
+<div class="bars" aria-label="DiT step per model, bf16 vs FP8 static, in milliseconds">
+  <div class="bar"><div class="name">HunyuanVideo</div><div class="track"><div class="seg bf16" style="width: 100%"><span>869.7</span></div><div class="seg q" style="width: 83.3%"><span>724.4</span></div></div></div>
+  <div class="bar"><div class="name">Wan 2.2 (old defaults)</div><div class="track"><div class="seg bf16" style="width: 65.8%"><span>572.6</span></div><div class="seg q" style="width: 68.7%"><span>597.2</span></div></div></div>
+  <div class="bar"><div class="name">Wan 2.1</div><div class="track"><div class="seg bf16" style="width: 55.9%"><span>486.2</span></div><div class="seg q" style="width: 54.4%"><span>473.0</span></div></div></div>
+  <div class="bar"><div class="name">LTX-2</div><div class="track"><div class="seg bf16" style="width: 47.6%"><span>413.7</span></div><div class="seg q" style="width: 49.3%"><span>428.4</span></div></div></div>
+  <div class="bar"><div class="name">Qwen-Image</div><div class="track"><div class="seg bf16" style="width: 47.8%"><span>415.3</span></div><div class="seg q" style="width: 41.5%"><span>361.3</span></div></div></div>
+  <div class="bar"><div class="name">FLUX.1-dev</div><div class="track"><div class="seg bf16" style="width: 31.9%"><span>277 (1/3.61 it/s)</span></div><div class="seg q" style="width: 30.3%"><span>263 (1/3.80 it/s)</span></div></div></div>
+</div>
+<p class="note">Bars are to one scale (869.7 ms = full width). FLUX is converted from its loop rate.</p>
+
+<div class="col">
+<ul>
+  <li><strong>Joint-attention models gain the most.</strong> HunyuanVideo −17&nbsp;%, Qwen-Image −13&nbsp;%, FLUX −5&nbsp;%. Their token rows (4096, 10240, 1024, 512) are 16-aligned, and they already ran VC2.</li>
+  <li><strong>Wan 2.1 flipped from +2.4&nbsp;% to −2.7&nbsp;%</strong> once its transformer stage ran VC2 with strided DMA. Numerics are bit-identical to the old graph; only the schedule changed.</li>
+  <li><strong>LTX-2 flipped the other way.</strong> VC2 helps its bf16 graph by 10&nbsp;% but its FP8 graph by only 3&nbsp;%, so FP8 is now 3.5&nbsp;% slower per step. Its 2310 video rows are not 16-aligned and its audio stream adds ~51-row FP8 matmuls where the quantize chain dominates. FP8 still buys LTX-2 the cold-start win below.</li>
+</ul>
+</div>
+</section>
+
+<section id="e2e">
+<h2>End to end</h2>
+<p class="col">Wall time of one <code>difflet generate</code> including weight load, text encoding, the denoising loop and VAE decode. Cold = OS page cache dropped before the run (a real disk read of the weights); warm = the run right after it. 2026-10-03 benchmark harness, device VAE.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Model</th><th class="n">Cold bf16</th><th class="n">Cold FP8</th><th class="n">Δ cold</th><th class="n">Warm bf16</th><th class="n">Warm FP8</th><th class="n">Δ warm</th></tr></thead>
+  <tbody>
+    <tr><td>Wan 2.1 14B</td><td class="n">413.9 s</td><td class="n">298.0 s</td><td class="n faster">−28 %</td><td class="n">85.7 s</td><td class="n">82.5 s</td><td class="n faster">−4 %</td></tr>
+    <tr><td>Wan 2.2 A14B</td><td class="n">404.9 s</td><td class="n">300.1 s</td><td class="n faster">−26 %</td><td class="n">81.5 s</td><td class="n">78.3 s</td><td class="n faster">−4 %</td></tr>
+    <tr><td>HunyuanVideo 13B</td><td class="n">596.1 s</td><td class="n">530.4 s</td><td class="n faster">−11 %</td><td class="n">113.0 s</td><td class="n">111.6 s</td><td class="n faster">−1 %</td></tr>
+    <tr><td>Qwen-Image 20B</td><td class="n">481.8 s</td><td class="n">400.5 s</td><td class="n faster">−17 %</td><td class="n">66.5 s</td><td class="n">64.5 s</td><td class="n faster">−3 %</td></tr>
+    <tr><td>FLUX.1-dev 12B</td><td class="n">306.7 s</td><td class="n">243.1 s</td><td class="n faster">−21 %</td><td class="n">39.9 s</td><td class="n">38.6 s</td><td class="n faster">−3 %</td></tr>
+    <tr><td>LTX-2 19B</td><td class="n">823.6 s</td><td class="n">631.9 s</td><td class="n faster">−23 %</td><td class="n">60.4 s</td><td class="n">55.4 s</td><td class="n faster">−8 %</td></tr>
+  </tbody>
+</table></div>
+<div class="col">
+<p>The cold gain is the weight bytes: Wan 2.1's transformer shrinks from 57.2 GB to 15.0 GB on disk, and the first run has to read and shard whatever is there. Warm runs already have the weights in the page cache, so the warm difference is essentially the DiT step difference times the step count.</p>
+<p>With the 2026-10-05 Wan defaults (host VAE, so not directly comparable with the table): warm e2e bf16 89.5 s, FP8 89.3 s; cold 179.2 s vs 86.2 s.</p>
+</div>
+</section>
+
+<section id="compile">
+<h2>Compile and preparation</h2>
+<div class="col">
+<p>FP8 adds one offline step and removes most of the compile.</p>
+</div>
+<div class="tbl"><table>
+  <thead><tr><th>Model</th><th class="n">Quantize (CPU, once)</th><th class="n">Compile bf16 (full)</th><th class="n">Compile FP8</th><th>What the FP8 arm builds</th></tr></thead>
+  <tbody>
+    <tr><td>Wan 2.1 14B</td><td class="n">415–430 s</td><td class="n">7,879 s</td><td class="n">478 s</td><td>transformer only; VAE (6,100 s of the bf16 build) and T5 reused</td></tr>
+    <tr><td>Wan 2.2 A14B</td><td class="n">2 experts</td><td class="n">6,581 s</td><td class="n">661 s</td><td>both expert transformers</td></tr>
+    <tr><td>HunyuanVideo 13B</td><td class="n">—</td><td class="n">4,632 s</td><td class="n">4,144 s (1,345 s with host VAE)</td><td>DiT + device VAE unless <code>--host-vae</code></td></tr>
+    <tr><td>Qwen-Image 20B</td><td class="n">—</td><td class="n">1,254 s</td><td class="n">721 s</td><td>DiT; text encoder and VAE reused</td></tr>
+    <tr><td>FLUX.1-dev 12B</td><td class="n">—</td><td class="n">1,038 s</td><td class="n">1,349 s</td><td>all components share one stage, so FP8 rebuilds everything</td></tr>
+    <tr><td>LTX-2 19B</td><td class="n">—</td><td class="n">1,839 s</td><td class="n">834 s</td><td>transformer only</td></tr>
+  </tbody>
+</table></div>
+<p class="col note">Quantization writes an FP8 checkpoint under the compile cache (400 linears for Wan 2.1); it is reused across compiles and shapes. The activation calibration JSON comes from a CPU run of the real denoise loop at the benchmark shape and is checked into the repo per model.</p>
+</section>
+
+<section id="quality">
+<h2>Render quality: FP8 against bf16</h2>
+<p class="col">Decoded video or image of the FP8 arm compared with the bf16 arm of the same prompt, seed, shape and step count. PSNR and SSIM per frame averaged; LPIPS with the AlexNet backbone. All renders are the same scene with the same motion; the differences are fine texture.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Model</th><th class="n">PSNR</th><th class="n">SSIM</th><th class="n">LPIPS</th><th>Source</th></tr></thead>
+  <tbody>
+    <tr><td>Wan 2.1 14B</td><td class="n">33.7 dB</td><td class="n">0.953</td><td class="n">0.035</td><td>2026-10-05 A/B, host VAE, latent SNR 24.9 dB; identical across the old and new graphs</td></tr>
+    <tr><td>Wan 2.2 A14B</td><td class="n">35.2 dB</td><td class="n">0.919</td><td class="n">0.099</td><td>2026-10-03 harness</td></tr>
+    <tr><td>Qwen-Image 20B</td><td class="n">33.3 dB</td><td class="n">0.988</td><td class="n">0.026</td><td>2026-10-03 harness</td></tr>
+    <tr><td>LTX-2 19B</td><td class="n">33.9 dB</td><td class="n">0.936</td><td class="n">0.080</td><td>2026-10-06 with the new defaults; unchanged from 10-03</td></tr>
+    <tr><td>FLUX.1-dev 12B</td><td class="n">29.2 dB</td><td class="n">0.974</td><td class="n">0.051</td><td>a single sharp 1024² image, where per-pixel PSNR is strict; SSIM and LPIPS are in line with the others</td></tr>
+    <tr><td>HunyuanVideo 13B</td><td class="n">26.8 dB</td><td class="n">0.892</td><td class="n">0.102</td><td>2026-10-03; the double blocks' text q/k projections stay bf16 (device NaN at 256 text rows under tp4)</td></tr>
+  </tbody>
+</table></div>
+<div class="col">
+<div class="callout">
+<p>Runs are bit-deterministic: two FP8 runs of the same seed give identical latents, and so do two bf16 runs. The scheduling levers of 2026-10-05 (VC2, strided DMA, bf16-domain quantize) change none of the FP8 values: three FP8 arms compared against one bf16 render gave the same latent cosine to six digits.</p>
+</div>
+<p>For reference, the retired weight-only FP8 mode (FP8 weights dequantized to bf16, bf16 matmuls) measured 24.6 dB PSNR on Wan 2.1 at bf16 step parity (563 ms), 9 dB below W8A8 static, and was removed on 2026-10-03.</p>
+</div>
+</section>
+
+<section id="levers">
+<h2>The VC2 finding: why Wan looked like the loser</h2>
+<div class="col">
+<p>An instruction-level trace of the Wan 2.1 FP8 step showed the scalar engine 63 ms busier than bf16 (the fp32 dequantize and the ×1/scale) and the tensor engine waiting on it; 79&nbsp;% of the FP8 dots ran single-row because Wan's 4680 token rows tile as 12 × 390 and 390 is not a multiple of 16. We screened runtime and compiler levers on a 2-block probe and confirmed the winners on the full 20-step model, same host, same day:</p>
+</div>
+<div class="tbl"><table>
+  <thead><tr><th>Wan 2.1, tp4, 480×832×9, 20 steps</th><th class="n">bf16</th><th class="n">FP8 static</th><th class="n">FP8 / bf16</th></tr></thead>
+  <tbody>
+    <tr><td>Shipped configuration (VC1, no strided DMA), re-measured</td><td class="n">573.7 ms</td><td class="n">585.1 ms</td><td class="n slower">1.020×</td></tr>
+    <tr class="hl"><td><code>NEURON_RT_VIRTUAL_CORE_SIZE=2</code> + <code>--vectorize-strided-dma</code></td><td class="n">486.1 ms</td><td class="n">473.0 ms</td><td class="n faster">0.973×</td></tr>
+    <tr><td>Same, plus bf16-domain quantize</td><td class="n">—</td><td class="n">473.0 ms</td><td class="n">neutral</td></tr>
+    <tr><td>Production CLI after the change, no switches</td><td class="n">486.2 ms</td><td class="n">473.0 ms</td><td class="n faster">0.973×</td></tr>
+  </tbody>
+</table></div>
+<div class="col">
+<ul>
+  <li><strong>VC2 is the lever</strong> (−14&nbsp;% alone on the probe); strided DMA adds 1–2&nbsp;% on top for Wan and nothing measurable on HunyuanVideo (726.0 → 722.6 ms), Qwen-Image (362.2 → 360.0 ms) or FLUX (4.31 → 4.39 it/s), which already ran VC2. Those three keep strided DMA off.</li>
+  <li><strong>LTX-2 gets both switches too</strong>: bf16 459.7 → 413.7 ms. Its FP8 graph gains less (440.3 → 428.4 ms), which is why it is the one model where FP8 is now slower than bf16.</li>
+  <li><strong>What did not help</strong>: bf16-domain quantize and dequantize (neutral, identical FP8 output), padding the token sequence to 128/256/512 rows for double-row matmuls (15–23&nbsp;% slower for bf16 and FP8 alike), the compiler's internal matmul flags (not reachable from the 2.26 command line), a hand-written NKI FP8 linear kernel (17–30&nbsp;% slower: the custom-call boundary costs more fusion than the fused epilogue saves).</li>
+</ul>
+</div>
+</section>
+
+<section id="method">
+<h2>Method and evidence</h2>
+<div class="col">
+<ul>
+  <li><strong>Hardware and toolchain.</strong> trn2.3xlarge, one Trainium2 chip as 4 logical NeuronCores, tensor parallelism 4, neuronx-cc 2.26.6360, NxD 0.19, nki 0.5.0, torch 2.9.1. Host idle during every measurement; no two compiles overlap.</li>
+  <li><strong>DiT step</strong> is the device-synced wall time per denoising step from the generate log, step 0 excluded, median of 19. <strong>End to end</strong> is the <code>difflet generate</code> wall clock. Two runs per arm; run 0 cold, run 1 warm.</li>
+  <li><strong>FP8 arms</strong> use <code>--quant fp8 --quant-calibration &lt;model&gt;.json</code>; the calibration is a CPU pass over the real 20-step loop at the benchmark shape.</li>
+  <li><strong>Quality</strong> compares the FP8 render with the bf16 render of the same prompt and seed (<code>scripts/ptq_compare_outputs.py</code>: PSNR, SSIM, LPIPS-alex, latent cosine and SNR). Single-seed latent SNR alone is not a usable gate: CPU bf16 vs device bf16 already differs by 14 dB after 20 steps.</li>
+  <li><strong>Evidence in the repo</strong> (branch <span class="mono">quantization</span>): <span class="mono">artifacts/verification-2026-10-05/fp8-ab/</span> (Wan A/Bs), <span class="mono">artifacts/verification-2026-10-05/model-screen/</span> (per-model CLI runs), <span class="mono">artifacts/verification-2026-10-05/fp8-screen/</span> (2-block screen), <span class="mono">docs/verification/2026-10-03-ptq-fp8-static-fanout.md</span> and <span class="mono">docs/verification/2026-10-05-fp8-step-levers.md</span>.</li>
+</ul>
+</div>
+</section>
+
+<footer>
+  Companion to the tech report <em>FP8 DiT Inference on Trainium</em> (2026-10-04), which covers the FP8 GEMM, the GPU-vs-Trainium differences, the HunyuanVideo case study and the NKI kernel. Wan 2.2's new-defaults run is still to come; its ratio is expected to move with Wan 2.1's.
+</footer>
+</div>
