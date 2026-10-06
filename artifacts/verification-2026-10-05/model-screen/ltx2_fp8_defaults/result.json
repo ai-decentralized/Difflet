@@ -1,0 +1,23 @@
+{
+ "name": "ltx2_fp8_defaults",
+ "flags": "--model-id Lightricks/LTX-2 --revision dfcc2108383fe1aaa0584bdf55d368a4bdadd90c --tp-degree 4 --height 480 --width 704 --num-frames 49 --cache-dir /home/ubuntu/.cache/difflet-ltx2-levers --quant fp8 --quant-calibration /home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-03/fp8-dyn-step/static/act_calibration_ltx_2.json",
+ "compile_s": 643,
+ "runs": [
+  {
+   "run": 0,
+   "e2e_wall_s": 622,
+   "dit_step_ms_median": 428.4,
+   "dit_step_ms_mean": 429.0,
+   "n_steps": 19,
+   "it_per_s": 5.46
+  },
+  {
+   "run": 1,
+   "e2e_wall_s": 62,
+   "dit_step_ms_median": 426.8,
+   "dit_step_ms_mean": 426.7,
+   "n_steps": 19,
+   "it_per_s": 1.57
+  }
+ ]
+}
