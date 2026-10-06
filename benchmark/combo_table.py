@@ -3,9 +3,10 @@ benchmark/trn2/run_combo.sh, plus the per-metric winners.
 
     DIFFLET_BENCH_DEVICE=trn2combo python -m benchmark.combo_table --model flux_1_dev
 
-Columns: per-step = real-loop mean per DiT call (step_realloop); DiT calls =
-steps minus TeaCache skips; loop/step = resident denoise loop wall / steps
-(what TeaCache buys); resident = in-process generate wall, model loaded
+Columns: per DiT call = real-loop mean gap between DiT calls (step_realloop);
+DiT calls = steps minus TeaCache skips (x2 under sequential CFG); avg per
+denoise step = denoise loop wall / steps (what layout and TeaCache buy
+together); denoise loop = first DiT call to last; resident = in-process generate wall, model loaded
 (median of step_realloop --generates); warm e2e = fresh-process CLI generate
 with a warm page cache (median of 3), split into weight load and the rest;
 PSNR/SSIM = this cell's output vs the tp4 cell's (same seed, same prompt).
@@ -44,6 +45,9 @@ def _row(slug: str, label: str) -> dict | None:
         "load_s": bd.get("weights_load_total_s"),
         "parity": _parity(slug, label, cfg),
         "status": d.get("status"), "loop_s": loop,
+        # denoise loop / steps: the average cost of one denoise step, skipped
+        # steps (TeaCache) and both CFG branches included
+        "step_avg_ms": d.get("loop_step_ms") or (loop and loop / cfg.steps * 1000),
         "blocked": d.get("blocked_reason"),
     }
 
@@ -87,15 +91,16 @@ def _psnr(r: dict | None) -> str:
 
 def table(slug: str) -> list[str]:
     rows = [r for r in (_row(slug, l) for l in [*COMBO_LABELS, *CFG_TRACK, *CFG_TRACK_HOSTVAE, *RING_STUDY]) if r]
-    L = ["| label | configuration | per-step (ms) | DiT calls | denoise loop (s) | "
-         "resident (s) | warm e2e (s) | load (s) | PSNR vs ref |",
-         "|---|---|---|---|---|---|---|---|---|"]
+    L = ["| label | configuration | per DiT call (ms) | DiT calls | avg per denoise step (ms) | "
+         "denoise loop (s) | resident (s) | warm e2e (s) | load (s) | PSNR vs ref |",
+         "|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         if r["status"] == "blocked":
-            L.append(f"| `{r['label']}` | {r['desc']} | **BLOCKED** — {r['blocked']} ||||||||")
+            L.append(f"| `{r['label']}` | {r['desc']} | **BLOCKED** — {r['blocked']} |||||||||")
             continue
         L.append(f"| `{r['label']}` | {r['desc']} | {_fmt(r['step_ms'])} | "
-                 f"{_fmt(r['calls'], '{}')}/{r['steps']} | {_fmt(r['loop_s'], '{:.2f}')} | "
+                 f"{_fmt(r['calls'], '{}')}/{r['steps']} | {_fmt(r['step_avg_ms'])} | "
+                 f"{_fmt(r['loop_s'], '{:.2f}')} | "
                  f"{_fmt(r['resident_s'], '{:.2f}')} | "
                  f"{_fmt(r['warm_s'])} | {_fmt(r['load_s'])} | {_psnr(r['parity'])}"
                  f"{'' if ref_label(slug, r['label']) == 'tp4' else ' (vs ' + ref_label(slug, r['label']) + ')'} |")
