@@ -1,0 +1,23 @@
+{
+ "name": "hv_fp8_sdma",
+ "flags": "--model-id hunyuanvideo-community/HunyuanVideo --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773 --tp-degree 4 --height 320 --width 512 --num-frames 61 --host-vae --quant fp8 --quant-calibration /home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-03/hv-fp8/static/act_calibration_hv.json",
+ "compile_s": 543,
+ "runs": [
+  {
+   "run": 0,
+   "e2e_wall_s": 243,
+   "dit_step_ms_median": 722.6,
+   "dit_step_ms_mean": 722.8,
+   "n_steps": 19,
+   "it_per_s": null
+  },
+  {
+   "run": 1,
+   "e2e_wall_s": 244,
+   "dit_step_ms_median": 722.5,
+   "dit_step_ms_mean": 722.7,
+   "n_steps": 19,
+   "it_per_s": null
+  }
+ ]
+}

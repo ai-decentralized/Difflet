@@ -1,0 +1,23 @@
+{
+ "name": "qwen_fp8_sdma",
+ "flags": "--model-id Qwen/Qwen-Image --revision 75e0b4be04f60ec59a75f475837eced720f823b6 --tp-degree 4 --height 1024 --width 1024 --quant fp8 --quant-calibration /home/ubuntu/Difflet/.claude/worktrees/fp8-step-experiments/artifacts/verification-2026-10-03/fp8-dyn-step/static/act_calibration_qwen_image.json",
+ "compile_s": 437,
+ "runs": [
+  {
+   "run": 0,
+   "e2e_wall_s": 191,
+   "dit_step_ms_median": 360.0,
+   "dit_step_ms_mean": 360.2,
+   "n_steps": 19,
+   "it_per_s": null
+  },
+  {
+   "run": 1,
+   "e2e_wall_s": 64,
+   "dit_step_ms_median": 360.1,
+   "dit_step_ms_mean": 360.3,
+   "n_steps": 19,
+   "it_per_s": null
+  }
+ ]
+}
