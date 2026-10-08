@@ -135,6 +135,12 @@ class ServeOptions:
         return 24.0 * 60.0 * 60.0 if output_modality == "video" else 30.0
 
 
+# Model types whose serving adapters wire the probe-free TeaCache controller
+# (--teacache-cadence / --teacache-online-delta) into their denoise loop. Both
+# run on the eager TPU backend and on Trainium. Flux/HunyuanVideo/LTX-2 keep
+# adaptive-only (or no) TeaCache in serving.
+_PROBE_FREE_TEACACHE_SERVING_MODELS = frozenset({"qwen_image", "wan"})
+
 # (model_type, output_modality) pairs whose serving adapters route a compiled
 # shape SET on one resident worker. HunyuanVideo 1.5 and LTX-2 are excluded:
 # their applications do not accept K>1 bucket sets.
@@ -199,12 +205,12 @@ def build_serving_profile(
         )
     if sp_enabled and not entry.require_capabilities().supports_sp:
         raise invalid_extra_body(f"{model_id} does not support --sp serving.")
-    if teacache_cadence is not None or teacache_online_delta is not None:
-        raise invalid_extra_body(
-            "resident serving does not yet implement --teacache-cadence or "
-            "--teacache-online-delta; use adaptive --teacache-speedup with a "
-            "calibration file."
-        )
+    _validate_probe_free_teacache(
+        model_type=model_type,
+        teacache_cadence=teacache_cadence,
+        teacache_online_delta=teacache_online_delta,
+        teacache_speedup=teacache_speedup,
+    )
     if output_modality == "video" and teacache_speedup is not None:
         raise invalid_extra_body("resident video serving does not yet expose adaptive TeaCache.")
     canonical_shapes = None
@@ -308,11 +314,69 @@ def build_serving_profile(
         teacache_speedup=teacache_speedup,
         teacache_calibration=None,
         teacache_calibration_data=frozen_calibration,
+        teacache_cadence=teacache_cadence,
+        teacache_online_delta=teacache_online_delta,
         output_fps=default_fps if output_modality == "video" else None,
         host_vae=(default_host_vae or host_vae) if output_modality == "video" else False,
         clip_placement=resolved_clip_placement,
         shapes=canonical_shapes,
     )
+
+
+def _validate_probe_free_teacache(
+    *,
+    model_type: str,
+    teacache_cadence: int | None,
+    teacache_online_delta: float | None,
+    teacache_speedup: float | None,
+) -> None:
+    """Check the probe-free TeaCache flags (`--teacache-cadence` / `--teacache-online-delta`).
+
+    Both modes are host-side controller state in the model's pipeline and need
+    no probe graph or calibration file, which is what makes them available on
+    the eager TPU backend as well as Trainium. Only the adapters that wire the
+    controller are accepted here, so a misconfigured profile fails at option
+    resolution instead of after a worker has loaded 20B of weights.
+    """
+    active = [
+        name
+        for name, on in (
+            ("--teacache-cadence", teacache_cadence is not None),
+            ("--teacache-online-delta", teacache_online_delta is not None),
+            ("--teacache-speedup", teacache_speedup is not None),
+        )
+        if on
+    ]
+    if len(active) > 1:
+        raise invalid_extra_body(f"{active[0]} and {active[1]} are mutually exclusive.")
+    if teacache_cadence is None and teacache_online_delta is None:
+        return
+    if model_type not in _PROBE_FREE_TEACACHE_SERVING_MODELS:
+        supported = ", ".join(sorted(_PROBE_FREE_TEACACHE_SERVING_MODELS))
+        raise invalid_extra_body(
+            "--teacache-cadence / --teacache-online-delta are implemented for "
+            f"{supported} serving only (got model type {model_type!r}); use adaptive "
+            "--teacache-speedup with a calibration file where the adapter supports it."
+        )
+    if teacache_cadence is not None and (
+        isinstance(teacache_cadence, bool)
+        or not isinstance(teacache_cadence, int)
+        or teacache_cadence < 2
+    ):
+        # cadence=1 would skip EVERY step inside the warmup/cooldown window —
+        # a resident server misconfigured that way serves garbage for hours.
+        raise invalid_extra_body(
+            "--teacache-cadence must be an integer >= 2 (skip every N-th DiT step)."
+        )
+    if teacache_online_delta is not None and (
+        isinstance(teacache_online_delta, bool)
+        or not math.isfinite(teacache_online_delta)
+        or teacache_online_delta <= 0
+    ):
+        raise invalid_extra_body(
+            "--teacache-online-delta must be a finite positive alpha (fraction of the "
+            "first post-warmup output delta below which a step is skipped)."
+        )
 
 
 def _load_serving_teacache_calibration(

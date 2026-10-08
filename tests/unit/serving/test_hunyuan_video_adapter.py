@@ -453,6 +453,10 @@ def test_profile_rejects_unsupported_parallel_axes(parallel, match, tmp_path):
         ({"output_mime_type": "image/png"}, "video/mp4"),
         ({"parallel": DiffletParallelConfig(tp_degree=2)}, "tp_degree=4"),
         ({"parallel": DiffletParallelConfig(tp_degree=4, dp_degree=2)}, "dp_degree=1"),
+        # No TeaCache in HunyuanVideo serving: adaptive OR probe-free.
+        ({"teacache_speedup": 1.5}, "TeaCache"),
+        ({"teacache_cadence": 2}, "TeaCache"),
+        ({"teacache_online_delta": 0.6}, "TeaCache"),
     ],
 )
 def test_profile_rejects_shapes_and_runtime_contract_mismatches(changed, match, tmp_path):

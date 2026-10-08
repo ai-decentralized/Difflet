@@ -418,17 +418,20 @@ def test_serve_options_maps_force_to_compile_policy():
 
 
 @pytest.mark.parametrize(
-    "flag,value",
+    "flag,value,field,expected",
     [
-        ("--teacache-cadence", "2"),
-        ("--teacache-online-delta", "0.6"),
+        ("--teacache-cadence", "2", "teacache_cadence", 2),
+        ("--teacache-online-delta", "0.6", "teacache_online_delta", 0.6),
     ],
 )
-def test_difflet_serve_preserves_unimplemented_teacache_modes_for_adapter(
+def test_difflet_serve_forwards_probe_free_teacache_modes_to_options(
     monkeypatch,
     flag,
     value,
+    field,
+    expected,
 ):
+    """The CLI only parses; model-type support is decided by build_serving_profile."""
     calls = []
     monkeypatch.setattr("difflet.cli.serve.run", calls.append)
     cli_main = importlib.import_module("difflet.cli.main")
@@ -437,13 +440,14 @@ def test_difflet_serve_preserves_unimplemented_teacache_modes_for_adapter(
         [
             "serve",
             "--model-id",
-            "black-forest-labs/FLUX.1-dev",
+            "Qwen/Qwen-Image",
             flag,
             value,
         ]
     )
 
     assert len(calls) == 1
+    assert getattr(calls[0], field) == expected
 
 
 def test_difflet_serve_preserves_calibration_without_speedup_for_adapter(monkeypatch):

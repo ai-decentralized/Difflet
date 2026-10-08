@@ -147,6 +147,51 @@ class _OnDeviceTransformer:
         return out.cpu()
 
 
+def build_wan_orchestrator(
+    *,
+    model_path: str,
+    text_encoder,
+    transformer,
+    transformer_2,
+    dtype,
+    shape: dict[str, int | None],
+    text_seq_len: int,
+    kwargs: dict[str, Any],
+):
+    """The backend-neutral ``WanOrchestrator`` the TPU experts run under.
+
+    Split out of ``load_eager`` so the kwargs contract is testable without a
+    chip: the orchestrator is the same class the Trainium application builds
+    (``NeuronWanApplication``), and the TeaCache kwargs below mirror what it
+    forwards. Only the probe-free modes are wired here — the adaptive path
+    needs the Trainium CPU-shadow probe and a calibration file, neither of
+    which exists on this backend, so ``teacache_calibration_path`` is
+    deliberately not forwarded rather than forwarded and left to fail late.
+    """
+    from difflet.models.wan.pipeline import WanOrchestrator
+
+    return WanOrchestrator(
+        model_path=model_path,
+        text_encoder=text_encoder,
+        transformer=transformer,
+        transformer_2=transformer_2,
+        # The VAE decodes on the host: AutoencoderKLWan raises an
+        # unsupported-negative-index error under torch_xla, and the serving
+        # stage runner owns that decode anyway.
+        vae_decoder=None,
+        dtype=dtype,
+        height=shape["height"],
+        width=shape["width"],
+        num_frames=shape["num_frames"],
+        max_text_length=text_seq_len,
+        # Probe-free TeaCache: a host-side skip controller over the orchestrator's
+        # own noise_pred trajectory. Wan's loop already round-trips the latents
+        # to the host every step for UniPC, so the controller adds no new sync.
+        teacache_cadence=kwargs.get("teacache_cadence"),
+        teacache_online_delta_alpha=kwargs.get("teacache_online_delta_alpha"),
+    )
+
+
 class TpuWanApplication(torch.nn.Module):
     def __init__(
         self,
@@ -276,8 +321,6 @@ class TpuWanApplication(torch.nn.Module):
         import torch_xla
         import torch_xla.core.xla_model as xm
 
-        from difflet.models.wan.pipeline import WanOrchestrator
-
         expert = self._require_transformer("load")
         module = expert._prepare_module().to(torch_xla.device())
         xm.mark_step()
@@ -296,20 +339,15 @@ class TpuWanApplication(torch.nn.Module):
         self.text_encoder = _BroadcastTextEncoder(
             self.model_path, int(self.config.text_dim), self.text_seq_len, self.dtype
         )
-        self.pipeline = WanOrchestrator(
+        self.pipeline = build_wan_orchestrator(
             model_path=self.model_path,
             text_encoder=self.text_encoder,
             transformer=transformer,
             transformer_2=transformer_2,
-            # The VAE decodes on the host: AutoencoderKLWan raises an
-            # unsupported-negative-index error under torch_xla, and the serving
-            # stage runner owns that decode anyway.
-            vae_decoder=None,
             dtype=self.dtype,
-            height=self.shape["height"],
-            width=self.shape["width"],
-            num_frames=self.shape["num_frames"],
-            max_text_length=self.text_seq_len,
+            shape=self.shape,
+            text_seq_len=self.text_seq_len,
+            kwargs=self.kwargs,
         )
 
     def has_compiled_artifacts(self, compiled_model_path: str) -> bool:
@@ -354,4 +392,4 @@ class TpuWanApplication(torch.nn.Module):
         return self._require_transformer("forward")(*args, **kwargs)
 
 
-__all__ = ["TpuWanApplication"]
+__all__ = ["TpuWanApplication", "build_wan_orchestrator"]

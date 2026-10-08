@@ -126,6 +126,7 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
                     res.step_latency_natural = Stats.from_samples(nat_step).__dict__
             if last:
                 res.stage_seconds = last.get("stage_seconds") or {}
+                res.teacache = last.get("teacache")
                 alt: dict = {}
                 if last.get("throughput_step_seconds") is not None:
                     alt["throughput"] = last["throughput_step_seconds"]

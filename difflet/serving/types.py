@@ -252,6 +252,11 @@ class ServingProfile:
     teacache_speedup: float | None = None
     teacache_calibration: str | None = None
     teacache_calibration_data: TeaCacheCalibration | None = None
+    # Probe-free TeaCache (fixed cadence / online-delta). Host-side controller
+    # state only: neither mode touches the compiled graph, so they are NOT part
+    # of any compile-cache identity and may be toggled without a recompile.
+    teacache_cadence: int | None = None
+    teacache_online_delta: float | None = None
     output_fps: int | None = None
     host_vae: bool = False
     clip_placement: ServingPlacement | None = None
