@@ -11,6 +11,7 @@ import dataclasses
 import importlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -322,10 +323,22 @@ def test_stage_rejects_malformed_reference(name):
 
 @pytest.fixture
 def captured_run(monkeypatch):
+    """Record the launch instead of spawning it: ``api`` is "run" for the single-process
+    ``subprocess.run(cmd, env=env, check=True)``, "popen" for the torchrun branch."""
     captured: dict = {}
-    monkeypatch.setattr(
-        "subprocess.run", lambda cmd, env, check: captured.update(cmd=cmd, env=env)
-    )
+
+    def fake_run(cmd, env, check):
+        captured.update(api="run", cmd=cmd, env=env, check=check)
+
+    class FakePopen:
+        def __init__(self, cmd, env):
+            captured.update(api="popen", cmd=cmd, env=env)
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.Popen", FakePopen)
     return captured
 
 
@@ -371,6 +384,7 @@ def test_runner_explicit_neuron_backend_uses_torchrun(monkeypatch, captured_run)
         cli_args=["--exec-mode", "compile"],
     )
 
+    assert captured_run["api"] == "popen"  # _run_torchrun, not subprocess.run
     assert captured_run["cmd"] == build_stage_command(
         "pkg.mod:Orch", "toy", ["--exec-mode", "compile"], nproc=4
     )
@@ -399,6 +413,7 @@ def test_runner_mpmd_strict_environment_pins_visible_cores(monkeypatch, captured
     assert env["NEURON_RT_VISIBLE_CORES"] == "4,5,6,7"
     assert "NEURON_RT_NUM_CORES" not in env
     assert captured_run["cmd"][1:3] == ["-m", "torch.distributed.run"]
+    assert captured_run["api"] == "popen"
 
 
 def test_runner_single_process_without_explicit_backend(monkeypatch, captured_run):
@@ -411,6 +426,7 @@ def test_runner_single_process_without_explicit_backend(monkeypatch, captured_ru
     run_stage("Org/Model", "transformer", num_cores=4, virtual_core_size=None, cli_args=[])
 
     assert captured_run["cmd"][:3] == [sys.executable, "-m", "difflet.cli.stage"]
+    assert (captured_run["api"], captured_run["check"]) == ("run", True)
 
 
 @pytest.mark.parametrize("backend", ["trainium", "tpu", "cpu"])
@@ -424,6 +440,8 @@ def test_runner_single_process_for_aot_or_non_mpmd_backends(monkeypatch, capture
 
     assert captured_run["cmd"][:3] == [sys.executable, "-m", "difflet.cli.stage"]
     assert captured_run["env"]["WORLD_SIZE"] == "8"  # legacy non-strict path: untouched
+    # still subprocess.run(cmd, env=env, check=True): Ctrl-C there is unchanged
+    assert (captured_run["api"], captured_run["check"]) == ("run", True)
 
 
 def test_runner_rejects_unknown_backend(monkeypatch, captured_run):
@@ -434,6 +452,125 @@ def test_runner_rejects_unknown_backend(monkeypatch, captured_run):
     with pytest.raises(ValueError, match="unknown Difflet backend"):
         run_stage("Org/Model", "transformer", num_cores=4, virtual_core_size=None, cli_args=[])
     assert captured_run == {}
+
+
+class _ScriptedTorchrun:
+    """subprocess.Popen stand-in for the torchrun branch. ``waits`` scripts each wait() call
+    in turn: an exception (class or instance) is raised, anything else is the return code.
+    ``calls`` records wait(timeout), kill, terminate and send_signal in order."""
+
+    def __init__(self, waits):
+        self.waits = list(waits)
+        self.calls: list[tuple] = []
+        self.pid = 4242
+
+    def __call__(self, cmd, env):  # used as the Popen class: "constructs" itself
+        self.cmd = cmd
+        return self
+
+    def wait(self, timeout=None):
+        self.calls.append(("wait", timeout))
+        outcome = self.waits.pop(0)
+        if isinstance(outcome, BaseException) or (
+            isinstance(outcome, type) and issubclass(outcome, BaseException)
+        ):
+            raise outcome
+        return outcome
+
+    def kill(self):
+        self.calls.append(("kill",))
+
+    def terminate(self):
+        self.calls.append(("terminate",))
+
+    def send_signal(self, sig):
+        self.calls.append(("send_signal", sig))
+
+
+def _run_scripted_torchrun(monkeypatch, waits, *, shutdown_timeout=None):
+    """run_stage's torchrun branch against _ScriptedTorchrun; returns (fake, raised)."""
+    from difflet.cli.runner import run_stage
+
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    if shutdown_timeout is None:
+        monkeypatch.delenv("TORCH_ELASTIC_SHUTDOWN_TIMEOUT", raising=False)
+    else:
+        monkeypatch.setenv("TORCH_ELASTIC_SHUTDOWN_TIMEOUT", shutdown_timeout)
+    fake = _ScriptedTorchrun(waits)
+    used_run = []
+    monkeypatch.setattr(subprocess, "Popen", fake)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: used_run.append(a))
+    raised = None
+    try:
+        run_stage("pkg.mod:Orch", "toy", num_cores=2, virtual_core_size=None, cli_args=[])
+    except BaseException as exc:  # noqa: BLE001 - the scripted KeyboardInterrupt included
+        raised = exc
+    assert used_run == [], "the torchrun branch went through subprocess.run"
+    assert fake.waits == [], f"scripted wait() outcomes left unused: {fake.waits}"
+    return fake, raised
+
+
+def _timeouts(fake) -> list:
+    return [call[1] for call in fake.calls if call[0] == "wait"]
+
+
+def test_runner_torchrun_ctrl_c_waits_for_torchrun_and_reraises(monkeypatch):
+    """Ctrl-C reached torchrun too (same process group): wait for it to stop its ranks, never
+    kill or signal it, then re-raise. subprocess.run would SIGKILL it after 0.25 s."""
+    fake, raised = _run_scripted_torchrun(monkeypatch, [KeyboardInterrupt, 0])
+    assert isinstance(raised, KeyboardInterrupt)
+    assert [call[0] for call in fake.calls] == ["wait", "wait"]
+    first, grace = _timeouts(fake)
+    assert first is None
+    assert grace == pytest.approx(60.0, abs=1.0)  # torchrun's default 30 s + 30 s margin
+
+
+def test_runner_torchrun_repeated_ctrl_c_keeps_waiting(monkeypatch):
+    """Another Ctrl-C while waiting (torchrun gets that one too) does not end the wait early:
+    the wait has one deadline, counted from the first interrupt."""
+    fake, raised = _run_scripted_torchrun(monkeypatch, [KeyboardInterrupt, KeyboardInterrupt, 0])
+    assert isinstance(raised, KeyboardInterrupt)
+    assert [call[0] for call in fake.calls] == ["wait", "wait", "wait"]
+    _, grace, rest = _timeouts(fake)
+    assert grace == pytest.approx(60.0, abs=1.0)
+    assert 0 <= rest <= grace
+
+
+def test_runner_torchrun_is_killed_only_after_its_shutdown_timeout(monkeypatch, capsys):
+    """Last resort: torchrun still running TORCH_ELASTIC_SHUTDOWN_TIMEOUT + 30 s after the
+    interrupt is killed and reaped, with a warning, and KeyboardInterrupt is still re-raised."""
+    fake, raised = _run_scripted_torchrun(
+        monkeypatch,
+        [KeyboardInterrupt, subprocess.TimeoutExpired("torchrun", 35), 0],
+        shutdown_timeout="5",
+    )
+    assert isinstance(raised, KeyboardInterrupt)
+    assert fake.calls[2:] == [("kill",), ("wait", None)]
+    assert _timeouts(fake)[1] == pytest.approx(35.0, abs=1.0)
+    err = capsys.readouterr().err
+    assert "torchrun (pid 4242) did not exit 35s after being interrupted; killing it" in err
+
+
+def test_runner_torchrun_other_errors_ask_torchrun_to_stop_first(monkeypatch):
+    """An exception torchrun did not also receive (no terminal SIGINT): send it SIGTERM, which
+    it forwards to its ranks like SIGINT, then wait for it the same way and re-raise."""
+    fake, raised = _run_scripted_torchrun(
+        monkeypatch, [subprocess.TimeoutExpired("torchrun", 1), 0], shutdown_timeout="junk"
+    )
+    assert isinstance(raised, subprocess.TimeoutExpired)
+    assert [call[0] for call in fake.calls] == ["wait", "terminate", "wait"]
+    assert _timeouts(fake)[1] == pytest.approx(60.0, abs=1.0)  # unparsable value: default 30 s
+
+
+def test_runner_torchrun_nonzero_exit_raises_called_process_error(monkeypatch):
+    """check=True semantics of the subprocess.run call it replaces."""
+    from difflet.cli.runner import build_stage_command
+
+    fake, raised = _run_scripted_torchrun(monkeypatch, [3])
+    assert isinstance(raised, subprocess.CalledProcessError)
+    assert raised.returncode == 3
+    assert raised.cmd == build_stage_command("pkg.mod:Orch", "toy", [], nproc=2)
+    assert fake.calls == [("wait", None)]
 
 
 # ---------------------------------------------------------------------- main
@@ -557,6 +694,137 @@ def test_main_rejects_backend_the_model_does_not_support(monkeypatch, capsys, tm
     assert "DIFFLET_BACKEND" not in os.environ
 
 
+HUNYUAN_ID = "hunyuanvideo-community/HunyuanVideo"  # registry backends: trainium
+
+
+def _main_argv(command: str, model_id: str, tmp_path) -> list[str]:
+    argv = [command, "--model-id", model_id]
+    if command != "compile":
+        argv += ["--prompt", "p", "--output", str(tmp_path / "c10.mp4")]
+    return argv
+
+
+def _recording_orchestrator(monkeypatch, cli_main) -> list:
+    built: list = []
+
+    class _Orch:
+        def __init__(self, args):
+            built.append(args.command)
+
+        def compile(self):
+            pass
+
+        def generate(self):
+            pass
+
+        def run(self):
+            pass
+
+    monkeypatch.setattr(cli_main, "_get_orchestrator", _Orch)
+    return built
+
+
+@pytest.mark.parametrize("command", ["compile", "generate", "run"])
+def test_main_rejects_ambient_non_aot_backend_the_model_does_not_support(
+    monkeypatch, capsys, tmp_path, command
+):
+    """DIFFLET_BACKEND=neuron in the shell, no --backend: the stages inherit it and would each
+    become N torchrun ranks running the model's Trainium application. Same exit-2 check as
+    --backend, naming the variable; nothing is built."""
+    cli_main = _cli_main()
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    built = _recording_orchestrator(monkeypatch, cli_main)
+
+    with pytest.raises(SystemExit) as exc:
+        cli_main.main(_main_argv(command, WAN_ID, tmp_path))
+
+    assert exc.value.code == 2
+    assert capsys.readouterr().err.strip() == (
+        "Error: model 'wan' does not support backend 'neuron'; supported backends: "
+        "trainium, tpu (DIFFLET_BACKEND=neuron)."
+    )
+    assert built == []
+
+
+def test_main_ambient_non_aot_backend_the_model_lists_goes_ahead(monkeypatch, tmp_path):
+    cli_main = _cli_main()
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    _allow_backend(monkeypatch, "wan", "neuron")
+    built = _recording_orchestrator(monkeypatch, cli_main)
+
+    cli_main.main(_main_argv("generate", WAN_ID, tmp_path))
+
+    assert built == ["generate"]
+    assert os.environ["DIFFLET_BACKEND"] == "neuron"
+
+
+@pytest.mark.parametrize(
+    "backend, model_id",
+    [("trainium", WAN_ID), ("tpu", WAN_ID), ("tpu", HUNYUAN_ID), ("Trainium ", HUNYUAN_ID)],
+)
+@pytest.mark.parametrize("command", ["compile", "generate"])
+def test_main_ambient_aot_backend_keeps_its_old_path(monkeypatch, tmp_path, backend, model_id,
+                                                     command):
+    """Trainium/TPU (requires_aot) selected through DIFFLET_BACKEND: no CLI model check, as
+    before, even for a model whose registry entry does not list the backend (HunyuanVideo
+    lists trainium only); the orchestrator is built and the variable left as it was."""
+    cli_main = _cli_main()
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    monkeypatch.setenv("DIFFLET_BACKEND", backend)
+    built = _recording_orchestrator(monkeypatch, cli_main)
+
+    cli_main.main(_main_argv(command, model_id, tmp_path))
+
+    assert built == [command]
+    assert os.environ["DIFFLET_BACKEND"] == backend
+    assert "DIFFLET_EXEC_MODE" not in os.environ
+
+
+@pytest.mark.parametrize("exec_mode", [None, "eager"])
+def test_main_unknown_ambient_backend_exits_2(monkeypatch, capsys, tmp_path, exec_mode):
+    """An unknown DIFFLET_BACKEND is a usage error (exit 2, the registry's message), not a
+    traceback, with or without --exec-mode."""
+    cli_main = _cli_main()
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    monkeypatch.setenv("DIFFLET_BACKEND", "no-such-backend")
+    built = _recording_orchestrator(monkeypatch, cli_main)
+    argv = _main_argv("generate", WAN_ID, tmp_path)
+    if exec_mode is not None:
+        argv += ["--exec-mode", exec_mode]
+
+    with pytest.raises(SystemExit) as exc:
+        cli_main.main(argv)
+
+    assert exc.value.code == 2
+    assert capsys.readouterr().err.strip() == (
+        "Error: unknown Difflet backend 'no-such-backend'; known backends: "
+        "cpu, cuda, neuron, rocm, tpu, trainium (DIFFLET_BACKEND)."
+    )
+    assert built == []
+    assert "DIFFLET_EXEC_MODE" not in os.environ
+
+
+def test_main_apply_backend_flags_unknown_ambient_backend_with_exec_mode_exits_2(
+    monkeypatch, capsys
+):
+    """The --exec-mode lookup itself (no model id in the namespace): exit 2, no traceback."""
+    from difflet.cli.main import _apply_backend_flags
+
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    monkeypatch.setenv("DIFFLET_BACKEND", "no-such-backend")
+
+    with pytest.raises(SystemExit) as exc:
+        _apply_backend_flags(SimpleNamespace(backend=None, exec_mode="eager"))
+
+    assert exc.value.code == 2
+    assert "unknown Difflet backend 'no-such-backend'" in capsys.readouterr().err
+    assert "DIFFLET_EXEC_MODE" not in os.environ
+
+
 def test_main_cli_modules_stay_torch_free():
     code = (
         "import importlib, sys\n"
@@ -664,30 +932,28 @@ def test_toy_pipeline_gloo_matches_tp1_reference(tmp_path, monkeypatch, exec_mod
     assert json.loads((tmp_path / f"result-{exec_mode}.json").read_text())["world_size"] == 4
 
 
-def _bounded_run(timeout: float):
-    """subprocess.run for run_stage with a deadline. torchrun starts each rank in its own
-    session, so a timeout sends torchrun SIGTERM (it then stops its ranks) before SIGKILL."""
-
-    def run(cmd, env, check):
-        proc = subprocess.Popen(cmd, env=env)
-        try:
-            returncode = proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.terminate()
-            try:
-                proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-            raise
-        if check and returncode:
-            raise subprocess.CalledProcessError(returncode, cmd)
-        return subprocess.CompletedProcess(cmd, returncode)
-
-    return run
+_REAL_POPEN = subprocess.Popen
 
 
-def _toy_torchrun_env(monkeypatch):
+def _bounded_popen(limit: float):
+    """subprocess.Popen for run_stage's torchrun branch, with a deadline: the first wait()
+    without a timeout gives up after ``limit`` seconds (TimeoutExpired); the branch then sends
+    torchrun SIGTERM (torchrun stops its ranks, which run in sessions of their own) and waits
+    for it before re-raising. Later waits are left alone."""
+
+    class BoundedPopen(_REAL_POPEN):
+        _bounded = False
+
+        def wait(self, timeout=None):
+            if timeout is None and not self._bounded:
+                self._bounded = True
+                timeout = limit
+            return super().wait(timeout=timeout)
+
+    return BoundedPopen
+
+
+def _toy_torchrun_env(monkeypatch, *, limit: float = 300):
     from tests.unit.backends._neuron_toy import TOY_DEVICE_ENV, TOY_FAIL_ENV
 
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
@@ -696,7 +962,7 @@ def _toy_torchrun_env(monkeypatch):
     monkeypatch.setenv("PYTHONPATH", _pythonpath())
     monkeypatch.delenv(TOY_FAIL_ENV, raising=False)
     monkeypatch.delenv("DIFFLET_EXEC_MODE", raising=False)
-    monkeypatch.setattr(subprocess, "run", _bounded_run(300))
+    monkeypatch.setattr(subprocess, "Popen", _bounded_popen(limit))
 
 
 @pytest.mark.parametrize("exec_mode", ["eager", "compile"])
@@ -745,9 +1011,8 @@ def test_toy_run_stage_torchrun_cpu_rank_failure_stops_the_launch(
         prepare_toy_work_dir,
     )
 
-    _toy_torchrun_env(monkeypatch)
+    _toy_torchrun_env(monkeypatch, limit=120)
     monkeypatch.setenv(TOY_FAIL_ENV, f"{step}:1")
-    monkeypatch.setattr(subprocess, "run", _bounded_run(120))
     prepare_toy_work_dir(tmp_path)
 
     start = time.monotonic()
@@ -766,3 +1031,89 @@ def test_toy_run_stage_torchrun_cpu_rank_failure_stops_the_launch(
     if step == "build_module":
         assert "RankFailureError" in log  # rank 0 stopped at the same phase
     assert not (tmp_path / "result-eager.json").exists()
+
+
+# The driver of the Ctrl-C test, a process of its own: run_stage's torchrun branch, as the CLI
+# runs it. argv: orchestrator, stage, nproc, work dir. SIGINT gets Python's default handler even
+# if the test runner ignores SIGINT (a background job), so Ctrl-C raises KeyboardInterrupt.
+_CTRL_C_DRIVER = """
+import signal, sys, time
+signal.signal(signal.SIGINT, signal.default_int_handler)
+from difflet.cli.runner import run_stage
+start = time.monotonic()
+try:
+    run_stage(sys.argv[1], sys.argv[2], num_cores=int(sys.argv[3]), virtual_core_size=None,
+              cli_args=["--work-dir", sys.argv[4]])
+except KeyboardInterrupt:
+    print(f"driver: KeyboardInterrupt after {time.monotonic() - start:.1f}s", flush=True)
+    raise
+print("driver: run_stage returned", flush=True)
+"""
+
+
+def _running(pid: int) -> bool:
+    """True while ``pid`` runs; a zombie (exited, not yet reaped) counts as gone."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] not in ("Z", "X")
+
+
+@pytest.mark.parametrize("presses", [1, 2])
+def test_toy_run_stage_torchrun_ctrl_c_leaves_no_rank_behind(tmp_path, monkeypatch, presses):
+    """Ctrl-C at a terminal sends SIGINT to the foreground process group: the driver
+    (run_stage) and torchrun, but not the ranks, which torchrun starts in sessions of their
+    own. These ranks ignore SIGINT and SIGTERM, as ranks blocked in a native Neuron compile or
+    collective do, so only torchrun's SIGKILL after its shutdown timeout (3 s here) stops them.
+    run_stage must wait for that instead of killing torchrun, then re-raise KeyboardInterrupt:
+    once the driver has exited, torchrun and every rank are gone. A second Ctrl-C a second
+    later (presses=2) must not cut that wait short."""
+    from tests.unit.backends._neuron_toy import TOY_HANG_STAGE, TOY_ORCHESTRATOR
+
+    _toy_torchrun_env(monkeypatch)
+    monkeypatch.setattr(subprocess, "Popen", _REAL_POPEN)  # the driver runs run_stage itself
+    nproc = 2
+    env = {**os.environ, "TORCH_ELASTIC_SHUTDOWN_TIMEOUT": "3"}
+    log_path = tmp_path / "driver.log"
+    pid_files = [tmp_path / f"hang-rank{rank}.pid" for rank in range(nproc)]
+    ranks: list[int] = []
+    with log_path.open("w") as log:
+        driver = subprocess.Popen(
+            [sys.executable, "-c", _CTRL_C_DRIVER, TOY_ORCHESTRATOR, TOY_HANG_STAGE,
+             str(nproc), str(tmp_path)],
+            env=env, stdout=log, stderr=subprocess.STDOUT,
+            start_new_session=True,  # a process group of its own, like a terminal's job
+        )
+    try:
+        deadline = time.monotonic() + 120
+        while not all(path.exists() for path in pid_files):
+            assert driver.poll() is None, f"the driver exited early:\n{log_path.read_text()}"
+            assert time.monotonic() < deadline, "the hang ranks never started"
+            time.sleep(0.2)
+        pids = [tuple(map(int, path.read_text().split())) for path in pid_files]
+        ranks = [rank for rank, _ in pids]
+        parents = {parent for _, parent in pids}
+        assert len(parents) == 1, pids  # every rank is a child of the one torchrun
+        torchrun = parents.pop()
+        assert _running(torchrun) and all(_running(rank) for rank in ranks)
+
+        for press in range(presses):
+            if press:
+                time.sleep(1.0)
+            os.killpg(driver.pid, signal.SIGINT)  # what the terminal does on Ctrl-C
+        returncode = driver.wait(timeout=120)
+        left = [pid for pid in (torchrun, *ranks) if _running(pid)]  # right as it exited
+    finally:
+        if driver.poll() is None:
+            os.killpg(driver.pid, signal.SIGKILL)
+            driver.wait()
+        for pid in ranks:  # never leave a deaf rank behind, whatever happened above
+            if _running(pid):
+                os.kill(pid, signal.SIGKILL)
+    output = log_path.read_text()
+    print(output)  # shown with -rP: torchrun's shutdown log and the driver's line
+    assert left == [], f"still running after the driver exited: {left}\n{output}"
+    assert returncode == -signal.SIGINT, output  # KeyboardInterrupt reached the top
+    assert "driver: KeyboardInterrupt after" in output
+    assert "killing it" not in output  # torchrun stopped its ranks itself; no last resort
