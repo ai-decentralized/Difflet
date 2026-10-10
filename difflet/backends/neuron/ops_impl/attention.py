@@ -25,7 +25,6 @@ Context-parallel entry points are not implemented in phase 1 of this backend.
 from __future__ import annotations
 
 import math
-from functools import lru_cache
 
 import torch
 import torch.nn.functional as F
@@ -111,8 +110,7 @@ def _flash_attention(q, k, v, *, scale: float, causal: bool):
     return out.squeeze(0) if squeeze else out
 
 
-@lru_cache(maxsize=None)
-def _flash_kernel():
+def _load_flash_kernel():
     try:
         from torch_neuronx.python_ops.nki_kernels.scaled_dot_product_attention import (
             scaled_dot_product_attention_kernel,
@@ -120,6 +118,14 @@ def _flash_kernel():
     except ImportError:
         return None
     return scaled_dot_product_attention_kernel
+
+
+# Resolved once at import: no import or cache lookup inside traced (compiled) code.
+_FLASH_KERNEL = _load_flash_kernel()
+
+
+def _flash_kernel():
+    return _FLASH_KERNEL
 
 
 def cross_attention(q, k, v, *, scale: float | None = None, attention_mask=None, **kwargs):
