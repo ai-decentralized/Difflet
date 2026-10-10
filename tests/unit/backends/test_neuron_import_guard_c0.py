@@ -70,19 +70,12 @@ if neuronx is not None:
 print("IMPORT-GUARD-OK", sys.argv[1])
 '''
 
-_NEEDS_C4 = pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="needs neuron linear (C4): difflet.ops.ColumnParallelLinear resolves to "
-    "difflet.backends.neuron.ops_impl.linear",
-)
-
 GUARDED_MODULES = [
     "difflet.ops",
     "difflet.pipeline",
     "difflet.models.wan.vae",
-    pytest.param("difflet.models.wan.umt5.modeling_umt5", marks=_NEEDS_C4),
-    pytest.param("difflet.models.wan.modeling_wan", marks=_NEEDS_C4),
+    "difflet.models.wan.umt5.modeling_umt5",
+    "difflet.models.wan.modeling_wan",
 ]
 
 
