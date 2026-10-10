@@ -190,6 +190,11 @@ class BenchConfig:
     steps: int = 20
     guidance_scale: Optional[float] = None
     seed: int = 42                           # difflet CLI default; pinned for repro
+    # Official negative prompt (paper eval protocol); None -> the model's default.
+    negative_prompt: Optional[str] = None
+    # --wan-vae-chunked: Wan's FP32 VAE as temporal-chunk graphs, the only way
+    # 81 frames decode on device. Changes the artifact, so compile and generate.
+    wan_vae_chunked: bool = False
     prompt: str = "a cinematic shot of a red fox running through a snowy forest"
     output_kind: str = "video"               # video | image
     extra_generate_flags: list[str] = field(default_factory=list)
@@ -257,6 +262,10 @@ class BenchConfig:
             return []
         return ["--teacache-speedup", str(self.teacache_speedup),
                 "--teacache-calibration", str(self.teacache_calibration)]
+
+    def cache_flags(self) -> list[str]:
+        """``difflet compile`` / ``generate`` artifact tokens beyond the parallel layout."""
+        return ["--wan-vae-chunked"] if self.wan_vae_chunked else []
 
     def decoder_flags(self) -> list[str]:
         """``difflet compile`` / ``generate`` decoder tokens (TAEF1 or none)."""
@@ -508,12 +517,23 @@ def add_config_arg(parser) -> None:
 
 
 # Keyed by a short slug used for the report filename (benchmark/<slug>.md).
+# Wan 2.1's official sample_neg_prompt (Wan-Video/Wan2.1 wan/configs/shared_config.py).
+WAN_NEGATIVE_PROMPT = (
+    "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，"
+    "低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，"
+    "毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+)
+
+# The five paper-eval entries use each model's official sampling settings
+# (docs/eval-redesign-plan-20261003.md P3): FLUX / Qwen-Image / Wan /
+# HunyuanVideo 50 steps, LTX-2 40; Wan at its official 81 frames. Results
+# before 2026-10 were measured at 20/28 steps and Wan 9 frames, guidance 1.0.
 MATRIX: dict[str, BenchConfig] = {
     "ltx_2": BenchConfig(
         model_id="Lightricks/LTX-2",
         revision="47da56e2ad66ce4125a9922b4a8826bf407f9d0a",
         model_type="ltx_2",
-        tp=4, height=480, width=704, num_frames=49, steps=20, guidance_scale=1.0,
+        tp=4, height=480, width=704, num_frames=49, steps=40, guidance_scale=1.0,
         output_kind="video",
         config_label="tp=4, bf16, TP-sharded transformer + attention_cte self-attn, "
                      "guidance=1.0 (batch-1 NEFF)",
@@ -529,10 +549,11 @@ MATRIX: dict[str, BenchConfig] = {
         model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers",
         revision="38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
         model_type="wan",
-        tp=4, height=480, width=832, num_frames=9, steps=20, guidance_scale=1.0,
+        tp=4, height=480, width=832, num_frames=81, steps=50, guidance_scale=5.0,
+        negative_prompt=WAN_NEGATIVE_PROMPT, wan_vae_chunked=True,
         output_kind="video",
-        config_label="tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage "
-                     "(transformer + VAE) subprocess pipeline",
+        config_label="tp=4, bf16, single-transformer (no MoE), attention_cte, official "
+                     "81 frames / 50 steps / CFG 5.0, chunked FP32 VAE on device",
         stage_names=["text_encoder (UMT5)", "transformer (denoise loop)", "vae_decoder"],
     ),
     "wan_2_2": BenchConfig(
@@ -548,7 +569,7 @@ MATRIX: dict[str, BenchConfig] = {
         model_id="black-forest-labs/FLUX.1-dev",
         revision="3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
         model_type="flux",
-        tp=4, height=1024, width=1024, num_frames=None, steps=28, guidance_scale=3.5,
+        tp=4, height=1024, width=1024, num_frames=None, steps=50, guidance_scale=3.5,
         output_kind="image",
         config_label="tp=4 (registry default tp=8 -> 4 on trn2.3xlarge), bf16, attention_cte",
         # measured load order (by size: T5 ~10GB, transformer ~24GB, then the two tiny ones)
@@ -559,7 +580,7 @@ MATRIX: dict[str, BenchConfig] = {
         model_id="Qwen/Qwen-Image",
         revision="75e0b4be04f60ec59a75f475837eced720f823b6",
         model_type="qwen_image",
-        tp=4, height=1024, width=1024, num_frames=None, steps=20, guidance_scale=4.0,
+        tp=4, height=1024, width=1024, num_frames=None, steps=50, guidance_scale=4.0,
         output_kind="image",
         config_label="tp=4, bf16, joint attention via attention_cte",
     ),
@@ -567,7 +588,7 @@ MATRIX: dict[str, BenchConfig] = {
         model_id="hunyuanvideo-community/HunyuanVideo",
         revision="e8c2aaa66fe3742a32c11a6766aecbf07c56e773",
         model_type="hunyuan_video",
-        tp=4, height=320, width=512, num_frames=61, steps=20, guidance_scale=6.0,
+        tp=4, height=320, width=512, num_frames=61, steps=50, guidance_scale=6.0,
         output_kind="video",
         config_label="tp=4, bf16, attention_cte",
         e2e_host_note="VAE decode runs on the host (no Neuron load line); the residual "

@@ -94,6 +94,7 @@ class TrainiumAdapter(BackendAdapter):
         # calibrated-adaptive TeaCache is part of the artifact (probe NEFF)
         cmd += getattr(cfg, "compile_teacache_flags", lambda: [])()
         cmd += getattr(cfg, "decoder_flags", lambda: [])()  # TAEF1 decoder NEFF
+        cmd += getattr(cfg, "cache_flags", lambda: [])()    # chunked Wan VAE
         t0 = time.perf_counter()
         text = self._run(cmd, log, timeout=14400)
         wall = time.perf_counter() - t0
@@ -116,8 +117,11 @@ class TrainiumAdapter(BackendAdapter):
                "--output", str(out_path) + out_ext] + cfg.shape_flags()
         if cfg.guidance_scale is not None:
             cmd += ["--guidance-scale", str(cfg.guidance_scale)]
+        if getattr(cfg, "negative_prompt", None):
+            cmd += ["--negative-prompt", cfg.negative_prompt]
         cmd += getattr(cfg, "teacache_flags", lambda: [])()
         cmd += getattr(cfg, "decoder_flags", lambda: [])()
+        cmd += getattr(cfg, "cache_flags", lambda: [])()
         cmd += cfg.extra_generate_flags
         t0 = time.perf_counter()
         text = self._run(cmd, log, timeout=14400)

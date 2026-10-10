@@ -1,8 +1,10 @@
-"""Closed-loop load generator for a running ``difflet serve`` (serving-layer metrics).
+"""Load generator for one or more running ``difflet serve`` processes (serving-layer metrics).
 
     python -m benchmark.serve_bench --model flux_1_dev --port 8091 --levels 1,2,4 \
         --requests 8 --warmup 2 --out benchmark/trn2/serving/flux_1_dev_tp4.json \
         [--phase-file P] [--sampler-jsonl S] [--api-mode sync|async] [--burst N]
+    python -m benchmark.serve_bench --model hunyuan_video --arrival poisson \
+        --ports 8091[,8092] --rhos 0.5,0.8,0.95 --arrivals 20 --slo 130 --out OUT.json
 
 For each concurrency level c it keeps c in-flight requests until N requests
 have completed (closed loop, no think time), records every request's wall
@@ -92,6 +94,8 @@ def _video_multipart(cfg) -> tuple[bytes, dict]:
     }
     if cfg.guidance_scale is not None:
         fields["guidance_scale"] = str(cfg.guidance_scale)
+    if cfg.negative_prompt:
+        fields["negative_prompt"] = cfg.negative_prompt
     parts = []
     for k, v in fields.items():
         parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n")
@@ -305,6 +309,84 @@ def run_level(send, concurrency: int, n_requests: int) -> dict:
     return out
 
 
+def run_poisson(sends: list, rate_per_s: float, n_arrivals: int, seed: int,
+                slo_s: float | None) -> dict:
+    """Open-loop Poisson load: n arrivals with exponential inter-arrival gaps at
+    ``rate_per_s`` (seeded, so every layout sees the same arrival sequence),
+    each sent at its arrival time regardless of completions. With several
+    servers (one ``send`` per server) each arrival goes to the server with the
+    fewest requests in flight, ties to the lowest index. Latency = arrival ->
+    response, so it includes queueing in the server's FIFO."""
+    import random
+    rng = random.Random(seed)
+    gaps = [rng.expovariate(rate_per_s) for _ in range(n_arrivals)]
+    offsets, t = [], 0.0
+    for g in gaps:
+        t += g
+        offsets.append(t)
+    offsets = [o - offsets[0] for o in offsets]   # first arrival at t=0
+    lock = threading.Lock()
+    in_flight = [0] * len(sends)
+    records: list[dict] = []
+
+    def fire(i: int, server: int, t_arr: float):
+        code, nbytes, err, extra = sends[server]()
+        t1 = time.perf_counter()
+        rec = {"arrival": i, "server": server, "arrival_s": round(t_arr - t_start, 3),
+               "end_s": round(t1 - t_start, 3), "latency_s": round(t1 - t_arr, 3),
+               "http": code, "bytes": nbytes, "error": err}
+        rec.update(extra)
+        with lock:
+            in_flight[server] -= 1
+            records.append(rec)
+
+    t_start = time.perf_counter()
+    wall0 = time.time()
+    threads = []
+    for i, off in enumerate(offsets):
+        delay = t_start + off - time.perf_counter()
+        if delay > 0:
+            time.sleep(delay)
+        with lock:
+            server = min(range(len(sends)), key=lambda k: (in_flight[k], k))
+            in_flight[server] += 1
+        th = threading.Thread(target=fire, args=(i, server, time.perf_counter()), daemon=True)
+        th.start()
+        threads.append(th)
+    for th in threads:
+        th.join()
+    wall = time.perf_counter() - t_start
+    records.sort(key=lambda r: r["arrival"])
+    ok = [r["latency_s"] for r in records if r["http"] == 200]
+    window = offsets[-1] if len(offsets) > 1 else 0.0
+    codes: dict[str, int] = {}
+    for r in records:
+        codes[str(r["http"])] = codes.get(str(r["http"]), 0) + 1
+    return {
+        "arrivals": n_arrivals, "arrival_seed": seed, "servers": len(sends),
+        "nominal_rate_per_s": rate_per_s,
+        # (n-1) gaps over the arrival window: the rate the servers actually saw
+        "realized_rate_per_s": round((n_arrivals - 1) / window, 6) if window else None,
+        "arrival_window_s": round(window, 3),
+        "expected_window_s": round((n_arrivals - 1) / rate_per_s, 3),
+        "successes": len(ok), "wall_s": round(wall, 3),
+        "throughput_per_hour": round(len(ok) / wall * 3600, 1) if wall else None,
+        "latency_s": {"p50": round(_pct(ok, 50), 3), "p90": round(_pct(ok, 90), 3),
+                      "p99": round(_pct(ok, 99), 3), "mean": round(statistics.mean(ok), 3),
+                      "min": round(min(ok), 3), "max": round(max(ok), 3)} if ok else None,
+        "slo_s": slo_s,
+        "slo_met_frac": (round(sum(1 for r in records if r["http"] == 200
+                                   and r["latency_s"] <= slo_s) / n_arrivals, 4)
+                         if slo_s else None),
+        "per_server": {str(k): sum(1 for r in records if r["server"] == k)
+                       for k in range(len(sends))},
+        "http_codes": codes,
+        "errors": [r["error"] for r in records if r["http"] != 200][:5],
+        "wall_t0": wall0, "wall_t1": wall0 + wall,
+        "records": records,
+    }
+
+
 def _find(obj, key):
     """Yield every value under ``key`` anywhere in a nested JSON object."""
     if isinstance(obj, dict):
@@ -420,6 +502,12 @@ _METHOD = {
              "client wall per request incl. queueing; throughput = successes / level wall; "
              "one resident worker (max_running_requests=1), so c>1 measures queueing, "
              "not parallel execution"),
+    "poisson": ("open loop: Poisson arrivals (seeded exponential gaps) sent at their arrival "
+                "time regardless of completions; with several servers each arrival goes to the "
+                "server with the fewest requests in flight; latency = arrival -> response incl. "
+                "queueing; rho = realized arrival rate x reference isolated latency; SLO met = "
+                "successes within slo_s of arrival / arrivals; devices idle cooldown_s before "
+                "each level"),
     "async": ("closed loop over the async Videos job API: each request = POST /v1/videos "
               "(create) -> poll GET /v1/videos/{id} every poll_interval_s until terminal -> "
               "GET .../content -> DELETE; latency = create start -> content downloaded "
@@ -450,9 +538,34 @@ def main() -> int:
                    help="async: seconds between job status polls")
     p.add_argument("--burst", type=int, default=0,
                    help="async: after the levels, submit N creates back to back and poll all")
+    p.add_argument("--arrival", choices=("closed", "poisson"), default="closed",
+                   help="closed: --levels concurrency; poisson: open loop at --rhos")
+    p.add_argument("--ports", default=None,
+                   help="poisson: comma-separated server ports (default: --port); more than "
+                        "one routes each arrival to the server with the fewest in flight")
+    p.add_argument("--rhos", default="0.5,0.8,0.95",
+                   help="poisson: nominal loads; rate = rho / --ref-latency")
+    p.add_argument("--ref-latency", type=float, default=None,
+                   help="poisson: isolated request latency (s) that defines rho; default: "
+                        "median of the warm-up requests on the first server")
+    p.add_argument("--arrivals", type=int, default=20, help="poisson: arrivals per level")
+    p.add_argument("--arrival-seed", type=int, default=42,
+                   help="poisson: seed of the first level; level i uses seed + i")
+    p.add_argument("--slo", type=float, default=None, help="poisson: latency SLO (s)")
+    p.add_argument("--cooldown", type=float, default=90.0,
+                   help="poisson: idle seconds before each level (the device slows under "
+                        "back-to-back load and recovers after ~90 s)")
     a = p.parse_args()
     cfg = resolve(a.model, a.config)
     base = f"http://127.0.0.1:{a.port}"
+    if a.arrival == "poisson":
+        if a.api_mode == "async":
+            print("[serve_bench] --arrival poisson uses the sync endpoints", file=sys.stderr)
+            return 2
+        ports = [int(x) for x in (a.ports or str(a.port)).split(",") if x]
+        req = _image_request if cfg.output_kind == "image" else _video_request
+        sends = [(lambda b=f"http://127.0.0.1:{pt}": req(b, cfg, a.timeout)) for pt in ports]
+        return _main_poisson(a, cfg, ports, sends)
     if cfg.output_kind == "image":
         if a.api_mode == "async":
             print("[serve_bench] image models have no async endpoint (/v1/videos is video-only)",
@@ -528,6 +641,68 @@ def main() -> int:
     }
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(out, indent=2))
+    print(f"[serve_bench] wrote {a.out}", flush=True)
+    return 0
+
+
+def _main_poisson(a, cfg, ports: list[int], sends: list) -> int:
+    def phase(name: str):
+        if a.phase_file:
+            Path(a.phase_file).write_text(name)
+
+    mon = _NeuronMonitor()
+    mon.start()
+    phase("warmup")
+    warm = []
+    for k, send in enumerate(sends):          # every server, so none pays a first-request cost
+        for i in range(a.warmup):
+            t0 = time.perf_counter()
+            code, nbytes, err, _ = send()
+            rec = {"server": k, "latency_s": round(time.perf_counter() - t0, 3), "http": code,
+                   "bytes": nbytes, "error": err}
+            warm.append(rec)
+            print(f"[serve_bench] warmup server {k} {i+1}/{a.warmup}: HTTP {code} "
+                  f"{rec['latency_s']}s {err}", flush=True)
+    isolated = {str(k): statistics.median([w["latency_s"] for w in warm
+                                           if w["server"] == k and w["http"] == 200] or [float("nan")])
+                for k in range(len(sends))}
+    ref = a.ref_latency if a.ref_latency else isolated["0"]
+    levels = []
+    for i, rho in enumerate(float(x) for x in a.rhos.split(",") if x):
+        phase("cooldown")
+        time.sleep(a.cooldown)
+        phase(f"rho{rho}")
+        lv = run_poisson(sends, rho / ref, a.arrivals, a.arrival_seed + i, a.slo)
+        lv["nominal_rho"] = rho
+        lv["realized_rho"] = (round(lv["realized_rate_per_s"] * ref, 3)
+                              if lv["realized_rate_per_s"] else None)
+        levels.append(lv)
+        lat = lv["latency_s"] or {}
+        print(f"[serve_bench] rho {rho} (realized {lv['realized_rho']}): {lv['successes']}/"
+              f"{lv['arrivals']} ok, p50 {lat.get('p50')} p99 {lat.get('p99')} s, SLO "
+              f"{lv['slo_met_frac']}, {lv['throughput_per_hour']}/h, per server "
+              f"{lv['per_server']}, codes {lv['http_codes']}", flush=True)
+    phase("done")
+    time.sleep(2)
+    mon.stop()
+    for lv in levels:
+        lv["neuron"] = mon.window(lv["wall_t0"], lv["wall_t1"])
+        for k in ("wall_t0", "wall_t1"):
+            lv.pop(k, None)
+    out = {
+        "model_slug": a.model, "config": a.config, "model_id": cfg.model_id,
+        "kind": cfg.output_kind,
+        "shape": {"height": cfg.height, "width": cfg.width, "num_frames": cfg.num_frames},
+        "steps": cfg.steps, "seed": cfg.seed, "guidance_scale": cfg.guidance_scale,
+        "negative_prompt": cfg.negative_prompt,
+        "parallel": cfg.parallel_dict(), "ports": ports, "arrival": "poisson",
+        "ref_latency_s": ref, "ref_latency_source": "--ref-latency" if a.ref_latency
+        else "warm-up median, server 0", "isolated_latency_s": isolated,
+        "cooldown_s": a.cooldown, "ready_seconds": a.ready_seconds, "warmup": warm,
+        "levels": levels, "method": _METHOD["poisson"],
+    }
+    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(a.out).write_text(json.dumps(out, indent=2, ensure_ascii=False))
     print(f"[serve_bench] wrote {a.out}", flush=True)
     return 0
 

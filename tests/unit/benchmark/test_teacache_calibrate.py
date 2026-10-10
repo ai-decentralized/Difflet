@@ -37,15 +37,15 @@ def test_placeholder_is_a_valid_calibration_that_never_skips(tmp_path):
     cfg = _cfg(tmp_path)
     path = tc.write_placeholder(cfg)
     cal = TeaCacheCalibration.from_json(path)
-    assert cal.model == "flux" and cal.shape_label == "1024x1024" and cal.num_steps == 28
+    assert cal.model == "flux" and cal.shape_label == "1024x1024" and cal.num_steps == 50
     assert cal.target_speedup is None and cal.cadence == 0 and cal.online_delta_alpha == 0.0
     ctrl = TeaCacheController(cal)
     assert ctrl.needs_signal()          # the probe / host signal is computed every step
-    assert _drive(ctrl, {i: 0.001 for i in range(28)}, 28) == 0
-    assert ctrl.full_steps == 28 and ctrl.skipped_steps == 0
+    assert _drive(ctrl, {i: 0.001 for i in range(50)}, 50) == 0
+    assert ctrl.full_steps == 50 and ctrl.skipped_steps == 0
     video = _cfg(tmp_path, "wan_2_1")
     cal = TeaCacheCalibration.from_json(tc.write_placeholder(video))
-    assert cal.model == "wan" and cal.shape_label == "480x832x9" and cal.num_steps == 20
+    assert cal.model == "wan" and cal.shape_label == "480x832x81" and cal.num_steps == 50
 
 
 def test_calibration_prompts_exclude_the_benchmark_prompt():
@@ -66,7 +66,9 @@ def test_simulate_skips_matches_the_controller_accumulate_branch():
 
 
 def test_fit_writes_the_tp4tcad_calibration_at_the_skip_budget(tmp_path, monkeypatch):
-    cfg = _cfg(tmp_path)
+    # a 28-step config (the pre-2026-10 FLUX campaign) keeps the fixture small
+    from benchmark.models import adaptive_target_speedup
+    cfg = replace(_cfg(tmp_path), steps=28, teacache_speedup=adaptive_target_speedup(28))
     monkeypatch.setattr(tc, "resolve", lambda slug, config: cfg)
     rng = np.random.default_rng(0)
     trajs = []

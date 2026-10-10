@@ -67,23 +67,23 @@ def test_adaptive_teacache_config():
                                   teacache_calibration_path)
     assert cadence2_skips(28) == 9 and cadence2_skips(20) == 5
     assert adaptive_target_speedup(28) == 1.474 and adaptive_target_speedup(20) == 1.333
-    fx = resolve("flux_1_dev", "tp4tcad")
-    assert fx.teacache_speedup == 1.474
+    fx = resolve("flux_1_dev", "tp4tcad")           # official 50 steps: 20 skips
+    assert fx.teacache_speedup == adaptive_target_speedup(50) == 1.667
     assert fx.teacache_calibration == teacache_calibration_path("flux_1_dev")
     assert fx.teacache_calibration.endswith("teacache_calib/flux_1_dev_tp4tcad.json")
     assert os.path.isabs(fx.teacache_calibration)
-    assert fx.compile_teacache_flags() == ["--teacache-speedup", "1.474",
+    assert fx.compile_teacache_flags() == ["--teacache-speedup", "1.667",
                                            "--teacache-calibration", fx.teacache_calibration]
     assert fx.teacache_flags() == fx.compile_teacache_flags()
     assert fx.parallel_flags() == resolve("flux_1_dev", "tp4").parallel_flags()
     assert fx.parallel_dict() == resolve("flux_1_dev", "tp4").parallel_dict()
     assert fx.config_slug == "flux_1_dev_tp4tcad"
     d = fx.teacache_dict()
-    assert d["mode"] == "adaptive" and d["target_speedup"] == 1.474
+    assert d["mode"] == "adaptive" and d["target_speedup"] == 1.667
     assert d["cadence"] is None and d["online_delta_alpha"] is None
     assert d["calibration"] == fx.teacache_calibration
     assert d["warmup_steps"] == 5 and d["cooldown_steps"] == 5
-    assert resolve("wan_2_1", "tp4tcad").teacache_speedup == 1.333
+    assert resolve("wan_2_1", "tp4tcad").teacache_speedup == 1.667   # 50 steps, 20 skips
     # the probe-free overlays never touch compile
     assert resolve("flux_1_dev", "tp4tc2").compile_teacache_flags() == []
     assert resolve("flux_1_dev", "tp4tcod").teacache_flags() == ["--teacache-online-delta", "0.6"]
@@ -256,7 +256,7 @@ def test_cell_status_requires_all_four_metrics(tmp_path, monkeypatch):
     d = {"status": "ok", "config": "tp4sp", "parallel": cfg.parallel_dict(),
          "compile_seconds": 100.0,
          "e2e_cold_seconds": 300.0, "e2e_warm": {"mean": 40.0},
-         "step_latency": {"mean": 0.27, "n": 27}}
+         "step_latency": {"mean": 0.27, "n": 49}}
     with open(json_path(cfg.config_slug), "w") as fh:
         json.dump(d, fh)
     assert cell_status.missing("flux_1_dev", "tp4sp") == []
@@ -291,9 +291,9 @@ def test_combo_tcad_budgets_have_their_own_calibration_and_target():
     base = resolve("flux_1_dev", "tp4tcad")
     c12 = resolve("flux_1_dev", "tp4tcad12")
     c14 = resolve("flux_1_dev", "tp2cp2tcad14")
-    assert base.teacache_speedup == adaptive_target_speedup(28) == 1.474
-    assert c12.teacache_speedup == round(28 / 16, 3)
-    assert c14.teacache_speedup == 2.0
+    assert base.teacache_speedup == adaptive_target_speedup(50) == 1.667
+    assert c12.teacache_speedup == round(50 / 38, 3)
+    assert c14.teacache_speedup == round(50 / 36, 3)
     assert c12.teacache_calibration.endswith("flux_1_dev_tp4tcad_s12.json")
     assert c14.teacache_calibration.endswith("flux_1_dev_tp4tcad_s14.json")
     assert base.teacache_calibration.endswith("flux_1_dev_tp4tcad.json")
@@ -301,12 +301,12 @@ def test_combo_tcad_budgets_have_their_own_calibration_and_target():
     assert c12.compile_teacache_flags()[0] == "--teacache-speedup"
 
 
-def test_wan_cfg_track_and_twenty_step_budget():
+def test_wan_cfg_track_and_skip_budget():
     assert resolve("wan_2_1", "tp4g5").guidance_scale == 5.0
     assert resolve("wan_2_1", "tp4g5tc2").teacache_flags() == ["--teacache-cadence", "2"]
     cfgp = resolve("wan_2_1", "tp2cfgg5")
     assert cfgp.parallel_flags() == ["--tp-degree", "2", "--cp-degree", "1", "--cfg-parallel"]
     assert cfgp.guidance_scale == 5.0
     t7 = resolve("wan_2_1", "tp4tcad7")
-    assert t7.teacache_speedup == round(20 / 13, 3)
+    assert t7.teacache_speedup == round(50 / 43, 3)
     assert t7.teacache_calibration.endswith("wan_2_1_tp4tcad_s7.json")
