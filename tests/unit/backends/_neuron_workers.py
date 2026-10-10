@@ -212,3 +212,111 @@ def c5_collectives_worker(rank: int, world_size: int, mode: str) -> dict[str, bo
 
     C.destroy_parallel_mesh()
     return checks
+
+
+# --------------------------------------------------------------------------
+# C4: TP linear and embedding
+# --------------------------------------------------------------------------
+
+
+def c4_tp_mlp_worker(rank: int, world_size: int, compiled: bool) -> dict:
+    """C4: neuron TP linear and embedding at TP=world_size against TP1 on gloo.
+
+    ``compiled`` wraps every module in ``torch.compile(backend="aot_eager",
+    fullgraph=True)``. Everything is compared inside the worker and only plain
+    Python values come back (bools, floats, hex digests), so the result does not
+    depend on how ``run_ranks`` transports tensors.
+    """
+    import hashlib
+
+    import torch.distributed as dist
+    import torch.nn.functional as F
+
+    from difflet.backends.neuron.ops_impl import linear as L
+    from difflet.backends.neuron.ops_impl.parallel_mesh import init_parallel_mesh
+    from difflet.backends.tpu.core.weights import load_sharded_state_dict
+    from difflet.pipeline.parallel_mesh import MeshSpec
+    from tests.unit.backends._neuron_toy import ToyTPMLP, reference_mlp, toy_full_weights
+
+    res: dict = {}
+    # A multi-rank process without a mesh must refuse to size a layer, not guess tp=1.
+    try:
+        L.ColumnParallelLinear(8, 16)
+    except RuntimeError:
+        res["uninitialized_mesh_raises"] = True
+    else:
+        res["uninitialized_mesh_raises"] = False
+
+    init_parallel_mesh(MeshSpec(tp=world_size))
+
+    def load(module, full):
+        load_sharded_state_dict(module, full, tp_size=world_size, tp_rank=rank)
+        return module.eval()
+
+    def run(module, *args):
+        if compiled:
+            module = torch.compile(module, backend="aot_eager", fullgraph=True, dynamic=False)
+        with torch.no_grad():
+            return module(*args)
+
+    # Toy column -> GELU(tanh) -> row MLP on fp32 random data, against TP1.
+    dim, hidden = 64, 256
+    weights = toy_full_weights(dim, hidden, seed=0)
+    x = torch.randn(2, 9, dim, generator=torch.Generator().manual_seed(1))
+    mlp = load(ToyTPMLP(dim, hidden), weights)
+    res["shapes_ok"] = (
+        tuple(mlp.up.weight.shape) == (hidden // world_size, dim)
+        and tuple(mlp.up.bias.shape) == (hidden // world_size,)
+        and tuple(mlp.down.weight.shape) == (dim, hidden // world_size)
+        and tuple(mlp.down.bias.shape) == (dim,)
+    )
+    got = run(mlp, x)
+    res["mlp_max_abs_err"] = (got - reference_mlp(x, weights)).abs().max().item()
+    res["mlp_digest"] = hashlib.sha256(got.contiguous().numpy().tobytes()).hexdigest()
+
+    # Ternary {-1, 0, 1} data keeps every partial sum a small integer, so the
+    # sharded result must equal TP1 bit for bit whatever the reduction order.
+    gen = torch.Generator().manual_seed(2)
+
+    def ternary(*shape):
+        return torch.randint(-1, 2, shape, generator=gen).float()
+
+    cw, cb, xc = ternary(128, 64), ternary(128), ternary(3, 5, 64)
+    col = load(L.ColumnParallelLinear(64, 128, gather_output=True), {"weight": cw, "bias": cb})
+    res["column_gather_exact"] = torch.equal(run(col, xc), F.linear(xc, cw, cb))
+
+    rw, rb, xr = ternary(64, 128), ternary(64), ternary(3, 5, 128)
+    full_row = F.linear(xr, rw) + rb
+    row = load(L.RowParallelLinear(128, 64, input_is_parallel=False), {"weight": rw, "bias": rb})
+    res["row_scatter_exact"] = torch.equal(run(row, xr), full_row)
+
+    skip = load(
+        L.RowParallelLinear(128, 64, input_is_parallel=False, skip_bias_add=True),
+        {"weight": rw, "bias": rb},
+    )
+    out, bias = run(skip, xr)
+    res["row_skip_bias_add_exact"] = torch.equal(out, F.linear(xr, rw)) and torch.equal(bias, rb)
+
+    # reduce_output=False: this rank's partial plus the FULL bias (NxD semantics,
+    # corrected by modeling_wan._sp_unbias). Summing the partials outside the layer
+    # and removing the (tp - 1) extra biases must give the full output.
+    partial_row = load(
+        L.RowParallelLinear(128, 64, input_is_parallel=True, reduce_output=False),
+        {"weight": rw, "bias": rb},
+    )
+    x_shard = xr.chunk(world_size, dim=-1)[rank]
+    partial = run(partial_row, x_shard)
+    total = partial.clone()
+    dist.all_reduce(total)
+    res["row_partial_plus_bias_exact"] = torch.equal(
+        partial, F.linear(x_shard, rw.chunk(world_size, dim=1)[rank]) + rb
+    ) and torch.equal(total - (world_size - 1) * rb, full_row)
+
+    # Embeddings are a lookup plus zeros, or a gather, so exact for any values.
+    ew = torch.randn(256, 32, generator=gen)
+    ids = torch.randint(0, 256, (2, 7), generator=gen)
+    vocab = load(L.ParallelEmbedding(256, 32), {"weight": ew})
+    res["embedding_vocab_exact"] = torch.equal(run(vocab, ids), F.embedding(ids, ew))
+    by_dim = load(L.ParallelEmbedding(256, 32, shard_across_embedding=True), {"weight": ew})
+    res["embedding_dim_exact"] = torch.equal(run(by_dim, ids), F.embedding(ids, ew))
+    return res

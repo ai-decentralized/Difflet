@@ -17,15 +17,7 @@ from difflet.backends import registry
 
 BACKENDS = Path(difflet.__file__).resolve().parent / "backends"
 
-PENDING = {
-    "ColumnParallelLinear",
-    "ParallelEmbedding",
-    "RowParallelLinear",
-    "dequantize_mx",
-    "linear_mx",
-    "matmul_mx",
-    "quantize_mx",
-}
+PENDING = {"dequantize_mx", "linear_mx", "matmul_mx", "quantize_mx"}
 
 
 def exports(backend):
