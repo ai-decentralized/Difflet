@@ -585,3 +585,18 @@ def c8_forward_failure_worker(rank: int, world_size: int, model_dir: str) -> dic
     )
     app.load()
     return {"rank": rank, "is_loaded": app.is_loaded}
+
+
+# --------------------------------------------------------------------------
+# C10: launch
+# --------------------------------------------------------------------------
+
+
+def c10_pipeline_worker(rank: int, world_size: int, exec_mode: str, work_dir: str) -> dict:
+    """C10: one gloo rank through DiffletPipeline (cpu backend) into the toy lifecycle."""
+    from tests.unit.backends._neuron_toy import run_toy_pipeline
+
+    result = run_toy_pipeline(exec_mode=exec_mode, work_dir=work_dir, device="cpu")
+    if (result["rank"], result["world_size"]) != (rank, world_size):
+        raise AssertionError(f"worker {rank}/{world_size} got {result}")
+    return result

@@ -149,13 +149,18 @@ class DiffletPipeline:
             application_kwargs=application_kwargs,
         )
 
-        cache_ready = has_valid_manifest(compiled_path, spec) and _compiled_artifacts_ready(
-            app, compiled_path
-        )
-        if not skip_compile and (force_compile or not cache_ready):
-            compiled_path.mkdir(parents=True, exist_ok=True)
-            _compile_app(app, compiled_path, debug=debug_compile)
-            write_manifest(compiled_path, spec)
+        # Non-AoT backends (neuron: eager, or torch.compile inside load) have no
+        # artifact to build or validate. compiled_path and the CacheSpec above are
+        # computed unchanged; AoT backends (trainium, tpu) keep the exact
+        # compile-then-load sequence.
+        if _requires_aot(backend_runtime):
+            cache_ready = has_valid_manifest(compiled_path, spec) and _compiled_artifacts_ready(
+                app, compiled_path
+            )
+            if not skip_compile and (force_compile or not cache_ready):
+                compiled_path.mkdir(parents=True, exist_ok=True)
+                _compile_app(app, compiled_path, debug=debug_compile)
+                write_manifest(compiled_path, spec)
 
         if load:
             _load_app(
@@ -186,6 +191,8 @@ class DiffletPipeline:
         return cls.from_pretrained(model_id, **kwargs)
 
     def compile(self, *, force: bool = False, debug: bool = False) -> None:
+        if not _requires_aot(self.backend):
+            return  # nothing is built ahead of time; load() compiles in-process
         # Use the same cache-validity check as `from_pretrained` so a stale or
         # missing manifest still triggers recompile even when the artifact dir
         # already exists.
@@ -291,6 +298,17 @@ def _compiled_artifacts_ready(app: Any, compiled_path: Path) -> bool:
     if checker is None:
         return True
     return bool(checker(str(compiled_path)))
+
+
+def _requires_aot(backend: Any) -> bool:
+    """Whether ``backend`` builds an ahead-of-time artifact before load.
+
+    True (the historical behaviour) for backend objects without capabilities,
+    such as the test doubles in tests/unit/pipeline/test_difflet_pipeline_extra.py.
+    Only trainium and tpu are AoT; cpu, cuda, rocm and neuron are not.
+    """
+    capabilities = getattr(backend, "capabilities", None)
+    return bool(getattr(capabilities, "requires_aot", True))
 
 
 def _load_app(

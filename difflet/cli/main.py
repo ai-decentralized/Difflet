@@ -347,6 +347,75 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     _add_teacache_flags(p)
 
 
+def _add_backend_flags(p: argparse.ArgumentParser) -> None:
+    # Imported here, not at module top: `python -m difflet.cli.stage` imports the
+    # difflet.cli package (and so this module) before running the stage module as
+    # __main__, and a top-level import would make runpy load it twice.
+    from difflet.backends.registry import available_backends
+    from difflet.cli.stage import EXEC_MODE_CHOICES
+
+    p.add_argument(
+        "--backend",
+        choices=available_backends(),
+        default=None,
+        help="Hardware backend (default: $DIFFLET_BACKEND, else auto-detected). Exported "
+        "as DIFFLET_BACKEND to every stage; 'neuron' runs each stage under torchrun, "
+        "one process per NeuronCore.",
+    )
+    p.add_argument(
+        "--exec-mode",
+        dest="exec_mode",
+        choices=EXEC_MODE_CHOICES,
+        default=None,
+        help="Execution mode for non-AoT backends: 'eager', or 'compile' (per-block "
+        "torch.compile). Default: $DIFFLET_EXEC_MODE, else compile. Unrelated to "
+        "--mode, the latency/throughput preset.",
+    )
+
+
+def _apply_backend_flags(args: argparse.Namespace) -> None:
+    """Check --backend / --exec-mode, then export them for every process this command spawns.
+
+    Stages inherit the environment; nothing goes through the orchestrators'
+    ``_shared_cli_args``, whose flags the stage-parser drift test pins
+    (tests/unit/cli/test_stage.py:109-145). Exits with code 2, before anything is
+    exported or any orchestrator is built, when the model's registry entry does not
+    list --backend, or when --exec-mode is given for an AoT backend.
+    """
+    backend = getattr(args, "backend", None)
+    exec_mode = getattr(args, "exec_mode", None)
+    model_id = getattr(args, "model_id", None)
+    if backend is not None and model_id is not None:
+        _require_model_backend(model_id, backend)
+    if exec_mode is not None:
+        from difflet.backends import get_backend
+
+        runtime = get_backend(backend)
+        if runtime.capabilities.requires_aot:
+            print(
+                f"Error: --exec-mode applies to non-AoT backends only; backend "
+                f"{runtime.name!r} compiles ahead of time (use --backend neuron).",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+    if backend is not None:
+        os.environ["DIFFLET_BACKEND"] = backend
+    if exec_mode is not None:
+        os.environ["DIFFLET_EXEC_MODE"] = exec_mode
+
+
+def _require_model_backend(model_id: str, backend: str) -> None:
+    """Exit 2 unless ``model_id``'s registry entry lists ``backend`` (ModelEntry.require_backend)."""
+    from difflet.registry import resolve_model
+
+    entry = resolve_model(model_id, model_type=_MODEL_TYPE.get(model_id))
+    try:
+        entry.require_backend(backend)
+    except ValueError as exc:
+        print(f"Error: {exc} (--backend {backend}).", file=sys.stderr)
+        raise SystemExit(2) from None
+
+
 def _add_serve_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8091)
@@ -502,6 +571,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_shape_flags(cp_cmd)
     _add_cache_flags(cp_cmd)
     _add_teacache_flags(cp_cmd)
+    _add_backend_flags(cp_cmd)
 
     gen = sub.add_parser("generate", help="Run inference (requires prior compile)")
     _add_model_flag(gen)
@@ -510,6 +580,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_shape_flags(gen)
     _add_cache_flags(gen)
     _add_generate_flags(gen)
+    _add_backend_flags(gen)
 
     run_cmd = sub.add_parser("run", help="Download + compile + generate in one shot")
     _add_model_flag(run_cmd)
@@ -518,6 +589,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_shape_flags(run_cmd)
     _add_cache_flags(run_cmd)
     _add_generate_flags(run_cmd)
+    _add_backend_flags(run_cmd)
 
     plan_cmd = sub.add_parser(
         "plan",
@@ -918,6 +990,7 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(1)
 
     if args.command in ("compile", "generate", "run"):
+        _apply_backend_flags(args)
         _validate_cfg_parallel(args)
         _validate_sp(args)
         _validate_taef1(args)
