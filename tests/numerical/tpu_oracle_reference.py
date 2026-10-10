@@ -8,6 +8,12 @@ side to compare against.
 
 Run this alone: it wants ~57-80 GB of host RAM and the TPU workers want their
 own.
+
+The snapshot is --snapshot, else $DIFFLET_WAN_SNAPSHOT / $DIFFLET_QWEN_SNAPSHOT,
+else the TPU host's /mnt/models path; the output is --out, else
+/mnt/models/oracle_<model>.pt. Both are checked before anything is loaded, so
+on a host without /mnt/models pass them. --threads sizes torch's thread pool
+(default: os.cpu_count()).
 """
 
 from __future__ import annotations
@@ -29,9 +35,10 @@ WAN = os.environ.get(
     "/mnt/models/hf/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/"
     "snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7",
 )
+SNAPSHOT_ENV = {"wan": "DIFFLET_WAN_SNAPSHOT", "qwen_image": "DIFFLET_QWEN_SNAPSHOT"}
 
 
-def wan(out: Path, frames: int) -> None:
+def wan(out: Path, frames: int, snapshot: str = WAN) -> None:
     from diffusers import WanTransformer3DModel
 
     torch.manual_seed(0)
@@ -44,7 +51,7 @@ def wan(out: Path, frames: int) -> None:
           f"latent {latent_frames}x60x104) ...", flush=True)
     mark = time.monotonic()
     model = WanTransformer3DModel.from_pretrained(
-        WAN + "/transformer", torch_dtype=torch.float32
+        snapshot + "/transformer", torch_dtype=torch.float32
     ).eval()
     model.requires_grad_(False)
     print(f"  loaded in {time.monotonic() - mark:.1f}s; "
@@ -75,7 +82,7 @@ def wan(out: Path, frames: int) -> None:
     print(f"wrote {out}", flush=True)
 
 
-def qwen_image(out: Path) -> None:
+def qwen_image(out: Path, snapshot: str = QWEN) -> None:
     from diffusers import QwenImageTransformer2DModel
 
     torch.manual_seed(0)
@@ -88,7 +95,7 @@ def qwen_image(out: Path) -> None:
     print("loading diffusers QwenImageTransformer2DModel fp32 ...", flush=True)
     mark = time.monotonic()
     model = QwenImageTransformer2DModel.from_pretrained(
-        QWEN + "/transformer", torch_dtype=torch.float32
+        snapshot + "/transformer", torch_dtype=torch.float32
     ).eval()
     model.requires_grad_(False)
     print(f"  loaded in {time.monotonic() - mark:.1f}s; "
@@ -132,14 +139,34 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("model", choices=["wan", "qwen_image"])
     p.add_argument("--frames", type=int, default=9)
-    p.add_argument("--out", default=None)
+    p.add_argument("--snapshot", default=None,
+                   help="diffusers snapshot directory holding transformer/ (default: "
+                        "$DIFFLET_WAN_SNAPSHOT or $DIFFLET_QWEN_SNAPSHOT, else the "
+                        "/mnt/models path of the TPU host)")
+    p.add_argument("--out", default=None,
+                   help="output .pt (default: /mnt/models/oracle_<model>.pt)")
+    p.add_argument("--threads", type=int, default=os.cpu_count(),
+                   help="torch intra-op threads (default: os.cpu_count(), i.e. this host's)")
     a = p.parse_args()
+    if a.threads < 1:
+        p.error(f"--threads must be at least 1, got {a.threads}")
+    # Read the environment now, not at import, so the same process can be pointed elsewhere.
+    snapshot = a.snapshot or os.environ.get(
+        SNAPSHOT_ENV[a.model], WAN if a.model == "wan" else QWEN)
     out = Path(a.out or f"/mnt/models/oracle_{a.model}.pt")
-    torch.set_num_threads(112)
+    # Fail here, not after minutes of loading and two forwards.
+    if not Path(snapshot, "transformer", "config.json").is_file():
+        p.error(f"no diffusers transformer at {snapshot}/transformer/config.json; pass "
+                f"--snapshot (or set {SNAPSHOT_ENV[a.model]}) to the snapshot directory")
+    if not out.parent.is_dir():
+        p.error(f"the output directory {out.parent} does not exist; pass --out")
+    torch.set_num_threads(a.threads)
+    print(f"torch threads: {torch.get_num_threads()} (os.cpu_count()={os.cpu_count()}); "
+          f"snapshot {snapshot}", flush=True)
     if a.model == "wan":
-        wan(out, a.frames)
+        wan(out=out, frames=a.frames, snapshot=snapshot)
     else:
-        qwen_image(out)
+        qwen_image(out=out, snapshot=snapshot)
 
 
 if __name__ == "__main__":
