@@ -49,7 +49,16 @@ Checks (on every rank; rank 0 prints one PASS/FAIL line per check, each rank ``[
   NEFF), no_recompile_in_forwards (no new Dynamo graph after the warm-up and, unless the cache
   was cold, no compilation during the forwards; the cache entries each phase added are in the
   JSON);
-* ``--eager-dir``: vs_eager_t<ts>, the compiled output within ``rel_max <= 2e-2`` of the eager one;
+* ``--eager-dir``: vs_eager_t<ts>, a sanity guard of the compiled output against the eager one:
+  cosine >= 0.999 and rel_l1 <= 2.0x the bf16 control's rel_l1 (vs fp32) at that timestep;
+  rel_max is reported, not gated. Compile mode's parity gate is parity_fp32_t<ts>, the same
+  ``parity.check`` as eager (decision D58). Why not C9's ``rel_max <= 2e-2``: that bound came
+  from a 6-block toy and lies below the bf16 noise floor of a 30-40 block DiT. Measured on the
+  1.3B at t=996 / 500: the bf16 control is itself rel_max 2.5e-2 / 3.0e-2 from fp32; diffusers
+  bf16 at 112 vs 12 CPU threads differs by rel_max 1.9e-2; a memory-layout change alone moved
+  eager by rel_max 1.7e-2 / 1.9e-2; per block, compiled vs eager on the same input differs by
+  rel_l1 2.5e-3 to 4.1e-3 (bf16 epsilon 3.9e-3), and the compiled stack ends closer to fp32
+  than eager (0.77x / 0.74x vs 1.02x the control's rel_l1), at rel_max 3.0e-2 / 3.7e-2 from it;
 * ``--expect cold``: rank 0 finds new ``.neff`` files and the lock directory; ``--expect warm``:
   no compilation, at least one persistent hit and no new ``.neff`` on every rank, and the
   warm-up under half the cold one; ``--cold-dir``: outputs ``torch.equal`` to the cold run's.
@@ -83,7 +92,9 @@ from difflet.backends.registry import get_backend
 from difflet.models.wan.neuron_application import _OnDeviceTransformer
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-COMPILE_VS_EAGER_MAX_REL = 2e-2
+#: D58: compiled vs eager is a sanity guard above the bf16 noise floor (see the docstring).
+VS_EAGER_MIN_COSINE = 0.999
+VS_EAGER_MAX_RATIO_VS_CONTROL = 2.0
 COMPILATION_TIME = "CompilationCache.CompilationTime"
 SYSFS_DEVICE = Path("/sys/devices/virtual/neuron_device/neuron0")
 GIB = 2**30
@@ -388,13 +399,22 @@ def main() -> int:
                        f"unique_graphs={graphs_end['unique_graphs']}"))
 
     if args.eager_dir is not None:
+        # D58: a sanity guard above the bf16 noise floor, not a parity gate (see the docstring).
         for ts, out in outputs.items():
             eager = torch.load(args.eager_dir / f"out-t{ts:g}.pt", weights_only=True)
             m = parity.metrics(out, eager)
+            control = parity_results[f"{ts:g}"]["control"]
+            limit = VS_EAGER_MAX_RATIO_VS_CONTROL * control["rel_l1"]
+            ratio = m["rel_l1"] / control["rel_l1"]
             parity_results[f"{ts:g}"]["vs_eager"] = m
-            checks.append((f"vs_eager_t{ts:g}", m["rel_max"] <= COMPILE_VS_EAGER_MAX_REL,
-                           f"rel_max={m['rel_max']:.3e} (tol {COMPILE_VS_EAGER_MAX_REL:.0e}) "
-                           f"cos={m['cosine']:.6f} bit_identical={torch.equal(out, eager)}"))
+            parity_results[f"{ts:g}"]["vs_eager_ratio_vs_control"] = ratio
+            checks.append((f"vs_eager_t{ts:g}",
+                           m["cosine"] >= VS_EAGER_MIN_COSINE and m["rel_l1"] <= limit,
+                           f"cos={m['cosine']:.6f} (min {VS_EAGER_MIN_COSINE}) "
+                           f"rel_l1={m['rel_l1']:.3e} ({ratio:.3f}x control "
+                           f"{control['rel_l1']:.3e}, max {VS_EAGER_MAX_RATIO_VS_CONTROL}x) "
+                           f"rel_max={m['rel_max']:.3e} (reported, not gated) "
+                           f"bit_identical={torch.equal(out, eager)}"))
 
     warmup_s = app.phase_seconds["warmup forward"]
     cold_warmup_s = None
