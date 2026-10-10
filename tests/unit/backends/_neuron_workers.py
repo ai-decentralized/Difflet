@@ -600,3 +600,213 @@ def c10_pipeline_worker(rank: int, world_size: int, exec_mode: str, work_dir: st
     if (result["rank"], result["world_size"]) != (rank, world_size):
         raise AssertionError(f"worker {rank}/{world_size} got {result}")
     return result
+
+
+# --------------------------------------------------------------------------
+# W1: Wan DiT application and the composed neuron Wan application
+# --------------------------------------------------------------------------
+
+
+def _w1_transformer_app(model_dir: str, world_size: int, exec_mode: str):
+    """The tiny Wan DiT (tests/unit/backends/_neuron_wan_toy.py) at TP=world, fp32, on gloo."""
+    import os
+
+    from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_config
+
+    return NeuronWanTransformerApplication(
+        model_path=os.path.join(model_dir, "transformer"),
+        config=tiny_wan_config(tp_degree=world_size),
+        parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32,
+        exec_mode=exec_mode,
+        device="cpu",
+    )
+
+
+def w1_wan_lifecycle_worker(rank: int, world_size: int, model_dir: str, exec_mode: str) -> dict:
+    """Load the tiny Wan DiT at TP=world and run one forward on the fixed inputs."""
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_inputs
+
+    app = _w1_transformer_app(model_dir, world_size, exec_mode)
+    app.load()
+    out = app(*tiny_wan_inputs())
+    return {
+        "rank": app.rank,
+        "world_size": app.world_size,
+        "load_report": app.load_report,
+        "warmup_shapes": app.warmup_shapes,
+        "compiled_blocks": list(app.compiled_blocks),
+        "unwarmed_shapes": list(app.unwarmed_shapes),
+        "local_heads": app.module.blocks[0].attn1.local_heads,
+        "param_numel": sum(p.numel() for p in app.module.parameters()),
+        "out": out.float().tolist(),
+    }
+
+
+def w1_wan_one_graph_worker(rank: int, world_size: int, model_dir: str) -> dict:
+    """Compile mode at TP=world: how many graphs Dynamo traced for the two blocks.
+
+    The blocks are compiled by a recording ``aot_eager`` (``_recording_backend``) so the traced
+    graphs can be inspected; Dynamo's tracing and caching do not depend on the backend.
+    """
+    from torch._dynamo.utils import counters
+
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_inputs
+
+    graphs: list = []
+    app = _w1_transformer_app(model_dir, world_size, "compile")
+    app.compile_backend = _recording_backend(graphs)
+    app.load()
+    after_warmup = counters["stats"]["unique_graphs"]
+    latents, timestep, text = tiny_wan_inputs()
+    app(latents, timestep, text)
+    # The CFG pass: same shapes, other values (the unconditional embeddings).
+    app(latents, timestep * 0.5, -text)
+    return {
+        "compiled_blocks": list(app.compiled_blocks),
+        "unique_graphs_after_warmup": after_warmup,
+        "unique_graphs_after_forwards": counters["stats"]["unique_graphs"],
+        "graph_breaks": sum(counters["graph_break"].values()),
+        "recorded_graphs": len(graphs),
+        "collectives_per_graph": [_collective_count(gm) for gm in graphs],
+        "unwarmed_shapes": list(app.unwarmed_shapes),
+    }
+
+
+def w1_fake_hidden(input_ids, text_dim: int):
+    """The fake umT5's output for ``input_ids``: an arange ramp plus the token id."""
+    batch, length = input_ids.shape
+    ramp = torch.arange(batch * length * text_dim, dtype=torch.float32)
+    return ramp.reshape(batch, length, text_dim) / 7 + input_ids[..., None].float()
+
+
+class _W1FakeUMT5:
+    """Stands in for umT5 on rank 0: ``w1_fake_hidden``, or a failure on demand."""
+
+    def __init__(self, text_dim: int):
+        self.text_dim = text_dim
+        self.fail = False
+        self.calls: list[tuple[tuple[int, ...], int]] = []
+
+    def __call__(self, input_ids, attention_mask):
+        from types import SimpleNamespace
+
+        self.calls.append((tuple(input_ids.shape), torch.get_num_threads()))
+        if self.fail:
+            raise ValueError("fake umT5 failure")
+        return SimpleNamespace(last_hidden_state=w1_fake_hidden(input_ids, self.text_dim))
+
+
+def w1_host_text_encoder_worker(rank: int, world_size: int) -> dict:
+    """The rank-0 host text encoder on gloo: a broadcast result, a failing encode, a failing load.
+
+    Every outcome comes back as a string, so a rank left waiting in a collective shows up as
+    run_ranks' timeout rather than as a result.
+    """
+    from difflet.backends.neuron.core.distributed import RankFailureError
+    from difflet.models.wan.neuron_application import _HostTextEncoder
+
+    def attempt(fn):
+        try:
+            out = fn()
+        except RankFailureError as exc:
+            return {"outcome": f"RankFailureError: {exc}"}
+        except Exception as exc:  # noqa: BLE001 - reported to the parent by type and message
+            return {"outcome": f"{type(exc).__name__}: {exc}"}
+        if out is None:
+            return {"outcome": "ok"}
+        return {"outcome": "ok", "dtype": str(out.dtype), "embeds": out.float().tolist()}
+
+    text_dim, seq_len = 24, 8
+    fake = _W1FakeUMT5(text_dim)
+    encoder = _HostTextEncoder(
+        "/nonexistent-w1-model", text_dim=text_dim, seq_len=seq_len, dtype=torch.bfloat16,
+        device="cpu", threads=2,
+    )
+    if rank == 0:
+        encoder.model = fake  # what load() leaves on rank 0; the real umT5 path is the e2e test's
+    input_ids = torch.tensor([[3, 4, 5, 6, 7, 1, 0, 0]])
+    attention_mask = torch.tensor([[1, 1, 1, 1, 1, 1, 0, 0]], dtype=torch.int32)
+    threads_before = torch.get_num_threads()
+    result = {"ok": attempt(lambda: encoder(input_ids, attention_mask))}
+    result["threads_restored"] = torch.get_num_threads() == threads_before
+    fake.fail = True
+    result["failed"] = attempt(lambda: encoder(input_ids, attention_mask))
+    fake.fail = False
+    result["recovered"] = attempt(lambda: encoder(input_ids, attention_mask))
+    result["calls"] = fake.calls
+    missing = _HostTextEncoder(
+        "/nonexistent-w1-model", text_dim=text_dim, seq_len=seq_len, dtype=torch.bfloat16,
+        device="cpu", threads=2,
+    )
+    result["load"] = attempt(missing.load)
+    result["loaded_model"] = missing.model is not None
+    return result
+
+
+def w1_wan_pipeline_worker(rank: int, world_size: int, model_dir: str) -> dict:
+    """The composed TorchNeuronWanApplication: two steps at guidance 5.0 on the fixed inputs."""
+    import hashlib
+
+    from difflet.models.wan.neuron_application import TorchNeuronWanApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import (
+        TINY_LATENT_SHAPE,
+        TINY_SHAPE,
+        TINY_TEXT_SEQ_LEN,
+        tiny_wan_pipeline_inputs,
+    )
+
+    app = TorchNeuronWanApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32,
+        shape=dict(TINY_SHAPE),
+        text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode="eager",
+        device="cpu",
+        encoder_threads=2,
+    )
+    app.load()
+    steps: list[int] = []
+    forward_seconds: list[float] = []
+    encoder_inputs: list[tuple[int, ...]] = []
+    negative_abs_sums: list[float] = []
+    # Each stamp records how many forwards ran before it: 2 per denoise iteration at CFG.
+    app.step_hook = lambda: steps.append(len(forward_seconds))
+    app.transformer_adapter.forward_hook = forward_seconds.append
+    if app.text_encoder.model is not None:  # rank 0 only
+        app.text_encoder.model.register_forward_hook(
+            lambda module, args, output: encoder_inputs.append(tuple(args[0].shape))
+        )
+    negative_prompt_embeds = app.pipeline._negative_prompt_embeds
+
+    def recording_negative(prompt_embeds):
+        out = negative_prompt_embeds(prompt_embeds)
+        negative_abs_sums.append(float(out.abs().sum()))
+        return out
+
+    app.pipeline._negative_prompt_embeds = recording_negative
+    prompt_embeds, latents = tiny_wan_pipeline_inputs()
+    out = app(
+        prompt_embeds=prompt_embeds,
+        latents=latents,
+        channels=TINY_LATENT_SHAPE[1],  # the orchestrator defaults to Wan's 16
+        num_inference_steps=2,
+        guidance_scale=5.0,
+        output_type="latent",
+    )
+    final = out.latents
+    return {
+        "dtype": str(final.dtype),
+        "latents": final.tolist(),
+        "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest(),
+        "steps": steps,
+        "forward_seconds": forward_seconds,
+        "encoder_inputs": encoder_inputs,
+        "negative_abs_sums": negative_abs_sums,
+        "phase_seconds": sorted(app.phase_seconds),
+        "unwarmed_shapes": list(app.unwarmed_shapes),
+    }
