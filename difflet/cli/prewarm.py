@@ -12,6 +12,13 @@ The main thread's own first device op remains the source of truth — if prewarm
 races ahead, the main thread finds the runtime already up; if it fails or lags,
 the main thread pays the init as before. Set ``DIFFLET_DISABLE_PREWARM`` to a
 non-empty value to opt out.
+
+Only AoT backends (Trainium) prewarm. A non-AoT backend (neuron) runs one process
+per NeuronCore under torchrun; each rank must bind its core before the runtime
+starts, and torch_neuronx refuses to create the process group once the runtime
+is up (torch_neuronx/distributed/backend.py:199-201). No thread is started for
+it: ``NeuronBackend.prepare_runtime`` only refuses a runtime that is already up
+when it runs, and a thread could start one after that check.
 """
 from __future__ import annotations
 
@@ -28,12 +35,14 @@ def prewarm_neuron_runtime(num_devices: int) -> threading.Thread | None:
             stage subprocess). Touching one core triggers the process-wide
             bring-up; the rest are touched too so every core's context is warm.
 
-    Returns the started daemon thread, or ``None`` if prewarm is disabled or
-    ``num_devices`` is non-positive.
+    Returns the started daemon thread, or ``None`` if prewarm is disabled,
+    ``num_devices`` is non-positive, or the selected backend is not AoT.
     """
     if os.environ.get("DIFFLET_DISABLE_PREWARM"):
         return None
     if num_devices < 1:
+        return None
+    if not _backend_requires_aot():
         return None
 
     def _touch() -> None:
@@ -53,3 +62,18 @@ def prewarm_neuron_runtime(num_devices: int) -> threading.Thread | None:
     thread = threading.Thread(target=_touch, name="neuron-prewarm", daemon=True)
     thread.start()
     return thread
+
+
+def _backend_requires_aot() -> bool:
+    """Whether the selected backend compiles ahead of time; True if it cannot be resolved.
+
+    The selection is ``DIFFLET_BACKEND``, else auto-detection (``neuron`` on a
+    TorchNeuron host). A failed lookup keeps the historical behaviour (prewarm),
+    which predates backend selection and is itself best-effort.
+    """
+    try:
+        from difflet.backends import get_backend
+
+        return bool(get_backend().capabilities.requires_aot)
+    except Exception:
+        return True

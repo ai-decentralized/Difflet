@@ -19,6 +19,11 @@ _BACKEND_FACTORIES = {
 }
 
 
+def available_backends() -> tuple[str, ...]:
+    """Every name ``resolve_backend_name`` accepts, sorted (the CLI ``--backend`` choices)."""
+    return tuple(sorted(_BACKEND_FACTORIES))
+
+
 def resolve_backend_name(name: str | None = None) -> str:
     value = name or envs.DIFFLET_BACKEND
     if value:
