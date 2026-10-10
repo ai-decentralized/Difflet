@@ -13,7 +13,8 @@ The snapshot is --snapshot, else $DIFFLET_WAN_SNAPSHOT / $DIFFLET_QWEN_SNAPSHOT,
 else the TPU host's /mnt/models path; the output is --out, else
 /mnt/models/oracle_<model>.pt. Both are checked before anything is loaded, so
 on a host without /mnt/models pass them. --threads sizes torch's thread pool
-(default: os.cpu_count()).
+(default: os.cpu_count()). For wan, --timesteps 996,500 computes the reference
+and the bf16 control at each timestep on the same inputs (saved under "runs").
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from __future__ import annotations
 import argparse
 import os
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 import torch
@@ -38,14 +40,18 @@ WAN = os.environ.get(
 SNAPSHOT_ENV = {"wan": "DIFFLET_WAN_SNAPSHOT", "qwen_image": "DIFFLET_QWEN_SNAPSHOT"}
 
 
-def wan(out: Path, frames: int, snapshot: str = WAN) -> None:
+def wan(out: Path, frames: int, snapshot: str = WAN,
+        timesteps: Sequence[float] = (500.0,)) -> None:
+    """One fp32 forward per timestep, then one bf16 control per timestep, on the same seeded
+    latents and text. ``runs`` holds every timestep; the single-timestep keys
+    (``timestep``, ``reference``, ``reference_bf16``) hold the first one."""
     from diffusers import WanTransformer3DModel
 
     torch.manual_seed(0)
     latent_frames = (frames - 1) // 4 + 1
     hidden = torch.randn(1, 16, latent_frames, 60, 104)
-    timestep = torch.tensor([500.0])
     text = torch.randn(1, 512, 4096)
+    steps = [torch.tensor([float(t)]) for t in timesteps]
 
     print(f"loading diffusers WanTransformer3DModel fp32 ({frames} frames, "
           f"latent {latent_frames}x60x104) ...", flush=True)
@@ -57,28 +63,41 @@ def wan(out: Path, frames: int, snapshot: str = WAN) -> None:
     print(f"  loaded in {time.monotonic() - mark:.1f}s; "
           f"{sum(p.numel() for p in model.parameters()) / 1e9:.3f}B params", flush=True)
 
-    mark = time.monotonic()
-    with torch.no_grad():
-        ref = model(hidden, timestep, text, return_dict=False)[0]
-    print(f"  forward in {time.monotonic() - mark:.1f}s -> {tuple(ref.shape)}", flush=True)
+    refs = []
+    for timestep in steps:
+        mark = time.monotonic()
+        with torch.no_grad():
+            refs.append(model(hidden, timestep, text, return_dict=False)[0])
+        print(f"  forward in {time.monotonic() - mark:.1f}s -> {tuple(refs[-1].shape)} "
+              f"(timestep {float(timestep[0]):g})", flush=True)
 
     # Control: the SAME upstream implementation in bf16. Without this there is
     # no way to tell whether a gap is difflet's fault or simply what bf16
     # costs over 40 layers.
     mark = time.monotonic()
     model = model.to(torch.bfloat16)
-    with torch.no_grad():
-        ref_bf16 = model(hidden.to(torch.bfloat16), timestep.to(torch.bfloat16),
-                         text.to(torch.bfloat16), return_dict=False)[0].float()
-    print(f"  bf16 control forward in {time.monotonic() - mark:.1f}s", flush=True)
-    a, r = ref_bf16.flatten(), ref.flatten()
-    cos = float(torch.nn.functional.cosine_similarity(a, r, dim=0))
-    print(f"  diffusers bf16 vs diffusers fp32: cosine {cos:.8f}  "
-          f"rel_l1 {float((a - r).abs().mean() / r.abs().mean()):.2e}", flush=True)
+    print(f"  converted to bf16 in {time.monotonic() - mark:.1f}s", flush=True)
+    runs = []
+    for timestep, ref in zip(steps, refs, strict=True):
+        mark = time.monotonic()
+        with torch.no_grad():
+            ref_bf16 = model(hidden.to(torch.bfloat16), timestep.to(torch.bfloat16),
+                             text.to(torch.bfloat16), return_dict=False)[0].float()
+        print(f"  bf16 control forward in {time.monotonic() - mark:.1f}s "
+              f"(timestep {float(timestep[0]):g})", flush=True)
+        a, r = ref_bf16.flatten(), ref.flatten()
+        cos = float(torch.nn.functional.cosine_similarity(a, r, dim=0))
+        print(f"  diffusers bf16 vs diffusers fp32: cosine {cos:.8f}  "
+              f"rel_l1 {float((a - r).abs().mean() / r.abs().mean()):.2e}  "
+              f"(timestep {float(timestep[0]):g})", flush=True)
+        runs.append({"timestep": timestep, "reference": ref, "reference_bf16": ref_bf16})
 
-    torch.save({"hidden_states": hidden, "timestep": timestep,
-                "encoder_hidden_states": text, "reference": ref,
-                "reference_bf16": ref_bf16, "frames": frames}, out)
+    first = runs[0]
+    torch.save({"hidden_states": hidden, "encoder_hidden_states": text, "frames": frames,
+                "timesteps": [float(t[0]) for t in steps], "runs": runs,
+                # The single-timestep layout tpu_oracle_compare.py reads.
+                "timestep": first["timestep"], "reference": first["reference"],
+                "reference_bf16": first["reference_bf16"]}, out)
     print(f"wrote {out}", flush=True)
 
 
@@ -147,9 +166,20 @@ def main() -> None:
                    help="output .pt (default: /mnt/models/oracle_<model>.pt)")
     p.add_argument("--threads", type=int, default=os.cpu_count(),
                    help="torch intra-op threads (default: os.cpu_count(), i.e. this host's)")
+    p.add_argument("--timesteps", default=None,
+                   help="wan only: comma-separated DiT timesteps, one fp32 reference and one "
+                        "bf16 control each on the same inputs (default: 500)")
     a = p.parse_args()
     if a.threads < 1:
         p.error(f"--threads must be at least 1, got {a.threads}")
+    timesteps = [500.0]
+    if a.timesteps is not None:
+        if a.model != "wan":
+            p.error("--timesteps applies to wan only")
+        try:
+            timesteps = [float(t) for t in a.timesteps.split(",")]
+        except ValueError:
+            p.error(f"--timesteps must be comma-separated numbers, got {a.timesteps!r}")
     # Read the environment now, not at import, so the same process can be pointed elsewhere.
     snapshot = a.snapshot or os.environ.get(
         SNAPSHOT_ENV[a.model], WAN if a.model == "wan" else QWEN)
@@ -164,7 +194,7 @@ def main() -> None:
     print(f"torch threads: {torch.get_num_threads()} (os.cpu_count()={os.cpu_count()}); "
           f"snapshot {snapshot}", flush=True)
     if a.model == "wan":
-        wan(out=out, frames=a.frames, snapshot=snapshot)
+        wan(out=out, frames=a.frames, snapshot=snapshot, timesteps=timesteps)
     else:
         qwen_image(out=out, snapshot=snapshot)
 

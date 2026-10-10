@@ -105,3 +105,86 @@ def test_missing_output_directory_stops_before_loading(monkeypatch, oracle, tmp_
         run(monkeypatch, oracle, "wan", "--out", str(tmp_path / "missing-dir" / "ref.pt"))
     assert oracle.calls == []
     assert "--out" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- --timesteps
+
+
+def test_timesteps_default_to_500(monkeypatch, oracle, tmp_path):
+    calls = run(monkeypatch, oracle, "wan", "--out", str(tmp_path / "ref.pt"))
+    assert [c["timesteps"] for c in calls] == [[500.0]]
+
+
+def test_timesteps_flag_takes_a_comma_separated_list(monkeypatch, oracle, tmp_path):
+    calls = run(monkeypatch, oracle, "wan", "--timesteps", "996, 500",
+                "--out", str(tmp_path / "ref.pt"))
+    assert [c["timesteps"] for c in calls] == [[996.0, 500.0]]
+
+
+@pytest.mark.parametrize("value", ["996,abc", "", "996,,500"])
+def test_timesteps_flag_rejects_a_malformed_list(monkeypatch, oracle, tmp_path, value):
+    with pytest.raises(SystemExit):
+        run(monkeypatch, oracle, "wan", "--timesteps", value, "--out", str(tmp_path / "r.pt"))
+    assert oracle.calls == []
+
+
+def test_timesteps_flag_is_wan_only(monkeypatch, oracle, tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        run(monkeypatch, oracle, "qwen_image", "--timesteps", "0.5",
+            "--out", str(tmp_path / "r.pt"))
+    assert oracle.calls == []
+    assert "--timesteps" in capsys.readouterr().err
+
+
+class _FakeWan(torch.nn.Module):
+    """Stands in for diffusers' WanTransformer3DModel: the output depends on the timestep,
+    the latents and the text, and is computed in the module's dtype."""
+
+    def __init__(self):
+        super().__init__()
+        self.scale = torch.nn.Parameter(torch.tensor(0.5))
+        self.seen = []
+
+    def forward(self, hidden, timestep, text, return_dict=True):
+        self.seen.append((float(timestep[0]), hidden.dtype, timestep.dtype, text.dtype))
+        out = hidden * self.scale * timestep.view(-1, 1, 1, 1, 1) / 1000 + text.mean()
+        return (out,)
+
+
+def test_wan_saves_one_reference_and_one_bf16_control_per_timestep(monkeypatch, tmp_path):
+    import diffusers
+
+    spec = importlib.util.spec_from_file_location("tpu_oracle_reference_wan", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    fake = _FakeWan()
+    monkeypatch.setattr(diffusers.WanTransformer3DModel, "from_pretrained",
+                        lambda path, torch_dtype: fake)
+    out = tmp_path / "oracle.pt"
+
+    module.wan(out=out, frames=1, snapshot=str(tmp_path), timesteps=[996.0, 500.0])
+
+    blob = torch.load(out, weights_only=False)
+    assert blob["timesteps"] == [996.0, 500.0]
+    assert [float(r["timestep"][0]) for r in blob["runs"]] == [996.0, 500.0]
+    # fp32 forwards first, then the bf16 control on the same inputs.
+    assert fake.seen == [
+        (996.0, torch.float32, torch.float32, torch.float32),
+        (500.0, torch.float32, torch.float32, torch.float32),
+        (996.0, torch.bfloat16, torch.bfloat16, torch.bfloat16),
+        (500.0, torch.bfloat16, torch.bfloat16, torch.bfloat16),
+    ]
+    hidden, text = blob["hidden_states"], blob["encoder_hidden_states"]
+    assert hidden.shape == (1, 16, 1, 60, 104) and text.shape == (1, 512, 4096)
+    for run_ in blob["runs"]:
+        t = run_["timestep"]
+        expected = hidden * 0.5 * t.view(-1, 1, 1, 1, 1) / 1000 + text.mean()
+        torch.testing.assert_close(run_["reference"], expected)
+        assert run_["reference_bf16"].dtype == torch.float32  # stored as fp32
+        torch.testing.assert_close(run_["reference_bf16"], expected, atol=0.1, rtol=0.02)
+        assert not torch.equal(run_["reference_bf16"], run_["reference"])
+    # The single-timestep keys stay, holding the first timestep (what tpu_oracle_compare reads).
+    assert torch.equal(blob["timestep"], blob["runs"][0]["timestep"])
+    assert torch.equal(blob["reference"], blob["runs"][0]["reference"])
+    assert torch.equal(blob["reference_bf16"], blob["runs"][0]["reference_bf16"])
+    assert blob["frames"] == 1
