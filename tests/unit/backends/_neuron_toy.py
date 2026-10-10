@@ -161,3 +161,131 @@ class ToyBlocksModel(nn.Module):
         for block in self.blocks:
             x = block(x)
         return x
+
+
+# ---------------------------------------------------------------------------- C8: application
+# ToyApplication drives ToyBlocksModel (C9) through TorchNeuronApplicationBase; the reference
+# helpers build the unsharded TP1 model on the host, before any process group exists.
+
+from collections.abc import Iterator  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
+
+from difflet.backends.neuron.core.application_base import TorchNeuronApplicationBase  # noqa: E402
+
+TOY_APP_BLOCKS, TOY_APP_DIM, TOY_APP_HIDDEN = 4, 64, 256
+TOY_APP_BATCH, TOY_APP_SEQ = 1, 16
+TOY_INPUT_SEED = 1
+INJECT_FAILURES = ("example_inputs", "build_module", "forward")
+#: The rank that raises with ``inject_failure="forward"``.
+FORWARD_FAILURE_RANK = 2
+
+
+def toy_blocks_input(
+    batch: int, seq: int, dim: int, *, seed: int = TOY_INPUT_SEED, dtype=torch.float32
+) -> torch.Tensor:
+    generator = torch.Generator().manual_seed(seed)
+    return torch.randn(batch, seq, dim, generator=generator).to(dtype)
+
+
+@contextmanager
+def tp1_mesh() -> Iterator[None]:
+    """A spec-only TP1 neuron mesh for unsharded references; valid only without a process group."""
+    import torch.distributed as dist
+
+    from difflet.backends.neuron.ops_impl import parallel_mesh
+    from difflet.pipeline.parallel_mesh import MeshSpec
+
+    if dist.is_available() and dist.is_initialized():
+        raise RuntimeError("tp1_mesh() must run before the process group is initialized")
+    parallel_mesh.destroy_parallel_mesh()
+    parallel_mesh.init_parallel_mesh(MeshSpec(tp=1))
+    try:
+        yield
+    finally:
+        parallel_mesh.destroy_parallel_mesh()
+
+
+def toy_blocks_reference(
+    n_blocks: int, dim: int, hidden: int, x: torch.Tensor, *, seed: int = 0
+) -> tuple[dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
+    """TP1 reference: (fp32 full weights, fp32 output, CPU-bf16 output upcast to fp32)."""
+    with tp1_mesh():
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(seed)
+            model = ToyBlocksModel(n_blocks, dim, hidden).eval()
+        weights = {name: t.detach().clone().contiguous() for name, t in model.state_dict().items()}
+        with torch.no_grad():
+            out = model(x.to(torch.float32))
+            out_bf16 = model.to(torch.bfloat16)(x.to(torch.bfloat16)).float()
+    return weights, out, out_bf16
+
+
+def _fail_forward_on_one_rank(module, args) -> None:
+    """Forward pre-hook on block 0's MLP: runs after the block's attention all-reduce and
+    before its MLP all-reduce, so the peers of the failing rank are left inside a collective."""
+    from difflet.backends.neuron.core.distributed import world_info
+
+    rank = world_info()[0]
+    if rank == FORWARD_FAILURE_RANK:
+        raise RuntimeError(f"injected failure: forward on rank {rank}")
+
+
+class ToyApplication(TorchNeuronApplicationBase):
+    """ToyBlocksModel behind the C8 lifecycle.
+
+    ``inject_failure``: ``"example_inputs"`` and ``"build_module"`` make rank 0 raise before a
+    collective; ``"forward"`` makes rank ``FORWARD_FAILURE_RANK`` raise inside block 0 of the
+    warm-up forward, between its two all-reduces (eager mode only: in compile mode Dynamo would
+    trace the raise into the block's graph and fail at compile time instead).
+    """
+
+    block_attrs = ("blocks",)
+
+    def __init__(
+        self,
+        *,
+        model_path=None,
+        parallel=None,
+        dtype=torch.bfloat16,
+        exec_mode=None,
+        device="neuron",
+        n_blocks: int = TOY_APP_BLOCKS,
+        dim: int = TOY_APP_DIM,
+        hidden: int = TOY_APP_HIDDEN,
+        batch: int = TOY_APP_BATCH,
+        seq: int = TOY_APP_SEQ,
+        inject_failure: str | None = None,
+        **kwargs,
+    ):
+        if inject_failure is not None and inject_failure not in INJECT_FAILURES:
+            raise ValueError(
+                f"inject_failure must be one of {INJECT_FAILURES}, got {inject_failure!r}"
+            )
+        super().__init__(
+            model_path=model_path,
+            parallel=parallel,
+            dtype=dtype,
+            exec_mode=exec_mode,
+            device=device,
+            **kwargs,
+        )
+        if inject_failure == "forward" and self.exec_mode != "eager":
+            raise ValueError("inject_failure='forward' needs exec_mode='eager'")
+        self.n_blocks, self.dim, self.hidden = int(n_blocks), int(dim), int(hidden)
+        self.batch, self.seq = int(batch), int(seq)
+        self.inject_failure = inject_failure
+
+    def build_module(self) -> torch.nn.Module:
+        from difflet.backends.neuron.core.distributed import is_rank0
+
+        if self.inject_failure == "build_module" and is_rank0():
+            raise RuntimeError("injected failure: build_module on rank 0")
+        model = ToyBlocksModel(self.n_blocks, self.dim, self.hidden)
+        if self.inject_failure == "forward":
+            model.blocks[0].mlp.register_forward_pre_hook(_fail_forward_on_one_rank)
+        return model
+
+    def get_example_inputs(self) -> tuple[torch.Tensor, ...]:
+        if self.inject_failure == "example_inputs":
+            raise RuntimeError("injected failure: example_inputs on rank 0")
+        return (toy_blocks_input(self.batch, self.seq, self.dim, dtype=self.dtype),)
