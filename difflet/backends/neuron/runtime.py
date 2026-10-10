@@ -7,19 +7,30 @@ starts, and ranks communicate through the ``neuron`` process group.
 
 Phase 1 supports tensor parallelism only; context, CFG, sequence and data
 parallelism raise until their collectives are validated on this backend.
+
+``prepare_runtime`` first points torch-neuronx's persistent NEFF cache at the Difflet
+compile cache (``compile.configure_compile_cache``): the runtime reads it once, when it
+first compiles, so it must be set before any device work. A runtime already started by
+earlier device work is refused rather than left on ``/tmp/neff_cache`` and every core.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterator, MutableMapping
 from contextlib import contextmanager
 from typing import Any
 
 from difflet.backends.base import BackendCapabilities, BackendRuntime
+from difflet.backends.neuron.compile import configure_compile_cache
 
 PROCESS_GROUP_BACKEND = "neuron"
 VISIBLE_CORES_ENV = "NEURON_RT_VISIBLE_CORES"
+
+# Set once prepare_runtime has configured this process; a later call (a second pipeline)
+# finds the runtime it started and goes ahead.
+_runtime_prepared = False
 
 
 class NeuronBackend(BackendRuntime):
@@ -40,8 +51,19 @@ class NeuronBackend(BackendRuntime):
                     f"launched with WORLD_SIZE={world_size}; launch with "
                     f"torchrun --nproc-per-node {parallel.world_size}"
                 )
+        global _runtime_prepared
+        if not _runtime_prepared and _neuron_runtime_initialized():
+            raise RuntimeError(
+                "the Neuron runtime is already initialised in this process, so prepare_runtime "
+                f"can no longer bind a NeuronCore ({VISIBLE_CORES_ENV}) or move the NEFF cache "
+                "(TORCH_NEURONX_NEFF_CACHE_DIR) off /tmp/neff_cache; call "
+                "get_backend('neuron').prepare_runtime(...) before anything touches the neuron "
+                "device (a tensor .to('neuron'), a torch.neuron call, a prewarm)"
+            )
+        configure_compile_cache()
         bind_core()
         init_process_group()
+        _runtime_prepared = True
 
 
 def create_backend() -> NeuronBackend:
@@ -107,6 +129,12 @@ def bind_core(env: MutableMapping[str, str] | None = None) -> int | None:
     core = visible[local_rank] if visible else local_rank
     env[VISIBLE_CORES_ENV] = str(core)
     return core
+
+
+def _neuron_runtime_initialized() -> bool:
+    """Whether this process has started the Neuron runtime; never imports torch_neuronx."""
+    torch_neuronx = sys.modules.get("torch_neuronx")
+    return torch_neuronx is not None and bool(torch_neuronx.is_neuron_runtime_initialized())
 
 
 def init_process_group() -> None:
