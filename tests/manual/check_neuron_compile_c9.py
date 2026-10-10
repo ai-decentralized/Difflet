@@ -39,7 +39,13 @@ heads of 128. Rank 0 prints one PASS/FAIL line per case:
   directory exists where configure_compile_cache pointed it;
 * neff_cache_warm / warm_start_time: the compiled forward stores no NEFF, compiles nothing and
   counts persistent-cache hits on every rank, and the first compiled forward takes under half
-  the cold run's time.
+  the cold run's time;
+* two_models_one_graph / two_models_options / two_models_parity: two more models of the same
+  block class, each compiled by its own ``compile_blocks(model)`` call on the backend="neuron"
+  string path (Wan 2.2 A14B's two transformers): only the first model's forward hands the
+  backend a Dynamo graph, the second's hands it none and compiles or loads no NEFF; every block
+  of both models got the one options dict the neuron backend edited; both match their eager
+  forward with no CPU fallback. Checked on every rank.
 
 Each rank then prints its own counters and ``[rank r] PASS`` (or FAIL).
 """
@@ -72,6 +78,11 @@ from tests.unit.backends._neuron_toy import ToyBlocksModel
 N_BLOCKS, DIM, HIDDEN, HEADS, SEQ = 6, 1024, 2048, 8, 512
 PARITY_TOL = 2e-2
 NKI_ATTENTION_OP = "nki_kernels.scaled_dot_product_attention_kernel"
+NEFF_COUNTERS = (
+    "CompilationCache.TotalCompilations",
+    "CompilationCache.PersistentHits",
+    "CompilationCache.InMemoryHits",
+)
 
 
 class CountingBackend:
@@ -112,6 +123,79 @@ def cache_counter(name: str) -> int:
     import torch_neuronx.metrics as metrics
 
     return metrics.get_counter_value(name) or 0
+
+
+def block_options(block: torch.nn.Module):
+    """The options dict Dynamo hands the backend for a block compiled in place (as C8's check
+    reads it: compiled fn closure -> OptimizeContext -> ConvertFrameAssert -> the
+    _TorchCompileWrapper), so the blocks keep the exact backend="neuron" string path."""
+    try:
+        ctx = next(
+            cell.cell_contents
+            for cell in block._compiled_call_impl.__closure__
+            if type(cell.cell_contents).__name__ == "OptimizeContext"
+        )
+        wrapper = ctx.callback._torchdynamo_orig_backend._torchdynamo_orig_backend
+        return wrapper.kwargs.get("options")
+    except Exception as exc:  # noqa: BLE001 - reported as a FAIL by the caller
+        return f"<unreadable: {exc!r}>"
+
+
+def check_two_models(x) -> list[tuple[str, bool, str]]:
+    """Two more models of the same block class, each compiled by its own
+    ``compile_blocks(model)`` call (backend="neuron", default options), as two applications'
+    loads would (Wan 2.2 A14B's two transformers). The first model's forward must hand the
+    neuron backend one new Dynamo graph for its blocks; the second model's must hand it none
+    and compile or load no NEFF, because both calls hand the backend one options dict, which
+    the backend has edited. The runtime's in-memory NEFF lookups are reported too: one per
+    block call, plus the new graph's own lookups in the first model only. Run after the main
+    case, whose callable-backend graph stays in Dynamo's cache and does not match the
+    "neuron" string."""
+    from torch._dynamo.utils import counters
+
+    models = []
+    for seed in (2, 3):
+        torch.manual_seed(seed)
+        model = ToyBlocksModel(N_BLOCKS, DIM, HIDDEN, heads=HEADS, dtype=torch.bfloat16)
+        models.append(model.eval().requires_grad_(False).to("neuron"))
+    with torch.no_grad():
+        refs = [model(x) for model in models]
+    torch.neuron.synchronize()
+    graphs, neffs, errs, fallbacks = [], [], [], []
+    for model, ref in zip(models, refs):
+        compile_blocks(model)
+        graphs_before = counters["stats"]["unique_graphs"]
+        before = [cache_counter(name) for name in NEFF_COUNTERS]
+        with torch.no_grad(), track_fallbacks() as model_fallbacks:
+            out = model(x)
+        torch.neuron.synchronize()
+        graphs.append(counters["stats"]["unique_graphs"] - graphs_before)
+        neffs.append(tuple(cache_counter(n) - b for n, b in zip(NEFF_COUNTERS, before)))
+        errs.append(rel_err(out, ref))
+        fallbacks.extend(model_fallbacks)
+    options = [block_options(block) for model in models for block in model.blocks]
+    shared = options[0]
+    same_dict = all(o is shared for o in options)
+    edited = isinstance(shared, dict) and shared.get("fallback_execution") is False and (
+        "dynamic" in shared  # written by the neuron backend: it received this very dict
+    )
+    return [
+        (
+            "two_models_one_graph",
+            graphs == [1, 0] and neffs[1][:2] == (0, 0),
+            f"graphs={graphs} neffs(compiled,persistent,in_memory)={neffs}",
+        ),
+        (
+            "two_models_options",
+            same_dict and edited,
+            f"one_dict={same_dict} blocks={len(options)} options={shared}",
+        ),
+        (
+            "two_models_parity",
+            max(errs) <= PARITY_TOL and not fallbacks,
+            f"rel_err={[f'{e:.2e}' for e in errs]} (tol {PARITY_TOL:.0e}) fallbacks={fallbacks}",
+        ),
+    ]
 
 
 def main() -> int:
@@ -203,6 +287,7 @@ def main() -> int:
     results.append(("compiled_neff", compiles + hits >= 1, counters))
     if args.expect == "warm":
         results.append(("warm_counters", compiles == 0 and hits >= 1, counters))
+    results.extend(check_two_models(x))
 
     if rank == 0:
         detail = (

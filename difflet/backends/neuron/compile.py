@@ -38,7 +38,17 @@ NKI_TRACE_CACHE_ENV = "NKI_ENABLE_TRACE_CACHE"
 #: With ``fallback_execution`` on (torch-neuronx's default), a graph that fails StableHLO
 #: conversion or fails at run time silently runs op by op instead
 #: (torch_neuronx/neuron_dynamo_backend/backend.py:83-86, 1449-1465, 1636-1641); off, it raises.
+#:
+#: Read-only (a ``MappingProxyType``): never pass it straight to ``compile_inplace`` or
+#: ``torch.compile(backend="neuron", options=...)``. The neuron backend edits the options dict
+#: it receives (``options.setdefault("dynamic", False)``, backend.py:1860-1862), which a
+#: mappingproxy refuses. Pass one mutable dict shared by every block instead, as
+#: ``compile_blocks`` does.
 NEURON_COMPILE_OPTIONS: Mapping[str, Any] = MappingProxyType({"fallback_execution": False})
+
+# The options dict compile_blocks hands the neuron backend, one per distinct option set, kept
+# for the whole process: (the options as requested, the dict the backend receives and edits).
+_shared_neuron_options: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
 
 def resolve_exec_mode(value: str | None = None) -> str:
@@ -112,9 +122,34 @@ def compile_inplace(
     Parameter and buffer names are unchanged, unlike ``torch.compile(module)``, which wraps the
     module and prefixes its state_dict keys with ``_orig_mod.``. ``options`` is passed as given,
     with no neuron defaults; ``compile_blocks`` adds ``NEURON_COMPILE_OPTIONS``.
+
+    With the neuron backend, ``options`` must be a plain mutable dict, never
+    ``NEURON_COMPILE_OPTIONS`` itself (a read-only mappingproxy): the backend edits the dict it
+    receives (it adds ``"dynamic"``). Blocks that should share one graph must also share one
+    dict object: Dynamo reuses a graph only while the backend wrappers compare equal, options
+    included, so a fresh copy per block (or per model) misses once the backend has edited the
+    first. ``compile_blocks`` takes care of both.
     """
     module.compile(backend=backend, fullgraph=fullgraph, dynamic=dynamic, options=options)
     return module
+
+
+def _neuron_options_for(requested: dict[str, Any]) -> dict[str, Any]:
+    """The one options dict the neuron backend gets for ``requested``, in every call.
+
+    Keyed by the options as requested, compared before the backend edits its copy: any key the
+    backend adds or changes (today ``"dynamic"``) then lands in the one shared dict, so the
+    wrappers of every model still compare equal. Pre-seeding ``"dynamic"`` in
+    ``NEURON_COMPILE_OPTIONS`` would only cover the edit known today. A list, not a dict
+    keyed by the items, so unhashable option values work too; it holds one entry per distinct
+    option set in the process.
+    """
+    for snapshot, shared in _shared_neuron_options:
+        if snapshot == requested:
+            return shared
+    shared = dict(requested)
+    _shared_neuron_options.append((dict(requested), shared))
+    return shared
 
 
 def compile_blocks(
@@ -134,7 +169,10 @@ def compile_blocks(
 
     With ``backend="neuron"``, ``options`` is laid over ``NEURON_COMPILE_OPTIONS``, so a block
     that fails to lower raises instead of silently running op by op; pass
-    ``{"fallback_execution": True}`` to allow that.
+    ``{"fallback_execution": True}`` to allow that. Every call with the same resulting options
+    hands the backend the same dict object, so a second model with the same block class (Wan
+    2.2 A14B's two transformers) reuses the first model's graphs instead of compiling its own.
+    The caller's ``options`` dict is copied, never edited.
 
     Each static input shape adds one cache entry per block class. Dynamo keeps a class's entries
     on its ``forward`` code object and allows ``torch._dynamo.config.recompile_limit`` (8) of
@@ -148,9 +186,10 @@ def compile_blocks(
     # One options object for all blocks: Dynamo reuses the first block's graph only while the
     # backend wrappers compare equal, options included, and the neuron backend adds "dynamic"
     # to the dict it is given (torch_neuronx/neuron_dynamo_backend/backend.py:1862); a fresh
-    # copy per block would compile every block separately.
+    # copy per block would compile every block separately. For the neuron backend the object
+    # is also shared across calls (_neuron_options_for), so other models reuse the graphs too.
     if backend == "neuron":
-        shared_options = {**NEURON_COMPILE_OPTIONS, **(options or {})}
+        shared_options = _neuron_options_for({**NEURON_COMPILE_OPTIONS, **(options or {})})
     else:
         shared_options = None if options is None else dict(options)
     compiled: list[str] = []

@@ -308,6 +308,9 @@ from difflet.cli.orchestrators.base import ModelOrchestrator  # noqa: E402
 TOY_MODEL_TYPE = "neuron_toy"
 TOY_ORCHESTRATOR = "tests.unit.backends._neuron_toy:ToyOrchestrator"
 TOY_STAGE = "toy"
+#: Test-only stage of the Ctrl-C test: ranks deaf to SIGINT and SIGTERM (toy_hang_rank).
+TOY_HANG_STAGE = "hang"
+TOY_HANG_SECONDS = 120.0  # a hang rank left behind still exits on its own after this
 TOY_DEVICE_ENV = "DIFFLET_TOY_DEVICE"  # test-only: "cpu" runs the toy stage on gloo/cpu
 #: Test-only failure injection: "<step>:<rank>", step one of TOY_FAIL_STEPS (eager mode).
 TOY_FAIL_ENV = "DIFFLET_TOY_FAIL"
@@ -515,6 +518,29 @@ def run_toy_pipeline(*, exec_mode: str | None, work_dir, device: str = "neuron")
     return result
 
 
+def toy_hang_rank(work_dir, *, seconds: float = TOY_HANG_SECONDS) -> None:
+    """One rank of the Ctrl-C test (the ``hang`` stage), on CPU, never the device.
+
+    Ignores SIGINT and SIGTERM, as a rank blocked in a native Neuron compile or collective
+    effectively does (Python's handlers never get to run there), so only SIGKILL, which
+    torchrun sends when its shutdown timeout runs out, stops it. Once deaf, writes
+    ``hang-rank<RANK>.pid`` = "<its pid> <its parent's pid, torchrun>" into ``work_dir``, then
+    sleeps for ``seconds`` and returns.
+    """
+    import signal
+    import time
+
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    path = Path(work_dir) / f"hang-rank{int(os.environ.get('RANK', '0'))}.pid"
+    partial = path.with_suffix(".partial")
+    partial.write_text(f"{os.getpid()} {os.getppid()}\n")
+    partial.rename(path)  # appears whole: the test never reads a half-written file
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        time.sleep(0.2)
+
+
 def _ensure_cpu_process_group() -> None:
     """torchrun CPU path: the cpu backend's prepare_runtime starts no process group."""
     import torch.distributed as dist
@@ -532,7 +558,8 @@ def _fallback_tracker(device: str):
 
 
 class ToyOrchestrator(ModelOrchestrator):
-    """Stage-only orchestrator: `difflet.cli.stage --orchestrator TOY_ORCHESTRATOR --stage toy`.
+    """Stage-only orchestrator: `difflet.cli.stage --orchestrator TOY_ORCHESTRATOR --stage toy`
+    (or ``--stage hang``, the Ctrl-C test's unresponsive ranks, see toy_hang_rank).
 
     Any failure leaves ``_run_stage_internal`` as an exception, so the stage process exits
     non-zero and torchrun stops the other ranks. The process group is destroyed only after
@@ -550,10 +577,13 @@ class ToyOrchestrator(ModelOrchestrator):
         raise NotImplementedError("the toy orchestrator only runs as a difflet.cli.stage stage")
 
     def _run_stage_internal(self, stage: str, args) -> None:
-        if stage != TOY_STAGE:
+        if stage not in (TOY_STAGE, TOY_HANG_STAGE):
             raise ValueError(f"unknown toy stage {stage!r}")
         if not getattr(args, "work_dir", None):
             raise ValueError("the toy stage needs --work-dir (see prepare_toy_work_dir)")
+        if stage == TOY_HANG_STAGE:
+            toy_hang_rank(args.work_dir)
+            return
         import torch.distributed as dist
 
         from difflet.backends.neuron.compile import resolve_exec_mode

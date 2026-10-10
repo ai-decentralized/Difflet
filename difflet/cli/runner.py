@@ -4,7 +4,9 @@ import os
 import re
 import subprocess
 import sys
+import time
 import uuid
+from collections.abc import Mapping
 
 from difflet import envs
 from difflet.common.neuron_cores import (
@@ -15,6 +17,11 @@ from difflet.common.neuron_cores import (
 # Rank variables owned by torchrun. A copy inherited from the caller (run_stage
 # called inside a process torchrun itself launched) must not reach the new launch.
 _TORCHRUN_RANK_ENV: tuple[str, ...] = ("WORLD_SIZE", "RANK", "LOCAL_RANK", "LOCAL_WORLD_SIZE")
+# torchrun's grace period for its ranks after it forwards a stop signal (torch.distributed
+# LaunchConfig.shutdown_timeout), and the extra time an interrupted launch gives torchrun.
+_TORCHRUN_SHUTDOWN_TIMEOUT_ENV = "TORCH_ELASTIC_SHUTDOWN_TIMEOUT"
+_TORCHRUN_SHUTDOWN_DEFAULT_S = 30
+_TORCHRUN_STOP_MARGIN_S = 30
 
 
 def _is_whole_device(num_cores: int) -> bool:
@@ -104,6 +111,66 @@ def _prepare_mpmd_env(env: dict[str, str], num_cores: int, *, strict_environment
         env.pop("NEURON_RT_NUM_CORES", None)
 
 
+def _torchrun_stop_timeout(env: Mapping[str, str]) -> float:
+    """How long an interrupted launch waits for torchrun before killing it.
+
+    torchrun signals every rank, waits TORCH_ELASTIC_SHUTDOWN_TIMEOUT (30 s unless set; parsed
+    with int() as torchrun does) and then SIGKILLs the ranks still running; the margin covers
+    that and its own teardown.
+    """
+    try:
+        shutdown_s = int(env.get(_TORCHRUN_SHUTDOWN_TIMEOUT_ENV, _TORCHRUN_SHUTDOWN_DEFAULT_S))
+    except ValueError:
+        shutdown_s = _TORCHRUN_SHUTDOWN_DEFAULT_S
+    return float(max(shutdown_s, 0) + _TORCHRUN_STOP_MARGIN_S)
+
+
+def _run_torchrun(cmd: list[str], env: dict[str, str]) -> None:
+    """``subprocess.run(cmd, env=env, check=True)`` for a torchrun launch, except that torchrun
+    is never killed before it has stopped its ranks.
+
+    torchrun starts every rank in a session of its own, so a terminal's Ctrl-C reaches torchrun
+    (in this process's group) but not the ranks, and only torchrun can stop them: it forwards
+    the signal, waits, then SIGKILLs the ranks still running (one blocked in a native Neuron
+    compile or collective cannot run Python's SIGINT handler). ``subprocess.run`` SIGKILLs
+    torchrun 0.25 s after a KeyboardInterrupt, which would leave such ranks holding their
+    NeuronCores. On KeyboardInterrupt this waits for torchrun instead (another Ctrl-C does not
+    cut the wait short; torchrun receives that one too), kills it only after
+    ``_torchrun_stop_timeout``, and re-raises. Any other exception first sends torchrun
+    SIGTERM, which it handles like SIGINT. A non-zero exit raises CalledProcessError.
+    """
+    proc = subprocess.Popen(cmd, env=env)
+    try:
+        returncode = proc.wait()
+    except BaseException as exc:
+        if not isinstance(exc, KeyboardInterrupt):
+            proc.terminate()
+        _await_torchrun_exit(proc, _torchrun_stop_timeout(env))
+        raise
+    if returncode:
+        raise subprocess.CalledProcessError(returncode, cmd)
+
+
+def _await_torchrun_exit(proc: subprocess.Popen, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            proc.wait(timeout=max(deadline - time.monotonic(), 0.0))
+            return
+        except KeyboardInterrupt:
+            continue  # Ctrl-C again: torchrun got it as well and is still stopping its ranks
+        except subprocess.TimeoutExpired:
+            break
+    print(
+        f"[difflet] torchrun (pid {proc.pid}) did not exit {timeout:.0f}s after being "
+        "interrupted; killing it (its ranks may still hold NeuronCores)",
+        file=sys.stderr,
+        flush=True,
+    )
+    proc.kill()
+    proc.wait()
+
+
 def run_stage(
     orchestrator: str,
     stage: str,
@@ -117,7 +184,8 @@ def run_stage(
     Staged CLI calls preserve explicit shell overrides. Serving compilation uses
     ``strict_environment=True`` so the compiled topology matches its identity.
     When DIFFLET_BACKEND names a non-AoT torchrun-MPMD backend (neuron), the stage
-    runs as ``num_cores`` torchrun ranks and ``virtual_core_size`` does not apply.
+    runs as ``num_cores`` torchrun ranks and ``virtual_core_size`` does not apply; an
+    interrupt then waits for torchrun to stop its ranks (``_run_torchrun``).
     """
     nproc = num_cores if _torchrun_mpmd_selected() else None
     env = os.environ.copy()
@@ -157,7 +225,10 @@ def run_stage(
 
     cmd = build_stage_command(orchestrator, stage, cli_args, nproc=nproc)
     try:
-        subprocess.run(cmd, env=env, check=True)
+        if nproc is None:
+            subprocess.run(cmd, env=env, check=True)
+        else:
+            _run_torchrun(cmd, env)
     except BaseException:
         # Keep the scratch dir for post-mortem on failure.
         raise

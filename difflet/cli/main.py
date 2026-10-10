@@ -5,6 +5,7 @@ import math
 import os
 import sys
 
+from difflet import envs
 from difflet.pipeline.parallel_config import CP_MODES
 
 VALID_MODELS = {
@@ -381,16 +382,26 @@ def _apply_backend_flags(args: argparse.Namespace) -> None:
     (tests/unit/cli/test_stage.py:109-145). Exits with code 2, before anything is
     exported or any orchestrator is built, when the model's registry entry does not
     list --backend, or when --exec-mode is given for an AoT backend.
+
+    Without --backend, a DIFFLET_BACKEND already in the environment selects the backend
+    the same way (a non-AoT one such as neuron makes every stage a torchrun launch), so
+    the model check runs for it too when it names a non-AoT backend; an AoT backend
+    (trainium, tpu) keeps its old path, which never checked here. An unknown
+    DIFFLET_BACKEND exits 2 as well.
     """
     backend = getattr(args, "backend", None)
     exec_mode = getattr(args, "exec_mode", None)
     model_id = getattr(args, "model_id", None)
     if backend is not None and model_id is not None:
         _require_model_backend(model_id, backend)
+    elif backend is None and model_id is not None and envs.DIFFLET_BACKEND:
+        ambient = _lookup_backend(None)
+        if not ambient.capabilities.requires_aot:
+            _require_model_backend(
+                model_id, ambient.name, source=f"DIFFLET_BACKEND={envs.DIFFLET_BACKEND}"
+            )
     if exec_mode is not None:
-        from difflet.backends import get_backend
-
-        runtime = get_backend(backend)
+        runtime = _lookup_backend(backend)
         if runtime.capabilities.requires_aot:
             print(
                 f"Error: --exec-mode applies to non-AoT backends only; backend "
@@ -404,15 +415,34 @@ def _apply_backend_flags(args: argparse.Namespace) -> None:
         os.environ["DIFFLET_EXEC_MODE"] = exec_mode
 
 
-def _require_model_backend(model_id: str, backend: str) -> None:
-    """Exit 2 unless ``model_id``'s registry entry lists ``backend`` (ModelEntry.require_backend)."""
+def _lookup_backend(name: str | None):
+    """``get_backend(name)``; ``None`` means DIFFLET_BACKEND, else auto-detection.
+
+    An unknown DIFFLET_BACKEND exits 2 with the registry's message instead of a traceback
+    (--backend itself is limited to the known names by argparse).
+    """
+    from difflet.backends import get_backend
+
+    try:
+        return get_backend(name)
+    except ValueError as exc:
+        source = "DIFFLET_BACKEND" if name is None else "--backend"
+        print(f"Error: {exc} ({source}).", file=sys.stderr)
+        raise SystemExit(2) from None
+
+
+def _require_model_backend(model_id: str, backend: str, *, source: str | None = None) -> None:
+    """Exit 2 unless ``model_id``'s registry entry lists ``backend`` (ModelEntry.require_backend).
+
+    ``source`` names where the backend came from in the message (default ``--backend NAME``).
+    """
     from difflet.registry import resolve_model
 
     entry = resolve_model(model_id, model_type=_MODEL_TYPE.get(model_id))
     try:
         entry.require_backend(backend)
     except ValueError as exc:
-        print(f"Error: {exc} (--backend {backend}).", file=sys.stderr)
+        print(f"Error: {exc} ({source or f'--backend {backend}'}).", file=sys.stderr)
         raise SystemExit(2) from None
 
 

@@ -41,6 +41,10 @@ def _fresh_dynamo_and_mesh(monkeypatch):
     torch._dynamo.reset()
     # prepare_runtime records that it ran; restore the flag so no test sees another's call.
     monkeypatch.setattr(runtime, "_runtime_prepared", False)
+    # compile_blocks keeps one neuron options dict per option set for the whole process, and a
+    # backend edits it; start every test without one. (raising=False: the RED run of the final
+    # fix uses the module from before the attribute existed.)
+    monkeypatch.setattr(neuron_compile, "_shared_neuron_options", [], raising=False)
     yield
     torch._dynamo.reset()
     destroy_parallel_mesh()
@@ -59,12 +63,38 @@ class CountingBackend:
 
 
 class OptionsEditingBackend(CountingBackend):
-    """Behaves like the neuron backend, which adds "dynamic" to its options dict in place."""
+    """Behaves like the neuron backend, which adds "dynamic" to its options dict in place
+    (``edits``: the keys it sets that way); records the options object of every graph."""
+
+    def __init__(self, edits=(("dynamic", False),)):
+        super().__init__()
+        self.edits = tuple(edits)
+        self.options = []
 
     def __call__(self, gm, example_inputs, *, options=None, **kwargs):
+        self.options.append(options)
         if options is not None:
-            options.setdefault("dynamic", False)
+            for key, value in self.edits:
+                options.setdefault(key, value)
         return super().__call__(gm, example_inputs)
+
+
+@pytest.fixture
+def neuron_backend_stub(monkeypatch):
+    """Install an OptionsEditingBackend as Dynamo's "neuron" backend for one test, so
+    ``compile_blocks(backend="neuron")`` (NEURON_COMPILE_OPTIONS, the shared options dict) runs
+    on CPU. Returns a factory taking the backend's ``edits``."""
+    from torch._dynamo.backends import registry
+
+    registry._lazy_import()  # read the entry-point table now, so it cannot replace the stub later
+
+    def install(edits=(("dynamic", False),)):
+        backend = OptionsEditingBackend(edits)
+        monkeypatch.setitem(registry._BACKENDS, "neuron", None)
+        monkeypatch.setitem(registry._COMPILER_FNS, "neuron", backend)
+        return backend
+
+    return install
 
 
 def _toy(n_blocks=N_BLOCKS, dtype=torch.float32):
@@ -298,6 +328,73 @@ def test_compile_blocks_turns_neuron_fallback_execution_off_unless_asked(monkeyp
     assert dict(neuron_compile.NEURON_COMPILE_OPTIONS) == {"fallback_execution": False}
     with pytest.raises(TypeError):
         neuron_compile.NEURON_COMPILE_OPTIONS["fallback_execution"] = True  # read-only
+
+
+def test_compile_blocks_hands_the_neuron_backend_one_options_dict_per_option_set(monkeypatch):
+    """Every call that resolves to the same options passes the same dict object, found by the
+    options as requested even after the backend has edited it; another option set gets a dict
+    of its own; the caller's dict is copied, never handed out or edited."""
+    seen = []
+    monkeypatch.setattr(nn.Module, "compile", lambda self, *a, **k: seen.append(k["options"]))
+    model = _toy(n_blocks=2)
+    caller = {"optlevel": 1}
+    neuron_compile.compile_blocks(model)  # seen[0:2]
+    seen[0]["dynamic"] = False  # what the neuron backend does when it compiles the first graph
+    neuron_compile.compile_blocks(model)  # seen[2:4]
+    neuron_compile.compile_blocks(model, options=caller)  # seen[4:6]
+    neuron_compile.compile_blocks(  # seen[6:8]: the same set, spelled out in another order
+        model, options={"optlevel": 1, "fallback_execution": False}
+    )
+    neuron_compile.compile_blocks(model, options={"fallback_execution": True})  # seen[8:10]
+    default, optlevel, fallback_on = seen[0], seen[4], seen[8]
+    assert all(options is default for options in seen[0:4])
+    assert all(options is optlevel for options in seen[4:8])
+    assert all(options is fallback_on for options in seen[8:10])
+    assert len({id(default), id(optlevel), id(fallback_on)}) == 3
+    assert default == {"fallback_execution": False, "dynamic": False}
+    assert optlevel == {"fallback_execution": False, "optlevel": 1}
+    assert fallback_on == {"fallback_execution": True}
+    assert caller == {"optlevel": 1} and all(options is not caller for options in seen)
+    assert dict(neuron_compile.NEURON_COMPILE_OPTIONS) == {"fallback_execution": False}
+
+
+def _other_toy(n_blocks=N_BLOCKS):
+    """Same block class and shapes as _toy(), other weights."""
+    torch.manual_seed(1)
+    return ToyBlocksModel(n_blocks, DIM, HIDDEN, heads=HEADS).eval()
+
+
+@pytest.mark.parametrize(
+    "edits",
+    [(("dynamic", False),), (("dynamic", False), ("added_later", 1))],
+    ids=["dynamic", "dynamic+another-key"],
+)
+@pytest.mark.parametrize("order", ["load_then_load", "compile_both_then_run"])
+def test_two_models_of_one_block_class_compile_one_graph(neuron_backend_stub, order, edits):
+    """Wan 2.2 A14B's two transformers: one block class, one compile_blocks call per model (one
+    per application load), backend="neuron". The neuron backend edits the options dict it gets,
+    and Dynamo reuses a block's graph only while the backend wrappers' options compare equal, so
+    the second model must be handed the first model's dict, edits included: one graph for both.
+    That also holds if the backend edits another key too, which pre-seeding "dynamic" in
+    NEURON_COMPILE_OPTIONS would not cover."""
+    backend = neuron_backend_stub(edits)
+    first, second, x = _toy(), _other_toy(), _input()
+    with torch.no_grad():
+        refs = [first(x), second(x)]
+        if order == "load_then_load":
+            neuron_compile.compile_blocks(first)
+            outs = [first(x)]
+            neuron_compile.compile_blocks(second)
+            outs.append(second(x))
+        else:
+            neuron_compile.compile_blocks(first)
+            neuron_compile.compile_blocks(second)
+            outs = [first(x), second(x)]
+        outs += [first(x), second(x)]  # every block of both models is a cache hit by now
+    assert len(backend.graphs) == 1
+    assert backend.options == [{"fallback_execution": False, **dict(edits)}]
+    for out, ref in zip(outs, refs * 2):
+        torch.testing.assert_close(out, ref, rtol=1e-5, atol=1e-5)
 
 
 class _TwoStacks(nn.Module):
