@@ -16,17 +16,21 @@ earlier device work is refused rather than left on ``/tmp/neff_cache`` and every
 
 from __future__ import annotations
 
+import datetime
+import math
 import os
 import sys
 from collections.abc import Iterator, MutableMapping
 from contextlib import contextmanager
 from typing import Any
 
+from difflet import envs
 from difflet.backends.base import BackendCapabilities, BackendRuntime
 from difflet.backends.neuron.compile import configure_compile_cache
 
 PROCESS_GROUP_BACKEND = "neuron"
 VISIBLE_CORES_ENV = "NEURON_RT_VISIBLE_CORES"
+PG_TIMEOUT_ENV = "DIFFLET_NEURON_PG_TIMEOUT_S"
 
 # Set once prepare_runtime has configured this process; a later call (a second pipeline)
 # finds the runtime it started and goes ahead.
@@ -137,10 +141,35 @@ def _neuron_runtime_initialized() -> bool:
     return torch_neuronx is not None and bool(torch_neuronx.is_neuron_runtime_initialized())
 
 
+def process_group_timeout() -> datetime.timedelta | None:
+    """The ``neuron`` process group's collective timeout from ``DIFFLET_NEURON_PG_TIMEOUT_S``.
+
+    The value is a positive number of seconds; unset or blank returns None, which leaves
+    torch's default (30 min for non-NCCL groups). The neuron backend's watchdog fails a
+    collective that waits longer than this, so a launch whose ranks can wait on a peer for
+    more than 30 min (a cold compile of a large block graph) raises it.
+    """
+    raw = envs.DIFFLET_NEURON_PG_TIMEOUT_S
+    if raw is None or not raw.strip():
+        return None
+    try:
+        seconds = float(raw)
+    except ValueError:
+        seconds = math.nan
+    if not (math.isfinite(seconds) and seconds > 0):
+        raise ValueError(f"{PG_TIMEOUT_ENV}={raw!r} is not a positive number of seconds")
+    return datetime.timedelta(seconds=seconds)
+
+
 def init_process_group() -> None:
-    """Initialise the ``neuron`` process group for multi-rank launches; no-op for one rank."""
+    """Initialise the ``neuron`` process group for multi-rank launches; no-op for one rank.
+
+    ``DIFFLET_NEURON_PG_TIMEOUT_S`` sets the group's timeout (``process_group_timeout``);
+    unset, ``timeout`` is not passed and torch's default applies.
+    """
     if (_env_int("WORLD_SIZE") or 1) <= 1:
         return
+    timeout = process_group_timeout()
     import torch.distributed as dist
     import torch_neuronx  # noqa: F401  registers the neuron device and process-group backend
 
@@ -152,7 +181,10 @@ def init_process_group() -> None:
                 f"expected {PROCESS_GROUP_BACKEND!r}"
             )
         return
-    dist.init_process_group(PROCESS_GROUP_BACKEND)
+    if timeout is None:
+        dist.init_process_group(PROCESS_GROUP_BACKEND)
+    else:
+        dist.init_process_group(PROCESS_GROUP_BACKEND, timeout=timeout)
 
 
 @contextmanager

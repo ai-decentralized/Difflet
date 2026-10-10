@@ -1,9 +1,14 @@
 """Unit tests for the neuron (TorchNeuron) backend runtime; no Neuron hardware needed."""
 
+import datetime
 import os
+import sys
+import types
 
 import pytest
+import torch.distributed as dist
 
+from difflet import envs
 from difflet.backends import registry
 from difflet.backends.neuron import runtime
 from difflet.pipeline.parallel_config import DiffletParallelConfig
@@ -116,3 +121,67 @@ def test_prepare_runtime_single_process_needs_no_device(monkeypatch, tmp_path):
     runtime.NeuronBackend().prepare_runtime(DiffletParallelConfig())
     assert os.environ["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "neuron" / "neff")
     assert os.environ["NKI_ENABLE_TRACE_CACHE"] == "0"
+
+
+# ------------------------------------------- process-group timeout (DIFFLET_NEURON_PG_TIMEOUT_S)
+
+
+def _record_process_group_creation(monkeypatch, timeout_env):
+    """A 4-rank launch whose ``init_process_group`` call is recorded instead of run: a stub
+    ``torch_neuronx`` (the real import registers the device) and no existing group."""
+    if timeout_env is None:
+        monkeypatch.delenv("DIFFLET_NEURON_PG_TIMEOUT_S", raising=False)
+    else:
+        monkeypatch.setenv("DIFFLET_NEURON_PG_TIMEOUT_S", timeout_env)
+    monkeypatch.setenv("WORLD_SIZE", "4")
+    monkeypatch.setitem(sys.modules, "torch_neuronx", types.ModuleType("torch_neuronx"))
+    monkeypatch.setattr(dist, "is_initialized", lambda: False)
+    calls = []
+    monkeypatch.setattr(dist, "init_process_group", lambda *a, **kw: calls.append((a, kw)))
+    return calls
+
+
+@pytest.mark.parametrize("timeout_env", [None, "", "  "])
+def test_init_process_group_keeps_the_torch_default_timeout_when_the_knob_is_unset(
+    monkeypatch, timeout_env
+):
+    calls = _record_process_group_creation(monkeypatch, timeout_env)
+    runtime.init_process_group()
+    # No timeout argument at all, so torch's own default (30 min for non-NCCL groups) applies.
+    assert calls == [(("neuron",), {})]
+
+
+@pytest.mark.parametrize(
+    "timeout_env, seconds", [("3600", 3600), (" 5400 ", 5400), ("90.5", 90.5)]
+)
+def test_init_process_group_passes_the_timeout_knob(monkeypatch, timeout_env, seconds):
+    calls = _record_process_group_creation(monkeypatch, timeout_env)
+    runtime.init_process_group()
+    assert calls == [(("neuron",), {"timeout": datetime.timedelta(seconds=seconds)})]
+
+
+@pytest.mark.parametrize("timeout_env", ["abc", "30m", "0", "-5", "nan", "inf"])
+def test_init_process_group_rejects_an_invalid_timeout_before_creating_the_group(
+    monkeypatch, timeout_env
+):
+    calls = _record_process_group_creation(monkeypatch, timeout_env)
+    with pytest.raises(
+        ValueError, match="DIFFLET_NEURON_PG_TIMEOUT_S=.*positive number of seconds"
+    ):
+        runtime.init_process_group()
+    assert calls == []
+
+
+def test_single_process_creates_no_group_whatever_the_timeout_knob(monkeypatch):
+    calls = _record_process_group_creation(monkeypatch, "3600")
+    monkeypatch.setenv("WORLD_SIZE", "1")
+    runtime.init_process_group()
+    assert calls == []
+
+
+def test_pg_timeout_is_a_registered_env_var(monkeypatch):
+    assert "DIFFLET_NEURON_PG_TIMEOUT_S" in dir(envs)
+    monkeypatch.delenv("DIFFLET_NEURON_PG_TIMEOUT_S", raising=False)
+    assert envs.DIFFLET_NEURON_PG_TIMEOUT_S is None
+    monkeypatch.setenv("DIFFLET_NEURON_PG_TIMEOUT_S", "3600")
+    assert envs.DIFFLET_NEURON_PG_TIMEOUT_S == "3600"

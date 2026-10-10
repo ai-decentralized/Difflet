@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     DIFFLET_BACKEND: str | None = None
     DIFFLET_COMPILE_CACHE: str = "~/.cache/difflet"
     DIFFLET_EXEC_MODE: str | None = None
+    DIFFLET_NEURON_PG_TIMEOUT_S: str | None = None
 
     # ----- Distributed framework (set by torchrun / launcher / tests) -----
     RANK: int = 0
@@ -77,6 +78,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # backend default. Not part of the compile-cache key.
     "DIFFLET_EXEC_MODE":
     lambda: os.environ.get("DIFFLET_EXEC_MODE"),
+
+    # Collective timeout of the ``neuron`` process group, in seconds (a positive
+    # number). Unset or blank keeps torch's default (30 min for non-NCCL groups).
+    # Raise it when a rank can wait in a collective longer than that, e.g. while
+    # a peer compiles a large block graph on a cold NEFF cache.
+    "DIFFLET_NEURON_PG_TIMEOUT_S":
+    lambda: os.environ.get("DIFFLET_NEURON_PG_TIMEOUT_S"),
 
     # Hardlink pre-sharded weights into a shape-independent store under
     # ``<DIFFLET_COMPILE_CACHE>/_shared_weights/`` so that every compiled shape
