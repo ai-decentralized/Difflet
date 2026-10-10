@@ -140,7 +140,8 @@ class WanOrchestrator(ModelOrchestrator):
         from difflet.pipeline.path_resolver import resolve_model_path
         from difflet.registry import resolve_model
         entry = resolve_model(self.args.model_id, model_type=_MODEL_TYPE)
-        resolve_model_path(self.args.model_id, local_files_only=False,
+        resolve_model_path(self.args.model_id, revision=self.args.revision,
+                           local_files_only=False,
                            allow_patterns=entry.download_patterns)
         print(f"[difflet] weights ready for {self.args.model_id}")
 
@@ -203,7 +204,9 @@ class WanOrchestrator(ModelOrchestrator):
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        model_dir = resolve_model_path(self.args.model_id, local_files_only=True)
+        model_dir = resolve_model_path(self.args.model_id,
+                                       revision=self.args.revision,
+                                       local_files_only=True)
         compile_shapes = _require_request_shape_in_set(args)
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
@@ -278,7 +281,9 @@ class WanOrchestrator(ModelOrchestrator):
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        model_dir = resolve_model_path(self.args.model_id, local_files_only=True)
+        model_dir = resolve_model_path(self.args.model_id,
+                                       revision=self.args.revision,
+                                       local_files_only=True)
         compile_shapes = _require_request_shape_in_set(args)
         parallel = DiffletParallelConfig(tp_degree=1, cp_degree=1)
         compiled_dir = self._stage_compiled_dir("vae", args)
@@ -414,6 +419,9 @@ class WanOrchestrator(ModelOrchestrator):
             parts += ["--output", a.output]
         if a.cache_dir:
             parts += ["--cache-dir", a.cache_dir]
+        # Only when pinned: a command line without --revision stays byte-identical.
+        if getattr(a, "revision", None):
+            parts += ["--revision", a.revision]
         if work_dir:
             parts += ["--work-dir", work_dir]
         if getattr(a, "requests_dir", None):
