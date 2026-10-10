@@ -12,6 +12,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from difflet.backends.neuron.ops_impl.attention import attention as neuron_attention
+from difflet.backends.neuron.ops_impl.collectives import get_tp_size
 from difflet.backends.neuron.ops_impl.linear import ColumnParallelLinear, RowParallelLinear
 
 
@@ -101,3 +103,61 @@ def write_toy_checkpoint(directory, weights, *, num_files=1):
     index = {"metadata": {"total_size": total}, "weight_map": weight_map}
     (directory / "model.safetensors.index.json").write_text(json.dumps(index, indent=2))
     return directory
+
+
+# ---------------------------------------------------------------- C9: repeated blocks
+
+
+class ToyBlock(nn.Module):
+    """A DiT-like block at TP: pre-norm self-attention (column q/k/v, row out) and a ToyTPMLP.
+
+    Attention runs over this rank's heads through the neuron attention op, so an unmasked bf16
+    call on the device takes the NKI flash kernel. At tp > 1 the block holds two all-reduces
+    (attention output, MLP down), both inside the block's compiled region.
+    """
+
+    def __init__(self, dim, hidden, *, heads=4, dtype=None, device=None):
+        super().__init__()
+        tp = get_tp_size()
+        if dim % heads or heads % tp:
+            raise ValueError(f"dim={dim} must split into heads={heads}, and heads across tp={tp}")
+        self.local_heads = heads // tp
+        self.head_dim = dim // heads
+        self.scale = self.head_dim**-0.5
+        factory = {"dtype": dtype, "device": device}
+        self.norm1 = nn.LayerNorm(dim, eps=1e-6, **factory)
+        self.to_q = ColumnParallelLinear(dim, dim, gather_output=False, **factory)
+        self.to_k = ColumnParallelLinear(dim, dim, gather_output=False, **factory)
+        self.to_v = ColumnParallelLinear(dim, dim, gather_output=False, **factory)
+        self.to_out = RowParallelLinear(dim, dim, input_is_parallel=True, **factory)
+        self.norm2 = nn.LayerNorm(dim, eps=1e-6, **factory)
+        self.mlp = ToyTPMLP(dim, hidden, dtype=dtype, device=device)
+
+    def _heads(self, t):
+        b, s, _ = t.shape
+        return t.view(b, s, self.local_heads, self.head_dim).transpose(1, 2)
+
+    def forward(self, x):
+        b, s, _ = x.shape
+        h = self.norm1(x)
+        q, k, v = self._heads(self.to_q(h)), self._heads(self.to_k(h)), self._heads(self.to_v(h))
+        a = neuron_attention(q, k, v, scale=self.scale, tp_q=True, tp_k=True)
+        a = a.transpose(1, 2).reshape(b, s, self.local_heads * self.head_dim)
+        x = x + self.to_out(a)
+        return x + self.mlp(self.norm2(x))
+
+
+class ToyBlocksModel(nn.Module):
+    """``n_blocks`` identical ToyBlocks in ``.blocks``; the per-block compile target."""
+
+    def __init__(self, n_blocks, dim, hidden, *, heads=4, dtype=None, device=None):
+        super().__init__()
+        self.blocks = nn.ModuleList(
+            ToyBlock(dim, hidden, heads=heads, dtype=dtype, device=device)
+            for _ in range(n_blocks)
+        )
+
+    def forward(self, x):
+        for block in self.blocks:
+            x = block(x)
+        return x
