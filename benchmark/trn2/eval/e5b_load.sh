@@ -6,8 +6,8 @@
 # same arrival sequence (seeds ARRIVAL_SEED, +1, +2 per level).
 #
 #   benchmark/trn2/eval/e5b_load.sh <model> [tp4|dp2tp2]     (venv active; run detached)
-# Env: RHOS (0.5,0.8,0.95), ARRIVALS (20), SLO (s; default 2.1 x REF_LATENCY,
-#      the FLUX ratio 30 / 14.2), REF_LATENCY (s; default: TP4 warm-up median),
+# Env: RHOS (0.5,0.8,0.95), ARRIVALS (20), SLO (s) or SLO_FACTOR (2.1 x the
+#      reference latency, the FLUX ratio 30 / 14.2), REF_LATENCY (s; default: TP4 warm-up median),
 #      PORT (8091), READY_TIMEOUT (14400), COOLDOWN (90)
 # Result: benchmark/trn2/eval/e5b/<model>_<layout>_<UTC stamp>.json; logs beside it.
 set -u
@@ -62,9 +62,7 @@ ready=$(echo "$(date +%s.%N) - $t0" | bc)
 
 extra=()
 [[ -n "${REF_LATENCY:-}" ]] && extra+=(--ref-latency "$REF_LATENCY")
-if [[ -n "${SLO:-}" ]]; then extra+=(--slo "$SLO")
-elif [[ -n "${REF_LATENCY:-}" ]]; then extra+=(--slo "$(echo "2.1 * $REF_LATENCY" | bc)")
-fi
+if [[ -n "${SLO:-}" ]]; then extra+=(--slo "$SLO"); else extra+=(--slo-factor "${SLO_FACTOR:-2.1}"); fi
 "$PY" -m benchmark.serve_bench --model "$MODEL" --config tp4 --arrival poisson \
   --ports "$(IFS=,; echo "${ports[*]}")" --rhos "${RHOS:-0.5,0.8,0.95}" \
   --arrivals "${ARRIVALS:-20}" --arrival-seed "${ARRIVAL_SEED:-42}" --cooldown "${COOLDOWN:-90}" \

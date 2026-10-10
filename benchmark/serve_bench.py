@@ -552,6 +552,9 @@ def main() -> int:
     p.add_argument("--arrival-seed", type=int, default=42,
                    help="poisson: seed of the first level; level i uses seed + i")
     p.add_argument("--slo", type=float, default=None, help="poisson: latency SLO (s)")
+    p.add_argument("--slo-factor", type=float, default=None,
+                   help="poisson: SLO = factor x reference latency when --slo is not given "
+                        "(the FLUX eval used 30 s on 14.2 s, about 2.1)")
     p.add_argument("--cooldown", type=float, default=90.0,
                    help="poisson: idle seconds before each level (the device slows under "
                         "back-to-back load and recovers after ~90 s)")
@@ -667,6 +670,8 @@ def _main_poisson(a, cfg, ports: list[int], sends: list) -> int:
                                            if w["server"] == k and w["http"] == 200] or [float("nan")])
                 for k in range(len(sends))}
     ref = a.ref_latency if a.ref_latency else isolated["0"]
+    if a.slo is None and a.slo_factor:
+        a.slo = round(a.slo_factor * ref, 1)
     levels = []
     for i, rho in enumerate(float(x) for x in a.rhos.split(",") if x):
         phase("cooldown")
@@ -698,7 +703,7 @@ def _main_poisson(a, cfg, ports: list[int], sends: list) -> int:
         "parallel": cfg.parallel_dict(), "ports": ports, "arrival": "poisson",
         "ref_latency_s": ref, "ref_latency_source": "--ref-latency" if a.ref_latency
         else "warm-up median, server 0", "isolated_latency_s": isolated,
-        "cooldown_s": a.cooldown, "ready_seconds": a.ready_seconds, "warmup": warm,
+        "slo_s": a.slo, "slo_factor": a.slo_factor, "cooldown_s": a.cooldown, "ready_seconds": a.ready_seconds, "warmup": warm,
         "levels": levels, "method": _METHOD["poisson"],
     }
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
