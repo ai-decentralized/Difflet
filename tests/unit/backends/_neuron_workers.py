@@ -417,3 +417,171 @@ def c7_peak_rss_worker(rank, world_size, ckpt_dir, n_layers, dim, hidden):
         "module_bytes": module_bytes,
         "missing": report["missing"],
     }
+
+
+# ----------------------------------------------------------------------------- C8 workers
+
+
+def c8_distributed_worker(rank: int, world_size: int) -> dict:
+    """Rank-0 I/O primitives on gloo: status sync, phases, rank0_call, broadcast_tensor."""
+    import math
+
+    import torch
+
+    from difflet.backends.neuron.core import distributed as nd
+
+    device = torch.device("cpu")
+    out: dict = {"world": nd.world_info(), "is_rank0": nd.is_rank0()}
+    nd.sync_status(True, device=device, what="all healthy")
+
+    try:
+        with nd.collective_phase("rank-2 phase", device=device):
+            if rank == 2:
+                raise ValueError("boom on rank 2")
+        out["phase"] = "completed"
+    except nd.RankFailureError as exc:
+        out["phase"] = f"RankFailureError: {exc}"
+    except ValueError as exc:
+        out["phase"] = f"ValueError: {exc}"
+
+    out["rank0_call"] = nd.rank0_call(lambda a, *, b: a + b, 40, b=2, device=device, what="add")
+
+    mismatches = []
+    for dtype in (torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64):
+        for shape in ((2, 3), (), (0, 4)):
+            expected = (torch.arange(math.prod(shape)) + 1).reshape(shape).to(dtype)
+            got = nd.broadcast_tensor(expected if rank == 0 else None, device=device)
+            if got.dtype != dtype or tuple(got.shape) != shape or not torch.equal(got, expected):
+                mismatches.append((str(dtype), shape, str(got.dtype), tuple(got.shape)))
+    out["broadcast_mismatches"] = mismatches
+
+    try:
+        nd.broadcast_tensor(None, device=device)
+        out["bad_root"] = "completed"
+    except nd.RankFailureError:
+        out["bad_root"] = "RankFailureError"
+    except TypeError:
+        out["bad_root"] = "TypeError"
+
+    # The neuron rule (int64 crosses the process group as int32) applied on gloo: rank 0's
+    # out-of-range payload must fail every rank, and in-range edge values still go through.
+    narrows_int64 = nd._narrows_int64
+    nd._narrows_int64 = lambda device: True
+    try:
+        try:
+            too_big = torch.tensor([1, 2**31], dtype=torch.int64)
+            nd.broadcast_tensor(too_big if rank == 0 else None, device=device)
+            out["int64_out_of_range"] = "completed"
+        except nd.RankFailureError as exc:
+            out["int64_out_of_range"] = f"RankFailureError: {exc}"
+        except ValueError as exc:
+            out["int64_out_of_range"] = f"ValueError: {exc}"
+        edges = torch.tensor([[-(2**31)], [2**31 - 1]], dtype=torch.int64)
+        scalar = torch.tensor(-5, dtype=torch.int64)
+        wire: list[tuple[str, tuple[int, ...]]] = []
+        broadcast = nd.dist.broadcast
+
+        def recording_broadcast(tensor, *args, **kwargs):
+            wire.append((str(tensor.dtype), tuple(tensor.shape)))
+            return broadcast(tensor, *args, **kwargs)
+
+        nd.dist.broadcast = recording_broadcast
+        try:
+            edges = nd.broadcast_tensor(edges if rank == 0 else None, device=device)
+            scalar = nd.broadcast_tensor(scalar if rank == 0 else None, device=device)
+        finally:
+            nd.dist.broadcast = broadcast
+        # int32 and flat on the wire; int64 in the original shape on arrival
+        out["int64_edges"] = (str(edges.dtype), edges.tolist())
+        out["int64_scalar"] = (str(scalar.dtype), tuple(scalar.shape), scalar.item())
+        out["int64_wire"] = wire  # [header, payload] per broadcast
+    finally:
+        nd._narrows_int64 = narrows_int64
+
+    # A mismatched collective count above would hang here until run_ranks times out.
+    nd.sync_status(True, device=device, what="still in lockstep")
+    out["final"] = "ok"
+    return out
+
+
+def c8_lifecycle_worker(
+    rank: int, world_size: int, model_dir: str, exec_mode: str, dtype_name: str
+) -> dict:
+    """Full ToyApplication lifecycle at TP=world on gloo; returns plain Python data."""
+    import torch
+
+    from difflet.backends.neuron.core.distributed import broadcast_tensor
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_toy import ToyApplication, toy_blocks_input
+
+    dtype = getattr(torch, dtype_name)
+    app = ToyApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=dtype,
+        exec_mode=exec_mode,
+        device="cpu",
+    )
+    app.load()
+    x = toy_blocks_input(app.batch, app.seq, app.dim, dtype=dtype) if rank == 0 else None
+    x = broadcast_tensor(x, device=app.device)
+    with torch.no_grad():
+        out = app(x)
+    return {
+        "rank": app.rank,
+        "world_size": app.world_size,
+        "is_loaded": app.is_loaded,
+        "compiled_blocks": list(app.compiled_blocks),
+        "warmup_shapes": app.warmup_shapes,
+        "param_numel": sum(p.numel() for p in app.module.parameters()),
+        "param_shapes": {name: tuple(p.shape) for name, p in app.module.named_parameters()},
+        "out": out.float().tolist(),
+    }
+
+
+def c8_failure_worker(rank: int, world_size: int, model_dir: str, inject: str) -> dict:
+    """Rank 0 fails before a collective; every rank must return instead of hanging."""
+    import torch
+
+    from difflet.backends.neuron.core.distributed import RankFailureError
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_toy import ToyApplication
+
+    app = ToyApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32,
+        exec_mode="eager",
+        device="cpu",
+        inject_failure=inject,
+    )
+    try:
+        app.load()
+    except RankFailureError as exc:
+        return {"outcome": "rank_failure", "message": str(exc), "is_loaded": app.is_loaded}
+    except RuntimeError as exc:
+        return {"outcome": "raised", "message": str(exc), "is_loaded": app.is_loaded}
+    return {"outcome": "loaded", "message": "", "is_loaded": app.is_loaded}
+
+
+def c8_forward_failure_worker(rank: int, world_size: int, model_dir: str) -> dict:
+    """FORWARD_FAILURE_RANK raises inside block 0 of load()'s warm-up forward.
+
+    Nothing is caught: the failing rank's error leaves the worker, as it would leave a torchrun
+    rank, while its peers stay blocked in block 0's MLP all-reduce until run_ranks kills them.
+    """
+    import torch
+
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_toy import ToyApplication
+
+    app = ToyApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32,
+        exec_mode="eager",
+        device="cpu",
+        inject_failure="forward",
+    )
+    app.load()
+    return {"rank": rank, "is_loaded": app.is_loaded}
