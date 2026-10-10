@@ -1,0 +1,198 @@
+{
+  "schema": "difflet-paper-eval-recovered/1",
+  "provenance": {
+    "recovered_on": "2026-10-10",
+    "recovered_from": "mlsys2025style/text/eval_rebuild.tex (last modified 2026-10-10), tables and LaTeX source comments",
+    "original_data": "artifacts/eval_perf_20261005/ALL-MODELS-performance-summary.md on branch eval/perf-freeze-20261005 (commits b018c62, e97df19)",
+    "original_status": "LOST: the branch was never pushed and the trn2 host expired; raw JSON receipts, driver scripts and figure renderers are gone",
+    "caveat": "Values are transcribed from the paper text, not from receipts. Precision is whatever the paper printed. Fields marked derived were computed during recovery from other printed values.",
+    "software_stack": {
+      "torch": "2.9.1",
+      "torch-neuronx": "2.9.0.2.15.32035",
+      "neuronx-cc": "2.26.6360.0",
+      "neuronx-distributed": "0.19.28492",
+      "nxd-inference": "0.10.18399",
+      "nki": "0.5.0"
+    },
+    "platform": "1x AWS trn2.3xlarge, 1 Trainium2 chip, 96 GiB HBM, 124 GB host memory, LNC=2 (4 logical NeuronCores)"
+  },
+
+  "protocol": {
+    "default_config": "BF16 denoiser, TP=4, step caching off",
+    "seed": 42,
+    "repeats": "images: median of 5 after 1 warm-up; video: median of 3",
+    "device_cooldown_s": 90,
+    "cooldown_reason": "device slows up to 25-30% under back-to-back load, recovers after 90 s idle",
+    "quality_prompts": "16 per modality; images 8 DrawBench + 8 PartiPrompts; video 16 VBench; none used for calibration",
+    "quality_metrics": "PSNR (dB, 8-bit), SSIM, LPIPS vs caching-off output of same model/prompt/seed; frame-averaged for video",
+    "caching_common": "5 initial and 5 final full steps in every mode; online-delta alpha=0.6; calibrated adaptive threshold set to cadence-2 skip budget"
+  },
+
+  "workloads": {
+    "flux_1_dev":    {"params": "12B", "shape": "1024x1024",    "tokens": 4096,  "steps": 50, "guidance": "3.5 distilled", "note": "parallel section says 4.6k tokens; inconsistent, flagged red in paper"},
+    "qwen_image":    {"params": "20B", "shape": "1024x1024",    "tokens": 4096,  "steps": 50, "guidance": "4.0 CFG", "note": "official 1:1 shape is 1328x1328"},
+    "wan_2_1":       {"params": "14B", "shape": "480x832x81",   "tokens": 32760, "steps": 50, "guidance": "5.0 CFG", "note": "VAE decodes on device in FP32, chunked temporally"},
+    "hunyuan_video": {"params": "13B", "shape": "320x512x61",   "tokens": 10240, "steps": 50, "guidance": "6.0 embedded", "note": "below official 720x1280x129, does not fit one chip"},
+    "ltx_2":         {"params": "19B", "shape": "480x704x49",   "tokens": 2310,  "steps": 40, "guidance": "1.0", "note": "first stage only; official uses CFG 4.0 but batch-2 program not built; official shape 512x768x121"}
+  },
+
+  "E1_E2_end_to_end": {
+    "description": "TP=4. compile = one-time build into empty caches. cold/warm = standalone latency; resident = request latency in serving process (no HTTP). step = DiT step latency.",
+    "sources": "e1-* (standalone), srv-*-off (resident), e2-* / e2r-flux-sdpa (SDPA), e1-flux-nxdi",
+    "rows": {
+      "flux_1_dev":      {"compile_min": 16.7, "cold_s": 318,  "warm_s": 47.6,  "resident_s": 14.2,  "step_nki_ms": 270,   "step_sdpa_ms": 682},
+      "flux_1_dev_nxdi": {"compile_min": 15.7, "cold_s": 337,  "warm_s": 66.3,  "resident_s": null,  "step_nki_ms": 271,   "step_sdpa_ms": null},
+      "qwen_image":      {"compile_min": 24.1, "cold_s": 537,  "warm_s": 98.9,  "resident_s": 42.4,  "step_nki_ms": 835,   "step_sdpa_ms": 1582},
+      "wan_2_1":         {"compile_min": 81.3, "cold_s": 1472, "warm_s": 1139,  "resident_s": 1304,  "step_nki_ms": 17070, "step_sdpa_ms": null, "sdpa_note": "SDPA does not compile at 81 frames: 7.96M instructions vs 5M compiler limit"},
+      "hunyuan_video":   {"compile_min": 85.8, "cold_s": 625,  "warm_s": 141,   "resident_s": 59.9,  "step_nki_ms": 845,   "step_sdpa_ms": 3620},
+      "ltx_2":           {"compile_min": 17.7, "cold_s": 787,  "warm_s": 74.3,  "resident_s": 53.8,  "step_nki_ms": 417,   "step_sdpa_ms": 507}
+    },
+    "nki_over_sdpa_step_speedup_derived": {"ltx_2": 1.22, "qwen_image": 1.89, "flux_1_dev": 2.53, "hunyuan_video": 4.28},
+    "findings_numbers": {
+      "warm_standalone_speedup_vs_pytorch_xla": {"range": [1.03, 2.01], "geomean": 1.41, "models": 4},
+      "resident_speedup_vs_pytorch_xla": {"range": [1.43, 4.71], "geomean": 3.16, "models": 4},
+      "denoise_share_of_resident_request": {"flux_1_dev": 0.95, "qwen_image": 0.98},
+      "wan_vae_decode_s": 325,
+      "hunyuan_video_non_denoise_share": 0.30,
+      "ltx_2_non_denoise_s": 35,
+      "nxdi_vs_difflet_flux_neuron_weight_load_s": {"nxdi": 43, "difflet": 23}
+    },
+    "open_issue": "resident DiT step slower than CLI: wan_2_1 19.6 vs 17.0 s, ltx_2 459 vs 417 ms; same compiler flags; undiagnosed"
+  },
+
+  "E2_attribution": {
+    "description": "Cumulative warm request latency (s), starting from standalone PyTorch/XLA. Rows 1-2 shard the checkpoint at load time. Caching = fixed cadence 2.",
+    "sources": "rows 1-2: e1n-* (hardlinked caches with tp*_sharded_checkpoint removed; LTX-2 and Wan from e1n-*-uncapped-20261008T1154); row 3 = E1 warm; row 4 = srv-*-off; row 5 = srv-* cadence2",
+    "rows": {
+      "pytorch_xla":        {"flux_1_dev": 75.2, "qwen_image": 141.1, "wan_2_1": null,   "hunyuan_video": 275.5, "ltx_2": 115.3},
+      "+nki_attention":     {"flux_1_dev": 57.1, "qwen_image": 103.3, "wan_2_1": 1336.5, "hunyuan_video": 142.9, "ltx_2": 113.9},
+      "+presharded_weights":{"flux_1_dev": 47.6, "qwen_image": 98.9,  "wan_2_1": 1138.7, "hunyuan_video": 140.8, "ltx_2": 74.3},
+      "+resident_process":  {"flux_1_dev": 14.2, "qwen_image": 42.4,  "wan_2_1": 1303.8, "hunyuan_video": 59.9,  "ltx_2": 53.8},
+      "+step_caching":      {"flux_1_dev": 8.8,  "qwen_image": 25.8,  "wan_2_1": 912.6,  "hunyuan_video": 42.9,  "ltx_2": 46.7}
+    },
+    "notes": {
+      "wan_2_1.pytorch_xla": "SDPA does not compile at 81 frames",
+      "flux_1_dev.+step_caching": "derived: resident caching-off request minus denoising time cadence 2 saves in the same process (e4a-flux-cooled)",
+      "wan_2_1.+step_caching": "derived the same way; run stopped after denoiser"
+    }
+  },
+
+  "E3a_parallel": {
+    "description": "FLUX resident; Wan standalone. DP2xTP2 serves two concurrent requests; latency is wall time for both.",
+    "sources": "e3a-flux-*-20261006T1255; Wan OOM logs queue-logs/wan_e3a_tp2cfg_oom*, wan_e3a_tp2_oom*",
+    "flux_1_dev": {
+      "tp4":            {"request_s": 13.97, "step_ms": 272.5},
+      "tp4_sp":         {"request_s": 14.28, "step_ms": 278.7},
+      "tp2cp2_gather":  {"request_s": 14.29, "step_ms": 278.8},
+      "tp2cp2_ulysses": {"request_s": 13.51, "step_ms": 263.3},
+      "tp2cp2_ring":    {"request_s": 13.75, "step_ms": 268.2},
+      "tp2":            {"request_s": 25.83, "step_ms": 510.3},
+      "tp2_sp":         {"request_s": 25.97, "step_ms": 511.3},
+      "tp2_cfg":        {"status": "n/a", "reason": "guidance-distilled, no second branch"},
+      "dp2xtp2":        {"request_s": 26.68, "step_ms": 529.6},
+      "tp4_serial_two_requests_s": 27.9
+    },
+    "wan_2_1_81f": {
+      "tp4":     {"request_s": 1139, "step_ms": 17070},
+      "tp2":     {"status": "OOM", "reason": "neuronx-cc backend killed at ~94 GB host memory"},
+      "tp2_cfg": {"status": "OOM", "reason": "neuronx-cc backend killed at ~94 GB host memory"},
+      "dp2xtp2": {"status": "OOM", "reason": "replicas run the TP2 program"},
+      "tp4_sp":  {"status": "not_attempted", "plan": "E3b"},
+      "tp2cp2":  {"status": "not_attempted", "plan": "E3b"}
+    }
+  },
+
+  "E4a_caching_speed": {
+    "description": "Denoising-time speedup over caching off at official step counts; skipped denoiser calls in parentheses in paper. fewer_steps = 30 of 50 (25 of 40 on LTX-2) without caching.",
+    "sources": "FLUX e4a-flux-cooled-20261005T0542 / e4a-flux-adaptive-20261005T0732; Qwen srv-qwen-cachemodes + srv-qwen (fewer) + e4a-qwen-adaptive; Wan srv-wan_2_1 (stop after denoiser) + e4a-wan_2_1-adaptive; HV srv-hunyuan_video + e4a-hunyuan_video-adaptive; LTX-2 srv-ltx_2 + e4a-ltx_2-adaptive-v2",
+    "off_denoise_s":   {"flux_1_dev": 13.5, "qwen_image": 41.7, "wan_2_1": 978, "hunyuan_video": 41.9, "ltx_2": 18.4},
+    "cadence2":        {"flux_1_dev": {"speedup": 1.67, "skipped": 20}, "qwen_image": {"speedup": 1.66, "skipped": 20}, "wan_2_1": {"speedup": 1.67, "skipped": 20}, "hunyuan_video": {"speedup": 1.68, "skipped": 20}, "ltx_2": {"speedup": 1.60, "skipped": 15}},
+    "online_delta":    {"flux_1_dev": {"speedup": 1.66, "skipped": 20}, "qwen_image": {"speedup": 1.61, "skipped": 19}, "wan_2_1": {"speedup": 1.56, "skipped": 18}, "hunyuan_video": {"speedup": 1.68, "skipped": 20}, "ltx_2": {"speedup": 1.29, "skipped": 9}},
+    "adaptive":        {"flux_1_dev": {"speedup": 1.64, "skipped": 20}, "qwen_image": {"speedup": 1.64, "skipped": 20}, "wan_2_1": {"speedup": 1.65, "skipped": 19}, "hunyuan_video": {"speedup": 1.56, "skipped": 19}, "ltx_2": {"speedup": 1.58, "skipped": 15}},
+    "fewer_steps":     {"flux_1_dev": 1.67, "qwen_image": 1.67, "wan_2_1": 1.67, "hunyuan_video": 1.68, "ltx_2": 1.59},
+    "notes": {
+      "online_delta.skipped": "varies by prompt; shown for the timing prompt",
+      "adaptive": "standalone (serving does not load probe yet); baseline is standalone caching-off: qwen 41.7, wan 826, hv 42.5, ltx_2 16.7 s",
+      "wan_2_1.adaptive": "adaptive run executed steps faster than off run (14.2 vs 17.1 s median), so 1.65x exceeds 1.61x ceiling for 19 skips; cause not established"
+    },
+    "per_call_cost": {"executed_call_ms": {"hunyuan_video": [830, 845], "qwen_image": 835}, "cached_step_ms": [0.3, 7]},
+    "online_delta_skip_range_16_prompts": {"flux_1_dev": [19, 20], "hunyuan_video": [18, 20], "qwen_image": [13, 19], "ltx_2": [0, 15]}
+  },
+
+  "E4a_caching_quality": {
+    "description": "PSNR dB vs same model caching-off output; mean over 16 prompts, worst prompt. Wan not scheduled.",
+    "sources": "e4a-quality-*-20261008T2102 (quality_cli.py); FLUX adaptive in-process via flux_quality_inproc.py, scored against in-process off run byte-identical to CLI off output on all 16 prompts",
+    "psnr_db": {
+      "cadence2":     {"flux_1_dev": {"mean": 33.6, "worst": 17.8}, "qwen_image": {"mean": 27.7, "worst": 15.9}, "hunyuan_video": {"mean": 28.3, "worst": 18.4}, "ltx_2": {"mean": 35.6, "worst": 28.2}},
+      "online_delta": {"flux_1_dev": {"mean": 32.0, "worst": 21.2}, "qwen_image": {"mean": 26.8, "worst": 15.5}, "hunyuan_video": {"mean": 29.1, "worst": 18.4}, "ltx_2": {"mean": 37.3, "worst": 27.2, "note": "one prompt skipped no step; mean over other 15"}},
+      "adaptive":     {"flux_1_dev": {"mean": 31.9, "worst": 21.1}, "qwen_image": {"mean": 25.8, "worst": 16.0}, "hunyuan_video": {"mean": 25.3, "worst": 17.3}, "ltx_2": {"mean": 34.6, "worst": 25.7}},
+      "fewer_steps":  {"flux_1_dev": {"mean": 22.2, "worst": 15.7}, "qwen_image": {"mean": 19.6, "worst": 11.0}, "hunyuan_video": {"mean": 20.3, "worst": 14.5}, "ltx_2": {"mean": 24.0, "worst": 19.1}}
+    },
+    "summary_only": {
+      "lpips_mean_caching_range": [0.05, 0.15],
+      "lpips_mean_fewer_steps_range": [0.19, 0.27],
+      "caching_beats_fewer_steps_prompts": "183 of 192 (4 models x 3 modes x 16 prompts)",
+      "note": "per-cell SSIM and LPIPS were measured but not printed in the paper; lost"
+    }
+  },
+
+  "caching_signal_boundary": {
+    "description": "Calibrated adaptive probe cost per scheduler step and fit R^2 over 8 recording prompts.",
+    "sources": "ms/step = (adaptive loop - off loop x executed/total) / steps; fit_r2 from p8-*-calib-*; Wan and LTX-2 calibration pairs recorded with host computation of the block-0 signal",
+    "rows": {
+      "flux_1_dev":    {"probe": "fused in DiT",     "ms_per_step": 2.3,  "fit_r2": 0.60},
+      "qwen_image":    {"probe": "fused in DiT",     "ms_per_step": 7.3,  "fit_r2": 0.68},
+      "wan_2_1":       {"probe": "separate program", "ms_per_step": null, "fit_r2": 0.13, "note": "not resolvable, adaptive run faster per step than off run"},
+      "hunyuan_video": {"probe": "separate program", "ms_per_step": 17.8, "fit_r2": 0.71},
+      "ltx_2":         {"probe": "separate program", "ms_per_step": 2.6,  "fit_r2": 0.82}
+    }
+  },
+
+  "E5a_startup": {
+    "description": "Startup of one resident model at TP=4 until server ready. recompiles = programs rebuilt switching caching off -> calibrated adaptive.",
+    "sources": "srv-*-first (compile policy AUTO, empty caches); srv-*-restart-{cold,warm} (NEVER policy, incl. one smoke request); e5a-recompile-*-20261008T0657",
+    "rows": {
+      "flux_1_dev":    {"first_start_min": 18.5,  "restart_cold_s": 340, "restart_warm_s": 91,  "recompiles": "1 of 1", "recompile_s": 1353},
+      "qwen_image":    {"first_start_min": 34.8,  "restart_cold_s": 640, "restart_warm_s": 129, "recompiles": "1 of 3", "recompile_s": 1419},
+      "wan_2_1":       {"first_start_min": 104.8, "restart_cold_s": 974, "restart_warm_s": 681, "recompiles": null},
+      "hunyuan_video": {"first_start_min": 116.8, "restart_cold_s": 624, "restart_warm_s": 194, "recompiles": null},
+      "ltx_2":         {"first_start_min": 34.1,  "restart_cold_s": 810, "restart_warm_s": 480, "recompiles": null}
+    },
+    "notes": "video serving exposes no step-caching policy; off->off recompiles 0; changing adaptive target 1.667x->1.3x recompiles 0"
+  },
+
+  "E5a_recovery": {
+    "source": "e5a-recovery-flux-rerun-20261008T1143",
+    "model": "flux_1_dev",
+    "reference_requests_byte_identical": true,
+    "timeout": {"timeout_s": 5, "error_returned_s": 5.0, "worker_serves_again_after_s": 9.3},
+    "sigkill": {"error_returned_s": 0.6, "ready_after_kill_s": 65.6},
+    "post_fault_output_byte_identical": true,
+    "known_gap": "a worker that dies before reporting ready is not detected; startup waits the full 900 s timeout"
+  },
+
+  "E5b_open_loop_load": {
+    "description": "difflet serve over HTTP, open-loop Poisson; TP4 vs two TP2 servers (least-in-flight routing). Same arrivals for both. 20 requests per level. rho = realized arrival rate x isolated TP4 latency (14.2 s). SLO = 30 s.",
+    "source": "e5b-flux-{tp4,dp2tp2}-20261009T0526 (drivers/e5b_load.py over benchmark.serve_bench.run_poisson); nominal rho 0.5/0.8/0.95, arrival seeds 42/43/44; realized windows 365/286/241 s vs expected 568/355/299 s",
+    "isolated_latency_s": {"tp4": 14.3, "tp2_replica_a": 26.2, "tp2_replica_b": 27.0},
+    "flux_1_dev": [
+      {"rho": 0.78, "tp4": {"p50_s": 39.4, "p99_s": 65.3,  "slo_met": 0.40, "completed_per_h": 178}, "dp2xtp2": {"p50_s": 39.1, "p99_s": 70.0,  "slo_met": 0.30, "completed_per_h": 179}},
+      {"rho": 0.99, "tp4": {"p50_s": 33.0, "p99_s": 53.8,  "slo_met": 0.40, "completed_per_h": 213}, "dp2xtp2": {"p50_s": 46.7, "p99_s": 69.3,  "slo_met": 0.25, "completed_per_h": 205}},
+      {"rho": 1.18, "tp4": {"p50_s": 65.9, "p99_s": 105.3, "slo_met": 0.20, "completed_per_h": 207}, "dp2xtp2": {"p50_s": 74.7, "p99_s": 110.7, "slo_met": 0.20, "completed_per_h": 207}}
+    ],
+    "hunyuan_video": {"status": "incomplete", "note": "e5b-hunyuan_video-tp4 was running when the host expired; TP2 HunyuanVideo denoiser does not fit in HBM"}
+  },
+
+  "not_done": {
+    "E6":  "diffusers on H100 + cost per 1k generations",
+    "E2b": "Wan 9/33/81-frame NKI vs SDPA sweep (Sept campaign: 9 frames 1.80x, 575 vs 1035 ms)",
+    "E3b": "Wan 81f tp4+sp and tp2cp2; masked-Ulysses max |diff| at >=3 prompt lengths with one compiled program",
+    "E5b_hunyuan_video": "open-loop load on HunyuanVideo TP4",
+    "E4b": "sensitivity curves (optional)",
+    "E4a_wan_quality": "not scheduled",
+    "figure_teacache_pareto": "not drawn",
+    "G1":  "chunked Wan VAE vs full FP32 reference",
+    "G4":  "HBM reason and largest fitting shape for HunyuanVideo / LTX-2",
+    "P11": "Qwen-Image true-CFG device check"
+  }
+}

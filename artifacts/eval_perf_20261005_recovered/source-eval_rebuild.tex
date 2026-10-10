@@ -1,0 +1,411 @@
+\section{Evaluation}
+\label{sec:evaluation}
+% Rewritten 2026-10-08 for flow: one method sentence, one table or figure, and
+% two or three stated findings per subsection. Earlier versions are kept beside
+% this file: evaluation.orig-20261004.tex (20/28-step campaign, superseded data)
+% and evaluation.pre-rewrite-20261008.tex (same data as here, provenance inline).
+%
+% Data: Difflet artifacts/eval_perf_20261005/ALL-MODELS-performance-summary.md
+% (branch eval/perf-freeze-20261005, commits b018c62 / e97df19; locked stack
+% torch-neuronx 2.9.0.2.15.32035, neuronx-cc 2.26.6360.0, neuronx-distributed
+% 0.19.28492, nxd-inference 0.10.18399, NKI 0.5.0).
+%
+% Open items (not in the text until measured):
+%   E4a quality   PSNR/SSIM/LPIPS cells of Table teacache and Figure teacache
+%                 (16-prompt run in progress; Wan not scheduled).
+%   E6            diffusers on H100 and cost per 1k generations (Q1).
+%   E2b           Wan 9/33/81-frame NKI vs SDPA sweep (9 frames was 1.80x,
+%                 575 vs 1,035 ms, in the September campaign).
+%   E3b           Wan 81f tp4+sp and tp2cp2; masked-Ulysses max |diff| at three
+%                 or more prompt lengths with one compiled program.
+%   E5b           open-loop Poisson load, p50/p99, tp4 vs dp2xtp2.
+%   G1            chunked Wan VAE vs full FP32 reference (numerical agreement).
+%   G4            HBM reason and largest fitting shape for HunyuanVideo / LTX-2.
+%   P11           Qwen-Image true-CFG device check.
+%   Resident step gap: the serving program's step is slower than the CLI's on
+%                 Wan (19.6 vs 17.0 s) and LTX-2 (459 vs 417 ms); undiagnosed.
+\providecommand{\pend}{\textcolor{red}{--}}
+\providecommand{\evtodo}[1]{\textcolor{red}{[#1]}}
+\providecommand{\evfigure}[2]{\fbox{\parbox[c][#1][c]{0.95\linewidth}{\centering\footnotesize\textcolor{red}{#2}}}}
+
+We evaluate \name on five image and video models and ask five questions, one per contribution: how fast \name is end to end (\S\ref{sec:eval-e2e}), which mechanism the speedup comes from (\S\ref{sec:eval-attribution}), which parallel configurations pay off (\S\ref{subsec:parallelism-eval}), what step caching saves and costs (\S\ref{sec:cache-effectiveness}), and what a resident process buys in startup and recovery (\S\ref{sec:serving-eval}).
+
+% ---------------------------------------------------------------------------
+\subsection{Experimental Setup}
+\label{sec:eval-setup}
+
+\paragraph{Platform.}
+All experiments run on one AWS \texttt{trn2.3xlarge} instance with one Trainium2 chip, 96\,GiB of HBM, and 124\,GB of host memory~\cite{aws-trn2-instances}. Under LNC=2 the chip exposes four logical NeuronCores, each pairing two physical cores~\cite{aws-lnc}. All experiments use one locked software stack: torch 2.9.1, torch-neuronx 2.9.0, neuronx-cc 2.26, neuronx-distributed 0.19, and NKI 0.5. Unless stated otherwise, the denoiser runs in BF16 with four-way tensor parallelism (TP=4) and step caching off.
+% E6: add the H100 instance type, driver, CUDA and diffusers versions here.
+
+\paragraph{Workloads.}
+Table~\ref{tab:workloads} lists the five models. Step count, guidance, and negative prompt follow each model's official defaults, and every comparison within a model fixes the checkpoint revision, prompt, seed (42), and output shape. Wan~2.1 runs at its official 81 frames, 32.8k visual tokens per step; its VAE decodes on the device in FP32, in fixed-size temporal chunks.
+
+\begin{table}[t]
+\caption{Evaluated models. Tokens are the visual tokens the denoiser attends over per step; guidance is distilled (dist.), classifier-free (CFG), or embedded (emb.).}
+\label{tab:workloads}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{2.2pt}
+\begin{tabular}{@{}lrrrrl@{}}
+\toprule
+model & params & H$\times$W$\times$F & tokens & steps & guidance \\
+\midrule
+FLUX.1-dev   & 12B & $1024^2$                      & \textcolor{red}{4{,}096}  & 50 & 3.5 dist. \\
+Qwen-Image   & 20B & $1024^2$\,$^{b}$              & 4{,}096  & 50 & 4.0 CFG \\
+Wan~2.1      & 14B & $480{\times}832{\times}81$        & 32{,}760 & 50 & 5.0 CFG \\
+HunyuanVideo & 13B & $320{\times}512{\times}61$\,$^{a}$ & 10{,}240 & 50 & 6.0 emb. \\
+LTX-2        & 19B & $480{\times}704{\times}49$\,$^{a}$ & 2{,}310  & 40 & 1.0\,$^{c}$ \\
+\bottomrule
+\end{tabular}
+\par\smallskip
+{\raggedright\scriptsize
+$^{a}$Below the official shape (HunyuanVideo $720\times1280\times129$, LTX-2 $512\times768\times121$), which does not fit on one chip; LTX-2 runs the first stage of its two-stage pipeline. $^{b}$The official 1:1 shape is $1328\times1328$; both image models run at $1024^2$ so that they process the same number of tokens. $^{c}$The official first stage uses CFG 4.0; \name does not yet build the batch-2 program CFG needs, so LTX-2 runs without guidance.\par}
+\vskip -0.1in
+\end{table}
+% Token counts = latent frames x latent H x latent W / patch area:
+% FLUX/Qwen 64x64; Wan 21x30x52; HunyuanVideo 16x20x32; LTX-2 7x15x22.
+% Configuration source: benchmark/models.py::MATRIX.
+
+\paragraph{Baselines.}
+Table~\ref{tab:baselines} lists the systems we compare and the mechanisms each one has. \emph{PyTorch/XLA} is \name with every NKI attention call replaced by PyTorch's scaled dot-product attention (SDPA) compiled through XLA~\cite{pytorch-xla}. The rest of the pipeline is unchanged---the same compiled components, presharded weights, and step caching---so the difference isolates the attention kernel. Because \texttt{difflet serve} does not accept SDPA, this baseline runs standalone only, and the ring mode of context parallelism has no SDPA variant. \emph{NxDI}~\cite{nxdi} is the FLUX.1-dev application AWS provides for Trainium. It compiles the pipeline ahead of time with the same family of NKI attention kernels, but shards the checkpoint at load time in every process and supports tensor parallelism only; its public release has no pipeline for the other four models. \name is the only system that combines all six mechanisms, and Section~\ref{sec:eval-attribution} measures what each contributes.
+
+\begin{table}[t]
+\caption{Systems compared and the mechanisms each provides: ahead-of-time compilation, NKI attention, presharded weights, a resident process, step caching, and parallelism. NxDI covers FLUX.1-dev only. Y: yes; $\times$: no.}
+\label{tab:baselines}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{2.4pt}
+\begin{tabular}{@{}lcccccl@{}}
+\toprule
+system & AOT & NKI & preshard & resident & cache & parallel \\
+\midrule
+PyTorch/XLA & Y & $\times$ & Y        & $\times$$^{d}$ & Y        & TP, CP$^{e}$ \\
+NxDI        & Y & Y        & $\times$ & $\times$       & $\times$ & TP \\
+\name       & Y & Y        & Y        & Y              & Y        & 5 axes$^{f}$ \\
+\bottomrule
+\end{tabular}
+\par\smallskip
+{\raggedright\scriptsize $^{d}$\texttt{difflet serve} does not accept SDPA. $^{e}$No ring mode: it has no SDPA variant. $^{f}$Tensor, sequence, context (gather, Ulysses, ring), CFG, and data parallelism.\par}
+\vskip -0.1in
+\end{table}
+% E6: add diffusers on one H100 (eager; no AOT, preshard, resident, caching
+% or parallelism) as the GPU reference once measured.
+
+\paragraph{Measurements.}
+\emph{Request latency} is the time to generate one output with the model already resident, measured through the serving engine without HTTP. \emph{Standalone latency} additionally covers process start and model loading: a \emph{cold} run first flushes the host page cache, a \emph{warm} run reuses the cached weight files but still loads them onto the device. \emph{Denoising time} is the wall time of the denoising loop, including steps served from the cache, and \emph{DiT step latency} is the median time of an uncached step, excluding the first; with sequential CFG it covers both passes. Compilation is a one-time build into empty caches and is reported separately. Image models report the median of five runs after one warm-up, video models the median of three. The device slows by up to 25--30\% under back-to-back load and recovers after 90\,s of idle, so every resident measurement idles the device for 90\,s first.
+
+\paragraph{Quality.}
+Step caching is judged against the uncached output of the same model, prompt, and seed by PSNR~\cite{wang2009mse}, SSIM~\cite{ssim}, and LPIPS~\cite{lpips}, frame-averaged for video, over 16 prompts per modality: eight from DrawBench~\cite{drawbench-imagen} and eight from PartiPrompts~\cite{partiprompts} for images, 16 from VBench~\cite{vbench} for video, none used for calibration.\footnote{$\mathrm{PSNR} = 10 \log_{10}(255^2/\mathrm{MSE})$ in dB over 8-bit pixels; every 10\,dB less is a tenfold larger mean squared difference.} We report the mean and the worst prompt.
+
+% ---------------------------------------------------------------------------
+\subsection{End-to-End Performance}
+\label{sec:eval-e2e}
+
+Table~\ref{tab:e2e} reports, for each model, the one-time compilation, the standalone latency of a fresh process, the request latency of a resident one, and the DiT step latency with each attention implementation.
+
+\begin{table}[t]
+\caption{End-to-end latency at TP=4. Cold and warm are standalone runs; resident is the request latency of the serving process; step is the DiT step latency with NKI and with SDPA attention.}
+\label{tab:e2e}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{2.2pt}
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& compile & \multicolumn{3}{c}{latency (s)} & \multicolumn{2}{c}{step (ms)} \\
+\cmidrule(lr){3-5}\cmidrule(lr){6-7}
+model & (min) & cold & warm & resident & NKI & SDPA \\
+\midrule
+FLUX.1-dev   & 16.7  & 318   & 47.6  & 14.2  & 270     & 682 \\
+\quad NxDI   & 15.7  & 337   & 66.3  & --    & 271     & -- \\
+Qwen-Image   & 24.1  & 537   & 98.9  & 42.4  & 835     & 1{,}582 \\
+Wan~2.1      & 81.3  & 1{,}472 & 1{,}139 & 1{,}304 & 17{,}070 & --$^{g}$ \\
+HunyuanVideo & 85.8  & 625   & 141   & 59.9  & 845     & 3{,}620 \\
+LTX-2        & 17.7  & 787   & 74.3  & 53.8  & 417     & 507 \\
+\bottomrule
+\end{tabular}
+\par\smallskip
+{\raggedright\scriptsize $^{g}$The SDPA program does not compile at 81 frames: it needs 7.96M instructions against the compiler's limit of 5M.\par}
+\vskip -0.1in
+\end{table}
+% Sources: e1-* (standalone, compile from empty compile/weight/NEFF caches),
+% srv-*-off (resident request), e2-* / e2r-flux-sdpa (SDPA), e1-flux-nxdi.
+
+\paragraph{Findings.}
+\emph{\name is 1.4$\times$ faster than PyTorch/XLA standalone and 3.2$\times$ faster once resident.} On the four models whose SDPA program compiles, \name's warm standalone latency is 1.03--2.01$\times$ lower (geometric mean 1.41$\times$), and its resident request latency 1.43--4.71$\times$ lower (3.16$\times$). Section~\ref{sec:eval-attribution} splits this gain by mechanism.
+
+\emph{Once a model is resident, request latency is mostly denoising---except on the video pipelines with heavy stages around the denoiser.} Denoising takes 95\% of a FLUX request and 98\% of a Qwen-Image request, so these are the models that caching and parallel execution speed up most directly. Wan spends a quarter of its request (325\,s) in the chunked VAE decode, HunyuanVideo 30\% in its encoders and decoder, and LTX-2 two thirds (35 of 54\,s) in the stages around its denoiser.
+
+\emph{\name's generality costs no denoising performance against NxDI.} On FLUX.1-dev, the one model NxDI supports, both systems run a 270\,ms DiT step, because both use the same family of NKI attention kernels. \name is faster end to end because of loading: NxDI loads the full diffusers pipeline on the host in every process and warms up each component, whereas \name reads checkpoints already split per core at compile time. Warm latency falls from 66.3 to 47.6\,s and the Neuron weight load from 43 to 23\,s, for a compilation one minute longer (16.7 against 15.7\,min), into which the checkpoint splitting moves.
+
+% ---------------------------------------------------------------------------
+\subsection{Where the Speedup Comes From}
+\label{sec:eval-attribution}
+
+Table~\ref{tab:attribution} starts from a standalone PyTorch/XLA run and adds \name's mechanisms one at a time. To separate the attention kernel from the loader, the first two rows shard the checkpoint at load time, as a system without \name's compile-time splitting would.
+
+\begin{table}[t]
+\caption{Cumulative attribution of warm request latency (s), starting from standalone PyTorch/XLA. Caching is fixed cadence~2.}
+\label{tab:attribution}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+configuration & FLUX & Qwen & Wan & HV & LTX-2 \\
+\midrule
+PyTorch/XLA             & 75.2 & 141.1 & --$^{h}$ & 275.5 & 115.3 \\
++ NKI attention         & 57.1 & 103.3 & 1336.5 & 142.9 & 113.9 \\
++ presharded weights    & 47.6 & 98.9  & 1138.7 & 140.8 & 74.3 \\
++ resident process      & 14.2 & 42.4  & 1303.8 & 59.9  & 53.8 \\
++ step caching          & 8.8$^{i}$ & 25.8 & 912.6$^{i}$ & 42.9 & 46.7 \\
+\bottomrule
+\end{tabular}
+\par\smallskip
+{\raggedright\scriptsize $^{h}$See Table~\ref{tab:e2e}. $^{i}$Resident caching-off request minus the denoising time cadence~2 saves in the same process.\par}
+\vskip -0.1in
+\end{table}
+% Rows 1-2: e1n-* (hardlink clones of the E2/E1 caches with every
+% tp*_sharded_checkpoint removed: "Sharding weights on load" for every
+% component, no compile); LTX-2 and Wan from the uncapped reruns
+% e1n-*-uncapped-20261008T1154. Row 3 = E1 warm, row 4 = srv-*-off, row 5 =
+% srv-* cadence2 (FLUX e4a-flux-cooled, Wan stop-after-denoiser, hence derived).
+
+\paragraph{Findings.}
+\emph{Each mechanism dominates on different models.} Together they cut request latency by 2.5--8.5$\times$. The resident process is the largest single step on the image models (3.35$\times$ on FLUX, 2.33$\times$ on Qwen-Image) and on HunyuanVideo (2.35$\times$), because a standalone request pays process start, pipeline construction, and a 10--148\,s device weight load on every call. The attention kernel gives 1.93$\times$ on HunyuanVideo and 1.32--1.37$\times$ on the image models. Presharding matters where the checkpoint is large relative to the rest of the pipeline: 1.53$\times$ on LTX-2, whose 19B transformer takes 37\,s to shard on the host, and 1.17$\times$ on Wan. Step caching adds 1.40--1.64$\times$ where the request is mostly denoising and 1.15$\times$ on LTX-2.
+
+\emph{Wan is the exception to the resident process.} Its resident request (1{,}304\,s) is slower than its standalone one (1{,}139\,s): the serving program's DiT step runs 15\% slower than the standalone program's (19.6 against 17.0\,s), with identical compiler flags, which outweighs the 148\,s of loading it saves.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{mlsys2025style/figures/eval-attn-tokens.pdf}
+\caption{DiT step speedup of NKI attention over PyTorch/XLA's SDPA, each model at its evaluated shape, ordered by visual tokens per step. $\times$: Wan~2.1's SDPA program does not compile at 81 frames.}
+\label{fig:attn-tokens}
+\end{figure}
+% Rendered by figures/render_eval_attn_tokens.py (data and sources in its docstring).
+
+\emph{The kernel's gain grows with sequence length, and at 32.8k tokens it is the only attention that runs.} Attention cost grows quadratically with the number of tokens. Figure~\ref{fig:attn-tokens} orders the models by sequence length: the DiT step speedup rises from 1.22$\times$ on LTX-2 (2.3k tokens) through 1.89--2.53$\times$ on the image models (4.1k) to 4.28$\times$ on HunyuanVideo (10.2k). At Wan's 32.8k tokens the SDPA program does not compile, so the fused kernel is the condition for running at all. The models differ in architecture as well as length, so the trend is across workloads rather than a controlled sweep.    
+
+% ---------------------------------------------------------------------------
+\subsection{Parallel Execution}
+\label{subsec:parallelism-eval}
+
+We sweep every configuration \name can launch on the four cores for FLUX.1-dev (\textcolor{red}{4.6k tokens}) in the resident process: tensor parallelism alone (TP4, TP2), with Megatron-style sequence parallelism (SP), with context parallelism over two cores in each of its three modes (TP2CP2), and two TP2 replicas serving concurrent requests (DP2$\times$TP2). Each configuration is compiled separately and measured as in Section~\ref{sec:eval-setup}. For the long sequence, we attempt Wan~2.1 at 81 frames (32.8k tokens) in the configurations that change the most at that length: TP2 with CFG parallelism, which runs the two guidance branches on separate core pairs, and the data-parallel pair. Figure~\ref{fig:parallel} normalizes the FLUX results to TP4, and Table~\ref{tab:parallel} gives the absolute latencies for both models. Section~\ref{sec:parallel-modes-support} lists which modes each model supports.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{mlsys2025style/figures/eval-parallel.pdf}
+\caption{Parallel configurations for FLUX.1-dev (\textcolor{red}{4.6k tokens}) relative to TP4: resident request latency and throughput. DP2$\times$TP2 serves two concurrent requests; its latency is the wall time for both and its throughput counts both.}
+\label{fig:parallel}
+\end{figure}
+% Rendered by figures/render_eval_parallel.py. Step latency (ms): tp4 272.5,
+% tp4+sp 278.7, tp2cp2 gather 278.8, ulysses 263.3, ring 268.2, tp2 510.3,
+% tp2+sp 511.3, dp2xtp2 529.6 (e3a-flux-*-20261006T1255).
+% Wan 81f: tp4 runs (E1); tp2+cfg and the tp2 program of dp2xtp2 are
+% OOM-killed in the neuronx-cc backend at ~94 GB host memory
+% (queue-logs/wan_e3a_tp2cfg_oom*, wan_e3a_tp2_oom*). tp4+sp and tp2cp2 not
+% attempted (E3b).
+
+\begin{table}[t]
+\caption{Request latency and DiT step latency across parallel configurations. FLUX is resident; Wan is standalone. DP rows serve two concurrent requests, so their latency is the wall time for both.}
+\label{tab:parallel}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{FLUX (\textcolor{red}{4.6k tok.})} & \multicolumn{2}{c}{Wan 81f (32.8k tok.)} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+config & req.\ (s) & step (ms) & req.\ (s) & step (ms) \\
+\midrule
+TP4               & 13.97 & 272.5 & 1{,}139 & 17{,}070 \\
+TP4+SP            & 14.28 & 278.7 & --  & --  \\
+TP2CP2, gather    & 14.29 & 278.8 & --  & --  \\
+TP2CP2, Ulysses   & 13.51 & 263.3 & --  & --  \\
+TP2CP2, ring      & 13.75 & 268.2 & --  & --  \\
+TP2               & 25.83 & 510.3 & OOM$^{k}$ & OOM$^{k}$ \\
+TP2+SP            & 25.97 & 511.3 & --  & --  \\
+TP2+CFG           & n/a$^{j}$ & n/a$^{j}$ & OOM$^{k}$ & OOM$^{k}$ \\
+\midrule
+DP2$\times$TP2    & 26.68 & 529.6 & OOM$^{k}$ & OOM$^{k}$ \\
+\bottomrule
+\end{tabular}
+\par\smallskip
+{\raggedright\scriptsize --: not attempted. $^{j}$FLUX is guidance-distilled and has no second guidance branch. $^{k}$Does not compile: the compiler backend exhausts the 124\,GB host (killed at 94\,GB); DP2$\times$TP2 replicas run the TP2 program.\par}
+\vskip -0.1in
+\end{table}
+
+\paragraph{Findings.}
+\emph{At 4.6k tokens, tensor parallelism over all four cores is the latency default.} Every configuration that keeps four cores on one request stays within 3\% of TP4 (Table~\ref{tab:parallel}). Sequence parallelism and gather-based context parallelism add 2\% per step (278.7 and 278.8 against 272.5\,ms); Ulysses and ring attention remove 3\% and 2\% (263.3 and 268.2\,ms), half a second on a 14\,s request. At this length the activations that sequence parallelism shards and the keys and values that context parallelism exchanges are small, so the extra collectives cost about what the split saves. Ulysses, which trades the sequence split for a head split with one all-to-all on each side of attention, is the fastest of the three context-parallel modes; it and ring attention are the only configurations faster than TP4, by 3\% and 2\%. Halving the cores to TP2 costs 1.87$\times$ per step, so tensor parallelism scales from two to four cores at 94\% efficiency.
+
+\emph{Data parallelism buys throughput only marginally once models are resident.} Two TP2 replicas, started together on separate core pairs, finish two requests in 26.7\,s, against 27.9\,s for TP4 serving them in turn: 5\% more throughput for almost twice the latency. Each replica's step (529.6\,ms) is 4\% slower than a TP2 replica running alone, so the replicas contend slightly for the chip's shared resources. Data parallelism therefore pays only when per-request work outside the device, such as loading, dominates; in a resident server it does not.
+
+\emph{At 32.8k tokens, the configurations that split the model in halves do not build.} Of the Wan configurations attempted, only TP4 compiles (Table~\ref{tab:parallel}). The TP2 program, with or without CFG batching, holds half the model and the full 32.8k-token sequence on each core, and the compiler backend exhausts the host's 124\,GB building it: it was killed at 94\,GB both times. CFG parallelism, which at short sequences removes work rather than moving it, and the data-parallel pair are therefore unavailable at this length, and the limit is the compiler's host memory rather than the device's.
+
+% Masked Ulysses correctness (E3b) goes here once measured.
+
+% ---------------------------------------------------------------------------
+\subsection{Step Caching}
+\label{sec:cache-effectiveness}
+
+We evaluate the three controller modes of Section~\ref{sec:caching}: \emph{fixed cadence} at cadence~2; \emph{online-delta} at its default $\alpha = 0.6$, untuned; and \emph{calibrated adaptive}, with its curve fitted per model on prompts other than the evaluation prompts and its threshold set to cadence~2's skip budget. All modes keep 5 initial and 5 final full steps, so within a model they differ mainly in \emph{which} steps they cache. As a further baseline, \emph{fewer steps} runs without caching at the number of denoiser calls cadence~2 executes. Table~\ref{tab:teacache} reports the speedups and Table~\ref{tab:teacache-quality} the quality.
+
+\begin{table}[t]
+\caption{Denoising-time speedup of step caching over caching off, at official step counts; skipped denoiser calls in parentheses. Fewer steps runs 30 of 50 steps (25 of 40 on LTX-2) without caching.}
+\label{tab:teacache}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{2.2pt}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+mode & FLUX & Qwen & Wan & HV & LTX-2 \\
+\midrule
+off (s)                & 13.5 & 41.7 & 978 & 41.9 & 18.4 \\
+\midrule
+cadence 2              & 1.67 (20) & 1.66 (20) & 1.67 (20) & 1.68 (20) & 1.60 (15) \\
+online-delta$^{l}$     & 1.66 (20) & 1.61 (19) & 1.56 (18) & 1.68 (20) & 1.29 (9) \\
+adaptive$^{m}$         & 1.64 (20) & 1.64 (20) & 1.65 (19) & 1.56 (19) & 1.58 (15) \\
+fewer steps            & 1.67 & 1.67 & 1.67 & 1.68 & 1.59 \\
+\bottomrule
+\end{tabular}
+\par\smallskip
+{\raggedright\scriptsize $^{l}$Online-delta's skip count varies by prompt; shown for the timing prompt. $^{m}$Calibrated adaptive runs standalone, since resident serving does not load the probe program yet; its speedup is against the standalone caching-off time (Qwen 41.7, Wan 826, HV 42.5, LTX-2 16.7\,s).\par}
+\vskip -0.1in
+\end{table}
+
+\begin{table}[t]
+\caption{Quality of step caching against the same model's caching-off output: PSNR in dB, mean over 16 prompts (worst prompt in parentheses).}
+\label{tab:teacache-quality}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+mode & FLUX & Qwen & HV & LTX-2 \\
+\midrule
+cadence 2        & 33.6 (17.8) & 27.7 (15.9) & 28.3 (18.4) & 35.6 (28.2) \\
+online-delta     & 32.0 (21.2) & 26.8 (15.5) & 29.1 (18.4) & 37.3 (27.2)$^{n}$ \\
+adaptive         & 31.9 (21.1) & 25.8 (16.0) & 25.3 (17.3) & 34.6 (25.7) \\
+fewer steps      & 22.2 (15.7) & 19.6 (11.0) & 20.3 (14.5) & 24.0 (19.1) \\
+\bottomrule
+\end{tabular}
+\par\smallskip
+{\raggedright\scriptsize $^{n}$One prompt skipped no step and is identical to caching off; mean over the other 15.\par}
+\vskip -0.1in
+\end{table}
+% Sources: FLUX e4a-flux-cooled-20261005T0542 / e4a-flux-adaptive-20261005T0732
+% (in-process); Qwen srv-qwen-cachemodes + srv-qwen (fewer) + e4a-qwen-adaptive;
+% Wan srv-wan_2_1 (stop after denoiser) + e4a-wan_2_1-adaptive; HV
+% srv-hunyuan_video + e4a-hunyuan_video-adaptive; LTX-2 srv-ltx_2 +
+% e4a-ltx_2-adaptive-v2. Quality: e4a-quality-*-20261008T2102 (quality_cli.py; FLUX adaptive
+% in-process via flux_quality_inproc.py, scored against an in-process caching-off run that is
+% byte-identical to the CLI caching-off output on all 16 prompts). Wan's adaptive run executed its steps
+% faster than its caching-off run (14.2 vs 17.1 s median), so its 1.65x exceeds
+% the 1.61x ceiling of 19 skips; cause not established.
+% Figure teacache (speed vs PSNR, one panel per model) goes here once E4a
+% quality is in.
+
+\paragraph{Findings.}
+\emph{Caching saves the skipped denoiser calls, not time per call.} An executed call costs the same in every mode---830--845\,ms on HunyuanVideo, 835\,ms on Qwen-Image---and a cached step costs 0.3--7\,ms. The speedup is therefore set by the fraction of calls skipped. Because the initial and final full steps are fixed, official step counts skip proportionally more than short runs: cadence~2 skips 20 of 50 steps for a ceiling of 1.67$\times$ and reaches 1.66--1.68$\times$; on LTX-2 it skips 15 of 40 for a ceiling of 1.60$\times$. Running fewer steps with the same number of calls takes the same time to within 0.5\%, so between caching and fewer steps the question is quality alone.
+
+\emph{At the same number of denoiser calls, caching keeps far more of the output than sampling fewer steps.} On every model, cadence~2 is 8.0--11.6\,dB above fewer steps in mean PSNR against the uncached output (Table~\ref{tab:teacache-quality}), and every caching mode is at least 5.0\,dB above it; the perceptual distance agrees, with mean LPIPS 0.05--0.15 under caching against 0.19--0.27 under fewer steps. The advantage holds prompt by prompt: across the four models and three modes, caching beats fewer steps on 183 of 192 prompts. Caching keeps the official noise schedule and reuses an output only where the trajectory changes slowly, whereas fewer steps coarsens the schedule everywhere. The worst prompt still loses much more than the mean, down to 15.5--17.8\,dB on the image models and HunyuanVideo, so the mean alone overstates what every prompt keeps.
+
+\emph{No mode is best everywhere, and online-delta's skip budget depends on the model and the prompt.} Cadence~2 keeps the most on FLUX and Qwen-Image, online-delta on HunyuanVideo and LTX-2, and calibrated adaptive is never the best, losing up to 3.0\,dB to cadence~2 at the same skip budget on HunyuanVideo. At the default $\alpha$, online-delta skips 18--20 of 50 steps on the 50-step models' timing prompts but only 9 of 40 on LTX-2's (1.29$\times$ against cadence~2's 1.60$\times$). Across the 16 prompts its budget varies by model: 19--20 skips on FLUX, 18--20 on HunyuanVideo, 13--19 on Qwen-Image, and 0--15 on LTX-2, where one prompt skips none at all. The mode spends its budget where the output changes slowly, which buys LTX-2 its highest quality (37.3\,dB) at a speed that is not known in advance.
+
+\begin{table}[t]
+\caption{Signal of calibrated adaptive caching: the probe's cost per scheduler step and how well the fitted curve predicts the output change ($R^2$ over 8 recording prompts).}
+\label{tab:cache-boundary}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llrr@{}}
+\toprule
+model & device probe & ms/step & fit $R^2$ \\
+\midrule
+FLUX.1-dev   & fused in the DiT  & 2.3  & 0.60 \\
+Qwen-Image   & fused in the DiT  & 7.3  & 0.68 \\
+Wan~2.1      & separate program  & --$^{o}$ & 0.13 \\
+HunyuanVideo & separate program  & 17.8 & 0.71 \\
+LTX-2        & separate program  & 2.6  & 0.82 \\
+\bottomrule
+\end{tabular}
+\par\smallskip
+{\raggedright\scriptsize $^{o}$Not resolvable: Wan's adaptive run executed its steps faster than its caching-off run, which swamps a per-step cost.\par}
+\vskip -0.1in
+\end{table}
+% ms/step = (adaptive loop - off loop x executed/total) / steps. fit_r2 from
+% p8-*-calib-*; Wan's and LTX-2's calibration pairs were recorded with a host
+% computation of the same block-0 signal.
+
+\emph{Calibrated adaptive is decided by how well its signal predicts, not by what the signal costs.} Every model runs the probe on the device (Table~\ref{tab:cache-boundary}), including HunyuanVideo, whose probe loads beside its denoiser at this shape. The probe costs 2--18\,ms per step, 0.3--2\% of a denoiser call, so at the same skip count the mode lands within 3\% of cadence~2's time. What separates the models is the fit: the curve explains 60--82\% of the variance in output change on four models but 13\% on Wan, where a timing gain is no evidence that the mode skips the right steps.
+
+% ---------------------------------------------------------------------------
+\subsection{Serving}
+\label{sec:serving-eval}
+
+Section~\ref{sec:serving} claims that a restart costs a load and not a compile, and that recovery after a timeout or crash leaves no state behind. We test both on the resident worker of \texttt{difflet serve}, and measure request latency under open-loop load.
+
+\begin{table}[t]
+\caption{Startup of one resident model at TP=4, until the server reports ready. Recompiles counts the programs rebuilt when switching from caching off to calibrated adaptive.}
+\label{tab:startup}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+& first start & \multicolumn{2}{c}{restart (s)} & \\
+\cmidrule(lr){3-4}
+model & (min) & cold & warm & recompiles \\
+\midrule
+FLUX.1-dev   & 18.5  & 340 & 91  & 1 of 1 \\
+Qwen-Image   & 34.8  & 640 & 129 & 1 of 3 \\
+Wan~2.1      & 104.8 & 974 & 681 & --$^{p}$ \\
+HunyuanVideo & 116.8 & 624 & 194 & --$^{p}$ \\
+LTX-2        & 34.1  & 810 & 480 & --$^{p}$ \\
+\bottomrule
+\end{tabular}
+\par\smallskip
+{\raggedright\scriptsize $^{p}$Resident video serving exposes no step-caching policy.\par}
+\vskip -0.1in
+\end{table}
+% Sources: srv-*-first (compile policy AUTO into empty caches), srv-*-restart-
+% {cold,warm} (NEVER policy, engine start incl. one smoke request);
+% e5a-recompile-*-20261008T0657 (prepare on hardlink clones: off->off 0,
+% off->adaptive 1/1 (1,353 s) and 1/3 (1,419 s), adaptive 1.667x->1.3x 0).
+
+\begin{table}[t]
+\caption{Request latency under open-loop Poisson load through \texttt{difflet serve} over HTTP: one TP4 server against two TP2 servers on separate core pairs, each request sent to the server with fewer requests in flight. Both layouts receive the same arrival sequence; 20 requests per load level. Load $\rho$ is the realized arrival rate times the isolated TP4 request latency (14.2\,s). SLO: completion within 30\,s of arrival.}
+\label{tab:serving-load}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{p50 / p99 (s)} & \multicolumn{2}{c}{SLO met} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+FLUX, $\rho$ & TP4 & DP2$\times$TP2 & TP4 & DP2$\times$TP2 \\
+\midrule
+0.78 & 39.4 / 65.3  & 39.1 / 70.0  & 40\% & 30\% \\
+0.99 & 33.0 / 53.8  & 46.7 / 69.3  & 40\% & 25\% \\
+1.18 & 65.9 / 105.3 & 74.7 / 110.7 & 20\% & 20\% \\
+\bottomrule
+\end{tabular}
+\vskip -0.1in
+\end{table}
+% Source: e5b-flux-{tp4,dp2tp2}-20261009T0526 (drivers/e5b_load.py over
+% benchmark.serve_bench.run_poisson; nominal rho 0.5/0.8/0.95 with 20 arrivals
+% each, arrival seeds 42/43/44; the realized arrival windows, 365/286/241 s,
+% were shorter than the expected 568/355/299 s, hence the realized rho above).
+% Isolated request latency: TP4 14.3 s, TP2 replicas 26.2 and 27.0 s.
+% Completed throughput 178/213/207 per hour (TP4) and 179/205/207 (DP2xTP2):
+% arrival-limited at every level. HunyuanVideo TP4 under load: e5b-hunyuan_video-tp4
+% (running at the time of writing); a TP2 HunyuanVideo denoiser does not fit in HBM.
+
+\paragraph{Findings.}
+\emph{A restart costs a load, not a compile---unless the probe changes.} The first start of a serving profile compiles its programs and takes 18--117\,min. Every later start validates them and pays the weight load, which the host page cache bounds: 91--681\,s warm, 340--974\,s cold. Changing the caching target recompiles nothing, but switching from caching off to calibrated adaptive rebuilds the program that carries the probe: FLUX's whole pipeline program (1{,}353\,s) and Qwen-Image's DiT (1{,}419\,s).
+
+\emph{Recovery leaves no state behind.} We test both failure paths on FLUX, repeating one prompt and seed; two reference requests produce byte-identical images. A 5\,s request timeout returns an error at 5.0\,s, and the same worker serves again 9.3\,s later, once its running denoising loop reaches the next cancellation point. Killing the worker with SIGKILL mid-request returns an error after 0.6\,s; the engine spawns a new worker, reloads the weights, and is ready 65.6\,s after the kill. After both faults the same seed reproduces the reference image byte for byte, so no sampling or cache state survives a request.
+% Source: e5a-recovery-flux-rerun-20261008T1143. Known gap: a worker that dies
+% before reporting ready is not detected; startup waits the full 900 s timeout.
+
+\emph{Under load, splitting the chip into replicas does not pay for resident FLUX.} Table~\ref{tab:serving-load} offers both layouts the same Poisson arrivals. At no load level does DP2$\times$TP2 beat TP4: their median latency ties at $\rho = 0.78$, and at $\rho = 0.99$ TP4's median is 33.0\,s against 46.7\,s, with the 30\,s SLO met for 40\% of requests against 25\%. Each TP2 replica needs 26--27\,s for a request that TP4 serves in 14.2\,s, so a request that finds a replica idle already spends most of the SLO, while the second replica adds only the 5\% of throughput measured in Section~\ref{subsec:parallelism-eval}. Both layouts complete the same number of requests per hour at every level, because arrivals, not capacity, limit them. Queueing dominates both: past $\rho \approx 1$ the 99th percentile exceeds 100\,s for either layout. With 20 requests per level these percentiles are coarse, but at every level TP4 has the lower 99th percentile and meets the SLO at least as often.
