@@ -62,14 +62,44 @@ class _FakeWanApp:
 
 # ----------------------------------------------------------------- download
 
+_WAN21_ID = "Wan-AI/Wan2.1-T2V-14B-Diffusers"
+_WAN21_REV = "38ec498cb3208fb688890f8cc7e94ede2cbd7f68"
+
+
 def test_download_resolves_remote(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "difflet.pipeline.path_resolver.resolve_model_path",
-        lambda model_id, *, local_files_only, allow_patterns=None: calls.append(local_files_only),
+        lambda model_id, *, revision=None, local_files_only, allow_patterns=None:
+        calls.append((revision, local_files_only)),
     )
     WanOrchestrator(_wan_args()).download()
-    assert calls == [False]
+    assert calls == [(None, False)]
+
+
+def test_download_passes_revision(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "difflet.pipeline.path_resolver.resolve_model_path",
+        lambda model_id, *, revision=None, local_files_only, allow_patterns=None:
+        calls.append((revision, local_files_only)),
+    )
+    WanOrchestrator(_wan_args(model_id=_WAN21_ID, revision=_WAN21_REV)).download()
+    assert calls == [(_WAN21_REV, False)]
+
+
+def test_cli_download_revision_reaches_snapshot_download(monkeypatch):
+    # `difflet download --model-id <wan> --revision <sha>` end to end: the pinned
+    # revision must arrive at huggingface_hub.snapshot_download, not be dropped.
+    import importlib
+
+    cli_main = importlib.import_module("difflet.cli.main")  # `difflet.cli.main` is also a function
+    calls = []
+    monkeypatch.setattr("huggingface_hub.snapshot_download",
+                        lambda **kw: calls.append(kw) or "/fake/snapshot")
+    cli_main.main(["download", "--model-id", _WAN21_ID, "--revision", _WAN21_REV])
+    assert [c["revision"] for c in calls] == [_WAN21_REV]
+    assert calls[0]["local_files_only"] is False
 
 
 # ------------------------------------------------------ generate error path
@@ -196,6 +226,62 @@ def test_shared_cli_args_omits_optionals_when_absent():
     assert "--output" not in parts
     assert "--cache-dir" not in parts
     assert "--work-dir" not in parts
+    assert "--revision" not in parts
+
+
+def test_shared_cli_args_without_revision_is_byte_identical_to_before():
+    # Trainium/TPU stage command lines must not change when --revision is not
+    # given (the stage cache identity and every recorded command stay valid).
+    parts = WanOrchestrator(_wan_args(cache_dir="/c"))._shared_cli_args(
+        "generate", work_dir="/w")
+    assert parts == [
+        "--model-id", "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+        "--tp-degree", "4", "--cp-degree", "1", "--cp-mode", "gather_kv",
+        "--height", "480", "--width", "832", "--num-frames", "9",
+        "--steps", "2", "--guidance-scale", "1.0", "--seed", "42",
+        "--stage-mode", "generate",
+        "--prompt", "a cat walking", "--output", "/tmp/wan.mp4",
+        "--cache-dir", "/c", "--work-dir", "/w",
+    ]
+
+
+def test_shared_cli_args_forwards_revision_only_when_set():
+    orch = WanOrchestrator(_wan_args(model_id=_WAN21_ID, revision=_WAN21_REV))
+    parts = orch._shared_cli_args("generate", work_dir="/w")
+    assert parts[parts.index("--revision") + 1] == _WAN21_REV
+    assert parts.count("--revision") == 1
+    # The pair is purely additive: removing it gives the unpinned command line.
+    plain = WanOrchestrator(_wan_args(model_id=_WAN21_ID))._shared_cli_args(
+        "generate", work_dir="/w")
+    without = list(parts)
+    i = without.index("--revision")
+    del without[i:i + 2]
+    assert without == plain
+
+
+def test_shared_cli_args_revision_round_trips_through_the_stage_parser():
+    from difflet.cli import stage
+
+    parts = WanOrchestrator(_wan_args(model_id=_WAN21_ID, revision=_WAN21_REV)
+                            )._shared_cli_args("generate")
+    ns, _ = stage._build_stage_parser().parse_known_args(
+        ["--orchestrator", "wan", "--stage", "transformer", *parts])
+    assert ns.revision == _WAN21_REV
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_orchestrator_hands_revision_to_every_stage(monkeypatch, tmp_path, mode):
+    stages = {}
+    monkeypatch.setattr(
+        wan_mod.runner, "run_stage",
+        lambda orch, stage, **kw: stages.update({stage: kw["cli_args"]}),
+    )
+    args = _wan_args(model_id=_WAN21_ID, revision=_WAN21_REV,
+                     work_dir=str(tmp_path / "work"), keep_work_dir=True)
+    getattr(WanOrchestrator(args), mode)()
+    assert set(stages) == {"transformer", "vae"}
+    for cli_args in stages.values():
+        assert cli_args[cli_args.index("--revision") + 1] == _WAN21_REV
 
 
 # ----------------------------------------------------------------- _save_video
@@ -291,6 +377,28 @@ def test_stage_vae_compile(monkeypatch, tmp_path):
     orch = WanOrchestrator(_wan_args(stage_mode="compile", cache_dir=str(tmp_path)))
     orch._stage_vae(orch.args)
     assert _FakeWanApp.instances[-1].compiled is not None
+
+
+@pytest.mark.parametrize("stage", ["transformer", "vae"])
+@pytest.mark.parametrize("revision", [None, _WAN21_REV])
+def test_stage_resolves_weights_at_the_requested_revision(
+    monkeypatch, tmp_path, stage, revision,
+):
+    # The stage process runs offline (local_files_only=True); without the
+    # revision it resolves whatever snapshot the hub cache's refs/main points
+    # at, not the one `difflet download --revision` fetched.
+    _setup_wan_fakes(monkeypatch)
+    resolved = []
+    monkeypatch.setattr(
+        "difflet.pipeline.path_resolver.resolve_model_path",
+        lambda model_id, **kw: resolved.append(kw) or "/fake/model",
+    )
+    args = _wan_args(model_id=_WAN21_ID, revision=revision,
+                     stage_mode="compile", cache_dir=str(tmp_path))
+    orch = WanOrchestrator(args)
+    getattr(orch, f"_stage_{stage}")(args)
+    assert [kw.get("revision") for kw in resolved] == [revision]
+    assert [kw["local_files_only"] for kw in resolved] == [True]
 
 
 def test_stage_vae_generate_saves_pt_for_non_mp4(monkeypatch, tmp_path):
