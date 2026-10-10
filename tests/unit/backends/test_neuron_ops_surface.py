@@ -17,7 +17,7 @@ from difflet.backends import registry
 
 BACKENDS = Path(difflet.__file__).resolve().parent / "backends"
 
-PENDING = {"dequantize_mx", "linear_mx", "matmul_mx", "quantize_mx"}
+PENDING: set[str] = set()
 
 
 def exports(backend):
