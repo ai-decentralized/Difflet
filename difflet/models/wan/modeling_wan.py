@@ -833,7 +833,10 @@ class WanTransformer3DModel(nn.Module):
         rotary_emb = self.rope(hidden_states)  # (cos, sin) each (1, S, 1, head_dim)
 
         hidden_states = self.patch_embedding(hidden_states)
-        hidden_states = hidden_states.flatten(2).transpose(1, 2)  # (B, S, inner_dim)
+        # (B, S, inner_dim). Contiguous, so block 0 sees the strides every later block sees
+        # (a compiled block's output): per-block torch.compile guards on strides and would
+        # otherwise trace block 0 separately. A no-op for XLA tensors (TPU / Trainium).
+        hidden_states = hidden_states.flatten(2).transpose(1, 2).contiguous()
 
         if self.sp_enabled:
             # Megatron-SP: shard the patch sequence across the TP group so each

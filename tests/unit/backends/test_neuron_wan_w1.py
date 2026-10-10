@@ -216,6 +216,51 @@ def test_compile_mode_traces_one_graph_for_all_blocks(tiny):
         assert result["unwarmed_shapes"] == []
 
 
+def _contiguous_outputs_backend(gm, example_inputs):
+    """A Dynamo backend that runs the graph eagerly but returns every output contiguous, as a
+    NEFF writes them on the neuron device. ``aot_eager`` instead keeps eager layout
+    propagation (an add with a transposed input returns a transposed output), which hides a
+    strided input to the block stack: each block then hands the next the same strides."""
+    del example_inputs
+
+    def run(*args):
+        return tuple(o.contiguous() if isinstance(o, torch.Tensor) else o for o in gm(*args))
+
+    return run
+
+
+def test_block_stack_input_is_contiguous_so_compiled_blocks_share_one_graph():
+    from torch._dynamo.utils import counters
+
+    from difflet.backends.neuron.compile import compile_blocks
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_inputs
+
+    torch._dynamo.reset()
+    counters.clear()
+    with tp1_mesh():
+        model = tiny_wan_tp1_model()
+        seen = []
+        handle = model.blocks[0].register_forward_pre_hook(
+            lambda module, args: seen.append(args[0].is_contiguous())
+        )
+        latents, timestep, text = tiny_wan_inputs()
+        with torch.no_grad():
+            model(latents, timestep, text)
+        handle.remove()
+        # The patch embedding's flatten(2).transpose(1, 2) view must not reach the blocks.
+        assert seen == [True]
+
+        compile_blocks(model, backend=_contiguous_outputs_backend)
+        with torch.no_grad():
+            model(latents, timestep, text)
+            model(latents, timestep * 0.5, -text)
+    # Block 0's input and the later blocks' inputs (block outputs) have the same strides, so
+    # Dynamo's static stride guards hold and every block reuses the first block's graph.
+    assert counters["stats"]["unique_graphs"] == 1
+    assert sum(counters["graph_break"].values()) == 0
+    torch._dynamo.reset()
+
+
 def test_adapter_passes_contiguous_inputs():
     received = []
 
