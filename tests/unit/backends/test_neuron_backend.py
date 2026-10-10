@@ -1,5 +1,7 @@
 """Unit tests for the neuron (TorchNeuron) backend runtime; no Neuron hardware needed."""
 
+import os
+
 import pytest
 
 from difflet.backends import registry
@@ -102,7 +104,15 @@ def test_prepare_runtime_rejects_world_size_mismatch(monkeypatch):
         runtime.NeuronBackend().prepare_runtime(DiffletParallelConfig(tp_degree=4))
 
 
-def test_prepare_runtime_single_process_needs_no_device(monkeypatch):
+def test_prepare_runtime_single_process_needs_no_device(monkeypatch, tmp_path):
     for name in ("WORLD_SIZE", "LOCAL_WORLD_SIZE", "LOCAL_RANK"):
         monkeypatch.delenv(name, raising=False)
+    # prepare_runtime exports the NEFF cache settings; delenv records them for restoration.
+    for name in ("TORCH_NEURONX_NEFF_CACHE_DIR", "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR",
+                 "NKI_ENABLE_TRACE_CACHE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    monkeypatch.setattr(runtime, "_runtime_prepared", False)  # restored after the call sets it
     runtime.NeuronBackend().prepare_runtime(DiffletParallelConfig())
+    assert os.environ["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "neuron" / "neff")
+    assert os.environ["NKI_ENABLE_TRACE_CACHE"] == "0"

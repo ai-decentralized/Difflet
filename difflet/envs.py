@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     # ----- Difflet-defined runtime config -----
     DIFFLET_BACKEND: str | None = None
     DIFFLET_COMPILE_CACHE: str = "~/.cache/difflet"
+    DIFFLET_EXEC_MODE: str | None = None
 
     # ----- Distributed framework (set by torchrun / launcher / tests) -----
     RANK: int = 0
@@ -70,6 +71,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "DIFFLET_COMPILE_CACHE":
     lambda: os.path.expanduser(
         os.environ.get("DIFFLET_COMPILE_CACHE", "~/.cache/difflet")),
+
+    # Execution mode of non-AoT backends (``neuron``): "eager" runs op by op,
+    # "compile" compiles each repeated block with torch.compile. Unset means the
+    # backend default. Not part of the compile-cache key.
+    "DIFFLET_EXEC_MODE":
+    lambda: os.environ.get("DIFFLET_EXEC_MODE"),
 
     # Hardlink pre-sharded weights into a shape-independent store under
     # ``<DIFFLET_COMPILE_CACHE>/_shared_weights/`` so that every compiled shape
