@@ -129,10 +129,10 @@ def test_online_delta_sweep_labels_are_tp4tcod_at_other_alphas():
 
 
 def test_configs_are_the_verify_cli_labels_sized_to_four_cores():
-    from benchmark.models import CFG_TRACK, COMBO_LABELS, ONLINE_DELTA_SWEEP
+    from benchmark.models import CFG_TRACK, COMBO_LABELS, FRAME_SWEEP, ONLINE_DELTA_SWEEP
     assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4cfg2",
                             "tp4tc2", "tp4tcod", "tp4tcad", *ONLINE_DELTA_SWEEP,
-                            *COMBO_LABELS, *CFG_TRACK}
+                            *COMBO_LABELS, *CFG_TRACK, *FRAME_SWEEP}
     for label in CONFIGS:
         cfg = resolve("flux_1_dev", label)
         world = cfg.tp * cfg.cp * (2 if cfg.cfg_parallel else 1)
@@ -310,3 +310,15 @@ def test_wan_cfg_track_and_skip_budget():
     t7 = resolve("wan_2_1", "tp4tcad7")
     assert t7.teacache_speedup == round(50 / 43, 3)
     assert t7.teacache_calibration.endswith("wan_2_1_tp4tcad_s7.json")
+
+
+def test_wan_frame_sweep_labels():
+    """E2b: Wan at 9 / 33 frames, NKI and SDPA, short loop, official sampling."""
+    from benchmark.models import FRAME_SWEEP
+    assert set(FRAME_SWEEP) == {"tp4f9", "tp4f9sdpa", "tp4f33", "tp4f33sdpa"}
+    nki, sdpa = resolve("wan_2_1", "tp4f33"), resolve("wan_2_1", "tp4f33sdpa")
+    assert (nki.num_frames, nki.steps, nki.guidance_scale) == (33, 8, 5.0)
+    assert nki.attention_impl == "megakernel" and sdpa.attention_impl == "sdpa"
+    assert sdpa.parallel_flags()[-2:] == ["--attention-impl", "sdpa"]
+    assert nki.cache_flags() == ["--wan-vae-chunked"] and nki.negative_prompt
+    assert sdpa.config_slug == "wan_2_1_tp4f33sdpa"

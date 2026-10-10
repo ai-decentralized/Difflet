@@ -355,6 +355,19 @@ ONLINE_DELTA_SWEEP: dict[str, float] = {
 CONFIGS.update({label: {"teacache_online_delta": a} for label, a in ONLINE_DELTA_SWEEP.items()})
 
 
+# Attention vs sequence length (paper eval E2b): Wan 2.1 at 9 / 33 / 81 frames
+# (about 4.7k / 15k / 32.8k visual tokens), NKI attention against SDPA. DiT step
+# latency does not depend on the step count, so the sweep runs an 8-step loop.
+# 81 frames with NKI is the tp4 cell itself; 81 frames with SDPA does not
+# compile (7.96M instructions against the 5M limit, E2) and stays unmeasured.
+FRAME_SWEEP: dict[str, dict] = {
+    f"tp4f{f}{impl}": {"num_frames": f, "steps": 8,
+                       **({"attention_impl": "sdpa"} if impl else {})}
+    for f in (9, 33) for impl in ("", "sdpa")
+}
+CONFIGS.update(FRAME_SWEEP)
+
+
 def is_sweep_label(label: str) -> bool:
     """True for the online-delta alpha-sweep cells (reported in their own
     table, not as campaign features)."""
@@ -373,6 +386,11 @@ _CONFIG_DESC = {
     "tp4tcad": "tp=4 + TeaCache calibrated adaptive (--teacache-speedup at cadence 2's "
                "skip budget, --teacache-calibration per model)",
 }
+_CONFIG_DESC.update({
+    label: (f"tp=4, {o['num_frames']} frames, 8-step loop"
+            + (", --attention-impl sdpa" if o.get("attention_impl") else ", NKI attention"))
+    for label, o in FRAME_SWEEP.items()
+})
 _CONFIG_DESC.update({
     label: f"tp=4 + TeaCache online-delta adaptive (--teacache-online-delta {a}; alpha sweep)"
     for label, a in ONLINE_DELTA_SWEEP.items()
