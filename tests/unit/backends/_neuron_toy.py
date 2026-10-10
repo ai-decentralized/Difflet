@@ -64,3 +64,40 @@ def reference_mlp(x: torch.Tensor, weights: dict[str, torch.Tensor]) -> torch.Te
     """
     h = F.gelu(F.linear(x, weights["up.weight"], weights["up.bias"]), approximate="tanh")
     return F.linear(h, weights["down.weight"]) + weights["down.bias"]
+
+
+# ---------------------------------------------------------------- C7: checkpoints
+
+
+def write_toy_checkpoint(directory, weights, *, num_files=1):
+    """Write ``weights`` as a HuggingFace-style safetensors checkpoint; returns the directory.
+
+    One file is ``model.safetensors``. More files split the sorted keys round-robin
+    into ``model-0000i-of-0000n.safetensors`` plus ``model.safetensors.index.json``,
+    the layout ``build_weight_map`` reads.
+    """
+    import json
+    from pathlib import Path
+
+    from safetensors.torch import save_file
+
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    names = sorted(weights)
+    if not 1 <= num_files <= len(names):
+        raise ValueError(f"num_files={num_files} must be in [1, {len(names)}]")
+    # contiguous + clone: safetensors refuses non-contiguous tensors and shared storage
+    tensors = {name: weights[name].detach().cpu().contiguous().clone() for name in names}
+    if num_files == 1:
+        save_file(tensors, str(directory / "model.safetensors"))
+        return directory
+    weight_map = {}
+    for i in range(num_files):
+        filename = f"model-{i + 1:05d}-of-{num_files:05d}.safetensors"
+        part = {name: tensors[name] for name in names[i::num_files]}
+        save_file(part, str(directory / filename))
+        weight_map.update(dict.fromkeys(part, filename))
+    total = sum(t.numel() * t.element_size() for t in tensors.values())
+    index = {"metadata": {"total_size": total}, "weight_map": weight_map}
+    (directory / "model.safetensors.index.json").write_text(json.dumps(index, indent=2))
+    return directory

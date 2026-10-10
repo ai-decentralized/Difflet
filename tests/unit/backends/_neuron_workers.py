@@ -320,3 +320,100 @@ def c4_tp_mlp_worker(rank: int, world_size: int, compiled: bool) -> dict:
     by_dim = load(L.ParallelEmbedding(256, 32, shard_across_embedding=True), {"weight": ew})
     res["embedding_dim_exact"] = torch.equal(run(by_dim, ids), F.embedding(ids, ew))
     return res
+
+
+# ---------------------------------------------------------------- C7: checkpoint loader
+
+
+def _proc_status_kib(field: str) -> int:
+    with open("/proc/self/status") as handle:
+        for line in handle:
+            if line.startswith(field + ":"):
+                return int(line.split()[1])
+    raise KeyError(field)
+
+
+def _reset_peak_rss() -> bool:
+    """Reset VmHWM to the current RSS (Linux >= 4.0); False where /proc forbids it."""
+    try:
+        with open("/proc/self/clear_refs", "w") as handle:
+            handle.write("5")
+    except OSError:
+        return False
+    return True
+
+
+def c7_checkpoint_worker(rank, world_size, ckpt_dir, dim, hidden, dtype_name):
+    """Load a toy TP MLP with tp size/rank from the mesh; check shards, reassembly, forward."""
+    import torch
+
+    from difflet.backends.neuron.core.checkpoint import (
+        build_on_meta,
+        load_sharded_checkpoint,
+        shard_dim,
+    )
+    from difflet.backends.neuron.ops_impl import parallel_mesh as pm
+    from difflet.backends.neuron.ops_impl.collectives import gather_tp_dim, get_tp_rank
+    from difflet.pipeline.parallel_mesh import MeshSpec
+    from tests.unit.backends._neuron_toy import ToyTPMLP, reference_mlp, toy_full_weights
+
+    dtype = getattr(torch, dtype_name)
+    pm.init_parallel_mesh(MeshSpec(tp=world_size))
+    full = toy_full_weights(dim, hidden, seed=0)
+    model = build_on_meta(lambda: ToyTPMLP(dim, hidden))
+    report = load_sharded_checkpoint(model, ckpt_dir, device="cpu", dtype=dtype)
+    state = model.state_dict()
+    shards_exact = reassembled_exact = True
+    for name, tensor in full.items():  # same order on every rank: collectives must match
+        axis = shard_dim(model, name)
+        whole = state[name] if axis is None else gather_tp_dim(state[name], dim=axis)
+        expected = tensor if axis is None else tensor.chunk(world_size, dim=axis)[rank]
+        shard_ok = state[name].dtype == dtype and torch.equal(state[name], expected.to(dtype))
+        shards_exact = shards_exact and shard_ok
+        reassembled_exact = reassembled_exact and torch.equal(whole, tensor.to(dtype))
+    forward_err = None
+    if dtype == torch.float32:
+        x = torch.randn(2, 8, dim, generator=torch.Generator().manual_seed(1))
+        with torch.no_grad():
+            ref = reference_mlp(x, full)
+            err = (model(x) - ref).abs().max() / ref.abs().max().clamp_min(1.0)
+        forward_err = err.item()
+    return {
+        "rank": rank,
+        "tp_rank": get_tp_rank(),
+        "missing": report["missing"],
+        "unexpected": report["unexpected"],
+        "shards_exact": bool(shards_exact),
+        "reassembled_exact": bool(reassembled_exact),
+        "forward_err": forward_err,
+    }
+
+
+def c7_peak_rss_worker(rank, world_size, ckpt_dir, n_layers, dim, hidden):
+    """Peak host RSS of one rank's bf16 load, measured from a VmHWM reset just before it."""
+    import gc
+
+    import safetensors.torch  # noqa: F401  import cost stays outside the measured window
+    import torch
+    import torch.nn as nn
+
+    from difflet.backends.neuron.core.checkpoint import build_on_meta, load_sharded_checkpoint
+    from difflet.backends.neuron.ops_impl import parallel_mesh as pm
+    from difflet.pipeline.parallel_mesh import MeshSpec
+    from tests.unit.backends._neuron_toy import ToyTPMLP
+
+    pm.init_parallel_mesh(MeshSpec(tp=world_size))
+    model = build_on_meta(lambda: nn.ModuleList(ToyTPMLP(dim, hidden) for _ in range(n_layers)))
+    gc.collect()
+    if not _reset_peak_rss():
+        return {"rank": rank, "peak_delta": None, "module_bytes": 0, "missing": []}
+    before = _proc_status_kib("VmRSS")
+    report = load_sharded_checkpoint(model, ckpt_dir, device="cpu", dtype=torch.bfloat16)
+    peak = _proc_status_kib("VmHWM")
+    module_bytes = sum(p.numel() * p.element_size() for p in model.parameters())
+    return {
+        "rank": rank,
+        "peak_delta": (peak - before) * 1024,
+        "module_bytes": module_bytes,
+        "missing": report["missing"],
+    }
