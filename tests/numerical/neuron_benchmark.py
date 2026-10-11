@@ -27,7 +27,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from difflet.backends.neuron.buildinfo import build_info
+from tests.numerical.buildinfo import build_info
 
 SPREAD_LIMIT = 0.10
 DRIFT_LIMIT = 1.10

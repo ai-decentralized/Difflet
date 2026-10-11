@@ -4,7 +4,7 @@ import json
 
 from pytest import approx
 
-from difflet.backends.neuron import benchmark
+from tests.numerical import neuron_benchmark as benchmark
 
 
 class FakeDevice:

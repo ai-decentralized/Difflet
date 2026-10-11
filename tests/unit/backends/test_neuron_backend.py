@@ -114,7 +114,7 @@ def test_prepare_runtime_single_process_needs_no_device(monkeypatch, tmp_path):
         monkeypatch.delenv(name, raising=False)
     # prepare_runtime exports the NEFF cache settings; delenv records them for restoration.
     for name in ("TORCH_NEURONX_NEFF_CACHE_DIR", "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR",
-                 "NKI_ENABLE_TRACE_CACHE"):
+                 "TORCH_NEURONX_HLO_CACHE_DIR", "NKI_ENABLE_TRACE_CACHE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
     monkeypatch.setattr(runtime, "_runtime_prepared", False)  # restored after the call sets it

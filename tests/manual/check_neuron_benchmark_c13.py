@@ -1,8 +1,8 @@
 """Manual check: the benchmark harness gives stable timings on hardware.
 
-Run on a trn2 host with the TorchNeuron stack (single process):
+Run on a trn2 host with the TorchNeuron stack (single process), from the repository root:
 
-    python tests/manual/check_neuron_benchmark_c13.py [results.json]
+    PYTHONPATH=. python tests/manual/check_neuron_benchmark_c13.py [results.json]
 
 Times a model-free toy (12 identical transformer blocks, hidden 1024, 8 heads of
 128, 1,000 tokens, bf16) in eager and compiled modes, interleaved over rounds,
@@ -18,17 +18,17 @@ import sys
 
 os.environ["DIFFLET_BACKEND"] = "neuron"
 
-from difflet.backends.neuron.cache import apply_neuron_cache_env
+from difflet.backends.neuron.compile import configure_compile_cache
 
-apply_neuron_cache_env()  # before torch: importing torch autoloads torch_neuronx
+configure_compile_cache()  # before torch: importing torch autoloads torch_neuronx
 
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 from torch import nn  # noqa: E402
 
 from difflet import ops  # noqa: E402
-from difflet.backends.neuron import benchmark  # noqa: E402
 from difflet.backends.neuron.compile import compile_blocks  # noqa: E402
+from tests.numerical import neuron_benchmark as benchmark  # noqa: E402
 
 DEPTH, D, HEADS, S = 12, 1024, 8, 1000
 HEAD_DIM = D // HEADS

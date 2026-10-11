@@ -12,6 +12,12 @@ Compiled NEFFs persist across processes under ``TORCH_NEURONX_NEFF_CACHE_DIR``: 
 re-traces with Dynamo but skips neuronx-cc. torch-neuronx's compilation cache reads its
 directories once, when the runtime first compiles, so ``configure_compile_cache`` must run
 before any device work; ``NeuronBackend.prepare_runtime`` calls it first.
+
+The eager path's HLO cache (``TORCH_NEURONX_HLO_CACHE_DIR``) is read earlier, when
+torch_neuronx is imported, and ``import torch`` autoloads torch_neuronx: in-process it is too
+late by then. The launcher therefore calls ``configure_compile_cache(env=...)`` on the ranks'
+environment before starting them, so every torch-neuronx cache lives under one root that
+survives reboots and is cleared as one (a cold-start measurement is otherwise partly warm).
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ DEFAULT_EXEC_MODE = "compile"
 
 NEFF_CACHE_ENV = "TORCH_NEURONX_NEFF_CACHE_DIR"
 NEFF_LOCAL_CACHE_ENV = "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR"
+HLO_CACHE_ENV = "TORCH_NEURONX_HLO_CACHE_DIR"
 NKI_TRACE_CACHE_ENV = "NKI_ENABLE_TRACE_CACHE"
 
 #: Options ``compile_blocks`` gives the ``"neuron"`` backend unless the caller overrides them.
@@ -76,11 +83,12 @@ def configure_compile_cache(
     nki_trace_cache: bool = False,
     env: MutableMapping[str, str] | None = None,
 ) -> dict[str, str]:
-    """Point torch-neuronx's persistent NEFF cache at a directory; set the NKI trace cache.
+    """Point torch-neuronx's persistent caches at directories; set the NKI trace cache.
 
     Each directory is the explicit argument, else the value already in ``env`` (a launcher's
     choice, kept verbatim), else a default under ``DIFFLET_COMPILE_CACHE``: ``neuron/neff`` for
-    NEFFs, ``neuron/neff_local`` for the per-host compile locks. ``NKI_ENABLE_TRACE_CACHE`` is
+    NEFFs, ``neuron/neff_local`` for the per-host compile locks, ``neuron/hlo`` for the eager
+    path's HLO cache (effective only in processes that import torch afterwards). ``NKI_ENABLE_TRACE_CACHE`` is
     always overwritten: ``import torch_neuronx`` defaults it to "1"
     (torch_neuronx/__init__.py:169), and that cache can serve stale kernels, so it stays off
     unless asked for. torch-neuronx creates the directories. Returns the values written to
@@ -93,6 +101,7 @@ def configure_compile_cache(
         NEFF_LOCAL_CACHE_ENV: _resolve_dir(
             local_cache_dir, env.get(NEFF_LOCAL_CACHE_ENV), neff_dir.parent / "neff_local"
         ),
+        HLO_CACHE_ENV: _resolve_dir(None, env.get(HLO_CACHE_ENV), neff_dir.parent / "hlo"),
         NKI_TRACE_CACHE_ENV: "1" if nki_trace_cache else "0",
     }
     env.update(settings)

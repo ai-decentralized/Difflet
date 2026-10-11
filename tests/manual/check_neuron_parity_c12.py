@@ -1,12 +1,12 @@
-"""Manual check: the parity harness reproduces the earlier hardware results.
+"""Manual check: the parity runner (tests/numerical/neuron_parity.py) on hardware.
 
-Run on a trn2 host with the TorchNeuron stack (single process):
+Run on a trn2 host with the TorchNeuron stack (single process), from the repository root:
 
-    python tests/manual/check_neuron_parity_c12.py [results.json]
+    PYTHONPATH=. python tests/manual/check_neuron_parity_c12.py [results.json]
 
-Expected: every check passes, matching the C2, C3 and C9 manual checks, and a
-saved device output reloads and compares exactly. The optional argument writes
-the results and the build as JSON.
+Reruns the C2, C3 and C9 cases through ``run_parity``, judged by the TPU numerical gate
+(``check``), and a saved device output that must reload and compare exactly. The optional
+argument writes the results and the build as JSON.
 """
 
 from __future__ import annotations
@@ -17,17 +17,17 @@ import tempfile
 
 os.environ["DIFFLET_BACKEND"] = "neuron"
 
-from difflet.backends.neuron.cache import apply_neuron_cache_env
+from difflet.backends.neuron.compile import configure_compile_cache
 
-apply_neuron_cache_env()  # before torch: importing torch autoloads torch_neuronx
+configure_compile_cache()  # before torch: importing torch autoloads torch_neuronx
 
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 from torch import nn  # noqa: E402
 
 from difflet import ops  # noqa: E402
-from difflet.backends.neuron import parity  # noqa: E402
 from difflet.backends.neuron.compile import compile_blocks  # noqa: E402
+from tests.numerical import neuron_parity as parity  # noqa: E402
 
 D, HEADS, S = 1024, 8, 1000
 HEAD_DIM = D // HEADS
@@ -76,12 +76,13 @@ def main() -> int:
     toy, x_toy = Toy(), torch.randn(1, S, D)
 
     results = [
-        parity.check("RMSNorm", rms, (x_norm,), dtype=torch.float32),
-        parity.check("RMSNorm", rms, (x_norm,), dtype=torch.bfloat16),
-        parity.check("attention 4680 (SDPA)", attention, (q, k, v), dtype=torch.float32, fp32_rtol=1e-3),
-        parity.check("attention 4680 (NKI kernel)", attention, (q, k, v), dtype=torch.bfloat16),
-        parity.check("toy 12 blocks, eager", toy, (x_toy,), dtype=torch.bfloat16),
-        parity.check("toy 12 blocks, compiled", toy, (x_toy,), dtype=torch.bfloat16, prepare=compile_blocks),
+        parity.run_parity("RMSNorm", rms, (x_norm,), dtype=torch.float32),
+        parity.run_parity("RMSNorm", rms, (x_norm,), dtype=torch.bfloat16),
+        parity.run_parity("attention 4680 (SDPA)", attention, (q, k, v), dtype=torch.float32),
+        parity.run_parity("attention 4680 (NKI kernel)", attention, (q, k, v), dtype=torch.bfloat16),
+        parity.run_parity("toy 12 blocks, eager", toy, (x_toy,), dtype=torch.bfloat16),
+        parity.run_parity("toy 12 blocks, compiled", toy, (x_toy,), dtype=torch.bfloat16,
+                          prepare=compile_blocks),
     ]
 
     with torch.no_grad():
@@ -89,14 +90,14 @@ def main() -> int:
         x_dev = x_toy.to(dtype=torch.bfloat16, device="neuron")
         first, second = model(x_dev).cpu(), model(x_dev).cpu()
     with tempfile.TemporaryDirectory() as tmp:
-        parity.save_reference(os.path.join(tmp, "toy"), {"out": first}, {"note": "C12 roundtrip"})
+        parity.save_reference(os.path.join(tmp, "toy"), {"out": first}, {"note": "roundtrip"})
         saved, _ = parity.load_reference(os.path.join(tmp, "toy"))
-    results.append(parity.compare_to_reference("saved reference roundtrip", second, saved["out"]))
-
-    if len(sys.argv) > 1:
-        with open(sys.argv[1], "w") as f:
-            f.write(parity.results_json(results))
-    return parity.report(results)
+    roundtrip = parity.metrics(second, saved["out"])
+    ok = roundtrip["max_abs"] == 0.0
+    results.append({"name": "saved reference roundtrip", "dtype": "bfloat16", "metrics": roundtrip,
+                    "control": None, "fallbacks": [], "ok": ok, "reasons": [] if ok else ["not exact"],
+                    "notes": []})
+    return parity.report(results, json_path=sys.argv[1] if len(sys.argv) > 1 else None)
 
 
 if __name__ == "__main__":

@@ -150,6 +150,7 @@ def test_pipeline_neuron_single_rank_skips_compile(tmp_path, monkeypatch):
     monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "difflet-cache"))
     monkeypatch.setenv("TORCH_NEURONX_NEFF_CACHE_DIR", str(tmp_path / "neff"))
     monkeypatch.setenv("TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR", str(tmp_path / "neff_local"))
+    monkeypatch.setenv("TORCH_NEURONX_HLO_CACHE_DIR", str(tmp_path / "hlo"))
     monkeypatch.setenv("NKI_ENABLE_TRACE_CACHE", "0")
     monkeypatch.setattr(runtime, "_runtime_prepared", False)  # restored after the call sets it
 

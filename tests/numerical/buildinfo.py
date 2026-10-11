@@ -26,7 +26,7 @@ def build_info() -> dict[str, str]:
 
 def _difflet_commit() -> str:
     """Short commit of the Difflet checkout, suffixed ``-dirty`` when tracked files are modified."""
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    root = os.path.dirname(os.path.abspath(__file__))  # git finds the checkout from any subdirectory
     try:
         head = subprocess.run(["git", "-C", root, "rev-parse", "--short", "HEAD"],
                               capture_output=True, text=True, timeout=5).stdout.strip()

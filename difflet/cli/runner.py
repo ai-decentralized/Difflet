@@ -104,6 +104,11 @@ def _prepare_mpmd_env(env: dict[str, str], num_cores: int, *, strict_environment
     """
     for name in _TORCHRUN_RANK_ENV:
         env.pop(name, None)
+    # Before the ranks start: the HLO cache location is read when torch_neuronx is imported,
+    # so prepare_runtime (which sets the NEFF cache) is too late for it.
+    from difflet.backends.neuron.compile import configure_compile_cache
+
+    configure_compile_cache(env=env)
     if strict_environment:
         visible_core_ids = select_neuron_core_ids(required_num_cores=num_cores)
         env["NEURON_RT_VISIBLE_CORES"] = ",".join(str(core_id) for core_id in visible_core_ids)

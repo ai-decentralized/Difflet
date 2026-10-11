@@ -29,6 +29,7 @@ WAN_DEPTH = 40  # Wan 2.x DiT depth
 CACHE_VARS = (
     "TORCH_NEURONX_NEFF_CACHE_DIR",
     "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR",
+    "TORCH_NEURONX_HLO_CACHE_DIR",
     "NKI_ENABLE_TRACE_CACHE",
 )
 
@@ -151,6 +152,7 @@ def test_configure_compile_cache_defaults_under_the_difflet_cache(monkeypatch, t
     assert settings == env == {
         "TORCH_NEURONX_NEFF_CACHE_DIR": str(tmp_path / "neuron" / "neff"),
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": str(tmp_path / "neuron" / "neff_local"),
+        "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "neuron" / "hlo"),
         "NKI_ENABLE_TRACE_CACHE": "0",
     }
     assert not (tmp_path / "neuron").exists()  # torch-neuronx creates the directories itself
@@ -163,27 +165,31 @@ def test_configure_compile_cache_keeps_launcher_dirs_but_forces_the_trace_cache_
     env = {
         "TORCH_NEURONX_NEFF_CACHE_DIR": "/shared/neff",
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": "/local/locks",
+        "TORCH_NEURONX_HLO_CACHE_DIR": "/shared/hlo",
         "NKI_ENABLE_TRACE_CACHE": "1",  # what `import torch_neuronx` sets by default
     }
     neuron_compile.configure_compile_cache(env=env)
     assert env == {
         "TORCH_NEURONX_NEFF_CACHE_DIR": "/shared/neff",
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": "/local/locks",
+        "TORCH_NEURONX_HLO_CACHE_DIR": "/shared/hlo",
         "NKI_ENABLE_TRACE_CACHE": "0",
     }
 
 
-def test_configure_compile_cache_explicit_arguments_win(tmp_path):
+def test_configure_compile_cache_explicit_arguments_win(monkeypatch, tmp_path):
     env = {
         "TORCH_NEURONX_NEFF_CACHE_DIR": "/shared/neff",
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": "/local/locks",
     }
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "root"))
     neuron_compile.configure_compile_cache(
         tmp_path / "neff", local_cache_dir=str(tmp_path / "locks"), nki_trace_cache=True, env=env
     )
     assert env == {
         "TORCH_NEURONX_NEFF_CACHE_DIR": str(tmp_path / "neff"),
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": str(tmp_path / "locks"),
+        "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "root" / "neuron" / "hlo"),
         "NKI_ENABLE_TRACE_CACHE": "1",
     }
 
@@ -202,6 +208,7 @@ def test_configure_compile_cache_writes_the_process_environment(monkeypatch, tmp
     monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
     neuron_compile.configure_compile_cache()
     assert os.environ["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "neuron" / "neff")
+    assert os.environ["TORCH_NEURONX_HLO_CACHE_DIR"] == str(tmp_path / "neuron" / "hlo")
     assert os.environ["NKI_ENABLE_TRACE_CACHE"] == "0"
 
 
@@ -599,3 +606,15 @@ def test_kernel_attention_path_traces_as_one_graph(monkeypatch):
     targets = [str(n.target) for n in backend.graphs[0].graph.nodes if n.op == "call_function"]
     assert "difflet_c9_test.flash_stub.default" in targets
     torch.testing.assert_close(out, ref)
+
+
+def test_launcher_exports_the_cache_settings_to_every_rank(monkeypatch, tmp_path):
+    """The HLO cache is read at torch_neuronx import, so the launcher sets it for the ranks."""
+    from difflet.cli import runner
+
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    env = {"TORCH_NEURONX_NEFF_CACHE_DIR": "/shared/neff"}
+    runner._prepare_mpmd_env(env, 4, strict_environment=False)
+    assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == "/shared/neff"
+    assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == str(tmp_path / "neuron" / "hlo")
+    assert env["NKI_ENABLE_TRACE_CACHE"] == "0"
