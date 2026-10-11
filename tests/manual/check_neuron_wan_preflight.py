@@ -64,10 +64,11 @@ Checks (on every rank; rank 0 prints one PASS/FAIL line per check, each rank ``[
   forward_shapes: every forward's device inputs have the warm-up's shapes (in eager mode too);
 * parity_fp32_t<ts>: ``parity.check`` against the fp32 reference with the bf16 control, at the
   TPU thresholds (cosine >= 0.995, rel_l1 <= 1.15x the control's, same-dtype <= 1.2x). The
-  same-dtype limit is gated only when rel_l1 is above 1.0x the control's (decision D65): a
-  result at least as close to fp32 as the control is reported, not judged, on its distance
-  from upstream bf16. In W3 the compiled 14B scored 0.929x the control vs fp32 and 1.201x
-  same-dtype at t=996, because neuronx-cc keeps the residual stream in fp32;
+  same-dtype limit is gated only when the output's error has cosine ``err_cos`` >= 0.5 with
+  the control's (decision D68, ``parity.same_dtype_gated``): a result that does not round like
+  upstream bf16 is reported, not judged, on its distance from it. In W3 the compiled 14B
+  scored 0.929x the control vs fp32 and 1.201x same-dtype at t=996 with err_cos 0.23, because
+  neuronx-cc keeps the residual stream in fp32; eager rounds like diffusers (0.57);
 * no_compile_in_forwards (every launch, every mode): the forwards neither compiled nor loaded a
   NEFF (``TotalCompilations + PersistentHits == 0``; a NEFF the warm-up never loaded shows as a
   persistent hit) and, in compile mode, added no Dynamo graph;
@@ -552,26 +553,23 @@ def main() -> int:
     parity_results: dict[str, Any] = {}
     for ts, out in outputs.items():
         ref, ref_bf16 = runs[ts]["reference"], runs[ts]["reference_bf16"]
-        m = parity.metrics(out, ref)
+        m = parity.metrics(out, ref, control=ref_bf16)
         m["vs_bf16"] = parity.metrics(out, ref_bf16)
         control = parity.metrics(ref_bf16, ref)
         notes: list[str] = []
         ok, reasons = parity.check(m, control=control, notes=notes)
         ratio = m["rel_l1"] / control["rel_l1"]
         same_ratio = m["vs_bf16"]["rel_l1"] / control["rel_l1"]
-        # D65: the same-dtype limit is gated only above 1.0x the control vs fp32.
-        same_gated = not ratio <= parity.SAME_DTYPE_GATED_ABOVE_RATIO
         parity_results[f"{ts:g}"] = {"vs_fp32": m, "control": control, "ok": ok,
                                     "reasons": reasons, "notes": notes,
                                     "ratio_vs_control": ratio, "same_dtype_ratio": same_ratio,
-                                    "same_dtype_gated": same_gated}
+                                    "err_cos": m["err_cos"],
+                                    "same_dtype_gated": parity.same_dtype_gated(m)}
         checks.append((f"parity_fp32_t{ts:g}", ok,
                        f"cos={m['cosine']:.6f} rel_l1={m['rel_l1']:.3e} "
                        f"({ratio:.3f}x control {control['rel_l1']:.3e}, cos "
                        f"{control['cosine']:.6f}) vs_bf16 rel_l1={m['vs_bf16']['rel_l1']:.3e} "
-                       f"(same-dtype {same_ratio:.3f}x "
-                       f"{'gated' if same_gated else 'reported, not gated (D65)'}) "
-                       f"rel_max={m['rel_max']:.3e}"
+                       f"({parity.same_dtype_label(m, control)}) rel_max={m['rel_max']:.3e}"
                        + (f" {reasons}" if reasons else "") + (f" {notes}" if notes else "")))
 
     prepare_delta = delta(snaps["start"], snaps["pre_prepare"])

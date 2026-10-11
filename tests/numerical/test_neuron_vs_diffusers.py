@@ -20,14 +20,19 @@ Each exec mode (``eager``, ``compile``) is a parameter; a mode without a recorde
 skipped. The recorded metrics are judged by ``tests.numerical.neuron_parity.check``, the
 function the device check itself calls, so there is one rule: the TPU gate's thresholds (why
 they are relative to a bf16 control and not an absolute cosine: see
-``test_tpu_vs_diffusers.py``), with the same-dtype limit gated only when the result is less
-accurate than the control (decision D65). Every rank's result and every recorded timestep is
-judged. ``test_device_run_was_clean_and_ranks_agree`` reads the verdicts the device check
-recorded, so point it at a run made under the current rule.
+``test_tpu_vs_diffusers.py``), with the same-dtype limit gated only when the device's error
+vector has cosine ``err_cos`` >= 0.5 with the bf16 control's (decision D68). Runs recorded
+before D68 hold no ``err_cos``; it is then computed from rank 0's saved output
+(``out-t<ts>.pt``, which ``test_device_run_was_clean_and_ranks_agree`` checks every rank
+produced) and the reference the device check read (its ``args.ref``). Every rank's result and
+every recorded timestep is judged, and each is printed with its verdict (run with ``-s``).
+``test_device_run_was_clean_and_ranks_agree`` reads the verdicts the device check recorded,
+so point it at a run made under the current rule.
 """
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -80,22 +85,47 @@ def _entries(results: list[dict]):
     for result in results:
         assert result["parity"], f"rank {result['rank']}: no parity entry recorded"
         for timestep, entry in result["parity"].items():
-            yield f"rank {result['rank']} t={timestep}", entry
+            yield result, timestep, entry
+
+
+@functools.lru_cache(maxsize=4)
+def _reference_runs(path: str) -> dict[str, dict]:
+    """The CPU reference the device check read: timestep (as recorded, ``f"{ts:g}"``) -> run."""
+    blob = torch.load(path, weights_only=False)
+    return {f"{float(run['timestep'][0]):g}": run for run in blob["runs"]}
+
+
+def _with_err_cos(fp32: dict, result: dict, timestep: str, run_dir: Path) -> dict:
+    """``fp32`` with ``err_cos`` (D68): as recorded, or computed from the saved output and the
+    reference for a run recorded before D68."""
+    if "err_cos" in fp32:
+        return fp32
+    run = _reference_runs(result["args"]["ref"])[timestep]
+    out = torch.load(run_dir / f"out-t{timestep}.pt", weights_only=True)
+    err_cos = parity.metrics(out, run["reference"], control=run["reference_bf16"])["err_cos"]
+    return {**fp32, "err_cos": err_cos}
 
 
 @pytest.mark.parametrize("mode", MODES)
 def test_adds_little_on_top_of_what_bf16_costs(mode: str):
     """Every rank's recorded metrics at every timestep pass ``parity.check``, the one rule the
     device check applied too: cosine floor, rel_l1 vs fp32 within 1.15x the bf16 control, and
-    the distance to upstream bf16 within 1.2x the control whenever the result is less accurate
-    than the control (D65; at or below 1.0x it is reported, not gated)."""
-    for where, entry in _entries(_results(mode)):
-        fp32, control = entry["vs_fp32"], entry["control"]
+    the distance to upstream bf16 within 1.2x the control whenever the device rounds like the
+    control (D68: err_cos >= 0.5; below it the distance is reported, not gated)."""
+    run_dir = Path(os.environ.get(f"DIFFLET_NEURON_ORACLE_{mode.upper()}", ""))
+    for result, timestep, entry in _entries(_results(mode)):
+        where = f"rank {result['rank']} t={timestep}"
+        control = entry["control"]
+        fp32 = _with_err_cos(entry["vs_fp32"], result, timestep, run_dir)
         assert fp32.get("vs_bf16") is not None, (
             f"{mode} {where}: no comparison with the bf16 control recorded"
         )
         notes: list[str] = []
         ok, reasons = parity.check(fp32, control=control, notes=notes)
+        print(f"{mode} {where}: {'PASS' if ok else 'FAIL'} rel_l1 "
+              f"{fp32['rel_l1'] / control['rel_l1']:.3f}x the control, cosine "
+              f"{fp32['cosine']:.6f}, {parity.same_dtype_label(fp32, control)}"
+              + ("" if "err_cos" in entry["vs_fp32"] else " [err_cos computed from out-t*.pt]"))
         assert ok, (
             f"{mode} {where}: {'; '.join(reasons)} (rel_l1 {fp32['rel_l1']:.3e} = "
             f"{fp32['rel_l1'] / control['rel_l1']:.3f}x the {control['rel_l1']:.3e} that bf16 "
