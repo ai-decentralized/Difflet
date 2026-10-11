@@ -125,7 +125,8 @@ def test_adds_little_on_top_of_what_bf16_costs(mode: str):
         print(f"{mode} {where}: {'PASS' if ok else 'FAIL'} rel_l1 "
               f"{fp32['rel_l1'] / control['rel_l1']:.3f}x the control, cosine "
               f"{fp32['cosine']:.6f}, {parity.same_dtype_label(fp32, control)}"
-              + ("" if "err_cos" in entry["vs_fp32"] else " [err_cos computed from out-t*.pt]"))
+              + ("" if "err_cos" in entry["vs_fp32"] else " [err_cos computed from out-t*.pt]")
+              + "".join(f"\n  note: {note}" for note in notes))
         assert ok, (
             f"{mode} {where}: {'; '.join(reasons)} (rel_l1 {fp32['rel_l1']:.3e} = "
             f"{fp32['rel_l1'] / control['rel_l1']:.3f}x the {control['rel_l1']:.3e} that bf16 "

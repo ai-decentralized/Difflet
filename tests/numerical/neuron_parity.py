@@ -7,7 +7,8 @@ the blind spot of the fallback check live in one place:
 * ``metrics(actual, reference, control=...)``: the numerical-oracle dict, computed in fp64,
   plus ``err_cos`` (how the result's error lines up with the bf16 control's) given a control.
 * ``check(metrics, control=...)``: the TPU numerical gate's three thresholds as defaults, the
-  same-dtype one gated only when the result rounds like the bf16 control (D68);
+  same-dtype one gated only when the result rounds like the bf16 control (D68), where it is
+  a diagnostic plus a nan detector rather than an independent gate (D69);
   ``same_dtype_gated`` / ``same_dtype_label`` say which, for callers' logs.
 * ``device_evidence(app, fallbacks)``: what the run itself shows about compilation and memory.
 
@@ -52,7 +53,8 @@ MAX_RATIO_VS_CONTROL = 1.15
 MAX_SAME_DTYPE_RATIO = 1.2
 #: Decision D68: ``MAX_SAME_DTYPE_RATIO`` is gated only when the result's error vector has at
 #: least this cosine with the bf16 control's (``err_cos``, i.e. the result rounds like
-#: upstream bf16); below it, the same-dtype distance is reported, not gated. See ``check``.
+#: upstream bf16); below it, the same-dtype distance is reported, not gated, and ``check``
+#: notes the decorrelation (D69). See ``check``.
 SAME_DTYPE_GATED_MIN_ERR_COS = 0.5
 #: Absolute cosine floor, a break detector and not the gate: upstream's own bf16 scores
 #: 0.99873 against fp32 for Wan (test_tpu_vs_diffusers.py:81).
@@ -166,33 +168,41 @@ def check(
     fp32_reference)``: what bf16 alone costs. Checks, each failing with a reason that names its
     threshold:
 
-    * ``cosine`` (and the same-dtype cosine) at least ``min_cosine``;
-    * with ``control``: ``rel_l1 / control["rel_l1"]`` at most ``max_ratio_vs_control``;
-    * with ``control`` and ``"vs_bf16"``: the same-dtype ``rel_l1 / control["rel_l1"]`` is never
-      nan, and is at most ``max_same_dtype_ratio`` when ``same_dtype_gated(metrics)``: the
-      result's error has cosine ``metrics["err_cos"]`` (from ``metrics(..., control=...)``) of
-      at least ``SAME_DTYPE_GATED_MIN_ERR_COS`` (0.5) with the control's, or no recorded
-      ``err_cos`` (decision D68). Below 0.5 the same-dtype distance is reported, not gated,
-      and a note saying so is appended to ``notes`` when the caller passes a list and the
-      distance is over the limit.
+    * ``cosine`` (and the same-dtype cosine) at least ``min_cosine``: the direction gate;
+    * with ``control``: ``rel_l1 / control["rel_l1"]`` at most ``max_ratio_vs_control``: the
+      magnitude gate, "difflet adds little on top of what bf16 costs";
+    * with ``control`` and ``"vs_bf16"``: the same-dtype ratio ``vs_bf16 rel_l1 /
+      control["rel_l1"]`` is never nan, and is at most ``max_same_dtype_ratio`` when
+      ``same_dtype_gated(metrics)`` holds: ``metrics["err_cos"]`` (from ``metrics(...,
+      control=...)``) is at least ``SAME_DTYPE_GATED_MIN_ERR_COS`` (0.5), or is missing or
+      nan (decision D68).
 
-    Why D68: the same-dtype distance asks "does the result round like upstream bf16?", which
-    presumes that it does: then its distance from upstream bf16 is a small residual and 1.2x
-    the control's distance from fp32 flags a real difference. That premise is measurable, as
-    the cosine between the two error vectors. When the errors are decorrelated, the distance
-    between result and control is set by their sizes alone, sqrt(r^2 + 1 - 2 r err_cos) times
-    the control's for a result r times the control from fp32, about 1.24x at r = 1.0 and
-    err_cos 0.23, whatever the result's correctness; the main gate (r <= 1.15) then judges it,
-    as every mode. Measured in W3: the per-block compiled 14B Wan DiT is 0.929x / 0.832x the
-    control from fp32 at t=996 / 500 but 1.201x / 1.097x it from diffusers bf16, with err_cos
-    0.23 / 0.30: neuronx-cc keeps the residual stream in fp32 inside each compiled block
-    although the StableHLO it receives rounds it to bf16 as diffusers does. Eager rounds like
-    diffusers (err_cos 0.57 / 0.66) and stays gated (W2: 1.025x vs fp32, same-dtype 0.931x).
-    D68 replaces D65, which gated the same-dtype distance only above 1.0x the control from
-    fp32: with decorrelated errors that made 1.0x, not 1.15x, the compiled path's effective
-    limit (W3 review).
+    What the same-dtype check is (decision D69): a reported diagnostic plus a nan detector, not
+    an independent gate. With ``e`` the result's error from fp32 and ``e_c`` the control's, the
+    result lies ``|e - e_c|`` from the control, so the same-dtype ratio is
+    ``sqrt(r^2 + 1 - 2 r err_cos)`` for a result ``r`` times the control from fp32: exactly in
+    the L2 norm, and to within a few per cent in the rel_l1 used here (W3: predicted 1.196,
+    measured 1.198). It is therefore fixed by ``r`` and ``err_cos``. Inside the gated regime
+    (``err_cos >= 0.5``) a result that passes the magnitude gate (``r <= 1.15``) sits at most
+    ``sqrt(1.15^2 - 1.15 + 1) = 1.083`` from the control, so the 1.2 limit cannot fail it;
+    it can only fail alongside the magnitude gate, or when ``err_cos`` is unknown. Below 0.5
+    the errors are decorrelated and the distance is set by their sizes alone (1.24x at
+    ``r = 1.0`` and ``err_cos`` 0.23, whatever the result's correctness), so it is reported,
+    not gated (D68). The real "rounds like upstream bf16" signal is ``err_cos`` itself: when
+    it is below 0.5 a note saying so is appended to ``notes`` (when the caller passes a list),
+    whatever the same-dtype magnitude, so a decorrelation regression, e.g. an eager path that
+    stops rounding like diffusers, is visible in the logs without failing the gate. Such a
+    regression passes as long as it stays within 1.15x, the bar every mode has.
 
-    Limits are inclusive, and a nan never passes: a nan ratio fails the main gate, a nan
+    Measured in W3: the per-block compiled 14B Wan DiT is 0.929x / 0.832x the control from
+    fp32 at t=996 / 500 but 1.201x / 1.097x it from diffusers bf16, with err_cos 0.23 / 0.30:
+    neuronx-cc keeps the residual stream in fp32 inside each compiled block although the
+    StableHLO it receives rounds it to bf16 as diffusers does. Eager rounds like diffusers
+    (err_cos 0.57 / 0.66; W2: 1.025x vs fp32, same-dtype 0.931x). D68 replaced D65, which gated
+    the same-dtype distance only above 1.0x the control from fp32: with decorrelated errors
+    that made 1.0x, not 1.15x, the compiled path's effective limit (W3 review).
+
+    Limits are inclusive, and a nan never passes: a nan ratio fails the magnitude gate, a nan
     same-dtype ratio fails whether gated or not, and a nan ``err_cos`` gates the same-dtype
     limit. Without ``control`` only the cosine floor is judged. The defaults are the TPU gate's
     values; loosening one here loosens every caller.
@@ -220,21 +230,22 @@ def check(
                     f"same-dtype (vs_bf16) rel_l1 {same_dtype['rel_l1']:.3e} against the "
                     f"control's {control['rel_l1']:.3e} gives a nan ratio"
                 )
-            elif not same_ratio <= max_same_dtype_ratio:
-                if same_dtype_gated(metrics):
-                    reasons.append(
-                        f"same-dtype (vs_bf16) rel_l1 {same_dtype['rel_l1']:.3e} is "
-                        f"{same_ratio:.3f}x the control's {control['rel_l1']:.3e}, above "
-                        f"max_same_dtype_ratio {max_same_dtype_ratio}"
-                    )
-                elif notes is not None:
-                    notes.append(
-                        f"same-dtype (vs_bf16) rel_l1 {same_dtype['rel_l1']:.3e} is "
-                        f"{same_ratio:.3f}x the control's, reported, not gated: the result's "
-                        f"error has cosine {metrics['err_cos']:.3f} with the control's (below "
-                        f"{SAME_DTYPE_GATED_MIN_ERR_COS}), so it does not round like upstream "
-                        f"bf16 and the distance measures the control's own rounding (D68)"
-                    )
+            elif not same_ratio <= max_same_dtype_ratio and same_dtype_gated(metrics):
+                reasons.append(
+                    f"same-dtype (vs_bf16) rel_l1 {same_dtype['rel_l1']:.3e} is "
+                    f"{same_ratio:.3f}x the control's {control['rel_l1']:.3e}, above "
+                    f"max_same_dtype_ratio {max_same_dtype_ratio}"
+                )
+    err_cos = metrics.get("err_cos")
+    if notes is not None and err_cos is not None and err_cos < SAME_DTYPE_GATED_MIN_ERR_COS:
+        distance = ("" if control is None or same_dtype is None else
+                    f"; same-dtype {_ratio(same_dtype['rel_l1'], control['rel_l1']):.3f}x the "
+                    f"control's distance from fp32, reported, not gated")
+        notes.append(
+            f"err_cos {err_cos:.3f} < {SAME_DTYPE_GATED_MIN_ERR_COS}: the result's error is "
+            f"decorrelated from the bf16 control's, so it does not round like upstream bf16"
+            f"{distance} (D68/D69)"
+        )
     return not reasons, reasons
 
 

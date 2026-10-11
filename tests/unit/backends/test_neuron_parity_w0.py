@@ -137,7 +137,8 @@ def test_check_fails_with_a_reason_naming_the_threshold():
 def test_check_gates_the_same_dtype_distance_and_the_cosine_floor():
     control = {"rel_l1": 1.0e-2, "cosine": 0.99873}
     # No err_cos recorded: whether the result rounds like the control is unknown, so the
-    # same-dtype limit applies (D68).
+    # same-dtype limit applies (D68). (1.05x and 1.25x imply err_cos 0.257: a decorrelated
+    # result that, recorded with its err_cos, would be reported instead.)
     near = {"rel_l1": 1.05e-2, "cosine": 0.999}
     ok, reasons = parity.check({**near, "vs_bf16": {"rel_l1": 1.25e-2, "cosine": 0.999}},
                                control=control)
@@ -156,79 +157,143 @@ def test_check_gates_the_same_dtype_distance_and_the_cosine_floor():
     assert parity.check({"rel_l1": 0.0, "cosine": 1.0}, control={"rel_l1": 0.0})[0] is True
 
 
-def test_check_gates_the_same_dtype_distance_only_when_the_errors_are_correlated():
-    # D68: the same-dtype limit asks "does the result round like upstream bf16?", so it is
-    # gated only when the result's error points the way the control's does (err_cos >= 0.5).
-    # Eager rounds like diffusers (W3: err_cos 0.57 / 0.66); the compiled 14B DiT does not,
-    # because neuronx-cc keeps the residual stream in fp32 (0.23 / 0.30).
+def _same_dtype_ratio(r: float, err_cos: float) -> float:
+    """Where a result ``r`` times the control from fp32, whose error has cosine ``err_cos``
+    with the control's, lies from the control, in multiples of the control's distance (D69)."""
+    return math.sqrt(r * r + 1 - 2 * r * err_cos)
+
+
+def _result(r: float, err_cos: float | None, *, control_rel_l1: float = 1.0e-2,
+            same_dtype: float | None = None) -> dict:
+    """Metrics of a geometrically consistent result: its same-dtype distance follows from ``r``
+    and ``err_cos`` unless given (needed only when ``err_cos`` is unknown)."""
+    if same_dtype is None:
+        same_dtype = _same_dtype_ratio(r, err_cos)
+    m = {"rel_l1": r * control_rel_l1, "cosine": 0.999,
+         "vs_bf16": {"rel_l1": same_dtype * control_rel_l1, "cosine": 0.999}}
+    if err_cos is not None:
+        m["err_cos"] = err_cos
+    return m
+
+
+def test_same_dtype_distance_follows_from_the_ratio_and_the_error_cosine():
+    # D69: |actual - control| is the distance between the two error vectors, so the same-dtype
+    # ratio is sqrt(r^2 + 1 - 2 r err_cos), exactly in L2. Built here from vectors.
+    gen = torch.Generator().manual_seed(3)
+    ref = torch.randn(4096, generator=gen, dtype=torch.float64)
+    e_c = torch.randn(4096, generator=gen, dtype=torch.float64) * 1e-2
+    other = torch.randn(4096, generator=gen, dtype=torch.float64)
+    u = e_c / e_c.norm()
+    w = other - (other @ u) * u
+    w = w / w.norm()
+    for r, c in ((1.0, 0.23), (0.929, 0.231), (1.15, 0.5), (1.025, 0.575), (2.5, 0.9)):
+        e = r * e_c.norm() * (c * u + math.sqrt(1 - c * c) * w)
+        m = parity.metrics(ref + e, ref, control=ref + e_c)
+        control = parity.metrics(ref + e_c, ref)
+        same = parity.metrics(ref + e, ref + e_c)
+        assert m["err_cos"] == pytest.approx(c, abs=1e-12)
+        assert m["rel_l2"] / control["rel_l2"] == pytest.approx(r, rel=1e-12)
+        # |actual - control| / |control - ref|, from the two rel_l2 values: exact.
+        l2 = same["rel_l2"] * float((ref + e_c).norm()) / (control["rel_l2"] * float(ref.norm()))
+        assert l2 == pytest.approx(_same_dtype_ratio(r, c), rel=1e-9)
+        # The rel_l1 ratio check() reads follows it to within a few per cent.
+        assert same["rel_l1"] / control["rel_l1"] == pytest.approx(_same_dtype_ratio(r, c),
+                                                                     rel=0.05)
+    # Inside the gated regime (err_cos >= 0.5) a result within the magnitude gate (r <= 1.15)
+    # is at most 1.083 from the control: the 1.2 limit cannot fail it.
+    worst = max(_same_dtype_ratio(r / 1000, c / 1000)
+                for r in range(0, 1151, 5) for c in range(500, 1001, 5))
+    assert worst == pytest.approx(math.sqrt(1.15**2 - 1.15 + 1), abs=1e-12)
+    assert worst < 1.0833 < parity.MAX_SAME_DTYPE_RATIO
     control = {"rel_l1": 1.0e-2, "cosine": 0.99873}
-    same_dtype = {"rel_l1": 1.25e-2, "cosine": 0.999}
+    for r in (0.0, 0.5, 0.9, 1.0, 1.1, 1.15):
+        for c in (0.5, 0.6, 0.8, 1.0):
+            assert parity.check(_result(r, c), control=control) == (True, [])
 
-    def result(err_cos, *, rel_l1=1.0e-2, vs_bf16=same_dtype):
-        return {"rel_l1": rel_l1, "cosine": 0.999, "vs_bf16": vs_bf16, "err_cos": err_cos}
 
-    # Correlated errors: the limit applies, with the usual reason and no note.
+def test_check_gates_the_same_dtype_distance_only_when_the_errors_are_correlated():
+    # D68: the same-dtype limit is gated only when the result's error points the way the
+    # control's does (err_cos >= 0.5); D69: there it can only fail together with the magnitude
+    # gate. Eager rounds like diffusers (W3: err_cos 0.57 / 0.66); the compiled 14B DiT does
+    # not, because neuronx-cc keeps the residual stream in fp32 (0.23 / 0.30). Every case here
+    # derives its same-dtype distance from r and err_cos.
+    control = {"rel_l1": 1.0e-2, "cosine": 0.99873}
+    # Correlated errors and a result far from fp32 (2.5x): both gates fail, no note.
     notes: list[str] = []
-    ok, reasons = parity.check(result(0.9), control=control, notes=notes)
-    assert not ok and len(reasons) == 1 and "max_same_dtype_ratio" in reasons[0]
+    ok, reasons = parity.check(_result(2.5, 0.9), control=control, notes=notes)
+    assert not ok and len(reasons) == 2
+    assert "max_ratio_vs_control" in reasons[0] and "max_same_dtype_ratio" in reasons[1]
+    assert "1.658x" in reasons[1] and notes == []
+    # Correlated and within the magnitude gate: nothing to report.
+    assert parity.check(_result(1.0, 0.9), control=control, notes=notes) == (True, [])
     assert notes == []
-    # Decorrelated errors: reported, not gated, with a note naming both numbers and the rule.
-    ok, reasons = parity.check(result(0.2), control=control, notes=notes)
+    # Decorrelated (W3's compiled DiT): the same-dtype distance (1.198x here) is reported, and
+    # the decorrelation is noted (D69), naming err_cos, the distance and the rule.
+    ok, reasons = parity.check(_result(0.929, 0.231), control=control, notes=notes)
     assert (ok, reasons) == (True, [])
     assert len(notes) == 1
-    assert "1.250x" in notes[0] and "0.200" in notes[0] and "not gated" in notes[0]
-    assert "D68" in notes[0]
-    # No cliff at 1.0x: a decorrelated result 1.10x the control from fp32 (inside the main
-    # gate) passes, where D65 gated it and two independent errors sit ~1.24x apart ...
-    assert parity.check(result(0.23, rel_l1=1.10e-2), control=control) == (True, [])
-    # ... and the main gate still judges it on its own.
-    ok, reasons = parity.check(result(0.23, rel_l1=1.2e-2), control=control)
+    assert "err_cos 0.231" in notes[0] and "1.197x" in notes[0] and "not gated" in notes[0]
+    assert "D69" in notes[0]
+    # The note appears whatever the distance: a decorrelated result 0.975x from the control.
+    notes = []
+    assert parity.check(_result(0.5, 0.3), control=control, notes=notes) == (True, [])
+    assert len(notes) == 1 and "err_cos 0.300" in notes[0] and "0.975x" in notes[0]
+    # No cliff at 1.0x: a decorrelated result 1.10x from fp32 (1.305x from the control) passes,
+    # where D65 gated it ...
+    assert parity.check(_result(1.10, 0.23), control=control) == (True, [])
+    # ... and the magnitude gate still judges it on its own.
+    ok, reasons = parity.check(_result(1.2, 0.23), control=control)
     assert not ok and len(reasons) == 1 and "max_ratio_vs_control" in reasons[0]
-    # The boundary is inclusive: 0.5 is gated, just below it is reported.
-    assert parity.check(result(0.5), control=control)[0] is False
-    assert parity.check(result(0.4999), control=control) == (True, [])
-    # Unknown error direction (not recorded, or nan): gated.
-    unknown = result(0.2)
-    del unknown["err_cos"]
-    assert parity.check(unknown, control=control)[0] is False
-    assert parity.check(result(math.nan), control=control)[0] is False
+    # The boundary is inclusive: at 1.6x from fp32 (1.400x from the control), err_cos 0.5 is
+    # gated (two reasons), 0.4999 reported (the magnitude gate alone, plus the note).
+    ok, reasons = parity.check(_result(1.6, 0.5), control=control)
+    assert not ok and len(reasons) == 2 and "max_same_dtype_ratio" in reasons[1]
+    notes = []
+    ok, reasons = parity.check(_result(1.6, 0.4999), control=control, notes=notes)
+    assert not ok and len(reasons) == 1 and "max_ratio_vs_control" in reasons[0]
+    assert len(notes) == 1
+    # Unknown error direction (not recorded, or nan): gated. 1.05x from fp32 and 1.25x from
+    # the control imply err_cos 0.257, but without err_cos the limit applies.
+    ok, reasons = parity.check(_result(1.05, None, same_dtype=1.25), control=control)
+    assert not ok and len(reasons) == 1 and "max_same_dtype_ratio" in reasons[0]
+    ok, reasons = parity.check({**_result(1.05, None, same_dtype=1.25), "err_cos": math.nan},
+                               control=control)
+    assert not ok and len(reasons) == 1 and "max_same_dtype_ratio" in reasons[0]
     # A nan same-dtype distance fails in either regime (W3 review), naming the nan.
     for err_cos in (0.2, 0.9):
-        ok, reasons = parity.check(
-            result(err_cos, vs_bf16={"rel_l1": math.nan, "cosine": 0.999}), control=control)
+        nan_same = {**_result(1.0, err_cos), "vs_bf16": {"rel_l1": math.nan, "cosine": 0.999}}
+        ok, reasons = parity.check(nan_same, control=control)
         assert not ok and len(reasons) == 1
         assert "same-dtype" in reasons[0] and "nan" in reasons[0]
     # The same-dtype cosine floor applies in either regime.
-    ok, reasons = parity.check(result(0.2, vs_bf16={"rel_l1": 1.25e-2, "cosine": 0.5}),
-                               control=control)
-    assert not ok and len(reasons) == 1 and "same-dtype (vs_bf16) cosine" in reasons[0]
-    # Within the limit there is nothing to note.
-    notes = []
-    assert parity.check(result(0.2, vs_bf16={"rel_l1": 1.1e-2, "cosine": 0.999}),
-                        control=control, notes=notes) == (True, [])
-    assert notes == []
+    for err_cos in (0.2, 0.9):
+        low_cos = _result(1.0, err_cos)
+        low_cos["vs_bf16"]["cosine"] = 0.5
+        ok, reasons = parity.check(low_cos, control=control)
+        assert not ok and len(reasons) == 1 and "same-dtype (vs_bf16) cosine" in reasons[0]
     assert parity.SAME_DTYPE_GATED_MIN_ERR_COS == 0.5
     assert not hasattr(parity, "SAME_DTYPE_GATED_ABOVE_RATIO")  # D65's rule is gone
 
 
 def test_same_dtype_helpers_state_the_rule_check_applies():
-    # Callers print "gated / reported" from these instead of re-deriving the rule.
+    # Callers print "gated / reported" from these instead of re-deriving the rule. The values
+    # are W2 eager's (1.0x, err_cos 0.575) and W3 compile's (0.929x, 0.231) at t=996, with the
+    # same-dtype distance derived from them.
     control = {"rel_l1": 1.0e-2, "cosine": 0.99873}
-    gated = {"rel_l1": 1.0e-2, "cosine": 0.999, "err_cos": 0.575,
-             "vs_bf16": {"rel_l1": 0.931e-2, "cosine": 0.9999}}
-    reported = {**gated, "err_cos": 0.231, "vs_bf16": {"rel_l1": 1.201e-2, "cosine": 0.9996}}
+    gated = _result(1.0, 0.575)
+    reported = _result(0.929, 0.231)
     assert parity.same_dtype_gated(gated) is True
     assert parity.same_dtype_gated(reported) is False
     assert parity.same_dtype_gated({"rel_l1": 1.0, "cosine": 1.0}) is True
     assert parity.same_dtype_gated({**gated, "err_cos": math.nan}) is True
     assert parity.same_dtype_label(gated, control) == (
-        "same-dtype 0.931x, gated (err_cos 0.575 >= 0.5, D68)")
+        "same-dtype 0.922x, gated (err_cos 0.575 >= 0.5, D68)")
     assert parity.same_dtype_label(reported, control) == (
-        "same-dtype 1.201x, reported, not gated (err_cos 0.231 < 0.5, D68)")
+        "same-dtype 1.197x, reported, not gated (err_cos 0.231 < 0.5, D68)")
     assert parity.same_dtype_label({"rel_l1": 1.0, "cosine": 1.0}, control) == (
         "same-dtype not measured")
     assert parity.same_dtype_label({**gated, "err_cos": None}, control) == (
-        "same-dtype 0.931x, gated (err_cos not recorded, D68)")
+        "same-dtype 0.922x, gated (err_cos not recorded, D68)")
 
 
 def _tpu_gate_module():
