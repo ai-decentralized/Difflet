@@ -5,7 +5,8 @@ compiled and nothing fell back" goes through this module, so the metrics, the th
 the blind spot of the fallback check live in one place:
 
 * ``metrics(actual, reference)``: the numerical-oracle dict, computed in fp64.
-* ``check(metrics, control=...)``: the TPU numerical gate's three thresholds as defaults.
+* ``check(metrics, control=...)``: the TPU numerical gate's three thresholds as defaults, the
+  same-dtype one gated only when the result is less accurate than the bf16 control (D65).
 * ``device_evidence(app, fallbacks)``: what the run itself shows about compilation and memory.
 
 Pure torch: it imports on a CPU-only host and never imports ``torch_neuronx`` or starts the
@@ -32,6 +33,7 @@ __all__ = [
     "MAX_SAME_DTYPE_RATIO",
     "MIN_COSINE",
     "NEFF_CACHE_ENV",
+    "SAME_DTYPE_GATED_ABOVE_RATIO",
     "check",
     "device_evidence",
     "metrics",
@@ -44,6 +46,10 @@ MAX_RATIO_VS_CONTROL = 1.15
 #: Distance to the same-dtype upstream result, as a multiple of the control's distance from
 #: fp32 (test_tpu_vs_diffusers.py:76, measured 0.91 for Wan).
 MAX_SAME_DTYPE_RATIO = 1.2
+#: Decision D65: ``MAX_SAME_DTYPE_RATIO`` is gated only when the result is farther from fp32
+#: than the bf16 control is (rel_l1 above this multiple of the control's); at or below it, the
+#: same-dtype distance is reported, not gated. See ``check``.
+SAME_DTYPE_GATED_ABOVE_RATIO = 1.0
 #: Absolute cosine floor, a break detector and not the gate: upstream's own bf16 scores
 #: 0.99873 against fp32 for Wan (test_tpu_vs_diffusers.py:81).
 MIN_COSINE = 0.995
@@ -99,6 +105,7 @@ def check(
     max_ratio_vs_control: float = MAX_RATIO_VS_CONTROL,
     max_same_dtype_ratio: float = MAX_SAME_DTYPE_RATIO,
     min_cosine: float = MIN_COSINE,
+    notes: list[str] | None = None,
 ) -> tuple[bool, list[str]]:
     """Judge one result against the TPU numerical gate; returns ``(ok, reasons)``.
 
@@ -111,9 +118,27 @@ def check(
     * ``cosine`` (and the same-dtype cosine) at least ``min_cosine``;
     * with ``control``: ``rel_l1 / control["rel_l1"]`` at most ``max_ratio_vs_control``;
     * with ``control`` and ``"vs_bf16"``: the same-dtype ``rel_l1 / control["rel_l1"]`` at most
-      ``max_same_dtype_ratio``.
+      ``max_same_dtype_ratio``, but only when the result is less accurate than the control,
+      i.e. ``rel_l1 / control["rel_l1"]`` above ``SAME_DTYPE_GATED_ABOVE_RATIO`` (1.0, decision
+      D65). At or below it the same-dtype distance is not gated, and a note saying so is
+      appended to ``notes`` when the caller passes a list and the distance is over the limit.
 
-    Limits are inclusive, and a nan never passes. Without ``control`` only the cosine floor is
+    Why D65: the same-dtype distance asks "does the result round like upstream bf16?". A
+    result that is farther from fp32 than upstream bf16 and also rounds differently is
+    suspect. A result at least as close to fp32 as the control is not, however far it lies
+    from upstream bf16: that distance then measures the control's own rounding pattern, not
+    the result's correctness. Measured in W3: the per-block compiled 14B Wan DiT is 0.929x /
+    0.832x the control from fp32 at t=996 / 500, but 1.201x / 1.097x it from diffusers bf16.
+    The StableHLO keeps diffusers' bf16 roundings of the residual stream, but neuronx-cc
+    runs the stream in fp32 inside each compiled block. Each block alone lies 0.16-0.36x the
+    local control from "diffusers bf16 with an fp32 stream" and 0.8x from diffusers bf16.
+    The output's error vector has cosine 0.23 with diffusers bf16's, against 0.57 for eager,
+    which rounds like diffusers. Two nearly independent errors of similar size are about
+    sqrt(2) apart, so a more accurate but differently rounding result would fail the
+    same-dtype limit by construction. Eager stays gated: W2 scored 1.025x vs fp32.
+
+    Limits are inclusive, and a nan never passes. A nan ratio counts as less accurate, so the
+    same-dtype limit is then gated as well. Without ``control`` only the cosine floor is
     judged. The defaults are the TPU gate's values; loosening one here loosens every caller.
     """
     reasons: list[str] = []
@@ -133,13 +158,22 @@ def check(
                 f"{control['rel_l1']:.3e}, above max_ratio_vs_control {max_ratio_vs_control}"
             )
         if same_dtype is not None:
-            ratio = _ratio(same_dtype["rel_l1"], control["rel_l1"])
-            if not ratio <= max_same_dtype_ratio:
-                reasons.append(
-                    f"same-dtype (vs_bf16) rel_l1 {same_dtype['rel_l1']:.3e} is {ratio:.3f}x "
-                    f"the control's {control['rel_l1']:.3e}, above "
-                    f"max_same_dtype_ratio {max_same_dtype_ratio}"
-                )
+            same_ratio = _ratio(same_dtype["rel_l1"], control["rel_l1"])
+            if not same_ratio <= max_same_dtype_ratio:
+                if ratio <= SAME_DTYPE_GATED_ABOVE_RATIO:
+                    if notes is not None:
+                        notes.append(
+                            f"same-dtype (vs_bf16) rel_l1 {same_dtype['rel_l1']:.3e} is "
+                            f"{same_ratio:.3f}x the control's, reported, not gated: the result "
+                            f"is {ratio:.3f}x the control from fp32, at least as accurate "
+                            f"(D65)"
+                        )
+                else:
+                    reasons.append(
+                        f"same-dtype (vs_bf16) rel_l1 {same_dtype['rel_l1']:.3e} is "
+                        f"{same_ratio:.3f}x the control's {control['rel_l1']:.3e}, above "
+                        f"max_same_dtype_ratio {max_same_dtype_ratio}"
+                    )
     return not reasons, reasons
 
 

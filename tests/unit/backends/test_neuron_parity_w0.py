@@ -114,7 +114,8 @@ def test_check_fails_with_a_reason_naming_the_threshold():
 
 def test_check_gates_the_same_dtype_distance_and_the_cosine_floor():
     control = {"rel_l1": 1.0e-2, "cosine": 0.99873}
-    near = {"rel_l1": 1.0e-2, "cosine": 0.999}
+    # Less accurate than the control (1.05x), so the same-dtype limit applies (D65).
+    near = {"rel_l1": 1.05e-2, "cosine": 0.999}
     ok, reasons = parity.check({**near, "vs_bf16": {"rel_l1": 1.25e-2, "cosine": 0.999}},
                                control=control)
     assert not ok and len(reasons) == 1
@@ -132,6 +133,47 @@ def test_check_gates_the_same_dtype_distance_and_the_cosine_floor():
     assert parity.check({"rel_l1": 0.0, "cosine": 1.0}, control={"rel_l1": 0.0})[0] is True
 
 
+def test_check_gates_the_same_dtype_distance_only_when_less_accurate_than_the_control():
+    # D65: the compiled 14B Wan DiT (W3) sits 0.929x the control from fp32 but 1.201x it from
+    # diffusers bf16, because it rounds at fewer points. When the device is at least as close
+    # to fp32 as the control, the same-dtype distance is reported, not gated.
+    control = {"rel_l1": 1.0e-2, "cosine": 0.99873}
+    same_dtype = {"rel_l1": 1.25e-2, "cosine": 0.999}
+    notes: list[str] = []
+    ok, reasons = parity.check({"rel_l1": 0.93e-2, "cosine": 0.999, "vs_bf16": same_dtype},
+                               control=control, notes=notes)
+    assert (ok, reasons) == (True, [])
+    assert len(notes) == 1
+    assert "1.250x" in notes[0] and "0.930x" in notes[0] and "not gated" in notes[0]
+    assert "D65" in notes[0]
+    # Less accurate than the control: the limit applies, with the usual reason.
+    notes = []
+    ok, reasons = parity.check({"rel_l1": 1.05e-2, "cosine": 0.999, "vs_bf16": same_dtype},
+                               control=control, notes=notes)
+    assert not ok and len(reasons) == 1 and "max_same_dtype_ratio" in reasons[0]
+    assert notes == []
+    # The boundary: exactly as accurate as the control counts as "at least as accurate".
+    ok, reasons = parity.check({"rel_l1": 1.0e-2, "cosine": 0.999, "vs_bf16": same_dtype},
+                               control=control)
+    assert (ok, reasons) == (True, [])
+    # Without a notes list the result is the same; the same-dtype cosine floor still applies.
+    ok, reasons = parity.check(
+        {"rel_l1": 0.93e-2, "cosine": 0.999, "vs_bf16": {"rel_l1": 1.25e-2, "cosine": 0.5}},
+        control=control)
+    assert not ok and len(reasons) == 1 and "same-dtype (vs_bf16) cosine" in reasons[0]
+    # A NaN ratio is never "at least as accurate": the main gate fails and so does same-dtype.
+    ok, reasons = parity.check({"rel_l1": math.nan, "cosine": 0.999, "vs_bf16": same_dtype},
+                               control=control)
+    assert not ok and any("max_same_dtype_ratio" in r for r in reasons)
+    # Within the limit there is nothing to note.
+    notes = []
+    assert parity.check({"rel_l1": 0.93e-2, "cosine": 0.999,
+                         "vs_bf16": {"rel_l1": 1.1e-2, "cosine": 0.999}},
+                        control=control, notes=notes) == (True, [])
+    assert notes == []
+    assert parity.SAME_DTYPE_GATED_ABOVE_RATIO == 1.0
+
+
 def _tpu_gate_module():
     path = Path(__file__).resolve().parents[2] / "numerical" / "test_tpu_vs_diffusers.py"
     spec = importlib.util.spec_from_file_location("_tpu_gate_thresholds", path)
@@ -147,6 +189,7 @@ def test_check_default_thresholds_are_pinned_to_the_tpu_gate():
     assert defaults == {
         "metrics": inspect.Parameter.empty, "control": None,
         "max_ratio_vs_control": 1.15, "max_same_dtype_ratio": 1.2, "min_cosine": 0.995,
+        "notes": None,
     }
     assert (parity.MAX_RATIO_VS_CONTROL, parity.MAX_SAME_DTYPE_RATIO, parity.MIN_COSINE) == (
         1.15, 1.2, 0.995)

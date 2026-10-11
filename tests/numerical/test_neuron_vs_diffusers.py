@@ -17,9 +17,13 @@ check recorded rather than recomputing it:
         pytest tests/numerical/test_neuron_vs_diffusers.py
 
 Each exec mode (``eager``, ``compile``) is a parameter; a mode without a recorded directory is
-skipped. The thresholds are the TPU gate's, imported from ``tests.numerical.neuron_parity``
-(why they are relative to a bf16 control and not an absolute cosine: see
-``test_tpu_vs_diffusers.py``). Every rank's result and every recorded timestep is judged.
+skipped. The recorded metrics are judged by ``tests.numerical.neuron_parity.check``, the
+function the device check itself calls, so there is one rule: the TPU gate's thresholds (why
+they are relative to a bf16 control and not an absolute cosine: see
+``test_tpu_vs_diffusers.py``), with the same-dtype limit gated only when the result is less
+accurate than the control (decision D65). Every rank's result and every recorded timestep is
+judged. ``test_device_run_was_clean_and_ranks_agree`` reads the verdicts the device check
+recorded, so point it at a run made under the current rule.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from tests.numerical import neuron_parity as parity
 from tests.numerical.neuron_parity import (
     MAX_RATIO_VS_CONTROL,
     MAX_SAME_DTYPE_RATIO,
@@ -79,38 +84,23 @@ def _entries(results: list[dict]):
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_sits_inside_the_noise_bf16_already_creates(mode: str):
-    for where, entry in _entries(_results(mode)):
-        same_dtype = entry["vs_fp32"].get("vs_bf16")
-        assert same_dtype is not None, (
-            f"{mode} {where}: no comparison with the bf16 control recorded"
-        )
-        assert same_dtype["cosine"] >= MIN_COSINE, (
-            f"{mode} {where}: cosine {same_dtype['cosine']:.8f} against the same-dtype "
-            f"upstream reference is below the {MIN_COSINE} floor -- a break, not rounding"
-        )
-        control = entry["control"]
-        ratio = same_dtype["rel_l1"] / control["rel_l1"]
-        assert ratio <= MAX_SAME_DTYPE_RATIO, (
-            f"{mode} {where}: difflet is {same_dtype['rel_l1']:.3e} from the same-dtype "
-            f"reference, {ratio:.2f}x the {control['rel_l1']:.3e} that reference is from "
-            f"fp32 -- outside the format's own noise"
-        )
-
-
-@pytest.mark.parametrize("mode", MODES)
 def test_adds_little_on_top_of_what_bf16_costs(mode: str):
+    """Every rank's recorded metrics at every timestep pass ``parity.check``, the one rule the
+    device check applied too: cosine floor, rel_l1 vs fp32 within 1.15x the bf16 control, and
+    the distance to upstream bf16 within 1.2x the control whenever the result is less accurate
+    than the control (D65; at or below 1.0x it is reported, not gated)."""
     for where, entry in _entries(_results(mode)):
         fp32, control = entry["vs_fp32"], entry["control"]
-        assert fp32["cosine"] >= MIN_COSINE, (
-            f"{mode} {where}: cosine {fp32['cosine']:.8f} against the fp32 reference is "
-            f"below the {MIN_COSINE} floor"
+        assert fp32.get("vs_bf16") is not None, (
+            f"{mode} {where}: no comparison with the bf16 control recorded"
         )
-        ratio = fp32["rel_l1"] / control["rel_l1"]
-        assert ratio <= MAX_RATIO_VS_CONTROL, (
-            f"{mode} {where}: relative error {fp32['rel_l1']:.3e} is {ratio:.3f}x the "
-            f"{control['rel_l1']:.3e} that bf16 alone costs upstream, above the "
-            f"{MAX_RATIO_VS_CONTROL}x allowance"
+        notes: list[str] = []
+        ok, reasons = parity.check(fp32, control=control, notes=notes)
+        assert ok, (
+            f"{mode} {where}: {'; '.join(reasons)} (rel_l1 {fp32['rel_l1']:.3e} = "
+            f"{fp32['rel_l1'] / control['rel_l1']:.3f}x the {control['rel_l1']:.3e} that bf16 "
+            f"alone costs upstream; thresholds max_ratio_vs_control {MAX_RATIO_VS_CONTROL}, "
+            f"max_same_dtype_ratio {MAX_SAME_DTYPE_RATIO}, min_cosine {MIN_COSINE})"
         )
 
 
