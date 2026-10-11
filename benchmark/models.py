@@ -69,6 +69,9 @@ class BenchConfig:
     # note about stages that run on the host (not a Neuron load line), explaining
     # the compute residual for host-pipeline models.
     e2e_host_note: str = ""
+    # The benchmark backends (bench.py --backend) this entry is for; None = any. `bench.py
+    # --all` skips an entry whose tuple excludes the selected backend.
+    backends: tuple[str, ...] | None = None
 
     def shape_flags(self) -> list[str]:
         f: list[str] = []
@@ -142,6 +145,7 @@ MATRIX: dict[str, BenchConfig] = {
         extra_generate_flags=["--host-vae", "--backend", "neuron", "--exec-mode", "compile"],
         config_label="tp=4, bf16, TorchNeuron per-block torch.compile, host fp32 umT5 on "
                      "rank 0, host VAE",
+        backends=("neuron",),
     ),
     "wan_2_2": BenchConfig(
         model_id="Wan-AI/Wan2.2-T2V-A14B-Diffusers",

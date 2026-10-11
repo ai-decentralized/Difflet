@@ -152,18 +152,20 @@
   "config_label": "tp=4, bf16, TorchNeuron per-block torch.compile, host fp32 umT5 on rank 0, host VAE",
   "status": "ok",
   "notes": [
-    "Commit 3763193977f4a508f72f713444d100f65fa88b08 in /home/ubuntu/Difflet/.claude/worktrees/neuron-phase1 for all 19 launches; no change under difflet/ at any launch; uncommitted files at the launches: benchmark/adapters/neuron.py, benchmark/bench.py, benchmark/models.py, benchmark/neuron_cold_warm.py, benchmark/neuron_wan_bench.py, benchmark/trn2/wan_2_1_neuron.json, benchmark/trn2/wan_2_1_neuron.md, tests/unit/benchmark/ (per-launch sha256 of the benchmark files in neuron.provenance). guidance_scale=1: one forward per step.",
+    "HEAD at the launches: 3763193 (script, true-cold CLI rows); 386a031 (CLI rows), all in /home/ubuntu/Difflet/.claude/worktrees/neuron-phase1; difflet/ identical at every launch (tree 54da3e39d41e, no uncommitted change). Uncommitted files at the launches: benchmark/adapters/neuron.py, benchmark/bench.py, benchmark/models.py, benchmark/neuron_cold_warm.py, benchmark/neuron_wan_bench.py, benchmark/trn2/wan_2_1_neuron.json, benchmark/trn2/wan_2_1_neuron.md, tests/unit/benchmark/ (per-launch sha256 of the benchmark files in neuron.provenance). guidance_scale=1: one forward per step.",
     "compile_seconds is the rank-max `warmup forward` of the cold script launch minus the first warm launch's (Dynamo trace + StableHLO lowering + neuronx-cc + NEFF load that the cache removes); nothing is built ahead of time, so there is no AoT compile phase.",
     "e2e_cold_seconds / e2e_warm are the script's `prepare_runtime` -> mp4 saved on rank 0 (NEFF cache empty / populated; the OS page cache was hot for both, Cached 72.2 GiB before the cold launch). The trn2 row's cold start dropped the page cache: see the true-cold CLI row.",
     "Counters (Total/PersistentHits/InMemoryHits, whole process): cold r0 5/34/11162 r1 25/19/11171 r2 4/40/11171 r3 13/31/11171; warm1 r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; warm2 r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; warm3 r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171",
     "Cold NEFFs: 47 new .neff files (4 >= 1 MiB block NEFFs); per rank compiled block/eager-op: r0 1/4, r1 1/24, r2 1/3, r3 1/12; dynamo unique graphs per rank [1, 1, 1, 1]",
-    "Threads: ranks OMP_NUM_THREADS=3 (torch default 3); umT5 encode pinned at 12 (D70); the script's host VAE decode on rank 0 at 12; the CLI driver's host decode at its torch default, 3 under OMP_NUM_THREADS=3 (pre-flight: 97.4 s at 3 vs ~65 s at 6, same mp4).",
+    "Threads (as recorded): script ranks OMP_NUM_THREADS=3 (torch default 3); umT5 encode pinned at 12 (D70); the script's host VAE decode on rank 0 at 12; CLI warm/cold launches: OMP_NUM_THREADS in the launch env unset (ruling D82: none, so torchrun gives its ranks 1 and the `difflet generate` driver decodes the VAE at 6 threads); the true-cold launch: OMP_NUM_THREADS 3, driver decode at 3 threads.",
     "Peak device memory is torch_neuronx.max_memory_allocated() per rank, in GiB (2**30).",
-    "The device-side script benchmark/neuron_wan_bench.py had 1 sha256 value(s) across the 19 launches (byte-identical).",
-    "Re-judged after the run (the stored verdict was a driver false positive; the record as it ran is kept as record.original.json): g5.0/cli-warm1 (stored failed ['rank_lines', 'compile_clean']). The job stopped there and resumed with --skip-existing; no launch was repeated.",
-    "Fallbacks and unwarmed shapes were [] on every rank of every launch and generate (track_fallbacks only sees eager ops; the compiled blocks are proven by the counters)."
+    "neuronx-cc: NeuronX Compiler version 2.28.4568.0+0163fa9e; NEURON_CC_FLAGS at the launches: None.",
+    "The device-side script benchmark/neuron_wan_bench.py had 1 sha256 value(s) across the 19 launches (adb718622beb\u2026, byte-identical); the copy in this tree (36751f0ed5ca\u2026) differs from it: only the W6 review's M-10 change: its encode_prompt and _denoise wrappers take (*args, **kwargs) and tag a generate's encodes by call order (first = prompt); for the orchestrator's keyword-only calls (the prompt, then the empty negative prompt) the behaviour and the recorded tags are the same.",
+    "Fallbacks and unwarmed shapes were [] on every rank of every launch and generate (track_fallbacks only sees eager ops; the compiled blocks are proven by the counters).",
+    "Superseded records kept under runs/overlapped-w7/ (not used here): g5.0/cli-warm1, g5.0/cli-warm2, g5.0/cli-warm3 \u2014 D82 CLI warm launches at guidance 5.0 that overlapped another agent's CPU probes (11:52:05-11:55:47 UTC); each was re-run once and the re-runs are used.",
+    "Superseded records kept under runs/round1-cli-omp3/ (not used here): g1.0/cli-cold, g1.0/cli-warm1, g1.0/cli-warm2, g1.0/cli-warm3, g5.0/cli-cold, g5.0/cli-w4check, g5.0/cli-warm1, g5.0/cli-warm2, g5.0/cli-warm3 \u2014 Round 1 CLI launches with OMP_NUM_THREADS=3 exported (driver VAE decode at 3 threads), superseded by ruling D82."
   ],
-  "timestamp": "2026-10-11 11:29 UTC",
+  "timestamp": "2026-10-11 12:08 UTC",
   "config_slug": "wan_2_1_neuron",
   "device_slug": "trn2",
   "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
@@ -185,7 +187,7 @@
         "NEFF compile (s) / NEFFs",
         "compiler-only `CompilationTime` sum on the compiling rank (block + eager-op; a sum over NEFFs compiled concurrently, not a wall clock); Dynamo frame compile (trace + lowering); new `.neff` files in the row's cache",
         "157.4 (rank 1: block 55.0 + eager-op 102.3; Dynamo 13.1, lowering 0.19) / 47 new: 4 block (one per rank, 4 files >= 1 MiB) + 43 eager-op",
-        "0.0 / 0 new (w1: 0.0 s, 0 new, w2: 0.0 s, 0 new, w3: 0.0 s, 0 new)",
+        "0.0 / 0 new (warm1: 0.0 s, 0 new, warm2: 0.0 s, 0 new, warm3: 0.0 s, 0 new)",
         "0 compilations in iterations 2-3 (True)",
         "transformer 255 s (AoT build)"
       ],
@@ -193,8 +195,8 @@
         "counters per rank",
         "whole process: TotalCompilations / PersistentHits / InMemoryHits",
         "r0 5/34/11162 r1 25/19/11171 r2 4/40/11171 r3 13/31/11171",
-        "w1: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171<br>w2: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171<br>w3: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171",
-        "w1 it2-3 generate deltas: r0 0/0/3703 r1 0/0/3705 r2 0/0/3705 r3 0/0/3705; r0 0/0/3703 r1 0/0/3705 r2 0/0/3705 r3 0/0/3705",
+        "warm1: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171<br>warm2: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171<br>warm3: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171",
+        "warm1 it2-3 generate deltas: r0 0/0/3703 r1 0/0/3705 r2 0/0/3705 r3 0/0/3705; r0 0/0/3703 r1 0/0/3705 r2 0/0/3705 r3 0/0/3705",
         "\u2014"
       ],
       [
@@ -247,16 +249,16 @@
       ],
       [
         "e2e (s), CLI",
-        "`difflet generate --backend neuron` process wall (torchrun ranks, then the driver's host VAE decode at OMP_NUM_THREADS=3)",
-        "239.9 (own fresh cache; 47 new .neff)",
-        "173.0 (median 173.0; 171.8-174.3, n=3)",
+        "`difflet generate --backend neuron` process wall (torchrun ranks, then the driver's host VAE decode), in the user's default environment (OMP_NUM_THREADS unset in the launch env; the driver's host VAE decode at 6 threads)",
+        "197.3 (own fresh cache; 47 new .neff)",
+        "135.2 (median 135.2; 134.5-135.9, n=3)",
         "n/a",
         "394 (page cache dropped) / 56.4 (n=3)"
       ],
       [
         "e2e (s), CLI, true cold",
         "page cache dropped (`sudo -n`), NEFF cache warm: the trn2 definition of a cold start",
-        "747.1 (Cached 72.3 \u2192 0.4 GiB at the drop; NEFF warm)",
+        "747.1 (Cached 72.3 \u2192 0.4 GiB at the drop; NEFF warm, cache g1.0-main); caveat: driver VAE decode at 3 threads (OMP_NUM_THREADS 3 in its launch env); the CLI warm/cold rows at the default (6 threads)",
         "n/a",
         "n/a",
         "394 (page cache dropped)"
@@ -264,16 +266,16 @@
       [
         "CLI rank load+warm-up / stage (s)",
         "the `[wan]` rank lines, rank-max (load+warm-up includes `prepare_runtime`)",
-        "105.1 / 133.9",
-        "36.5 / 65.0 ; 36.6 / 65.2 ; 39.1 / 67.6",
+        "103.3 / 132.0",
+        "39.3 / 67.8 ; 41.6 / 70.0 ; 40.5 / 69.0",
         "n/a",
         "\u2014"
       ],
       [
         "CLI start \u2192 latents / \u2192 mp4 (s)",
-        "file mtimes: process start \u2192 latents.pt saved by rank 0; latents.pt \u2192 mp4 written (rank teardown + the driver's host VAE load, decode at 3 threads, export)",
-        "138.2 / 100.9",
-        "69.2 / 102.9 ; 69.3 / 101.6 ; 71.9 / 101.6",
+        "file mtimes taken right after each launch: process start \u2192 latents.pt saved by rank 0; latents.pt \u2192 mp4 written (rank teardown + the driver's host VAE load, decode at 6 threads, export)",
+        "136.3 / 60.2",
+        "71.9 / 63.2 ; 74.1 / 60.0 ; 73.1 / 60.4",
         "true cold: 644.4 / 101.8",
         "\u2014"
       ],
@@ -289,7 +291,7 @@
         "DiT step median (ms)",
         "inter-step deltas of the real loop, `torch.neuron.synchronize` both sides, step 0 excluded, n=49, rank 0",
         "evidence only: 534.8",
-        "**534.4** (w2 534.3, w3 533.9)",
+        "**534.4** (warm2 534.3, warm3 533.9)",
         "534.6 (pooled, n=294)",
         "554.8 (isolated timer)"
       ],
@@ -383,20 +385,20 @@
     },
     "e2e_cli_warm": {
       "n": 3,
-      "mean": 173.0208797876597,
-      "median": 173.01077679698938,
-      "std": 1.03803141338504,
-      "p50": 173.01077679698938,
-      "p90": 174.29722482500074,
-      "min": 171.75463774098898,
-      "max": 174.29722482500074,
+      "mean": 135.20144739699995,
+      "median": 135.22612147299515,
+      "std": 0.5673589406561197,
+      "p50": 135.22612147299515,
+      "p90": 135.8836516779993,
+      "min": 134.49456904000544,
+      "max": 135.8836516779993,
       "samples": [
-        173.01077679698938,
-        171.75463774098898,
-        174.29722482500074
+        135.8836516779993,
+        135.22612147299515,
+        134.49456904000544
       ]
     },
-    "e2e_cli_cold_s": 239.94644736900227,
+    "e2e_cli_cold_s": 197.34646996099036,
     "e2e_cli_true_cold_s": 747.0969491150026,
     "resident_e2e": {
       "n": 6,
@@ -845,6 +847,27 @@
         0.5302499660028843
       ]
     },
+    "threads": {
+      "bench_omp": [
+        "3"
+      ],
+      "cli": {
+        "omp": [
+          "unset"
+        ],
+        "driver": [
+          6
+        ]
+      },
+      "true_cold": {
+        "omp": [
+          "3"
+        ],
+        "driver": [
+          3
+        ]
+      }
+    },
     "checks": [
       {
         "launch": "script-cold",
@@ -1288,6 +1311,62 @@
         "hard": false
       },
       {
+        "launch": "cli-cold",
+        "name": "exit",
+        "ok": true,
+        "detail": "exit 0 timed_out=False",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "rank_lines",
+        "ok": true,
+        "detail": "ranks [0, 1, 2, 3]",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "compile_clean",
+        "ok": true,
+        "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "one_writer",
+        "ok": true,
+        "detail": "1 'latents saved' lines",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "video_saved",
+        "ok": true,
+        "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-cold/out.mp4']",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "no_failure",
+        "ok": true,
+        "detail": "0 failure lines",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "file_rule_cold",
+        "ok": true,
+        "detail": "new .neff 47",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "latents_equal_to_script",
+        "ok": true,
+        "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+        "hard": false
+      },
+      {
         "launch": "cli-warm1",
         "name": "exit",
         "ok": true,
@@ -1510,68 +1589,19 @@
         "ok": true,
         "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
         "hard": false
-      },
-      {
-        "launch": "cli-cold",
-        "name": "exit",
-        "ok": true,
-        "detail": "exit 0 timed_out=False",
-        "hard": true
-      },
-      {
-        "launch": "cli-cold",
-        "name": "rank_lines",
-        "ok": true,
-        "detail": "ranks [0, 1, 2, 3]",
-        "hard": true
-      },
-      {
-        "launch": "cli-cold",
-        "name": "compile_clean",
-        "ok": true,
-        "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
-        "hard": true
-      },
-      {
-        "launch": "cli-cold",
-        "name": "one_writer",
-        "ok": true,
-        "detail": "1 'latents saved' lines",
-        "hard": true
-      },
-      {
-        "launch": "cli-cold",
-        "name": "video_saved",
-        "ok": true,
-        "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-cold/out.mp4']",
-        "hard": true
-      },
-      {
-        "launch": "cli-cold",
-        "name": "no_failure",
-        "ok": true,
-        "detail": "0 failure lines",
-        "hard": true
-      },
-      {
-        "launch": "cli-cold",
-        "name": "file_rule_cold",
-        "ok": true,
-        "detail": "new .neff 47",
-        "hard": true
-      },
-      {
-        "launch": "cli-cold",
-        "name": "latents_equal_to_script",
-        "ok": true,
-        "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
-        "hard": false
       }
     ],
     "provenance": {
-      "head": "3763193977f4a508f72f713444d100f65fa88b08",
+      "head": [
+        "3763193977f4a508f72f713444d100f65fa88b08",
+        "386a03181a10a1106fe00d1cf0b29b21e605ac99"
+      ],
       "worktree": "/home/ubuntu/Difflet/.claude/worktrees/neuron-phase1",
+      "difflet_trees": [
+        "54da3e39d41e0e55e42e9ccd2c4f20fd83a80551"
+      ],
       "status_at_runs": [
+        "",
         "M benchmark/bench.py\n M benchmark/models.py\n?? benchmark/adapters/neuron.py\n?? benchmark/neuron_cold_warm.py\n?? benchmark/neuron_wan_bench.py\n?? benchmark/trn2/wan_2_1_neuron.json\n?? benchmark/trn2/wan_2_1_neuron.md\n?? tests/unit/benchmark/",
         "M benchmark/bench.py\n M benchmark/models.py\n?? benchmark/adapters/neuron.py\n?? benchmark/neuron_cold_warm.py\n?? benchmark/neuron_wan_bench.py\n?? tests/unit/benchmark/"
       ],
@@ -1588,9 +1618,9 @@
         "benchmark/neuron_cold_warm.py": [
           "0e976fa718cba79c901e608ea62f11e0015bc34be72f7cdad39f58c68573e14a",
           "b8f5efd0790993199e681e152c13b572c93338358baa1657eb8fd7d7e6a7853a",
+          "a203e5a2f5d21e6d2a181c562261752e47794dfccdd59e26fe24cb621d6eb8ba",
           "42dbb820a17473f9be3ab33f983c705099a972f51c7ed4b9e7a8058a8ed02ebc",
-          "4a4620da45a3cd2ea6a4667c1508e6fa50dfba83e02f58fc99ad6bc74aa8fc78",
-          "53931f5117ce74f1508eb46e95d3c7dc0dc74b8d4645ab614346d4a170813373"
+          "4a4620da45a3cd2ea6a4667c1508e6fa50dfba83e02f58fc99ad6bc74aa8fc78"
         ],
         "benchmark/neuron_wan_bench.py": [
           "adb718622beb1a63b7e836caa4bc1953dc158602e7376052c5d14411d587ae7a"
@@ -1612,6 +1642,7 @@
           "c9c3c1ec997476d8c95ea9f340a3e4efb1858c2c3b9b3df097784ec3a9fad35e"
         ]
       },
+      "loaded_sha256_at_runs": {},
       "launches": 19
     }
   },
@@ -1770,18 +1801,20 @@
       "config_label": "tp=4, bf16, TorchNeuron per-block torch.compile, host fp32 umT5 on rank 0, host VAE",
       "status": "ok",
       "notes": [
-        "Commit 3763193977f4a508f72f713444d100f65fa88b08 in /home/ubuntu/Difflet/.claude/worktrees/neuron-phase1 for all 19 launches; no change under difflet/ at any launch; uncommitted files at the launches: benchmark/adapters/neuron.py, benchmark/bench.py, benchmark/models.py, benchmark/neuron_cold_warm.py, benchmark/neuron_wan_bench.py, benchmark/trn2/wan_2_1_neuron.json, benchmark/trn2/wan_2_1_neuron.md, tests/unit/benchmark/ (per-launch sha256 of the benchmark files in neuron.provenance). guidance_scale=5: two batch-1 DiT forwards per step (CFG).",
+        "HEAD at the launches: 3763193 (script, true-cold CLI rows); 386a031 (CLI rows), all in /home/ubuntu/Difflet/.claude/worktrees/neuron-phase1; difflet/ identical at every launch (tree 54da3e39d41e, no uncommitted change). Uncommitted files at the launches: benchmark/adapters/neuron.py, benchmark/bench.py, benchmark/models.py, benchmark/neuron_cold_warm.py, benchmark/neuron_wan_bench.py, benchmark/trn2/wan_2_1_neuron.json, benchmark/trn2/wan_2_1_neuron.md, tests/unit/benchmark/ (per-launch sha256 of the benchmark files in neuron.provenance). guidance_scale=5: two batch-1 DiT forwards per step (CFG).",
         "compile_seconds is the rank-max `warmup forward` of the cold script launch minus the first warm launch's (Dynamo trace + StableHLO lowering + neuronx-cc + NEFF load that the cache removes); nothing is built ahead of time, so there is no AoT compile phase.",
         "e2e_cold_seconds / e2e_warm are the script's `prepare_runtime` -> mp4 saved on rank 0 (NEFF cache empty / populated; the OS page cache was hot for both, Cached 84.3 GiB before the cold launch). The trn2 row's cold start dropped the page cache: see the true-cold CLI row.",
         "Counters (Total/PersistentHits/InMemoryHits, whole process): cold r0 38/1/22271 r1 2/42/22286 r2 5/39/22286 r3 2/42/22286; warm1 r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286; warm2 r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286; warm3 r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286",
         "Cold NEFFs: 47 new .neff files (4 >= 1 MiB block NEFFs); per rank compiled block/eager-op: r0 1/37, r1 1/1, r2 1/4, r3 1/1; dynamo unique graphs per rank [1, 1, 1, 1]",
-        "Threads: ranks OMP_NUM_THREADS=3 (torch default 3); umT5 encode pinned at 12 (D70); the script's host VAE decode on rank 0 at 12; the CLI driver's host decode at its torch default, 3 under OMP_NUM_THREADS=3 (pre-flight: 97.4 s at 3 vs ~65 s at 6, same mp4).",
+        "Threads (as recorded): script ranks OMP_NUM_THREADS=3 (torch default 3); umT5 encode pinned at 12 (D70); the script's host VAE decode on rank 0 at 12; CLI warm/cold launches: OMP_NUM_THREADS in the launch env unset (ruling D82: none, so torchrun gives its ranks 1 and the `difflet generate` driver decodes the VAE at 6 threads); the true-cold launch: OMP_NUM_THREADS 3, driver decode at 3 threads.",
         "Peak device memory is torch_neuronx.max_memory_allocated() per rank, in GiB (2**30).",
-        "The device-side script benchmark/neuron_wan_bench.py had 1 sha256 value(s) across the 19 launches (byte-identical).",
-        "Re-judged after the run (the stored verdict was a driver false positive; the record as it ran is kept as record.original.json): g5.0/cli-warm1 (stored failed ['rank_lines', 'compile_clean']). The job stopped there and resumed with --skip-existing; no launch was repeated.",
-        "Fallbacks and unwarmed shapes were [] on every rank of every launch and generate (track_fallbacks only sees eager ops; the compiled blocks are proven by the counters)."
+        "neuronx-cc: NeuronX Compiler version 2.28.4568.0+0163fa9e; NEURON_CC_FLAGS at the launches: None.",
+        "The device-side script benchmark/neuron_wan_bench.py had 1 sha256 value(s) across the 19 launches (adb718622beb\u2026, byte-identical); the copy in this tree (36751f0ed5ca\u2026) differs from it: only the W6 review's M-10 change: its encode_prompt and _denoise wrappers take (*args, **kwargs) and tag a generate's encodes by call order (first = prompt); for the orchestrator's keyword-only calls (the prompt, then the empty negative prompt) the behaviour and the recorded tags are the same.",
+        "Fallbacks and unwarmed shapes were [] on every rank of every launch and generate (track_fallbacks only sees eager ops; the compiled blocks are proven by the counters).",
+        "Superseded records kept under runs/overlapped-w7/ (not used here): g5.0/cli-warm1, g5.0/cli-warm2, g5.0/cli-warm3 \u2014 D82 CLI warm launches at guidance 5.0 that overlapped another agent's CPU probes (11:52:05-11:55:47 UTC); each was re-run once and the re-runs are used.",
+        "Superseded records kept under runs/round1-cli-omp3/ (not used here): g1.0/cli-cold, g1.0/cli-warm1, g1.0/cli-warm2, g1.0/cli-warm3, g5.0/cli-cold, g5.0/cli-w4check, g5.0/cli-warm1, g5.0/cli-warm2, g5.0/cli-warm3 \u2014 Round 1 CLI launches with OMP_NUM_THREADS=3 exported (driver VAE decode at 3 threads), superseded by ruling D82."
       ],
-      "timestamp": "2026-10-11 10:44 UTC",
+      "timestamp": "2026-10-11 12:17 UTC",
       "config_slug": "wan_2_1_neuron",
       "device_slug": "trn2",
       "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
@@ -1803,7 +1836,7 @@
             "NEFF compile (s) / NEFFs",
             "compiler-only `CompilationTime` sum on the compiling rank (block + eager-op; a sum over NEFFs compiled concurrently, not a wall clock); Dynamo frame compile (trace + lowering); new `.neff` files in the row's cache",
             "201.2 (rank 0: block 51.6 + eager-op 149.6; Dynamo 12.0, lowering 0.19) / 47 new: 4 block (one per rank, 4 files >= 1 MiB) + 43 eager-op",
-            "0.0 / 0 new (w1: 0.0 s, 0 new, w2: 0.0 s, 0 new, w3: 0.0 s, 0 new)",
+            "0.0 / 0 new (warm1: 0.0 s, 0 new, warm2: 0.0 s, 0 new, warm3: 0.0 s, 0 new)",
             "0 compilations in iterations 2-3 (True)",
             "transformer 255 s (AoT build)"
           ],
@@ -1811,8 +1844,8 @@
             "counters per rank",
             "whole process: TotalCompilations / PersistentHits / InMemoryHits",
             "r0 38/1/22271 r1 2/42/22286 r2 5/39/22286 r3 2/42/22286",
-            "w1: r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286<br>w2: r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286<br>w3: r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286",
-            "w1 it2-3 generate deltas: r0 0/0/7406 r1 0/0/7410 r2 0/0/7410 r3 0/0/7410; r0 0/0/7406 r1 0/0/7410 r2 0/0/7410 r3 0/0/7410",
+            "warm1: r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286<br>warm2: r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286<br>warm3: r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286",
+            "warm1 it2-3 generate deltas: r0 0/0/7406 r1 0/0/7410 r2 0/0/7410 r3 0/0/7410; r0 0/0/7406 r1 0/0/7410 r2 0/0/7410 r3 0/0/7410",
             "\u2014"
           ],
           [
@@ -1865,16 +1898,16 @@
           ],
           [
             "e2e (s), CLI",
-            "`difflet generate --backend neuron` process wall (torchrun ranks, then the driver's host VAE decode at OMP_NUM_THREADS=3)",
-            "266.7 (own fresh cache; 47 new .neff)",
-            "198.4 (median 198.9; 197.0-199.2, n=3)",
+            "`difflet generate --backend neuron` process wall (torchrun ranks, then the driver's host VAE decode), in the user's default environment (OMP_NUM_THREADS unset in the launch env; the driver's host VAE decode at 6 threads)",
+            "215.9 (own fresh cache; 47 new .neff)",
+            "159.3 (median 159.2; 159.2-159.4, n=3)",
             "n/a",
             "394 (page cache dropped) / 56.4 (n=3)"
           ],
           [
             "e2e (s), CLI, true cold",
             "page cache dropped (`sudo -n`), NEFF cache warm: the trn2 definition of a cold start",
-            "780.9 (Cached 84.4 \u2192 0.4 GiB at the drop; NEFF warm)",
+            "780.9 (Cached 84.4 \u2192 0.4 GiB at the drop; NEFF warm, cache g5.0-main); caveat: driver VAE decode at 3 threads (OMP_NUM_THREADS 3 in its launch env); the CLI warm/cold rows at the default (6 threads)",
             "n/a",
             "n/a",
             "394 (page cache dropped)"
@@ -1882,16 +1915,16 @@
           [
             "CLI rank load+warm-up / stage (s)",
             "the `[wan]` rank lines, rank-max (load+warm-up includes `prepare_runtime`)",
-            "104.3 / 160.2",
-            "36.3 / 91.6 ; 34.2 / 89.6 ; 36.0 / 91.3",
+            "95.1 / 150.6",
+            "37.1 / 92.2 ; 38.9 / 94.2 ; 37.5 / 92.7",
             "n/a",
             "\u2014"
           ],
           [
             "CLI start \u2192 latents / \u2192 mp4 (s)",
-            "file mtimes: process start \u2192 latents.pt saved by rank 0; latents.pt \u2192 mp4 written (rank teardown + the driver's host VAE load, decode at 3 threads, export)",
-            "164.6 / 101.3",
-            "95.9 / 102.5 ; 93.8 / 102.4 ; 95.6 / 102.4",
+            "file mtimes taken right after each launch: process start \u2192 latents.pt saved by rank 0; latents.pt \u2192 mp4 written (rank teardown + the driver's host VAE load, decode at 6 threads, export)",
+            "154.8 / 60.2",
+            "96.5 / 61.9 ; 98.4 / 60.0 ; 96.9 / 61.3",
             "true cold: 678.0 / 102.0",
             "\u2014"
           ],
@@ -1907,7 +1940,7 @@
             "DiT step median (ms)",
             "inter-step deltas of the real loop, `torch.neuron.synchronize` both sides, step 0 excluded, n=49, rank 0",
             "evidence only: 1066.2",
-            "**1067.2** (w2 1067.1, w3 1066.8)",
+            "**1067.2** (warm2 1067.1, warm3 1066.8)",
             "1067.1 (pooled, n=294)",
             "554.8 (isolated timer)"
           ],
@@ -1987,7 +2020,7 @@
             "W4 reproduction (D80)",
             "one extra warm CLI run with W4's parameters: latents and mp4 sha256 equal to W4's",
             "\u2014",
-            "yes: latents 8e5eaffed4cf6f3a\u2026, file e639f3146c361940\u2026, mp4 a9f9004fc1343eab\u2026; wall 200.8 s",
+            "yes: latents 8e5eaffed4cf6f3a\u2026, file e639f3146c361940\u2026, mp4 a9f9004fc1343eab\u2026; wall 163.9 s",
             "\u2014",
             "\u2014"
           ]
@@ -2009,20 +2042,20 @@
         },
         "e2e_cli_warm": {
           "n": 3,
-          "mean": 198.37167948733259,
-          "median": 198.91338964999886,
-          "std": 0.9692294606368785,
-          "p50": 198.91338964999886,
-          "p90": 199.19124689100136,
-          "min": 197.01040192099754,
-          "max": 199.19124689100136,
+          "mean": 159.294774704671,
+          "median": 159.2325926790072,
+          "std": 0.09230210669934558,
+          "p50": 159.2325926790072,
+          "p90": 159.4252617190068,
+          "min": 159.22646971599897,
+          "max": 159.4252617190068,
           "samples": [
-            199.19124689100136,
-            197.01040192099754,
-            198.91338964999886
+            159.4252617190068,
+            159.22646971599897,
+            159.2325926790072
           ]
         },
-        "e2e_cli_cold_s": 266.7369987379934,
+        "e2e_cli_cold_s": 215.8772467969975,
         "e2e_cli_true_cold_s": 780.8748476970068,
         "resident_e2e": {
           "n": 6,
@@ -2520,6 +2553,27 @@
             0.5344532309973147,
             0.5320279050065437
           ]
+        },
+        "threads": {
+          "bench_omp": [
+            "3"
+          ],
+          "cli": {
+            "omp": [
+              "unset"
+            ],
+            "driver": [
+              6
+            ]
+          },
+          "true_cold": {
+            "omp": [
+              "3"
+            ],
+            "driver": [
+              3
+            ]
+          }
         },
         "checks": [
           {
@@ -3020,6 +3074,62 @@
             "hard": false
           },
           {
+            "launch": "cli-cold",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g5.0/cli-cold/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "file_rule_cold",
+            "ok": true,
+            "detail": "new .neff 47",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs script 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": false
+          },
+          {
             "launch": "cli-w4check",
             "name": "exit",
             "ok": true,
@@ -3319,68 +3429,19 @@
             "ok": true,
             "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs script 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
             "hard": false
-          },
-          {
-            "launch": "cli-cold",
-            "name": "exit",
-            "ok": true,
-            "detail": "exit 0 timed_out=False",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "rank_lines",
-            "ok": true,
-            "detail": "ranks [0, 1, 2, 3]",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "compile_clean",
-            "ok": true,
-            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "one_writer",
-            "ok": true,
-            "detail": "1 'latents saved' lines",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "video_saved",
-            "ok": true,
-            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g5.0/cli-cold/out.mp4']",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "no_failure",
-            "ok": true,
-            "detail": "0 failure lines",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "file_rule_cold",
-            "ok": true,
-            "detail": "new .neff 47",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "latents_equal_to_script",
-            "ok": true,
-            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs script 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
-            "hard": false
           }
         ],
         "provenance": {
-          "head": "3763193977f4a508f72f713444d100f65fa88b08",
+          "head": [
+            "3763193977f4a508f72f713444d100f65fa88b08",
+            "386a03181a10a1106fe00d1cf0b29b21e605ac99"
+          ],
           "worktree": "/home/ubuntu/Difflet/.claude/worktrees/neuron-phase1",
+          "difflet_trees": [
+            "54da3e39d41e0e55e42e9ccd2c4f20fd83a80551"
+          ],
           "status_at_runs": [
+            "",
             "M benchmark/bench.py\n M benchmark/models.py\n?? benchmark/adapters/neuron.py\n?? benchmark/neuron_cold_warm.py\n?? benchmark/neuron_wan_bench.py\n?? benchmark/trn2/wan_2_1_neuron.json\n?? benchmark/trn2/wan_2_1_neuron.md\n?? tests/unit/benchmark/",
             "M benchmark/bench.py\n M benchmark/models.py\n?? benchmark/adapters/neuron.py\n?? benchmark/neuron_cold_warm.py\n?? benchmark/neuron_wan_bench.py\n?? tests/unit/benchmark/"
           ],
@@ -3397,9 +3458,9 @@
             "benchmark/neuron_cold_warm.py": [
               "0e976fa718cba79c901e608ea62f11e0015bc34be72f7cdad39f58c68573e14a",
               "b8f5efd0790993199e681e152c13b572c93338358baa1657eb8fd7d7e6a7853a",
+              "a203e5a2f5d21e6d2a181c562261752e47794dfccdd59e26fe24cb621d6eb8ba",
               "42dbb820a17473f9be3ab33f983c705099a972f51c7ed4b9e7a8058a8ed02ebc",
-              "4a4620da45a3cd2ea6a4667c1508e6fa50dfba83e02f58fc99ad6bc74aa8fc78",
-              "53931f5117ce74f1508eb46e95d3c7dc0dc74b8d4645ab614346d4a170813373"
+              "4a4620da45a3cd2ea6a4667c1508e6fa50dfba83e02f58fc99ad6bc74aa8fc78"
             ],
             "benchmark/neuron_wan_bench.py": [
               "adb718622beb1a63b7e836caa4bc1953dc158602e7376052c5d14411d587ae7a"
@@ -3421,6 +3482,7 @@
               "c9c3c1ec997476d8c95ea9f340a3e4efb1858c2c3b9b3df097784ec3a9fad35e"
             ]
           },
+          "loaded_sha256_at_runs": {},
           "launches": 19
         }
       }
@@ -3579,18 +3641,20 @@
       "config_label": "tp=4, bf16, TorchNeuron per-block torch.compile, host fp32 umT5 on rank 0, host VAE",
       "status": "ok",
       "notes": [
-        "Commit 3763193977f4a508f72f713444d100f65fa88b08 in /home/ubuntu/Difflet/.claude/worktrees/neuron-phase1 for all 19 launches; no change under difflet/ at any launch; uncommitted files at the launches: benchmark/adapters/neuron.py, benchmark/bench.py, benchmark/models.py, benchmark/neuron_cold_warm.py, benchmark/neuron_wan_bench.py, benchmark/trn2/wan_2_1_neuron.json, benchmark/trn2/wan_2_1_neuron.md, tests/unit/benchmark/ (per-launch sha256 of the benchmark files in neuron.provenance). guidance_scale=1: one forward per step.",
+        "HEAD at the launches: 3763193 (script, true-cold CLI rows); 386a031 (CLI rows), all in /home/ubuntu/Difflet/.claude/worktrees/neuron-phase1; difflet/ identical at every launch (tree 54da3e39d41e, no uncommitted change). Uncommitted files at the launches: benchmark/adapters/neuron.py, benchmark/bench.py, benchmark/models.py, benchmark/neuron_cold_warm.py, benchmark/neuron_wan_bench.py, benchmark/trn2/wan_2_1_neuron.json, benchmark/trn2/wan_2_1_neuron.md, tests/unit/benchmark/ (per-launch sha256 of the benchmark files in neuron.provenance). guidance_scale=1: one forward per step.",
         "compile_seconds is the rank-max `warmup forward` of the cold script launch minus the first warm launch's (Dynamo trace + StableHLO lowering + neuronx-cc + NEFF load that the cache removes); nothing is built ahead of time, so there is no AoT compile phase.",
         "e2e_cold_seconds / e2e_warm are the script's `prepare_runtime` -> mp4 saved on rank 0 (NEFF cache empty / populated; the OS page cache was hot for both, Cached 72.2 GiB before the cold launch). The trn2 row's cold start dropped the page cache: see the true-cold CLI row.",
         "Counters (Total/PersistentHits/InMemoryHits, whole process): cold r0 5/34/11162 r1 25/19/11171 r2 4/40/11171 r3 13/31/11171; warm1 r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; warm2 r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; warm3 r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171",
         "Cold NEFFs: 47 new .neff files (4 >= 1 MiB block NEFFs); per rank compiled block/eager-op: r0 1/4, r1 1/24, r2 1/3, r3 1/12; dynamo unique graphs per rank [1, 1, 1, 1]",
-        "Threads: ranks OMP_NUM_THREADS=3 (torch default 3); umT5 encode pinned at 12 (D70); the script's host VAE decode on rank 0 at 12; the CLI driver's host decode at its torch default, 3 under OMP_NUM_THREADS=3 (pre-flight: 97.4 s at 3 vs ~65 s at 6, same mp4).",
+        "Threads (as recorded): script ranks OMP_NUM_THREADS=3 (torch default 3); umT5 encode pinned at 12 (D70); the script's host VAE decode on rank 0 at 12; CLI warm/cold launches: OMP_NUM_THREADS in the launch env unset (ruling D82: none, so torchrun gives its ranks 1 and the `difflet generate` driver decodes the VAE at 6 threads); the true-cold launch: OMP_NUM_THREADS 3, driver decode at 3 threads.",
         "Peak device memory is torch_neuronx.max_memory_allocated() per rank, in GiB (2**30).",
-        "The device-side script benchmark/neuron_wan_bench.py had 1 sha256 value(s) across the 19 launches (byte-identical).",
-        "Re-judged after the run (the stored verdict was a driver false positive; the record as it ran is kept as record.original.json): g5.0/cli-warm1 (stored failed ['rank_lines', 'compile_clean']). The job stopped there and resumed with --skip-existing; no launch was repeated.",
-        "Fallbacks and unwarmed shapes were [] on every rank of every launch and generate (track_fallbacks only sees eager ops; the compiled blocks are proven by the counters)."
+        "neuronx-cc: NeuronX Compiler version 2.28.4568.0+0163fa9e; NEURON_CC_FLAGS at the launches: None.",
+        "The device-side script benchmark/neuron_wan_bench.py had 1 sha256 value(s) across the 19 launches (adb718622beb\u2026, byte-identical); the copy in this tree (36751f0ed5ca\u2026) differs from it: only the W6 review's M-10 change: its encode_prompt and _denoise wrappers take (*args, **kwargs) and tag a generate's encodes by call order (first = prompt); for the orchestrator's keyword-only calls (the prompt, then the empty negative prompt) the behaviour and the recorded tags are the same.",
+        "Fallbacks and unwarmed shapes were [] on every rank of every launch and generate (track_fallbacks only sees eager ops; the compiled blocks are proven by the counters).",
+        "Superseded records kept under runs/overlapped-w7/ (not used here): g5.0/cli-warm1, g5.0/cli-warm2, g5.0/cli-warm3 \u2014 D82 CLI warm launches at guidance 5.0 that overlapped another agent's CPU probes (11:52:05-11:55:47 UTC); each was re-run once and the re-runs are used.",
+        "Superseded records kept under runs/round1-cli-omp3/ (not used here): g1.0/cli-cold, g1.0/cli-warm1, g1.0/cli-warm2, g1.0/cli-warm3, g5.0/cli-cold, g5.0/cli-w4check, g5.0/cli-warm1, g5.0/cli-warm2, g5.0/cli-warm3 \u2014 Round 1 CLI launches with OMP_NUM_THREADS=3 exported (driver VAE decode at 3 threads), superseded by ruling D82."
       ],
-      "timestamp": "2026-10-11 11:29 UTC",
+      "timestamp": "2026-10-11 12:08 UTC",
       "config_slug": "wan_2_1_neuron",
       "device_slug": "trn2",
       "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
@@ -3612,7 +3676,7 @@
             "NEFF compile (s) / NEFFs",
             "compiler-only `CompilationTime` sum on the compiling rank (block + eager-op; a sum over NEFFs compiled concurrently, not a wall clock); Dynamo frame compile (trace + lowering); new `.neff` files in the row's cache",
             "157.4 (rank 1: block 55.0 + eager-op 102.3; Dynamo 13.1, lowering 0.19) / 47 new: 4 block (one per rank, 4 files >= 1 MiB) + 43 eager-op",
-            "0.0 / 0 new (w1: 0.0 s, 0 new, w2: 0.0 s, 0 new, w3: 0.0 s, 0 new)",
+            "0.0 / 0 new (warm1: 0.0 s, 0 new, warm2: 0.0 s, 0 new, warm3: 0.0 s, 0 new)",
             "0 compilations in iterations 2-3 (True)",
             "transformer 255 s (AoT build)"
           ],
@@ -3620,8 +3684,8 @@
             "counters per rank",
             "whole process: TotalCompilations / PersistentHits / InMemoryHits",
             "r0 5/34/11162 r1 25/19/11171 r2 4/40/11171 r3 13/31/11171",
-            "w1: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171<br>w2: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171<br>w3: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171",
-            "w1 it2-3 generate deltas: r0 0/0/3703 r1 0/0/3705 r2 0/0/3705 r3 0/0/3705; r0 0/0/3703 r1 0/0/3705 r2 0/0/3705 r3 0/0/3705",
+            "warm1: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171<br>warm2: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171<br>warm3: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171",
+            "warm1 it2-3 generate deltas: r0 0/0/3703 r1 0/0/3705 r2 0/0/3705 r3 0/0/3705; r0 0/0/3703 r1 0/0/3705 r2 0/0/3705 r3 0/0/3705",
             "\u2014"
           ],
           [
@@ -3674,16 +3738,16 @@
           ],
           [
             "e2e (s), CLI",
-            "`difflet generate --backend neuron` process wall (torchrun ranks, then the driver's host VAE decode at OMP_NUM_THREADS=3)",
-            "239.9 (own fresh cache; 47 new .neff)",
-            "173.0 (median 173.0; 171.8-174.3, n=3)",
+            "`difflet generate --backend neuron` process wall (torchrun ranks, then the driver's host VAE decode), in the user's default environment (OMP_NUM_THREADS unset in the launch env; the driver's host VAE decode at 6 threads)",
+            "197.3 (own fresh cache; 47 new .neff)",
+            "135.2 (median 135.2; 134.5-135.9, n=3)",
             "n/a",
             "394 (page cache dropped) / 56.4 (n=3)"
           ],
           [
             "e2e (s), CLI, true cold",
             "page cache dropped (`sudo -n`), NEFF cache warm: the trn2 definition of a cold start",
-            "747.1 (Cached 72.3 \u2192 0.4 GiB at the drop; NEFF warm)",
+            "747.1 (Cached 72.3 \u2192 0.4 GiB at the drop; NEFF warm, cache g1.0-main); caveat: driver VAE decode at 3 threads (OMP_NUM_THREADS 3 in its launch env); the CLI warm/cold rows at the default (6 threads)",
             "n/a",
             "n/a",
             "394 (page cache dropped)"
@@ -3691,16 +3755,16 @@
           [
             "CLI rank load+warm-up / stage (s)",
             "the `[wan]` rank lines, rank-max (load+warm-up includes `prepare_runtime`)",
-            "105.1 / 133.9",
-            "36.5 / 65.0 ; 36.6 / 65.2 ; 39.1 / 67.6",
+            "103.3 / 132.0",
+            "39.3 / 67.8 ; 41.6 / 70.0 ; 40.5 / 69.0",
             "n/a",
             "\u2014"
           ],
           [
             "CLI start \u2192 latents / \u2192 mp4 (s)",
-            "file mtimes: process start \u2192 latents.pt saved by rank 0; latents.pt \u2192 mp4 written (rank teardown + the driver's host VAE load, decode at 3 threads, export)",
-            "138.2 / 100.9",
-            "69.2 / 102.9 ; 69.3 / 101.6 ; 71.9 / 101.6",
+            "file mtimes taken right after each launch: process start \u2192 latents.pt saved by rank 0; latents.pt \u2192 mp4 written (rank teardown + the driver's host VAE load, decode at 6 threads, export)",
+            "136.3 / 60.2",
+            "71.9 / 63.2 ; 74.1 / 60.0 ; 73.1 / 60.4",
             "true cold: 644.4 / 101.8",
             "\u2014"
           ],
@@ -3716,7 +3780,7 @@
             "DiT step median (ms)",
             "inter-step deltas of the real loop, `torch.neuron.synchronize` both sides, step 0 excluded, n=49, rank 0",
             "evidence only: 534.8",
-            "**534.4** (w2 534.3, w3 533.9)",
+            "**534.4** (warm2 534.3, warm3 533.9)",
             "534.6 (pooled, n=294)",
             "554.8 (isolated timer)"
           ],
@@ -3810,20 +3874,20 @@
         },
         "e2e_cli_warm": {
           "n": 3,
-          "mean": 173.0208797876597,
-          "median": 173.01077679698938,
-          "std": 1.03803141338504,
-          "p50": 173.01077679698938,
-          "p90": 174.29722482500074,
-          "min": 171.75463774098898,
-          "max": 174.29722482500074,
+          "mean": 135.20144739699995,
+          "median": 135.22612147299515,
+          "std": 0.5673589406561197,
+          "p50": 135.22612147299515,
+          "p90": 135.8836516779993,
+          "min": 134.49456904000544,
+          "max": 135.8836516779993,
           "samples": [
-            173.01077679698938,
-            171.75463774098898,
-            174.29722482500074
+            135.8836516779993,
+            135.22612147299515,
+            134.49456904000544
           ]
         },
-        "e2e_cli_cold_s": 239.94644736900227,
+        "e2e_cli_cold_s": 197.34646996099036,
         "e2e_cli_true_cold_s": 747.0969491150026,
         "resident_e2e": {
           "n": 6,
@@ -4272,6 +4336,27 @@
             0.5302499660028843
           ]
         },
+        "threads": {
+          "bench_omp": [
+            "3"
+          ],
+          "cli": {
+            "omp": [
+              "unset"
+            ],
+            "driver": [
+              6
+            ]
+          },
+          "true_cold": {
+            "omp": [
+              "3"
+            ],
+            "driver": [
+              3
+            ]
+          }
+        },
         "checks": [
           {
             "launch": "script-cold",
@@ -4715,6 +4800,62 @@
             "hard": false
           },
           {
+            "launch": "cli-cold",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-cold/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "file_rule_cold",
+            "ok": true,
+            "detail": "new .neff 47",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+            "hard": false
+          },
+          {
             "launch": "cli-warm1",
             "name": "exit",
             "ok": true,
@@ -4937,68 +5078,19 @@
             "ok": true,
             "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
             "hard": false
-          },
-          {
-            "launch": "cli-cold",
-            "name": "exit",
-            "ok": true,
-            "detail": "exit 0 timed_out=False",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "rank_lines",
-            "ok": true,
-            "detail": "ranks [0, 1, 2, 3]",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "compile_clean",
-            "ok": true,
-            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "one_writer",
-            "ok": true,
-            "detail": "1 'latents saved' lines",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "video_saved",
-            "ok": true,
-            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-cold/out.mp4']",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "no_failure",
-            "ok": true,
-            "detail": "0 failure lines",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "file_rule_cold",
-            "ok": true,
-            "detail": "new .neff 47",
-            "hard": true
-          },
-          {
-            "launch": "cli-cold",
-            "name": "latents_equal_to_script",
-            "ok": true,
-            "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
-            "hard": false
           }
         ],
         "provenance": {
-          "head": "3763193977f4a508f72f713444d100f65fa88b08",
+          "head": [
+            "3763193977f4a508f72f713444d100f65fa88b08",
+            "386a03181a10a1106fe00d1cf0b29b21e605ac99"
+          ],
           "worktree": "/home/ubuntu/Difflet/.claude/worktrees/neuron-phase1",
+          "difflet_trees": [
+            "54da3e39d41e0e55e42e9ccd2c4f20fd83a80551"
+          ],
           "status_at_runs": [
+            "",
             "M benchmark/bench.py\n M benchmark/models.py\n?? benchmark/adapters/neuron.py\n?? benchmark/neuron_cold_warm.py\n?? benchmark/neuron_wan_bench.py\n?? benchmark/trn2/wan_2_1_neuron.json\n?? benchmark/trn2/wan_2_1_neuron.md\n?? tests/unit/benchmark/",
             "M benchmark/bench.py\n M benchmark/models.py\n?? benchmark/adapters/neuron.py\n?? benchmark/neuron_cold_warm.py\n?? benchmark/neuron_wan_bench.py\n?? tests/unit/benchmark/"
           ],
@@ -5015,9 +5107,9 @@
             "benchmark/neuron_cold_warm.py": [
               "0e976fa718cba79c901e608ea62f11e0015bc34be72f7cdad39f58c68573e14a",
               "b8f5efd0790993199e681e152c13b572c93338358baa1657eb8fd7d7e6a7853a",
+              "a203e5a2f5d21e6d2a181c562261752e47794dfccdd59e26fe24cb621d6eb8ba",
               "42dbb820a17473f9be3ab33f983c705099a972f51c7ed4b9e7a8058a8ed02ebc",
-              "4a4620da45a3cd2ea6a4667c1508e6fa50dfba83e02f58fc99ad6bc74aa8fc78",
-              "53931f5117ce74f1508eb46e95d3c7dc0dc74b8d4645ab614346d4a170813373"
+              "4a4620da45a3cd2ea6a4667c1508e6fa50dfba83e02f58fc99ad6bc74aa8fc78"
             ],
             "benchmark/neuron_wan_bench.py": [
               "adb718622beb1a63b7e836caa4bc1953dc158602e7376052c5d14411d587ae7a"
@@ -5039,11 +5131,12 @@
               "c9c3c1ec997476d8c95ea9f340a3e4efb1858c2c3b9b3df097784ec3a9fad35e"
             ]
           },
+          "loaded_sha256_at_runs": {},
           "launches": 19
         }
       }
     }
   },
   "headline_guidance": 5.0,
-  "plan_note": "Run order: guidance 5, 1; per guidance script-cold, script-warm1, script-warm2, script-warm3, cli-w4check, cli-warm1, cli-warm2, cli-warm3, cli-truecold, cli-cold. Cold compile walls: g=5.0 57.6 s, g=1.0 60.9 s (same block graph and shape; one cold compile per guidance value, each on its own fresh cache): they differ by 5.8%."
+  "plan_note": "Run order (by start time): g=5: script-cold, script-warm1, script-warm2, script-warm3, cli-truecold (09:47-10:40 UTC, HEAD 3763193, cache g5.0-main); then cli-cold, cli-w4check, cli-warm1, cli-warm2, cli-warm3 (11:43-12:17 UTC, HEAD 386a031, cache g5.0-cli-default) | g=1: script-cold, script-warm1, script-warm2, script-warm3, cli-truecold (10:44-11:25 UTC, HEAD 3763193, cache g1.0-main); then cli-cold, cli-warm1, cli-warm2, cli-warm3 (11:57-12:08 UTC, HEAD 386a031, cache g1.0-cli-default). Cold compile walls: g=5.0 57.6 s, g=1.0 60.9 s (same block graph and shape; one cold compile per guidance value, each on its own fresh cache): they differ by 5.8%."
 }

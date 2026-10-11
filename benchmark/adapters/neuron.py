@@ -42,17 +42,25 @@ CACHE_ENV_VARS = tuple(CACHE_ENV_DIRS)
 TORCHRUN_RANK_ENV = ("WORLD_SIZE", "RANK", "LOCAL_RANK", "LOCAL_WORLD_SIZE", "MASTER_ADDR",
                      "MASTER_PORT")
 #: Inherited values that would change what a launch runs; dropped from every launch env.
+#: ``OMP_NUM_THREADS`` too: a launch sets it only when asked (``launch_env(omp_threads=...)``).
 DROPPED_ENV = (*CACHE_ENV_VARS, *TORCHRUN_RANK_ENV, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE",
                "NEURON_RT_NUM_CORES", "NEURON_RT_VIRTUAL_CORE_SIZE",
-               "TORCH_NEURONX_ENABLED_METRIC_TABLES", "TORCH_NEURONX_METRICS_DIR")
-#: Set in every launch env (brief sections 7 P2 and 8.5).
+               "TORCH_NEURONX_ENABLED_METRIC_TABLES", "TORCH_NEURONX_METRICS_DIR",
+               "OMP_NUM_THREADS")
+#: Set in every launch env (brief section 7 P2).
 LAUNCH_ENV = {
     "HF_HUB_OFFLINE": "1",
     "DIFFLET_NO_JEMALLOC": "1",
-    "OMP_NUM_THREADS": "3",
     "DIFFLET_NEURON_PG_TIMEOUT_S": "3600",
     "PYTHONSAFEPATH": "1",
 }
+#: The bench script's ranks run their host work at 3 threads (brief 8.5). The CLI launches
+#: export nothing (ruling D82): torchrun gives its ranks its default and the ``difflet
+#: generate`` driver keeps torch's, so the CLI rows show what a user gets.
+BENCH_OMP_THREADS = "3"
+#: Variables every launch record lists (``None`` = not set in that launch's env).
+RECORDED_ENV = (*LAUNCH_ENV, "OMP_NUM_THREADS", "DIFFLET_COMPILE_CACHE", *CACHE_ENV_VARS,
+                "NKI_ENABLE_TRACE_CACHE", "PYTHONPATH", "NEURON_CC_FLAGS")
 
 # Not anchored to line starts: torchrun runs the ranks with ``python -u``, so a rank's print
 # reaches the shared log as two writes (the text, then its newline) and another rank's line
@@ -76,23 +84,27 @@ _FAILURE_MARKERS = ("Traceback (most recent call last)", "ChildFailedError")
 
 def launch_env(base: Mapping[str, str], *, cache_root: str | os.PathLike[str],
                export_cache_dirs: bool, metrics_dir: str | os.PathLike[str] | None = None,
-               ) -> dict[str, str]:
+               omp_threads: str | None = None) -> dict[str, str]:
     """The environment of one launch.
 
     ``DIFFLET_COMPILE_CACHE`` is ``cache_root`` (one root per benchmark row, D66), the three
     torch-neuronx cache variables are never inherited from ``base`` (brief section 8.2), nor
     are torchrun's rank variables, ``DIFFLET_BACKEND`` / ``DIFFLET_EXEC_MODE`` (the command
-    names them) or a stale core count. ``export_cache_dirs`` (the bare torchrun bench launch)
-    then exports the three locations under ``cache_root`` plus ``NKI_ENABLE_TRACE_CACHE=0``,
-    exactly what ``difflet.cli.runner.run_stage`` exports to its ranks, so they are set before
-    the ranks import torch. A CLI launch leaves that to the launcher. ``metrics_dir`` turns on
+    names them), a stale core count or ``OMP_NUM_THREADS``, which is set only to
+    ``omp_threads`` when given (the bench launch: ``BENCH_OMP_THREADS``; a CLI launch: unset,
+    D82). ``export_cache_dirs`` (the bare torchrun bench launch) then exports the three
+    locations under ``cache_root`` plus ``NKI_ENABLE_TRACE_CACHE=0``, exactly what
+    ``difflet.cli.runner.run_stage`` exports to its ranks, so they are set before the ranks
+    import torch. A CLI launch leaves that to the launcher. ``metrics_dir`` turns on
     torch-neuronx's per-graph CSV (``graph_stats``) into that directory.
     """
     env = {k: v for k, v in base.items() if k not in DROPPED_ENV}
-    leaked = [name for name in CACHE_ENV_VARS if name in env]
+    leaked = [name for name in (*CACHE_ENV_VARS, "OMP_NUM_THREADS") if name in env]
     if leaked:  # pragma: no cover - DROPPED_ENV covers them; kept as the stated invariant
-        raise AssertionError(f"inherited cache locations survived: {leaked}")
+        raise AssertionError(f"inherited variables survived: {leaked}")
     env.update(LAUNCH_ENV)
+    if omp_threads is not None:
+        env["OMP_NUM_THREADS"] = str(omp_threads)
     env["PYTHONPATH"] = str(REPO_ROOT)
     env["DIFFLET_COMPILE_CACHE"] = os.path.abspath(os.fspath(cache_root))
     if export_cache_dirs:
@@ -354,7 +366,10 @@ def summarize_bench_launch(results: Sequence[Mapping[str, Any]], *, steps: int,
         n = min(len(p["step_deltas_s"]) for p in per_rank)
         rank_max_series = [max(p["step_deltas_s"][k] for p in per_rank) for k in range(n)]
         hashes = [p["latents_sha256"] for p in per_rank]
-        encodes = {e["tag"]: e["seconds"] for e in it0["encodes"]}
+        prompt_encodes = [e["seconds"] for e in it0["encodes"] if e["tag"] == "prompt"]
+        negative_encodes = [e["seconds"] for e in it0["encodes"] if e["tag"] == "negative"]
+        encodes = {"prompt": prompt_encodes[0] if prompt_encodes else None,
+                   "negative": sum(negative_encodes) if negative_encodes else None}
         decode = it0.get("decode") or {}
         timings = decode.get("timings") or {}
         checks = {
@@ -472,31 +487,144 @@ def counter_rule(summary: Mapping[str, Any], expect: str, new_neffs: int) -> tup
 # ------------------------------------------------------------------------------ processes
 
 
-def run_logged(cmd: Sequence[str], env: Mapping[str, str], log: Path, *, timeout: float,
-               stop_grace: float = 90.0) -> dict[str, Any]:
-    """Run ``cmd`` with stdout+stderr into ``log``; wall clock and epochs around it.
+#: How long a stopped launch gets to stop its ranks before it is killed: torchrun forwards the
+#: signal, waits TORCH_ELASTIC_SHUTDOWN_TIMEOUT (30 s) and SIGKILLs the ranks still running;
+#: ``difflet generate`` waits for its torchrun up to 60 s more (difflet/cli/runner.py).
+STOP_GRACE_S = 90.0
 
-    On timeout the process gets one SIGINT (Ctrl-C: torchrun / the CLI stop their ranks), up
-    to ``stop_grace`` seconds, then SIGKILL (D39)."""
+
+def descendants(root: int, parents: Mapping[int, int]) -> list[int]:
+    """Every pid below ``root`` in ``parents`` (pid -> parent pid), breadth first."""
+    children: dict[int, list[int]] = {}
+    for pid, ppid in parents.items():
+        children.setdefault(ppid, []).append(pid)
+    out, queue = [], list(children.get(root, []))
+    while queue:
+        pid = queue.pop(0)
+        if pid not in out:
+            out.append(pid)
+            queue.extend(children.get(pid, []))
+    return out
+
+
+def process_parents() -> dict[int, int]:
+    """pid -> parent pid of every process, from ``/proc/<pid>/stat``."""
+    parents = {}
+    for stat in Path("/proc").glob("[0-9]*/stat"):
+        try:
+            text = stat.read_text()
+        except OSError:
+            continue
+        # "pid (comm) state ppid ...": comm may contain spaces and parentheses
+        parents[int(text.split(" ", 1)[0])] = int(text.rsplit(")", 1)[1].split()[1])
+    return parents
+
+
+def process_stat(pid: int) -> tuple[str, str] | None:
+    """``(state, start time in clock ticks)`` of a live process, from ``/proc/<pid>/stat``;
+    None when it is gone. The start time tells a pid from a later process reusing it."""
+    try:
+        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    except (OSError, IndexError):
+        return None
+    return fields[0], fields[19]
+
+
+def _tree(pid: int) -> dict[int, str | None]:
+    """The descendants of ``pid`` with their start times."""
+    out = {}
+    for child in descendants(pid, process_parents()):
+        stat = process_stat(child)
+        out[child] = stat[1] if stat else None
+    return out
+
+
+def wait_through_interrupts(proc, timeout: float | None) -> int | None:
+    """``proc.wait(timeout)`` that keeps waiting through repeated interrupts: another Ctrl-C or
+    SIGTERM while a launch is being stopped must not abandon the stop (as
+    ``difflet.cli.runner._await_torchrun_exit`` keeps waiting). None when ``timeout`` expires;
+    ``timeout=None`` waits for the exit."""
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        remaining = None if deadline is None else max(deadline - time.monotonic(), 0.0)
+        try:
+            return proc.wait(timeout=remaining)
+        except KeyboardInterrupt:
+            print(f"[neuron bench] interrupted again; still stopping launch pid {proc.pid}",
+                  file=sys.stderr, flush=True)
+        except subprocess.TimeoutExpired:
+            return None
+
+
+def stop_launch(proc: subprocess.Popen, grace: float = STOP_GRACE_S) -> int:
+    """Stop a launch started in a session of its own (``run_logged``) without orphaning ranks.
+
+    SIGINT goes to the launch's whole process group, as a terminal's Ctrl-C would: torchrun
+    (or ``difflet generate`` and the torchrun it started) forwards it to its ranks, which run
+    in sessions of their own. After ``grace`` seconds whatever is left gets SIGKILL: the
+    process group and every descendant seen before or after the SIGINT (the ranks are not in
+    the group), with a warning naming them. Repeated interrupts do not cut either wait short.
+    Once the launch has exited, by itself or killed, every descendant seen before that is
+    still running (the same pid with the same start time) is killed too: a launcher that gave
+    up on its torchrun can leave ranks behind. Returns the launch's exit code."""
     import signal
 
+    seen = _tree(proc.pid)
+    try:
+        os.killpg(proc.pid, signal.SIGINT)
+    except ProcessLookupError:
+        pass
+    code = wait_through_interrupts(proc, grace)
+    if code is None:
+        seen.update(_tree(proc.pid))
+        print(f"[neuron bench] launch pid {proc.pid} did not stop {grace:.0f}s after SIGINT; "
+              f"killing its process group and descendants {sorted(seen)}", file=sys.stderr,
+              flush=True)
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        code = wait_through_interrupts(proc, None)
+    left = []
+    for pid, start in sorted(seen.items()):
+        stat = process_stat(pid)
+        if start is not None and stat is not None and stat[1] == start and stat[0] != "Z":
+            left.append(pid)
+    if left:
+        print(f"[neuron bench] launch pid {proc.pid} exited and left {left} running; killing "
+              "them", file=sys.stderr, flush=True)
+        for pid in left:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+    return code
+
+
+def run_logged(cmd: Sequence[str], env: Mapping[str, str], log: Path, *, timeout: float,
+               stop_grace: float = STOP_GRACE_S, popen=subprocess.Popen) -> dict[str, Any]:
+    """Run ``cmd`` with stdout+stderr into ``log``; wall clock and epochs around it.
+
+    The launch runs in a session of its own, so only this function signals it. On timeout,
+    and when this process is interrupted (KeyboardInterrupt; the driver maps SIGTERM to it),
+    ``stop_launch`` stops it the way ``difflet.cli.runner._run_torchrun`` stops torchrun:
+    SIGINT to the launch, a bounded wait for its ranks to stop, then SIGKILL of what is left
+    (D39). An interrupt is re-raised after the launch has stopped."""
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "w") as handle:
         start_epoch = time.time()
         start = time.perf_counter()
-        proc = subprocess.Popen(list(cmd), env=dict(env), stdout=handle,
-                                stderr=subprocess.STDOUT)
+        proc = popen(list(cmd), env=dict(env), stdout=handle, stderr=subprocess.STDOUT,
+                     start_new_session=True)
         timed_out = False
         try:
             code = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
-            proc.send_signal(signal.SIGINT)
-            try:
-                code = proc.wait(timeout=stop_grace)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                code = proc.wait()
+            code = stop_launch(proc, stop_grace)
+        except BaseException:
+            stop_launch(proc, stop_grace)
+            raise
         wall = time.perf_counter() - start
     return {"cmd": list(cmd), "exit_code": code, "wall_s": wall, "start_epoch": start_epoch,
             "end_epoch": start_epoch + wall, "timed_out": timed_out, "log": str(log)}
@@ -531,8 +659,11 @@ def busy_processes(ps_output: str, ignore_pids: Sequence[int] = ()) -> list[str]
     lines = []
     for line in ps_output.splitlines()[1:]:
         parts = line.strip().split(None, 1)
-        if len(parts) == 2 and parts[0].isdigit() and int(parts[0]) not in ignore_pids \
-                and _BUSY.search(parts[1]) and "neuron_wan_bench.py --inspect" not in parts[1]:
+        if len(parts) != 2 or not parts[0].isdigit() or int(parts[0]) in ignore_pids:
+            continue
+        if os.path.basename(parts[1].split(None, 1)[0]) == "grep":
+            continue  # someone's `ps | grep -E 'torchrun|...'` (the D9 check drops it too)
+        if _BUSY.search(parts[1]) and "neuron_wan_bench.py --inspect" not in parts[1]:
             lines.append(line.strip())
     return lines
 
@@ -560,6 +691,7 @@ class NeuronAdapter(BackendAdapter):
         self.iters = iters
         self._model_dir: str | None = None
         self._launches = 0
+        self._torch_threads: dict[str | None, int | None] = {}
 
     def device_info(self) -> str:
         try:
@@ -616,7 +748,7 @@ class NeuronAdapter(BackendAdapter):
         out_dir.mkdir(parents=True, exist_ok=True)
         root = cache_root or self.cache_dir
         env = launch_env(os.environ, cache_root=root, export_cache_dirs=True,
-                         metrics_dir=out_dir)
+                         metrics_dir=out_dir, omp_threads=BENCH_OMP_THREADS)
         env["DIFFLET_DISABLE_PREWARM"] = "1"
         cmd = bench_command(self.python, model_dir=self.model_dir(spec), out_dir=out_dir,
                             steps=spec.steps, guidance_scale=spec.guidance_scale or 1.0,
@@ -625,14 +757,16 @@ class NeuronAdapter(BackendAdapter):
                             num_frames=spec.num_frames, expect=expect,
                             revision=spec.revision)
         launch = run_logged(cmd, env, out_dir / "launch.log", timeout=timeout)
-        launch["env"] = {k: env.get(k) for k in (*LAUNCH_ENV, "DIFFLET_COMPILE_CACHE",
-                                                 *CACHE_ENV_VARS, "NKI_ENABLE_TRACE_CACHE",
-                                                 "PYTHONPATH", "NEURON_CC_FLAGS")}
+        launch["env"] = {k: env.get(k) for k in RECORDED_ENV}
         if launch["exit_code"] != 0:
             return {"launch": launch, "summary": None}
-        results = read_rank_results(out_dir)
-        summary = summarize_bench_launch(results, steps=spec.steps,
-                                         guidance_scale=spec.guidance_scale or 1.0)
+        try:
+            results = read_rank_results(out_dir)
+            summary = summarize_bench_launch(results, steps=spec.steps,
+                                             guidance_scale=spec.guidance_scale or 1.0)
+        except Exception as exc:  # noqa: BLE001 - e.g. a rank wrote no JSON despite exit 0
+            return {"launch": launch, "summary": None,
+                    "error": f"{type(exc).__name__}: {exc}"}
         return {"launch": launch, "summary": summary}
 
     def run_generate(self, spec) -> dict:
@@ -670,7 +804,9 @@ class NeuronAdapter(BackendAdapter):
     def run_cli_generate(self, spec, out_dir: Path, *, cache_root: str | None = None,
                          command: list[str] | None = None, timeout: float = 3600.0
                          ) -> dict[str, Any]:
-        """One ``difflet generate --backend neuron`` (or ``command``): wall + parsed lines."""
+        """One ``difflet generate --backend neuron`` (or ``command``) in the user's default
+        environment (no ``OMP_NUM_THREADS``, D82): wall, parsed lines, hashes, and what a
+        re-render needs without touching the files again (``timeline``, ``threads``)."""
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         root = cache_root or self.cache_dir
@@ -679,16 +815,47 @@ class NeuronAdapter(BackendAdapter):
         cmd = command or cli_generate_command(self.python, spec, output=mp4, cache_dir=root,
                                               work_dir=work)
         launch = run_logged(cmd, env, out_dir / "cli.log", timeout=timeout)
-        launch["env"] = {k: env.get(k) for k in (*LAUNCH_ENV, "DIFFLET_COMPILE_CACHE",
-                                                 *CACHE_ENV_VARS, "PYTHONPATH",
-                                                 "NEURON_CC_FLAGS")}
+        launch["env"] = {k: env.get(k) for k in RECORDED_ENV}
         text = Path(launch["log"]).read_text(errors="replace")
         parsed = parse_cli_log(text)
         latents = work / "latents.pt"
         inspected = (inspect_outputs(self.python, env, latents, mp4 if mp4.exists() else None)
                      if latents.exists() else {"error": "no latents.pt"})
         return {"launch": launch, "parsed": parsed, "checks": cli_checks(parsed),
-                "inspect": inspected, "mp4": str(mp4), "latents": str(latents)}
+                "inspect": inspected, "mp4": str(mp4), "latents": str(latents),
+                "files": {"latents": "work/latents.pt", "mp4": "out.mp4", "log": "cli.log"},
+                "timeline": file_timeline(launch, latents, mp4),
+                "threads": {"launch_env_omp_num_threads": env.get("OMP_NUM_THREADS"),
+                            "driver_torch_threads": self.torch_threads(env),
+                            "rank_omp_lines": torchrun_omp_lines(text)}}
+
+    def torch_threads(self, env: Mapping[str, str]) -> int | None:
+        """``torch.get_num_threads()`` of a process started with ``env`` (the CLI driver's,
+        which decodes the VAE on the host): measured once per ``OMP_NUM_THREADS`` value."""
+        key = env.get("OMP_NUM_THREADS")
+        if key not in self._torch_threads:
+            out = subprocess.run([self.python, "-I", "-c",
+                                  "import torch; print(torch.get_num_threads())"],
+                                 env=dict(env), capture_output=True, text=True, timeout=300)
+            lines = out.stdout.strip().splitlines()
+            self._torch_threads[key] = int(lines[-1]) if out.returncode == 0 and lines else None
+        return self._torch_threads[key]
+
+
+def file_timeline(launch: Mapping[str, Any], latents: Path, mp4: Path) -> dict[str, float] | None:
+    """A CLI launch split by its files' mtimes, taken right after it: process start ->
+    latents.pt saved by rank 0 (spawn, load, generate), latents.pt -> mp4 written (rank
+    teardown, then the driver's host VAE load + decode + export), mp4 -> process exit."""
+    if not latents.is_file() or not mp4.is_file():
+        return None
+    t_latents, t_mp4 = latents.stat().st_mtime, mp4.stat().st_mtime
+    return {"to_latents_s": t_latents - launch["start_epoch"], "decode_s": t_mp4 - t_latents,
+            "after_mp4_s": launch["end_epoch"] - t_mp4}
+
+
+def torchrun_omp_lines(text: str) -> list[str]:
+    """torchrun's own note when it sets ``OMP_NUM_THREADS=1`` for its ranks (unset in env)."""
+    return [line.strip() for line in text.splitlines() if "OMP_NUM_THREADS" in line][:2]
 
 
 __all__ = ["NeuronAdapter"]

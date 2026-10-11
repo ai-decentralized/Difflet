@@ -130,25 +130,43 @@ def cold_results(**kwargs) -> list[dict[str, Any]]:
     return out
 
 
+HOST = {"device": "trn2.3xlarge / 4 NeuronCores (logical config 2) / 96 GiB/device",
+        "toolchain": {"torch": "2.14.0+cpu"}, "sudo_available": True, "epoch": 1.0}
+TREE = "54da3e39d41e0e55e42e9ccd2c4f20fd83a80551"
+
+
+def provenance(head: str = "3763193977f4a508f72f713444d100f65fa88b08") -> dict[str, Any]:
+    return {"head": head, "worktree": "/wt", "status": "?? benchmark/neuron_wan_bench.py",
+            "difflet_tree": TREE, "difflet_diff_vs_head": "",
+            "files_sha256": {"benchmark/neuron_wan_bench.py": "aa"},
+            "loaded_sha256": {"benchmark/neuron_cold_warm.py": "bb"},
+            "neuronx_cc": ["NeuronX Compiler version 2.28"], "neuron_cc_flags": None,
+            "python": "/venv/bin/python"}
+
+
 def launch_record(summary, *, name: str, guidance: float, kind: str = "bench",
                   expect: str = "warm", wall: float = 400.0, new_neffs=None,
-                  start_epoch: float = 990.0, checks=None, ok: bool = True) -> dict[str, Any]:
+                  start_epoch: float = 990.0, checks=None, ok: bool = True,
+                  omp: str | None = "3") -> dict[str, Any]:
     return {
         "launch": {"name": name, "kind": kind, "guidance": guidance, "cache": "main",
                    "expect": expect, "fresh_cache": expect == "cold", "drop_page_cache": False},
         "run": {"exit_code": 0, "wall_s": wall, "start_epoch": start_epoch,
-                "end_epoch": start_epoch + wall, "timed_out": False},
+                "end_epoch": start_epoch + wall, "timed_out": False,
+                "env": {"OMP_NUM_THREADS": omp}},
         "summary": copy.deepcopy(summary),
         "state_before": {"meminfo": {"Cached_gib": 80.0}},
         "new_neffs": dict(new_neffs or {}),
         "checks": list(checks or [{"name": "exit", "ok": True, "detail": "", "hard": True}]),
-        "ok": ok,
+        "ok": ok, "host": dict(HOST), "provenance": provenance(),
     }
 
 
 def cli_record(*, name: str, guidance: float, wall: float, kind: str = "cli",
                expect: str = "warm", new_neffs=None, tensor: str = LATENTS,
-               ok: bool = True, drop=None) -> dict[str, Any]:
+               ok: bool = True, drop=None, omp: str | None = None,
+               driver_threads: int = 6,
+               head: str = "386a03181a10a1106fe00d1cf0b29b21e605ac99") -> dict[str, Any]:
     rank_lines = {str(r): {"backend": "neuron", "world": 4, "exec_mode": "compile",
                            "compiled_blocks": 40, "unwarmed_shapes": "[]",
                            "load_fallbacks": "[]", "generate_fallbacks": "[]",
@@ -164,7 +182,10 @@ def cli_record(*, name: str, guidance: float, wall: float, kind: str = "cli",
             "mp4": {"sha256": MP4}}},
         "new_neffs": dict(new_neffs or {}),
         "checks": [{"name": "exit", "ok": ok, "detail": "", "hard": True}],
-        "ok": ok,
+        "ok": ok, "host": dict(HOST), "provenance": provenance(head),
+        "timeline": {"to_latents_s": wall - 61.0, "decode_s": 60.0, "after_mp4_s": 1.0},
+        "threads": {"launch_env_omp_num_threads": omp, "driver_torch_threads": driver_threads,
+                    "rank_omp_lines": []},
     }
     if drop is not None:
         record["page_cache_drop"] = drop

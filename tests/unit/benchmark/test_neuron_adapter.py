@@ -1,11 +1,16 @@
-"""CPU tests of the neuron benchmark adapter's pure parts: launch environments, command lines,
-the CLI log parser, the per-launch summary and the counter rule (W6)."""
+"""CPU tests of the neuron benchmark adapter: launch environments, command lines, the CLI log
+parser, the per-launch summary, the counter rule, and how a launch is stopped (W6)."""
 
 from __future__ import annotations
 
 import json
 import math
 import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
 
 import pytest
 
@@ -31,7 +36,8 @@ def _shell():
 
 
 def test_bench_env_never_inherits_the_shells_cache_locations(tmp_path):
-    env = na.launch_env(_shell(), cache_root=tmp_path / "row", export_cache_dirs=True)
+    env = na.launch_env(_shell(), cache_root=tmp_path / "row", export_cache_dirs=True,
+                        omp_threads=na.BENCH_OMP_THREADS)
     root = str(tmp_path / "row")
     assert env["DIFFLET_COMPILE_CACHE"] == root
     assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == os.path.join(root, "neuron", "neff")
@@ -53,6 +59,14 @@ def test_cli_env_leaves_the_cache_locations_to_the_launcher(tmp_path):
     env = na.launch_env(_shell(), cache_root=tmp_path / "row", export_cache_dirs=False)
     assert env["DIFFLET_COMPILE_CACHE"] == str(tmp_path / "row")
     assert not any(name in env for name in CACHE_VARS)
+
+
+def test_cli_env_is_the_users_default_threads(tmp_path):
+    # D82: no OMP_NUM_THREADS, not even the shell's 12, so torchrun and the driver keep theirs
+    env = na.launch_env(_shell(), cache_root=tmp_path, export_cache_dirs=False)
+    assert "OMP_NUM_THREADS" not in env
+    assert "OMP_NUM_THREADS" not in na.LAUNCH_ENV and na.BENCH_OMP_THREADS == "3"
+    assert "OMP_NUM_THREADS" in na.RECORDED_ENV  # recorded as None for a CLI launch
 
 
 def test_metrics_dir_turns_on_the_graph_stats_table(tmp_path):
@@ -334,6 +348,142 @@ def test_device_and_ps_busy_detection():
         "100 /venv/bin/python -m torch.distributed.run --standalone x",
         "103 /venv/bin/python /wt/benchmark/neuron_wan_bench.py --model-dir s"]
     assert na.busy_processes(ps, ignore_pids=[100, 103]) == []
+    # an operator's `ps | grep -E 'torchrun|...'` is not a device job (M-7)
+    grep = "    PID COMMAND\n    104 grep -E torchrun|neuron_wan_bench\n" \
+           "    105 /usr/bin/grep --color=auto torchrun\n"
+    assert na.busy_processes(grep) == []
+
+
+def test_descendants_walks_the_whole_tree():
+    parents = {10: 1, 11: 10, 12: 10, 13: 11, 14: 13, 20: 1}
+    assert na.descendants(10, parents) == [11, 12, 13, 14]
+    assert na.descendants(20, parents) == []
+    assert na.process_parents()[os.getpid()] == os.getppid()
+
+
+class _FakeProc:
+    pid = 4242
+
+    def __init__(self, waits):
+        self.waits = list(waits)
+
+    def wait(self, timeout=None):
+        outcome = self.waits.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+
+def test_run_logged_stops_the_launch_before_reraising_an_interrupt(tmp_path, monkeypatch):
+    stopped = []
+    monkeypatch.setattr(na, "stop_launch", lambda proc, grace: stopped.append(grace) or -2)
+    proc = _FakeProc([KeyboardInterrupt()])
+    popen_kwargs = {}
+
+    def popen(cmd, **kwargs):
+        popen_kwargs.update(kwargs)
+        return proc
+
+    with pytest.raises(KeyboardInterrupt):
+        na.run_logged(["torchrun"], {}, tmp_path / "x.log", timeout=10, stop_grace=5,
+                      popen=popen)
+    assert stopped == [5]  # the ranks were stopped before the interrupt propagated
+    assert popen_kwargs["start_new_session"] is True  # only run_logged signals the launch
+
+    stopped.clear()
+    out = na.run_logged(["torchrun"], {}, tmp_path / "y.log", timeout=10, stop_grace=5,
+                        popen=lambda cmd, **kw: _FakeProc([subprocess.TimeoutExpired("x", 10)]))
+    assert out["timed_out"] and out["exit_code"] == -2 and stopped == [5]
+
+
+def test_stop_launch_kills_ranks_that_left_the_process_group(tmp_path):
+    # A stand-in for torchrun: ignores SIGINT and starts a "rank" in a session of its own
+    # (as torchrun does) that ignores SIGINT too; neither stops by itself.
+    rank_pid = tmp_path / "rank.pid"
+    code = (
+        "import signal, subprocess, sys, time\n"
+        "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+        "rank = subprocess.Popen([sys.executable, '-c', 'import signal, time; "
+        "signal.signal(signal.SIGINT, signal.SIG_IGN); time.sleep(120)'], "
+        "start_new_session=True)\n"
+        f"open({str(rank_pid)!r}, 'w').write(str(rank.pid))\n"
+        "time.sleep(120)\n")
+    out = na.run_logged([sys.executable, "-c", code], dict(os.environ), tmp_path / "l.log",
+                        timeout=3, stop_grace=1)
+    assert out["timed_out"] and out["exit_code"] == -signal.SIGKILL
+    pid = int(rank_pid.read_text())
+    deadline = time.time() + 10
+    while time.time() < deadline and _alive(pid):
+        time.sleep(0.1)
+    assert not _alive(pid)  # the rank did not outlive its launcher
+
+
+def test_a_repeated_interrupt_does_not_abandon_the_wait():
+    proc = _FakeProc([KeyboardInterrupt(), KeyboardInterrupt(), 0])
+    assert na.wait_through_interrupts(proc, 30) == 0  # two more Ctrl-C, still waited
+    late = _FakeProc([KeyboardInterrupt(), subprocess.TimeoutExpired("x", 1)])
+    assert na.wait_through_interrupts(late, 1) is None  # -> the SIGKILL fallback follows
+
+
+def test_stop_launch_kills_a_rank_left_behind_by_a_launcher_that_exited(tmp_path):
+    # The launcher exits on SIGINT within the grace period but leaves its session-detached
+    # "rank" (which ignores SIGINT) running, as a CLI that gave up on its torchrun would.
+    rank_pid = tmp_path / "rank.pid"
+    code = (
+        "import signal, subprocess, sys, time\n"
+        "signal.signal(signal.SIGINT, lambda *a: sys.exit(0))\n"
+        "rank = subprocess.Popen([sys.executable, '-c', 'import signal, time; "
+        "signal.signal(signal.SIGINT, signal.SIG_IGN); time.sleep(120)'], "
+        "start_new_session=True)\n"
+        f"open({str(rank_pid)!r}, 'w').write(str(rank.pid))\n"
+        "time.sleep(120)\n")
+    out = na.run_logged([sys.executable, "-c", code], dict(os.environ), tmp_path / "l.log",
+                        timeout=3, stop_grace=30)
+    assert out["timed_out"] and out["exit_code"] == 0  # the launcher stopped by itself
+    pid = int(rank_pid.read_text())
+    deadline = time.time() + 10
+    while time.time() < deadline and _alive(pid):
+        time.sleep(0.1)
+    assert not _alive(pid)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except OSError:
+        return False
+    return state != "Z"
+
+
+def test_cli_timeline_and_torchrun_note(tmp_path):
+    latents, mp4 = tmp_path / "latents.pt", tmp_path / "out.mp4"
+    latents.write_text("x")
+    mp4.write_text("y")
+    os.utime(latents, (1000.0, 1000.0))
+    os.utime(mp4, (1060.0, 1060.0))
+    assert na.file_timeline({"start_epoch": 900.0, "end_epoch": 1061.0}, latents, mp4) == {
+        "to_latents_s": 100.0, "decode_s": 60.0, "after_mp4_s": 1.0}
+    assert na.file_timeline({"start_epoch": 0, "end_epoch": 1}, tmp_path / "no", mp4) is None
+    log = "a\nSetting OMP_NUM_THREADS environment variable for each process to be 1 ...\nb\n"
+    assert na.torchrun_omp_lines(log) == [
+        "Setting OMP_NUM_THREADS environment variable for each process to be 1 ..."]
+
+
+def test_bench_all_skips_entries_for_other_backends(monkeypatch):
+    from benchmark import bench
+
+    ran = []
+    monkeypatch.setattr(bench, "run_one", lambda slug, backend, **kw: ran.append(slug))
+    monkeypatch.setattr(bench, "write_outputs", lambda slug, res: None)
+    monkeypatch.setattr(sys, "argv", ["bench", "--all", "--backend", "trainium"])
+    assert bench.main() == 0
+    assert "wan_2_1_neuron" not in ran and "wan_2_1" in ran
+    ran.clear()
+    monkeypatch.setattr(sys, "argv", ["bench", "--all", "--backend", "neuron"])
+    bench.main()
+    assert "wan_2_1_neuron" in ran and "wan_2_1" in ran  # backends=None: any backend
+    assert MATRIX["wan_2_1_neuron"].backends == ("neuron",)
+    assert all(cfg.backends is None for slug, cfg in MATRIX.items() if slug != "wan_2_1_neuron")
 
 
 def test_adapter_compiles_nothing_ahead_of_time(tmp_path):
