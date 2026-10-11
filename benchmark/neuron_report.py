@@ -146,7 +146,8 @@ def w6_rows(n: Mapping[str, Any]) -> list[list[str]]:
                f"{_joined(th['cli']['driver'])} threads")
     rows.append([
         "e2e (s), CLI", "`difflet generate --backend neuron` process wall (torchrun ranks, "
-        f"then the driver's host VAE decode), in the user's default environment ({cli_env})",
+        f"then the driver's host VAE decode), in the user's default thread environment "
+        f"({cli_env}); the launch's other variables: Reproduction (neuron)",
         (f"{_f(cc['run']['wall_s'])} (own fresh cache; {len(cc['new_neffs'])} new .neff)"
          if cc else "—"),
         _range_text(n["cli_warm_wall"]), "n/a", TRN2["e2e"]])
@@ -446,14 +447,22 @@ def render_markdown(results: Mapping[str, Mapping[str, Any]], *, plan_note: str)
           "# re-render this file from the recorded launches (no device):",
           "PYTHONSAFEPATH=1 PYTHONPATH=<worktree> <venv>/bin/python -m benchmark.neuron_cold_warm \\",
           "    --record-dir <records> --assemble-only",
-          "# the user-facing command each CLI row timed:",
-          "difflet generate --backend neuron --exec-mode compile --host-vae \\",
+          "# the user-facing command each CLI row timed (`python -m difflet.cli.main` is the",
+          "# `difflet` console script), in the environment every launch had: the adapter's",
+          "# LAUNCH_ENV (benchmark/adapters/neuron.py), the row's cache root as",
+          "# DIFFLET_COMPILE_CACHE and --cache-dir, PYTHONPATH, and no OMP_NUM_THREADS (the",
+          "# tables' \"user's default environment\" means these default thread counts only):",
+          " ".join(f"{name}={value}" for name, value in na.LAUNCH_ENV.items()) + " \\",
+          "    DIFFLET_COMPILE_CACHE=<cache> PYTHONPATH=<worktree> \\",
+          "    <venv>/bin/python -m difflet.cli.main generate --backend neuron --exec-mode compile "
+          "--host-vae \\",
           "    --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision "
           "38ec498cb3208fb688890f8cc7e94ede2cbd7f68 \\",
           "    --tp-degree 4 --cp-degree 1 --height 480 --width 832 --num-frames 9 \\",
           "    --steps 50 --guidance-scale 5.0 --seed 42 \\",
           "    --prompt \"a cinematic shot of a red fox running through a snowy forest\" "
-          "--output out.mp4", "```", ""]
+          "--output out.mp4 \\",
+          "    --cache-dir <cache> --work-dir <work> --keep-work-dir", "```", ""]
     for k in order:
         body = neutralize_aot_wording(drop_section(report.render(results[k]), "## Reproduction"))
         L += [f"## Appendix: generic report, guidance {k} (`benchmark/report.py`)", "",

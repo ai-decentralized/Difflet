@@ -511,6 +511,38 @@ def test_render_markdown_puts_guidance_five_first():
     assert "cold start** (NEFF cache empty; page cache hot)" in appendix
 
 
+def test_reproduction_block_shows_the_launch_environment():
+    """Final review M-2: the block showed a bare `difflet generate` while every CLI row ran
+    with the adapter's LAUNCH_ENV; "default environment" in the tables is the thread counts."""
+    records = {**_records(1.0), **_records(5.0)}
+    results = {f"{g:.1f}": _result(records, g) for g in (5.0, 1.0)}
+    md = nr.render_markdown(results, plan_note="Run order: guidance 5, 1.")
+    block = md[md.index("## Reproduction (neuron)"):md.index("## Appendix")]
+    assert ("HF_HUB_OFFLINE=1 DIFFLET_NO_JEMALLOC=1 DIFFLET_NEURON_PG_TIMEOUT_S=3600 "
+            "PYTHONSAFEPATH=1 \\\n    DIFFLET_COMPILE_CACHE=<cache> PYTHONPATH=<worktree> \\\n"
+            "    <venv>/bin/python -m difflet.cli.main generate --backend neuron") in block
+    assert all(f"{name}={value}" in block for name, value in na.LAUNCH_ENV.items())
+    assert "--cache-dir <cache> --work-dir <work> --keep-work-dir\n```" in block
+    assert "means these default thread counts only" in block
+    for k in ("5.0", "1.0"):
+        cli = {r[0]: r for r in results[k]["neuron"]["table"]}["e2e (s), CLI"][1]
+        assert "in the user's default thread environment (OMP_NUM_THREADS unset" in cli
+        assert "other variables: Reproduction (neuron)" in cli
+
+
+def test_notes_say_the_cli_rows_ran_without_jemalloc_and_what_the_fix_round_ran():
+    records = _records(5.0)
+    [note] = [n for n in _result(records, 5.0)["notes"] if n.startswith("jemalloc: ")]
+    assert note.startswith("jemalloc: every CLI row's recorded launch env had "
+                           "DIFFLET_NO_JEMALLOC=1 (Reproduction).")
+    assert note.endswith(cw.FIX_ROUND_LAUNCHES + ".")
+    assert "cold exit 0, 220.9 s, 47 new .neff" in note and "e639f3146c36" in note
+    # read from the records, not assumed: a row without it shows up
+    records["g5.0/cli-warm2"]["cli"]["launch"]["env"].pop("DIFFLET_NO_JEMALLOC")
+    [note] = [n for n in _result(records, 5.0)["notes"] if n.startswith("jemalloc: ")]
+    assert "DIFFLET_NO_JEMALLOC=1/None (Reproduction)" in note
+
+
 def test_neutralize_aot_wording():
     text = ("| **e2e generate — cold start** (page cache dropped) | **1 s** |\n\n"
             "> Cold vs warm: **a → b**. the gap is the one-time cold disk read.\n\nnext")

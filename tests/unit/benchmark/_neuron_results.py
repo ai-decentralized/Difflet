@@ -177,7 +177,10 @@ def cli_record(*, name: str, guidance: float, wall: float, kind: str = "cli",
                    "drop_page_cache": drop is not None},
         "run": {"exit_code": 0, "wall_s": wall, "start_epoch": 0.0, "end_epoch": wall,
                 "timed_out": False},
-        "cli": {"parsed": {"ranks": rank_lines}, "inspect": {
+        "cli": {"launch": {"env": {"HF_HUB_OFFLINE": "1", "DIFFLET_NO_JEMALLOC": "1",
+                                   "DIFFLET_NEURON_PG_TIMEOUT_S": "3600",
+                                   "PYTHONSAFEPATH": "1", "OMP_NUM_THREADS": omp}},
+                "parsed": {"ranks": rank_lines}, "inspect": {
             "tensor_sha256": tensor, "file_sha256": "e639f3146c3619406267c317c9798b8ead7300535c7835a7d7c7c0de54769028",
             "mp4": {"sha256": MP4}}},
         "new_neffs": dict(new_neffs or {}),
