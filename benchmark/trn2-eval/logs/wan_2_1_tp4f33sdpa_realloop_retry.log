@@ -1,0 +1,99 @@
+[realloop] wan_2_1_tp4f33sdpa: building pipeline (--tp-degree 4 --cp-degree 1 --attention-impl sdpa, compiled NEFF, skip_compile)...
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[realloop] wan_2_1_tp4f33sdpa: pipeline ready in 5.0s; timing NeuronWanBackboneApplication.__call__ per step
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.03s for 4 shard(s) (10836.7 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 9.89s (device init 9.89s, total load_weights 9.92s)
+INFO:Neuron:Skipping model warmup
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.52s for 4 shard(s) (28602.8 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+2026-Oct-11 07:49:06.572238 87725:87857 ERROR  NMGR:dlr_kelf_stage                          Failed to create logical core info for subgraph 0 to 1
+2026-Oct-11 07:49:06.572294 87725:87857 ERROR  NMGR:kmgr_load_nn_internal_v2                Failed to stage graph to NeuronCore
+2026-Oct-11 07:49:06.572304 87725:87857 ERROR  NMGR:kmgr_load_nn_post_metrics               Failed to load NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-6ad264b9/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_16bbce081fe57a5ee4c0+fc86724b.neff, err: 4
+2026-Oct-11 07:49:06.572314 87725:87857 ERROR   NRT:nrt_infodump                            Neuron runtime information - please include in any support request:
+2026-Oct-11 07:49:06.572321 87725:87857 ERROR   NRT:nrt_infodump                            ------------->8------------[ cut here ]------------>8-------------
+2026-Oct-11 07:49:06.572328 87725:87857 ERROR   NRT:nrt_infodump                            NRT version: 2.34.10.0 (ac18d186d3198d7152096c3a8fa77e1ab1424c39)
+2026-Oct-11 07:49:06.572327 87725:87855 ERROR  NMGR:dlr_kelf_stage                          Failed to create logical core info for subgraph 0 to 1
+2026-Oct-11 07:49:06.572336 87725:87857 ERROR   NRT:nrt_infodump                            Embedded FW version: 1.24.1.0 (b0a1a5cc148a4e8a48e1889d2982f465280f3d0a) loaded from "libnrtucode_extisa.so"
+2026-Oct-11 07:49:06.572354 87725:87855 ERROR  NMGR:kmgr_load_nn_internal_v2                Failed to stage graph to NeuronCore
+2026-Oct-11 07:49:06.572363 87725:87855 ERROR  NMGR:kmgr_load_nn_post_metrics               Failed to load NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-6ad264b9/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_16bbce081fe57a5ee4c0+fc86724b.neff, err: 4
+2026-Oct-11 07:49:06.572363 87725:87857 ERROR   NRT:nrt_infodump                            CCOM version: 2.34.10.0- (compat 92)
+2026-Oct-11 07:49:06.572376 87725:87857 ERROR   NRT:nrt_infodump                            NCFW version: 2.34.1.0 (23a4b43d43c9755014be657d2853735b1551cfbe)
+2026-Oct-11 07:49:06.572382 87725:87857 ERROR   NRT:nrt_infodump                            Instance ID: i-07940935353caecba
+2026-Oct-11 07:49:06.572387 87725:87857 ERROR   NRT:nrt_infodump                            Cluster ID: N/A
+2026-Oct-11 07:49:06.572402 87725:87857 ERROR   NRT:nrt_infodump                            Kernel: Linux 6.17.0-1019-aws #19~24.04.1-Ubuntu SMP Tue Jun 23 18:53:06 UTC 2026
+2026-Oct-11 07:49:06.572409 87725:87857 ERROR   NRT:nrt_infodump                            Nodename: ip-172-31-42-212
+2026-Oct-11 07:49:06.572437 87725:87857 ERROR   NRT:nrt_infodump                            Driver version: 2.30.2.0
+
+2026-Oct-11 07:49:06.572442 87725:87857 ERROR   NRT:nrt_infodump                            Failure: NRT_RESOURCE in nrt_load_util
+2026-Oct-11 07:49:06.572450 87725:87857 ERROR   NRT:nrt_infodump                            Visible cores: 0, 1, 2, 3
+2026-Oct-11 07:49:06.572456 87725:87857 ERROR   NRT:nrt_infodump                            Environment:
+2026-Oct-11 07:49:06.572464 87725:87857 ERROR   NRT:nrt_infodump                                NEURON_LIBRARY_PATH=/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/libneuronpjrt.so
+2026-Oct-11 07:49:06.572472 87725:87857 ERROR   NRT:nrt_infodump                                NEURON_RT_ROOT_COMM_ID=localhost:62182
+2026-Oct-11 07:49:06.572478 87725:87857 ERROR   NRT:nrt_infodump                                NEURON_PLATFORM_TARGET_OVERRIDE=trn2
+2026-Oct-11 07:49:06.572483 87725:87857 ERROR   NRT:nrt_infodump                                NEURON_RT_DISABLE_EXECUTION_BARRIER=1
+2026-Oct-11 07:49:06.572488 87725:87857 ERROR   NRT:nrt_infodump                                NEURON_RT_NUMERICAL_ERRORS_VERBOSITY=none
+2026-Oct-11 07:49:06.572492 87725:87857 ERROR   NRT:nrt_infodump                            -------------8<-----------[ cut to here ]-----------8<------------
+2026-Oct-11 07:49:06.572193 87725:87854 ERROR  NMGR:dlr_kelf_stage                          Failed to create logical core info for subgraph 0 to 1
+2026-Oct-11 07:49:06.572234 87725:87856 ERROR  NMGR:dlr_kelf_stage                          Failed to create logical core info for subgraph 0 to 1
+2026-Oct-11 07:49:06.573751 87725:87854 ERROR  NMGR:kmgr_load_nn_internal_v2                Failed to stage graph to NeuronCore
+2026-Oct-11 07:49:06.575353 87725:87856 ERROR  NMGR:kmgr_load_nn_internal_v2                Failed to stage graph to NeuronCore
+2026-Oct-11 07:49:06.576953 87725:87854 ERROR  NMGR:kmgr_load_nn_post_metrics               Failed to load NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-6ad264b9/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_16bbce081fe57a5ee4c0+fc86724b.neff, err: 4
+2026-Oct-11 07:49:09.680496 87725:87856 ERROR  NMGR:kmgr_load_nn_post_metrics               Failed to load NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-6ad264b9/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_16bbce081fe57a5ee4c0+fc86724b.neff, err: 4
+2026-Oct-11 07:49:11.394499 87725:87856 ERROR   NRT:nrt_load_collectives                    Failed to load collectives for model.
+2026-Oct-11 07:49:11.485605 87725:87857 ERROR   NRT:nrt_load_collectives                    Failed to load collectives for model.
+2026-Oct-11 07:49:12.512271 87725:87855 ERROR   NRT:nrt_load_collectives                    Failed to load collectives for model.
+2026-Oct-11 07:49:12.762126 87725:87854 ERROR   NRT:nrt_load_collectives                    Failed to load collectives for model.
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/work/Difflet/benchmark/step_realloop.py", line 427, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/ubuntu/work/Difflet/benchmark/step_realloop.py", line 322, in main
+    return _main(args, cfg)
+           ^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/work/Difflet/benchmark/step_realloop.py", line 346, in _main
+    result = run()
+             ^^^^^
+  File "/home/ubuntu/work/Difflet/benchmark/step_realloop.py", line 232, in run
+    orch._run_stage_internal("transformer", ns)   # loads + one real generate
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/work/Difflet/difflet/cli/orchestrators/wan.py", line 182, in _run_stage_internal
+    self._stage_transformer(args)
+  File "/home/ubuntu/work/Difflet/difflet/cli/orchestrators/wan.py", line 241, in _stage_transformer
+    app.load(str(compiled_dir), start_rank_id=0,
+  File "/home/ubuntu/work/Difflet/difflet/backends/trainium/core/multi_component_application.py", line 93, in load
+    self._load_one(
+  File "/home/ubuntu/work/Difflet/difflet/backends/trainium/core/multi_component_application.py", line 198, in _load_one
+    spec.component.load(
+  File "/home/ubuntu/work/Difflet/difflet/backends/trainium/core/application_base.py", line 470, in load
+    self.load_weights(
+  File "/home/ubuntu/work/Difflet/difflet/backends/trainium/core/application_base.py", line 634, in load_weights
+    self.traced_model.nxd_model.initialize(weights, start_rank_tensor)
+RuntimeError: The following operation failed in the TorchScript interpreter.
+Traceback of TorchScript, serialized code (most recent call last):
+  File "code/__torch__/neuronx_distributed/trace/spmd/___torch_mangle_11.py", line 136, in initialize
+    for _24 in range(torch.len(models0)):
+      model = models0[_24]
+      _25 = (model).initialize(states, weights, start_rank_id, )
+             ~~~~~~~~~~~~~~~~~ <--- HERE
+    return None
+
+Traceback of TorchScript, original code (most recent call last):
+  File "/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/spmd.py", line 179, in initialize
+        for bucket_model in self.models.values():
+            for model in bucket_model.models:
+                model.initialize(states, weights, start_rank_id)
+                ~~~~~~~~~~~~~~~~ <--- HERE
+RuntimeError: Could not load the model status=4 message=Allocation Failure
+
