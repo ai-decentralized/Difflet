@@ -883,6 +883,9 @@ def neuron_torchrun(monkeypatch, tmp_path):
     monkeypatch.setenv(fake_pipeline.FAKE_RECORDS_ENV, str(records))
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
     monkeypatch.setenv("DIFFLET_DISABLE_PREWARM", "1")
+    # run_stage exports the neuron cache locations under it to the ranks, and their
+    # `import torch` (torch_neuronx autoload) creates the HLO one: keep it in tmp_path.
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "difflet-cache"))
     monkeypatch.delenv("DIFFLET_EXEC_MODE", raising=False)
     monkeypatch.setattr(subprocess, "Popen", _bounded_popen(300))
     return records
