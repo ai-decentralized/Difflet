@@ -1,0 +1,1481 @@
+17:13:45.011 +    0.02s | [difflet] DiT attention policy: megakernel
+17:13:45.337 +    0.35s | <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+17:13:45.345 +    0.35s | [difflet] DiT attention policy: megakernel
+17:13:56.711 +   11.72s | 2026-Oct-11 17:13:56.711174 117504:117505  INFO   NRT:nrt_init                                Neuron Runtime 2.34.10.0 built on Aug  1 2026
+17:13:56.711 +   11.72s | 2026-Oct-11 17:13:56.711197 117504:117505  INFO   NRT:nrt_init                                Found neuron driver: 2.30
+17:13:56.711 +   11.72s | 2026-Oct-11 17:13:56.711200 117504:117505  INFO   NRT:nrt_init                                Async IO support: supported
+17:13:56.711 +   11.72s | 2026-Oct-11 17:13:56.711252 117504:117505  INFO   NRT:nrt_allocate_neuron_cores               Instance info:: device count:1 cores per device:8 architecture:TRN
+17:13:56.713 +   11.72s | 2026-Oct-11 17:13:56.713003 117504:117505  INFO  TDRV:tdrv_init                               TDRV UltraServer information server_type:0 reservation_id:0x0 pod_sz:0 election_state:4 node_id:-1
+17:14:00.421 +   15.43s | /home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+17:14:00.421 +   15.43s |   component, error = import_nki(config)
+17:14:00.428 +   15.44s | /home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+17:14:00.428 +   15.44s |   warnings.warn(f"Warning: {error}")
+17:14:00.428 +   15.44s | /home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+17:14:00.428 +   15.44s |   warnings.warn(f"Warning: {error}")
+17:14:00.428 +   15.44s | /home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+17:14:00.428 +   15.44s |   warnings.warn(f"Warning: {error}")
+17:14:02.236 +   17.25s | Neuron: Loading presharded checkpoints for ranks: 0...3
+17:14:03.153 +   18.16s | Neuron: Presharded file read: 0.92s for 4 shard(s) (10836.7 MB total)
+17:14:03.153 +   18.16s | Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+17:14:04.452 +   19.46s | 2026-Oct-11 17:14:04.451763 117504:117505  INFO  TDRV:tdrv_init_one_mla_phase2                Initialized vcore: 0
+17:14:04.472 +   19.48s | 2026-Oct-11 17:14:04.472638 117504:117505  INFO  TDRV:tdrv_init_one_mla_phase2                Initialized vcore: 1
+17:14:04.490 +   19.50s | 2026-Oct-11 17:14:04.490214 117504:117505  INFO  TDRV:tdrv_init_one_mla_phase2                Initialized vcore: 2
+17:14:04.508 +   19.52s | 2026-Oct-11 17:14:04.508027 117504:117505  INFO  TDRV:tdrv_init_one_mla_phase2                Initialized vcore: 3
+17:14:04.509 +   19.52s | 
+17:15:09.356 +   84.37s | 2026-Oct-11 17:15:09.356533 117504:117687  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff version: 2.0, LNC start: 2
+17:15:09.356 +   84.37s | 2026-Oct-11 17:15:09.356545 117504:117685  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff version: 2.0, LNC start: 0
+17:15:09.356 +   84.37s | 2026-Oct-11 17:15:09.356558 117504:117687  INFO  NMGR:enter_cache                             NEFF load cache - first worker, creating cache
+17:15:09.356 +   84.37s | 2026-Oct-11 17:15:09.356563 117504:117685  INFO  NMGR:enter_cache                             NEFF load cache - waiting for cache creation
+17:15:09.356 +   84.37s | 2026-Oct-11 17:15:09.356541 117504:117688  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff version: 2.0, LNC start: 3
+17:15:09.356 +   84.37s | 2026-Oct-11 17:15:09.356585 117504:117688  INFO  NMGR:enter_cache                             NEFF load cache - waiting for cache creation
+17:15:09.356 +   84.37s | 2026-Oct-11 17:15:09.356629 117504:117686  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff version: 2.0, LNC start: 1
+17:15:09.356 +   84.37s | 2026-Oct-11 17:15:09.356640 117504:117686  INFO  NMGR:enter_cache                             NEFF load cache - waiting for cache creation
+17:15:09.920 +   84.93s | 2026-Oct-11 17:15:09.920107 117504:117688  INFO  NMGR:wait_cache                              NEFF load cache - using cache after wait
+17:15:09.920 +   84.93s | 2026-Oct-11 17:15:09.920180 117504:117686  INFO  NMGR:wait_cache                              NEFF load cache - using cache after wait
+17:15:09.920 +   84.93s | 2026-Oct-11 17:15:09.920472 117504:117685  INFO  NMGR:wait_cache                              NEFF load cache - using cache after wait
+17:15:09.965 +   84.97s | 2026-Oct-11 17:15:09.965679 117504:118440  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:09.965 +   84.97s | [ND 0:NC 3] Current Usage Total: 9.765MB
+17:15:09.965 +   84.97s | 	Shared Scratchpad: 0.000B
+17:15:09.965 +   84.97s | 	Tensors: 0.000B
+17:15:09.965 +   84.97s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff]:
+17:15:09.965 +   84.97s | 	Total: 7.504MB
+17:15:09.965 +   84.97s | 	* model code: 7.395MB
+17:15:09.965 +   84.97s | 	* model constants: 0.000B
+17:15:09.965 +   84.97s | 	* scratchpad: 0.000B
+17:15:09.965 +   84.97s | 	* runtime: 108.008KB
+17:15:09.965 +   84.97s | 	* dma rings io: 0.000B
+17:15:09.965 +   84.97s | 	* dma rings spill: 0.000B
+17:15:09.965 +   84.97s | 	* dma rings collectives: 0.000B
+17:15:09.965 +   84.97s | 	* dma rings runtime: 4.000KB
+17:15:09.965 +   84.97s | 	* collectives: 0.000B
+17:15:09.965 +   84.97s | 
+17:15:09.966 +   84.98s | 2026-Oct-11 17:15:09.966500 117504:118443  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:09.966 +   84.98s | [ND 0:NC 0] Current Usage Total: 2.718GB
+17:15:09.966 +   84.98s | 	Shared Scratchpad: 64.000MB
+17:15:09.966 +   84.98s | 	Tensors: 2.646GB
+17:15:09.966 +   84.98s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff]:
+17:15:09.966 +   84.98s | 	Total: 7.524MB
+17:15:09.966 +   84.98s | 	* model code: 7.414MB
+17:15:09.966 +   84.98s | 	* model constants: 0.000B
+17:15:09.966 +   84.98s | 	* scratchpad: 0.000B
+17:15:09.966 +   84.98s | 	* runtime: 108.008KB
+17:15:09.966 +   84.98s | 	* dma rings io: 0.000B
+17:15:09.966 +   84.98s | 	* dma rings spill: 0.000B
+17:15:09.966 +   84.98s | 	* dma rings collectives: 0.000B
+17:15:09.966 +   84.98s | 	* dma rings runtime: 4.000KB
+17:15:09.966 +   84.98s | 	* collectives: 0.000B
+17:15:09.966 +   84.98s | 
+17:15:09.973 +   84.98s | 2026-Oct-11 17:15:09.973300 117504:118439  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:09.973 +   84.98s | [ND 0:NC 6] Current Usage Total: 2.718GB
+17:15:09.973 +   84.98s | 	Shared Scratchpad: 64.000MB
+17:15:09.973 +   84.98s | 	Tensors: 2.646GB
+17:15:09.973 +   84.98s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff]:
+17:15:09.973 +   84.98s | 	Total: 7.524MB
+17:15:09.973 +   84.98s | 	* model code: 7.414MB
+17:15:09.973 +   84.98s | 	* model constants: 0.000B
+17:15:09.973 +   84.98s | 	* scratchpad: 0.000B
+17:15:09.973 +   84.98s | 	* runtime: 108.008KB
+17:15:09.973 +   84.98s | 	* dma rings io: 0.000B
+17:15:09.973 +   84.98s | 	* dma rings spill: 0.000B
+17:15:09.973 +   84.98s | 	* dma rings collectives: 0.000B
+17:15:09.973 +   84.98s | 	* dma rings runtime: 4.000KB
+17:15:09.973 +   84.98s | 	* collectives: 0.000B
+17:15:09.973 +   84.98s | 
+17:15:09.975 +   84.98s | 2026-Oct-11 17:15:09.975431 117504:118444  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:09.975 +   84.98s | [ND 0:NC 7] Current Usage Total: 9.765MB
+17:15:09.975 +   84.98s | 	Shared Scratchpad: 0.000B
+17:15:09.975 +   84.98s | 	Tensors: 0.000B
+17:15:09.975 +   84.98s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff]:
+17:15:09.975 +   84.98s | 	Total: 7.504MB
+17:15:09.975 +   84.98s | 	* model code: 7.395MB
+17:15:09.975 +   84.98s | 	* model constants: 0.000B
+17:15:09.975 +   84.98s | 	* scratchpad: 0.000B
+17:15:09.975 +   84.98s | 	* runtime: 108.008KB
+17:15:09.975 +   84.98s | 	* dma rings io: 0.000B
+17:15:09.975 +   84.98s | 	* dma rings spill: 0.000B
+17:15:09.975 +   84.98s | 	* dma rings collectives: 0.000B
+17:15:09.975 +   84.98s | 	* dma rings runtime: 4.000KB
+17:15:09.975 +   84.98s | 	* collectives: 0.000B
+17:15:09.975 +   84.98s | 
+17:15:09.975 +   84.98s | 2026-Oct-11 17:15:09.975869 117504:117686  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff" ID: 0
+17:15:09.975 +   84.98s | 2026-Oct-11 17:15:09.975879 117504:117686  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff, loaded successfully
+17:15:09.976 +   84.98s | 2026-Oct-11 17:15:09.976296 117504:118441  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:09.976 +   84.98s | [ND 0:NC 4] Current Usage Total: 2.718GB
+17:15:09.976 +   84.98s | 	Shared Scratchpad: 64.000MB
+17:15:09.976 +   84.98s | 	Tensors: 2.646GB
+17:15:09.976 +   84.98s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff]:
+17:15:09.976 +   84.98s | 	Total: 7.524MB
+17:15:09.976 +   84.98s | 	* model code: 7.414MB
+17:15:09.976 +   84.98s | 	* model constants: 0.000B
+17:15:09.976 +   84.98s | 	* scratchpad: 0.000B
+17:15:09.976 +   84.98s | 	* runtime: 108.008KB
+17:15:09.976 +   84.98s | 	* dma rings io: 0.000B
+17:15:09.976 +   84.98s | 	* dma rings spill: 0.000B
+17:15:09.976 +   84.98s | 	* dma rings collectives: 0.000B
+17:15:09.976 +   84.98s | 	* dma rings runtime: 4.000KB
+17:15:09.976 +   84.98s | 	* collectives: 0.000B
+17:15:09.976 +   84.98s | 
+17:15:09.976 +   84.98s | 2026-Oct-11 17:15:09.976385 117504:118442  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:09.976 +   84.98s | [ND 0:NC 5] Current Usage Total: 9.765MB
+17:15:09.976 +   84.98s | 	Shared Scratchpad: 0.000B
+17:15:09.976 +   84.98s | 	Tensors: 0.000B
+17:15:09.976 +   84.99s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff]:
+17:15:09.976 +   84.99s | 	Total: 7.504MB
+17:15:09.976 +   84.99s | 	* model code: 7.395MB
+17:15:09.976 +   84.99s | 	* model constants: 0.000B
+17:15:09.976 +   84.99s | 	* scratchpad: 0.000B
+17:15:09.976 +   84.99s | 	* runtime: 108.008KB
+17:15:09.976 +   84.99s | 	* dma rings io: 0.000B
+17:15:09.976 +   84.99s | 	* dma rings spill: 0.000B
+17:15:09.976 +   84.99s | 	* dma rings collectives: 0.000B
+17:15:09.976 +   84.99s | 	* dma rings runtime: 4.000KB
+17:15:09.976 +   84.99s | 	* collectives: 0.000B
+17:15:09.976 +   84.99s | 
+17:15:09.976 +   84.99s | 2026-Oct-11 17:15:09.976764 117504:117685  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff" ID: 0
+17:15:09.976 +   84.99s | 2026-Oct-11 17:15:09.976769 117504:117685  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff, loaded successfully
+17:15:09.978 +   84.99s | 2026-Oct-11 17:15:09.978163 117504:118445  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:09.978 +   84.99s | [ND 0:NC 1] Current Usage Total: 9.765MB
+17:15:09.978 +   84.99s | 	Shared Scratchpad: 0.000B
+17:15:09.978 +   84.99s | 	Tensors: 0.000B
+17:15:09.978 +   84.99s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff]:
+17:15:09.978 +   84.99s | 	Total: 7.504MB
+17:15:09.978 +   84.99s | 	* model code: 7.395MB
+17:15:09.978 +   84.99s | 	* model constants: 0.000B
+17:15:09.978 +   84.99s | 	* scratchpad: 0.000B
+17:15:09.978 +   84.99s | 	* runtime: 108.008KB
+17:15:09.978 +   84.99s | 	* dma rings io: 0.000B
+17:15:09.978 +   84.99s | 	* dma rings spill: 0.000B
+17:15:09.978 +   84.99s | 	* dma rings collectives: 0.000B
+17:15:09.978 +   84.99s | 	* dma rings runtime: 4.000KB
+17:15:09.978 +   84.99s | 	* collectives: 0.000B
+17:15:09.978 +   84.99s | 
+17:15:09.978 +   84.99s | 2026-Oct-11 17:15:09.978513 117504:117688  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff" ID: 0
+17:15:09.978 +   84.99s | 2026-Oct-11 17:15:09.978520 117504:117688  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff, loaded successfully
+17:15:09.978 +   84.99s | 2026-Oct-11 17:15:09.978615 117504:118438  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:09.978 +   84.99s | [ND 0:NC 2] Current Usage Total: 2.718GB
+17:15:09.978 +   84.99s | 	Shared Scratchpad: 64.000MB
+17:15:09.978 +   84.99s | 	Tensors: 2.646GB
+17:15:09.978 +   84.99s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff]:
+17:15:09.978 +   84.99s | 	Total: 7.524MB
+17:15:09.978 +   84.99s | 	* model code: 7.414MB
+17:15:09.978 +   84.99s | 	* model constants: 0.000B
+17:15:09.978 +   84.99s | 	* scratchpad: 0.000B
+17:15:09.978 +   84.99s | 	* runtime: 108.008KB
+17:15:09.978 +   84.99s | 	* dma rings io: 0.000B
+17:15:09.978 +   84.99s | 	* dma rings spill: 0.000B
+17:15:09.978 +   84.99s | 	* dma rings collectives: 0.000B
+17:15:09.978 +   84.99s | 	* dma rings runtime: 4.000KB
+17:15:09.978 +   84.99s | 	* collectives: 0.000B
+17:15:09.978 +   84.99s | 
+17:15:09.978 +   84.99s | 2026-Oct-11 17:15:09.978843 117504:117687  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff" ID: 0
+17:15:09.980 +   84.99s | 2026-Oct-11 17:15:09.980054 117504:117687  INFO  NMGR:release_tmp_neff_cache                  NEFF load cache - cleared by the last worker
+17:15:09.980 +   84.99s | 2026-Oct-11 17:15:09.980059 117504:117687  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/layout_opt/graph.neff, loaded successfully
+17:15:10.001 +   85.01s | 2026-Oct-11 17:15:10.001060 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000001 with status NRT_SUCCESS, Execution Unit[201]
+17:15:10.001 +   85.01s | 2026-Oct-11 17:15:10.001098 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000001 with status NRT_SUCCESS, Execution Unit[101]
+17:15:10.001 +   85.01s | 2026-Oct-11 17:15:10.001106 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000001 with status NRT_SUCCESS, Execution Unit[301]
+17:15:10.001 +   85.01s | 2026-Oct-11 17:15:10.001147 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000001 with status NRT_SUCCESS, Execution Unit[1]
+17:15:10.001 +   85.01s | 2026-Oct-11 17:15:10.001450 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10002
+17:15:10.001 +   85.01s | 2026-Oct-11 17:15:10.001468 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10002
+17:15:10.001 +   85.01s | 2026-Oct-11 17:15:10.001471 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10001
+17:15:10.001 +   85.01s | 2026-Oct-11 17:15:10.001474 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10001
+17:15:10.001 +   85.01s | 2026-Oct-11 17:15:10.001476 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10004
+17:15:10.001 +   85.01s | 2026-Oct-11 17:15:10.001479 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10004
+17:15:10.001 +   85.01s | 2026-Oct-11 17:15:10.001481 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10003
+17:15:10.001 +   85.01s | 2026-Oct-11 17:15:10.001483 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10003
+17:15:10.002 +   85.01s | 2026-Oct-11 17:15:10.002762 117504:117686  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff version: 2.0, LNC start: 1
+17:15:10.002 +   85.01s | 2026-Oct-11 17:15:10.002767 117504:117686  INFO  NMGR:enter_cache                             NEFF load cache - first worker, creating cache
+17:15:10.002 +   85.01s | 2026-Oct-11 17:15:10.002771 117504:117685  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff version: 2.0, LNC start: 0
+17:15:10.002 +   85.01s | 2026-Oct-11 17:15:10.002774 117504:117688  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff version: 2.0, LNC start: 3
+17:15:10.002 +   85.01s | 2026-Oct-11 17:15:10.002781 117504:117685  INFO  NMGR:enter_cache                             NEFF load cache - waiting for cache creation
+17:15:10.003 +   85.01s | 2026-Oct-11 17:15:10.002798 117504:117688  INFO  NMGR:enter_cache                             NEFF load cache - waiting for cache creation
+17:15:10.003 +   85.01s | 2026-Oct-11 17:15:10.003092 117504:117687  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff version: 2.0, LNC start: 2
+17:15:10.003 +   85.01s | 2026-Oct-11 17:15:10.003103 117504:117687  INFO  NMGR:enter_cache                             NEFF load cache - waiting for cache creation
+17:15:10.063 +   85.07s | 2026-Oct-11 17:15:10.063186 117504:117687  INFO  NMGR:wait_cache                              NEFF load cache - using cache after wait
+17:15:10.063 +   85.07s | 2026-Oct-11 17:15:10.063395 117504:117688  INFO  NMGR:wait_cache                              NEFF load cache - using cache after wait
+17:15:10.063 +   85.07s | 2026-Oct-11 17:15:10.063427 117504:117685  INFO  NMGR:wait_cache                              NEFF load cache - using cache after wait
+17:15:10.095 +   85.10s | 2026-Oct-11 17:15:10.095289 117504:118449  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:10.095 +   85.10s | [ND 0:NC 3] Current Usage Total: 11.340MB
+17:15:10.095 +   85.10s | 	Shared Scratchpad: 0.000B
+17:15:10.095 +   85.10s | 	Tensors: 0.000B
+17:15:10.095 +   85.10s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff]:
+17:15:10.095 +   85.10s | 	Total: 1.575MB
+17:15:10.095 +   85.10s | 	* model code: 1.119MB
+17:15:10.095 +   85.10s | 	* model constants: 160.000KB
+17:15:10.095 +   85.10s | 	* scratchpad: 0.000B
+17:15:10.095 +   85.10s | 	* runtime: 272.195KB
+17:15:10.095 +   85.10s | 	* dma rings io: 31.000KB
+17:15:10.095 +   85.10s | 	* dma rings spill: 0.000B
+17:15:10.095 +   85.10s | 	* dma rings collectives: 0.000B
+17:15:10.095 +   85.10s | 	* dma rings runtime: 4.000KB
+17:15:10.095 +   85.10s | 	* collectives: 0.000B
+17:15:10.095 +   85.10s | 
+17:15:10.104 +   85.11s | 2026-Oct-11 17:15:10.104201 117504:118452  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:10.104 +   85.11s | [ND 0:NC 5] Current Usage Total: 11.340MB
+17:15:10.104 +   85.11s | 	Shared Scratchpad: 0.000B
+17:15:10.104 +   85.11s | 	Tensors: 0.000B
+17:15:10.104 +   85.11s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff]:
+17:15:10.104 +   85.11s | 	Total: 1.575MB
+17:15:10.104 +   85.11s | 	* model code: 1.119MB
+17:15:10.104 +   85.11s | 	* model constants: 160.000KB
+17:15:10.104 +   85.11s | 	* scratchpad: 0.000B
+17:15:10.104 +   85.11s | 	* runtime: 272.195KB
+17:15:10.104 +   85.11s | 	* dma rings io: 31.000KB
+17:15:10.104 +   85.11s | 	* dma rings spill: 0.000B
+17:15:10.104 +   85.11s | 	* dma rings collectives: 0.000B
+17:15:10.104 +   85.11s | 	* dma rings runtime: 4.000KB
+17:15:10.104 +   85.11s | 	* collectives: 0.000B
+17:15:10.104 +   85.11s | 
+17:15:10.104 +   85.11s | 2026-Oct-11 17:15:10.104238 117504:118448  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:10.104 +   85.11s | [ND 0:NC 7] Current Usage Total: 11.340MB
+17:15:10.104 +   85.11s | 	Shared Scratchpad: 0.000B
+17:15:10.104 +   85.11s | 	Tensors: 0.000B
+17:15:10.104 +   85.11s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff]:
+17:15:10.104 +   85.11s | 	Total: 1.575MB
+17:15:10.104 +   85.11s | 	* model code: 1.119MB
+17:15:10.104 +   85.11s | 	* model constants: 160.000KB
+17:15:10.104 +   85.11s | 	* scratchpad: 0.000B
+17:15:10.104 +   85.11s | 	* runtime: 272.195KB
+17:15:10.104 +   85.11s | 	* dma rings io: 31.000KB
+17:15:10.104 +   85.11s | 	* dma rings spill: 0.000B
+17:15:10.104 +   85.11s | 	* dma rings collectives: 0.000B
+17:15:10.104 +   85.11s | 	* dma rings runtime: 4.000KB
+17:15:10.104 +   85.11s | 	* collectives: 0.000B
+17:15:10.104 +   85.11s | 
+17:15:10.110 +   85.12s | 2026-Oct-11 17:15:10.109980 117504:118453  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:10.110 +   85.12s | [ND 0:NC 1] Current Usage Total: 11.340MB
+17:15:10.110 +   85.12s | 	Shared Scratchpad: 0.000B
+17:15:10.110 +   85.12s | 	Tensors: 0.000B
+17:15:10.110 +   85.12s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff]:
+17:15:10.110 +   85.12s | 	Total: 1.575MB
+17:15:10.110 +   85.12s | 	* model code: 1.119MB
+17:15:10.110 +   85.12s | 	* model constants: 160.000KB
+17:15:10.110 +   85.12s | 	* scratchpad: 0.000B
+17:15:10.110 +   85.12s | 	* runtime: 272.195KB
+17:15:10.110 +   85.12s | 	* dma rings io: 31.000KB
+17:15:10.110 +   85.12s | 	* dma rings spill: 0.000B
+17:15:10.110 +   85.12s | 	* dma rings collectives: 0.000B
+17:15:10.110 +   85.12s | 	* dma rings runtime: 4.000KB
+17:15:10.110 +   85.12s | 	* collectives: 0.000B
+17:15:10.110 +   85.12s | 
+17:15:10.135 +   85.14s | 2026-Oct-11 17:15:10.135486 117504:118446  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:10.135 +   85.14s | [ND 0:NC 6] Current Usage Total: 2.782GB
+17:15:10.135 +   85.14s | 	Shared Scratchpad: 128.000MB
+17:15:10.135 +   85.14s | 	Tensors: 2.646GB
+17:15:10.135 +   85.14s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff]:
+17:15:10.135 +   85.14s | 	Total: 1.860MB
+17:15:10.135 +   85.14s | 	* model code: 1.186MB
+17:15:10.135 +   85.14s | 	* model constants: 160.000KB
+17:15:10.135 +   85.14s | 	* scratchpad: 0.000B
+17:15:10.135 +   85.14s | 	* runtime: 272.195KB
+17:15:10.135 +   85.14s | 	* dma rings io: 31.000KB
+17:15:10.135 +   85.14s | 	* dma rings spill: 152.000KB
+17:15:10.135 +   85.14s | 	* dma rings collectives: 0.000B
+17:15:10.135 +   85.14s | 	* dma rings runtime: 4.000KB
+17:15:10.135 +   85.14s | 	* collectives: 71.188KB
+17:15:10.135 +   85.14s | 
+17:15:10.135 +   85.14s | 2026-Oct-11 17:15:10.135607 117504:118451  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:10.135 +   85.14s | [ND 0:NC 0] Current Usage Total: 2.782GB
+17:15:10.135 +   85.14s | 	Shared Scratchpad: 128.000MB
+17:15:10.135 +   85.14s | 	Tensors: 2.646GB
+17:15:10.135 +   85.14s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff]:
+17:15:10.135 +   85.14s | 	Total: 1.860MB
+17:15:10.135 +   85.14s | 	* model code: 1.186MB
+17:15:10.135 +   85.14s | 	* model constants: 160.000KB
+17:15:10.135 +   85.14s | 	* scratchpad: 0.000B
+17:15:10.135 +   85.14s | 	* runtime: 272.195KB
+17:15:10.135 +   85.14s | 	* dma rings io: 31.000KB
+17:15:10.135 +   85.14s | 	* dma rings spill: 152.000KB
+17:15:10.135 +   85.14s | 	* dma rings collectives: 0.000B
+17:15:10.135 +   85.14s | 	* dma rings runtime: 4.000KB
+17:15:10.135 +   85.14s | 	* collectives: 71.188KB
+17:15:10.135 +   85.14s | 
+17:15:10.135 +   85.14s | 2026-Oct-11 17:15:10.135844 117504:117688  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff" ID: 0
+17:15:10.135 +   85.14s | 2026-Oct-11 17:15:10.135850 117504:117688  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff, loaded successfully
+17:15:10.136 +   85.14s | 2026-Oct-11 17:15:10.135954 117504:117686  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff" ID: 0
+17:15:10.136 +   85.14s | 2026-Oct-11 17:15:10.135964 117504:117686  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff, loaded successfully
+17:15:10.138 +   85.15s | 2026-Oct-11 17:15:10.138351 117504:118450  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:10.138 +   85.15s | [ND 0:NC 4] Current Usage Total: 2.782GB
+17:15:10.138 +   85.15s | 	Shared Scratchpad: 128.000MB
+17:15:10.138 +   85.15s | 	Tensors: 2.646GB
+17:15:10.138 +   85.15s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff]:
+17:15:10.138 +   85.15s | 	Total: 1.860MB
+17:15:10.138 +   85.15s | 	* model code: 1.186MB
+17:15:10.138 +   85.15s | 	* model constants: 160.000KB
+17:15:10.138 +   85.15s | 	* scratchpad: 0.000B
+17:15:10.138 +   85.15s | 	* runtime: 272.195KB
+17:15:10.138 +   85.15s | 	* dma rings io: 31.000KB
+17:15:10.138 +   85.15s | 	* dma rings spill: 152.000KB
+17:15:10.138 +   85.15s | 	* dma rings collectives: 0.000B
+17:15:10.138 +   85.15s | 	* dma rings runtime: 4.000KB
+17:15:10.138 +   85.15s | 	* collectives: 71.188KB
+17:15:10.138 +   85.15s | 
+17:15:10.138 +   85.15s | 2026-Oct-11 17:15:10.138664 117504:117685  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff" ID: 0
+17:15:10.138 +   85.15s | 2026-Oct-11 17:15:10.138674 117504:117685  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff, loaded successfully
+17:15:10.140 +   85.15s | 2026-Oct-11 17:15:10.140505 117504:118447  INFO  TDRV:dml_log_dev_neff_mem                    
+17:15:10.140 +   85.15s | [ND 0:NC 2] Current Usage Total: 2.782GB
+17:15:10.140 +   85.15s | 	Shared Scratchpad: 128.000MB
+17:15:10.140 +   85.15s | 	Tensors: 2.646GB
+17:15:10.140 +   85.15s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff]:
+17:15:10.140 +   85.15s | 	Total: 1.860MB
+17:15:10.140 +   85.15s | 	* model code: 1.186MB
+17:15:10.140 +   85.15s | 	* model constants: 160.000KB
+17:15:10.140 +   85.15s | 	* scratchpad: 0.000B
+17:15:10.140 +   85.15s | 	* runtime: 272.195KB
+17:15:10.140 +   85.15s | 	* dma rings io: 31.000KB
+17:15:10.140 +   85.15s | 	* dma rings spill: 152.000KB
+17:15:10.140 +   85.15s | 	* dma rings collectives: 0.000B
+17:15:10.140 +   85.15s | 	* dma rings runtime: 4.000KB
+17:15:10.140 +   85.15s | 	* collectives: 71.188KB
+17:15:10.140 +   85.15s | 
+17:15:10.140 +   85.15s | 2026-Oct-11 17:15:10.140890 117504:117687  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff" ID: 0
+17:15:10.141 +   85.15s | 2026-Oct-11 17:15:10.141356 117504:117687  INFO  NMGR:release_tmp_neff_cache                  NEFF load cache - cleared by the last worker
+17:15:10.141 +   85.15s | 2026-Oct-11 17:15:10.141359 117504:117687  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_a1b7b5ecccb29ec87985+418a20b2.neff, loaded successfully
+17:15:10.146 +   85.16s | Neuron: Finished traced model weight initialization in 66.99s (device init 66.99s, total load_weights 67.91s)
+17:15:10.246 +   85.25s | Neuron: Skipping model warmup
+17:15:11.631 +   86.64s | Neuron: Loading presharded checkpoints for ranks: 0...3
+17:15:11.996 +   87.01s | Neuron: Presharded file read: 0.37s for 4 shard(s) (28602.8 MB total)
+17:15:11.996 +   87.01s | Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+17:15:59.625 +  134.63s | 2026-Oct-11 17:15:59.625791 117504:117685  INFO   NRT:nrt_load_util                           [nec_dev 0] collective world size is not defined. Using the entire world in global communicator ctx_device_id:0 ctx_device_count:4
+17:15:59.625 +  134.63s | 2026-Oct-11 17:15:59.625799 117504:117686  INFO   NRT:nrt_load_util                           [nec_dev 1] collective world size is not defined. Using the entire world in global communicator ctx_device_id:1 ctx_device_count:4
+17:15:59.626 +  134.63s | 2026-Oct-11 17:15:59.625799 117504:117688  INFO   NRT:nrt_load_util                           [nec_dev 3] collective world size is not defined. Using the entire world in global communicator ctx_device_id:3 ctx_device_count:4
+17:15:59.626 +  134.63s | 2026-Oct-11 17:15:59.625834 117504:117686  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff version: 2.0, LNC start: 1
+17:15:59.626 +  134.63s | 2026-Oct-11 17:15:59.625825 117504:117685  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff version: 2.0, LNC start: 0
+17:15:59.626 +  134.63s | 2026-Oct-11 17:15:59.625838 117504:117686  INFO  NMGR:enter_cache                             NEFF load cache - first worker, creating cache
+17:15:59.626 +  134.63s | 2026-Oct-11 17:15:59.625840 117504:117688  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff version: 2.0, LNC start: 3
+17:15:59.626 +  134.63s | 2026-Oct-11 17:15:59.625844 117504:117688  INFO  NMGR:enter_cache                             NEFF load cache - waiting for cache creation
+17:15:59.626 +  134.63s | 2026-Oct-11 17:15:59.625850 117504:117685  INFO  NMGR:enter_cache                             NEFF load cache - waiting for cache creation
+17:15:59.626 +  134.63s | 2026-Oct-11 17:15:59.625907 117504:117687  INFO   NRT:nrt_load_util                           [nec_dev 2] collective world size is not defined. Using the entire world in global communicator ctx_device_id:2 ctx_device_count:4
+17:15:59.626 +  134.63s | 2026-Oct-11 17:15:59.625922 117504:117687  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff version: 2.0, LNC start: 2
+17:15:59.626 +  134.63s | 2026-Oct-11 17:15:59.625925 117504:117687  INFO  NMGR:enter_cache                             NEFF load cache - waiting for cache creation
+17:16:01.665 +  136.67s | 2026-Oct-11 17:16:01.665554 117504:117687  INFO  NMGR:wait_cache                              NEFF load cache - using cache after wait
+17:16:01.665 +  136.67s | 2026-Oct-11 17:16:01.665837 117504:117685  INFO  NMGR:wait_cache                              NEFF load cache - using cache after wait
+17:16:01.665 +  136.67s | 2026-Oct-11 17:16:01.665877 117504:117688  INFO  NMGR:wait_cache                              NEFF load cache - using cache after wait
+17:16:01.766 +  136.78s | 2026-Oct-11 17:16:01.766888 117504:119138  INFO  TDRV:dml_log_dev_neff_mem                    
+17:16:01.767 +  136.78s | [ND 0:NC 7] Current Usage Total: 38.191MB
+17:16:01.767 +  136.78s | 	Shared Scratchpad: 0.000B
+17:16:01.767 +  136.78s | 	Tensors: 0.000B
+17:16:01.767 +  136.78s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff]:
+17:16:01.767 +  136.78s | 	Total: 26.850MB
+17:16:01.767 +  136.78s | 	* model code: 26.651MB
+17:16:01.767 +  136.78s | 	* model constants: 32.000KB
+17:16:01.767 +  136.78s | 	* scratchpad: 0.000B
+17:16:01.767 +  136.78s | 	* runtime: 108.008KB
+17:16:01.767 +  136.78s | 	* dma rings io: 0.000B
+17:16:01.767 +  136.78s | 	* dma rings spill: 60.500KB
+17:16:01.767 +  136.78s | 	* dma rings collectives: 0.000B
+17:16:01.767 +  136.78s | 	* dma rings runtime: 4.000KB
+17:16:01.767 +  136.78s | 	* collectives: 0.000B
+17:16:01.767 +  136.78s | 
+17:16:01.774 +  136.78s | 2026-Oct-11 17:16:01.774104 117504:119139  INFO  TDRV:dml_log_dev_neff_mem                    
+17:16:01.774 +  136.78s | [ND 0:NC 3] Current Usage Total: 38.191MB
+17:16:01.774 +  136.78s | 	Shared Scratchpad: 0.000B
+17:16:01.774 +  136.78s | 	Tensors: 0.000B
+17:16:01.774 +  136.78s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff]:
+17:16:01.774 +  136.78s | 	Total: 26.850MB
+17:16:01.774 +  136.78s | 	* model code: 26.651MB
+17:16:01.774 +  136.78s | 	* model constants: 32.000KB
+17:16:01.774 +  136.78s | 	* scratchpad: 0.000B
+17:16:01.774 +  136.78s | 	* runtime: 108.008KB
+17:16:01.774 +  136.78s | 	* dma rings io: 0.000B
+17:16:01.774 +  136.78s | 	* dma rings spill: 60.500KB
+17:16:01.774 +  136.78s | 	* dma rings collectives: 0.000B
+17:16:01.774 +  136.78s | 	* dma rings runtime: 4.000KB
+17:16:01.774 +  136.78s | 	* collectives: 0.000B
+17:16:01.774 +  136.78s | 
+17:16:01.784 +  136.79s | 2026-Oct-11 17:16:01.784660 117504:119143  INFO  TDRV:dml_log_dev_neff_mem                    
+17:16:01.784 +  136.79s | [ND 0:NC 5] Current Usage Total: 38.191MB
+17:16:01.784 +  136.79s | 	Shared Scratchpad: 0.000B
+17:16:01.784 +  136.79s | 	Tensors: 0.000B
+17:16:01.784 +  136.79s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff]:
+17:16:01.784 +  136.79s | 	Total: 26.850MB
+17:16:01.784 +  136.79s | 	* model code: 26.651MB
+17:16:01.784 +  136.79s | 	* model constants: 32.000KB
+17:16:01.784 +  136.79s | 	* scratchpad: 0.000B
+17:16:01.784 +  136.79s | 	* runtime: 108.008KB
+17:16:01.784 +  136.79s | 	* dma rings io: 0.000B
+17:16:01.784 +  136.79s | 	* dma rings spill: 60.500KB
+17:16:01.784 +  136.79s | 	* dma rings collectives: 0.000B
+17:16:01.784 +  136.79s | 	* dma rings runtime: 4.000KB
+17:16:01.784 +  136.79s | 	* collectives: 0.000B
+17:16:01.784 +  136.79s | 
+17:16:01.789 +  136.80s | 2026-Oct-11 17:16:01.789587 117504:119137  INFO  TDRV:dml_log_dev_neff_mem                    
+17:16:01.789 +  136.80s | [ND 0:NC 6] Current Usage Total: 9.987GB
+17:16:01.789 +  136.80s | 	Shared Scratchpad: 320.000MB
+17:16:01.789 +  136.80s | 	Tensors: 9.636GB
+17:16:01.789 +  136.80s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff]:
+17:16:01.789 +  136.80s | 	Total: 27.558MB
+17:16:01.789 +  136.80s | 	* model code: 27.329MB
+17:16:01.789 +  136.80s | 	* model constants: 32.000KB
+17:16:01.789 +  136.80s | 	* scratchpad: 0.000B
+17:16:01.789 +  136.80s | 	* runtime: 108.008KB
+17:16:01.789 +  136.80s | 	* dma rings io: 30.000KB
+17:16:01.789 +  136.80s | 	* dma rings spill: 60.500KB
+17:16:01.789 +  136.80s | 	* dma rings collectives: 0.000B
+17:16:01.789 +  136.80s | 	* dma rings runtime: 4.000KB
+17:16:01.789 +  136.80s | 	* collectives: 0.000B
+17:16:01.789 +  136.80s | 
+17:16:01.790 +  136.80s | 2026-Oct-11 17:16:01.790052 117504:117686  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff" ID: 0
+17:16:01.790 +  136.80s | 2026-Oct-11 17:16:01.790060 117504:117686  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff, loaded successfully
+17:16:01.809 +  136.82s | 2026-Oct-11 17:16:01.809110 117504:119142  INFO  TDRV:dml_log_dev_neff_mem                    
+17:16:01.809 +  136.82s | [ND 0:NC 1] Current Usage Total: 38.191MB
+17:16:01.809 +  136.82s | 	Shared Scratchpad: 0.000B
+17:16:01.809 +  136.82s | 	Tensors: 0.000B
+17:16:01.809 +  136.82s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff]:
+17:16:01.809 +  136.82s | 	Total: 26.850MB
+17:16:01.809 +  136.82s | 	* model code: 26.651MB
+17:16:01.809 +  136.82s | 	* model constants: 32.000KB
+17:16:01.809 +  136.82s | 	* scratchpad: 0.000B
+17:16:01.809 +  136.82s | 	* runtime: 108.008KB
+17:16:01.809 +  136.82s | 	* dma rings io: 0.000B
+17:16:01.809 +  136.82s | 	* dma rings spill: 60.500KB
+17:16:01.809 +  136.82s | 	* dma rings collectives: 0.000B
+17:16:01.809 +  136.82s | 	* dma rings runtime: 4.000KB
+17:16:01.809 +  136.82s | 	* collectives: 0.000B
+17:16:01.809 +  136.82s | 
+17:16:01.826 +  136.84s | 2026-Oct-11 17:16:01.826477 117504:119141  INFO  TDRV:dml_log_dev_neff_mem                    
+17:16:01.826 +  136.84s | [ND 0:NC 4] Current Usage Total: 9.987GB
+17:16:01.826 +  136.84s | 	Shared Scratchpad: 320.000MB
+17:16:01.826 +  136.84s | 	Tensors: 9.636GB
+17:16:01.826 +  136.84s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff]:
+17:16:01.826 +  136.84s | 	Total: 27.558MB
+17:16:01.826 +  136.84s | 	* model code: 27.329MB
+17:16:01.826 +  136.84s | 	* model constants: 32.000KB
+17:16:01.826 +  136.84s | 	* scratchpad: 0.000B
+17:16:01.826 +  136.84s | 	* runtime: 108.008KB
+17:16:01.826 +  136.84s | 	* dma rings io: 30.000KB
+17:16:01.826 +  136.84s | 	* dma rings spill: 60.500KB
+17:16:01.826 +  136.84s | 	* dma rings collectives: 0.000B
+17:16:01.826 +  136.84s | 	* dma rings runtime: 4.000KB
+17:16:01.826 +  136.84s | 	* collectives: 0.000B
+17:16:01.826 +  136.84s | 
+17:16:01.827 +  136.84s | 2026-Oct-11 17:16:01.827506 117504:117685  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff" ID: 0
+17:16:01.827 +  136.84s | 2026-Oct-11 17:16:01.827519 117504:117685  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff, loaded successfully
+17:16:01.828 +  136.84s | 2026-Oct-11 17:16:01.828315 117504:119136  INFO  TDRV:dml_log_dev_neff_mem                    
+17:16:01.828 +  136.84s | [ND 0:NC 2] Current Usage Total: 9.987GB
+17:16:01.828 +  136.84s | 	Shared Scratchpad: 320.000MB
+17:16:01.828 +  136.84s | 	Tensors: 9.636GB
+17:16:01.828 +  136.84s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff]:
+17:16:01.828 +  136.84s | 	Total: 27.558MB
+17:16:01.828 +  136.84s | 	* model code: 27.329MB
+17:16:01.828 +  136.84s | 	* model constants: 32.000KB
+17:16:01.828 +  136.84s | 	* scratchpad: 0.000B
+17:16:01.828 +  136.84s | 	* runtime: 108.008KB
+17:16:01.828 +  136.84s | 	* dma rings io: 30.000KB
+17:16:01.828 +  136.84s | 	* dma rings spill: 60.500KB
+17:16:01.828 +  136.84s | 	* dma rings collectives: 0.000B
+17:16:01.828 +  136.84s | 	* dma rings runtime: 4.000KB
+17:16:01.828 +  136.84s | 	* collectives: 0.000B
+17:16:01.828 +  136.84s | 
+17:16:01.828 +  136.84s | 2026-Oct-11 17:16:01.828907 117504:117687  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff" ID: 0
+17:16:01.828 +  136.84s | 2026-Oct-11 17:16:01.828915 117504:117687  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff, loaded successfully
+17:16:01.828 +  136.84s | 2026-Oct-11 17:16:01.828954 117504:119140  INFO  TDRV:dml_log_dev_neff_mem                    
+17:16:01.828 +  136.84s | [ND 0:NC 0] Current Usage Total: 9.987GB
+17:16:01.828 +  136.84s | 	Shared Scratchpad: 320.000MB
+17:16:01.828 +  136.84s | 	Tensors: 9.636GB
+17:16:01.828 +  136.84s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff]:
+17:16:01.829 +  136.84s | 	Total: 27.558MB
+17:16:01.829 +  136.84s | 	* model code: 27.329MB
+17:16:01.829 +  136.84s | 	* model constants: 32.000KB
+17:16:01.829 +  136.84s | 	* scratchpad: 0.000B
+17:16:01.829 +  136.84s | 	* runtime: 108.008KB
+17:16:01.829 +  136.84s | 	* dma rings io: 30.000KB
+17:16:01.829 +  136.84s | 	* dma rings spill: 60.500KB
+17:16:01.829 +  136.84s | 	* dma rings collectives: 0.000B
+17:16:01.829 +  136.84s | 	* dma rings runtime: 4.000KB
+17:16:01.829 +  136.84s | 	* collectives: 0.000B
+17:16:01.829 +  136.84s | 
+17:16:01.829 +  136.84s | 2026-Oct-11 17:16:01.829505 117504:117688  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff" ID: 0
+17:16:01.839 +  136.85s | 2026-Oct-11 17:16:01.839144 117504:117688  INFO  NMGR:release_tmp_neff_cache                  NEFF load cache - cleared by the last worker
+17:16:01.839 +  136.85s | 2026-Oct-11 17:16:01.839151 117504:117688  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/layout_opt/graph.neff, loaded successfully
+17:16:01.908 +  136.92s | 2026-Oct-11 17:16:01.908521 117504:117715  INFO  TDRV:kbl_model_remove                        Removed model: 1002 from: ND0 NC0
+17:16:01.908 +  136.92s | 2026-Oct-11 17:16:01.908591 117504:117714  INFO  TDRV:kbl_model_remove                        Removed model: 1001 from: ND0 NC2
+17:16:01.908 +  136.92s | 2026-Oct-11 17:16:01.908617 117504:117713  INFO  TDRV:kbl_model_remove                        Removed model: 1003 from: ND0 NC6
+17:16:01.908 +  136.92s | 2026-Oct-11 17:16:01.908627 117504:117712  INFO  TDRV:kbl_model_remove                        Removed model: 1004 from: ND0 NC4
+17:16:01.908 +  136.92s | 2026-Oct-11 17:16:01.908634 117504:117715  INFO  TDRV:kbl_model_remove                        Removed model: 1002 from: ND0 NC1
+17:16:01.908 +  136.92s | 2026-Oct-11 17:16:01.908721 117504:117714  INFO  TDRV:kbl_model_remove                        Removed model: 1001 from: ND0 NC3
+17:16:01.908 +  136.92s | 2026-Oct-11 17:16:01.908766 117504:117713  INFO  TDRV:kbl_model_remove                        Removed model: 1003 from: ND0 NC7
+17:16:01.908 +  136.92s | 2026-Oct-11 17:16:01.908775 117504:117712  INFO  TDRV:kbl_model_remove                        Removed model: 1004 from: ND0 NC5
+17:16:01.909 +  136.92s | 2026-Oct-11 17:16:01.909038 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000002 with status NRT_SUCCESS, Execution Unit[301]
+17:16:01.909 +  136.92s | 2026-Oct-11 17:16:01.909085 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000002 with status NRT_SUCCESS, Execution Unit[201]
+17:16:01.909 +  136.92s | 2026-Oct-11 17:16:01.909117 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000002 with status NRT_SUCCESS, Execution Unit[101]
+17:16:01.967 +  136.98s | 2026-Oct-11 17:16:01.966852 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000002 with status NRT_SUCCESS, Execution Unit[1]
+17:16:01.967 +  136.98s | 2026-Oct-11 17:16:01.967161 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10010
+17:16:01.967 +  136.98s | 2026-Oct-11 17:16:01.967176 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10010
+17:16:01.967 +  136.98s | 2026-Oct-11 17:16:01.967178 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10009
+17:16:01.967 +  136.98s | 2026-Oct-11 17:16:01.967181 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10009
+17:16:01.967 +  136.98s | 2026-Oct-11 17:16:01.967183 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10011
+17:16:01.967 +  136.98s | 2026-Oct-11 17:16:01.967186 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10011
+17:16:01.967 +  136.98s | 2026-Oct-11 17:16:01.967188 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10012
+17:16:01.967 +  136.98s | 2026-Oct-11 17:16:01.967191 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10012
+17:16:01.969 +  136.98s | 2026-Oct-11 17:16:01.968896 117504:117688  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff version: 2.0, LNC start: 3
+17:16:01.969 +  136.98s | 2026-Oct-11 17:16:01.968907 117504:117688  INFO  NMGR:enter_cache                             NEFF load cache - first worker, creating cache
+17:16:01.969 +  136.98s | 2026-Oct-11 17:16:01.969033 117504:117685  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff version: 2.0, LNC start: 0
+17:16:01.969 +  136.98s | 2026-Oct-11 17:16:01.969043 117504:117685  INFO  NMGR:enter_cache                             NEFF load cache - waiting for cache creation
+17:16:01.969 +  136.98s | 2026-Oct-11 17:16:01.969038 117504:117687  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff version: 2.0, LNC start: 2
+17:16:01.969 +  136.98s | 2026-Oct-11 17:16:01.969049 117504:117687  INFO  NMGR:enter_cache                             NEFF load cache - waiting for cache creation
+17:16:01.969 +  136.98s | 2026-Oct-11 17:16:01.969047 117504:117686  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff version: 2.0, LNC start: 1
+17:16:01.969 +  136.98s | 2026-Oct-11 17:16:01.969057 117504:117686  INFO  NMGR:enter_cache                             NEFF load cache - waiting for cache creation
+17:16:32.276 +  167.29s | 2026-Oct-11 17:16:32.276761 117504:117686  INFO  NMGR:wait_cache                              NEFF load cache - using cache after wait
+17:16:32.276 +  167.29s | 2026-Oct-11 17:16:32.276794 117504:117685  INFO  NMGR:wait_cache                              NEFF load cache - using cache after wait
+17:16:32.277 +  167.29s | 2026-Oct-11 17:16:32.277046 117504:117687  INFO  NMGR:wait_cache                              NEFF load cache - using cache after wait
+17:16:33.205 +  168.21s | 2026-Oct-11 17:16:33.205452 117504:119552  INFO  TDRV:dml_log_dev_neff_mem                    
+17:16:33.205 +  168.21s | [ND 0:NC 1] Current Usage Total: 170.163MB
+17:16:33.205 +  168.21s | 	Shared Scratchpad: 0.000B
+17:16:33.205 +  168.21s | 	Tensors: 0.000B
+17:16:33.205 +  168.21s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff]:
+17:16:33.205 +  168.21s | 	Total: 139.477MB
+17:16:33.205 +  168.21s | 	* model code: 96.681MB
+17:16:33.205 +  168.21s | 	* model constants: 306.047KB
+17:16:33.205 +  168.21s | 	* scratchpad: 0.000B
+17:16:33.205 +  168.21s | 	* runtime: 272.320KB
+17:16:33.205 +  168.21s | 	* dma rings io: 0.000B
+17:16:33.205 +  168.21s | 	* dma rings spill: 42.227MB
+17:16:33.205 +  168.21s | 	* dma rings collectives: 0.000B
+17:16:33.205 +  168.21s | 	* dma rings runtime: 4.000KB
+17:16:33.205 +  168.21s | 	* collectives: 0.000B
+17:16:33.205 +  168.21s | 
+17:16:33.609 +  168.62s | 2026-Oct-11 17:16:33.609712 117504:119556  INFO  TDRV:dml_log_dev_neff_mem                    
+17:16:33.609 +  168.62s | [ND 0:NC 5] Current Usage Total: 170.163MB
+17:16:33.609 +  168.62s | 	Shared Scratchpad: 0.000B
+17:16:33.609 +  168.62s | 	Tensors: 0.000B
+17:16:33.609 +  168.62s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff]:
+17:16:33.609 +  168.62s | 	Total: 139.477MB
+17:16:33.609 +  168.62s | 	* model code: 96.681MB
+17:16:33.610 +  168.62s | 	* model constants: 306.047KB
+17:16:33.610 +  168.62s | 	* scratchpad: 0.000B
+17:16:33.610 +  168.62s | 	* runtime: 272.320KB
+17:16:33.610 +  168.62s | 	* dma rings io: 0.000B
+17:16:33.610 +  168.62s | 	* dma rings spill: 42.227MB
+17:16:33.610 +  168.62s | 	* dma rings collectives: 0.000B
+17:16:33.610 +  168.62s | 	* dma rings runtime: 4.000KB
+17:16:33.610 +  168.62s | 	* collectives: 0.000B
+17:16:33.610 +  168.62s | 
+17:16:33.619 +  168.63s | 2026-Oct-11 17:16:33.619000 117504:119550  INFO  TDRV:dml_log_dev_neff_mem                    
+17:16:33.619 +  168.63s | [ND 0:NC 3] Current Usage Total: 170.163MB
+17:16:33.619 +  168.63s | 	Shared Scratchpad: 0.000B
+17:16:33.619 +  168.63s | 	Tensors: 0.000B
+17:16:33.619 +  168.63s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff]:
+17:16:33.619 +  168.63s | 	Total: 139.477MB
+17:16:33.619 +  168.63s | 	* model code: 96.681MB
+17:16:33.619 +  168.63s | 	* model constants: 306.047KB
+17:16:33.619 +  168.63s | 	* scratchpad: 0.000B
+17:16:33.619 +  168.63s | 	* runtime: 272.320KB
+17:16:33.619 +  168.63s | 	* dma rings io: 0.000B
+17:16:33.619 +  168.63s | 	* dma rings spill: 42.227MB
+17:16:33.619 +  168.63s | 	* dma rings collectives: 0.000B
+17:16:33.619 +  168.63s | 	* dma rings runtime: 4.000KB
+17:16:33.619 +  168.63s | 	* collectives: 0.000B
+17:16:33.619 +  168.63s | 
+17:16:33.700 +  168.71s | 2026-Oct-11 17:16:33.700493 117504:119554  INFO  TDRV:dml_log_dev_neff_mem                    
+17:16:33.700 +  168.71s | [ND 0:NC 7] Current Usage Total: 170.163MB
+17:16:33.700 +  168.71s | 	Shared Scratchpad: 0.000B
+17:16:33.700 +  168.71s | 	Tensors: 0.000B
+17:16:33.700 +  168.71s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff]:
+17:16:33.700 +  168.71s | 	Total: 139.477MB
+17:16:33.700 +  168.71s | 	* model code: 96.681MB
+17:16:33.700 +  168.71s | 	* model constants: 306.047KB
+17:16:33.700 +  168.71s | 	* scratchpad: 0.000B
+17:16:33.700 +  168.71s | 	* runtime: 272.320KB
+17:16:33.700 +  168.71s | 	* dma rings io: 0.000B
+17:16:33.700 +  168.71s | 	* dma rings spill: 42.227MB
+17:16:33.700 +  168.71s | 	* dma rings collectives: 0.000B
+17:16:33.700 +  168.71s | 	* dma rings runtime: 4.000KB
+17:16:33.700 +  168.71s | 	* collectives: 0.000B
+17:16:33.700 +  168.71s | 
+17:19:20.437 +  335.45s | 2026-Oct-11 17:19:20.437764 117504:119551  INFO  TDRV:dml_log_dev_neff_mem                    
+17:19:20.438 +  335.45s | [ND 0:NC 0] Current Usage Total: 19.334GB
+17:19:20.438 +  335.45s | 	Shared Scratchpad: 3.688GB
+17:19:20.438 +  335.45s | 	Tensors: 9.636GB
+17:19:20.438 +  335.45s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff]:
+17:19:20.438 +  335.45s | 	Total: 5.979GB
+17:19:20.438 +  335.45s | 	* model code: 456.309MB
+17:19:20.438 +  335.45s | 	* model constants: 306.047KB
+17:19:20.438 +  335.45s | 	* scratchpad: 0.000B
+17:19:20.438 +  335.45s | 	* runtime: 272.320KB
+17:19:20.438 +  335.45s | 	* dma rings io: 0.000B
+17:19:20.438 +  335.45s | 	* dma rings spill: 5.533GB
+17:19:20.438 +  335.45s | 	* dma rings collectives: 0.000B
+17:19:20.438 +  335.45s | 	* dma rings runtime: 4.000KB
+17:19:20.438 +  335.45s | 	* collectives: 71.188KB
+17:19:20.438 +  335.45s | 
+17:19:20.438 +  335.45s | 2026-Oct-11 17:19:20.438209 117504:117688  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff" ID: 0
+17:19:20.438 +  335.45s | 2026-Oct-11 17:19:20.438222 117504:117688  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff, loaded successfully
+17:19:21.810 +  336.82s | 2026-Oct-11 17:19:21.810486 117504:119555  INFO  TDRV:dml_log_dev_neff_mem                    
+17:19:21.810 +  336.82s | [ND 0:NC 4] Current Usage Total: 19.334GB
+17:19:21.810 +  336.82s | 	Shared Scratchpad: 3.688GB
+17:19:21.810 +  336.82s | 	Tensors: 9.636GB
+17:19:21.810 +  336.82s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff]:
+17:19:21.810 +  336.82s | 	Total: 5.979GB
+17:19:21.810 +  336.82s | 	* model code: 456.309MB
+17:19:21.810 +  336.82s | 	* model constants: 306.047KB
+17:19:21.810 +  336.82s | 	* scratchpad: 0.000B
+17:19:21.810 +  336.82s | 	* runtime: 272.320KB
+17:19:21.810 +  336.82s | 	* dma rings io: 0.000B
+17:19:21.810 +  336.82s | 	* dma rings spill: 5.533GB
+17:19:21.810 +  336.82s | 	* dma rings collectives: 0.000B
+17:19:21.810 +  336.82s | 	* dma rings runtime: 4.000KB
+17:19:21.810 +  336.82s | 	* collectives: 71.188KB
+17:19:21.810 +  336.82s | 
+17:19:21.811 +  336.82s | 2026-Oct-11 17:19:21.810981 117504:117685  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff" ID: 0
+17:19:21.811 +  336.82s | 2026-Oct-11 17:19:21.810992 117504:117685  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff, loaded successfully
+17:19:22.663 +  337.67s | 2026-Oct-11 17:19:22.663631 117504:119549  INFO  TDRV:dml_log_dev_neff_mem                    
+17:19:22.663 +  337.67s | [ND 0:NC 2] Current Usage Total: 19.334GB
+17:19:22.663 +  337.67s | 	Shared Scratchpad: 3.688GB
+17:19:22.663 +  337.67s | 	Tensors: 9.636GB
+17:19:22.663 +  337.67s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff]:
+17:19:22.663 +  337.67s | 	Total: 5.979GB
+17:19:22.663 +  337.67s | 	* model code: 456.309MB
+17:19:22.663 +  337.67s | 	* model constants: 306.047KB
+17:19:22.664 +  337.67s | 	* scratchpad: 0.000B
+17:19:22.664 +  337.67s | 	* runtime: 272.320KB
+17:19:22.664 +  337.67s | 	* dma rings io: 0.000B
+17:19:22.664 +  337.67s | 	* dma rings spill: 5.533GB
+17:19:22.664 +  337.67s | 	* dma rings collectives: 0.000B
+17:19:22.664 +  337.67s | 	* dma rings runtime: 4.000KB
+17:19:22.664 +  337.67s | 	* collectives: 71.188KB
+17:19:22.664 +  337.67s | 
+17:19:22.664 +  337.67s | 2026-Oct-11 17:19:22.664112 117504:117687  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff" ID: 0
+17:19:22.664 +  337.67s | 2026-Oct-11 17:19:22.664124 117504:117687  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff, loaded successfully
+17:19:23.121 +  338.13s | 2026-Oct-11 17:19:23.121036 117504:119553  INFO  TDRV:dml_log_dev_neff_mem                    
+17:19:23.121 +  338.13s | [ND 0:NC 6] Current Usage Total: 19.334GB
+17:19:23.121 +  338.13s | 	Shared Scratchpad: 3.688GB
+17:19:23.121 +  338.13s | 	Tensors: 9.636GB
+17:19:23.121 +  338.13s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff]:
+17:19:23.121 +  338.13s | 	Total: 5.979GB
+17:19:23.121 +  338.13s | 	* model code: 456.309MB
+17:19:23.121 +  338.13s | 	* model constants: 306.047KB
+17:19:23.121 +  338.13s | 	* scratchpad: 0.000B
+17:19:23.121 +  338.13s | 	* runtime: 272.320KB
+17:19:23.121 +  338.13s | 	* dma rings io: 0.000B
+17:19:23.121 +  338.13s | 	* dma rings spill: 5.533GB
+17:19:23.121 +  338.13s | 	* dma rings collectives: 0.000B
+17:19:23.121 +  338.13s | 	* dma rings runtime: 4.000KB
+17:19:23.121 +  338.13s | 	* collectives: 71.188KB
+17:19:23.121 +  338.13s | 
+17:19:23.121 +  338.13s | 2026-Oct-11 17:19:23.121528 117504:117686  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff" ID: 0
+17:19:23.532 +  338.54s | 2026-Oct-11 17:19:23.532437 117504:117686  INFO  NMGR:release_tmp_neff_cache                  NEFF load cache - cleared by the last worker
+17:19:23.532 +  338.54s | 2026-Oct-11 17:19:23.532456 117504:117686  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-2c7eedcd/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_0382838589555a2c2efa+3de01f62.neff, loaded successfully
+17:19:23.550 +  338.56s | Neuron: Finished traced model weight initialization in 251.55s (device init 251.55s, total load_weights 251.92s)
+17:19:23.743 +  338.75s | Neuron: Skipping model warmup
+17:19:24.463 +  339.47s | 2026-Oct-11 17:19:24.463337 117504:117715  INFO  TDRV:kbl_model_remove                        Removed model: 1012 from: ND0 NC0
+17:19:24.463 +  339.47s | 2026-Oct-11 17:19:24.463338 117504:117714  INFO  TDRV:kbl_model_remove                        Removed model: 1010 from: ND0 NC2
+17:19:24.463 +  339.47s | 2026-Oct-11 17:19:24.463343 117504:117712  INFO  TDRV:kbl_model_remove                        Removed model: 1011 from: ND0 NC4
+17:19:24.463 +  339.47s | 2026-Oct-11 17:19:24.463349 117504:117713  INFO  TDRV:kbl_model_remove                        Removed model: 1009 from: ND0 NC6
+17:19:24.464 +  339.47s | 2026-Oct-11 17:19:24.463783 117504:117712  INFO  TDRV:kbl_model_remove                        Removed model: 1011 from: ND0 NC5
+17:19:24.464 +  339.47s | 2026-Oct-11 17:19:24.463829 117504:117714  INFO  TDRV:kbl_model_remove                        Removed model: 1010 from: ND0 NC3
+17:19:24.464 +  339.47s | 2026-Oct-11 17:19:24.464213 117504:117715  INFO  TDRV:kbl_model_remove                        Removed model: 1012 from: ND0 NC1
+17:19:24.464 +  339.47s | 2026-Oct-11 17:19:24.464269 117504:117713  INFO  TDRV:kbl_model_remove                        Removed model: 1009 from: ND0 NC7
+17:19:24.464 +  339.47s | 2026-Oct-11 17:19:24.464308 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000003 with status NRT_SUCCESS, Execution Unit[201]
+17:19:24.464 +  339.47s | 2026-Oct-11 17:19:24.464315 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000003 with status NRT_SUCCESS, Execution Unit[1]
+17:19:24.464 +  339.47s | 2026-Oct-11 17:19:24.464643 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000003 with status NRT_SUCCESS, Execution Unit[301]
+17:19:24.688 +  339.70s | 2026-Oct-11 17:19:24.688050 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000003 with status NRT_SUCCESS, Execution Unit[101]
+17:19:24.740 +  339.75s | 2026-Oct-11 17:19:24.740140 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000004 with status NRT_SUCCESS, Execution Unit[301]
+17:19:24.740 +  339.75s | 2026-Oct-11 17:19:24.740147 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000004 with status NRT_SUCCESS, Execution Unit[201]
+17:19:24.740 +  339.75s | 2026-Oct-11 17:19:24.740161 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000004 with status NRT_SUCCESS, Execution Unit[1]
+17:19:24.740 +  339.75s | 2026-Oct-11 17:19:24.740161 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000004 with status NRT_SUCCESS, Execution Unit[101]
+17:19:35.276 +  350.29s | 2026-Oct-11 17:19:35.276758 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000005 with status NRT_SUCCESS, Execution Unit[101]
+17:19:35.276 +  350.29s | 2026-Oct-11 17:19:35.276760 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000005 with status NRT_SUCCESS, Execution Unit[301]
+17:19:35.276 +  350.29s | 2026-Oct-11 17:19:35.276789 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000005 with status NRT_SUCCESS, Execution Unit[1]
+17:19:35.276 +  350.29s | 2026-Oct-11 17:19:35.276759 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000005 with status NRT_SUCCESS, Execution Unit[201]
+17:19:45.083 +  360.09s | 2026-Oct-11 17:19:45.083610 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000006 with status NRT_SUCCESS, Execution Unit[301]
+17:19:45.083 +  360.09s | 2026-Oct-11 17:19:45.083669 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000006 with status NRT_SUCCESS, Execution Unit[201]
+17:19:45.083 +  360.09s | 2026-Oct-11 17:19:45.083672 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000006 with status NRT_SUCCESS, Execution Unit[101]
+17:19:45.083 +  360.09s | 2026-Oct-11 17:19:45.083708 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000006 with status NRT_SUCCESS, Execution Unit[1]
+17:19:54.912 +  369.92s | 2026-Oct-11 17:19:54.912067 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000007 with status NRT_SUCCESS, Execution Unit[301]
+17:19:54.912 +  369.92s | 2026-Oct-11 17:19:54.912078 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000007 with status NRT_SUCCESS, Execution Unit[1]
+17:19:54.912 +  369.92s | 2026-Oct-11 17:19:54.912112 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000007 with status NRT_SUCCESS, Execution Unit[101]
+17:19:54.912 +  369.92s | 2026-Oct-11 17:19:54.912260 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000007 with status NRT_SUCCESS, Execution Unit[201]
+17:20:04.714 +  379.72s | 2026-Oct-11 17:20:04.714370 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000008 with status NRT_SUCCESS, Execution Unit[301]
+17:20:04.714 +  379.72s | 2026-Oct-11 17:20:04.714496 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000008 with status NRT_SUCCESS, Execution Unit[201]
+17:20:04.714 +  379.72s | 2026-Oct-11 17:20:04.714551 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000008 with status NRT_SUCCESS, Execution Unit[1]
+17:20:04.714 +  379.72s | 2026-Oct-11 17:20:04.714579 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000008 with status NRT_SUCCESS, Execution Unit[101]
+17:20:14.530 +  389.54s | 2026-Oct-11 17:20:14.530034 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000009 with status NRT_SUCCESS, Execution Unit[1]
+17:20:14.530 +  389.54s | 2026-Oct-11 17:20:14.530063 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000009 with status NRT_SUCCESS, Execution Unit[301]
+17:20:14.530 +  389.54s | 2026-Oct-11 17:20:14.530072 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000009 with status NRT_SUCCESS, Execution Unit[101]
+17:20:14.530 +  389.54s | 2026-Oct-11 17:20:14.530062 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000009 with status NRT_SUCCESS, Execution Unit[201]
+17:20:24.333 +  399.34s | 2026-Oct-11 17:20:24.333817 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000000a with status NRT_SUCCESS, Execution Unit[1]
+17:20:24.333 +  399.34s | 2026-Oct-11 17:20:24.333817 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000000a with status NRT_SUCCESS, Execution Unit[101]
+17:20:24.334 +  399.34s | 2026-Oct-11 17:20:24.333862 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000000a with status NRT_SUCCESS, Execution Unit[301]
+17:20:24.334 +  399.34s | 2026-Oct-11 17:20:24.333925 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000000a with status NRT_SUCCESS, Execution Unit[201]
+17:20:34.164 +  409.17s | 2026-Oct-11 17:20:34.164546 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000000b with status NRT_SUCCESS, Execution Unit[101]
+17:20:34.164 +  409.17s | 2026-Oct-11 17:20:34.164552 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000000b with status NRT_SUCCESS, Execution Unit[201]
+17:20:34.164 +  409.17s | 2026-Oct-11 17:20:34.164585 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000000b with status NRT_SUCCESS, Execution Unit[1]
+17:20:34.164 +  409.17s | 2026-Oct-11 17:20:34.164597 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000000b with status NRT_SUCCESS, Execution Unit[301]
+17:20:43.968 +  418.98s | 2026-Oct-11 17:20:43.967941 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000000c with status NRT_SUCCESS, Execution Unit[1]
+17:20:43.968 +  418.98s | 2026-Oct-11 17:20:43.968029 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000000c with status NRT_SUCCESS, Execution Unit[101]
+17:20:43.968 +  418.98s | 2026-Oct-11 17:20:43.968057 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000000c with status NRT_SUCCESS, Execution Unit[201]
+17:20:43.968 +  418.98s | 2026-Oct-11 17:20:43.968091 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000000c with status NRT_SUCCESS, Execution Unit[301]
+17:20:53.783 +  428.79s | 2026-Oct-11 17:20:53.783550 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000000d with status NRT_SUCCESS, Execution Unit[1]
+17:20:53.783 +  428.79s | 2026-Oct-11 17:20:53.783555 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000000d with status NRT_SUCCESS, Execution Unit[101]
+17:20:53.783 +  428.79s | 2026-Oct-11 17:20:53.783589 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000000d with status NRT_SUCCESS, Execution Unit[201]
+17:20:53.783 +  428.79s | 2026-Oct-11 17:20:53.783670 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000000d with status NRT_SUCCESS, Execution Unit[301]
+17:21:03.587 +  438.60s | 2026-Oct-11 17:21:03.587178 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000000e with status NRT_SUCCESS, Execution Unit[101]
+17:21:03.587 +  438.60s | 2026-Oct-11 17:21:03.587178 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000000e with status NRT_SUCCESS, Execution Unit[201]
+17:21:03.587 +  438.60s | 2026-Oct-11 17:21:03.587224 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000000e with status NRT_SUCCESS, Execution Unit[1]
+17:21:03.587 +  438.60s | 2026-Oct-11 17:21:03.587231 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000000e with status NRT_SUCCESS, Execution Unit[301]
+17:21:13.402 +  448.41s | 2026-Oct-11 17:21:13.402185 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000000f with status NRT_SUCCESS, Execution Unit[301]
+17:21:13.402 +  448.41s | 2026-Oct-11 17:21:13.402185 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000000f with status NRT_SUCCESS, Execution Unit[201]
+17:21:13.402 +  448.41s | 2026-Oct-11 17:21:13.402184 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000000f with status NRT_SUCCESS, Execution Unit[1]
+17:21:13.402 +  448.41s | 2026-Oct-11 17:21:13.402206 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000000f with status NRT_SUCCESS, Execution Unit[101]
+17:21:23.205 +  458.21s | 2026-Oct-11 17:21:23.205458 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000010 with status NRT_SUCCESS, Execution Unit[1]
+17:21:23.205 +  458.21s | 2026-Oct-11 17:21:23.205465 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000010 with status NRT_SUCCESS, Execution Unit[301]
+17:21:23.205 +  458.21s | 2026-Oct-11 17:21:23.205551 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000010 with status NRT_SUCCESS, Execution Unit[201]
+17:21:23.205 +  458.21s | 2026-Oct-11 17:21:23.205560 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000010 with status NRT_SUCCESS, Execution Unit[101]
+17:21:33.020 +  468.03s | 2026-Oct-11 17:21:33.020587 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000011 with status NRT_SUCCESS, Execution Unit[1]
+17:21:33.020 +  468.03s | 2026-Oct-11 17:21:33.020588 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000011 with status NRT_SUCCESS, Execution Unit[101]
+17:21:33.020 +  468.03s | 2026-Oct-11 17:21:33.020588 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000011 with status NRT_SUCCESS, Execution Unit[301]
+17:21:33.020 +  468.03s | 2026-Oct-11 17:21:33.020616 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000011 with status NRT_SUCCESS, Execution Unit[201]
+17:21:42.824 +  477.83s | 2026-Oct-11 17:21:42.824365 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000012 with status NRT_SUCCESS, Execution Unit[1]
+17:21:42.824 +  477.83s | 2026-Oct-11 17:21:42.824484 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000012 with status NRT_SUCCESS, Execution Unit[101]
+17:21:42.824 +  477.83s | 2026-Oct-11 17:21:42.824519 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000012 with status NRT_SUCCESS, Execution Unit[201]
+17:21:42.824 +  477.83s | 2026-Oct-11 17:21:42.824587 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000012 with status NRT_SUCCESS, Execution Unit[301]
+17:21:52.639 +  487.65s | 2026-Oct-11 17:21:52.639052 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000013 with status NRT_SUCCESS, Execution Unit[201]
+17:21:52.639 +  487.65s | 2026-Oct-11 17:21:52.639080 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000013 with status NRT_SUCCESS, Execution Unit[1]
+17:21:52.639 +  487.65s | 2026-Oct-11 17:21:52.639091 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000013 with status NRT_SUCCESS, Execution Unit[301]
+17:21:52.639 +  487.65s | 2026-Oct-11 17:21:52.639143 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000013 with status NRT_SUCCESS, Execution Unit[101]
+17:22:02.442 +  497.45s | 2026-Oct-11 17:22:02.442601 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000014 with status NRT_SUCCESS, Execution Unit[201]
+17:22:02.442 +  497.45s | 2026-Oct-11 17:22:02.442671 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000014 with status NRT_SUCCESS, Execution Unit[1]
+17:22:02.442 +  497.45s | 2026-Oct-11 17:22:02.442691 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000014 with status NRT_SUCCESS, Execution Unit[301]
+17:22:02.442 +  497.45s | 2026-Oct-11 17:22:02.442702 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000014 with status NRT_SUCCESS, Execution Unit[101]
+17:22:12.256 +  507.27s | 2026-Oct-11 17:22:12.256412 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000015 with status NRT_SUCCESS, Execution Unit[1]
+17:22:12.256 +  507.27s | 2026-Oct-11 17:22:12.256411 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000015 with status NRT_SUCCESS, Execution Unit[301]
+17:22:12.256 +  507.27s | 2026-Oct-11 17:22:12.256412 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000015 with status NRT_SUCCESS, Execution Unit[101]
+17:22:12.256 +  507.27s | 2026-Oct-11 17:22:12.256637 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000015 with status NRT_SUCCESS, Execution Unit[201]
+17:22:22.061 +  517.07s | 2026-Oct-11 17:22:22.061150 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000016 with status NRT_SUCCESS, Execution Unit[201]
+17:22:22.061 +  517.07s | 2026-Oct-11 17:22:22.061150 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000016 with status NRT_SUCCESS, Execution Unit[1]
+17:22:22.061 +  517.07s | 2026-Oct-11 17:22:22.061150 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000016 with status NRT_SUCCESS, Execution Unit[301]
+17:22:22.061 +  517.07s | 2026-Oct-11 17:22:22.061211 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000016 with status NRT_SUCCESS, Execution Unit[101]
+17:22:31.875 +  526.88s | 2026-Oct-11 17:22:31.875671 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000017 with status NRT_SUCCESS, Execution Unit[201]
+17:22:31.875 +  526.88s | 2026-Oct-11 17:22:31.875691 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000017 with status NRT_SUCCESS, Execution Unit[1]
+17:22:31.875 +  526.88s | 2026-Oct-11 17:22:31.875689 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000017 with status NRT_SUCCESS, Execution Unit[301]
+17:22:31.875 +  526.88s | 2026-Oct-11 17:22:31.875759 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000017 with status NRT_SUCCESS, Execution Unit[101]
+17:22:41.679 +  536.69s | 2026-Oct-11 17:22:41.679375 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000018 with status NRT_SUCCESS, Execution Unit[101]
+17:22:41.679 +  536.69s | 2026-Oct-11 17:22:41.679383 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000018 with status NRT_SUCCESS, Execution Unit[301]
+17:22:41.679 +  536.69s | 2026-Oct-11 17:22:41.679399 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000018 with status NRT_SUCCESS, Execution Unit[1]
+17:22:41.679 +  536.69s | 2026-Oct-11 17:22:41.679430 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000018 with status NRT_SUCCESS, Execution Unit[201]
+17:22:51.494 +  546.50s | 2026-Oct-11 17:22:51.494331 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000019 with status NRT_SUCCESS, Execution Unit[301]
+17:22:51.494 +  546.50s | 2026-Oct-11 17:22:51.494374 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000019 with status NRT_SUCCESS, Execution Unit[201]
+17:22:51.494 +  546.50s | 2026-Oct-11 17:22:51.494399 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000019 with status NRT_SUCCESS, Execution Unit[1]
+17:22:51.494 +  546.50s | 2026-Oct-11 17:22:51.494398 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000019 with status NRT_SUCCESS, Execution Unit[101]
+17:23:01.297 +  556.31s | 2026-Oct-11 17:23:01.297887 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000001a with status NRT_SUCCESS, Execution Unit[301]
+17:23:01.298 +  556.31s | 2026-Oct-11 17:23:01.297894 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000001a with status NRT_SUCCESS, Execution Unit[1]
+17:23:01.298 +  556.31s | 2026-Oct-11 17:23:01.297943 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000001a with status NRT_SUCCESS, Execution Unit[101]
+17:23:01.298 +  556.31s | 2026-Oct-11 17:23:01.297946 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000001a with status NRT_SUCCESS, Execution Unit[201]
+17:23:11.112 +  566.12s | 2026-Oct-11 17:23:11.112465 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000001b with status NRT_SUCCESS, Execution Unit[301]
+17:23:11.112 +  566.12s | 2026-Oct-11 17:23:11.112465 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000001b with status NRT_SUCCESS, Execution Unit[101]
+17:23:11.112 +  566.12s | 2026-Oct-11 17:23:11.112506 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000001b with status NRT_SUCCESS, Execution Unit[1]
+17:23:11.112 +  566.12s | 2026-Oct-11 17:23:11.112635 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000001b with status NRT_SUCCESS, Execution Unit[201]
+17:23:20.915 +  575.92s | 2026-Oct-11 17:23:20.915635 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000001c with status NRT_SUCCESS, Execution Unit[201]
+17:23:20.915 +  575.92s | 2026-Oct-11 17:23:20.915639 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000001c with status NRT_SUCCESS, Execution Unit[301]
+17:23:20.915 +  575.92s | 2026-Oct-11 17:23:20.915657 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000001c with status NRT_SUCCESS, Execution Unit[1]
+17:23:20.915 +  575.92s | 2026-Oct-11 17:23:20.915692 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000001c with status NRT_SUCCESS, Execution Unit[101]
+17:23:30.731 +  585.74s | 2026-Oct-11 17:23:30.731380 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000001d with status NRT_SUCCESS, Execution Unit[1]
+17:23:30.731 +  585.74s | 2026-Oct-11 17:23:30.731380 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000001d with status NRT_SUCCESS, Execution Unit[101]
+17:23:30.731 +  585.74s | 2026-Oct-11 17:23:30.731379 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000001d with status NRT_SUCCESS, Execution Unit[201]
+17:23:30.731 +  585.74s | 2026-Oct-11 17:23:30.731432 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000001d with status NRT_SUCCESS, Execution Unit[301]
+17:23:40.534 +  595.54s | 2026-Oct-11 17:23:40.534351 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000001e with status NRT_SUCCESS, Execution Unit[1]
+17:23:40.534 +  595.54s | 2026-Oct-11 17:23:40.534357 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000001e with status NRT_SUCCESS, Execution Unit[301]
+17:23:40.534 +  595.54s | 2026-Oct-11 17:23:40.534357 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000001e with status NRT_SUCCESS, Execution Unit[101]
+17:23:40.534 +  595.54s | 2026-Oct-11 17:23:40.534430 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000001e with status NRT_SUCCESS, Execution Unit[201]
+17:23:50.349 +  605.36s | 2026-Oct-11 17:23:50.349088 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000001f with status NRT_SUCCESS, Execution Unit[1]
+17:23:50.349 +  605.36s | 2026-Oct-11 17:23:50.349123 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000001f with status NRT_SUCCESS, Execution Unit[201]
+17:23:50.349 +  605.36s | 2026-Oct-11 17:23:50.349129 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000001f with status NRT_SUCCESS, Execution Unit[101]
+17:23:50.349 +  605.36s | 2026-Oct-11 17:23:50.349185 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000001f with status NRT_SUCCESS, Execution Unit[301]
+17:24:00.152 +  615.16s | 2026-Oct-11 17:24:00.152712 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000020 with status NRT_SUCCESS, Execution Unit[1]
+17:24:00.152 +  615.16s | 2026-Oct-11 17:24:00.152739 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000020 with status NRT_SUCCESS, Execution Unit[101]
+17:24:00.152 +  615.16s | 2026-Oct-11 17:24:00.152746 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000020 with status NRT_SUCCESS, Execution Unit[201]
+17:24:00.152 +  615.16s | 2026-Oct-11 17:24:00.152795 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000020 with status NRT_SUCCESS, Execution Unit[301]
+17:24:09.968 +  624.98s | 2026-Oct-11 17:24:09.968909 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000021 with status NRT_SUCCESS, Execution Unit[1]
+17:24:09.969 +  624.98s | 2026-Oct-11 17:24:09.968933 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000021 with status NRT_SUCCESS, Execution Unit[101]
+17:24:09.969 +  624.98s | 2026-Oct-11 17:24:09.968960 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000021 with status NRT_SUCCESS, Execution Unit[201]
+17:24:09.969 +  624.98s | 2026-Oct-11 17:24:09.968974 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000021 with status NRT_SUCCESS, Execution Unit[301]
+17:24:19.772 +  634.78s | 2026-Oct-11 17:24:19.772244 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000022 with status NRT_SUCCESS, Execution Unit[1]
+17:24:19.772 +  634.78s | 2026-Oct-11 17:24:19.772244 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000022 with status NRT_SUCCESS, Execution Unit[301]
+17:24:19.772 +  634.78s | 2026-Oct-11 17:24:19.772244 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000022 with status NRT_SUCCESS, Execution Unit[201]
+17:24:19.772 +  634.78s | 2026-Oct-11 17:24:19.772297 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000022 with status NRT_SUCCESS, Execution Unit[101]
+17:24:29.586 +  644.59s | 2026-Oct-11 17:24:29.585936 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000023 with status NRT_SUCCESS, Execution Unit[201]
+17:24:29.586 +  644.59s | 2026-Oct-11 17:24:29.585970 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000023 with status NRT_SUCCESS, Execution Unit[1]
+17:24:29.586 +  644.59s | 2026-Oct-11 17:24:29.585973 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000023 with status NRT_SUCCESS, Execution Unit[301]
+17:24:29.586 +  644.59s | 2026-Oct-11 17:24:29.586045 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000023 with status NRT_SUCCESS, Execution Unit[101]
+17:24:39.389 +  654.40s | 2026-Oct-11 17:24:39.388955 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000024 with status NRT_SUCCESS, Execution Unit[201]
+17:24:39.389 +  654.40s | 2026-Oct-11 17:24:39.388971 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000024 with status NRT_SUCCESS, Execution Unit[301]
+17:24:39.389 +  654.40s | 2026-Oct-11 17:24:39.389000 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000024 with status NRT_SUCCESS, Execution Unit[1]
+17:24:39.389 +  654.40s | 2026-Oct-11 17:24:39.389124 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000024 with status NRT_SUCCESS, Execution Unit[101]
+17:24:49.202 +  664.21s | 2026-Oct-11 17:24:49.202897 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000025 with status NRT_SUCCESS, Execution Unit[201]
+17:24:49.203 +  664.21s | 2026-Oct-11 17:24:49.202917 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000025 with status NRT_SUCCESS, Execution Unit[1]
+17:24:49.203 +  664.21s | 2026-Oct-11 17:24:49.202934 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000025 with status NRT_SUCCESS, Execution Unit[101]
+17:24:49.203 +  664.21s | 2026-Oct-11 17:24:49.202945 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000025 with status NRT_SUCCESS, Execution Unit[301]
+17:24:59.006 +  674.02s | 2026-Oct-11 17:24:59.006362 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000026 with status NRT_SUCCESS, Execution Unit[201]
+17:24:59.006 +  674.02s | 2026-Oct-11 17:24:59.006528 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000026 with status NRT_SUCCESS, Execution Unit[301]
+17:24:59.006 +  674.02s | 2026-Oct-11 17:24:59.006564 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000026 with status NRT_SUCCESS, Execution Unit[1]
+17:24:59.006 +  674.02s | 2026-Oct-11 17:24:59.006578 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000026 with status NRT_SUCCESS, Execution Unit[101]
+17:25:08.821 +  683.83s | 2026-Oct-11 17:25:08.821729 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000027 with status NRT_SUCCESS, Execution Unit[1]
+17:25:08.821 +  683.83s | 2026-Oct-11 17:25:08.821739 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000027 with status NRT_SUCCESS, Execution Unit[101]
+17:25:08.821 +  683.83s | 2026-Oct-11 17:25:08.821741 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000027 with status NRT_SUCCESS, Execution Unit[201]
+17:25:08.821 +  683.83s | 2026-Oct-11 17:25:08.821920 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000027 with status NRT_SUCCESS, Execution Unit[301]
+17:25:18.627 +  693.64s | 2026-Oct-11 17:25:18.626966 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000028 with status NRT_SUCCESS, Execution Unit[301]
+17:25:18.627 +  693.64s | 2026-Oct-11 17:25:18.627046 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000028 with status NRT_SUCCESS, Execution Unit[201]
+17:25:18.627 +  693.64s | 2026-Oct-11 17:25:18.627077 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000028 with status NRT_SUCCESS, Execution Unit[101]
+17:25:18.627 +  693.64s | 2026-Oct-11 17:25:18.627100 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000028 with status NRT_SUCCESS, Execution Unit[1]
+17:25:28.444 +  703.45s | 2026-Oct-11 17:25:28.444447 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000029 with status NRT_SUCCESS, Execution Unit[201]
+17:25:28.444 +  703.45s | 2026-Oct-11 17:25:28.444485 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000029 with status NRT_SUCCESS, Execution Unit[301]
+17:25:28.444 +  703.45s | 2026-Oct-11 17:25:28.444497 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000029 with status NRT_SUCCESS, Execution Unit[1]
+17:25:28.444 +  703.45s | 2026-Oct-11 17:25:28.444563 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000029 with status NRT_SUCCESS, Execution Unit[101]
+17:25:38.248 +  713.26s | 2026-Oct-11 17:25:38.248081 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000002a with status NRT_SUCCESS, Execution Unit[1]
+17:25:38.248 +  713.26s | 2026-Oct-11 17:25:38.248089 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000002a with status NRT_SUCCESS, Execution Unit[201]
+17:25:38.248 +  713.26s | 2026-Oct-11 17:25:38.248150 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000002a with status NRT_SUCCESS, Execution Unit[101]
+17:25:38.248 +  713.26s | 2026-Oct-11 17:25:38.248151 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000002a with status NRT_SUCCESS, Execution Unit[301]
+17:25:48.063 +  723.07s | 2026-Oct-11 17:25:48.063314 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000002b with status NRT_SUCCESS, Execution Unit[301]
+17:25:48.063 +  723.07s | 2026-Oct-11 17:25:48.063353 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000002b with status NRT_SUCCESS, Execution Unit[201]
+17:25:48.063 +  723.07s | 2026-Oct-11 17:25:48.063365 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000002b with status NRT_SUCCESS, Execution Unit[101]
+17:25:48.063 +  723.07s | 2026-Oct-11 17:25:48.063420 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000002b with status NRT_SUCCESS, Execution Unit[1]
+17:25:57.867 +  732.88s | 2026-Oct-11 17:25:57.866818 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000002c with status NRT_SUCCESS, Execution Unit[201]
+17:25:57.867 +  732.88s | 2026-Oct-11 17:25:57.866849 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000002c with status NRT_SUCCESS, Execution Unit[101]
+17:25:57.867 +  732.88s | 2026-Oct-11 17:25:57.866853 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000002c with status NRT_SUCCESS, Execution Unit[1]
+17:25:57.867 +  732.88s | 2026-Oct-11 17:25:57.866907 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000002c with status NRT_SUCCESS, Execution Unit[301]
+17:26:07.681 +  742.69s | 2026-Oct-11 17:26:07.681607 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000002d with status NRT_SUCCESS, Execution Unit[101]
+17:26:07.681 +  742.69s | 2026-Oct-11 17:26:07.681632 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000002d with status NRT_SUCCESS, Execution Unit[1]
+17:26:07.681 +  742.69s | 2026-Oct-11 17:26:07.681664 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000002d with status NRT_SUCCESS, Execution Unit[301]
+17:26:07.681 +  742.69s | 2026-Oct-11 17:26:07.681732 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000002d with status NRT_SUCCESS, Execution Unit[201]
+17:26:17.485 +  752.49s | 2026-Oct-11 17:26:17.484933 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000002e with status NRT_SUCCESS, Execution Unit[1]
+17:26:17.485 +  752.49s | 2026-Oct-11 17:26:17.484971 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000002e with status NRT_SUCCESS, Execution Unit[101]
+17:26:17.485 +  752.49s | 2026-Oct-11 17:26:17.485016 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000002e with status NRT_SUCCESS, Execution Unit[301]
+17:26:17.485 +  752.49s | 2026-Oct-11 17:26:17.485048 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000002e with status NRT_SUCCESS, Execution Unit[201]
+17:26:27.296 +  762.31s | 2026-Oct-11 17:26:27.296374 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000002f with status NRT_SUCCESS, Execution Unit[201]
+17:26:27.296 +  762.31s | 2026-Oct-11 17:26:27.296429 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000002f with status NRT_SUCCESS, Execution Unit[301]
+17:26:27.296 +  762.31s | 2026-Oct-11 17:26:27.296452 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000002f with status NRT_SUCCESS, Execution Unit[1]
+17:26:27.296 +  762.31s | 2026-Oct-11 17:26:27.296481 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000002f with status NRT_SUCCESS, Execution Unit[101]
+17:26:37.101 +  772.11s | 2026-Oct-11 17:26:37.101089 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000030 with status NRT_SUCCESS, Execution Unit[201]
+17:26:37.101 +  772.11s | 2026-Oct-11 17:26:37.101089 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000030 with status NRT_SUCCESS, Execution Unit[301]
+17:26:37.101 +  772.11s | 2026-Oct-11 17:26:37.101089 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000030 with status NRT_SUCCESS, Execution Unit[1]
+17:26:37.101 +  772.11s | 2026-Oct-11 17:26:37.101122 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000030 with status NRT_SUCCESS, Execution Unit[101]
+17:26:46.918 +  781.93s | 2026-Oct-11 17:26:46.918137 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000031 with status NRT_SUCCESS, Execution Unit[1]
+17:26:46.918 +  781.93s | 2026-Oct-11 17:26:46.918150 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000031 with status NRT_SUCCESS, Execution Unit[101]
+17:26:46.918 +  781.93s | 2026-Oct-11 17:26:46.918158 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000031 with status NRT_SUCCESS, Execution Unit[201]
+17:26:46.918 +  781.93s | 2026-Oct-11 17:26:46.918159 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000031 with status NRT_SUCCESS, Execution Unit[301]
+17:26:56.721 +  791.73s | 2026-Oct-11 17:26:56.721337 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000032 with status NRT_SUCCESS, Execution Unit[1]
+17:26:56.721 +  791.73s | 2026-Oct-11 17:26:56.721353 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000032 with status NRT_SUCCESS, Execution Unit[101]
+17:26:56.721 +  791.73s | 2026-Oct-11 17:26:56.721386 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000032 with status NRT_SUCCESS, Execution Unit[301]
+17:26:56.721 +  791.73s | 2026-Oct-11 17:26:56.721390 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000032 with status NRT_SUCCESS, Execution Unit[201]
+17:27:06.535 +  801.54s | 2026-Oct-11 17:27:06.535157 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000033 with status NRT_SUCCESS, Execution Unit[301]
+17:27:06.535 +  801.54s | 2026-Oct-11 17:27:06.535160 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000033 with status NRT_SUCCESS, Execution Unit[1]
+17:27:06.535 +  801.54s | 2026-Oct-11 17:27:06.535158 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000033 with status NRT_SUCCESS, Execution Unit[201]
+17:27:06.535 +  801.54s | 2026-Oct-11 17:27:06.535160 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000033 with status NRT_SUCCESS, Execution Unit[101]
+17:27:16.339 +  811.35s | 2026-Oct-11 17:27:16.339706 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000034 with status NRT_SUCCESS, Execution Unit[301]
+17:27:16.339 +  811.35s | 2026-Oct-11 17:27:16.339710 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000034 with status NRT_SUCCESS, Execution Unit[1]
+17:27:16.339 +  811.35s | 2026-Oct-11 17:27:16.339707 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000034 with status NRT_SUCCESS, Execution Unit[201]
+17:27:16.339 +  811.35s | 2026-Oct-11 17:27:16.339744 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000034 with status NRT_SUCCESS, Execution Unit[101]
+17:27:26.156 +  821.16s | 2026-Oct-11 17:27:26.156137 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000035 with status NRT_SUCCESS, Execution Unit[201]
+17:27:26.156 +  821.16s | 2026-Oct-11 17:27:26.156142 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000035 with status NRT_SUCCESS, Execution Unit[301]
+17:27:26.156 +  821.16s | 2026-Oct-11 17:27:26.156165 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000035 with status NRT_SUCCESS, Execution Unit[1]
+17:27:26.156 +  821.16s | 2026-Oct-11 17:27:26.156185 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000035 with status NRT_SUCCESS, Execution Unit[101]
+17:27:35.959 +  830.97s | 2026-Oct-11 17:27:35.959742 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000036 with status NRT_SUCCESS, Execution Unit[201]
+17:27:35.959 +  830.97s | 2026-Oct-11 17:27:35.959893 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000036 with status NRT_SUCCESS, Execution Unit[301]
+17:27:35.960 +  830.97s | 2026-Oct-11 17:27:35.959901 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000036 with status NRT_SUCCESS, Execution Unit[101]
+17:27:35.960 +  830.97s | 2026-Oct-11 17:27:35.959979 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000036 with status NRT_SUCCESS, Execution Unit[1]
+17:27:45.775 +  840.78s | 2026-Oct-11 17:27:45.775510 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000037 with status NRT_SUCCESS, Execution Unit[301]
+17:27:45.775 +  840.78s | 2026-Oct-11 17:27:45.775551 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000037 with status NRT_SUCCESS, Execution Unit[201]
+17:27:45.775 +  840.78s | 2026-Oct-11 17:27:45.775606 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000037 with status NRT_SUCCESS, Execution Unit[101]
+17:27:45.775 +  840.78s | 2026-Oct-11 17:27:45.775646 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000037 with status NRT_SUCCESS, Execution Unit[1]
+17:27:55.580 +  850.59s | 2026-Oct-11 17:27:55.580257 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000038 with status NRT_SUCCESS, Execution Unit[101]
+17:27:55.580 +  850.59s | 2026-Oct-11 17:27:55.580291 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000038 with status NRT_SUCCESS, Execution Unit[1]
+17:27:55.580 +  850.59s | 2026-Oct-11 17:27:55.580303 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000038 with status NRT_SUCCESS, Execution Unit[301]
+17:27:55.580 +  850.59s | 2026-Oct-11 17:27:55.580303 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000038 with status NRT_SUCCESS, Execution Unit[201]
+17:28:05.394 +  860.40s | 2026-Oct-11 17:28:05.394186 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000039 with status NRT_SUCCESS, Execution Unit[1]
+17:28:05.394 +  860.40s | 2026-Oct-11 17:28:05.394235 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000039 with status NRT_SUCCESS, Execution Unit[101]
+17:28:05.394 +  860.40s | 2026-Oct-11 17:28:05.394238 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000039 with status NRT_SUCCESS, Execution Unit[201]
+17:28:05.394 +  860.40s | 2026-Oct-11 17:28:05.394291 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000039 with status NRT_SUCCESS, Execution Unit[301]
+17:28:15.197 +  870.21s | 2026-Oct-11 17:28:15.197642 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000003a with status NRT_SUCCESS, Execution Unit[1]
+17:28:15.197 +  870.21s | 2026-Oct-11 17:28:15.197642 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000003a with status NRT_SUCCESS, Execution Unit[101]
+17:28:15.197 +  870.21s | 2026-Oct-11 17:28:15.197658 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000003a with status NRT_SUCCESS, Execution Unit[201]
+17:28:15.197 +  870.21s | 2026-Oct-11 17:28:15.197753 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000003a with status NRT_SUCCESS, Execution Unit[301]
+17:28:25.009 +  880.02s | 2026-Oct-11 17:28:25.009667 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000003b with status NRT_SUCCESS, Execution Unit[201]
+17:28:25.010 +  880.02s | 2026-Oct-11 17:28:25.009701 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000003b with status NRT_SUCCESS, Execution Unit[301]
+17:28:25.010 +  880.02s | 2026-Oct-11 17:28:25.009715 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000003b with status NRT_SUCCESS, Execution Unit[1]
+17:28:25.010 +  880.02s | 2026-Oct-11 17:28:25.009779 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000003b with status NRT_SUCCESS, Execution Unit[101]
+17:28:34.813 +  889.82s | 2026-Oct-11 17:28:34.813380 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000003c with status NRT_SUCCESS, Execution Unit[201]
+17:28:34.813 +  889.82s | 2026-Oct-11 17:28:34.813391 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000003c with status NRT_SUCCESS, Execution Unit[301]
+17:28:34.813 +  889.82s | 2026-Oct-11 17:28:34.813466 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000003c with status NRT_SUCCESS, Execution Unit[101]
+17:28:34.813 +  889.82s | 2026-Oct-11 17:28:34.813523 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000003c with status NRT_SUCCESS, Execution Unit[1]
+17:28:44.626 +  899.64s | 2026-Oct-11 17:28:44.626702 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000003d with status NRT_SUCCESS, Execution Unit[301]
+17:28:44.626 +  899.64s | 2026-Oct-11 17:28:44.626751 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000003d with status NRT_SUCCESS, Execution Unit[1]
+17:28:44.626 +  899.64s | 2026-Oct-11 17:28:44.626758 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000003d with status NRT_SUCCESS, Execution Unit[201]
+17:28:44.626 +  899.64s | 2026-Oct-11 17:28:44.626765 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000003d with status NRT_SUCCESS, Execution Unit[101]
+17:28:54.431 +  909.44s | 2026-Oct-11 17:28:54.431006 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000003e with status NRT_SUCCESS, Execution Unit[101]
+17:28:54.431 +  909.44s | 2026-Oct-11 17:28:54.431006 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000003e with status NRT_SUCCESS, Execution Unit[201]
+17:28:54.431 +  909.44s | 2026-Oct-11 17:28:54.431008 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000003e with status NRT_SUCCESS, Execution Unit[301]
+17:28:54.431 +  909.44s | 2026-Oct-11 17:28:54.431041 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000003e with status NRT_SUCCESS, Execution Unit[1]
+17:29:04.242 +  919.25s | 2026-Oct-11 17:29:04.242645 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000003f with status NRT_SUCCESS, Execution Unit[201]
+17:29:04.242 +  919.25s | 2026-Oct-11 17:29:04.242652 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000003f with status NRT_SUCCESS, Execution Unit[101]
+17:29:04.242 +  919.25s | 2026-Oct-11 17:29:04.242649 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000003f with status NRT_SUCCESS, Execution Unit[1]
+17:29:04.242 +  919.25s | 2026-Oct-11 17:29:04.242665 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000003f with status NRT_SUCCESS, Execution Unit[301]
+17:29:14.047 +  929.06s | 2026-Oct-11 17:29:14.047472 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000040 with status NRT_SUCCESS, Execution Unit[101]
+17:29:14.047 +  929.06s | 2026-Oct-11 17:29:14.047494 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000040 with status NRT_SUCCESS, Execution Unit[1]
+17:29:14.047 +  929.06s | 2026-Oct-11 17:29:14.047530 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000040 with status NRT_SUCCESS, Execution Unit[201]
+17:29:14.047 +  929.06s | 2026-Oct-11 17:29:14.047590 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000040 with status NRT_SUCCESS, Execution Unit[301]
+17:29:23.862 +  938.87s | 2026-Oct-11 17:29:23.862563 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000041 with status NRT_SUCCESS, Execution Unit[201]
+17:29:23.862 +  938.87s | 2026-Oct-11 17:29:23.862590 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000041 with status NRT_SUCCESS, Execution Unit[1]
+17:29:23.862 +  938.87s | 2026-Oct-11 17:29:23.862604 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000041 with status NRT_SUCCESS, Execution Unit[301]
+17:29:23.862 +  938.87s | 2026-Oct-11 17:29:23.862591 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000041 with status NRT_SUCCESS, Execution Unit[101]
+17:29:33.666 +  948.68s | 2026-Oct-11 17:29:33.666857 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000042 with status NRT_SUCCESS, Execution Unit[101]
+17:29:33.667 +  948.68s | 2026-Oct-11 17:29:33.666856 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000042 with status NRT_SUCCESS, Execution Unit[1]
+17:29:33.667 +  948.68s | 2026-Oct-11 17:29:33.666893 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000042 with status NRT_SUCCESS, Execution Unit[201]
+17:29:33.667 +  948.68s | 2026-Oct-11 17:29:33.666896 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000042 with status NRT_SUCCESS, Execution Unit[301]
+17:29:43.483 +  958.49s | 2026-Oct-11 17:29:43.483538 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000043 with status NRT_SUCCESS, Execution Unit[301]
+17:29:43.483 +  958.49s | 2026-Oct-11 17:29:43.483559 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000043 with status NRT_SUCCESS, Execution Unit[101]
+17:29:43.483 +  958.49s | 2026-Oct-11 17:29:43.483559 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000043 with status NRT_SUCCESS, Execution Unit[201]
+17:29:43.483 +  958.49s | 2026-Oct-11 17:29:43.483611 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000043 with status NRT_SUCCESS, Execution Unit[1]
+17:29:53.286 +  968.30s | 2026-Oct-11 17:29:53.286816 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000044 with status NRT_SUCCESS, Execution Unit[301]
+17:29:53.287 +  968.30s | 2026-Oct-11 17:29:53.286842 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000044 with status NRT_SUCCESS, Execution Unit[201]
+17:29:53.287 +  968.30s | 2026-Oct-11 17:29:53.286901 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000044 with status NRT_SUCCESS, Execution Unit[101]
+17:29:53.287 +  968.30s | 2026-Oct-11 17:29:53.286905 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000044 with status NRT_SUCCESS, Execution Unit[1]
+17:30:03.102 +  978.11s | 2026-Oct-11 17:30:03.102384 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000045 with status NRT_SUCCESS, Execution Unit[201]
+17:30:03.102 +  978.11s | 2026-Oct-11 17:30:03.102396 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000045 with status NRT_SUCCESS, Execution Unit[101]
+17:30:03.102 +  978.11s | 2026-Oct-11 17:30:03.102409 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000045 with status NRT_SUCCESS, Execution Unit[301]
+17:30:03.102 +  978.11s | 2026-Oct-11 17:30:03.102461 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000045 with status NRT_SUCCESS, Execution Unit[1]
+17:30:12.906 +  987.92s | 2026-Oct-11 17:30:12.906531 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000046 with status NRT_SUCCESS, Execution Unit[201]
+17:30:12.906 +  987.92s | 2026-Oct-11 17:30:12.906578 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000046 with status NRT_SUCCESS, Execution Unit[101]
+17:30:12.906 +  987.92s | 2026-Oct-11 17:30:12.906580 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000046 with status NRT_SUCCESS, Execution Unit[1]
+17:30:12.906 +  987.92s | 2026-Oct-11 17:30:12.906666 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000046 with status NRT_SUCCESS, Execution Unit[301]
+17:30:22.720 +  997.73s | 2026-Oct-11 17:30:22.720858 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000047 with status NRT_SUCCESS, Execution Unit[1]
+17:30:22.721 +  997.73s | 2026-Oct-11 17:30:22.720934 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000047 with status NRT_SUCCESS, Execution Unit[301]
+17:30:22.721 +  997.73s | 2026-Oct-11 17:30:22.720858 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000047 with status NRT_SUCCESS, Execution Unit[101]
+17:30:22.721 +  997.73s | 2026-Oct-11 17:30:22.720858 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000047 with status NRT_SUCCESS, Execution Unit[201]
+17:30:32.524 + 1007.53s | 2026-Oct-11 17:30:32.524261 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000048 with status NRT_SUCCESS, Execution Unit[201]
+17:30:32.524 + 1007.53s | 2026-Oct-11 17:30:32.524278 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000048 with status NRT_SUCCESS, Execution Unit[301]
+17:30:32.524 + 1007.53s | 2026-Oct-11 17:30:32.524282 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000048 with status NRT_SUCCESS, Execution Unit[1]
+17:30:32.524 + 1007.53s | 2026-Oct-11 17:30:32.524350 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000048 with status NRT_SUCCESS, Execution Unit[101]
+17:30:42.340 + 1017.35s | 2026-Oct-11 17:30:42.340080 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000049 with status NRT_SUCCESS, Execution Unit[201]
+17:30:42.340 + 1017.35s | 2026-Oct-11 17:30:42.340101 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000049 with status NRT_SUCCESS, Execution Unit[301]
+17:30:42.340 + 1017.35s | 2026-Oct-11 17:30:42.340111 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000049 with status NRT_SUCCESS, Execution Unit[101]
+17:30:42.340 + 1017.35s | 2026-Oct-11 17:30:42.340113 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000049 with status NRT_SUCCESS, Execution Unit[1]
+17:30:52.145 + 1027.15s | 2026-Oct-11 17:30:52.145413 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000004a with status NRT_SUCCESS, Execution Unit[301]
+17:30:52.145 + 1027.15s | 2026-Oct-11 17:30:52.145414 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000004a with status NRT_SUCCESS, Execution Unit[101]
+17:30:52.145 + 1027.15s | 2026-Oct-11 17:30:52.145438 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000004a with status NRT_SUCCESS, Execution Unit[201]
+17:30:52.145 + 1027.15s | 2026-Oct-11 17:30:52.145515 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000004a with status NRT_SUCCESS, Execution Unit[1]
+17:31:01.964 + 1036.97s | 2026-Oct-11 17:31:01.963824 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000004b with status NRT_SUCCESS, Execution Unit[201]
+17:31:01.964 + 1036.97s | 2026-Oct-11 17:31:01.963865 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000004b with status NRT_SUCCESS, Execution Unit[301]
+17:31:01.964 + 1036.97s | 2026-Oct-11 17:31:01.963873 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000004b with status NRT_SUCCESS, Execution Unit[1]
+17:31:01.964 + 1036.97s | 2026-Oct-11 17:31:01.963914 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000004b with status NRT_SUCCESS, Execution Unit[101]
+17:31:11.767 + 1046.78s | 2026-Oct-11 17:31:11.766960 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000004c with status NRT_SUCCESS, Execution Unit[101]
+17:31:11.767 + 1046.78s | 2026-Oct-11 17:31:11.766965 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000004c with status NRT_SUCCESS, Execution Unit[1]
+17:31:11.767 + 1046.78s | 2026-Oct-11 17:31:11.766980 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000004c with status NRT_SUCCESS, Execution Unit[301]
+17:31:11.767 + 1046.78s | 2026-Oct-11 17:31:11.767035 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000004c with status NRT_SUCCESS, Execution Unit[201]
+17:31:21.580 + 1056.59s | 2026-Oct-11 17:31:21.580399 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000004d with status NRT_SUCCESS, Execution Unit[301]
+17:31:21.580 + 1056.59s | 2026-Oct-11 17:31:21.580437 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000004d with status NRT_SUCCESS, Execution Unit[201]
+17:31:21.580 + 1056.59s | 2026-Oct-11 17:31:21.580465 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000004d with status NRT_SUCCESS, Execution Unit[101]
+17:31:21.580 + 1056.59s | 2026-Oct-11 17:31:21.580501 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000004d with status NRT_SUCCESS, Execution Unit[1]
+17:31:31.383 + 1066.39s | 2026-Oct-11 17:31:31.383918 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000004e with status NRT_SUCCESS, Execution Unit[301]
+17:31:31.384 + 1066.39s | 2026-Oct-11 17:31:31.383946 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000004e with status NRT_SUCCESS, Execution Unit[201]
+17:31:31.384 + 1066.39s | 2026-Oct-11 17:31:31.383953 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000004e with status NRT_SUCCESS, Execution Unit[101]
+17:31:31.384 + 1066.39s | 2026-Oct-11 17:31:31.384029 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000004e with status NRT_SUCCESS, Execution Unit[1]
+17:31:41.199 + 1076.21s | 2026-Oct-11 17:31:41.199034 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000004f with status NRT_SUCCESS, Execution Unit[101]
+17:31:41.199 + 1076.21s | 2026-Oct-11 17:31:41.199037 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000004f with status NRT_SUCCESS, Execution Unit[1]
+17:31:41.199 + 1076.21s | 2026-Oct-11 17:31:41.199045 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000004f with status NRT_SUCCESS, Execution Unit[301]
+17:31:41.199 + 1076.21s | 2026-Oct-11 17:31:41.199104 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000004f with status NRT_SUCCESS, Execution Unit[201]
+17:31:51.002 + 1086.01s | 2026-Oct-11 17:31:51.002335 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000050 with status NRT_SUCCESS, Execution Unit[201]
+17:31:51.002 + 1086.01s | 2026-Oct-11 17:31:51.002335 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000050 with status NRT_SUCCESS, Execution Unit[101]
+17:31:51.002 + 1086.01s | 2026-Oct-11 17:31:51.002348 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000050 with status NRT_SUCCESS, Execution Unit[301]
+17:31:51.002 + 1086.01s | 2026-Oct-11 17:31:51.002404 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000050 with status NRT_SUCCESS, Execution Unit[1]
+17:32:00.816 + 1095.82s | 2026-Oct-11 17:32:00.816193 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000051 with status NRT_SUCCESS, Execution Unit[101]
+17:32:00.816 + 1095.82s | 2026-Oct-11 17:32:00.816193 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000051 with status NRT_SUCCESS, Execution Unit[201]
+17:32:00.816 + 1095.82s | 2026-Oct-11 17:32:00.816229 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000051 with status NRT_SUCCESS, Execution Unit[1]
+17:32:00.816 + 1095.82s | 2026-Oct-11 17:32:00.816272 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000051 with status NRT_SUCCESS, Execution Unit[301]
+17:32:10.620 + 1105.63s | 2026-Oct-11 17:32:10.620076 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000052 with status NRT_SUCCESS, Execution Unit[201]
+17:32:10.620 + 1105.63s | 2026-Oct-11 17:32:10.620083 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000052 with status NRT_SUCCESS, Execution Unit[101]
+17:32:10.620 + 1105.63s | 2026-Oct-11 17:32:10.620145 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000052 with status NRT_SUCCESS, Execution Unit[301]
+17:32:10.620 + 1105.63s | 2026-Oct-11 17:32:10.620156 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000052 with status NRT_SUCCESS, Execution Unit[1]
+17:32:20.436 + 1115.45s | 2026-Oct-11 17:32:20.436812 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000053 with status NRT_SUCCESS, Execution Unit[101]
+17:32:20.436 + 1115.45s | 2026-Oct-11 17:32:20.436833 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000053 with status NRT_SUCCESS, Execution Unit[1]
+17:32:20.437 + 1115.45s | 2026-Oct-11 17:32:20.436882 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000053 with status NRT_SUCCESS, Execution Unit[301]
+17:32:20.437 + 1115.45s | 2026-Oct-11 17:32:20.436897 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000053 with status NRT_SUCCESS, Execution Unit[201]
+17:32:30.240 + 1125.25s | 2026-Oct-11 17:32:30.240042 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000054 with status NRT_SUCCESS, Execution Unit[101]
+17:32:30.240 + 1125.25s | 2026-Oct-11 17:32:30.240043 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000054 with status NRT_SUCCESS, Execution Unit[1]
+17:32:30.240 + 1125.25s | 2026-Oct-11 17:32:30.240084 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000054 with status NRT_SUCCESS, Execution Unit[301]
+17:32:30.240 + 1125.25s | 2026-Oct-11 17:32:30.240176 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000054 with status NRT_SUCCESS, Execution Unit[201]
+17:32:40.054 + 1135.06s | 2026-Oct-11 17:32:40.054598 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000055 with status NRT_SUCCESS, Execution Unit[101]
+17:32:40.054 + 1135.06s | 2026-Oct-11 17:32:40.054630 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000055 with status NRT_SUCCESS, Execution Unit[1]
+17:32:40.054 + 1135.06s | 2026-Oct-11 17:32:40.054674 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000055 with status NRT_SUCCESS, Execution Unit[201]
+17:32:40.054 + 1135.06s | 2026-Oct-11 17:32:40.054754 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000055 with status NRT_SUCCESS, Execution Unit[301]
+17:32:49.859 + 1144.87s | 2026-Oct-11 17:32:49.859065 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000056 with status NRT_SUCCESS, Execution Unit[101]
+17:32:49.859 + 1144.87s | 2026-Oct-11 17:32:49.859116 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000056 with status NRT_SUCCESS, Execution Unit[1]
+17:32:49.859 + 1144.87s | 2026-Oct-11 17:32:49.859151 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000056 with status NRT_SUCCESS, Execution Unit[301]
+17:32:49.859 + 1144.87s | 2026-Oct-11 17:32:49.859205 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000056 with status NRT_SUCCESS, Execution Unit[201]
+17:32:59.676 + 1154.68s | 2026-Oct-11 17:32:59.676127 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000057 with status NRT_SUCCESS, Execution Unit[201]
+17:32:59.676 + 1154.68s | 2026-Oct-11 17:32:59.676127 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000057 with status NRT_SUCCESS, Execution Unit[301]
+17:32:59.676 + 1154.68s | 2026-Oct-11 17:32:59.676139 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000057 with status NRT_SUCCESS, Execution Unit[101]
+17:32:59.676 + 1154.68s | 2026-Oct-11 17:32:59.676204 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000057 with status NRT_SUCCESS, Execution Unit[1]
+17:33:09.481 + 1164.49s | 2026-Oct-11 17:33:09.481016 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000058 with status NRT_SUCCESS, Execution Unit[1]
+17:33:09.481 + 1164.49s | 2026-Oct-11 17:33:09.481038 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000058 with status NRT_SUCCESS, Execution Unit[201]
+17:33:09.481 + 1164.49s | 2026-Oct-11 17:33:09.481036 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000058 with status NRT_SUCCESS, Execution Unit[101]
+17:33:09.481 + 1164.49s | 2026-Oct-11 17:33:09.481105 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000058 with status NRT_SUCCESS, Execution Unit[301]
+17:33:19.296 + 1174.31s | 2026-Oct-11 17:33:19.296751 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000059 with status NRT_SUCCESS, Execution Unit[201]
+17:33:19.297 + 1174.31s | 2026-Oct-11 17:33:19.296749 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000059 with status NRT_SUCCESS, Execution Unit[101]
+17:33:19.297 + 1174.31s | 2026-Oct-11 17:33:19.296750 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000059 with status NRT_SUCCESS, Execution Unit[301]
+17:33:19.297 + 1174.31s | 2026-Oct-11 17:33:19.296749 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000059 with status NRT_SUCCESS, Execution Unit[1]
+17:33:29.100 + 1184.11s | 2026-Oct-11 17:33:29.100271 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000005a with status NRT_SUCCESS, Execution Unit[301]
+17:33:29.100 + 1184.11s | 2026-Oct-11 17:33:29.100283 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000005a with status NRT_SUCCESS, Execution Unit[201]
+17:33:29.100 + 1184.11s | 2026-Oct-11 17:33:29.100293 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000005a with status NRT_SUCCESS, Execution Unit[101]
+17:33:29.100 + 1184.11s | 2026-Oct-11 17:33:29.100340 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000005a with status NRT_SUCCESS, Execution Unit[1]
+17:33:38.914 + 1193.92s | 2026-Oct-11 17:33:38.914613 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000005b with status NRT_SUCCESS, Execution Unit[101]
+17:33:38.914 + 1193.92s | 2026-Oct-11 17:33:38.914712 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000005b with status NRT_SUCCESS, Execution Unit[1]
+17:33:38.914 + 1193.92s | 2026-Oct-11 17:33:38.914753 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000005b with status NRT_SUCCESS, Execution Unit[201]
+17:33:38.914 + 1193.92s | 2026-Oct-11 17:33:38.914845 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000005b with status NRT_SUCCESS, Execution Unit[301]
+17:33:48.718 + 1203.73s | 2026-Oct-11 17:33:48.717967 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000005c with status NRT_SUCCESS, Execution Unit[301]
+17:33:48.718 + 1203.73s | 2026-Oct-11 17:33:48.717989 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000005c with status NRT_SUCCESS, Execution Unit[201]
+17:33:48.718 + 1203.73s | 2026-Oct-11 17:33:48.717990 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000005c with status NRT_SUCCESS, Execution Unit[101]
+17:33:48.718 + 1203.73s | 2026-Oct-11 17:33:48.718026 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000005c with status NRT_SUCCESS, Execution Unit[1]
+17:33:58.533 + 1213.54s | 2026-Oct-11 17:33:58.533145 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000005d with status NRT_SUCCESS, Execution Unit[101]
+17:33:58.533 + 1213.54s | 2026-Oct-11 17:33:58.533167 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000005d with status NRT_SUCCESS, Execution Unit[1]
+17:33:58.533 + 1213.54s | 2026-Oct-11 17:33:58.533212 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000005d with status NRT_SUCCESS, Execution Unit[301]
+17:33:58.533 + 1213.54s | 2026-Oct-11 17:33:58.533228 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000005d with status NRT_SUCCESS, Execution Unit[201]
+17:34:08.336 + 1223.35s | 2026-Oct-11 17:34:08.336400 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000005e with status NRT_SUCCESS, Execution Unit[1]
+17:34:08.336 + 1223.35s | 2026-Oct-11 17:34:08.336540 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000005e with status NRT_SUCCESS, Execution Unit[201]
+17:34:08.336 + 1223.35s | 2026-Oct-11 17:34:08.336598 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000005e with status NRT_SUCCESS, Execution Unit[101]
+17:34:08.336 + 1223.35s | 2026-Oct-11 17:34:08.336612 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000005e with status NRT_SUCCESS, Execution Unit[301]
+17:34:18.150 + 1233.16s | 2026-Oct-11 17:34:18.149905 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x30100000000005f with status NRT_SUCCESS, Execution Unit[301]
+17:34:18.150 + 1233.16s | 2026-Oct-11 17:34:18.149928 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x20100000000005f with status NRT_SUCCESS, Execution Unit[201]
+17:34:18.150 + 1233.16s | 2026-Oct-11 17:34:18.149929 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x10100000000005f with status NRT_SUCCESS, Execution Unit[101]
+17:34:18.150 + 1233.16s | 2026-Oct-11 17:34:18.149978 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000005f with status NRT_SUCCESS, Execution Unit[1]
+17:34:27.953 + 1242.96s | 2026-Oct-11 17:34:27.953269 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000060 with status NRT_SUCCESS, Execution Unit[301]
+17:34:27.953 + 1242.96s | 2026-Oct-11 17:34:27.953279 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000060 with status NRT_SUCCESS, Execution Unit[201]
+17:34:27.953 + 1242.96s | 2026-Oct-11 17:34:27.953296 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000060 with status NRT_SUCCESS, Execution Unit[101]
+17:34:27.953 + 1242.96s | 2026-Oct-11 17:34:27.953349 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000060 with status NRT_SUCCESS, Execution Unit[1]
+17:34:37.767 + 1252.78s | 2026-Oct-11 17:34:37.767586 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000061 with status NRT_SUCCESS, Execution Unit[101]
+17:34:37.767 + 1252.78s | 2026-Oct-11 17:34:37.767633 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000061 with status NRT_SUCCESS, Execution Unit[1]
+17:34:37.767 + 1252.78s | 2026-Oct-11 17:34:37.767644 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000061 with status NRT_SUCCESS, Execution Unit[301]
+17:34:37.767 + 1252.78s | 2026-Oct-11 17:34:37.767702 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000061 with status NRT_SUCCESS, Execution Unit[201]
+17:34:47.571 + 1262.58s | 2026-Oct-11 17:34:47.571149 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000062 with status NRT_SUCCESS, Execution Unit[301]
+17:34:47.571 + 1262.58s | 2026-Oct-11 17:34:47.571149 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000062 with status NRT_SUCCESS, Execution Unit[1]
+17:34:47.571 + 1262.58s | 2026-Oct-11 17:34:47.571149 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000062 with status NRT_SUCCESS, Execution Unit[101]
+17:34:47.571 + 1262.58s | 2026-Oct-11 17:34:47.571187 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000062 with status NRT_SUCCESS, Execution Unit[201]
+17:34:57.385 + 1272.39s | 2026-Oct-11 17:34:57.385858 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000063 with status NRT_SUCCESS, Execution Unit[301]
+17:34:57.386 + 1272.39s | 2026-Oct-11 17:34:57.385890 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000063 with status NRT_SUCCESS, Execution Unit[201]
+17:34:57.386 + 1272.39s | 2026-Oct-11 17:34:57.385890 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000063 with status NRT_SUCCESS, Execution Unit[101]
+17:34:57.386 + 1272.39s | 2026-Oct-11 17:34:57.385938 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000063 with status NRT_SUCCESS, Execution Unit[1]
+17:35:07.190 + 1282.20s | 2026-Oct-11 17:35:07.189894 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000064 with status NRT_SUCCESS, Execution Unit[201]
+17:35:07.190 + 1282.20s | 2026-Oct-11 17:35:07.189949 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000064 with status NRT_SUCCESS, Execution Unit[301]
+17:35:07.190 + 1282.20s | 2026-Oct-11 17:35:07.189957 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000064 with status NRT_SUCCESS, Execution Unit[1]
+17:35:07.190 + 1282.20s | 2026-Oct-11 17:35:07.190008 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000064 with status NRT_SUCCESS, Execution Unit[101]
+17:35:17.006 + 1292.02s | 2026-Oct-11 17:35:17.006742 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000065 with status NRT_SUCCESS, Execution Unit[201]
+17:35:17.006 + 1292.02s | 2026-Oct-11 17:35:17.006744 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000065 with status NRT_SUCCESS, Execution Unit[301]
+17:35:17.006 + 1292.02s | 2026-Oct-11 17:35:17.006745 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000065 with status NRT_SUCCESS, Execution Unit[101]
+17:35:17.006 + 1292.02s | 2026-Oct-11 17:35:17.006742 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000065 with status NRT_SUCCESS, Execution Unit[1]
+17:35:26.810 + 1301.82s | 2026-Oct-11 17:35:26.810061 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000066 with status NRT_SUCCESS, Execution Unit[201]
+17:35:26.810 + 1301.82s | 2026-Oct-11 17:35:26.810063 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000066 with status NRT_SUCCESS, Execution Unit[301]
+17:35:26.810 + 1301.82s | 2026-Oct-11 17:35:26.810103 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000066 with status NRT_SUCCESS, Execution Unit[1]
+17:35:26.810 + 1301.82s | 2026-Oct-11 17:35:26.810071 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000066 with status NRT_SUCCESS, Execution Unit[101]
+17:35:36.625 + 1311.63s | 2026-Oct-11 17:35:36.625177 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000067 with status NRT_SUCCESS, Execution Unit[1]
+17:35:36.625 + 1311.63s | 2026-Oct-11 17:35:36.625233 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000067 with status NRT_SUCCESS, Execution Unit[201]
+17:35:36.625 + 1311.63s | 2026-Oct-11 17:35:36.625234 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000067 with status NRT_SUCCESS, Execution Unit[101]
+17:35:36.625 + 1311.63s | 2026-Oct-11 17:35:36.625289 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000067 with status NRT_SUCCESS, Execution Unit[301]
+17:35:46.429 + 1321.44s | 2026-Oct-11 17:35:46.428926 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000068 with status NRT_SUCCESS, Execution Unit[101]
+17:35:46.429 + 1321.44s | 2026-Oct-11 17:35:46.428926 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000068 with status NRT_SUCCESS, Execution Unit[1]
+17:35:46.429 + 1321.44s | 2026-Oct-11 17:35:46.429150 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000068 with status NRT_SUCCESS, Execution Unit[201]
+17:35:46.429 + 1321.44s | 2026-Oct-11 17:35:46.429164 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000068 with status NRT_SUCCESS, Execution Unit[301]
+17:35:46.440 + 1321.45s | [steptiming] wan: loop=981.698s steps=50 mean=19634.0ms/step median_excl_step0=19618.4ms
+17:35:46.441 + 1321.45s | [steptiming] wrote /home/ubuntu/work/scratch/e2e/run1/steps.json
+17:35:46.456 + 1321.47s | 2026-Oct-11 17:35:46.456678 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10007
+17:35:46.464 + 1321.47s | 2026-Oct-11 17:35:46.464162 117504:117504  INFO  TDRV:kbl_model_remove                        Removed model: 1008 from: ND0 NC4
+17:35:46.465 + 1321.47s | 2026-Oct-11 17:35:46.465169 117504:117504  INFO  TDRV:kbl_model_remove                        Removed model: 1008 from: ND0 NC5
+17:35:46.465 + 1321.47s | 2026-Oct-11 17:35:46.465427 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10007
+17:35:46.465 + 1321.47s | 2026-Oct-11 17:35:46.465436 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10006
+17:35:46.489 + 1321.50s | 2026-Oct-11 17:35:46.489313 117504:117504  INFO  TDRV:kbl_model_remove                        Removed model: 1005 from: ND0 NC6
+17:35:46.490 + 1321.50s | 2026-Oct-11 17:35:46.490419 117504:117504  INFO  TDRV:kbl_model_remove                        Removed model: 1005 from: ND0 NC7
+17:35:46.490 + 1321.50s | 2026-Oct-11 17:35:46.490736 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10006
+17:35:46.490 + 1321.50s | 2026-Oct-11 17:35:46.490744 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10008
+17:35:46.501 + 1321.51s | 2026-Oct-11 17:35:46.501544 117504:117504  INFO  TDRV:kbl_model_remove                        Removed model: 1006 from: ND0 NC2
+17:35:46.502 + 1321.51s | 2026-Oct-11 17:35:46.502316 117504:117504  INFO  TDRV:kbl_model_remove                        Removed model: 1006 from: ND0 NC3
+17:35:46.502 + 1321.51s | 2026-Oct-11 17:35:46.502536 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10008
+17:35:46.502 + 1321.51s | 2026-Oct-11 17:35:46.502543 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10005
+17:35:46.508 + 1321.52s | 2026-Oct-11 17:35:46.508009 117504:117504  INFO  TDRV:kbl_model_remove                        Removed model: 1007 from: ND0 NC0
+17:35:46.508 + 1321.52s | 2026-Oct-11 17:35:46.508816 117504:117504  INFO  TDRV:kbl_model_remove                        Removed model: 1007 from: ND0 NC1
+17:35:46.516 + 1321.52s | 2026-Oct-11 17:35:46.516312 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10005
+17:35:46.527 + 1321.54s | 2026-Oct-11 17:35:46.527045 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10014
+17:35:46.527 + 1321.54s | 2026-Oct-11 17:35:46.527057 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10014
+17:35:46.527 + 1321.54s | 2026-Oct-11 17:35:46.527062 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10016
+17:35:46.527 + 1321.54s | 2026-Oct-11 17:35:46.527066 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10016
+17:35:46.527 + 1321.54s | 2026-Oct-11 17:35:46.527069 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10015
+17:35:46.527 + 1321.54s | 2026-Oct-11 17:35:46.527072 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10015
+17:35:46.527 + 1321.54s | 2026-Oct-11 17:35:46.527075 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloading 10013
+17:35:46.527 + 1321.54s | 2026-Oct-11 17:35:46.527078 117504:117504  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10013
+17:35:46.706 + 1321.72s | [wan] latents saved to /home/ubuntu/.cache/difflet/work/wan/latents.pt
+17:35:47.682 + 1322.69s | 2026-Oct-11 17:35:47.682580 117504:117712  INFO  TDRV:kbl_model_remove                        Removed model: 1015 from: ND0 NC4
+17:35:47.687 + 1322.70s | 2026-Oct-11 17:35:47.687198 117504:117713  INFO  TDRV:kbl_model_remove                        Removed model: 1014 from: ND0 NC6
+17:35:47.691 + 1322.70s | 2026-Oct-11 17:35:47.691257 117504:117714  INFO  TDRV:kbl_model_remove                        Removed model: 1016 from: ND0 NC2
+17:35:47.708 + 1322.72s | 2026-Oct-11 17:35:47.707988 117504:117715  INFO  TDRV:kbl_model_remove                        Removed model: 1013 from: ND0 NC0
+17:35:47.951 + 1322.96s | 2026-Oct-11 17:35:47.951292 117504:117712  INFO  TDRV:kbl_model_remove                        Removed model: 1015 from: ND0 NC5
+17:35:47.957 + 1322.97s | 2026-Oct-11 17:35:47.957318 117504:117712  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000069 with status NRT_SUCCESS, Execution Unit[1]
+17:35:47.960 + 1322.97s | 2026-Oct-11 17:35:47.960080 117504:117714  INFO  TDRV:kbl_model_remove                        Removed model: 1016 from: ND0 NC3
+17:35:47.963 + 1322.97s | 2026-Oct-11 17:35:47.963746 117504:117713  INFO  TDRV:kbl_model_remove                        Removed model: 1014 from: ND0 NC7
+17:35:47.965 + 1322.97s | 2026-Oct-11 17:35:47.965198 117504:117714  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x201000000000069 with status NRT_SUCCESS, Execution Unit[201]
+17:35:47.971 + 1322.98s | 2026-Oct-11 17:35:47.971491 117504:117713  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x101000000000069 with status NRT_SUCCESS, Execution Unit[101]
+17:35:47.972 + 1322.98s | 2026-Oct-11 17:35:47.972272 117504:117715  INFO  TDRV:kbl_model_remove                        Removed model: 1013 from: ND0 NC1
+17:35:50.827 + 1325.84s | 2026-Oct-11 17:35:50.827084 117504:117715  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x301000000000069 with status NRT_SUCCESS, Execution Unit[301]
+17:36:05.934 + 1340.94s | 2026-Oct-11 17:36:05.934162 127826:127827  INFO   NRT:nrt_init                                Neuron Runtime 2.34.10.0 built on Aug  1 2026
+17:36:05.934 + 1340.94s | 2026-Oct-11 17:36:05.934196 127826:127827  INFO   NRT:nrt_init                                Found neuron driver: 2.30
+17:36:05.934 + 1340.94s | 2026-Oct-11 17:36:05.934200 127826:127827  INFO   NRT:nrt_init                                Async IO support: supported
+17:36:05.934 + 1340.94s | 2026-Oct-11 17:36:05.934301 127826:127827  INFO   NRT:nrt_allocate_neuron_cores               Instance info:: device count:1 cores per device:8 architecture:TRN
+17:36:05.946 + 1340.95s | 2026-Oct-11 17:36:05.946332 127826:127827  INFO  TDRV:tdrv_init                               TDRV UltraServer information server_type:0 reservation_id:0x0 pod_sz:0 election_state:4 node_id:-1
+17:36:09.946 + 1344.96s | /home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+17:36:09.946 + 1344.96s |   component, error = import_nki(config)
+17:36:09.952 + 1344.96s | /home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+17:36:09.952 + 1344.96s |   warnings.warn(f"Warning: {error}")
+17:36:09.952 + 1344.96s | /home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+17:36:09.952 + 1344.96s |   warnings.warn(f"Warning: {error}")
+17:36:09.952 + 1344.96s | /home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+17:36:09.952 + 1344.96s |   warnings.warn(f"Warning: {error}")
+17:36:12.576 + 1347.59s | 2026-Oct-11 17:36:12.576915 127826:127827  INFO  TDRV:tdrv_init_one_mla_phase2                Initialized vcore: 0
+17:36:12.577 + 1347.59s | 
+17:36:16.329 + 1351.34s | Neuron: Skipping model warmup
+17:36:16.719 + 1351.73s | 2026-Oct-11 17:36:16.719769 127826:128075  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk0/model.MODULE_ee0773f88daa2727f352+a7846d2e.neff version: 2.0, LNC start: 0
+17:36:16.719 + 1351.73s | 2026-Oct-11 17:36:16.719791 127826:128075  INFO  NMGR:enter_cache                             NEFF load cache - first worker, creating cache
+17:36:17.799 + 1352.81s | 2026-Oct-11 17:36:17.799866 127826:128111  INFO  TDRV:dml_log_dev_neff_mem                    
+17:36:17.800 + 1352.81s | [ND 0:NC 5] Current Usage Total: 21.231MB
+17:36:17.800 + 1352.81s | 	Shared Scratchpad: 0.000B
+17:36:17.800 + 1352.81s | 	Tensors: 0.000B
+17:36:17.800 + 1352.81s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk0/model.MODULE_ee0773f88daa2727f352+a7846d2e.neff]:
+17:36:17.800 + 1352.81s | 	Total: 18.970MB
+17:36:17.800 + 1352.81s | 	* model code: 16.101MB
+17:36:17.800 + 1352.81s | 	* model constants: 128.000KB
+17:36:17.800 + 1352.81s | 	* scratchpad: 0.000B
+17:36:17.800 + 1352.81s | 	* runtime: 272.016KB
+17:36:17.800 + 1352.81s | 	* dma rings io: 32.250KB
+17:36:17.800 + 1352.81s | 	* dma rings spill: 2.443MB
+17:36:17.800 + 1352.81s | 	* dma rings collectives: 0.000B
+17:36:17.800 + 1352.81s | 	* dma rings runtime: 4.000KB
+17:36:17.800 + 1352.81s | 	* collectives: 0.000B
+17:36:17.800 + 1352.81s | 
+17:36:17.829 + 1352.84s | 2026-Oct-11 17:36:17.829797 127826:128110  INFO  TDRV:dml_log_dev_neff_mem                    
+17:36:17.829 + 1352.84s | [ND 0:NC 4] Current Usage Total: 815.414MB
+17:36:17.829 + 1352.84s | 	Shared Scratchpad: 512.000MB
+17:36:17.829 + 1352.84s | 	Tensors: 279.601MB
+17:36:17.829 + 1352.84s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk0/model.MODULE_ee0773f88daa2727f352+a7846d2e.neff]:
+17:36:17.829 + 1352.84s | 	Total: 21.552MB
+17:36:17.830 + 1352.84s | 	* model code: 17.058MB
+17:36:17.830 + 1352.84s | 	* model constants: 128.004KB
+17:36:17.830 + 1352.84s | 	* scratchpad: 0.000B
+17:36:17.830 + 1352.84s | 	* runtime: 272.016KB
+17:36:17.830 + 1352.84s | 	* dma rings io: 32.500KB
+17:36:17.830 + 1352.84s | 	* dma rings spill: 4.068MB
+17:36:17.830 + 1352.84s | 	* dma rings collectives: 0.000B
+17:36:17.830 + 1352.84s | 	* dma rings runtime: 4.000KB
+17:36:17.830 + 1352.84s | 	* collectives: 0.000B
+17:36:17.830 + 1352.84s | 
+17:36:17.830 + 1352.84s | 2026-Oct-11 17:36:17.830009 127826:128075  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk0/model.MODULE_ee0773f88daa2727f352+a7846d2e.neff" ID: 0
+17:36:17.836 + 1352.84s | 2026-Oct-11 17:36:17.836279 127826:128075  INFO  NMGR:release_tmp_neff_cache                  NEFF load cache - cleared by the last worker
+17:36:17.836 + 1352.84s | 2026-Oct-11 17:36:17.836289 127826:128075  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk0/model.MODULE_ee0773f88daa2727f352+a7846d2e.neff, loaded successfully
+17:36:17.964 + 1352.97s | 2026-Oct-11 17:36:17.964238 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000001 with status NRT_SUCCESS, Execution Unit[1]
+17:36:18.023 + 1353.03s | 2026-Oct-11 17:36:18.023022 127826:128075  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk1/model.MODULE_446f5b3a56c4630ff516+b8173f6c.neff version: 2.0, LNC start: 0
+17:36:18.023 + 1353.03s | 2026-Oct-11 17:36:18.023043 127826:128075  INFO  NMGR:enter_cache                             NEFF load cache - first worker, creating cache
+17:36:18.697 + 1353.71s | 2026-Oct-11 17:36:18.697063 127826:128142  INFO  TDRV:dml_log_dev_neff_mem                    
+17:36:18.697 + 1353.71s | [ND 0:NC 5] Current Usage Total: 27.629MB
+17:36:18.697 + 1353.71s | 	Shared Scratchpad: 0.000B
+17:36:18.697 + 1353.71s | 	Tensors: 0.000B
+17:36:18.697 + 1353.71s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk1/model.MODULE_446f5b3a56c4630ff516+b8173f6c.neff]:
+17:36:18.697 + 1353.71s | 	Total: 6.395MB
+17:36:18.697 + 1353.71s | 	* model code: 5.774MB
+17:36:18.697 + 1353.71s | 	* model constants: 256.000KB
+17:36:18.697 + 1353.71s | 	* scratchpad: 0.000B
+17:36:18.697 + 1353.71s | 	* runtime: 190.031KB
+17:36:18.697 + 1353.71s | 	* dma rings io: 31.000KB
+17:36:18.697 + 1353.71s | 	* dma rings spill: 155.000KB
+17:36:18.697 + 1353.71s | 	* dma rings collectives: 0.000B
+17:36:18.697 + 1353.71s | 	* dma rings runtime: 4.000KB
+17:36:18.697 + 1353.71s | 	* collectives: 0.000B
+17:36:18.697 + 1353.71s | 
+17:36:18.777 + 1353.79s | 2026-Oct-11 17:36:18.777077 127826:128141  INFO  TDRV:dml_log_dev_neff_mem                    
+17:36:18.777 + 1353.79s | [ND 0:NC 4] Current Usage Total: 1.912GB
+17:36:18.777 + 1353.79s | 	Shared Scratchpad: 896.000MB
+17:36:18.777 + 1353.79s | 	Tensors: 1012.374MB
+17:36:18.777 + 1353.79s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk1/model.MODULE_446f5b3a56c4630ff516+b8173f6c.neff]:
+17:36:18.777 + 1353.79s | 	Total: 25.313MB
+17:36:18.777 + 1353.79s | 	* model code: 22.222MB
+17:36:18.777 + 1353.79s | 	* model constants: 192.004KB
+17:36:18.777 + 1353.79s | 	* scratchpad: 0.000B
+17:36:18.777 + 1353.79s | 	* runtime: 190.062KB
+17:36:18.777 + 1353.79s | 	* dma rings io: 224.000KB
+17:36:18.777 + 1353.79s | 	* dma rings spill: 2.495MB
+17:36:18.777 + 1353.79s | 	* dma rings collectives: 0.000B
+17:36:18.777 + 1353.79s | 	* dma rings runtime: 4.000KB
+17:36:18.777 + 1353.79s | 	* collectives: 0.000B
+17:36:18.777 + 1353.79s | 
+17:36:18.777 + 1353.79s | 2026-Oct-11 17:36:18.777433 127826:128075  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk1/model.MODULE_446f5b3a56c4630ff516+b8173f6c.neff" ID: 0
+17:36:18.778 + 1353.79s | 2026-Oct-11 17:36:18.778115 127826:128075  INFO  NMGR:release_tmp_neff_cache                  NEFF load cache - cleared by the last worker
+17:36:18.778 + 1353.79s | 2026-Oct-11 17:36:18.778122 127826:128075  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk1/model.MODULE_446f5b3a56c4630ff516+b8173f6c.neff, loaded successfully
+17:36:19.244 + 1354.25s | 2026-Oct-11 17:36:19.244350 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000002 with status NRT_SUCCESS, Execution Unit[1]
+17:36:19.617 + 1354.63s | 2026-Oct-11 17:36:19.617193 127826:127826  INFO  NMGR:kmgr_unload_nn                          Unloading 10001
+17:36:19.617 + 1354.63s | 2026-Oct-11 17:36:19.617222 127826:127826  INFO  TDRV:kbl_model_remove                        Removed model: 1001 from: ND0 NC4
+17:36:19.617 + 1354.63s | 2026-Oct-11 17:36:19.617871 127826:127826  INFO  TDRV:kbl_model_remove                        Removed model: 1001 from: ND0 NC5
+17:36:19.714 + 1354.72s | 2026-Oct-11 17:36:19.714380 127826:127826  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10001
+17:36:19.772 + 1354.78s | 2026-Oct-11 17:36:19.772428 127826:128075  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk2/model.MODULE_15a5d017e420297ed9f6+ccd6e4b1.neff version: 2.0, LNC start: 0
+17:36:19.772 + 1354.78s | 2026-Oct-11 17:36:19.772447 127826:128075  INFO  NMGR:enter_cache                             NEFF load cache - first worker, creating cache
+17:36:23.252 + 1358.26s | 2026-Oct-11 17:36:23.252285 127826:128190  INFO  TDRV:dml_log_dev_neff_mem                    
+17:36:23.252 + 1358.26s | [ND 0:NC 4] Current Usage Total: 4.245GB
+17:36:23.252 + 1358.26s | 	Shared Scratchpad: 896.000MB
+17:36:23.252 + 1358.26s | 	Tensors: 3.281GB
+17:36:23.252 + 1358.26s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk2/model.MODULE_15a5d017e420297ed9f6+ccd6e4b1.neff]:
+17:36:23.252 + 1358.26s | 	Total: 63.409MB
+17:36:23.252 + 1358.26s | 	* model code: 56.608MB
+17:36:23.252 + 1358.26s | 	* model constants: 128.000KB
+17:36:23.252 + 1358.26s | 	* scratchpad: 0.000B
+17:36:23.252 + 1358.26s | 	* runtime: 272.016KB
+17:36:23.252 + 1358.26s | 	* dma rings io: 31.500KB
+17:36:23.252 + 1358.26s | 	* dma rings spill: 6.375MB
+17:36:23.252 + 1358.26s | 	* dma rings collectives: 0.000B
+17:36:23.252 + 1358.26s | 	* dma rings runtime: 4.000KB
+17:36:23.252 + 1358.26s | 	* collectives: 0.000B
+17:36:23.252 + 1358.26s | 
+17:36:23.253 + 1358.26s | 2026-Oct-11 17:36:23.253245 127826:128191  INFO  TDRV:dml_log_dev_neff_mem                    
+17:36:23.253 + 1358.26s | [ND 0:NC 5] Current Usage Total: 70.697MB
+17:36:23.253 + 1358.26s | 	Shared Scratchpad: 0.000B
+17:36:23.253 + 1358.26s | 	Tensors: 0.000B
+17:36:23.253 + 1358.26s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk2/model.MODULE_15a5d017e420297ed9f6+ccd6e4b1.neff]:
+17:36:23.253 + 1358.26s | 	Total: 62.040MB
+17:36:23.253 + 1358.26s | 	* model code: 55.699MB
+17:36:23.253 + 1358.26s | 	* model constants: 128.000KB
+17:36:23.253 + 1358.26s | 	* scratchpad: 0.000B
+17:36:23.253 + 1358.26s | 	* runtime: 272.016KB
+17:36:23.253 + 1358.26s | 	* dma rings io: 31.500KB
+17:36:23.253 + 1358.26s | 	* dma rings spill: 5.915MB
+17:36:23.253 + 1358.26s | 	* dma rings collectives: 0.000B
+17:36:23.253 + 1358.26s | 	* dma rings runtime: 4.000KB
+17:36:23.253 + 1358.26s | 	* collectives: 0.000B
+17:36:23.253 + 1358.26s | 
+17:36:23.253 + 1358.26s | 2026-Oct-11 17:36:23.253450 127826:128075  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk2/model.MODULE_15a5d017e420297ed9f6+ccd6e4b1.neff" ID: 0
+17:36:23.271 + 1358.28s | 2026-Oct-11 17:36:23.271773 127826:128075  INFO  NMGR:release_tmp_neff_cache                  NEFF load cache - cleared by the last worker
+17:36:23.271 + 1358.28s | 2026-Oct-11 17:36:23.271785 127826:128075  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk2/model.MODULE_15a5d017e420297ed9f6+ccd6e4b1.neff, loaded successfully
+17:36:23.761 + 1358.77s | 2026-Oct-11 17:36:23.760979 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000003 with status NRT_SUCCESS, Execution Unit[1]
+17:36:23.895 + 1358.90s | 2026-Oct-11 17:36:23.895467 127826:127826  INFO  NMGR:kmgr_unload_nn                          Unloading 10002
+17:36:23.895 + 1358.90s | 2026-Oct-11 17:36:23.895514 127826:127826  INFO  TDRV:kbl_model_remove                        Removed model: 1002 from: ND0 NC4
+17:36:23.896 + 1358.91s | 2026-Oct-11 17:36:23.896551 127826:127826  INFO  TDRV:kbl_model_remove                        Removed model: 1002 from: ND0 NC5
+17:36:23.962 + 1358.97s | 2026-Oct-11 17:36:23.962044 127826:127826  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10002
+17:36:23.978 + 1358.99s | 2026-Oct-11 17:36:23.978329 127826:128075  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk3/model.MODULE_88f26781ca3c844ae035+219f6e5c.neff version: 2.0, LNC start: 0
+17:36:23.978 + 1358.99s | 2026-Oct-11 17:36:23.978349 127826:128075  INFO  NMGR:enter_cache                             NEFF load cache - first worker, creating cache
+17:36:24.915 + 1359.92s | 2026-Oct-11 17:36:24.915229 127826:128227  INFO  TDRV:dml_log_dev_neff_mem                    
+17:36:24.915 + 1359.92s | [ND 0:NC 5] Current Usage Total: 75.653MB
+17:36:24.915 + 1359.92s | 	Shared Scratchpad: 0.000B
+17:36:24.915 + 1359.92s | 	Tensors: 0.000B
+17:36:24.915 + 1359.92s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk3/model.MODULE_88f26781ca3c844ae035+219f6e5c.neff]:
+17:36:24.915 + 1359.92s | 	Total: 11.349MB
+17:36:24.915 + 1359.92s | 	* model code: 10.728MB
+17:36:24.915 + 1359.92s | 	* model constants: 256.000KB
+17:36:24.915 + 1359.92s | 	* scratchpad: 0.000B
+17:36:24.915 + 1359.92s | 	* runtime: 190.031KB
+17:36:24.915 + 1359.92s | 	* dma rings io: 31.000KB
+17:36:24.915 + 1359.92s | 	* dma rings spill: 155.000KB
+17:36:24.915 + 1359.92s | 	* dma rings collectives: 0.000B
+17:36:24.915 + 1359.92s | 	* dma rings runtime: 4.000KB
+17:36:24.915 + 1359.92s | 	* collectives: 0.000B
+17:36:24.915 + 1359.92s | 
+17:36:25.025 + 1360.03s | 2026-Oct-11 17:36:25.025010 127826:128226  INFO  TDRV:dml_log_dev_neff_mem                    
+17:36:25.025 + 1360.03s | [ND 0:NC 4] Current Usage Total: 3.716GB
+17:36:25.025 + 1360.03s | 	Shared Scratchpad: 896.000MB
+17:36:25.025 + 1360.03s | 	Tensors: 2.740GB
+17:36:25.025 + 1360.03s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk3/model.MODULE_88f26781ca3c844ae035+219f6e5c.neff]:
+17:36:25.025 + 1360.03s | 	Total: 37.905MB
+17:36:25.025 + 1360.03s | 	* model code: 34.814MB
+17:36:25.025 + 1360.03s | 	* model constants: 192.004KB
+17:36:25.025 + 1360.03s | 	* scratchpad: 0.000B
+17:36:25.025 + 1360.03s | 	* runtime: 190.062KB
+17:36:25.025 + 1360.03s | 	* dma rings io: 224.000KB
+17:36:25.025 + 1360.03s | 	* dma rings spill: 2.495MB
+17:36:25.025 + 1360.03s | 	* dma rings collectives: 0.000B
+17:36:25.025 + 1360.03s | 	* dma rings runtime: 4.000KB
+17:36:25.025 + 1360.03s | 	* collectives: 0.000B
+17:36:25.025 + 1360.03s | 
+17:36:25.025 + 1360.03s | 2026-Oct-11 17:36:25.025221 127826:128075  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk3/model.MODULE_88f26781ca3c844ae035+219f6e5c.neff" ID: 0
+17:36:25.027 + 1360.04s | 2026-Oct-11 17:36:25.026854 127826:128075  INFO  NMGR:release_tmp_neff_cache                  NEFF load cache - cleared by the last worker
+17:36:25.027 + 1360.04s | 2026-Oct-11 17:36:25.026864 127826:128075  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk3/model.MODULE_88f26781ca3c844ae035+219f6e5c.neff, loaded successfully
+17:36:26.351 + 1361.36s | 2026-Oct-11 17:36:26.350837 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000004 with status NRT_SUCCESS, Execution Unit[1]
+17:36:27.178 + 1362.19s | 2026-Oct-11 17:36:27.178610 127826:127826  INFO  NMGR:kmgr_unload_nn                          Unloading 10004
+17:36:27.178 + 1362.19s | 2026-Oct-11 17:36:27.178637 127826:127826  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10004
+17:36:27.202 + 1362.21s | 2026-Oct-11 17:36:27.202436 127826:128075  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk4/model.MODULE_b0d7696d3c10a677e582+891cd766.neff version: 2.0, LNC start: 0
+17:36:27.202 + 1362.21s | 2026-Oct-11 17:36:27.202457 127826:128075  INFO  NMGR:enter_cache                             NEFF load cache - first worker, creating cache
+17:36:28.693 + 1363.70s | 2026-Oct-11 17:36:28.693531 127826:128252  INFO  TDRV:dml_log_dev_neff_mem                    
+17:36:28.693 + 1363.70s | [ND 0:NC 5] Current Usage Total: 100.403MB
+17:36:28.693 + 1363.70s | 	Shared Scratchpad: 0.000B
+17:36:28.693 + 1363.70s | 	Tensors: 0.000B
+17:36:28.693 + 1363.70s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk4/model.MODULE_b0d7696d3c10a677e582+891cd766.neff]:
+17:36:28.693 + 1363.70s | 	Total: 24.749MB
+17:36:28.693 + 1363.70s | 	* model code: 24.110MB
+17:36:28.693 + 1363.70s | 	* model constants: 192.000KB
+17:36:28.693 + 1363.70s | 	* scratchpad: 0.000B
+17:36:28.693 + 1363.70s | 	* runtime: 272.062KB
+17:36:28.693 + 1363.70s | 	* dma rings io: 31.000KB
+17:36:28.693 + 1363.70s | 	* dma rings spill: 155.000KB
+17:36:28.693 + 1363.70s | 	* dma rings collectives: 0.000B
+17:36:28.693 + 1363.70s | 	* dma rings runtime: 4.000KB
+17:36:28.693 + 1363.70s | 	* collectives: 0.000B
+17:36:28.693 + 1363.70s | 
+17:36:28.851 + 1363.86s | 2026-Oct-11 17:36:28.851514 127826:128251  INFO  TDRV:dml_log_dev_neff_mem                    
+17:36:28.851 + 1363.86s | [ND 0:NC 4] Current Usage Total: 5.139GB
+17:36:28.851 + 1363.86s | 	Shared Scratchpad: 2.250GB
+17:36:28.851 + 1363.86s | 	Tensors: 2.740GB
+17:36:28.851 + 1363.86s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk4/model.MODULE_b0d7696d3c10a677e582+891cd766.neff]:
+17:36:28.851 + 1363.86s | 	Total: 49.280MB
+17:36:28.851 + 1363.86s | 	* model code: 41.147MB
+17:36:28.851 + 1363.86s | 	* model constants: 192.004KB
+17:36:28.851 + 1363.86s | 	* scratchpad: 0.000B
+17:36:28.851 + 1363.86s | 	* runtime: 190.062KB
+17:36:28.851 + 1363.86s | 	* dma rings io: 262.750KB
+17:36:28.851 + 1363.86s | 	* dma rings spill: 7.499MB
+17:36:28.851 + 1363.86s | 	* dma rings collectives: 0.000B
+17:36:28.851 + 1363.86s | 	* dma rings runtime: 4.000KB
+17:36:28.851 + 1363.86s | 	* collectives: 0.000B
+17:36:28.851 + 1363.86s | 
+17:36:28.851 + 1363.86s | 2026-Oct-11 17:36:28.851836 127826:128075  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk4/model.MODULE_b0d7696d3c10a677e582+891cd766.neff" ID: 0
+17:36:28.852 + 1363.86s | 2026-Oct-11 17:36:28.852523 127826:128075  INFO  NMGR:release_tmp_neff_cache                  NEFF load cache - cleared by the last worker
+17:36:28.852 + 1363.86s | 2026-Oct-11 17:36:28.852530 127826:128075  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk4/model.MODULE_b0d7696d3c10a677e582+891cd766.neff, loaded successfully
+17:36:30.623 + 1365.63s | 2026-Oct-11 17:36:30.622857 127826:128045  INFO  TDRV:kbl_model_remove                        Removed model: 1004 from: ND0 NC4
+17:36:30.623 + 1365.63s | 2026-Oct-11 17:36:30.623736 127826:128045  INFO  TDRV:kbl_model_remove                        Removed model: 1004 from: ND0 NC5
+17:36:30.731 + 1365.74s | 2026-Oct-11 17:36:30.730990 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000005 with status NRT_SUCCESS, Execution Unit[1]
+17:36:31.848 + 1366.86s | 2026-Oct-11 17:36:31.847922 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000006 with status NRT_SUCCESS, Execution Unit[1]
+17:36:32.676 + 1367.68s | 2026-Oct-11 17:36:32.676161 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000007 with status NRT_SUCCESS, Execution Unit[1]
+17:36:32.932 + 1367.94s | 2026-Oct-11 17:36:32.932050 127826:127826  INFO  NMGR:kmgr_unload_nn                          Unloading 10003
+17:36:32.932 + 1367.94s | 2026-Oct-11 17:36:32.932080 127826:127826  INFO  TDRV:kbl_model_remove                        Removed model: 1003 from: ND0 NC4
+17:36:32.932 + 1367.94s | 2026-Oct-11 17:36:32.932958 127826:127826  INFO  TDRV:kbl_model_remove                        Removed model: 1003 from: ND0 NC5
+17:36:33.273 + 1368.28s | 2026-Oct-11 17:36:33.273588 127826:127826  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10003
+17:36:33.350 + 1368.36s | 2026-Oct-11 17:36:33.350477 127826:128075  INFO  NMGR:kmgr_load_nn_internal                   Loading NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk5/model.MODULE_447e0d8cd752796504eb+87970166.neff version: 2.0, LNC start: 0
+17:36:33.350 + 1368.36s | 2026-Oct-11 17:36:33.350501 127826:128075  INFO  NMGR:enter_cache                             NEFF load cache - first worker, creating cache
+17:36:38.671 + 1373.68s | 2026-Oct-11 17:36:38.670910 127826:128366  INFO  TDRV:dml_log_dev_neff_mem                    
+17:36:38.671 + 1373.68s | [ND 0:NC 5] Current Usage Total: 105.558MB
+17:36:38.671 + 1373.68s | 	Shared Scratchpad: 0.000B
+17:36:38.671 + 1373.68s | 	Tensors: 0.000B
+17:36:38.671 + 1373.68s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk5/model.MODULE_447e0d8cd752796504eb+87970166.neff]:
+17:36:38.671 + 1373.68s | 	Total: 78.547MB
+17:36:38.671 + 1373.68s | 	* model code: 72.979MB
+17:36:38.671 + 1373.68s | 	* model constants: 128.000KB
+17:36:38.671 + 1373.68s | 	* scratchpad: 0.000B
+17:36:38.671 + 1373.68s | 	* runtime: 272.016KB
+17:36:38.671 + 1373.68s | 	* dma rings io: 31.500KB
+17:36:38.671 + 1373.68s | 	* dma rings spill: 5.143MB
+17:36:38.671 + 1373.68s | 	* dma rings collectives: 0.000B
+17:36:38.671 + 1373.68s | 	* dma rings runtime: 4.000KB
+17:36:38.671 + 1373.68s | 	* collectives: 0.000B
+17:36:38.671 + 1373.68s | 
+17:36:38.742 + 1373.75s | 2026-Oct-11 17:36:38.742129 127826:128365  INFO  TDRV:dml_log_dev_neff_mem                    
+17:36:38.742 + 1373.75s | [ND 0:NC 4] Current Usage Total: 14.249GB
+17:36:38.742 + 1373.75s | 	Shared Scratchpad: 2.250GB
+17:36:38.742 + 1373.75s | 	Tensors: 11.851GB
+17:36:38.742 + 1373.75s | Per NEFF memory usage breakdown for [/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk5/model.MODULE_447e0d8cd752796504eb+87970166.neff]:
+17:36:38.742 + 1373.75s | 	Total: 100.438MB
+17:36:38.742 + 1373.75s | 	* model code: 94.467MB
+17:36:38.742 + 1373.75s | 	* model constants: 128.000KB
+17:36:38.742 + 1373.75s | 	* scratchpad: 0.000B
+17:36:38.742 + 1373.75s | 	* runtime: 272.016KB
+17:36:38.742 + 1373.75s | 	* dma rings io: 31.500KB
+17:36:38.742 + 1373.75s | 	* dma rings spill: 5.545MB
+17:36:38.742 + 1373.75s | 	* dma rings collectives: 0.000B
+17:36:38.742 + 1373.75s | 	* dma rings runtime: 4.000KB
+17:36:38.742 + 1373.75s | 	* collectives: 0.000B
+17:36:38.742 + 1373.75s | 
+17:36:38.742 + 1373.75s | 2026-Oct-11 17:36:38.742480 127826:128075  INFO  NMGR:kmgr_load_nn_internal_v2                Loaded NN "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk5/model.MODULE_447e0d8cd752796504eb+87970166.neff" ID: 0
+17:36:38.747 + 1373.76s | 2026-Oct-11 17:36:38.747103 127826:128075  INFO  NMGR:release_tmp_neff_cache                  NEFF load cache - cleared by the last worker
+17:36:38.747 + 1373.76s | 2026-Oct-11 17:36:38.747111 127826:128075  INFO  NMGR:kmgr_load_nn_post_metrics               NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b31eb22/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk5/model.MODULE_447e0d8cd752796504eb+87970166.neff, loaded successfully
+17:36:39.841 + 1374.85s | 2026-Oct-11 17:36:39.841198 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000008 with status NRT_SUCCESS, Execution Unit[1]
+17:36:40.407 + 1375.42s | 2026-Oct-11 17:36:40.407539 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000009 with status NRT_SUCCESS, Execution Unit[1]
+17:36:41.331 + 1376.34s | 2026-Oct-11 17:36:41.331316 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000000a with status NRT_SUCCESS, Execution Unit[1]
+17:36:42.093 + 1377.10s | 2026-Oct-11 17:36:42.093074 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000000b with status NRT_SUCCESS, Execution Unit[1]
+17:36:42.815 + 1377.82s | 2026-Oct-11 17:36:42.814884 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000000c with status NRT_SUCCESS, Execution Unit[1]
+17:36:43.870 + 1378.88s | 2026-Oct-11 17:36:43.866825 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000000d with status NRT_SUCCESS, Execution Unit[1]
+17:36:44.457 + 1379.47s | 2026-Oct-11 17:36:44.457167 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000000e with status NRT_SUCCESS, Execution Unit[1]
+17:36:45.215 + 1380.22s | 2026-Oct-11 17:36:45.215590 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000000f with status NRT_SUCCESS, Execution Unit[1]
+17:36:45.959 + 1380.97s | 2026-Oct-11 17:36:45.959590 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000010 with status NRT_SUCCESS, Execution Unit[1]
+17:36:46.687 + 1381.70s | 2026-Oct-11 17:36:46.687665 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000011 with status NRT_SUCCESS, Execution Unit[1]
+17:36:47.705 + 1382.71s | 2026-Oct-11 17:36:47.705682 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000012 with status NRT_SUCCESS, Execution Unit[1]
+17:36:48.268 + 1383.28s | 2026-Oct-11 17:36:48.268693 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000013 with status NRT_SUCCESS, Execution Unit[1]
+17:36:49.042 + 1384.05s | 2026-Oct-11 17:36:49.042407 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000014 with status NRT_SUCCESS, Execution Unit[1]
+17:36:49.772 + 1384.78s | 2026-Oct-11 17:36:49.772668 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000015 with status NRT_SUCCESS, Execution Unit[1]
+17:36:50.548 + 1385.56s | 2026-Oct-11 17:36:50.548722 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000016 with status NRT_SUCCESS, Execution Unit[1]
+17:36:51.597 + 1386.61s | 2026-Oct-11 17:36:51.597310 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000017 with status NRT_SUCCESS, Execution Unit[1]
+17:36:52.152 + 1387.16s | 2026-Oct-11 17:36:52.152016 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000018 with status NRT_SUCCESS, Execution Unit[1]
+17:36:52.922 + 1387.93s | 2026-Oct-11 17:36:52.922697 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000019 with status NRT_SUCCESS, Execution Unit[1]
+17:36:53.647 + 1388.66s | 2026-Oct-11 17:36:53.647714 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000001a with status NRT_SUCCESS, Execution Unit[1]
+17:36:54.370 + 1389.38s | 2026-Oct-11 17:36:54.370694 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000001b with status NRT_SUCCESS, Execution Unit[1]
+17:36:55.386 + 1390.40s | 2026-Oct-11 17:36:55.383421 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000001c with status NRT_SUCCESS, Execution Unit[1]
+17:36:55.957 + 1390.97s | 2026-Oct-11 17:36:55.957612 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000001d with status NRT_SUCCESS, Execution Unit[1]
+17:36:56.691 + 1391.70s | 2026-Oct-11 17:36:56.691340 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000001e with status NRT_SUCCESS, Execution Unit[1]
+17:36:57.438 + 1392.45s | 2026-Oct-11 17:36:57.438395 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000001f with status NRT_SUCCESS, Execution Unit[1]
+17:36:58.251 + 1393.26s | 2026-Oct-11 17:36:58.251138 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000020 with status NRT_SUCCESS, Execution Unit[1]
+17:36:59.269 + 1394.28s | 2026-Oct-11 17:36:59.269273 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000021 with status NRT_SUCCESS, Execution Unit[1]
+17:36:59.839 + 1394.85s | 2026-Oct-11 17:36:59.839208 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000022 with status NRT_SUCCESS, Execution Unit[1]
+17:37:00.670 + 1395.68s | 2026-Oct-11 17:37:00.670038 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000023 with status NRT_SUCCESS, Execution Unit[1]
+17:37:01.436 + 1396.45s | 2026-Oct-11 17:37:01.436891 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000024 with status NRT_SUCCESS, Execution Unit[1]
+17:37:02.193 + 1397.20s | 2026-Oct-11 17:37:02.193098 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000025 with status NRT_SUCCESS, Execution Unit[1]
+17:37:03.197 + 1398.21s | 2026-Oct-11 17:37:03.197421 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000026 with status NRT_SUCCESS, Execution Unit[1]
+17:37:03.770 + 1398.78s | 2026-Oct-11 17:37:03.770688 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000027 with status NRT_SUCCESS, Execution Unit[1]
+17:37:04.513 + 1399.52s | 2026-Oct-11 17:37:04.513426 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000028 with status NRT_SUCCESS, Execution Unit[1]
+17:37:05.280 + 1400.29s | 2026-Oct-11 17:37:05.269326 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000029 with status NRT_SUCCESS, Execution Unit[1]
+17:37:06.013 + 1401.02s | 2026-Oct-11 17:37:06.013582 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000002a with status NRT_SUCCESS, Execution Unit[1]
+17:37:07.019 + 1402.03s | 2026-Oct-11 17:37:07.019050 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000002b with status NRT_SUCCESS, Execution Unit[1]
+17:37:07.583 + 1402.59s | 2026-Oct-11 17:37:07.583927 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000002c with status NRT_SUCCESS, Execution Unit[1]
+17:37:08.330 + 1403.34s | 2026-Oct-11 17:37:08.329941 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000002d with status NRT_SUCCESS, Execution Unit[1]
+17:37:09.072 + 1404.08s | 2026-Oct-11 17:37:09.072453 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000002e with status NRT_SUCCESS, Execution Unit[1]
+17:37:09.796 + 1404.81s | 2026-Oct-11 17:37:09.796595 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000002f with status NRT_SUCCESS, Execution Unit[1]
+17:37:10.785 + 1405.79s | 2026-Oct-11 17:37:10.785155 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000030 with status NRT_SUCCESS, Execution Unit[1]
+17:37:11.343 + 1406.35s | 2026-Oct-11 17:37:11.343462 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000031 with status NRT_SUCCESS, Execution Unit[1]
+17:37:12.068 + 1407.08s | 2026-Oct-11 17:37:12.068842 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000032 with status NRT_SUCCESS, Execution Unit[1]
+17:37:12.801 + 1407.81s | 2026-Oct-11 17:37:12.801072 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000033 with status NRT_SUCCESS, Execution Unit[1]
+17:37:13.531 + 1408.54s | 2026-Oct-11 17:37:13.531868 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000034 with status NRT_SUCCESS, Execution Unit[1]
+17:37:14.523 + 1409.53s | 2026-Oct-11 17:37:14.523076 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000035 with status NRT_SUCCESS, Execution Unit[1]
+17:37:15.080 + 1410.09s | 2026-Oct-11 17:37:15.080475 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000036 with status NRT_SUCCESS, Execution Unit[1]
+17:37:15.806 + 1410.82s | 2026-Oct-11 17:37:15.806446 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000037 with status NRT_SUCCESS, Execution Unit[1]
+17:37:16.526 + 1411.53s | 2026-Oct-11 17:37:16.525928 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000038 with status NRT_SUCCESS, Execution Unit[1]
+17:37:17.244 + 1412.25s | 2026-Oct-11 17:37:17.243973 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000039 with status NRT_SUCCESS, Execution Unit[1]
+17:37:18.228 + 1413.24s | 2026-Oct-11 17:37:18.228151 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000003a with status NRT_SUCCESS, Execution Unit[1]
+17:37:18.783 + 1413.79s | 2026-Oct-11 17:37:18.783297 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000003b with status NRT_SUCCESS, Execution Unit[1]
+17:37:19.504 + 1414.51s | 2026-Oct-11 17:37:19.504724 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000003c with status NRT_SUCCESS, Execution Unit[1]
+17:37:20.224 + 1415.23s | 2026-Oct-11 17:37:20.224026 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000003d with status NRT_SUCCESS, Execution Unit[1]
+17:37:21.005 + 1416.01s | 2026-Oct-11 17:37:21.004888 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000003e with status NRT_SUCCESS, Execution Unit[1]
+17:37:21.999 + 1417.01s | 2026-Oct-11 17:37:21.999302 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000003f with status NRT_SUCCESS, Execution Unit[1]
+17:37:22.554 + 1417.56s | 2026-Oct-11 17:37:22.554639 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000040 with status NRT_SUCCESS, Execution Unit[1]
+17:37:23.276 + 1418.29s | 2026-Oct-11 17:37:23.276411 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000041 with status NRT_SUCCESS, Execution Unit[1]
+17:37:23.997 + 1419.01s | 2026-Oct-11 17:37:23.997143 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000042 with status NRT_SUCCESS, Execution Unit[1]
+17:37:24.718 + 1419.73s | 2026-Oct-11 17:37:24.718804 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000043 with status NRT_SUCCESS, Execution Unit[1]
+17:37:25.702 + 1420.71s | 2026-Oct-11 17:37:25.702722 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000044 with status NRT_SUCCESS, Execution Unit[1]
+17:37:26.258 + 1421.27s | 2026-Oct-11 17:37:26.258068 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000045 with status NRT_SUCCESS, Execution Unit[1]
+17:37:26.981 + 1421.99s | 2026-Oct-11 17:37:26.981250 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000046 with status NRT_SUCCESS, Execution Unit[1]
+17:37:27.701 + 1422.71s | 2026-Oct-11 17:37:27.700937 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000047 with status NRT_SUCCESS, Execution Unit[1]
+17:37:28.422 + 1423.43s | 2026-Oct-11 17:37:28.422663 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000048 with status NRT_SUCCESS, Execution Unit[1]
+17:37:29.406 + 1424.41s | 2026-Oct-11 17:37:29.406130 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000049 with status NRT_SUCCESS, Execution Unit[1]
+17:37:29.961 + 1424.97s | 2026-Oct-11 17:37:29.961470 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000004a with status NRT_SUCCESS, Execution Unit[1]
+17:37:30.684 + 1425.69s | 2026-Oct-11 17:37:30.684308 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000004b with status NRT_SUCCESS, Execution Unit[1]
+17:37:31.460 + 1426.47s | 2026-Oct-11 17:37:31.460785 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000004c with status NRT_SUCCESS, Execution Unit[1]
+17:37:32.192 + 1427.20s | 2026-Oct-11 17:37:32.191641 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000004d with status NRT_SUCCESS, Execution Unit[1]
+17:37:33.175 + 1428.18s | 2026-Oct-11 17:37:33.175421 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000004e with status NRT_SUCCESS, Execution Unit[1]
+17:37:33.731 + 1428.74s | 2026-Oct-11 17:37:33.731026 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000004f with status NRT_SUCCESS, Execution Unit[1]
+17:37:34.452 + 1429.46s | 2026-Oct-11 17:37:34.452227 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000050 with status NRT_SUCCESS, Execution Unit[1]
+17:37:35.172 + 1430.18s | 2026-Oct-11 17:37:35.172484 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000051 with status NRT_SUCCESS, Execution Unit[1]
+17:37:35.895 + 1430.90s | 2026-Oct-11 17:37:35.895265 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000052 with status NRT_SUCCESS, Execution Unit[1]
+17:37:36.879 + 1431.89s | 2026-Oct-11 17:37:36.878979 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000053 with status NRT_SUCCESS, Execution Unit[1]
+17:37:37.434 + 1432.44s | 2026-Oct-11 17:37:37.433908 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000054 with status NRT_SUCCESS, Execution Unit[1]
+17:37:38.158 + 1433.17s | 2026-Oct-11 17:37:38.158092 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000055 with status NRT_SUCCESS, Execution Unit[1]
+17:37:38.878 + 1433.89s | 2026-Oct-11 17:37:38.878248 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000056 with status NRT_SUCCESS, Execution Unit[1]
+17:37:39.599 + 1434.61s | 2026-Oct-11 17:37:39.599790 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000057 with status NRT_SUCCESS, Execution Unit[1]
+17:37:40.584 + 1435.59s | 2026-Oct-11 17:37:40.584284 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000058 with status NRT_SUCCESS, Execution Unit[1]
+17:37:41.140 + 1436.15s | 2026-Oct-11 17:37:41.140194 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000059 with status NRT_SUCCESS, Execution Unit[1]
+17:37:41.862 + 1436.87s | 2026-Oct-11 17:37:41.861959 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000005a with status NRT_SUCCESS, Execution Unit[1]
+17:37:42.582 + 1437.59s | 2026-Oct-11 17:37:42.582392 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000005b with status NRT_SUCCESS, Execution Unit[1]
+17:37:43.304 + 1438.31s | 2026-Oct-11 17:37:43.303810 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000005c with status NRT_SUCCESS, Execution Unit[1]
+17:37:44.288 + 1439.30s | 2026-Oct-11 17:37:44.287932 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000005d with status NRT_SUCCESS, Execution Unit[1]
+17:37:44.843 + 1439.85s | 2026-Oct-11 17:37:44.842950 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000005e with status NRT_SUCCESS, Execution Unit[1]
+17:37:45.618 + 1440.63s | 2026-Oct-11 17:37:45.617871 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x100000000005f with status NRT_SUCCESS, Execution Unit[1]
+17:37:46.346 + 1441.36s | 2026-Oct-11 17:37:46.346268 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000060 with status NRT_SUCCESS, Execution Unit[1]
+17:37:47.067 + 1442.08s | 2026-Oct-11 17:37:47.066764 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000061 with status NRT_SUCCESS, Execution Unit[1]
+17:37:48.050 + 1443.06s | 2026-Oct-11 17:37:48.050401 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000062 with status NRT_SUCCESS, Execution Unit[1]
+17:37:48.605 + 1443.61s | 2026-Oct-11 17:37:48.605392 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000063 with status NRT_SUCCESS, Execution Unit[1]
+17:37:49.328 + 1444.34s | 2026-Oct-11 17:37:49.328648 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000064 with status NRT_SUCCESS, Execution Unit[1]
+17:37:50.047 + 1445.06s | 2026-Oct-11 17:37:50.047679 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000065 with status NRT_SUCCESS, Execution Unit[1]
+17:37:50.769 + 1445.78s | 2026-Oct-11 17:37:50.769085 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000066 with status NRT_SUCCESS, Execution Unit[1]
+17:37:52.634 + 1447.64s | [wan] video saved to /home/ubuntu/work/scratch/e2e/run1/out.mp4
+17:37:52.648 + 1447.66s | 2026-Oct-11 17:37:52.648420 127826:127826  INFO  NMGR:kmgr_unload_nn                          Unloading 10005
+17:37:52.648 + 1447.66s | 2026-Oct-11 17:37:52.648448 127826:127826  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10005
+17:37:52.650 + 1447.66s | 2026-Oct-11 17:37:52.650175 127826:127826  INFO  NMGR:kmgr_unload_nn                          Unloading 10006
+17:37:52.650 + 1447.66s | 2026-Oct-11 17:37:52.650195 127826:127826  INFO  TDRV:kbl_model_remove                        Removed model: 1006 from: ND0 NC4
+17:37:52.651 + 1447.66s | 2026-Oct-11 17:37:52.651428 127826:127826  INFO  TDRV:kbl_model_remove                        Removed model: 1006 from: ND0 NC5
+17:37:53.311 + 1448.32s | 2026-Oct-11 17:37:53.311664 127826:127826  INFO  NMGR:kmgr_unload_nn                          Unloaded NN: 10006
+17:37:54.323 + 1449.33s | 2026-Oct-11 17:37:54.323300 127826:128045  INFO  TDRV:kbl_model_remove                        Removed model: 1005 from: ND0 NC4
+17:37:54.325 + 1449.33s | 2026-Oct-11 17:37:54.325382 127826:128045  INFO  TDRV:kbl_model_remove                        Removed model: 1005 from: ND0 NC5
+17:37:54.518 + 1449.53s | 2026-Oct-11 17:37:54.518235 127826:128045  INFO  NMGR:tpb_xu_report_complete                  Completed request 0x1000000000067 with status NRT_SUCCESS, Execution Unit[1]
+exit=0

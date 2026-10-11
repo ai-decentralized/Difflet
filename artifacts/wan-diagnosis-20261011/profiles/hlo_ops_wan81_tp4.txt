@@ -1,0 +1,69 @@
+=== MODULE_0382838589555a2c2efa+3de01f62: ops on tensors with numel >= 1e+06
+--- count by (op, dtype, shape):
+    442  broadcast          F32       [1, 32760, 5120]
+    360  broadcast          F32       [1, 32760, 1280]
+    321  multiply           F32       [1, 32760, 5120]
+    320  parameter          BF16      [10, 32760, 128]
+    320  convert            F32       [1, 32760, 1, 64]
+    320  convert            F32       [1, 32760, 10, 64]
+    320  reshape            F32       [1, 32760, 64]
+    320  broadcast          F32       [1, 32760, 10, 64]
+    320  multiply           F32       [1, 32760, 10, 64]
+    320  convert            BF16      [1, 32760, 10, 64]
+    281  convert            F32       [1, 32760, 5120]
+    240  parameter          BF16      [1280, 5120]
+    240  transpose          BF16      [5120, 1280]
+    240  convert            F32       [1, 32760, 1280]
+    240  reshape            BF16      [1, 32760, 10, 128]
+    240  multiply           F32       [1, 32760, 1280]
+    240  get-tuple-element  BF16      [1, 32760, 5120]
+    201  add                F32       [1, 32760, 5120]
+    201  convert            BF16      [1, 32760, 5120]
+    160  call               BF16      [10, 32760, 128]
+    160  dot                BF16      [1, 32760, 1280]
+    160  transpose          BF16      [1, 32760, 1280]
+    160  broadcast          BF16      [1, 32760, 1280]
+    160  add                BF16      [1, 32760, 1280]
+    160  transpose          BF16      [1, 10, 32760, 128]
+    160  reshape            BF16      [10, 32760, 128]
+    160  reshape            BF16      [1, 32760, 1, 128]
+    160  slice              BF16      [1, 32760, 1, 64]
+    160  reshape            BF16      [1, 32760, 10, 64, 2]
+    160  slice              BF16      [1, 32760, 10, 64, 1]
+    160  reshape            BF16      [1, 32760, 10, 64]
+    160  broadcast          BF16      [1, 32760, 10, 64]
+    160  multiply           BF16      [1, 32760, 10, 64]
+    160  broadcast          PRED      [1, 32760, 10, 64]
+    160  pad                BF16      [1, 32760, 10, 128]
+    160  pad                PRED      [1, 32760, 10, 128]
+    160  select             BF16      [1, 32760, 10, 128]
+    160  broadcast          BF16      [1, 32760, 5120]
+    160  add                BF16      [1, 32760, 5120]
+    121  transpose          BF16      [1, 32760, 5120]
+--- total elements written by (op, dtype) [G]:
+     95.94  broadcast          F32
+     70.61  multiply           F32
+     64.58  convert            F32
+     45.51  transpose          BF16
+     45.46  convert            BF16
+     44.97  broadcast          BF16
+     40.26  get-tuple-element  BF16
+     39.93  add                BF16
+     34.57  reshape            BF16
+     33.71  add                F32
+     31.37  dot                BF16
+     26.23  parameter          BF16
+     20.30  get-tuple-element  F32
+     15.77  call               BF16
+     10.06  multiply           BF16
+      7.89  custom-call        BF16
+      6.71  pad                BF16
+      6.71  pad                PRED
+      6.71  select             BF16
+      5.03  power              F32
+--- dots:
+    160  ('BF16', 'BF16') -> BF16 [1, 32760, 1280]
+    120  ('BF16', 'BF16') -> BF16 [1, 32760, 5120]
+     40  ('BF16', 'BF16') -> BF16 [1, 32760, 3456]
+      2  ('BF16', 'BF16') -> BF16 [512, 5120]
+      1  ('BF16', 'BF16') -> BF16 [32760, 64]

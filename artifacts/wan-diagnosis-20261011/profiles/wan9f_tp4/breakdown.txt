@@ -1,0 +1,75 @@
+span 534.1 ms
+== TensorE by type (both pcores)
+           t     opcode        n     ms  tflop
+0    REGULAR     MATMUL  2244356  753.3  25.22
+1  TRANSPOSE     MATMUL   895806  244.6   2.44
+2    REGULAR  LDWEIGHTS  2237170  227.2    NaN
+3  TRANSPOSE  LDWEIGHTS   895299  116.1    NaN
+4      SPILL     MATMUL    21478    6.2   0.13
+5      SPILL  LDWEIGHTS    21478    2.5    NaN
+== summed instruction time by category x engine (ms, both pcores)
+engine            GpSimd  Scalar  Sync  Tensor  Vector  total
+cat                                                          
+linear              61.5    60.2  18.5   757.7    71.7  969.5
+attention(NKI)      11.5    91.5  51.5   171.6    94.4  420.4
+compiler(no src)   218.6    53.3  56.2    32.1    24.1  384.3
+transpose(PE)        0.0     0.0   0.0   360.8     0.0  360.8
+layernorm            1.5    11.8   0.0     7.9    56.5   77.6
+qk-rmsnorm           1.6    35.5   1.4    14.0     9.9   62.5
+rope                 0.6     0.4   0.0     9.5    25.4   35.9
+other                6.0     6.9   0.5     4.6     0.6   18.6
+== top sources
+engine                                               GpSimd  Scalar  Sync  Tensor  Vector  total
+src                                                                                             
+<none>                                                218.6    53.3  56.2   391.8    24.1  744.1
+torch/nn/modules/module.py:1786                        36.4    50.3  16.8   451.7    43.2  598.3
+neuronx_distributed/parallel_layers/layers.py:996      24.9     9.9   1.7   305.9    28.5  370.9
+nkilib/core/attention/attention_cte.py:3872             0.0     0.0   0.0   118.2     0.0  118.2
+nkilib/core/attention/attention_cte.py:3005             0.0    86.9   0.0     2.0     0.0   88.8
+diffusers/models/normalization.py:87                    1.5    11.8   0.0     7.9    56.5   77.6
+nkilib/core/attention/attention_cte.py:3775             0.2     1.0   0.0     1.1    68.3   70.6
+nkilib/core/attention/attention_cte.py:3596             0.0     0.0   0.0    48.4     0.0   48.4
+nkilib/core/attention/attention_cte.py:3038             0.0     0.0  45.0     0.0     0.0   45.0
+difflet/models/wan/modeling_wan.py:527                  1.1    22.6   0.9     9.8     4.7   39.2
+difflet/models/wan/modeling_wan.py:528                  0.5    12.9   0.5     5.2     5.1   24.3
+difflet/backends/trainium/ops_impl/embeddings.py:13     0.2     0.1   0.0     4.9    12.7   18.0
+difflet/backends/trainium/ops_impl/embeddings.py:12     0.4     0.2   0.0     4.5    12.7   17.8
+nkilib/core/attention/attention_cte.py:3380            11.1     0.1   0.0     0.1     0.0   11.2
+== CC ops
+   operation dtype  input_size    n     ms  avg_us
+0  AllReduce  bf16     7987200  702  68.14    97.1
+1  AllReduce  fp32       18720  120   2.57    21.4
+2  AllReduce  bf16    11980800    8   1.11   139.1
+3  AllReduce  bf16    15974400    3   0.52   173.8
+4  AllReduce  fp32        2048   40   0.45    11.3
+         type  pcore_idx  k  n    cnt     ms
+0  activity_0          0  8  8  12974  336.6
+1  activity_0          1  8  8   5987  247.0
+2  activity_1          0  4  8  12974  197.2
+3  activity_1          1  4  8   5987  286.9
+pcore 0: span 534.5 ms | tensor busy 255.0 | idle&vec/scal 31.0 | idle&only-cc 38.3 | idle&nothing 200.5
+pcore 1: span 534.5 ms | tensor busy 299.0 | idle&vec/scal 24.7 | idle&only-cc 28.7 | idle&nothing 176.2
+== DMA by queue type
+         queue_type  rd_GB  ms_sum
+0  software_dynamic  70.95  3847.1
+1  hardware_dynamic  37.58  2016.5
+2              data  21.16  1575.2
+3       instruction   8.78   687.2
+   pcore_idx                 queue_name  rd_GB  transpose_GB     ms
+0          0  qSyncSpillReload0_defId_1  20.48         20.41  190.2
+1          0  qSyncSpillReload0_defId_0   0.46          0.46    4.0
+2          1  qSyncSpillReload0_defId_1   0.07          0.00   20.2
+3          0  qSyncSpillReload0_defId_2   0.06          0.06    0.6
+4          1             qSyncPIOParam0   0.03          0.00    7.5
+5          0             qSyncPIOParam0   0.03          0.00   12.0
+   neuron_device_idx  neuroncore_idx           usage_type  usage_bytes
+0                  0               4    Shared Scratchpad    469762048
+1                  0               4              Tensors   7503325318
+2                  0               4      DMA Rings Spill    145709056
+3                  0               4                Total  10771551602
+4                  0               4  Tensor Instructions     19020736
+5                  0               5  Tensor Instructions     12087424
+6                  0               5    Shared Scratchpad            0
+7                  0               5              Tensors            0
+8                  0               5      DMA Rings Spill      4391680
+9                  0               5                Total   2576431092
