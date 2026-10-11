@@ -838,6 +838,79 @@ def test_main_apply_backend_flags_unknown_ambient_backend_with_exec_mode_exits_2
     assert "DIFFLET_EXEC_MODE" not in os.environ
 
 
+def _main_as_console_script(monkeypatch, cli_main, argv) -> list:
+    """``main()`` as the ``difflet`` console script runs it (argv=None, ``sys.argv``), with the
+    jemalloc re-exec recorded instead of exec'd and a no-op orchestrator."""
+    reexecs: list = []
+    monkeypatch.setattr(cli_main, "_ensure_jemalloc", lambda: reexecs.append(True))
+    _recording_orchestrator(monkeypatch, cli_main)
+    monkeypatch.setattr(sys, "argv", ["difflet", *argv])
+    cli_main.main()
+    return reexecs
+
+
+@pytest.mark.parametrize("command", ["generate", "run"])
+@pytest.mark.parametrize("flags, ambient", [(["--backend", "neuron"], None), ([], "neuron")])
+def test_main_torchrun_backend_skips_the_jemalloc_reexec(monkeypatch, tmp_path, command, flags,
+                                                         ambient):
+    """Final review I-1: run_stage hands this process's environment to torchrun, its ranks and
+    the neuronx-cc their warm-up spawns, and neuronx-cc aborts under the jemalloc preload
+    (difflet/backends/trainium/utils/compile_allocator.py). --backend neuron or an ambient
+    DIFFLET_BACKEND=neuron: no re-exec."""
+    cli_main = _cli_main()
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    if ambient is not None:
+        monkeypatch.setenv("DIFFLET_BACKEND", ambient)
+
+    reexecs = _main_as_console_script(
+        monkeypatch, cli_main, [*_main_argv(command, WAN_ID, tmp_path), *flags])
+
+    assert reexecs == []
+    assert os.environ["DIFFLET_BACKEND"] == "neuron"
+
+
+@pytest.mark.parametrize("command", ["generate", "run"])
+@pytest.mark.parametrize("flags, ambient, detected", [
+    (["--backend", "trainium"], None, "neuron"),
+    (["--backend", "tpu"], None, "neuron"),
+    ([], "trainium", "neuron"),
+    ([], None, "neuron"),  # unset on a TorchNeuron host (auto-detects neuron): as before
+    ([], None, "trainium"),
+])
+def test_main_aot_or_unset_backend_keeps_the_jemalloc_reexec(monkeypatch, tmp_path, command,
+                                                             flags, ambient, detected):
+    """Trainium, TPU and an unset backend re-exec exactly as before, whatever auto-detection
+    says (the stages are single processes unless DIFFLET_BACKEND names a torchrun backend)."""
+    from difflet.backends import registry
+
+    cli_main = _cli_main()
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    monkeypatch.setattr(registry, "_auto_detect_backend", lambda: detected)
+    if ambient is not None:
+        monkeypatch.setenv("DIFFLET_BACKEND", ambient)
+
+    reexecs = _main_as_console_script(
+        monkeypatch, cli_main, [*_main_argv(command, WAN_ID, tmp_path), *flags])
+
+    assert reexecs == [True]
+
+
+def test_main_in_process_call_never_reexecs(monkeypatch, tmp_path):
+    """main(argv) called from Python never re-execs, whatever the backend (unchanged)."""
+    cli_main = _cli_main()
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    reexecs: list = []
+    monkeypatch.setattr(cli_main, "_ensure_jemalloc", lambda: reexecs.append(True))
+    _recording_orchestrator(monkeypatch, cli_main)
+
+    cli_main.main([*_main_argv("generate", WAN_ID, tmp_path), "--backend", "trainium"])
+
+    assert reexecs == []
+
+
 def test_main_cli_modules_stay_torch_free():
     code = (
         "import importlib, sys\n"
