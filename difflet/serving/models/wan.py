@@ -685,15 +685,15 @@ def _compile_specs(
     generation = _compile_spec(source, profile)
     if profile.host_vae:
         return (generation,)
-    # v3: temporal step graphs replace the full-video graph. Never load an
-    # old single-shot artifact into the step decoder.
+    # v4: device-resident temporal state and ranked spatial tiles replace
+    # ordinary host history IO. These graphs cannot use earlier artifacts.
     from difflet.backends.trainium.core.bucketing import canonicalize_shapes
 
     profile_shapes = profile.shapes or ((profile.height, profile.width, profile.num_frames),)
     shapes_list = [list(shape) for shape in canonicalize_shapes(profile_shapes)]
     decoder_identity = CompileArtifactIdentity.from_cache_inputs(
         {
-            "compile_contract_version": 3,
+            "compile_contract_version": 4 if any(shape[2] > 1 for shape in shapes_list) else 3,
             "component_id": "decoder",
             "model_type": _MODEL_TYPE,
             "model_id": source.model_id,
@@ -886,7 +886,7 @@ def _pipeline_definition(profile: ServingProfile | None = None):
 
 
 def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
-    """Build a decoder-only W4 replicated wrapper from the existing Wan VAE."""
+    """Build a W4 decoder; videos distribute spatial tiles across replicas."""
 
     from difflet.backends.trainium.core.multi_component_application import (
         ComponentSpec,

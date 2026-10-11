@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
+import threading
+from collections import defaultdict
 from typing import List, Tuple
 
 import torch
+from diffusers import AutoencoderKLWan
 
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
 from difflet.backends.trainium.core.bucketing import (
@@ -20,9 +23,20 @@ from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, Mode
 from difflet.models.wan.vae.modeling_vae import (
     WanVAEDecoderConfig,
     WanVAEDecoderModel,
-    WanVAEDecoderStepModel,
-    wan_vae_decode_cache,
 )
+from .vae_model import NeuronWanVAEDecoderStepModel
+
+
+def _tile_grid(height, width):
+    # Match Omni's 256-pixel tiles and 192-pixel stride (latent scale is 8).
+    return [(i, j, min(32, height - i), min(32, width - j))
+            for i in range(0, height, 24) for j in range(0, width, 24)]
+
+
+class _StatefulVAEInstance(BaseModelInstance):
+    def get(self, bucket_rank, **kwargs):
+        return self.module, {state: index + 1
+                             for index, state in enumerate(self.module.decode_cache)}
 
 
 class WanVAEDecoderInferenceConfig(InferenceConfig):
@@ -94,7 +108,7 @@ class ModelWrapperWanVAEDecoder(ShapeBucketedInputGenerator, ModelWrapper):
     """ModelBuilder wrapper for Wan VAE decoder compile inputs.
 
     Images retain their single-frame graph. Videos use first, second and
-    steady-state graphs, independent of the total number of latent frames.
+    alternating steady-state graphs per tile shape, with device history.
     """
 
     def __init__(
@@ -116,14 +130,19 @@ class ModelWrapperWanVAEDecoder(ShapeBucketedInputGenerator, ModelWrapper):
         )
         self.bucket_config = None
         self.decode_step = (model_init_kwargs or {}).get("step")
+        self.tile_shape = (model_init_kwargs or {}).get("tile_shape")
 
     def input_generator(self):
+        if self.decode_step is not None:
+            return [(torch.zeros(
+                int(getattr(self.config.neuron_config, "batch_size", 1)),
+                int(self.config.z_dim), 1, *self.tile_shape,
+                dtype=self.config.neuron_config.torch_dtype,
+            ), torch.ones(self.decode_step + 1, dtype=torch.bool))]
         return dedupe_example_inputs(
             [
                 self.example_inputs_for_shape(shape)
                 for shape in resolve_compile_shapes(self.config)
-                if self.decode_step is None
-                or (int(shape[2]) - 1) // int(self.config.scale_factor_temporal) >= self.decode_step
             ]
         )
 
@@ -134,26 +153,12 @@ class ModelWrapperWanVAEDecoder(ShapeBucketedInputGenerator, ModelWrapper):
         latent_shape = [
             batch_size,
             int(self.config.z_dim),
-            (
-                1
-                if self.decode_step is not None
-                else (int(num_frames) - 1) // int(self.config.scale_factor_temporal) + 1
-            ),
+            (int(num_frames) - 1) // int(self.config.scale_factor_temporal) + 1,
             int(height) // int(self.config.scale_factor_spatial),
             int(width) // int(self.config.scale_factor_spatial),
         ]
         latents = torch.zeros(latent_shape, dtype=dtype)
-        if self.decode_step is None:
-            return (latents,)
-        cache = wan_vae_decode_cache(self.decoder_config(), latent_shape, self.decode_step, dtype)
-        return (
-            latents,
-            *(
-                torch.zeros(t.shape if isinstance(t, torch.Tensor) else (1,), dtype=dtype)
-                for t in cache
-                if t is not None
-            ),
-        )
+        return (latents,)
 
     def decoder_config(self):
         return WanVAEDecoderConfig(
@@ -176,21 +181,20 @@ class ModelWrapperWanVAEDecoder(ShapeBucketedInputGenerator, ModelWrapper):
 
     def get_model_instance(self):
         def _create_model():
-            kwargs = {} if self.decode_step is None else {"step": self.decode_step}
+            kwargs = self.model_init_kwargs
             model = self.model_cls(self.decoder_config(), **kwargs)
             model = model.to(dtype=self.config.neuron_config.torch_dtype)
             model.eval()
             return model
 
-        return BaseModelInstance(module_cls=_create_model, input_output_aliases={})
+        instance_cls = _StatefulVAEInstance if self.decode_step is not None else BaseModelInstance
+        return instance_cls(module_cls=_create_model, input_output_aliases={})
 
     def forward(self, latents, *history):
         if self.model is None:
             raise RuntimeError("Forward called before load. Run load() first.")
         if self.decode_step is not None:
-            # The outer traced executor fixes its argument count to the last
-            # step. The scripted NxD router accepts a tensor list, including
-            # the first step which has no history (as in the base warmup path).
+            # Call the existing scripted shape router directly, as in warmup.
             return self.model.nxd_model.forward([latents, *history])
         return self._forward(latents, *history)
 
@@ -208,20 +212,24 @@ class NeuronWanVAEDecoderApplication(NeuronApplicationBase):
             for shape in resolve_compile_shapes(self.config)
         )
         self.temporal_decode = max_latent_frames > 1
+        self._decode_lock = threading.Lock()
         if self.temporal_decode:
-            for step in range(min(3, max_latent_frames)):
-                self.models.append(
-                    self.model_wrapper(
-                        config=self.config,
-                        model_cls=WanVAEDecoderStepModel,
-                        tag=f"WanVAEDecoderStepModel_{step}",
-                        compiler_args=self.get_compiler_args(),
-                        # All steps share checkpoint weights; avoid specializing
-                        # their layout to just one of the different step graphs.
-                        priority_model_idx=None,
-                        model_init_kwargs={"step": step},
-                    )
-                )
+            tile_shapes = sorted({
+                (h, w) for height, width, _ in resolve_compile_shapes(self.config)
+                for _, _, h, w in _tile_grid(height // 8, width // 8)
+            }, reverse=True)
+            maximum = (max(h for h, _ in tile_shapes), max(w for _, w in tile_shapes))
+            for tile_shape in tile_shapes:
+                for step in range(min(4, max_latent_frames)):
+                    self.models.append(self.model_wrapper(
+                        config=self.config, model_cls=NeuronWanVAEDecoderStepModel,
+                        tag=f"WanVAETile_{tile_shape[0]}x{tile_shape[1]}_{step}",
+                        compiler_args=self.get_compiler_args(), priority_model_idx=None,
+                        model_init_kwargs={"step": step, "tile_shape": tile_shape,
+                                           "max_tile_shape": maximum,
+                                           "batch_size": int(self.neuron_config.batch_size),
+                                           "logical_nc_config": self.neuron_config.logical_nc_config},
+                    ))
             self.model = self.models[0]
         else:
             self.model = self.model_wrapper(
@@ -244,6 +252,12 @@ class NeuronWanVAEDecoderApplication(NeuronApplicationBase):
     def forward(self, latents):
         if not self.temporal_decode:
             return self.models[0](latents)
+        # A loaded NxD instance owns one cache per rank. Serialize requests so
+        # their temporal histories cannot interleave; phase zero resets storage.
+        with self._decode_lock:
+            return self._forward_tiled(latents)
+
+    def _forward_tiled(self, latents):
         shape = (
             int(latents.shape[3]) * int(self.config.scale_factor_spatial),
             int(latents.shape[4]) * int(self.config.scale_factor_spatial),
@@ -251,15 +265,46 @@ class NeuronWanVAEDecoderApplication(NeuronApplicationBase):
         )
         if shape not in resolve_compile_shapes(self.config):
             raise ValueError(f"Wan VAE shape {shape} is not in the compiled shape set.")
-        chunks = []
-        # Request-local state: every video starts with an empty causal cache.
-        history = ()
-        for index in range(latents.shape[2]):
-            chunk, *history = self.models[min(index, 2)](
-                latents[:, :, index : index + 1].contiguous(), *history
-            )
-            chunks.append(chunk)
-        return torch.cat(chunks, dim=2)
+        if int(latents.shape[0]) != int(self.neuron_config.batch_size):
+            raise ValueError("Wan VAE batch size differs from the compiled batch size.")
+        tiles_by_shape = defaultdict(list)
+        for i, j, h, w in _tile_grid(latents.shape[3], latents.shape[4]):
+            tiles_by_shape[h, w].append((i, j))
+        decoded = {}
+        ranks = int(self.neuron_config.local_ranks_size)
+        router = self.traced_model.nxd_model
+        for (h, w), positions in tiles_by_shape.items():
+            for offset in range(0, len(positions), ranks):
+                active = positions[offset:offset + ranks]
+                # All ranks execute the same graph, each on a different tile.
+                # Idle ranks repeat the final tile; their output is discarded.
+                assigned = active + [active[-1]] * (ranks - len(active))
+                chunks = [[] for _ in active]
+                for frame in range(latents.shape[2]):
+                    phase = frame if frame < 2 else 2 + frame % 2
+                    marker = torch.ones(phase + 1, dtype=torch.bool)
+                    inputs = [[latents[:, :, frame:frame + 1, i:i + h, j:j + w].contiguous(), marker]
+                              for i, j in assigned]
+                    outputs = router.forward_ranked(inputs)
+                    for rank in range(len(active)):
+                        chunks[rank].append(outputs[rank][0].cpu())
+                for position, parts in zip(active, chunks):
+                    decoded[position] = torch.cat(parts, dim=2)
+        # Reuse Diffusers' exact overlap blending. Tile edges keep their true
+        # shapes, so spatial attention never sees artificial padded pixels.
+        rows = []
+        for i in range(0, latents.shape[3], 24):
+            row = []
+            for j in range(0, latents.shape[4], 24):
+                tile = decoded[i, j]
+                if i:
+                    tile = AutoencoderKLWan.blend_v(self, decoded[i - 24, j], tile, 64)
+                if j:
+                    tile = AutoencoderKLWan.blend_h(self, decoded[i, j - 24], tile, 64)
+                decoded[i, j] = tile
+                row.append(tile[:, :, :, :192, :192])
+            rows.append(torch.cat(row, dim=-1))
+        return torch.cat(rows, dim=-2)[:, :, :, :shape[0], :shape[1]].clamp(-1, 1)
 
     def get_compiler_args(self) -> str:
         compiler_args = (
