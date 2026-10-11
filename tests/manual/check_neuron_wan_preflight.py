@@ -1,10 +1,14 @@
-"""Manual check (W1b): Wan2.1-T2V-1.3B through the neuron Wan DiT application on 4 ranks.
+"""Manual check (W1b, W2, W3): Wan2.1 T2V DiT through the neuron application on 4 ranks.
 
-The pre-flight of the 14B gates: the identical code path (``NeuronWanTransformerApplication``,
-TP4, the one static shape 480x832x9 = latent (1,16,3,60,104) = 4,680 DiT tokens, 512 text
-tokens, the shared block graph in compile mode) on the 1.3B checkpoint (30 blocks, dim 1536,
-12 heads -> 3 per rank), so the cold block-graph compile, per-rank HBM, the one-graph property
-and parity with the diffusers fp32 reference are measured in minutes instead of hours.
+Written as the pre-flight of the 14B gates: the identical code path
+(``NeuronWanTransformerApplication``, TP4, the one static shape 480x832x9 = latent
+(1,16,3,60,104) = 4,680 DiT tokens, 512 text tokens, the shared block graph in compile mode) on
+the 1.3B checkpoint (30 blocks, dim 1536, 12 heads -> 3 per rank), so the cold block-graph
+compile, per-rank HBM, the one-graph property and parity with the diffusers fp32 reference are
+measured in minutes instead of hours. The same script runs the 14B gates (40 blocks, dim 5120,
+40 heads -> 10 per rank; the model shape comes from the snapshot's config): Gate 1 (W2) is
+``--exec-mode eager``, Gate 2 (W3) the compile cold/warm pair. ``--num-frames 5`` (480x832x5,
+3,120 tokens) is the decision-D48 fallback shape when 480x832x9 exceeds 18 GiB per rank.
 
 Inputs: the diffusers snapshot (``--model-dir``, holding ``transformer/``) and the CPU reference
 written beforehand by ``tests/numerical/tpu_oracle_reference.py wan --timesteps 996,500
@@ -26,29 +30,39 @@ paths, ``W1B`` a records directory):
 ``--cache-dir`` follows tests/manual/check_neuron_compile_c9.py: it is the NEFF cache, its
 ``_local`` sibling holds the compile locks and ``<dir>.cold.json`` the cold run's warm-up time.
 
-Each rank enables ``torch_neuronx.metrics`` before any device work (otherwise the compilation
-counters read 0 and "warm" proves nothing), loads with ``load(skip_warmup=True)`` and then runs
-``warmup()`` (the two halves of ``load()``, split only to read the counters in between), runs
-one DiT forward per timestep through the composed application's host<->device adapter under
-``track_fallbacks()``, and writes ``<out-dir>/result-rank<r>.json``: the checks, the parity
-metrics, ``parity.device_evidence``, ``max_memory_allocated``, ``phase_seconds``, the compilation
-counters / ``CompilationCache.CompilationTime`` / Dynamo graph counts / NEFF count / device and
-host memory at start, after load, after the warm-up and at the end, the driver's per-core device
-memory counters, the process-group timeout, and the sha256 of its outputs. Rank 0 also writes
-its outputs as fp32 on the host, ``<out-dir>/out-t<timestep>.pt``.
+Each rank enables ``torch_neuronx.metrics`` and counts the ``.neff`` files of the cache before
+``prepare_runtime`` (which itself compiles or loads one NEFF for the process group; otherwise
+the compilation counters miss it, read 0 if never enabled, and "warm" proves nothing), loads with
+``load(skip_warmup=True)`` and then runs ``warmup()`` (the two halves of ``load()``, split only
+to read the counters in between), runs one DiT forward per timestep through the composed
+application's host<->device adapter under ``track_fallbacks()``, and writes
+``<out-dir>/result-rank<r>.json``: the checks, the parity metrics, ``parity.device_evidence``,
+``max_memory_allocated`` after the load, the warm-up and the forwards, ``phase_seconds``, the
+compilation counters / ``CompilationCache.CompilationTime`` / Dynamo graph counts / NEFF count /
+device memory / host memory (VmHWM, VmRSS, MemAvailable, Cached) before ``prepare_runtime``, at
+start, after load, after the warm-up and at the end, the ``.neff`` files the run added, the
+driver's per-core device memory counters, the process-group timeout, and the sha256 of its
+outputs. Rank 0 also writes its outputs as fp32 on the host, ``<out-dir>/out-t<timestep>.pt``.
+CompilationTime sums samples per rank; compiles overlap (within a rank and across ranks), so a
+sum is compiler work, not wall clock: the wall-clock compile cost is the warm-up delta, cold
+minus warm.
 
 Checks (on every rank; rank 0 prints one PASS/FAIL line per check, each rank ``[rank r] PASS``):
 
-* checkpoint: every parameter found, no unexpected tensor; heads_per_rank: 12 / 4 = 3;
+* checkpoint: every parameter found, no unexpected tensor; heads_per_rank: heads / 4;
 * fallbacks: ``track_fallbacks()`` around the warm-up and around the forwards is ``[]``;
-  unwarmed_shapes: ``[]``;
+  unwarmed_shapes: ``[]`` (recorded by the application in compile mode only);
+  forward_shapes: every forward's device inputs have the warm-up's shapes (in eager mode too);
 * parity_fp32_t<ts>: ``parity.check`` against the fp32 reference with the bf16 control, at the
   TPU thresholds (cosine >= 0.995, rel_l1 <= 1.15x the control's, same-dtype <= 1.2x);
-* compile mode: compiled_blocks (all 30), one_graph (Dynamo ``unique_graphs == 1`` after the
-  warm-up and after the forwards, no graph break), warmup_neff (the warm-up compiled or loaded a
-  NEFF), no_recompile_in_forwards (no new Dynamo graph after the warm-up and, unless the cache
-  was cold, no compilation during the forwards; the cache entries each phase added are in the
-  JSON);
+* no_compile_in_forwards (every launch, every mode): the forwards neither compiled nor loaded a
+  NEFF (``TotalCompilations + PersistentHits == 0``; a NEFF the warm-up never loaded shows as a
+  persistent hit) and, in compile mode, added no Dynamo graph;
+* hbm_d48: ``max_memory_allocated`` at the end at most 18 GiB (decision D48: above it, or on an
+  OOM, the 14B gates continue at 480x832x5);
+* compile mode: compiled_blocks (all of them), one_graph (Dynamo ``unique_graphs == 1`` after
+  the warm-up and after the forwards, no graph break), warmup_neff (the warm-up compiled or
+  loaded a NEFF); the cache entries each phase added are in the JSON;
 * ``--eager-dir``: vs_eager_t<ts>, a sanity guard of the compiled output against the eager one:
   cosine >= 0.999 and rel_l1 <= 2.0x the bf16 control's rel_l1 (vs fp32) at that timestep;
   rel_max is reported, not gated. Compile mode's parity gate is parity_fp32_t<ts>, the same
@@ -62,6 +76,11 @@ Checks (on every rank; rank 0 prints one PASS/FAIL line per check, each rank ``[
 * ``--expect cold``: rank 0 finds new ``.neff`` files and the lock directory; ``--expect warm``:
   no compilation, at least one persistent hit and no new ``.neff`` on every rank, and the
   warm-up under half the cold one; ``--cold-dir``: outputs ``torch.equal`` to the cold run's.
+  ``--expect`` requires ``--eager-dir``, so a cold or warm compile launch is never judged
+  without the vs-eager guard.
+
+The reference is read and checked (its timesteps, its frame count against ``--num-frames``)
+before any device work, so a wrong ``--ref`` fails in seconds rather than after the 14B load.
 
 The process group is destroyed only when every check passed (a failing rank exits non-zero and
 torchrun stops its peers).
@@ -95,6 +114,8 @@ from difflet.pipeline.parallel_config import DiffletParallelConfig
 #: D58: compiled vs eager is a sanity guard above the bf16 noise floor (see the docstring).
 VS_EAGER_MIN_COSINE = 0.999
 VS_EAGER_MAX_RATIO_VS_CONTROL = 2.0
+#: Decision D48: above this per-rank peak (or on an OOM) the 14B gates run at 480x832x5.
+HBM_LIMIT_GIB = 18.0
 COMPILATION_TIME = "CompilationCache.CompilationTime"
 SYSFS_DEVICE = Path("/sys/devices/virtual/neuron_device/neuron0")
 GIB = 2**30
@@ -126,6 +147,8 @@ def parse_args() -> argparse.Namespace:
         p.error("--expect applies to --exec-mode compile")
     if args.expect is not None and args.cache_dir is None:
         p.error("--expect needs --cache-dir (the directory whose cold/warm state is checked)")
+    if args.expect is not None and args.eager_dir is None:
+        p.error("--expect needs --eager-dir (a compile launch is judged against eager too)")
     try:
         args.timesteps = [float(t) for t in args.timesteps.split(",")]
     except ValueError:
@@ -136,9 +159,23 @@ def parse_args() -> argparse.Namespace:
 # ------------------------------------------------------------------------- measurements
 
 
+def neff_files() -> dict[str, int]:
+    """The ``.neff`` files of the persistent NEFF cache on disk: relative path -> bytes."""
+    raw = os.environ.get(NEFF_CACHE_ENV)
+    directory = Path(raw) if raw else None
+    if directory is None or not directory.is_dir():
+        return {}
+    files = {}
+    for path in directory.rglob("*.neff"):
+        try:
+            files[str(path.relative_to(directory))] = path.stat().st_size
+        except OSError:  # removed while listing
+            continue
+    return files
+
+
 def count_neffs() -> int:
-    directory = Path(os.environ[NEFF_CACHE_ENV])
-    return sum(1 for _ in directory.rglob("*.neff")) if directory.is_dir() else 0
+    return len(neff_files())
 
 
 def compilation_counters() -> dict[str, int]:
@@ -177,11 +214,17 @@ def device_memory() -> dict[str, float]:
 
 
 def host_memory() -> dict[str, float]:
+    """This process's VmHWM / VmRSS and the host's MemAvailable / Cached, in GiB: the 14B
+    shards are 57 GB of fp32 that every rank slices while the page cache holds them."""
     values = {}
     for line in Path("/proc/self/status").read_text().splitlines():
         if line.startswith(("VmHWM:", "VmRSS:")):
             key, value = line.split(":", 1)
             values[f"{key}_gib"] = int(value.split()[0]) / 2**20  # kB
+    for line in Path("/proc/meminfo").read_text().splitlines():
+        if line.startswith(("MemAvailable:", "Cached:")):
+            key, value = line.split(":", 1)
+            values[f"host_{key}_gib"] = int(value.split()[0]) / 2**20  # kB
     return values
 
 
@@ -198,7 +241,11 @@ def cache_entries() -> dict[str, dict[str, Any]] | None:
                              "compilation_time_ms": e["compilation_time_ms"]} for e in entries}
 
 
-def snapshot(t0: float, *, device: bool = True) -> dict[str, Any]:
+def snapshot(t0: float, *, device: bool = True, runtime_started: bool = True) -> dict[str, Any]:
+    """Counters, timers and memory now. Before ``prepare_runtime`` pass
+    ``runtime_started=False``: the runtime's in-memory compilation cache is then not read (its
+    accessor builds the runtime's resource manager, which must not exist before the core is
+    bound) and is empty in a fresh process anyway."""
     return {
         "t_s": time.perf_counter() - t0,
         "counters": compilation_counters(),
@@ -207,7 +254,7 @@ def snapshot(t0: float, *, device: bool = True) -> dict[str, Any]:
         "neff_count": count_neffs(),
         "device_memory": device_memory() if device else None,
         "host_memory": host_memory(),
-        "cache_entries": cache_entries(),
+        "cache_entries": cache_entries() if runtime_started else {},
     }
 
 
@@ -271,12 +318,33 @@ def delta(after: dict[str, Any], before: dict[str, Any]) -> dict[str, int]:
     return {k: after["counters"][k] - before["counters"][k] for k in after["counters"]}
 
 
+def _progress(rank: int, what: str, app: Any, snap: dict[str, Any]) -> None:
+    """One line per rank per phase, so a long load can be followed in the log."""
+    mem, host = snap["device_memory"], snap["host_memory"]
+    print(f"[rank {rank}] {what} at {snap['t_s']:.1f}s: "
+          f"phases={ {k: round(v, 1) for k, v in app.phase_seconds.items()} } "
+          f"HBM allocated={mem['allocated_gib']:.2f} max={mem['max_allocated_gib']:.2f} GiB "
+          f"VmHWM={host['VmHWM_gib']:.2f} GiB host MemAvailable="
+          f"{host['host_MemAvailable_gib']:.1f} GiB Cached={host['host_Cached_gib']:.1f} GiB "
+          f"counters={snap['counters']}", flush=True)
+
+
 # ------------------------------------------------------------------------------- run
 
 
 def main() -> int:
     args = parse_args()
     t0 = time.perf_counter()
+    # The reference first (host only, seconds): a wrong --ref must not cost the 14B load.
+    blob = torch.load(args.ref, weights_only=False)
+    runs = {float(run["timestep"][0]): run for run in blob["runs"]}
+    missing = [ts for ts in args.timesteps if ts not in runs]
+    if missing:
+        raise ValueError(f"{args.ref} has no reference at timesteps {missing} "
+                         f"(it holds {sorted(runs)})")
+    if blob.get("frames") != args.num_frames:
+        raise ValueError(f"{args.ref} was computed at {blob.get('frames')} frames, this run "
+                         f"is --num-frames {args.num_frames}; recompute the reference")
     cache_dir = local_dir = timing_file = None
     if args.cache_dir is not None:
         cache_dir = args.cache_dir.expanduser().absolute()
@@ -284,20 +352,33 @@ def main() -> int:
         timing_file = cache_dir.with_name(cache_dir.name + ".cold.json")
         # Before any device work: the runtime's compilation cache reads these once.
         configure_compile_cache(cache_dir, local_cache_dir=local_dir)
+    else:
+        configure_compile_cache()  # what prepare_runtime does; resolved now to count the NEFFs
+
+    # Before prepare_runtime, which itself compiles or loads one NEFF: enable the counters
+    # (D53; they read 0 until enabled) and list the cache on disk. Neither starts the runtime;
+    # prepare_runtime refuses to run if something did.
+    import torch_neuronx
+    import torch_neuronx.metrics as metrics
+
+    metrics.set_enabled(True)
+    metrics_setup = {"enabled_before_prepare_runtime": bool(metrics.is_enabled()),
+                     "runtime_initialized_when_enabled":
+                         bool(torch_neuronx.is_neuron_runtime_initialized())}
+    neffs_before = neff_files()
+    snaps = {"pre_prepare": snapshot(t0, device=False, runtime_started=False)}
     world = int(os.environ.get("WORLD_SIZE", "1"))
     parallel = DiffletParallelConfig(tp_degree=world)
     get_backend("neuron").prepare_runtime(parallel)
     prepare_s = time.perf_counter() - t0
 
     import torch.distributed as dist
-    import torch_neuronx.metrics as metrics
 
-    metrics.set_enabled(True)  # before any device work, or every counter reads 0 (D53)
     rank = dist.get_rank() if dist.is_initialized() else 0
     logical_core = runtime.parse_core_list(os.environ.get(runtime.VISIBLE_CORES_ENV))
     logical_core = logical_core[0] if len(logical_core) == 1 else None
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    snaps = {"start": snapshot(t0, device=False)}
+    snaps["start"] = snapshot(t0, device=False)
 
     transformer_dir = args.model_dir / "transformer"
     config = NeuronWanConfig.from_pretrained(
@@ -310,17 +391,21 @@ def main() -> int:
     )
     app.load(skip_warmup=True)
     snaps["after_load"] = snapshot(t0)
+    _progress(rank, "loaded", app, snaps["after_load"])
     with track_fallbacks() as warmup_fallbacks:
         app.warmup()
     snaps["after_warmup"] = snapshot(t0)
+    _progress(rank, "warmed up", app, snaps["after_warmup"])
 
-    blob = torch.load(args.ref, weights_only=False)
-    runs = {float(run["timestep"][0]): run for run in blob["runs"]}
-    missing = [ts for ts in args.timesteps if ts not in runs]
-    if missing:
-        raise ValueError(f"{args.ref} has no reference at timesteps {missing} "
-                         f"(it holds {sorted(runs)})")
-    adapter = _OnDeviceTransformer(app, config, torch.bfloat16, app.device)
+    forward_shapes: list[list[tuple[int, ...]]] = []
+
+    def module(*device_args: torch.Tensor) -> torch.Tensor:
+        # The device-side inputs of each forward, to compare with the warm-up's in every mode
+        # (the application records unwarmed shapes in compile mode only).
+        forward_shapes.append([tuple(a.shape) for a in device_args])
+        return app(*device_args)
+
+    adapter = _OnDeviceTransformer(module, config, torch.bfloat16, app.device)
     forward_s: list[float] = []
     adapter.forward_hook = forward_s.append
     outputs: dict[float, torch.Tensor] = {}
@@ -331,6 +416,7 @@ def main() -> int:
             outputs[ts] = out.float()
     snaps["end"] = snapshot(t0)
     evidence = parity.device_evidence(app, fallbacks)
+    neffs_after = neff_files()
 
     # ------------------------------------------------------------------ checks
     checks: list[tuple[str, bool, str]] = []
@@ -346,6 +432,11 @@ def main() -> int:
                    f"forwards={evidence['fallbacks']} warm-up={warmup_fallbacks}"))
     checks.append(("unwarmed_shapes", evidence["unwarmed_shapes"] == [],
                    f"{evidence['unwarmed_shapes']} warmup={app.warmup_shapes}"))
+    checks.append(("forward_shapes",
+                   len(forward_shapes) == len(args.timesteps)
+                   and all(shapes == app.warmup_shapes for shapes in forward_shapes),
+                   f"{len(forward_shapes)} forwards at {sorted(set(map(str, forward_shapes)))} "
+                   f"warmup={app.warmup_shapes}"))
 
     parity_results: dict[str, Any] = {}
     for ts, out in outputs.items():
@@ -366,12 +457,29 @@ def main() -> int:
                        f"({same_ratio:.3f}x) rel_max={m['rel_max']:.3e}"
                        + (f" {reasons}" if reasons else "")))
 
+    prepare_delta = delta(snaps["start"], snaps["pre_prepare"])
+    load_delta = delta(snaps["after_load"], snaps["start"])
     warmup_delta = delta(snaps["after_warmup"], snaps["after_load"])
     forwards_delta = delta(snaps["end"], snaps["after_warmup"])
-    run_delta = delta(snaps["end"], snaps["start"])
-    new_neffs = snaps["end"]["neff_count"] - snaps["start"]["neff_count"]
+    run_delta = delta(snaps["end"], snaps["pre_prepare"])
+    added_neffs = sorted(set(neffs_after) - set(neffs_before))
+    new_neffs = len(added_neffs)
     graphs_warm = snaps["after_warmup"]["dynamo"]
     graphs_end = snaps["end"]["dynamo"]
+    # Every launch, every mode (W1b review): the forwards run what the warm-up compiled or
+    # loaded, nothing else. A NEFF the warm-up never loaded shows as a persistent hit here.
+    forward_neffs = forwards_delta["TotalCompilations"] + forwards_delta["PersistentHits"]
+    no_new_graph = (args.exec_mode != "compile"
+                    or graphs_end["unique_graphs"] == graphs_warm["unique_graphs"])
+    checks.append(("no_compile_in_forwards", forward_neffs == 0 and no_new_graph,
+                   f"forward counters {forwards_delta}, unique_graphs "
+                   f"{graphs_warm['unique_graphs']} -> {graphs_end['unique_graphs']}"))
+    peak_gib = snaps["end"]["device_memory"]["max_allocated_gib"]
+    checks.append(("hbm_d48", peak_gib <= HBM_LIMIT_GIB,
+                   f"max_memory_allocated after load="
+                   f"{snaps['after_load']['device_memory']['max_allocated_gib']:.2f} "
+                   f"warm-up={snaps['after_warmup']['device_memory']['max_allocated_gib']:.2f} "
+                   f"end={peak_gib:.2f} GiB (limit {HBM_LIMIT_GIB} GiB, decision D48)"))
     if args.exec_mode == "compile":
         checks.append(("compiled_blocks", len(app.compiled_blocks) == config.num_layers,
                        f"{len(app.compiled_blocks)} of {config.num_layers}"))
@@ -384,14 +492,6 @@ def main() -> int:
         checks.append(("warmup_neff",
                        warmup_delta["TotalCompilations"] + warmup_delta["PersistentHits"] >= 1,
                        f"warm-up counters {warmup_delta}"))
-        # A new Dynamo graph after the warm-up is a recompile in every run. A NEFF compiled
-        # during the forwards is one only on a warm cache: on a cold one a compile the warm-up
-        # started can finish during the first forward (seen once in four cold runs).
-        checks.append(("no_recompile_in_forwards",
-                       graphs_end["unique_graphs"] == graphs_warm["unique_graphs"]
-                       and (args.expect == "cold" or forwards_delta["TotalCompilations"] == 0),
-                       f"unique_graphs {graphs_warm['unique_graphs']} -> "
-                       f"{graphs_end['unique_graphs']}, forward counters {forwards_delta}"))
     else:
         checks.append(("eager_compiles_no_block", not app.compiled_blocks
                        and graphs_end["unique_graphs"] == 0,
@@ -453,6 +553,7 @@ def main() -> int:
         "args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
         "neff_cache_dir": os.environ.get(NEFF_CACHE_ENV),
         "metrics_enabled": bool(metrics.is_enabled()),
+        "metrics_setup": metrics_setup,
         "pg_timeout": pg_timeout(),
         "env": {k: os.environ.get(k) for k in (
             "OMP_NUM_THREADS", "HF_HUB_OFFLINE", "DIFFLET_NO_JEMALLOC", runtime.PG_TIMEOUT_ENV,
@@ -469,17 +570,27 @@ def main() -> int:
         "warmup_fallbacks": list(warmup_fallbacks),
         "max_memory_allocated_bytes": snaps["end"]["device_memory"]["max_allocated_bytes"],
         "max_memory_allocated_gib": snaps["end"]["device_memory"]["max_allocated_gib"],
+        "max_memory_allocated_gib_by_phase": {
+            name: snaps[name]["device_memory"]["max_allocated_gib"]
+            for name in ("after_load", "after_warmup", "end")},
         "weights_allocated_gib": snaps["after_load"]["device_memory"]["allocated_gib"],
+        "host_vmhwm_gib_by_phase": {name: snap["host_memory"]["VmHWM_gib"]
+                                    for name, snap in snaps.items()},
         "phase_seconds": dict(app.phase_seconds),
         "timers_s": {"prepare_runtime": prepare_s, "forwards": forward_s,
                      "total": time.perf_counter() - t0},
-        "counters": {"warmup": warmup_delta, "forwards": forwards_delta, "run": run_delta},
+        "counters": {"prepare_runtime": prepare_delta, "load": load_delta,
+                     "warmup": warmup_delta, "forwards": forwards_delta, "run": run_delta},
         "cache_entries_added": {
+            "prepare_runtime": added_entries(snaps["start"], snaps["pre_prepare"]),
             "load": added_entries(snaps["after_load"], snaps["start"]),
             "warmup": added_entries(snaps["after_warmup"], snaps["after_load"]),
             "forwards": added_entries(snaps["end"], snaps["after_warmup"]),
         },
+        "forward_shapes": forward_shapes,
+        "neffs_before_prepare_runtime": len(neffs_before),
         "new_neffs": new_neffs,
+        "new_neff_files": {path: neffs_after[path] for path in added_neffs},
         "cold_warmup_forward_s": cold_warmup_s,
         "snapshots": {
             name: {**{k: v for k, v in snap.items() if k != "cache_entries"},
@@ -501,9 +612,13 @@ def main() -> int:
     failed = [name for name, passed, _ in checks if not passed]
     print(f"[rank {rank}] {'PASS' if ok else 'FAIL'} {args.exec_mode}"
           f"{'/' + args.expect if args.expect else ''} warmup_forward={warmup_s:.1f}s "
+          f"load_checkpoint={app.phase_seconds['load checkpoint']:.1f}s "
           f"forwards={[round(s, 2) for s in forward_s]} run_counters={run_delta} "
-          f"new_neffs={new_neffs} max_memory_allocated="
-          f"{result['max_memory_allocated_gib']:.2f}GiB"
+          f"forward_counters={forwards_delta} new_neffs={new_neffs} "
+          f"max_memory_allocated after_load="
+          f"{snaps['after_load']['device_memory']['max_allocated_gib']:.2f}GiB end="
+          f"{result['max_memory_allocated_gib']:.2f}GiB VmHWM="
+          f"{snaps['end']['host_memory']['VmHWM_gib']:.2f}GiB"
           + (f" failed={failed}" if failed else ""), flush=True)
     if ok and dist.is_initialized():
         dist.destroy_process_group()
