@@ -33,8 +33,10 @@
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
-| per denoise step (transformer fwd) | — | — | — | — | — |
+| per denoise step (transformer fwd) | 9.81 s | 9.81 s | 9.81 s | 9.80 s | 99 |
 | end-to-end (warm) | 22.0 min (1321 s) | 22.0 min (1321 s) | 22.0 min (1321 s) | 22.0 min (1321 s) | 1 |
+
+**Throughput:** 0.102 DiT steps/s
 
 ## Compile breakdown
 
@@ -80,6 +82,7 @@ difflet runs the pipeline stages sequentially in one process, each (re)loading i
 
 ## Notes
 
+- per-step = 9807.2 ms/DiT-step (median 9805.2, p90 9813.1, n=99) — measured the SAME way as H100: inter-step deltas of a real 50-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 100 DiT calls timed; warm generate 1236s; output finite=True.
 - compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop
 - e2e_cold = 1652 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
 - e2e_warm = 1321 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 1652 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
