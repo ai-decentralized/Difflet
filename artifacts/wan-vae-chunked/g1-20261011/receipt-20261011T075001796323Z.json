@@ -1,0 +1,53 @@
+{
+  "kind": "vae_only_synthetic_latents",
+  "config": {
+    "model_path": "/home/ubuntu/.cache/huggingface/hub/models--Wan-AI--Wan2.1-T2V-14B-Diffusers/snapshots/38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+    "output_dir": "artifacts/wan-vae-chunked/g1-20261011",
+    "height": 480,
+    "width": 832,
+    "num_frames": 81,
+    "reference_frames": 33,
+    "compile_only": false,
+    "load_only": false,
+    "resume_compile": false,
+    "seed": 42,
+    "iters": 3
+  },
+  "git_commit": "3a5402376e275b9c2f8b2981c882e6ce55ea483b",
+  "versions": {
+    "torch": "2.9.1",
+    "diffusers": "0.38.0",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b"
+  },
+  "sources": {
+    "difflet/models/wan/vae/chunked.py": "6f0113329b909eec0b407e7cfb6fa2de31111865466fdfa43a164fdcf68618b3",
+    "difflet/models/wan/vae/modeling_vae.py": "1d9b836ae99c166c38aa2ce43ec531673757aa9210b056739a9451ed5044f5cf",
+    "difflet/backends/trainium/wan/vae.py": "96f0aebb8fe4144a9729e9a3036adc11afb94f35aff749acf4140c28f481c43e",
+    "scripts/benchmark_wan_vae_chunked.py": "6725c4913452e7d99f1111134749a0612c32ad70309f7813f6c5adae1ec37856",
+    "difflet/backends/trainium/utils/compile_serial.py": "5b21f1995c0ecc17f57e513e288ea2f58642d968270757fa390fae5628766fb4"
+  },
+  "status": "passed",
+  "compiler_work_dir": "/home/ubuntu/work/Difflet/artifacts/wan-vae-chunked/g1-20261011/compiler",
+  "compile_seconds": 1432.9675223140002,
+  "load_seconds": 6.347502664997592,
+  "decode_seconds": [
+    148.9839332509946,
+    149.1202103589967,
+    148.43810744200164
+  ],
+  "output_shape": [
+    1,
+    3,
+    81,
+    480,
+    832
+  ],
+  "finite": true,
+  "repeated_bitwise": true,
+  "reference_frames": 33,
+  "max_abs": 5.587935447692871e-06,
+  "rmse": 4.841618306272721e-07,
+  "relative_l2": 1.1980108638454112e-06
+}
