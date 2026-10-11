@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -9,6 +11,7 @@ import pytest
 
 from difflet.cli.orchestrators import wan as wan_mod
 from difflet.cli.orchestrators.wan import WanOrchestrator
+from tests.unit.cli import _fake_neuron_pipeline as fake_pipeline
 
 
 def _wan_args(**overrides) -> argparse.Namespace:
@@ -599,3 +602,345 @@ def test_stage_transformer_validates_the_calibration_like_the_probe_pipelines(
     orch._finish_stage_compile("transformer", args, orch._stage_compiled_dir("transformer", args))
     with pytest.raises(ValueError, match=bad["match"]):
         orch._stage_transformer(args)
+
+
+# ------------------------------------------- neuron backend (torchrun MPMD, task W5)
+# With DIFFLET_BACKEND=neuron the transformer stage runs as torchrun ranks; each builds
+# TorchNeuronWanApplication through DiffletPipeline.from_pretrained (here the CPU fake of
+# tests/unit/cli/_fake_neuron_pipeline.py), the VAE decodes on the host, and only rank 0 writes.
+
+_NEURON_APP_KWARGS = {
+    "text_seq_len": 512, "batch_size": 1, "enable_text_encoder": True,
+    "enable_transformer": True, "enable_transformer_2": False, "enable_vae_decoder": False,
+    "exec_mode": None, "encoder_threads": 12,
+}
+
+
+@pytest.fixture
+def neuron_stage(monkeypatch):
+    """One process, DIFFLET_BACKEND=neuron, no process group (rank 0): from_pretrained is the
+    CPU fake; the Trainium application is a recorder that must stay unused."""
+    from difflet.pipeline.difflet_pipeline import DiffletPipeline
+
+    _setup_wan_fakes(monkeypatch)
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.delenv("DIFFLET_EXEC_MODE", raising=False)
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    monkeypatch.setattr(fake_pipeline, "CALLS", [])
+    monkeypatch.setattr(DiffletPipeline, "from_pretrained",
+                        classmethod(fake_pipeline.fake_from_pretrained))
+    return fake_pipeline
+
+
+def _fake_latents(seed: int):
+    import torch
+
+    return torch.randn(fake_pipeline.LATENT_SHAPE, generator=torch.Generator().manual_seed(seed))
+
+
+def test_stage_transformer_neuron_routes_through_pipeline(neuron_stage, monkeypatch, tmp_path,
+                                                          capsys):
+    import torch
+
+    monkeypatch.setattr(WanOrchestrator, "_require_stage_artifact",
+                        lambda *a: pytest.fail("non-AoT: there is no stage artifact to require"))
+    cache = tmp_path / "cache"
+    args = _wan_args(model_id=_WAN21_ID, revision=_WAN21_REV, stage_mode="generate",
+                     work_dir=str(tmp_path), cache_dir=str(cache), prompt="a fox",
+                     steps=50, guidance_scale=5.0, seed=42)
+    WanOrchestrator(args)._stage_transformer(args)
+
+    assert _FakeWanApp.instances == []  # the Trainium application is never built
+    [call] = neuron_stage.CALLS
+    kw = call["kwargs"]
+    assert call["model_id"] == _WAN21_ID
+    assert (kw["backend"], kw["revision"], kw["local_files_only"]) == ("neuron", _WAN21_REV, True)
+    assert kw["application_kwargs"] == _NEURON_APP_KWARGS
+    assert (kw["height"], kw["width"], kw["num_frames"], kw["shapes"]) == (480, 832, 9, None)
+    assert kw["dtype"] is torch.bfloat16 and kw["compile_cache_dir"] == str(cache)
+    parallel = kw["parallel"]
+    assert (parallel.tp_degree, parallel.cp_degree, parallel.cfg_parallel_enabled,
+            parallel.sp_enabled) == (4, 1, False, False)
+    app = call["pipeline"].app
+    # The warm-up runs in load(), before the step loop (the Trainium stage skips it: AoT NEFFs).
+    assert [c["skip_warmup"] for c in app.load_calls] == [False]
+    assert app.calls == [{"prompt": "a fox", "height": 480, "width": 832, "num_frames": 9,
+                          "num_inference_steps": 50, "guidance_scale": 5.0,
+                          "output_type": "latent", "seed": 42}]
+    assert torch.equal(torch.load(tmp_path / "latents.pt"), _fake_latents(42))
+    out = capsys.readouterr().out
+    assert out.count(f"[wan] latents saved to {tmp_path / 'latents.pt'}") == 1
+    assert "compiled_blocks=40 unwarmed_shapes=[]" in out
+    assert not cache.exists()  # generate writes no stage manifest and no AoT artifact
+
+
+def test_stage_transformer_neuron_compile_warms_up_and_writes_the_manifest(neuron_stage,
+                                                                           tmp_path):
+    from difflet.cli.orchestrators.base import has_valid_stage_manifest
+
+    args = _wan_args(model_id=_WAN21_ID, stage_mode="compile", work_dir=str(tmp_path / "w"),
+                     cache_dir=str(tmp_path / "cache"))
+    orch = WanOrchestrator(args)
+    orch._stage_transformer(args)
+
+    [call] = neuron_stage.CALLS
+    app = call["pipeline"].app
+    # `difflet compile --backend neuron` = the warm-up that fills the NEFF cache; no generate.
+    assert [c["skip_warmup"] for c in app.load_calls] == [False] and app.calls == []
+    compiled_dir = orch._stage_compiled_dir("transformer", args)
+    inputs = orch._stage_cache_inputs("transformer", args)
+    assert has_valid_stage_manifest(compiled_dir, inputs)
+    assert (inputs["backend"], inputs["exec_mode"]) == ("neuron", "compile")
+    assert not (tmp_path / "w").exists()
+
+
+@pytest.mark.parametrize("mode", ["generate", "compile"])
+def test_stage_transformer_neuron_writes_files_on_rank0_only(neuron_stage, monkeypatch, tmp_path,
+                                                             capsys, mode):
+    # work_file() and the compiled dir are the same path on every rank: one writer, rank 0.
+    from difflet.backends.neuron.core import distributed
+
+    monkeypatch.setattr(distributed, "is_rank0", lambda: False)
+    work, cache = tmp_path / "work", tmp_path / "cache"
+    work.mkdir()
+    args = _wan_args(model_id=_WAN21_ID, stage_mode=mode, work_dir=str(work),
+                     cache_dir=str(cache))
+    WanOrchestrator(args)._stage_transformer(args)
+
+    [call] = neuron_stage.CALLS
+    assert len(call["pipeline"].app.calls) == (1 if mode == "generate" else 0)  # every rank runs
+    assert list(work.iterdir()) == [] and not cache.exists()
+    assert "latents saved" not in capsys.readouterr().out
+
+
+def test_stage_transformer_neuron_rejects_request_batches(neuron_stage, tmp_path):
+    # Every rank would claim a different request from the queue and feed its own prompt to
+    # the same TP collectives; data parallelism is out of phase 1.
+    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path),
+                     requests_dir=str(tmp_path / "requests"), worker_index=0,
+                     dp_schedule="round_robin")
+    with pytest.raises(NotImplementedError, match="--requests"):
+        WanOrchestrator(args)._stage_transformer(args)
+    assert neuron_stage.CALLS == []
+
+
+@pytest.mark.parametrize("overrides, parallel, app_extra", [
+    (dict(cp_degree=2), (2, False, False), {}),
+    (dict(cfg_parallel=True), (1, True, False), {}),
+    (dict(sp_enabled=True), (1, False, True), {}),
+    (dict(teacache_cadence=2), (1, False, False), {"teacache_cadence": 2}),
+    (dict(teacache_online_delta=0.6), (1, False, False), {"teacache_online_delta_alpha": 0.6}),
+])
+def test_stage_transformer_neuron_hands_unsupported_options_on(neuron_stage, tmp_path, overrides,
+                                                               parallel, app_extra):
+    # Not dropped silently: prepare_runtime rejects cp/cfg/sp, the application TeaCache.
+    args = _wan_args(model_id=_WAN21_ID, stage_mode="compile", cache_dir=str(tmp_path),
+                     **overrides)
+    WanOrchestrator(args)._stage_transformer(args)
+    kw = neuron_stage.CALLS[0]["kwargs"]
+    p = kw["parallel"]
+    assert (p.cp_degree, p.cfg_parallel_enabled, p.sp_enabled) == parallel
+    assert kw["application_kwargs"] == {**_NEURON_APP_KWARGS, **app_extra}
+
+
+@pytest.mark.parametrize("backend_name, tracked", [("neuron", True), ("cpu", False)])
+def test_stage_transformer_neuron_logs_fallbacks(neuron_stage, monkeypatch, tmp_path, capsys,
+                                                 backend_name, tracked):
+    # track_fallbacks() synchronizes the device: only a pipeline on the neuron backend uses it.
+    from contextlib import contextmanager
+
+    from difflet.backends.neuron import runtime
+
+    entered = []
+
+    @contextmanager
+    def fake_track():
+        ops: list = []
+        entered.append(ops)
+        yield ops
+        ops.append("aten::fake_cpu_op")
+
+    monkeypatch.setattr(runtime, "track_fallbacks", fake_track)
+    monkeypatch.setattr(neuron_stage, "BACKEND_NAME", backend_name)
+    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path), cache_dir=str(tmp_path / "c"))
+    WanOrchestrator(args)._stage_transformer(args)
+
+    assert len(entered) == (2 if tracked else 0)  # around load() and around the generate
+    out = capsys.readouterr().out
+    line = [ln for ln in out.splitlines() if "fallbacks" in ln]
+    assert len(line) == 1 and "rank 0/1" in line[0]
+    assert line[0].count("aten::fake_cpu_op") == (2 if tracked else 0)
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_neuron_forces_host_vae(monkeypatch, tmp_path, capsys, mode):
+    # The vae stage would run as torchrun ranks building the Trainium VAE application, and the
+    # neuron application has no device VAE (enable_vae_decoder=True raises by design).
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    stages, decoded = [], []
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: stages.append(stage))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host",
+                        lambda latents_path, model_id, output_path, revision=None:
+                        decoded.append((latents_path, revision)))
+    args = _wan_args(model_id=_WAN21_ID, revision=_WAN21_REV, host_vae=False,
+                     work_dir=str(tmp_path / "work"), keep_work_dir=True)
+    getattr(WanOrchestrator(args), mode)()
+
+    assert stages == ["transformer"] and args.host_vae is True
+    expected = [(str(tmp_path / "work" / "latents.pt"), _WAN21_REV)] if mode == "generate" else []
+    assert decoded == expected
+    assert capsys.readouterr().out.count("--host-vae") == 1
+
+
+@pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
+def test_aot_backends_keep_the_vae_stage(monkeypatch, tmp_path, capsys, backend):
+    monkeypatch.delenv("DIFFLET_BACKEND", raising=False)
+    if backend is not None:
+        monkeypatch.setenv("DIFFLET_BACKEND", backend)
+    stages = []
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: stages.append(stage))
+    args = _wan_args(model_id=_WAN21_ID, host_vae=False, work_dir=str(tmp_path / "work"))
+    WanOrchestrator(args).generate()
+    assert stages == ["transformer", "vae"] and args.host_vae is False
+    assert "--host-vae" not in capsys.readouterr().out
+
+
+def test_cache_inputs_unchanged_for_trainium_and_distinct_for_neuron(monkeypatch):
+    args = _wan_args(model_id=_WAN21_ID, cache_dir="/c")
+    orch = WanOrchestrator(args)
+
+    def keyed(backend, exec_mode=None):
+        monkeypatch.delenv("DIFFLET_BACKEND", raising=False)
+        monkeypatch.delenv("DIFFLET_EXEC_MODE", raising=False)
+        if backend is not None:
+            monkeypatch.setenv("DIFFLET_BACKEND", backend)
+        if exec_mode is not None:
+            monkeypatch.setenv("DIFFLET_EXEC_MODE", exec_mode)
+        stages = ("transformer", "vae")
+        return ({s: orch._stage_cache_inputs(s, args) for s in stages},
+                {s: orch._stage_compiled_dir(s, args) for s in stages})
+
+    base, base_dirs = keyed(None)
+    assert set(base["transformer"]) == {"component", "model_id", "tp", "cp", "cp_mode",
+                                        "cfg_parallel", "sp", "dtype", "text_seq_len", "shapes",
+                                        "toolchain"}
+    assert set(base["vae"]) == {"component", "model_id", "dtype", "shapes", "toolchain"}
+    for backend in ("trainium", "tpu"):  # AoT: byte-identical keys and dirs
+        assert keyed(backend) == (base, base_dirs)
+    neuron, neuron_dirs = keyed("neuron")
+    for stage in ("transformer", "vae"):
+        assert neuron[stage] == {**base[stage], "backend": "neuron", "exec_mode": "compile"}
+        assert neuron_dirs[stage] != base_dirs[stage]
+        assert neuron_dirs[stage].parent == base_dirs[stage].parent
+    # resolve_exec_mode: an omitted --exec-mode keys like the default (compile); eager differs.
+    assert keyed("neuron", "compile") == (neuron, neuron_dirs)
+    eager, eager_dirs = keyed("neuron", "eager")
+    assert eager["transformer"] == {**neuron["transformer"], "exec_mode": "eager"}
+    assert eager_dirs["transformer"] != neuron_dirs["transformer"]
+
+
+# CPU torchrun: the real run_stage -> torchrun (2 ranks, gloo) -> difflet.cli.stage ->
+# WanOrchestrator, with from_pretrained replaced in every rank (FAKE_PIPELINE_ENV).
+
+_REAL_POPEN = subprocess.Popen
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _bounded_popen(limit: float):
+    """subprocess.Popen whose first untimed wait() gives up after ``limit`` s (TimeoutExpired):
+    run_stage then sends torchrun SIGTERM and waits for it, so a hung launch fails the test."""
+
+    class BoundedPopen(_REAL_POPEN):
+        _bounded = False
+
+        def wait(self, timeout=None):
+            if timeout is None and not self._bounded:
+                self._bounded = True
+                timeout = limit
+            return super().wait(timeout=timeout)
+
+    return BoundedPopen
+
+
+def _alive(pid: int) -> bool:
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"  # a zombie has exited
+
+
+@pytest.fixture
+def neuron_torchrun(monkeypatch, tmp_path):
+    site, records = tmp_path / "site", tmp_path / "records"
+    fake_pipeline.write_sitecustomize(site)
+    records.mkdir()
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(
+        filter(None, [str(site), str(_REPO_ROOT), os.environ.get("PYTHONPATH")])))
+    monkeypatch.setenv(fake_pipeline.FAKE_PIPELINE_ENV, fake_pipeline.MODULE)
+    monkeypatch.setenv(fake_pipeline.FAKE_RECORDS_ENV, str(records))
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("DIFFLET_DISABLE_PREWARM", "1")
+    monkeypatch.delenv("DIFFLET_EXEC_MODE", raising=False)
+    monkeypatch.setattr(subprocess, "Popen", _bounded_popen(300))
+    return records
+
+
+def test_generate_neuron_cpu_torchrun_one_writer_and_decode_after_every_rank_exited(
+    neuron_torchrun, monkeypatch, tmp_path, capfd,
+):
+    """Review Focus 5: rank 0 alone writes latents.pt, and the driver decodes only after
+    run_stage returned, which is after torchrun exited: rank 1, which lingers at exit after
+    rank 0 wrote the file, has exited too."""
+    import torch
+
+    seen = {}
+
+    def decode(latents_path, model_id, output_path, revision=None):
+        seen["records"] = fake_pipeline.read_rank_records(neuron_torchrun)
+        seen["alive"] = [_alive(r["pid"]) for r in seen["records"]]
+        seen["latents"] = torch.load(latents_path)
+
+    monkeypatch.setattr(wan_mod, "_decode_latents_host", decode)
+    work, cache = tmp_path / "work", tmp_path / "cache"
+    args = _wan_args(model_id=_WAN21_ID, revision=_WAN21_REV, tp_degree=2, work_dir=str(work),
+                     keep_work_dir=True, cache_dir=str(cache), steps=3, guidance_scale=5.0)
+    WanOrchestrator(args).generate()
+
+    records = seen["records"]
+    assert [r["rank"] for r in records] == [0, 1] and seen["alive"] == [False, False]
+    writes = [w for r in records for w in r["writes"]]
+    assert writes == [{"kind": "torch.save", "path": str(work / "latents.pt"), "rank": 0}]
+    for record in records:
+        [call] = record["from_pretrained"]
+        kw = call["kwargs"]
+        assert (call["model_id"], kw["backend"], kw["revision"]) == (_WAN21_ID, "neuron",
+                                                                      _WAN21_REV)
+        assert kw["parallel"]["tp_degree"] == 2 and record["world_size"] == 2
+        assert [c["skip_warmup"] for c in record["pipeline_load_calls"]] == [False]
+        assert [(c["seed"], c["num_inference_steps"]) for c in record["app_calls"]] == [(42, 3)]
+    assert torch.equal(seen["latents"], _fake_latents(42))
+    log = "".join(capfd.readouterr())
+    assert log.count("[wan] latents saved to") == 1
+    assert log.count("compiled_blocks=40 unwarmed_shapes=[]") == 2  # one line per rank
+    assert not cache.exists()  # generate: no stage manifest, no AoT artifact
+
+
+def test_compile_neuron_cpu_torchrun_rank0_writes_the_manifest(neuron_torchrun, tmp_path):
+    from difflet.cli.orchestrators.base import has_valid_stage_manifest
+
+    args = _wan_args(model_id=_WAN21_ID, tp_degree=2, cache_dir=str(tmp_path / "cache"))
+    orch = WanOrchestrator(args)
+    orch.compile()
+
+    records = fake_pipeline.read_rank_records(neuron_torchrun)
+    assert [r["rank"] for r in records] == [0, 1]
+    compiled_dir = orch._stage_compiled_dir("transformer", args)
+    writes = [w for r in records for w in r["writes"]]
+    assert writes == [{"kind": "manifest", "path": str(compiled_dir), "rank": 0}]
+    assert has_valid_stage_manifest(compiled_dir, orch._stage_cache_inputs("transformer", args))
+    for record in records:
+        assert [c["skip_warmup"] for c in record["pipeline_load_calls"]] == [False]
+        assert record["app_calls"] == []
