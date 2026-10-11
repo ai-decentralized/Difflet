@@ -1,0 +1,62 @@
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[parity] mode=reference tp=2 cp=1 layers=2+2 shape=320x512x61 -> /home/ubuntu/.cache/difflet/parity/hv_ulysses/compile_reference_l2s2
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/parity/hv_ulysses/compile_reference_l2s2/
+INFO:Neuron:Generating HLOs for the following models: ['HunyuanVideoTransformer3DModel']
+[2026-10-11 00:51:49.841: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 2
+[2026-10-11 00:51:49.841: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-11 00:51:49.841: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-11 00:51:49.841: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-11 00:51:49.841: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 2
+[2026-10-11 00:51:49.841: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x7e9cffb83a60>, 'Ascending Ring PG Group')>
+[2026-10-11 00:51:49.842: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1]]
+[2026-10-11 00:51:49.842: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1]]
+[2026-10-11 00:51:49.842: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1]]
+[2026-10-11 00:51:49.842: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1]]
+[2026-10-11 00:51:49.842: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1]]
+[2026-10-11 00:51:49.842: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1]]
+INFO:Neuron:Generating 1 hlos for key: HunyuanVideoTransformer3DModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module HunyuanVideoTransformer3DModel
+INFO:Neuron:Finished loading module HunyuanVideoTransformer3DModel in 1.8218536376953125 seconds
+INFO:Neuron:generating HLO: HunyuanVideoTransformer3DModel, input example shape = torch.Size([1, 16, 16, 40, 64])
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[difflet] tracing attention kernel: sdpa (masked fallback under megakernel policy)
+[difflet] tracing attention kernel: attention_cte (bounds)
+INFO:Neuron:Finished generating HLO for HunyuanVideoTransformer3DModel in 108.1664605140686 seconds, input example shape = torch.Size([1, 16, 16, 40, 64])
+INFO:Neuron:Generated all HLOs in 110.01262068748474 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'HunyuanVideoTransformer3DModel' is the priority model with bucket rank 0
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+..................
+Compiler status PASS
+2026-10-11 00:59:32.000123:  37121  [INFO]: Compilation Successfully Completed for model.MODULE_cd930bb762e45adefa89+51aa0e9b.hlo_module.pb
+INFO:Neuron:Done compilation for the priority HLO in 352.5106110572815 seconds
+INFO:Neuron:Done optimizing weight layout for all HLOs in 0.0013048648834228516 seconds
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Finished Compilation for all HLOs in 0.0005269050598144531 seconds
+....
+Compiler status PASS
+INFO:Neuron:Done preparing weight layout transformation
+INFO:Neuron:Finished building model in 528.2276613712311 seconds
+INFO:Neuron:Reusing pre-sharded checkpoints from /home/ubuntu/.cache/difflet/_shared_weights/hunyuanvideo-community--HunyuanVideo__transformer__e8c2aaa6__bfloat16__tp2__d3b36fc54d998e85.
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...1
+INFO:Neuron:Presharded file read: 0.01s for 2 shard(s) (3224.3 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...1 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 65.63s (device init 65.63s, total load_weights 65.64s)
+INFO:Neuron:Warming up the model.
+INFO:Neuron:Warmup completed in 0.34078145027160645 seconds.
+[parity] reference valid=256: out (1, 16, 16, 40, 64) finite=True
+[parity] reference valid=160: out (1, 16, 16, 40, 64) finite=True
+[parity] reference valid=77: out (1, 16, 16, 40, 64) finite=True
+[parity] reference valid=20: out (1, 16, 16, 40, 64) finite=True
+[parity] reference valid=5: out (1, 16, 16, 40, 64) finite=True
+[parity] saved 5 outputs -> benchmark/trn2/eval/e3b/hv_parity_reference.pt
