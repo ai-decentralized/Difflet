@@ -172,6 +172,37 @@ def _torchrun_backend() -> str | None:
     return get_backend(envs.DIFFLET_BACKEND).name
 
 
+_TEACACHE_FLAGS = (
+    ("--teacache-cadence", "teacache_cadence"),
+    ("--teacache-online-delta", "teacache_online_delta"),
+    ("--teacache-speedup", "teacache_speedup"),
+    ("--teacache-calibration", "teacache_calibration"),
+)
+
+
+def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
+    """The options a torchrun backend's ranks reject in phase 1, as the command line names them.
+
+    The ranks keep their own checks (``_stage_transformer_neuron``'s request-batch check, the
+    neuron runtime's ``check_parallel_supported`` for cp/cfg/sp, the application's
+    ``_reject_unsupported`` for TeaCache); this list lets the driver refuse the same options
+    before torchrun starts tp*cp*cfg processes that import torch only to fail. Torch-free.
+    """
+    found = []
+    if (getattr(args, "cp_degree", None) or 1) > 1:
+        found.append(f"--cp-degree {args.cp_degree}")
+    if getattr(args, "cfg_parallel", False):
+        found.append("--cfg-parallel")
+    if getattr(args, "sp_enabled", False):
+        found.append("--sp")
+    found += [flag for flag, name in _TEACACHE_FLAGS if getattr(args, name, None) is not None]
+    if getattr(args, "requests", None) is not None:
+        found.append("--requests")
+    if getattr(args, "requests_dir", None) is not None:
+        found.append("--requests/--dp (data-parallel worker)")
+    return found
+
+
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
     """The application kwargs, plus any TeaCache flag the user gave: the neuron application
     rejects TeaCache (phase 1) instead of the stage dropping the flag silently."""
@@ -208,6 +239,25 @@ class WanOrchestrator(ModelOrchestrator):
                            allow_patterns=entry.download_patterns)
         print(f"[difflet] weights ready for {self.args.model_id}")
 
+    def _reject_unsupported_torchrun_options(self) -> None:
+        """A torchrun backend (neuron) asked for an option its ranks reject in phase 1: print
+        one message naming it and exit 2 before anything is launched (or downloaded, for
+        ``run``). The ranks' own checks stay (defence in depth)."""
+        found = _torchrun_unsupported_options(self.args)
+        if not found:
+            return
+        backend = _torchrun_backend()
+        if backend is None:
+            return
+        print(f"Error: the {backend} backend does not support {', '.join(found)} (phase 1: "
+              "tensor parallelism only, one request per launch, no TeaCache); nothing was "
+              "launched.", file=sys.stderr, flush=True)
+        raise SystemExit(2)
+
+    def run(self) -> None:
+        self._reject_unsupported_torchrun_options()  # before the download, too
+        super().run()
+
     def _require_host_vae(self) -> None:
         """A torchrun backend (neuron) decodes the VAE on the host: its vae stage would run as
         torchrun ranks building the Trainium VAE application, and the neuron application has
@@ -242,6 +292,7 @@ class WanOrchestrator(ModelOrchestrator):
               flush=True)
 
     def compile(self) -> None:
+        self._reject_unsupported_torchrun_options()
         self._require_host_vae()
         self._root_compile_cache_at_cache_dir()
         full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1) * (
@@ -259,6 +310,7 @@ class WanOrchestrator(ModelOrchestrator):
                          cli_args=shared)
 
     def generate(self) -> None:
+        self._reject_unsupported_torchrun_options()
         self._require_host_vae()
         self._root_compile_cache_at_cache_dir()
         _require_request_shape_in_set(self.args)  # fail fast before any stage runs

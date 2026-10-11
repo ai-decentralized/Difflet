@@ -911,6 +911,68 @@ def test_main_in_process_call_never_reexecs(monkeypatch, tmp_path):
     assert reexecs == []
 
 
+def _batch_argv(command: str, batch: str, tmp_path) -> list[str]:
+    argv = [command, "--model-id", WAN_ID, "--total-cores", "64"]
+    if batch == "requests":
+        requests = tmp_path / "requests.jsonl"
+        requests.write_text('{"prompt": "p", "output": "o.mp4", "seed": 1}\n')
+        return [*argv, "--requests", str(requests)]
+    return [*argv, "--dp", "2", "--prompt", "p", "--output", str(tmp_path / "o.mp4")]
+
+
+@pytest.mark.parametrize("command", ["generate", "run"])
+@pytest.mark.parametrize("flags, ambient", [(["--backend", "neuron"], None), ([], "neuron")])
+@pytest.mark.parametrize("batch, named", [("requests", "--requests"), ("dp", "--dp 2")])
+def test_main_torchrun_backend_rejects_batches_before_the_router(monkeypatch, capsys, tmp_path,
+                                                                 command, flags, ambient, batch,
+                                                                 named):
+    """Final review M-1: a --requests / --dp batch went to the DP router, whose worker launched
+    torchrun ranks that each raised NotImplementedError. Now: exit 2, one message, before the
+    router writes its queue or starts a worker."""
+    cli_main = _cli_main()
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    if ambient is not None:
+        monkeypatch.setenv("DIFFLET_BACKEND", ambient)
+    built = _recording_orchestrator(monkeypatch, cli_main)
+    monkeypatch.setattr(cli_main, "_dispatch_dp",
+                        lambda args: pytest.fail("the DP router must not start"))
+
+    with pytest.raises(SystemExit) as exc:
+        cli_main.main([*_batch_argv(command, batch, tmp_path), *flags])
+
+    assert exc.value.code == 2
+    assert capsys.readouterr().err.strip() == (
+        f"Error: the neuron backend does not support {named} (phase 1: one request per "
+        "launch, no data parallelism); nothing was launched.")
+    assert built == []
+
+
+@pytest.mark.parametrize("flags, ambient", [(["--backend", "trainium"], None),
+                                            ([], "tpu"), ([], None)])
+@pytest.mark.parametrize("batch", ["requests", "dp"])
+def test_main_aot_backend_batches_still_go_to_the_router(monkeypatch, tmp_path, flags, ambient,
+                                                         batch):
+    cli_main = _cli_main()
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    if ambient is not None:
+        monkeypatch.setenv("DIFFLET_BACKEND", ambient)
+    routed = []
+
+    def fake_dispatch(args):
+        routed.append((args.requests is not None, args.dp))
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli_main, "_dispatch_dp", fake_dispatch)
+
+    with pytest.raises(SystemExit) as exc:
+        cli_main.main([*_batch_argv("generate", batch, tmp_path), *flags])
+
+    assert exc.value.code == 0
+    assert routed == [(True, None)] if batch == "requests" else routed == [(False, 2)]
+
+
 def test_main_cli_modules_stay_torch_free():
     code = (
         "import importlib, sys\n"
