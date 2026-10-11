@@ -184,7 +184,7 @@ def main() -> int:
     args = p.parse_args()
 
     if args.all:
-        slugs = list(MATRIX)
+        slugs = [s for s, c in MATRIX.items() if c.backends is None or args.backend in c.backends]
     elif args.model:
         if args.model not in MATRIX:
             raise SystemExit(f"unknown model '{args.model}'. known: {', '.join(MATRIX)}")

@@ -408,11 +408,13 @@ def run(args: argparse.Namespace) -> int:
     encodes: list[dict[str, Any]] = []
     original_encode_prompt = pipeline.encode_prompt
 
-    def timed_encode_prompt(**kwargs):
+    def timed_encode_prompt(*args, **kwargs):
         start = time.perf_counter()
-        embeds = original_encode_prompt(**kwargs)
-        if kwargs.get("prompt") is not None or kwargs.get("input_ids") is not None:
-            encodes.append({"tag": "negative" if kwargs.get("prompt") == "" else "prompt",
+        embeds = original_encode_prompt(*args, **kwargs)
+        if args or kwargs.get("prompt") is not None or kwargs.get("input_ids") is not None:
+            # the generate's first encode is its prompt; later ones are the negative prompt
+            # (the orchestrator encodes it lazily inside the first denoise iteration)
+            encodes.append({"tag": "negative" if encodes else "prompt",
                             "t_s": start - t0, "seconds": time.perf_counter() - start})
         return embeds
 
@@ -433,10 +435,10 @@ def run(args: argparse.Namespace) -> int:
     denoise_marks: dict[str, float] = {}
     original_denoise = pipeline._denoise
 
-    def timed_denoise(**kwargs):
+    def timed_denoise(*args, **kwargs):
         torch.neuron.synchronize()  # no queued work leaks into the loop's first stamp
         denoise_marks["start"] = time.perf_counter()
-        latents = original_denoise(**kwargs)
+        latents = original_denoise(*args, **kwargs)
         denoise_marks["end"] = time.perf_counter()
         return latents
 
