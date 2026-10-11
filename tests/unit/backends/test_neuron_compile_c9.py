@@ -32,6 +32,8 @@ CACHE_VARS = (
     "TORCH_NEURONX_HLO_CACHE_DIR",
     "NKI_ENABLE_TRACE_CACHE",
 )
+HLO_CACHE_MODULE = "torch_neuronx.python_ops.compilation.hlo_cache"
+COMPILE_LOGGER = "difflet.backends.neuron.compile"
 
 
 @pytest.fixture(autouse=True)
@@ -177,12 +179,47 @@ def test_configure_compile_cache_keeps_launcher_dirs_but_forces_the_trace_cache_
     }
 
 
-def test_configure_compile_cache_explicit_arguments_win(monkeypatch, tmp_path):
+def test_configure_compile_cache_inherits_the_hlo_dir_alone(monkeypatch, tmp_path):
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    env = {"TORCH_NEURONX_HLO_CACHE_DIR": "/shared/hlo"}
+    neuron_compile.configure_compile_cache(env=env)
+    assert env == {
+        "TORCH_NEURONX_NEFF_CACHE_DIR": str(tmp_path / "neuron" / "neff"),
+        "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": str(tmp_path / "neuron" / "neff_local"),
+        "TORCH_NEURONX_HLO_CACHE_DIR": "/shared/hlo",
+        "NKI_ENABLE_TRACE_CACHE": "0",
+    }
+
+
+def test_configure_compile_cache_explicit_arguments_win(tmp_path):
+    env = {
+        "TORCH_NEURONX_NEFF_CACHE_DIR": "/shared/neff",
+        "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": "/local/locks",
+        "TORCH_NEURONX_HLO_CACHE_DIR": "/shared/hlo",
+    }
+    neuron_compile.configure_compile_cache(
+        tmp_path / "neff",
+        local_cache_dir=str(tmp_path / "locks"),
+        hlo_cache_dir=tmp_path / "hlo",
+        nki_trace_cache=True,
+        env=env,
+    )
+    assert env == {
+        "TORCH_NEURONX_NEFF_CACHE_DIR": str(tmp_path / "neff"),
+        "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": str(tmp_path / "locks"),
+        "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "hlo"),
+        "NKI_ENABLE_TRACE_CACHE": "1",
+    }
+
+
+def test_configure_compile_cache_explicit_neff_dirs_leave_the_hlo_dir_at_its_default(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "root"))
     env = {
         "TORCH_NEURONX_NEFF_CACHE_DIR": "/shared/neff",
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": "/local/locks",
     }
-    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "root"))
     neuron_compile.configure_compile_cache(
         tmp_path / "neff", local_cache_dir=str(tmp_path / "locks"), nki_trace_cache=True, env=env
     )
@@ -197,19 +234,95 @@ def test_configure_compile_cache_explicit_arguments_win(monkeypatch, tmp_path):
 def test_configure_compile_cache_expands_the_home_directory(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     env = {}
-    neuron_compile.configure_compile_cache("~/neff", local_cache_dir="~/locks", env=env)
+    neuron_compile.configure_compile_cache(
+        "~/neff", local_cache_dir="~/locks", hlo_cache_dir="~/hlo", env=env
+    )
     assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "neff")
     assert env["TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR"] == str(tmp_path / "locks")
+    assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == str(tmp_path / "hlo")
+
+
+def _isolate_cache_env(monkeypatch):
+    """Unset the cache variables now and restore them after the test, even though
+    configure_compile_cache assigns os.environ itself (delenv of an absent name records
+    nothing to undo, so set first)."""
+    for name in CACHE_VARS:
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
 
 
 def test_configure_compile_cache_writes_the_process_environment(monkeypatch, tmp_path):
-    for name in CACHE_VARS:
-        monkeypatch.delenv(name, raising=False)  # restored at teardown
+    _isolate_cache_env(monkeypatch)
     monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    monkeypatch.setattr(neuron_compile, "_hlo_cache_warned", True)  # no log about the real one
     neuron_compile.configure_compile_cache()
     assert os.environ["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "neuron" / "neff")
     assert os.environ["TORCH_NEURONX_HLO_CACHE_DIR"] == str(tmp_path / "neuron" / "hlo")
     assert os.environ["NKI_ENABLE_TRACE_CACHE"] == "0"
+
+
+@pytest.fixture
+def fake_hlo_cache(monkeypatch, tmp_path):
+    """torch-neuronx's hlo_cache module as already imported with CACHE_DIR=/tmp/hlo_cache (a
+    stand-in in sys.modules; the real one, if any, comes back at teardown), no warning issued
+    yet in this process, no cache variable set, DIFFLET_COMPILE_CACHE=tmp_path."""
+    fake = types.ModuleType(HLO_CACHE_MODULE)
+    fake.CACHE_DIR = "/tmp/hlo_cache"
+    monkeypatch.setitem(sys.modules, HLO_CACHE_MODULE, fake)
+    monkeypatch.setattr(neuron_compile, "_hlo_cache_warned", False)
+    _isolate_cache_env(monkeypatch)
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    return fake
+
+
+def _compile_log_records(caplog):
+    return [r for r in caplog.records if r.name == COMPILE_LOGGER]
+
+
+def test_configure_compile_cache_logs_once_that_an_imported_torch_neuronx_keeps_its_hlo_locks(
+    fake_hlo_cache, caplog, tmp_path
+):
+    """torch-neuronx's C++ HLO cache reads TORCH_NEURONX_HLO_CACHE_DIR at each lookup, but
+    hlo_cache.CACHE_DIR, its lock directory, was read at import: the entries move, the locks
+    do not."""
+    with caplog.at_level(logging.WARNING, logger=COMPILE_LOGGER):
+        neuron_compile.configure_compile_cache()
+        neuron_compile.configure_compile_cache(hlo_cache_dir=tmp_path / "another")  # differs too
+    records = _compile_log_records(caplog)
+    assert len(records) == 1
+    assert records[0].levelno == logging.WARNING
+    message = records[0].getMessage()
+    assert f"TORCH_NEURONX_HLO_CACHE_DIR={tmp_path / 'neuron' / 'hlo'} was set" in message
+    assert "HLO lowering locks stay in /tmp/hlo_cache" in message
+    assert "processes started with the new value" in message
+
+
+def test_configure_compile_cache_does_not_log_when_the_hlo_dir_already_matches(
+    fake_hlo_cache, caplog, tmp_path
+):
+    fake_hlo_cache.CACHE_DIR = str(tmp_path / "neuron" / "hlo") + "/"  # the same directory
+    with caplog.at_level(logging.WARNING, logger=COMPILE_LOGGER):
+        neuron_compile.configure_compile_cache()
+    assert _compile_log_records(caplog) == []
+    assert neuron_compile._hlo_cache_warned is False  # still armed for a real mismatch
+
+
+def test_configure_compile_cache_does_not_log_for_another_processes_env(fake_hlo_cache, caplog):
+    """A launcher's mapping (run_stage's rank env) is for processes not started yet: this
+    process's HLO directory is not what it sets."""
+    with caplog.at_level(logging.WARNING, logger=COMPILE_LOGGER):
+        neuron_compile.configure_compile_cache(env={})
+    assert _compile_log_records(caplog) == []
+
+
+def test_configure_compile_cache_does_not_import_torch_neuronx_to_check(
+    fake_hlo_cache, monkeypatch, caplog
+):
+    monkeypatch.delitem(sys.modules, HLO_CACHE_MODULE)  # not imported in this process
+    with caplog.at_level(logging.WARNING, logger=COMPILE_LOGGER):
+        neuron_compile.configure_compile_cache()
+    assert _compile_log_records(caplog) == []
+    assert HLO_CACHE_MODULE not in sys.modules
 
 
 def test_prepare_runtime_configures_the_cache_before_binding_a_core(monkeypatch):

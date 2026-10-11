@@ -153,6 +153,11 @@ def test_pipeline_neuron_single_rank_skips_compile(tmp_path, monkeypatch):
     monkeypatch.setenv("TORCH_NEURONX_HLO_CACHE_DIR", str(tmp_path / "hlo"))
     monkeypatch.setenv("NKI_ENABLE_TRACE_CACHE", "0")
     monkeypatch.setattr(runtime, "_runtime_prepared", False)  # restored after the call sets it
+    # The real hlo_cache module is imported here, so prepare_runtime may log its
+    # once-per-process HLO warning and set this flag; restore it for later tests.
+    from difflet.backends.neuron import compile as neuron_compile
+
+    monkeypatch.setattr(neuron_compile, "_hlo_cache_warned", False)
 
     pipe = _dummy_pipeline(tmp_path, "neuron")
 
@@ -961,10 +966,13 @@ def _bounded_popen(limit: float):
     return BoundedPopen
 
 
-def _toy_torchrun_env(monkeypatch, *, limit: float = 300):
+def _toy_torchrun_env(monkeypatch, tmp_path, *, limit: float = 300):
     from tests.unit.backends._neuron_toy import TOY_DEVICE_ENV, TOY_FAIL_ENV
 
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    # run_stage exports the neuron cache locations under it to the ranks, and their
+    # `import torch` (torch_neuronx autoload) creates the HLO one: keep it in tmp_path.
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "difflet-cache"))
     monkeypatch.setenv("DIFFLET_DISABLE_PREWARM", "1")
     monkeypatch.setenv(TOY_DEVICE_ENV, "cpu")
     monkeypatch.setenv("PYTHONPATH", _pythonpath())
@@ -985,7 +993,7 @@ def test_toy_run_stage_torchrun_cpu_end_to_end(tmp_path, monkeypatch, exec_mode)
         prepare_toy_work_dir,
     )
 
-    _toy_torchrun_env(monkeypatch)
+    _toy_torchrun_env(monkeypatch, tmp_path)
     prepare_toy_work_dir(tmp_path)
 
     run_stage(
@@ -1019,7 +1027,7 @@ def test_toy_run_stage_torchrun_cpu_rank_failure_stops_the_launch(
         prepare_toy_work_dir,
     )
 
-    _toy_torchrun_env(monkeypatch, limit=120)
+    _toy_torchrun_env(monkeypatch, tmp_path, limit=120)
     monkeypatch.setenv(TOY_FAIL_ENV, f"{step}:1")
     prepare_toy_work_dir(tmp_path)
 
@@ -1079,7 +1087,7 @@ def test_toy_run_stage_torchrun_ctrl_c_leaves_no_rank_behind(tmp_path, monkeypat
     later (presses=2) must not cut that wait short."""
     from tests.unit.backends._neuron_toy import TOY_HANG_STAGE, TOY_ORCHESTRATOR
 
-    _toy_torchrun_env(monkeypatch)
+    _toy_torchrun_env(monkeypatch, tmp_path)
     monkeypatch.setattr(subprocess, "Popen", _REAL_POPEN)  # the driver runs run_stage itself
     nproc = 2
     env = {**os.environ, "TORCH_ELASTIC_SHUTDOWN_TIMEOUT": "3"}

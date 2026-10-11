@@ -190,7 +190,12 @@ def run_stage(
     ``strict_environment=True`` so the compiled topology matches its identity.
     When DIFFLET_BACKEND names a non-AoT torchrun-MPMD backend (neuron), the stage
     runs as ``num_cores`` torchrun ranks and ``virtual_core_size`` does not apply; an
-    interrupt then waits for torchrun to stop its ranks (``_run_torchrun``).
+    interrupt then waits for torchrun to stop its ranks (``_run_torchrun``). The ranks
+    also get the neuron compile-cache locations (NEFF, NEFF locks, HLO) under
+    DIFFLET_COMPILE_CACHE, and NKI_ENABLE_TRACE_CACHE=0: torch-neuronx fixes its HLO
+    lock directory when a rank imports torch, before any Difflet code runs there.
+    Locations the shell exported are kept; the NKI trace cache is turned off as
+    ``prepare_runtime`` would turn it off in each rank anyway.
     """
     nproc = num_cores if _torchrun_mpmd_selected() else None
     env = os.environ.copy()

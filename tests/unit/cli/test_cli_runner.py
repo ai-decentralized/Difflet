@@ -1,5 +1,16 @@
 from __future__ import annotations
+import os
 import sys
+
+import pytest
+
+# What run_stage's torchrun branch adds for the neuron ranks (compile.configure_compile_cache).
+NEURON_CACHE_VARS = (
+    "TORCH_NEURONX_NEFF_CACHE_DIR",
+    "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR",
+    "TORCH_NEURONX_HLO_CACHE_DIR",
+    "NKI_ENABLE_TRACE_CACHE",
+)
 
 
 def test_sets_neuron_rt_num_cores(monkeypatch):
@@ -123,3 +134,83 @@ def test_strict_environment_preserves_inherited_visible_cores(monkeypatch):
     assert [
         captured["env"][name] for name in ("WORLD_SIZE", "LOCAL_WORLD_SIZE", "RANK", "LOCAL_RANK")
     ] == ["1", "1", "0", "0"]
+
+
+@pytest.fixture
+def captured_launch(monkeypatch, tmp_path):
+    """Record the launch instead of spawning it: ``api`` is "run" for the single-process
+    ``subprocess.run(cmd, env=env, check=True)``, "popen" for the torchrun branch
+    (``_run_torchrun``). No neuron cache variable in the shell; DIFFLET_COMPILE_CACHE is
+    ``tmp_path``."""
+    captured = {}
+
+    def fake_run(cmd, env, check):
+        captured.update(api="run", cmd=cmd, env=env)
+
+    class FakePopen:
+        def __init__(self, cmd, env):
+            captured.update(api="popen", cmd=cmd, env=env)
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.Popen", FakePopen)
+    for name in NEURON_CACHE_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    return captured
+
+
+def test_torchrun_launch_exports_the_neuron_cache_locations(monkeypatch, tmp_path, captured_launch):
+    """torch-neuronx fixes its HLO lock directory (TORCH_NEURONX_HLO_CACHE_DIR, read into
+    hlo_cache.CACHE_DIR) when a rank imports torch, before any Difflet code runs there: the
+    launcher must hand the ranks every location."""
+    from difflet.cli.runner import run_stage
+
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+
+    run_stage("pkg.mod:Orch", "toy", num_cores=2, virtual_core_size=None, cli_args=[])
+
+    assert captured_launch["api"] == "popen"
+    env = captured_launch["env"]
+    assert {name: env[name] for name in NEURON_CACHE_VARS} == {
+        "TORCH_NEURONX_NEFF_CACHE_DIR": str(tmp_path / "neuron" / "neff"),
+        "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": str(tmp_path / "neuron" / "neff_local"),
+        "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "neuron" / "hlo"),
+        "NKI_ENABLE_TRACE_CACHE": "0",
+    }
+    assert not any(name in os.environ for name in NEURON_CACHE_VARS)  # the launcher's own env
+    assert not (tmp_path / "neuron").exists()  # torch-neuronx creates the directories
+
+
+def test_torchrun_launch_keeps_cache_locations_the_shell_exported(
+    monkeypatch, tmp_path, captured_launch
+):
+    from difflet.cli.runner import run_stage
+
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("TORCH_NEURONX_HLO_CACHE_DIR", "/shell/hlo")
+
+    run_stage("pkg.mod:Orch", "toy", num_cores=2, virtual_core_size=None, cli_args=[])
+
+    env = captured_launch["env"]
+    assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == "/shell/hlo"
+    assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "neuron" / "neff")
+
+
+@pytest.mark.parametrize("backend", [None, "trainium", "tpu", "cpu"])
+def test_single_process_launch_adds_no_neuron_cache_variables(
+    monkeypatch, captured_launch, backend
+):
+    from difflet.cli.runner import run_stage
+
+    if backend is None:
+        monkeypatch.delenv("DIFFLET_BACKEND", raising=False)
+    else:
+        monkeypatch.setenv("DIFFLET_BACKEND", backend)
+
+    run_stage("Org/Model", "transformer", num_cores=4, virtual_core_size=None, cli_args=[])
+
+    assert captured_launch["api"] == "run"
+    assert [name for name in NEURON_CACHE_VARS if name in captured_launch["env"]] == []

@@ -9,20 +9,33 @@ built however deep the model is. ``nn.Module.compile`` is used rather than
 ``torch.compile(block)`` so parameter names stay unchanged (no ``_orig_mod.`` prefix).
 
 Compiled NEFFs persist across processes under ``TORCH_NEURONX_NEFF_CACHE_DIR``: a warm start
-re-traces with Dynamo but skips neuronx-cc. torch-neuronx's compilation cache reads its
-directories once, when the runtime first compiles, so ``configure_compile_cache`` must run
-before any device work; ``NeuronBackend.prepare_runtime`` calls it first.
+re-traces with Dynamo but skips neuronx-cc. ``configure_compile_cache`` sets the cache
+locations (laid out by ``neuron_cache_env``: ``<DIFFLET_COMPILE_CACHE>/neuron/
+{neff,neff_local,hlo}``), so every torch-neuronx cache lives under one root that survives
+reboots and is cleared as one (a cold-start measurement is otherwise partly warm).
+torch-neuronx reads the locations at two different times:
 
-The eager path's HLO cache (``TORCH_NEURONX_HLO_CACHE_DIR``) is read earlier, when
-torch_neuronx is imported, and ``import torch`` autoloads torch_neuronx: in-process it is too
-late by then. The launcher therefore calls ``configure_compile_cache(env=...)`` on the ranks'
-environment before starting them, so every torch-neuronx cache lives under one root that
-survives reboots and is cleared as one (a cold-start measurement is otherwise partly warm).
+* ``TORCH_NEURONX_NEFF_CACHE_DIR`` and ``TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR`` once, when the
+  runtime first compiles. Setting them in-process before any device work is enough;
+  ``NeuronBackend.prepare_runtime`` calls ``configure_compile_cache`` first.
+* ``TORCH_NEURONX_HLO_CACHE_DIR`` twice: torch-neuronx's C++ cache at every HLO-cache lookup
+  and write (csrc/core/NeuronBindings.cpp, ``_get_hlo_cache``/``_put_hlo_cache``), and
+  torch_neuronx/python_ops/compilation/hlo_cache.py once, when ``import torch`` autoloads
+  torch_neuronx, into ``CACHE_DIR``: the directory holding the file locks that let one rank
+  lower a graph while the others wait for its entry. Set in a process that already imported
+  torch, it moves that process's HLO entries but not its locks; the CLI launcher
+  (``difflet.cli.runner._prepare_mpmd_env``) therefore calls ``configure_compile_cache(env=...)``
+  on its torchrun ranks' environment before they start.
+
+This module imports no torch at module import, so a launcher can compute and export the
+locations before any process imports torch.
 """
 
 from __future__ import annotations
 
+import logging
 import os
+import sys
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
@@ -33,6 +46,8 @@ from difflet import envs
 if TYPE_CHECKING:
     import torch.nn as nn
 
+logger = logging.getLogger(__name__)
+
 EXEC_MODES = ("eager", "compile")
 DEFAULT_EXEC_MODE = "compile"
 
@@ -40,6 +55,19 @@ NEFF_CACHE_ENV = "TORCH_NEURONX_NEFF_CACHE_DIR"
 NEFF_LOCAL_CACHE_ENV = "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR"
 HLO_CACHE_ENV = "TORCH_NEURONX_HLO_CACHE_DIR"
 NKI_TRACE_CACHE_ENV = "NKI_ENABLE_TRACE_CACHE"
+
+CACHE_SUBDIR = "neuron"
+# torch-neuronx cache variables and their subdirectories under <cache root>/CACHE_SUBDIR.
+CACHE_ENV_DIRS = {
+    NEFF_CACHE_ENV: "neff",
+    NEFF_LOCAL_CACHE_ENV: "neff_local",
+    HLO_CACHE_ENV: "hlo",
+}
+
+# The torch-neuronx module that reads HLO_CACHE_ENV into its CACHE_DIR at import.
+_HLO_CACHE_MODULE = "torch_neuronx.python_ops.compilation.hlo_cache"
+# Set once configure_compile_cache has warned that this process keeps another HLO cache.
+_hlo_cache_warned = False
 
 #: Options ``compile_blocks`` gives the ``"neuron"`` backend unless the caller overrides them.
 #: With ``fallback_execution`` on (torch-neuronx's default), a graph that fails StableHLO
@@ -71,51 +99,96 @@ def resolve_exec_mode(value: str | None = None) -> str:
     return mode
 
 
+def neuron_cache_env(
+    root: str | os.PathLike[str] | None = None, *, env: Mapping[str, str] | None = None
+) -> dict[str, str]:
+    """The three cache locations, by variable name.
+
+    A variable already set to a non-empty value in ``env`` (``os.environ`` by default) is
+    kept verbatim; any other is ``<root>/neuron/<subdir>`` as an absolute path with ``~``
+    expanded. ``root`` defaults to ``env``'s own ``DIFFLET_COMPILE_CACHE`` (the environment
+    the locations are for), then to this process's. Nothing is written or created;
+    ``configure_compile_cache`` is the one place that writes the locations to an environment.
+    """
+    env = os.environ if env is None else env
+    root = root or env.get("DIFFLET_COMPILE_CACHE") or envs.DIFFLET_COMPILE_CACHE
+    base = os.path.join(os.path.abspath(os.path.expanduser(os.fspath(root))), CACHE_SUBDIR)
+    return {var: env.get(var) or os.path.join(base, sub) for var, sub in CACHE_ENV_DIRS.items()}
+
+
 def default_neff_cache_dir() -> Path:
-    """The persistent NEFF cache inside the Difflet compile cache."""
-    return Path(envs.DIFFLET_COMPILE_CACHE) / "neuron" / "neff"
+    """The default persistent NEFF cache inside the Difflet compile cache, ignoring any
+    ``TORCH_NEURONX_NEFF_CACHE_DIR`` already set (``neuron_cache_env`` has the layout)."""
+    return Path(neuron_cache_env(env={})[NEFF_CACHE_ENV])
 
 
 def configure_compile_cache(
     cache_dir: str | os.PathLike[str] | None = None,
     *,
     local_cache_dir: str | os.PathLike[str] | None = None,
+    hlo_cache_dir: str | os.PathLike[str] | None = None,
     nki_trace_cache: bool = False,
     env: MutableMapping[str, str] | None = None,
 ) -> dict[str, str]:
-    """Point torch-neuronx's persistent caches at directories; set the NKI trace cache.
+    """Set torch-neuronx's persistent cache locations and the NKI trace cache in ``env``.
 
-    Each directory is the explicit argument, else the value already in ``env`` (a launcher's
-    choice, kept verbatim), else a default under ``DIFFLET_COMPILE_CACHE``: ``neuron/neff`` for
-    NEFFs, ``neuron/neff_local`` for the per-host compile locks, ``neuron/hlo`` for the eager
-    path's HLO cache (effective only in processes that import torch afterwards). ``NKI_ENABLE_TRACE_CACHE`` is
-    always overwritten: ``import torch_neuronx`` defaults it to "1"
-    (torch_neuronx/__init__.py:169), and that cache can serve stale kernels, so it stays off
-    unless asked for. torch-neuronx creates the directories. Returns the values written to
-    ``env`` (``os.environ`` by default).
+    Each location is the explicit argument (``~`` expanded, made absolute), else the value
+    already in ``env`` (a launcher's or the shell's choice, kept verbatim), else its default
+    under ``env``'s ``DIFFLET_COMPILE_CACHE``, falling back to this process's
+    (``neuron_cache_env``): ``neuron/neff`` for NEFFs
+    (``cache_dir``), ``neuron/neff_local`` for the per-host compile locks (``local_cache_dir``),
+    ``neuron/hlo`` for the HLO cache (``hlo_cache_dir``). ``NKI_ENABLE_TRACE_CACHE`` is always
+    overwritten: ``import torch_neuronx`` defaults it to "1" (torch_neuronx/__init__.py:169),
+    and that cache can serve stale kernels, so it stays off unless asked for. torch-neuronx
+    creates the directories. Returns the values written to ``env`` (``os.environ`` by default).
+
+    In a process that already imported torch, the HLO location moves the HLO cache entries but
+    not the lock directory torch-neuronx fixed at import (module docstring). When this writes
+    ``os.environ`` of a process whose torch-neuronx was imported with another HLO directory,
+    it logs one warning per process saying so.
     """
-    env = os.environ if env is None else env
-    neff_dir = default_neff_cache_dir()
-    settings = {
-        NEFF_CACHE_ENV: _resolve_dir(cache_dir, env.get(NEFF_CACHE_ENV), neff_dir),
-        NEFF_LOCAL_CACHE_ENV: _resolve_dir(
-            local_cache_dir, env.get(NEFF_LOCAL_CACHE_ENV), neff_dir.parent / "neff_local"
-        ),
-        HLO_CACHE_ENV: _resolve_dir(None, env.get(HLO_CACHE_ENV), neff_dir.parent / "hlo"),
-        NKI_TRACE_CACHE_ENV: "1" if nki_trace_cache else "0",
+    target = os.environ if env is None else env
+    defaults = neuron_cache_env(env=target)
+    explicit = {
+        NEFF_CACHE_ENV: cache_dir,
+        NEFF_LOCAL_CACHE_ENV: local_cache_dir,
+        HLO_CACHE_ENV: hlo_cache_dir,
     }
-    env.update(settings)
+    settings = {
+        var: defaults[var] if path is None else _absolute(path) for var, path in explicit.items()
+    }
+    settings[NKI_TRACE_CACHE_ENV] = "1" if nki_trace_cache else "0"
+    target.update(settings)
+    if target is os.environ:
+        _warn_if_hlo_cache_dir_fixed(settings[HLO_CACHE_ENV])
     return settings
 
 
-def _resolve_dir(
-    explicit: str | os.PathLike[str] | None, inherited: str | None, default: Path
-) -> str:
-    if explicit is not None:
-        return os.path.abspath(os.path.expanduser(os.fspath(explicit)))
-    if inherited:
-        return inherited
-    return os.path.abspath(os.fspath(default))
+def _absolute(path: str | os.PathLike[str]) -> str:
+    return os.path.abspath(os.path.expanduser(os.fspath(path)))
+
+
+def _warn_if_hlo_cache_dir_fixed(hlo_dir: str) -> None:
+    """Log once per process when torch-neuronx, already imported, keeps its HLO locks in
+    another directory than ``hlo_dir``.
+
+    Looks only in ``sys.modules``: importing torch_neuronx here would start what it checks.
+    """
+    global _hlo_cache_warned
+    current = getattr(sys.modules.get(_HLO_CACHE_MODULE), "CACHE_DIR", None)
+    if _hlo_cache_warned or current is None:
+        return
+    if os.path.abspath(current) == os.path.abspath(hlo_dir):
+        return
+    _hlo_cache_warned = True
+    logger.warning(
+        "torch-neuronx was imported before %s=%s was set: this process now keeps its HLO cache "
+        "entries there (read at each lookup), but its HLO lowering locks stay in %s (read at "
+        "import), so it does not share those locks with processes started with the new value, "
+        "such as the torchrun ranks launched by difflet.cli.runner.run_stage. Export the "
+        "variable before python imports torch to keep both in one directory.",
+        HLO_CACHE_ENV, hlo_dir, current,
+    )
 
 
 def compile_inplace(

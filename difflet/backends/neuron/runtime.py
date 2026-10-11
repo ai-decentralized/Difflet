@@ -12,6 +12,10 @@ parallelism raise until their collectives are validated on this backend.
 compile cache (``compile.configure_compile_cache``): the runtime reads it once, when it
 first compiles, so it must be set before any device work. A runtime already started by
 earlier device work is refused rather than left on ``/tmp/neff_cache`` and every core.
+The same call sets the HLO cache location (``TORCH_NEURONX_HLO_CACHE_DIR``), which this late
+moves the HLO cache entries but not the lock directory torch-neuronx fixed when torch was
+imported; the CLI launcher exports it to its ranks before they start (``compile``'s module
+docstring).
 """
 
 from __future__ import annotations
