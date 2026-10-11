@@ -1,0 +1,44 @@
+[cold] wan_2_1_tp2cp2: dropping page cache...
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/work/Difflet/benchmark/cold_warm_e2e.py", line 107, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/ubuntu/work/Difflet/benchmark/cold_warm_e2e.py", line 103, in main
+    return run(a.model, a.config)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/work/Difflet/benchmark/cold_warm_e2e.py", line 70, in run
+    gc = cold_ad.run_generate(cfg)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/work/Difflet/benchmark/adapters/trainium.py", line 127, in run_generate
+    text = self._run(cmd, log, timeout=14400)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/work/Difflet/benchmark/adapters/trainium.py", line 182, in _run
+    raise RuntimeError(f"command failed ({proc.returncode}): {' '.join(cmd)}\n{tail}")
+RuntimeError: command failed (1): /home/ubuntu/work/Difflet/.venv/bin/difflet generate --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68 --tp-degree 2 --cp-degree 2 --cp-mode ulysses --cache-dir /home/ubuntu/.cache/difflet --prompt a cinematic shot of a red fox running through a snowy forest --steps 50 --seed 42 --output benchmark/trn2-eval/logs/wan2_1_t2v_14b_diffusers_tp2cp2_out.mp4 --height 480 --width 832 --num-frames 81 --guidance-scale 5.0 --negative-prompt 色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走 --wan-vae-chunked
+Traceback of TorchScript, original code (most recent call last):
+  File "/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/spmd.py", line 179, in initialize
+        for bucket_model in self.models.values():
+            for model in bucket_model.models:
+                model.initialize(states, weights, start_rank_id)
+                ~~~~~~~~~~~~~~~~ <--- HERE
+RuntimeError: Could not load the model status=4 message=Allocation Failure
+
+[difflet] work dir preserved at /home/ubuntu/.cache/difflet/work/wan for inspection
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/work/Difflet/difflet/cli/main.py", line 1002, in <module>
+    main()
+  File "/home/ubuntu/work/Difflet/difflet/cli/main.py", line 910, in main
+    _run(args, argv)
+  File "/home/ubuntu/work/Difflet/difflet/cli/main.py", line 998, in _run
+    getattr(orchestrator, args.command)()
+  File "/home/ubuntu/work/Difflet/difflet/cli/orchestrators/wan.py", line 163, in generate
+    runner.run_stage(self.args.model_id, "transformer",
+  File "/home/ubuntu/work/Difflet/difflet/cli/runner.py", line 88, in run_stage
+    subprocess.run(cmd, env=env, check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/home/ubuntu/work/Difflet/.venv/bin/python3', '-m', 'difflet.cli.stage', '--orchestrator', 'Wan-AI/Wan2.1-T2V-14B-Diffusers', '--stage', 'transformer', '--attention-impl', 'megakernel', '--model-id', 'Wan-AI/Wan2.1-T2V-14B-Diffusers', '--tp-degree', '2', '--cp-degree', '2', '--cp-mode', 'ulysses', '--height', '480', '--width', '832', '--num-frames', '81', '--steps', '50', '--guidance-scale', '5.0', '--seed', '42', '--stage-mode', 'generate', '--revision', '38ec498cb3208fb688890f8cc7e94ede2cbd7f68', '--wan-vae-chunked', '--prompt', 'a cinematic shot of a red fox running through a snowy forest', '--negative-prompt', '色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走', '--output', 'benchmark/trn2-eval/logs/wan2_1_t2v_14b_diffusers_tp2cp2_out.mp4', '--cache-dir', '/home/ubuntu/.cache/difflet', '--work-dir', '/home/ubuntu/.cache/difflet/work/wan']' returned non-zero exit status 1.

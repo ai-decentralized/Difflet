@@ -1,0 +1,227 @@
+[realloop] wan_2_1_tp2cp2: building pipeline (--tp-degree 2 --cp-degree 2 --cp-mode ulysses, compiled NEFF, skip_compile)...
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[realloop] wan_2_1_tp2cp2: pipeline ready in 5.2s; timing NeuronWanBackboneApplication.__call__ per step
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.03s for 4 shard(s) (21671.8 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 11.11s (device init 11.11s, total load_weights 11.13s)
+INFO:Neuron:Skipping model warmup
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.34s for 4 shard(s) (55406.2 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+2026-Oct-11 05:50:35.769537 61561:61822 ERROR  TDRV:dmem_alloc_internal                     Failed to allocate DEVICE memory (90928896 bytes): memory allocation failed (ret=-12)
+2026-Oct-11 05:50:35.775201 61561:61822 ERROR  TDRV:dml_dump                                Wrote nrt memory alloc debug info to /tmp/nrt_mem_log_device_0_6acb23ab.csv
+2026-Oct-11 05:50:35.780032 61561:61822 ERROR  TDRV:dml_driver_dump                         Wrote driver memory alloc debug info to /tmp/neuron_mem_log_device_0_hbm_0_6acb23ab.csv
+2026-Oct-11 05:50:35.782450 61561:61822 ERROR  TDRV:log_dev_mem                             Failed to allocate 86.717MB (alignment: none, usage: dma rings spill) on ND 0:NC 0
+2026-Oct-11 05:50:35.785428 61561:61822 ERROR  TDRV:print_lnc_hbm_details                   LNC size is 2. Neuron Cores using this HBM: NC 0 and NC 1
+2026-Oct-11 05:50:35.787353 61561:61822 ERROR  TDRV:log_dev_mem_utilization                 ND 0:NC 0, current utilization:
+2026-Oct-11 05:50:35.789085 61561:61822 ERROR  TDRV:log_dev_mem_usage_table                 Displaying Current Memory Utilization:
+(NOTE: the lines are LONG, and NEFF id to name mapping is printed after)
+
+              |          |  Model   |  Model   |          |  Shared  |          |          |DMA Rings |DMA Rings | DMA Rings |DMA Rings |           | Profiler |
+              |  TOTAL   |   Code   |Constants | Tensors  |Scratchpad|Scratchpad| Runtime  |    IO    |  Spill   |Collectives| Runtime  |Collectives| Buffers  |
+ND 0 HBM 0    | 23.844GB |180.658MB |994.969KB | 18.826GB | 2.438GB  |  0.000B  | 2.097MB  | 94.000KB | 2.401GB  |  0.000B   | 76.000KB | 71.188KB  |  0.000B  |
+\_NC 0        | 23.691GB | 53.043MB |497.484KB | 18.826GB | 2.438GB  |  0.000B  |937.266KB | 63.000KB | 2.374GB  |  0.000B   | 36.000KB | 71.188KB  |  0.000B  |
+  \_NEFF 1008 | 2.645MB  | 1.947MB  |160.000KB |   n/a    |128.009MB*|  0.000B  |272.195KB | 31.000KB |176.000KB |  0.000B   | 4.000KB  | 71.188KB  |   n/a    |
+  \_NEFF 1011 | 49.578MB | 49.406MB | 32.000KB |   n/a    |350.000MB*|  0.000B  |108.008KB | 32.000KB |  0.000B  |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+\_NC 1        |156.461MB |127.615MB |497.484KB |  0.000B  |  0.000B  |  0.000B  | 1.181MB  | 31.000KB | 27.110MB |  0.000B   | 40.000KB |  0.000B   |  0.000B  |
+  \_NEFF 1008 | 2.157MB  | 1.701MB  |160.000KB |   n/a    | 0.000B*  |  0.000B  |272.195KB | 31.000KB |  0.000B  |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+  \_NEFF 1011 | 49.204MB | 49.063MB | 32.000KB |   n/a    | 0.000B*  |  0.000B  |108.008KB |  0.000B  |  0.000B  |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+  \_NEFF 1014 |102.839MB | 75.161MB |305.484KB |   n/a    | 0.000B*  |  0.000B  |272.320KB |  0.000B  | 27.110MB |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+
+NEFF id to name mapping:
+1008: "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_5c58958206a7166dacd4+3eaabd3d.neff"
+1011: "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/transformer/layout_opt/graph.neff"
+1014: "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_90f5c27580a277f326d4+98eab687.neff"
+
+(*) Per-NEFF scratchpad reservation. Total HBM scratchpad usage is the max across loaded NEFFs, rounded up to page size (64.000MB).
+
+2026-Oct-11 05:50:35.789167 61561:61822 ERROR  TDRV:log_dev_mem_usage_table                 Also logged memory breakdown to /tmp/neuron_mem_table_device_0_nc_0.log
+2026-Oct-11 05:50:35.791204 61561:61822 ERROR  TDRV:dma_ring_alloc                          Failed to allocate TX ring
+2026-Oct-11 05:50:35.792703 61561:61822 ERROR  TDRV:dma_ring_create_prings_from_vring       Failed to allocate static tx ring for queue qSPSpillReload0_defId_0_14
+2026-Oct-11 05:50:35.794679 61561:61822 ERROR  TDRV:drs_create_data_refill_rings            Failed to creaate static rings for queue bundle qSPSpillReload0_defId_0
+2026-Oct-11 05:50:35.796888 61561:61822 ERROR  TDRV:kbl_model_add                           create_data_refill_rings() error
+2026-Oct-11 05:50:35.841819 61561:61589 ERROR  NMGR:dlr_kelf_stage                          Failed to load subgraph
+2026-Oct-11 05:50:35.843417 61561:61589 ERROR  NMGR:kmgr_load_nn_internal_v2                Failed to stage graph to NeuronCore
+2026-Oct-11 05:50:35.845195 61561:61589 ERROR  NMGR:kmgr_load_nn_post_metrics               Failed to load NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_90f5c27580a277f326d4+98eab687.neff, err: 4
+2026-Oct-11 05:50:35.848792 61561:61589 ERROR   NRT:nrt_infodump                            Neuron runtime information - please include in any support request:
+2026-Oct-11 05:50:35.851031 61561:61589 ERROR   NRT:nrt_infodump                            ------------->8------------[ cut here ]------------>8-------------
+2026-Oct-11 05:50:35.853009 61561:61589 ERROR   NRT:nrt_infodump                            NRT version: 2.34.10.0 (ac18d186d3198d7152096c3a8fa77e1ab1424c39)
+2026-Oct-11 05:50:35.854961 61561:61589 ERROR   NRT:nrt_infodump                            Embedded FW version: 1.24.1.0 (b0a1a5cc148a4e8a48e1889d2982f465280f3d0a) loaded from "libnrtucode_extisa.so"
+2026-Oct-11 05:50:35.858295 61561:61589 ERROR   NRT:nrt_infodump                            CCOM version: 2.34.10.0- (compat 92)
+2026-Oct-11 05:50:35.859964 61561:61589 ERROR   NRT:nrt_infodump                            NCFW version: 2.34.1.0 (23a4b43d43c9755014be657d2853735b1551cfbe)
+2026-Oct-11 05:50:35.862892 61561:61589 ERROR   NRT:nrt_infodump                            Instance ID: i-07940935353caecba
+2026-Oct-11 05:50:35.865355 61561:61589 ERROR   NRT:nrt_infodump                            Cluster ID: N/A
+2026-Oct-11 05:50:35.867488 61561:61589 ERROR   NRT:nrt_infodump                            Kernel: Linux 6.17.0-1019-aws #19~24.04.1-Ubuntu SMP Tue Jun 23 18:53:06 UTC 2026
+2026-Oct-11 05:50:35.870614 61561:61589 ERROR   NRT:nrt_infodump                            Nodename: ip-172-31-42-212
+2026-Oct-11 05:50:35.872133 61561:61589 ERROR   NRT:nrt_infodump                            Driver version: 2.30.2.0
+
+2026-Oct-11 05:50:35.874633 61561:61589 ERROR   NRT:nrt_infodump                            Failure: NRT_RESOURCE in nrt_load_util
+2026-Oct-11 05:50:35.876320 61561:61589 ERROR   NRT:nrt_infodump                            Visible cores: 0, 1, 2, 3
+2026-Oct-11 05:50:35.877900 61561:61589 ERROR   NRT:nrt_infodump                            Environment:
+2026-Oct-11 05:50:35.879146 61561:61589 ERROR   NRT:nrt_infodump                                NEURON_LIBRARY_PATH=/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/libneuronpjrt.so
+2026-Oct-11 05:50:35.881683 61561:61589 ERROR   NRT:nrt_infodump                                NEURON_RT_ROOT_COMM_ID=localhost:62182
+2026-Oct-11 05:50:35.884179 61561:61589 ERROR   NRT:nrt_infodump                                NEURON_PLATFORM_TARGET_OVERRIDE=trn2
+2026-Oct-11 05:50:35.885907 61561:61589 ERROR   NRT:nrt_infodump                                NEURON_RT_DISABLE_EXECUTION_BARRIER=1
+2026-Oct-11 05:50:35.888433 61561:61589 ERROR   NRT:nrt_infodump                                NEURON_RT_NUMERICAL_ERRORS_VERBOSITY=none
+2026-Oct-11 05:50:35.890148 61561:61589 ERROR   NRT:nrt_infodump                            -------------8<-----------[ cut to here ]-----------8<------------
+2026-Oct-11 05:50:36.783221 61561:61818 ERROR  TDRV:dmem_alloc_internal                     Failed to allocate DEVICE memory (90928896 bytes): memory allocation failed (ret=-12)
+2026-Oct-11 05:50:36.790047 61561:61818 ERROR  TDRV:dml_dump                                Wrote nrt memory alloc debug info to /tmp/nrt_mem_log_device_0_6acb23ac.csv
+2026-Oct-11 05:50:36.796964 61561:61818 ERROR  TDRV:dml_driver_dump                         Wrote driver memory alloc debug info to /tmp/neuron_mem_log_device_0_hbm_1_6acb23ac.csv
+2026-Oct-11 05:50:36.799347 61561:61818 ERROR  TDRV:log_dev_mem                             Failed to allocate 86.717MB (alignment: none, usage: dma rings spill) on ND 0:NC 2
+2026-Oct-11 05:50:36.802357 61561:61818 ERROR  TDRV:print_lnc_hbm_details                   LNC size is 2. Neuron Cores using this HBM: NC 2 and NC 3
+2026-Oct-11 05:50:36.804510 61561:61818 ERROR  TDRV:log_dev_mem_utilization                 ND 0:NC 2, current utilization:
+2026-Oct-11 05:50:36.806979 61561:61818 ERROR  TDRV:log_dev_mem_usage_table                 Displaying Current Memory Utilization:
+(NOTE: the lines are LONG, and NEFF id to name mapping is printed after)
+
+              |          |  Model   |  Model   |          |  Shared  |          |          |DMA Rings |DMA Rings | DMA Rings |DMA Rings |           | Profiler |
+              |  TOTAL   |   Code   |Constants | Tensors  |Scratchpad|Scratchpad| Runtime  |    IO    |  Spill   |Collectives| Runtime  |Collectives| Buffers  |
+ND 0 HBM 1    | 23.844GB |180.658MB |994.969KB | 18.826GB | 2.438GB  |  0.000B  | 2.097MB  | 94.000KB | 2.401GB  |  0.000B   | 76.000KB | 71.188KB  |  0.000B  |
+\_NC 2        | 23.691GB | 53.043MB |497.484KB | 18.826GB | 2.438GB  |  0.000B  |937.266KB | 63.000KB | 2.374GB  |  0.000B   | 36.000KB | 71.188KB  |  0.000B  |
+  \_NEFF 1006 | 2.645MB  | 1.947MB  |160.000KB |   n/a    |128.009MB*|  0.000B  |272.195KB | 31.000KB |176.000KB |  0.000B   | 4.000KB  | 71.188KB  |   n/a    |
+  \_NEFF 1009 | 49.578MB | 49.406MB | 32.000KB |   n/a    |350.000MB*|  0.000B  |108.008KB | 32.000KB |  0.000B  |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+\_NC 3        |156.461MB |127.615MB |497.484KB |  0.000B  |  0.000B  |  0.000B  | 1.181MB  | 31.000KB | 27.110MB |  0.000B   | 40.000KB |  0.000B   |  0.000B  |
+  \_NEFF 1006 | 2.157MB  | 1.701MB  |160.000KB |   n/a    | 0.000B*  |  0.000B  |272.195KB | 31.000KB |  0.000B  |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+  \_NEFF 1009 | 49.204MB | 49.063MB | 32.000KB |   n/a    | 0.000B*  |  0.000B  |108.008KB |  0.000B  |  0.000B  |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+  \_NEFF 1016 |102.839MB | 75.161MB |305.484KB |   n/a    | 0.000B*  |  0.000B  |272.320KB |  0.000B  | 27.110MB |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+
+NEFF id to name mapping:
+1006: "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_5c58958206a7166dacd4+3eaabd3d.neff"
+1009: "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/transformer/layout_opt/graph.neff"
+1016: "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_90f5c27580a277f326d4+98eab687.neff"
+
+(*) Per-NEFF scratchpad reservation. Total HBM scratchpad usage is the max across loaded NEFFs, rounded up to page size (64.000MB).
+
+2026-Oct-11 05:50:36.807155 61561:61818 ERROR  TDRV:log_dev_mem_usage_table                 Also logged memory breakdown to /tmp/neuron_mem_table_device_0_nc_2.log
+2026-Oct-11 05:50:36.809448 61561:61818 ERROR  TDRV:dma_ring_alloc                          Failed to allocate TX ring
+2026-Oct-11 05:50:36.812168 61561:61818 ERROR  TDRV:dma_ring_create_prings_from_vring       Failed to allocate static tx ring for queue qSPSpillReload0_defId_0_14
+2026-Oct-11 05:50:36.815323 61561:61818 ERROR  TDRV:drs_create_data_refill_rings            Failed to creaate static rings for queue bundle qSPSpillReload0_defId_0
+2026-Oct-11 05:50:36.817606 61561:61818 ERROR  TDRV:kbl_model_add                           create_data_refill_rings() error
+2026-Oct-11 05:50:36.857916 61561:61817 ERROR  TDRV:dmem_alloc_internal                     Failed to allocate DEVICE memory (90928896 bytes): memory allocation failed (ret=-12)
+2026-Oct-11 05:50:36.864200 61561:61817 ERROR  TDRV:dml_dump                                Wrote nrt memory alloc debug info to /tmp/nrt_mem_log_device_0_6acb23ac.csv
+2026-Oct-11 05:50:36.869763 61561:61817 ERROR  TDRV:dml_driver_dump                         Wrote driver memory alloc debug info to /tmp/neuron_mem_log_device_0_hbm_3_6acb23ac.csv
+2026-Oct-11 05:50:36.872080 61561:61817 ERROR  TDRV:log_dev_mem                             Failed to allocate 86.717MB (alignment: none, usage: dma rings spill) on ND 0:NC 6
+2026-Oct-11 05:50:36.874304 61561:61817 ERROR  TDRV:print_lnc_hbm_details                   LNC size is 2. Neuron Cores using this HBM: NC 6 and NC 7
+2026-Oct-11 05:50:36.875833 61561:61817 ERROR  TDRV:log_dev_mem_utilization                 ND 0:NC 6, current utilization:
+2026-Oct-11 05:50:36.877809 61561:61817 ERROR  TDRV:log_dev_mem_usage_table                 Displaying Current Memory Utilization:
+(NOTE: the lines are LONG, and NEFF id to name mapping is printed after)
+
+              |          |  Model   |  Model   |          |  Shared  |          |          |DMA Rings |DMA Rings | DMA Rings |DMA Rings |           | Profiler |
+              |  TOTAL   |   Code   |Constants | Tensors  |Scratchpad|Scratchpad| Runtime  |    IO    |  Spill   |Collectives| Runtime  |Collectives| Buffers  |
+ND 0 HBM 3    | 23.844GB |180.658MB |994.969KB | 18.826GB | 2.438GB  |  0.000B  | 2.097MB  | 94.000KB | 2.401GB  |  0.000B   | 76.000KB | 71.188KB  |  0.000B  |
+\_NC 6        | 23.691GB | 53.043MB |497.484KB | 18.826GB | 2.438GB  |  0.000B  |937.266KB | 63.000KB | 2.374GB  |  0.000B   | 36.000KB | 71.188KB  |  0.000B  |
+  \_NEFF 1005 | 2.645MB  | 1.947MB  |160.000KB |   n/a    |128.009MB*|  0.000B  |272.195KB | 31.000KB |176.000KB |  0.000B   | 4.000KB  | 71.188KB  |   n/a    |
+  \_NEFF 1010 | 49.578MB | 49.406MB | 32.000KB |   n/a    |350.000MB*|  0.000B  |108.008KB | 32.000KB |  0.000B  |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+\_NC 7        |156.461MB |127.615MB |497.484KB |  0.000B  |  0.000B  |  0.000B  | 1.181MB  | 31.000KB | 27.110MB |  0.000B   | 40.000KB |  0.000B   |  0.000B  |
+  \_NEFF 1005 | 2.157MB  | 1.701MB  |160.000KB |   n/a    | 0.000B*  |  0.000B  |272.195KB | 31.000KB |  0.000B  |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+  \_NEFF 1010 | 49.204MB | 49.063MB | 32.000KB |   n/a    | 0.000B*  |  0.000B  |108.008KB |  0.000B  |  0.000B  |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+  \_NEFF 1015 |102.839MB | 75.161MB |305.484KB |   n/a    | 0.000B*  |  0.000B  |272.320KB |  0.000B  | 27.110MB |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+
+NEFF id to name mapping:
+1005: "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_5c58958206a7166dacd4+3eaabd3d.neff"
+1010: "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/transformer/layout_opt/graph.neff"
+1015: "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_90f5c27580a277f326d4+98eab687.neff"
+
+(*) Per-NEFF scratchpad reservation. Total HBM scratchpad usage is the max across loaded NEFFs, rounded up to page size (64.000MB).
+
+2026-Oct-11 05:50:36.876250 61561:61816 ERROR  TDRV:dmem_alloc_internal                     Failed to allocate DEVICE memory (90928896 bytes): memory allocation failed (ret=-12)
+2026-Oct-11 05:50:36.877884 61561:61817 ERROR  TDRV:log_dev_mem_usage_table                 Also logged memory breakdown to /tmp/neuron_mem_table_device_0_nc_6.log
+2026-Oct-11 05:50:36.882894 61561:61817 ERROR  TDRV:dma_ring_alloc                          Failed to allocate TX ring
+2026-Oct-11 05:50:36.883425 61561:61816 ERROR  TDRV:dml_dump                                Wrote nrt memory alloc debug info to /tmp/nrt_mem_log_device_0_6acb23ac.csv
+2026-Oct-11 05:50:36.884102 61561:61817 ERROR  TDRV:dma_ring_create_prings_from_vring       Failed to allocate static tx ring for queue qSPSpillReload0_defId_0_14
+2026-Oct-11 05:50:36.888594 61561:61817 ERROR  TDRV:drs_create_data_refill_rings            Failed to creaate static rings for queue bundle qSPSpillReload0_defId_0
+2026-Oct-11 05:50:36.889508 61561:61816 ERROR  TDRV:dml_driver_dump                         Wrote driver memory alloc debug info to /tmp/neuron_mem_log_device_0_hbm_2_6acb23ac.csv
+2026-Oct-11 05:50:36.890293 61561:61817 ERROR  TDRV:kbl_model_add                           create_data_refill_rings() error
+2026-Oct-11 05:50:36.893263 61561:61816 ERROR  TDRV:log_dev_mem                             Failed to allocate 86.717MB (alignment: none, usage: dma rings spill) on ND 0:NC 4
+2026-Oct-11 05:50:36.896631 61561:61816 ERROR  TDRV:print_lnc_hbm_details                   LNC size is 2. Neuron Cores using this HBM: NC 4 and NC 5
+2026-Oct-11 05:50:36.898629 61561:61816 ERROR  TDRV:log_dev_mem_utilization                 ND 0:NC 4, current utilization:
+2026-Oct-11 05:50:36.900661 61561:61816 ERROR  TDRV:log_dev_mem_usage_table                 Displaying Current Memory Utilization:
+(NOTE: the lines are LONG, and NEFF id to name mapping is printed after)
+
+              |          |  Model   |  Model   |          |  Shared  |          |          |DMA Rings |DMA Rings | DMA Rings |DMA Rings |           | Profiler |
+              |  TOTAL   |   Code   |Constants | Tensors  |Scratchpad|Scratchpad| Runtime  |    IO    |  Spill   |Collectives| Runtime  |Collectives| Buffers  |
+ND 0 HBM 2    | 23.844GB |180.658MB |994.969KB | 18.826GB | 2.438GB  |  0.000B  | 2.097MB  | 94.000KB | 2.401GB  |  0.000B   | 76.000KB | 71.188KB  |  0.000B  |
+\_NC 4        | 23.691GB | 53.043MB |497.484KB | 18.826GB | 2.438GB  |  0.000B  |937.266KB | 63.000KB | 2.374GB  |  0.000B   | 36.000KB | 71.188KB  |  0.000B  |
+  \_NEFF 1007 | 2.645MB  | 1.947MB  |160.000KB |   n/a    |128.009MB*|  0.000B  |272.195KB | 31.000KB |176.000KB |  0.000B   | 4.000KB  | 71.188KB  |   n/a    |
+  \_NEFF 1012 | 49.578MB | 49.406MB | 32.000KB |   n/a    |350.000MB*|  0.000B  |108.008KB | 32.000KB |  0.000B  |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+\_NC 5        |156.461MB |127.615MB |497.484KB |  0.000B  |  0.000B  |  0.000B  | 1.181MB  | 31.000KB | 27.110MB |  0.000B   | 40.000KB |  0.000B   |  0.000B  |
+  \_NEFF 1007 | 2.157MB  | 1.701MB  |160.000KB |   n/a    | 0.000B*  |  0.000B  |272.195KB | 31.000KB |  0.000B  |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+  \_NEFF 1012 | 49.204MB | 49.063MB | 32.000KB |   n/a    | 0.000B*  |  0.000B  |108.008KB |  0.000B  |  0.000B  |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+  \_NEFF 1013 |102.839MB | 75.161MB |305.484KB |   n/a    | 0.000B*  |  0.000B  |272.320KB |  0.000B  | 27.110MB |  0.000B   | 4.000KB  |  0.000B   |   n/a    |
+
+NEFF id to name mapping:
+1007: "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/text_encoder/WanUmT5EncoderModel/_tp0_bk0/model.MODULE_5c58958206a7166dacd4+3eaabd3d.neff"
+1012: "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/transformer/layout_opt/graph.neff"
+1013: "/tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_90f5c27580a277f326d4+98eab687.neff"
+
+(*) Per-NEFF scratchpad reservation. Total HBM scratchpad usage is the max across loaded NEFFs, rounded up to page size (64.000MB).
+
+2026-Oct-11 05:50:36.901051 61561:61816 ERROR  TDRV:log_dev_mem_usage_table                 Also logged memory breakdown to /tmp/neuron_mem_table_device_0_nc_4.log
+2026-Oct-11 05:50:36.903264 61561:61816 ERROR  TDRV:dma_ring_alloc                          Failed to allocate TX ring
+2026-Oct-11 05:50:36.904833 61561:61816 ERROR  TDRV:dma_ring_create_prings_from_vring       Failed to allocate static tx ring for queue qSPSpillReload0_defId_0_14
+2026-Oct-11 05:50:36.906959 61561:61816 ERROR  TDRV:drs_create_data_refill_rings            Failed to creaate static rings for queue bundle qSPSpillReload0_defId_0
+2026-Oct-11 05:50:36.909149 61561:61816 ERROR  TDRV:kbl_model_add                           create_data_refill_rings() error
+2026-Oct-11 05:50:36.948107 61561:61588 ERROR  NMGR:dlr_kelf_stage                          Failed to load subgraph
+2026-Oct-11 05:50:36.949992 61561:61588 ERROR  NMGR:kmgr_load_nn_internal_v2                Failed to stage graph to NeuronCore
+2026-Oct-11 05:50:36.951726 61561:61588 ERROR  NMGR:kmgr_load_nn_post_metrics               Failed to load NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_90f5c27580a277f326d4+98eab687.neff, err: 4
+2026-Oct-11 05:50:37.861766 61561:61587 ERROR  NMGR:dlr_kelf_stage                          Failed to load subgraph
+2026-Oct-11 05:50:37.863811 61561:61587 ERROR  NMGR:kmgr_load_nn_internal_v2                Failed to stage graph to NeuronCore
+2026-Oct-11 05:50:37.865665 61561:61587 ERROR  NMGR:kmgr_load_nn_post_metrics               Failed to load NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_90f5c27580a277f326d4+98eab687.neff, err: 4
+2026-Oct-11 05:50:39.345206 61561:61589 ERROR   NRT:nrt_load_collectives                    Failed to load collectives for model.
+2026-Oct-11 05:50:39.368005 61561:61586 ERROR  NMGR:dlr_kelf_stage                          Failed to load subgraph
+2026-Oct-11 05:50:39.369696 61561:61586 ERROR  NMGR:kmgr_load_nn_internal_v2                Failed to stage graph to NeuronCore
+2026-Oct-11 05:50:40.273315 61561:61588 ERROR   NRT:nrt_load_collectives                    Failed to load collectives for model.
+2026-Oct-11 05:50:40.693985 61561:61587 ERROR   NRT:nrt_load_collectives                    Failed to load collectives for model.
+2026-Oct-11 05:50:45.225890 61561:61586 ERROR  NMGR:kmgr_load_nn_post_metrics               Failed to load NN: /tmp/nxd_model/wan2.1-t2v-14b-diffusers-transformer-f275ad02/transformer/WanTransformer3DModel/_tp0_bk0/model.MODULE_90f5c27580a277f326d4+98eab687.neff, err: 4
+2026-Oct-11 05:50:47.685477 61561:61586 ERROR   NRT:nrt_load_collectives                    Failed to load collectives for model.
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/work/Difflet/benchmark/step_realloop.py", line 427, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/ubuntu/work/Difflet/benchmark/step_realloop.py", line 322, in main
+    return _main(args, cfg)
+           ^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/work/Difflet/benchmark/step_realloop.py", line 346, in _main
+    result = run()
+             ^^^^^
+  File "/home/ubuntu/work/Difflet/benchmark/step_realloop.py", line 232, in run
+    orch._run_stage_internal("transformer", ns)   # loads + one real generate
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/work/Difflet/difflet/cli/orchestrators/wan.py", line 182, in _run_stage_internal
+    self._stage_transformer(args)
+  File "/home/ubuntu/work/Difflet/difflet/cli/orchestrators/wan.py", line 241, in _stage_transformer
+    app.load(str(compiled_dir), start_rank_id=0,
+  File "/home/ubuntu/work/Difflet/difflet/backends/trainium/core/multi_component_application.py", line 93, in load
+    self._load_one(
+  File "/home/ubuntu/work/Difflet/difflet/backends/trainium/core/multi_component_application.py", line 198, in _load_one
+    spec.component.load(
+  File "/home/ubuntu/work/Difflet/difflet/backends/trainium/core/application_base.py", line 470, in load
+    self.load_weights(
+  File "/home/ubuntu/work/Difflet/difflet/backends/trainium/core/application_base.py", line 634, in load_weights
+    self.traced_model.nxd_model.initialize(weights, start_rank_tensor)
+RuntimeError: The following operation failed in the TorchScript interpreter.
+Traceback of TorchScript, serialized code (most recent call last):
+  File "code/__torch__/neuronx_distributed/trace/spmd/___torch_mangle_11.py", line 136, in initialize
+    for _24 in range(torch.len(models0)):
+      model = models0[_24]
+      _25 = (model).initialize(states, weights, start_rank_id, )
+             ~~~~~~~~~~~~~~~~~ <--- HERE
+    return None
+
+Traceback of TorchScript, original code (most recent call last):
+  File "/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/trace/spmd.py", line 179, in initialize
+        for bucket_model in self.models.values():
+            for model in bucket_model.models:
+                model.initialize(states, weights, start_rank_id)
+                ~~~~~~~~~~~~~~~~ <--- HERE
+RuntimeError: Could not load the model status=4 message=Allocation Failure
+
