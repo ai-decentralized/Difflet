@@ -920,6 +920,90 @@ def test_aot_backends_leave_the_compile_cache_alone(monkeypatch, tmp_path, capsy
     assert _CACHE_NOTE not in capsys.readouterr().out
 
 
+_REJECTED = [
+    (dict(cp_degree=2), "--cp-degree 2"),
+    (dict(cfg_parallel=True), "--cfg-parallel"),
+    (dict(sp_enabled=True), "--sp"),
+    (dict(teacache_cadence=2), "--teacache-cadence"),
+    (dict(teacache_online_delta=0.6), "--teacache-online-delta"),
+    (dict(teacache_speedup=1.5, teacache_calibration="c.json"),
+     "--teacache-speedup, --teacache-calibration"),
+    (dict(teacache_calibration="c.json"), "--teacache-calibration"),
+    (dict(requests="r.jsonl"), "--requests"),
+    (dict(requests_dir="/rd", worker_index=0, dp_schedule="round_robin"),
+     "--requests/--dp (data-parallel worker)"),
+    (dict(cp_degree=2, sp_enabled=True, teacache_cadence=3),
+     "--cp-degree 2, --sp, --teacache-cadence"),
+]
+
+
+@pytest.mark.parametrize("overrides, named", _REJECTED)
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_neuron_driver_rejects_unsupported_options_before_any_launch(monkeypatch, tmp_path,
+                                                                     capsys, mode, overrides,
+                                                                     named):
+    """Final review M-1: the ranks rejected these after torchrun had started them (one
+    traceback per rank); the driver now exits 2 with one message before any launch, any
+    note, the cache export or (for `run`) the download."""
+    _unset(monkeypatch, *_CACHE_ENV)
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host",
+                        lambda *a, **k: pytest.fail("nothing to decode"))
+    monkeypatch.setattr(WanOrchestrator, "download",
+                        lambda self: pytest.fail("rejected before the download"))
+    args = _wan_args(model_id=_WAN21_ID, cache_dir=str(tmp_path / "cache"),
+                     work_dir=str(tmp_path / "work"), **overrides)
+
+    with pytest.raises(SystemExit) as exc:
+        getattr(WanOrchestrator(args), mode)()
+
+    assert exc.value.code == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.strip() == (
+        f"Error: the neuron backend does not support {named} (phase 1: tensor parallelism "
+        "only, one request per launch, no TeaCache); nothing was launched.")
+    assert args.host_vae is False and "DIFFLET_COMPILE_CACHE" not in os.environ
+    assert not (tmp_path / "work").exists()
+
+
+@pytest.mark.parametrize("overrides", [
+    {}, dict(tp_degree=2, steps=50, guidance_scale=5.0, seed=7), dict(cp_mode="ring"),
+    dict(host_vae=True),
+])
+def test_neuron_driver_lets_supported_options_through(monkeypatch, tmp_path, capsys, overrides):
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    stages = []
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: stages.append(stage))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host", lambda *a, **k: None)
+    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), **overrides)
+
+    WanOrchestrator(args).generate()
+
+    assert stages == ["transformer"] and capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
+@pytest.mark.parametrize("overrides", [o for o, _ in _REJECTED])
+def test_aot_backends_skip_the_torchrun_option_check(monkeypatch, tmp_path, capsys, backend,
+                                                     overrides):
+    # Trainium/TPU support these (or reject them where they always did); the hook stays out.
+    _unset(monkeypatch, "DIFFLET_BACKEND")
+    if backend is not None:
+        monkeypatch.setenv("DIFFLET_BACKEND", backend)
+    stages = []
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: stages.append(stage))
+    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), **overrides)
+
+    WanOrchestrator(args).generate()
+
+    assert stages == ["transformer", "vae"] and capsys.readouterr().err == ""
+
+
 def test_cache_inputs_unchanged_for_trainium_and_distinct_for_neuron(monkeypatch):
     args = _wan_args(model_id=_WAN21_ID, cache_dir="/c")
     orch = WanOrchestrator(args)
