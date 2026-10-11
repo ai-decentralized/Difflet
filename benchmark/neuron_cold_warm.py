@@ -696,6 +696,35 @@ def bench_script_note(prov: Mapping[str, Any], current: str | None = None) -> st
     return note + f"; the copy in this tree is {str(current)[:12]}…."
 
 
+#: The fix round's (FR) two `difflet generate --backend neuron` launches after its jemalloc
+#: commit, in the CLI's default environment (records: /home/ubuntu/plans/wan21/records/FR).
+FIX_ROUND_LAUNCHES = (
+    "The fix round's two launches after that commit ran without it (only HF_HUB_OFFLINE=1 and "
+    "DIFFLET_NEURON_PG_TIMEOUT_S=3600 exported, no DIFFLET_COMPILE_CACHE, --cache-dir a fresh "
+    "directory that the warm launch reused; W4's parameters, guidance 5): cold exit 0, 220.9 s, "
+    "47 new .neff under the "
+    "--cache-dir (the CLI rows' 47 keys); warm exit 0, 158.0 s, no new cache file; latents.pt "
+    "e639f3146c36… and mp4 a9f9004fc134… both times, the same as the CLI rows' and W4's")
+
+
+def jemalloc_note(records: Mapping[str, Any], g: float) -> str:
+    """What DIFFLET_NO_JEMALLOC the CLI rows' launch envs recorded, why, and the fix round's
+    launches without it."""
+    values = sorted({
+        str((((rec.get("cli") or {}).get("launch") or {}).get("env") or {})
+            .get("DIFFLET_NO_JEMALLOC"))
+        for key, rec in records.items()
+        if key.startswith(gkey(g) + "/") and _kind(key.split("/")[1]) != "script"})
+    return ("jemalloc: every CLI row's recorded launch env had DIFFLET_NO_JEMALLOC="
+            + "/".join(values) + " (Reproduction). Before the fix round's commit \"fix(cli): "
+            "do not preload jemalloc for the torchrun (neuron) backend\" a plain `difflet "
+            "generate --backend neuron` re-exec'd itself under the jemalloc LD_PRELOAD, which "
+            "its torchrun ranks and their neuronx-cc compiles inherited; on this host the "
+            "variable changed nothing (torch_neuronx is a source build without "
+            "lib/libjemalloc.so, so nothing was preloaded either way). " + FIX_ROUND_LAUNCHES
+            + ".")
+
+
 def guidance_notes(n: Mapping[str, Any], *, records: Mapping[str, Any],
                    prov: Mapping[str, Any]) -> list[str]:
     g, cs, ws = n["g"], n["cold"], n["warms"]
@@ -737,7 +766,8 @@ def guidance_notes(n: Mapping[str, Any], *, records: Mapping[str, Any],
         f"{', '.join(prov['neuron_cc_flags'])}.",
     ]
     notes.append(bench_script_note(prov))
-    rejudged = sorted(key for key, rec in records.items() if rec.get("rejudged"))
+    notes.append(jemalloc_note(records, g))
+    rejudged =sorted(key for key, rec in records.items() if rec.get("rejudged"))
     if rejudged:
         notes.append(
             "Re-judged after the run (the stored verdict was a driver false positive; the record "
