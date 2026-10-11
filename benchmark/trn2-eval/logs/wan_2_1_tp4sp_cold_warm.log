@@ -1,0 +1,4 @@
+[cold] wan_2_1_tp4sp: dropping page cache...
+[cold] wan_2_1_tp4sp: 1598.1s (load 521.76)
+[warm] wan_2_1_tp4sp: 1273.8s (load 219.55)
+[done] wan_2_1_tp4sp: cold 1598s -> warm 1274s
