@@ -7,7 +7,6 @@ tests/manual/check_neuron_launch_c10.py.
 
 from __future__ import annotations
 
-import dataclasses
 import importlib
 import json
 import os
@@ -28,7 +27,8 @@ torch = pytest.importorskip("torch")
 REPO_ROOT = Path(__file__).resolve().parents[3]
 # fp32 TP-N vs the TP1 reference differs by reduction order only.
 FP32_TOL = {"atol": 1e-4, "rtol": 1e-4}
-WAN_ID = "Wan-AI/Wan2.1-T2V-14B-Diffusers"  # registry backends: trainium, tpu
+WAN_ID = "Wan-AI/Wan2.1-T2V-14B-Diffusers"  # registry backends: trainium, tpu, neuron (W5)
+HUNYUAN_ID = "hunyuanvideo-community/HunyuanVideo"  # registry backends: trainium
 
 
 def _isolate_env(monkeypatch, *names):
@@ -582,19 +582,6 @@ def _parse_main(argv):
     return _build_parser().parse_args(argv)
 
 
-def _allow_backend(monkeypatch, model_type: str, backend: str) -> None:
-    """Add ``backend`` to a builtin registry entry for this test (no builtin model lists
-    neuron in phase 1)."""
-    from difflet import registry
-
-    registry._ensure_builtin_models_registered()
-    entry = registry._REGISTRY[model_type]
-    monkeypatch.setitem(
-        registry._REGISTRY, model_type,
-        dataclasses.replace(entry, backends=(*entry.backends, backend)),
-    )
-
-
 @pytest.mark.parametrize("command", ["compile", "generate", "run"])
 def test_main_commands_accept_backend_flags(command):
     args = _parse_main([
@@ -651,7 +638,6 @@ def test_main_exports_selection_before_orchestrator(monkeypatch, tmp_path):
 
     _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
     monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
-    _allow_backend(monkeypatch, "wan", "neuron")
     seen = {}
 
     class _Orch:
@@ -679,7 +665,7 @@ def test_main_rejects_backend_the_model_does_not_support(monkeypatch, capsys, tm
     _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
     built = []
     monkeypatch.setattr(cli_main, "_get_orchestrator", lambda args: built.append(args))
-    argv = [command, "--model-id", WAN_ID, "--backend", "neuron"]
+    argv = [command, "--model-id", HUNYUAN_ID, "--backend", "neuron"]
     if command != "compile":
         argv += ["--prompt", "p", "--output", str(tmp_path / "c10.mp4")]
 
@@ -688,13 +674,10 @@ def test_main_rejects_backend_the_model_does_not_support(monkeypatch, capsys, tm
 
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert "model 'wan' does not support backend 'neuron'" in err
-    assert "supported backends: trainium, tpu" in err
+    assert "model 'hunyuan_video' does not support backend 'neuron'" in err
+    assert "supported backends: trainium (--backend neuron)" in err
     assert built == []
     assert "DIFFLET_BACKEND" not in os.environ
-
-
-HUNYUAN_ID = "hunyuanvideo-community/HunyuanVideo"  # registry backends: trainium
 
 
 def _main_argv(command: str, model_id: str, tmp_path) -> list[str]:
@@ -737,12 +720,12 @@ def test_main_rejects_ambient_non_aot_backend_the_model_does_not_support(
     built = _recording_orchestrator(monkeypatch, cli_main)
 
     with pytest.raises(SystemExit) as exc:
-        cli_main.main(_main_argv(command, WAN_ID, tmp_path))
+        cli_main.main(_main_argv(command, HUNYUAN_ID, tmp_path))
 
     assert exc.value.code == 2
     assert capsys.readouterr().err.strip() == (
-        "Error: model 'wan' does not support backend 'neuron'; supported backends: "
-        "trainium, tpu (DIFFLET_BACKEND=neuron)."
+        "Error: model 'hunyuan_video' does not support backend 'neuron'; supported backends: "
+        "trainium (DIFFLET_BACKEND=neuron)."
     )
     assert built == []
 
@@ -752,13 +735,37 @@ def test_main_ambient_non_aot_backend_the_model_lists_goes_ahead(monkeypatch, tm
     _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
     monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
-    _allow_backend(monkeypatch, "wan", "neuron")
     built = _recording_orchestrator(monkeypatch, cli_main)
 
     cli_main.main(_main_argv("generate", WAN_ID, tmp_path))
 
     assert built == ["generate"]
     assert os.environ["DIFFLET_BACKEND"] == "neuron"
+
+
+def test_registry_wan_lists_neuron():
+    """W5: both Wan ids resolve to the entry that lists neuron (after trainium and tpu)."""
+    from difflet.registry import resolve_model
+
+    for model_id in (WAN_ID, "Wan-AI/Wan2.2-T2V-A14B-Diffusers"):
+        entry = resolve_model(model_id)
+        assert (entry.name, entry.backends) == ("wan", ("trainium", "tpu", "neuron"))
+
+
+@pytest.mark.parametrize("command", ["compile", "generate", "run"])
+def test_main_accepts_backend_neuron_for_wan(monkeypatch, tmp_path, command):
+    """W5: --backend neuron passes the model check for Wan (no exit 2) and is exported with
+    --exec-mode for the stages."""
+    cli_main = _cli_main()
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    built = _recording_orchestrator(monkeypatch, cli_main)
+
+    cli_main.main([*_main_argv(command, WAN_ID, tmp_path),
+                   "--backend", "neuron", "--exec-mode", "eager"])
+
+    assert built == [command]
+    assert (os.environ["DIFFLET_BACKEND"], os.environ["DIFFLET_EXEC_MODE"]) == ("neuron", "eager")
 
 
 @pytest.mark.parametrize(
