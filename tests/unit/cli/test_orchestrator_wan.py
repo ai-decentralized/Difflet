@@ -807,6 +807,119 @@ def test_aot_backends_keep_the_vae_stage(monkeypatch, tmp_path, capsys, backend)
     assert "--host-vae" not in capsys.readouterr().out
 
 
+_CACHE_ENV = ("DIFFLET_COMPILE_CACHE", "TORCH_NEURONX_NEFF_CACHE_DIR",
+              "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR", "TORCH_NEURONX_HLO_CACHE_DIR")
+_CACHE_NOTE = "compiles into --cache-dir: DIFFLET_COMPILE_CACHE="
+
+
+def _unset(monkeypatch, *names):
+    """Unset ``names`` now and restore them after the test, even when the code under test
+    assigns os.environ itself (delenv of an absent name records nothing to undo)."""
+    for name in names:
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+
+
+def _record_launch_envs(monkeypatch) -> list[dict]:
+    """The real run_stage up to the launch: the environment each torchrun launch would get."""
+    launches: list[dict] = []
+    monkeypatch.setattr(wan_mod.runner, "_run_torchrun",
+                        lambda cmd, env: launches.append(dict(env)))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host", lambda *a, **k: None)
+    monkeypatch.setattr(WanOrchestrator, "download", lambda self: None)
+    return launches
+
+
+@pytest.mark.parametrize("ambient", [None, ""])
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_neuron_cache_dir_roots_the_compile_cache_when_unset(monkeypatch, tmp_path, capsys,
+                                                             mode, ambient):
+    """Final review I-2: with --cache-dir and no DIFFLET_COMPILE_CACHE the NEFF/HLO caches went
+    to ~/.cache/difflet/neuron; --cache-dir held only the stage manifest. Now the driver exports
+    --cache-dir (absolute) before the first launch, so the ranks compile under it."""
+    _unset(monkeypatch, *_CACHE_ENV)
+    if ambient is not None:
+        monkeypatch.setenv("DIFFLET_COMPILE_CACHE", ambient)
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.delenv("DIFFLET_EXEC_MODE", raising=False)
+    monkeypatch.chdir(tmp_path)
+    launches = _record_launch_envs(monkeypatch)
+    args = _wan_args(model_id=_WAN21_ID, cache_dir="cache", work_dir=str(tmp_path / "work"))
+    orch = WanOrchestrator(args)
+    keys_before = {s: (orch._stage_cache_inputs(s, args), orch._stage_compiled_dir(s, args))
+                   for s in ("transformer", "vae")}
+
+    getattr(orch, mode)()
+
+    root = str(tmp_path / "cache")
+    assert os.environ["DIFFLET_COMPILE_CACHE"] == root
+    assert len(launches) == (2 if mode == "run" else 1)
+    for env in launches:
+        assert env["DIFFLET_COMPILE_CACHE"] == root
+        assert (env["TORCH_NEURONX_NEFF_CACHE_DIR"], env["TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR"],
+                env["TORCH_NEURONX_HLO_CACHE_DIR"]) == tuple(
+            str(tmp_path / "cache" / "neuron" / sub) for sub in ("neff", "neff_local", "hlo"))
+    assert capsys.readouterr().out.count(_CACHE_NOTE + root) == 1  # `run`: once, at compile
+    # The stage manifest dir and its key do not depend on the variable.
+    assert keys_before == {s: (orch._stage_cache_inputs(s, args),
+                               orch._stage_compiled_dir(s, args))
+                           for s in ("transformer", "vae")}
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_neuron_exported_compile_cache_wins_over_cache_dir(monkeypatch, tmp_path, capsys, mode):
+    # The benchmark driver exports DIFFLET_COMPILE_CACHE per row and passes --cache-dir too.
+    _unset(monkeypatch, *_CACHE_ENV)
+    explicit = str(tmp_path / "explicit")
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", explicit)
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    launches = _record_launch_envs(monkeypatch)
+    args = _wan_args(model_id=_WAN21_ID, cache_dir=str(tmp_path / "cache"),
+                     work_dir=str(tmp_path / "work"))
+
+    getattr(WanOrchestrator(args), mode)()
+
+    assert os.environ["DIFFLET_COMPILE_CACHE"] == explicit
+    [env] = launches
+    assert env["DIFFLET_COMPILE_CACHE"] == explicit
+    assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "explicit" / "neuron" / "neff")
+    assert _CACHE_NOTE not in capsys.readouterr().out
+
+
+def test_neuron_without_cache_dir_exports_nothing(monkeypatch, tmp_path, capsys):
+    _unset(monkeypatch, *_CACHE_ENV)
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    stages = []
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: stages.append(stage))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host", lambda *a, **k: None)
+    args = _wan_args(model_id=_WAN21_ID, cache_dir=None, work_dir=str(tmp_path / "work"))
+
+    WanOrchestrator(args).generate()
+
+    assert stages == ["transformer"] and "DIFFLET_COMPILE_CACHE" not in os.environ
+    assert _CACHE_NOTE not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
+@pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_aot_backends_leave_the_compile_cache_alone(monkeypatch, tmp_path, capsys, backend, mode):
+    _unset(monkeypatch, *_CACHE_ENV, "DIFFLET_BACKEND")
+    if backend is not None:
+        monkeypatch.setenv("DIFFLET_BACKEND", backend)
+    seen = []
+    monkeypatch.setattr(wan_mod.runner, "run_stage", lambda orch, stage, **kw: seen.append(
+        (stage, os.environ.get("DIFFLET_COMPILE_CACHE"))))
+    args = _wan_args(model_id=_WAN21_ID, cache_dir=str(tmp_path / "cache"),
+                     work_dir=str(tmp_path / "work"))
+
+    getattr(WanOrchestrator(args), mode)()
+
+    assert seen == [("transformer", None), ("vae", None)]
+    assert "DIFFLET_COMPILE_CACHE" not in os.environ
+    assert _CACHE_NOTE not in capsys.readouterr().out
+
+
 def test_cache_inputs_unchanged_for_trainium_and_distinct_for_neuron(monkeypatch):
     args = _wan_args(model_id=_WAN21_ID, cache_dir="/c")
     orch = WanOrchestrator(args)
