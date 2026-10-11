@@ -1,0 +1,17 @@
+{
+  "lnc2_latents": "/home/ubuntu/.cache/difflet/work/bench_wan_2_1/latents.pt",
+  "single_core_latents": "/home/ubuntu/work/scratch/numerics/latents_81f_tp4_single_core.pt",
+  "shape": [
+    1,
+    16,
+    21,
+    60,
+    104
+  ],
+  "bitwise_equal": true,
+  "max_abs_diff": 0.0,
+  "mean_abs_diff": 0.0,
+  "ref_max_abs": 4.3486247062683105,
+  "cosine": 1.0000666379928589,
+  "psnr_db": Infinity
+}
