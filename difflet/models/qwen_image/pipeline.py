@@ -7,6 +7,7 @@ DiT call represented by ``QwenImageDiTInputBundle``.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import warnings
 from dataclasses import dataclass
@@ -176,6 +177,9 @@ class QwenImageOrchestrator:
         encoder_hidden_states: torch.Tensor | None = None,
         encoder_hidden_states_mask: torch.Tensor | None = None,
         guidance: torch.Tensor | None = None,
+        negative_encoder_hidden_states: torch.Tensor | None = None,
+        negative_encoder_hidden_states_mask: torch.Tensor | None = None,
+        true_cfg_scale: float = 1.0,
         batch_size: int = 1,
         channels: int = 16,
         num_inference_steps: int = 4,
@@ -205,6 +209,11 @@ class QwenImageOrchestrator:
                 dtype=self.dtype,
             )
 
+        negative = _negative_text_inputs(
+            negative_encoder_hidden_states,
+            negative_encoder_hidden_states_mask,
+            true_cfg_scale,
+        )
         packed_latents = bundle.hidden_states
         trajectory: list[torch.Tensor] | None = [] if return_trajectory else None
         if trajectory is not None:
@@ -237,6 +246,8 @@ class QwenImageOrchestrator:
                 timesteps=timesteps,
                 trajectory=trajectory,
                 controller=controller,
+                negative=negative,
+                true_cfg_scale=float(true_cfg_scale),
             )
 
         images = packed_latents
@@ -274,6 +285,8 @@ class QwenImageOrchestrator:
         timesteps: torch.Tensor,
         trajectory: list[torch.Tensor] | None,
         controller: Any | None,
+        negative: tuple[torch.Tensor, torch.Tensor] | None = None,
+        true_cfg_scale: float = 1.0,
     ) -> torch.Tensor:
         latents = bundle.hidden_states
         # fused-A (cclog 81): prev_mod is a persistent on-device Parameter; the
@@ -315,6 +328,17 @@ class QwenImageOrchestrator:
                 noise_pred = controller.skip_noise_pred(None)
             else:
                 noise_pred = _first_tensor(self.transformer(model_bundle))
+                if negative is not None:
+                    # True CFG: a second pass of the same batch-1 program on the
+                    # negative prompt. A cached step reuses the guided prediction,
+                    # so it skips both passes.
+                    negative_bundle = dataclasses.replace(
+                        model_bundle,
+                        encoder_hidden_states=negative[0].to(dtype=model_dtype),
+                        encoder_hidden_states_mask=negative[1],
+                    )
+                    negative_pred = _first_tensor(self.transformer(negative_bundle))
+                    noise_pred = true_cfg_combine(noise_pred, negative_pred, true_cfg_scale)
                 if controller is not None:
                     controller.record_full_step(noise_pred, None)
             latents = self._scheduler_step(noise_pred, timestep, latents, len(timesteps))
@@ -395,6 +419,48 @@ def unpack_qwen_image_latents(
     latents = latents.view(batch_size, height // 2, width // 2, channels // 4, 2, 2)
     latents = latents.permute(0, 3, 1, 4, 2, 5)
     return latents.reshape(batch_size, channels // 4, 1, height, width)
+
+
+def true_cfg_combine(
+    cond: torch.Tensor, uncond: torch.Tensor, true_cfg_scale: float
+) -> torch.Tensor:
+    """Qwen-Image true classifier-free guidance, exactly as diffusers'
+    ``QwenImagePipeline`` combines its two passes: the guided prediction is
+    rescaled to the conditional prediction's norm over the channel axis."""
+    comb = uncond + true_cfg_scale * (cond - uncond)
+    cond_norm = torch.norm(cond, dim=-1, keepdim=True)
+    comb_norm = torch.norm(comb, dim=-1, keepdim=True)
+    return comb * (cond_norm / comb_norm)
+
+
+def _negative_text_inputs(
+    encoder_hidden_states: torch.Tensor | None,
+    encoder_hidden_states_mask: torch.Tensor | None,
+    true_cfg_scale: float,
+) -> tuple[torch.Tensor, torch.Tensor] | None:
+    """The negative-prompt inputs when true CFG is on, else None.
+
+    Same rule as diffusers: true CFG needs both ``true_cfg_scale > 1`` and a
+    negative prompt (even " "); either alone leaves one pass per step.
+    """
+    has_negative = encoder_hidden_states is not None
+    if float(true_cfg_scale) > 1.0 and not has_negative:
+        warnings.warn(
+            f"true_cfg_scale={true_cfg_scale} without negative-prompt embeddings: "
+            "classifier-free guidance is off (one pass per step).",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return None
+    if not has_negative or float(true_cfg_scale) <= 1.0:
+        return None
+    if encoder_hidden_states_mask is None:
+        encoder_hidden_states_mask = torch.ones(
+            encoder_hidden_states.shape[:2],
+            dtype=torch.bool,
+            device=encoder_hidden_states.device,
+        )
+    return encoder_hidden_states, encoder_hidden_states_mask
 
 
 def _bundle_from_tensors(

@@ -186,35 +186,53 @@ class QwenImageOrchestrator(ModelOrchestrator):
         self._require_stage_artifact("text", args, compiled_dir)
         app.load(str(compiled_dir))
         tok = AutoTokenizer.from_pretrained(str(Path(model_dir) / "tokenizer"))
+
+        def encode(prompt: str):
+            ti = tok(
+                _QWEN_TEMPLATE.format(prompt),
+                max_length=_ENC_SEQ,
+                padding="max_length",
+                truncation=True,
+                return_tensors="pt",
+                return_attention_mask=True,
+            )
+            input_ids = ti.input_ids.to(torch.int32)
+            attn = ti.attention_mask.to(torch.int32)
+            out = app(
+                input_ids=input_ids,
+                attention_mask=attn,
+                position_ids=torch.arange(_ENC_SEQ, dtype=torch.int32).unsqueeze(0),
+                sampling_params=torch.tensor([[1.0, 1.0, 1.0]], dtype=torch.float32),
+            )
+            hs = out.captured_tensors[0].float()
+            valid = int(attn.sum())
+            dev = hs[:, _QWEN_DROP_IDX:valid]
+            seq = dev.shape[1]
+            ehs = torch.zeros(1, _TEXT_SEQ_LEN, dev.shape[-1], dtype=torch.bfloat16)
+            ehs[:, :seq] = dev.to(torch.bfloat16)
+            mask = torch.zeros(1, _TEXT_SEQ_LEN, dtype=torch.bool)
+            mask[:, :seq] = True
+            return ehs, mask
+
         for req in stage_loop.claim_requests(args):
             with stage_loop.request_scope(args, req, final=False):
-                ti = tok(
-                    _QWEN_TEMPLATE.format(req.prompt),
-                    max_length=_ENC_SEQ,
-                    padding="max_length",
-                    truncation=True,
-                    return_tensors="pt",
-                    return_attention_mask=True,
-                )
-                input_ids = ti.input_ids.to(torch.int32)
-                attn = ti.attention_mask.to(torch.int32)
-                out = app(
-                    input_ids=input_ids,
-                    attention_mask=attn,
-                    position_ids=torch.arange(_ENC_SEQ, dtype=torch.int32).unsqueeze(0),
-                    sampling_params=torch.tensor([[1.0, 1.0, 1.0]], dtype=torch.float32),
-                )
-                hs = out.captured_tensors[0].float()
-                valid = int(attn.sum())
-                dev = hs[:, _QWEN_DROP_IDX:valid]
-                seq = dev.shape[1]
-                ehs = torch.zeros(1, _TEXT_SEQ_LEN, dev.shape[-1], dtype=torch.bfloat16)
-                ehs[:, :seq] = dev.to(torch.bfloat16)
-                mask = torch.zeros(1, _TEXT_SEQ_LEN, dtype=torch.bool)
-                mask[:, :seq] = True
+                ehs, mask = encode(req.prompt)
+                text = {"encoder_hidden_states": ehs, "encoder_hidden_states_mask": mask}
+                if qwen_common.true_cfg_enabled(
+                    stage_loop.effective(req, args, "guidance_scale", 4.0)
+                ):
+                    negative = stage_loop.effective(
+                        req, args, "negative_prompt", qwen_common.DEFAULT_NEGATIVE_PROMPT
+                    )
+                    neg_ehs, neg_mask = encode(negative)
+                    text["negative_encoder_hidden_states"] = neg_ehs
+                    text["negative_encoder_hidden_states_mask"] = neg_mask
                 dest = stage_loop.work_file(args, req, "text.pt")
-                torch.save({"encoder_hidden_states": ehs, "encoder_hidden_states_mask": mask}, dest)
-                print(f"[text] encoder_hidden_states {tuple(ehs.shape)} -> {dest}")
+                torch.save(text, dest)
+                print(
+                    f"[text] encoder_hidden_states {tuple(ehs.shape)}"
+                    f"{' + negative prompt (true CFG)' if len(text) > 2 else ''} -> {dest}"
+                )
 
     def _stage_generate(self, args: argparse.Namespace) -> None:
         import numpy as np
@@ -281,16 +299,18 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 num_steps = int(stage_loop.effective(req, args, "steps", 4))
                 sigmas = np.linspace(1.0, 1.0 / num_steps, num_steps).tolist()
                 sched.set_timesteps(sigmas=sigmas, mu=mu, device="cpu")
-                guidance = torch.full(
-                    [1],
-                    float(stage_loop.effective(req, args, "guidance_scale", 4.0)),
-                    dtype=torch.bfloat16,
-                )
+                guidance_scale = float(stage_loop.effective(req, args, "guidance_scale", 4.0))
+                guidance = torch.full([1], guidance_scale, dtype=torch.bfloat16)
                 torch.manual_seed(req.seed)
                 out = app.pipeline(
                     encoder_hidden_states=text["encoder_hidden_states"],
                     encoder_hidden_states_mask=text["encoder_hidden_states_mask"],
                     guidance=guidance,
+                    negative_encoder_hidden_states=text.get("negative_encoder_hidden_states"),
+                    negative_encoder_hidden_states_mask=text.get(
+                        "negative_encoder_hidden_states_mask"
+                    ),
+                    true_cfg_scale=guidance_scale,
                     timesteps=sched.timesteps,
                     num_inference_steps=num_steps,
                     output_type="latent",
@@ -493,6 +513,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
             parts += ["--shapes", str(a.shapes)]
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
+        if getattr(a, "negative_prompt", None) is not None:
+            parts += ["--negative-prompt", a.negative_prompt]
         if getattr(a, "output", None):
             parts += ["--output", a.output]
         if a.cache_dir:

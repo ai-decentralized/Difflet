@@ -333,7 +333,11 @@ def _add_teacache_flags(p: argparse.ArgumentParser) -> None:
 
 def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--prompt", required=False, default=None)
-    p.add_argument("--negative-prompt", default=None, help="Negative prompt for the staged Wan pipeline")
+    p.add_argument(
+        "--negative-prompt",
+        default=None,
+        help="Negative prompt (Wan; Qwen-Image true CFG, default ' ' when --guidance-scale > 1)",
+    )
     p.add_argument("--output", required=False, default=None, help="Output file path (.png or .mp4)")
     p.add_argument(
         "--requests",

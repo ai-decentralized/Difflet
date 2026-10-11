@@ -71,10 +71,17 @@ class QwenTextStageRunner:
     ) -> StageExecutionResult[QwenTextPayload]:
         started = time.monotonic()
         values = self.adapter._encode_prompt(invocation.request.prompt)
+        negative = self.adapter._encode_negative_prompt(invocation.request)
         return stage_result(
             QwenTextPayload(
                 encoder_hidden_states=values["encoder_hidden_states"],
                 encoder_hidden_states_mask=values["encoder_hidden_states_mask"],
+                negative_encoder_hidden_states=(
+                    None if negative is None else negative["encoder_hidden_states"]
+                ),
+                negative_encoder_hidden_states_mask=(
+                    None if negative is None else negative["encoder_hidden_states_mask"]
+                ),
             ),
             started_monotonic=started,
         )
@@ -98,6 +105,8 @@ class QwenGenerateStageRunner:
             {
                 "encoder_hidden_states": inputs.encoder_hidden_states,
                 "encoder_hidden_states_mask": inputs.encoder_hidden_states_mask,
+                "negative_encoder_hidden_states": inputs.negative_encoder_hidden_states,
+                "negative_encoder_hidden_states_mask": inputs.negative_encoder_hidden_states_mask,
             },
             invocation.request,
         )
@@ -801,6 +810,18 @@ class QwenImageServingStageAdapter:
         mask[:, :seq] = True
         return {"encoder_hidden_states": ehs, "encoder_hidden_states_mask": mask}
 
+    def _encode_negative_prompt(self, request: DiffletGenerateRequest) -> dict[str, object] | None:
+        """The negative prompt's embeddings when the request runs true CFG, else None.
+
+        Qwen-Image has no guidance embedding, so a guidance scale above 1 is the
+        true-CFG scale (two DiT passes per step) with the model card's negative
+        prompt " " (the image API exposes no negative prompt yet). The TPU path
+        keeps one pass per step.
+        """
+        if self._tpu or not qwen_common.true_cfg_enabled(request.guidance_scale):
+            return None
+        return self._encode_prompt(qwen_common.DEFAULT_NEGATIVE_PROMPT)
+
     def _denoise(self, text: dict[str, object], request: DiffletGenerateRequest):
         import numpy as np
         import torch
@@ -840,6 +861,9 @@ class QwenImageServingStageAdapter:
             encoder_hidden_states=text["encoder_hidden_states"],
             encoder_hidden_states_mask=text["encoder_hidden_states_mask"],
             guidance=guidance,
+            negative_encoder_hidden_states=text.get("negative_encoder_hidden_states"),
+            negative_encoder_hidden_states_mask=text.get("negative_encoder_hidden_states_mask"),
+            true_cfg_scale=float(request.guidance_scale),
             timesteps=sched.timesteps,
             num_inference_steps=num_steps,
             teacache_enabled=use_teacache,

@@ -493,3 +493,100 @@ def test_stage_generate_compiles_the_probe_additively_for_adaptive_teacache(monk
     app = FakeGen.instances[-1]
     assert app.kwargs["teacache_fused"] is False
     assert app.probe_checked is None and app.compiled is None and app.loaded is not None
+
+
+# ----------------------------------------------------------------- true CFG
+
+class _TextByPrompt(_Recorder):
+    """Fake encoder whose output encodes how many times it has been called."""
+
+    @classmethod
+    def get_config_cls(cls):
+        return lambda *a, **kw: object()
+
+    def __call__(self, **kw):
+        import torch
+        self.n = getattr(self, "n", 0) + 1
+        return types.SimpleNamespace(captured_tensors=[torch.full((1, 256, 16), float(self.n))])
+
+
+def _run_text_stage(monkeypatch, tmp_path, **overrides):
+    import torch
+
+    _setup_text(monkeypatch, _TextByPrompt)
+    seen = []
+    tok = sys.modules["transformers"].AutoTokenizer.from_pretrained("x")
+    monkeypatch.setattr(
+        sys.modules["transformers"].AutoTokenizer, "from_pretrained",
+        lambda p: (lambda text, **kw: (seen.append(text), tok(text, **kw))[1]),
+    )
+    args = _qwen_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
+                      **overrides)
+    orch = QwenImageOrchestrator(args)
+    orch._finish_stage_compile("text", args, orch._stage_compiled_dir("text", args))
+    orch._stage_text(args)
+    return torch.load(tmp_path / "text.pt"), seen
+
+
+def test_stage_text_encodes_the_default_negative_prompt_for_true_cfg(monkeypatch, tmp_path):
+    text, seen = _run_text_stage(monkeypatch, tmp_path, guidance_scale=4.0)
+    assert len(seen) == 2 and "a cat" in seen[0]
+    assert seen[1] == qwen_mod._QWEN_TEMPLATE.format(" ")  # model card default
+    assert set(text) == {"encoder_hidden_states", "encoder_hidden_states_mask",
+                         "negative_encoder_hidden_states", "negative_encoder_hidden_states_mask"}
+    assert float(text["negative_encoder_hidden_states"][0, 0, 0]) == 2.0  # second encode
+
+
+def test_stage_text_uses_the_given_negative_prompt(monkeypatch, tmp_path):
+    _, seen = _run_text_stage(monkeypatch, tmp_path, guidance_scale=4.0, negative_prompt="blurry")
+    assert seen[1] == qwen_mod._QWEN_TEMPLATE.format("blurry")
+
+
+def test_stage_text_skips_the_negative_prompt_without_guidance(monkeypatch, tmp_path):
+    text, seen = _run_text_stage(monkeypatch, tmp_path, guidance_scale=1.0)
+    assert len(seen) == 1
+    assert set(text) == {"encoder_hidden_states", "encoder_hidden_states_mask"}
+
+
+def test_stage_generate_passes_true_cfg_inputs(monkeypatch, tmp_path):
+    import torch
+
+    sched = types.SimpleNamespace(
+        config=types.SimpleNamespace(
+            max_shift=1.15, base_shift=0.5, max_image_seq_len=4096, base_image_seq_len=256),
+        timesteps=torch.zeros(4),
+        set_timesteps=lambda **kw: None,
+    )
+    calls = []
+
+    class RecordingPipeline(_FakePipeline):
+        def __call__(self, **kw):
+            calls.append(kw)
+            return super().__call__(**kw)
+
+    class FakeGen(_Recorder):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.pipeline = RecordingPipeline(sched)
+
+    _setup_generate(monkeypatch, FakeGen)
+    neg = torch.full((1, 1024, 16), -1.0)
+    torch.save({"encoder_hidden_states": torch.zeros(1, 1024, 16),
+                "encoder_hidden_states_mask": torch.ones(1, 1024, dtype=torch.bool),
+                "negative_encoder_hidden_states": neg,
+                "negative_encoder_hidden_states_mask": torch.ones(1, 1024, dtype=torch.bool)},
+               tmp_path / "text.pt")
+    args = _qwen_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
+                      guidance_scale=4.0)
+    orch = QwenImageOrchestrator(args)
+    orch._finish_stage_compile("generate", args, orch._stage_compiled_dir("generate", args))
+    orch._stage_generate(args)
+    assert calls[-1]["true_cfg_scale"] == 4.0
+    assert torch.equal(calls[-1]["negative_encoder_hidden_states"], neg)
+
+
+def test_shared_cli_args_forward_the_negative_prompt():
+    args = _qwen_args(negative_prompt="blurry")
+    parts = QwenImageOrchestrator(args)._shared_cli_args("generate")
+    assert parts[parts.index("--negative-prompt") + 1] == "blurry"
+    assert "--negative-prompt" not in QwenImageOrchestrator(_qwen_args())._shared_cli_args("generate")

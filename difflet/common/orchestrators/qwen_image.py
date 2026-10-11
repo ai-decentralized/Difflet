@@ -22,6 +22,15 @@ ENC_SEQ = 256
 TEXT_SEQ_LEN = 1024
 VIRTUAL_CORE_SIZE = 2
 SERVING_ARTIFACT_MARKER = "difflet_serving_artifact.json"
+# Qwen-Image has no guidance embedding (guidance_embeds=False), so the request's
+# guidance scale is the true-CFG scale: above 1 every executed step runs the DiT
+# twice, on the prompt and on a negative prompt. The model card's default
+# negative prompt is " " (diffusers QwenImagePipeline needs one for CFG at all).
+DEFAULT_NEGATIVE_PROMPT = " "
+
+
+def true_cfg_enabled(guidance_scale: float | None) -> bool:
+    return guidance_scale is not None and float(guidance_scale) > 1.0
 
 
 def stage_compiled_dir_from_values(

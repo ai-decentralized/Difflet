@@ -356,3 +356,132 @@ def test_teacache_step_mismatch_uses_baseline_without_probe(tmp_path):
     assert transformer.delta_calls == 0
     assert len(transformer.calls) == 2
     assert pipe.teacache_controller.stats()["full_steps"] == 0
+
+
+# ----------------------------------------------------------------- true CFG
+
+
+class PromptAwareTransformer(FakeTransformer):
+    """Returns a different prediction for the prompt and the negative prompt."""
+
+    def __call__(self, bundle):
+        self.calls.append(bundle)
+        base = torch.arange(bundle.hidden_states.numel(), dtype=torch.float32)
+        base = base.reshape(bundle.hidden_states.shape) / bundle.hidden_states.numel()
+        shift = float(bundle.encoder_hidden_states.flatten()[0])
+        return {"sample": base + shift}
+
+
+def _diffusers_true_cfg(noise_pred, neg_noise_pred, true_cfg_scale):
+    # Verbatim from diffusers QwenImagePipeline.__call__ (0.38), the reference.
+    comb_pred = neg_noise_pred + true_cfg_scale * (noise_pred - neg_noise_pred)
+    cond_norm = torch.norm(noise_pred, dim=-1, keepdim=True)
+    noise_norm = torch.norm(comb_pred, dim=-1, keepdim=True)
+    return comb_pred * (cond_norm / noise_norm)
+
+
+def test_true_cfg_combine_matches_diffusers():
+    cond = torch.randn(1, 16, 64)
+    uncond = torch.randn(1, 16, 64)
+    for scale in (1.0, 2.5, 4.0):
+        torch.testing.assert_close(
+            m.true_cfg_combine(cond, uncond, scale), _diffusers_true_cfg(cond, uncond, scale),
+            rtol=0, atol=0,
+        )
+    # scale 1 is the conditional prediction (the norm rescale is then the identity)
+    torch.testing.assert_close(m.true_cfg_combine(cond, uncond, 1.0), cond)
+
+
+def _true_cfg_pipeline(tmp_path, transformer):
+    orch = m.QwenImageOrchestrator(
+        model_path=str(tmp_path), transformer=transformer, scheduler=FakeScheduler()
+    )
+    orch._scheduler_step = lambda noise_pred, timestep, latents, n: latents - 0.1 * noise_pred
+    return orch
+
+
+def _cfg_inputs():
+    pos = torch.full((1, 4, 8), 1.0)  # _bundle()'s prompt embeddings
+    neg = torch.full((1, 4, 8), -1.0)
+    mask = torch.ones((1, 4), dtype=torch.bool)
+    return pos, neg, mask
+
+
+def test_true_cfg_runs_two_passes_per_step_and_combines(tmp_path):
+    transformer = PromptAwareTransformer()
+    orch = _true_cfg_pipeline(tmp_path, transformer)
+    _, neg, mask = _cfg_inputs()
+    latents = torch.zeros((1, 16, 64))
+    out = orch(
+        bundle=_bundle(latents),
+        negative_encoder_hidden_states=neg, negative_encoder_hidden_states_mask=mask,
+        true_cfg_scale=4.0, timesteps=torch.tensor([1000.0, 500.0]),
+    )
+    assert len(transformer.calls) == 4  # two steps x (prompt, negative prompt)
+    assert [float(c.encoder_hidden_states.flatten()[0]) for c in transformer.calls] == [1, -1, 1, -1]
+    # replay the loop with the reference combination
+    expected = latents
+    for _ in range(2):
+        base = torch.arange(expected.numel(), dtype=torch.float32).reshape(expected.shape) / expected.numel()
+        guided = _diffusers_true_cfg(base + 1.0, base - 1.0, 4.0)
+        expected = expected - 0.1 * guided
+    torch.testing.assert_close(out.latents, expected)
+
+
+def test_true_cfg_needs_scale_above_one_and_a_negative_prompt(tmp_path):
+    _, neg, mask = _cfg_inputs()
+    for kwargs in (
+        dict(negative_encoder_hidden_states=neg, true_cfg_scale=1.0),
+        dict(true_cfg_scale=1.0),
+    ):
+        transformer = PromptAwareTransformer()
+        _true_cfg_pipeline(tmp_path, transformer)(
+            bundle=_bundle(), timesteps=torch.tensor([1000.0]), **kwargs,
+        )
+        assert len(transformer.calls) == 1
+    transformer = PromptAwareTransformer()
+    with pytest.warns(RuntimeWarning, match="classifier-free guidance is off"):
+        _true_cfg_pipeline(tmp_path, transformer)(
+            bundle=_bundle(), timesteps=torch.tensor([1000.0]), true_cfg_scale=4.0,
+        )
+    assert len(transformer.calls) == 1
+
+
+def test_true_cfg_cached_step_skips_both_passes(tmp_path):
+    transformer = PromptAwareTransformer()
+    orch = _true_cfg_pipeline(tmp_path, transformer)
+
+    class SkipEverySecond:
+        calibration = type("Cal", (), {"cadence": 2, "online_delta_alpha": 0.0, "num_steps": 4})()
+
+        def __init__(self):
+            self.recorded = []
+
+        def reset(self):
+            pass
+
+        def needs_signal(self):
+            return False
+
+        def should_skip(self, step_index, _sig, diff_norm=None):
+            return step_index % 2 == 1
+
+        def skip_noise_pred(self, _):
+            return self.recorded[-1]
+
+        def record_full_step(self, noise_pred, _):
+            self.recorded.append(noise_pred)
+
+        def stats(self):
+            return {}
+
+    controller = SkipEverySecond()
+    orch.teacache_controller = controller
+    _, neg, mask = _cfg_inputs()
+    orch(
+        bundle=_bundle(), negative_encoder_hidden_states=neg,
+        negative_encoder_hidden_states_mask=mask, true_cfg_scale=4.0,
+        timesteps=torch.tensor([1000.0, 750.0, 500.0, 250.0]),
+    )
+    assert len(transformer.calls) == 4  # 2 executed steps x 2 passes; 2 cached steps run nothing
+    assert len(controller.recorded) == 2

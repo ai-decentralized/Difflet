@@ -522,3 +522,77 @@ def test_qwen_request_validator_enforces_shape_set_membership(tmp_path):
     assert exc.value.code == "profile_mismatch"
     assert "768x768" in exc.value.message
     assert "1024x1024" in exc.value.message and "512x512" in exc.value.message
+
+
+# --- True CFG: guidance scale > 1 runs the DiT on the prompt and on " " ---
+
+
+def _request(guidance: float, profile=None) -> DiffletGenerateRequest:
+    return DiffletGenerateRequest("request", "Qwen/Qwen-Image", "a cat", 1024, 1024, 4, guidance, 0)
+
+
+def test_qwen_serving_encodes_the_negative_prompt_only_for_true_cfg(monkeypatch):
+    from difflet.serving.orchestrators import qwen_image as serving_qwen
+
+    adapter = serving_qwen.QwenImageServingStageAdapter()
+    encoded = []
+    monkeypatch.setattr(adapter, "_encode_prompt", lambda prompt: encoded.append(prompt) or {
+        "encoder_hidden_states": f"ehs:{prompt}", "encoder_hidden_states_mask": f"mask:{prompt}"})
+
+    assert adapter._encode_negative_prompt(_request(1.0)) is None
+    assert encoded == []
+    assert adapter._encode_negative_prompt(_request(4.0))["encoder_hidden_states"] == "ehs: "
+    assert encoded == [qwen_image.DEFAULT_NEGATIVE_PROMPT]
+    adapter._tpu = True  # the TPU path keeps one pass per step
+    assert adapter._encode_negative_prompt(_request(4.0)) is None
+
+
+def test_qwen_serving_text_and_generate_stages_carry_the_negative_prompt(monkeypatch):
+    from difflet.serving.orchestrators import qwen_image as serving_qwen
+
+    adapter = serving_qwen.QwenImageServingStageAdapter()
+    monkeypatch.setattr(adapter, "_encode_prompt", lambda prompt: {
+        "encoder_hidden_states": f"ehs:{prompt}", "encoder_hidden_states_mask": f"mask:{prompt}"})
+    invocation = SimpleNamespace(request=_request(4.0), input=None)
+    payload = asyncio.run(serving_qwen.QwenTextStageRunner(adapter).execute(invocation)).output
+    assert payload.encoder_hidden_states == "ehs:a cat"
+    assert payload.negative_encoder_hidden_states == "ehs: "
+    assert payload.negative_encoder_hidden_states_mask == "mask: "
+
+    seen = {}
+    monkeypatch.setattr(adapter, "_denoise", lambda text, request: seen.update(text) or "latents")
+    asyncio.run(serving_qwen.QwenGenerateStageRunner(adapter).execute(
+        SimpleNamespace(request=_request(4.0), input=payload)))
+    assert seen["negative_encoder_hidden_states"] == "ehs: "
+
+
+def test_qwen_serving_denoise_passes_the_true_cfg_scale(monkeypatch, tmp_path):
+    import torch
+
+    from difflet.serving.orchestrators import qwen_image as serving_qwen
+
+    captured = {}
+
+    class _Pipeline:
+        scheduler = SimpleNamespace(
+            config=SimpleNamespace(max_shift=1.15, base_shift=0.5,
+                                   max_image_seq_len=4096, base_image_seq_len=256),
+            timesteps=torch.zeros(4),
+            set_timesteps=lambda **kw: None,
+        )
+
+        def __call__(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(latents=torch.zeros(1, 4096, 64))
+
+    adapter = serving_qwen.QwenImageServingStageAdapter()
+    adapter.active_profile = _profile(tmp_path)
+    adapter.denoise_app = SimpleNamespace(pipeline=_Pipeline())
+    neg = torch.full((1, 1024, 16), -1.0)
+    adapter._denoise({"encoder_hidden_states": torch.zeros(1, 1024, 16),
+                      "encoder_hidden_states_mask": torch.ones(1, 1024, dtype=torch.bool),
+                      "negative_encoder_hidden_states": neg,
+                      "negative_encoder_hidden_states_mask": torch.ones(1, 1024, dtype=torch.bool)},
+                     _request(4.0))
+    assert captured["true_cfg_scale"] == 4.0
+    assert torch.equal(captured["negative_encoder_hidden_states"], neg)

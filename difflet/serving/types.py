@@ -372,6 +372,10 @@ class QwenInitialPayload(StagePayload):
 class QwenTextPayload(StagePayload):
     encoder_hidden_states: Any
     encoder_hidden_states_mask: Any
+    # Set when the request runs true CFG (guidance scale > 1): the negative prompt's
+    # embeddings for the DiT's second pass per step.
+    negative_encoder_hidden_states: Any = None
+    negative_encoder_hidden_states_mask: Any = None
 
 
 @dataclass(frozen=True, slots=True)
