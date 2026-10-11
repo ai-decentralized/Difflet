@@ -102,11 +102,24 @@ def compare(a_path: str, b_path: str, json_path: str | None) -> int:
               f"{rows[-1]['mean_abs_diff']:.3e} cosine {rows[-1]['cosine']:.6f}")
     # one program per mode served every length: check the masks changed the output
     distinct = len({round(float(o.sum()), 3) for o in a["outputs"].values()})
+    # scale control: how far the mask itself moves the reference output (each
+    # length vs the longest); a mask the split mishandled would show up at this scale
+    full = max(a["outputs"])
+    mask_effect = []
+    for n in sorted(a["outputs"]):
+        if n == full:
+            continue
+        d = (a["outputs"][n].flatten() - a["outputs"][full].flatten()).abs()
+        mask_effect.append({"valid_text_tokens": n, "vs_valid_text_tokens": full,
+                            "max_abs_diff": float(d.max()), "mean_abs_diff": float(d.mean())})
+        print(f"[parity] mask effect valid={n} vs {full}: max|diff| {float(d.max()):.3e} "
+              f"mean|diff| {float(d.mean()):.3e}")
     doc = {"reference": {k: a[k] for k in ("mode", "tp", "cp", "program_dir")},
            "candidate": {k: b[k] for k in ("mode", "tp", "cp", "program_dir")},
            "layers": a["layers"], "single_layers": a["single_layers"], "shape": a["shape"],
            "text_seq_len": a["text_seq_len"], "seed": a["seed"],
-           "distinct_reference_outputs": distinct, "rows": rows}
+           "distinct_reference_outputs": distinct, "rows": rows,
+           "reference_mask_effect": mask_effect}
     if json_path:
         with open(json_path, "w") as fh:
             json.dump(doc, fh, indent=2)

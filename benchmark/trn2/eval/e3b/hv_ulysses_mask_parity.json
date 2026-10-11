@@ -1,0 +1,87 @@
+{
+  "reference": {
+    "mode": "reference",
+    "tp": 2,
+    "cp": 1,
+    "program_dir": "/home/ubuntu/.cache/difflet/parity/hv_ulysses/compile_reference_l2s2"
+  },
+  "candidate": {
+    "mode": "ulysses",
+    "tp": 2,
+    "cp": 2,
+    "program_dir": "/home/ubuntu/.cache/difflet/parity/hv_ulysses/compile_ulysses_l2s2"
+  },
+  "layers": 2,
+  "single_layers": 2,
+  "shape": [
+    320,
+    512,
+    61
+  ],
+  "text_seq_len": 256,
+  "seed": 1234,
+  "distinct_reference_outputs": 5,
+  "rows": [
+    {
+      "valid_text_tokens": 5,
+      "max_abs_diff": 0.07421875,
+      "mean_abs_diff": 0.0036756047047674656,
+      "ref_max_abs": 3.328125,
+      "cosine": 0.9999281167984009
+    },
+    {
+      "valid_text_tokens": 20,
+      "max_abs_diff": 0.078125,
+      "mean_abs_diff": 0.003657058347016573,
+      "ref_max_abs": 3.296875,
+      "cosine": 0.9999290704727173
+    },
+    {
+      "valid_text_tokens": 77,
+      "max_abs_diff": 0.0625,
+      "mean_abs_diff": 0.0037438380531966686,
+      "ref_max_abs": 3.34375,
+      "cosine": 0.9999269247055054
+    },
+    {
+      "valid_text_tokens": 160,
+      "max_abs_diff": 0.04833984375,
+      "mean_abs_diff": 0.003739227307960391,
+      "ref_max_abs": 3.34375,
+      "cosine": 0.9999268651008606
+    },
+    {
+      "valid_text_tokens": 256,
+      "max_abs_diff": 0.06640625,
+      "mean_abs_diff": 0.003836236894130707,
+      "ref_max_abs": 3.484375,
+      "cosine": 0.9999217987060547
+    }
+  ],
+  "reference_mask_effect": [
+    {
+      "valid_text_tokens": 5,
+      "vs_valid_text_tokens": 256,
+      "max_abs_diff": 1.26171875,
+      "mean_abs_diff": 0.10172577202320099
+    },
+    {
+      "valid_text_tokens": 20,
+      "vs_valid_text_tokens": 256,
+      "max_abs_diff": 1.23828125,
+      "mean_abs_diff": 0.09354157000780106
+    },
+    {
+      "valid_text_tokens": 77,
+      "vs_valid_text_tokens": 256,
+      "max_abs_diff": 0.638671875,
+      "mean_abs_diff": 0.05804019421339035
+    },
+    {
+      "valid_text_tokens": 160,
+      "vs_valid_text_tokens": 256,
+      "max_abs_diff": 0.359375,
+      "mean_abs_diff": 0.031022891402244568
+    }
+  ]
+}

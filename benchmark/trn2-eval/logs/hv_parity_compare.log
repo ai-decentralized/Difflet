@@ -1,0 +1,6 @@
+[parity] valid=5: max|diff| 7.422e-02 mean|diff| 3.676e-03 cosine 0.999928
+[parity] valid=20: max|diff| 7.812e-02 mean|diff| 3.657e-03 cosine 0.999929
+[parity] valid=77: max|diff| 6.250e-02 mean|diff| 3.744e-03 cosine 0.999927
+[parity] valid=160: max|diff| 4.834e-02 mean|diff| 3.739e-03 cosine 0.999927
+[parity] valid=256: max|diff| 6.641e-02 mean|diff| 3.836e-03 cosine 0.999922
+[parity] wrote benchmark/trn2/eval/e3b/hv_ulysses_mask_parity.json
