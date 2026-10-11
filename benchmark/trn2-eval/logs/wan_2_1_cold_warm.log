@@ -1,0 +1,4 @@
+[cold] wan_2_1: dropping page cache...
+[cold] wan_2_1: 1652.0s (load 523.92)
+[warm] wan_2_1: 1321.1s (load 220.36)
+[done] wan_2_1: cold 1652s -> warm 1321s

@@ -1,6 +1,6 @@
 # Benchmark — Wan-AI/Wan2.1-T2V-14B-Diffusers
 
-**Status:** compiled  
+**Status:** ok  
 **Backend:** trainium  
 **Device:** trn2.3xlarge / 4 NeuronCores / 96 GB/device  
 **Timestamp:** 2026-10-11 05:50 UTC
@@ -22,13 +22,19 @@
 | phase | time |
 |---|---|
 | compile (AOT, one-time) | 45.9 min (2753 s) |
-| **e2e generate — cold start** (page cache dropped) | **—** |
+| **e2e generate — cold start** (page cache dropped) | **27.5 min (1652 s)** |
+| &nbsp;&nbsp;↳ of which weights load (cold disk read) | 8.7 min (524 s) |
+| **e2e generate — warm cache** | **22.0 min (1321 s)** |
+| &nbsp;&nbsp;↳ of which weights load (from page cache) | 3.7 min (220 s) |
+
+> Cold vs warm: **27.5 min (1652 s) → 22.0 min (1321 s)** (1.3× faster warm). e2e is load-dominated; the gap is the one-time cold disk read of the weights (warm = weights already in the OS page cache). The stable compute metric is the per-step latency below.
 
 ## Latency distribution
 
 | metric | mean | median | p90 | min | n |
 |---|---|---|---|---|---|
 | per denoise step (transformer fwd) | — | — | — | — | — |
+| end-to-end (warm) | 22.0 min (1321 s) | 22.0 min (1321 s) | 22.0 min (1321 s) | 22.0 min (1321 s) | 1 |
 
 ## Compile breakdown
 
@@ -42,6 +48,28 @@ Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-
 
 > The headline **compile = 45.9 min (2753 s)** is the full `difflet compile` wall; the **Σ component builds = 45.4 min (2725 s)** above is only the neuronx-cc build sub-phase. The difference is one-time host model load + HLO trace + weight shard/save before/around the builds (largest for big multi-encoder pipelines).
 
+## End-to-end breakdown (cold generate)
+
+difflet runs the pipeline stages sequentially in one process, each (re)loading its component to device. e2e cold is **load-dominated**, not compute-bound.
+
+| stage | weight shard | weight load |
+|---|---:|---:|
+| stage_0 | — | 88.36 s |
+| vae_decoder | — | 7.3 min (436 s) |
+| **weights load total** | 0.0 ms | **8.7 min (524 s)** |
+
+- **weights load total:** 8.7 min (524 s) of 27.5 min (1652 s) wall
+- **compute + overhead (residual):** 18.8 min (1128 s) = text-encode + denoise loop + VAE decode + process/runtime startup
+
+## Output validity
+
+| field | value |
+|---|---|
+| shape | None |
+| dtype | None |
+| finite (no NaN/Inf) | None |
+| note | saved wan2_1_t2v_14b_diffusers_out.mp4 |
+
 ## Toolchain
 
 - `torch` = 2.9.1
@@ -53,6 +81,8 @@ Per component (neuronx-cc AOT). `other` = layout-optimize + weight-shard + neff-
 ## Notes
 
 - compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop
+- e2e_cold = 1652 s — TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.
+- e2e_warm = 1321 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 1652 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model.
 
 ## Reproduction
 

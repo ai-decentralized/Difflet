@@ -37,10 +37,37 @@
     },
     "wall_total_s": 2724.717
   },
-  "load_seconds": null,
-  "e2e_cold_seconds": null,
-  "e2e_breakdown": null,
-  "e2e_warm": null,
+  "load_seconds": 523.92,
+  "e2e_cold_seconds": 1652.003,
+  "e2e_breakdown": {
+    "stages": [
+      {
+        "stage": "stage_0",
+        "load_s": 88.36
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 435.56
+      }
+    ],
+    "weights_load_total_s": 523.92,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 1652.003,
+    "compute_and_overhead_s": 1128.083
+  },
+  "e2e_warm": {
+    "n": 1,
+    "mean": 1321.144373093004,
+    "median": 1321.144373093004,
+    "std": 0.0,
+    "p50": 1321.144373093004,
+    "p90": 1321.144373093004,
+    "min": 1321.144373093004,
+    "max": 1321.144373093004,
+    "samples": [
+      1321.144373093004
+    ]
+  },
   "step_latency": null,
   "step_basis": "",
   "step_latency_alt": {},
@@ -49,7 +76,16 @@
   "step_latency_natural": null,
   "throughput": {},
   "peak_device_mem_gb": null,
-  "output": null,
+  "output": {
+    "shape": null,
+    "dtype": null,
+    "finite": null,
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "note": "saved wan2_1_t2v_14b_diffusers_out.mp4"
+  },
   "toolchain": {
     "torch": "2.9.1",
     "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
@@ -58,9 +94,11 @@
     "diffusers": "0.38.0"
   },
   "config_label": "tp=4, bf16, single-transformer (no MoE), attention_cte, official 81 frames / 50 steps / CFG 5.0, chunked FP32 VAE on device",
-  "status": "compiled",
+  "status": "ok",
   "notes": [
-    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop"
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "e2e_cold = 1652 s \u2014 TRUE cold start (OS page cache dropped before the run), so the weight load is a real cold disk read.",
+    "e2e_warm = 1321 s (n=1, warm OS page cache from the immediately-preceding cold run; same session as the 1652 s cold start). difflet reloads weights every process, so warm = warm disk cache -> faster load, not a resident model."
   ],
   "timestamp": "2026-10-11 05:50 UTC",
   "config_slug": "wan_2_1",
@@ -71,5 +109,21 @@
   "seed": 42,
   "prompt": "a cinematic shot of a red fox running through a snowy forest",
   "guidance_scale": 5.0,
-  "output_kind": "video"
+  "output_kind": "video",
+  "e2e_warm_breakdown": {
+    "stages": [
+      {
+        "stage": "stage_0",
+        "load_s": 8.35
+      },
+      {
+        "stage": "vae_decoder",
+        "load_s": 212.01
+      }
+    ],
+    "weights_load_total_s": 220.36,
+    "weights_shard_total_s": 0.0,
+    "wall_total_s": 1321.144,
+    "compute_and_overhead_s": 1100.784
+  }
 }
