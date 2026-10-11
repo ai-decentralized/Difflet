@@ -543,6 +543,76 @@ def test_compile_blocks_rejects_missing_empty_and_string_containers(monkeypatch)
         neuron_compile.compile_blocks(model, block_attrs="single")
 
 
+# The colleague's fixtures (71aa987): one uniform stack, a mixed list, a one-block list, and a
+# list nested in every block.
+class Block(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.proj = nn.Linear(4, 4)
+        self.inner = nn.ModuleList([nn.Linear(4, 4), nn.Linear(4, 4)])  # nested stack
+
+    def forward(self, x):
+        return self.proj(x)
+
+
+class Other(nn.Module):
+    def forward(self, x):
+        return x
+
+
+class Model(nn.Module):
+    def __init__(self, depth=3):
+        super().__init__()
+        self.embed = nn.Linear(4, 4)
+        self.blocks = nn.ModuleList([Block() for _ in range(depth)])
+        self.mixed = nn.ModuleList([Block(), Other()])
+        self.single = nn.ModuleList([Block()])
+
+
+def test_finds_outermost_uniform_stacks_only():
+    assert neuron_compile.repeated_block_lists(Model()) == ["blocks"]
+
+
+def test_compile_blocks_without_block_attrs_compiles_the_discovered_stack(monkeypatch):
+    seen = []
+    monkeypatch.setattr(nn.Module, "compile", lambda self, *a, **k: seen.append((self, k)))
+    model, backend = Model(depth=3), CountingBackend()
+    names = neuron_compile.compile_blocks(model, block_attrs=None, backend=backend)
+    assert names == ["blocks.0", "blocks.1", "blocks.2"]
+    assert [module for module, _ in seen] == list(model.blocks)  # not mixed, single or inner
+    assert all(kwargs["backend"] is backend for _, kwargs in seen)
+
+
+def test_a_bare_module_list_is_the_one_stack(monkeypatch):
+    """The model itself is a uniform ModuleList (named ""): it is the stack, the lists nested
+    in its blocks are not, and the compiled blocks are named "0", "1", ... (not ".0")."""
+    seen = []
+    monkeypatch.setattr(nn.Module, "compile", lambda self, *a, **k: seen.append(self))
+    stack = nn.ModuleList([Block() for _ in range(3)])
+    assert neuron_compile.repeated_block_lists(stack) == [""]
+    assert neuron_compile.compile_blocks(stack, block_attrs=None) == ["0", "1", "2"]
+    assert seen == list(stack)
+    mixed = nn.ModuleList([Block(), Other()])  # not uniform, and its blocks' lists stay inside
+    assert neuron_compile.repeated_block_lists(mixed) == []
+
+
+def test_compile_blocks_without_block_attrs_raises_when_no_stack_is_found(monkeypatch):
+    monkeypatch.setattr(nn.Module, "compile", lambda self, *a, **k: None)
+    with pytest.raises(ValueError, match="no repeated block stack found; pass block_attrs"):
+        neuron_compile.compile_blocks(nn.Sequential(nn.Linear(2, 2)), block_attrs=None)
+
+
+def test_compile_blocks_still_defaults_to_the_blocks_container(monkeypatch):
+    """block_attrs=None is opt-in: the default stays ("blocks",), never discovery."""
+    seen = []
+    monkeypatch.setattr(nn.Module, "compile", lambda self, *a, **k: seen.append(self))
+    model = _TwoStacks()  # inner.blocks is a uniform stack discovery would find
+    assert neuron_compile.repeated_block_lists(model) == ["inner.blocks"]
+    with pytest.raises(AttributeError, match="no block container 'blocks'"):
+        neuron_compile.compile_blocks(model)
+    assert seen == []
+
+
 def test_compile_inplace_returns_the_module_with_its_state_dict_keys():
     block = _toy(n_blocks=1).blocks[0]
     keys = list(block.state_dict())
