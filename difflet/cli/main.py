@@ -993,6 +993,16 @@ def _ensure_jemalloc() -> None:
     os.execv(sys.executable, [sys.executable, "-m", "difflet.cli.main", *sys.argv[1:]])
 
 
+def _torchrun_backend_selected() -> bool:
+    """Whether DIFFLET_BACKEND (which ``_apply_backend_flags`` exports from --backend) names a
+    non-AoT torchrun-MPMD backend (neuron): the launcher's own rule
+    (``runner._torchrun_mpmd_selected``), true exactly when every stage runs as torchrun ranks.
+    Unset, trainium and tpu are False; auto-detection is not consulted."""
+    from difflet.cli import runner
+
+    return runner._torchrun_mpmd_selected()
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -1057,8 +1067,11 @@ def main(argv: list[str] | None = None) -> None:
     # is NOT the safety boundary for compilation: `run` also compiles when the
     # cache is cold, and neuronx-cc aborts under jemalloc. The compile path
     # strips the preload itself for exactly that reason -- see
-    # difflet/backends/trainium/utils/compile_allocator.py.
-    if argv is None and args.command in ("generate", "run"):
+    # difflet/backends/trainium/utils/compile_allocator.py. A torchrun backend (neuron)
+    # gets no preload at all: run_stage hands this process's environment to torchrun and
+    # its ranks, whose per-block torch.compile warm-up spawns neuronx-cc with it, and the
+    # weight load jemalloc speeds up is the Trainium one.
+    if argv is None and args.command in ("generate", "run") and not _torchrun_backend_selected():
         _ensure_jemalloc()
 
     if args.command == "plan":
