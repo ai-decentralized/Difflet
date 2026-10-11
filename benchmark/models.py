@@ -337,6 +337,9 @@ CONFIGS: dict[str, dict[str, Any]] = {
     # probe component to the tp4 DiT stage; Wan / LTX-2 compute the signal on
     # the host (no NEFF change).
     "tp4tcad": {"teacache_adaptive": True},
+    # Fewer steps, no caching: 30 of 50 steps executes as many denoiser calls as
+    # cadence 2 does at 50 (the step-caching table's quality baseline).
+    "tp4s30": {"steps": 30},
 }
 
 # Online-delta alpha sweep (2026-09-18): the same runtime-only overlay as
@@ -385,6 +388,7 @@ _CONFIG_DESC = {
     "tp4tcod": "tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.6)",
     "tp4tcad": "tp=4 + TeaCache calibrated adaptive (--teacache-speedup at cadence 2's "
                "skip budget, --teacache-calibration per model)",
+    "tp4s30": "tp=4, 30 steps, no caching (cadence 2's denoiser calls at 50 steps)",
 }
 _CONFIG_DESC.update({
     label: (f"tp=4, {o['num_frames']} frames, 8-step loop"
