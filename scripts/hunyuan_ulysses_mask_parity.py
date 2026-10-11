@@ -40,6 +40,7 @@ def run(args) -> None:
         NeuronHunyuanVideoBackboneApplication,
     )
     from difflet.models.hunyuan_video.application import create_hunyuan_video_backbone_config
+    from difflet.models.hunyuan_video.pipeline import _first_tensor
     from difflet.pipeline.path_resolver import resolve_model_path
 
     tp, cp = MODES[args.mode]
@@ -77,7 +78,7 @@ def run(args) -> None:
         mask = torch.zeros([1, text_len], dtype=torch.int64)
         mask[:, :n_valid] = 1
         with torch.no_grad():
-            out = app.models[0](hidden, timestep, text, mask, pooled, guidance)
+            out = _first_tensor(app.models[0](hidden, timestep, text, mask, pooled, guidance))
         outs[n_valid] = out.detach().to(torch.float32).cpu()
         print(f"[parity] {args.mode} valid={n_valid}: out {tuple(outs[n_valid].shape)} "
               f"finite={bool(torch.isfinite(outs[n_valid]).all())}", flush=True)
