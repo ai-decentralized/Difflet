@@ -1,0 +1,771 @@
+{
+  "model_slug": "hunyuan_video",
+  "config": "tp4",
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "kind": "video",
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 50,
+  "seed": 42,
+  "guidance_scale": 6.0,
+  "negative_prompt": null,
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "ports": [
+    8091
+  ],
+  "arrival": "poisson",
+  "ref_latency_s": 58.4855,
+  "ref_latency_source": "warm-up median, server 0",
+  "isolated_latency_s": {
+    "0": 58.4855
+  },
+  "slo_s": 122.8,
+  "slo_factor": 2.1,
+  "cooldown_s": 90.0,
+  "ready_seconds": 5973.06142212,
+  "warmup": [
+    {
+      "server": 0,
+      "latency_s": 58.473,
+      "http": 200,
+      "bytes": 441877,
+      "error": ""
+    },
+    {
+      "server": 0,
+      "latency_s": 58.498,
+      "http": 200,
+      "bytes": 441877,
+      "error": ""
+    }
+  ],
+  "levels": [
+    {
+      "arrivals": 20,
+      "arrival_seed": 42,
+      "servers": 1,
+      "nominal_rate_per_s": 0.008549127561532345,
+      "realized_rate_per_s": 0.013768,
+      "arrival_window_s": 1380.021,
+      "expected_window_s": 2222.449,
+      "successes": 20,
+      "wall_s": 1496.185,
+      "throughput_per_hour": 48.1,
+      "latency_s": {
+        "p50": 136.103,
+        "p90": 189.559,
+        "p99": 244.176,
+        "mean": 133.384,
+        "min": 58.452,
+        "max": 250.414
+      },
+      "slo_s": 122.8,
+      "slo_met_frac": 0.45,
+      "per_server": {
+        "0": 20
+      },
+      "http_codes": {
+        "200": 20
+      },
+      "errors": [],
+      "records": [
+        {
+          "arrival": 0,
+          "server": 0,
+          "arrival_s": 0.0,
+          "end_s": 58.452,
+          "latency_s": 58.452,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 1,
+          "server": 0,
+          "arrival_s": 2.963,
+          "end_s": 116.937,
+          "latency_s": 113.974,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 2,
+          "server": 0,
+          "arrival_s": 40.584,
+          "end_s": 175.374,
+          "latency_s": 134.791,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 3,
+          "server": 0,
+          "arrival_s": 70.129,
+          "end_s": 234.088,
+          "latency_s": 163.959,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 4,
+          "server": 0,
+          "arrival_s": 226.121,
+          "end_s": 292.821,
+          "latency_s": 66.7,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 5,
+          "server": 0,
+          "arrival_s": 358.201,
+          "end_s": 416.682,
+          "latency_s": 58.481,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 6,
+          "server": 0,
+          "arrival_s": 618.729,
+          "end_s": 677.185,
+          "latency_s": 58.456,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 7,
+          "server": 0,
+          "arrival_s": 629.368,
+          "end_s": 735.619,
+          "latency_s": 106.251,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 8,
+          "server": 0,
+          "arrival_s": 693.473,
+          "end_s": 794.081,
+          "latency_s": 100.608,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 9,
+          "server": 0,
+          "arrival_s": 697.012,
+          "end_s": 852.919,
+          "latency_s": 155.907,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 10,
+          "server": 0,
+          "arrival_s": 725.87,
+          "end_s": 911.716,
+          "latency_s": 185.846,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 11,
+          "server": 0,
+          "arrival_s": 808.208,
+          "end_s": 970.303,
+          "latency_s": 162.095,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 12,
+          "server": 0,
+          "arrival_s": 811.354,
+          "end_s": 1028.934,
+          "latency_s": 217.58,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 13,
+          "server": 0,
+          "arrival_s": 837.286,
+          "end_s": 1087.7,
+          "latency_s": 250.414,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 14,
+          "server": 0,
+          "arrival_s": 960.046,
+          "end_s": 1146.492,
+          "latency_s": 186.446,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 15,
+          "server": 0,
+          "arrival_s": 1052.14,
+          "end_s": 1205.212,
+          "latency_s": 153.072,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 16,
+          "server": 0,
+          "arrival_s": 1081.269,
+          "end_s": 1263.892,
+          "latency_s": 182.623,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 17,
+          "server": 0,
+          "arrival_s": 1185.351,
+          "end_s": 1322.766,
+          "latency_s": 137.415,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 18,
+          "server": 0,
+          "arrival_s": 1379.258,
+          "end_s": 1437.712,
+          "latency_s": 58.454,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 19,
+          "server": 0,
+          "arrival_s": 1380.021,
+          "end_s": 1496.185,
+          "latency_s": 116.164,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        }
+      ],
+      "nominal_rho": 0.5,
+      "realized_rho": 0.805,
+      "neuron": {
+        "samples": 1497,
+        "neuroncore_util_mean_pct": 68.0,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 87.59
+      }
+    },
+    {
+      "arrivals": 20,
+      "arrival_seed": 43,
+      "servers": 1,
+      "nominal_rate_per_s": 0.013678604098451754,
+      "realized_rate_per_s": 0.016175,
+      "arrival_window_s": 1174.628,
+      "expected_window_s": 1389.031,
+      "successes": 20,
+      "wall_s": 1308.167,
+      "throughput_per_hour": 55.0,
+      "latency_s": {
+        "p50": 89.404,
+        "p90": 140.459,
+        "p99": 176.318,
+        "mean": 95.756,
+        "min": 58.443,
+        "max": 181.058
+      },
+      "slo_s": 122.8,
+      "slo_met_frac": 0.8,
+      "per_server": {
+        "0": 20
+      },
+      "http_codes": {
+        "200": 20
+      },
+      "errors": [],
+      "records": [
+        {
+          "arrival": 0,
+          "server": 0,
+          "arrival_s": 0.0,
+          "end_s": 58.473,
+          "latency_s": 58.473,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 1,
+          "server": 0,
+          "arrival_s": 87.104,
+          "end_s": 145.581,
+          "latency_s": 58.477,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 2,
+          "server": 0,
+          "arrival_s": 98.466,
+          "end_s": 204.064,
+          "latency_s": 105.598,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 3,
+          "server": 0,
+          "arrival_s": 143.857,
+          "end_s": 262.805,
+          "latency_s": 118.948,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 4,
+          "server": 0,
+          "arrival_s": 225.273,
+          "end_s": 321.611,
+          "latency_s": 96.337,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 5,
+          "server": 0,
+          "arrival_s": 340.402,
+          "end_s": 398.854,
+          "latency_s": 58.452,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 6,
+          "server": 0,
+          "arrival_s": 384.534,
+          "end_s": 457.312,
+          "latency_s": 72.778,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 7,
+          "server": 0,
+          "arrival_s": 434.955,
+          "end_s": 516.046,
+          "latency_s": 81.091,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 8,
+          "server": 0,
+          "arrival_s": 436.369,
+          "end_s": 575.089,
+          "latency_s": 138.72,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 9,
+          "server": 0,
+          "arrival_s": 477.771,
+          "end_s": 633.879,
+          "latency_s": 156.109,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 10,
+          "server": 0,
+          "arrival_s": 511.825,
+          "end_s": 692.883,
+          "latency_s": 181.058,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 11,
+          "server": 0,
+          "arrival_s": 651.641,
+          "end_s": 751.66,
+          "latency_s": 100.019,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 12,
+          "server": 0,
+          "arrival_s": 709.53,
+          "end_s": 810.606,
+          "latency_s": 101.076,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 13,
+          "server": 0,
+          "arrival_s": 812.449,
+          "end_s": 871.255,
+          "latency_s": 58.806,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 14,
+          "server": 0,
+          "arrival_s": 854.067,
+          "end_s": 929.951,
+          "latency_s": 75.883,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 15,
+          "server": 0,
+          "arrival_s": 868.236,
+          "end_s": 988.61,
+          "latency_s": 120.374,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 16,
+          "server": 0,
+          "arrival_s": 1007.357,
+          "end_s": 1065.827,
+          "latency_s": 58.47,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 17,
+          "server": 0,
+          "arrival_s": 1132.81,
+          "end_s": 1191.253,
+          "latency_s": 58.443,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 18,
+          "server": 0,
+          "arrival_s": 1167.27,
+          "end_s": 1249.741,
+          "latency_s": 82.471,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 19,
+          "server": 0,
+          "arrival_s": 1174.628,
+          "end_s": 1308.167,
+          "latency_s": 133.539,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        }
+      ],
+      "nominal_rho": 0.8,
+      "realized_rho": 0.946,
+      "neuron": {
+        "samples": 1308,
+        "neuroncore_util_mean_pct": 78.0,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 87.59
+      }
+    },
+    {
+      "arrivals": 20,
+      "arrival_seed": 44,
+      "servers": 1,
+      "nominal_rate_per_s": 0.016243342366911457,
+      "realized_rate_per_s": 0.019827,
+      "arrival_window_s": 958.28,
+      "expected_window_s": 1169.71,
+      "successes": 20,
+      "wall_s": 1227.298,
+      "throughput_per_hour": 58.7,
+      "latency_s": {
+        "p50": 201.083,
+        "p90": 318.702,
+        "p99": 374.217,
+        "mean": 199.786,
+        "min": 58.451,
+        "max": 376.987
+      },
+      "slo_s": 122.8,
+      "slo_met_frac": 0.2,
+      "per_server": {
+        "0": 20
+      },
+      "http_codes": {
+        "200": 20
+      },
+      "errors": [],
+      "records": [
+        {
+          "arrival": 0,
+          "server": 0,
+          "arrival_s": 0.0,
+          "end_s": 58.457,
+          "latency_s": 58.457,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 1,
+          "server": 0,
+          "arrival_s": 48.071,
+          "end_s": 116.901,
+          "latency_s": 68.83,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 2,
+          "server": 0,
+          "arrival_s": 170.014,
+          "end_s": 228.464,
+          "latency_s": 58.451,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 3,
+          "server": 0,
+          "arrival_s": 181.981,
+          "end_s": 286.896,
+          "latency_s": 104.914,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 4,
+          "server": 0,
+          "arrival_s": 197.686,
+          "end_s": 345.45,
+          "latency_s": 147.764,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 5,
+          "server": 0,
+          "arrival_s": 199.504,
+          "end_s": 404.162,
+          "latency_s": 204.658,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 6,
+          "server": 0,
+          "arrival_s": 207.14,
+          "end_s": 462.844,
+          "latency_s": 255.704,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 7,
+          "server": 0,
+          "arrival_s": 207.685,
+          "end_s": 521.53,
+          "latency_s": 313.846,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 8,
+          "server": 0,
+          "arrival_s": 218.176,
+          "end_s": 580.587,
+          "latency_s": 362.41,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 9,
+          "server": 0,
+          "arrival_s": 262.561,
+          "end_s": 639.548,
+          "latency_s": 376.987,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 10,
+          "server": 0,
+          "arrival_s": 543.027,
+          "end_s": 698.199,
+          "latency_s": 155.171,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 11,
+          "server": 0,
+          "arrival_s": 615.831,
+          "end_s": 756.844,
+          "latency_s": 141.014,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 12,
+          "server": 0,
+          "arrival_s": 645.104,
+          "end_s": 815.827,
+          "latency_s": 170.723,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 13,
+          "server": 0,
+          "arrival_s": 677.073,
+          "end_s": 874.582,
+          "latency_s": 197.509,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 14,
+          "server": 0,
+          "arrival_s": 749.436,
+          "end_s": 933.494,
+          "latency_s": 184.059,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 15,
+          "server": 0,
+          "arrival_s": 773.735,
+          "end_s": 992.285,
+          "latency_s": 218.55,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 16,
+          "server": 0,
+          "arrival_s": 778.438,
+          "end_s": 1050.882,
+          "latency_s": 272.444,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 17,
+          "server": 0,
+          "arrival_s": 891.848,
+          "end_s": 1109.551,
+          "latency_s": 217.703,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 18,
+          "server": 0,
+          "arrival_s": 950.967,
+          "end_s": 1168.482,
+          "latency_s": 217.515,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        },
+        {
+          "arrival": 19,
+          "server": 0,
+          "arrival_s": 958.28,
+          "end_s": 1227.298,
+          "latency_s": 269.017,
+          "http": 200,
+          "bytes": 441877,
+          "error": ""
+        }
+      ],
+      "nominal_rho": 0.95,
+      "realized_rho": 1.16,
+      "neuron": {
+        "samples": 1227,
+        "neuroncore_util_mean_pct": 83.2,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 87.59
+      }
+    }
+  ],
+  "method": "open loop: Poisson arrivals (seeded exponential gaps) sent at their arrival time regardless of completions; with several servers each arrival goes to the server with the fewest requests in flight; latency = arrival -> response incl. queueing; rho = realized arrival rate x reference isolated latency; SLO met = successes within slo_s of arrival / arrivals; devices idle cooldown_s before each level"
+}

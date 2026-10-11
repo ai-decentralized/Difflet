@@ -1,0 +1,6 @@
+[serve_bench] warmup server 0 1/2: HTTP 200 58.473s 
+[serve_bench] warmup server 0 2/2: HTTP 200 58.498s 
+[serve_bench] rho 0.5 (realized 0.805): 20/20 ok, p50 136.103 p99 244.176 s, SLO 0.45, 48.1/h, per server {'0': 20}, codes {'200': 20}
+[serve_bench] rho 0.8 (realized 0.946): 20/20 ok, p50 89.404 p99 176.318 s, SLO 0.8, 55.0/h, per server {'0': 20}, codes {'200': 20}
+[serve_bench] rho 0.95 (realized 1.16): 20/20 ok, p50 201.083 p99 374.217 s, SLO 0.2, 58.7/h, per server {'0': 20}, codes {'200': 20}
+[serve_bench] wrote benchmark/trn2/eval/e5b/hunyuan_video_tp4_20261010T2146.json
