@@ -234,10 +234,32 @@ def _neuron_options_for(requested: dict[str, Any]) -> dict[str, Any]:
     return shared
 
 
+def repeated_block_lists(module: nn.Module) -> list[str]:
+    """Names of outermost ModuleLists whose two or more members share one class.
+
+    A ModuleList inside another ModuleList belongs to that list's members and is
+    never a stack of its own, whether or not the outer list qualifies. A ``module`` that is
+    itself such a list is the one stack, named ``""``.
+    """
+    import torch.nn as nn
+
+    def inside(name: str, other: str) -> bool:
+        return name != other and (other == "" or name.startswith(other + "."))
+
+    lists = [name for name, child in module.named_modules() if isinstance(child, nn.ModuleList)]
+    outermost = [name for name in lists if not any(inside(name, other) for other in lists)]
+    names = []
+    for name in outermost:
+        blocks = module.get_submodule(name)
+        if len(blocks) >= 2 and len({type(block) for block in blocks}) == 1:
+            names.append(name)
+    return names
+
+
 def compile_blocks(
     model: nn.Module,
     *,
-    block_attrs: Sequence[str] = ("blocks",),
+    block_attrs: Sequence[str] | None = ("blocks",),
     backend: str | Callable[..., Any] = "neuron",
     fullgraph: bool = True,
     dynamic: bool = False,
@@ -246,8 +268,11 @@ def compile_blocks(
     """Compile every child of each block container in place; return their qualified names.
 
     ``block_attrs`` names ``nn.ModuleList``/``nn.Sequential`` containers by (dotted) attribute
-    path; the model's own forward stays eager. Blocks of one class at one input shape share a
-    single Dynamo cache entry, so the backend compiles one graph for the whole stack.
+    path (``""`` is the model itself, whose blocks are then named ``"0"``, ``"1"``, ...);
+    ``None`` compiles the stacks ``repeated_block_lists`` finds instead, and raises
+    ``ValueError`` when there is none. The model's own forward stays eager. Blocks of one
+    class at one input shape share a single Dynamo cache entry, so the backend compiles one
+    graph for the whole stack.
 
     With ``backend="neuron"``, ``options`` is laid over ``NEURON_COMPILE_OPTIONS``, so a block
     that fails to lower raises instead of silently running op by op; pass
@@ -265,6 +290,10 @@ def compile_blocks(
     """
     if isinstance(block_attrs, str):
         raise TypeError(f"block_attrs must be a sequence of attribute names, got {block_attrs!r}")
+    if block_attrs is None:
+        block_attrs = repeated_block_lists(model)
+        if not block_attrs:
+            raise ValueError("no repeated block stack found; pass block_attrs")
     # One options object for all blocks: Dynamo reuses the first block's graph only while the
     # backend wrappers compare equal, options included, and the neuron backend adds "dynamic"
     # to the dict it is given (torch_neuronx/neuron_dynamo_backend/backend.py:1862); a fresh
@@ -293,7 +322,7 @@ def compile_blocks(
                 dynamic=dynamic,
                 options=shared_options,
             )
-            compiled.append(f"{attr}.{name}")
+            compiled.append(f"{attr}.{name}" if attr else name)
     return compiled
 
 
