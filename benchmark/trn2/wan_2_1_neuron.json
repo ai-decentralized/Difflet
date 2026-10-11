@@ -1,0 +1,5049 @@
+{
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "model_type": "wan",
+  "backend": "neuron",
+  "device": "trn2.3xlarge / 4 NeuronCores (logical config 2) / 96 GiB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 50,
+  "compile_seconds": 60.891815495997434,
+  "compile_breakdown": {
+    "warmup_forward_cold_s": 73.87797516399587,
+    "warmup_forward_warm_s": 12.986159667998436,
+    "neff_compile_s": 157.3514711,
+    "block_neff_compile_s": 55.025,
+    "eager_op_neff_compile_s": 102.31300000000002,
+    "dynamo_frame_compile_cold_s": 13.097034406,
+    "dynamo_frame_compile_warm_s": 9.994756731,
+    "dynamo_lower_s": 0.187968,
+    "load_and_warmup_cold_s": 87.34866253199289,
+    "load_and_warmup_warm_s": 18.693357151001692
+  },
+  "load_seconds": 3.9948129700060235,
+  "e2e_cold_seconds": 186.28122095500294,
+  "e2e_breakdown": null,
+  "e2e_warm": {
+    "n": 3,
+    "mean": 114.14717507866833,
+    "median": 113.66586618300062,
+    "std": 0.7207533845328035,
+    "p50": 113.66586618300062,
+    "p90": 115.16595835400221,
+    "min": 113.60970069900213,
+    "max": 115.16595835400221,
+    "samples": [
+      113.60970069900213,
+      113.66586618300062,
+      115.16595835400221
+    ]
+  },
+  "step_latency": {
+    "n": 49,
+    "mean": 0.534831273142897,
+    "median": 0.5344488059927244,
+    "std": 0.002342126969714115,
+    "p50": 0.5344488059927244,
+    "p90": 0.5377863239991711,
+    "min": 0.5294777149974834,
+    "max": 0.5418092309992062,
+    "samples": [
+      0.5341255379898939,
+      0.5403030330053298,
+      0.5321866620070068,
+      0.5335502959933365,
+      0.5348942749988055,
+      0.5353390660020523,
+      0.5348634539986961,
+      0.5418092309992062,
+      0.5294777149974834,
+      0.533921715003089,
+      0.5340816829993855,
+      0.5354693599947495,
+      0.5356679190008435,
+      0.5383428089990048,
+      0.5371481600013794,
+      0.5315701470099157,
+      0.5336809619911946,
+      0.5336719430051744,
+      0.5334890069934772,
+      0.5344923850061605,
+      0.5339267350063892,
+      0.5353282619907986,
+      0.5329035550093977,
+      0.5381255079992115,
+      0.537070047997986,
+      0.5312785290007014,
+      0.533708757997374,
+      0.5339724980003666,
+      0.5344534320029197,
+      0.5333655750000617,
+      0.5410269049898488,
+      0.5318372440087842,
+      0.5354683329933323,
+      0.5332501539960504,
+      0.5373275130114052,
+      0.5344488059927244,
+      0.5343841400026577,
+      0.5366445139952702,
+      0.5333460730034858,
+      0.5328821349976351,
+      0.5377863239991711,
+      0.5337726990110241,
+      0.5354846819973318,
+      0.5352389679901535,
+      0.53453747300955,
+      0.5347366979985964,
+      0.5343635339959292,
+      0.5346327709994512,
+      0.5333451580081601
+    ]
+  },
+  "step_basis": "real loop, neuron synchronize both sides, step 0 excluded, n=49",
+  "step_latency_alt": {},
+  "stage_seconds": {
+    "text_encoder_load_s": 0.7093711140041705,
+    "text_encode": 2.0652030240016757,
+    "negative_encode (inside denoise)": 0.0,
+    "denoise": 26.74105402699206,
+    "vae_decode (host, 12 threads)": 48.539568089996465
+  },
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 1.8697485547611545
+  },
+  "peak_device_mem_gb": 8.13182544708252,
+  "output": {
+    "shape": [
+      1,
+      3,
+      9,
+      480,
+      832
+    ],
+    "dtype": "torch.float32",
+    "finite": true,
+    "min": -1.0,
+    "max": 1.0,
+    "mean": -0.3625313937664032,
+    "std": 0.4496240019798279,
+    "note": "decoded frames of the first warm generate; 88546 byte mp4 sha256 e56c43137f8824ba4890a87e002327e039d9b23b40de7be2e7a8862e801b2210; latents (1,16,3,60,104) sha256 a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820"
+  },
+  "toolchain": {
+    "torch": "2.14.0+cpu",
+    "torch-neuronx": "2.14.3.0.0+unknown.dev",
+    "neuronx-cc": "2.28.4568.0+0163fa9e",
+    "nki": "0.7.0+36523665040.g7b8cdcef",
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "numpy": "2.5.3"
+  },
+  "config_label": "tp=4, bf16, TorchNeuron per-block torch.compile, host fp32 umT5 on rank 0, host VAE",
+  "status": "ok",
+  "notes": [
+    "Commit 3763193977f4a508f72f713444d100f65fa88b08 in /home/ubuntu/Difflet/.claude/worktrees/neuron-phase1 for all 19 launches; no change under difflet/ at any launch; uncommitted files at the launches: benchmark/adapters/neuron.py, benchmark/bench.py, benchmark/models.py, benchmark/neuron_cold_warm.py, benchmark/neuron_wan_bench.py, benchmark/trn2/wan_2_1_neuron.json, benchmark/trn2/wan_2_1_neuron.md, tests/unit/benchmark/ (per-launch sha256 of the benchmark files in neuron.provenance). guidance_scale=1: one forward per step.",
+    "compile_seconds is the rank-max `warmup forward` of the cold script launch minus the first warm launch's (Dynamo trace + StableHLO lowering + neuronx-cc + NEFF load that the cache removes); nothing is built ahead of time, so there is no AoT compile phase.",
+    "e2e_cold_seconds / e2e_warm are the script's `prepare_runtime` -> mp4 saved on rank 0 (NEFF cache empty / populated; the OS page cache was hot for both, Cached 72.2 GiB before the cold launch). The trn2 row's cold start dropped the page cache: see the true-cold CLI row.",
+    "Counters (Total/PersistentHits/InMemoryHits, whole process): cold r0 5/34/11162 r1 25/19/11171 r2 4/40/11171 r3 13/31/11171; warm1 r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; warm2 r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; warm3 r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171",
+    "Cold NEFFs: 47 new .neff files (4 >= 1 MiB block NEFFs); per rank compiled block/eager-op: r0 1/4, r1 1/24, r2 1/3, r3 1/12; dynamo unique graphs per rank [1, 1, 1, 1]",
+    "Threads: ranks OMP_NUM_THREADS=3 (torch default 3); umT5 encode pinned at 12 (D70); the script's host VAE decode on rank 0 at 12; the CLI driver's host decode at its torch default, 3 under OMP_NUM_THREADS=3 (pre-flight: 97.4 s at 3 vs ~65 s at 6, same mp4).",
+    "Peak device memory is torch_neuronx.max_memory_allocated() per rank, in GiB (2**30).",
+    "The device-side script benchmark/neuron_wan_bench.py had 1 sha256 value(s) across the 19 launches (byte-identical).",
+    "Re-judged after the run (the stored verdict was a driver false positive; the record as it ran is kept as record.original.json): g5.0/cli-warm1 (stored failed ['rank_lines', 'compile_clean']). The job stopped there and resumed with --skip-existing; no launch was repeated.",
+    "Fallbacks and unwarmed shapes were [] on every rank of every launch and generate (track_fallbacks only sees eager ops; the compiled blocks are proven by the counters)."
+  ],
+  "timestamp": "2026-10-11 11:29 UTC",
+  "config_slug": "wan_2_1_neuron",
+  "device_slug": "trn2",
+  "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video",
+  "neuron": {
+    "table": [
+      [
+        "compile wall (s)",
+        "rank-max `warmup forward` cold \u2212 warm (first warm launch)",
+        "**60.9** (= 73.9 \u2212 13.0)",
+        "n/a",
+        "n/a",
+        "7879 (incl. VAE 6098; transformer 255)"
+      ],
+      [
+        "NEFF compile (s) / NEFFs",
+        "compiler-only `CompilationTime` sum on the compiling rank (block + eager-op; a sum over NEFFs compiled concurrently, not a wall clock); Dynamo frame compile (trace + lowering); new `.neff` files in the row's cache",
+        "157.4 (rank 1: block 55.0 + eager-op 102.3; Dynamo 13.1, lowering 0.19) / 47 new: 4 block (one per rank, 4 files >= 1 MiB) + 43 eager-op",
+        "0.0 / 0 new (w1: 0.0 s, 0 new, w2: 0.0 s, 0 new, w3: 0.0 s, 0 new)",
+        "0 compilations in iterations 2-3 (True)",
+        "transformer 255 s (AoT build)"
+      ],
+      [
+        "counters per rank",
+        "whole process: TotalCompilations / PersistentHits / InMemoryHits",
+        "r0 5/34/11162 r1 25/19/11171 r2 4/40/11171 r3 13/31/11171",
+        "w1: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171<br>w2: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171<br>w3: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171",
+        "w1 it2-3 generate deltas: r0 0/0/3703 r1 0/0/3705 r2 0/0/3705 r3 0/0/3705; r0 0/0/3703 r1 0/0/3705 r2 0/0/3705 r3 0/0/3705",
+        "\u2014"
+      ],
+      [
+        "load (s)",
+        "rank-max `load checkpoint` (each rank's bf16 slices of the fp32 shards)",
+        "4.0",
+        "4.0 (median 4.0; 4.0-4.0, n=3)",
+        "n/a",
+        "343 cold / 28.4 warm"
+      ],
+      [
+        "prepare_runtime / load() total (s)",
+        "rank-max: runtime + process group bring-up; the whole `load()` (runtime init, build on meta, load checkpoint, per-block compile wrap, warm-up forward, text encoder load)",
+        "20.3 / 87.3",
+        "17.7 (median 17.4; 17.2-18.6, n=3) / 18.7 (median 18.7; 18.6-18.7, n=3)",
+        "n/a",
+        "\u2014"
+      ],
+      [
+        "text encoder load (s)",
+        "rank 0 `text encoder load` phase (umT5 fp32 `from_pretrained`, lazily mmap'd: the read lands in the first encode)",
+        "0.7",
+        "0.7 (median 0.7; 0.7-0.7, n=3)",
+        "n/a",
+        "94.4 cold / 8.3 warm (umT5 NEFF load)"
+      ],
+      [
+        "e2e (s), script",
+        "rank 0: `prepare_runtime` start \u2192 first mp4 saved (load, warm-up, encode, 50 steps, host VAE decode at 12 threads, mp4)",
+        "**186.3**",
+        "**114.1 (median 113.7; 113.6-115.2, n=3)**",
+        "generate only: 76.7 (median 76.6; 76.3-77.0, n=6)",
+        "394 (page cache dropped) / 56.4 (n=3)"
+      ],
+      [
+        "e2e (s), script, latent output",
+        "`prepare_runtime` start \u2192 final latents (no decode)",
+        "136.4",
+        "65.0 (median 64.7; 64.3-66.0, n=3)",
+        "generate only: 27.6 (median 27.6; 27.5-27.6, n=6)",
+        "\u2014"
+      ],
+      [
+        "launch wall (s), script",
+        "driver: torchrun spawn \u2192 exit (3 generates + decodes); spawn + imports \u2192 `prepare_runtime`",
+        "346.3; spawn 4.5",
+        "274.6 (median 274.2; 273.5-276.0, n=3); spawn 4.3 (median 4.3; 4.3-4.4, n=3)",
+        "n/a",
+        "\u2014"
+      ],
+      [
+        "e2e (s), CLI",
+        "`difflet generate --backend neuron` process wall (torchrun ranks, then the driver's host VAE decode at OMP_NUM_THREADS=3)",
+        "239.9 (own fresh cache; 47 new .neff)",
+        "173.0 (median 173.0; 171.8-174.3, n=3)",
+        "n/a",
+        "394 (page cache dropped) / 56.4 (n=3)"
+      ],
+      [
+        "e2e (s), CLI, true cold",
+        "page cache dropped (`sudo -n`), NEFF cache warm: the trn2 definition of a cold start",
+        "747.1 (Cached 72.3 \u2192 0.4 GiB at the drop; NEFF warm)",
+        "n/a",
+        "n/a",
+        "394 (page cache dropped)"
+      ],
+      [
+        "CLI rank load+warm-up / stage (s)",
+        "the `[wan]` rank lines, rank-max (load+warm-up includes `prepare_runtime`)",
+        "105.1 / 133.9",
+        "36.5 / 65.0 ; 36.6 / 65.2 ; 39.1 / 67.6",
+        "n/a",
+        "\u2014"
+      ],
+      [
+        "CLI start \u2192 latents / \u2192 mp4 (s)",
+        "file mtimes: process start \u2192 latents.pt saved by rank 0; latents.pt \u2192 mp4 written (rank teardown + the driver's host VAE load, decode at 3 threads, export)",
+        "138.2 / 100.9",
+        "69.2 / 102.9 ; 69.3 / 101.6 ; 71.9 / 101.6",
+        "true cold: 644.4 / 101.8",
+        "\u2014"
+      ],
+      [
+        "text encode / denoise / VAE decode (s)",
+        "rank-0 stage clocks: prompt encode (the negative prompt is encoded lazily inside the first denoise iteration), `_denoise`, host decode incl. VAE load and mp4 write",
+        "1.99 / 26.8 / 49.8 (VAE 49.5)",
+        "2.07 / 26.7 / 48.5 (VAE 48.3)",
+        "0.81 / 26.8 / 48.8 (VAE 48.5)",
+        "\u2014"
+      ],
+      [
+        "DiT step median (ms)",
+        "inter-step deltas of the real loop, `torch.neuron.synchronize` both sides, step 0 excluded, n=49, rank 0",
+        "evidence only: 534.8",
+        "**534.4** (w2 534.3, w3 533.9)",
+        "534.6 (pooled, n=294)",
+        "554.8 (isolated timer)"
+      ],
+      [
+        "DiT step rank-max median (ms)",
+        "per step, the max over the 4 ranks (what the request waits for)",
+        "536.0",
+        "535.5",
+        "536.3",
+        "\u2014"
+      ],
+      [
+        "DiT step mean / p90 / min / max (ms)",
+        "same series",
+        "535.3 / 536.9 / 529.5 / 546.4",
+        "534.8 / 537.8 / 529.5 / 541.8",
+        "535.0 / 539.0 / 528.8 / 548.1",
+        "\u2014"
+      ],
+      [
+        "DiT forward (ms)",
+        "per forward (host\u2192device inputs, forward, sync, copy back), n=50; median (mean / p90)",
+        "531.2",
+        "530.9 (531.2 / 533.7)",
+        "531.1 (531.2 / 533.8, n=300)",
+        "\u2014"
+      ],
+      [
+        "throughput (steps/s)",
+        "1 / mean step",
+        "evidence only: 1.868",
+        "1.870",
+        "1.869",
+        "1.80"
+      ],
+      [
+        "peak device mem (GiB/rank)",
+        "`torch_neuronx.max_memory_allocated()` per rank (the process's peak so far: after the launch, after generates 2-3)",
+        "8.03 8.03 8.13 8.13",
+        "8.03 8.03 8.03 8.03",
+        "8.03 8.03 8.03 8.03",
+        "null"
+      ],
+      [
+        "fallbacks / unwarmed shapes",
+        "`track_fallbacks()` (load and every generate) / `app.unwarmed_shapes`, every rank",
+        "[] / []",
+        "[] / [] ; [] / [] ; [] / []",
+        "[] / []",
+        "\u2014"
+      ],
+      [
+        "throttle",
+        "sysfs `ham_throttle` `entries`/`max` per core before vs right after every generate (semantics undocumented: a flag, not a verdict); step series p90/median (<= 1.10) and first-10 vs last-10 medians (<= 5 %)",
+        "sysfs entries/max changed across 3/3 generates (max seen ['128/255', '255/255']); p90/median max 1.008, first-10 vs last-10 max 0.06%; within limits",
+        "sysfs entries/max changed across 7/9 generates (max seen ['128/255', '255/255']); p90/median max 1.011, first-10 vs last-10 max 0.20%; within limits",
+        "step medians of the 3 generates per launch: spread 0.13% (max over the warm launches; flag above 2 %)",
+        "\u2014"
+      ],
+      [
+        "output",
+        "decoded frames (first generate of the launch; resident: generate 2 of the first warm launch): shape, finite, min/max/mean/std; mp4 bytes, sha256",
+        "[1, 3, 9, 480, 832] finite=True [-1.000, 1.000] mean -0.363 std 0.450; 88546 B mp4 e56c43137f8824ba\u2026",
+        "[1, 3, 9, 480, 832] finite=True [-1.000, 1.000] mean -0.363 std 0.450; 88546 B mp4 e56c43137f8824ba\u2026",
+        "[1, 3, 9, 480, 832] finite=True [-1.000, 1.000] mean -0.363 std 0.450; 88546 B mp4 e56c43137f8824ba\u2026",
+        "(1,3,9,480,832)"
+      ],
+      [
+        "final latents",
+        "sha256 of the fp32 latents, equal on the 4 ranks of every generate (else the launch failed)",
+        "1 distinct: a703d237e9a9b537\u2026",
+        "1 distinct: a703d237e9a9b537\u2026",
+        "1 distinct: a703d237e9a9b537\u2026",
+        "\u2014"
+      ]
+    ],
+    "e2e_latents_warm": {
+      "n": 3,
+      "mean": 65.01772203600073,
+      "median": 64.69989324299968,
+      "std": 0.7144686415250953,
+      "p50": 64.69989324299968,
+      "p90": 66.00726077800209,
+      "min": 64.34601208700042,
+      "max": 66.00726077800209,
+      "samples": [
+        64.69989324299968,
+        64.34601208700042,
+        66.00726077800209
+      ]
+    },
+    "e2e_cli_warm": {
+      "n": 3,
+      "mean": 173.0208797876597,
+      "median": 173.01077679698938,
+      "std": 1.03803141338504,
+      "p50": 173.01077679698938,
+      "p90": 174.29722482500074,
+      "min": 171.75463774098898,
+      "max": 174.29722482500074,
+      "samples": [
+        173.01077679698938,
+        171.75463774098898,
+        174.29722482500074
+      ]
+    },
+    "e2e_cli_cold_s": 239.94644736900227,
+    "e2e_cli_true_cold_s": 747.0969491150026,
+    "resident_e2e": {
+      "n": 6,
+      "mean": 76.65042902799905,
+      "median": 76.6064439365,
+      "std": 0.2854669998926171,
+      "p50": 76.40181313399808,
+      "p90": 76.96954677600297,
+      "min": 76.34887478200835,
+      "max": 77.00663228299527,
+      "samples": [
+        76.34887478200835,
+        76.36463245398772,
+        76.40181313399808,
+        77.00663228299527,
+        76.96954677600297,
+        76.81107473900192
+      ]
+    },
+    "resident_step": {
+      "n": 294,
+      "mean": 0.535031451057826,
+      "median": 0.5345591465011239,
+      "std": 0.0029291259470075443,
+      "p50": 0.5345299969922053,
+      "p90": 0.5389508440130157,
+      "min": 0.5288153159926878,
+      "max": 0.5480973159865243,
+      "samples": [
+        0.5290159580035834,
+        0.5343666170083452,
+        0.5337962240009801,
+        0.5418501109961653,
+        0.5306283259997144,
+        0.5360642449959414,
+        0.5359293770015938,
+        0.5341415000002598,
+        0.5370970840012887,
+        0.5348204409965547,
+        0.5362446030048886,
+        0.5344345659977989,
+        0.5389685879927129,
+        0.5336682940105675,
+        0.5367447379976511,
+        0.5344133009930374,
+        0.5315837890084367,
+        0.5350223619898316,
+        0.5385339080094127,
+        0.5342334129964001,
+        0.5322874400008004,
+        0.5344864960061386,
+        0.5349714979965938,
+        0.5341798459994607,
+        0.5342525250016479,
+        0.5340469060029136,
+        0.5370115259865997,
+        0.5331735830113757,
+        0.5351964199944632,
+        0.5364247700053966,
+        0.5314731229882454,
+        0.5335735700064106,
+        0.5351264719938627,
+        0.5389508440130157,
+        0.5345937449892517,
+        0.5334803050063783,
+        0.5347657940001227,
+        0.5342473219934618,
+        0.533954332000576,
+        0.534022965002805,
+        0.5338920089998282,
+        0.5368688580056187,
+        0.5317310019891011,
+        0.5383327970048413,
+        0.5341954140021699,
+        0.5378743089968339,
+        0.5335892190050799,
+        0.5426341209968086,
+        0.5290722290083067,
+        0.5340150879928842,
+        0.5347032220015535,
+        0.5346157659951132,
+        0.5353359319997253,
+        0.5345882960100425,
+        0.5338062689988874,
+        0.5403114459913922,
+        0.5336211399990134,
+        0.5348088400060078,
+        0.5336651160032488,
+        0.5349014059902402,
+        0.5333844700071495,
+        0.5334538140014047,
+        0.5338371480029309,
+        0.5411894919961924,
+        0.5330607719952241,
+        0.5337771339982282,
+        0.5355645840027137,
+        0.5336342740047257,
+        0.5349931579985423,
+        0.5331773149955552,
+        0.5347627070004819,
+        0.5427492199960398,
+        0.5294523730117362,
+        0.5367349209991517,
+        0.5317165390006267,
+        0.5362703229911858,
+        0.5359087079996243,
+        0.5399574250041042,
+        0.5299491600017063,
+        0.5360290599928703,
+        0.5335024410014739,
+        0.537114685997949,
+        0.5348352110013366,
+        0.5373975679976866,
+        0.5333003890118562,
+        0.539125391995185,
+        0.5334990160044981,
+        0.5339192249957705,
+        0.534654599003261,
+        0.5343441199947847,
+        0.5351075329963351,
+        0.5351166480104439,
+        0.5335874089942081,
+        0.5348637790011708,
+        0.5316908079985296,
+        0.5367958720016759,
+        0.5400604989990825,
+        0.5292378570011351,
+        0.5354370909917634,
+        0.5336673010024242,
+        0.5377673939947272,
+        0.5323498090001522,
+        0.53544917301042,
+        0.5386654579924652,
+        0.5312848110042978,
+        0.5389330399921164,
+        0.53349019199959,
+        0.5352353660127847,
+        0.5340868929924909,
+        0.5447884210007032,
+        0.529457568001817,
+        0.5420029709930532,
+        0.5298816090071341,
+        0.5344352169922786,
+        0.5339115210081218,
+        0.5345299969922053,
+        0.5349438840057701,
+        0.5337317130033625,
+        0.533742945000995,
+        0.5382575489929877,
+        0.538085014995886,
+        0.5328736140072579,
+        0.5338596229994437,
+        0.536907664994942,
+        0.5341820489993552,
+        0.5344176630023867,
+        0.5343722320103552,
+        0.5333539529965492,
+        0.5411712939967401,
+        0.5338204159925226,
+        0.5346904930047458,
+        0.5390940490033245,
+        0.5297503860056167,
+        0.5343533299892442,
+        0.5347539159993175,
+        0.5339542029978475,
+        0.5350379020092078,
+        0.5353706189926015,
+        0.534646726999199,
+        0.5349327770090895,
+        0.5337592409923673,
+        0.5415258160064695,
+        0.5306746279966319,
+        0.5404169100074796,
+        0.5294171159912366,
+        0.5394309859984787,
+        0.5339592910022475,
+        0.5337803319998784,
+        0.5353496479947353,
+        0.5344209540053271,
+        0.5364646520029055,
+        0.5358283079985995,
+        0.5364165489881998,
+        0.5407038720004493,
+        0.5297960919997422,
+        0.5329099939990556,
+        0.5346474530088017,
+        0.5360132210043957,
+        0.5343132509879069,
+        0.5349955790006788,
+        0.5344566380081233,
+        0.5373891060007736,
+        0.5315993789990898,
+        0.5337631639995379,
+        0.5342276529991068,
+        0.5348263679916272,
+        0.5333260340121342,
+        0.5367130239901599,
+        0.5353658189997077,
+        0.5368599750072462,
+        0.5348458189982921,
+        0.5341968290013028,
+        0.533794950999436,
+        0.5362765500030946,
+        0.5350236809899798,
+        0.537952419006615,
+        0.5341330520022893,
+        0.5346086159988772,
+        0.5332339180022245,
+        0.5349917779967654,
+        0.5354608820052817,
+        0.5376345289987512,
+        0.5321625279902946,
+        0.5352290150040062,
+        0.5370976450067246,
+        0.5327703059883788,
+        0.5368260180111974,
+        0.5331021829915699,
+        0.5340377819957212,
+        0.5337713170010829,
+        0.5450410510093207,
+        0.5288153159926878,
+        0.5375412050052546,
+        0.5433031769935042,
+        0.5302311760024168,
+        0.5325808320048964,
+        0.5301409740059171,
+        0.5328278669912834,
+        0.5350464580114931,
+        0.5364290899888147,
+        0.5341873069992289,
+        0.5328482269978849,
+        0.5348070830077631,
+        0.5344163109984947,
+        0.5338285470061237,
+        0.5366462379897712,
+        0.5313831220119027,
+        0.5339425629936159,
+        0.5342819579964271,
+        0.5342386789998272,
+        0.5369682599994121,
+        0.5350325440085726,
+        0.5355013469961705,
+        0.5347188239975367,
+        0.5372953330079326,
+        0.5338838419993408,
+        0.5354373209993355,
+        0.5351167429907946,
+        0.5371540580090368,
+        0.5343972349946853,
+        0.5361974620027468,
+        0.535569632993429,
+        0.5360912180040032,
+        0.5344347649952397,
+        0.5345142139995005,
+        0.5338416020094883,
+        0.535116849001497,
+        0.5364570789970458,
+        0.5332419539918192,
+        0.5358195610024268,
+        0.5354038320074324,
+        0.5400476810027612,
+        0.532477447995916,
+        0.5342762929940363,
+        0.5338844790094299,
+        0.535801324993372,
+        0.534512607002398,
+        0.5346455980034079,
+        0.5341014869918581,
+        0.5343074760021409,
+        0.5337518010055646,
+        0.534972833993379,
+        0.5337396139948396,
+        0.5343635860044742,
+        0.5330072960059624,
+        0.5422678000031738,
+        0.529401185005554,
+        0.535172996998881,
+        0.5355465499887941,
+        0.5360427300038282,
+        0.5324718370102346,
+        0.533124814988696,
+        0.5341406689985888,
+        0.5339307090034708,
+        0.5342038119997596,
+        0.5345958980033174,
+        0.5424420539929997,
+        0.5354906640131958,
+        0.5361120499874232,
+        0.5330591100064339,
+        0.5335165569995297,
+        0.5438477179995971,
+        0.5295240450068377,
+        0.5480973159865243,
+        0.5290244330099085,
+        0.535859943003743,
+        0.5362104309897404,
+        0.5317728170048213,
+        0.54045014300209,
+        0.5324285169917857,
+        0.5402320630091708,
+        0.5322449669911293,
+        0.5328126750100637,
+        0.5369998229871271,
+        0.5342165130132344,
+        0.5405874149873853,
+        0.5290232970000943,
+        0.5339310060080606,
+        0.5376377229986247,
+        0.531746791995829,
+        0.5341130010056077,
+        0.5357443510001758,
+        0.5368325610033935,
+        0.5327630669926293,
+        0.5347608290030621,
+        0.5356732109939912,
+        0.5325606270052958,
+        0.5334429420036031,
+        0.5416879639960825,
+        0.5313697560050059,
+        0.5350217009981861,
+        0.5356273429933935,
+        0.5339254580030683,
+        0.5406625689938664
+      ]
+    },
+    "step_rank_max": {
+      "n": 49,
+      "mean": 0.5366028202038344,
+      "median": 0.5354846819973318,
+      "std": 0.0026918351845254197,
+      "p50": 0.5354846819973318,
+      "p90": 0.5408789650100516,
+      "min": 0.5333486059971619,
+      "max": 0.5438800279953284,
+      "samples": [
+        0.5438688969879877,
+        0.5403030330053298,
+        0.534537215004093,
+        0.5342822649981827,
+        0.5383451810048427,
+        0.5353390660020523,
+        0.5351148470072076,
+        0.5418092309992062,
+        0.5382235910074087,
+        0.5340343279967783,
+        0.5341088179993676,
+        0.535881956006051,
+        0.5438800279953284,
+        0.5383428089990048,
+        0.5371481600013794,
+        0.535014795997995,
+        0.5336809619911946,
+        0.5336719430051744,
+        0.5344857720047003,
+        0.5345259019959485,
+        0.5365963100048248,
+        0.5356073090079008,
+        0.5407739439979196,
+        0.5381255079992115,
+        0.537070047997986,
+        0.5341239840054186,
+        0.533708757997374,
+        0.5342273040005239,
+        0.534607114008395,
+        0.5410423790017376,
+        0.5410269049898488,
+        0.5352370260079624,
+        0.5354683329933323,
+        0.5374049949896289,
+        0.5373424619901925,
+        0.5344696410029428,
+        0.5346290300076362,
+        0.5366445139952702,
+        0.5374946219963022,
+        0.5408789650100516,
+        0.5383363949949853,
+        0.5369805340014864,
+        0.5354846819973318,
+        0.5352389679901535,
+        0.5369687229976989,
+        0.5350378069997532,
+        0.5343965089996345,
+        0.5346680149959866,
+        0.5333486059971619
+      ]
+    },
+    "forward": {
+      "n": 50,
+      "mean": 0.5311872771190247,
+      "median": 0.5309161029945244,
+      "std": 0.0017081698778690522,
+      "p50": 0.5309159139869735,
+      "p90": 0.5337186719989404,
+      "min": 0.5264756039978238,
+      "max": 0.5354313349962467,
+      "samples": [
+        0.5308857240015641,
+        0.5309055830002762,
+        0.5343847769981949,
+        0.5285457870049868,
+        0.5303210529964417,
+        0.5317972379998537,
+        0.5318294869939564,
+        0.5316174649924506,
+        0.5304566480044741,
+        0.5264756039978238,
+        0.5309162920020754,
+        0.530796694001765,
+        0.5325350330094807,
+        0.5331941719923634,
+        0.5354313349962467,
+        0.5313370359945111,
+        0.528232263008249,
+        0.5306639990012627,
+        0.5298719359998358,
+        0.5304844409984071,
+        0.5311800199997379,
+        0.5308234889962478,
+        0.5319708850001916,
+        0.530118828988634,
+        0.5347435790026793,
+        0.5312604229984572,
+        0.5279805249883793,
+        0.5305163839948364,
+        0.5309159139869735,
+        0.5312010199995711,
+        0.5303612550051184,
+        0.5342893449997064,
+        0.528314159004367,
+        0.5321677449974231,
+        0.5307810219965177,
+        0.5337186719989404,
+        0.5311852900049416,
+        0.5314259209990269,
+        0.5305504700081656,
+        0.5302368409902556,
+        0.5301965219987324,
+        0.534626833992661,
+        0.5308413119928446,
+        0.5323797860037303,
+        0.531687470007455,
+        0.5317270329978783,
+        0.5313498210016405,
+        0.5309727230051067,
+        0.5309080339939101,
+        0.5302499660028843
+      ]
+    },
+    "checks": [
+      {
+        "launch": "script-cold",
+        "name": "exit",
+        "ok": true,
+        "detail": "exit 0 timed_out=False",
+        "hard": true
+      },
+      {
+        "launch": "script-cold",
+        "name": "fallbacks",
+        "ok": true,
+        "detail": "load [[], [], [], []], generates [[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+        "hard": true
+      },
+      {
+        "launch": "script-cold",
+        "name": "unwarmed_shapes",
+        "ok": true,
+        "detail": "[[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+        "hard": true
+      },
+      {
+        "launch": "script-cold",
+        "name": "compiled_blocks",
+        "ok": true,
+        "detail": "[40, 40, 40, 40]",
+        "hard": true
+      },
+      {
+        "launch": "script-cold",
+        "name": "loop_shape",
+        "ok": true,
+        "detail": "one stamp per iteration, steps-1 deltas, forwards = steps x (2 if g > 1)",
+        "hard": true
+      },
+      {
+        "launch": "script-cold",
+        "name": "latents_equal_on_ranks",
+        "ok": true,
+        "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+        "hard": true
+      },
+      {
+        "launch": "script-cold",
+        "name": "latents_equal_across_iterations",
+        "ok": true,
+        "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+        "hard": true
+      },
+      {
+        "launch": "script-cold",
+        "name": "mp4_written",
+        "ok": true,
+        "detail": "[88546, 88546, 88546] bytes",
+        "hard": true
+      },
+      {
+        "launch": "script-cold",
+        "name": "hlo_locks_in_cache",
+        "ok": true,
+        "detail": "['/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo']",
+        "hard": true
+      },
+      {
+        "launch": "script-cold",
+        "name": "counter_rule_cold",
+        "ok": true,
+        "detail": "Total/PersistentHits/InMemoryHits r0 5/34/11162 r1 25/19/11171 r2 4/40/11171 r3 13/31/11171; new .neff 47",
+        "hard": true
+      },
+      {
+        "launch": "script-cold",
+        "name": "no_compile_in_generates",
+        "ok": true,
+        "detail": "generate TotalCompilations by iteration and rank [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]",
+        "hard": false
+      },
+      {
+        "launch": "script-cold",
+        "name": "step_series_it1",
+        "ok": true,
+        "detail": "p90/median 1.0039 (max 1.1); first-10 vs last-10 median 0.04% (max 5%)",
+        "hard": false
+      },
+      {
+        "launch": "script-cold",
+        "name": "step_series_it2",
+        "ok": true,
+        "detail": "p90/median 1.0069 (max 1.1); first-10 vs last-10 median 0.06% (max 5%)",
+        "hard": false
+      },
+      {
+        "launch": "script-cold",
+        "name": "step_series_it3",
+        "ok": true,
+        "detail": "p90/median 1.0081 (max 1.1); first-10 vs last-10 median 0.01% (max 5%)",
+        "hard": false
+      },
+      {
+        "launch": "script-cold",
+        "name": "resident_medians_within_2pct",
+        "ok": true,
+        "detail": "step medians [534.8, 534.19, 534.69] ms, spread 0.11%",
+        "hard": false
+      },
+      {
+        "launch": "script-warm1",
+        "name": "exit",
+        "ok": true,
+        "detail": "exit 0 timed_out=False",
+        "hard": true
+      },
+      {
+        "launch": "script-warm1",
+        "name": "fallbacks",
+        "ok": true,
+        "detail": "load [[], [], [], []], generates [[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+        "hard": true
+      },
+      {
+        "launch": "script-warm1",
+        "name": "unwarmed_shapes",
+        "ok": true,
+        "detail": "[[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+        "hard": true
+      },
+      {
+        "launch": "script-warm1",
+        "name": "compiled_blocks",
+        "ok": true,
+        "detail": "[40, 40, 40, 40]",
+        "hard": true
+      },
+      {
+        "launch": "script-warm1",
+        "name": "loop_shape",
+        "ok": true,
+        "detail": "one stamp per iteration, steps-1 deltas, forwards = steps x (2 if g > 1)",
+        "hard": true
+      },
+      {
+        "launch": "script-warm1",
+        "name": "latents_equal_on_ranks",
+        "ok": true,
+        "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+        "hard": true
+      },
+      {
+        "launch": "script-warm1",
+        "name": "latents_equal_across_iterations",
+        "ok": true,
+        "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+        "hard": true
+      },
+      {
+        "launch": "script-warm1",
+        "name": "latents_equal_to_cold_launch",
+        "ok": true,
+        "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+        "hard": true
+      },
+      {
+        "launch": "script-warm1",
+        "name": "mp4_written",
+        "ok": true,
+        "detail": "[88546, 88546, 88546] bytes",
+        "hard": true
+      },
+      {
+        "launch": "script-warm1",
+        "name": "hlo_locks_in_cache",
+        "ok": true,
+        "detail": "['/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo']",
+        "hard": true
+      },
+      {
+        "launch": "script-warm1",
+        "name": "counter_rule_warm",
+        "ok": true,
+        "detail": "Total/PersistentHits/InMemoryHits r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; new .neff 0",
+        "hard": true
+      },
+      {
+        "launch": "script-warm1",
+        "name": "no_compile_in_generates",
+        "ok": true,
+        "detail": "generate TotalCompilations by iteration and rank [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]",
+        "hard": true
+      },
+      {
+        "launch": "script-warm1",
+        "name": "step_series_it1",
+        "ok": true,
+        "detail": "p90/median 1.0062 (max 1.1); first-10 vs last-10 median 0.02% (max 5%)",
+        "hard": false
+      },
+      {
+        "launch": "script-warm1",
+        "name": "step_series_it2",
+        "ok": true,
+        "detail": "p90/median 1.0073 (max 1.1); first-10 vs last-10 median 0.09% (max 5%)",
+        "hard": false
+      },
+      {
+        "launch": "script-warm1",
+        "name": "step_series_it3",
+        "ok": true,
+        "detail": "p90/median 1.0084 (max 1.1); first-10 vs last-10 median 0.03% (max 5%)",
+        "hard": false
+      },
+      {
+        "launch": "script-warm1",
+        "name": "resident_medians_within_2pct",
+        "ok": true,
+        "detail": "step medians [534.45, 534.41, 534.65] ms, spread 0.05%",
+        "hard": false
+      },
+      {
+        "launch": "script-warm2",
+        "name": "exit",
+        "ok": true,
+        "detail": "exit 0 timed_out=False",
+        "hard": true
+      },
+      {
+        "launch": "script-warm2",
+        "name": "fallbacks",
+        "ok": true,
+        "detail": "load [[], [], [], []], generates [[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+        "hard": true
+      },
+      {
+        "launch": "script-warm2",
+        "name": "unwarmed_shapes",
+        "ok": true,
+        "detail": "[[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+        "hard": true
+      },
+      {
+        "launch": "script-warm2",
+        "name": "compiled_blocks",
+        "ok": true,
+        "detail": "[40, 40, 40, 40]",
+        "hard": true
+      },
+      {
+        "launch": "script-warm2",
+        "name": "loop_shape",
+        "ok": true,
+        "detail": "one stamp per iteration, steps-1 deltas, forwards = steps x (2 if g > 1)",
+        "hard": true
+      },
+      {
+        "launch": "script-warm2",
+        "name": "latents_equal_on_ranks",
+        "ok": true,
+        "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+        "hard": true
+      },
+      {
+        "launch": "script-warm2",
+        "name": "latents_equal_across_iterations",
+        "ok": true,
+        "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+        "hard": true
+      },
+      {
+        "launch": "script-warm2",
+        "name": "latents_equal_to_cold_launch",
+        "ok": true,
+        "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+        "hard": true
+      },
+      {
+        "launch": "script-warm2",
+        "name": "mp4_written",
+        "ok": true,
+        "detail": "[88546, 88546, 88546] bytes",
+        "hard": true
+      },
+      {
+        "launch": "script-warm2",
+        "name": "hlo_locks_in_cache",
+        "ok": true,
+        "detail": "['/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo']",
+        "hard": true
+      },
+      {
+        "launch": "script-warm2",
+        "name": "counter_rule_warm",
+        "ok": true,
+        "detail": "Total/PersistentHits/InMemoryHits r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; new .neff 0",
+        "hard": true
+      },
+      {
+        "launch": "script-warm2",
+        "name": "no_compile_in_generates",
+        "ok": true,
+        "detail": "generate TotalCompilations by iteration and rank [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]",
+        "hard": true
+      },
+      {
+        "launch": "script-warm2",
+        "name": "step_series_it1",
+        "ok": true,
+        "detail": "p90/median 1.0040 (max 1.1); first-10 vs last-10 median 0.06% (max 5%)",
+        "hard": false
+      },
+      {
+        "launch": "script-warm2",
+        "name": "step_series_it2",
+        "ok": true,
+        "detail": "p90/median 1.0093 (max 1.1); first-10 vs last-10 median 0.10% (max 5%)",
+        "hard": false
+      },
+      {
+        "launch": "script-warm2",
+        "name": "step_series_it3",
+        "ok": true,
+        "detail": "p90/median 1.0051 (max 1.1); first-10 vs last-10 median 0.20% (max 5%)",
+        "hard": false
+      },
+      {
+        "launch": "script-warm2",
+        "name": "resident_medians_within_2pct",
+        "ok": true,
+        "detail": "step medians [534.33, 534.44, 534.83] ms, spread 0.09%",
+        "hard": false
+      },
+      {
+        "launch": "script-warm3",
+        "name": "exit",
+        "ok": true,
+        "detail": "exit 0 timed_out=False",
+        "hard": true
+      },
+      {
+        "launch": "script-warm3",
+        "name": "fallbacks",
+        "ok": true,
+        "detail": "load [[], [], [], []], generates [[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+        "hard": true
+      },
+      {
+        "launch": "script-warm3",
+        "name": "unwarmed_shapes",
+        "ok": true,
+        "detail": "[[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+        "hard": true
+      },
+      {
+        "launch": "script-warm3",
+        "name": "compiled_blocks",
+        "ok": true,
+        "detail": "[40, 40, 40, 40]",
+        "hard": true
+      },
+      {
+        "launch": "script-warm3",
+        "name": "loop_shape",
+        "ok": true,
+        "detail": "one stamp per iteration, steps-1 deltas, forwards = steps x (2 if g > 1)",
+        "hard": true
+      },
+      {
+        "launch": "script-warm3",
+        "name": "latents_equal_on_ranks",
+        "ok": true,
+        "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+        "hard": true
+      },
+      {
+        "launch": "script-warm3",
+        "name": "latents_equal_across_iterations",
+        "ok": true,
+        "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+        "hard": true
+      },
+      {
+        "launch": "script-warm3",
+        "name": "latents_equal_to_cold_launch",
+        "ok": true,
+        "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+        "hard": true
+      },
+      {
+        "launch": "script-warm3",
+        "name": "mp4_written",
+        "ok": true,
+        "detail": "[88546, 88546, 88546] bytes",
+        "hard": true
+      },
+      {
+        "launch": "script-warm3",
+        "name": "hlo_locks_in_cache",
+        "ok": true,
+        "detail": "['/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo']",
+        "hard": true
+      },
+      {
+        "launch": "script-warm3",
+        "name": "counter_rule_warm",
+        "ok": true,
+        "detail": "Total/PersistentHits/InMemoryHits r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; new .neff 0",
+        "hard": true
+      },
+      {
+        "launch": "script-warm3",
+        "name": "no_compile_in_generates",
+        "ok": true,
+        "detail": "generate TotalCompilations by iteration and rank [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]",
+        "hard": true
+      },
+      {
+        "launch": "script-warm3",
+        "name": "step_series_it1",
+        "ok": true,
+        "detail": "p90/median 1.0053 (max 1.1); first-10 vs last-10 median 0.08% (max 5%)",
+        "hard": false
+      },
+      {
+        "launch": "script-warm3",
+        "name": "step_series_it2",
+        "ok": true,
+        "detail": "p90/median 1.0036 (max 1.1); first-10 vs last-10 median 0.01% (max 5%)",
+        "hard": false
+      },
+      {
+        "launch": "script-warm3",
+        "name": "step_series_it3",
+        "ok": true,
+        "detail": "p90/median 1.0113 (max 1.1); first-10 vs last-10 median 0.13% (max 5%)",
+        "hard": false
+      },
+      {
+        "launch": "script-warm3",
+        "name": "resident_medians_within_2pct",
+        "ok": true,
+        "detail": "step medians [533.9, 534.51, 534.6] ms, spread 0.13%",
+        "hard": false
+      },
+      {
+        "launch": "cli-warm1",
+        "name": "exit",
+        "ok": true,
+        "detail": "exit 0 timed_out=False",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm1",
+        "name": "rank_lines",
+        "ok": true,
+        "detail": "ranks [0, 1, 2, 3]",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm1",
+        "name": "compile_clean",
+        "ok": true,
+        "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm1",
+        "name": "one_writer",
+        "ok": true,
+        "detail": "1 'latents saved' lines",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm1",
+        "name": "video_saved",
+        "ok": true,
+        "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-warm1/out.mp4']",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm1",
+        "name": "no_failure",
+        "ok": true,
+        "detail": "0 failure lines",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm1",
+        "name": "file_rule_warm",
+        "ok": true,
+        "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm1",
+        "name": "latents_equal_to_script",
+        "ok": true,
+        "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+        "hard": false
+      },
+      {
+        "launch": "cli-warm2",
+        "name": "exit",
+        "ok": true,
+        "detail": "exit 0 timed_out=False",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm2",
+        "name": "rank_lines",
+        "ok": true,
+        "detail": "ranks [0, 1, 2, 3]",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm2",
+        "name": "compile_clean",
+        "ok": true,
+        "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm2",
+        "name": "one_writer",
+        "ok": true,
+        "detail": "1 'latents saved' lines",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm2",
+        "name": "video_saved",
+        "ok": true,
+        "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-warm2/out.mp4']",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm2",
+        "name": "no_failure",
+        "ok": true,
+        "detail": "0 failure lines",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm2",
+        "name": "file_rule_warm",
+        "ok": true,
+        "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm2",
+        "name": "latents_equal_to_script",
+        "ok": true,
+        "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+        "hard": false
+      },
+      {
+        "launch": "cli-warm3",
+        "name": "exit",
+        "ok": true,
+        "detail": "exit 0 timed_out=False",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm3",
+        "name": "rank_lines",
+        "ok": true,
+        "detail": "ranks [0, 1, 2, 3]",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm3",
+        "name": "compile_clean",
+        "ok": true,
+        "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm3",
+        "name": "one_writer",
+        "ok": true,
+        "detail": "1 'latents saved' lines",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm3",
+        "name": "video_saved",
+        "ok": true,
+        "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-warm3/out.mp4']",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm3",
+        "name": "no_failure",
+        "ok": true,
+        "detail": "0 failure lines",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm3",
+        "name": "file_rule_warm",
+        "ok": true,
+        "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+        "hard": true
+      },
+      {
+        "launch": "cli-warm3",
+        "name": "latents_equal_to_script",
+        "ok": true,
+        "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+        "hard": false
+      },
+      {
+        "launch": "cli-truecold",
+        "name": "exit",
+        "ok": true,
+        "detail": "exit 0 timed_out=False",
+        "hard": true
+      },
+      {
+        "launch": "cli-truecold",
+        "name": "rank_lines",
+        "ok": true,
+        "detail": "ranks [0, 1, 2, 3]",
+        "hard": true
+      },
+      {
+        "launch": "cli-truecold",
+        "name": "compile_clean",
+        "ok": true,
+        "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+        "hard": true
+      },
+      {
+        "launch": "cli-truecold",
+        "name": "one_writer",
+        "ok": true,
+        "detail": "1 'latents saved' lines",
+        "hard": true
+      },
+      {
+        "launch": "cli-truecold",
+        "name": "video_saved",
+        "ok": true,
+        "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-truecold/out.mp4']",
+        "hard": true
+      },
+      {
+        "launch": "cli-truecold",
+        "name": "no_failure",
+        "ok": true,
+        "detail": "0 failure lines",
+        "hard": true
+      },
+      {
+        "launch": "cli-truecold",
+        "name": "file_rule_warm",
+        "ok": true,
+        "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+        "hard": true
+      },
+      {
+        "launch": "cli-truecold",
+        "name": "latents_equal_to_script",
+        "ok": true,
+        "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+        "hard": false
+      },
+      {
+        "launch": "cli-cold",
+        "name": "exit",
+        "ok": true,
+        "detail": "exit 0 timed_out=False",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "rank_lines",
+        "ok": true,
+        "detail": "ranks [0, 1, 2, 3]",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "compile_clean",
+        "ok": true,
+        "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "one_writer",
+        "ok": true,
+        "detail": "1 'latents saved' lines",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "video_saved",
+        "ok": true,
+        "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-cold/out.mp4']",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "no_failure",
+        "ok": true,
+        "detail": "0 failure lines",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "file_rule_cold",
+        "ok": true,
+        "detail": "new .neff 47",
+        "hard": true
+      },
+      {
+        "launch": "cli-cold",
+        "name": "latents_equal_to_script",
+        "ok": true,
+        "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+        "hard": false
+      }
+    ],
+    "provenance": {
+      "head": "3763193977f4a508f72f713444d100f65fa88b08",
+      "worktree": "/home/ubuntu/Difflet/.claude/worktrees/neuron-phase1",
+      "status_at_runs": [
+        "M benchmark/bench.py\n M benchmark/models.py\n?? benchmark/adapters/neuron.py\n?? benchmark/neuron_cold_warm.py\n?? benchmark/neuron_wan_bench.py\n?? benchmark/trn2/wan_2_1_neuron.json\n?? benchmark/trn2/wan_2_1_neuron.md\n?? tests/unit/benchmark/",
+        "M benchmark/bench.py\n M benchmark/models.py\n?? benchmark/adapters/neuron.py\n?? benchmark/neuron_cold_warm.py\n?? benchmark/neuron_wan_bench.py\n?? tests/unit/benchmark/"
+      ],
+      "difflet_diff_vs_head_at_runs": [
+        ""
+      ],
+      "neuronx_cc": [
+        "NeuronX Compiler version 2.28.4568.0+0163fa9e"
+      ],
+      "neuron_cc_flags": [
+        "None"
+      ],
+      "files_sha256_at_runs": {
+        "benchmark/neuron_cold_warm.py": [
+          "0e976fa718cba79c901e608ea62f11e0015bc34be72f7cdad39f58c68573e14a",
+          "b8f5efd0790993199e681e152c13b572c93338358baa1657eb8fd7d7e6a7853a",
+          "42dbb820a17473f9be3ab33f983c705099a972f51c7ed4b9e7a8058a8ed02ebc",
+          "4a4620da45a3cd2ea6a4667c1508e6fa50dfba83e02f58fc99ad6bc74aa8fc78",
+          "53931f5117ce74f1508eb46e95d3c7dc0dc74b8d4645ab614346d4a170813373"
+        ],
+        "benchmark/neuron_wan_bench.py": [
+          "adb718622beb1a63b7e836caa4bc1953dc158602e7376052c5d14411d587ae7a"
+        ],
+        "benchmark/adapters/neuron.py": [
+          "af6b1de94cfa327ccfebfa05831a435ffa7bc9132987a6ca43d2c153f3cc889a",
+          "7047c50f1fa9c972edf2011139dcab0be2335fc46f129e699b23d7d4b6be8c42"
+        ],
+        "benchmark/harness.py": [
+          "13942ab2667a0560e6eff703a4a37aa4a8a58c7df281586194ac32dbbc8ddd6a"
+        ],
+        "benchmark/report.py": [
+          "282e1c9ef28b16a9425e18544e45ac6798735f59184db004835e0a0afc8fec6e"
+        ],
+        "benchmark/models.py": [
+          "0cf41b2dfab9f39a13f4baddf739190a5a761694adae04f25d434021400173a9"
+        ],
+        "tests/numerical/neuron_parity.py": [
+          "c9c3c1ec997476d8c95ea9f340a3e4efb1858c2c3b9b3df097784ec3a9fad35e"
+        ]
+      },
+      "launches": 19
+    }
+  },
+  "results_by_guidance": {
+    "5.0": {
+      "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+      "model_type": "wan",
+      "backend": "neuron",
+      "device": "trn2.3xlarge / 4 NeuronCores (logical config 2) / 96 GiB/device",
+      "dtype": "bf16",
+      "parallel": {
+        "tp_degree": 4,
+        "cp_degree": 1,
+        "cp_mode": "gather_kv",
+        "cfg_parallel_enabled": false,
+        "sp_enabled": false
+      },
+      "shape": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 9
+      },
+      "steps": 50,
+      "compile_seconds": 57.564253219999955,
+      "compile_breakdown": {
+        "warmup_forward_cold_s": 70.46874186399509,
+        "warmup_forward_warm_s": 12.904488643995137,
+        "neff_compile_s": 201.240574556,
+        "block_neff_compile_s": 51.575,
+        "eager_op_neff_compile_s": 149.64600000000002,
+        "dynamo_frame_compile_cold_s": 12.032526328,
+        "dynamo_frame_compile_warm_s": 10.067158768,
+        "dynamo_lower_s": 0.18622,
+        "load_and_warmup_cold_s": 83.41582419500628,
+        "load_and_warmup_warm_s": 18.26979178500187
+      },
+      "load_seconds": 3.650504571007332,
+      "e2e_cold_seconds": 206.4601715040044,
+      "e2e_breakdown": null,
+      "e2e_warm": {
+        "n": 3,
+        "mean": 141.176864766671,
+        "median": 140.5310633330082,
+        "std": 1.2369825472603253,
+        "p50": 140.5310633330082,
+        "p90": 142.90774066600716,
+        "min": 140.09179030099767,
+        "max": 142.90774066600716,
+        "samples": [
+          140.5310633330082,
+          142.90774066600716,
+          140.09179030099767
+        ]
+      },
+      "step_latency": {
+        "n": 49,
+        "mean": 1.0680688516122803,
+        "median": 1.0672266440087697,
+        "std": 0.0035349066418286757,
+        "p50": 1.0672266440087697,
+        "p90": 1.0724275300017325,
+        "min": 1.0617820469924482,
+        "max": 1.078232622006908,
+        "samples": [
+          1.0669428609980969,
+          1.0661191880062688,
+          1.065537193993805,
+          1.0724275300017325,
+          1.0663884170062374,
+          1.0688015399937285,
+          1.0655677079921588,
+          1.0667927550093736,
+          1.0678134149929974,
+          1.0757325120066525,
+          1.0618212099943776,
+          1.078232622006908,
+          1.071516748997965,
+          1.0617820469924482,
+          1.0686960140010342,
+          1.0704958140122471,
+          1.0664763120003045,
+          1.068863757987856,
+          1.0658137170103146,
+          1.0732770059985342,
+          1.0673310150014004,
+          1.0647911109990673,
+          1.0662465839996003,
+          1.0665960619953694,
+          1.069419385996298,
+          1.0661099740100326,
+          1.0652349829906598,
+          1.0666141039982904,
+          1.0668496580037754,
+          1.067105107998941,
+          1.06644423599937,
+          1.0672266440087697,
+          1.0706792639975902,
+          1.0652989869995508,
+          1.0677954080019845,
+          1.0697508859884692,
+          1.0689577410084894,
+          1.0657539969979553,
+          1.0768842149991542,
+          1.0619387390033808,
+          1.067312828003196,
+          1.0668012729875045,
+          1.0678173750056885,
+          1.0708652419998543,
+          1.0737159910058836,
+          1.0620425429951865,
+          1.0690446350054117,
+          1.072369493995211,
+          1.0692778770026052
+        ]
+      },
+      "step_basis": "real loop, neuron synchronize both sides, step 0 excluded, n=49",
+      "step_latency_alt": {},
+      "stage_seconds": {
+        "text_encoder_load_s": 0.7145087410026463,
+        "text_encode": 2.022274949995335,
+        "negative_encode (inside denoise)": 0.2574009320087498,
+        "denoise": 53.65549805399496,
+        "vae_decode (host, 12 threads)": 48.99070524099807
+      },
+      "e2e_warm_natural": null,
+      "step_latency_natural": null,
+      "throughput": {
+        "DiT steps/s": 0.9362692287959448
+      },
+      "peak_device_mem_gb": 8.13231372833252,
+      "output": {
+        "shape": [
+          1,
+          3,
+          9,
+          480,
+          832
+        ],
+        "dtype": "torch.float32",
+        "finite": true,
+        "min": -1.0,
+        "max": 1.0,
+        "mean": -0.12168343365192413,
+        "std": 0.5324186682701111,
+        "note": "decoded frames of the first warm generate; 101970 byte mp4 sha256 a9f9004fc1343eab167e70f4522f382243f40b7b83765b726e01d02cb01b7f34; latents (1,16,3,60,104) sha256 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6"
+      },
+      "toolchain": {
+        "torch": "2.14.0+cpu",
+        "torch-neuronx": "2.14.3.0.0+unknown.dev",
+        "neuronx-cc": "2.28.4568.0+0163fa9e",
+        "nki": "0.7.0+36523665040.g7b8cdcef",
+        "diffusers": "0.38.0",
+        "transformers": "4.57.6",
+        "numpy": "2.5.3"
+      },
+      "config_label": "tp=4, bf16, TorchNeuron per-block torch.compile, host fp32 umT5 on rank 0, host VAE",
+      "status": "ok",
+      "notes": [
+        "Commit 3763193977f4a508f72f713444d100f65fa88b08 in /home/ubuntu/Difflet/.claude/worktrees/neuron-phase1 for all 19 launches; no change under difflet/ at any launch; uncommitted files at the launches: benchmark/adapters/neuron.py, benchmark/bench.py, benchmark/models.py, benchmark/neuron_cold_warm.py, benchmark/neuron_wan_bench.py, benchmark/trn2/wan_2_1_neuron.json, benchmark/trn2/wan_2_1_neuron.md, tests/unit/benchmark/ (per-launch sha256 of the benchmark files in neuron.provenance). guidance_scale=5: two batch-1 DiT forwards per step (CFG).",
+        "compile_seconds is the rank-max `warmup forward` of the cold script launch minus the first warm launch's (Dynamo trace + StableHLO lowering + neuronx-cc + NEFF load that the cache removes); nothing is built ahead of time, so there is no AoT compile phase.",
+        "e2e_cold_seconds / e2e_warm are the script's `prepare_runtime` -> mp4 saved on rank 0 (NEFF cache empty / populated; the OS page cache was hot for both, Cached 84.3 GiB before the cold launch). The trn2 row's cold start dropped the page cache: see the true-cold CLI row.",
+        "Counters (Total/PersistentHits/InMemoryHits, whole process): cold r0 38/1/22271 r1 2/42/22286 r2 5/39/22286 r3 2/42/22286; warm1 r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286; warm2 r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286; warm3 r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286",
+        "Cold NEFFs: 47 new .neff files (4 >= 1 MiB block NEFFs); per rank compiled block/eager-op: r0 1/37, r1 1/1, r2 1/4, r3 1/1; dynamo unique graphs per rank [1, 1, 1, 1]",
+        "Threads: ranks OMP_NUM_THREADS=3 (torch default 3); umT5 encode pinned at 12 (D70); the script's host VAE decode on rank 0 at 12; the CLI driver's host decode at its torch default, 3 under OMP_NUM_THREADS=3 (pre-flight: 97.4 s at 3 vs ~65 s at 6, same mp4).",
+        "Peak device memory is torch_neuronx.max_memory_allocated() per rank, in GiB (2**30).",
+        "The device-side script benchmark/neuron_wan_bench.py had 1 sha256 value(s) across the 19 launches (byte-identical).",
+        "Re-judged after the run (the stored verdict was a driver false positive; the record as it ran is kept as record.original.json): g5.0/cli-warm1 (stored failed ['rank_lines', 'compile_clean']). The job stopped there and resumed with --skip-existing; no launch was repeated.",
+        "Fallbacks and unwarmed shapes were [] on every rank of every launch and generate (track_fallbacks only sees eager ops; the compiled blocks are proven by the counters)."
+      ],
+      "timestamp": "2026-10-11 10:44 UTC",
+      "config_slug": "wan_2_1_neuron",
+      "device_slug": "trn2",
+      "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+      "seed": 42,
+      "prompt": "a cinematic shot of a red fox running through a snowy forest",
+      "guidance_scale": 5.0,
+      "output_kind": "video",
+      "neuron": {
+        "table": [
+          [
+            "compile wall (s)",
+            "rank-max `warmup forward` cold \u2212 warm (first warm launch)",
+            "**57.6** (= 70.5 \u2212 12.9)",
+            "n/a",
+            "n/a",
+            "7879 (incl. VAE 6098; transformer 255)"
+          ],
+          [
+            "NEFF compile (s) / NEFFs",
+            "compiler-only `CompilationTime` sum on the compiling rank (block + eager-op; a sum over NEFFs compiled concurrently, not a wall clock); Dynamo frame compile (trace + lowering); new `.neff` files in the row's cache",
+            "201.2 (rank 0: block 51.6 + eager-op 149.6; Dynamo 12.0, lowering 0.19) / 47 new: 4 block (one per rank, 4 files >= 1 MiB) + 43 eager-op",
+            "0.0 / 0 new (w1: 0.0 s, 0 new, w2: 0.0 s, 0 new, w3: 0.0 s, 0 new)",
+            "0 compilations in iterations 2-3 (True)",
+            "transformer 255 s (AoT build)"
+          ],
+          [
+            "counters per rank",
+            "whole process: TotalCompilations / PersistentHits / InMemoryHits",
+            "r0 38/1/22271 r1 2/42/22286 r2 5/39/22286 r3 2/42/22286",
+            "w1: r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286<br>w2: r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286<br>w3: r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286",
+            "w1 it2-3 generate deltas: r0 0/0/7406 r1 0/0/7410 r2 0/0/7410 r3 0/0/7410; r0 0/0/7406 r1 0/0/7410 r2 0/0/7410 r3 0/0/7410",
+            "\u2014"
+          ],
+          [
+            "load (s)",
+            "rank-max `load checkpoint` (each rank's bf16 slices of the fp32 shards)",
+            "3.7",
+            "3.6 (median 3.6; 3.5-3.6, n=3)",
+            "n/a",
+            "343 cold / 28.4 warm"
+          ],
+          [
+            "prepare_runtime / load() total (s)",
+            "rank-max: runtime + process group bring-up; the whole `load()` (runtime init, build on meta, load checkpoint, per-block compile wrap, warm-up forward, text encoder load)",
+            "18.4 / 83.4",
+            "18.1 (median 17.4; 17.1-19.7, n=3) / 18.2 (median 18.2; 18.2-18.3, n=3)",
+            "n/a",
+            "\u2014"
+          ],
+          [
+            "text encoder load (s)",
+            "rank 0 `text encoder load` phase (umT5 fp32 `from_pretrained`, lazily mmap'd: the read lands in the first encode)",
+            "0.9",
+            "0.7 (median 0.7; 0.7-0.7, n=3)",
+            "n/a",
+            "94.4 cold / 8.3 warm (umT5 NEFF load)"
+          ],
+          [
+            "e2e (s), script",
+            "rank 0: `prepare_runtime` start \u2192 first mp4 saved (load, warm-up, encode, 50 steps, host VAE decode at 12 threads, mp4)",
+            "**206.5**",
+            "**141.2 (median 140.5; 140.1-142.9, n=3)**",
+            "generate only: 103.6 (median 103.5; 103.3-104.1, n=6)",
+            "394 (page cache dropped) / 56.4 (n=3)"
+          ],
+          [
+            "e2e (s), script, latent output",
+            "`prepare_runtime` start \u2192 final latents (no decode)",
+            "157.3",
+            "91.8 (median 91.2; 90.7-93.4, n=3)",
+            "generate only: 54.5 (median 54.5; 54.4-54.5, n=6)",
+            "\u2014"
+          ],
+          [
+            "launch wall (s), script",
+            "driver: torchrun spawn \u2192 exit (3 generates + decodes); spawn + imports \u2192 `prepare_runtime`",
+            "421.3; spawn 4.5",
+            "355.5 (median 354.8; 354.3-357.5, n=3); spawn 4.4 (median 4.3; 4.2-4.5, n=3)",
+            "n/a",
+            "\u2014"
+          ],
+          [
+            "e2e (s), CLI",
+            "`difflet generate --backend neuron` process wall (torchrun ranks, then the driver's host VAE decode at OMP_NUM_THREADS=3)",
+            "266.7 (own fresh cache; 47 new .neff)",
+            "198.4 (median 198.9; 197.0-199.2, n=3)",
+            "n/a",
+            "394 (page cache dropped) / 56.4 (n=3)"
+          ],
+          [
+            "e2e (s), CLI, true cold",
+            "page cache dropped (`sudo -n`), NEFF cache warm: the trn2 definition of a cold start",
+            "780.9 (Cached 84.4 \u2192 0.4 GiB at the drop; NEFF warm)",
+            "n/a",
+            "n/a",
+            "394 (page cache dropped)"
+          ],
+          [
+            "CLI rank load+warm-up / stage (s)",
+            "the `[wan]` rank lines, rank-max (load+warm-up includes `prepare_runtime`)",
+            "104.3 / 160.2",
+            "36.3 / 91.6 ; 34.2 / 89.6 ; 36.0 / 91.3",
+            "n/a",
+            "\u2014"
+          ],
+          [
+            "CLI start \u2192 latents / \u2192 mp4 (s)",
+            "file mtimes: process start \u2192 latents.pt saved by rank 0; latents.pt \u2192 mp4 written (rank teardown + the driver's host VAE load, decode at 3 threads, export)",
+            "164.6 / 101.3",
+            "95.9 / 102.5 ; 93.8 / 102.4 ; 95.6 / 102.4",
+            "true cold: 678.0 / 102.0",
+            "\u2014"
+          ],
+          [
+            "text encode / denoise / VAE decode (s)",
+            "rank-0 stage clocks: prompt encode (the negative prompt is encoded lazily inside the first denoise iteration), `_denoise`, host decode incl. VAE load and mp4 write",
+            "2.01 (+ negative 0.26) / 53.6 / 49.1 (VAE 48.7)",
+            "2.02 (+ negative 0.26) / 53.7 / 49.0 (VAE 48.7)",
+            "0.80 (+ negative 0.25) / 53.6 / 48.8 (VAE 48.6)",
+            "\u2014"
+          ],
+          [
+            "DiT step median (ms)",
+            "inter-step deltas of the real loop, `torch.neuron.synchronize` both sides, step 0 excluded, n=49, rank 0",
+            "evidence only: 1066.2",
+            "**1067.2** (w2 1067.1, w3 1066.8)",
+            "1067.1 (pooled, n=294)",
+            "554.8 (isolated timer)"
+          ],
+          [
+            "DiT step rank-max median (ms)",
+            "per step, the max over the 4 ranks (what the request waits for)",
+            "1068.8",
+            "1070.9",
+            "1069.9",
+            "\u2014"
+          ],
+          [
+            "DiT step mean / p90 / min / max (ms)",
+            "same series",
+            "1067.0 / 1071.4 / 1060.6 / 1075.4",
+            "1068.1 / 1072.4 / 1061.8 / 1078.2",
+            "1067.7 / 1072.1 / 1061.2 / 1088.2",
+            "\u2014"
+          ],
+          [
+            "DiT forward (ms)",
+            "per forward (host\u2192device inputs, forward, sync, copy back), n=100; median (mean / p90)",
+            "531.0",
+            "531.5 (531.6 / 534.1)",
+            "531.2 (531.2 / 533.4, n=600)",
+            "\u2014"
+          ],
+          [
+            "throughput (steps/s)",
+            "1 / mean step",
+            "evidence only: 0.937",
+            "0.936",
+            "0.937",
+            "1.80"
+          ],
+          [
+            "peak device mem (GiB/rank)",
+            "`torch_neuronx.max_memory_allocated()` per rank (the process's peak so far: after the launch, after generates 2-3)",
+            "8.07 8.03 8.13 8.13",
+            "8.03 8.03 8.03 8.03",
+            "8.03 8.03 8.03 8.03",
+            "null"
+          ],
+          [
+            "fallbacks / unwarmed shapes",
+            "`track_fallbacks()` (load and every generate) / `app.unwarmed_shapes`, every rank",
+            "[] / []",
+            "[] / [] ; [] / [] ; [] / []",
+            "[] / []",
+            "\u2014"
+          ],
+          [
+            "throttle",
+            "sysfs `ham_throttle` `entries`/`max` per core before vs right after every generate (semantics undocumented: a flag, not a verdict); step series p90/median (<= 1.10) and first-10 vs last-10 medians (<= 5 %)",
+            "sysfs entries/max changed across 3/3 generates (max seen ['128/255', '255/255']); p90/median max 1.005, first-10 vs last-10 max 0.08%; within limits",
+            "sysfs entries/max changed across 6/9 generates (max seen ['128/255', '255/255']); p90/median max 1.006, first-10 vs last-10 max 0.22%; within limits",
+            "step medians of the 3 generates per launch: spread 0.08% (max over the warm launches; flag above 2 %)",
+            "\u2014"
+          ],
+          [
+            "output",
+            "decoded frames (first generate of the launch; resident: generate 2 of the first warm launch): shape, finite, min/max/mean/std; mp4 bytes, sha256",
+            "[1, 3, 9, 480, 832] finite=True [-1.000, 1.000] mean -0.122 std 0.532; 101970 B mp4 a9f9004fc1343eab\u2026",
+            "[1, 3, 9, 480, 832] finite=True [-1.000, 1.000] mean -0.122 std 0.532; 101970 B mp4 a9f9004fc1343eab\u2026",
+            "[1, 3, 9, 480, 832] finite=True [-1.000, 1.000] mean -0.122 std 0.532; 101970 B mp4 a9f9004fc1343eab\u2026",
+            "(1,3,9,480,832)"
+          ],
+          [
+            "final latents",
+            "sha256 of the fp32 latents, equal on the 4 ranks of every generate (else the launch failed)",
+            "1 distinct: 8e5eaffed4cf6f3a\u2026",
+            "1 distinct: 8e5eaffed4cf6f3a\u2026",
+            "1 distinct: 8e5eaffed4cf6f3a\u2026",
+            "\u2014"
+          ],
+          [
+            "W4 reproduction (D80)",
+            "one extra warm CLI run with W4's parameters: latents and mp4 sha256 equal to W4's",
+            "\u2014",
+            "yes: latents 8e5eaffed4cf6f3a\u2026, file e639f3146c361940\u2026, mp4 a9f9004fc1343eab\u2026; wall 200.8 s",
+            "\u2014",
+            "\u2014"
+          ]
+        ],
+        "e2e_latents_warm": {
+          "n": 3,
+          "mean": 91.77777270333415,
+          "median": 91.18146930700459,
+          "std": 1.1635654538489386,
+          "p50": 91.18146930700459,
+          "p90": 93.40413505600009,
+          "min": 90.74771374699776,
+          "max": 93.40413505600009,
+          "samples": [
+            91.18146930700459,
+            93.40413505600009,
+            90.74771374699776
+          ]
+        },
+        "e2e_cli_warm": {
+          "n": 3,
+          "mean": 198.37167948733259,
+          "median": 198.91338964999886,
+          "std": 0.9692294606368785,
+          "p50": 198.91338964999886,
+          "p90": 199.19124689100136,
+          "min": 197.01040192099754,
+          "max": 199.19124689100136,
+          "samples": [
+            199.19124689100136,
+            197.01040192099754,
+            198.91338964999886
+          ]
+        },
+        "e2e_cli_cold_s": 266.7369987379934,
+        "e2e_cli_true_cold_s": 780.8748476970068,
+        "resident_e2e": {
+          "n": 6,
+          "mean": 103.59758082433352,
+          "median": 103.53305545500189,
+          "std": 0.27789663562552236,
+          "p50": 103.44205990200862,
+          "p90": 103.67900271299004,
+          "min": 103.298803305006,
+          "max": 104.14666670099541,
+          "samples": [
+            103.298803305006,
+            103.39490131700586,
+            103.62405100799515,
+            103.67900271299004,
+            104.14666670099541,
+            103.44205990200862
+          ]
+        },
+        "resident_step": {
+          "n": 294,
+          "mean": 1.067741934071423,
+          "median": 1.0670745040042675,
+          "std": 0.0037527353746370008,
+          "p50": 1.0670666039950447,
+          "p90": 1.0721250599890482,
+          "min": 1.0611942440009443,
+          "max": 1.0881969229958486,
+          "samples": [
+            1.070328417001292,
+            1.0644611409952631,
+            1.0681738470011624,
+            1.0664505260065198,
+            1.0655552639946109,
+            1.069065536998096,
+            1.0665769949991954,
+            1.0748260580003262,
+            1.069534628011752,
+            1.061545821998152,
+            1.0657371809938923,
+            1.065797620001831,
+            1.0693227190058678,
+            1.0727772569953231,
+            1.0785478689940646,
+            1.0640616430027876,
+            1.0627222250041086,
+            1.0662484200001927,
+            1.0658595749991946,
+            1.0721082859963644,
+            1.0621285350061953,
+            1.0662894519919064,
+            1.06737208100094,
+            1.0711520629993174,
+            1.0646946699998807,
+            1.0667393150069984,
+            1.0711562389915343,
+            1.0649698070046725,
+            1.0692729839938693,
+            1.0710403550037881,
+            1.0679635389969917,
+            1.0739848850062117,
+            1.0639807999978075,
+            1.0776531449955655,
+            1.0613377160043456,
+            1.0758172250061762,
+            1.0617032849986572,
+            1.0680555869912496,
+            1.0748917710006936,
+            1.0626057160116034,
+            1.066268450987991,
+            1.0661489560006885,
+            1.0648903800029075,
+            1.0696588999999221,
+            1.0696864680066938,
+            1.0685028709995095,
+            1.0691312229901087,
+            1.0680592480057385,
+            1.0665478260052623,
+            1.0670666039950447,
+            1.06331252399832,
+            1.0661509430065053,
+            1.0687564399995608,
+            1.0663809340039734,
+            1.07599080199725,
+            1.0617008980043465,
+            1.065642683999613,
+            1.0696043079951778,
+            1.068821039996692,
+            1.069436322999536,
+            1.0648063940025168,
+            1.0658084300084738,
+            1.0668683129915735,
+            1.066442701005144,
+            1.0731380709912628,
+            1.0666226590110455,
+            1.064283419997082,
+            1.068872128991643,
+            1.0742603160033468,
+            1.0611942440009443,
+            1.0686648650007555,
+            1.068620332996943,
+            1.0693333119997988,
+            1.0717337430105545,
+            1.0695648369874107,
+            1.068597856006818,
+            1.0695410629996331,
+            1.0640361359983217,
+            1.0881969229958486,
+            1.0643748860020423,
+            1.0666549480083631,
+            1.0653810999938287,
+            1.0659990760032088,
+            1.0672134549968177,
+            1.066676381000434,
+            1.0682913740020012,
+            1.0696195990021806,
+            1.0672989320009947,
+            1.0672575069911545,
+            1.0659566270041978,
+            1.0649953259999165,
+            1.0666590309992898,
+            1.065557894995436,
+            1.0651326510123909,
+            1.0656891069957055,
+            1.066085030004615,
+            1.0663991019973764,
+            1.0652091379888589,
+            1.0649602920020698,
+            1.071481955004856,
+            1.0667612239922164,
+            1.0647994950122666,
+            1.06649541099614,
+            1.065489984001033,
+            1.0674454190011602,
+            1.0783026479912223,
+            1.0620798980089603,
+            1.0662820949946763,
+            1.0728268520033453,
+            1.0641374989936594,
+            1.0767710970103508,
+            1.0614894019963685,
+            1.0652488649939187,
+            1.069473420997383,
+            1.0656413800024893,
+            1.0695259119966067,
+            1.0674851650110213,
+            1.0741890819917899,
+            1.0664677140011918,
+            1.062546533998102,
+            1.0664738030027365,
+            1.0646845260052942,
+            1.0689159070025198,
+            1.0685174889949849,
+            1.0705813550011953,
+            1.0665499939932488,
+            1.0710948280029697,
+            1.0649235769960796,
+            1.0668711230100598,
+            1.0648147570027504,
+            1.068838691993733,
+            1.068642746002297,
+            1.0652856870001415,
+            1.0686829810001655,
+            1.0709097639919491,
+            1.0686487990024034,
+            1.0679418240033556,
+            1.0704587990039727,
+            1.0613975989981554,
+            1.068115524991299,
+            1.065601118010818,
+            1.0717831419897266,
+            1.0625187100085896,
+            1.0653693240019493,
+            1.0664157239953056,
+            1.067754916002741,
+            1.069226287989295,
+            1.0643290860025445,
+            1.0663867109979037,
+            1.0662597729970003,
+            1.0674920950114029,
+            1.0743185309984256,
+            1.0616268429876072,
+            1.0701677590113832,
+            1.066586829998414,
+            1.0766890739905648,
+            1.064969484010362,
+            1.074357131990837,
+            1.0631496630085167,
+            1.0668460220040288,
+            1.068781730995397,
+            1.0642690639942884,
+            1.0730698230036069,
+            1.0703176639945013,
+            1.0684348740032874,
+            1.065521552998689,
+            1.0666104499978246,
+            1.0679927260061959,
+            1.0736736270046094,
+            1.0710126319900155,
+            1.061492155000451,
+            1.066254828008823,
+            1.0666843479993986,
+            1.0668525310029509,
+            1.0692739839869319,
+            1.0682782560033957,
+            1.0698628940008348,
+            1.0645394629973453,
+            1.064757854997879,
+            1.0671396860125242,
+            1.0708665529964492,
+            1.0638991619925946,
+            1.0748289400071371,
+            1.069457011995837,
+            1.0698790550086414,
+            1.0655308839923237,
+            1.0680477429996245,
+            1.0717508960078703,
+            1.0677216079930076,
+            1.0709580300026573,
+            1.0763758800021606,
+            1.0618529829953332,
+            1.0688295480067609,
+            1.0626084190007532,
+            1.0714775019878289,
+            1.0651336690061726,
+            1.0619281709950883,
+            1.0673129659990082,
+            1.0668011000088882,
+            1.0696477699966636,
+            1.0707925349997822,
+            1.0638934830058133,
+            1.0656940039916662,
+            1.0650857650034595,
+            1.0673518239927944,
+            1.0677794880029978,
+            1.065530824009329,
+            1.0661497179971775,
+            1.066692496999167,
+            1.066927735999343,
+            1.0678118359937798,
+            1.074169116007397,
+            1.066835830002674,
+            1.0617933319881558,
+            1.0684898960025748,
+            1.066935196009581,
+            1.0769712229957804,
+            1.0623012839932926,
+            1.064832739008125,
+            1.0690135679906234,
+            1.0786824240058195,
+            1.0636110909981653,
+            1.0676036180084338,
+            1.0738000389974331,
+            1.0632119499932742,
+            1.0689054490067065,
+            1.0668839470017701,
+            1.0677236699993955,
+            1.066567068992299,
+            1.066649258005782,
+            1.0669993109913776,
+            1.07021598200663,
+            1.071206020002137,
+            1.062354362991755,
+            1.0765657640004065,
+            1.061347224007477,
+            1.0658082459995057,
+            1.0679539239936275,
+            1.067481479010894,
+            1.0721250599890482,
+            1.0639937870000722,
+            1.0682669810048537,
+            1.0698002290009754,
+            1.0620490339933895,
+            1.0727026090025902,
+            1.0657783380011097,
+            1.0661716460017487,
+            1.0678682680008933,
+            1.065688696995494,
+            1.0667174639966106,
+            1.065511641005287,
+            1.0669852950086351,
+            1.0684214349894319,
+            1.0700106410076842,
+            1.0623565900023095,
+            1.0673566729965387,
+            1.0687302269943757,
+            1.0641951950092334,
+            1.0684973019961035,
+            1.0698652970022522,
+            1.0663216679968173,
+            1.0705375809920952,
+            1.070833219011547,
+            1.0661174279957777,
+            1.0661902440042468,
+            1.0704917699913494,
+            1.0627511189959478,
+            1.0670824040134903,
+            1.0659842059976654,
+            1.0673019709938671,
+            1.071138860002975,
+            1.0690894849976758,
+            1.0661568549985532,
+            1.0689012450020527,
+            1.0713572069944348,
+            1.062598879012512,
+            1.070990048989188,
+            1.066119435010478,
+            1.068210947996704,
+            1.0665234649932245,
+            1.0662102880014572,
+            1.0717589910054812,
+            1.062335818001884,
+            1.0653300749982009,
+            1.0675005739904009,
+            1.0684558020002441,
+            1.071617845009314,
+            1.0648402700026054,
+            1.0653067789971828,
+            1.0675724070024444,
+            1.079860161000397,
+            1.0674941889883485,
+            1.0689956650021486,
+            1.0633042720000958
+          ]
+        },
+        "step_rank_max": {
+          "n": 49,
+          "mean": 1.0716095974488298,
+          "median": 1.0709272600070108,
+          "std": 0.0038178253504120227,
+          "p50": 1.0709272600070108,
+          "p90": 1.076891559001524,
+          "min": 1.0656964839872671,
+          "max": 1.0798657190025551,
+          "samples": [
+            1.0685149619966978,
+            1.0669737330026692,
+            1.072781914001098,
+            1.0724275300017325,
+            1.069312870997237,
+            1.0689945859921863,
+            1.0687972050072858,
+            1.067241204000311,
+            1.0679924550058786,
+            1.0757325120066525,
+            1.0796514700050466,
+            1.078232622006908,
+            1.0720247989956988,
+            1.0775557090091752,
+            1.0692851079948014,
+            1.0709639780106954,
+            1.0760236740024993,
+            1.068863757987856,
+            1.07378466600494,
+            1.0732770059985342,
+            1.0706471829907969,
+            1.067838558999938,
+            1.0688255349959945,
+            1.070804255999974,
+            1.069788402004633,
+            1.0662258009979269,
+            1.066341444995487,
+            1.0667147460044362,
+            1.0668496580037754,
+            1.0712138649978442,
+            1.0696364369941875,
+            1.0728606400080025,
+            1.0709272600070108,
+            1.0656964839872671,
+            1.0758660769934068,
+            1.076891559001524,
+            1.0693475040025078,
+            1.0725506429880625,
+            1.0768842149991542,
+            1.0742463380011031,
+            1.069738354999572,
+            1.0668012729875045,
+            1.0756579449953279,
+            1.0717164929956198,
+            1.0737159910058836,
+            1.075855048999074,
+            1.077266980006243,
+            1.0798657190025551,
+            1.069664100999944
+          ]
+        },
+        "forward": {
+          "n": 100,
+          "mean": 0.5316219182297937,
+          "median": 0.5315119814986247,
+          "std": 0.0017870138453259053,
+          "p50": 0.5315190840046853,
+          "p90": 0.5340702679968672,
+          "min": 0.5264732829964487,
+          "max": 0.535409714007983,
+          "samples": [
+            0.5304740659921663,
+            0.5301559859944973,
+            0.5315743409882998,
+            0.5313973500014981,
+            0.5308909330051392,
+            0.5308473909972236,
+            0.5317743500054348,
+            0.5308113390055951,
+            0.5344340539886616,
+            0.5314451720041689,
+            0.5280964989942731,
+            0.5343834749946836,
+            0.5328948640089948,
+            0.5320864920067834,
+            0.530667977000121,
+            0.5312602649937617,
+            0.5315379509993363,
+            0.5317866219993448,
+            0.5321529169887071,
+            0.5319808119966183,
+            0.5303242289955961,
+            0.5309971079987008,
+            0.5271097219956573,
+            0.5304988639982184,
+            0.5338898869958939,
+            0.532537699007662,
+            0.5264732829964487,
+            0.5334319510002388,
+            0.5269038590049604,
+            0.5313999350037193,
+            0.5340702679968672,
+            0.5316661980032222,
+            0.5330050180054968,
+            0.5298106660047779,
+            0.5315621080080746,
+            0.5318138899892801,
+            0.5345312799909152,
+            0.5307217789959395,
+            0.5318906570028048,
+            0.5306781530089211,
+            0.534477003995562,
+            0.5315190840046853,
+            0.5295635109941941,
+            0.5309138820011867,
+            0.5294147739914479,
+            0.5317840000061551,
+            0.5312582320038928,
+            0.5313736169919139,
+            0.5316269979957724,
+            0.5315024169976823,
+            0.5331797420076327,
+            0.5326570969918976,
+            0.5306427739997162,
+            0.5315933289966779,
+            0.530633943999419,
+            0.5310878110030899,
+            0.531227683997713,
+            0.5314223689929349,
+            0.5317595079977764,
+            0.530878304009093,
+            0.5298357579886215,
+            0.5339782030059723,
+            0.531504878992564,
+            0.5314290129899746,
+            0.532948611988104,
+            0.5308764270012034,
+            0.5327686410018941,
+            0.5342915580113186,
+            0.5314344189973781,
+            0.530278090009233,
+            0.5310218570084544,
+            0.5286244040034944,
+            0.5350586989952717,
+            0.5313537210022332,
+            0.5340287859871751,
+            0.5313439949968597,
+            0.5309526439959882,
+            0.5308677880093455,
+            0.5338936110056238,
+            0.5315444700099761,
+            0.526571566995699,
+            0.5318555499979993,
+            0.5327492489886936,
+            0.5307999259966891,
+            0.5322750699997414,
+            0.5305464190023486,
+            0.5325420460139867,
+            0.5317462230013916,
+            0.5343746199941961,
+            0.5330583500035573,
+            0.53344509001181,
+            0.5312931240041507,
+            0.527141254991875,
+            0.5319513110007392,
+            0.5349513690016465,
+            0.5310777780105127,
+            0.535409714007983,
+            0.5334009600046556,
+            0.5344532309973147,
+            0.5320279050065437
+          ]
+        },
+        "checks": [
+          {
+            "launch": "script-cold",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "fallbacks",
+            "ok": true,
+            "detail": "load [[], [], [], []], generates [[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "unwarmed_shapes",
+            "ok": true,
+            "detail": "[[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "compiled_blocks",
+            "ok": true,
+            "detail": "[40, 40, 40, 40]",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "loop_shape",
+            "ok": true,
+            "detail": "one stamp per iteration, steps-1 deltas, forwards = steps x (2 if g > 1)",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "latents_equal_on_ranks",
+            "ok": true,
+            "detail": "['8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6']",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "latents_equal_across_iterations",
+            "ok": true,
+            "detail": "['8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6']",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "mp4_written",
+            "ok": true,
+            "detail": "[101970, 101970, 101970] bytes",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "hlo_locks_in_cache",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo']",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "counter_rule_cold",
+            "ok": true,
+            "detail": "Total/PersistentHits/InMemoryHits r0 38/1/22271 r1 2/42/22286 r2 5/39/22286 r3 2/42/22286; new .neff 47",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "no_compile_in_generates",
+            "ok": true,
+            "detail": "generate TotalCompilations by iteration and rank [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]",
+            "hard": false
+          },
+          {
+            "launch": "script-cold",
+            "name": "step_series_it1",
+            "ok": true,
+            "detail": "p90/median 1.0049 (max 1.1); first-10 vs last-10 median 0.04% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-cold",
+            "name": "step_series_it2",
+            "ok": true,
+            "detail": "p90/median 1.0047 (max 1.1); first-10 vs last-10 median 0.08% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-cold",
+            "name": "step_series_it3",
+            "ok": true,
+            "detail": "p90/median 1.0044 (max 1.1); first-10 vs last-10 median 0.01% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-cold",
+            "name": "resident_medians_within_2pct",
+            "ok": true,
+            "detail": "step medians [1066.18, 1066.5, 1067.1] ms, spread 0.09%",
+            "hard": false
+          },
+          {
+            "launch": "script-cold",
+            "name": "latents_equal_w4",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs W4 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": false
+          },
+          {
+            "launch": "script-cold",
+            "name": "mp4_equal_w4",
+            "ok": true,
+            "detail": "a9f9004fc1343eab167e70f4522f382243f40b7b83765b726e01d02cb01b7f34 vs W4 a9f9004fc1343eab167e70f4522f382243f40b7b83765b726e01d02cb01b7f34",
+            "hard": false
+          },
+          {
+            "launch": "script-warm1",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "fallbacks",
+            "ok": true,
+            "detail": "load [[], [], [], []], generates [[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "unwarmed_shapes",
+            "ok": true,
+            "detail": "[[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "compiled_blocks",
+            "ok": true,
+            "detail": "[40, 40, 40, 40]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "loop_shape",
+            "ok": true,
+            "detail": "one stamp per iteration, steps-1 deltas, forwards = steps x (2 if g > 1)",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "latents_equal_on_ranks",
+            "ok": true,
+            "detail": "['8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "latents_equal_across_iterations",
+            "ok": true,
+            "detail": "['8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "latents_equal_to_cold_launch",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "mp4_written",
+            "ok": true,
+            "detail": "[101970, 101970, 101970] bytes",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "hlo_locks_in_cache",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "counter_rule_warm",
+            "ok": true,
+            "detail": "Total/PersistentHits/InMemoryHits r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286; new .neff 0",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "no_compile_in_generates",
+            "ok": true,
+            "detail": "generate TotalCompilations by iteration and rank [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "step_series_it1",
+            "ok": true,
+            "detail": "p90/median 1.0049 (max 1.1); first-10 vs last-10 median 0.15% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm1",
+            "name": "step_series_it2",
+            "ok": true,
+            "detail": "p90/median 1.0062 (max 1.1); first-10 vs last-10 median 0.01% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm1",
+            "name": "step_series_it3",
+            "ok": true,
+            "detail": "p90/median 1.0028 (max 1.1); first-10 vs last-10 median 0.08% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm1",
+            "name": "resident_medians_within_2pct",
+            "ok": true,
+            "detail": "step medians [1067.23, 1067.37, 1066.66] ms, spread 0.07%",
+            "hard": false
+          },
+          {
+            "launch": "script-warm1",
+            "name": "latents_equal_w4",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs W4 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": false
+          },
+          {
+            "launch": "script-warm1",
+            "name": "mp4_equal_w4",
+            "ok": true,
+            "detail": "a9f9004fc1343eab167e70f4522f382243f40b7b83765b726e01d02cb01b7f34 vs W4 a9f9004fc1343eab167e70f4522f382243f40b7b83765b726e01d02cb01b7f34",
+            "hard": false
+          },
+          {
+            "launch": "script-warm2",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "fallbacks",
+            "ok": true,
+            "detail": "load [[], [], [], []], generates [[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "unwarmed_shapes",
+            "ok": true,
+            "detail": "[[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "compiled_blocks",
+            "ok": true,
+            "detail": "[40, 40, 40, 40]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "loop_shape",
+            "ok": true,
+            "detail": "one stamp per iteration, steps-1 deltas, forwards = steps x (2 if g > 1)",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "latents_equal_on_ranks",
+            "ok": true,
+            "detail": "['8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "latents_equal_across_iterations",
+            "ok": true,
+            "detail": "['8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "latents_equal_to_cold_launch",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "mp4_written",
+            "ok": true,
+            "detail": "[101970, 101970, 101970] bytes",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "hlo_locks_in_cache",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "counter_rule_warm",
+            "ok": true,
+            "detail": "Total/PersistentHits/InMemoryHits r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286; new .neff 0",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "no_compile_in_generates",
+            "ok": true,
+            "detail": "generate TotalCompilations by iteration and rank [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "step_series_it1",
+            "ok": true,
+            "detail": "p90/median 1.0036 (max 1.1); first-10 vs last-10 median 0.22% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm2",
+            "name": "step_series_it2",
+            "ok": true,
+            "detail": "p90/median 1.0043 (max 1.1); first-10 vs last-10 median 0.07% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm2",
+            "name": "step_series_it3",
+            "ok": true,
+            "detail": "p90/median 1.0056 (max 1.1); first-10 vs last-10 median 0.18% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm2",
+            "name": "resident_medians_within_2pct",
+            "ok": true,
+            "detail": "step medians [1067.13, 1066.87, 1067.72] ms, spread 0.08%",
+            "hard": false
+          },
+          {
+            "launch": "script-warm2",
+            "name": "latents_equal_w4",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs W4 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": false
+          },
+          {
+            "launch": "script-warm2",
+            "name": "mp4_equal_w4",
+            "ok": true,
+            "detail": "a9f9004fc1343eab167e70f4522f382243f40b7b83765b726e01d02cb01b7f34 vs W4 a9f9004fc1343eab167e70f4522f382243f40b7b83765b726e01d02cb01b7f34",
+            "hard": false
+          },
+          {
+            "launch": "script-warm3",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "fallbacks",
+            "ok": true,
+            "detail": "load [[], [], [], []], generates [[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "unwarmed_shapes",
+            "ok": true,
+            "detail": "[[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "compiled_blocks",
+            "ok": true,
+            "detail": "[40, 40, 40, 40]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "loop_shape",
+            "ok": true,
+            "detail": "one stamp per iteration, steps-1 deltas, forwards = steps x (2 if g > 1)",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "latents_equal_on_ranks",
+            "ok": true,
+            "detail": "['8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "latents_equal_across_iterations",
+            "ok": true,
+            "detail": "['8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6', '8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "latents_equal_to_cold_launch",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "mp4_written",
+            "ok": true,
+            "detail": "[101970, 101970, 101970] bytes",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "hlo_locks_in_cache",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g5.0-main/neuron/hlo']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "counter_rule_warm",
+            "ok": true,
+            "detail": "Total/PersistentHits/InMemoryHits r0 0/39/22271 r1 0/44/22286 r2 0/44/22286 r3 0/44/22286; new .neff 0",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "no_compile_in_generates",
+            "ok": true,
+            "detail": "generate TotalCompilations by iteration and rank [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "step_series_it1",
+            "ok": true,
+            "detail": "p90/median 1.0033 (max 1.1); first-10 vs last-10 median 0.12% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm3",
+            "name": "step_series_it2",
+            "ok": true,
+            "detail": "p90/median 1.0053 (max 1.1); first-10 vs last-10 median 0.06% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm3",
+            "name": "step_series_it3",
+            "ok": true,
+            "detail": "p90/median 1.0035 (max 1.1); first-10 vs last-10 median 0.10% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm3",
+            "name": "resident_medians_within_2pct",
+            "ok": true,
+            "detail": "step medians [1066.75, 1067.0, 1067.3] ms, spread 0.05%",
+            "hard": false
+          },
+          {
+            "launch": "script-warm3",
+            "name": "latents_equal_w4",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs W4 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": false
+          },
+          {
+            "launch": "script-warm3",
+            "name": "mp4_equal_w4",
+            "ok": true,
+            "detail": "a9f9004fc1343eab167e70f4522f382243f40b7b83765b726e01d02cb01b7f34 vs W4 a9f9004fc1343eab167e70f4522f382243f40b7b83765b726e01d02cb01b7f34",
+            "hard": false
+          },
+          {
+            "launch": "cli-w4check",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-w4check",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-w4check",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-w4check",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-w4check",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g5.0/cli-w4check/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-w4check",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-w4check",
+            "name": "file_rule_warm",
+            "ok": true,
+            "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+            "hard": true
+          },
+          {
+            "launch": "cli-w4check",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs script 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": true
+          },
+          {
+            "launch": "cli-w4check",
+            "name": "w4_latents_file",
+            "ok": true,
+            "detail": "e639f3146c3619406267c317c9798b8ead7300535c7835a7d7c7c0de54769028 vs e639f3146c3619406267c317c9798b8ead7300535c7835a7d7c7c0de54769028",
+            "hard": true
+          },
+          {
+            "launch": "cli-w4check",
+            "name": "w4_latents_tensor",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": true
+          },
+          {
+            "launch": "cli-w4check",
+            "name": "w4_mp4",
+            "ok": true,
+            "detail": "a9f9004fc1343eab167e70f4522f382243f40b7b83765b726e01d02cb01b7f34 vs a9f9004fc1343eab167e70f4522f382243f40b7b83765b726e01d02cb01b7f34",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g5.0/cli-warm1/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "file_rule_warm",
+            "ok": true,
+            "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs script 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": false
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g5.0/cli-warm2/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "file_rule_warm",
+            "ok": true,
+            "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs script 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": false
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g5.0/cli-warm3/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "file_rule_warm",
+            "ok": true,
+            "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs script 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": false
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g5.0/cli-truecold/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "file_rule_warm",
+            "ok": true,
+            "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs script 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": false
+          },
+          {
+            "launch": "cli-cold",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g5.0/cli-cold/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "file_rule_cold",
+            "ok": true,
+            "detail": "new .neff 47",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6 vs script 8e5eaffed4cf6f3a79a94dc11664c4f6b49767375fc6f5c451a39330bed990f6",
+            "hard": false
+          }
+        ],
+        "provenance": {
+          "head": "3763193977f4a508f72f713444d100f65fa88b08",
+          "worktree": "/home/ubuntu/Difflet/.claude/worktrees/neuron-phase1",
+          "status_at_runs": [
+            "M benchmark/bench.py\n M benchmark/models.py\n?? benchmark/adapters/neuron.py\n?? benchmark/neuron_cold_warm.py\n?? benchmark/neuron_wan_bench.py\n?? benchmark/trn2/wan_2_1_neuron.json\n?? benchmark/trn2/wan_2_1_neuron.md\n?? tests/unit/benchmark/",
+            "M benchmark/bench.py\n M benchmark/models.py\n?? benchmark/adapters/neuron.py\n?? benchmark/neuron_cold_warm.py\n?? benchmark/neuron_wan_bench.py\n?? tests/unit/benchmark/"
+          ],
+          "difflet_diff_vs_head_at_runs": [
+            ""
+          ],
+          "neuronx_cc": [
+            "NeuronX Compiler version 2.28.4568.0+0163fa9e"
+          ],
+          "neuron_cc_flags": [
+            "None"
+          ],
+          "files_sha256_at_runs": {
+            "benchmark/neuron_cold_warm.py": [
+              "0e976fa718cba79c901e608ea62f11e0015bc34be72f7cdad39f58c68573e14a",
+              "b8f5efd0790993199e681e152c13b572c93338358baa1657eb8fd7d7e6a7853a",
+              "42dbb820a17473f9be3ab33f983c705099a972f51c7ed4b9e7a8058a8ed02ebc",
+              "4a4620da45a3cd2ea6a4667c1508e6fa50dfba83e02f58fc99ad6bc74aa8fc78",
+              "53931f5117ce74f1508eb46e95d3c7dc0dc74b8d4645ab614346d4a170813373"
+            ],
+            "benchmark/neuron_wan_bench.py": [
+              "adb718622beb1a63b7e836caa4bc1953dc158602e7376052c5d14411d587ae7a"
+            ],
+            "benchmark/adapters/neuron.py": [
+              "af6b1de94cfa327ccfebfa05831a435ffa7bc9132987a6ca43d2c153f3cc889a",
+              "7047c50f1fa9c972edf2011139dcab0be2335fc46f129e699b23d7d4b6be8c42"
+            ],
+            "benchmark/harness.py": [
+              "13942ab2667a0560e6eff703a4a37aa4a8a58c7df281586194ac32dbbc8ddd6a"
+            ],
+            "benchmark/report.py": [
+              "282e1c9ef28b16a9425e18544e45ac6798735f59184db004835e0a0afc8fec6e"
+            ],
+            "benchmark/models.py": [
+              "0cf41b2dfab9f39a13f4baddf739190a5a761694adae04f25d434021400173a9"
+            ],
+            "tests/numerical/neuron_parity.py": [
+              "c9c3c1ec997476d8c95ea9f340a3e4efb1858c2c3b9b3df097784ec3a9fad35e"
+            ]
+          },
+          "launches": 19
+        }
+      }
+    },
+    "1.0": {
+      "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+      "model_type": "wan",
+      "backend": "neuron",
+      "device": "trn2.3xlarge / 4 NeuronCores (logical config 2) / 96 GiB/device",
+      "dtype": "bf16",
+      "parallel": {
+        "tp_degree": 4,
+        "cp_degree": 1,
+        "cp_mode": "gather_kv",
+        "cfg_parallel_enabled": false,
+        "sp_enabled": false
+      },
+      "shape": {
+        "height": 480,
+        "width": 832,
+        "num_frames": 9
+      },
+      "steps": 50,
+      "compile_seconds": 60.891815495997434,
+      "compile_breakdown": {
+        "warmup_forward_cold_s": 73.87797516399587,
+        "warmup_forward_warm_s": 12.986159667998436,
+        "neff_compile_s": 157.3514711,
+        "block_neff_compile_s": 55.025,
+        "eager_op_neff_compile_s": 102.31300000000002,
+        "dynamo_frame_compile_cold_s": 13.097034406,
+        "dynamo_frame_compile_warm_s": 9.994756731,
+        "dynamo_lower_s": 0.187968,
+        "load_and_warmup_cold_s": 87.34866253199289,
+        "load_and_warmup_warm_s": 18.693357151001692
+      },
+      "load_seconds": 3.9948129700060235,
+      "e2e_cold_seconds": 186.28122095500294,
+      "e2e_breakdown": null,
+      "e2e_warm": {
+        "n": 3,
+        "mean": 114.14717507866833,
+        "median": 113.66586618300062,
+        "std": 0.7207533845328035,
+        "p50": 113.66586618300062,
+        "p90": 115.16595835400221,
+        "min": 113.60970069900213,
+        "max": 115.16595835400221,
+        "samples": [
+          113.60970069900213,
+          113.66586618300062,
+          115.16595835400221
+        ]
+      },
+      "step_latency": {
+        "n": 49,
+        "mean": 0.534831273142897,
+        "median": 0.5344488059927244,
+        "std": 0.002342126969714115,
+        "p50": 0.5344488059927244,
+        "p90": 0.5377863239991711,
+        "min": 0.5294777149974834,
+        "max": 0.5418092309992062,
+        "samples": [
+          0.5341255379898939,
+          0.5403030330053298,
+          0.5321866620070068,
+          0.5335502959933365,
+          0.5348942749988055,
+          0.5353390660020523,
+          0.5348634539986961,
+          0.5418092309992062,
+          0.5294777149974834,
+          0.533921715003089,
+          0.5340816829993855,
+          0.5354693599947495,
+          0.5356679190008435,
+          0.5383428089990048,
+          0.5371481600013794,
+          0.5315701470099157,
+          0.5336809619911946,
+          0.5336719430051744,
+          0.5334890069934772,
+          0.5344923850061605,
+          0.5339267350063892,
+          0.5353282619907986,
+          0.5329035550093977,
+          0.5381255079992115,
+          0.537070047997986,
+          0.5312785290007014,
+          0.533708757997374,
+          0.5339724980003666,
+          0.5344534320029197,
+          0.5333655750000617,
+          0.5410269049898488,
+          0.5318372440087842,
+          0.5354683329933323,
+          0.5332501539960504,
+          0.5373275130114052,
+          0.5344488059927244,
+          0.5343841400026577,
+          0.5366445139952702,
+          0.5333460730034858,
+          0.5328821349976351,
+          0.5377863239991711,
+          0.5337726990110241,
+          0.5354846819973318,
+          0.5352389679901535,
+          0.53453747300955,
+          0.5347366979985964,
+          0.5343635339959292,
+          0.5346327709994512,
+          0.5333451580081601
+        ]
+      },
+      "step_basis": "real loop, neuron synchronize both sides, step 0 excluded, n=49",
+      "step_latency_alt": {},
+      "stage_seconds": {
+        "text_encoder_load_s": 0.7093711140041705,
+        "text_encode": 2.0652030240016757,
+        "negative_encode (inside denoise)": 0.0,
+        "denoise": 26.74105402699206,
+        "vae_decode (host, 12 threads)": 48.539568089996465
+      },
+      "e2e_warm_natural": null,
+      "step_latency_natural": null,
+      "throughput": {
+        "DiT steps/s": 1.8697485547611545
+      },
+      "peak_device_mem_gb": 8.13182544708252,
+      "output": {
+        "shape": [
+          1,
+          3,
+          9,
+          480,
+          832
+        ],
+        "dtype": "torch.float32",
+        "finite": true,
+        "min": -1.0,
+        "max": 1.0,
+        "mean": -0.3625313937664032,
+        "std": 0.4496240019798279,
+        "note": "decoded frames of the first warm generate; 88546 byte mp4 sha256 e56c43137f8824ba4890a87e002327e039d9b23b40de7be2e7a8862e801b2210; latents (1,16,3,60,104) sha256 a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820"
+      },
+      "toolchain": {
+        "torch": "2.14.0+cpu",
+        "torch-neuronx": "2.14.3.0.0+unknown.dev",
+        "neuronx-cc": "2.28.4568.0+0163fa9e",
+        "nki": "0.7.0+36523665040.g7b8cdcef",
+        "diffusers": "0.38.0",
+        "transformers": "4.57.6",
+        "numpy": "2.5.3"
+      },
+      "config_label": "tp=4, bf16, TorchNeuron per-block torch.compile, host fp32 umT5 on rank 0, host VAE",
+      "status": "ok",
+      "notes": [
+        "Commit 3763193977f4a508f72f713444d100f65fa88b08 in /home/ubuntu/Difflet/.claude/worktrees/neuron-phase1 for all 19 launches; no change under difflet/ at any launch; uncommitted files at the launches: benchmark/adapters/neuron.py, benchmark/bench.py, benchmark/models.py, benchmark/neuron_cold_warm.py, benchmark/neuron_wan_bench.py, benchmark/trn2/wan_2_1_neuron.json, benchmark/trn2/wan_2_1_neuron.md, tests/unit/benchmark/ (per-launch sha256 of the benchmark files in neuron.provenance). guidance_scale=1: one forward per step.",
+        "compile_seconds is the rank-max `warmup forward` of the cold script launch minus the first warm launch's (Dynamo trace + StableHLO lowering + neuronx-cc + NEFF load that the cache removes); nothing is built ahead of time, so there is no AoT compile phase.",
+        "e2e_cold_seconds / e2e_warm are the script's `prepare_runtime` -> mp4 saved on rank 0 (NEFF cache empty / populated; the OS page cache was hot for both, Cached 72.2 GiB before the cold launch). The trn2 row's cold start dropped the page cache: see the true-cold CLI row.",
+        "Counters (Total/PersistentHits/InMemoryHits, whole process): cold r0 5/34/11162 r1 25/19/11171 r2 4/40/11171 r3 13/31/11171; warm1 r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; warm2 r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; warm3 r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171",
+        "Cold NEFFs: 47 new .neff files (4 >= 1 MiB block NEFFs); per rank compiled block/eager-op: r0 1/4, r1 1/24, r2 1/3, r3 1/12; dynamo unique graphs per rank [1, 1, 1, 1]",
+        "Threads: ranks OMP_NUM_THREADS=3 (torch default 3); umT5 encode pinned at 12 (D70); the script's host VAE decode on rank 0 at 12; the CLI driver's host decode at its torch default, 3 under OMP_NUM_THREADS=3 (pre-flight: 97.4 s at 3 vs ~65 s at 6, same mp4).",
+        "Peak device memory is torch_neuronx.max_memory_allocated() per rank, in GiB (2**30).",
+        "The device-side script benchmark/neuron_wan_bench.py had 1 sha256 value(s) across the 19 launches (byte-identical).",
+        "Re-judged after the run (the stored verdict was a driver false positive; the record as it ran is kept as record.original.json): g5.0/cli-warm1 (stored failed ['rank_lines', 'compile_clean']). The job stopped there and resumed with --skip-existing; no launch was repeated.",
+        "Fallbacks and unwarmed shapes were [] on every rank of every launch and generate (track_fallbacks only sees eager ops; the compiled blocks are proven by the counters)."
+      ],
+      "timestamp": "2026-10-11 11:29 UTC",
+      "config_slug": "wan_2_1_neuron",
+      "device_slug": "trn2",
+      "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+      "seed": 42,
+      "prompt": "a cinematic shot of a red fox running through a snowy forest",
+      "guidance_scale": 1.0,
+      "output_kind": "video",
+      "neuron": {
+        "table": [
+          [
+            "compile wall (s)",
+            "rank-max `warmup forward` cold \u2212 warm (first warm launch)",
+            "**60.9** (= 73.9 \u2212 13.0)",
+            "n/a",
+            "n/a",
+            "7879 (incl. VAE 6098; transformer 255)"
+          ],
+          [
+            "NEFF compile (s) / NEFFs",
+            "compiler-only `CompilationTime` sum on the compiling rank (block + eager-op; a sum over NEFFs compiled concurrently, not a wall clock); Dynamo frame compile (trace + lowering); new `.neff` files in the row's cache",
+            "157.4 (rank 1: block 55.0 + eager-op 102.3; Dynamo 13.1, lowering 0.19) / 47 new: 4 block (one per rank, 4 files >= 1 MiB) + 43 eager-op",
+            "0.0 / 0 new (w1: 0.0 s, 0 new, w2: 0.0 s, 0 new, w3: 0.0 s, 0 new)",
+            "0 compilations in iterations 2-3 (True)",
+            "transformer 255 s (AoT build)"
+          ],
+          [
+            "counters per rank",
+            "whole process: TotalCompilations / PersistentHits / InMemoryHits",
+            "r0 5/34/11162 r1 25/19/11171 r2 4/40/11171 r3 13/31/11171",
+            "w1: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171<br>w2: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171<br>w3: r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171",
+            "w1 it2-3 generate deltas: r0 0/0/3703 r1 0/0/3705 r2 0/0/3705 r3 0/0/3705; r0 0/0/3703 r1 0/0/3705 r2 0/0/3705 r3 0/0/3705",
+            "\u2014"
+          ],
+          [
+            "load (s)",
+            "rank-max `load checkpoint` (each rank's bf16 slices of the fp32 shards)",
+            "4.0",
+            "4.0 (median 4.0; 4.0-4.0, n=3)",
+            "n/a",
+            "343 cold / 28.4 warm"
+          ],
+          [
+            "prepare_runtime / load() total (s)",
+            "rank-max: runtime + process group bring-up; the whole `load()` (runtime init, build on meta, load checkpoint, per-block compile wrap, warm-up forward, text encoder load)",
+            "20.3 / 87.3",
+            "17.7 (median 17.4; 17.2-18.6, n=3) / 18.7 (median 18.7; 18.6-18.7, n=3)",
+            "n/a",
+            "\u2014"
+          ],
+          [
+            "text encoder load (s)",
+            "rank 0 `text encoder load` phase (umT5 fp32 `from_pretrained`, lazily mmap'd: the read lands in the first encode)",
+            "0.7",
+            "0.7 (median 0.7; 0.7-0.7, n=3)",
+            "n/a",
+            "94.4 cold / 8.3 warm (umT5 NEFF load)"
+          ],
+          [
+            "e2e (s), script",
+            "rank 0: `prepare_runtime` start \u2192 first mp4 saved (load, warm-up, encode, 50 steps, host VAE decode at 12 threads, mp4)",
+            "**186.3**",
+            "**114.1 (median 113.7; 113.6-115.2, n=3)**",
+            "generate only: 76.7 (median 76.6; 76.3-77.0, n=6)",
+            "394 (page cache dropped) / 56.4 (n=3)"
+          ],
+          [
+            "e2e (s), script, latent output",
+            "`prepare_runtime` start \u2192 final latents (no decode)",
+            "136.4",
+            "65.0 (median 64.7; 64.3-66.0, n=3)",
+            "generate only: 27.6 (median 27.6; 27.5-27.6, n=6)",
+            "\u2014"
+          ],
+          [
+            "launch wall (s), script",
+            "driver: torchrun spawn \u2192 exit (3 generates + decodes); spawn + imports \u2192 `prepare_runtime`",
+            "346.3; spawn 4.5",
+            "274.6 (median 274.2; 273.5-276.0, n=3); spawn 4.3 (median 4.3; 4.3-4.4, n=3)",
+            "n/a",
+            "\u2014"
+          ],
+          [
+            "e2e (s), CLI",
+            "`difflet generate --backend neuron` process wall (torchrun ranks, then the driver's host VAE decode at OMP_NUM_THREADS=3)",
+            "239.9 (own fresh cache; 47 new .neff)",
+            "173.0 (median 173.0; 171.8-174.3, n=3)",
+            "n/a",
+            "394 (page cache dropped) / 56.4 (n=3)"
+          ],
+          [
+            "e2e (s), CLI, true cold",
+            "page cache dropped (`sudo -n`), NEFF cache warm: the trn2 definition of a cold start",
+            "747.1 (Cached 72.3 \u2192 0.4 GiB at the drop; NEFF warm)",
+            "n/a",
+            "n/a",
+            "394 (page cache dropped)"
+          ],
+          [
+            "CLI rank load+warm-up / stage (s)",
+            "the `[wan]` rank lines, rank-max (load+warm-up includes `prepare_runtime`)",
+            "105.1 / 133.9",
+            "36.5 / 65.0 ; 36.6 / 65.2 ; 39.1 / 67.6",
+            "n/a",
+            "\u2014"
+          ],
+          [
+            "CLI start \u2192 latents / \u2192 mp4 (s)",
+            "file mtimes: process start \u2192 latents.pt saved by rank 0; latents.pt \u2192 mp4 written (rank teardown + the driver's host VAE load, decode at 3 threads, export)",
+            "138.2 / 100.9",
+            "69.2 / 102.9 ; 69.3 / 101.6 ; 71.9 / 101.6",
+            "true cold: 644.4 / 101.8",
+            "\u2014"
+          ],
+          [
+            "text encode / denoise / VAE decode (s)",
+            "rank-0 stage clocks: prompt encode (the negative prompt is encoded lazily inside the first denoise iteration), `_denoise`, host decode incl. VAE load and mp4 write",
+            "1.99 / 26.8 / 49.8 (VAE 49.5)",
+            "2.07 / 26.7 / 48.5 (VAE 48.3)",
+            "0.81 / 26.8 / 48.8 (VAE 48.5)",
+            "\u2014"
+          ],
+          [
+            "DiT step median (ms)",
+            "inter-step deltas of the real loop, `torch.neuron.synchronize` both sides, step 0 excluded, n=49, rank 0",
+            "evidence only: 534.8",
+            "**534.4** (w2 534.3, w3 533.9)",
+            "534.6 (pooled, n=294)",
+            "554.8 (isolated timer)"
+          ],
+          [
+            "DiT step rank-max median (ms)",
+            "per step, the max over the 4 ranks (what the request waits for)",
+            "536.0",
+            "535.5",
+            "536.3",
+            "\u2014"
+          ],
+          [
+            "DiT step mean / p90 / min / max (ms)",
+            "same series",
+            "535.3 / 536.9 / 529.5 / 546.4",
+            "534.8 / 537.8 / 529.5 / 541.8",
+            "535.0 / 539.0 / 528.8 / 548.1",
+            "\u2014"
+          ],
+          [
+            "DiT forward (ms)",
+            "per forward (host\u2192device inputs, forward, sync, copy back), n=50; median (mean / p90)",
+            "531.2",
+            "530.9 (531.2 / 533.7)",
+            "531.1 (531.2 / 533.8, n=300)",
+            "\u2014"
+          ],
+          [
+            "throughput (steps/s)",
+            "1 / mean step",
+            "evidence only: 1.868",
+            "1.870",
+            "1.869",
+            "1.80"
+          ],
+          [
+            "peak device mem (GiB/rank)",
+            "`torch_neuronx.max_memory_allocated()` per rank (the process's peak so far: after the launch, after generates 2-3)",
+            "8.03 8.03 8.13 8.13",
+            "8.03 8.03 8.03 8.03",
+            "8.03 8.03 8.03 8.03",
+            "null"
+          ],
+          [
+            "fallbacks / unwarmed shapes",
+            "`track_fallbacks()` (load and every generate) / `app.unwarmed_shapes`, every rank",
+            "[] / []",
+            "[] / [] ; [] / [] ; [] / []",
+            "[] / []",
+            "\u2014"
+          ],
+          [
+            "throttle",
+            "sysfs `ham_throttle` `entries`/`max` per core before vs right after every generate (semantics undocumented: a flag, not a verdict); step series p90/median (<= 1.10) and first-10 vs last-10 medians (<= 5 %)",
+            "sysfs entries/max changed across 3/3 generates (max seen ['128/255', '255/255']); p90/median max 1.008, first-10 vs last-10 max 0.06%; within limits",
+            "sysfs entries/max changed across 7/9 generates (max seen ['128/255', '255/255']); p90/median max 1.011, first-10 vs last-10 max 0.20%; within limits",
+            "step medians of the 3 generates per launch: spread 0.13% (max over the warm launches; flag above 2 %)",
+            "\u2014"
+          ],
+          [
+            "output",
+            "decoded frames (first generate of the launch; resident: generate 2 of the first warm launch): shape, finite, min/max/mean/std; mp4 bytes, sha256",
+            "[1, 3, 9, 480, 832] finite=True [-1.000, 1.000] mean -0.363 std 0.450; 88546 B mp4 e56c43137f8824ba\u2026",
+            "[1, 3, 9, 480, 832] finite=True [-1.000, 1.000] mean -0.363 std 0.450; 88546 B mp4 e56c43137f8824ba\u2026",
+            "[1, 3, 9, 480, 832] finite=True [-1.000, 1.000] mean -0.363 std 0.450; 88546 B mp4 e56c43137f8824ba\u2026",
+            "(1,3,9,480,832)"
+          ],
+          [
+            "final latents",
+            "sha256 of the fp32 latents, equal on the 4 ranks of every generate (else the launch failed)",
+            "1 distinct: a703d237e9a9b537\u2026",
+            "1 distinct: a703d237e9a9b537\u2026",
+            "1 distinct: a703d237e9a9b537\u2026",
+            "\u2014"
+          ]
+        ],
+        "e2e_latents_warm": {
+          "n": 3,
+          "mean": 65.01772203600073,
+          "median": 64.69989324299968,
+          "std": 0.7144686415250953,
+          "p50": 64.69989324299968,
+          "p90": 66.00726077800209,
+          "min": 64.34601208700042,
+          "max": 66.00726077800209,
+          "samples": [
+            64.69989324299968,
+            64.34601208700042,
+            66.00726077800209
+          ]
+        },
+        "e2e_cli_warm": {
+          "n": 3,
+          "mean": 173.0208797876597,
+          "median": 173.01077679698938,
+          "std": 1.03803141338504,
+          "p50": 173.01077679698938,
+          "p90": 174.29722482500074,
+          "min": 171.75463774098898,
+          "max": 174.29722482500074,
+          "samples": [
+            173.01077679698938,
+            171.75463774098898,
+            174.29722482500074
+          ]
+        },
+        "e2e_cli_cold_s": 239.94644736900227,
+        "e2e_cli_true_cold_s": 747.0969491150026,
+        "resident_e2e": {
+          "n": 6,
+          "mean": 76.65042902799905,
+          "median": 76.6064439365,
+          "std": 0.2854669998926171,
+          "p50": 76.40181313399808,
+          "p90": 76.96954677600297,
+          "min": 76.34887478200835,
+          "max": 77.00663228299527,
+          "samples": [
+            76.34887478200835,
+            76.36463245398772,
+            76.40181313399808,
+            77.00663228299527,
+            76.96954677600297,
+            76.81107473900192
+          ]
+        },
+        "resident_step": {
+          "n": 294,
+          "mean": 0.535031451057826,
+          "median": 0.5345591465011239,
+          "std": 0.0029291259470075443,
+          "p50": 0.5345299969922053,
+          "p90": 0.5389508440130157,
+          "min": 0.5288153159926878,
+          "max": 0.5480973159865243,
+          "samples": [
+            0.5290159580035834,
+            0.5343666170083452,
+            0.5337962240009801,
+            0.5418501109961653,
+            0.5306283259997144,
+            0.5360642449959414,
+            0.5359293770015938,
+            0.5341415000002598,
+            0.5370970840012887,
+            0.5348204409965547,
+            0.5362446030048886,
+            0.5344345659977989,
+            0.5389685879927129,
+            0.5336682940105675,
+            0.5367447379976511,
+            0.5344133009930374,
+            0.5315837890084367,
+            0.5350223619898316,
+            0.5385339080094127,
+            0.5342334129964001,
+            0.5322874400008004,
+            0.5344864960061386,
+            0.5349714979965938,
+            0.5341798459994607,
+            0.5342525250016479,
+            0.5340469060029136,
+            0.5370115259865997,
+            0.5331735830113757,
+            0.5351964199944632,
+            0.5364247700053966,
+            0.5314731229882454,
+            0.5335735700064106,
+            0.5351264719938627,
+            0.5389508440130157,
+            0.5345937449892517,
+            0.5334803050063783,
+            0.5347657940001227,
+            0.5342473219934618,
+            0.533954332000576,
+            0.534022965002805,
+            0.5338920089998282,
+            0.5368688580056187,
+            0.5317310019891011,
+            0.5383327970048413,
+            0.5341954140021699,
+            0.5378743089968339,
+            0.5335892190050799,
+            0.5426341209968086,
+            0.5290722290083067,
+            0.5340150879928842,
+            0.5347032220015535,
+            0.5346157659951132,
+            0.5353359319997253,
+            0.5345882960100425,
+            0.5338062689988874,
+            0.5403114459913922,
+            0.5336211399990134,
+            0.5348088400060078,
+            0.5336651160032488,
+            0.5349014059902402,
+            0.5333844700071495,
+            0.5334538140014047,
+            0.5338371480029309,
+            0.5411894919961924,
+            0.5330607719952241,
+            0.5337771339982282,
+            0.5355645840027137,
+            0.5336342740047257,
+            0.5349931579985423,
+            0.5331773149955552,
+            0.5347627070004819,
+            0.5427492199960398,
+            0.5294523730117362,
+            0.5367349209991517,
+            0.5317165390006267,
+            0.5362703229911858,
+            0.5359087079996243,
+            0.5399574250041042,
+            0.5299491600017063,
+            0.5360290599928703,
+            0.5335024410014739,
+            0.537114685997949,
+            0.5348352110013366,
+            0.5373975679976866,
+            0.5333003890118562,
+            0.539125391995185,
+            0.5334990160044981,
+            0.5339192249957705,
+            0.534654599003261,
+            0.5343441199947847,
+            0.5351075329963351,
+            0.5351166480104439,
+            0.5335874089942081,
+            0.5348637790011708,
+            0.5316908079985296,
+            0.5367958720016759,
+            0.5400604989990825,
+            0.5292378570011351,
+            0.5354370909917634,
+            0.5336673010024242,
+            0.5377673939947272,
+            0.5323498090001522,
+            0.53544917301042,
+            0.5386654579924652,
+            0.5312848110042978,
+            0.5389330399921164,
+            0.53349019199959,
+            0.5352353660127847,
+            0.5340868929924909,
+            0.5447884210007032,
+            0.529457568001817,
+            0.5420029709930532,
+            0.5298816090071341,
+            0.5344352169922786,
+            0.5339115210081218,
+            0.5345299969922053,
+            0.5349438840057701,
+            0.5337317130033625,
+            0.533742945000995,
+            0.5382575489929877,
+            0.538085014995886,
+            0.5328736140072579,
+            0.5338596229994437,
+            0.536907664994942,
+            0.5341820489993552,
+            0.5344176630023867,
+            0.5343722320103552,
+            0.5333539529965492,
+            0.5411712939967401,
+            0.5338204159925226,
+            0.5346904930047458,
+            0.5390940490033245,
+            0.5297503860056167,
+            0.5343533299892442,
+            0.5347539159993175,
+            0.5339542029978475,
+            0.5350379020092078,
+            0.5353706189926015,
+            0.534646726999199,
+            0.5349327770090895,
+            0.5337592409923673,
+            0.5415258160064695,
+            0.5306746279966319,
+            0.5404169100074796,
+            0.5294171159912366,
+            0.5394309859984787,
+            0.5339592910022475,
+            0.5337803319998784,
+            0.5353496479947353,
+            0.5344209540053271,
+            0.5364646520029055,
+            0.5358283079985995,
+            0.5364165489881998,
+            0.5407038720004493,
+            0.5297960919997422,
+            0.5329099939990556,
+            0.5346474530088017,
+            0.5360132210043957,
+            0.5343132509879069,
+            0.5349955790006788,
+            0.5344566380081233,
+            0.5373891060007736,
+            0.5315993789990898,
+            0.5337631639995379,
+            0.5342276529991068,
+            0.5348263679916272,
+            0.5333260340121342,
+            0.5367130239901599,
+            0.5353658189997077,
+            0.5368599750072462,
+            0.5348458189982921,
+            0.5341968290013028,
+            0.533794950999436,
+            0.5362765500030946,
+            0.5350236809899798,
+            0.537952419006615,
+            0.5341330520022893,
+            0.5346086159988772,
+            0.5332339180022245,
+            0.5349917779967654,
+            0.5354608820052817,
+            0.5376345289987512,
+            0.5321625279902946,
+            0.5352290150040062,
+            0.5370976450067246,
+            0.5327703059883788,
+            0.5368260180111974,
+            0.5331021829915699,
+            0.5340377819957212,
+            0.5337713170010829,
+            0.5450410510093207,
+            0.5288153159926878,
+            0.5375412050052546,
+            0.5433031769935042,
+            0.5302311760024168,
+            0.5325808320048964,
+            0.5301409740059171,
+            0.5328278669912834,
+            0.5350464580114931,
+            0.5364290899888147,
+            0.5341873069992289,
+            0.5328482269978849,
+            0.5348070830077631,
+            0.5344163109984947,
+            0.5338285470061237,
+            0.5366462379897712,
+            0.5313831220119027,
+            0.5339425629936159,
+            0.5342819579964271,
+            0.5342386789998272,
+            0.5369682599994121,
+            0.5350325440085726,
+            0.5355013469961705,
+            0.5347188239975367,
+            0.5372953330079326,
+            0.5338838419993408,
+            0.5354373209993355,
+            0.5351167429907946,
+            0.5371540580090368,
+            0.5343972349946853,
+            0.5361974620027468,
+            0.535569632993429,
+            0.5360912180040032,
+            0.5344347649952397,
+            0.5345142139995005,
+            0.5338416020094883,
+            0.535116849001497,
+            0.5364570789970458,
+            0.5332419539918192,
+            0.5358195610024268,
+            0.5354038320074324,
+            0.5400476810027612,
+            0.532477447995916,
+            0.5342762929940363,
+            0.5338844790094299,
+            0.535801324993372,
+            0.534512607002398,
+            0.5346455980034079,
+            0.5341014869918581,
+            0.5343074760021409,
+            0.5337518010055646,
+            0.534972833993379,
+            0.5337396139948396,
+            0.5343635860044742,
+            0.5330072960059624,
+            0.5422678000031738,
+            0.529401185005554,
+            0.535172996998881,
+            0.5355465499887941,
+            0.5360427300038282,
+            0.5324718370102346,
+            0.533124814988696,
+            0.5341406689985888,
+            0.5339307090034708,
+            0.5342038119997596,
+            0.5345958980033174,
+            0.5424420539929997,
+            0.5354906640131958,
+            0.5361120499874232,
+            0.5330591100064339,
+            0.5335165569995297,
+            0.5438477179995971,
+            0.5295240450068377,
+            0.5480973159865243,
+            0.5290244330099085,
+            0.535859943003743,
+            0.5362104309897404,
+            0.5317728170048213,
+            0.54045014300209,
+            0.5324285169917857,
+            0.5402320630091708,
+            0.5322449669911293,
+            0.5328126750100637,
+            0.5369998229871271,
+            0.5342165130132344,
+            0.5405874149873853,
+            0.5290232970000943,
+            0.5339310060080606,
+            0.5376377229986247,
+            0.531746791995829,
+            0.5341130010056077,
+            0.5357443510001758,
+            0.5368325610033935,
+            0.5327630669926293,
+            0.5347608290030621,
+            0.5356732109939912,
+            0.5325606270052958,
+            0.5334429420036031,
+            0.5416879639960825,
+            0.5313697560050059,
+            0.5350217009981861,
+            0.5356273429933935,
+            0.5339254580030683,
+            0.5406625689938664
+          ]
+        },
+        "step_rank_max": {
+          "n": 49,
+          "mean": 0.5366028202038344,
+          "median": 0.5354846819973318,
+          "std": 0.0026918351845254197,
+          "p50": 0.5354846819973318,
+          "p90": 0.5408789650100516,
+          "min": 0.5333486059971619,
+          "max": 0.5438800279953284,
+          "samples": [
+            0.5438688969879877,
+            0.5403030330053298,
+            0.534537215004093,
+            0.5342822649981827,
+            0.5383451810048427,
+            0.5353390660020523,
+            0.5351148470072076,
+            0.5418092309992062,
+            0.5382235910074087,
+            0.5340343279967783,
+            0.5341088179993676,
+            0.535881956006051,
+            0.5438800279953284,
+            0.5383428089990048,
+            0.5371481600013794,
+            0.535014795997995,
+            0.5336809619911946,
+            0.5336719430051744,
+            0.5344857720047003,
+            0.5345259019959485,
+            0.5365963100048248,
+            0.5356073090079008,
+            0.5407739439979196,
+            0.5381255079992115,
+            0.537070047997986,
+            0.5341239840054186,
+            0.533708757997374,
+            0.5342273040005239,
+            0.534607114008395,
+            0.5410423790017376,
+            0.5410269049898488,
+            0.5352370260079624,
+            0.5354683329933323,
+            0.5374049949896289,
+            0.5373424619901925,
+            0.5344696410029428,
+            0.5346290300076362,
+            0.5366445139952702,
+            0.5374946219963022,
+            0.5408789650100516,
+            0.5383363949949853,
+            0.5369805340014864,
+            0.5354846819973318,
+            0.5352389679901535,
+            0.5369687229976989,
+            0.5350378069997532,
+            0.5343965089996345,
+            0.5346680149959866,
+            0.5333486059971619
+          ]
+        },
+        "forward": {
+          "n": 50,
+          "mean": 0.5311872771190247,
+          "median": 0.5309161029945244,
+          "std": 0.0017081698778690522,
+          "p50": 0.5309159139869735,
+          "p90": 0.5337186719989404,
+          "min": 0.5264756039978238,
+          "max": 0.5354313349962467,
+          "samples": [
+            0.5308857240015641,
+            0.5309055830002762,
+            0.5343847769981949,
+            0.5285457870049868,
+            0.5303210529964417,
+            0.5317972379998537,
+            0.5318294869939564,
+            0.5316174649924506,
+            0.5304566480044741,
+            0.5264756039978238,
+            0.5309162920020754,
+            0.530796694001765,
+            0.5325350330094807,
+            0.5331941719923634,
+            0.5354313349962467,
+            0.5313370359945111,
+            0.528232263008249,
+            0.5306639990012627,
+            0.5298719359998358,
+            0.5304844409984071,
+            0.5311800199997379,
+            0.5308234889962478,
+            0.5319708850001916,
+            0.530118828988634,
+            0.5347435790026793,
+            0.5312604229984572,
+            0.5279805249883793,
+            0.5305163839948364,
+            0.5309159139869735,
+            0.5312010199995711,
+            0.5303612550051184,
+            0.5342893449997064,
+            0.528314159004367,
+            0.5321677449974231,
+            0.5307810219965177,
+            0.5337186719989404,
+            0.5311852900049416,
+            0.5314259209990269,
+            0.5305504700081656,
+            0.5302368409902556,
+            0.5301965219987324,
+            0.534626833992661,
+            0.5308413119928446,
+            0.5323797860037303,
+            0.531687470007455,
+            0.5317270329978783,
+            0.5313498210016405,
+            0.5309727230051067,
+            0.5309080339939101,
+            0.5302499660028843
+          ]
+        },
+        "checks": [
+          {
+            "launch": "script-cold",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "fallbacks",
+            "ok": true,
+            "detail": "load [[], [], [], []], generates [[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "unwarmed_shapes",
+            "ok": true,
+            "detail": "[[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "compiled_blocks",
+            "ok": true,
+            "detail": "[40, 40, 40, 40]",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "loop_shape",
+            "ok": true,
+            "detail": "one stamp per iteration, steps-1 deltas, forwards = steps x (2 if g > 1)",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "latents_equal_on_ranks",
+            "ok": true,
+            "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "latents_equal_across_iterations",
+            "ok": true,
+            "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "mp4_written",
+            "ok": true,
+            "detail": "[88546, 88546, 88546] bytes",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "hlo_locks_in_cache",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo']",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "counter_rule_cold",
+            "ok": true,
+            "detail": "Total/PersistentHits/InMemoryHits r0 5/34/11162 r1 25/19/11171 r2 4/40/11171 r3 13/31/11171; new .neff 47",
+            "hard": true
+          },
+          {
+            "launch": "script-cold",
+            "name": "no_compile_in_generates",
+            "ok": true,
+            "detail": "generate TotalCompilations by iteration and rank [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]",
+            "hard": false
+          },
+          {
+            "launch": "script-cold",
+            "name": "step_series_it1",
+            "ok": true,
+            "detail": "p90/median 1.0039 (max 1.1); first-10 vs last-10 median 0.04% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-cold",
+            "name": "step_series_it2",
+            "ok": true,
+            "detail": "p90/median 1.0069 (max 1.1); first-10 vs last-10 median 0.06% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-cold",
+            "name": "step_series_it3",
+            "ok": true,
+            "detail": "p90/median 1.0081 (max 1.1); first-10 vs last-10 median 0.01% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-cold",
+            "name": "resident_medians_within_2pct",
+            "ok": true,
+            "detail": "step medians [534.8, 534.19, 534.69] ms, spread 0.11%",
+            "hard": false
+          },
+          {
+            "launch": "script-warm1",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "fallbacks",
+            "ok": true,
+            "detail": "load [[], [], [], []], generates [[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "unwarmed_shapes",
+            "ok": true,
+            "detail": "[[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "compiled_blocks",
+            "ok": true,
+            "detail": "[40, 40, 40, 40]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "loop_shape",
+            "ok": true,
+            "detail": "one stamp per iteration, steps-1 deltas, forwards = steps x (2 if g > 1)",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "latents_equal_on_ranks",
+            "ok": true,
+            "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "latents_equal_across_iterations",
+            "ok": true,
+            "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "latents_equal_to_cold_launch",
+            "ok": true,
+            "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "mp4_written",
+            "ok": true,
+            "detail": "[88546, 88546, 88546] bytes",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "hlo_locks_in_cache",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "counter_rule_warm",
+            "ok": true,
+            "detail": "Total/PersistentHits/InMemoryHits r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; new .neff 0",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "no_compile_in_generates",
+            "ok": true,
+            "detail": "generate TotalCompilations by iteration and rank [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm1",
+            "name": "step_series_it1",
+            "ok": true,
+            "detail": "p90/median 1.0062 (max 1.1); first-10 vs last-10 median 0.02% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm1",
+            "name": "step_series_it2",
+            "ok": true,
+            "detail": "p90/median 1.0073 (max 1.1); first-10 vs last-10 median 0.09% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm1",
+            "name": "step_series_it3",
+            "ok": true,
+            "detail": "p90/median 1.0084 (max 1.1); first-10 vs last-10 median 0.03% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm1",
+            "name": "resident_medians_within_2pct",
+            "ok": true,
+            "detail": "step medians [534.45, 534.41, 534.65] ms, spread 0.05%",
+            "hard": false
+          },
+          {
+            "launch": "script-warm2",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "fallbacks",
+            "ok": true,
+            "detail": "load [[], [], [], []], generates [[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "unwarmed_shapes",
+            "ok": true,
+            "detail": "[[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "compiled_blocks",
+            "ok": true,
+            "detail": "[40, 40, 40, 40]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "loop_shape",
+            "ok": true,
+            "detail": "one stamp per iteration, steps-1 deltas, forwards = steps x (2 if g > 1)",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "latents_equal_on_ranks",
+            "ok": true,
+            "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "latents_equal_across_iterations",
+            "ok": true,
+            "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "latents_equal_to_cold_launch",
+            "ok": true,
+            "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "mp4_written",
+            "ok": true,
+            "detail": "[88546, 88546, 88546] bytes",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "hlo_locks_in_cache",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "counter_rule_warm",
+            "ok": true,
+            "detail": "Total/PersistentHits/InMemoryHits r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; new .neff 0",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "no_compile_in_generates",
+            "ok": true,
+            "detail": "generate TotalCompilations by iteration and rank [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm2",
+            "name": "step_series_it1",
+            "ok": true,
+            "detail": "p90/median 1.0040 (max 1.1); first-10 vs last-10 median 0.06% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm2",
+            "name": "step_series_it2",
+            "ok": true,
+            "detail": "p90/median 1.0093 (max 1.1); first-10 vs last-10 median 0.10% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm2",
+            "name": "step_series_it3",
+            "ok": true,
+            "detail": "p90/median 1.0051 (max 1.1); first-10 vs last-10 median 0.20% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm2",
+            "name": "resident_medians_within_2pct",
+            "ok": true,
+            "detail": "step medians [534.33, 534.44, 534.83] ms, spread 0.09%",
+            "hard": false
+          },
+          {
+            "launch": "script-warm3",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "fallbacks",
+            "ok": true,
+            "detail": "load [[], [], [], []], generates [[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "unwarmed_shapes",
+            "ok": true,
+            "detail": "[[[], [], [], []], [[], [], [], []], [[], [], [], []]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "compiled_blocks",
+            "ok": true,
+            "detail": "[40, 40, 40, 40]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "loop_shape",
+            "ok": true,
+            "detail": "one stamp per iteration, steps-1 deltas, forwards = steps x (2 if g > 1)",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "latents_equal_on_ranks",
+            "ok": true,
+            "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "latents_equal_across_iterations",
+            "ok": true,
+            "detail": "['a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820', 'a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "latents_equal_to_cold_launch",
+            "ok": true,
+            "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "mp4_written",
+            "ok": true,
+            "detail": "[88546, 88546, 88546] bytes",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "hlo_locks_in_cache",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo', '/home/ubuntu/plans/wan21/records/W6/caches/g1.0-main/neuron/hlo']",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "counter_rule_warm",
+            "ok": true,
+            "detail": "Total/PersistentHits/InMemoryHits r0 0/39/11162 r1 0/44/11171 r2 0/44/11171 r3 0/44/11171; new .neff 0",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "no_compile_in_generates",
+            "ok": true,
+            "detail": "generate TotalCompilations by iteration and rank [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]",
+            "hard": true
+          },
+          {
+            "launch": "script-warm3",
+            "name": "step_series_it1",
+            "ok": true,
+            "detail": "p90/median 1.0053 (max 1.1); first-10 vs last-10 median 0.08% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm3",
+            "name": "step_series_it2",
+            "ok": true,
+            "detail": "p90/median 1.0036 (max 1.1); first-10 vs last-10 median 0.01% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm3",
+            "name": "step_series_it3",
+            "ok": true,
+            "detail": "p90/median 1.0113 (max 1.1); first-10 vs last-10 median 0.13% (max 5%)",
+            "hard": false
+          },
+          {
+            "launch": "script-warm3",
+            "name": "resident_medians_within_2pct",
+            "ok": true,
+            "detail": "step medians [533.9, 534.51, 534.6] ms, spread 0.13%",
+            "hard": false
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-warm1/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "file_rule_warm",
+            "ok": true,
+            "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm1",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+            "hard": false
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-warm2/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "file_rule_warm",
+            "ok": true,
+            "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm2",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+            "hard": false
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-warm3/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "file_rule_warm",
+            "ok": true,
+            "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+            "hard": true
+          },
+          {
+            "launch": "cli-warm3",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+            "hard": false
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-truecold/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "file_rule_warm",
+            "ok": true,
+            "detail": "new .neff 0, new HLO-cache files 0 (the CLI prints no counters; a warm launch adds nothing to the row's cache)",
+            "hard": true
+          },
+          {
+            "launch": "cli-truecold",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+            "hard": false
+          },
+          {
+            "launch": "cli-cold",
+            "name": "exit",
+            "ok": true,
+            "detail": "exit 0 timed_out=False",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "rank_lines",
+            "ok": true,
+            "detail": "ranks [0, 1, 2, 3]",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "compile_clean",
+            "ok": true,
+            "detail": "exec_mode/compiled_blocks/unwarmed/fallbacks per rank: r0 compile/40/[]/[]/[]; r1 compile/40/[]/[]/[]; r2 compile/40/[]/[]/[]; r3 compile/40/[]/[]/[]",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "one_writer",
+            "ok": true,
+            "detail": "1 'latents saved' lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "video_saved",
+            "ok": true,
+            "detail": "['/home/ubuntu/plans/wan21/records/W6/runs/g1.0/cli-cold/out.mp4']",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "no_failure",
+            "ok": true,
+            "detail": "0 failure lines",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "file_rule_cold",
+            "ok": true,
+            "detail": "new .neff 47",
+            "hard": true
+          },
+          {
+            "launch": "cli-cold",
+            "name": "latents_equal_to_script",
+            "ok": true,
+            "detail": "a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820 vs script a703d237e9a9b537f7236e20b1cedf0ebbb3597111a8c6a3e7f05c6d5e8ea820",
+            "hard": false
+          }
+        ],
+        "provenance": {
+          "head": "3763193977f4a508f72f713444d100f65fa88b08",
+          "worktree": "/home/ubuntu/Difflet/.claude/worktrees/neuron-phase1",
+          "status_at_runs": [
+            "M benchmark/bench.py\n M benchmark/models.py\n?? benchmark/adapters/neuron.py\n?? benchmark/neuron_cold_warm.py\n?? benchmark/neuron_wan_bench.py\n?? benchmark/trn2/wan_2_1_neuron.json\n?? benchmark/trn2/wan_2_1_neuron.md\n?? tests/unit/benchmark/",
+            "M benchmark/bench.py\n M benchmark/models.py\n?? benchmark/adapters/neuron.py\n?? benchmark/neuron_cold_warm.py\n?? benchmark/neuron_wan_bench.py\n?? tests/unit/benchmark/"
+          ],
+          "difflet_diff_vs_head_at_runs": [
+            ""
+          ],
+          "neuronx_cc": [
+            "NeuronX Compiler version 2.28.4568.0+0163fa9e"
+          ],
+          "neuron_cc_flags": [
+            "None"
+          ],
+          "files_sha256_at_runs": {
+            "benchmark/neuron_cold_warm.py": [
+              "0e976fa718cba79c901e608ea62f11e0015bc34be72f7cdad39f58c68573e14a",
+              "b8f5efd0790993199e681e152c13b572c93338358baa1657eb8fd7d7e6a7853a",
+              "42dbb820a17473f9be3ab33f983c705099a972f51c7ed4b9e7a8058a8ed02ebc",
+              "4a4620da45a3cd2ea6a4667c1508e6fa50dfba83e02f58fc99ad6bc74aa8fc78",
+              "53931f5117ce74f1508eb46e95d3c7dc0dc74b8d4645ab614346d4a170813373"
+            ],
+            "benchmark/neuron_wan_bench.py": [
+              "adb718622beb1a63b7e836caa4bc1953dc158602e7376052c5d14411d587ae7a"
+            ],
+            "benchmark/adapters/neuron.py": [
+              "af6b1de94cfa327ccfebfa05831a435ffa7bc9132987a6ca43d2c153f3cc889a",
+              "7047c50f1fa9c972edf2011139dcab0be2335fc46f129e699b23d7d4b6be8c42"
+            ],
+            "benchmark/harness.py": [
+              "13942ab2667a0560e6eff703a4a37aa4a8a58c7df281586194ac32dbbc8ddd6a"
+            ],
+            "benchmark/report.py": [
+              "282e1c9ef28b16a9425e18544e45ac6798735f59184db004835e0a0afc8fec6e"
+            ],
+            "benchmark/models.py": [
+              "0cf41b2dfab9f39a13f4baddf739190a5a761694adae04f25d434021400173a9"
+            ],
+            "tests/numerical/neuron_parity.py": [
+              "c9c3c1ec997476d8c95ea9f340a3e4efb1858c2c3b9b3df097784ec3a9fad35e"
+            ]
+          },
+          "launches": 19
+        }
+      }
+    }
+  },
+  "headline_guidance": 5.0,
+  "plan_note": "Run order: guidance 5, 1; per guidance script-cold, script-warm1, script-warm2, script-warm3, cli-w4check, cli-warm1, cli-warm2, cli-warm3, cli-truecold, cli-cold. Cold compile walls: g=5.0 57.6 s, g=1.0 60.9 s (same block graph and shape; one cold compile per guidance value, each on its own fresh cache): they differ by 5.8%."
+}
