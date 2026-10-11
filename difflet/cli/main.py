@@ -149,7 +149,10 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--cache-dir",
         default=None,
-        help="Compiled artifact cache root (default: ~/.cache/difflet/)",
+        help="Compiled artifact cache root (default: ~/.cache/difflet/). Trainium/TPU: the "
+        "compiled stage artifacts. --backend neuron: the stage manifests, and the NEFF/HLO "
+        "compile cache under <dir>/neuron/ (exported as DIFFLET_COMPILE_CACHE when that is "
+        "unset; an exported DIFFLET_COMPILE_CACHE keeps the compile cache).",
     )
     p.add_argument(
         "--force", action="store_true", help="Recompile even if a valid cache entry exists"

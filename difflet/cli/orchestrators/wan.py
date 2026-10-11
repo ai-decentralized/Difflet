@@ -6,13 +6,15 @@ Inter-stage tensor: {work_dir}/latents.pt
 
 With DIFFLET_BACKEND naming a non-AoT torchrun backend (neuron), the transformer stage runs as
 torchrun ranks that build the registry's application through DiffletPipeline
-(_stage_transformer_neuron), the VAE decodes on the host (--host-vae is forced), and the stage
-cache key names the backend and exec mode. Unset, trainium and tpu keep their paths unchanged.
+(_stage_transformer_neuron), the VAE decodes on the host (--host-vae is forced), the stage
+cache key names the backend and exec mode, and --cache-dir becomes DIFFLET_COMPILE_CACHE (the
+NEFF/HLO cache root) unless that is exported. Unset, trainium and tpu keep their paths unchanged.
 """
 from __future__ import annotations
 
 import argparse
 import contextlib
+import os
 import re
 import shutil
 import sys
@@ -219,8 +221,29 @@ class WanOrchestrator(ModelOrchestrator):
               flush=True)
         self.args.host_vae = True
 
+    def _root_compile_cache_at_cache_dir(self) -> None:
+        """A torchrun backend (neuron) compiles into the NEFF and HLO caches that
+        ``runner.run_stage`` exports to its ranks under ``$DIFFLET_COMPILE_CACHE/neuron/``,
+        while --cache-dir holds only the stage manifest. With --cache-dir given and
+        DIFFLET_COMPILE_CACHE unset or empty, export --cache-dir (absolute) as
+        DIFFLET_COMPILE_CACHE before any stage launch, so the compile cache lives under it;
+        an exported DIFFLET_COMPILE_CACHE wins. Read from os.environ directly: envs fills in
+        the default when the variable is unset."""
+        cache_dir = getattr(self.args, "cache_dir", None)
+        if not cache_dir or os.environ.get("DIFFLET_COMPILE_CACHE"):
+            return
+        backend = _torchrun_backend()
+        if backend is None:
+            return
+        root = os.path.abspath(os.path.expanduser(cache_dir))
+        os.environ["DIFFLET_COMPILE_CACHE"] = root
+        print(f"[wan] backend {backend!r} compiles into --cache-dir: "
+              f"DIFFLET_COMPILE_CACHE={root} (NEFF and HLO caches under {root}/neuron)",
+              flush=True)
+
     def compile(self) -> None:
         self._require_host_vae()
+        self._root_compile_cache_at_cache_dir()
         full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1) * (
             2 if getattr(self.args, "cfg_parallel", False) else 1
         )
@@ -237,6 +260,7 @@ class WanOrchestrator(ModelOrchestrator):
 
     def generate(self) -> None:
         self._require_host_vae()
+        self._root_compile_cache_at_cache_dir()
         _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(self.args.work_dir or
                         Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME)
