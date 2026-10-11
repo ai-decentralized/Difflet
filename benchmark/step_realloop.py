@@ -220,12 +220,18 @@ def _build_wan(cfg, cache):
     """Wan transformer stage (UMT5 text-encode + denoise loop in ONE stage, as
     difflet/cli/orchestrators/wan.py runs it); NeuronWanBackboneApplication
     is the per-step DiT call (batch 2 under CFG-parallel)."""
+    import os
     from difflet.backends.trainium.wan.backbone import NeuronWanBackboneApplication
-    from difflet.cli.orchestrators.wan import WanOrchestrator
+    from difflet.cli.orchestrators.wan import WanOrchestrator, _transformer_virtual_core_size
 
     work = _work_dir(cfg, cache)
     orch = WanOrchestrator(_staged_namespace(cfg, cache, work, work / "out.mp4"))
     argv = orch._shared_cli_args(stage_mode="generate", work_dir=str(work))
+    # difflet.cli.runner sets this for the transformer stage subprocess; the in-process
+    # stage must trace / load the same graph as its artifact (same as HunyuanVideo below).
+    vc = _transformer_virtual_core_size(orch.args)
+    if vc is not None:
+        os.environ.setdefault("NEURON_RT_VIRTUAL_CORE_SIZE", str(vc))
     ns = _stage_ns(cfg.model_id, "transformer", argv)
 
     def run():

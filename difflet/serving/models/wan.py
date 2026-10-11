@@ -649,6 +649,15 @@ def _validate_profile(profile: ServingProfile) -> None:
         raise ValueError("Wan resident video serving does not support TeaCache")
 
 
+def _transformer_virtual_core_size() -> int | None:
+    """NEURON_RT_VIRTUAL_CORE_SIZE the resident transformer is traced and run with: the same
+    value as the CLI orchestrator's transformer stage (see core/compiler_flags.py), so the
+    resident step runs the same graph as the standalone one."""
+    from difflet.backends.trainium.core.compiler_flags import wan_transformer_virtual_core_size
+
+    return wan_transformer_virtual_core_size()
+
+
 def _compile_spec(
     source: ResolvedModelSource,
     profile: ServingProfile,
@@ -666,9 +675,16 @@ def _compile_spec(
         revision=source.resolved_source_id,
         application_kwargs=_application_kwargs(),
     )
-    identity = CompileArtifactIdentity.from_cache_inputs(
-        {"component_id": "generation", "cache_inputs": cache_spec.cache_inputs()}
-    )
+    identity_inputs: dict[str, Any] = {
+        "component_id": "generation",
+        "cache_inputs": cache_spec.cache_inputs(),
+    }
+    # Additive-only: the virtual core size the transformer is traced for (absent = the
+    # single-core graph, whose identity stays unchanged).
+    virtual_core_size = _transformer_virtual_core_size()
+    if virtual_core_size is not None:
+        identity_inputs["virtual_core_size"] = virtual_core_size
+    identity = CompileArtifactIdentity.from_cache_inputs(identity_inputs)
     return DiffletCompileSpec(
         artifact_id="generation",
         component_id="generation",
@@ -765,7 +781,10 @@ def _compile_artifact(
         application = _build_neuron_vae(source, profile)
     else:
         raise ValueError(f"unknown Wan serving component {spec.component_id!r}")
-    with serving_compile_environment(profile.world_size):
+    virtual_core_size = (
+        _transformer_virtual_core_size() if spec.component_id == "generation" else None
+    )
+    with serving_compile_environment(profile.world_size, virtual_core_size=virtual_core_size):
         application.compile(str(target.staging_path))
     if not application.has_compiled_artifacts(
         str(target.staging_path)
@@ -814,7 +833,11 @@ def _runtime_plan(
     # whole plan.
     tpu = not specs
     generation = by_component.get("generation")
-    environment, allocation = resident_environment(profile, allocation_id="wan-resident")
+    environment, allocation = resident_environment(
+        profile,
+        allocation_id="wan-resident",
+        virtual_core_size=None if tpu else _transformer_virtual_core_size(),
+    )
     topology = ParallelTopology(
         tp_degree=profile.parallel.tp_degree,
         cp_degree=profile.parallel.cp_degree,

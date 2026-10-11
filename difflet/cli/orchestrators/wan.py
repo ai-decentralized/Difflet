@@ -31,22 +31,26 @@ from difflet.cli.orchestrators.base import (
 # are loaded only when present), so the orchestrator is version-agnostic.
 _MODEL_TYPE = "wan"
 _CLI_NAME = "wan"
-_VIRTUAL_CORE_SIZE = None  # Wan does not require NEURON_RT_VIRTUAL_CORE_SIZE
+_VIRTUAL_CORE_SIZE = None  # the VAE stage does not use NEURON_RT_VIRTUAL_CORE_SIZE
 
 
 def _transformer_virtual_core_size(args) -> int | None:
-    """Ring CP is the one Wan path that needs NEURON_RT_VIRTUAL_CORE_SIZE=2.
+    """NEURON_RT_VIRTUAL_CORE_SIZE for the Wan transformer stage: 2 by default.
 
-    The nkilib ring kernel allocates per-core shared_hbm send/recv buffers and
-    a core_barrier that only exist in its LNC2 SPMD-grid variant, selected in
-    ops_impl.attention.ring_attention off this env var; without it neuronx-cc
-    fails with NCC_ILLC059 ("Could not find MemoryLocation ... send_k_buf on
-    core 1"). Every other Wan stage/mode stays at None so its existing compile
-    caches remain valid (ring's transformer cache is a separate key anyway).
+    With 2 the trace picks ``attention_cte[2]``, so the NKI attention runs on both physical
+    cores of the LNC2 pair (480x832x81 tp4: 9.59 -> 6.12 s per DiT call; see
+    core/compiler_flags.py). DIFFLET_WAN_VIRTUAL_CORE_SIZE=1 restores the single-core graph.
+
+    Ring CP needs 2 regardless: the nkilib ring kernel allocates per-core shared_hbm
+    send/recv buffers and a core_barrier that only exist in its LNC2 SPMD-grid variant,
+    selected in ops_impl.attention.ring_attention off this env var; without it neuronx-cc
+    fails with NCC_ILLC059 ("Could not find MemoryLocation ... send_k_buf on core 1").
     """
     if getattr(args, "cp_mode", None) == "ring" and (args.cp_degree or 1) > 1:
         return 2
-    return _VIRTUAL_CORE_SIZE
+    from difflet.backends.trainium.core.compiler_flags import wan_transformer_virtual_core_size
+
+    return wan_transformer_virtual_core_size()
 
 # The historical model id keeps the bare "wan" compiled-dir prefix so existing
 # compile caches stay valid (additive-only, same policy as
@@ -328,7 +332,7 @@ class WanOrchestrator(ModelOrchestrator):
     def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         prefix = _cache_prefix(self.args.model_id)
         if stage == "transformer":
-            return {
+            inputs = {
                 "component": f"{prefix}_transformer",
                 "model_id": self.args.model_id,
                 "revision": getattr(args, "revision", None),
@@ -343,6 +347,16 @@ class WanOrchestrator(ModelOrchestrator):
                 "shapes": canonical_shapes_list(args, (480, 832, 9)),
                 "toolchain": stage_toolchain_versions(),
             }
+            # Additive-only (absent at the old defaults, so those artifacts keep their key):
+            # the virtual core size the graph was traced for and the tensorizer extras the
+            # backbone compiles with. Both change the NEFF.
+            from difflet.backends.trainium.core.compiler_flags import tensorizer_cache_inputs
+
+            vc = _transformer_virtual_core_size(args)
+            if vc is not None:
+                inputs["virtual_core_size"] = vc
+            inputs.update(tensorizer_cache_inputs("wan"))
+            return inputs
         if stage == "vae":
             inputs = {
                 "component": f"{prefix}_vae",

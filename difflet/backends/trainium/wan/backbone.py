@@ -191,9 +191,13 @@ class NeuronWanBackboneApplication(NeuronApplicationBase):
         return self.models[0](*model_inputs, **kwargs)
 
     def get_compiler_args(self) -> str:
+        from difflet.backends.trainium.core.compiler_flags import tensorizer_options
+
+        # --vectorize-strided-dma is on by default for Wan (see core/compiler_flags.py;
+        # DIFFLET_STRIDED_DMA=0 turns it off). The orchestrator mirrors it into the stage key.
         compiler_args = (
             "--model-type=transformer -O1 "
-            "--tensorizer-options='--enable-ccop-compute-overlap' "
+            f"--tensorizer-options='{tensorizer_options('wan')}' "
             "--auto-cast=none "
             "--internal-hlo2tensorizer-options='--verify-hlo=true'"
         )

@@ -308,7 +308,7 @@ def test_compile_artifact_checks_target_environment_and_payload(monkeypatch, tmp
     wan._compile_artifact(runtime.source, runtime.profile, spec, target)
 
     assert calls == {
-        "environment": (4, {}),
+        "environment": (4, {"virtual_core_size": 2}),
         "compile": str(target.staging_path),
         "validated": str(target.staging_path),
     }
@@ -370,7 +370,7 @@ def test_neuron_decoder_compile_uses_dedicated_artifact(monkeypatch, tmp_path):
     wan._compile_artifact(runtime.source, runtime.profile, spec, target)
 
     assert calls == {
-        "environment": (4, {}),
+        "environment": (4, {"virtual_core_size": None}),
         "compile": str(target.staging_path),
         "validated": str(target.staging_path),
     }
@@ -446,6 +446,28 @@ def test_artifact_validation_rejects_empty_model_payload(monkeypatch, tmp_path):
 
     (component / "model.pt").write_bytes(b"model")
     wan._validate_artifact(runtime.source, runtime.profile, spec, root)
+
+
+def test_resident_transformer_uses_the_cli_virtual_core_size(monkeypatch, tmp_path):
+    # The resident worker traces and runs the transformer with the CLI stage's
+    # NEURON_RT_VIRTUAL_CORE_SIZE (2: attention_cte[2] on both physical cores), so the
+    # resident DiT step is the standalone one. The value is in the generation identity
+    # (additive-only), so a single-core artifact is never reused for the LNC2 graph.
+    monkeypatch.delenv("DIFFLET_WAN_VIRTUAL_CORE_SIZE", raising=False)
+    runtime = _runtime(tmp_path, monkeypatch)
+    plan = runtime.runtime_plan
+    assert plan.environment.virtual_core_size_override == 2
+    assert plan.allocations[0].effective_virtual_core_size == 2
+    lnc2 = runtime.compile_specs[0].identity
+
+    monkeypatch.setenv("DIFFLET_WAN_VIRTUAL_CORE_SIZE", "1")
+    single = _runtime(tmp_path, monkeypatch)
+    assert single.runtime_plan.environment.virtual_core_size_override is None
+    assert single.compile_specs[0].identity != lnc2
+    # the decoder artifact does not depend on the transformer's virtual core size
+    assert [spec.identity for spec in single.compile_specs[1:]] == [
+        spec.identity for spec in runtime.compile_specs[1:]
+    ]
 
 
 def test_runtime_plan_places_prompt_and_denoiser_on_neuron_and_decoder_on_host(
