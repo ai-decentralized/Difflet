@@ -12,11 +12,17 @@ from difflet.backends.trainium.core.bucketing import (
     CompileShape,
     ShapeBucketedInputGenerator,
     canonicalize_shapes,
+    dedupe_example_inputs,
     resolve_compile_shapes,
 )
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
-from difflet.models.wan.vae.modeling_vae import WanVAEDecoderConfig, WanVAEDecoderModel
+from difflet.models.wan.vae.modeling_vae import (
+    WanVAEDecoderConfig,
+    WanVAEDecoderModel,
+    WanVAEDecoderStepModel,
+    wan_vae_decode_cache,
+)
 
 
 class WanVAEDecoderInferenceConfig(InferenceConfig):
@@ -87,8 +93,8 @@ class WanVAEDecoderInferenceConfig(InferenceConfig):
 class ModelWrapperWanVAEDecoder(ShapeBucketedInputGenerator, ModelWrapper):
     """ModelBuilder wrapper for Wan VAE decoder compile inputs.
 
-    Decodes the full latent in one shot, so each compile shape genuinely
-    becomes its own bucket NEFF (unlike the tiled HunyuanVideo decoder).
+    Images retain their single-frame graph. Videos use first, second and
+    steady-state graphs, independent of the total number of latent frames.
     """
 
     def __init__(
@@ -106,57 +112,87 @@ class ModelWrapperWanVAEDecoder(ShapeBucketedInputGenerator, ModelWrapper):
             tag,
             compiler_args,
             priority_model_idx,
-            model_init_kwargs or {},
+            model_init_kwargs=model_init_kwargs or {},
         )
         self.bucket_config = None
+        self.decode_step = (model_init_kwargs or {}).get("step")
+
+    def input_generator(self):
+        return dedupe_example_inputs(
+            [
+                self.example_inputs_for_shape(shape)
+                for shape in resolve_compile_shapes(self.config)
+                if self.decode_step is None
+                or (int(shape[2]) - 1) // int(self.config.scale_factor_temporal) >= self.decode_step
+            ]
+        )
 
     def example_inputs_for_shape(self, shape: CompileShape) -> Tuple[torch.Tensor, ...]:
         height, width, num_frames = shape
         batch_size = int(getattr(self.config.neuron_config, "batch_size", 1))
         dtype = self.config.neuron_config.torch_dtype
-        return (
-            torch.randn(
-                [
-                    batch_size,
-                    int(self.config.z_dim),
-                    (int(num_frames) - 1) // int(self.config.scale_factor_temporal) + 1,
-                    int(height) // int(self.config.scale_factor_spatial),
-                    int(width) // int(self.config.scale_factor_spatial),
-                ],
-                dtype=dtype,
+        latent_shape = [
+            batch_size,
+            int(self.config.z_dim),
+            (
+                1
+                if self.decode_step is not None
+                else (int(num_frames) - 1) // int(self.config.scale_factor_temporal) + 1
             ),
+            int(height) // int(self.config.scale_factor_spatial),
+            int(width) // int(self.config.scale_factor_spatial),
+        ]
+        latents = torch.zeros(latent_shape, dtype=dtype)
+        if self.decode_step is None:
+            return (latents,)
+        cache = wan_vae_decode_cache(self.decoder_config(), latent_shape, self.decode_step, dtype)
+        return (
+            latents,
+            *(
+                torch.zeros(t.shape if isinstance(t, torch.Tensor) else (1,), dtype=dtype)
+                for t in cache
+                if t is not None
+            ),
+        )
+
+    def decoder_config(self):
+        return WanVAEDecoderConfig(
+            base_dim=int(self.config.base_dim),
+            decoder_base_dim=int(self.config.decoder_base_dim),
+            z_dim=int(self.config.z_dim),
+            dim_mult=list(self.config.dim_mult),
+            num_res_blocks=int(self.config.num_res_blocks),
+            attn_scales=list(self.config.attn_scales),
+            temperal_downsample=list(self.config.temperal_downsample),
+            dropout=float(self.config.dropout),
+            latents_mean=list(getattr(self.config, "latents_mean", [])),
+            latents_std=list(getattr(self.config, "latents_std", [])),
+            is_residual=bool(getattr(self.config, "is_residual", False)),
+            out_channels=int(getattr(self.config, "out_channels", 3)),
+            patch_size=getattr(self.config, "patch_size", None),
+            scale_factor_temporal=int(getattr(self.config, "scale_factor_temporal", 4)),
+            scale_factor_spatial=int(getattr(self.config, "scale_factor_spatial", 8)),
         )
 
     def get_model_instance(self):
         def _create_model():
-            cfg = WanVAEDecoderConfig(
-                base_dim=int(self.config.base_dim),
-                decoder_base_dim=int(self.config.decoder_base_dim),
-                z_dim=int(self.config.z_dim),
-                dim_mult=list(self.config.dim_mult),
-                num_res_blocks=int(self.config.num_res_blocks),
-                attn_scales=list(self.config.attn_scales),
-                temperal_downsample=list(self.config.temperal_downsample),
-                dropout=float(self.config.dropout),
-                latents_mean=list(getattr(self.config, "latents_mean", [])),
-                latents_std=list(getattr(self.config, "latents_std", [])),
-                is_residual=bool(getattr(self.config, "is_residual", False)),
-                out_channels=int(getattr(self.config, "out_channels", 3)),
-                patch_size=getattr(self.config, "patch_size", None),
-                scale_factor_temporal=int(getattr(self.config, "scale_factor_temporal", 4)),
-                scale_factor_spatial=int(getattr(self.config, "scale_factor_spatial", 8)),
-            )
-            model = self.model_cls(cfg)
+            kwargs = {} if self.decode_step is None else {"step": self.decode_step}
+            model = self.model_cls(self.decoder_config(), **kwargs)
             model = model.to(dtype=self.config.neuron_config.torch_dtype)
             model.eval()
             return model
 
         return BaseModelInstance(module_cls=_create_model, input_output_aliases={})
 
-    def forward(self, latents):
+    def forward(self, latents, *history):
         if self.model is None:
             raise RuntimeError("Forward called before load. Run load() first.")
-        return self._forward(latents)
+        if self.decode_step is not None:
+            # The outer traced executor fixes its argument count to the last
+            # step. The scripted NxD router accepts a tensor list, including
+            # the first step which has no history (as in the base warmup path).
+            return self.model.nxd_model.forward([latents, *history])
+        return self._forward(latents, *history)
 
 
 class NeuronWanVAEDecoderApplication(NeuronApplicationBase):
@@ -167,14 +203,35 @@ class NeuronWanVAEDecoderApplication(NeuronApplicationBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model_wrapper = self.get_model_wrapper_cls()
-        self.model = self.model_wrapper(
-            config=self.config,
-            model_cls=self._model_cls,
-            tag=self._model_cls.__name__,
-            compiler_args=self.get_compiler_args(),
-            priority_model_idx=0,
+        max_latent_frames = max(
+            (int(shape[2]) - 1) // int(self.config.scale_factor_temporal) + 1
+            for shape in resolve_compile_shapes(self.config)
         )
-        self.models.append(self.model)
+        self.temporal_decode = max_latent_frames > 1
+        if self.temporal_decode:
+            for step in range(min(3, max_latent_frames)):
+                self.models.append(
+                    self.model_wrapper(
+                        config=self.config,
+                        model_cls=WanVAEDecoderStepModel,
+                        tag=f"WanVAEDecoderStepModel_{step}",
+                        compiler_args=self.get_compiler_args(),
+                        # All steps share checkpoint weights; avoid specializing
+                        # their layout to just one of the different step graphs.
+                        priority_model_idx=None,
+                        model_init_kwargs={"step": step},
+                    )
+                )
+            self.model = self.models[0]
+        else:
+            self.model = self.model_wrapper(
+                config=self.config,
+                model_cls=self._model_cls,
+                tag=self._model_cls.__name__,
+                compiler_args=self.get_compiler_args(),
+                priority_model_idx=0,
+            )
+            self.models.append(self.model)
         self.dtype = self.config.neuron_config.torch_dtype
 
     @classmethod
@@ -184,8 +241,25 @@ class NeuronWanVAEDecoderApplication(NeuronApplicationBase):
     def get_model_wrapper_cls(self):
         return ModelWrapperWanVAEDecoder
 
-    def forward(self, *model_inputs, **kwargs):
-        return self.models[0](*model_inputs, **kwargs)
+    def forward(self, latents):
+        if not self.temporal_decode:
+            return self.models[0](latents)
+        shape = (
+            int(latents.shape[3]) * int(self.config.scale_factor_spatial),
+            int(latents.shape[4]) * int(self.config.scale_factor_spatial),
+            (int(latents.shape[2]) - 1) * int(self.config.scale_factor_temporal) + 1,
+        )
+        if shape not in resolve_compile_shapes(self.config):
+            raise ValueError(f"Wan VAE shape {shape} is not in the compiled shape set.")
+        chunks = []
+        # Request-local state: every video starts with an empty causal cache.
+        history = ()
+        for index in range(latents.shape[2]):
+            chunk, *history = self.models[min(index, 2)](
+                latents[:, :, index : index + 1].contiguous(), *history
+            )
+            chunks.append(chunk)
+        return torch.cat(chunks, dim=2)
 
     def get_compiler_args(self) -> str:
         compiler_args = (

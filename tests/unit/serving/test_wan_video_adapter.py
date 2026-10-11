@@ -996,6 +996,6 @@ def test_multi_shape_decoder_identity_covers_the_set(monkeypatch, tmp_path):
     }
     assert multi["decoder"].identity != single["decoder"].identity
     inputs = json.loads(multi["decoder"].identity.canonical_cache_inputs_json)
-    assert inputs["compile_contract_version"] == 2
+    assert inputs["compile_contract_version"] == 3
     assert inputs["shapes"] == [[64, 96, 9], [64, 96, 5]]
     assert "height" not in inputs

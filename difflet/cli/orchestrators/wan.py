@@ -101,9 +101,8 @@ def _decode_latents_host(latents_path: str, model_id: str, output_path: str,
                          revision: str | None = None) -> None:
     """Decode DiT latents with the diffusers Wan VAE on host CPU.
 
-    The compiled single-shot Neuron VAE exceeds the neuronx-cc instruction
-    limit (NCC_EVRF007) beyond ~9 frames; diffusers decodes latent frames
-    sequentially with a causal cache, so long clips work on host.
+    This is the explicit host fallback. The Neuron path also decodes temporal
+    chunks with a causal cache, using separately compiled step graphs.
     """
     import torch
     from diffusers import AutoencoderKLWan
@@ -355,6 +354,7 @@ class WanOrchestrator(ModelOrchestrator):
             }
         if stage == "vae":
             return {
+                "compile_contract_version": 3,
                 "component": f"{prefix}_vae",
                 "model_id": self.args.model_id,
                 "dtype": "bfloat16",
