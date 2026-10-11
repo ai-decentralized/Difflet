@@ -36,6 +36,9 @@ def _make_adapter(name: str):
     if name == "tpu":
         from benchmark.adapters.tpu import TpuAdapter
         return TpuAdapter()
+    if name == "neuron":
+        from benchmark.adapters.neuron import NeuronAdapter
+        return NeuronAdapter()
     raise SystemExit(f"unknown backend: {name}")
 
 
