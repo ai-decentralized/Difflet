@@ -63,9 +63,16 @@ PASS/FAIL line per check, each rank ``[rank r] PASS``):
 * with ``--expect warm``: the load compiled no NEFF (``TotalCompilations == 0``, at least one
   persistent hit); the counters of every phase and the new ``.neff`` files are recorded.
 
+umT5 threads: rank 0 encodes with a fixed ``--encoder-threads`` (default 12, this host's
+vCPUs). It is pinned, not picked per launch, because umT5's fp32 output bits depend on the
+intra-op thread count: the embeddings, and with them every latent hash below, are reproducible
+across launches only at the same count. ``--probe-encoder-threads 12,3,12,3`` (off by default)
+times rank 0's encode at each listed count before the generate (errata P1-7), as a record
+only; the generate still runs at ``--encoder-threads``. W4 measured 12 vs 3 as a tie within
+noise (2.17 / 2.28 s, then 2.88 / 2.17 s): the encode is memory-bound.
+
 Timing (informational; W6 owns the benchmark): ``phase_seconds`` (incl. "text encoder load"
-and "warmup forward"), the umT5 encode with 12 and with 3 intra-op threads on rank 0 (errata
-P1-7; the faster count is kept for the run), every encode inside the generate, per-iteration
+and "warmup forward"), the optional thread probe, every encode inside the generate, per-iteration
 seconds from ``step_hook`` (iteration 0 from the start of its first forward), per-forward
 seconds from ``forward_hook``, the generate wall, the VAE decode (rank 0, ``--decode-threads``)
 and the process total. Every rank hashes the latents after each step (``--no-hash-steps`` to
@@ -142,10 +149,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         "without --ref)")
     p.add_argument("--no-hash-steps", dest="hash_steps", action="store_false",
                    help="do not hash the latents after every step (the final ones still are)")
-    p.add_argument("--encoder-threads-probe", default="12,3,12,3",
-                   help="rank 0's umT5 intra-op thread counts to time before the generate, "
-                        "in order; the fastest is kept ('' keeps --encoder-threads)")
-    p.add_argument("--encoder-threads", type=int, default=12)
+    p.add_argument("--probe-encoder-threads", default="",
+                   help="record only: rank 0's umT5 intra-op thread counts to time before the "
+                        "generate, in order (e.g. 12,3,12,3); off by default")
+    p.add_argument("--encoder-threads", type=int, default=12,
+                   help="rank 0's umT5 intra-op threads for the real encodes; pinned because "
+                        "the embeddings' bits depend on it")
     p.add_argument("--decode-threads", type=int, default=os.cpu_count() or 1,
                    help="rank 0's torch threads for the VAE decode (the peers have exited)")
     args = p.parse_args(argv)
@@ -160,11 +169,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.expect is not None and args.cache_dir is None:
         p.error("--expect needs --cache-dir (the directory whose warm state is checked)")
     try:
-        args.encoder_threads_probe = [int(t) for t in args.encoder_threads_probe.split(",")
+        args.probe_encoder_threads = [int(t) for t in args.probe_encoder_threads.split(",")
                                       if t.strip()]
     except ValueError:
-        p.error(f"--encoder-threads-probe must be comma-separated integers, got "
-                f"{args.encoder_threads_probe!r}")
+        p.error(f"--probe-encoder-threads must be comma-separated integers, got "
+                f"{args.probe_encoder_threads!r}")
+    if args.encoder_threads < 1:
+        p.error(f"--encoder-threads must be at least 1, got {args.encoder_threads}")
     return args
 
 
@@ -410,32 +421,36 @@ def main(args: argparse.Namespace) -> int:
 
     encoder._encode = timed_encode
 
-    # P1-7: rank 0's encode with 12 and with 3 threads while the peers wait in the status
-    # all-reduce; keep the faster.
-    tokenizer = pipeline._get_tokenizer()
-    tokens = tokenizer([args.prompt], padding="max_length", truncation=True,
-                       max_length=args.text_seq_len, return_tensors="pt")
+    # P1-7, record only (--probe-encoder-threads): rank 0's encode at each listed thread count
+    # while the peers wait in the status all-reduce. The generate runs at the pinned
+    # --encoder-threads whatever the probe finds: the embeddings' bits depend on the count.
     probe: list[dict[str, Any]] = []
-    for threads in args.encoder_threads_probe:
-        encoder.threads = threads
-        begin = time.perf_counter()
-        embeds = encoder(tokens["input_ids"].to(torch.int64),
-                         tokens["attention_mask"].to(torch.int32))
-        probe.append({"threads": threads, "call_s": time.perf_counter() - begin,
-                      "sha256": sha256(embeds),
-                      "encode_s": encodes[-1]["seconds"] if rank == 0 else None})
-    chosen_threads = args.encoder_threads
-    if probe and rank == 0:
-        best = {}
-        for entry in probe:
-            best[entry["threads"]] = min(best.get(entry["threads"], math.inf), entry["encode_s"])
-        chosen_threads = min(best, key=best.get)
-    encoder.threads = chosen_threads
+    probe_fastest = None
+    if args.probe_encoder_threads:
+        tokenizer = pipeline._get_tokenizer()
+        tokens = tokenizer([args.prompt], padding="max_length", truncation=True,
+                           max_length=args.text_seq_len, return_tensors="pt")
+        for threads in args.probe_encoder_threads:
+            encoder.threads = threads
+            begin = time.perf_counter()
+            embeds = encoder(tokens["input_ids"].to(torch.int64),
+                             tokens["attention_mask"].to(torch.int32))
+            probe.append({"threads": threads, "call_s": time.perf_counter() - begin,
+                          "sha256": sha256(embeds),
+                          "encode_s": encodes[-1]["seconds"] if rank == 0 else None})
+        if rank == 0:
+            best: dict[int, float] = {}
+            for entry in probe:
+                best[entry["threads"]] = min(best.get(entry["threads"], math.inf),
+                                             entry["encode_s"])
+            probe_fastest = min(best, key=best.get)
+    encoder.threads = args.encoder_threads
     snaps["after_probe"] = snapshot(t0)
     if probe:
-        print(f"[rank {rank}] encoder thread probe: "
+        print(f"[rank {rank}] encoder thread probe (record only): "
               f"{[(e['threads'], round(e['call_s'], 3), e['encode_s'] and round(e['encode_s'], 3)) for e in probe]}"
-              f" -> {chosen_threads} threads", flush=True)
+              f"; fastest {probe_fastest}; the generate uses the pinned {args.encoder_threads}",
+              flush=True)
 
     phase["name"] = "generate"
     step_stamps: list[float] = []
@@ -699,8 +714,9 @@ def main(args: argparse.Namespace) -> int:
         "iteration_stats_excl_first": stats(iterations[1:]),
         "forward_stats": stats(per_forward),
         "encodes": encodes,
+        "encoder_threads": args.encoder_threads,
         "encoder_threads_probe": probe,
-        "encoder_threads_chosen": chosen_threads,
+        "encoder_threads_probe_fastest": probe_fastest,
         "counters": {
             "prepare_runtime": delta(snaps["start"], snaps["pre_prepare"]),
             "load": load_delta,
@@ -853,6 +869,10 @@ def read_back_mp4(path: Path) -> dict[str, Any]:
 def summarize(args: argparse.Namespace) -> int:
     directory = args.summarize
     paths = sorted(directory.glob("result-rank*.json"))
+    if not paths:
+        print(f"FAIL {args.tag}: no result-rank*.json under {directory} (did the launch run, "
+              "and did every rank get as far as writing its result?)", flush=True)
+        return 1
     results = sorted((json.loads(p.read_text()) for p in paths), key=lambda r: r["rank"])
     problems: list[str] = []
     world = results[0]["world_size"] if results else 0
@@ -925,7 +945,8 @@ def summarize(args: argparse.Namespace) -> int:
             "warmup forward")),
         "text_encoder_load_s": phases.get("text encoder load"),
         "encode_probe_best_s_by_threads": probe_best,
-        "encoder_threads_chosen": rank0.get("encoder_threads_chosen"),
+        "encoder_threads": rank0.get("encoder_threads"),
+        "encoder_threads_probe_fastest": rank0.get("encoder_threads_probe_fastest"),
         "generate_encodes_rank0": [e for e in rank0.get("encodes", [])
                                    if e["phase"] == "generate"],
         "prompt_encode_calls_s_rank0": rank0.get("timers_s", {}).get("prompt_encodes"),
