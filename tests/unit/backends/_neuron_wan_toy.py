@@ -57,6 +57,20 @@ TINY_WEIGHT_SEED_2 = 4
 #: and 500 (sigma' = 3 sigma / (1 + 2 sigma)), so 800 gives each expert two steps.
 TINY_BOUNDARY_RATIO = 0.8
 TINY_INPUT_SEED = 1
+TINY_VAE_SEED = 5
+#: A diffusers AutoencoderKLWan with the real layout, sized for the tiny latent: z_dim = the DiT's
+#: out_channels; dim_mult [1, 2, 4, 4] upsamples x8 in space and x4 in time, so the latent
+#: (1, 4, 2, 4, 6) decodes to 5 frames of 32 x 48.
+TINY_VAE: dict = {
+    "base_dim": 8,
+    "z_dim": 4,
+    "dim_mult": [1, 2, 4, 4],
+    "num_res_blocks": 1,
+    "attn_scales": [],
+    "temperal_downsample": [False, True, True],
+    "latents_mean": [0.1, -0.2, 0.05, 0.3],
+    "latents_std": [1.5, 0.8, 1.2, 2.0],
+}
 TINY_PIPELINE_SEED = 2
 TINY_ENCODER_SEED = 3
 TINY_TIMESTEP = 750.0
@@ -219,7 +233,29 @@ def write_tiny_wan_model(root) -> torch.Tensor:
     _write_json(root / "scheduler" / "scheduler_config.json", WAN21_SCHEDULER)
     _write_json(root / "model_index.json", {"_class_name": "WanPipeline"})
     _write_text_encoder(root)
+    _write_vae(root)
     return reference
+
+
+def _write_vae(root: Path) -> None:
+    from diffusers import AutoencoderKLWan
+
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(TINY_VAE_SEED)
+        vae = AutoencoderKLWan(**TINY_VAE).eval()
+    vae.save_pretrained(str(root / "vae"))
+
+
+def tiny_wan_host_decode(root, latents: torch.Tensor) -> torch.Tensor:
+    """The host decode the CLI runs (``_decode_latents_host``): diffusers in fp32."""
+    from diffusers import AutoencoderKLWan
+
+    vae = AutoencoderKLWan.from_pretrained(str(Path(root) / "vae"), torch_dtype=torch.float32)
+    z_dim = vae.config.z_dim
+    mean = torch.tensor(vae.config.latents_mean).view(1, z_dim, 1, 1, 1)
+    std = torch.tensor(vae.config.latents_std).view(1, z_dim, 1, 1, 1)
+    with torch.no_grad():
+        return vae.eval().decode(latents.float() * std + mean, return_dict=False)[0]
 
 
 def write_tiny_wan22_model(root, *, transformer_2_config: dict | None = None) -> None:

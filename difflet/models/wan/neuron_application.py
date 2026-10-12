@@ -23,8 +23,12 @@ launch builds one and holds:
 * ``pipeline``: the backend-neutral ``WanOrchestrator`` (fp32 latents, UniPC on the host), which
   every rank runs on identical inputs; its DiT calls go through ``_OnDeviceTransformer``.
 
-The VAE decodes on the host outside this application (``--host-vae``). Phase 1 limits, each
-rejected in ``__init__``: no device VAE, one static shape, batch 1, no TeaCache, tensor
+* ``vae_decoder`` (``enable_vae_decoder=True``): ``_DeviceVaeDecoder``, the VAE decoder on every
+  rank's core in fp32, eager (``NeuronWanVaeDecoderApplication``); ``output_type="pt"`` then
+  returns decoded frames. Without it the VAE decodes on the host outside this application
+  (``--host-vae``).
+
+Phase 1 limits, each rejected in ``__init__``: one static shape, batch 1, no TeaCache, tensor
 parallelism only.
 
 Timing hooks (for the benchmark): ``step_hook`` is called with no arguments once per denoise
@@ -53,6 +57,7 @@ from difflet.backends.neuron.runtime import check_parallel_supported
 from difflet.backends.neuron.wan.config import NeuronWanConfig
 from difflet.backends.neuron.wan.text_encoder import NeuronWanTextEncoderApplication
 from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication
+from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +179,26 @@ class _DeviceTextEncoder:
         return torch.cat(rows)
 
 
+class _DeviceVaeDecoder:
+    """The orchestrator's VAE decoder: host latents in (already un-normalised), host frames out.
+
+    Exposes what ``WanOrchestrator._decode_latents`` reads: ``dtype`` (fp32, the decode
+    precision) and ``config`` (``latents_mean``/``latents_std``).
+    """
+
+    def __init__(self, app: NeuronWanVaeDecoderApplication, *, device):
+        self.app = app
+        self.dtype = app.dtype
+        self.config = app.vae_config
+        self.device = torch.device(device)
+
+    def load(self, skip_warmup: bool = False) -> None:
+        self.app.load(skip_warmup=skip_warmup)
+
+    def __call__(self, latents: torch.Tensor) -> torch.Tensor:
+        return self.app(latents.to(self.device, self.dtype)).cpu()
+
+
 class _OnDeviceTransformer:
     """The orchestrator's DiT callable: host tensors in, host tensor out.
 
@@ -232,11 +257,6 @@ def _resolve_shape(shape: dict[str, int | None], shapes) -> dict[str, int]:
 
 
 def _reject_unsupported(options: dict[str, Any]) -> None:
-    if options["enable_vae_decoder"]:
-        raise NotImplementedError(
-            "the neuron backend decodes the VAE on the host (--host-vae); there is no device "
-            "VAE in phase 1"
-        )
     teacache = [name for name in _TEACACHE_KWARGS if options[name] is not None]
     if teacache:
         raise NotImplementedError(
@@ -342,6 +362,20 @@ class TorchNeuronWanApplication(torch.nn.Module):
                 device=self.device,
                 threads=int(options["encoder_threads"]),
             )
+        self.vae_decoder: _DeviceVaeDecoder | None = None
+        if options["enable_vae_decoder"]:
+            cfg = self.config
+            self.vae_decoder = _DeviceVaeDecoder(
+                NeuronWanVaeDecoderApplication(
+                    model_path=os.path.join(self.model_path, "vae"),
+                    latent_shape=(1, int(cfg.out_channels), cfg.latent_frames,
+                                  cfg.latent_height, cfg.latent_width),
+                    parallel=parallel,
+                    dtype=torch.float32,  # see NeuronWanVaeDecoderApplication
+                    device=self.device,
+                ),
+                device=self.device,
+            )
         self.transformer_adapter: _OnDeviceTransformer | None = None
         self.transformer_2_adapter: _OnDeviceTransformer | None = None
         self.pipeline = None
@@ -405,12 +439,14 @@ class TorchNeuronWanApplication(torch.nn.Module):
             start = time.perf_counter()
             self.text_encoder.load()
             self._text_encoder_load_seconds = time.perf_counter() - start
+        if self.vae_decoder is not None:
+            self.vae_decoder.load(skip_warmup=skip_warmup)
         pipeline = WanOrchestrator(
             model_path=self.model_path,
             text_encoder=self.text_encoder,
             transformer=self.transformer_adapter,
             transformer_2=self.transformer_2_adapter,
-            vae_decoder=None,
+            vae_decoder=self.vae_decoder,
             dtype=self.dtype,
             max_text_length=self.text_seq_len,
             **self.shape,
@@ -449,6 +485,8 @@ class TorchNeuronWanApplication(torch.nn.Module):
             seconds.update(
                 {f"text_encoder {k}": v for k, v in self.text_encoder.app.phase_seconds.items()}
             )
+        if self.vae_decoder is not None:
+            seconds.update({f"vae {k}": v for k, v in self.vae_decoder.app.phase_seconds.items()})
         if self._text_encoder_load_seconds is not None:
             seconds["text encoder load"] = self._text_encoder_load_seconds
         return seconds
@@ -469,6 +507,8 @@ class TorchNeuronWanApplication(torch.nn.Module):
             shapes += list(self.transformer_2.unwarmed_shapes)
         if isinstance(self.text_encoder, _DeviceTextEncoder):
             shapes += list(self.text_encoder.app.unwarmed_shapes)
+        if self.vae_decoder is not None:
+            shapes += list(self.vae_decoder.app.unwarmed_shapes)
         return shapes
 
     @property

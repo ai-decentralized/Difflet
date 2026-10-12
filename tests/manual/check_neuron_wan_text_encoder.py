@@ -29,16 +29,23 @@ import sys
 import time
 from pathlib import Path
 
-import torch
-
 from difflet.backends.neuron.compile import configure_compile_cache
-from difflet.backends.neuron.runtime import track_fallbacks
-from difflet.backends.neuron.wan.text_encoder import NeuronWanTextEncoderApplication
-from difflet.backends.registry import get_backend
-from difflet.models.wan.neuron_application import _DeviceTextEncoder
-from difflet.pipeline.parallel_config import DiffletParallelConfig
-from tests.numerical import neuron_parity as parity
-from tests.numerical.buildinfo import build_info
+
+# Before torch: importing torch autoloads torch_neuronx, which reads the HLO cache location once.
+if "--cache-dir" in sys.argv[:-1]:
+    configure_compile_cache(sys.argv[sys.argv.index("--cache-dir") + 1])
+else:
+    configure_compile_cache()
+
+import torch  # noqa: E402
+
+from difflet.backends.neuron.runtime import track_fallbacks  # noqa: E402
+from difflet.backends.neuron.wan.text_encoder import NeuronWanTextEncoderApplication  # noqa: E402
+from difflet.backends.registry import get_backend  # noqa: E402
+from difflet.models.wan.neuron_application import _DeviceTextEncoder  # noqa: E402
+from difflet.pipeline.parallel_config import DiffletParallelConfig  # noqa: E402
+from tests.numerical import neuron_parity as parity  # noqa: E402
+from tests.numerical.buildinfo import build_info  # noqa: E402
 
 PROMPTS = (
     "A cinematic shot of a red fox running through fresh snow at sunrise, its breath visible in "
@@ -66,10 +73,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    if args.cache_dir is not None:
-        configure_compile_cache(args.cache_dir)
-    else:
-        configure_compile_cache()
     import torch_neuronx.metrics as metrics
 
     metrics.set_enabled(True)

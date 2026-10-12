@@ -773,9 +773,25 @@ def test_stage_transformer_neuron_logs_fallbacks(neuron_stage, monkeypatch, tmp_
 
 
 @pytest.mark.parametrize("mode", ["compile", "generate"])
-def test_neuron_forces_host_vae(monkeypatch, tmp_path, capsys, mode):
-    # The vae stage would run as torchrun ranks building the Trainium VAE application, and the
-    # neuron application has no device VAE (enable_vae_decoder=True raises by design).
+def test_neuron_runs_the_vae_stage(monkeypatch, tmp_path, capsys, mode):
+    # As on Trainium: the VAE decodes in a launch of its own after the transformer stage
+    # (the device decoder needs ~12 GiB of activations per core at 480x832 in fp32).
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    stages, decoded = [], []
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: stages.append(stage))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host",
+                        lambda *a, **k: decoded.append(a))
+    args = _wan_args(model_id=_WAN21_ID, revision=_WAN21_REV, host_vae=False,
+                     work_dir=str(tmp_path / "work"), keep_work_dir=True)
+    getattr(WanOrchestrator(args), mode)()
+
+    assert stages == ["transformer", "vae"] and args.host_vae is False and decoded == []
+    assert "--host-vae" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_neuron_host_vae_decodes_on_the_host(monkeypatch, tmp_path, mode):
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
     stages, decoded = [], []
     monkeypatch.setattr(wan_mod.runner, "run_stage",
@@ -783,14 +799,78 @@ def test_neuron_forces_host_vae(monkeypatch, tmp_path, capsys, mode):
     monkeypatch.setattr(wan_mod, "_decode_latents_host",
                         lambda latents_path, model_id, output_path, revision=None:
                         decoded.append((latents_path, revision)))
-    args = _wan_args(model_id=_WAN21_ID, revision=_WAN21_REV, host_vae=False,
+    args = _wan_args(model_id=_WAN21_ID, revision=_WAN21_REV, host_vae=True,
                      work_dir=str(tmp_path / "work"), keep_work_dir=True)
     getattr(WanOrchestrator(args), mode)()
 
-    assert stages == ["transformer"] and args.host_vae is True
+    assert stages == ["transformer"]
     expected = [(str(tmp_path / "work" / "latents.pt"), _WAN21_REV)] if mode == "generate" else []
     assert decoded == expected
-    assert capsys.readouterr().out.count("--host-vae") == 1
+
+
+class _FakeNeuronVae:
+    """NeuronWanVaeDecoderApplication without a device: records the latent it decodes."""
+
+    instances: list = []
+
+    def __init__(self, *, model_path, latent_shape, parallel, device):
+        from difflet.models.wan.vae.modeling_vae import WanVAEDecoderConfig
+
+        self.model_path, self.latent_shape, self.device = model_path, latent_shape, device
+        self.dtype = __import__("torch").float32
+        self.vae_config = WanVAEDecoderConfig(z_dim=4, latents_mean=[0.5] * 4,
+                                              latents_std=[2.0] * 4)
+        self.loaded, self.skip_warmup, self.decoded = False, None, []
+        _FakeNeuronVae.instances.append(self)
+
+    def load(self, skip_warmup=False):
+        self.loaded, self.skip_warmup = True, skip_warmup
+
+    def __call__(self, z):
+        self.decoded.append(z.clone())
+        return z.cpu() + 1.0
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_neuron_vae_stage_decodes_on_the_device(monkeypatch, tmp_path, mode):
+    import json
+
+    import torch
+
+    import difflet.backends.neuron.wan.vae as vae_mod
+    import difflet.models.wan.neuron_application as na_mod
+    from difflet.backends.neuron.core import distributed
+
+    model_dir = tmp_path / "model"
+    (model_dir / "vae").mkdir(parents=True)
+    (model_dir / "vae" / "config.json").write_text(json.dumps({"z_dim": 4}))
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: str(model_dir))
+    monkeypatch.setattr(vae_mod, "NeuronWanVaeDecoderApplication", _FakeNeuronVae)
+    # The real adapter moves the latent to the neuron device; this test stays on the host.
+    monkeypatch.setattr(na_mod, "_DeviceVaeDecoder", lambda app, device: app)
+    monkeypatch.setattr(distributed, "is_rank0", lambda: True)
+    monkeypatch.setattr(_FakeNeuronVae, "instances", [])
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    work = tmp_path / "work"
+    work.mkdir()
+    z = torch.randn(1, 4, 3, 60, 104)
+    torch.save(z, work / "latents.pt")
+    args = _wan_args(model_id=_WAN21_ID, stage_mode=mode, work_dir=str(work),
+                     cache_dir=str(tmp_path / "cache"), output=str(tmp_path / "out" / "clip.pt"))
+
+    WanOrchestrator(args)._stage_vae(args)
+
+    [app] = _FakeNeuronVae.instances
+    assert app.loaded and app.latent_shape == (1, 4, 3, 60, 104) and app.device == "neuron"
+    # The warm-up decode fills the kernel cache in compile mode; generate's own decode suffices.
+    assert app.skip_warmup is (mode == "generate")
+    if mode == "compile":
+        assert app.decoded == []
+        return
+    [decoded] = app.decoded
+    torch.testing.assert_close(decoded, z * 2.0 + 0.5)  # un-normalised: z * std + mean
+    torch.testing.assert_close(torch.load(tmp_path / "out" / "clip.pt"), decoded + 1.0)
 
 
 @pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
@@ -853,7 +933,8 @@ def test_neuron_cache_dir_roots_the_compile_cache_when_unset(monkeypatch, tmp_pa
 
     root = str(tmp_path / "cache")
     assert os.environ["DIFFLET_COMPILE_CACHE"] == root
-    assert len(launches) == (2 if mode == "run" else 1)
+    # transformer and vae stages; `run` launches both twice (compile, then generate)
+    assert len(launches) == (4 if mode == "run" else 2)
     for env in launches:
         assert env["DIFFLET_COMPILE_CACHE"] == root
         assert (env["TORCH_NEURONX_NEFF_CACHE_DIR"], env["TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR"],
@@ -880,9 +961,10 @@ def test_neuron_exported_compile_cache_wins_over_cache_dir(monkeypatch, tmp_path
     getattr(WanOrchestrator(args), mode)()
 
     assert os.environ["DIFFLET_COMPILE_CACHE"] == explicit
-    [env] = launches
-    assert env["DIFFLET_COMPILE_CACHE"] == explicit
-    assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "explicit" / "neuron" / "neff")
+    assert len(launches) == 2  # transformer and vae stages
+    for env in launches:
+        assert env["DIFFLET_COMPILE_CACHE"] == explicit
+        assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "explicit" / "neuron" / "neff")
     assert _CACHE_NOTE not in capsys.readouterr().out
 
 
@@ -897,7 +979,7 @@ def test_neuron_without_cache_dir_exports_nothing(monkeypatch, tmp_path, capsys)
 
     WanOrchestrator(args).generate()
 
-    assert stages == ["transformer"] and "DIFFLET_COMPILE_CACHE" not in os.environ
+    assert stages == ["transformer", "vae"] and "DIFFLET_COMPILE_CACHE" not in os.environ
     assert _CACHE_NOTE not in capsys.readouterr().out
 
 
@@ -983,7 +1065,8 @@ def test_neuron_driver_lets_supported_options_through(monkeypatch, tmp_path, cap
 
     WanOrchestrator(args).generate()
 
-    assert stages == ["transformer"] and capsys.readouterr().err == ""
+    expected = ["transformer"] if overrides.get("host_vae") else ["transformer", "vae"]
+    assert stages == expected and capsys.readouterr().err == ""
 
 
 @pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
@@ -1105,8 +1188,11 @@ def test_generate_neuron_cpu_torchrun_one_writer_and_decode_after_every_rank_exi
 
     monkeypatch.setattr(wan_mod, "_decode_latents_host", decode)
     work, cache = tmp_path / "work", tmp_path / "cache"
+    # --host-vae: this test is about the transformer stage's hand-off to the host decode (the
+    # fake pipeline covers the transformer stage only; the device vae stage is tested apart).
     args = _wan_args(model_id=_WAN21_ID, revision=_WAN21_REV, tp_degree=2, work_dir=str(work),
-                     keep_work_dir=True, cache_dir=str(cache), steps=3, guidance_scale=5.0)
+                     keep_work_dir=True, cache_dir=str(cache), steps=3, guidance_scale=5.0,
+                     host_vae=True)
     WanOrchestrator(args).generate()
 
     records = seen["records"]
@@ -1131,7 +1217,9 @@ def test_generate_neuron_cpu_torchrun_one_writer_and_decode_after_every_rank_exi
 def test_compile_neuron_cpu_torchrun_rank0_writes_the_manifest(neuron_torchrun, tmp_path):
     from difflet.cli.orchestrators.base import has_valid_stage_manifest
 
-    args = _wan_args(model_id=_WAN21_ID, tp_degree=2, cache_dir=str(tmp_path / "cache"))
+    # --host-vae: the transformer stage's manifest only (the fake pipeline covers that stage).
+    args = _wan_args(model_id=_WAN21_ID, tp_degree=2, cache_dir=str(tmp_path / "cache"),
+                     host_vae=True)
     orch = WanOrchestrator(args)
     orch.compile()
 
@@ -1244,6 +1332,6 @@ def test_neuron_driver_lets_dual_expert_through(monkeypatch, tmp_path, capsys):
 
     WanOrchestrator(args).generate()
 
-    [(stage, cli_args)] = stages
-    assert stage == "transformer" and "--dual-expert" in cli_args
+    assert [stage for stage, _ in stages] == ["transformer", "vae"]
+    assert "--dual-expert" in stages[0][1]
     assert capsys.readouterr().err == ""

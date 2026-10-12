@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import os
 import re
 import shutil
@@ -135,6 +136,19 @@ def _decode_latents_host(latents_path: str, model_id: str, output_path: str,
         return
     torch.save(frames.cpu(), out.with_suffix(".pt"))
     print(f"[wan] video tensor saved to {out.with_suffix('.pt')}", flush=True)
+
+
+def _write_frames(frames, output: str) -> None:
+    """Decoded frames to ``output``: MP4 when it ends in .mp4 and encoding works, else a .pt."""
+    import torch
+
+    out_path = Path(output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.suffix == ".mp4" and _save_video(frames.cpu(), str(out_path)):
+        return
+    pt_path = out_path.with_suffix(".pt")
+    torch.save(frames.cpu(), pt_path)
+    print(f"[wan] video tensor saved to {pt_path}")
 
 
 def _require_request_shape_in_set(args: argparse.Namespace):
@@ -288,19 +302,6 @@ class WanOrchestrator(ModelOrchestrator):
         self._reject_dual_expert_misuse()
         super().run()
 
-    def _require_host_vae(self) -> None:
-        """A torchrun backend (neuron) decodes the VAE on the host: its vae stage would run as
-        torchrun ranks building the Trainium VAE application, and the neuron application has
-        no device VAE (phase 1)."""
-        if getattr(self.args, "host_vae", False):
-            return
-        backend = _torchrun_backend()
-        if backend is None:
-            return
-        print(f"[wan] backend {backend!r} decodes the VAE on the host: using --host-vae",
-              flush=True)
-        self.args.host_vae = True
-
     def _root_compile_cache_at_cache_dir(self) -> None:
         """A torchrun backend (neuron) compiles into the NEFF and HLO caches that
         ``runner.run_stage`` exports to its ranks under ``$DIFFLET_COMPILE_CACHE/neuron/``,
@@ -324,7 +325,6 @@ class WanOrchestrator(ModelOrchestrator):
     def compile(self) -> None:
         self._reject_unsupported_torchrun_options()
         self._reject_dual_expert_misuse()
-        self._require_host_vae()
         self._root_compile_cache_at_cache_dir()
         full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1) * (
             2 if getattr(self.args, "cfg_parallel", False) else 1
@@ -343,7 +343,6 @@ class WanOrchestrator(ModelOrchestrator):
     def generate(self) -> None:
         self._reject_unsupported_torchrun_options()
         self._reject_dual_expert_misuse()
-        self._require_host_vae()
         self._root_compile_cache_at_cache_dir()
         _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(self.args.work_dir or
@@ -572,6 +571,9 @@ class WanOrchestrator(ModelOrchestrator):
             dist.destroy_process_group()
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
+        if _torchrun_backend() is not None:
+            self._stage_vae_neuron(args)
+            return
         import torch
 
         from difflet.models.wan.application import NeuronWanApplication
@@ -624,14 +626,55 @@ class WanOrchestrator(ModelOrchestrator):
                     output_type="pt",
                 )
                 frames = out.frames if hasattr(out, "frames") else out[0]
-                out_path = Path(req.output)
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                if out_path.suffix == ".mp4" and _save_video(frames.cpu(), str(out_path)):
-                    pass
-                else:
-                    pt_path = out_path.with_suffix(".pt")
-                    torch.save(frames.cpu(), pt_path)
-                    print(f"[wan] video tensor saved to {pt_path}")
+                _write_frames(frames, req.output)
+
+    def _stage_vae_neuron(self, args: argparse.Namespace) -> None:
+        """The neuron backend's vae stage, structured as Trainium's: a launch of its own after
+        the transformer stage has exited, so the decoder's activations (about 12 GiB per core at
+        480x832 in fp32) never share a core with the DiT and the text encoder. One rank decodes
+        in fp32, eager (``NeuronWanVaeDecoderApplication``). ``compile`` mode loads it with the
+        warm-up decode, which compiles and caches the per-op kernels at the request shape, and
+        writes the manifest; ``generate`` skips the warm-up, a second full decode that eager
+        mode does not need (the request's decode compiles whatever the cache lacks). The
+        latents are un-normalised as the host decode and the orchestrator do."""
+        import torch
+
+        from difflet.backends.neuron.core import distributed
+        from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication
+        from difflet.cli.dp import stage_loop
+        from difflet.models.wan.neuron_application import _DeviceVaeDecoder
+        from difflet.pipeline.parallel_config import DiffletParallelConfig
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        model_dir = resolve_model_path(self.args.model_id, revision=self.args.revision,
+                                       local_files_only=True)
+        vae_dir = Path(model_dir) / "vae"
+        with open(vae_dir / "config.json", encoding="utf-8") as f:
+            z_dim = int(json.load(f)["z_dim"])
+        h, w, frames_count = args.height or 480, args.width or 832, args.num_frames or 9
+        app = NeuronWanVaeDecoderApplication(
+            model_path=str(vae_dir),
+            latent_shape=(1, z_dim, (frames_count - 1) // 4 + 1, h // 8, w // 8),
+            parallel=DiffletParallelConfig(tp_degree=1),
+            device="neuron",
+        )
+        app.load(skip_warmup=args.stage_mode != "compile")
+        if args.stage_mode == "compile":
+            if distributed.is_rank0():
+                self._finish_stage_compile("vae", args, self._stage_compiled_dir("vae", args))
+            return
+        decoder = _DeviceVaeDecoder(app, device="neuron")
+        config = app.vae_config
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                z = torch.load(stage_loop.work_file(args, req, "latents.pt"),
+                               map_location="cpu").to(torch.float32)
+                if config.latents_mean and config.latents_std:
+                    z = (z * torch.tensor(config.latents_std).view(1, z_dim, 1, 1, 1)
+                         + torch.tensor(config.latents_mean).view(1, z_dim, 1, 1, 1))
+                frames = decoder(z)
+                if distributed.is_rank0():
+                    _write_frames(frames, req.output)
 
     # ------------------------------------------------------------ helpers
 

@@ -37,6 +37,7 @@ from tests.unit.backends._neuron_wan_toy import (  # noqa: E402
     TINY_TEXT_SHAPE,
     TINY_WAN_TRANSFORMER,
     tiny_wan_config,
+    tiny_wan_host_decode,
     tiny_wan_pipeline_reference,
     tiny_wan_tp1_model,
     write_tiny_wan22_model,
@@ -49,6 +50,7 @@ from tests.unit.backends._neuron_workers import (  # noqa: E402
     w1_wan_one_graph_worker,
     w1_wan22_pipeline_worker,
     w1_wan_device_text_encoder_worker,
+    w1_wan_device_vae_worker,
     w1_wan_pipeline_worker,
 )
 
@@ -358,7 +360,6 @@ def test_application_call_dispatch(tiny):
                        shapes=((32, 48, 5),))
     assert single.config.image_seq_len == 12
     for kwargs, match in (
-        ({"enable_vae_decoder": True}, "host"),
         ({"teacache_cadence": 2}, "TeaCache"),
         ({"teacache_online_delta_alpha": 0.5}, "TeaCache"),
         ({"teacache_calibration_path": "/x.json"}, "TeaCache"),
@@ -521,3 +522,32 @@ def test_device_text_encoder_runs_in_fp32_and_hands_the_dit_its_dtype(tiny):
     assert isinstance(app.text_encoder, na._DeviceTextEncoder)
     assert app.text_encoder.app.dtype is torch.float32
     assert app.text_encoder.dtype is torch.bfloat16
+
+
+# ---- the VAE decoder on the device (enable_vae_decoder=True) ------------------------------
+
+
+def test_device_vae_on_four_ranks_matches_the_host_decode(tiny):
+    """The two-step run decoded on the device in fp32: identical on every rank, and equal to
+    diffusers' fp32 decode (the CLI's host path) of the TP1 reference latents."""
+    reference_latents = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2,
+                                                    guidance_scale=5.0)
+    reference_frames = tiny_wan_host_decode(tiny.dir, reference_latents)
+
+    results = run_ranks(w1_wan_device_vae_worker, tiny.dir, world_size=4, env=OFFLINE)
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]
+        assert {f"vae {phase}" for phase in LOAD_PHASES} <= set(result["phase_seconds"])
+    torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference_latents,
+                               atol=1e-4, rtol=1e-4)
+    frames = torch.tensor(results[0]["frames"])
+    assert tuple(frames.shape) == (1, 3, TINY_SHAPE["num_frames"], TINY_SHAPE["height"],
+                                   TINY_SHAPE["width"])
+    torch.testing.assert_close(frames, reference_frames, atol=1e-4, rtol=1e-4)
+
+
+def test_device_vae_runs_eager_in_fp32(tiny):
+    app = _composed(tiny, dtype=torch.bfloat16, exec_mode="compile", enable_vae_decoder=True)
+    assert app.vae_decoder.dtype is torch.float32
+    assert app.vae_decoder.app.exec_mode == "eager"
+    assert tuple(app.vae_decoder.config.latents_std) == (1.5, 0.8, 1.2, 2.0)

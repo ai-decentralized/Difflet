@@ -98,6 +98,9 @@ class TorchNeuronApplicationBase(torch.nn.Module):
     #: gets ``NEURON_COMPILE_OPTIONS``), "aot_eager" elsewhere (CPU and gloo tests). Set a
     #: callable on the instance or as a ``staticmethod``; it is passed no options.
     compile_backend: str | Callable[..., Any] | None = None
+    #: Checkpoint key prefixes the module skips on purpose: reported under ``"skipped"`` in
+    #: ``load_report`` instead of ``"unexpected"``, so they raise no warning.
+    skipped_checkpoint_prefixes: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -190,6 +193,14 @@ class TorchNeuronApplicationBase(torch.nn.Module):
             self.load_report = load_sharded_checkpoint(
                 module, model_dir, device=self.device, dtype=self.dtype, rename=self.checkpoint_key
             )
+            if self.skipped_checkpoint_prefixes:
+                # Tensors the subclass skips on purpose (e.g. a VAE checkpoint's encoder half).
+                unexpected = self.load_report["unexpected"]
+                prefixes = self.skipped_checkpoint_prefixes
+                self.load_report["skipped"] = [k for k in unexpected if k.startswith(prefixes)]
+                self.load_report["unexpected"] = [
+                    k for k in unexpected if not k.startswith(prefixes)
+                ]
             if self.load_report["unexpected"]:
                 logger.warning("%s: %d checkpoint tensors matched no parameter, e.g. %s",
                                type(self).__name__, len(self.load_report["unexpected"]),
