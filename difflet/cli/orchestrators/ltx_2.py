@@ -49,8 +49,15 @@ class LTX2Orchestrator(ModelOrchestrator):
         print(f"[difflet] weights ready for {_HF_MODEL_ID}")
 
     def compile(self) -> None:
+        from difflet.backends.trainium.core.compiler_flags import apply_virtual_core_env
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.path_resolver import resolve_model_path
+        # In-process compile: the DiT is traced for NEURON_RT_VIRTUAL_CORE_SIZE=2
+        # (attention_cte[2], the NKI attention on both physical cores of each LNC2
+        # core; be5dfe3 measured bf16 459.7 -> 413.7 ms per DiT step at 480x704x49
+        # tp4 together with strided DMA). The value is in the cache key (CacheSpec).
+        # DIFFLET_VIRTUAL_CORE_SIZE=1 restores the environment-following single-core graph.
+        apply_virtual_core_env(_MODEL_TYPE)
         resolve_model_path(_HF_MODEL_ID, revision=self.args.revision, local_files_only=True)
         DiffletPipeline.precompile(
             _HF_MODEL_ID,
@@ -95,10 +102,13 @@ class LTX2Orchestrator(ModelOrchestrator):
                     print(f"[difflet] video tensor saved to {out.with_suffix('.pt')}")
 
     def _load_pipeline(self):
+        from difflet.backends.trainium.core.compiler_flags import apply_virtual_core_env
         from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.path_resolver import resolve_model_path
         from difflet.registry import resolve_model
+
+        apply_virtual_core_env(_MODEL_TYPE)  # same graph / env as compile()
 
         try:
             model_path = resolve_model_path(_HF_MODEL_ID, revision=self.args.revision,

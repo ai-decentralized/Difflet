@@ -131,12 +131,18 @@ def test_online_delta_sweep_labels_are_tp4tcod_at_other_alphas():
 def test_configs_are_the_verify_cli_labels_sized_to_four_cores():
     from benchmark.models import CFG_TRACK, COMBO_LABELS, FRAME_SWEEP, ONLINE_DELTA_SWEEP
     assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4cfg2",
-                            "tp4tc2", "tp4tcod", "tp4tcad", *ONLINE_DELTA_SWEEP,
+                            "tp4tc2", "tp4tcod", "tp4tcad", "tp4s30", *ONLINE_DELTA_SWEEP,
                             *COMBO_LABELS, *CFG_TRACK, *FRAME_SWEEP}
     for label in CONFIGS:
         cfg = resolve("flux_1_dev", label)
         world = cfg.tp * cfg.cp * (2 if cfg.cfg_parallel else 1)
         assert world == 4, (label, world)
+
+
+def test_fewer_steps_config_is_tp4_at_30_steps():
+    cfg = resolve("wan_2_1", "tp4s30")
+    assert cfg.steps == 30 and cfg.parallel_flags() == resolve("wan_2_1", "tp4").parallel_flags()
+    assert cfg.config_slug == "wan_2_1_tp4s30"
 
 
 def test_parallel_flags_per_config():

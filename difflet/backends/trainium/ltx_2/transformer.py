@@ -818,9 +818,13 @@ class NeuronLTX2TransformerApplication(NeuronApplicationBase):
         return self.models[0](*model_inputs, **kwargs)
 
     def get_compiler_args(self) -> str:
+        from difflet.backends.trainium.core.compiler_flags import tensorizer_options
+
+        # --vectorize-strided-dma is on by default for LTX-2 (see core/compiler_flags.py;
+        # DIFFLET_STRIDED_DMA=0 turns it off); CacheSpec mirrors it into the key.
         compiler_args = (
             "--model-type=transformer -O1 "
-            "--tensorizer-options='--enable-ccop-compute-overlap' "
+            f"--tensorizer-options='{tensorizer_options('ltx_2')}' "
             "--auto-cast=none "
             "--internal-hlo2tensorizer-options='--verify-hlo=true'"
         )

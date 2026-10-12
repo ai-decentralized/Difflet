@@ -17,10 +17,11 @@ def _clean_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def test_wan_defaults_strided_dma_on_the_others_off():
-    assert cf.tensorizer_options("wan") == "--enable-ccop-compute-overlap --vectorize-strided-dma"
-    assert cf.tensorizer_cache_inputs("wan") == {"tensorizer_extras": ["--vectorize-strided-dma"]}
-    for model in ("flux", "qwen_image", "hunyuan_video", "ltx_2", None, "unknown"):
+def test_wan_and_ltx2_default_strided_dma_on_the_others_off():
+    for model in ("wan", "ltx_2"):
+        assert cf.tensorizer_options(model) == "--enable-ccop-compute-overlap --vectorize-strided-dma"
+        assert cf.tensorizer_cache_inputs(model) == {"tensorizer_extras": ["--vectorize-strided-dma"]}
+    for model in ("flux", "qwen_image", "hunyuan_video", None, "unknown"):
         assert cf.tensorizer_options(model) == "--enable-ccop-compute-overlap"
         assert cf.tensorizer_cache_inputs(model) == {}
 
@@ -83,7 +84,6 @@ def test_wan_backbone_compiler_args_default_to_strided_dma(monkeypatch):
 
 @pytest.mark.parametrize("module,cls", [
     ("difflet.backends.trainium.qwen_image.transformer", "NeuronQwenImageTransformerApplication"),
-    ("difflet.backends.trainium.ltx_2.transformer", "NeuronLTX2TransformerApplication"),
     ("difflet.backends.trainium.hunyuan_video.backbone", "NeuronHunyuanVideoBackboneApplication"),
 ])
 def test_other_backbones_keep_their_option_string(monkeypatch, module, cls):
@@ -103,3 +103,12 @@ def test_wan_transformer_virtual_core_size_defaults_to_2(monkeypatch):
     assert cf.wan_transformer_virtual_core_size() is None
     monkeypatch.setenv("DIFFLET_WAN_VIRTUAL_CORE_SIZE", "2")
     assert cf.wan_transformer_virtual_core_size() == 2
+
+
+def test_ltx2_backbone_compiler_args_default_to_strided_dma(monkeypatch):
+    pytest.importorskip("neuronx_distributed")
+    from difflet.backends.trainium.ltx_2.transformer import NeuronLTX2TransformerApplication as K
+
+    assert "--tensorizer-options='--enable-ccop-compute-overlap --vectorize-strided-dma'" in _compiler_args(K)
+    monkeypatch.setenv("DIFFLET_STRIDED_DMA", "0")
+    assert "--tensorizer-options='--enable-ccop-compute-overlap'" in _compiler_args(K)

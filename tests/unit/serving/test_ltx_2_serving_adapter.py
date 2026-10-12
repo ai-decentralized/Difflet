@@ -609,3 +609,37 @@ def test_startup_smoke_uses_temporary_target_and_cleans_it(monkeypatch, tmp_path
     ]
     assert not parent.exists()
     assert adapter._smoke_target is None
+
+
+# --- Virtual core size: the resident DiT runs the CLI's LNC2 attention graph ---
+
+
+def test_resident_ltx2_traces_and_runs_with_virtual_core_size_2(monkeypatch, tmp_path):
+    import os
+
+    monkeypatch.setattr(os, "environ", os.environ.copy())  # the compile env writes os.environ
+    monkeypatch.delenv("DIFFLET_VIRTUAL_CORE_SIZE", raising=False)
+    monkeypatch.setenv("NEURON_RT_VIRTUAL_CORE_SIZE", "7")
+    monkeypatch.setattr(ltx_2, "select_neuron_core_ids", lambda *, required_num_cores: (0, 1, 2, 3))
+    with ltx_2._serving_compile_environment():
+        assert os.environ["NEURON_RT_VIRTUAL_CORE_SIZE"] == "2"
+    assert os.environ["NEURON_RT_VIRTUAL_CORE_SIZE"] == "7"  # restored
+
+    monkeypatch.setattr(
+        ltx_2, "resolve_available_neuron_core_ids", lambda *, required_num_cores: (4, 5, 6, 7)
+    )
+    identity = CompileArtifactIdentity.from_cache_inputs({"profile": "ltx2"})
+    plan = ltx_2.build_runtime_plan(
+        _profile(tmp_path), ltx_2._pipeline_definition(),
+        (DiffletCompileSpec("pipeline", "pipeline", identity),),
+    )
+    assert plan.environment.virtual_core_size_override == 2
+    assert plan.allocations[0].effective_virtual_core_size == 2
+
+    # the artifact identity carries it, so a single-core artifact is never reused
+    lnc2 = ltx_2.build_compile_plan(_source(tmp_path), _profile(tmp_path))[0].identity
+    monkeypatch.setenv("DIFFLET_VIRTUAL_CORE_SIZE", "1")
+    single = ltx_2.build_compile_plan(_source(tmp_path), _profile(tmp_path))[0].identity
+    assert single != lnc2
+    with ltx_2._serving_compile_environment():
+        assert "NEURON_RT_VIRTUAL_CORE_SIZE" not in os.environ

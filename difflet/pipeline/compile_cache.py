@@ -101,10 +101,15 @@ class CacheSpec:
         # Additive-only: the tensorizer extras the backbone compiles with (strided DMA,
         # DIFFLET_TENSORIZER_EXTRA). Empty at the historical defaults, so every existing
         # artifact keeps its key; a model whose default flips (Wan) gets a new one.
+        # Likewise the virtual core size an in-process DiT is traced for (LTX-2).
         if self.backend in (None, "trainium"):
-            from difflet.backends.trainium.core.compiler_flags import tensorizer_cache_inputs
+            from difflet.backends.trainium.core.compiler_flags import (
+                tensorizer_cache_inputs,
+                virtual_core_cache_inputs,
+            )
 
             inputs.update(tensorizer_cache_inputs(self.model_name))
+            inputs.update(virtual_core_cache_inputs(self.model_name))
         return inputs
 
     def canonical_shapes(self) -> list[list[int | None]]:

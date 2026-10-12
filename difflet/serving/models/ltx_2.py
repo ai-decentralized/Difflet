@@ -17,6 +17,8 @@ from difflet.common.neuron_cores import (
     resolve_available_neuron_core_ids,
     select_neuron_core_ids,
 )
+from difflet.backends.trainium.core.compiler_flags import apply_virtual_core_env
+from difflet.backends.trainium.core.compiler_flags import virtual_core_size as _virtual_core_size
 from difflet.pipeline.compile_cache import CacheSpec
 from difflet.registry import resolve_model
 from difflet.serving.artifact_manager import ImmutableArtifactManager
@@ -245,10 +247,11 @@ def build_runtime_plan(
         raise ValueError("LTX-2 serving stage must be named 'pipeline'")
 
     distributed = DistributedProcessEnvironment(1, 1, 0, 0)
+    virtual_core_size = _virtual_core_size(_MODEL_TYPE)
     environment = RuntimeEnvironment(
         available_core_ids=resolve_available_neuron_core_ids(required_num_cores=_WORLD_SIZE),
         num_cores_override=None,
-        virtual_core_size_override=None,
+        virtual_core_size_override=virtual_core_size,
         logical_nc_config_override=None,
         inherited_distributed=distributed,
         child_distributed=distributed,
@@ -258,6 +261,8 @@ def build_runtime_plan(
         requested_num_cores=_WORLD_SIZE,
         effective_num_cores=_WORLD_SIZE,
         world_size=_WORLD_SIZE,
+        requested_virtual_core_size=virtual_core_size,
+        effective_virtual_core_size=virtual_core_size,
     )
     return RuntimePlan(
         mode="resident",
@@ -763,7 +768,9 @@ def _serving_compile_environment() -> Iterator[None]:
             str(core_id) for core_id in visible_core_ids
         )
         os.environ["NEURON_RT_NUM_CORES"] = str(_WORLD_SIZE)
-        os.environ.pop("NEURON_RT_VIRTUAL_CORE_SIZE", None)
+        # Trace the DiT for the same virtual core size as the CLI (attention_cte[2] on
+        # both physical cores; CacheSpec carries it in the artifact identity).
+        apply_virtual_core_env(_MODEL_TYPE)
         os.environ.pop("NEURON_LOGICAL_NC_CONFIG", None)
         os.environ.update(
             {"WORLD_SIZE": "1", "LOCAL_WORLD_SIZE": "1", "RANK": "0", "LOCAL_RANK": "0"}

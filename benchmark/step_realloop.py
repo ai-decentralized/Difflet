@@ -118,8 +118,11 @@ def _build_flux(cfg, cache):
 def _build_ltx2(cfg, cache):
     """Mirror difflet/cli/orchestrators/ltx_2.py exactly (host pipeline + decode)."""
     import torch
+    from difflet.backends.trainium.core.compiler_flags import apply_virtual_core_env
     from difflet.pipeline.difflet_pipeline import DiffletPipeline
     from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    apply_virtual_core_env("ltx_2")  # the CLI's graph / env (CacheSpec carries it in the key)
 
     parallel = DiffletParallelConfig(tp_degree=cfg.tp, cp_degree=cfg.cp, cp_mode=cfg.cp_mode, cfg_parallel_enabled=cfg.cfg_parallel, sp_enabled=cfg.sp)
     pipe = DiffletPipeline.from_pretrained(
