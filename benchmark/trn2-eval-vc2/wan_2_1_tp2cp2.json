@@ -1,0 +1,76 @@
+{
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "model_type": "wan",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 2,
+    "cp_degree": 2,
+    "cp_mode": "ulysses",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 81
+  },
+  "steps": 50,
+  "compile_seconds": 2280.5685461370012,
+  "compile_breakdown": {
+    "text_encoder_t5": {
+      "module_load_s": 1.152,
+      "hlo_generate_s": 0.886,
+      "priority_hlo_compile_s": 10.987,
+      "all_hlo_compile_s": 0.001,
+      "build_total_s": 74.823,
+      "other_s": 61.797
+    },
+    "transformer": {
+      "module_load_s": 3.24,
+      "hlo_generate_s": 824.846,
+      "priority_hlo_compile_s": 1100.456,
+      "all_hlo_compile_s": 0.003,
+      "build_total_s": 2190.137,
+      "other_s": 261.591
+    },
+    "wall_total_s": 2264.96
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": null,
+  "step_latency": null,
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {},
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=2 x cp=2 (ulysses); tp=4, bf16, single-transformer (no MoE), attention_cte, official 81 frames / 50 steps / CFG 5.0, chunked FP32 VAE on device",
+  "status": "load_failed_hbm",
+  "notes": [
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop",
+    "load fails on the device (2026-10-12, LNC2 attention program): 'Failed to allocate 43.396MB (alignment: none, usage: dma rings spill)' on NC 1 and NC 7 while creating the static rings of qSPSpillReload0_defId_0_12, with the UMT5 text encoder co-resident; the single-core program missed by 86.7 MB in the same allocation (benchmark/trn2-eval/wan_2_1_tp2cp2.json). cold_warm and step_realloop both stop at this load (logs/wan_2_1_tp2cp2_*.log)."
+  ],
+  "timestamp": "2026-10-12 00:02 UTC",
+  "config_slug": "wan_2_1_tp2cp2",
+  "model_slug": "wan_2_1",
+  "config": "tp2cp2",
+  "device_slug": "trn2-eval-vc2",
+  "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 5.0,
+  "output_kind": "video"
+}
