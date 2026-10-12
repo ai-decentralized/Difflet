@@ -131,7 +131,7 @@ def test_online_delta_sweep_labels_are_tp4tcod_at_other_alphas():
 def test_configs_are_the_verify_cli_labels_sized_to_four_cores():
     from benchmark.models import CFG_TRACK, COMBO_LABELS, FRAME_SWEEP, ONLINE_DELTA_SWEEP
     assert set(CONFIGS) == {"tp4", "tp2cp2", "tp4sp", "tp2cfg", "tp4sdpa", "tp4cfg2",
-                            "tp4tc2", "tp4tcod", "tp4tcad", "tp4s30", *ONLINE_DELTA_SWEEP,
+                            "tp4tc2", "tp4tcod", "tp4tcad", "tp4s30", "tp4s25", *ONLINE_DELTA_SWEEP,
                             *COMBO_LABELS, *CFG_TRACK, *FRAME_SWEEP}
     for label in CONFIGS:
         cfg = resolve("flux_1_dev", label)
