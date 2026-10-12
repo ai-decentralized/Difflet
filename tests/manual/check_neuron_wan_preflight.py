@@ -148,6 +148,9 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--model-dir", type=Path, required=True,
                    help="diffusers snapshot directory holding transformer/")
+    p.add_argument("--expert", choices=("transformer", "transformer_2"), default="transformer",
+                   help="the DiT to check: transformer_2 is Wan 2.2 A14B's low-noise expert; "
+                        "the --ref must have been computed with the same --expert")
     p.add_argument("--ref", type=Path, required=True,
                    help="CPU reference from tpu_oracle_reference.py wan --timesteps ...")
     p.add_argument("--exec-mode", choices=("eager", "compile"), required=True)
@@ -439,6 +442,11 @@ def main() -> int:
     if missing:
         raise ValueError(f"{args.ref} has no reference at timesteps {missing} "
                          f"(it holds {sorted(runs)})")
+    # References written before the oracle had --expert hold transformer/.
+    if blob.get("expert", "transformer") != args.expert:
+        raise ValueError(f"{args.ref} was computed for {blob.get('expert', 'transformer')}/, "
+                         f"this run checks --expert {args.expert}; recompute the reference "
+                         f"with tpu_oracle_reference.py wan --expert {args.expert}")
     if blob.get("frames") != args.num_frames:
         raise ValueError(f"{args.ref} was computed at {blob.get('frames')} frames, this run "
                          f"is --num-frames {args.num_frames}; recompute the reference")
@@ -483,7 +491,7 @@ def main() -> int:
     # Device memory too: the baseline after prepare_runtime, before the load (W2 review).
     snaps["start"] = snapshot(t0)
 
-    transformer_dir = args.model_dir / "transformer"
+    transformer_dir = args.model_dir / args.expert
     config = NeuronWanConfig.from_pretrained(
         transformer_dir, tp_degree=world, height=args.height, width=args.width,
         num_frames=args.num_frames, text_seq_len=args.text_seq_len, torch_dtype=torch.bfloat16,

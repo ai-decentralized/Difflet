@@ -14,7 +14,9 @@ else the TPU host's /mnt/models path; the output is --out, else
 /mnt/models/oracle_<model>.pt. Both are checked before anything is loaded, so
 on a host without /mnt/models pass them. --threads sizes torch's thread pool
 (default: os.cpu_count()). For wan, --timesteps 996,500 computes the reference
-and the bf16 control at each timestep on the same inputs (saved under "runs").
+and the bf16 control at each timestep on the same inputs (saved under "runs"), and
+--expert transformer_2 runs Wan 2.2 A14B's low-noise expert instead of transformer/
+(recorded as "expert"; pair it with timesteps below the boundary, e.g. 500).
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ SNAPSHOT_ENV = {"wan": "DIFFLET_WAN_SNAPSHOT", "qwen_image": "DIFFLET_QWEN_SNAPS
 
 
 def wan(out: Path, frames: int, snapshot: str = WAN,
-        timesteps: Sequence[float] = (500.0,)) -> None:
+        timesteps: Sequence[float] = (500.0,), expert: str = "transformer") -> None:
     """One fp32 forward per timestep, then one bf16 control per timestep, on the same seeded
     latents and text. ``runs`` holds every timestep; the single-timestep keys
     (``timestep``, ``reference``, ``reference_bf16``) hold the first one."""
@@ -53,11 +55,11 @@ def wan(out: Path, frames: int, snapshot: str = WAN,
     text = torch.randn(1, 512, 4096)
     steps = [torch.tensor([float(t)]) for t in timesteps]
 
-    print(f"loading diffusers WanTransformer3DModel fp32 ({frames} frames, "
+    print(f"loading diffusers WanTransformer3DModel fp32 from {expert}/ ({frames} frames, "
           f"latent {latent_frames}x60x104) ...", flush=True)
     mark = time.monotonic()
     model = WanTransformer3DModel.from_pretrained(
-        snapshot + "/transformer", torch_dtype=torch.float32
+        snapshot + "/" + expert, torch_dtype=torch.float32
     ).eval()
     model.requires_grad_(False)
     print(f"  loaded in {time.monotonic() - mark:.1f}s; "
@@ -94,7 +96,7 @@ def wan(out: Path, frames: int, snapshot: str = WAN,
 
     first = runs[0]
     torch.save({"hidden_states": hidden, "encoder_hidden_states": text, "frames": frames,
-                "timesteps": [float(t[0]) for t in steps], "runs": runs,
+                "expert": expert, "timesteps": [float(t[0]) for t in steps], "runs": runs,
                 # The single-timestep layout tpu_oracle_compare.py reads.
                 "timestep": first["timestep"], "reference": first["reference"],
                 "reference_bf16": first["reference_bf16"]}, out)
@@ -166,12 +168,17 @@ def main() -> None:
                    help="output .pt (default: /mnt/models/oracle_<model>.pt)")
     p.add_argument("--threads", type=int, default=os.cpu_count(),
                    help="torch intra-op threads (default: os.cpu_count(), i.e. this host's)")
+    p.add_argument("--expert", choices=("transformer", "transformer_2"), default="transformer",
+                   help="wan only: the expert subdirectory (transformer_2: Wan 2.2 A14B's "
+                        "low-noise expert)")
     p.add_argument("--timesteps", default=None,
                    help="wan only: comma-separated DiT timesteps, one fp32 reference and one "
                         "bf16 control each on the same inputs (default: 500)")
     a = p.parse_args()
     if a.threads < 1:
         p.error(f"--threads must be at least 1, got {a.threads}")
+    if a.expert != "transformer" and a.model != "wan":
+        p.error("--expert applies to wan only")
     timesteps = [500.0]
     if a.timesteps is not None:
         if a.model != "wan":
@@ -185,8 +192,8 @@ def main() -> None:
         SNAPSHOT_ENV[a.model], WAN if a.model == "wan" else QWEN)
     out = Path(a.out or f"/mnt/models/oracle_{a.model}.pt")
     # Fail here, not after minutes of loading and two forwards.
-    if not Path(snapshot, "transformer", "config.json").is_file():
-        p.error(f"no diffusers transformer at {snapshot}/transformer/config.json; pass "
+    if not Path(snapshot, a.expert, "config.json").is_file():
+        p.error(f"no diffusers transformer at {snapshot}/{a.expert}/config.json; pass "
                 f"--snapshot (or set {SNAPSHOT_ENV[a.model]}) to the snapshot directory")
     if not out.parent.is_dir():
         p.error(f"the output directory {out.parent} does not exist; pass --out")
@@ -194,7 +201,7 @@ def main() -> None:
     print(f"torch threads: {torch.get_num_threads()} (os.cpu_count()={os.cpu_count()}); "
           f"snapshot {snapshot}", flush=True)
     if a.model == "wan":
-        wan(out=out, frames=a.frames, snapshot=snapshot, timesteps=timesteps)
+        wan(out=out, frames=a.frames, snapshot=snapshot, timesteps=timesteps, expert=a.expert)
     else:
         qwen_image(out=out, snapshot=snapshot)
 

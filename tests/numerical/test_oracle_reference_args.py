@@ -188,3 +188,29 @@ def test_wan_saves_one_reference_and_one_bf16_control_per_timestep(monkeypatch, 
     assert torch.equal(blob["reference"], blob["runs"][0]["reference"])
     assert torch.equal(blob["reference_bf16"], blob["runs"][0]["reference_bf16"])
     assert blob["frames"] == 1
+
+
+def test_expert_selects_the_low_noise_subdirectory(monkeypatch, oracle, snapshot, tmp_path):
+    (snapshot / "transformer_2").mkdir()
+    (snapshot / "transformer_2" / "config.json").write_text("{}")
+    calls = run(monkeypatch, oracle, "wan", "--expert", "transformer_2",
+                "--out", str(tmp_path / "ref.pt"))
+    assert [c["expert"] for c in calls] == ["transformer_2"]
+
+
+def test_expert_defaults_to_the_high_noise_transformer(monkeypatch, oracle, tmp_path):
+    calls = run(monkeypatch, oracle, "wan", "--out", str(tmp_path / "ref.pt"))
+    assert [c["expert"] for c in calls] == ["transformer"]
+
+
+def test_missing_low_noise_expert_stops_before_loading(monkeypatch, oracle, tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        run(monkeypatch, oracle, "wan", "--expert", "transformer_2", "--out", str(tmp_path / "r.pt"))
+    assert oracle.calls == [] and "transformer_2/config.json" in capsys.readouterr().err
+
+
+def test_expert_applies_to_wan_only(monkeypatch, oracle, tmp_path):
+    with pytest.raises(SystemExit):
+        run(monkeypatch, oracle, "qwen_image", "--expert", "transformer_2",
+            "--out", str(tmp_path / "r.pt"))
+    assert oracle.calls == []
