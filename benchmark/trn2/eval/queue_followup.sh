@@ -20,7 +20,7 @@ export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 PY="${PYTHON_BIN:-python}"
 CACHE="$HOME/.cache/difflet"
 SCRATCH="${SCRATCH:-$HOME/work/scratch/followup}"
-WAIT_FOR="${WAIT_FOR:-$HOME/work/logs/queue_wan_vc2.log}"
+WAIT_FOR="${WAIT_FOR:-$HOME/work/logs/queue_ltx2.log}"
 mkdir -p "$SCRATCH"
 ts() { date -u +%FT%TZ; }
 step() {  # step <name> <log> <cmd...>
@@ -37,7 +37,8 @@ has() { [[ -f "$RES/$1.json" ]] && "$PY" -c "import json,sys; d=json.load(open('
 
 if [[ -n "$WAIT_FOR" ]]; then
   echo "[followup] $(ts) waiting for ALL_DONE in $WAIT_FOR"
-  until grep -q ALL_DONE "$WAIT_FOR" 2>/dev/null; do sleep 60; done
+  # the final line only ("... <UTC>Z ALL_DONE"), not a "waiting for ALL_DONE" banner
+  until grep -q -E "Z ALL_DONE$" "$WAIT_FOR" 2>/dev/null; do sleep 60; done
 fi
 
 # ---------------------------------------------------------------- Qwen-Image, true CFG (P11)
@@ -105,7 +106,9 @@ EOF
   rm -rf "$NOPRE"
 fi
 
-# 3. resident serving (difflet serve), into empty caches first
+# 3. resident serving (difflet serve), into empty caches first. The Neuron decoder is
+#    the chunked FP32 VAE (the CLI's --wan-vae-chunked graph) on one core; the unchunked
+#    81-frame decoder exceeds the compiler's instruction limit (39.1 M vs 10 M).
 SERVE_OUT="$RES/serving/wan_2_1_resident.json"
 if [[ ! -f "$SERVE_OUT" ]]; then
   SC="$SCRATCH/serve_cache"; NCC="$SCRATCH/serve_neuron_cc"; PORT=8093
@@ -125,7 +128,8 @@ if [[ ! -f "$SERVE_OUT" ]]; then
     done
     echo "$(date +%s.%N) - $t0" | bc
   }
-  stop_serve() { kill "$SERVE_PID" 2>/dev/null; pkill -f "difflet.cli.main serve" 2>/dev/null; pkill -f "difflet.cli.stage" 2>/dev/null; sleep 10; }
+  # serve() runs in a command substitution, so its $SERVE_PID never reaches this shell
+  stop_serve() { pkill -f "difflet.cli.main serve" 2>/dev/null; pkill -f "difflet.cli.stage" 2>/dev/null; sleep 10; }
   rm -rf "$SC" "$NCC"; mkdir -p "$SC" "$NCC"
   echo "[followup] $(ts) wan serve first start (empty caches)"
   if first=$(serve "$LOG/wan_2_1_serve_first.log"); then

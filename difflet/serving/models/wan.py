@@ -51,6 +51,8 @@ from difflet.serving.types import (
 )
 
 _MODEL_TYPE = "wan"
+# The chunked decoder graph version (NeuronWanVAEChunkedApplication sets the same value).
+_WAN_VAE_CHUNKED_VERSION = 3
 _HF_MODEL_IDS = (
     "Wan-AI/Wan2.1-T2V-14B-Diffusers",
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
@@ -390,12 +392,14 @@ class WanNeuronDecoderStageRunner:
         application = self.adapter._require_neuron_vae()
         decoder = application.vae_decoder
         config = decoder.config
-        latents = invocation.input.latents.detach().to(dtype=torch.bfloat16)
+        # The decoder's dtype (FP32 for the chunked decoder), as the CLI pipeline decodes.
+        dtype = getattr(decoder, "dtype", None) or torch.float32
+        latents = invocation.input.latents.detach().to(dtype=dtype)
         mean = getattr(config, "latents_mean", None)
         std = getattr(config, "latents_std", None)
         if mean is not None and std is not None and len(mean) > 0 and len(std) > 0:
-            mean_tensor = torch.tensor(mean, dtype=torch.bfloat16).view(1, -1, 1, 1, 1)
-            std_tensor = torch.tensor(std, dtype=torch.bfloat16).view(1, -1, 1, 1, 1)
+            mean_tensor = torch.tensor(mean, dtype=dtype).view(1, -1, 1, 1, 1)
+            std_tensor = torch.tensor(std, dtype=dtype).view(1, -1, 1, 1, 1)
             latents = latents * std_tensor + mean_tensor
         frames = decoder(latents)
         if isinstance(frames, (tuple, list)):
@@ -476,7 +480,7 @@ class WanServingStageAdapter:
             vae_app.load(
                 str(decoder_binding.path),
                 start_rank_id=0,
-                local_ranks_size=runtime.profile.world_size,
+                local_ranks_size=1,  # the chunked decoder runs on one core
                 skip_warmup=not runtime.profile.shapes,
             )
             self.vae_app = vae_app
@@ -707,17 +711,20 @@ def _compile_specs(
 
     profile_shapes = profile.shapes or ((profile.height, profile.width, profile.num_frames),)
     shapes_list = [list(shape) for shape in canonicalize_shapes(profile_shapes)]
+    # v3: the chunked FP32 decoder (the CLI's --wan-vae-chunked graph) on one core of the
+    # resident runtime, replacing the replicated unchunked BF16 decoder of v2.
     decoder_identity = CompileArtifactIdentity.from_cache_inputs(
         {
-            "compile_contract_version": 2,
+            "compile_contract_version": 3,
             "component_id": "decoder",
             "model_type": _MODEL_TYPE,
             "model_id": source.model_id,
             "resolved_source_id": source.resolved_source_id,
             "shapes": shapes_list,
-            "dtype": profile.dtype,
+            "dtype": "float32",
+            "wan_vae_chunked_version": _WAN_VAE_CHUNKED_VERSION,
             "component_tp_degree": 1,
-            "component_world_size": profile.world_size,
+            "component_world_size": 1,
             "logical_nc_config": 2,
             "toolchain": toolchain_versions(),
         }
@@ -885,7 +892,8 @@ def _runtime_plan(
                 else StageRuntimeSpec(
                     stage_id="decoder",
                     allocation_id=allocation.allocation_id,
-                    topology=ParallelTopology(tp_degree=1, cp_degree=1, world_size=_WORLD_SIZE),
+                    # the chunked decoder runs on one core of the allocation
+                    topology=ParallelTopology(tp_degree=1, cp_degree=1, world_size=1),
                     artifact_id="decoder",
                     placement="neuron",
                 )
@@ -909,7 +917,16 @@ def _pipeline_definition(profile: ServingProfile | None = None):
 
 
 def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
-    """Build a decoder-only W4 replicated wrapper from the existing Wan VAE."""
+    """The chunked FP32 decoder (the CLI's ``--wan-vae-chunked`` graph, checked against
+    the diffusers FP32 decoder in G1) on one core of the resident runtime.
+
+    The unchunked decoder holds the whole latent video in one graph and exceeds the
+    compiler's instruction limit at the official 81 frames (39.1 M vs 10 M, NCC_EVRF007);
+    the chunked one decodes fixed-size temporal chunks with explicit causal state, so
+    its graphs do not depend on the video length.
+    """
+
+    import torch
 
     from difflet.backends.trainium.core.multi_component_application import (
         ComponentSpec,
@@ -917,7 +934,7 @@ def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
     )
     from difflet.backends.trainium.core.config import NeuronConfig
     from difflet.backends.trainium.wan.vae import (
-        NeuronWanVAEDecoderApplication,
+        NeuronWanVAEChunkedApplication,
         WanVAEDecoderInferenceConfig,
     )
     from difflet.utils.diffusers_adapter import load_diffusers_config
@@ -926,8 +943,8 @@ def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
     neuron_config = NeuronConfig(
         batch_size=1,
         tp_degree=1,
-        world_size=profile.world_size,
-        torch_dtype=_torch_bfloat16(),
+        world_size=1,
+        torch_dtype=torch.float32,
         # The generation artifact uses the Trn2 platform LNC=2.  A resident
         # decoder shares that runtime, unlike the CLI's isolated W1/LNC1 VAE.
         logical_nc_config=2,
@@ -941,7 +958,7 @@ def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
         # PIXEL frames per shape; the config derives per-bucket latents itself.
         compile_shapes=profile.canonical_shapes() if profile.shapes else None,
     )
-    decoder = NeuronWanVAEDecoderApplication(
+    decoder = NeuronWanVAEChunkedApplication(
         model_path=vae_path,
         config=config,
     )
@@ -956,7 +973,7 @@ def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
                 ComponentSpec(
                     "vae_decoder",
                     self.vae_decoder,
-                    world_size=profile.world_size,
+                    world_size=1,
                 )
             ]
 
