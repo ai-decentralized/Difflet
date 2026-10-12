@@ -1,5 +1,6 @@
 {
   "what": "difflet compile wan_2_1 tp4 81f (UMT5 + DiT + chunked VAE) into empty difflet and Neuron compile caches",
   "wall_s": 3570.2846179,
-  "wall_min": 59.5
+  "wall_min": 59.5,
+  "superseded": "reused the presharded UMT5, DiT and VAE weights in ~/.cache/difflet/_shared_weights (the store ignores --cache-dir); see wan_2_1_compile_empty2.json"
 }

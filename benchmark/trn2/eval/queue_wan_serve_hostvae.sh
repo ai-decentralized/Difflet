@@ -9,7 +9,11 @@
 # out (first decode: "Failed to allocate DEVICE memory" on ND 0:NC 4).
 #
 # First start into empty caches, resident request latency (serve_bench, 1 warm-up + 3),
-# warm and cold restarts.
+# warm and cold restarts. "Empty" includes the presharded weight store: it lives under
+# DIFFLET_COMPILE_CACHE (~/.cache/difflet/_shared_weights) whatever --cache-dir says, and
+# the serving transformer's store key equals the CLI's, so without
+# DIFFLET_SHARED_WEIGHTS_DIR the first start reuses the CLI's shards (LTX-2's serving key
+# differs, so its first start sharded: 476.7 s).
 #
 #   setsid nohup benchmark/trn2/eval/queue_wan_serve_hostvae.sh > LOG 2>&1 &   (venv active)
 set -u
@@ -40,7 +44,8 @@ if [[ ! -f "$SERVE_OUT" ]]; then
   serve() {  # serve <log>: start the server, wait for /ready, print seconds to ready
     local log="$1" t0 t
     t0=$(date +%s.%N)
-    NEURON_COMPILE_CACHE_URL="$NCC" "$PY" -m difflet.cli.main serve --model-id "$mid" --tp-degree 4 \
+    NEURON_COMPILE_CACHE_URL="$NCC" DIFFLET_SHARED_WEIGHTS_DIR="$SC/_shared_weights" \
+      "$PY" -m difflet.cli.main serve --model-id "$mid" --tp-degree 4 \
       --height "$h" --width "$w" --num-frames "$f" --cache-dir "$SC" --port "$PORT" --host-vae \
       --request-timeout 3600 --max-queued-requests 8 --worker-restart-timeout 7200 >"$log" 2>&1 &
     SERVE_PID=$!
