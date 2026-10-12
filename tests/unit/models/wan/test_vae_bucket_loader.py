@@ -70,3 +70,39 @@ def test_only_current_partition_models_stay_alive(monkeypatch):
     assert active == {0, 1}
     del loader
     assert not active
+
+
+def test_replicated_loader_builds_models_over_all_resident_ranks(monkeypatch):
+    # A resident worker's global communicator spans its four ranks, so the chunked
+    # decoder runs replicated (TP1, W4) and every bucket model is built for 4 ranks.
+    built = []
+
+    class ExportModel:
+        def save_neff(self, path):
+            Path(path).write_bytes(b"0")
+
+        def save_metaneff(self, path):
+            Path(path).write_bytes(b"metadata")
+
+    class ExecutionModel:
+        def __init__(self, neff, metadata, local_ranks, world_size):
+            built.append((local_ranks, world_size))
+
+        def initialize(self, state, loaded_weights, start_rank):
+            assert len(loaded_weights) == 4 and start_rank == 0
+
+        def forward(self, inputs):
+            return inputs
+
+    monkeypatch.setattr(torch.classes.neuron, "SPMDModel", ExecutionModel)
+    xs = (torch.zeros(1, 4, 1, 2, 2), torch.zeros(1))
+    nxd = SimpleNamespace(
+        input_shape_map={str([list(t.shape) for t in xs]): ("decoder", 0)},
+        models=SimpleNamespace(named_children=lambda: iter(
+            [("decoder", SimpleNamespace(models=[ExportModel()]))])),
+        flattener_map=SimpleNamespace(named_children=lambda: iter([("decoder_0", lambda v: v)])),
+        packer=lambda v: v,
+    )
+    loader = _WanBucketLoader(nxd, [object()] * 4, 0, local_ranks_size=4, world_size=4)
+    loader.run(xs)
+    assert built == [(4, 4)]

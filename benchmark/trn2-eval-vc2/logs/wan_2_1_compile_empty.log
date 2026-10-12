@@ -1,0 +1,208 @@
+[difflet] DiT attention policy: megakernel
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/work/scratch/followup/compile_cache/wan2_1_t2v_14b_diffusers_transformer/748286adff23f7d9/text_encoder/
+INFO:Neuron:Generating HLOs for the following models: ['WanUmT5EncoderModel']
+[2026-10-12 09:23:44.376: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-10-12 09:23:44.377: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-12 09:23:44.377: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-12 09:23:44.377: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-12 09:23:44.377: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-12 09:23:44.377: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x77f32512d8a0>, 'Ascending Ring PG Group')>
+[2026-10-12 09:23:44.377: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-10-12 09:23:44.377: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-10-12 09:23:44.377: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-12 09:23:44.377: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-12 09:23:44.377: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-12 09:23:44.377: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+INFO:Neuron:Generating 1 hlos for key: WanUmT5EncoderModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module WanUmT5EncoderModel
+INFO:Neuron:Finished loading module WanUmT5EncoderModel in 0.658900260925293 seconds
+INFO:Neuron:generating HLO: WanUmT5EncoderModel, input example shape = torch.Size([1, 512])
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+INFO:Neuron:Finished generating HLO for WanUmT5EncoderModel in 0.9859669208526611 seconds, input example shape = torch.Size([1, 512])
+INFO:Neuron:Generated all HLOs in 1.6801581382751465 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'WanUmT5EncoderModel' is the priority model with bucket rank 0
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+.
+Compiler status PASS
+2026-10-12 09:23:51.000079:  296023  [INFO]: Compilation Successfully Completed for model.MODULE_ca9a3b5e5041b800c1fb+a32cd5f9.hlo_module.pb
+INFO:Neuron:Done compilation for the priority HLO in 5.02712869644165 seconds
+INFO:Neuron:Done optimizing weight layout for all HLOs in 0.0022535324096679688 seconds
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Finished Compilation for all HLOs in 0.0008788108825683594 seconds
+..
+Compiler status PASS
+INFO:Neuron:Done preparing weight layout transformation
+INFO:Neuron:Finished building model in 35.69399428367615 seconds
+INFO:Neuron:Reusing pre-sharded checkpoints from /home/ubuntu/.cache/difflet/_shared_weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__text_encoder__38ec498c__bfloat16__tp4__4ef6774dfe12b8b2.
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/work/scratch/followup/compile_cache/wan2_1_t2v_14b_diffusers_transformer/748286adff23f7d9/transformer/
+INFO:Neuron:Generating HLOs for the following models: ['WanTransformer3DModel']
+[2026-10-12 09:24:20.164: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-10-12 09:24:20.164: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-12 09:24:20.164: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-12 09:24:20.164: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-12 09:24:20.164: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-12 09:24:20.164: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x77f32512d8a0>, 'Ascending Ring PG Group')>
+[2026-10-12 09:24:20.164: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-10-12 09:24:20.164: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-10-12 09:24:20.164: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-12 09:24:20.164: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-12 09:24:20.164: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-12 09:24:20.164: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+INFO:Neuron:Generating 1 hlos for key: WanTransformer3DModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module WanTransformer3DModel
+INFO:Neuron:Finished loading module WanTransformer3DModel in 2.2158849239349365 seconds
+INFO:Neuron:generating HLO: WanTransformer3DModel, input example shape = torch.Size([1, 16, 21, 60, 104])
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[difflet] tracing attention kernel: attention_cte
+INFO:Neuron:Finished generating HLO for WanTransformer3DModel in 826.145206451416 seconds, input example shape = torch.Size([1, 16, 21, 60, 104])
+INFO:Neuron:Generated all HLOs in 828.5633544921875 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'WanTransformer3DModel' is the priority model with bucket rank 0
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+..........................................................
+Compiler status PASS
+2026-10-12 09:57:13.000157:  296023  [INFO]: Compilation Successfully Completed for model.MODULE_bb78955b4022eabdefb9+e9b34a31.hlo_module.pb
+INFO:Neuron:Done compilation for the priority HLO in 1145.5179224014282 seconds
+INFO:Neuron:Done optimizing weight layout for all HLOs in 0.03191542625427246 seconds
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Finished Compilation for all HLOs in 0.0027365684509277344 seconds
+.........
+Compiler status PASS
+INFO:Neuron:Done preparing weight layout transformation
+INFO:Neuron:Finished building model in 2147.6151201725006 seconds
+INFO:Neuron:Reusing pre-sharded checkpoints from /home/ubuntu/.cache/difflet/_shared_weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__transformer__38ec498c__bfloat16__tp4__c06caa3c7836f86e.
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/work/scratch/followup/compile_cache/wan2_1_t2v_14b_diffusers_vae/9db17e38ad0863f9/vae_decoder_chunked/
+INFO:Neuron:Generating HLOs for the following models: ['WanVAESplitChunkModel']
+[2026-10-12 10:00:16.018: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 1
+[2026-10-12 10:00:16.018: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-12 10:00:16.018: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-12 10:00:16.018: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-12 10:00:16.018: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 1
+[2026-10-12 10:00:16.018: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x7040a73498a0>, 'Ascending Ring PG Group')>
+[2026-10-12 10:00:16.018: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0]]
+[2026-10-12 10:00:16.019: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0]]
+[2026-10-12 10:00:16.019: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0]]
+[2026-10-12 10:00:16.019: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0]]
+[2026-10-12 10:00:16.019: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0]]
+[2026-10-12 10:00:16.019: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0]]
+INFO:Neuron:Generating 6 hlos for key: WanVAESplitChunkModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module WanVAESplitChunkModel
+INFO:Neuron:Finished loading module WanVAESplitChunkModel in 0.45038628578186035 seconds
+INFO:Neuron:generating HLO: WanVAESplitChunkModel, input example shape = torch.Size([1, 16, 1, 60, 104])
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=1, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=2, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=3, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=4, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=5, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=6, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=7, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=8, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=9, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=10, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=11, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=12, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=13, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=14, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=15, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=16, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=17, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=18, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=19, shape=torch.Size([1]), dtype=torch.float32). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+INFO:Neuron:Finished generating HLO for WanVAESplitChunkModel in 0.15364480018615723 seconds, input example shape = torch.Size([1, 16, 1, 60, 104])
+INFO:Neuron:generating HLO: WanVAESplitChunkModel, input example shape = torch.Size([1, 192, 1, 1, 240, 416])
+INFO:Neuron:Finished generating HLO for WanVAESplitChunkModel in 0.07266759872436523 seconds, input example shape = torch.Size([1, 192, 1, 1, 240, 416])
+INFO:Neuron:generating HLO: WanVAESplitChunkModel, input example shape = torch.Size([1, 16, 1, 60, 104])
+INFO:Neuron:Finished generating HLO for WanVAESplitChunkModel in 0.16509723663330078 seconds, input example shape = torch.Size([1, 16, 1, 60, 104])
+INFO:Neuron:generating HLO: WanVAESplitChunkModel, input example shape = torch.Size([1, 192, 1, 1, 240, 416])
+INFO:Neuron:Finished generating HLO for WanVAESplitChunkModel in 0.3587069511413574 seconds, input example shape = torch.Size([1, 192, 1, 1, 240, 416])
+INFO:Neuron:generating HLO: WanVAESplitChunkModel, input example shape = torch.Size([1, 192, 1, 1, 240, 416])
+INFO:Neuron:Finished generating HLO for WanVAESplitChunkModel in 0.6341001987457275 seconds, input example shape = torch.Size([1, 192, 1, 1, 240, 416])
+INFO:Neuron:generating HLO: WanVAESplitChunkModel, input example shape = torch.Size([1, 16, 1, 60, 104])
+INFO:Neuron:Finished generating HLO for WanVAESplitChunkModel in 0.25160694122314453 seconds, input example shape = torch.Size([1, 16, 1, 60, 104])
+INFO:Neuron:Generated all HLOs in 2.104247808456421 seconds
+INFO:Neuron:Can't find a priority model, skip marking weights
+INFO:Neuron:Can't find a priority model, skip optimizing weight layout for other HLOs
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Neuron compiler flags: --model-type=unet-inference -O1 --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true' --internal-hlo2tensorizer-options='--verify-hlo=true'  --verbose=35 --logfile=/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b524380/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk0/log-neuron-cc.txt
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:249: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+INFO:Neuron:Neuron compiler flags: --model-type=unet-inference -O1 --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true' --internal-hlo2tensorizer-options='--verify-hlo=true'  --verbose=35 --logfile=/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b524380/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk1/log-neuron-cc.txt
+INFO:Neuron:Neuron compiler flags: --model-type=unet-inference -O1 --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true' --internal-hlo2tensorizer-options='--verify-hlo=true'  --verbose=35 --logfile=/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b524380/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk2/log-neuron-cc.txt
+INFO:Neuron:Neuron compiler flags: --model-type=unet-inference -O1 --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true' --internal-hlo2tensorizer-options='--verify-hlo=true'  --verbose=35 --logfile=/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b524380/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk3/log-neuron-cc.txt
+INFO:Neuron:Neuron compiler flags: --model-type=unet-inference -O1 --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true' --internal-hlo2tensorizer-options='--verify-hlo=true'  --verbose=35 --logfile=/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b524380/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk4/log-neuron-cc.txt
+INFO:Neuron:Neuron compiler flags: --model-type=unet-inference -O1 --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true' --internal-hlo2tensorizer-options='--verify-hlo=true'  --verbose=35 --logfile=/tmp/nxd_model/wan2.1-t2v-14b-diffusers-vae-5b524380/vae_decoder_chunked/WanVAESplitChunkModel/_tp0_bk5/log-neuron-cc.txt
+......
+Compiler status PASS
+2026-10-12 10:02:12.000983:  298813  [INFO]: Compilation Successfully Completed for model.MODULE_7460e6cd49abec2af628+9e0e49df.hlo_module.pb
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:249: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+..
+Compiler status PASS
+2026-10-12 10:02:45.000556:  298813  [INFO]: Compilation Successfully Completed for model.MODULE_219bef61137d49745ac7+36864577.hlo_module.pb
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:249: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+......................
+Compiler status PASS
+2026-10-12 10:09:57.000373:  298813  [INFO]: Compilation Successfully Completed for model.MODULE_a805f89cbb94e2b83a7c+9c013766.hlo_module.pb
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:249: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+...
+Compiler status PASS
+2026-10-12 10:10:47.000749:  298813  [INFO]: Compilation Successfully Completed for model.MODULE_fdf16c1962217f430722+2aa59d5f.hlo_module.pb
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:249: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+......
+Compiler status PASS
+2026-10-12 10:12:40.000252:  298813  [INFO]: Compilation Successfully Completed for model.MODULE_1710a2df28697b6306f4+7d717154.hlo_module.pb
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:249: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+...............................
+Compiler status PASS
+2026-10-12 10:22:58.000826:  298813  [INFO]: Compilation Successfully Completed for model.MODULE_6f11a350e4d8def94d75+8756f8f8.hlo_module.pb
+INFO:Neuron:Finished Compilation for all HLOs in 1360.7868309020996 seconds
+INFO:Neuron:Can't find a priority model, falling back to the existing weight layout
+INFO:Neuron:Finished building model in 1370.6365027427673 seconds
+INFO:Neuron:Reusing pre-sharded checkpoints from /home/ubuntu/.cache/difflet/_shared_weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__vae__38ec498c__float32__tp1__9cfedf9e20a0f1d1.

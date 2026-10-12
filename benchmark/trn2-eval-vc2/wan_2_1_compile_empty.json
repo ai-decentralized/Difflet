@@ -1,0 +1,5 @@
+{
+  "what": "difflet compile wan_2_1 tp4 81f (UMT5 + DiT + chunked VAE) into empty difflet and Neuron compile caches",
+  "wall_s": 3570.2846179,
+  "wall_min": 59.5
+}

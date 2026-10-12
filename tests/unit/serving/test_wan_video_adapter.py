@@ -255,8 +255,8 @@ def test_neuron_profile_adds_only_decoder_artifact_and_binding(monkeypatch, tmp_
         neuron.require_compile_spec("decoder").identity.canonical_cache_inputs_json
     )
     assert decoder_identity["component_tp_degree"] == 1
-    # the chunked FP32 decoder (the CLI's --wan-vae-chunked graph) on one core
-    assert decoder_identity["component_world_size"] == 1
+    # the chunked FP32 decoder (the CLI's --wan-vae-chunked graph), replicated on 4 ranks
+    assert decoder_identity["component_world_size"] == 4
     assert decoder_identity["dtype"] == "float32"
     assert decoder_identity["wan_vae_chunked_version"] == 3
     assert decoder_identity["logical_nc_config"] == 2
@@ -271,7 +271,7 @@ def test_neuron_profile_adds_only_decoder_artifact_and_binding(monkeypatch, tmp_
     ]
     assert neuron.runtime_plan.stages[2].artifact_id == "decoder"
     assert neuron.runtime_plan.stages[2].topology.tp_degree == 1
-    assert neuron.runtime_plan.stages[2].topology.world_size == 1
+    assert neuron.runtime_plan.stages[2].topology.world_size == 4
 
 
 def test_compile_artifact_checks_target_environment_and_payload(monkeypatch, tmp_path):
@@ -840,7 +840,7 @@ def test_adapter_loads_neuron_decoder_after_generation_and_releases_it(
         (
             "decoder",
             str(runtime.artifacts.require("decoder").path),
-            {"start_rank_id": 0, "local_ranks_size": 1, "skip_warmup": True},
+            {"start_rank_id": 0, "local_ranks_size": 4, "skip_warmup": True},
         ),
     ]
     assert isinstance(runners["decoder"].inner, wan.WanNeuronDecoderStageRunner)

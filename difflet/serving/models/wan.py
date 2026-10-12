@@ -480,7 +480,7 @@ class WanServingStageAdapter:
             vae_app.load(
                 str(decoder_binding.path),
                 start_rank_id=0,
-                local_ranks_size=1,  # the chunked decoder runs on one core
+                local_ranks_size=runtime.profile.world_size,
                 skip_warmup=not runtime.profile.shapes,
             )
             self.vae_app = vae_app
@@ -711,8 +711,8 @@ def _compile_specs(
 
     profile_shapes = profile.shapes or ((profile.height, profile.width, profile.num_frames),)
     shapes_list = [list(shape) for shape in canonicalize_shapes(profile_shapes)]
-    # v3: the chunked FP32 decoder (the CLI's --wan-vae-chunked graph) on one core of the
-    # resident runtime, replacing the replicated unchunked BF16 decoder of v2.
+    # v3: the chunked FP32 decoder (the CLI's --wan-vae-chunked graph), replicated over the
+    # resident ranks like the unchunked BF16 decoder of v2 it replaces.
     decoder_identity = CompileArtifactIdentity.from_cache_inputs(
         {
             "compile_contract_version": 3,
@@ -724,7 +724,7 @@ def _compile_specs(
             "dtype": "float32",
             "wan_vae_chunked_version": _WAN_VAE_CHUNKED_VERSION,
             "component_tp_degree": 1,
-            "component_world_size": 1,
+            "component_world_size": profile.world_size,
             "logical_nc_config": 2,
             "toolchain": toolchain_versions(),
         }
@@ -892,8 +892,7 @@ def _runtime_plan(
                 else StageRuntimeSpec(
                     stage_id="decoder",
                     allocation_id=allocation.allocation_id,
-                    # the chunked decoder runs on one core of the allocation
-                    topology=ParallelTopology(tp_degree=1, cp_degree=1, world_size=1),
+                    topology=ParallelTopology(tp_degree=1, cp_degree=1, world_size=_WORLD_SIZE),
                     artifact_id="decoder",
                     placement="neuron",
                 )
@@ -918,12 +917,19 @@ def _pipeline_definition(profile: ServingProfile | None = None):
 
 def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
     """The chunked FP32 decoder (the CLI's ``--wan-vae-chunked`` graph, checked against
-    the diffusers FP32 decoder in G1) on one core of the resident runtime.
+    the diffusers FP32 decoder in G1), replicated over the resident ranks (TP1, W4): the
+    generation artifact's global communicator spans all four, and the runtime refuses to
+    execute a NEFF of another world size.
 
     The unchunked decoder holds the whole latent video in one graph and exceeds the
     compiler's instruction limit at the official 81 frames (39.1 M vs 10 M, NCC_EVRF007);
     the chunked one decodes fixed-size temporal chunks with explicit causal state, so
     its graphs do not depend on the video length.
+
+    At 480x832x81 on trn2.3xlarge it does not fit beside the generation artifact: UMT5
+    and the DiT hold ~20.5 of each logical core's 24 GB (5.5 GB of it the DiT's DMA-ring
+    spill), and the steady-state tail bucket moves ~3 GB of FP32 state in and ~3 GB out.
+    Serve that shape with ``--host-vae``.
     """
 
     import torch
@@ -943,7 +949,7 @@ def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
     neuron_config = NeuronConfig(
         batch_size=1,
         tp_degree=1,
-        world_size=1,
+        world_size=profile.world_size,
         torch_dtype=torch.float32,
         # The generation artifact uses the Trn2 platform LNC=2.  A resident
         # decoder shares that runtime, unlike the CLI's isolated W1/LNC1 VAE.
@@ -973,7 +979,7 @@ def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
                 ComponentSpec(
                     "vae_decoder",
                     self.vae_decoder,
-                    world_size=1,
+                    world_size=profile.world_size,
                 )
             ]
 

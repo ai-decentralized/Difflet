@@ -243,13 +243,17 @@ class ModelWrapperWanVAEChunk(ModelWrapperWanVAEDecoder):
 class _WanBucketLoader:
     """Keep one prefix and one tail NEFF resident; weights stay shared."""
 
-    def __init__(self, nxd_model, weights, start_rank):
+    def __init__(self, nxd_model, weights, start_rank, local_ranks_size=1, world_size=1):
         import ast
         from pathlib import Path
         import tempfile
 
         self.weights = weights
         self.start_rank = start_rank
+        # >1 when the decoder is replicated across the ranks of a resident process whose
+        # global communicator spans them (a NEFF's world size must match it).
+        self.local_ranks_size = int(local_ranks_size)
+        self.world_size = int(world_size)
         self.routes = {
             tuple(tuple(shape) for shape in ast.literal_eval(signature)): tuple(route)
             for signature, route in nxd_model.input_shape_map.items()
@@ -283,7 +287,9 @@ class _WanBucketLoader:
                 # SPMDModel.unload() alone retains tensor pools. Destroy the
                 # object before allocating the replacement's buffers.
                 del previous
-            model = torch.classes.neuron.SPMDModel(*self.artifacts[route], 1, 1)
+            model = torch.classes.neuron.SPMDModel(
+                *self.artifacts[route], self.local_ranks_size, self.world_size
+            )
             model.initialize([], self.weights, self.start_rank)
             self.resident[partition] = (route, model)
         model = self.resident[partition][1]
@@ -296,6 +302,10 @@ class NeuronWanVAEChunkedApplication(NeuronWanVAEDecoderApplication):
 
     Causal state is explicit input/output and currently crosses the host on
     each call. This bounds compilation size; it does not claim zero-copy state.
+
+    TP1. W1 standalone (the CLI's VAE stage), or replicated over every rank of a
+    resident process (world_size > 1): there the generation artifact's global
+    communicator spans all ranks and the runtime refuses a NEFF of another world size.
     """
 
     def __init__(self, *args, **kwargs):
@@ -303,8 +313,8 @@ class NeuronWanVAEChunkedApplication(NeuronWanVAEDecoderApplication):
 
         self._model_cls = WanVAESplitChunkModel
         super().__init__(*args, **kwargs)
-        if self.neuron_config.tp_degree != 1 or self.neuron_config.world_size != 1:
-            raise ValueError("Chunked Wan VAE currently requires standalone TP1/W1")
+        if self.neuron_config.tp_degree != 1:
+            raise ValueError("Chunked Wan VAE requires TP1 (standalone or replicated)")
         if self.dtype != torch.float32:
             raise ValueError("Chunked Wan VAE requires float32 to match the official VAE")
         self.config.wan_vae_chunked_version = 3
@@ -325,10 +335,16 @@ class NeuronWanVAEChunkedApplication(NeuronWanVAEDecoderApplication):
 
         start_rank_id = self.neuron_config.start_rank_id if start_rank_id is None else start_rank_id
         local_ranks_size = self.neuron_config.local_ranks_size if local_ranks_size is None else local_ranks_size
-        if local_ranks_size != 1:
-            raise ValueError("Chunked Wan VAE loading requires one local rank")
+        world_size = int(self.neuron_config.world_size)
+        if local_ranks_size != world_size:
+            raise ValueError(
+                f"Chunked Wan VAE loads on all of its {world_size} rank(s); got {local_ranks_size}"
+            )
         path = os.path.join(compiled_model_path, "weights", "tp0_sharded_checkpoint.safetensors")
-        checkpoint = [load_file(path)] if os.path.exists(path) else self.get_builder().shard_checkpoint()
+        # TP1: every rank holds the same weights (one copy per rank when replicated).
+        checkpoint = (
+            [load_file(path)] if os.path.exists(path) else self.get_builder().shard_checkpoint()[:1]
+        ) * local_ranks_size
         # NxD.initialize eagerly allocates I/O buffers for EVERY bucket. With
         # large causal histories that exceeds a core's HBM. Load shared weights
         # once and initialize only the active graph for each partition.
@@ -336,6 +352,8 @@ class NeuronWanVAEChunkedApplication(NeuronWanVAEDecoderApplication):
         self.model.bucket_loader = _WanBucketLoader(
             self.traced_model.nxd_model, weights,
             _runtime_start_rank_id(start_rank_id, local_ranks_size),
+            local_ranks_size=local_ranks_size,
+            world_size=world_size,
         )
 
     def warmup(self):

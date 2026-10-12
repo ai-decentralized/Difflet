@@ -1,0 +1,10 @@
+{
+  "what": "LTX-2 480x704x49 tp4 (tp4) standalone, weights sharded at load; the model's files read into the page cache right before the run (warm by definition)",
+  "warm_s": 262.128,
+  "prewarm_s": 701.099,
+  "host_text_encoder_load": [
+    "00:04",
+    "00:04"
+  ],
+  "sharding_on_load_lines": 1
+}
