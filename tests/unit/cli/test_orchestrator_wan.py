@@ -1144,3 +1144,106 @@ def test_compile_neuron_cpu_torchrun_rank0_writes_the_manifest(neuron_torchrun, 
     for record in records:
         assert [c["skip_warmup"] for c in record["pipeline_load_calls"]] == [False]
         assert record["app_calls"] == []
+
+
+# ------------------------------------------- Wan 2.2 dual expert (neuron backend)
+
+
+def test_dual_expert_reaches_the_neuron_application(neuron_stage, tmp_path):
+    args = _wan_args(stage_mode="generate", work_dir=str(tmp_path), dual_expert=True,
+                     guidance_scale=4.0, guidance_scale_2=3.0, steps=10)
+    WanOrchestrator(args)._stage_transformer(args)
+
+    [call] = neuron_stage.CALLS
+    assert call["kwargs"]["application_kwargs"] == {**_NEURON_APP_KWARGS,
+                                                    "enable_transformer_2": True}
+    [request] = call["pipeline"].app.calls
+    assert (request["guidance_scale"], request["guidance_scale_2"]) == (4.0, 3.0)
+
+
+def test_single_expert_call_is_unchanged(neuron_stage, tmp_path):
+    args = _wan_args(stage_mode="generate", work_dir=str(tmp_path))
+    WanOrchestrator(args)._stage_transformer(args)
+
+    [call] = neuron_stage.CALLS
+    assert call["kwargs"]["application_kwargs"] == _NEURON_APP_KWARGS
+    assert "guidance_scale_2" not in call["pipeline"].app.calls[0]
+
+
+def test_shared_cli_args_forward_the_dual_expert_flags():
+    plain = WanOrchestrator(_wan_args())._shared_cli_args(stage_mode="generate")
+    assert "--dual-expert" not in plain and "--guidance-scale-2" not in plain
+    parts = WanOrchestrator(_wan_args(dual_expert=True, guidance_scale_2=3.0))._shared_cli_args(
+        stage_mode="generate")
+    assert "--dual-expert" in parts
+    assert parts[parts.index("--guidance-scale-2") + 1] == "3.0"
+
+
+def test_cli_and_stage_parsers_accept_the_dual_expert_flags():
+    from difflet.cli.main import _build_parser
+    from difflet.cli.stage import _build_stage_parser
+
+    cli = _build_parser().parse_args([
+        "generate", "--model-id", "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+        "--dual-expert", "--guidance-scale-2", "3.0",
+    ])
+    assert cli.dual_expert is True and cli.guidance_scale_2 == 3.0
+    stage, _ = _build_stage_parser().parse_known_args([
+        "--orchestrator", "Wan-AI/Wan2.2-T2V-A14B-Diffusers", "--stage", "transformer",
+        "--dual-expert", "--guidance-scale-2", "3.0",
+    ])
+    assert stage.dual_expert is True and stage.guidance_scale_2 == 3.0
+
+
+def _refuse_launches(monkeypatch):
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host",
+                        lambda *a, **k: pytest.fail("nothing to decode"))
+    monkeypatch.setattr(WanOrchestrator, "download",
+                        lambda self: pytest.fail("rejected before the download"))
+
+
+@pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_dual_expert_is_refused_off_neuron(monkeypatch, tmp_path, capsys, backend, mode):
+    # The trainium and tpu Wan paths hold one expert by design (expert residency).
+    _unset(monkeypatch, "DIFFLET_BACKEND")
+    if backend is not None:
+        monkeypatch.setenv("DIFFLET_BACKEND", backend)
+    _refuse_launches(monkeypatch)
+    args = _wan_args(work_dir=str(tmp_path / "work"), host_vae=True, dual_expert=True)
+
+    with pytest.raises(SystemExit) as exc:
+        getattr(WanOrchestrator(args), mode)()
+
+    assert exc.value.code == 2
+    assert "--dual-expert runs on the neuron backend only" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("backend", ["neuron", "trainium"])
+def test_guidance_scale_2_needs_dual_expert(monkeypatch, tmp_path, capsys, backend):
+    monkeypatch.setenv("DIFFLET_BACKEND", backend)
+    _refuse_launches(monkeypatch)
+    args = _wan_args(work_dir=str(tmp_path / "work"), host_vae=True, guidance_scale_2=3.0)
+
+    with pytest.raises(SystemExit) as exc:
+        WanOrchestrator(args).generate()
+
+    assert exc.value.code == 2
+    assert "--guidance-scale-2 sets the low-noise expert's guidance" in capsys.readouterr().err
+
+
+def test_neuron_driver_lets_dual_expert_through(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    stages = []
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: stages.append((stage, kw["cli_args"])))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host", lambda *a, **k: None)
+    args = _wan_args(work_dir=str(tmp_path / "work"), dual_expert=True, guidance_scale_2=3.0)
+
+    WanOrchestrator(args).generate()
+
+    [(stage, cli_args)] = stages
+    assert stage == "transformer" and "--dual-expert" in cli_args
+    assert capsys.readouterr().err == ""

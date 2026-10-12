@@ -339,6 +339,22 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--worker-index", type=int, default=None, help=argparse.SUPPRESS)
     p.add_argument("--steps", type=int, default=None)
     p.add_argument("--guidance-scale", type=float, default=None)
+    p.add_argument(
+        "--guidance-scale-2",
+        dest="guidance_scale_2",
+        type=float,
+        default=None,
+        help="Wan 2.2 A14B with --dual-expert: guidance for the low-noise expert's steps "
+        "(default: --guidance-scale)",
+    )
+    p.add_argument(
+        "--dual-expert",
+        dest="dual_expert",
+        action="store_true",
+        help="Wan 2.2 A14B on the neuron backend: hold both experts, the high-noise one above "
+        "the checkpoint's boundary timestep and the low-noise one below it (default: the "
+        "high-noise expert for every step, as on trainium and tpu)",
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
         "--work-dir", default=None, help="Directory for inter-stage tensors (staged models only)"

@@ -203,10 +203,30 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     return found
 
 
+def _dual_expert_misuse(args: argparse.Namespace, torchrun_backend: str | None) -> str | None:
+    """Why --dual-expert / --guidance-scale-2 cannot run as given, else None. Torch-free.
+
+    The trainium and tpu Wan paths hold the high-noise expert alone (expert residency) and run
+    it for every step; only the neuron application loads ``transformer_2``. A low-noise
+    guidance scale without the low-noise expert would be ignored, so it is refused too.
+    """
+    dual = getattr(args, "dual_expert", False)
+    if getattr(args, "guidance_scale_2", None) is not None and not dual:
+        return "--guidance-scale-2 sets the low-noise expert's guidance; it needs --dual-expert"
+    if dual and torchrun_backend is None:
+        return ("--dual-expert runs on the neuron backend only (pass --backend neuron): the "
+                "trainium and tpu Wan paths hold the high-noise expert alone and run it for "
+                "every step")
+    return None
+
+
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
     """The application kwargs, plus any TeaCache flag the user gave: the neuron application
-    rejects TeaCache (phase 1) instead of the stage dropping the flag silently."""
+    rejects TeaCache (phase 1) instead of the stage dropping the flag silently. --dual-expert
+    loads Wan 2.2 A14B's low-noise expert (``transformer_2``)."""
     kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
+    if getattr(args, "dual_expert", False):
+        kwargs["enable_transformer_2"] = True
     for app_key, arg_key in (
         ("teacache_cadence", "teacache_cadence"),
         ("teacache_online_delta_alpha", "teacache_online_delta"),
@@ -254,8 +274,18 @@ class WanOrchestrator(ModelOrchestrator):
               "launched.", file=sys.stderr, flush=True)
         raise SystemExit(2)
 
+    def _reject_dual_expert_misuse(self) -> None:
+        """--dual-expert off the neuron backend, or --guidance-scale-2 without it: print one
+        message and exit 2 before anything is launched (or downloaded, for ``run``)."""
+        problem = _dual_expert_misuse(self.args, _torchrun_backend())
+        if problem is None:
+            return
+        print(f"Error: {problem}; nothing was launched.", file=sys.stderr, flush=True)
+        raise SystemExit(2)
+
     def run(self) -> None:
         self._reject_unsupported_torchrun_options()  # before the download, too
+        self._reject_dual_expert_misuse()
         super().run()
 
     def _require_host_vae(self) -> None:
@@ -293,6 +323,7 @@ class WanOrchestrator(ModelOrchestrator):
 
     def compile(self) -> None:
         self._reject_unsupported_torchrun_options()
+        self._reject_dual_expert_misuse()
         self._require_host_vae()
         self._root_compile_cache_at_cache_dir()
         full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1) * (
@@ -311,6 +342,7 @@ class WanOrchestrator(ModelOrchestrator):
 
     def generate(self) -> None:
         self._reject_unsupported_torchrun_options()
+        self._reject_dual_expert_misuse()
         self._require_host_vae()
         self._root_compile_cache_at_cache_dir()
         _require_request_shape_in_set(self.args)  # fail fast before any stage runs
@@ -499,6 +531,9 @@ class WanOrchestrator(ModelOrchestrator):
                     "transformer", args, self._stage_compiled_dir("transformer", args)
                 )
         else:
+            # Only when given: the orchestrator otherwise uses --guidance-scale throughout.
+            low_noise = ({"guidance_scale_2": float(args.guidance_scale_2)}
+                         if getattr(args, "guidance_scale_2", None) is not None else {})
             for req in stage_loop.claim_requests(args):
                 with stage_loop.request_scope(args, req, final=False):
                     with _fallback_tracker(pipe) as fallbacks:
@@ -513,6 +548,7 @@ class WanOrchestrator(ModelOrchestrator):
                                 stage_loop.effective(req, args, "guidance_scale", 1.0)
                             ),
                             output_type="latent",
+                            **low_noise,
                         )
                     generate_fallbacks.extend(fallbacks)
                     latents_out = out.latents if hasattr(out, "latents") else out[0]
@@ -681,6 +717,10 @@ class WanOrchestrator(ModelOrchestrator):
             parts.append("--cfg-parallel")
         if getattr(a, "sp_enabled", False):
             parts.append("--sp")
+        if getattr(a, "dual_expert", False):
+            parts.append("--dual-expert")
+        if getattr(a, "guidance_scale_2", None) is not None:
+            parts += ["--guidance-scale-2", str(a.guidance_scale_2)]
         if getattr(a, "teacache_cadence", None) is not None:
             parts += ["--teacache-cadence", str(a.teacache_cadence)]
         if getattr(a, "teacache_online_delta", None) is not None:
