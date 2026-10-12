@@ -1,0 +1,4 @@
+[cold] ltx_2_tp4sdpa: dropping page cache...
+[cold] ltx_2_tp4sdpa: 781.9s (load 308.54)
+[warm] ltx_2_tp4sdpa: 67.4s (load 9.63)
+[done] ltx_2_tp4sdpa: cold 782s -> warm 67s

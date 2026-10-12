@@ -1,0 +1,33 @@
+[difflet] DiT attention policy: sdpa
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[difflet] DiT attention policy: sdpa
+Fetching 46 files:   0%|          | 0/46 [00:00<?, ?it/s]Fetching 46 files: 100%|██████████| 46/46 [00:00<00:00, 3534.57it/s]
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Loading pipeline components...:  29%|██▊       | 2/7 [00:00<00:02,  2.41it/s]
+Loading checkpoint shards:   0%|          | 0/11 [00:00<?, ?it/s][A
+Loading checkpoint shards:   9%|▉         | 1/11 [00:00<00:01,  5.37it/s][A
+Loading checkpoint shards:  18%|█▊        | 2/11 [00:00<00:02,  3.61it/s][A
+Loading checkpoint shards:  27%|██▋       | 3/11 [00:00<00:02,  3.17it/s][A
+Loading checkpoint shards:  36%|███▋      | 4/11 [00:01<00:02,  2.98it/s][A
+Loading checkpoint shards:  45%|████▌     | 5/11 [00:01<00:02,  2.90it/s][A
+Loading checkpoint shards:  55%|█████▍    | 6/11 [00:01<00:01,  2.86it/s][A
+Loading checkpoint shards:  64%|██████▎   | 7/11 [00:02<00:01,  2.84it/s][A
+Loading checkpoint shards:  73%|███████▎  | 8/11 [00:02<00:01,  2.83it/s][A
+Loading checkpoint shards:  82%|████████▏ | 9/11 [00:03<00:00,  2.82it/s][A
+Loading checkpoint shards:  91%|█████████ | 10/11 [00:03<00:00,  2.81it/s][A
+Loading checkpoint shards: 100%|██████████| 11/11 [00:03<00:00,  3.26it/s][ALoading checkpoint shards: 100%|██████████| 11/11 [00:03<00:00,  3.06it/s]
+Loading pipeline components...:  43%|████▎     | 3/7 [00:04<00:07,  1.77s/it]Loading pipeline components...: 100%|██████████| 7/7 [00:04<00:00,  1.54it/s]
+Neuron: Loading presharded checkpoints for ranks: 0...3
+Neuron: Presharded file read: 0.39s for 4 shard(s) (38011.3 MB total)
+Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+Neuron: Finished traced model weight initialization in 9.24s (device init 9.24s, total load_weights 9.63s)
+Neuron: Warming up the model.
+Neuron: Warmup completed in 1.4196290969848633 seconds.
+[ltx_2] video saved to benchmark/trn2-eval-vc2/logs/ltx_2_tp4sdpa_out.mp4

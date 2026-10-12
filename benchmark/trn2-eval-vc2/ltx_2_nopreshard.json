@@ -1,0 +1,9 @@
+{
+  "what": "LTX-2 480x704x49 tp4 standalone, weights sharded at load (no presharded shards); run 2 = warm page cache",
+  "walls_s": [
+    387.78,
+    618.682
+  ],
+  "warm_s": 618.682,
+  "sharding_on_load_lines": 1
+}

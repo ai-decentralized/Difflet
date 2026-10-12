@@ -1,0 +1,9 @@
+{
+  "what": "LTX-2 480x704x49 tp4 standalone, PyTorch SDPA attention, weights sharded at load (no presharded shards); run 2 = warm page cache",
+  "walls_s": [
+    611.958,
+    624.015
+  ],
+  "warm_s": 624.015,
+  "sharding_on_load_lines": 1
+}
