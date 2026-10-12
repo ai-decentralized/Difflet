@@ -1,0 +1,9 @@
+{
+  "what": "Wan 2.1 81f tp4 standalone, weights sharded at load (no presharded shards); run 2 = warm page cache",
+  "walls_s": [
+    1575.222,
+    1492.149
+  ],
+  "warm_s": 1492.149,
+  "sharding_on_load_lines": 2
+}
