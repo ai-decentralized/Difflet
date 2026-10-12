@@ -159,7 +159,8 @@ def _require_request_shape_in_set(args: argparse.Namespace):
 
 # TorchNeuronWanApplication keyword arguments for the torchrun transformer stage: the Trainium
 # stage's set, exec_mode=None (the application reads DIFFLET_EXEC_MODE, which --exec-mode
-# exports) and umT5 pinned at 12 host threads (D70: its fp32 output bits depend on the count).
+# exports), umT5 on the device (fp32, TP-sharded; --host-text-encoder keeps it on rank 0's
+# host) and, for the host encoder, 12 threads (D70: its fp32 output bits depend on the count).
 _TORCHRUN_APPLICATION_KWARGS = {
     "text_seq_len": 512,
     "batch_size": 1,
@@ -169,6 +170,7 @@ _TORCHRUN_APPLICATION_KWARGS = {
     "enable_vae_decoder": False,
     "exec_mode": None,
     "encoder_threads": 12,
+    "text_encoder_device": "neuron",
 }
 
 
@@ -241,6 +243,8 @@ def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
     kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
     if getattr(args, "dual_expert", False):
         kwargs["enable_transformer_2"] = True
+    if getattr(args, "host_text_encoder", False):
+        kwargs["text_encoder_device"] = "host"
     for app_key, arg_key in (
         ("teacache_cadence", "teacache_cadence"),
         ("teacache_online_delta_alpha", "teacache_online_delta"),
@@ -762,6 +766,8 @@ class WanOrchestrator(ModelOrchestrator):
             parts.append("--sp")
         if getattr(a, "dual_expert", False):
             parts.append("--dual-expert")
+        if getattr(a, "host_text_encoder", False):
+            parts.append("--host-text-encoder")
         if getattr(a, "guidance_scale_2", None) is not None:
             parts += ["--guidance-scale-2", str(a.guidance_scale_2)]
         if getattr(a, "teacache_cadence", None) is not None:

@@ -612,7 +612,7 @@ def test_stage_transformer_validates_the_calibration_like_the_probe_pipelines(
 _NEURON_APP_KWARGS = {
     "text_seq_len": 512, "batch_size": 1, "enable_text_encoder": True,
     "enable_transformer": True, "enable_transformer_2": False, "enable_vae_decoder": False,
-    "exec_mode": None, "encoder_threads": 12,
+    "exec_mode": None, "encoder_threads": 12, "text_encoder_device": "neuron",
 }
 
 
@@ -1335,3 +1335,32 @@ def test_neuron_driver_lets_dual_expert_through(monkeypatch, tmp_path, capsys):
     assert [stage for stage, _ in stages] == ["transformer", "vae"]
     assert "--dual-expert" in stages[0][1]
     assert capsys.readouterr().err == ""
+
+
+# ------------------------------------------- umT5 placement (neuron backend)
+
+
+def test_host_text_encoder_keeps_umt5_on_the_host(neuron_stage, tmp_path):
+    args = _wan_args(stage_mode="generate", work_dir=str(tmp_path), host_text_encoder=True)
+    WanOrchestrator(args)._stage_transformer(args)
+
+    [call] = neuron_stage.CALLS
+    assert call["kwargs"]["application_kwargs"] == {**_NEURON_APP_KWARGS,
+                                                    "text_encoder_device": "host"}
+
+
+def test_host_text_encoder_is_forwarded_and_parsed():
+    from difflet.cli.main import _build_parser
+    from difflet.cli.stage import _build_stage_parser
+
+    plain = WanOrchestrator(_wan_args())._shared_cli_args(stage_mode="generate")
+    assert "--host-text-encoder" not in plain
+    parts = WanOrchestrator(_wan_args(host_text_encoder=True))._shared_cli_args(
+        stage_mode="compile")
+    assert "--host-text-encoder" in parts
+    for command in ("compile", "generate"):
+        cli = _build_parser().parse_args([command, "--model-id", _WAN21_ID, "--host-text-encoder"])
+        assert cli.host_text_encoder is True
+    stage, _ = _build_stage_parser().parse_known_args([
+        "--orchestrator", _WAN21_ID, "--stage", "transformer", "--host-text-encoder"])
+    assert stage.host_text_encoder is True

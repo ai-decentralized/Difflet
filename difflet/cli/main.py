@@ -167,6 +167,13 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "compiler instruction limit (NCC_EVRF007).",
     )
     p.add_argument(
+        "--host-text-encoder",
+        dest="host_text_encoder",
+        action="store_true",
+        help="Wan on the neuron backend: encode prompts with umT5 on rank 0's host CPU (fp32) "
+        "instead of on the device (fp32, TP-sharded, the default)",
+    )
+    p.add_argument(
         "--taef1",
         dest="taef1",
         action="store_true",
