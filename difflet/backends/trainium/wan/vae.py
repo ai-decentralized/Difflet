@@ -8,7 +8,6 @@ from collections import defaultdict
 from typing import List, Tuple
 
 import torch
-from diffusers import AutoencoderKLWan
 
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
 from difflet.backends.trainium.core.bucketing import (
@@ -31,6 +30,23 @@ def _tile_grid(height, width):
     # Match Omni's 256-pixel tiles and 192-pixel stride (latent scale is 8).
     return [(i, j, min(32, height - i), min(32, width - j))
             for i in range(0, height, 24) for j in range(0, width, 24)]
+
+
+def _blend_tile_edge(previous, current, extent, dim):
+    """Vectorize Diffusers 0.38's Wan blend_v/blend_h without changing rounding."""
+    extent = min(previous.shape[dim], current.shape[dim], extent)
+    if not extent:
+        return current
+    shape = [1] * current.ndim
+    shape[dim] = extent
+    # Python's original scalar coefficients use double precision, then cast
+    # separately at each multiply. Compute both before casting (also for BF16).
+    fraction = torch.arange(extent, dtype=torch.float64, device=current.device) / extent
+    before = (1 - fraction).to(previous.dtype).reshape(shape)
+    after = fraction.to(current.dtype).reshape(shape)
+    edge = current.narrow(dim, 0, extent)
+    edge.copy_(previous.narrow(dim, previous.shape[dim] - extent, extent) * before + edge * after)
+    return current
 
 
 class _StatefulVAEInstance(BaseModelInstance):
@@ -290,7 +306,7 @@ class NeuronWanVAEDecoderApplication(NeuronApplicationBase):
                         chunks[rank].append(outputs[rank][0].cpu())
                 for position, parts in zip(active, chunks):
                     decoded[position] = torch.cat(parts, dim=2)
-        # Reuse Diffusers' exact overlap blending. Tile edges keep their true
+        # Preserve Diffusers' overlap blending and order. Tile edges keep their true
         # shapes, so spatial attention never sees artificial padded pixels.
         rows = []
         for i in range(0, latents.shape[3], 24):
@@ -298,9 +314,9 @@ class NeuronWanVAEDecoderApplication(NeuronApplicationBase):
             for j in range(0, latents.shape[4], 24):
                 tile = decoded[i, j]
                 if i:
-                    tile = AutoencoderKLWan.blend_v(self, decoded[i - 24, j], tile, 64)
+                    tile = _blend_tile_edge(decoded[i - 24, j], tile, 64, -2)
                 if j:
-                    tile = AutoencoderKLWan.blend_h(self, decoded[i, j - 24], tile, 64)
+                    tile = _blend_tile_edge(decoded[i, j - 24], tile, 64, -1)
                 decoded[i, j] = tile
                 row.append(tile[:, :, :, :192, :192])
             rows.append(torch.cat(row, dim=-1))
