@@ -1,0 +1,11 @@
+{
+  "what": "difflet compile wan_2_1 tp4 81f (UMT5 + DiT + chunked VAE) into empty difflet and Neuron compile caches and an empty presharded weight store",
+  "wall_s": 4504.216,
+  "wall_min": 75.1,
+  "sharding_s": [
+    177.18773964900174,
+    561.4516812050133,
+    1.468917283025803
+  ],
+  "reused_preshard_lines": 0
+}
