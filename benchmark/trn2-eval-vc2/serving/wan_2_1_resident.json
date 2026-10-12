@@ -1,0 +1,57 @@
+{
+  "decoder": "host VAE (--host-vae)",
+  "first_start_s": 4011.030325431,
+  "first_start_min": 66.9,
+  "restart_warm_s": 786.272625122,
+  "restart_cold_s": 1101.840711887,
+  "serve_bench": "benchmark/trn2-eval-vc2/serving/wan_2_1_serve_bench.json",
+  "levels": [
+    {
+      "concurrency": 1,
+      "requests": 3,
+      "successes": 3,
+      "wall_s": 3704.355,
+      "throughput_per_s": 0.0008,
+      "throughput_per_hour": 2.9,
+      "latency_s": {
+        "p50": 1244.522,
+        "p90": 1248.991,
+        "p99": 1249.996,
+        "mean": 1234.785,
+        "min": 1209.724,
+        "max": 1250.108
+      },
+      "http_codes": {
+        "200": 3
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 1209.724,
+          "http": 200,
+          "bytes": 1462821,
+          "error": ""
+        },
+        {
+          "latency_s": 1250.108,
+          "http": 200,
+          "bytes": 1463019,
+          "error": ""
+        },
+        {
+          "latency_s": 1244.522,
+          "http": 200,
+          "bytes": 1465069,
+          "error": ""
+        }
+      ],
+      "resources": null,
+      "neuron": {
+        "samples": 3705,
+        "neuroncore_util_mean_pct": 8.1,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 110.29
+      }
+    }
+  ]
+}

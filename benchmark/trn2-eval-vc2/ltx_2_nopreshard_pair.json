@@ -1,0 +1,73 @@
+{
+  "what": "LTX-2 480x704x49 standalone, weights sharded at load, warm (files read into the page cache before each run, transformer first); tp4sdpa = PyTorch/XLA row, tp4 = + NKI attention row; alternated, twice each",
+  "runs": [
+    {
+      "cfg": "tp4",
+      "run": 1,
+      "warm_s": 113.193,
+      "prewarm_s": 701.202,
+      "device_init_s": 9.16,
+      "load_weights_s": 51.52,
+      "host_text_encoder_load": [
+        "00:03",
+        "00:03"
+      ],
+      "sharding_on_load_lines": 1
+    },
+    {
+      "cfg": "tp4sdpa",
+      "run": 2,
+      "warm_s": 108.959,
+      "prewarm_s": 11.223,
+      "device_init_s": 7.65,
+      "load_weights_s": 46.85,
+      "host_text_encoder_load": [
+        "00:03",
+        "00:03"
+      ],
+      "sharding_on_load_lines": 1
+    },
+    {
+      "cfg": "tp4",
+      "run": 3,
+      "warm_s": 105.936,
+      "prewarm_s": 11.273,
+      "device_init_s": 9.02,
+      "load_weights_s": 46.97,
+      "host_text_encoder_load": [
+        "00:03",
+        "00:03"
+      ],
+      "sharding_on_load_lines": 1
+    },
+    {
+      "cfg": "tp4sdpa",
+      "run": 4,
+      "warm_s": 110.506,
+      "prewarm_s": 11.526,
+      "device_init_s": 7.82,
+      "load_weights_s": 46.93,
+      "host_text_encoder_load": [
+        "00:03",
+        "00:03"
+      ],
+      "sharding_on_load_lines": 1
+    }
+  ],
+  "summary": {
+    "tp4sdpa": {
+      "warm_s": [
+        108.959,
+        110.506
+      ],
+      "median_warm_s": 109.7325
+    },
+    "tp4": {
+      "warm_s": [
+        113.193,
+        105.936
+      ],
+      "median_warm_s": 109.56450000000001
+    }
+  }
+}

@@ -1,0 +1,80 @@
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+Fetching 30 files:   0%|          | 0/30 [00:00<?, ?it/s]Fetching 30 files: 100%|██████████| 30/30 [00:00<00:00, 3306.94it/s]
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[difflet serve] stage topology:
+  - prompt_encoder: role=prompt_encoder kind=extracted placement=neuron artifact=generation
+  - denoiser: role=denoiser kind=extracted placement=neuron artifact=generation
+  - decoder: role=decoder kind=extracted placement=host artifact=-
+2026-10-12 19:09:45.421 INFO:     Started server process [344519]
+2026-10-12 19:09:45.421 INFO:     Waiting for application startup.
+2026-10-12 19:09:45.421 INFO:     serving startup begin model=Wan-AI/Wan2.1-T2V-14B-Diffusers
+2026-10-12 19:09:46.028 INFO:     worker_process_start model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile_identity=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 startup_timeout=7200.0
+2026-10-12 19:09:46.029 INFO:     worker_process_terminate model=Wan-AI/Wan2.1-T2V-14B-Diffusers
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-10-12 19:09:46.116 INFO:     worker heartbeat transition state=starting request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:10:16.119 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=starting to_state=loading
+2026-10-12 19:10:16.120 INFO:     worker heartbeat transition state=loading request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.05s for 4 shard(s) (10836.7 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 10.46s (device init 10.46s, total load_weights 10.51s)
+INFO:Neuron:Skipping model warmup
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.35s for 4 shard(s) (28602.8 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+2026-10-12 19:10:46.120 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:11:16.120 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:11:46.120 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:12:16.120 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:12:46.120 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:13:16.121 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+INFO:Neuron:Finished traced model weight initialization in 181.36s (device init 181.36s, total load_weights 181.71s)
+INFO:Neuron:Skipping model warmup
+2026-10-12 19:13:46.121 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:14:16.121 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:14:46.121 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:15:16.122 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:15:46.122 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:16:16.122 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:16:46.122 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:17:16.122 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:17:46.123 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:18:16.123 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:18:46.123 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:19:16.123 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:19:46.124 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:20:16.124 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:20:46.124 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:21:16.124 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:21:46.124 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:22:16.125 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Wan-AI/Wan2.1-T2V-14B-Diffusers profile=b2a37cc84aa4332e5abc3c909ff72f5146f479cc7c0ca7c2277cf41c383082c0 running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 19:22:24.825 INFO:     worker_process_ready model=Wan-AI/Wan2.1-T2V-14B-Diffusers replicas=1
+2026-10-12 19:22:24.827 INFO:     video.service_start ephemeral_jobs=true staging_removed=0 artifacts_removed=0
+2026-10-12 19:22:24.827 INFO:     serving startup complete model=Wan-AI/Wan2.1-T2V-14B-Diffusers
+2026-10-12 19:22:24.827 INFO:     Application startup complete.
+2026-10-12 19:22:24.829 INFO:     Uvicorn running on http://0.0.0.0:8093 (Press CTRL+C to quit)
+2026-10-12 19:22:27.938 INFO:     127.0.0.1:32832 - "GET /ready HTTP/1.1" 200
+2026-10-12 19:22:28.038 INFO:     Shutting down
+2026-10-12 19:22:28.138 INFO:     Waiting for application shutdown.
+2026-10-12 19:22:28.138 INFO:     serving shutdown begin model=Wan-AI/Wan2.1-T2V-14B-Diffusers
+2026-10-12 19:22:28.139 INFO:     video.service_stop ephemeral_jobs=true staging_removed=0 artifacts_removed=0
+2026-10-12 19:22:28.140 INFO:     worker_process_shutdown requested model=Wan-AI/Wan2.1-T2V-14B-Diffusers alive=True
+2026-10-12 19:22:33.146 INFO:     worker_process_terminate model=Wan-AI/Wan2.1-T2V-14B-Diffusers
+2026-10-12 19:22:34.437 INFO:     serving shutdown complete model=Wan-AI/Wan2.1-T2V-14B-Diffusers
+2026-10-12 19:22:34.437 INFO:     Application shutdown complete.
+2026-10-12 19:22:34.437 INFO:     Finished server process [344519]
