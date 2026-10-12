@@ -1,0 +1,4 @@
+[cold] ltx_2: dropping page cache...
+[cold] ltx_2: 780.3s (load 309.91)
+[warm] ltx_2: 64.7s (load 10.3)
+[done] ltx_2: cold 780s -> warm 65s
