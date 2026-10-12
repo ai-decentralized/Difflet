@@ -1,0 +1,24 @@
+[realloop] wan_2_1_tp4sp: building pipeline (--tp-degree 4 --cp-degree 1 --sp, compiled NEFF, skip_compile)...
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[realloop] wan_2_1_tp4sp: pipeline ready in 4.9s; timing NeuronWanBackboneApplication.__call__ per step
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.03s for 4 shard(s) (10836.7 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 11.63s (device init 11.63s, total load_weights 11.66s)
+INFO:Neuron:Skipping model warmup
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.36s for 4 shard(s) (28602.8 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 177.96s (device init 177.96s, total load_weights 178.32s)
+INFO:Neuron:Skipping model warmup
+[wan] latents saved to /home/ubuntu/.cache/difflet/work/bench_wan_2_1_tp4sp/latents.pt
+[realloop] wan_2_1_tp4sp: NOTE 100 DiT calls for 50 steps (2x/step — CFG/segmented); per-step = inter-call delta
+[realloop] wan_2_1_tp4sp: per-step 6705.8 ms (median 6941.0, p90 7067.3, n=99); generate 862.6s, finite=True
+[realloop] patched benchmark/trn2-eval-vc2/wan_2_1_tp4sp.md

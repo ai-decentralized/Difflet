@@ -1,0 +1,96 @@
+[difflet] DiT attention policy: megakernel
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/911e9dc849aa8e81/text_encoder/
+INFO:Neuron:Generating HLOs for the following models: ['WanUmT5EncoderModel']
+[2026-10-11 22:35:17.625: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-10-11 22:35:17.625: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-11 22:35:17.625: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-11 22:35:17.625: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-11 22:35:17.625: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-11 22:35:17.625: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x7ce7b763d8a0>, 'Ascending Ring PG Group')>
+[2026-10-11 22:35:17.625: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-10-11 22:35:17.625: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-10-11 22:35:17.625: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-11 22:35:17.625: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-11 22:35:17.625: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-11 22:35:17.626: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+INFO:Neuron:Generating 1 hlos for key: WanUmT5EncoderModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module WanUmT5EncoderModel
+INFO:Neuron:Finished loading module WanUmT5EncoderModel in 0.6474077701568604 seconds
+INFO:Neuron:generating HLO: WanUmT5EncoderModel, input example shape = torch.Size([1, 512])
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+INFO:Neuron:Finished generating HLO for WanUmT5EncoderModel in 1.1986992359161377 seconds, input example shape = torch.Size([1, 512])
+INFO:Neuron:Generated all HLOs in 1.8803269863128662 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'WanUmT5EncoderModel' is the priority model with bucket rank 0
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+.
+Compiler status PASS
+2026-10-11 22:35:26.000557:  190061  [INFO]: Compilation Successfully Completed for model.MODULE_e91a993ac6a1ac4effe7+9dcb816c.hlo_module.pb
+INFO:Neuron:Done compilation for the priority HLO in 7.054960489273071 seconds
+INFO:Neuron:Done optimizing weight layout for all HLOs in 0.0023021697998046875 seconds
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Finished Compilation for all HLOs in 0.0009086132049560547 seconds
+..
+Compiler status PASS
+INFO:Neuron:Done preparing weight layout transformation
+INFO:Neuron:Finished building model in 40.73118448257446 seconds
+INFO:Neuron:Reusing pre-sharded checkpoints from /home/ubuntu/.cache/difflet/_shared_weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__text_encoder__38ec498c__bfloat16__tp4__4ef6774dfe12b8b2.
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/wan2_1_t2v_14b_diffusers_transformer/911e9dc849aa8e81/transformer/
+INFO:Neuron:Generating HLOs for the following models: ['WanTransformer3DModel']
+[2026-10-11 22:35:58.453: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-10-11 22:35:58.454: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-11 22:35:58.454: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-11 22:35:58.454: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-11 22:35:58.454: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-11 22:35:58.454: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x7ce7b763d8a0>, 'Ascending Ring PG Group')>
+[2026-10-11 22:35:58.454: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-10-11 22:35:58.454: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-10-11 22:35:58.454: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-11 22:35:58.454: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-11 22:35:58.454: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-11 22:35:58.454: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+INFO:Neuron:Generating 1 hlos for key: WanTransformer3DModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module WanTransformer3DModel
+INFO:Neuron:Finished loading module WanTransformer3DModel in 2.1661343574523926 seconds
+INFO:Neuron:generating HLO: WanTransformer3DModel, input example shape = torch.Size([1, 16, 21, 60, 104])
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[difflet] tracing attention kernel: attention_cte
+INFO:Neuron:Finished generating HLO for WanTransformer3DModel in 833.0052607059479 seconds, input example shape = torch.Size([1, 16, 21, 60, 104])
+INFO:Neuron:Generated all HLOs in 835.4137108325958 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'WanTransformer3DModel' is the priority model with bucket rank 0
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+.......................................................
+Compiler status PASS
+2026-10-11 23:07:58.000702:  190061  [INFO]: Compilation Successfully Completed for model.MODULE_f3b431b173cf29be75f7+8af14708.hlo_module.pb
+INFO:Neuron:Done compilation for the priority HLO in 1085.7781538963318 seconds
+INFO:Neuron:Done optimizing weight layout for all HLOs in 0.029932498931884766 seconds
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Finished Compilation for all HLOs in 0.0031092166900634766 seconds
+.........
+Compiler status PASS
+INFO:Neuron:Done preparing weight layout transformation
+INFO:Neuron:Finished building model in 2090.5426976680756 seconds
+INFO:Neuron:Reusing pre-sharded checkpoints from /home/ubuntu/.cache/difflet/_shared_weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__transformer__38ec498c__bfloat16__tp4-sp__f671d3914b393192.
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
