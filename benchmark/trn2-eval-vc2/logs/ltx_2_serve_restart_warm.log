@@ -1,0 +1,70 @@
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[difflet serve] resolving LTX-2 weights for Lightricks/LTX-2
+Fetching 46 files:   0%|          | 0/46 [00:00<?, ?it/s]Fetching 46 files: 100%|██████████| 46/46 [00:00<00:00, 4058.78it/s]
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[difflet serve] stage topology:
+  - pipeline: role=pipeline kind=opaque_pipeline placement=hybrid artifact=pipeline
+2026-10-12 05:25:25.076 INFO:     Started server process [256109]
+2026-10-12 05:25:25.076 INFO:     Waiting for application startup.
+2026-10-12 05:25:25.077 INFO:     serving startup begin model=Lightricks/LTX-2
+2026-10-12 05:25:26.147 INFO:     worker_process_start model=Lightricks/LTX-2 profile_identity=761950733623e1177bfae6a55dde7e968251e87d1ea024b9f57cb9e46107e1dd startup_timeout=7200.0
+2026-10-12 05:25:26.147 INFO:     worker_process_terminate model=Lightricks/LTX-2
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-10-12 05:25:26.235 INFO:     worker heartbeat transition state=starting request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 05:25:56.242 INFO:     worker heartbeat state_dwell_seconds=30.01 from_state=starting to_state=loading
+2026-10-12 05:25:56.242 INFO:     worker heartbeat transition state=loading request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[difflet serve] loading LTX-2 worker profile ServingProfile(model_id='Lightricks/LTX-2', model_type='ltx_2', height=480, width=704, num_frames=49, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir='/home/ubuntu/work/scratch/ltx2/serve_cache', revision=None, dtype='bfloat16', output_modality='video', output_mime_type='video/mp4', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, output_fps=24, host_vae=True, clip_placement=None, shapes=None)
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Loading pipeline components...:  29%|██▊       | 2/7 [00:01<00:02,  1.96it/s]
+Loading checkpoint shards:   0%|          | 0/11 [00:00<?, ?it/s][A
+Loading checkpoint shards:   9%|▉         | 1/11 [00:00<00:01,  7.12it/s][A
+Loading checkpoint shards:  18%|█▊        | 2/11 [00:00<00:02,  4.30it/s][A
+Loading checkpoint shards:  27%|██▋       | 3/11 [00:00<00:02,  3.79it/s][A
+Loading checkpoint shards:  36%|███▋      | 4/11 [00:01<00:01,  3.59it/s][A
+Loading checkpoint shards:  45%|████▌     | 5/11 [00:01<00:01,  3.46it/s][A
+Loading checkpoint shards:  55%|█████▍    | 6/11 [00:01<00:01,  3.37it/s][A
+Loading checkpoint shards:  64%|██████▎   | 7/11 [00:01<00:01,  3.32it/s][A
+Loading checkpoint shards:  73%|███████▎  | 8/11 [00:02<00:00,  3.31it/s][A
+Loading checkpoint shards:  82%|████████▏ | 9/11 [00:02<00:00,  3.29it/s][A
+Loading checkpoint shards:  91%|█████████ | 10/11 [00:02<00:00,  3.29it/s][A
+Loading checkpoint shards: 100%|██████████| 11/11 [00:03<00:00,  3.82it/s][ALoading checkpoint shards: 100%|██████████| 11/11 [00:03<00:00,  3.60it/s]
+Loading pipeline components...:  57%|█████▋    | 4/7 [00:04<00:03,  1.13s/it]Loading pipeline components...: 100%|██████████| 7/7 [00:04<00:00,  1.67it/s]
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.35s for 4 shard(s) (38011.3 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 18.38s (device init 18.38s, total load_weights 18.73s)
+INFO:Neuron:Warming up the model.
+INFO:Neuron:Warmup completed in 1.3119020462036133 seconds.
+2026-10-12 05:26:26.242 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Lightricks/LTX-2 profile=761950733623e1177bfae6a55dde7e968251e87d1ea024b9f57cb9e46107e1dd running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-10-12 05:26:51.643 INFO:     worker_process_ready model=Lightricks/LTX-2 replicas=1
+2026-10-12 05:26:51.643 INFO:     video.service_start ephemeral_jobs=true staging_removed=0 artifacts_removed=0
+2026-10-12 05:26:51.643 INFO:     serving startup complete model=Lightricks/LTX-2
+2026-10-12 05:26:51.644 INFO:     Application startup complete.
+2026-10-12 05:26:51.644 INFO:     Uvicorn running on http://0.0.0.0:8094 (Press CTRL+C to quit)
+2026-10-12 05:26:52.744 INFO:     127.0.0.1:52584 - "GET /ready HTTP/1.1" 200
+2026-10-12 05:26:52.849 INFO:     Shutting down
+2026-10-12 05:26:52.950 INFO:     Waiting for application shutdown.
+2026-10-12 05:26:52.950 INFO:     serving shutdown begin model=Lightricks/LTX-2
+2026-10-12 05:26:52.951 INFO:     video.service_stop ephemeral_jobs=true staging_removed=0 artifacts_removed=0
+2026-10-12 05:26:52.951 INFO:     worker_process_shutdown requested model=Lightricks/LTX-2 alive=True
+[difflet serve] LTX-2 worker loaded
+[difflet serve] running LTX-2 generation smoke
+[difflet serve] LTX-2 generation smoke passed
+2026-10-12 05:26:56.144 INFO:     worker_process_terminate model=Lightricks/LTX-2
+2026-10-12 05:26:56.145 INFO:     serving shutdown complete model=Lightricks/LTX-2
+2026-10-12 05:26:56.145 INFO:     Application shutdown complete.
+2026-10-12 05:26:56.145 INFO:     Finished server process [256109]

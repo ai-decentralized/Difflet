@@ -1,0 +1,36 @@
+[realloop] ltx_2_tp4tcod: building pipeline (--tp-degree 4 --cp-degree 1, compiled NEFF, skip_compile)...
+Fetching 46 files:   0%|          | 0/46 [00:00<?, ?it/s]Fetching 46 files: 100%|██████████| 46/46 [00:00<00:00, 4967.64it/s]
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Loading pipeline components...:  57%|█████▋    | 4/7 [00:01<00:00,  3.74it/s]
+Loading checkpoint shards:   0%|          | 0/11 [00:00<?, ?it/s][A
+Loading checkpoint shards:   9%|▉         | 1/11 [00:00<00:01,  6.62it/s][A
+Loading checkpoint shards:  18%|█▊        | 2/11 [00:00<00:02,  4.08it/s][A
+Loading checkpoint shards:  27%|██▋       | 3/11 [00:00<00:02,  3.57it/s][A
+Loading checkpoint shards:  36%|███▋      | 4/11 [00:01<00:02,  3.43it/s][A
+Loading checkpoint shards:  45%|████▌     | 5/11 [00:01<00:01,  3.34it/s][A
+Loading checkpoint shards:  55%|█████▍    | 6/11 [00:01<00:01,  3.31it/s][A
+Loading checkpoint shards:  64%|██████▎   | 7/11 [00:02<00:01,  3.30it/s][A
+Loading checkpoint shards:  73%|███████▎  | 8/11 [00:02<00:00,  3.28it/s][A
+Loading checkpoint shards:  82%|████████▏ | 9/11 [00:02<00:00,  3.28it/s][A
+Loading checkpoint shards:  91%|█████████ | 10/11 [00:02<00:00,  3.26it/s][A
+Loading checkpoint shards: 100%|██████████| 11/11 [00:03<00:00,  3.74it/s][ALoading checkpoint shards: 100%|██████████| 11/11 [00:03<00:00,  3.52it/s]
+Loading pipeline components...: 100%|██████████| 7/7 [00:04<00:00,  1.46it/s]Loading pipeline components...: 100%|██████████| 7/7 [00:04<00:00,  1.63it/s]
+[teacache] probe-free controller enabled for ltx_2/480x704x49: cadence=0 online_delta_alpha=0.6
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.36s for 4 shard(s) (38011.3 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 17.72s (device init 17.72s, total load_weights 18.08s)
+INFO:Neuron:Warming up the model.
+INFO:Neuron:Warmup completed in 1.4165492057800293 seconds.
+[realloop] ltx_2_tp4tcod: pipeline ready in 30.2s; timing NeuronLTX2Application.forward_dit per step
+[teacache] stats: {'full_steps': 32, 'skipped_steps': 8, 'probe_calls': 0, 'last_delta_estimate': 0.0634765625, 'cache_initialized': True, 'online_delta_alpha': 0.6, 'baseline_delta': 0.073242, 'skipped_step_indices': [5, 7, 9, 12, 15, 18, 21, 24], 'delta_trace': [[1, 0.073242], [2, 0.063965], [3, 0.047852], [4, 0.033447], [6, 0.030762], [8, 0.037598], [10, 0.056152], [11, 0.032471], [13, 0.044189], [14, 0.029785], [16, 0.053223], [17, 0.031006], [19, 0.052979], [20, 0.036865], [22, 0.053223], [23, 0.038574], [25, 0.057617], [26, 0.044189], [27, 0.046875], [28, 0.044922], [29, 0.047119], [30, 0.048096], [31, 0.055908], [32, 0.059814], [33, 0.063477], [34, 0.07666], [35, 0.086426], [36, 0.106445], [37, 0.146484], [38, 0.217773], [39, 0.40625]]}
+[realloop] ltx_2_tp4tcod: NOTE 32 DiT calls for 40 steps (0.8x/step — CFG/segmented); per-step = inter-call delta
+[realloop] ltx_2_tp4tcod: per-step 414.1 ms (median 413.9, p90 414.1, n=31); generate 38.7s, finite=True
+[realloop] patched benchmark/trn2-eval-vc2/ltx_2_tp4tcod.md

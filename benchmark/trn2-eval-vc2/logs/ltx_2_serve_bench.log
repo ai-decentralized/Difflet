@@ -1,0 +1,4 @@
+[serve_bench] warmup 1/1: HTTP 200 56.724s 889592 B 
+[serve_bench] c=1: 3/3 ok, wall 131.774s, 82.0/h, p50 43.258 p90 44.867 p99 45.229 s, codes {'200': 3}
+[serve_bench] c=1 neuron: {'samples': 132, 'neuroncore_util_mean_pct': 33.9, 'neuroncore_util_max_core_pct': 100.0, 'device_mem_used_gb_max': 42.31}
+[serve_bench] wrote benchmark/trn2-eval-vc2/serving/ltx_2_serve_bench.json

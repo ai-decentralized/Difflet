@@ -1,0 +1,102 @@
+{
+  "model_id": "Lightricks/LTX-2",
+  "model_type": "ltx_2",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 480,
+    "width": 704,
+    "num_frames": 49
+  },
+  "steps": 25,
+  "compile_seconds": 7.038787184006651,
+  "compile_breakdown": {
+    "wall_total_s": 7.039
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": null,
+  "step_latency": {
+    "n": 24,
+    "mean": 0.4141088170836156,
+    "median": 0.4139226020051865,
+    "std": 0.001079432763091109,
+    "p50": 0.4139320520043839,
+    "p90": 0.41420764999929816,
+    "min": 0.4134436190070119,
+    "max": 0.4191887570050312,
+    "samples": [
+      0.4191887570050312,
+      0.4137441569910152,
+      0.4141169799986528,
+      0.41397907699865755,
+      0.4137083330133464,
+      0.41368816899193916,
+      0.4136347140010912,
+      0.4139131520059891,
+      0.41437559299811255,
+      0.4140500420035096,
+      0.4139601859933464,
+      0.41371048300061375,
+      0.41364432299451437,
+      0.41381879401160404,
+      0.41383670098730363,
+      0.41394735500216484,
+      0.41371847099799197,
+      0.4141617630084511,
+      0.41420764999929816,
+      0.41393970599165186,
+      0.41407290800998453,
+      0.41381862499110866,
+      0.4139320520043839,
+      0.4134436190070119
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 2.415
+  },
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4, 25 steps, no caching (cadence 2's denoiser calls at 40 steps); tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF)",
+  "status": "compiled",
+  "notes": [
+    "per-step = 414.1 ms/DiT-step (median 413.9, p90 414.2, n=24) \u2014 measured the SAME way as H100: inter-step deltas of a real 25-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 25 DiT calls timed; warm generate 36s; output finite=True.",
+    "Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop"
+  ],
+  "timestamp": "2026-10-12 04:44 UTC",
+  "config_slug": "ltx_2_tp4s25",
+  "model_slug": "ltx_2",
+  "config": "tp4s25",
+  "device_slug": "trn2-eval-vc2",
+  "revision": "47da56e2ad66ce4125a9922b4a8826bf407f9d0a",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video",
+  "dit_calls_per_step": 1.0,
+  "dit_calls": 25,
+  "loop_wall_s": 10.355,
+  "loop_step_ms": 414.2
+}

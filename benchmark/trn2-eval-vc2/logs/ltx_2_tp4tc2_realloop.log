@@ -1,0 +1,36 @@
+[realloop] ltx_2_tp4tc2: building pipeline (--tp-degree 4 --cp-degree 1, compiled NEFF, skip_compile)...
+Fetching 46 files:   0%|          | 0/46 [00:00<?, ?it/s]Fetching 46 files: 100%|██████████| 46/46 [00:00<00:00, 3843.85it/s]
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Loading pipeline components...:  14%|█▍        | 1/7 [00:01<00:06,  1.04s/it]
+Loading checkpoint shards:   0%|          | 0/11 [00:00<?, ?it/s][A
+Loading checkpoint shards:   9%|▉         | 1/11 [00:00<00:01,  6.79it/s][A
+Loading checkpoint shards:  18%|█▊        | 2/11 [00:00<00:02,  4.27it/s][A
+Loading checkpoint shards:  27%|██▋       | 3/11 [00:00<00:02,  3.79it/s][A
+Loading checkpoint shards:  36%|███▋      | 4/11 [00:01<00:01,  3.58it/s][A
+Loading checkpoint shards:  45%|████▌     | 5/11 [00:01<00:01,  3.48it/s][A
+Loading checkpoint shards:  55%|█████▍    | 6/11 [00:01<00:01,  3.40it/s][A
+Loading checkpoint shards:  64%|██████▎   | 7/11 [00:01<00:01,  3.37it/s][A
+Loading checkpoint shards:  73%|███████▎  | 8/11 [00:02<00:00,  3.35it/s][A
+Loading checkpoint shards:  82%|████████▏ | 9/11 [00:02<00:00,  3.33it/s][A
+Loading checkpoint shards:  91%|█████████ | 10/11 [00:02<00:00,  3.33it/s][A
+Loading checkpoint shards: 100%|██████████| 11/11 [00:03<00:00,  3.86it/s][ALoading checkpoint shards: 100%|██████████| 11/11 [00:03<00:00,  3.63it/s]
+Loading pipeline components...:  57%|█████▋    | 4/7 [00:04<00:03,  1.04s/it]Loading pipeline components...: 100%|██████████| 7/7 [00:04<00:00,  1.67it/s]
+[teacache] probe-free controller enabled for ltx_2/480x704x49: cadence=2 online_delta_alpha=0.0
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.38s for 4 shard(s) (38011.3 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 18.41s (device init 18.41s, total load_weights 18.79s)
+INFO:Neuron:Warming up the model.
+INFO:Neuron:Warmup completed in 1.4541144371032715 seconds.
+[realloop] ltx_2_tp4tc2: pipeline ready in 31.0s; timing NeuronLTX2Application.forward_dit per step
+[teacache] stats: {'full_steps': 25, 'skipped_steps': 15, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True, 'online_delta_alpha': 0.0, 'baseline_delta': None, 'skipped_step_indices': [6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34], 'delta_trace': []}
+[realloop] ltx_2_tp4tc2: NOTE 25 DiT calls for 40 steps (0.62x/step — CFG/segmented); per-step = inter-call delta
+[realloop] ltx_2_tp4tc2: per-step 413.9 ms (median 413.7, p90 414.0, n=24); generate 36.2s, finite=True
+[realloop] patched benchmark/trn2-eval-vc2/ltx_2_tp4tc2.md

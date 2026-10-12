@@ -1,0 +1,56 @@
+{
+  "first_start_s": 2028.449968354,
+  "first_start_min": 33.8,
+  "restart_warm_s": 155.223983596,
+  "restart_cold_s": 811.178641548,
+  "serve_bench": "benchmark/trn2-eval-vc2/serving/ltx_2_serve_bench.json",
+  "levels": [
+    {
+      "concurrency": 1,
+      "requests": 3,
+      "successes": 3,
+      "wall_s": 131.774,
+      "throughput_per_s": 0.0228,
+      "throughput_per_hour": 82.0,
+      "latency_s": {
+        "p50": 43.258,
+        "p90": 44.867,
+        "p99": 45.229,
+        "mean": 43.925,
+        "min": 43.247,
+        "max": 45.269
+      },
+      "http_codes": {
+        "200": 3
+      },
+      "errors": [],
+      "records": [
+        {
+          "latency_s": 45.269,
+          "http": 200,
+          "bytes": 889450,
+          "error": ""
+        },
+        {
+          "latency_s": 43.247,
+          "http": 200,
+          "bytes": 889469,
+          "error": ""
+        },
+        {
+          "latency_s": 43.258,
+          "http": 200,
+          "bytes": 889269,
+          "error": ""
+        }
+      ],
+      "resources": null,
+      "neuron": {
+        "samples": 132,
+        "neuroncore_util_mean_pct": 33.9,
+        "neuroncore_util_max_core_pct": 100.0,
+        "device_mem_used_gb_max": 42.31
+      }
+    }
+  ]
+}

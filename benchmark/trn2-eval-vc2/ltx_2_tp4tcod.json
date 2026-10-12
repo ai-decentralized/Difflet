@@ -1,0 +1,263 @@
+{
+  "model_id": "Lightricks/LTX-2",
+  "model_type": "ltx_2",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 480,
+    "width": 704,
+    "num_frames": 49
+  },
+  "steps": 40,
+  "compile_seconds": 6.9866040740016615,
+  "compile_breakdown": {
+    "wall_total_s": 6.987
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": null,
+  "step_latency": {
+    "n": 31,
+    "mean": 0.4140507689035956,
+    "median": 0.4139386829920113,
+    "std": 0.0009120458514892479,
+    "p50": 0.4139386829920113,
+    "p90": 0.41412810000474565,
+    "min": 0.4135527530015679,
+    "max": 0.4189558450016193,
+    "samples": [
+      0.4189558450016193,
+      0.41396823299874086,
+      0.4136469930090243,
+      0.413602949003689,
+      0.41402404199470766,
+      0.41400773799978197,
+      0.41385225400154013,
+      0.4138409250008408,
+      0.4140064399980474,
+      0.4137838320020819,
+      0.41404052899451926,
+      0.41367085100500844,
+      0.4140642429993022,
+      0.41378895100206137,
+      0.4139504519989714,
+      0.41374177900434006,
+      0.4139386829920113,
+      0.4137507650011685,
+      0.4135527530015679,
+      0.41379903399501927,
+      0.41362966800807044,
+      0.4136443710012827,
+      0.41384889399341773,
+      0.41395934599859174,
+      0.41408360200875904,
+      0.4138838229991961,
+      0.41418253199663013,
+      0.413980333993095,
+      0.4141745829983847,
+      0.41412810000474565,
+      0.4140712920052465
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 2.415
+  },
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.6); tp=4, bf16, TP-sharded transformer + attention_cte self-attn, guidance=1.0 (batch-1 NEFF)",
+  "status": "compiled",
+  "notes": [
+    "per-step = 414.1 ms/DiT-step (median 413.9, p90 414.1, n=31) \u2014 measured the SAME way as H100: inter-step deltas of a real 40-step generate (wrapping NeuronLTX2Application.forward_dit, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 32 DiT calls timed; warm generate 39s; output finite=True.",
+    "Default registry shape 512x768x121 also compiles; 480x704x49 used here as the representative fast shape. CFG (guidance>1) needs a batch-2 NEFF.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop"
+  ],
+  "timestamp": "2026-10-12 04:43 UTC",
+  "config_slug": "ltx_2_tp4tcod",
+  "model_slug": "ltx_2",
+  "config": "tp4tcod",
+  "device_slug": "trn2-eval-vc2",
+  "revision": "47da56e2ad66ce4125a9922b4a8826bf407f9d0a",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 1.0,
+  "output_kind": "video",
+  "teacache": {
+    "mode": "online_delta",
+    "cadence": null,
+    "online_delta_alpha": 0.6,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "dit_calls": 32,
+    "skipped_steps_by_calls": 8,
+    "stats": {
+      "full_steps": 32,
+      "skipped_steps": 8,
+      "probe_calls": 0,
+      "last_delta_estimate": 0.0634765625,
+      "cache_initialized": true,
+      "online_delta_alpha": 0.6,
+      "baseline_delta": 0.073242,
+      "skipped_step_indices": [
+        5,
+        7,
+        9,
+        12,
+        15,
+        18,
+        21,
+        24
+      ],
+      "delta_trace": [
+        [
+          1,
+          0.073242
+        ],
+        [
+          2,
+          0.063965
+        ],
+        [
+          3,
+          0.047852
+        ],
+        [
+          4,
+          0.033447
+        ],
+        [
+          6,
+          0.030762
+        ],
+        [
+          8,
+          0.037598
+        ],
+        [
+          10,
+          0.056152
+        ],
+        [
+          11,
+          0.032471
+        ],
+        [
+          13,
+          0.044189
+        ],
+        [
+          14,
+          0.029785
+        ],
+        [
+          16,
+          0.053223
+        ],
+        [
+          17,
+          0.031006
+        ],
+        [
+          19,
+          0.052979
+        ],
+        [
+          20,
+          0.036865
+        ],
+        [
+          22,
+          0.053223
+        ],
+        [
+          23,
+          0.038574
+        ],
+        [
+          25,
+          0.057617
+        ],
+        [
+          26,
+          0.044189
+        ],
+        [
+          27,
+          0.046875
+        ],
+        [
+          28,
+          0.044922
+        ],
+        [
+          29,
+          0.047119
+        ],
+        [
+          30,
+          0.048096
+        ],
+        [
+          31,
+          0.055908
+        ],
+        [
+          32,
+          0.059814
+        ],
+        [
+          33,
+          0.063477
+        ],
+        [
+          34,
+          0.07666
+        ],
+        [
+          35,
+          0.086426
+        ],
+        [
+          36,
+          0.106445
+        ],
+        [
+          37,
+          0.146484
+        ],
+        [
+          38,
+          0.217773
+        ],
+        [
+          39,
+          0.40625
+        ]
+      ]
+    }
+  },
+  "dit_calls_per_step": 0.8,
+  "dit_calls": 32,
+  "loop_wall_s": 13.252,
+  "loop_step_ms": 331.3
+}
