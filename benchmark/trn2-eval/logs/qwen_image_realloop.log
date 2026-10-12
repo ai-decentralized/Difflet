@@ -1,0 +1,33 @@
+[realloop] qwen_image: building pipeline (--tp-degree 4 --cp-degree 1, compiled NEFF, skip_compile)...
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[realloop] pre-stage text: running as a subprocess (num_cores=4, virtual_core_size=2)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Neuron: Loading presharded checkpoints for ranks: 0...3
+Neuron: Finished weights loading in 11.991037575993687 seconds
+Neuron: Warming up the model.
+Neuron: Warmup completed in 0.21866750717163086 seconds.
+[text] encoder_hidden_states (1, 1024, 3584) + negative prompt (true CFG) -> /home/ubuntu/.cache/difflet/work/bench_qwen_image/text.pt
+[realloop] qwen_image: pipeline ready in 24.5s; timing NeuronQwenImageTransformerApplication.__call__ per step
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.42s for 4 shard(s) (38987.1 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 18.48s (device init 18.48s, total load_weights 18.90s)
+INFO:Neuron:Skipping model warmup
+[generate] packed latents (1, 4096, 64) -> /home/ubuntu/.cache/difflet/work/bench_qwen_image/latents.pt
+[realloop] qwen_image: NOTE 100 DiT calls for 50 steps (2x/step — CFG/segmented); per-step = inter-call delta
+[realloop] qwen_image: per-step 417.1 ms (median 417.1, p90 417.8, n=99); generate 61.9s, finite=True
+[realloop] patched benchmark/trn2-eval/qwen_image.md

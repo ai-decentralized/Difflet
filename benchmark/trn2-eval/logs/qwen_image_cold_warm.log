@@ -1,0 +1,4 @@
+[cold] qwen_image: dropping page cache...
+[cold] qwen_image: 541.0s (load 457.9)
+[warm] qwen_image: 99.7s (load 35.177)
+[done] qwen_image: cold 541s -> warm 100s
