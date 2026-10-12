@@ -34,9 +34,11 @@ from tests.unit.backends._neuron_wan_toy import (  # noqa: E402
     TINY_SHAPE,
     TINY_TEXT_SEQ_LEN,
     TINY_TEXT_SHAPE,
+    TINY_WAN_TRANSFORMER,
     tiny_wan_config,
     tiny_wan_pipeline_reference,
     tiny_wan_tp1_model,
+    write_tiny_wan22_model,
     write_tiny_wan_model,
 )
 from tests.unit.backends._neuron_workers import (  # noqa: E402
@@ -44,6 +46,7 @@ from tests.unit.backends._neuron_workers import (  # noqa: E402
     w1_host_text_encoder_worker,
     w1_wan_lifecycle_worker,
     w1_wan_one_graph_worker,
+    w1_wan22_pipeline_worker,
     w1_wan_pipeline_worker,
 )
 
@@ -353,7 +356,6 @@ def test_application_call_dispatch(tiny):
                        shapes=((32, 48, 5),))
     assert single.config.image_seq_len == 12
     for kwargs, match in (
-        ({"enable_transformer_2": True}, "transformer_2"),
         ({"enable_vae_decoder": True}, "host"),
         ({"teacache_cadence": 2}, "TeaCache"),
         ({"teacache_online_delta_alpha": 0.5}, "TeaCache"),
@@ -415,3 +417,58 @@ def test_end_to_end_two_steps_on_cpu_matches_tp1(tiny):
     torch.testing.assert_close(latents[0], reference, atol=1e-4, rtol=1e-4)
     assert not torch.equal(reference, torch.zeros_like(reference))
     assert Path(tiny.dir, "tokenizer", "tokenizer.json").is_file()
+
+
+# ---- Wan 2.2 A14B: the low-noise expert ---------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def tiny22(tmp_path_factory):
+    pytest.importorskip("safetensors.torch")
+    pytest.importorskip("accelerate")
+    pytest.importorskip("transformers")
+    root = tmp_path_factory.mktemp("tiny_wan22")
+    write_tiny_wan22_model(root)
+    return SimpleNamespace(dir=str(root))
+
+
+def test_low_noise_expert_needs_a_two_expert_checkpoint(tiny):
+    with pytest.raises(ValueError, match="transformer_2"):
+        _composed(tiny, enable_transformer_2=True)  # Wan 2.1 layout: no transformer_2/
+    with pytest.raises(ValueError, match="requires enable_transformer"):
+        _composed(tiny, enable_transformer=False, enable_transformer_2=True)
+
+
+def test_low_noise_expert_must_share_the_architecture(tmp_path):
+    pytest.importorskip("safetensors.torch")
+    write_tiny_wan22_model(tmp_path, transformer_2_config={**TINY_WAN_TRANSFORMER, "ffn_dim": 64})
+    with pytest.raises(ValueError, match="ffn_dim"):
+        _composed(SimpleNamespace(dir=str(tmp_path)), enable_transformer_2=True)
+
+
+def test_one_expert_is_unchanged_on_a_two_expert_checkpoint(tiny22):
+    app = _composed(tiny22)
+    assert app.transformer_2 is None and app.expert_calls == {}
+
+
+def test_two_experts_on_four_ranks_match_tp1(tiny22):
+    reference = tiny_wan_pipeline_reference(
+        tiny22.dir, num_inference_steps=4, guidance_scale=5.0, guidance_scale_2=3.0, dual=True
+    )
+    high_noise_only = tiny_wan_pipeline_reference(
+        tiny22.dir, num_inference_steps=4, guidance_scale=5.0, guidance_scale_2=3.0
+    )
+    results = run_ranks(w1_wan22_pipeline_worker, tiny22.dir, world_size=4, env=OFFLINE)
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]  # bit-identical on every rank
+        calls = result["expert_calls"]
+        # Four CFG steps = eight forwards, each step on one expert, both experts used.
+        assert calls["transformer"] > 0 and calls["transformer_2"] > 0
+        assert calls["transformer"] + calls["transformer_2"] == 8
+        assert calls["transformer"] % 2 == 0 and calls["transformer_2"] % 2 == 0
+        assert result["forwards_timed"] == 8  # one hook times both experts
+        assert {f"transformer_2 {phase}" for phase in LOAD_PHASES} <= set(result["phase_seconds"])
+        assert result["unwarmed_shapes"] == []
+    latents = torch.tensor(results[0]["latents"])
+    torch.testing.assert_close(latents, reference, atol=1e-4, rtol=1e-4)
+    assert not torch.allclose(reference, high_noise_only, atol=1e-3)  # the second expert mattered

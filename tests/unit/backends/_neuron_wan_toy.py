@@ -9,6 +9,8 @@ at toy size, and returns the TP1 fp32 reference output on the fixed inputs:
   module -> checkpoint rename is exercised;
 * ``scheduler/scheduler_config.json``: Wan2.1's UniPC config (flow_shift 3.0, flow sigmas);
 * ``model_index.json`` without ``boundary_ratio`` (Wan2.1: one expert for every step);
+  ``write_tiny_wan22_model`` adds ``transformer_2/`` (same architecture, its own weights) and a
+  ``boundary_ratio``, the Wan 2.2 A14B layout;
 * ``text_encoder/``: a seeded one-layer ``transformers.UMT5EncoderModel`` with ``d_model`` equal
   to the DiT's ``text_dim``, and ``tokenizer/``: a word-level fast tokenizer that appends
   ``</s>``, so the orchestrator's negative-prompt encode (``""`` at guidance > 1) really runs
@@ -50,6 +52,10 @@ TINY_LATENT_SHAPE = (1, 4, 2, 4, 6)
 TINY_TEXT_SHAPE = (1, TINY_TEXT_SEQ_LEN, TINY_WAN_TRANSFORMER["text_dim"])
 TINY_BLOCK_NAMES = [f"blocks.{i}" for i in range(TINY_WAN_TRANSFORMER["num_layers"])]
 TINY_WEIGHT_SEED = 0
+TINY_WEIGHT_SEED_2 = 4
+#: The tiny Wan 2.2's boundary. Four UniPC steps at flow shift 3.0 sit near t = 1000, 900, 750
+#: and 500 (sigma' = 3 sigma / (1 + 2 sigma)), so 800 gives each expert two steps.
+TINY_BOUNDARY_RATIO = 0.8
 TINY_INPUT_SEED = 1
 TINY_PIPELINE_SEED = 2
 TINY_ENCODER_SEED = 3
@@ -135,13 +141,13 @@ def tiny_wan_config(*, tp_degree: int = 1, dtype: torch.dtype = torch.float32):
     )
 
 
-def tiny_wan_tp1_model():
+def tiny_wan_tp1_model(seed: int = TINY_WEIGHT_SEED):
     """The seeded unsharded DiT; call inside ``tp1_mesh()``."""
     from difflet.models.wan.modeling_wan import WanTransformer3DModel, WanTransformerConfig
 
     config = WanTransformerConfig.from_diffusers_dict(TINY_WAN_TRANSFORMER)
     with torch.random.fork_rng(devices=[]):
-        torch.manual_seed(TINY_WEIGHT_SEED)
+        torch.manual_seed(seed)
         model = WanTransformer3DModel(config, dtype=torch.float32)
     return model.eval().requires_grad_(False)
 
@@ -187,13 +193,12 @@ def _write_text_encoder(root: Path) -> None:
     )
 
 
-def write_tiny_wan_model(root) -> torch.Tensor:
-    """Write the tiny model under ``root``; return the TP1 fp32 output on ``tiny_wan_inputs()``."""
+def _write_expert(root: Path, subdir: str, seed: int, config: dict) -> torch.Tensor:
+    """One seeded expert under ``root/subdir``; returns its TP1 output on ``tiny_wan_inputs()``."""
     from safetensors.torch import save_file
 
-    root = Path(root)
     with tp1_mesh():
-        model = tiny_wan_tp1_model()
+        model = tiny_wan_tp1_model(seed)
         state = {
             _diffusers_key(name): tensor.detach().contiguous().clone()
             for name, tensor in model.state_dict().items()
@@ -202,19 +207,46 @@ def write_tiny_wan_model(root) -> torch.Tensor:
             reference = model(*tiny_wan_inputs())
     if not any(".ffn.net.0.proj." in key for key in state):
         raise AssertionError("the tiny checkpoint must carry the diffusers FFN keys")
-    _write_json(root / "transformer" / "config.json", TINY_WAN_TRANSFORMER)
-    save_file(state, str(root / "transformer" / "diffusion_pytorch_model.safetensors"))
+    _write_json(root / subdir / "config.json", config)
+    save_file(state, str(root / subdir / "diffusion_pytorch_model.safetensors"))
+    return reference
+
+
+def write_tiny_wan_model(root) -> torch.Tensor:
+    """Write the tiny model under ``root``; return the TP1 fp32 output on ``tiny_wan_inputs()``."""
+    root = Path(root)
+    reference = _write_expert(root, "transformer", TINY_WEIGHT_SEED, TINY_WAN_TRANSFORMER)
     _write_json(root / "scheduler" / "scheduler_config.json", WAN21_SCHEDULER)
     _write_json(root / "model_index.json", {"_class_name": "WanPipeline"})
     _write_text_encoder(root)
     return reference
 
 
+def write_tiny_wan22_model(root, *, transformer_2_config: dict | None = None) -> None:
+    """The tiny model in the Wan 2.2 A14B layout: ``transformer_2/`` with its own weights (or the
+    given config, to test a mismatch) and ``boundary_ratio`` in ``model_index.json``."""
+    root = Path(root)
+    write_tiny_wan_model(root)
+    _write_expert(root, "transformer_2", TINY_WEIGHT_SEED_2, TINY_WAN_TRANSFORMER)
+    if transformer_2_config is not None:
+        _write_json(root / "transformer_2" / "config.json", transformer_2_config)
+    _write_json(
+        root / "model_index.json",
+        {"_class_name": "WanPipeline", "boundary_ratio": TINY_BOUNDARY_RATIO},
+    )
+
+
 def tiny_wan_pipeline_reference(
-    root, *, num_inference_steps: int, guidance_scale: float
+    root,
+    *,
+    num_inference_steps: int,
+    guidance_scale: float,
+    guidance_scale_2: float | None = None,
+    dual: bool = False,
 ) -> torch.Tensor:
-    """The same ``WanOrchestrator`` at TP1 on the host: the seeded unsharded DiT, the tiny UMT5
-    called directly (no trimming, no broadcast), ``tiny_wan_pipeline_inputs()``; final latents."""
+    """The same ``WanOrchestrator`` at TP1 on the host: the seeded unsharded DiT (and, with
+    ``dual``, the low-noise expert), the tiny UMT5 called directly (no trimming, no broadcast),
+    ``tiny_wan_pipeline_inputs()``; final latents."""
     from transformers import UMT5EncoderModel
 
     from difflet.models.wan.pipeline import WanOrchestrator
@@ -225,16 +257,20 @@ def tiny_wan_pipeline_reference(
     ).eval()
     prompt_embeds, latents = tiny_wan_pipeline_inputs()
     with tp1_mesh():
-        model = tiny_wan_tp1_model()
+        def expert(seed):
+            model = tiny_wan_tp1_model(seed)
 
-        def transformer(hidden_states, timestep, encoder_hidden_states):
-            return model(hidden_states, timestep, encoder_hidden_states)
+            def transformer(hidden_states, timestep, encoder_hidden_states):
+                return model(hidden_states, timestep, encoder_hidden_states)
 
-        transformer.dtype = torch.float32
+            transformer.dtype = torch.float32
+            return transformer
+
         pipeline = WanOrchestrator(
             model_path=str(root),
             text_encoder=lambda input_ids, attention_mask: encoder(input_ids, attention_mask),
-            transformer=transformer,
+            transformer=expert(TINY_WEIGHT_SEED),
+            transformer_2=expert(TINY_WEIGHT_SEED_2) if dual else None,
             dtype=torch.float32,
             max_text_length=TINY_TEXT_SEQ_LEN,
             **TINY_SHAPE,
@@ -245,6 +281,7 @@ def tiny_wan_pipeline_reference(
             channels=TINY_LATENT_SHAPE[1],
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
+            guidance_scale_2=guidance_scale_2,
             output_type="latent",
         )
     return out.latents

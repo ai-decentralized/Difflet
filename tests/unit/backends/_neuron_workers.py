@@ -810,3 +810,52 @@ def w1_wan_pipeline_worker(rank: int, world_size: int, model_dir: str) -> dict:
         "phase_seconds": sorted(app.phase_seconds),
         "unwarmed_shapes": list(app.unwarmed_shapes),
     }
+
+
+def w1_wan22_pipeline_worker(rank: int, world_size: int, model_dir: str) -> dict:
+    """The composed application with both Wan 2.2 experts: four steps at guidance 5.0 above the
+    boundary and 3.0 below it, on the fixed inputs."""
+    import hashlib
+
+    from difflet.models.wan.neuron_application import TorchNeuronWanApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import (
+        TINY_LATENT_SHAPE,
+        TINY_SHAPE,
+        TINY_TEXT_SEQ_LEN,
+        tiny_wan_pipeline_inputs,
+    )
+
+    app = TorchNeuronWanApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32,
+        shape=dict(TINY_SHAPE),
+        text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode="eager",
+        device="cpu",
+        encoder_threads=2,
+        enable_transformer_2=True,
+    )
+    app.load()
+    forward_seconds: list[float] = []
+    app.transformer_adapter.forward_hook = forward_seconds.append  # times both experts
+    prompt_embeds, latents = tiny_wan_pipeline_inputs()
+    out = app(
+        prompt_embeds=prompt_embeds,
+        latents=latents,
+        channels=TINY_LATENT_SHAPE[1],
+        num_inference_steps=4,
+        guidance_scale=5.0,
+        guidance_scale_2=3.0,
+        output_type="latent",
+    )
+    final = out.latents
+    return {
+        "latents": final.tolist(),
+        "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest(),
+        "expert_calls": app.expert_calls,
+        "forwards_timed": len(forward_seconds),
+        "phase_seconds": sorted(app.phase_seconds),
+        "unwarmed_shapes": [list(shape) for shape in app.unwarmed_shapes],
+    }
