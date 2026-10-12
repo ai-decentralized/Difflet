@@ -97,7 +97,7 @@ _UMT5_CONFIG = {
     "d_model": TINY_WAN_TRANSFORMER["text_dim"],
     "d_kv": 8,
     "d_ff": 32,
-    "num_heads": 3,
+    "num_heads": 4,  # divisible by TP4: the device umT5 shards heads and relative biases
     "num_layers": 1,
     "relative_attention_num_buckets": 8,
     "relative_attention_max_distance": 16,

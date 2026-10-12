@@ -859,3 +859,30 @@ def w1_wan22_pipeline_worker(rank: int, world_size: int, model_dir: str) -> dict
         "phase_seconds": sorted(app.phase_seconds),
         "unwarmed_shapes": [list(shape) for shape in app.unwarmed_shapes],
     }
+
+
+def w1_wan_device_text_encoder_worker(rank: int, world_size: int, model_dir: str,
+                                      prompts: list) -> dict:
+    """The composed application with umT5 on the (CPU) device, sharded at TP4: the embeddings
+    the orchestrator gets for each prompt."""
+    from difflet.models.wan.neuron_application import TorchNeuronWanApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import TINY_SHAPE, TINY_TEXT_SEQ_LEN
+
+    app = TorchNeuronWanApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32,
+        shape=dict(TINY_SHAPE),
+        text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode="eager",
+        device="cpu",
+        text_encoder_device="neuron",
+    )
+    app.load()
+    embeds = [app.pipeline.encode_prompt(prompt=prompt) for prompt in prompts]
+    return {
+        "embeds": [e.tolist() for e in embeds],
+        "phase_seconds": sorted(app.phase_seconds),
+        "unwarmed_shapes": [list(shape) for shape in app.unwarmed_shapes],
+    }

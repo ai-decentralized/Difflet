@@ -13,6 +13,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 import inspect  # noqa: E402
+import os  # noqa: E402
 import time  # noqa: E402
 from pathlib import Path  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
@@ -47,6 +48,7 @@ from tests.unit.backends._neuron_workers import (  # noqa: E402
     w1_wan_lifecycle_worker,
     w1_wan_one_graph_worker,
     w1_wan22_pipeline_worker,
+    w1_wan_device_text_encoder_worker,
     w1_wan_pipeline_worker,
 )
 
@@ -472,3 +474,50 @@ def test_two_experts_on_four_ranks_match_tp1(tiny22):
     latents = torch.tensor(results[0]["latents"])
     torch.testing.assert_close(latents, reference, atol=1e-4, rtol=1e-4)
     assert not torch.allclose(reference, high_noise_only, atol=1e-3)  # the second expert mattered
+
+
+# ---- umT5 on the device (text_encoder_device="neuron") ----------------------------------
+
+
+def test_text_encoder_device_must_be_host_or_neuron(tiny):
+    with pytest.raises(ValueError, match="text_encoder_device"):
+        _composed(tiny, text_encoder_device="gpu")
+
+
+def test_device_text_encoder_on_four_ranks_matches_hugging_face(tiny):
+    """Difflet's umT5, sharded at TP4, against the transformers UMT5EncoderModel the host path
+    runs: same tokens, same padding, fp32, on every rank."""
+    from transformers import AutoTokenizer, UMT5EncoderModel
+
+    prompts = ["a red fox runs", ""]  # the negative prompt is the empty one
+    tokenizer = AutoTokenizer.from_pretrained(os.path.join(tiny.dir, "tokenizer"))
+    encoder = UMT5EncoderModel.from_pretrained(
+        os.path.join(tiny.dir, "text_encoder"), dtype=torch.float32
+    ).eval()
+    references = []
+    for prompt in prompts:
+        tokens = tokenizer([prompt], padding="max_length", truncation=True,
+                           max_length=TINY_TEXT_SEQ_LEN, return_tensors="pt")
+        with torch.no_grad():
+            hidden = encoder(tokens["input_ids"], tokens["attention_mask"]).last_hidden_state
+        hidden = hidden * tokens["attention_mask"][..., None]  # padded rows are zeros
+        references.append(hidden)
+
+    results = run_ranks(w1_wan_device_text_encoder_worker, tiny.dir, prompts, world_size=4,
+                        env=OFFLINE)
+    for result in results:
+        assert result["embeds"] == results[0]["embeds"]  # identical on every rank
+        assert {f"text_encoder {phase}" for phase in LOAD_PHASES} <= set(result["phase_seconds"])
+        assert "text encoder load" not in result["phase_seconds"]  # no host encoder
+        assert result["unwarmed_shapes"] == []
+    for got, want in zip(results[0]["embeds"], references):
+        torch.testing.assert_close(torch.tensor(got), want, atol=1e-5, rtol=1e-5)
+
+
+def test_device_text_encoder_runs_in_fp32_and_hands_the_dit_its_dtype(tiny):
+    # umT5 is fragile in bf16: it runs in fp32 whatever the DiT's dtype, and only its
+    # embeddings are cast to that dtype (what the host path does).
+    app = _composed(tiny, dtype=torch.bfloat16, text_encoder_device="neuron")
+    assert isinstance(app.text_encoder, na._DeviceTextEncoder)
+    assert app.text_encoder.app.dtype is torch.float32
+    assert app.text_encoder.dtype is torch.bfloat16

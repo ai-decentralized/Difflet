@@ -15,7 +15,11 @@ launch builds one and holds:
   mesh set-up are idempotent) and, its blocks having the first expert's graph, compiles no new
   NEFF;
 * ``text_encoder``: ``_HostTextEncoder``, umT5 in fp32 on rank 0's host only, its embeddings
-  broadcast to every rank (one fp32 copy of the 22.7 GB encoder instead of four);
+  broadcast to every rank (one fp32 copy of the 22.7 GB encoder instead of four); or, with
+  ``text_encoder_device="neuron"``, ``_DeviceTextEncoder``: umT5 on the device in fp32, as on
+  the host, sharded across the TP group with the AoT path's layout
+  (``NeuronWanTextEncoderApplication``, about a quarter of the 22.7 GB fp32 encoder per rank),
+  every rank encoding, the embeddings cast to the DiT's dtype;
 * ``pipeline``: the backend-neutral ``WanOrchestrator`` (fp32 latents, UniPC on the host), which
   every rank runs on identical inputs; its DiT calls go through ``_OnDeviceTransformer``.
 
@@ -47,6 +51,7 @@ from difflet.backends.neuron.core.checkpoint import _resolve_device
 from difflet.backends.neuron.core.distributed import broadcast_tensor, rank0_call
 from difflet.backends.neuron.runtime import check_parallel_supported
 from difflet.backends.neuron.wan.config import NeuronWanConfig
+from difflet.backends.neuron.wan.text_encoder import NeuronWanTextEncoderApplication
 from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication
 
 logger = logging.getLogger(__name__)
@@ -64,6 +69,7 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "exec_mode": None,
     "device": "neuron",
     "encoder_threads": 12,
+    "text_encoder_device": "host",
     "shapes": None,
     "teacache_cadence": None,
     "teacache_online_delta_alpha": None,
@@ -134,6 +140,38 @@ class _HostTextEncoder:
         embeds = torch.zeros(input_ids.shape[0], self.seq_len, self.text_dim, dtype=self.dtype)
         embeds[:, :valid] = hidden.to(self.dtype)
         return embeds
+
+
+class _DeviceTextEncoder:
+    """umT5 on the device (``NeuronWanTextEncoderApplication``), called like ``_HostTextEncoder``.
+
+    Every rank encodes (the encoder's TP collectives need all of them) and every rank gets the
+    full embeddings, so nothing is broadcast. Each prompt row is encoded alone at the static
+    ``(1, seq_len)`` shape, padding included and masked; the rows past the valid prefix are then
+    zeroed, as the host path returns them (the orchestrator zeroes them as well).
+    """
+
+    def __init__(self, app: NeuronWanTextEncoderApplication, *, dtype, device):
+        self.app = app
+        self.dtype = dtype
+        self.device = torch.device(device)
+
+    def load(self, skip_warmup: bool = False) -> None:
+        self.app.load(skip_warmup=skip_warmup)
+
+    def __call__(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        rows = []
+        for ids, mask in zip(input_ids, attention_mask):
+            valid = max(int(mask.sum()), 1)
+            if mask[valid:].any():
+                raise ValueError("expected right-padded prompts (the tokenizer pads on the right)")
+            hidden = self.app(
+                ids[None].to(self.device, torch.int64), mask[None].to(self.device, torch.int32)
+            )
+            row = hidden.to("cpu", self.dtype)
+            row[:, valid:] = 0
+            rows.append(row)
+        return torch.cat(rows)
 
 
 class _OnDeviceTransformer:
@@ -209,6 +247,10 @@ def _reject_unsupported(options: dict[str, Any]) -> None:
             f"the neuron Wan application runs batch_size=1 only (phase 1), got "
             f"batch_size={options['batch_size']}"
         )
+    if options["text_encoder_device"] not in ("host", "neuron"):
+        raise ValueError(
+            f"text_encoder_device must be 'host' or 'neuron', got {options['text_encoder_device']!r}"
+        )
 
 
 class TorchNeuronWanApplication(torch.nn.Module):
@@ -276,8 +318,22 @@ class TorchNeuronWanApplication(torch.nn.Module):
                 exec_mode=options["exec_mode"],
                 device=self.device,
             )
-        self.text_encoder: _HostTextEncoder | None = None
-        if options["enable_text_encoder"]:
+        self.text_encoder: _HostTextEncoder | _DeviceTextEncoder | None = None
+        if options["enable_text_encoder"] and options["text_encoder_device"] == "neuron":
+            self.text_encoder = _DeviceTextEncoder(
+                NeuronWanTextEncoderApplication(
+                    model_path=os.path.join(self.model_path, "text_encoder"),
+                    text_seq_len=self.text_seq_len,
+                    batch_size=1,
+                    parallel=parallel,
+                    dtype=torch.float32,  # see NeuronWanTextEncoderApplication
+                    exec_mode=options["exec_mode"],
+                    device=self.device,
+                ),
+                dtype=self.dtype,
+                device=self.device,
+            )
+        elif options["enable_text_encoder"]:
             self.text_encoder = _HostTextEncoder(
                 self.model_path,
                 text_dim=int(self.config.text_dim),
@@ -343,7 +399,9 @@ class TorchNeuronWanApplication(torch.nn.Module):
                 self.transformer_2, self.transformer_2.config, self.dtype, self.device,
                 hook_from=self.transformer_adapter,
             )
-        if self.text_encoder is not None:
+        if isinstance(self.text_encoder, _DeviceTextEncoder):
+            self.text_encoder.load(skip_warmup=skip_warmup)
+        elif self.text_encoder is not None:
             start = time.perf_counter()
             self.text_encoder.load()
             self._text_encoder_load_seconds = time.perf_counter() - start
@@ -379,13 +437,17 @@ class TorchNeuronWanApplication(torch.nn.Module):
 
     @property
     def phase_seconds(self) -> dict[str, float]:
-        """The DiT's load phases, the low-noise expert's as ``"transformer_2 <phase>"``, plus
-        ``"text encoder load"`` (rank 0's umT5 read, which the other ranks wait out in that
-        phase's status sync)."""
+        """The DiT's load phases, the low-noise expert's as ``"transformer_2 <phase>"``, the
+        device umT5's as ``"text_encoder <phase>"``, or for the host umT5 ``"text encoder load"``
+        (rank 0's read, which the other ranks wait out in that phase's status sync)."""
         seconds = dict(self.transformer.phase_seconds) if self.transformer is not None else {}
         if self.transformer_2 is not None:
             seconds.update(
                 {f"transformer_2 {k}": v for k, v in self.transformer_2.phase_seconds.items()}
+            )
+        if isinstance(self.text_encoder, _DeviceTextEncoder):
+            seconds.update(
+                {f"text_encoder {k}": v for k, v in self.text_encoder.app.phase_seconds.items()}
             )
         if self._text_encoder_load_seconds is not None:
             seconds["text encoder load"] = self._text_encoder_load_seconds
@@ -396,6 +458,8 @@ class TorchNeuronWanApplication(torch.nn.Module):
         blocks = list(self.transformer.compiled_blocks) if self.transformer is not None else []
         if self.transformer_2 is not None:
             blocks += [f"transformer_2.{name}" for name in self.transformer_2.compiled_blocks]
+        if isinstance(self.text_encoder, _DeviceTextEncoder):
+            blocks += [f"text_encoder.{name}" for name in self.text_encoder.app.compiled_blocks]
         return blocks
 
     @property
@@ -403,6 +467,8 @@ class TorchNeuronWanApplication(torch.nn.Module):
         shapes = list(self.transformer.unwarmed_shapes) if self.transformer is not None else []
         if self.transformer_2 is not None:
             shapes += list(self.transformer_2.unwarmed_shapes)
+        if isinstance(self.text_encoder, _DeviceTextEncoder):
+            shapes += list(self.text_encoder.app.unwarmed_shapes)
         return shapes
 
     @property
