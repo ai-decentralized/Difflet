@@ -1,0 +1,304 @@
+{
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "model_type": "wan",
+  "backend": "trainium",
+  "device": "trn2.3xlarge / 4 NeuronCores / 96 GB/device",
+  "dtype": "bf16",
+  "parallel": {
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "cfg_parallel_enabled": false,
+    "sp_enabled": false
+  },
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 81
+  },
+  "steps": 50,
+  "compile_seconds": 13.298955266000121,
+  "compile_breakdown": {
+    "wall_total_s": 13.299
+  },
+  "load_seconds": null,
+  "e2e_cold_seconds": null,
+  "e2e_breakdown": null,
+  "e2e_warm": null,
+  "step_latency": {
+    "n": 63,
+    "mean": 6.843883899730235,
+    "median": 6.683629097999074,
+    "std": 0.4657559867546489,
+    "p50": 6.683629097999074,
+    "p90": 7.472722780003096,
+    "min": 6.373748459998751,
+    "max": 7.493771342997206,
+    "samples": [
+      6.376996927006985,
+      6.381110066999099,
+      6.373748459998751,
+      6.3881280869973125,
+      6.3740850030008005,
+      6.390280798994354,
+      6.374474476004252,
+      6.387394104996929,
+      6.375191724000615,
+      6.398016453007585,
+      6.374693962992751,
+      6.397546834006789,
+      6.375227515003644,
+      6.395730749994982,
+      6.375173916996573,
+      6.388116907008225,
+      6.37557571499201,
+      6.3983441940072225,
+      6.37548308398982,
+      6.397979739005677,
+      6.376713571997243,
+      6.3989327309973305,
+      6.37769708900305,
+      6.390742208008305,
+      6.379127542997594,
+      6.405643120990135,
+      6.400589559008949,
+      6.4694778970006155,
+      6.495578139991267,
+      6.570799534005346,
+      6.6043404200027,
+      6.683629097999074,
+      6.723591916001169,
+      6.80977796499792,
+      6.8539639719965635,
+      6.929872549997526,
+      6.987137963005807,
+      7.070896499993978,
+      7.1195079070021166,
+      7.196694234997267,
+      7.245754068004317,
+      7.323874766007066,
+      7.353164719999768,
+      7.415012719997321,
+      7.43378455999482,
+      7.47677973700047,
+      7.472972717005177,
+      7.493771342997206,
+      7.4733976970019285,
+      7.484215260992642,
+      7.472722780003096,
+      7.474127845998737,
+      7.446821113000624,
+      7.4360805390024325,
+      7.408919181005331,
+      7.412299276998965,
+      7.3786522559967125,
+      7.383154520997778,
+      7.354703008997603,
+      7.348775222009863,
+      7.329087854988757,
+      7.322813463004422,
+      7.305788393001421
+    ]
+  },
+  "step_basis": "",
+  "step_latency_alt": {},
+  "stage_seconds": {},
+  "e2e_warm_natural": null,
+  "step_latency_natural": null,
+  "throughput": {
+    "DiT steps/s": 0.146
+  },
+  "peak_device_mem_gb": null,
+  "output": null,
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "neuronx-distributed": "0.19.28492+435aae2b",
+    "diffusers": "0.38.0"
+  },
+  "config_label": "tp=4 + TeaCache online-delta adaptive (--teacache-online-delta 0.6); tp=4, bf16, single-transformer (no MoE), attention_cte, official 81 frames / 50 steps / CFG 5.0, chunked FP32 VAE on device",
+  "status": "compiled",
+  "notes": [
+    "per-step = 6843.9 ms/DiT-step (median 6683.6, p90 7472.7, n=63) \u2014 measured the SAME way as H100: inter-step deltas of a real 50-step generate (wrapping NeuronWanBackboneApplication.__call__, synced, step 0 excluded), NOT the old isolated synthetic-input timer. 64 DiT calls timed; warm generate 1928s; output finite=True.",
+    "compile-only run: e2e/per-step come from cold_warm_e2e / step_realloop"
+  ],
+  "timestamp": "2026-10-12 01:49 UTC",
+  "config_slug": "wan_2_1_tp4tcod",
+  "model_slug": "wan_2_1",
+  "config": "tp4tcod",
+  "device_slug": "trn2-eval-vc2",
+  "revision": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+  "seed": 42,
+  "prompt": "a cinematic shot of a red fox running through a snowy forest",
+  "guidance_scale": 5.0,
+  "output_kind": "video",
+  "teacache": {
+    "mode": "online_delta",
+    "cadence": null,
+    "online_delta_alpha": 0.6,
+    "warmup_steps": 5,
+    "cooldown_steps": 5,
+    "dit_calls": 64,
+    "skipped_steps_by_calls": -14,
+    "stats": {
+      "full_steps": 32,
+      "skipped_steps": 18,
+      "probe_calls": 0,
+      "last_delta_estimate": 0.0869140625,
+      "cache_initialized": true,
+      "online_delta_alpha": 0.6,
+      "baseline_delta": 0.542969,
+      "skipped_step_indices": [
+        5,
+        7,
+        9,
+        12,
+        14,
+        16,
+        19,
+        21,
+        23,
+        25,
+        27,
+        30,
+        32,
+        34,
+        36,
+        38,
+        40,
+        43
+      ],
+      "delta_trace": [
+        [
+          1,
+          0.542969
+        ],
+        [
+          2,
+          0.287109
+        ],
+        [
+          3,
+          0.166992
+        ],
+        [
+          4,
+          0.150391
+        ],
+        [
+          6,
+          0.234375
+        ],
+        [
+          8,
+          0.322266
+        ],
+        [
+          10,
+          0.412109
+        ],
+        [
+          11,
+          0.135742
+        ],
+        [
+          13,
+          0.211914
+        ],
+        [
+          15,
+          0.273438
+        ],
+        [
+          17,
+          0.337891
+        ],
+        [
+          18,
+          0.100098
+        ],
+        [
+          20,
+          0.161133
+        ],
+        [
+          22,
+          0.208984
+        ],
+        [
+          24,
+          0.255859
+        ],
+        [
+          26,
+          0.298828
+        ],
+        [
+          28,
+          0.339844
+        ],
+        [
+          29,
+          0.078125
+        ],
+        [
+          31,
+          0.126953
+        ],
+        [
+          33,
+          0.164062
+        ],
+        [
+          35,
+          0.206055
+        ],
+        [
+          37,
+          0.248047
+        ],
+        [
+          39,
+          0.294922
+        ],
+        [
+          41,
+          0.353516
+        ],
+        [
+          42,
+          0.086914
+        ],
+        [
+          44,
+          0.167969
+        ],
+        [
+          45,
+          0.097168
+        ],
+        [
+          46,
+          0.108887
+        ],
+        [
+          47,
+          0.133789
+        ],
+        [
+          48,
+          0.185547
+        ],
+        [
+          49,
+          0.308594
+        ]
+      ]
+    }
+  },
+  "dit_calls_per_step": 1.28,
+  "dit_calls": 64,
+  "loop_wall_s": 438.224,
+  "loop_step_ms": 8764.5
+}

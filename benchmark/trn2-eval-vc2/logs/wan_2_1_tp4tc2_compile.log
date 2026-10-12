@@ -1,0 +1,3 @@
+
+========== benchmarking wan_2_1 (Wan-AI/Wan2.1-T2V-14B-Diffusers) [tp4tc2] ==========
+[bench] wan_2_1_tp4tc2: status=compiled  compile=12.750019494007574  e2e_cold=None  -> benchmark/trn2-eval-vc2/wan_2_1_tp4tc2.md

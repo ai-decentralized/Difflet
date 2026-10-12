@@ -1,0 +1,26 @@
+[realloop] wan_2_1_tp4tcod: building pipeline (--tp-degree 4 --cp-degree 1, compiled NEFF, skip_compile)...
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/work/Difflet/.venv/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[realloop] wan_2_1_tp4tcod: pipeline ready in 4.9s; timing NeuronWanBackboneApplication.__call__ per step
+[teacache] probe-free controller enabled for wan/480x832x81: cadence=0 online_delta_alpha=0.6
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 2.78s for 4 shard(s) (10836.7 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 106.23s (device init 106.23s, total load_weights 109.01s)
+INFO:Neuron:Skipping model warmup
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 13.81s for 4 shard(s) (28602.8 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 1361.39s (device init 1361.39s, total load_weights 1375.22s)
+INFO:Neuron:Skipping model warmup
+[teacache] stats: {'full_steps': 32, 'skipped_steps': 18, 'probe_calls': 0, 'last_delta_estimate': 0.0869140625, 'cache_initialized': True, 'online_delta_alpha': 0.6, 'baseline_delta': 0.542969, 'skipped_step_indices': [5, 7, 9, 12, 14, 16, 19, 21, 23, 25, 27, 30, 32, 34, 36, 38, 40, 43], 'delta_trace': [[1, 0.542969], [2, 0.287109], [3, 0.166992], [4, 0.150391], [6, 0.234375], [8, 0.322266], [10, 0.412109], [11, 0.135742], [13, 0.211914], [15, 0.273438], [17, 0.337891], [18, 0.100098], [20, 0.161133], [22, 0.208984], [24, 0.255859], [26, 0.298828], [28, 0.339844], [29, 0.078125], [31, 0.126953], [33, 0.164062], [35, 0.206055], [37, 0.248047], [39, 0.294922], [41, 0.353516], [42, 0.086914], [44, 0.167969], [45, 0.097168], [46, 0.108887], [47, 0.133789], [48, 0.185547], [49, 0.308594]]}
+[wan] latents saved to /home/ubuntu/.cache/difflet/work/bench_wan_2_1_tp4tcod/latents.pt
+[realloop] wan_2_1_tp4tcod: NOTE 64 DiT calls for 50 steps (1.3x/step — CFG/segmented); per-step = inter-call delta
+[realloop] wan_2_1_tp4tcod: per-step 6843.9 ms (median 6683.6, p90 7472.7, n=63); generate 1928.0s, finite=True
+[realloop] patched benchmark/trn2-eval-vc2/wan_2_1_tp4tcod.md
