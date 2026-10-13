@@ -1,0 +1,98 @@
+total_time_ms 12.289 tensor_active_ms 9.685 vector_active_ms 7.262 scalar_active_ms 5.22 gpsimd_active_ms 1.571 cc_op_ms 2.101 dma_active_ms 9.197 hbm_rd_GB 1.846 hbm_wr_GB 0.837 spill_reload_GB 1.329 spill_save_GB 0.692 transpose_GFLOP 90.6 hw_GFLOP 927.9 model_GFLOP 837.1 mfu 0.432
+throttle {"throttle_activity_1_active_time_nc4_percent": 0.40962182534300196, "throttle_activity_0_active_time_nc4_percent": 0.5877375675784747, "throttle_avg_util_limit_nc4_percent": 0.7925484802499757, "throttle_activity_0_avg_util_limit_nc4_percent": 1, "throttle_activity_1_avg_util_limit_nc4_percent": 0.5, "throttle_activity_1_active_time_nc5_percent": 0.4097152669429186, "throttle_active_nc4_time_ns": 5033769, "throttle_active_nc5_time_ns": 5034924, "throttle_activity_0_active_time_nc5_percent": 0.5877367914428084, "throttle_activity_1_avg_util_limit_nc5_percent": 0.5, "throttle_avg_util_limit_nc5_percent": 0.7925944249142678, "throttle_activity_0_avg_util_limit_nc5_percent": 1}
+
+CC ops:
+  t=   0.011ms dur=   165.1us BARRIER        Invalid  in=0 dtype=BARRIER busbw=0
+  t=   0.938ms dur=   149.9us ALLREDUCE      Mesh     in=18720 dtype=fp32 busbw=187342820.17448395
+  t=   1.957ms dur=    15.3us ALLREDUCE      Mesh     in=18720 dtype=fp32 busbw=1835720412.7206795
+  t=   4.635ms dur=   116.7us ALLREDUCE      RDH      in=11980800 dtype=bf16 busbw=153939230751.4994
+  t=   4.839ms dur=   135.2us ALLREDUCE      RDH      in=11980800 dtype=bf16 busbw=132918658754.05
+  t=   5.231ms dur=   133.4us ALLREDUCE      RDH      in=11980800 dtype=bf16 busbw=134674095164.41823
+  t=   5.999ms dur=   101.3us ALLREDUCE      RDH      in=11980800 dtype=bf16 busbw=177471957821.969
+  t=   6.733ms dur=    11.2us ALLREDUCE      Mesh     in=18720 dtype=fp32 busbw=2505041753.372216
+  t=   6.914ms dur=     7.4us ALLREDUCE      Mesh     in=2048 dtype=fp32 busbw=415069789.6885153
+  t=   7.647ms dur=   110.4us ALLREDUCE      RDH      in=11980800 dtype=bf16 busbw=162758581165.25516
+  t=   7.847ms dur=   136.1us ALLREDUCE      RDH      in=11980800 dtype=bf16 busbw=132044291884.15994
+  t=   8.386ms dur=   150.2us ALLREDUCE      RDH      in=11980800 dtype=bf16 busbw=119625230989.58334
+  t=   8.776ms dur=   170.7us ALLREDUCE      RDH      in=11980800 dtype=bf16 busbw=105288309707.36282
+  t=  10.925ms dur=   163.6us ALLREDUCE      RDH      in=11980800 dtype=bf16 busbw=109836734898.18695
+  t=  11.500ms dur=   188.4us ALLREDUCE      RDH      in=11980800 dtype=bf16 busbw=95400598852.7976
+  t=  11.691ms dur=   181.1us ALLREDUCE      RDH      in=11980800 dtype=bf16 busbw=99226637157.51993
+  t=  11.945ms dur=   165.0us ALLREDUCE      RDH      in=11980800 dtype=bf16 busbw=108921193796.21216
+  cc (non-barrier) total ms 1.936
+
+opcode summary (top by active time):
+  tensor  MATMUL                                 92262     7.783ms
+  tensor  LDWEIGHTS                              90702     3.993ms
+  scalar  ACTIVATE                                7128     2.325ms
+  vector  TENSOR_TENSOR                           5906     1.661ms
+  gpsimd  EVENT_SEMAPHORE                         1791     1.574ms
+  sync    DMA_DIRECT2D                            2925     1.322ms
+  vector  TENSOR_SCALAR                           4755     1.299ms
+  vector  TENSOR_SCALAR_CACHE_REDUCE              4070     1.236ms
+  scalar  COPY                                    4025     0.949ms
+  gpsimd  DMA_DIRECT2D                            2286     0.866ms
+  vector  COPY                                    3383     0.770ms
+  sync    EVENT_SEMAPHORE                         5969     0.768ms
+  scalar  DMA_DIRECT2D                            1748     0.596ms
+  vector  EVENT_SEMAPHORE                         5415     0.587ms
+  scalar  EVENT_SEMAPHORE                         2988     0.443ms
+  vector  CAST                                    1135     0.428ms
+  tensor  EVENT_SEMAPHORE                         2577     0.404ms
+  vector  TENSOR_REDUCE                           1924     0.203ms
+  scalar  ACTIVATION_READ_ACCUMULATOR              740     0.103ms
+  sync    WRITE                                   4343     0.098ms
+  gpsimd  MEMSET                                  1440     0.073ms
+  vector  MEMSET                                   566     0.068ms
+  vector  DVE_READ_ACCUMULATOR                    1480     0.061ms
+  vector  RECIPROCAL                               740     0.056ms
+  gpsimd  TENSOR_SCALAR                             44     0.034ms
+
+layers (top by duration):
+    12.289ms PE=  7.654 ACT=  3.590 DVE=  5.209 start=  0.000 /sg01
+    12.289ms PE=  7.687 ACT=  3.596 DVE=  5.229 start=  0.000 /sg00
+    12.271ms PE=  0.970 ACT=  0.729 DVE=  0.561 start=  0.016 /sg01/Unknown
+    12.269ms PE=  0.979 ACT=  0.734 DVE=  0.561 start=  0.015 /sg00/Unknown
+     9.204ms PE=  0.936 ACT=  0.101 DVE=  0.344 start=  3.067 /sg01/WanAttention[attn2][0]
+     9.180ms PE=  0.001 ACT=  0.063 DVE=  0.166 start=  3.091 /sg01/WanAttention[attn2][0]/RowParallelLinear[0][0]_add.374
+     9.165ms PE=  0.000 ACT=  0.000 DVE=  0.130 start=  3.124 /sg01/_multiply.440
+     9.161ms PE=  0.089 ACT=  0.031 DVE=  0.133 start=  3.125 /sg01/_add.441
+     8.857ms PE=  0.935 ACT=  0.101 DVE=  0.344 start=  3.070 /sg00/WanAttention[attn2][0]
+     8.833ms PE=  0.001 ACT=  0.063 DVE=  0.167 start=  3.094 /sg00/WanAttention[attn2][0]/RowParallelLinear[0][0]_add.374
+     8.832ms PE=  2.234 ACT=  0.037 DVE=  0.334 start=  3.111 /sg00/WanFeedForward[ffn][0]
+     8.831ms PE=  0.002 ACT=  0.005 DVE=  0.004 start=  3.116 /sg00/WanAttention[attn2][0]_multiply.350
+     8.817ms PE=  0.101 ACT=  0.033 DVE=  0.144 start=  3.127 /sg00/_add.441
+     8.808ms PE=  0.000 ACT=  0.000 DVE=  0.137 start=  3.127 /sg00/_multiply.440
+     8.685ms PE=  0.002 ACT=  0.000 DVE=  0.001 start=  3.258 /sg00/WanFeedForward[ffn][0]/RowParallelLinear[net_out][0]_all-reduce.433
+     8.562ms PE=  2.232 ACT=  0.037 DVE=  0.334 start=  3.107 /sg01/WanFeedForward[ffn][0]
+     8.426ms PE=  1.113 ACT=  0.034 DVE=  0.130 start=  3.121 /sg01/WanFeedForward[ffn][0]/RowParallelLinear[net_out][0]_dot.9
+     8.416ms PE=  0.002 ACT=  0.000 DVE=  0.001 start=  3.253 /sg01/WanFeedForward[ffn][0]/RowParallelLinear[net_out][0]_all-reduce.433
+     8.380ms PE=  0.001 ACT=  0.001 DVE=  0.000 start=  3.167 /sg01/WanFeedForward[ffn][0]/RowParallelLinear[net_out][0]_add.435
+     8.266ms PE=  0.000 ACT=  0.002 DVE=  0.204 start=  3.108 /sg01/WanFeedForward[ffn][0]/ColumnParallelLinear[net_in][0]_add.416
+     8.265ms PE=  0.000 ACT=  0.092 DVE=  0.054 start=  3.110 /sg01/WanFeedForward[ffn][0]_add.424
+     8.265ms PE=  0.000 ACT=  0.091 DVE=  0.000 start=  3.109 /sg01/WanFeedForward[ffn][0]_multiply.420
+     8.265ms PE=  0.000 ACT=  0.093 DVE=  0.000 start=  3.110 /sg01/WanFeedForward[ffn][0]_tanh.423
+     8.265ms PE=  0.000 ACT=  0.092 DVE=  0.000 start=  3.108 /sg01/WanFeedForward[ffn][0]_multiply.14
+     8.264ms PE=  1.118 ACT=  0.000 DVE=  0.000 start=  3.107 /sg01/WanFeedForward[ffn][0]/ColumnParallelLinear[net_in][0]_dot.8
+     8.263ms PE=  0.000 ACT=  0.091 DVE=  0.000 start=  3.110 /sg01/WanFeedForward[ffn][0]_multiply.417
+     8.119ms PE=  0.000 ACT=  0.000 DVE=  0.094 start=  3.107 /sg01/_add.410
+     8.118ms PE=  0.005 ACT=  0.000 DVE=  0.117 start=  3.101 /sg01/FP32LayerNorm[norm3][0]_multiply.401
+     8.100ms PE=  0.000 ACT=  0.121 DVE=  0.000 start=  3.093 /sg01/FP32LayerNorm[norm3][0]_multiply.388
+     8.098ms PE=  0.000 ACT=  0.000 DVE=  0.000 start=  3.098 /sg01/FP32LayerNorm[norm3][0]_rsqrt.2
+     8.097ms PE=  0.000 ACT=  0.003 DVE=  0.000 start=  3.097 /sg01/FP32LayerNorm[norm3][0]_add.2
+     8.072ms PE=  0.004 ACT=  0.000 DVE=  0.112 start=  3.095 /sg01/FP32LayerNorm[norm3][0]_subtract.387
+     8.055ms PE=  0.000 ACT=  0.003 DVE=  0.000 start=  3.093 /sg01/FP32LayerNorm[norm3][0]_multiply.20
+     8.048ms PE=  0.126 ACT=  0.000 DVE=  0.000 start=  3.146 /sg01/FP32LayerNorm[norm3][0]_reduce.393
+     8.006ms PE=  0.000 ACT=  0.068 DVE=  0.115 start=  3.130 /sg01/_add.252
+     8.002ms PE=  0.089 ACT=  0.000 DVE=  0.000 start=  3.145 /sg01/FP32LayerNorm[norm3][0]_reduce.381
+     7.847ms PE=  1.113 ACT=  0.034 DVE=  0.130 start=  3.124 /sg00/WanFeedForward[ffn][0]/RowParallelLinear[net_out][0]_dot.9
+     7.799ms PE=  0.001 ACT=  0.001 DVE=  0.000 start=  3.170 /sg00/WanFeedForward[ffn][0]/RowParallelLinear[net_out][0]_add.435
+     7.686ms PE=  0.001 ACT=  0.002 DVE=  0.204 start=  3.111 /sg00/WanFeedForward[ffn][0]/ColumnParallelLinear[net_in][0]_add.416
+     7.686ms PE=  0.000 ACT=  0.092 DVE=  0.054 start=  3.113 /sg00/WanFeedForward[ffn][0]_add.424
+     7.685ms PE=  0.000 ACT=  0.093 DVE=  0.000 start=  3.113 /sg00/WanFeedForward[ffn][0]_tanh.423
+     7.685ms PE=  0.000 ACT=  0.091 DVE=  0.000 start=  3.112 /sg00/WanFeedForward[ffn][0]_multiply.420
+     7.684ms PE=  0.000 ACT=  0.092 DVE=  0.000 start=  3.111 /sg00/WanFeedForward[ffn][0]_multiply.14
+     7.684ms PE=  1.120 ACT=  0.000 DVE=  0.000 start=  3.111 /sg00/WanFeedForward[ffn][0]/ColumnParallelLinear[net_in][0]_dot.8
+     7.683ms PE=  0.000 ACT=  0.091 DVE=  0.000 start=  3.113 /sg00/WanFeedForward[ffn][0]_multiply.417
+
+layer duration by category (layers may overlap): {'attention_kernel': 401.793, 'other': 510.417, 'collective': 17.101, 'dot/matmul': 32.222}

@@ -1,0 +1,9 @@
+first-g5 rc=0 wall=399.421581323
+warm1-g5 rc=0 wall=172.620272282
+warm2-g5 rc=0 wall=136.792985535
+warm3-g5 rc=0 wall=127.674671971
+warm1-g1 rc=0 wall=98.007193097
+warm2-g1 rc=0 wall=99.805311372
+twostep-g5 rc=0 wall=65.086439355
+warm4-g5 rc=0 wall=123.259455001
+warm5-g5 rc=0 wall=129.675424499

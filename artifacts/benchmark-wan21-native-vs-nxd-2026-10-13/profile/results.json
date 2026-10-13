@@ -1,0 +1,44 @@
+{
+ "per_forward_ms": {
+  "neuron": {"dit_call_host": 528.5, "device_wall": 525.97, "device_busy": 524.5, "blocks_40": 519.49, "block_median": 12.982,
+             "eager_nonblock_execs": 34, "eager_nonblock_ms": 5.03, "device_gaps": 1.46, "h2d": 1.5, "d2h": 0.5,
+             "cc_per_forward_ms": 68.5, "cc_ops_per_block": 16, "inter_block_device_gap_us_median": 6.9,
+             "segments_synced_ms": {"rope": 0.65, "patch_embed": 0.53, "flatten": 0.56, "cond_embed": 2.92, "blocks": 522.77, "norm_proj": 2.84, "unpatchify": 0.56}},
+  "trainium": {"dit_call_host": 477.3, "neff_exec": 474.0, "neff_execs_per_forward": 1, "cc_per_forward_ms": 72.4, "cc_ops": 873}
+ },
+ "per_step_ms_g5": {"neuron": {"step": 1062.7, "sched": 4.8, "residual": 0.75}, "trainium": {"step": 957.3, "sched": 1.8, "residual": 0.74}},
+ "device_profile_neuron_explorer": {
+  "tn_block_neff_profiled_ms": 12.289, "nxd_dit_neff_profiled_ms": 437.65, "nxd_layer_period_profiled_ms": 10.783,
+  "nxd_nonlayer_profiled_ms": 6.33,
+  "tn_block_pe_busy_ms": [7.687, 7.653], "tn_block_pe_idle_gaps_gt50us_ms": [1.940, 2.216],
+  "nxd_layer_pe_busy_ms": [8.075, 8.072], "nxd_layer_pe_idle_gaps_gt50us_ms": [0.272, 0.215],
+  "tn_block_cc_ms": 1.936, "tn_block_spill_reload_GB": 1.329, "tn_block_spill_save_GB": 0.692,
+  "tn_block_throttle_activity1_active_frac": 0.41, "nxd_throttle_activity1_active_frac": 0.33,
+  "tn_self_attn_kernel_span_ms": 1.64, "tn_cross_attn_kernel_span_ms": 0.45,
+  "nxd_trace_note": "NxD instruction trace buffer overflowed (8388572 rows, covers 0-321.9 ms of 437.6 ms); per-layer numbers from fully covered layers 0..27; NEFF has no HLO names"
+ },
+ "experiments_block_neff_in_situ_ms": {
+  "baseline_O2": {"block": 12.982, "blocks_per_forward": 519.49, "probe_fwd": 526.4},
+  "O1": {"block": 13.492, "blocks_per_forward": 540.03, "probe_fwd": 549.3},
+  "ccop_compute_overlap": {"block": 12.713, "blocks_per_forward": 508.91, "probe_fwd": 522.2},
+  "weight_layout_optimization": {"block": 12.880, "probe_fwd": 636.8, "note": "plus many small per-call NEFF executions (320/960/640 per 8 forwards...) ~+110 ms/forward"},
+  "two_blocks_per_graph": {"pair": 26.169, "per_block": 13.08, "probe_fwd": 531.9}
+ },
+ "host_unipc_cpu_microbench_ms": {"torch2.14_1thread": 2.77, "torch2.14_6threads": 0.68, "torch2.9.1_1thread": 3.28, "torch2.9.1_6threads": 1.46},
+ "warm_e2e_s": {
+  "neuron": {"launch_imports_pg_init": 23.65, "of_which_init_process_group": 17.33, "dit_ckpt": 5.38, "dit_warmup_and_other": 13.98,
+             "umt5_load": 3.32, "orch_build_encode": 1.50, "denoise_50": 53.32, "stage_teardown": 2.53, "vae_spawn_imports": 4.33,
+             "vae_load": 8.73, "vae_decode": 7.35, "mp4_and_teardown": 2.04, "sum": 126.13, "measured": 127.2},
+  "trainium": {"launch_imports": 7.92, "dit_load": 7.89, "dit_warmup": 0.0, "umt5_load": 7.74, "encode": 0.62, "denoise_50": 48.38,
+               "stage_teardown": 1.69, "vae_spawn_imports": 5.35, "vae_load": 23.77, "vae_decode": 1.41, "mp4_and_teardown": 2.30,
+               "sum": 107.07, "measured": 107.2}
+ },
+ "cold_e2e_s": {
+  "neuron": {"other": 39.95, "dit_load_inferred": 436.7, "dit_warmup": 13.98, "umt5_load_inferred": 174.8, "orch_encode": 1.72,
+             "denoise": 53.33, "vae_load": 8.73, "vae_decode": 7.35, "measured": 737.6,
+             "weights_read_GB": 80.38, "load_extra_vs_warm_s": 602.8},
+  "trainium": {"other": 39.84, "dit_load": 231.06, "dit_warmup": 0.0, "umt5_load": 87.16, "encode": 0.73, "denoise": 48.11,
+               "vae_load": 24.15, "vae_decode": 1.41, "measured": 432.46, "weights_read_GB": 39.58,
+               "disk_MBps": [124.3, 123.8]}
+ }
+}

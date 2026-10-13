@@ -1,0 +1,10 @@
+execution {'execution_index': 0, 'neff_name': 'nxd_dit.neff', 'execution_start_ts': 0, 'execution_end_ts': 437646497, 'num_subgraphs': 2, 'row_count': 16858151}
+rows 8388572 first 83 last end 321864189
+pcores Counter({1: 4194287, 0: 4194285})
+engines [('Tensor', 6234400), ('Vector', 840833), ('Scalar', 566515), ('Sync', 482149), ('GpSimd', 264675)]
+n distinct layer strings 2
+  layer 'Unknown' 8383799
+  layer '' 4773
+  hlo  200000
+
+blocks found []

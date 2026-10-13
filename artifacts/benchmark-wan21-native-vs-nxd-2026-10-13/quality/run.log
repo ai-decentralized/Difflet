@@ -1,0 +1,33 @@
+[quality] neuron/cold-g5: (9, 480, 832, 3) decoded
+[quality] neuron/first-g5: (9, 480, 832, 3) decoded
+[quality] neuron/warm1-g1: (9, 480, 832, 3) decoded
+[quality] neuron/warm1-g5: (9, 480, 832, 3) decoded
+[quality] neuron/warm2-g1: (9, 480, 832, 3) decoded
+[quality] neuron/warm2-g5: (9, 480, 832, 3) decoded
+[quality] neuron/warm3-g5: (9, 480, 832, 3) decoded
+[quality] trainium/cold-g5: (9, 480, 832, 3) decoded
+[quality] trainium/warm1-g1: (9, 480, 832, 3) decoded
+[quality] trainium/warm1-g5: (9, 480, 832, 3) decoded
+[quality] trainium/warm2-g1: (9, 480, 832, 3) decoded
+[quality] trainium/warm2-g5: (9, 480, 832, 3) decoded
+[quality] trainium/warm3-g5: (9, 480, 832, 3) decoded
+[quality] neuron/warm1-g5: CPU VAE decode 97.6 s, out.mp4 vs CPU VAE PSNR 35.08 dB
+[quality] trainium/warm1-g5: CPU VAE decode 97.3 s, out.mp4 vs CPU VAE PSNR 12.40 dB
+[quality] neuron/warm1-g1: CPU VAE decode 102.4 s, out.mp4 vs CPU VAE PSNR 36.56 dB
+[quality] trainium/warm1-g1: CPU VAE decode 100.1 s, out.mp4 vs CPU VAE PSNR 13.66 dB
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+[quality] neuron/cold-g5: clip prompt=0.3077 margin=0.1507
+[quality] neuron/first-g5: clip prompt=0.3077 margin=0.1507
+[quality] neuron/warm1-g1: clip prompt=0.2299 margin=0.1012
+[quality] neuron/warm1-g5: clip prompt=0.3077 margin=0.1507
+[quality] neuron/warm2-g1: clip prompt=0.2299 margin=0.1012
+[quality] neuron/warm2-g5: clip prompt=0.3077 margin=0.1507
+[quality] neuron/warm3-g5: clip prompt=0.3077 margin=0.1507
+[quality] trainium/cold-g5: clip prompt=0.2278 margin=0.0698
+[quality] trainium/warm1-g1: clip prompt=0.1934 margin=0.0113
+[quality] trainium/warm1-g5: clip prompt=0.2278 margin=0.0698
+[quality] trainium/warm2-g1: clip prompt=0.1934 margin=0.0113
+[quality] trainium/warm2-g5: clip prompt=0.2278 margin=0.0698
+[quality] trainium/warm3-g5: clip prompt=0.2278 margin=0.0698
+[quality] wrote /home/ubuntu/wan21-bench/quality/metrics.json in 488.7 s
+rc=0

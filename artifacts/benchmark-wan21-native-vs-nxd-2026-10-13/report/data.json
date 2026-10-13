@@ -1,0 +1,4512 @@
+{
+ "rows": [
+  {
+   "backend": "neuron",
+   "name": "first-g5",
+   "guidance": 5.0,
+   "start_utc": "2026-10-13 02:50:07",
+   "wall_s": 456.94,
+   "new_cache_files": 1253,
+   "page_cache_gib": 93.9,
+   "drop": false,
+   "step_median_ms": 1062.5,
+   "step_p90_ms": 1065.1,
+   "denoise_s": 53.26,
+   "vcs": [
+    "2"
+   ],
+   "procs": 4
+  },
+  {
+   "backend": "neuron",
+   "name": "cold-g5",
+   "guidance": 5.0,
+   "start_utc": "2026-10-13 02:57:50",
+   "wall_s": 737.61,
+   "new_cache_files": 0,
+   "page_cache_gib": 0.6,
+   "drop": true,
+   "step_median_ms": 1064.1,
+   "step_p90_ms": 1067.2,
+   "denoise_s": 53.33,
+   "vcs": [
+    "2"
+   ],
+   "procs": 4
+  },
+  {
+   "backend": "neuron",
+   "name": "warm1-g5",
+   "guidance": 5.0,
+   "start_utc": "2026-10-13 03:10:07",
+   "wall_s": 127.24,
+   "new_cache_files": 0,
+   "page_cache_gib": 75.7,
+   "drop": false,
+   "step_median_ms": 1063.7,
+   "step_p90_ms": 1067.1,
+   "denoise_s": 53.32,
+   "vcs": [
+    "2"
+   ],
+   "procs": 4
+  },
+  {
+   "backend": "neuron",
+   "name": "warm2-g5",
+   "guidance": 5.0,
+   "start_utc": "2026-10-13 03:12:14",
+   "wall_s": 128.4,
+   "new_cache_files": 0,
+   "page_cache_gib": 75.7,
+   "drop": false,
+   "step_median_ms": 1064.4,
+   "step_p90_ms": 1066.7,
+   "denoise_s": 53.32,
+   "vcs": [
+    "2"
+   ],
+   "procs": 4
+  },
+  {
+   "backend": "neuron",
+   "name": "warm3-g5",
+   "guidance": 5.0,
+   "start_utc": "2026-10-13 03:14:23",
+   "wall_s": 125.93,
+   "new_cache_files": 0,
+   "page_cache_gib": 75.8,
+   "drop": false,
+   "step_median_ms": 1063.4,
+   "step_p90_ms": 1066.4,
+   "denoise_s": 53.29,
+   "vcs": [
+    "2"
+   ],
+   "procs": 4
+  },
+  {
+   "backend": "neuron",
+   "name": "warm1-g1",
+   "guidance": 1.0,
+   "start_utc": "2026-10-13 03:16:29",
+   "wall_s": 101.15,
+   "new_cache_files": 0,
+   "page_cache_gib": 75.8,
+   "drop": false,
+   "step_median_ms": 534.0,
+   "step_p90_ms": 536.4,
+   "denoise_s": 26.72,
+   "vcs": [
+    "2"
+   ],
+   "procs": 4
+  },
+  {
+   "backend": "neuron",
+   "name": "warm2-g1",
+   "guidance": 1.0,
+   "start_utc": "2026-10-13 03:18:10",
+   "wall_s": 94.85,
+   "new_cache_files": 0,
+   "page_cache_gib": 75.8,
+   "drop": false,
+   "step_median_ms": 535.3,
+   "step_p90_ms": 537.6,
+   "denoise_s": 26.76,
+   "vcs": [
+    "2"
+   ],
+   "procs": 4
+  },
+  {
+   "backend": "trainium",
+   "name": "compile",
+   "guidance": null,
+   "start_utc": "2026-10-13 03:21:45",
+   "wall_s": 6175.61,
+   "new_cache_files": 26,
+   "page_cache_gib": 76.9,
+   "drop": false,
+   "step_median_ms": null,
+   "step_p90_ms": null,
+   "denoise_s": null,
+   "vcs": [],
+   "procs": 0
+  },
+  {
+   "backend": "trainium",
+   "name": "cold-g5",
+   "guidance": 5.0,
+   "start_utc": "2026-10-13 05:04:47",
+   "wall_s": 432.46,
+   "new_cache_files": 0,
+   "page_cache_gib": 0.2,
+   "drop": true,
+   "step_median_ms": 958.0,
+   "step_p90_ms": 959.3,
+   "denoise_s": 48.11,
+   "vcs": [
+    "2"
+   ],
+   "procs": 1
+  },
+  {
+   "backend": "trainium",
+   "name": "warm1-g5",
+   "guidance": 5.0,
+   "start_utc": "2026-10-13 05:12:00",
+   "wall_s": 106.13,
+   "new_cache_files": 0,
+   "page_cache_gib": 40.2,
+   "drop": false,
+   "step_median_ms": 959.2,
+   "step_p90_ms": 979.2,
+   "denoise_s": 48.38,
+   "vcs": [
+    "2"
+   ],
+   "procs": 1
+  },
+  {
+   "backend": "trainium",
+   "name": "warm2-g5",
+   "guidance": 5.0,
+   "start_utc": "2026-10-13 05:13:46",
+   "wall_s": 109.12,
+   "new_cache_files": 0,
+   "page_cache_gib": 40.2,
+   "drop": false,
+   "step_median_ms": 958.3,
+   "step_p90_ms": 978.8,
+   "denoise_s": 48.36,
+   "vcs": [
+    "2"
+   ],
+   "procs": 1
+  },
+  {
+   "backend": "trainium",
+   "name": "warm3-g5",
+   "guidance": 5.0,
+   "start_utc": "2026-10-13 05:15:35",
+   "wall_s": 106.31,
+   "new_cache_files": 0,
+   "page_cache_gib": 40.2,
+   "drop": false,
+   "step_median_ms": 959.3,
+   "step_p90_ms": 979.7,
+   "denoise_s": 48.4,
+   "vcs": [
+    "2"
+   ],
+   "procs": 1
+  },
+  {
+   "backend": "trainium",
+   "name": "warm1-g1",
+   "guidance": 1.0,
+   "start_utc": "2026-10-13 05:17:21",
+   "wall_s": 82.21,
+   "new_cache_files": 0,
+   "page_cache_gib": 40.2,
+   "drop": false,
+   "step_median_ms": 479.5,
+   "step_p90_ms": 479.9,
+   "denoise_s": 24.08,
+   "vcs": [
+    "2"
+   ],
+   "procs": 1
+  },
+  {
+   "backend": "trainium",
+   "name": "warm2-g1",
+   "guidance": 1.0,
+   "start_utc": "2026-10-13 05:18:44",
+   "wall_s": 80.35,
+   "new_cache_files": 0,
+   "page_cache_gib": 40.2,
+   "drop": false,
+   "step_median_ms": 479.0,
+   "step_p90_ms": 480.1,
+   "denoise_s": 24.08,
+   "vcs": [
+    "2"
+   ],
+   "procs": 1
+  }
+ ],
+ "headline": {
+  "neuron": {
+   "step_g5_ms": 1063.8,
+   "step_g5_n": 147,
+   "step_g1_ms": 534.1,
+   "step_g1_n": 98,
+   "warm_g5_s": 127.2,
+   "warm_g5_runs": [
+    127.24,
+    128.4,
+    125.93
+   ],
+   "warm_g1_s": 98.0,
+   "warm_g1_runs": [
+    101.15,
+    94.85
+   ],
+   "cold_g5_s": 737.61,
+   "first_g5_s": 456.94,
+   "compile_s": 329.7
+  },
+  "trainium": {
+   "step_g5_ms": 959.0,
+   "step_g5_n": 147,
+   "step_g1_ms": 479.3,
+   "step_g1_n": 98,
+   "warm_g5_s": 107.2,
+   "warm_g5_runs": [
+    106.13,
+    109.12,
+    106.31
+   ],
+   "warm_g1_s": 81.3,
+   "warm_g1_runs": [
+    82.21,
+    80.35
+   ],
+   "cold_g5_s": 432.46,
+   "compile_s": 6175.61
+  }
+ },
+ "series": {
+  "neuron_g5": [
+   1061.69,
+   1067.78,
+   1062.88,
+   1066.82,
+   1062.49,
+   1063.61,
+   1062.94,
+   1063.45,
+   1063.51,
+   1062.7,
+   1064.95,
+   1066.57,
+   1063.1,
+   1062.39,
+   1065.58,
+   1065.97,
+   1063.09,
+   1063.15,
+   1066.57,
+   1065.7,
+   1065.68,
+   1064.07,
+   1062.59,
+   1066.33,
+   1068.99,
+   1062.47,
+   1066.88,
+   1063.08,
+   1063.69,
+   1063.5,
+   1064.23,
+   1067.01,
+   1063.79,
+   1063.5,
+   1063.89,
+   1063.56,
+   1067.08,
+   1063.18,
+   1064.57,
+   1063.14,
+   1067.14,
+   1063.08,
+   1065.43,
+   1063.17,
+   1063.01,
+   1067.8,
+   1068.46,
+   1065.92,
+   1061.9
+  ],
+  "neuron_g1": [
+   536.36,
+   534.43,
+   533.79,
+   536.6,
+   532.85,
+   534.39,
+   536.28,
+   537.08,
+   533.3,
+   534.53,
+   533.33,
+   534.03,
+   533.73,
+   533.79,
+   536.15,
+   535.28,
+   533.66,
+   533.43,
+   534.28,
+   535.91,
+   534.6,
+   533.91,
+   533.7,
+   533.5,
+   534.0,
+   533.19,
+   533.99,
+   533.84,
+   536.47,
+   532.91,
+   535.88,
+   533.92,
+   534.03,
+   533.72,
+   533.64,
+   533.86,
+   533.48,
+   533.95,
+   533.9,
+   533.64,
+   533.38,
+   533.98,
+   536.18,
+   537.09,
+   536.39,
+   536.08,
+   533.62,
+   536.7,
+   534.96
+  ],
+  "trainium_g5": [
+   957.16,
+   957.55,
+   958.35,
+   957.86,
+   958.56,
+   959.08,
+   957.52,
+   959.36,
+   959.04,
+   958.53,
+   957.63,
+   959.17,
+   958.73,
+   958.15,
+   959.51,
+   958.31,
+   958.59,
+   958.31,
+   957.09,
+   956.34,
+   957.46,
+   957.28,
+   957.26,
+   957.19,
+   959.02,
+   958.88,
+   958.96,
+   959.55,
+   959.71,
+   959.98,
+   962.06,
+   965.55,
+   969.0,
+   969.86,
+   970.86,
+   970.33,
+   968.68,
+   972.69,
+   974.25,
+   977.17,
+   975.79,
+   976.85,
+   980.04,
+   979.22,
+   981.02,
+   975.12,
+   979.89,
+   981.23,
+   982.76
+  ],
+  "trainium_g1": [
+   484.18,
+   480.42,
+   479.52,
+   478.83,
+   478.81,
+   479.08,
+   478.6,
+   478.71,
+   478.63,
+   479.17,
+   479.53,
+   479.83,
+   479.13,
+   479.39,
+   479.77,
+   479.47,
+   478.74,
+   479.58,
+   479.12,
+   479.15,
+   479.19,
+   478.89,
+   479.28,
+   479.36,
+   478.96,
+   479.34,
+   479.25,
+   479.45,
+   479.95,
+   479.81,
+   479.62,
+   479.67,
+   479.48,
+   479.95,
+   479.45,
+   479.95,
+   479.73,
+   479.45,
+   479.84,
+   479.71,
+   478.76,
+   479.26,
+   479.86,
+   479.67,
+   480.08,
+   479.48,
+   480.23,
+   479.91,
+   479.82
+  ]
+ },
+ "profile": {
+  "step_breakdown": [
+   {
+    "component": "DiT transformer blocks on device (40 per forward x 2 forwards at g=5)",
+    "neuron_ms": 1039,
+    "trainium_ms": 934.3,
+    "evidence": "Neuron: runtime inspect system trace rank0 (analysis/neuron_r0_sys.json, forwards.py) shows 40 block-NEFF executions of 12.98 ms (median) = 519.5 ms per forward. Trainium: one 474.0 ms DiT NEFF per forward (analysis/trainium_sys.json). Its layer share is inferred from the device profile: layer period 10.783 ms, non-layer 6.33 ms of 437.65 ms, scaled by 474.0/437.65, giving 467.1 ms/forward."
+   },
+   {
+    "component": "Non-block device work (patch embed, condition embedder, rope, head/unpatchify)",
+    "neuron_ms": 10.1,
+    "trainium_ms": 13.7,
+    "evidence": "Neuron: 34 small eager NEFF executions = 5.03 ms per forward (system trace). Probe2 synced segments: rope 0.65, patch 0.53, cond 2.92, norm/proj 2.84 ms. Trainium: inferred inside the single NEFF (profile non-layer 6.33 ms x 1.083 = 6.86 ms/forward)."
+   },
+   {
+    "component": "Host side per forward: H2D/D2H copies, sync, launch gaps",
+    "neuron_ms": 8,
+    "trainium_ms": 6.6,
+    "evidence": "Host DiT call (probe2 timing proxy) minus device busy. Neuron: 528.5-524.5 = 4.0 ms/forward (h2d 1.5, d2h 0.5, device gaps 1.46, inter-block gap median 6.9 us). Trainium: 477.3-474.0 = 3.3 ms/forward."
+   },
+   {
+    "component": "Host UniPC scheduler step",
+    "neuron_ms": 4.8,
+    "trainium_ms": 1.8,
+    "evidence": "probe2 sched_s medians (neuron ranks 4.7-5.1 ms, trainium 1.76-1.83 ms). CPU microbench sched_bench.py, torch 2.14: 2.77 ms at 1 thread vs 0.68 ms at 6 threads. torchrun sets OMP_NUM_THREADS=1."
+   },
+   {
+    "component": "CFG combine / loop residual",
+    "neuron_ms": 0.75,
+    "trainium_ms": 0.74,
+    "evidence": "probe2: step - 2*dit_call - sched. Totals: neuron 1062.7 vs probe 1062.7 (benchmark 1063.8); trainium 957.1 vs probe 957.3 (benchmark 959.0)."
+   }
+  ],
+  "step_root_causes": [
+   {
+    "claim": "Collectives are not overlapped with compute because torch.compile graphs are built without NxD's --tensorizer-options=--enable-ccop-compute-overlap. torch-neuronx CompileOnlyKernelExecution uses '--model-type transformer --auto-cast=none -O2' plus NEURON_CC_FLAGS only.",
+    "ms_per_step_explained": 21.2,
+    "evidence": "A/B test expB (NEURON_CC_FLAGS=--tensorizer-options=--enable-ccop-compute-overlap, separate cache): block NEFF 12.982 -> 12.713 ms in situ; 40 blocks 519.49 -> 508.91 ms per forward (-10.6 ms), so -21.2 ms/step at g=5. CC ops per block went from 16 to 22, matching NxD's ~21.8/layer.",
+    "confidence": "high (measured)"
+   },
+   {
+    "claim": "The rest of the per-block NEFF gap: inside the compiled block the tensor engine (PE) stalls on the all-reduce -> residual-add -> LayerNorm chains of the three row-parallel outputs and the qk-norm all-reduces. Compiler scheduling and spill also differ from the NxD graph. The block boundary itself is not the cause.",
+    "ms_per_step_explained": 83.5,
+    "evidence": "neuron-explorer device profiles. TN block: 12.29 ms with PE busy 7.67 ms and PE idle gaps over 50 us of 1.94-2.22 ms; the largest gaps line up with the 11.98 MB RDH all-reduces (gapwhat.py). NxD layer: period 10.78 ms with PE busy 8.07 ms and idle gaps of only 0.21-0.27 ms. TN spill reload/save is 1.33/0.69 GB per block. Activity throttle at the 50% limit is active 41% of the time vs 33% for NxD. Things ruled out by measurement: inter-block gap 6.9 us; two blocks per graph gives 13.08 ms/block (no gain); -O1 gives 13.49 ms/block (worse); weight layout optimization (WLO) gives 12.88 ms/block but +110 ms/forward of per-call relayout NEFFs. The remaining gap after the ccop fix is computed as 104.7-21.2 ms/step. Splitting it across stalls, spill, throttle and compiler version (2.28 vs 2.26) is inference.",
+    "confidence": "medium (attributed from profiles; not fixed by any flag tested)"
+   },
+   {
+    "claim": "The host UniPC step runs single-threaded on the neuron ranks (torchrun OMP_NUM_THREADS=1, 4 ranks each running the same step).",
+    "ms_per_step_explained": 3,
+    "evidence": "probe2 sched 4.8 vs 1.8 ms. Microbench torch 2.14: 2.77 ms at 1 thread vs 0.68 ms at 6 threads.",
+    "confidence": "medium-high"
+   },
+   {
+    "claim": "Per-forward host overhead is slightly higher: 3 separate H2D copies, an explicit sync, then .cpu(), versus NxD's in-graph IO.",
+    "ms_per_step_explained": 1.4,
+    "evidence": "Host call minus device busy: neuron 4.0 vs trainium 3.3 ms/forward.",
+    "confidence": "medium"
+   },
+   {
+    "claim": "Offset: TorchNeuron's eager non-block ops (5.0 ms/forward) are cheaper than the NxD graph's non-layer part (~6.9 ms/forward, inferred).",
+    "ms_per_step_explained": -3.6,
+    "evidence": "System trace eager NEFFs 5.03 ms/forward. NxD non-layer is inferred from profile (437.65 - 40*10.783) x 474.0/437.65.",
+    "confidence": "low-medium (NxD side inferred)"
+   }
+  ],
+  "cold_e2e_breakdown": [
+   {
+    "component": "DiT weight load (neuron: fp32 safetensors 57.15 GB read; trainium: presharded bf16 28.6 GB)",
+    "neuron_s": 436.7,
+    "trainium_s": 231.06,
+    "evidence": "Neuron cold load+warmup was 644.0 s vs 41.2 s warm (+602.8 s) for 79.87 GB of fp32 DiT+umT5. The DiT/umT5 split is inferred in proportion to bytes; warm DiT ckpt is 5.38 s. Trainium cold log: weight init 231.06 s for 28602.8 MB, i.e. 124 MB/s, the EBS rate."
+   },
+   {
+    "component": "umT5 load (neuron: fp32 22.72 GB; trainium: bf16 10.84 GB)",
+    "neuron_s": 174.8,
+    "trainium_s": 87.16,
+    "evidence": "Neuron: inferred bytes-proportional share of the +602.8 s, plus 3.32 s warm. Trainium cold log: 87.16 s for 10836.7 MB (124 MB/s)."
+   },
+   {
+    "component": "DiT warm-up forward (Dynamo trace, StableHLO lowering, NEFF cache lookup/load, 1 forward)",
+    "neuron_s": 13.98,
+    "trainium_s": 0,
+    "evidence": "Warm-run phase_seconds 'warmup forward' 13.36 s + other phases 0.62 s (probe2 events). NxD logs 'Skipping model warmup'. NEFF loads in the trace total 2.6 s."
+   },
+   {
+    "component": "Prompt encode + orchestrator build",
+    "neuron_s": 1.72,
+    "trainium_s": 0.73,
+    "evidence": "Cold probe encode_s (neuron 0.97+0.09, trainium 0.69+0.04) plus neuron orchestrator 0.66 s."
+   },
+   {
+    "component": "Denoise 50 steps g=5",
+    "neuron_s": 53.33,
+    "trainium_s": 48.11,
+    "evidence": "cold-g5 probe denoise_s."
+   },
+   {
+    "component": "VAE load",
+    "neuron_s": 8.73,
+    "trainium_s": 24.15,
+    "evidence": "Neuron VAE phase_seconds 'load checkpoint' 8.70 s (warm value). Trainium cold log weight init 24.15 s."
+   },
+   {
+    "component": "VAE decode",
+    "neuron_s": 7.35,
+    "trainium_s": 1.41,
+    "evidence": "probe2 events: neuron fp32 eager decode 7.35 s; trainium compiled bf16 decode 1.41 s."
+   },
+   {
+    "component": "Launch, imports, process-group/NRT init, stage teardowns, VAE stage spawn, mp4 (cold)",
+    "neuron_s": 39.95,
+    "trainium_s": 39.84,
+    "evidence": "Remainder after the rows above. Neuron: warm 32.55 s (incl. init_process_group 17.33 s) + 7.4 s cold extra outside the stage. Trainium: warm 18.67 s + 22.6 s cold reads of imports/NEFFs. Totals: neuron 736.6 vs measured 737.6; trainium 432.46 measured."
+   }
+  ],
+  "warm_e2e_breakdown": [
+   {
+    "component": "Launch + imports + runtime init (neuron: torchrun, torch/torch_neuronx import, dist.init_process_group('neuron') 17.33 s)",
+    "neuron_s": 23.65,
+    "trainium_s": 7.92,
+    "evidence": "probe2 event timelines (runs/neuron-ev2-g5, runs/trainium-ev2-g5). The init_process_group split comes from runs/neuron-expA-O1 events (7.48->24.81 s)."
+   },
+   {
+    "component": "DiT weight load",
+    "neuron_s": 5.38,
+    "trainium_s": 7.89,
+    "evidence": "Neuron phase 'load checkpoint' (fp32 page cache, cast to bf16 shards). Trainium warm1 log total load_weights 7.89 s."
+   },
+   {
+    "component": "DiT warm-up (Dynamo trace + NEFF lookup/load + 1 forward)",
+    "neuron_s": 13.98,
+    "trainium_s": 0,
+    "evidence": "phase_seconds warmup forward 13.36 + other 0.62. NxD skips warm-up."
+   },
+   {
+    "component": "umT5 load (incl. NRT init on trainium)",
+    "neuron_s": 3.32,
+    "trainium_s": 7.74,
+    "evidence": "Neuron TextEncoder phase_seconds (ckpt 2.43, warmup 0.78). Trainium warm1 log 7.74 s."
+   },
+   {
+    "component": "Orchestrator build + prompt encode",
+    "neuron_s": 1.5,
+    "trainium_s": 0.62,
+    "evidence": "probe2 events: 0.66 + 0.84 vs 0.58 + 0.04."
+   },
+   {
+    "component": "Denoise 50 steps g=5",
+    "neuron_s": 53.32,
+    "trainium_s": 48.38,
+    "evidence": "Benchmark warm1-g5 probe denoise_s."
+   },
+   {
+    "component": "Transformer stage teardown",
+    "neuron_s": 2.53,
+    "trainium_s": 1.69,
+    "evidence": "probe2 events, stage end to run_stage end."
+   },
+   {
+    "component": "VAE stage spawn + imports",
+    "neuron_s": 4.33,
+    "trainium_s": 5.35,
+    "evidence": "probe2 events."
+   },
+   {
+    "component": "VAE load",
+    "neuron_s": 8.73,
+    "trainium_s": 23.77,
+    "evidence": "Neuron phase 'load checkpoint' 8.70. Trainium weight init 23.77-23.79 s."
+   },
+   {
+    "component": "VAE decode",
+    "neuron_s": 7.35,
+    "trainium_s": 1.41,
+    "evidence": "probe2 events: neuron fp32 eager; trainium compiled."
+   },
+   {
+    "component": "mp4 write + VAE teardown",
+    "neuron_s": 2.04,
+    "trainium_s": 2.3,
+    "evidence": "probe2 events (write 0.23 vs 0.50, exit 1.81 vs 1.80). Sums: 126.13 vs measured 127.2; 107.07 vs 107.2."
+   }
+  ],
+  "fix_candidates": [
+   {
+    "title": "Compile the torch.compile block graphs with --tensorizer-options=--enable-ccop-compute-overlap, NxD's flag. Scope it to compile graphs; today it can only go through NEURON_CC_FLAGS, which also changes every eager-op cache key.",
+    "where": "torch_neuronx/csrc/core/KernelExecution.cpp CompileOnlyKernelExecution::GetCompileAdditionalArgs (or a per-graph compiler-flags option); Difflet difflet/backends/neuron/compile.py NEURON_COMPILE_OPTIONS or launcher env",
+    "expected_gain": "Measured -10.6 ms/forward (block 12.98->12.71 ms): -21 ms/step at g=5 (-2.0%), -1.06 s per 50-step g=5 run",
+    "risk": "low: NxD default, same numerics; one-time recompile of the block NEFFs (~3 min)",
+    "is_torch_native_bug": true
+   },
+   {
+    "title": "Remove the PE stalls on all-reduce -> residual -> LayerNorm inside the block NEFF. Options: sequence-parallel reduce-scatter/all-gather instead of all-reduce, or chunked matmul+collective overlap. Compare neuronx-cc 2.28 (TorchNeuron) with 2.26 (NxD) on the same block, and look at spill (1.33 GB reload per block).",
+    "where": "difflet/models/wan/modeling_wan.py block structure on neuron (sp path exists but is rejected by neuron check_parallel_supported); torch-neuronx StableHLO lowering / neuronx-cc scheduling",
+    "expected_gain": "Up to ~1.0 ms/block in situ (~40 ms/forward, ~80 ms/step at g=5) if layer time reaches NxD's 11.68 ms. Unproven.",
+    "risk": "medium-high: needs compiler investigation or model restructuring; SP path unvalidated on neuron",
+    "is_torch_native_bug": true
+   },
+   {
+    "title": "Run the host UniPC step with more than 1 intra-op thread. torchrun sets OMP_NUM_THREADS=1, so call torch.set_num_threads around scheduler.step, or run the scheduler on device.",
+    "where": "difflet/models/wan/neuron_application.py / difflet/cli/runner.py torchrun env",
+    "expected_gain": "~2-3 ms/step (microbench 2.77 -> 0.68 ms): ~0.1-0.15 s per 50 steps",
+    "risk": "low (4 ranks x threads must fit 12 vCPUs)",
+    "is_torch_native_bug": true
+   },
+   {
+    "title": "Cold start: cache per-rank bf16 presharded DiT weights after the first load instead of re-reading 57.15 GB of fp32 safetensors. Optionally a bf16 umT5 (numerics change). Or put HF/compile caches on the unused 437 GB local NVMe (nvme1n1); EBS reads at ~124 MB/s.",
+    "where": "difflet/backends/neuron/core/checkpoint.py load_sharded_checkpoint; deployment storage",
+    "expected_gain": "DiT bf16 shards: -28.6 GB read ~ -220 s cold. bf16 umT5: ~-90 s more. Local NVMe: most of the ~600 s cold weight-read time.",
+    "risk": "low-medium: extra cache disk use (28.6 GB); umT5 bf16 changes numerics",
+    "is_torch_native_bug": false
+   },
+   {
+    "title": "Warm start: cut the 17.3 s dist.init_process_group('neuron') (NRT init + collectives bootstrap) and the 13.4 s DiT warm-up (Dynamo re-trace + StableHLO lowering + NEFF cache lookup each launch). Use a persistent compiled-artifact cache (AOT/precompile) or keep ranks resident across requests.",
+    "where": "torch_neuronx process group backend; torch_neuronx neuron_dynamo_backend cache_artifact; difflet/backends/neuron/runtime.py",
+    "expected_gain": "Up to ~10-20 s of the 20 s warm e2e gap (estimate)",
+    "risk": "medium",
+    "is_torch_native_bug": true
+   },
+   {
+    "title": "VAE stage: compile the fp32 decoder (per-block torch.compile) instead of eager, and avoid a second torchrun spawn and NRT init",
+    "where": "difflet/backends/neuron/wan/vae.py; difflet/cli/orchestrators/wan.py _stage_vae_neuron",
+    "expected_gain": "Decode 7.35 s -> ~1.5-2 s (NxD 1.41 s bf16), plus a few s of spawn/init: ~5-10 s warm e2e",
+    "risk": "medium (fp32 VAE memory ~12 GiB/core; compile time)",
+    "is_torch_native_bug": false
+   },
+   {
+    "title": "Do NOT switch the block compile to -O1, enable weight_layout_optimization, or group 2 blocks per graph (all measured worse). The WLO path runs per-call relayout NEFFs, which looks like a torch-neuronx bug.",
+    "where": "torch_neuronx neuron_dynamo_backend WLO executor (weight transforms per call)",
+    "expected_gain": "Avoids regressions: -O1 +20.5 ms/forward, WLO +110 ms/forward, 2-block graphs +4 ms/forward. A fixed WLO (cached relayout) would gain only ~0.1 ms/block (~4 ms/forward).",
+    "risk": "n/a (negative results)",
+    "is_torch_native_bug": true
+   }
+  ],
+  "artifacts": [
+   "/home/ubuntu/wan21-bench/profile/results.json",
+   "/home/ubuntu/wan21-bench/profile/probe2/sitecustomize.py",
+   "/home/ubuntu/wan21-bench/profile/run.sh",
+   "/home/ubuntu/wan21-bench/profile/expA.sh",
+   "/home/ubuntu/wan21-bench/profile/expB.sh",
+   "/home/ubuntu/wan21-bench/profile/expC.sh",
+   "/home/ubuntu/wan21-bench/profile/expD.sh",
+   "/home/ubuntu/wan21-bench/profile/summarize.py",
+   "/home/ubuntu/wan21-bench/profile/timeline.py",
+   "/home/ubuntu/wan21-bench/profile/sysexec.py",
+   "/home/ubuntu/wan21-bench/profile/forwards.py",
+   "/home/ubuntu/wan21-bench/profile/layers.py",
+   "/home/ubuntu/wan21-bench/profile/instr.py",
+   "/home/ubuntu/wan21-bench/profile/peidle.py",
+   "/home/ubuntu/wan21-bench/profile/gapwhat.py",
+   "/home/ubuntu/wan21-bench/profile/nxd_layers.py",
+   "/home/ubuntu/wan21-bench/profile/nxd_attn.py",
+   "/home/ubuntu/wan21-bench/profile/extract_neff.py",
+   "/home/ubuntu/wan21-bench/profile/neffid.py",
+   "/home/ubuntu/wan21-bench/profile/sched_bench.py",
+   "/home/ubuntu/wan21-bench/profile/runs/ (neuron-p2-g5, neuron-seg-g5, neuron-ev2-g5, neuron-insp-g5, neuron-expA-O1, neuron-expB-ccop, neuron-expC-wlo, neuron-expD-pair, trainium-p2-g5, trainium-ev2-g5, trainium-insp-g5: log.txt, probe2/*.json, events, inspect/)",
+   "/home/ubuntu/wan21-bench/profile/analysis/ (neuron_r0_sys.json, neuron_r1_sys.json, neuron_r3_sys.json, trainium_sys.json, expA/B/C/D_r0_sys.json, nxd_periods.txt, nxd_attention.txt, tn_attention.txt, tn_block_gaps.txt)",
+   "/home/ubuntu/wan21-bench/profile/prof/ (tn_block_rank_0_exec_4.ntff, tn_block_summary.json, tn_block_full.json, tn_block_layers.txt, tn_block_instr_sg01.txt, nxd_dit_rank_0_exec_2.ntff, nxd_dit_summary.json, nxd_parquet/)",
+   "/home/ubuntu/wan21-bench/profile/neffs/ (tn_block_r0.neff = neuron cache 41/00/410014531aee817ed9e6b7f99c92b8ff.neff, nxd_dit.neff extracted from trainium model.pt)",
+   "/home/ubuntu/wan21-bench/profile/cache_O1, cache_ccop, cache_wlo, cache_pair (experiment NEFF caches; benchmark caches untouched)"
+  ],
+  "method": "I used about 55 minutes of device time, one process tree at a time; runs longer than ~2 min were detached with systemd-run.\n(a) Host side: I wrote my own probe at profile/probe2/sitecustomize.py, put first on PYTHONPATH in place of the benchmark probe. It times each DiT call (host tensors in, host tensor out, device-synced), the UniPC step, and step stamps. On neuron it also splits each forward into H2D / forward / D2H, and with hooks on the eager top-level modules into rope / patch / cond / blocks / head segments. It logs a wall-clock event timeline across all processes (imports, init_process_group, app loads with phase_seconds, encode, denoise, VAE stage, mp4). Runs used the exact benchmark env and argv with --steps 3-4 at g=5 and g=1. Warm timelines are from a second consecutive run, because switching backends evicts the other's page cache.\n(b) Device side: NEURON_RT_INSPECT_ENABLE=1 with SYSTEM_PROFILE=1 on both backends, converted with neuron-explorer view to JSON. From it: per-NEFF execution counts and durations, gaps, cc_running per exec, cross-rank alignment and NEFF load costs. I then ran neuron-explorer capture on the rank-0 block NEFF from the neuron cache, matched by NEFF header id, and on the NxD DiT NEFF extracted from model.pt. Both captures ran 4 collective workers (-r 4 --collectives-worker-count 4, profile id 0). I got summary-json, full JSON for the block, and parquet for NxD. The NxD instruction buffer overflowed after 321.9 of 437.6 ms, so NxD per-layer numbers come from fully covered layers, delimited by the once-per-layer 2048 B all-reduce. NxD's NEFF has no HLO names; I used nki_source_location instead.\n(c) Compiler flags come from source: torch-neuronx KernelExecution.cpp, compile graphs get '--model-type transformer --auto-cast=none -O2'; NxD backbone.py gets '--model-type=transformer -O1 --tensorizer-options=--enable-ccop-compute-overlap --auto-cast=none --verify-hlo' plus weight-layout optimization. I ran A/B recompiles on copied caches: -O1, ccop overlap, WLO via a probe monkeypatch of NEURON_COMPILE_OPTIONS, and 2 blocks per graph via a probe hook on compile_blocks.\n(d) Cold numbers are from the existing cold-g5 logs and probes. Byte counts are du of the snapshot plus NxD log sizes. Disk rate is from the NxD cold weight-init logs.\nThe 64 compiled_blocks are 40 DiT blocks plus 24 umT5 encoder blocks (block_attrs 'encoder.block'). Each rank has its own block NEFF because the rank is a Python constant.",
+  "summary": "The DiT step gap is almost entirely the per-block NEFF itself. At g=5 the gap is 105 ms/step (1063.8 vs 959.0).\n\n**Device time.** Each of the 40 TorchNeuron block NEFFs runs 12.98 ms in situ. The equivalent layer inside NxD's single 474.0 ms DiT NEFF takes about 11.68 ms (inferred from the NxD profile). That ~1.3 ms per block (~11%) accounts for 104.7 ms/step at g=5. Host overhead is small and similar on both sides:\n- H2D/D2H/sync: 4.0 vs 3.3 ms per forward.\n- Launch gaps between blocks: 6.9 us median, so dispatch is not the problem.\n- Neuron's eager non-block ops: 5.0 ms per forward, slightly cheaper than NxD's in-graph equivalent.\n\n**Within the block (device profiles).** Both sides do about the same amount of tensor-engine (PE) work (7.7 vs 8.1 ms per layer). The difference is PE idle time: TorchNeuron has 1.9-2.2 ms of idle gaps (over 50 us) per block, versus 0.2-0.3 ms per NxD layer. Those gaps line up with the three 48 MB row-parallel all-reduces and the residual/LayerNorm chain that waits on them. TorchNeuron also spills more and is throttled longer.\n\n**Flags and experiments.** torch.compile graphs are built with -O2 and without NxD's --enable-ccop-compute-overlap. Adding that flag measured -10.6 ms per forward (-21 ms/step at g=5). Three other changes made things worse:\n- -O1: +20.5 ms per forward.\n- Weight-layout optimization (WLO): +110 ms per forward, from relayout NEFFs run on every call.\n- Two blocks per compiled graph: 13.08 ms per block, so block boundaries are not the cause.\n\nAbout 84 ms/step remains. My attribution of it to the compiler (scheduling, spills, throttling, neuronx-cc 2.28 vs 2.26) is inference, not measured. The other per-step contributors are the single-threaded host UniPC step under torchrun (+3 ms/step) and the host copies (+1.4 ms/step). The non-block ops partly offset these (-3.6 ms/step). At g=1 the same pieces add up to about 54 ms against the measured 54.8.\n\n**Warm e2e (127.2 vs 107.2 s).** Neuron pays four extra costs per launch:\n- dist.init_process_group: 17.3 s.\n- DiT warm-up: 13.4 s (Dynamo re-trace plus NEFF lookup and load).\n- Eager fp32 VAE decode: 7.35 vs 1.41 s.\n- Denoise: +4.9 s.\n\nIt wins back umT5 load (3.3 vs 7.7 s), VAE load (8.7 vs 23.8 s) and imports.\n\n**Cold e2e (737.6 vs 432.5 s).** This is EBS throughput at ~124 MB/s. Neuron reads 80.4 GB of fp32 safetensors (57.15 GB DiT, 22.72 GB umT5) against NxD's 39.6 GB of presharded bf16. That is about 603 s of extra load versus about 303 s. Caching bf16 per-rank shards, or putting caches on the unused 437 GB local NVMe, is the fix.\n\nAll figures are in /home/ubuntu/wan21-bench/profile/results.json; runs, traces, profiles and NEFFs are under /home/ubuntu/wan21-bench/profile/."
+ },
+ "verify": [
+  {
+   "claims": [
+    {
+     "claim": "Root cause 1: torch.compile block graphs are built without --enable-ccop-compute-overlap. Adding it cuts the block NEFF from 12.98 to 12.71 ms, about -10.6 ms/forward and -21.2 ms/step at g=5.",
+     "verdict": "confirmed",
+     "reason": "Trace recompute (/tmp/verif/blk.py on analysis/*_sys.json): baseline block median 12.984/12.982/12.985 ms on ranks 0/1/3 with 16 CC ops per block; expB median 12.714 ms with 22 CC ops per block. Steady-state 40-block sums were 519.4-520.5 vs 508.8-510.4 ms per forward. The original expB was g=1 with --host-text-encoder/--host-vae, one run. Its host-side gain was only ~4 ms (probe2 fwd 522.2 vs 526.4 ms; g=1 steps ~528-532 vs benchmark 534.1). So I re-measured on device at g=5, 6 steps, benchmark probe, alternating runs (/home/ubuntu/wan21-bench/verify_meas): base1 1063.6, ccop1 1042.7, base2 1063.2, ccop2 1042.0 ms/step (medians over 20 samples per run). That is -20.9 and -21.2 ms/step, which reproduces the claim. Remaining confound: the ccop runs used --host-text-encoder --host-vae (needed for cache_ccop), and NEURON_CC_FLAGS also recompiles the eager ops."
+    },
+    {
+     "claim": "Root cause 2: the remaining ~83.5 ms/step of the gap is PE stalls on all-reduce -> residual -> LayerNorm chains inside the block NEFF, plus spill, throttling and compiler differences. The block boundary is not the cause.",
+     "verdict": "unverified",
+     "reason": "The size of the device gap holds. TN device time is 519.5 ms of blocks + 5.03 ms eager = 524.5 ms/forward. The NxD DiT NEFF is 474.0 ms/forward (my recompute: 6 execs, 473.9-474.3). That is ~101 ms/step at g=5, ~80 ms after the ccop fix. But 83.5 is a subtraction, not a measurement, and the mechanism comes from one isolated capture per backend. The TN capture ran 12.29 ms vs 12.98 in situ. The NxD instruction trace overflowed at 321.9 of 437.6 ms, and its per-layer time (11.68 ms) is scaled from the profile. The NxD summary counters are truncated too: hardware_flops 26.69 TFLOP/40 = 667 GFLOP/layer, below what TN does per block (928 GFLOP), so summary-level PE/spill/throttle comparisons are not like-for-like. The reported 'PE busy 7.67 ms' is a different metric from the profiler summary's tensor_engine_active_time of 9.68 ms (78.6%) for the TN block. Spill is directionally supported: TN reloads 1.31 GB per block (summary says 1,310,207,392 B, not 1.33) vs NxD 13.3 GB over a truncated trace. 'Block boundary is not the cause' is confirmed: expD pairs run 26.170 ms, i.e. 13.085 ms/block. One internal inconsistency: the summary says '48 MB' all-reduces but tn_block_gaps.txt shows 11,980,800 B. No experiment isolated the stall, spill, throttle or compiler-version shares."
+    },
+    {
+     "claim": "Root cause 3: the host UniPC step runs single-threaded on the neuron ranks because torchrun sets OMP_NUM_THREADS=1. This accounts for ~3 ms/step (4.8 vs 1.8 ms).",
+     "verdict": "unverified",
+     "reason": "Partly supported. The torchrun OMP_NUM_THREADS=1 message is in neuron/warm1-g5/log.txt and comes from torch/distributed/run.py:980-992. I reran the CPU microbench myself: torch 2.14 2.79 ms at 1 thread vs 0.70 ms at 6 threads; torch 2.9.1 3.23 vs 1.52 ms (1.28 ms at default threads). But in situ the neuron sched is 4.74 ms, ~2 ms above the 1-thread microbench, so threads cannot explain the whole 3 ms. Targeted on-device test (probe2, g=5, 6 steps, one run each): OMP_NUM_THREADS=3 cut sched only from 4.74 to 3.38 ms (-1.36), and the step got worse, 1064.2 -> 1069.9 ms, because the DiT call rose 528.5 -> 532.0 ms. Threading accounts for at most ~1.4-2 ms of the gap. The proposed fix only helps if it is scoped to the scheduler call (torch.set_num_threads around scheduler.step), not set globally."
+    },
+    {
+     "claim": "Per-forward device split: TN 40 blocks = 519.5 ms (median block 12.98 ms) vs NxD single NEFF 474.0 ms; inter-block gap is negligible.",
+     "verdict": "confirmed",
+     "reason": "Recomputed from the raw system traces: steady 40-block spans of 519.6-520.8 ms with only 0.24 ms of total inter-block gaps per forward; NxD 474.06 ms median."
+    },
+    {
+     "claim": "Two blocks per graph (13.08 ms/block), WLO (block 12.88 ms) and -O1 (13.49 ms/block) do not help.",
+     "verdict": "confirmed",
+     "reason": "Trace recompute: expD pair median 26.170 ms; expC block median 12.901 ms; expA block median 13.493 ms with forward block sums of 540.0 ms. The WLO +110 ms/forward comes from probe2 fwd 633-637 ms vs 526.5."
+    }
+   ],
+   "missing": "1) The first forward in every TorchNeuron trace runs about 2.5% faster per block: 12.68 vs 12.98 ms baseline, 507.0 vs 519.5 ms per forward. ccop, O1, WLO and the 2-block pairs show the same pattern (494.8 vs 508.9; 524.9 vs 540.0; 497.7 vs 516.5; 511.6 vs 523.6). NxD shows no such pattern (474.1 ms from the first forward). The profile never explains this. It points to a state- or data-dependent slowdown (possibly activity/power throttle, since the warm-up input differs). That would mean ~12 ms/forward of the 'compiler/stall' remainder may not be scheduling. 2) The original expB measured only ~-4 ms/step at g=1 on the host side, against -10.6 ms/forward on the device. The report did not notice or reconcile this. My matched g=5 re-measurement confirms -21 ms/step, but the g=1 discrepancy is still unexplained. 3) The NxD device-profile counters (flops, PE active, spill, throttle) come from a trace truncated at 73.5%, and the TN and NxD 'PE busy' numbers were computed from different sources (TN merged active_time, NxD parquet rows). The PE-idle comparison, 1.94-2.22 vs 0.21-0.27 ms, therefore rests on one capture per side with unmatched methods and was not cross-checked. 4) In-situ neuron sched is 4.7 ms vs 2.8 ms for the single-thread microbench; the extra ~2 ms is unattributed. 5) The fix candidate 'raise threads' was not tested in situ. My single test showed that a global OMP_NUM_THREADS=3 makes the step 5.7 ms slower. 6) Re-measurement artifacts: /home/ubuntu/wan21-bench/verify_meas/{base1,ccop1,base2,ccop2,omp_default,omp3}/ (log.txt, probe/ or probe2/), plus scripts ab.sh and omp.sh. Analysis scripts: /tmp/verif/{blk.py,span.py,fwd.py,seq.py,steps.py}."
+  },
+  {
+   "claims": [
+    {
+     "claim": "The per-step totals reconcile. Neuron: 2 x 528.5 + 4.8 + 0.75 = 1062.7 ms. Trainium: 2 x 477.3 + 1.8 + 0.74 = 957.1 ms. These match the benchmark's 1063.8 and 959.0 ms.",
+     "verdict": "confirmed",
+     "reason": "The arithmetic checks out against results.json. My own matched rerun (/home/ubuntu/wan21-bench/verify/runs/neuron-ctl-g1-hostte) reproduced a neuron dit_call median of 528.5-529.4 ms across all 4 ranks, and a device busy time of 524.3 ms per forward (blocks 519.3 + eager 5.04)."
+    },
+    {
+     "claim": "Each TorchNeuron block NEFF takes 12.98 ms in situ, so 40 blocks take 519.5 ms per forward.",
+     "verdict": "confirmed",
+     "reason": "In my matched control run the block NEFF median was 12.978 ms and the per-forward block total 519.3 ms (rank-0 system trace, /home/ubuntu/wan21-bench/verify/ctl_r0_sys.json). Ranks 1 and 3 in the original traces also show 12.980 and 12.983 ms."
+    },
+    {
+     "claim": "The equivalent NxD layer takes about 11.68 ms in situ, which puts the per-block gap at about 1.3 ms (104.7 ms per step).",
+     "verdict": "unverified",
+     "reason": "The NxD layer time is not measured. It is the profiled period (10.783 ms) multiplied by 474.0/437.65, which assumes the in-situ slowdown is spread evenly over layers and non-layer work. The two backends do not slow down by the same amount in situ: TN runs 12.98/12.29 = 1.056x its capture time, NxD 1.083x. Comparing the two captures directly gives a gap of 12.289 - 10.783 = 1.51 ms per block, not 1.3 ms. So the split between layer and non-layer time for NxD, and therefore the 'TN eager ops are cheaper' offset (-3.6 ms/step), is not established."
+    },
+    {
+     "claim": "The block boundary is not the cause: inter-block gaps are about 6.9 us, the ranks do not skew, and two blocks per graph is no better.",
+     "verdict": "confirmed",
+     "reason": "I checked cross-rank skew, which the profile did not: the first collective of each block waits a median of only 8.4-19.0 us on ranks 0, 1 and 3, so host launch jitter is not turned into device waits. The expD trace confirms a pair NEFF median of 26.169 ms, i.e. 13.08 ms per block."
+    },
+    {
+     "claim": "NxD compiles with '-O1 --tensorizer-options=--enable-ccop-compute-overlap --auto-cast=none'. TorchNeuron uses -O2 without ccop overlap.",
+     "verdict": "confirmed",
+     "reason": "difflet/backends/trainium/wan/backbone.py lines 193-199 set those NxD flags. The ccop-overlap run has 22 collective positions per block, against 16 in the baseline."
+    },
+    {
+     "claim": "Adding ccop overlap cuts device block time by 10.6 ms per forward.",
+     "verdict": "confirmed",
+     "reason": "The expB run used different settings from the baseline (g=1, 3 steps, --host-text-encoder --host-vae), so I ran a matched control with exactly those settings and a copied cache. Block median: control 12.978 ms vs ccop 12.713 ms. Blocks per forward: 519.3 vs 508.9 ms. Device busy per forward: 524.3 vs 513.0-513.9 ms."
+    },
+    {
+     "claim": "ccop overlap gives -21.2 ms/step at g=5 (high confidence, measured), i.e. about -1.06 s per 50-step run.",
+     "verdict": "refuted",
+     "reason": "Measured from the host, the end-to-end gain is about half. Matched control vs expB, probe2 fwd_s: 526.6-528.1 vs 520.4-522.2 ms; dit_call: about 528.9 vs about 523.2 ms. That is about -5.7 ms per forward, about -11 ms/step. results.json itself records probe_fwd 526.4 -> 522.2 ms. In expB, host gaps longer than 3 ms appear inside forwards: forwards.py splits most forwards into separate groups, and one forward has 5.8 ms of gaps. These gaps eat roughly half of the device gain. The cause is unexplained, possibly NEURON_CC_FLAGS changing the eager-op NEFFs and their cache. The -21 ms/step figure is a device-only projection, not a measurement."
+    },
+    {
+     "claim": "The remaining ~83.5 ms/step comes from tensor-engine stalls on the all-reduce -> residual -> LayerNorm chains inside the block NEFF.",
+     "verdict": "unverified",
+     "reason": "The large gaps do coincide with RDH all-reduce chunks (tn_block_gaps.txt), but causation is not shown, and several alternatives were not separated out:\n(1) Different attention kernel. TN calls torch-neuronx's wrapper of nkilib attention_cte from nki 0.7.0; NxD calls attention_cte[2] from nki 0.5.0. The two attention_cte.py files differ (md5 c109197e vs 7f9e5e20, 2079 diff lines). The profile never compared attention timing; its own nxd_attention.txt cannot isolate NxD attention, because the attention_cte source tag is spread over the whole 10.7 ms layer window.\n(2) More transposes and spill in TN, inferred by dividing NxD's truncated-trace counters by about 29 layers covered: transpose about 90.6 vs about 72 GFLOP per layer, spill reload 1.31 vs about 0.45 GB.\n(3) The gap breakdown shows GpSimd and Vector running the fp32 residual/gate elementwise ops (add.441, add.252: GpSimd 348-671 us inside the gaps), not only waiting on collectives.\n(4) The activity throttle at the 50% limit is on 5.03 ms of the TN block (41%) vs 33% for NxD. That alone could be a large part of a 1.3-1.5 ms gap.\n(5) Section timing from the collective timestamps: TN is slower in both halves of the layer. From the self-attn qk-norm all-reduce to the cross-attn q-norm all-reduce: TN 5.80 ms (capture) vs NxD 4.97 ms. The rest of the layer: TN 6.49 vs NxD 5.81 ms. So the extra time is not concentrated at the row-parallel all-reduce points."
+    },
+    {
+     "claim": "Both sides do about the same tensor-engine (PE) work (7.7 vs 8.1 ms busy) and differ mainly in PE idle time.",
+     "verdict": "unverified",
+     "reason": "The answer depends on the metric. neuron-explorer's own summary gives tensor_engine_active_time of 9.68 ms per TN block, against an inferred ~9.2 ms per NxD layer (275.4 ms active over 321.85 ms of covered trace x 10.78). By that measure TN's PE is active longer, not shorter. Hardware FLOPs are similar: 927.9 GFLOP per TN block vs about 911 GFLOP per NxD layer (inferred)."
+    },
+    {
+     "claim": "The gaps line up with the 'three 48 MB row-parallel all-reduces'.",
+     "verdict": "unverified",
+     "reason": "TN actually issues 12 RDH all-reduces of 11.98 MB per block (4 chunks per row-parallel output) plus 4 small fp32/2 KB ones. NxD issues 18 of 7.99 MB (6 chunks) plus 4 small. Total collective time per layer is similar: TN 1.94 ms (capture), NxD 73.85/40 = 1.85 ms. Collective time per forward in situ is 68.5 ms for TN vs 72.4 ms for NxD. So the total amount of communication is not the difference; whether the overlap is the difference is not proven."
+    },
+    {
+     "claim": "The host UniPC step runs single-threaded on the neuron ranks (torchrun OMP_NUM_THREADS=1), costing about +3 ms/step.",
+     "verdict": "confirmed",
+     "reason": "The neuron warm1-g5 log contains torchrun's 'Setting OMP_NUM_THREADS ... to be 1' line, and Difflet never overrides it. My rerun of sched_bench: 4 concurrent 1-thread processes take 3.14-3.59 ms per step, and 3 threads take 1.01 ms. But the step measured on the device ranks is 4.2-5.2 ms, so about 1-1.5 ms of sched_s is not explained by the thread count."
+    },
+    {
+     "claim": "Per-forward host overhead is 4.0 ms on neuron vs 3.3 ms on trainium.",
+     "verdict": "confirmed",
+     "reason": "In my control run dit_call minus device busy is about 528.6 - 524.3 = 4.3 ms, consistent with 4.0. I did not re-measure the trainium side."
+    },
+    {
+     "claim": "Warm: dist.init_process_group('neuron') costs about 17.3 s per launch.",
+     "verdict": "confirmed",
+     "reason": "In my control run it took 19.68 s (998.21 -> 1017.88 on all 4 ranks), with INSPECT on. The size is right; the exact figure varies from run to run."
+    },
+    {
+     "claim": "Warm: the 13.4 s DiT warm-up is a Dynamo re-trace plus StableHLO lowering plus NEFF lookup/load.",
+     "verdict": "unverified",
+     "reason": "Only the total (13.36-13.44 s) and the NEFF load time (2.6 s) were measured; the rest is not broken down. I also found that each rank spawns a 'python -c' child process during the warm-up, which runs 9-14 s (ev2: 968.2 -> 981.9 s; control run: 1034.2 -> 1043.4 s). It overlaps the warm-up and the umT5 load, and the profile neither identifies nor accounts for it."
+    },
+    {
+     "claim": "The neuron VAE decode is fp32 eager (7.35 s vs NxD's compiled 1.41 s).",
+     "verdict": "confirmed",
+     "reason": "difflet/backends/neuron/wan/vae.py raises an error for any exec_mode other than eager. Its docstring also says the whole decoder runs on each rank, so the 4 ranks decode redundantly."
+    },
+    {
+     "claim": "Cold e2e is EBS-bound: neuron reads 57.15 GB of fp32 DiT and 22.72 GB of umT5 at about 124 MB/s.",
+     "verdict": "confirmed",
+     "reason": "du -sb of the snapshot gives transformer 57,154,175,533 B and text_encoder 22,723,695,074 B. 80.38 GB over the +602.8 s cold excess is 133 MB/s; NxD's cold logs give 123.8-124.3 MB/s. The split of that time between DiT and umT5 is inferred by bytes, and the neuron cold VAE load uses the warm value; neither is measured."
+    },
+    {
+     "claim": "The two-backend comparison is not confounded by the profile harness.",
+     "verdict": "unverified",
+     "reason": "Under profile/run.sh, torch_neuronx logs 'neuron-ls not found in PATH; NUMA optimizations disabled'. The benchmark logs do not have this warning, so the profiled neuron runs differ from the benchmark in thread pinning. There is a single NUMA node with CPUs 0-11, and the profiled step matches the benchmark (1062.7 vs 1063.8 ms), so the effect is likely negligible. I did not test it."
+    }
+   ],
+   "missing": "1. No comparison of the attention kernels. The two backends use different attention_cte implementations: nki 0.7.0 through torch-neuronx's wrap_nki with grid=(LNC,), against nki 0.5.0 attention_cte[2] in NxD, and the source files differ. The profile gives a TN attention span (1.64 ms) but no reliable NxD equivalent, so the attention share of the 1.3-1.5 ms per-block gap is unknown.\n\n2. No breakdown of the gap within the layer. The collective timestamps show TN slower in both halves of the layer (about +0.8 ms across self-attention, about +0.7 ms across cross-attention plus FFN), which works against the single \"all-reduce -> residual -> LayerNorm stall\" story.\n\n3. No per-layer NxD figures for spill, transpose FLOPs or tensor-engine active time. My estimates from the truncated trace, divided over about 29 layers: spill 0.45 GB vs TN 1.31 GB, transpose 72 vs 90.6 GFLOP. Tensor-engine active time is about 9.2 ms for NxD vs TN's 9.68 ms, which contradicts the \"same PE work\" claim.\n\n4. The activity throttle (41% vs 33% of time at a 50% utilisation limit) was noted but not quantified as a cause.\n\n5. The ccop gain was never confirmed end to end. The host-measured gain is about 5.7 ms per forward against 10.6 ms on the device. The expB run also has unexplained host gaps over 3 ms, and recompiling every eager op under NEURON_CC_FLAGS would cost more than the stated ~3 minutes when umT5 runs on the device. The claim that ccop keeps numerics identical was not checked.\n\n6. The ~2 ms of UniPC step time beyond the single-thread cost is unexplained.\n\n7. The warm-up was not decomposed. A per-rank 'python -c' child process runs 9-14 s during warm-up and is unidentified.\n\n8. NxD's 23.8 s warm VAE load (vs 8.7 s on neuron) and the effect of its 'Skipping model warmup' on the first denoise step were not explained.\n\n9. The different in-situ vs capture slowdowns (1.056x for TN, 1.083x for NxD) were not explained, but the NxD per-layer figure is built on that scaling.\n\nEvidence from this stage is in /home/ubuntu/wan21-bench/verify/:\n- runs/neuron-ctl-g1-hostte: a matched control for expB, with the probe2 JSONs, events and inspect output.\n- ctl_r0_sys.json: the converted rank-0 system trace.\n- cache_ctl: a 97 MB copy of the neuron cache. The benchmark caches were not touched.\n\nThe helper scripts are /tmp/ccorder.py, /tmp/p2cmp.py and /tmp/nxdatt.py."
+  }
+ ],
+ "judges": [
+  {
+   "X": {
+    "prompt_adherence": 3,
+    "fidelity": 2,
+    "artifacts": 1,
+    "temporal": 1,
+    "notes": "g5: Only the first frame shows a recognizable red fox on snow in a forest, and even that frame has blocky, confetti-like noise in the background and snow. Frames 2-5 fall apart into heavy multicolor speckle and grid noise with a washed-out grey/olive cast. A faint fox silhouette is barely visible, the red coat and white snow are gone, and green blotches appear. g1: the same failure. Frame 1 has a crude red fox blob, and the later frames are a washed-out yellow-grey noise field where only tree trunks can be made out. The video degrades badly after the first frame at both guidance values, which looks like a pipeline or numerical fault, not just a weak model."
+   },
+   "Y": {
+    "prompt_adherence": 9,
+    "fidelity": 7,
+    "artifacts": 6,
+    "temporal": 8,
+    "notes": "g5: A clear, well-lit red fox in a running pose crosses a snowy birch and pine forest, framed cinematically. The fox's coat, tail and legs stay consistent across frames, and it moves forward smoothly. Frame 1 has blocky, confetti-like artifacts in the background and snow, as X's first frame does. The later frames are clean apart from slight over-sharpened, painterly textures. g1: the scene holds together (the fox is in a stride pose, with tree trunks and snow) but looks worse, as expected: the fox is dark and over-saturated red with patchy texture, the lighting is murkier, and frame 1 is blocky. It still stays coherent over time."
+   },
+   "preference": "Y",
+   "both_reasonable": false,
+   "reasoning": "Y is a coherent, prompt-faithful clip at both guidance values and is a reasonable result for a 14B text-to-video model at 480x832 over 9 frames. Its only clear flaw is the blocky first frame, which X shares. X collapses into colored noise after frame 1 at both g5 and g1, keeping only a faint fox or tree outline. The two outputs start almost the same (same seed and composition), so the gap appears in later frames. That points to a broken run, not a matter of taste. X is not a reasonable output."
+  },
+  {
+   "X": {
+    "prompt_adherence": 3,
+    "fidelity": 2,
+    "artifacts": 1,
+    "temporal": 1,
+    "notes": "g5: Frame 1 is a plausible cinematic red fox trotting through a snowy birch/pine forest, with blocky speckle noise in the background. It is almost identical to Y's frame 1, which suggests the same seed and the same first latent. Frames 2-5 collapse into desaturated, grain- and grid-patterned static. Only a faint gray fox silhouette and tree trunks are visible. The red color and the snow are gone, and there are green/yellow blotches near the bottom. That reads as a numerics or decode failure on the temporal latents, not normal sampling quality. g1: the same failure. Frame 1 shows a crude red fox in a dark forest, then frames 2-5 turn into a muddy olive/purple noise field. Apart from frame 1, the video does not show a red fox in snow, and it is not cinematic."
+   },
+   "Y": {
+    "prompt_adherence": 9,
+    "fidelity": 7,
+    "artifacts": 6,
+    "temporal": 8,
+    "notes": "g5: A clearly red fox in mid-run, legs in a running gait, crossing snowy ground in a forest of dark trunks and birch, with shallow depth of field and cinematic tone. All four prompt elements are satisfied. Frame 1 has the same blocky speckle noise as X's frame 1, which is common for Wan's first latent frame. Frames 2-5 are clean, consistent, and identity-stable, with small coherent leg and pose changes. Mild over-sharpened/painterly texture on the fur and background. g1: lower quality as expected. The fox is oversaturated and blotchy with a dark muddy body, the trees are more cluttered, and frame 1 is noisy. It stays coherent over time, though, and is still a red fox running on snow in a forest."
+   },
+   "preference": "Y",
+   "both_reasonable": false,
+   "reasoning": "X and Y share a nearly identical first frame, so they likely used the same seed and conditioning. After frame 1, X degrades into gray/colored static at both guidance values. Only a ghost silhouette of the fox stays, and the red color and the snow are lost. That points to a defect in X's pipeline (likely bad latents for the later frames, or a broken VAE decode), not just lower sampling quality. Y gives a coherent, cinematic red fox running through a snowy forest across all frames at g5. At g1 it is degraded but still coherent and on prompt. Y is a reasonable output for a 14B T2V model at 480x832 and 9 frames; X is not."
+  },
+  {
+   "X": {
+    "prompt_adherence": 2,
+    "fidelity": 2,
+    "artifacts": 1,
+    "temporal": 1,
+    "notes": "g5: Frame 1 shows a clear red fox in a snowy forest, with blocky/confetti artifacts in the background and snow. Frames 2-5 then fall apart into a gray-purple high-frequency noise and checkerboard texture. Only a faint ghost of the fox outline and the tree trunks remain, with green blotches near the bottom. That is a severe jump between frame 1 and frame 2 and identity loss after it. g1: the same pattern. Frame 1 has a crude red fox, which looks a lot like Y's g1 frame 1, and frames 2-5 are washed-out ochre and gray noise with only the tree structure left. Every frame after the first is broken in both sheets, while frame 1 stays sensible. This looks like a pipeline defect in how later latent frames are produced or decoded, not like normal model behavior."
+   },
+   "Y": {
+    "prompt_adherence": 9,
+    "fidelity": 7,
+    "artifacts": 6,
+    "temporal": 8,
+    "notes": "g5: A detailed red fox runs left to right through a snowy birch and pine forest. The cinematic look matches the prompt. The fox's identity, coat pattern, framing and background trees stay consistent across frames 2-5, with plausible stride changes and no flicker. Frame 1 has the same blocky, confetti-like artifacts as X's frame 1, which is common in Wan's first latent frame. Frames 2-5 show some painterly or over-sharpened texture in the snow and background. g1: worse, as expected. The fox is a saturated, somewhat mangled red shape (odd legs, patchy texture), but the scene and identity hold across frames, with smooth motion and only mild shape drift."
+   },
+   "preference": "Y",
+   "both_reasonable": false,
+   "reasoning": "I prefer Y, and only Y is a reasonable output. Y is temporally coherent at both guidance values. At g5 the fox and forest stay stable across frames with natural running motion. The only notable artifacts are blocky patches in frame 1, which X's frame 1 shares. X matches Y fairly closely in frame 1 (same scene and similar layout) but falls into structured noise from frame 2 onward, at both g5 and g1, leaving only a faint ghost of the fox. A 14B text-to-video model at 480x832 should not produce that, and guidance 1.0 does not explain it. It points to a bug in X's handling of later frames, such as the temporal or causal VAE decode, the cache, or the latents after the first frame. Y is a reasonable Wan2.1 14B output. X is not."
+  },
+  {
+   "X": {
+    "prompt_adherence": 2,
+    "fidelity": 1,
+    "artifacts": 1,
+    "temporal": 1,
+    "notes": "g5: Only frame 0 is usable. It shows a red fox in snowy woods, with the same composition as Y frame 0 and similar mosaic/blocky speckle in the background. Frames 1-4 fall apart into desaturated gray/purple/green chroma noise with a visible fine checkerboard/grid pattern (blockiness), heavy color shift, and green blotches near the bottom. The fox is only a faint ghosted silhouette, still roughly in the right place, so some structure survives. g1 shows the same failure: frame 0 is a plausible but crude solid-red fox, and frames 1-4 are washed-out yellow/gray noise with grid texture and only faint trees. The failure is identical at both guidance values, so CFG is not the cause; it is systematic. Because frame 0 is fine and every later frame is corrupted, the latent temporal frames after the first (or the VAE decoder's temporal/causal cache path) are probably being produced or decoded wrongly. There are no hard NaN/black patches, but it looks like near-noise latents."
+   },
+   "Y": {
+    "prompt_adherence": 8,
+    "fidelity": 7,
+    "artifacts": 6,
+    "temporal": 8,
+    "notes": "g5: A clear, coherent red fox in mid-stride through a snowy birch/pine forest, matching the prompt well. Fox anatomy is plausible (4 legs, bushy tail, ears, white chest) and stays consistent across frames, with small forward motion and a stable background. Frame 0 has strong mosaic/blocky speckle in the trees and snow, the same first-frame artifact seen in X frame 0. Later frames are somewhat oversharpened and painterly, with a mild posterized look in the snow and trees, but there is no banding, NaN or color drift. g1 is clearly worse, as expected without CFG: the fox is a mottled dark-red blob with muddled legs and odd texture, and a branch passes through its body. Frame 0 is again blocky. Still, the scene is coherent and temporally stable with no noise collapse. This is a reasonable output for Wan2.1 14B at 480x832 with 9 frames."
+   },
+   "preference": "Y",
+   "both_reasonable": false,
+   "reasoning": "Y is far better at both guidance values. Y gives a coherent, temporally stable fox video. Its only notable artifacts are blockiness in frame 0 and a slightly oversharpened, painterly texture, which is acceptable for a 14B T2V model at this resolution and length. X is broken: frame 0 is nearly the same as Y's (so seed and conditioning match), but frames 1-4 at both g5 and g1 collapse into grid-patterned chroma noise with strong color shift and only a ghosted fox outline. A sharp first frame followed by corrupted later frames, the same at both CFG settings, points to a backend bug rather than a quality difference. Likely suspects are the handling of latent frames after t=0 (e.g. the temporal RoPE/attention or patching over frames) or the VAE decoder's causal temporal cache on that backend. X is not a reasonable output."
+  }
+ ],
+ "skeptic": {
+  "claim_equivalent_quality": "refuted",
+  "claim_reasonable_absolute_quality": "refuted",
+  "reasons": "Both claims are refuted. The trainium (NxD AoT) videos that users actually receive are broken, and the TorchNeuron videos are not.\n\nClaim 1, \"both backends produce equivalent-quality video\", is refuted:\n- **The two out.mp4 files do not match.** /home/ubuntu/wan21-bench/quality/metrics.json `video_compare` gives neuron vs trainium mean PSNR 12.10 dB and luma SSIM 0.396 at g5, and 13.68 dB / 0.450 at g1. Frame 0 is 18.0 dB / 0.76 SSIM, and frames 1-8 fall to 9.4-12.7 dB.\n- **I looked at the sheets myself.** In sheets/trainium_warm1-g5.png, frame 0 is a sharp fox. Frames 1-8 are washed-out, grid-patterned colour noise with only a ghost of the fox. trainium_cold-g5.png looks identical, so the fault is deterministic. trainium_warm1-g1.png shows the same collapse. neuron_warm1-g5.png is a coherent, temporally stable fox video.\n- **Four blind judges agreed.** All preferred Y over X with both_reasonable=false. blind_key.json maps X to trainium and Y to neuron.\n\n**Is this just chaotic bf16 divergence? No.** The final latents are close:\n- g1 cosine 0.9974 (rel_l2 0.073); g5 cosine 0.9696 (rel_l2 0.248).\n- For scale, the same backend's own g5 latents vs its g1 latents give cosine 0.63 and 0.61.\n- Latents that close cannot explain 12 dB between the videos.\n\n**The fault is trainium's VAE stage.**\n- Trainium's out.mp4 against a CPU fp32 decode of its own latents is only 12.40 dB at g5 (frame 0 21.1 dB, then 9.4-12.7 dB).\n- Neuron's out.mp4 against the CPU decode of its own latents is 35.08 dB, close to the h264 crf18 floor of about 36.3 dB.\n- Decoded on CPU, trainium's latents give a clean fox video (sheets/cpuvae_trainium_warm1-g5.png, which I viewed).\n- The two backends' CPU decodes agree at 23.3 dB at g5 and 33.5 dB at g1.\n\n**Even the DiT is not strictly equivalent.**\n- In oracle/compare.json (2-step fp32 reference), neuron passes the repo's W4 parity rule: rel_l1 ratio 0.928x the bf16 control.\n- Trainium fails it on magnitude: 1.272x against a 1.15x limit. All of its cosine floors still pass.\n- At the latent level the gap is therefore small but real. At the video level the two are nowhere near equivalent.\n\nClaim 2, \"the output quality of both is reasonable\", is refuted for trainium:\n- Its user-facing video is unusable after frame 0 at both g5 and g1.\n- Its CLIP prompt margin drops to 0.070 at g5 and 0.011 at g1, against 0.151 and 0.101 for neuron.\n- Its g1 output has the prompt as the top text in only 5 of 9 frames.\n\nNeuron's output is reasonable:\n- At g5 I saw a coherent red fox with consistent identity and motion.\n- At g1 it is degraded, which is expected without CFG, but still coherent and on prompt.\n- Its one shared flaw is a blocky, posterized frame 0. The CPU fp32 decode of either backend's latents shows the same flaw, so it comes from the latents, not from a backend's VAE.\n\nNeither claim stays \"unclear\". The failure is gross, deterministic and visually obvious, and the CPU reference decode localises it to one backend.",
+  "caveats": "1. **Limited sample.** There is one prompt and one seed at 9 frames. The oracle comparison is a single 2-step sample per backend.\n2. **No fp32 reference for the full run.** No fp32 reference exists for the full step count, so which DiT is closer to the true model at g5 is not established. Only the 2-step parity result (neuron passes, trainium fails at 1.272x) speaks to it.\n3. **VAE root cause unverified.** That trainium's on-device VAE causes the corruption is shown by the CPU-decode comparison, but the specific mechanism (for example a temporal or causal cache fault) is an inference and has not been verified.\n4. **Pixel format not checked.** ffprobe is not installed, so I could not compare the mp4 container or pixel format between backends. A pixel-format misread is implausible: the same reader gives 35 dB for neuron, and trainium's frame 0 decodes at about 21 dB.\n5. **Spot-check scope.** I spot-checked metrics.json, compare.json, blind_key.json and these sheets: trainium warm1-g5, cold-g5 and warm1-g1; neuron warm1-g5 and warm1-g1; cpuvae trainium warm1-g5. I did not re-run any metric.\n6. **Neuron \"reasonable\" is a judgement call.** It rests on visual inspection and four LLM judges. Frame 0 is blocky on every decode path.\n7. **Speed comparison.** Trainium's faster warm and cold e2e times (107.2 s and 432.5 s) currently produce broken videos, so the speed comparison needs that caveat."
+ },
+ "oracle_wf": {
+  "reference_file": "/home/ubuntu/wan21-bench/quality/oracle/ref_2steps.pt",
+  "per_backend": [
+   {
+    "backend": "neuron",
+    "init_noise_equal_to_ref": true,
+    "rel_err_vs_fp32": 0.04058884440867046,
+    "bf16_control_rel_err_vs_fp32": 0.043735671087522014,
+    "ratio": 0.9280489677966925,
+    "update_cosine": 0.9995761379126517,
+    "parity_pass": true,
+    "detail": "Probe file: /home/ubuntu/wan21-bench/quality/device-2step/neuron/probe/latents-58644-1.pt. All three W4 checks pass. (1) init_latents: torch.equal with the reference latents_init is True. (2) parity_latents_final: cosine 0.999177 against fp32 (floor 0.995). rel_l1 4.059e-2 is 0.928x the bf16 control's 4.374e-2 (limit 1.15x). The same-dtype distance to diffusers bf16 is 1.265x the control's distance from fp32, with a cosine of 0.998495. That ratio is reported but not gated because err_cos is 0.148, below 0.5 (D68). This matches the decorrelation already documented for the per-block compiled path in W3. (3) update_final (final - init): cosine 0.999576 (floor 0.98), also 0.928x the control. Against the bf16_tsround control (rel_l1 4.779e-2): 0.849x, which passes; err_cos is 0.273 and the same-dtype ratio is 1.107x."
+   },
+   {
+    "backend": "trainium",
+    "init_noise_equal_to_ref": true,
+    "rel_err_vs_fp32": 0.05565046274198309,
+    "bf16_control_rel_err_vs_fp32": 0.043735671087522014,
+    "ratio": 1.2724273198099028,
+    "update_cosine": 0.9991664076330931,
+    "parity_pass": false,
+    "detail": "Probe file: /home/ubuntu/wan21-bench/quality/device-2step/trainium/probe/latents-61356-1.pt. Fails the magnitude gate only. (1) init_latents: torch.equal with the reference latents_init is True. (2) parity_latents_final: FAIL with the reason 'rel_l1 5.565e-02 is 1.272x the control's 4.374e-02, above max_ratio_vs_control 1.15'. Cosine is 0.998349, so the 0.995 floor holds. The same-dtype ratio is 1.275x, reported and not gated because err_cos is 0.383, below 0.5. (3) update_final: FAIL. Its cosine of 0.999166 clears the 0.98 floor, but the update's own parity.check fails on the same 1.272x ratio (rel_l1 3.930e-2 vs the control's 3.088e-2). Against the bf16_tsround control (rel_l1 4.779e-2) the ratio is 1.164x, which still fails 1.15. err_cos rises to 0.569, so the same-dtype limit is gated there, and the same-dtype ratio of 1.007x passes it. Inference, not verified: this result's error lines up better with the bf16-rounded-timestep control (err_cos 0.569) than with the plain bf16 control (0.383). That suggests the NxD path feeds the DiT bf16-rounded timesteps, as D44 describes for the orchestrator. Even counting that, it adds about 16% more error than upstream bf16 does."
+   }
+  ],
+  "rule": "This is the W4 rule, imported and not reimplemented. The script calls comparison(), describe() and UPDATE_MIN_COSINE from tests/manual/check_neuron_wan_w4.py, and those use tests/numerical/neuron_parity.py metrics() and check(). init_latents: torch.equal(device initial, ref latents_init). parity_latents_final: parity.check(metrics(final, fp32, control=bf16) + vs_bf16, control=metrics(bf16, fp32)). Its thresholds are cosine >= 0.995 (MIN_COSINE), rel_l1 / control rel_l1 <= 1.15 (MAX_RATIO_VS_CONTROL), and same-dtype ratio <= 1.2, gated only when err_cos >= 0.5 (D68/D69); a nan never passes. update_final: the same comparison on final - latents_init, plus fp32 cosine >= 0.98. A backend passes when all three pass. Every comparison is also repeated against the bf16_tsround control as a diagnostic (D44). The comparisons use the fp32 final latents saved by the probe on rank 0.",
+  "notes": "Verdict: TorchNeuron (neuron) passes the repo's parity rule against the fp32 oracle at 2 steps. NxD AoT (trainium) fails it, on the magnitude gate alone: its error is 1.272x the bf16 control's, against a 1.15x limit. Both pass init-noise equality and all the cosine floors.\n\nReference run:\n- Launched as systemd unit wan21-oracle-ref, using the native venv python (torch 2.14.0+cpu, diffusers 0.38.0, transformers 4.57.6).\n- Script: /home/ubuntu/wan21-bench/quality/oracle/run_ref.sh. Log: /home/ubuntu/wan21-bench/quality/oracle/ref.log.\n- Exit status 0. Wall time 19:59.61 under /usr/bin/time; max RSS 62,232,624 kB.\n- Stage times (from meta): load 0.55 s, encode 14.08 s (16 prompt tokens, 1 negative), fp32 624.6 s, bf16 274.8 s, bf16_tsround 276.8 s.\n- Timesteps seen: fp32/bf16 [999, 999, 750, 750]; tsround [1000, 1000, 752, 752].\n- Final latents absmean: fp32 0.7996, bf16 0.7962, tsround 0.8035.\n\nControls vs fp32 (final latents):\n- bf16: rel_l1 4.374e-2, cosine 0.999022.\n- bf16_tsround: rel_l1 4.779e-2, cosine 0.998843.\n- tsround vs bf16: rel_l1 4.542e-2.\n\nCross-backend: neuron final vs trainium final has cosine 0.997887 and rel_l1 6.269e-2.\n\nComparison script: /home/ubuntu/Difflet/.claude/worktrees/wan21-bench/benchmark/wan21_oracle_compare.py. Command: TORCH_DEVICE_BACKEND_AUTOLOAD=0 PYTHONSAFEPATH=1 PYTHONPATH=<worktree> native python, with args --ref ... --device neuron=... --device trainium=... --out .... It exits 1 because trainium fails. Its output, including the full metrics dicts, describe() strings and reference meta, is /home/ubuntu/wan21-bench/quality/oracle/compare.json.\n\nCaveats:\n- Only one seed and one prompt at 2 steps, so a single sample per backend.\n- The device runs encoded the prompt on their own paths and the probe saved no embeddings. Inference: some of the gap may come from the text encoder rather than the DiT; I did not measure this.\n- In the native venv, torch auto-loads torch_neuronx, so the CPU reference process opened /dev/neuron0 (fd 3). It ran no device work and nothing else was using the device. The compare script sets TORCH_DEVICE_BACKEND_AUTOLOAD=0, and its output records torch_neuronx_loaded=false.\n- I smoke-tested the compare script against a synthetic reference under /tmp/oracle_test before the real run. Those numbers are not results.\n\nNothing was committed, and the git branch was left unchanged."
+ },
+ "oracle": {
+  "reference_file": "/home/ubuntu/wan21-bench/quality/oracle/ref_2steps.pt",
+  "reference_meta": {
+   "prompt": "a cinematic shot of a red fox running through a snowy forest",
+   "negative_prompt": "",
+   "steps": 2,
+   "guidance_scale": 5.0,
+   "seed": 42,
+   "height": 480,
+   "width": 832,
+   "num_frames": 9,
+   "max_sequence_length": 512,
+   "latent_shape": [
+    1,
+    16,
+    3,
+    60,
+    104
+   ],
+   "timesteps": [
+    999,
+    750
+   ],
+   "snapshot": "/home/ubuntu/.cache/huggingface/hub/models--Wan-AI--Wan2.1-T2V-14B-Diffusers/snapshots/38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+   "threads": 12,
+   "diffusers": "0.38.0",
+   "transformers": "4.57.6",
+   "torch": "2.14.0+cpu",
+   "runs": [
+    "fp32",
+    "bf16",
+    "bf16_tsround"
+   ],
+   "seconds": {
+    "load": 0.5518498950004869,
+    "encode": 14.075726897001005,
+    "fp32": 624.6164221800027,
+    "bf16": 274.81791850199807,
+    "bf16_tsround": 276.80838524499995
+   },
+   "vm_hwm_gib": 59.34965515136719
+  },
+  "reference_timesteps_seen": {
+   "fp32": [
+    999.0,
+    999.0,
+    750.0,
+    750.0
+   ],
+   "bf16": [
+    999.0,
+    999.0,
+    750.0,
+    750.0
+   ],
+   "bf16_tsround": [
+    1000.0,
+    1000.0,
+    752.0,
+    752.0
+   ]
+  },
+  "controls": {
+   "bf16_vs_fp32": {
+    "cosine": 0.9990223719624086,
+    "rel_l1": 0.043735671087522014,
+    "rel_l2": 0.04427968408406255,
+    "max_abs": 0.49967968463897705,
+    "ref_absmean": 0.7995563942021071,
+    "rel_max": 0.1704966151377081
+   },
+   "bf16_tsround_vs_fp32": {
+    "cosine": 0.9988425471245045,
+    "rel_l1": 0.04779446915163443,
+    "rel_l2": 0.048473426227338676,
+    "max_abs": 0.4104851484298706,
+    "ref_absmean": 0.7995563942021071,
+    "rel_max": 0.14006238501002571
+   },
+   "bf16_tsround_vs_bf16": {
+    "cosine": 0.9989620558419954,
+    "rel_l1": 0.04541689331155028,
+    "rel_l2": 0.04651481790176628,
+    "max_abs": 0.37693846225738525,
+    "ref_absmean": 0.7962052065890572,
+    "rel_max": 0.12430077621819902
+   }
+  },
+  "rule": {
+   "source": "tests/manual/check_neuron_wan_w4.py comparison()/UPDATE_MIN_COSINE + tests/numerical/neuron_parity.py check()",
+   "min_cosine": 0.995,
+   "max_ratio_vs_control": 1.15,
+   "max_same_dtype_ratio": 1.2,
+   "same_dtype_gated_min_err_cos": 0.5,
+   "update_min_cosine": 0.98
+  },
+  "backends": [
+   {
+    "backend": "neuron",
+    "latents_file": "/home/ubuntu/wan21-bench/quality/device-2step/neuron/probe/latents-58644-1.pt",
+    "dtype": {
+     "initial": "torch.float32",
+     "final": "torch.float32"
+    },
+    "init_noise_equal_to_ref": true,
+    "init_vs_ref": {
+     "cosine": 0.9999999999999518,
+     "rel_l1": 0.0,
+     "rel_l2": 0.0,
+     "max_abs": 0.0,
+     "ref_absmean": 0.7998745863294252,
+     "rel_max": 0.0
+    },
+    "final": {
+     "vs_fp32": {
+      "cosine": 0.9991770213843546,
+      "rel_l1": 0.04058884440867046,
+      "rel_l2": 0.04121716543028455,
+      "max_abs": 0.41956865787506104,
+      "ref_absmean": 0.7995563942021071,
+      "rel_max": 0.14316178580935043,
+      "err_cos": 0.14833821963695004,
+      "vs_bf16": {
+       "cosine": 0.9984954428287923,
+       "rel_l1": 0.05531518799025212,
+       "rel_l2": 0.056036259279059385,
+       "max_abs": 0.45271527767181396,
+       "ref_absmean": 0.7962052065890572,
+       "rel_max": 0.14928925024907416
+      }
+     },
+     "control": {
+      "cosine": 0.9990223719624086,
+      "rel_l1": 0.043735671087522014,
+      "rel_l2": 0.04427968408406255,
+      "max_abs": 0.49967968463897705,
+      "ref_absmean": 0.7995563942021071,
+      "rel_max": 0.1704966151377081
+     },
+     "ok": true,
+     "reasons": [],
+     "notes": [
+      "err_cos 0.148 < 0.5: the result's error is decorrelated from the bf16 control's, so it does not round like upstream bf16; same-dtype 1.265x the control's distance from fp32, reported, not gated (D68/D69)"
+     ],
+     "ratio_vs_control": 0.9280489677966925,
+     "same_dtype_gated": false,
+     "same_dtype": "same-dtype 1.265x, reported, not gated (err_cos 0.148 < 0.5, D68)",
+     "tsround": {
+      "vs_fp32": {
+       "cosine": 0.9991770213843546,
+       "rel_l1": 0.04058884440867046,
+       "rel_l2": 0.04121716543028455,
+       "max_abs": 0.41956865787506104,
+       "ref_absmean": 0.7995563942021071,
+       "rel_max": 0.14316178580935043,
+       "err_cos": 0.272845154874065,
+       "vs_bf16": {
+        "cosine": 0.9985388438807318,
+        "rel_l1": 0.05292697176700277,
+        "rel_l2": 0.054127409564275496,
+        "max_abs": 0.4971061944961548,
+        "ref_absmean": 0.8035203844324151,
+        "rel_max": 0.16264419555765236
+       }
+      },
+      "control": {
+       "cosine": 0.9988425471245045,
+       "rel_l1": 0.04779446915163443,
+       "rel_l2": 0.048473426227338676,
+       "max_abs": 0.4104851484298706,
+       "ref_absmean": 0.7995563942021071,
+       "rel_max": 0.14006238501002571
+      },
+      "ok": true,
+      "reasons": [],
+      "ratio_vs_control": 0.8492372680172855,
+      "same_dtype": "same-dtype 1.107x, reported, not gated (err_cos 0.273 < 0.5, D68)",
+      "control_vs_bf16_control": {
+       "cosine": 0.9989620558419954,
+       "rel_l1": 0.04541689331155028,
+       "rel_l2": 0.04651481790176628,
+       "max_abs": 0.37693846225738525,
+       "ref_absmean": 0.7962052065890572,
+       "rel_max": 0.12430077621819902
+      }
+     }
+    },
+    "final_describe": "cos=0.999177 rel_l1=4.059e-02 (0.928x control 4.374e-02, cos 0.999022) same-dtype 1.265x, reported, not gated (err_cos 0.148 < 0.5, D68); vs the bf16-timestep control 4.779e-02: 0.849x (same-dtype 1.107x, reported, not gated (err_cos 0.273 < 0.5, D68)) [\"err_cos 0.148 < 0.5: the result's error is decorrelated from the bf16 control's, so it does not round like upstream bf16; same-dtype 1.265x the control's distance from fp32, reported, not gated (D68/D69)\"]",
+    "update": {
+     "vs_fp32": {
+      "cosine": 0.9995761379126517,
+      "rel_l1": 0.028662230291772135,
+      "rel_l2": 0.029275799751533403,
+      "max_abs": 0.4195687770843506,
+      "ref_absmean": 1.1322590622192619,
+      "rel_max": 0.06431506138404278,
+      "err_cos": 0.14833822040142397,
+      "vs_bf16": {
+       "cosine": 0.9992248437608667,
+       "rel_l1": 0.03898339795098136,
+       "rel_l2": 0.03974149343083177,
+       "max_abs": 0.45271527767181396,
+       "ref_absmean": 1.1297691583919878,
+       "rel_max": 0.06788365709675351
+      }
+     },
+     "control": {
+      "cosine": 0.9995064286636915,
+      "rel_l1": 0.030884394453162954,
+      "rel_l2": 0.03145105099073384,
+      "max_abs": 0.4996796250343323,
+      "ref_absmean": 1.1322590622192619,
+      "rel_max": 0.07659513174398512
+     },
+     "ok": true,
+     "reasons": [],
+     "notes": [
+      "err_cos 0.148 < 0.5: the result's error is decorrelated from the bf16 control's, so it does not round like upstream bf16; same-dtype 1.262x the control's distance from fp32, reported, not gated (D68/D69)"
+     ],
+     "ratio_vs_control": 0.9280489645098662,
+     "same_dtype_gated": false,
+     "same_dtype": "same-dtype 1.262x, reported, not gated (err_cos 0.148 < 0.5, D68)",
+     "tsround": {
+      "vs_fp32": {
+       "cosine": 0.9995761379126517,
+       "rel_l1": 0.028662230291772135,
+       "rel_l2": 0.029275799751533403,
+       "max_abs": 0.4195687770843506,
+       "ref_absmean": 1.1322590622192619,
+       "rel_max": 0.06431506138404278,
+       "err_cos": 0.2728451531383063,
+       "vs_bf16": {
+        "cosine": 0.999257537995857,
+        "rel_l1": 0.03747360403814482,
+        "rel_l2": 0.03854285108405664,
+        "max_abs": 0.49710631370544434,
+        "ref_absmean": 1.1348761844025441,
+        "rel_max": 0.07560278921158498
+       }
+      },
+      "control": {
+       "cosine": 0.9994113484791546,
+       "rel_l1": 0.03375055637363126,
+       "rel_l2": 0.03442978930890186,
+       "max_abs": 0.41048526763916016,
+       "ref_absmean": 1.1322590622192619,
+       "rel_max": 0.06292266400021052
+      },
+      "ok": true,
+      "reasons": [],
+      "ratio_vs_control": 0.8492372681051698,
+      "same_dtype": "same-dtype 1.110x, reported, not gated (err_cos 0.273 < 0.5, D68)",
+      "control_vs_bf16_control": {
+       "cosine": 0.9994675383842555,
+       "rel_l1": 0.03200757151233725,
+       "rel_l2": 0.03298878908739597,
+       "max_abs": 0.37693846225738525,
+       "ref_absmean": 1.1297691583919878,
+       "rel_max": 0.05652109080579193
+      }
+     }
+    },
+    "update_describe": "cosine 0.999576 (min 0.98); cos=0.999576 rel_l1=2.866e-02 (0.928x control 3.088e-02, cos 0.999506) same-dtype 1.262x, reported, not gated (err_cos 0.148 < 0.5, D68); vs the bf16-timestep control 3.375e-02: 0.849x (same-dtype 1.110x, reported, not gated (err_cos 0.273 < 0.5, D68)) [\"err_cos 0.148 < 0.5: the result's error is decorrelated from the bf16 control's, so it does not round like upstream bf16; same-dtype 1.262x the control's distance from fp32, reported, not gated (D68/D69)\"]",
+    "update_cosine": 0.9995761379126517,
+    "checks": {
+     "init_latents": true,
+     "parity_latents_final": true,
+     "update_final": true
+    },
+    "parity_pass": true
+   },
+   {
+    "backend": "trainium",
+    "latents_file": "/home/ubuntu/wan21-bench/quality/device-2step/trainium/probe/latents-61356-1.pt",
+    "dtype": {
+     "initial": "torch.float32",
+     "final": "torch.float32"
+    },
+    "init_noise_equal_to_ref": true,
+    "init_vs_ref": {
+     "cosine": 0.9999999999999518,
+     "rel_l1": 0.0,
+     "rel_l2": 0.0,
+     "max_abs": 0.0,
+     "ref_absmean": 0.7998745863294252,
+     "rel_max": 0.0
+    },
+    "final": {
+     "vs_fp32": {
+      "cosine": 0.9983485524570265,
+      "rel_l1": 0.05565046274198309,
+      "rel_l2": 0.05767949141637085,
+      "max_abs": 0.5319865942001343,
+      "ref_absmean": 0.7995563942021071,
+      "rel_max": 0.18152011458159106,
+      "err_cos": 0.38271076163852086,
+      "vs_bf16": {
+       "cosine": 0.9983583399903075,
+       "rel_l1": 0.05574825270585973,
+       "rel_l2": 0.05793266669820628,
+       "max_abs": 0.498623251914978,
+       "ref_absmean": 0.7962052065890572,
+       "rel_max": 0.16442805247916834
+      }
+     },
+     "control": {
+      "cosine": 0.9990223719624086,
+      "rel_l1": 0.043735671087522014,
+      "rel_l2": 0.04427968408406255,
+      "max_abs": 0.49967968463897705,
+      "ref_absmean": 0.7995563942021071,
+      "rel_max": 0.1704966151377081
+     },
+     "ok": false,
+     "reasons": [
+      "rel_l1 5.565e-02 is 1.272x the control's 4.374e-02, above max_ratio_vs_control 1.15"
+     ],
+     "notes": [
+      "err_cos 0.383 < 0.5: the result's error is decorrelated from the bf16 control's, so it does not round like upstream bf16; same-dtype 1.275x the control's distance from fp32, reported, not gated (D68/D69)"
+     ],
+     "ratio_vs_control": 1.2724273198099028,
+     "same_dtype_gated": false,
+     "same_dtype": "same-dtype 1.275x, reported, not gated (err_cos 0.383 < 0.5, D68)",
+     "tsround": {
+      "vs_fp32": {
+       "cosine": 0.9983485524570265,
+       "rel_l1": 0.05565046274198309,
+       "rel_l2": 0.05767949141637085,
+       "max_abs": 0.5319865942001343,
+       "ref_absmean": 0.7995563942021071,
+       "rel_max": 0.18152011458159106,
+       "err_cos": 0.5685371031753731,
+       "vs_bf16": {
+        "cosine": 0.9987625539745025,
+        "rel_l1": 0.04815175417579453,
+        "rel_l2": 0.04973296941769596,
+        "max_abs": 0.5623118877410889,
+        "ref_absmean": 0.8035203844324151,
+        "rel_max": 0.18397832424287314
+       }
+      },
+      "control": {
+       "cosine": 0.9988425471245045,
+       "rel_l1": 0.04779446915163443,
+       "rel_l2": 0.048473426227338676,
+       "max_abs": 0.4104851484298706,
+       "ref_absmean": 0.7995563942021071,
+       "rel_max": 0.14006238501002571
+      },
+      "ok": false,
+      "reasons": [
+       "rel_l1 5.565e-02 is 1.164x the control's 4.779e-02, above max_ratio_vs_control 1.15"
+      ],
+      "ratio_vs_control": 1.164370349326916,
+      "same_dtype": "same-dtype 1.007x, gated (err_cos 0.569 >= 0.5, D68)",
+      "control_vs_bf16_control": {
+       "cosine": 0.9989620558419954,
+       "rel_l1": 0.04541689331155028,
+       "rel_l2": 0.04651481790176628,
+       "max_abs": 0.37693846225738525,
+       "ref_absmean": 0.7962052065890572,
+       "rel_max": 0.12430077621819902
+      }
+     }
+    },
+    "final_describe": "cos=0.998349 rel_l1=5.565e-02 (1.272x control 4.374e-02, cos 0.999022) same-dtype 1.275x, reported, not gated (err_cos 0.383 < 0.5, D68); vs the bf16-timestep control 4.779e-02: 1.164x (same-dtype 1.007x, gated (err_cos 0.569 >= 0.5, D68)) [\"rel_l1 5.565e-02 is 1.272x the control's 4.374e-02, above max_ratio_vs_control 1.15\"] [\"err_cos 0.383 < 0.5: the result's error is decorrelated from the bf16 control's, so it does not round like upstream bf16; same-dtype 1.275x the control's distance from fp32, reported, not gated (D68/D69)\"]",
+    "update": {
+     "vs_fp32": {
+      "cosine": 0.9991664076330931,
+      "rel_l1": 0.03929814720599235,
+      "rel_l2": 0.040968689359997965,
+      "max_abs": 0.531986653804779,
+      "ref_absmean": 1.1322590622192619,
+      "rel_max": 0.08154742717680183,
+      "err_cos": 0.3827107616543825,
+      "vs_bf16": {
+       "cosine": 0.9991705202527077,
+       "rel_l1": 0.039288600447154765,
+       "rel_l2": 0.04108644521447728,
+       "max_abs": 0.498623251914978,
+       "ref_absmean": 1.1297691583919878,
+       "rel_max": 0.07476745655136062
+      }
+     },
+     "control": {
+      "cosine": 0.9995064286636915,
+      "rel_l1": 0.030884394453162954,
+      "rel_l2": 0.03145105099073384,
+      "max_abs": 0.4996796250343323,
+      "ref_absmean": 1.1322590622192619,
+      "rel_max": 0.07659513174398512
+     },
+     "ok": false,
+     "reasons": [
+      "rel_l1 3.930e-02 is 1.272x the control's 3.088e-02, above max_ratio_vs_control 1.15"
+     ],
+     "notes": [
+      "err_cos 0.383 < 0.5: the result's error is decorrelated from the bf16 control's, so it does not round like upstream bf16; same-dtype 1.272x the control's distance from fp32, reported, not gated (D68/D69)"
+     ],
+     "ratio_vs_control": 1.2724273181262817,
+     "same_dtype_gated": false,
+     "same_dtype": "same-dtype 1.272x, reported, not gated (err_cos 0.383 < 0.5, D68)",
+     "tsround": {
+      "vs_fp32": {
+       "cosine": 0.9991664076330931,
+       "rel_l1": 0.03929814720599235,
+       "rel_l2": 0.040968689359997965,
+       "max_abs": 0.531986653804779,
+       "ref_absmean": 1.1322590622192619,
+       "rel_max": 0.08154742717680183,
+       "err_cos": 0.5685371059215407,
+       "vs_bf16": {
+        "cosine": 0.9993731714647038,
+        "rel_l1": 0.03409263183913805,
+        "rel_l2": 0.03541367387857203,
+        "max_abs": 0.5623118877410889,
+        "ref_absmean": 1.1348761844025441,
+        "rel_max": 0.08551962819214617
+       }
+      },
+      "control": {
+       "cosine": 0.9994113484791546,
+       "rel_l1": 0.03375055637363126,
+       "rel_l2": 0.03442978930890186,
+       "max_abs": 0.41048526763916016,
+       "ref_absmean": 1.1322590622192619,
+       "rel_max": 0.06292266400021052
+      },
+      "ok": false,
+      "reasons": [
+       "rel_l1 3.930e-02 is 1.164x the control's 3.375e-02, above max_ratio_vs_control 1.15"
+      ],
+      "ratio_vs_control": 1.1643703520305617,
+      "same_dtype": "same-dtype 1.010x, gated (err_cos 0.569 >= 0.5, D68)",
+      "control_vs_bf16_control": {
+       "cosine": 0.9994675383842555,
+       "rel_l1": 0.03200757151233725,
+       "rel_l2": 0.03298878908739597,
+       "max_abs": 0.37693846225738525,
+       "ref_absmean": 1.1297691583919878,
+       "rel_max": 0.05652109080579193
+      }
+     }
+    },
+    "update_describe": "cosine 0.999166 (min 0.98); cos=0.999166 rel_l1=3.930e-02 (1.272x control 3.088e-02, cos 0.999506) same-dtype 1.272x, reported, not gated (err_cos 0.383 < 0.5, D68); vs the bf16-timestep control 3.375e-02: 1.164x (same-dtype 1.010x, gated (err_cos 0.569 >= 0.5, D68)) [\"rel_l1 3.930e-02 is 1.272x the control's 3.088e-02, above max_ratio_vs_control 1.15\"] [\"err_cos 0.383 < 0.5: the result's error is decorrelated from the bf16 control's, so it does not round like upstream bf16; same-dtype 1.272x the control's distance from fp32, reported, not gated (D68/D69)\"]",
+    "update_cosine": 0.9991664076330931,
+    "checks": {
+     "init_latents": true,
+     "parity_latents_final": false,
+     "update_final": false
+    },
+    "parity_pass": false
+   }
+  ],
+  "cross_backend": {
+   "neuron_vs_trainium": {
+    "cosine": 0.9978870824027606,
+    "rel_l1": 0.06269134341251517,
+    "rel_l2": 0.06517019999772965,
+    "max_abs": 0.5036323666572571,
+    "ref_absmean": 0.8047308292641684,
+    "rel_max": 0.16534198814060916
+   }
+  },
+  "torch_neuronx_loaded": false
+ },
+ "metrics": {
+  "meta": {
+   "script": "benchmark/wan21_quality.py",
+   "out": "/home/ubuntu/wan21-bench",
+   "generated_utc": "2026-10-13 05:51:54",
+   "elapsed_s": 488.7,
+   "torch_threads": 3,
+   "prompt": "a cinematic shot of a red fox running through a snowy forest",
+   "clip": {
+    "model": "openai/clip-vit-large-patch14",
+    "revision": "32bd64288804d66eefd0ccbe215aa642df71cc41",
+    "texts": [
+     "a cinematic shot of a red fox running through a snowy forest",
+     "a bowl of fruit on a kitchen table",
+     "a city street at night with neon signs",
+     "a portrait of an elderly man"
+    ]
+   },
+   "definitions": {
+    "latent_rel_l2": "||a - b|| / ||b||, b = reference (trainium, or the g1 run)",
+    "latent_psnr_db": "10 log10(peak^2 / MSE), peak = max(b) - min(b)",
+    "update_cosine": "cosine of (final - initial) between the two runs",
+    "video_psnr": "per frame, RGB uint8 decoded from out.mp4, peak 255",
+    "ssim": "BT.601 luma, gaussian 11x11 sigma 1.5, K1=.01 K2=.03 L=255, valid",
+    "temporal_mean_abs_diff": "mean |frame[i+1] - frame[i]| over RGB (0-255)",
+    "laplacian_var": "variance of 4-neighbour Laplacian of luma, valid region",
+    "saturated_frac": "fraction of RGB values <= 2 or >= 253",
+    "clip": "cosine(text_emb, image_emb), CLIPProcessor resize+center-crop 224",
+    "margin_vs_best_control": "prompt cosine - max control cosine (frame means)",
+    "comparisons": "cross-backend pairs use the warm1 run of each backend",
+    "cpu_vae_reference": "diffusers AutoencoderKLWan fp32 CPU decode of the probe's final latents, encoded like the CLI (crf 18)"
+   }
+  },
+  "initial_noise": {
+   "runs": {
+    "neuron/cold-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "neuron/warm1-g1": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "neuron/warm1-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "neuron/warm2-g1": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "neuron/warm2-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "neuron/warm3-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "trainium/cold-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "trainium/warm1-g1": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "trainium/warm1-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "trainium/warm2-g1": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "trainium/warm2-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "trainium/warm3-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83"
+   },
+   "all_equal": true,
+   "distinct": 1,
+   "runs_without_latents": [
+    "neuron/first-g5"
+   ]
+  },
+  "final_latents": {
+   "neuron_vs_trainium_g5": {
+    "a": "neuron/warm1-g5",
+    "b_reference": "trainium/warm1-g5",
+    "cosine": 0.9695869651652053,
+    "rel_l2": 0.24842070976967529,
+    "max_abs": 2.6475754976272583,
+    "mean_abs": 0.13556171363702618,
+    "psnr_db": 32.17730651684657,
+    "psnr_peak": 7.9850616455078125,
+    "cosine_per_latent_frame": [
+     0.962308977047537,
+     0.9724629828697551,
+     0.9743508703001602
+    ],
+    "update_cosine": 0.9831013696970285,
+    "update_rel_l2": 0.18354579014472228
+   },
+   "neuron_vs_trainium_g1": {
+    "a": "neuron/warm1-g1",
+    "b_reference": "trainium/warm1-g1",
+    "cosine": 0.9973597212249357,
+    "rel_l2": 0.0726332604172313,
+    "max_abs": 0.763764500617981,
+    "mean_abs": 0.03253964495385376,
+    "psnr_db": 43.15490225805468,
+    "psnr_peak": 7.262003183364868,
+    "cosine_per_latent_frame": [
+     0.9976535417175707,
+     0.9971481500780593,
+     0.997401699195769
+    ],
+    "update_cosine": 0.9987977853475624,
+    "update_rel_l2": 0.04903233765853661
+   },
+   "reference_neuron_g5_vs_g1": {
+    "a": "neuron/warm1-g5",
+    "b_reference": "neuron/warm1-g1",
+    "cosine": 0.6262029639478459,
+    "rel_l2": 0.9427845541223022,
+    "max_abs": 3.8916479349136353,
+    "mean_abs": 0.49721347825306556,
+    "psnr_db": 20.874152148737885,
+    "psnr_peak": 7.21989369392395,
+    "cosine_per_latent_frame": [
+     0.6295766851797111,
+     0.596007203926654,
+     0.6741063946640495
+    ],
+    "update_cosine": 0.8066568455855901,
+    "update_rel_l2": 0.6339333473844049
+   },
+   "reference_trainium_g5_vs_g1": {
+    "a": "trainium/warm1-g5",
+    "b_reference": "trainium/warm1-g1",
+    "cosine": 0.613871875994176,
+    "rel_l2": 0.9474262676397975,
+    "max_abs": 3.993710517883301,
+    "mean_abs": 0.5032950706957976,
+    "psnr_db": 20.84670461915121,
+    "psnr_peak": 7.262003183364868,
+    "cosine_per_latent_frame": [
+     0.6211720982767848,
+     0.5788326887157333,
+     0.6605745608201492
+    ],
+    "update_cosine": 0.8040016527705927,
+    "update_rel_l2": 0.6395764749459175
+   }
+  },
+  "determinism": {
+   "neuron_g5": {
+    "warm_final_latents": {
+     "runs": {
+      "neuron/warm1-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+      "neuron/warm2-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+      "neuron/warm3-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "warm_mp4": {
+     "runs": {
+      "neuron/warm1-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+      "neuron/warm2-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+      "neuron/warm3-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "warm_decoded_frames": {
+     "runs": {
+      "neuron/warm1-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+      "neuron/warm2-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+      "neuron/warm3-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "all_runs_final_latents": {
+     "runs": {
+      "neuron/cold-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+      "neuron/warm1-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+      "neuron/warm2-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+      "neuron/warm3-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "all_runs_mp4": {
+     "runs": {
+      "neuron/cold-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+      "neuron/first-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+      "neuron/warm1-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+      "neuron/warm2-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+      "neuron/warm3-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "all_runs_decoded_frames": {
+     "runs": {
+      "neuron/cold-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+      "neuron/first-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+      "neuron/warm1-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+      "neuron/warm2-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+      "neuron/warm3-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8"
+     },
+     "all_equal": true,
+     "distinct": 1
+    }
+   },
+   "neuron_g1": {
+    "warm_final_latents": {
+     "runs": {
+      "neuron/warm1-g1": "9be6fc6ae55e3fa0a3d8a9399360c71c6b84c57def5c256e292b18d7c4a3ceed",
+      "neuron/warm2-g1": "9be6fc6ae55e3fa0a3d8a9399360c71c6b84c57def5c256e292b18d7c4a3ceed"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "warm_mp4": {
+     "runs": {
+      "neuron/warm1-g1": "e8bbe70b6e56b1f402dfaaddcfc315d26a03caa209ae0a4a6454da912bcf83e7",
+      "neuron/warm2-g1": "e8bbe70b6e56b1f402dfaaddcfc315d26a03caa209ae0a4a6454da912bcf83e7"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "warm_decoded_frames": {
+     "runs": {
+      "neuron/warm1-g1": "d4a9a02d8d4d889b3b893b2d0a8a242d7696507491291a880082b83004d9b59f",
+      "neuron/warm2-g1": "d4a9a02d8d4d889b3b893b2d0a8a242d7696507491291a880082b83004d9b59f"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "all_runs_final_latents": {
+     "runs": {
+      "neuron/warm1-g1": "9be6fc6ae55e3fa0a3d8a9399360c71c6b84c57def5c256e292b18d7c4a3ceed",
+      "neuron/warm2-g1": "9be6fc6ae55e3fa0a3d8a9399360c71c6b84c57def5c256e292b18d7c4a3ceed"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "all_runs_mp4": {
+     "runs": {
+      "neuron/warm1-g1": "e8bbe70b6e56b1f402dfaaddcfc315d26a03caa209ae0a4a6454da912bcf83e7",
+      "neuron/warm2-g1": "e8bbe70b6e56b1f402dfaaddcfc315d26a03caa209ae0a4a6454da912bcf83e7"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "all_runs_decoded_frames": {
+     "runs": {
+      "neuron/warm1-g1": "d4a9a02d8d4d889b3b893b2d0a8a242d7696507491291a880082b83004d9b59f",
+      "neuron/warm2-g1": "d4a9a02d8d4d889b3b893b2d0a8a242d7696507491291a880082b83004d9b59f"
+     },
+     "all_equal": true,
+     "distinct": 1
+    }
+   },
+   "trainium_g5": {
+    "warm_final_latents": {
+     "runs": {
+      "trainium/warm1-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+      "trainium/warm2-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+      "trainium/warm3-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "warm_mp4": {
+     "runs": {
+      "trainium/warm1-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+      "trainium/warm2-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+      "trainium/warm3-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "warm_decoded_frames": {
+     "runs": {
+      "trainium/warm1-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+      "trainium/warm2-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+      "trainium/warm3-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "all_runs_final_latents": {
+     "runs": {
+      "trainium/cold-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+      "trainium/warm1-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+      "trainium/warm2-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+      "trainium/warm3-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "all_runs_mp4": {
+     "runs": {
+      "trainium/cold-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+      "trainium/warm1-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+      "trainium/warm2-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+      "trainium/warm3-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "all_runs_decoded_frames": {
+     "runs": {
+      "trainium/cold-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+      "trainium/warm1-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+      "trainium/warm2-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+      "trainium/warm3-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93"
+     },
+     "all_equal": true,
+     "distinct": 1
+    }
+   },
+   "trainium_g1": {
+    "warm_final_latents": {
+     "runs": {
+      "trainium/warm1-g1": "cc515a59c5ba86c1eba92e4402244294b91281c8988fcd69db80a6d9db4cc60b",
+      "trainium/warm2-g1": "cc515a59c5ba86c1eba92e4402244294b91281c8988fcd69db80a6d9db4cc60b"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "warm_mp4": {
+     "runs": {
+      "trainium/warm1-g1": "98bbfa90f0107ed6d2b2ad7658042adf287d2903f674601e68319cd47d365356",
+      "trainium/warm2-g1": "98bbfa90f0107ed6d2b2ad7658042adf287d2903f674601e68319cd47d365356"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "warm_decoded_frames": {
+     "runs": {
+      "trainium/warm1-g1": "d8f046cc88923c5e1cc9ee54ce15efb7f108cba9cfa8f265de560702f112ccf4",
+      "trainium/warm2-g1": "d8f046cc88923c5e1cc9ee54ce15efb7f108cba9cfa8f265de560702f112ccf4"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "all_runs_final_latents": {
+     "runs": {
+      "trainium/warm1-g1": "cc515a59c5ba86c1eba92e4402244294b91281c8988fcd69db80a6d9db4cc60b",
+      "trainium/warm2-g1": "cc515a59c5ba86c1eba92e4402244294b91281c8988fcd69db80a6d9db4cc60b"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "all_runs_mp4": {
+     "runs": {
+      "trainium/warm1-g1": "98bbfa90f0107ed6d2b2ad7658042adf287d2903f674601e68319cd47d365356",
+      "trainium/warm2-g1": "98bbfa90f0107ed6d2b2ad7658042adf287d2903f674601e68319cd47d365356"
+     },
+     "all_equal": true,
+     "distinct": 1
+    },
+    "all_runs_decoded_frames": {
+     "runs": {
+      "trainium/warm1-g1": "d8f046cc88923c5e1cc9ee54ce15efb7f108cba9cfa8f265de560702f112ccf4",
+      "trainium/warm2-g1": "d8f046cc88923c5e1cc9ee54ce15efb7f108cba9cfa8f265de560702f112ccf4"
+     },
+     "all_equal": true,
+     "distinct": 1
+    }
+   }
+  },
+  "video_compare": {
+   "neuron_vs_trainium_g5": {
+    "a": "neuron/warm1-g5",
+    "b": "trainium/warm1-g5",
+    "psnr_db_per_frame": [
+     18.032715775364665,
+     12.681826777540447,
+     11.068919456472486,
+     9.410788263676354,
+     11.171325477410601,
+     12.27929545887823,
+     11.381452170532373,
+     11.082615222805208,
+     11.782076090698745
+    ],
+    "psnr_db_mean": 12.099001632597679,
+    "psnr_db_min": 9.410788263676354,
+    "ssim_luma_per_frame": [
+     0.7623210382505038,
+     0.47874804623416267,
+     0.36266638844974897,
+     0.32925307155381955,
+     0.2541075408893353,
+     0.33598597474147873,
+     0.36187690702791525,
+     0.36010365038730163,
+     0.3209579836167418
+    ],
+    "ssim_luma_mean": 0.3962245112390008,
+    "ssim_luma_min": 0.2541075408893353,
+    "mean_abs_rgb_diff": 54.31542718349359
+   },
+   "neuron_vs_trainium_g1": {
+    "a": "neuron/warm1-g1",
+    "b": "trainium/warm1-g1",
+    "psnr_db_per_frame": [
+     20.60592667845626,
+     14.707466888748318,
+     13.155579394456527,
+     12.080507985395986,
+     12.221197987350891,
+     12.550870392882981,
+     12.557535705687188,
+     12.515050597340782,
+     12.696820622976725
+    ],
+    "psnr_db_mean": 13.676772917032851,
+    "psnr_db_min": 12.080507985395986,
+    "ssim_luma_per_frame": [
+     0.8211204488630621,
+     0.5458133670642548,
+     0.45099104480207497,
+     0.38355485292121866,
+     0.28984704229479097,
+     0.37591616422236324,
+     0.41677809885416367,
+     0.4130445001111697,
+     0.35604589838438583
+    ],
+    "ssim_luma_mean": 0.4503457130574982,
+    "ssim_luma_min": 0.28984704229479097,
+    "mean_abs_rgb_diff": 45.65163066461895
+   },
+   "reference_neuron_g5_vs_g1": {
+    "a": "neuron/warm1-g5",
+    "b": "neuron/warm1-g1",
+    "psnr_db_per_frame": [
+     10.476451730365392,
+     11.645037445285011,
+     11.98167430384608,
+     12.333229776058607,
+     12.47169478179388,
+     12.650562007492042,
+     12.770831596875498,
+     12.812184015460542,
+     12.795824225759294
+    ],
+    "psnr_db_mean": 12.215276653659593,
+    "psnr_db_min": 10.476451730365392,
+    "ssim_luma_per_frame": [
+     0.47996317344949463,
+     0.5312904962352846,
+     0.5514261865836355,
+     0.5634965552914052,
+     0.5706705926283294,
+     0.5748755837870778,
+     0.5727738964828234,
+     0.576436032841182,
+     0.569701174492345
+    ],
+    "ssim_luma_mean": 0.5545148546435086,
+    "ssim_luma_min": 0.47996317344949463,
+    "mean_abs_rgb_diff": 46.594771078169515
+   },
+   "reference_trainium_g5_vs_g1": {
+    "a": "trainium/warm1-g5",
+    "b": "trainium/warm1-g1",
+    "psnr_db_per_frame": [
+     10.197303071094614,
+     16.02658444172507,
+     22.6277563898333,
+     24.093388850420375,
+     21.715566877828635,
+     22.105771592399336,
+     26.1351728967426,
+     26.80829383530512,
+     24.100099725145334
+    ],
+    "psnr_db_mean": 21.53443752005493,
+    "psnr_db_min": 10.197303071094614,
+    "ssim_luma_per_frame": [
+     0.4514170877305019,
+     0.7709157222687616,
+     0.8304594312175319,
+     0.8399516009211357,
+     0.6420531513262671,
+     0.7756456116400128,
+     0.8583910644924023,
+     0.8637982802839388,
+     0.7735726067930812
+    ],
+    "ssim_luma_mean": 0.7562449507415149,
+    "ssim_luma_min": 0.4514170877305019,
+    "mean_abs_rgb_diff": 19.79256847993827
+   }
+  },
+  "cpu_vae_reference": {
+   "neuron/warm1-g5": {
+    "mp4": "/home/ubuntu/wan21-bench/quality/ref/neuron_warm1-g5_cpuvae.mp4",
+    "mp4_sha256": "148b5d89d292869cec4cf5e46f1bbb17897fed36e6cef56b29bb261b2fe8092e",
+    "decode_s": 97.6,
+    "backend_mp4_vs_cpu_vae_mp4": {
+     "psnr_db_per_frame": [
+      33.15229632809378,
+      34.24522668201726,
+      35.79195317049115,
+      35.74381173761658,
+      35.748067854585116,
+      35.67746360118242,
+      35.297950481228135,
+      35.31520769121987,
+      34.780765241214
+     ],
+     "psnr_db_mean": 35.083638087516476,
+     "psnr_db_min": 33.15229632809378,
+     "ssim_luma_per_frame": [
+      0.9690115736055613,
+      0.9657065703547347,
+      0.9754586480364477,
+      0.9744769450536619,
+      0.9752729437470055,
+      0.9747144101641939,
+      0.9716985312476621,
+      0.972064356157412,
+      0.9690869847808772
+     ],
+     "ssim_luma_mean": 0.9719434403497283,
+     "ssim_luma_min": 0.9657065703547347,
+     "mean_abs_rgb_diff": 3.2326933278430676
+    },
+    "backend_mp4_vs_cpu_vae_raw": {
+     "psnr_db_per_frame": [
+      31.800461601948946,
+      32.56083588548506,
+      34.22999024438393,
+      33.98987421947125,
+      33.594075487326805,
+      33.60867354946522,
+      33.45420039806287,
+      33.1146743350248,
+      32.863277156683075
+     ],
+     "psnr_db_mean": 33.24622920865021,
+     "psnr_db_min": 31.800461601948946,
+     "ssim_luma_per_frame": [
+      0.9707389918975399,
+      0.967352950574147,
+      0.9779340889520473,
+      0.976072772599603,
+      0.9750524889660395,
+      0.9737832220235886,
+      0.9721738985008109,
+      0.9703436109584702,
+      0.9677974964902478
+     ],
+     "ssim_luma_mean": 0.9723610578847216,
+     "ssim_luma_min": 0.967352950574147,
+     "mean_abs_rgb_diff": 3.8855066254154798
+    },
+    "h264_loss_cpu_vae_mp4_vs_raw": {
+     "psnr_db_per_frame": [
+      34.78398601662198,
+      35.48811666326285,
+      37.1834167129292,
+      37.04304363806368,
+      36.49741231869706,
+      36.55044435757094,
+      36.65909265050215,
+      36.285390940574885,
+      36.23923531959312
+     ],
+     "psnr_db_mean": 36.30334873531288,
+     "psnr_db_min": 34.78398601662198,
+     "ssim_luma_per_frame": [
+      0.9871270500302386,
+      0.9849728601076517,
+      0.9900345347570287,
+      0.9889784418633252,
+      0.9883228094241704,
+      0.988081714586986,
+      0.9874047574512007,
+      0.9867943161950375,
+      0.9853876917768429
+     ],
+     "ssim_luma_mean": 0.9874560195769424,
+     "ssim_luma_min": 0.9849728601076517,
+     "mean_abs_rgb_diff": 2.673780363396249
+    },
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      99.97225393963676,
+      115.42372991230413,
+      118.1062686409366
+     ],
+     "channel_std": [
+      67.19664564777663,
+      66.96052926039692,
+      67.03541678862605
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 6.237852960570246,
+     "temporal_mean_abs_diff_per_pair": [
+      19.57777276976496,
+      13.839413060897435,
+      3.7225869724893164,
+      2.3810296474358976,
+      3.300601796207265,
+      2.8591454660790596,
+      2.0966796875,
+      2.125594284188034
+     ],
+     "laplacian_var_mean": 294.05175522743707,
+     "laplacian_var_per_frame": [
+      471.25754033852496,
+      278.52158740623554,
+      304.6739925158189,
+      276.7225710502059,
+      258.5650573683398,
+      258.9400161160198,
+      284.43102424156064,
+      258.0907564585874,
+      255.26325155164133
+     ],
+     "saturated_frac": 0.027051801400759735,
+     "saturated_low_frac": 0.02395963170702754,
+     "saturated_high_frac": 0.0030921696937321937
+    },
+    "clip": {
+     "prompt_cosine_mean": 0.3038528694046868,
+     "prompt_cosine_per_frame": [
+      0.2850084900856018,
+      0.28768497705459595,
+      0.3089146614074707,
+      0.3073309361934662,
+      0.31078198552131653,
+      0.3123651146888733,
+      0.30945104360580444,
+      0.30811911821365356,
+      0.3050194978713989
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10822232150369221,
+      "a city street at night with neon signs": 0.1111183257566558,
+      "a portrait of an elderly man": 0.15638353096114266
+     },
+     "margin_vs_best_control": 0.14746933844354415,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "trainium/warm1-g5": {
+    "mp4": "/home/ubuntu/wan21-bench/quality/ref/trainium_warm1-g5_cpuvae.mp4",
+    "mp4_sha256": "6fbbf654299f8c733b27f9b19e5021160821f812ede448f80e378ac3ac261299",
+    "decode_s": 97.3,
+    "backend_mp4_vs_cpu_vae_mp4": {
+     "psnr_db_per_frame": [
+      21.08889551968073,
+      12.706262192094622,
+      11.049122396255393,
+      9.374482239808833,
+      11.096971644611152,
+      12.185992426072769,
+      11.309443082284185,
+      11.038764429656101,
+      11.72282148484242
+     ],
+     "psnr_db_mean": 12.396972823922912,
+     "psnr_db_min": 9.374482239808833,
+     "ssim_luma_per_frame": [
+      0.8759578729367463,
+      0.4751311665888241,
+      0.35834987921154016,
+      0.3209190307319502,
+      0.24317855897507576,
+      0.32471923994218926,
+      0.348676713278302,
+      0.34910908787234146,
+      0.3107585480088402
+     ],
+     "ssim_luma_mean": 0.4007555663939788,
+     "ssim_luma_min": 0.24317855897507576,
+     "mean_abs_rgb_diff": 54.100196796355654
+    },
+    "backend_mp4_vs_cpu_vae_raw": {
+     "psnr_db_per_frame": [
+      20.76900871280827,
+      12.643216766785548,
+      10.99949702207578,
+      9.331773428551491,
+      11.060649462319297,
+      12.175622795734675,
+      11.274346322089988,
+      10.994662220659993,
+      11.687832329183362
+     ],
+     "psnr_db_mean": 12.32628989557871,
+     "psnr_db_min": 9.331773428551491,
+     "ssim_luma_per_frame": [
+      0.8735800585454239,
+      0.4809298831304808,
+      0.36197228356628436,
+      0.32392860812822905,
+      0.24421333344687643,
+      0.3252899675564471,
+      0.35059475812642593,
+      0.349326577170449,
+      0.3115627040105993
+     ],
+     "ssim_luma_mean": 0.4023775748534685,
+     "ssim_luma_min": 0.24421333344687643,
+     "mean_abs_rgb_diff": 54.429611637879866
+    },
+    "h264_loss_cpu_vae_mp4_vs_raw": {
+     "psnr_db_per_frame": [
+      34.99260003043712,
+      35.54207386389735,
+      37.309217749768,
+      36.73497095161488,
+      36.68591002876998,
+      36.72077900008189,
+      36.775524145952964,
+      36.44139019499901,
+      36.33288715115924
+     ],
+     "psnr_db_mean": 36.3928170129645,
+     "psnr_db_min": 34.99260003043712,
+     "ssim_luma_per_frame": [
+      0.9877415918468034,
+      0.9858165421246079,
+      0.9901299916219273,
+      0.9894566822537854,
+      0.9892059839585107,
+      0.9888835096100679,
+      0.9876195686428142,
+      0.9871870329011568,
+      0.9857010764758161
+     ],
+     "ssim_luma_mean": 0.9879713310483879,
+     "ssim_luma_min": 0.9857010764758161,
+     "mean_abs_rgb_diff": 2.6483966939696106
+    },
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      98.5295397636218,
+      114.72031138710827,
+      117.55578286369303
+     ],
+     "channel_std": [
+      66.84997757413822,
+      67.43410238690547,
+      67.60840743051723
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 6.022027014055823,
+     "temporal_mean_abs_diff_per_pair": [
+      17.282194010416667,
+      13.894759949252137,
+      3.755073951655983,
+      2.171478532318376,
+      3.040885416666667,
+      3.125326355502137,
+      2.394525407318376,
+      2.511972489316239
+     ],
+     "laplacian_var_mean": 269.3876567988111,
+     "laplacian_var_per_frame": [
+      414.90033497368336,
+      254.45406679681557,
+      279.38281146729554,
+      234.10950255720826,
+      243.61852011754115,
+      237.13440594148108,
+      271.73223780033464,
+      239.84070511897346,
+      249.31632641596653
+     ],
+     "saturated_frac": 0.02411367447174739,
+     "saturated_low_frac": 0.021518596420940173,
+     "saturated_high_frac": 0.0025950780508072176
+    },
+    "clip": {
+     "prompt_cosine_mean": 0.30892135368453133,
+     "prompt_cosine_per_frame": [
+      0.2934994101524353,
+      0.28737133741378784,
+      0.31226271390914917,
+      0.3102858066558838,
+      0.31149357557296753,
+      0.3133094906806946,
+      0.3169322907924652,
+      0.31810271739959717,
+      0.31703484058380127
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10420029858748119,
+      "a city street at night with neon signs": 0.11237569567230013,
+      "a portrait of an elderly man": 0.16246366335286033
+     },
+     "margin_vs_best_control": 0.146457690331671,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "neuron_vs_trainium_g5": {
+    "a": "neuron/warm1-g5",
+    "b": "trainium/warm1-g5",
+    "psnr_db_per_frame": [
+     20.76251006773974,
+     22.73807754127466,
+     23.487690358660586,
+     23.73394305942839,
+     23.806912962322237,
+     23.973931810047674,
+     23.8902354683764,
+     23.93086105851293,
+     23.7197498775261
+    ],
+    "psnr_db_mean": 23.33821246709875,
+    "psnr_db_min": 20.76251006773974,
+    "ssim_luma_per_frame": [
+     0.8439906381707587,
+     0.8788038179171815,
+     0.8973612192451578,
+     0.8985699495733985,
+     0.8997584397605657,
+     0.9013051233321506,
+     0.8952787841142995,
+     0.8945197211341046,
+     0.8864932849361093
+    ],
+    "ssim_luma_mean": 0.888453442020414,
+    "ssim_luma_min": 0.8439906381707587,
+    "mean_abs_rgb_diff": 9.391637916963438
+   },
+   "neuron/warm1-g1": {
+    "mp4": "/home/ubuntu/wan21-bench/quality/ref/neuron_warm1-g1_cpuvae.mp4",
+    "mp4_sha256": "5ae12fa84c0df69e6970f5fd1052e871945b8cbd79a367b4b763667cc55d91c0",
+    "decode_s": 102.4,
+    "backend_mp4_vs_cpu_vae_mp4": {
+     "psnr_db_per_frame": [
+      34.96688678374158,
+      36.03845943150335,
+      37.61595954762625,
+      37.2465422744212,
+      37.03231609089523,
+      36.49407635486919,
+      36.8050333408403,
+      36.69276462506192,
+      36.17102975877329
+     ],
+     "psnr_db_mean": 36.56256313419248,
+     "psnr_db_min": 34.96688678374158,
+     "ssim_luma_per_frame": [
+      0.9673952665005529,
+      0.9696302681869169,
+      0.9776885639619074,
+      0.977796295762187,
+      0.9753513696236928,
+      0.9732900693248382,
+      0.9732850550055215,
+      0.9742317323808728,
+      0.9709849104229958
+     ],
+     "ssim_luma_mean": 0.9732948367966094,
+     "ssim_luma_min": 0.9673952665005529,
+     "mean_abs_rgb_diff": 2.6341611393043687
+    },
+    "backend_mp4_vs_cpu_vae_raw": {
+     "psnr_db_per_frame": [
+      33.96428326157477,
+      34.965731586578016,
+      36.325135706530475,
+      35.92189646193538,
+      35.64552365058364,
+      35.489930611926845,
+      35.390725089516486,
+      34.77085684291623,
+      34.483016737234365
+     ],
+     "psnr_db_mean": 35.217455549866244,
+     "psnr_db_min": 33.96428326157477,
+     "ssim_luma_per_frame": [
+      0.9691905969276866,
+      0.9717001337000234,
+      0.9791604594507171,
+      0.9785661581959635,
+      0.9758450514526829,
+      0.9763361332704019,
+      0.9752871815364184,
+      0.9737805487006541,
+      0.9709699200539785
+     ],
+     "ssim_luma_mean": 0.9745373536987252,
+     "ssim_luma_min": 0.9691905969276866,
+     "mean_abs_rgb_diff": 3.0904133650878443
+    },
+    "h264_loss_cpu_vae_mp4_vs_raw": {
+     "psnr_db_per_frame": [
+      37.39700835657721,
+      38.28325394575298,
+      39.43551597229773,
+      38.75846184328701,
+      38.658809227630705,
+      38.85522228121681,
+      38.47762913449196,
+      37.981909030380194,
+      37.8220831135365
+     ],
+     "psnr_db_mean": 38.40776587835235,
+     "psnr_db_min": 37.39700835657721,
+     "ssim_luma_per_frame": [
+      0.9857155897041169,
+      0.98544440513921,
+      0.9889638900923055,
+      0.9879615639247181,
+      0.986942310608116,
+      0.9870973536556615,
+      0.9863971240006018,
+      0.9861109124892818,
+      0.9845684518217604
+     ],
+     "ssim_luma_mean": 0.9865779557150858,
+     "ssim_luma_min": 0.9845684518217604,
+     "mean_abs_rgb_diff": 2.1466366556861347
+    },
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      84.32125901442308,
+      79.68504023103633,
+      76.47949496972934
+     ],
+     "channel_std": [
+      61.432975741759456,
+      56.2579106686739,
+      53.16186571958869
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 6.088248697916667,
+     "temporal_mean_abs_diff_per_pair": [
+      15.369877637553419,
+      7.81767077323718,
+      2.7358548677884613,
+      6.646430121527778,
+      5.765045739850428,
+      4.546850794604701,
+      2.0163570045405983,
+      3.807902644230769
+     ],
+     "laplacian_var_mean": 214.97835575711179,
+     "laplacian_var_per_frame": [
+      290.0282601375653,
+      180.20828293028973,
+      232.65301969768882,
+      219.04113034004428,
+      182.23616472896222,
+      203.5121432216784,
+      213.48676874990133,
+      204.89112441873527,
+      208.74830758914058
+     ],
+     "saturated_frac": 0.02074356006647673,
+     "saturated_low_frac": 0.02045031309354226,
+     "saturated_high_frac": 0.00029324697293447294
+    },
+    "clip": {
+     "prompt_cosine_mean": 0.2255266292227639,
+     "prompt_cosine_per_frame": [
+      0.25631779432296753,
+      0.2541002035140991,
+      0.2354760766029358,
+      0.23580461740493774,
+      0.22724400460720062,
+      0.20393410325050354,
+      0.19361095130443573,
+      0.20173215866088867,
+      0.22151975333690643
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.11360010256369908,
+      "a city street at night with neon signs": 0.1080896407365799,
+      "a portrait of an elderly man": 0.12922843545675278
+     },
+     "margin_vs_best_control": 0.09629819376601112,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "trainium/warm1-g1": {
+    "mp4": "/home/ubuntu/wan21-bench/quality/ref/trainium_warm1-g1_cpuvae.mp4",
+    "mp4_sha256": "715cd0aee965d54dfd7b71f3f8949c697b081f9e67d55f43a30ab5e3ed89a3cb",
+    "decode_s": 100.1,
+    "backend_mp4_vs_cpu_vae_mp4": {
+     "psnr_db_per_frame": [
+      20.679922498629537,
+      14.661100021605503,
+      13.107737247617191,
+      12.050728171006512,
+      12.190717131968619,
+      12.499423259346095,
+      12.539591974549321,
+      12.494405958367413,
+      12.678814801496987
+     ],
+     "psnr_db_mean": 13.655826784954131,
+     "psnr_db_min": 12.050728171006512,
+     "ssim_luma_per_frame": [
+      0.8261920397732866,
+      0.5446690318825166,
+      0.44906016967006235,
+      0.3807836402429254,
+      0.2879631018179341,
+      0.37028543446495926,
+      0.41208834161754865,
+      0.4086827888971093,
+      0.3525018280344521
+     ],
+     "ssim_luma_mean": 0.44802515293342154,
+     "ssim_luma_min": 0.2879631018179341,
+     "mean_abs_rgb_diff": 45.80276191907051
+    },
+    "backend_mp4_vs_cpu_vae_raw": {
+     "psnr_db_per_frame": [
+      20.35121814133443,
+      14.6593097665173,
+      13.116841955673921,
+      12.05838802336008,
+      12.223361285069982,
+      12.54298648701564,
+      12.55207259829043,
+      12.490365230878533,
+      12.708446061184112
+     ],
+     "psnr_db_mean": 13.633665505480492,
+     "psnr_db_min": 12.05838802336008,
+     "ssim_luma_per_frame": [
+      0.8197387267044661,
+      0.5529257065166244,
+      0.45452245813194453,
+      0.3869870505750828,
+      0.2923743786247712,
+      0.37491050942755705,
+      0.41719471917186984,
+      0.41219094085723,
+      0.3575332507242243
+     ],
+     "ssim_luma_mean": 0.4520419711926411,
+     "ssim_luma_min": 0.2923743786247712,
+     "mean_abs_rgb_diff": 45.73490408728039
+    },
+    "h264_loss_cpu_vae_mp4_vs_raw": {
+     "psnr_db_per_frame": [
+      37.18218290099991,
+      38.187433982939794,
+      39.3912673784818,
+      38.699380096042134,
+      38.514465380542376,
+      38.77699085613783,
+      38.289313308803685,
+      37.770835343262185,
+      37.69543301717262
+     ],
+     "psnr_db_mean": 38.27858914048692,
+     "psnr_db_min": 37.18218290099991,
+     "ssim_luma_per_frame": [
+      0.9852613496297382,
+      0.9852997237880325,
+      0.9891005908557309,
+      0.9879599826698543,
+      0.9867445342094645,
+      0.9870457741669856,
+      0.9863971667002976,
+      0.9860430735154815,
+      0.9844983239732716
+     ],
+     "ssim_luma_mean": 0.9864833910565396,
+     "ssim_luma_min": 0.9844983239732716,
+     "mean_abs_rgb_diff": 2.1611613767212727
+    },
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      83.93302172364672,
+      79.61142272079772,
+      76.45178980813746
+     ],
+     "channel_std": [
+      61.69410044552242,
+      56.447212408039434,
+      53.31075113739497
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 6.323827811999198,
+     "temporal_mean_abs_diff_per_pair": [
+      17.255921975160255,
+      7.979158319978633,
+      2.724418235844017,
+      6.840360409989316,
+      5.75446047008547,
+      4.256060530181624,
+      2.060246394230769,
+      3.7199961605235043
+     ],
+     "laplacian_var_mean": 242.19783733238586,
+     "laplacian_var_per_frame": [
+      300.9378862458472,
+      198.5216176177129,
+      261.97791344411405,
+      245.70231250564507,
+      205.67892910770016,
+      235.96567221949852,
+      247.50378805458146,
+      241.19181530284547,
+      242.3006014935279
+     ],
+     "saturated_frac": 0.022932154410018994,
+     "saturated_low_frac": 0.02258261366334283,
+     "saturated_high_frac": 0.00034954074667616335
+    },
+    "clip": {
+     "prompt_cosine_mean": 0.22685850163300833,
+     "prompt_cosine_per_frame": [
+      0.2641512155532837,
+      0.24698854982852936,
+      0.23630233108997345,
+      0.23944821953773499,
+      0.2145424485206604,
+      0.22223994135856628,
+      0.20314478874206543,
+      0.20269018411636353,
+      0.21221883594989777
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.11214781800905864,
+      "a city street at night with neon signs": 0.10530175103081597,
+      "a portrait of an elderly man": 0.13081307460864386
+     },
+     "margin_vs_best_control": 0.09604542702436447,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "neuron_vs_trainium_g1": {
+    "a": "neuron/warm1-g1",
+    "b": "trainium/warm1-g1",
+    "psnr_db_per_frame": [
+     32.77029788314033,
+     33.485176146184834,
+     33.72921667971561,
+     33.87765598751855,
+     33.530503426706204,
+     33.706922190454435,
+     33.53215971095769,
+     33.456523406295176,
+     33.45776645295717
+    ],
+    "psnr_db_mean": 33.50513576488112,
+    "psnr_db_min": 32.77029788314033,
+    "ssim_luma_per_frame": [
+     0.970775344177671,
+     0.9676118733370915,
+     0.9734788330809069,
+     0.9733780016977015,
+     0.9703243240984935,
+     0.9706340475855301,
+     0.9708355056435628,
+     0.9716996034300895,
+     0.9694016332400035
+    ],
+    "ssim_luma_mean": 0.9709043518101167,
+    "ssim_luma_min": 0.9676118733370915,
+    "mean_abs_rgb_diff": 3.0566077946937322
+   }
+  },
+  "runs": {
+   "neuron/cold-g5": {
+    "backend": "neuron",
+    "run": "cold-g5",
+    "guidance": 5.0,
+    "mp4": "/home/ubuntu/wan21-bench/neuron/cold-g5/out.mp4",
+    "mp4_sha256": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+    "frames_sha256": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      99.61134231436967,
+      114.9269603587963,
+      117.80076789529915
+     ],
+     "channel_std": [
+      66.98824088443547,
+      66.85785256543542,
+      66.89882577275658
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 6.111356816740116,
+     "temporal_mean_abs_diff_per_pair": [
+      19.260745526175214,
+      13.729727564102564,
+      3.629206730769231,
+      2.4311189569978633,
+      3.0327899639423075,
+      2.69609124599359,
+      2.019044638087607,
+      2.092129907852564
+     ],
+     "laplacian_var_mean": 278.14688863401426,
+     "laplacian_var_per_frame": [
+      482.3036293509049,
+      255.93395685288723,
+      303.1513194878203,
+      269.3487409533573,
+      239.59445036495796,
+      236.34473294546717,
+      259.193779858257,
+      231.96749722411676,
+      225.48389066835995
+     ],
+     "saturated_frac": 0.025674876098053183,
+     "saturated_low_frac": 0.022941428507834757,
+     "saturated_high_frac": 0.0027334475902184236
+    },
+    "latents_file": "/home/ubuntu/wan21-bench/neuron/cold-g5/probe/latents-30946-1.pt",
+    "latents_files_found": 1,
+    "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "initial_finite": true,
+    "initial_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "initial_dtype": "torch.float32",
+    "final_sha256": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+    "final_finite": true,
+    "final_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "final_dtype": "torch.float32",
+    "clip": {
+     "prompt_cosine_mean": 0.3077434500058492,
+     "prompt_cosine_per_frame": [
+      0.2829210162162781,
+      0.28928646445274353,
+      0.3101656436920166,
+      0.30913498997688293,
+      0.3133585453033447,
+      0.3139611482620239,
+      0.3158424496650696,
+      0.3176307678222656,
+      0.3173900246620178
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10741623822185728,
+      "a city street at night with neon signs": 0.11166817860470878,
+      "a portrait of an elderly man": 0.15704606142308977
+     },
+     "margin_vs_best_control": 0.1506973885827594,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "neuron/first-g5": {
+    "backend": "neuron",
+    "run": "first-g5",
+    "guidance": 5.0,
+    "mp4": "/home/ubuntu/wan21-bench/neuron/first-g5/out.mp4",
+    "mp4_sha256": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+    "frames_sha256": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      99.61134231436967,
+      114.9269603587963,
+      117.80076789529915
+     ],
+     "channel_std": [
+      66.98824088443547,
+      66.85785256543542,
+      66.89882577275658
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 6.111356816740116,
+     "temporal_mean_abs_diff_per_pair": [
+      19.260745526175214,
+      13.729727564102564,
+      3.629206730769231,
+      2.4311189569978633,
+      3.0327899639423075,
+      2.69609124599359,
+      2.019044638087607,
+      2.092129907852564
+     ],
+     "laplacian_var_mean": 278.14688863401426,
+     "laplacian_var_per_frame": [
+      482.3036293509049,
+      255.93395685288723,
+      303.1513194878203,
+      269.3487409533573,
+      239.59445036495796,
+      236.34473294546717,
+      259.193779858257,
+      231.96749722411676,
+      225.48389066835995
+     ],
+     "saturated_frac": 0.025674876098053183,
+     "saturated_low_frac": 0.022941428507834757,
+     "saturated_high_frac": 0.0027334475902184236
+    },
+    "clip": {
+     "prompt_cosine_mean": 0.3077434500058492,
+     "prompt_cosine_per_frame": [
+      0.2829210162162781,
+      0.28928646445274353,
+      0.3101656436920166,
+      0.30913498997688293,
+      0.3133585453033447,
+      0.3139611482620239,
+      0.3158424496650696,
+      0.3176307678222656,
+      0.3173900246620178
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10741623822185728,
+      "a city street at night with neon signs": 0.11166817860470878,
+      "a portrait of an elderly man": 0.15704606142308977
+     },
+     "margin_vs_best_control": 0.1506973885827594,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "neuron/warm1-g1": {
+    "backend": "neuron",
+    "run": "warm1-g1",
+    "guidance": 1.0,
+    "mp4": "/home/ubuntu/wan21-bench/neuron/warm1-g1/out.mp4",
+    "mp4_sha256": "e8bbe70b6e56b1f402dfaaddcfc315d26a03caa209ae0a4a6454da912bcf83e7",
+    "frames_sha256": "d4a9a02d8d4d889b3b893b2d0a8a242d7696507491291a880082b83004d9b59f",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      84.06541744569088,
+      79.20197705217237,
+      76.24024522569445
+     ],
+     "channel_std": [
+      61.197037802069296,
+      56.23918235929124,
+      53.23096973892416
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 5.921190884581998,
+     "temporal_mean_abs_diff_per_pair": [
+      15.165145065438034,
+      7.742308526976496,
+      2.763231169871795,
+      6.390810296474359,
+      5.457513688568376,
+      4.368326822916667,
+      1.8514898838141025,
+      3.630701622596154
+     ],
+     "laplacian_var_mean": 204.27957536225142,
+     "laplacian_var_per_frame": [
+      287.1808024630131,
+      168.28914139902503,
+      230.30602132012547,
+      207.20035054851715,
+      172.06920661440802,
+      182.38143816213062,
+      209.41831190690354,
+      190.5103629704415,
+      191.16054287569833
+     ],
+     "saturated_frac": 0.02086811120014245,
+     "saturated_low_frac": 0.02056957799145299,
+     "saturated_high_frac": 0.0002985332086894587
+    },
+    "latents_file": "/home/ubuntu/wan21-bench/neuron/warm1-g1/probe/latents-41065-1.pt",
+    "latents_files_found": 1,
+    "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "initial_finite": true,
+    "initial_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "initial_dtype": "torch.float32",
+    "final_sha256": "9be6fc6ae55e3fa0a3d8a9399360c71c6b84c57def5c256e292b18d7c4a3ceed",
+    "final_finite": true,
+    "final_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "final_dtype": "torch.float32",
+    "clip": {
+     "prompt_cosine_mean": 0.22994307511382633,
+     "prompt_cosine_per_frame": [
+      0.25237804651260376,
+      0.24359895288944244,
+      0.23414218425750732,
+      0.24733737111091614,
+      0.2322920858860016,
+      0.1991640031337738,
+      0.21992778778076172,
+      0.2110775262117386,
+      0.2295697182416916
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10348495344320933,
+      "a city street at night with neon signs": 0.1069268062710762,
+      "a portrait of an elderly man": 0.12878815001911587
+     },
+     "margin_vs_best_control": 0.10115492509471047,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "neuron/warm1-g5": {
+    "backend": "neuron",
+    "run": "warm1-g5",
+    "guidance": 5.0,
+    "mp4": "/home/ubuntu/wan21-bench/neuron/warm1-g5/out.mp4",
+    "mp4_sha256": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+    "frames_sha256": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      99.61134231436967,
+      114.9269603587963,
+      117.80076789529915
+     ],
+     "channel_std": [
+      66.98824088443547,
+      66.85785256543542,
+      66.89882577275658
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 6.111356816740116,
+     "temporal_mean_abs_diff_per_pair": [
+      19.260745526175214,
+      13.729727564102564,
+      3.629206730769231,
+      2.4311189569978633,
+      3.0327899639423075,
+      2.69609124599359,
+      2.019044638087607,
+      2.092129907852564
+     ],
+     "laplacian_var_mean": 278.14688863401426,
+     "laplacian_var_per_frame": [
+      482.3036293509049,
+      255.93395685288723,
+      303.1513194878203,
+      269.3487409533573,
+      239.59445036495796,
+      236.34473294546717,
+      259.193779858257,
+      231.96749722411676,
+      225.48389066835995
+     ],
+     "saturated_frac": 0.025674876098053183,
+     "saturated_low_frac": 0.022941428507834757,
+     "saturated_high_frac": 0.0027334475902184236
+    },
+    "latents_file": "/home/ubuntu/wan21-bench/neuron/warm1-g5/probe/latents-34899-1.pt",
+    "latents_files_found": 1,
+    "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "initial_finite": true,
+    "initial_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "initial_dtype": "torch.float32",
+    "final_sha256": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+    "final_finite": true,
+    "final_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "final_dtype": "torch.float32",
+    "clip": {
+     "prompt_cosine_mean": 0.3077434500058492,
+     "prompt_cosine_per_frame": [
+      0.2829210162162781,
+      0.28928646445274353,
+      0.3101656436920166,
+      0.30913498997688293,
+      0.3133585453033447,
+      0.3139611482620239,
+      0.3158424496650696,
+      0.3176307678222656,
+      0.3173900246620178
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10741623822185728,
+      "a city street at night with neon signs": 0.11166817860470878,
+      "a portrait of an elderly man": 0.15704606142308977
+     },
+     "margin_vs_best_control": 0.1506973885827594,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "neuron/warm2-g1": {
+    "backend": "neuron",
+    "run": "warm2-g1",
+    "guidance": 1.0,
+    "mp4": "/home/ubuntu/wan21-bench/neuron/warm2-g1/out.mp4",
+    "mp4_sha256": "e8bbe70b6e56b1f402dfaaddcfc315d26a03caa209ae0a4a6454da912bcf83e7",
+    "frames_sha256": "d4a9a02d8d4d889b3b893b2d0a8a242d7696507491291a880082b83004d9b59f",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      84.06541744569088,
+      79.20197705217237,
+      76.24024522569445
+     ],
+     "channel_std": [
+      61.197037802069296,
+      56.23918235929124,
+      53.23096973892416
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 5.921190884581998,
+     "temporal_mean_abs_diff_per_pair": [
+      15.165145065438034,
+      7.742308526976496,
+      2.763231169871795,
+      6.390810296474359,
+      5.457513688568376,
+      4.368326822916667,
+      1.8514898838141025,
+      3.630701622596154
+     ],
+     "laplacian_var_mean": 204.27957536225142,
+     "laplacian_var_per_frame": [
+      287.1808024630131,
+      168.28914139902503,
+      230.30602132012547,
+      207.20035054851715,
+      172.06920661440802,
+      182.38143816213062,
+      209.41831190690354,
+      190.5103629704415,
+      191.16054287569833
+     ],
+     "saturated_frac": 0.02086811120014245,
+     "saturated_low_frac": 0.02056957799145299,
+     "saturated_high_frac": 0.0002985332086894587
+    },
+    "latents_file": "/home/ubuntu/wan21-bench/neuron/warm2-g1/probe/latents-43014-1.pt",
+    "latents_files_found": 1,
+    "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "initial_finite": true,
+    "initial_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "initial_dtype": "torch.float32",
+    "final_sha256": "9be6fc6ae55e3fa0a3d8a9399360c71c6b84c57def5c256e292b18d7c4a3ceed",
+    "final_finite": true,
+    "final_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "final_dtype": "torch.float32",
+    "clip": {
+     "prompt_cosine_mean": 0.22994307511382633,
+     "prompt_cosine_per_frame": [
+      0.25237804651260376,
+      0.24359895288944244,
+      0.23414218425750732,
+      0.24733737111091614,
+      0.2322920858860016,
+      0.1991640031337738,
+      0.21992778778076172,
+      0.2110775262117386,
+      0.2295697182416916
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10348495344320933,
+      "a city street at night with neon signs": 0.1069268062710762,
+      "a portrait of an elderly man": 0.12878815001911587
+     },
+     "margin_vs_best_control": 0.10115492509471047,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "neuron/warm2-g5": {
+    "backend": "neuron",
+    "run": "warm2-g5",
+    "guidance": 5.0,
+    "mp4": "/home/ubuntu/wan21-bench/neuron/warm2-g5/out.mp4",
+    "mp4_sha256": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+    "frames_sha256": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      99.61134231436967,
+      114.9269603587963,
+      117.80076789529915
+     ],
+     "channel_std": [
+      66.98824088443547,
+      66.85785256543542,
+      66.89882577275658
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 6.111356816740116,
+     "temporal_mean_abs_diff_per_pair": [
+      19.260745526175214,
+      13.729727564102564,
+      3.629206730769231,
+      2.4311189569978633,
+      3.0327899639423075,
+      2.69609124599359,
+      2.019044638087607,
+      2.092129907852564
+     ],
+     "laplacian_var_mean": 278.14688863401426,
+     "laplacian_var_per_frame": [
+      482.3036293509049,
+      255.93395685288723,
+      303.1513194878203,
+      269.3487409533573,
+      239.59445036495796,
+      236.34473294546717,
+      259.193779858257,
+      231.96749722411676,
+      225.48389066835995
+     ],
+     "saturated_frac": 0.025674876098053183,
+     "saturated_low_frac": 0.022941428507834757,
+     "saturated_high_frac": 0.0027334475902184236
+    },
+    "latents_file": "/home/ubuntu/wan21-bench/neuron/warm2-g5/probe/latents-36978-1.pt",
+    "latents_files_found": 1,
+    "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "initial_finite": true,
+    "initial_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "initial_dtype": "torch.float32",
+    "final_sha256": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+    "final_finite": true,
+    "final_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "final_dtype": "torch.float32",
+    "clip": {
+     "prompt_cosine_mean": 0.3077434500058492,
+     "prompt_cosine_per_frame": [
+      0.2829210162162781,
+      0.28928646445274353,
+      0.3101656436920166,
+      0.30913498997688293,
+      0.3133585453033447,
+      0.3139611482620239,
+      0.3158424496650696,
+      0.3176307678222656,
+      0.3173900246620178
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10741623822185728,
+      "a city street at night with neon signs": 0.11166817860470878,
+      "a portrait of an elderly man": 0.15704606142308977
+     },
+     "margin_vs_best_control": 0.1506973885827594,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "neuron/warm3-g5": {
+    "backend": "neuron",
+    "run": "warm3-g5",
+    "guidance": 5.0,
+    "mp4": "/home/ubuntu/wan21-bench/neuron/warm3-g5/out.mp4",
+    "mp4_sha256": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+    "frames_sha256": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      99.61134231436967,
+      114.9269603587963,
+      117.80076789529915
+     ],
+     "channel_std": [
+      66.98824088443547,
+      66.85785256543542,
+      66.89882577275658
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 6.111356816740116,
+     "temporal_mean_abs_diff_per_pair": [
+      19.260745526175214,
+      13.729727564102564,
+      3.629206730769231,
+      2.4311189569978633,
+      3.0327899639423075,
+      2.69609124599359,
+      2.019044638087607,
+      2.092129907852564
+     ],
+     "laplacian_var_mean": 278.14688863401426,
+     "laplacian_var_per_frame": [
+      482.3036293509049,
+      255.93395685288723,
+      303.1513194878203,
+      269.3487409533573,
+      239.59445036495796,
+      236.34473294546717,
+      259.193779858257,
+      231.96749722411676,
+      225.48389066835995
+     ],
+     "saturated_frac": 0.025674876098053183,
+     "saturated_low_frac": 0.022941428507834757,
+     "saturated_high_frac": 0.0027334475902184236
+    },
+    "latents_file": "/home/ubuntu/wan21-bench/neuron/warm3-g5/probe/latents-39094-1.pt",
+    "latents_files_found": 1,
+    "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "initial_finite": true,
+    "initial_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "initial_dtype": "torch.float32",
+    "final_sha256": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+    "final_finite": true,
+    "final_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "final_dtype": "torch.float32",
+    "clip": {
+     "prompt_cosine_mean": 0.3077434500058492,
+     "prompt_cosine_per_frame": [
+      0.2829210162162781,
+      0.28928646445274353,
+      0.3101656436920166,
+      0.30913498997688293,
+      0.3133585453033447,
+      0.3139611482620239,
+      0.3158424496650696,
+      0.3176307678222656,
+      0.3173900246620178
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10741623822185728,
+      "a city street at night with neon signs": 0.11166817860470878,
+      "a portrait of an elderly man": 0.15704606142308977
+     },
+     "margin_vs_best_control": 0.1506973885827594,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "trainium/cold-g5": {
+    "backend": "trainium",
+    "run": "cold-g5",
+    "guidance": 5.0,
+    "mp4": "/home/ubuntu/wan21-bench/trainium/cold-g5/out.mp4",
+    "mp4_sha256": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+    "frames_sha256": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      99.78132567663818,
+      101.2326074496973,
+      93.42023543224715
+     ],
+     "channel_std": [
+      37.357923941542445,
+      32.333047970955214,
+      42.76124887950282
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 28.98468570546207,
+     "temporal_mean_abs_diff_per_pair": [
+      51.07318626469017,
+      41.88282752403846,
+      37.6485359909188,
+      28.864165164262822,
+      21.656256677350427,
+      21.155372763087605,
+      13.784818209134615,
+      15.812323050213676
+     ],
+     "laplacian_var_mean": 58.56290818827168,
+     "laplacian_var_per_frame": [
+      367.0624135027967,
+      31.409333464324284,
+      12.520084873239542,
+      7.610509677489933,
+      38.80650017206009,
+      25.067098326291966,
+      11.179264191433457,
+      12.070811832978384,
+      21.340157653830673
+     ],
+     "saturated_frac": 0.01636173433048433,
+     "saturated_low_frac": 0.014872128739316239,
+     "saturated_high_frac": 0.0014896055911680912
+    },
+    "latents_file": "/home/ubuntu/wan21-bench/trainium/cold-g5/probe/latents-55549-1.pt",
+    "latents_files_found": 1,
+    "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "initial_finite": true,
+    "initial_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "initial_dtype": "torch.float32",
+    "final_sha256": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+    "final_finite": true,
+    "final_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "final_dtype": "torch.float32",
+    "clip": {
+     "prompt_cosine_mean": 0.22779550651709238,
+     "prompt_cosine_per_frame": [
+      0.2797335386276245,
+      0.24119365215301514,
+      0.2220778465270996,
+      0.22350159287452698,
+      0.19734357297420502,
+      0.20924770832061768,
+      0.22041890025138855,
+      0.20587795972824097,
+      0.25076478719711304
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10274206267462836,
+      "a city street at night with neon signs": 0.11114498641755846,
+      "a portrait of an elderly man": 0.15802384747399223
+     },
+     "margin_vs_best_control": 0.06977165904310015,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "trainium/warm1-g1": {
+    "backend": "trainium",
+    "run": "warm1-g1",
+    "guidance": 1.0,
+    "mp4": "/home/ubuntu/wan21-bench/trainium/warm1-g1/out.mp4",
+    "mp4_sha256": "98bbfa90f0107ed6d2b2ad7658042adf287d2903f674601e68319cd47d365356",
+    "frames_sha256": "d8f046cc88923c5e1cc9ee54ce15efb7f108cba9cfa8f265de560702f112ccf4",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      99.83785362134971,
+      93.20539891604345,
+      80.9997635105057
+     ],
+     "channel_std": [
+      31.130143795117515,
+      25.161575891396833,
+      27.385576393157965
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 19.424110243055555,
+     "temporal_mean_abs_diff_per_pair": [
+      42.168850994925215,
+      19.49698434161325,
+      27.32970252403846,
+      19.12426048344017,
+      14.749512553418803,
+      11.330515491452992,
+      10.127132578792734,
+      11.06592297676282
+     ],
+     "laplacian_var_mean": 59.813516602030454,
+     "laplacian_var_per_frame": [
+      348.08466512066536,
+      21.03289060106636,
+      19.188872995145967,
+      19.23221987406424,
+      49.7324770738419,
+      26.34435183919491,
+      14.147706836738884,
+      15.412924140129963,
+      25.145540937426535
+     ],
+     "saturated_frac": 0.00958292527302944,
+     "saturated_low_frac": 0.009435838081671415,
+     "saturated_high_frac": 0.0001470871913580247
+    },
+    "latents_file": "/home/ubuntu/wan21-bench/trainium/warm1-g1/probe/latents-57611-1.pt",
+    "latents_files_found": 1,
+    "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "initial_finite": true,
+    "initial_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "initial_dtype": "torch.float32",
+    "final_sha256": "cc515a59c5ba86c1eba92e4402244294b91281c8988fcd69db80a6d9db4cc60b",
+    "final_finite": true,
+    "final_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "final_dtype": "torch.float32",
+    "clip": {
+     "prompt_cosine_mean": 0.19342010551028782,
+     "prompt_cosine_per_frame": [
+      0.2592155933380127,
+      0.23411740362644196,
+      0.21294164657592773,
+      0.20989300310611725,
+      0.15253913402557373,
+      0.1773088276386261,
+      0.16662588715553284,
+      0.18518075346946716,
+      0.14295870065689087
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.15366175439622667,
+      "a city street at night with neon signs": 0.1423939209845331,
+      "a portrait of an elderly man": 0.18211108280552757
+     },
+     "margin_vs_best_control": 0.011309022704760252,
+     "frames_prompt_is_top": 5
+    }
+   },
+   "trainium/warm1-g5": {
+    "backend": "trainium",
+    "run": "warm1-g5",
+    "guidance": 5.0,
+    "mp4": "/home/ubuntu/wan21-bench/trainium/warm1-g5/out.mp4",
+    "mp4_sha256": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+    "frames_sha256": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      99.78132567663818,
+      101.2326074496973,
+      93.42023543224715
+     ],
+     "channel_std": [
+      37.357923941542445,
+      32.333047970955214,
+      42.76124887950282
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 28.98468570546207,
+     "temporal_mean_abs_diff_per_pair": [
+      51.07318626469017,
+      41.88282752403846,
+      37.6485359909188,
+      28.864165164262822,
+      21.656256677350427,
+      21.155372763087605,
+      13.784818209134615,
+      15.812323050213676
+     ],
+     "laplacian_var_mean": 58.56290818827168,
+     "laplacian_var_per_frame": [
+      367.0624135027967,
+      31.409333464324284,
+      12.520084873239542,
+      7.610509677489933,
+      38.80650017206009,
+      25.067098326291966,
+      11.179264191433457,
+      12.070811832978384,
+      21.340157653830673
+     ],
+     "saturated_frac": 0.01636173433048433,
+     "saturated_low_frac": 0.014872128739316239,
+     "saturated_high_frac": 0.0014896055911680912
+    },
+    "latents_file": "/home/ubuntu/wan21-bench/trainium/warm1-g5/probe/latents-56393-1.pt",
+    "latents_files_found": 1,
+    "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "initial_finite": true,
+    "initial_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "initial_dtype": "torch.float32",
+    "final_sha256": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+    "final_finite": true,
+    "final_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "final_dtype": "torch.float32",
+    "clip": {
+     "prompt_cosine_mean": 0.22779550651709238,
+     "prompt_cosine_per_frame": [
+      0.2797335386276245,
+      0.24119365215301514,
+      0.2220778465270996,
+      0.22350159287452698,
+      0.19734357297420502,
+      0.20924770832061768,
+      0.22041890025138855,
+      0.20587795972824097,
+      0.25076478719711304
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10274206267462836,
+      "a city street at night with neon signs": 0.11114498641755846,
+      "a portrait of an elderly man": 0.15802384747399223
+     },
+     "margin_vs_best_control": 0.06977165904310015,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "trainium/warm2-g1": {
+    "backend": "trainium",
+    "run": "warm2-g1",
+    "guidance": 1.0,
+    "mp4": "/home/ubuntu/wan21-bench/trainium/warm2-g1/out.mp4",
+    "mp4_sha256": "98bbfa90f0107ed6d2b2ad7658042adf287d2903f674601e68319cd47d365356",
+    "frames_sha256": "d8f046cc88923c5e1cc9ee54ce15efb7f108cba9cfa8f265de560702f112ccf4",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      99.83785362134971,
+      93.20539891604345,
+      80.9997635105057
+     ],
+     "channel_std": [
+      31.130143795117515,
+      25.161575891396833,
+      27.385576393157965
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 19.424110243055555,
+     "temporal_mean_abs_diff_per_pair": [
+      42.168850994925215,
+      19.49698434161325,
+      27.32970252403846,
+      19.12426048344017,
+      14.749512553418803,
+      11.330515491452992,
+      10.127132578792734,
+      11.06592297676282
+     ],
+     "laplacian_var_mean": 59.813516602030454,
+     "laplacian_var_per_frame": [
+      348.08466512066536,
+      21.03289060106636,
+      19.188872995145967,
+      19.23221987406424,
+      49.7324770738419,
+      26.34435183919491,
+      14.147706836738884,
+      15.412924140129963,
+      25.145540937426535
+     ],
+     "saturated_frac": 0.00958292527302944,
+     "saturated_low_frac": 0.009435838081671415,
+     "saturated_high_frac": 0.0001470871913580247
+    },
+    "latents_file": "/home/ubuntu/wan21-bench/trainium/warm2-g1/probe/latents-57980-1.pt",
+    "latents_files_found": 1,
+    "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "initial_finite": true,
+    "initial_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "initial_dtype": "torch.float32",
+    "final_sha256": "cc515a59c5ba86c1eba92e4402244294b91281c8988fcd69db80a6d9db4cc60b",
+    "final_finite": true,
+    "final_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "final_dtype": "torch.float32",
+    "clip": {
+     "prompt_cosine_mean": 0.19342010551028782,
+     "prompt_cosine_per_frame": [
+      0.2592155933380127,
+      0.23411740362644196,
+      0.21294164657592773,
+      0.20989300310611725,
+      0.15253913402557373,
+      0.1773088276386261,
+      0.16662588715553284,
+      0.18518075346946716,
+      0.14295870065689087
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.15366175439622667,
+      "a city street at night with neon signs": 0.1423939209845331,
+      "a portrait of an elderly man": 0.18211108280552757
+     },
+     "margin_vs_best_control": 0.011309022704760252,
+     "frames_prompt_is_top": 5
+    }
+   },
+   "trainium/warm2-g5": {
+    "backend": "trainium",
+    "run": "warm2-g5",
+    "guidance": 5.0,
+    "mp4": "/home/ubuntu/wan21-bench/trainium/warm2-g5/out.mp4",
+    "mp4_sha256": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+    "frames_sha256": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      99.78132567663818,
+      101.2326074496973,
+      93.42023543224715
+     ],
+     "channel_std": [
+      37.357923941542445,
+      32.333047970955214,
+      42.76124887950282
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 28.98468570546207,
+     "temporal_mean_abs_diff_per_pair": [
+      51.07318626469017,
+      41.88282752403846,
+      37.6485359909188,
+      28.864165164262822,
+      21.656256677350427,
+      21.155372763087605,
+      13.784818209134615,
+      15.812323050213676
+     ],
+     "laplacian_var_mean": 58.56290818827168,
+     "laplacian_var_per_frame": [
+      367.0624135027967,
+      31.409333464324284,
+      12.520084873239542,
+      7.610509677489933,
+      38.80650017206009,
+      25.067098326291966,
+      11.179264191433457,
+      12.070811832978384,
+      21.340157653830673
+     ],
+     "saturated_frac": 0.01636173433048433,
+     "saturated_low_frac": 0.014872128739316239,
+     "saturated_high_frac": 0.0014896055911680912
+    },
+    "latents_file": "/home/ubuntu/wan21-bench/trainium/warm2-g5/probe/latents-56771-1.pt",
+    "latents_files_found": 1,
+    "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "initial_finite": true,
+    "initial_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "initial_dtype": "torch.float32",
+    "final_sha256": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+    "final_finite": true,
+    "final_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "final_dtype": "torch.float32",
+    "clip": {
+     "prompt_cosine_mean": 0.22779550651709238,
+     "prompt_cosine_per_frame": [
+      0.2797335386276245,
+      0.24119365215301514,
+      0.2220778465270996,
+      0.22350159287452698,
+      0.19734357297420502,
+      0.20924770832061768,
+      0.22041890025138855,
+      0.20587795972824097,
+      0.25076478719711304
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10274206267462836,
+      "a city street at night with neon signs": 0.11114498641755846,
+      "a portrait of an elderly man": 0.15802384747399223
+     },
+     "margin_vs_best_control": 0.06977165904310015,
+     "frames_prompt_is_top": 9
+    }
+   },
+   "trainium/warm3-g5": {
+    "backend": "trainium",
+    "run": "warm3-g5",
+    "guidance": 5.0,
+    "mp4": "/home/ubuntu/wan21-bench/trainium/warm3-g5/out.mp4",
+    "mp4_sha256": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+    "frames_sha256": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+    "stats": {
+     "frames": 9,
+     "height": 480,
+     "width": 832,
+     "channel_mean": [
+      99.78132567663818,
+      101.2326074496973,
+      93.42023543224715
+     ],
+     "channel_std": [
+      37.357923941542445,
+      32.333047970955214,
+      42.76124887950282
+     ],
+     "channel_min": [
+      0,
+      0,
+      0
+     ],
+     "channel_max": [
+      255,
+      255,
+      255
+     ],
+     "temporal_mean_abs_diff": 28.98468570546207,
+     "temporal_mean_abs_diff_per_pair": [
+      51.07318626469017,
+      41.88282752403846,
+      37.6485359909188,
+      28.864165164262822,
+      21.656256677350427,
+      21.155372763087605,
+      13.784818209134615,
+      15.812323050213676
+     ],
+     "laplacian_var_mean": 58.56290818827168,
+     "laplacian_var_per_frame": [
+      367.0624135027967,
+      31.409333464324284,
+      12.520084873239542,
+      7.610509677489933,
+      38.80650017206009,
+      25.067098326291966,
+      11.179264191433457,
+      12.070811832978384,
+      21.340157653830673
+     ],
+     "saturated_frac": 0.01636173433048433,
+     "saturated_low_frac": 0.014872128739316239,
+     "saturated_high_frac": 0.0014896055911680912
+    },
+    "latents_file": "/home/ubuntu/wan21-bench/trainium/warm3-g5/probe/latents-57183-1.pt",
+    "latents_files_found": 1,
+    "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+    "initial_finite": true,
+    "initial_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "initial_dtype": "torch.float32",
+    "final_sha256": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+    "final_finite": true,
+    "final_shape": [
+     1,
+     16,
+     3,
+     60,
+     104
+    ],
+    "final_dtype": "torch.float32",
+    "clip": {
+     "prompt_cosine_mean": 0.22779550651709238,
+     "prompt_cosine_per_frame": [
+      0.2797335386276245,
+      0.24119365215301514,
+      0.2220778465270996,
+      0.22350159287452698,
+      0.19734357297420502,
+      0.20924770832061768,
+      0.22041890025138855,
+      0.20587795972824097,
+      0.25076478719711304
+     ],
+     "control_cosine_mean": {
+      "a bowl of fruit on a kitchen table": 0.10274206267462836,
+      "a city street at night with neon signs": 0.11114498641755846,
+      "a portrait of an elderly man": 0.15802384747399223
+     },
+     "margin_vs_best_control": 0.06977165904310015,
+     "frames_prompt_is_top": 9
+    }
+   }
+  },
+  "sheets": [
+   "/home/ubuntu/wan21-bench/quality/sheets/cpuvae_neuron_warm1-g1.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/cpuvae_neuron_warm1-g5.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/cpuvae_trainium_warm1-g1.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/cpuvae_trainium_warm1-g5.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/neuron_cold-g5.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/neuron_first-g5.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/neuron_warm1-g1.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/neuron_warm1-g5.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/neuron_warm2-g1.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/neuron_warm2-g5.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/neuron_warm3-g5.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/trainium_cold-g5.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/trainium_warm1-g1.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/trainium_warm1-g5.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/trainium_warm2-g1.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/trainium_warm2-g5.png",
+   "/home/ubuntu/wan21-bench/quality/sheets/trainium_warm3-g5.png"
+  ],
+  "blind_sheets": [
+   "/home/ubuntu/wan21-bench/quality/blind/X_g1.png",
+   "/home/ubuntu/wan21-bench/quality/blind/X_g5.png",
+   "/home/ubuntu/wan21-bench/quality/blind/Y_g1.png",
+   "/home/ubuntu/wan21-bench/quality/blind/Y_g5.png"
+  ]
+ },
+ "qdev": {
+  "ok": true,
+  "neuron_latents": "/home/ubuntu/wan21-bench/quality/device-2step/neuron/probe/latents-58644-1.pt",
+  "trainium_latents": "/home/ubuntu/wan21-bench/quality/device-2step/trainium/probe/latents-61356-1.pt",
+  "initial_noise_bitwise_equal": true,
+  "notes": "Both 2-step runs finished with exit 0, one after the other. Each used the warm1-g5 argv from runs.jsonl, changed only to --steps 2 --guidance-scale 5.0 --seed 42 --output out.mp4, with the backend's existing cache and the benchmark env (the env is copied from the _env() function in the driver: python's bin dir prepended to PATH; DIFFLET_BACKEND/EXEC_MODE, TORCH_NEURONX_*_CACHE_DIR, NEURON_RT_NUM_CORES and NEURON_LOGICAL_NC_CONFIG unset). The launch scripts are /home/ubuntu/wan21-bench/quality/device-2step/<backend>/run.sh and the logs are .../<backend>/log.txt. Each ran as a detached systemd unit: wan21-q2step-neuron, then wan21-q2step-trainium after pgrep showed no difflet process left.\n\nNeuron (TorchNeuron, compile mode): 05:22:05 to 05:33:38 UTC. The log says compiled_blocks=64, unwarmed_shapes=[], no fallbacks, load+warmup 647.1s, stage 651.2s. My inference for why load was slow: the trainium run had pushed the neuron weights out of the page cache, and during load top showed the ranks in D state with about 35% iowait. This does not affect the latents. Rank 0 probe probe-58644-1.json: step_s [1.1625, 1.0628], denoise_s 2.225. Ranks 1-3 wrote only probe json files, as expected. out.mp4 written.\n\nTrainium (NxD AoT): 05:33:52 to 05:35:10 UTC. probe-61356-1.json: step_s [1.1356, 0.9560], denoise_s 2.092. out.mp4 written. Every log line matching 'error' comes from the usual NxD 'Failed to import blockwise_mm_bwd' warnings; there are no tracebacks.\n\nLatents comparison (loaded with native_venv torch): both files are dicts with keys ['initial', 'final']. All four tensors are shape (1, 16, 3, 60, 104), torch.float32, on cpu, and finite. 'initial' is bitwise equal across the backends: same shape and dtype, torch.equal True, and the uint8 byte views are equal. initial mean -0.001263, std 1.002648 on both. 'final' after 2 steps: neuron mean 0.067030 / std 1.015818, trainium mean 0.072476 / std 1.012427. Neuron vs trainium: max|diff| 0.5036, mean|diff| 0.05045, cosine 0.99789. These are only device-to-device numbers; the fp32 oracle comparison is for the next stage.\n\nThe 'final' tensor is whatever the probe captured at the end of _denoise; I assume this is the latent before VAE decode but did not check that further."
+ },
+ "novcs": {
+  "step_median_ms": 957.4,
+  "env": {
+   "NEURON_RT_VIRTUAL_CORE_SIZE": null,
+   "NEURON_LOGICAL_NC_CONFIG": null,
+   "NEURON_RT_VISIBLE_CORES": null,
+   "NEURON_RT_NUM_CORES": null,
+   "WORLD_SIZE": null
+  }
+ },
+ "ccop": {
+  "first-g5": {
+   "steps_ms": [
+    1043.99,
+    1043.29,
+    1043.34,
+    1042.81,
+    1044.15,
+    1041.86,
+    1042.7,
+    1043.99,
+    1044.8,
+    1041.28,
+    1044.88,
+    1042.27,
+    1041.82,
+    1044.56,
+    1044.01,
+    1042.14,
+    1045.8,
+    1041.72,
+    1044.33,
+    1044.43,
+    1044.04,
+    1043.64,
+    1045.17,
+    1041.41,
+    1045.03,
+    1044.73,
+    1040.15,
+    1043.31,
+    1042.47,
+    1043.58,
+    1041.7,
+    1041.8,
+    1043.25,
+    1040.98,
+    1040.87,
+    1040.92,
+    1042.1,
+    1041.39,
+    1045.11,
+    1041.43,
+    1045.34,
+    1043.7,
+    1043.78,
+    1044.32,
+    1052.66,
+    1048.56,
+    1053.44,
+    1055.72,
+    1056.58
+   ],
+   "denoise_s": 52.302154742999846,
+   "flags": {
+    "NEURON_RT_VIRTUAL_CORE_SIZE": "2",
+    "NEURON_LOGICAL_NC_CONFIG": "2",
+    "NEURON_RT_VISIBLE_CORES": "0",
+    "NEURON_RT_NUM_CORES": null,
+    "WORLD_SIZE": "4"
+   },
+   "wall_s": 399.421581323,
+   "rc": "rc=0"
+  },
+  "twostep-g5": {
+   "steps_ms": [
+    1042.04
+   ],
+   "denoise_s": 2.174251730000833,
+   "flags": {
+    "NEURON_RT_VIRTUAL_CORE_SIZE": "2",
+    "NEURON_LOGICAL_NC_CONFIG": "2",
+    "NEURON_RT_VISIBLE_CORES": "0",
+    "NEURON_RT_NUM_CORES": null,
+    "WORLD_SIZE": "4"
+   },
+   "wall_s": 65.086439355,
+   "rc": "rc=0"
+  },
+  "warm1-g1": {
+   "steps_ms": [
+    523.14,
+    523.5,
+    525.4,
+    523.85,
+    525.14,
+    524.74,
+    522.42,
+    524.78,
+    523.0,
+    522.42,
+    522.54,
+    522.71,
+    523.47,
+    522.19,
+    522.36,
+    522.63,
+    522.3,
+    525.64,
+    525.31,
+    522.17,
+    522.89,
+    522.32,
+    522.8,
+    524.42,
+    522.72,
+    522.64,
+    522.45,
+    523.27,
+    523.49,
+    522.73,
+    522.28,
+    525.52,
+    522.16,
+    523.5,
+    522.62,
+    525.86,
+    524.12,
+    525.01,
+    522.49,
+    522.96,
+    522.85,
+    528.2,
+    522.53,
+    522.53,
+    523.09,
+    523.05,
+    523.27,
+    523.4,
+    525.04
+   ],
+   "denoise_s": 26.170628563999344,
+   "flags": {
+    "NEURON_RT_VIRTUAL_CORE_SIZE": "2",
+    "NEURON_LOGICAL_NC_CONFIG": "2",
+    "NEURON_RT_VISIBLE_CORES": "0",
+    "NEURON_RT_NUM_CORES": null,
+    "WORLD_SIZE": "4"
+   },
+   "wall_s": 98.007193097,
+   "rc": "rc=0"
+  },
+  "warm1-g5": {
+   "steps_ms": [
+    1041.18,
+    1043.31,
+    1046.26,
+    1041.33,
+    1041.6,
+    1041.45,
+    1041.48,
+    1041.16,
+    1040.68,
+    1041.67,
+    1042.34,
+    1041.25,
+    1041.36,
+    1044.74,
+    1041.05,
+    1043.92,
+    1040.89,
+    1046.63,
+    1043.0,
+    1041.86,
+    1041.17,
+    1044.25,
+    1044.2,
+    1044.34,
+    1040.33,
+    1042.43,
+    1047.29,
+    1042.62,
+    1042.15,
+    1041.75,
+    1043.49,
+    1041.72,
+    1041.72,
+    1041.56,
+    1042.18,
+    1042.61,
+    1043.9,
+    1042.69,
+    1044.75,
+    1040.84,
+    1041.53,
+    1041.39,
+    1041.96,
+    1042.93,
+    1044.95,
+    1048.46,
+    1053.25,
+    1047.48,
+    1051.98
+   ],
+   "denoise_s": 52.251539849003166,
+   "flags": {
+    "NEURON_RT_VIRTUAL_CORE_SIZE": "2",
+    "NEURON_LOGICAL_NC_CONFIG": "2",
+    "NEURON_RT_VISIBLE_CORES": "0",
+    "NEURON_RT_NUM_CORES": null,
+    "WORLD_SIZE": "4"
+   },
+   "wall_s": 172.620272282,
+   "rc": "rc=0"
+  },
+  "warm2-g1": {
+   "steps_ms": [
+    522.09,
+    524.55,
+    523.92,
+    523.02,
+    522.3,
+    523.03,
+    525.5,
+    525.13,
+    523.47,
+    524.49,
+    522.62,
+    523.27,
+    523.11,
+    522.04,
+    526.02,
+    522.1,
+    523.29,
+    523.56,
+    525.52,
+    525.56,
+    523.21,
+    522.77,
+    522.83,
+    522.65,
+    523.58,
+    522.56,
+    523.09,
+    525.64,
+    524.48,
+    525.61,
+    522.13,
+    522.84,
+    522.97,
+    522.98,
+    522.74,
+    522.6,
+    523.37,
+    522.53,
+    523.33,
+    525.34,
+    523.34,
+    522.46,
+    523.23,
+    522.82,
+    523.26,
+    527.02,
+    525.42,
+    522.84,
+    522.77
+   ],
+   "denoise_s": 26.177057290999073,
+   "flags": {
+    "NEURON_RT_VIRTUAL_CORE_SIZE": "2",
+    "NEURON_LOGICAL_NC_CONFIG": "2",
+    "NEURON_RT_VISIBLE_CORES": "0",
+    "NEURON_RT_NUM_CORES": null,
+    "WORLD_SIZE": "4"
+   },
+   "wall_s": 99.805311372,
+   "rc": "rc=0"
+  },
+  "warm2-g5": {
+   "steps_ms": [
+    1044.15,
+    1043.1,
+    1041.11,
+    1043.11,
+    1040.7,
+    1041.31,
+    1041.53,
+    1044.44,
+    1042.26,
+    1041.22,
+    1046.86,
+    1040.94,
+    1041.96,
+    1041.88,
+    1044.71,
+    1043.93,
+    1041.58,
+    1041.45,
+    1041.93,
+    1041.31,
+    1046.1,
+    1040.61,
+    1043.45,
+    1043.88,
+    1044.78,
+    1044.95,
+    1041.86,
+    1045.34,
+    1042.45,
+    1045.21,
+    1046.06,
+    1046.42,
+    1044.07,
+    1048.84,
+    1052.37,
+    1053.44,
+    1059.86,
+    1057.03,
+    1066.78,
+    1060.28,
+    1063.7,
+    1063.48,
+    1062.69,
+    1067.22,
+    1064.74,
+    1065.12,
+    1065.99,
+    1071.77,
+    1063.49
+   ],
+   "denoise_s": 52.544516294998175,
+   "flags": {
+    "NEURON_RT_VIRTUAL_CORE_SIZE": "2",
+    "NEURON_LOGICAL_NC_CONFIG": "2",
+    "NEURON_RT_VISIBLE_CORES": "0",
+    "NEURON_RT_NUM_CORES": null,
+    "WORLD_SIZE": "4"
+   },
+   "wall_s": 136.792985535,
+   "rc": "rc=0"
+  },
+  "warm3-g5": {
+   "steps_ms": [
+    1041.23,
+    1042.59,
+    1043.43,
+    1041.99,
+    1041.87,
+    1044.74,
+    1040.18,
+    1043.4,
+    1040.83,
+    1043.04,
+    1040.19,
+    1041.22,
+    1040.27,
+    1040.91,
+    1040.54,
+    1040.52,
+    1045.69,
+    1039.91,
+    1040.45,
+    1044.29,
+    1045.13,
+    1044.35,
+    1044.51,
+    1041.85,
+    1044.21,
+    1044.35,
+    1041.44,
+    1049.88,
+    1044.45,
+    1048.97,
+    1048.93,
+    1048.28,
+    1051.62,
+    1056.44,
+    1055.07,
+    1057.04,
+    1064.87,
+    1060.74,
+    1066.54,
+    1063.97,
+    1070.69,
+    1062.1,
+    1067.01,
+    1065.47,
+    1060.12,
+    1067.47,
+    1066.06,
+    1066.47,
+    1058.82
+   ],
+   "denoise_s": 52.579837345998385,
+   "flags": {
+    "NEURON_RT_VIRTUAL_CORE_SIZE": "2",
+    "NEURON_LOGICAL_NC_CONFIG": "2",
+    "NEURON_RT_VISIBLE_CORES": "0",
+    "NEURON_RT_NUM_CORES": null,
+    "WORLD_SIZE": "4"
+   },
+   "wall_s": 127.674671971,
+   "rc": "rc=0"
+  },
+  "warm4-g5": {
+   "steps_ms": [
+    1040.35,
+    1046.02,
+    1043.27,
+    1043.23,
+    1043.28,
+    1042.7,
+    1040.2,
+    1043.93,
+    1042.2,
+    1040.37,
+    1040.73,
+    1040.86,
+    1043.57,
+    1041.09,
+    1040.49,
+    1040.57,
+    1044.33,
+    1040.38,
+    1041.26,
+    1041.53,
+    1043.91,
+    1043.23,
+    1044.03,
+    1041.73,
+    1041.69,
+    1041.62,
+    1041.88,
+    1041.56,
+    1045.68,
+    1041.23,
+    1044.07,
+    1042.18,
+    1042.82,
+    1045.52,
+    1042.87,
+    1044.02,
+    1043.53,
+    1051.29,
+    1047.26,
+    1050.91,
+    1053.67,
+    1055.47,
+    1051.67,
+    1063.78,
+    1061.36,
+    1064.95,
+    1069.13,
+    1062.46,
+    1063.03
+   ],
+   "denoise_s": 52.39865210299831,
+   "flags": {
+    "NEURON_RT_VIRTUAL_CORE_SIZE": "2",
+    "NEURON_LOGICAL_NC_CONFIG": "2",
+    "NEURON_RT_VISIBLE_CORES": "0",
+    "NEURON_RT_NUM_CORES": null,
+    "WORLD_SIZE": "4"
+   },
+   "wall_s": 123.259455001,
+   "rc": "rc=0"
+  },
+  "warm5-g5": {
+   "steps_ms": [
+    1042.8,
+    1042.46,
+    1044.4,
+    1040.85,
+    1041.61,
+    1043.95,
+    1045.7,
+    1041.33,
+    1041.41,
+    1040.92,
+    1040.77,
+    1045.5,
+    1040.65,
+    1042.38,
+    1045.39,
+    1043.71,
+    1041.28,
+    1043.04,
+    1041.67,
+    1047.98,
+    1041.09,
+    1042.25,
+    1042.23,
+    1045.68,
+    1041.89,
+    1043.2,
+    1045.45,
+    1045.59,
+    1046.56,
+    1049.09,
+    1053.3,
+    1055.17,
+    1055.45,
+    1061.3,
+    1065.79,
+    1062.16,
+    1066.82,
+    1068.33,
+    1071.44,
+    1065.03,
+    1066.4,
+    1061.94,
+    1067.19,
+    1067.62,
+    1068.27,
+    1061.02,
+    1070.22,
+    1065.99,
+    1065.53
+   ],
+   "denoise_s": 52.654613481001434,
+   "flags": {
+    "NEURON_RT_VIRTUAL_CORE_SIZE": "2",
+    "NEURON_LOGICAL_NC_CONFIG": "2",
+    "NEURON_RT_VISIBLE_CORES": "0",
+    "NEURON_RT_NUM_CORES": null,
+    "WORLD_SIZE": "4"
+   },
+   "wall_s": 129.675424499,
+   "rc": "rc=0"
+  }
+ }
+}

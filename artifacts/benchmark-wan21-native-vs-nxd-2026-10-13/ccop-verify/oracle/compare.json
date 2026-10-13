@@ -1,0 +1,275 @@
+{
+  "reference_file": "/home/ubuntu/wan21-bench/quality/oracle/ref_2steps.pt",
+  "reference_meta": {
+    "prompt": "a cinematic shot of a red fox running through a snowy forest",
+    "negative_prompt": "",
+    "steps": 2,
+    "guidance_scale": 5.0,
+    "seed": 42,
+    "height": 480,
+    "width": 832,
+    "num_frames": 9,
+    "max_sequence_length": 512,
+    "latent_shape": [
+      1,
+      16,
+      3,
+      60,
+      104
+    ],
+    "timesteps": [
+      999,
+      750
+    ],
+    "snapshot": "/home/ubuntu/.cache/huggingface/hub/models--Wan-AI--Wan2.1-T2V-14B-Diffusers/snapshots/38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+    "threads": 12,
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "torch": "2.14.0+cpu",
+    "runs": [
+      "fp32",
+      "bf16",
+      "bf16_tsround"
+    ],
+    "seconds": {
+      "load": 0.5518498950004869,
+      "encode": 14.075726897001005,
+      "fp32": 624.6164221800027,
+      "bf16": 274.81791850199807,
+      "bf16_tsround": 276.80838524499995
+    },
+    "vm_hwm_gib": 59.34965515136719
+  },
+  "reference_timesteps_seen": {
+    "fp32": [
+      999.0,
+      999.0,
+      750.0,
+      750.0
+    ],
+    "bf16": [
+      999.0,
+      999.0,
+      750.0,
+      750.0
+    ],
+    "bf16_tsround": [
+      1000.0,
+      1000.0,
+      752.0,
+      752.0
+    ]
+  },
+  "controls": {
+    "bf16_vs_fp32": {
+      "cosine": 0.9990223719624086,
+      "rel_l1": 0.043735671087522014,
+      "rel_l2": 0.04427968408406255,
+      "max_abs": 0.49967968463897705,
+      "ref_absmean": 0.7995563942021071,
+      "rel_max": 0.1704966151377081
+    },
+    "bf16_tsround_vs_fp32": {
+      "cosine": 0.9988425471245045,
+      "rel_l1": 0.04779446915163443,
+      "rel_l2": 0.048473426227338676,
+      "max_abs": 0.4104851484298706,
+      "ref_absmean": 0.7995563942021071,
+      "rel_max": 0.14006238501002571
+    },
+    "bf16_tsround_vs_bf16": {
+      "cosine": 0.9989620558419954,
+      "rel_l1": 0.04541689331155028,
+      "rel_l2": 0.04651481790176628,
+      "max_abs": 0.37693846225738525,
+      "ref_absmean": 0.7962052065890572,
+      "rel_max": 0.12430077621819902
+    }
+  },
+  "rule": {
+    "source": "tests/manual/check_neuron_wan_w4.py comparison()/UPDATE_MIN_COSINE + tests/numerical/neuron_parity.py check()",
+    "min_cosine": 0.995,
+    "max_ratio_vs_control": 1.15,
+    "max_same_dtype_ratio": 1.2,
+    "same_dtype_gated_min_err_cos": 0.5,
+    "update_min_cosine": 0.98
+  },
+  "backends": [
+    {
+      "backend": "neuron",
+      "latents_file": "/home/ubuntu/wan21-bench/ccop-verify/twostep-g5/probe/latents-134982-1.pt",
+      "dtype": {
+        "initial": "torch.float32",
+        "final": "torch.float32"
+      },
+      "init_noise_equal_to_ref": true,
+      "init_vs_ref": {
+        "cosine": 0.9999999999999518,
+        "rel_l1": 0.0,
+        "rel_l2": 0.0,
+        "max_abs": 0.0,
+        "ref_absmean": 0.7998745863294252,
+        "rel_max": 0.0
+      },
+      "final": {
+        "vs_fp32": {
+          "cosine": 0.9991671973653518,
+          "rel_l1": 0.04071536675805504,
+          "rel_l2": 0.04135190954655221,
+          "max_abs": 0.4489154815673828,
+          "ref_absmean": 0.7995563942021071,
+          "rel_max": 0.1531752689634616,
+          "err_cos": 0.13597074158301922,
+          "vs_bf16": {
+            "cosine": 0.9984613050926792,
+            "rel_l1": 0.05570855774457705,
+            "rel_l2": 0.056525162818514094,
+            "max_abs": 0.483519971370697,
+            "ref_absmean": 0.7962052065890572,
+            "rel_max": 0.15944753262493963
+          }
+        },
+        "control": {
+          "cosine": 0.9990223719624086,
+          "rel_l1": 0.043735671087522014,
+          "rel_l2": 0.04427968408406255,
+          "max_abs": 0.49967968463897705,
+          "ref_absmean": 0.7995563942021071,
+          "rel_max": 0.1704966151377081
+        },
+        "ok": true,
+        "reasons": [],
+        "notes": [
+          "err_cos 0.136 < 0.5: the result's error is decorrelated from the bf16 control's, so it does not round like upstream bf16; same-dtype 1.274x the control's distance from fp32, reported, not gated (D68/D69)"
+        ],
+        "ratio_vs_control": 0.9309418546837234,
+        "same_dtype_gated": false,
+        "same_dtype": "same-dtype 1.274x, reported, not gated (err_cos 0.136 < 0.5, D68)",
+        "tsround": {
+          "vs_fp32": {
+            "cosine": 0.9991671973653518,
+            "rel_l1": 0.04071536675805504,
+            "rel_l2": 0.04135190954655221,
+            "max_abs": 0.4489154815673828,
+            "ref_absmean": 0.7995563942021071,
+            "rel_max": 0.1531752689634616,
+            "err_cos": 0.2606766943789216,
+            "vs_bf16": {
+              "cosine": 0.9985092621292662,
+              "rel_l1": 0.05340952169451524,
+              "rel_l2": 0.05464044134242044,
+              "max_abs": 0.4399726390838623,
+              "ref_absmean": 0.8035203844324151,
+              "rel_max": 0.1439511250180682
+            }
+          },
+          "control": {
+            "cosine": 0.9988425471245045,
+            "rel_l1": 0.04779446915163443,
+            "rel_l2": 0.048473426227338676,
+            "max_abs": 0.4104851484298706,
+            "ref_absmean": 0.7995563942021071,
+            "rel_max": 0.14006238501002571
+          },
+          "ok": true,
+          "reasons": [],
+          "ratio_vs_control": 0.8518844853968357,
+          "same_dtype": "same-dtype 1.117x, reported, not gated (err_cos 0.261 < 0.5, D68)",
+          "control_vs_bf16_control": {
+            "cosine": 0.9989620558419954,
+            "rel_l1": 0.04541689331155028,
+            "rel_l2": 0.04651481790176628,
+            "max_abs": 0.37693846225738525,
+            "ref_absmean": 0.7962052065890572,
+            "rel_max": 0.12430077621819902
+          }
+        }
+      },
+      "final_describe": "cos=0.999167 rel_l1=4.072e-02 (0.931x control 4.374e-02, cos 0.999022) same-dtype 1.274x, reported, not gated (err_cos 0.136 < 0.5, D68); vs the bf16-timestep control 4.779e-02: 0.852x (same-dtype 1.117x, reported, not gated (err_cos 0.261 < 0.5, D68)) [\"err_cos 0.136 < 0.5: the result's error is decorrelated from the bf16 control's, so it does not round like upstream bf16; same-dtype 1.274x the control's distance from fp32, reported, not gated (D68/D69)\"]",
+      "update": {
+        "vs_fp32": {
+          "cosine": 0.9995721690302486,
+          "rel_l1": 0.02875157528875822,
+          "rel_l2": 0.02937150606603009,
+          "max_abs": 0.44891560077667236,
+          "ref_absmean": 1.1322590622192619,
+          "rel_max": 0.0688135914708488,
+          "err_cos": 0.13597074047789806,
+          "vs_bf16": {
+            "cosine": 0.9992089372600818,
+            "rel_l1": 0.0392606254348945,
+            "rel_l2": 0.040088228928712666,
+            "max_abs": 0.483519971370697,
+            "ref_absmean": 1.1297691583919878,
+            "rel_max": 0.07250275295492647
+          }
+        },
+        "control": {
+          "cosine": 0.9995064286636915,
+          "rel_l1": 0.030884394453162954,
+          "rel_l2": 0.03145105099073384,
+          "max_abs": 0.4996796250343323,
+          "ref_absmean": 1.1322590622192619,
+          "rel_max": 0.07659513174398512
+        },
+        "ok": true,
+        "reasons": [],
+        "notes": [
+          "err_cos 0.136 < 0.5: the result's error is decorrelated from the bf16 control's, so it does not round like upstream bf16; same-dtype 1.271x the control's distance from fp32, reported, not gated (D68/D69)"
+        ],
+        "ratio_vs_control": 0.9309418493654064,
+        "same_dtype_gated": false,
+        "same_dtype": "same-dtype 1.271x, reported, not gated (err_cos 0.136 < 0.5, D68)",
+        "tsround": {
+          "vs_fp32": {
+            "cosine": 0.9995721690302486,
+            "rel_l1": 0.02875157528875822,
+            "rel_l2": 0.02937150606603009,
+            "max_abs": 0.44891560077667236,
+            "ref_absmean": 1.1322590622192619,
+            "rel_max": 0.0688135914708488,
+            "err_cos": 0.260676686467724,
+            "vs_bf16": {
+              "cosine": 0.9992430321089802,
+              "rel_l1": 0.03781526139485515,
+              "rel_l2": 0.038908169081470746,
+              "max_abs": 0.4399724006652832,
+              "ref_absmean": 1.1348761844025441,
+              "rel_max": 0.0669135348904906
+            }
+          },
+          "control": {
+            "cosine": 0.9994113484791546,
+            "rel_l1": 0.03375055637363126,
+            "rel_l2": 0.03442978930890186,
+            "max_abs": 0.41048526763916016,
+            "ref_absmean": 1.1322590622192619,
+            "rel_max": 0.06292266400021052
+          },
+          "ok": true,
+          "reasons": [],
+          "ratio_vs_control": 0.8518844836353969,
+          "same_dtype": "same-dtype 1.120x, reported, not gated (err_cos 0.261 < 0.5, D68)",
+          "control_vs_bf16_control": {
+            "cosine": 0.9994675383842555,
+            "rel_l1": 0.03200757151233725,
+            "rel_l2": 0.03298878908739597,
+            "max_abs": 0.37693846225738525,
+            "ref_absmean": 1.1297691583919878,
+            "rel_max": 0.05652109080579193
+          }
+        }
+      },
+      "update_describe": "cosine 0.999572 (min 0.98); cos=0.999572 rel_l1=2.875e-02 (0.931x control 3.088e-02, cos 0.999506) same-dtype 1.271x, reported, not gated (err_cos 0.136 < 0.5, D68); vs the bf16-timestep control 3.375e-02: 0.852x (same-dtype 1.120x, reported, not gated (err_cos 0.261 < 0.5, D68)) [\"err_cos 0.136 < 0.5: the result's error is decorrelated from the bf16 control's, so it does not round like upstream bf16; same-dtype 1.271x the control's distance from fp32, reported, not gated (D68/D69)\"]",
+      "update_cosine": 0.9995721690302486,
+      "checks": {
+        "init_latents": true,
+        "parity_latents_final": true,
+        "update_final": true
+      },
+      "parity_pass": true
+    }
+  ],
+  "cross_backend": {},
+  "torch_neuronx_loaded": false
+}

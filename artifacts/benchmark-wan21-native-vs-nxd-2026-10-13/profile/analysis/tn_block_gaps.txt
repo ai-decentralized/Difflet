@@ -1,0 +1,56 @@
+gap 0.550 ms [7.839-8.389] cc=[('ALLREDUCE', 'RDH', 11980800, 7.847, 136.1), ('ALLREDUCE', 'RDH', 11980800, 8.386, 150.2)]
+     GpSimd      670.9us  
+     Scalar      104.0us  
+     Vector       91.3us  
+     Vector       43.3us  %add.416 = add(%reshape.81, %broadcast.415)
+     Vector       42.0us  %add.374 = add(%all-reduce.372, %broadcast.373)
+     Sync         33.9us  %add.252 = add(%convert.71, %multiply.251)
+gap 0.401 ms [4.836-5.237] cc=[('ALLREDUCE', 'RDH', 11980800, 4.839, 135.2), ('ALLREDUCE', 'RDH', 11980800, 5.231, 133.4)]
+     GpSimd      424.1us  
+     Sync        418.6us  
+     Vector       64.5us  %multiply.251 = multiply(%convert.247, %broadcast.250)
+     Scalar       63.1us  
+     Scalar       57.6us  %multiply.268 = multiply(%subtract.267, %subtract.267)
+     Vector       54.6us  %add.252 = add(%convert.71, %multiply.251)
+gap 0.331 ms [11.546-11.877] cc=[('ALLREDUCE', 'RDH', 11980800, 11.5, 188.4), ('ALLREDUCE', 'RDH', 11980800, 11.691, 181.1)]
+     GpSimd      347.7us  %add.441 = add(%convert.376, %multiply.440)
+     Sync        151.1us  %add.374 = add(%all-reduce.372, %broadcast.373)
+     GpSimd      106.5us  
+     Vector      100.3us  %add.441 = add(%convert.376, %multiply.440)
+     Vector       93.9us  %multiply.440 = multiply(%convert.436, %broadcast.439)
+     Sync         67.8us  
+gap 0.240 ms [5.865-6.105] cc=[('ALLREDUCE', 'RDH', 11980800, 5.999, 101.3)]
+     Scalar       21.4us  %multiply.268 = multiply(%subtract.267, %subtract.267)
+     Sync         19.1us  
+     GpSimd       18.4us  
+     Vector       18.1us  %subtract.267 = subtract(%convert.254, %broadcast.266)
+     Vector       18.0us  %multiply.281 = multiply(%subtract.267, %broadcast.280)
+     Vector       17.0us  %add.285 = add(%multiply.283, %broadcast.284)
+gap 0.158 ms [0.933-1.091] cc=[('ALLREDUCE', 'Mesh', 18720, 0.938, 149.9)]
+     Scalar       45.8us  
+     GpSimd       13.1us  
+     Sync          2.0us  %multiply.3 = multiply(%all-reduce.134, %broadcast.6)
+     Scalar        1.6us  %reduce.128 = reduce(%multiply.2, %constant.49)
+     Vector        0.5us  %scatter.203 = scatter(%scatter.195, %constant.51, %convert.199)
+     GpSimd        0.5us  %all-reduce.134 = all-reduce(%reshape.129)
+gap 0.146 ms [8.394-8.540] cc=[('ALLREDUCE', 'RDH', 11980800, 8.386, 150.2)]
+     Scalar       30.8us  
+     GpSimd       27.5us  
+     Vector       19.8us  
+     Vector       10.5us  %dot.9 = dot(%reshape.82, %transpose.426)
+     Sync          3.0us  
+     Scalar        2.4us  %dot.9 = dot(%reshape.82, %transpose.426)
+gap 0.126 ms [5.242-5.369] cc=[('ALLREDUCE', 'RDH', 11980800, 5.231, 133.4)]
+     Sync         28.6us  
+     Vector       19.5us  %add.285 = add(%multiply.283, %broadcast.284)
+     Vector       18.6us  %multiply.281 = multiply(%subtract.267, %broadcast.280)
+     Vector        6.0us  %add.291 = add(%reshape.49, %broadcast.290)
+     Scalar        4.7us  
+     Scalar        2.2us  %multiply.8 = multiply(%convert.302, %convert.302)
+gap 0.092 ms [1.308-1.400] cc=[]
+     Vector      118.3us  %multiply.196 = multiply(%reshape.124, %broadcast.188)
+     Scalar       73.6us  %scatter.203 = scatter(%scatter.195, %constant.51, %convert.199)
+     Vector       63.1us  %multiply.197 = multiply(%reshape.125, %broadcast.183)
+     Scalar       19.1us  
+     GpSimd        8.3us  
+     Vector        5.7us  %multiply.184 = multiply(%reshape.124, %broadcast.183)

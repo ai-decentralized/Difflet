@@ -1,0 +1,31 @@
+fully covered layer windows (marker k -> k+1): [0, 1, 2] ... [25, 26, 27] n 28
+attention_cte clusters 207 spans ms (first 12): [0.367, 0.041, 0.001, 0.35, 0.052, 1.553, 0.007, 0.819, 0.196, 0.001, 0.001, 3.017]
+self-attn-like (>1ms) median span ms 3.006 n 29
+cross-attn-like (<=1ms) median span ms 0.046 n 178
+
+per-layer instruction busy (sum of durations, pcore1) by (engine, source), ms:
+  Tensor   module.py:1786                              6.849
+  Tensor   none                                        6.145
+  Tensor   nxd_linear                                  4.802
+  Tensor   attention_cte                               4.323
+  Vector   attention_cte                               2.051
+  Scalar   attention_cte                               2.030
+  Sync     attention_cte                               1.112
+  Sync     none                                        0.999
+  Vector   normalization.py:87                         0.900
+  Scalar   none                                        0.810
+  Scalar   module.py:1786                              0.763
+  Vector   module.py:1786                              0.696
+  GpSimd   module.py:1786                              0.596
+  Vector   nxd_linear                                  0.449
+  GpSimd   none                                        0.427
+  GpSimd   nxd_linear                                  0.425
+  Vector   none                                        0.372
+  Scalar   modeling_wan.py:527                         0.360
+  GpSimd   attention_cte                               0.287
+  Sync     module.py:1786                              0.251
+  Scalar   modeling_wan.py:528                         0.211
+  Vector   embeddings.py:12                            0.200
+  Vector   embeddings.py:13                            0.200
+  Scalar   normalization.py:87                         0.186
+  Scalar   nxd_linear                                  0.158

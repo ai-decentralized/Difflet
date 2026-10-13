@@ -1,0 +1,2524 @@
+{
+  "meta": {
+    "script": "benchmark/wan21_quality.py",
+    "out": "/home/ubuntu/wan21-bench",
+    "generated_utc": "2026-10-13 05:51:54",
+    "elapsed_s": 488.7,
+    "torch_threads": 3,
+    "prompt": "a cinematic shot of a red fox running through a snowy forest",
+    "clip": {
+      "model": "openai/clip-vit-large-patch14",
+      "revision": "32bd64288804d66eefd0ccbe215aa642df71cc41",
+      "texts": [
+        "a cinematic shot of a red fox running through a snowy forest",
+        "a bowl of fruit on a kitchen table",
+        "a city street at night with neon signs",
+        "a portrait of an elderly man"
+      ]
+    },
+    "definitions": {
+      "latent_rel_l2": "||a - b|| / ||b||, b = reference (trainium, or the g1 run)",
+      "latent_psnr_db": "10 log10(peak^2 / MSE), peak = max(b) - min(b)",
+      "update_cosine": "cosine of (final - initial) between the two runs",
+      "video_psnr": "per frame, RGB uint8 decoded from out.mp4, peak 255",
+      "ssim": "BT.601 luma, gaussian 11x11 sigma 1.5, K1=.01 K2=.03 L=255, valid",
+      "temporal_mean_abs_diff": "mean |frame[i+1] - frame[i]| over RGB (0-255)",
+      "laplacian_var": "variance of 4-neighbour Laplacian of luma, valid region",
+      "saturated_frac": "fraction of RGB values <= 2 or >= 253",
+      "clip": "cosine(text_emb, image_emb), CLIPProcessor resize+center-crop 224",
+      "margin_vs_best_control": "prompt cosine - max control cosine (frame means)",
+      "comparisons": "cross-backend pairs use the warm1 run of each backend",
+      "cpu_vae_reference": "diffusers AutoencoderKLWan fp32 CPU decode of the probe's final latents, encoded like the CLI (crf 18)"
+    }
+  },
+  "initial_noise": {
+    "runs": {
+      "neuron/cold-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "neuron/warm1-g1": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "neuron/warm1-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "neuron/warm2-g1": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "neuron/warm2-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "neuron/warm3-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "trainium/cold-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "trainium/warm1-g1": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "trainium/warm1-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "trainium/warm2-g1": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "trainium/warm2-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "trainium/warm3-g5": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83"
+    },
+    "all_equal": true,
+    "distinct": 1,
+    "runs_without_latents": [
+      "neuron/first-g5"
+    ]
+  },
+  "final_latents": {
+    "neuron_vs_trainium_g5": {
+      "a": "neuron/warm1-g5",
+      "b_reference": "trainium/warm1-g5",
+      "cosine": 0.9695869651652053,
+      "rel_l2": 0.24842070976967529,
+      "max_abs": 2.6475754976272583,
+      "mean_abs": 0.13556171363702618,
+      "psnr_db": 32.17730651684657,
+      "psnr_peak": 7.9850616455078125,
+      "cosine_per_latent_frame": [
+        0.962308977047537,
+        0.9724629828697551,
+        0.9743508703001602
+      ],
+      "update_cosine": 0.9831013696970285,
+      "update_rel_l2": 0.18354579014472228
+    },
+    "neuron_vs_trainium_g1": {
+      "a": "neuron/warm1-g1",
+      "b_reference": "trainium/warm1-g1",
+      "cosine": 0.9973597212249357,
+      "rel_l2": 0.0726332604172313,
+      "max_abs": 0.763764500617981,
+      "mean_abs": 0.03253964495385376,
+      "psnr_db": 43.15490225805468,
+      "psnr_peak": 7.262003183364868,
+      "cosine_per_latent_frame": [
+        0.9976535417175707,
+        0.9971481500780593,
+        0.997401699195769
+      ],
+      "update_cosine": 0.9987977853475624,
+      "update_rel_l2": 0.04903233765853661
+    },
+    "reference_neuron_g5_vs_g1": {
+      "a": "neuron/warm1-g5",
+      "b_reference": "neuron/warm1-g1",
+      "cosine": 0.6262029639478459,
+      "rel_l2": 0.9427845541223022,
+      "max_abs": 3.8916479349136353,
+      "mean_abs": 0.49721347825306556,
+      "psnr_db": 20.874152148737885,
+      "psnr_peak": 7.21989369392395,
+      "cosine_per_latent_frame": [
+        0.6295766851797111,
+        0.596007203926654,
+        0.6741063946640495
+      ],
+      "update_cosine": 0.8066568455855901,
+      "update_rel_l2": 0.6339333473844049
+    },
+    "reference_trainium_g5_vs_g1": {
+      "a": "trainium/warm1-g5",
+      "b_reference": "trainium/warm1-g1",
+      "cosine": 0.613871875994176,
+      "rel_l2": 0.9474262676397975,
+      "max_abs": 3.993710517883301,
+      "mean_abs": 0.5032950706957976,
+      "psnr_db": 20.84670461915121,
+      "psnr_peak": 7.262003183364868,
+      "cosine_per_latent_frame": [
+        0.6211720982767848,
+        0.5788326887157333,
+        0.6605745608201492
+      ],
+      "update_cosine": 0.8040016527705927,
+      "update_rel_l2": 0.6395764749459175
+    }
+  },
+  "determinism": {
+    "neuron_g5": {
+      "warm_final_latents": {
+        "runs": {
+          "neuron/warm1-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+          "neuron/warm2-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+          "neuron/warm3-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "warm_mp4": {
+        "runs": {
+          "neuron/warm1-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+          "neuron/warm2-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+          "neuron/warm3-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "warm_decoded_frames": {
+        "runs": {
+          "neuron/warm1-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+          "neuron/warm2-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+          "neuron/warm3-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "all_runs_final_latents": {
+        "runs": {
+          "neuron/cold-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+          "neuron/warm1-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+          "neuron/warm2-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+          "neuron/warm3-g5": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "all_runs_mp4": {
+        "runs": {
+          "neuron/cold-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+          "neuron/first-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+          "neuron/warm1-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+          "neuron/warm2-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+          "neuron/warm3-g5": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "all_runs_decoded_frames": {
+        "runs": {
+          "neuron/cold-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+          "neuron/first-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+          "neuron/warm1-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+          "neuron/warm2-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+          "neuron/warm3-g5": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8"
+        },
+        "all_equal": true,
+        "distinct": 1
+      }
+    },
+    "neuron_g1": {
+      "warm_final_latents": {
+        "runs": {
+          "neuron/warm1-g1": "9be6fc6ae55e3fa0a3d8a9399360c71c6b84c57def5c256e292b18d7c4a3ceed",
+          "neuron/warm2-g1": "9be6fc6ae55e3fa0a3d8a9399360c71c6b84c57def5c256e292b18d7c4a3ceed"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "warm_mp4": {
+        "runs": {
+          "neuron/warm1-g1": "e8bbe70b6e56b1f402dfaaddcfc315d26a03caa209ae0a4a6454da912bcf83e7",
+          "neuron/warm2-g1": "e8bbe70b6e56b1f402dfaaddcfc315d26a03caa209ae0a4a6454da912bcf83e7"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "warm_decoded_frames": {
+        "runs": {
+          "neuron/warm1-g1": "d4a9a02d8d4d889b3b893b2d0a8a242d7696507491291a880082b83004d9b59f",
+          "neuron/warm2-g1": "d4a9a02d8d4d889b3b893b2d0a8a242d7696507491291a880082b83004d9b59f"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "all_runs_final_latents": {
+        "runs": {
+          "neuron/warm1-g1": "9be6fc6ae55e3fa0a3d8a9399360c71c6b84c57def5c256e292b18d7c4a3ceed",
+          "neuron/warm2-g1": "9be6fc6ae55e3fa0a3d8a9399360c71c6b84c57def5c256e292b18d7c4a3ceed"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "all_runs_mp4": {
+        "runs": {
+          "neuron/warm1-g1": "e8bbe70b6e56b1f402dfaaddcfc315d26a03caa209ae0a4a6454da912bcf83e7",
+          "neuron/warm2-g1": "e8bbe70b6e56b1f402dfaaddcfc315d26a03caa209ae0a4a6454da912bcf83e7"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "all_runs_decoded_frames": {
+        "runs": {
+          "neuron/warm1-g1": "d4a9a02d8d4d889b3b893b2d0a8a242d7696507491291a880082b83004d9b59f",
+          "neuron/warm2-g1": "d4a9a02d8d4d889b3b893b2d0a8a242d7696507491291a880082b83004d9b59f"
+        },
+        "all_equal": true,
+        "distinct": 1
+      }
+    },
+    "trainium_g5": {
+      "warm_final_latents": {
+        "runs": {
+          "trainium/warm1-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+          "trainium/warm2-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+          "trainium/warm3-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "warm_mp4": {
+        "runs": {
+          "trainium/warm1-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+          "trainium/warm2-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+          "trainium/warm3-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "warm_decoded_frames": {
+        "runs": {
+          "trainium/warm1-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+          "trainium/warm2-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+          "trainium/warm3-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "all_runs_final_latents": {
+        "runs": {
+          "trainium/cold-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+          "trainium/warm1-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+          "trainium/warm2-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+          "trainium/warm3-g5": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "all_runs_mp4": {
+        "runs": {
+          "trainium/cold-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+          "trainium/warm1-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+          "trainium/warm2-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+          "trainium/warm3-g5": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "all_runs_decoded_frames": {
+        "runs": {
+          "trainium/cold-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+          "trainium/warm1-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+          "trainium/warm2-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+          "trainium/warm3-g5": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93"
+        },
+        "all_equal": true,
+        "distinct": 1
+      }
+    },
+    "trainium_g1": {
+      "warm_final_latents": {
+        "runs": {
+          "trainium/warm1-g1": "cc515a59c5ba86c1eba92e4402244294b91281c8988fcd69db80a6d9db4cc60b",
+          "trainium/warm2-g1": "cc515a59c5ba86c1eba92e4402244294b91281c8988fcd69db80a6d9db4cc60b"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "warm_mp4": {
+        "runs": {
+          "trainium/warm1-g1": "98bbfa90f0107ed6d2b2ad7658042adf287d2903f674601e68319cd47d365356",
+          "trainium/warm2-g1": "98bbfa90f0107ed6d2b2ad7658042adf287d2903f674601e68319cd47d365356"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "warm_decoded_frames": {
+        "runs": {
+          "trainium/warm1-g1": "d8f046cc88923c5e1cc9ee54ce15efb7f108cba9cfa8f265de560702f112ccf4",
+          "trainium/warm2-g1": "d8f046cc88923c5e1cc9ee54ce15efb7f108cba9cfa8f265de560702f112ccf4"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "all_runs_final_latents": {
+        "runs": {
+          "trainium/warm1-g1": "cc515a59c5ba86c1eba92e4402244294b91281c8988fcd69db80a6d9db4cc60b",
+          "trainium/warm2-g1": "cc515a59c5ba86c1eba92e4402244294b91281c8988fcd69db80a6d9db4cc60b"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "all_runs_mp4": {
+        "runs": {
+          "trainium/warm1-g1": "98bbfa90f0107ed6d2b2ad7658042adf287d2903f674601e68319cd47d365356",
+          "trainium/warm2-g1": "98bbfa90f0107ed6d2b2ad7658042adf287d2903f674601e68319cd47d365356"
+        },
+        "all_equal": true,
+        "distinct": 1
+      },
+      "all_runs_decoded_frames": {
+        "runs": {
+          "trainium/warm1-g1": "d8f046cc88923c5e1cc9ee54ce15efb7f108cba9cfa8f265de560702f112ccf4",
+          "trainium/warm2-g1": "d8f046cc88923c5e1cc9ee54ce15efb7f108cba9cfa8f265de560702f112ccf4"
+        },
+        "all_equal": true,
+        "distinct": 1
+      }
+    }
+  },
+  "video_compare": {
+    "neuron_vs_trainium_g5": {
+      "a": "neuron/warm1-g5",
+      "b": "trainium/warm1-g5",
+      "psnr_db_per_frame": [
+        18.032715775364665,
+        12.681826777540447,
+        11.068919456472486,
+        9.410788263676354,
+        11.171325477410601,
+        12.27929545887823,
+        11.381452170532373,
+        11.082615222805208,
+        11.782076090698745
+      ],
+      "psnr_db_mean": 12.099001632597679,
+      "psnr_db_min": 9.410788263676354,
+      "ssim_luma_per_frame": [
+        0.7623210382505038,
+        0.47874804623416267,
+        0.36266638844974897,
+        0.32925307155381955,
+        0.2541075408893353,
+        0.33598597474147873,
+        0.36187690702791525,
+        0.36010365038730163,
+        0.3209579836167418
+      ],
+      "ssim_luma_mean": 0.3962245112390008,
+      "ssim_luma_min": 0.2541075408893353,
+      "mean_abs_rgb_diff": 54.31542718349359
+    },
+    "neuron_vs_trainium_g1": {
+      "a": "neuron/warm1-g1",
+      "b": "trainium/warm1-g1",
+      "psnr_db_per_frame": [
+        20.60592667845626,
+        14.707466888748318,
+        13.155579394456527,
+        12.080507985395986,
+        12.221197987350891,
+        12.550870392882981,
+        12.557535705687188,
+        12.515050597340782,
+        12.696820622976725
+      ],
+      "psnr_db_mean": 13.676772917032851,
+      "psnr_db_min": 12.080507985395986,
+      "ssim_luma_per_frame": [
+        0.8211204488630621,
+        0.5458133670642548,
+        0.45099104480207497,
+        0.38355485292121866,
+        0.28984704229479097,
+        0.37591616422236324,
+        0.41677809885416367,
+        0.4130445001111697,
+        0.35604589838438583
+      ],
+      "ssim_luma_mean": 0.4503457130574982,
+      "ssim_luma_min": 0.28984704229479097,
+      "mean_abs_rgb_diff": 45.65163066461895
+    },
+    "reference_neuron_g5_vs_g1": {
+      "a": "neuron/warm1-g5",
+      "b": "neuron/warm1-g1",
+      "psnr_db_per_frame": [
+        10.476451730365392,
+        11.645037445285011,
+        11.98167430384608,
+        12.333229776058607,
+        12.47169478179388,
+        12.650562007492042,
+        12.770831596875498,
+        12.812184015460542,
+        12.795824225759294
+      ],
+      "psnr_db_mean": 12.215276653659593,
+      "psnr_db_min": 10.476451730365392,
+      "ssim_luma_per_frame": [
+        0.47996317344949463,
+        0.5312904962352846,
+        0.5514261865836355,
+        0.5634965552914052,
+        0.5706705926283294,
+        0.5748755837870778,
+        0.5727738964828234,
+        0.576436032841182,
+        0.569701174492345
+      ],
+      "ssim_luma_mean": 0.5545148546435086,
+      "ssim_luma_min": 0.47996317344949463,
+      "mean_abs_rgb_diff": 46.594771078169515
+    },
+    "reference_trainium_g5_vs_g1": {
+      "a": "trainium/warm1-g5",
+      "b": "trainium/warm1-g1",
+      "psnr_db_per_frame": [
+        10.197303071094614,
+        16.02658444172507,
+        22.6277563898333,
+        24.093388850420375,
+        21.715566877828635,
+        22.105771592399336,
+        26.1351728967426,
+        26.80829383530512,
+        24.100099725145334
+      ],
+      "psnr_db_mean": 21.53443752005493,
+      "psnr_db_min": 10.197303071094614,
+      "ssim_luma_per_frame": [
+        0.4514170877305019,
+        0.7709157222687616,
+        0.8304594312175319,
+        0.8399516009211357,
+        0.6420531513262671,
+        0.7756456116400128,
+        0.8583910644924023,
+        0.8637982802839388,
+        0.7735726067930812
+      ],
+      "ssim_luma_mean": 0.7562449507415149,
+      "ssim_luma_min": 0.4514170877305019,
+      "mean_abs_rgb_diff": 19.79256847993827
+    }
+  },
+  "cpu_vae_reference": {
+    "neuron/warm1-g5": {
+      "mp4": "/home/ubuntu/wan21-bench/quality/ref/neuron_warm1-g5_cpuvae.mp4",
+      "mp4_sha256": "148b5d89d292869cec4cf5e46f1bbb17897fed36e6cef56b29bb261b2fe8092e",
+      "decode_s": 97.6,
+      "backend_mp4_vs_cpu_vae_mp4": {
+        "psnr_db_per_frame": [
+          33.15229632809378,
+          34.24522668201726,
+          35.79195317049115,
+          35.74381173761658,
+          35.748067854585116,
+          35.67746360118242,
+          35.297950481228135,
+          35.31520769121987,
+          34.780765241214
+        ],
+        "psnr_db_mean": 35.083638087516476,
+        "psnr_db_min": 33.15229632809378,
+        "ssim_luma_per_frame": [
+          0.9690115736055613,
+          0.9657065703547347,
+          0.9754586480364477,
+          0.9744769450536619,
+          0.9752729437470055,
+          0.9747144101641939,
+          0.9716985312476621,
+          0.972064356157412,
+          0.9690869847808772
+        ],
+        "ssim_luma_mean": 0.9719434403497283,
+        "ssim_luma_min": 0.9657065703547347,
+        "mean_abs_rgb_diff": 3.2326933278430676
+      },
+      "backend_mp4_vs_cpu_vae_raw": {
+        "psnr_db_per_frame": [
+          31.800461601948946,
+          32.56083588548506,
+          34.22999024438393,
+          33.98987421947125,
+          33.594075487326805,
+          33.60867354946522,
+          33.45420039806287,
+          33.1146743350248,
+          32.863277156683075
+        ],
+        "psnr_db_mean": 33.24622920865021,
+        "psnr_db_min": 31.800461601948946,
+        "ssim_luma_per_frame": [
+          0.9707389918975399,
+          0.967352950574147,
+          0.9779340889520473,
+          0.976072772599603,
+          0.9750524889660395,
+          0.9737832220235886,
+          0.9721738985008109,
+          0.9703436109584702,
+          0.9677974964902478
+        ],
+        "ssim_luma_mean": 0.9723610578847216,
+        "ssim_luma_min": 0.967352950574147,
+        "mean_abs_rgb_diff": 3.8855066254154798
+      },
+      "h264_loss_cpu_vae_mp4_vs_raw": {
+        "psnr_db_per_frame": [
+          34.78398601662198,
+          35.48811666326285,
+          37.1834167129292,
+          37.04304363806368,
+          36.49741231869706,
+          36.55044435757094,
+          36.65909265050215,
+          36.285390940574885,
+          36.23923531959312
+        ],
+        "psnr_db_mean": 36.30334873531288,
+        "psnr_db_min": 34.78398601662198,
+        "ssim_luma_per_frame": [
+          0.9871270500302386,
+          0.9849728601076517,
+          0.9900345347570287,
+          0.9889784418633252,
+          0.9883228094241704,
+          0.988081714586986,
+          0.9874047574512007,
+          0.9867943161950375,
+          0.9853876917768429
+        ],
+        "ssim_luma_mean": 0.9874560195769424,
+        "ssim_luma_min": 0.9849728601076517,
+        "mean_abs_rgb_diff": 2.673780363396249
+      },
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          99.97225393963676,
+          115.42372991230413,
+          118.1062686409366
+        ],
+        "channel_std": [
+          67.19664564777663,
+          66.96052926039692,
+          67.03541678862605
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 6.237852960570246,
+        "temporal_mean_abs_diff_per_pair": [
+          19.57777276976496,
+          13.839413060897435,
+          3.7225869724893164,
+          2.3810296474358976,
+          3.300601796207265,
+          2.8591454660790596,
+          2.0966796875,
+          2.125594284188034
+        ],
+        "laplacian_var_mean": 294.05175522743707,
+        "laplacian_var_per_frame": [
+          471.25754033852496,
+          278.52158740623554,
+          304.6739925158189,
+          276.7225710502059,
+          258.5650573683398,
+          258.9400161160198,
+          284.43102424156064,
+          258.0907564585874,
+          255.26325155164133
+        ],
+        "saturated_frac": 0.027051801400759735,
+        "saturated_low_frac": 0.02395963170702754,
+        "saturated_high_frac": 0.0030921696937321937
+      },
+      "clip": {
+        "prompt_cosine_mean": 0.3038528694046868,
+        "prompt_cosine_per_frame": [
+          0.2850084900856018,
+          0.28768497705459595,
+          0.3089146614074707,
+          0.3073309361934662,
+          0.31078198552131653,
+          0.3123651146888733,
+          0.30945104360580444,
+          0.30811911821365356,
+          0.3050194978713989
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10822232150369221,
+          "a city street at night with neon signs": 0.1111183257566558,
+          "a portrait of an elderly man": 0.15638353096114266
+        },
+        "margin_vs_best_control": 0.14746933844354415,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "trainium/warm1-g5": {
+      "mp4": "/home/ubuntu/wan21-bench/quality/ref/trainium_warm1-g5_cpuvae.mp4",
+      "mp4_sha256": "6fbbf654299f8c733b27f9b19e5021160821f812ede448f80e378ac3ac261299",
+      "decode_s": 97.3,
+      "backend_mp4_vs_cpu_vae_mp4": {
+        "psnr_db_per_frame": [
+          21.08889551968073,
+          12.706262192094622,
+          11.049122396255393,
+          9.374482239808833,
+          11.096971644611152,
+          12.185992426072769,
+          11.309443082284185,
+          11.038764429656101,
+          11.72282148484242
+        ],
+        "psnr_db_mean": 12.396972823922912,
+        "psnr_db_min": 9.374482239808833,
+        "ssim_luma_per_frame": [
+          0.8759578729367463,
+          0.4751311665888241,
+          0.35834987921154016,
+          0.3209190307319502,
+          0.24317855897507576,
+          0.32471923994218926,
+          0.348676713278302,
+          0.34910908787234146,
+          0.3107585480088402
+        ],
+        "ssim_luma_mean": 0.4007555663939788,
+        "ssim_luma_min": 0.24317855897507576,
+        "mean_abs_rgb_diff": 54.100196796355654
+      },
+      "backend_mp4_vs_cpu_vae_raw": {
+        "psnr_db_per_frame": [
+          20.76900871280827,
+          12.643216766785548,
+          10.99949702207578,
+          9.331773428551491,
+          11.060649462319297,
+          12.175622795734675,
+          11.274346322089988,
+          10.994662220659993,
+          11.687832329183362
+        ],
+        "psnr_db_mean": 12.32628989557871,
+        "psnr_db_min": 9.331773428551491,
+        "ssim_luma_per_frame": [
+          0.8735800585454239,
+          0.4809298831304808,
+          0.36197228356628436,
+          0.32392860812822905,
+          0.24421333344687643,
+          0.3252899675564471,
+          0.35059475812642593,
+          0.349326577170449,
+          0.3115627040105993
+        ],
+        "ssim_luma_mean": 0.4023775748534685,
+        "ssim_luma_min": 0.24421333344687643,
+        "mean_abs_rgb_diff": 54.429611637879866
+      },
+      "h264_loss_cpu_vae_mp4_vs_raw": {
+        "psnr_db_per_frame": [
+          34.99260003043712,
+          35.54207386389735,
+          37.309217749768,
+          36.73497095161488,
+          36.68591002876998,
+          36.72077900008189,
+          36.775524145952964,
+          36.44139019499901,
+          36.33288715115924
+        ],
+        "psnr_db_mean": 36.3928170129645,
+        "psnr_db_min": 34.99260003043712,
+        "ssim_luma_per_frame": [
+          0.9877415918468034,
+          0.9858165421246079,
+          0.9901299916219273,
+          0.9894566822537854,
+          0.9892059839585107,
+          0.9888835096100679,
+          0.9876195686428142,
+          0.9871870329011568,
+          0.9857010764758161
+        ],
+        "ssim_luma_mean": 0.9879713310483879,
+        "ssim_luma_min": 0.9857010764758161,
+        "mean_abs_rgb_diff": 2.6483966939696106
+      },
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          98.5295397636218,
+          114.72031138710827,
+          117.55578286369303
+        ],
+        "channel_std": [
+          66.84997757413822,
+          67.43410238690547,
+          67.60840743051723
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 6.022027014055823,
+        "temporal_mean_abs_diff_per_pair": [
+          17.282194010416667,
+          13.894759949252137,
+          3.755073951655983,
+          2.171478532318376,
+          3.040885416666667,
+          3.125326355502137,
+          2.394525407318376,
+          2.511972489316239
+        ],
+        "laplacian_var_mean": 269.3876567988111,
+        "laplacian_var_per_frame": [
+          414.90033497368336,
+          254.45406679681557,
+          279.38281146729554,
+          234.10950255720826,
+          243.61852011754115,
+          237.13440594148108,
+          271.73223780033464,
+          239.84070511897346,
+          249.31632641596653
+        ],
+        "saturated_frac": 0.02411367447174739,
+        "saturated_low_frac": 0.021518596420940173,
+        "saturated_high_frac": 0.0025950780508072176
+      },
+      "clip": {
+        "prompt_cosine_mean": 0.30892135368453133,
+        "prompt_cosine_per_frame": [
+          0.2934994101524353,
+          0.28737133741378784,
+          0.31226271390914917,
+          0.3102858066558838,
+          0.31149357557296753,
+          0.3133094906806946,
+          0.3169322907924652,
+          0.31810271739959717,
+          0.31703484058380127
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10420029858748119,
+          "a city street at night with neon signs": 0.11237569567230013,
+          "a portrait of an elderly man": 0.16246366335286033
+        },
+        "margin_vs_best_control": 0.146457690331671,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "neuron_vs_trainium_g5": {
+      "a": "neuron/warm1-g5",
+      "b": "trainium/warm1-g5",
+      "psnr_db_per_frame": [
+        20.76251006773974,
+        22.73807754127466,
+        23.487690358660586,
+        23.73394305942839,
+        23.806912962322237,
+        23.973931810047674,
+        23.8902354683764,
+        23.93086105851293,
+        23.7197498775261
+      ],
+      "psnr_db_mean": 23.33821246709875,
+      "psnr_db_min": 20.76251006773974,
+      "ssim_luma_per_frame": [
+        0.8439906381707587,
+        0.8788038179171815,
+        0.8973612192451578,
+        0.8985699495733985,
+        0.8997584397605657,
+        0.9013051233321506,
+        0.8952787841142995,
+        0.8945197211341046,
+        0.8864932849361093
+      ],
+      "ssim_luma_mean": 0.888453442020414,
+      "ssim_luma_min": 0.8439906381707587,
+      "mean_abs_rgb_diff": 9.391637916963438
+    },
+    "neuron/warm1-g1": {
+      "mp4": "/home/ubuntu/wan21-bench/quality/ref/neuron_warm1-g1_cpuvae.mp4",
+      "mp4_sha256": "5ae12fa84c0df69e6970f5fd1052e871945b8cbd79a367b4b763667cc55d91c0",
+      "decode_s": 102.4,
+      "backend_mp4_vs_cpu_vae_mp4": {
+        "psnr_db_per_frame": [
+          34.96688678374158,
+          36.03845943150335,
+          37.61595954762625,
+          37.2465422744212,
+          37.03231609089523,
+          36.49407635486919,
+          36.8050333408403,
+          36.69276462506192,
+          36.17102975877329
+        ],
+        "psnr_db_mean": 36.56256313419248,
+        "psnr_db_min": 34.96688678374158,
+        "ssim_luma_per_frame": [
+          0.9673952665005529,
+          0.9696302681869169,
+          0.9776885639619074,
+          0.977796295762187,
+          0.9753513696236928,
+          0.9732900693248382,
+          0.9732850550055215,
+          0.9742317323808728,
+          0.9709849104229958
+        ],
+        "ssim_luma_mean": 0.9732948367966094,
+        "ssim_luma_min": 0.9673952665005529,
+        "mean_abs_rgb_diff": 2.6341611393043687
+      },
+      "backend_mp4_vs_cpu_vae_raw": {
+        "psnr_db_per_frame": [
+          33.96428326157477,
+          34.965731586578016,
+          36.325135706530475,
+          35.92189646193538,
+          35.64552365058364,
+          35.489930611926845,
+          35.390725089516486,
+          34.77085684291623,
+          34.483016737234365
+        ],
+        "psnr_db_mean": 35.217455549866244,
+        "psnr_db_min": 33.96428326157477,
+        "ssim_luma_per_frame": [
+          0.9691905969276866,
+          0.9717001337000234,
+          0.9791604594507171,
+          0.9785661581959635,
+          0.9758450514526829,
+          0.9763361332704019,
+          0.9752871815364184,
+          0.9737805487006541,
+          0.9709699200539785
+        ],
+        "ssim_luma_mean": 0.9745373536987252,
+        "ssim_luma_min": 0.9691905969276866,
+        "mean_abs_rgb_diff": 3.0904133650878443
+      },
+      "h264_loss_cpu_vae_mp4_vs_raw": {
+        "psnr_db_per_frame": [
+          37.39700835657721,
+          38.28325394575298,
+          39.43551597229773,
+          38.75846184328701,
+          38.658809227630705,
+          38.85522228121681,
+          38.47762913449196,
+          37.981909030380194,
+          37.8220831135365
+        ],
+        "psnr_db_mean": 38.40776587835235,
+        "psnr_db_min": 37.39700835657721,
+        "ssim_luma_per_frame": [
+          0.9857155897041169,
+          0.98544440513921,
+          0.9889638900923055,
+          0.9879615639247181,
+          0.986942310608116,
+          0.9870973536556615,
+          0.9863971240006018,
+          0.9861109124892818,
+          0.9845684518217604
+        ],
+        "ssim_luma_mean": 0.9865779557150858,
+        "ssim_luma_min": 0.9845684518217604,
+        "mean_abs_rgb_diff": 2.1466366556861347
+      },
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          84.32125901442308,
+          79.68504023103633,
+          76.47949496972934
+        ],
+        "channel_std": [
+          61.432975741759456,
+          56.2579106686739,
+          53.16186571958869
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 6.088248697916667,
+        "temporal_mean_abs_diff_per_pair": [
+          15.369877637553419,
+          7.81767077323718,
+          2.7358548677884613,
+          6.646430121527778,
+          5.765045739850428,
+          4.546850794604701,
+          2.0163570045405983,
+          3.807902644230769
+        ],
+        "laplacian_var_mean": 214.97835575711179,
+        "laplacian_var_per_frame": [
+          290.0282601375653,
+          180.20828293028973,
+          232.65301969768882,
+          219.04113034004428,
+          182.23616472896222,
+          203.5121432216784,
+          213.48676874990133,
+          204.89112441873527,
+          208.74830758914058
+        ],
+        "saturated_frac": 0.02074356006647673,
+        "saturated_low_frac": 0.02045031309354226,
+        "saturated_high_frac": 0.00029324697293447294
+      },
+      "clip": {
+        "prompt_cosine_mean": 0.2255266292227639,
+        "prompt_cosine_per_frame": [
+          0.25631779432296753,
+          0.2541002035140991,
+          0.2354760766029358,
+          0.23580461740493774,
+          0.22724400460720062,
+          0.20393410325050354,
+          0.19361095130443573,
+          0.20173215866088867,
+          0.22151975333690643
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.11360010256369908,
+          "a city street at night with neon signs": 0.1080896407365799,
+          "a portrait of an elderly man": 0.12922843545675278
+        },
+        "margin_vs_best_control": 0.09629819376601112,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "trainium/warm1-g1": {
+      "mp4": "/home/ubuntu/wan21-bench/quality/ref/trainium_warm1-g1_cpuvae.mp4",
+      "mp4_sha256": "715cd0aee965d54dfd7b71f3f8949c697b081f9e67d55f43a30ab5e3ed89a3cb",
+      "decode_s": 100.1,
+      "backend_mp4_vs_cpu_vae_mp4": {
+        "psnr_db_per_frame": [
+          20.679922498629537,
+          14.661100021605503,
+          13.107737247617191,
+          12.050728171006512,
+          12.190717131968619,
+          12.499423259346095,
+          12.539591974549321,
+          12.494405958367413,
+          12.678814801496987
+        ],
+        "psnr_db_mean": 13.655826784954131,
+        "psnr_db_min": 12.050728171006512,
+        "ssim_luma_per_frame": [
+          0.8261920397732866,
+          0.5446690318825166,
+          0.44906016967006235,
+          0.3807836402429254,
+          0.2879631018179341,
+          0.37028543446495926,
+          0.41208834161754865,
+          0.4086827888971093,
+          0.3525018280344521
+        ],
+        "ssim_luma_mean": 0.44802515293342154,
+        "ssim_luma_min": 0.2879631018179341,
+        "mean_abs_rgb_diff": 45.80276191907051
+      },
+      "backend_mp4_vs_cpu_vae_raw": {
+        "psnr_db_per_frame": [
+          20.35121814133443,
+          14.6593097665173,
+          13.116841955673921,
+          12.05838802336008,
+          12.223361285069982,
+          12.54298648701564,
+          12.55207259829043,
+          12.490365230878533,
+          12.708446061184112
+        ],
+        "psnr_db_mean": 13.633665505480492,
+        "psnr_db_min": 12.05838802336008,
+        "ssim_luma_per_frame": [
+          0.8197387267044661,
+          0.5529257065166244,
+          0.45452245813194453,
+          0.3869870505750828,
+          0.2923743786247712,
+          0.37491050942755705,
+          0.41719471917186984,
+          0.41219094085723,
+          0.3575332507242243
+        ],
+        "ssim_luma_mean": 0.4520419711926411,
+        "ssim_luma_min": 0.2923743786247712,
+        "mean_abs_rgb_diff": 45.73490408728039
+      },
+      "h264_loss_cpu_vae_mp4_vs_raw": {
+        "psnr_db_per_frame": [
+          37.18218290099991,
+          38.187433982939794,
+          39.3912673784818,
+          38.699380096042134,
+          38.514465380542376,
+          38.77699085613783,
+          38.289313308803685,
+          37.770835343262185,
+          37.69543301717262
+        ],
+        "psnr_db_mean": 38.27858914048692,
+        "psnr_db_min": 37.18218290099991,
+        "ssim_luma_per_frame": [
+          0.9852613496297382,
+          0.9852997237880325,
+          0.9891005908557309,
+          0.9879599826698543,
+          0.9867445342094645,
+          0.9870457741669856,
+          0.9863971667002976,
+          0.9860430735154815,
+          0.9844983239732716
+        ],
+        "ssim_luma_mean": 0.9864833910565396,
+        "ssim_luma_min": 0.9844983239732716,
+        "mean_abs_rgb_diff": 2.1611613767212727
+      },
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          83.93302172364672,
+          79.61142272079772,
+          76.45178980813746
+        ],
+        "channel_std": [
+          61.69410044552242,
+          56.447212408039434,
+          53.31075113739497
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 6.323827811999198,
+        "temporal_mean_abs_diff_per_pair": [
+          17.255921975160255,
+          7.979158319978633,
+          2.724418235844017,
+          6.840360409989316,
+          5.75446047008547,
+          4.256060530181624,
+          2.060246394230769,
+          3.7199961605235043
+        ],
+        "laplacian_var_mean": 242.19783733238586,
+        "laplacian_var_per_frame": [
+          300.9378862458472,
+          198.5216176177129,
+          261.97791344411405,
+          245.70231250564507,
+          205.67892910770016,
+          235.96567221949852,
+          247.50378805458146,
+          241.19181530284547,
+          242.3006014935279
+        ],
+        "saturated_frac": 0.022932154410018994,
+        "saturated_low_frac": 0.02258261366334283,
+        "saturated_high_frac": 0.00034954074667616335
+      },
+      "clip": {
+        "prompt_cosine_mean": 0.22685850163300833,
+        "prompt_cosine_per_frame": [
+          0.2641512155532837,
+          0.24698854982852936,
+          0.23630233108997345,
+          0.23944821953773499,
+          0.2145424485206604,
+          0.22223994135856628,
+          0.20314478874206543,
+          0.20269018411636353,
+          0.21221883594989777
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.11214781800905864,
+          "a city street at night with neon signs": 0.10530175103081597,
+          "a portrait of an elderly man": 0.13081307460864386
+        },
+        "margin_vs_best_control": 0.09604542702436447,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "neuron_vs_trainium_g1": {
+      "a": "neuron/warm1-g1",
+      "b": "trainium/warm1-g1",
+      "psnr_db_per_frame": [
+        32.77029788314033,
+        33.485176146184834,
+        33.72921667971561,
+        33.87765598751855,
+        33.530503426706204,
+        33.706922190454435,
+        33.53215971095769,
+        33.456523406295176,
+        33.45776645295717
+      ],
+      "psnr_db_mean": 33.50513576488112,
+      "psnr_db_min": 32.77029788314033,
+      "ssim_luma_per_frame": [
+        0.970775344177671,
+        0.9676118733370915,
+        0.9734788330809069,
+        0.9733780016977015,
+        0.9703243240984935,
+        0.9706340475855301,
+        0.9708355056435628,
+        0.9716996034300895,
+        0.9694016332400035
+      ],
+      "ssim_luma_mean": 0.9709043518101167,
+      "ssim_luma_min": 0.9676118733370915,
+      "mean_abs_rgb_diff": 3.0566077946937322
+    }
+  },
+  "runs": {
+    "neuron/cold-g5": {
+      "backend": "neuron",
+      "run": "cold-g5",
+      "guidance": 5.0,
+      "mp4": "/home/ubuntu/wan21-bench/neuron/cold-g5/out.mp4",
+      "mp4_sha256": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+      "frames_sha256": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          99.61134231436967,
+          114.9269603587963,
+          117.80076789529915
+        ],
+        "channel_std": [
+          66.98824088443547,
+          66.85785256543542,
+          66.89882577275658
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 6.111356816740116,
+        "temporal_mean_abs_diff_per_pair": [
+          19.260745526175214,
+          13.729727564102564,
+          3.629206730769231,
+          2.4311189569978633,
+          3.0327899639423075,
+          2.69609124599359,
+          2.019044638087607,
+          2.092129907852564
+        ],
+        "laplacian_var_mean": 278.14688863401426,
+        "laplacian_var_per_frame": [
+          482.3036293509049,
+          255.93395685288723,
+          303.1513194878203,
+          269.3487409533573,
+          239.59445036495796,
+          236.34473294546717,
+          259.193779858257,
+          231.96749722411676,
+          225.48389066835995
+        ],
+        "saturated_frac": 0.025674876098053183,
+        "saturated_low_frac": 0.022941428507834757,
+        "saturated_high_frac": 0.0027334475902184236
+      },
+      "latents_file": "/home/ubuntu/wan21-bench/neuron/cold-g5/probe/latents-30946-1.pt",
+      "latents_files_found": 1,
+      "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "initial_finite": true,
+      "initial_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "initial_dtype": "torch.float32",
+      "final_sha256": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+      "final_finite": true,
+      "final_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "final_dtype": "torch.float32",
+      "clip": {
+        "prompt_cosine_mean": 0.3077434500058492,
+        "prompt_cosine_per_frame": [
+          0.2829210162162781,
+          0.28928646445274353,
+          0.3101656436920166,
+          0.30913498997688293,
+          0.3133585453033447,
+          0.3139611482620239,
+          0.3158424496650696,
+          0.3176307678222656,
+          0.3173900246620178
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10741623822185728,
+          "a city street at night with neon signs": 0.11166817860470878,
+          "a portrait of an elderly man": 0.15704606142308977
+        },
+        "margin_vs_best_control": 0.1506973885827594,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "neuron/first-g5": {
+      "backend": "neuron",
+      "run": "first-g5",
+      "guidance": 5.0,
+      "mp4": "/home/ubuntu/wan21-bench/neuron/first-g5/out.mp4",
+      "mp4_sha256": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+      "frames_sha256": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          99.61134231436967,
+          114.9269603587963,
+          117.80076789529915
+        ],
+        "channel_std": [
+          66.98824088443547,
+          66.85785256543542,
+          66.89882577275658
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 6.111356816740116,
+        "temporal_mean_abs_diff_per_pair": [
+          19.260745526175214,
+          13.729727564102564,
+          3.629206730769231,
+          2.4311189569978633,
+          3.0327899639423075,
+          2.69609124599359,
+          2.019044638087607,
+          2.092129907852564
+        ],
+        "laplacian_var_mean": 278.14688863401426,
+        "laplacian_var_per_frame": [
+          482.3036293509049,
+          255.93395685288723,
+          303.1513194878203,
+          269.3487409533573,
+          239.59445036495796,
+          236.34473294546717,
+          259.193779858257,
+          231.96749722411676,
+          225.48389066835995
+        ],
+        "saturated_frac": 0.025674876098053183,
+        "saturated_low_frac": 0.022941428507834757,
+        "saturated_high_frac": 0.0027334475902184236
+      },
+      "clip": {
+        "prompt_cosine_mean": 0.3077434500058492,
+        "prompt_cosine_per_frame": [
+          0.2829210162162781,
+          0.28928646445274353,
+          0.3101656436920166,
+          0.30913498997688293,
+          0.3133585453033447,
+          0.3139611482620239,
+          0.3158424496650696,
+          0.3176307678222656,
+          0.3173900246620178
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10741623822185728,
+          "a city street at night with neon signs": 0.11166817860470878,
+          "a portrait of an elderly man": 0.15704606142308977
+        },
+        "margin_vs_best_control": 0.1506973885827594,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "neuron/warm1-g1": {
+      "backend": "neuron",
+      "run": "warm1-g1",
+      "guidance": 1.0,
+      "mp4": "/home/ubuntu/wan21-bench/neuron/warm1-g1/out.mp4",
+      "mp4_sha256": "e8bbe70b6e56b1f402dfaaddcfc315d26a03caa209ae0a4a6454da912bcf83e7",
+      "frames_sha256": "d4a9a02d8d4d889b3b893b2d0a8a242d7696507491291a880082b83004d9b59f",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          84.06541744569088,
+          79.20197705217237,
+          76.24024522569445
+        ],
+        "channel_std": [
+          61.197037802069296,
+          56.23918235929124,
+          53.23096973892416
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 5.921190884581998,
+        "temporal_mean_abs_diff_per_pair": [
+          15.165145065438034,
+          7.742308526976496,
+          2.763231169871795,
+          6.390810296474359,
+          5.457513688568376,
+          4.368326822916667,
+          1.8514898838141025,
+          3.630701622596154
+        ],
+        "laplacian_var_mean": 204.27957536225142,
+        "laplacian_var_per_frame": [
+          287.1808024630131,
+          168.28914139902503,
+          230.30602132012547,
+          207.20035054851715,
+          172.06920661440802,
+          182.38143816213062,
+          209.41831190690354,
+          190.5103629704415,
+          191.16054287569833
+        ],
+        "saturated_frac": 0.02086811120014245,
+        "saturated_low_frac": 0.02056957799145299,
+        "saturated_high_frac": 0.0002985332086894587
+      },
+      "latents_file": "/home/ubuntu/wan21-bench/neuron/warm1-g1/probe/latents-41065-1.pt",
+      "latents_files_found": 1,
+      "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "initial_finite": true,
+      "initial_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "initial_dtype": "torch.float32",
+      "final_sha256": "9be6fc6ae55e3fa0a3d8a9399360c71c6b84c57def5c256e292b18d7c4a3ceed",
+      "final_finite": true,
+      "final_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "final_dtype": "torch.float32",
+      "clip": {
+        "prompt_cosine_mean": 0.22994307511382633,
+        "prompt_cosine_per_frame": [
+          0.25237804651260376,
+          0.24359895288944244,
+          0.23414218425750732,
+          0.24733737111091614,
+          0.2322920858860016,
+          0.1991640031337738,
+          0.21992778778076172,
+          0.2110775262117386,
+          0.2295697182416916
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10348495344320933,
+          "a city street at night with neon signs": 0.1069268062710762,
+          "a portrait of an elderly man": 0.12878815001911587
+        },
+        "margin_vs_best_control": 0.10115492509471047,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "neuron/warm1-g5": {
+      "backend": "neuron",
+      "run": "warm1-g5",
+      "guidance": 5.0,
+      "mp4": "/home/ubuntu/wan21-bench/neuron/warm1-g5/out.mp4",
+      "mp4_sha256": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+      "frames_sha256": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          99.61134231436967,
+          114.9269603587963,
+          117.80076789529915
+        ],
+        "channel_std": [
+          66.98824088443547,
+          66.85785256543542,
+          66.89882577275658
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 6.111356816740116,
+        "temporal_mean_abs_diff_per_pair": [
+          19.260745526175214,
+          13.729727564102564,
+          3.629206730769231,
+          2.4311189569978633,
+          3.0327899639423075,
+          2.69609124599359,
+          2.019044638087607,
+          2.092129907852564
+        ],
+        "laplacian_var_mean": 278.14688863401426,
+        "laplacian_var_per_frame": [
+          482.3036293509049,
+          255.93395685288723,
+          303.1513194878203,
+          269.3487409533573,
+          239.59445036495796,
+          236.34473294546717,
+          259.193779858257,
+          231.96749722411676,
+          225.48389066835995
+        ],
+        "saturated_frac": 0.025674876098053183,
+        "saturated_low_frac": 0.022941428507834757,
+        "saturated_high_frac": 0.0027334475902184236
+      },
+      "latents_file": "/home/ubuntu/wan21-bench/neuron/warm1-g5/probe/latents-34899-1.pt",
+      "latents_files_found": 1,
+      "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "initial_finite": true,
+      "initial_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "initial_dtype": "torch.float32",
+      "final_sha256": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+      "final_finite": true,
+      "final_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "final_dtype": "torch.float32",
+      "clip": {
+        "prompt_cosine_mean": 0.3077434500058492,
+        "prompt_cosine_per_frame": [
+          0.2829210162162781,
+          0.28928646445274353,
+          0.3101656436920166,
+          0.30913498997688293,
+          0.3133585453033447,
+          0.3139611482620239,
+          0.3158424496650696,
+          0.3176307678222656,
+          0.3173900246620178
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10741623822185728,
+          "a city street at night with neon signs": 0.11166817860470878,
+          "a portrait of an elderly man": 0.15704606142308977
+        },
+        "margin_vs_best_control": 0.1506973885827594,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "neuron/warm2-g1": {
+      "backend": "neuron",
+      "run": "warm2-g1",
+      "guidance": 1.0,
+      "mp4": "/home/ubuntu/wan21-bench/neuron/warm2-g1/out.mp4",
+      "mp4_sha256": "e8bbe70b6e56b1f402dfaaddcfc315d26a03caa209ae0a4a6454da912bcf83e7",
+      "frames_sha256": "d4a9a02d8d4d889b3b893b2d0a8a242d7696507491291a880082b83004d9b59f",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          84.06541744569088,
+          79.20197705217237,
+          76.24024522569445
+        ],
+        "channel_std": [
+          61.197037802069296,
+          56.23918235929124,
+          53.23096973892416
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 5.921190884581998,
+        "temporal_mean_abs_diff_per_pair": [
+          15.165145065438034,
+          7.742308526976496,
+          2.763231169871795,
+          6.390810296474359,
+          5.457513688568376,
+          4.368326822916667,
+          1.8514898838141025,
+          3.630701622596154
+        ],
+        "laplacian_var_mean": 204.27957536225142,
+        "laplacian_var_per_frame": [
+          287.1808024630131,
+          168.28914139902503,
+          230.30602132012547,
+          207.20035054851715,
+          172.06920661440802,
+          182.38143816213062,
+          209.41831190690354,
+          190.5103629704415,
+          191.16054287569833
+        ],
+        "saturated_frac": 0.02086811120014245,
+        "saturated_low_frac": 0.02056957799145299,
+        "saturated_high_frac": 0.0002985332086894587
+      },
+      "latents_file": "/home/ubuntu/wan21-bench/neuron/warm2-g1/probe/latents-43014-1.pt",
+      "latents_files_found": 1,
+      "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "initial_finite": true,
+      "initial_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "initial_dtype": "torch.float32",
+      "final_sha256": "9be6fc6ae55e3fa0a3d8a9399360c71c6b84c57def5c256e292b18d7c4a3ceed",
+      "final_finite": true,
+      "final_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "final_dtype": "torch.float32",
+      "clip": {
+        "prompt_cosine_mean": 0.22994307511382633,
+        "prompt_cosine_per_frame": [
+          0.25237804651260376,
+          0.24359895288944244,
+          0.23414218425750732,
+          0.24733737111091614,
+          0.2322920858860016,
+          0.1991640031337738,
+          0.21992778778076172,
+          0.2110775262117386,
+          0.2295697182416916
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10348495344320933,
+          "a city street at night with neon signs": 0.1069268062710762,
+          "a portrait of an elderly man": 0.12878815001911587
+        },
+        "margin_vs_best_control": 0.10115492509471047,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "neuron/warm2-g5": {
+      "backend": "neuron",
+      "run": "warm2-g5",
+      "guidance": 5.0,
+      "mp4": "/home/ubuntu/wan21-bench/neuron/warm2-g5/out.mp4",
+      "mp4_sha256": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+      "frames_sha256": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          99.61134231436967,
+          114.9269603587963,
+          117.80076789529915
+        ],
+        "channel_std": [
+          66.98824088443547,
+          66.85785256543542,
+          66.89882577275658
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 6.111356816740116,
+        "temporal_mean_abs_diff_per_pair": [
+          19.260745526175214,
+          13.729727564102564,
+          3.629206730769231,
+          2.4311189569978633,
+          3.0327899639423075,
+          2.69609124599359,
+          2.019044638087607,
+          2.092129907852564
+        ],
+        "laplacian_var_mean": 278.14688863401426,
+        "laplacian_var_per_frame": [
+          482.3036293509049,
+          255.93395685288723,
+          303.1513194878203,
+          269.3487409533573,
+          239.59445036495796,
+          236.34473294546717,
+          259.193779858257,
+          231.96749722411676,
+          225.48389066835995
+        ],
+        "saturated_frac": 0.025674876098053183,
+        "saturated_low_frac": 0.022941428507834757,
+        "saturated_high_frac": 0.0027334475902184236
+      },
+      "latents_file": "/home/ubuntu/wan21-bench/neuron/warm2-g5/probe/latents-36978-1.pt",
+      "latents_files_found": 1,
+      "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "initial_finite": true,
+      "initial_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "initial_dtype": "torch.float32",
+      "final_sha256": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+      "final_finite": true,
+      "final_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "final_dtype": "torch.float32",
+      "clip": {
+        "prompt_cosine_mean": 0.3077434500058492,
+        "prompt_cosine_per_frame": [
+          0.2829210162162781,
+          0.28928646445274353,
+          0.3101656436920166,
+          0.30913498997688293,
+          0.3133585453033447,
+          0.3139611482620239,
+          0.3158424496650696,
+          0.3176307678222656,
+          0.3173900246620178
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10741623822185728,
+          "a city street at night with neon signs": 0.11166817860470878,
+          "a portrait of an elderly man": 0.15704606142308977
+        },
+        "margin_vs_best_control": 0.1506973885827594,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "neuron/warm3-g5": {
+      "backend": "neuron",
+      "run": "warm3-g5",
+      "guidance": 5.0,
+      "mp4": "/home/ubuntu/wan21-bench/neuron/warm3-g5/out.mp4",
+      "mp4_sha256": "9b914e81faf7fe48d86c6a3239032c465a7f2484b9fa563edb9676da38b64af8",
+      "frames_sha256": "1e1d45f13590bfd346375194d92d37b9cbd951b072297b76c2fec276f4ba1ad8",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          99.61134231436967,
+          114.9269603587963,
+          117.80076789529915
+        ],
+        "channel_std": [
+          66.98824088443547,
+          66.85785256543542,
+          66.89882577275658
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 6.111356816740116,
+        "temporal_mean_abs_diff_per_pair": [
+          19.260745526175214,
+          13.729727564102564,
+          3.629206730769231,
+          2.4311189569978633,
+          3.0327899639423075,
+          2.69609124599359,
+          2.019044638087607,
+          2.092129907852564
+        ],
+        "laplacian_var_mean": 278.14688863401426,
+        "laplacian_var_per_frame": [
+          482.3036293509049,
+          255.93395685288723,
+          303.1513194878203,
+          269.3487409533573,
+          239.59445036495796,
+          236.34473294546717,
+          259.193779858257,
+          231.96749722411676,
+          225.48389066835995
+        ],
+        "saturated_frac": 0.025674876098053183,
+        "saturated_low_frac": 0.022941428507834757,
+        "saturated_high_frac": 0.0027334475902184236
+      },
+      "latents_file": "/home/ubuntu/wan21-bench/neuron/warm3-g5/probe/latents-39094-1.pt",
+      "latents_files_found": 1,
+      "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "initial_finite": true,
+      "initial_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "initial_dtype": "torch.float32",
+      "final_sha256": "9f1987625c91875e9e5e40ce3c592d1e8218fe7e3de3ffacb8ee5d4d595faa58",
+      "final_finite": true,
+      "final_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "final_dtype": "torch.float32",
+      "clip": {
+        "prompt_cosine_mean": 0.3077434500058492,
+        "prompt_cosine_per_frame": [
+          0.2829210162162781,
+          0.28928646445274353,
+          0.3101656436920166,
+          0.30913498997688293,
+          0.3133585453033447,
+          0.3139611482620239,
+          0.3158424496650696,
+          0.3176307678222656,
+          0.3173900246620178
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10741623822185728,
+          "a city street at night with neon signs": 0.11166817860470878,
+          "a portrait of an elderly man": 0.15704606142308977
+        },
+        "margin_vs_best_control": 0.1506973885827594,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "trainium/cold-g5": {
+      "backend": "trainium",
+      "run": "cold-g5",
+      "guidance": 5.0,
+      "mp4": "/home/ubuntu/wan21-bench/trainium/cold-g5/out.mp4",
+      "mp4_sha256": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+      "frames_sha256": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          99.78132567663818,
+          101.2326074496973,
+          93.42023543224715
+        ],
+        "channel_std": [
+          37.357923941542445,
+          32.333047970955214,
+          42.76124887950282
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 28.98468570546207,
+        "temporal_mean_abs_diff_per_pair": [
+          51.07318626469017,
+          41.88282752403846,
+          37.6485359909188,
+          28.864165164262822,
+          21.656256677350427,
+          21.155372763087605,
+          13.784818209134615,
+          15.812323050213676
+        ],
+        "laplacian_var_mean": 58.56290818827168,
+        "laplacian_var_per_frame": [
+          367.0624135027967,
+          31.409333464324284,
+          12.520084873239542,
+          7.610509677489933,
+          38.80650017206009,
+          25.067098326291966,
+          11.179264191433457,
+          12.070811832978384,
+          21.340157653830673
+        ],
+        "saturated_frac": 0.01636173433048433,
+        "saturated_low_frac": 0.014872128739316239,
+        "saturated_high_frac": 0.0014896055911680912
+      },
+      "latents_file": "/home/ubuntu/wan21-bench/trainium/cold-g5/probe/latents-55549-1.pt",
+      "latents_files_found": 1,
+      "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "initial_finite": true,
+      "initial_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "initial_dtype": "torch.float32",
+      "final_sha256": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+      "final_finite": true,
+      "final_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "final_dtype": "torch.float32",
+      "clip": {
+        "prompt_cosine_mean": 0.22779550651709238,
+        "prompt_cosine_per_frame": [
+          0.2797335386276245,
+          0.24119365215301514,
+          0.2220778465270996,
+          0.22350159287452698,
+          0.19734357297420502,
+          0.20924770832061768,
+          0.22041890025138855,
+          0.20587795972824097,
+          0.25076478719711304
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10274206267462836,
+          "a city street at night with neon signs": 0.11114498641755846,
+          "a portrait of an elderly man": 0.15802384747399223
+        },
+        "margin_vs_best_control": 0.06977165904310015,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "trainium/warm1-g1": {
+      "backend": "trainium",
+      "run": "warm1-g1",
+      "guidance": 1.0,
+      "mp4": "/home/ubuntu/wan21-bench/trainium/warm1-g1/out.mp4",
+      "mp4_sha256": "98bbfa90f0107ed6d2b2ad7658042adf287d2903f674601e68319cd47d365356",
+      "frames_sha256": "d8f046cc88923c5e1cc9ee54ce15efb7f108cba9cfa8f265de560702f112ccf4",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          99.83785362134971,
+          93.20539891604345,
+          80.9997635105057
+        ],
+        "channel_std": [
+          31.130143795117515,
+          25.161575891396833,
+          27.385576393157965
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 19.424110243055555,
+        "temporal_mean_abs_diff_per_pair": [
+          42.168850994925215,
+          19.49698434161325,
+          27.32970252403846,
+          19.12426048344017,
+          14.749512553418803,
+          11.330515491452992,
+          10.127132578792734,
+          11.06592297676282
+        ],
+        "laplacian_var_mean": 59.813516602030454,
+        "laplacian_var_per_frame": [
+          348.08466512066536,
+          21.03289060106636,
+          19.188872995145967,
+          19.23221987406424,
+          49.7324770738419,
+          26.34435183919491,
+          14.147706836738884,
+          15.412924140129963,
+          25.145540937426535
+        ],
+        "saturated_frac": 0.00958292527302944,
+        "saturated_low_frac": 0.009435838081671415,
+        "saturated_high_frac": 0.0001470871913580247
+      },
+      "latents_file": "/home/ubuntu/wan21-bench/trainium/warm1-g1/probe/latents-57611-1.pt",
+      "latents_files_found": 1,
+      "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "initial_finite": true,
+      "initial_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "initial_dtype": "torch.float32",
+      "final_sha256": "cc515a59c5ba86c1eba92e4402244294b91281c8988fcd69db80a6d9db4cc60b",
+      "final_finite": true,
+      "final_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "final_dtype": "torch.float32",
+      "clip": {
+        "prompt_cosine_mean": 0.19342010551028782,
+        "prompt_cosine_per_frame": [
+          0.2592155933380127,
+          0.23411740362644196,
+          0.21294164657592773,
+          0.20989300310611725,
+          0.15253913402557373,
+          0.1773088276386261,
+          0.16662588715553284,
+          0.18518075346946716,
+          0.14295870065689087
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.15366175439622667,
+          "a city street at night with neon signs": 0.1423939209845331,
+          "a portrait of an elderly man": 0.18211108280552757
+        },
+        "margin_vs_best_control": 0.011309022704760252,
+        "frames_prompt_is_top": 5
+      }
+    },
+    "trainium/warm1-g5": {
+      "backend": "trainium",
+      "run": "warm1-g5",
+      "guidance": 5.0,
+      "mp4": "/home/ubuntu/wan21-bench/trainium/warm1-g5/out.mp4",
+      "mp4_sha256": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+      "frames_sha256": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          99.78132567663818,
+          101.2326074496973,
+          93.42023543224715
+        ],
+        "channel_std": [
+          37.357923941542445,
+          32.333047970955214,
+          42.76124887950282
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 28.98468570546207,
+        "temporal_mean_abs_diff_per_pair": [
+          51.07318626469017,
+          41.88282752403846,
+          37.6485359909188,
+          28.864165164262822,
+          21.656256677350427,
+          21.155372763087605,
+          13.784818209134615,
+          15.812323050213676
+        ],
+        "laplacian_var_mean": 58.56290818827168,
+        "laplacian_var_per_frame": [
+          367.0624135027967,
+          31.409333464324284,
+          12.520084873239542,
+          7.610509677489933,
+          38.80650017206009,
+          25.067098326291966,
+          11.179264191433457,
+          12.070811832978384,
+          21.340157653830673
+        ],
+        "saturated_frac": 0.01636173433048433,
+        "saturated_low_frac": 0.014872128739316239,
+        "saturated_high_frac": 0.0014896055911680912
+      },
+      "latents_file": "/home/ubuntu/wan21-bench/trainium/warm1-g5/probe/latents-56393-1.pt",
+      "latents_files_found": 1,
+      "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "initial_finite": true,
+      "initial_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "initial_dtype": "torch.float32",
+      "final_sha256": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+      "final_finite": true,
+      "final_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "final_dtype": "torch.float32",
+      "clip": {
+        "prompt_cosine_mean": 0.22779550651709238,
+        "prompt_cosine_per_frame": [
+          0.2797335386276245,
+          0.24119365215301514,
+          0.2220778465270996,
+          0.22350159287452698,
+          0.19734357297420502,
+          0.20924770832061768,
+          0.22041890025138855,
+          0.20587795972824097,
+          0.25076478719711304
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10274206267462836,
+          "a city street at night with neon signs": 0.11114498641755846,
+          "a portrait of an elderly man": 0.15802384747399223
+        },
+        "margin_vs_best_control": 0.06977165904310015,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "trainium/warm2-g1": {
+      "backend": "trainium",
+      "run": "warm2-g1",
+      "guidance": 1.0,
+      "mp4": "/home/ubuntu/wan21-bench/trainium/warm2-g1/out.mp4",
+      "mp4_sha256": "98bbfa90f0107ed6d2b2ad7658042adf287d2903f674601e68319cd47d365356",
+      "frames_sha256": "d8f046cc88923c5e1cc9ee54ce15efb7f108cba9cfa8f265de560702f112ccf4",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          99.83785362134971,
+          93.20539891604345,
+          80.9997635105057
+        ],
+        "channel_std": [
+          31.130143795117515,
+          25.161575891396833,
+          27.385576393157965
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 19.424110243055555,
+        "temporal_mean_abs_diff_per_pair": [
+          42.168850994925215,
+          19.49698434161325,
+          27.32970252403846,
+          19.12426048344017,
+          14.749512553418803,
+          11.330515491452992,
+          10.127132578792734,
+          11.06592297676282
+        ],
+        "laplacian_var_mean": 59.813516602030454,
+        "laplacian_var_per_frame": [
+          348.08466512066536,
+          21.03289060106636,
+          19.188872995145967,
+          19.23221987406424,
+          49.7324770738419,
+          26.34435183919491,
+          14.147706836738884,
+          15.412924140129963,
+          25.145540937426535
+        ],
+        "saturated_frac": 0.00958292527302944,
+        "saturated_low_frac": 0.009435838081671415,
+        "saturated_high_frac": 0.0001470871913580247
+      },
+      "latents_file": "/home/ubuntu/wan21-bench/trainium/warm2-g1/probe/latents-57980-1.pt",
+      "latents_files_found": 1,
+      "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "initial_finite": true,
+      "initial_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "initial_dtype": "torch.float32",
+      "final_sha256": "cc515a59c5ba86c1eba92e4402244294b91281c8988fcd69db80a6d9db4cc60b",
+      "final_finite": true,
+      "final_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "final_dtype": "torch.float32",
+      "clip": {
+        "prompt_cosine_mean": 0.19342010551028782,
+        "prompt_cosine_per_frame": [
+          0.2592155933380127,
+          0.23411740362644196,
+          0.21294164657592773,
+          0.20989300310611725,
+          0.15253913402557373,
+          0.1773088276386261,
+          0.16662588715553284,
+          0.18518075346946716,
+          0.14295870065689087
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.15366175439622667,
+          "a city street at night with neon signs": 0.1423939209845331,
+          "a portrait of an elderly man": 0.18211108280552757
+        },
+        "margin_vs_best_control": 0.011309022704760252,
+        "frames_prompt_is_top": 5
+      }
+    },
+    "trainium/warm2-g5": {
+      "backend": "trainium",
+      "run": "warm2-g5",
+      "guidance": 5.0,
+      "mp4": "/home/ubuntu/wan21-bench/trainium/warm2-g5/out.mp4",
+      "mp4_sha256": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+      "frames_sha256": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          99.78132567663818,
+          101.2326074496973,
+          93.42023543224715
+        ],
+        "channel_std": [
+          37.357923941542445,
+          32.333047970955214,
+          42.76124887950282
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 28.98468570546207,
+        "temporal_mean_abs_diff_per_pair": [
+          51.07318626469017,
+          41.88282752403846,
+          37.6485359909188,
+          28.864165164262822,
+          21.656256677350427,
+          21.155372763087605,
+          13.784818209134615,
+          15.812323050213676
+        ],
+        "laplacian_var_mean": 58.56290818827168,
+        "laplacian_var_per_frame": [
+          367.0624135027967,
+          31.409333464324284,
+          12.520084873239542,
+          7.610509677489933,
+          38.80650017206009,
+          25.067098326291966,
+          11.179264191433457,
+          12.070811832978384,
+          21.340157653830673
+        ],
+        "saturated_frac": 0.01636173433048433,
+        "saturated_low_frac": 0.014872128739316239,
+        "saturated_high_frac": 0.0014896055911680912
+      },
+      "latents_file": "/home/ubuntu/wan21-bench/trainium/warm2-g5/probe/latents-56771-1.pt",
+      "latents_files_found": 1,
+      "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "initial_finite": true,
+      "initial_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "initial_dtype": "torch.float32",
+      "final_sha256": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+      "final_finite": true,
+      "final_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "final_dtype": "torch.float32",
+      "clip": {
+        "prompt_cosine_mean": 0.22779550651709238,
+        "prompt_cosine_per_frame": [
+          0.2797335386276245,
+          0.24119365215301514,
+          0.2220778465270996,
+          0.22350159287452698,
+          0.19734357297420502,
+          0.20924770832061768,
+          0.22041890025138855,
+          0.20587795972824097,
+          0.25076478719711304
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10274206267462836,
+          "a city street at night with neon signs": 0.11114498641755846,
+          "a portrait of an elderly man": 0.15802384747399223
+        },
+        "margin_vs_best_control": 0.06977165904310015,
+        "frames_prompt_is_top": 9
+      }
+    },
+    "trainium/warm3-g5": {
+      "backend": "trainium",
+      "run": "warm3-g5",
+      "guidance": 5.0,
+      "mp4": "/home/ubuntu/wan21-bench/trainium/warm3-g5/out.mp4",
+      "mp4_sha256": "0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431",
+      "frames_sha256": "1af6dc806827170e9a488c7113af04300bc2dd0338ad64e8d5ac6f0f15a83a93",
+      "stats": {
+        "frames": 9,
+        "height": 480,
+        "width": 832,
+        "channel_mean": [
+          99.78132567663818,
+          101.2326074496973,
+          93.42023543224715
+        ],
+        "channel_std": [
+          37.357923941542445,
+          32.333047970955214,
+          42.76124887950282
+        ],
+        "channel_min": [
+          0,
+          0,
+          0
+        ],
+        "channel_max": [
+          255,
+          255,
+          255
+        ],
+        "temporal_mean_abs_diff": 28.98468570546207,
+        "temporal_mean_abs_diff_per_pair": [
+          51.07318626469017,
+          41.88282752403846,
+          37.6485359909188,
+          28.864165164262822,
+          21.656256677350427,
+          21.155372763087605,
+          13.784818209134615,
+          15.812323050213676
+        ],
+        "laplacian_var_mean": 58.56290818827168,
+        "laplacian_var_per_frame": [
+          367.0624135027967,
+          31.409333464324284,
+          12.520084873239542,
+          7.610509677489933,
+          38.80650017206009,
+          25.067098326291966,
+          11.179264191433457,
+          12.070811832978384,
+          21.340157653830673
+        ],
+        "saturated_frac": 0.01636173433048433,
+        "saturated_low_frac": 0.014872128739316239,
+        "saturated_high_frac": 0.0014896055911680912
+      },
+      "latents_file": "/home/ubuntu/wan21-bench/trainium/warm3-g5/probe/latents-57183-1.pt",
+      "latents_files_found": 1,
+      "initial_sha256": "16aeaed7caf5c7a3d6f2f4f9bc11b68f2482f888f88328ed9b496a53258b7c83",
+      "initial_finite": true,
+      "initial_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "initial_dtype": "torch.float32",
+      "final_sha256": "80e2cdd2b8aed0bab1a11642e5ed64fe240eb219a59f34d8d2c80c6fea83c24f",
+      "final_finite": true,
+      "final_shape": [
+        1,
+        16,
+        3,
+        60,
+        104
+      ],
+      "final_dtype": "torch.float32",
+      "clip": {
+        "prompt_cosine_mean": 0.22779550651709238,
+        "prompt_cosine_per_frame": [
+          0.2797335386276245,
+          0.24119365215301514,
+          0.2220778465270996,
+          0.22350159287452698,
+          0.19734357297420502,
+          0.20924770832061768,
+          0.22041890025138855,
+          0.20587795972824097,
+          0.25076478719711304
+        ],
+        "control_cosine_mean": {
+          "a bowl of fruit on a kitchen table": 0.10274206267462836,
+          "a city street at night with neon signs": 0.11114498641755846,
+          "a portrait of an elderly man": 0.15802384747399223
+        },
+        "margin_vs_best_control": 0.06977165904310015,
+        "frames_prompt_is_top": 9
+      }
+    }
+  },
+  "sheets": [
+    "/home/ubuntu/wan21-bench/quality/sheets/cpuvae_neuron_warm1-g1.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/cpuvae_neuron_warm1-g5.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/cpuvae_trainium_warm1-g1.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/cpuvae_trainium_warm1-g5.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/neuron_cold-g5.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/neuron_first-g5.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/neuron_warm1-g1.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/neuron_warm1-g5.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/neuron_warm2-g1.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/neuron_warm2-g5.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/neuron_warm3-g5.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/trainium_cold-g5.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/trainium_warm1-g1.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/trainium_warm1-g5.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/trainium_warm2-g1.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/trainium_warm2-g5.png",
+    "/home/ubuntu/wan21-bench/quality/sheets/trainium_warm3-g5.png"
+  ],
+  "blind_sheets": [
+    "/home/ubuntu/wan21-bench/quality/blind/X_g1.png",
+    "/home/ubuntu/wan21-bench/quality/blind/X_g5.png",
+    "/home/ubuntu/wan21-bench/quality/blind/Y_g1.png",
+    "/home/ubuntu/wan21-bench/quality/blind/Y_g5.png"
+  ]
+}

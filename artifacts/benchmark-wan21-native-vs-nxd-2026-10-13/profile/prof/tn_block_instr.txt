@@ -1,0 +1,25 @@
+instructions 5143
+top:other              total=   4.203ms span= 12.289ms  CC-core_8=1.882 GpSimd=0.844 Sync=0.367 Vector=0.357 Tensor=0.355 Scalar=0.347 CC-core_9=0.031 CC-core_10=0.014 CC-core_11=0.005
+attn1_kernel           total=   0.133ms span=  1.634ms  Sync=0.122 Scalar=0.007 Tensor=0.003 TensorMatrix=0.000
+attn2_kernel           total=   0.021ms span=  4.286ms  Sync=0.011 Tensor=0.010 Scalar=0.000
+attn1:other            total=   0.001ms span=  1.932ms  Sync=0.001 Vector=0.000
+allreduce              total=   0.001ms span=  5.832ms  Sync=0.001 Tensor=0.000
+kernel_other           total=   0.001ms span=  0.099ms  Sync=0.000 Scalar=0.000
+attn2:other            total=   0.001ms span=  0.906ms  Sync=0.001
+
+top hlo names by busy time:
+     4.201ms top:other          
+     0.133ms attn1_kernel       %custom-call.233 = custom-call(%reshape.230, %reshape.232, %reshape.228)
+     0.020ms attn2_kernel       %custom-call.361 = custom-call(%reshape.358, %reshape.359, %reshape.360)
+     0.001ms top:other          %add.97 = add(%slice.66, %broadcast.42)
+     0.001ms attn1:other        %reduce.128 = reduce(%multiply.2, %constant.49)
+     0.001ms attn2_kernel       %custom-call.233 = custom-call(%reshape.230, %reshape.232, %reshape.228)
+     0.001ms kernel_other       %custom-call.233 = custom-call(%reshape.230, %reshape.232, %reshape.228)
+     0.000ms allreduce          %multiply.3 = multiply(%all-reduce.134, %broadcast.6)
+     0.000ms allreduce          %multiply.9 = multiply(%all-reduce.314, %broadcast.6)
+     0.000ms allreduce          %multiply.5 = multiply(%all-reduce.159, %broadcast.6)
+     0.000ms attn2:other        %reduce.308 = reduce(%multiply.8, %constant.49)
+     0.000ms attn2:other        %add.301 = add(%reshape.61, %broadcast.300)
+     0.000ms attn1:other        %reduce.153 = reduce(%multiply.4, %constant.49)
+     0.000ms attn2:other        %reduce.333 = reduce(%multiply.10, %constant.49)
+     0.000ms allreduce          %multiply.11 = multiply(%all-reduce.339, %broadcast.19)

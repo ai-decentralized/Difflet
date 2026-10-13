@@ -1,0 +1,393 @@
+<title>Wan2.1 Trainium2 Backend Benchmark</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one 1080px reading column; tables and charts may run wider inside their own scrollers. */
+:root {
+  --bg: #f6f7f8; --surface: #ffffff; --ink: #14171a; --ink-2: #4a525a; --ink-3: #737c85;
+  --rule: #dde1e5; --rule-2: #eceff1; --accent: #1f4e79;
+  --tn: #2a78d6; --nxd: #eb6834;
+  --good: #1d7a3e; --good-bg: #e3f3e8; --warn: #9a6200; --warn-bg: #fbf0d9;
+  --bad: #b3261e; --bad-bg: #fbe4e2; --info-bg: #e7eef6;
+  --f-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121417; --surface: #1a1d21; --ink: #eef0f2; --ink-2: #b9c0c7; --ink-3: #8a939c;
+  --rule: #2e3338; --rule-2: #23272c; --accent: #8db8e3;
+  --tn: #3987e5; --nxd: #d95926;
+  --good: #6cc98a; --good-bg: #17301f; --warn: #e2b04a; --warn-bg: #33280f;
+  --bad: #f08a83; --bad-bg: #3a1b19; --info-bg: #1c2733; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #121417; --surface: #1a1d21; --ink: #eef0f2; --ink-2: #b9c0c7; --ink-3: #8a939c;
+  --rule: #2e3338; --rule-2: #23272c; --accent: #8db8e3;
+  --tn: #3987e5; --nxd: #d95926;
+  --good: #6cc98a; --good-bg: #17301f; --warn: #e2b04a; --warn-bg: #33280f;
+  --bad: #f08a83; --bad-bg: #3a1b19; --info-bg: #1c2733; color-scheme: dark; }
+
+body { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--f-body); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 72px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 650; text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 44px); letter-spacing: -0.01em; }
+h2 { font-size: 26px; }
+h3 { font-size: 18px; font-family: var(--f-body); font-weight: 600; }
+p { margin: 0; max-width: 72ch; }
+a { color: var(--accent); }
+code, .mono { font-family: var(--f-mono); font-size: 0.88em; }
+.eyebrow { font: 500 12px/1.2 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+section { display: flex; flex-direction: column; gap: 18px; padding-block: 36px 8px; border-top: 1px solid var(--rule); }
+header { display: flex; flex-direction: column; gap: 14px; padding-bottom: 28px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-2); font-size: 13.5px; }
+.meta span b { color: var(--ink); font-weight: 600; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13.5px; color: var(--ink-2); }
+.key { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.sw.tn { background: var(--tn); } .sw.nxd { background: var(--nxd); }
+
+.verdicts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.verdict { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.verdict .label { font-size: 12.5px; color: var(--ink-3); font-weight: 500; }
+.verdict .vals { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.verdict .v { font: 600 21px/1.1 var(--f-body); }
+.verdict .v small { font-size: 12px; font-weight: 500; color: var(--ink-3); margin-left: 2px; }
+.verdict .who { font-size: 11.5px; color: var(--ink-3); display: flex; align-items: center; gap: 5px; }
+.verdict .note { font-size: 13px; color: var(--ink-2); }
+
+.chip { display: inline-flex; align-items: center; gap: 5px; font: 600 11.5px/1 var(--f-body); padding: 4px 8px; border-radius: 999px; white-space: nowrap; }
+.chip.good { color: var(--good); background: var(--good-bg); }
+.chip.bad { color: var(--bad); background: var(--bad-bg); }
+.chip.warn { color: var(--warn); background: var(--warn-bg); }
+.chip.info { color: var(--accent); background: var(--info-bg); }
+
+.callout { background: var(--surface); border: 1px solid var(--rule); border-left: 4px solid var(--bad); border-radius: 6px; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; }
+.callout.ok { border-left-color: var(--good); }
+.callout.info { border-left-color: var(--accent); }
+
+.scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th, td { padding: 8px 12px; border-bottom: 1px solid var(--rule-2); text-align: left; vertical-align: top; }
+th { font-weight: 600; color: var(--ink-2); background: var(--rule-2); font-size: 12.5px; white-space: nowrap; }
+td.n, th.n { text-align: right; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td .sub { color: var(--ink-3); font-size: 12px; display: block; }
+
+.pairs { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.pair { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.pair h3 { font-size: 14px; }
+.barrow { display: grid; grid-template-columns: 92px 1fr 78px; align-items: center; gap: 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.barrow .lab { color: var(--ink-2); }
+.barrow .track { height: 14px; position: relative; }
+.barrow .bar { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0 4px 4px 0; }
+.barrow .val { text-align: right; font-weight: 600; }
+.pair .delta { font-size: 12.5px; color: var(--ink-2); }
+
+.chart { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 10px 6px; position: relative; }
+.chart svg { display: block; width: 100%; height: auto; }
+.chart text { fill: var(--ink-3); font: 11px var(--f-body); }
+.chart .grid { stroke: var(--rule-2); }
+.chart .axis { stroke: var(--rule); }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--bg); font: 12px/1.45 var(--f-body); padding: 7px 9px; border-radius: 6px; white-space: nowrap; transform: translate(-50%, -110%); opacity: 0; transition: opacity .08s; font-variant-numeric: tabular-nums; }
+.tip.on { opacity: 1; }
+
+.diffbar { display: flex; align-items: center; gap: 6px; min-width: 160px; }
+.diffbar .b { height: 8px; border-radius: 3px; }
+
+.sheets { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+figure { margin: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+figure img { display: block; width: 100%; height: auto; }
+figcaption { padding: 10px 14px; font-size: 13px; color: var(--ink-2); display: flex; flex-direction: column; gap: 4px; }
+figcaption b { color: var(--ink); }
+
+ul.clean { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; max-width: 80ch; }
+details { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 14px; }
+details summary { cursor: pointer; font-weight: 600; }
+details[open] summary { margin-bottom: 10px; }
+pre { margin: 0; overflow-x: auto; background: var(--rule-2); padding: 12px 14px; border-radius: 6px; font: 12.5px/1.5 var(--f-mono); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .tip { transition: none; } }
+@media (max-width: 520px) { .barrow { grid-template-columns: 70px 1fr 66px; } th, td { padding: 7px 9px; } }
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">Difflet benchmark · trn2.3xlarge · 2026-10-13</div>
+  <h1>Wan2.1 T2V 14B on Trainium2: TorchNeuron vs NxD AoT</h1>
+  <p>Same model, prompt, seed and shape on both Neuron backends, launched through the same <code>difflet generate</code> CLI with <code>NEURON_RT_VIRTUAL_CORE_SIZE=2</code>. Timing, where the DiT step time goes, and whether the videos are any good.</p>
+  <div class="meta">
+    <span><b>Model</b> Wan-AI/Wan2.1-T2V-14B-Diffusers @ 38ec498</span>
+    <span><b>Shape</b> 480×832×9 (4,680 tokens)</span>
+    <span><b>Parallel</b> TP=4, one logical core (LNC=2) per rank</span>
+    <span><b>Steps</b> 50, seed 42, guidance 5.0 (and 1.0)</span>
+    <span><b>Placement</b> umT5 and VAE on device on both</span>
+  </div>
+  <div class="legend">
+    <span class="key"><span class="sw tn"></span>TorchNeuron (<code>--backend neuron</code>, torch 2.14, per-block torch.compile)</span>
+    <span class="key"><span class="sw nxd"></span>NxD AoT (<code>--backend trainium</code>, torch-xla 2.9, one AoT NEFF)</span>
+  </div>
+</header>
+
+<div class="stack">
+  <div class="verdicts" id="verdicts"></div>
+  <div class="callout">
+    <h3>Bottom line</h3>
+    <p id="bottomline"></p>
+  </div>
+</div>
+
+<section id="timing">
+  <div class="eyebrow">1 · Timing</div>
+  <h2>Headline numbers</h2>
+  <p>e2e is the <code>difflet generate</code> process wall, spawn to mp4. <b>Cold</b> means the OS page cache was dropped right before the launch with compiled artifacts present; <b>warm</b> is a new process with page cache and compile cache warm (n=3 at g=5, n=2 at g=1). <b>DiT step</b> is the inter-iteration time of the shared denoise loop, device-synchronised after every scheduler step, step 0 excluded, pooled over the warm launches. Lower is better everywhere.</p>
+  <div class="pairs" id="pairs"></div>
+  <details>
+    <summary>Every launch</summary>
+    <div class="scroll"><table id="runs"></table></div>
+  </details>
+</section>
+
+<section id="steps">
+  <div class="eyebrow">2 · Step series</div>
+  <h2>Every denoise step, guidance 5.0</h2>
+  <p>Both backends are flat and stable from step 1 to 49; the gap is a constant per-step cost, not warm-up or throttling drift. Hover the chart for values.</p>
+  <div class="chart" id="stepchart"><div class="tip" id="steptip"></div></div>
+</section>
+
+<section id="why">
+  <div class="eyebrow">3 · Profiling</div>
+  <h2>Why the TorchNeuron step is ~10% slower</h2>
+  <p>Profiled with the Neuron runtime's inspect traces and <code>neuron-explorer</code> device profiles on both backends, then checked by two independent verifiers who re-derived the numbers from the raw traces and re-measured on the device.</p>
+  <div class="scroll"><table id="breakdown"></table></div>
+  <h3>Root causes</h3>
+  <div class="scroll"><table id="causes"></table></div>
+  <div class="callout ok" id="fixbox"></div>
+</section>
+
+<section id="e2e">
+  <div class="eyebrow">4 · End to end</div>
+  <h2>Where warm and cold e2e differ</h2>
+  <p>Component times per backend for one warm and one cold g=5 launch. Bars show the difference: blue where TorchNeuron spends longer, orange where NxD AoT does.</p>
+  <h3>Warm (127.2 s vs 107.2 s)</h3>
+  <div class="scroll"><table id="warm"></table></div>
+  <h3>Cold, page cache dropped (737.6 s vs 432.5 s)</h3>
+  <div class="scroll"><table id="cold"></table></div>
+  <div class="callout info"><p>Cold start is disk-bound on both: EBS reads at about 124 MB/s. TorchNeuron reads the original fp32 safetensors (57.15 GB DiT + 22.72 GB umT5) on every cold start; NxD AoT reads its presharded bf16 copies (28.6 GB + 10.8 GB) written at compile time. Caching bf16 per-rank shards after the first load, or keeping caches on the instance's unused local NVMe, is the fix for TorchNeuron's cold start.</p></div>
+</section>
+
+<section id="quality">
+  <div class="eyebrow">5 · Output quality</div>
+  <h2>Are the videos reasonable?</h2>
+  <div class="callout">
+    <h3>NxD AoT's delivered videos are corrupted; TorchNeuron's are correct</h3>
+    <p>Frame 0 of every NxD AoT video is fine; frames 1–8 dissolve into grid-patterned noise. The fault is in its on-device VAE stage, not its DiT: decoding the same NxD latents with the diffusers VAE on CPU gives a clean video. It is deterministic (identical bytes in every cold and warm launch) and not caused by VCS=2 (a launch with the variable unset produced a byte-identical mp4). TorchNeuron's video matches a CPU fp32 decode of its own latents to within h264 loss.</p>
+  </div>
+  <div class="sheets" id="sheets"></div>
+  <h3>Measurements</h3>
+  <div class="scroll"><table id="qtable"></table></div>
+  <h3>fp32 oracle (diffusers on CPU, 2 steps, g=5)</h3>
+  <p>The repo's W4 parity rule: final latents must have cosine ≥ 0.995 to the fp32 reference and an L1 error at most 1.15× what plain bf16 diffusers has (the bf16 control). Both backends start from bit-identical noise.</p>
+  <div class="scroll"><table id="oracle"></table></div>
+  <h3>Blind review</h3>
+  <p>Four independent vision reviewers saw frame rows labelled only X and Y (X was NxD AoT), each with a different brief. Scores 1–10, guidance 5.0.</p>
+  <div class="scroll"><table id="judges"></table></div>
+</section>
+
+<section id="followups">
+  <div class="eyebrow">6 · Follow-ups</div>
+  <h2>What would close the gaps</h2>
+  <div class="scroll"><table id="fixes"></table></div>
+</section>
+
+<section id="method">
+  <div class="eyebrow">7 · Method and evidence</div>
+  <h2>Reproduce it</h2>
+  <ul class="clean">
+    <li>Both backends run the user-facing CLI with default placement (umT5 and VAE on device) and <code>NEURON_RT_VIRTUAL_CORE_SIZE=2</code> exported to every launch, the NxD compile included. The NxD transformer trace reads it to pick the two-core attention kernel, and the stage cache key does not include it, so each backend had its own fresh cache.</li>
+    <li>The DiT step is measured by one probe on both backends (<code>benchmark/wan_step_probe/sitecustomize.py</code>): it patches the shared <code>WanOrchestrator</code> loop at import, so the NxD stage subprocess and the four torchrun ranks are timed by identical code. Every launch recorded VCS=2 in the process that ran the DiT.</li>
+    <li>Toolchains: TorchNeuron torch 2.14.0, torch-neuronx 2.14.3 (editable), neuronx-cc 2.28.4568, Python 3.14. NxD AoT torch 2.9.1, torch-neuronx 2.9.0.2.15, neuronx-cc 2.26.6360, NxD 0.19, Python 3.12. Runtime 2.35.27, tools 2.33.32.</li>
+  </ul>
+  <pre>python3 benchmark/wan21_native_vs_nxd.py run --backend neuron   --out ~/wan21-bench --python ~/workspace/native_venv/bin/python
+python3 benchmark/wan21_native_vs_nxd.py run --backend trainium --out ~/wan21-bench --python ~/Difflet/.venv/bin/python
+python3 benchmark/wan21_native_vs_nxd.py report --out ~/wan21-bench
+python  benchmark/wan21_quality.py --out ~/wan21-bench          # CPU only
+python  benchmark/wan21_oracle_compare.py --ref ref_2steps.pt --device neuron=... --device trainium=...</pre>
+  <p id="evidence"></p>
+  <h3>Caveats</h3>
+  <ul class="clean" id="caveats"></ul>
+</section>
+</div>
+
+<script type="application/json" id="data">__DATA__</script>
+<script>
+const D = JSON.parse(document.getElementById('data').textContent);
+const H = D.headline, TN = H.neuron, NX = H.trainium;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const f1 = (x) => (x == null ? '—' : Number(x).toFixed(1));
+const pct = (a, b) => ((a - b) / b * 100);
+const chip = (kind, text) => `<span class="chip ${kind}">${kind === 'good' ? '✓' : kind === 'bad' ? '✕' : kind === 'warn' ? '!' : 'i'} ${esc(text)}</span>`;
+const dot = (who) => `<span class="sw ${who}"></span>`;
+
+// ---- verdict tiles
+const tiles = [
+  { label: 'DiT step, g=5', a: TN.step_g5_ms, b: NX.step_g5_ms, unit: 'ms', note: `NxD AoT ${Math.abs(pct(NX.step_g5_ms, TN.step_g5_ms)).toFixed(1)}% faster per step` },
+  { label: 'e2e warm, g=5', a: TN.warm_g5_s, b: NX.warm_g5_s, unit: 's', note: 'NxD AoT faster, but its video is corrupted' },
+  { label: 'e2e cold, g=5', a: TN.cold_g5_s, b: NX.cold_g5_s, unit: 's', note: 'Disk-bound: fp32 vs presharded bf16 reads' },
+  { label: 'One-time compile', a: TN.compile_s, b: NX.compile_s, unit: 's', note: 'TorchNeuron JIT inside its first generate; NxD AoT 103 min' },
+];
+$('verdicts').innerHTML = tiles.map(t => `<div class="verdict"><div class="label">${t.label}</div>
+  <div class="vals"><div><div class="who">${dot('tn')}TorchNeuron</div><div class="v">${f1(t.a)}<small>${t.unit}</small></div></div>
+  <div><div class="who">${dot('nxd')}NxD AoT</div><div class="v">${f1(t.b)}<small>${t.unit}</small></div></div></div>
+  <div class="note">${t.note}</div></div>`).join('') +
+  `<div class="verdict"><div class="label">Output quality</div>
+   <div class="vals"><div><div class="who">${dot('tn')}TorchNeuron</div>${chip('good', 'Correct')}</div>
+   <div><div class="who">${dot('nxd')}NxD AoT</div>${chip('bad', 'Corrupted video')}</div></div>
+   <div class="note">NxD AoT's on-device VAE breaks frames 1–8; its DiT latents are fine</div></div>`;
+
+const ccopWarm = ['warm1-g5','warm2-g5','warm3-g5','warm4-g5','warm5-g5'].flatMap(k => (D.ccop[k] && D.ccop[k].steps_ms) || []);
+const median = (a) => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length ? (s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2) : null; };
+const ccopMed = median(ccopWarm);
+$('bottomline').innerHTML = `NxD AoT runs the Wan2.1 DiT about 10% faster per step (${f1(NX.step_g5_ms)} vs ${f1(TN.step_g5_ms)} ms at g=5; ${f1(NX.step_g1_ms)} vs ${f1(TN.step_g1_ms)} ms at g=1) and is faster end to end (${f1(NX.warm_g5_s)} vs ${f1(TN.warm_g5_s)} s warm, ${f1(NX.cold_g5_s)} vs ${f1(TN.cold_g5_s)} s cold), but <b>the videos it delivers are corrupted by its VAE stage</b>, so its e2e numbers are not usable as they stand. TorchNeuron produces correct video, passes the fp32 parity gate, and compiles in about 5.5 minutes instead of 103.` +
+  (ccopMed ? ` One TorchNeuron cause of the step gap, collectives not overlapped with compute, is fixed on this branch: ${f1(TN.step_g5_ms)} → ${f1(ccopMed)} ms per g=5 step.` : '');
+
+// ---- paired bars
+const pairs = [
+  { t: 'DiT step, g=5', u: 'ms', a: TN.step_g5_ms, b: NX.step_g5_ms },
+  { t: 'DiT step, g=1', u: 'ms', a: TN.step_g1_ms, b: NX.step_g1_ms },
+  { t: 'e2e warm, g=5', u: 's', a: TN.warm_g5_s, b: NX.warm_g5_s },
+  { t: 'e2e warm, g=1', u: 's', a: TN.warm_g1_s, b: NX.warm_g1_s },
+  { t: 'e2e cold, g=5', u: 's', a: TN.cold_g5_s, b: NX.cold_g5_s },
+  { t: 'One-time compile', u: 's', a: TN.compile_s, b: NX.compile_s, note: 'TorchNeuron: first generate − warm generate (JIT); NxD: <code>difflet compile</code> wall' },
+];
+$('pairs').innerHTML = pairs.map(p => { const m = Math.max(p.a, p.b);
+  const row = (who, name, v) => `<div class="barrow" title="${name}: ${f1(v)} ${p.u}"><span class="lab">${name}</span><span class="track"><span class="bar" style="width:${(v / m * 100).toFixed(1)}%;background:var(--${who})"></span></span><span class="val">${f1(v)} ${p.u}</span></div>`;
+  const d = pct(p.a, p.b); return `<div class="pair"><h3>${p.t}</h3>${row('tn', 'TorchNeuron', p.a)}${row('nxd', 'NxD AoT', p.b)}
+  <div class="delta">${d > 0 ? 'TorchNeuron ' + d.toFixed(1) + '% slower' : 'TorchNeuron ' + Math.abs(d).toFixed(1) + '% faster'}${p.note ? ' · ' + p.note : ''}</div></div>`; }).join('');
+
+// ---- every launch
+const bname = (b) => b === 'neuron' ? `${dot('tn')} TorchNeuron` : `${dot('nxd')} NxD AoT`;
+$('runs').innerHTML = `<tr><th>Backend</th><th>Launch</th><th>Start (UTC)</th><th class="n">Wall (s)</th><th class="n">Step median (ms)</th><th class="n">Denoise (s)</th><th class="n">New cache files</th><th class="n">Page cache at start (GiB)</th><th>VCS seen</th></tr>` +
+  D.rows.map(r => `<tr><td>${bname(r.backend)}</td><td><code>${r.name}</code>${r.drop ? '<span class="sub">page cache dropped</span>' : ''}</td><td>${r.start_utc.slice(11)}</td><td class="n">${f1(r.wall_s)}</td><td class="n">${f1(r.step_median_ms)}</td><td class="n">${r.denoise_s == null ? '—' : r.denoise_s.toFixed(2)}</td><td class="n">${r.new_cache_files}</td><td class="n">${f1(r.page_cache_gib)}</td><td>${r.procs ? r.vcs.join(',') + ` (${r.procs} proc)` : '—'}</td></tr>`).join('');
+
+// ---- step chart
+(function () {
+  const a = D.series.neuron_g5, b = D.series.trainium_g5;
+  const c = ccopWarm.length ? D.ccop['warm1-g5'].steps_ms : null;
+  const W = 960, Hh = 300, L = 54, R = 16, T = 14, B = 34;
+  const all = [...a, ...b, ...(c || [])];
+  const lo = Math.floor((Math.min(...all) - 20) / 50) * 50, hi = Math.ceil((Math.max(...all) + 20) / 50) * 50;
+  const x = (i) => L + i * (W - L - R) / (a.length - 1);
+  const y = (v) => T + (hi - v) * (Hh - T - B) / (hi - lo);
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Per-step DiT time at guidance 5 for both backends">`;
+  for (let v = lo; v <= hi; v += 50) s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
+  [1, 10, 20, 30, 40, 49].forEach(i => s += `<text x="${x(i - 1)}" y="${Hh - 12}" text-anchor="middle">${i}</text>`);
+  s += `<text x="${L}" y="${Hh - 0}" text-anchor="start">step (1–49)</text><text x="6" y="${T + 4}">ms</text>`;
+  const path = (arr, col, dash) => `<path d="${arr.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ')}" fill="none" stroke="var(--${col})" stroke-width="2" ${dash ? 'stroke-dasharray="5 4"' : ''}/>`;
+  s += path(a, 'tn') + path(b, 'nxd') + (c ? path(c, 'tn', true) : '');
+  const lab = (arr, col, txt) => `<text x="${W - R - 4}" y="${y(arr[arr.length - 1]) - 7}" text-anchor="end" style="fill:var(--ink-2);font-weight:600">${txt}</text>`;
+  s += lab(a, 'tn', 'TorchNeuron') + lab(b, 'nxd', 'NxD AoT') + (c ? `<text x="${W - R - 4}" y="${y(c[c.length - 1]) + 16}" text-anchor="end" style="fill:var(--ink-2)">TorchNeuron + ccop overlap (dashed)</text>` : '');
+  s += `<line id="xh" x1="0" x2="0" y1="${T}" y2="${Hh - B}" stroke="var(--ink-3)" stroke-width="1" visibility="hidden"/><rect x="${L}" y="${T}" width="${W - L - R}" height="${Hh - T - B}" fill="transparent" id="hit"/></svg>`;
+  const box = $('stepchart'); box.insertAdjacentHTML('beforeend', s);
+  const svg = box.querySelector('svg'), tip = $('steptip'), xh = svg.querySelector('#xh');
+  svg.querySelector('#hit').addEventListener('pointermove', (e) => {
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    const i = Math.max(0, Math.min(a.length - 1, Math.round((p.x - L) / ((W - L - R) / (a.length - 1)))));
+    xh.setAttribute('x1', x(i)); xh.setAttribute('x2', x(i)); xh.setAttribute('visibility', 'visible');
+    tip.innerHTML = `step ${i + 1}<br>${dot('tn')} TorchNeuron ${a[i].toFixed(1)} ms<br>${dot('nxd')} NxD AoT ${b[i].toFixed(1)} ms` + (c ? `<br>TorchNeuron + ccop ${c[i].toFixed(1)} ms` : '');
+    const r = box.getBoundingClientRect(), sr = svg.getBoundingClientRect();
+    tip.style.left = (x(i) / W * sr.width + sr.left - r.left) + 'px'; tip.style.top = (y(Math.min(a[i], b[i])) / Hh * sr.height + sr.top - r.top) + 'px'; tip.classList.add('on');
+  });
+  svg.querySelector('#hit').addEventListener('pointerleave', () => { tip.classList.remove('on'); xh.setAttribute('visibility', 'hidden'); });
+})();
+
+// ---- step breakdown
+const P = D.profile;
+$('breakdown').innerHTML = `<tr><th>Per g=5 step</th><th class="n">${dot('tn')} TorchNeuron (ms)</th><th class="n">${dot('nxd')} NxD AoT (ms)</th><th class="n">Δ (ms)</th><th>Evidence</th></tr>` +
+  P.step_breakdown.map(r => `<tr><td>${esc(r.component)}</td><td class="n">${f1(r.neuron_ms)}</td><td class="n">${f1(r.trainium_ms)}</td><td class="n">${(r.neuron_ms - r.trainium_ms > 0 ? '+' : '') + f1(r.neuron_ms - r.trainium_ms)}</td><td><span class="sub">${esc(r.evidence)}</span></td></tr>`).join('') +
+  `<tr><td><b>Sum</b> (benchmark median ${f1(TN.step_g5_ms)} vs ${f1(NX.step_g5_ms)})</td><td class="n"><b>${f1(P.step_breakdown.reduce((s, r) => s + r.neuron_ms, 0))}</b></td><td class="n"><b>${f1(P.step_breakdown.reduce((s, r) => s + r.trainium_ms, 0))}</b></td><td class="n"></td><td></td></tr>`;
+
+const causes = [
+  { c: 'Block graphs compiled without collective/compute overlap. torch-neuronx builds torch.compile graphs with <code>--model-type transformer --auto-cast=none -O2</code>; NxD\'s Wan backbone adds <code>--enable-ccop-compute-overlap</code>.', ms: '≈21 of 105', s: ['good', 'Confirmed, fixed'], v: 'A/B on device at g=5 through the benchmark probe, twice: 1063.6 → 1042.7 and 1063.2 → 1042.0 ms/step. Block NEFF 12.98 → 12.71 ms; collective ops per block 16 → 22, matching NxD\'s ~22 per layer. A second verifier saw about half the gain at g=1 under the runtime profiler, which adds host gaps.' },
+  { c: 'The rest of the per-block NEFF gap: TorchNeuron\'s block is still ~1 ms slower than the equivalent NxD layer after the fix. Its tensor engine sits idle 1.9–2.2 ms per block (NxD 0.2–0.3 ms), it spills more (1.33 GB reload per block) and is throttled more often.', ms: '≈80', s: ['warn', 'Size confirmed, cause open'], v: 'The size is a subtraction from measured device times. Candidate mechanisms not yet separated: different attention_cte kernel versions (nki 0.7 vs 0.5), compiler version (2.28 vs 2.26), scheduling around the row-parallel all-reduces. The total collective time per layer is about the same on both (1.94 vs 1.85 ms).' },
+  { c: 'Host UniPC scheduler step runs single-threaded on each torchrun rank (torchrun sets OMP_NUM_THREADS=1).', ms: '≈1–3', s: ['info', 'Minor'], v: '4.8 vs 1.8 ms per step. OMP_NUM_THREADS=3 cut it to 3.4 ms but the DiT call got slower, so no net gain measured.' },
+  { c: 'Per-forward host overhead: three H2D copies, an explicit sync and a copy back, vs in-graph IO on NxD.', ms: '≈1.4', s: ['info', 'Minor'], v: '4.0 vs 3.3 ms per forward.' },
+  { c: 'Not the cause: dispatch between the 40 block NEFFs, block boundaries, optimisation level, weight-layout optimisation.', ms: '0', s: ['good', 'Ruled out'], v: 'Median gap between block executions 6.9 µs. Two blocks per graph: 13.08 ms per block (no gain). -O1: +20.5 ms per forward. Weight-layout optimisation: +110 ms per forward from relayout NEFFs run on every call.' },
+];
+$('causes').innerHTML = `<tr><th>Cause</th><th class="n">ms / g=5 step</th><th>Status</th><th>Evidence</th></tr>` +
+  causes.map(r => `<tr><td>${r.c}</td><td class="n">${r.ms}</td><td>${chip(r.s[0], r.s[1])}</td><td><span class="sub">${r.v}</span></td></tr>`).join('');
+
+(function () {
+  const g5 = ['warm3-g5','warm4-g5','warm5-g5'].map(k => D.ccop[k]).filter(Boolean);
+  const g1 = ['warm1-g1','warm2-g1'].flatMap(k => (D.ccop[k] && D.ccop[k].steps_ms) || []);
+  const box = $('fixbox');
+  if (!g5.length) { box.innerHTML = '<h3>Fix: collective/compute overlap</h3><p>Verification pending.</p>'; return; }
+  const wall5 = g5.map(r => r.wall_s).filter(Boolean);
+  const m1 = median(g1);
+  box.innerHTML = `<h3>Fixed on this branch: collective/compute overlap for TorchNeuron's TP block graphs</h3>
+  <p><code>TorchNeuronWanApplication.load()</code> now appends <code>--tensorizer-options=--enable-ccop-compute-overlap</code> to <code>NEURON_CC_FLAGS</code> before the DiT blocks compile when TP &gt; 1, matching the NxD Wan backbone. It respects flags the user already set; <code>DIFFLET_NEURON_CCOP_OVERLAP=0</code> turns it off. Same protocol, fresh cache, on device:</p>
+  <div class="scroll"><table><tr><th></th><th class="n">Before</th><th class="n">After</th><th class="n">NxD AoT</th></tr>
+  <tr><td>DiT step median, g=5 (ms)</td><td class="n">${f1(TN.step_g5_ms)}</td><td class="n"><b>${f1(ccopMed)}</b></td><td class="n">${f1(NX.step_g5_ms)}</td></tr>
+  <tr><td>DiT step median, g=1 (ms)</td><td class="n">${f1(TN.step_g1_ms)}</td><td class="n"><b>${f1(m1)}</b></td><td class="n">${f1(NX.step_g1_ms)}</td></tr>
+  <tr><td>e2e warm, g=5 (s)<span class="sub">fix: warm3–5 on a settled page cache; warm1–2 re-read weights evicted by other jobs</span></td><td class="n">${f1(TN.warm_g5_s)}</td><td class="n"><b>${wall5.length ? f1(wall5.reduce((s, v) => s + v, 0) / wall5.length) : '—'}</b></td><td class="n">${f1(NX.warm_g5_s)}</td></tr>
+  <tr><td>Gap to NxD AoT per g=5 step</td><td class="n">${f1(TN.step_g5_ms - NX.step_g5_ms)} ms (${pct(TN.step_g5_ms, NX.step_g5_ms).toFixed(1)}%)</td><td class="n"><b>${f1(ccopMed - NX.step_g5_ms)} ms (${pct(ccopMed, NX.step_g5_ms).toFixed(1)}%)</b></td><td class="n"></td></tr></table></div>
+  <p>Step medians pooled over five warm launches (n=${ccopWarm.length}); all four ranks agree within 1 ms. The ~1 s saved per 50-step run is inside launch-to-launch e2e noise.</p>
+  <p>${D.ccopOracle ? 'Numerics: the fp32-oracle W4 gate still passes (cosine ' + D.ccopOracle.cosine.toFixed(6) + ', ' + D.ccopOracle.ratio.toFixed(3) + '× the bf16 control). ' : ''}${D.ccop50 ? 'At 50 steps the output is not bitwise equal to the unfixed build (overlap chunks the all-reduces differently) but is the same video: final-latent cosine ' + D.ccop50.g1.final_cosine.toFixed(5) + ' at g=1 and ' + D.ccop50.g5.final_cosine.toFixed(4) + ' at g=5 (the two backends differ by 0.970).' : ''}</p>`;
+})();
+
+// ---- e2e tables
+const e2e = (rows, unit) => `<tr><th>Component</th><th class="n">${dot('tn')} TorchNeuron (${unit})</th><th class="n">${dot('nxd')} NxD AoT (${unit})</th><th>Difference</th></tr>` + rows.map(r => {
+  const d = r.neuron_s - r.trainium_s; const w = Math.min(140, Math.abs(d) / 3);
+  return `<tr><td>${esc(r.component)}</td><td class="n">${f1(r.neuron_s)}</td><td class="n">${f1(r.trainium_s)}</td><td><div class="diffbar"><span class="b" style="width:${w.toFixed(0)}px;background:var(--${d > 0 ? 'tn' : 'nxd'})"></span><span class="mono">${d > 0 ? '+' : ''}${f1(d)}</span></div></td></tr>`; }).join('') +
+  `<tr><td><b>Sum of components</b></td><td class="n"><b>${f1(rows.reduce((s, r) => s + r.neuron_s, 0))}</b></td><td class="n"><b>${f1(rows.reduce((s, r) => s + r.trainium_s, 0))}</b></td><td></td></tr>`;
+$('warm').innerHTML = e2e(P.warm_e2e_breakdown, 's');
+$('cold').innerHTML = e2e(P.cold_e2e_breakdown, 's');
+
+// ---- quality
+const imgs = [
+  ['neuron_warm1-g5', 'TorchNeuron, guidance 5.0', 'Its own on-device VAE. 35.1 dB from the CPU fp32 decode of the same latents (h264 crf 18 floor 36–38 dB).', 'good', 'Correct'],
+  ['trainium_warm1-g5', 'NxD AoT, guidance 5.0', 'Its own on-device VAE. Frame 0 ~21 dB, frames 1–8 9–13 dB from the CPU decode of the same latents.', 'bad', 'Corrupted'],
+  ['cpuvae_trainium_warm1-g5', 'NxD AoT latents, CPU fp32 VAE', 'The same NxD latents decoded by diffusers on CPU: the DiT output is fine; the VAE stage is the fault.', 'good', 'Latents fine'],
+  ['cpuvae_neuron_warm1-g5', 'TorchNeuron latents, CPU fp32 VAE', 'For reference: the two backends\' latents decode to the same scene (23.3 dB apart at g=5, 33.5 dB at g=1).', 'info', 'Reference'],
+];
+$('sheets').innerHTML = imgs.map(([f, t, c, k, s]) => `<figure><img src="img/${f}.jpg" alt="${t}: 9 frames" loading="lazy" width="1252" height="748"><figcaption><b>${t}</b> ${chip(k, s)}<span>${c}</span></figcaption></figure>`).join('');
+const M = D.metrics;
+const q = [
+  ['Initial noise identical (sha256), 12 runs', 'yes', 'yes', 'Same seed path on both backends'],
+  ['Run-to-run determinism', 'bitwise', 'bitwise', 'latents, mp4 and decoded frames'],
+  ['Final latents vs the other backend, g=5', 'cosine 0.970, rel L2 0.248', '', 'g=1: cosine 0.997, rel L2 0.073'],
+  ['Delivered mp4 vs CPU decode of own latents, g=5', '35.1 dB, SSIM 0.97', '12.4 dB, SSIM 0.40', 'h264 floor 36–38 dB'],
+  ['CLIP ViT-L/14 prompt score, g=5', '0.308 (margin 0.151)', '0.228 (margin 0.070)', 'CPU-decoded latents score the same: 0.304 vs 0.309'],
+  ['Temporal frame difference (MAD), g=5', '6.1', '29.0', 'higher means flicker'],
+  ['Sharpness (Laplacian variance), g=5', '278', '59', ''],
+];
+$('qtable').innerHTML = `<tr><th>Check</th><th>${dot('tn')} TorchNeuron</th><th>${dot('nxd')} NxD AoT</th><th>Note</th></tr>` + q.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td><span class="sub">${r[3]}</span></td></tr>`).join('');
+$('oracle').innerHTML = `<tr><th>Backend</th><th>Init noise = reference</th><th class="n">Cosine vs fp32</th><th class="n">rel L1 vs fp32</th><th class="n">bf16 control</th><th class="n">Ratio (≤ 1.15)</th><th class="n">Update cosine (≥ 0.98)</th><th>W4 gate</th></tr>` +
+  D.oracle_wf.per_backend.map(b => `<tr><td>${bname(b.backend)}</td><td>${b.init_noise_equal_to_ref ? 'bit-identical' : 'differs'}</td><td class="n">${(b.backend === 'neuron' ? 0.999177 : 0.998349).toFixed(4)}</td><td class="n">${b.rel_err_vs_fp32.toFixed(4)}</td><td class="n">${b.bf16_control_rel_err_vs_fp32.toFixed(4)}</td><td class="n">${b.ratio.toFixed(3)}×</td><td class="n">${b.update_cosine.toFixed(4)}</td><td>${b.parity_pass ? chip('good', 'Pass') : chip('warn', 'Fails magnitude')}</td></tr>`).join('') +
+  (D.ccop['twostep-g5'] && D.ccopOracle ? `<tr><td>${dot('tn')} TorchNeuron + ccop fix</td><td>${D.ccopOracle.init ? 'bit-identical' : 'differs'}</td><td class="n">${D.ccopOracle.cosine.toFixed(4)}</td><td class="n">${D.ccopOracle.rel.toFixed(4)}</td><td class="n">${D.ccopOracle.control.toFixed(4)}</td><td class="n">${D.ccopOracle.ratio.toFixed(3)}×</td><td class="n">${D.ccopOracle.update_cosine.toFixed(4)}</td><td>${D.ccopOracle.pass ? chip('good', 'Pass') : chip('bad', 'Fail')}</td></tr>` : '');
+$('judges').innerHTML = `<tr><th>Reviewer brief</th><th class="n">TorchNeuron (Y)</th><th class="n">NxD AoT (X)</th><th>Preferred</th><th>Both reasonable?</th></tr>` +
+  D.judges.map((j, i) => { const avg = (s) => ((s.prompt_adherence + s.fidelity + s.artifacts + s.temporal) / 4).toFixed(1);
+    const brief = ['Overall viewer', 'Artifact hunter', 'Temporal coherence', 'Prompt adherence'][i];
+    return `<tr><td>${brief}<span class="sub">${esc(j.reasoning.slice(0, 220))}…</span></td><td class="n">${avg(j.Y)}</td><td class="n">${avg(j.X)}</td><td>${j.preference === 'Y' ? 'TorchNeuron' : j.preference === 'X' ? 'NxD AoT' : 'Neither'}</td><td>${j.both_reasonable ? chip('good', 'Yes') : chip('bad', 'No')}</td></tr>`; }).join('');
+
+// ---- follow-ups
+const fixes = [
+  ['Fix NxD AoT\'s on-device Wan VAE stage', 'NxD AoT', 'Frames 1–8 corrupted in every launch; reproduces with VCS unset. The June trn2 report\'s output statistics (std 0.084) suggest it predates this run. Until fixed, NxD AoT e2e numbers time a broken output.', 'bad'],
+  ['Collective/compute overlap in TorchNeuron block graphs', 'TorchNeuron', 'Done on this branch (≈ −21 ms per g=5 step).', 'good'],
+  ['Find the remaining ~1 ms per block', 'TorchNeuron', 'Compare the two attention_cte kernels and compiler versions on one block; try sequence-parallel reduce-scatter/all-gather in place of all-reduce. Up to ≈80 ms per g=5 step.', 'warn'],
+  ['Cache bf16 per-rank DiT shards after the first load', 'TorchNeuron', 'Cold start reads 57 GB of fp32 instead of 28.6 GB of bf16: ≈ −220 s cold. A bf16 umT5 would save ≈90 s more but changes numerics.', 'warn'],
+  ['Cut per-launch start-up', 'TorchNeuron', '17.3 s of neuron process-group init and 13.4 s of DiT warm-up (Dynamo re-trace and NEFF load) on every warm launch; a resident server or a precompiled artifact cache removes most of it.', 'warn'],
+  ['Compile the fp32 VAE decoder', 'TorchNeuron', 'Eager decode takes 7.35 s vs 1.41 s on NxD AoT; the second torchrun launch for the VAE stage adds a few seconds.', 'warn'],
+];
+$('fixes').innerHTML = `<tr><th>Item</th><th>Backend</th><th>Why</th><th>Status</th></tr>` + fixes.map(f => `<tr><td>${f[0]}</td><td>${f[1]}</td><td><span class="sub">${f[2]}</span></td><td>${chip(f[3], f[3] === 'good' ? 'Done' : f[3] === 'bad' ? 'Blocking' : 'Open')}</td></tr>`).join('');
+
+$('evidence').innerHTML = `Evidence (launch logs, probe JSONs, summary tables, quality metrics, frame sheets, profiler summaries, verifier measurements) is committed under <code>artifacts/benchmark-wan21-native-vs-nxd-2026-10-13/</code> on branch <a href="https://github.com/ai-decentralized/Difflet/tree/benchmark/wan21-native-vs-nxd-vcs2">benchmark/wan21-native-vs-nxd-vcs2</a>.`;
+$('caveats').innerHTML = [
+  'One prompt, one seed, one shape. The fp32 oracle comparison is 2 steps; there is no fp32 reference for the full 50-step run.',
+  'The NxD AoT side of the per-layer device profile is partly inferred: its instruction trace was truncated at 73.5% and the per-layer time is scaled from it.',
+  'The torch-native warm e2e includes a second torchrun launch for its on-device VAE stage; NxD AoT also runs its VAE as a separate stage subprocess.',
+  'TorchNeuron launches ran from an interactive shell; NxD AoT launches ran under a systemd unit. The only relevant difference is LD_LIBRARY_PATH (unset in the unit); the fix verification ran under a unit with /opt/aws/neuron/bin on PATH so torch-neuronx keeps its NUMA binding, as in the baseline.',
+  'Toolchains differ by design (torch 2.14 / neuronx-cc 2.28 vs torch 2.9 / neuronx-cc 2.26); the comparison is of the two backends as shipped, not of one compiler.',
+].map(t => `<li>${t}</li>`).join('');
+</script>

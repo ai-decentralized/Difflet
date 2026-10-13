@@ -1,0 +1,47 @@
+instructions 245933
+top:other              total=  20.341ms span= 12.289ms  TensorMatrix=5.984 GpSimd=4.476 Vector=2.875 Tensor=2.802 Scalar=2.137 Sync=2.069
+attn1_kernel           total=  12.990ms span=  4.327ms  TensorMatrix=4.743 Vector=3.169 Scalar=2.589 Tensor=1.748 Sync=0.398 GpSimd=0.343
+ffn:dot                total=  10.318ms span=  3.497ms  TensorMatrix=7.873 Tensor=2.102 Vector=0.261 Scalar=0.082
+attn1:dot              total=   7.932ms span=  4.721ms  TensorMatrix=5.883 Tensor=1.571 Vector=0.261 Sync=0.135 Scalar=0.082
+attn2:dot              total=   4.520ms span=  2.845ms  TensorMatrix=3.293 Tensor=0.893 Vector=0.264 Scalar=0.069
+attn2_kernel           total=   3.128ms span=  4.555ms  Vector=0.726 TensorMatrix=0.699 Sync=0.685 Scalar=0.412 GpSimd=0.352 Tensor=0.254
+attn1:other            total=   2.783ms span=  2.778ms  Vector=1.728 Scalar=0.892 TensorMatrix=0.086 Tensor=0.038 GpSimd=0.038 Sync=0.001
+norm2:other            total=   1.630ms span=  2.295ms  Vector=0.714 TensorMatrix=0.527 Scalar=0.288 Tensor=0.078 GpSimd=0.023
+ffn:other              total=   1.444ms span=  3.554ms  Scalar=0.922 Vector=0.519 GpSimd=0.001 TensorMatrix=0.000 Tensor=0.000
+norm3:other            total=   1.440ms span=  3.305ms  TensorMatrix=0.549 Vector=0.506 Scalar=0.288 Tensor=0.076 GpSimd=0.021
+norm1:other            total=   1.284ms span=  0.809ms  Vector=0.506 TensorMatrix=0.434 Scalar=0.284 Tensor=0.040 GpSimd=0.021
+allreduce              total=   0.871ms span= 11.358ms  Vector=0.409 Sync=0.314 Scalar=0.130 GpSimd=0.011 TensorMatrix=0.004 Tensor=0.003
+attn2:other            total=   0.688ms span=  7.520ms  Vector=0.322 Scalar=0.198 TensorMatrix=0.111 Tensor=0.050 GpSimd=0.007 Sync=0.001
+kernel_other           total=   0.079ms span=  0.223ms  Sync=0.020 TensorMatrix=0.020 Vector=0.020 Scalar=0.011 Tensor=0.006 GpSimd=0.002
+
+top hlo names by busy time:
+    17.025ms top:other          
+    12.988ms attn1_kernel       %custom-call.233 = custom-call(%reshape.230, %reshape.232, %reshape.228)
+     5.242ms ffn:dot            %dot.9 = dot(%reshape.82, %transpose.426)
+     5.076ms ffn:dot            %dot.8 = dot(%reshape.78, %transpose.412)
+     3.066ms attn2_kernel       %custom-call.361 = custom-call(%reshape.358, %reshape.359, %reshape.360)
+     2.168ms attn1:dot          %dot.3 = dot(%reshape.35, %transpose.237)
+     2.147ms attn2:dot          %dot.7 = dot(%reshape.62, %transpose.365)
+     1.939ms attn1:dot          %dot.1 = dot(%reshape.12, %transpose.112)
+     1.927ms attn1:dot          %dot.2 = dot(%reshape.12, %transpose.117)
+     1.898ms attn1:dot          %dot = dot(%reshape.12, %transpose.107)
+     1.886ms attn2:dot          %dot.4 = dot(%reshape.47, %transpose.287)
+     1.673ms top:other          %add.441 = add(%convert.376, %multiply.440)
+     0.847ms allreduce          %add.374 = add(%all-reduce.372, %broadcast.373)
+     0.545ms top:other          %add.252 = add(%convert.71, %multiply.251)
+     0.412ms ffn:other          %add.416 = add(%reshape.81, %broadcast.415)
+     0.325ms norm3:other        %reduce.393 = reduce(%multiply.388, %constant.49)
+     0.319ms attn1:other        %add.121 = add(%reshape.34, %broadcast.120)
+     0.317ms attn2:other        %multiply.325 = multiply(%multiply.321, %broadcast.324)
+     0.309ms norm1:other        %reduce.88 = reduce(%multiply.83, %constant.49)
+     0.306ms top:other          %multiply.251 = multiply(%convert.247, %broadcast.250)
+     0.304ms norm2:other        %reduce.273 = reduce(%multiply.268, %constant.49)
+     0.297ms top:other          %multiply.440 = multiply(%convert.436, %broadcast.439)
+     0.296ms attn2:dot          %dot.5 = dot(%reshape.53, %transpose.292)
+     0.295ms ffn:other          %add.424 = add(%tanh.423, %broadcast.53)
+     0.288ms attn1:other        %scatter.226 = scatter(%scatter.218, %constant.51, %convert.222)
+     0.288ms attn1:other        %scatter.203 = scatter(%scatter.195, %constant.51, %convert.199)
+     0.285ms top:other          %add.105 = add(%multiply.101, %broadcast.104)
+     0.280ms norm3:other        %reduce.381 = reduce(%convert.376, %constant.49)
+     0.279ms norm2:other        %reduce.261 = reduce(%convert.254, %constant.49)
+     0.275ms norm3:other        %multiply.388 = multiply(%subtract.387, %subtract.387)

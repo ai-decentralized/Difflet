@@ -1,0 +1,2 @@
+0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431  /home/ubuntu/wan21-bench/vae-vcs-test/novcs/out.mp4
+0cc020092605a9c6455258dfae9e6f3612c8dfab0ca77a57fc00f3eaa5533431  /home/ubuntu/wan21-bench/trainium/warm1-g5/out.mp4
