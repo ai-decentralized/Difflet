@@ -50,6 +50,7 @@ from typing import Any
 
 import torch
 
+from difflet.backends.neuron.compile import enable_ccop_compute_overlap
 from difflet.backends.neuron.core.application_base import _normalize_dtype
 from difflet.backends.neuron.core.checkpoint import _resolve_device
 from difflet.backends.neuron.core.distributed import broadcast_tensor, rank0_call
@@ -422,6 +423,10 @@ class TorchNeuronWanApplication(torch.nn.Module):
             return
         from difflet.models.wan.pipeline import WanOrchestrator
 
+        if self.parallel.tp_degree > 1:
+            # Before the DiT blocks compile: overlap their row-parallel all-reduces with
+            # compute, as the AoT Wan backbone does.
+            enable_ccop_compute_overlap()
         if self.transformer is not None:
             self.transformer.load(skip_warmup=skip_warmup)
             self.transformer_adapter = _OnDeviceTransformer(

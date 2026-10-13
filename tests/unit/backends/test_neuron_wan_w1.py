@@ -551,3 +551,26 @@ def test_device_vae_runs_eager_in_fp32(tiny):
     assert app.vae_decoder.dtype is torch.float32
     assert app.vae_decoder.app.exec_mode == "eager"
     assert tuple(app.vae_decoder.config.latents_std) == (1.5, 0.8, 1.2, 2.0)
+
+
+@pytest.mark.parametrize("tp_degree, expected", [(4, True), (1, False)])
+def test_ccop_overlap_is_on_when_the_tp_dit_blocks_compile(tiny, monkeypatch, tp_degree, expected):
+    # A block graph's compiler flags are read when it first compiles, inside the DiT's load
+    # (its warm-up). A TP1 DiT has no collectives, so its NEFF cache keys stay unchanged.
+    monkeypatch.delenv("DIFFLET_NEURON_CCOP_OVERLAP", raising=False)
+    monkeypatch.delenv("NEURON_CC_FLAGS", raising=False)
+    app = _composed(tiny, parallel=DiffletParallelConfig(tp_degree=tp_degree),
+                    enable_text_encoder=False)
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def fake_load(skip_warmup=False):
+        seen.append(os.environ.get("NEURON_CC_FLAGS", ""))
+        raise Stop
+
+    monkeypatch.setattr(app.transformer, "load", fake_load)
+    with pytest.raises(Stop):
+        app.load()
+    assert ("--enable-ccop-compute-overlap" in seen[0]) is expected

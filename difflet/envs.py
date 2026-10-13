@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     DIFFLET_COMPILE_CACHE: str = "~/.cache/difflet"
     DIFFLET_EXEC_MODE: str | None = None
     DIFFLET_NEURON_PG_TIMEOUT_S: str | None = None
+    DIFFLET_NEURON_CCOP_OVERLAP: bool = True
 
     # ----- Distributed framework (set by torchrun / launcher / tests) -----
     RANK: int = 0
@@ -85,6 +86,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # a peer compiles a large block graph on a cold NEFF cache.
     "DIFFLET_NEURON_PG_TIMEOUT_S":
     lambda: os.environ.get("DIFFLET_NEURON_PG_TIMEOUT_S"),
+
+    # Let neuronx-cc overlap collectives with compute in the ``neuron`` backend's
+    # tensor-parallel block graphs, as the AoT Wan backbone does
+    # (``--tensorizer-options=--enable-ccop-compute-overlap``, appended to
+    # NEURON_CC_FLAGS). Set to 0 to compile without it. Part of the NEFF cache key.
+    "DIFFLET_NEURON_CCOP_OVERLAP":
+    lambda: os.environ.get("DIFFLET_NEURON_CCOP_OVERLAP", "1") not in ("0", "false", "False"),
 
     # Hardlink pre-sharded weights into a shape-independent store under
     # ``<DIFFLET_COMPILE_CACHE>/_shared_weights/`` so that every compiled shape

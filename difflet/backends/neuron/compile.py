@@ -64,6 +64,12 @@ CACHE_ENV_DIRS = {
     HLO_CACHE_ENV: "hlo",
 }
 
+#: Extra neuronx-cc flags, read by torch-neuronx for every graph and eager op it compiles.
+CC_FLAGS_ENV = "NEURON_CC_FLAGS"
+#: Overlap a graph's collectives with its compute (``enable_ccop_compute_overlap``).
+CCOP_OVERLAP_OPTION = "--enable-ccop-compute-overlap"
+CCOP_OVERLAP_FLAG = f"--tensorizer-options={CCOP_OVERLAP_OPTION}"
+
 # The torch-neuronx module that reads HLO_CACHE_ENV into its CACHE_DIR at import.
 _HLO_CACHE_MODULE = "torch_neuronx.python_ops.compilation.hlo_cache"
 # Set once configure_compile_cache has warned that this process keeps another HLO cache.
@@ -189,6 +195,37 @@ def _warn_if_hlo_cache_dir_fixed(hlo_dir: str) -> None:
         "variable before python imports torch to keep both in one directory.",
         HLO_CACHE_ENV, hlo_dir, current,
     )
+
+
+def enable_ccop_compute_overlap(env: MutableMapping[str, str] | None = None) -> bool:
+    """Append ``CCOP_OVERLAP_FLAG`` to ``NEURON_CC_FLAGS`` in ``env`` (``os.environ`` by default).
+
+    torch-neuronx compiles a ``torch.compile`` graph with ``--model-type transformer
+    --auto-cast=none`` at -O2 plus ``NEURON_CC_FLAGS`` (read per graph, when the graph is first
+    compiled), so without this flag the collectives of a tensor-parallel block graph do not
+    overlap its compute; the AoT Wan backbone always builds with it
+    (``difflet/backends/trainium/wan/backbone.py`` ``get_compiler_args``). Call it before the
+    first graph compiles. The eager-op NEFFs read the same variable, and the flags are part of
+    every NEFF's cache key, so the first launch after turning it on compiles once more.
+
+    Nothing changes when ``DIFFLET_NEURON_CCOP_OVERLAP`` is 0, when the flag is already there,
+    or when ``NEURON_CC_FLAGS`` passes its own ``--tensorizer-options`` (a second occurrence
+    would compete with the user's; logged). Returns whether the flag is in effect.
+    """
+    target = os.environ if env is None else env
+    flags = target.get(CC_FLAGS_ENV, "").strip()
+    if CCOP_OVERLAP_OPTION in flags:
+        return True
+    if not envs.DIFFLET_NEURON_CCOP_OVERLAP:
+        return False
+    if "--tensorizer-options" in flags:
+        logger.warning(
+            "%s=%r sets its own --tensorizer-options, so collective/compute overlap (%s) is not "
+            "added; include it there to keep it.", CC_FLAGS_ENV, flags, CCOP_OVERLAP_OPTION,
+        )
+        return False
+    target[CC_FLAGS_ENV] = f"{flags} {CCOP_OVERLAP_FLAG}".strip()
+    return True
 
 
 def compile_inplace(

@@ -193,3 +193,66 @@ def test_pg_timeout_is_a_registered_env_var(monkeypatch):
     assert envs.DIFFLET_NEURON_PG_TIMEOUT_S is None
     monkeypatch.setenv("DIFFLET_NEURON_PG_TIMEOUT_S", "3600")
     assert envs.DIFFLET_NEURON_PG_TIMEOUT_S == "3600"
+
+
+# ------------------------------- collective/compute overlap (DIFFLET_NEURON_CCOP_OVERLAP)
+
+CCOP = "--tensorizer-options=--enable-ccop-compute-overlap"
+
+
+@pytest.mark.parametrize(
+    "flags, expected",
+    [
+        (None, CCOP),
+        ("", CCOP),
+        ("--verbose=info", f"--verbose=info {CCOP}"),
+        (CCOP, CCOP),
+        (f"-O1 {CCOP}", f"-O1 {CCOP}"),
+    ],
+)
+def test_ccop_overlap_is_appended_to_the_compiler_flags(monkeypatch, flags, expected):
+    from difflet.backends.neuron.compile import enable_ccop_compute_overlap
+
+    monkeypatch.delenv("DIFFLET_NEURON_CCOP_OVERLAP", raising=False)
+    env = {} if flags is None else {"NEURON_CC_FLAGS": flags}
+    assert enable_ccop_compute_overlap(env) is True
+    assert env["NEURON_CC_FLAGS"] == expected
+
+
+def test_ccop_overlap_respects_the_users_own_tensorizer_options(monkeypatch, caplog):
+    from difflet.backends.neuron.compile import enable_ccop_compute_overlap
+
+    monkeypatch.delenv("DIFFLET_NEURON_CCOP_OVERLAP", raising=False)
+    env = {"NEURON_CC_FLAGS": "--tensorizer-options=--some-option"}
+    assert enable_ccop_compute_overlap(env) is False
+    assert env == {"NEURON_CC_FLAGS": "--tensorizer-options=--some-option"}
+    assert "--enable-ccop-compute-overlap" in caplog.text
+
+
+@pytest.mark.parametrize("value", ["0", "false", "False"])
+def test_ccop_overlap_opt_out(monkeypatch, value):
+    from difflet.backends.neuron.compile import enable_ccop_compute_overlap
+
+    monkeypatch.setenv("DIFFLET_NEURON_CCOP_OVERLAP", value)
+    env = {"NEURON_CC_FLAGS": "--verbose=info"}
+    assert enable_ccop_compute_overlap(env) is False
+    assert env == {"NEURON_CC_FLAGS": "--verbose=info"}
+    # A flag the user wrote stays in effect whatever the knob says.
+    assert enable_ccop_compute_overlap({"NEURON_CC_FLAGS": CCOP}) is True
+
+
+def test_ccop_overlap_writes_the_process_environment_by_default(monkeypatch):
+    from difflet.backends.neuron.compile import enable_ccop_compute_overlap
+
+    monkeypatch.delenv("DIFFLET_NEURON_CCOP_OVERLAP", raising=False)
+    monkeypatch.delenv("NEURON_CC_FLAGS", raising=False)
+    assert enable_ccop_compute_overlap() is True
+    assert os.environ["NEURON_CC_FLAGS"] == CCOP
+
+
+def test_ccop_overlap_is_a_registered_env_var(monkeypatch):
+    assert "DIFFLET_NEURON_CCOP_OVERLAP" in dir(envs)
+    monkeypatch.delenv("DIFFLET_NEURON_CCOP_OVERLAP", raising=False)
+    assert envs.DIFFLET_NEURON_CCOP_OVERLAP is True
+    monkeypatch.setenv("DIFFLET_NEURON_CCOP_OVERLAP", "0")
+    assert envs.DIFFLET_NEURON_CCOP_OVERLAP is False
