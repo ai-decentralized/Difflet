@@ -496,10 +496,65 @@ class WanVAEDecoderModel(nn.Module):
         return torch.clamp(torch.cat(chunks, dim=2), min=-1.0, max=1.0)
 
 
+def wan_vae_decode_cache(config, latent_shape, step, dtype):
+    """Infer a step's input cache using the decoder itself, without allocating weights.
+
+    The first step has no history; the second still has the temporal upsamplers'
+    ``Rep`` sentinels. After that, all active slots have two frames of history.
+    """
+    with torch.device("meta"):
+        model = WanVAEDecoderModel(config).to(dtype=dtype)
+        latent = torch.empty(latent_shape, dtype=dtype)
+        cache = model._clear_cache()
+        for index in range(step):
+            model.decoder(latent, feat_cache=cache, feat_idx=[0], first_chunk=index == 0)
+    return cache
+
+
+class WanVAEDecoderStepModel(WanVAEDecoderModel):
+    """One latent frame and its causal history, with the original weight names."""
+
+    def __init__(self, config: WanVAEDecoderConfig, step: int):
+        super().__init__(config)
+        self.step = step
+        # Only slot types are needed in forward; spatial dimensions come from
+        # the input tensors. Derive the layout instead of duplicating layer indices.
+        template = wan_vae_decode_cache(config, (1, config.z_dim, 1, 2, 2), step, torch.float32)
+        self.cache_layout = tuple("tensor" if isinstance(t, torch.Tensor) else t for t in template)
+
+    def forward(self, z: torch.Tensor, *history: torch.Tensor):
+        history_iter = iter(history)
+        cache = []
+        for slot in self.cache_layout:
+            if slot is None:
+                cache.append(None)
+            else:
+                tensor = next(history_iter)
+                cache.append(tensor if slot == "tensor" else slot)
+        chunk = self.decoder(
+            self.post_quant_conv(z),
+            feat_cache=cache,
+            feat_idx=[0],
+            first_chunk=self.step == 0,
+        )
+        return (
+            torch.clamp(chunk, min=-1.0, max=1.0),
+            # NxD shares one output packer across step graphs. Keep the number
+            # of outputs fixed even while temporal upsamplers hold Rep sentinels.
+            *(
+                tensor if isinstance(tensor, torch.Tensor) else z.new_zeros(1)
+                for tensor in cache
+                if tensor is not None
+            ),
+        )
+
+
 __all__ = [
     "WanCausalConv3d",
     "WanDecoder3d",
     "WanRMSNorm",
     "WanVAEDecoderConfig",
     "WanVAEDecoderModel",
+    "WanVAEDecoderStepModel",
+    "wan_vae_decode_cache",
 ]

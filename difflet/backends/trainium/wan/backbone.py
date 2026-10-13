@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from functools import partial
 from typing import List, Tuple
 
 import torch
@@ -16,6 +17,7 @@ from difflet.backends.trainium.core.bucketing import (
 )
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
+from difflet.backends.trainium.ops_impl.attention import attention
 from difflet.models.wan.modeling_wan import WanTransformer3DModel
 
 
@@ -150,6 +152,15 @@ class ModelWrapperWanBackbone(ShapeBucketedInputGenerator, ModelWrapper):
     def get_model_instance(self):
         def _create_model():
             model = self.model_cls(self.config)
+            # Match each Wan attention launch to this artifact's LNC. Relying
+            # on an unset runtime variable otherwise launches only one program
+            # inside an LNC2 graph. Keep this binding local to the new model.
+            attention_op = partial(
+                attention, logical_nc_config=self.config.neuron_config.logical_nc_config
+            )
+            for block in model.blocks:
+                block.attn1.attention_op = attention_op
+                block.attn2.attention_op = attention_op
             model = model.to(dtype=self.config.neuron_config.torch_dtype)
             model.eval()
             return model

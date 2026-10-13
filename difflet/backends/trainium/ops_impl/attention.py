@@ -30,8 +30,14 @@ def attention(
     tp_q: bool = False,
     tp_k: bool = False,
     tp_out: bool = False,
+    logical_nc_config: int | None = None,
     **kwargs,
 ):
+    # A model-specific launch setting takes precedence over ambient runtime
+    # environment. Existing callers retain their previous environment behavior.
+    vc_size = (int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
+               if logical_nc_config is None else logical_nc_config)
+    kernel = attention_cte[2] if vc_size == 2 else attention_cte
     # Contiguous-masked (lossless) flash path: a caller that resolved its mask to
     # attention_cte's per-query bound_min/bound_max range (via
     # ops_impl.mask_bounds.mask_to_contiguous_bounds, computed OUTSIDE the traced
@@ -44,8 +50,6 @@ def attention(
         assert bound_min is not None and bound_max is not None, (
             "bound_min and bound_max must both be provided"
         )
-        vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
-        kernel = attention_cte[2] if vc_size == 2 else attention_cte
         s = 1.0 if scale is None else float(scale)
         q_scaled = (q.float() * s).to(q.dtype) if s != 1.0 else q
         return kernel(
@@ -75,8 +79,6 @@ def attention(
             tp_out=tp_out,
             **kwargs,
         )
-    vc_size = int(os.getenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1"))
-    kernel = attention_cte[2] if vc_size == 2 else attention_cte
     return kernel(
         q,
         k,

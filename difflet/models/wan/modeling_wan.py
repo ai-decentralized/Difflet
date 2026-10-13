@@ -362,6 +362,7 @@ def _attn_kernel(
     v: torch.Tensor,
     *,
     head_dim: int,
+    attention_op=None,
 ) -> torch.Tensor:
     """Run attention on (B, heads, S, head_dim) tensors via ``difflet.ops.attention``.
 
@@ -378,7 +379,7 @@ def _attn_kernel(
     q_flat = q.reshape(batch * heads, seq_q, dim)
     k_flat = k.reshape(batch * heads, seq_k, dim)
     v_flat = v.reshape(batch * heads, seq_k, dim)
-    out = attention(
+    out = (attention if attention_op is None else attention_op)(
         q_flat,
         k_flat,
         v_flat,
@@ -427,6 +428,7 @@ class WanAttention(nn.Module):
             self.cp_group = get_cp_group()
         inner_dim = heads * head_dim
         self.inner_dim = inner_dim
+        self.attention_op = None
 
         # TP-aware head sharding: keep Q/K/V sharded across ranks (gather_output=False)
         # so each rank computes attention for its own 1/tp of the heads — the FFN is
@@ -556,7 +558,7 @@ class WanAttention(nn.Module):
                     stacked_kv, gather_dim=3, process_group=self.cp_group
                 )  # [2, B, heads, S, head_dim]
                 k, v = torch.unbind(stacked_kv, dim=0)
-            out = _attn_kernel(q, k, v, head_dim=self.head_dim)
+            out = _attn_kernel(q, k, v, head_dim=self.head_dim, attention_op=self.attention_op)
 
         # (B, local_heads, S, dim) → (B, S, local_heads * dim); RowParallelLinear then
         # all-reduces each rank's partial output projection back to the full model dim.
