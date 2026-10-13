@@ -7,7 +7,7 @@
 
 # Difflet
 
-**Run diffusion transformers on AWS Trainium: FLUX, Qwen-Image, Wan, HunyuanVideo, and LTX-2, from one CLI, one Python API, and one OpenAI-compatible server.**
+**Run diffusion transformers on AWS Trainium: FLUX, Qwen-Image, Wan, HunyuanVideo, LTX-2 etc., from one CLI, one Python API, and one OpenAI-compatible server.**
 
 MiniMax-H3 also supports text-to-video with audio through the staged CLI.
 
