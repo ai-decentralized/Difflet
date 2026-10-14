@@ -202,3 +202,23 @@ def test_falls_back_to_sdpa_outside_the_kernel_limits(fake_kernel, case):
         _close(out, _reference(q, k, v, scale=0.2, tp_q=True, tp_k=True))
     elif case in ("mask", "autograd"):
         _close_bf16(out.detach(), _reference(q.detach(), k, v, scale=0.2, tp_q=True, tp_k=True))
+
+
+def test_sdpa_switch_skips_the_kernel(fake_kernel, monkeypatch):
+    # DIFFLET_NEURON_ATTENTION=sdpa (read at import) forces F.scaled_dot_product_attention.
+    monkeypatch.setattr(neuron_attention, "_ATTENTION_PATH", "sdpa")
+    q, k, v = _bf16(*_inputs())
+    with torch.no_grad():
+        out = neuron_attention.attention(q, k, v, scale=0.2, tp_q=True, tp_k=True)
+    assert fake_kernel == []
+    _close_bf16(out, _reference(q, k, v, scale=0.2, tp_q=True, tp_k=True))
+
+
+def test_attention_path_env_is_validated():
+    import subprocess
+    import sys
+
+    code = "import difflet.backends.neuron.ops_impl.attention"
+    env = {**__import__("os").environ, "DIFFLET_NEURON_ATTENTION": "flash"}
+    proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    assert proc.returncode != 0 and "must be 'auto' or 'sdpa'" in proc.stderr

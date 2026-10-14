@@ -25,9 +25,18 @@ Context-parallel entry points are not implemented in phase 1 of this backend.
 from __future__ import annotations
 
 import math
+import os
 
 import torch
 import torch.nn.functional as F
+
+#: ``DIFFLET_NEURON_ATTENTION=sdpa`` sends every call through ``F.scaled_dot_product_attention``
+#: (never the direct kernel call): the A/B switch behind the SDPA-gate measurement. Read once at
+#: import, so compiled regions see a constant. Default ``auto``: the direct kernel when eligible.
+ATTENTION_PATH_ENV = "DIFFLET_NEURON_ATTENTION"
+_ATTENTION_PATH = os.environ.get(ATTENTION_PATH_ENV, "auto").strip().lower()
+if _ATTENTION_PATH not in ("auto", "sdpa"):
+    raise ValueError(f"{ATTENTION_PATH_ENV} must be 'auto' or 'sdpa', got {_ATTENTION_PATH!r}")
 
 # Kernel limits stated by torch-neuronx's SDPA gate, other than its 512-multiple lengths.
 _KERNEL_DTYPES = (torch.bfloat16, torch.float16)
@@ -85,6 +94,8 @@ def attention(
 
 
 def _can_use_flash_kernel(q, k, v, attention_mask) -> bool:
+    if _ATTENTION_PATH == "sdpa":
+        return False
     if attention_mask is not None or not _on_neuron(q) or q.dtype not in _KERNEL_DTYPES:
         return False
     if torch.is_grad_enabled() and (q.requires_grad or k.requires_grad or v.requires_grad):
