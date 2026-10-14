@@ -1,0 +1,88 @@
+{
+  "model": "wan_2_1",
+  "reference": "tp4",
+  "configs": [
+    "tp4",
+    "tp4tc2",
+    "tp4s30",
+    "tp4tcod"
+  ],
+  "updated_utc": "2026-10-14T07:14:46Z",
+  "complete_prompts": [
+    0
+  ],
+  "prompts_total": 16,
+  "metric": "PSNR (dB, 8-bit), frame-averaged, vs the reference output of the same prompt and seed (benchmark.output_parity.compare); worst = lowest prompt mean; identical outputs (infinite PSNR) are excluded from the mean and listed",
+  "summary": {
+    "tp4tc2": {
+      "prompts": 1,
+      "mean_psnr_db": 20.21,
+      "worst_psnr_db": 20.21,
+      "worst_prompt": 0,
+      "identical_to_reference": []
+    },
+    "tp4s30": {
+      "prompts": 1,
+      "mean_psnr_db": 16.47,
+      "worst_psnr_db": 16.47,
+      "worst_prompt": 0,
+      "identical_to_reference": []
+    },
+    "tp4tcod": {
+      "prompts": 1,
+      "mean_psnr_db": 19.9,
+      "worst_psnr_db": 19.9,
+      "worst_prompt": 0,
+      "identical_to_reference": []
+    }
+  },
+  "caching_beats_baseline": {
+    "baseline": "tp4s30",
+    "wins": 2,
+    "pairs": 2
+  },
+  "per_prompt": {
+    "tp4tc2": {
+      "0": {
+        "psnr_db": 20.21,
+        "psnr_min_db": 19.02,
+        "mean_abs_diff": 11.168,
+        "identical": false
+      }
+    },
+    "tp4s30": {
+      "0": {
+        "psnr_db": 16.47,
+        "psnr_min_db": 15.61,
+        "mean_abs_diff": 24.61,
+        "identical": false
+      }
+    },
+    "tp4tcod": {
+      "0": {
+        "psnr_db": 19.9,
+        "psnr_min_db": 18.49,
+        "mean_abs_diff": 11.694,
+        "identical": false
+      }
+    }
+  },
+  "prompts": [
+    "Close up of grapes on a rotating table.",
+    "Turtle swimming in ocean.",
+    "A storm trooper vacuuming the beach.",
+    "A panda standing on a surfboard in the ocean in sunset.",
+    "An astronaut feeding ducks on a sunny afternoon, reflection from the water.",
+    "Two pandas discussing an academic paper.",
+    "Sunset time lapse at the beach with moving clouds and colors in the sky.",
+    "A fat rabbit wearing a purple robe walking through a fantasy landscape.",
+    "A koala bear playing piano in the forest.",
+    "An astronaut flying in space.",
+    "Fireworks.",
+    "An animated painting of fluffy white clouds moving in sky.",
+    "Flying through fantasy landscapes.",
+    "A bigfoot walking in the snowstorm.",
+    "A squirrel eating a burger.",
+    "A cat wearing sunglasses and working as a lifeguard at a pool."
+  ]
+}
