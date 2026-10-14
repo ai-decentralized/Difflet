@@ -1,0 +1,19 @@
+# VBench (Huang et al., CVPR 2024) prompts/prompts_per_dimension/overall_consistency.txt, lines 1-16,
+# github.com/Vchitect/VBench at commit fd18b3d055cb0fc6f066ca90fe2c3c8cbb698490 (Apache-2.0).
+# The step-caching quality runs read one prompt per non-comment line, in this order.
+Close up of grapes on a rotating table.
+Turtle swimming in ocean.
+A storm trooper vacuuming the beach.
+A panda standing on a surfboard in the ocean in sunset.
+An astronaut feeding ducks on a sunny afternoon, reflection from the water.
+Two pandas discussing an academic paper.
+Sunset time lapse at the beach with moving clouds and colors in the sky.
+A fat rabbit wearing a purple robe walking through a fantasy landscape.
+A koala bear playing piano in the forest.
+An astronaut flying in space.
+Fireworks.
+An animated painting of fluffy white clouds moving in sky.
+Flying through fantasy landscapes.
+A bigfoot walking in the snowstorm.
+A squirrel eating a burger.
+A cat wearing sunglasses and working as a lifeguard at a pool.
