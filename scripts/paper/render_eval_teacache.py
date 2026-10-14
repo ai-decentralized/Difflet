@@ -148,7 +148,7 @@ def main() -> None:
                           linewidth=0.8, zorder=2)
                 marker(ax_q, mean, y + dy, mode)
             if name.startswith("Wan") and wan_rows is not None:
-                ax_q.text(39.6, y + 0.36, f"{wan_prompts} of 16 prompts", ha="right",
+                ax_q.text(39.6, y + 0.36, f"{wan_prompts} prompts", ha="right",
                           va="center", fontsize=4.9, color=MUTED, style="italic")
         ax_s.text(1.165, y - 0.13, name, ha="right", va="center", fontsize=6.1, color=INK,
                   clip_on=False)
@@ -159,7 +159,9 @@ def main() -> None:
     ax_s.set_xticks([1.2, 1.4, 1.6, 1.8])
     ax_s.set_xticklabels(["1.2×", "1.4×", "1.6×", "1.8×"])
     style(ax_s, "speedup over caching off")
-    ax_q.set_xlim(10, 40)
+    worst = min(v[1] for _, _, _, _, rows in MODELS for v in (rows or wan_rows or []) if v)
+    low = 10 if worst >= 10.5 else int(worst) - 1.5  # keep every whisker inside the axis
+    ax_q.set_xlim(low, 40)
     ax_q.set_xticks([10, 20, 30, 40])
     style(ax_q, "PSNR vs. caching off (dB)")
 
