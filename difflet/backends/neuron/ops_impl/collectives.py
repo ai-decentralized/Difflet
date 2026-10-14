@@ -15,10 +15,12 @@ forces object collectives to graph-break.
 Each process is one rank of an MPMD launch, so a rank is a Python constant: the
 NxD ``*_spmd`` helpers take an int rank, and ``SPMDRank`` holds no rank buffer.
 
-Phase 1 supports tensor parallelism only, and the TP group is the whole world
-(see ``parallel_mesh``). The CFG and CP groups are size-1 stand-ins at degree 1
-and raise when called at a larger degree, so model code that only imports them
-keeps importing.
+Tensor and CFG parallelism are supported (see ``parallel_mesh`` for the groups). The CFG
+path is the shared model code's: ``scatter_to_process_group_spmd`` over the CFG group is a
+local slice by this rank's CFG coordinate (a Python int), and
+``gather_from_tensor_model_parallel_region_with_dim`` over it is one all-gather. The CP group
+is a size-1 stand-in at degree 1 and raises at a larger degree, so model code that only
+imports it keeps importing.
 """
 
 from __future__ import annotations
@@ -30,6 +32,8 @@ from torch import nn
 
 from difflet.backends.neuron.ops_impl.parallel_mesh import (
     destroy_parallel_mesh,
+    get_axis_group,
+    get_axis_size,
     get_mesh_spec,
     get_tp_group,
     get_tp_rank,
@@ -39,7 +43,7 @@ from difflet.backends.neuron.ops_impl.parallel_mesh import (
 )
 from difflet.pipeline.parallel_mesh import MeshSpec
 
-_TP_ONLY = "the neuron backend supports tensor parallelism only"
+_TP_ONLY = "the neuron backend supports tensor and CFG parallelism only"
 
 
 class _TrivialGroup:
@@ -71,13 +75,18 @@ def _shard(tensor: torch.Tensor, axis: int, rank: int, parts: int) -> torch.Tens
     return tensor.narrow(axis, rank * width, width).contiguous()
 
 
-def _check_explicit_group(process_group) -> None:
-    size = int(process_group.size())
-    if size != 1:
-        raise NotImplementedError(
-            f"{_TP_ONLY}: collectives over an explicit process group of size {size} are "
-            "not implemented; pass process_group=None for the tensor-parallel group"
-        )
+def _gather_dim(tensor, dim: int, group) -> torch.Tensor:
+    """All-gather ``tensor`` along ``dim`` over ``group`` as one plain collective."""
+    axis = dim % tensor.dim()
+    if axis == 0:
+        return _wait(fc.all_gather_single(tensor.contiguous(), 0, group))
+    # all_gather_single on another dim gathers on dim 0 and then re-concatenates
+    # with chunk + cat; move the axis to dim 0 instead, so the gather is one plain
+    # collective on the device. The result is made contiguous, as cat's is, so
+    # callers can .view() it.
+    moved = tensor.movedim(axis, 0).contiguous()
+    gathered = _wait(fc.all_gather_single(moved, 0, group))
+    return gathered.movedim(0, axis).contiguous()
 
 
 def _spec_or_trivial() -> MeshSpec:
@@ -94,19 +103,9 @@ def _dist_ready() -> bool:
 
 
 def gather_tp_dim(tensor, *, dim: int):
-    tp_size = get_tp_size()
-    if tp_size == 1:
+    if get_tp_size() == 1:
         return tensor
-    axis = dim % tensor.dim()
-    if axis == 0:
-        return _wait(fc.all_gather_single(tensor.contiguous(), 0, get_tp_group()))
-    # all_gather_single on another dim gathers on dim 0 and then re-concatenates
-    # with chunk + cat; move the axis to dim 0 instead, so the gather is one plain
-    # collective on the device. The result is made contiguous, as cat's is, so
-    # callers can .view() it.
-    moved = tensor.movedim(axis, 0).contiguous()
-    gathered = _wait(fc.all_gather_single(moved, 0, get_tp_group()))
-    return gathered.movedim(0, axis).contiguous()
+    return _gather_dim(tensor, dim, get_tp_group())
 
 
 def reduce_tp(tensor):
@@ -152,10 +151,12 @@ def reduce_scatter_to_sequence_parallel_region(tensor, *, dim: int):
 
 
 def gather_from_tensor_model_parallel_region_with_dim(tensor, gather_dim: int, process_group=None):
-    if process_group is not None:
-        _check_explicit_group(process_group)
+    """All-gather along ``gather_dim`` over ``process_group`` (default: the TP group)."""
+    if process_group is None:
+        return gather_tp_dim(tensor, dim=gather_dim)
+    if int(process_group.size()) == 1:
         return tensor
-    return gather_tp_dim(tensor, dim=gather_dim)
+    return _gather_dim(tensor, gather_dim, process_group)
 
 
 def reduce_from_tensor_model_parallel_region(tensor):
@@ -167,12 +168,15 @@ def scatter_to_tensor_model_parallel_region(tensor, dim: int = -1):
 
 
 def scatter_to_process_group_spmd(tensor, partition_dim: int, rank, process_group=None):
-    """This rank's slice along ``partition_dim``: a local narrow, no collective."""
-    if process_group is not None:
-        _check_explicit_group(process_group)
-        return tensor
-    tp_size = get_tp_size()
-    if tp_size == 1:
+    """Slice ``rank`` of ``partition_dim`` split over ``process_group``: a local narrow, no
+    collective.
+
+    With ``process_group=None`` (the TP group) ``rank`` may be the global rank, as the model
+    code passes it (``SPMDRank.get_rank()``); it is mapped to its TP coordinate, ``rank % tp``
+    in the mesh layout (a TP-local rank maps to itself). With an explicit group ``rank`` is the
+    caller's coordinate in that group (the CFG scatter passes ``get_cfg_rank_spmd``)."""
+    size = get_tp_size() if process_group is None else int(process_group.size())
+    if size == 1:
         return tensor
     if isinstance(rank, torch.Tensor):
         raise TypeError(
@@ -180,10 +184,12 @@ def scatter_to_process_group_spmd(tensor, partition_dim: int, rank, process_grou
             "Python int (SPMDRank.get_rank() returns one); got a tensor"
         )
     rank = int(rank)
-    if not 0 <= rank < tp_size:
-        raise ValueError(f"rank {rank} is outside the tensor-parallel group of size {tp_size}")
-    axis = _divisible_dim(tensor, partition_dim, tp_size, "scatter")
-    return _shard(tensor, axis, rank, tp_size)
+    if process_group is None and is_mesh_initialized() and 0 <= rank < get_mesh_spec().world_size:
+        rank = get_mesh_spec().axis_rank(rank, "tp")
+    if not 0 <= rank < size:
+        raise ValueError(f"rank {rank} is outside the process group of size {size}")
+    axis = _divisible_dim(tensor, partition_dim, size, "scatter")
+    return _shard(tensor, axis, rank, size)
 
 
 class SPMDRank(nn.Module):
@@ -209,6 +215,9 @@ def _trivial_axis_group(axis: str) -> _TrivialGroup:
 
 
 def get_cfg_group():
+    """This rank's CFG group (two ranks, one per guidance branch) or a size-1 stand-in."""
+    if get_axis_size("cfg") > 1:
+        return get_axis_group("cfg")
     return _trivial_axis_group("cfg")
 
 

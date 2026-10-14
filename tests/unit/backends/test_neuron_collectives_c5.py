@@ -125,14 +125,12 @@ def test_mesh_spec_from_config(config, expected):
     "config, unsupported",
     [
         (DiffletParallelConfig(tp_degree=2, cp_degree=2), "cp=2"),
-        (DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True), "cfg=2"),
         (DiffletParallelConfig(dp_degree=2), "dp=2"),
         (MeshSpec(tp=2, cp=2), "cp=2"),
-        (SimpleNamespace(tp_degree=1, cfg_parallel_enabled=True), "cfg=2"),
     ],
 )
-def test_non_tp_modes_are_rejected(config, unsupported):
-    match = f"tensor parallelism only; unsupported: {unsupported}"
+def test_cp_and_dp_are_rejected(config, unsupported):
+    match = f"tensor and CFG parallelism; unsupported: {unsupported}"
     with pytest.raises(NotImplementedError, match=match):
         C.init_parallel_mesh(config)
     assert not pm.is_mesh_initialized()
@@ -191,7 +189,7 @@ def test_scatter_to_process_group_takes_the_given_ranks_slice():
     assert shard.flatten().tolist() == [4, 5]
     with pytest.raises(TypeError, match="Python int"):
         C.scatter_to_process_group_spmd(full, partition_dim=0, rank=torch.tensor(2))
-    with pytest.raises(ValueError, match="outside the tensor-parallel group"):
+    with pytest.raises(ValueError, match="outside the process group of size 4"):
         C.scatter_to_process_group_spmd(full, partition_dim=0, rank=4)
 
 
@@ -201,11 +199,32 @@ def test_explicit_process_groups():
     trivial = C.get_cp_group()
     assert C.gather_from_tensor_model_parallel_region_with_dim(x, 0, process_group=trivial) is x
     assert C.scatter_to_process_group_spmd(x, 0, 3, process_group=trivial) is x
+    # An explicit group of size 2 (the CFG group): the scatter is a local slice by the caller's
+    # coordinate in that group; the gather is a real collective (the 4-rank tests cover it).
     two = SimpleNamespace(size=lambda: 2)
-    with pytest.raises(NotImplementedError, match="tensor parallelism only"):
-        C.gather_from_tensor_model_parallel_region_with_dim(x, 0, process_group=two)
-    with pytest.raises(NotImplementedError, match="tensor parallelism only"):
-        C.scatter_to_process_group_spmd(x, 0, 0, process_group=two)
+    rows = torch.arange(8.0).reshape(4, 2)
+    torch.testing.assert_close(C.scatter_to_process_group_spmd(rows, 0, 1, process_group=two),
+                               rows[2:])
+    with pytest.raises(ValueError, match="outside the process group of size 2"):
+        C.scatter_to_process_group_spmd(rows, 0, 2, process_group=two)
+
+
+def test_tp_scatter_maps_a_global_rank_to_its_tp_coordinate():
+    # The model scatters per-head weights with the global rank (SPMDRank) over the TP group;
+    # at TP2 x CFG2, global ranks 2 and 3 are TP coordinates 0 and 1.
+    C.init_parallel_mesh(MeshSpec(cfg=2, tp=2))
+    full = torch.arange(4.0).reshape(4, 1)
+    assert C.scatter_to_process_group_spmd(full, 0, 3).flatten().tolist() == [2.0, 3.0]
+    assert C.scatter_to_process_group_spmd(full, 0, 2).flatten().tolist() == [0.0, 1.0]
+    with pytest.raises(ValueError, match="outside the process group of size 2"):
+        C.scatter_to_process_group_spmd(full, 0, 4)
+
+
+def test_cfg_mesh_is_spec_only_without_a_process_group():
+    C.init_parallel_mesh(DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True))
+    assert pm.get_mesh_spec() == MeshSpec(cfg=2, tp=1) and pm.get_axis_size("cfg") == 2
+    with pytest.raises(RuntimeError, match="no cfg process group"):
+        C.get_cfg_group()
 
 
 @pytest.mark.parametrize("initialized", [False, True])
@@ -238,3 +257,18 @@ def test_gloo_tp4_collectives_are_exact(mode):
     }
     assert all(not names for names in failed.values()), failed
     assert len(results[0]) >= 20
+
+
+def test_cfg_mesh_on_four_ranks():
+    """TP2 x CFG2 in the Trainium/TPU layout: TP groups {0,1} {2,3}, CFG groups {0,2} {1,3}."""
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import cfg_mesh_worker
+
+    results = run_ranks(cfg_mesh_worker, world_size=4)
+    for rank, r in enumerate(results):
+        assert r["tp_ranks"] == [[0, 1], [2, 3]][rank // 2]
+        assert r["cfg_ranks"] == [[0, 2], [1, 3]][rank % 2]
+        assert (r["tp_rank"], r["cfg_rank"]) == (rank % 2, rank // 2)
+        # TP all-reduce: {0,1} sums to 1+2 = 3, {2,3} to 3+4 = 7; the CFG gather stacks both.
+        assert r["gathered_col0"] == [3.0, 3.0, 7.0, 7.0]
+        assert r["branch"] == [[[0.0, 1.0]], [[2.0, 3.0]]][rank // 2]  # this rank's CFG branch

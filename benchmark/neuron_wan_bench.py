@@ -109,6 +109,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--num-frames", type=int, default=9)
     p.add_argument("--text-seq-len", type=int, default=512)
     p.add_argument("--exec-mode", choices=("compile", "eager"), default="compile")
+    p.add_argument("--cfg-parallel", action="store_true",
+                   help="TP (world/2) x CFG 2: the guidance branches on separate rank groups")
     p.add_argument("--iters", type=int, default=3,
                    help="generates in this process: the 1st is the launch's number, the "
                         "rest are the resident rows")
@@ -370,7 +372,11 @@ def run(args: argparse.Namespace) -> int:
     prepare_epoch = time.time()
     snaps: dict[str, Any] = {"pre_prepare": snapshot(t0, device=False)}
     world = int(os.environ.get("WORLD_SIZE", "1"))
-    parallel = DiffletParallelConfig(tp_degree=world)
+    cfg_parallel = bool(getattr(args, "cfg_parallel", False))
+    if cfg_parallel and world % 2:
+        raise SystemExit(f"--cfg-parallel needs an even world size, got {world}")
+    parallel = DiffletParallelConfig(tp_degree=world // 2 if cfg_parallel else world,
+                                     cfg_parallel_enabled=cfg_parallel)
     get_backend("neuron").prepare_runtime(parallel)
     prepare_s = time.perf_counter() - t0
     rank = dist.get_rank() if dist.is_initialized() else 0

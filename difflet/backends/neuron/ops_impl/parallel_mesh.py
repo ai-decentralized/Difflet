@@ -1,11 +1,13 @@
-"""Tensor-parallel mesh state for the neuron (TorchNeuron) backend.
+"""Parallel mesh state for the neuron (TorchNeuron) backend: tensor and CFG parallelism.
 
-Phase 1 supports tensor parallelism only, and ``NeuronBackend.prepare_runtime``
-requires the parallel config's world size to equal ``WORLD_SIZE``, so the TP
-group is always the whole world: it is ``dist.group.WORLD`` and no subgroup is
-created. torch_neuronx turns a whole-world group into replica groups without any
-registration (``torch_neuronx/distributed/mesh_registry.py``,
-``get_all_replica_groups``), so a compiled collective is identical on every rank.
+The rank layout is the Trainium and TPU one (``MeshSpec``): tp innermost, then cp, then cfg,
+then dp, ``rank = tp + T * (cp + C * (cfg + G * dp))``. Each axis of size > 1 gets one process
+subgroup per combination of the other coordinates (``MeshSpec.axis_groups``), created with
+``dist.new_group`` by every rank in the same order, as torch.distributed requires; a rank keeps
+the group it belongs to. When TP spans the whole world the TP group is ``dist.group.WORLD``
+and no subgroup is made. Subgroups serve eager and ``torch.compile`` collectives alike on the
+neuron process group (checked on device: all-reduce and all-gather over TP2 and CFG2
+subgroups, exact in both modes). Context and data parallelism are not implemented yet.
 
 Without an initialized process group the mesh is "spec-only": sizes are known,
 so layers can be built with sharded shapes (on meta, for example), but anything
@@ -20,6 +22,9 @@ from difflet.pipeline.parallel_mesh import MeshSpec
 
 _MESH_SPEC: MeshSpec | None = None
 _TP_GROUP: dist.ProcessGroup | None = None
+#: This rank's process group per axis of size > 1 ("tp", "cfg").
+_AXIS_GROUPS: dict[str, dist.ProcessGroup] = {}
+_SUPPORTED_AXES = ("tp", "cfg")
 _NOT_INITIALIZED = "neuron parallel mesh is not initialized; call init_parallel_mesh() first"
 
 
@@ -59,21 +64,21 @@ def mesh_spec_from_config(config) -> MeshSpec:
     return MeshSpec(dp=dp, cfg=cfg, cp=cp, tp=tp)
 
 
-def _check_tp_only(spec: MeshSpec) -> None:
+def _check_supported(spec: MeshSpec) -> None:
     unsupported = [
-        f"{axis}={spec.axis_size(axis)}" for axis in ("dp", "cfg", "cp") if spec.axis_size(axis) > 1
+        f"{axis}={spec.axis_size(axis)}" for axis in ("dp", "cp") if spec.axis_size(axis) > 1
     ]
     if unsupported:
         raise NotImplementedError(
-            "the neuron backend supports tensor parallelism only; unsupported: "
+            "the neuron backend supports tensor and CFG parallelism; unsupported: "
             + ", ".join(unsupported)
         )
 
 
-def _bind_tp_group(spec: MeshSpec) -> dist.ProcessGroup | None:
-    """The TP process group for ``spec``; None at tp == 1 or without a process group."""
+def _bind_groups(spec: MeshSpec) -> dict[str, dist.ProcessGroup]:
+    """This rank's group for every axis of size > 1; empty without a process group."""
     if not _dist_ready():
-        return None
+        return {}
     world = dist.get_world_size()
     if spec.world_size != world:
         raise ValueError(
@@ -82,27 +87,42 @@ def _bind_tp_group(spec: MeshSpec) -> dist.ProcessGroup | None:
         )
     if dist.get_backend() == "neuron":
         import torch_neuronx  # noqa: F401  registers the PrivateUse1 functional collectives
-    return dist.group.WORLD if spec.tp > 1 else None
+    rank = dist.get_rank()
+    groups: dict[str, dist.ProcessGroup] = {}
+    for axis in _SUPPORTED_AXES:
+        size = spec.axis_size(axis)
+        if size == 1:
+            continue
+        if size == world:
+            groups[axis] = dist.group.WORLD
+            continue
+        for members in spec.axis_groups(axis):  # every rank creates every group, in order
+            group = dist.new_group(members)
+            if rank in members:
+                groups[axis] = group
+    return groups
 
 
 def init_parallel_mesh(config) -> None:
     """Record the mesh once per process; idempotent for an equal spec."""
-    global _MESH_SPEC, _TP_GROUP
+    global _MESH_SPEC, _TP_GROUP, _AXIS_GROUPS
     spec = mesh_spec_from_config(config)
-    _check_tp_only(spec)
+    _check_supported(spec)
     if _MESH_SPEC is not None:
         if spec != _MESH_SPEC:
             raise RuntimeError(
                 f"neuron parallel mesh already initialized with {_MESH_SPEC}; "
                 f"cannot re-initialize with {spec}"
             )
-        if _TP_GROUP is None:
-            # A spec-only mesh picks up the process group once it exists.
-            _TP_GROUP = _bind_tp_group(spec)
+        if not _AXIS_GROUPS and _dist_ready():
+            # A spec-only mesh picks up the process groups once they exist.
+            _AXIS_GROUPS = _bind_groups(spec)
+            _TP_GROUP = _AXIS_GROUPS.get("tp")
         return
-    group = _bind_tp_group(spec)
+    groups = _bind_groups(spec)
     _MESH_SPEC = spec
-    _TP_GROUP = group
+    _AXIS_GROUPS = groups
+    _TP_GROUP = groups.get("tp")
 
 
 def is_mesh_initialized() -> bool:
@@ -142,15 +162,43 @@ def get_tp_rank() -> int:
     return dist.get_rank(get_tp_group())
 
 
+def get_axis_size(axis: str) -> int:
+    return get_mesh_spec().axis_size(axis) if _MESH_SPEC is not None else 1
+
+
+def get_axis_group(axis: str) -> dist.ProcessGroup:
+    """This rank's group on ``axis`` (size > 1 only)."""
+    spec = get_mesh_spec()
+    if spec.axis_size(axis) == 1:
+        raise RuntimeError(f"the {axis} axis of {spec} has size 1; it has no group")
+    if axis not in _AXIS_GROUPS:
+        raise RuntimeError(
+            f"neuron parallel mesh {spec} has no {axis} process group (spec-only); initialize "
+            "torch.distributed before init_parallel_mesh()"
+        )
+    return _AXIS_GROUPS[axis]
+
+
+def get_axis_rank(axis: str) -> int:
+    """This rank's coordinate on ``axis`` (0 at size 1 or without a process group)."""
+    if _MESH_SPEC is None or _MESH_SPEC.axis_size(axis) == 1 or not _dist_ready():
+        return 0
+    return _MESH_SPEC.axis_rank(dist.get_rank(), axis)
+
+
 def destroy_parallel_mesh() -> None:
     """Reset module state (tests only; does not destroy torch process groups)."""
-    global _MESH_SPEC, _TP_GROUP
+    global _MESH_SPEC, _TP_GROUP, _AXIS_GROUPS
     _MESH_SPEC = None
     _TP_GROUP = None
+    _AXIS_GROUPS = {}
 
 
 __all__ = [
     "destroy_parallel_mesh",
+    "get_axis_group",
+    "get_axis_rank",
+    "get_axis_size",
     "get_mesh_spec",
     "get_tp_group",
     "get_tp_rank",

@@ -1004,7 +1004,6 @@ def test_aot_backends_leave_the_compile_cache_alone(monkeypatch, tmp_path, capsy
 
 _REJECTED = [
     (dict(cp_degree=2), "--cp-degree 2"),
-    (dict(cfg_parallel=True), "--cfg-parallel"),
     (dict(sp_enabled=True), "--sp"),
     (dict(teacache_cadence=2), "--teacache-cadence"),
     (dict(teacache_online_delta=0.6), "--teacache-online-delta"),

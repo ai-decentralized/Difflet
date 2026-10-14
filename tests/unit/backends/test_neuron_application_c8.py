@@ -358,16 +358,15 @@ def test_exec_mode_resolution(monkeypatch):
     "parallel",
     [
         DiffletParallelConfig(cp_degree=2),
-        DiffletParallelConfig(cfg_parallel_enabled=True),
         DiffletParallelConfig(sp_enabled=True),
         DiffletParallelConfig(dp_degree=2),
     ],
-    ids=["cp", "cfg", "sp", "dp"],
+    ids=["cp", "sp", "dp"],
 )
 def test_unsupported_parallel_modes_raise(parallel):
     app = ToyApplication(parallel=parallel, device="cpu", exec_mode="eager",
                          model_path="/nonexistent")
-    with pytest.raises(NotImplementedError, match="tensor parallelism only"):
+    with pytest.raises(NotImplementedError, match="tensor and CFG parallelism"):
         app.load()
     assert parallel_mesh.is_mesh_initialized() is False
 

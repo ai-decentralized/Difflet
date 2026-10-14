@@ -49,6 +49,7 @@ from tests.unit.backends._neuron_workers import (  # noqa: E402
     w1_wan_lifecycle_worker,
     w1_wan_one_graph_worker,
     w1_wan22_pipeline_worker,
+    w1_wan_cfg_parallel_worker,
     w1_wan_device_text_encoder_worker,
     w1_wan_device_vae_worker,
     w1_wan_pipeline_worker,
@@ -110,9 +111,10 @@ def test_config_validates_tp_and_shape(tiny):
         NeuronWanConfig.from_pretrained(tiny.transformer, tp_degree=3)
     with pytest.raises(ValueError, match=r"num_frames=6 must satisfy \(num_frames - 1\) % 4"):
         NeuronWanConfig.from_pretrained(tiny.transformer, num_frames=6)
-    for flag in ("context_parallel_enabled", "cfg_parallel_enabled", "sp_enabled"):
-        with pytest.raises(NotImplementedError, match="neuron backend supports tensor parallel"):
+    for flag in ("context_parallel_enabled", "sp_enabled"):
+        with pytest.raises(NotImplementedError, match="supports tensor and CFG parallelism"):
             NeuronWanConfig.from_pretrained(tiny.transformer, **{flag: True})
+    NeuronWanConfig.from_pretrained(tiny.transformer, cfg_parallel_enabled=True).validate()
     # The defaults are Wan2.1-T2V-14B at the benchmark shape 480x832x9.
     default = NeuronWanConfig(tp_degree=4)
     default.validate()
@@ -365,7 +367,7 @@ def test_application_call_dispatch(tiny):
         ({"teacache_calibration_path": "/x.json"}, "TeaCache"),
         ({"shapes": ((32, 48, 5), (32, 48, 9))}, "one static shape"),
         ({"batch_size": 2}, "batch_size"),
-        ({"parallel": DiffletParallelConfig(cp_degree=2)}, "tensor parallelism only"),
+        ({"parallel": DiffletParallelConfig(cp_degree=2)}, "tensor and CFG parallelism"),
     ):
         with pytest.raises(NotImplementedError, match=match):
             _composed(tiny, **kwargs)
@@ -551,3 +553,25 @@ def test_device_vae_runs_eager_in_fp32(tiny):
     assert app.vae_decoder.dtype is torch.float32
     assert app.vae_decoder.app.exec_mode == "eager"
     assert tuple(app.vae_decoder.config.latents_std) == (1.5, 0.8, 1.2, 2.0)
+
+
+# ---- CFG parallelism (TP2 x CFG2) ------------------------------------------------------
+
+
+def test_cfg_parallel_on_four_ranks_matches_tp1(tiny):
+    """[uncond, cond] as one batched DiT call per step, each branch on its own TP2 group:
+    identical on every rank and equal to the serial TP1 reference."""
+    reference = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2, guidance_scale=5.0)
+    results = run_ranks(w1_wan_cfg_parallel_worker, tiny.dir, world_size=4, env=OFFLINE)
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]
+        assert result["dit_calls"] == 2  # one batched call per step, not two
+        assert result["unwarmed_shapes"] == []
+    torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
+                               atol=1e-4, rtol=1e-4)
+
+
+def test_cfg_parallel_refuses_the_device_text_encoder(tiny):
+    with pytest.raises(ValueError, match="encode on the host"):
+        _composed(tiny, parallel=DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
+                  text_encoder_device="neuron")

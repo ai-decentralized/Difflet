@@ -97,10 +97,12 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
         """``(latents, timestep, text embeddings)`` at the static shape, in ``dtype``.
 
         These are exactly the per-step shapes the orchestrator sends (two batch-1 forwards per
-        CFG step), so the warm-up compiles the only block graph the run needs.
+        CFG step), so the warm-up compiles the only block graph the run needs. With CFG
+        parallelism the orchestrator sends one batch of 2 ([uncond, cond]) and the model splits it
+        over the CFG group, so each rank's blocks still see batch 1.
         """
         cfg = self.config
-        batch = int(cfg.batch_size)
+        batch = 2 if cfg.cfg_parallel_enabled else int(cfg.batch_size)
         return (
             torch.zeros(
                 batch,

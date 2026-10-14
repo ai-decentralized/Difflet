@@ -204,11 +204,10 @@ def c5_collectives_worker(rank: int, world_size: int, mode: str) -> dict[str, bo
         checks["indivisible reduce-scatter raises"] = False
     except ValueError:
         checks["indivisible reduce-scatter raises"] = True
-    try:
-        C.gather_from_tensor_model_parallel_region_with_dim(x[rank], 0, dist.group.WORLD)
-        checks["explicit multi-rank group raises"] = False
-    except NotImplementedError:
-        checks["explicit multi-rank group raises"] = True
+    # An explicit multi-rank group (here the world, which is also the TP group) is gathered over.
+    checks["explicit multi-rank group gathers"] = same(
+        C.gather_from_tensor_model_parallel_region_with_dim(x[rank], 0, dist.group.WORLD),
+        C.gather_tp_dim(x[rank], dim=0))
 
     C.destroy_parallel_mesh()
     return checks
@@ -928,4 +927,66 @@ def w1_wan_device_vae_worker(rank: int, world_size: int, model_dir: str) -> dict
         "latents": out.latents.tolist(),
         "sha256": hashlib.sha256(frames.contiguous().numpy().tobytes()).hexdigest(),
         "phase_seconds": sorted(app.phase_seconds),
+    }
+
+
+def cfg_mesh_worker(rank: int, world_size: int) -> dict:
+    """TP2 x CFG2 on a gloo world: each rank's group memberships and both collectives."""
+    import torch.distributed as dist
+
+    from difflet.backends.neuron.ops_impl import collectives as C
+    from difflet.backends.neuron.ops_impl import parallel_mesh as pm
+    from difflet.pipeline.parallel_mesh import MeshSpec
+
+    C.init_parallel_mesh(MeshSpec(cfg=2, tp=2))
+    tp_group, cfg_group = pm.get_tp_group(), C.get_cfg_group()
+    x = torch.full((2, 3), float(rank + 1))
+    reduced = C.reduce_from_tensor_model_parallel_region(x)  # sums over the TP group
+    gathered = C.gather_from_tensor_model_parallel_region_with_dim(reduced, 0, process_group=cfg_group)
+    branch = C.scatter_to_process_group_spmd(
+        torch.arange(4.0).reshape(2, 2), 0, C.get_cfg_rank_spmd(C.SPMDRank(world_size).get_rank()),
+        process_group=cfg_group)
+    return {
+        "tp_ranks": dist.get_process_group_ranks(tp_group),
+        "cfg_ranks": dist.get_process_group_ranks(cfg_group),
+        "tp_rank": pm.get_tp_rank(), "cfg_rank": pm.get_axis_rank("cfg"),
+        "gathered_col0": gathered[:, 0].tolist(), "branch": branch.tolist(),
+    }
+
+
+def w1_wan_cfg_parallel_worker(rank: int, world_size: int, model_dir: str) -> dict:
+    """The composed application at TP2 x CFG2: two steps at guidance 5.0 on the fixed inputs."""
+    import hashlib
+
+    from difflet.models.wan.neuron_application import TorchNeuronWanApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import (
+        TINY_LATENT_SHAPE,
+        TINY_SHAPE,
+        TINY_TEXT_SEQ_LEN,
+        tiny_wan_pipeline_inputs,
+    )
+
+    app = TorchNeuronWanApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=world_size // 2, cfg_parallel_enabled=True),
+        dtype=torch.float32,
+        shape=dict(TINY_SHAPE),
+        text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode="eager",
+        device="cpu",
+        encoder_threads=2,
+    )
+    app.load()
+    calls: list[float] = []
+    app.transformer_adapter.forward_hook = calls.append
+    prompt_embeds, latents = tiny_wan_pipeline_inputs()
+    out = app(prompt_embeds=prompt_embeds, latents=latents, channels=TINY_LATENT_SHAPE[1],
+              num_inference_steps=2, guidance_scale=5.0, output_type="latent")
+    final = out.latents
+    return {
+        "latents": final.tolist(),
+        "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest(),
+        "dit_calls": len(calls),
+        "unwarmed_shapes": [list(s) for s in app.unwarmed_shapes],
     }

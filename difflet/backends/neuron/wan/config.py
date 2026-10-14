@@ -106,12 +106,11 @@ class NeuronWanConfig(WanTransformerConfig):
             )
         for mode, enabled in (
             ("context parallelism", self.context_parallel_enabled),
-            ("cfg parallelism", self.cfg_parallel_enabled),
             ("sequence parallelism", self.sp_enabled),
         ):
             if enabled:
                 raise NotImplementedError(
-                    "the neuron backend supports tensor parallelism only (phase 1); "
+                    "the neuron backend supports tensor and CFG parallelism; "
                     f"{mode} is not implemented"
                 )
 
