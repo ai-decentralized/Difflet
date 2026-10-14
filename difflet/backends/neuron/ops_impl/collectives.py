@@ -15,12 +15,12 @@ forces object collectives to graph-break.
 Each process is one rank of an MPMD launch, so a rank is a Python constant: the
 NxD ``*_spmd`` helpers take an int rank, and ``SPMDRank`` holds no rank buffer.
 
-Tensor and CFG parallelism are supported (see ``parallel_mesh`` for the groups). The CFG
-path is the shared model code's: ``scatter_to_process_group_spmd`` over the CFG group is a
-local slice by this rank's CFG coordinate (a Python int), and
-``gather_from_tensor_model_parallel_region_with_dim`` over it is one all-gather. The CP group
-is a size-1 stand-in at degree 1 and raises at a larger degree, so model code that only
-imports it keeps importing.
+Tensor, CFG and context parallelism are supported (see ``parallel_mesh`` for the groups).
+The CFG and CP paths are the shared model code's: ``scatter_to_process_group_spmd`` over an
+axis group is a local slice by this rank's coordinate on that axis (a Python int), and
+``gather_from_tensor_model_parallel_region_with_dim`` over it is one all-gather. Ulysses
+attention trades a sequence shard for a head shard and back with ``seq_to_heads`` and
+``heads_to_seq``, one ``all_to_all_single`` each over the CP group.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from difflet.backends.neuron.ops_impl.parallel_mesh import (
 )
 from difflet.pipeline.parallel_mesh import MeshSpec
 
-_TP_ONLY = "the neuron backend supports tensor and CFG parallelism only"
+_TP_ONLY = "the neuron backend supports tensor, CFG and context parallelism only"
 
 
 class _TrivialGroup:
@@ -222,7 +222,36 @@ def get_cfg_group():
 
 
 def get_cp_group():
+    """This rank's CP group or a size-1 stand-in."""
+    if get_axis_size("cp") > 1:
+        return get_axis_group("cp")
     return _trivial_axis_group("cp")
+
+
+def seq_to_heads(tensor, group, parts: int):
+    """Ulysses forward swap over ``group`` (``parts`` ranks): ``[B, H, S/parts, d]`` to
+    ``[B, H/parts, S, d]``.
+
+    Head block ``j`` goes to the group's ``j``-th rank; the blocks received from ranks
+    ``0..parts-1`` (their sequence shards, in order) concatenate along the sequence. One
+    ``all_to_all_single`` on dim 0 after moving heads there.
+    """
+    b, h, s, d = tensor.shape
+    _divisible_dim(tensor, 1, parts, "split the heads of")
+    x = tensor.permute(1, 0, 2, 3).contiguous()                          # [H, B, S/p, d]
+    y = _wait(fc.all_to_all_single(x, None, None, group))                # [p(src) * H/p, B, S/p, d]
+    y = y.reshape(parts, h // parts, b, s, d)
+    return y.permute(2, 1, 0, 3, 4).reshape(b, h // parts, parts * s, d)
+
+
+def heads_to_seq(tensor, group, parts: int):
+    """Ulysses inverse swap: ``[B, H/parts, S, d]`` to ``[B, H, S/parts, d]``."""
+    b, hl, s, d = tensor.shape
+    _divisible_dim(tensor, 2, parts, "split the sequence of")
+    x = tensor.reshape(b, hl, parts, s // parts, d).permute(2, 0, 1, 3, 4)  # [p(dst), B, H/p, S/p, d]
+    x = x.contiguous().reshape(parts * b, hl, s // parts, d)
+    y = _wait(fc.all_to_all_single(x, None, None, group)).reshape(parts, b, hl, s // parts, d)
+    return y.permute(1, 0, 2, 3, 4).reshape(b, parts * hl, s // parts, d)
 
 
 def get_cfg_rank_spmd(global_rank):

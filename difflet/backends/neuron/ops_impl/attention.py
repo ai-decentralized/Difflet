@@ -164,21 +164,62 @@ def _merge_causal_mask(q, k, attention_mask):
     return attention_mask.to(device=q.device, dtype=q.dtype) + causal_bias
 
 
-def _context_parallel_unsupported(name: str):
+def _context_parallel_unsupported(name: str, instead: str):
     def unsupported(*args, **kwargs):
         raise NotImplementedError(
-            f"difflet.ops.{name} needs context parallelism, which the neuron backend "
-            "does not implement yet; run with cp_degree=1"
+            f"difflet.ops.{name} is not implemented on the neuron backend; {instead}"
         )
 
     unsupported.__name__ = name
     return unsupported
 
 
-ring_attention = _context_parallel_unsupported("ring_attention")
-joint_ring_attention = _context_parallel_unsupported("joint_ring_attention")
-ulysses_attention = _context_parallel_unsupported("ulysses_attention")
-joint_ulysses_attention = _context_parallel_unsupported("joint_ulysses_attention")
+ring_attention = _context_parallel_unsupported(
+    "ring_attention", "use cp_mode='ulysses' or 'gather_kv'")
+joint_ring_attention = _context_parallel_unsupported(
+    "joint_ring_attention", "use cp_mode='ulysses' or 'gather_kv'")
+joint_ulysses_attention = _context_parallel_unsupported(
+    "joint_ulysses_attention", "joint (text + image) sequences are not sharded yet")
+
+
+def _dense_bhsd(q, k, v, *, scale: float):
+    """Unmasked attention on ``[B, H, S, d]`` in the standard layout, through ``attention``'s
+    ``attention_cte`` convention (heads folded into the batch, ``tp_q``/``tp_k`` set), as Wan's
+    own attention path calls it."""
+    b, h, s_q, d = q.shape
+    s_k = k.shape[2]
+    out = attention(q.reshape(b * h, s_q, d), k.reshape(b * h, s_k, d), v.reshape(b * h, s_k, d),
+                    scale=scale, causal=False, tp_q=True, tp_k=True, tp_out=False)
+    return out.reshape(b, h, s_q, d)
+
+
+def ulysses_attention(q, k, v, *, scale: float, causal: bool = False):
+    """Ulysses context-parallel self-attention over a sequence sharded on the CP group.
+
+    ``q, k, v``: ``[B, H, S/cp, d]`` (``H`` this TP rank's heads) to ``[B, H, S/cp, d]``. One
+    all-to-all trades the sequence shard for a head shard, ``[B, H/cp, S, d]``, so ordinary
+    attention sees the whole sequence (the flash kernel where it applies); a second restores
+    the caller's layout. Exact: one dense softmax over the full sequence. Non-causal only: the
+    swaps rebuild every rank's tokens but a caller sharding a joint sequence would not get
+    global order back, so a causal mask could land on the wrong positions.
+    """
+    if causal:
+        raise NotImplementedError("ulysses_attention supports non-causal attention only")
+    from difflet.backends.neuron.ops_impl import collectives
+    from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_size
+
+    cp = get_axis_size("cp")
+    if cp == 1:
+        return _dense_bhsd(q, k, v, scale=scale)
+    if q.shape[1] % cp:
+        raise ValueError(
+            f"cp_mode='ulysses' needs this rank's head count ({q.shape[1]}) divisible by "
+            f"cp_degree ({cp}): num_attention_heads must be divisible by tp_degree * cp_degree"
+        )
+    group = collectives.get_cp_group()
+    q, k, v = (collectives.seq_to_heads(t, group, cp) for t in (q, k, v))
+    out = _dense_bhsd(q, k, v, scale=scale)
+    return collectives.heads_to_seq(out, group, cp)
 
 __all__ = [
     "attention",

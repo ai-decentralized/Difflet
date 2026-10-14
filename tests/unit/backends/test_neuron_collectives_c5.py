@@ -124,13 +124,12 @@ def test_mesh_spec_from_config(config, expected):
 @pytest.mark.parametrize(
     "config, unsupported",
     [
-        (DiffletParallelConfig(tp_degree=2, cp_degree=2), "cp=2"),
         (DiffletParallelConfig(dp_degree=2), "dp=2"),
-        (MeshSpec(tp=2, cp=2), "cp=2"),
+        (MeshSpec(dp=2, tp=2), "dp=2"),
     ],
 )
-def test_cp_and_dp_are_rejected(config, unsupported):
-    match = f"tensor and CFG parallelism; unsupported: {unsupported}"
+def test_dp_is_rejected(config, unsupported):
+    match = f"tensor, context and CFG parallelism; unsupported: {unsupported}"
     with pytest.raises(NotImplementedError, match=match):
         C.init_parallel_mesh(config)
     assert not pm.is_mesh_initialized()
@@ -272,3 +271,13 @@ def test_cfg_mesh_on_four_ranks():
         # TP all-reduce: {0,1} sums to 1+2 = 3, {2,3} to 3+4 = 7; the CFG gather stacks both.
         assert r["gathered_col0"] == [3.0, 3.0, 7.0, 7.0]
         assert r["branch"] == [[[0.0, 1.0]], [[2.0, 3.0]]][rank // 2]  # this rank's CFG branch
+
+
+def test_ulysses_attention_on_four_ranks_matches_full_attention():
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import ulysses_worker
+
+    for r in run_ranks(ulysses_worker, world_size=4):
+        assert r["shape"] == [1, 2, 4, 16]  # this rank's heads, this rank's sequence block
+        assert r["max_err"] < 1e-5
+        assert r["round_trip_exact"]

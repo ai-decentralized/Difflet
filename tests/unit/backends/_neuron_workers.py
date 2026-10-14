@@ -990,3 +990,59 @@ def w1_wan_cfg_parallel_worker(rank: int, world_size: int, model_dir: str) -> di
         "dit_calls": len(calls),
         "unwarmed_shapes": [list(s) for s in app.unwarmed_shapes],
     }
+
+
+def ulysses_worker(rank: int, world_size: int) -> dict:
+    """TP2 x CP2: Ulysses attention on this rank's head block and sequence block, against plain
+    attention over the full sequence; plus the two layout swaps as a round trip."""
+    import torch.nn.functional as F
+
+    from difflet.backends.neuron.ops_impl import attention as A
+    from difflet.backends.neuron.ops_impl import collectives as C
+    from difflet.backends.neuron.ops_impl import parallel_mesh as pm
+    from difflet.pipeline.parallel_mesh import MeshSpec
+
+    C.init_parallel_mesh(MeshSpec(cp=2, tp=2))
+    tp, cp = pm.get_tp_rank(), pm.get_axis_rank("cp")
+    gen = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, 4, 8, 16, generator=gen) for _ in range(3))  # [B, H, S, d]
+    heads, rows = slice(2 * tp, 2 * tp + 2), slice(4 * cp, 4 * cp + 4)
+    local = [t[:, heads, rows].contiguous() for t in (q, k, v)]
+    out = A.ulysses_attention(*local, scale=0.25)
+    ref = F.scaled_dot_product_attention(q, k, v, scale=0.25)[:, heads, rows]
+    group = C.get_cp_group()
+    back = C.heads_to_seq(C.seq_to_heads(local[0], group, 2), group, 2)
+    return {"max_err": (out - ref).abs().max().item(), "shape": list(out.shape),
+            "round_trip_exact": torch.equal(back, local[0])}
+
+
+def w1_wan_cp_worker(rank: int, world_size: int, model_dir: str, cp_mode: str) -> dict:
+    """The composed application at TP2 x CP2: two steps at guidance 5.0 on the fixed inputs."""
+    import hashlib
+
+    from difflet.models.wan.neuron_application import TorchNeuronWanApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import (
+        TINY_LATENT_SHAPE,
+        TINY_SHAPE,
+        TINY_TEXT_SEQ_LEN,
+        tiny_wan_pipeline_inputs,
+    )
+
+    app = TorchNeuronWanApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=world_size // 2, cp_degree=2, cp_mode=cp_mode),
+        dtype=torch.float32,
+        shape=dict(TINY_SHAPE),
+        text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode="eager",
+        device="cpu",
+        encoder_threads=2,
+    )
+    app.load()
+    prompt_embeds, latents = tiny_wan_pipeline_inputs()
+    out = app(prompt_embeds=prompt_embeds, latents=latents, channels=TINY_LATENT_SHAPE[1],
+              num_inference_steps=2, guidance_scale=5.0, output_type="latent")
+    final = out.latents
+    return {"latents": final.tolist(),
+            "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest()}

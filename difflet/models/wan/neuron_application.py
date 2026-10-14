@@ -313,6 +313,8 @@ class TorchNeuronWanApplication(torch.nn.Module):
             text_seq_len=self.text_seq_len,
             tp_degree=int(parallel.tp_degree),
             cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel_enabled", False)),
+            context_parallel_enabled=int(getattr(parallel, "cp_degree", 1) or 1) > 1,
+            cp_mode=str(getattr(parallel, "cp_mode", "gather_kv")),
             torch_dtype=self.dtype,
         )
         self.config = NeuronWanConfig.from_pretrained(transformer_path, **config_overrides)
@@ -341,9 +343,9 @@ class TorchNeuronWanApplication(torch.nn.Module):
             )
         self.text_encoder: _HostTextEncoder | _DeviceTextEncoder | None = None
         if (options["enable_text_encoder"] and options["text_encoder_device"] == "neuron"
-                and self.config.cfg_parallel_enabled):
+                and (self.config.cfg_parallel_enabled or self.config.context_parallel_enabled)):
             raise ValueError(
-                "CFG parallelism halves the TP degree, so a core would hold a TP-"
+                "CFG and context parallelism narrow the TP degree, so a core would hold a TP-"
                 f"{parallel.tp_degree} shard of the fp32 text encoder beside a TP-"
                 f"{parallel.tp_degree} shard of the DiT, more than its HBM; encode on the host "
                 "(text_encoder_device='host', --host-text-encoder)"

@@ -123,12 +123,20 @@ def test_unknown_kwargs_raise():
         neuron_attention.attention(q, k, v, tp_q=True, tp_k=True, sliding_window=4)
 
 
-@pytest.mark.parametrize(
-    "name", ["ring_attention", "joint_ring_attention", "ulysses_attention", "joint_ulysses_attention"]
-)
-def test_context_parallel_entry_points_raise(name):
-    with pytest.raises(NotImplementedError, match="context parallelism"):
+@pytest.mark.parametrize("name", ["ring_attention", "joint_ring_attention", "joint_ulysses_attention"])
+def test_unimplemented_context_parallel_entry_points_raise(name):
+    with pytest.raises(NotImplementedError, match="not implemented on the neuron backend"):
         getattr(neuron_attention, name)(None, None, None, scale=1.0)
+
+
+def test_ulysses_attention_without_context_parallelism_is_plain_attention():
+    g = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, 2, 6, 8, generator=g) for _ in range(3))  # [B, H, S, d]
+    out = neuron_attention.ulysses_attention(q, k, v, scale=0.5)
+    torch.testing.assert_close(out, torch.nn.functional.scaled_dot_product_attention(
+        q, k, v, scale=0.5))
+    with pytest.raises(NotImplementedError, match="non-causal"):
+        neuron_attention.ulysses_attention(q, k, v, scale=0.5, causal=True)
 
 
 # ---- routing between the NKI flash kernel and SDPA ----------------------------------

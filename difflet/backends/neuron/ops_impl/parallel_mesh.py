@@ -1,4 +1,4 @@
-"""Parallel mesh state for the neuron (TorchNeuron) backend: tensor and CFG parallelism.
+"""Parallel mesh state for the neuron (TorchNeuron) backend: tensor, context and CFG parallelism.
 
 The rank layout is the Trainium and TPU one (``MeshSpec``): tp innermost, then cp, then cfg,
 then dp, ``rank = tp + T * (cp + C * (cfg + G * dp))``. Each axis of size > 1 gets one process
@@ -7,7 +7,8 @@ subgroup per combination of the other coordinates (``MeshSpec.axis_groups``), cr
 the group it belongs to. When TP spans the whole world the TP group is ``dist.group.WORLD``
 and no subgroup is made. Subgroups serve eager and ``torch.compile`` collectives alike on the
 neuron process group (checked on device: all-reduce and all-gather over TP2 and CFG2
-subgroups, exact in both modes). Context and data parallelism are not implemented yet.
+subgroups, all-to-all over CP2 subgroups, exact in both modes). Data parallelism is not
+implemented.
 
 Without an initialized process group the mesh is "spec-only": sizes are known,
 so layers can be built with sharded shapes (on meta, for example), but anything
@@ -22,9 +23,9 @@ from difflet.pipeline.parallel_mesh import MeshSpec
 
 _MESH_SPEC: MeshSpec | None = None
 _TP_GROUP: dist.ProcessGroup | None = None
-#: This rank's process group per axis of size > 1 ("tp", "cfg").
+#: This rank's process group per axis of size > 1 ("tp", "cp", "cfg").
 _AXIS_GROUPS: dict[str, dist.ProcessGroup] = {}
-_SUPPORTED_AXES = ("tp", "cfg")
+_SUPPORTED_AXES = ("tp", "cp", "cfg")
 _NOT_INITIALIZED = "neuron parallel mesh is not initialized; call init_parallel_mesh() first"
 
 
@@ -65,13 +66,10 @@ def mesh_spec_from_config(config) -> MeshSpec:
 
 
 def _check_supported(spec: MeshSpec) -> None:
-    unsupported = [
-        f"{axis}={spec.axis_size(axis)}" for axis in ("dp", "cp") if spec.axis_size(axis) > 1
-    ]
-    if unsupported:
+    if spec.dp > 1:
         raise NotImplementedError(
-            "the neuron backend supports tensor and CFG parallelism; unsupported: "
-            + ", ".join(unsupported)
+            "the neuron backend supports tensor, context and CFG parallelism; unsupported: "
+            f"dp={spec.dp}"
         )
 
 
