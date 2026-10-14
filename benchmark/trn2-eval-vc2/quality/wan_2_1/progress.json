@@ -7,33 +7,34 @@
     "tp4s30",
     "tp4tcod"
   ],
-  "updated_utc": "2026-10-14T09:48:29Z",
+  "updated_utc": "2026-10-14T10:39:36Z",
   "complete_prompts": [
     0,
     1,
     2,
-    3
+    3,
+    4
   ],
   "prompts_total": 16,
   "metric": "PSNR (dB, 8-bit), frame-averaged, vs the reference output of the same prompt and seed (benchmark.output_parity.compare); worst = lowest prompt mean; identical outputs (infinite PSNR) are excluded from the mean and listed",
   "summary": {
     "tp4tc2": {
-      "prompts": 4,
-      "mean_psnr_db": 21.4,
+      "prompts": 5,
+      "mean_psnr_db": 21.09,
       "worst_psnr_db": 16.95,
       "worst_prompt": 1,
       "identical_to_reference": []
     },
     "tp4s30": {
-      "prompts": 4,
-      "mean_psnr_db": 13.6,
+      "prompts": 5,
+      "mean_psnr_db": 13.73,
       "worst_psnr_db": 10.4,
       "worst_prompt": 1,
       "identical_to_reference": []
     },
     "tp4tcod": {
-      "prompts": 4,
-      "mean_psnr_db": 20.63,
+      "prompts": 5,
+      "mean_psnr_db": 20.38,
       "worst_psnr_db": 19.13,
       "worst_prompt": 1,
       "identical_to_reference": []
@@ -41,8 +42,8 @@
   },
   "caching_beats_baseline": {
     "baseline": "tp4s30",
-    "wins": 8,
-    "pairs": 8
+    "wins": 10,
+    "pairs": 10
   },
   "per_prompt": {
     "tp4tc2": {
@@ -68,6 +69,12 @@
         "psnr_db": 24.47,
         "psnr_min_db": 23.55,
         "mean_abs_diff": 7.641,
+        "identical": false
+      },
+      "4": {
+        "psnr_db": 19.84,
+        "psnr_min_db": 18.99,
+        "mean_abs_diff": 11.578,
         "identical": false
       }
     },
@@ -95,6 +102,12 @@
         "psnr_min_db": 14.26,
         "mean_abs_diff": 27.733,
         "identical": false
+      },
+      "4": {
+        "psnr_db": 14.26,
+        "psnr_min_db": 14.04,
+        "mean_abs_diff": 31.185,
+        "identical": false
       }
     },
     "tp4tcod": {
@@ -120,6 +133,12 @@
         "psnr_db": 24.02,
         "psnr_min_db": 23.13,
         "mean_abs_diff": 7.704,
+        "identical": false
+      },
+      "4": {
+        "psnr_db": 19.37,
+        "psnr_min_db": 18.48,
+        "mean_abs_diff": 11.8,
         "identical": false
       }
     }
