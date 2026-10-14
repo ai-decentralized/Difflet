@@ -7,32 +7,33 @@
     "tp4s30",
     "tp4tcod"
   ],
-  "updated_utc": "2026-10-14T08:57:28Z",
+  "updated_utc": "2026-10-14T09:48:29Z",
   "complete_prompts": [
     0,
     1,
-    2
+    2,
+    3
   ],
   "prompts_total": 16,
   "metric": "PSNR (dB, 8-bit), frame-averaged, vs the reference output of the same prompt and seed (benchmark.output_parity.compare); worst = lowest prompt mean; identical outputs (infinite PSNR) are excluded from the mean and listed",
   "summary": {
     "tp4tc2": {
-      "prompts": 3,
-      "mean_psnr_db": 20.38,
+      "prompts": 4,
+      "mean_psnr_db": 21.4,
       "worst_psnr_db": 16.95,
       "worst_prompt": 1,
       "identical_to_reference": []
     },
     "tp4s30": {
-      "prompts": 3,
-      "mean_psnr_db": 13.27,
+      "prompts": 4,
+      "mean_psnr_db": 13.6,
       "worst_psnr_db": 10.4,
       "worst_prompt": 1,
       "identical_to_reference": []
     },
     "tp4tcod": {
-      "prompts": 3,
-      "mean_psnr_db": 19.51,
+      "prompts": 4,
+      "mean_psnr_db": 20.63,
       "worst_psnr_db": 19.13,
       "worst_prompt": 1,
       "identical_to_reference": []
@@ -40,8 +41,8 @@
   },
   "caching_beats_baseline": {
     "baseline": "tp4s30",
-    "wins": 6,
-    "pairs": 6
+    "wins": 8,
+    "pairs": 8
   },
   "per_prompt": {
     "tp4tc2": {
@@ -61,6 +62,12 @@
         "psnr_db": 23.98,
         "psnr_min_db": 21.61,
         "mean_abs_diff": 5.855,
+        "identical": false
+      },
+      "3": {
+        "psnr_db": 24.47,
+        "psnr_min_db": 23.55,
+        "mean_abs_diff": 7.641,
         "identical": false
       }
     },
@@ -82,6 +89,12 @@
         "psnr_min_db": 12.45,
         "mean_abs_diff": 35.908,
         "identical": false
+      },
+      "3": {
+        "psnr_db": 14.59,
+        "psnr_min_db": 14.26,
+        "mean_abs_diff": 27.733,
+        "identical": false
       }
     },
     "tp4tcod": {
@@ -101,6 +114,12 @@
         "psnr_db": 19.49,
         "psnr_min_db": 17.86,
         "mean_abs_diff": 10.081,
+        "identical": false
+      },
+      "3": {
+        "psnr_db": 24.02,
+        "psnr_min_db": 23.13,
+        "mean_abs_diff": 7.704,
         "identical": false
       }
     }
