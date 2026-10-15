@@ -154,6 +154,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ref", type=Path, required=True,
                    help="CPU reference from tpu_oracle_reference.py wan --timesteps ...")
     p.add_argument("--exec-mode", choices=("eager", "compile"), required=True)
+    p.add_argument("--cp-degree", type=int, default=1,
+                   help="context-parallel degree; TP is WORLD_SIZE / cp")
+    p.add_argument("--cp-mode", choices=("ulysses", "gather_kv"), default="ulysses")
     p.add_argument("--timesteps", default="996,500",
                    help="comma-separated timesteps; each must be in the reference's runs")
     p.add_argument("--out-dir", type=Path, required=True)
@@ -478,7 +481,11 @@ def main() -> int:
     neffs_before = neff_files()
     snaps = {"pre_prepare": snapshot(t0, device=False, runtime_started=False)}
     world = int(os.environ.get("WORLD_SIZE", "1"))
-    parallel = DiffletParallelConfig(tp_degree=world)
+    cp = int(args.cp_degree)
+    if world % cp:
+        raise SystemExit(f"WORLD_SIZE {world} is not divisible by --cp-degree {cp}")
+    tp = world // cp
+    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp, cp_mode=args.cp_mode)
     get_backend("neuron").prepare_runtime(parallel)
     prepare_s = time.perf_counter() - t0
 
@@ -493,8 +500,9 @@ def main() -> int:
 
     transformer_dir = args.model_dir / args.expert
     config = NeuronWanConfig.from_pretrained(
-        transformer_dir, tp_degree=world, height=args.height, width=args.width,
+        transformer_dir, tp_degree=tp, height=args.height, width=args.width,
         num_frames=args.num_frames, text_seq_len=args.text_seq_len, torch_dtype=torch.bfloat16,
+        context_parallel_enabled=cp > 1, cp_mode=args.cp_mode,
     )
     app = NeuronWanTransformerApplication(
         model_path=transformer_dir, config=config, parallel=parallel, dtype=torch.bfloat16,
