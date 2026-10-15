@@ -19,7 +19,10 @@ written against:
   valid; mutually exclusive with ``attention_mask``.
 * boolean masks are True where attention is allowed; float masks are additive.
 
-Context-parallel entry points are not implemented in phase 1 of this backend.
+Context parallelism: ``ulysses_attention`` swaps the sequence shard for a head shard around
+plain attention; ``ring_attention`` passes K/V blocks around the CP group and merges the
+partial results by their logsumexp, from the same flash kernel run with its softmax statistics.
+The joint (text + image) variants are not implemented.
 """
 
 from __future__ import annotations
@@ -135,6 +138,55 @@ def _load_flash_kernel():
 _FLASH_KERNEL = _load_flash_kernel()
 
 
+def _load_flash_lse_op():
+    """torch-neuronx's flash kernel returning ``(out, lse)``: unmasked attention on
+    ``[B, H, L, d]`` and the natural-log logsumexp of its scaled scores, ``[B, H, L]`` fp32.
+
+    The kernel's public wrapper hands the logsumexp back by copying into a caller buffer from an
+    op registered as mutating nothing, which compiled graphs may drop; this op returns it instead,
+    registered with ``nki_op`` like the wrapper and calling the same internal function
+    (``_compute_attention_nki`` with ``training=True``, i.e. ``cache_softmax=True``). That path
+    requires the query length to be a multiple of 128 (kernel validation NCC_INKI016) where the
+    plain forward does not, so the query is zero-padded and the padded rows are dropped; without
+    a mask every query row is independent, so this is exact.
+    """
+    try:
+        return torch.ops.difflet_neuron.flash_attention_lse  # already registered (module reload)
+    except (AttributeError, RuntimeError):
+        pass
+    try:
+        from torch_neuronx.neuron_dynamo_backend.decompositions import _compute_attention_nki
+        from torch_neuronx.nki_hop import nki_op
+    except ImportError:
+        return None
+
+    @nki_op("difflet_neuron::flash_attention_lse", mutates_args={})
+    def flash_attention_lse(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
+                            scale: float) -> tuple[torch.Tensor, torch.Tensor]:
+        length = q.shape[2]
+        padded = -(-length // 128) * 128
+        if padded != length:
+            q = F.pad(q, (0, 0, 0, padded - length))
+        out, lse = _compute_attention_nki(q, k, v, False, scale, True)
+        return out[:, :, :length].contiguous(), lse[..., :length].contiguous()
+
+    return flash_attention_lse
+
+
+_FLASH_LSE_OP = _load_flash_lse_op()
+
+
+def _attention_with_lse(q, k, v, *, scale: float):
+    """Unmasked attention on ``[B, H, L, d]`` and its logsumexp ``[B, H, L]`` (fp32): the flash
+    kernel where it applies, else fp32 math (CPU, fp32 inputs)."""
+    if _FLASH_LSE_OP is not None and _can_use_flash_kernel(q, k, v, None):
+        return _FLASH_LSE_OP(q, k, v, scale)
+    scores = torch.matmul(q.float(), k.float().transpose(-1, -2)) * scale
+    lse = torch.logsumexp(scores, dim=-1)
+    out = torch.matmul(torch.softmax(scores, dim=-1), v.float()).to(q.dtype)
+    return out, lse
+
+
 def _flash_kernel():
     return _FLASH_KERNEL
 
@@ -174,10 +226,8 @@ def _context_parallel_unsupported(name: str, instead: str):
     return unsupported
 
 
-ring_attention = _context_parallel_unsupported(
-    "ring_attention", "use cp_mode='ulysses' or 'gather_kv'")
 joint_ring_attention = _context_parallel_unsupported(
-    "joint_ring_attention", "use cp_mode='ulysses' or 'gather_kv'")
+    "joint_ring_attention", "joint (text + image) sequences are not sharded yet")
 joint_ulysses_attention = _context_parallel_unsupported(
     "joint_ulysses_attention", "joint (text + image) sequences are not sharded yet")
 
@@ -191,6 +241,41 @@ def _dense_bhsd(q, k, v, *, scale: float):
     out = attention(q.reshape(b * h, s_q, d), k.reshape(b * h, s_k, d), v.reshape(b * h, s_k, d),
                     scale=scale, causal=False, tp_q=True, tp_k=True, tp_out=False)
     return out.reshape(b, h, s_q, d)
+
+
+def ring_attention(q, k, v, *, scale: float, causal: bool = False):
+    """Ring context-parallel self-attention over a sequence sharded on the CP group.
+
+    ``q, k, v``: ``[B, H, S/cp, d]`` to ``[B, H, S/cp, d]``. In ``cp`` rounds each rank attends
+    its query shard to the K/V block it holds, getting ``(o_r, l_r)`` (output, logsumexp), and
+    passes the block to the next rank. Partial results merge in fp32:
+    ``l = logaddexp(l, l_r)``, ``o = exp(l_old - l) * o + exp(l_r - l) * o_r``, which is exactly
+    the softmax over all ``S`` keys. Non-causal only. Any shard length: the flash kernel's
+    logsumexp path needs query lengths in multiples of 128, which ``_attention_with_lse`` pads to.
+    """
+    if causal:
+        raise NotImplementedError("ring_attention supports non-causal attention only")
+    from difflet.backends.neuron.ops_impl import collectives
+    from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_rank, get_axis_size
+
+    cp = get_axis_size("cp")
+    if cp == 1:
+        return _dense_bhsd(q, k, v, scale=scale)
+    group, rank = collectives.get_cp_group(), get_axis_rank("cp")
+    kv = torch.stack([k, v])  # one hand-off per round for both
+    out = lse = None
+    for step in range(cp):
+        o_r, l_r = _attention_with_lse(q, kv[0], kv[1], scale=scale)
+        if out is None:
+            out, lse = o_r.float(), l_r
+        else:
+            merged = torch.logaddexp(lse, l_r)
+            out = (out * torch.exp(lse - merged).unsqueeze(-1)
+                   + o_r.float() * torch.exp(l_r - merged).unsqueeze(-1))
+            lse = merged
+        if step < cp - 1:
+            kv = collectives.ring_shift(kv, group, cp, rank)
+    return out.to(q.dtype)
 
 
 def ulysses_attention(q, k, v, *, scale: float, causal: bool = False):

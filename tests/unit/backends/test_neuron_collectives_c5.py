@@ -281,3 +281,14 @@ def test_ulysses_attention_on_four_ranks_matches_full_attention():
         assert r["shape"] == [1, 2, 4, 16]  # this rank's heads, this rank's sequence block
         assert r["max_err"] < 1e-5
         assert r["round_trip_exact"]
+
+
+def test_ring_attention_on_four_ranks_matches_full_attention():
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import ring_worker
+
+    for rank, r in enumerate(run_ranks(ring_worker, world_size=4)):
+        assert r["shape"] == [1, 2, 4, 16]
+        assert r["max_err"] < 1e-5
+        partner = [2, 3, 0, 1][rank]  # CP groups {0,2} {1,3}: the previous rank is the partner
+        assert r["received"] == [float(partner)] * 2

@@ -156,7 +156,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--exec-mode", choices=("eager", "compile"), required=True)
     p.add_argument("--cp-degree", type=int, default=1,
                    help="context-parallel degree; TP is WORLD_SIZE / cp")
-    p.add_argument("--cp-mode", choices=("ulysses", "gather_kv"), default="ulysses")
+    p.add_argument("--cp-mode", choices=("ulysses", "gather_kv", "ring"), default="ulysses")
     p.add_argument("--timesteps", default="996,500",
                    help="comma-separated timesteps; each must be in the reference's runs")
     p.add_argument("--out-dir", type=Path, required=True)

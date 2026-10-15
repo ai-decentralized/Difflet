@@ -1003,7 +1003,6 @@ def test_aot_backends_leave_the_compile_cache_alone(monkeypatch, tmp_path, capsy
 
 
 _REJECTED = [
-    (dict(cp_degree=2, cp_mode="ring"), "--cp-mode ring"),
     (dict(sp_enabled=True), "--sp"),
     (dict(teacache_cadence=2), "--teacache-cadence"),
     (dict(teacache_online_delta=0.6), "--teacache-online-delta"),
@@ -1014,7 +1013,7 @@ _REJECTED = [
     (dict(requests_dir="/rd", worker_index=0, dp_schedule="round_robin"),
      "--requests/--dp (data-parallel worker)"),
     (dict(cp_degree=2, cp_mode="ring", sp_enabled=True, teacache_cadence=3),
-     "--cp-mode ring, --sp, --teacache-cadence"),
+     "--sp, --teacache-cadence"),
 ]
 
 
@@ -1045,7 +1044,7 @@ def test_neuron_driver_rejects_unsupported_options_before_any_launch(monkeypatch
     assert out == ""
     assert err.strip() == (
         f"Error: the neuron backend does not support {named} (it runs tensor, CFG and "
-        "context (gather_kv, ulysses) parallelism, one request per launch, no TeaCache); "
+        "context parallelism, one request per launch, no TeaCache); "
         "nothing was launched.")
     assert args.host_vae is False and "DIFFLET_COMPILE_CACHE" not in os.environ
     assert not (tmp_path / "work").exists()

@@ -244,6 +244,25 @@ def seq_to_heads(tensor, group, parts: int):
     return y.permute(2, 1, 0, 3, 4).reshape(b, h // parts, parts * s, d)
 
 
+def ring_shift(tensor, group, parts: int, rank: int):
+    """Send ``tensor`` to the next rank of ``group`` and return the previous rank's.
+
+    ``rank`` is this rank's coordinate in ``group``. One ``all_to_all_single``: slot
+    ``(rank + 1) % parts`` of the input carries ``tensor``, the other slots zeros, and slot
+    ``(rank - 1) % parts`` of the output is the received block. ``permute_tensor`` would express
+    this directly but fails on the neuron backend (eager: a shape error; compiled: NEFF setup
+    fails). At ``parts == 2`` only the partner's slot crosses ranks; at larger degrees the zero
+    slots cost bandwidth that point-to-point send/recv would not.
+    """
+    if parts == 1:
+        return tensor
+    zeros = torch.zeros_like(tensor)
+    slots = [zeros] * parts
+    slots[(rank + 1) % parts] = tensor
+    out = _wait(fc.all_to_all_single(torch.stack(slots).contiguous(), None, None, group))
+    return out[(rank - 1) % parts]
+
+
 def heads_to_seq(tensor, group, parts: int):
     """Ulysses inverse swap: ``[B, H/parts, S, d]`` to ``[B, H, S/parts, d]``."""
     b, hl, s, d = tensor.shape

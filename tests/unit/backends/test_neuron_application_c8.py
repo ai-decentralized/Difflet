@@ -357,11 +357,10 @@ def test_exec_mode_resolution(monkeypatch):
 @pytest.mark.parametrize(
     "parallel",
     [
-        DiffletParallelConfig(cp_degree=2, cp_mode="ring"),
         DiffletParallelConfig(sp_enabled=True),
         DiffletParallelConfig(dp_degree=2),
     ],
-    ids=["cp-ring", "sp", "dp"],
+    ids=["sp", "dp"],
 )
 def test_unsupported_parallel_modes_raise(parallel):
     app = ToyApplication(parallel=parallel, device="cpu", exec_mode="eager",

@@ -123,10 +123,28 @@ def test_unknown_kwargs_raise():
         neuron_attention.attention(q, k, v, tp_q=True, tp_k=True, sliding_window=4)
 
 
-@pytest.mark.parametrize("name", ["ring_attention", "joint_ring_attention", "joint_ulysses_attention"])
+@pytest.mark.parametrize("name", ["joint_ring_attention", "joint_ulysses_attention"])
 def test_unimplemented_context_parallel_entry_points_raise(name):
     with pytest.raises(NotImplementedError, match="not implemented on the neuron backend"):
         getattr(neuron_attention, name)(None, None, None, scale=1.0)
+
+
+def test_attention_with_lse_matches_logsumexp_off_device():
+    g = torch.Generator().manual_seed(1)
+    q, k, v = (torch.randn(1, 2, n, 8, generator=g) for n in (5, 7, 7))
+    out, lse = neuron_attention._attention_with_lse(q, k, v, scale=0.5)
+    scores = (q @ k.transpose(-1, -2)) * 0.5
+    torch.testing.assert_close(lse, torch.logsumexp(scores, -1))
+    torch.testing.assert_close(out, torch.softmax(scores, -1) @ v)
+
+
+def test_ring_attention_without_context_parallelism_is_plain_attention():
+    g = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, 2, 6, 8, generator=g) for _ in range(3))
+    torch.testing.assert_close(neuron_attention.ring_attention(q, k, v, scale=0.5),
+                               torch.nn.functional.scaled_dot_product_attention(q, k, v, scale=0.5))
+    with pytest.raises(NotImplementedError, match="non-causal"):
+        neuron_attention.ring_attention(q, k, v, scale=0.5, causal=True)
 
 
 def test_ulysses_attention_without_context_parallelism_is_plain_attention():

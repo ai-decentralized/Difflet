@@ -1046,3 +1046,26 @@ def w1_wan_cp_worker(rank: int, world_size: int, model_dir: str, cp_mode: str) -
     final = out.latents
     return {"latents": final.tolist(),
             "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest()}
+
+
+def ring_worker(rank: int, world_size: int) -> dict:
+    """TP2 x CP2: ring attention on this rank's head block and sequence block, against plain
+    attention over the full sequence; plus one ring shift."""
+    import torch.nn.functional as F
+
+    from difflet.backends.neuron.ops_impl import attention as A
+    from difflet.backends.neuron.ops_impl import collectives as C
+    from difflet.backends.neuron.ops_impl import parallel_mesh as pm
+    from difflet.pipeline.parallel_mesh import MeshSpec
+
+    C.init_parallel_mesh(MeshSpec(cp=2, tp=2))
+    tp, cp = pm.get_tp_rank(), pm.get_axis_rank("cp")
+    gen = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, 4, 8, 16, generator=gen) for _ in range(3))  # [B, H, S, d]
+    heads, rows = slice(2 * tp, 2 * tp + 2), slice(4 * cp, 4 * cp + 4)
+    local = [t[:, heads, rows].contiguous() for t in (q, k, v)]
+    out = A.ring_attention(*local, scale=0.25)
+    ref = F.scaled_dot_product_attention(q, k, v, scale=0.25)[:, heads, rows]
+    shifted = C.ring_shift(torch.full((2,), float(rank)), C.get_cp_group(), 2, cp)
+    return {"max_err": (out - ref).abs().max().item(), "shape": list(out.shape),
+            "received": shifted.tolist()}

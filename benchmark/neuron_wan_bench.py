@@ -113,7 +113,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="TP (world/2) x CFG 2: the guidance branches on separate rank groups")
     p.add_argument("--cp-degree", type=int, default=1,
                    help="context-parallel degree; TP is world / (cp * cfg)")
-    p.add_argument("--cp-mode", choices=("ulysses", "gather_kv"), default="ulysses")
+    p.add_argument("--cp-mode", choices=("ulysses", "gather_kv", "ring"), default="ulysses")
     p.add_argument("--iters", type=int, default=3,
                    help="generates in this process: the 1st is the launch's number, the "
                         "rest are the resident rows")

@@ -200,13 +200,11 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """The options a torchrun backend's ranks reject in phase 1, as the command line names them.
 
     The ranks keep their own checks (``_stage_transformer_neuron``'s request-batch check, the
-    neuron runtime's ``check_parallel_supported`` for ring/sp, the application's
+    neuron runtime's ``check_parallel_supported`` for sp/dp, the application's
     ``_reject_unsupported`` for TeaCache); this list lets the driver refuse the same options
     before torchrun starts tp*cp*cfg processes that import torch only to fail. Torch-free.
     """
     found = []
-    if (getattr(args, "cp_degree", None) or 1) > 1 and getattr(args, "cp_mode", None) == "ring":
-        found.append("--cp-mode ring")
     if getattr(args, "sp_enabled", False):
         found.append("--sp")
     found += [flag for flag, name in _TEACACHE_FLAGS if getattr(args, name, None) is not None]
@@ -286,8 +284,8 @@ class WanOrchestrator(ModelOrchestrator):
         if backend is None:
             return
         print(f"Error: the {backend} backend does not support {', '.join(found)} (it runs "
-              "tensor, CFG and context (gather_kv, ulysses) parallelism, one request per launch, "
-              "no TeaCache); nothing was launched.", file=sys.stderr, flush=True)
+              "tensor, CFG and context parallelism, one request per launch, no TeaCache); "
+              "nothing was launched.", file=sys.stderr, flush=True)
         raise SystemExit(2)
 
     def _reject_dual_expert_misuse(self) -> None:

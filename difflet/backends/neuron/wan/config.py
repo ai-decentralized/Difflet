@@ -109,11 +109,6 @@ class NeuronWanConfig(WanTransformerConfig):
                 "the neuron backend supports tensor, context and CFG parallelism; "
                 "sequence parallelism is not implemented"
             )
-        if self.context_parallel_enabled and self.cp_mode not in ("gather_kv", "ulysses"):
-            raise NotImplementedError(
-                f"cp_mode={self.cp_mode!r} is not implemented on the neuron backend; "
-                "use 'ulysses' or 'gather_kv'"
-            )
 
     @classmethod
     def from_pretrained(cls, transformer_path, **overrides) -> "NeuronWanConfig":

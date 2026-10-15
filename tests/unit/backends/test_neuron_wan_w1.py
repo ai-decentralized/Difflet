@@ -114,8 +114,8 @@ def test_config_validates_tp_and_shape(tiny):
         NeuronWanConfig.from_pretrained(tiny.transformer, num_frames=6)
     with pytest.raises(NotImplementedError, match="sequence parallelism is not implemented"):
         NeuronWanConfig.from_pretrained(tiny.transformer, sp_enabled=True)
-    with pytest.raises(NotImplementedError, match="cp_mode='ring' is not implemented"):
-        NeuronWanConfig.from_pretrained(tiny.transformer, context_parallel_enabled=True, cp_mode="ring")
+    NeuronWanConfig.from_pretrained(tiny.transformer, context_parallel_enabled=True,
+                                    cp_mode="ring").validate()
     NeuronWanConfig.from_pretrained(tiny.transformer, cfg_parallel_enabled=True).validate()
     NeuronWanConfig.from_pretrained(tiny.transformer, context_parallel_enabled=True,
                                     cp_mode="ulysses").validate()
@@ -371,7 +371,7 @@ def test_application_call_dispatch(tiny):
         ({"teacache_calibration_path": "/x.json"}, "TeaCache"),
         ({"shapes": ((32, 48, 5), (32, 48, 9))}, "one static shape"),
         ({"batch_size": 2}, "batch_size"),
-        ({"parallel": DiffletParallelConfig(cp_degree=2, cp_mode="ring")}, "supports tensor, context"),
+        ({"parallel": DiffletParallelConfig(sp_enabled=True)}, "supports tensor, context"),
     ):
         with pytest.raises(NotImplementedError, match=match):
             _composed(tiny, **kwargs)
@@ -584,7 +584,7 @@ def test_cfg_parallel_refuses_the_device_text_encoder(tiny):
 # ---- context parallelism (TP2 x CP2) -----------------------------------------------------
 
 
-@pytest.mark.parametrize("cp_mode", ["ulysses", "gather_kv"])
+@pytest.mark.parametrize("cp_mode", ["ulysses", "gather_kv", "ring"])
 def test_context_parallel_on_four_ranks_matches_tp1(tiny, cp_mode):
     """The sequence sharded over the CP group and each branch's heads over TP: identical on
     every rank and equal to the TP1 reference."""
