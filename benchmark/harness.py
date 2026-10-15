@@ -176,6 +176,9 @@ class BenchResult:
     step_basis: str = ""                     # how step_latency was measured
     step_latency_alt: dict[str, Any] = field(default_factory=dict)
     stage_seconds: dict[str, float] = field(default_factory=dict)
+    # TeaCache controller stats ({full_steps, skipped_steps, ...}) from the
+    # same warm generate as stage_seconds; None when no mode was enabled.
+    teacache: Optional[dict] = None
     # The "natural" pass: the same generate with no per-step instrumentation
     # sync. step_latency is for comparing devices; these are for knowing what a
     # real serving loop delivers. On an eager backend the two nearly coincide;

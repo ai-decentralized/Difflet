@@ -720,7 +720,12 @@ def _validate_profile(profile: ServingProfile) -> None:
         raise ValueError("HunyuanVideo resident serving requires dp_degree=1")
     if profile.world_size != _WORLD_SIZE:
         raise ValueError("HunyuanVideo resident serving requires world_size=4")
-    if profile.teacache_speedup is not None or profile.teacache_calibration_data is not None:
+    if (
+        profile.teacache_speedup is not None
+        or profile.teacache_calibration_data is not None
+        or profile.teacache_cadence is not None
+        or profile.teacache_online_delta is not None
+    ):
         raise ValueError("HunyuanVideo resident video serving does not support TeaCache")
 
 

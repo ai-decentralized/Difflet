@@ -159,6 +159,11 @@ def render(r: dict) -> str:
         a("|---|---|")
         for name, value in st.items():
             a(f"| {name} | {value:.2f} |")
+        tc = r.get("teacache")
+        if tc:
+            a("")
+            a(f"TeaCache: {tc.get('full_steps')} full / {tc.get('skipped_steps')} skipped "
+              "steps in this generate (per-step figures above cover the full steps only).")
         a("")
 
     # compile breakdown

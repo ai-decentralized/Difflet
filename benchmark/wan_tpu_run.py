@@ -16,6 +16,12 @@ import sys
 import time
 from pathlib import Path
 
+# Documented as `python benchmark/wan_tpu_run.py`, which puts benchmark/ (not
+# the repo root) at sys.path[0]; the spawned workers inherit that and then
+# fail on `from benchmark.harness import ...`. Put the root first so the
+# script works as documented without PYTHONPATH.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 SNAP = os.environ.get(
     "DIFFLET_WAN_SNAPSHOT",
     "/mnt/models/hf/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/"
@@ -174,6 +180,11 @@ def _worker(rank, world, args, reply_q):
         width=args["width"],
         num_frames=args["num_frames"],
         tokenizer_path=str(Path(args["model_dir"]) / "tokenizer"),
+        # Probe-free TeaCache, the same controller `difflet serve` wires on TPU
+        # (models/wan/tpu_application.py::build_wan_orchestrator). A skipped
+        # step never reaches _OnDevice, so `timer` counts full steps only.
+        teacache_cadence=args.get("teacache_cadence"),
+        teacache_online_delta_alpha=args.get("teacache_online_delta"),
     )
     orchestrator._tokenizer = tokenizer
 
@@ -259,6 +270,9 @@ def _worker(rank, world, args, reply_q):
                 "finite": bool(latents.isfinite().all()),
                 "min": float(latents.min()), "max": float(latents.max()),
                 "mean": float(latents.mean()), "std": float(latents.std()),
+                # None unless --teacache-* was passed; otherwise the controller's
+                # {full_steps, skipped_steps, ...} for this iteration.
+                "teacache": getattr(orchestrator, "_teacache_last_stats", None),
             })
 
     # --- decode (rank 0 only, on host: the VAE is 3D-conv heavy and the
@@ -318,6 +332,11 @@ def main() -> int:
     parser.add_argument("--natural-iters", type=int, default=2,
                         help="extra iterations with no per-step device sync")
     parser.add_argument("--both-experts", action="store_true")
+    parser.add_argument("--teacache-cadence", type=int, default=None, metavar="N",
+                        help="probe-free TeaCache: skip every N-th DiT step")
+    parser.add_argument("--teacache-online-delta", type=float, default=None,
+                        metavar="ALPHA",
+                        help="probe-free TeaCache: online-delta alpha")
     parser.add_argument("--no-decode", dest="decode", action="store_false")
     parser.add_argument("--out", default="/mnt/models/wan_tpu_out")
     parser.add_argument("--world", type=int, default=0)
@@ -331,6 +350,8 @@ def main() -> int:
         "seed": options.seed, "iters": options.iters,
         "natural_iters": options.natural_iters,
         "both_experts": options.both_experts, "decode": options.decode,
+        "teacache_cadence": options.teacache_cadence,
+        "teacache_online_delta": options.teacache_online_delta,
         "text_seq_len": 512,
         "out": options.out,
     }

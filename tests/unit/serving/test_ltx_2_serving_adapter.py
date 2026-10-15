@@ -252,6 +252,10 @@ def test_runtime_rejects_non_tp4_profile(parallel, tmp_path):
         ({"output_modality": "image"}, "video/mp4"),
         ({"output_mime_type": "image/png"}, "video/mp4"),
         ({"host_vae": False}, "host decode"),
+        # No TeaCache in LTX-2 serving: adaptive OR probe-free.
+        ({"teacache_speedup": 1.5}, "TeaCache"),
+        ({"teacache_cadence": 2}, "TeaCache"),
+        ({"teacache_online_delta": 0.6}, "TeaCache"),
     ],
 )
 def test_profile_rejects_shapes_and_runtime_contract_mismatches(changed, match, tmp_path):
