@@ -248,9 +248,8 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
 
     ``q, k, v``: ``[B, H, S/cp, d]`` to ``[B, H, S/cp, d]``. In ``cp`` rounds each rank attends
     its query shard to the K/V block it holds, getting ``(o_r, l_r)`` (output, logsumexp), and
-    passes the block to the next rank. Partial results merge in fp32:
-    ``l = logaddexp(l, l_r)``, ``o = exp(l_old - l) * o + exp(l_r - l) * o_r``, which is exactly
-    the softmax over all ``S`` keys. Non-causal only. Any shard length: the flash kernel's
+    passes the block to the next rank. Partial results merge in fp32 by their logsumexp
+    (``_merge_partials``), which is exactly the softmax over all ``S`` keys. Non-causal only. Any shard length: the flash kernel's
     logsumexp path needs query lengths in multiples of 128, which ``_attention_with_lse`` pads to.
     """
     if causal:
@@ -269,13 +268,25 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
         if out is None:
             out, lse = o_r.float(), l_r
         else:
-            merged = torch.logaddexp(lse, l_r)
-            out = (out * torch.exp(lse - merged).unsqueeze(-1)
-                   + o_r.float() * torch.exp(l_r - merged).unsqueeze(-1))
-            lse = merged
+            out, lse = _merge_partials(out, lse, o_r.float(), l_r)
         if step < cp - 1:
             kv = collectives.ring_shift(kv, group, cp, rank)
     return out.to(q.dtype)
+
+
+def _merge_partials(out, lse, o_r, l_r):
+    """Merge two partial attentions by their logsumexp, max-subtracted so no exponent exceeds 0.
+
+    With ``m = max(l, l_r)``, ``w = exp(l - m)`` and ``w_r = exp(l_r - m)`` (both in [0, 1]):
+    ``o = (w o + w_r o_r) / (w + w_r)`` and ``l = m + log(w + w_r)``. Not ``torch.logaddexp``:
+    compiled on the neuron backend it returns garbage from about 80 and inf from about 90 (eager
+    PyTorch is stable), and attention logsumexps reach that range.
+    """
+    m = torch.maximum(lse, l_r)
+    w, w_r = torch.exp(lse - m), torch.exp(l_r - m)
+    total = w + w_r
+    merged = (out * w.unsqueeze(-1) + o_r * w_r.unsqueeze(-1)) / total.unsqueeze(-1)
+    return merged, m + torch.log(total)
 
 
 def ulysses_attention(q, k, v, *, scale: float, causal: bool = False):

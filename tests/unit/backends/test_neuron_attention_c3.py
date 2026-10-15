@@ -138,6 +138,21 @@ def test_attention_with_lse_matches_logsumexp_off_device():
     torch.testing.assert_close(out, torch.softmax(scores, -1) @ v)
 
 
+@pytest.mark.parametrize("offset", [0.0, 150.0, 400.0])
+def test_merge_partials_is_exact_and_stable_at_large_logsumexp(offset):
+    # Two halves of one key set, logsumexps shifted to ~offset (where a naive log(e^a + e^b)
+    # overflows): the merge must equal attention over all keys, with no inf or nan.
+    g = torch.Generator().manual_seed(2)
+    q, k, v = torch.randn(1, 2, 5, 8, generator=g), torch.randn(1, 2, 12, 8, generator=g), \
+        torch.randn(1, 2, 12, 8, generator=g)
+    o1, l1 = neuron_attention._attention_with_lse(q, k[:, :, :6], v[:, :, :6], scale=0.5)
+    o2, l2 = neuron_attention._attention_with_lse(q, k[:, :, 6:], v[:, :, 6:], scale=0.5)
+    out, lse = neuron_attention._merge_partials(o1, l1 + offset, o2, l2 + offset)
+    scores = (q @ k.transpose(-1, -2)) * 0.5
+    torch.testing.assert_close(out, torch.softmax(scores, -1) @ v)
+    torch.testing.assert_close(lse, torch.logsumexp(scores, -1) + offset)
+
+
 def test_ring_attention_without_context_parallelism_is_plain_attention():
     g = torch.Generator().manual_seed(0)
     q, k, v = (torch.randn(1, 2, 6, 8, generator=g) for _ in range(3))
