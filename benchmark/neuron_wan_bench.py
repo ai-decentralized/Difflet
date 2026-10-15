@@ -381,7 +381,7 @@ def run(args: argparse.Namespace) -> int:
     if world % lanes:
         raise SystemExit(f"world size {world} is not divisible by cp * cfg = {lanes}")
     parallel = DiffletParallelConfig(tp_degree=world // lanes, cp_degree=cp,
-                                     cp_mode=getattr(args, "cp_mode", "ulysses"),
+                                     cp_mode=getattr(args, "cp_mode", "ulysses") if cp > 1 else "gather_kv",
                                      cfg_parallel_enabled=cfg_parallel)
     get_backend("neuron").prepare_runtime(parallel)
     prepare_s = time.perf_counter() - t0
