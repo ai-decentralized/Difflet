@@ -16,9 +16,9 @@ def create_qwen_image_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
-    if backend not in {"trainium", "tpu"}:
+    if backend not in {"trainium", "tpu", "neuron"}:
         raise NotImplementedError(
-            f"Qwen-Image supports the trainium and tpu backends, got {backend!r}"
+            f"Qwen-Image supports the trainium, tpu and neuron backends, got {backend!r}"
         )
     # Two different parallel-config types reach this factory: the pipeline's
     # DiffletParallelConfig and serving's ParallelTopology, which carries no
@@ -34,6 +34,22 @@ def create_qwen_image_application(
         from difflet.models.qwen_image.tpu_application import TpuQwenImageApplication
 
         return TpuQwenImageApplication(
+            model_path=model_path,
+            parallel=parallel,
+            dtype=dtype,
+            shape=shape,
+            **kwargs,
+        )
+
+    if backend == "neuron":
+        # TorchNeuron, one process per NeuronCore (torchrun): the DiT on the device, Qwen2.5-VL
+        # on rank 0's host, the VAE on the host unless enable_vae_decoder. Keyword arguments
+        # and their defaults: neuron_application._KWARG_DEFAULTS.
+        from difflet.models.qwen_image.neuron_application import (
+            TorchNeuronQwenImageApplication,
+        )
+
+        return TorchNeuronQwenImageApplication(
             model_path=model_path,
             parallel=parallel,
             dtype=dtype,

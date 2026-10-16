@@ -15,7 +15,9 @@ from typing import Any
 import numpy as np
 import torch
 
-from difflet.models.qwen_image.application import QwenImageDiTInputBundle
+# From the NxD-free contract module (application.py re-exports the same class): the neuron and
+# TPU applications build this orchestrator in environments without neuronx_distributed.
+from difflet.models.qwen_image.contract import QwenImageDiTInputBundle
 
 
 @dataclass

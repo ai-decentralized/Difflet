@@ -22,9 +22,12 @@ def _force_cpu_backend():
 
 
 def test_entry_rejects_an_unsupported_backend(tmp_path):
-    # Qwen-Image gained the tpu backend in plan Phase 4; everything else must
-    # still be refused rather than silently falling through to Trainium.
-    with pytest.raises(NotImplementedError, match="trainium and tpu"):
+    # Qwen-Image gained the tpu backend in plan Phase 4 and the neuron
+    # (TorchNeuron) backend after it; everything else must still be refused
+    # rather than silently falling through to Trainium. The neuron routing
+    # itself is covered in tests/unit/backends/test_neuron_qwen_image_q2.py,
+    # which imports without neuronx_distributed.
+    with pytest.raises(NotImplementedError, match=r"trainium, tpu and neuron backends, got 'cpu'"):
         create_qwen_image_application(
             model_path=str(tmp_path),
             parallel=DiffletParallelConfig(tp_degree=1),

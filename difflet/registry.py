@@ -387,8 +387,9 @@ def _register_builtin_qwen_image() -> None:
             # the same primitive wan's validated SP path uses).
             supports_sp=True,
         ),
-        # Qwen-Image is the first model on the TPU backend (plan Phase 4).
-        backends=("trainium", "tpu"),
+        # Qwen-Image is the first model on the TPU backend (plan Phase 4), and the second on
+        # the neuron backend (TorchNeuron, torchrun ranks; host Qwen2.5-VL, host or device VAE).
+        backends=("trainium", "tpu", "neuron"),
     )
     class _QwenImageRegistration:
         pass
