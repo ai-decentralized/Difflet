@@ -196,6 +196,61 @@ _TEACACHE_FLAGS = (
 )
 
 
+def _replica_requests(args: argparse.Namespace, *, device):
+    """The requests a torchrun replica runs, one at a time, every rank the same request.
+
+    Outside batch mode, or with one rank, this is ``stage_loop.claim_requests``. In a DP worker
+    (``--requests-dir``) under torchrun, rank 0 alone claims from the queue and broadcasts the
+    claimed index (-1 when the queue is empty, as int32) to the replica's ranks, which read the
+    request from the manifest: claiming on every rank would hand the TP group different requests.
+    """
+    from difflet.backends.neuron.core import distributed
+    from difflet.cli.dp import stage_loop
+
+    rank, world = distributed.world_info()
+    if not stage_loop.batch_mode(args) or world == 1:
+        yield from stage_loop.claim_requests(args)
+        return
+    import torch
+
+    from difflet.cli.dp.requests_io import read_manifest
+
+    manifest = {r.index: r for r in read_manifest(Path(args.requests_dir))}
+    claims = stage_loop.claim_requests(args) if rank == 0 else None
+    while True:
+        req = next(claims, None) if rank == 0 else None
+        index = (torch.tensor([req.index if req is not None else -1], dtype=torch.int32)
+                 if rank == 0 else None)
+        index = int(distributed.broadcast_tensor(index, device=device).reshape(-1)[0].item())
+        if index < 0:
+            return
+        yield req if rank == 0 else manifest[index]
+
+
+@contextlib.contextmanager
+def _replica_request_scope(args: argparse.Namespace, req):
+    """``stage_loop.request_scope`` for a torchrun replica: a failed request is marked failed
+    once (rank 0) and every rank re-raises. A rank cannot skip a request its TP partners are
+    still running: they would wait in a collective forever. One rank stays as before."""
+    from difflet.backends.neuron.core import distributed
+    from difflet.cli.dp import claims, stage_loop
+
+    rank, world = distributed.world_info()
+    if not stage_loop.batch_mode(args) or world == 1:
+        with stage_loop.request_scope(args, req, final=False):
+            yield
+        return
+    try:
+        yield
+    except Exception:
+        if rank == 0:
+            import traceback
+
+            claims.mark_failed(args.requests_dir, req.index, traceback.format_exc())
+            print(f"[dp-worker] request {req.index} failed; stopping this replica", flush=True)
+        raise
+
+
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """The options a torchrun backend's ranks reject in phase 1, as the command line names them.
 
@@ -206,10 +261,6 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """
     found = []
     found += [flag for flag, name in _TEACACHE_FLAGS if getattr(args, name, None) is not None]
-    if getattr(args, "requests", None) is not None:
-        found.append("--requests")
-    if getattr(args, "requests_dir", None) is not None:
-        found.append("--requests/--dp (data-parallel worker)")
     return found
 
 
@@ -485,12 +536,6 @@ class WanOrchestrator(ModelOrchestrator):
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-        if stage_loop.batch_mode(args):
-            raise NotImplementedError(
-                f"[wan] the {backend} backend runs one request per launch (phase 1): every "
-                "rank would claim a different request; --requests and data parallelism are "
-                "not supported"
-            )
         compile_shapes = _require_request_shape_in_set(args)
         h, w, f = args.height or 480, args.width or 832, args.num_frames or 9
         # The whole parallel request: the backend rejects what it does not run (cp, cfg, sp)
@@ -532,8 +577,8 @@ class WanOrchestrator(ModelOrchestrator):
             # Only when given: the orchestrator otherwise uses --guidance-scale throughout.
             low_noise = ({"guidance_scale_2": float(args.guidance_scale_2)}
                          if getattr(args, "guidance_scale_2", None) is not None else {})
-            for req in stage_loop.claim_requests(args):
-                with stage_loop.request_scope(args, req, final=False):
+            for req in _replica_requests(args, device=getattr(pipe.app, "device", None)):
+                with _replica_request_scope(args, req):
                     with _fallback_tracker(pipe) as fallbacks:
                         out = pipe(
                             generator=torch.Generator().manual_seed(req.seed),

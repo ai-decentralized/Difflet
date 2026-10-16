@@ -937,27 +937,6 @@ def _validate_dp(args: argparse.Namespace) -> None:
         _validate_capacity(args)
 
 
-def _reject_batch_on_torchrun_backend(args: argparse.Namespace) -> None:
-    """--requests or --dp > 1 on a torchrun backend (neuron): exit 2 before the DP router writes
-    its queue or starts a worker. Each worker would launch its own torchrun ranks, and those
-    ranks reject a request batch (one request per launch, dp=1, in phase 1). The Wan
-    orchestrator's driver hook refuses the backend's other unsupported options."""
-    if not _torchrun_backend_selected():
-        return
-    found = []
-    if args.requests is not None:
-        found.append("--requests")
-    if (args.dp or 1) > 1:
-        mode = getattr(args, "mode", None)
-        found.append(f"--dp {args.dp}" + (f" (from --mode {mode})" if mode else ""))
-    print(
-        f"Error: the {_lookup_backend(None).name} backend does not support {', '.join(found)} "
-        "(phase 1: one request per launch, no data parallelism); nothing was launched.",
-        file=sys.stderr,
-    )
-    raise SystemExit(2)
-
-
 def _dispatch_dp(args: argparse.Namespace) -> None:
     """Route batch/DP generate runs through the router; exits the process."""
     from difflet.cli.dp import router
@@ -1108,7 +1087,6 @@ def main(argv: list[str] | None = None) -> None:
         _validate_teacache(args)
         _validate_dp(args)
         if args.requests_dir is None and (args.requests is not None or (args.dp or 1) > 1):
-            _reject_batch_on_torchrun_backend(args)
             _dispatch_dp(args)  # raises SystemExit
 
     # Only for the weight-loading commands, where jemalloc pays off. This list

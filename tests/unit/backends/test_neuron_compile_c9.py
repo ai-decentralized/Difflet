@@ -338,8 +338,8 @@ def test_prepare_runtime_configures_the_cache_before_binding_a_core(monkeypatch)
 def test_prepare_runtime_leaves_the_env_alone_when_the_config_is_rejected(monkeypatch):
     calls = []
     monkeypatch.setattr(runtime, "configure_compile_cache", lambda: calls.append("cache"))
-    with pytest.raises(NotImplementedError, match="cp_degree=2"):
-        runtime.NeuronBackend().prepare_runtime(DiffletParallelConfig(tp_degree=2, cp_degree=2))
+    with pytest.raises(NotImplementedError, match="dp_degree=2"):
+        runtime.NeuronBackend().prepare_runtime(DiffletParallelConfig(tp_degree=2, dp_degree=2))
     assert calls == []
 
 

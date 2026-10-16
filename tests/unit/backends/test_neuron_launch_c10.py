@@ -923,28 +923,30 @@ def _batch_argv(command: str, batch: str, tmp_path) -> list[str]:
 @pytest.mark.parametrize("command", ["generate", "run"])
 @pytest.mark.parametrize("flags, ambient", [(["--backend", "neuron"], None), ([], "neuron")])
 @pytest.mark.parametrize("batch, named", [("requests", "--requests"), ("dp", "--dp 2")])
-def test_main_torchrun_backend_rejects_batches_before_the_router(monkeypatch, capsys, tmp_path,
-                                                                 command, flags, ambient, batch,
-                                                                 named):
-    """Final review M-1: a --requests / --dp batch went to the DP router, whose worker launched
-    torchrun ranks that each raised NotImplementedError. Now: exit 2, one message, before the
-    router writes its queue or starts a worker."""
+def test_main_torchrun_backend_routes_batches_to_the_router(monkeypatch, capsys, tmp_path,
+                                                            command, flags, ambient, batch,
+                                                            named):
+    """A --requests / --dp batch on the neuron backend goes to the DP router, whose workers
+    launch their own torchrun replicas (rank 0 of each claims requests for its TP group)."""
     cli_main = _cli_main()
     _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
     monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
     if ambient is not None:
         monkeypatch.setenv("DIFFLET_BACKEND", ambient)
     built = _recording_orchestrator(monkeypatch, cli_main)
-    monkeypatch.setattr(cli_main, "_dispatch_dp",
-                        lambda args: pytest.fail("the DP router must not start"))
+    routed = []
+
+    def fake_dispatch(args):
+        routed.append(args)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli_main, "_dispatch_dp", fake_dispatch)
 
     with pytest.raises(SystemExit) as exc:
         cli_main.main([*_batch_argv(command, batch, tmp_path), *flags])
 
-    assert exc.value.code == 2
-    assert capsys.readouterr().err.strip() == (
-        f"Error: the neuron backend does not support {named} (phase 1: one request per "
-        "launch, no data parallelism); nothing was launched.")
+    assert exc.value.code == 0 and len(routed) == 1
+    assert "does not support" not in capsys.readouterr().err
     assert built == []
 
 
@@ -1268,3 +1270,37 @@ def test_toy_run_stage_torchrun_ctrl_c_leaves_no_rank_behind(tmp_path, monkeypat
     assert returncode == -signal.SIGINT, output  # KeyboardInterrupt reached the top
     assert "driver: KeyboardInterrupt after" in output
     assert "killing it" not in output  # torchrun stopped its ranks itself; no last resort
+
+
+def _dp_queue(tmp_path, n):
+    from difflet.cli.dp.requests_io import RequestSpec, write_manifest
+
+    requests = tmp_path / "requests"
+    write_manifest([RequestSpec(index=i, prompt=f"p{i}", output=f"o{i}", assigned_worker=0)
+                    for i in range(n)], requests)
+    return requests
+
+
+def test_dp_replica_ranks_run_the_same_requests_claimed_once(tmp_path):
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import dp_replica_claims_worker
+
+    requests = _dp_queue(tmp_path, 3)
+    results = run_ranks(dp_replica_claims_worker, str(requests), -1, world_size=2)
+    assert [r["seen"] for r in results] == [[(0, "p0"), (1, "p1"), (2, "p2")]] * 2
+    assert all(r["error"] is None for r in results)
+    claims = sorted(requests.glob("*.claim"))
+    assert [p.name for p in claims] == ["req_0000.claim", "req_0001.claim", "req_0002.claim"]
+    assert {p.read_text() for p in claims} == {"0"}
+
+
+def test_dp_replica_stops_together_on_a_failed_request(tmp_path):
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import dp_replica_claims_worker
+
+    requests = _dp_queue(tmp_path, 3)
+    results = run_ranks(dp_replica_claims_worker, str(requests), 1, world_size=2)
+    assert [r["seen"] for r in results] == [[(0, "p0")]] * 2
+    assert [r["error"] for r in results] == ["boom", "boom"]  # every rank stops, none hangs
+    assert sorted(p.name for p in requests.glob("*.failed")) == ["req_0001.failed"]
+    assert not (requests / "req_0002.claim").exists()  # left for the router's summary

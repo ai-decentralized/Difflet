@@ -1103,3 +1103,25 @@ def w1_wan_sp_worker(rank: int, world_size: int, model_dir: str, cfg: bool) -> d
     final = out.latents
     return {"latents": final.tolist(),
             "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest()}
+
+
+def dp_replica_claims_worker(rank: int, world_size: int, requests_dir: str, fail_index: int) -> dict:
+    """A 2-rank DP replica draining a queue: rank 0 claims, both ranks run each request; a
+    request at ``fail_index`` raises on every rank."""
+    import argparse
+    from pathlib import Path
+
+    from difflet.cli.orchestrators.wan import _replica_request_scope, _replica_requests
+
+    args = argparse.Namespace(requests_dir=Path(requests_dir), worker_index=0,
+                              dp_schedule="round_robin")
+    seen, error = [], None
+    try:
+        for req in _replica_requests(args, device=torch.device("cpu")):
+            with _replica_request_scope(args, req):
+                if req.index == fail_index:
+                    raise RuntimeError("boom")
+                seen.append((req.index, req.prompt))
+    except RuntimeError as exc:
+        error = str(exc)
+    return {"seen": seen, "error": error}

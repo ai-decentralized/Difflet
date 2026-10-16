@@ -713,15 +713,24 @@ def test_stage_transformer_neuron_writes_files_on_rank0_only(neuron_stage, monke
     assert "latents saved" not in capsys.readouterr().out
 
 
-def test_stage_transformer_neuron_rejects_request_batches(neuron_stage, tmp_path):
-    # Every rank would claim a different request from the queue and feed its own prompt to
-    # the same TP collectives; data parallelism is out of phase 1.
-    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path),
-                     requests_dir=str(tmp_path / "requests"), worker_index=0,
-                     dp_schedule="round_robin")
-    with pytest.raises(NotImplementedError, match="--requests"):
-        WanOrchestrator(args)._stage_transformer(args)
-    assert neuron_stage.CALLS == []
+def test_stage_transformer_neuron_runs_a_request_batch(neuron_stage, tmp_path):
+    # A DP worker's queue: one load, then every request this worker claims, in order, each
+    # with its own prompt and seed and its own latents file.
+    from difflet.cli.dp.requests_io import RequestSpec, write_manifest
+
+    requests = tmp_path / "requests"
+    write_manifest([RequestSpec(index=i, prompt=p, output=str(tmp_path / f"o{i}.mp4"), seed=s,
+                                assigned_worker=0)
+                    for i, (p, s) in enumerate([("a fox", 1), ("a cat", 2)])], requests)
+    args = _wan_args(model_id=_WAN21_ID, stage_mode="generate", work_dir=str(tmp_path),
+                     requests_dir=str(requests), worker_index=0, dp_schedule="round_robin")
+    WanOrchestrator(args)._stage_transformer(args)
+
+    [call] = neuron_stage.CALLS
+    assert [c["prompt"] for c in call["pipeline"].app.calls] == ["a fox", "a cat"]
+    assert len(call["pipeline"].app.load_calls) == 1  # loaded once for the whole queue
+    assert (tmp_path / "latents_req0000.pt").exists() and (tmp_path / "latents_req0001.pt").exists()
+    assert sorted(p.name for p in requests.glob("*.claim")) == ["req_0000.claim", "req_0001.claim"]
 
 
 @pytest.mark.parametrize("overrides, parallel, app_extra", [
@@ -1008,9 +1017,6 @@ _REJECTED = [
     (dict(teacache_speedup=1.5, teacache_calibration="c.json"),
      "--teacache-speedup, --teacache-calibration"),
     (dict(teacache_calibration="c.json"), "--teacache-calibration"),
-    (dict(requests="r.jsonl"), "--requests"),
-    (dict(requests_dir="/rd", worker_index=0, dp_schedule="round_robin"),
-     "--requests/--dp (data-parallel worker)"),
     (dict(cp_degree=2, cp_mode="ring", sp_enabled=True, teacache_cadence=3,
           teacache_online_delta=0.5),
      "--teacache-cadence, --teacache-online-delta"),
