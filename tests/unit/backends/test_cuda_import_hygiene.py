@@ -67,7 +67,24 @@ def test_scan_detects_a_forbidden_import(tmp_path):
     ]
 
 
-@pytest.mark.parametrize("module", OPS_MODULES)
-@pytest.mark.xfail(strict=True, reason="lands in Phase 2 (PR 3)")
+# Modules Phase 2 has not landed yet: their import is expected to fail (strict), so
+# landing one flips its test and the executor must remove it from this set.
+_PENDING = {"attention", "embeddings", "linear", "mx", "norm", "platform"}
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        pytest.param(
+            m,
+            marks=(
+                pytest.mark.xfail(strict=True, reason="lands in Phase 2 (PR 3)")
+                if m in _PENDING
+                else ()
+            ),
+        )
+        for m in OPS_MODULES
+    ],
+)
 def test_cuda_ops_impl_module_imports(module):
     importlib.import_module(f"difflet.backends.cuda.ops_impl.{module}")
