@@ -1,0 +1,1384 @@
+{
+  "rank": 0,
+  "world_size": 4,
+  "logical_core": 0,
+  "exec_mode": "eager",
+  "expect": null,
+  "ok": true,
+  "args": {
+    "model_dir": "/home/ubuntu/.cache/huggingface/hub/models--Qwen--Qwen-Image/snapshots/75e0b4be04f60ec59a75f475837eced720f823b6",
+    "reference": "/home/ubuntu/qwen-v1-work/ref-l4.pt",
+    "num_layers": 4,
+    "height": 1024,
+    "width": 1024,
+    "text_seq_len": 1024,
+    "exec_mode": "eager",
+    "tp_degree": 4,
+    "cp_degree": 1,
+    "cp_mode": "gather_kv",
+    "save": "/home/ubuntu/qwen-v1-work/a-l4-eager/out.pt",
+    "out_json": "/home/ubuntu/qwen-v1-work/a-l4-eager/result.json",
+    "compare": {},
+    "equal_to": null,
+    "expect": null,
+    "bench_warmup": 2,
+    "bench_iters": 5,
+    "bench_rounds": 2,
+    "hbm_limit_gib": 24.0
+  },
+  "neff_cache_dir": "/home/ubuntu/.cache/difflet-neuron-qwen-l4/neuron/neff",
+  "metrics_setup": {
+    "enabled_before_prepare_runtime": true,
+    "runtime_initialized_when_enabled": false
+  },
+  "pg_timeout": {
+    "env": "7200",
+    "configured_s": 7200.0,
+    "backend_options_timeout_s": "unreadable: RuntimeError: Backend neuron does not implement getBackendOptions."
+  },
+  "env": {
+    "OMP_NUM_THREADS": "3",
+    "HF_HUB_OFFLINE": "1",
+    "DIFFLET_NO_JEMALLOC": "1",
+    "DIFFLET_NEURON_PG_TIMEOUT_S": "7200",
+    "NEURON_RT_VISIBLE_CORES": "0",
+    "DIFFLET_DISABLE_PREWARM": "1",
+    "DIFFLET_COMPILE_CACHE": "/home/ubuntu/.cache/difflet-neuron-qwen-l4"
+  },
+  "torch_threads": 3,
+  "config": {
+    "num_layers": 4,
+    "checkpoint_num_layers": 60,
+    "heads": 24,
+    "head_dim": 128,
+    "heads_per_rank": 6,
+    "tp": 4,
+    "cp": 1,
+    "cp_mode": "gather_kv",
+    "image_seq_len": 4096,
+    "text_seq_len": 1024
+  },
+  "reference": {
+    "path": "/home/ubuntu/qwen-v1-work/ref-l4.pt",
+    "num_layers": 4,
+    "prompt": "A cozy coffee shop storefront on a rainy evening, a chalkboard sign by the door reads \"Fresh Bread\", warm light through the windows, photorealistic",
+    "valid_rows": 36,
+    "timesteps": [
+      1000.0,
+      500.0
+    ],
+    "dit_timesteps": [
+      1.0,
+      0.5
+    ],
+    "parity_gated": true
+  },
+  "checks": [
+    {
+      "name": "checkpoint",
+      "ok": true,
+      "detail": "missing=0 unexpected=0 skipped=1792"
+    },
+    {
+      "name": "heads_per_rank",
+      "ok": true,
+      "detail": "attn.heads=6 (=24/tp 4)"
+    },
+    {
+      "name": "fallbacks",
+      "ok": true,
+      "detail": "forwards=[] warm-up=[] benchmark=[]"
+    },
+    {
+      "name": "unwarmed_shapes",
+      "ok": true,
+      "detail": "[] warmup=[(1, 4096, 64), (1,), (1, 1024, 3584)]"
+    },
+    {
+      "name": "forward_shapes",
+      "ok": true,
+      "detail": "2 forwards at ['[(1, 4096, 64), (1,), (1, 1024, 3584)]'] warmup=[(1, 4096, 64), (1,), (1, 1024, 3584)]"
+    },
+    {
+      "name": "finite",
+      "ok": true,
+      "detail": "t1000: absmean=23.1952 std=28.9923 [-124.000, 131.000] t500: absmean=67.9114 std=84.8425 [-342.000, 380.000]"
+    },
+    {
+      "name": "parity_fp32_t1000",
+      "ok": true,
+      "detail": "cos=0.999968 rel_l1=1.249e-02 rel_l2=1.381e-02 rel_max=3.234e-02 | 1.015x control rel_l1 1.230e-02 (rel_l2 1.363e-02, cos 0.999969) err_cos=0.965 same-dtype 0.231x, gated (err_cos 0.965 >= 0.5, D68)"
+    },
+    {
+      "name": "parity_fp32_t500",
+      "ok": true,
+      "detail": "cos=0.999989 rel_l1=4.668e-03 rel_l2=4.742e-03 rel_max=5.725e-03 | 1.031x control rel_l1 4.525e-03 (rel_l2 4.605e-03, cos 0.999990) err_cos=0.721 same-dtype 0.599x, gated (err_cos 0.721 >= 0.5, D68)"
+    },
+    {
+      "name": "no_compile_in_forwards",
+      "ok": true,
+      "detail": "forward+benchmark counters {'TotalCompilations': 0, 'PersistentHits': 0, 'InMemoryHits': 8175}, unique_graphs 0 -> 0"
+    },
+    {
+      "name": "instrumentation",
+      "ok": true,
+      "detail": "metrics enabled before prepare_runtime=True on a fresh runtime=True; forward InMemoryHits=8175 (> 0); max_memory_allocated=1.40 GiB (> 0)"
+    },
+    {
+      "name": "hbm",
+      "ok": true,
+      "detail": "max_memory_allocated after load=0.67 warm-up=1.34 end=1.40 GiB (limit 24.0); weights allocated 0.67 GiB"
+    },
+    {
+      "name": "eager_compiles_no_block",
+      "ok": true,
+      "detail": "compiled_blocks=0 unique_graphs=0"
+    }
+  ],
+  "parity": {
+    "1000": {
+      "gated": true,
+      "vs_fp32": {
+        "cosine": 0.9999680549559353,
+        "rel_l1": 0.012489962190096255,
+        "rel_l2": 0.013807988405913345,
+        "max_abs": 4.2216339111328125,
+        "ref_absmean": 22.935195890062943,
+        "rel_max": 0.0323439972541347,
+        "err_cos": 0.9647588071962694,
+        "vs_bf16": {
+          "cosine": 0.9999935053593493,
+          "rel_l1": 0.00284018092925632,
+          "rel_l2": 0.0036063140108699436,
+          "max_abs": 0.5,
+          "ref_absmean": 23.19244108054454,
+          "rel_max": 0.003816793893129771
+        }
+      },
+      "control": {
+        "cosine": 0.9999691302723285,
+        "rel_l1": 0.012300864803771345,
+        "rel_l2": 0.013628844268400922,
+        "max_abs": 4.2216339111328125,
+        "ref_absmean": 22.935195890062943,
+        "rel_max": 0.0323439972541347
+      },
+      "ok": true,
+      "reasons": [],
+      "notes": [],
+      "ratio_vs_control": 1.0153726904035996,
+      "ratio_l2_vs_control": 1.0131444848869375,
+      "same_dtype_gated": true
+    },
+    "500": {
+      "gated": true,
+      "vs_fp32": {
+        "cosine": 0.9999892393695846,
+        "rel_l1": 0.004667907880270197,
+        "rel_l2": 0.004742194136137439,
+        "max_abs": 2.177825927734375,
+        "ref_absmean": 67.84544461228083,
+        "rel_max": 0.005725002681476601,
+        "err_cos": 0.7210474300055664,
+        "vs_bf16": {
+          "cosine": 0.999993911285231,
+          "rel_l1": 0.0027127441757089513,
+          "rel_l2": 0.0034897331176481214,
+          "max_abs": 2.0,
+          "ref_absmean": 67.91371595251258,
+          "rel_max": 0.005263157894736842
+        }
+      },
+      "control": {
+        "cosine": 0.9999899140317982,
+        "rel_l1": 0.0045254864320966775,
+        "rel_l2": 0.00460523348160937,
+        "max_abs": 2.177825927734375,
+        "ref_absmean": 67.84544461228083,
+        "rel_max": 0.005725002681476601
+      },
+      "ok": true,
+      "reasons": [],
+      "notes": [],
+      "ratio_vs_control": 1.0314709700958125,
+      "ratio_l2_vs_control": 1.0297402194861587,
+      "same_dtype_gated": true
+    }
+  },
+  "output_stats": {
+    "1000": {
+      "finite": true,
+      "absmean": 23.19522232856616,
+      "std": 28.992268346297806,
+      "min": -124.0,
+      "max": 131.0
+    },
+    "500": {
+      "finite": true,
+      "absmean": 67.91140262247154,
+      "std": 84.84250935523963,
+      "min": -342.0,
+      "max": 380.0
+    }
+  },
+  "device_evidence": {
+    "fallbacks": [],
+    "unwarmed_shapes": [],
+    "compiled_blocks": [],
+    "phase_seconds": {
+      "runtime init": 1.5043481570010044,
+      "build on meta": 4.816889417999846,
+      "load checkpoint": 20.104460933000155,
+      "eval": 0.0015906919998087687,
+      "compile": 0.0006220459999894956,
+      "warmup forward": 33.15071080800044
+    },
+    "counters": {
+      "TotalCompilations": 92,
+      "PersistentHits": 7,
+      "InMemoryHits": 8636
+    },
+    "neff_count": 104,
+    "peak_device_mem_gb": 1.395787239074707
+  },
+  "warmup_fallbacks": [],
+  "benchmark_fallbacks": [],
+  "phase_seconds": {
+    "runtime init": 1.5043481570010044,
+    "build on meta": 4.816889417999846,
+    "load checkpoint": 20.104460933000155,
+    "eval": 0.0015906919998087687,
+    "compile": 0.0006220459999894956,
+    "warmup forward": 33.15071080800044
+  },
+  "timers_s": {
+    "prepare_runtime": 19.08130169099968,
+    "adapter_forwards": [
+      0.5473590980000154,
+      0.08183880999968096
+    ],
+    "total": 86.00609993299986
+  },
+  "benchmark": {
+    "name": "dit_forward",
+    "first_call_ms": 89.03539200036903,
+    "median_ms": 80.95171900004061,
+    "p10_ms": 79.82771580118424,
+    "p90_ms": 82.24128190086049,
+    "spread": 0.029814883852868332,
+    "drift": 1.0129704489923792,
+    "round_medians_ms": [
+      81.39736299926881,
+      80.35512100104825
+    ],
+    "samples_ms": [
+      85.76089300004242,
+      80.50607500081242,
+      80.00615899982222,
+      81.39736299926881,
+      81.85021400095138,
+      80.35512100104825,
+      81.8111949993181,
+      79.91671800118638,
+      79.02669600116496,
+      81.78745499935758
+    ],
+    "peak_memory": {
+      "allocated_bytes.all.peak": 1498715136,
+      "allocated_bytes.large_pool.peak": 1498715136,
+      "allocated_bytes.small_pool.peak": 0,
+      "reserved_bytes.all.peak": 1650458624,
+      "reserved_bytes.large_pool.peak": 1650458624,
+      "reserved_bytes.small_pool.peak": 0,
+      "active_bytes.all.peak": 1476931720,
+      "active_bytes.large_pool.peak": 1476931720,
+      "active_bytes.small_pool.peak": 0
+    },
+    "flags": []
+  },
+  "max_memory_allocated_gib": 1.395787239074707,
+  "max_memory_allocated_gib_by_phase": {
+    "start": 4.76837158203125e-07,
+    "after_load": 0.674919605255127,
+    "after_warmup": 1.3411071300506592,
+    "after_forwards": 1.395787239074707,
+    "end": 1.395787239074707
+  },
+  "weights_allocated_gib": 0.6749193668365479,
+  "host_vmhwm_gib_by_phase": {
+    "pre_prepare": 0.4915008544921875,
+    "start": 0.5494194030761719,
+    "after_load": 0.7676734924316406,
+    "after_warmup": 1.4536781311035156,
+    "after_forwards": 1.4575157165527344,
+    "end": 1.460418701171875
+  },
+  "counters": {
+    "prepare_runtime": {
+      "TotalCompilations": 0,
+      "PersistentHits": 1,
+      "InMemoryHits": 0
+    },
+    "load": {
+      "TotalCompilations": 0,
+      "PersistentHits": 1,
+      "InMemoryHits": 4
+    },
+    "warmup": {
+      "TotalCompilations": 92,
+      "PersistentHits": 5,
+      "InMemoryHits": 457
+    },
+    "forwards_and_benchmark": {
+      "TotalCompilations": 0,
+      "PersistentHits": 0,
+      "InMemoryHits": 8175
+    },
+    "run": {
+      "TotalCompilations": 92,
+      "PersistentHits": 7,
+      "InMemoryHits": 8636
+    }
+  },
+  "cache_entries_added": {
+    "prepare_runtime": [
+      {
+        "key": "nki_75_set_rng_state_gpsimd_f8a4ffa8ba55d97e_()_[2]_((torch.Size([1, 6]), torch.int32),):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 12699,
+        "compilation_time_ms": 0
+      }
+    ],
+    "load": [
+      {
+        "key": "all_reduce--n64--_[1]:Int:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:reduce_op=s:max:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5205,
+        "compilation_time_ms": 0
+      }
+    ],
+    "warmup": [
+      {
+        "key": "prologue--i0_TRANSPOSE_5120x6x128x_to_6x5120x128x_params_1,0,2,_dtype_bf16_i1_TRANSPOSE_5120x6x128x_to_6x5120x128x_params_1,0,2,_dtype_bf16_i2_TRANSPOSE_5120x6x128x_to_6x5120x128x_params_1,0,2,_dtype_bf16_op_nki_kernel_global_nki_20_attention_cte_9f2139af88b64e4b_(('bias_band_params', None), ('bias_layout', 'dense'), ('bound_max', None), ('bound_min', None), ('cache_softmax', False), ('causal_mask', False), ('cp_offset', None), ('cp_strided_q_slicing', False), ('cp_striped_input', False), ('global_cp_deg', None), ('k_prior', None), ('mm_out_dtype', 'float32'), ('position_bias', None), ('prior_used_len', None), ('scale', 0.08838834764831843), ('sink', None), ('skip_output_normalization', False), ('sliding_window', None), ('softmax_dtype', 'float32'), ('tp_k', True), ('tp_out', False), ('tp_q', True), ('v_prior', None))_[2]_((torch.Size([6, 5120, 128]), torch.bfloat16), (torch.Size([6, 5120, 128]), torch.bfloat16), (torch.Size([6, 5120, 128]), torch.bfloat16)):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 963810,
+        "compilation_time_ms": 5065
+      },
+      {
+        "key": "linear--n64--_[1,4096,3072]:BFloat16:S(C)_[3072,3072]:BFloat16:S(C)_[3072]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 317448,
+        "compilation_time_ms": 7498
+      },
+      {
+        "key": "linear--n64--_[1,4096,3072]:BFloat16:S(C)_[3072,3072]:BFloat16:S(C)_None:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 282099,
+        "compilation_time_ms": 6633
+      },
+      {
+        "key": "linear--n64--_[1,4096,3072]:BFloat16:S(C)_[768,3072]:BFloat16:S(C)_[768]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 144569,
+        "compilation_time_ms": 4007
+      },
+      {
+        "key": "linear--n64--_[1,1024,3072]:BFloat16:S(C)_[3072,3072]:BFloat16:S(C)_[3072]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 139702,
+        "compilation_time_ms": 4908
+      },
+      {
+        "key": "linear--n64--_[1,1024,3072]:BFloat16:S(C)_[3072,3072]:BFloat16:S(C)_None:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 133303,
+        "compilation_time_ms": 5329
+      },
+      {
+        "key": "linear--n64--_[1,4096,768]:BFloat16:S(C)_[3072,768]:BFloat16:S(C)_None:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 125736,
+        "compilation_time_ms": 2562
+      },
+      {
+        "key": "gelu--n64--_[1,4096,3072]:BFloat16:S(C)_kw:approximate=s:tanh:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 120398,
+        "compilation_time_ms": 5784
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,1,3072]:BFloat16:S(C)_[1,4096,3072]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 119106,
+        "compilation_time_ms": 5478
+      },
+      {
+        "key": "add.Tensor--n64--_[1,4096,3072]:BFloat16:S(C)_[3072]:BFloat16:S(C)_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 119104,
+        "compilation_time_ms": 4299
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,4096,3072]:BFloat16:S(C)_[1,1,3072]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 119056,
+        "compilation_time_ms": 3440
+      },
+      {
+        "key": "add.Tensor--n64--_[1,4096,3072]:BFloat16:S(C)_[1,1,3072]:BFloat16:S(C)_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 119049,
+        "compilation_time_ms": 3608
+      },
+      {
+        "key": "linear--n64--_[1,3072]:BFloat16:S(C)_[4608,3072]:BFloat16:S(C)_[4608]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 115817,
+        "compilation_time_ms": 4017
+      },
+      {
+        "key": "linear--n64--_[1,4096,3072]:BFloat16:S(C)_[64,3072]:BFloat16:S(C)_[64]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 112392,
+        "compilation_time_ms": 2558
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,4096,6,128]:BFloat16:S(C)_[128]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 105678,
+        "compilation_time_ms": 3840
+      },
+      {
+        "key": "native_layer_norm--n64--_[1,4096,3072]:BFloat16:S(C)_IL[i3072]_None_None_d3eb0c6f7a0b5ed8d:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 98533,
+        "compilation_time_ms": 3035
+      },
+      {
+        "key": "linear--n64--_[1,1024,3584]:BFloat16:S(C)_[768,3584]:BFloat16:S(C)_[768]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 93218,
+        "compilation_time_ms": 0
+      },
+      {
+        "key": "linear--n64--_[1,1024,3072]:BFloat16:S(C)_[768,3072]:BFloat16:S(C)_[768]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 90228,
+        "compilation_time_ms": 3853
+      },
+      {
+        "key": "prologue--i0_TRANSPOSE_1x6x5120x128x_to_1x5120x6x128x_params_0,2,1,3,_dtype_bf16_op_aten::contiguous_contiguous--n64--_[1,5120,6,128]:BFloat16:S(3932160,128,655360,1):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 82078,
+        "compilation_time_ms": 2320
+      },
+      {
+        "key": "linear--n64--_[1,3072]:BFloat16:S(C)_[1536,3072]:BFloat16:S(C)_[1536]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 81002,
+        "compilation_time_ms": 1764
+      },
+      {
+        "key": "linear--n64--_[1,1024,768]:BFloat16:S(C)_[3072,768]:BFloat16:S(C)_None:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 80980,
+        "compilation_time_ms": 3437
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,1024,3584]:BFloat16:S(C)_[3584]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 78083,
+        "compilation_time_ms": 5482
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,1,3072]:BFloat16:S(C)_[1,1024,3072]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 76329,
+        "compilation_time_ms": 5851
+      },
+      {
+        "key": "add.Tensor--n64--_[1,1024,3072]:BFloat16:S(C)_[3072]:BFloat16:S(C)_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 76326,
+        "compilation_time_ms": 5336
+      },
+      {
+        "key": "add.Tensor--n64--_[1,1024,3072]:BFloat16:S(C)_[1,1,3072]:BFloat16:S(C)_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 76308,
+        "compilation_time_ms": 3718
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,1024,3072]:BFloat16:S(C)_[1,1,3072]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 76288,
+        "compilation_time_ms": 0
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,1024,6,128]:BFloat16:S(C)_[128]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 75129,
+        "compilation_time_ms": 3839
+      },
+      {
+        "key": "linear--n64--_[1,4096,64]:BFloat16:S(C)_[768,64]:BFloat16:S(C)_[768]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 74371,
+        "compilation_time_ms": 1487
+      },
+      {
+        "key": "native_layer_norm--n64--_[1,1024,3072]:BFloat16:S(C)_IL[i3072]_None_None_d3eb0c6f7a0b5ed8d:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 73401,
+        "compilation_time_ms": 3699
+      },
+      {
+        "key": "linear--n64--_[1,3072]:BFloat16:S(C)_[768,3072]:BFloat16:S(C)_[768]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 72276,
+        "compilation_time_ms": 4387
+      },
+      {
+        "key": "gelu--n64--_[1,1024,3072]:BFloat16:S(C)_kw:approximate=s:tanh:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 72040,
+        "compilation_time_ms": 4897
+      },
+      {
+        "key": "silu--n64--_[1,3072]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 71011,
+        "compilation_time_ms": 4330
+      },
+      {
+        "key": "prologue--i0_TRANSPOSE_3072x1x4096x_to_1x4096x3072x_params_1,2,0,_dtype_bf16_op_aten::contiguous_contiguous--n64--_[1,4096,3072]:BFloat16:S(4096,1,4096):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 69395,
+        "compilation_time_ms": 2853
+      },
+      {
+        "key": "prologue--i0_1x4096x6x64x_bf16_i1_SLICE_1x4096x6x128x_to_1x4096x6x64x_params_0,1,1,0,4096,1,0,6,1,0,127,2,_dtype_bf16_op_aten::stack_stack--n64--_TL[[1,4096,6,64]:BFloat16:S(C),[1,4096,6,64]:BFloat16:S(3145728,768,128,2)]_i-1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 68993,
+        "compilation_time_ms": 3234
+      },
+      {
+        "key": "mean.dim--n64--_[1,1024,3584]:Float:S(C)_IL[i-1]_b1_kw:dtype=None:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 65877,
+        "compilation_time_ms": 3808
+      },
+      {
+        "key": "prologue--i0_1x1024x6x64x_bf16_i1_SLICE_1x1024x6x128x_to_1x1024x6x64x_params_0,1,1,0,1024,1,0,6,1,0,127,2,_dtype_bf16_op_aten::stack_stack--n64--_TL[[1,1024,6,64]:BFloat16:S(C),[1,1024,6,64]:BFloat16:S(786432,768,128,2)]_i-1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 65556,
+        "compilation_time_ms": 2849
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,1024,3584]:BFloat16:S(C)_[1,1024,1]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 64469,
+        "compilation_time_ms": 4345
+      },
+      {
+        "key": "linear--n64--_[1,256]:BFloat16:S(C)_[768,256]:BFloat16:S(C)_[768]:BFloat16:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 63856,
+        "compilation_time_ms": 0
+      },
+      {
+        "key": "prologue--i0_SLICE_1x1024x6x128x_to_1x1024x6x64x_params_0,1,1,0,1024,1,0,6,1,1,128,2,_dtype_bf16_op_aten::neg_neg--n64--_[1,1024,6,64]:BFloat16:S(786432,768,128,2):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 63179,
+        "compilation_time_ms": 2136
+      },
+      {
+        "key": "prologue--i0_SLICE_1x4096x6x128x_to_1x4096x6x64x_params_0,1,1,0,4096,1,0,6,1,1,128,2,_dtype_bf16_op_aten::neg_neg--n64--_[1,4096,6,64]:BFloat16:S(3145728,768,128,2):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 62771,
+        "compilation_time_ms": 2532
+      },
+      {
+        "key": "add.Tensor--n64--_[1,4096,6,128]:Float:S(C)_[1,4096,6,128]:Float:S(C)_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 62748,
+        "compilation_time_ms": 3018
+      },
+      {
+        "key": "add.Tensor--n64--_[1,1024,1]:Float:S(C)_[]:Double:S(C):cpu:wrapped_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 62602,
+        "compilation_time_ms": 4031
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,4096,6,128]:BFloat16:S(C)_[1,4096,6,1]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 62067,
+        "compilation_time_ms": 3797
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,4096,6,128]:Float:S(C)_[1,4096,1,128]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 61936,
+        "compilation_time_ms": 2637
+      },
+      {
+        "key": "pow.Tensor_Scalar_out--n64--_[1,4096,6,128]:Float:S(C)_i2_kw:out=[1,4096,6,128]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 61678,
+        "compilation_time_ms": 3800
+      },
+      {
+        "key": "add.Tensor--n64--_[1,1,3072]:BFloat16:S(C)_[]:Long:S(C):cpu:wrapped_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 61483,
+        "compilation_time_ms": 3230
+      },
+      {
+        "key": "add.Tensor--n64--_[1,3072]:BFloat16:S(C)_[]:Long:S(C):cpu:wrapped_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 61476,
+        "compilation_time_ms": 1245
+      },
+      {
+        "key": "mean.dim--n64--_[1,4096,6,128]:Float:S(C)_IL[i-1]_b1_kw:dtype=None:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 60806,
+        "compilation_time_ms": 3716
+      },
+      {
+        "key": "pow.Tensor_Scalar_out--n64--_[1,1024,3584]:Float:S(C)_i2_kw:out=[1,1024,3584]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 60664,
+        "compilation_time_ms": 2865
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,1024,6,128]:BFloat16:S(C)_[1,1024,6,1]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 59194,
+        "compilation_time_ms": 3309
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,1024,6,128]:Float:S(C)_[1,1024,1,128]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 59150,
+        "compilation_time_ms": 2757
+      },
+      {
+        "key": "add.Tensor--n64--_[1,1024,6,128]:Float:S(C)_[1,1024,6,128]:Float:S(C)_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 59083,
+        "compilation_time_ms": 2546
+      },
+      {
+        "key": "pow.Tensor_Scalar_out--n64--_[1,1024,6,128]:Float:S(C)_i2_kw:out=[1,1024,6,128]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 58862,
+        "compilation_time_ms": 2865
+      },
+      {
+        "key": "div.out--n64--_[128]:Float:S(C)_[]:Long:S(C):cpu:wrapped_kw:out=[128]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 58860,
+        "compilation_time_ms": 5575
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,128]:Float:S(C)_[]:Long:S(C):cpu:wrapped:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 58807,
+        "compilation_time_ms": 5137
+      },
+      {
+        "key": "mean.dim--n64--_[1,1024,6,128]:Float:S(C)_IL[i-1]_b1_kw:dtype=None:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 58753,
+        "compilation_time_ms": 2728
+      },
+      {
+        "key": "rsqrt--n64--_[1,1024,1]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 56615,
+        "compilation_time_ms": 4252
+      },
+      {
+        "key": "prologue--i0_TRANSPOSE_1x4096x768x_to_768x1x4096x_params_2,0,1,_dtype_bf16_op_aten::contiguous_contiguous--n64--_[768,1,4096]:BFloat16:S(1,3145728,768):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 40862,
+        "compilation_time_ms": 1408
+      },
+      {
+        "key": "prologue--i0_TRANSPOSE_3072x1x1024x_to_1x1024x3072x_params_1,2,0,_dtype_bf16_op_aten::contiguous_contiguous--n64--_[1,1024,3072]:BFloat16:S(1024,1,1024):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 40345,
+        "compilation_time_ms": 6170
+      },
+      {
+        "key": "prologue--i0_TRANSPOSE_1x1024x768x_to_768x1x1024x_params_2,0,1,_dtype_bf16_op_aten::contiguous_contiguous--n64--_[768,1,1024]:BFloat16:S(1,786432,768):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 33629,
+        "compilation_time_ms": 0
+      },
+      {
+        "key": "exp--n64--_[128]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 30493,
+        "compilation_time_ms": 5518
+      },
+      {
+        "key": "add.Tensor--n64--_[1,4096,3072]:BFloat16:S(C)_[1,4096,3072]:BFloat16:S(C)_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 23019,
+        "compilation_time_ms": 5445
+      },
+      {
+        "key": "cos--n64--_[1,128]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 22231,
+        "compilation_time_ms": 5041
+      },
+      {
+        "key": "sin--n64--_[1,128]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 22183,
+        "compilation_time_ms": 5242
+      },
+      {
+        "key": "add.Tensor--n64--_[1,1024,3072]:BFloat16:S(C)_[1,1024,3072]:BFloat16:S(C)_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 14297,
+        "compilation_time_ms": 6311
+      },
+      {
+        "key": "add.Tensor--n64--_[1,1024,6,1]:Float:S(C)_[]:Double:S(C):cpu:wrapped_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 12670,
+        "compilation_time_ms": 3135
+      },
+      {
+        "key": "add.Tensor--n64--_[1,4096,6,1]:Float:S(C)_[]:Double:S(C):cpu:wrapped_kw:alpha=i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 12662,
+        "compilation_time_ms": 3684
+      },
+      {
+        "key": "mul.Tensor--n64--_[1,1]:Float:S(C)_[1,128]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 12311,
+        "compilation_time_ms": 5708
+      },
+      {
+        "key": "mul.Tensor--n64--_[128]:Float:S(C)_[]:Double:S(C):cpu:wrapped:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 12286,
+        "compilation_time_ms": 6038
+      },
+      {
+        "key": "all_reduce--n64--_[1,4096,3072]:BFloat16:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:reduce_op=s:sum:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5630,
+        "compilation_time_ms": 2774
+      },
+      {
+        "key": "all_reduce--n64--_[1,1024,3072]:BFloat16:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:reduce_op=s:sum:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5245,
+        "compilation_time_ms": 4592
+      },
+      {
+        "key": "all_reduce--n64--_[262144]:BFloat16:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:reduce_op=s:sum:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5244,
+        "compilation_time_ms": 1077
+      },
+      {
+        "key": "all_reduce--n64--_[3670016]:BFloat16:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:reduce_op=s:sum:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5232,
+        "compilation_time_ms": 1116
+      },
+      {
+        "key": "all_gather_into_tensor--n64--_[768,1,4096]:BFloat16:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:group_size=i4:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5221,
+        "compilation_time_ms": 2353
+      },
+      {
+        "key": "all_gather_into_tensor--n64--_[1536,1]:BFloat16:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:group_size=i4:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5214,
+        "compilation_time_ms": 1335
+      },
+      {
+        "key": "all_gather_into_tensor--n64--_[768,1,1024]:BFloat16:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:group_size=i4:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5213,
+        "compilation_time_ms": 6188
+      },
+      {
+        "key": "all_reduce--n64--_[1]:BFloat16:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:reduce_op=s:sum:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5212,
+        "compilation_time_ms": 1086
+      },
+      {
+        "key": "all_reduce--n64--_[10]:Int:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:reduce_op=s:sum:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5209,
+        "compilation_time_ms": 1077
+      },
+      {
+        "key": "all_gather_into_tensor--n64--_[4608,1]:BFloat16:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:group_size=i4:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5208,
+        "compilation_time_ms": 3503
+      },
+      {
+        "key": "all_reduce--n64--_[1]:Int:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:reduce_op=s:sum:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5202,
+        "compilation_time_ms": 1100
+      },
+      {
+        "key": "all_gather_into_tensor--n64--_[768,1]:BFloat16:S(C)_kw:group_name=s:[[0,1,2,3]]_kw:group_size=i4:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 5202,
+        "compilation_time_ms": 0
+      },
+      {
+        "key": "cat--n64--_TL[[1,1024,6,128]:BFloat16:S(C),[1,4096,6,128]:BFloat16:S(C)]_i1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4977,
+        "compilation_time_ms": 1846
+      },
+      {
+        "key": "cat--n64--_TL[[1,128]:Float:S(C),[1,128]:Float:S(C)]_i-1:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4886,
+        "compilation_time_ms": 5240
+      },
+      {
+        "key": "rsqrt--n64--_[1,4096,6,1]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4742,
+        "compilation_time_ms": 3848
+      },
+      {
+        "key": "rsqrt--n64--_[1,1024,6,1]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4740,
+        "compilation_time_ms": 2783
+      },
+      {
+        "key": "_to_copy--n64--_[1,1]:BFloat16:S(C)_kw:dtype=i6_kw:non_blocking=b0:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4544,
+        "compilation_time_ms": 5418
+      },
+      {
+        "key": "_to_copy--n64--_[1,1024,6,128]:BFloat16:S(C)_kw:dtype=i6_kw:non_blocking=b0:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4530,
+        "compilation_time_ms": 2306
+      },
+      {
+        "key": "_to_copy--n64--_[1,4096,6,128]:BFloat16:S(C)_kw:dtype=i6_kw:non_blocking=b0:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4525,
+        "compilation_time_ms": 3224
+      },
+      {
+        "key": "_to_copy--n64--_[1,4096,6,128]:Float:S(C)_kw:dtype=i15_kw:non_blocking=b0:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4517,
+        "compilation_time_ms": 3872
+      },
+      {
+        "key": "_to_copy--n64--_[1,1024,6,128]:Float:S(C)_kw:dtype=i15_kw:non_blocking=b0:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4516,
+        "compilation_time_ms": 3199
+      },
+      {
+        "key": "_to_copy--n64--_[1,1024,3584]:Float:S(C)_kw:dtype=i15_kw:non_blocking=b0:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4496,
+        "compilation_time_ms": 5072
+      },
+      {
+        "key": "_to_copy--n64--_[1,1024,3584]:BFloat16:S(C)_kw:dtype=i6_kw:non_blocking=b0:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4495,
+        "compilation_time_ms": 2685
+      },
+      {
+        "key": "_to_copy--n64--_[1,256]:Float:S(C)_kw:dtype=i15_kw:non_blocking=b0:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4493,
+        "compilation_time_ms": 4511
+      },
+      {
+        "key": "copy_--n64--_[1,5120,6,128]:BFloat16:S(C)_[1,5120,6,128]:BFloat16:S(C)_None:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4471,
+        "compilation_time_ms": 2302
+      },
+      {
+        "key": "copy_--n64--_[1,1024,3072]:BFloat16:S(C)_[1,1024,3072]:BFloat16:S(C)_None:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4465,
+        "compilation_time_ms": 4049
+      },
+      {
+        "key": "copy_--n64--_[1,4096,3072]:BFloat16:S(C)_[1,4096,3072]:BFloat16:S(C)_None:054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4448,
+        "compilation_time_ms": 3569
+      },
+      {
+        "key": "arange.start_out--n64--_i0_i128_i1_kw:out=[0]:Float:S(C):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166",
+        "neff_size_bytes": 4346,
+        "compilation_time_ms": 5706
+      }
+    ],
+    "forwards": []
+  },
+  "compile_breakdown": {},
+  "block_neffs": [],
+  "forward_shapes": [
+    [
+      [
+        1,
+        4096,
+        64
+      ],
+      [
+        1
+      ],
+      [
+        1,
+        1024,
+        3584
+      ]
+    ],
+    [
+      [
+        1,
+        4096,
+        64
+      ],
+      [
+        1
+      ],
+      [
+        1,
+        1024,
+        3584
+      ]
+    ]
+  ],
+  "neffs_before_prepare_runtime": 0,
+  "new_neffs": 104,
+  "new_neff_files": {
+    "01/14/0114614eb7df22f8033b61469b561af5.neff": 14297,
+    "02/1c/021c6dbdb5b776c1c192829e5a0694d0.neff": 4517,
+    "02/fa/02fa500bfffe3e547adca4b626f2b35f.neff": 139702,
+    "05/bb/05bbd713953130ff3558ea4d2444b210.neff": 4471,
+    "08/1f/081f27e69f6cfc6b2ecd2b6b109d2894.neff": 82078,
+    "0b/31/0b312cb5a65e5f79edf4931efb78fe89.neff": 4465,
+    "10/eb/10ebb5b1cb900310c9306760b9471c17.neff": 4495,
+    "15/53/155396420c3717cf1e8eb1ddcec9282e.neff": 7917,
+    "18/db/18db27f497ddc5c68a9c722c7781e01e.neff": 5202,
+    "1d/00/1d000ff79aa000bb24468ff95ea3f510.neff": 5244,
+    "1d/ea/1dea47540d845434984e9407f2862e5b.neff": 5205,
+    "1f/68/1f684ee621eef8406d4f77b1834c7f06.neff": 59194,
+    "20/1d/201dd8d3fc1562910d2405784ba35c73.neff": 23019,
+    "22/0c/220cf78a48c5cbed3e402db92756f3b3.neff": 40862,
+    "22/23/2223d996080e81bf94ffd004c3f41067.neff": 73401,
+    "22/5f/225faf9a85fec20776ec9e791812fe74.neff": 8646,
+    "23/9d/239d7eff1bc8a19ebec7555314156e17.neff": 5232,
+    "24/7d/247d3ce10c06764d6ac4075b62a3af1d.neff": 4640,
+    "26/a2/26a2f7a8e40b05d12e3279311a0295f1.neff": 61936,
+    "2b/07/2b07a077ada3a03cc7d442e5f5f97fe5.neff": 4977,
+    "2b/dd/2bdd17c393630a4e5440305399d5fca0.neff": 4742,
+    "2e/65/2e656db6e64ba5748b4235f7d444ac08.neff": 61678,
+    "2e/9c/2e9c1b41a5dbee0740a329655a8d02d7.neff": 12670,
+    "2e/e2/2ee2b31073b38b702a4f176278da5d72.neff": 5213,
+    "2f/55/2f5551df5cfecfa201978f90ca691d96.neff": 4516,
+    "34/59/34593d6a034b83bd2face9d857bff3e5.neff": 81002,
+    "38/5b/385be34b905fdf1402f062f179c37fd0.neff": 5214,
+    "38/76/3876a6fcb3bf738c5e044b7470dda0d9.neff": 133303,
+    "39/ba/39ba8fb9cea490d680acde1d67065e46.neff": 125736,
+    "3c/b6/3cb62b52525197b06f91f5f12adc6be5.neff": 4496,
+    "41/f4/41f4f618271e95b923e71eaff2462ece.neff": 112392,
+    "43/04/43046a8ce0614cfad5301012558491c0.neff": 61476,
+    "50/fd/50fd3587631bde9f9204f226178fa868.neff": 5209,
+    "54/d8/54d898080152b7861f3a18f4d113686c.neff": 98533,
+    "57/0a/570acdadaa1b684e47e5118be27c8028.neff": 74371,
+    "58/d8/58d8dc2889b0f6feac0b80a1897f43f4.neff": 7745,
+    "5a/14/5a14ef519eb85f645844539a1e27da34.neff": 59083,
+    "5b/1c/5b1c9d6cdfb86a3c9fc8cb04effa3ee2.neff": 76326,
+    "5b/25/5b255ff19ce9d6e9439edd1a955d60db.neff": 22231,
+    "5c/4d/5c4d54800644ce4e8f314aea8075d402.neff": 76288,
+    "61/54/615434cd0a0ef5b0c54a3f1ef40bfb1b.neff": 75129,
+    "6a/70/6a70552b107b7cb67f83448a9f9bd525.neff": 4544,
+    "70/0a/700a41b3ef3d9336c7edce89234fd8ca.neff": 33629,
+    "72/b6/72b67e53dd79a1d1725ef1471bdacfa1.neff": 58753,
+    "75/55/7555cbfd2747a2903a7b725773720e43.neff": 12286,
+    "77/f0/77f04bfd79cc4d14bed87b7abbd12983.neff": 65877,
+    "78/16/7816dd3e3dfbb06940f64454bdb6c8c5.neff": 40345,
+    "79/be/79be7078422a336fdbe2038794e4bba7.neff": 115817,
+    "83/ed/83ed7fd47c4c84d933df28af9fe64e9f.neff": 58862,
+    "83/fc/83fced1864ef59e12771f3aeb4a5dcf3.neff": 4346,
+    "84/f0/84f0c88d2ff178728f1c0ab4b1ec6866.neff": 78083,
+    "85/70/8570103089daaff8384982cbfd1cc3dc.neff": 12662,
+    "88/f9/88f93c1779706180ef8a82a681e6c01d.neff": 119056,
+    "8a/b7/8ab7ac488329b8a92847e4cf72c009e1.neff": 282099,
+    "8d/f3/8df3e23da83fb17576540da251db235e.neff": 119106,
+    "8e/12/8e121211ebe752c6652ae8a9e8d8c520.neff": 30493,
+    "8e/42/8e423a8aaba84cda994cdef86e3e9c44.neff": 58860,
+    "8e/c3/8ec3e356b2767c0540c7aeafaa0a8851.neff": 60664,
+    "90/00/9000a4298b6756d6c8bf8bf24c2eb969.neff": 62067,
+    "90/a9/90a98959bbb47d7ae8b3531801010f35.neff": 59150,
+    "9a/c7/9ac7d7b207322fafb806ba0771888156.neff": 72276,
+    "9a/cc/9acc59065cce0786d92425040a95ea4b.neff": 62602,
+    "9b/15/9b151219108adf5599baa1b5affbf37f.neff": 5630,
+    "9c/80/9c80813ded0c04c69cba482e70f97903.neff": 93218,
+    "9c/f0/9cf0f3af124f977e80fd30786f758373.neff": 65556,
+    "a0/2f/a02ffa4a9fe9464f52304e29388c5728.neff": 4740,
+    "a2/8c/a28c83e9a8b30585349b2b2e7e84a23f.neff": 4525,
+    "a3/2d/a32df84362a8c197318f281fc5227e9b.neff": 12699,
+    "a4/b8/a4b829c718b2ebbb3b9a33aa4bb80cfa.neff": 4530,
+    "a5/71/a571afb14e2f30fbd9df05b2a52edbc0.neff": 144569,
+    "ad/c2/adc2a562d68f2bf6703830f8eb6c960a.neff": 5221,
+    "ae/70/ae700554cce01878352b02eb2cb6405a.neff": 80980,
+    "b5/f4/b5f40d4d451d15f2b3c77e55f5756cc1.neff": 119104,
+    "b6/15/b6156c904f432b12cb5ee98a249d5a39.neff": 12311,
+    "b7/de/b7de5979d7bb3afc633520d793b18697.neff": 105678,
+    "b7/ea/b7ead0cce2894fd749a871b61ff4b1db.neff": 5202,
+    "ba/cc/bacc2fa5eb4c24df039f9ba957ab3526.neff": 58807,
+    "ba/f9/baf91dbc7a9faf2f6060e88176247e7d.neff": 69395,
+    "bb/45/bb451908d1a1e670efea2a7bb26651b5.neff": 4886,
+    "bc/e9/bce974e8a10d50e818344dbe15747c36.neff": 5245,
+    "bf/72/bf72bbbefb89f8ff0787c043dabf2b01.neff": 4637,
+    "c4/5e/c45ef2bb4175a8b63a975e86aad76dfc.neff": 61483,
+    "c7/01/c7010bb484ff96a24bed0dec1ff3fceb.neff": 68993,
+    "c7/69/c76994d2c36684e5ea424758d34abfd4.neff": 317448,
+    "c9/5d/c95d5c118b6e033bafaf1c6d97d6f2a2.neff": 90228,
+    "ca/bc/cabcb53a17973eb13302d2885b61d2ed.neff": 5208,
+    "cb/e9/cbe9fcf66da52d865b307a39109cb778.neff": 63179,
+    "cd/ac/cdacef4ec668cd1d84070f6bfd7beff3.neff": 4493,
+    "ce/3f/ce3f69ff164c75f3a465d7e6ec17ee08.neff": 76329,
+    "ce/94/ce94209be9112199ca701a365d80e95e.neff": 119049,
+    "d9/df/d9df54970632a0c25e8daab7a28c4f72.neff": 64469,
+    "dc/49/dc490ecd16e22f5a00924f87aa0908e2.neff": 62748,
+    "de/aa/deaa2704c5d4c1a06ea4aca1cc7b74dd.neff": 22183,
+    "e0/9e/e09e8e3e1acc36ed6397bb5bd1c3fc64.neff": 120398,
+    "e0/f6/e0f654c07d4adc16babf6dccc85dd041.neff": 76308,
+    "e3/c5/e3c5a3566ed5c2b6c571871545d103d4.neff": 72040,
+    "e9/69/e969d11509cb7b11367fd9d0bf7d5072.neff": 4448,
+    "eb/38/eb385379f5347e5f5733bce4b6ab8777.neff": 56615,
+    "ec/3b/ec3b7516ef6cb79e51c5335790e447b5.neff": 60806,
+    "ec/6c/ec6c57c587874036cb88b920110ffb6e.neff": 63856,
+    "ec/7d/ec7db272fcf5ce4106ac5ecd0ed7b394.neff": 62771,
+    "ec/e7/ece76ac20dcae656196d5cdaf7912e5c.neff": 71011,
+    "f9/6a/f96a181e57877f52d67dfa540c9f1fce.neff": 963810,
+    "fa/ce/facebdeaf650c0f29b2e8bebd2ba7221.neff": 5212
+  },
+  "snapshots": {
+    "pre_prepare": {
+      "t_s": 0.0076543979994312394,
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 0,
+        "InMemoryHits": 0
+      },
+      "compilation_time": {
+        "total_s": 0.0,
+        "samples": 0,
+        "largest_s": []
+      },
+      "neff_size": {
+        "total_bytes": 0,
+        "samples": 0,
+        "largest_bytes": []
+      },
+      "dynamo": {
+        "unique_graphs": 0,
+        "graph_breaks": 0
+      },
+      "neff_count": 0,
+      "device_memory": null,
+      "host_memory": {
+        "VmHWM_gib": 0.4915008544921875,
+        "VmRSS_gib": 0.4915008544921875,
+        "host_MemAvailable_gib": 120.61544418334961,
+        "host_Cached_gib": 43.44062805175781
+      },
+      "cache_entry_count": 0
+    },
+    "start": {
+      "t_s": 19.081320022,
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 1,
+        "InMemoryHits": 0
+      },
+      "compilation_time": {
+        "total_s": 0.0,
+        "samples": 0,
+        "largest_s": []
+      },
+      "neff_size": {
+        "total_bytes": 0,
+        "samples": 0,
+        "largest_bytes": []
+      },
+      "dynamo": {
+        "unique_graphs": 0,
+        "graph_breaks": 0
+      },
+      "neff_count": 1,
+      "device_memory": {
+        "allocated_bytes": 0,
+        "max_allocated_bytes": 512,
+        "allocated_gib": 0.0,
+        "max_allocated_gib": 4.76837158203125e-07
+      },
+      "host_memory": {
+        "VmHWM_gib": 0.5494194030761719,
+        "VmRSS_gib": 0.5494194030761719,
+        "host_MemAvailable_gib": 119.68113708496094,
+        "host_Cached_gib": 43.767940521240234
+      },
+      "cache_entry_count": 1
+    },
+    "after_load": {
+      "t_s": 45.51047981100055,
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 2,
+        "InMemoryHits": 4
+      },
+      "compilation_time": {
+        "total_s": 0.0,
+        "samples": 0,
+        "largest_s": []
+      },
+      "neff_size": {
+        "total_bytes": 0,
+        "samples": 0,
+        "largest_bytes": []
+      },
+      "dynamo": {
+        "unique_graphs": 0,
+        "graph_breaks": 0
+      },
+      "neff_count": 2,
+      "device_memory": {
+        "allocated_bytes": 724689152,
+        "max_allocated_bytes": 724689408,
+        "allocated_gib": 0.6749193668365479,
+        "max_allocated_gib": 0.674919605255127
+      },
+      "host_memory": {
+        "VmHWM_gib": 0.7676734924316406,
+        "VmRSS_gib": 0.6983070373535156,
+        "host_MemAvailable_gib": 119.2163314819336,
+        "host_Cached_gib": 46.40127944946289
+      },
+      "cache_entry_count": 2
+    },
+    "after_warmup": {
+      "t_s": 84.26843403100065,
+      "counters": {
+        "TotalCompilations": 92,
+        "PersistentHits": 7,
+        "InMemoryHits": 461
+      },
+      "compilation_time": {
+        "total_s": 345.303841782,
+        "samples": 92,
+        "retained": 92,
+        "largest_s": [
+          7.499,
+          6.634,
+          6.311,
+          6.188,
+          6.17,
+          6.039,
+          5.852,
+          5.784
+        ]
+      },
+      "neff_size": {
+        "total_bytes": 6074766,
+        "samples": 92,
+        "retained": 92,
+        "largest_bytes": [
+          963810,
+          317448,
+          282099,
+          144569,
+          139702,
+          133303,
+          125736,
+          120398
+        ]
+      },
+      "dynamo": {
+        "unique_graphs": 0,
+        "graph_breaks": 0
+      },
+      "neff_count": 104,
+      "device_memory": {
+        "allocated_bytes": 1081817856,
+        "max_allocated_bytes": 1440002816,
+        "allocated_gib": 1.007521390914917,
+        "max_allocated_gib": 1.3411071300506592
+      },
+      "host_memory": {
+        "VmHWM_gib": 1.4536781311035156,
+        "VmRSS_gib": 1.4536781311035156,
+        "host_MemAvailable_gib": 115.72455215454102,
+        "host_Cached_gib": 46.432716369628906
+      },
+      "cache_entry_count": 99
+    },
+    "after_forwards": {
+      "t_s": 84.90508815199973,
+      "counters": {
+        "TotalCompilations": 92,
+        "PersistentHits": 7,
+        "InMemoryHits": 1551
+      },
+      "compilation_time": {
+        "total_s": 345.303841782,
+        "samples": 92,
+        "retained": 92,
+        "largest_s": [
+          7.499,
+          6.634,
+          6.311,
+          6.188,
+          6.17,
+          6.039,
+          5.852,
+          5.784
+        ]
+      },
+      "neff_size": {
+        "total_bytes": 6074766,
+        "samples": 92,
+        "retained": 92,
+        "largest_bytes": [
+          963810,
+          317448,
+          282099,
+          144569,
+          139702,
+          133303,
+          125736,
+          120398
+        ]
+      },
+      "dynamo": {
+        "unique_graphs": 0,
+        "graph_breaks": 0
+      },
+      "neff_count": 104,
+      "device_memory": {
+        "allocated_bytes": 1081817856,
+        "max_allocated_bytes": 1498715136,
+        "allocated_gib": 1.007521390914917,
+        "max_allocated_gib": 1.395787239074707
+      },
+      "host_memory": {
+        "VmHWM_gib": 1.4575157165527344,
+        "VmRSS_gib": 1.4575157165527344,
+        "host_MemAvailable_gib": 115.72305297851562,
+        "host_Cached_gib": 46.43253707885742
+      },
+      "cache_entry_count": 99
+    },
+    "end": {
+      "t_s": 85.97461872900021,
+      "counters": {
+        "TotalCompilations": 92,
+        "PersistentHits": 7,
+        "InMemoryHits": 8636
+      },
+      "compilation_time": {
+        "total_s": 345.303841782,
+        "samples": 92,
+        "retained": 92,
+        "largest_s": [
+          7.499,
+          6.634,
+          6.311,
+          6.188,
+          6.17,
+          6.039,
+          5.852,
+          5.784
+        ]
+      },
+      "neff_size": {
+        "total_bytes": 6074766,
+        "samples": 92,
+        "retained": 92,
+        "largest_bytes": [
+          963810,
+          317448,
+          282099,
+          144569,
+          139702,
+          133303,
+          125736,
+          120398
+        ]
+      },
+      "dynamo": {
+        "unique_graphs": 0,
+        "graph_breaks": 0
+      },
+      "neff_count": 104,
+      "device_memory": {
+        "allocated_bytes": 1089682432,
+        "max_allocated_bytes": 1498715136,
+        "allocated_gib": 1.014845848083496,
+        "max_allocated_gib": 1.395787239074707
+      },
+      "host_memory": {
+        "VmHWM_gib": 1.460418701171875,
+        "VmRSS_gib": 1.460418701171875,
+        "host_MemAvailable_gib": 115.72892761230469,
+        "host_Cached_gib": 46.43254089355469
+      },
+      "cache_entry_count": 99
+    }
+  },
+  "sysfs_device_memory": {
+    "neuron_core0": {
+      "present": 4096,
+      "peak": 16215502848,
+      "collectives": {
+        "present": 4096,
+        "peak": 75808768
+      },
+      "constants": {
+        "present": 32768,
+        "peak": 1351680
+      },
+      "dma_rings": {
+        "present": 4096,
+        "peak": 45568000
+      },
+      "driver_memory": {
+        "present": 0,
+        "peak": 0
+      },
+      "model_code": {
+        "present": 4096,
+        "peak": 15851520
+      },
+      "model_shared_scratchpad": {
+        "present": 67108864,
+        "peak": 402653184
+      },
+      "nonshared_scratchpad": {
+        "present": 4096,
+        "peak": 8192
+      },
+      "notifications": {
+        "present": 0,
+        "peak": 0
+      },
+      "runtime_memory": {
+        "present": 8192,
+        "peak": 10412032
+      },
+      "tensors": {
+        "present": 25165824,
+        "peak": 15672029184
+      },
+      "uncategorized": {
+        "present": 0,
+        "peak": 0
+      }
+    },
+    "neuron_core1": {
+      "present": 4096,
+      "peak": 59510784,
+      "collectives": {
+        "present": 0,
+        "peak": 0
+      },
+      "constants": {
+        "present": 32768,
+        "peak": 1474560
+      },
+      "dma_rings": {
+        "present": 4096,
+        "peak": 37273600
+      },
+      "driver_memory": {
+        "present": 0,
+        "peak": 0
+      },
+      "model_code": {
+        "present": 4096,
+        "peak": 15519744
+      },
+      "model_shared_scratchpad": {
+        "present": 0,
+        "peak": 0
+      },
+      "nonshared_scratchpad": {
+        "present": 0,
+        "peak": 0
+      },
+      "notifications": {
+        "present": 0,
+        "peak": 0
+      },
+      "runtime_memory": {
+        "present": 8192,
+        "peak": 9756672
+      },
+      "tensors": {
+        "present": 0,
+        "peak": 0
+      },
+      "uncategorized": {
+        "present": 0,
+        "peak": 0
+      }
+    }
+  },
+  "outputs": {
+    "1000": {
+      "sha256": "a047ecd837a988d8feec88eb3d583192b01425197454c7be87664450025f794b",
+      "shape": [
+        1,
+        4096,
+        64
+      ]
+    },
+    "500": {
+      "sha256": "ec912444071e8462547723481480aa7870cbd0cc650437be2a6641b6551afe34",
+      "shape": [
+        1,
+        4096,
+        64
+      ]
+    }
+  },
+  "compiled_blocks": 0,
+  "load_report": {
+    "missing": 0,
+    "unexpected": 0,
+    "skipped": 1792
+  }
+}

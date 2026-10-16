@@ -1,0 +1,117 @@
+launch 2026-10-16T03:02:47Z head=9aa4e3f cache=/home/ubuntu/.cache/difflet-neuron-qwen-l4 args: --reference /home/ubuntu/qwen-v1-work/ref-l4.pt --num-layers 4 --exec-mode eager --save /home/ubuntu/qwen-v1-work/a-l4-eager/out.pt --out-json /home/ubuntu/qwen-v1-work/a-l4-eager/result.json
+torch-neuronx was imported before TORCH_NEURONX_HLO_CACHE_DIR=/home/ubuntu/.cache/difflet-neuron-qwen-l4/neuron/hlo was set: this process now keeps its HLO cache entries there (read at each lookup), but its HLO lowering locks stay in /tmp/hlo_cache (read at import), so it does not share those locks with processes started with the new value, such as the torchrun ranks launched by difflet.cli.runner.run_stage. Export the variable before python imports torch to keep both in one directory.
+torch-neuronx was imported before TORCH_NEURONX_HLO_CACHE_DIR=/home/ubuntu/.cache/difflet-neuron-qwen-l4/neuron/hlo was set: this process now keeps its HLO cache entries there (read at each lookup), but its HLO lowering locks stay in /tmp/hlo_cache (read at import), so it does not share those locks with processes started with the new value, such as the torchrun ranks launched by difflet.cli.runner.run_stage. Export the variable before python imports torch to keep both in one directory.
+torch-neuronx was imported before TORCH_NEURONX_HLO_CACHE_DIR=/home/ubuntu/.cache/difflet-neuron-qwen-l4/neuron/hlo was set: this process now keeps its HLO cache entries there (read at each lookup), but its HLO lowering locks stay in /tmp/hlo_cache (read at import), so it does not share those locks with processes started with the new value, such as the torchrun ranks launched by difflet.cli.runner.run_stage. Export the variable before python imports torch to keep both in one directory.
+torch-neuronx was imported before TORCH_NEURONX_HLO_CACHE_DIR=/home/ubuntu/.cache/difflet-neuron-qwen-l4/neuron/hlo was set: this process now keeps its HLO cache entries there (read at each lookup), but its HLO lowering locks stay in /tmp/hlo_cache (read at import), so it does not share those locks with processes started with the new value, such as the torchrun ranks launched by difflet.cli.runner.run_stage. Export the variable before python imports torch to keep both in one directory.
+Traceback (most recent call last):
+  File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/tests/manual/check_neuron_qwen_preflight.py", line 493, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/tests/manual/check_neuron_qwen_preflight.py", line 181, in main
+    get_backend("neuron").prepare_runtime(parallel)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/runtime.py", line 73, in prepare_runtime
+    init_process_group()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/runtime.py", line 188, in init_process_group
+    dist.init_process_group(PROCESS_GROUP_BACKEND, timeout=timeout)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/c10d_logger.py", line 83, in wrapper
+    return func(*args, **kwargs)
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/c10d_logger.py", line 97, in wrapper
+    func_return = func(*args, **kwargs)
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/distributed_c10d.py", line 2553, in init_process_group
+    default_pg, _ = _new_process_group_helper(
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        world_size,
+        ^^^^^^^^^^^
+    ...<9 lines>...
+        enable_reconfigure=enable_reconfigure,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/distributed_c10d.py", line 2874, in _new_process_group_helper
+    backend_result = creator_fn(dist_backend_opts, backend_options)
+  File "/home/ubuntu/workspace/torch_neuron_eager/torch_neuronx/distributed/backend.py", line 33, in _create_neuron_process_group
+    _neuron_runtime_setup(rank, size, prefix_store)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/workspace/torch_neuron_eager/torch_neuronx/distributed/backend.py", line 221, in _neuron_runtime_setup
+    torch_neuronx._C._nrt_barrier(0, rank, size)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/_dynamo/eval_frame.py", line 1548, in _fn
+    return fn(*args, **kwargs)
+RuntimeError: Compilation error occurred on Neuron for operation=nki_kernel_global;
+error message="COMPILATION FAILED: posix_spawn failed: No such file or directory"
+neff cache key=nki_75_set_rng_state_gpsimd_f8a4ffa8ba55d97e_()_[2]_((torch.Size([1, 6]), torch.int32),):054b98c82971b783da5c075a4f64a72db7eba8989763dba617dc40aa007b9166
+Note: Neuron errors are reported asynchronously. The Python traceback shows where the
+error was detected (synchronization point), not necessarily where the failing operation
+was dispatched. For synchronous error reporting, set NEURON_LAUNCH_BLOCKING=1.
+W1016 03:03:06.543000 88716 torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 88730 closing signal SIGTERM
+W1016 03:03:06.543000 88716 torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 88731 closing signal SIGTERM
+W1016 03:03:06.543000 88716 torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 88732 closing signal SIGTERM
+E1016 03:03:15.176000 88716 torch/distributed/elastic/multiprocessing/api.py:1002] failed (exitcode: 1) local_rank: 0 (pid: 88729) of binary: /home/ubuntu/workspace/native_venv/bin/python
+Traceback (most recent call last):
+  File "/home/ubuntu/workspace/native_venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 380, in wrapper
+    return f(*args, **kwargs)
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/run.py", line 1138, in main
+    run(args)
+    ~~~^^^^^^
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/run.py", line 1129, in run
+    elastic_launch(
+    ~~~~~~~~~~~~~~~
+        config=config,
+        ~~~~~~~~~~~~~~
+        entrypoint=cmd,
+        ~~~~~~~~~~~~~~~
+    )(*cmd_args)
+    ~^^^^^^^^^^^
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/launcher/api.py", line 197, in __call__
+    return launch_agent(
+        self._config,
+    ...<2 lines>...
+        health_check_server=self._health_check_server,
+    )
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/launcher/api.py", line 386, in launch_agent
+    raise ChildFailedError(
+    ...<2 lines>...
+    )
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/tests/manual/check_neuron_qwen_preflight.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-16_03:03:15
+  host      : ip-172-31-36-18.ap-southeast-4.compute.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : -15 (pid: 88730)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 88730
+[2]:
+  time      : 2026-10-16_03:03:15
+  host      : ip-172-31-36-18.ap-southeast-4.compute.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : -15 (pid: 88731)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 88731
+[3]:
+  time      : 2026-10-16_03:03:15
+  host      : ip-172-31-36-18.ap-southeast-4.compute.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : -15 (pid: 88732)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 88732
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-16_03:03:06
+  host      : ip-172-31-36-18.ap-southeast-4.compute.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 88729) 
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+EXIT rc=1 launch_wall_s=28.507732318 2026-10-16T03:03:15Z

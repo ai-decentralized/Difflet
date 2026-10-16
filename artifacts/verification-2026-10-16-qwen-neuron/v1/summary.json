@@ -1,0 +1,1365 @@
+{
+  "host": "trn2.3xlarge, 4 logical NeuronCores (config 2)",
+  "runs": {
+    "a-l4-eager": {
+      "label": "(a) 4 layers TP4 eager vs CPU fp32 (scratch cache root difflet-neuron-qwen-l4)",
+      "ok_all_ranks": true,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "eager_compiles_no_block": true
+      },
+      "parity": {
+        "1000": {
+          "gated": true,
+          "ok": true,
+          "ratio_vs_control": 1.0153726904035996,
+          "ratio_l2_vs_control": 1.0131444848869375,
+          "cosine": 0.9999680549559353,
+          "rel_l1": 0.012489962190096255,
+          "rel_l2": 0.013807988405913345,
+          "rel_max": 0.0323439972541347,
+          "err_cos": 0.9647588071962694,
+          "control_cosine": 0.9999691302723285,
+          "control_rel_l1": 0.012300864803771345,
+          "control_rel_l2": 0.013628844268400922
+        },
+        "500": {
+          "gated": true,
+          "ok": true,
+          "ratio_vs_control": 1.0314709700958125,
+          "ratio_l2_vs_control": 1.0297402194861587,
+          "cosine": 0.9999892393695846,
+          "rel_l1": 0.004667907880270197,
+          "rel_l2": 0.004742194136137439,
+          "rel_max": 0.005725002681476601,
+          "err_cos": 0.7210474300055664,
+          "control_cosine": 0.9999899140317982,
+          "control_rel_l1": 0.0045254864320966775,
+          "control_rel_l2": 0.00460523348160937
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 1.504351070998382,
+        "build on meta": 4.816889417999846,
+        "load checkpoint": 20.104772664999473,
+        "eval": 0.0017647919994487893,
+        "compile": 0.0006869999997434206,
+        "warmup forward": 33.60396457599927
+      },
+      "prepare_runtime_s_rank_max": 19.08131446600055,
+      "adapter_forward_ms_per_rank": [
+        [
+          547.4,
+          81.8
+        ],
+        [
+          102.4,
+          86.2
+        ],
+        [
+          81.3,
+          86.7
+        ],
+        [
+          103.3,
+          84.7
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        80.95,
+        81.06,
+        80.93,
+        80.94
+      ],
+      "bench_p10_p90_ms_rank0": [
+        79.83,
+        82.24
+      ],
+      "bench_samples_per_rank": 10,
+      "bench_spread_drift_rank0": [
+        0.0298,
+        1.013
+      ],
+      "peak_hbm_gib_per_rank": [
+        1.396,
+        1.396,
+        1.396,
+        1.396
+      ],
+      "weights_gib_per_rank": [
+        0.675,
+        0.675,
+        0.675,
+        0.675
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.46,
+        1.41,
+        1.51,
+        1.5
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 92,
+          "PersistentHits": 7,
+          "InMemoryHits": 8636
+        },
+        {
+          "TotalCompilations": 6,
+          "PersistentHits": 98,
+          "InMemoryHits": 8639
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 103,
+          "InMemoryHits": 8639
+        },
+        {
+          "TotalCompilations": 5,
+          "PersistentHits": 99,
+          "InMemoryHits": 8639
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 92,
+          "PersistentHits": 5,
+          "InMemoryHits": 457
+        },
+        {
+          "TotalCompilations": 6,
+          "PersistentHits": 96,
+          "InMemoryHits": 460
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 101,
+          "InMemoryHits": 460
+        },
+        {
+          "TotalCompilations": 3,
+          "PersistentHits": 99,
+          "InMemoryHits": 460
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 8175
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 8175
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 8175
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 8175
+        }
+      ],
+      "compilation_time_s_per_rank": [
+        345.3,
+        24.2,
+        1.1,
+        16.2
+      ],
+      "new_neffs": 104,
+      "block_neffs_per_rank": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "compiled_blocks": 0,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "unwarmed_shapes_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_stats_rank0": {
+        "1000": {
+          "finite": true,
+          "absmean": 23.19522232856616,
+          "std": 28.992268346297806,
+          "min": -124.0,
+          "max": 131.0
+        },
+        "500": {
+          "finite": true,
+          "absmean": 67.91140262247154,
+          "std": 84.84250935523963,
+          "min": -342.0,
+          "max": 380.0
+        }
+      },
+      "output_sha256_rank0": {
+        "1000": "a047ecd837a988d8feec88eb3d583192b01425197454c7be87664450025f794b",
+        "500": "ec912444071e8462547723481480aa7870cbd0cc650437be2a6641b6551afe34"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      },
+      "pg_timeout": {
+        "env": "7200",
+        "configured_s": 7200.0,
+        "backend_options_timeout_s": "unreadable: RuntimeError: Backend neuron does not implement getBackendOptions."
+      },
+      "torch_threads": 3
+    },
+    "b-l4-compile-cold": {
+      "label": "(b) 4 layers TP4 compile, cold block NEFF, vs CPU fp32 and vs (a)",
+      "ok_all_ranks": true,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "vs_eager_t1000": true,
+        "vs_eager_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true,
+        "neff_cache_cold": true
+      },
+      "parity": {
+        "1000": {
+          "gated": true,
+          "ok": true,
+          "ratio_vs_control": 1.0406080942945888,
+          "ratio_l2_vs_control": 1.0399145030816361,
+          "cosine": 0.9999670218088128,
+          "rel_l1": 0.012800379481627879,
+          "rel_l2": 0.01417283281495115,
+          "rel_max": 0.03617474121902952,
+          "err_cos": 0.955513154600703,
+          "control_cosine": 0.9999691302723285,
+          "control_rel_l1": 0.012300864803771345,
+          "control_rel_l2": 0.013628844268400922,
+          "vs_eager": {
+            "cosine": 0.9999912630205229,
+            "rel_l1": 0.003505278530438545,
+            "rel_l2": 0.004195626705968145,
+            "rel_max": 0.003816793893129771
+          }
+        },
+        "500": {
+          "gated": true,
+          "ok": true,
+          "ratio_vs_control": 0.9635286681945779,
+          "ratio_l2_vs_control": 0.9652149714089768,
+          "cosine": 0.9999904990211376,
+          "rel_l1": 0.004360435914850744,
+          "rel_l2": 0.004445040303283251,
+          "rel_max": 0.006564784193880746,
+          "err_cos": 0.5253131851055646,
+          "control_cosine": 0.9999899140317982,
+          "control_rel_l1": 0.0045254864320966775,
+          "control_rel_l2": 0.00460523348160937,
+          "vs_eager": {
+            "cosine": 0.9999902958723575,
+            "rel_l1": 0.0037546188302908447,
+            "rel_l2": 0.004406664999157708,
+            "rel_max": 0.005263157894736842
+          }
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.033352063999700476,
+        "build on meta": 1.1519179539991455,
+        "load checkpoint": 0.26464249299897347,
+        "eval": 0.0015812960009498056,
+        "compile": 0.23233811799946125,
+        "warmup forward": 24.116437606000545
+      },
+      "prepare_runtime_s_rank_max": 17.804956281999694,
+      "adapter_forward_ms_per_rank": [
+        [
+          34.2,
+          33.9
+        ],
+        [
+          34.8,
+          30.2
+        ],
+        [
+          34.1,
+          34.0
+        ],
+        [
+          34.6,
+          34.0
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        28.28,
+        28.29,
+        28.32,
+        28.32
+      ],
+      "bench_p10_p90_ms_rank0": [
+        28.08,
+        29.55
+      ],
+      "bench_samples_per_rank": 10,
+      "bench_spread_drift_rank0": [
+        0.052,
+        1.0023
+      ],
+      "peak_hbm_gib_per_rank": [
+        0.964,
+        0.964,
+        0.964,
+        0.964
+      ],
+      "weights_gib_per_rank": [
+        0.675,
+        0.675,
+        0.675,
+        0.675
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.45,
+        1.37,
+        1.45,
+        1.43
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 46,
+          "InMemoryHits": 691
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 50,
+          "InMemoryHits": 694
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 51,
+          "InMemoryHits": 694
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 51,
+          "InMemoryHits": 694
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 12
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 48,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 49,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 49,
+          "InMemoryHits": 15
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 675
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 675
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 675
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 675
+        }
+      ],
+      "compilation_time_s_per_rank": [
+        0.0,
+        13.9,
+        0.0,
+        0.0
+      ],
+      "new_neffs": 1,
+      "block_neffs_per_rank": [
+        [
+          [
+            "a0654ef7f432",
+            2580116,
+            0.0
+          ]
+        ],
+        [
+          [
+            "a0654ef7f432",
+            2580116,
+            13.9
+          ]
+        ],
+        [
+          [
+            "a0654ef7f432",
+            2580116,
+            0.0
+          ]
+        ],
+        [
+          [
+            "a0654ef7f432",
+            2580116,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 4,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "unwarmed_shapes_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_stats_rank0": {
+        "1000": {
+          "finite": true,
+          "absmean": 23.203322122379177,
+          "std": 29.002446773991224,
+          "min": -124.5,
+          "max": 131.0
+        },
+        "500": {
+          "finite": true,
+          "absmean": 67.90390049644338,
+          "std": 84.83281584729343,
+          "min": -342.0,
+          "max": 380.0
+        }
+      },
+      "output_sha256_rank0": {
+        "1000": "08a5db987c9f3023818d7ca7d1241b17a44dcda314b47ef0fdc9e2a999832ad7",
+        "500": "d9b8f674edc61171cb0368c56fbfae6aad48a12cccbe0fb89e15355b01188396"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      },
+      "pg_timeout": {
+        "env": "7200",
+        "configured_s": 7200.0,
+        "backend_options_timeout_s": "unreadable: RuntimeError: Backend neuron does not implement getBackendOptions."
+      },
+      "torch_threads": 3
+    },
+    "c-l60-compile-cold": {
+      "label": "(c) 60 layers TP4 compile, empty cache root difflet-neuron-qwen",
+      "ok_all_ranks": true,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true,
+        "neff_cache_cold": true
+      },
+      "parity": {
+        "1000": {
+          "gated": true,
+          "ok": true,
+          "ratio_vs_control": 1.0184269782902993,
+          "ratio_l2_vs_control": 1.0200519238668844,
+          "cosine": 0.9998893025425155,
+          "rel_l1": 0.025021472612078318,
+          "rel_l2": 0.025187641216679005,
+          "rel_max": 0.026406135711373464,
+          "err_cos": 0.9641247507275894,
+          "control_cosine": 0.9998644933181546,
+          "control_rel_l1": 0.02456874488349034,
+          "control_rel_l2": 0.024692508907973944
+        },
+        "500": {
+          "gated": true,
+          "ok": true,
+          "ratio_vs_control": 0.89125901738311,
+          "ratio_l2_vs_control": 0.8930923531332744,
+          "cosine": 0.999929804777232,
+          "rel_l1": 0.01462456435840646,
+          "rel_l2": 0.014788433427837835,
+          "rel_max": 0.018029108116950913,
+          "err_cos": 0.8670734745865387,
+          "control_cosine": 0.9999032413067195,
+          "control_rel_l1": 0.016408882348642823,
+          "control_rel_l2": 0.01655868329401202
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 1.4548870990001888,
+        "build on meta": 1.3138658599982591,
+        "load checkpoint": 53.423686873000406,
+        "eval": 0.015865868001128547,
+        "compile": 0.15626432499993825,
+        "warmup forward": 29.32229874299992
+      },
+      "prepare_runtime_s_rank_max": 20.126767770001607,
+      "adapter_forward_ms_per_rank": [
+        [
+          351.2,
+          354.4
+        ],
+        [
+          1511.1,
+          352.9
+        ],
+        [
+          1513.3,
+          354.2
+        ],
+        [
+          667.5,
+          353.0
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        348.98,
+        349.06,
+        348.91,
+        348.82
+      ],
+      "bench_p10_p90_ms_rank0": [
+        348.22,
+        349.52
+      ],
+      "bench_samples_per_rank": 10,
+      "bench_spread_drift_rank0": [
+        0.0037,
+        1.0005
+      ],
+      "peak_hbm_gib_per_rank": [
+        10.115,
+        10.153,
+        10.153,
+        10.153
+      ],
+      "weights_gib_per_rank": [
+        9.757,
+        9.757,
+        9.757,
+        9.757
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.35,
+        1.43,
+        1.34,
+        1.34
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 38,
+          "PersistentHits": 8,
+          "InMemoryHits": 1587
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 50,
+          "InMemoryHits": 1590
+        },
+        {
+          "TotalCompilations": 9,
+          "PersistentHits": 42,
+          "InMemoryHits": 1590
+        },
+        {
+          "TotalCompilations": 3,
+          "PersistentHits": 48,
+          "InMemoryHits": 1590
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 36,
+          "PersistentHits": 8,
+          "InMemoryHits": 68
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 48,
+          "InMemoryHits": 71
+        },
+        {
+          "TotalCompilations": 9,
+          "PersistentHits": 40,
+          "InMemoryHits": 71
+        },
+        {
+          "TotalCompilations": 3,
+          "PersistentHits": 46,
+          "InMemoryHits": 71
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1515
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1515
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1515
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1515
+        }
+      ],
+      "compilation_time_s_per_rank": [
+        157.1,
+        1.1,
+        33.6,
+        3.3
+      ],
+      "new_neffs": 51,
+      "block_neffs_per_rank": [
+        [
+          [
+            "a0654ef7f432",
+            2582059,
+            0.0
+          ]
+        ],
+        [
+          [
+            "a0654ef7f432",
+            2582059,
+            0.0
+          ]
+        ],
+        [
+          [
+            "a0654ef7f432",
+            2582059,
+            16.5
+          ]
+        ],
+        [
+          [
+            "a0654ef7f432",
+            2582059,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 60,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "unwarmed_shapes_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_stats_rank0": {
+        "1000": {
+          "finite": true,
+          "absmean": 0.8552167400861777,
+          "std": 1.070770723861567,
+          "min": -4.625,
+          "max": 5.15625
+        },
+        "500": {
+          "finite": true,
+          "absmean": 1.0868698432220754,
+          "std": 1.3644896392044887,
+          "min": -6.28125,
+          "max": 6.625
+        }
+      },
+      "output_sha256_rank0": {
+        "1000": "669790dbca47e4e9d309668b55651612348cdf7d635de5104776532b70fd2aa3",
+        "500": "6d0de39a7966dcd180dcc143c7a9a6e5c3be00ee5fb08d963dec3ab093faf026"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0
+      },
+      "pg_timeout": {
+        "env": "7200",
+        "configured_s": 7200.0,
+        "backend_options_timeout_s": "unreadable: RuntimeError: Backend neuron does not implement getBackendOptions."
+      },
+      "torch_threads": 3
+    },
+    "c-l60-compile-warm": {
+      "label": "(c) 60 layers TP4 compile, second launch on the warm cache",
+      "ok_all_ranks": true,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "equal_to_t1000": true,
+        "equal_to_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true,
+        "warm_counters": true
+      },
+      "parity": {
+        "1000": {
+          "gated": true,
+          "ok": true,
+          "ratio_vs_control": 1.0184269782902993,
+          "ratio_l2_vs_control": 1.0200519238668844,
+          "cosine": 0.9998893025425155,
+          "rel_l1": 0.025021472612078318,
+          "rel_l2": 0.025187641216679005,
+          "rel_max": 0.026406135711373464,
+          "err_cos": 0.9641247507275894,
+          "control_cosine": 0.9998644933181546,
+          "control_rel_l1": 0.02456874488349034,
+          "control_rel_l2": 0.024692508907973944
+        },
+        "500": {
+          "gated": true,
+          "ok": true,
+          "ratio_vs_control": 0.89125901738311,
+          "ratio_l2_vs_control": 0.8930923531332744,
+          "cosine": 0.999929804777232,
+          "rel_l1": 0.01462456435840646,
+          "rel_l2": 0.014788433427837835,
+          "rel_max": 0.018029108116950913,
+          "err_cos": 0.8670734745865387,
+          "control_cosine": 0.9999032413067195,
+          "control_rel_l1": 0.016408882348642823,
+          "control_rel_l2": 0.01655868329401202
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.032818908999615815,
+        "build on meta": 1.3034917670011055,
+        "load checkpoint": 3.4299495200011734,
+        "eval": 0.00985370300077193,
+        "compile": 0.15998343200044474,
+        "warmup forward": 8.130447483001262
+      },
+      "prepare_runtime_s_rank_max": 21.9510189850007,
+      "adapter_forward_ms_per_rank": [
+        [
+          351.8,
+          355.1
+        ],
+        [
+          354.5,
+          355.0
+        ],
+        [
+          357.0,
+          355.3
+        ],
+        [
+          352.7,
+          355.3
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        348.64,
+        348.66,
+        348.68,
+        348.68
+      ],
+      "bench_p10_p90_ms_rank0": [
+        347.89,
+        350.26
+      ],
+      "bench_samples_per_rank": 30,
+      "bench_spread_drift_rank0": [
+        0.0068,
+        1.0024
+      ],
+      "peak_hbm_gib_per_rank": [
+        10.153,
+        10.153,
+        10.153,
+        10.153
+      ],
+      "weights_gib_per_rank": [
+        9.757,
+        9.757,
+        9.757,
+        9.757
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.41,
+        1.45,
+        1.43,
+        1.54
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 46,
+          "InMemoryHits": 3607
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 51,
+          "InMemoryHits": 3610
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 51,
+          "InMemoryHits": 3610
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 51,
+          "InMemoryHits": 3610
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 68
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 49,
+          "InMemoryHits": 71
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 49,
+          "InMemoryHits": 71
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 49,
+          "InMemoryHits": 71
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 3535
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 3535
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 3535
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 3535
+        }
+      ],
+      "compilation_time_s_per_rank": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "new_neffs": 0,
+      "block_neffs_per_rank": [
+        [
+          [
+            "a0654ef7f432",
+            2582059,
+            0.0
+          ]
+        ],
+        [
+          [
+            "a0654ef7f432",
+            2582059,
+            0.0
+          ]
+        ],
+        [
+          [
+            "a0654ef7f432",
+            2582059,
+            0.0
+          ]
+        ],
+        [
+          [
+            "a0654ef7f432",
+            2582059,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 60,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "unwarmed_shapes_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_stats_rank0": {
+        "1000": {
+          "finite": true,
+          "absmean": 0.8552167400861777,
+          "std": 1.070770723861567,
+          "min": -4.625,
+          "max": 5.15625
+        },
+        "500": {
+          "finite": true,
+          "absmean": 1.0868698432220754,
+          "std": 1.3644896392044887,
+          "min": -6.28125,
+          "max": 6.625
+        }
+      },
+      "output_sha256_rank0": {
+        "1000": "669790dbca47e4e9d309668b55651612348cdf7d635de5104776532b70fd2aa3",
+        "500": "6d0de39a7966dcd180dcc143c7a9a6e5c3be00ee5fb08d963dec3ab093faf026"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0
+      },
+      "pg_timeout": {
+        "env": "7200",
+        "configured_s": 7200.0,
+        "backend_options_timeout_s": "unreadable: RuntimeError: Backend neuron does not implement getBackendOptions."
+      },
+      "torch_threads": 3
+    },
+    "d-l60-eager": {
+      "label": "(d) 60 layers TP4 eager vs CPU fp32 and vs (c) cold",
+      "ok_all_ranks": true,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "vs_compile_t1000": true,
+        "vs_compile_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "eager_compiles_no_block": true
+      },
+      "parity": {
+        "1000": {
+          "gated": true,
+          "ok": true,
+          "ratio_vs_control": 0.903537755259572,
+          "ratio_l2_vs_control": 0.9051918465032962,
+          "cosine": 0.9999107129499275,
+          "rel_l1": 0.022198788601573958,
+          "rel_l2": 0.022351457733208024,
+          "rel_max": 0.025579727042105368,
+          "err_cos": 0.9611853934197879,
+          "control_cosine": 0.9998644933181546,
+          "control_rel_l1": 0.02456874488349034,
+          "control_rel_l2": 0.024692508907973944,
+          "vs_compile": {
+            "cosine": 0.9999797159796426,
+            "rel_l1": 0.006333430099427842,
+            "rel_l2": 0.0067777000747028145,
+            "rel_max": 0.007575757575757576
+          }
+        },
+        "500": {
+          "gated": true,
+          "ok": true,
+          "ratio_vs_control": 1.0175322160144906,
+          "ratio_l2_vs_control": 1.0169454216851181,
+          "cosine": 0.9999046454463332,
+          "rel_l1": 0.01669656641853559,
+          "rel_l2": 0.016839277164979377,
+          "rel_max": 0.02040577827933229,
+          "err_cos": 0.9566071930055801,
+          "control_cosine": 0.9999032413067195,
+          "control_rel_l1": 0.016408882348642823,
+          "control_rel_l2": 0.01655868329401202,
+          "vs_compile": {
+            "cosine": 0.9999667209470084,
+            "rel_l1": 0.007834608066293741,
+            "rel_l2": 0.008196265372784199,
+            "rel_max": 0.009433962264150943
+          }
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.031877704999715206,
+        "build on meta": 1.3102058789991133,
+        "load checkpoint": 3.451667264000207,
+        "eval": 0.015718631000709138,
+        "compile": 0.0011023239985661348,
+        "warmup forward": 23.24983838999833
+      },
+      "prepare_runtime_s_rank_max": 20.140253999999914,
+      "adapter_forward_ms_per_rank": [
+        [
+          1150.6,
+          1165.7
+        ],
+        [
+          1150.1,
+          1165.8
+        ],
+        [
+          1180.9,
+          1166.0
+        ],
+        [
+          1181.0,
+          1140.9
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        1155.29,
+        1167.37,
+        1155.31,
+        1155.27
+      ],
+      "bench_p10_p90_ms_rank0": [
+        1152.13,
+        1164.97
+      ],
+      "bench_samples_per_rank": 3,
+      "bench_spread_drift_rank0": [
+        0.0111,
+        1.0
+      ],
+      "peak_hbm_gib_per_rank": [
+        10.477,
+        10.145,
+        10.477,
+        10.477
+      ],
+      "weights_gib_per_rank": [
+        9.757,
+        9.757,
+        9.757,
+        9.757
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.5,
+        1.55,
+        1.55,
+        1.55
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 15,
+          "PersistentHits": 84,
+          "InMemoryHits": 60724
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 104,
+          "InMemoryHits": 60727
+        },
+        {
+          "TotalCompilations": 39,
+          "PersistentHits": 65,
+          "InMemoryHits": 60727
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 104,
+          "InMemoryHits": 60727
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 15,
+          "PersistentHits": 82,
+          "InMemoryHits": 7513
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 102,
+          "InMemoryHits": 7516
+        },
+        {
+          "TotalCompilations": 39,
+          "PersistentHits": 63,
+          "InMemoryHits": 7516
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 102,
+          "InMemoryHits": 7516
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 53207
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 53207
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 53207
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 53207
+        }
+      ],
+      "compilation_time_s_per_rank": [
+        57.0,
+        0.0,
+        146.0,
+        0.0
+      ],
+      "new_neffs": 54,
+      "block_neffs_per_rank": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "compiled_blocks": 0,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "unwarmed_shapes_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_stats_rank0": {
+        "1000": {
+          "finite": true,
+          "absmean": 0.8532277517146554,
+          "std": 1.0682911335628076,
+          "min": -4.59375,
+          "max": 5.15625
+        },
+        "500": {
+          "finite": true,
+          "absmean": 1.0876758960109782,
+          "std": 1.3655074695426703,
+          "min": -6.3125,
+          "max": 6.65625
+        }
+      },
+      "output_sha256_rank0": {
+        "1000": "f309018b77c1c0d5bc7601f042d3890051481857ce45de19845cee2645e666d2",
+        "500": "802bd8eedadb7826ff3b6728d6fb3873c28c8074f4b3feebd8b1d25ee07a4c50"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0
+      },
+      "pg_timeout": {
+        "env": "7200",
+        "configured_s": 7200.0,
+        "backend_options_timeout_s": "unreadable: RuntimeError: Backend neuron does not implement getBackendOptions."
+      },
+      "torch_threads": 3
+    }
+  },
+  "references": {
+    "ref-l4.pt": {
+      "num_layers": 4,
+      "prompt": "A cozy coffee shop storefront on a rainy evening, a chalkboard sign by the door reads \"Fresh Bread\", warm light through the windows, photorealistic",
+      "valid_rows": 36,
+      "timesteps": [
+        1000.0,
+        500.0
+      ],
+      "dit_timesteps": [
+        1.0,
+        0.5
+      ],
+      "timings_s": {
+        "load_fp32_s": 0.9318961850003689,
+        "fp32_t1000_s": 6.722153042999707,
+        "fp32_t500_s": 6.6546150209996995,
+        "bf16_t1000_s": 2.3553360580008302,
+        "bf16_t500_s": 2.190724742000384
+      },
+      "threads": 12,
+      "versions": {
+        "torch": "2.14.0+cpu",
+        "diffusers": "0.38.0"
+      },
+      "loading_info_counts": {
+        "missing_keys": 0,
+        "unexpected_keys": 1792,
+        "mismatched_keys": 0,
+        "error_msgs": 0
+      },
+      "fp32_output_sha256": {
+        "1000": "edf8b45d45bfd656eeeae805b9ad1a806dc30b5d513b9f58adf3b39399fd76bf",
+        "500": "7683a0419629a6f8ea85b959b9e44469079cfa17c02b88ed068225ef107f61e1"
+      }
+    },
+    "ref-l60.pt": {
+      "num_layers": 60,
+      "prompt": "A cozy coffee shop storefront on a rainy evening, a chalkboard sign by the door reads \"Fresh Bread\", warm light through the windows, photorealistic",
+      "valid_rows": 36,
+      "timesteps": [
+        1000.0,
+        500.0
+      ],
+      "dit_timesteps": [
+        1.0,
+        0.5
+      ],
+      "timings_s": {
+        "load_fp32_s": 258.8503915449983,
+        "fp32_t1000_s": 100.15197571600038,
+        "fp32_t500_s": 100.56803434299945,
+        "bf16_t1000_s": 34.863246153001455,
+        "bf16_t500_s": 35.00214719700125
+      },
+      "threads": 12,
+      "versions": {
+        "torch": "2.14.0+cpu",
+        "diffusers": "0.38.0"
+      },
+      "loading_info_counts": {
+        "missing_keys": 0,
+        "unexpected_keys": 0,
+        "mismatched_keys": 0,
+        "error_msgs": 0
+      },
+      "fp32_output_sha256": {
+        "1000": "9dd5f0401234c2e747d686d00f29e7ab2be8b70a800d3d461508bb1360f55425",
+        "500": "3a7fa32d67356edab27a6e7b1059dd7002701def57d55fc5aacb8efa64d7c314"
+      }
+    }
+  },
+  "prompt_embeds": {
+    "prompt": "A cozy coffee shop storefront on a rainy evening, a chalkboard sign by the door reads \"Fresh Bread\", warm light through the windows, photorealistic",
+    "valid_rows": 36,
+    "encoder_dtype": "bfloat16",
+    "load_s": 1.4055719320003845,
+    "encode_s": 0.5684572520003712,
+    "stats": {
+      "absmean": 2.8906822204589844,
+      "std": 5.20136833190918,
+      "absmax": 170.0
+    },
+    "sha256": "b5260c2ec733e9ce41e391e268ef1deaecef1d2a008662ddfd89ee7272a13528"
+  },
+  "derived": {
+    "l60_cold_compile_wall_s": {
+      "value": 21.191851259998657,
+      "definition": "rank-max 'warmup forward' cold launch minus warm launch",
+      "cold_warmup_s": 29.32229874299992,
+      "warm_warmup_s": 8.130447483001262
+    },
+    "l60_compile_vs_eager_speedup": 3.313448246192675
+  }
+}
