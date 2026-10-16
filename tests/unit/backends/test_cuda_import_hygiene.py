@@ -69,7 +69,7 @@ def test_scan_detects_a_forbidden_import(tmp_path):
 
 # Modules Phase 2 has not landed yet: their import is expected to fail (strict), so
 # landing one flips its test and the executor must remove it from this set.
-_PENDING = {"attention", "embeddings", "linear", "mx", "norm", "platform"}
+_PENDING = {"attention", "mx", "platform"}
 
 
 @pytest.mark.parametrize(
