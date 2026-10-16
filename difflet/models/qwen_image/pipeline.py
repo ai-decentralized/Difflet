@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from difflet.models.qwen_image.application import QwenImageDiTInputBundle
+from difflet.models.qwen_image.contract import QwenImageDiTInputBundle
 
 
 @dataclass
