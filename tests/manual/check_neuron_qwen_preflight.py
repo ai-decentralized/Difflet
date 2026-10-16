@@ -49,6 +49,11 @@ Checks (every rank; rank 0 prints one PASS/FAIL line each, every rank a summary 
 * compile mode: compiled_blocks (all of them), one_graph (one Dynamo graph, no break),
   warmup_neff, block_neff (the Dynamo graph's NEFF is a runtime cache entry the warm-up added);
   eager mode: no block compiled, no Dynamo graph;
+* ranks_identical: the sha256 of every rank's outputs equals rank 0's (TP gathers the final
+  projection and CP the image tokens, so each rank holds the full output), all-gathered over
+  a gloo side group; the per-rank sequence/head arithmetic of the CP mode is recorded as
+  ``shape_rules``; cp_scatter: the diffusers model (eager, inside the trace module) receives
+  ``image_seq_len / cp`` image tokens per rank in every parity forward;
 * ``--compare NAME=PATH`` (another launch's ``--save``, e.g. eager): vs_NAME_t<t>, cosine >=
   0.999 and rel_l1 <= 2x the bf16 control's rel_l1 from fp32 (the Wan preflight's D58 guard;
   without a control only the cosine);
@@ -151,6 +156,49 @@ def _stats(t: torch.Tensor) -> dict[str, Any]:
             "std": float(t.std()), "min": float(t.min()), "max": float(t.max())}
 
 
+def gather_hashes(hashes: dict[str, str], world: int) -> list[dict[str, str]]:
+    """Every rank's output hashes, in rank order, over a gloo side group (host objects only:
+    the neuron group carries device tensors)."""
+    import torch.distributed as dist
+
+    if world <= 1 or not dist.is_initialized():
+        return [hashes]
+    group = dist.new_group(backend="gloo")
+    gathered: list[Any] = [None] * world
+    dist.all_gather_object(gathered, hashes, group=group)
+    dist.destroy_process_group(group)
+    return gathered
+
+
+def shape_rules(config: NeuronQwenImageConfig, tp: int, cp: int, cp_mode: str) -> dict[str, Any]:
+    """The per-rank sequence and head arithmetic of the CP mode, as recorded evidence.
+
+    The image tokens are scattered over cp (text replicated). Ring attends the joint
+    ``[txt ‖ img/cp]`` query to each K/V block through the flash kernel's logsumexp path, which
+    needs the query length padded to a multiple of 128 (``_attention_with_lse`` pads it);
+    Ulysses swaps to ``heads / (tp * cp)`` heads at the full joint length.
+    """
+    img, txt = int(config.image_seq_len), int(config.text_seq_len)
+    heads = int(config.num_attention_heads)
+    img_rank = img // cp
+    rules: dict[str, Any] = {
+        "image_seq_len": img, "text_seq_len": txt, "image_tokens_per_rank": img_rank,
+        "heads_per_tp_rank": heads // tp, "image_divisible_by_cp": img % cp == 0,
+    }
+    if cp > 1 and cp_mode == "ring":
+        q_len = txt + img_rank
+        rules.update({"ring_query_len": q_len, "ring_query_len_mod_128": q_len % 128,
+                      "ring_query_padded_to": -(-q_len // 128) * 128,
+                      "ring_key_blocks": [txt] + [img_rank] * cp})
+    if cp > 1 and cp_mode == "ulysses":
+        rules.update({"ulysses_heads_per_rank": (heads // tp) // cp,
+                      "ulysses_heads_divisible": (heads // tp) % cp == 0,
+                      "ulysses_attention_len": img + txt})
+    if cp > 1 and cp_mode == "gather_kv":
+        rules.update({"gather_kv_query_len": txt + img_rank, "gather_kv_key_len": txt + img})
+    return rules
+
+
 def main() -> int:
     args = parse_args()
     t0 = time.perf_counter()
@@ -213,6 +261,14 @@ def main() -> int:
         forward_shapes.append([tuple(a.shape) for a in device_args])
         return app(*device_args)
 
+    # The diffusers model runs eager inside the trace module, after the CP scatter: the
+    # sequence it receives is this rank's image shard (positive evidence the scatter happened).
+    seen_image_tokens: list[int] = []
+
+    def _record(_mod, _args, kwargs):
+        seen_image_tokens.append(int(kwargs["hidden_states"].shape[1]))
+
+    scatter_hook = app.module.transformer.register_forward_pre_hook(_record, with_kwargs=True)
     adapter = _OnDeviceTransformer(module, config, torch.bfloat16, app.device)
     adapter_s: list[float] = []
     adapter.forward_hook = adapter_s.append
@@ -222,6 +278,7 @@ def main() -> int:
             out = adapter(ref["hidden_states"], run["dit_timestep"],
                           ref["encoder_hidden_states"])
             outputs[f"{run['timestep']:g}"] = out.float()
+    scatter_hook.remove()
     snaps["after_forwards"] = wanpf.snapshot(t0)
     wanpf._progress(rank, "parity forwards done", app, snaps["after_forwards"])
 
@@ -242,6 +299,8 @@ def main() -> int:
         breakdown["end"] = wanpf.compile_breakdown()
     evidence = parity.device_evidence(app, fallbacks)
     neffs_after = wanpf.neff_files()
+    output_hashes = {ts: wanpf.sha256(out) for ts, out in outputs.items()}
+    all_hashes = gather_hashes(output_hashes, world)
 
     # ------------------------------------------------------------------ checks
     checks: list[tuple[str, bool, str]] = []
@@ -266,6 +325,20 @@ def main() -> int:
                    and all(shapes == app.warmup_shapes for shapes in forward_shapes),
                    f"{len(forward_shapes)} forwards at {sorted(set(map(str, forward_shapes)))} "
                    f"warmup={app.warmup_shapes}"))
+    # TP gathers the final projection and CP gathers the image tokens back, so every rank
+    # holds the full output: each must be bit-identical to rank 0's.
+    differ = sorted(r for r, h in enumerate(all_hashes) if h != all_hashes[0])
+    checks.append(("ranks_identical", len(all_hashes) == world and not differ,
+                   f"{len(all_hashes)} ranks, sha256 of every output equal to rank 0's"
+                   + (f"; differ on ranks {differ}" if differ else "")
+                   + f" (t{next(iter(output_hashes))} {next(iter(output_hashes.values()))[:12]})"))
+    expected_tokens = config.image_seq_len // cp
+    checks.append(("cp_scatter",
+                   len(seen_image_tokens) == len(runs)
+                   and all(n == expected_tokens for n in seen_image_tokens),
+                   f"image tokens per rank into the blocks {seen_image_tokens} (expected "
+                   f"{config.image_seq_len}/cp {cp} = {expected_tokens}; output "
+                   f"{[list(o.shape) for o in outputs.values()][0]})"))
     out_stats = {ts: _stats(out) for ts, out in outputs.items()}
     checks.append(("finite", all(s["finite"] for s in out_stats.values()),
                    " ".join(f"t{ts}: absmean={s['absmean']:.4f} std={s['std']:.4f} "
@@ -419,6 +492,9 @@ def main() -> int:
                    "heads_per_rank": heads_per_rank, "tp": tp, "cp": cp,
                    "cp_mode": args.cp_mode, "image_seq_len": config.image_seq_len,
                    "text_seq_len": config.text_seq_len},
+        "shape_rules": shape_rules(config, tp, cp, args.cp_mode),
+        "rank_output_hashes": all_hashes,
+        "image_tokens_into_blocks": seen_image_tokens,
         "reference": {"path": str(args.reference), "num_layers": int(ref["num_layers"]),
                       "prompt": ref.get("prompt"), "valid_rows": ref.get("valid_rows"),
                       "timesteps": [r["timestep"] for r in runs],
@@ -479,6 +555,7 @@ def main() -> int:
                     f"(median {statistics.median(adapter_s) * 1e3:.1f}) " if adapter_s else "")
     print(f"[rank {rank}] {'PASS' if ok else 'FAIL'} {args.exec_mode}"
           f"{'/' + args.expect if args.expect else ''} layers={args.num_layers} tp={tp} cp={cp} "
+          f"{(args.cp_mode + ' ') if cp > 1 else ''}"
           f"load_checkpoint={app.phase_seconds.get('load checkpoint', 0):.1f}s "
           f"warmup_forward={warmup_s:.1f}s {adapter_line}{bench_line}"
           f"run_counters={run_delta} new_neffs={len(added_neffs)} "
