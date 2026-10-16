@@ -53,7 +53,9 @@ summary="$(grep -E '^[0-9]+ (passed|failed)' "$unit_log" | tail -n 1 || true)"
 
 known="$HERE/known-red.txt"
 [ -f "$known" ] || : > "$known"
-red_now="$(grep -E '^(FAILED|ERROR) ' "$unit_log" | sed -E 's/^(FAILED|ERROR) //; s/ - .*//' | sort -u)"
+# Anchor on "tests/": pytest's captured-log lines also start with "ERROR " and
+# would otherwise be mistaken for test ids.
+red_now="$(grep -E '^(FAILED|ERROR) tests/' "$unit_log" | sed -E 's/^(FAILED|ERROR) //; s/ - .*//' | sort -u)"
 unexpected="$(comm -23 <(printf '%s\n' "$red_now" | sed '/^$/d') <(sort -u "$known"))"
 fixed="$(comm -13 <(printf '%s\n' "$red_now" | sed '/^$/d') <(sort -u "$known"))"
 n_known="$(sed '/^$/d' "$known" | sort -u | wc -l | tr -d ' ')"
