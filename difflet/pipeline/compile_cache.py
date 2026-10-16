@@ -244,6 +244,9 @@ def _cache_relevant_toolchain_versions() -> dict[str, str | None]:
 # would change every existing Trainium cache hash.
 _BACKEND_EXTRA_TOOLCHAIN_PACKAGES: dict[str, tuple[str, ...]] = {
     "tpu": ("libtpu",),
+    # CUDA has no AOT artifact today, but the manifest and any future
+    # torch.compile cache still key on the kernels torch was built against.
+    "cuda": ("triton",),
 }
 
 
@@ -254,6 +257,14 @@ def _backend_extra_toolchain_versions(backend: str) -> dict[str, str | None]:
             versions[package] = metadata.version(package)
         except metadata.PackageNotFoundError:
             versions[package] = None
+    if backend == "cuda":
+        # torch.version.cuda is the CUDA runtime the wheel was built for (None on a
+        # CPU-only build); cudnn.version() needs a CUDA build too.
+        import torch
+
+        versions["cuda"] = torch.version.cuda
+        cudnn = torch.backends.cudnn.version() if torch.version.cuda else None
+        versions["cudnn"] = None if cudnn is None else str(cudnn)
     return versions
 
 
