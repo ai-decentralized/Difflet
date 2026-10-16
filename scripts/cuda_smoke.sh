@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Qwen-Image on one GPU through the CUDA backend; logs to /tmp/logs/cuda-smoke-<ts>.log.
-# Usage: scripts/cuda_smoke.sh [cuda_smoke.py args...]   e.g. --steps 4 --output /tmp/qwen4.png
+# Qwen-Image on one GPU through `difflet run` on the CUDA backend (plan File Map / F3).
+# Logs to /tmp/logs/cuda-smoke-<ts>.log.
+#   scripts/cuda_smoke.sh --prompt "a cat" --output /tmp/qwen.png [--steps 50 --seed 0]
+# Per-phase timings (load / encode / generate, peak memory) come from scripts/cuda_smoke.py.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,4 +14,4 @@ export DIFFLET_BACKEND=cuda
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 cd "$ROOT"
 echo "log: $LOG"
-"$PY" scripts/cuda_smoke.py "$@" 2>&1 | tee "$LOG"
+"$PY" -m difflet.cli.main run --model-id Qwen/Qwen-Image --tp-degree 1 "$@" 2>&1 | tee "$LOG"
