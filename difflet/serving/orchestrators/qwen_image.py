@@ -51,12 +51,8 @@ _MODEL_TYPE = "qwen_image"
 _ENC_SEQ = qwen_common.ENC_SEQ
 _TEXT_SEQ_LEN = qwen_common.TEXT_SEQ_LEN
 _MAX_GUIDANCE_SCALE = 20.0
-_QWEN_TEMPLATE = (
-    "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, "
-    "quantity, text, spatial relationships of the objects and background:<|im_end|>\n"
-    "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
-)
-_QWEN_DROP_IDX = 34
+_QWEN_TEMPLATE = qwen_common.QWEN_TEMPLATE
+_QWEN_DROP_IDX = qwen_common.QWEN_DROP_IDX
 
 logger = logging.getLogger(__name__)
 
