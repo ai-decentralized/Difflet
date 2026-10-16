@@ -1,0 +1,15 @@
+launch 2026-10-16T04:09:18Z head=317060e probe=0 cache=/home/ubuntu/.cache/difflet-neuron-qwen neff_before=173 hlo_files_before=460
+cmd: python -m difflet.cli.main generate --backend neuron --exec-mode compile --model-id Qwen/Qwen-Image --revision 75e0b4be04f60ec59a75f475837eced720f823b6 --tp-degree 4 --cp-degree 1 --cp-mode gather_kv --height 1024 --width 1024 --steps 50 --seed 42 --prompt A red fox sitting in a snowy forest at sunrise, highly detailed photograph --output /home/ubuntu/qwen-v3-work/tp4-s50-gen3-noprobe/out.png --cache-dir /home/ubuntu/.cache/difflet-neuron-qwen --work-dir /home/ubuntu/qwen-v3-work/tp4-s50-gen3-noprobe/work --keep-work-dir
+<frozen runpy>:130: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00, 117.61it/s]
+[qwen_image] neuron rank 1/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 32.4s, stage 50.6s
+[qwen_image] neuron rank 3/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 32.4s, stage 50.6s[qwen_image] neuron rank 2/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 32.4s, stage 50.6s
+
+[generate] packed latents (1, 4096, 64) -> /home/ubuntu/qwen-v3-work/tp4-s50-gen3-noprobe/work/latents.pt
+[qwen_image] neuron rank 0/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 32.4s, stage 50.6s
+[vae] image saved to /home/ubuntu/qwen-v3-work/tp4-s50-gen3-noprobe/out.png
+EXIT rc=0 process_wall_s=81.384401523 start_epoch=1792123758.512644202 end_epoch=1792123839.897045725 new_neff=0 new_hlo_files=0 2026-10-16T04:10:39Z

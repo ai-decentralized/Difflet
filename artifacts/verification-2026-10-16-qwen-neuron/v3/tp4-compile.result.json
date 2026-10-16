@@ -1,0 +1,126 @@
+{
+  "log": "tp4-compile.log",
+  "cmd": "python -m difflet.cli.main compile --backend neuron --exec-mode compile --model-id Qwen/Qwen-Image --revision 75e0b4be04f60ec59a75f475837eced720f823b6 --tp-degree 4 --cp-degree 1 --height 1024 --width 1024 --cache-dir /home/ubuntu/.cache/difflet-neuron-qwen",
+  "launch": "launch 2026-10-16T04:03:41Z head=317060e probe=1 cache=/home/ubuntu/.cache/difflet-neuron-qwen neff_before=173 hlo_files_before=460",
+  "rank_lines": {
+    "1": {
+      "exec_mode": "compile",
+      "compiled_blocks": 60,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 34.2,
+      "stage_s": 34.2
+    },
+    "2": {
+      "exec_mode": "compile",
+      "compiled_blocks": 60,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 34.2,
+      "stage_s": 34.2
+    },
+    "3": {
+      "exec_mode": "compile",
+      "compiled_blocks": 60,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 34.2,
+      "stage_s": 34.2
+    },
+    "0": {
+      "exec_mode": "compile",
+      "compiled_blocks": 60,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 34.2,
+      "stage_s": 34.2
+    }
+  },
+  "rc": 0,
+  "process_wall_s": 40.912682413,
+  "new_neff": 0,
+  "new_hlo_files": 0,
+  "app_load": {
+    "0": {
+      "app_load_s": 14.997,
+      "phase_seconds": {
+        "runtime init": 0.034,
+        "build on meta": 1.501,
+        "load checkpoint": 3.763,
+        "eval": 0.01,
+        "compile": 0.149,
+        "warmup forward": 8.154,
+        "text encoder load": 1.207
+      },
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 46,
+        "InMemoryHits": 73
+      },
+      "max_memory_allocated_gib": 10.115,
+      "VmHWM_gib": 1.545
+    },
+    "1": {
+      "app_load_s": 15.004,
+      "phase_seconds": {
+        "runtime init": 0.04,
+        "build on meta": 1.502,
+        "load checkpoint": 3.763,
+        "eval": 0.01,
+        "compile": 0.149,
+        "warmup forward": 8.157,
+        "text encoder load": 1.202
+      },
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 51,
+        "InMemoryHits": 76
+      },
+      "max_memory_allocated_gib": 10.115,
+      "VmHWM_gib": 1.481
+    },
+    "2": {
+      "app_load_s": 14.998,
+      "phase_seconds": {
+        "runtime init": 0.034,
+        "build on meta": 1.501,
+        "load checkpoint": 3.763,
+        "eval": 0.01,
+        "compile": 0.149,
+        "warmup forward": 8.153,
+        "text encoder load": 1.207
+      },
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 51,
+        "InMemoryHits": 76
+      },
+      "max_memory_allocated_gib": 10.115,
+      "VmHWM_gib": 1.377
+    },
+    "3": {
+      "app_load_s": 15.004,
+      "phase_seconds": {
+        "runtime init": 0.04,
+        "build on meta": 1.502,
+        "load checkpoint": 3.763,
+        "eval": 0.01,
+        "compile": 0.148,
+        "warmup forward": 8.156,
+        "text encoder load": 1.203
+      },
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 51,
+        "InMemoryHits": 76
+      },
+      "max_memory_allocated_gib": 10.115,
+      "VmHWM_gib": 1.404
+    }
+  },
+  "png_sha256": null
+}

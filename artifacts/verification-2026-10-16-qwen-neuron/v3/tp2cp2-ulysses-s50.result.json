@@ -1,0 +1,213 @@
+{
+  "log": "tp2cp2-ulysses-s50.log",
+  "cmd": "python -m difflet.cli.main generate --backend neuron --exec-mode compile --model-id Qwen/Qwen-Image --revision 75e0b4be04f60ec59a75f475837eced720f823b6 --tp-degree 2 --cp-degree 2 --cp-mode ulysses --height 1024 --width 1024 --steps 50 --seed 42 --prompt A red fox sitting in a snowy forest at sunrise, highly detailed photograph --output /home/ubuntu/qwen-v3-work/tp2cp2-ulysses-s50/out.png --cache-dir /home/ubuntu/.cache/difflet-neuron-qwen --work-dir /home/ubuntu/qwen-v3-work/tp2cp2-ulysses-s50/work --keep-work-dir",
+  "launch": "launch 2026-10-16T04:12:19Z head=317060e probe=1 cache=/home/ubuntu/.cache/difflet-neuron-qwen neff_before=173 hlo_files_before=460",
+  "rank_lines": {
+    "1": {
+      "exec_mode": "compile",
+      "compiled_blocks": 60,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 39.3,
+      "stage_s": 60.8
+    },
+    "2": {
+      "exec_mode": "compile",
+      "compiled_blocks": 60,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 39.3,
+      "stage_s": 60.8
+    },
+    "3": {
+      "exec_mode": "compile",
+      "compiled_blocks": 60,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 39.2,
+      "stage_s": 60.8
+    },
+    "0": {
+      "exec_mode": "compile",
+      "compiled_blocks": 60,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 39.2,
+      "stage_s": 60.8
+    }
+  },
+  "rc": 0,
+  "process_wall_s": 91.373126973,
+  "new_neff": 0,
+  "new_hlo_files": 0,
+  "app_load": {
+    "0": {
+      "app_load_s": 18.391,
+      "phase_seconds": {
+        "runtime init": 0.035,
+        "build on meta": 1.51,
+        "load checkpoint": 7.313,
+        "eval": 0.01,
+        "compile": 0.15,
+        "warmup forward": 8.527,
+        "text encoder load": 0.661
+      },
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 47,
+        "InMemoryHits": 73
+      },
+      "max_memory_allocated_gib": 19.723,
+      "VmHWM_gib": 1.567
+    },
+    "1": {
+      "app_load_s": 18.391,
+      "phase_seconds": {
+        "runtime init": 0.035,
+        "build on meta": 1.511,
+        "load checkpoint": 7.312,
+        "eval": 0.01,
+        "compile": 0.15,
+        "warmup forward": 8.532,
+        "text encoder load": 0.655
+      },
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 52,
+        "InMemoryHits": 76
+      },
+      "max_memory_allocated_gib": 19.723,
+      "VmHWM_gib": 1.523
+    },
+    "2": {
+      "app_load_s": 18.386,
+      "phase_seconds": {
+        "runtime init": 0.03,
+        "build on meta": 1.511,
+        "load checkpoint": 7.313,
+        "eval": 0.01,
+        "compile": 0.151,
+        "warmup forward": 8.526,
+        "text encoder load": 0.661
+      },
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 52,
+        "InMemoryHits": 76
+      },
+      "max_memory_allocated_gib": 19.723,
+      "VmHWM_gib": 1.496
+    },
+    "3": {
+      "app_load_s": 18.387,
+      "phase_seconds": {
+        "runtime init": 0.031,
+        "build on meta": 1.511,
+        "load checkpoint": 7.313,
+        "eval": 0.01,
+        "compile": 0.151,
+        "warmup forward": 8.532,
+        "text encoder load": 0.655
+      },
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 52,
+        "InMemoryHits": 76
+      },
+      "max_memory_allocated_gib": 19.723,
+      "VmHWM_gib": 1.562
+    }
+  },
+  "text_encode_rank0_s": 0.527,
+  "text_valid_rows": 19,
+  "embeds_sha256_distinct": [
+    "832742b44768863dcdd8bb51f423b6d2ab45fa207f8d29dcd8cd935c94dda4fc"
+  ],
+  "generate_rank0": {
+    "generate_s": 21.515,
+    "denoise_s": 20.96,
+    "pre_denoise_s": 0.555,
+    "steps": 50,
+    "step0_ms": 419.27,
+    "step_ms": {
+      "n": 49,
+      "median": 419.09,
+      "p10": 418.31,
+      "p90": 420.91,
+      "min": 417.88,
+      "max": 421.93,
+      "mean": 419.2
+    },
+    "forward_ms": {
+      "n": 50,
+      "median": 418.1,
+      "p90": 419.78
+    },
+    "latents_shape": [
+      1,
+      4096,
+      64
+    ],
+    "latents_dtype": "torch.bfloat16",
+    "latents_finite": true,
+    "latents_std": 0.42679858207702637
+  },
+  "rank0_host_VmHWM_gib": 13.748,
+  "host_VmHWM_gib_by_rank": {
+    "0": 13.748,
+    "1": 1.559,
+    "2": 1.528,
+    "3": 1.596
+  },
+  "max_memory_allocated_gib_by_rank": {
+    "0": 19.723,
+    "1": 19.748,
+    "2": 19.748,
+    "3": 19.748
+  },
+  "counters_end_by_rank": {
+    "0": {
+      "TotalCompilations": 0,
+      "PersistentHits": 47,
+      "InMemoryHits": 5181
+    },
+    "1": {
+      "TotalCompilations": 0,
+      "PersistentHits": 52,
+      "InMemoryHits": 5190
+    },
+    "2": {
+      "TotalCompilations": 0,
+      "PersistentHits": 52,
+      "InMemoryHits": 5190
+    },
+    "3": {
+      "TotalCompilations": 0,
+      "PersistentHits": 52,
+      "InMemoryHits": 5190
+    }
+  },
+  "step_median_ms_by_rank": {
+    "0": 419.09,
+    "1": 418.95,
+    "2": 418.9,
+    "3": 418.91
+  },
+  "latents_sha256_by_rank": {
+    "0": "a2b0d982bf4e23f4e40eb53009b9456ac512970d6d2789a38903b3f829a37793",
+    "1": "a2b0d982bf4e23f4e40eb53009b9456ac512970d6d2789a38903b3f829a37793",
+    "2": "a2b0d982bf4e23f4e40eb53009b9456ac512970d6d2789a38903b3f829a37793",
+    "3": "a2b0d982bf4e23f4e40eb53009b9456ac512970d6d2789a38903b3f829a37793"
+  },
+  "latents_identical_across_ranks": true,
+  "host_decode_s": 23.031,
+  "host_decode_threads": 6,
+  "driver_VmHWM_gib": 9.266,
+  "latents_pt_sha256": "a2b0d982bf4e23f4e40eb53009b9456ac512970d6d2789a38903b3f829a37793",
+  "png_sha256": "bef8e26be3746e24feacb743561e8d34036e3c3e19f99cfd6a02c25844bc7adb",
+  "latents_pt_tensor_sha256": "a2b0d982bf4e23f4e40eb53009b9456ac512970d6d2789a38903b3f829a37793"
+}

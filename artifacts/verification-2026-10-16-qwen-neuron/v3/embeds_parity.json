@@ -1,0 +1,47 @@
+{
+  "prompt": "A red fox sitting in a snowy forest at sunrise, highly detailed photograph",
+  "load_bf16_s": 0.08,
+  "ours_encode_s": 0.51,
+  "ours_valid_rows": 19,
+  "ours_padding_zero": true,
+  "template_equal": true,
+  "diffusers_bf16_encode_s": 7.766,
+  "diffusers_rows": 19,
+  "ours_vs_diffusers_bf16": {
+    "max_abs": 0.0,
+    "mean_abs": 0.0,
+    "rel_l1": 0.0,
+    "cosine": 0.9999999999999998,
+    "equal": true
+  },
+  "device_rows": 19,
+  "device_vs_ours": {
+    "max_abs": 0.0,
+    "mean_abs": 0.0,
+    "rel_l1": 0.0,
+    "cosine": 0.9999999999999999,
+    "equal": true
+  },
+  "device_vs_diffusers_bf16": {
+    "max_abs": 0.0,
+    "mean_abs": 0.0,
+    "rel_l1": 0.0,
+    "cosine": 0.9999999999999998,
+    "equal": true
+  },
+  "ours_vs_diffusers_fp32": {
+    "max_abs": 7.13604736328125,
+    "mean_abs": 0.04321216566871818,
+    "rel_l1": 0.014781181427132419,
+    "cosine": 0.9998785617548712,
+    "equal": false
+  },
+  "diffusers_bf16_vs_fp32": {
+    "max_abs": 7.13604736328125,
+    "mean_abs": 0.04321216566871818,
+    "rel_l1": 0.014781181427132419,
+    "cosine": 0.9998785617548712,
+    "equal": false
+  },
+  "note_fp32": "fp32 = the bf16 checkpoint weights upcast, so it isolates compute precision"
+}

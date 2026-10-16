@@ -1,0 +1,265 @@
+launch 2026-10-16T04:02:41Z head=317060e probe=1 cache=/home/ubuntu/.cache/difflet-neuron-qwen neff_before=173 hlo_files_before=460
+cmd: python -m difflet.cli.main compile --backend neuron --exec-mode compile --model-id Qwen/Qwen-Image --tp-degree 4 --cp-degree 1 --height 1024 --width 1024 --cache-dir /home/ubuntu/.cache/difflet-neuron-qwen
+<frozen runpy>:130: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[v3probe] {"event": "patched", "rank": "driver", "t_epoch": 1792123361.884, "t_since_start_s": 0.089, "VmHWM_gib": 0.025, "VmRSS_gib": 0.025, "module": "difflet.cli.orchestrators.qwen_image"}
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+[v3probe] {"event": "metrics_enabled", "rank": "2", "t_epoch": 1792123365.996, "t_since_start_s": 1.884, "VmHWM_gib": 0.462, "VmRSS_gib": 0.462, "enabled": true}
+[v3probe] {"event": "metrics_enabled", "rank": "0", "t_epoch": 1792123365.997, "t_since_start_s": 1.886, "VmHWM_gib": 0.462, "VmRSS_gib": 0.462, "enabled": true}
+[v3probe] {"event": "metrics_enabled", "rank": "1", "t_epoch": 1792123365.998, "t_since_start_s": 1.886, "VmHWM_gib": 0.462, "VmRSS_gib": 0.462, "enabled": true}
+[v3probe] {"event": "metrics_enabled", "rank": "3", "t_epoch": 1792123365.999, "t_since_start_s": 1.887, "VmHWM_gib": 0.462, "VmRSS_gib": 0.462, "enabled": true}
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "<frozen runpy>", line 203, in _run_module_as_main
+[rank1]:   File "<frozen runpy>", line 88, in _run_code
+[rank1]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/stage.py", line 137, in <module>
+[rank1]:     sys.exit(main())
+[rank1]:              ~~~~^^
+[rank1]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/stage.py", line 132, in main
+[rank1]:     orchestrator._run_stage_internal(args.stage, args)
+[rank1]:     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 329, in _run_stage_internal
+[rank1]:     self._stage_generate(args)
+[rank1]:     ~~~~~~~~~~~~~~~~~~~~^^^^^^
+[rank1]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 439, in _stage_generate
+[rank1]:     self._stage_generate_neuron(args, backend)
+[rank1]:     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+[rank1]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 580, in _stage_generate_neuron
+[rank1]:     pipe = DiffletPipeline.from_pretrained(
+[rank1]:         _HF_MODEL_ID,
+[rank1]:     ...<11 lines>...
+[rank1]:         **bound,
+[rank1]:     )
+[rank1]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/pipeline/difflet_pipeline.py", line 117, in from_pretrained
+[rank1]:     model_path = resolve_model_path(
+[rank1]:         model_id,
+[rank1]:     ...<2 lines>...
+[rank1]:         allow_patterns=entry.download_patterns,
+[rank1]:     )
+[rank1]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/pipeline/path_resolver.py", line 75, in resolve_model_path
+[rank1]:     return snapshot_download(
+[rank1]:         repo_id=model_id,
+[rank1]:     ...<2 lines>...
+[rank1]:         allow_patterns=patterns,
+[rank1]:     )
+[rank1]:   File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank1]:     return fn(*args, **kwargs)
+[rank1]:   File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/huggingface_hub/_snapshot_download.py", line 230, in snapshot_download
+[rank1]:     raise LocalEntryNotFoundError(
+[rank1]:     ...<3 lines>...
+[rank1]:     )
+[rank1]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find an appropriate cached snapshot folder for the specified revision on the local disk and outgoing traffic has been disabled. To enable repo look-ups and downloads online, pass 'local_files_only=False' as input.
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "<frozen runpy>", line 203, in _run_module_as_main
+[rank2]:   File "<frozen runpy>", line 88, in _run_code
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/stage.py", line 137, in <module>
+[rank2]:     sys.exit(main())
+[rank2]:              ~~~~^^
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/stage.py", line 132, in main
+[rank2]:     orchestrator._run_stage_internal(args.stage, args)
+[rank2]:     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 329, in _run_stage_internal
+[rank2]:     self._stage_generate(args)
+[rank2]:     ~~~~~~~~~~~~~~~~~~~~^^^^^^
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 439, in _stage_generate
+[rank2]:     self._stage_generate_neuron(args, backend)
+[rank2]:     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 580, in _stage_generate_neuron
+[rank2]:     pipe = DiffletPipeline.from_pretrained(
+[rank2]:         _HF_MODEL_ID,
+[rank2]:     ...<11 lines>...
+[rank2]:         **bound,
+[rank2]:     )
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/pipeline/difflet_pipeline.py", line 117, in from_pretrained
+[rank2]:     model_path = resolve_model_path(
+[rank2]:         model_id,
+[rank2]:     ...<2 lines>...
+[rank2]:         allow_patterns=entry.download_patterns,
+[rank2]:     )
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/pipeline/path_resolver.py", line 75, in resolve_model_path
+[rank2]:     return snapshot_download(
+[rank2]:         repo_id=model_id,
+[rank2]:     ...<2 lines>...
+[rank2]:         allow_patterns=patterns,
+[rank2]:     )
+[rank2]:   File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank2]:     return fn(*args, **kwargs)
+[rank2]:   File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/huggingface_hub/_snapshot_download.py", line 230, in snapshot_download
+[rank2]:     raise LocalEntryNotFoundError(
+[rank2]:     ...<3 lines>...
+[rank2]:     )
+[rank2]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find an appropriate cached snapshot folder for the specified revision on the local disk and outgoing traffic has been disabled. To enable repo look-ups and downloads online, pass 'local_files_only=False' as input.
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "<frozen runpy>", line 203, in _run_module_as_main
+[rank3]:   File "<frozen runpy>", line 88, in _run_code
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/stage.py", line 137, in <module>
+[rank3]:     sys.exit(main())
+[rank3]:              ~~~~^^
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/stage.py", line 132, in main
+[rank3]:     orchestrator._run_stage_internal(args.stage, args)
+[rank3]:     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 329, in _run_stage_internal
+[rank3]:     self._stage_generate(args)
+[rank3]:     ~~~~~~~~~~~~~~~~~~~~^^^^^^
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 439, in _stage_generate
+[rank3]:     self._stage_generate_neuron(args, backend)
+[rank3]:     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 580, in _stage_generate_neuron
+[rank3]:     pipe = DiffletPipeline.from_pretrained(
+[rank3]:         _HF_MODEL_ID,
+[rank3]:     ...<11 lines>...
+[rank3]:         **bound,
+[rank3]:     )
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/pipeline/difflet_pipeline.py", line 117, in from_pretrained
+[rank3]:     model_path = resolve_model_path(
+[rank3]:         model_id,
+[rank3]:     ...<2 lines>...
+[rank3]:         allow_patterns=entry.download_patterns,
+[rank3]:     )
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/pipeline/path_resolver.py", line 75, in resolve_model_path
+[rank3]:     return snapshot_download(
+[rank3]:         repo_id=model_id,
+[rank3]:     ...<2 lines>...
+[rank3]:         allow_patterns=patterns,
+[rank3]:     )
+[rank3]:   File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank3]:     return fn(*args, **kwargs)
+[rank3]:   File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/huggingface_hub/_snapshot_download.py", line 230, in snapshot_download
+[rank3]:     raise LocalEntryNotFoundError(
+[rank3]:     ...<3 lines>...
+[rank3]:     )
+[rank3]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find an appropriate cached snapshot folder for the specified revision on the local disk and outgoing traffic has been disabled. To enable repo look-ups and downloads online, pass 'local_files_only=False' as input.
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "<frozen runpy>", line 203, in _run_module_as_main
+[rank0]:   File "<frozen runpy>", line 88, in _run_code
+[rank0]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/stage.py", line 137, in <module>
+[rank0]:     sys.exit(main())
+[rank0]:              ~~~~^^
+[rank0]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/stage.py", line 132, in main
+[rank0]:     orchestrator._run_stage_internal(args.stage, args)
+[rank0]:     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 329, in _run_stage_internal
+[rank0]:     self._stage_generate(args)
+[rank0]:     ~~~~~~~~~~~~~~~~~~~~^^^^^^
+[rank0]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 439, in _stage_generate
+[rank0]:     self._stage_generate_neuron(args, backend)
+[rank0]:     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+[rank0]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 580, in _stage_generate_neuron
+[rank0]:     pipe = DiffletPipeline.from_pretrained(
+[rank0]:         _HF_MODEL_ID,
+[rank0]:     ...<11 lines>...
+[rank0]:         **bound,
+[rank0]:     )
+[rank0]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/pipeline/difflet_pipeline.py", line 117, in from_pretrained
+[rank0]:     model_path = resolve_model_path(
+[rank0]:         model_id,
+[rank0]:     ...<2 lines>...
+[rank0]:         allow_patterns=entry.download_patterns,
+[rank0]:     )
+[rank0]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/pipeline/path_resolver.py", line 75, in resolve_model_path
+[rank0]:     return snapshot_download(
+[rank0]:         repo_id=model_id,
+[rank0]:     ...<2 lines>...
+[rank0]:         allow_patterns=patterns,
+[rank0]:     )
+[rank0]:   File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank0]:     return fn(*args, **kwargs)
+[rank0]:   File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/huggingface_hub/_snapshot_download.py", line 230, in snapshot_download
+[rank0]:     raise LocalEntryNotFoundError(
+[rank0]:     ...<3 lines>...
+[rank0]:     )
+[rank0]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find an appropriate cached snapshot folder for the specified revision on the local disk and outgoing traffic has been disabled. To enable repo look-ups and downloads online, pass 'local_files_only=False' as input.
+E1016 04:03:06.843000 426804 torch/distributed/elastic/multiprocessing/api.py:1002] failed (exitcode: 1) local_rank: 0 (pid: 426821) of binary: /home/ubuntu/workspace/native_venv/bin/python
+Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/run.py", line 1142, in <module>
+    main()
+    ~~~~^^
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 380, in wrapper
+    return f(*args, **kwargs)
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/run.py", line 1138, in main
+    run(args)
+    ~~~^^^^^^
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/run.py", line 1129, in run
+    elastic_launch(
+    ~~~~~~~~~~~~~~~
+        config=config,
+        ~~~~~~~~~~~~~~
+        entrypoint=cmd,
+        ~~~~~~~~~~~~~~~
+    )(*cmd_args)
+    ~^^^^^^^^^^^
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/launcher/api.py", line 197, in __call__
+    return launch_agent(
+        self._config,
+    ...<2 lines>...
+        health_check_server=self._health_check_server,
+    )
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/launcher/api.py", line 386, in launch_agent
+    raise ChildFailedError(
+    ...<2 lines>...
+    )
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+difflet.cli.stage FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-16_04:03:06
+  host      : ip-172-31-36-18.ap-southeast-4.compute.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 426822) 
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-16_04:03:06
+  host      : ip-172-31-36-18.ap-southeast-4.compute.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 426823) 
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2026-10-16_04:03:06
+  host      : ip-172-31-36-18.ap-southeast-4.compute.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 426824) 
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-16_04:03:06
+  host      : ip-172-31-36-18.ap-southeast-4.compute.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 426821) 
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/main.py", line 1140, in <module>
+    main()
+    ~~~~^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/main.py", line 1136, in main
+    getattr(orchestrator, args.command)()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/orchestrators/qwen_image.py", line 231, in compile
+    runner.run_stage(
+    ~~~~~~~~~~~~~~~~^
+        _HF_MODEL_ID,
+        ^^^^^^^^^^^^^
+    ...<3 lines>...
+        cli_args=shared,
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/runner.py", line 241, in run_stage
+    _run_torchrun(cmd, env)
+    ~~~~~~~~~~~~~^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/cli/runner.py", line 156, in _run_torchrun
+    raise subprocess.CalledProcessError(returncode, cmd)
+subprocess.CalledProcessError: Command '['/home/ubuntu/workspace/native_venv/bin/python', '-m', 'torch.distributed.run', '--standalone', '--nproc-per-node', '4', '-m', 'difflet.cli.stage', '--orchestrator', 'Qwen/Qwen-Image', '--stage', 'generate', '--model-id', 'Qwen/Qwen-Image', '--tp-degree', '4', '--cp-degree', '1', '--cp-mode', 'gather_kv', '--height', '1024', '--width', '1024', '--steps', '4', '--guidance-scale', '4.0', '--seed', '42', '--stage-mode', 'compile', '--cache-dir', '/home/ubuntu/.cache/difflet-neuron-qwen', '--work-dir', '/home/ubuntu/.cache/difflet/work/qwen-image']' returned non-zero exit status 1.
+EXIT rc=1 process_wall_s=25.824621147 start_epoch=1792123361.775357850 end_epoch=1792123387.599978997 new_neff=0 new_hlo_files=0 2026-10-16T04:03:07Z

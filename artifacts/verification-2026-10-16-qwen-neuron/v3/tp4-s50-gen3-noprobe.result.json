@@ -1,0 +1,49 @@
+{
+  "log": "tp4-s50-gen3-noprobe.log",
+  "cmd": "python -m difflet.cli.main generate --backend neuron --exec-mode compile --model-id Qwen/Qwen-Image --revision 75e0b4be04f60ec59a75f475837eced720f823b6 --tp-degree 4 --cp-degree 1 --cp-mode gather_kv --height 1024 --width 1024 --steps 50 --seed 42 --prompt A red fox sitting in a snowy forest at sunrise, highly detailed photograph --output /home/ubuntu/qwen-v3-work/tp4-s50-gen3-noprobe/out.png --cache-dir /home/ubuntu/.cache/difflet-neuron-qwen --work-dir /home/ubuntu/qwen-v3-work/tp4-s50-gen3-noprobe/work --keep-work-dir",
+  "launch": "launch 2026-10-16T04:09:18Z head=317060e probe=0 cache=/home/ubuntu/.cache/difflet-neuron-qwen neff_before=173 hlo_files_before=460",
+  "rank_lines": {
+    "1": {
+      "exec_mode": "compile",
+      "compiled_blocks": 60,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 32.4,
+      "stage_s": 50.6
+    },
+    "3": {
+      "exec_mode": "compile",
+      "compiled_blocks": 60,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 32.4,
+      "stage_s": 50.6
+    },
+    "2": {
+      "exec_mode": "compile",
+      "compiled_blocks": 60,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 32.4,
+      "stage_s": 50.6
+    },
+    "0": {
+      "exec_mode": "compile",
+      "compiled_blocks": 60,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 32.4,
+      "stage_s": 50.6
+    }
+  },
+  "rc": 0,
+  "process_wall_s": 81.384401523,
+  "new_neff": 0,
+  "new_hlo_files": 0,
+  "png_sha256": "c643eefc7c2820dfb2d299b4935e7ef8b0582888561761b3823e7c4222766ba9",
+  "latents_pt_tensor_sha256": "02613803dae28a5172db5b43597f6a6c2d37ca4934799d20df11f2c7bd1decdb"
+}

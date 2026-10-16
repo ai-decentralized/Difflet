@@ -1,0 +1,213 @@
+{
+  "log": "diag/c-tp4e-fed.log",
+  "cmd": "python -m difflet.cli.main generate --backend neuron --exec-mode eager --model-id Qwen/Qwen-Image --revision 75e0b4be04f60ec59a75f475837eced720f823b6 --tp-degree 4 --cp-degree 1 --cp-mode gather_kv --height 1024 --width 1024 --steps 50 --seed 42 --prompt A red fox sitting in a snowy forest at sunrise, highly detailed photograph --output /home/ubuntu/qwen-v3-work/diag/c-tp4e-fed/out.png --cache-dir /home/ubuntu/.cache/difflet-neuron-qwen --work-dir /home/ubuntu/qwen-v3-work/diag/c-tp4e-fed/work --keep-work-dir",
+  "launch": "launch 2026-10-16T04:20:34Z head=317060e probe=1 cache=/home/ubuntu/.cache/difflet-neuron-qwen neff_before=173 hlo_files_before=460",
+  "rank_lines": {
+    "2": {
+      "exec_mode": "eager",
+      "compiled_blocks": 0,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 30.6,
+      "stage_s": 88.8
+    },
+    "1": {
+      "exec_mode": "eager",
+      "compiled_blocks": 0,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 30.5,
+      "stage_s": 88.8
+    },
+    "3": {
+      "exec_mode": "eager",
+      "compiled_blocks": 0,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 30.5,
+      "stage_s": 88.8
+    },
+    "0": {
+      "exec_mode": "eager",
+      "compiled_blocks": 0,
+      "unwarmed_shapes": "[]",
+      "fallbacks_load": "[]",
+      "fallbacks_generate": "[]",
+      "load_warmup_s": 30.2,
+      "stage_s": 88.8
+    }
+  },
+  "rc": 0,
+  "process_wall_s": 119.18475299,
+  "new_neff": 0,
+  "new_hlo_files": 0,
+  "app_load": {
+    "0": {
+      "app_load_s": 13.184,
+      "phase_seconds": {
+        "runtime init": 0.031,
+        "build on meta": 1.508,
+        "load checkpoint": 3.654,
+        "eval": 0.017,
+        "compile": 0.001,
+        "warmup forward": 7.202,
+        "text encoder load": 0.576
+      },
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 99,
+        "InMemoryHits": 7518
+      },
+      "max_memory_allocated_gib": 10.44,
+      "VmHWM_gib": 1.491
+    },
+    "1": {
+      "app_load_s": 13.187,
+      "phase_seconds": {
+        "runtime init": 0.036,
+        "build on meta": 1.508,
+        "load checkpoint": 3.654,
+        "eval": 0.017,
+        "compile": 0.001,
+        "warmup forward": 7.203,
+        "text encoder load": 0.575
+      },
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 104,
+        "InMemoryHits": 7521
+      },
+      "max_memory_allocated_gib": 10.44,
+      "VmHWM_gib": 1.558
+    },
+    "2": {
+      "app_load_s": 13.195,
+      "phase_seconds": {
+        "runtime init": 0.031,
+        "build on meta": 1.508,
+        "load checkpoint": 3.654,
+        "eval": 0.017,
+        "compile": 0.001,
+        "warmup forward": 7.203,
+        "text encoder load": 0.575
+      },
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 104,
+        "InMemoryHits": 7521
+      },
+      "max_memory_allocated_gib": 10.44,
+      "VmHWM_gib": 1.578
+    },
+    "3": {
+      "app_load_s": 13.208,
+      "phase_seconds": {
+        "runtime init": 0.035,
+        "build on meta": 1.508,
+        "load checkpoint": 3.654,
+        "eval": 0.017,
+        "compile": 0.001,
+        "warmup forward": 7.203,
+        "text encoder load": 0.574
+      },
+      "counters": {
+        "TotalCompilations": 0,
+        "PersistentHits": 104,
+        "InMemoryHits": 7521
+      },
+      "max_memory_allocated_gib": 10.44,
+      "VmHWM_gib": 1.435
+    }
+  },
+  "text_encode_rank0_s": 0.876,
+  "text_valid_rows": 19,
+  "embeds_sha256_distinct": [
+    "832742b44768863dcdd8bb51f423b6d2ab45fa207f8d29dcd8cd935c94dda4fc"
+  ],
+  "generate_rank0": {
+    "generate_s": 58.636,
+    "denoise_s": 57.734,
+    "pre_denoise_s": 0.902,
+    "steps": 50,
+    "step0_ms": 1158.79,
+    "step_ms": {
+      "n": 49,
+      "median": 1152.61,
+      "p10": 1146.66,
+      "p90": 1163.54,
+      "min": 1140.94,
+      "max": 1197.16,
+      "mean": 1154.6
+    },
+    "forward_ms": {
+      "n": 50,
+      "median": 1152.3,
+      "p90": 1162.15
+    },
+    "latents_shape": [
+      1,
+      4096,
+      64
+    ],
+    "latents_dtype": "torch.bfloat16",
+    "latents_finite": true,
+    "latents_std": 0.42688724398612976
+  },
+  "rank0_host_VmHWM_gib": 13.813,
+  "host_VmHWM_gib_by_rank": {
+    "0": 13.813,
+    "1": 1.706,
+    "2": 1.727,
+    "3": 1.583
+  },
+  "max_memory_allocated_gib_by_rank": {
+    "0": 10.44,
+    "1": 10.44,
+    "2": 10.44,
+    "3": 10.44
+  },
+  "counters_end_by_rank": {
+    "0": {
+      "TotalCompilations": 0,
+      "PersistentHits": 99,
+      "InMemoryHits": 387576
+    },
+    "1": {
+      "TotalCompilations": 0,
+      "PersistentHits": 104,
+      "InMemoryHits": 387585
+    },
+    "2": {
+      "TotalCompilations": 0,
+      "PersistentHits": 104,
+      "InMemoryHits": 387585
+    },
+    "3": {
+      "TotalCompilations": 0,
+      "PersistentHits": 104,
+      "InMemoryHits": 387585
+    }
+  },
+  "step_median_ms_by_rank": {
+    "0": 1152.61,
+    "1": 1152.93,
+    "2": 1154.31,
+    "3": 1154.05
+  },
+  "latents_sha256_by_rank": {
+    "0": "e6f6bf9c4e765c6bc814b7cde156a8d8e9c6bccc40ee4f21bc1e577e1e6e090c",
+    "1": "e6f6bf9c4e765c6bc814b7cde156a8d8e9c6bccc40ee4f21bc1e577e1e6e090c",
+    "2": "e6f6bf9c4e765c6bc814b7cde156a8d8e9c6bccc40ee4f21bc1e577e1e6e090c",
+    "3": "e6f6bf9c4e765c6bc814b7cde156a8d8e9c6bccc40ee4f21bc1e577e1e6e090c"
+  },
+  "latents_identical_across_ranks": true,
+  "host_decode_s": 23.059,
+  "host_decode_threads": 6,
+  "driver_VmHWM_gib": 9.266,
+  "latents_pt_sha256": "e6f6bf9c4e765c6bc814b7cde156a8d8e9c6bccc40ee4f21bc1e577e1e6e090c",
+  "png_sha256": "48de7cd2d5ef96a8e0b752b4f93681736f08337850de2d3c6c92cc94b9be24ba",
+  "latents_pt_tensor_sha256": "e6f6bf9c4e765c6bc814b7cde156a8d8e9c6bccc40ee4f21bc1e577e1e6e090c"
+}
