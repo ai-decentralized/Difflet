@@ -80,7 +80,7 @@ class DiffletPipeline:
         )
         canonical_shapes = None
         if shapes:
-            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+            from difflet.pipeline.bucketing import canonicalize_shapes
 
             canonical_shapes = canonicalize_shapes(shapes)
             if height is None and width is None and num_frames is None:
