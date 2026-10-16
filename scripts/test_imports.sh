@@ -61,6 +61,7 @@ NEUTRAL = [
     "difflet.models.flux.pipeline",
     "difflet.models.wan.pipeline",
     "difflet.models.hunyuan_video.pipeline",
+    "difflet.models.qwen_image.pipeline",
     "difflet.ops.mx",
     "difflet.backends.cpu.ops_impl.mx",
     "difflet.backends.cuda.runtime",
@@ -70,8 +71,6 @@ NEUTRAL = [
 # Needs the Neuron SDK. Reasons for the three that look neutral but are not:
 #   difflet.models.ltx_2.entry / .pipeline — the ltx_2 package __init__ imports
 #       the Trainium application eagerly (LTX-2 is trainium-only today).
-#   difflet.models.qwen_image.pipeline — imports QwenImageDiTInputBundle from the
-#       Trainium application module; Phase 4 of the CUDA plan moves that type.
 TRAINIUM = [
     "difflet.models.flux.application",
     "difflet.models.hunyuan_video.application",
@@ -81,7 +80,6 @@ TRAINIUM = [
     "difflet.backends.trainium.hunyuan_video.vae",
     "difflet.backends.trainium.hunyuan_video.vae15",
     "difflet.models.qwen_image.application",
-    "difflet.models.qwen_image.pipeline",
     "difflet.backends.trainium.qwen_image.transformer",
     "difflet.models.ltx_2.application",
     "difflet.models.ltx_2.entry",
