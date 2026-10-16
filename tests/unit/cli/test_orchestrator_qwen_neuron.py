@@ -1,0 +1,720 @@
+"""The Qwen-Image CLI on the neuron backend (torchrun MPMD, task D).
+
+With DIFFLET_BACKEND=neuron, ``difflet compile/generate --model-id Qwen/Qwen-Image`` is one
+torchrun launch of the generate stage (the text stage folded into it: rank 0 encodes on its
+host) plus, for generate, a host decode in the driver. The ranks build
+TorchNeuronQwenImageApplication through DiffletPipeline.from_pretrained, here the CPU fake of
+tests/unit/cli/_fake_neuron_pipeline.py; only rank 0 writes. No test touches a NeuronCore.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from difflet.cli.orchestrators import qwen_image as qwen_mod
+from difflet.cli.orchestrators.qwen_image import QwenImageOrchestrator
+from tests.unit.cli import _fake_neuron_pipeline as fake_pipeline
+
+_QWEN_ID = "Qwen/Qwen-Image"
+_REV = "75e0b4be04f60ec59a75f475837eced720f823b6"
+_CACHE_ENV = ("DIFFLET_COMPILE_CACHE", "TORCH_NEURONX_NEFF_CACHE_DIR",
+              "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR", "TORCH_NEURONX_HLO_CACHE_DIR")
+_CACHE_NOTE = "compiles into --cache-dir: DIFFLET_COMPILE_CACHE="
+_NEURON_APP_KWARGS = {
+    "text_seq_len": 1024, "batch_size": 1, "enable_text_encoder": True,
+    "enable_transformer": True, "enable_vae_decoder": False, "exec_mode": None,
+    "encoder_threads": 12,
+}
+
+
+def _qwen_args(**overrides) -> argparse.Namespace:
+    defaults = dict(
+        model_id=_QWEN_ID, tp_degree=4, cp_degree=1, cp_mode="gather_kv", cfg_parallel=False,
+        sp_enabled=False, height=1024, width=1024, num_frames=None, shapes=None,
+        cache_dir=None, force=False, revision=None, host_vae=False,
+        prompt="a cat", output="/tmp/qwen.png",
+        steps=4, guidance_scale=4.0, seed=42, stage_mode="generate",
+        work_dir=None, keep_work_dir=False,
+        teacache_cadence=None, teacache_online_delta=None,
+        teacache_speedup=None, teacache_calibration=None,
+        compiled_dir=None, vae_tp_degree=None,
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def _unset(monkeypatch, *names):
+    """Unset ``names`` now and restore them after the test, even when the code under test
+    assigns os.environ itself (delenv of an absent name records nothing to undo)."""
+    for name in names:
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+
+
+def _backend(monkeypatch, backend):
+    _unset(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    if backend is not None:
+        monkeypatch.setenv("DIFFLET_BACKEND", backend)
+
+
+def _record_stages(monkeypatch) -> tuple[list, list]:
+    """run_stage and the host decode, recorded."""
+    stages, decoded = [], []
+    monkeypatch.setattr(qwen_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: stages.append((stage, kw["num_cores"])))
+    monkeypatch.setattr(qwen_mod, "_decode_latents_host",
+                        lambda *a, **k: decoded.append((a, k)))
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: "/fake/model")
+    return stages, decoded
+
+
+# ----------------------------------------------------------------- the stage plan
+
+
+@pytest.mark.parametrize("keep", [False, True])
+def test_neuron_generate_is_one_launch_and_a_host_decode(monkeypatch, tmp_path, keep):
+    _backend(monkeypatch, "neuron")
+    stages, decoded = _record_stages(monkeypatch)
+    work = tmp_path / "work"
+    args = _qwen_args(revision=_REV, work_dir=str(work), keep_work_dir=keep, height=768,
+                      width=1360, output=str(tmp_path / "out.png"))
+
+    QwenImageOrchestrator(args).generate()
+
+    # The text stage is folded into the generate launch; tp 4 = every core of a trn2.3xlarge.
+    assert stages == [("generate", 4)]
+    assert decoded == [((str(work / "latents.pt"), "/fake/model", str(tmp_path / "out.png")),
+                        {"height": 768, "width": 1360})]
+    assert work.exists() is keep
+
+
+def test_neuron_compile_is_the_generate_launch_only(monkeypatch, tmp_path):
+    _backend(monkeypatch, "neuron")
+    stages, decoded = _record_stages(monkeypatch)
+    QwenImageOrchestrator(_qwen_args(tp_degree=2, cp_degree=2, cp_mode="ulysses")).compile()
+    assert stages == [("generate", 4)] and decoded == []  # the host VAE compiles nothing
+
+
+def test_neuron_run_compiles_then_generates(monkeypatch, tmp_path):
+    _backend(monkeypatch, "neuron")
+    stages, decoded = _record_stages(monkeypatch)
+    downloads = []
+    monkeypatch.setattr(QwenImageOrchestrator, "download", lambda self: downloads.append(1))
+    QwenImageOrchestrator(_qwen_args(work_dir=str(tmp_path / "w"))).run()
+    assert downloads == [1] and [s for s, _ in stages] == ["generate", "generate"]
+    assert len(decoded) == 1
+
+
+def test_neuron_generate_preserves_the_work_dir_when_the_decode_fails(monkeypatch, tmp_path,
+                                                                      capsys):
+    _backend(monkeypatch, "neuron")
+    _record_stages(monkeypatch)
+
+    def boom(*a, **k):
+        raise RuntimeError("decode failed")
+
+    monkeypatch.setattr(qwen_mod, "_decode_latents_host", boom)
+    work = tmp_path / "work"
+    with pytest.raises(RuntimeError, match="decode failed"):
+        QwenImageOrchestrator(_qwen_args(work_dir=str(work))).generate()
+    assert work.exists() and "work dir preserved" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
+@pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_aot_backends_keep_the_three_stages(monkeypatch, tmp_path, backend, mode):
+    _backend(monkeypatch, backend)
+    stages, decoded = _record_stages(monkeypatch)
+    getattr(QwenImageOrchestrator(_qwen_args(work_dir=str(tmp_path / "w"))), mode)()
+    assert stages == [("text", 4), ("generate", 4), ("vae", 1)] and decoded == []
+
+
+@pytest.mark.parametrize("stage", ["text", "vae"])
+def test_neuron_has_no_text_or_vae_stage(monkeypatch, stage):
+    _backend(monkeypatch, "neuron")
+    args = _qwen_args()
+    with pytest.raises(RuntimeError, match=f"no '{stage}' stage"):
+        QwenImageOrchestrator(args)._run_stage_internal(stage, args)
+
+
+# ----------------------------------------------------------------- driver-side rejection
+
+_REJECTED = [
+    (dict(sp_enabled=True), "--sp"),
+    (dict(cfg_parallel=True), "--cfg-parallel"),
+    (dict(teacache_cadence=2), "--teacache-cadence"),
+    (dict(teacache_online_delta=0.6), "--teacache-online-delta"),
+    (dict(teacache_speedup=1.5, teacache_calibration="c.json"),
+     "--teacache-speedup, --teacache-calibration"),
+    (dict(requests="r.jsonl"), "--requests"),
+    (dict(requests_dir="/rd", worker_index=0, dp_schedule="round_robin"),
+     "--requests/--dp (data-parallel worker)"),
+    (dict(shapes="1024x1024,768x1360"), "--shapes with more than one shape"),
+    (dict(sp_enabled=True, cfg_parallel=True, shapes="1024x1024, 512x512 ,"),
+     "--sp, --cfg-parallel, --shapes with more than one shape"),
+]
+
+
+@pytest.mark.parametrize("overrides, named", _REJECTED)
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_neuron_driver_rejects_unsupported_options_before_any_launch(monkeypatch, tmp_path,
+                                                                     capsys, mode, overrides,
+                                                                     named):
+    _unset(monkeypatch, *_CACHE_ENV)
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setattr(qwen_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(qwen_mod, "_decode_latents_host",
+                        lambda *a, **k: pytest.fail("nothing to decode"))
+    monkeypatch.setattr(QwenImageOrchestrator, "download",
+                        lambda self: pytest.fail("rejected before the download"))
+    args = _qwen_args(cache_dir=str(tmp_path / "cache"), work_dir=str(tmp_path / "work"),
+                      **overrides)
+
+    with pytest.raises(SystemExit) as exc:
+        getattr(QwenImageOrchestrator(args), mode)()
+
+    assert exc.value.code == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.strip() == (
+        f"Error: the neuron backend does not support {named} (it runs tensor and context "
+        "parallelism at one static shape, one request per launch, no TeaCache); "
+        "nothing was launched.")
+    assert "DIFFLET_COMPILE_CACHE" not in os.environ
+    assert not (tmp_path / "work").exists()
+
+
+@pytest.mark.parametrize("overrides", [
+    {}, dict(tp_degree=2, steps=50, guidance_scale=5.0, seed=7),
+    dict(tp_degree=2, cp_degree=2, cp_mode="ring"), dict(tp_degree=1, cp_degree=4,
+                                                         cp_mode="ulysses"),
+    dict(shapes="1024x1024"), dict(height=768, width=1360, shapes="768x1360"),
+    dict(host_vae=True),
+])
+def test_neuron_driver_lets_supported_options_through(monkeypatch, tmp_path, capsys, overrides):
+    _backend(monkeypatch, "neuron")
+    stages, decoded = _record_stages(monkeypatch)
+    QwenImageOrchestrator(_qwen_args(work_dir=str(tmp_path / "w"), **overrides)).generate()
+    assert [s for s, _ in stages] == ["generate"] and len(decoded) == 1
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
+@pytest.mark.parametrize("overrides", [o for o, _ in _REJECTED])
+def test_aot_backends_skip_the_torchrun_option_check(monkeypatch, tmp_path, capsys, backend,
+                                                     overrides):
+    # Trainium/TPU support these (or reject them where they always did); the hook stays out.
+    _backend(monkeypatch, backend)
+    stages, _ = _record_stages(monkeypatch)
+    monkeypatch.setattr(qwen_mod, "_require_request_shape_in_set", lambda args: None)
+    QwenImageOrchestrator(_qwen_args(work_dir=str(tmp_path / "w"), **overrides)).generate()
+    assert [s for s, _ in stages] == ["text", "generate", "vae"]
+    assert capsys.readouterr().err == ""
+
+
+def test_neuron_request_shape_outside_the_single_shape_fails_before_the_launch(monkeypatch,
+                                                                               tmp_path):
+    _backend(monkeypatch, "neuron")
+    stages, _ = _record_stages(monkeypatch)
+    args = _qwen_args(shapes="768x1360", work_dir=str(tmp_path / "w"))
+    with pytest.raises(SystemExit, match="not in the compiled bucket set"):
+        QwenImageOrchestrator(args).generate()
+    assert stages == []
+
+
+# ----------------------------------------------------------------- stage cache key
+
+
+def test_cache_inputs_unchanged_for_aot_backends_and_distinct_for_neuron(monkeypatch):
+    args = _qwen_args(cache_dir="/c")
+    orch = QwenImageOrchestrator(args)
+    stages = ("text", "generate", "vae")
+
+    def keyed(backend, exec_mode=None):
+        _backend(monkeypatch, backend)
+        if exec_mode is not None:
+            monkeypatch.setenv("DIFFLET_EXEC_MODE", exec_mode)
+        return ({s: orch._stage_cache_inputs(s, args) for s in stages},
+                {s: orch._stage_compiled_dir(s, args) for s in stages})
+
+    base, base_dirs = keyed(None)
+    assert set(base["generate"]) == {"component", "model_id", "tp", "cp", "cp_mode", "sp",
+                                     "dtype", "text_seq_len", "shapes", "toolchain"}
+    for backend in ("trainium", "tpu"):  # AoT: byte-identical keys and dirs
+        assert keyed(backend) == (base, base_dirs)
+    neuron, neuron_dirs = keyed("neuron")
+    for stage in stages:
+        assert neuron[stage] == {**base[stage], "backend": "neuron", "exec_mode": "compile"}
+        assert neuron_dirs[stage] != base_dirs[stage]
+        assert neuron_dirs[stage].parent == base_dirs[stage].parent
+    # An omitted --exec-mode keys like the default (compile); eager differs.
+    assert keyed("neuron", "compile") == (neuron, neuron_dirs)
+    eager, eager_dirs = keyed("neuron", "eager")
+    assert eager["generate"] == {**neuron["generate"], "exec_mode": "eager"}
+    assert eager_dirs["generate"] != neuron_dirs["generate"]
+    # CP degree and mode stay in the key.
+    ring = _qwen_args(cache_dir="/c", tp_degree=2, cp_degree=2, cp_mode="ring")
+    assert orch._stage_compiled_dir("generate", ring) != neuron_dirs["generate"]
+
+
+# ----------------------------------------------------------------- the torchrun command line
+
+
+def _record_launches(monkeypatch) -> list[tuple[list[str], dict]]:
+    """The real run_stage up to the launch: each torchrun command line and environment."""
+    launches: list = []
+    monkeypatch.setattr(qwen_mod.runner, "_run_torchrun",
+                        lambda cmd, env: launches.append((list(cmd), dict(env))))
+    monkeypatch.setattr(qwen_mod, "_decode_latents_host", lambda *a, **k: None)
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: "/fake/model")
+    return launches
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_neuron_torchrun_command_line(monkeypatch, tmp_path, capsys, mode):
+    from difflet.cli import stage as stage_mod
+
+    _unset(monkeypatch, *_CACHE_ENV)
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setenv("DIFFLET_EXEC_MODE", "eager")
+    monkeypatch.chdir(tmp_path)
+    launches = _record_launches(monkeypatch)
+    work = tmp_path / "work"
+    args = _qwen_args(tp_degree=2, cp_degree=2, cp_mode="ulysses", cache_dir="cache",
+                      work_dir=str(work), revision=_REV, steps=20, guidance_scale=3.5, seed=7,
+                      prompt="a fox", output=str(tmp_path / "fox.png"), shapes="1024x1024")
+    getattr(QwenImageOrchestrator(args), mode)()
+
+    [(cmd, env)] = launches
+    head = [sys.executable, "-m", "torch.distributed.run", "--standalone", "--nproc-per-node",
+            "4", "-m", "difflet.cli.stage", "--orchestrator", _QWEN_ID, "--stage", "generate"]
+    assert cmd[:len(head)] == head
+    stage_args, _ = stage_mod._build_stage_parser().parse_known_args(cmd[len(head) - 4:])
+    assert (stage_args.stage, stage_args.stage_mode) == ("generate", mode)
+    assert (stage_args.tp_degree, stage_args.cp_degree, stage_args.cp_mode) == (2, 2, "ulysses")
+    assert (stage_args.height, stage_args.width, stage_args.shapes) == (1024, 1024, "1024x1024")
+    assert (stage_args.steps, stage_args.guidance_scale, stage_args.seed) == (20, 3.5, 7)
+    assert (stage_args.prompt, stage_args.revision, stage_args.cache_dir) == ("a fox", _REV,
+                                                                              "cache")
+    assert stage_args.work_dir == (str(work) if mode == "generate" else
+                                   str(Path.home() / ".cache" / "difflet" / "work" / "qwen-image"))
+    # The backend and exec mode reach the ranks through the environment; --cache-dir roots the
+    # compile cache; torchrun owns the rank variables and core binding.
+    root = str(tmp_path / "cache")
+    assert (env["DIFFLET_BACKEND"], env["DIFFLET_EXEC_MODE"]) == ("neuron", "eager")
+    assert env["DIFFLET_COMPILE_CACHE"] == root
+    assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "cache" / "neuron" / "neff")
+    assert "RANK" not in env and "WORLD_SIZE" not in env
+    assert capsys.readouterr().out.count(_CACHE_NOTE + root) == 1
+
+
+def test_neuron_exported_compile_cache_wins_over_cache_dir(monkeypatch, tmp_path, capsys):
+    _unset(monkeypatch, *_CACHE_ENV)
+    explicit = str(tmp_path / "explicit")
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", explicit)
+    _backend(monkeypatch, "neuron")
+    launches = _record_launches(monkeypatch)
+    args = _qwen_args(cache_dir=str(tmp_path / "cache"), work_dir=str(tmp_path / "work"))
+    QwenImageOrchestrator(args).generate()
+    [(_, env)] = launches
+    assert env["DIFFLET_COMPILE_CACHE"] == explicit
+    assert _CACHE_NOTE not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
+def test_aot_backends_leave_the_compile_cache_alone(monkeypatch, tmp_path, capsys, backend):
+    _unset(monkeypatch, *_CACHE_ENV)
+    _backend(monkeypatch, backend)
+    stages, _ = _record_stages(monkeypatch)
+    QwenImageOrchestrator(_qwen_args(cache_dir=str(tmp_path / "c"),
+                                     work_dir=str(tmp_path / "w"))).generate()
+    assert len(stages) == 3 and "DIFFLET_COMPILE_CACHE" not in os.environ
+    assert _CACHE_NOTE not in capsys.readouterr().out
+
+
+# ----------------------------------------------------------------- the generate stage (ranks)
+
+
+@pytest.fixture
+def neuron_stage(monkeypatch):
+    """One process, DIFFLET_BACKEND=neuron, no process group (rank 0): from_pretrained is the
+    CPU fake. (The Trainium application module imports neuronx_distributed, which this venv
+    lacks: the neuron path importing it would fail every test here.)"""
+    from difflet.pipeline.difflet_pipeline import DiffletPipeline
+
+    _backend(monkeypatch, "neuron")
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    monkeypatch.setattr(fake_pipeline, "CALLS", [])
+    monkeypatch.setattr(DiffletPipeline, "from_pretrained",
+                        classmethod(fake_pipeline.fake_from_pretrained))
+    return fake_pipeline
+
+
+def _fake_latents(seed: int):
+    import torch
+
+    return torch.randn(fake_pipeline.LATENT_SHAPE, generator=torch.Generator().manual_seed(seed))
+
+
+def test_stage_generate_neuron_routes_through_pipeline(neuron_stage, monkeypatch, tmp_path,
+                                                       capsys):
+    import torch
+
+    monkeypatch.setattr(QwenImageOrchestrator, "_require_stage_artifact",
+                        lambda *a: pytest.fail("non-AoT: there is no stage artifact to require"))
+    cache = tmp_path / "cache"
+    args = _qwen_args(revision=_REV, work_dir=str(tmp_path), cache_dir=str(cache),
+                      prompt="a fox", steps=50, guidance_scale=5.0, seed=42,
+                      tp_degree=2, cp_degree=2, cp_mode="ring")
+    QwenImageOrchestrator(args)._stage_generate(args)
+
+    [call] = neuron_stage.CALLS
+    kw = call["kwargs"]
+    assert call["model_id"] == _QWEN_ID
+    assert (kw["backend"], kw["revision"], kw["local_files_only"]) == ("neuron", _REV, True)
+    assert kw["application_kwargs"] == _NEURON_APP_KWARGS
+    assert (kw["height"], kw["width"], kw["shapes"], kw["load"]) == (1024, 1024, None, False)
+    assert kw["dtype"] is torch.bfloat16 and kw["compile_cache_dir"] == str(cache)
+    assert "model_path_override" not in kw
+    p = kw["parallel"]
+    assert (p.tp_degree, p.cp_degree, p.cp_mode, p.cfg_parallel_enabled, p.sp_enabled) == (
+        2, 2, "ring", False, False)
+    app = call["pipeline"].app
+    # The warm-up runs in load(), before the step loop (the Trainium stage skips it: AoT NEFFs).
+    assert [c["skip_warmup"] for c in app.load_calls] == [False]
+    assert app.calls == [{"prompt": "a fox", "num_inference_steps": 50, "guidance_scale": 5.0,
+                          "output_type": "latent", "seed": 42}]
+    assert torch.equal(torch.load(tmp_path / "latents.pt"), _fake_latents(42))
+    out = capsys.readouterr().out
+    assert out.count(f"-> {tmp_path / 'latents.pt'}") == 1
+    assert "[qwen_image] neuron rank 0/1: exec_mode=compile compiled_blocks=40" in out
+    assert not cache.exists()  # generate writes no stage manifest and no AoT artifact
+
+
+def test_stage_generate_neuron_compile_warms_up_and_writes_the_manifest(neuron_stage, tmp_path):
+    from difflet.cli.orchestrators.base import has_valid_stage_manifest
+
+    args = _qwen_args(stage_mode="compile", work_dir=str(tmp_path / "w"),
+                      cache_dir=str(tmp_path / "cache"))
+    orch = QwenImageOrchestrator(args)
+    orch._stage_generate(args)
+
+    [call] = neuron_stage.CALLS
+    app = call["pipeline"].app
+    assert [c["skip_warmup"] for c in app.load_calls] == [False] and app.calls == []
+    compiled_dir = orch._stage_compiled_dir("generate", args)
+    inputs = orch._stage_cache_inputs("generate", args)
+    assert has_valid_stage_manifest(compiled_dir, inputs)
+    assert (inputs["backend"], inputs["exec_mode"]) == ("neuron", "compile")
+    assert not (tmp_path / "w").exists()
+
+
+@pytest.mark.parametrize("mode", ["generate", "compile"])
+def test_stage_generate_neuron_writes_files_on_rank0_only(neuron_stage, monkeypatch, tmp_path,
+                                                          capsys, mode):
+    from difflet.backends.neuron.core import distributed
+
+    monkeypatch.setattr(distributed, "is_rank0", lambda: False)
+    work, cache = tmp_path / "work", tmp_path / "cache"
+    work.mkdir()
+    args = _qwen_args(stage_mode=mode, work_dir=str(work), cache_dir=str(cache))
+    QwenImageOrchestrator(args)._stage_generate(args)
+
+    [call] = neuron_stage.CALLS
+    assert len(call["pipeline"].app.calls) == (1 if mode == "generate" else 0)  # every rank runs
+    assert list(work.iterdir()) == [] and not cache.exists()
+    assert "packed latents" not in capsys.readouterr().out
+
+
+def test_stage_generate_neuron_rejects_request_batches(neuron_stage, tmp_path):
+    args = _qwen_args(work_dir=str(tmp_path), requests_dir=str(tmp_path / "requests"),
+                      worker_index=0, dp_schedule="round_robin")
+    with pytest.raises(NotImplementedError, match="--requests"):
+        QwenImageOrchestrator(args)._stage_generate(args)
+    assert neuron_stage.CALLS == []
+
+
+@pytest.mark.parametrize("overrides, parallel, app_extra", [
+    (dict(cfg_parallel=True), (True, False), {}),
+    (dict(sp_enabled=True), (False, True), {}),
+    (dict(teacache_cadence=2), (False, False), {"teacache_cadence": 2}),
+    (dict(teacache_online_delta=0.6), (False, False), {"teacache_online_delta_alpha": 0.6}),
+    (dict(teacache_speedup=1.5, teacache_calibration="c.json"), (False, False),
+     {"teacache_speedup": 1.5, "teacache_calibration_path": "c.json"}),
+])
+def test_stage_generate_neuron_hands_unsupported_options_on(neuron_stage, tmp_path, overrides,
+                                                            parallel, app_extra):
+    # Not dropped silently: the backend rejects cfg/sp, the application TeaCache.
+    args = _qwen_args(stage_mode="compile", cache_dir=str(tmp_path), **overrides)
+    QwenImageOrchestrator(args)._stage_generate(args)
+    kw = neuron_stage.CALLS[0]["kwargs"]
+    p = kw["parallel"]
+    assert (p.cfg_parallel_enabled, p.sp_enabled) == parallel
+    assert kw["application_kwargs"] == {**_NEURON_APP_KWARGS, **app_extra}
+
+
+def test_stage_generate_neuron_binds_a_local_model_path(neuron_stage, tmp_path):
+    model = tmp_path / "snapshot"
+    model.mkdir()
+    args = _qwen_args(stage_mode="compile", cache_dir=str(tmp_path / "cache"),
+                      model_path=str(model), shapes="1024x1024")
+    orch = QwenImageOrchestrator(args)
+    orch._stage_generate(args)
+    kw = neuron_stage.CALLS[0]["kwargs"]
+    assert kw["model_path_override"] == str(model.resolve())
+    assert kw["resolved_source_id"] == "local"
+    assert kw["compiled_path_override"] == str(orch._stage_compiled_dir("generate", args))
+    assert [tuple(s) for s in kw["shapes"]] == [(1024, 1024, None)]
+
+
+# ----------------------------------------------------------------- host VAE decode
+
+
+def _tiny_vae_snapshot(root: Path):
+    """A seeded tiny AutoencoderKLQwenImage (z_dim 4, 8x spatial scale) under ``root/vae``."""
+    import torch
+    from diffusers import AutoencoderKLQwenImage
+
+    from tests.unit.backends._neuron_qwen_app_toy import TINY_VAE_CONFIG
+
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(11)
+        vae = AutoencoderKLQwenImage(**TINY_VAE_CONFIG).eval()
+    vae.save_pretrained(str(root / "vae"), safe_serialization=True)
+    return vae
+
+
+def _diffusers_decode(vae, packed, height: int, width: int):
+    """diffusers QwenImagePipeline's decode of packed latents (output_type='pt', before
+    postprocessing), in fp32."""
+    import torch
+    from diffusers import QwenImagePipeline
+
+    latents = QwenImagePipeline._unpack_latents(packed, height, width, vae_scale_factor=8)
+    z_dim = vae.config.z_dim
+    mean = torch.tensor(vae.config.latents_mean).view(1, z_dim, 1, 1, 1)
+    std = 1.0 / torch.tensor(vae.config.latents_std).view(1, z_dim, 1, 1, 1)
+    with torch.no_grad():
+        return vae.decode(latents / std + mean, return_dict=False)[0][:, :, 0]
+
+
+def test_host_decode_matches_diffusers_qwen_image_pipeline(tmp_path, monkeypatch):
+    import torch
+
+    vae = _tiny_vae_snapshot(tmp_path / "model")
+    height, width = 64, 96  # a non-square grid: 4 x 6 packed tokens
+    packed = torch.randn(1, (height // 16) * (width // 16), 16,
+                         generator=torch.Generator().manual_seed(3)).to(torch.bfloat16)
+    torch.save(packed, tmp_path / "latents.pt")
+    # Keep the tensor: a writer that fails falls back to <output>.pt.
+    monkeypatch.setattr(qwen_mod, "_save_image_pil",
+                        lambda image, path: (_ for _ in ()).throw(RuntimeError("no image")))
+    out = tmp_path / "out" / "img.png"
+
+    qwen_mod._decode_latents_host(str(tmp_path / "latents.pt"), str(tmp_path / "model"),
+                                  str(out), height=height, width=width)
+
+    image = torch.load(out.with_suffix(".pt"))
+    assert image.shape == (1, 3, height, width) and image.dtype == torch.float32
+    torch.testing.assert_close(image, _diffusers_decode(vae, packed.float(), height, width),
+                               rtol=1e-5, atol=1e-5)
+
+
+def test_host_decode_writes_the_png_torchvision_would(tmp_path):
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    _tiny_vae_snapshot(tmp_path / "model")
+    packed = torch.randn(1, 4, 16, generator=torch.Generator().manual_seed(5))
+    torch.save(packed, tmp_path / "latents.pt")
+    out = tmp_path / "img.png"
+    qwen_mod._decode_latents_host(str(tmp_path / "latents.pt"), str(tmp_path / "model"),
+                                  str(out), height=32, width=32)
+
+    with Image.open(out) as png:
+        assert png.size == (32, 32) and png.mode == "RGB"
+        pixels = np.asarray(png)
+    # torchvision.utils.save_image's quantisation: x * 255 + 0.5, clamped, truncated.
+    from diffusers import AutoencoderKLQwenImage
+
+    vae = AutoencoderKLQwenImage.from_pretrained(str(tmp_path / "model" / "vae")).eval()
+    ref = (_diffusers_decode(vae, packed, 32, 32)[0] * 0.5 + 0.5).clamp(0, 1)
+    expected = ref.mul(255).add(0.5).clamp(0, 255).permute(1, 2, 0).to(torch.uint8).numpy()
+    assert np.abs(pixels.astype(int) - expected.astype(int)).max() <= 1
+
+
+def test_host_decode_rejects_a_latent_of_another_shape(tmp_path):
+    import torch
+
+    _tiny_vae_snapshot(tmp_path / "model")
+    torch.save(torch.zeros(1, 24, 16), tmp_path / "latents.pt")
+    with pytest.raises(ValueError, match="length 24 does not match request grid 6x6"):
+        qwen_mod._decode_latents_host(str(tmp_path / "latents.pt"), str(tmp_path / "model"),
+                                      str(tmp_path / "x.png"), height=96, width=96)
+
+
+# ----------------------------------------------------------------- CPU torchrun (2 ranks, gloo)
+# The real run_stage -> torchrun -> difflet.cli.stage -> QwenImageOrchestrator, with
+# from_pretrained replaced in every rank (FAKE_PIPELINE_ENV).
+
+_REAL_POPEN = subprocess.Popen
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _bounded_popen(limit: float):
+    """subprocess.Popen whose first untimed wait() gives up after ``limit`` s (TimeoutExpired):
+    run_stage then sends torchrun SIGTERM and waits for it, so a hung launch fails the test."""
+
+    class BoundedPopen(_REAL_POPEN):
+        _bounded = False
+
+        def wait(self, timeout=None):
+            if timeout is None and not self._bounded:
+                self._bounded = True
+                timeout = limit
+            return super().wait(timeout=timeout)
+
+    return BoundedPopen
+
+
+def _alive(pid: int) -> bool:
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"  # a zombie has exited
+
+
+@pytest.fixture
+def neuron_torchrun(monkeypatch, tmp_path):
+    site, records = tmp_path / "site", tmp_path / "records"
+    fake_pipeline.write_sitecustomize(site)
+    records.mkdir()
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(
+        filter(None, [str(site), str(_REPO_ROOT), os.environ.get("PYTHONPATH")])))
+    monkeypatch.setenv(fake_pipeline.FAKE_PIPELINE_ENV, fake_pipeline.MODULE)
+    monkeypatch.setenv(fake_pipeline.FAKE_RECORDS_ENV, str(records))
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setenv("DIFFLET_DISABLE_PREWARM", "1")
+    # run_stage exports the neuron cache locations under it to the ranks, and their
+    # `import torch` (torch_neuronx autoload) creates the HLO one: keep it in tmp_path.
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "difflet-cache"))
+    monkeypatch.setattr(subprocess, "Popen", _bounded_popen(300))
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: str(tmp_path / "model"))
+    return records
+
+
+def test_generate_neuron_cpu_torchrun_one_writer_and_decode_after_every_rank_exited(
+    neuron_torchrun, monkeypatch, tmp_path, capfd,
+):
+    import torch
+
+    seen = {}
+
+    def decode(latents_path, model_dir, output_path, *, height, width):
+        seen["records"] = fake_pipeline.read_rank_records(neuron_torchrun)
+        seen["alive"] = [_alive(r["pid"]) for r in seen["records"]]
+        seen["latents"] = torch.load(latents_path)
+        seen["decode"] = (model_dir, output_path, height, width)
+
+    monkeypatch.setattr(qwen_mod, "_decode_latents_host", decode)
+    work, cache = tmp_path / "work", tmp_path / "cache"
+    args = _qwen_args(revision=_REV, tp_degree=2, work_dir=str(work), keep_work_dir=True,
+                      cache_dir=str(cache), steps=3, guidance_scale=5.0, prompt="a fox",
+                      output=str(tmp_path / "fox.png"))
+    QwenImageOrchestrator(args).generate()
+
+    records = seen["records"]
+    assert [r["rank"] for r in records] == [0, 1] and seen["alive"] == [False, False]
+    writes = [w for r in records for w in r["writes"]]
+    assert writes == [{"kind": "torch.save", "path": str(work / "latents.pt"), "rank": 0}]
+    for record in records:
+        [call] = record["from_pretrained"]
+        kw = call["kwargs"]
+        assert (call["model_id"], kw["backend"], kw["revision"]) == (_QWEN_ID, "neuron", _REV)
+        assert kw["parallel"]["tp_degree"] == 2 and record["world_size"] == 2
+        assert kw["application_kwargs"] == _NEURON_APP_KWARGS
+        assert [c["skip_warmup"] for c in record["pipeline_load_calls"]] == [False]
+        assert [(c["prompt"], c["seed"], c["num_inference_steps"], c["guidance_scale"])
+                for c in record["app_calls"]] == [("a fox", 42, 3, 5.0)]
+    assert torch.equal(seen["latents"], _fake_latents(42))
+    assert seen["decode"] == (str(tmp_path / "model"), str(tmp_path / "fox.png"), 1024, 1024)
+    log = "".join(capfd.readouterr())
+    assert log.count("[generate] packed latents") == 1
+    assert log.count("compiled_blocks=40 unwarmed_shapes=[]") == 2  # one line per rank
+    assert not cache.exists()  # generate: no stage manifest, no AoT artifact
+
+
+def test_compile_neuron_cpu_torchrun_rank0_writes_the_manifest(neuron_torchrun, tmp_path):
+    from difflet.cli.orchestrators.base import has_valid_stage_manifest
+
+    args = _qwen_args(tp_degree=2, cache_dir=str(tmp_path / "cache"))
+    orch = QwenImageOrchestrator(args)
+    orch.compile()
+
+    records = fake_pipeline.read_rank_records(neuron_torchrun)
+    assert [r["rank"] for r in records] == [0, 1]
+    compiled_dir = orch._stage_compiled_dir("generate", args)
+    writes = [w for r in records for w in r["writes"]]
+    assert writes == [{"kind": "manifest", "path": str(compiled_dir), "rank": 0}]
+    assert has_valid_stage_manifest(compiled_dir, orch._stage_cache_inputs("generate", args))
+    for record in records:
+        assert [c["skip_warmup"] for c in record["pipeline_load_calls"]] == [False]
+        assert record["app_calls"] == []
+
+
+# ----------------------------------------------------------------- `difflet generate` end to end
+
+
+def test_main_generate_backend_neuron_reaches_the_torchrun_launch(monkeypatch, tmp_path):
+    """``difflet generate --model-id Qwen/Qwen-Image --backend neuron --exec-mode eager ...``:
+    main's checks pass (the registry lists neuron for Qwen-Image), --backend/--exec-mode are
+    exported for the ranks, and the orchestrator launches one torchrun generate stage."""
+    cli_main = importlib.import_module("difflet.cli.main")  # the package exports main()
+
+    _unset(monkeypatch, *_CACHE_ENV, "NEURON_RT_NUM_CORES")
+    _backend(monkeypatch, None)
+    launches = _record_launches(monkeypatch)
+    out = tmp_path / "out.png"
+    cli_main.main(["generate", "--model-id", _QWEN_ID, "--backend", "neuron",
+                   "--exec-mode", "eager", "--tp-degree", "2", "--cp-degree", "2",
+                   "--cp-mode", "ring", "--total-cores", "4", "--prompt", "a fox",
+                   "--output", str(out), "--cache-dir", str(tmp_path / "cache"),
+                   "--work-dir", str(tmp_path / "work")])
+
+    [(cmd, env)] = launches
+    assert cmd[cmd.index("--nproc-per-node") + 1] == "4"
+    assert cmd[cmd.index("--stage") + 1] == "generate"
+    assert (env["DIFFLET_BACKEND"], env["DIFFLET_EXEC_MODE"]) == ("neuron", "eager")
+    assert env["DIFFLET_COMPILE_CACHE"] == str(tmp_path / "cache")
+
+
+@pytest.mark.parametrize("flag", [["--sp"], ["--teacache-cadence", "2"],
+                                  ["--shapes", "1024x1024,768x1360"]])
+def test_main_generate_backend_neuron_rejects_before_any_launch(monkeypatch, tmp_path, capsys,
+                                                                flag):
+    cli_main = importlib.import_module("difflet.cli.main")  # the package exports main()
+
+    _unset(monkeypatch, *_CACHE_ENV, "NEURON_RT_NUM_CORES")
+    _backend(monkeypatch, None)
+    monkeypatch.setattr(qwen_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    with pytest.raises(SystemExit) as exc:
+        cli_main.main(["generate", "--model-id", _QWEN_ID, "--backend", "neuron",
+                       "--total-cores", "4", "--prompt", "a fox", "--output",
+                       str(tmp_path / "o.png"), "--work-dir", str(tmp_path / "work"), *flag])
+    # main's own checks let these through (Qwen-Image supports sp and TeaCache on Trainium);
+    # the orchestrator's driver hook refuses them.
+    assert exc.value.code == 2
+    assert capsys.readouterr().err.startswith("Error: the neuron backend does not support --")
