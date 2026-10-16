@@ -163,5 +163,4 @@ tests/unit/registry/test_qwen_image_registration.py::test_qwen_image_still_rejec
 tests/unit/registry/test_qwen_image_registration.py::test_qwen_image_supports_context_parallel
 tests/unit/utils/test_diffusers_adapter.py
 tests/unit/utils/test_kv_cache_reconstruct_utils.py
-tests/unit/utils/test_random.py
 tests/unit/utils/test_tensor_replacement_registry.py
