@@ -114,12 +114,48 @@ parity testing.
 Rules:
 
 - The surface is **additive only**. Dispatch is frozen at first import per process.
-- Each op has a Trainium implementation under `difflet/backends/trainium/ops_impl/` and,
-  ideally, a CPU reference under `difflet/backends/cpu/ops_impl/`.
-- `cuda/` and `rocm/` are stubs.
+- Each op has a Trainium implementation under `difflet/backends/trainium/ops_impl/`, a CPU
+  reference under `difflet/backends/cpu/ops_impl/` (the numerical oracle), a TPU
+  implementation under `difflet/backends/tpu/ops_impl/`, and a CUDA implementation under
+  `difflet/backends/cuda/ops_impl/`. `rocm/` is a stub.
+- The Megatron-style parallel layers, the shard-at-load helpers and the safetensors loader are
+  shared by the torch backends in `difflet/backends/_torch_megatron/`; TPU and CUDA each bind
+  them to their own collectives (`build_parallel_layers(collectives)`).
 
 The repo-wide import guard (`scripts/test_imports.sh`) enforces that modeling files import only
-from `difflet.ops`, `torch`, stdlib, `diffusers`, and `transformers`.
+from `difflet.ops`, `torch`, stdlib, `diffusers`, and `transformers`. It runs in two tiers: the
+backend-neutral modules always, the Trainium modules only when the Neuron SDK is importable.
+
+### CUDA backend (Release 1)
+
+`DIFFLET_BACKEND=cuda` runs Qwen-Image at `tp=1` on one NVIDIA GPU, with the DiT going through
+`difflet.ops` and the text encoder, VAE and scheduler loop on the same device in one process.
+There is no ahead-of-time compile step: `compile()` writes `cuda_manifest.json`, `load()` builds
+the module eagerly from the diffusers safetensors. Validated on an RTX PRO 6000 (Blackwell,
+96 GB) with torch 2.11.0+cu128: 50 steps at 1024×1024 in 20.5 s, 58 GB peak, and the
+diffusers-relative parity gate passing. Plan, decisions and status log:
+`docs/plans/2026-10-16-cuda-backend-support.md`.
+
+```bash
+# environment (CUDA 12.8+ wheel; Blackwell needs it) — see requirements-cuda.lock
+uv venv --python 3.11 .venv
+uv pip install --python .venv/bin/python --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
+uv pip install --python .venv/bin/python -e ".[test,cuda]"
+scripts/cuda_env_check.sh                       # driver, capability, torch build, bf16 matmul
+
+# first image, then the parity gate against upstream diffusers
+hf download Qwen/Qwen-Image
+scripts/cuda_smoke.sh --steps 50 --output /tmp/qwen.png --local-files-only
+DIFFLET_BACKEND=cuda python tests/numerical/cuda_parity_gpu.py --model-path <snapshot dir>
+DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_vs_diffusers.py -v
+
+# CPU-host gate (no SDK, no GPU) — also what CI runs
+scripts/cpu-gate.sh
+```
+
+Not in Release 1 (follow-ups F1–F8 in the plan): Wan and Flux on CUDA, a second GPU
+(data-parallel / CFG-parallel first; tensor-parallel across PCIe only when a workload needs it),
+context parallel, `difflet run` / `difflet serve` wiring, `torch.compile`, FP8, custom kernels.
 
 ## Compile cache
 

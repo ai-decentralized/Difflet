@@ -129,8 +129,8 @@ Exit: Status log has a dated "Phase 0 verdict"; the capability triple in `runtim
 Goal: `DIFFLET_BACKEND=cpu ./scripts/check_quick.sh` is green on a laptop, so the GPU box (which also has no Neuron SDK) can import Difflet at all.
 
 **PR 1 — plan, gitignore, CI**
-- [ ] **1.1** `.gitignore`: `!docs/plans/`; commit this plan (D18).
-- [ ] **1.2** `.github/workflows/unit-cpu.yml` running `DIFFLET_BACKEND=cpu pytest tests/unit -q --continue-on-collection-errors` on Ubuntu, Python 3.12. It is red on day one and turns green with PR 2; that is the point (D12).
+- [x] **1.1** `.gitignore`: `!docs/plans/`; commit this plan (D18).
+- [x] **1.2** `.github/workflows/unit-cpu.yml` running `DIFFLET_BACKEND=cpu pytest tests/unit -q --continue-on-collection-errors` on Ubuntu, Python 3.12. It is red on day one and turns green with PR 2; that is the point (D12).
 
 **PR 2 — hygiene**
 - [x] **1.3** `tests/unit/backends/test_cuda_backend.py` (copy `test_tpu_backend.py`): `"cuda"` resolves; capabilities per Phase 0; `prepare_runtime` on a CUDA-less host raises a clear `RuntimeError`; auto-detect order Trainium → TPU → CUDA → ROCm pinned.
