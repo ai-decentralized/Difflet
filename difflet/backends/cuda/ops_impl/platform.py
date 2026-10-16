@@ -53,6 +53,8 @@ def sdpa_kernel_report(q, k, v) -> str:
         ("efficient", SDPBackend.EFFICIENT_ATTENTION),
         ("math", SDPBackend.MATH),
     ]
+    if q.dim() == 3:  # the backend lifts (B*H, S, D) to 4-D before SDPA; probe the same way
+        q, k, v = q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0)
     for name, backend in order:
         if backend is None:
             continue

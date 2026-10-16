@@ -53,10 +53,16 @@ test = [
     "imageio",
     "imageio-ffmpeg",
 ]
-# CUDA backend (docs/plans/2026-10-16-cuda-backend-support.md, D17). Empty until
-# Phase 0 pins the torch CUDA wheel from the GPU box; the lock lives in
-# requirements-cuda.lock. Install torch from the cu128 index first.
-cuda = []
+# CUDA backend (docs/plans/2026-10-16-cuda-backend-support.md, D17). Pinned from the
+# RTX PRO 6000 box on 2026-10-16 (requirements-cuda.lock has the full freeze). torch
+# must come from the CUDA 12.8 index, which an extra cannot express:
+#   uv pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
+#   pip install -e ".[test,cuda]"
+cuda = [
+    "torch==2.11.0",                              # +cu128 build; Blackwell sm_120 needs a CUDA 12.8+ wheel
+    "triton==3.6.0",                              # ships with the torch wheel; pinned for the cache key
+    "hf_transfer",                                # fast Hub downloads (54 GB Qwen-Image in ~90 s on the box)
+]
 dev = [
     "difflet-diffusion[test]",
     "black==26.1.0",
