@@ -16,9 +16,9 @@ def create_qwen_image_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
-    if backend not in {"trainium", "tpu"}:
+    if backend not in {"trainium", "tpu", "cuda"}:
         raise NotImplementedError(
-            f"Qwen-Image supports the trainium and tpu backends, got {backend!r}"
+            f"Qwen-Image supports the trainium, tpu and cuda backends, got {backend!r}"
         )
     # Two different parallel-config types reach this factory: the pipeline's
     # DiffletParallelConfig and serving's ParallelTopology, which carries no
@@ -28,6 +28,17 @@ def create_qwen_image_application(
             "Qwen-Image is guidance-distilled (single forward pass with the "
             "guidance scale baked into the timestep embedding); CFG-parallel "
             "requires true two-pass classifier-free guidance and does not apply."
+        )
+
+    if backend == "cuda":
+        from difflet.models.qwen_image.cuda_application import CudaQwenImageApplication
+
+        return CudaQwenImageApplication(
+            model_path=model_path,
+            parallel=parallel,
+            dtype=dtype,
+            shape=shape,
+            **kwargs,
         )
 
     if backend == "tpu":
@@ -50,4 +61,3 @@ def create_qwen_image_application(
         shape=shape,
         **kwargs,
     )
-

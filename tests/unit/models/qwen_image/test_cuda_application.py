@@ -1,0 +1,155 @@
+"""CPU-only coverage for the Qwen-Image CUDA application and entry branch (PR 3 Task 7).
+
+No weights, no GPU: an empty model dir builds an application with no transformer,
+which is enough to prove the entry wiring, the reflective contract and the prompt
+padding helper. The GPU round trip is scripts/cuda_smoke.py on the box.
+"""
+
+import inspect
+import os
+
+import pytest
+import torch
+
+from difflet.models.qwen_image.entry import create_qwen_image_application
+from difflet.models.qwen_image.prompt import pad_or_truncate_prompt_embeds
+from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+
+@pytest.fixture(autouse=True)
+def _cpu_backend(monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
+
+
+def _build(tmp_path, **kwargs):
+    return create_qwen_image_application(
+        model_path=str(tmp_path),
+        parallel=DiffletParallelConfig(tp_degree=1),
+        dtype="bf16",
+        shape={"height": 64, "width": 64},
+        backend="cuda",
+        **kwargs,
+    )
+
+
+def test_entry_builds_the_cuda_application(tmp_path):
+    app = _build(tmp_path)
+    assert type(app).__name__ == "CudaQwenImageApplication"
+    assert app.transformer is None  # empty model dir -> no transformer/config.json
+    assert app.has_compiled_artifacts(str(tmp_path)) is False
+    assert app.dtype is torch.bfloat16
+
+
+def test_entry_error_lists_all_three_backends(tmp_path):
+    with pytest.raises(NotImplementedError, match="trainium, tpu and cuda"):
+        create_qwen_image_application(
+            model_path=str(tmp_path),
+            parallel=DiffletParallelConfig(tp_degree=1),
+            dtype="bf16",
+            shape={"height": 64, "width": 64},
+            backend="rocm",
+        )
+
+
+def test_entry_rejects_cfg_parallel_on_cuda(tmp_path):
+    with pytest.raises(NotImplementedError, match="guidance-distilled"):
+        create_qwen_image_application(
+            model_path=str(tmp_path),
+            parallel=DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True),
+            dtype="bf16",
+            shape={"height": 64, "width": 64},
+            backend="cuda",
+        )
+
+
+def test_registry_lists_cuda_for_qwen_image():
+    from difflet.registry import resolve_model
+
+    entry = resolve_model("Qwen/Qwen-Image")
+    assert "cuda" in entry.backends
+    entry.require_backend("cuda")  # must not raise
+
+
+def test_cuda_application_signatures_match_the_pipeline_contract(tmp_path):
+    app = _build(tmp_path)
+    assert "debug" in inspect.signature(app.compile).parameters
+    load_params = inspect.signature(app.load).parameters
+    for name in ("start_rank_id", "local_ranks_size", "skip_warmup"):
+        assert name in load_params
+
+
+def test_lifecycle_without_a_transformer_is_an_explicit_error(tmp_path):
+    app = _build(tmp_path)
+    with pytest.raises(NotImplementedError, match="transformer/config.json"):
+        app.compile(str(tmp_path))
+    with pytest.raises(NotImplementedError, match="transformer/config.json"):
+        app.load(str(tmp_path))
+
+
+def test_pad_or_truncate_prompt_embeds_pads_and_masks():
+    embeds = torch.ones(1, 3, 4)
+    padded, mask = pad_or_truncate_prompt_embeds(embeds, None, max_sequence_length=5)
+    assert tuple(padded.shape) == (1, 5, 4) and tuple(mask.shape) == (1, 5)
+    assert mask.dtype == torch.bool
+    assert mask[0].tolist() == [True, True, True, False, False]
+    assert torch.equal(padded[0, :3], embeds[0]) and torch.equal(padded[0, 3:], torch.zeros(2, 4))
+    truncated, tmask = pad_or_truncate_prompt_embeds(embeds, None, max_sequence_length=2)
+    assert tuple(truncated.shape) == (1, 2, 4) and tmask[0].tolist() == [True, True]
+
+
+def test_tiny_qwen_dit_runs_through_the_cuda_ops_on_cpu(tmp_path):
+    """Bind difflet.ops to the CUDA backend in a fresh process and run a tiny DiT on CPU
+    tensors: config → meta build → safetensors load → compile → load → forward. This is
+    the pre-GPU proof that the modeling code resolves and runs on the CUDA ops."""
+    import subprocess
+    import sys
+    import textwrap
+
+    code = textwrap.dedent(f"""
+        import json, os, torch
+        from safetensors.torch import save_file
+        root = {str(tmp_path)!r}
+        tdir = os.path.join(root, "transformer"); os.makedirs(tdir)
+        cfg = dict(patch_size=2, in_channels=16, out_channels=4, num_layers=1,
+                   attention_head_dim=32, num_attention_heads=2, joint_attention_dim=64,
+                   guidance_embeds=False, axes_dims_rope=[8, 12, 12])
+        json.dump(cfg, open(os.path.join(tdir, "config.json"), "w"))
+        from difflet.models.qwen_image.dit_config import QwenImageDiTConfig
+        from difflet.models.qwen_image.modeling_qwen_image import _QwenImageTransformerTraceModule
+        config = QwenImageDiTConfig.from_pretrained(tdir, height=64, width=64, text_seq_len=8,
+                                                    torch_dtype=torch.float32)
+        torch.manual_seed(0)
+        full = _QwenImageTransformerTraceModule(config)
+        # HF layout: the diffusers transformer's own keys; the loader strips "transformer."
+        state = {{k[len("transformer."):]: v.contiguous() for k, v in full.state_dict().items()}}
+        save_file(state, os.path.join(tdir, "model.safetensors"))
+        from difflet.models.qwen_image.cuda_application import CudaQwenImageApplication
+        from difflet.pipeline.parallel_config import DiffletParallelConfig
+        app = CudaQwenImageApplication(model_path=root, parallel=DiffletParallelConfig(tp_degree=1),
+                                       dtype="fp32", shape={{"height": 64, "width": 64}},
+                                       text_seq_len=8, device="cpu", load_text_encoder=False, load_vae=False)
+        cache = os.path.join(root, "cache")
+        app.compile(cache)
+        assert app.has_compiled_artifacts(cache)
+        app.load(cache)
+        c = app.dit_input_contract()
+        from difflet.models.qwen_image.contract import QwenImageDiTInputBundle
+        bundle = QwenImageDiTInputBundle(
+            hidden_states=torch.randn(*c["hidden_states"]["shape"]),
+            timestep=torch.full(c["timestep"]["shape"], 0.5),
+            encoder_hidden_states=torch.randn(*c["encoder_hidden_states"]["shape"]),
+            encoder_hidden_states_mask=torch.ones(*c["encoder_hidden_states_mask"]["shape"], dtype=torch.bool),
+            guidance=torch.zeros(c["guidance"]["shape"]))
+        out = app(bundle)
+        out = out[0] if isinstance(out, (tuple, list)) else out
+        assert tuple(out.shape) == (1, config.image_seq_len, config.out_channels * 4) or tuple(out.shape)[:2] == (1, config.image_seq_len), out.shape
+        assert torch.isfinite(out).all()
+        import difflet.ops.attention as A
+        print("OK", tuple(out.shape), A.attention.__module__ if hasattr(A.attention, "__module__") else "")
+        """)
+    env = dict(os.environ, DIFFLET_BACKEND="cuda")
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=300
+    )
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    assert "OK" in proc.stdout, proc.stdout
