@@ -105,7 +105,7 @@ class CacheSpec:
         same list form (schema v5).
         """
         if self.shapes:
-            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+            from difflet.pipeline.bucketing import canonicalize_shapes
 
             return [list(shape) for shape in canonicalize_shapes(self.shapes)]
         return [[self.height, self.width, self.num_frames]]

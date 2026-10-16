@@ -177,7 +177,7 @@ def _compile_identity(
         "toolchain": toolchain_versions(),
     }
     if stage != "text":
-        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+        from difflet.pipeline.bucketing import canonicalize_shapes
 
         profile_shapes = profile.shapes or ((profile.height, profile.width, None),)
         inputs["shapes"] = [list(shape) for shape in canonicalize_shapes(profile_shapes)]
