@@ -143,19 +143,37 @@ uv pip install --python .venv/bin/python --index-url https://download.pytorch.or
 uv pip install --python .venv/bin/python -e ".[test,cuda]"
 scripts/cuda_env_check.sh                       # driver, capability, torch build, bf16 matmul
 
-# first image, then the parity gate against upstream diffusers
+# first image through the CLI (one process; download + eager "compile" + generate)
 hf download Qwen/Qwen-Image
-scripts/cuda_smoke.sh --steps 50 --output /tmp/qwen.png --local-files-only
+DIFFLET_BACKEND=cuda difflet run --model-id Qwen/Qwen-Image --tp-degree 1 \
+    --prompt "a photorealistic cat sitting in a sunlit garden" --output /tmp/qwen.png --steps 50
+scripts/cuda_smoke.sh --prompt "..." --output /tmp/qwen.png     # same, logged to /tmp/logs
+DIFFLET_BACKEND=cuda python scripts/cuda_smoke.py --steps 50     # per-phase timings, peak memory
+
+# oracles against upstream diffusers: DiT-level (all-ones and padded-prompt masks), then
+# whole pipeline (prompt in, image out, same initial noise)
 DIFFLET_BACKEND=cuda python tests/numerical/cuda_parity_gpu.py --model-path <snapshot dir>
-DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_vs_diffusers.py -v
+DIFFLET_BACKEND=cuda python scripts/cuda_e2e_vs_diffusers.py --model-path <snapshot dir>
+DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_vs_diffusers.py tests/numerical/test_cuda_e2e_vs_diffusers.py -v
+
+# the CUDA column of the CLI matrix (download → compile → timed generate, results.json)
+python scripts/verify_cli_cuda.py --steps 50
 
 # CPU-host gate (no SDK, no GPU) — also what CI runs
 .claude/skills/difflet-cuda-backend/scripts/cpu-gate.sh
 ```
 
+**Prompt padding mask.** Difflet pads every prompt to 1024 text tokens; a typical prompt is
+about 16. The shared Qwen modeling code drops the padding mask (it does not trace under XLA),
+so on Trainium and TPU the DiT attends over the padding. On CUDA the mask is applied
+(`_QwenImageTransformerTraceModule(apply_text_mask=True)`, set only by the CUDA transformer
+application), which is what upstream diffusers does; `tests/unit/models/qwen_image/test_qwen_text_mask.py`
+pins it against diffusers on CPU. Trainium/TPU outputs are unchanged by this.
+
 Not in Release 1 (follow-ups F1–F8 in the plan): Wan and Flux on CUDA, a second GPU
 (data-parallel / CFG-parallel first; tensor-parallel across PCIe only when a workload needs it),
-context parallel, `difflet run` / `difflet serve` wiring, `torch.compile`, FP8, custom kernels.
+context parallel, `--requests` / `--dp` batches on CUDA, `difflet serve` on CUDA (F3b),
+`torch.compile`, FP8, custom kernels.
 
 ## Compile cache
 
