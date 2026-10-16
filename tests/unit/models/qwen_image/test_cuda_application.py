@@ -234,3 +234,31 @@ def test_generate_rejects_guidance_scale_when_the_model_has_no_guidance_embeds(t
     app = _build(tmp_path, device="cpu")
     with pytest.raises(ValueError, match="guidance_embeds"):
         app.generate("a cat", guidance_scale=1.0)
+
+
+def test_generate_uses_the_given_initial_latents(tmp_path, monkeypatch):
+    # The end-to-end oracle (scripts/cuda_e2e_vs_diffusers.py) feeds the same packed noise to
+    # difflet and diffusers; generate() must use it verbatim.
+    app = _build(tmp_path, device="cpu")
+    seen = {}
+
+    class _P:
+        scheduler = None
+        vae_scale_factor = 8
+
+        def prepare_latents(self, **kw):
+            seen.update(kw)
+            return kw["latents"]
+
+        def __call__(self, **kw):
+            seen["call"] = kw
+            return type("O", (), {"images": None})()
+
+    app.pipeline = _P()
+    app.vae = None
+    monkeypatch.setattr(
+        app, "encode_prompt", lambda p: (torch.zeros(1, 4, 8), torch.ones(1, 4, dtype=torch.bool))
+    )
+    noise = torch.randn(1, 16, 64)
+    app.generate("a cat", num_inference_steps=2, seed=0, latents=noise, output_type="latent")
+    assert seen["latents"] is noise and seen["call"]["latents"] is noise

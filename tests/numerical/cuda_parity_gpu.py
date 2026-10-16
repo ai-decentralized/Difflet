@@ -1,6 +1,9 @@
 """Qwen-Image DiT parity on one GPU: diffusers fp32 → diffusers bf16 (control) →
 difflet bf16 through the CUDA ops, on identical seeded inputs (CUDA plan D14).
 
+Two cases per run: the all-ones text mask (Release 1) and the padded-prompt mask
+(F3: only the first --valid-text-tokens of text_seq_len are valid, as a real prompt is).
+
 Writes a JSON the gate reads (tests/numerical/test_cuda_vs_diffusers.py):
 
     DIFFLET_BACKEND=cuda python tests/numerical/cuda_parity_gpu.py \
@@ -41,6 +44,12 @@ def main() -> None:
     ap.add_argument("--height", type=int, default=1024)
     ap.add_argument("--width", type=int, default=1024)
     ap.add_argument("--text-seq-len", type=int, default=1024)
+    ap.add_argument(
+        "--valid-text-tokens",
+        type=int,
+        default=16,
+        help="the padded-prompt case (F3): only the first N text tokens are valid",
+    )
     ap.add_argument("--skip-fp32", action="store_true", help="reuse a saved reference")
     ap.add_argument("--reference", default="/tmp/logs/cuda_parity_reference.pt")
     args = ap.parse_args()
@@ -58,6 +67,9 @@ def main() -> None:
     timestep = torch.tensor([0.5])
     text = torch.randn(1, cfg.text_seq_len, cfg.joint_attention_dim)
     mask = torch.ones(1, cfg.text_seq_len, dtype=torch.bool)
+    # The padded-prompt case: a real prompt is ~16 tokens of 1024; diffusers masks the rest.
+    mask_part = torch.zeros(1, cfg.text_seq_len, dtype=torch.bool)
+    mask_part[:, : args.valid_text_tokens] = True
     img_shapes = [(1, cfg.packed_height, cfg.packed_width)]
     payload: dict = {
         "model": "qwen_image",
@@ -66,47 +78,62 @@ def main() -> None:
         "device": torch.cuda.get_device_name(0),
         "torch": torch.__version__,
         "cuda": torch.version.cuda,
+        "valid_text_tokens": args.valid_text_tokens,
     }
 
     ref_path = Path(args.reference)
     if args.skip_fp32 and ref_path.is_file():
         blob = torch.load(ref_path, weights_only=False)
         ref, ref_bf16 = blob["reference"], blob["reference_bf16"]
+        ref_m, ref_bf16_m = blob["reference_masked"], blob["reference_bf16_masked"]
         payload["control"] = blob["control"]
+        payload["control_masked"] = blob["control_masked"]
         print("reusing saved fp32 reference and bf16 control", flush=True)
     else:
         from diffusers import QwenImageTransformer2DModel
 
         def upstream(dtype):
+            """Two forwards per load (all-ones mask, padded-prompt mask): fp32 is 80 GB."""
             mark = time.monotonic()
             model = QwenImageTransformer2DModel.from_pretrained(str(tdir), torch_dtype=dtype)
             model.to(device).eval().requires_grad_(False)
             print(f"diffusers {dtype} loaded in {time.monotonic() - mark:.1f}s", flush=True)
+            outs = []
             with torch.no_grad():
-                out = (
-                    model(
-                        hidden_states=hidden.to(device, dtype),
-                        timestep=timestep.to(device, dtype),
-                        encoder_hidden_states=text.to(device, dtype),
-                        encoder_hidden_states_mask=mask.to(device),
-                        img_shapes=img_shapes,
-                        txt_seq_lens=[int(mask.sum())],
-                        return_dict=False,
-                    )[0]
-                    .float()
-                    .cpu()
-                )
+                for m in (mask, mask_part):
+                    outs.append(
+                        model(
+                            hidden_states=hidden.to(device, dtype),
+                            timestep=timestep.to(device, dtype),
+                            encoder_hidden_states=text.to(device, dtype),
+                            encoder_hidden_states_mask=m.to(device),
+                            img_shapes=img_shapes,
+                            return_dict=False,
+                        )[0]
+                        .float()
+                        .cpu()
+                    )
             del model
             torch.cuda.empty_cache()
-            return out
+            return outs
 
-        ref = upstream(torch.float32)
-        ref_bf16 = upstream(torch.bfloat16)
+        ref, ref_m = upstream(torch.float32)
+        ref_bf16, ref_bf16_m = upstream(torch.bfloat16)
         payload["control"] = _metrics(ref_bf16, ref)
+        payload["control_masked"] = _metrics(ref_bf16_m, ref_m)
         print(f"control (diffusers bf16 vs fp32): {payload['control']}", flush=True)
+        print(f"control, padded prompt: {payload['control_masked']}", flush=True)
         ref_path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
-            {"reference": ref, "reference_bf16": ref_bf16, "control": payload["control"]}, ref_path
+            {
+                "reference": ref,
+                "reference_bf16": ref_bf16,
+                "reference_masked": ref_m,
+                "reference_bf16_masked": ref_bf16_m,
+                "control": payload["control"],
+                "control_masked": payload["control_masked"],
+            },
+            ref_path,
         )
 
     # difflet bf16 through the CUDA ops (DiT only: no text encoder, no VAE).
@@ -128,26 +155,34 @@ def main() -> None:
     app.compile(str(cache))
     app.load(str(cache), skip_warmup=True)
     print(f"difflet bf16 loaded in {time.monotonic() - mark:.1f}s", flush=True)
-    bundle = QwenImageDiTInputBundle(
-        hidden_states=hidden.to(device, torch.bfloat16),
-        timestep=timestep.to(device, torch.bfloat16),
-        encoder_hidden_states=text.to(device, torch.bfloat16),
-        encoder_hidden_states_mask=mask.to(device),
-        guidance=torch.zeros(1, device=device, dtype=torch.bfloat16),
-    )
-    with torch.no_grad():
-        out = app(bundle)
-    out = (out[0] if isinstance(out, (tuple, list)) else out).float().cpu()
-    entry = _metrics(out, ref)
-    entry["vs_bf16"] = _metrics(out, ref_bf16)
-    payload["results"] = {"sdpa": entry}
-    print(f"difflet bf16 vs fp32: {entry}", flush=True)
-    print(f"difflet bf16 vs bf16 control: {entry['vs_bf16']}", flush=True)
-    print(
-        f"ratio vs control: rel_l1 {entry['rel_l1'] / payload['control']['rel_l1']:.3f}x, "
-        f"same-dtype distance {entry['vs_bf16']['rel_l1'] / payload['control']['rel_l1']:.3f}x",
-        flush=True,
-    )
+    def difflet_forward(m):
+        bundle = QwenImageDiTInputBundle(
+            hidden_states=hidden.to(device, torch.bfloat16),
+            timestep=timestep.to(device, torch.bfloat16),
+            encoder_hidden_states=text.to(device, torch.bfloat16),
+            encoder_hidden_states_mask=m.to(device),
+            guidance=torch.zeros(1, device=device, dtype=torch.bfloat16),
+        )
+        with torch.no_grad():
+            out = app(bundle)
+        return (out[0] if isinstance(out, (tuple, list)) else out).float().cpu()
+
+    payload["results"] = {}
+    for name, m, r, r_bf16, control in (
+        ("sdpa", mask, ref, ref_bf16, payload["control"]),
+        ("masked", mask_part, ref_m, ref_bf16_m, payload["control_masked"]),
+    ):
+        out = difflet_forward(m)
+        entry = _metrics(out, r)
+        entry["vs_bf16"] = _metrics(out, r_bf16)
+        payload["results"][name] = entry
+        print(f"[{name}] difflet bf16 vs fp32: {entry}", flush=True)
+        print(f"[{name}] difflet bf16 vs bf16 control: {entry['vs_bf16']}", flush=True)
+        print(
+            f"[{name}] ratio vs control: rel_l1 {entry['rel_l1'] / control['rel_l1']:.3f}x, "
+            f"same-dtype distance {entry['vs_bf16']['rel_l1'] / control['rel_l1']:.3f}x",
+            flush=True,
+        )
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(payload, indent=2))
     print(f"wrote {args.out}", flush=True)
