@@ -33,6 +33,7 @@ dependencies = [
     "av",                                         # video I/O (Wan/Hunyuan output) — difflet/serving/video_media.py
     "imageio-ffmpeg",                             # ffmpeg binary for video encoding
     "accelerate",                                 # used by diffusers' from_pretrained weight loading
+    "transformers",                               # text encoders (CLIP/T5/UMT5/Qwen2-VL); was only implied via diffusers
 
     # Serving stack — `difflet serve` is part of the CLI, so these are required,
     # not optional. fastapi and boto3 are already in the venv; listed anyway to
@@ -52,6 +53,10 @@ test = [
     "imageio",
     "imageio-ffmpeg",
 ]
+# CUDA backend (docs/plans/2026-10-16-cuda-backend-support.md, D17). Empty until
+# Phase 0 pins the torch CUDA wheel from the GPU box; the lock lives in
+# requirements-cuda.lock. Install torch from the cu128 index first.
+cuda = []
 dev = [
     "difflet-diffusion[test]",
     "black==26.1.0",
