@@ -41,8 +41,10 @@ class CudaQwenImageTransformerApplication(CudaApplicationBase):
         from difflet.models.qwen_image.modeling_qwen_image import _QwenImageTransformerTraceModule
 
         self._init_runtime()
+        # CUDA runs eagerly, so the prompt padding mask can reach the attention
+        # (Trainium/TPU keep dropping it: the mask path does not trace under XLA).
         with init_empty_weights(include_buffers=False):
-            module = _QwenImageTransformerTraceModule(self.dit_config)
+            module = _QwenImageTransformerTraceModule(self.dit_config, apply_text_mask=True)
         return module
 
     def _prepare_module(self) -> torch.nn.Module:
