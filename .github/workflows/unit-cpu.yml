@@ -1,0 +1,38 @@
+name: unit-cpu
+
+# CPU-only unit suite with the CPU reference backend selected. No accelerator,
+# no Neuron SDK. Added by PR 1 of docs/plans/2026-10-16-cuda-backend-support.md
+# (decision D12); it is red until PR 2 (Phase 1 import hygiene) lands and is
+# meant to stay green from then on. GPU and Trainium tests remain manual and
+# are recorded in the plan's status log.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  unit-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # CPU wheels only: the default index would pull multi-GB CUDA builds.
+      - name: Install torch (CPU)
+        run: pip install --index-url https://download.pytorch.org/whl/cpu torch
+
+      # `transformers` is imported by the package but missing from pyproject
+      # today; PR 2 adds it there and removes it from this line.
+      - name: Install Difflet with test extras
+        run: pip install -e ".[test]" transformers
+
+      - name: Unit tests (CPU backend)
+        env:
+          DIFFLET_BACKEND: cpu
+        run: pytest tests/unit -q -p no:cacheprovider --continue-on-collection-errors
