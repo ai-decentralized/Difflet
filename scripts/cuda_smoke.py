@@ -28,7 +28,6 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--height", type=int, default=1024)
     ap.add_argument("--width", type=int, default=1024)
-    ap.add_argument("--guidance-scale", type=float, default=None)
     ap.add_argument("--output", default="/tmp/qwen.png")
     ap.add_argument("--compile-cache-dir", default=None)
     ap.add_argument("--local-files-only", action="store_true")
@@ -69,7 +68,6 @@ def main() -> None:
         args.prompt,
         num_inference_steps=args.steps,
         seed=args.seed,
-        guidance_scale=args.guidance_scale,
         output_type="pil",
     )
     torch.cuda.synchronize()
