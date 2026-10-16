@@ -24,7 +24,6 @@ import os
 
 import torch
 from torch import nn
-from diffusers.models.attention_dispatch import dispatch_attention_fn
 
 from difflet.ops import (
     ColumnParallelLinear,
@@ -411,16 +410,21 @@ class _QwenImageTrainiumAttnProcessor:
                 )
                 joint_hidden_states = attn_out.reshape(b, h, s_q, d).transpose(1, 2)
             else:
-                joint_hidden_states = dispatch_attention_fn(
-                    joint_query,
-                    joint_key,
-                    joint_value,
-                    attn_mask=attention_mask,
-                    dropout_p=0.0,
-                    is_causal=False,
-                    backend=self._attention_backend,
-                    parallel_config=self._parallel_config,
+                # Masked joint attention (a padded prompt on an eager backend): the
+                # same op in (B, H, S, d) layout, so the (B, 1, 1, S_k) key mask
+                # broadcasts per batch row instead of against folded heads.
+                q = joint_query.transpose(1, 2)
+                k = joint_key.transpose(1, 2)
+                v = joint_value.transpose(1, 2)
+                attn_out = attention(
+                    q,
+                    k,
+                    v,
+                    scale=1.0 / math.sqrt(head_dim),
+                    causal=False,
+                    attention_mask=attention_mask,
                 )
+                joint_hidden_states = attn_out.transpose(1, 2)
 
         joint_hidden_states = joint_hidden_states.flatten(2, 3)
         joint_hidden_states = joint_hidden_states.to(txt_query.dtype)
@@ -439,13 +443,17 @@ class _QwenImageTrainiumAttnProcessor:
 class _QwenImageTransformerTraceModule(nn.Module):
     """Fix non-tensor Qwen-Image pipeline args at trace time."""
 
-    def __init__(self, config):
+    def __init__(self, config, *, apply_text_mask: bool = False):
         super().__init__()
         from diffusers.models.transformers.transformer_qwenimage import (
             QwenImageTransformer2DModel,
         )
 
         self.config = config
+        # Whether the prompt padding mask reaches the joint attention. False keeps the
+        # Trainium/TPU behaviour (mask dropped; see forward). The CUDA backend sets True so
+        # padded prompts match upstream diffusers (CUDA plan F3).
+        self.apply_text_mask = bool(apply_text_mask)
         self.guidance_embeds = bool(getattr(config, "guidance_embeds", False))
         self.context_parallel_enabled = bool(getattr(config, "context_parallel_enabled", False))
         self.cp_mode = str(getattr(config, "cp_mode", "gather_kv"))
@@ -541,8 +549,19 @@ class _QwenImageTransformerTraceModule(nn.Module):
     ) -> torch.Tensor:
         # The diffusers mask path computes active text length with arange/where.
         # That currently fails during XLA tracing for the fixed-shape M4a
-        # boundary, so the first Trainium closure uses full-length cached text
-        # embeddings and keeps mask support as a separate follow-up.
+        # boundary, so the Trainium/TPU closures (apply_text_mask=False) use
+        # full-length cached text embeddings and drop the mask. Eager backends
+        # (CUDA) pass it through: diffusers then builds the joint key mask
+        # [text_mask | ones(image)] and the processor applies it, so a prompt
+        # padded to text_seq_len gives the same output as diffusers' unpadded run.
+        if self.apply_text_mask:
+            if self.context_parallel_enabled:
+                raise NotImplementedError(
+                    "text mask with context parallel is follow-up F2/F6 of the CUDA plan"
+                )
+            mask_arg = encoder_hidden_states_mask
+        else:
+            mask_arg = None
         del encoder_hidden_states_mask
         guidance_arg = guidance if self.guidance_embeds else None
 
@@ -572,7 +591,7 @@ class _QwenImageTransformerTraceModule(nn.Module):
             hidden_states=hidden_states,
             timestep=timestep,
             encoder_hidden_states=encoder_hidden_states,
-            encoder_hidden_states_mask=None,
+            encoder_hidden_states_mask=mask_arg,
             guidance=guidance_arg,
             img_shapes=img_shapes * int(hidden_states.shape[0]),
             return_dict=False,
