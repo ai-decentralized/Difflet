@@ -22,7 +22,7 @@ rejected in phase 1) · **NOT MEASURED** (not gated off, but this campaign did n
 
 ## Summary
 
-* **Outcome: PASS, no Difflet bug found.** All 4 ranks passed every gated cell in V1 (6 cells), V2
+* **Outcome: PASS, no Difflet bug found.** All 4 ranks passed every gated cell in V1 (5 device cells plus the CPU reference), V2
   (10 gated cells plus 1 LIMIT probe) and V3 (8 cells). No fix commits were needed. The bug ledger
   is empty.
 * **DiT parity, TP4, all 60 layers, compiled.** Against a full 60-layer diffusers 0.38 fp32 CPU
@@ -90,17 +90,17 @@ rejected in phase 1) · **NOT MEASURED** (not gated off, but this campaign did n
 | Item | Value | Source |
 |---|---|---|
 | Instance | trn2.3xlarge, 4 logical NeuronCores (config 2), 24 GiB per core (`total_hbm` 25,769,803,776 B in the V2 OOM dump) | `E/v1/summary.json` `host`; `E/v2/summary.json` `derived.l60_tp1cp4_hbm_probe` |
-| Kernel | 6.17.0-1019-aws | `uname -r` (V4) |
-| Python | 3.14.8 (`/home/ubuntu/workspace/native_venv`) | venv interpreter (V4) |
-| torch | 2.14.0+cpu | venv `importlib.metadata` (V4); `E/v1/summary.json` references `versions` |
-| torch-neuronx | 2.14.3.0.0+unknown.dev | venv metadata (V4) |
-| neuronx-cc | 2.28.4568.0+0163fa9e | venv metadata (V4) |
-| diffusers / transformers / safetensors / huggingface-hub | 0.38.0 / 4.57.6 / 0.8.0 / 0.36.2 | venv metadata (V4) |
-| Neuron system packages | aws-neuronx-runtime-lib 2.35.27.0, aws-neuronx-collectives 2.35.40.0, aws-neuronx-dkms 2.31.6.0, aws-neuronx-tools 2.33.32.0 | `dpkg -l` (V4) |
+| Kernel | 6.17.0-1019-aws | `uname -r` (V4, `E/v4/env.txt`) |
+| Python | 3.14.8 (`/home/ubuntu/workspace/native_venv`) | venv interpreter (V4, `E/v4/env.txt`) |
+| torch | 2.14.0+cpu | venv `importlib.metadata` (V4, `E/v4/env.txt`); `E/v1/summary.json` references `versions` |
+| torch-neuronx | 2.14.3.0.0+unknown.dev | venv metadata (V4, `E/v4/env.txt`) |
+| neuronx-cc | 2.28.4568.0+0163fa9e | venv metadata (V4, `E/v4/env.txt`) |
+| diffusers / transformers / safetensors / huggingface-hub | 0.38.0 / 4.57.6 / 0.8.0 / 0.36.2 | venv metadata (V4, `E/v4/env.txt`) |
+| Neuron system packages | aws-neuronx-runtime-lib 2.35.27.0, aws-neuronx-collectives 2.35.40.0, aws-neuronx-dkms 2.31.6.0, aws-neuronx-tools 2.33.32.0 | `dpkg -l` (V4, `E/v4/env.txt`) |
 | Checkpoint | `Qwen/Qwen-Image` @ `75e0b4be04f60ec59a75f475837eced720f823b6`: DiT 60 layers, 24 heads x 128, about 41 GB bf16; Qwen2.5-VL 7B text encoder; VAE | task brief; V1 reference load (20.430B params) |
 | Code under test | `difflet/` at `9aa4e3f`. It is byte-identical through `1c16390`: `git diff --stat 9aa4e3f 1c16390 -- difflet/` is empty | `git` (V4) |
-| HEAD at launch | V1 `9aa4e3f`; V2 `ea6fe1b`/`eca572e`; V3 `317060e` (printed in every launch line of the logs) | `E/v*/…log` |
-| Commits of this campaign | `98a081c`, `ea6fe1b` (V1); `eca572e`, `317060e` (V2); `3d2641c`, `1c16390` (V3); this doc (V4). None pushed. | `git log` |
+| HEAD at launch | V1 `9aa4e3f`; V2 `ea6fe1b`/`eca572e`; V3 `317060e` (printed in every launch line of the logs). The launch line records HEAD only, not uncommitted changes. The V2 cells launched at `ea6fe1b` already report `cp_scatter` and `ranks_identical`, so they ran the `eca572e` preflight before it was committed; V3h likewise ran `check_qwen_image_prompt_embeds.py` before `3d2641c`. *Inference* from the result fields; both commits touch `tests/manual/` only (`git show --stat`) | `E/v*/…log`; `E/v2/summary.json` `cp_scatter_detail` |
+| Commits of this campaign | `98a081c`, `ea6fe1b` (V1); `eca572e`, `317060e` (V2); `3d2641c`, `1c16390` (V3); `94d7808` and its correction (V4, this doc). None pushed: `origin/feat/qwen-image-neuron` is at `9aa4e3f` | `git log`, `git branch -vv` |
 | Compile cache | main root `/home/ubuntu/.cache/difflet-neuron-qwen`; scratch roots `…-qwen-l4` (V1 4-layer) and `…-qwen-v3cold` (V3 cold) | launch lines |
 
 Launch environment for every device run (`E/v1/scripts/dev.sh`, `E/v3/scripts/cli.sh`):
@@ -149,7 +149,7 @@ Both ran with the work dir `/home/ubuntu/qwen-v1-work`, where the `.pt` inputs a
 
 | Cell | Outcome | Key metrics | Evidence | Reproduction |
 |---|---|---|---|---|
-| V1-ref: CPU references (diffusers 0.38, first N blocks of the real checkpoint) | **PASS** | 4 layers: 1.400B params, missing 0, unexpected 1792 (blocks 4-59, expected); fp32 forward 6.7 s; control rel_l1 1.230e-2/4.525e-3. 60 layers: 20.430B params, missing 0, unexpected 0; load 258.9 s; fp32 forward 100 s per timestep; control rel_l1 2.457e-2/1.641e-2, cosine 0.99986449/0.99990324. Prompt embeddings: absmean 2.89, absmax 170, sha256 `b5260c2e…` | `E/v1/ref-l4.log`, `E/v1/ref-l60.log`, `E/v1/summary.json` `references`, `prompt_embeds` | `bash E/v1/scripts/ref.sh 4 /home/ubuntu/qwen-v1-work/ref-l4.pt`; `… ref.sh 60 …/ref-l60.pt` |
+| V1-ref: CPU references (diffusers 0.38, first N blocks of the real checkpoint) | **PASS** | 4 layers: 1.400B params, missing 0, unexpected 1792 (blocks 4-59, expected); fp32 forward 6.7 s; control rel_l1 1.230e-2/4.525e-3. 60 layers: 20.430B params, missing 0, unexpected 0; load 258.9 s; fp32 forward 100 s per timestep; control rel_l1 2.457e-2/1.641e-2, cosine 0.99986449/0.99990324. Prompt embeddings: absmean 2.89, absmax 170, sha256 of the bf16 tensor bytes `b5260c2e…` | `E/v1/ref-l4.log`, `E/v1/ref-l60.log`, `E/v1/summary.json` `references`, `prompt_embeds` | `bash E/v1/scripts/ref.sh 4 /home/ubuntu/qwen-v1-work/ref-l4.pt`; `… ref.sh 60 …/ref-l60.pt` |
 | V1a: 4 layers TP4 eager | **PASS** | cosine 0.999968/0.999989; rel_l1 1.249e-2/4.668e-3 = 1.015x/1.031x the control; rel_l2 1.381e-2/4.742e-3. Forward median 81.0 ms (p10 79.8, p90 82.2, n=10). Warm-up 33.6 s (104 eager-op NEFFs, fresh scratch root). HBM 1.40 GiB/rank. Fallbacks [], unwarmed [], 0 compiles in the forwards | `E/v1/a-l4-eager.log`, `E/v1/a-l4-eager/result*.json`; first try without PATH: `E/v1/a-l4-eager.try1-nopath.log` | `bash E/v1/scripts/dev.sh /home/ubuntu/.cache/difflet-neuron-qwen-l4 --reference /home/ubuntu/qwen-v1-work/ref-l4.pt --num-layers 4 --exec-mode eager --save /home/ubuntu/qwen-v1-work/a-l4-eager/out.pt --out-json /home/ubuntu/qwen-v1-work/a-l4-eager/result.json` |
 | V1b: 4 layers TP4 compile (cold block NEFF) | **PASS** | vs fp32: cosine 0.999967/0.999990, rel_l1 1.041x/0.964x the control. Vs eager: cosine 0.999991/0.999990, rel_l1 3.5e-3/3.8e-3 (0.285x/0.830x the control). One Dynamo graph, 0 breaks, 1 block NEFF `a0654ef7f432` (2,580,116 B, compiled by rank 1 in 13.9 s). Warm-up 24.1 s. Forward 28.3 ms (n=10), 2.9x faster than eager. HBM 0.96 GiB/rank | `E/v1/b-l4-compile-cold.log`, `E/v1/b-l4-compile-cold/result*.json` | `… dev.sh /home/ubuntu/.cache/difflet-neuron-qwen-l4 --reference …/ref-l4.pt --num-layers 4 --exec-mode compile --expect cold --compare eager=…/a-l4-eager/out.pt --save … --out-json …` |
 | V1c-cold: 60 layers TP4 compile, empty main cache root | **PASS** | cosine 0.999889/0.999930; rel_l1 2.502e-2/1.462e-2 = 1.018x/0.891x the control; rel_l2 2.519e-2/1.479e-2. Load checkpoint 53.4 s, prepare_runtime 20.1 s, warm-up 29.3 s, launch wall 123.9 s. 51 new .neff; one graph for 60 blocks, same block key `a0654ef7f432` (2,582,059 B, rank 2, 16.5 s). CompilationTime sum r0 157.1 / r1 1.1 / r2 33.6 / r3 3.3 s (a sum over concurrent compiles, not a wall). Forward 349.0 ms (p10 348.2, p90 349.5, n=10). HBM 10.12-10.15 GiB/rank (weights 9.76 GiB) | `E/v1/c-l60-compile-cold.log`, `E/v1/c-l60-compile-cold/result*.json` | `… dev.sh /home/ubuntu/.cache/difflet-neuron-qwen --reference …/ref-l60.pt --num-layers 60 --exec-mode compile --expect cold --bench-iters 5 --bench-rounds 2 --save … --out-json …` |
@@ -184,7 +184,7 @@ gated cell also had fallbacks [], 0 compiles in the forwards and one Dynamo grap
 | V2f: 4L tp1cp4 gather_kv | **PASS** | cosine 0.999968/0.999991; 1.034x/0.911x. Forward 40.6 ms. Cold warm-up 35.5 s with 1 block NEFF (`242efaca9490`, 23.6 s; the graph does not depend on the rank). HBM 2.73 GiB | `E/v2/l4-tp1cp4-gather_kv.log`, `E/v2/l4-tp1cp4-gather_kv/` | `cell.sh l4-tp1cp4-gather_kv 4 gather_kv 4` |
 | V2g: 60L tp2cp2 ulysses vs the 60-layer fp32 reference | **PASS** | weights 19.50 GiB/rank, peak 19.75 GiB. cosine 0.999888/0.999933; rel_l1 2.480e-2/1.435e-2 = 1.009x/0.875x. Forward 416.2 ms (n=10). Warm relaunch: 0 compilations, `torch.equal` to the first launch, 416.0 ms (n=30, p10 415.3, p90 416.8). Vs V1 TP4: cosine 0.999989/0.999990, rel_l1 0.168x/0.228x the control. Block NEFF reused from 4 layers (same key `702b26e1e07f`). Load 6.6 s, warm-up 8.5 s, launch wall 50.0 s | `E/v2/l60-tp2cp2-ulysses.log`, `E/v2/l60-tp2cp2-ulysses-warm.log` and dirs | `cell.sh l60-tp2cp2-ulysses 2 ulysses 60 --bench-iters 5 --bench-rounds 2`; then `cell.sh l60-tp2cp2-ulysses-warm 2 ulysses 60 --bench-iters 10 --bench-rounds 3 --expect warm --equal-to /home/ubuntu/qwen-v2-work/l60-tp2cp2-ulysses/out.pt --compare tp4=/home/ubuntu/qwen-v1-work/c-l60-compile-cold/out.pt` |
 | V2h: 60L tp2cp2 gather_kv and ring | **PASS** | gather_kv: cosine 0.999871/0.999929, 1.044x/0.888x, forward 445.9 ms (1.07x Ulysses). Ring: cosine 0.999890/0.999933, 1.007x/0.872x, forward 543.6 ms (1.31x Ulysses). 19.75 GiB/rank, 0 compiles. Vs V1 TP4: gather_kv 0.145x/0.226x, ring 0.154x/0.231x the control. Vs Ulysses: at most 0.187x | `E/v2/l60-tp2cp2-gather_kv.log`, `E/v2/l60-tp2cp2-ring.log` and dirs | `cell.sh l60-tp2cp2-{gather_kv,ring} 2 {mode} 60 --bench-iters 5 --bench-rounds 2 --compare tp4=/home/ubuntu/qwen-v1-work/c-l60-compile-cold/out.pt --compare ulysses=/home/ubuntu/qwen-v2-work/l60-tp2cp2-ulysses/out.pt` |
-| V2i: 30L tp1cp4, all 3 modes, vs a 30-layer fp32 reference made in V2 | **PASS** | Reference: 10.235B params; control cosine 0.99941163/0.99997140, rel_l1 4.013e-2/1.671e-2. Ulysses: cosine 0.999389/0.999974, 1.016x/1.105x, 217.8 ms. gather_kv: 1.013x/1.107x, 283.8 ms. Ring: 1.012x/1.101x, 430.3 ms. Weights 19.07 GiB, peak 19.24 GiB/rank, 0 compiles | `E/v2/ref-l30.log`, `E/v2/l30-tp1cp4-*.log` and dirs | `bash E/v1/scripts/ref.sh 30 /home/ubuntu/qwen-v2-work/ref-l30.pt`; `cell.sh l30-tp1cp4-{mode} 4 {mode} 30 --bench-iters 5 --bench-rounds 2 [--compare ulysses=…]` |
+| V2i: 30L tp1cp4, all 3 modes, vs a 30-layer fp32 reference made in V2 | **PASS** | Reference: 10.235B params; control cosine 0.99941163/0.99997140, rel_l1 4.013e-2/1.671e-2. Ulysses: cosine 0.999389/0.999974, 1.016x/1.105x, 217.8 ms. gather_kv: 1.013x/1.107x, 283.8 ms. Ring: 1.012x/1.101x, 430.3 ms. Weights 19.07 GiB, peak 19.20 (ring) to 19.24 GiB/rank, 0 compiles | `E/v2/ref-l30.log`, `E/v2/l30-tp1cp4-*.log` and dirs | `bash E/v1/scripts/ref.sh 30 /home/ubuntu/qwen-v2-work/ref-l30.pt`; `cell.sh l30-tp1cp4-{mode} 4 {mode} 30 --bench-iters 5 --bench-rounds 2 [--compare ulysses=…]` |
 | V2j: ring padding at 1024x1008 (4032 image tokens), 4L, vs a new 1024x1008 reference | **PASS** | Ring tp2cp2: query 1024+2016 = 3040, padded to 3072. cosine 0.999968/0.999991, 1.014x/0.963x, 50.5 ms. Ring tp1cp4: query 2032, padded to 2048. 1.031x/0.911x, 74.4 ms. Ulysses tp2cp2 control: 1.016x/0.963x, 34.0 ms; vs ring rel_l1 0.120x/0.308x the control. At this shape ring is 1.23x slower than at 1024x1024 and Ulysses 1.03x slower | `E/v2/ref-l4-1024x1008.log`, `E/v2/l4w1008-*.log` and dirs | `ref.sh 4 /home/ubuntu/qwen-v2-work/ref-l4-1024x1008.pt --width 1008`; `cell.sh l4w1008-tp2cp2-ring 2 ring 4 --reference /home/ubuntu/qwen-v2-work/ref-l4-1024x1008.pt --width 1008` (likewise tp1cp4 ring and tp2cp2 ulysses `--compare ring=…`) |
 | V2k: 60L tp1cp4 HBM probe | **LIMIT** | tp1 needs 38.05 GiB/rank of weights against 24 GiB per core, and the device OOMed during the weight load. The first runtime OOM came 23 s after launch (a 113,246,208 B request); the allocator stopped at 25,643,949,568 of 25,769,803,776 B. Ranks 2 and 3 raised `NRT EXECUTION FAILED: lazy::AllocBind: NRT_RESOURCE; no pending ops on stream to wait for (cannot defer), Failed to allocate resource` at `load_checkpoint_into` `target.copy_`; torchrun SIGTERMed ranks 0 and 1. The error surfaced only after about 16 min of allocator retries (2812 OOM warnings; launch wall 996.9 s, rc=1). Afterwards the device was healthy: a warm 4L tp2cp2 Ulysses rerun passed, `torch.equal` to V2b, with 0 compiles | `E/v2/l60-tp1cp4-ulysses-probe.log` (curated), `E/v2/l4-tp2cp2-ulysses-postprobe.log`, `E/v2/summary.json` `derived.l60_tp1cp4_hbm_probe` | `cell.sh l60-tp1cp4-ulysses-probe 4 ulysses 60 --bench-iters 0`; then `cell.sh l4-tp2cp2-ulysses-postprobe 2 ulysses 4 --expect warm --equal-to /home/ubuntu/qwen-v2-work/l4-tp2cp2-ulysses/out.pt` |
 
@@ -224,13 +224,15 @@ Generate 3 ran without it and gave the same PNG and latents.
 | V3g: TP4 eager control + teacher-forced per-step DiT parity on the real CLI trajectory | **PASS** | TP4 eager, 50 steps: wall 119.5 s, step 1152 ms, image coherent. Vs TP4 compile: PSNR 45.1 dB, latents rel_l1 1.04%. Teacher-forced, with the TP4-compile trajectory's inputs fed to each config: TP4 compile replayed into itself is `torch.equal` at all 50 steps. Noise-prediction rel_l1 vs TP4 compile: tp2cp2 Ulysses 0.37-1.70% (mean 0.47%); TP4 eager 0.53-3.11% (mean 0.86%). The CP/eager ratio is 0.42-0.77 at every step. Free-running latents vs TP4 compile, CP vs eager: 0.054% vs 0.071% at step 10; 1.03% vs 0.38% at step 30; 4.7% vs 1.0% final. *Inference:* this is chaotic amplification of bf16-level per-step differences, not a CP defect | `E/v3/tp4-eager-s50.log`, `E/v3/tp4-eager-s50.result.json`, `E/v3/png/tp4-eager-s50-seed42.png`, `E/v3/diag/*.log`, `E/v3/diag/traj_compare.json`, `E/v3/summary.json` `teacher_forced_and_free_run` | `bash E/v3/scripts/gen-eager.sh <run> 1 50 4 1 gather_kv`; `bash E/v3/scripts/diag-batch.sh`; `python E/v3/scripts/traj_cmp.py` |
 | V3h: text-embedding parity (CPU): `encode_prompt` vs diffusers `_get_qwen_prompt_embeds` | **PASS** | The templates are identical; both give 19 valid rows. Ours is `torch.equal` to diffusers bf16 (max abs 0), and the padding rows are exactly zero. The embeddings rank 0 broadcast on device are `torch.equal` to both. The bf16-vs-fp32 floor is cosine 0.99988 and rel_l1 1.48%, the same for both implementations. Encode time: ours 0.51 s, diffusers 7.8 s | `E/v3/embeds_parity.json`, `E/v3/embeds_parity.log` | `bash E/v3/scripts/embeds.sh` (`tests/manual/check_qwen_image_prompt_embeds.py --fp32 --device-embeds <rank-0 dump>`) |
 
-Golden output for regressions: seed 42, the fox prompt, TP4 and 50 steps give these, reproduced 5
-times, including on the separately compiled V3d root:
+Golden output for regressions: seed 42, the fox prompt, TP4 and 50 steps give these in 5
+free-running generates: V3b, V3c generate 2, V3c generate 3 (no probe), the V3d generate on the
+separately compiled root, and diag `a-tp4c-free`. The `b-tp4c-fed` self-replay gives them too
+(`E/v3/summary.json` `runs`, `E/v3/diag/res-{a,b}-*.json`):
 
 * latents sha256 `02613803dae28a5172db5b43597f6a6c2d37ca4934799d20df11f2c7bd1decdb`;
 * PNG sha256 `c643eefc7c2820dfb2d299b4935e7ef8b0582888561761b3823e7c4222766ba9`.
 
-**Transcription note.** The V3 step report rounded two V3g ranges differently from its summary
+**Transcription note.** The V3 step report (a chat report, not committed) rounded two V3g ranges differently from its summary
 file. It gave TP4 eager per-step rel_l1 as 0.58-3.11% and the CP/eager ratio as 0.43-0.69. This doc
 uses the values in `E/v3/summary.json` `teacher_forced_and_free_run`: minimum 0.5256% (0.578% is
 step 0, not the minimum) and ratio 0.419-0.769. The conclusion does not change: CP is closer to TP4
@@ -346,7 +348,10 @@ Environment traps, not Difflet bugs (the logs are kept):
 * **Optional:** the driver could resolve the model path once and fail fast before torchrun spawns
   4 ranks (see the `refs/main` trap).
 * **Not committed by design:**
-  * `E/prompt_embeds.pt` (7.3 MB; its sha256 is in `E/v1/summary.json`).
+  * `E/prompt_embeds.pt` (7,342,035 B; file sha256 `4a14eea6…`). `E/v1/summary.json` holds the
+    sha256 of its bf16 tensor bytes (`b5260c2e…`), not of the file; both are in `E/v4/env.txt`.
+    The file stays untracked in the worktree, so `git status` lists it, because
+    `E/v1/scripts/ref.sh` reads it from that path.
   * Every reference `.pt`, device `out.pt`, `latents.pt` and trajectory dump, under
     `/home/ubuntu/qwen-v{1,2,3}-work`.
   * The scratch cache roots `…-qwen-l4` and `…-qwen-v3cold`. They can be removed with user
