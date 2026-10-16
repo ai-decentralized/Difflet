@@ -210,7 +210,17 @@ class CudaQwenImageApplication(torch.nn.Module):
         guidance_scale: float | None = None,
         output_type: str = "pil",
     ):
-        """Text → image on the device: encode, denoise through the Difflet DiT, decode."""
+        """Text → image on the device: encode, denoise through the Difflet DiT, decode.
+
+        Single pass, no classifier-free guidance — the same path the Trainium CLI runs.
+        Qwen-Image's transformer has ``guidance_embeds=False``, so the modeling code drops
+        the guidance tensor; a ``guidance_scale`` would be a silent no-op and is refused.
+        """
+        if guidance_scale is not None and not bool(getattr(self.config, "guidance_embeds", False)):
+            raise ValueError(
+                "guidance_scale has no effect: this model's transformer has guidance_embeds=False "
+                "and Release 1 generation is single-pass without classifier-free guidance"
+            )
         if self.pipeline is None:
             raise RuntimeError("application is not loaded; call load() first")
         encoder_hidden_states, encoder_hidden_states_mask = self.encode_prompt(prompt)
@@ -228,7 +238,8 @@ class CudaQwenImageApplication(torch.nn.Module):
                 num_inference_steps=int(num_inference_steps),
                 image_seq_len=int(latents.shape[1]),
             ).to(self.device)
-        # The Trainium CLI feeds guidance 4.0 by default (single-pass, no negative prompt).
+        # The Trainium CLI fills the (ignored, guidance_embeds=False) guidance tensor with 4.0;
+        # mirrored so the DiT inputs are identical, not because it changes the image.
         guidance_scale = 4.0 if guidance_scale is None else float(guidance_scale)
         out = self.pipeline(
             latents=latents,

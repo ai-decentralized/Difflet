@@ -192,3 +192,45 @@ def test_qwen_timesteps_pass_mu_to_a_dynamic_shift_scheduler():
     sched = _Sched()
     ts = qwen_image_timesteps(sched, num_inference_steps=4, image_seq_len=4096)
     assert tuple(ts.shape) == (4,) and ts[0] == 1000.0
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{"tp_degree": 2}, {"tp_degree": 1, "cp_degree": 2}, {"tp_degree": 1, "dp_degree": 2}]
+)
+def test_entry_rejects_multi_rank_parallel_on_cuda_up_front(tmp_path, kwargs):
+    # Review finding: tp/cp/dp > 1 used to fail only after loading the 41 GB DiT (first
+    # collective raised F2). Release 1 is one process, one device; refuse before any load.
+    with pytest.raises(NotImplementedError, match="not supported"):
+        create_qwen_image_application(
+            model_path=str(tmp_path),
+            parallel=DiffletParallelConfig(**kwargs),
+            dtype="bf16",
+            shape={"height": 64, "width": 64},
+            backend="cuda",
+        )
+
+
+def test_generate_rejects_guidance_scale_when_the_model_has_no_guidance_embeds(tmp_path):
+    # Qwen-Image's transformer has guidance_embeds=False: the guidance tensor is dropped by the
+    # modeling code, so a user-supplied guidance_scale would be a silent no-op.
+    import json
+
+    tdir = tmp_path / "transformer"
+    tdir.mkdir()
+    (tdir / "config.json").write_text(
+        json.dumps(
+            {
+                "patch_size": 2,
+                "in_channels": 64,
+                "num_layers": 1,
+                "attention_head_dim": 128,
+                "num_attention_heads": 24,
+                "joint_attention_dim": 3584,
+                "guidance_embeds": False,
+                "axes_dims_rope": [16, 56, 56],
+            }
+        )
+    )
+    app = _build(tmp_path, device="cpu")
+    with pytest.raises(ValueError, match="guidance_embeds"):
+        app.generate("a cat", guidance_scale=1.0)
