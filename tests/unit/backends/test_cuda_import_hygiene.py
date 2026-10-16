@@ -25,8 +25,7 @@ FORBIDDEN_PREFIXES = (
     "difflet.backends.tpu",
 )
 
-# Phase 2 appends Path("difflet/backends/_torch_megatron").
-SCANNED = [Path("difflet/backends/cuda")]
+SCANNED = [Path("difflet/backends/cuda"), Path("difflet/backends/_torch_megatron")]
 
 OPS_MODULES = ("attention", "collectives", "embeddings", "linear", "mx", "norm", "platform")
 
