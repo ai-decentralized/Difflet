@@ -43,6 +43,13 @@ def refuse_unsupported(args: argparse.Namespace) -> None:
     for name in ("teacache_speedup", "teacache_cadence", "teacache_online_delta"):
         if getattr(args, name, None) is not None:
             _refuse(f"--{name.replace('_', '-')} (TeaCache port)")
+    if getattr(args, "guidance_scale", None) is not None:
+        # Qwen-Image's transformer has guidance_embeds=False: the application refuses the
+        # value as a silent no-op, and the CLI must not hide that by dropping the flag.
+        raise SystemExit(
+            f"{_TAG} --guidance-scale has no effect on Qwen-Image (guidance_embeds=False; "
+            "Release 1 generation is single-pass without classifier-free guidance)"
+        )
 
 
 def pipeline_kwargs(args: argparse.Namespace, *, load: bool) -> dict:
@@ -68,6 +75,8 @@ class CudaQwenImageOrchestrator(ModelOrchestrator):
         self._last_pipe = None
 
     def download(self) -> None:
+        # run() is download → compile → generate: refuse here too, before the 58 GB pull.
+        refuse_unsupported(self.args)
         from difflet.pipeline.path_resolver import resolve_model_path
 
         resolve_model_path(HF_MODEL_ID, revision=self.args.revision, local_files_only=False)
