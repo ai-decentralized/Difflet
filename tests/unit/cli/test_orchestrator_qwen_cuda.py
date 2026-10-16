@@ -133,3 +133,23 @@ def test_run_is_download_compile_generate(recorder, monkeypatch, tmp_path):
     monkeypatch.setattr(orch, "generate", lambda: order.append("generate"))
     orch.run()
     assert order == ["download", "compile", "generate"]
+
+
+def test_run_refuses_unsupported_flags_before_any_download(recorder, monkeypatch):
+    # Review finding: run() is download → compile → generate, and the refusal lived in
+    # compile/generate, so `difflet run --cp-degree 2` pulled the 58 GB snapshot first.
+    monkeypatch.setattr(
+        "difflet.pipeline.path_resolver.resolve_model_path",
+        lambda *a, **kw: pytest.fail("must refuse before resolving the snapshot"),
+    )
+    with pytest.raises(SystemExit) as exc:
+        mod.CudaQwenImageOrchestrator(_args(cp_degree=2)).run()
+    assert "F2" in str(exc.value) and recorder == []
+
+
+def test_guidance_scale_is_refused_not_dropped(recorder):
+    # The application refuses guidance_scale (guidance_embeds=False → silent no-op); the CLI
+    # must not hide that by never forwarding the flag.
+    with pytest.raises(SystemExit) as exc:
+        mod.CudaQwenImageOrchestrator(_args(guidance_scale=3.0)).generate()
+    assert "guidance" in str(exc.value) and recorder == []
