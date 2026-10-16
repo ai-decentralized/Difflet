@@ -146,28 +146,28 @@ Exit: `DIFFLET_BACKEND=cpu ./scripts/check_quick.sh` green on the Mac and in CI.
 
 ### Phase 2 — Op surface at world size 1 (Mac for tests, box for the GPU smoke) — PR 3 begins
 
-- [ ] **2.1** Lift (D10): create `difflet/backends/_torch_megatron/` from `backends/tpu/ops_impl/{linear,norm,embeddings}.py` and `backends/tpu/core/{weights,checkpoint}.py`, parameterised by a collectives module. Rewire TPU to import from it. **Run the full TPU unit set before and after; it must be identical.**
-- [ ] **2.2** `cuda/ops_impl/collectives.py` + `parallel_mesh.py`: world-size-1 implementations (identity; `get_tp_size() == 1`). Multi-process paths raise `NotImplementedError("follow-up F2")`.
-- [ ] **2.3** `cuda/ops_impl/{linear,norm,embeddings}.py`: bind `_torch_megatron` to the CUDA collectives.
-- [ ] **2.4** `cuda/ops_impl/attention.py`: `attention`, `cross_attention` on SDPA honouring `scale`, `attention_mask`, `causal`; accept and ignore `tp_q/tp_k/tp_out`. `ring_*`, `ulysses_*`, `joint_*` raise naming F2/F6. Dedicated test for the mask (the DEVELOPER.md silently-dropped-mask lesson).
-- [ ] **2.5** `cuda/ops_impl/platform.py`: `hardware` enum, `get_platform_target()`, compute capability, `distributed_backend_name() == "nccl"`, `sdpa_kernel_report()`. `mx.py`: all names raise (D9).
-- [ ] **2.6** `tests/unit/backends/test_cuda_layers.py`, `test_cuda_attention.py`, `test_torch_megatron.py` — all run on CPU tensors. Flip the 1.4 xfails.
+- [x] **2.1** Lift (D10): create `difflet/backends/_torch_megatron/` from `backends/tpu/ops_impl/{linear,norm,embeddings}.py` and `backends/tpu/core/{weights,checkpoint}.py`, parameterised by a collectives module. Rewire TPU to import from it. **Run the full TPU unit set before and after; it must be identical.**
+- [x] **2.2** `cuda/ops_impl/collectives.py` + `parallel_mesh.py`: world-size-1 implementations (identity; `get_tp_size() == 1`). Multi-process paths raise `NotImplementedError("follow-up F2")`.
+- [x] **2.3** `cuda/ops_impl/{linear,norm,embeddings}.py`: bind `_torch_megatron` to the CUDA collectives.
+- [x] **2.4** `cuda/ops_impl/attention.py`: `attention`, `cross_attention` on SDPA honouring `scale`, `attention_mask`, `causal`; accept and ignore `tp_q/tp_k/tp_out`. `ring_*`, `ulysses_*`, `joint_*` raise naming F2/F6. Dedicated test for the mask (the DEVELOPER.md silently-dropped-mask lesson).
+- [x] **2.5** `cuda/ops_impl/platform.py`: `hardware` enum, `get_platform_target()`, compute capability, `distributed_backend_name() == "nccl"`, `sdpa_kernel_report()`. `mx.py`: all names raise (D9).
+- [x] **2.6** `tests/unit/backends/test_cuda_layers.py`, `test_cuda_attention.py`, `test_torch_megatron.py` — all run on CPU tensors. Flip the 1.4 xfails.
 
 Exit: every `difflet.ops` export resolves on the CUDA backend; CPU-host tests pass; TPU tests unchanged.
 
 ### Phase 3 — Lifecycle without AOT (Mac for contract tests)
 
-- [ ] **3.1** `cuda/core/application_base.py`: `CudaComponentApplication`. `compile(path)` validates config + shape, writes `manifest.json` (model id, dtype, torch/CUDA versions). `has_compiled_artifacts(path)` = manifest present and matching. `load(path, start_rank_id=None, local_ranks_size=None, skip_warmup=False)` builds on `meta`, loads safetensors shards onto the device. `__call__` runs the forward.
-- [ ] **3.2** `tests/unit/backends/test_cuda_application.py`: contract names pinned with `inspect.signature`; manifest round-trip; tiny synthetic component `compile → has_compiled_artifacts → load → __call__` on CPU.
-- [ ] **3.3** Docstring + Status log: what `has_compiled_artifacts` *means* for CUDA (manifest only), as TPU's docstring did for "graph exported, not compiled".
+- [x] **3.1** `cuda/core/application_base.py`: `CudaComponentApplication`. `compile(path)` validates config + shape, writes `manifest.json` (model id, dtype, torch/CUDA versions). `has_compiled_artifacts(path)` = manifest present and matching. `load(path, start_rank_id=None, local_ranks_size=None, skip_warmup=False)` builds on `meta`, loads safetensors shards onto the device. `__call__` runs the forward.
+- [x] **3.2** `tests/unit/backends/test_cuda_application.py`: contract names pinned with `inspect.signature`; manifest round-trip; tiny synthetic component `compile → has_compiled_artifacts → load → __call__` on CPU.
+- [x] **3.3** Docstring + Status log: what `has_compiled_artifacts` *means* for CUDA (manifest only), as TPU's docstring did for "graph exported, not compiled".
 
 ### Phase 4 — Qwen-Image on the box (GPU days 1–3) — PR 3 completes
 
-- [ ] **4.1** `difflet/backends/cuda/qwen_image/config.py`, `transformer.py`, `difflet/models/qwen_image/cuda_application.py`: text encoder, DiT and VAE all on the GPU in one process (D8). `entry.py` branch; registry tuple; registration unit test.
-- [ ] **4.2** `difflet download` Qwen-Image from Hugging Face on the box (D15). Record size and time.
-- [ ] **4.3** `scripts/cuda_smoke.sh`: `DIFFLET_BACKEND=cuda difflet run --model-id Qwen/Qwen-Image --tp-degree 1 --prompt … --output /tmp/qwen.png`. Record wall time, peak memory, and the image path in the Status log. The image must be prompt-faithful by eye before any numeric gate is trusted.
-- [ ] **4.4** `tests/numerical/cuda_parity_gpu.py` (D14): on the GPU, diffusers fp32 forward → diffusers bf16 forward → Difflet bf16 forward on the same seeded inputs; writes `cuda_parity_qwen_image.json`. `test_cuda_vs_diffusers.py` applies the TPU harness's three relative gates (≤ 1.15× the bf16-alone deviation; inside the control's distance from fp32; loose absolute floor). Record the numbers, including the residual, without loosening the gate.
-- [ ] **4.5** Open PR 3 with the Status log entries for Phases 0, 2, 3, 4. Update `DEVELOPER.md` (CUDA quick start, backend section).
+- [x] **4.1** `difflet/backends/cuda/qwen_image/config.py`, `transformer.py`, `difflet/models/qwen_image/cuda_application.py`: text encoder, DiT and VAE all on the GPU in one process (D8). `entry.py` branch; registry tuple; registration unit test.
+- [x] **4.2** `difflet download` Qwen-Image from Hugging Face on the box (D15). Record size and time.
+- [x] **4.3** `scripts/cuda_smoke.sh`: `DIFFLET_BACKEND=cuda difflet run --model-id Qwen/Qwen-Image --tp-degree 1 --prompt … --output /tmp/qwen.png`. Record wall time, peak memory, and the image path in the Status log. The image must be prompt-faithful by eye before any numeric gate is trusted.
+- [x] **4.4** `tests/numerical/cuda_parity_gpu.py` (D14): on the GPU, diffusers fp32 forward → diffusers bf16 forward → Difflet bf16 forward on the same seeded inputs; writes `cuda_parity_qwen_image.json`. `test_cuda_vs_diffusers.py` applies the TPU harness's three relative gates (≤ 1.15× the bf16-alone deviation; inside the control's distance from fp32; loose absolute floor). Record the numbers, including the residual, without loosening the gate.
+- [x] **4.5** Open PR 3 with the Status log entries for Phases 0, 2, 3, 4. Update `DEVELOPER.md` (CUDA quick start, backend section).
 
 Exit (Release 1 done): Qwen-Image generates a prompt-faithful image on one Pro 6000 at `tp=1`, the diffusers-relative gates pass, three PRs merged or in review, numbers in the Status log.
 
