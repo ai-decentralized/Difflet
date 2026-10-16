@@ -21,6 +21,17 @@ CLI_NAME = "qwen-image"
 ENC_SEQ = 256
 TEXT_SEQ_LEN = 1024
 VIRTUAL_CORE_SIZE = 2
+#: Qwen2.5-VL prompt template (diffusers' ``QwenImagePipeline.prompt_template_encode``). The
+#: Trainium text stage (CLI and serving), the TPU serving encode and the neuron application
+#: all format the prompt with it and keep the last hidden state from token
+#: ``QWEN_DROP_IDX`` on: the 34 tokens before it are the system prompt and the
+#: ``<|im_start|>user\n`` header, identical for every prompt.
+QWEN_TEMPLATE = (
+    "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, "
+    "quantity, text, spatial relationships of the objects and background:<|im_end|>\n"
+    "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
+)
+QWEN_DROP_IDX = 34
 SERVING_ARTIFACT_MARKER = "difflet_serving_artifact.json"
 
 
