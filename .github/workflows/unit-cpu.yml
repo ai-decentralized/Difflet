@@ -30,7 +30,18 @@ jobs:
       - name: Install Difflet with test extras
         run: pip install -e ".[test]"
 
-      - name: Unit tests (CPU backend)
+      # The gate runs the import guard and tests/unit with DIFFLET_BACKEND=cpu, and
+      # fails on any red test not in known-red.txt and on any Neuron-only skip not
+      # in neuron-skips.txt (a regression hiding as a skip). Full logs are uploaded.
+      - name: CPU gate (import guard + unit tests)
         env:
-          DIFFLET_BACKEND: cpu
-        run: pytest tests/unit -q -p no:cacheprovider --continue-on-collection-errors
+          PYTHON_BIN: python
+          CPU_GATE_LOGDIR: ${{ runner.temp }}/cpu-gate
+        run: scripts/cpu-gate.sh
+
+      - name: Upload gate logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpu-gate-logs
+          path: ${{ runner.temp }}/cpu-gate

@@ -43,6 +43,12 @@ _TRAINIUM_ONLY_BACKEND = re.compile(
     r"does not support backend 'cpu'; supported backends: [^;]*\btrainium\b"
 )
 
+# Node ids convert_report turned into skips in this session. tests/conftest.py dumps
+# them to $NEURON_GATE_REPORT at session end; the CPU gate diffs that file against its
+# committed neuron-skips.txt, so a *new* Neuron-only skip (a regression hiding as a
+# skip) fails the gate instead of only nudging the skipped count.
+CONVERTED: list[str] = []
+
 NEURON_COLLECT_IGNORE = [
     "unit/layers/test_normalization.py",
     "unit/models/flux/test_flux_application.py",
@@ -106,4 +112,12 @@ def convert_report(report, excinfo, *, neuron_available: bool) -> bool:
         return False
     report.outcome = "skipped"
     report.longrepr = (str(getattr(report, "fspath", "")), 0, reason)
+    CONVERTED.append(str(getattr(report, "nodeid", "")))
     return True
+
+
+def dump_conversions(path) -> None:
+    """Write the converted node ids, sorted and unique, one per line."""
+    lines = sorted(set(CONVERTED))
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("".join(f"{line}\n" for line in lines))

@@ -18,6 +18,7 @@ in the header. Introduced by the CUDA backend plan (Phase 1, task 1.10).
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
@@ -52,3 +53,11 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
     _gate.convert_report(report, call.excinfo, neuron_available=NEURON_AVAILABLE)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    # The CPU gate sets NEURON_GATE_REPORT and diffs the result against its committed
+    # neuron-skips.txt; a conversion not in that file is a regression hiding as a skip.
+    path = os.environ.get("NEURON_GATE_REPORT")
+    if path:
+        _gate.dump_conversions(path)

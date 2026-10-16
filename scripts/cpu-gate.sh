@@ -46,7 +46,10 @@ if [ "$unit_only" -eq 0 ]; then
 fi
 
 unit_log="$LOGDIR/cpu-gate-unit-$ts.log"
-"$PY" -m pytest tests/unit -q --tb=short -p no:cacheprovider -p no:warnings \
+# tests/conftest.py writes the node ids the Neuron gate converted to skips here.
+export NEURON_GATE_REPORT="$LOGDIR/cpu-gate-neuron-skips-$ts.txt"
+: > "$NEURON_GATE_REPORT"
+"$PY" -m pytest tests/unit -q --tb=short -rs -p no:cacheprovider -p no:warnings \
   --continue-on-collection-errors "$@" > "$unit_log" 2>&1
 summary="$(grep -E '^[0-9]+ (passed|failed)' "$unit_log" | tail -n 1 || true)"
 [ -n "$summary" ] || summary="$(tail -n 1 "$unit_log")"
@@ -67,6 +70,25 @@ if [ -n "$unexpected" ]; then
   printf '%s\n' "$unexpected" | head -n 20 >&2
   status=1
 fi
+
+# Neuron-gate drift: a test the gate converted to a skip that is not in the
+# committed neuron-skips.txt is a Neuron-only failure that did not exist before —
+# almost always a lazy Neuron import that crept into backend-neutral code, or a
+# model that lost "cpu" from its registration. It fails the gate; ledger it or fix it.
+skips_known="$HERE/neuron-skips.txt"
+[ -f "$skips_known" ] || : > "$skips_known"
+new_skips="$(comm -23 <(sort -u "$NEURON_GATE_REPORT") <(sort -u "$skips_known"))"
+gone_skips="$(comm -13 <(sort -u "$NEURON_GATE_REPORT") <(sort -u "$skips_known"))"
+n_gate="$(sed '/^$/d' "$NEURON_GATE_REPORT" | wc -l | tr -d ' ')"
+if [ -n "$new_skips" ]; then
+  echo "NEURON-GATE DRIFT: newly skipped as Neuron-only (not in neuron-skips.txt):" >&2
+  printf '%s\n' "$new_skips" | head -n 20 >&2
+  status=1
+fi
+if [ -n "$gone_skips" ]; then
+  echo "neuron skips resolved ($(printf '%s\n' "$gone_skips" | sed '/^$/d' | wc -l | tr -d ' ')) — remove them from neuron-skips.txt in this commit:" >&2
+  printf '%s\n' "$gone_skips" | head -n 20 >&2
+fi
 if [ "$imports" = "FAIL" ] && [ "${CPU_GATE_IMPORTS_REQUIRED:-1}" = "1" ]; then
   status=1
 fi
@@ -75,5 +97,5 @@ if [ "$n_fixed" -gt 0 ]; then
   printf '%s\n' "$fixed" | head -n 20 >&2
 fi
 
-echo "cpu-gate: imports=$imports unit=[$summary] known_red=$n_known fixed=$n_fixed regressions=$(printf '%s\n' "$unexpected" | sed '/^$/d' | wc -l | tr -d ' ') log=$unit_log"
+echo "cpu-gate: imports=$imports unit=[$summary] known_red=$n_known fixed=$n_fixed regressions=$(printf '%s\n' "$unexpected" | sed '/^$/d' | wc -l | tr -d ' ') neuron_skips=$n_gate new_skips=$(printf '%s\n' "$new_skips" | sed '/^$/d' | wc -l | tr -d ' ') log=$unit_log"
 exit $status

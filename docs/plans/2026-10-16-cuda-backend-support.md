@@ -136,11 +136,11 @@ Goal: `DIFFLET_BACKEND=cpu ./scripts/check_quick.sh` is green on a laptop, so th
 - [x] **1.3** `tests/unit/backends/test_cuda_backend.py` (copy `test_tpu_backend.py`): `"cuda"` resolves; capabilities per Phase 0; `prepare_runtime` on a CUDA-less host raises a clear `RuntimeError`; auto-detect order Trainium → TPU → CUDA → ROCm pinned.
 - [x] **1.4** `tests/unit/backends/test_cuda_import_hygiene.py`: static scan of `difflet/backends/cuda/**` and `difflet/backends/_torch_megatron/**` for forbidden imports; `importlib.import_module` of every `difflet.ops` module on the CUDA backend (xfail per module until Phase 2 lands it).
 - [x] **1.5** Move `canonicalize_shapes` to `difflet/pipeline/bucketing.py`; `backends/trainium/core/bucketing.py` re-exports it; update `difflet_pipeline.py`, `compile_cache.py`, `models/*/entry.py`, `models/*/application.py`. Fix `_resolve_load_rank_range`.
-- [x] **1.6** `difflet/utils/`: for each of the nine files, move the Neuron import inside the function that needs it or split the Neuron half into `difflet/backends/trainium/utils/`. Gate: `DIFFLET_BACKEND=cpu python -c "import difflet.utils.random, difflet.utils.accuracy, ..."`.
+- [x] **1.6** *(narrowed to `random.py` — ruling 1 in the Phase 1 status entry)* `difflet/utils/`: for each of the nine files, move the Neuron import inside the function that needs it or split the Neuron half into `difflet/backends/trainium/utils/`. Gate: `DIFFLET_BACKEND=cpu python -c "import difflet.utils.random, difflet.utils.accuracy, ..."`.
 - [x] **1.7** `difflet/models/flux/entry.py` and any other `entry.py`: Trainium imports inside the `backend == "trainium"` branch. `scripts/test_imports.sh` imports entries, not Trainium applications.
 - [x] **1.8** `pyproject.toml`: add `transformers`; `scripts/test_unit.sh` documents `PYTHON_BIN` for non-Neuron hosts.
 - [x] **1.9** `compile_cache.py`: `"cuda"` in `_BACKEND_EXTRA_TOOLCHAIN_PACKAGES`; `torch.version.cuda` and cuDNN version in the key. Unit test: cuda and trainium specs differ; a trainium key is byte-identical to before.
-- [x] **1.10** Status log: new CPU-host baseline (target: 0 errors; remaining failures only trainium-only models, listed by name). CI green.
+- [ ] **1.10** *(entry written; CI has not run — branch is local)* Status log: new CPU-host baseline (target: 0 errors; remaining failures only trainium-only models, listed by name). CI green.
 
 Exit: `DIFFLET_BACKEND=cpu ./scripts/check_quick.sh` green on the Mac and in CI.
 
