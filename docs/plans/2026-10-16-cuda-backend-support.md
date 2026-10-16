@@ -165,7 +165,7 @@ Exit: every `difflet.ops` export resolves on the CUDA backend; CPU-host tests pa
 
 - [x] **4.1** `difflet/backends/cuda/qwen_image/config.py`, `transformer.py`, `difflet/models/qwen_image/cuda_application.py`: text encoder, DiT and VAE all on the GPU in one process (D8). `entry.py` branch; registry tuple; registration unit test.
 - [x] **4.2** `difflet download` Qwen-Image from Hugging Face on the box (D15). Record size and time.
-- [x] **4.3** `scripts/cuda_smoke.sh`: `DIFFLET_BACKEND=cuda difflet run --model-id Qwen/Qwen-Image --tp-degree 1 --prompt … --output /tmp/qwen.png`. Record wall time, peak memory, and the image path in the Status log. The image must be prompt-faithful by eye before any numeric gate is trusted.
+- [x] **4.3** `scripts/cuda_smoke.sh` *(as run: `scripts/cuda_smoke.py` → `DiffletPipeline.from_pretrained(backend="cuda")` + `generate()`; the `difflet run` CLI wiring is cut to follow-up F3 — see the Release 1 status entry)*. Record wall time, peak memory, and the image path in the Status log. The image must be prompt-faithful by eye before any numeric gate is trusted.
 - [x] **4.4** `tests/numerical/cuda_parity_gpu.py` (D14): on the GPU, diffusers fp32 forward → diffusers bf16 forward → Difflet bf16 forward on the same seeded inputs; writes `cuda_parity_qwen_image.json`. `test_cuda_vs_diffusers.py` applies the TPU harness's three relative gates (≤ 1.15× the bf16-alone deviation; inside the control's distance from fp32; loose absolute floor). Record the numbers, including the residual, without loosening the gate.
 - [x] **4.5** Open PR 3 with the Status log entries for Phases 0, 2, 3, 4. Update `DEVELOPER.md` (CUDA quick start, backend section).
 
