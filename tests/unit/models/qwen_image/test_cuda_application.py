@@ -153,3 +153,42 @@ def test_tiny_qwen_dit_runs_through_the_cuda_ops_on_cpu(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr[-3000:]
     assert "OK" in proc.stdout, proc.stdout
+
+
+def test_dynamic_shift_mu_matches_the_cli_formula():
+    # difflet/cli/orchestrators/qwen_image.py computes mu from the scheduler config; the
+    # CUDA path must use the same value or its timesteps differ from the Trainium path.
+    from types import SimpleNamespace
+
+    from difflet.models.qwen_image.cuda_application import dynamic_shift_mu
+
+    sc = SimpleNamespace(
+        base_shift=0.5, max_shift=0.9, base_image_seq_len=256, max_image_seq_len=8192
+    )
+    slope = (0.9 - 0.5) / (8192 - 256)
+    expected = 4096 * slope + (0.5 - slope * 256)
+    assert dynamic_shift_mu(sc, 4096) == pytest.approx(expected)
+
+
+def test_qwen_timesteps_pass_mu_to_a_dynamic_shift_scheduler():
+    from difflet.models.qwen_image.cuda_application import qwen_image_timesteps
+
+    class _Sched:
+        config = type(
+            "C",
+            (),
+            {
+                "base_shift": 0.5,
+                "max_shift": 0.9,
+                "base_image_seq_len": 256,
+                "max_image_seq_len": 8192,
+            },
+        )()
+
+        def set_timesteps(self, sigmas=None, mu=None, device=None, **kw):
+            assert mu is not None and len(sigmas) == 4
+            self.timesteps = torch.tensor(sigmas) * 1000
+
+    sched = _Sched()
+    ts = qwen_image_timesteps(sched, num_inference_steps=4, image_seq_len=4096)
+    assert tuple(ts.shape) == (4,) and ts[0] == 1000.0

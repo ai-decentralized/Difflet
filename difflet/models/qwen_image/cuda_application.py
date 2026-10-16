@@ -23,6 +23,27 @@ from difflet.models.qwen_image.contract import QwenImageDiTInputBundle, normaliz
 from difflet.models.qwen_image.dit_config import QwenImageDiTConfig
 
 
+def dynamic_shift_mu(scheduler_config, image_seq_len: int) -> float:
+    """``mu`` for a ``use_dynamic_shifting`` FlowMatch scheduler — the formula
+    difflet/cli/orchestrators/qwen_image.py and diffusers' ``calculate_shift`` share."""
+    sc = scheduler_config
+    slope = (sc.max_shift - sc.base_shift) / (sc.max_image_seq_len - sc.base_image_seq_len)
+    return float(image_seq_len * slope + (sc.base_shift - slope * sc.base_image_seq_len))
+
+
+def qwen_image_timesteps(scheduler, *, num_inference_steps: int, image_seq_len: int):
+    """Timesteps the way the Trainium CLI builds them: linear sigmas plus the dynamic
+    shift ``mu`` (the model's scheduler config has ``use_dynamic_shifting=True``, and
+    ``set_timesteps`` refuses to run without ``mu``)."""
+    import numpy as np
+
+    steps = max(int(num_inference_steps), 1)
+    sigmas = np.linspace(1.0, 1.0 / steps, steps).tolist()
+    mu = dynamic_shift_mu(scheduler.config, image_seq_len)
+    scheduler.set_timesteps(sigmas=sigmas, mu=mu, device="cpu")
+    return scheduler.timesteps
+
+
 class CudaQwenImageApplication(torch.nn.Module):
     def __init__(
         self,
@@ -200,8 +221,18 @@ class CudaQwenImageApplication(torch.nn.Module):
         latents = self.pipeline.prepare_latents(
             batch_size=batch, dtype=self.dtype, device=self.device, generator=generator
         )
+        timesteps = None
+        if self.pipeline.scheduler is not None:
+            timesteps = qwen_image_timesteps(
+                self.pipeline.scheduler,
+                num_inference_steps=int(num_inference_steps),
+                image_seq_len=int(latents.shape[1]),
+            ).to(self.device)
+        # The Trainium CLI feeds guidance 4.0 by default (single-pass, no negative prompt).
+        guidance_scale = 4.0 if guidance_scale is None else float(guidance_scale)
         out = self.pipeline(
             latents=latents,
+            timesteps=timesteps,
             encoder_hidden_states=encoder_hidden_states,
             encoder_hidden_states_mask=encoder_hidden_states_mask,
             batch_size=batch,
@@ -234,4 +265,4 @@ class CudaQwenImageApplication(torch.nn.Module):
         return self._require_transformer("forward")(*args, **kwargs)
 
 
-__all__ = ["CudaQwenImageApplication"]
+__all__ = ["CudaQwenImageApplication", "dynamic_shift_mu", "qwen_image_timesteps"]
