@@ -104,11 +104,6 @@ class NeuronWanConfig(WanTransformerConfig):
                 f"Wan latent frames {self.latent_frames} is not divisible by "
                 f"the temporal patch {p_t}"
             )
-        if self.sp_enabled:
-            raise NotImplementedError(
-                "the neuron backend supports tensor, context and CFG parallelism; "
-                "sequence parallelism is not implemented"
-            )
 
     @classmethod
     def from_pretrained(cls, transformer_path, **overrides) -> "NeuronWanConfig":

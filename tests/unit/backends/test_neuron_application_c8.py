@@ -357,15 +357,14 @@ def test_exec_mode_resolution(monkeypatch):
 @pytest.mark.parametrize(
     "parallel",
     [
-        DiffletParallelConfig(sp_enabled=True),
         DiffletParallelConfig(dp_degree=2),
     ],
-    ids=["sp", "dp"],
+    ids=["dp"],
 )
 def test_unsupported_parallel_modes_raise(parallel):
     app = ToyApplication(parallel=parallel, device="cpu", exec_mode="eager",
                          model_path="/nonexistent")
-    with pytest.raises(NotImplementedError, match="supports tensor, context"):
+    with pytest.raises(NotImplementedError, match="supports tensor, sequence"):
         app.load()
     assert parallel_mesh.is_mesh_initialized() is False
 

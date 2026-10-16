@@ -51,6 +51,7 @@ from tests.unit.backends._neuron_workers import (  # noqa: E402
     w1_wan22_pipeline_worker,
     w1_wan_cfg_parallel_worker,
     w1_wan_cp_worker,
+    w1_wan_sp_worker,
     w1_wan_device_text_encoder_worker,
     w1_wan_device_vae_worker,
     w1_wan_pipeline_worker,
@@ -112,8 +113,7 @@ def test_config_validates_tp_and_shape(tiny):
         NeuronWanConfig.from_pretrained(tiny.transformer, tp_degree=3)
     with pytest.raises(ValueError, match=r"num_frames=6 must satisfy \(num_frames - 1\) % 4"):
         NeuronWanConfig.from_pretrained(tiny.transformer, num_frames=6)
-    with pytest.raises(NotImplementedError, match="sequence parallelism is not implemented"):
-        NeuronWanConfig.from_pretrained(tiny.transformer, sp_enabled=True)
+    NeuronWanConfig.from_pretrained(tiny.transformer, sp_enabled=True).validate()
     NeuronWanConfig.from_pretrained(tiny.transformer, context_parallel_enabled=True,
                                     cp_mode="ring").validate()
     NeuronWanConfig.from_pretrained(tiny.transformer, cfg_parallel_enabled=True).validate()
@@ -371,7 +371,7 @@ def test_application_call_dispatch(tiny):
         ({"teacache_calibration_path": "/x.json"}, "TeaCache"),
         ({"shapes": ((32, 48, 5), (32, 48, 9))}, "one static shape"),
         ({"batch_size": 2}, "batch_size"),
-        ({"parallel": DiffletParallelConfig(sp_enabled=True)}, "supports tensor, context"),
+        ({"parallel": DiffletParallelConfig(dp_degree=2)}, "supports tensor, sequence"),
     ):
         with pytest.raises(NotImplementedError, match=match):
             _composed(tiny, **kwargs)
@@ -590,6 +590,21 @@ def test_context_parallel_on_four_ranks_matches_tp1(tiny, cp_mode):
     every rank and equal to the TP1 reference."""
     reference = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2, guidance_scale=5.0)
     results = run_ranks(w1_wan_cp_worker, tiny.dir, cp_mode, world_size=4, env=OFFLINE)
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]
+    torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
+                               atol=1e-4, rtol=1e-4)
+
+
+# ---- sequence parallelism (Megatron SP within the TP group) ------------------------------
+
+
+@pytest.mark.parametrize("cfg", [False, True], ids=["tp4-sp", "tp2-cfg2-sp"])
+def test_sequence_parallel_on_four_ranks_matches_tp1(tiny, cfg):
+    """The sequence sharded over the TP group between the matmuls: identical on every rank and
+    equal to the TP1 reference, alone and combined with CFG parallelism."""
+    reference = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2, guidance_scale=5.0)
+    results = run_ranks(w1_wan_sp_worker, tiny.dir, cfg, world_size=4, env=OFFLINE)
     for result in results:
         assert result["sha256"] == results[0]["sha256"]
     torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,

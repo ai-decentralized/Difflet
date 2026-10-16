@@ -89,6 +89,10 @@ def test_tensor_parallel_is_supported():
     runtime.check_parallel_supported(DiffletParallelConfig(tp_degree=4))
 
 
+def test_sequence_parallel_is_supported():
+    runtime.check_parallel_supported(DiffletParallelConfig(tp_degree=4, sp_enabled=True))
+
+
 def test_cfg_parallel_is_supported():
     runtime.check_parallel_supported(DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True))
 
@@ -101,7 +105,6 @@ def test_context_parallel_is_supported(mode):
 @pytest.mark.parametrize(
     "parallel, name",
     [
-        (DiffletParallelConfig(tp_degree=4, sp_enabled=True), "sp_enabled"),
         (DiffletParallelConfig(tp_degree=2, dp_degree=2), "dp_degree=2"),
     ],
 )

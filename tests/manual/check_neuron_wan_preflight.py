@@ -157,6 +157,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cp-degree", type=int, default=1,
                    help="context-parallel degree; TP is WORLD_SIZE / cp")
     p.add_argument("--cp-mode", choices=("ulysses", "gather_kv", "ring"), default="ulysses")
+    p.add_argument("--sp", action="store_true", help="sequence parallelism within the TP group")
     p.add_argument("--timesteps", default="996,500",
                    help="comma-separated timesteps; each must be in the reference's runs")
     p.add_argument("--out-dir", type=Path, required=True)
@@ -485,7 +486,9 @@ def main() -> int:
     if world % cp:
         raise SystemExit(f"WORLD_SIZE {world} is not divisible by --cp-degree {cp}")
     tp = world // cp
-    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp, cp_mode=args.cp_mode)
+    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp,
+                                     cp_mode=args.cp_mode if cp > 1 else "gather_kv",
+                                     sp_enabled=args.sp)
     get_backend("neuron").prepare_runtime(parallel)
     prepare_s = time.perf_counter() - t0
 
@@ -502,7 +505,8 @@ def main() -> int:
     config = NeuronWanConfig.from_pretrained(
         transformer_dir, tp_degree=tp, height=args.height, width=args.width,
         num_frames=args.num_frames, text_seq_len=args.text_seq_len, torch_dtype=torch.bfloat16,
-        context_parallel_enabled=cp > 1, cp_mode=args.cp_mode,
+        context_parallel_enabled=cp > 1, cp_mode=args.cp_mode if cp > 1 else "gather_kv",
+        sp_enabled=args.sp,
     )
     app = NeuronWanTransformerApplication(
         model_path=transformer_dir, config=config, parallel=parallel, dtype=torch.bfloat16,

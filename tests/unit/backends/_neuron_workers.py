@@ -1069,3 +1069,37 @@ def ring_worker(rank: int, world_size: int) -> dict:
     shifted = C.ring_shift(torch.full((2,), float(rank)), C.get_cp_group(), 2, cp)
     return {"max_err": (out - ref).abs().max().item(), "shape": list(out.shape),
             "received": shifted.tolist()}
+
+
+def w1_wan_sp_worker(rank: int, world_size: int, model_dir: str, cfg: bool) -> dict:
+    """The composed application with sequence parallelism: TP4 + SP, or TP2 x CFG2 + SP; two
+    steps at guidance 5.0 on the fixed inputs."""
+    import hashlib
+
+    from difflet.models.wan.neuron_application import TorchNeuronWanApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import (
+        TINY_LATENT_SHAPE,
+        TINY_SHAPE,
+        TINY_TEXT_SEQ_LEN,
+        tiny_wan_pipeline_inputs,
+    )
+
+    app = TorchNeuronWanApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=world_size // (2 if cfg else 1),
+                                       cfg_parallel_enabled=cfg, sp_enabled=True),
+        dtype=torch.float32,
+        shape=dict(TINY_SHAPE),
+        text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode="eager",
+        device="cpu",
+        encoder_threads=2,
+    )
+    app.load()
+    prompt_embeds, latents = tiny_wan_pipeline_inputs()
+    out = app(prompt_embeds=prompt_embeds, latents=latents, channels=TINY_LATENT_SHAPE[1],
+              num_inference_steps=2, guidance_scale=5.0, output_type="latent")
+    final = out.latents
+    return {"latents": final.tolist(),
+            "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest()}

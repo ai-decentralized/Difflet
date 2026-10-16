@@ -314,6 +314,7 @@ class TorchNeuronWanApplication(torch.nn.Module):
             tp_degree=int(parallel.tp_degree),
             cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel_enabled", False)),
             context_parallel_enabled=int(getattr(parallel, "cp_degree", 1) or 1) > 1,
+            sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
             cp_mode=str(getattr(parallel, "cp_mode", "gather_kv")),
             torch_dtype=self.dtype,
         )

@@ -114,6 +114,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--cp-degree", type=int, default=1,
                    help="context-parallel degree; TP is world / (cp * cfg)")
     p.add_argument("--cp-mode", choices=("ulysses", "gather_kv", "ring"), default="ulysses")
+    p.add_argument("--sp", action="store_true", help="sequence parallelism within the TP group")
     p.add_argument("--iters", type=int, default=3,
                    help="generates in this process: the 1st is the launch's number, the "
                         "rest are the resident rows")
@@ -382,7 +383,8 @@ def run(args: argparse.Namespace) -> int:
         raise SystemExit(f"world size {world} is not divisible by cp * cfg = {lanes}")
     parallel = DiffletParallelConfig(tp_degree=world // lanes, cp_degree=cp,
                                      cp_mode=getattr(args, "cp_mode", "ulysses") if cp > 1 else "gather_kv",
-                                     cfg_parallel_enabled=cfg_parallel)
+                                     cfg_parallel_enabled=cfg_parallel,
+                                     sp_enabled=bool(getattr(args, "sp", False)))
     get_backend("neuron").prepare_runtime(parallel)
     prepare_s = time.perf_counter() - t0
     rank = dist.get_rank() if dist.is_initialized() else 0

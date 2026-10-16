@@ -79,16 +79,15 @@ def create_backend() -> NeuronBackend:
 
 
 def check_parallel_supported(parallel: Any) -> None:
-    """Reject parallel modes the neuron backend does not implement (it runs TP, CFG and CP in
-    every cp_mode: gather_kv, ulysses, ring)."""
+    """Reject parallel modes the neuron backend does not implement (it runs TP with or without
+    sequence parallelism, CFG, and CP in every cp_mode: gather_kv, ulysses, ring)."""
     unsupported = []
-    if parallel.sp_enabled:
-        unsupported.append("sp_enabled")
     if parallel.dp_degree > 1:
         unsupported.append(f"dp_degree={parallel.dp_degree}")
     if unsupported:
         raise NotImplementedError(
-            "the neuron backend supports tensor, context and CFG parallelism; unsupported: "
+            "the neuron backend supports tensor, sequence, context and CFG parallelism; "
+            "unsupported: "
             + ", ".join(unsupported)
         )
 
