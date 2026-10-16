@@ -73,3 +73,20 @@ def test_result_records_the_host():
     payload = _result()
     for key in ("device", "torch", "model_path", "shape"):
         assert key in payload, key
+
+
+def test_padded_prompt_sits_inside_the_noise_bf16_creates():
+    # A real prompt is ~16 valid tokens of 1024; the DiT must mask the padding like
+    # diffusers does. Same three gates against the padded-prompt reference and control.
+    payload = _result()
+    if "masked" not in payload.get("results", {}) or "control_masked" not in payload:
+        pytest.skip("no padded-prompt case recorded; re-run cuda_parity_gpu.py")
+    entry = payload["results"]["masked"]
+    control = payload["control_masked"]
+    same_dtype = entry["vs_bf16"]
+    assert same_dtype["cosine"] >= MIN_ABSOLUTE_COSINE, same_dtype
+    assert same_dtype["rel_l1"] / control["rel_l1"] <= MAX_SAME_DTYPE_DISTANCE_RATIO, (
+        same_dtype,
+        control,
+    )
+    assert entry["rel_l1"] / control["rel_l1"] <= MAX_ERROR_RATIO_VS_CONTROL, (entry, control)

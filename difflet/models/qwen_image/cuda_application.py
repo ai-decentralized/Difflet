@@ -209,8 +209,12 @@ class CudaQwenImageApplication(torch.nn.Module):
         seed: int | None = None,
         guidance_scale: float | None = None,
         output_type: str = "pil",
+        latents: torch.Tensor | None = None,
     ):
         """Text → image on the device: encode, denoise through the Difflet DiT, decode.
+
+        ``latents`` is packed ``(B, S, 64)`` initial noise used verbatim (the end-to-end
+        oracle feeds the same tensor to diffusers); otherwise ``seed`` draws it.
 
         Single pass, no classifier-free guidance — the same path the Trainium CLI runs.
         Qwen-Image's transformer has ``guidance_embeds=False``, so the modeling code drops
@@ -229,7 +233,11 @@ class CudaQwenImageApplication(torch.nn.Module):
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(int(seed))
         latents = self.pipeline.prepare_latents(
-            batch_size=batch, dtype=self.dtype, device=self.device, generator=generator
+            batch_size=batch,
+            dtype=self.dtype,
+            device=self.device,
+            generator=generator,
+            latents=latents,
         )
         timesteps = None
         if self.pipeline.scheduler is not None:
