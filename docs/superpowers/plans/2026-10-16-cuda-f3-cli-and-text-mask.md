@@ -600,3 +600,36 @@ Expected: last line `cpu-gate: imports=ok unit=[... passed ...] known_red=0 fixe
 git add DEVELOPER.md docs/plans/2026-10-16-cuda-backend-support.md
 git commit -m "docs: F3 status — difflet run on CUDA, the text mask, and the pending GPU oracles"
 ```
+
+---
+
+## Execution ledger (folded from the SDD workspace, 2026-10-16)
+
+```
+# SDD ledger — plan: docs/superpowers/plans/2026-10-16-cuda-f3-cli-and-text-mask.md
+Spec: docs/plans/2026-10-16-cuda-backend-support.md (F3, D2) — read.
+Pre-flight: Task 2 consumes CudaQwenImageApplication.generate(prompt, *, num_inference_steps, seed, output_type) — exists today; Task 3 adds latents= (additive, no conflict).
+Pre-flight: Task 3 parity/e2e scripts consume Task 1's CUDA transformer app (apply_text_mask=True) — consistent.
+Pre-flight: Task 4 consumes verify_cli.{_DIFFLET_CMD,Status,StepResult,allocate_run_dir} — all present in scripts/verify_cli.py.
+Pre-flight: Task 1 attention mask layout (B,1,1,S_k) vs ops.attention 4-D inputs — CPU reference uses masked_fill broadcast, CUDA impl passes to SDPA attn_mask; both broadcast. Clean.
+Task 1: Ruling: all-ones masks also take the masked 4-D SDPA branch on CUDA (diffusers builds a joint mask whenever one is given) — kept, simplest and oracle-equal; cost if wrong: kernel choice for full prompts may drop from flash to efficient, measured in F4
+Task 1: complete (commits ad37f98..e9fa3c0, tests: .venv/bin/python -m pytest tests/unit/models/qwen_image -q -p no:cacheprovider → 41 passed, 1 skipped in 3.84s)
+Task 2: Ruling: --steps defaults to 50 on CUDA (diffusers' default) while the Trainium CLI keeps 4 — the 4 is a Neuron cost choice, not a model property; cost if wrong: a slower default run, overridable with --steps
+Task 2: complete (commits e9fa3c0..cee8bb2, tests: .venv/bin/python -m pytest tests/unit/cli -q -p no:cacheprovider → 398 passed, 1 skipped in 3.96s)
+Task 3: Ruling: identical-image cosine asserted within 1e-12 instead of == 1.0 — float64 cosine of a tensor with itself is 1.0000000000000044; a test tolerance, not a metric change; cost if wrong: none.
+Task 3: Ruling: cuda_parity_gpu.py drops the deprecated txt_seq_lens kwarg (diffusers 0.38 derives RoPE length from the mask; removal in 0.39) — the all-ones case is unchanged (max_txt_seq_len = text_seq_len either way); cost if wrong: a re-run shows a changed "sdpa" number.
+Task 3: Ruling: the e2e script loads Difflet via model_path_override/compiled_path_override so a local snapshot path works like cuda_parity_gpu.py; cost if wrong: the from_pretrained bound-mode kwargs are untested until the GPU run.
+Task 3: complete (commits cee8bb2..e2bf977, tests: .venv/bin/python -m pytest tests/unit/models/qwen_image tests/unit/scripts tests/numerical -q -p no:cacheprovider → 44 passed, 36 skipped in 3.69s)
+Task 4: Ruling: a local run_step(cmd, log_fh, *, timeout, env) mirrors verify_cli.run_step because that one takes no env — duplicated ~15 lines instead of changing the Trainium script's signature; cost if wrong: two copies to keep in step
+Task 4: complete (commits e2bf977..25bf2a9, tests: .venv/bin/python -m pytest tests/unit/cli/test_verify_cli_cuda.py tests/unit/cli/test_verify_cli.py -q -p no:cacheprovider → 56 passed in 2.30s)
+Task 5: cpu-gate (full): imports=ok unit=[2286 passed, 172 skipped] regressions=0 neuron_skips=129 new_skips=0
+Task 5: complete (commits 25bf2a9..df07d99, tests: .claude/skills/difflet-cuda-backend/scripts/cpu-gate.sh --unit-only → cpu-gate: imports=skipped unit=[2286 passed, 172 skipped in 21.00s] known_red=0 fixed=0 regressions=0 neuron_skips=129 new_skips=0 log=.superpowers/sdd/2026-10-16-cuda-f3-cli-and-text-mask/logs/cpu-gate-unit-20261016-194347.log)
+Final review: fresh reviewer (Agent, fable) on review-ad37f98..df07d99.diff — 0 Critical, 1 Important, 4 Minor.
+Final: fixed run() downloading before refusing an unsupported flag — test_run_refuses_unsupported_flags_before_any_download RED→GREEN
+Final: fixed --guidance-scale silently dropped on CUDA (re-graded Important: same silent-no-op class as the PR 3 fix) — test_guidance_scale_is_refused_not_dropped RED→GREEN; suite tests/unit/cli + qwen_image green
+Final: minor (deferred): cuda_parity_gpu.py --skip-fp32 with a pre-F3 reference .pt raises KeyError instead of recomputing (the pod that had that file is terminated)
+Final: minor (deferred): tests/unit/cli has no autouse DIFFLET_BACKEND=cpu fixture; on a GPU host without the env, pre-existing CLI tests would route to the CUDA orchestrator (the gate exports cpu)
+Final: minor (deferred): non-Qwen refusal on CUDA advises DIFFLET_BACKEND=trainium on a host with no Neuron; --mode presets are refused by the resolved flag (cp-degree) not the flag typed
+Final: Ruling: masked 4-D SDPA branch is taken on every CUDA generate (prompts are always padded), so the flash-ineligibility cost is general — F4 compares against the Release 1 baseline 20.5 s / 50 steps; cost if wrong: a slower step until F4
+Final: Ruling: reviewer's declined-to-judge list (serve F3b, torchrun F2, Trainium/TPU mask, dp on compile, hidden --requests-dir, non-Qwen download, Trainium-only flags ignored, scheduler device, non-1024 shapes, e2e floors, torch import in auto-detect) — all stand as out of plan or pre-existing; cost if wrong: none ship-blocking
+```
