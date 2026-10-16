@@ -22,7 +22,11 @@ written against:
 Context parallelism: ``ulysses_attention`` swaps the sequence shard for a head shard around
 plain attention; ``ring_attention`` passes K/V blocks around the CP group and merges the
 partial results by their logsumexp, from the same flash kernel run with its softmax statistics.
-The joint (text + image) variants are not implemented.
+The joint (text + image) variants serve MMDiT models whose image stream is sequence-sharded
+over the CP group while the text stream is replicated on every rank (Qwen-Image, HunyuanVideo):
+``joint_ring_attention`` folds the text K/V in as one local partial and rings only the image
+K/V; ``joint_ulysses_attention`` swaps the image stream to a head shard, cuts the replicated
+text to the same heads, and runs one dense attention over both. All four are non-causal only.
 """
 
 from __future__ import annotations
@@ -216,22 +220,6 @@ def _merge_causal_mask(q, k, attention_mask):
     return attention_mask.to(device=q.device, dtype=q.dtype) + causal_bias
 
 
-def _context_parallel_unsupported(name: str, instead: str):
-    def unsupported(*args, **kwargs):
-        raise NotImplementedError(
-            f"difflet.ops.{name} is not implemented on the neuron backend; {instead}"
-        )
-
-    unsupported.__name__ = name
-    return unsupported
-
-
-joint_ring_attention = _context_parallel_unsupported(
-    "joint_ring_attention", "joint (text + image) sequences are not sharded yet")
-joint_ulysses_attention = _context_parallel_unsupported(
-    "joint_ulysses_attention", "joint (text + image) sequences are not sharded yet")
-
-
 def _dense_bhsd(q, k, v, *, scale: float):
     """Unmasked attention on ``[B, H, S, d]`` in the standard layout, through ``attention``'s
     ``attention_cte`` convention (heads folded into the batch, ``tp_q``/``tp_k`` set), as Wan's
@@ -260,9 +248,22 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
     cp = get_axis_size("cp")
     if cp == 1:
         return _dense_bhsd(q, k, v, scale=scale)
-    group, rank = collectives.get_cp_group(), get_axis_rank("cp")
+    out, _ = _ring_partials(q, k, v, scale=scale, cp=cp,
+                            group=collectives.get_cp_group(), rank=get_axis_rank("cp"))
+    return out.to(q.dtype)
+
+
+def _ring_partials(q, k, v, *, scale: float, cp: int, group, rank: int, out=None, lse=None):
+    """The ring loop shared by ``ring_attention`` and ``joint_ring_attention``.
+
+    Attends ``q`` to the K/V block this rank holds, passes the block to the next rank, and
+    repeats ``cp`` times, so every rank's block is seen once. Each partial merges into the
+    running ``(out, lse)`` (fp32 output, logsumexp), which a caller may seed with a partial of
+    its own (the joint variant's text partial); returns the merged pair, output still fp32.
+    """
+    from difflet.backends.neuron.ops_impl import collectives
+
     kv = torch.stack([k, v])  # one hand-off per round for both
-    out = lse = None
     for step in range(cp):
         o_r, l_r = _attention_with_lse(q, kv[0], kv[1], scale=scale)
         if out is None:
@@ -271,6 +272,40 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
             out, lse = _merge_partials(out, lse, o_r.float(), l_r)
         if step < cp - 1:
             kv = collectives.ring_shift(kv, group, cp, rank)
+    return out, lse
+
+
+def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float,
+                         causal: bool = False):
+    """Ring context-parallel joint (text + image) attention: image sharded, text replicated.
+
+    ``q``: this rank's joint queries ``[B, H, S_txt + S_img/cp, d]`` (the caller's order; Qwen
+    puts text first). ``image_k, image_v``: ``[B, H, S_img/cp, d]``, this rank's image block.
+    ``text_k, text_v``: ``[B, H, S_txt, d]``, identical on every rank. Returns
+    ``[B, H, q.shape[2], d]`` in ``q``'s row order.
+
+    The text K/V give one local partial, computed once and never passed on: every rank already
+    holds them, and rotating them would count them ``cp`` times. That partial seeds the ring
+    over the image blocks (``_ring_partials``, as in ``ring_attention``), and the ``cp + 1``
+    partials merge by their logsumexp into exactly the softmax over all ``S_txt + S_img`` keys.
+    Each partial attends the long joint query to a shorter key block (``L_q != L_k``), which
+    ``_attention_with_lse`` takes on both the flash kernel and the fp32 path. Non-causal only:
+    a causal mask across ring-rotated image blocks would need per-hop position offsets, and no
+    joint caller is causal. At ``cp == 1`` this is plain attention over ``[text ‖ image]``.
+    """
+    if causal:
+        raise NotImplementedError("joint_ring_attention supports non-causal attention only")
+    from difflet.backends.neuron.ops_impl import collectives
+    from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_rank, get_axis_size
+
+    cp = get_axis_size("cp")
+    if cp == 1:
+        return _dense_bhsd(q, torch.cat([text_k, image_k], dim=2),
+                           torch.cat([text_v, image_v], dim=2), scale=scale)
+    o_txt, l_txt = _attention_with_lse(q, text_k, text_v, scale=scale)
+    out, _ = _ring_partials(q, image_k, image_v, scale=scale, cp=cp,
+                            group=collectives.get_cp_group(), rank=get_axis_rank("cp"),
+                            out=o_txt.float(), lse=l_txt)
     return out.to(q.dtype)
 
 
@@ -307,15 +342,80 @@ def ulysses_attention(q, k, v, *, scale: float, causal: bool = False):
     cp = get_axis_size("cp")
     if cp == 1:
         return _dense_bhsd(q, k, v, scale=scale)
-    if q.shape[1] % cp:
-        raise ValueError(
-            f"cp_mode='ulysses' needs this rank's head count ({q.shape[1]}) divisible by "
-            f"cp_degree ({cp}): num_attention_heads must be divisible by tp_degree * cp_degree"
-        )
+    _check_ulysses_heads(q.shape[1], cp)
     group = collectives.get_cp_group()
     q, k, v = (collectives.seq_to_heads(t, group, cp) for t in (q, k, v))
     out = _dense_bhsd(q, k, v, scale=scale)
     return collectives.heads_to_seq(out, group, cp)
+
+
+def _check_ulysses_heads(heads: int, cp: int) -> None:
+    if heads % cp:
+        raise ValueError(
+            f"cp_mode='ulysses' needs this rank's head count ({heads}) divisible by "
+            f"cp_degree ({cp}): num_attention_heads must be divisible by tp_degree * cp_degree"
+        )
+
+
+def joint_ulysses_attention(q_img, q_txt, image_k, image_v, text_k, text_v, *, scale: float,
+                            causal: bool = False, key_valid_len=None):
+    """Ulysses context-parallel joint (text + image) attention: image sharded, text replicated.
+
+    ``q_img, image_k, image_v``: ``[B, H, S_img/cp, d]``, this rank's image block (``H`` this
+    TP rank's heads). ``q_txt, text_k, text_v``: ``[B, H, S_txt, d]``, identical on every rank.
+    Returns ``(img_out [B, H, S_img/cp, d], txt_out [B, H, S_txt, d])``, each stream in the
+    sharding it arrived with, so each caller re-joins them in its own order (Qwen
+    ``[txt ‖ img]``, HunyuanVideo ``[img ‖ txt]``).
+
+    The image stream takes the Ulysses swap (``seq_to_heads``) to ``[B, H/cp, S_img, d]``. The
+    text stream is replicated, so no exchange is needed to put it on the same heads: this rank
+    narrows it to its own head block, ``H/cp`` heads from ``cp_rank * H/cp`` (the block
+    ``seq_to_heads`` delivers here; the rank is a Python constant in this one-process-per-rank
+    backend, so the slice is static). One dense attention over ``[image ‖ text]`` on those heads
+    at full sequence length is then the exact joint result. On the way out the image rows take
+    ``heads_to_seq`` back to the sequence shard, and the text rows are all-gathered over heads,
+    restoring the replication callers expect.
+
+    ``key_valid_len`` (int32 ``[B]`` or None): valid keys per batch row in the joint
+    ``[image_full ‖ text]`` order, for a right-padded text stream (HunyuanVideo); keys at index
+    ``>= key_valid_len[b]`` are masked for every query, through ``attention``'s bounds (masked,
+    so SDPA rather than the flash kernel). Non-causal only, as ``ulysses_attention``.
+    """
+    if causal:
+        raise NotImplementedError("joint_ulysses_attention supports non-causal attention only")
+    from difflet.backends.neuron.ops_impl import collectives
+    from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_rank, get_axis_size
+
+    cp = get_axis_size("cp")
+    if cp > 1:
+        _check_ulysses_heads(q_img.shape[1], cp)
+        group, heads = collectives.get_cp_group(), q_img.shape[1] // cp
+        start = get_axis_rank("cp") * heads
+        q_img, image_k, image_v = (collectives.seq_to_heads(t, group, cp)
+                                   for t in (q_img, image_k, image_v))
+        q_txt, text_k, text_v = (t.narrow(1, start, heads) for t in (q_txt, text_k, text_v))
+
+    # Image first, the order key_valid_len counts in; each stream is returned separately.
+    q = torch.cat([q_img, q_txt], dim=2)
+    k = torch.cat([image_k, text_k], dim=2)
+    v = torch.cat([image_v, text_v], dim=2)
+    if key_valid_len is None:
+        out = _dense_bhsd(q, k, v, scale=scale)
+    else:
+        b, h, s, d = q.shape
+        count = key_valid_len.to(torch.int32).reshape(b, 1, 1, 1)
+        bound_max = count.expand(b, h, s, 1).reshape(b * h, s, 1)
+        out = attention(q.reshape(b * h, s, d), k.reshape(b * h, s, d), v.reshape(b * h, s, d),
+                        scale=scale, causal=False, bound_min=torch.zeros_like(bound_max),
+                        bound_max=bound_max, tp_q=True, tp_k=True, tp_out=False)
+        out = out.reshape(b, h, s, d)
+    s_img = q_img.shape[2]
+    img_out, txt_out = out[:, :, :s_img], out[:, :, s_img:]
+    if cp > 1:
+        img_out = collectives.heads_to_seq(img_out.contiguous(), group, cp)
+        txt_out = collectives.gather_from_tensor_model_parallel_region_with_dim(
+            txt_out.contiguous(), 1, group)
+    return img_out, txt_out
 
 __all__ = [
     "attention",
