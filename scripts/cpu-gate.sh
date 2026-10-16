@@ -49,7 +49,9 @@ unit_log="$LOGDIR/cpu-gate-unit-$ts.log"
 # tests/conftest.py writes the node ids the Neuron gate converted to skips here.
 export NEURON_GATE_REPORT="$LOGDIR/cpu-gate-neuron-skips-$ts.txt"
 : > "$NEURON_GATE_REPORT"
-"$PY" -m pytest tests/unit -q --tb=short -rs -p no:cacheprovider -p no:warnings \
+# -rfEs: failures and errors must appear in the short summary, or the regression
+# diff below cannot see them (found on the GPU box: two failures, "regressions=0").
+"$PY" -m pytest tests/unit -q --tb=short -rfEs -p no:cacheprovider -p no:warnings \
   --continue-on-collection-errors "$@" > "$unit_log" 2>&1
 summary="$(grep -E '^[0-9]+ (passed|failed)' "$unit_log" | tail -n 1 || true)"
 [ -n "$summary" ] || summary="$(tail -n 1 "$unit_log")"

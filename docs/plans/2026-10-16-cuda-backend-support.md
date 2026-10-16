@@ -115,12 +115,12 @@ Two TPU lessons carried over verbatim:
 
 Goal: confirm the environment and write the facts down before any code depends on them.
 
-- [ ] **0.1** Record: hostname, OS, kernel, `nvidia-smi` driver and CUDA versions, GPU name and memory, Python version, disk free.
-- [ ] **0.2** Install torch from the CUDA 12.8+ wheel index into a fresh venv; confirm `torch.cuda.is_available()`, `torch.cuda.get_device_capability()`, and that a bf16 matmul runs. If no wheel supports the box's Python, pick the newest Python the wheels do support and record it.
-- [ ] **0.3** Load diffusers' `QwenImageTransformer2DModel` from the real checkpoint in bf16 on the GPU, one seeded forward: wall time, peak memory. This is the oracle baseline and proves the card holds the model.
-- [ ] **0.4** Record which SDPA kernel torch selects for Qwen-Image's head dim and sequence length (`torch.nn.attention.sdpa_kernel` probing), per D7.
-- [ ] **0.5** Generate `requirements-cuda.lock` from the venv; write the `cuda` extra (D17).
-- [ ] **0.6** Append the Phase 0 verdict to the Status log and start the three-day clock (D19).
+- [x] **0.1** Record: hostname, OS, kernel, `nvidia-smi` driver and CUDA versions, GPU name and memory, Python version, disk free.
+- [x] **0.2** Install torch from the CUDA 12.8+ wheel index into a fresh venv; confirm `torch.cuda.is_available()`, `torch.cuda.get_device_capability()`, and that a bf16 matmul runs. If no wheel supports the box's Python, pick the newest Python the wheels do support and record it.
+- [x] **0.3** Load diffusers' `QwenImageTransformer2DModel` from the real checkpoint in bf16 on the GPU, one seeded forward: wall time, peak memory. This is the oracle baseline and proves the card holds the model.
+- [x] **0.4** Record which SDPA kernel torch selects for Qwen-Image's head dim and sequence length (`torch.nn.attention.sdpa_kernel` probing), per D7.
+- [x] **0.5** Generate `requirements-cuda.lock` from the venv; write the `cuda` extra (D17).
+- [x] **0.6** Append the Phase 0 verdict to the Status log and start the three-day clock (D19).
 
 Exit: Status log has a dated "Phase 0 verdict"; the capability triple in `runtime.py` is confirmed (`requires_aot=False`, `single_process_multi_core=False`, `supports_torchrun_mpmd=True`).
 

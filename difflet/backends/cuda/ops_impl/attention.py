@@ -59,6 +59,18 @@ def attention(
     attention_mask = _bounds_to_mask(k, bound_min, bound_max, attention_mask)
     scale = 1.0 if scale is None else scale
 
+    # SDPA's fused kernels (flash / cuDNN / efficient) require 4-D (B, H, S, D); a 3-D
+    # (B*H, S, D) call silently takes the math path, which materialises the S×S score
+    # matrix per head (measured in Phase 0 on the Pro 6000: "flash" vs "math" for the
+    # same tokens). Model code folds heads into the batch axis, so lift it here.
+    folded = q.dim() == 3
+    if folded:
+        q, k, v = q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0)
+    out = _sdpa(q, k, v, scale=scale, causal=causal, attention_mask=attention_mask)
+    return out.squeeze(0) if folded else out
+
+
+def _sdpa(q, k, v, *, scale: float, causal: bool, attention_mask):
     if attention_mask is None:
         return F.scaled_dot_product_attention(q, k, v, is_causal=causal, scale=scale)
 

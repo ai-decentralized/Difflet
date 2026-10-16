@@ -163,3 +163,24 @@ def test_public_surface_matches_the_ops_contract():
     for module, mod in (("attention", A), ("platform", P), ("mx", MX)):
         expected = {name for name, (m, _) in _EXPORTS.items() if m == module}
         assert expected <= set(mod.__all__), module
+
+
+def test_heads_folded_inputs_reach_sdpa_as_four_dimensional(monkeypatch):
+    # Phase 0 on the box: SDPA picks the flash kernel for (B, H, S, D) but falls back to the
+    # math path (materialised S×S scores) for the (B*H, S, D) layout difflet's model code
+    # passes. The backend must present 4-D tensors to SDPA whatever the caller's layout.
+    import torch.nn.functional as F
+
+    seen = []
+    real = F.scaled_dot_product_attention
+
+    def spy(q, k, v, **kw):
+        seen.append(q.ndim)
+        return real(q, k, v, **kw)
+
+    monkeypatch.setattr(F, "scaled_dot_product_attention", spy)
+    q, k, v = (t.reshape(2, 4, 8) for t in _qkv())
+    out = A.attention(q, k, v, scale=1.0)
+    assert seen == [4], seen
+    assert tuple(out.shape) == (2, 4, 8)
+    assert torch.allclose(out, CPU_A.attention(q, k, v, scale=1.0), atol=1e-5)
