@@ -15,8 +15,8 @@
 # in the same commit that fixed them, so the file shrinks to empty by the end
 # of Phase 1.
 #
-# CPU_GATE_IMPORTS_REQUIRED=1 makes a failing scripts/test_imports.sh fail the
-# gate. It is 0 by default until plan task 1.7 lands; flip it in that commit.
+# CPU_GATE_IMPORTS_REQUIRED (default 1 since plan task 1.7 / PR 2 Task 6): a
+# failing scripts/test_imports.sh fails the gate. Set it to 0 only to triage.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,7 +67,7 @@ if [ -n "$unexpected" ]; then
   printf '%s\n' "$unexpected" | head -n 20 >&2
   status=1
 fi
-if [ "$imports" = "FAIL" ] && [ "${CPU_GATE_IMPORTS_REQUIRED:-0}" = "1" ]; then
+if [ "$imports" = "FAIL" ] && [ "${CPU_GATE_IMPORTS_REQUIRED:-1}" = "1" ]; then
   status=1
 fi
 if [ "$n_fixed" -gt 0 ]; then
