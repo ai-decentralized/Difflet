@@ -17,6 +17,11 @@ docs/*
 !docs/plans/
 docs/plans/*
 !docs/plans/*.md
+!docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/plans/
+docs/superpowers/plans/*
+!docs/superpowers/plans/*.md
 docs_human/
 .history/
 # Compile cache (Trainium AOT artifacts can be huge)
