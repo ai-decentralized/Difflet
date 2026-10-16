@@ -102,3 +102,19 @@ def test_convert_report_only_touches_the_call_phase():
 def test_collect_ignore_entries_exist(relpath):
     # A stale entry would hide a module that no longer exists — or no longer needs the SDK.
     assert (_TESTS_DIR / relpath).is_file(), relpath
+
+
+def test_convert_report_records_the_converted_nodeid(tmp_path):
+    gate.CONVERTED.clear()
+    report, excinfo = _failed_report(_mnf("torch_neuronx"))
+    report.nodeid = "tests/unit/x.py::test_a"
+    gate.convert_report(report, excinfo, neuron_available=False)
+    assert gate.CONVERTED == ["tests/unit/x.py::test_a"]
+
+
+def test_dump_conversions_writes_sorted_unique_nodeids(tmp_path):
+    gate.CONVERTED.clear()
+    gate.CONVERTED.extend(["tests/unit/b.py::t", "tests/unit/a.py::t", "tests/unit/b.py::t"])
+    out = tmp_path / "neuron-skips.txt"
+    gate.dump_conversions(out)
+    assert out.read_text().splitlines() == ["tests/unit/a.py::t", "tests/unit/b.py::t"]

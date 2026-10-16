@@ -16,7 +16,7 @@ largest shape, and manifests/hashes see one deterministic order.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Sequence
 
 import torch
 
