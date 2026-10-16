@@ -1069,3 +1069,104 @@ def ring_worker(rank: int, world_size: int) -> dict:
     shifted = C.ring_shift(torch.full((2,), float(rank)), C.get_cp_group(), 2, cp)
     return {"max_err": (out - ref).abs().max().item(), "shape": list(out.shape),
             "received": shifted.tolist()}
+
+
+# --------------------------------------------------------------------------
+# Joint (text + image) context-parallel attention: joint_ring_attention and
+# joint_ulysses_attention against one dense softmax over the full joint sequence
+# --------------------------------------------------------------------------
+
+JOINT_HEADS, JOINT_S_TXT, JOINT_S_IMG, JOINT_D = 4, 6, 16, 16
+
+
+def _joint_reference(q, k, v, *, scale: float, valid: int | None = None):
+    """fp64 softmax attention on ``[B, H, S, d]``; keys at index >= ``valid`` masked."""
+    scores = (q.double() @ k.double().transpose(-1, -2)) * scale
+    if valid is not None:
+        scores[..., valid:] = float("-inf")
+    return torch.softmax(scores, dim=-1) @ v.double()
+
+
+def joint_cp_worker(rank: int, world_size: int, tp: int, mode: str) -> dict:
+    """TP ``tp`` x CP ``world_size // tp``: both joint CP attentions on this rank's head block
+    (TP) and image sequence block (CP), text replicated, against a dense softmax over the full
+    ``[text ‖ image]`` sequence; returns max errors and output shapes.
+
+    ``mode="compiled"`` runs each op through ``torch.compile(backend="aot_eager",
+    fullgraph=True, dynamic=False)``: the per-block compile the device path uses must trace
+    the ring loop and the all-to-alls without a graph break.
+    """
+    from types import SimpleNamespace
+
+    from difflet.backends.neuron.ops_impl import attention as A
+    from difflet.backends.neuron.ops_impl import collectives as C
+    from difflet.backends.neuron.ops_impl import parallel_mesh as pm
+
+    C.init_parallel_mesh(SimpleNamespace(tp_degree=tp, context_parallel_enabled=True))
+    cp = pm.get_axis_size("cp")
+    assert cp == world_size // tp
+    tp_rank, cp_rank = pm.get_tp_rank(), pm.get_axis_rank("cp")
+    scale = 0.25
+    gen = torch.Generator().manual_seed(7)
+    q_t, k_t, v_t = (torch.randn(1, JOINT_HEADS, JOINT_S_TXT, JOINT_D, generator=gen)
+                     for _ in range(3))
+    q_i, k_i, v_i = (torch.randn(1, JOINT_HEADS, JOINT_S_IMG, JOINT_D, generator=gen)
+                     for _ in range(3))
+    hl, rows = JOINT_HEADS // tp, JOINT_S_IMG // cp
+    heads = slice(hl * tp_rank, hl * (tp_rank + 1))
+    img_rows = slice(rows * cp_rank, rows * (cp_rank + 1))
+
+    def txt(t):  # replicated over CP: this TP rank's heads, every text row
+        return t[:, heads].contiguous()
+
+    def img(t):  # sharded over CP: this TP rank's heads, this CP rank's image rows
+        return t[:, heads, img_rows].contiguous()
+
+    ring, ulysses = A.joint_ring_attention, A.joint_ulysses_attention
+    if mode == "compiled":
+        torch._dynamo.reset()
+        ring = torch.compile(ring, backend="aot_eager", fullgraph=True, dynamic=False)
+        ulysses = torch.compile(ulysses, backend="aot_eager", fullgraph=True, dynamic=False)
+
+    # Ring, in Qwen's calling convention: joint query [text ‖ this rank's image rows].
+    ref = _joint_reference(torch.cat([q_t, q_i], 2), torch.cat([k_t, k_i], 2),
+                           torch.cat([v_t, v_i], 2), scale=scale)[:, heads]
+    ref_txt, ref_img = ref[:, :, :JOINT_S_TXT], ref[:, :, JOINT_S_TXT:][:, :, img_rows]
+    ring_out = ring(torch.cat([txt(q_t), img(q_i)], 2), img(k_i), img(v_i), txt(k_t), txt(v_t),
+                    scale=scale, causal=False)
+
+    # Ulysses: image and text streams apart, each returned in the sharding it came in.
+    img_out, txt_out = ulysses(img(q_i), txt(q_t), img(k_i), img(v_i), txt(k_t), txt(v_t),
+                               scale=scale, causal=False)
+
+    # Ulysses with a key-padding count in the joint [image ‖ text] order: the last two text
+    # keys are padding (HunyuanVideo's contract).
+    valid = JOINT_S_IMG + JOINT_S_TXT - 2
+    masked = _joint_reference(torch.cat([q_i, q_t], 2), torch.cat([k_i, k_t], 2),
+                              torch.cat([v_i, v_t], 2), scale=scale, valid=valid)[:, heads]
+    img_masked, txt_masked = ulysses(
+        img(q_i), txt(q_t), img(k_i), img(v_i), txt(k_t), txt(v_t), scale=scale, causal=False,
+        key_valid_len=torch.tensor([valid], dtype=torch.int32))
+
+    # One head per rank cannot split over cp >= 2 ranks; raised before any collective.
+    try:
+        A.joint_ulysses_attention(*(t[:, :1] for t in (img(q_i), txt(q_t), img(k_i), img(v_i),
+                                                        txt(k_t), txt(v_t))), scale=scale)
+        head_error = ""
+    except ValueError as exc:
+        head_error = str(exc)
+
+    def err(out, expected):
+        return (out.double() - expected).abs().max().item()
+
+    return {
+        "cp": cp,
+        "ring_shape": list(ring_out.shape),
+        "ring_err": err(ring_out, torch.cat([ref_txt, ref_img], 2)),
+        "ulysses_shapes": [list(img_out.shape), list(txt_out.shape)],
+        "ulysses_img_err": err(img_out, ref_img),
+        "ulysses_txt_err": err(txt_out, ref_txt),
+        "masked_img_err": err(img_masked, masked[:, :, :JOINT_S_IMG][:, :, img_rows]),
+        "masked_txt_err": err(txt_masked, masked[:, :, JOINT_S_IMG:]),
+        "head_error": head_error,
+    }
