@@ -1,0 +1,18 @@
+prompt embeddings from /home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/artifacts/verification-2026-10-16-qwen-neuron/prompt_embeds.pt: (1, 1024, 3584), 36 valid rows
+loading diffusers QwenImageTransformer2DModel fp32, num_layers=30 (12 threads)
+The config attributes {'pooled_projection_dim': 768} were passed to QwenImageTransformer2DModel, but are not expected and will be ignored. Please verify your config.json configuration file.
+
+Loading checkpoint shards:   0%|          | 0/9 [00:00<?, ?it/s]
+Loading checkpoint shards:  11%|█         | 1/9 [00:00<00:05,  1.55it/s]
+Loading checkpoint shards:  22%|██▏       | 2/9 [00:01<00:04,  1.71it/s]
+Loading checkpoint shards:  33%|███▎      | 3/9 [00:01<00:03,  1.76it/s]
+Loading checkpoint shards:  44%|████▍     | 4/9 [00:02<00:02,  1.80it/s]
+Loading checkpoint shards: 100%|██████████| 9/9 [00:02<00:00,  3.81it/s]
+Some weights of the model checkpoint at /home/ubuntu/.cache/huggingface/hub/models--Qwen--Qwen-Image/snapshots/75e0b4be04f60ec59a75f475837eced720f823b6/transformer were not used when initializing QwenImageTransformer2DModel: 
+ [... unused block keys elided ...]
+  loaded in 2.4s; 10.235B params; missing=0 mismatched=0 unexpected=960 (blocks >= 30 expected there)
+  fp32 forward t=1000 (dit 1) in 48.4s -> (1, 4096, 64) finite=True absmean=20.6736
+  fp32 forward t=500 (dit 0.5) in 48.3s -> (1, 4096, 64) finite=True absmean=54.1035
+  bf16 control t=1000 in 17.4s: vs fp32 cosine 0.99941163 rel_l1 4.013e-02 rel_l2 4.712e-02
+  bf16 control t=500 in 17.3s: vs fp32 cosine 0.99997140 rel_l1 1.671e-02 rel_l2 1.737e-02
+wrote /home/ubuntu/qwen-v2-work/ref-l30.pt

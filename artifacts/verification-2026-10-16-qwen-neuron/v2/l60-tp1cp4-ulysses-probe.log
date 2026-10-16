@@ -1,0 +1,243 @@
+launch 2026-10-16T03:34:26Z head=ea6fe1b cache=/home/ubuntu/.cache/difflet-neuron-qwen args: --reference /home/ubuntu/qwen-v1-work/ref-l60.pt --num-layers 60 --exec-mode compile --cp-degree 4 --cp-mode ulysses --save /home/ubuntu/qwen-v2-work/l60-tp1cp4-ulysses-probe/out.pt --out-json /home/ubuntu/qwen-v2-work/l60-tp1cp4-ulysses-probe/result.json --bench-iters 0
+2026-Oct-16 03:34:49.202344 116292:116400 ERROR  TDRV:dmem_alloc_internal                     Failed to allocate DEVICE memory (113246208 bytes): memory allocation failed (ret=-12)
+2026-Oct-16 03:34:49.204475 116289:116461 ERROR  TDRV:dmem_alloc_internal                     Failed to allocate DEVICE memory (113246208 bytes): memory allocation failed (ret=-12)
+2026-Oct-16 03:34:49.207619 116289:116461 ERROR  TDRV:tensor_allocate                         Failed to allocate 113246208 bytes on DEVICE for tensor UNKNOWN.
+2026-Oct-16 03:34:49.207642 116289:116461 ERROR   NRT:nrt_infodump                            Neuron runtime information - please include in any support request:
+2026-Oct-16 03:34:49.207648 116289:116461 ERROR   NRT:nrt_infodump                            ------------->8------------[ cut here ]------------>8-------------
+2026-Oct-16 03:34:49.207653 116289:116461 ERROR   NRT:nrt_infodump                            NRT version: 2.35.27.0 (d2725ccb85ec45a12a6cda21994562156f6e1c23)
+2026-Oct-16 03:34:49.207657 116289:116461 ERROR   NRT:nrt_infodump                            Embedded FW version: 1.25.25.0 (075061dae8aef6f283044dde9fb9bdaac4eaec44) loaded from "libnrtucode_extisa.so"
+2026-Oct-16 03:34:49.207666 116289:116461 ERROR   NRT:nrt_infodump                            CCOM version: 0.35.40.0-"354ad3064" (compat 93)
+2026-Oct-16 03:34:49.207672 116289:116461 ERROR   NRT:nrt_infodump                            NCFW version: 2.35.9.0 (0cd410fb83c08e6964e981b2fdc1f50713297caa)
+2026-Oct-16 03:34:49.207676 116289:116461 ERROR   NRT:nrt_infodump                            Instance ID: i-0bf1dfdde27a99470
+2026-Oct-16 03:34:49.207687 116289:116461 ERROR   NRT:nrt_infodump                            Cluster ID: 9190342406860538583
+2026-Oct-16 03:34:49.207692 116289:116461 ERROR   NRT:nrt_infodump                            Kernel: Linux 6.17.0-1019-aws #19~24.04.1-Ubuntu SMP Tue Jun 23 18:53:06 UTC 2026
+2026-Oct-16 03:34:49.207697 116289:116461 ERROR   NRT:nrt_infodump                            Nodename: ip-172-31-36-18
+2026-Oct-16 03:34:49.204408 116291:116364 ERROR  TDRV:dmem_alloc_internal                     Failed to allocate DEVICE memory (113246208 bytes): memory allocation failed (ret=-12)
+2026-Oct-16 03:34:49.207721 116289:116461 ERROR   NRT:nrt_infodump                            Driver version: 2.31.6.0
+
+2026-Oct-16 03:34:49.207727 116289:116461 ERROR   NRT:nrt_infodump                            Failure: NRT_RESOURCE in nrt_tensor_allocate
+2026-Oct-16 03:34:49.207731 116289:116461 ERROR   NRT:nrt_infodump                            LNC: 0
+2026-Oct-16 03:34:49.207737 116289:116461 ERROR   NRT:nrt_infodump                            Visible cores: 0
+2026-Oct-16 03:34:49.207741 116289:116461 ERROR   NRT:nrt_infodump                            Environment:
+2026-Oct-16 03:34:49.207728 116291:116364 ERROR  TDRV:tensor_allocate                         Failed to allocate 113246208 bytes on DEVICE for tensor UNKNOWN.
+2026-Oct-16 03:34:49.207748 116289:116461 ERROR   NRT:nrt_infodump                                NEURON_LAUNCH_BLOCKING=0
+2026-Oct-16 03:34:49.207752 116289:116461 ERROR   NRT:nrt_infodump                                NEURON_RT_ALLOW_LEGACY_NEFF=1
+2026-Oct-16 03:34:49.207751 116291:116364 ERROR   NRT:nrt_infodump                            Neuron runtime information - please include in any support request:
+2026-Oct-16 03:34:49.207756 116289:116461 ERROR   NRT:nrt_infodump                                NEURON_RT_DBG_ZEROCOPY=1
+2026-Oct-16 03:34:49.207758 116291:116364 ERROR   NRT:nrt_infodump                            ------------->8------------[ cut here ]------------>8-------------
+2026-Oct-16 03:34:49.207760 116289:116461 ERROR   NRT:nrt_infodump                                NEURON_RT_MAP_HBM=1
+2026-Oct-16 03:34:49.207763 116291:116364 ERROR   NRT:nrt_infodump                            NRT version: 2.35.27.0 (d2725ccb85ec45a12a6cda21994562156f6e1c23)
+2026-Oct-16 03:34:49.207773 116289:116461 ERROR   NRT:nrt_infodump                                NEURON_LOGICAL_NC_CONFIG=2
+2026-Oct-16 03:34:49.207774 116291:116364 ERROR   NRT:nrt_infodump                            Embedded FW version: 1.25.25.0 (075061dae8aef6f283044dde9fb9bdaac4eaec44) loaded from "libnrtucode_extisa.so"
+2026-Oct-16 03:34:49.207778 116289:116461 ERROR   NRT:nrt_infodump                                NEURON_RT_ROOT_COMM_ID=ip-172-31-36-18.ap-southeast-4.compute.internal:35875
+2026-Oct-16 03:34:49.207783 116289:116461 ERROR   NRT:nrt_infodump                                NEURON_RT_ENABLE_DEVICE_MEMORY_OOM_LOG=0
+2026-Oct-16 03:34:49.207782 116291:116364 ERROR   NRT:nrt_infodump                            CCOM version: 0.35.40.0-"354ad3064" (compat 93)
+2026-Oct-16 03:34:49.207787 116289:116461 ERROR   NRT:nrt_infodump                            -------------8<-----------[ cut to here ]-----------8<------------
+[curated: 98713 lines in the raw log, 8436 'Neuron OOM' / 'OOM recovery' warnings; the first 12 and last 12 follow, then every line that is not part of a runtime info dump]
+[rank1]:[W1016 03:34:51.240034748 NeuronLogging.h:103] Warning: [Neuron] [WARNING] [torch_neuronx/csrc/core/utils/ErrorRecovery.cpp:110] OOM recovery failed after shelves cleanup + cache drain op= neuron::alloc::lazy nrt_status=NRT_RESOURCE  (function log)
+[rank1]:[W1016 03:34:51.241442677 NeuronMetrics.cpp:625] Warning: Neuron OOM: requested_size=113246208 | Peak memory stats (at allocated_bytes peak): allocated_bytes.current=25606069248 allocated_bytes.peak=25606069248 reserved_bytes.current=25612517376 reserved_bytes.peak=25612517376 active_bytes.current=25605762048 active_bytes.peak=25605762048 internal_fragmentation=307200 num_alloc_retries=0 num_ooms=0 num_alloc_deferred=0 num_alloc_drain_retry_ok=0 num_alloc_drain_retry_fail=0 (function RecordOOMFailure)
+[rank1]:[W1016 03:34:51.241748692 NeuronMetrics.cpp:668] Warning: Neuron OOM: Segment pool state: segments=533 free_chunks=2 total_free=163734528 largest_cached_free=5767168 nrt_free=157286400 cached_free=6448128 allocated=25606069248 reserved=25612517376 active=25605762048 total_hbm=25769803776 (function RecordOOMFailure)
+[rank3]:[W1016 03:34:51.242372446 NeuronLogging.h:103] Warning: [Neuron] [WARNING] [torch_neuronx/csrc/core/utils/ErrorRecovery.cpp:110] OOM recovery failed after shelves cleanup + cache drain op= neuron::alloc::lazy nrt_status=NRT_RESOURCE  (function log)
+[rank3]:[W1016 03:34:51.242394965 NeuronMetrics.cpp:625] Warning: Neuron OOM: requested_size=113246208 | Peak memory stats (at allocated_bytes peak): allocated_bytes.current=25606069248 allocated_bytes.peak=25606069248 reserved_bytes.current=25612517376 reserved_bytes.peak=25612517376 active_bytes.current=25605762048 active_bytes.peak=25605762048 internal_fragmentation=307200 num_alloc_retries=0 num_ooms=0 num_alloc_deferred=0 num_alloc_drain_retry_ok=0 num_alloc_drain_retry_fail=0 (function RecordOOMFailure)
+[rank3]:[W1016 03:34:51.242671085 NeuronMetrics.cpp:668] Warning: Neuron OOM: Segment pool state: segments=533 free_chunks=2 total_free=163734528 largest_cached_free=5767168 nrt_free=157286400 cached_free=6448128 allocated=25606069248 reserved=25612517376 active=25605762048 total_hbm=25769803776 (function RecordOOMFailure)
+[rank2]:[W1016 03:34:51.243424334 NeuronLogging.h:103] Warning: [Neuron] [WARNING] [torch_neuronx/csrc/core/utils/ErrorRecovery.cpp:110] OOM recovery failed after shelves cleanup + cache drain op= neuron::alloc::lazy nrt_status=NRT_RESOURCE  (function log)
+[rank2]:[W1016 03:34:51.243439404 NeuronMetrics.cpp:625] Warning: Neuron OOM: requested_size=113246208 | Peak memory stats (at allocated_bytes peak): allocated_bytes.current=25606069248 allocated_bytes.peak=25606069248 reserved_bytes.current=25612517376 reserved_bytes.peak=25612517376 active_bytes.current=25605762048 active_bytes.peak=25605762048 internal_fragmentation=307200 num_alloc_retries=0 num_ooms=0 num_alloc_deferred=0 num_alloc_drain_retry_ok=0 num_alloc_drain_retry_fail=0 (function RecordOOMFailure)
+[rank2]:[W1016 03:34:51.243722866 NeuronMetrics.cpp:668] Warning: Neuron OOM: Segment pool state: segments=533 free_chunks=2 total_free=163734528 largest_cached_free=5767168 nrt_free=157286400 cached_free=6448128 allocated=25606069248 reserved=25612517376 active=25605762048 total_hbm=25769803776 (function RecordOOMFailure)
+[rank0]:[W1016 03:34:51.256697532 NeuronLogging.h:103] Warning: [Neuron] [WARNING] [torch_neuronx/csrc/core/utils/ErrorRecovery.cpp:110] OOM recovery failed after shelves cleanup + cache drain op= neuron::alloc::lazy nrt_status=NRT_RESOURCE  (function log)
+[rank0]:[W1016 03:34:51.256718057 NeuronMetrics.cpp:625] Warning: Neuron OOM: requested_size=113246208 | Peak memory stats (at allocated_bytes peak): allocated_bytes.current=25606069248 allocated_bytes.peak=25606069248 reserved_bytes.current=25612517376 reserved_bytes.peak=25612517376 active_bytes.current=25605762048 active_bytes.peak=25605762048 internal_fragmentation=307200 num_alloc_retries=0 num_ooms=0 num_alloc_deferred=0 num_alloc_drain_retry_ok=0 num_alloc_drain_retry_fail=0 (function RecordOOMFailure)
+[rank0]:[W1016 03:34:51.257024693 NeuronMetrics.cpp:668] Warning: Neuron OOM: Segment pool state: segments=533 free_chunks=2 total_free=163734528 largest_cached_free=5767168 nrt_free=157286400 cached_free=6448128 allocated=25606069248 reserved=25612517376 active=25605762048 total_hbm=25769803776 (function RecordOOMFailure)
+...
+[rank3]:[W1016 03:51:00.171262660 NeuronLogging.h:103] Warning: [Neuron] [WARNING] [torch_neuronx/csrc/core/utils/ErrorRecovery.cpp:110] OOM recovery failed after shelves cleanup + cache drain op= neuron::alloc::lazy nrt_status=NRT_RESOURCE  (function log)
+[rank3]:[W1016 03:51:00.171279036 NeuronMetrics.cpp:625] Warning: Neuron OOM: requested_size=4 | Peak memory stats (at allocated_bytes peak): allocated_bytes.current=25643949568 allocated_bytes.peak=25643949568 reserved_bytes.current=25660751872 reserved_bytes.peak=25660751872 active_bytes.current=25643634176 active_bytes.peak=25643634176 internal_fragmentation=315392 num_alloc_retries=5 num_ooms=5 num_alloc_deferred=0 num_alloc_drain_retry_ok=0 num_alloc_drain_retry_fail=0 (function RecordOOMFailure)
+[rank3]:[W1016 03:51:00.171637022 NeuronMetrics.cpp:668] Warning: Neuron OOM: Segment pool state: segments=540 free_chunks=7 total_free=125854208 largest_cached_free=5767168 nrt_free=109051904 cached_free=16802304 allocated=25643949568 reserved=25660751872 active=25643634176 total_hbm=25769803776 (function RecordOOMFailure)
+[rank2]:[W1016 03:51:01.247448974 NeuronLogging.h:103] Warning: [Neuron] [WARNING] [torch_neuronx/csrc/core/utils/ErrorRecovery.cpp:110] OOM recovery failed after shelves cleanup + cache drain op= neuron::alloc::lazy nrt_status=NRT_RESOURCE  (function log)
+[rank2]:[W1016 03:51:01.247468289 NeuronMetrics.cpp:625] Warning: Neuron OOM: requested_size=4 | Peak memory stats (at allocated_bytes peak): allocated_bytes.current=25643949568 allocated_bytes.peak=25643949568 reserved_bytes.current=25660751872 reserved_bytes.peak=25660751872 active_bytes.current=25643634176 active_bytes.peak=25643634176 internal_fragmentation=315392 num_alloc_retries=5 num_ooms=5 num_alloc_deferred=0 num_alloc_drain_retry_ok=0 num_alloc_drain_retry_fail=0 (function RecordOOMFailure)
+[rank2]:[W1016 03:51:01.247887201 NeuronMetrics.cpp:668] Warning: Neuron OOM: Segment pool state: segments=540 free_chunks=7 total_free=125854208 largest_cached_free=5767168 nrt_free=109051904 cached_free=16802304 allocated=25643949568 reserved=25660751872 active=25643634176 total_hbm=25769803776 (function RecordOOMFailure)
+[rank0]:[W1016 03:51:01.878633654 NeuronLogging.h:103] Warning: [Neuron] [WARNING] [torch_neuronx/csrc/core/utils/ErrorRecovery.cpp:110] OOM recovery failed after shelves cleanup + cache drain op= neuron::alloc::lazy nrt_status=NRT_RESOURCE  (function log)
+[rank0]:[W1016 03:51:01.878652214 NeuronMetrics.cpp:625] Warning: Neuron OOM: requested_size=393216 | Peak memory stats (at allocated_bytes peak): allocated_bytes.current=25643949568 allocated_bytes.peak=25643949568 reserved_bytes.current=25660751872 reserved_bytes.peak=25660751872 active_bytes.current=25643634176 active_bytes.peak=25643634176 internal_fragmentation=315392 num_alloc_retries=5 num_ooms=5 num_alloc_deferred=0 num_alloc_drain_retry_ok=0 num_alloc_drain_retry_fail=0 (function RecordOOMFailure)
+[rank0]:[W1016 03:51:01.879026526 NeuronMetrics.cpp:668] Warning: Neuron OOM: Segment pool state: segments=540 free_chunks=7 total_free=125854208 largest_cached_free=5767168 nrt_free=109051904 cached_free=16802304 allocated=25643949568 reserved=25660751872 active=25643634176 total_hbm=25769803776 (function RecordOOMFailure)
+[rank1]:[W1016 03:51:01.898263135 NeuronLogging.h:103] Warning: [Neuron] [WARNING] [torch_neuronx/csrc/core/utils/ErrorRecovery.cpp:110] OOM recovery failed after shelves cleanup + cache drain op= neuron::alloc::lazy nrt_status=NRT_RESOURCE  (function log)
+[rank1]:[W1016 03:51:01.898278838 NeuronMetrics.cpp:625] Warning: Neuron OOM: requested_size=393216 | Peak memory stats (at allocated_bytes peak): allocated_bytes.current=25643949568 allocated_bytes.peak=25643949568 reserved_bytes.current=25660751872 reserved_bytes.peak=25660751872 active_bytes.current=25643634176 active_bytes.peak=25643634176 internal_fragmentation=315392 num_alloc_retries=5 num_ooms=5 num_alloc_deferred=0 num_alloc_drain_retry_ok=0 num_alloc_drain_retry_fail=0 (function RecordOOMFailure)
+[rank1]:[W1016 03:51:01.898628541 NeuronMetrics.cpp:668] Warning: Neuron OOM: Segment pool state: segments=540 free_chunks=7 total_free=125854208 largest_cached_free=5767168 nrt_free=109051904 cached_free=16802304 allocated=25643949568 reserved=25660751872 active=25643634176 total_hbm=25769803776 (function RecordOOMFailure)
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/distributed.py", line 112, in collective_phase
+[rank3]:     yield
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/application_base.py", line 312, in _phase
+[rank3]:     yield
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/application_base.py", line 193, in load
+[rank3]:     self.load_report = load_sharded_checkpoint(
+[rank3]:                        ~~~~~~~~~~~~~~~~~~~~~~~^
+[rank3]:         module, model_dir, device=self.device, dtype=self.dtype, rename=self.checkpoint_key
+[rank3]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:     )
+[rank3]:     ^
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/checkpoint.py", line 107, in load_sharded_checkpoint
+[rank3]:     report = load_checkpoint_into(
+[rank3]:         module,
+[rank3]:     ...<6 lines>...
+[rank3]:         rename=rename,
+[rank3]:     )
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/tpu/core/checkpoint.py", line 142, in load_checkpoint_into
+[rank3]:     target.copy_(tensor.to(dtype or target.dtype))
+[rank3]:     ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]: RuntimeError: NRT Execution error occurred on Neuron for operation=neuron::alloc::lazy
+[rank3]: error message="NRT EXECUTION FAILED: lazy::AllocBind: NRT_RESOURCE; no pending ops on stream to wait for (cannot defer), Failed to allocate resource"
+[rank3]: Note: Neuron errors are reported asynchronously. The Python traceback shows where the
+[rank3]: error was detected (synchronization point), not necessarily where the failing operation
+[rank3]: was dispatched. For synchronous error reporting, set NEURON_LAUNCH_BLOCKING=1.
+[rank3]: During handling of the above exception, another exception occurred:
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/tests/manual/check_neuron_qwen_preflight.py", line 570, in <module>
+[rank3]:     sys.exit(main())
+[rank3]:              ~~~~^^
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/tests/manual/check_neuron_qwen_preflight.py", line 249, in main
+[rank3]:     app.load(skip_warmup=True)
+[rank3]:     ~~~~~~~~^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/application_base.py", line 186, in load
+[rank3]:     with self._phase("load checkpoint"):
+[rank3]:          ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/ubuntu/.local/share/uv/python/cpython-3.14.8-linux-x86_64-gnu/lib/python3.14/contextlib.py", line 162, in __exit__
+[rank3]:     self.gen.throw(value)
+[rank3]:     ~~~~~~~~~~~~~~^^^^^^^
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/application_base.py", line 311, in _phase
+[rank3]:     with collective_phase(what, device=self.device):
+[rank3]:          ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/ubuntu/.local/share/uv/python/cpython-3.14.8-linux-x86_64-gnu/lib/python3.14/contextlib.py", line 162, in __exit__
+[rank3]:     self.gen.throw(value)
+[rank3]:     ~~~~~~~~~~~~~~^^^^^^^
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/distributed.py", line 114, in collective_phase
+[rank3]:     sync_status(False, device=device, what=what)
+[rank3]:     ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/distributed.py", line 95, in sync_status
+[rank3]:     failed = int(flag.cpu()[0])
+[rank3]:                  ~~~~~~~~^^
+[rank3]: RuntimeError: NRT Execution error occurred on Neuron for operation=neuron::alloc::lazy
+[rank3]: error message="NRT EXECUTION FAILED: lazy::AllocBind: NRT_RESOURCE; no pending ops on stream to wait for (cannot defer), Failed to allocate resource"
+[rank3]: Note: Neuron errors are reported asynchronously. The Python traceback shows where the
+[rank3]: error was detected (synchronization point), not necessarily where the failing operation
+[rank3]: was dispatched. For synchronous error reporting, set NEURON_LAUNCH_BLOCKING=1.
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/distributed.py", line 112, in collective_phase
+[rank2]:     yield
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/application_base.py", line 312, in _phase
+[rank2]:     yield
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/application_base.py", line 193, in load
+[rank2]:     self.load_report = load_sharded_checkpoint(
+[rank2]:                        ~~~~~~~~~~~~~~~~~~~~~~~^
+[rank2]:         module, model_dir, device=self.device, dtype=self.dtype, rename=self.checkpoint_key
+[rank2]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:     )
+[rank2]:     ^
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/checkpoint.py", line 107, in load_sharded_checkpoint
+[rank2]:     report = load_checkpoint_into(
+[rank2]:         module,
+[rank2]:     ...<6 lines>...
+[rank2]:         rename=rename,
+[rank2]:     )
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/tpu/core/checkpoint.py", line 142, in load_checkpoint_into
+[rank2]:     target.copy_(tensor.to(dtype or target.dtype))
+[rank2]:     ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]: RuntimeError: NRT Execution error occurred on Neuron for operation=neuron::alloc::lazy
+[rank2]: error message="NRT EXECUTION FAILED: lazy::AllocBind: NRT_RESOURCE; no pending ops on stream to wait for (cannot defer), Failed to allocate resource"
+[rank2]: Note: Neuron errors are reported asynchronously. The Python traceback shows where the
+[rank2]: error was detected (synchronization point), not necessarily where the failing operation
+[rank2]: was dispatched. For synchronous error reporting, set NEURON_LAUNCH_BLOCKING=1.
+[rank2]: During handling of the above exception, another exception occurred:
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/tests/manual/check_neuron_qwen_preflight.py", line 570, in <module>
+[rank2]:     sys.exit(main())
+[rank2]:              ~~~~^^
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/tests/manual/check_neuron_qwen_preflight.py", line 249, in main
+[rank2]:     app.load(skip_warmup=True)
+[rank2]:     ~~~~~~~~^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/application_base.py", line 186, in load
+[rank2]:     with self._phase("load checkpoint"):
+[rank2]:          ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/ubuntu/.local/share/uv/python/cpython-3.14.8-linux-x86_64-gnu/lib/python3.14/contextlib.py", line 162, in __exit__
+[rank2]:     self.gen.throw(value)
+[rank2]:     ~~~~~~~~~~~~~~^^^^^^^
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/application_base.py", line 311, in _phase
+[rank2]:     with collective_phase(what, device=self.device):
+[rank2]:          ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/ubuntu/.local/share/uv/python/cpython-3.14.8-linux-x86_64-gnu/lib/python3.14/contextlib.py", line 162, in __exit__
+[rank2]:     self.gen.throw(value)
+[rank2]:     ~~~~~~~~~~~~~~^^^^^^^
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/distributed.py", line 114, in collective_phase
+[rank2]:     sync_status(False, device=device, what=what)
+[rank2]:     ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/difflet/backends/neuron/core/distributed.py", line 95, in sync_status
+[rank2]:     failed = int(flag.cpu()[0])
+[rank2]:                  ~~~~~~~~^^
+[rank2]: RuntimeError: NRT Execution error occurred on Neuron for operation=neuron::alloc::lazy
+[rank2]: error message="NRT EXECUTION FAILED: lazy::AllocBind: NRT_RESOURCE; no pending ops on stream to wait for (cannot defer), Failed to allocate resource"
+[rank2]: Note: Neuron errors are reported asynchronously. The Python traceback shows where the
+[rank2]: error was detected (synchronization point), not necessarily where the failing operation
+[rank2]: was dispatched. For synchronous error reporting, set NEURON_LAUNCH_BLOCKING=1.
+W1016 03:51:02.606000 116277 torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 116289 closing signal SIGTERM
+W1016 03:51:02.607000 116277 torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 116290 closing signal SIGTERM
+E1016 03:51:02.921000 116277 torch/distributed/elastic/multiprocessing/api.py:1002] failed (exitcode: 1) local_rank: 2 (pid: 116291) of binary: /home/ubuntu/workspace/native_venv/bin/python
+Traceback (most recent call last):
+  File "/home/ubuntu/workspace/native_venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 380, in wrapper
+    return f(*args, **kwargs)
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/run.py", line 1138, in main
+    run(args)
+    ~~~^^^^^^
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/run.py", line 1129, in run
+    elastic_launch(
+    ~~~~~~~~~~~~~~~
+        config=config,
+        ~~~~~~~~~~~~~~
+        entrypoint=cmd,
+        ~~~~~~~~~~~~~~~
+    )(*cmd_args)
+    ~^^^^^^^^^^^
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/launcher/api.py", line 197, in __call__
+    return launch_agent(
+        self._config,
+    ...<2 lines>...
+        health_check_server=self._health_check_server,
+    )
+  File "/home/ubuntu/workspace/native_venv/lib/python3.14/site-packages/torch/distributed/launcher/api.py", line 386, in launch_agent
+    raise ChildFailedError(
+    ...<2 lines>...
+    )
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/home/ubuntu/Difflet/.claude/worktrees/qwen-image-neuron/tests/manual/check_neuron_qwen_preflight.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-16_03:51:02
+  host      : ip-172-31-36-18.ap-southeast-4.compute.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 116292) 
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-16_03:51:02
+  host      : ip-172-31-36-18.ap-southeast-4.compute.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : -15 (pid: 116289)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 116289
+[3]:
+  time      : 2026-10-16_03:51:02
+  host      : ip-172-31-36-18.ap-southeast-4.compute.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : -15 (pid: 116290)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 116290
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-16_03:51:02
+  host      : ip-172-31-36-18.ap-southeast-4.compute.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 116291) 
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+EXIT rc=1 launch_wall_s=996.860618633 2026-10-16T03:51:03Z

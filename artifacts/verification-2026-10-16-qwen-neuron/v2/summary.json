@@ -1,0 +1,4798 @@
+{
+  "host": "trn2.3xlarge, 4 logical NeuronCores (config 2)",
+  "cache_root": "/home/ubuntu/.cache/difflet-neuron-qwen (shared with V1)",
+  "shape": "1024x1024 (image_seq_len 4096), text_seq_len 1024, bf16, compile mode",
+  "runs": {
+    "l4-tp2cp2-gather_kv.try1-nohook": {
+      "label": "4 layers tp2cp2 gather_kv, cold first launch (before the cp_scatter check was added)",
+      "cfg": {
+        "num_layers": 4,
+        "tp": 2,
+        "cp": 2,
+        "cp_mode": "gather_kv",
+        "heads_per_rank": 12
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "gather_kv_query_len": 3072,
+        "gather_kv_key_len": 5120
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 af5117bacb66)",
+      "cp_scatter_detail": null,
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.03937047267981,
+          "ratio_l2_vs_control": 1.03944728588462,
+          "cosine": 0.9999670644688226,
+          "rel_l1": 0.012785155665466261,
+          "rel_l2": 0.014166465184533497,
+          "rel_max": 0.0323439972541347,
+          "err_cos": 0.9563647251103554,
+          "control_cosine": 0.9999691302723285,
+          "control_rel_l1": 0.012300864803771345,
+          "control_rel_l2": 0.013628844268400922
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.9581204267882676,
+          "ratio_l2_vs_control": 0.9602473449580653,
+          "cosine": 0.9999906061204016,
+          "rel_l1": 0.004335960991744983,
+          "rel_l2": 0.004422163223627385,
+          "rel_max": 0.006564784193880746,
+          "err_cos": 0.531212639969136,
+          "control_cosine": 0.9999899140317982,
+          "control_rel_l1": 0.0045254864320966775,
+          "control_rel_l2": 0.00460523348160937
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.18,
+        "load checkpoint": 0.46,
+        "eval": 0.0,
+        "compile": 0.14,
+        "warmup forward": 27.14
+      },
+      "prepare_runtime_s_rank_max": 19.04,
+      "adapter_forward_ms_per_rank": [
+        [
+          38.4,
+          39.0
+        ],
+        [
+          42.0,
+          38.8
+        ],
+        [
+          39.1,
+          39.1
+        ],
+        [
+          41.1,
+          39.3
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        35.06,
+        35.06,
+        35.1,
+        35.05
+      ],
+      "bench_p10_p90_ms_rank0": [
+        34.35,
+        36.15
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        1.51,
+        1.515,
+        1.51,
+        1.51
+      ],
+      "weights_gib_per_rank": [
+        1.343,
+        1.343,
+        1.343,
+        1.343
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.51,
+        1.42,
+        1.47,
+        1.45
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 17,
+          "PersistentHits": 30,
+          "InMemoryHits": 706
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 51,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 2,
+          "PersistentHits": 50,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 2,
+          "PersistentHits": 50,
+          "InMemoryHits": 709
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 17,
+          "PersistentHits": 28,
+          "InMemoryHits": 12
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 49,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 2,
+          "PersistentHits": 48,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 2,
+          "PersistentHits": 48,
+          "InMemoryHits": 15
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        }
+      ],
+      "new_neffs_in_cache": 22,
+      "block_neffs_per_rank": [
+        [
+          [
+            "faa1a546aa0a",
+            3129822,
+            16.7
+          ]
+        ],
+        [
+          [
+            "faa1a546aa0a",
+            3129822,
+            0.0
+          ]
+        ],
+        [
+          [
+            "faa1a546aa0a",
+            3129822,
+            0.0
+          ]
+        ],
+        [
+          [
+            "faa1a546aa0a",
+            3129822,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 4,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "af5117bacb66cdfa963dd173aacd19fc384736e06e8ce1f4485f9f47f2352f69",
+        "500": "a34064cef0064d7e5606b1a9b184a75aa036b5583d5ce5aa56dfaddac773e83c"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      }
+    },
+    "l4-tp2cp2-gather_kv": {
+      "label": "4 layers tp2cp2 gather_kv, warm relaunch with the cp_scatter check",
+      "cfg": {
+        "num_layers": 4,
+        "tp": 2,
+        "cp": 2,
+        "cp_mode": "gather_kv",
+        "heads_per_rank": 12
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "gather_kv_query_len": 3072,
+        "gather_kv_key_len": 5120
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 af5117bacb66)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [2048, 2048] (expected 4096/cp 2 = 2048; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.03937047267981,
+          "ratio_l2_vs_control": 1.03944728588462,
+          "cosine": 0.9999670644688226,
+          "rel_l1": 0.012785155665466261,
+          "rel_l2": 0.014166465184533497,
+          "rel_max": 0.0323439972541347,
+          "err_cos": 0.9563647251103554,
+          "control_cosine": 0.9999691302723285,
+          "control_rel_l1": 0.012300864803771345,
+          "control_rel_l2": 0.013628844268400922
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.9581204267882676,
+          "ratio_l2_vs_control": 0.9602473449580653,
+          "cosine": 0.9999906061204016,
+          "rel_l1": 0.004335960991744983,
+          "rel_l2": 0.004422163223627385,
+          "rel_max": 0.006564784193880746,
+          "err_cos": 0.531212639969136,
+          "control_cosine": 0.9999899140317982,
+          "control_rel_l1": 0.0045254864320966775,
+          "control_rel_l2": 0.00460523348160937
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.18,
+        "load checkpoint": 0.49,
+        "eval": 0.0,
+        "compile": 0.16,
+        "warmup forward": 9.24
+      },
+      "prepare_runtime_s_rank_max": 8.24,
+      "adapter_forward_ms_per_rank": [
+        [
+          39.1,
+          40.2
+        ],
+        [
+          39.2,
+          40.2
+        ],
+        [
+          42.0,
+          40.1
+        ],
+        [
+          41.8,
+          36.5
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        34.69,
+        34.7,
+        34.7,
+        34.71
+      ],
+      "bench_p10_p90_ms_rank0": [
+        34.38,
+        35.26
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        1.51,
+        1.51,
+        1.51,
+        1.51
+      ],
+      "weights_gib_per_rank": [
+        1.343,
+        1.343,
+        1.343,
+        1.343
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.45,
+        1.43,
+        1.41,
+        1.47
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 47,
+          "InMemoryHits": 706
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 709
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 45,
+          "InMemoryHits": 12
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 15
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        }
+      ],
+      "new_neffs_in_cache": 0,
+      "block_neffs_per_rank": [
+        [
+          [
+            "faa1a546aa0a",
+            3129822,
+            0.0
+          ]
+        ],
+        [
+          [
+            "faa1a546aa0a",
+            3129822,
+            0.0
+          ]
+        ],
+        [
+          [
+            "faa1a546aa0a",
+            3129822,
+            0.0
+          ]
+        ],
+        [
+          [
+            "faa1a546aa0a",
+            3129822,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 4,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "af5117bacb66cdfa963dd173aacd19fc384736e06e8ce1f4485f9f47f2352f69",
+        "500": "a34064cef0064d7e5606b1a9b184a75aa036b5583d5ce5aa56dfaddac773e83c"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      }
+    },
+    "l4-tp2cp2-ulysses": {
+      "label": "4 layers tp2cp2 ulysses (cold block NEFF)",
+      "cfg": {
+        "num_layers": 4,
+        "tp": 2,
+        "cp": 2,
+        "cp_mode": "ulysses",
+        "heads_per_rank": 12
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5120
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 b72e6639a2dc)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [2048, 2048] (expected 4096/cp 2 = 2048; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0394376772842153,
+          "ratio_l2_vs_control": 1.0394705802786925,
+          "cosine": 0.9999670662523583,
+          "rel_l1": 0.012785982340219241,
+          "rel_l2": 0.01416678266020264,
+          "rel_max": 0.0323439972541347,
+          "err_cos": 0.956424279687761,
+          "control_cosine": 0.9999691302723285,
+          "control_rel_l1": 0.012300864803771345,
+          "control_rel_l2": 0.013628844268400922
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.9588913898647822,
+          "ratio_l2_vs_control": 0.9605609447380187,
+          "cosine": 0.999990597600414,
+          "rel_l1": 0.004339449974687397,
+          "rel_l2": 0.004423607423833851,
+          "rel_max": 0.006564784193880746,
+          "err_cos": 0.5319828884084284,
+          "control_cosine": 0.9999899140317982,
+          "control_rel_l1": 0.0045254864320966775,
+          "control_rel_l2": 0.00460523348160937
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.17,
+        "load checkpoint": 0.47,
+        "eval": 0.0,
+        "compile": 0.16,
+        "warmup forward": 28.06
+      },
+      "prepare_runtime_s_rank_max": 17.17,
+      "adapter_forward_ms_per_rank": [
+        [
+          38.7,
+          37.5
+        ],
+        [
+          36.1,
+          37.8
+        ],
+        [
+          38.7,
+          34.5
+        ],
+        [
+          36.1,
+          37.5
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        32.88,
+        32.83,
+        32.85,
+        32.93
+      ],
+      "bench_p10_p90_ms_rank0": [
+        32.4,
+        33.42
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        1.51,
+        1.51,
+        1.51,
+        1.51
+      ],
+      "weights_gib_per_rank": [
+        1.343,
+        1.343,
+        1.343,
+        1.343
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.44,
+        1.53,
+        1.5,
+        1.49
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 47,
+          "InMemoryHits": 706
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 51,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 51,
+          "InMemoryHits": 709
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 45,
+          "InMemoryHits": 12
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 49,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 49,
+          "InMemoryHits": 15
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        }
+      ],
+      "new_neffs_in_cache": 2,
+      "block_neffs_per_rank": [
+        [
+          [
+            "702b26e1e07f",
+            2895942,
+            0.0
+          ]
+        ],
+        [
+          [
+            "702b26e1e07f",
+            2895942,
+            19.6
+          ]
+        ],
+        [
+          [
+            "9b9c0cfaa045",
+            2894050,
+            0.0
+          ]
+        ],
+        [
+          [
+            "9b9c0cfaa045",
+            2894050,
+            19.8
+          ]
+        ]
+      ],
+      "compiled_blocks": 4,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "b72e6639a2dcc0e87a7d9152d7e685afa63eb7c0a00080f19c3e348d7fe02613",
+        "500": "fd18bcf8eda8bd613832f67a22f0f5f67b8ad4bbb2a0a87af2e23448d44b3d48"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      }
+    },
+    "l4-tp2cp2-ring": {
+      "label": "4 layers tp2cp2 ring (cold block NEFF)",
+      "cfg": {
+        "num_layers": 4,
+        "tp": 2,
+        "cp": 2,
+        "cp_mode": "ring",
+        "heads_per_rank": 12
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ring_query_len": 3072,
+        "ring_query_len_mod_128": 0,
+        "ring_query_padded_to": 3072,
+        "ring_key_blocks": [
+          1024,
+          2048,
+          2048
+        ]
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 4dc84d4b55c3)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [2048, 2048] (expected 4096/cp 2 = 2048; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.038820946940531,
+          "ratio_l2_vs_control": 1.0387636668952347,
+          "cosine": 0.9999670799603073,
+          "rel_l1": 0.012778396023641196,
+          "rel_l2": 0.014157148247788244,
+          "rel_max": 0.0323439972541347,
+          "err_cos": 0.9563245981726184,
+          "control_cosine": 0.9999691302723285,
+          "control_rel_l1": 0.012300864803771345,
+          "control_rel_l2": 0.013628844268400922
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.9565477727516982,
+          "ratio_l2_vs_control": 0.9581144538725016,
+          "cosine": 0.9999906363349569,
+          "rel_l1": 0.004328843967240106,
+          "rel_l2": 0.00441234076218752,
+          "rel_max": 0.006981586338291879,
+          "err_cos": 0.5309604950802032,
+          "control_cosine": 0.9999899140317982,
+          "control_rel_l1": 0.0045254864320966775,
+          "control_rel_l2": 0.00460523348160937
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.17,
+        "load checkpoint": 0.47,
+        "eval": 0.0,
+        "compile": 0.15,
+        "warmup forward": 31.98
+      },
+      "prepare_runtime_s_rank_max": 18.75,
+      "adapter_forward_ms_per_rank": [
+        [
+          48.0,
+          45.7
+        ],
+        [
+          48.0,
+          45.7
+        ],
+        [
+          47.9,
+          45.8
+        ],
+        [
+          48.0,
+          44.9
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        40.91,
+        41.0,
+        41.02,
+        40.97
+      ],
+      "bench_p10_p90_ms_rank0": [
+        40.8,
+        42.24
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        1.51,
+        1.515,
+        1.51,
+        1.51
+      ],
+      "weights_gib_per_rank": [
+        1.343,
+        1.343,
+        1.343,
+        1.343
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.55,
+        1.53,
+        1.5,
+        1.48
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 46,
+          "InMemoryHits": 706
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 51,
+          "InMemoryHits": 709
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 44,
+          "InMemoryHits": 12
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 49,
+          "InMemoryHits": 15
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        }
+      ],
+      "new_neffs_in_cache": 2,
+      "block_neffs_per_rank": [
+        [
+          [
+            "40b84c825c2d",
+            4073467,
+            23.8
+          ]
+        ],
+        [
+          [
+            "40b84c825c2d",
+            4073467,
+            0.0
+          ]
+        ],
+        [
+          [
+            "206b7f20df5e",
+            4072912,
+            0.0
+          ]
+        ],
+        [
+          [
+            "206b7f20df5e",
+            4072912,
+            23.7
+          ]
+        ]
+      ],
+      "compiled_blocks": 4,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "4dc84d4b55c383bf553ff1613a11232b8bcc1b2090d345c32a935b5ed39f9ed4",
+        "500": "6617f363411941a82c95525e55d957024c65ac8a84b82edce19e27b9477e1ee5"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      }
+    },
+    "l4-tp1cp4-ulysses": {
+      "label": "4 layers tp1cp4 ulysses (cold block NEFF)",
+      "cfg": {
+        "num_layers": 4,
+        "tp": 1,
+        "cp": 4,
+        "cp_mode": "ulysses",
+        "heads_per_rank": 24
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1024,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5120
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 7cf6cc600ab0)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [1024, 1024] (expected 4096/cp 4 = 1024; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0333240161259625,
+          "ratio_l2_vs_control": 1.0357612463979153,
+          "cosine": 0.9999679124237234,
+          "rel_l1": 0.012710779020855505,
+          "rel_l2": 0.014116228726402023,
+          "rel_max": 0.03617474121902952,
+          "err_cos": 0.959580900405226,
+          "control_cosine": 0.9999691302723285,
+          "control_rel_l1": 0.012300864803771345,
+          "control_rel_l2": 0.013628844268400922
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.9104626770722185,
+          "ratio_l2_vs_control": 0.9148123093184959,
+          "cosine": 0.9999914963588085,
+          "rel_l1": 0.0041202864920207435,
+          "rel_l2": 0.004212924276261925,
+          "rel_max": 0.0054341517191895125,
+          "err_cos": 0.5274215093528979,
+          "control_cosine": 0.9999899140317982,
+          "control_rel_l1": 0.0045254864320966775,
+          "control_rel_l2": 0.00460523348160937
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.16,
+        "load checkpoint": 0.83,
+        "eval": 0.0,
+        "compile": 0.14,
+        "warmup forward": 42.03
+      },
+      "prepare_runtime_s_rank_max": 9.15,
+      "adapter_forward_ms_per_rank": [
+        [
+          36.6,
+          37.9
+        ],
+        [
+          36.6,
+          37.7
+        ],
+        [
+          36.5,
+          38.0
+        ],
+        [
+          36.4,
+          38.0
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        31.74,
+        31.73,
+        31.73,
+        31.72
+      ],
+      "bench_p10_p90_ms_rank0": [
+        31.61,
+        31.99
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        2.733,
+        2.733,
+        2.733,
+        2.733
+      ],
+      "weights_gib_per_rank": [
+        2.612,
+        2.612,
+        2.612,
+        2.612
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.2,
+        1.19,
+        1.21,
+        1.19
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 7,
+          "PersistentHits": 32,
+          "InMemoryHits": 570
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 43,
+          "InMemoryHits": 573
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 43,
+          "InMemoryHits": 573
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 43,
+          "InMemoryHits": 573
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 7,
+          "PersistentHits": 30,
+          "InMemoryHits": 11
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 41,
+          "InMemoryHits": 14
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 41,
+          "InMemoryHits": 14
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 41,
+          "InMemoryHits": 14
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        }
+      ],
+      "new_neffs_in_cache": 10,
+      "block_neffs_per_rank": [
+        [
+          [
+            "d15ba1d84cb4",
+            3624095,
+            32.9
+          ]
+        ],
+        [
+          [
+            "a786ea956035",
+            3644609,
+            32.6
+          ]
+        ],
+        [
+          [
+            "79b573b1fe84",
+            3733957,
+            32.9
+          ]
+        ],
+        [
+          [
+            "15399bafd5d1",
+            3740682,
+            33.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 4,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "7cf6cc600ab04a6e3ee9f477aa57e17b0c0ef06ff3c478b95b5c2a61c335983f",
+        "500": "4d391a0bfb23ea673559a8778dcd4e6f8e818841f9b6e8b716b3282c53986180"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      }
+    },
+    "l4-tp1cp4-ring": {
+      "label": "4 layers tp1cp4 ring (cold block NEFF)",
+      "cfg": {
+        "num_layers": 4,
+        "tp": 1,
+        "cp": 4,
+        "cp_mode": "ring",
+        "heads_per_rank": 24
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1024,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "ring_query_len": 2048,
+        "ring_query_len_mod_128": 0,
+        "ring_query_padded_to": 2048,
+        "ring_key_blocks": [
+          1024,
+          1024,
+          1024,
+          1024,
+          1024
+        ]
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 6ecba0e41138)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [1024, 1024] (expected 4096/cp 4 = 1024; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0325831586067298,
+          "ratio_l2_vs_control": 1.0349981007408044,
+          "cosine": 0.9999679067188552,
+          "rel_l1": 0.012701665832672567,
+          "rel_l2": 0.014105827933087154,
+          "rel_max": 0.0323439972541347,
+          "err_cos": 0.9593594426090903,
+          "control_cosine": 0.9999691302723285,
+          "control_rel_l1": 0.012300864803771345,
+          "control_rel_l2": 0.013628844268400922
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.9096325059928991,
+          "ratio_l2_vs_control": 0.9137841208206785,
+          "cosine": 0.9999915096100722,
+          "rel_l1": 0.004116529564064965,
+          "rel_l2": 0.0042081892281663705,
+          "rel_max": 0.005725002681476601,
+          "err_cos": 0.5262934174472778,
+          "control_cosine": 0.9999899140317982,
+          "control_rel_l1": 0.0045254864320966775,
+          "control_rel_l2": 0.00460523348160937
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.17,
+        "load checkpoint": 0.83,
+        "eval": 0.0,
+        "compile": 0.15,
+        "warmup forward": 59.41
+      },
+      "prepare_runtime_s_rank_max": 17.47,
+      "adapter_forward_ms_per_rank": [
+        [
+          65.9,
+          65.7
+        ],
+        [
+          65.8,
+          65.9
+        ],
+        [
+          65.8,
+          65.8
+        ],
+        [
+          65.9,
+          65.7
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        60.09,
+        60.06,
+        60.08,
+        60.14
+      ],
+      "bench_p10_p90_ms_rank0": [
+        60.06,
+        60.35
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        2.733,
+        2.733,
+        2.733,
+        2.733
+      ],
+      "weights_gib_per_rank": [
+        2.612,
+        2.612,
+        2.612,
+        2.612
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.36,
+        1.35,
+        1.32,
+        1.38
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 38,
+          "InMemoryHits": 570
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 43,
+          "InMemoryHits": 573
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 43,
+          "InMemoryHits": 573
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 43,
+          "InMemoryHits": 573
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 36,
+          "InMemoryHits": 11
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 41,
+          "InMemoryHits": 14
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 41,
+          "InMemoryHits": 14
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 41,
+          "InMemoryHits": 14
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        }
+      ],
+      "new_neffs_in_cache": 4,
+      "block_neffs_per_rank": [
+        [
+          [
+            "d6059d52e077",
+            6209824,
+            49.3
+          ]
+        ],
+        [
+          [
+            "f63c3442e302",
+            6099717,
+            44.6
+          ]
+        ],
+        [
+          [
+            "cdb6e7d3ca93",
+            6083394,
+            47.7
+          ]
+        ],
+        [
+          [
+            "8346a5729b61",
+            6315971,
+            53.1
+          ]
+        ]
+      ],
+      "compiled_blocks": 4,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "6ecba0e411381d22c82c08108f4c1b53688c18bcfa68590e80676033bfeb8935",
+        "500": "1bc57bb3d42cad64c1daf99bd2e92a883d8493f13011655324c135f85b19a5ab"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      }
+    },
+    "l4-tp1cp4-gather_kv": {
+      "label": "4 layers tp1cp4 gather_kv (cold block NEFF)",
+      "cfg": {
+        "num_layers": 4,
+        "tp": 1,
+        "cp": 4,
+        "cp_mode": "gather_kv",
+        "heads_per_rank": 24
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1024,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "gather_kv_query_len": 2048,
+        "gather_kv_key_len": 5120
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 617576bc49d5)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [1024, 1024] (expected 4096/cp 4 = 1024; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.033531606145892,
+          "ratio_l2_vs_control": 1.0359979683795149,
+          "cosine": 0.9999678952767199,
+          "rel_l1": 0.01271333255762527,
+          "rel_l2": 0.014119454973424152,
+          "rel_max": 0.03617474121902952,
+          "err_cos": 0.9595201588569788,
+          "control_cosine": 0.9999691302723285,
+          "control_rel_l1": 0.012300864803771345,
+          "control_rel_l2": 0.013628844268400922
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.9106922294945011,
+          "ratio_l2_vs_control": 0.914856532551962,
+          "cosine": 0.9999914904428541,
+          "rel_l1": 0.004121325328393238,
+          "rel_l2": 0.0042131279345773475,
+          "rel_max": 0.0054341517191895125,
+          "err_cos": 0.5273634361299708,
+          "control_cosine": 0.9999899140317982,
+          "control_rel_l1": 0.0045254864320966775,
+          "control_rel_l2": 0.00460523348160937
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.17,
+        "load checkpoint": 0.84,
+        "eval": 0.0,
+        "compile": 0.14,
+        "warmup forward": 35.5
+      },
+      "prepare_runtime_s_rank_max": 17.78,
+      "adapter_forward_ms_per_rank": [
+        [
+          47.0,
+          46.3
+        ],
+        [
+          47.0,
+          46.2
+        ],
+        [
+          47.0,
+          46.3
+        ],
+        [
+          47.0,
+          46.1
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        40.62,
+        40.62,
+        40.61,
+        40.59
+      ],
+      "bench_p10_p90_ms_rank0": [
+        40.44,
+        41.01
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        2.733,
+        2.733,
+        2.733,
+        2.733
+      ],
+      "weights_gib_per_rank": [
+        2.612,
+        2.612,
+        2.612,
+        2.612
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.31,
+        1.31,
+        1.31,
+        1.26
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 38,
+          "InMemoryHits": 570
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 573
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 573
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 573
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 36,
+          "InMemoryHits": 11
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 42,
+          "InMemoryHits": 14
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 42,
+          "InMemoryHits": 14
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 42,
+          "InMemoryHits": 14
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        }
+      ],
+      "new_neffs_in_cache": 1,
+      "block_neffs_per_rank": [
+        [
+          [
+            "242efaca9490",
+            4616716,
+            23.6
+          ]
+        ],
+        [
+          [
+            "242efaca9490",
+            4616716,
+            0.0
+          ]
+        ],
+        [
+          [
+            "242efaca9490",
+            4616716,
+            0.0
+          ]
+        ],
+        [
+          [
+            "242efaca9490",
+            4616716,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 4,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "617576bc49d5a86a10c07fa42190d3e1d0131d49dcb8a7563886ddbe083daebb",
+        "500": "0c57b101ebe190fdd410ba7325a53473ed76ef35a45021b611deaac7e7ad1807"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      }
+    },
+    "l60-tp2cp2-ulysses": {
+      "label": "60 layers tp2cp2 ulysses (block NEFF warm from the 4-layer run)",
+      "cfg": {
+        "num_layers": 60,
+        "tp": 2,
+        "cp": 2,
+        "cp_mode": "ulysses",
+        "heads_per_rank": 12
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5120
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 88e68f888776)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [2048, 2048] (expected 4096/cp 2 = 2048; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0093771829363571,
+          "ratio_l2_vs_control": 1.0104798867641445,
+          "cosine": 0.9998877453459032,
+          "rel_l1": 0.024799130498779517,
+          "rel_l2": 0.02495128360525214,
+          "rel_max": 0.025579727042105368,
+          "err_cos": 0.9665340491811821,
+          "control_cosine": 0.9998644933181546,
+          "control_rel_l1": 0.02456874488349034,
+          "control_rel_l2": 0.024692508907973944
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.8746785790221936,
+          "ratio_l2_vs_control": 0.8762675989509187,
+          "cosine": 0.9999329445648331,
+          "rel_l1": 0.014352497896053258,
+          "rel_l2": 0.014509837651832601,
+          "rel_max": 0.02040577827933229,
+          "err_cos": 0.8668161172749513,
+          "control_cosine": 0.9999032413067195,
+          "control_rel_l1": 0.016408882348642823,
+          "control_rel_l2": 0.01655868329401202
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.3,
+        "load checkpoint": 6.64,
+        "eval": 0.02,
+        "compile": 0.15,
+        "warmup forward": 8.48
+      },
+      "prepare_runtime_s_rank_max": 20.04,
+      "adapter_forward_ms_per_rank": [
+        [
+          420.6,
+          417.5
+        ],
+        [
+          422.8,
+          420.8
+        ],
+        [
+          420.2,
+          420.8
+        ],
+        [
+          422.9,
+          420.7
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        416.16,
+        416.19,
+        416.25,
+        416.26
+      ],
+      "bench_p10_p90_ms_rank0": [
+        415.53,
+        416.91
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        19.748,
+        19.748,
+        19.748,
+        19.748
+      ],
+      "weights_gib_per_rank": [
+        19.504,
+        19.504,
+        19.504,
+        19.504
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.47,
+        1.51,
+        1.47,
+        1.52
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 47,
+          "InMemoryHits": 1602
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 1605
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 1605
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 1605
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 45,
+          "InMemoryHits": 68
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 71
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 71
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 71
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1530
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1530
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1530
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1530
+        }
+      ],
+      "new_neffs_in_cache": 0,
+      "block_neffs_per_rank": [
+        [
+          [
+            "702b26e1e07f",
+            2895942,
+            0.0
+          ]
+        ],
+        [
+          [
+            "702b26e1e07f",
+            2895942,
+            0.0
+          ]
+        ],
+        [
+          [
+            "9b9c0cfaa045",
+            2894050,
+            0.0
+          ]
+        ],
+        [
+          [
+            "9b9c0cfaa045",
+            2894050,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 60,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "88e68f888776b99af30446b3db6263cbc464d1c4d32357c9f13083e65d74e4d3",
+        "500": "4ec2b287374759194a3a206fb5ef2e6f972f06ee62b3f02699c0448c66e91fa0"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0
+      }
+    },
+    "l60-tp2cp2-gather_kv": {
+      "label": "60 layers tp2cp2 gather_kv, vs V1 TP4 compile and vs ulysses",
+      "cfg": {
+        "num_layers": 60,
+        "tp": 2,
+        "cp": 2,
+        "cp_mode": "gather_kv",
+        "heads_per_rank": 12
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "gather_kv_query_len": 3072,
+        "gather_kv_key_len": 5120
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "vs_tp4_t1000": true,
+        "vs_tp4_t500": true,
+        "vs_ulysses_t1000": true,
+        "vs_ulysses_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 d93ff2497473)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [2048, 2048] (expected 4096/cp 2 = 2048; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0443281438911325,
+          "ratio_l2_vs_control": 1.0451499537385658,
+          "cosine": 0.9998712938051786,
+          "rel_l1": 0.025657831741910223,
+          "rel_l2": 0.025807374542858093,
+          "rel_max": 0.025579727042105368,
+          "err_cos": 0.969714306401833,
+          "control_cosine": 0.9998644933181546,
+          "control_rel_l1": 0.02456874488349034,
+          "control_rel_l2": 0.024692508907973944,
+          "vs_tp4": {
+            "cosine": 0.999990961744578,
+            "rel_l1": 0.003556751431584213,
+            "rel_l2": 0.004253199967136775,
+            "rel_max": 0.006060606060606061
+          },
+          "vs_ulysses": {
+            "cosine": 0.9999902821241318,
+            "rel_l1": 0.0037489318613679276,
+            "rel_l2": 0.004415743045891716,
+            "rel_max": 0.006060606060606061
+          }
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.8883482050241449,
+          "ratio_l2_vs_control": 0.8904369924285496,
+          "cosine": 0.9999292290476697,
+          "rel_l1": 0.014576801180869226,
+          "rel_l2": 0.014744464150896933,
+          "rel_max": 0.02040577827933229,
+          "err_cos": 0.8705092064309887,
+          "control_cosine": 0.9999032413067195,
+          "control_rel_l1": 0.016408882348642823,
+          "control_rel_l2": 0.01655868329401202,
+          "vs_tp4": {
+            "cosine": 0.9999904228952827,
+            "rel_l1": 0.003707651275503753,
+            "rel_l2": 0.004378451399816133,
+            "rel_max": 0.00589622641509434
+          },
+          "vs_ulysses": {
+            "cosine": 0.9999933195891437,
+            "rel_l1": 0.002876265991629281,
+            "rel_l2": 0.003655356263015157,
+            "rel_max": 0.0047169811320754715
+          }
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.32,
+        "load checkpoint": 6.62,
+        "eval": 0.02,
+        "compile": 0.16,
+        "warmup forward": 9.57
+      },
+      "prepare_runtime_s_rank_max": 17.6,
+      "adapter_forward_ms_per_rank": [
+        [
+          452.1,
+          452.6
+        ],
+        [
+          452.8,
+          448.4
+        ],
+        [
+          452.2,
+          452.7
+        ],
+        [
+          452.6,
+          452.8
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        445.89,
+        445.89,
+        445.9,
+        445.88
+      ],
+      "bench_p10_p90_ms_rank0": [
+        445.06,
+        447.14
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        19.748,
+        19.748,
+        19.748,
+        19.748
+      ],
+      "weights_gib_per_rank": [
+        19.504,
+        19.504,
+        19.504,
+        19.504
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.51,
+        1.49,
+        1.38,
+        1.47
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 47,
+          "InMemoryHits": 1602
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 1605
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 1605
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 1605
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 45,
+          "InMemoryHits": 68
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 71
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 71
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 71
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1530
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1530
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1530
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1530
+        }
+      ],
+      "new_neffs_in_cache": 0,
+      "block_neffs_per_rank": [
+        [
+          [
+            "faa1a546aa0a",
+            3129822,
+            0.0
+          ]
+        ],
+        [
+          [
+            "faa1a546aa0a",
+            3129822,
+            0.0
+          ]
+        ],
+        [
+          [
+            "faa1a546aa0a",
+            3129822,
+            0.0
+          ]
+        ],
+        [
+          [
+            "faa1a546aa0a",
+            3129822,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 60,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "d93ff2497473baef7f37cc06c8b88ec1644cb7c8c28a036d2162e8e363e92e8b",
+        "500": "dace01a417d3cb6887b27afd8a145e28e5f72dcbe1f2c1c3eac41a1c240c94ed"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0
+      }
+    },
+    "l60-tp2cp2-ring": {
+      "label": "60 layers tp2cp2 ring, vs V1 TP4 compile and vs ulysses",
+      "cfg": {
+        "num_layers": 60,
+        "tp": 2,
+        "cp": 2,
+        "cp_mode": "ring",
+        "heads_per_rank": 12
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ring_query_len": 3072,
+        "ring_query_len_mod_128": 0,
+        "ring_query_padded_to": 3072,
+        "ring_key_blocks": [
+          1024,
+          2048,
+          2048
+        ]
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "vs_tp4_t1000": true,
+        "vs_tp4_t500": true,
+        "vs_ulysses_t1000": true,
+        "vs_ulysses_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 18fe47db4479)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [2048, 2048] (expected 4096/cp 2 = 2048; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0067835460680563,
+          "ratio_l2_vs_control": 1.008666488742062,
+          "cosine": 0.9998896783631488,
+          "rel_l1": 0.02473540809624182,
+          "rel_l2": 0.02490650625843817,
+          "rel_max": 0.026406135711373464,
+          "err_cos": 0.967738719309774,
+          "control_cosine": 0.9998644933181546,
+          "control_rel_l1": 0.02456874488349034,
+          "control_rel_l2": 0.024692508907973944,
+          "vs_tp4": {
+            "cosine": 0.9999900718145036,
+            "rel_l1": 0.0037846396678605006,
+            "rel_l2": 0.00446707546928936,
+            "rel_max": 0.006060606060606061
+          },
+          "vs_ulysses": {
+            "cosine": 0.9999934488093762,
+            "rel_l1": 0.002806248090184956,
+            "rel_l2": 0.0036200406155399763,
+            "rel_max": 0.006060606060606061
+          }
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.8716750834388238,
+          "ratio_l2_vs_control": 0.8732164439781112,
+          "cosine": 0.9999331656221782,
+          "rel_l1": 0.014303213890391075,
+          "rel_l2": 0.014459314542956932,
+          "rel_max": 0.018029108116950913,
+          "err_cos": 0.8651021900518896,
+          "control_cosine": 0.9999032413067195,
+          "control_rel_l1": 0.016408882348642823,
+          "control_rel_l2": 0.01655868329401202,
+          "vs_tp4": {
+            "cosine": 0.9999900675196616,
+            "rel_l1": 0.0037913832855257334,
+            "rel_l2": 0.00445955746879307,
+            "rel_max": 0.00589622641509434
+          },
+          "vs_ulysses": {
+            "cosine": 0.9999926550907088,
+            "rel_l1": 0.0030698377715732863,
+            "rel_l2": 0.003833056242605576,
+            "rel_max": 0.0047169811320754715
+          }
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.31,
+        "load checkpoint": 6.61,
+        "eval": 0.01,
+        "compile": 0.15,
+        "warmup forward": 8.48
+      },
+      "prepare_runtime_s_rank_max": 20.41,
+      "adapter_forward_ms_per_rank": [
+        [
+          549.5,
+          549.4
+        ],
+        [
+          549.5,
+          549.5
+        ],
+        [
+          549.6,
+          544.4
+        ],
+        [
+          549.7,
+          549.2
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        543.63,
+        543.99,
+        543.63,
+        543.99
+      ],
+      "bench_p10_p90_ms_rank0": [
+        543.26,
+        544.89
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        19.748,
+        19.748,
+        19.748,
+        19.748
+      ],
+      "weights_gib_per_rank": [
+        19.504,
+        19.504,
+        19.504,
+        19.504
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.42,
+        1.53,
+        1.45,
+        1.51
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 47,
+          "InMemoryHits": 1602
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 1605
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 1605
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 1605
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 45,
+          "InMemoryHits": 68
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 71
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 71
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 71
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1530
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1530
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1530
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 1530
+        }
+      ],
+      "new_neffs_in_cache": 0,
+      "block_neffs_per_rank": [
+        [
+          [
+            "40b84c825c2d",
+            4073467,
+            0.0
+          ]
+        ],
+        [
+          [
+            "40b84c825c2d",
+            4073467,
+            0.0
+          ]
+        ],
+        [
+          [
+            "206b7f20df5e",
+            4072912,
+            0.0
+          ]
+        ],
+        [
+          [
+            "206b7f20df5e",
+            4072912,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 60,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "18fe47db44790ed491e1655ea686eb9e6a4ff4768531be82daacc96289b5111f",
+        "500": "c7cff6136397ae623779da7ca987f79984fe065469ae5957ad4e42029286136b"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0
+      }
+    },
+    "l60-tp2cp2-ulysses-warm": {
+      "label": "60 layers tp2cp2 ulysses relaunch: --expect warm, --equal-to the first launch, vs V1 TP4",
+      "cfg": {
+        "num_layers": 60,
+        "tp": 2,
+        "cp": 2,
+        "cp_mode": "ulysses",
+        "heads_per_rank": 12
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5120
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "vs_tp4_t1000": true,
+        "vs_tp4_t500": true,
+        "equal_to_t1000": true,
+        "equal_to_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true,
+        "warm_counters": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 88e68f888776)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [2048, 2048] (expected 4096/cp 2 = 2048; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0093771829363571,
+          "ratio_l2_vs_control": 1.0104798867641445,
+          "cosine": 0.9998877453459032,
+          "rel_l1": 0.024799130498779517,
+          "rel_l2": 0.02495128360525214,
+          "rel_max": 0.025579727042105368,
+          "err_cos": 0.9665340491811821,
+          "control_cosine": 0.9998644933181546,
+          "control_rel_l1": 0.02456874488349034,
+          "control_rel_l2": 0.024692508907973944,
+          "vs_tp4": {
+            "cosine": 0.9999886516989998,
+            "rel_l1": 0.0041312560784068746,
+            "rel_l2": 0.004777243931373865,
+            "rel_max": 0.006060606060606061
+          }
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.8746785790221936,
+          "ratio_l2_vs_control": 0.8762675989509187,
+          "cosine": 0.9999329445648331,
+          "rel_l1": 0.014352497896053258,
+          "rel_l2": 0.014509837651832601,
+          "rel_max": 0.02040577827933229,
+          "err_cos": 0.8668161172749513,
+          "control_cosine": 0.9999032413067195,
+          "control_rel_l1": 0.016408882348642823,
+          "control_rel_l2": 0.01655868329401202,
+          "vs_tp4": {
+            "cosine": 0.9999902585467333,
+            "rel_l1": 0.003739184491340213,
+            "rel_l2": 0.004414919048195643,
+            "rel_max": 0.0047169811320754715
+          }
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.3,
+        "load checkpoint": 6.6,
+        "eval": 0.01,
+        "compile": 0.15,
+        "warmup forward": 8.42
+      },
+      "prepare_runtime_s_rank_max": 18.38,
+      "adapter_forward_ms_per_rank": [
+        [
+          420.7,
+          422.2
+        ],
+        [
+          425.7,
+          422.0
+        ],
+        [
+          427.2,
+          417.9
+        ],
+        [
+          420.0,
+          422.4
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        415.98,
+        416.05,
+        416.04,
+        416.11
+      ],
+      "bench_p10_p90_ms_rank0": [
+        415.32,
+        416.8
+      ],
+      "bench_samples_per_rank": 30,
+      "peak_hbm_gib_per_rank": [
+        19.748,
+        19.748,
+        19.748,
+        19.748
+      ],
+      "weights_gib_per_rank": [
+        19.504,
+        19.504,
+        19.504,
+        19.504
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.51,
+        1.51,
+        1.45,
+        1.51
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 47,
+          "InMemoryHits": 3642
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 3645
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 3645
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 3645
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 45,
+          "InMemoryHits": 68
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 71
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 71
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 71
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 3570
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 3570
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 3570
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 3570
+        }
+      ],
+      "new_neffs_in_cache": 0,
+      "block_neffs_per_rank": [
+        [
+          [
+            "702b26e1e07f",
+            2895942,
+            0.0
+          ]
+        ],
+        [
+          [
+            "702b26e1e07f",
+            2895942,
+            0.0
+          ]
+        ],
+        [
+          [
+            "9b9c0cfaa045",
+            2894050,
+            0.0
+          ]
+        ],
+        [
+          [
+            "9b9c0cfaa045",
+            2894050,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 60,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "88e68f888776b99af30446b3db6263cbc464d1c4d32357c9f13083e65d74e4d3",
+        "500": "4ec2b287374759194a3a206fb5ef2e6f972f06ee62b3f02699c0448c66e91fa0"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0
+      }
+    },
+    "l30-tp1cp4-ulysses": {
+      "label": "30 layers tp1cp4 ulysses (a larger N that fits tp1)",
+      "cfg": {
+        "num_layers": 30,
+        "tp": 1,
+        "cp": 4,
+        "cp_mode": "ulysses",
+        "heads_per_rank": 24
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1024,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5120
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 39da5048f599)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [1024, 1024] (expected 4096/cp 4 = 1024; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0158445182683449,
+          "ratio_l2_vs_control": 1.017840488220673,
+          "cosine": 0.9993886343845921,
+          "rel_l1": 0.04076294231579341,
+          "rel_l2": 0.04796136686063732,
+          "rel_max": 0.09550601748994297,
+          "err_cos": 0.9952962918585504,
+          "control_cosine": 0.9994116306119667,
+          "control_rel_l1": 0.040127147002062664,
+          "control_rel_l2": 0.04712071038211544
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 1.1049068501130974,
+          "ratio_l2_vs_control": 1.0958305291364985,
+          "cosine": 0.999973699150962,
+          "rel_l1": 0.018466125818417996,
+          "rel_l2": 0.019029146086998933,
+          "rel_max": 0.02204616681735477,
+          "err_cos": 0.9384914438956669,
+          "control_cosine": 0.9999714001771023,
+          "control_rel_l1": 0.016712834947604695,
+          "control_rel_l2": 0.017365044667986825
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.22,
+        "load checkpoint": 6.05,
+        "eval": 0.01,
+        "compile": 0.15,
+        "warmup forward": 8.15
+      },
+      "prepare_runtime_s_rank_max": 22.54,
+      "adapter_forward_ms_per_rank": [
+        [
+          223.8,
+          222.2
+        ],
+        [
+          224.2,
+          222.2
+        ],
+        [
+          224.1,
+          222.1
+        ],
+        [
+          224.0,
+          222.1
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        217.76,
+        217.69,
+        217.68,
+        217.76
+      ],
+      "bench_p10_p90_ms_rank0": [
+        217.55,
+        218.52
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        19.238,
+        19.238,
+        19.238,
+        19.238
+      ],
+      "weights_gib_per_rank": [
+        19.07,
+        19.07,
+        19.07,
+        19.07
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.19,
+        1.18,
+        1.18,
+        1.19
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 39,
+          "InMemoryHits": 986
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 989
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 989
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 989
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 37,
+          "InMemoryHits": 37
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 42,
+          "InMemoryHits": 40
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 42,
+          "InMemoryHits": 40
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 42,
+          "InMemoryHits": 40
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 945
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 945
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 945
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 945
+        }
+      ],
+      "new_neffs_in_cache": 0,
+      "block_neffs_per_rank": [
+        [
+          [
+            "d15ba1d84cb4",
+            3624095,
+            0.0
+          ]
+        ],
+        [
+          [
+            "a786ea956035",
+            3644609,
+            0.0
+          ]
+        ],
+        [
+          [
+            "79b573b1fe84",
+            3733957,
+            0.0
+          ]
+        ],
+        [
+          [
+            "15399bafd5d1",
+            3740682,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 30,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "39da5048f599caca076e2e802d01a49c9bb6b33f2c8e221eaf9d78eaf93487e2",
+        "500": "5acfa622fd9a821493614c537b535cc59620f2b669dec17e09e9a154336f58a6"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 960
+      }
+    },
+    "l30-tp1cp4-gather_kv": {
+      "label": "30 layers tp1cp4 gather_kv, vs ulysses",
+      "cfg": {
+        "num_layers": 30,
+        "tp": 1,
+        "cp": 4,
+        "cp_mode": "gather_kv",
+        "heads_per_rank": 24
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1024,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "gather_kv_query_len": 2048,
+        "gather_kv_key_len": 5120
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "vs_ulysses_t1000": true,
+        "vs_ulysses_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 c37913971021)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [1024, 1024] (expected 4096/cp 4 = 1024; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0134391633587405,
+          "ratio_l2_vs_control": 1.0155324335812002,
+          "cosine": 0.999390386465846,
+          "rel_l1": 0.040666422285743575,
+          "rel_l2": 0.047852609686424616,
+          "rel_max": 0.09550601748994297,
+          "err_cos": 0.9953129286228162,
+          "control_cosine": 0.9994116306119667,
+          "control_rel_l1": 0.040127147002062664,
+          "control_rel_l2": 0.04712071038211544,
+          "vs_ulysses": {
+            "cosine": 0.9999978983599727,
+            "rel_l1": 0.0010122828938177095,
+            "rel_l2": 0.002052551009029277,
+            "rel_max": 0.0040650406504065045
+          }
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 1.1067800024996979,
+          "ratio_l2_vs_control": 1.0976531421356712,
+          "cosine": 0.9999737504938329,
+          "rel_l1": 0.018497431505086964,
+          "rel_l2": 0.019060795843142023,
+          "rel_max": 0.02509321879363783,
+          "err_cos": 0.9382856472489901,
+          "control_cosine": 0.9999714001771023,
+          "control_rel_l1": 0.016712834947604695,
+          "control_rel_l2": 0.017365044667986825,
+          "vs_ulysses": {
+            "cosine": 0.9999955525226688,
+            "rel_l1": 0.0017656730946199728,
+            "rel_l2": 0.002982719518082473,
+            "rel_max": 0.005988023952095809
+          }
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.2,
+        "load checkpoint": 6.07,
+        "eval": 0.01,
+        "compile": 0.14,
+        "warmup forward": 11.74
+      },
+      "prepare_runtime_s_rank_max": 16.94,
+      "adapter_forward_ms_per_rank": [
+        [
+          290.1,
+          289.4
+        ],
+        [
+          285.8,
+          288.9
+        ],
+        [
+          285.6,
+          285.3
+        ],
+        [
+          290.0,
+          289.2
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        283.8,
+        283.76,
+        283.73,
+        283.73
+      ],
+      "bench_p10_p90_ms_rank0": [
+        283.37,
+        284.34
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        19.238,
+        19.238,
+        19.238,
+        19.238
+      ],
+      "weights_gib_per_rank": [
+        19.07,
+        19.07,
+        19.07,
+        19.07
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.29,
+        1.36,
+        1.31,
+        1.38
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 39,
+          "InMemoryHits": 986
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 989
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 989
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 989
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 37,
+          "InMemoryHits": 37
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 42,
+          "InMemoryHits": 40
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 42,
+          "InMemoryHits": 40
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 42,
+          "InMemoryHits": 40
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 945
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 945
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 945
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 945
+        }
+      ],
+      "new_neffs_in_cache": 0,
+      "block_neffs_per_rank": [
+        [
+          [
+            "242efaca9490",
+            4616716,
+            0.0
+          ]
+        ],
+        [
+          [
+            "242efaca9490",
+            4616716,
+            0.0
+          ]
+        ],
+        [
+          [
+            "242efaca9490",
+            4616716,
+            0.0
+          ]
+        ],
+        [
+          [
+            "242efaca9490",
+            4616716,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 30,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "c3791397102101d421fca8cc6a403e4d21450b775560eb0638683c8f9359ab75",
+        "500": "cb5b9fc06130ae18d6f1b21b02190f54e17f5074cee89f1ba7befeec27d87b07"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 960
+      }
+    },
+    "l30-tp1cp4-ring": {
+      "label": "30 layers tp1cp4 ring, vs ulysses",
+      "cfg": {
+        "num_layers": 30,
+        "tp": 1,
+        "cp": 4,
+        "cp_mode": "ring",
+        "heads_per_rank": 24
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1024,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "ring_query_len": 2048,
+        "ring_query_len_mod_128": 0,
+        "ring_query_padded_to": 2048,
+        "ring_key_blocks": [
+          1024,
+          1024,
+          1024,
+          1024,
+          1024
+        ]
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "vs_ulysses_t1000": true,
+        "vs_ulysses_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 db80a0f9078d)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [1024, 1024] (expected 4096/cp 4 = 1024; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0115174306522843,
+          "ratio_l2_vs_control": 1.013656781884935,
+          "cosine": 0.9993941839711845,
+          "rel_l1": 0.04058930863493294,
+          "rel_l2": 0.04776422764606718,
+          "rel_max": 0.09950642549053923,
+          "err_cos": 0.9952864437118724,
+          "control_cosine": 0.9994116306119667,
+          "control_rel_l1": 0.040127147002062664,
+          "control_rel_l2": 0.04712071038211544,
+          "vs_ulysses": {
+            "cosine": 0.9999963812026291,
+            "rel_l1": 0.0016778400784802161,
+            "rel_l2": 0.0026923620311043324,
+            "rel_max": 0.0040650406504065045
+          }
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 1.1007232138876848,
+          "ratio_l2_vs_control": 1.0917995973073675,
+          "cosine": 0.9999738554918108,
+          "rel_l1": 0.018396205396701858,
+          "rel_l2": 0.018959148775732466,
+          "rel_max": 0.02380946403110805,
+          "err_cos": 0.9376775797590812,
+          "control_cosine": 0.9999714001771023,
+          "control_rel_l1": 0.016712834947604695,
+          "control_rel_l2": 0.017365044667986825,
+          "vs_ulysses": {
+            "cosine": 0.9999936589923981,
+            "rel_l1": 0.0024778942629839315,
+            "rel_l2": 0.003561667519676098,
+            "rel_max": 0.005988023952095809
+          }
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.2,
+        "load checkpoint": 6.0,
+        "eval": 0.01,
+        "compile": 0.16,
+        "warmup forward": 7.4
+      },
+      "prepare_runtime_s_rank_max": 17.28,
+      "adapter_forward_ms_per_rank": [
+        [
+          436.9,
+          433.1
+        ],
+        [
+          432.1,
+          433.8
+        ],
+        [
+          432.1,
+          433.8
+        ],
+        [
+          436.7,
+          433.7
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        430.27,
+        430.26,
+        430.31,
+        430.37
+      ],
+      "bench_p10_p90_ms_rank0": [
+        429.97,
+        430.54
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        19.195,
+        19.195,
+        19.195,
+        19.195
+      ],
+      "weights_gib_per_rank": [
+        19.07,
+        19.07,
+        19.07,
+        19.07
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.35,
+        1.35,
+        1.36,
+        1.33
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 39,
+          "InMemoryHits": 986
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 989
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 989
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 44,
+          "InMemoryHits": 989
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 37,
+          "InMemoryHits": 37
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 42,
+          "InMemoryHits": 40
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 42,
+          "InMemoryHits": 40
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 42,
+          "InMemoryHits": 40
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 945
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 945
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 945
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 945
+        }
+      ],
+      "new_neffs_in_cache": 0,
+      "block_neffs_per_rank": [
+        [
+          [
+            "d6059d52e077",
+            6209824,
+            0.0
+          ]
+        ],
+        [
+          [
+            "f63c3442e302",
+            6099717,
+            0.0
+          ]
+        ],
+        [
+          [
+            "cdb6e7d3ca93",
+            6083394,
+            0.0
+          ]
+        ],
+        [
+          [
+            "8346a5729b61",
+            6315971,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 30,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "db80a0f9078d5c551274f7c6181118df1e07005cd8bb124017686aee9b5e30ad",
+        "500": "70dc898fe06c869f7b21655d26996738d1a58e2147b17919be63cbb57b208f8d"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 960
+      }
+    },
+    "l4-tp2cp2-ulysses-postprobe": {
+      "label": "l4-tp2cp2-ulysses-postprobe",
+      "cfg": {
+        "num_layers": 4,
+        "tp": 2,
+        "cp": 2,
+        "cp_mode": "ulysses",
+        "heads_per_rank": 12
+      },
+      "shape_rules": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5120
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "equal_to_t1000": true,
+        "equal_to_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true,
+        "warm_counters": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 b72e6639a2dc)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [2048, 2048] (expected 4096/cp 2 = 2048; output [1, 4096, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0394376772842153,
+          "ratio_l2_vs_control": 1.0394705802786925,
+          "cosine": 0.9999670662523583,
+          "rel_l1": 0.012785982340219241,
+          "rel_l2": 0.01416678266020264,
+          "rel_max": 0.0323439972541347,
+          "err_cos": 0.956424279687761,
+          "control_cosine": 0.9999691302723285,
+          "control_rel_l1": 0.012300864803771345,
+          "control_rel_l2": 0.013628844268400922
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.9588913898647822,
+          "ratio_l2_vs_control": 0.9605609447380187,
+          "cosine": 0.999990597600414,
+          "rel_l1": 0.004339449974687397,
+          "rel_l2": 0.004423607423833851,
+          "rel_max": 0.006564784193880746,
+          "err_cos": 0.5319828884084284,
+          "control_cosine": 0.9999899140317982,
+          "control_rel_l1": 0.0045254864320966775,
+          "control_rel_l2": 0.00460523348160937
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.16,
+        "load checkpoint": 0.47,
+        "eval": 0.0,
+        "compile": 0.16,
+        "warmup forward": 8.08
+      },
+      "prepare_runtime_s_rank_max": 18.03,
+      "adapter_forward_ms_per_rank": [
+        [
+          36.5,
+          37.5
+        ],
+        [
+          38.3,
+          36.9
+        ],
+        [
+          36.4,
+          37.6
+        ],
+        [
+          38.2,
+          37.8
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        32.47,
+        32.47,
+        32.47,
+        32.46
+      ],
+      "bench_p10_p90_ms_rank0": [
+        32.21,
+        33.39
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        1.51,
+        1.51,
+        1.51,
+        1.51
+      ],
+      "weights_gib_per_rank": [
+        1.343,
+        1.343,
+        1.343,
+        1.343
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.41,
+        1.49,
+        1.41,
+        1.49
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 47,
+          "InMemoryHits": 706
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 709
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 45,
+          "InMemoryHits": 12
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 15
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        }
+      ],
+      "new_neffs_in_cache": 0,
+      "block_neffs_per_rank": [
+        [
+          [
+            "702b26e1e07f",
+            2895942,
+            0.0
+          ]
+        ],
+        [
+          [
+            "702b26e1e07f",
+            2895942,
+            0.0
+          ]
+        ],
+        [
+          [
+            "9b9c0cfaa045",
+            2894050,
+            0.0
+          ]
+        ],
+        [
+          [
+            "9b9c0cfaa045",
+            2894050,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 4,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "b72e6639a2dcc0e87a7d9152d7e685afa63eb7c0a00080f19c3e348d7fe02613",
+        "500": "fd18bcf8eda8bd613832f67a22f0f5f67b8ad4bbb2a0a87af2e23448d44b3d48"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      }
+    },
+    "l4w1008-tp2cp2-ring": {
+      "label": "l4w1008-tp2cp2-ring",
+      "cfg": {
+        "num_layers": 4,
+        "tp": 2,
+        "cp": 2,
+        "cp_mode": "ring",
+        "heads_per_rank": 12
+      },
+      "shape_rules": {
+        "image_seq_len": 4032,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2016,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ring_query_len": 3040,
+        "ring_query_len_mod_128": 96,
+        "ring_query_padded_to": 3072,
+        "ring_key_blocks": [
+          1024,
+          2016,
+          2016
+        ]
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 384b5c3e252d)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [2016, 2016] (expected 4032/cp 2 = 2016; output [1, 4032, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0144598956960025,
+          "ratio_l2_vs_control": 1.0123763630046427,
+          "cosine": 0.9999680902095375,
+          "rel_l1": 0.012692120654301316,
+          "rel_l2": 0.01402269755520754,
+          "rel_max": 0.030650792696370232,
+          "err_cos": 0.9590169165583079,
+          "control_cosine": 0.9999687423823518,
+          "control_rel_l1": 0.012511209864627998,
+          "control_rel_l2": 0.013851269219274763
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.9627347633676788,
+          "ratio_l2_vs_control": 0.9647674252233336,
+          "cosine": 0.9999906219091004,
+          "rel_l1": 0.0043599304846484365,
+          "rel_l2": 0.004450396364592349,
+          "rel_max": 0.005987562049030461,
+          "err_cos": 0.5397357889740128,
+          "control_cosine": 0.9999898721746132,
+          "control_rel_l1": 0.004528693312576822,
+          "control_rel_l2": 0.004612921465048562
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.16,
+        "load checkpoint": 0.48,
+        "eval": 0.0,
+        "compile": 0.15,
+        "warmup forward": 43.51
+      },
+      "prepare_runtime_s_rank_max": 18.13,
+      "adapter_forward_ms_per_rank": [
+        [
+          56.5,
+          56.2
+        ],
+        [
+          53.7,
+          54.4
+        ],
+        [
+          53.1,
+          56.1
+        ],
+        [
+          57.0,
+          55.6
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        50.5,
+        50.51,
+        50.48,
+        50.46
+      ],
+      "bench_p10_p90_ms_rank0": [
+        50.26,
+        51.97
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        1.515,
+        1.51,
+        1.515,
+        1.51
+      ],
+      "weights_gib_per_rank": [
+        1.343,
+        1.343,
+        1.343,
+        1.343
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.48,
+        1.57,
+        1.53,
+        1.59
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 5,
+          "PersistentHits": 42,
+          "InMemoryHits": 706
+        },
+        {
+          "TotalCompilations": 2,
+          "PersistentHits": 50,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 8,
+          "PersistentHits": 44,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 709
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 5,
+          "PersistentHits": 40,
+          "InMemoryHits": 12
+        },
+        {
+          "TotalCompilations": 2,
+          "PersistentHits": 48,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 8,
+          "PersistentHits": 42,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 15
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        }
+      ],
+      "new_neffs_in_cache": 15,
+      "block_neffs_per_rank": [
+        [
+          [
+            "aa65cdca8cfc",
+            5467415,
+            0.0
+          ]
+        ],
+        [
+          [
+            "aa65cdca8cfc",
+            5467415,
+            34.5
+          ]
+        ],
+        [
+          [
+            "b2ab92b494eb",
+            5475182,
+            34.7
+          ]
+        ],
+        [
+          [
+            "b2ab92b494eb",
+            5475182,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 4,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "384b5c3e252daeb3be0b18fde1ea7db37f90da0a3dca769f1ef9d94bd316d704",
+        "500": "08068ce96a39c142e3d545e0bf2a33c155999624a5648db2c35c3a198007d039"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      }
+    },
+    "l4w1008-tp1cp4-ring": {
+      "label": "l4w1008-tp1cp4-ring",
+      "cfg": {
+        "num_layers": 4,
+        "tp": 1,
+        "cp": 4,
+        "cp_mode": "ring",
+        "heads_per_rank": 24
+      },
+      "shape_rules": {
+        "image_seq_len": 4032,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1008,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "ring_query_len": 2032,
+        "ring_query_len_mod_128": 112,
+        "ring_query_padded_to": 2048,
+        "ring_key_blocks": [
+          1024,
+          1008,
+          1008,
+          1008,
+          1008
+        ]
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 6564efa3589c)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [1008, 1008] (expected 4032/cp 4 = 1008; output [1, 4032, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0310170064231587,
+          "ratio_l2_vs_control": 1.0332033735954618,
+          "cosine": 0.9999675673062324,
+          "rel_l1": 0.012899270141360651,
+          "rel_l2": 0.014311178085933662,
+          "rel_max": 0.030650792696370232,
+          "err_cos": 0.9606482162731175,
+          "control_cosine": 0.9999687423823518,
+          "control_rel_l1": 0.012511209864627998,
+          "control_rel_l2": 0.013851269219274763
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.9110859519168266,
+          "ratio_l2_vs_control": 0.9141573133740221,
+          "cosine": 0.9999914920694701,
+          "rel_l1": 0.004126028857628421,
+          "rel_l2": 0.004216935893294151,
+          "rel_max": 0.005408868090011647,
+          "err_cos": 0.5280328785758005,
+          "control_cosine": 0.9999898721746132,
+          "control_rel_l1": 0.004528693312576822,
+          "control_rel_l2": 0.004612921465048562
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.16,
+        "load checkpoint": 0.85,
+        "eval": 0.0,
+        "compile": 0.14,
+        "warmup forward": 68.73
+      },
+      "prepare_runtime_s_rank_max": 17.17,
+      "adapter_forward_ms_per_rank": [
+        [
+          77.3,
+          80.1
+        ],
+        [
+          84.6,
+          75.1
+        ],
+        [
+          77.3,
+          80.0
+        ],
+        [
+          80.9,
+          79.7
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        74.37,
+        74.4,
+        74.35,
+        74.41
+      ],
+      "bench_p10_p90_ms_rank0": [
+        74.22,
+        74.61
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        2.733,
+        2.733,
+        2.733,
+        2.733
+      ],
+      "weights_gib_per_rank": [
+        2.612,
+        2.612,
+        2.612,
+        2.612
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.37,
+        1.37,
+        1.4,
+        1.37
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 7,
+          "PersistentHits": 32,
+          "InMemoryHits": 570
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 43,
+          "InMemoryHits": 573
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 43,
+          "InMemoryHits": 573
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 43,
+          "InMemoryHits": 573
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 7,
+          "PersistentHits": 30,
+          "InMemoryHits": 11
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 41,
+          "InMemoryHits": 14
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 41,
+          "InMemoryHits": 14
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 41,
+          "InMemoryHits": 14
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 555
+        }
+      ],
+      "new_neffs_in_cache": 10,
+      "block_neffs_per_rank": [
+        [
+          [
+            "a9865c361b98",
+            8268076,
+            57.5
+          ]
+        ],
+        [
+          [
+            "1309afeaa4a5",
+            8227627,
+            59.9
+          ]
+        ],
+        [
+          [
+            "db6fed85e15a",
+            8253106,
+            57.7
+          ]
+        ],
+        [
+          [
+            "439d27acc3c5",
+            8272105,
+            57.1
+          ]
+        ]
+      ],
+      "compiled_blocks": 4,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "6564efa3589c3fc0295e44c1a873656bf14e3441124c117a3a6c34132ac31f90",
+        "500": "c44268a154aaf62dd8fec72633d0d9927206e29d2861899fe25e19660a9f7135"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      }
+    },
+    "l4w1008-tp2cp2-ulysses": {
+      "label": "l4w1008-tp2cp2-ulysses",
+      "cfg": {
+        "num_layers": 4,
+        "tp": 2,
+        "cp": 2,
+        "cp_mode": "ulysses",
+        "heads_per_rank": 12
+      },
+      "shape_rules": {
+        "image_seq_len": 4032,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2016,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5056
+      },
+      "ok_all_ranks": true,
+      "n_ranks": 4,
+      "checks_rank0": {
+        "checkpoint": true,
+        "heads_per_rank": true,
+        "fallbacks": true,
+        "unwarmed_shapes": true,
+        "forward_shapes": true,
+        "ranks_identical": true,
+        "cp_scatter": true,
+        "finite": true,
+        "parity_fp32_t1000": true,
+        "parity_fp32_t500": true,
+        "vs_ring_t1000": true,
+        "vs_ring_t500": true,
+        "no_compile_in_forwards": true,
+        "instrumentation": true,
+        "hbm": true,
+        "compiled_blocks": true,
+        "one_graph": true,
+        "warmup_neff": true,
+        "block_neff": true
+      },
+      "failed_checks_any_rank": [],
+      "ranks_identical_detail": "4 ranks, sha256 of every output equal to rank 0's (t1000 4d03f6f8f944)",
+      "cp_scatter_detail": "image tokens per rank into the blocks [2016, 2016] (expected 4032/cp 2 = 2016; output [1, 4032, 64])",
+      "parity": {
+        "1000": {
+          "ok": true,
+          "ratio_vs_control": 1.0162430767030095,
+          "ratio_l2_vs_control": 1.0138747526830318,
+          "cosine": 0.9999680449670822,
+          "rel_l1": 0.0127144304061066,
+          "rel_l2": 0.01404345215403829,
+          "rel_max": 0.030650792696370232,
+          "err_cos": 0.9591447043029816,
+          "control_cosine": 0.9999687423823518,
+          "control_rel_l1": 0.012511209864627998,
+          "control_rel_l2": 0.013851269219274763,
+          "vs_ring": {
+            "cosine": 0.9999969363578596,
+            "rel_l1": 0.0014976027457364563,
+            "rel_l2": 0.002475450638464006,
+            "rel_max": 0.0037313432835820895
+          }
+        },
+        "500": {
+          "ok": true,
+          "ratio_vs_control": 0.9628250123172563,
+          "ratio_l2_vs_control": 0.9647185548439149,
+          "cosine": 0.9999906137206827,
+          "rel_l1": 0.004360339194462855,
+          "rel_l2": 0.004450170929370123,
+          "rel_max": 0.005579341050642657,
+          "err_cos": 0.5406242978753178,
+          "control_cosine": 0.9999898721746132,
+          "control_rel_l1": 0.004528693312576822,
+          "control_rel_l2": 0.004612921465048562,
+          "vs_ring": {
+            "cosine": 0.9999972360800291,
+            "rel_l1": 0.0013961536170966394,
+            "rel_l2": 0.002351142552851246,
+            "rel_max": 0.005235602094240838
+          }
+        }
+      },
+      "phase_seconds_rank_max": {
+        "runtime init": 0.03,
+        "build on meta": 1.16,
+        "load checkpoint": 0.47,
+        "eval": 0.0,
+        "compile": 0.15,
+        "warmup forward": 29.08
+      },
+      "prepare_runtime_s_rank_max": 21.45,
+      "adapter_forward_ms_per_rank": [
+        [
+          39.7,
+          38.5
+        ],
+        [
+          39.8,
+          38.1
+        ],
+        [
+          39.8,
+          38.4
+        ],
+        [
+          39.7,
+          38.5
+        ]
+      ],
+      "bench_median_ms_per_rank": [
+        34.0,
+        34.1,
+        34.02,
+        34.0
+      ],
+      "bench_p10_p90_ms_rank0": [
+        33.54,
+        35.03
+      ],
+      "bench_samples_per_rank": 10,
+      "peak_hbm_gib_per_rank": [
+        1.51,
+        1.515,
+        1.515,
+        1.51
+      ],
+      "weights_gib_per_rank": [
+        1.343,
+        1.343,
+        1.343,
+        1.343
+      ],
+      "host_vmhwm_gib_per_rank": [
+        1.56,
+        1.57,
+        1.55,
+        1.53
+      ],
+      "run_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 47,
+          "InMemoryHits": 706
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 51,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 51,
+          "InMemoryHits": 709
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 52,
+          "InMemoryHits": 709
+        }
+      ],
+      "warmup_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 45,
+          "InMemoryHits": 12
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 49,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 1,
+          "PersistentHits": 49,
+          "InMemoryHits": 15
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 50,
+          "InMemoryHits": 15
+        }
+      ],
+      "forward_and_bench_counters_per_rank": [
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        },
+        {
+          "TotalCompilations": 0,
+          "PersistentHits": 0,
+          "InMemoryHits": 690
+        }
+      ],
+      "new_neffs_in_cache": 2,
+      "block_neffs_per_rank": [
+        [
+          [
+            "42b902fe985e",
+            2969214,
+            0.0
+          ]
+        ],
+        [
+          [
+            "42b902fe985e",
+            2969214,
+            20.8
+          ]
+        ],
+        [
+          [
+            "73be87d1e2a5",
+            2975158,
+            20.7
+          ]
+        ],
+        [
+          [
+            "73be87d1e2a5",
+            2975158,
+            0.0
+          ]
+        ]
+      ],
+      "compiled_blocks": 4,
+      "fallbacks_all_ranks": [
+        [],
+        [],
+        [],
+        []
+      ],
+      "output_sha256_rank0": {
+        "1000": "4d03f6f8f944820776f9a43ecd71f0a954dcb924036a94203d86b2f1235299bc",
+        "500": "569fb7b140e2bb7beacb0b889fab0cbfdac4bd6033e0f41ebb365d005d9cd953"
+      },
+      "load_report": {
+        "missing": 0,
+        "unexpected": 0,
+        "skipped": 1792
+      }
+    }
+  },
+  "references": {
+    "ref-l30.pt (new in V2)": {
+      "num_layers": 30,
+      "prompt": "A cozy coffee shop storefront on a rainy evening, a chalkboard sign by the door reads \"Fresh Bread\", warm light through the windows, photorealistic",
+      "valid_rows": 36,
+      "timesteps": [
+        1000.0,
+        500.0
+      ],
+      "timings_s": {
+        "load_fp32_s": 2.4073939319987403,
+        "fp32_t1000_s": 48.38993756899981,
+        "fp32_t500_s": 48.261921182998776,
+        "bf16_t1000_s": 17.40298411799995,
+        "bf16_t500_s": 17.294906754001204
+      },
+      "loading_info_counts": {
+        "missing_keys": 0,
+        "unexpected_keys": 960,
+        "mismatched_keys": 0,
+        "error_msgs": 0
+      },
+      "fp32_output_sha256": {
+        "1000": "c614a867c260f510417e86cbfb87b8420476258911d9b432f05efec0493f3bdc",
+        "500": "947de82d07fab5360dc07896d412f534678a5c789d62864e90658be12fcac359"
+      }
+    },
+    "ref-l4.pt, ref-l60.pt": "V1's (see v1/summary.json references)"
+  },
+  "derived": {
+    "forward_ms_rank0": {
+      "l4-tp2cp2-gather_kv.try1-nohook": 35.06,
+      "l4-tp2cp2-gather_kv": 34.69,
+      "l4-tp2cp2-ulysses": 32.88,
+      "l4-tp2cp2-ring": 40.91,
+      "l4-tp1cp4-ulysses": 31.74,
+      "l4-tp1cp4-ring": 60.09,
+      "l4-tp1cp4-gather_kv": 40.62,
+      "l60-tp2cp2-ulysses": 416.16,
+      "l60-tp2cp2-gather_kv": 445.89,
+      "l60-tp2cp2-ring": 543.63,
+      "l60-tp2cp2-ulysses-warm": 415.98,
+      "l30-tp1cp4-ulysses": 217.76,
+      "l30-tp1cp4-gather_kv": 283.8,
+      "l30-tp1cp4-ring": 430.27,
+      "l4-tp2cp2-ulysses-postprobe": 32.47,
+      "l4w1008-tp2cp2-ring": 50.5,
+      "l4w1008-tp1cp4-ring": 74.37,
+      "l4w1008-tp2cp2-ulysses": 34.0
+    },
+    "l4_tp2cp2_vs_ulysses": {
+      "gather_kv": 1.0550486618004864,
+      "ring": 1.2442214111922139
+    },
+    "l4_tp1cp4_vs_ulysses": {
+      "gather_kv": 1.279773156899811,
+      "ring": 1.8931947069943291
+    },
+    "l60_tp2cp2_vs_ulysses": {
+      "gather_kv": 1.0719024953122744,
+      "ring": 1.306865714697822
+    },
+    "l30_tp1cp4_vs_ulysses": {
+      "gather_kv": 1.303269654665687,
+      "ring": 1.9758908890521676
+    },
+    "w1008_vs_w1024_tp2cp2": {
+      "ring": 1.2344170129552678,
+      "ulysses": 1.0340632603406326
+    },
+    "shape_rules": {
+      "l4-tp2cp2-gather_kv.try1-nohook": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "gather_kv_query_len": 3072,
+        "gather_kv_key_len": 5120
+      },
+      "l4-tp2cp2-gather_kv": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "gather_kv_query_len": 3072,
+        "gather_kv_key_len": 5120
+      },
+      "l4-tp2cp2-ulysses": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5120
+      },
+      "l4-tp2cp2-ring": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ring_query_len": 3072,
+        "ring_query_len_mod_128": 0,
+        "ring_query_padded_to": 3072,
+        "ring_key_blocks": [
+          1024,
+          2048,
+          2048
+        ]
+      },
+      "l4-tp1cp4-ulysses": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1024,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5120
+      },
+      "l4-tp1cp4-ring": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1024,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "ring_query_len": 2048,
+        "ring_query_len_mod_128": 0,
+        "ring_query_padded_to": 2048,
+        "ring_key_blocks": [
+          1024,
+          1024,
+          1024,
+          1024,
+          1024
+        ]
+      },
+      "l4-tp1cp4-gather_kv": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1024,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "gather_kv_query_len": 2048,
+        "gather_kv_key_len": 5120
+      },
+      "l60-tp2cp2-ulysses": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5120
+      },
+      "l60-tp2cp2-gather_kv": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "gather_kv_query_len": 3072,
+        "gather_kv_key_len": 5120
+      },
+      "l60-tp2cp2-ring": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ring_query_len": 3072,
+        "ring_query_len_mod_128": 0,
+        "ring_query_padded_to": 3072,
+        "ring_key_blocks": [
+          1024,
+          2048,
+          2048
+        ]
+      },
+      "l60-tp2cp2-ulysses-warm": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5120
+      },
+      "l30-tp1cp4-ulysses": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1024,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5120
+      },
+      "l30-tp1cp4-gather_kv": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1024,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "gather_kv_query_len": 2048,
+        "gather_kv_key_len": 5120
+      },
+      "l30-tp1cp4-ring": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1024,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "ring_query_len": 2048,
+        "ring_query_len_mod_128": 0,
+        "ring_query_padded_to": 2048,
+        "ring_key_blocks": [
+          1024,
+          1024,
+          1024,
+          1024,
+          1024
+        ]
+      },
+      "l4-tp2cp2-ulysses-postprobe": {
+        "image_seq_len": 4096,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2048,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5120
+      },
+      "l4w1008-tp2cp2-ring": {
+        "image_seq_len": 4032,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2016,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ring_query_len": 3040,
+        "ring_query_len_mod_128": 96,
+        "ring_query_padded_to": 3072,
+        "ring_key_blocks": [
+          1024,
+          2016,
+          2016
+        ]
+      },
+      "l4w1008-tp1cp4-ring": {
+        "image_seq_len": 4032,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 1008,
+        "heads_per_tp_rank": 24,
+        "image_divisible_by_cp": true,
+        "ring_query_len": 2032,
+        "ring_query_len_mod_128": 112,
+        "ring_query_padded_to": 2048,
+        "ring_key_blocks": [
+          1024,
+          1008,
+          1008,
+          1008,
+          1008
+        ]
+      },
+      "l4w1008-tp2cp2-ulysses": {
+        "image_seq_len": 4032,
+        "text_seq_len": 1024,
+        "image_tokens_per_rank": 2016,
+        "heads_per_tp_rank": 12,
+        "image_divisible_by_cp": true,
+        "ulysses_heads_per_rank": 6,
+        "ulysses_heads_divisible": true,
+        "ulysses_attention_len": 5056
+      }
+    },
+    "l60_tp1cp4_hbm_probe": {
+      "outcome": "LIMIT: device OOM while loading the weights (tp1 holds the whole model per rank)",
+      "command": "cell.sh l60-tp1cp4-ulysses-probe 4 ulysses 60 --bench-iters 0",
+      "expected_weights_gib_per_rank": 38.05384039878845,
+      "first_runtime_oom": {
+        "time": "2026-Oct-16 03:34:49.202344",
+        "request_bytes": 113246208
+      },
+      "allocator_at_oom_bytes": {
+        "allocated_max": 25643949568,
+        "total_hbm": 25769803776
+      },
+      "allocator_at_oom_gib": {
+        "allocated_max": 23.882789134979248,
+        "total_hbm": 24.0
+      },
+      "python_errors": [
+        "NRT EXECUTION FAILED: lazy::AllocBind: NRT_RESOURCE; no pending ops on stream to wait for (cannot defer), Failed to allocate resource"
+      ],
+      "raised_at": "difflet/backends/tpu/core/checkpoint.py load_checkpoint_into target.copy_ (ranks 2, 3), re-raised by collective_phase sync_status; ranks 0, 1 SIGTERM by torchrun",
+      "oom_warnings_in_log": 2812,
+      "exit_rc": 1,
+      "launch_wall_s": 996.860618633,
+      "device_healthy_after": "l4-tp2cp2-ulysses-postprobe: PASS, outputs torch.equal to l4-tp2cp2-ulysses, 0 compilations"
+    }
+  }
+}
