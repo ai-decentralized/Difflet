@@ -325,7 +325,9 @@ def _resolve_load_rank_range(
     start_rank_id: int | None,
     local_ranks_size: int | None,
 ) -> tuple[int | None, int | None]:
-    return get_backend("trainium").resolve_load_rank_range(
+    # The load-rank policy belongs to whichever backend is selected (D5/D11):
+    # Trainium maps one torchrun rank to one NeuronCore; CPU and CUDA pass through.
+    return get_backend().resolve_load_rank_range(
         start_rank_id=start_rank_id,
         local_ranks_size=local_ranks_size,
     )
