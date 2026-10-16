@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
-import os
 import re
 import shutil
 import sys
@@ -32,6 +31,13 @@ from difflet.cli.orchestrators.base import (
     require_request_shape_in_set,
     stage_toolchain_versions,
     write_stage_manifest,
+)
+from difflet.cli.orchestrators.torchrun import (
+    fallback_tracker as _fallback_tracker,
+    reject_unsupported_torchrun_options,
+    root_compile_cache_at_cache_dir,
+    torchrun_backend as _torchrun_backend,
+    torchrun_unsupported_options as _torchrun_unsupported_options,
 )
 
 # Model id comes from the CLI (--model-id); both Wan 2.2 A14B (MoE, dual
@@ -174,28 +180,6 @@ _TORCHRUN_APPLICATION_KWARGS = {
 }
 
 
-def _torchrun_backend() -> str | None:
-    """The non-AoT torchrun-MPMD backend DIFFLET_BACKEND names (neuron), else None.
-
-    The launcher's own opt-in rule (``runner._torchrun_mpmd_selected``): exactly when a Wan
-    stage runs as torchrun ranks, the transformer stage builds the backend's application through
-    DiffletPipeline, the VAE decodes on the host and the stage cache key names the backend.
-    """
-    if not runner._torchrun_mpmd_selected():
-        return None
-    from difflet.backends import get_backend
-
-    return get_backend(envs.DIFFLET_BACKEND).name
-
-
-_TEACACHE_FLAGS = (
-    ("--teacache-cadence", "teacache_cadence"),
-    ("--teacache-online-delta", "teacache_online_delta"),
-    ("--teacache-speedup", "teacache_speedup"),
-    ("--teacache-calibration", "teacache_calibration"),
-)
-
-
 def _replica_requests(args: argparse.Namespace, *, device):
     """The requests a torchrun replica runs, one at a time, every rank the same request.
 
@@ -251,19 +235,6 @@ def _replica_request_scope(args: argparse.Namespace, req):
         raise
 
 
-def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
-    """The options a torchrun backend's ranks reject in phase 1, as the command line names them.
-
-    The ranks keep their own checks (``_stage_transformer_neuron``'s request-batch check, the
-    neuron runtime's ``check_parallel_supported`` for dp, the application's
-    ``_reject_unsupported`` for TeaCache); this list lets the driver refuse the same options
-    before torchrun starts tp*cp*cfg processes that import torch only to fail. Torch-free.
-    """
-    found = []
-    found += [flag for flag, name in _TEACACHE_FLAGS if getattr(args, name, None) is not None]
-    return found
-
-
 def _dual_expert_misuse(args: argparse.Namespace, torchrun_backend: str | None) -> str | None:
     """Why --dual-expert / --guidance-scale-2 cannot run as given, else None. Torch-free.
 
@@ -301,16 +272,6 @@ def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
     return kwargs
 
 
-def _fallback_tracker(pipe):
-    """``track_fallbacks()`` for a pipeline on the neuron backend (it synchronizes the device);
-    an empty record otherwise."""
-    if getattr(getattr(pipe, "backend", None), "name", None) == "neuron":
-        from difflet.backends.neuron.runtime import track_fallbacks
-
-        return track_fallbacks()
-    return contextlib.nullcontext([])
-
-
 class WanOrchestrator(ModelOrchestrator):
 
     def download(self) -> None:
@@ -326,17 +287,10 @@ class WanOrchestrator(ModelOrchestrator):
         """A torchrun backend (neuron) asked for an option its ranks reject in phase 1: print
         one message naming it and exit 2 before anything is launched (or downloaded, for
         ``run``). The ranks' own checks stay (defence in depth)."""
-        found = _torchrun_unsupported_options(self.args)
-        if not found:
-            return
-        backend = _torchrun_backend()
-        if backend is None:
-            return
-        print(f"Error: the {backend} backend does not support {', '.join(found)} (it runs "
-              "tensor, sequence, CFG and context parallelism, one request per launch, no "
-              "TeaCache); "
-              "nothing was launched.", file=sys.stderr, flush=True)
-        raise SystemExit(2)
+        reject_unsupported_torchrun_options(
+            _torchrun_unsupported_options(self.args),
+            runs="tensor, sequence, CFG and context parallelism",
+        )
 
     def _reject_dual_expert_misuse(self) -> None:
         """--dual-expert off the neuron backend, or --guidance-scale-2 without it: print one
@@ -353,24 +307,9 @@ class WanOrchestrator(ModelOrchestrator):
         super().run()
 
     def _root_compile_cache_at_cache_dir(self) -> None:
-        """A torchrun backend (neuron) compiles into the NEFF and HLO caches that
-        ``runner.run_stage`` exports to its ranks under ``$DIFFLET_COMPILE_CACHE/neuron/``,
-        while --cache-dir holds only the stage manifest. With --cache-dir given and
-        DIFFLET_COMPILE_CACHE unset or empty, export --cache-dir (absolute) as
-        DIFFLET_COMPILE_CACHE before any stage launch, so the compile cache lives under it;
-        an exported DIFFLET_COMPILE_CACHE wins. Read from os.environ directly: envs fills in
-        the default when the variable is unset."""
-        cache_dir = getattr(self.args, "cache_dir", None)
-        if not cache_dir or os.environ.get("DIFFLET_COMPILE_CACHE"):
-            return
-        backend = _torchrun_backend()
-        if backend is None:
-            return
-        root = os.path.abspath(os.path.expanduser(cache_dir))
-        os.environ["DIFFLET_COMPILE_CACHE"] = root
-        print(f"[wan] backend {backend!r} compiles into --cache-dir: "
-              f"DIFFLET_COMPILE_CACHE={root} (NEFF and HLO caches under {root}/neuron)",
-              flush=True)
+        """--cache-dir roots a torchrun backend's NEFF/HLO compile cache
+        (``root_compile_cache_at_cache_dir``)."""
+        root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="wan")
 
     def compile(self) -> None:
         self._reject_unsupported_torchrun_options()

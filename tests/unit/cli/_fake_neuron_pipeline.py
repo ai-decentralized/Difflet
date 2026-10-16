@@ -1,6 +1,8 @@
-"""Test double for ``DiffletPipeline`` in the Wan CLI transformer stage on the neuron backend.
+"""Test double for ``DiffletPipeline`` in the Wan CLI transformer stage (and the Qwen-Image CLI
+generate stage) on the neuron backend.
 
-The stage (``WanOrchestrator._stage_transformer_neuron``) builds its application through
+The stage (``WanOrchestrator._stage_transformer_neuron``, ``QwenImageOrchestrator.
+_stage_generate_neuron``) builds its application through
 ``DiffletPipeline.from_pretrained``; this module replaces that classmethod with
 ``fake_from_pretrained``, which returns a ``FakePipeline`` around a ``FakeWanApp`` on the CPU: no
 weights, no device, no Neuron runtime. Not collected by pytest.
@@ -165,12 +167,13 @@ def install() -> None:
     writes (``torch.save``, ``write_stage_manifest``) with the writing rank."""
     import torch
 
+    import difflet.cli.orchestrators.qwen_image as qwen_mod
     import difflet.cli.orchestrators.wan as wan_mod
     from difflet.pipeline.difflet_pipeline import DiffletPipeline
 
     DiffletPipeline.from_pretrained = classmethod(fake_from_pretrained)
     real_save = torch.save
-    real_manifest = wan_mod.write_stage_manifest
+    real_manifest = wan_mod.write_stage_manifest  # the base module's, imported by both
 
     def recorded_save(obj, f, *args, **kwargs):
         RankRecord.writes.append({"kind": "torch.save", "path": str(f),
@@ -184,6 +187,7 @@ def install() -> None:
 
     torch.save = recorded_save
     wan_mod.write_stage_manifest = recorded_manifest
+    qwen_mod.write_stage_manifest = recorded_manifest
     atexit.register(RankRecord.write)
 
 
