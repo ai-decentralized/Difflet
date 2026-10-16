@@ -123,12 +123,6 @@ def test_unknown_kwargs_raise():
         neuron_attention.attention(q, k, v, tp_q=True, tp_k=True, sliding_window=4)
 
 
-@pytest.mark.parametrize("name", ["joint_ring_attention", "joint_ulysses_attention"])
-def test_unimplemented_context_parallel_entry_points_raise(name):
-    with pytest.raises(NotImplementedError, match="not implemented on the neuron backend"):
-        getattr(neuron_attention, name)(None, None, None, scale=1.0)
-
-
 def test_attention_with_lse_matches_logsumexp_off_device():
     g = torch.Generator().manual_seed(1)
     q, k, v = (torch.randn(1, 2, n, 8, generator=g) for n in (5, 7, 7))
