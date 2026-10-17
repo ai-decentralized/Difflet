@@ -28,12 +28,20 @@ CATEGORIES = ("gemm", "attention", "norm", "elementwise", "copy", "other")
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("copy", re.compile(r"Memcpy|Memset|copy_kernel|\bcopy\b", re.IGNORECASE)),
     ("attention", re.compile(r"flash|fmha|attention|sdpa|cudnn.*(fprop|attn)", re.IGNORECASE)),
-    ("gemm", re.compile(r"gemm|cutlass|cublas|matmul|nvjet", re.IGNORECASE)),
+    # Inductor's Triton GEMM templates (triton_tem_*) are GEMMs whatever their fused
+    # epilogue is called, so gemm is checked before norm.
+    (
+        "gemm",
+        re.compile(
+            r"gemm|cutlass|cublas|matmul|nvjet|triton_tem|\baddmm\b|\bbmm\b|\bmm\b", re.IGNORECASE
+        ),
+    ),
     ("norm", re.compile(r"norm|layer_norm|rms|RowwiseMoments", re.IGNORECASE)),
     (
         "elementwise",
         re.compile(
-            r"elementwise|vectorized|unrolled|reduce|softmax|index|where|cat\b|CatArray|fill",
+            r"elementwise|vectorized|unrolled|reduce|softmax|index|where|cat\b|CatArray|fill"
+            r"|triton_poi|triton_per|triton_red",
             re.IGNORECASE,
         ),
     ),
@@ -45,8 +53,28 @@ _NOT_A_KERNEL = re.compile(r"^aten::|^cuda[A-Z]|Command Buffer Full|^ProfilerSte
 
 def is_kernel(name: str) -> bool:
     """True for a device kernel row of ``key_averages()``; False for the aten op rows
-    (their device time is their kernels', counted once) and profiler markers."""
+    (their device time is their kernels', counted once) and profiler markers. Name-based;
+    ``kernel_events`` is the kind-based filter and is what the bench script uses."""
     return not _NOT_A_KERNEL.search(name)
+
+
+def kernel_events(rows: Iterable[Any]) -> list[tuple[str, float]]:
+    """``(name, self_device_time_us)`` for the device-kernel rows of ``prof.key_averages()``.
+
+    Rows are kept by *kind* (``device_type == CUDA``), not by name: an inductor Triton kernel
+    shows up twice under the same key — the Python launcher (CPU kind) and the kernel (CUDA
+    kind) — and an aten op row carries its kernels' time on the CPU kind.
+    """
+    from torch.autograd import DeviceType
+
+    out: list[tuple[str, float]] = []
+    for row in rows:
+        if getattr(row, "device_type", None) != DeviceType.CUDA:
+            continue
+        us = float(getattr(row, "self_device_time_total", 0.0) or 0.0)
+        if us > 0:
+            out.append((str(row.key), us))
+    return out
 
 
 def categorize_kernel(name: str) -> str:
@@ -108,4 +136,11 @@ def time_forward(fn: Callable[[], Any], *, warmup: int = 3, iters: int = 10) -> 
     }
 
 
-__all__ = ["CATEGORIES", "categorize_kernel", "is_kernel", "summarize_profile", "time_forward"]
+__all__ = [
+    "CATEGORIES",
+    "categorize_kernel",
+    "is_kernel",
+    "kernel_events",
+    "summarize_profile",
+    "time_forward",
+]
