@@ -83,6 +83,14 @@ def _init_linear_(weight: torch.Tensor, bias: torch.Tensor | None, fan_in: int) 
 class ColumnParallelLinear(nn.Module):
     """``y = x A^T + b`` with ``A`` split along its output dim."""
 
+
+    @property
+    def tensor_parallel_group(self):
+        """NxD's attribute: the process group this layer is sharded over (the TP group)."""
+        from difflet.backends.neuron.ops_impl.collectives import get_tp_group
+
+        return get_tp_group()
+
     def __init__(
         self,
         input_size,
@@ -134,6 +142,14 @@ class ColumnParallelLinear(nn.Module):
 
 class RowParallelLinear(nn.Module):
     """``y = x A^T + b`` with ``A`` split along its input dim."""
+
+
+    @property
+    def tensor_parallel_group(self):
+        """NxD's attribute: the process group this layer is sharded over (the TP group)."""
+        from difflet.backends.neuron.ops_impl.collectives import get_tp_group
+
+        return get_tp_group()
 
     def __init__(
         self,

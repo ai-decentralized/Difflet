@@ -159,8 +159,14 @@ def gather_from_tensor_model_parallel_region_with_dim(tensor, gather_dim: int, p
     return _gather_dim(tensor, gather_dim, process_group)
 
 
-def reduce_from_tensor_model_parallel_region(tensor):
-    return reduce_tp(tensor)
+def reduce_from_tensor_model_parallel_region(tensor, process_group=None):
+    """All-reduce (sum) over ``process_group`` (default: the TP group), as NxD's: model code may
+    pass a layer's ``tensor_parallel_group`` explicitly (Flux's single-stream blocks)."""
+    if process_group is None:
+        return reduce_tp(tensor)
+    if int(process_group.size()) == 1:
+        return tensor
+    return _wait(fc.all_reduce(tensor, "sum", process_group))
 
 
 def scatter_to_tensor_model_parallel_region(tensor, dim: int = -1):

@@ -1226,3 +1226,19 @@ def joint_cp_worker(rank: int, world_size: int, tp: int, mode: str) -> dict:
         "masked_txt_err": err(txt_masked, masked[:, :, JOINT_S_IMG:]),
         "head_error": head_error,
     }
+
+
+def flux_dit_worker(rank: int, world_size: int, model_dir: str) -> dict:
+    """The Flux DiT application at TP=world_size on CPU (eager), on the tiny checkpoint."""
+    from difflet.backends.neuron.flux.config import NeuronFluxConfig
+    from difflet.backends.neuron.flux.transformer import NeuronFluxTransformerApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_flux_toy import TINY_SHAPE, first, tiny_inputs
+
+    config = NeuronFluxConfig.from_pretrained(model_dir, tp_degree=world_size, **TINY_SHAPE)
+    app = NeuronFluxTransformerApplication(model_path=model_dir, config=config,
+                                           parallel=DiffletParallelConfig(tp_degree=world_size),
+                                           dtype=torch.float32, exec_mode="eager", device="cpu")
+    app.load()
+    out = first(app(**tiny_inputs(config)))
+    return {"out": out.tolist(), "report": app.load_report}
