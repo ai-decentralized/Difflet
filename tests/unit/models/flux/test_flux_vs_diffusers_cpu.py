@@ -5,18 +5,15 @@ proof is replaced by pinning the neutral modeling, driven by ``FluxDiTConfig`` a
 weights through ``convert_flux_hf_state_dict``, to the diffusers reference in fp32. A
 strict load proves the conversion produces exactly the module's parameter names.
 
-The single-stream block relies on two Trainium op contracts the CPU stand-ins do not
-honour (``RowParallelLinear(skip_bias_add=True)`` returning ``(out, bias)``, and
-``reduce_from_tensor_model_parallel_region(..., process_group=)``); the test bridges
-them exactly as ``test_flux_sp.py`` does. The CUDA ops (``_torch_megatron``) have the
-same two gaps, so the CUDA port has to close them for real.
+The single-stream block runs on the real CPU ops: ``RowParallelLinear(skip_bias_add=True)``
+returns ``(out, bias)`` and ``reduce_from_tensor_model_parallel_region`` takes
+``process_group=`` (closed for CPU, CUDA and the shared ``_torch_megatron`` layers in
+F5 Task 3), so no test-local bridge stands in for them.
 """
 
 import torch
-import torch.nn.functional as F
 from diffusers import FluxPipeline, FluxTransformer2DModel
 
-import difflet.models.flux.modeling_flux as mf
 from difflet.layers.embeddings import FluxPosEmbed
 from difflet.models.flux.dit_config import FluxDiTConfig
 from difflet.models.flux.modeling_flux import (
@@ -28,28 +25,7 @@ from difflet.models.flux.modeling_flux import (
 AXES_DIMS_ROPE = (2, 2, 4)
 
 
-class _FaithfulRowParallelLinear(mf.RowParallelLinear):
-    """CPU ``RowParallelLinear`` that returns ``(x @ W^T, bias)`` under ``skip_bias_add``."""
-
-    def __init__(self, input_size, output_size, bias=True, skip_bias_add=False, **kwargs):
-        super().__init__(input_size, output_size, bias=bias, **kwargs)
-        self._skip_bias_add = skip_bias_add
-        self.tensor_parallel_group = None
-
-    def forward(self, x):
-        if self._skip_bias_add:
-            return F.linear(x, self.weight), self.bias
-        return super().forward(x)
-
-
-def _cpu_reduce(tensor, process_group=None):
-    del process_group
-    return tensor
-
-
-def test_neutral_flux_dit_matches_diffusers_on_cpu(monkeypatch):
-    monkeypatch.setattr(mf, "RowParallelLinear", _FaithfulRowParallelLinear)
-    monkeypatch.setattr(mf, "reduce_from_tensor_model_parallel_region", _cpu_reduce)
+def test_neutral_flux_dit_matches_diffusers_on_cpu():
     torch.manual_seed(0)
     reference = FluxTransformer2DModel(
         patch_size=1,

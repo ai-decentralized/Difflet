@@ -160,8 +160,16 @@ def scatter_to_process_group_spmd(tensor, partition_dim: int, rank, process_grou
     return tensor.narrow(dim, int(rank) * shard, shard).contiguous()
 
 
-def reduce_from_tensor_model_parallel_region(tensor):
-    return reduce_tp(tensor)
+def reduce_from_tensor_model_parallel_region(tensor, process_group=None):
+    """All-reduce over ``process_group`` (replica lists, default the TP group).
+
+    ``process_group`` is what a ``RowParallelLinear`` exposes as
+    ``tensor_parallel_group`` (Flux's single block merges two reduces into this one).
+    """
+    groups = get_tp_groups() if process_group is None else process_group
+    if len(groups[0]) == 1:
+        return tensor
+    return _not_single_process("reduce_from_tensor_model_parallel_region")
 
 
 def scatter_to_tensor_model_parallel_region(tensor, dim: int = -1):

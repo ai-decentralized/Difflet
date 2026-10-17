@@ -93,3 +93,43 @@ def test_public_surface_matches_the_ops_contract():
     for module, mod in (("linear", L), ("norm", N), ("embeddings", E)):
         expected = {name for name, (m, _) in _EXPORTS.items() if m == module}
         assert expected <= set(mod.__all__), module
+
+
+# --- F5 task 3: the RowParallelLinear features NeuronFluxSingleTransformerBlock uses ---
+
+
+def test_row_parallel_skip_bias_add_returns_the_unbiased_output_and_the_bias():
+    layer = L.RowParallelLinear(16, 8, bias=True, input_is_parallel=True, skip_bias_add=True)
+    x = torch.randn(4, 16)
+    out, bias = layer(x)
+    assert bias is layer.bias
+    assert torch.allclose(out, F.linear(x, layer.weight))
+
+
+def test_row_parallel_skip_bias_add_without_bias_returns_none():
+    layer = L.RowParallelLinear(16, 8, bias=False, input_is_parallel=True, skip_bias_add=True)
+    x = torch.randn(4, 16)
+    out, bias = layer(x)
+    assert bias is None
+    assert torch.allclose(out, F.linear(x, layer.weight))
+
+
+def test_row_parallel_reduce_output_false_skips_the_all_reduce():
+    # At tp=2 the CUDA all-reduce raises F2, so not raising proves the reduce was skipped.
+    _reinit(MeshSpec(tp=2))
+    partial = L.RowParallelLinear(16, 8, bias=True, input_is_parallel=True, reduce_output=False)
+    x = torch.randn(4, 8)
+    # NxD semantics: the full bias is added to the un-reduced partial (the modeling's
+    # _sp_unbias corrects the tp-fold overcount after its own reduce).
+    assert torch.allclose(partial(x), F.linear(x, partial.weight) + partial.bias)
+
+    reducing = L.RowParallelLinear(16, 8, bias=True, input_is_parallel=True)
+    with pytest.raises(NotImplementedError, match="not supported"):
+        reducing(x)
+
+
+def test_row_parallel_exposes_its_tensor_parallel_group():
+    assert L.RowParallelLinear(16, 8).tensor_parallel_group is None
+    _reinit(MeshSpec(tp=2))
+    layer = L.RowParallelLinear(16, 8, input_is_parallel=True)
+    assert layer.tensor_parallel_group == pm.get_tp_groups() == [[0, 1]]
