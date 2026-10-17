@@ -165,8 +165,18 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "NeuronCore. Trainium (AoT): required for Wan clips beyond ~9 "
         "frames, whose single-shot compiled VAE graph exceeds the "
         "compiler instruction limit (NCC_EVRF007). --backend neuron: "
-        "optional; the VAE stage otherwise decodes eagerly in fp32 on "
-        "one core.",
+        "optional; Wan's VAE stage otherwise decodes eagerly in fp32 on "
+        "one core. Qwen-Image on --backend neuron decodes on the host by "
+        "default; --host-vae keeps it there when --device-vae is given or "
+        "the default changes.",
+    )
+    p.add_argument(
+        "--device-vae",
+        dest="device_vae",
+        action="store_true",
+        help="Qwen-Image on --backend neuron: decode in a VAE stage of its own on one "
+        "NeuronCore (fp32, eager), after the generate launch has exited, instead of on the "
+        "host CPU (the default for now). Mutually exclusive with --host-vae.",
     )
     p.add_argument(
         "--host-text-encoder",
