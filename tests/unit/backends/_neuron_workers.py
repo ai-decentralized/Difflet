@@ -1205,7 +1205,10 @@ def dp_replica_claims_worker(rank: int, world_size: int, requests_dir: str, fail
     import argparse
     from pathlib import Path
 
-    from difflet.cli.orchestrators.wan import _replica_request_scope, _replica_requests
+    from difflet.cli.orchestrators.torchrun import (
+        replica_request_scope as _replica_request_scope,
+    )
+    from difflet.cli.orchestrators.torchrun import replica_requests as _replica_requests
 
     args = argparse.Namespace(requests_dir=Path(requests_dir), worker_index=0,
                               dp_schedule="round_robin")

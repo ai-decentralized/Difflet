@@ -2,8 +2,10 @@
 backend (neuron): Wan (``wan.py``), Qwen-Image (``qwen_image.py``) and Flux (``flux.py``).
 
 Every helper is inert unless DIFFLET_BACKEND names such a backend (``torchrun_backend``), so
-unset, trainium and tpu keep their stage paths unchanged. Torch-free except ``fallback_tracker``,
-which runs in the ranks: the driver checks must not import torch before torchrun fans out.
+unset, trainium and tpu keep their stage paths unchanged. Torch-free except the helpers that run
+in the ranks (``fallback_tracker``, and ``replica_requests``/``replica_request_scope``, a DP
+replica's request queue), which import torch when called: the driver checks must not import
+torch before torchrun fans out.
 """
 from __future__ import annotations
 
@@ -46,30 +48,19 @@ def torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
 
     The ranks keep their own checks (the application's ``_reject_unsupported`` for TeaCache);
     this list lets the driver refuse the same options before torchrun starts tp*cp processes
-    that import torch only to fail. A model adds its own (Qwen-Image: request batches,
-    --cfg-parallel, several --shapes; Wan: several --shapes, since it runs SP and DP
-    replicas). Torch-free.
+    that import torch only to fail. A model adds its own (Qwen-Image: --cfg-parallel, several
+    --shapes; Wan: several --shapes). Both run SP and DP replicas. Torch-free.
     """
     return [flag for flag, name in TEACACHE_FLAGS if getattr(args, name, None) is not None]
-
-
-def batch_options(args: argparse.Namespace) -> list[str]:
-    """Request batches (--requests, a data-parallel worker), as the command line names them:
-    for a model whose torchrun ranks run no request queue. Torch-free."""
-    found = []
-    if getattr(args, "requests", None) is not None:
-        found.append("--requests")
-    if getattr(args, "requests_dir", None) is not None:
-        found.append("--requests/--dp (data-parallel worker)")
-    return found
 
 
 def reject_unsupported_torchrun_options(found: list[str], *, runs: str) -> None:
     """On a torchrun backend, ``found`` non-empty: print one message naming the options and exit
     2 before anything is launched (or downloaded, for ``run``). ``runs`` is what the model's
     ranks do support, request batching and TeaCache included ("tensor and context parallelism
-    at one static shape, one request per launch, no TeaCache"; Wan's and Flux's ranks run
-    TeaCache and DP replicas, so the phrase is the model's, not a fixed suffix). No-op on unset,
+    at one static shape, one request per launch, no TeaCache"; Wan's, Qwen-Image's and Flux's
+    DP workers drain a request queue, and Wan and Flux run TeaCache, so the phrase is the
+    model's, not a fixed suffix). No-op on unset,
     trainium and tpu, which support these options or reject them where they always did."""
     if not found:
         return
@@ -144,7 +135,7 @@ def replica_requests(args: argparse.Namespace, *, device):
 
 
 @contextlib.contextmanager
-def replica_request_scope(args: argparse.Namespace, req, *, final: bool):
+def replica_request_scope(args: argparse.Namespace, req, *, final: bool = False):
     """``stage_loop.request_scope`` for a torchrun replica: a failed request is marked failed
     once (rank 0) and every rank re-raises. A rank cannot skip a request its TP partners are
     still running: they would wait in a collective forever. With ``final`` (the stage that
