@@ -8,6 +8,7 @@ is the real model code.
 """
 
 import importlib
+import importlib.util
 import math
 import os
 
@@ -25,14 +26,20 @@ def _reload(name):
 
 
 # Reload only the flux modeling module so its `from difflet.ops import ...`
-# rebinds onto the cpu backend. Shared trainium core / difflet.layers modules are
-# imported normally — reloading them would replace classes that other test
-# modules (registry, wan, qwen) depend on and break them mid-session.
-import difflet.backends.trainium.core.config as _config_mod  # noqa: E402
+# rebinds onto the cpu backend. Shared difflet.layers modules are imported
+# normally — reloading them would replace classes that other test modules
+# (registry, wan, qwen) depend on and break them mid-session.
 import difflet.layers.normalization as _norm_mod  # noqa: E402
+from difflet.models.flux.dit_config import FluxDiTConfig  # noqa: E402
 mf = _reload("difflet.models.flux.modeling_flux")
 
-NeuronConfig = _config_mod.NeuronConfig
+# The Trainium wrapper classes (FluxBackboneInferenceConfig,
+# NeuronFluxBackboneApplication) live in difflet.models.flux.trainium_backbone,
+# which imports the NxD application stack; their tests run only where it imports.
+needs_neuron = pytest.mark.skipif(
+    importlib.util.find_spec("neuronx_distributed") is None,
+    reason="trainium_backbone imports the NxD application stack (neuronx_distributed)",
+)
 
 
 def _restore_backend_env():
@@ -78,9 +85,8 @@ def patched_markers(monkeypatch):
 
 
 def _backbone_config(num_layers=1, num_single_layers=0, guidance_embeds=False, **overrides):
-    nc = NeuronConfig(tp_degree=1, world_size=1, torch_dtype=torch.float32)
     kwargs = dict(
-        neuron_config=nc,
+        torch_dtype=torch.float32,
         attention_head_dim=HEAD_DIM,
         guidance_embeds=guidance_embeds,
         in_channels=4,
@@ -95,7 +101,29 @@ def _backbone_config(num_layers=1, num_single_layers=0, guidance_embeds=False, *
         out_channels=4,
     )
     kwargs.update(overrides)
-    return mf.FluxBackboneInferenceConfig(**kwargs)
+    return FluxDiTConfig(**kwargs)
+
+
+def _trainium_backbone_config(num_layers=1, num_single_layers=0, guidance_embeds=False):
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.models.flux.trainium_backbone import FluxBackboneInferenceConfig
+
+    nc = NeuronConfig(tp_degree=1, world_size=1, torch_dtype=torch.float32)
+    return FluxBackboneInferenceConfig(
+        neuron_config=nc,
+        attention_head_dim=HEAD_DIM,
+        guidance_embeds=guidance_embeds,
+        in_channels=4,
+        joint_attention_dim=DIM,
+        num_attention_heads=HEADS,
+        num_layers=num_layers,
+        num_single_layers=num_single_layers,
+        patch_size=1,
+        pooled_projection_dim=8,
+        height=16,
+        width=16,
+        out_channels=4,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -274,10 +302,11 @@ def test_full_model_out_channels_defaults_to_in_channels():
 
 
 # --------------------------------------------------------------------------
-# FluxBackboneInferenceConfig
+# FluxBackboneInferenceConfig (Trainium wrapper)
 # --------------------------------------------------------------------------
+@needs_neuron
 def test_backbone_config_required_attributes():
-    config = _backbone_config()
+    config = _trainium_backbone_config()
     required = config.get_required_attributes()
     for attr in required:
         assert hasattr(config, attr)
@@ -286,10 +315,14 @@ def test_backbone_config_required_attributes():
     assert config.context_parallel_enabled is False
 
 
+@needs_neuron
 def test_backbone_config_mutual_exclusivity_raises():
+    from difflet.backends.trainium.core.config import NeuronConfig
+    from difflet.models.flux.trainium_backbone import FluxBackboneInferenceConfig
+
     nc = NeuronConfig(tp_degree=1, world_size=1, torch_dtype=torch.float32)
     with pytest.raises(ValueError):
-        mf.FluxBackboneInferenceConfig(
+        FluxBackboneInferenceConfig(
             neuron_config=nc,
             cfg_parallel_enabled=True,
             context_parallel_enabled=True,
@@ -307,15 +340,18 @@ def test_backbone_config_mutual_exclusivity_raises():
         )
 
 
+@needs_neuron
 def test_backbone_convert_hf_to_neuron_state_dict_splits_single_blocks():
-    config = _backbone_config(num_single_layers=1)
+    from difflet.models.flux.trainium_backbone import NeuronFluxBackboneApplication
+
+    config = _trainium_backbone_config(num_single_layers=1)
     inner_dim = config.num_attention_heads * config.attention_head_dim
     sd = {
         "single_transformer_blocks.0.proj_out.weight": torch.randn(DIM, inner_dim + 7),
         "single_transformer_blocks.0.proj_out.bias": torch.randn(DIM),
     }
-    out = mf.NeuronFluxBackboneApplication.convert_hf_to_neuron_state_dict(dict(sd), config)
+    out = NeuronFluxBackboneApplication.convert_hf_to_neuron_state_dict(dict(sd), config)
     assert "single_transformer_blocks.0.proj_out_attn.weight" in out
     assert "single_transformer_blocks.0.proj_out_mlp.weight" in out
     assert "global_rank.rank" in out
-    assert mf.NeuronFluxBackboneApplication.update_state_dict_for_tied_weights({}) is None
+    assert NeuronFluxBackboneApplication.update_state_dict_for_tied_weights({}) is None

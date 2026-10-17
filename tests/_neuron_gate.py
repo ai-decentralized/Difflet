@@ -53,7 +53,6 @@ NEURON_COLLECT_IGNORE = [
     "unit/layers/test_normalization.py",
     "unit/models/flux/test_flux_application.py",
     "unit/models/flux/test_flux_clip.py",
-    "unit/models/flux/test_flux_modeling.py",
     "unit/models/flux/test_flux_sp.py",
     "unit/models/flux/test_flux_t5.py",
     "unit/models/flux/test_flux_teacache_probe_keys.py",
