@@ -46,6 +46,8 @@ LINGER_S = 1.5
 CALLS: list[dict[str, Any]] = []
 #: The ``backend.name`` the fake pipeline reports; "neuron" makes the stage track fallbacks.
 BACKEND_NAME = "cpu"
+#: A request with this prompt raises in the fake app's call, on every rank (a failing request).
+FAIL_PROMPT = "fail on every rank"
 
 
 def _rank_world() -> tuple[int, int]:
@@ -88,6 +90,8 @@ class FakeWanApp:
         generator = kwargs["generator"]
         self.calls.append({**{k: v for k, v in kwargs.items() if k != "generator"},
                            "seed": generator.initial_seed()})
+        if kwargs.get("prompt") == FAIL_PROMPT:
+            raise RuntimeError(f"fake failure on {FAIL_PROMPT!r}")
         latents = torch.randn(LATENT_SHAPE, generator=generator, dtype=torch.float32)
         if dist.is_available() and dist.is_initialized():
             world = dist.get_world_size()
@@ -212,3 +216,51 @@ def write_sitecustomize(directory) -> Path:
 
 def read_rank_records(directory) -> list[dict[str, Any]]:
     return [json.loads(p.read_text()) for p in sorted(Path(directory).glob("rank*.json"))]
+
+
+# ------------------------------------------------------------- gloo replica (run_ranks)
+
+
+def qwen_replica_worker(rank: int, world_size: int, work_dir: str, requests_dir: str) -> dict:
+    """One Qwen-Image DP replica of ``world_size`` gloo ranks: ``_stage_generate`` on the neuron
+    path with this fake pipeline, draining ``requests_dir`` as DP worker 0. Returns the prompts
+    the rank ran, the files it saved and the stage's error, if any. The stage destroys the
+    process group after a successful run; the gloo runner does that itself here."""
+    import argparse
+
+    import torch
+    import torch.distributed as dist
+
+    os.environ["DIFFLET_BACKEND"] = "neuron"
+    import difflet.cli.orchestrators.qwen_image as qwen_mod
+    from difflet.pipeline.difflet_pipeline import DiffletPipeline
+
+    DiffletPipeline.from_pretrained = classmethod(fake_from_pretrained)
+    saved: list[str] = []
+    real_save = torch.save
+
+    def recorded_save(obj, f, *args, **kwargs):
+        saved.append(Path(f).name)
+        return real_save(obj, f, *args, **kwargs)
+
+    args = argparse.Namespace(
+        model_id="Qwen/Qwen-Image", tp_degree=world_size, cp_degree=1, cp_mode="gather_kv",
+        cfg_parallel=False, sp_enabled=False, height=1024, width=1024, num_frames=None,
+        shapes=None, cache_dir=None, revision=None, prompt=None, output=None, steps=2,
+        guidance_scale=4.0, seed=42, stage_mode="generate", work_dir=work_dir,
+        requests_dir=requests_dir, worker_index=0, dp_schedule="round_robin",
+    )
+    error = None
+    keep_destroy = dist.destroy_process_group
+    dist.destroy_process_group = lambda *a, **k: None
+    torch.save = recorded_save
+    try:
+        qwen_mod.QwenImageOrchestrator(args)._stage_generate(args)
+    except RuntimeError as exc:
+        error = str(exc)
+    finally:
+        dist.destroy_process_group = keep_destroy
+        torch.save = real_save
+    app = CALLS[-1]["pipeline"].app
+    return {"prompts": [c["prompt"] for c in app.calls], "seeds": [c["seed"] for c in app.calls],
+            "saved": saved, "error": error, "loads": len(app.load_calls)}
