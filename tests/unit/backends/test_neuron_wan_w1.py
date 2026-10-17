@@ -575,10 +575,61 @@ def test_cfg_parallel_on_four_ranks_matches_tp1(tiny):
                                atol=1e-4, rtol=1e-4)
 
 
-def test_cfg_parallel_refuses_the_device_text_encoder(tiny):
-    with pytest.raises(ValueError, match="encode on the host"):
-        _composed(tiny, parallel=DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
-                  text_encoder_device="neuron")
+def _umt5_budget_between(monkeypatch, root, fits, fails):
+    """A per-core budget (DIFFLET_NEURON_HBM_GIB, which also turns the check on off the device)
+    that the umT5 + DiT estimate at ``fits`` = (tp, experts) meets and at ``fails`` exceeds.
+    The DiT is counted in fp32, the dtype the CPU tests load."""
+    from difflet.backends.neuron.hbm import FIT_FRACTION, GIB
+    from difflet.backends.neuron.wan.hbm import device_text_encoder_bytes
+
+    low, high = (device_text_encoder_bytes(root, tp_degree=tp, experts=experts, dit_dtype_bytes=4)
+                 for tp, experts in (fits, fails))
+    assert low < high
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", repr((low + high) / 2 / FIT_FRACTION / GIB))
+
+
+@pytest.mark.parametrize("parallel", [
+    DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
+    DiffletParallelConfig(tp_degree=2, cp_degree=2, cp_mode="ulysses"),
+    DiffletParallelConfig(tp_degree=2),  # one dp2tp2 replica, or a plain tp2
+], ids=["tp2-cfg2", "tp2-cp2", "tp2"])
+def test_a_narrow_tp_refuses_the_device_text_encoder(tiny, monkeypatch, parallel):
+    """The check follows tp and the checkpoint's sizes, not the mode flags: wherever the TP
+    group is too narrow for umT5 to fit beside the DiT, construction fails, before any load."""
+    from difflet.backends.neuron.hbm import HbmBudgetError
+
+    one = ("transformer",)
+    _umt5_budget_between(monkeypatch, tiny.dir, fits=(4, one), fails=(2, one))
+    with pytest.raises(HbmBudgetError, match=r"at tp=2 .*encode on the host \(text_encoder_dev"):
+        _composed(tiny, parallel=parallel, text_encoder_device="neuron")
+    app = _composed(tiny, parallel=DiffletParallelConfig(tp_degree=4),
+                    text_encoder_device="neuron")  # tp4 fits
+    assert isinstance(app.text_encoder, na._DeviceTextEncoder)
+    host = _composed(tiny, parallel=parallel, text_encoder_device="host")  # the host is fine
+    assert isinstance(host.text_encoder, na._HostTextEncoder)
+    # Without the DiT on the core the encoder alone fits.
+    alone = _composed(tiny, parallel=parallel, text_encoder_device="neuron",
+                      enable_transformer=False)
+    assert isinstance(alone.text_encoder, na._DeviceTextEncoder)
+
+
+def test_without_a_budget_the_cpu_does_not_check_the_device_text_encoder(tiny):
+    # On the CPU (no DIFFLET_NEURON_HBM_GIB) there is no HBM to check: the gloo tests run it.
+    app = _composed(tiny, parallel=DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
+                    text_encoder_device="neuron")
+    assert isinstance(app.text_encoder, na._DeviceTextEncoder)
+
+
+def test_the_low_noise_expert_counts_against_the_device_text_encoder(tiny22, monkeypatch):
+    from difflet.backends.neuron.hbm import HbmBudgetError
+
+    _umt5_budget_between(monkeypatch, tiny22.dir, fits=(4, ("transformer",)),
+                         fails=(4, ("transformer", "transformer_2")))
+    four = DiffletParallelConfig(tp_degree=4)
+    _composed(tiny22, parallel=four, text_encoder_device="neuron")
+    with pytest.raises(HbmBudgetError, match=r"transformer, transformer_2\) on one core"):
+        _composed(tiny22, parallel=four, text_encoder_device="neuron",
+                  enable_transformer_2=True)
 
 
 # ---- context parallelism (TP2 x CP2) -----------------------------------------------------

@@ -166,7 +166,9 @@ def _require_request_shape_in_set(args: argparse.Namespace):
 # TorchNeuronWanApplication keyword arguments for the torchrun transformer stage: the Trainium
 # stage's set, exec_mode=None (the application reads DIFFLET_EXEC_MODE, which --exec-mode
 # exports), umT5 on the device (fp32, TP-sharded; --host-text-encoder keeps it on rank 0's
-# host) and, for the host encoder, 12 threads (D70: its fp32 output bits depend on the count).
+# host, and the driver sets that flag itself when the TP group is too narrow for the encoder to
+# fit beside the DiT: WanOrchestrator._place_text_encoder) and, for the host encoder, 12 threads
+# (D70: its fp32 output bits depend on the count).
 _TORCHRUN_APPLICATION_KWARGS = {
     "text_seq_len": 512,
     "batch_size": 1,
@@ -301,6 +303,45 @@ class WanOrchestrator(ModelOrchestrator):
         print(f"Error: {problem}; nothing was launched.", file=sys.stderr, flush=True)
         raise SystemExit(2)
 
+    def _place_text_encoder(self) -> None:
+        """On a torchrun backend (neuron), move umT5 to rank 0's host when it cannot fit on the
+        device beside the DiT at this TP degree, and print one line saying so.
+
+        The CLI default is the device encoder (``_TORCHRUN_APPLICATION_KWARGS``). A topology that
+        narrows the TP group (``--cfg-parallel`` or ``--cp-degree>1`` with ``--tp-degree 2``,
+        ``--mode latency``'s CFG, DP replicas of tp2, a plain tp2) leaves each core at least
+        10.6 GiB of fp32 encoder beside 13.3 GiB of DiT, more than its HBM. Before this check the
+        application refused it only after torchrun had started every rank. The estimate
+        (``difflet/backends/neuron/wan/hbm.py``) depends on the tp the transformer stage runs and
+        the local checkpoint's sizes. Weights that are not local yet (``compile`` before any
+        download) leave the flag alone, and the application's own check still refuses. The
+        setting lands on ``self.args``, so ``_shared_cli_args`` hands it to the stages, and a
+        ``run`` that dispatches DP workers after ``compile`` forwards it to them
+        (``worker_cli_args``). Torch-free, like every driver check.
+        """
+        args = self.args
+        if _torchrun_backend() is None or getattr(args, "host_text_encoder", False):
+            return
+        from difflet.backends.neuron.hbm import GIB
+        from difflet.backends.neuron.wan.hbm import device_text_encoder_fits
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        try:
+            model_dir = resolve_model_path(args.model_id, revision=args.revision,
+                                           local_files_only=True)
+        except OSError:
+            return
+        tp = args.tp_degree or 4
+        experts = (("transformer", "transformer_2") if getattr(args, "dual_expert", False)
+                   else ("transformer",))
+        fits, estimate, limit = device_text_encoder_fits(model_dir, tp_degree=tp, experts=experts)
+        if fits:
+            return
+        args.host_text_encoder = True
+        print(f"[wan] umT5 on the device needs at least {estimate / GIB:.1f} GiB per core beside "
+              f"the DiT at tp={tp}, over the {limit / GIB:.1f} GiB budget: encoding on rank 0's "
+              "host instead (--host-text-encoder)", flush=True)
+
     def run(self) -> None:
         self._reject_unsupported_torchrun_options()  # before the download, too
         self._reject_dual_expert_misuse()
@@ -314,6 +355,7 @@ class WanOrchestrator(ModelOrchestrator):
     def compile(self) -> None:
         self._reject_unsupported_torchrun_options()
         self._reject_dual_expert_misuse()
+        self._place_text_encoder()
         self._root_compile_cache_at_cache_dir()
         full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1) * (
             2 if getattr(self.args, "cfg_parallel", False) else 1
@@ -332,6 +374,7 @@ class WanOrchestrator(ModelOrchestrator):
     def generate(self) -> None:
         self._reject_unsupported_torchrun_options()
         self._reject_dual_expert_misuse()
+        self._place_text_encoder()
         self._root_compile_cache_at_cache_dir()
         _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(self.args.work_dir or
