@@ -58,10 +58,17 @@ and ``TORCH_NEURONX_METRICS_DIR=<dir>`` (torch-neuronx writes
 
 Checks (on every rank; rank 0 prints one PASS/FAIL line per check, each rank ``[rank r] PASS``):
 
-* checkpoint: every parameter found, no unexpected tensor; heads_per_rank: heads / 4;
+* checkpoint: every parameter found, no unexpected tensor (blocks past ``--num-layers`` are
+  ``skipped``); heads_per_rank: heads / tp;
 * fallbacks: ``track_fallbacks()`` around the warm-up and around the forwards is ``[]``;
   unwarmed_shapes: ``[]`` (recorded by the application in compile mode only);
   forward_shapes: every forward's device inputs have the warm-up's shapes (in eager mode too);
+* ranks_identical: the sha256 of every rank's outputs equals rank 0's. The TP all-reduces
+  replicate the output and CP gathers the sequence back, so each rank holds the full output.
+  The hashes are all-gathered over a gloo side group (``gather_hashes``). cp_scatter: the
+  block stack carries ``image_seq_len / cp`` tokens per rank in every forward (``/ tp`` again
+  under ``--sp``; read where the stack hands them to ``norm_out``), positive evidence that the
+  sequence scatter happened;
 * parity_fp32_t<ts>: ``parity.check`` against the fp32 reference with the bf16 control, at the
   TPU thresholds (cosine >= 0.995, rel_l1 <= 1.15x the control's, same-dtype <= 1.2x). The
   same-dtype limit is gated only when the output's error has cosine ``err_cos`` >= 0.5 with
@@ -98,8 +105,14 @@ Checks (on every rank; rank 0 prints one PASS/FAIL line per check, each rank ``[
   ``--expect`` requires ``--eager-dir``, so a cold or warm compile launch is never judged
   without the vs-eager guard.
 
-The reference is read and checked (its timesteps, its frame count against ``--num-frames``)
-before any device work, so a wrong ``--ref`` fails in seconds rather than after the 14B load.
+``--num-layers N`` builds and loads only the first N blocks of the real checkpoint, as the
+Qwen-Image preflight does: a 4-block 14B run checks the code path, the collectives and parity
+in minutes. The reference must be computed with the same depth (``tpu_oracle_reference.py wan
+--num-layers N``, recorded as ``num_layers``).
+
+The reference is read and checked (its timesteps, its frame count against ``--num-frames``, its
+depth against ``--num-layers``) before any device work, so a wrong ``--ref`` fails in seconds
+rather than after the 14B load.
 
 The process group is destroyed only when every check passed (a failing rank exits non-zero and
 torchrun stops its peers). ``--inject-fail-rank R`` tests exactly that (review focus 4 of the
@@ -175,7 +188,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--width", type=int, default=832)
     p.add_argument("--num-frames", type=int, default=9)
     p.add_argument("--text-seq-len", type=int, default=512)
+    p.add_argument("--num-layers", type=int, default=None,
+                   help="build only the first N blocks of the checkpoint (default: every "
+                        "block); the --ref must have been computed with the same --num-layers")
     args = p.parse_args()
+    if args.num_layers is not None and args.num_layers < 1:
+        p.error(f"--num-layers must be at least 1, got {args.num_layers}")
     if args.expect is not None and args.exec_mode != "compile":
         p.error("--expect applies to --exec-mode compile")
     if args.expect is not None and args.cache_dir is None:
@@ -418,6 +436,36 @@ def sha256(tensor: torch.Tensor) -> str:
     return hashlib.sha256(tensor.contiguous().numpy().tobytes()).hexdigest()
 
 
+def gather_hashes(hashes: dict[str, str], world: int) -> list[dict[str, str]]:
+    """Every rank's output hashes, in rank order, over a gloo side group (host objects only:
+    the neuron group carries device tensors). The Qwen-Image preflight's helper."""
+    import torch.distributed as dist
+
+    if world <= 1 or not dist.is_initialized():
+        return [hashes]
+    group = dist.new_group(backend="gloo")
+    gathered: list[Any] = [None] * world
+    dist.all_gather_object(gathered, hashes, group=group)
+    dist.destroy_process_group(group)
+    return gathered
+
+
+def reference_depth(blob: dict[str, Any], transformer_dir: Path,
+                    num_layers: int | None) -> tuple[int, int]:
+    """``(reference blocks, this run's blocks)``. A ``None`` on either side means the
+    checkpoint's every block (references written before ``--num-layers`` hold every block)."""
+    total = int(json.loads((transformer_dir / "config.json").read_text())["num_layers"])
+    ref_layers = blob.get("num_layers")
+    return (total if ref_layers is None else int(ref_layers),
+            total if num_layers is None else int(num_layers))
+
+
+def expected_block_tokens(image_seq_len: int, *, tp: int, cp: int, sp: bool) -> int:
+    """The sequence length the block stack carries on each rank: CP scatters the patch tokens
+    over the CP group, SP over the TP group (the two are exclusive)."""
+    return image_seq_len // cp // (tp if sp else 1)
+
+
 def delta(after: dict[str, Any], before: dict[str, Any]) -> dict[str, int]:
     return {k: after["counters"][k] - before["counters"][k] for k in after["counters"]}
 
@@ -454,6 +502,11 @@ def main() -> int:
     if blob.get("frames") != args.num_frames:
         raise ValueError(f"{args.ref} was computed at {blob.get('frames')} frames, this run "
                          f"is --num-frames {args.num_frames}; recompute the reference")
+    ref_layers, run_layers = reference_depth(blob, args.model_dir / args.expert, args.num_layers)
+    if ref_layers != run_layers:
+        raise ValueError(f"{args.ref} was computed with {ref_layers} blocks, this run builds "
+                         f"{run_layers}; recompute the reference with tpu_oracle_reference.py "
+                         f"wan --num-layers {run_layers}")
     for flag, directory in (("--eager-dir", args.eager_dir), ("--cold-dir", args.cold_dir)):
         absent = [f"out-t{ts:g}.pt" for ts in args.timesteps
                   if directory is not None and not (directory / f"out-t{ts:g}.pt").is_file()]
@@ -507,6 +560,7 @@ def main() -> int:
         num_frames=args.num_frames, text_seq_len=args.text_seq_len, torch_dtype=torch.bfloat16,
         context_parallel_enabled=cp > 1, cp_mode=args.cp_mode if cp > 1 else "gather_kv",
         sp_enabled=args.sp,
+        **({} if args.num_layers is None else {"num_layers": args.num_layers}),
     )
     app = NeuronWanTransformerApplication(
         model_path=transformer_dir, config=config, parallel=parallel, dtype=torch.bfloat16,
@@ -535,6 +589,13 @@ def main() -> int:
         forward_shapes.append([tuple(a.shape) for a in device_args])
         return app(*device_args)
 
+    # The sequence the block stack carried is this rank's shard after the CP (or SP) scatter:
+    # positive evidence that the scatter happened. It is read where the stack hands it to
+    # norm_out, which runs eager in both modes. A hook on a block would run inside the block's
+    # compiled region and break its graph.
+    block_tokens: list[int] = []
+    scatter_hook = app.module.norm_out.register_forward_pre_hook(
+        lambda _mod, norm_args: block_tokens.append(int(norm_args[0].shape[1])))
     adapter = _OnDeviceTransformer(module, config, torch.bfloat16, app.device)
     forward_s: list[float] = []
     adapter.forward_hook = forward_s.append
@@ -544,7 +605,10 @@ def main() -> int:
             out = adapter(blob["hidden_states"], runs[ts]["timestep"],
                           blob["encoder_hidden_states"])
             outputs[ts] = out.float()
+    scatter_hook.remove()
     snaps["end"] = snapshot(t0)
+    output_hashes = {f"{ts:g}": sha256(out) for ts, out in outputs.items()}
+    all_hashes = gather_hashes(output_hashes, world)
     if args.exec_mode == "compile":
         breakdown["end"] = compile_breakdown()
     evidence = parity.device_evidence(app, fallbacks)
@@ -555,11 +619,26 @@ def main() -> int:
     report = app.load_report or {}
     checks.append(("checkpoint", not report.get("missing") and not report.get("unexpected"),
                    f"missing={len(report.get('missing', []))} "
-                   f"unexpected={len(report.get('unexpected', []))}"))
+                   f"unexpected={len(report.get('unexpected', []))} "
+                   f"skipped={len(report.get('skipped', []))}"))
     attn = app.module.blocks[0].attn1
-    heads_per_rank = config.num_attention_heads // world
+    # TP shards the heads; CP shards the sequence (Ulysses swaps heads for sequence inside the
+    # attention only), so a block's attention holds heads / tp.
+    heads_per_rank = config.num_attention_heads // tp
     checks.append(("heads_per_rank", attn.local_heads == heads_per_rank,
-                   f"local_heads={attn.local_heads} (={config.num_attention_heads}/{world})"))
+                   f"local_heads={attn.local_heads} (={config.num_attention_heads}/tp {tp})"))
+    differ = sorted(r for r, h in enumerate(all_hashes) if h != all_hashes[0])
+    checks.append(("ranks_identical", len(all_hashes) == world and not differ,
+                   f"{len(all_hashes)} ranks, sha256 of every output equal to rank 0's"
+                   + (f"; differ on ranks {differ}" if differ else "")
+                   + f" (t{next(iter(output_hashes))} {next(iter(output_hashes.values()))[:12]})"))
+    expected_tokens = expected_block_tokens(config.image_seq_len, tp=tp, cp=cp, sp=args.sp)
+    checks.append(("cp_scatter",
+                   len(block_tokens) == len(args.timesteps)
+                   and all(n == expected_tokens for n in block_tokens),
+                   f"tokens per rank through the blocks {block_tokens} (expected "
+                   f"{config.image_seq_len}/cp {cp}" + (f"/tp {tp}" if args.sp else "")
+                   + f" = {expected_tokens})"))
     checks.append(("fallbacks", evidence["fallbacks"] == [] and warmup_fallbacks == [],
                    f"forwards={evidence['fallbacks']} warm-up={warmup_fallbacks}"))
     checks.append(("unwarmed_shapes", evidence["unwarmed_shapes"] == [],
@@ -717,7 +796,10 @@ def main() -> int:
             "DIFFLET_DISABLE_PREWARM", "TORCH_NEURONX_ENABLED_METRIC_TABLES",
             "TORCH_NEURONX_METRICS_DIR")},
         "torch_threads": torch.get_num_threads(),
-        "config": {"num_layers": config.num_layers, "dim": config.num_attention_heads
+        "config": {"num_layers": config.num_layers,
+                   "checkpoint_num_layers": config.checkpoint_num_layers,
+                   "tp": tp, "cp": cp, "sp": args.sp,
+                   "dim": config.num_attention_heads
                    * config.attention_head_dim, "heads": config.num_attention_heads,
                    "heads_per_rank": heads_per_rank, "ffn_dim": config.ffn_dim,
                    "image_seq_len": config.image_seq_len, "text_seq_len": config.text_seq_len,
@@ -757,6 +839,8 @@ def main() -> int:
         "sysfs_device_memory": sysfs_device_memory(logical_core),
         "outputs": {f"{ts:g}": {"sha256": sha256(out), "shape": list(out.shape)}
                     for ts, out in outputs.items()},
+        "all_rank_hashes": all_hashes,
+        "block_tokens_per_rank": block_tokens,
         "compiled_blocks": len(app.compiled_blocks),
         "load_report": {k: len(v) for k, v in report.items()},
     }
@@ -772,7 +856,8 @@ def main() -> int:
                       + str([(b["neff_size_bytes"], round(b["compilation_time_ms"] / 1e3, 1))
                              for b in blocks]) + " ")
     print(f"[rank {rank}] {'PASS' if ok else 'FAIL'} {args.exec_mode}"
-          f"{'/' + args.expect if args.expect else ''} warmup_forward={warmup_s:.1f}s "
+          f"{'/' + args.expect if args.expect else ''} layers={config.num_layers} tp={tp} "
+          f"cp={cp} warmup_forward={warmup_s:.1f}s "
           f"load_checkpoint={app.phase_seconds['load checkpoint']:.1f}s "
           f"forwards={[round(s, 2) for s in forward_s]} run_counters={run_delta} "
           f"forward_counters={forwards_delta} new_neffs={new_neffs} {block_line}"
