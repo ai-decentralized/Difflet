@@ -1020,6 +1020,10 @@ _REJECTED = [
     (dict(cp_degree=2, cp_mode="ring", sp_enabled=True, teacache_cadence=3,
           teacache_online_delta=0.5),
      "--teacache-cadence, --teacache-online-delta"),
+    # One static shape per process: a bucketed set failed only once every rank had started.
+    (dict(shapes="480x832x9,480x832x5"), "--shapes with more than one shape"),
+    (dict(shapes="480x832x9, 480x832x5", teacache_cadence=2),
+     "--teacache-cadence, --shapes with more than one shape"),
 ]
 
 
@@ -1058,7 +1062,7 @@ def test_neuron_driver_rejects_unsupported_options_before_any_launch(monkeypatch
 
 @pytest.mark.parametrize("overrides", [
     {}, dict(tp_degree=2, steps=50, guidance_scale=5.0, seed=7), dict(cp_mode="ring"),
-    dict(host_vae=True),
+    dict(host_vae=True), dict(shapes="480x832x9"),
 ])
 def test_neuron_driver_lets_supported_options_through(monkeypatch, tmp_path, capsys, overrides):
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
