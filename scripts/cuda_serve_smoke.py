@@ -4,7 +4,10 @@ Starts ``difflet serve --model-id Qwen/Qwen-Image`` with ``DIFFLET_BACKEND=cuda`
 subprocess, polls ``GET /ready`` (the worker loads the model and runs its 4-step startup smoke
 first), POSTs one ``/v1/chat/completions`` request, saves the PNG, and writes
 ``serve_timings.json`` next to it (``ready_s``, ``request_s``). With ``--requests 2`` the second
-request proves the model stays resident (its ``request_s`` carries no load).
+request proves the model stays resident (its ``request_s`` carries no load). The snapshot must
+already be in the HF cache (``hf download Qwen/Qwen-Image``): ``ready_s`` is load + the 4-step
+startup smoke, and the 900 s startup timeout is not sized for a 54 GB download. Honours
+``DIFFLET_API_KEY`` and an S3 artifact store configured through the repo-root ``.env``.
 
     DIFFLET_BACKEND=cuda python scripts/cuda_serve_smoke.py --output /tmp/qwen-serve.png --steps 50
 """
@@ -48,6 +51,24 @@ def decode_image_data_url(url: str) -> bytes:
     return base64.b64decode(url[len(prefix) :])
 
 
+def fetch_image_bytes(url: str, *, opener=urllib.request.urlopen, timeout: float = 60.0) -> bytes:
+    """The PNG behind a chat response: inline data URL, or the http(s) URL an S3 artifact
+    store returns when the server's ``.env`` configures one."""
+    if url.startswith("data:"):
+        return decode_image_data_url(url)
+    if url.startswith(("http://", "https://")):
+        with opener(url, timeout=timeout) as resp:
+            return resp.read()
+    raise ValueError(f"unsupported image URL {url[:40]!r}")
+
+
+def request_headers(api_key: str | None) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
 def image_url_from_response(body: dict) -> str:
     try:
         content = body["choices"][0]["message"]["content"]
@@ -83,12 +104,14 @@ def wait_for_ready(base_url: str, *, timeout: float, process: subprocess.Popen) 
     raise TimeoutError(f"difflet serve not ready after {timeout:.0f} s")
 
 
-def post_chat(base_url: str, body: dict, *, timeout: float) -> tuple[dict, float]:
+def post_chat(
+    base_url: str, body: dict, *, timeout: float, api_key: str | None = None
+) -> tuple[dict, float]:
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         f"{base_url}/v1/chat/completions",
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers=request_headers(api_key),
         method="POST",
     )
     start = time.monotonic()
@@ -113,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     cmd, env = serve_command(port=args.port, cache_dir=args.cache_dir)
+    api_key = os.environ.get("DIFFLET_API_KEY") or None  # the server reads the same variable
     base_url = f"http://127.0.0.1:{args.port}"
     print(f"[serve-smoke] starting: {' '.join(cmd)}", flush=True)
     process = subprocess.Popen(cmd, env=env, start_new_session=True)
@@ -128,8 +152,10 @@ def main(argv: list[str] | None = None) -> int:
         out = pathlib.Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
         for index in range(max(1, int(args.requests))):
-            payload, request_s = post_chat(base_url, body, timeout=args.request_timeout)
-            png = decode_image_data_url(image_url_from_response(payload))
+            payload, request_s = post_chat(
+                base_url, body, timeout=args.request_timeout, api_key=api_key
+            )
+            png = fetch_image_bytes(image_url_from_response(payload))
             path = out if index == 0 else out.with_name(f"{out.stem}-{index + 1}{out.suffix}")
             path.write_bytes(png)
             timings["requests"].append({"request_s": round(request_s, 1), "image": str(path)})

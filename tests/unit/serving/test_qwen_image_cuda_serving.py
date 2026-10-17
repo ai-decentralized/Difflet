@@ -14,6 +14,9 @@ from difflet.serving.options import CompilePolicy, DownloadPolicy
 from difflet.serving.orchestrators import qwen_image_cuda as mod
 from difflet.serving.types import ResolvedModelSource, ServingProfile
 
+import os as _os
+
+_AMBIENT_VISIBLE_CORES = _os.environ.get("NEURON_RT_VISIBLE_CORES")
 _SOURCE = ResolvedModelSource("hf_snapshot", "Qwen/Qwen-Image", None, "/snap/qwen", "a" * 40)
 
 
@@ -80,11 +83,44 @@ def test_unsupported_profiles_are_refused_before_the_download(source, over, expe
     assert source == []
 
 
-def test_runtime_plan_is_accepted_by_the_resident_worker_environment(source, monkeypatch):
-    for name in ("NEURON_RT_VISIBLE_CORES", "NEURON_RT_NUM_CORES", "WORLD_SIZE", "RANK"):
-        monkeypatch.delenv(name, raising=False)
+_WORKER_ENVIRONMENT_NAMES = (
+    "NEURON_RT_VISIBLE_CORES",
+    "NEURON_RT_NUM_CORES",
+    "NEURON_RT_VIRTUAL_CORE_SIZE",
+    "NEURON_LOGICAL_NC_CONFIG",
+    "WORLD_SIZE",
+    "LOCAL_WORLD_SIZE",
+    "RANK",
+    "LOCAL_RANK",
+)
+
+
+@pytest.fixture
+def preserve_worker_environment():
+    import os
+
+    original = {name: os.environ.get(name) for name in _WORKER_ENVIRONMENT_NAMES}
+    yield
+    for name, value in original.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+
+def test_runtime_plan_is_accepted_by_the_resident_worker_environment(
+    source, preserve_worker_environment
+):
     bundle = _prepare(_profile(), source)
     _apply_worker_runtime_environment(bundle)  # raises ValueError on a plan the worker rejects
+
+
+def test_worker_environment_does_not_leak_out_of_the_previous_test():
+    # Review finding: the first version used delenv(raising=False), which records nothing to
+    # undo, so NEURON_RT_VISIBLE_CORES=0 stayed set for every later test in the session.
+    import os
+
+    assert os.environ.get("NEURON_RT_VISIBLE_CORES") == _AMBIENT_VISIBLE_CORES
 
 
 def test_profile_identity_tracks_shape_and_source(source):
@@ -227,8 +263,23 @@ def test_startup_loads_the_pipeline_exactly_as_the_cuda_cli_would(source, record
     cli_args = argparse.Namespace(
         tp_degree=1, height=1024, width=1024, cache_dir="/c", revision="r1", force=True
     )
-    assert model_id == "Qwen/Qwen-Image" and kw == cli.pipeline_kwargs(cli_args, load=True)
+    cli_kw = cli.pipeline_kwargs(cli_args, load=True)
+    # Same kwargs as the CLI except the revision: the server loads the commit the parent pinned
+    # (test below), where the CLI resolves the user's ref itself.
+    assert model_id == "Qwen/Qwen-Image"
+    assert {k: v for k, v in kw.items() if k != "revision"} == {
+        k: v for k, v in cli_kw.items() if k != "revision"
+    }
     assert kw["backend"] == "cuda" and kw["load"] is True and kw["force_compile"] is True
+
+
+def test_worker_loads_the_commit_the_parent_pinned(source, recorder):
+    # Review finding: revision=profile.revision re-resolves refs/main in the worker, so a worker
+    # restart after a newer snapshot landed would quietly load a commit the bundle, the
+    # profile_identity and the validator's tokenizer do not describe.
+    adapter, engine = _engine(_prepare(_profile(revision=None), source))
+    asyncio.run(engine.start())
+    assert recorder[0][1]["revision"] == _SOURCE.resolved_source_id == "a" * 40
 
 
 def test_auto_compile_policy_does_not_force(source, recorder):

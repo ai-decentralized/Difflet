@@ -64,3 +64,12 @@ def test_cuda_placement_needs_allocation_and_topology_but_no_artifact():
     StageRuntimeSpec("pipeline", "qwen-cuda", topology, None, placement="cuda")
     with pytest.raises(ValueError):
         StageRuntimeSpec("pipeline", None, None, None, placement="cuda")
+
+
+def test_legacy_serving_tests_run_on_the_cpu_backend_whatever_the_host_has():
+    # Review finding: resolve_serving_model now branches on current_backend(), so the existing
+    # serving tests (which pin no backend) failed 97 times under DIFFLET_BACKEND=cuda. The
+    # serving conftest pins cpu; CUDA tests set their own backend after it.
+    from difflet.backends.registry import current_backend
+
+    assert current_backend() == "cpu"
