@@ -305,7 +305,6 @@ def test_neuron_vae_stage_compile_warms_up_and_writes_the_manifest(monkeypatch, 
 # ----------------------------------------------------------------- driver-side rejection
 
 _REJECTED = [
-    (dict(sp_enabled=True), "--sp"),
     (dict(cfg_parallel=True), "--cfg-parallel"),
     (dict(teacache_cadence=2), "--teacache-cadence"),
     (dict(teacache_online_delta=0.6), "--teacache-online-delta"),
@@ -316,7 +315,7 @@ _REJECTED = [
      "--requests/--dp (data-parallel worker)"),
     (dict(shapes="1024x1024,768x1360"), "--shapes with more than one shape"),
     (dict(sp_enabled=True, cfg_parallel=True, shapes="1024x1024, 512x512 ,"),
-     "--sp, --cfg-parallel, --shapes with more than one shape"),
+     "--cfg-parallel, --shapes with more than one shape"),
 ]
 
 
@@ -343,8 +342,8 @@ def test_neuron_driver_rejects_unsupported_options_before_any_launch(monkeypatch
     out, err = capsys.readouterr()
     assert out == ""
     assert err.strip() == (
-        f"Error: the neuron backend does not support {named} (it runs tensor and context "
-        "parallelism at one static shape, one request per launch, no TeaCache); "
+        f"Error: the neuron backend does not support {named} (it runs tensor, sequence and "
+        "context parallelism at one static shape, one request per launch, no TeaCache); "
         "nothing was launched.")
     assert "DIFFLET_COMPILE_CACHE" not in os.environ
     assert not (tmp_path / "work").exists()
@@ -355,7 +354,7 @@ def test_neuron_driver_rejects_unsupported_options_before_any_launch(monkeypatch
     dict(tp_degree=2, cp_degree=2, cp_mode="ring"), dict(tp_degree=1, cp_degree=4,
                                                          cp_mode="ulysses"),
     dict(shapes="1024x1024"), dict(height=768, width=1360, shapes="768x1360"),
-    dict(host_vae=True),
+    dict(host_vae=True), dict(sp_enabled=True), dict(sp_enabled=True, tp_degree=2),
 ])
 def test_neuron_driver_lets_supported_options_through(monkeypatch, tmp_path, capsys, overrides):
     _backend(monkeypatch, "neuron")
@@ -363,6 +362,39 @@ def test_neuron_driver_lets_supported_options_through(monkeypatch, tmp_path, cap
     QwenImageOrchestrator(_qwen_args(work_dir=str(tmp_path / "w"), **overrides)).generate()
     assert [s for s, _ in stages] == ["generate"] and len(decoded) == 1
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_neuron_driver_refuses_sp_with_cp_before_any_launch(monkeypatch, tmp_path, capsys, mode):
+    # Both shard the image sequence; every rank's NeuronQwenImageConfig would refuse the pair.
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setattr(qwen_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(QwenImageOrchestrator, "download",
+                        lambda self: pytest.fail("rejected before the download"))
+    args = _qwen_args(sp_enabled=True, tp_degree=2, cp_degree=2, work_dir=str(tmp_path / "w"))
+    with pytest.raises(SystemExit) as exc:
+        getattr(QwenImageOrchestrator(args), mode)()
+    assert exc.value.code == 2
+    assert capsys.readouterr().err.strip() == (
+        "Error: --sp and --cp-degree > 1 are mutually exclusive for Qwen-Image (both shard the "
+        "image sequence); nothing was launched.")
+
+
+def test_sp_reaches_the_ranks_and_keys_its_own_artifact(neuron_stage, tmp_path):
+    from difflet.cli import stage as stage_mod
+
+    args = _qwen_args(sp_enabled=True, stage_mode="compile", cache_dir=str(tmp_path))
+    orch = QwenImageOrchestrator(args)
+    shared = orch._shared_cli_args(stage_mode="generate")
+    assert "--sp" in shared
+    stage_args, _ = stage_mod._build_stage_parser().parse_known_args(
+        ["--orchestrator", _QWEN_ID, "--stage", "generate", *shared])
+    assert stage_args.sp_enabled is True
+    orch._stage_generate(args)
+    assert neuron_stage.CALLS[0]["kwargs"]["parallel"].sp_enabled is True
+    dense = _qwen_args(stage_mode="compile", cache_dir=str(tmp_path))
+    assert orch._stage_compiled_dir("generate", args) != orch._stage_compiled_dir("generate", dense)
 
 
 @pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
@@ -858,7 +890,7 @@ def test_main_generate_backend_neuron_reaches_the_torchrun_launch(monkeypatch, t
     assert env["DIFFLET_COMPILE_CACHE"] == str(tmp_path / "cache")
 
 
-@pytest.mark.parametrize("flag", [["--sp"], ["--teacache-cadence", "2"],
+@pytest.mark.parametrize("flag", [["--teacache-cadence", "2"],
                                   ["--shapes", "1024x1024,768x1360"]])
 def test_main_generate_backend_neuron_rejects_before_any_launch(monkeypatch, tmp_path, capsys,
                                                                 flag):

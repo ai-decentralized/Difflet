@@ -45,19 +45,17 @@ def torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
 
     The ranks keep their own checks (the application's ``_reject_unsupported`` for TeaCache);
     this list lets the driver refuse the same options before torchrun starts tp*cp processes
-    that import torch only to fail. A model adds its own (Qwen-Image: --sp, request batches,
+    that import torch only to fail. A model adds its own (Qwen-Image: request batches,
     --cfg-parallel, several --shapes; Wan: several --shapes, since it runs SP and DP
     replicas). Torch-free.
     """
     return [flag for flag, name in TEACACHE_FLAGS if getattr(args, name, None) is not None]
 
 
-def sp_and_batch_options(args: argparse.Namespace) -> list[str]:
-    """--sp and request batches (--requests, a data-parallel worker), as the command line names
-    them: for a model whose torchrun ranks run neither. Torch-free."""
+def batch_options(args: argparse.Namespace) -> list[str]:
+    """Request batches (--requests, a data-parallel worker), as the command line names them:
+    for a model whose torchrun ranks run no request queue. Torch-free."""
     found = []
-    if getattr(args, "sp_enabled", False):
-        found.append("--sp")
     if getattr(args, "requests", None) is not None:
         found.append("--requests")
     if getattr(args, "requests_dir", None) is not None:

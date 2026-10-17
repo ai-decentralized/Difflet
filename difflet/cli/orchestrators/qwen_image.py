@@ -34,8 +34,9 @@ the unpack and the un-normalisation (``_vae_latents``), so they see the same fp3
 ``compile`` is the generate stage's load + warm-up (it fills the NEFF cache) and its stage
 manifest, plus the vae stage's warm-up decode with --device-vae; the stage cache key names the
 backend and exec mode; --cache-dir becomes DIFFLET_COMPILE_CACHE unless that is exported; the
-options the ranks reject (--sp, --cfg-parallel, TeaCache, several --shapes, --requests/--dp)
-are refused by the driver before torchrun starts. Unset, trainium and tpu keep their three
+options the ranks reject (--cfg-parallel, TeaCache, several --shapes, --requests/--dp) and the
+pairs they cannot run together (--sp with --cp-degree > 1) are refused by the driver before
+torchrun starts. The ranks run TP, SP (--sp) and CP. Unset, trainium and tpu keep their three
 stages unchanged.
 """
 
@@ -59,10 +60,10 @@ from difflet.cli.orchestrators.base import (
     write_stage_manifest,
 )
 from difflet.cli.orchestrators.torchrun import (
+    batch_options,
     fallback_tracker,
     reject_unsupported_torchrun_options,
     root_compile_cache_at_cache_dir,
-    sp_and_batch_options,
     torchrun_backend,
     torchrun_unsupported_options,
 )
@@ -100,23 +101,41 @@ _TORCHRUN_APPLICATION_KWARGS = {
     "encoder_threads": 12,
 }
 #: What the neuron Qwen-Image ranks support, for the driver's rejection message.
-_TORCHRUN_RUNS = "tensor and context parallelism at one static shape, one request per launch"
+_TORCHRUN_RUNS = (
+    "tensor, sequence and context parallelism at one static shape, one request per launch"
+)
 
 
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """The options the torchrun (neuron) generate stage rejects in phase 1, as the command line
-    names them: every torchrun backend's (TeaCache), --sp and request batches (the Qwen ranks
-    run no sequence parallelism and no DP replica loop, unlike Wan's), plus --cfg-parallel
-    (Qwen-Image is guidance-distilled: one forward per step) and a --shapes with more than one
-    shape (the application holds one static shape per process). Torch-free: the shapes are
-    counted, not parsed, so a malformed --shapes fails where it always did."""
-    found = torchrun_unsupported_options(args) + sp_and_batch_options(args)
+    names them: every torchrun backend's (TeaCache), request batches (the Qwen ranks run no DP
+    replica loop, unlike Wan's), plus --cfg-parallel (Qwen-Image is guidance-distilled: one
+    forward per step) and a --shapes with more than one shape (the application holds one static
+    shape per process). Torch-free: the shapes are counted, not parsed, so a malformed --shapes
+    fails where it always did."""
+    found = torchrun_unsupported_options(args) + batch_options(args)
     if getattr(args, "cfg_parallel", False):
         found.append("--cfg-parallel")
     shapes = getattr(args, "shapes", None)
     if shapes and len([token for token in str(shapes).split(",") if token.strip()]) > 1:
         found.append("--shapes with more than one shape")
     return found
+
+
+def _torchrun_conflicts(args: argparse.Namespace) -> list[str]:
+    """Option pairs the torchrun (neuron) path cannot honour together, one message each:
+    --host-vae with --device-vae, and --sp with --cp-degree > 1 (both shard the image
+    sequence; ``NeuronQwenImageConfig`` refuses the pair in every rank, as Wan's config does).
+    Torch-free."""
+    conflicts = []
+    if getattr(args, "host_vae", False) and getattr(args, "device_vae", False):
+        conflicts.append("--host-vae and --device-vae are mutually exclusive")
+    if getattr(args, "sp_enabled", False) and (getattr(args, "cp_degree", None) or 1) > 1:
+        conflicts.append(
+            "--sp and --cp-degree > 1 are mutually exclusive for Qwen-Image (both shard the "
+            "image sequence)"
+        )
+    return conflicts
 
 
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
@@ -265,9 +284,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
         reject_unsupported_torchrun_options(
             _torchrun_unsupported_options(self.args), runs=_TORCHRUN_RUNS
         )
-        if getattr(self.args, "host_vae", False) and getattr(self.args, "device_vae", False):
-            print("Error: --host-vae and --device-vae are mutually exclusive; nothing was "
-                  "launched.", file=sys.stderr, flush=True)
+        conflicts = _torchrun_conflicts(self.args)
+        if conflicts and torchrun_backend() is not None:
+            print(f"Error: {conflicts[0]}; nothing was launched.", file=sys.stderr, flush=True)
             raise SystemExit(2)
 
     def run(self) -> None:
