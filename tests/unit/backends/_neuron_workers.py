@@ -669,6 +669,51 @@ def w1_wan_lifecycle_worker(rank: int, world_size: int, model_dir: str, exec_mod
     }
 
 
+def w1_wan_truncated_worker(rank: int, world_size: int, model_dir: str, num_layers: int,
+                            cp: int, exec_mode: str) -> dict:
+    """The tiny Wan DiT cut to its first ``num_layers`` blocks at TP=world/cp x CP=cp, with the
+    preflight's evidence hook: the sequence length the block stack hands ``norm_out``."""
+    import hashlib
+    import os
+
+    from torch._dynamo.utils import counters
+
+    from difflet.backends.neuron.wan.config import NeuronWanConfig
+    from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import TINY_SHAPE, TINY_TEXT_SEQ_LEN, tiny_wan_inputs
+
+    transformer_dir = os.path.join(model_dir, "transformer")
+    tp = world_size // cp
+    config = NeuronWanConfig.from_pretrained(
+        transformer_dir, num_layers=num_layers, tp_degree=tp, text_seq_len=TINY_TEXT_SEQ_LEN,
+        context_parallel_enabled=cp > 1, cp_mode="ulysses" if cp > 1 else "gather_kv",
+        torch_dtype=torch.float32, **TINY_SHAPE,
+    )
+    app = NeuronWanTransformerApplication(
+        model_path=transformer_dir, config=config,
+        parallel=DiffletParallelConfig(tp_degree=tp, cp_degree=cp,
+                                       cp_mode="ulysses" if cp > 1 else "gather_kv"),
+        dtype=torch.float32, exec_mode=exec_mode, device="cpu",
+    )
+    app.load()
+    tokens: list[int] = []
+    hook = app.module.norm_out.register_forward_pre_hook(
+        lambda _mod, args: tokens.append(int(args[0].shape[1])))
+    out = app(*tiny_wan_inputs())
+    hook.remove()
+    return {
+        "num_blocks": len(app.module.blocks),
+        "load_report": app.load_report,
+        "tokens": tokens,
+        "image_seq_len": config.image_seq_len,
+        "graph_breaks": sum(counters["graph_break"].values()),
+        "unwarmed_shapes": list(app.unwarmed_shapes),
+        "out": out.float().tolist(),
+        "sha256": hashlib.sha256(out.contiguous().numpy().tobytes()).hexdigest(),
+    }
+
+
 def w1_wan_one_graph_worker(rank: int, world_size: int, model_dir: str) -> dict:
     """Compile mode at TP=world: how many graphs Dynamo traced for the two blocks.
 
