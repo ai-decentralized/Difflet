@@ -354,4 +354,5 @@ def test_backbone_convert_hf_to_neuron_state_dict_splits_single_blocks():
     assert "single_transformer_blocks.0.proj_out_attn.weight" in out
     assert "single_transformer_blocks.0.proj_out_mlp.weight" in out
     assert "global_rank.rank" in out
+    assert torch.equal(out["global_rank.rank"], torch.arange(1, dtype=torch.int32))
     assert NeuronFluxBackboneApplication.update_state_dict_for_tied_weights({}) is None

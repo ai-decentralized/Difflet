@@ -285,17 +285,20 @@ class NeuronFluxBackboneApplication(NeuronApplicationBase):
             state_dict,
             num_single_layers=config.num_single_layers,
             inner_dim=config.num_attention_heads * config.attention_head_dim,
-            world_size=config.neuron_config.world_size,
         )
         # The Trainium checkpoint has always kept the fused HF
         # ``single_transformer_blocks.{i}.proj_out.*`` keys next to the split ones,
-        # updating the caller's dict in place. Keep that exactly (same keys, same
-        # order, every value a contiguous clone) so the sharded checkpoint and the
-        # shared weight store see no change; the neutral function drops them.
+        # updating the caller's dict in place, and carries the SPMD rank buffer
+        # (Trainium state the neutral conversion leaves out). Keep that exactly (same
+        # keys, same order, every value a contiguous clone) so the sharded checkpoint
+        # and the shared weight store see no change.
         for key, value in list(state_dict.items()):
             if key in converted:
                 state_dict[key] = converted.pop(key)
             else:
                 state_dict[key] = value.clone().detach().contiguous()
+        state_dict["global_rank.rank"] = torch.arange(
+            0, config.neuron_config.world_size, dtype=torch.int32
+        )
         state_dict.update(converted)
         return state_dict
