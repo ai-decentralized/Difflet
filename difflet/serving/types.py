@@ -285,9 +285,7 @@ class ServingProfile:
         return frozenset(self.canonical_shapes())
 
     def shape_dicts(self) -> list[dict[str, int | None]]:
-        return [
-            {"height": h, "width": w, "num_frames": f} for h, w, f in self.canonical_shapes()
-        ]
+        return [{"height": h, "width": w, "num_frames": f} for h, w, f in self.canonical_shapes()]
 
 
 @dataclass(frozen=True)
