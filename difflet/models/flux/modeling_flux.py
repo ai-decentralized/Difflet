@@ -40,6 +40,8 @@ from difflet.layers.embeddings import (
     NeuronCombinedTimestepTextProjEmbeddings,
     apply_rotary_emb,
 )
+from difflet.backends.registry import current_backend
+from difflet.layers.markers import ModuleMarkerEndWrapper, ModuleMarkerStartWrapper
 from difflet.layers.normalization import (
     NeuronAdaLayerNormContinuous,
     NeuronAdaLayerNormZero,
@@ -73,15 +75,11 @@ from difflet.ops import (
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
 from difflet.backends.trainium.core.bucketing import ShapeBucketedInputGenerator
 from difflet.backends.trainium.core.config import InferenceConfig
-from difflet.backends.trainium.core.layer_boundary_marker import (
-    ModuleMarkerEndWrapper,
-    ModuleMarkerStartWrapper,
-)
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 
 _HARDWARE = hardware(get_platform_target())
 
-if not os.environ.get("NEURON_PLATFORM_TARGET_OVERRIDE"):
+if current_backend() == "trainium" and not os.environ.get("NEURON_PLATFORM_TARGET_OVERRIDE"):
     os.environ["NEURON_PLATFORM_TARGET_OVERRIDE"] = get_platform_target()
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
