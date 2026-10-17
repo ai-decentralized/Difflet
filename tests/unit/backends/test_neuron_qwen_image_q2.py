@@ -209,12 +209,13 @@ def test_kwargs_mirror_the_cli_and_reject_phase1_limits(tiny):
         ({"shapes": ((64, 96, None), (32, 48, None))}, "one static shape"),
         ({"batch_size": 2}, "batch_size"),
         ({"parallel": DiffletParallelConfig(cfg_parallel_enabled=True)}, "guidance-distilled"),
-        ({"parallel": DiffletParallelConfig(sp_enabled=True)},
-         "sequence parallelism is not implemented"),
         ({"parallel": DiffletParallelConfig(dp_degree=2)}, "dp_degree=2"),
     ):
         with pytest.raises(NotImplementedError, match=match):
             _composed(tiny, **kwargs)
+    # Sequence parallelism reaches the DiT's config (SP with CP is refused by the parallel
+    # config itself and again by NeuronQwenImageConfig, as for Wan).
+    assert _composed(tiny, parallel=DiffletParallelConfig(sp_enabled=True)).config.sp_enabled
     with pytest.raises(TypeError, match="encoder_thread"):
         _composed(tiny, encoder_thread=4)
     with pytest.raises(ValueError, match="text_encoder_dtype"):
@@ -483,6 +484,25 @@ def test_end_to_end_two_steps_on_fixed_embeddings_matches_diffusers(tiny, world_
         assert result["unwarmed_shapes"] == []
     latents = torch.tensor(results[0]["latents"])
     assert tuple(latents.shape) == TINY_PACKED_LATENT_SHAPE
+    torch.testing.assert_close(latents, reference, **FP32_TOL)
+
+
+@pytest.mark.parametrize("exec_mode", ["eager", "compile"])
+def test_end_to_end_sequence_parallel_tp2_matches_diffusers(tiny, exec_mode):
+    """Two steps with Megatron SP over TP2 (the DiT's QwenImageSPTransformer2DModel fork):
+    identical on both ranks, equal to TP2 without SP and to diffusers' loop."""
+    embeds, _ = tiny_text_inputs()
+    reference, _ = _host_reference(tiny.dir, embeds)
+    dense = run_ranks(q2_pipeline_worker, tiny.dir, 2, "gather_kv", exec_mode, False,
+                      world_size=2, env=OFFLINE)
+    results = run_ranks(q2_pipeline_worker, tiny.dir, 2, "gather_kv", exec_mode, False, "latent",
+                        True, world_size=2, env=OFFLINE)
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]
+        assert result["steps"] == [1, 2] and result["unwarmed_shapes"] == []
+        assert len(result["compiled_blocks"]) == (2 if exec_mode == "compile" else 0)
+    latents = torch.tensor(results[0]["latents"])
+    torch.testing.assert_close(latents, torch.tensor(dense[0]["latents"]), **FP32_TOL)
     torch.testing.assert_close(latents, reference, **FP32_TOL)
 
 

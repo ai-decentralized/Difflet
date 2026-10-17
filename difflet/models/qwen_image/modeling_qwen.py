@@ -40,18 +40,22 @@ from diffusers.models.transformers.transformer_qwenimage import (
 from difflet.ops import (
     SPMDRank,
     gather_from_sequence_parallel_region,
+    get_tensor_model_parallel_size,
     reduce_scatter_to_sequence_parallel_region,
     scatter_to_process_group_spmd,
 )
 
 
 def _safe_tp_size() -> int:
-    """TP group size, 1 when no group is initialized (CPU reference / tp=1)."""
-    try:
-        from neuronx_distributed.parallel_layers.utils import (
-            get_tensor_model_parallel_size,
-        )
+    """TP group size, 1 when no group is initialized (CPU reference / tp=1).
 
+    Asked through ``difflet.ops``, as ``modeling_wan._safe_tp_size`` does, so the selected
+    backend answers: NxD's group on Trainium, the neuron mesh on TorchNeuron. Importing
+    ``neuronx_distributed`` here instead made every non-Trainium process see tp=1, which turned
+    ``sp_enabled`` off without a word (``QwenImageSPTransformer2DModel.__init__``) while the
+    row-parallel layers still skipped their all-reduce.
+    """
+    try:
         return int(get_tensor_model_parallel_size())
     except Exception:
         return 1
