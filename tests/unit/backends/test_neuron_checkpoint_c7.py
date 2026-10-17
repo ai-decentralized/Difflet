@@ -91,6 +91,7 @@ def test_reexports_are_the_tpu_objects_not_copies():
     ):
         assert getattr(ckpt, name) is getattr(tpu_weights, name)
     assert sorted(ckpt.__all__) == [
+        "CheckpointSlice",
         "build_on_meta",
         "build_weight_map",
         "load_checkpoint_into",

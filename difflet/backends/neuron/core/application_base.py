@@ -150,6 +150,11 @@ class TorchNeuronApplicationBase(torch.nn.Module):
     def checkpoint_dir(self) -> str | None:
         return self.model_path
 
+    def checkpoint_slices(self):
+        """Parameters that are a range of a fused checkpoint tensor: ``{name: CheckpointSlice}``
+        (see ``core.checkpoint``). None by default."""
+        return {}
+
     def checkpoint_key(self, name: str) -> str:
         """Checkpoint key for module parameter ``name`` (module -> checkpoint direction)."""
         return name
@@ -191,7 +196,8 @@ class TorchNeuronApplicationBase(torch.nn.Module):
                     "(phase 1 loads weights from safetensors only)"
                 )
             self.load_report = load_sharded_checkpoint(
-                module, model_dir, device=self.device, dtype=self.dtype, rename=self.checkpoint_key
+                module, model_dir, device=self.device, dtype=self.dtype, rename=self.checkpoint_key,
+                slices=self.checkpoint_slices(),
             )
             if self.skipped_checkpoint_prefixes:
                 # Tensors the subclass skips on purpose (e.g. a VAE checkpoint's encoder half).

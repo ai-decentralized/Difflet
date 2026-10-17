@@ -15,7 +15,8 @@ layer and its loader cannot disagree.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
@@ -32,6 +33,7 @@ from difflet.backends.tpu.core.weights import (
 )
 
 __all__ = [
+    "CheckpointSlice",
     "build_on_meta",
     "build_weight_map",
     "load_checkpoint_into",
@@ -63,6 +65,45 @@ def build_on_meta(factory: Callable[[], nn.Module]) -> nn.Module:
         return factory()
 
 
+@dataclass(frozen=True)
+class CheckpointSlice:
+    """A parameter that is the range ``[start, start + length)`` of checkpoint tensor ``key``
+    along ``dim``: e.g. Flux's single-stream ``proj_out_attn.weight`` is the first ``inner_dim``
+    input columns of the fused ``proj_out.weight``. Each rank reads only its TP shard of that
+    range, along the parameter's own declared shard axis."""
+
+    key: str
+    dim: int
+    start: int
+    length: int
+
+
+def _read_checkpoint_slice(path: str, spec: CheckpointSlice, *, shard: int | None, tp_size: int,
+                           tp_rank: int) -> torch.Tensor:
+    from safetensors import safe_open
+
+    with safe_open(path, framework="pt") as handle:
+        view = handle.get_slice(spec.key)
+        shape = view.get_shape()
+        selector = [slice(None)] * len(shape)
+        axis = spec.dim % len(shape)
+        if spec.start + spec.length > shape[axis]:
+            raise ValueError(f"{spec}: range exceeds dim {axis} of size {shape[axis]}")
+        lo, hi = spec.start, spec.start + spec.length
+        if shard is not None and tp_size > 1:
+            shard_axis = shard % len(shape)
+            size = spec.length if shard_axis == axis else shape[shard_axis]
+            if size % tp_size:
+                raise ValueError(f"{spec}: dim {shard_axis} of size {size} is not divisible by tp={tp_size}")
+            width = size // tp_size
+            if shard_axis == axis:  # this rank's shard of the range
+                lo, hi = lo + tp_rank * width, lo + (tp_rank + 1) * width
+            else:
+                selector[shard_axis] = slice(tp_rank * width, (tp_rank + 1) * width)
+        selector[axis] = slice(lo, hi)
+        return view[tuple(selector)]
+
+
 def load_sharded_checkpoint(
     module: nn.Module,
     model_dir: str | Path,
@@ -74,6 +115,7 @@ def load_sharded_checkpoint(
     rename: Callable[[str], str] | None = None,
     prefix: str = "",
     strict: bool = True,
+    slices: Mapping[str, CheckpointSlice] | None = None,
 ) -> dict[str, list[str]]:
     """Load this rank's shards of the safetensors checkpoint in ``model_dir`` onto ``device``.
 
@@ -84,8 +126,10 @@ def load_sharded_checkpoint(
     into place. Host buffers are moved to ``device`` last.
 
     ``tp_size``/``tp_rank`` default to the neuron parallel mesh. ``rename`` maps a
-    module name (after stripping ``prefix``) to its checkpoint key. Returns
-    ``{"missing": [...], "unexpected": [...]}``; with ``strict`` a parameter or
+    module name (after stripping ``prefix``) to its checkpoint key. ``slices`` maps a module name
+    to a :class:`CheckpointSlice` for parameters that are a range of a fused checkpoint tensor;
+    they are read after the renamable ones, and their source keys do not count as unexpected.
+    Returns ``{"missing": [...], "unexpected": [...]}``; with ``strict`` a parameter or
     persistent buffer missing from the checkpoint raises ``ValueError``.
     """
     tp_size = get_tp_size() if tp_size is None else int(tp_size)
@@ -104,6 +148,7 @@ def load_sharded_checkpoint(
     # dtype=None: each entry is cast to its target's dtype -- ``dtype`` for the
     # parameters materialised above, the stored dtype for real buffers, so an fp32
     # buffer is not rounded through bf16 (tpu/core/checkpoint.py:142).
+    slices = dict(slices or {})
     report = load_checkpoint_into(
         module,
         model_dir,
@@ -111,11 +156,41 @@ def load_sharded_checkpoint(
         tp_rank=tp_rank,
         prefix=prefix,
         dtype=None,
-        strict=strict,
+        strict=strict and not slices,  # sliced parameters show up as missing until read below
         rename=rename,
     )
+    if slices:
+        report = _load_slices(module, model_dir, slices, report, tp_size=tp_size, tp_rank=tp_rank,
+                              strict=strict)
     module.to(target)
     return report
+
+
+def _load_slices(module, model_dir, slices, report, *, tp_size, tp_rank, strict):
+    from difflet.backends.tpu.core.checkpoint import build_weight_map
+    from difflet.backends.tpu.core.weights import shard_dim
+
+    weight_map = build_weight_map(model_dir)
+    params = dict(module.named_parameters())
+    with torch.no_grad():
+        for name, spec in slices.items():
+            if name not in params:
+                raise ValueError(f"sliced parameter {name!r} is not a parameter of the module")
+            if spec.key not in weight_map:
+                raise ValueError(f"{name}: checkpoint has no {spec.key!r}")
+            target = params[name]
+            tensor = _read_checkpoint_slice(weight_map[spec.key], spec, shard=shard_dim(module, name),
+                                            tp_size=tp_size, tp_rank=tp_rank)
+            if tuple(tensor.shape) != tuple(target.shape):
+                raise ValueError(f"{name}: checkpoint slice {tuple(tensor.shape)} != parameter "
+                                 f"{tuple(target.shape)} ({spec}, tp={tp_size})")
+            target.copy_(tensor.to(target.dtype))
+    missing = [n for n in report["missing"] if n not in slices]
+    sources = {spec.key for spec in slices.values()}
+    unexpected = [k for k in report["unexpected"] if k not in sources]
+    if strict and missing:
+        raise ValueError(f"{len(missing)} parameters had no checkpoint entry: {missing[:5]}")
+    return {"missing": missing, "unexpected": unexpected}
 
 
 def _meta_computed_buffers(module: nn.Module) -> list[str]:
