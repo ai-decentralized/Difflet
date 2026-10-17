@@ -91,3 +91,77 @@ def test_profile_identity_tracks_shape_and_source(source):
     a = _prepare(_profile(), source).runtime_plan.profile_identity
     b = _prepare(_profile(height=768, width=768), source).runtime_plan.profile_identity
     assert a != b and a == _prepare(_profile(), source).runtime_plan.profile_identity
+
+
+# ----------------------------------------------------------------- validator
+
+
+class _Tok:
+    def __init__(self, n):
+        self.n = n
+
+    def __call__(self, text, **kw):
+        import types
+
+        return types.SimpleNamespace(input_ids=[list(range(self.n))])
+
+
+def _validator(bundle, n_tokens=40):
+    v = mod.CudaQwenImageServingRequestValidator(bundle)
+    v._tokenizer_for_runtime = lambda: _Tok(n_tokens)
+    return v
+
+
+def _request(**over):
+    from difflet.serving.types import DiffletGenerateRequest
+
+    d = dict(
+        request_id="r1",
+        model="Qwen/Qwen-Image",
+        prompt="a cat",
+        height=1024,
+        width=1024,
+        num_inference_steps=50,
+        guidance_scale=mod.NOOP_GUIDANCE_SCALE,
+        seed=7,
+    )
+    d.update(over)
+    return DiffletGenerateRequest(**d)
+
+
+def test_default_request_is_accepted(source):
+    _validator(_prepare(_profile(), source)).validate(_request())
+
+
+def test_guidance_scale_other_than_the_noop_value_is_refused(source):
+    with pytest.raises(DiffletServingError) as exc:
+        _validator(_prepare(_profile(), source)).validate(_request(guidance_scale=1.0))
+    assert exc.value.code == "feature_not_supported" and "guidance_embeds" in exc.value.message
+
+
+def test_request_shape_must_equal_the_profile_shape(source):
+    with pytest.raises(DiffletServingError) as exc:
+        _validator(_prepare(_profile(), source)).validate(_request(height=768, width=768))
+    assert exc.value.code == "profile_mismatch"
+
+
+def test_prompt_longer_than_the_dit_text_length_is_refused(source):
+    # diffusers truncates at tokenizer_max_length (1024) + the 34-token template prefix.
+    bundle = _prepare(_profile(), source)
+    _validator(bundle, n_tokens=34 + 1024).validate(_request())
+    with pytest.raises(DiffletServingError) as exc:
+        _validator(bundle, n_tokens=34 + 1025).validate(_request())
+    assert exc.value.code == "prompt_too_long"
+
+
+def test_preload_loads_the_tokenizer_from_the_pinned_snapshot(source, monkeypatch):
+    seen = {}
+    import transformers
+
+    monkeypatch.setattr(
+        transformers.AutoTokenizer,
+        "from_pretrained",
+        staticmethod(lambda p, **k: seen.update(path=str(p)) or _Tok(5)),
+    )
+    mod.CudaQwenImageServingRequestValidator(_prepare(_profile(), source)).preload()
+    assert seen["path"] == "/snap/qwen/tokenizer"

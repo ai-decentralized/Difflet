@@ -21,14 +21,17 @@ CUDA worker never loads the Neuron runtime, so the one GPU is slot 0 and the var
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from difflet.serving.errors import feature_not_supported
+from difflet.common.orchestrators.qwen_image import TEXT_SEQ_LEN
+from difflet.serving.errors import feature_not_supported, profile_mismatch, prompt_too_long
 from difflet.serving.options import CompilePolicy, DownloadPolicy
 from difflet.serving.orchestrators.base import resolve_hf_model_source
 from difflet.serving.types import (
     ArtifactSet,
     CompileArtifactIdentity,
+    DiffletGenerateRequest,
     DistributedProcessEnvironment,
     ParallelTopology,
     ResolvedModelSource,
@@ -45,6 +48,17 @@ _MODEL_TYPE = "qwen_image"
 _ALLOCATION_ID = "qwen-cuda"
 _STAGE_ID = "pipeline"
 _TAG = "[qwen_image/cuda serve]"
+#: The value the CUDA application fills into Qwen-Image's ignored guidance tensor
+#: (``guidance_embeds=False``); the serving default, and the only value a request may carry.
+NOOP_GUIDANCE_SCALE = 4.0
+# diffusers' QwenImagePipeline prompt template and the prefix length it drops; the encoder
+# truncates at tokenizer_max_length (TEXT_SEQ_LEN) + the prefix, silently.
+_QWEN_TEMPLATE = (
+    "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, "
+    "quantity, text, spatial relationships of the objects and background:<|im_end|>\n"
+    "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
+)
+_QWEN_DROP_IDX = 34
 
 
 def _refuse(what: str, follow_up: str) -> None:
@@ -153,8 +167,54 @@ class CudaQwenImageServingArtifactPreparer:
         )
 
 
+class CudaQwenImageServingRequestValidator:
+    """The CUDA CLI's request contract, enforced in the server process before the worker."""
+
+    model_id = _HF_MODEL_ID
+    model_type = _MODEL_TYPE
+
+    def __init__(self, runtime: ResolvedRuntimeBundle) -> None:
+        self.model_id = runtime.profile.model_id
+        self.runtime = runtime
+        self._tokenizer: Any = None
+
+    def preload(self) -> None:
+        self._tokenizer_for_runtime()
+
+    def validate(self, request: DiffletGenerateRequest) -> None:
+        if float(request.guidance_scale) != NOOP_GUIDANCE_SCALE:
+            raise feature_not_supported(
+                "guidance_scale has no effect on Qwen-Image (guidance_embeds=False); Release 1 "
+                "generation on CUDA is single-pass without classifier-free guidance — omit it"
+            )
+        profile = self.runtime.profile
+        if (request.height, request.width) != (profile.height, profile.width):
+            raise profile_mismatch(
+                f"request shape {request.height}x{request.width} is not the resident CUDA "
+                f"profile shape {profile.height}x{profile.width}"
+            )
+        encoded = self._tokenizer_for_runtime()(
+            _QWEN_TEMPLATE.format(request.prompt),
+            padding=False,
+            truncation=False,
+            return_tensors="pt",
+        )
+        if len(encoded.input_ids[0]) - _QWEN_DROP_IDX > TEXT_SEQ_LEN:
+            raise prompt_too_long(f"Qwen prompt exceeds the DiT text length {TEXT_SEQ_LEN}")
+
+    def _tokenizer_for_runtime(self):
+        if self._tokenizer is None:
+            from transformers import AutoTokenizer
+
+            model_dir = self.runtime.source.pinned_model_path
+            self._tokenizer = AutoTokenizer.from_pretrained(str(Path(model_dir) / "tokenizer"))
+        return self._tokenizer
+
+
 __all__: list[str] = [
+    "NOOP_GUIDANCE_SCALE",
     "CudaQwenImageServingArtifactPreparer",
+    "CudaQwenImageServingRequestValidator",
     "cuda_runtime_plan",
     "refuse_unsupported_profile",
 ]
