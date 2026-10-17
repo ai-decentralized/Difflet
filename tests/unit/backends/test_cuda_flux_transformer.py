@@ -137,3 +137,20 @@ def test_forward_before_load_is_an_explicit_error(tmp_path):
     )
     with pytest.raises(RuntimeError, match="not loaded"):
         FluxDiTAdapter(app)(**_inputs(), guidance=3.5)
+
+
+def test_load_converts_without_cloning_the_checkpoint(tmp_path, monkeypatch):
+    """The loader must not hold the host checkpoint twice: it asks the converter for the
+    no-clone path (``load_state_dict`` copies into the parameters anyway)."""
+    import difflet.models.flux.modeling_flux as modeling_flux
+
+    real = modeling_flux.convert_flux_hf_state_dict
+    seen = []
+
+    def spy(state_dict, **kwargs):
+        seen.append(kwargs.get("clone", True))
+        return real(state_dict, **kwargs)
+
+    monkeypatch.setattr(modeling_flux, "convert_flux_hf_state_dict", spy)
+    _adapter(tmp_path)
+    assert seen == [False]

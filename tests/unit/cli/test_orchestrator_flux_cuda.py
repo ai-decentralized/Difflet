@@ -158,6 +158,7 @@ def test_schnell_is_built_from_its_own_repo(recorder, monkeypatch):
         ({"teacache_cadence": 2}, "F5b"),
         ({"teacache_speedup": 1.5}, "F5b"),
         ({"teacache_online_delta": 0.1}, "F5b"),
+        ({"teacache_calibration": "/x.json"}, "F5b"),
         ({"taef1": True}, "F5b"),
         ({"taef1_path": "madebyollin/taef1"}, "F5b"),
         ({"host_vae": True}, "F5b"),
@@ -198,3 +199,12 @@ def test_run_refuses_unsupported_flags_before_any_download(recorder, monkeypatch
     with pytest.raises(SystemExit) as exc:
         mod.FluxCudaOrchestrator(_args(taef1=True)).run()
     assert "F5b" in str(exc.value) and recorder == []
+
+
+def test_lone_teacache_calibration_is_refused_by_name(recorder):
+    """``main._validate_teacache`` lets a lone ``--teacache-calibration`` through and Flux on
+    CUDA forwards nothing, so without this refusal the calibration file is silently dropped."""
+    with pytest.raises(SystemExit) as exc:
+        mod.FluxCudaOrchestrator(_args(teacache_calibration="/x.json")).generate()
+    assert "--teacache-calibration" in str(exc.value) and "F5b" in str(exc.value)
+    assert recorder == []
