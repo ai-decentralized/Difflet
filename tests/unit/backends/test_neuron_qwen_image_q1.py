@@ -189,6 +189,9 @@ def test_application_guards_topology_and_dtype(tiny):
     with pytest.raises(NotImplementedError, match="guidance-distilled"):
         make(tiny_qwen_config(tp_degree=2),
              DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True))
+    # The runtime lets SP through (Wan runs it); the Qwen DiT must not silently ignore it.
+    with pytest.raises(NotImplementedError, match="sequence parallelism is not implemented"):
+        make(tiny_qwen_config(tp_degree=2), DiffletParallelConfig(tp_degree=2, sp_enabled=True))
     with pytest.raises(ValueError, match="context_parallel_enabled=False.*cp_degree=2"):
         make(tiny_qwen_config(), DiffletParallelConfig(cp_degree=2))
     with pytest.raises(ValueError, match="context_parallel_enabled=True.*cp_degree=1"):
