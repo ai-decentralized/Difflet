@@ -214,3 +214,67 @@ def test_expert_applies_to_wan_only(monkeypatch, oracle, tmp_path):
         run(monkeypatch, oracle, "qwen_image", "--expert", "transformer_2",
             "--out", str(tmp_path / "r.pt"))
     assert oracle.calls == []
+
+
+# ---------------------------------------------------------------- --num-layers
+
+
+def test_num_layers_defaults_to_every_block(monkeypatch, oracle, tmp_path):
+    calls = run(monkeypatch, oracle, "wan", "--out", str(tmp_path / "ref.pt"))
+    assert [c["num_layers"] for c in calls] == [None]
+
+
+def test_num_layers_flag_reaches_wan(monkeypatch, oracle, tmp_path):
+    calls = run(monkeypatch, oracle, "wan", "--num-layers", "4", "--out", str(tmp_path / "r.pt"))
+    assert [c["num_layers"] for c in calls] == [4]
+
+
+@pytest.mark.parametrize("argv, message", [
+    (["wan", "--num-layers", "0"], "at least 1"),
+    (["qwen_image", "--num-layers", "4"], "wan only"),
+])
+def test_num_layers_flag_is_checked_before_loading(monkeypatch, oracle, tmp_path, capsys, argv,
+                                                    message):
+    with pytest.raises(SystemExit):
+        run(monkeypatch, oracle, *argv, "--out", str(tmp_path / "r.pt"))
+    assert oracle.calls == [] and message in capsys.readouterr().err
+
+
+class _FakeWanBlocks(_FakeWan):
+    def __init__(self, num_blocks):
+        super().__init__()
+        self.blocks = torch.nn.ModuleList(torch.nn.Identity() for _ in range(num_blocks))
+
+
+@pytest.mark.parametrize("num_layers", [None, 2])
+def test_wan_builds_the_first_blocks_and_records_the_depth(monkeypatch, tmp_path, num_layers):
+    import diffusers
+
+    spec = importlib.util.spec_from_file_location("tpu_oracle_reference_wan_layers", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    seen = []
+
+    def from_pretrained(path, torch_dtype, **kwargs):
+        seen.append(kwargs)
+        return _FakeWanBlocks(kwargs.get("num_layers", 40))
+
+    monkeypatch.setattr(diffusers.WanTransformer3DModel, "from_pretrained", from_pretrained)
+    out = tmp_path / "oracle.pt"
+    module.wan(out=out, frames=1, snapshot=str(tmp_path), num_layers=num_layers)
+    # Without the flag from_pretrained gets exactly the call it always got.
+    assert seen == [{} if num_layers is None else {"num_layers": num_layers}]
+    assert torch.load(out, weights_only=False)["num_layers"] == num_layers
+
+
+def test_wan_refuses_a_model_of_another_depth(monkeypatch, tmp_path):
+    import diffusers
+
+    spec = importlib.util.spec_from_file_location("tpu_oracle_reference_wan_depth", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(diffusers.WanTransformer3DModel, "from_pretrained",
+                        lambda path, torch_dtype, **kw: _FakeWanBlocks(40))
+    with pytest.raises(RuntimeError, match="built 40 blocks, wanted 2"):
+        module.wan(out=tmp_path / "o.pt", frames=1, snapshot=str(tmp_path), num_layers=2)
+    assert not (tmp_path / "o.pt").exists()
