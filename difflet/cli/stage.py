@@ -83,6 +83,7 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--guidance-scale-2", dest="guidance_scale_2", type=float, default=None)
     p.add_argument("--dual-expert", dest="dual_expert", action="store_true")
     p.add_argument("--host-text-encoder", dest="host_text_encoder", action="store_true")
+    p.add_argument("--device-text-encoder", dest="device_text_encoder", action="store_true")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--work-dir", default=None)
     p.add_argument("--cache-dir", default=None)
