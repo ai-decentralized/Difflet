@@ -54,7 +54,7 @@ import torch
 
 from difflet.backends.neuron.core.application_base import _normalize_dtype
 from difflet.backends.neuron.core.checkpoint import _resolve_device
-from difflet.backends.neuron.core.distributed import broadcast_tensor, rank0_call
+from difflet.backends.neuron.core.distributed import broadcast_tensor, rank0_call, world_info
 from difflet.backends.neuron.hbm import budget_enforced, check_fits
 from difflet.backends.neuron.runtime import check_parallel_supported
 from difflet.backends.neuron.wan.config import NeuronWanConfig
@@ -218,7 +218,8 @@ class _OnDeviceTransformer:
     tensor, a transposed slice) would otherwise be restrided on the device through a CPU round
     trip (decision D16). ``.dtype`` and ``.config`` are what the orchestrator reads
     (``_component_dtype``; ``cfg_parallel_enabled``). The latents stay fp32 on the host between
-    steps, as on TPU, because UniPC's corrector collapses in bf16.
+    steps, as on TPU, because UniPC's corrector collapses in bf16. A call at any other shape
+    than the static one raises (``_check_dit_shapes``) instead of compiling new block graphs.
     """
 
     def __init__(self, module: Callable[..., torch.Tensor], config, dtype, device, hook_from=None):
@@ -234,6 +235,7 @@ class _OnDeviceTransformer:
         self.calls = 0
 
     def __call__(self, hidden_states, timestep, encoder_hidden_states) -> torch.Tensor:
+        _check_dit_shapes(self.config, hidden_states, timestep, encoder_hidden_states)
         start = time.perf_counter()
         args = tuple(
             tensor.to(self.dtype).contiguous().to(self.device)
@@ -248,6 +250,43 @@ class _OnDeviceTransformer:
         if hook is not None:
             hook(time.perf_counter() - start)
         return out
+
+
+def dit_input_shapes(config) -> dict[str, tuple[int, ...]]:
+    """The per-call DiT input shapes at the config's one static shape: batch 1, or the
+    ``[uncond, cond]`` batch of 2 that CFG parallelism sends in one call (the module splits it
+    over the CFG group). They are exactly the warm-up's (``get_example_inputs``)."""
+    batch = 2 if config.cfg_parallel_enabled else int(config.batch_size)
+    return {
+        "hidden_states": (batch, int(config.in_channels), config.latent_frames,
+                          config.latent_height, config.latent_width),
+        "timestep": (batch,),
+        "encoder_hidden_states": (batch, int(config.text_seq_len), int(config.text_dim)),
+    }
+
+
+def _check_dit_shapes(config, hidden_states, timestep, encoder_hidden_states) -> None:
+    """Refuse a DiT call at any other shape than the one the warm-up compiled.
+
+    In compile mode, a new shape does not fail on its own. Every compiled block traces and
+    compiles a new graph (minutes per block graph for the 14B on a cold cache), and Dynamo
+    fails only after ``recompile_limit`` shapes. The base merely logs the first such shape. In
+    eager mode the precomputed rotary tables and the CP/SP sequence split assume the static
+    shape too. Every rank receives the same call, so every rank raises here, before any device
+    work or collective.
+    """
+    expected = dit_input_shapes(config)
+    given = {"hidden_states": hidden_states, "timestep": timestep,
+             "encoder_hidden_states": encoder_hidden_states}
+    for name, tensor in given.items():
+        if tuple(tensor.shape) != expected[name]:
+            raise ValueError(
+                f"Wan DiT input {name!r} has shape {tuple(tensor.shape)}, expected "
+                f"{expected[name]} (the one static shape, {config.height}x{config.width}x"
+                f"{config.num_frames}, text_seq_len={config.text_seq_len}"
+                + (", the CFG-parallel batch of 2" if config.cfg_parallel_enabled else "")
+                + "); the neuron backend compiles one static shape per process"
+            )
 
 
 def _resolve_shape(shape: dict[str, int | None], shapes) -> dict[str, int]:
@@ -319,6 +358,7 @@ class TorchNeuronWanApplication(torch.nn.Module):
             batch_size=1,
             text_seq_len=self.text_seq_len,
             tp_degree=int(parallel.tp_degree),
+            cp_degree=int(getattr(parallel, "cp_degree", 1) or 1),
             cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel_enabled", False)),
             context_parallel_enabled=int(getattr(parallel, "cp_degree", 1) or 1) > 1,
             sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
@@ -607,10 +647,21 @@ class TorchNeuronWanApplication(torch.nn.Module):
             },
         }
 
-    def __call__(self, *args: Any, **kwargs: Any):
+    def __call__(self, *args: Any, seed: int | None = None, **kwargs: Any):
         """``app(latents, timestep, text)`` runs the DiT (the high-noise expert when there are
-        two); anything else runs the orchestrator."""
+        two); anything else runs the orchestrator (``WanOrchestrator.__call__``'s arguments),
+        with two additions:
+
+        * ``seed``: a ``torch.Generator`` seeded with it (pass one or ``generator``);
+        * without ``latents``, the initial noise is drawn on rank 0 (from ``generator``, or the
+          global RNG) and broadcast, so every rank of the TP/CP/CFG group denoises the same
+          latents even when the caller's generators or global RNGs differ per rank. Rank 0's
+          draw is the one the orchestrator itself would have made, so a single rank, or ranks
+          that were given identical generators, get the same latents as before.
+        """
         if len(args) >= 3:
+            if seed is not None:
+                raise TypeError("seed applies to the orchestrator call, not a DiT call")
             if self.transformer_adapter is None:
                 raise RuntimeError(
                     f"{type(self).__name__}: the DiT is not loaded (call load() first; "
@@ -619,7 +670,34 @@ class TorchNeuronWanApplication(torch.nn.Module):
             return self.transformer_adapter(*args, **kwargs)
         if self.pipeline is None:
             raise RuntimeError(f"{type(self).__name__} is not loaded; call load() first")
+        if seed is not None:
+            if kwargs.get("generator") is not None:
+                raise ValueError("pass seed or generator, not both")
+            kwargs["generator"] = torch.Generator().manual_seed(int(seed))
+        if kwargs.get("latents") is None:
+            kwargs["latents"] = self._initial_latents(kwargs)
         return self.pipeline(*args, **kwargs)
+
+    def _initial_latents(self, kwargs: dict[str, Any]) -> torch.Tensor:
+        """Rank 0's fp32 initial noise, broadcast (see ``__call__``): the orchestrator's own
+        ``prepare_latents`` draw, at the call's batch, channels and shape."""
+        pipeline = self.pipeline
+
+        def draw() -> torch.Tensor:
+            return pipeline.prepare_latents(
+                batch_size=int(kwargs.get("batch_size", 1)),
+                channels=int(kwargs.get("channels", 16)),
+                height=kwargs.get("height"),
+                width=kwargs.get("width"),
+                num_frames=kwargs.get("num_frames"),
+                dtype=torch.float32,
+                generator=kwargs.get("generator"),
+            )
+
+        if world_info()[1] == 1:
+            return draw()
+        latents = rank0_call(draw, device=self.device, what="initial latents")
+        return broadcast_tensor(latents, device=self.device).cpu()
 
 
 def _require_same_architecture(config, config_2) -> None:

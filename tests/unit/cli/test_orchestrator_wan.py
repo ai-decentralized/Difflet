@@ -1030,9 +1030,46 @@ def test_neuron_driver_accepts_teacache(monkeypatch, tmp_path, capsys, overrides
     assert "does not support" not in capsys.readouterr().err
 
 
+# One static shape per process: a bucketed set failed only once every rank had started.
+_SHAPES_REJECTED = [
+    (dict(shapes="480x832x9,480x832x5"), "--shapes with more than one shape"),
+    (dict(shapes="480x832x9, 480x832x5", teacache_cadence=2), "--shapes with more than one shape"),
+]
+
+
+@pytest.mark.parametrize("overrides, named", _SHAPES_REJECTED)
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_neuron_driver_rejects_several_shapes_before_any_launch(monkeypatch, tmp_path, capsys,
+                                                                mode, overrides, named):
+    """The ranks hold one static shape and rejected a bucketed set only after torchrun had
+    started them; the driver exits 2 with one message before any launch, any note, the cache
+    export or (for `run`) the download. TeaCache flags are not refused (Wan runs them)."""
+    _unset(monkeypatch, *_CACHE_ENV)
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host",
+                        lambda *a, **k: pytest.fail("nothing to decode"))
+    monkeypatch.setattr(WanOrchestrator, "download",
+                        lambda self: pytest.fail("rejected before the download"))
+    args = _wan_args(model_id=_WAN21_ID, cache_dir=str(tmp_path / "cache"),
+                     work_dir=str(tmp_path / "work"), **overrides)
+
+    with pytest.raises(SystemExit) as exc:
+        getattr(WanOrchestrator(args), mode)()
+
+    assert exc.value.code == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert f"does not support {named} (" in err and "nothing was launched." in err
+    assert "--teacache" not in err
+    assert "DIFFLET_COMPILE_CACHE" not in os.environ
+    assert not (tmp_path / "work").exists()
+
+
 @pytest.mark.parametrize("overrides", [
     {}, dict(tp_degree=2, steps=50, guidance_scale=5.0, seed=7), dict(cp_mode="ring"),
-    dict(host_vae=True),
+    dict(host_vae=True), dict(shapes="480x832x9"),
 ])
 def test_neuron_driver_lets_supported_options_through(monkeypatch, tmp_path, capsys, overrides):
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
