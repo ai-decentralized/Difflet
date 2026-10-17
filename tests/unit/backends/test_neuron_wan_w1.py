@@ -48,6 +48,7 @@ from tests.unit.backends._neuron_workers import (  # noqa: E402
     w1_host_text_encoder_worker,
     w1_wan_lifecycle_worker,
     w1_wan_one_graph_worker,
+    w1_wan_truncated_worker,
     w1_wan22_pipeline_worker,
     w1_wan_cfg_parallel_worker,
     w1_wan_cp_worker,
@@ -125,6 +126,61 @@ def test_config_validates_tp_and_shape(tiny):
     default.validate()
     geometry = (default.latent_frames, default.latent_height, default.latent_width)
     assert geometry == (3, 60, 104) and default.image_seq_len == 4680
+
+
+def test_num_layers_override_records_the_checkpoint_depth(tiny):
+    config = NeuronWanConfig.from_pretrained(tiny.transformer, num_layers=1, **TINY_SHAPE)
+    assert (config.num_layers, config.checkpoint_num_layers) == (1, 2)
+    full = NeuronWanConfig.from_pretrained(tiny.transformer, **TINY_SHAPE)
+    assert (full.num_layers, full.checkpoint_num_layers) == (2, 2)
+    with pytest.raises(ValueError, match="exceeds the checkpoint's 2 blocks"):
+        NeuronWanConfig.from_pretrained(tiny.transformer, num_layers=3)
+    with pytest.raises(ValueError, match="num_layers=0 must be >= 1"):
+        NeuronWanConfig.from_pretrained(tiny.transformer, num_layers=0)
+    app = NeuronWanTransformerApplication(
+        model_path=tiny.transformer, config=config, dtype=torch.float32, device="cpu"
+    )
+    assert app.skipped_checkpoint_prefixes == ("blocks.1.",)
+    whole = NeuronWanTransformerApplication(
+        model_path=tiny.transformer, config=full, dtype=torch.float32, device="cpu"
+    )
+    assert whole.skipped_checkpoint_prefixes == ()
+
+
+def _truncated_reference(num_layers: int):
+    """The seeded TP1 DiT (the tiny checkpoint's weights) with only its first blocks."""
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_inputs
+
+    with tp1_mesh():
+        model = tiny_wan_tp1_model()
+        model.blocks = model.blocks[:num_layers]
+        with torch.no_grad():
+            return model(*tiny_wan_inputs())
+
+
+@pytest.mark.parametrize("cp, exec_mode", [(2, "eager"), (1, "compile")],
+                         ids=["tp2-cp2-eager", "tp4-compile"])
+def test_num_layers_loads_the_first_blocks_and_skips_the_rest(tiny, cp, exec_mode):
+    """The on-device parity runs' cut: the first block of the real checkpoint, the second
+    reported as skipped (not unexpected), equal to diffusers-layout TP1 with one block. The
+    preflight's cp_scatter hook on norm_out sees this rank's sequence shard, and it leaves the
+    compiled blocks' graph unbroken."""
+    from safetensors import safe_open
+
+    reference = _truncated_reference(1)
+    assert not torch.allclose(reference, tiny.ref, atol=1e-3)  # the second block mattered
+    results = run_ranks(w1_wan_truncated_worker, tiny.dir, 1, cp, exec_mode, world_size=4,
+                        env=OFFLINE)
+    with safe_open(str(tiny.transformer / "diffusion_pytorch_model.safetensors"), "pt") as f:
+        block1 = sorted(k for k in f.keys() if k.startswith("blocks.1."))
+    assert block1
+    for result in results:
+        assert result["num_blocks"] == 1
+        assert result["load_report"] == {"missing": [], "unexpected": [], "skipped": block1}
+        assert result["sha256"] == results[0]["sha256"]  # ranks_identical
+        assert result["tokens"] == [result["image_seq_len"] // cp]  # cp_scatter
+        assert result["graph_breaks"] == 0 and result["unwarmed_shapes"] == []
+    torch.testing.assert_close(torch.tensor(results[0]["out"]), reference, atol=1e-4, rtol=1e-4)
 
 
 def test_checkpoint_key_round_trip(tiny):
