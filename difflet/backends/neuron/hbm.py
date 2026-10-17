@@ -108,17 +108,18 @@ def suggested_tp(estimate_bytes: int, tp_degree: int, limit_bytes: int) -> int:
 def check_fits(estimate_bytes: int, *, what: str, tp_degree: int, advice: str = "") -> None:
     """Raise ``HbmBudgetError`` when ``estimate_bytes`` of weights per rank exceed
     ``FIT_FRACTION`` of one core's HBM. ``what`` names the load in the message. ``advice``
-    replaces the default "raise tp" guidance."""
+    replaces the default "raise tp" guidance; a ``{tp}`` in it becomes ``suggested_tp``."""
     hbm, origin = per_core_hbm_bytes()
     limit = int(hbm * FIT_FRACTION)
     if estimate_bytes <= limit:
         return
+    tp = suggested_tp(estimate_bytes, tp_degree, limit)
     if not advice:
-        tp = suggested_tp(estimate_bytes, tp_degree, limit)
         advice = (
-            f"shard it over more cores: tp_degree={tp} or more (--tp-degree), or fewer CP/CFG/DP "
+            "shard it over more cores: tp_degree={tp} or more (--tp-degree), or fewer CP/CFG/DP "
             "lanes to free the cores for TP"
         )
+    advice = advice.replace("{tp}", str(tp))
     raise HbmBudgetError(
         f"{what}: {estimate_bytes / GIB:.2f} GiB of weights per rank at tp={tp_degree} do not "
         f"fit one NeuronCore's {hbm / GIB:.1f} GiB of HBM ({origin}; weights may use at most "
