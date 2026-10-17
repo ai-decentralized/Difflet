@@ -85,8 +85,29 @@ def _divisible_dim(tensor: torch.Tensor, dim: int, parts: int, what: str) -> int
 
 
 def _shard(tensor: torch.Tensor, axis: int, rank: int, parts: int) -> torch.Tensor:
+    """This rank's slice along ``axis``, with the strides a fresh tensor of its shape has.
+
+    ``contiguous()`` alone is not enough: a narrow behind size-1 leading dimensions (a batch-1
+    sequence shard ``[1, S/tp, D]``) already counts as contiguous, so it keeps the parent's
+    stride on the size-1 axis (``S * D`` instead of ``S/tp * D``). Dynamo guards on every
+    stride, so the first compiled block, fed the shard, and the next ones, fed a block output
+    of the same shape, would compile two graphs (Megatron SP's entry scatter did). The copy
+    happens only when the strides differ.
+    """
     width = tensor.shape[axis] // parts
-    return tensor.narrow(axis, rank * width, width).contiguous()
+    shard = tensor.narrow(axis, rank * width, width)
+    if tuple(shard.stride()) != _contiguous_strides(shard.shape):
+        shard = shard.clone(memory_format=torch.contiguous_format)
+    return shard
+
+
+def _contiguous_strides(shape) -> tuple[int, ...]:
+    """The strides ``torch.empty(shape)`` has (row-major; a size-0/1 axis counts as 1)."""
+    strides, step = [], 1
+    for size in reversed(tuple(shape)):
+        strides.append(step)
+        step *= max(int(size), 1)
+    return tuple(reversed(strides))
 
 
 def _gather_dim(tensor, dim: int, group) -> torch.Tensor:

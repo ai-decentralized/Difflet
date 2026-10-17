@@ -202,9 +202,12 @@ def q1_qwen_worker(
     cp_mode: str,
     exec_mode: str,
     num_layers: int | None = None,
+    sp: bool = False,
 ) -> dict:
-    """Load the tiny DiT at TP=tp x CP=world/tp on CPU fp32, run the fixed inputs twice (the
-    second time with other values at the same shapes), report the output and the lifecycle."""
+    """Load the tiny DiT at TP=tp x CP=world/tp on CPU fp32 (with Megatron SP over the TP group
+    when ``sp``), run the fixed inputs twice (the second time with other values at the same
+    shapes), report the output and the lifecycle. In eager mode the rows the first block
+    receives per stream are recorded: under SP each rank's sequence shard."""
     from torch._dynamo.utils import counters
 
     from difflet.backends.neuron.ops_impl import parallel_mesh
@@ -216,7 +219,7 @@ def q1_qwen_worker(
 
     cp = world_size // tp
     parallel = DiffletParallelConfig(
-        tp_degree=tp, cp_degree=cp, cp_mode=cp_mode if cp > 1 else "gather_kv"
+        tp_degree=tp, cp_degree=cp, cp_mode=cp_mode if cp > 1 else "gather_kv", sp_enabled=sp
     )
     overrides = dict(
         TINY_SHAPE,
@@ -224,6 +227,7 @@ def q1_qwen_worker(
         tp_degree=tp,
         context_parallel_enabled=cp > 1,
         cp_mode=parallel.cp_mode,
+        sp_enabled=sp,
         torch_dtype=torch.float32,
     )
     if num_layers is not None:
@@ -244,6 +248,15 @@ def q1_qwen_worker(
     counters.clear()
     app.load()
     after_warmup = counters["stats"]["unique_graphs"]
+    block_rows: list = []
+    if exec_mode == "eager":
+        app.module.transformer.transformer_blocks[0].register_forward_pre_hook(
+            lambda module, args, kwargs: block_rows.append(
+                [int(kwargs["hidden_states"].shape[1]),
+                 int(kwargs["encoder_hidden_states"].shape[1])]
+            ),
+            with_kwargs=True,
+        )
     hidden, timestep, text = tiny_qwen_inputs()
     out = app(hidden, timestep, text)
     other = app(hidden, timestep * 0.5, -text)
@@ -266,6 +279,9 @@ def q1_qwen_worker(
         "graph_breaks": sum(counters["graph_break"].values()),
         "collectives_per_graph": [_collective_count(gm) for gm in graphs],
         "num_blocks": len(app.module.transformer.transformer_blocks),
+        "transformer_class": type(app.module.transformer).__name__,
+        "sp_active": bool(getattr(app.module.transformer, "sp_enabled", False)),
+        "block_rows": block_rows,
         "local_heads": int(block0.attn.heads),
         "processor": [type(block0.attn.processor).__name__,
                       block0.attn.processor.context_parallel_enabled,

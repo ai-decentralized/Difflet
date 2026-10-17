@@ -29,10 +29,15 @@ The text mask is dropped by the DiT, as on Trainium and TPU: the embeddings are 
 So ``encoder_hidden_states`` must arrive zero-padded to exactly ``text_seq_len`` rows; a shorter
 diffusers-style tensor is rejected rather than silently mis-shaped.
 
+Parallelism: tensor parallelism, with or without sequence parallelism (Megatron SP within the
+TP group: the ``QwenImageSPTransformer2DModel`` fork, see
+``difflet/backends/neuron/qwen_image/transformer.py``), and context parallelism in every
+``cp_mode`` (gather_kv, ulysses, ring); SP and CP are mutually exclusive, as for Wan
+(``NeuronQwenImageConfig``).
+
 Phase 1 limits, each rejected in ``__init__``: one static shape, batch 1, no TeaCache, no CFG
-parallelism (Qwen-Image is guidance-distilled, one forward per step), no SP (rejected here: the
-runtime's ``check_parallel_supported`` allows it for Wan) and no DP; TP and CP (gather_kv,
-ulysses, ring) only.
+parallelism (Qwen-Image is guidance-distilled, one forward per step) and no DP within one
+application.
 
 Timing hooks (for the benchmark): ``step_hook`` is called with no arguments once per denoise
 iteration, right after the orchestrator's scheduler step (``load`` wraps
@@ -405,12 +410,6 @@ def _reject_unsupported(options: dict[str, Any], parallel) -> None:
             "Qwen-Image is guidance-distilled (one forward per step); CFG parallelism does not "
             "apply"
         )
-    # The neuron runtime's check_parallel_supported lets SP through (Wan runs it); Qwen does not.
-    if getattr(parallel, "sp_enabled", False):
-        raise NotImplementedError(
-            "Qwen-Image on the neuron backend runs tensor and context parallelism; sequence "
-            "parallelism is not implemented"
-        )
     dtype = normalize_dtype(options["text_encoder_dtype"])
     if dtype not in (torch.bfloat16, torch.float32):
         raise ValueError(f"text_encoder_dtype must be bfloat16 or float32, got {dtype}")
@@ -473,6 +472,7 @@ class TorchNeuronQwenImageApplication(torch.nn.Module):
             tp_degree=int(parallel.tp_degree),
             context_parallel_enabled=cp > 1,
             cp_mode=str(getattr(parallel, "cp_mode", "gather_kv")),
+            sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
             torch_dtype=self.dtype,
         )
         self.transformer: NeuronQwenImageTransformerApplication | None = None

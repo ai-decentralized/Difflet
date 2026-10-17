@@ -260,9 +260,11 @@ def q2_pipeline_worker(
     exec_mode: str,
     use_prompt: bool,
     output_type: str = "latent",
+    sp: bool = False,
 ) -> dict:
-    """The composed application at TP=tp x CP=world/tp on CPU fp32: two steps from seed 7, on a
-    prompt (the tiny Qwen2.5-VL, encoded on rank 0) or on the fixed embeddings."""
+    """The composed application at TP=tp x CP=world/tp on CPU fp32 (Megatron SP over the TP
+    group when ``sp``): two steps from seed 7, on a prompt (the tiny Qwen2.5-VL, encoded on
+    rank 0) or on the fixed embeddings."""
     import hashlib
 
     from difflet.models.qwen_image.neuron_application import TorchNeuronQwenImageApplication
@@ -272,7 +274,8 @@ def q2_pipeline_worker(
     app = TorchNeuronQwenImageApplication(
         model_path=model_dir,
         parallel=DiffletParallelConfig(tp_degree=tp, cp_degree=cp,
-                                       cp_mode=cp_mode if cp > 1 else "gather_kv"),
+                                       cp_mode=cp_mode if cp > 1 else "gather_kv",
+                                       sp_enabled=sp),
         dtype=torch.float32,
         shape=dict(TINY_SHAPE),
         text_seq_len=TINY_TEXT_SEQ_LEN,

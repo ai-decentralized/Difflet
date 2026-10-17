@@ -292,3 +292,17 @@ def test_ring_attention_on_four_ranks_matches_full_attention():
         assert r["max_err"] < 1e-5
         partner = [2, 3, 0, 1][rank]  # CP groups {0,2} {1,3}: the previous rank is the partner
         assert r["received"] == [float(partner)] * 2
+
+
+def test_shard_has_the_strides_of_a_fresh_tensor():
+    """A batch-1 sequence shard narrowed behind a size-1 axis counts as contiguous yet keeps the
+    parent's stride there; the shard must not, or the first compiled block (fed the shard) and
+    the next (fed a block output) guard on different strides and compile two graphs."""
+    x = torch.randn(1, 24, 8)
+    for rank in (0, 1):
+        shard = C._shard(x, 1, rank, 2)
+        assert shard.stride() == torch.empty(1, 12, 8).stride() == (96, 8, 1)
+        assert torch.equal(shard, x[:, 12 * rank:12 * (rank + 1)])
+    already = C._shard(torch.randn(4, 6), 0, 1, 2)  # a leading-axis narrow needs no copy
+    assert already.stride() == (6, 1)
+    assert C._contiguous_strides((1, 0, 3)) == torch.empty(1, 0, 3).stride()

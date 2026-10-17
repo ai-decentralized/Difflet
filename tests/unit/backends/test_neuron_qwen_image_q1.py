@@ -78,9 +78,9 @@ def tiny(tmp_path_factory):
 
 
 def _run(tiny, *, world_size=1, tp=1, cp_mode="gather_kv", exec_mode="eager", num_layers=None,
-         model_dir=None):
+         model_dir=None, sp=False):
     return run_ranks(q1_qwen_worker, model_dir or tiny.dir, tp, cp_mode, exec_mode, num_layers,
-                     world_size=world_size, env=OFFLINE)
+                     sp, world_size=world_size, env=OFFLINE)
 
 
 def _assert_replicated_and_close(results, reference):
@@ -141,8 +141,15 @@ def test_config_defaults_are_qwen_image():
         ({"guidance_embeds": True}, NotImplementedError, "guidance_embeds=True"),
         ({"height": 72}, ValueError, "height=72 must be a positive multiple of 16"),
         ({"width": 100}, ValueError, "width=100 must be a positive multiple of 16"),
-        ({"sp_enabled": True}, NotImplementedError, "sequence parallelism is not implemented"),
         ({"dp_degree": 2}, NotImplementedError, "dp_degree=2"),
+        # SP shards the packed image tokens and the padded text rows over tp: 24 and 8 rows.
+        ({"sp_enabled": True, "tp_degree": 4, "height": 48}, ValueError,
+         r"image_seq_len=18 \(3x6 packed\) over tp=4"),
+        ({"sp_enabled": True, "tp_degree": 4, "text_seq_len": 6}, ValueError,
+         "text_seq_len=6 over tp=4"),
+        ({"sp_enabled": True, "context_parallel_enabled": True}, ValueError,
+         "sp_enabled and context_parallel_enabled are mutually exclusive"),
+        ({"sp_enabled": True, "zero_cond_t": True}, NotImplementedError, "zero_cond_t"),
         ({"cfg_parallel_enabled": True}, NotImplementedError, "guidance-distilled"),
         ({"cp_mode": "tree"}, ValueError, "cp_mode must be one of"),
         ({"cp_degree": 2}, ValueError, "needs context_parallel_enabled"),
@@ -170,6 +177,10 @@ def test_config_validate_accepts_supported_topologies():
         # cp unknown: the cp checks wait for the application (or the mesh).
         {"context_parallel_enabled": True, "cp_mode": "ulysses", "tp_degree": 4},
         {"num_layers": 1, "checkpoint_num_layers": 2},
+        {"sp_enabled": True, "tp_degree": 2},
+        {"sp_enabled": True, "tp_degree": 4},
+        # tp1: the fork is the dense model, so nothing has to divide.
+        {"sp_enabled": True, "text_seq_len": 7},
     ):
         tiny_qwen_config(**overrides).validate()
 
@@ -189,9 +200,13 @@ def test_application_guards_topology_and_dtype(tiny):
     with pytest.raises(NotImplementedError, match="guidance-distilled"):
         make(tiny_qwen_config(tp_degree=2),
              DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True))
-    # The runtime lets SP through (Wan runs it); the Qwen DiT must not silently ignore it.
-    with pytest.raises(NotImplementedError, match="sequence parallelism is not implemented"):
+    # The mesh carries no SP flag, so the config and the parallel config must agree on it.
+    with pytest.raises(ValueError, match="sp_enabled=False.*sp_enabled=True"):
         make(tiny_qwen_config(tp_degree=2), DiffletParallelConfig(tp_degree=2, sp_enabled=True))
+    with pytest.raises(ValueError, match="sp_enabled=True.*sp_enabled=False"):
+        make(tiny_qwen_config(tp_degree=2, sp_enabled=True), DiffletParallelConfig(tp_degree=2))
+    assert make(tiny_qwen_config(tp_degree=2, sp_enabled=True),
+                DiffletParallelConfig(tp_degree=2, sp_enabled=True)).config.sp_enabled
     with pytest.raises(ValueError, match="context_parallel_enabled=False.*cp_degree=2"):
         make(tiny_qwen_config(), DiffletParallelConfig(cp_degree=2))
     with pytest.raises(ValueError, match="context_parallel_enabled=True.*cp_degree=1"):
@@ -358,6 +373,44 @@ def test_tp2_matches_tp1_and_diffusers(tiny, exec_mode):
             # all-gathers, both attention out-projections' and both MLPs' all-reduces.
             assert result["collectives_per_graph"] == [6]
         assert result["five_arg_equal"] is True
+
+
+# ---- (d2) TP2 with sequence parallelism ------------------------------------------------------
+
+
+@pytest.mark.parametrize("exec_mode", ["eager", "compile"])
+def test_tp2_sequence_parallel_matches_tp2_and_tp1(tiny, exec_mode):
+    """Megatron SP over the TP group (the QwenImageSPTransformer2DModel fork): both residual
+    streams sharded between the blocks, all-gather in and reduce-scatter out of every TP region.
+    fp32: equal to TP2 without SP, TP1 and diffusers, and identical on every rank."""
+    (single,) = _run(tiny)
+    dense = _run(tiny, world_size=2, tp=2, exec_mode=exec_mode)
+    results = _run(tiny, world_size=2, tp=2, exec_mode=exec_mode, sp=True)
+    out = _assert_replicated_and_close(results, tiny.ref)
+    torch.testing.assert_close(out, torch.tensor(single["out"]), atol=ATOL, rtol=RTOL)
+    torch.testing.assert_close(out, torch.tensor(dense[0]["out"]), atol=ATOL, rtol=RTOL)
+    assert dense[0]["transformer_class"] == "QwenImageTransformer2DModel"
+    for result in results:
+        assert result["transformer_class"] == "QwenImageSPTransformer2DModel"
+        assert result["sp_active"] is True  # the fork saw tp=2 (it falls back to dense at tp1)
+        assert result["load_report"] == CLEAN_REPORT  # same keys as diffusers' class
+        assert result["local_heads"] == 2
+        assert result["warmup_shapes"] == WARMUP_SHAPES  # the shard is taken inside the module
+        assert result["unwarmed_shapes"] == []
+        assert result["five_arg_equal"] is True and result["other_differs"] is True
+        if exec_mode == "eager":
+            # Every forward's first block sees this rank's half of the 24 image tokens and of
+            # the 8 text rows.
+            assert result["block_rows"] == [[12, 4]] * 3
+        else:
+            assert result["compiled_blocks"] == TINY_BLOCK_NAMES
+            assert result["unique_graphs_after_warmup"] == 1
+            assert result["unique_graphs_after_forwards"] == 1
+            assert result["graph_breaks"] == 0
+            # The two modulation all-gathers, then per TP region (joint attention, image MLP,
+            # text MLP) an all-gather of each stream entering it and a reduce-scatter of each
+            # leaving it: 2 + (2 + 2) + (1 + 1) + (1 + 1), against TP2's 2 + 4 all-reduces.
+            assert result["collectives_per_graph"] == [10]
 
 
 # ---- (e) CP2 ---------------------------------------------------------------------------------
