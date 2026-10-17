@@ -193,7 +193,36 @@ refuse the flag. `--teacache-cadence N` runs the existing probe-free TeaCache co
 Nth step after warm-up): cadence 2 → 0.20 s/step at PSNR 38.5 dB against the full run. The
 calibrated and online-delta TeaCache modes need the probe path on CUDA (F4b) and are refused.
 
-Not in Release 1 (follow-ups F1–F8 in the plan): Wan and Flux on CUDA, a second GPU
+**Flux on CUDA (F5, code landed; GPU gates pending).** `modeling_flux.py` is backend-neutral since
+F5: the Trainium wrapper classes live in `difflet/models/flux/trainium_backbone.py` (bodies
+unchanged), the layer-boundary markers resolve per backend in `difflet/layers/markers.py`
+(identity off Trainium), and `FluxDiTConfig` (`difflet/models/flux/dit_config.py`) replaces the
+Trainium `InferenceConfig` elsewhere. On CUDA, Difflet's own `NeuronFluxTransformer2DModel` runs
+on the CUDA ops from the diffusers safetensors (`difflet/backends/cuda/flux/transformer.py`; the
+single-stream block's `skip_bias_add` / `reduce_output=False` / `process_group=` contract is now
+part of the shared and CUDA ops) and a thin `FluxDiTAdapter` lets diffusers' `FluxPipeline` drive
+it with CLIP, T5, the scheduler and the VAE on the same GPU. The modeling is pinned against
+diffusers' `FluxTransformer2DModel` on CPU (`tests/unit/models/flux/test_flux_vs_diffusers_cpu.py`,
+and a two-step `FluxPipeline` run around the adapter in `test_flux_cuda_application.py`).
+
+```bash
+hf auth login                                    # both FLUX repos are gated: accept the license on the model page first
+hf download black-forest-labs/FLUX.1-dev --exclude "flux1-dev.safetensors" --exclude "ae.safetensors"
+DIFFLET_BACKEND=cuda difflet run --model-id black-forest-labs/FLUX.1-dev --tp-degree 1 \
+    --prompt "..." --output /tmp/flux.png --steps 28 --guidance-scale 3.5
+scripts/cuda_smoke_flux.sh --prompt "..." --output /tmp/flux.png --steps 28
+DIFFLET_BACKEND=cuda python tests/numerical/cuda_parity_flux_gpu.py --model-path <snapshot dir>
+DIFFLET_BACKEND=cuda python scripts/cuda_e2e_flux_vs_diffusers.py --model-path <snapshot dir>
+DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_flux_vs_diffusers.py tests/numerical/test_cuda_flux_e2e_vs_diffusers.py -v
+python scripts/verify_cli_cuda.py                # Qwen-Image at 50 steps and FLUX.1-dev at 28
+```
+
+The GPU side of F5 (smoke, parity, e2e, CLI matrix on the RTX PRO 6000) has not run yet; the
+status log records it as pending. Flux on CUDA refuses TeaCache, SP, CP, CFG-parallel, TAEF1,
+`--host-vae`, bucketed shapes and `--torch-compile` as F5b. The Trainium byte-identity of the
+split is argued (verbatim move, CPU suites) but not re-run on a trn2 (D13).
+
+Not in Release 1 (follow-ups F1–F8 in the plan): Wan on CUDA, Flux GPU verification (F5 Task 5), a second GPU
 (data-parallel / CFG-parallel first; tensor-parallel across PCIe only when a workload needs it),
 context parallel, `--requests` / `--dp` batches on CUDA, `difflet serve` on CUDA (F3b), CUDA
 graphs, calibrated/online-delta TeaCache, FP8, `flash-attn`, custom kernels (F4b).
