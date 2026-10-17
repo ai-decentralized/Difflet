@@ -42,9 +42,14 @@ TP group: the ``QwenImageSPTransformer2DModel`` fork, see
 ``cp_mode`` (gather_kv, ulysses, ring); SP and CP are mutually exclusive, as for Wan
 (``NeuronQwenImageConfig``).
 
-Phase 1 limits, each rejected in ``__init__``: one static shape, batch 1, no TeaCache, no CFG
-parallelism (Qwen-Image is guidance-distilled, one forward per step) and no DP within one
-application.
+Guidance: one DiT forward per step by default (the guidance scale is dropped: the checkpoint
+has no guidance embedder). True classifier-free guidance is opt-in, ``true_cfg_scale`` > 1 with
+a ``negative_prompt`` (``QwenImageOrchestrator``, diffusers' formula): two forwards per step, or
+with CFG parallelism (``cfg_parallel_enabled``, not with CP) one batch-2 call whose branches run
+on the two CFG groups. CFG parallelism refuses a call without true CFG.
+
+Phase 1 limits, each rejected in ``__init__``: one static shape, batch 1, no TeaCache and no DP
+within one application.
 
 Timing hooks (for the benchmark): ``step_hook`` is called with no arguments once per denoise
 iteration, right after the orchestrator's scheduler step (``load`` wraps
@@ -423,8 +428,9 @@ class _OnDeviceTransformer:
 
 def _check_dit_shapes(config, hidden_states: torch.Tensor, text: torch.Tensor) -> None:
     """The one static shape: the RoPE tables are precomputed for it, so another shape would fail
-    deep in the attention (or, for the text, attend the wrong rows)."""
-    batch = int(config.batch_size)
+    deep in the attention (or, for the text, attend the wrong rows). The batch is 1, or the
+    CFG-parallel ``[negative, conditional]`` pair of 2 (``NeuronQwenImageConfig.dit_batch``)."""
+    batch = int(getattr(config, "dit_batch", config.batch_size))
     hidden = (batch, int(config.image_seq_len), int(config.in_channels))
     if tuple(hidden_states.shape) != hidden:
         raise ValueError(
@@ -474,11 +480,6 @@ def _reject_unsupported(options: dict[str, Any], parallel) -> None:
             f"the neuron Qwen-Image application runs batch_size=1 only (phase 1), got "
             f"batch_size={options['batch_size']}"
         )
-    if getattr(parallel, "cfg_parallel_enabled", False):
-        raise NotImplementedError(
-            "Qwen-Image is guidance-distilled (one forward per step); CFG parallelism does not "
-            "apply"
-        )
     dtype = normalize_dtype(options["text_encoder_dtype"])
     if dtype not in (torch.bfloat16, torch.float32):
         raise ValueError(f"text_encoder_dtype must be bfloat16 or float32, got {dtype}")
@@ -487,6 +488,14 @@ def _reject_unsupported(options: dict[str, Any], parallel) -> None:
             "text_encoder_device must be 'host' or 'neuron', got "
             f"{options['text_encoder_device']!r}"
         )
+
+
+def _runs_true_cfg(kwargs: dict[str, Any]) -> bool:
+    """Whether an orchestrator call runs true CFG: ``true_cfg_scale`` > 1 and negative
+    embeddings (``_negative_bundle``'s rule)."""
+    scale = kwargs.get("true_cfg_scale")
+    return (scale is not None and float(scale) > 1.0
+            and kwargs.get("negative_encoder_hidden_states") is not None)
 
 
 def _flow_match_mu(scheduler_config, image_seq_len: int) -> float:
@@ -547,6 +556,7 @@ class TorchNeuronQwenImageApplication(torch.nn.Module):
             context_parallel_enabled=cp > 1,
             cp_mode=str(getattr(parallel, "cp_mode", "gather_kv")),
             sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
+            cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel_enabled", False)),
             torch_dtype=self.dtype,
         )
         self.transformer: NeuronQwenImageTransformerApplication | None = None
@@ -732,7 +742,7 @@ class TorchNeuronQwenImageApplication(torch.nn.Module):
         """The Trainium/TPU contract, five tensors; the DiT reads the first three (the mask and
         guidance are accepted and dropped, see the module docstring)."""
         cfg = self.config
-        batch = int(cfg.batch_size)
+        batch = cfg.dit_batch
         return {
             "hidden_states": {
                 "shape": (batch, int(cfg.image_seq_len), int(cfg.in_channels)),
@@ -785,7 +795,7 @@ class TorchNeuronQwenImageApplication(torch.nn.Module):
         return self.text_encoder(prompt)
 
     def generate(self, *, prompt: str | list[str] | None = None, seed: int | None = None,
-                 **kwargs: Any):
+                 negative_prompt: str | list[str] | None = None, **kwargs: Any):
         """The orchestrator's ``__call__`` (its keyword arguments: ``encoder_hidden_states``,
         ``encoder_hidden_states_mask``, ``guidance``/``guidance_scale``, ``timesteps``,
         ``num_inference_steps``, ``latents``, ``generator``, ``output_type`` 'latent' | 'pt',
@@ -794,6 +804,11 @@ class TorchNeuronQwenImageApplication(torch.nn.Module):
         * ``prompt``: encoded by ``encode_prompt`` into the two ``encoder_hidden_states*``
           arguments (pass one or the other);
         * ``seed``: a ``torch.Generator`` seeded with it (pass one or ``generator``);
+        * ``negative_prompt``: encoded like ``prompt`` into ``negative_encoder_hidden_states*``
+          for true classifier-free guidance, which the orchestrator runs when
+          ``true_cfg_scale`` > 1 (opt-in; diffusers' QwenImagePipeline semantics). Under CFG
+          parallelism a call without true CFG is refused: the DiT then takes only the batch-2
+          ``[negative, conditional]`` pair;
         * the schedule: without ``timesteps``, the FlowMatch schedule is set as the CLI generate
           stage sets it (``sigmas = linspace(1, 1/N, N)`` shifted by ``_flow_match_mu`` at this
           shape) and passed as ``timesteps``; the orchestrator alone would set it without
@@ -811,6 +826,18 @@ class TorchNeuronQwenImageApplication(torch.nn.Module):
             embeds, mask = self.encode_prompt(prompt)
             kwargs["encoder_hidden_states"] = embeds
             kwargs["encoder_hidden_states_mask"] = mask
+        if negative_prompt is not None:
+            if kwargs.get("negative_encoder_hidden_states") is not None:
+                raise ValueError("pass negative_prompt or negative_encoder_hidden_states, not both")
+            embeds, mask = self.encode_prompt(negative_prompt)
+            kwargs["negative_encoder_hidden_states"] = embeds
+            kwargs["negative_encoder_hidden_states_mask"] = mask
+        if self.config.cfg_parallel_enabled and not _runs_true_cfg(kwargs):
+            raise ValueError(
+                "cfg_parallel_enabled splits the two branches of true classifier-free guidance "
+                "over the CFG group; pass true_cfg_scale > 1 and a negative_prompt (or "
+                "negative_encoder_hidden_states), or run without CFG parallelism"
+            )
         if seed is not None:
             if kwargs.get("generator") is not None:
                 raise ValueError("pass seed or generator, not both")

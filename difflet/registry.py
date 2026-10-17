@@ -48,6 +48,11 @@ class ModelCapabilities:
     # Empty whenever supports_cp is False. A subset when a model wires context
     # parallelism but not every attention strategy.
     cp_modes: frozenset[str] = _ALL_CP_MODES
+    # Backends on which a model that is distilled by default runs opt-in true
+    # classifier-free guidance (two branches per step, --true-cfg-scale > 1 with
+    # a negative prompt), so --cfg-parallel can split those branches there. The
+    # planner and --mode keep treating the model as distilled.
+    true_cfg_backends: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if self.num_attention_heads < 1:
@@ -390,6 +395,10 @@ def _register_builtin_qwen_image() -> None:
             # scatter_to_process_group_spmd with a materialized SPMDRank buffer,
             # the same primitive wan's validated SP path uses).
             supports_sp=True,
+            # One forward per step by default; the neuron application runs diffusers'
+            # opt-in true CFG (true_cfg_scale > 1 with a negative prompt) and can split
+            # its two branches over a CFG group.
+            true_cfg_backends=frozenset({"neuron"}),
         ),
         # Qwen-Image is the first model on the TPU backend (plan Phase 4), and the second on
         # the neuron backend (TorchNeuron, torchrun ranks; host Qwen2.5-VL, host or device VAE).
