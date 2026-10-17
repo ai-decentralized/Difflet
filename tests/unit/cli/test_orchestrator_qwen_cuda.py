@@ -15,12 +15,33 @@ from difflet.cli.orchestrators import qwen_image_cuda as mod
 
 def _args(**over):
     d = dict(
-        model_id="Qwen/Qwen-Image", tp_degree=None, cp_degree=None, cp_mode="gather_kv",
-        cfg_parallel=False, sp_enabled=False, dp=None, height=None, width=None, shapes=None,
-        cache_dir=None, force=False, revision=None, prompt="a cat", output="/tmp/x/qwen.png",
-        steps=None, guidance_scale=None, seed=42, requests=None, requests_dir=None,
-        teacache_cadence=None, teacache_online_delta=None, teacache_speedup=None,
-        teacache_calibration=None, host_vae=False, taef1=False, taef1_path=None,
+        model_id="Qwen/Qwen-Image",
+        tp_degree=None,
+        cp_degree=None,
+        cp_mode="gather_kv",
+        cfg_parallel=False,
+        sp_enabled=False,
+        dp=None,
+        height=None,
+        width=None,
+        shapes=None,
+        cache_dir=None,
+        force=False,
+        revision=None,
+        prompt="a cat",
+        output="/tmp/x/qwen.png",
+        steps=None,
+        guidance_scale=None,
+        seed=42,
+        requests=None,
+        requests_dir=None,
+        teacache_cadence=None,
+        teacache_online_delta=None,
+        teacache_speedup=None,
+        teacache_calibration=None,
+        host_vae=False,
+        taef1=False,
+        taef1_path=None,
     )
     d.update(over)
     return argparse.Namespace(**d)
@@ -153,3 +174,9 @@ def test_guidance_scale_is_refused_not_dropped(recorder):
     with pytest.raises(SystemExit) as exc:
         mod.CudaQwenImageOrchestrator(_args(guidance_scale=3.0)).generate()
     assert "guidance" in str(exc.value) and recorder == []
+
+
+def test_torch_compile_is_opt_in():
+    assert mod.pipeline_kwargs(_args(), load=True).get("application_kwargs") is None
+    kw = mod.pipeline_kwargs(_args(torch_compile=True), load=True)
+    assert kw["application_kwargs"] == {"torch_compile": True}

@@ -213,3 +213,61 @@ def test_cuda_transformer_application_trims(config, tmp_path):
 
     app = CudaQwenImageTransformerApplication(model_path=str(tmp_path), config=config)
     assert app.build_module().trim_text_padding is True
+
+
+# --- F4 task 3: torch.compile as a measured, opt-in option (D4) ---
+
+
+def _write_checkpoint(config, tmp_path):
+    from safetensors.torch import save_file
+
+    full = _QwenImageTransformerTraceModule(config)
+    state = {k[len("transformer.") :]: v.contiguous() for k, v in full.state_dict().items()}
+    save_file(state, str(tmp_path / "transformer" / "model.safetensors"))
+    return full
+
+
+def _loaded_cuda_transformer_app(config, tmp_path, **kwargs):
+    from difflet.backends.cuda.qwen_image.transformer import CudaQwenImageTransformerApplication
+
+    app = CudaQwenImageTransformerApplication(
+        model_path=str(tmp_path / "transformer"), config=config, device="cpu", **kwargs
+    )
+    cache = tmp_path / "cache"
+    app.compile(str(cache))
+    app.load(str(cache), skip_warmup=True)
+    return app
+
+
+def test_torch_compile_is_off_by_default(config, tmp_path):
+    from torch._dynamo.eval_frame import OptimizedModule
+
+    _write_checkpoint(config, tmp_path)
+    app = _loaded_cuda_transformer_app(config, tmp_path)
+    assert app.torch_compile is False
+    assert not any(
+        isinstance(b, OptimizedModule) for b in app.module.transformer.transformer_blocks
+    )
+
+
+def test_torch_compile_wraps_each_block(config, tmp_path):
+    from torch._dynamo.eval_frame import OptimizedModule
+
+    _write_checkpoint(config, tmp_path)
+    app = _loaded_cuda_transformer_app(config, tmp_path, torch_compile=True)
+    assert app.torch_compile is True
+    assert all(isinstance(b, OptimizedModule) for b in app.module.transformer.transformer_blocks)
+
+
+@pytest.mark.slow
+def test_compiled_module_matches_eager(config, tmp_path):
+    full = _write_checkpoint(config, tmp_path)
+    app = _loaded_cuda_transformer_app(config, tmp_path, torch_compile=True)
+    hidden, t, text, mask = _inputs(config, 1, [3])
+    eager = _QwenImageTransformerTraceModule(config, apply_text_mask=True, trim_text_padding=True)
+    eager.load_state_dict(full.state_dict())
+    with torch.no_grad():
+        compiled_out = app(hidden, t, text, mask, torch.zeros(1))
+    torch.testing.assert_close(
+        compiled_out, _difflet(eager.eval(), hidden, t, text, mask), rtol=1e-4, atol=1e-4
+    )

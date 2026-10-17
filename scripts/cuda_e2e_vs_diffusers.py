@@ -16,6 +16,7 @@ real prompt is ~16 valid tokens of 1024.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import math
 import os
@@ -83,6 +84,9 @@ def run_difflet(args, device) -> tuple[torch.Tensor, torch.Tensor]:
     print(f"difflet generated in {time.monotonic() - mark:.1f}s", flush=True)
     img = _to_unit(out.images)
     del out, app, pipe
+    # A torch.compile'd DiT (F4 task 3) stays alive in dynamo's caches until reset.
+    torch._dynamo.reset()
+    gc.collect()
     torch.cuda.empty_cache()
     return img.cpu(), noise.cpu()
 
@@ -114,7 +118,9 @@ def run_diffusers(args, device, noise: torch.Tensor) -> torch.Tensor:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--model-path", required=True, help="local HF snapshot of Qwen/Qwen-Image")
     ap.add_argument("--model-id", default="Qwen/Qwen-Image")
     ap.add_argument("--prompt", default="a photorealistic cat sitting in a sunlit garden")
@@ -146,7 +152,10 @@ def main() -> None:
         "device": torch.cuda.get_device_name(0),
         "torch": torch.__version__,
         "metrics": metrics,
-        "images": {"difflet": str(images / "e2e_difflet.png"), "diffusers": str(images / "e2e_diffusers.png")},
+        "images": {
+            "difflet": str(images / "e2e_difflet.png"),
+            "diffusers": str(images / "e2e_diffusers.png"),
+        },
     }
     print(f"difflet vs diffusers (pixels in [0,1]): {metrics}", flush=True)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)

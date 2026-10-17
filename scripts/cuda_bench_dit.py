@@ -62,6 +62,7 @@ def _cat(name: str) -> str:
 def _free(*objs) -> None:
     for o in objs:
         del o
+    torch._dynamo.reset()  # compiled blocks (--torch-compile) live in dynamo's caches
     gc.collect()
     torch.cuda.empty_cache()
 

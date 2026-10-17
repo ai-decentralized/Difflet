@@ -56,7 +56,7 @@ def refuse_unsupported(args: argparse.Namespace) -> None:
 def pipeline_kwargs(args: argparse.Namespace, *, load: bool) -> dict:
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-    return dict(
+    kwargs = dict(
         backend="cuda",
         parallel=DiffletParallelConfig(tp_degree=args.tp_degree or 1),
         dtype="bf16",
@@ -68,6 +68,10 @@ def pipeline_kwargs(args: argparse.Namespace, *, load: bool) -> dict:
         force_compile=bool(getattr(args, "force", False)),
         load=load,
     )
+    if getattr(args, "torch_compile", False):
+        # Measured option (CUDA plan D4 / F4 task 3): compiled DiT blocks, eager otherwise.
+        kwargs["application_kwargs"] = {"torch_compile": True}
+    return kwargs
 
 
 class CudaQwenImageOrchestrator(ModelOrchestrator):
@@ -87,7 +91,9 @@ class CudaQwenImageOrchestrator(ModelOrchestrator):
         refuse_unsupported(self.args)
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
 
-        pipe = DiffletPipeline.from_pretrained(HF_MODEL_ID, **pipeline_kwargs(self.args, load=False))
+        pipe = DiffletPipeline.from_pretrained(
+            HF_MODEL_ID, **pipeline_kwargs(self.args, load=False)
+        )
         self._last_pipe = pipe
         print(f"[difflet] CUDA artifact (eager manifest) at {pipe.compiled_path}")
 
@@ -115,4 +121,10 @@ class CudaQwenImageOrchestrator(ModelOrchestrator):
         )
 
 
-__all__ = ["DEFAULT_STEPS", "HF_MODEL_ID", "CudaQwenImageOrchestrator", "pipeline_kwargs", "refuse_unsupported"]
+__all__ = [
+    "DEFAULT_STEPS",
+    "HF_MODEL_ID",
+    "CudaQwenImageOrchestrator",
+    "pipeline_kwargs",
+    "refuse_unsupported",
+]
