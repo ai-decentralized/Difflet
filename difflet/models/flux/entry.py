@@ -16,9 +16,41 @@ def create_flux_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
-    if backend != "trainium":
-        raise NotImplementedError(
-            f"Flux currently supports only the trainium backend, got {backend!r}"
+    if backend not in {"trainium", "cuda"}:
+        raise NotImplementedError(f"Flux supports the trainium and cuda backends, got {backend!r}")
+
+    if backend == "cuda":
+        # Release 1 of the CUDA backend is one process on one device (plan D5, D6).
+        # Refuse here, before the 24 GB DiT is loaded, rather than at the first collective.
+        # Two parallel-config types reach this factory (DiffletParallelConfig and serving's
+        # ParallelTopology): ask, do not assume.
+        tp = int(getattr(parallel, "tp_degree", 1) or 1)
+        cp = int(getattr(parallel, "cp_degree", 1) or 1)
+        dp = int(getattr(parallel, "dp_degree", 1) or 1)
+        if tp > 1:
+            raise NotImplementedError(
+                f"Flux on CUDA runs tp=1 on one GPU in Release 1 (got tp={tp}); "
+                "tensor parallel across PCIe is follow-up F6 of the CUDA backend plan"
+            )
+        if getattr(parallel, "sp_enabled", False):
+            raise NotImplementedError(
+                "Flux on CUDA has no sequence parallelism in Release 1 (it needs tp > 1); "
+                "follow-up F6 of the CUDA backend plan"
+            )
+        if cp > 1 or dp > 1 or getattr(parallel, "cfg_parallel_enabled", False):
+            raise NotImplementedError(
+                f"Flux on CUDA is one GPU in Release 1 (got cp={cp}, dp={dp}, "
+                f"cfg_parallel={bool(getattr(parallel, 'cfg_parallel_enabled', False))}); "
+                "the second card is follow-up F2 of the CUDA backend plan"
+            )
+        from difflet.models.flux.cuda_application import CudaFluxApplication
+
+        return CudaFluxApplication(
+            model_path=model_path,
+            parallel=parallel,
+            dtype=dtype,
+            shape=shape,
+            **kwargs,
         )
 
     from difflet.models.flux.application import (

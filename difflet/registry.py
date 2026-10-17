@@ -253,6 +253,8 @@ def _register_builtin_flux() -> None:
             supports_cp=True,
             supports_sp=True,
         ),
+        # CUDA (plan F5): tp=1, one GPU, FluxPipeline around the Difflet DiT.
+        backends=("trainium", "cuda"),
     )
     class _FluxRegistration:
         pass

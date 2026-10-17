@@ -855,9 +855,13 @@ def _get_orchestrator(args: argparse.Namespace):
             from difflet.cli.orchestrators.qwen_image_cuda import CudaQwenImageOrchestrator
 
             return CudaQwenImageOrchestrator(args)
+        if args.model_id in ("black-forest-labs/FLUX.1-dev", "black-forest-labs/FLUX.1-schnell"):
+            from difflet.cli.orchestrators.flux_cuda import FluxCudaOrchestrator
+
+            return FluxCudaOrchestrator(args)
         raise SystemExit(
-            f"[difflet] {args.model_id} is not on the CUDA backend yet (plan follow-ups "
-            "F1 Wan, F5 Flux); set DIFFLET_BACKEND=trainium for the staged Neuron path"
+            f"[difflet] {args.model_id} is not on the CUDA backend yet (plan follow-up "
+            "F1 Wan); set DIFFLET_BACKEND=trainium for the staged Neuron path"
         )
 
     from difflet.cli.orchestrators.flux import FluxOrchestrator
