@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import math
 import struct
+from collections.abc import Callable
 from pathlib import Path
 
 from difflet import envs
@@ -81,16 +82,18 @@ def budget_enforced(device_type: str) -> bool:
     return device_type == "neuron" or bool((envs.DIFFLET_NEURON_HBM_GIB or "").strip())
 
 
-def safetensors_numel(directory: str | Path) -> int:
-    """Total element count of the ``*.safetensors`` files directly in ``directory``. Only the
-    headers are read. Returns 0 when the directory has none (a component the checkpoint lacks)."""
+def safetensors_numel(directory: str | Path, keep: Callable[[str], bool] | None = None) -> int:
+    """Total element count of the ``*.safetensors`` files directly in ``directory``, or of the
+    tensors whose name ``keep`` accepts (a component that loads only part of its checkpoint, as
+    Qwen-Image's text encoder skips the vision tower). Only the headers are read. Returns 0 when
+    the directory has none (a component the checkpoint lacks)."""
     total = 0
     for path in sorted(Path(directory).glob("*.safetensors")):
         with path.open("rb") as handle:
             (header_len,) = struct.unpack("<Q", handle.read(8))
             header = json.loads(handle.read(header_len))
         for name, info in header.items():
-            if name != "__metadata__":
+            if name != "__metadata__" and (keep is None or keep(name)):
                 total += math.prod(info["shape"]) if info["shape"] else 1
     return total
 
