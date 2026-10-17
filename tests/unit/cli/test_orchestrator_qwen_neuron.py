@@ -1174,3 +1174,127 @@ def test_main_generate_backend_neuron_rejects_before_any_launch(monkeypatch, tmp
     # the orchestrator's driver hook refuses them.
     assert exc.value.code == 2
     assert capsys.readouterr().err.startswith("Error: the neuron backend does not support --")
+
+
+# ----------------------------------------------------------------- device text encoder (opt-in)
+
+
+def _header_only_snapshot(root: Path) -> Path:
+    """The real Qwen-Image sizes as safetensors headers only: the DiT, and the text encoder's
+    language model, vision tower and lm_head."""
+    import json
+    import struct
+
+    def write(component, tensors):
+        header = json.dumps({name: {"dtype": "BF16", "shape": [n], "data_offsets": [0, 0]}
+                             for name, n in tensors.items()})
+        (root / component).mkdir(parents=True)
+        with open(root / component / "model.safetensors", "wb") as f:
+            f.write(struct.pack("<Q", len(header)) + header.encode())
+
+    write("transformer", {"w": _REAL_DIT_NUMEL})
+    write("text_encoder", {"model.layers.0.w": 7_070_619_136, "visual.w": 676_550_144,
+                           "lm_head.weight": 544_997_376})
+    return root
+
+
+_TE_NOTE = "[qwen_image] Qwen2.5-VL on the device needs at least"
+
+
+@pytest.fixture
+def qwen_snapshot(monkeypatch, tmp_path):
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
+    stages, decoded = _record_stages(monkeypatch)
+    root = _header_only_snapshot(tmp_path / "snapshot")
+    monkeypatch.setattr(qwen_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: stages.append((stage, kw["cli_args"])))
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: str(root))
+    monkeypatch.setattr(QwenImageOrchestrator, "download", lambda self: None)
+    return stages
+
+
+@pytest.mark.parametrize("overrides", [
+    dict(tp_degree=2, cp_degree=2),  # --cp-degree 2 on four cores
+    dict(tp_degree=2),               # each replica of --dp 2 --tp-degree 2
+], ids=["tp2-cp2", "tp2"])
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_a_narrow_tp_keeps_qwen_vl_on_the_host_before_any_launch(qwen_snapshot, tmp_path,
+                                                                 capsys, mode, overrides):
+    args = _qwen_args(device_text_encoder=True, work_dir=str(tmp_path / "w"), **overrides)
+    getattr(QwenImageOrchestrator(args), mode)()
+    out, err = capsys.readouterr()
+    [note] = [line for line in out.splitlines() if line.startswith(_TE_NOTE)]  # once, for run
+    assert "25.6 GiB per core beside the DiT at tp=2, over the 22.8 GiB budget" in note
+    assert note.endswith("encoding on rank 0's host instead (without --device-text-encoder)")
+    assert err == "" and args.device_text_encoder is False
+    assert qwen_snapshot and all("--device-text-encoder" not in cli for _, cli in qwen_snapshot)
+
+
+def test_qwen_vl_goes_to_the_device_where_it_fits(qwen_snapshot, neuron_stage, tmp_path, capsys):
+    # tp4: 3.3 GiB of encoder beside 9.5 GiB of DiT per core.
+    from difflet.cli import stage as stage_mod
+
+    args = _qwen_args(device_text_encoder=True, work_dir=str(tmp_path / "w"))
+    QwenImageOrchestrator(args).generate()
+    assert _TE_NOTE not in capsys.readouterr().out and args.device_text_encoder is True
+    [(stage, cli)] = qwen_snapshot
+    stage_args, _ = stage_mod._build_stage_parser().parse_known_args(
+        ["--orchestrator", _QWEN_ID, "--stage", stage, *cli])
+    assert stage_args.device_text_encoder is True
+    # The ranks build the application with the device encoder.
+    stage_args.stage_mode = "compile"
+    stage_args.cache_dir = str(tmp_path / "cache")
+    QwenImageOrchestrator(stage_args)._stage_generate(stage_args)
+    assert neuron_stage.CALLS[0]["kwargs"]["application_kwargs"] == {
+        **_NEURON_APP_KWARGS, "text_encoder_device": "neuron"}
+
+
+def test_the_host_encoder_stays_the_default(qwen_snapshot, neuron_stage, tmp_path):
+    args = _qwen_args(work_dir=str(tmp_path / "w"))
+    QwenImageOrchestrator(args).generate()
+    assert all("--device-text-encoder" not in cli for _, cli in qwen_snapshot)
+    args = _qwen_args(stage_mode="compile", cache_dir=str(tmp_path / "cache"))
+    QwenImageOrchestrator(args)._stage_generate(args)
+    assert "text_encoder_device" not in neuron_stage.CALLS[0]["kwargs"]["application_kwargs"]
+
+
+def test_weights_not_local_leave_qwen_vl_to_the_application(monkeypatch, tmp_path, capsys):
+    _backend(monkeypatch, "neuron")
+    _record_stages(monkeypatch)
+
+    def not_local(*a, **k):
+        raise FileNotFoundError("not in the cache")
+
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", not_local)
+    args = _qwen_args(device_text_encoder=True, tp_degree=2)
+    QwenImageOrchestrator(args).compile()
+    assert args.device_text_encoder is True and _TE_NOTE not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
+def test_aot_backends_never_move_qwen_vl(monkeypatch, tmp_path, capsys, backend):
+    _backend(monkeypatch, backend)
+    _record_stages(monkeypatch)
+    args = _qwen_args(device_text_encoder=True, tp_degree=2, work_dir=str(tmp_path / "w"))
+    QwenImageOrchestrator(args).generate()
+    assert args.device_text_encoder is True and _TE_NOTE not in capsys.readouterr().out
+
+
+def test_device_text_encoder_is_parsed_and_dp_workers_inherit_the_fallback(qwen_snapshot,
+                                                                          tmp_path):
+    from difflet.cli.dp.router import worker_cli_args
+
+    cli_main = importlib.import_module("difflet.cli.main")
+    for command in ("compile", "generate", "run"):
+        parsed = cli_main._build_parser().parse_args(
+            [command, "--model-id", _QWEN_ID, "--device-text-encoder"])
+        assert parsed.device_text_encoder is True
+    parsed.dp = 2
+    assert "--device-text-encoder" in worker_cli_args(parsed)
+    # `run` with --dp compiles in the driver, then the router forwards the args: a tp2 replica
+    # inherits the host encoder the compile fell back to.
+    parsed.tp_degree, parsed.work_dir = 2, str(tmp_path / "w")
+    QwenImageOrchestrator(parsed).compile()
+    assert "--device-text-encoder" not in worker_cli_args(parsed)
