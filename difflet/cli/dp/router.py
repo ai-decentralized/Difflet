@@ -108,6 +108,9 @@ def worker_cli_args(args) -> list[str]:
         ("--teacache-online-delta", getattr(args, "teacache_online_delta", None)),
         ("--teacache-speedup", getattr(args, "teacache_speedup", None)),
         ("--teacache-calibration", getattr(args, "teacache_calibration", None)),
+        ("--true-cfg-scale", getattr(args, "true_cfg_scale", None)),
+        # The default for requests without one of their own (a manifest line's wins).
+        ("--negative-prompt", getattr(args, "negative_prompt", None)),
     ):
         if value is not None:
             argv += [flag, str(value)]

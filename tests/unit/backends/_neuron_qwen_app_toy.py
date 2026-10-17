@@ -428,3 +428,62 @@ def q4_device_prompt_worker(rank: int, world_size: int, model_dir: str, use_dit:
         result["sha256"] = hashlib.sha256(out.latents.contiguous().numpy().tobytes()).hexdigest()
     return result
 
+
+def tiny_negative_inputs():
+    """Fixed negative-prompt embeddings ``[1, 8, 24]`` (3 valid rows) and their mask."""
+    gen = torch.Generator().manual_seed(12)
+    embeds = torch.zeros(1, TINY_TEXT_SEQ_LEN, TEXT_DIM)
+    embeds[:, :3] = torch.randn(1, 3, TEXT_DIM, generator=gen)
+    mask = torch.zeros(1, TINY_TEXT_SEQ_LEN, dtype=torch.bool)
+    mask[:, :3] = True
+    return embeds.to(torch.bfloat16), mask
+
+
+def q5_true_cfg_worker(rank: int, world_size: int, model_dir: str, tp: int, cfg_parallel: bool,
+                       exec_mode: str, true_cfg_scale: float | None = 4.0,
+                       sp: bool = False) -> dict:
+    """The composed application at TP=tp (with Megatron SP when ``sp``), with CFG parallelism
+    over world/tp = 2 groups or serial, on CPU fp32: two steps from seed 7 on the fixed
+    embeddings with true CFG (the fixed negative embeddings) at ``true_cfg_scale``, or without
+    it when that is None."""
+    import hashlib
+
+    from difflet.models.qwen_image.neuron_application import TorchNeuronQwenImageApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    app = TorchNeuronQwenImageApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=tp, cfg_parallel_enabled=cfg_parallel,
+                                       sp_enabled=sp),
+        dtype=torch.float32, shape=dict(TINY_SHAPE), text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode=exec_mode, device="cpu", enable_text_encoder=False,
+    )
+    app.load()
+    forwards: list[float] = []
+    steps: list[int] = []
+    app.transformer_adapter.forward_hook = forwards.append
+    app.step_hook = lambda: steps.append(len(forwards))
+    embeds, mask = tiny_text_inputs()
+    negative, negative_mask = tiny_negative_inputs()
+    kwargs = dict(encoder_hidden_states=embeds, encoder_hidden_states_mask=mask,
+                  num_inference_steps=2, seed=7, channels=TINY_Z_DIM)
+    if true_cfg_scale is not None:
+        kwargs.update(true_cfg_scale=true_cfg_scale, negative_encoder_hidden_states=negative,
+                      negative_encoder_hidden_states_mask=negative_mask)
+    try:
+        out = app(**kwargs)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    final = out.latents
+    module = app.transformer.module
+    return {
+        "latents": final.tolist(),
+        "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest(),
+        "steps": steps,
+        "forwards": len(forwards),
+        "warmup_shapes": app.transformer.warmup_shapes,
+        "unwarmed_shapes": [list(k) for k in app.unwarmed_shapes],
+        "compiled_blocks": app.compiled_blocks,
+        "cfg_group_size": module.cfg_group.size() if module.cfg_parallel_enabled else 1,
+    }
+

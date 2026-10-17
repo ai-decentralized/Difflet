@@ -36,10 +36,12 @@ the unpack and the un-normalisation (``_vae_latents``), so they see the same fp3
 ``compile`` is the generate stage's load + warm-up (it fills the NEFF cache) and its stage
 manifest, plus the vae stage's warm-up decode with --device-vae; the stage cache key names the
 backend and exec mode; --cache-dir becomes DIFFLET_COMPILE_CACHE unless that is exported; the
-options the ranks reject (--cfg-parallel, TeaCache, several --shapes), the pairs they cannot
-run together (--sp with --cp-degree > 1) and a TP degree whose DiT shard cannot fit one core
-(``_check_dit_fits``) are refused by the driver before torchrun starts. The ranks run TP, SP
-(--sp) and CP. DP replicas (--dp, --requests) are separate torchrun launches, as Wan's: each DP
+options the ranks reject (TeaCache, several --shapes), the pairs they cannot run together
+(--sp or --cfg-parallel with --cp-degree > 1, --cfg-parallel without --true-cfg-scale > 1) and a
+TP degree whose DiT shard cannot fit one core (``_check_dit_fits``) are refused by the driver
+before torchrun starts. The ranks run TP, SP (--sp), CP and, with opt-in true CFG
+(--true-cfg-scale > 1, --negative-prompt: diffusers' two forwards per step), CFG parallelism
+(--cfg-parallel: the two branches on two TP groups, twice the cores). DP replicas (--dp, --requests) are separate torchrun launches, as Wan's: each DP
 worker runs this driver, its generate launch drains the request queue (rank 0 claims:
 ``replica_requests``), and its decode, host or vae stage, writes and marks done each request
 the replica finished. Unset, trainium and tpu keep their three stages unchanged.
@@ -108,32 +110,38 @@ _TORCHRUN_APPLICATION_KWARGS = {
 }
 #: What the neuron Qwen-Image ranks support, for the driver's rejection message.
 _TORCHRUN_RUNS = (
-    "tensor, sequence and context parallelism at one static shape, and DP replicas, "
+    "tensor, sequence, context and CFG parallelism at one static shape, and DP replicas, "
     "no TeaCache"
 )
 
 
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """The options the torchrun (neuron) generate stage rejects in phase 1, as the command line
-    names them: every torchrun backend's (TeaCache), plus --cfg-parallel (Qwen-Image is
-    guidance-distilled: one forward per step) and a --shapes with more than one shape (the
-    application holds one static shape per process). Request batches and DP replicas run, as
-    Wan's: each replica's rank 0 claims the requests (``replica_requests``). Torch-free: the
-    shapes are counted, not parsed, so a malformed --shapes fails where it always did."""
+    names them: every torchrun backend's (TeaCache), plus a --shapes with more than one shape
+    (the application holds one static shape per process). Request batches and DP replicas run,
+    as Wan's: each replica's rank 0 claims the requests (``replica_requests``); --cfg-parallel
+    runs with true CFG (``_torchrun_conflicts``). Torch-free: the shapes are counted, not
+    parsed, so a malformed --shapes fails where it always did."""
     found = torchrun_unsupported_options(args)
-    if getattr(args, "cfg_parallel", False):
-        found.append("--cfg-parallel")
     shapes = getattr(args, "shapes", None)
     if shapes and len([token for token in str(shapes).split(",") if token.strip()]) > 1:
         found.append("--shapes with more than one shape")
     return found
 
 
-def _torchrun_conflicts(args: argparse.Namespace) -> list[str]:
+def _true_cfg_scale(args: argparse.Namespace) -> float | None:
+    """--true-cfg-scale when it turns true CFG on (above 1), else None."""
+    scale = getattr(args, "true_cfg_scale", None)
+    return float(scale) if scale is not None and float(scale) > 1.0 else None
+
+
+def _torchrun_conflicts(args: argparse.Namespace, *, generating: bool) -> list[str]:
     """Option pairs the torchrun (neuron) path cannot honour together, one message each:
-    --host-vae with --device-vae, and --sp with --cp-degree > 1 (both shard the image
-    sequence; ``NeuronQwenImageConfig`` refuses the pair in every rank, as Wan's config does).
-    Torch-free."""
+    --host-vae with --device-vae; --sp or --cfg-parallel with --cp-degree > 1 (SP and CP both
+    shard the image sequence, CFG and CP both take the data-parallel lanes;
+    ``NeuronQwenImageConfig`` refuses either pair in every rank, as Wan's config does); and,
+    for a ``generating`` command, --cfg-parallel without --true-cfg-scale > 1 (the CFG groups
+    split true CFG's two branches; ``compile`` only warms the batch-2 graph up). Torch-free."""
     conflicts = []
     if getattr(args, "host_vae", False) and getattr(args, "device_vae", False):
         conflicts.append("--host-vae and --device-vae are mutually exclusive")
@@ -142,7 +150,41 @@ def _torchrun_conflicts(args: argparse.Namespace) -> list[str]:
             "--sp and --cp-degree > 1 are mutually exclusive for Qwen-Image (both shard the "
             "image sequence)"
         )
+    cfg = bool(getattr(args, "cfg_parallel", False))
+    if cfg and (getattr(args, "cp_degree", None) or 1) > 1:
+        conflicts.append("--cfg-parallel and --cp-degree > 1 are mutually exclusive")
+    if cfg and generating and _true_cfg_scale(args) is None:
+        conflicts.append(
+            "--cfg-parallel splits the two branches of true classifier-free guidance; "
+            "Qwen-Image runs them only with --true-cfg-scale > 1"
+        )
     return conflicts
+
+
+def _true_cfg_misuse(args: argparse.Namespace) -> str | None:
+    """--true-cfg-scale or --negative-prompt off the neuron backend, else None. Torch-free:
+    the Trainium and TPU stages run one forward per step and would ignore them."""
+    flags = [flag for flag, name in (("--true-cfg-scale", "true_cfg_scale"),
+                                     ("--negative-prompt", "negative_prompt"))
+             if getattr(args, name, None) is not None]
+    if not flags or torchrun_backend() is not None:
+        return None
+    return (f"{' and '.join(flags)} run on the neuron backend only (pass --backend neuron): "
+            "the trainium and tpu Qwen-Image paths run one forward per step")
+
+
+def _true_cfg_kwargs(args: argparse.Namespace, req) -> dict:
+    """The application's true-CFG arguments for one request: none by default (one forward per
+    step, the call unchanged), or ``true_cfg_scale`` and the request's negative prompt (its
+    manifest line's, else --negative-prompt, else diffusers' empty negative prompt ``" "``)
+    when --true-cfg-scale > 1."""
+    from difflet.cli.dp import stage_loop
+
+    scale = _true_cfg_scale(args)
+    if scale is None:
+        return {}
+    negative = stage_loop.effective(req, args, "negative_prompt", None)
+    return {"true_cfg_scale": scale, "negative_prompt": " " if negative is None else negative}
 
 
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
@@ -288,17 +330,28 @@ class QwenImageOrchestrator(ModelOrchestrator):
         resolve_model_path(_HF_MODEL_ID, revision=self.args.revision, local_files_only=False)
         print(f"[difflet] weights ready for {_HF_MODEL_ID}")
 
-    def _reject_unsupported_torchrun_options(self) -> None:
-        """A torchrun backend (neuron) asked for an option its ranks reject in phase 1: print
-        one message naming it and exit 2 before anything is launched (or downloaded, for
-        ``run``). The ranks' own checks stay (defence in depth)."""
+    def _reject_unsupported_torchrun_options(self, *, generating: bool = True) -> None:
+        """A torchrun backend (neuron) asked for an option its ranks reject in phase 1, or a
+        pair they cannot run together: print one message naming it and exit 2 before anything
+        is launched (or downloaded, for ``run``). The ranks' own checks stay (defence in
+        depth). Off the neuron backend, the true-CFG flags are refused the same way."""
         reject_unsupported_torchrun_options(
             _torchrun_unsupported_options(self.args), runs=_TORCHRUN_RUNS
         )
-        conflicts = _torchrun_conflicts(self.args)
+        conflicts = _torchrun_conflicts(self.args, generating=generating)
         if conflicts and torchrun_backend() is not None:
             print(f"Error: {conflicts[0]}; nothing was launched.", file=sys.stderr, flush=True)
             raise SystemExit(2)
+        misuse = _true_cfg_misuse(self.args)
+        if misuse is not None:
+            print(f"Error: {misuse}; nothing was launched.", file=sys.stderr, flush=True)
+            raise SystemExit(2)
+
+    def _replica_cores(self) -> int:
+        """Cores of one generate launch: tp x cp, doubled by --cfg-parallel (each CFG branch
+        on its own TP group)."""
+        return ((self.args.tp_degree or 4) * (self.args.cp_degree or 1)
+                * (2 if getattr(self.args, "cfg_parallel", False) else 1))
 
     def _check_dit_fits(self) -> None:
         """On a torchrun backend (neuron), refuse a TP degree whose DiT shard clearly cannot fit
@@ -372,13 +425,13 @@ class QwenImageOrchestrator(ModelOrchestrator):
         super().run()
 
     def compile(self) -> None:
-        self._reject_unsupported_torchrun_options()
+        self._reject_unsupported_torchrun_options(generating=False)
         self._check_dit_fits()
         self._place_text_encoder()
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="qwen_image")
         work_dir = Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME
         work_dir.mkdir(parents=True, exist_ok=True)
-        full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1)
+        full_cores = self._replica_cores()
         shared = self._shared_cli_args(stage_mode="compile", work_dir=str(work_dir))
         if torchrun_backend() is not None:
             # The generate stage's load + warm-up (the text encoder is part of it) fills the
@@ -425,7 +478,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             self.args.work_dir or Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME
         )
         work_dir.mkdir(parents=True, exist_ok=True)
-        full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1)
+        full_cores = self._replica_cores()
         shared = self._shared_cli_args(stage_mode="generate", work_dir=str(work_dir))
         if torchrun_backend() is not None:
             self._generate_torchrun(work_dir, full_cores, shared)
@@ -741,7 +794,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
         compile_shapes = _require_request_shape_in_set(args)
         h, w = args.height or 1024, args.width or 1024
         # The whole parallel request: the backend and the application reject what they do not
-        # run (cfg, sp) rather than the stage dropping it.
+        # run (CFG parallelism without true CFG, SP with CP) rather than the stage dropping it.
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
             cp_degree=args.cp_degree or 1,
@@ -791,6 +844,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 with replica_request_scope(args, req):
                     with fallback_tracker(pipe) as fallbacks:
                         out = pipe(
+                            **_true_cfg_kwargs(args, req),
                             # The noise the Trainium stage draws after torch.manual_seed(seed).
                             generator=torch.Generator().manual_seed(req.seed),
                             prompt=req.prompt,
@@ -992,6 +1046,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 # reuse each other's artifact (the 9a00746 naming bug, now on
                 # the hashed system). Same encoding wan/hunyuan use.
                 "sp": bool(getattr(args, "sp_enabled", False)),
+                # Additive: only a CFG-parallel artifact names it (its warm-up is the batch-2
+                # pair), so every existing artifact keeps its identity.
+                **({"cfg_parallel": True} if getattr(args, "cfg_parallel", False) else {}),
                 "dtype": "bfloat16",
                 "text_seq_len": _TEXT_SEQ_LEN,
                 "shapes": canonical_shapes_list(args, (1024, 1024)),
@@ -1065,6 +1122,12 @@ class QwenImageOrchestrator(ModelOrchestrator):
             parts += ["--revision", a.revision]
         if getattr(a, "sp_enabled", None):
             parts += ["--sp"]
+        if getattr(a, "cfg_parallel", False):
+            parts += ["--cfg-parallel"]
+        if getattr(a, "true_cfg_scale", None) is not None:
+            parts += ["--true-cfg-scale", str(a.true_cfg_scale)]
+        if getattr(a, "negative_prompt", None) is not None:
+            parts += ["--negative-prompt", a.negative_prompt]
         if getattr(a, "device_text_encoder", False):
             parts += ["--device-text-encoder"]
         if getattr(a, "teacache_speedup", None) is not None:

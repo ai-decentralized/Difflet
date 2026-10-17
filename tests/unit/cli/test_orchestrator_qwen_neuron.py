@@ -305,14 +305,13 @@ def test_neuron_vae_stage_compile_warms_up_and_writes_the_manifest(monkeypatch, 
 # ----------------------------------------------------------------- driver-side rejection
 
 _REJECTED = [
-    (dict(cfg_parallel=True), "--cfg-parallel"),
     (dict(teacache_cadence=2), "--teacache-cadence"),
     (dict(teacache_online_delta=0.6), "--teacache-online-delta"),
     (dict(teacache_speedup=1.5, teacache_calibration="c.json"),
      "--teacache-speedup, --teacache-calibration"),
     (dict(shapes="1024x1024,768x1360"), "--shapes with more than one shape"),
-    (dict(sp_enabled=True, cfg_parallel=True, shapes="1024x1024, 512x512 ,"),
-     "--cfg-parallel, --shapes with more than one shape"),
+    (dict(sp_enabled=True, cfg_parallel=True, shapes="1024x1024, 512x512 ,",
+          teacache_cadence=3), "--teacache-cadence, --shapes with more than one shape"),
 ]
 
 
@@ -339,8 +338,8 @@ def test_neuron_driver_rejects_unsupported_options_before_any_launch(monkeypatch
     out, err = capsys.readouterr()
     assert out == ""
     assert err.strip() == (
-        f"Error: the neuron backend does not support {named} (it runs tensor, sequence and "
-        "context parallelism at one static shape, and DP replicas, no TeaCache); "
+        f"Error: the neuron backend does not support {named} (it runs tensor, sequence, "
+        "context and CFG parallelism at one static shape, and DP replicas, no TeaCache); "
         "nothing was launched.")
     assert "DIFFLET_COMPILE_CACHE" not in os.environ
     assert not (tmp_path / "work").exists()
@@ -1298,3 +1297,165 @@ def test_device_text_encoder_is_parsed_and_dp_workers_inherit_the_fallback(qwen_
     parsed.tp_degree, parsed.work_dir = 2, str(tmp_path / "w")
     QwenImageOrchestrator(parsed).compile()
     assert "--device-text-encoder" not in worker_cli_args(parsed)
+
+
+# ----------------------------------------------------------------- true CFG and CFG parallelism
+
+
+def test_cfg_parallel_doubles_the_cores_and_keys_its_own_artifact(monkeypatch, tmp_path):
+    _backend(monkeypatch, "neuron")
+    stages, _ = _record_stages(monkeypatch)
+    args = _qwen_args(tp_degree=2, cfg_parallel=True, true_cfg_scale=4.0,
+                      work_dir=str(tmp_path / "w"), cache_dir="/c")
+    orch = QwenImageOrchestrator(args)
+    orch.generate()
+    assert stages == [("generate", 4)]  # each CFG branch on its own TP group of 2
+    plain = _qwen_args(tp_degree=2, cache_dir="/c")
+    assert orch._stage_cache_inputs("generate", args)["cfg_parallel"] is True
+    assert "cfg_parallel" not in orch._stage_cache_inputs("generate", plain)  # additive
+    assert orch._stage_compiled_dir("generate", args) != orch._stage_compiled_dir("generate",
+                                                                                   plain)
+
+
+def test_compile_with_cfg_parallel_needs_no_scale(monkeypatch, tmp_path):
+    # compile only warms the batch-2 pair up; the scale is a generate-time setting.
+    _backend(monkeypatch, "neuron")
+    stages, _ = _record_stages(monkeypatch)
+    QwenImageOrchestrator(_qwen_args(cfg_parallel=True)).compile()
+    assert stages == [("generate", 8)]
+
+
+@pytest.mark.parametrize("scale", [None, 1.0])
+@pytest.mark.parametrize("mode", ["generate", "run"])
+def test_cfg_parallel_without_true_cfg_is_refused_before_any_launch(monkeypatch, tmp_path,
+                                                                    capsys, mode, scale):
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setattr(qwen_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(QwenImageOrchestrator, "download",
+                        lambda self: pytest.fail("rejected before the download"))
+    args = _qwen_args(cfg_parallel=True, true_cfg_scale=scale, work_dir=str(tmp_path / "w"))
+    with pytest.raises(SystemExit) as exc:
+        getattr(QwenImageOrchestrator(args), mode)()
+    assert exc.value.code == 2
+    assert capsys.readouterr().err.strip() == (
+        "Error: --cfg-parallel splits the two branches of true classifier-free guidance; "
+        "Qwen-Image runs them only with --true-cfg-scale > 1; nothing was launched.")
+
+
+def test_cfg_parallel_with_cp_is_refused(monkeypatch, tmp_path, capsys):
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setattr(qwen_mod.runner, "run_stage", lambda *a, **k: pytest.fail("launched"))
+    args = _qwen_args(cfg_parallel=True, true_cfg_scale=4.0, tp_degree=1, cp_degree=2)
+    with pytest.raises(SystemExit):
+        QwenImageOrchestrator(args).generate()
+    assert "--cfg-parallel and --cp-degree > 1 are mutually exclusive" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
+@pytest.mark.parametrize("overrides", [dict(true_cfg_scale=4.0), dict(negative_prompt="x")])
+def test_true_cfg_flags_are_refused_off_neuron(monkeypatch, tmp_path, capsys, backend,
+                                               overrides):
+    _backend(monkeypatch, backend)
+    monkeypatch.setattr(qwen_mod.runner, "run_stage", lambda *a, **k: pytest.fail("launched"))
+    with pytest.raises(SystemExit) as exc:
+        QwenImageOrchestrator(_qwen_args(work_dir=str(tmp_path / "w"), **overrides)).generate()
+    assert exc.value.code == 2
+    assert "run on the neuron backend only" in capsys.readouterr().err
+
+
+def test_true_cfg_reaches_the_ranks_only_when_it_is_on(neuron_stage, tmp_path):
+    from difflet.cli import stage as stage_mod
+
+    def calls(**overrides):
+        neuron_stage.CALLS.clear()
+        args = _qwen_args(work_dir=str(tmp_path), cache_dir=str(tmp_path / "c"), **overrides)
+        shared = QwenImageOrchestrator(args)._shared_cli_args("generate", str(tmp_path))
+        stage_args, _ = stage_mod._build_stage_parser().parse_known_args(
+            ["--orchestrator", _QWEN_ID, "--stage", "generate", *shared])
+        QwenImageOrchestrator(stage_args)._stage_generate(stage_args)
+        return neuron_stage.CALLS[0]["pipeline"].app.calls
+
+    [plain] = calls()
+    assert "true_cfg_scale" not in plain and "negative_prompt" not in plain  # unchanged call
+    assert "true_cfg_scale" not in calls(true_cfg_scale=1.0)[0]  # not above 1: off
+    [default_negative] = calls(true_cfg_scale=4.0)
+    assert (default_negative["true_cfg_scale"], default_negative["negative_prompt"]) == (4.0, " ")
+    [given] = calls(true_cfg_scale=4.0, negative_prompt="blurry", cfg_parallel=True)
+    assert (given["true_cfg_scale"], given["negative_prompt"]) == (4.0, "blurry")
+    assert neuron_stage.CALLS[0]["kwargs"]["parallel"].cfg_parallel_enabled is True
+
+
+def test_a_request_line_negative_prompt_wins(neuron_stage, tmp_path):
+    from difflet.cli.dp.requests_io import RequestSpec, write_manifest
+
+    requests = tmp_path / "requests"
+    write_manifest([RequestSpec(index=0, prompt="a", output=str(tmp_path / "o0.png"),
+                                negative_prompt="ugly", assigned_worker=0),
+                    RequestSpec(index=1, prompt="b", output=str(tmp_path / "o1.png"),
+                                assigned_worker=0)], requests)
+    args = _qwen_args(work_dir=str(tmp_path), requests_dir=str(requests), worker_index=0,
+                      dp_schedule="round_robin", true_cfg_scale=3.0, negative_prompt="blurry")
+    QwenImageOrchestrator(args)._stage_generate(args)
+    app = neuron_stage.CALLS[0]["pipeline"].app
+    assert [c["negative_prompt"] for c in app.calls] == ["ugly", "blurry"]
+
+
+def test_main_cfg_parallel_needs_true_cfg_on_neuron(monkeypatch, tmp_path, capsys):
+    cli_main = importlib.import_module("difflet.cli.main")
+
+    _unset(monkeypatch, *_CACHE_ENV, "NEURON_RT_NUM_CORES")
+    _backend(monkeypatch, None)
+    launches = _record_launches(monkeypatch)
+    base = ["generate", "--model-id", _QWEN_ID, "--backend", "neuron", "--cfg-parallel",
+            "--tp-degree", "2", "--total-cores", "4", "--prompt", "a fox", "--output",
+            str(tmp_path / "o.png"), "--work-dir", str(tmp_path / "w")]
+    with pytest.raises(SystemExit) as exc:
+        cli_main.main(base)
+    assert exc.value.code == 1 and launches == []
+    assert "runs them only with --true-cfg-scale > 1" in capsys.readouterr().err
+    cli_main.main([*base, "--true-cfg-scale", "4", "--negative-prompt", "blurry"])
+    [(cmd, _)] = launches
+    assert cmd[cmd.index("--nproc-per-node") + 1] == "4"
+    assert cmd[cmd.index("--true-cfg-scale") + 1] == "4.0" and "--cfg-parallel" in cmd
+    assert cmd[cmd.index("--negative-prompt") + 1] == "blurry"
+
+
+def test_main_cfg_parallel_stays_refused_on_trainium(monkeypatch, tmp_path, capsys):
+    cli_main = importlib.import_module("difflet.cli.main")
+
+    _backend(monkeypatch, None)
+    monkeypatch.setattr(cli_main, "_get_orchestrator", lambda args: pytest.fail("dispatched"))
+    with pytest.raises(SystemExit) as exc:
+        cli_main.main(["generate", "--model-id", _QWEN_ID, "--backend", "trainium",
+                       "--cfg-parallel", "--true-cfg-scale", "4", "--prompt", "a",
+                       "--output", str(tmp_path / "o.png")])
+    assert exc.value.code == 1
+    assert "is guidance-distilled" in capsys.readouterr().err
+
+
+def test_dp_router_forwards_true_cfg_and_keeps_the_negative_prompt(monkeypatch, tmp_path):
+    from difflet.cli.dp import router
+
+    cli_main = importlib.import_module("difflet.cli.main")
+    _unset(monkeypatch, "NEURON_RT_NUM_CORES")
+    _backend(monkeypatch, None)
+    routed = {}
+
+    def fake_router(args, requests, *, replica_cores):
+        routed.update(args=args, requests=requests, replica_cores=replica_cores)
+        return 0
+
+    monkeypatch.setattr(router, "run_router", fake_router)
+    with pytest.raises(SystemExit) as exc:
+        cli_main.main(["generate", "--model-id", _QWEN_ID, "--backend", "neuron", "--dp", "2",
+                       "--tp-degree", "1", "--cfg-parallel", "--true-cfg-scale", "4",
+                       "--negative-prompt", "blurry", "--total-cores", "4", "--prompt", "a fox",
+                       "--output", str(tmp_path / "o.png")])
+    assert exc.value.code == 0
+    [request] = routed["requests"]
+    assert request.negative_prompt == "blurry" and routed["replica_cores"] == 2
+    forwarded = router.worker_cli_args(routed["args"])
+    assert forwarded[forwarded.index("--true-cfg-scale") + 1] == "4.0"
+    assert forwarded[forwarded.index("--negative-prompt") + 1] == "blurry"
+    assert "--cfg-parallel" in forwarded
